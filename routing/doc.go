@@ -1,16 +1,45 @@
-// Package routing is Arandu's Routing.
+// Package routing mirrors Illuminate\Routing.
 //
-// It holds: Router, Route, Routes, Group, Resource, Redirect, SignedRoute.
+// The files it answers to, in the clone at
+// laravel_illuminate/routing:
 //
-// # Nothing is here yet, and that is deliberate
+//	AbstractRouteCollection.php
+//	CallableDispatcher.php
+//	CompiledRouteCollection.php
+//	Controller.php
+//	ControllerDispatcher.php
+//	ControllerMiddlewareOptions.php
+//	CreatesRegularExpressionRouteConstraints.php
+//	FiltersControllerMiddleware.php
+//	ImplicitRouteBinding.php
+//	MiddlewareNameResolver.php
+//	PendingResourceRegistration.php
+//	PendingSingletonResourceRegistration.php
+//	Pipeline.php
+//	RedirectController.php
+//	Redirector.php
+//	ResolvesRouteDependencies.php
+//	ResourceRegistrar.php
+//	ResponseFactory.php
+//	Route.php
+//	RouteAction.php
+//	RouteBinding.php
+//	RouteCollection.php
+//	RouteCollectionInterface.php
+//	RouteDependencyResolverTrait.php
+//	RouteFileRegistrar.php
+//	RouteGroup.php
+//	RouteParameterBinder.php
+//	RouteRegistrar.php
+//	RouteSignatureParameters.php
+//	RouteUri.php
+//	RouteUrlGenerator.php
+//	Router.php
+//	RoutingServiceProvider.php
+//	SortedMiddleware.php
+//	UrlGenerator.php
+//	ViewController.php
 //
-// This tree was written from docs/31-reorganizacao-hesape.md before a line of
-// code moved. The attempt before it fixed things one at a time, and one at a
-// time does not reorganize a structure.
-//
-// That document names, for every package here, which Illuminate component it
-// answers to, what moves into it and from where, and which existing Arandu
-// package splits to make it. The move happens in phases, each ending with the
-// whole tree compiling and the tests passing; until this package's phase, its
-// code lives where the document's change table says it lives today.
+// Nothing is implemented here yet. docs/31-reorganizacao-hesape.md says what
+// moves in, from where, and in which phase.
 package routing

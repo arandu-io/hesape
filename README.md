@@ -14,7 +14,24 @@ import (
 )
 ```
 
-## The tree is here before the code is
+## The tree mirrors the clone, directory by directory
+
+`laravel_illuminate/` holds all forty-two Illuminate components, cloned whole.
+This tree is generated from it: every directory that holds PHP classes becomes a
+Go package at the same path, lowercased, and its doc comment names the files it
+answers to.
+
+    laravel_illuminate/auth/Access/Gate.php   ->  hesape/auth/access
+    laravel_illuminate/auth/Passwords/        ->  hesape/auth/passwords
+    laravel_illuminate/database/Eloquent/     ->  hesape/database/eloquent
+
+What is deliberately not mirrored: `stubs/`, `resources/` and `views/`, which
+hold data rather than classes, and the eight components that become no package
+at all -- those keep a single directory whose doc comment says why, so somebody
+looking for `Container` finds the reason instead of silence.
+
+One package could not be literal: `Support/Defer` is `support/deferpkg`,
+because `defer` is a Go keyword.
 
 Every package below exists with its doc comment and nothing else. That is
 deliberate: the reorganization is specified in full before anything moves,

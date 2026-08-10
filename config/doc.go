@@ -1,16 +1,36 @@
-// Package config is Arandu's Config.
+// Package config mirrors Illuminate\Config.
 //
-// It holds: App, Env, LoadDotenv, String, Bool, Int, Seconds.
+// The files it answers to, in the clone at
+// laravel_illuminate/config:
 //
-// # Nothing is here yet, and that is deliberate
+//	Repository.php
 //
-// This tree was written from docs/31-reorganizacao-hesape.md before a line of
-// code moved. The attempt before it fixed things one at a time, and one at a
-// time does not reorganize a structure.
+// It holds: App, Env, LoadDotenv, String, MustString, Bool, Int, Seconds.
 //
-// That document names, for every package here, which Illuminate component it
-// answers to, what moves into it and from where, and which existing Arandu
-// package splits to make it. The move happens in phases, each ending with the
-// whole tree compiling and the tests passing; until this package's phase, its
-// code lives where the document's change table says it lives today.
+// # There is no Repository, and that is the whole difference
+//
+// Illuminate\Config is one class: a map with dotted keys, read as
+// config("app.name"). The mirror of it here is a typed struct, so a wrong key
+// is a compile error instead of a nil that surfaces on the first request that
+// happens to need it. Nothing in this package looks a setting up by string at
+// the point of use, nothing here is a map, and there is no set: configuration
+// is read at boot and never written.
+//
+// # Load is the one entry point
+//
+// [Load] reads a .env from the working directory when there is one -- filling
+// only what the environment has not already defined -- and then validates the
+// result. There is no second loader and no flag that moves the file.
+//
+// It fails at boot, not on the first request. A configuration that cannot be
+// served is a process that must not start.
+//
+// # What this package does not carry
+//
+// [App] is the identity of the application and the key it signs with, and
+// nothing else. The connection belongs to the database package, the store URL
+// to cache and session, the TTLs to session, the level and the tracing secret
+// to log. Each of those parses what it needs from the environment this package
+// has already populated, which is why [LoadDotenv] and the readers below are
+// exported: they are the mechanism, and the mechanism is shared.
 package config

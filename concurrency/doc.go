@@ -1,16 +1,27 @@
-// Package concurrency is Arandu's Concurrency.
+// Package concurrency runs work in parallel and keeps a panic from taking the
+// process down.
 //
-// It holds: Task[T], Run, RunWith, Recover, PanicError.
+// It is Arandu's answer to Illuminate\Concurrency -- ConcurrencyManager,
+// ForkDriver, ProcessDriver and SyncDriver -- and it answers all four with the
+// goroutine. PHP has to fork a process or shell one out to do two things at
+// once, so a driver is chosen per deployment and closures are serialized across
+// the boundary. Go does not, so there is no manager, no driver and no closure
+// to serialize: [Run] starts goroutines, and [RunWith] is the same call with a
+// ceiling for tasks that contend for something finite.
 //
-// # Nothing is here yet, and that is deliberate
+// Unlike the rest of the leaf packages, its reason to exist is not ergonomics.
+// A panic raised while serving a request is caught by the HTTP pipeline and
+// turned into a page. A panic raised in a queue handler, in a scheduled task,
+// or in a pass of the event relay is caught by nothing, and it ends the process
+// for every tenant being served at the time. [Recover] is the guard those call
+// sites wrap around code they did not write.
 //
-// This tree was written from docs/31-reorganizacao-hesape.md before a line of
-// code moved. The attempt before it fixed things one at a time, and one at a
-// time does not reorganize a structure.
+// Results come back in argument order, the first failure cancels the context
+// the other tasks are running under, and no goroutine outlives the call. A
+// panic anywhere in this package becomes a [PanicError] carrying the recovered
+// value and the stack at the point of recovery, so it travels the ordinary
+// error path instead of a second one.
 //
-// That document names, for every package here, which Illuminate component it
-// answers to, what moves into it and from where, and which existing Arandu
-// package splits to make it. The move happens in phases, each ending with the
-// whole tree compiling and the tests passing; until this package's phase, its
-// code lives where the document's change table says it lives today.
+// The package is a leaf: it imports the standard library and nothing else,
+// which is what lets the queue, the scheduler and the event relay depend on it.
 package concurrency

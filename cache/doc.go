@@ -1,16 +1,44 @@
-// Package cache is Arandu's Cache.
+// Package cache mirrors Illuminate\Cache.
 //
-// It holds: Repository, Store, Lock, RateLimiter, Remember[T], Get[T], Pull[T].
+// The files it answers to, in the clone at
+// laravel_illuminate/cache:
 //
-// # Nothing is here yet, and that is deliberate
+//	ApcStore.php
+//	ApcWrapper.php
+//	ArrayLock.php
+//	ArrayStore.php
+//	CacheLock.php
+//	CacheManager.php
+//	CacheServiceProvider.php
+//	DatabaseLock.php
+//	DatabaseStore.php
+//	DynamoDbLock.php
+//	DynamoDbStore.php
+//	FailoverStore.php
+//	FileLock.php
+//	FileStore.php
+//	HasCacheLock.php
+//	Lock.php
+//	LuaScripts.php
+//	MemcachedConnector.php
+//	MemcachedLock.php
+//	MemcachedStore.php
+//	MemoizedStore.php
+//	NoLock.php
+//	NullStore.php
+//	PhpRedisLock.php
+//	RateLimiter.php
+//	RedisLock.php
+//	RedisStore.php
+//	RedisTagSet.php
+//	RedisTaggedCache.php
+//	Repository.php
+//	RetrievesMultipleKeys.php
+//	SessionStore.php
+//	TagSet.php
+//	TaggableStore.php
+//	TaggedCache.php
 //
-// This tree was written from docs/31-reorganizacao-hesape.md before a line of
-// code moved. The attempt before it fixed things one at a time, and one at a
-// time does not reorganize a structure.
-//
-// That document names, for every package here, which Illuminate component it
-// answers to, what moves into it and from where, and which existing Arandu
-// package splits to make it. The move happens in phases, each ending with the
-// whole tree compiling and the tests passing; until this package's phase, its
-// code lives where the document's change table says it lives today.
+// Nothing is implemented here yet. docs/31-reorganizacao-hesape.md says what
+// moves in, from where, and in which phase.
 package cache

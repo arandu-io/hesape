@@ -1,16 +1,16 @@
-// Package translation is Arandu's Translation.
+// Package translation mirrors Illuminate\Translation.
 //
-// It holds: Translator, Lines, Loader, T, Choice, Negotiate.
+// The files it answers to, in the clone at
+// laravel_illuminate/translation:
 //
-// # Nothing is here yet, and that is deliberate
+//	ArrayLoader.php
+//	CreatesPotentiallyTranslatedStrings.php
+//	FileLoader.php
+//	MessageSelector.php
+//	PotentiallyTranslatedString.php
+//	TranslationServiceProvider.php
+//	Translator.php
 //
-// This tree was written from docs/31-reorganizacao-hesape.md before a line of
-// code moved. The attempt before it fixed things one at a time, and one at a
-// time does not reorganize a structure.
-//
-// That document names, for every package here, which Illuminate component it
-// answers to, what moves into it and from where, and which existing Arandu
-// package splits to make it. The move happens in phases, each ending with the
-// whole tree compiling and the tests passing; until this package's phase, its
-// code lives where the document's change table says it lives today.
+// Nothing is implemented here yet. docs/31-reorganizacao-hesape.md says what
+// moves in, from where, and in which phase.
 package translation

@@ -1,16 +1,37 @@
-// Package queue is Arandu's Queue.
+// Package queue mirrors Illuminate\Queue.
 //
-// It holds: Job, Handler, Queue, Worker, Dispatch, Locker, the table driver.
+// The files it answers to, in the clone at
+// laravel_illuminate/queue:
 //
-// # Nothing is here yet, and that is deliberate
+//	BackgroundQueue.php
+//	BeanstalkdQueue.php
+//	CallQueuedClosure.php
+//	CallQueuedHandler.php
+//	DatabaseQueue.php
+//	DeferredQueue.php
+//	FailoverQueue.php
+//	InteractsWithQueue.php
+//	InvalidPayloadException.php
+//	Listener.php
+//	ListenerOptions.php
+//	LuaScripts.php
+//	ManuallyFailedException.php
+//	MaxAttemptsExceededException.php
+//	NullQueue.php
+//	Queue.php
+//	QueueManager.php
+//	QueueRoutes.php
+//	QueueServiceProvider.php
+//	RedisQueue.php
+//	SerializesAndRestoresModelIdentifiers.php
+//	SerializesModels.php
+//	SqsQueue.php
+//	SyncQueue.php
+//	TimeoutExceededException.php
+//	Worker.php
+//	WorkerOptions.php
+//	WorkerStopReason.php
 //
-// This tree was written from docs/31-reorganizacao-hesape.md before a line of
-// code moved. The attempt before it fixed things one at a time, and one at a
-// time does not reorganize a structure.
-//
-// That document names, for every package here, which Illuminate component it
-// answers to, what moves into it and from where, and which existing Arandu
-// package splits to make it. The move happens in phases, each ending with the
-// whole tree compiling and the tests passing; until this package's phase, its
-// code lives where the document's change table says it lives today.
+// Nothing is implemented here yet. docs/31-reorganizacao-hesape.md says what
+// moves in, from where, and in which phase.
 package queue

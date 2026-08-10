@@ -1,16 +1,23 @@
-// Package auth is Arandu's Auth\Access.
+// Package auth mirrors Illuminate\Auth.
 //
-// It holds: Subject, Action, Policy[T], Grant, Authorize, SystemGrant, Guest, Tenant.
+// The files it answers to, in the clone at
+// laravel_illuminate/auth:
 //
-// # Nothing is here yet, and that is deliberate
+//	AuthManager.php
+//	AuthServiceProvider.php
+//	Authenticatable.php
+//	AuthenticationException.php
+//	CreatesUserProviders.php
+//	DatabaseUserProvider.php
+//	EloquentUserProvider.php
+//	GenericUser.php
+//	GuardHelpers.php
+//	MustVerifyEmail.php
+//	Recaller.php
+//	RequestGuard.php
+//	SessionGuard.php
+//	TokenGuard.php
 //
-// This tree was written from docs/31-reorganizacao-hesape.md before a line of
-// code moved. The attempt before it fixed things one at a time, and one at a
-// time does not reorganize a structure.
-//
-// That document names, for every package here, which Illuminate component it
-// answers to, what moves into it and from where, and which existing Arandu
-// package splits to make it. The move happens in phases, each ending with the
-// whole tree compiling and the tests passing; until this package's phase, its
-// code lives where the document's change table says it lives today.
+// Nothing is implemented here yet. docs/31-reorganizacao-hesape.md says what
+// moves in, from where, and in which phase.
 package auth

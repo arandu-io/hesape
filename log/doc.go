@@ -1,16 +1,14 @@
-// Package log is Arandu's Log.
+// Package log mirrors Illuminate\Log.
 //
-// It holds: New, Into, For, With, Field, Middleware, ParseLevel, the eight PSR-3 levels.
+// The files it answers to, in the clone at
+// laravel_illuminate/log:
 //
-// # Nothing is here yet, and that is deliberate
+//	LogManager.php
+//	LogServiceProvider.php
+//	Logger.php
+//	ParsesLogConfiguration.php
+//	functions.php
 //
-// This tree was written from docs/31-reorganizacao-hesape.md before a line of
-// code moved. The attempt before it fixed things one at a time, and one at a
-// time does not reorganize a structure.
-//
-// That document names, for every package here, which Illuminate component it
-// answers to, what moves into it and from where, and which existing Arandu
-// package splits to make it. The move happens in phases, each ending with the
-// whole tree compiling and the tests passing; until this package's phase, its
-// code lives where the document's change table says it lives today.
+// Nothing is implemented here yet. docs/31-reorganizacao-hesape.md says what
+// moves in, from where, and in which phase.
 package log
