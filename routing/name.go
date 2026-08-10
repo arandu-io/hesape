@@ -1,0 +1,198 @@
+package routing
+
+import (
+	"fmt"
+	"strings"
+	"sync"
+)
+
+// Route is one registered route.
+//
+// It is metadata: what `aru routes` prints, what the error page shows for the
+// pattern that matched, and what a URL is generated from.
+type Route struct {
+	// Method is the HTTP method the route answers, or ANY for a route
+	// registered without one.
+	Method string
+	// Pattern is the full path, prefixes of every enclosing group included.
+	Pattern string
+	// Module is the module that registered the route, so `aru routes` can
+	// group them. It is empty for a route registered outside a module.
+	Module string
+
+	name       string
+	namePrefix string
+	table      *Routes
+
+	// siblings are the extra rows a single registration produced: the PATCH of
+	// a resource update, the second and later methods of Match. They carry the
+	// name for display and are deliberately not indexed by it, so generating a
+	// URL from that name has one answer rather than two.
+	siblings []*Route
+}
+
+// RouteName returns the name given with Name, or empty.
+//
+// The exported field used to be called Name and nothing ever wrote to it -- a
+// promise the code did not keep. Now Name(...) writes it and this reads it.
+func (r *Route) RouteName() string {
+	if r == nil {
+		return ""
+	}
+	return r.name
+}
+
+// Name gives the route a name, so a URL can be generated from it instead of
+// written by hand.
+//
+//	r.Get("/", home).Name("home")
+//	routing.Resource(r, "invoices", InvoiceController{}, httpx.Action) // names them all
+//
+// It returns the route so the call chains, and the declaration reads as one
+// line.
+//
+// The name of every enclosing group is prepended, joined with a dot:
+// Group{Name: "admin"} around .Name("users") gives "admin.users". Laravel
+// concatenates the two literally and the dot is the caller's to remember; it is
+// joined here instead, because a forgotten dot produces "adminusers", which is
+// a name that works everywhere until somebody reads it.
+func (r *Route) Name(name string) *Route {
+	if r == nil {
+		return nil
+	}
+	full := joinName(r.namePrefix, name)
+	r.name = full
+	for _, s := range r.siblings {
+		s.name = full
+	}
+	if r.table != nil {
+		r.table.register(full, r)
+	}
+	return r
+}
+
+// Routes is the table of registered routes, and the index by name.
+type Routes struct {
+	mu     sync.RWMutex
+	all    []*Route
+	byName map[string]*Route
+}
+
+// NewRoutes returns an empty table.
+//
+// A Router builds its own; this is for the caller that has to hold one before
+// there is a router -- a test, and the URL generator the view layer is handed
+// at boot.
+func NewRoutes() *Routes { return &Routes{byName: map[string]*Route{}} }
+
+// Route builds the path of a named route, filling the parameters in order.
+//
+//	Route("home")                  -> "/"
+//	Route("invoices.show", "42")   -> "/invoices/42"
+//
+// A hardcoded "/invoices/"+id compiles and keeps compiling after the route
+// moves. This does not: an unknown name or a wrong number of parameters is an
+// error the caller sees, not a 404 the person sees.
+//
+// It returns an error rather than panicking, because a URL is often built from
+// data -- and a panic in a template renderer takes the whole page down to
+// report something a broken link would have said better.
+//
+// It was called URL. The method is on a table of routes, in a package called
+// routing, and it answers the question "where is the route called this": Route
+// is the word for that, and it is the word the vocabulary already uses --
+// route("invoices.show", 42) is what a Laravel view writes.
+func (t *Routes) Route(name string, params ...string) (string, error) {
+	t.mu.RLock()
+	route, known := t.byName[name]
+	t.mu.RUnlock()
+
+	if !known {
+		return "", fmt.Errorf("routing: no route named %q. Name it with .Name(%q), or run `aru routes` to see what exists", name, name)
+	}
+
+	// "{$}" is not a parameter. It is the anchor that stops a pattern ending in
+	// a slash from matching everything below it, which is what "GET /{$}" means
+	// and what registering the root route does by default. Reading it as a
+	// parameter made Route("home") return an error for the one route every
+	// application has.
+	out := strings.TrimSuffix(route.Pattern, "{$}")
+	if out == "" {
+		out = "/"
+	}
+
+	var missing []string
+	for _, segment := range strings.Split(out, "/") {
+		if !strings.HasPrefix(segment, "{") || !strings.HasSuffix(segment, "}") {
+			continue
+		}
+		if len(params) == 0 {
+			missing = append(missing, segment)
+			continue
+		}
+		out = strings.Replace(out, segment, params[0], 1)
+		params = params[1:]
+	}
+
+	if len(missing) > 0 {
+		return "", fmt.Errorf("routing: route %q needs %s and got none", name, strings.Join(missing, ", "))
+	}
+	if len(params) > 0 {
+		return "", fmt.Errorf("routing: route %q takes fewer parameters than the %d given", name, len(params))
+	}
+	return out, nil
+}
+
+// Must is Route for the places that cannot handle an error -- a template
+// helper, mostly. It returns the message as the href, so a broken link says
+// what is wrong instead of pointing at "/".
+func (t *Routes) Must(name string, params ...string) string {
+	out, err := t.Route(name, params...)
+	if err != nil {
+		return "#" + err.Error()
+	}
+	return out
+}
+
+// All returns the routes in registration order, for `aru routes`.
+func (t *Routes) All() []*Route {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return append([]*Route(nil), t.all...)
+}
+
+func (t *Routes) add(r *Route) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.all = append(t.all, r)
+}
+
+// register indexes a route by name.
+//
+// Registering the same name twice panics rather than replacing. Two routes with
+// one name means every URL built from it goes to one of them, chosen by
+// registration order -- and finding that out at boot beats finding it out from
+// a link that quietly points at the wrong page.
+func (t *Routes) register(name string, r *Route) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if existing, taken := t.byName[name]; taken && existing != r {
+		panic(fmt.Sprintf("routing: two routes named %q: %s %s and %s %s",
+			name, existing.Method, existing.Pattern, r.Method, r.Pattern))
+	}
+	t.byName[name] = r
+}
+
+// joinName joins a group's name prefix to a route's name with a dot, and
+// tolerates a prefix that already ends in one.
+func joinName(prefix, name string) string {
+	prefix = strings.TrimSuffix(prefix, ".")
+	switch {
+	case prefix == "":
+		return name
+	case name == "":
+		return prefix
+	default:
+		return prefix + "." + name
+	}
+}

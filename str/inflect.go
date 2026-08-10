@@ -55,12 +55,24 @@ func Singular(s string) string {
 }
 
 // splitTail cuts a name into everything before the last word and the last word
-// itself. Only the last word inflects: "purchase_order" pluralizes "order".
+// itself. Only the last word inflects: "purchase_order" pluralizes "order" and
+// "PurchaseOrder" pluralizes "Order".
+//
+// It finds the boundary the way delimit does, which is what keeps the answer
+// spelled the way the argument was -- PurchaseOrders, not Purchaseorders.
 func splitTail(s string) (head, word string) {
 	rs := []rune(s)
 	for i := len(rs) - 1; i >= 0; i-- {
 		if isSeparator(rs[i]) {
 			return string(rs[:i+1]), string(rs[i+1:])
+		}
+		if i == 0 || !unicode.IsUpper(rs[i]) {
+			continue
+		}
+		prevWord := unicode.IsLower(rs[i-1]) || unicode.IsDigit(rs[i-1])
+		runEnd := unicode.IsUpper(rs[i-1]) && i+1 < len(rs) && unicode.IsLower(rs[i+1])
+		if prevWord || runEnd {
+			return string(rs[:i]), string(rs[i:])
 		}
 	}
 	return "", s
@@ -86,7 +98,7 @@ func matchCase(was, now string) string {
 	if allUpper && len(rs) > 1 {
 		return strings.ToUpper(now)
 	}
-	return UpperFirst(now)
+	return Ucfirst(now)
 }
 
 func pluralize(w string) string {

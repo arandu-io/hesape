@@ -5,16 +5,22 @@
 //
 //	Repository.php
 //
-// It holds: App, Env, LoadDotenv, String, MustString, Bool, Int, Seconds.
+// It holds: Repository, App, Env, LoadDotenv, String, MustString, Bool, Int,
+// Seconds.
 //
-// # There is no Repository, and that is the whole difference
+// # Two readers, and the difference between them
 //
 // Illuminate\Config is one class: a map with dotted keys, read as
-// config("app.name"). The mirror of it here is a typed struct, so a wrong key
-// is a compile error instead of a nil that surfaces on the first request that
-// happens to need it. Nothing in this package looks a setting up by string at
-// the point of use, nothing here is a map, and there is no set: configuration
-// is read at boot and never written.
+// config("app.name"). [Repository] is that class, method for method -- Has,
+// Get, GetMany, String, Integer, Float, Boolean, Array, Collection, Set,
+// Prepend, Push, All -- because a Laravel developer types config() and there is
+// no second name for it.
+//
+// [App] is the same settings as a typed struct, and it is what the framework
+// itself reads: a wrong field is a compile error there, instead of a nil that
+// surfaces on the first request that happens to need it. A first-party package
+// that looks a setting up by string is doing it wrong. An application that does
+// is doing what the framework it came from does.
 //
 // # Load is the one entry point
 //

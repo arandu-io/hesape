@@ -1,16 +1,19 @@
-// Package scheduler is Arandu's Console\Scheduling.
+// Package scheduler is Arandu's Console\Scheduling: the tasks a module
+// declares, and the loop that fires them.
 //
-// It holds: Scheduler, Task, Cron.
+// A scheduler built on a system cron exists because the runtime has no resident
+// process: cron calls a command every minute and the command decides what to
+// run. That is two artifacts and a dependency on the operating system.
 //
-// # Nothing is here yet, and that is deliberate
+// Go has a resident process. The scheduler is a goroutine in the same binary,
+// which is also what keeps the deploy story of doc 17 true: one image, no
+// crontab to configure, nothing to forget when a machine is replaced.
 //
-// This tree was written from docs/31-reorganizacao-hesape.md before a line of
-// code moved. The attempt before it fixed things one at a time, and one at a
-// time does not reorganize a structure.
+// What it does not do is retry. A task that fails is logged and diagnosed, and
+// the next window runs it again; work that needs its own retry budget enqueues a
+// job, and the queue owns the retry. Scheduler fires, queue persists.
 //
-// That document names, for every package here, which Illuminate component it
-// answers to, what moves into it and from where, and which existing Arandu
-// package splits to make it. The move happens in phases, each ending with the
-// whole tree compiling and the tests passing; until this package's phase, its
-// code lives where the document's change table says it lives today.
+// The pieces are Task, which a module declares; Schedule, the parsed cron
+// expression; Scheduler, the loop; and Module, which runs the loop in the
+// application process.
 package scheduler

@@ -1,11 +1,12 @@
 package config
 
 import (
-	"encoding/base64"
 	"fmt"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/arandu-io/hesape/encryption"
 )
 
 // Env is the deployment environment. It gates everything that must never run
@@ -32,10 +33,6 @@ func (e Env) Is(want Env) bool { return e == want }
 // -- a typo the type system cannot catch and this method removes the occasion
 // for.
 func (e Env) IsProduction() bool { return e == EnvProd }
-
-// AppKeyLen is the required length of APP_KEY, in bytes. The key signs session
-// cookies, CSRF tokens and signed URLs.
-const AppKeyLen = 32
 
 // App is the identity of the application. It is a struct, not a map, and every
 // field is validated at boot.
@@ -66,8 +63,8 @@ type App struct {
 	// Locale is the default language tag.
 	Locale string
 
-	// Key signs session cookies, CSRF tokens and signed URLs. Exactly AppKeyLen
-	// bytes.
+	// Key signs session cookies, CSRF tokens and signed URLs. Exactly
+	// [encryption.KeySize] bytes.
 	Key []byte
 
 	// PreviousKeys are keys retired but still accepted on verification, newest
@@ -90,9 +87,13 @@ func Load() (App, error) {
 		return App{}, err
 	}
 
-	key, err := parseKey("APP_KEY", String("APP_KEY", ""))
+	// The key is parsed by encryption, not here. It is the same key encryption
+	// signs with, and a second reader of the same variable is a second answer to
+	// "is this key valid" (RULE 9). Naming the variable is this package's part:
+	// the error has to send a reader to a line of a .env file.
+	key, err := encryption.ParseKey(String("APP_KEY", ""))
 	if err != nil {
-		return App{}, err
+		return App{}, fmt.Errorf("APP_KEY: %w", err)
 	}
 	previous, err := parsePreviousKeys(String("APP_PREVIOUS_KEYS", ""))
 	if err != nil {
@@ -140,12 +141,12 @@ func (a App) Validate() error {
 	default:
 		return fmt.Errorf("invalid APP_ENV: %q (expected dev, staging or prod)", a.Env)
 	}
-	if len(a.Key) != AppKeyLen {
-		return fmt.Errorf("APP_KEY must be %d bytes, got %d (run `aru key:generate`)", AppKeyLen, len(a.Key))
+	if len(a.Key) != encryption.KeySize {
+		return fmt.Errorf("APP_KEY must be %d bytes, got %d (run `aru key:generate`)", encryption.KeySize, len(a.Key))
 	}
 	for i, k := range a.PreviousKeys {
-		if len(k) != AppKeyLen {
-			return fmt.Errorf("APP_PREVIOUS_KEYS entry %d must be %d bytes, got %d", i+1, AppKeyLen, len(k))
+		if len(k) != encryption.KeySize {
+			return fmt.Errorf("APP_PREVIOUS_KEYS entry %d must be %d bytes, got %d", i+1, encryption.KeySize, len(k))
 		}
 	}
 	if a.Debug && a.Env.IsProduction() {
@@ -163,28 +164,9 @@ func (a App) Validate() error {
 	return nil
 }
 
-// parseKey accepts both a raw 32-byte string and the "base64:" form emitted by
-// `aru key:generate` -- a random 32-byte key is not printable, so the generated
-// value is always encoded.
-//
-// The variable name is a parameter because the same format is read from
-// APP_KEY and from every entry of APP_PREVIOUS_KEYS, and an error that names
-// the wrong one sends the reader to the wrong line of the file.
-func parseKey(name, v string) ([]byte, error) {
-	if v == "" {
-		return nil, nil
-	}
-	if after, ok := strings.CutPrefix(v, "base64:"); ok {
-		b, err := base64.StdEncoding.DecodeString(after)
-		if err != nil {
-			return nil, fmt.Errorf("%s is not valid base64: %w", name, err)
-		}
-		return b, nil
-	}
-	return []byte(v), nil
-}
-
 // parsePreviousKeys reads the retired keys, newest first, separated by commas.
+// Each one is in the format [encryption.ParseKey] accepts, which is the format
+// APP_KEY is in: a rotated key is a key that used to be APP_KEY.
 //
 // Empty entries are skipped rather than rejected, because the value is written
 // by prepending: "new,old" is typed as ",old" first often enough that failing
@@ -199,9 +181,9 @@ func parsePreviousKeys(v string) ([][]byte, error) {
 		if part == "" {
 			continue
 		}
-		key, err := parseKey("APP_PREVIOUS_KEYS", part)
+		key, err := encryption.ParseKey(part)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("APP_PREVIOUS_KEYS entry %d: %w", len(keys)+1, err)
 		}
 		keys = append(keys, key)
 	}

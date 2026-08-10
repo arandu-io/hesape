@@ -2,84 +2,166 @@ package str
 
 import (
 	"strings"
+	"sync"
 	"unicode"
 )
 
-// Snake is the name as a column, a table or a module is spelled:
-// "PurchaseOrder", "purchase-order" and "purchase order" all become
-// "purchase_order".
-//
-// It reads a run of capitals as one word, so HTTPServer is http_server and not
-// h_t_t_p_server. Illuminate produces the second, and the second is what an
-// identifier looks like after a machine has been at it.
-func Snake(s string) string { return delimit(s, '_') }
+// The three casing caches Illuminate keeps as $snakeCache, $camelCache and
+// $studlyCache. They are read on every call and cleared only by FlushCache.
+var (
+	caseCacheMu sync.RWMutex
+	snakeCache  = map[string]string{}
+	camelCache  = map[string]string{}
+	studlyCache = map[string]string{}
+)
 
-// Kebab is Snake with hyphens: "WelcomeEmail" becomes "welcome-email".
-//
-// It names files, URL segments and view directories, where a hyphen is what the
-// address bar expects and an underscore is what a shell autocompletes badly.
-func Kebab(s string) string { return delimit(s, '-') }
+func cachedCase(cache map[string]string, key string, compute func() string) string {
+	caseCacheMu.RLock()
+	v, ok := cache[key]
+	caseCacheMu.RUnlock()
+	if ok {
+		return v
+	}
+	v = compute()
+	caseCacheMu.Lock()
+	cache[key] = v
+	caseCacheMu.Unlock()
+	return v
+}
 
-// Studly is the Go type a name becomes: "invoice_line", "invoice-line" and
-// "invoiceLine" all become InvoiceLine.
+// FlushCache answers for Str::flushCache. It empties the snake, camel and
+// studly caches.
+func FlushCache() {
+	caseCacheMu.Lock()
+	clear(snakeCache)
+	clear(camelCache)
+	clear(studlyCache)
+	caseCacheMu.Unlock()
+}
+
+// Snake answers for Str::snake. It converts a string to snake case with the
+// given delimiter: Snake("PurchaseOrder", "_") is "purchase_order".
 //
-// It goes through Snake first, which is what lets it accept every spelling.
-// That also means it normalizes a run of capitals -- HTTPServer is HttpServer --
-// so a generator that reads a specification twice writes the same identifier
-// both times.
-func Studly(s string) string {
+// It is Illuminate's algorithm, which means a run of capitals becomes one
+// delimiter per capital -- Snake("HTTPServer", "_") is "h_t_t_p_server" -- and
+// a string that is already all lowercase letters is returned untouched, so
+// Snake("foo-bar", "_") is "foo-bar" and not "foo_bar".
+func Snake(value, delimiter string) string {
+	return cachedCase(snakeCache, value+"\x00"+delimiter, func() string {
+		if ctypeLower(value) {
+			return value
+		}
+		spaced := ucwords(value)
+		var stripped strings.Builder
+		stripped.Grow(len(spaced))
+		for _, r := range spaced {
+			if !unicode.IsSpace(r) {
+				stripped.WriteRune(r)
+			}
+		}
+		rs := []rune(stripped.String())
+		var b strings.Builder
+		b.Grow(len(value) + 8)
+		for i, r := range rs {
+			b.WriteRune(r)
+			if i+1 < len(rs) && rs[i+1] >= 'A' && rs[i+1] <= 'Z' {
+				b.WriteString(delimiter)
+			}
+		}
+		return Lower(b.String())
+	})
+}
+
+// Kebab answers for Str::kebab. It is Snake with a hyphen:
+// Kebab("WelcomeEmail") is "welcome-email".
+func Kebab(value string) string { return Snake(value, "-") }
+
+// Studly answers for Str::studly. It converts a string to studly caps:
+// Studly("invoice_line") and Studly("invoice-line") are both "InvoiceLine".
+//
+// Only the first letter of each dash-, underscore- or space-separated part is
+// touched, so Studly("HTTPServer") is "HTTPServer" and not "HttpServer".
+func Studly(value string) string {
+	return cachedCase(studlyCache, value, func() string {
+		var b strings.Builder
+		b.Grow(len(value))
+		for _, word := range strings.Split(studlyBoundaries.Replace(value), " ") {
+			b.WriteString(Ucfirst(word))
+		}
+		return b.String()
+	})
+}
+
+var studlyBoundaries = strings.NewReplacer("-", " ", "_", " ")
+
+// Pascal answers for Str::pascal. Illuminate defines it as an alias of
+// Str::studly, and so does this.
+func Pascal(value string) string { return Studly(value) }
+
+// Camel answers for Str::camel. It is Studly with a lowercase initial:
+// Camel("purchase_order") is "purchaseOrder".
+func Camel(value string) string {
+	return cachedCase(camelCache, value, func() string { return Lcfirst(Studly(value)) })
+}
+
+// Ucfirst answers for Str::ucfirst. It uppercases the first character and
+// leaves the rest of the string alone.
+func Ucfirst(value string) string {
+	if value == "" {
+		return value
+	}
+	rs := []rune(value)
+	return strings.ToUpper(string(rs[0])) + string(rs[1:])
+}
+
+// Lcfirst answers for Str::lcfirst. It lowercases the first character and
+// leaves the rest of the string alone.
+func Lcfirst(value string) string {
+	if value == "" {
+		return value
+	}
+	rs := []rune(value)
+	return strings.ToLower(string(rs[0])) + string(rs[1:])
+}
+
+// Ucsplit answers for Str::ucsplit. It splits a string into pieces in front of
+// every uppercase letter, dropping the empty pieces:
+// Ucsplit("EmailNotificationSent") is ["Email", "Notification", "Sent"].
+func Ucsplit(value string) []string {
+	var out []string
+	start := 0
+	for i, r := range value {
+		if i > start && unicode.IsUpper(r) {
+			out = append(out, value[start:i])
+			start = i
+		}
+	}
+	if start < len(value) {
+		out = append(out, value[start:])
+	}
+	return out
+}
+
+// Lower answers for Str::lower. It lowercases the whole string.
+func Lower(value string) string { return strings.ToLower(value) }
+
+// Upper answers for Str::upper. It uppercases the whole string.
+func Upper(value string) string { return strings.ToUpper(value) }
+
+// Title answers for Str::title. It uppercases the first letter of every word
+// and lowercases the rest of each one: Title("welcome EMAIL") is "Welcome
+// Email".
+//
+// A word starts after any character that is not a letter, which is what makes
+// Title("hello-world") "Hello-World" and Title("o'neil") "O'Neil", the way
+// PHP's mb_convert_case does with MB_CASE_TITLE.
+func Title(value string) string {
 	var b strings.Builder
-	for _, w := range strings.Split(Snake(s), "_") {
-		b.WriteString(UpperFirst(w))
-	}
-	return b.String()
-}
-
-// Camel is Studly with a lowercase initial: "purchase_order" becomes
-// "purchaseOrder". It names an unexported variable or a JSON field.
-func Camel(s string) string {
-	studly := Studly(s)
-	if studly == "" {
-		return studly
-	}
-	rs := []rune(studly)
-	rs[0] = unicode.ToLower(rs[0])
-	return string(rs)
-}
-
-// UpperFirst capitalizes the first letter and leaves the rest alone. Sentence
-// case, not Title Case.
-func UpperFirst(s string) string {
-	if s == "" {
-		return s
-	}
-	rs := []rune(s)
-	rs[0] = unicode.ToUpper(rs[0])
-	return string(rs)
-}
-
-// Headline is the name as a sentence starts it: "WelcomeEmail" and
-// "password_confirmation" become "Welcome email" and "Password confirmation".
-//
-// Sentence case is deliberate. Its callers put the result in front of a message
-// the reader finishes -- "Password confirmation must match password" -- and a
-// capital in the middle of that sentence reads as a proper noun.
-func Headline(s string) string {
-	return UpperFirst(strings.Join(Words(s), " "))
-}
-
-// Title capitalizes every word and lowercases the rest of each one: "welcome
-// EMAIL" becomes "Welcome Email". Spacing is left exactly as it was found.
-//
-// This is the one for a heading a person reads. Headline is the one for the
-// first half of a sentence.
-func Title(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
+	b.Grow(len(value))
 	boundary := true
-	for _, r := range s {
+	for _, r := range value {
 		switch {
-		case unicode.IsSpace(r):
+		case !unicode.IsLetter(r):
 			boundary = true
 			b.WriteRune(r)
 		case boundary:
@@ -92,57 +174,152 @@ func Title(s string) string {
 	return b.String()
 }
 
-// Words is the words a name is made of, lowercased: "PurchaseOrder-line"
-// becomes ["purchase", "order", "line"].
+// The case modes Str::convertCase accepts, with the values PHP gives
+// MB_CASE_UPPER, MB_CASE_LOWER, MB_CASE_TITLE and MB_CASE_FOLD.
+const (
+	CaseUpper = 0
+	CaseLower = 1
+	CaseTitle = 2
+	CaseFold  = 3
+)
+
+// ConvertCase answers for Str::convertCase. The mode is one of CaseUpper,
+// CaseLower, CaseTitle or CaseFold; PHP defaults the argument to MB_CASE_FOLD,
+// and Go has no default arguments, so pass CaseFold for that.
 //
-// It splits on the two things that carry structure in a name: a separator rune
-// and a capital that starts a word. An empty string has no words, and the slice
-// is nil rather than a slice holding one empty string, so a caller can range
-// over it without a length check.
-func Words(s string) []string {
-	snake := Snake(s)
-	if snake == "" {
-		return nil
+// The encoding argument is gone: Go strings are UTF-8 and there is nothing to
+// choose. CaseFold is Unicode simple case folding, which for every alphabet
+// this package can reach is lowercasing.
+func ConvertCase(value string, mode int) string {
+	switch mode {
+	case CaseUpper:
+		return Upper(value)
+	case CaseTitle:
+		return Title(value)
+	default:
+		return Lower(value)
 	}
-	return strings.Split(snake, "_")
+}
+
+// Headline answers for Str::headline. It converts a string to a title-cased
+// sentence: Headline("EmailNotificationSent") and
+// Headline("email_notification_sent") are both "Email Notification Sent".
+func Headline(value string) string {
+	parts := strings.Split(value, " ")
+	if len(parts) == 1 {
+		parts = Ucsplit(strings.Join(parts, "_"))
+	}
+	for i, p := range parts {
+		parts[i] = Title(p)
+	}
+	collapsed := headlineBoundaries.Replace(strings.Join(parts, "_"))
+
+	var kept []string
+	for _, piece := range strings.Split(collapsed, "_") {
+		// array_filter drops every falsy value, which in PHP is the empty
+		// string and also the string "0".
+		if piece != "" && piece != "0" {
+			kept = append(kept, piece)
+		}
+	}
+	return strings.Join(kept, " ")
+}
+
+var headlineBoundaries = strings.NewReplacer("-", "_", " ", "_")
+
+// apaMinorWords are the words Str::apa leaves lowercase when they are short
+// enough and not at the start of the title.
+var apaMinorWords = map[string]bool{
+	"and": true, "as": true, "but": true, "for": true, "if": true, "nor": true,
+	"or": true, "so": true, "yet": true, "a": true, "an": true, "the": true,
+	"at": true, "by": true, "in": true, "of": true, "off": true, "on": true,
+	"per": true, "to": true, "up": true, "via": true, "et": true, "ou": true,
+	"un": true, "une": true, "la": true, "le": true, "les": true, "de": true,
+	"du": true, "des": true, "par": true, "à": true,
+}
+
+// apaEndPunctuation are the characters that end a sentence inside a title, so
+// that the word after one of them is capitalized even when it is minor.
+var apaEndPunctuation = map[string]bool{".": true, "!": true, "?": true, ":": true, "—": true, ",": true}
+
+// Apa answers for Str::apa. It converts a string to APA-style title case,
+// which leaves minor words of three letters or fewer lowercase unless they
+// open the title or follow end punctuation.
+//
+// See https://apastyle.apa.org/style-grammar-guidelines/capitalization/title-case.
+func Apa(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return value
+	}
+	words := strings.FieldsFunc(value, unicode.IsSpace)
+
+	for i := range words {
+		lowercaseWord := Lower(words[i])
+
+		if strings.Contains(lowercaseWord, "-") {
+			hyphenated := strings.Split(lowercaseWord, "-")
+			for j, part := range hyphenated {
+				if apaMinorWords[part] && runeLen(part) <= 3 {
+					hyphenated[j] = part
+					continue
+				}
+				hyphenated[j] = Ucfirst(part)
+			}
+			words[i] = strings.Join(hyphenated, "-")
+			continue
+		}
+
+		afterEnd := i == 0
+		if i > 0 {
+			prev := []rune(words[i-1])
+			afterEnd = len(prev) > 0 && apaEndPunctuation[string(prev[len(prev)-1])]
+		}
+		if apaMinorWords[lowercaseWord] && runeLen(lowercaseWord) <= 3 && !afterEnd {
+			words[i] = lowercaseWord
+			continue
+		}
+		words[i] = Ucfirst(lowercaseWord)
+	}
+
+	return strings.Join(words, " ")
+}
+
+// ctypeLower is PHP's ctype_lower: every byte is an ASCII lowercase letter, and
+// the empty string is not.
+func ctypeLower(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := range len(s) {
+		if s[i] < 'a' || s[i] > 'z' {
+			return false
+		}
+	}
+	return true
+}
+
+// ucwords is PHP's ucwords: it uppercases the first letter of the string and
+// every letter that follows one of PHP's default word delimiters.
+func ucwords(s string) string {
+	b := []byte(s)
+	boundary := true
+	for i := range b {
+		if boundary && b[i] >= 'a' && b[i] <= 'z' {
+			b[i] -= 'a' - 'A'
+		}
+		switch b[i] {
+		case ' ', '\t', '\r', '\n', '\f', '\v':
+			boundary = true
+		default:
+			boundary = false
+		}
+	}
+	return string(b)
 }
 
 // isSeparator reports whether r is one of the runes that ends a word without
-// being part of one.
+// being part of one. It is what splitTail uses to find the last word of a
+// compound name.
 func isSeparator(r rune) bool {
 	return r == '_' || r == '-' || r == '.' || unicode.IsSpace(r)
-}
-
-// delimit is the one word-splitter in this package: Snake, Kebab and everything
-// built on Words go through it.
-//
-// A word ends at a separator, and it ends at a capital that starts one -- after
-// a lowercase letter or a digit, or at the end of a run of capitals followed by
-// a lowercase letter, which is what keeps HTTPServer in two pieces instead of
-// five. Separators never survive into the answer, so no leading, trailing or
-// doubled delimiter can come out of it.
-func delimit(s string, sep rune) string {
-	rs := []rune(s)
-	var b strings.Builder
-	b.Grow(len(s) + 4)
-	pending := false
-	for i, r := range rs {
-		if isSeparator(r) {
-			pending = b.Len() > 0
-			continue
-		}
-		if unicode.IsUpper(r) && b.Len() > 0 {
-			prevWord := unicode.IsLower(rs[i-1]) || unicode.IsDigit(rs[i-1])
-			runEnd := unicode.IsUpper(rs[i-1]) && i+1 < len(rs) && unicode.IsLower(rs[i+1])
-			if prevWord || runEnd {
-				pending = true
-			}
-		}
-		if pending {
-			b.WriteRune(sep)
-			pending = false
-		}
-		b.WriteRune(unicode.ToLower(r))
-	}
-	return b.String()
 }

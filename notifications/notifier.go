@@ -1,0 +1,205 @@
+package notifications
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"sync"
+
+	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/events"
+	notifyevents "github.com/arandu-io/hesape/notifications/events"
+)
+
+// Channel delivers a notification one way.
+//
+// Writing one is small on purpose: everything above it -- authorization, the
+// choice of channels, suppression, the events -- has already happened, so a
+// channel is "turn this notification into the shape my transport wants, and
+// hand it over".
+type Channel interface {
+	// Name is what a Notification's Via has to return to reach this channel.
+	Name() ChannelName
+	// Send delivers, and answers with a receipt: whatever identifies the
+	// delivery on the other side -- a provider message id, the id of the row
+	// that was written. The empty string is fine for a channel that has
+	// nothing to identify a delivery by.
+	//
+	// A channel that cannot reach this recipient returns ErrNotAddressed, and
+	// the Notifier moves on to the next channel rather than failing the send:
+	// a user with no e-mail address still gets the row in their bell menu.
+	Send(ctx context.Context, g auth.Grant, to Notifiable, n Notification) (string, error)
+}
+
+// EventRecorder is where the Notifier reports what it did.
+//
+// It names the one method it needs rather than taking *events.Recorder, so a
+// test can watch the three events without an outbox and a database behind it.
+type EventRecorder interface {
+	Record(e events.Event)
+}
+
+// Notifier sends a Notification to a Notifiable over the channels it was given.
+//
+// It is Illuminate's ChannelManager and NotificationSender in one type, minus
+// the manager half: there is no driver to resolve from configuration, because
+// the channels an application has are the slice passed to New. A channel that
+// is not in the slice is a channel a notification cannot name by accident.
+type Notifier struct {
+	byName map[ChannelName]Channel
+	events EventRecorder
+
+	mu         sync.RWMutex
+	suppressed map[Key]bool
+}
+
+// Option configures a Notifier at construction.
+type Option func(*Notifier)
+
+// WithEvents records notification.sending, notification.sent and
+// notification.failed into r.
+//
+// Without it the Notifier records nothing, which is the right default for a
+// command-line tool and the wrong one for an application: "the customer says
+// they never got it" is answered by these three rows and by nothing else.
+func WithEvents(r EventRecorder) Option {
+	return func(n *Notifier) { n.events = r }
+}
+
+// New returns a Notifier that can reach the given channels.
+//
+// Two channels answering to the same name is a configuration mistake that would
+// otherwise show up as "half the notifications went to the wrong place": the
+// last one wins here, and Channels reports what is actually wired.
+func New(channels []Channel, opts ...Option) *Notifier {
+	n := &Notifier{byName: make(map[ChannelName]Channel, len(channels))}
+	for _, c := range channels {
+		if c == nil {
+			continue
+		}
+		n.byName[c.Name()] = c
+	}
+	for _, o := range opts {
+		o(n)
+	}
+	return n
+}
+
+// Channels is which channel names are wired, for a diagnostic.
+func (n *Notifier) Channels() []ChannelName {
+	out := make([]ChannelName, 0, len(n.byName))
+	for name := range n.byName {
+		out = append(out, name)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// Suppress silences a kind of notification for the life of this Notifier.
+//
+// It is for the process that must not send: an import that touches ten thousand
+// rows, a seeder, a replay of yesterday's queue. Laravel's answer is a fake
+// wired in the container; here it is a list of keys on the object that would do
+// the sending, so the suppression is visible where the sending is.
+//
+// There is no Unsuppress. A process that suppresses does so because sending
+// would be wrong for the whole of it, and a switch that goes both ways is a
+// switch somebody flips in the middle of a loop.
+func (n *Notifier) Suppress(keys ...Key) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.suppressed == nil {
+		n.suppressed = make(map[Key]bool, len(keys))
+	}
+	for _, k := range keys {
+		n.suppressed[k] = true
+	}
+}
+
+// Suppressed reports whether a key is silenced.
+func (n *Notifier) Suppressed(k Key) bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.suppressed[k]
+}
+
+// Send delivers one notification to one recipient, over every channel the
+// notification names for them.
+//
+// A channel that fails does not stop the others: the errors are joined and
+// returned together, so "the mail provider was down" does not also mean "and
+// the row was never written". Laravel throws on the first one, which is how a
+// transient SMTP failure loses the copy the user would have seen in the
+// morning.
+func (n *Notifier) Send(ctx context.Context, g auth.Grant, to Notifiable, note Notification) error {
+	if err := g.Check(ActionSend); err != nil {
+		return err
+	}
+	if to == nil {
+		return errors.New("notifications: no recipient")
+	}
+	if note == nil {
+		return errors.New("notifications: no notification")
+	}
+	key := note.Key()
+	if !key.Valid() {
+		return fmt.Errorf("notifications: %q is not a key: lowercase letters, digits, dot, dash and underscore", string(key))
+	}
+	if n.Suppressed(key) {
+		return nil
+	}
+
+	var errs []error
+	for _, name := range note.Via(to) {
+		ch, ok := n.byName[name]
+		if !ok {
+			errs = append(errs, fmt.Errorf("%w: %s asked for %q, and the notifier was built with %v", ErrNoChannel, key, name, n.Channels()))
+			continue
+		}
+
+		payload := notifyevents.Payload{
+			Key:            string(key),
+			Channel:        string(name),
+			NotifiableType: to.NotifiableType(),
+			NotifiableID:   to.NotifiableID(),
+			Tenant:         auth.Tenant(g),
+		}
+		n.record(notifyevents.NewSending(payload))
+
+		receipt, err := ch.Send(ctx, g, to, note)
+		switch {
+		case errors.Is(err, ErrNotAddressed):
+			// Not a failure: this recipient is not reachable this way, which
+			// the notification could not know when it named the channel.
+			continue
+		case err != nil:
+			n.record(notifyevents.NewFailed(payload, err))
+			errs = append(errs, fmt.Errorf("notifications: %s over %s: %w", key, name, err))
+		default:
+			n.record(notifyevents.NewSent(payload, receipt))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// SendMany is Send for a list of recipients.
+//
+// It keeps going after a recipient fails, for the reason a bulk send exists at
+// all: stopping at the first bad address means the other nine hundred people
+// hear nothing, and nobody finds out until they ask.
+func (n *Notifier) SendMany(ctx context.Context, g auth.Grant, to []Notifiable, note Notification) error {
+	var errs []error
+	for _, one := range to {
+		if err := n.Send(ctx, g, one, note); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (n *Notifier) record(e events.Event) {
+	if n.events != nil {
+		n.events.Record(e)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/config"
+	"github.com/arandu-io/hesape/encryption"
 )
 
 func mustURL(t *testing.T, raw string) *url.URL {
@@ -28,7 +29,7 @@ func validApp(t *testing.T) config.App {
 		URL:      mustURL(t, "http://localhost:8080"),
 		Timezone: time.UTC,
 		Locale:   "en",
-		Key:      make([]byte, config.AppKeyLen),
+		Key:      make([]byte, encryption.KeySize),
 	}
 }
 
@@ -71,7 +72,7 @@ func TestValidateRejectsWrongKeyLength(t *testing.T) {
 // before the rotation -- which is a logout nobody can reproduce.
 func TestValidateRejectsAShortPreviousKey(t *testing.T) {
 	app := validApp(t)
-	app.PreviousKeys = [][]byte{make([]byte, config.AppKeyLen), []byte("short")}
+	app.PreviousKeys = [][]byte{make([]byte, encryption.KeySize), []byte("short")}
 
 	err := app.Validate()
 	if err == nil {
@@ -145,7 +146,7 @@ func TestEnvIsAndIsProduction(t *testing.T) {
 // bytes are not printable, so the value in .env is always encoded.
 func TestLoadDecodesBase64Key(t *testing.T) {
 	emptyProject(t)
-	raw := make([]byte, config.AppKeyLen)
+	raw := make([]byte, encryption.KeySize)
 	for i := range raw {
 		raw[i] = byte(i)
 	}
@@ -156,8 +157,8 @@ func TestLoadDecodesBase64Key(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if len(app.Key) != config.AppKeyLen {
-		t.Fatalf("key length = %d, want %d", len(app.Key), config.AppKeyLen)
+	if len(app.Key) != encryption.KeySize {
+		t.Fatalf("key length = %d, want %d", len(app.Key), encryption.KeySize)
 	}
 	if string(app.Key) != string(raw) {
 		t.Fatal("the decoded key does not match what was encoded")
@@ -177,10 +178,10 @@ func TestLoadRejectsBrokenBase64Key(t *testing.T) {
 // order is load-bearing -- newest first, so the common case is the first try.
 func TestLoadReadsPreviousKeys(t *testing.T) {
 	emptyProject(t)
-	older := strings.Repeat("o", config.AppKeyLen)
-	oldest := strings.Repeat("z", config.AppKeyLen)
+	older := strings.Repeat("o", encryption.KeySize)
+	oldest := strings.Repeat("z", encryption.KeySize)
 
-	t.Setenv("APP_KEY", strings.Repeat("k", config.AppKeyLen))
+	t.Setenv("APP_KEY", strings.Repeat("k", encryption.KeySize))
 	t.Setenv("APP_PREVIOUS_KEYS", older+", base64:"+base64.StdEncoding.EncodeToString([]byte(oldest)))
 
 	app, err := config.Load()
@@ -201,7 +202,7 @@ func TestLoadReadsPreviousKeys(t *testing.T) {
 
 func TestLoadAppliesDefaults(t *testing.T) {
 	emptyProject(t)
-	t.Setenv("APP_KEY", strings.Repeat("k", config.AppKeyLen))
+	t.Setenv("APP_KEY", strings.Repeat("k", encryption.KeySize))
 
 	app, err := config.Load()
 	if err != nil {
@@ -238,7 +239,7 @@ func TestDebugDefaultsToTheEnvironment(t *testing.T) {
 	} {
 		t.Run(string(env), func(t *testing.T) {
 			emptyProject(t)
-			t.Setenv("APP_KEY", strings.Repeat("k", config.AppKeyLen))
+			t.Setenv("APP_KEY", strings.Repeat("k", encryption.KeySize))
 			t.Setenv("APP_ENV", string(env))
 
 			app, err := config.Load()
@@ -254,7 +255,7 @@ func TestDebugDefaultsToTheEnvironment(t *testing.T) {
 
 func TestLoadRejectsAnUnknownTimezone(t *testing.T) {
 	emptyProject(t)
-	t.Setenv("APP_KEY", strings.Repeat("k", config.AppKeyLen))
+	t.Setenv("APP_KEY", strings.Repeat("k", encryption.KeySize))
 	t.Setenv("APP_TIMEZONE", "Middle/Earth")
 
 	if _, err := config.Load(); err == nil {

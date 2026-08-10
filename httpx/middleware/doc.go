@@ -1,16 +1,17 @@
 // Package middleware is Arandu's Http\Middleware.
 //
-// It holds: SecurityHeaders, TrustProxies, CORS, LimitBodySize.
+// It holds the middleware that is about the request itself rather than about
+// anything the application knows: [SecurityHeaders], [TrustProxies] and
+// [LimitBodySize]. Authentication is in hesape/auth/middleware, the CSRF check
+// and the observability root are in hesape/foundation, the panic net is in
+// hesape/exception, and throttling is in hesape/routing/middleware -- each of
+// them next to the thing it needs, which is why they are not all here.
 //
-// # Nothing is here yet, and that is deliberate
+// Every one of these returns an httpx.Middleware, which is an alias of
+// pipeline.Middleware[http.Handler] and therefore of the standard
+// func(http.Handler) http.Handler. Compose them with pipeline.Chain.
 //
-// This tree was written from docs/31-reorganizacao-hesape.md before a line of
-// code moved. The attempt before it fixed things one at a time, and one at a
-// time does not reorganize a structure.
-//
-// That document names, for every package here, which Illuminate component it
-// answers to, what moves into it and from where, and which existing Arandu
-// package splits to make it. The move happens in phases, each ending with the
-// whole tree compiling and the tests passing; until this package's phase, its
-// code lives where the document's change table says it lives today.
+// CORS is not here yet. Its options struct is a decision -- which origins, which
+// methods, credentials or not, how long a preflight is cached -- and a decision
+// is not made while moving files.
 package middleware

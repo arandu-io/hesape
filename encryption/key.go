@@ -23,6 +23,11 @@ const keyPrefix = "base64:"
 // GenerateKey returns a new application key, already written the way a .env
 // file has to hold it: keyPrefix followed by KeySize random bytes in base64.
 //
+// It answers to KeyGenerateCommand::generateRandomKey, not to the static
+// Encrypter::generateKey -- the PHP of the same name returns raw bytes, and
+// that one is [Cipher.GenerateKey]. The two are one call apart:
+// GenerateKey() is "base64:" plus base64 of AES256GCM.GenerateKey().
+//
 // It returns the encoded string rather than the raw bytes on purpose. The
 // caller that wants a key wants to print it or write it down, and if it were
 // handed bytes it would have to encode them -- which means the encoding would

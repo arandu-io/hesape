@@ -1,0 +1,232 @@
+package pagination_test
+
+import (
+	"slices"
+	"strconv"
+	"testing"
+
+	"github.com/arandu-io/hesape/pagination"
+)
+
+type post struct{ ID int }
+
+// postKey is what a repository writes: the value of every column the ORDER BY
+// names, keyed by column name.
+func postKey(p post) map[string]string {
+	return map[string]string{"id": strconv.Itoa(p.ID)}
+}
+
+// descending returns count posts counting down from first, which is the order a
+// backward keyset query returns rows in.
+func descending(first, count int) []post {
+	out := make([]post, count)
+	for i := range out {
+		out[i] = post{ID: first - i}
+	}
+	return out
+}
+
+// ascending returns count posts counting up from first.
+func ascending(first, count int) []post {
+	out := make([]post, count)
+	for i := range out {
+		out[i] = post{ID: first + i}
+	}
+	return out
+}
+
+func ids(items []post) []int {
+	out := make([]int, len(items))
+	for i, p := range items {
+		out[i] = p.ID
+	}
+	return out
+}
+
+func TestCursorPaginateFirstPage(t *testing.T) {
+	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, pagination.Options{Path: "/posts"})
+
+	if got := ids(p.Items()); !slices.Equal(got, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}) {
+		t.Errorf("Items = %v, want 1..10 with the probe row dropped", got)
+	}
+	if !p.OnFirstPage() {
+		t.Error("OnFirstPage = false, want true")
+	}
+	if p.PreviousCursor() != nil {
+		t.Error("PreviousCursor on the first page is not nil")
+	}
+	next := p.NextCursor()
+	if next == nil {
+		t.Fatal("NextCursor = nil, want the last row")
+	}
+	if parameterOf(next, "id") != "10" || !next.PointsToNextItems() {
+		t.Errorf("NextCursor = %+v, want id 10 pointing forward", next)
+	}
+	if !p.HasMorePages() || p.OnLastPage() {
+		t.Error("a page with a probe row has more pages")
+	}
+	if got, want := p.NextPageURL(), "/posts?cursor="+next.Encode(); got != want {
+		t.Errorf("NextPageURL = %q, want %q", got, want)
+	}
+	if got := p.PreviousPageURL(); got != "" {
+		t.Errorf("PreviousPageURL = %q, want empty", got)
+	}
+}
+
+func TestCursorPaginateWholeResultSetFitsOnOnePage(t *testing.T) {
+	p := pagination.CursorPaginate(ascending(1, 4), 10, nil, postKey, pagination.Options{Path: "/posts"})
+
+	if p.NextCursor() != nil || p.PreviousCursor() != nil {
+		t.Error("a result set that fits on one page has no cursors")
+	}
+	if p.HasPages() {
+		t.Error("HasPages = true, want false")
+	}
+	if !p.OnLastPage() {
+		t.Error("OnLastPage = false, want true")
+	}
+}
+
+func TestCursorPaginateForwardPage(t *testing.T) {
+	cursor := cursorPtr(map[string]string{"id": "10"}, true)
+	p := pagination.CursorPaginate(ascending(11, 11), 10, cursor, postKey, pagination.Options{Path: "/posts"})
+
+	if got := ids(p.Items()); !slices.Equal(got, []int{11, 12, 13, 14, 15, 16, 17, 18, 19, 20}) {
+		t.Errorf("Items = %v, want 11..20", got)
+	}
+	if p.OnFirstPage() {
+		t.Error("OnFirstPage = true, want false")
+	}
+	previous := p.PreviousCursor()
+	if previous == nil {
+		t.Fatal("PreviousCursor = nil, want the first row")
+	}
+	if parameterOf(previous, "id") != "11" || previous.PointsToNextItems() {
+		t.Errorf("PreviousCursor = %+v, want id 11 pointing backward", previous)
+	}
+	next := p.NextCursor()
+	if next == nil || parameterOf(next, "id") != "20" || !next.PointsToNextItems() {
+		t.Errorf("NextCursor = %+v, want id 20 pointing forward", next)
+	}
+}
+
+func TestCursorPaginateForwardLastPage(t *testing.T) {
+	cursor := cursorPtr(map[string]string{"id": "20"}, true)
+	p := pagination.CursorPaginate(ascending(21, 6), 10, cursor, postKey, pagination.Options{Path: "/posts"})
+
+	if p.NextCursor() != nil {
+		t.Error("NextCursor on the last page is not nil")
+	}
+	if p.PreviousCursor() == nil {
+		t.Error("PreviousCursor = nil, want the first row: there is a page behind")
+	}
+	if !p.OnLastPage() {
+		t.Error("OnLastPage = false, want true")
+	}
+}
+
+// A backward query returns its rows the wrong way round, and the probe row is
+// the one furthest from the boundary: the reader must still see the page in
+// reading order.
+func TestCursorPaginateBackwardPage(t *testing.T) {
+	cursor := cursorPtr(map[string]string{"id": "31"}, false)
+	p := pagination.CursorPaginate(descending(30, 11), 10, cursor, postKey, pagination.Options{Path: "/posts"})
+
+	if got := ids(p.Items()); !slices.Equal(got, []int{21, 22, 23, 24, 25, 26, 27, 28, 29, 30}) {
+		t.Errorf("Items = %v, want 21..30 in reading order", got)
+	}
+	previous := p.PreviousCursor()
+	if previous == nil || parameterOf(previous, "id") != "21" || previous.PointsToNextItems() {
+		t.Errorf("PreviousCursor = %+v, want id 21 pointing backward", previous)
+	}
+	next := p.NextCursor()
+	if next == nil || parameterOf(next, "id") != "30" || !next.PointsToNextItems() {
+		t.Errorf("NextCursor = %+v, want id 30 pointing forward", next)
+	}
+	if p.OnFirstPage() {
+		t.Error("OnFirstPage = true, want false")
+	}
+}
+
+// Walking back far enough to run out of rows lands on the first page, and the
+// way forward has to stay open even though no probe row came back.
+func TestCursorPaginateBackwardToTheStart(t *testing.T) {
+	cursor := cursorPtr(map[string]string{"id": "6"}, false)
+	p := pagination.CursorPaginate(descending(5, 5), 10, cursor, postKey, pagination.Options{Path: "/posts"})
+
+	if got := ids(p.Items()); !slices.Equal(got, []int{1, 2, 3, 4, 5}) {
+		t.Errorf("Items = %v, want 1..5 in reading order", got)
+	}
+	if !p.OnFirstPage() {
+		t.Error("OnFirstPage = false, want true")
+	}
+	if p.PreviousCursor() != nil {
+		t.Error("PreviousCursor at the start of the result set is not nil")
+	}
+	next := p.NextCursor()
+	if next == nil || parameterOf(next, "id") != "5" {
+		t.Errorf("NextCursor = %+v, want id 5: the page walked back from is still there", next)
+	}
+}
+
+func TestCursorPaginateEmptyPage(t *testing.T) {
+	cursor := cursorPtr(map[string]string{"id": "99"}, true)
+	p := pagination.CursorPaginate(nil, 10, cursor, postKey, pagination.Options{Path: "/posts"})
+
+	if p.Count() != 0 {
+		t.Errorf("Count = %d, want 0", p.Count())
+	}
+	if p.NextCursor() != nil || p.PreviousCursor() != nil {
+		t.Error("an empty page has no row to build a cursor from")
+	}
+	if p.NextPageURL() != "" || p.PreviousPageURL() != "" {
+		t.Error("an empty page links nowhere")
+	}
+}
+
+func TestCursorPaginateURLs(t *testing.T) {
+	opts := pagination.Options{Path: "/posts", Query: map[string][]string{"team": {"core"}}}
+	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, opts)
+
+	if got, want := p.URL(nil), "/posts?team=core"; got != want {
+		t.Errorf("URL(nil) = %q, want %q", got, want)
+	}
+	encoded := p.NextCursor().Encode()
+	if got, want := p.NextPageURL(), "/posts?cursor="+encoded+"&team=core"; got != want {
+		t.Errorf("NextPageURL = %q, want %q", got, want)
+	}
+}
+
+func TestCursorPaginateGuardsAgainstNonsensePageSize(t *testing.T) {
+	p := pagination.CursorPaginate(ascending(1, 3), 0, nil, postKey, pagination.Options{})
+	if got := p.PerPage(); got != 1 {
+		t.Errorf("PerPage = %d, want 1", got)
+	}
+	if got := p.Count(); got != 1 {
+		t.Errorf("Count = %d, want 1", got)
+	}
+}
+
+func TestCursorPaginateWithoutKeyPanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("CursorPaginate with a nil key did not panic")
+		}
+	}()
+	pagination.CursorPaginate(ascending(1, 2), 10, nil, nil, pagination.Options{})
+}
+
+func TestThroughCursor(t *testing.T) {
+	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, pagination.Options{Path: "/posts"})
+	mapped := pagination.ThroughCursor(p, func(v post) string { return strconv.Itoa(v.ID) })
+
+	if got := mapped.Items(); !slices.Equal(got, []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}) {
+		t.Errorf("Items = %v, want 1..10 as strings", got)
+	}
+	if mapped.NextPageURL() != p.NextPageURL() {
+		t.Errorf("NextPageURL = %q, want %q", mapped.NextPageURL(), p.NextPageURL())
+	}
+	if mapped.Cursor() != p.Cursor() {
+		t.Error("Through changed the cursor the page was read from")
+	}
+}
