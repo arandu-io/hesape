@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      # `gofmt -l .` skips nothing, and a view source is not valid Go: it
+      # carries a build tag the compiler honours and gofmt does not.
+      - name: gofmt
+        run: |
+          out=$(gofmt -l $(find . -name '*.go' -not -name '*.kyse.go'))
+          test -z "$out" || { echo "$out"; exit 1; }
+
+      - name: vet
+        run: go vet ./...
+
+      - name: test
+        run: go test -race ./...
+
+      # The collection carries no third-party dependency beyond
+      # golang.org/x/crypto. A require line that is not that is a review.
+      - name: no third-party dependency
+        run: |
+          if grep -E '^\s+[a-z]' go.mod | grep -v 'golang.org/x/crypto' | grep -q .; then
+            echo "a dependency was added to the collection:"
+            grep -E '^\s+[a-z]' go.mod
+            exit 1
+          fi
