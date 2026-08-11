@@ -133,6 +133,13 @@ func checkObject(t *ObjectType, v any, path string, problems *[]Problem) bool {
 	// A property nobody declared is reported rather than ignored, and the
 	// names are sorted because a map is not ordered and an error that reads
 	// differently on two runs is an error nobody can test.
+	//
+	// An open object skips the check: additionalProperties is absent or true,
+	// which JSON Schema reads as "anything else is allowed". Only Deserialize
+	// produces one -- everything built here is closed.
+	if !t.closed() {
+		return true
+	}
 	var undeclared []string
 	for name := range object {
 		if !declared[name] {
@@ -197,6 +204,9 @@ func checkNumber(t *NumberType, v any, path string, problems *[]Problem) bool {
 	if t.hasMax && n > t.maximum {
 		report(problems, path, "must be at most "+number(t.maximum))
 	}
+	if t.hasMultipleOf && t.multipleOf != 0 && math.Mod(n, t.multipleOf) != 0 {
+		report(problems, path, "must be a multiple of "+number(t.multipleOf))
+	}
 	return true
 }
 
@@ -235,12 +245,12 @@ func checkArray(t *ArrayType, v any, path string, problems *[]Problem) bool {
 }
 
 func checkUnion(t *UnionType, v any, path string, problems *[]Problem) bool {
-	for _, kind := range t.kinds {
-		if isKind(kind, v) {
+	for _, name := range t.types {
+		if isKind(name, v) {
 			return true
 		}
 	}
-	report(problems, path, "must be "+article(t.kinds))
+	report(problems, path, "must be "+article(t.types))
 	return false
 }
 

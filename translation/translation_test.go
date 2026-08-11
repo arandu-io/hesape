@@ -35,10 +35,10 @@ func newTranslator(t *testing.T, opts ...translation.Option) *translation.Transl
 func TestTReadsTheGroupAndTheItem(t *testing.T) {
 	tr := newTranslator(t)
 
-	if got, want := tr.T("en", "messages.welcome", translation.Replace{"name": "Ana"}), "Welcome, Ana."; got != want {
+	if got, want := tr.Get("en", "messages.welcome", translation.Replace{"name": "Ana"}), "Welcome, Ana."; got != want {
 		t.Errorf("T = %q, want %q", got, want)
 	}
-	if got, want := tr.T("pt-BR", "messages.welcome", translation.Replace{"name": "Ana"}), "Bem-vindo, Ana."; got != want {
+	if got, want := tr.Get("pt-BR", "messages.welcome", translation.Replace{"name": "Ana"}), "Bem-vindo, Ana."; got != want {
 		t.Errorf("T in pt-BR = %q, want %q", got, want)
 	}
 }
@@ -46,7 +46,7 @@ func TestTReadsTheGroupAndTheItem(t *testing.T) {
 func TestTReadsADottedItemAsOneItem(t *testing.T) {
 	tr := newTranslator(t)
 
-	got := tr.T("en", "messages.invoice.due", translation.Replace{"customer": "Ana", "date": "the 9th"})
+	got := tr.Get("en", "messages.invoice.due", translation.Replace{"customer": "Ana", "date": "the 9th"})
 	if want := "The invoice for Ana is due on the 9th."; got != want {
 		t.Errorf("T = %q, want %q", got, want)
 	}
@@ -55,7 +55,7 @@ func TestTReadsADottedItemAsOneItem(t *testing.T) {
 func TestTFallsBackWhenTheLocaleDoesNotCarryTheKey(t *testing.T) {
 	tr := translation.New(catalogue(), "pt-BR", "en")
 
-	got := tr.T("pt-BR", "messages.invoice.due", translation.Replace{"customer": "Ana", "date": "the 9th"})
+	got := tr.Get("pt-BR", "messages.invoice.due", translation.Replace{"customer": "Ana", "date": "the 9th"})
 	if want := "The invoice for Ana is due on the 9th."; got != want {
 		t.Errorf("T = %q, want %q", got, want)
 	}
@@ -64,7 +64,7 @@ func TestTFallsBackWhenTheLocaleDoesNotCarryTheKey(t *testing.T) {
 func TestTUsesTheDefaultLocaleWhenGivenNone(t *testing.T) {
 	tr := translation.New(catalogue(), "pt-BR", "en")
 
-	if got, want := tr.T("", "messages.welcome", translation.Replace{"name": "Ana"}), "Bem-vindo, Ana."; got != want {
+	if got, want := tr.Get("", "messages.welcome", translation.Replace{"name": "Ana"}), "Bem-vindo, Ana."; got != want {
 		t.Errorf("T = %q, want %q", got, want)
 	}
 	if got, want := tr.Locale(), "pt-BR"; got != want {
@@ -83,7 +83,7 @@ func TestTReturnsTheKeyItDidNotFind(t *testing.T) {
 		reported = append(reported, locale+" "+key)
 	}))
 
-	if got, want := tr.T("en", "messages.absent", nil), "messages.absent"; got != want {
+	if got, want := tr.Get("en", "messages.absent", nil), "messages.absent"; got != want {
 		t.Errorf("T = %q, want %q", got, want)
 	}
 	if len(reported) != 1 || reported[0] != "en messages.absent" {
@@ -96,7 +96,7 @@ func TestTReturnsTheKeyItDidNotFind(t *testing.T) {
 func TestTRefusesAKeyWithNoItem(t *testing.T) {
 	tr := newTranslator(t)
 
-	if got, want := tr.T("en", "messages", nil), "messages"; got != want {
+	if got, want := tr.Get("en", "messages", nil), "messages"; got != want {
 		t.Errorf("T = %q, want %q", got, want)
 	}
 	if tr.Has("en", "messages") {
@@ -131,10 +131,10 @@ func TestHasIsSilentAboutMissingKeys(t *testing.T) {
 func TestReplacementLeavesAPlaceholderItHasNoArgumentFor(t *testing.T) {
 	tr := newTranslator(t)
 
-	if got, want := tr.T("en", "messages.welcome", nil), "Welcome, :name."; got != want {
+	if got, want := tr.Get("en", "messages.welcome", nil), "Welcome, :name."; got != want {
 		t.Errorf("T = %q, want %q", got, want)
 	}
-	if got, want := tr.T("en", "messages.welcome", translation.Replace{"other": "x"}), "Welcome, :name."; got != want {
+	if got, want := tr.Get("en", "messages.welcome", translation.Replace{"other": "x"}), "Welcome, :name."; got != want {
 		t.Errorf("T = %q, want %q", got, want)
 	}
 }
@@ -146,12 +146,12 @@ func TestReplacementTakesTheWholePlaceholderName(t *testing.T) {
 		"en": {"messages": {"pair": ":value and :values", "punctuated": ":value, :value."}},
 	}), "en", "en")
 
-	got := tr.T("en", "messages.pair", translation.Replace{"value": "one", "values": "many"})
+	got := tr.Get("en", "messages.pair", translation.Replace{"value": "one", "values": "many"})
 	if want := "one and many"; got != want {
 		t.Errorf("T = %q, want %q", got, want)
 	}
 
-	got = tr.T("en", "messages.punctuated", translation.Replace{"value": "one"})
+	got = tr.Get("en", "messages.punctuated", translation.Replace{"value": "one"})
 	if want := "one, one."; got != want {
 		t.Errorf("T = %q, want %q", got, want)
 	}
@@ -162,7 +162,7 @@ func TestReplacementRendersWhatItIsGiven(t *testing.T) {
 		"en": {"messages": {"seconds": "Try again in :seconds seconds."}},
 	}), "en", "en")
 
-	if got, want := tr.T("en", "messages.seconds", translation.Replace{"seconds": 60}), "Try again in 60 seconds."; got != want {
+	if got, want := tr.Get("en", "messages.seconds", translation.Replace{"seconds": 60}), "Try again in 60 seconds."; got != want {
 		t.Errorf("T = %q, want %q", got, want)
 	}
 }
@@ -226,7 +226,7 @@ func TestWithNamespaceIsReachedByAPrefixedKey(t *testing.T) {
 	})
 	tr := newTranslator(t, translation.WithNamespace("shop", shop))
 
-	if got, want := tr.T("en", "shop::orders.title", nil), "Your orders"; got != want {
+	if got, want := tr.Get("en", "shop::orders.title", nil), "Your orders"; got != want {
 		t.Errorf("T = %q, want %q", got, want)
 	}
 	if tr.Has("en", "other::orders.title") {
@@ -242,7 +242,7 @@ func TestANamespaceDoesNotFallThroughToTheApplication(t *testing.T) {
 	})
 	tr := newTranslator(t, translation.WithNamespace("shop", shop))
 
-	if got, want := tr.T("en", "shop::messages.welcome", nil), "shop::messages.welcome"; got != want {
+	if got, want := tr.Get("en", "shop::messages.welcome", nil), "shop::messages.welcome"; got != want {
 		t.Errorf("T = %q, want %q", got, want)
 	}
 }
@@ -258,7 +258,7 @@ func TestWithPluralReplacesTheRule(t *testing.T) {
 func TestANilCatalogueStillTranslatesTheBundledLines(t *testing.T) {
 	tr := translation.New(nil, "en", "en")
 
-	if got, want := tr.T("en", "auth.failed", nil), "These credentials do not match our records."; got != want {
+	if got, want := tr.Get("en", "auth.failed", nil), "These credentials do not match our records."; got != want {
 		t.Errorf("T = %q, want %q", got, want)
 	}
 }
@@ -274,7 +274,7 @@ func TestTheTranslatorIsSafeForConcurrentUse(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for range 200 {
-				tr.T("pt-BR", "messages.welcome", translation.Replace{"name": "Ana"})
+				tr.Get("pt-BR", "messages.welcome", translation.Replace{"name": "Ana"})
 				tr.Choice("en", "messages.apples", i, nil)
 				tr.Has("en", "auth.failed")
 			}

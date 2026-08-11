@@ -98,13 +98,51 @@ type ObjectType struct {
 	base[*ObjectType]
 
 	properties []Property
+
+	// additionalProperties answers ObjectType::$additionalProperties. A nil
+	// pointer is PHP's null: the keyword is absent from the document, which
+	// JSON Schema reads as "anything else is allowed".
+	//
+	// [Object] sets it to false, because this package closes objects by
+	// default -- see the package comment for why. [Deserialize] sets it from
+	// the document it is reading, and is the only way an object here ends up
+	// open: there is no builder that opens one, because there is no method in
+	// Illuminate that does and this package does not invent names.
+	additionalProperties *bool
 }
 
 // Object builds an object from its properties, in the order given.
+//
+// It answers JsonSchemaTypeFactory::object($properties). PHP takes a map of
+// name to type, or a closure handed the factory; Go takes the properties in
+// order, because a Go map has no order and a schema whose properties render
+// differently on two runs is a schema nobody can diff.
+//
+// The object is closed: additionalProperties renders as false. That is this
+// package's default and not JSON Schema's -- see the package comment.
+// [ObjectType.WithoutAdditionalProperties] is the same thing said out loud.
 func Object(properties ...Property) *ObjectType {
-	t := &ObjectType{properties: properties}
+	t := &ObjectType{properties: properties, additionalProperties: new(bool)}
 	t.self = t
 	return t
+}
+
+// WithoutAdditionalProperties disallows properties the object did not declare.
+// It answers ObjectType::withoutAdditionalProperties.
+//
+// It is already true of every object [Object] builds, so calling it changes
+// nothing and is not required. It exists because a schema written in the
+// Illuminate idiom says it, and reads the same here; and because an object that
+// came back from [Deserialize] open is closed by exactly this call.
+func (t *ObjectType) WithoutAdditionalProperties() *ObjectType {
+	t.additionalProperties = new(bool)
+	return t
+}
+
+// closed reports whether a property the object did not declare is refused. It
+// is JSON Schema's own reading of the keyword: absent means allowed.
+func (t *ObjectType) closed() bool {
+	return t.additionalProperties != nil && !*t.additionalProperties
 }
 
 // Properties returns the object's properties in declaration order.
@@ -241,15 +279,13 @@ func (t *IntegerType) Default(v int) *IntegerType {
 }
 
 // NumberType is a number, whole or fractional.
-//
-// It has no MultipleOf. The check is exact arithmetic on a binary float, and
-// 0.1 is not representable, so a rule written for money would refuse amounts
-// that are correct.
 type NumberType struct {
 	base[*NumberType]
 
 	minimum, maximum float64
 	hasMin, hasMax   bool
+	multipleOf       float64
+	hasMultipleOf    bool
 }
 
 // Number builds a number type.
@@ -268,6 +304,20 @@ func (t *NumberType) Min(v float64) *NumberType {
 // Max sets the maximum value, inclusive.
 func (t *NumberType) Max(v float64) *NumberType {
 	t.maximum, t.hasMax = v, true
+	return t
+}
+
+// MultipleOf requires the value to be a multiple of v. It answers
+// NumberType::multipleOf.
+//
+// The check is exact arithmetic on a binary float, and 0.1 is not representable
+// in one: a rule written as MultipleOf(0.01) for money will refuse amounts that
+// are correct. Money is an integer of cents, and [IntegerType.MultipleOf] is
+// the rule for it. This is here because JSON Schema has the keyword for numbers
+// and a document that carries it has to survive [Deserialize] and render back
+// unchanged.
+func (t *NumberType) MultipleOf(v float64) *NumberType {
+	t.multipleOf, t.hasMultipleOf = v, true
 	return t
 }
 
@@ -352,8 +402,9 @@ func (t *ArrayType) Default(v []any) *ArrayType {
 	return t
 }
 
-// unionKinds is the set of primitive names a union may be built from.
-var unionKinds = []string{"string", "integer", "number", "boolean", "object", "array"}
+// unionSupported answers UnionType::SUPPORTED, the set of primitive names a
+// union may be composed of.
+var unionSupported = []string{"string", "integer", "number", "boolean", "object", "array"}
 
 // UnionType is a value that may be any of several primitive kinds. It renders
 // as JSON Schema's type-as-a-list form.
@@ -364,41 +415,56 @@ var unionKinds = []string{"string", "integer", "number", "boolean", "object", "a
 type UnionType struct {
 	base[*UnionType]
 
-	kinds []string
+	types []string
 }
 
 // Union builds a union of the named primitive kinds: string, integer, number,
-// boolean, object or array. The name "null" is accepted and marks the union
-// nullable.
+// boolean, object or array. It answers JsonSchemaTypeFactory::union($types) and
+// the UnionType constructor it calls. The name "null" is accepted and marks the
+// union nullable, as the PHP constructor does.
 //
-// An unsupported name panics. A schema is written once, at start-up, and a
-// typo there is a mistake in the program, not in the data.
-func Union(kinds ...string) *UnionType {
-	t := &UnionType{}
-	t.self = t
-
-	seen := map[string]bool{}
-	for _, kind := range kinds {
-		if kind == "null" {
-			t.m.nullable = true
-			continue
-		}
-		if !contains(unionKinds, kind) {
-			panic(fmt.Sprintf("jsonschema: %q is not a kind a union may be built from", kind))
-		}
-		if seen[kind] {
-			continue
-		}
-		seen[kind] = true
-		t.kinds = append(t.kinds, kind)
+// An unsupported name panics where the PHP throws an InvalidArgumentException.
+// A schema is written once, at start-up, and a typo there is a mistake in the
+// program, not in the data. [Deserialize] reads names out of a document rather
+// than out of a program and gets an error for the same input.
+func Union(types ...string) *UnionType {
+	t, err := newUnion(types)
+	if err != nil {
+		panic(err.Error())
 	}
 	return t
 }
 
-// Kinds returns the union's member kinds, in the order given.
-func (t *UnionType) Kinds() []string {
-	out := make([]string, len(t.kinds))
-	copy(out, t.kinds)
+// newUnion is the UnionType constructor with the InvalidArgumentException
+// returned rather than thrown, which is what [Deserialize] needs: the names it
+// passes came out of a file.
+func newUnion(names []string) (*UnionType, error) {
+	t := &UnionType{}
+	t.self = t
+
+	seen := map[string]bool{}
+	for _, name := range names {
+		if name == "null" {
+			t.m.nullable = true
+			continue
+		}
+		if !contains(unionSupported, name) {
+			return nil, fmt.Errorf("jsonschema: unsupported JSON Schema type [%s] in a multi-type union", name)
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		t.types = append(t.types, name)
+	}
+	return t, nil
+}
+
+// Types returns the union's member type names, in the order given. It answers
+// UnionType::types.
+func (t *UnionType) Types() []string {
+	out := make([]string, len(t.types))
+	copy(out, t.types)
 	return out
 }
 

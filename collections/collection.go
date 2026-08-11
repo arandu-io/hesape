@@ -363,6 +363,91 @@ func (c Collection[T]) Reverse() Collection[T] {
 	return out
 }
 
+// CrossJoin is Collection::crossJoin: the cartesian product of the collection
+// with every list given, one tuple per combination.
+//
+// The PHP starts Arr::crossJoin from [[]] and folds each array into it, so
+// crossing nothing wraps each element on its own -- [1,2] becomes [[1],[2]] --
+// and crossing an empty list yields nothing at all. Both hold here.
+//
+// It is a function and not a method for the reason Chunk is: a method that
+// instantiated Collection[Collection[T]] from inside Collection[T] would be an
+// instantiation cycle, which Go rejects.
+func CrossJoin[T any](c Collection[T], lists ...[]T) Collection[Collection[T]] {
+	results := Collection[Collection[T]]{Collection[T]{}}
+	for _, array := range append([][]T{[]T(c)}, lists...) {
+		next := make(Collection[Collection[T]], 0, len(results)*len(array))
+		for _, product := range results {
+			for _, item := range array {
+				combined := make(Collection[T], len(product), len(product)+1)
+				copy(combined, product)
+				next = append(next, append(combined, item))
+			}
+		}
+		results = next
+	}
+	return results
+}
+
+// Zip is Collection::zip: the collection paired position by position with the
+// lists given.
+//
+// The PHP hands the positions to array_map, which pads the short arrays with
+// null; Go pads with the zero value of T, because a typed slice has no null.
+// The result is as long as the longest input.
+//
+// It is a function and not a method for the reason CrossJoin is.
+func Zip[T any](c Collection[T], items ...[]T) Collection[Collection[T]] {
+	longest := len(c)
+	for _, list := range items {
+		longest = max(longest, len(list))
+	}
+	out := make(Collection[Collection[T]], longest)
+	for i := range out {
+		tuple := make(Collection[T], 0, len(items)+1)
+		if i < len(c) {
+			tuple = append(tuple, c[i])
+		} else {
+			var zero T
+			tuple = append(tuple, zero)
+		}
+		for _, list := range items {
+			if i < len(list) {
+				tuple = append(tuple, list[i])
+				continue
+			}
+			var zero T
+			tuple = append(tuple, zero)
+		}
+		out[i] = tuple
+	}
+	return out
+}
+
+// Multiply is Collection::multiply: the elements repeated multiplier times, in
+// order.
+//
+// A multiplier of zero or less gives an empty collection, because the PHP loop
+// never runs.
+func (c Collection[T]) Multiply(multiplier int) Collection[T] {
+	if multiplier <= 0 {
+		return Collection[T]{}
+	}
+	out := make(Collection[T], 0, len(c)*multiplier)
+	for i := 0; i < multiplier; i++ {
+		out = append(out, c...)
+	}
+	return out
+}
+
+// ToBase is Collection::toBase.
+//
+// The PHP hands back a plain Illuminate\Support\Collection, which matters only
+// where a subclass -- an Eloquent collection -- has to be dropped to the base
+// class. Nothing here subclasses, so this is a detached copy under the name the
+// PHP gives it.
+func (c Collection[T]) ToBase() Collection[T] { return c.Values() }
+
 // Pad is Collection::pad.
 //
 // A positive size pads on the right, a negative size on the left, and a size

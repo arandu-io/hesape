@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"os"
 	"sort"
 	"strings"
 )
@@ -103,8 +104,98 @@ func (c Collection[T]) Sole(callback func(value T, key int) bool) (T, error) {
 	case 1:
 		return matched[0], nil
 	default:
-		return zero, fmt.Errorf("%w: %d items matched", ErrMultipleItemsFound, len(matched))
+		return zero, &MultipleItemsFoundError{Count: len(matched)}
 	}
+}
+
+// HasSole answers to Illuminate\Support\Collection::hasSole: exactly one
+// element passes the test.
+//
+// A nil callback counts the whole collection, which is what the PHP does when
+// $key is null and the unless() guard skips the filter.
+func (c Collection[T]) HasSole(callback func(value T, key int) bool) bool {
+	if callback == nil {
+		return len(c) == 1
+	}
+	return len(c.Filter(callback)) == 1
+}
+
+// HasMany answers to
+// Illuminate\Support\Traits\EnumeratesValues::hasMany: at least two elements
+// pass the test.
+//
+// The PHP stops at two matches (filter()->take(2)->count() === 2) and so does
+// this, which is what makes it cheap on a long collection.
+func (c Collection[T]) HasMany(callback func(value T, key int) bool) bool {
+	if callback == nil {
+		return len(c) >= 2
+	}
+	found := 0
+	for i, v := range c {
+		if !callback(v, i) {
+			continue
+		}
+		if found++; found == 2 {
+			return true
+		}
+	}
+	return false
+}
+
+// ContainsManyItems answers to
+// Illuminate\Support\Collection::containsManyItems, which the PHP marks
+// deprecated in 12.50.0 and defines as a call to hasMany.
+func (c Collection[T]) ContainsManyItems(callback func(value T, key int) bool) bool {
+	return c.HasMany(callback)
+}
+
+// ForPage answers to
+// Illuminate\Support\Traits\EnumeratesValues::forPage: the perPage elements of
+// the one-based page.
+//
+// A page below one reads from the start, because the PHP clamps the offset with
+// max(0, ...) rather than counting backwards.
+func (c Collection[T]) ForPage(page, perPage int) Collection[T] {
+	offset := (page - 1) * perPage
+	if offset < 0 {
+		offset = 0
+	}
+	if perPage < 0 {
+		perPage = 0
+	}
+	return c.Slice(offset, perPage)
+}
+
+// PipeThrough answers to
+// Illuminate\Support\Traits\EnumeratesValues::pipeThrough: the collection fed
+// through the callbacks in order, each one receiving what the previous returned.
+//
+// The PHP types the result as mixed because a pipe may return anything; a Go
+// pipe returns a collection, and Pipe is there for the shape that does not.
+func (c Collection[T]) PipeThrough(callbacks ...func(collection Collection[T]) Collection[T]) Collection[T] {
+	carry := c
+	for _, callback := range callbacks {
+		carry = callback(carry)
+	}
+	return carry
+}
+
+// Dump answers to
+// Illuminate\Support\Traits\EnumeratesValues::dump: write the elements to
+// standard output and return the collection so the call can sit inside a chain.
+func (c Collection[T]) Dump() Collection[T] {
+	fmt.Fprintf(os.Stdout, "%#v\n", c.All())
+	return c
+}
+
+// Dd answers to
+// Illuminate\Support\Traits\EnumeratesValues::dd: dump and die.
+//
+// The PHP dd() ends the request; this ends the process with status 1. It never
+// returns, which is why nothing here is chainable.
+func (c Collection[T]) Dd() {
+	c.Dump()
+	os.Exit(1)
 }
 
 // Each answers to

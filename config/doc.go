@@ -31,6 +31,16 @@
 // It fails at boot, not on the first request. A configuration that cannot be
 // served is a process that must not start.
 //
+// # What is not ported, and why
+//
+// Repository::offsetExists, offsetGet, offsetSet and offsetUnset are the four
+// methods of PHP's ArrayAccess -- the language interface behind
+// $config['app.name'] and unset($config['app.name']). Go has no operator to
+// overload, so there is nothing for them to be. Each is one line in the PHP and
+// delegates to a method that is here: offsetExists is [Repository.Has],
+// offsetGet is [Repository.Get], offsetSet is [Repository.Set], and offsetUnset
+// is Set(key, nil). Nothing is missing; only the square brackets are.
+//
 // # What this package does not carry
 //
 // [App] is the identity of the application and the key it signs with, and

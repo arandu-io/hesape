@@ -187,20 +187,152 @@ func Confirmed(e Errors, field, value, confirmation string) {
 	}
 }
 
-// First returns one message, for a view that shows a single line.
+// First answers to Illuminate\Support\MessageBag::first: the first message for
+// a key, or the first message of any key when none is given.
 //
-// A form that lists every error next to its field uses the map directly. One
-// that shows a banner needs one sentence, and picking it at the call site means
-// every template does it slightly differently.
+// The PHP's $key defaults to null; the variadic is how Go spells that, and only
+// the first key is read. A key with no messages is the empty string, which is
+// what the empty-string default of Arr::first returns there.
 //
-// The field order is not stable -- a map has none -- so this is for the case
-// where any of them answers the question "what is wrong". When which field
-// failed matters, read the map.
-func (e Errors) First() string {
+// With no key the field order is not stable -- a map has none -- so that form
+// answers "what is wrong" and not "which field". When which field failed
+// matters, pass the key.
+func (e Errors) First(key ...string) string {
+	if len(key) > 0 {
+		msgs := e[key[0]]
+		if len(msgs) == 0 {
+			return ""
+		}
+		return msgs[0]
+	}
 	for _, msgs := range e {
 		if len(msgs) > 0 {
 			return msgs[0]
 		}
 	}
 	return ""
+}
+
+// Get answers to Illuminate\Support\MessageBag::get: every message for a key.
+//
+// An absent key is an empty slice, as the PHP returns [], not null. The
+// wildcard form the PHP supports is not read here: this bag keys by the field
+// name the validator wrote, and no rule writes a star into one.
+func (e Errors) Get(key string) []string { return e[key] }
+
+// All answers to Illuminate\Support\MessageBag::all: every message in the bag,
+// with the fields in a stable order so two renders of the same failure agree.
+//
+// The PHP has no order to keep -- a PHP array remembers insertion -- and a Go
+// map has none to remember, so the fields are sorted.
+func (e Errors) All() []string {
+	out := make([]string, 0, len(e))
+	for _, field := range e.Keys() {
+		out = append(out, e[field]...)
+	}
+	return out
+}
+
+// Keys answers to Illuminate\Support\MessageBag::keys, sorted for the reason
+// All is.
+func (e Errors) Keys() []string {
+	fields := make([]string, 0, len(e))
+	for field := range e {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	return fields
+}
+
+// Has answers to Illuminate\Support\MessageBag::has: every key given has at
+// least one message. No key at all is Any, as the PHP's null is.
+func (e Errors) Has(keys ...string) bool {
+	if len(keys) == 0 {
+		return e.Any()
+	}
+	for _, key := range keys {
+		if len(e[key]) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// HasAny answers to Illuminate\Support\MessageBag::hasAny: at least one of the
+// keys given has a message.
+func (e Errors) HasAny(keys ...string) bool {
+	for _, key := range keys {
+		if len(e[key]) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// Missing answers to Illuminate\Support\MessageBag::missing: not HasAny.
+func (e Errors) Missing(keys ...string) bool { return !e.HasAny(keys...) }
+
+// Messages answers to Illuminate\Support\MessageBag::messages: the raw map.
+func (e Errors) Messages() map[string][]string { return e }
+
+// GetMessages answers to Illuminate\Support\MessageBag::getMessages, which the
+// PHP defines as an alias of messages.
+func (e Errors) GetMessages() map[string][]string { return e.Messages() }
+
+// Count answers to Illuminate\Support\MessageBag::count: the number of
+// messages, not the number of fields.
+func (e Errors) Count() int {
+	n := 0
+	for _, msgs := range e {
+		n += len(msgs)
+	}
+	return n
+}
+
+// IsEmpty answers to Illuminate\Support\MessageBag::isEmpty.
+func (e Errors) IsEmpty() bool { return !e.Any() }
+
+// IsNotEmpty answers to Illuminate\Support\MessageBag::isNotEmpty.
+func (e Errors) IsNotEmpty() bool { return e.Any() }
+
+// Unique answers to Illuminate\Support\MessageBag::unique: All with the
+// repeats dropped, keeping the first of each.
+func (e Errors) Unique() []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(e))
+	for _, msg := range e.All() {
+		if _, ok := seen[msg]; ok {
+			continue
+		}
+		seen[msg] = struct{}{}
+		out = append(out, msg)
+	}
+	return out
+}
+
+// Forget answers to Illuminate\Support\MessageBag::forget: drop every message
+// for a key.
+func (e Errors) Forget(key string) Errors {
+	delete(e, key)
+	return e
+}
+
+// AddIf answers to Illuminate\Support\MessageBag::addIf.
+func (e Errors) AddIf(condition bool, field, msg string) Errors {
+	if condition {
+		e.Add(field, msg)
+	}
+	return e
+}
+
+// Merge answers to Illuminate\Support\MessageBag::merge: the messages of other
+// appended to the ones already here.
+func (e Errors) Merge(other Errors) Errors {
+	if e == nil {
+		return e
+	}
+	for field, msgs := range other {
+		e[field] = append(e[field], msgs...)
+	}
+	return e
 }

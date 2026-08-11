@@ -27,14 +27,14 @@ func TestPageCarriesTheErrorsOfTheRequestThatRedirectedHere(t *testing.T) {
 	page := view.New(ctx, "Sign up").WithToken("csrf-token")
 
 	// Nothing in the handler mentioned errors, and the errors are on the page.
-	if got := page.FieldError("password"); got != "must be at least 12 characters" {
-		t.Errorf("FieldError = %q", got)
+	if got := page.First("password"); got != "must be at least 12 characters" {
+		t.Errorf("First = %q", got)
 	}
 	if got := page.OldValue("email"); got != "ada@example.test" {
 		t.Errorf("OldValue = %q", got)
 	}
-	if !page.HasErrors() {
-		t.Error("HasErrors said no on a page that was redirected here from a rejection")
+	if !page.Any() {
+		t.Error("Any said no on a page that was redirected here from a rejection")
 	}
 	// The chrome the constructor is also responsible for.
 	if page.Title != "Sign up" || page.Path != "/signup" || page.CSRFToken() != "csrf-token" {
@@ -51,17 +51,17 @@ func TestAPageNobodyWasRejectedOnDrawsNothing(t *testing.T) {
 
 	// A screen asks unconditionally, so all three have to answer without a nil
 	// check at the call site.
-	if page.HasErrors() {
-		t.Error("HasErrors said yes on a fresh page")
+	if page.Any() {
+		t.Error("Any said yes on a fresh page")
 	}
-	if got := page.FieldError("email"); got != "" {
-		t.Errorf("FieldError = %q", got)
+	if got := page.First("email"); got != "" {
+		t.Errorf("First = %q", got)
 	}
 	if got := page.OldValue("email"); got != "" {
 		t.Errorf("OldValue = %q", got)
 	}
-	if got := page.ErrorSummary(); got != nil {
-		t.Errorf("ErrorSummary = %v, want nil so the banner is not drawn empty", got)
+	if got := page.All(); got != nil {
+		t.Errorf("All = %v, want nil so the banner is not drawn empty", got)
 	}
 }
 
@@ -78,7 +78,7 @@ func TestOldValueIsEmptyForAPasswordField(t *testing.T) {
 	if got := page.OldValue("password"); got != "" {
 		t.Errorf("OldValue(password) = %q", got)
 	}
-	if got := page.FieldError("password"); got == "" {
+	if got := page.First("password"); got == "" {
 		t.Error("the password box would come back empty and silent")
 	}
 }
@@ -112,29 +112,29 @@ func TestErrorSummaryNamesTheFieldAndTheBareMessageDoesNot(t *testing.T) {
 		"Email is not a valid email address",
 		"Password confirmation does not match",
 	}
-	if got := page.ErrorSummary(); !reflect.DeepEqual(got, want) {
-		t.Errorf("ErrorSummary =\n%q\nwant\n%q", got, want)
+	if got := page.All(); !reflect.DeepEqual(got, want) {
+		t.Errorf("All =\n%q\nwant\n%q", got, want)
 	}
 
 	// The same message drawn under its own labelled box says only what to
 	// change. The name is prepended for the banner and baked into nothing --
 	// the one deliberate divergence from Laravel's ":attribute must be...".
-	if got := page.FieldError("email"); got != "is not a valid email address" {
-		t.Errorf("FieldError = %q, want the bare sentence", got)
+	if got := page.First("email"); got != "is not a valid email address" {
+		t.Errorf("First = %q, want the bare sentence", got)
 	}
 }
 
 func TestPageStillSatisfiesLayout(t *testing.T) {
 	// The compile-time assertion in page.go is the real check; this names it so
 	// that a build failure there points at a test with a reason in it. Adding
-	// HasErrors and ErrorSummary to Layout is what makes the banner the layout's
+	// Any and All to Layout is what makes the banner the layout's
 	// -- and every screen in every project gets them by embedding Page, which is
 	// what keeps that addition from being a change each of them has to make.
 	var _ view.Layout = view.Page{}
 
 	page := view.Page{Errors: validation.Errors{"email": {"is required"}}}
 	var layout view.Layout = page
-	if !layout.HasErrors() || len(layout.ErrorSummary()) != 1 {
+	if !layout.Any() || len(layout.All()) != 1 {
 		t.Error("a layout cannot see that this page was rejected")
 	}
 }

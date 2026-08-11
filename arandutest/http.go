@@ -178,11 +178,11 @@ type Response struct {
 	path string
 }
 
-// Status fails unless the status is the one expected.
+// AssertStatus answers TestResponse::assertStatus, and fails unless the status is the one expected.
 //
 // The body is printed on failure, because the answer to "why is this a 500" is
 // in it and finding out otherwise means running the test again with a print.
-func (r *Response) Status(want int) *Response {
+func (r *Response) AssertStatus(want int) *Response {
 	r.t.Helper()
 	if r.rec.Code != want {
 		r.t.Fatalf("%s answered %d, want %d\n%s", r.path, r.rec.Code, want, r.body())
@@ -190,11 +190,11 @@ func (r *Response) Status(want int) *Response {
 	return r
 }
 
-// OK is Status(200).
-func (r *Response) OK() *Response { return r.Status(http.StatusOK) }
+// AssertOk answers TestResponse::assertOk: AssertStatus(200).
+func (r *Response) AssertOk() *Response { return r.AssertStatus(http.StatusOK) }
 
-// See fails unless the text is in the body.
-func (r *Response) See(text string) *Response {
+// AssertSee answers TestResponse::assertSee, and fails unless the text is in the body.
+func (r *Response) AssertSee(text string) *Response {
 	r.t.Helper()
 	if !strings.Contains(r.rec.Body.String(), text) {
 		r.t.Errorf("%s does not show %q\n%s", r.path, text, r.body())
@@ -202,12 +202,12 @@ func (r *Response) See(text string) *Response {
 	return r
 }
 
-// DontSee fails when the text is in the body.
+// AssertDontSee answers TestResponse::assertDontSee, and fails when the text is in the body.
 //
 // It is the half people skip, and the half that catches a leak: a draft in a
 // public listing, an address in a page that should not name one, a button
 // somebody without the permission can see.
-func (r *Response) DontSee(text string) *Response {
+func (r *Response) AssertDontSee(text string) *Response {
 	r.t.Helper()
 	if strings.Contains(r.rec.Body.String(), text) {
 		r.t.Errorf("%s shows %q and should not", r.path, text)
@@ -215,12 +215,12 @@ func (r *Response) DontSee(text string) *Response {
 	return r
 }
 
-// RedirectsTo fails unless the response sends the client to that address.
+// AssertRedirect answers TestResponse::assertRedirect, and fails unless the response sends the client to that address.
 //
 // It reads HX-Redirect as well as Location, because a handler answering an HTMX
 // request redirects with a header and a 204 -- and a test that only reads
 // Location says "redirected to \"\"" for a response that is correct.
-func (r *Response) RedirectsTo(want string) *Response {
+func (r *Response) AssertRedirect(want string) *Response {
 	r.t.Helper()
 
 	got := r.rec.Header().Get("Location")
@@ -233,8 +233,8 @@ func (r *Response) RedirectsTo(want string) *Response {
 	return r
 }
 
-// Body is what came back, for an assertion this package does not have.
-func (r *Response) Body() string { return r.rec.Body.String() }
+// GetContent answers TestResponse::getContent: what came back, for an assertion this package does not have.
+func (r *Response) GetContent() string { return r.rec.Body.String() }
 
 // Header reads one response header.
 func (r *Response) Header(name string) string { return r.rec.Header().Get(name) }

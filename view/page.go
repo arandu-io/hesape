@@ -2,7 +2,6 @@ package view
 
 import (
 	"net/url"
-	"sort"
 	"strings"
 
 	"github.com/arandu-io/hesape/httpx"
@@ -64,17 +63,17 @@ type Layout interface {
 	PanelLink() string
 	AdminLink() string
 
-	// HasErrors says whether the attempt that landed here was rejected, and
-	// ErrorSummary is one line per failed field for the banner that says so.
+	// Any says whether the attempt that landed here was rejected, and
+	// All is one line per failed field for the banner that says so.
 	//
 	// The banner is the layout's, which is why these two are here and the
 	// per-field message is not: a page body draws "must be at least 12
 	// characters" under the box it belongs to, and the layout draws the summary
-	// once, above everything. FieldError and OldValue are promoted methods on
+	// once, above everything. First and OldValue are promoted methods on
 	// Page for the body to call, deliberately outside this interface -- Layout
 	// is what the LAYOUT asks for.
-	HasErrors() bool
-	ErrorSummary() []string
+	Any() bool
+	All() []string
 }
 
 // Page is the chrome every screen hands the layout, embedded rather than
@@ -261,7 +260,10 @@ func (p Page) WithToken(token string) Page {
 	return p
 }
 
-// FieldError is the first message for a field, or empty.
+// First answers to Illuminate\Support\MessageBag::first, promoted onto Page so
+// a template writes what a Blade template writes: the first message for a
+// field, or empty. It was called FieldError, which is the same method under a
+// name Illuminate does not use.
 //
 // One message and not all of them, because that is what a form draws: the box
 // has room for one line, and the first is the one that names what to change.
@@ -272,7 +274,7 @@ func (p Page) WithToken(token string) Page {
 //		Name: "email", Label: "Email", Type: "email", Page: .Page,
 //	}) !!}
 //
-// components.Page is the two-method interface Page satisfies -- FieldError and
+// components.Page is the two-method interface Page satisfies -- First and
 // OldOr -- so the name is written once, in one place, instead of once per prop
 // beside it. This comment used to say the message went in as `Error: ...`, a
 // prop that does not exist, and nine published screens were written from it.
@@ -281,23 +283,19 @@ func (p Page) WithToken(token string) Page {
 // nobody was rejected on -- so a screen asks unconditionally and draws nothing
 // when there is nothing. There is no @error directive and none is needed
 // (RULE 15).
-func (p Page) FieldError(name string) string {
-	msgs := p.Errors[name]
-	if len(msgs) == 0 {
-		return ""
-	}
-	return msgs[0]
-}
+func (p Page) First(name string) string { return p.Errors.First(name) }
 
-// FieldErrors is every message for a field, for the rare screen that lists them.
-func (p Page) FieldErrors(name string) []string { return p.Errors[name] }
+// Get answers to Illuminate\Support\MessageBag::get: every message for a field,
+// for the rare screen that lists them. It was called FieldErrors.
+func (p Page) Get(name string) []string { return p.Errors.Get(name) }
 
-// HasErrors reports whether the attempt that landed here was rejected.
+// Any answers to Illuminate\Support\MessageBag::any, and reports whether the
+// attempt that landed here was rejected. It was called HasErrors.
 //
 // It is what a layout asks before drawing the banner. A page with no errors must
 // not draw an empty one: a box that is always there and usually blank is a box
 // people stop reading, which is how a real message goes unseen.
-func (p Page) HasErrors() bool { return len(p.Errors) > 0 }
+func (p Page) Any() bool { return len(p.Errors) > 0 }
 
 // OldValue is what was typed in a field on the attempt that was rejected.
 //
@@ -324,7 +322,7 @@ func (p Page) OldOr(name, fallback string) string {
 	return fallback
 }
 
-// ErrorSummary is one line per failed field, for the banner, in sorted field
+// All is one line per failed field, for the banner, in sorted field
 // order.
 //
 //	Password must be at least 12 characters
@@ -359,20 +357,23 @@ func displayableAttribute(field string) string {
 	return str.Ucfirst(strings.ReplaceAll(str.Snake(field, "_"), "_", " "))
 }
 
-func (p Page) ErrorSummary() []string {
+// All answers to Illuminate\Support\MessageBag::all: every message, for the
+// banner. It was called ErrorSummary.
+//
+// Each line is prefixed with the field's displayable name, which is the one
+// place this differs from the PHP -- there the validator has already baked
+// ":attribute" into the message, so the bag has nothing left to prepend.
+//
+// Nil rather than empty on a page with no errors, so a layout that ranges over
+// it draws no banner at all.
+func (p Page) All() []string {
 	if len(p.Errors) == 0 {
 		return nil
 	}
 
-	fields := make([]string, 0, len(p.Errors))
-	for field := range p.Errors {
-		fields = append(fields, field)
-	}
-	sort.Strings(fields)
-
-	out := make([]string, 0, len(fields))
-	for _, field := range fields {
-		for _, msg := range p.Errors[field] {
+	out := make([]string, 0, len(p.Errors))
+	for _, field := range p.Errors.Keys() {
+		for _, msg := range p.Errors.Get(field) {
 			out = append(out, displayableAttribute(field)+" "+msg)
 		}
 	}

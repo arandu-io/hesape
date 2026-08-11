@@ -94,12 +94,13 @@ func (t *Translator) Locale() string { return t.locale }
 // asked for.
 func (t *Translator) Fallback() string { return t.fallback }
 
-// T returns the line stored under key, with its placeholders replaced.
+// Get answers Illuminate\Translation\Translator::get: the line stored under
+// key, with its placeholders replaced.
 //
 // An empty locale means the translator's own. A key no catalogue carries is
 // returned unchanged, after the [WithMissingKey] callback has seen it, so a
 // wrong key shows as itself on the page instead of as a blank.
-func (t *Translator) T(locale, key string, replace Replace) string {
+func (t *Translator) Get(locale, key string, replace Replace) string {
 	line, _, ok := t.line(locale, key)
 	if !ok {
 		t.reportMissing(locale, key)

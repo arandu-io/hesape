@@ -1,155 +1,407 @@
 package pipeline_test
 
 import (
-	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/arandu-io/hesape/pipeline"
 )
 
-// TestMiddlewareOrder pins the contract: the first middleware in the list is the
-// outermost, so the pipeline order is the order of execution. This is the test
-// that travelled with Chain from httpx, and the assertion is unchanged -- the
-// composition became generic, the order did not.
-func TestMiddlewareOrder(t *testing.T) {
+// record is the pipe every ordering test is built from: it marks the way in and
+// the way out, which is the only way to tell an onion from a queue.
+func record(order *[]string, name string) pipeline.Pipe[string] {
+	return func(passable string, next pipeline.Destination[string]) (string, error) {
+		*order = append(*order, "in:"+name)
+		out, err := next(passable)
+		*order = append(*order, "out:"+name)
+		return out, err
+	}
+}
+
+// TestThenRunsThePipesInOrder: the first pipe given to Through is the outermost,
+// which is what array_reverse plus array_reduce produces in PHP.
+func TestThenRunsThePipesInOrder(t *testing.T) {
 	var order []string
-	mark := func(name string) pipeline.Middleware[http.Handler] {
-		return func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				order = append(order, "in:"+name)
-				next.ServeHTTP(w, r)
-				order = append(order, "out:"+name)
-			})
-		}
-	}
 
-	h := pipeline.Chain(http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		order = append(order, "handler")
-	})), mark("first"), mark("second"))
-
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
-
-	got := strings.Join(order, ",")
-	want := "in:first,in:second,handler,out:second,out:first"
-	if got != want {
-		t.Fatalf("order = %s, want %s", got, want)
-	}
-}
-
-// TestChainWithoutMiddlewareReturnsTheHandler: a group with nothing on it must
-// not change what it wraps.
-func TestChainWithoutMiddlewareReturnsTheHandler(t *testing.T) {
-	called := false
-	h := pipeline.Chain(http.Handler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		called = true
-	})))
-
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
-
-	if !called {
-		t.Fatal("handler was not reached: Chain with no middleware must return it untouched")
-	}
-}
-
-// TestChainIsGenericOverTheHandler is why the type moved out of httpx: the same
-// composition has to serve a handler that is not an http.Handler.
-func TestChainIsGenericOverTheHandler(t *testing.T) {
-	type command func(string) string
-
-	shout := pipeline.Middleware[command](func(next command) command {
-		return func(s string) string { return next(s) + "!" }
-	})
-	quote := pipeline.Middleware[command](func(next command) command {
-		return func(s string) string { return `"` + next(s) + `"` }
-	})
-
-	c := pipeline.Chain(command(func(s string) string { return s }), shout, quote)
-
-	if got, want := c("ok"), `"ok"!`; got != want {
-		t.Fatalf("composed = %q, want %q: the first middleware is the outermost", got, want)
-	}
-}
-
-// TestIdentityLeavesTheHandlerAlone: the switched-off middleware has to be a
-// value that composes, not a hole in the slice.
-func TestIdentityLeavesTheHandlerAlone(t *testing.T) {
-	var order []string
-	record := pipeline.Middleware[http.Handler](func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			order = append(order, "record")
-			next.ServeHTTP(w, r)
+	got, err := pipeline.New[string]().
+		Send("invoice").
+		Through(record(&order, "first"), record(&order, "second")).
+		Then(func(passable string) (string, error) {
+			order = append(order, "destination:"+passable)
+			return passable, nil
 		})
-	})
+	if err != nil {
+		t.Fatalf("Then: %v", err)
+	}
+	if got != "invoice" {
+		t.Fatalf("result = %q, want %q", got, "invoice")
+	}
 
-	h := pipeline.Chain(http.Handler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		order = append(order, "handler")
-	})), pipeline.Identity, record, pipeline.Identity)
-
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
-
-	if got, want := strings.Join(order, ","), "record,handler"; got != want {
-		t.Fatalf("order = %s, want %s", got, want)
+	want := "in:first,in:second,destination:invoice,out:second,out:first"
+	if have := strings.Join(order, ","); have != want {
+		t.Fatalf("order = %s, want %s", have, want)
 	}
 }
 
-// TestPipeComposesWithChain: Pipe is an alias, so the slice of pipes is a slice
-// of middlewares and there is no second composition function to keep in step.
-func TestPipeComposesWithChain(t *testing.T) {
-	type job struct{ name string }
+// TestPipesCarryTheChangedPassable: each pipe hands the next one whatever it
+// passes to next, not what Send was given.
+func TestPipesCarryTheChangedPassable(t *testing.T) {
+	upper := pipeline.Pipe[string](func(passable string, next pipeline.Destination[string]) (string, error) {
+		return next(strings.ToUpper(passable))
+	})
+	exclaim := pipeline.Pipe[string](func(passable string, next pipeline.Destination[string]) (string, error) {
+		return next(passable + "!")
+	})
 
-	var order []string
-	stage := func(name string) pipeline.Pipe[job] {
-		return func(next pipeline.Handler[job]) pipeline.Handler[job] {
-			return func(ctx context.Context, j job) error {
-				order = append(order, "in:"+name)
-				err := next(ctx, j)
-				order = append(order, "out:"+name)
-				return err
-			}
-		}
+	got, err := pipeline.New[string]().Send("ok").Through(upper, exclaim).ThenReturn()
+	if err != nil {
+		t.Fatalf("ThenReturn: %v", err)
 	}
-
-	pipes := []pipeline.Pipe[job]{stage("first"), stage("second")}
-	h := pipeline.Chain(pipeline.Handler[job](func(_ context.Context, j job) error {
-		order = append(order, "handle:"+j.name)
-		return nil
-	}), pipes...)
-
-	if err := h(context.Background(), job{name: "invoice.send"}); err != nil {
-		t.Fatalf("handler returned %v, want nil", err)
-	}
-
-	got := strings.Join(order, ",")
-	want := "in:first,in:second,handle:invoice.send,out:second,out:first"
-	if got != want {
-		t.Fatalf("order = %s, want %s", got, want)
+	if want := "OK!"; got != want {
+		t.Fatalf("result = %q, want %q", got, want)
 	}
 }
 
-// TestPipeCanStopTheHandler: a stage that refuses the work must be able to
-// return without calling the next one, which is what WithoutOverlapping and
-// RateLimited are.
-func TestPipeCanStopTheHandler(t *testing.T) {
-	errRefused := errors.New("pipeline_test: refused")
+// TestThenReturnAnswersWithThePassable: thenReturn() is then(fn ($p) => $p), so
+// what comes back is the value the last pipe handed on.
+func TestThenReturnAnswersWithThePassable(t *testing.T) {
+	got, err := pipeline.New[int]().Send(41).Through(
+		func(passable int, next pipeline.Destination[int]) (int, error) { return next(passable + 1) },
+	).ThenReturn()
+	if err != nil {
+		t.Fatalf("ThenReturn: %v", err)
+	}
+	if got != 42 {
+		t.Fatalf("result = %d, want 42", got)
+	}
+}
 
-	refuse := pipeline.Pipe[int](func(pipeline.Handler[int]) pipeline.Handler[int] {
-		return func(context.Context, int) error { return errRefused }
+// TestThenWithoutPipesReachesTheDestination: an empty list is not a pipeline
+// that does nothing, it is a pipeline that is only its destination.
+func TestThenWithoutPipesReachesTheDestination(t *testing.T) {
+	got, err := pipeline.New[string]().Send("bare").Then(func(passable string) (string, error) {
+		return passable + ":done", nil
 	})
+	if err != nil {
+		t.Fatalf("Then: %v", err)
+	}
+	if want := "bare:done"; got != want {
+		t.Fatalf("result = %q, want %q", got, want)
+	}
+}
 
+// TestZeroValuePipelineRuns: the zero value has no pipes and the zero passable,
+// and it must not need a constructor to be sent anywhere.
+func TestZeroValuePipelineRuns(t *testing.T) {
+	var p pipeline.Pipeline[int]
+
+	got, err := p.Then(func(passable int) (int, error) { return passable + 7, nil })
+	if err != nil {
+		t.Fatalf("Then: %v", err)
+	}
+	if got != 7 {
+		t.Fatalf("result = %d, want 7: the zero passable is 0", got)
+	}
+}
+
+// TestPipeCanStopThePipeline: a pipe that returns without calling next answers
+// for the whole pipeline, which is what an authorization check does.
+func TestPipeCanStopThePipeline(t *testing.T) {
 	reached := false
-	h := pipeline.Chain(pipeline.Handler[int](func(context.Context, int) error {
-		reached = true
-		return nil
-	}), refuse)
 
-	if err := h(context.Background(), 1); !errors.Is(err, errRefused) {
-		t.Fatalf("error = %v, want %v", err, errRefused)
+	refuse := pipeline.Pipe[string](func(string, pipeline.Destination[string]) (string, error) {
+		return "refused", nil
+	})
+
+	got, err := pipeline.New[string]().Send("order").Through(refuse).Then(func(passable string) (string, error) {
+		reached = true
+		return passable, nil
+	})
+	if err != nil {
+		t.Fatalf("Then: %v", err)
+	}
+	if got != "refused" {
+		t.Fatalf("result = %q, want %q", got, "refused")
 	}
 	if reached {
-		t.Fatal("handler ran: a pipe that does not call next must stop the pipeline")
+		t.Fatal("the destination ran: a pipe that does not call next must stop the pipeline")
+	}
+}
+
+// TestErrorFromAPipeComesBack: PHP throws out of then() and handleException()
+// rethrows; here the error is returned, and nothing downstream ran.
+func TestErrorFromAPipeComesBack(t *testing.T) {
+	boom := errors.New("pipeline_test: boom")
+	reached := false
+
+	fail := pipeline.Pipe[int](func(int, pipeline.Destination[int]) (int, error) { return 0, boom })
+
+	_, err := pipeline.New[int]().Send(1).Through(fail).Then(func(passable int) (int, error) {
+		reached = true
+		return passable, nil
+	})
+	if !errors.Is(err, boom) {
+		t.Fatalf("error = %v, want %v", err, boom)
+	}
+	if reached {
+		t.Fatal("the destination ran after a pipe failed")
+	}
+}
+
+// TestErrorFromTheDestinationComesBack: the destination is inside the onion, so
+// its failure travels back out through every pipe.
+func TestErrorFromTheDestinationComesBack(t *testing.T) {
+	boom := errors.New("pipeline_test: boom")
+
+	var order []string
+	_, err := pipeline.New[string]().Send("x").Through(record(&order, "only")).Then(func(string) (string, error) {
+		return "", boom
+	})
+	if !errors.Is(err, boom) {
+		t.Fatalf("error = %v, want %v", err, boom)
+	}
+	if want := "in:only,out:only"; strings.Join(order, ",") != want {
+		t.Fatalf("order = %s, want %s: a pipe still unwinds when the destination fails", order, want)
+	}
+}
+
+// TestThroughReplacesAndPipeAppends: through() assigns and pipe() array_pushes.
+// Getting this backwards silently doubles or drops a stage.
+func TestThroughReplacesAndPipeAppends(t *testing.T) {
+	var order []string
+
+	_, err := pipeline.New[string]().
+		Send("x").
+		Through(record(&order, "dropped")).
+		Through(record(&order, "kept")).
+		Pipe(record(&order, "appended")).
+		ThenReturn()
+	if err != nil {
+		t.Fatalf("ThenReturn: %v", err)
+	}
+
+	want := "in:kept,in:appended,out:appended,out:kept"
+	if have := strings.Join(order, ","); have != want {
+		t.Fatalf("order = %s, want %s", have, want)
+	}
+}
+
+// TestThroughWithoutPipesEmptiesTheList: through([]) is how a caller clears what
+// it set, and it must not be read as "leave it alone".
+func TestThroughWithoutPipesEmptiesTheList(t *testing.T) {
+	var order []string
+
+	_, err := pipeline.New[string]().Send("x").Through(record(&order, "first")).Through().ThenReturn()
+	if err != nil {
+		t.Fatalf("ThenReturn: %v", err)
+	}
+	if len(order) != 0 {
+		t.Fatalf("order = %v, want nothing: Through() with no pipes empties the list", order)
+	}
+}
+
+// TestPipeAppendsToAPipelineThatHasNone: pipe() on a pipeline that never had
+// through() called is the whole list, not an error.
+func TestPipeAppendsToAPipelineThatHasNone(t *testing.T) {
+	var order []string
+
+	if _, err := pipeline.New[string]().Send("x").Pipe(record(&order, "only")).ThenReturn(); err != nil {
+		t.Fatalf("ThenReturn: %v", err)
+	}
+	if want := "in:only,out:only"; strings.Join(order, ",") != want {
+		t.Fatalf("order = %s, want %s", order, want)
+	}
+}
+
+// TestThroughCopiesTheCallersSlice: a caller that reuses its own slice -- a
+// router building one list per route is the case -- must not be able to change
+// a pipeline it already built.
+func TestThroughCopiesTheCallersSlice(t *testing.T) {
+	var order []string
+
+	pipes := []pipeline.Pipe[string]{record(&order, "original")}
+	p := pipeline.New[string]().Send("x").Through(pipes...)
+	pipes[0] = record(&order, "swapped")
+
+	if _, err := p.ThenReturn(); err != nil {
+		t.Fatalf("ThenReturn: %v", err)
+	}
+	if want := "in:original,out:original"; strings.Join(order, ",") != want {
+		t.Fatalf("order = %s, want %s", order, want)
+	}
+}
+
+// TestFinallyRunsOnSuccessWithTheSentPassable: PHP hands the callback
+// $this->passable, the field, which no pipe can reach -- not the value the
+// pipes passed each other.
+func TestFinallyRunsOnSuccessWithTheSentPassable(t *testing.T) {
+	var seen string
+	calls := 0
+
+	got, err := pipeline.New[string]().
+		Send("sent").
+		Through(func(passable string, next pipeline.Destination[string]) (string, error) {
+			return next(passable + ":changed")
+		}).
+		Finally(func(passable string) {
+			seen = passable
+			calls++
+		}).
+		ThenReturn()
+	if err != nil {
+		t.Fatalf("ThenReturn: %v", err)
+	}
+	if got != "sent:changed" {
+		t.Fatalf("result = %q, want %q", got, "sent:changed")
+	}
+	if seen != "sent" {
+		t.Fatalf("Finally saw %q, want %q: it is given the passable as Send left it", seen, "sent")
+	}
+	if calls != 1 {
+		t.Fatalf("Finally ran %d times, want once", calls)
+	}
+}
+
+// TestFinallyRunsWhenAPipeFails: it is a finally block, not a success hook.
+func TestFinallyRunsWhenAPipeFails(t *testing.T) {
+	boom := errors.New("pipeline_test: boom")
+	ran := false
+
+	_, err := pipeline.New[int]().
+		Send(1).
+		Through(func(int, pipeline.Destination[int]) (int, error) { return 0, boom }).
+		Finally(func(int) { ran = true }).
+		ThenReturn()
+	if !errors.Is(err, boom) {
+		t.Fatalf("error = %v, want %v", err, boom)
+	}
+	if !ran {
+		t.Fatal("Finally did not run after a failure")
+	}
+}
+
+// TestFinallyRunsWhenAPipePanics: PHP's finally block runs while a Throwable is
+// on its way out, and so does the deferred call here. The panic keeps going --
+// nothing in Illuminate swallows it.
+func TestFinallyRunsWhenAPipePanics(t *testing.T) {
+	ran := false
+
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("the panic did not travel out of Then")
+			}
+		}()
+
+		_, _ = pipeline.New[int]().
+			Send(1).
+			Through(func(int, pipeline.Destination[int]) (int, error) { panic("held wrong") }).
+			Finally(func(int) { ran = true }).
+			ThenReturn()
+	}()
+
+	if !ran {
+		t.Fatal("Finally did not run while a panic was unwinding")
+	}
+}
+
+// TestFinallyKeepsTheSecondCallback: assigning the property twice keeps the
+// second, and two callbacks would be a set nobody declared.
+func TestFinallyKeepsTheSecondCallback(t *testing.T) {
+	var ran []string
+
+	if _, err := pipeline.New[int]().
+		Send(1).
+		Finally(func(int) { ran = append(ran, "first") }).
+		Finally(func(int) { ran = append(ran, "second") }).
+		ThenReturn(); err != nil {
+		t.Fatalf("ThenReturn: %v", err)
+	}
+
+	if len(ran) != 1 || ran[0] != "second" {
+		t.Fatalf("callbacks ran = %v, want [second]", ran)
+	}
+}
+
+// TestThenWithoutADestinationFails, and fails before anything else happens: in
+// PHP the destination is a typed argument, so it fails before then() reaches
+// its try block and therefore before finally.
+func TestThenWithoutADestinationFails(t *testing.T) {
+	ran := false
+	reached := false
+
+	_, err := pipeline.New[int]().
+		Send(1).
+		Through(func(passable int, next pipeline.Destination[int]) (int, error) {
+			reached = true
+			return next(passable)
+		}).
+		Finally(func(int) { ran = true }).
+		Then(nil)
+	if err == nil {
+		t.Fatal("Then(nil) returned no error")
+	}
+	if !strings.Contains(err.Error(), "pipeline: ") {
+		t.Fatalf("error = %v, want it to name the package", err)
+	}
+	if reached {
+		t.Fatal("a pipe ran without a destination")
+	}
+	if ran {
+		t.Fatal("Finally ran for a call that never started")
+	}
+}
+
+// TestNilPipeFailsWhenThePipelineReachesIt.
+func TestNilPipeFailsWhenThePipelineReachesIt(t *testing.T) {
+	reached := false
+
+	_, err := pipeline.New[int]().Send(1).Through(nil).Then(func(passable int) (int, error) {
+		reached = true
+		return passable, nil
+	})
+	if err == nil {
+		t.Fatal("a nil pipe returned no error")
+	}
+	if !strings.Contains(err.Error(), "pipe 0") {
+		t.Fatalf("error = %v, want it to say which pipe is nil", err)
+	}
+	if reached {
+		t.Fatal("the destination ran past a nil pipe")
+	}
+}
+
+// TestNilPipeIsHarmlessWhenNobodyReachesIt: PHP does not evaluate a stage that
+// an earlier pipe never calls, and neither does this.
+func TestNilPipeIsHarmlessWhenNobodyReachesIt(t *testing.T) {
+	stop := pipeline.Pipe[int](func(int, pipeline.Destination[int]) (int, error) { return 9, nil })
+
+	got, err := pipeline.New[int]().Send(1).Through(stop, nil).ThenReturn()
+	if err != nil {
+		t.Fatalf("ThenReturn: %v", err)
+	}
+	if got != 9 {
+		t.Fatalf("result = %d, want 9", got)
+	}
+}
+
+// TestPipelineCanBeSentTwice: the builder keeps its pipes, and running it again
+// runs them again against whatever Send left last.
+func TestPipelineCanBeSentTwice(t *testing.T) {
+	p := pipeline.New[int]().Through(func(passable int, next pipeline.Destination[int]) (int, error) {
+		return next(passable * 2)
+	})
+
+	first, err := p.Send(2).ThenReturn()
+	if err != nil {
+		t.Fatalf("ThenReturn: %v", err)
+	}
+	second, err := p.Send(5).ThenReturn()
+	if err != nil {
+		t.Fatalf("ThenReturn: %v", err)
+	}
+	if first != 4 || second != 10 {
+		t.Fatalf("results = %d and %d, want 4 and 10", first, second)
 	}
 }

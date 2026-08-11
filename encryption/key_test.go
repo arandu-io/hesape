@@ -2,6 +2,7 @@ package encryption_test
 
 import (
 	"encoding/base64"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -86,6 +87,23 @@ func TestTheErrorNamesTheCommandThatFixesIt(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "aru key:generate") {
 		t.Errorf("the error does not say how to fix it: %v", err)
+	}
+}
+
+// TestAnEmptyKeyIsTheMissingKeyError, not the wrong-length one. It answers
+// MissingAppKeyException, which the PHP throws for the empty key and only for
+// it, and a caller that wants to print "run the installer" instead of "check
+// your .env" has to be able to tell the two apart.
+func TestAnEmptyKeyIsTheMissingKeyError(t *testing.T) {
+	_, err := encryption.ParseKey("")
+	if !errors.Is(err, encryption.ErrMissingAppKey) {
+		t.Fatalf("the empty key is not ErrMissingAppKey: %v", err)
+	}
+
+	// A key of the wrong length is a different mistake and must not answer to
+	// the same error.
+	if _, err := encryption.ParseKey("base64:" + base64.StdEncoding.EncodeToString([]byte("short"))); errors.Is(err, encryption.ErrMissingAppKey) {
+		t.Error("a short key was reported as a missing key")
 	}
 }
 

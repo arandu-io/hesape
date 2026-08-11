@@ -89,7 +89,12 @@ func (t *ObjectType) MarshalJSON() ([]byte, error) {
 	if len(required) > 0 {
 		fields = append(fields, field{"required", required})
 	}
-	fields = append(fields, field{"additionalProperties", false})
+	// A nil pointer is the keyword being absent from the document, which is
+	// how a schema that allows extra properties came back from Deserialize.
+	// Every object this package builds carries false.
+	if t.additionalProperties != nil {
+		fields = append(fields, field{"additionalProperties", *t.additionalProperties})
+	}
 	return marshalFields(t.m.tail(fields))
 }
 
@@ -135,6 +140,9 @@ func (t *NumberType) MarshalJSON() ([]byte, error) {
 	if t.hasMax {
 		fields = append(fields, field{"maximum", t.maximum})
 	}
+	if t.hasMultipleOf {
+		fields = append(fields, field{"multipleOf", t.multipleOf})
+	}
 	return marshalFields(t.m.tail(fields))
 }
 
@@ -161,13 +169,13 @@ func (t *ArrayType) MarshalJSON() ([]byte, error) {
 	return marshalFields(t.m.tail(fields))
 }
 
-// MarshalJSON renders the union as a list of kinds.
+// MarshalJSON renders the union as a list of type names.
 func (t *UnionType) MarshalJSON() ([]byte, error) {
-	kinds := t.Kinds()
+	names := t.Types()
 	if t.m.nullable {
-		kinds = append(kinds, "null")
+		names = append(names, "null")
 	}
-	fields := t.m.labels([]field{{"type", kinds}})
+	fields := t.m.labels([]field{{"type", names}})
 	return marshalFields(t.m.tail(fields))
 }
 

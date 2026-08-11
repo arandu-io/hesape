@@ -5,21 +5,21 @@ import (
 	"unicode/utf8"
 )
 
-// Slug is the text as an address: "Josefin Sans Café" becomes
-// "josefin-sans-cafe".
+// Slug answers for Str::slug. It is the text as an address:
+// Slug("Josefin Sans Café", "-") is "josefin-sans-cafe".
+//
+// The PHP defaults the separator to "-"; Go has no default arguments, so it is
+// required here, as it is on Snake. Pass "" to run the words together.
 //
 // It folds to ASCII first, so an accented rune becomes the letter it is built
 // on instead of disappearing. The version this replaced dropped it, which meant
 // two font families whose names differed only in their accents wrote to the
 // same file, and the second one silently won.
-func Slug(s string) string { return SlugWith(s, "-") }
-
-// SlugWith is Slug with a separator of the caller's choosing. Pass "" to run
-// the words together.
 //
-// An at sign becomes the word "at" before anything else happens, which is what
-// keeps two addresses at different hosts from slugging to the same thing.
-func SlugWith(s, sep string) string {
+// An at sign becomes the word "at" before anything else happens -- the PHP's
+// $dictionary default -- which is what keeps two addresses at different hosts
+// from slugging to the same thing.
+func Slug(s, separator string) string {
 	folded := strings.ToLower(strings.ReplaceAll(ASCII(s), "@", " at "))
 
 	var b strings.Builder
@@ -31,7 +31,7 @@ func SlugWith(s, sep string) string {
 			continue
 		}
 		if pending {
-			b.WriteString(sep)
+			b.WriteString(separator)
 			pending = false
 		}
 		b.WriteRune(r)

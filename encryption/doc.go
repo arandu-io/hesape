@@ -6,16 +6,20 @@
 //	Encrypter.php                  -- [Encrypter], and the package functions
 //	                                  [Encrypt], [Decrypt], [Supported],
 //	                                  [AppearsEncrypted]
-//	EncryptionServiceProvider.php  -- not ported; ADR 0001 and ADR 0002 reject
-//	                                  the container, the facade and the service
-//	                                  provider. What it does that is not wiring
-//	                                  -- reading APP_KEY and decoding the
-//	                                  "base64:" prefix -- is [ParseKey], and
-//	                                  config.Load calls it
-//	MissingAppKeyException.php     -- not ported; it exists only for the
-//	                                  provider above. config.Load reports a
-//	                                  missing APP_KEY, naming the variable and
-//	                                  the command that fixes it
+//	EncryptionServiceProvider.php  -- parseKey and key are [ParseKey], which
+//	                                  config.Load calls
+//	MissingAppKeyException.php     -- [ErrMissingAppKey], returned by [ParseKey]
+//	                                  for the empty key
+//
+// # What is not ported, and why
+//
+// EncryptionServiceProvider::register is the only public method of the
+// component that is absent. Its body is two container bindings -- singleton
+// 'encrypter' and the SerializableClosure secret -- and it is reason 2 of the
+// porting rule: a method that exists only to serve the container, the facade
+// and the service provider, all three of which ADR 0001 and ADR 0002 rejected.
+// Everything register does that is not wiring is [ParseKey], and config.Load
+// calls it at boot. There is nothing here for a caller to reach for.
 //
 // [Signer] has no counterpart in Illuminate\Encryption. It is the signing half
 // of Illuminate\Routing\UrlGenerator::signedRoute and of the password reset

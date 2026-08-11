@@ -37,11 +37,11 @@ func echoCookie(t *testing.T) http.Handler {
 func TestSigningOutIsVisibleToTheNextRequest(t *testing.T) {
 	client := arandutest.NewClient(t, echoCookie(t))
 
-	client.Get("/?set=first").See("carrying nothing")
-	client.Get("/").See("carrying first")
+	client.Get("/?set=first").AssertSee("carrying nothing")
+	client.Get("/").AssertSee("carrying first")
 
 	client.Get("/?set=clear")
-	client.Get("/").See("carrying nothing")
+	client.Get("/").AssertSee("carrying nothing")
 }
 
 // Signing in a second time must replace the session, not hide behind it. When
@@ -54,7 +54,7 @@ func TestASecondSessionReplacesTheFirstInsteadOfQueueingBehindIt(t *testing.T) {
 	client.Get("/?set=first")
 	client.Get("/?set=second")
 
-	client.Get("/").See("carrying second").DontSee("carrying first")
+	client.Get("/").AssertSee("carrying second").AssertDontSee("carrying first")
 }
 
 // whoami answers with what a policy would see: the subject the request carries,
@@ -83,10 +83,10 @@ func whoami(t *testing.T) http.Handler {
 func TestActingAsIsVisibleWhereAPolicyLooks(t *testing.T) {
 	client := arandutest.NewClient(t, whoami(t))
 
-	client.Get("/").See("nobody loaded a session")
+	client.Get("/").AssertSee("nobody loaded a session")
 
 	client.ActingAs(auth.Subject{ID: "u1", Tenant: "acme"})
-	client.Get("/").See("subject u1 of acme")
+	client.Get("/").AssertSee("subject u1 of acme")
 }
 
 // It holds for every request afterwards, not just the next one. A client that
@@ -96,8 +96,8 @@ func TestActingAsIsVisibleWhereAPolicyLooks(t *testing.T) {
 func TestActingAsHoldsForEveryLaterRequest(t *testing.T) {
 	client := arandutest.NewClient(t, whoami(t)).ActingAs(auth.Subject{ID: "u1", Tenant: "acme"})
 
-	client.Get("/").See("subject u1 of acme")
-	client.Get("/again").See("subject u1 of acme")
+	client.Get("/").AssertSee("subject u1 of acme")
+	client.Get("/again").AssertSee("subject u1 of acme")
 }
 
 // A declared anonymous reader is a subject too, and it is not the same fact as
@@ -106,5 +106,5 @@ func TestActingAsHoldsForEveryLaterRequest(t *testing.T) {
 func TestActingAsAcceptsADeclaredGuest(t *testing.T) {
 	client := arandutest.NewClient(t, whoami(t)).ActingAs(auth.Guest("acme"))
 
-	client.Get("/").See("guest of acme")
+	client.Get("/").AssertSee("guest of acme")
 }

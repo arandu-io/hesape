@@ -31,8 +31,24 @@
 // break authentication without noticing. A hasher is the mirror of the PHP
 // class and takes its numbers from the caller; Make is the framework's own path.
 //
-// HashManager has no counterpart: there is no driver to select, because there is
-// no container to select it from. HashServiceProvider is ADR 0001.
+// HashManager is here too. It is the class that reads hashing.driver and hands
+// back the hasher it names, and that is a real choice an application makes, not
+// container plumbing: Driver, GetDefaultDriver, CreateBcryptDriver,
+// CreateArgonDriver, CreateArgon2idDriver, and the Make, Check, Info,
+// NeedsRehash, IsHashed and VerifyConfiguration that forward to the driver. In
+// PHP it takes the container; here it takes a [Config], which is the
+// configuration repository the container would have handed it, written down
+// instead of resolved (ADR 0002).
+//
+// # What is not ported, and why
+//
+// HashServiceProvider::register and HashServiceProvider::provides are the only
+// public methods of the component that are absent. register binds 'hash' and
+// 'hash.driver' as container singletons and provides names those two bindings;
+// both are reason 2 of the porting rule -- a method that exists only to serve
+// the container and the service provider, which ADR 0001 and ADR 0002 rejected.
+// What they build is [NewHashManager] and [HashManager.Driver], and an
+// application calls those directly.
 //
 // The package knows nothing about users, sessions or requests. It takes a
 // string and returns a string, and the only third-party import is

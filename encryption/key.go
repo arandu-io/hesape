@@ -3,6 +3,7 @@ package encryption
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -45,15 +46,36 @@ func GenerateKey() string {
 	return keyPrefix + base64.StdEncoding.EncodeToString(key)
 }
 
+// ErrMissingAppKey answers Illuminate\Encryption\MissingAppKeyException, the
+// RuntimeException that EncryptionServiceProvider::key throws when the
+// configured key is empty. Its message is the one the PHP constructor defaults
+// to, with the command that fixes it appended -- the PHP prints that separately,
+// from the exception renderer, and there is no renderer between ParseKey and the
+// process that is refusing to start.
+//
+// It is a distinct error and not the length error below because the two are
+// different mistakes: a missing key means the application was never keyed, and a
+// short one means it was keyed wrongly. Only the first is what a fresh checkout
+// hits.
+var ErrMissingAppKey = errors.New("encryption: no application encryption key has been specified (run `aru key:generate`)")
+
 // ParseKey reads a configured application key and returns the bytes it names,
 // accepting both the base64 form GenerateKey emits and a raw KeySize-byte
 // string typed by hand.
+//
+// It answers the protected EncryptionServiceProvider::parseKey together with
+// the EncryptionServiceProvider::key it calls: the empty key is
+// [ErrMissingAppKey], which is the MissingAppKeyException the PHP throws for
+// exactly that case.
 //
 // The length is checked here rather than by the caller, so that a key that
 // parses is a key that works. Refusing it at boot is the whole point: a short
 // key is a weaker signature everywhere at once, and it is not visible from any
 // request that would go wrong.
 func ParseKey(v string) ([]byte, error) {
+	if v == "" {
+		return nil, ErrMissingAppKey
+	}
 	key := []byte(v)
 	if after, ok := strings.CutPrefix(v, keyPrefix); ok {
 		b, err := base64.StdEncoding.DecodeString(after)

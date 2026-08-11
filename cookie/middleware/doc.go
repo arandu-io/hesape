@@ -6,6 +6,18 @@
 //	AddQueuedCookiesToResponse.php
 //	EncryptCookies.php
 //
-// Nothing is implemented here yet. docs/31-reorganizacao-hesape.md says what
-// moves in, from where, and in which phase.
+// Both are identical in the clone and in
+// reference_laravel/framework/src/Illuminate/Cookie/Middleware.
+//
+// Each is a struct with a Handle method, mirroring the PHP class with its
+// handle method. Handle takes the next handler and returns one, rather than
+// taking the request and a closure: in PHP the response comes back as a value
+// and can still be changed, while here it is written as the handler runs, so
+// both middlewares wrap the http.ResponseWriter and do their work at the last
+// moment before the header goes out.
+//
+// The order is Laravel's global order, [EncryptCookies] outside
+// [AddQueuedCookiesToResponse], so that a queued cookie is encrypted too:
+//
+//	r.Get("/", h, encrypt.Handle, queue.Handle)
 package middleware

@@ -23,7 +23,7 @@ func TestSlugKeepsAccentedRunes(t *testing.T) {
 		"":                           "",
 		"日本語":                        "",
 	} {
-		if got := str.Slug(in); got != want {
+		if got := str.Slug(in, "-"); got != want {
 			t.Errorf("Slug(%q) = %q, want %q", in, got, want)
 		}
 	}
@@ -32,12 +32,12 @@ func TestSlugKeepsAccentedRunes(t *testing.T) {
 // TestSlugWithNoSeparatorIsTheRepositoryDirectory: the font source spells a
 // family directory with the words run together, and using the hyphenated form
 // for it is a 404 on every licence fetch.
-func TestSlugWithNoSeparatorIsTheRepositoryDirectory(t *testing.T) {
-	if got := str.SlugWith("Young Serif", ""); got != "youngserif" {
-		t.Errorf(`SlugWith("Young Serif", "") = %q, want "youngserif"`, got)
+func TestSlugWithAnEmptySeparatorRunsTheWordsTogether(t *testing.T) {
+	if got := str.Slug("Young Serif", ""); got != "youngserif" {
+		t.Errorf(`Slug("Young Serif", "") = %q, want "youngserif"`, got)
 	}
-	if got := str.SlugWith("Purchase Order", "_"); got != "purchase_order" {
-		t.Errorf(`SlugWith("Purchase Order", "_") = %q, want "purchase_order"`, got)
+	if got := str.Slug("Purchase Order", "_"); got != "purchase_order" {
+		t.Errorf(`Slug("Purchase Order", "_") = %q, want "purchase_order"`, got)
 	}
 }
 

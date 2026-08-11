@@ -6,6 +6,12 @@
 //	ContextDehydrating.php
 //	ContextHydrated.php
 //
-// Nothing is implemented here yet. docs/31-reorganizacao-hesape.md says what
-// moves in, from where, and in which phase.
+// The clone is the source; it was checked against
+// reference_laravel/framework/src/Illuminate/Log/Context/Events and the two are
+// identical.
+//
+// Both events carry the repository, and both carry it as the Repository
+// interface declared here rather than as the concrete
+// log/context.Repository -- the concrete one dispatches them, and naming it
+// would close an import loop. The type doc says so on the interface itself.
 package events
