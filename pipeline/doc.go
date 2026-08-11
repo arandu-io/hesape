@@ -45,14 +45,22 @@
 //
 // # What is not here, and why
 //
-//   - via() chooses which method name is invoked on a class pipe. Go resolves
-//     methods when it compiles and a pipe here is a func, so there is no name to
-//     choose: this is the __call family, a PHP language interface Go does not
-//     have.
+//   - via() chooses, by string, which method name carry() invokes on a class
+//     pipe -- `$pipe->{$this->method}(...)`. That is the variable-method family,
+//     a PHP language interface Go does not have. What replaces it is the method
+//     value: `Through(auditor.Handle)` is via('handle')->through([$auditor]),
+//     resolved by the compiler instead of at the line that runs it, and a pipe
+//     whose method was renamed fails the build rather than the request.
 //   - withinTransaction() is `getContainer()->make('db')->connection(...)
-//     ->transaction(...)` and nothing else, so it is the container. A pipeline
-//     that runs inside a transaction opens one in a pipe, which is where the
-//     onion already puts before-and-after.
+//     ->transaction(...)` and nothing else, so it is the container. What
+//     replaces it is a pipe: a stage that opens the transaction, calls next and
+//     commits or rolls back is where the onion already puts before-and-after,
+//     and it is the only form that says which connection it used.
+//   - Pipeline::getContainer() and Hub::setContainer() are the container itself.
+//     What replaces them is the closure: a [Pipe] is a func, so the logger, the
+//     repository or the clock it needs is captured by the function that builds
+//     it -- `func auditPipe(log *slog.Logger) Pipe[Order]` -- and passed as a
+//     value rather than resolved from a name at the moment it is called.
 //   - PipelineServiceProvider (register, provides) binds the Hub into the
 //     container, which ADR 0001 and ADR 0002 rejected.
 //

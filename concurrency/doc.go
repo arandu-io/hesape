@@ -37,10 +37,15 @@
 //
 // [DriverProcess], [DriverFork] and [DriverSync] are kept as the strings a
 // ported configuration already contains, and they resolve to the same driver.
-// createProcessDriver, createForkDriver and createSyncDriver are not here:
-// three exported factories for one value is three ways to say it (RULE 9), and
-// [Manager.Extend] is the seam the PHP keeps for putting something else behind
-// a name.
+// So are the three factories that build it: [Manager.CreateProcessDriver],
+// [Manager.CreateForkDriver] and [Manager.CreateSyncDriver] are the methods
+// MultipleInstanceManager::resolve reaches by name -- "fork" reaches
+// createForkDriver -- and [Manager.Driver] dispatches through them for the same
+// reason. Three names answering with one value is what the collapse looks like
+// from the outside, and each comment says what went with the mechanism it was
+// named after: the ProcessFactory the PHP constructor resolves, and the two
+// RuntimeExceptions createForkDriver throws. [Manager.Extend] is the seam the
+// PHP keeps for putting something else behind a name.
 //
 // # A panic is an error
 //

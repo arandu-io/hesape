@@ -9,6 +9,12 @@
 //	ParsesLogConfiguration.php
 //	functions.php
 //
+// Three more are answered by subpackages, and their own comments say how:
+// Events/MessageLogged.php is log/events, Context/Repository.php and
+// Context/ContextLogProcessor.php are log/context, and
+// Context/Events/ContextDehydrating.php and Context/Events/ContextHydrated.php
+// are log/context/events.
+//
 // The clone is the source. LogManager.php was checked against
 // reference_laravel/framework/src/Illuminate/Log/LogManager.php, which is
 // ahead of it in three places that matter: the `monthly` driver and the
@@ -112,4 +118,27 @@
 //
 // The error page itself is not here: it renders a failure rather than recording
 // one, and it lives in the exception package.
+//
+// # What is not here, and why
+//
+// Three public methods of the component have no counterpart, and all three are
+// the container:
+//
+//   - LogServiceProvider (register) binds 'log' as a singleton over
+//     `new LogManager($app)`, which ADR 0001 and ADR 0002 rejected. What
+//     replaces it is [NewLogManager], handed the two things $app was reached
+//     for: the configuration and the event dispatcher.
+//   - ContextServiceProvider (register, boot) binds the context repository
+//     scoped and hangs the queue's dehydrate and hydrate off it. log/context
+//     says what a queue integration has to call in its place, and why the
+//     carrier is the context.Context rather than a container singleton.
+//   - LogManager::setApplication sets the $app field and nothing else, so it is
+//     the container with one line. A LogManager is built with what it needs and
+//     does not swap it afterwards; [LogManager.SetDefaultDriver] and
+//     [LogManager.Extend] are the two things a caller actually reached for it
+//     to change.
+//
+// The eleven driver factories, the tap chain and the Monolog handler plumbing
+// of LogManager are protected in PHP and are not part of the surface: what this
+// carries of them is above, under No Monolog.
 package log

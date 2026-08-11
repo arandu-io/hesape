@@ -278,6 +278,100 @@ func TestTheThreeDriverNamesReachTheSameDriver(t *testing.T) {
 	}
 }
 
+func TestTheThreeFactoriesAnswerWithTheSameDriver(t *testing.T) {
+	t.Parallel()
+
+	m := concurrency.NewManager[int](nil)
+
+	process := m.CreateProcessDriver()
+	if process == nil {
+		t.Fatal("CreateProcessDriver answered with nothing")
+	}
+	if fork := m.CreateForkDriver(); fork != process {
+		t.Fatal("CreateForkDriver is not the driver CreateProcessDriver answered with")
+	}
+	if sync := m.CreateSyncDriver(); sync != process {
+		t.Fatal("CreateSyncDriver is not the driver CreateProcessDriver answered with")
+	}
+
+	// resolve() reaches the factory whose name the driver key spells, so what
+	// Driver answers with has to be what the factory answers with.
+	resolved, err := m.Driver(concurrency.DriverFork)
+	if err != nil {
+		t.Fatalf("Driver(fork): %v", err)
+	}
+	if resolved != process {
+		t.Fatal("Driver(fork) did not answer with what CreateForkDriver builds")
+	}
+}
+
+func TestAFactoryDriverRunsTasksInArgumentOrder(t *testing.T) {
+	t.Parallel()
+
+	// The last task finishes first. PHP's sync driver holds the order by
+	// running the tasks in a row; here they run at the same time and the order
+	// is held by where the result is written.
+	done := make(chan struct{})
+	got, err := concurrency.NewManager[string](nil).CreateSyncDriver().Run(context.Background(),
+		func(ctx context.Context) (string, error) { <-done; return "first", nil },
+		func(ctx context.Context) (string, error) { <-done; return "second", nil },
+		func(ctx context.Context) (string, error) { close(done); return "third", nil },
+	)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(got) != 3 || got[0] != "first" || got[1] != "second" || got[2] != "third" {
+		t.Fatalf("got %v, want [first second third]", got)
+	}
+}
+
+func TestManagerRunReturnsResultsInArgumentOrder(t *testing.T) {
+	t.Parallel()
+
+	done := make(chan struct{})
+	got, err := concurrency.NewManager[int](nil).Run(context.Background(),
+		func(ctx context.Context) (int, error) { <-done; return 1, nil },
+		func(ctx context.Context) (int, error) { <-done; return 2, nil },
+		func(ctx context.Context) (int, error) { close(done); return 3, nil },
+	)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(got) != 3 || got[0] != 1 || got[1] != 2 || got[2] != 3 {
+		t.Fatalf("got %v, want [1 2 3]", got)
+	}
+}
+
+func TestManagerRunTurnsAPanicIntoAnErrorInsteadOfEndingTheProcess(t *testing.T) {
+	t.Parallel()
+
+	m := concurrency.NewManager[int](nil)
+
+	_, err := m.Run(context.Background(),
+		func(ctx context.Context) (int, error) { return 1, nil },
+		func(ctx context.Context) (int, error) { panic("held wrong") },
+	)
+
+	var panicErr *concurrency.PanicError
+	if !errors.As(err, &panicErr) {
+		t.Fatalf("got %v (%T), want a *concurrency.PanicError", err, err)
+	}
+	if panicErr.Value != "held wrong" {
+		t.Fatalf("value is %v, want the recovered value", panicErr.Value)
+	}
+
+	// Reaching this line at all is half the assertion: an unguarded panic in a
+	// goroutine ends the test binary rather than failing the test. The other
+	// half is that the manager is still usable afterwards.
+	got, err := m.Run(context.Background(), func(ctx context.Context) (int, error) { return 7, nil })
+	if err != nil {
+		t.Fatalf("Run after a panic: %v", err)
+	}
+	if len(got) != 1 || got[0] != 7 {
+		t.Fatalf("got %v, want [7]", got)
+	}
+}
+
 func TestDriverWithoutANameIsTheDefaultInstance(t *testing.T) {
 	t.Parallel()
 

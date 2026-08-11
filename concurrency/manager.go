@@ -248,8 +248,12 @@ func (m *Manager[T]) Driver(name ...string) (Driver[T], error) {
 			// that registered the driver.
 			return nil, fmt.Errorf("%w: [%s] was extended with a creator that answered nothing", ErrDriverNotSupported, driver)
 		}
-	case driver == DriverProcess, driver == DriverFork, driver == DriverSync:
-		d = goroutineDriver[T]{}
+	case driver == DriverProcess:
+		d = m.CreateProcessDriver()
+	case driver == DriverFork:
+		d = m.CreateForkDriver()
+	case driver == DriverSync:
+		d = m.CreateSyncDriver()
 	default:
 		return nil, fmt.Errorf("%w: [%s]", ErrDriverNotSupported, driver)
 	}
@@ -259,6 +263,55 @@ func (m *Manager[T]) Driver(name ...string) (Driver[T], error) {
 	}
 	m.instances[instance] = d
 	return d, nil
+}
+
+// CreateProcessDriver answers
+// ConcurrencyManager::createProcessDriver: the instance [Manager.Driver] builds
+// for a configuration whose driver key is [DriverProcess].
+//
+// PHP shells out to `artisan invoke-serialized-closure` once per task, with the
+// closure serialized into an environment variable and the result parsed back out
+// of the child's JSON on stdout. The goroutine is what that pipe was standing in
+// for, so this answers with the same driver [Manager.CreateForkDriver] and
+// [Manager.CreateSyncDriver] do. The package comment says why the three are one.
+//
+// It answers no error where the PHP constructor takes a ProcessFactory out of
+// the container, which ADR 0002 rejected: there is no process to start and
+// nothing to resolve.
+func (m *Manager[T]) CreateProcessDriver() Driver[T] {
+	return goroutineDriver[T]{}
+}
+
+// CreateForkDriver answers ConcurrencyManager::createForkDriver: the instance
+// [Manager.Driver] builds for a configuration whose driver key is [DriverFork].
+//
+// It is the same driver [Manager.CreateProcessDriver] answers with. PHP's is the
+// fast one -- pcntl_fork through spatie/fork rather than a fresh PHP process per
+// task -- and it is the one that cannot always be had: createForkDriver throws a
+// RuntimeException when the code is not running in the console, because a forked
+// child inside a web request would inherit the request's file descriptors, and
+// another when spatie/fork is not installed.
+//
+// Neither throw is mirrored, so this answers no error where the PHP throws two.
+// Both guard a limit that is gone with the thing it guarded: a goroutine forks
+// nothing, needs no extension, and is available in a request handler exactly as
+// it is in a command.
+func (m *Manager[T]) CreateForkDriver() Driver[T] {
+	return goroutineDriver[T]{}
+}
+
+// CreateSyncDriver answers ConcurrencyManager::createSyncDriver: the instance
+// [Manager.Driver] builds for a configuration whose driver key is [DriverSync].
+//
+// It is the same driver the other two answer with, and that is the one collapse
+// worth reading twice: PHP's sync driver maps over the tasks in the current
+// process, one after another, which is how a test suite gets a fixed order out
+// of an API that otherwise has none. [Run] answers in argument order whatever
+// the tasks did, so the order this driver existed to guarantee is already
+// guaranteed -- and running the tasks at the same time keeps the race detector
+// looking at the code that will run in production.
+func (m *Manager[T]) CreateSyncDriver() Driver[T] {
+	return goroutineDriver[T]{}
 }
 
 // Extend answers MultipleInstanceManager::extend: it registers a creator for a

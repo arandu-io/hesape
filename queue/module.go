@@ -59,45 +59,17 @@ func (*Module) Name() string { return "queue" }
 // Routes registers nothing.
 func (*Module) Routes(*routing.Router) {}
 
-// Migrations returns the jobs table, when the queue is the one that needs it.
+// Migrations returns the schema the wired driver needs.
 //
-// The table belongs to [DatabaseQueue]. An application wired to another driver
-// declares no schema here rather than carrying an empty table it will never
-// read.
+// The jobs table belongs to [DatabaseQueue] and is declared there. An
+// application wired to a driver that stores jobs elsewhere gets nothing here,
+// rather than an empty table it will never read -- which is why this asks the
+// driver instead of answering for it.
 func (m *Module) Migrations() []foundation.Migration {
-	if _, isDatabase := m.queue.(*DatabaseQueue); !isDatabase {
-		return nil
+	if driver, owns := m.queue.(foundation.Migratable); owns {
+		return driver.Migrations()
 	}
-	return []foundation.Migration{{
-		ID: "2026_07_31_000010_create_jobs_table",
-		// Portable types only: TEXT, INTEGER and TIMESTAMP mean the same thing
-		// on SQLite, Postgres and MySQL.
-		Up: `
-CREATE TABLE jobs (
-    id             VARCHAR(255) PRIMARY KEY,
-    -- queue is indexed, so VARCHAR rather than TEXT: see database.KeyText.
-    queue          VARCHAR(255) NOT NULL,
-    name           TEXT NOT NULL,
-    tenant_id      VARCHAR(255) NOT NULL,
-    payload        TEXT NOT NULL,
-    authorized_by  TEXT NOT NULL,
-    action         TEXT NOT NULL,
-    run_at         TIMESTAMP NOT NULL,
-    reserved_until TIMESTAMP,
-    attempts       INTEGER NOT NULL DEFAULT 0,
-    failed_at      TIMESTAMP,
-    last_error     TEXT
-);
-
--- The pop query filters on queue, failed_at and run_at and orders by run_at.
--- This index is that query.
-CREATE INDEX idx_jobs_ready ON jobs (queue, failed_at, run_at);
-
--- The dead letter queue is read by the diagnosis, newest failure first.
-CREATE INDEX idx_jobs_parked ON jobs (failed_at);
-`,
-		Down: `DROP TABLE jobs;`,
-	}}
+	return nil
 }
 
 // Health fails when a queue stops draining.

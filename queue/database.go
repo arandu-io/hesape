@@ -37,8 +37,46 @@ var (
 	_ jobs.Driver = (*DatabaseQueue)(nil)
 )
 
-// connectionName is what a popped job reports as its connection.
+// databaseConnection is what a popped job reports as its connection.
 const databaseConnection = "database"
+
+// Migrations returns the jobs table.
+//
+// It answers Laravel's `queue:table`, which generates the migration for this
+// driver and only this one. [Module] collects it, so an application wired to
+// another driver declares no schema for a table it will never read.
+func (q *DatabaseQueue) Migrations() []database.Migration {
+	return []database.Migration{{
+		ID: "2026_07_31_000010_create_jobs_table",
+		// Portable types only: TEXT, INTEGER and TIMESTAMP mean the same thing
+		// on SQLite, Postgres and MySQL.
+		Up: `
+CREATE TABLE jobs (
+    id             VARCHAR(255) PRIMARY KEY,
+    -- queue is indexed, so VARCHAR rather than TEXT: see database.KeyText.
+    queue          VARCHAR(255) NOT NULL,
+    name           TEXT NOT NULL,
+    tenant_id      VARCHAR(255) NOT NULL,
+    payload        TEXT NOT NULL,
+    authorized_by  TEXT NOT NULL,
+    action         TEXT NOT NULL,
+    run_at         TIMESTAMP NOT NULL,
+    reserved_until TIMESTAMP,
+    attempts       INTEGER NOT NULL DEFAULT 0,
+    failed_at      TIMESTAMP,
+    last_error     TEXT
+);
+
+-- The pop query filters on queue, failed_at and run_at and orders by run_at.
+-- This index is that query.
+CREATE INDEX idx_jobs_ready ON jobs (queue, failed_at, run_at);
+
+-- The dead letter queue is read by the diagnosis, newest failure first.
+CREATE INDEX idx_jobs_parked ON jobs (failed_at);
+`,
+		Down: `DROP TABLE jobs;`,
+	}}
+}
 
 // Push adds a job.
 //
@@ -277,13 +315,18 @@ func (q *DatabaseQueue) CreationTimeOfOldestPendingJob(ctx context.Context, queu
 	return oldest, nil
 }
 
-// Clear removes every job on a queue, failed ones included, and returns how
-// many went.
+// Clear removes every job waiting or in flight on a queue, and returns how many
+// went.
+//
+// Parked jobs are not cleared: a job that gave up is no longer on a queue, it
+// is in the dead letter list, and [DatabaseQueue.Failed] and
+// [DatabaseQueue.Retry] are how it is dealt with. The RESP driver draws the
+// line in the same place.
 func (q *DatabaseQueue) Clear(ctx context.Context, queue string) (int, error) {
 	if queue == "" {
 		queue = jobs.DefaultQueue
 	}
-	res, err := q.db.ExecContext(ctx, `DELETE FROM jobs WHERE queue = ?`, queue)
+	res, err := q.db.ExecContext(ctx, `DELETE FROM jobs WHERE queue = ? AND failed_at IS NULL`, queue)
 	if err != nil {
 		return 0, fmt.Errorf("queue: clearing %s: %w", queue, err)
 	}
