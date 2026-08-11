@@ -48,6 +48,10 @@ type envFacade struct{}
 // Env answers to Illuminate\Support\Env. It is a value rather than a type
 // because every method of the PHP class is static: support.Env.Get(key, nil)
 // reads as Env::get($key).
+//
+// It is also the env() helper of helpers.php, which is Env::get and nothing
+// else; PHP keeps class and function names apart and Go does not, so the one
+// name is this.
 var Env envFacade
 
 var (

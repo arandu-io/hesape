@@ -1,0 +1,134 @@
+name: database-connectors
+
+# A workflow of its own, and not steps added to ci.yml, for one reason: the
+# connectors are separate Go modules, so `go build ./...` at the root never
+# reaches them -- and the suite below needs a PostgreSQL and a MySQL running
+# beside the job, which is a service block ci.yml has no use for.
+#
+# ci.yml keeps what it owns: the root module, and the check that its go.mod
+# carries nothing but golang.org/x/crypto. That check is also what proves no
+# driver leaked into the core, so it is not repeated here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    # One job per module. A single job with three `cd`s hides which connector
+    # broke, and failing independently is the whole point of the split.
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [sqlite, pgx, mysql]
+
+    defaults:
+      run:
+        working-directory: database/connectors/${{ matrix.module }}
+
+    # A real PostgreSQL and a real MySQL, because the claim this collection
+    # makes is that one schema serves all three -- and for a long time it did
+    # not. Every test ran against SQLite, which accepts `id TEXT PRIMARY KEY`.
+    # MySQL refuses it, so `aru migrate` failed on the first statement of the
+    # first migration, in every project, and nothing noticed. See ADR 0018.
+    #
+    # The services run for every module in the matrix rather than only for the
+    # two that use them: a conditional here would be one more thing to get
+    # wrong, and an unused container costs seconds.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: arandu_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      mysql:
+        image: mysql:9
+        env:
+          MYSQL_ROOT_PASSWORD: mysql
+          MYSQL_DATABASE: arandu_test
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -pmysql"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      ARANDU_TEST_POSTGRES_DSN: postgres://postgres:postgres@127.0.0.1:5432/arandu_test?sslmode=disable
+      ARANDU_TEST_MYSQL_DSN: root:mysql@tcp(127.0.0.1:3306)/arandu_test?parseTime=true&loc=UTC
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -l $(find . -name '*.go' -not -name '*.kyse.go'))
+          test -z "$out" || { echo "$out"; exit 1; }
+
+      - name: vet
+        run: go vet ./...
+
+      - name: test
+        run: go test -race ./...
+
+      # The conformance suite skips when no DSN is set, which is what keeps
+      # `go test ./...` working on a laptop with nothing installed. Here the
+      # DSNs are set, so a skip means the service never came up -- and a skip
+      # that looks like a pass is exactly how the MySQL defect survived.
+      - name: the conformance suite actually ran
+        run: |
+          out=$(go test ./ -run TestConformance -v)
+          echo "$out"
+          if ! echo "$out" | grep -q -- "--- PASS: TestConformance/"; then
+            echo
+            echo "the conformance suite did not run against a server."
+            echo "a skip here is a false green: see ADR 0018."
+            exit 1
+          fi
+
+  # The reason the connectors are separate modules at all: a project that only
+  # speaks SQLite must not carry Postgres. If two drivers meet in one module,
+  # the split has stopped paying for itself, and nobody notices until
+  # govulncheck reports a pgx advisory in an SQLite-only project.
+  isolation:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - module: sqlite
+            forbidden: jackc/pgx|go-sql-driver
+          - module: pgx
+            forbidden: modernc.org/sqlite|go-sql-driver
+          - module: mysql
+            forbidden: modernc.org/sqlite|jackc/pgx
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: the ${{ matrix.module }} connector carries no other driver
+        working-directory: database/connectors/${{ matrix.module }}
+        run: |
+          deps=$(go list -deps ./... | grep -E '${{ matrix.forbidden }}' || true)
+          if [ -n "$deps" ]; then
+            echo "a ${{ matrix.module }}-only project would carry:"
+            echo "$deps"
+            exit 1
+          fi

@@ -1,49 +1,71 @@
 // Package process runs external programs.
 //
-// It is Arandu's Process -- Illuminate\Process, whose Factory, PendingProcess,
-// InvokedProcess and ProcessResult are Runner, Command, Invoked and Result
-// here. What it adds to os/exec is the handful of things every caller of
-// os/exec writes again and each one writes differently:
+// It answers Illuminate\Process, name for name: Factory, PendingProcess,
+// InvokedProcess, ProcessResult, Pool, Pipe, and the five Fake* types. What a
+// Laravel developer types here is what they type there.
 //
-//   - an error that repeats what the program said. os/exec reports a failed
+//	factory := process.NewFactory()
+//	result, err := factory.Run(ctx, []string{"go", "build", "./..."}, nil)
+//	if result.Failed() {
+//		log.Print(result.ErrorOutput())
+//	}
+//
+// # A failed exit is a result, not an error
+//
+// This is the one thing to know before writing anything else with it, and it is
+// Illuminate's rule rather than ours. A program that exits non-zero comes back
+// with a nil error and Failed reporting it:
+//
+//	result, err := factory.Run(ctx, []string{"git", "diff", "--quiet"}, nil)
+//	// err is nil. A difference is exit code 1, and it is not a failure.
+//	if result.ExitCode() == 1 {
+//		// there are changes
+//	}
+//
+// The error is for the program that never ran, ran out of time, or was stray.
+// Throw is what turns a failed exit into one, when the caller wants that:
+//
+//	result, err := factory.Run(ctx, []string{"go", "test", "./..."}, nil)
+//	if _, err = result.Throw(nil); err != nil {
+//		return err // a *ProcessFailedException, carrying both streams
+//	}
+//
+// # What os/exec does not do
+//
+//   - An error that repeats what the program said. os/exec reports a failed
 //     command as "exit status 1" and throws the explanation away, so a build
 //     that stopped because a module could not be fetched answers with the exit
 //     status of a program the person did not know was running.
-//   - a deadline that also covers the program that never finishes and never
+//   - A deadline that also covers the program that never finishes and never
 //     prints. A context deadline bounds the total; IdleTimeout bounds the
 //     silence, which is the shape a hung download or a stalled compiler has.
-//   - a bound on how much output is held in memory, so a program that decides
-//     to print forever costs a known number of bytes and not the process.
-//   - one seam. Runner is the interface; System is the only implementation
-//     that touches the operating system, and a test substitutes for it by
-//     implementing two methods.
+//   - A fake. Factory.Fake answers a command pattern with a canned result, so a
+//     test that shells out stops shelling out, and PreventStrayProcesses turns
+//     "somebody forgot to fake git" from a test that quietly runs git on CI
+//     into a test that fails naming the command.
 //
-// # One way to ask whether it failed
+// # No shell, and no string form to add
 //
-// Run returns (Result, error). The Result is always filled -- output, exit code
-// and duration are there whether the program succeeded or not -- and the error
-// is the only place failure is reported: there is no Successful method beside
-// it (RULE 9). A caller that expects a non-zero exit and wants to carry on
-// reads it back off the error:
+// A command is a program and its arguments, and nothing here hands a string to
+// sh. PHP accepts the string form because Symfony escapes it; accepting it in
+// Go would be exec.Command("sh", "-c", line) with an interpolated line, which
+// is command injection with a familiar signature.
 //
-//	res, err := process.System{}.Run(ctx, process.Command{Name: "git", Args: []string{"diff", "--quiet"}})
-//	var exit *process.ExitError
-//	if errors.As(err, &exit) && exit.ExitCode == 1 {
-//		// a difference, not a failure
-//	}
+// This is the one place the surface is deliberately narrower than Illuminate's,
+// and it is narrower by removing a footgun rather than by leaving work undone.
 //
-// # What is not here
+// # What is not here, and why
 //
-// No shell. A Command names a program and its arguments, and nothing in this
-// package hands a string to sh -- the quoting rules of a shell are how an
-// argument becomes a command.
+// Pool, Pipe, InvokedProcessPool and ProcessPoolResults are the concurrency
+// surface. Running several programs at once is what a goroutine already is, and
+// feeding one program's output into the next is its Stdin fed from the other's
+// Output. They answer to nothing here, and that is a gap rather than a
+// decision: a caller who wants Illuminate's concurrently() writes the errgroup
+// themselves today.
 //
-// No pool and no pipe, so Pool, Pipe, InvokedProcessPool and ProcessPoolResults
-// answer to nothing: a process is started with Start and waited on where the
-// caller wants it, running several at once is what a goroutine already is, and
-// what Pipe composes in PHP is one program's Stdin fed from another's Result.
-//
-// No fake either, and the five Fake* classes have no counterpart: Runner is an
-// interface, so a test writes the two methods it needs instead of scripting a
-// sequence of pretend processes.
+// The output held in memory is not bounded. Illuminate does not bound it
+// either, and a bound that Laravel has no counterpart for was one this package
+// used to carry -- it was removed along with the Truncated field, because a
+// surface that is ours rather than Illuminate's is the thing ADR 0044 exists to
+// keep out.
 package process

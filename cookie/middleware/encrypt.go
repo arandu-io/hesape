@@ -175,7 +175,7 @@ func (m *EncryptCookies) decrypt(r *http.Request) *http.Request {
 		if err != nil {
 			continue
 		}
-		value, ok := cookie.ValidateCookieValuePrefix(c.Name, plain, m.encrypter.GetAllKeys())
+		value, ok := cookie.CookieValuePrefix.Validate(c.Name, plain, m.encrypter.GetAllKeys())
 		if !ok || !validCookieValue(value) {
 			// Not valid means the value was written for another cookie name,
 			// or under a key this application no longer holds. Not a valid
@@ -225,7 +225,7 @@ func (m *EncryptCookies) decryptCookie(name, value string) (string, error) {
 // encryptCookie is the encrypt() half of the PHP loop for one cookie: the value
 // prefix for this name, then the whole thing encrypted.
 func (m *EncryptCookies) encryptCookie(name, value string) (string, error) {
-	prefixed := cookie.CreateCookieValuePrefix(name, m.encrypter.GetKey()) + value
+	prefixed := cookie.CookieValuePrefix.Create(name, m.encrypter.GetKey()) + value
 	if Serialized(name) {
 		return encryption.Encrypt(m.encrypter, prefixed)
 	}
@@ -293,9 +293,18 @@ func (w *encryptWriter) Write(b []byte) (int, error) {
 	return w.ResponseWriter.Write(b)
 }
 
-// Unwrap gives http.ResponseController the writer underneath, so flushing and
-// hijacking still reach it.
+// Unwrap gives http.ResponseController the writer underneath, so hijacking and
+// the deadline calls still reach it.
 func (w *encryptWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// FlushError encrypts the cookies on the response and then flushes the writer
+// underneath, for the reason [queueWriter.FlushError] does: a flush commits the
+// header, and without this method http.ResponseController would find the real
+// writer through Unwrap and commit it with the values still in the clear.
+func (w *encryptWriter) FlushError() error {
+	w.encryptCookies()
+	return http.NewResponseController(w.ResponseWriter).Flush()
+}
 
 // validCookieValue reports whether a value can travel back on a Cookie header.
 // It is net/http's own rule for a cookie octet, which is what the parser on the

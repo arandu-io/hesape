@@ -337,8 +337,13 @@ func TestCollection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Collection(app.providers): %v", err)
 	}
-	if !reflect.DeepEqual(got, []any{"first", "second"}) {
+	// It is Illuminate\Support\Collection, so the result carries that type's
+	// methods rather than being a bare slice.
+	if !reflect.DeepEqual([]any(got), []any{"first", "second"}) {
 		t.Fatalf("Collection(app.providers): %v", got)
+	}
+	if got.Count() != 2 {
+		t.Fatalf("Collection(app.providers).Count() = %d, want 2", got.Count())
 	}
 
 	if _, err := r.Collection("app.missing"); err == nil {

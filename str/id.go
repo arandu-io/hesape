@@ -7,17 +7,24 @@ import (
 	"time"
 )
 
-// UUID is a random version 4 UUID in the canonical 8-4-4-4-12 hyphenated form.
+// UUID answers for Str::uuid. It is a random version 4 UUID in the canonical
+// 8-4-4-4-12 hyphenated form.
 //
 // Random, which means unordered: a table with one of these as its primary key
 // writes to a random leaf of the index on every insert. UUID7 is the one to
 // reach for when the value is a key. This one is for a correlation id, a
 // one-time token or anything a person may paste.
 //
+// CreateUUIDsUsing and FreezeUUIDs stand in front of it, so a test can pin what
+// it returns.
+//
 // There is no error to return. Since Go 1.24 crypto/rand.Read cannot fail; when
 // the system source is unavailable the program crashes rather than handing back
 // a value that is not random.
 func UUID() string {
+	if s, ok := fromUUIDFactory(); ok {
+		return s
+	}
 	var b [16]byte
 	rand.Read(b[:])
 	b[6] = b[6]&0x0f | 0x40 // version 4
@@ -25,13 +32,20 @@ func UUID() string {
 	return formatUUID(b)
 }
 
-// UUID7 is a version 7 UUID: 48 bits of Unix milliseconds followed by 74 bits
-// of randomness, in the same hyphenated form.
+// UUID7 answers for Str::uuid7. It is a version 7 UUID: 48 bits of Unix
+// milliseconds followed by 74 bits of randomness, in the same hyphenated form.
 //
 // Sortable by generation time, which is what makes it usable as a primary key
 // and as a cursor. It also tells anyone holding it when the row was created, so
 // it is not the identifier for something whose age is private.
+//
+// Illuminate takes an optional time to build it at; this reads the clock, and a
+// caller that has to pin the value uses CreateUUIDsUsing, which stands in front
+// of this the same way.
 func UUID7() string {
+	if s, ok := fromUUIDFactory(); ok {
+		return s
+	}
 	var b [16]byte
 	rand.Read(b[:])
 	ms := time.Now().UnixMilli()
@@ -43,13 +57,58 @@ func UUID7() string {
 	return formatUUID(b)
 }
 
-// ULID is a 26-character Crockford base32 identifier: 48 bits of Unix
-// milliseconds followed by 80 bits of randomness.
+// OrderedUUID answers for Str::orderedUuid. It is a time-ordered UUID: 48 bits
+// of Unix milliseconds in front, the rest random, and the version nibble still
+// reading 4.
+//
+// It is what Illuminate builds with Ramsey's CombGenerator behind a
+// TimestampFirstCombCodec, and it exists for the same reason UUID7 does -- an
+// index that is written in order -- for a schema whose column is documented as
+// holding a version 4 UUID.
+func OrderedUUID() string {
+	if s, ok := fromUUIDFactory(); ok {
+		return s
+	}
+	var b [16]byte
+	rand.Read(b[:])
+	ms := time.Now().UnixMilli()
+	for i := range 6 {
+		b[i] = byte(ms >> (40 - 8*i))
+	}
+	b[6] = b[6]&0x0f | 0x40 // version 4
+	b[8] = b[8]&0x3f | 0x80 // RFC 4122 variant
+	return formatUUID(b)
+}
+
+// fromUUIDFactory reads the factory CreateUUIDsUsing set, if there is one.
+func fromUUIDFactory() (string, bool) {
+	factoryMu.RLock()
+	factory := uuidFactory
+	factoryMu.RUnlock()
+	if factory == nil {
+		return "", false
+	}
+	return factory(), true
+}
+
+// ULID answers for Str::ulid. It is a 26-character Crockford base32 identifier:
+// 48 bits of Unix milliseconds followed by 80 bits of randomness.
 //
 // Sortable like UUID7 and shorter, with an alphabet that has no I, L, O or U in
 // it, so it survives being read aloud and cannot spell a word. It is what to
 // use where the value shows up in a URL.
+//
+// CreateULIDsUsing and FreezeULIDs stand in front of it. Illuminate takes an
+// optional time to build it at; this reads the clock, and a caller that has to
+// pin the value uses those.
 func ULID() string {
+	factoryMu.RLock()
+	factory := ulidFactory
+	factoryMu.RUnlock()
+	if factory != nil {
+		return factory()
+	}
+
 	var rnd [10]byte
 	rand.Read(rnd[:])
 
@@ -74,12 +133,22 @@ func ULID() string {
 	return string(out)
 }
 
-// Random is n random alphanumeric characters, from the system source.
+// Random answers for Str::random. It is n random alphanumeric characters, from
+// the system source.
 //
 // Use it for anything that has to be unguessable -- a token, a nonce, a
 // password a machine invented. It is not a hash and not an identifier; UUID7 or
 // ULID is what names a row.
+//
+// CreateRandomStringsUsing stands in front of it, so a test can pin what it
+// returns.
 func Random(n int) string {
+	factoryMu.RLock()
+	factory := randomFactory
+	factoryMu.RUnlock()
+	if factory != nil {
+		return factory(n)
+	}
 	if n <= 0 {
 		return ""
 	}

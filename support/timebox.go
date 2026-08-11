@@ -27,7 +27,7 @@ func (t *Timebox) Call(callback func(*Timebox) (any, error), microseconds int) (
 	remainder := time.Duration(microseconds)*time.Microsecond - time.Since(start)
 
 	if !t.EarlyReturn && remainder > 0 {
-		time.Sleep(remainder)
+		t.usleep(remainder)
 	}
 
 	if err != nil {
@@ -46,4 +46,11 @@ func (t *Timebox) ReturnEarly() *Timebox {
 func (t *Timebox) DontReturnEarly() *Timebox {
 	t.EarlyReturn = false
 	return t
+}
+
+// usleep answers to the protected Timebox::usleep, which goes through
+// Sleep::usleep and not through the operating system directly -- so a test that
+// called [Fake] captures the wait instead of serving it.
+func (t *Timebox) usleep(remainder time.Duration) {
+	_ = Usleep(int(remainder / time.Microsecond)).Goodnight()
 }

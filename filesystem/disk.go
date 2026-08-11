@@ -2,6 +2,8 @@ package filesystem
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -27,7 +29,7 @@ var ErrNoDisk = errors.New("filesystem: no such disk")
 
 // Info is what a file is, without its content.
 //
-// Stat answers with it, Get carries it inside a [File], and [Send] writes it
+// Stat answers with it, Get carries it inside a [File], and [Serve] writes it
 // into the response headers. One type, because a size that means one thing in a
 // listing and another in a download is how a Content-Length ends up wrong.
 type Info struct {
@@ -54,8 +56,8 @@ type File struct {
 // because it is never told which tenant it is serving.
 //
 // Six methods, because they are the six an object store and a directory both
-// have. Copy, Move and DeletePrefix are composed out of them by [Disk], so a
-// new driver is six methods and not nine.
+// have. Copy, Move, DeleteDirectory and every listing narrower than this one are
+// composed out of them by [Disk], so a new driver is six methods and not twenty.
 type Adapter interface {
 	// Put writes body at path, creating whatever it needs to.
 	Put(ctx context.Context, path string, body io.Reader, contentType string) error
@@ -78,7 +80,7 @@ type Adapter interface {
 // customer's files by building a string". The Grant decides the tenant, the
 // tenant decides the prefix, and the prefix is not reachable from the key.
 //
-// Reads are not exempt. List, Get, Stat and Exists take a Grant for the same
+// Reads are not exempt. AllFiles, Get, Stat and Exists take a Grant for the same
 // reason Put does -- RULE 17 -- and a listing is the one call where forgetting
 // it hands over the names of every file in the system.
 type Disk struct {
@@ -168,6 +170,74 @@ func (d *Disk) Exists(ctx context.Context, g auth.Grant, key string) (bool, erro
 	return ok, nil
 }
 
+// Missing is Exists inverted, and it exists because the two readings are not
+// equally easy to get right: `if !ok` after a call that also returns an error is
+// where a failed lookup silently becomes "the file is not there".
+func (d *Disk) Missing(ctx context.Context, g auth.Grant, key string) (bool, error) {
+	ok, err := d.Exists(ctx, g, key)
+	if err != nil {
+		return false, err
+	}
+	return !ok, nil
+}
+
+// Size returns how many bytes the file holds.
+func (d *Disk) Size(ctx context.Context, g auth.Grant, key string) (int64, error) {
+	i, err := d.Stat(ctx, g, key)
+	if err != nil {
+		return 0, err
+	}
+	return i.Size, nil
+}
+
+// LastModified returns when the file was last written.
+func (d *Disk) LastModified(ctx context.Context, g auth.Grant, key string) (time.Time, error) {
+	i, err := d.Stat(ctx, g, key)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return i.ModifiedAt, nil
+}
+
+// MimeType returns the stored content type.
+//
+// It is the type [Put] inferred from the key, never the one an upload
+// announced, so it is the same string [Serve] will send -- which is what makes
+// it safe to show to a person or to switch on.
+func (d *Disk) MimeType(ctx context.Context, g auth.Grant, key string) (string, error) {
+	i, err := d.Stat(ctx, g, key)
+	if err != nil {
+		return "", err
+	}
+	if i.ContentType == "" {
+		return TypeOf(key), nil
+	}
+	return i.ContentType, nil
+}
+
+// Checksum returns the SHA-256 of the file's contents, in lowercase hex.
+//
+// Illuminate's default is MD5, and this is not: the reason to hash a stored file
+// is to answer "is this the same file", and answering it with a hash that can be
+// made to collide on purpose is answering a different question. There is no
+// algorithm option for the same reason there is no second anything here (RULE
+// 9).
+//
+// It reads the whole file, because a checksum of part of one is not a checksum.
+func (d *Disk) Checksum(ctx context.Context, g auth.Grant, key string) (string, error) {
+	f, err := d.Get(ctx, g, key)
+	if err != nil {
+		return "", err
+	}
+	defer f.Body.Close()
+
+	sum := sha256.New()
+	if _, err := io.Copy(sum, f.Body); err != nil {
+		return "", d.wrap("checksum", key, err)
+	}
+	return hex.EncodeToString(sum.Sum(nil)), nil
+}
+
 // Delete removes a file. Removing what is not there is not an error.
 func (d *Disk) Delete(ctx context.Context, g auth.Grant, key string) error {
 	full, err := Key(g, key)
@@ -180,19 +250,25 @@ func (d *Disk) Delete(ctx context.Context, g auth.Grant, key string) error {
 	return nil
 }
 
-// List returns the keys under a prefix, without the tenant part, sorted.
+// AllFiles returns every key under a directory, recursively, without the tenant
+// part, sorted.
 //
-// The empty prefix means everything this tenant has. Sorted because a listing
+// The empty directory means everything this tenant has. Sorted because a listing
 // that changes order between two identical calls turns a paginated screen into
 // a bug report nobody can reproduce.
-func (d *Disk) List(ctx context.Context, g auth.Grant, prefix string) ([]string, error) {
-	full, err := prefixPath(g, prefix)
+//
+// The argument is matched as a prefix, so "invoices/" is the directory and
+// "invoices" also catches "invoices-2025.pdf". That is a superset of Illuminate's
+// argument rather than a different one, and only the caller knows which was
+// meant -- [Files] and [Directories] are the ones that read it as a directory.
+func (d *Disk) AllFiles(ctx context.Context, g auth.Grant, directory string) ([]string, error) {
+	full, err := prefixPath(g, directory)
 	if err != nil {
 		return nil, err
 	}
 	paths, err := d.adapter.List(ctx, full)
 	if err != nil {
-		return nil, d.wrap("list", prefix, err)
+		return nil, d.wrap("list", directory, err)
 	}
 	tenantPrefix := auth.Tenant(g) + "/"
 	keys := make([]string, 0, len(paths))
@@ -207,6 +283,79 @@ func (d *Disk) List(ctx context.Context, g auth.Grant, prefix string) ([]string,
 	}
 	sort.Strings(keys)
 	return keys, nil
+}
+
+// Files returns the keys directly inside a directory, without descending.
+//
+// The empty directory is the tenant's root. What "directly inside" means is
+// decided here and not by the driver: an object store has no directories at all,
+// and a listing that differed between local disk and S3 would be a module that
+// works until it is deployed.
+func (d *Disk) Files(ctx context.Context, g auth.Grant, directory string) ([]string, error) {
+	dir := asDirectory(directory)
+	all, err := d.AllFiles(ctx, g, dir)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(all))
+	for _, key := range all {
+		if !strings.Contains(strings.TrimPrefix(key, dir), "/") {
+			out = append(out, key)
+		}
+	}
+	return out, nil
+}
+
+// Directories returns the directories directly inside a directory.
+//
+// A directory exists because a key underneath it does; there is nothing else for
+// one to be. Every name comes back with a trailing slash, so what it is cannot be
+// mistaken and it can be passed straight back in.
+func (d *Disk) Directories(ctx context.Context, g auth.Grant, directory string) ([]string, error) {
+	return d.directories(ctx, g, directory, false)
+}
+
+// AllDirectories returns every directory under a directory, at any depth.
+func (d *Disk) AllDirectories(ctx context.Context, g auth.Grant, directory string) ([]string, error) {
+	return d.directories(ctx, g, directory, true)
+}
+
+func (d *Disk) directories(ctx context.Context, g auth.Grant, directory string, recursive bool) ([]string, error) {
+	dir := asDirectory(directory)
+	all, err := d.AllFiles(ctx, g, dir)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	for _, key := range all {
+		rest := strings.TrimPrefix(key, dir)
+		for i, c := range rest {
+			if c != '/' {
+				continue
+			}
+			seen[dir+rest[:i+1]] = true
+			if !recursive {
+				break
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// asDirectory is what turns Illuminate's directory argument into the prefix the
+// rest of the package speaks. The empty directory is the tenant's root, and
+// anything else gets the trailing slash that makes "invoices" mean the folder
+// rather than every key starting with those eight letters.
+func asDirectory(directory string) string {
+	if directory == "" || strings.HasSuffix(directory, "/") {
+		return directory
+	}
+	return directory + "/"
 }
 
 // Copy duplicates a file inside one tenant.
@@ -237,13 +386,13 @@ func (d *Disk) Move(ctx context.Context, g auth.Grant, src, dst string) error {
 	return d.Delete(ctx, g, src)
 }
 
-// DeletePrefix removes everything under a prefix, for this tenant only.
+// DeleteDirectory removes everything under a directory, for this tenant only.
 //
 // It is the one operation whose blast radius is worth stating out loud: an
-// empty prefix deletes everything the tenant has. It still cannot reach past
+// empty directory deletes everything the tenant has. It still cannot reach past
 // the tenant, because the prefix is resolved the same way a key is.
-func (d *Disk) DeletePrefix(ctx context.Context, g auth.Grant, prefix string) error {
-	keys, err := d.List(ctx, g, prefix)
+func (d *Disk) DeleteDirectory(ctx context.Context, g auth.Grant, directory string) error {
+	keys, err := d.AllFiles(ctx, g, directory)
 	if err != nil {
 		return err
 	}
@@ -253,6 +402,55 @@ func (d *Disk) DeletePrefix(ctx context.Context, g auth.Grant, prefix string) er
 		}
 	}
 	return nil
+}
+
+// Append adds a line to the end of a file, creating it when it is not there.
+//
+// It is read-modify-write and not an append syscall, because an object store has
+// no such thing: two concurrent Appends to the same key end with one of the two,
+// not both. Illuminate's is the same shape, and the answer to a file several
+// writers extend at once is the queue, not this.
+func (d *Disk) Append(ctx context.Context, g auth.Grant, key, data string) error {
+	return d.join(ctx, g, key, data, false)
+}
+
+// Prepend adds a line to the front of a file, creating it when it is not there.
+//
+// It reads the whole file into memory to do it. That is what prepending to a
+// file is, on a directory and on a bucket alike.
+func (d *Disk) Prepend(ctx context.Context, g auth.Grant, key, data string) error {
+	return d.join(ctx, g, key, data, true)
+}
+
+func (d *Disk) join(ctx context.Context, g auth.Grant, key, data string, front bool) error {
+	existing, err := d.Get(ctx, g, key)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return d.Put(ctx, g, key, strings.NewReader(data), "")
+	case err != nil:
+		return err
+	}
+	body, err := io.ReadAll(existing.Body)
+	closeErr := existing.Body.Close()
+	if err != nil {
+		return d.wrap("read", key, err)
+	}
+	if closeErr != nil {
+		return d.wrap("read", key, closeErr)
+	}
+
+	var b strings.Builder
+	b.Grow(len(body) + len(data) + 1)
+	if front {
+		b.WriteString(data)
+		b.WriteString("\n")
+		b.Write(body)
+	} else {
+		b.Write(body)
+		b.WriteString("\n")
+		b.WriteString(data)
+	}
+	return d.Put(ctx, g, key, strings.NewReader(b.String()), existing.ContentType)
 }
 
 // wrap names the disk and the key in an error, and lets ErrNotFound through

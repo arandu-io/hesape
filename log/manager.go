@@ -46,8 +46,8 @@ type Config struct {
 // -- handler, processors, formatter, tap, action_level -- have no field: see the
 // package documentation for why.
 type ChannelConfig struct {
-	// Driver answers `driver`: "single", "daily", "stack", "stderr", "errorlog",
-	// "null", "custom", or a name registered with Extend.
+	// Driver answers `driver`: "single", "daily", "monthly", "stack", "stderr",
+	// "errorlog", "null", "custom", or a name registered with Extend.
 	Driver string
 
 	// Name answers `name`, the channel name stamped on every line. Empty falls
@@ -62,8 +62,16 @@ type ChannelConfig struct {
 	Path string
 
 	// Days answers `days`, how many daily files to keep. Zero is Illuminate's
-	// default of 7.
+	// default of 7. MaxFiles wins over it when both are set.
 	Days int
+
+	// MaxFiles answers `max_files`, which Illuminate reads before `days` on the
+	// daily driver and is the only thing the monthly driver reads. Zero is the
+	// default the driver names: 7 files for daily, 3 for monthly.
+	//
+	// It is the one thing here that comes from the current Laravel rather than
+	// from the clone -- see the package documentation.
+	MaxFiles int
 
 	// Channels answers `channels`, the channels a stack fans out to.
 	Channels []string
@@ -211,6 +219,8 @@ func (m *LogManager) resolveLocked(name string, config *ChannelConfig) (*slog.Lo
 		return m.createSingleDriverLocked(*config)
 	case "daily":
 		return m.createDailyDriverLocked(*config)
+	case "monthly":
+		return m.createMonthlyDriverLocked(*config)
 	case "stack":
 		return m.createStackDriverLocked(*config)
 	case "stderr", "errorlog":
@@ -238,21 +248,62 @@ func (m *LogManager) createSingleDriverLocked(config ChannelConfig) (*slog.Logge
 }
 
 // createDailyDriverLocked answers
-// Illuminate\Log\LogManager::createDailyDriver: one file per day, keeping the
-// last `days` of them, which is Monolog's RotatingFileHandler.
+// Illuminate\Log\LogManager::createDailyDriver: one file per day, keeping only
+// the newest of them, which is Monolog's RotatingFileHandler.
+//
+// The count is `max_files`, then `days`, then 7 -- the clone reads only `days`,
+// and `max_files` is the current Laravel's, which the package documentation
+// names as the second source.
 func (m *LogManager) createDailyDriverLocked(config ChannelConfig) (*slog.Logger, error) {
-	if config.Path == "" {
-		return nil, errors.New("log: the daily driver needs a path")
+	keep := config.MaxFiles
+	if keep <= 0 {
+		keep = config.Days
 	}
-	days := config.Days
-	if days <= 0 {
-		days = defaultDailyDays
+	if keep <= 0 {
+		keep = defaultDailyFiles
 	}
-	return m.buildLoggerLocked(config, &rotatingWriter{path: config.Path, days: days})
+	return m.createRotatingDriverLocked(config, filePerDay, keep, "daily")
 }
 
-// defaultDailyDays is Illuminate's `$config['days'] ?? 7`.
-const defaultDailyDays = 7
+// createMonthlyDriverLocked answers
+// Illuminate\Log\LogManager::createMonthlyDriver: one file per month, keeping
+// the last `max_files` of them, three by default.
+//
+// It has no counterpart in the clone; it is the current Laravel's, and it is
+// here because a `monthly` channel in config/logging.php is something a Laravel
+// developer writes today and would otherwise fail as an unsupported driver.
+func (m *LogManager) createMonthlyDriverLocked(config ChannelConfig) (*slog.Logger, error) {
+	keep := config.MaxFiles
+	if keep <= 0 {
+		keep = defaultMonthlyFiles
+	}
+	return m.createRotatingDriverLocked(config, filePerMonth, keep, "monthly")
+}
+
+// createRotatingDriverLocked answers
+// Illuminate\Log\LogManager::createRotatingDriver, which the daily and monthly
+// drivers both go through.
+func (m *LogManager) createRotatingDriverLocked(config ChannelConfig, format string, keep int, driver string) (*slog.Logger, error) {
+	if config.Path == "" {
+		return nil, fmt.Errorf("log: the %s driver needs a path", driver)
+	}
+	return m.buildLoggerLocked(config, &rotatingWriter{path: config.Path, format: format, keep: keep})
+}
+
+// The two date formats Monolog's RotatingFileHandler names FILE_PER_DAY and
+// FILE_PER_MONTH, written as Go layouts. They are what goes in the file name
+// between the base and the extension.
+const (
+	filePerDay   = time.DateOnly
+	filePerMonth = "2006-01"
+)
+
+// The counts the two rotating drivers fall back to: Illuminate's
+// `$config['max_files'] ?? $config['days'] ?? 7` and `$config['max_files'] ?? 3`.
+const (
+	defaultDailyFiles   = 7
+	defaultMonthlyFiles = 3
+)
 
 // createStackDriverLocked answers
 // Illuminate\Log\LogManager::createStackDriver: one logger over the handlers of
@@ -626,59 +677,70 @@ func openLogFile(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 }
 
-// rotatingWriter is Monolog's RotatingFileHandler: one file per day, named after
-// the configured path with the date before the extension, and only the last
-// `days` of them kept.
+// rotatingWriter is Monolog's RotatingFileHandler: one file per period, named
+// after the configured path with the date before the extension, and only the
+// last `keep` of them kept.
+//
+// format is the period -- filePerDay or filePerMonth -- and it is the whole
+// difference between the daily and the monthly driver, exactly as it is the
+// whole difference in Monolog.
 type rotatingWriter struct {
-	mu   sync.Mutex
-	path string
-	days int
-	day  string
-	file *os.File
+	mu      sync.Mutex
+	path    string
+	format  string
+	keep    int
+	current string
+	file    *os.File
 }
 
-// Write appends to today's file, opening it -- and pruning the old ones -- the
-// first time a day is written to.
+// Write appends to the current period's file, opening it -- and pruning the old
+// ones -- the first time that period is written to.
 func (w *rotatingWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	day := time.Now().Format(time.DateOnly)
-	if w.file == nil || day != w.day {
+	format := w.format
+	if format == "" {
+		format = filePerDay
+	}
+
+	period := time.Now().Format(format)
+	if w.file == nil || period != w.current {
 		if w.file != nil {
 			_ = w.file.Close()
 			w.file = nil
 		}
-		file, err := openLogFile(dailyPath(w.path, day))
+		file, err := openLogFile(rotatingPath(w.path, period))
 		if err != nil {
 			return 0, err
 		}
-		w.file, w.day = file, day
+		w.file, w.current = file, period
 		w.prune()
 	}
 	return w.file.Write(p)
 }
 
-// dailyPath is Monolog's default rotating filename: base-YYYY-MM-DD.ext.
-func dailyPath(path, day string) string {
+// rotatingPath is Monolog's default rotating filename: base-YYYY-MM-DD.ext for
+// a daily channel and base-YYYY-MM.ext for a monthly one.
+func rotatingPath(path, period string) string {
 	ext := filepath.Ext(path)
-	return strings.TrimSuffix(path, ext) + "-" + day + ext
+	return strings.TrimSuffix(path, ext) + "-" + period + ext
 }
 
-// prune deletes everything past the newest `days` files, which is what
+// prune deletes everything past the newest `keep` files, which is what
 // RotatingFileHandler does when it rotates.
 func (w *rotatingWriter) prune() {
-	if w.days <= 0 {
+	if w.keep <= 0 {
 		return
 	}
 	ext := filepath.Ext(w.path)
 	matches, err := filepath.Glob(strings.TrimSuffix(w.path, ext) + "-*" + ext)
-	if err != nil || len(matches) <= w.days {
+	if err != nil || len(matches) <= w.keep {
 		return
 	}
 	// The names sort the way the dates do, so the oldest are at the front.
 	slices.Sort(matches)
-	for _, old := range matches[:len(matches)-w.days] {
+	for _, old := range matches[:len(matches)-w.keep] {
 		_ = os.Remove(old)
 	}
 }

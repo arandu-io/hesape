@@ -6,8 +6,8 @@
 //
 // # What lives here
 //
-// The Module contract and its optional interfaces -- Bootable, Background,
-// Closable, Diagnostic, Health, Schedulable, Migratable -- are the whole
+// [Module] and its optional interfaces -- Bootable, Background, Closable,
+// Diagnostic, Health, Schedulable, Migratable -- are the whole
 // vocabulary of composition. A module declares; the kernel collects; nothing
 // runs until something asks. That shape is why [Task] and [Migration] are
 // declared here rather than in the packages that execute them: the scheduler
@@ -24,11 +24,14 @@
 //
 // # What is not here yet
 //
-// Kernel itself, the Module interface, RendererProvider and Builtins are
-// waiting on the layer below: they name a router, a view renderer and a console
-// command, and hesape/routing, hesape/httpx and hesape/console are still empty.
-// Declaring those three surfaces from up here to unblock the kernel would be a
-// second definition of each (RULE 9), thrown away the day the real one lands.
+// Kernel itself, RendererProvider and Builtins are still waiting. [Module]
+// is not: it named a router, hesape/routing now has one, and it landed here
+// because the four adapter packages ADR 0048 folds in implement it and cannot
+// compile without it.
+//
+// The remaining three name a boot sequence, a view renderer and a console
+// command. Declaring any of them from up here to unblock the kernel would be a
+// second definition of it (RULE 9), thrown away the day the real one lands.
 // Until then they stay in github.com/arandu-io/framework/kernel, which is what
 // docs/31-reorganizacao-hesape.md means by moving in phases.
 package foundation

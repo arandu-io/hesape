@@ -55,27 +55,38 @@ var currencyDigits = map[string]int{
 	"XPF": 0,
 }
 
-// Currency renders v as an amount in the given ISO 4217 currency. The code is
-// read case-insensitively and decides two things: the symbol, and how many
-// digits the currency keeps after the decimal point — two for most, none for
-// the yen, three for the dinars.
+// Currency answers for Number::currency. It renders v as an amount in the
+// given ISO 4217 currency. The code is read case-insensitively and decides two
+// things: the symbol, and how many digits the currency keeps after the decimal
+// point — two for most, none for the yen, three for the dinars.
+//
+// The argument is named `in` after Illuminate's own, and an empty one falls
+// back to DefaultCurrency, exactly as Illuminate falls back to Number::$currency.
+// The optional argument is Illuminate's $precision, which overrides the digit
+// count the currency itself carries; $locale has no equivalent here.
 //
 // A code with no symbol in the table is printed in front of the amount as it
-// was given; an empty code prints the amount alone. The sign leads, as it does
-// in en-US.
+// was given. The sign leads, as it does in en-US.
 //
 //	Currency(1234.5, "USD")  // "$1,234.50"
 //	Currency(1234.56, "JPY") // "¥1,235"
 //	Currency(-99, "CHF")     // "-CHF 99.00"
-func Currency(v float64, code string) string {
+//	Currency(1234.5, "USD", 0) // "$1,235"
+func Currency(v float64, in string, precision ...int) string {
 	if s, ok := special(v); ok {
 		return s
 	}
-	code = strings.ToUpper(strings.TrimSpace(code))
+	code := strings.ToUpper(strings.TrimSpace(in))
+	if code == "" {
+		code = strings.ToUpper(strings.TrimSpace(DefaultCurrency()))
+	}
 
 	digits := 2
 	if d, ok := currencyDigits[code]; ok {
 		digits = d
+	}
+	if len(precision) > 0 {
+		digits = max(precision[0], 0)
 	}
 
 	amount := Format(v, digits)

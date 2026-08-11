@@ -37,7 +37,7 @@
 // if in statement position does replace when, but only by breaking the chain
 // and naming an intermediate:
 //
-//	q := db.Table("posts")
+//	q = q.From("posts")
 //	if published {
 //		q = q.Where("published", true)
 //	}
@@ -45,9 +45,13 @@
 //
 // against
 //
-//	db.Table("posts").
+//	q.From("posts").
 //		When(published, func(q *query.Builder) { q.Where("published", true) }, nil).
 //		OrderBy("id")
+//
+// Both forms compile against the builder as it stands. The Laravel spelling of
+// the first line is db.table('posts'), which is Connection::table and is not
+// written yet; From is Builder::from, and is the entry point that exists.
 //
 // The first form is not wrong, and nobody is stopped from writing it. It is
 // longer by a variable that exists only to be reassigned, and the reassignment

@@ -15,9 +15,13 @@ package query
 // A nil callback on a true condition leaves the builder untouched instead of
 // failing, which is what Collection.When does with the same argument.
 //
-//	db.Table("posts").
+//	q.From("posts").
 //		When(published, func(q *query.Builder) { q.Where("published", true) }, nil).
 //		OrderBy("id")
+//
+// The Laravel spelling of the first line is db.table('posts'), which is
+// Connection::table and is not written yet. From is Builder::from, and is the
+// entry point that exists today.
 func (b *Builder) When(condition bool, callback, otherwise func(*Builder)) *Builder {
 	if condition {
 		if callback != nil {

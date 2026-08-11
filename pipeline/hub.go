@@ -54,17 +54,20 @@ func (h *Hub[T]) Defaults(callback func(p *Pipeline[T], passable T) (T, error)) 
 // Pipe sends an object through one of the available pipelines. It answers
 // pipe($object, $pipeline = null).
 //
-// An empty name is the default pipeline: PHP writes `$pipeline ?: 'default'`,
-// and the empty string is the falsy value Go has. Each call builds a fresh
-// [Pipeline], so nothing a pipeline was sent leaks into the next one.
+// At most one name may be given, which is PHP's optional argument, and an empty
+// one is no name: both reach the pipeline [Hub.Defaults] defined, because PHP
+// writes `$pipeline ?: 'default'` and the empty string is the falsy value Go
+// has. Each call builds a fresh [Pipeline], so nothing a pipeline was sent
+// leaks into the next one.
 //
 // A name that was never defined fails rather than reaching for a missing key.
 // The clone predates that check; the message follows
 // reference_laravel/framework/src/Illuminate/Pipeline/Hub.php, which throws
 // InvalidArgumentException. A name defined with a nil callback is not defined.
-func (h *Hub[T]) Pipe(object T, name string) (T, error) {
-	if name == "" {
-		name = "default"
+func (h *Hub[T]) Pipe(object T, pipeline ...string) (T, error) {
+	name := "default"
+	if len(pipeline) > 0 && pipeline[0] != "" {
+		name = pipeline[0]
 	}
 
 	h.mu.RLock()

@@ -1,12 +1,16 @@
 package filesystem
 
 import (
+	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"path"
 	"strings"
+
+	"github.com/arandu-io/hesape/auth"
 )
 
 // ErrRefusedUpload is what every [UploadRules] failure unwraps to, so a handler
@@ -78,7 +82,7 @@ func (u Upload) Extension() string { return strings.ToLower(path.Ext(u.Name)) }
 // There is no content-type rule. The announced type is a header the client
 // wrote, so checking it stops nobody who is trying; the extension is checked
 // because it is what a person sees, and the real defense is on the way out --
-// the stored type comes from the key, and [Send] sends nosniff.
+// the stored type comes from the key, and [Serve] sends nosniff.
 type UploadRules struct {
 	// MaxBytes is the largest file accepted. It must be positive.
 	MaxBytes int64
@@ -117,4 +121,75 @@ func (u Upload) Check(r UploadRules) error {
 		return fmt.Errorf("%w: %q has no extension, and only %s are accepted", ErrRefusedUpload, u.Name, strings.Join(r.Extensions, ", "))
 	}
 	return fmt.Errorf("%w: %s is not accepted, only %s", ErrRefusedUpload, ext, strings.Join(r.Extensions, ", "))
+}
+
+// PutFile stores an upload under a directory and returns the key it landed on.
+//
+// The name is drawn at random and keeps only the extension, which is the point
+// of the call: the announced filename is a string the client chose, and storing
+// under it means two people uploading "scan.pdf" overwrite each other -- and
+// that somebody who guesses a filename guesses a key. Illuminate's putFile does
+// the same thing for the same reason.
+//
+// It does not check [UploadRules]. Checking is [Upload.Check], called where the
+// answer can be shown to the person who picked the file; folding it in here
+// would make an unchecked Put impossible to write and a checked one impossible
+// to see.
+func (d *Disk) PutFile(ctx context.Context, g auth.Grant, directory string, u Upload) (string, error) {
+	return d.PutFileAs(ctx, g, directory, u, randomName()+u.Extension())
+}
+
+// randomName draws the forty characters Illuminate's hashName draws.
+//
+// It does not call str.Random, which is the same forty characters, because that
+// one answers to Str::createRandomStringsUsing -- a test hook that makes the
+// value deterministic process-wide. A deterministic name is fine for a token in
+// a fixture and is not fine here: unpredictability is half of why this call
+// exists, and a global that can switch it off is a global somebody will switch
+// off in a test helper that also runs in staging.
+func randomName() string {
+	const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, 40)
+	// crypto/rand.Read is documented never to fail, and panics internally if the
+	// operating system's source ever does. There is no error to handle.
+	rand.Read(b)
+	for i, v := range b {
+		// 62 does not divide 256, so a modulo makes the first eight letters very
+		// slightly likelier. Over forty characters that is not a weakness worth
+		// a rejection loop, and it is written down rather than hidden.
+		b[i] = alphabet[int(v)%len(alphabet)]
+	}
+	return string(b)
+}
+
+// PutFileAs stores an upload under a directory with the name you give it.
+//
+// The name is a name: one with a separator in it is refused rather than cleaned,
+// because a caller that meant a subdirectory should say so in directory, and a
+// caller that did not mean one has been handed something by a client.
+func (d *Disk) PutFileAs(ctx context.Context, g auth.Grant, directory string, u Upload, name string) (string, error) {
+	if u.Open == nil {
+		return "", fmt.Errorf("%w: it carries no content", ErrRefusedUpload)
+	}
+	if name == "" || name == "." || name == ".." ||
+		strings.ContainsAny(name, `/\`) || strings.ContainsRune(name, 0) {
+		return "", fmt.Errorf("%w: %q is not a filename", ErrBadKey, name)
+	}
+	key := name
+	if dir := strings.Trim(directory, "/"); dir != "" {
+		key = dir + "/" + name
+	}
+
+	body, err := u.Open()
+	if err != nil {
+		return "", err
+	}
+	defer body.Close()
+
+	// The empty content type is on purpose: Put infers it from the key, and the
+	// one the client announced is a string an attacker chose.
+	if err := d.Put(ctx, g, key, body, ""); err != nil {
+		return "", err
+	}
+	return key, nil
 }

@@ -363,8 +363,8 @@ func (r *Repository) ForgetHidden(key ...string) *Repository {
 //
 // A key that holds something which is not a list is not stackable, and Illuminate
 // throws RuntimeException for it; here that is the error, which is the shape a
-// thrown exception takes in this ecosystem. A key that holds nothing is
-// stackable, and pushing creates the stack.
+// thrown exception takes in this ecosystem, and it matches ErrUnableToPush. A
+// key that holds nothing is stackable, and pushing creates the stack.
 func (r *Repository) Push(key string, values ...any) (*Repository, error) {
 	if r == nil {
 		return nil, errUnableToPush(key)
@@ -388,7 +388,8 @@ func (r *Repository) PushHidden(key string, values ...any) (*Repository, error) 
 // the key's stack.
 //
 // A key that is not a stack, and a stack that is empty, are both the
-// RuntimeException Illuminate throws, and both are this error.
+// RuntimeException Illuminate throws, and both are this error, which matches
+// ErrUnableToPop.
 func (r *Repository) Pop(key string) (any, error) {
 	if r == nil {
 		return nil, errUnableToPop(key)
@@ -910,27 +911,45 @@ func toFloat(value any) (float64, bool) {
 	return 0, false
 }
 
-// The four RuntimeException messages Illuminate throws, word for word.
+// The three failures Illuminate throws RuntimeException for. Each error names
+// the key the way Illuminate's message does, and wraps the sentinel so that a
+// caller can tell the three apart with errors.Is instead of reading the text.
+//
+// PHP has one class for all three and the message is the only distinction; Go
+// has somewhere better to put it.
+var (
+	// ErrUnableToPush is what Push and PushHidden report for a key that holds
+	// something other than a list, which is Illuminate's "Unable to push value
+	// onto context stack for key [...]".
+	ErrUnableToPush = errors.New("log/context: unable to push value onto context stack")
+
+	// ErrUnableToPop is what Pop and PopHidden report for a key that is not a
+	// stack or is an empty one, which is Illuminate's "Unable to pop value from
+	// context stack for key [...]".
+	ErrUnableToPop = errors.New("log/context: unable to pop value from context stack")
+
+	// ErrNotAStack is what StackContains and HiddenStackContains report for a
+	// key that holds something other than a list, which is Illuminate's "Given
+	// key [...] is not a stack.".
+	ErrNotAStack = errors.New("log/context: key is not a stack")
+)
+
 func errUnableToPush(key string) error {
-	return fmt.Errorf("log/context: unable to push value onto context stack for key [%s]", key)
+	return fmt.Errorf("log/context: unable to push value onto context stack for key [%s]: %w", key, ErrUnableToPush)
 }
 
 func errUnableToPushHidden(key string) error {
-	return fmt.Errorf("log/context: unable to push value onto hidden context stack for key [%s]", key)
+	return fmt.Errorf("log/context: unable to push value onto hidden context stack for key [%s]: %w", key, ErrUnableToPush)
 }
 
 func errUnableToPop(key string) error {
-	return fmt.Errorf("log/context: unable to pop value from context stack for key [%s]", key)
+	return fmt.Errorf("log/context: unable to pop value from context stack for key [%s]: %w", key, ErrUnableToPop)
 }
 
 func errUnableToPopHidden(key string) error {
-	return fmt.Errorf("log/context: unable to pop value from hidden context stack for key [%s]", key)
+	return fmt.Errorf("log/context: unable to pop value from hidden context stack for key [%s]: %w", key, ErrUnableToPop)
 }
 
 func errNotAStack(key string) error {
-	return fmt.Errorf("log/context: given key [%s] is not a stack", key)
+	return fmt.Errorf("log/context: given key [%s] is not a stack: %w", key, ErrNotAStack)
 }
-
-// ErrNotAStack is what StackContains and HiddenStackContains report for a key
-// that holds something other than a list. It is matched with errors.Is.
-var ErrNotAStack = errors.New("log/context: key is not a stack")

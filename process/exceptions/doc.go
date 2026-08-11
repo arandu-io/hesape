@@ -6,8 +6,11 @@
 //	ProcessFailedException.php
 //	ProcessTimedOutException.php
 //
-// Both are implemented, one directory up: ProcessFailedException is
-// process.ExitError and ProcessTimedOutException is process.TimeoutError.
+// Both are implemented one directory up, under their own names:
+// process.ProcessFailedException and process.ProcessTimedOutException. Beside
+// them is process.StrayProcessError, which Illuminate raises as a plain
+// RuntimeException from preventStrayProcesses and which is a named type here so
+// that errors.As can tell it from a program that really failed.
 //
 // They stayed there because in Go an error type belongs beside the function
 // that returns it -- errors.As on the value Run gave back is how a caller

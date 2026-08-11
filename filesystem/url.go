@@ -57,7 +57,7 @@ type URLSigner struct {
 // NewURLSigner returns a signer whose fallback links point under base.
 //
 // base is the path the redeeming route is mounted at -- "/files", say, for a
-// route that reads the last segment and calls [Redeem] then [Send]. It is
+// route that reads the last segment and calls [Redeem] then [Serve]. It is
 // unused when the disk can presign, because then the URL comes from the store.
 func NewURLSigner(s *encryption.Signer, base string) *URLSigner {
 	return &URLSigner{signer: s, base: strings.TrimSuffix(base, "/")}
@@ -101,7 +101,7 @@ func (u *URLSigner) TemporaryURL(ctx context.Context, g auth.Grant, d *Disk, key
 // Redeem reads a token issued by [TemporaryURL] and returns what it authorizes.
 //
 // The Grant it returns is for this action, in this tenant, and it is meant for
-// the key returned beside it -- pass the two together to [Send] and to nothing
+// the key returned beside it -- pass the two together to [Serve] and to nothing
 // else. It is a system grant, so it carries no person: a link is not a session,
 // and treating it as one would mean a download link could be used to write.
 //

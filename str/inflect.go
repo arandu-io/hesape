@@ -1,13 +1,25 @@
 package str
 
 import (
+	"errors"
+	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
+
+	"github.com/arandu-io/hesape/number"
 )
 
-// Plural is the plural of an English noun: "purchase_order" becomes
-// "purchase_orders", "person" becomes "people", "knife" becomes "knives".
+// Plural answers for Str::plural and for Pluralizer::plural, which it is: in
+// Illuminate the first forwards straight to the second. It is the plural of an
+// English noun -- "purchase_order" becomes "purchase_orders", "person" becomes
+// "people", "knife" becomes "knives".
+//
+// The optional count is Illuminate's $count, which defaults to 2. A count of
+// one in either sign returns the word untouched, so Plural("rule", 1) is
+// "rule".
 //
 // It pluralizes the last word and leaves the rest alone, so a compound name
 // keeps its shape: "sales_person" is "sales_people", not "sales_persons". The
@@ -15,11 +27,21 @@ import (
 // "INVOICES" -- because this names a table in one call site and a heading in
 // the next.
 //
+// A value that does not end in a letter, a digit or a non-ASCII rune is
+// returned untouched, which is the guard Pluralizer::plural runs before it
+// reaches the inflector: "rule!" and "rule " stay as they are.
+//
 // English pluralization has hundreds of exceptions and this handles the ones a
 // schema meets. Everything the tables in this file do not name takes -s or -es
 // by rule. A word that comes out wrong is a line to add there, not a rule to
 // change.
-func Plural(s string) string {
+func Plural(s string, count ...int) string {
+	if len(count) > 0 && (count[0] == 1 || count[0] == -1) {
+		return s
+	}
+	if pluralizerUncountable[Lower(s)] || !endsInflectable(s) {
+		return s
+	}
 	head, word := splitTail(s)
 	if word == "" {
 		return s
@@ -27,19 +49,42 @@ func Plural(s string) string {
 	return head + matchCase(word, pluralize(strings.ToLower(word)))
 }
 
-// PluralN is a count and the noun agreeing with it: "1 rule", "3 rules".
+// PluralStudly answers for Str::pluralStudly. It pluralizes the last word of a
+// studly caps string and leaves everything in front of it alone:
+// PluralStudly("VerifiedHuman") is "VerifiedHumans".
 //
-// The count is in the answer because every caller was building that sentence by
-// hand, and the one that was not printed "1 fields".
-func PluralN(n int, singular string) string {
-	if n == 1 || n == -1 {
-		return strconv.Itoa(n) + " " + singular
-	}
-	return strconv.Itoa(n) + " " + Plural(singular)
+// Illuminate finds that last word by splitting in front of every capital, which
+// is why PluralStudly("HTTPServer") is "HTTPServers" and not "HTTPServer" with
+// the run of capitals pluralized.
+func PluralStudly(value string, count ...int) string {
+	head, word := splitBeforeUpper(value)
+	return head + Plural(word, count...)
 }
 
-// Singular is the singular of an English noun: "purchase_orders" becomes
-// "purchase_order", "people" becomes "person", "knives" becomes "knife".
+// PluralPascal answers for Str::pluralPascal. Illuminate defines it as an alias
+// of Str::pluralStudly, and so does this.
+func PluralPascal(value string, count ...int) string { return PluralStudly(value, count...) }
+
+// Counted answers for Str::counted. It is the count and the noun agreeing with
+// it: Counted("rule", 1) is "1 rule" and Counted("rule", 3) is "3 rules".
+//
+// The count is formatted the way Illuminate formats it, through Number::format,
+// so Counted("row", 1000) is "1,000 rows".
+func Counted(value string, count int) string {
+	return number.Format(float64(count)) + " " + Plural(value, count)
+}
+
+// PluralN is the old name of Counted, with its arguments the other way around.
+//
+// Deprecated: it is an invented name for Str::counted. Call Counted instead.
+// It stays because callers outside this package still name it.
+func PluralN(n int, singular string) string {
+	return strconv.Itoa(n) + " " + Plural(singular, n)
+}
+
+// Singular answers for Str::singular and for Pluralizer::singular. It is the
+// singular of an English noun: "purchase_orders" becomes "purchase_order",
+// "people" becomes "person", "knives" becomes "knife".
 //
 // It is Plural read backwards, with the same tables and the same treatment of
 // compounds and case. English does not invert cleanly -- "axes" is the plural of
@@ -52,6 +97,73 @@ func Singular(s string) string {
 		return s
 	}
 	return head + matchCase(word, singularize(strings.ToLower(word)))
+}
+
+// pluralizerUncountable is Pluralizer::$uncountable, the public list of
+// non-noun word forms the inflector must not touch. It is checked by Plural
+// only, exactly as Illuminate checks it.
+var pluralizerUncountable = map[string]bool{
+	"recommended": true,
+	"related":     true,
+}
+
+// ErrLanguageNotSupported is returned by UseLanguage for a language this
+// package carries no inflection rules for.
+var ErrLanguageNotSupported = errors.New("str: unsupported inflector language")
+
+// languageMu guards the inflector language, which UseLanguage may be called
+// from any goroutine to set.
+var languageMu sync.RWMutex
+
+// language is Pluralizer::$language, whose default is "english".
+var language = "english"
+
+// UseLanguage answers for Pluralizer::useLanguage. It names the language the
+// inflector works in.
+//
+// Illuminate hands the name to Doctrine's InflectorFactory, which throws for a
+// language it has no rules for; this returns ErrLanguageNotSupported instead,
+// which is the (T, error) shape an exception takes here. English is the only
+// language this package carries rules for, so it is the only one accepted --
+// Plural and Singular would otherwise keep answering in English under another
+// language's name, which is worse than refusing.
+func UseLanguage(lang string) error {
+	if !strings.EqualFold(lang, "english") {
+		return fmt.Errorf("%w: %q", ErrLanguageNotSupported, lang)
+	}
+	languageMu.Lock()
+	language = strings.ToLower(lang)
+	languageMu.Unlock()
+	return nil
+}
+
+// Language reports the language UseLanguage last accepted. It answers for
+// Pluralizer::$language, which Illuminate keeps protected and reads back
+// through the inflector it builds.
+func Language() string {
+	languageMu.RLock()
+	defer languageMu.RUnlock()
+	return language
+}
+
+// inflectableTail is Pluralizer::plural's '/^(.*)[A-Za-z0-9\x{0080}-\x{FFFF}]$/u'
+// guard: a value that does not end in a letter, a digit or a rune past ASCII is
+// not a word and is returned as it stands.
+var inflectableTail = regexp.MustCompile(`[A-Za-z0-9\x{0080}-\x{FFFF}]$`)
+
+func endsInflectable(s string) bool { return inflectableTail.MatchString(s) }
+
+// splitBeforeUpper is Str::pluralStudly's
+// preg_split('/(.)(?=[A-Z])/u', $value, -1, PREG_SPLIT_DELIM_CAPTURE) followed
+// by array_pop: everything up to the last capital, and the word starting at it.
+func splitBeforeUpper(value string) (head, word string) {
+	rs := []rune(value)
+	for i := len(rs) - 1; i > 0; i-- {
+		if unicode.IsUpper(rs[i]) {
+			return string(rs[:i]), string(rs[i:])
+		}
+	}
+	return "", value
 }
 
 // splitTail cuts a name into everything before the last word and the last word
@@ -163,9 +275,13 @@ func isVowel(b byte) bool { return strings.IndexByte("aeiou", b) >= 0 }
 // uncountable is a noun that is its own plural. A word here is never touched by
 // either direction.
 var uncountable = set(
-	"aircraft", "bison", "deer", "equipment", "evidence", "fish", "furniture",
-	"information", "money", "moose", "news", "offspring", "rice", "salmon",
-	"series", "sheep", "software", "species", "staff", "swine", "trout",
+	"aircraft", "audio", "bison", "chassis", "compensation", "coreopsis",
+	"deer", "education", "emoji", "equipment", "evidence", "feedback",
+	"firmware", "fish", "furniture", "gold", "hardware", "information",
+	"jedi", "kin", "knowledge", "love", "metadata", "money", "moose", "news",
+	"nutrition", "offspring", "police", "rain", "rice", "salmon", "series",
+	"sheep", "software", "species", "staff", "swine", "traffic", "trout",
+	"wheat",
 )
 
 // irregularPlural is the plural that no rule produces.

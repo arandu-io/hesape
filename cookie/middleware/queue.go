@@ -89,9 +89,29 @@ func (w *queueWriter) Write(b []byte) (int, error) {
 	return w.ResponseWriter.Write(b)
 }
 
-// Unwrap gives http.ResponseController the writer underneath, so flushing and
-// hijacking still reach it.
+// Unwrap gives http.ResponseController the writer underneath, so hijacking and
+// the deadline calls still reach it.
 func (w *queueWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// FlushError drains the queue and then flushes the writer underneath.
+//
+// It answers to nothing in the PHP, which has no streaming response to flush,
+// and it is not optional here. A flush commits the header, so it is the third
+// way to reach the point of no return alongside WriteHeader and Write. Without
+// this method http.ResponseController would walk [queueWriter.Unwrap] down to
+// the real writer and flush that one, and the queued cookies would be added to
+// a header that had already gone out.
+//
+// It is FlushError and not Flush because that is what http.ResponseController
+// looks for first, and because the error is worth passing on: a writer that
+// cannot flush says so, where a Flush method would have to swallow it. A
+// handler that reaches for http.Flusher by type assertion instead finds nothing
+// here, as it did before -- that costs it the flush, but nothing is committed,
+// so the cookies still go out.
+func (w *queueWriter) FlushError() error {
+	w.setCookies()
+	return http.NewResponseController(w.ResponseWriter).Flush()
+}
 
 // setCookie answers to Symfony's ResponseHeaderBag::setCookie: the cookie
 // replaces any already on the response with the same name, path and domain, and

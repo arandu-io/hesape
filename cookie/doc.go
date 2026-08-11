@@ -13,10 +13,23 @@
 // returns the default straight, which is the same intent said once. Everything
 // else in the package is identical in both copies.
 //
-// CookieServiceProvider.php is not mirrored. It registers the jar in the
+// CookieServiceProvider.php is not mirrored, and its register() is the one
+// method of this component with no answer here. It registers the jar in the
 // container and reads config, which ADR 0001 and ADR 0002 rejected: an
 // application builds its own jar with [NewCookieJar] and
 // [CookieJar.SetDefaultPathAndDomain].
+//
+// The three methods of CookieValuePrefix are static, and they are reached
+// through the [CookieValuePrefix] value rather than as package functions, so
+// that the call keeps the name the PHP gives it:
+//
+//	CookieValuePrefix::create($name, $key)     // PHP
+//	cookie.CookieValuePrefix.Create(name, key) // Go
+//
+// Naming them CreateCookieValuePrefix and the rest would have been three names
+// this framework invented, which ADR 0044 does not allow; naming them Create,
+// Remove and Validate at the package level would have said nothing about what
+// they create, remove or validate.
 //
 // The middleware lives in cookie/middleware, as it does in PHP, and it is what
 // makes the queue useful: a handler calls [CookieJarFrom] and queues, and the

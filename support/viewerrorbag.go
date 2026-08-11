@@ -126,6 +126,18 @@ func (v *ViewErrorBag) Messages() map[string][]string {
 	return v.GetBag(DefaultErrorBag).Messages()
 }
 
+// ToArray answers to MessageBag::toArray on the default bag, through __call:
+// the messages of the default bag, keyed by field, which is what a view writes
+// out when it dumps $errors.
+func (v *ViewErrorBag) ToArray() map[string][]string {
+	return v.GetBag(DefaultErrorBag).ToArray()
+}
+
+// ToJson answers to MessageBag::toJson on the default bag, through __call.
+func (v *ViewErrorBag) ToJson() (string, error) {
+	return v.GetBag(DefaultErrorBag).ToJson()
+}
+
 // IsEmpty answers to MessageBag::isEmpty on the default bag, through __call.
 func (v *ViewErrorBag) IsEmpty() bool { return v.GetBag(DefaultErrorBag).IsEmpty() }
 

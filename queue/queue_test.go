@@ -10,6 +10,8 @@ import (
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/log"
 	"github.com/arandu-io/hesape/queue"
+	"github.com/arandu-io/hesape/queue/jobs"
+	"github.com/arandu-io/hesape/queue/middleware"
 )
 
 const tenant = "11111111-1111-4111-8111-111111111111"
@@ -20,14 +22,14 @@ func grant() auth.Grant { return auth.SystemGrant("invoice.send", tenant) }
 // cannot be scoped, and everything the handler touches would read across
 // customers.
 func TestAJobWithoutATenantIsRefused(t *testing.T) {
-	_, err := queue.New(auth.SystemGrant("invoice.send", ""), "", "invoice.send", nil)
-	if !errors.Is(err, queue.ErrNoTenant) {
+	_, err := jobs.New(auth.SystemGrant("invoice.send", ""), "", "invoice.send", nil)
+	if !errors.Is(err, jobs.ErrNoTenant) {
 		t.Fatalf("err = %v, want ErrNoTenant", err)
 	}
 }
 
 func TestAJobWithoutANameIsRefused(t *testing.T) {
-	if _, err := queue.New(grant(), "", "", nil); !errors.Is(err, queue.ErrNoName) {
+	if _, err := jobs.New(grant(), "", "", nil); !errors.Is(err, jobs.ErrNoName) {
 		t.Fatalf("err = %v, want ErrNoName", err)
 	}
 }
@@ -36,7 +38,7 @@ func TestAJobWithoutANameIsRefused(t *testing.T) {
 // reissues the work under. A worker that invented its own Grant would be a way
 // to reach the database with permissions nobody granted.
 func TestTheJobCarriesTheGrantThatPushedIt(t *testing.T) {
-	j, err := queue.New(grant(), "", "invoice.send", map[string]string{"id": "i-1"})
+	j, err := jobs.New(grant(), "", "invoice.send", map[string]string{"id": "i-1"})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -44,14 +46,14 @@ func TestTheJobCarriesTheGrantThatPushedIt(t *testing.T) {
 	if j.TenantID != tenant || j.Action != "invoice.send" {
 		t.Fatalf("job = %+v", j)
 	}
-	if j.Queue != queue.DefaultQueue {
+	if j.Queue != jobs.DefaultQueue {
 		t.Errorf("queue = %q, want the default", j.Queue)
 	}
-	if j.ID == "" {
+	if j.UUID == "" {
 		t.Error("the job has no id, and the id is what a handler deduplicates on")
 	}
 
-	g := queue.GrantFor(j)
+	g := jobs.GrantFor(&j)
 	if g.Subject().Tenant != tenant || g.Action() != "invoice.send" {
 		t.Errorf("the rebuilt Grant does not match the push: %+v", g.Subject())
 	}
@@ -65,8 +67,40 @@ func TestTheJobCarriesTheGrantThatPushedIt(t *testing.T) {
 	}
 }
 
+// TestAForgedJobIsRefused: New takes the tenant and the action from the Grant,
+// but Push takes a Job and a Job is a struct anybody can fill in. Without this
+// check the queue is the one way past the authorization the collection exists
+// to enforce.
+func TestAForgedJobIsRefused(t *testing.T) {
+	forged := jobs.Job{
+		UUID:     "j-1",
+		Name:     "invoice.send",
+		TenantID: "22222222-2222-4222-8222-222222222222",
+	}
+	if err := jobs.Authorized(grant(), forged); !errors.Is(err, jobs.ErrForged) {
+		t.Errorf("a job naming another tenant was accepted: %v", err)
+	}
+
+	escalated := jobs.Job{UUID: "j-2", Name: "invoice.send", Action: "invoice.delete"}
+	if err := jobs.Authorized(grant(), escalated); !errors.Is(err, jobs.ErrForged) {
+		t.Errorf("a job naming an action the Grant does not carry was accepted: %v", err)
+	}
+}
+
+// TestADetachedJobCannotSettleItself: a job built to be pushed has no queue to
+// release it back onto, and saying so beats a nil dereference in a handler.
+func TestADetachedJobCannotSettleItself(t *testing.T) {
+	j, err := jobs.New(grant(), "", "invoice.send", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Delete(context.Background()); !errors.Is(err, jobs.ErrDetached) {
+		t.Errorf("Delete = %v, want ErrDetached", err)
+	}
+}
+
 func TestThePayloadSurvives(t *testing.T) {
-	j, err := queue.New(grant(), "mail", "invoice.send", map[string]any{"id": "i-1", "amount": 1250})
+	j, err := jobs.New(grant(), "mail", "invoice.send", map[string]any{"id": "i-1", "amount": 1250})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -112,40 +146,72 @@ func TestBackoffIsCapped(t *testing.T) {
 // silently went to the wrong place.
 func TestTwoHandlersForOneNamePanics(t *testing.T) {
 	w := queue.NewWorker(&fakeQueue{}, queue.WorkerOptions{})
-	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, queue.Job) error { return nil })
+	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, *jobs.Job) error { return nil })
 
 	defer func() {
 		if recover() == nil {
 			t.Fatal("a second handler for the same name was accepted")
 		}
 	}()
-	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, queue.Job) error { return nil })
+	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, *jobs.Job) error { return nil })
 }
 
-// fakeQueue is the in-memory driver the worker tests run against. The real
-// drivers live in github.com/arandu-io/queue and are tested there, against a
-// real store -- this one exists to drive the loop.
+// fakeQueue is the in-memory driver the worker tests run against. What it
+// proves is the loop; what the DatabaseQueue does to rows is proved against a
+// database in database_test.go.
 type fakeQueue struct {
 	mu       sync.Mutex
-	ready    []queue.Job
-	acked    []queue.Job
-	failures []failure
+	ready    []jobs.Job
+	deleted  []jobs.Job
+	released []released
+	failed   []failure
+}
+
+type released struct {
+	job   jobs.Job
+	delay time.Duration
 }
 
 type failure struct {
-	job   queue.Job
+	job   jobs.Job
 	cause error
-	park  bool
 }
 
-func (q *fakeQueue) Push(_ context.Context, _ auth.Grant, j queue.Job) error {
+var (
+	_ queue.Queue = (*fakeQueue)(nil)
+	_ jobs.Driver = (*fakeQueue)(nil)
+)
+
+func (q *fakeQueue) Push(_ context.Context, g auth.Grant, j jobs.Job) error {
+	if err := jobs.Authorized(g, j); err != nil {
+		return err
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	q.ready = append(q.ready, j)
+	q.ready = append(q.ready, jobs.Prepare(g, j))
 	return nil
 }
 
-func (q *fakeQueue) Reserve(_ context.Context, _ string, n int, _ time.Duration) ([]queue.Job, error) {
+func (q *fakeQueue) PushOn(ctx context.Context, g auth.Grant, name string, j jobs.Job) error {
+	j.Queue = name
+	return q.Push(ctx, g, j)
+}
+
+func (q *fakeQueue) Later(ctx context.Context, g auth.Grant, delay time.Duration, j jobs.Job) error {
+	j.RunAt = time.Now().UTC().Add(delay)
+	return q.Push(ctx, g, j)
+}
+
+func (q *fakeQueue) Bulk(ctx context.Context, g auth.Grant, js []jobs.Job) error {
+	for _, j := range js {
+		if err := q.Push(ctx, g, j); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (q *fakeQueue) Pop(_ context.Context, _ string, n int, _ time.Duration) ([]*jobs.Job, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if len(q.ready) == 0 {
@@ -154,59 +220,103 @@ func (q *fakeQueue) Reserve(_ context.Context, _ string, n int, _ time.Duration)
 	if n > len(q.ready) {
 		n = len(q.ready)
 	}
-	out := make([]queue.Job, 0, n)
+	out := make([]*jobs.Job, 0, n)
 	for _, j := range q.ready[:n] {
 		// Like the real drivers: the delivery is counted when the job is
 		// handed over, so Attempts includes this one.
 		j.Attempts++
-		out = append(out, j)
+		out = append(out, jobs.Popped(q, "fake", j))
 	}
 	q.ready = q.ready[n:]
 	return out, nil
 }
 
-func (q *fakeQueue) Ack(_ context.Context, j queue.Job) error {
+func (q *fakeQueue) Size(context.Context, string) (int, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	q.acked = append(q.acked, j)
+	return len(q.ready), nil
+}
+
+func (q *fakeQueue) PendingSize(ctx context.Context, name string) (int, error) {
+	return q.Size(ctx, name)
+}
+
+func (q *fakeQueue) CreationTimeOfOldestPendingJob(context.Context, string) (time.Time, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.ready) == 0 {
+		return time.Time{}, nil
+	}
+	return q.ready[0].RunAt, nil
+}
+
+func (q *fakeQueue) Clear(context.Context, string) (int, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	n := len(q.ready)
+	q.ready = nil
+	return n, nil
+}
+
+func (q *fakeQueue) Failed(_ context.Context, limit int) ([]jobs.Job, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	out := make([]jobs.Job, 0, len(q.failed))
+	for _, f := range q.failed {
+		out = append(out, f.job)
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (q *fakeQueue) Retry(context.Context, string) error { return nil }
+
+func (q *fakeQueue) ReleaseJob(_ context.Context, j *jobs.Job, delay time.Duration) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.released = append(q.released, released{job: *j, delay: delay})
 	return nil
 }
 
-func (q *fakeQueue) Fail(_ context.Context, j queue.Job, cause error, _ time.Time, park bool) error {
+func (q *fakeQueue) DeleteJob(_ context.Context, j *jobs.Job) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	q.failures = append(q.failures, failure{job: j, cause: cause, park: park})
+	q.deleted = append(q.deleted, *j)
 	return nil
 }
 
-func (q *fakeQueue) Parked(context.Context, int) ([]queue.Job, error) { return nil, nil }
-func (q *fakeQueue) Retry(context.Context, string) error              { return nil }
-func (q *fakeQueue) Pending(context.Context, string) (int, error)     { return 0, nil }
-func (q *fakeQueue) Oldest(context.Context, string) (time.Duration, error) {
-	return 0, nil
-}
-
-func (q *fakeQueue) state() ([]queue.Job, []failure) {
+func (q *fakeQueue) FailJob(_ context.Context, j *jobs.Job, cause error) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return append([]queue.Job(nil), q.acked...), append([]failure(nil), q.failures...)
+	q.failed = append(q.failed, failure{job: *j, cause: cause})
+	return nil
 }
 
-func TestTheWorkerRunsAndAcknowledges(t *testing.T) {
+func (q *fakeQueue) state() (deleted []jobs.Job, rel []released, failed []failure) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return append([]jobs.Job(nil), q.deleted...),
+		append([]released(nil), q.released...),
+		append([]failure(nil), q.failed...)
+}
+
+func TestTheWorkerRunsAndDeletes(t *testing.T) {
 	q := &fakeQueue{}
-	j, err := queue.New(grant(), "", "invoice.send", map[string]string{"id": "i-1"})
+	j, err := jobs.New(grant(), "", "invoice.send", map[string]string{"id": "i-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = q.Push(context.Background(), grant(), j)
 
-	var got queue.Job
+	var got string
 	var gotGrant auth.Grant
 	done := make(chan struct{})
 
 	w := queue.NewWorker(q, queue.WorkerOptions{Poll: time.Millisecond})
-	w.HandleFunc("invoice.send", func(_ context.Context, g auth.Grant, j queue.Job) error {
-		got, gotGrant = j, g
+	w.HandleFunc("invoice.send", func(_ context.Context, g auth.Grant, j *jobs.Job) error {
+		got, gotGrant = j.UUID, g
 		close(done)
 		return nil
 	})
@@ -221,8 +331,8 @@ func TestTheWorkerRunsAndAcknowledges(t *testing.T) {
 	}
 	cancel()
 
-	if got.ID != j.ID {
-		t.Errorf("ran %s, want %s", got.ID, j.ID)
+	if got != j.UUID {
+		t.Errorf("ran %s, want %s", got, j.UUID)
 	}
 	// The handler receives a Grant for the tenant that pushed it, which is what
 	// lets it reach a repository at all.
@@ -231,20 +341,20 @@ func TestTheWorkerRunsAndAcknowledges(t *testing.T) {
 	}
 
 	waitFor(t, func() bool {
-		acked, _ := q.state()
-		return len(acked) == 1
-	}, "the job was not acknowledged")
+		deleted, _, _ := q.state()
+		return len(deleted) == 1
+	}, "the finished job was not deleted")
 }
 
-// TestAFailedJobIsRetriedThenParked: a worker stuck on one bad payload stops
+// TestAFailedJobIsReleasedThenParked: a worker stuck on one bad payload stops
 // draining everything behind it.
-func TestAFailedJobIsRetriedThenParked(t *testing.T) {
+func TestAFailedJobIsReleasedThenParked(t *testing.T) {
 	q := &fakeQueue{}
-	j, _ := queue.New(grant(), "", "invoice.send", nil)
+	j, _ := jobs.New(grant(), "", "invoice.send", nil)
 	_ = q.Push(context.Background(), grant(), j)
 
 	w := queue.NewWorker(q, queue.WorkerOptions{Poll: time.Millisecond, MaxAttempts: 2})
-	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, queue.Job) error {
+	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, *jobs.Job) error {
 		return errors.New("the invoice has no address")
 	})
 
@@ -253,26 +363,29 @@ func TestAFailedJobIsRetriedThenParked(t *testing.T) {
 	defer cancel()
 
 	waitFor(t, func() bool {
-		_, failures := q.state()
-		return len(failures) == 1
-	}, "the failure was not recorded")
+		_, rel, _ := q.state()
+		return len(rel) == 1
+	}, "the first failure did not put the job back")
 
-	_, failures := q.state()
-	if failures[0].park {
-		t.Error("the first failure parked the job instead of scheduling a retry")
+	_, rel, failed := q.state()
+	if len(failed) != 0 {
+		t.Error("the first failure parked the job instead of releasing it")
 	}
-	if failures[0].cause == nil || failures[0].cause.Error() != "the invoice has no address" {
-		t.Errorf("the reason was not passed to the driver: %v", failures[0].cause)
+	if rel[0].job.LastError != "the invoice has no address" {
+		t.Errorf("the reason did not reach the driver: %q", rel[0].job.LastError)
+	}
+	if rel[0].delay <= 0 {
+		t.Errorf("the job came back immediately, with no backoff: %s", rel[0].delay)
 	}
 
 	// The second attempt reaches MaxAttempts and parks.
-	failed := j
-	failed.Attempts = 1
-	_ = q.Push(context.Background(), grant(), failed)
+	second := j
+	second.Attempts = 1
+	_ = q.Push(context.Background(), grant(), second)
 
 	waitFor(t, func() bool {
-		_, failures := q.state()
-		return len(failures) == 2 && failures[1].park
+		_, _, failed := q.state()
+		return len(failed) == 1
 	}, "the job was not parked after the last attempt")
 }
 
@@ -280,19 +393,19 @@ func TestAFailedJobIsRetriedThenParked(t *testing.T) {
 // handler, and a job retried forever is one nobody ever looks at.
 func TestAJobWithNoHandlerParksImmediately(t *testing.T) {
 	q := &fakeQueue{}
-	j, _ := queue.New(grant(), "", "report.monthly", nil)
+	j, _ := jobs.New(grant(), "", "report.monthly", nil)
 	_ = q.Push(context.Background(), grant(), j)
 
 	w := queue.NewWorker(q, queue.WorkerOptions{Poll: time.Millisecond})
-	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, queue.Job) error { return nil })
+	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, *jobs.Job) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { _ = w.Run(ctx) }()
 	defer cancel()
 
 	waitFor(t, func() bool {
-		_, failures := q.state()
-		return len(failures) == 1 && failures[1-1].park
+		_, _, failed := q.state()
+		return len(failed) == 1
 	}, "a job with no handler was not parked")
 }
 
@@ -330,11 +443,11 @@ func waitFor(t *testing.T, cond func() bool, message string) {
 
 // TestTheBatchRunsInParallel is a bug an audit found.
 //
-// Reserve hides the whole batch for one Lease, and the batch used to run one
-// job at a time. With Concurrency 4, Lease 5m and a two-minute handler, the
-// fourth job started at minute six -- past its own lease, visible again to
-// another worker, and running in both. At-least-once became exactly-twice for
-// the tail of every batch.
+// Pop hides the whole batch for one Lease, and the batch used to run one job at
+// a time. With Concurrency 4, Lease 5m and a two-minute handler, the fourth job
+// started at minute six -- past its own lease, visible again to another worker,
+// and running in both. At-least-once became exactly-twice for the tail of every
+// batch.
 //
 // The handler here waits for all four to arrive. Serially, none of them ever
 // does, and the test times out instead of passing slowly.
@@ -343,7 +456,7 @@ func TestTheBatchRunsInParallel(t *testing.T) {
 
 	q := &fakeQueue{}
 	for range batch {
-		j, err := queue.New(grant(), "", "slow.thing", nil)
+		j, err := jobs.New(grant(), "", "slow.thing", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -359,7 +472,7 @@ func TestTheBatchRunsInParallel(t *testing.T) {
 		Concurrency: batch,
 		Poll:        time.Millisecond,
 	})
-	w.HandleFunc("slow.thing", func(ctx context.Context, _ auth.Grant, _ queue.Job) error {
+	w.HandleFunc("slow.thing", func(ctx context.Context, _ auth.Grant, _ *jobs.Job) error {
 		arrived <- struct{}{}
 		select {
 		case <-release:
@@ -395,7 +508,7 @@ func TestTheBatchRunsInParallel(t *testing.T) {
 // of every statement is the cost that matters.
 func TestProductionBuildsNoCollector(t *testing.T) {
 	q := &fakeQueue{}
-	j, err := queue.New(grant(), "", "invoice.send", nil)
+	j, err := jobs.New(grant(), "", "invoice.send", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,7 +518,7 @@ func TestProductionBuildsNoCollector(t *testing.T) {
 
 	seen := make(chan *log.Collector, 1)
 	w := queue.NewWorker(q, queue.WorkerOptions{Poll: time.Millisecond})
-	w.HandleFunc("invoice.send", func(ctx context.Context, _ auth.Grant, _ queue.Job) error {
+	w.HandleFunc("invoice.send", func(ctx context.Context, _ auth.Grant, _ *jobs.Job) error {
 		seen <- log.FromContext(ctx)
 		return nil
 	})
@@ -432,7 +545,7 @@ func TestProductionBuildsNoCollector(t *testing.T) {
 // collector used to be created and dropped, so the console never showed one.
 func TestARecorderPutsTheJobOnTheConsole(t *testing.T) {
 	q := &fakeQueue{}
-	j, err := queue.New(grant(), "", "invoice.send", nil)
+	j, err := jobs.New(grant(), "", "invoice.send", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +555,7 @@ func TestARecorderPutsTheJobOnTheConsole(t *testing.T) {
 
 	recorder := log.NewRecorder(8)
 	w := queue.NewWorker(q, queue.WorkerOptions{Poll: time.Millisecond, Recorder: recorder})
-	w.HandleFunc("invoice.send", func(ctx context.Context, _ auth.Grant, _ queue.Job) error {
+	w.HandleFunc("invoice.send", func(ctx context.Context, _ auth.Grant, _ *jobs.Job) error {
 		// Something a person would want to see on the page.
 		log.FromContext(ctx).RecordEvent("invoice.rendered", nil)
 		return nil
@@ -470,4 +583,78 @@ func TestARecorderPutsTheJobOnTheConsole(t *testing.T) {
 	if events := recent[0].Collector.Events(); len(events) != 1 || events[0].Name != "invoice.rendered" {
 		t.Errorf("what the handler recorded did not survive: %+v", events)
 	}
+}
+
+// TestAMiddlewareThatReleasedTheJobIsNotOverruled is why the worker asks
+// DeletedOrReleased before it settles anything: WithoutOverlapping releases the
+// job for ten seconds, and a worker that released it again for the backoff --
+// or parked it -- would undo the decision the middleware just made.
+func TestAMiddlewareThatReleasedTheJobIsNotOverruled(t *testing.T) {
+	q := &fakeQueue{}
+	j, _ := jobs.New(grant(), "", "invoice.send", nil)
+	_ = q.Push(context.Background(), grant(), j)
+
+	w := queue.NewWorker(q, queue.WorkerOptions{
+		Poll:        time.Millisecond,
+		MaxAttempts: 1, // the worker would park on the first failure
+		Middleware: []middleware.Middleware{
+			middleware.Func(func(ctx context.Context, j *jobs.Job, _ func(context.Context) error) error {
+				return j.Release(ctx, 10*time.Second)
+			}),
+		},
+	})
+	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, *jobs.Job) error {
+		t.Error("the handler ran even though the middleware released the job")
+		return nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { _ = w.Run(ctx) }()
+	defer cancel()
+
+	waitFor(t, func() bool {
+		_, rel, _ := q.state()
+		return len(rel) == 1
+	}, "the middleware never released the job")
+
+	deleted, rel, failed := q.state()
+	if len(deleted) != 0 {
+		t.Error("a released job was also deleted")
+	}
+	if len(failed) != 0 {
+		t.Error("a released job was also parked")
+	}
+	if rel[0].delay != 10*time.Second {
+		t.Errorf("the worker overrode the middleware's delay: %s", rel[0].delay)
+	}
+}
+
+// TestAMiddlewareThatSkipsTheJobDeletesIt: a middleware that returns without
+// touching the job says the work is handled, and handled work is done.
+func TestAMiddlewareThatSkipsTheJobDeletesIt(t *testing.T) {
+	q := &fakeQueue{}
+	j, _ := jobs.New(grant(), "", "invoice.send", nil)
+	_ = q.Push(context.Background(), grant(), j)
+
+	w := queue.NewWorker(q, queue.WorkerOptions{
+		Poll: time.Millisecond,
+		Middleware: []middleware.Middleware{
+			middleware.Func(func(context.Context, *jobs.Job, func(context.Context) error) error {
+				return nil
+			}),
+		},
+	})
+	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, *jobs.Job) error {
+		t.Error("the handler ran even though the middleware skipped the job")
+		return nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { _ = w.Run(ctx) }()
+	defer cancel()
+
+	waitFor(t, func() bool {
+		deleted, _, _ := q.state()
+		return len(deleted) == 1
+	}, "the skipped job was not deleted")
 }

@@ -1,40 +1,35 @@
 package number
 
-import "math"
-
-// decimalUnits are the SI units, a thousand apart. The list stops at EB because
-// an int64 of bytes cannot reach a zettabyte.
-var decimalUnits = []string{"B", "KB", "MB", "GB", "TB", "PB", "EB"}
+// decimalUnits are the SI units, a thousand apart.
+var decimalUnits = []string{"B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB", "RB", "QB"}
 
 // binaryUnits are the IEC units, 1024 apart.
-var binaryUnits = []string{"B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"}
+var binaryUnits = []string{"B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB", "RiB", "QiB"}
 
-// FileSize renders a byte count in SI units, a thousand bytes to the kilobyte.
+// FileSize answers for Number::fileSize. It renders a byte count against the
+// largest unit it reaches.
 //
-//	FileSize(1000, 0) // "1 KB"
-//	FileSize(1536, 2) // "1.54 KB"
-func FileSize(bytes int64, precision int) string {
-	return fileSize(bytes, precision, 1000, decimalUnits)
-}
-
-// FileSizeBinary renders a byte count in IEC units, 1024 bytes to the kibibyte.
+//	FileSize(1000, 0, -1, false) // "1 KB"
+//	FileSize(1024, 0, -1, true)  // "1 KiB"
+//	FileSize(1536, 2, -1, false) // "1.54 KB"
 //
-//	FileSizeBinary(1024, 0) // "1 KiB"
-//	FileSizeBinary(1536, 1) // "1.5 KiB"
-func FileSizeBinary(bytes int64, precision int) string {
-	return fileSize(bytes, precision, 1024, binaryUnits)
-}
-
-// fileSize steps up a unit for every whole multiple of base, so 999 bytes stay
-// bytes and 1000 of them become the next unit up.
-func fileSize(bytes int64, precision int, base float64, units []string) string {
-	v := float64(bytes)
-	magnitude := math.Abs(v)
-	unit := 0
-	for magnitude >= base && unit < len(units)-1 {
-		v /= base
-		magnitude /= base
-		unit++
+// Illuminate defaults $precision to 0, $maxPrecision to null and
+// $useBinaryPrefix to false; Go has no default arguments, so all three are
+// required and a negative maxPrecision is the null.
+//
+// The unit steps up while the count is more than nine tenths of the base, which
+// is Illuminate's own bound and is why 999 bytes read "1 KB" and 900 of them
+// read "900 B". A negative count never passes that test, so it keeps its unit:
+// FileSize(-1000, 0, -1, false) is "-1,000 B", as it is in Illuminate.
+func FileSize(bytes float64, precision, maxPrecision int, useBinaryPrefix bool) string {
+	base, units := 1000.0, decimalUnits
+	if useBinaryPrefix {
+		base, units = 1024.0, binaryUnits
 	}
-	return Format(v, precision) + " " + units[unit]
+	i := 0
+	for bytes/base > 0.9 && i < len(units)-1 {
+		bytes /= base
+		i++
+	}
+	return formatWith(bytes, precision, maxPrecision) + " " + units[i]
 }

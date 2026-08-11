@@ -20,7 +20,9 @@ type Fluent struct {
 	attributes map[string]any
 }
 
-// NewFluent answers to Fluent::__construct.
+// NewFluent answers to Fluent::__construct, and to the fluent() helper of
+// helpers.php, which is that constructor and nothing else; PHP keeps class and
+// function names apart and Go does not, so the one name is the type's.
 func NewFluent(attributes map[string]any) *Fluent {
 	f := &Fluent{attributes: map[string]any{}}
 	f.dataSource = dataSource{

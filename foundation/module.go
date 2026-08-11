@@ -6,17 +6,72 @@ import (
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database"
+	"github.com/arandu-io/hesape/routing"
 )
 
+// Module is the only unit of composition in the framework.
+//
 // A module is a directory. It registers its own routes, its own migrations and
 // its own dependency graph. There is no injection container and no reflection
 // based resolution: the wiring is explicit, and the CLI generates the file that
 // instantiates everything.
 //
-// The Module interface itself -- Name plus Routes -- is not declared yet,
-// because Routes names the router and hesape/routing is empty. See the package
-// comment. Everything below is optional and independent of it: a module
-// implements as many of these as it has reasons to.
+// Every third-party module implements this interface and nothing else. It is
+// the public contract of the framework -- change it and the whole ecosystem
+// breaks, so change it with great care.
+//
+// # What it answers to in Laravel
+//
+// Illuminate\Support\ServiceProvider is the shape: register() declares what the
+// component brings and boot() runs once the rest of the application is up, and
+// loadRoutesFrom(), loadMigrationsFrom() and loadViewsFrom() are how a package
+// hands the framework the three things it ships. Here Routes is
+// loadRoutesFrom(), [Migratable] is loadMigrationsFrom(), [Bootable] is boot(),
+// and register() has no counterpart at all: what it registers is a binding in a
+// container, and constructing the value and passing it is the whole of that
+// (ADR 0001, ADR 0045).
+//
+// # Why the name is Module and not ServiceProvider
+//
+// ADR 0044 says a name is Laravel's without exception, and this is the case
+// where following that rule would mislead rather than orient. A ServiceProvider
+// provides services TO a container: it is named after the mechanism ADR 0001
+// rejected, and somebody arriving from Laravel would open it looking for
+// $this->app->singleton and find no app to call it on. What this interface
+// names is the vertical slice of ADR 0003 -- a directory with its routes, its
+// migrations, its policies and its repository, composed by hand in
+// bootstrap/app.go -- and Module is what docs/01 has called that since before
+// the framework had a router.
+//
+// The rule is about vocabulary a Laravel developer already holds. It is not
+// worth spending on a word whose meaning here would be the opposite of the one
+// they hold.
+//
+// Everything below is optional and independent of Module: a module implements
+// as many of these as it has reasons to, and a module that implements none of
+// them is still a module.
+type Module interface {
+	// Name is the stable identifier of the module: a lowercase slug, no spaces.
+	//
+	// It is what `aru routes` prints beside a route, what the route names are
+	// prefixed with, and what a diagnosis is attributed to. Stable means a
+	// rename is a new module rather than the same one under another name: the
+	// route names built from it are in published links and in tests.
+	Name() string
+
+	// Routes registers the module's HTTP routes.
+	//
+	// It is Laravel's loadRoutesFrom(), with the difference that the routes are
+	// code rather than a file the framework requires: the router is handed in,
+	// so nothing is registered on a global and there is nothing to reset
+	// between tests.
+	//
+	// A module with no HTTP surface -- a relay, a scheduler-only module -- still
+	// implements it and returns having registered nothing. An empty
+	// implementation is one line, and an optional interface for the absence of
+	// routes would be a second shape to check for what a no-op already says.
+	Routes(r *routing.Router)
+}
 
 // Bootable is optional: implement it when the module needs to prepare state at
 // boot -- open a pool, warm a cache, register codecs.

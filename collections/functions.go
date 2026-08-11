@@ -31,11 +31,17 @@ func Map[T, U any](c Collection[T], callback func(value T, key int) U) Collectio
 }
 
 // MapSpread answers to
-// Illuminate\Support\Traits\EnumeratesValues::mapSpread.
-func MapSpread[T, U any](c Collection[[]T], callback func(values ...T) U) Collection[U] {
+// Illuminate\Support\Traits\EnumeratesValues::mapSpread: each nested chunk
+// spread across the callback's arguments.
+//
+// The PHP appends the key to the chunk before spreading it -- $chunk[] = $key
+// -- so the callback receives the chunk's elements and then the position. That
+// is why the element type is []any and not []T: the trailing key is an int and
+// the elements need not be.
+func MapSpread[U any](c Collection[[]any], callback func(values ...any) U) Collection[U] {
 	out := make([]U, len(c))
-	for i, v := range c {
-		out[i] = callback(v...)
+	for i, chunk := range c {
+		out[i] = callback(spreadWithKey(chunk, i)...)
 	}
 	return Collection[U](out)
 }
@@ -43,14 +49,23 @@ func MapSpread[T, U any](c Collection[[]T], callback func(values ...T) U) Collec
 // EachSpread answers to
 // Illuminate\Support\Traits\EnumeratesValues::eachSpread.
 //
+// As in MapSpread the position is appended to the chunk before it is spread.
 // Returning false from the callback stops the walk, as it does in PHP.
-func EachSpread[T any](c Collection[[]T], callback func(values ...T) bool) Collection[[]T] {
-	for _, v := range c {
-		if !callback(v...) {
+func EachSpread(c Collection[[]any], callback func(values ...any) bool) Collection[[]any] {
+	for i, chunk := range c {
+		if !callback(spreadWithKey(chunk, i)...) {
 			break
 		}
 	}
 	return c
+}
+
+// spreadWithKey is the PHP's $chunk[] = $key, done on a copy so that the
+// collection's own chunk is not grown by being spread.
+func spreadWithKey(chunk []any, key int) []any {
+	out := make([]any, 0, len(chunk)+1)
+	out = append(out, chunk...)
+	return append(out, key)
 }
 
 // MapInto answers to Illuminate\Support\Traits\EnumeratesValues::mapInto.

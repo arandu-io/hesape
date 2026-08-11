@@ -176,7 +176,7 @@ func TestListReturnsKeysSortedAndScoped(t *testing.T) {
 	put(t, d, grant(tenant), "notes.txt", "n")
 	put(t, d, grant(other), "invoices/secret.pdf", "s")
 
-	got, err := d.List(ctx, grant(tenant), "invoices/")
+	got, err := d.AllFiles(ctx, grant(tenant), "invoices/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestListReturnsKeysSortedAndScoped(t *testing.T) {
 		t.Fatalf("List = %v, want %v", got, want)
 	}
 
-	all, err := d.List(ctx, grant(tenant), "")
+	all, err := d.AllFiles(ctx, grant(tenant), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestListCannotBeAskedForAnotherTenant(t *testing.T) {
 	ctx := context.Background()
 	put(t, d, grant(other), "secret.pdf", "s")
 
-	got, err := d.List(ctx, grant(tenant), other+"/")
+	got, err := d.AllFiles(ctx, grant(tenant), other+"/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,10 +209,10 @@ func TestListCannotBeAskedForAnotherTenant(t *testing.T) {
 		t.Fatalf("List = %v, want nothing", got)
 	}
 
-	if _, err := d.List(ctx, grant(tenant), "../"+other); err == nil {
+	if _, err := d.AllFiles(ctx, grant(tenant), "../"+other); err == nil {
 		t.Fatal("a prefix that escapes was accepted")
 	}
-	if _, err := d.List(ctx, auth.Grant{}, ""); !errors.Is(err, filesystem.ErrNoTenant) {
+	if _, err := d.AllFiles(ctx, auth.Grant{}, ""); !errors.Is(err, filesystem.ErrNoTenant) {
 		t.Fatalf("err = %v, want ErrNoTenant", err)
 	}
 }
@@ -279,7 +279,7 @@ func TestCopyCannotCrossTenants(t *testing.T) {
 	}
 }
 
-func TestDeletePrefix(t *testing.T) {
+func TestDeleteDirectory(t *testing.T) {
 	d := filesystem.NewDisk("local", newMem())
 	ctx := context.Background()
 	g := grant(tenant)
@@ -288,10 +288,10 @@ func TestDeletePrefix(t *testing.T) {
 	put(t, d, g, "tmp/b.txt", "b")
 	put(t, d, g, "keep.txt", "k")
 
-	if err := d.DeletePrefix(ctx, g, "tmp/"); err != nil {
+	if err := d.DeleteDirectory(ctx, g, "tmp/"); err != nil {
 		t.Fatal(err)
 	}
-	left, err := d.List(ctx, g, "")
+	left, err := d.AllFiles(ctx, g, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,9 +300,9 @@ func TestDeletePrefix(t *testing.T) {
 	}
 }
 
-// TestDeletePrefixStopsAtTheTenant: the blast radius is the tenant, even for an
+// TestDeleteDirectoryStopsAtTheTenant: the blast radius is the tenant, even for an
 // empty prefix, and never wider.
-func TestDeletePrefixStopsAtTheTenant(t *testing.T) {
+func TestDeleteDirectoryStopsAtTheTenant(t *testing.T) {
 	const other = "22222222-2222-4222-8222-222222222222"
 	d := filesystem.NewDisk("local", newMem())
 	ctx := context.Background()
@@ -310,7 +310,7 @@ func TestDeletePrefixStopsAtTheTenant(t *testing.T) {
 	put(t, d, grant(tenant), "a.txt", "a")
 	put(t, d, grant(other), "b.txt", "b")
 
-	if err := d.DeletePrefix(ctx, grant(tenant), ""); err != nil {
+	if err := d.DeleteDirectory(ctx, grant(tenant), ""); err != nil {
 		t.Fatal(err)
 	}
 	if ok, err := d.Exists(ctx, grant(other), "b.txt"); err != nil || !ok {

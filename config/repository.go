@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/arandu-io/hesape/collections"
 )
 
 // Repository mirrors Illuminate\Config\Repository: the dotted-key store behind
@@ -224,12 +226,21 @@ func (r *Repository) Array(key string, def ...any) ([]any, error) {
 // Collection answers to collection: it returns the specified array
 // configuration value as a collection.
 //
-// Illuminate wraps the array in Illuminate\Support\Collection. The mirror of
-// that class in hesape/collections is a set of functions over a slice --
-// collections.Map, collections.Filter -- so the wrapper is the slice, and this
-// is [Repository.Array] under the name a Laravel developer reaches for.
-func (r *Repository) Collection(key string, def ...any) ([]any, error) {
-	return r.Array(key, def...)
+// Illuminate wraps the array in Illuminate\Support\Collection, and this wraps
+// it in the mirror of that class, [collections.Collection]. It is
+// [Repository.Array] plus the wrap, exactly as the PHP is: the error is the one
+// array() raises, because collection() is `new Collection($this->array(...))`
+// and a value that is not an array never reaches the constructor.
+//
+// collections.Collection[any] has []any as its underlying type, so a caller
+// that only ranges over the result reads it as a list; a caller that wants
+// Map, Filter or First has them without converting.
+func (r *Repository) Collection(key string, def ...any) (collections.Collection[any], error) {
+	list, err := r.Array(key, def...)
+	if err != nil {
+		return nil, err
+	}
+	return collections.Collection[any](list), nil
 }
 
 // Set answers to set: it sets a given configuration value.

@@ -13,6 +13,18 @@ import (
 // package state and resetting it between cases is the only way these stay
 // independent of each other's order.
 
+// testConnector is a Connector reduced to the two things Register reads. The
+// real ones are modules of their own under connectors/, and importing one here
+// would put its driver in this module's go.sum -- which is the arrangement
+// these tests exist to keep working.
+type testConnector struct {
+	dialect Dialect
+	driver  string
+}
+
+func (c testConnector) Dialect() Dialect   { return c.dialect }
+func (c testConnector) DriverName() string { return c.driver }
+
 func reset(t *testing.T) {
 	t.Helper()
 	registryMu.Lock()
@@ -27,7 +39,7 @@ func reset(t *testing.T) {
 
 func TestOpenUsesTheRegisteredDriver(t *testing.T) {
 	reset(t)
-	Register(DialectPostgres, "pgx")
+	Register(testConnector{DialectPostgres, "pgx"})
 
 	var opened string
 	swap(t, func(driverName, dsn string) (*sql.DB, error) {
@@ -59,7 +71,7 @@ func TestOpenUsesTheRegisteredDriver(t *testing.T) {
 // and nothing in that message says so.
 func TestAMissingDriverSaysWhichOneAndHow(t *testing.T) {
 	reset(t)
-	Register(DialectSQLite, "sqlite")
+	Register(testConnector{DialectSQLite, "sqlite"})
 
 	_, _, err := Open(Config{
 		Connection: DialectPostgres,
@@ -73,7 +85,7 @@ func TestAMissingDriverSaysWhichOneAndHow(t *testing.T) {
 	for _, want := range []string{
 		"pgsql",  // what is configured
 		"sqlite", // what is linked, so the gap is visible
-		"go get github.com/arandu-io/database/pgx", // the command that fixes it
+		"go get github.com/arandu-io/hesape/database/connectors/pgx", // the command that fixes it
 		// And where the import goes. It said cmd/app/main.go, a file the
 		// skeleton does not have -- ADR 0019 moved the entrypoint to main.go
 		// in the root. The message sent whoever hit it to look for a
@@ -99,8 +111,8 @@ func TestTheErrorIsUsefulWithNothingLinked(t *testing.T) {
 	if !strings.Contains(err.Error(), "linked: none") {
 		t.Errorf("the error does not say that nothing is linked:\n%s", err)
 	}
-	if !strings.Contains(err.Error(), "database/sqlite") {
-		t.Errorf("the error does not name the compartment to install:\n%s", err)
+	if !strings.Contains(err.Error(), "database/connectors/sqlite") {
+		t.Errorf("the error does not name the connector to install:\n%s", err)
 	}
 }
 
@@ -108,7 +120,7 @@ func TestTheErrorIsUsefulWithNothingLinked(t *testing.T) {
 // finding out at boot beats finding out from a query that behaves differently.
 func TestTwoDriversForOneDialectPanics(t *testing.T) {
 	reset(t)
-	Register(DialectSQLite, "sqlite")
+	Register(testConnector{DialectSQLite, "sqlite"})
 
 	defer func() {
 		recovered := recover()
@@ -119,7 +131,7 @@ func TestTwoDriversForOneDialectPanics(t *testing.T) {
 			t.Errorf("the panic does not say what to do: %v", recovered)
 		}
 	}()
-	Register(DialectSQLite, "sqlite3")
+	Register(testConnector{DialectSQLite, "sqlite3"})
 }
 
 // TestRegisteringTheSameDriverTwiceIsFine: a module imported through two paths
@@ -127,8 +139,8 @@ func TestTwoDriversForOneDialectPanics(t *testing.T) {
 // break a build for no reason.
 func TestRegisteringTheSameDriverTwiceIsFine(t *testing.T) {
 	reset(t)
-	Register(DialectSQLite, "sqlite")
-	Register(DialectSQLite, "sqlite")
+	Register(testConnector{DialectSQLite, "sqlite"})
+	Register(testConnector{DialectSQLite, "sqlite"})
 
 	if got := Registered(); len(got) != 1 {
 		t.Fatalf("registered = %v, want one entry", got)
@@ -137,9 +149,9 @@ func TestRegisteringTheSameDriverTwiceIsFine(t *testing.T) {
 
 func TestRegisteredIsSorted(t *testing.T) {
 	reset(t)
-	Register(DialectPostgres, "pgx")
-	Register(DialectMySQL, "mysql")
-	Register(DialectSQLite, "sqlite")
+	Register(testConnector{DialectPostgres, "pgx"})
+	Register(testConnector{DialectMySQL, "mysql"})
+	Register(testConnector{DialectSQLite, "sqlite"})
 
 	got := Registered()
 	for i := 1; i < len(got); i++ {
@@ -154,7 +166,7 @@ func TestRegisteredIsSorted(t *testing.T) {
 // corruption and is really a pool setting.
 func TestSQLiteGetsOneWriter(t *testing.T) {
 	reset(t)
-	Register(DialectSQLite, "arandu-open-test")
+	Register(testConnector{DialectSQLite, "arandu-open-test"})
 	swap(t, sql.Open)
 
 	db, closeDB, err := Open(Config{
@@ -176,7 +188,7 @@ func TestSQLiteGetsOneWriter(t *testing.T) {
 // a queue in this process.
 func TestTheServerPoolIsBounded(t *testing.T) {
 	reset(t)
-	Register(DialectPostgres, "arandu-open-test")
+	Register(testConnector{DialectPostgres, "arandu-open-test"})
 	swap(t, sql.Open)
 
 	db, closeDB, err := Open(Config{
@@ -197,7 +209,7 @@ func TestTheServerPoolIsBounded(t *testing.T) {
 // directory above it, and the error it gives for a missing one names neither.
 func TestTheSQLiteDirectoryIsCreated(t *testing.T) {
 	reset(t)
-	Register(DialectSQLite, "arandu-open-test")
+	Register(testConnector{DialectSQLite, "arandu-open-test"})
 	swap(t, sql.Open)
 
 	_, closeDB, err := Open(Config{
@@ -228,7 +240,7 @@ func swap(t *testing.T, fn func(string, string) (*sql.DB, error)) {
 // is exactly why it would have been found in production and not in a test.
 func TestOpenDoesNotDeadlockAgainstRegister(t *testing.T) {
 	reset(t)
-	Register(DialectSQLite, "arandu-open-test")
+	Register(testConnector{DialectSQLite, "arandu-open-test"})
 	swap(t, sql.Open)
 
 	done := make(chan struct{})
@@ -274,7 +286,7 @@ func TestOpenDoesNotDeadlockAgainstRegister(t *testing.T) {
 // never runs in CI.
 func TestOpenRefusesADatabaseItCannotReach(t *testing.T) {
 	reset(t)
-	Register(DialectPostgres, "unreachable-probe")
+	Register(testConnector{DialectPostgres, "unreachable-probe"})
 	sql.Register("unreachable-probe", unreachableDriver{})
 
 	original := sqlOpen

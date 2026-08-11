@@ -46,7 +46,24 @@
 //
 // # Reading a schema this package did not write
 //
-// Parse is deliberately absent, and so is the deserializer half of the
-// Illuminate component. It arrives with the first caller that has to read a
-// schema it did not build, and not before.
+// [Deserialize] is the other direction -- Deserializer.php, reached in PHP
+// through JsonSchema::fromArray, which is [FromArray] here. It reads a decoded
+// document into the same values the builder produces, so a schema that arrived
+// as JSON is checked by the same [Validate] as one written in Go.
+//
+// It reads the subset this package can represent, and every keyword outside it
+// is an error naming the keyword rather than a silent drop. There is no Parse
+// that takes bytes: [encoding/json.Unmarshal] into a map[string]any is the
+// decoder, and a second one here would be a second answer to what the document
+// says.
+//
+// # Where the types live
+//
+// Illuminate keeps its eight type classes in a Types sub-namespace and reaches
+// them through the JsonSchema facade -- JsonSchema::string(). Here they are the
+// package itself, so the call reads jsonschema.String(). The sub-package
+// hesape/jsonschema/types holds no types and exists only to say so: splitting
+// them out would put half a schema behind a second import path for no gain, and
+// [Validate] switches over a closed set that has to be declared where it is
+// checked.
 package jsonschema

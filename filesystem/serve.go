@@ -11,9 +11,13 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// SendOptions is how a file is offered.
-type SendOptions struct {
+// ServeOptions is how a file is offered.
+type ServeOptions struct {
 	// Download asks the browser to save the file instead of rendering it.
+	//
+	// It is the whole difference between Illuminate's download() and its
+	// response(): one field rather than two functions, because two functions
+	// that differ by a header is two places to fix the header (RULE 9).
 	Download bool
 	// Filename is what to call it on the way out. Empty means the last segment
 	// of the key.
@@ -25,7 +29,11 @@ type SendOptions struct {
 	CacheControl string
 }
 
-// Send writes a stored file to an HTTP response.
+// Serve writes a stored file to an HTTP response.
+//
+// It answers for Illuminate's serve(), download() and response() at once --
+// the range-aware one, the attachment one and the inline one are the same
+// function here, and which of the three it is comes from [ServeOptions].
 //
 // This is the half that makes "no symlink into a document root" a real answer
 // rather than a refusal. A file is served by a route, the route runs a Policy
@@ -40,7 +48,7 @@ type SendOptions struct {
 // X-Content-Type-Options is nosniff, so a browser cannot decide a .txt is HTML;
 // and the disposition filename is escaped, because a filename with a quote and
 // a semicolon in it is a header injection with a friendly name.
-func Send(w http.ResponseWriter, r *http.Request, g auth.Grant, d *Disk, key string, opt SendOptions) error {
+func Serve(w http.ResponseWriter, r *http.Request, g auth.Grant, d *Disk, key string, opt ServeOptions) error {
 	f, err := d.Get(r.Context(), g, key)
 	if err != nil {
 		return err

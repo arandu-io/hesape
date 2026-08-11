@@ -11,14 +11,14 @@ import (
 	"github.com/arandu-io/hesape/filesystem"
 )
 
-func TestSendWritesTheFileAndTheHeaders(t *testing.T) {
+func TestServeWritesTheFileAndTheHeaders(t *testing.T) {
 	d := filesystem.NewDisk("local", newMem())
 	g := grant(tenant)
 	put(t, d, g, "notes.txt", "the body")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/files/notes.txt", nil)
-	if err := filesystem.Send(rec, req, g, d, "notes.txt", filesystem.SendOptions{}); err != nil {
+	if err := filesystem.Serve(rec, req, g, d, "notes.txt", filesystem.ServeOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -38,17 +38,17 @@ func TestSendWritesTheFileAndTheHeaders(t *testing.T) {
 	}
 }
 
-// TestSendAlwaysSendsNosniff: the stored type came from the key, and nosniff is
+// TestServeAlwaysSendsNosniff: the stored type came from the key, and nosniff is
 // what stops a browser deciding a .txt was HTML all along. It is not an option,
 // because the day it is one is the day somebody turns it off.
-func TestSendAlwaysSendsNosniff(t *testing.T) {
+func TestServeAlwaysSendsNosniff(t *testing.T) {
 	d := filesystem.NewDisk("local", newMem())
 	g := grant(tenant)
 	put(t, d, g, "notes.txt", "<script>alert(1)</script>")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/files/notes.txt", nil)
-	if err := filesystem.Send(rec, req, g, d, "notes.txt", filesystem.SendOptions{}); err != nil {
+	if err := filesystem.Serve(rec, req, g, d, "notes.txt", filesystem.ServeOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
@@ -56,16 +56,16 @@ func TestSendAlwaysSendsNosniff(t *testing.T) {
 	}
 }
 
-// TestSendNeverCachesInAShared cache: a shared cache holding one tenant's file
+// TestServeNeverCachesInAShared cache: a shared cache holding one tenant's file
 // is the same leak as a missing prefix, arriving later.
-func TestSendNeverCachesInASharedCache(t *testing.T) {
+func TestServeNeverCachesInASharedCache(t *testing.T) {
 	d := filesystem.NewDisk("local", newMem())
 	g := grant(tenant)
 	put(t, d, g, "notes.txt", "x")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/files/notes.txt", nil)
-	if err := filesystem.Send(rec, req, g, d, "notes.txt", filesystem.SendOptions{}); err != nil {
+	if err := filesystem.Serve(rec, req, g, d, "notes.txt", filesystem.ServeOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := rec.Header().Get("Cache-Control"); !strings.Contains(got, "private") {
@@ -73,15 +73,15 @@ func TestSendNeverCachesInASharedCache(t *testing.T) {
 	}
 }
 
-func TestSendOffersADownloadWithAName(t *testing.T) {
+func TestServeOffersADownloadWithAName(t *testing.T) {
 	d := filesystem.NewDisk("local", newMem())
 	g := grant(tenant)
 	put(t, d, g, "2026-08/q1.pdf", "%PDF")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/files/x", nil)
-	opt := filesystem.SendOptions{Download: true, Filename: `relatório "final".pdf`}
-	if err := filesystem.Send(rec, req, g, d, "2026-08/q1.pdf", opt); err != nil {
+	opt := filesystem.ServeOptions{Download: true, Filename: `relatório "final".pdf`}
+	if err := filesystem.Serve(rec, req, g, d, "2026-08/q1.pdf", opt); err != nil {
 		t.Fatal(err)
 	}
 
@@ -96,16 +96,16 @@ func TestSendOffersADownloadWithAName(t *testing.T) {
 	}
 }
 
-// TestSendDefaultsTheNameToTheLastSegmentOfTheKey, so a download of
+// TestServeDefaultsTheNameToTheLastSegmentOfTheKey, so a download of
 // "2026-08/q1.pdf" does not land as "2026-08".
-func TestSendDefaultsTheNameToTheLastSegmentOfTheKey(t *testing.T) {
+func TestServeDefaultsTheNameToTheLastSegmentOfTheKey(t *testing.T) {
 	d := filesystem.NewDisk("local", newMem())
 	g := grant(tenant)
 	put(t, d, g, "2026-08/q1.pdf", "%PDF")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/files/x", nil)
-	if err := filesystem.Send(rec, req, g, d, "2026-08/q1.pdf", filesystem.SendOptions{Download: true}); err != nil {
+	if err := filesystem.Serve(rec, req, g, d, "2026-08/q1.pdf", filesystem.ServeOptions{Download: true}); err != nil {
 		t.Fatal(err)
 	}
 	if got := rec.Header().Get("Content-Disposition"); !strings.Contains(got, "q1.pdf") {
@@ -113,15 +113,15 @@ func TestSendDefaultsTheNameToTheLastSegmentOfTheKey(t *testing.T) {
 	}
 }
 
-// TestSendWritesNothingWhenItFails: the caller decides the status, because
+// TestServeWritesNothingWhenItFails: the caller decides the status, because
 // ErrNotFound is a 404 and a Grant refusal is a 403, and only the caller has an
 // exception handler.
-func TestSendWritesNothingWhenItFails(t *testing.T) {
+func TestServeWritesNothingWhenItFails(t *testing.T) {
 	d := filesystem.NewDisk("local", newMem())
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/files/missing", nil)
-	err := filesystem.Send(rec, req, grant(tenant), d, "missing.pdf", filesystem.SendOptions{})
+	err := filesystem.Serve(rec, req, grant(tenant), d, "missing.pdf", filesystem.ServeOptions{})
 	if !errors.Is(err, filesystem.ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
@@ -133,19 +133,19 @@ func TestSendWritesNothingWhenItFails(t *testing.T) {
 	}
 }
 
-// TestSendCannotServeAnotherTenantsFile: the route ran a Policy, and the Grant
+// TestServeCannotServeAnotherTenantsFile: the route ran a Policy, and the Grant
 // that Policy produced is the only thing that reaches the disk.
-func TestSendCannotServeAnotherTenantsFile(t *testing.T) {
+func TestServeCannotServeAnotherTenantsFile(t *testing.T) {
 	const other = "22222222-2222-4222-8222-222222222222"
 	d := filesystem.NewDisk("local", newMem())
 	put(t, d, grant(other), "secret.pdf", "theirs")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/files/secret.pdf", nil)
-	if err := filesystem.Send(rec, req, grant(tenant), d, "secret.pdf", filesystem.SendOptions{}); !errors.Is(err, filesystem.ErrNotFound) {
+	if err := filesystem.Serve(rec, req, grant(tenant), d, "secret.pdf", filesystem.ServeOptions{}); !errors.Is(err, filesystem.ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
-	if err := filesystem.Send(rec, req, auth.Grant{}, d, "secret.pdf", filesystem.SendOptions{}); !errors.Is(err, filesystem.ErrNoTenant) {
+	if err := filesystem.Serve(rec, req, auth.Grant{}, d, "secret.pdf", filesystem.ServeOptions{}); !errors.Is(err, filesystem.ErrNoTenant) {
 		t.Fatalf("err = %v, want ErrNoTenant", err)
 	}
 	if rec.Body.Len() != 0 {
@@ -153,9 +153,9 @@ func TestSendCannotServeAnotherTenantsFile(t *testing.T) {
 	}
 }
 
-// TestSendServesARangeWhenTheDriverCanSeek: a video does not play without it,
+// TestServeServesARangeWhenTheDriverCanSeek: a video does not play without it,
 // and the driver that can is the common one.
-func TestSendServesARangeWhenTheDriverCanSeek(t *testing.T) {
+func TestServeServesARangeWhenTheDriverCanSeek(t *testing.T) {
 	d := filesystem.NewDisk("local", newMem())
 	g := grant(tenant)
 	put(t, d, g, "clip.bin", "0123456789")
@@ -163,7 +163,7 @@ func TestSendServesARangeWhenTheDriverCanSeek(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/files/clip.bin", nil)
 	req.Header.Set("Range", "bytes=2-5")
-	if err := filesystem.Send(rec, req, g, d, "clip.bin", filesystem.SendOptions{}); err != nil {
+	if err := filesystem.Serve(rec, req, g, d, "clip.bin", filesystem.ServeOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if rec.Code != http.StatusPartialContent {
@@ -174,16 +174,16 @@ func TestSendServesARangeWhenTheDriverCanSeek(t *testing.T) {
 	}
 }
 
-// TestSendStillWorksWhenTheDriverCannotSeek: a streaming driver gets a plain
+// TestServeStillWorksWhenTheDriverCannotSeek: a streaming driver gets a plain
 // copy -- correct, just without resumable downloads.
-func TestSendStillWorksWhenTheDriverCannotSeek(t *testing.T) {
+func TestServeStillWorksWhenTheDriverCannotSeek(t *testing.T) {
 	d := filesystem.NewDisk("stream", streamAdapter{newMem()})
 	g := grant(tenant)
 	put(t, d, g, "notes.txt", "the body")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/files/notes.txt", nil)
-	if err := filesystem.Send(rec, req, g, d, "notes.txt", filesystem.SendOptions{}); err != nil {
+	if err := filesystem.Serve(rec, req, g, d, "notes.txt", filesystem.ServeOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := rec.Body.String(); got != "the body" {
@@ -203,7 +203,7 @@ func TestAHeadRequestCarriesNoBody(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodHead, "/files/notes.txt", nil)
-	if err := filesystem.Send(rec, req, g, d, "notes.txt", filesystem.SendOptions{}); err != nil {
+	if err := filesystem.Serve(rec, req, g, d, "notes.txt", filesystem.ServeOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if rec.Body.Len() != 0 {

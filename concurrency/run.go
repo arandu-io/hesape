@@ -13,8 +13,18 @@ import (
 // or the whole call waits for work whose result is already discarded.
 type Task[T any] func(ctx context.Context) (T, error)
 
-// Run executes every task concurrently and returns their results in argument
-// order.
+// Run answers Driver::run -- ForkDriver, ProcessDriver and SyncDriver all
+// declare it -- and Concurrency::run with it: every task runs concurrently and
+// the results come back in argument order.
+//
+// Argument order is what PHP promises too, in three spellings: SyncDriver maps
+// over the array, ForkDriver ksorts the results and array_combines them back
+// onto the original keys, ProcessDriver names each process after its key. A set
+// of results in completion order would be a different set every run.
+//
+// The $timeout of ProcessDriver::run is the context: context.WithTimeout around
+// the call is one deadline for the set, which is what a per-process timeout
+// adds up to, and it reaches the tasks so they can stop rather than be killed.
 //
 // Run waits for every goroutine it starts, so none outlives the call. The first
 // task to fail cancels the context the others run under, and tasks that had not
@@ -35,11 +45,46 @@ func Run[T any](ctx context.Context, tasks ...Task[T]) ([]T, error) {
 	return RunWith(ctx, 0, tasks...)
 }
 
+// Defer answers Driver::defer -- ForkDriver, ProcessDriver and SyncDriver all
+// declare it -- and Concurrency::defer with it: it hands back the callback that
+// starts the tasks once the current work is finished, and runs nothing itself.
+//
+// Illuminate answers with a DeferredCallback that its defer() helper has
+// already pushed onto the collection the HTTP kernel drains after the response
+// is sent. Here the callback is the func, and the caller decides when it runs.
+// DeferredCallback belongs to hesape/support/deferpkg, which is empty; naming
+// that type here would put a second one in the tree.
+//
+// The context is detached with context.WithoutCancel: the tasks run after the
+// request they came from is over, and a deferred callback that inherits a
+// cancelled context never runs at all. Deadlines go with it, so a deferred task
+// that needs one sets its own.
+//
+// The callback runs the tasks the way [Run] does -- concurrently, the first
+// failure cancelling the rest, a panic answering as a [PanicError]. Results are
+// discarded, as ForkDriver::defer discards what run() returns; only the failure
+// comes back, so the caller has something to log for work nobody was waiting
+// for. PHP returns void there and lets the exception handler catch. Invoking
+// the callback twice runs the tasks twice, as invoking a Closure twice does.
+func Defer[T any](ctx context.Context, tasks ...Task[T]) func() error {
+	deferred := context.WithoutCancel(ctx)
+
+	return func() error {
+		_, err := Run(deferred, tasks...)
+		return err
+	}
+}
+
 // RunWith is [Run] with a ceiling on how many tasks run at the same time.
 //
 // A limit of zero or less is no ceiling, which is what [Run] passes. Use a
 // ceiling when the tasks contend for something finite: database connections, an
 // API that rate limits, memory proportional to each payload.
+//
+// Illuminate has no method here to mirror: ProcessDriver::run starts one
+// process per task and its pool has no width. A goroutine is cheap enough that
+// a hundred of them are free and a hundred connections are not, which is the
+// one place where what the mechanism costs changes what the API needs.
 func RunWith[T any](ctx context.Context, limit int, tasks ...Task[T]) ([]T, error) {
 	if len(tasks) == 0 {
 		return nil, nil

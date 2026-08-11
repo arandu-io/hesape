@@ -130,6 +130,69 @@ func CreateFromTimestampMs(timestamp int64) time.Time {
 	return time.UnixMilli(timestamp)
 }
 
+// ErrNotAnOrderedID is what Carbon::createFromId hits through Ulid::fromString
+// and Uuid::fromString when the string is neither.
+var ErrNotAnOrderedID = errors.New("support: id is neither an ordered UUID nor a ULID")
+
+// crockford is the alphabet a ULID is written in, which leaves out I, L, O and
+// U so that no two characters can be misread for each other.
+const crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+// CreateFromId answers to Carbon::createFromId: the instant an ordered UUID or
+// a ULID was made at, which both carry in their first 48 bits.
+//
+// The PHP leans on ramsey/uuid and symfony/uid; the milliseconds are read here
+// instead, because the core carries no third-party code. A string that is
+// neither is [ErrNotAnOrderedID], which is what the PHP throws.
+func CreateFromId(id string) (time.Time, error) {
+	if milliseconds, ok := ulidMilliseconds(id); ok {
+		return time.UnixMilli(milliseconds), nil
+	}
+	if milliseconds, ok := orderedUUIDMilliseconds(id); ok {
+		return time.UnixMilli(milliseconds), nil
+	}
+	return time.Time{}, ErrNotAnOrderedID
+}
+
+// ulidMilliseconds is Ulid::isValid followed by getDateTime: 26 Crockford
+// characters, of which the first 10 are the milliseconds.
+func ulidMilliseconds(id string) (int64, bool) {
+	if len(id) != 26 {
+		return 0, false
+	}
+	milliseconds := int64(0)
+	for i, r := range strings.ToUpper(id) {
+		index := strings.IndexRune(crockford, r)
+		if index < 0 {
+			return 0, false
+		}
+		if i < 10 {
+			milliseconds = milliseconds<<5 | int64(index)
+		}
+	}
+	return milliseconds, true
+}
+
+// orderedUUIDMilliseconds is Uuid::getDateTime for the ordered shapes: the
+// first 48 bits are the milliseconds, which is version 7 and the ordered UUID
+// Laravel writes.
+func orderedUUIDMilliseconds(id string) (int64, bool) {
+	hex := strings.ReplaceAll(id, "-", "")
+	if len(hex) != 32 {
+		return 0, false
+	}
+	milliseconds, err := strconv.ParseInt(hex[:12], 16, 64)
+	if err != nil {
+		return 0, false
+	}
+	for _, r := range hex {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+			return 0, false
+		}
+	}
+	return milliseconds, true
+}
+
 // SetTestNow answers to Carbon::setTestNow: pin the instant every later [Now]
 // reports. A nil value is the PHP null and hands time back to the clock.
 func SetTestNow(value *time.Time) {
@@ -176,6 +239,27 @@ func Use(c Clock) {
 		c = SystemClock{}
 	}
 	clock = c
+}
+
+// clockFunc lets a plain function be a [Clock], which is what
+// DateFactory::useCallable takes.
+type clockFunc func() time.Time
+
+// Now answers to Carbon::now, read from the function.
+func (f clockFunc) Now() time.Time { return f() }
+
+// UseCallable answers to DateFactory::useCallable: the function every later
+// [Now] reads.
+//
+// DateFactory::useClass and DateFactory::useFactory take a Carbon subclass name
+// and a Carbon factory, neither of which Go has: there is no class string and
+// no second date type. The Clock is what is left of the three.
+func UseCallable(callable func() time.Time) {
+	if callable == nil {
+		UseDefault()
+		return
+	}
+	Use(clockFunc(callable))
 }
 
 // UseDefault answers to DateFactory::useDefault: back to the system clock, with

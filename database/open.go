@@ -23,18 +23,20 @@ var (
 // servers running, and the thing under test is the resolution, not the network.
 var sqlOpen = sql.Open
 
-// Register records that a driver for this dialect is linked into the binary.
+// Register records that a connector for this dialect is linked into the binary.
 //
-// Driver compartments call it from init(). It is not meant for application code:
-// a project that registers its own driver name is a project that will get a
+// Connectors call it from init(). It is not meant for application code: a
+// project that registers its own driver name is a project that will get a
 // different pool policy than every other, for no gain.
 //
 // Registering the same dialect twice panics rather than picking one. Two drivers
 // for one dialect is an import nobody meant to add, and finding out at boot is
 // better than finding out from a query that behaves differently.
-func Register(d Dialect, driverName string) {
+func Register(c Connector) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
+
+	d, driverName := c.Dialect(), c.DriverName()
 
 	if existing, taken := registry[d]; taken && existing != driverName {
 		panic(fmt.Sprintf("database: %s is already registered to the %q driver, and %q wants it too -- remove one of the imports",
@@ -163,14 +165,14 @@ func driverFor(d Dialect) (string, error) {
 		}
 	}
 	return "", fmt.Errorf(
-		"DB_CONNECTION is %s and no driver for it is linked into this binary (linked: %s).\n"+
-			"Add it:\n\n    go get github.com/arandu-io/database/%s\n\n"+
-			"and blank-import it in main.go, next to the other drivers:\n\n    _ \"github.com/arandu-io/database/%s\"",
-		d, linked, compartment(d), compartment(d))
+		"DATABASE_URL asks for %s and no connector for it is linked into this binary (linked: %s).\n"+
+			"Add it:\n\n    go get github.com/arandu-io/hesape/database/connectors/%s\n\n"+
+			"and blank-import it in main.go, next to the other connectors:\n\n    _ \"github.com/arandu-io/hesape/database/connectors/%s\"",
+		d, linked, connectorFor(d), connectorFor(d))
 }
 
-// compartment is the module name that carries the driver for a dialect.
-func compartment(d Dialect) string {
+// connectorFor is the module that carries the connector for a dialect.
+func connectorFor(d Dialect) string {
 	switch d {
 	case DialectPostgres:
 		return "pgx"

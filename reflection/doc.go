@@ -33,23 +33,40 @@
 // # The reflection that is already here
 //
 // Refusing to build this package is worth less than knowing where runtime
-// reflection got in anyway, so it was counted. As of ADR 0046 the whole of
-// hesape imports reflect in four non-test files, at twelve call sites, and the
-// full list with what each one is for and whether a generic or an interface
-// could replace it is in docs/adr/0046-macro-condicao-e-reflexao.md.
+// reflection got in anyway, so it was counted. ADR 0046 audits eight non-test
+// files line by line, at twenty-one call sites, giving for each one what it is
+// for and whether a generic or an interface could replace it. Read the audit in
+// docs/adr/0046-macro-condicao-e-reflexao.md.
+//
+// The repository total is larger than the audited set and moves faster: thirteen
+// non-test files at the last measurement, with collections/arr alone answering
+// for nearly half. Trust the command below over any number written here.
 //
 // The shape of the list, so that a reader knows what to expect before opening
-// it: nine of the twelve sites are the same question asked of a value whose
-// static type is any -- is it a map, is it a slice, how long is it, is it nil.
-// They are in support/arr and in testing, both of which mirror a PHP surface
-// typed mixed, and a generic cannot answer a question about a value whose type
-// was already erased at the call. One site, view/runtime.go, is a better panic
-// message on a path that only runs when a template is already wrong, and it is
-// the one that could move to build time, since kyse knows the type it compiled.
-// None of the twelve is on a request path, and none of them decides
-// authorization, routing, dispatch or persistence.
+// it. Ten of the twenty-one are in packages that exist only to serve tests,
+// testing and support/testing/fakes: not _test.go files, so the count includes
+// them on purpose, but nothing serving a request reaches them. Nine of the
+// eleven that remain are the same question asked of a value whose static type is
+// any -- is it a map, is it a slice, how long is it, is it nil, are these two
+// equal. They are in support/arr, support/optional and log/context, all three
+// mirroring a PHP surface typed mixed, and a generic cannot answer a question
+// about a value whose type was already erased at the call. Of the last two, one
+// is a better panic message on a path that only runs when a template is already
+// wrong (view/runtime.go), and it is the one that moves to build time once kyse
+// type-checks the template; the other is BackedEnum::tryFrom
+// (support/interactswithdata.go), where an interface would work and was turned
+// down on price, because it would put a method on every enum in every
+// application.
 //
-// The count is the point rather than the verdict. Rerun it before believing it:
+// None of it decides authorization, routing, dispatch or persistence: auth,
+// routing, validation, queue, events, database, session, encryption, hashing,
+// http and cache import reflect in zero non-test files. That is the sentence
+// worth keeping, and it was re-measured after the last additions rather than
+// carried over from the first count.
 //
-//	grep -rn '"reflect"' --include='*.go' . | grep -v _test.go
+// The count is the point rather than the verdict, and it moves -- four files,
+// then eight, then thirteen, in the hours it took to write ADR 0046, as other
+// packages landed. Rerun it before believing any number above:
+//
+//	grep -rln '"reflect"' --include='*.go' . | grep -v _test.go | grep -v reflection/doc.go
 package reflection

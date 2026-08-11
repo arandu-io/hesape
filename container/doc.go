@@ -12,9 +12,27 @@
 // Read against the clone at laravel_illuminate/container: Container.php,
 // BoundMethod.php, ContextualBindingBuilder.php, RewindableGenerator.php,
 // Util.php and the sixteen files under Attributes/. Checked against
-// reference_laravel 13.24.0, which adds two attributes the clone does not
-// have -- BindWhen and RequestAttribute -- both covered in the attribute table
-// below. 64 public methods, all of them accounted for here.
+// reference_laravel 13.24.0, which adds two attributes the clone does not have
+// -- BindWhen and RequestAttribute -- so the attribute table below has eighteen
+// rows.
+//
+// The public surface, counted so that it can be recounted: 55 methods on
+// Container, 1 static on BoundMethod, 4 on ContextualBindingBuilder, 2 on
+// RewindableGenerator, 4 statics on Util. 66, plus the two constructors. Every
+// one of them appears below.
+//
+// Container::resolve is not among the 66: it is protected, and make, makeWith
+// and get are the public doors onto it, which is why it shares their row. The
+// name resolve is public in the component all the same -- it is the static
+// handler each of the fourteen contextual attributes exposes -- and the global
+// resolve() helper belongs to Foundation, not here.
+//
+// plans/cobertura.sh reports 64 for this component, and the gap is arithmetic
+// rather than disagreement: it counts distinct names across the whole
+// directory, Attributes/ included, and drops the ones beginning with __. 66,
+// less __get and __set, less the second call -- Container and BoundMethod each
+// have one and the name is counted once -- plus the resolve the attributes
+// share. It reports 0 of 64, which is the number this file exists to explain.
 //
 // # Why not
 //
@@ -95,6 +113,14 @@
 //	alias       the consumer declares the interface it needs
 //	extend      a decorator type implementing the same interface
 //
+// bind has a second shape worth naming, because it is the one that looks most
+// like Go. Passing a Closure as the abstract sends it through
+// bindBasedOnClosureReturnTypes, which registers it under every type in the
+// closure's return type list: bind(fn (): Mailer => new SMTPMailer) makes
+// SMTPMailer the Mailer. That is a return type deciding a binding, which is
+// what a Go constructor already is -- except that the Go version is checked
+// when the constructor is written rather than when something asks for a Mailer.
+//
 // bindIf, singletonIf and scopedIf ask "is this already registered?", which is
 // a question about a runtime map. There is no map. Either the line is in
 // bootstrap/app.go or it is not, and you can see which. Where a collaborator is
@@ -139,13 +165,14 @@
 //	resolved                the value exists; there is no lazy slot to interrogate
 //	isShared / isAlias      no lifetimes and no aliases to interrogate
 //	getBindings             bootstrap/app.go, read top to bottom
+//	getAlias                the consumer's interface is already the name
 //	currentlyResolving      the stack trace, which already says it better
 //
 // At the one edge where a collaborator is truly optional, `bound` is a nil check
 // on a named field -- `a.Billing != nil` -- and the field name says which one.
 //
 // Lifecycle -- forgetInstance, forgetInstances, forgetScopedInstances, flush,
-// dropStaleInstances, forgetExtenders:
+// forgetExtenders, and the protected dropStaleInstances behind them:
 //
 //	all six       build a new App
 //
@@ -155,9 +182,15 @@
 // to forget. This is the single largest thing gained by not having a container,
 // and it is worth more than everything on this page costs.
 //
+// forgetExtenders is the one that is not about tests: it drops the decorators
+// registered for a type, so the next resolution comes back undecorated. Here
+// the decorator is applied by wrapping, in one line, so removing it is removing
+// that line -- and the line is in Build rather than in whichever package
+// happened to call extend.
+//
 // Hooks -- beforeResolving, resolving, afterResolving, afterResolvingAttribute,
-// rebinding, refresh, bindMethod, hasMethodBinding, callMethodBinding,
-// whenHasAttribute:
+// fireAfterResolvingAttributeCallbacks, rebinding, refresh, bindMethod,
+// hasMethodBinding, callMethodBinding, whenHasAttribute:
 //
 //	resolving family    do it once, in Build, in front of you
 //	rebinding/refresh   see below
@@ -169,24 +202,82 @@
 //
 //	logger := slog.Default().With("env", cfg.App.Env, "component", "billing")
 //
+// fireAfterResolvingAttributeCallbacks is the odd one: it is public, but it is
+// not for you. It is the container calling itself -- BoundMethod invokes it
+// after resolving each parameter, because BoundMethod is a separate class and
+// PHP has no other way to reach in. It is public by accident of structure, not
+// by design, and there is no resolution here for it to run after.
+//
 // rebinding and refresh fire when a binding is replaced after something already
-// resolved it, so the old holder can be updated. Replacing a collaborator on a
-// running application is not a thing this framework does. When the underlying
-// need is real -- a value reloaded while the process runs and read
-// concurrently -- it is one type, and it is honest about the concurrency:
+// resolved it, so the old holder can be updated. refresh is the narrow form:
+// it registers a callback that calls target.method(instance), which is a setter
+// on an object that is already running. Replacing a collaborator on a running
+// application is not a thing this framework does. When the underlying need is
+// real -- a value reloaded while the process runs and read concurrently -- it
+// is one type, and it is honest about the concurrency:
 //
 //	type Reloadable[T any] struct{ v atomic.Pointer[T] }
 //
 //	func (r *Reloadable[T]) Load() *T     { return r.v.Load() }
 //	func (r *Reloadable[T]) Store(next *T) { r.v.Store(next) }
 //
+// Environment -- resolveEnvironmentUsing, currentEnvironmentIs:
+//
+//	both    an if on cfg.App.Env, in Build
+//
+// These two exist to serve #[Bind]. The attribute is repeatable and carries a
+// list of environments, so a class can declare "in production the Mailer is
+// this one, otherwise that one". currentEnvironmentIs asks the callback that
+// resolveEnvironmentUsing installed -- and returns false when none was
+// installed -- while ['*'] is the fallback taken when no listed environment
+// matched. In Go it is a function with an if in it:
+//
+//	func mailerFor(cfg Config, log *slog.Logger) Mailer {
+//		if cfg.App.Env == "production" {
+//			return SMTPMailer{Host: cfg.App.Name}
+//		}
+//		return LogMailer{Log: log}
+//	}
+//
+// The difference is where the answer lives. With the attribute, finding out
+// what production actually gets means opening every candidate class and reading
+// what is written on it, because the binding is declared on the thing being
+// bound. Here both branches are in one function and the question is answered by
+// reading it.
+//
+// Util -- arrayWrap, unwrapIfClosure, getParameterClassName,
+// getContextualAttributeFromDependency:
+//
+// The class is marked @internal and is the reflection the rest of the component
+// stands on. getParameterClassName reads a class name off a ReflectionParameter
+// and getContextualAttributeFromDependency pulls the ContextualAttribute off
+// one; both are PHP reflection, skip reason 1, and there is no resolution here
+// for them to serve. The other two are copies Illuminate made to keep this
+// component free of Illuminate\Support: arrayWrap is Arr::wrap, written where
+// it belongs, in support/arr.Wrap. unwrapIfClosure is the value() helper --
+// call it if it is a closure, otherwise return it -- and in Go a func value and
+// a value are different types, so the signature already says which one arrived
+// and there is nothing to unwrap.
+//
+// RewindableGenerator -- getIterator, count:
+//
+// IteratorAggregate and Countable, skip reason 1. What the type is for is in
+// "tagged".
+//
 // Everything else -- when, whenHasAttribute, addContextualBinding, needs, give,
-// giveTagged, giveConfig, tag, tagged, getInstance, setInstance,
-// resolveEnvironmentUsing, currentEnvironmentIs, resolveFromAttribute, and the
-// ArrayAccess and __get/__set pairs -- is covered in the four sections below,
-// in the attribute table, or is PHP language interface with no Go equivalent.
-// getInstance and setInstance are the global container itself; they are what
-// ADR 0001 rejected, not a method within it.
+// giveTagged, giveConfig, tag, tagged, resolveFromAttribute, getInstance,
+// setInstance and the two constructors -- is covered in the four sections
+// below, or in the attribute table. getInstance and setInstance are the global
+// container itself; they are what ADR 0001 rejected, not a method within it.
+//
+// That leaves six that are PHP language interface, skip reason 1: offsetExists,
+// offsetGet, offsetSet and offsetUnset are ArrayAccess, which lets the container
+// be subscripted like an array -- $app['config'] -- and __get and __set are the
+// same thing spelled with a dot, delegating straight back to the subscript.
+// They add no behaviour: offsetExists is bound, offsetGet is make, offsetSet is
+// bind, and offsetUnset drops the binding, the instance and the resolved flag
+// together. Go has no operator to overload and no hook for a field that was
+// never declared.
 //
 // # singleton
 //
@@ -350,15 +441,25 @@
 // of the wrong type is a build failure.
 //
 // The order is now the order in the argument list, which is where somebody
-// looking for it will look.
+// looking for it will look. Laravel's tag appends without checking, so tagging
+// the same class twice puts it in the list twice and tagged yields it twice;
+// the slice has the same property, and in the slice you can see it.
 //
-// The laziness is RewindableGenerator.php: `tagged` returns a generator so the
-// members are only constructed if iterated, and Countable so counting does not
-// construct them. That matters when a tag holds twenty services and a request
-// uses two. It is a real feature and this drops it. If a member is expensive
-// enough to matter, the element type is a factory -- `[]func() Channel` -- and
-// the laziness is visible in the type rather than hidden in the container. In
-// practice the members are handles, and building them all at boot costs
+// The laziness is RewindableGenerator.php: tagged returns one, so the members
+// are only constructed if iterated, and its count() is the number of registered
+// abstracts, so counting does not construct them either. That matters when a
+// tag holds twenty services and a request uses two. It is a real feature and
+// this drops it. If a member is expensive enough to matter, the element type is
+// a factory and the laziness is visible in the type rather than hidden in the
+// container:
+//
+//	type LazyNotifier struct{ channels []func() Channel }
+//
+//	func NewLazyNotifier(channels ...func() Channel) *LazyNotifier {
+//		return &LazyNotifier{channels: channels}
+//	}
+//
+// In practice the members are handles, and building them all at boot costs
 // nothing and fails at boot instead of on the twentieth request.
 //
 // giveTagged and giveConfig are the contextual forms of the same thing: a slice
@@ -394,43 +495,56 @@
 //
 // # Attributes
 //
-// The sixteen files under Attributes/ are contextual bindings written on a
-// constructor parameter. Every one of them is a struct field, filled in
-// bootstrap/app.go, or a read from the request:
+// The sixteen files under Attributes/, plus BindWhen and RequestAttribute from
+// 13.24.0, are contextual bindings written on a constructor parameter. Fourteen
+// of the eighteen implement ContextualAttribute and have a static resolve that
+// reaches into the container for one named thing; every one of them is a struct
+// field, filled in bootstrap/app.go, or a read from the request:
 //
-//	#[Auth('web')]              a field: auth *auth.Service, guard chosen at wiring
+//	#[Auth('web')]              a field holding the guard, picked at wiring
 //	#[Authenticated]            GrantFrom(ctx) -- the Grant carries the caller
 //	#[CurrentUser]              GrantFrom(ctx); it subclasses Authenticated
-//	#[Cache('redis')]           a field: cache *cache.Repository
+//	#[Cache('redis')]           a field holding the store: cache *cache.Repository
 //	#[Config('app.name')]       a field on the typed config struct: cfg.App.Name
-//	#[Context('trace')]         context.WithValue with an unexported key type
-//	#[Database('reporting')]    a field: db *data.DB
+//	#[Context('trace')]         logcontext.For(ctx).Get("trace")
+//	#[Database('reporting')]    a field holding the connection, picked at wiring
 //	#[DB]                       same; it subclasses Database
-//	#[Give(Foo::class)]         the argument you pass
+//	#[Give(Foo::class, params)] the argument you pass, built how you built it
 //	#[Log('billing')]           a field: log *slog.Logger, or log.With("component", ...)
 //	#[RouteParameter('id')]     r.PathValue("id") in the handler
-//	#[RequestAttribute('x')]    a value on r.Context(), same as #[Context]
-//	#[Storage('s3')]            a field: disk *filesystem.Disk
+//	#[RequestAttribute('x')]    a value on r.Context(), put there by middleware
+//	#[Storage('s3')]            a field holding the disk: disk *filesystem.Disk
 //	#[Tag('reports')]           a slice field; see "tagged"
 //	#[Singleton] / #[Scoped]    see "singleton" and "scoped"
 //	#[Bind] / #[BindWhen]       a line in bootstrap/app.go; the condition is an if
 //
+// The four class-level ones work as a set and are worth reading together.
+// #[Bind] and #[BindWhen] name a concrete for the class they sit on -- by
+// environment list and by closure respectively -- and #[Singleton] or #[Scoped]
+// on that same class decides the lifetime the binding is registered with. Four
+// attributes on two classes to express what Build expresses in one line and one
+// if.
+//
 // #[Authenticated] and #[CurrentUser] are worth separating from the rest. They
-// resolve the authenticated user from the container, which means any object
-// anywhere can ask who is logged in. Here the caller arrives as a
-// security.Grant on the request context and reaches the data layer as an
-// argument, because RULE 14 makes the Grant the only source of tenant for SQL
-// and RULE 17 requires it on reads as well as writes. Making that reachable
-// without passing it is precisely what this framework will not do.
+// call the auth userResolver, which means any object anywhere can ask who is
+// logged in -- and that it returns Authenticatable|null, so the parameter is
+// nullable and nothing makes the guest case get handled. Here the caller
+// arrives as a security.Grant on the request context and reaches the data layer
+// as an argument, and the accessor returns an error rather than a nil user,
+// because RULE 14 makes the Grant the only source of tenant for SQL and RULE 17
+// requires it on reads as well as writes. Making that reachable without passing
+// it is precisely what this framework will not do.
 //
 // #[Config] is the one where the replacement is better rather than merely
-// equivalent. `#[Config('app.nmae')]` injects null and the failure surfaces
-// somewhere else entirely; cfg.App.Nmae does not build.
+// equivalent. #[Config('app.nmae')] injects the default, usually null, and the
+// failure surfaces somewhere else entirely; cfg.App.Nmae does not build.
 //
-// #[Bind] and #[BindWhen] put the binding on the class being bound, with
-// BindWhen taking a closure and Bind taking a list of environments. A binding
-// that varies by environment is an if in Build, next to the other one, where
-// both branches are readable at once.
+// #[Context] is the one that already has a home in this module. It reads the
+// log context repository, which is per-request key/value that follows the work
+// into logs and queued jobs, and its hidden flag means "carry it, do not print
+// it". That is log/context here, and the read is logcontext.For(ctx).Get(key),
+// or GetHidden(key) for the hidden half. The ctx it reads from is the request's,
+// which is form A of "scoped" and is the one place this document recommends it.
 //
 // # What is actually given up
 //

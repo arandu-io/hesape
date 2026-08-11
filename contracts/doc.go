@@ -3,7 +3,7 @@
 // # There is no package here
 //
 // In Go an interface belongs to the package that consumes it, not to a tree of
-// its own. Illuminate\Contracts is a namespace of 150 interfaces that every
+// its own. Illuminate\Contracts is a namespace of 150 contracts that every
 // other component type-hints against; the Go equivalent of each one is declared
 // where it is used -- cache.Store in package cache, queue.Queue in package
 // queue, session.Handler in package session -- so a second copy declared here
@@ -26,5 +26,8 @@
 // because that is the list somebody is looking for.
 //
 // Measured on 10/08/2026 against the clone in laravel_illuminate/contracts:
-// 85 MISSING, 42 PARTIAL, 23 EXISTS.
+// 81 MISSING, 39 PARTIAL, 30 EXISTS. The count moves while the other packages
+// are being written -- cookie went from two MISSING to two EXISTS on the day
+// this was measured -- so the map carries its date and the reader should check
+// it before reusing the numbers.
 package contracts

@@ -27,11 +27,6 @@ import (
 // of them -- the shape os/exec's own tests use.
 const helperEnv = "HESAPE_PROCESS_HELPER"
 
-// sys is what these tests exercise, held as a Runner rather than a System: it
-// is the interface the rest of the collection depends on, and a method that
-// only exists on the concrete type is a method nothing can call.
-var sys Runner = System{}
-
 func TestMain(m *testing.M) {
 	if os.Getenv(helperEnv) != "" {
 		// syscall.Exit and not os.Exit: under -race the runtime spends a full
@@ -101,78 +96,120 @@ func helper(args []string) int {
 	return 0
 }
 
-// helperCommand is a Command that runs the stand-in program.
-func helperCommand(args ...string) Command {
-	return Command{
-		Name: os.Args[0],
-		Args: args,
-		Env:  map[string]string{helperEnv: "1"},
-	}
+// helperCommand is a PendingProcess that runs the stand-in program.
+//
+// Every pending process needs a factory, because the factory is what holds the
+// fakes and the recording; the ones here get a fresh one, which fakes nothing,
+// so the command really runs.
+func helperCommand(args ...string) *PendingProcess {
+	return helperCommandOn(NewFactory(), args...)
+}
+
+// helperCommandOn is helperCommand on a factory the test already holds, for the
+// tests where the factory is the thing under test.
+func helperCommandOn(factory *Factory, args ...string) *PendingProcess {
+	return factory.NewPendingProcess().
+		Command(append([]string{os.Args[0]}, args...)...).
+		Env(map[string]string{helperEnv: "1"})
 }
 
 func TestRunCapturesOutput(t *testing.T) {
 	t.Parallel()
 
-	res, err := sys.Run(t.Context(), helperCommand("both"))
+	c := helperCommand("both")
+	line := c.String()
+
+	res, err := c.Run(t.Context(), nil, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if res.Stdout != "out" || res.Stderr != "err" {
-		t.Fatalf("streams: stdout %q, stderr %q", res.Stdout, res.Stderr)
+	if res.Output() != "out" || res.ErrorOutput() != "err" {
+		t.Fatalf("streams: stdout %q, stderr %q", res.Output(), res.ErrorOutput())
 	}
-	if res.ExitCode != 0 {
-		t.Fatalf("exit code %d, want 0", res.ExitCode)
+	if res.ExitCode() != 0 {
+		t.Fatalf("exit code %d, want 0", res.ExitCode())
 	}
-	if res.Duration <= 0 {
-		t.Fatalf("duration %s, want something positive", res.Duration)
+	if !res.Successful() || res.Failed() {
+		t.Fatalf("a command that exited 0 reports Successful=%t, Failed=%t", res.Successful(), res.Failed())
 	}
-	if res.Truncated {
-		t.Fatal("nothing was capped, so nothing should be reported as truncated")
-	}
-	if res.Name != os.Args[0] {
-		t.Fatalf("name %q, want the program that ran", res.Name)
+	if res.Command() != line {
+		t.Fatalf("command %q, want the line that ran, %q", res.Command(), line)
 	}
 }
 
-func TestRunReportsExitStatusWithWhatTheProgramSaid(t *testing.T) {
+func TestRunReportsAFailedExitAsAResultAndNotAsAnError(t *testing.T) {
 	t.Parallel()
 
-	res, err := sys.Run(t.Context(), helperCommand("exit", "3"))
+	res, err := helperCommand("exit", "3").Run(t.Context(), nil, nil)
 
-	var exit *ExitError
-	if !errors.As(err, &exit) {
-		t.Fatalf("error %v (%T), want an *ExitError", err, err)
+	// A command that exits non-zero is not an error, and that is the behaviour
+	// under test rather than a shortcut: Laravel's run() does not throw for it,
+	// failed() reports it, and Throw is what raises it.
+	if err != nil {
+		t.Fatalf("a command that exited 3 came back as an error: %v", err)
 	}
-	if exit.ExitCode != 3 {
-		t.Fatalf("exit code %d, want 3", exit.ExitCode)
+	if res.ExitCode() != 3 {
+		t.Fatalf("exit code %d, want 3", res.ExitCode())
 	}
-	if !strings.Contains(exit.Error(), "the reason it failed") {
-		t.Fatalf("message %q does not repeat what the program wrote", exit)
+	if !res.Failed() {
+		t.Fatal("a command that exited 3 reports itself as successful")
 	}
-	// The Result is filled anyway: a caller that wanted the output should not
-	// have to take it back out of the error.
-	if res.ExitCode != 3 || res.Stderr != "the reason it failed" {
-		t.Fatalf("result %+v does not describe the run", res)
+	if res.ErrorOutput() != "the reason it failed" {
+		t.Fatalf("error output %q, want what the program wrote", res.ErrorOutput())
+	}
+	if !res.SeeInErrorOutput("reason") {
+		t.Fatalf("SeeInErrorOutput found nothing in %q", res.ErrorOutput())
+	}
+
+	// The result is what carries the failure, and Throw is the one place it
+	// becomes an error -- with what the program said still in the message.
+	same, err := res.Throw(nil)
+	var exception *ProcessFailedException
+	if !errors.As(err, &exception) {
+		t.Fatalf("error %v (%T), want a *ProcessFailedException", err, err)
+	}
+	if same != res {
+		t.Fatal("Throw handed back a result that is not the one it was called on")
+	}
+	if exception.Code != 3 {
+		t.Fatalf("exception code %d, want the exit code 3", exception.Code)
+	}
+	if !strings.Contains(exception.Error(), "the reason it failed") {
+		t.Fatalf("message %q does not repeat what the program wrote", exception)
 	}
 }
 
-func TestExitErrorMessageIsCutButTheFieldIsNot(t *testing.T) {
+func TestProcessFailedExceptionSaysTheCommandTheCodeAndBothStreams(t *testing.T) {
 	t.Parallel()
 
-	said := strings.Repeat("z", excerpt*2)
-	err := &ExitError{Name: "loud", ExitCode: 1, Stderr: said}
-	if len(err.Error()) > excerpt+64 {
-		t.Fatalf("message is %d bytes, want an excerpt", len(err.Error()))
+	result := NewFakeProcessResult("git push", 128, "everything up to date", "no such remote")
+	exception := NewProcessFailedException(result)
+
+	for _, want := range []string{
+		`The command "git push" failed.`,
+		"Exit Code: 128",
+		"Output:",
+		"everything up to date",
+		"Error Output:",
+		"no such remote",
+	} {
+		if !strings.Contains(exception.Error(), want) {
+			t.Errorf("message does not contain %q:\n%s", want, exception.Error())
+		}
 	}
-	if !strings.HasSuffix(err.Error(), "...") {
-		t.Fatalf("message %q does not say it was cut", err.Error()[:32])
+	// The result is attached whole, so a caller that wants the output does not
+	// have to take it back out of the message.
+	if exception.Result != result {
+		t.Fatal("the exception does not carry the result it was built from")
 	}
-	if err.Stderr != said {
-		t.Fatal("the field lost bytes the message was only supposed to omit")
+
+	// A failure with no status is still a failure, and 0 would say the opposite.
+	if code := NewProcessFailedException(NewFakeProcessResult("hush", 0, "", "")).Code; code != 1 {
+		t.Fatalf("code %d for a failure with no status, want 1", code)
 	}
 }
 
-func TestRunHonoursDir(t *testing.T) {
+func TestRunHonoursThePathItWasGiven(t *testing.T) {
 	t.Parallel()
 
 	// EvalSymlinks because a temporary directory is under a symlink on macOS,
@@ -182,14 +219,12 @@ func TestRunHonoursDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c := helperCommand("cwd")
-	c.Dir = dir
-	res, err := sys.Run(t.Context(), c)
+	res, err := helperCommand("cwd").Path(dir).Run(t.Context(), nil, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if res.Stdout != dir {
-		t.Fatalf("ran in %q, want %q", res.Stdout, dir)
+	if res.Output() != dir {
+		t.Fatalf("ran in %q, want %q", res.Output(), dir)
 	}
 }
 
@@ -198,45 +233,47 @@ func TestRunHonoursDir(t *testing.T) {
 func TestEnvIsAddedToTheOneThisProcessHas(t *testing.T) {
 	t.Setenv("HESAPE_PROCESS_INHERITED", "from the parent")
 
-	c := helperCommand("env", "HESAPE_PROCESS_INHERITED")
-	c.Env["HESAPE_PROCESS_EXTRA"] = "added"
-	res, err := sys.Run(t.Context(), c)
+	c := helperCommand("env", "HESAPE_PROCESS_INHERITED").
+		Env(map[string]string{helperEnv: "1", "HESAPE_PROCESS_EXTRA": "added"})
+
+	res, err := c.Run(t.Context(), nil, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if res.Stdout != "from the parent" {
-		t.Fatalf("inherited variable came through as %q", res.Stdout)
+	if res.Output() != "from the parent" {
+		t.Fatalf("inherited variable came through as %q", res.Output())
 	}
 
-	c.Args = []string{"env", "HESAPE_PROCESS_EXTRA"}
-	if res, err = sys.Run(t.Context(), c); err != nil {
+	// The same pending process with another command: what Run is given replaces
+	// what Command set.
+	res, err = c.Run(t.Context(), []string{os.Args[0], "env", "HESAPE_PROCESS_EXTRA"}, nil)
+	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if res.Stdout != "added" {
-		t.Fatalf("added variable came through as %q", res.Stdout)
+	if res.Output() != "added" {
+		t.Fatalf("added variable came through as %q", res.Output())
 	}
 }
 
 func TestEnvOverridesAVariableThatIsAlreadySet(t *testing.T) {
 	t.Setenv("HESAPE_PROCESS_OVERRIDDEN", "the old value")
 
-	c := helperCommand("env", "HESAPE_PROCESS_OVERRIDDEN")
-	c.Env["HESAPE_PROCESS_OVERRIDDEN"] = "the new one"
-	res, err := sys.Run(t.Context(), c)
+	res, err := helperCommand("env", "HESAPE_PROCESS_OVERRIDDEN").
+		Env(map[string]string{helperEnv: "1", "HESAPE_PROCESS_OVERRIDDEN": "the new one"}).
+		Run(t.Context(), nil, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if res.Stdout != "the new one" {
-		t.Fatalf("variable came through as %q", res.Stdout)
+	if res.Output() != "the new one" {
+		t.Fatalf("variable came through as %q", res.Output())
 	}
 }
 
 func TestEnvRefusesANameThatIsNotOne(t *testing.T) {
 	t.Parallel()
 
-	c := helperCommand("cwd")
-	c.Env["NOT=A=NAME"] = "x"
-	if _, err := sys.Run(t.Context(), c); err == nil {
+	c := helperCommand("cwd").Env(map[string]string{helperEnv: "1", "NOT=A=NAME": "x"})
+	if _, err := c.Run(t.Context(), nil, nil); err == nil {
 		t.Fatal("a name with an = in it was accepted, and it would have reached the program as a different variable")
 	}
 }
@@ -244,57 +281,56 @@ func TestEnvRefusesANameThatIsNotOne(t *testing.T) {
 func TestStdinIsWrittenAndThenClosed(t *testing.T) {
 	t.Parallel()
 
-	c := helperCommand("cat")
-	c.Stdin = "what the program reads"
-	res, err := sys.Run(t.Context(), c)
+	const written = "what the program reads"
+
+	res, err := helperCommand("cat").Input(written).Run(t.Context(), nil, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if res.Stdout != c.Stdin {
-		t.Fatalf("read back %q", res.Stdout)
+	if res.Output() != written {
+		t.Fatalf("read back %q", res.Output())
 	}
 }
 
 func TestEmptyStdinDoesNotWaitForATerminal(t *testing.T) {
 	t.Parallel()
 
-	// No Stdin at all: the program must see end of input rather than block.
-	done := make(chan Result, 1)
+	// No Input at all: the program must see end of input rather than block.
+	done := make(chan ProcessResult, 1)
 	go func() {
-		res, _ := sys.Run(context.Background(), helperCommand("cat"))
+		res, _ := helperCommand("cat").Run(context.Background(), nil, nil)
 		done <- res
 	}()
 	select {
 	case res := <-done:
-		if res.Stdout != "" {
-			t.Fatalf("read %q from an input that should be empty", res.Stdout)
+		if res.Output() != "" {
+			t.Fatalf("read %q from an input that should be empty", res.Output())
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("a command with no Stdin waited for input")
+		t.Fatal("a command with no Input waited for input")
 	}
 }
 
 func TestTimeoutKillsAndSaysSo(t *testing.T) {
 	t.Parallel()
 
-	c := helperCommand("sleep", "10000")
-	c.Timeout = 50 * time.Millisecond
+	limit := 50 * time.Millisecond
 
 	start := time.Now()
-	_, err := sys.Run(t.Context(), c)
+	_, err := helperCommand("sleep", "10000").Timeout(limit).Run(t.Context(), nil, nil)
 	if took := time.Since(start); took > 5*time.Second {
 		t.Fatalf("waited %s for a 50ms timeout", took)
 	}
 
-	var timeout *TimeoutError
+	var timeout *ProcessTimedOutException
 	if !errors.As(err, &timeout) {
-		t.Fatalf("error %v (%T), want a *TimeoutError", err, err)
+		t.Fatalf("error %v (%T), want a *ProcessTimedOutException", err, err)
 	}
 	if timeout.Idle {
 		t.Fatal("a total timeout was reported as silence")
 	}
-	if timeout.After != c.Timeout {
-		t.Fatalf("reported %s, want %s", timeout.After, c.Timeout)
+	if timeout.Timeout != limit {
+		t.Fatalf("reported %s, want %s", timeout.Timeout, limit)
 	}
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal("a timeout that does not unwrap to context.DeadlineExceeded")
@@ -304,25 +340,27 @@ func TestTimeoutKillsAndSaysSo(t *testing.T) {
 func TestIdleTimeoutKillsAProgramThatWentQuiet(t *testing.T) {
 	t.Parallel()
 
-	c := helperCommand("quiet", "60000")
-	c.IdleTimeout = 300 * time.Millisecond
+	limit := 300 * time.Millisecond
 
-	res, err := sys.Run(t.Context(), c)
+	res, err := helperCommand("quiet", "60000").IdleTimeout(limit).Run(t.Context(), nil, nil)
 
-	var timeout *TimeoutError
+	var timeout *ProcessTimedOutException
 	if !errors.As(err, &timeout) {
-		t.Fatalf("error %v (%T), want a *TimeoutError", err, err)
+		t.Fatalf("error %v (%T), want a *ProcessTimedOutException", err, err)
 	}
 	if !timeout.Idle {
 		t.Fatal("silence was reported as a total timeout, which tells the person to raise the wrong limit")
 	}
-	if !strings.Contains(timeout.Error(), "no output") {
+	if timeout.Timeout != limit {
+		t.Fatalf("reported %s, want the idle limit %s", timeout.Timeout, limit)
+	}
+	if !strings.Contains(timeout.Error(), "idle timeout") {
 		t.Fatalf("message %q does not say why", timeout)
 	}
 	// What it printed before going quiet: proof it was killed for stopping and
 	// not for being slow to start.
-	if res.Stdout != "." {
-		t.Fatalf("output %q, want the one chunk it produced before the silence", res.Stdout)
+	if res.Output() != "." {
+		t.Fatalf("output %q, want the one chunk it produced before the silence", res.Output())
 	}
 }
 
@@ -331,67 +369,86 @@ func TestIdleTimeoutLeavesAProgramThatKeepsPrinting(t *testing.T) {
 
 	// Twenty chunks, 50ms apart: a second in total, well past an idle limit of
 	// 400ms, and never an eighth of it in silence.
-	c := helperCommand("drip", "20", "50")
-	c.IdleTimeout = 400 * time.Millisecond
-
-	res, err := sys.Run(t.Context(), c)
+	res, err := helperCommand("drip", "20", "50").
+		IdleTimeout(400*time.Millisecond).
+		Run(t.Context(), nil, nil)
 	if err != nil {
 		t.Fatalf("a program that reported progress the whole time was killed: %v", err)
 	}
-	if len(res.Stdout) != 20 {
-		t.Fatalf("kept %d chunks of output", len(res.Stdout))
+	if len(res.Output()) != 20 {
+		t.Fatalf("kept %d chunks of output", len(res.Output()))
 	}
 }
 
-func TestMaxOutputCapsWhatIsKeptAndSaysThatItDid(t *testing.T) {
+func TestALoudProgramsOutputIsKeptWhole(t *testing.T) {
 	t.Parallel()
 
-	var seen int
+	// The package used to cap what it kept and flag the result as truncated.
+	// Illuminate does neither, and ADR 0044 makes the surface Illuminate's, so
+	// this is the test that says what happens instead: everything is kept, and
+	// the handler is handed everything too.
 	var mu sync.Mutex
-	c := helperCommand("spew", "5000")
-	c.MaxOutput = 100
-	c.OnOutput = func(_ Stream, chunk []byte) {
+	var heard int
+	res, err := helperCommand("spew", "5000").Run(t.Context(), nil, func(_ Stream, buffer string) {
 		mu.Lock()
-		seen += len(chunk)
+		heard += len(buffer)
 		mu.Unlock()
-	}
-
-	res, err := sys.Run(t.Context(), c)
+	})
 	if err != nil {
 		t.Fatalf("a loud program was turned into a failure: %v", err)
 	}
-	if len(res.Stdout) != 100 {
-		t.Fatalf("kept %d bytes, want the cap of 100", len(res.Stdout))
-	}
-	if !res.Truncated {
-		t.Fatal("output was cut and the Result does not say so")
+	if len(res.Output()) != 5000 {
+		t.Fatalf("kept %d bytes of the 5000 the program printed", len(res.Output()))
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if seen != 5000 {
-		t.Fatalf("OnOutput saw %d bytes; the cap is on what is kept, not on what is read", seen)
+	if heard != 5000 {
+		t.Fatalf("the handler heard %d bytes of the 5000 the program printed", heard)
 	}
 }
 
-func TestOnOutputSaysWhichStream(t *testing.T) {
+func TestTheOutputHandlerSaysWhichStream(t *testing.T) {
 	t.Parallel()
 
 	var mu sync.Mutex
 	got := map[Stream]string{}
-	c := helperCommand("both")
-	c.OnOutput = func(stream Stream, chunk []byte) {
-		mu.Lock()
-		got[stream] += string(chunk)
-		mu.Unlock()
-	}
 
-	if _, err := sys.Run(t.Context(), c); err != nil {
+	_, err := helperCommand("both").Run(t.Context(), nil, func(stream Stream, buffer string) {
+		mu.Lock()
+		got[stream] += buffer
+		mu.Unlock()
+	})
+	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if got[Stdout] != "out" || got[Stderr] != "err" {
+	if got[Out] != "out" || got[Err] != "err" {
 		t.Fatalf("chunks arrived as %v", got)
+	}
+}
+
+func TestQuietlyKeepsNothingButStillHandsOverWhatWasPrinted(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	got := map[Stream]string{}
+
+	res, err := helperCommand("both").Quietly().Run(t.Context(), nil, func(stream Stream, buffer string) {
+		mu.Lock()
+		got[stream] += buffer
+		mu.Unlock()
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Output() != "" || res.ErrorOutput() != "" {
+		t.Fatalf("a quiet command kept stdout %q and stderr %q", res.Output(), res.ErrorOutput())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if got[Out] != "out" || got[Err] != "err" {
+		t.Fatalf("the handler heard %v; quietly is about what is kept, not about what is read", got)
 	}
 }
 
@@ -399,23 +456,22 @@ func TestCancellingTheContextIsTheCallersCancellation(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	c := helperCommand("sleep", "10000")
 	// Limits of this package's own are set too, to prove which one is reported:
 	// the caller gave up first, so neither of these is the answer.
-	c.Timeout = time.Minute
-	c.IdleTimeout = time.Minute
+	c := helperCommand("sleep", "10000").Timeout(time.Minute).IdleTimeout(time.Minute)
 
-	invoked, err := sys.Start(ctx, c)
+	invoked, err := c.Start(ctx, nil, nil)
 	if err != nil {
+		cancel()
 		t.Fatalf("Start: %v", err)
 	}
 	cancel()
-	_, err = invoked.Wait()
+	_, err = invoked.Wait(nil)
 
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error %v (%T), want context.Canceled", err, err)
 	}
-	var timeout *TimeoutError
+	var timeout *ProcessTimedOutException
 	if errors.As(err, &timeout) {
 		t.Fatal("a cancelled command was reported as a timeout")
 	}
@@ -424,7 +480,7 @@ func TestCancellingTheContextIsTheCallersCancellation(t *testing.T) {
 func TestUnknownProgramNamesItself(t *testing.T) {
 	t.Parallel()
 
-	_, err := sys.Run(t.Context(), Command{Name: "hesape-no-such-program"})
+	_, err := NewFactory().Run(t.Context(), []string{"hesape-no-such-program"}, nil)
 	if err == nil {
 		t.Fatal("a program that does not exist ran")
 	}
@@ -439,10 +495,10 @@ func TestUnknownProgramNamesItself(t *testing.T) {
 func TestCommandWithNoNameIsRefused(t *testing.T) {
 	t.Parallel()
 
-	if _, err := sys.Run(t.Context(), Command{}); err == nil {
+	if _, err := NewFactory().Run(t.Context(), nil, nil); err == nil {
 		t.Fatal("a command with no name was accepted")
 	}
-	if _, err := sys.Run(t.Context(), Command{Name: "   "}); err == nil {
+	if _, err := NewFactory().Run(t.Context(), []string{"   "}, nil); err == nil {
 		t.Fatal("a command whose name is whitespace was accepted")
 	}
 }
@@ -450,19 +506,19 @@ func TestCommandWithNoNameIsRefused(t *testing.T) {
 func TestStartExposesTheProcessAndWaitIsRepeatable(t *testing.T) {
 	t.Parallel()
 
-	invoked, err := sys.Start(t.Context(), helperCommand("sleep", "50"))
+	invoked, err := helperCommand("sleep", "50").Start(t.Context(), nil, nil)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if invoked.PID() <= 0 {
-		t.Fatalf("pid %d", invoked.PID())
+	if invoked.ID() <= 0 {
+		t.Fatalf("pid %d", invoked.ID())
 	}
 	if !invoked.Running() {
 		t.Fatal("a command that was just started is not running")
 	}
 
-	first, firstErr := invoked.Wait()
-	second, secondErr := invoked.Wait()
+	first, firstErr := invoked.Wait(nil)
+	second, secondErr := invoked.Wait(nil)
 	if firstErr != nil || secondErr != nil {
 		t.Fatalf("Wait: %v / %v", firstErr, secondErr)
 	}
@@ -481,7 +537,7 @@ func TestSignalReachesTheProgram(t *testing.T) {
 		t.Skip("Windows delivers no signal but Kill, and killing is what cancelling the context already does")
 	}
 
-	invoked, err := sys.Start(t.Context(), helperCommand("sleep", "10000"))
+	invoked, err := helperCommand("sleep", "10000").Start(t.Context(), nil, nil)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -489,33 +545,39 @@ func TestSignalReachesTheProgram(t *testing.T) {
 		t.Fatalf("Signal: %v", err)
 	}
 
-	res, err := invoked.Wait()
-	if err == nil {
+	// A killed program is a failed result and not an error, for the reason a
+	// non-zero exit is one: the failure lives on the result, and Throw is what
+	// raises it.
+	res, err := invoked.Wait(nil)
+	if err != nil {
+		t.Fatalf("waiting on a killed program: %v", err)
+	}
+	if !res.Failed() {
 		t.Fatal("a killed program came back as a success")
 	}
-	if res.ExitCode != -1 {
-		t.Fatalf("exit code %d, want -1 for a program that was killed", res.ExitCode)
+	if res.ExitCode() != -1 {
+		t.Fatalf("exit code %d, want -1 for a program that was killed", res.ExitCode())
 	}
 	if err := invoked.Signal(os.Kill); err == nil {
 		t.Fatal("signalling a program that has already been reaped was accepted")
 	}
 }
 
-func TestCommandString(t *testing.T) {
+func TestTheCommandLineIsRenderedTheWayAPersonWouldTypeIt(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		command Command
+		command []string
 		want    string
 	}{
-		{Command{Name: "go", Args: []string{"build", "./..."}}, "go build ./..."},
-		{Command{Name: "tailwindcss", Args: []string{"--input", "-"}}, "tailwindcss --input -"},
-		{Command{Name: "git", Args: []string{"commit", "-m", "two words"}}, `git commit -m "two words"`},
-		{Command{Name: "sh", Args: []string{""}}, `sh ""`},
-		{Command{Name: "go"}, "go"},
+		{[]string{"go", "build", "./..."}, "go build ./..."},
+		{[]string{"tailwindcss", "--input", "-"}, "tailwindcss --input -"},
+		{[]string{"git", "commit", "-m", "two words"}, `git commit -m "two words"`},
+		{[]string{"sh", ""}, `sh ""`},
+		{[]string{"go"}, "go"},
 	}
 	for _, c := range cases {
-		if got := c.command.String(); got != c.want {
+		if got := NewFactory().NewPendingProcess().Command(c.command...).String(); got != c.want {
 			t.Errorf("String() = %q, want %q", got, c.want)
 		}
 	}
@@ -527,7 +589,413 @@ func TestNilContextIsRefused(t *testing.T) {
 	// A nil context is what the test is about: passing one is a mistake, and the
 	// mistake has to come back as an error rather than as a panic from inside
 	// os/exec, where it names neither the command nor the caller.
-	if _, err := sys.Start(nil, helperCommand("cwd")); err == nil { //nolint:staticcheck
+	if _, err := helperCommand("cwd").Start(nil, nil, nil); err == nil { //nolint:staticcheck
 		t.Fatal("a nil context was accepted, and it would have panicked somewhere further in")
 	}
+}
+
+func TestAFakeAnswersTheCommandsItsPatternMatches(t *testing.T) {
+	t.Parallel()
+
+	factory := NewFactory()
+	factory.Fake(FakeHandler{Command: "git *", Result: "nothing to commit"})
+
+	res, err := factory.Run(t.Context(), []string{"git", "status"}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// A faked string is normalised the way a program's output ends: exactly one
+	// trailing newline, however the test wrote it.
+	if res.Output() != "nothing to commit\n" {
+		t.Fatalf("output %q, want the faked one", res.Output())
+	}
+	if res.Command() != "git status" {
+		t.Fatalf("command %q, want the line that was asked for", res.Command())
+	}
+	if !res.Successful() {
+		t.Fatalf("a fake with no exit code came back failed, exit code %d", res.ExitCode())
+	}
+	factory.AssertRan(t, "git status")
+
+	// A handler may be a function of the process, which is how one fake answers
+	// differently for the commands it matched.
+	byArgument := NewFactory()
+	byArgument.Fake(FakeHandler{Command: "git *", Result: func(p *PendingProcess) any {
+		return "the fake saw " + p.String()
+	}})
+	res, err = byArgument.Run(t.Context(), []string{"git", "fetch"}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Output() != "the fake saw git fetch\n" {
+		t.Fatalf("output %q; the handler was not handed the process it answered for", res.Output())
+	}
+}
+
+func TestTheFirstHandlerThatMatchesIsTheOneThatAnswers(t *testing.T) {
+	t.Parallel()
+
+	specificFirst := NewFactory()
+	specificFirst.Fake(
+		FakeHandler{Command: "git *", Result: "the specific one"},
+		FakeHandler{Command: "*", Result: "the catch-all"},
+	)
+
+	res, err := specificFirst.Run(t.Context(), []string{"git", "status"}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Output() != "the specific one\n" {
+		t.Fatalf("output %q, want the handler registered first", res.Output())
+	}
+	res, err = specificFirst.Run(t.Context(), []string{"hg", "status"}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Output() != "the catch-all\n" {
+		t.Fatalf("output %q, want the catch-all for a command the first pattern misses", res.Output())
+	}
+
+	// The other order, which is the mistake people make: a "*" registered first
+	// swallows every pattern after it.
+	catchAllFirst := NewFactory()
+	catchAllFirst.Fake(
+		FakeHandler{Command: "*", Result: "the catch-all"},
+		FakeHandler{Command: "git *", Result: "the specific one"},
+	)
+	res, err = catchAllFirst.Run(t.Context(), []string{"git", "status"}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Output() != "the catch-all\n" {
+		t.Fatalf("output %q; a \"*\" registered first is supposed to win", res.Output())
+	}
+}
+
+func TestFakingWithNoHandlersAnswersEverythingWithNothing(t *testing.T) {
+	t.Parallel()
+
+	factory := NewFactory().Fake()
+
+	res, err := factory.Run(t.Context(), []string{"rm", "-rf", "/"}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Output() != "" || res.ErrorOutput() != "" {
+		t.Fatalf("output %q and error output %q, want nothing from a blank fake", res.Output(), res.ErrorOutput())
+	}
+	if !res.Successful() {
+		t.Fatalf("a blank fake came back failed, exit code %d", res.ExitCode())
+	}
+	if !factory.IsRecording() {
+		t.Fatal("a factory that has been faked does not report itself as recording")
+	}
+	factory.AssertRan(t, "rm *")
+}
+
+func TestAStrayCommandIsRefusedInsteadOfRun(t *testing.T) {
+	t.Parallel()
+
+	factory := NewFactory()
+	factory.Fake(FakeHandler{Command: "git *", Result: "ok"})
+	factory.PreventStrayProcesses()
+
+	if !factory.PreventingStrayProcesses() {
+		t.Fatal("PreventStrayProcesses was called and the factory does not report it")
+	}
+
+	_, err := helperCommandOn(factory, "say", "out", "this must not run").Run(t.Context(), nil, nil)
+	var stray *StrayProcessError
+	if !errors.As(err, &stray) {
+		t.Fatalf("error %v (%T), want a *StrayProcessError", err, err)
+	}
+	if !strings.Contains(stray.Error(), "without a matching fake") {
+		t.Fatalf("message %q does not say what went wrong", stray)
+	}
+	if !strings.Contains(stray.Error(), "this must not run") {
+		t.Fatalf("message %q does not name the command that had no fake", stray)
+	}
+	factory.AssertNothingRan(t)
+
+	// And with the guard off the same command runs for real, which is what says
+	// the guard is what stopped it and not the fake.
+	factory.AllowStrayProcesses()
+	res, err := helperCommandOn(factory, "say", "out", "and now it does").Run(t.Context(), nil, nil)
+	if err != nil {
+		t.Fatalf("Run with stray processes allowed: %v", err)
+	}
+	if res.Output() != "and now it does" {
+		t.Fatalf("output %q, want what the program printed", res.Output())
+	}
+}
+
+func TestTheAssertionsSeeEveryCommandThatWasFaked(t *testing.T) {
+	t.Parallel()
+
+	factory := NewFactory()
+	factory.Fake(FakeHandler{Command: "*", Result: "ok"})
+	factory.AssertNothingRan(t)
+
+	for range 2 {
+		if _, err := factory.Run(t.Context(), []string{"git", "fetch"}, nil); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	}
+	if _, err := factory.Run(t.Context(), []string{"go", "build", "./..."}, nil); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	factory.AssertRan(t, "git fetch")
+	factory.AssertRan(t, "go *")
+	factory.AssertRanTimes(t, "git fetch", 2)
+	factory.AssertRanTimes(t, "*", 3)
+	factory.AssertNotRan(t, "rm *")
+	factory.AssertDidntRun(t, "npm install")
+
+	want := []string{"git fetch", "git fetch", "go build ./..."}
+	if got := factory.Recorded(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("recorded %q, want %q -- in the order they ran", got, want)
+	}
+}
+
+func TestTheCountBehindTheAssertionsMatchesPatternsLikeAFakeDoes(t *testing.T) {
+	t.Parallel()
+
+	// countRan and ranReport are what the four assertions are made of, and they
+	// are exercised here rather than through the assertions themselves: those
+	// take a *testing.T and report a mismatch by failing this test, so the only
+	// half of them a test can reach is the half that passes.
+	factory := NewFactory()
+	factory.Fake(FakeHandler{Command: "*", Result: ""})
+
+	if got := factory.ranReport(); got != "no process ran" {
+		t.Fatalf("report before anything ran is %q", got)
+	}
+
+	for _, command := range [][]string{{"git", "status"}, {"git", "push", "origin", "main"}} {
+		if _, err := factory.Run(t.Context(), command, nil); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	}
+
+	for _, c := range []struct {
+		pattern string
+		want    int
+	}{
+		{"git *", 2},
+		{"git status", 1},
+		{"*", 2},
+		{"", 2},
+		{"hg *", 0},
+		{"git", 0},
+	} {
+		if got := factory.countRan(c.pattern); got != c.want {
+			t.Errorf("countRan(%q) = %d, want %d", c.pattern, got, c.want)
+		}
+	}
+
+	report := factory.ranReport()
+	if !strings.HasPrefix(report, "2 ran:") {
+		t.Fatalf("report %q does not open with how many ran", report)
+	}
+	for _, want := range []string{"git status", "git push origin main"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("report does not name %q:\n%s", want, report)
+		}
+	}
+}
+
+func TestARecordedCommandReadsBackTheWayTheFakePatternSawIt(t *testing.T) {
+	t.Parallel()
+
+	factory := NewFactory()
+	factory.Fake(FakeHandler{Command: `git commit -m "two words"`, Result: "committed"})
+
+	res, err := factory.Run(t.Context(), []string{"git", "commit", "-m", "two words"}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !res.SeeInOutput("committed") {
+		t.Fatalf("output %q: a pattern with a quoted argument did not answer", res.Output())
+	}
+	// The same string on both sides. A pattern that a fake answered and that an
+	// assertion then says never ran is the one thing matchesCommand exists to
+	// prevent.
+	factory.AssertRan(t, `git commit -m "two words"`)
+	if got := factory.Recorded(); len(got) != 1 || got[0] != res.Command() {
+		t.Fatalf("recorded %q, want the command line the result reports, %q", got, res.Command())
+	}
+}
+
+func TestASequenceAnswersDifferentlyEachTimeTheCommandRuns(t *testing.T) {
+	t.Parallel()
+
+	factory := NewFactory()
+	factory.Fake(FakeHandler{Command: "git pull", Result: factory.Sequence(
+		NewFakeProcessResult("", 1, "", "not a repository"),
+		"already up to date",
+	)})
+
+	first, err := factory.Run(t.Context(), []string{"git", "pull"}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if first.ExitCode() != 1 || first.ErrorOutput() != "not a repository\n" {
+		t.Fatalf("first run: exit code %d, error output %q", first.ExitCode(), first.ErrorOutput())
+	}
+
+	second, err := factory.Run(t.Context(), []string{"git", "pull"}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !second.Successful() || second.Output() != "already up to date\n" {
+		t.Fatalf("second run: exit code %d, output %q", second.ExitCode(), second.Output())
+	}
+
+	// Run out, and the next command is an error: a sequence that quietly repeats
+	// its last answer is a test that passes for a reason nobody wrote down.
+	if _, err := factory.Run(t.Context(), []string{"git", "pull"}, nil); !errors.Is(err, ErrEmptyProcessSequence) {
+		t.Fatalf("error %v, want the sequence to say it ran out", err)
+	}
+	factory.AssertRanTimes(t, "git pull", 2)
+}
+
+func TestASequenceThatRanOutCanBeToldToAnswerAnyway(t *testing.T) {
+	t.Parallel()
+
+	factory := NewFactory()
+	sequence := factory.Sequence("the only answer").DontFailWhenEmpty()
+	factory.Fake(FakeHandler{Command: "date", Result: sequence})
+
+	if _, err := factory.Run(t.Context(), []string{"date"}, nil); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !sequence.IsEmpty() {
+		t.Fatal("a sequence of one still reports something left after one run")
+	}
+
+	res, err := factory.Run(t.Context(), []string{"date"}, nil)
+	if err != nil {
+		t.Fatalf("a sequence told not to fail when empty failed anyway: %v", err)
+	}
+	if !res.Successful() || res.Output() != "" {
+		t.Fatalf("exit code %d and output %q, want an empty success", res.ExitCode(), res.Output())
+	}
+
+	// WhenEmpty says what to answer with instead of nothing.
+	named := NewFactory()
+	named.Fake(FakeHandler{Command: "date", Result: named.Sequence().WhenEmpty("the standing answer")})
+	res, err = named.Run(t.Context(), []string{"date"}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Output() != "the standing answer\n" {
+		t.Fatalf("output %q, want what WhenEmpty was given", res.Output())
+	}
+}
+
+func TestResultBuildsTheOutcomeAFakeAnswersWith(t *testing.T) {
+	t.Parallel()
+
+	factory := NewFactory()
+	factory.Fake(
+		FakeHandler{Command: "go test*", Result: factory.Result("", "FAIL\tprocess", 1)},
+		FakeHandler{Command: "go *", Result: factory.Result("all good", "", 0)},
+	)
+
+	failed, err := factory.Run(t.Context(), []string{"go", "test", "./..."}, nil)
+	if err != nil {
+		t.Fatalf("a faked non-zero exit came back as an error: %v", err)
+	}
+	if !failed.Failed() || failed.ExitCode() != 1 {
+		t.Fatalf("exit code %d, want the faked 1", failed.ExitCode())
+	}
+	if !failed.SeeInErrorOutput("FAIL") {
+		t.Fatalf("error output %q does not carry what the fake was given", failed.ErrorOutput())
+	}
+	if _, err := failed.Throw(nil); err == nil {
+		t.Fatal("Throw on a faked failure returned no error")
+	}
+
+	ok, err := factory.Run(t.Context(), []string{"go", "vet", "./..."}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !ok.SeeInOutput("all good") {
+		t.Fatalf("output %q, want the second handler's", ok.Output())
+	}
+	if _, err := ok.Throw(nil); err != nil {
+		t.Fatalf("Throw on a successful result returned %v", err)
+	}
+
+	// One result registered once is handed to every command that matches, and
+	// each of them reports its own command line rather than the first one's.
+	if failed.Command() != "go test ./..." || ok.Command() != "go vet ./..." {
+		t.Fatalf("commands %q and %q, want each result to name the command it answered", failed.Command(), ok.Command())
+	}
+}
+
+func TestDescribeReplaysAProcessThatIsWatchedWhileItRuns(t *testing.T) {
+	t.Parallel()
+
+	factory := NewFactory()
+	factory.Fake(FakeHandler{Command: "deploy *", Result: factory.Describe().
+		ID(4242).
+		Output("uploading").
+		ErrorOutput("a slow mirror").
+		Output("done").
+		RunsFor(2).
+		ExitCode(1)})
+
+	var seen []string
+	invoked, err := factory.Start(t.Context(), []string{"deploy", "production"}, func(stream Stream, buffer string) {
+		seen = append(seen, string(stream)+": "+strings.TrimSuffix(buffer, "\n"))
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if invoked.ID() != 4242 {
+		t.Fatalf("id %d, want the described 4242", invoked.ID())
+	}
+
+	rounds := 0
+	for invoked.Running() {
+		rounds++
+		if rounds > 10 {
+			t.Fatal("a fake described as running for two rounds never stopped")
+		}
+	}
+	if rounds != 2 {
+		t.Fatalf("the watching loop went round %d times, want the described 2", rounds)
+	}
+
+	res, err := invoked.Wait(nil)
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if res.ExitCode() != 1 || !res.Failed() {
+		t.Fatalf("exit code %d, want the described 1", res.ExitCode())
+	}
+	if res.Output() != "uploading\ndone\n" {
+		t.Fatalf("output %q, want both described lines of standard output", res.Output())
+	}
+	if res.ErrorOutput() != "a slow mirror\n" {
+		t.Fatalf("error output %q, want the described line", res.ErrorOutput())
+	}
+	if res.Command() != "deploy production" {
+		t.Fatalf("command %q, want the line that was started", res.Command())
+	}
+
+	// The output does not arrive on its own, because nothing is running: it
+	// arrives because the loop asked, and it arrives in the order it was
+	// described, across both streams.
+	want := []string{"out: uploading", "err: a slow mirror", "out: done"}
+	if !reflect.DeepEqual(seen, want) {
+		t.Fatalf("the handler was handed %q, want %q", seen, want)
+	}
+
+	// A started fake is recorded when it starts, with the result it will end
+	// with, so an assertion does not have to wait for it.
+	factory.AssertRan(t, "deploy *")
+	factory.AssertRanTimes(t, "deploy production", 1)
 }

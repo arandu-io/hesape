@@ -26,24 +26,29 @@
 // skeleton carried pgx and modernc/sqlite together, and govulncheck found a pgx
 // advisory in a project that could have been SQLite-only.
 //
-// So each driver is its own module with its own go.mod:
+// So each connector is its own module with its own go.mod, under Connectors
+// where Illuminate keeps them:
 //
-//	go get github.com/arandu-io/database/sqlite   // needs nothing installed
-//	go get github.com/arandu-io/database/pgx      // Postgres
-//	go get github.com/arandu-io/database/mysql    // MySQL
+//	go get github.com/arandu-io/hesape/database/connectors/sqlite   // needs nothing installed
+//	go get github.com/arandu-io/hesape/database/connectors/pgx      // Postgres
+//	go get github.com/arandu-io/hesape/database/connectors/mysql    // MySQL
 //
 // and the project blank-imports the ones it uses:
 //
 //	import (
 //	    "github.com/arandu-io/hesape/database"
-//	    _ "github.com/arandu-io/database/pgx"
-//	    _ "github.com/arandu-io/database/sqlite"
+//	    _ "github.com/arandu-io/hesape/database/connectors/pgx"
+//	    _ "github.com/arandu-io/hesape/database/connectors/sqlite"
 //	)
 //
 //	db, closeDB, err := database.Open(cfg)
 //
 // Switching engines stays what ADR 0009 promised: a line in .env. The import
 // list is what decides which engines a build can speak at all.
+//
+// The conformance subpackage is what makes "one Repository, three engines" a
+// measurement rather than a claim: one suite, run by all three connectors
+// against a real server.
 //
 // # The Illuminate files this package answers to
 //

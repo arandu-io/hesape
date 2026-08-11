@@ -1,10 +1,15 @@
 package fakes
 
 import (
+	"crypto/rand"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
+	"time"
 )
 
 // TestingT is the part of *testing.T that an assertion uses.
@@ -36,6 +41,27 @@ type TestingT interface {
 type Fake interface {
 	isFake()
 }
+
+// The fakes stand in for the contracts they answer, and these lines say so at
+// compile time: a method that drifts from the contract is a fake that cannot be
+// installed where the real thing was, and the drift is worth finding here
+// rather than at the call site.
+//
+// BusFake is not among them. Its fluent setters -- PipeThrough, Map,
+// SerializeAndRestore -- answer the concrete type so that a chain reads, and
+// PHP's `return $this` covaries where Go's does not. QueueingDispatcher
+// describes what a BusFake forwards to, which is the real dispatcher.
+var (
+	_ Fake             = (*MailFake)(nil)
+	_ Fake             = (*QueueFake)(nil)
+	_ Fake             = (*EventFake)(nil)
+	_ Fake             = (*BusFake)(nil)
+	_ Fake             = (*NotificationFake)(nil)
+	_ Fake             = (*ExceptionHandlerFake)(nil)
+	_ Queue            = (*QueueFake)(nil)
+	_ Dispatcher       = (*EventFake)(nil)
+	_ ExceptionHandler = (*ExceptionHandlerFake)(nil)
+)
 
 // class answers PHP's get_class(): the type a fake files a recorded value
 // under.
@@ -197,4 +223,148 @@ func listOf(lines []string) string {
 // countedAs renders "2 mailables" or "1 mailable" for a message header.
 func countedAs(count int, noun string) string {
 	return fmt.Sprintf("%d %s", count, plural(noun, count))
+}
+
+// joinNames renders a handful of class names inside one line of a message.
+func joinNames(names []string) string {
+	return strings.Join(names, ", ")
+}
+
+// countedWere renders "2 events were" or "1 event was" for a message header.
+//
+// The verb agrees with the count because a framework that reports "1 event
+// were dispatched" reads as one with a bug in it, and a reader who is already
+// looking at a failure does not need the extra doubt.
+func countedWere(count int, noun string) string {
+	if count == 1 {
+		return "1 " + noun + " was"
+	}
+	return fmt.Sprintf("%d %s were", count, plural(noun, count))
+}
+
+// countedAre renders "2 listeners are" or "1 listener is".
+func countedAre(count int, noun string) string {
+	if count == 1 {
+		return "1 " + noun + " is"
+	}
+	return fmt.Sprintf("%d %s are", count, plural(noun, count))
+}
+
+// classNames answers PHP's array_keys() over an array keyed by get_class():
+// the distinct class of each recorded value, in the order each was first
+// recorded.
+//
+// The order is the order of the first record of that class, not alphabetical,
+// because a failure message that lists what happened in the order it happened
+// is the one a reader can follow.
+func classNames(values []any) []string {
+	seen := make(map[string]bool, len(values))
+	names := make([]string, 0, len(values))
+	for _, value := range values {
+		name := className(value)
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	return names
+}
+
+// classCounts renders one line per distinct class, with how many of it were
+// recorded: PHP's "OrderShipped dispatched 2 times".
+func classCounts(values []any, verb string) []string {
+	counts := make(map[string]int, len(values))
+	for _, value := range values {
+		counts[className(value)]++
+	}
+	names := classNames(values)
+	lines := make([]string, 0, len(names))
+	for _, name := range names {
+		lines = append(lines, fmt.Sprintf("%s %s %d %s", name, verb, counts[name], plural("time", counts[name])))
+	}
+	return lines
+}
+
+// uuid answers Illuminate\Support\Str::uuid: a random version 4 UUID.
+//
+// The full one lives in the str package. This is the whole of what the fakes
+// ask of it -- a NotificationFake stamps an id on a notification that arrived
+// without one -- and reaching across packages for sixteen random bytes would
+// be the larger cost.
+func uuid() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand does not fail on any supported platform, and an id that
+		// no assertion reads is not worth a panic if it ever does.
+		binary.BigEndian.PutUint64(b[:8], uint64(time.Now().UnixNano()))
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return formatUUID(b)
+}
+
+// orderedClock keeps the last millisecond an ordered id was made in, and how
+// many were made in it, so that two ids made in the same millisecond still sort
+// in the order they were made.
+var orderedClock struct {
+	sync.Mutex
+	millis  int64
+	counter uint16
+}
+
+// orderedUUID answers Illuminate\Support\Str::orderedUuid: a UUID whose bytes
+// sort in the order it was created, which is what a batch id is for.
+//
+// Laravel makes a timestamp-first UUID for the same reason RFC 9562 made
+// version 7, so this is a version 7: 48 bits of Unix milliseconds, then a
+// counter, then random. The counter is the monotonic form RFC 9562 describes,
+// and it is what makes the promise in the name true -- a plain version 7 ties
+// with itself when two ids are made inside one millisecond, which is every
+// batch a test dispatches in a loop.
+func orderedUUID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		binary.BigEndian.PutUint64(b[8:], uint64(time.Now().UnixNano()))
+	}
+
+	millis := time.Now().UnixMilli()
+
+	orderedClock.Lock()
+	if millis > orderedClock.millis {
+		orderedClock.millis, orderedClock.counter = millis, 0
+	} else {
+		// A clock that went backwards keeps the millisecond it had, so that
+		// the ids stay ordered even when the wall clock does not.
+		millis = orderedClock.millis
+		orderedClock.counter++
+	}
+	counter := orderedClock.counter
+	orderedClock.Unlock()
+
+	b[0] = byte(millis >> 40)
+	b[1] = byte(millis >> 32)
+	b[2] = byte(millis >> 24)
+	b[3] = byte(millis >> 16)
+	b[4] = byte(millis >> 8)
+	b[5] = byte(millis)
+	b[6] = 0x70 | byte(counter>>8&0x0f)
+	b[7] = byte(counter)
+	b[8] = (b[8] & 0x3f) | 0x80
+	return formatUUID(b)
+}
+
+// formatUUID renders the sixteen bytes in the 8-4-4-4-12 form.
+func formatUUID(b [16]byte) string {
+	dst := make([]byte, 36)
+	hex.Encode(dst[0:8], b[0:4])
+	dst[8] = '-'
+	hex.Encode(dst[9:13], b[4:6])
+	dst[13] = '-'
+	hex.Encode(dst[14:18], b[6:8])
+	dst[18] = '-'
+	hex.Encode(dst[19:23], b[8:10])
+	dst[23] = '-'
+	hex.Encode(dst[24:36], b[10:16])
+	return string(dst)
 }
