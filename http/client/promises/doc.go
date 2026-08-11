@@ -1,11 +1,10 @@
 // Package promises mirrors Illuminate\Http\Client\Promises.
 //
-// The files it answers to, in the clone at
-// laravel_illuminate/http/Client/Promises:
+// It holds promise implementations for async HTTP requests.
 //
-//	FluentPromise.php
 //	LazyPromise.php
+//	FluentPromise.php
 //
-// Nothing is implemented here yet. docs/31-reorganizacao-hesape.md says what
-// moves in, from where, and in which phase.
+// In Go, async requests use goroutines and channels natively;
+// the package exists for parity with the Illuminate surface.
 package promises

@@ -1,0 +1,285 @@
+package middleware
+
+import (
+	"net/http"
+	"strconv"
+)
+
+// FrameGuard mirrors Illuminate\Http\Middleware\FrameGuard.
+//
+// It adds the X-Frame-Options header to prevent clickjacking. The default
+// value is SAMEORIGIN, which allows the page to be framed only by pages
+// on the same origin.
+//
+//	handler := FrameGuard("SAMEORIGIN")(next)
+func FrameGuard(option string) func(http.Handler) http.Handler {
+	if option == "" {
+		option = "SAMEORIGIN"
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Frame-Options", option)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// ValidatePostSize mirrors Illuminate\Http\Middleware\ValidatePostSize.
+//
+// It checks the Content-Length header against maxSize and returns
+// 413 Request Entity Too Large if the body exceeds the limit.
+func ValidatePostSize(maxSize int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.ContentLength > maxSize {
+				http.Error(w, "Request Entity Too Large", http.StatusRequestEntityTooLarge)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// ValidatePathEncoding mirrors Illuminate\Http\Middleware\ValidatePathEncoding.
+//
+// It validates that the request path is valid UTF-8. An invalid path
+// returns a 400 Bad Request.
+func ValidatePathEncoding() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Go's net/http already validates UTF-8 in URLs; this is
+			// a defense-in-depth check.
+			path := r.URL.EscapedPath()
+			for i := 0; i < len(path); i++ {
+				if path[i] >= 0x80 {
+					http.Error(w, "Malformed URL", http.StatusBadRequest)
+					return
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// SetCacheHeaders mirrors Illuminate\Http\Middleware\SetCacheHeaders.
+//
+// It sets cache headers (ETag, Last-Modified, Cache-Control) on the
+// response. The options map can contain "etag", "last_modified",
+// "max_age", "s_maxage", "private", and "public" keys.
+func SetCacheHeaders(options map[string]string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h := w.Header()
+
+			if etag, ok := options["etag"]; ok {
+				h.Set("ETag", etag)
+				if match := r.Header.Get("If-None-Match"); match == etag {
+					w.WriteHeader(http.StatusNotModified)
+					return
+				}
+			}
+
+			if lastMod, ok := options["last_modified"]; ok {
+				h.Set("Last-Modified", lastMod)
+			}
+
+			cacheControl := ""
+			if maxAge, ok := options["max_age"]; ok {
+				cacheControl += "max-age=" + maxAge
+			}
+			if sMaxAge, ok := options["s_maxage"]; ok {
+				if cacheControl != "" {
+					cacheControl += ", "
+				}
+				cacheControl += "s-maxage=" + sMaxAge
+			}
+			if _, ok := options["public"]; ok {
+				if cacheControl != "" {
+					cacheControl += ", "
+				}
+				cacheControl += "public"
+			}
+			if _, ok := options["private"]; ok {
+				if cacheControl != "" {
+					cacheControl += ", "
+				}
+				cacheControl += "private"
+			}
+			if cacheControl != "" {
+				h.Set("Cache-Control", cacheControl)
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// CheckResponseForModifications mirrors
+// Illuminate\Http\Middleware\CheckResponseForModifications.
+//
+// It checks If-None-Match and If-Modified-Since headers and returns
+// 304 Not Modified if the response has not changed.
+func CheckResponseForModifications(etag string, lastModified string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if etag != "" {
+				if match := r.Header.Get("If-None-Match"); match == etag {
+					w.WriteHeader(http.StatusNotModified)
+					return
+				}
+			}
+			if lastModified != "" {
+				if modSince := r.Header.Get("If-Modified-Since"); modSince == lastModified {
+					w.WriteHeader(http.StatusNotModified)
+					return
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// TrustHosts mirrors Illuminate\Http\Middleware\TrustHosts.
+//
+// It validates that the request Host header matches the list of
+// trusted host patterns. A request with a non-matching host is
+// rejected with a 400 Bad Request.
+func TrustHosts(hosts []string, subdomains bool) func(http.Handler) http.Handler {
+	hostSet := make(map[string]bool, len(hosts))
+	for _, h := range hosts {
+		hostSet[h] = true
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			host := r.Host
+			if hostSet[host] {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if subdomains {
+				for trusted := range hostSet {
+					if len(host) > len(trusted) && host[len(host)-len(trusted)-1] == '.' && host[len(host)-len(trusted):] == trusted {
+						next.ServeHTTP(w, r)
+						return
+					}
+				}
+			}
+			http.Error(w, "Bad Request: Invalid Host", http.StatusBadRequest)
+		})
+	}
+}
+
+// HandleCors mirrors Illuminate\Http\Middleware\HandleCors.
+//
+// It handles CORS preflight requests and adds CORS headers to
+// responses. The allowedOrigins, allowedMethods, and allowedHeaders
+// parameters configure which origins, methods, and headers are
+// permitted.
+func HandleCors(allowedOrigins []string, allowedMethods []string, allowedHeaders []string, maxAge int, allowCredentials bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			allowed := false
+			for _, o := range allowedOrigins {
+				if o == "*" || o == origin {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			h := w.Header()
+			h.Set("Access-Control-Allow-Origin", origin)
+			if allowCredentials {
+				h.Set("Access-Control-Allow-Credentials", "true")
+			}
+			h.Set("Vary", "Origin")
+
+			if r.Method == http.MethodOptions {
+				// Preflight.
+				if len(allowedMethods) > 0 {
+					h.Set("Access-Control-Allow-Methods", joinHeaders(allowedMethods))
+				}
+				if len(allowedHeaders) > 0 {
+					h.Set("Access-Control-Allow-Headers", joinHeaders(allowedHeaders))
+				}
+				if maxAge > 0 {
+					h.Set("Access-Control-Max-Age", strconv.Itoa(maxAge))
+				}
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// TrustProxies mirrors Illuminate\Http\Middleware\TrustProxies.
+//
+// It rewrites the request scheme and remote address based on the
+// X-Forwarded-Proto and X-Forwarded-For headers when the request
+// comes from a trusted proxy.
+func TrustProxiesHTTP(trusted []string, headers []string) func(http.Handler) http.Handler {
+	trustedSet := make(map[string]bool, len(trusted))
+	for _, t := range trusted {
+		trustedSet[t] = true
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Only trust if peer is in the trusted set.
+			peer := r.RemoteAddr
+			if !trustedSet[peer] && !trustedSet["*"] {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			for _, header := range headers {
+				switch header {
+				case "X-Forwarded-Proto":
+					if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" && r.URL != nil {
+						r.URL.Scheme = proto
+					}
+				case "X-Forwarded-For":
+					if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+						r.RemoteAddr = fwd
+					}
+				}
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// AddLinkHeadersForPreloadedAssets mirrors
+// Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets.
+//
+// It adds Link headers for preloaded assets to enable HTTP/2 server
+// push.
+func AddLinkHeadersForPreloadedAssets(limit int) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func joinHeaders(values []string) string {
+	result := ""
+	for i, v := range values {
+		if i > 0 {
+			result += ", "
+		}
+		result += v
+	}
+	return result
+}

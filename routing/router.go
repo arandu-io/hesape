@@ -2,6 +2,7 @@ package routing
 
 import (
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/arandu-io/hesape/pipeline"
@@ -24,6 +25,12 @@ const anyMethod = "ANY"
 // the flash so that it could build a request context itself, which is what made
 // registering a controller a second registration path; both belong to the layer
 // that owns the request context, and neither is here.
+//
+// Configuration that is router-level rather than per-sub-router -- the global
+// where patterns, the matched listeners, the middleware aliases and groups,
+// the explicit binders and the view renderer -- lives on the root and is
+// reached through [Router.root], so a sub-router created by Group reads the
+// same map the kernel populated.
 type Router struct {
 	mux    *http.ServeMux
 	prefix string
@@ -31,6 +38,30 @@ type Router struct {
 	module string
 	mws    []pipeline.Middleware[http.Handler]
 	table  *Routes
+
+	// root is the router the kernel built, shared with every sub-router so
+	// the configuration below is one set and not one per group.
+	root *Router
+
+	// patterns are the global where constraints, applied to every route at
+	// registration. Pattern and Patterns set them.
+	patterns map[string]string
+	// matchedCallbacks fire after a route matches and before its middleware,
+	// which is where RouteMatched lives in Laravel. Matched registers them.
+	matchedCallbacks []func(*Route, *http.Request)
+	// middlewareAliases name a middleware for `aru routes` and for resolution
+	// by the kernel; AliasMiddleware sets them.
+	middlewareAliases map[string]pipeline.Middleware[http.Handler]
+	// middlewareGroups are named bundles of middleware the kernel composes;
+	// MiddlewareGroup sets them.
+	middlewareGroups map[string][]pipeline.Middleware[http.Handler]
+	// binders are the explicit route parameter resolvers; Bind and Model set
+	// them, SubstituteBindings applies them. Uses RouteBindings from
+	// bindings.go (shared with the URL+bindings fatia).
+	binders *RouteBindings
+	// viewRenderer renders the view a View route answers with; SetViewRenderer
+	// wires it and View uses it. The concrete is hesape/view.
+	viewRenderer ViewRenderer
 }
 
 // Group is what a sub-router adds to everything registered under it.
@@ -58,11 +89,19 @@ type Group struct {
 
 // NewRouter returns an empty router.
 func NewRouter() *Router {
-	return &Router{mux: http.NewServeMux(), table: NewRoutes()}
+	r := &Router{mux: http.NewServeMux(), table: NewRoutes()}
+	r.root = r
+	r.patterns = map[string]string{}
+	r.middlewareAliases = map[string]pipeline.Middleware[http.Handler]{}
+	r.middlewareGroups = map[string][]pipeline.Middleware[http.Handler]{}
+	r.binders = NewRouteBindings()
+	return r
 }
 
 // Group returns a sub-router with the prefix and name appended and the
-// middleware inherited. The route table is shared with the parent.
+// middleware inherited. The route table is shared with the parent, and so is
+// the root configuration -- patterns, matched listeners, aliases, groups,
+// binders and the view renderer -- so a sub-router reads what the kernel set.
 func (r *Router) Group(g Group) *Router {
 	return &Router{
 		mux:    r.mux,
@@ -71,6 +110,7 @@ func (r *Router) Group(g Group) *Router {
 		module: r.module,
 		mws:    append(append([]pipeline.Middleware[http.Handler]{}, r.mws...), g.Middleware...),
 		table:  r.table,
+		root:   r.root,
 	}
 }
 
@@ -163,7 +203,9 @@ func (r *Router) Fallback(h http.Handler, mws ...pipeline.Middleware[http.Handle
 	if !strings.HasSuffix(pattern, "/") {
 		pattern += "/"
 	}
-	return r.register("", pattern, h, mws...)
+	route := r.register("", pattern, h, mws...)
+	route.fallback = true
+	return route
 }
 
 // Table returns the route table, for URL generation and for `aru routes`.
@@ -184,24 +226,42 @@ func (r *Router) handle(method, pattern string, h http.Handler, mws ...pipeline.
 
 // register registers an already-joined pattern. An empty method matches every
 // method, which is what the mux does with a pattern that names none.
+//
+// The route itself is what the mux dispatches to (Route.ServeHTTP), not a
+// handler wrapped and frozen here. That lets Where, Middleware, WithoutMiddleware,
+// the route-in-context and a matched listener all act on a route already in the
+// mux, which is the shape every fluent call returns.
 func (r *Router) register(method, full string, h http.Handler, mws ...pipeline.Middleware[http.Handler]) *Route {
-	all := append(append([]pipeline.Middleware[http.Handler]{}, r.mws...), mws...)
-
 	key := full
 	label := anyMethod
 	if method != "" {
 		key = method + " " + full
 		label = method
 	}
-	r.mux.Handle(key, pipeline.Chain(h, all...))
 
 	route := &Route{
 		Method:     label,
 		Pattern:    full,
 		Module:     r.module,
 		namePrefix: r.name,
+		prefix:     r.prefix,
 		table:      r.table,
+		router:     r.root,
+		handler:    h,
+		mws:        append(append([]pipeline.Middleware[http.Handler]{}, r.mws...), mws...),
+		wheres:     map[string]*regexp.Regexp{},
+		defaults:   map[string]any{},
+		action:     map[string]any{"uses": "Closure", "controller": "Closure"},
 	}
+	// Global where patterns apply to every route, as Laravel's addWhereClauses
+	// does. They are compiled once, at registration.
+	for name, expr := range r.root.patterns {
+		if re, err := regexp.Compile(expr); err == nil {
+			route.wheres[name] = re
+			route.whereOrder = append(route.whereOrder, name)
+		}
+	}
+	r.mux.Handle(key, route)
 	r.table.add(route)
 	return route
 }

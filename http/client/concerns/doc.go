@@ -1,10 +1,9 @@
 // Package concerns mirrors Illuminate\Http\Client\Concerns.
 //
-// The files it answers to, in the clone at
-// laravel_illuminate/http/Client/Concerns:
+// It holds traits that are composed into the HTTP client classes.
 //
-//	DeterminesStatusCode.php
+//	DeterminesStatusCode.php — status-check methods (ok, created, notFound, etc.)
 //
-// Nothing is implemented here yet. docs/31-reorganizacao-hesape.md says what
-// moves in, from where, and in which phase.
+// In Go, these are methods on the Response struct rather than traits;
+// the package exists for parity with the Illuminate surface.
 package concerns

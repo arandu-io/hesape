@@ -2,14 +2,23 @@ package routing
 
 import (
 	"fmt"
+	"net/http"
+	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/arandu-io/hesape/pipeline"
 )
 
 // Route is one registered route.
 //
-// It is metadata: what `aru routes` prints, what the error page shows for the
-// pattern that matched, and what a URL is generated from.
+// It is metadata and the handler the mux dispatches to: what `aru routes`
+// prints, what the error page shows for the pattern that matched, what a URL
+// is generated from, and the http.Handler that answers. The handler is stored
+// here rather than handed to the mux wrapped and frozen at registration, so a
+// where constraint, a middleware added after registration and a route model
+// binding can all take effect on a route that is already registered -- which is
+// the shape every fluent call returns.
 type Route struct {
 	// Method is the HTTP method the route answers, or ANY for a route
 	// registered without one.
@@ -29,7 +38,59 @@ type Route struct {
 	// name for display and are deliberately not indexed by it, so generating a
 	// URL from that name has one answer rather than two.
 	siblings []*Route
+
+	// handler is what the route dispatches to once matching, where constraints
+	// and the route-in-context are settled. It is set at registration.
+	handler http.Handler
+	// mws are the middleware wrapping the handler, group middleware first. It
+	// is read at request time, so Middleware called after registration takes
+	// effect on a route already in the mux.
+	mws []pipeline.Middleware[http.Handler]
+	// excluded are middleware removed from mws at request time, by identity.
+	// WithoutMiddleware appends here.
+	excluded []pipeline.Middleware[http.Handler]
+	// wheres are the regular-expression constraints keyed by parameter name.
+	// A request whose path value fails the regex is answered 404 before the
+	// handler, which is what stops /users/{id} from reaching the database for
+	// /users/abc. See Where and WhereNumber.
+	wheres map[string]*regexp.Regexp
+	// whereOrder keeps wheres deterministic for matching and display.
+	whereOrder []string
+	// defaults are the fixed parameter values the route carries, set with
+	// Defaults. Redirect and View use them to hand a destination or a view
+	// name to the handler.
+	defaults map[string]any
+	// action describes the handler for display and for binding: "uses" is the
+	// action string ("PostController@show" or "Closure"), "controller" is its
+	// controller part. Set with Uses.
+	action map[string]any
+	// domain is the host the route is declared for, if any. http.ServeMux does
+	// not route by host, so this is for URL generation and matching only.
+	domain string
+	// prefix is the path prefix the route was registered under, recorded so
+	// GetPrefix can answer it.
+	prefix string
+	// withTrashed allows soft-deleted records through implicit model binding.
+	// The implicit binding (hesape/routing, in the binding files) reads it.
+	withTrashed bool
+	// scopedBindings is whether the route enforces scoped implicit bindings.
+	// nil = unset, true = ScopeBindings, false = WithoutScopedBindings.
+	scopedBindings *bool
+	// missingHandler answers when an implicit model binding resolves nothing.
+	missingHandler http.Handler
+	// router is the root router, for firing matched callbacks.
+	router *Router
+	// bindingFields are the {param:field} qualifiers parsed off the URI, used
+	// by the route model binding to resolve a model by a column other than id.
+	bindingFields map[string]string
+	// fallback marks a route registered with Fallback, so matching treats it
+	// as the last resort.
+	fallback bool
 }
+
+// triState returns a pointer to b, the shape scopedBindings stores so the
+// difference between "unset" and "false" survives.
+func triState(b bool) *bool { return &b }
 
 // RouteName returns the name given with Name, or empty.
 //
