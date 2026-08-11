@@ -115,7 +115,7 @@ func (b *Builder[T]) IncrementOrCreate(g auth.Grant, attributes map[string]any, 
 // It is how a read that has to see what was just written avoids the replica lag
 // that would otherwise make a fresh row look missing.
 func (b *Builder[T]) UseWritePDO() *Builder[T] {
-	b.query.UseWritePDO = true
+	b.query.UseWritePDO()
 	return b
 }
 

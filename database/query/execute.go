@@ -144,7 +144,57 @@ func (b *Builder) scoped(ctx context.Context, g auth.Grant) (*Builder, error) {
 	if err := scoped.scopeUnions(ctx, g); err != nil {
 		return nil, err
 	}
+	if err := scoped.scopeSubqueries(ctx, g); err != nil {
+		return nil, err
+	}
 	return scoped, nil
+}
+
+// scopeSubqueries puts the tenant on every query nested inside a where clause.
+//
+// `where exists (select ... from invoices)` compiles that inner select whole,
+// so a filter on the outer query says nothing about which invoices it looked
+// at: the outer row belongs to this tenant, and the reason it was returned may
+// be a row belonging to another. Same for a whereIn over a subquery, and same
+// for a nested group that carries either.
+//
+// It walks the clauses rather than the flat binding list, and then rebuilds
+// that list with WhereBindings -- scoping a subquery adds a binding to it, so
+// leaving the old list in place would slide every value after it onto the wrong
+// placeholder. This is why WhereRaw records its bindings on the clause.
+func (b *Builder) scopeSubqueries(ctx context.Context, g auth.Grant) error {
+	changed := false
+	for i, where := range b.Wheres {
+		if where.Query == nil {
+			continue
+		}
+		switch where.Type {
+		case "Exists", "In":
+			// Another table, compiled whole. It needs a tenant of its own.
+			scoped, err := where.Query.scoped(ctx, g)
+			if err != nil {
+				return err
+			}
+			where.Query = scoped
+			b.Wheres[i] = where
+			changed = true
+
+		case "Nested":
+			// A parenthesised group of the SAME query. It is already under the
+			// outer filter and must not be scoped again -- scoped() builds one
+			// of these itself to wrap what it found, so scoping it here would
+			// wrap the wrapper forever. It is descended into, because the group
+			// may hold an Exists.
+			if err := where.Query.scopeSubqueries(ctx, g); err != nil {
+				return err
+			}
+			changed = true
+		}
+	}
+	if changed {
+		b.Bindings["where"] = b.WhereBindings()
+	}
+	return nil
 }
 
 // scopeUnions puts the tenant on the far side of every union.
@@ -222,7 +272,7 @@ func (b *Builder) runSelect() ([]Record, error) {
 	if b.Connection == nil {
 		return nil, errors.New("query: the builder has no connection to run against")
 	}
-	return b.Connection.Select(b.ToSQL(), b.GetBindings(), !b.UseWritePDO)
+	return b.Connection.Select(b.ToSQL(), b.GetBindings(), !b.UsingWritePDO())
 }
 
 // affectingStatement runs a statement that answers with a row count, through
@@ -570,7 +620,7 @@ func (b *Builder) Exists(ctx context.Context, g auth.Grant) (bool, error) {
 	query.ApplyBeforeQueryCallbacks()
 
 	rows, err := query.Connection.Select(
-		query.Grammar.CompileExists(query), query.GetBindings(), !query.UseWritePDO)
+		query.Grammar.CompileExists(query), query.GetBindings(), !query.UsingWritePDO())
 	if err != nil {
 		return false, err
 	}

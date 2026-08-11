@@ -72,18 +72,20 @@ type Builder struct {
 	// BeforeQueryCallbacks is Builder::$beforeQueryCallbacks.
 	BeforeQueryCallbacks []func(*Builder)
 
-	// UseWritePDO is Builder::$useWritePdo.
-	UseWritePDO bool
+	// AfterQueryCallbacks is Builder::$afterQueryCallbacks. Each runs over the
+	// result of Get, Pluck or Cursor before it is handed back.
+	AfterQueryCallbacks []func([]Record) []Record
 
-	from       any
-	distinct   any
-	indexHint  *IndexHint
-	limit      *int
-	groupLimit *GroupLimit
-	offset     *int
-	lock       any
-	aggregate  *Aggregate
-	timeout    *int
+	from        any
+	distinct    any
+	indexHint   *IndexHint
+	limit       *int
+	groupLimit  *GroupLimit
+	offset      *int
+	lock        any
+	aggregate   *Aggregate
+	timeout     *int
+	useWritePDO bool
 }
 
 // Connection answers Illuminate\Database\ConnectionInterface, narrowed to what
@@ -296,8 +298,14 @@ func (b *Builder) WhereColumn(first any, args ...any) *Builder {
 }
 
 // WhereRaw answers Builder::whereRaw.
+//
+// The bindings are recorded on the clause as well as appended to the segment.
+// PHP only appends, because nothing there ever needs to rebuild the flat list;
+// here the tenant filter does -- scoping a subquery changes how many bindings
+// it contributes, and the list can only be put back in order if every clause
+// knows which of them are its own.
 func (b *Builder) WhereRaw(sql string, bindings ...any) *Builder {
-	b.Wheres = append(b.Wheres, Where{Type: "Raw", SQL: sql, Boolean: "and"})
+	b.Wheres = append(b.Wheres, Where{Type: "Raw", SQL: sql, Boolean: "and", Values: bindings})
 	if len(bindings) > 0 {
 		b.AddBinding(bindings, "where")
 	}
@@ -306,11 +314,56 @@ func (b *Builder) WhereRaw(sql string, bindings ...any) *Builder {
 
 // OrWhereRaw answers Builder::orWhereRaw.
 func (b *Builder) OrWhereRaw(sql string, bindings ...any) *Builder {
-	b.Wheres = append(b.Wheres, Where{Type: "Raw", SQL: sql, Boolean: "or"})
+	b.Wheres = append(b.Wheres, Where{Type: "Raw", SQL: sql, Boolean: "or", Values: bindings})
 	if len(bindings) > 0 {
 		b.AddBinding(bindings, "where")
 	}
 	return b
+}
+
+// WhereBindings rebuilds the where segment from the clauses, in the order the
+// compiled statement consumes them.
+//
+// It exists so that a clause carrying a subquery can be replaced -- which is
+// what putting the tenant on a subquery does -- without the values afterwards
+// sliding onto the wrong placeholders. Every clause type that contributes a
+// binding is listed here, and a type that starts contributing one has to be
+// added: a clause this does not know about loses its values silently, which is
+// a wrong answer rather than an error.
+func (b *Builder) WhereBindings() []any {
+	out := make([]any, 0, len(b.Bindings["where"]))
+	for _, where := range b.Wheres {
+		switch where.Type {
+		case "Basic":
+			if !IsExpression(where.Value) {
+				out = append(out, where.Value)
+			}
+		case "In", "Between":
+			// An In carries either a list of values or a subquery, never both.
+			// The subquery form is the one that loses its bindings silently if
+			// this branch only ever looks at Values.
+			if where.Query != nil {
+				out = append(out, where.Query.GetBindings()...)
+				continue
+			}
+			for _, value := range where.Values {
+				if !IsExpression(value) {
+					out = append(out, value)
+				}
+			}
+		case "Raw":
+			out = append(out, where.Values...)
+		case "Nested":
+			if where.Query != nil {
+				out = append(out, where.Query.WhereBindings()...)
+			}
+		case "Exists":
+			if where.Query != nil {
+				out = append(out, where.Query.GetBindings()...)
+			}
+		}
+	}
+	return out
 }
 
 // WhereIn answers Builder::whereIn.
@@ -747,8 +800,57 @@ func (b *Builder) MergeBindings(query *Builder) *Builder {
 	return b
 }
 
+// UseWritePDO answers Builder::useWritePdo.
+//
+// It sends the read to the write connection, for the case a replica has not
+// caught up yet: a row inserted and read back in the same request is not there
+// on a replica that is two hundred milliseconds behind.
+//
+// The state behind it is unexported and read through UsingWritePDO, for the
+// same reason From, Limit and Offset are: PHP holds $useWritePdo and
+// useWritePdo() in separate namespaces and Go holds them in one.
+func (b *Builder) UseWritePDO() *Builder {
+	b.useWritePDO = true
+	return b
+}
+
+// UsingWritePDO reports whether the read goes to the write connection.
+// Mechanical, for the reason UseWritePDO gives.
+func (b *Builder) UsingWritePDO() bool { return b.useWritePDO }
+
+// AfterQuery answers Builder::afterQuery.
+func (b *Builder) AfterQuery(callback func([]Record) []Record) *Builder {
+	b.AfterQueryCallbacks = append(b.AfterQueryCallbacks, callback)
+	return b
+}
+
+// ApplyAfterQueryCallbacks answers Builder::applyAfterQueryCallbacks. Each
+// callback receives what the one before it returned, so they compose.
+func (b *Builder) ApplyAfterQueryCallbacks(result []Record) []Record {
+	for _, callback := range b.AfterQueryCallbacks {
+		result = callback(result)
+	}
+	return result
+}
+
 // GetColumns answers Builder::getColumns.
-func (b *Builder) GetColumns() []any { return b.Columns }
+//
+// The PHP maps each column through the grammar's getValue, so an Expression
+// comes back as the SQL it carries rather than as the object, and returns []
+// rather than null when nothing was selected. Both are reproduced: a caller
+// ranging the result must not have to special-case nil, and must not receive a
+// type it would have to unwrap.
+func (b *Builder) GetColumns() []any {
+	out := make([]any, 0, len(b.Columns))
+	for _, column := range b.Columns {
+		if IsExpression(column) {
+			out = append(out, stringify(column))
+			continue
+		}
+		out = append(out, column)
+	}
+	return out
+}
 
 // GetLimit answers Builder::getLimit.
 func (b *Builder) GetLimit() *int { return b.limit }
@@ -782,10 +884,19 @@ func (b *Builder) GetLock() any { return b.lock }
 // the same reason as GetFrom.
 func (b *Builder) GetAggregate() *Aggregate { return b.aggregate }
 
-// SetAggregate sets the aggregate the next compile reports. It is how the
-// aggregate methods hand the grammar what the PHP assigns to $query->aggregate.
+// SetAggregate answers Builder::setAggregate.
+//
+// It also drops the ordering when there is no GROUP BY, which is the half of
+// the PHP that is easy to miss and the half that matters: ORDER BY on an
+// aggregate with no grouping is a sort of one row, and MySQL in strict mode
+// refuses it outright when the ordering column is not in the select. The order
+// bindings go with it, or the placeholders and the values stop lining up.
 func (b *Builder) SetAggregate(function string, columns []any) *Builder {
 	b.aggregate = &Aggregate{Function: function, Columns: columns}
+	if len(b.Groups) == 0 {
+		b.Orders = nil
+		b.Bindings["order"] = nil
+	}
 	return b
 }
 
@@ -843,6 +954,12 @@ func (b *Builder) CloneWithout(properties ...string) *Builder {
 			out.Orders = nil
 		case "unions":
 			out.Unions = nil
+		case "unionorders":
+			out.UnionOrders = nil
+		case "unionlimit":
+			out.UnionLimit = nil
+		case "unionoffset":
+			out.UnionOffset = nil
 		case "limit":
 			out.limit = nil
 		case "offset":

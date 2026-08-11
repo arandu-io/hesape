@@ -17,7 +17,7 @@ import (
 // runSelect answers Builder::runSelect.
 func (b *Builder[T]) runSelect() ([]query.Record, error) {
 	sql := b.query.ToSQL()
-	rows, err := b.model.Connection.Select(sql, b.query.GetBindings(), !b.query.UseWritePDO)
+	rows, err := b.model.Connection.Select(sql, b.query.GetBindings(), !b.query.UsingWritePDO())
 	if err != nil {
 		return nil, fmt.Errorf("eloquent: selecting from %s: %w", b.model.GetTable(), err)
 	}
