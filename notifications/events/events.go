@@ -7,9 +7,7 @@
 //	NotificationSending.php            -> Sending, NewSending
 //	NotificationSent.php               -> Sent, NewSent
 //	NotificationFailed.php             -> Failed, NewFailed
-//	BroadcastNotificationCreated.php   -> nothing: broadcasting a notification
-//	                                      is the broadcast channel doing its
-//	                                      job, not a second event about it
+//	BroadcastNotificationCreated.php   -> BroadcastNotificationCreated
 //
 // In Laravel these are classes a listener type-hints. Here they are event
 // names on the outbox, because that is the one way an application learns that

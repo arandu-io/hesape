@@ -11,7 +11,8 @@ import (
 //
 // Build one in a package-level variable with MustCompile: the rules are then
 // parsed once, at boot, and a set that boots is a set whose names are all real.
-// A Set is read-only once compiled, so one is shared by every request.
+// A Set is read-only once compiled, so one is shared by every request; the
+// per-request state lives in the Validator that Make builds over it.
 type Set struct {
 	fields   []*field // sorted by name, so failures come out in a stable order
 	byName   map[string]*field
@@ -28,13 +29,23 @@ type field struct {
 	// bail stops the field at its first failure.
 	bail bool
 	// sometimes skips the field entirely when its key was not sent at all --
-	// which is why the input is url.Values and not a map of strings: only
-	// url.Values can tell "absent" from "present and empty", and that is the
-	// difference a PATCH is made of.
+	// which is why the data can tell "absent" from "present and empty", and
+	// that is the difference a PATCH is made of.
 	sometimes bool
+	// nullable stops the field when the value is NULL rather than when it is
+	// empty. Laravel's isNotNullIfMarkedAsNullable.
+	nullable bool
 	// numeric is set by numeric, integer or decimal, and makes every size rule
-	// on this field measure the value rather than the characters.
+	// on this field measure the value rather than the characters. Laravel's
+	// $numericRules.
 	numeric bool
+	// file is set by file, image, mimes, mimetypes, extensions or dimensions,
+	// and makes a size limit on this field mean KILOBYTES. Laravel's
+	// $fileRules.
+	file bool
+	// hasImplicit records that the field declares at least one implicit rule,
+	// which is what shouldStopValidating asks before it stops.
+	hasImplicit bool
 	// layout is the date_format layout, which the date comparisons read.
 	layout string
 }
@@ -90,59 +101,25 @@ func (s *Set) Source() (file string, line int) { return s.file, s.line }
 // Validate runs the set over a submitted form and returns what passed and what
 // failed.
 //
-// The input is url.Values rather than a map of strings because "absent" and
-// "present and empty" are different questions, and `sometimes` asks the first
-// one. A rule reads the first value of a field; a multi-value input is read out
-// with Input.Strings.
+// It is Make plus Passes for the common case: an HTML form, no upload, no rule
+// that leaves the process. A set with `unique`, `exists`, `current_password` or
+// `active_url` in it goes through Make instead, which is where the Grant, the
+// verifier and the context are given -- those four fail closed here, on
+// purpose: RULE 17 has no exception for a read, and a rule set has no Grant.
+//
+// The input is url.Values rather than Data because that is what a form arrives
+// as; DataFrom is the conversion, and a name sent twice becomes a list.
 //
 // The returned Errors is nil when nothing failed. Assigning it to an error
 // interface makes that interface non-nil even so, because the type is not nil
 // -- callers ask Any(), and httpx.Context.Validate returns a plain nil for
 // exactly this reason.
 func (s *Set) Validate(values url.Values) (Input, Errors) {
-	var errs Errors
-	passed := make(url.Values, len(s.fields))
-
-	for _, f := range s.fields {
-		_, present := values[f.name]
-		if f.sometimes && !present {
-			// Not sent at all, and the set says that is allowed. Nothing else
-			// on this field has an opinion about a value that is not there.
-			continue
-		}
-
-		e := &eval{set: s, f: f, values: values, value: values.Get(f.name)}
-		failed := false
-		for _, r := range f.rules {
-			// A rule that is not implicit does not run on a blank value.
-			// Without this, `min:12` reports "must be at least 12 characters"
-			// about an optional box nobody typed in. Laravel's
-			// presentOrRuleIsImplicit.
-			if !r.spec.implicit && !filled(e.value) {
-				continue
-			}
-			if r.spec.eval(e, r) {
-				continue
-			}
-			if errs == nil {
-				errs = Errors{}
-			}
-			errs.Add(f.name, s.message(f, r))
-			failed = true
-
-			// A failed implicit rule stops the field: `required` failing must
-			// not also produce "must be at least 12 characters" about the same
-			// empty box. Laravel's shouldStopValidating, and `bail` is the same
-			// stop asked for explicitly.
-			if f.bail || r.spec.implicit {
-				break
-			}
-		}
-		if !failed && present {
-			passed[f.name] = slices.Clone(values[f.name])
-		}
+	v := Make(DataFrom(values), s)
+	if v.Passes() {
+		return v.Validated(), nil
 	}
-	return Input{values: passed}, errs
+	return v.Validated(), v.Errors()
 }
 
 // message is the sentence one failure puts on the field, after any override.
@@ -153,69 +130,59 @@ func (s *Set) message(f *field, r *rule) string {
 	return r.spec.message(f, r)
 }
 
-// eval is one field's turn: the value under test and the form it came in.
-type eval struct {
-	set    *Set
-	f      *field
-	values url.Values
-	value  string
-}
-
-func (e *eval) has(name string) bool {
-	_, ok := e.values[name]
-	return ok
-}
-
-func (e *eval) other(name string) string { return e.values.Get(name) }
-
-// size is what min, max, size, between and the four comparisons measure.
-//
-// It is polymorphic exactly as Laravel's getSize is: a string is measured in
-// RUNES, never bytes -- a limit in bytes rejects valid input in every language
-// that needs more than one byte per character -- and a field that declares
-// numeric, integer or decimal is measured by its VALUE. Both halves of the gate
-// matter: a field that declares `integer` and was sent "abc" is measured as
-// three characters, because there is no number to measure.
-func (e *eval) size(v string) float64 {
-	if e.f.numeric {
-		if n, ok := number(v); ok {
-			return n
-		}
-	}
-	return float64(len([]rune(v)))
-}
-
 // Input is what passed the rules. It is the only way to read a submitted value
 // out of a validated request: a field the set does not declare is not in here,
 // so a value nobody wrote a rule for cannot reach a repository by accident.
 type Input struct {
-	values url.Values
+	data Data
 }
 
 // Has reports whether the field was sent and passed.
-func (in Input) Has(field string) bool {
-	_, ok := in.values[field]
-	return ok
+func (in Input) Has(field string) bool { return in.data.Has(field) }
+
+// String returns the value, or empty when the field was not sent. A field sent
+// more than once is a list, and this is its first value -- what url.Values.Get
+// answers.
+func (in Input) String(field string) string {
+	value := in.data.Get(field)
+	if list, ok := asList(value); ok {
+		if len(list) == 0 {
+			return ""
+		}
+		return stringOf(list[0])
+	}
+	return stringOf(value)
 }
 
-// String returns the value, or empty when the field was not sent.
-func (in Input) String(field string) string { return in.values.Get(field) }
-
-// Strings returns every value of a field, which is what a multi-select sends.
-func (in Input) Strings(field string) []string { return slices.Clone(in.values[field]) }
+// Strings returns every value of a field, which is what a multi-select sends. A
+// field sent once is a list of one.
+func (in Input) Strings(field string) []string {
+	value, sent := lookup(in.data, field)
+	if !sent {
+		return nil
+	}
+	if list, ok := asList(value); ok {
+		out := make([]string, len(list))
+		for i, item := range list {
+			out[i] = stringOf(item)
+		}
+		return out
+	}
+	return []string{stringOf(value)}
+}
 
 // Int returns the value as a whole number. It is zero when the field was not
 // sent or does not hold one -- which is a rule's job to have proven, with
 // `integer`.
 func (in Input) Int(field string) int64 {
-	n, _ := whole(in.values.Get(field))
+	n, _ := whole(in.String(field))
 	return n
 }
 
 // Float returns the value as a number, zero when there is none. `numeric` or
 // `decimal` is what proves there is.
 func (in Input) Float(field string) float64 {
-	n, _ := number(in.values.Get(field))
+	n, _ := number(in.String(field))
 	return n
 }
 
@@ -225,26 +192,33 @@ func (in Input) Float(field string) float64 {
 // only the "0" and "1" that the `boolean` rule allows, because an unticked
 // checkbox sends nothing and a ticked one sends "on". Anything else is false: a
 // checkbox has no third answer.
-func (in Input) Bool(field string) bool { return contains(acceptable, in.values.Get(field)) }
+func (in Input) Bool(field string) bool { return isAccepted(in.String(field)) }
 
 // Time reads a value with the layout its rule declared. It is the zero time
 // when the field was not sent or does not parse, which `date_format` is what
 // prevents.
 func (in Input) Time(field, layout string) time.Time {
-	t, err := time.Parse(layout, in.values.Get(field))
+	t, err := time.Parse(layout, in.String(field))
 	if err != nil {
 		return time.Time{}
 	}
 	return t
 }
 
-// Values returns a copy of everything that passed, for a caller that hands the
-// whole form on. It is a copy so that a caller cannot reach back into the
-// request's own values through it.
-func (in Input) Values() url.Values {
-	out := make(url.Values, len(in.values))
-	for k, v := range in.values {
-		out[k] = slices.Clone(v)
-	}
-	return out
+// File returns the upload that passed, and false when the field holds none.
+func (in Input) File(field string) (File, bool) { return asFile(in.data.Get(field)) }
+
+// Data returns a copy of everything that passed, in the shape the rules read
+// it. It is a copy so that a caller cannot reach back into the request's own
+// values through it.
+func (in Input) Data() Data { return in.data.Clone() }
+
+// Values returns a copy of everything that passed, as a submitted form, for a
+// caller that hands the whole thing on.
+func (in Input) Values() url.Values { return in.data.Values() }
+
+// anyAffix reports whether the value carries any of the affixes, with the given
+// match -- the shape starts_with, ends_with and their two refusals share.
+func anyAffix(list []string, match func(string, string) bool, v string) bool {
+	return slices.ContainsFunc(list, func(affix string) bool { return match(v, affix) })
 }

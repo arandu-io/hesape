@@ -62,7 +62,7 @@ func (n invoicePaid) Via(notifications.Notifiable) []notifications.ChannelName {
 }
 
 func (n invoicePaid) ToMail(notifications.Notifiable) messages.Mail {
-	return messages.Mail{Subject: "Your invoice is paid"}.
+	return messages.NewMail().Subject("Your invoice is paid").
 		Line("We received your payment for invoice " + n.number + ".").
 		Success()
 }

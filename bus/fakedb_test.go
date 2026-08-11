@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -14,17 +15,17 @@ import (
 	"github.com/arandu-io/hesape/database"
 )
 
-// A database/sql driver that understands the four statements this package
-// issues, and nothing else.
+// A database/sql driver that understands the statements this package issues,
+// and nothing else.
 //
 // It is here for the same reason the one in hesape/database is: the core has
 // two dependencies, a test dependency is still a dependency, and a real engine
 // would put a SQLite driver in the go.sum of every project that imports the
 // collection.
 //
-// What it proves is that the store's statements agree with each other -- that
-// the columns Create writes are the columns Find reads back in the order it
-// reads them, that Record's compare-and-set rejects a write against counters
+// What it proves is that the repository's statements agree with each other --
+// that the columns Store writes are the columns Find reads back in the order it
+// reads them, that the counter compare-and-set rejects a write against counters
 // that moved, that Cancel and Prune touch the rows they claim to. What it does
 // not prove is that the SQL is valid for PostgreSQL, MySQL or SQLite; that is
 // the conformance suite's job, and it runs against real engines in the adapter
@@ -44,11 +45,11 @@ var (
 
 // fakeRow is one row of job_batches, in the order the columns are declared.
 type fakeRow struct {
-	id, tenant, name, queue       string
-	total, pending, failed, allow int64
-	callbacks                     string
-	createdAt                     time.Time
-	cancelledAt, finishedAt       *time.Time
+	id, tenant, name        string
+	total, pending, failed  int64
+	failedJobIDs, options   string
+	createdAt               time.Time
+	cancelledAt, finishedAt *time.Time
 }
 
 type fakeDB struct {
@@ -56,8 +57,8 @@ type fakeDB struct {
 	rows map[string]*fakeRow // keyed by tenant and id
 }
 
-// newFakeStore returns a SQL store over a fresh fake database.
-func newFakeStore() *bus.SQL {
+// newFakeStore returns a database repository over a fresh fake database.
+func newFakeStore() *bus.DatabaseBatchRepository {
 	fakeMu.Lock()
 	fakeSeq++
 	dsn := fmt.Sprintf("bus-fake-%d", fakeSeq)
@@ -68,7 +69,7 @@ func newFakeStore() *bus.SQL {
 	if err != nil {
 		panic(err)
 	}
-	return bus.NewSQL(database.Wrap(handle, database.DialectSQLite))
+	return bus.NewDatabaseBatchRepository(database.Wrap(handle, database.DialectSQLite))
 }
 
 func lookupFake(dsn string) *fakeDB {
@@ -112,20 +113,22 @@ func (c *fakeConn) ExecContext(_ context.Context, query string, args []driver.Na
 	switch {
 	case strings.HasPrefix(q, "INSERT INTO "+bus.BatchesTable):
 		row := &fakeRow{
-			id: str(v[0]), tenant: str(v[1]), name: str(v[2]), queue: str(v[3]),
-			total: num(v[4]), pending: num(v[5]), failed: num(v[6]), allow: num(v[7]),
-			callbacks: str(v[8]), createdAt: stamp(v[9]),
-			cancelledAt: maybe(v[10]), finishedAt: maybe(v[11]),
+			id: str(v[0]), tenant: str(v[1]), name: str(v[2]),
+			total: num(v[3]), pending: num(v[4]), failed: num(v[5]),
+			failedJobIDs: str(v[6]), options: str(v[7]), createdAt: stamp(v[8]),
+			cancelledAt: maybe(v[9]), finishedAt: maybe(v[10]),
 		}
 		c.db.rows[fakeKey(row.tenant, row.id)] = row
 		return fakeResult(1), nil
 
-	case strings.HasPrefix(q, "UPDATE "+bus.BatchesTable+" SET cancelled_at"):
-		row := c.db.rows[fakeKey(str(v[2]), str(v[1]))]
-		if row == nil || row.cancelledAt != nil || row.finishedAt != nil {
+	case strings.HasPrefix(q, "UPDATE "+bus.BatchesTable+" SET total_jobs"):
+		row := c.db.rows[fakeKey(str(v[3]), str(v[2]))]
+		if row == nil {
 			return fakeResult(0), nil
 		}
-		row.cancelledAt = maybe(v[0])
+		row.total += num(v[0])
+		row.pending += num(v[1])
+		row.finishedAt = nil
 		return fakeResult(1), nil
 
 	case strings.HasPrefix(q, "UPDATE "+bus.BatchesTable+" SET pending_jobs"):
@@ -135,14 +138,48 @@ func (c *fakeConn) ExecContext(_ context.Context, query string, args []driver.Na
 		if row == nil || row.pending != num(v[5]) || row.failed != num(v[6]) {
 			return fakeResult(0), nil
 		}
-		row.pending, row.failed, row.finishedAt = num(v[0]), num(v[1]), maybe(v[2])
+		row.pending, row.failed, row.failedJobIDs = num(v[0]), num(v[1]), str(v[2])
 		return fakeResult(1), nil
 
-	case strings.HasPrefix(q, "DELETE FROM "+bus.BatchesTable):
+	case strings.HasPrefix(q, "UPDATE "+bus.BatchesTable+" SET finished_at"):
+		row := c.db.rows[fakeKey(str(v[2]), str(v[1]))]
+		if row == nil || row.finishedAt != nil {
+			return fakeResult(0), nil
+		}
+		row.finishedAt = maybe(v[0])
+		return fakeResult(1), nil
+
+	case strings.HasPrefix(q, "UPDATE "+bus.BatchesTable+" SET cancelled_at"):
+		row := c.db.rows[fakeKey(str(v[3]), str(v[2]))]
+		if row == nil || row.cancelledAt != nil {
+			return fakeResult(0), nil
+		}
+		row.cancelledAt, row.finishedAt = maybe(v[0]), maybe(v[1])
+		return fakeResult(1), nil
+
+	case strings.Contains(q, "DELETE FROM "+bus.BatchesTable+" WHERE id ="):
+		key := fakeKey(str(v[1]), str(v[0]))
+		if _, ok := c.db.rows[key]; !ok {
+			return fakeResult(0), nil
+		}
+		delete(c.db.rows, key)
+		return fakeResult(1), nil
+
+	case strings.HasPrefix(q, "DELETE FROM "+bus.BatchesTable+" WHERE tenant_id ="):
 		tenant, before := str(v[0]), stamp(v[1])
+		takes := func(row *fakeRow) bool {
+			switch {
+			case strings.Contains(q, "finished_at IS NOT NULL"):
+				return row.finishedAt != nil
+			case strings.Contains(q, "finished_at IS NULL"):
+				return row.finishedAt == nil
+			default:
+				return row.cancelledAt != nil
+			}
+		}
 		n := int64(0)
 		for k, row := range c.db.rows {
-			if row.tenant != tenant || row.finishedAt == nil || !row.createdAt.Before(before) {
+			if row.tenant != tenant || !takes(row) || !row.createdAt.Before(before) {
 				continue
 			}
 			delete(c.db.rows, k)
@@ -162,15 +199,63 @@ func (c *fakeConn) QueryContext(_ context.Context, query string, args []driver.N
 
 	c.db.mu.Lock()
 	defer c.db.mu.Unlock()
+
+	// The list: WHERE tenant_id = ? ... ORDER BY created_at DESC, id DESC LIMIT ?
+	if strings.Contains(q, "ORDER BY created_at DESC") {
+		tenant := str(args[0].Value)
+		limit := num(args[len(args)-1].Value)
+		var (
+			cursorAt time.Time
+			cursorID string
+			paging   bool
+		)
+		if len(args) == 5 {
+			cursorAt, cursorID, paging = stamp(args[1].Value), str(args[3].Value), true
+		}
+		after := func(row *fakeRow) bool {
+			if row.createdAt.Equal(cursorAt) {
+				return row.id < cursorID
+			}
+			return row.createdAt.Before(cursorAt)
+		}
+
+		var rows []*fakeRow
+		for _, row := range c.db.rows {
+			if row.tenant != tenant || (paging && !after(row)) {
+				continue
+			}
+			rows = append(rows, row)
+		}
+		sort.Slice(rows, func(i, j int) bool {
+			if rows[i].createdAt.Equal(rows[j].createdAt) {
+				return rows[i].id > rows[j].id
+			}
+			return rows[i].createdAt.After(rows[j].createdAt)
+		})
+		if int64(len(rows)) > limit {
+			rows = rows[:limit]
+		}
+		out := &fakeRows{}
+		for _, row := range rows {
+			out.values = append(out.values, fakeValues(row))
+		}
+		return out, nil
+	}
+
 	row := c.db.rows[fakeKey(str(args[1].Value), str(args[0].Value))]
 	if row == nil {
 		return &fakeRows{}, nil
 	}
-	return &fakeRows{values: [][]driver.Value{{
-		row.id, row.tenant, row.name, row.queue,
-		row.total, row.pending, row.failed, row.allow,
-		row.callbacks, row.createdAt, back(row.cancelledAt), back(row.finishedAt),
-	}}}, nil
+	return &fakeRows{values: [][]driver.Value{fakeValues(row)}}, nil
+}
+
+func fakeValues(row *fakeRow) []driver.Value {
+	return []driver.Value{
+		row.id, row.tenant, row.name,
+		row.total, row.pending, row.failed,
+		row.failedJobIDs, row.options, row.createdAt,
+		back(row.cancelledAt), back(row.finishedAt),
+	}
 }
 
 type fakeRows struct {
@@ -179,8 +264,8 @@ type fakeRows struct {
 }
 
 func (r *fakeRows) Columns() []string {
-	return []string{"id", "tenant_id", "name", "queue", "total_jobs", "pending_jobs",
-		"failed_jobs", "allow_failures", "callbacks", "created_at", "cancelled_at", "finished_at"}
+	return []string{"id", "tenant_id", "name", "total_jobs", "pending_jobs",
+		"failed_jobs", "failed_job_ids", "options", "created_at", "cancelled_at", "finished_at"}
 }
 
 func (r *fakeRows) Close() error { return nil }

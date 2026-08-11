@@ -1,18 +1,21 @@
 package validation
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/netip"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/arandu-io/hesape/str"
 )
+
+// evaluator is what a rule answers with. It is the signature every
+// ValidatesAttributes method has, so an entry below holds the method itself
+// rather than a closure around it: there is one place a rule's behaviour is
+// written, and it is the method with the PHP's name.
+type evaluator = func(v *Validator, attribute string, value any, parameters []string) bool
 
 // spec is one rule name: how many arguments it takes, whether it runs on a
 // blank value, what it checks at boot, what it answers on a request and what it
@@ -29,11 +32,8 @@ type spec struct {
 	minArgs, maxArgs int
 
 	// implicit marks a rule that runs even when the value is blank, and whose
-	// failure stops every later rule on the field.
-	//
-	// Without it, `min:12` on an optional field nobody filled in reports "must
-	// be at least 12 characters" about a box the person deliberately left
-	// alone. It is Laravel's $implicitRules, and dropping it is a real bug.
+	// failure stops every later rule on the field. It is Laravel's
+	// $implicitRules, and dropping it is a real bug.
 	implicit bool
 
 	// sizeIsValue marks numeric, integer and decimal: the three rules that make
@@ -53,7 +53,7 @@ type spec struct {
 	check func(c *checkCtx) error
 
 	// eval answers whether the value passes. It never allocates a message.
-	eval func(e *eval, r *rule) bool
+	eval evaluator
 
 	// message is the sentence a failure puts on the field. It is written to
 	// read after a humanised field name and to be drawn without one -- see
@@ -61,121 +61,235 @@ type spec struct {
 	message func(f *field, r *rule) string
 }
 
-// specs is the whole rule set. It is closed: a name that is not in here and not
-// in refused is a boot failure, which is what makes "a rule set that boots is a
-// rule set whose names are all real" true.
+// specs is the whole rule set: every rule Illuminate\Validation has, at the
+// spelling somebody types into a rule string, pointing at the method that
+// carries the PHP's name.
 //
-// 61 of Laravel's 111, at Laravel's spelling. Every one of the other 50 is
-// named in refused with the reason it is not here, so a migrating developer
-// gets an answer rather than "unknown rule".
+// It is closed. A name that is not in here and not in refused is a boot
+// failure, which is what makes "a rule set that boots is a rule set whose names
+// are all real" true.
 var specs = map[string]*spec{
 	// ---------------------------------------------------------------------
 	// Presence and flow.
 	// ---------------------------------------------------------------------
 	"required": {
 		implicit: true,
-		eval:     func(e *eval, r *rule) bool { return filled(e.value) },
+		eval:     (*Validator).ValidateRequired,
 		message:  func(f *field, r *rule) string { return "is required" },
 	},
 	"sometimes": {
-		// A marker. The field is skipped entirely when its key is absent, which
-		// is decided in Set.Validate, so this can only pass.
-		eval:    func(e *eval, r *rule) bool { return true },
+		eval:    (*Validator).ValidateSometimes,
 		message: func(f *field, r *rule) string { return "" },
 	},
 	"bail": {
-		// A marker. Set.Validate reads field.bail; see shouldStop.
-		eval:    func(e *eval, r *rule) bool { return true },
+		eval:    (*Validator).ValidateBail,
+		message: func(f *field, r *rule) string { return "" },
+	},
+	"nullable": {
+		eval:    (*Validator).ValidateNullable,
 		message: func(f *field, r *rule) string { return "" },
 	},
 	"filled": {
 		implicit: true,
-		// Absent passes: filled is about a key that was sent, not about one
-		// that had to be. That is the whole difference from required.
-		eval: func(e *eval, r *rule) bool {
-			if !e.has(e.f.name) {
-				return true
-			}
-			return filled(e.value)
-		},
-		message: func(f *field, r *rule) string { return "must have a value" },
+		eval:     (*Validator).ValidateFilled,
+		message:  func(f *field, r *rule) string { return "must have a value" },
 	},
 	"present": {
 		implicit: true,
-		eval:     func(e *eval, r *rule) bool { return e.has(e.f.name) },
+		eval:     (*Validator).ValidatePresent,
 		message:  func(f *field, r *rule) string { return "must be present" },
+	},
+	"present_if": {
+		minArgs: 2, maxArgs: -1, implicit: true, refs: []int{0},
+		eval: (*Validator).ValidatePresentIf,
+		message: func(f *field, r *rule) string {
+			return fmt.Sprintf("must be present when %s is %s", str.Headline(r.args[0]), or(r.args[1:]))
+		},
+	},
+	"present_unless": {
+		minArgs: 2, maxArgs: -1, implicit: true, refs: []int{0},
+		eval: (*Validator).ValidatePresentUnless,
+		message: func(f *field, r *rule) string {
+			return fmt.Sprintf("must be present unless %s is %s", str.Headline(r.args[0]), or(r.args[1:]))
+		},
+	},
+	"present_with": {
+		minArgs: 1, maxArgs: -1, implicit: true,
+		eval: (*Validator).ValidatePresentWith,
+		message: func(f *field, r *rule) string {
+			return fmt.Sprintf("must be present when %s is present", andHeadlined(r.args))
+		},
+	},
+	"present_with_all": {
+		minArgs: 1, maxArgs: -1, implicit: true,
+		eval: (*Validator).ValidatePresentWithAll,
+		message: func(f *field, r *rule) string {
+			return fmt.Sprintf("must be present when %s are present", andHeadlined(r.args))
+		},
 	},
 	"missing": {
 		implicit: true,
-		eval:     func(e *eval, r *rule) bool { return !e.has(e.f.name) },
+		eval:     (*Validator).ValidateMissing,
 		message:  func(f *field, r *rule) string { return "must not be sent" },
 	},
+	"missing_if": {
+		minArgs: 2, maxArgs: -1, implicit: true, refs: []int{0},
+		eval: (*Validator).ValidateMissingIf,
+		message: func(f *field, r *rule) string {
+			return fmt.Sprintf("must not be sent when %s is %s", str.Headline(r.args[0]), or(r.args[1:]))
+		},
+	},
+	"missing_unless": {
+		minArgs: 2, maxArgs: -1, implicit: true, refs: []int{0},
+		eval: (*Validator).ValidateMissingUnless,
+		message: func(f *field, r *rule) string {
+			return fmt.Sprintf("must not be sent unless %s is %s", str.Headline(r.args[0]), or(r.args[1:]))
+		},
+	},
+	"missing_with": {
+		minArgs: 1, maxArgs: -1, implicit: true,
+		eval: (*Validator).ValidateMissingWith,
+		message: func(f *field, r *rule) string {
+			return fmt.Sprintf("must not be sent when %s is present", andHeadlined(r.args))
+		},
+	},
+	"missing_with_all": {
+		minArgs: 1, maxArgs: -1, implicit: true,
+		eval: (*Validator).ValidateMissingWithAll,
+		message: func(f *field, r *rule) string {
+			return fmt.Sprintf("must not be sent when %s are present", andHeadlined(r.args))
+		},
+	},
 	"prohibited": {
-		// Implicit here although Laravel leaves it out of $implicitRules. The
-		// consequence is that a prohibited field somebody filled in gets one
-		// message instead of also being told it is too long -- and a blank
-		// value passes either way, so nothing else changes.
-		implicit: true,
-		eval:     func(e *eval, r *rule) bool { return !filled(e.value) },
-		message:  func(f *field, r *rule) string { return "is not allowed" },
+		eval:    (*Validator).ValidateProhibited,
+		message: func(f *field, r *rule) string { return "is not allowed" },
+	},
+	"prohibited_if": {
+		minArgs: 2, maxArgs: -1, refs: []int{0},
+		eval: (*Validator).ValidateProhibitedIf,
+		message: func(f *field, r *rule) string {
+			return fmt.Sprintf("is not allowed when %s is %s", str.Headline(r.args[0]), or(r.args[1:]))
+		},
+	},
+	"prohibited_if_accepted": {
+		minArgs: 1, maxArgs: -1, refs: []int{0},
+		eval: (*Validator).ValidateProhibitedIfAccepted,
+		message: func(f *field, r *rule) string {
+			return "is not allowed when " + str.Headline(r.args[0]) + " is accepted"
+		},
+	},
+	"prohibited_if_declined": {
+		minArgs: 1, maxArgs: -1, refs: []int{0},
+		eval: (*Validator).ValidateProhibitedIfDeclined,
+		message: func(f *field, r *rule) string {
+			return "is not allowed when " + str.Headline(r.args[0]) + " is declined"
+		},
+	},
+	"prohibited_unless": {
+		minArgs: 2, maxArgs: -1, refs: []int{0},
+		eval: (*Validator).ValidateProhibitedUnless,
+		message: func(f *field, r *rule) string {
+			return fmt.Sprintf("is not allowed unless %s is %s", str.Headline(r.args[0]), or(r.args[1:]))
+		},
+	},
+	"prohibits": {
+		minArgs: 1, maxArgs: -1,
+		eval: (*Validator).ValidateProhibits,
+		message: func(f *field, r *rule) string {
+			return "cannot be sent together with " + andHeadlined(r.args)
+		},
 	},
 	"required_if": {
 		minArgs: 2, maxArgs: -1, implicit: true, refs: []int{0},
-		eval: func(e *eval, r *rule) bool {
-			// Laravel returns early when the other key was not sent at all,
-			// rather than treating its absence as the empty string: a form that
-			// does not carry the field cannot be answering it.
-			if !e.has(r.args[0]) {
-				return true
-			}
-			if !contains(r.args[1:], e.other(r.args[0])) {
-				return true
-			}
-			return filled(e.value)
-		},
+		eval: (*Validator).ValidateRequiredIf,
 		message: func(f *field, r *rule) string {
 			return fmt.Sprintf("is required when %s is %s", str.Headline(r.args[0]), or(r.args[1:]))
 		},
 	},
+	"required_if_accepted": {
+		minArgs: 1, maxArgs: -1, implicit: true, refs: []int{0},
+		eval: (*Validator).ValidateRequiredIfAccepted,
+		message: func(f *field, r *rule) string {
+			return "is required when " + str.Headline(r.args[0]) + " is accepted"
+		},
+	},
+	"required_if_declined": {
+		minArgs: 1, maxArgs: -1, implicit: true, refs: []int{0},
+		eval: (*Validator).ValidateRequiredIfDeclined,
+		message: func(f *field, r *rule) string {
+			return "is required when " + str.Headline(r.args[0]) + " is declined"
+		},
+	},
 	"required_unless": {
 		minArgs: 2, maxArgs: -1, implicit: true, refs: []int{0},
-		eval: func(e *eval, r *rule) bool {
-			if contains(r.args[1:], e.other(r.args[0])) {
-				return true
-			}
-			return filled(e.value)
-		},
+		eval: (*Validator).ValidateRequiredUnless,
 		message: func(f *field, r *rule) string {
 			return fmt.Sprintf("is required unless %s is %s", str.Headline(r.args[0]), or(r.args[1:]))
 		},
 	},
 	"required_with": {
 		minArgs: 1, maxArgs: -1, implicit: true,
-		eval: func(e *eval, r *rule) bool {
-			for _, other := range r.args {
-				if filled(e.other(other)) {
-					return filled(e.value)
-				}
-			}
-			return true
-		},
+		eval: (*Validator).ValidateRequiredWith,
 		message: func(f *field, r *rule) string {
 			return fmt.Sprintf("is required when %s is present", andHeadlined(r.args))
 		},
 	},
+	"required_with_all": {
+		minArgs: 1, maxArgs: -1, implicit: true,
+		eval: (*Validator).ValidateRequiredWithAll,
+		message: func(f *field, r *rule) string {
+			return fmt.Sprintf("is required when %s are present", andHeadlined(r.args))
+		},
+	},
 	"required_without": {
 		minArgs: 1, maxArgs: -1, implicit: true,
-		eval: func(e *eval, r *rule) bool {
-			for _, other := range r.args {
-				if !filled(e.other(other)) {
-					return filled(e.value)
-				}
-			}
-			return true
-		},
+		eval: (*Validator).ValidateRequiredWithout,
 		message: func(f *field, r *rule) string {
 			return fmt.Sprintf("is required when %s is not present", andHeadlined(r.args))
 		},
+	},
+	"required_without_all": {
+		minArgs: 1, maxArgs: -1, implicit: true,
+		eval: (*Validator).ValidateRequiredWithoutAll,
+		message: func(f *field, r *rule) string {
+			return fmt.Sprintf("is required when none of %s are present", andHeadlined(r.args))
+		},
+	},
+	"required_array_keys": {
+		minArgs: 1, maxArgs: -1,
+		eval: (*Validator).ValidateRequiredArrayKeys,
+		message: func(f *field, r *rule) string {
+			return "must contain entries for " + and(r.args)
+		},
+	},
+
+	// ---------------------------------------------------------------------
+	// Exclusion. These five never put a message on the field: their failure
+	// takes the field out of the validated data instead.
+	// ---------------------------------------------------------------------
+	"exclude": {
+		eval:    (*Validator).ValidateExclude,
+		message: func(f *field, r *rule) string { return "" },
+	},
+	"exclude_if": {
+		minArgs: 2, maxArgs: -1, refs: []int{0},
+		eval:    (*Validator).ValidateExcludeIf,
+		message: func(f *field, r *rule) string { return "" },
+	},
+	"exclude_unless": {
+		minArgs: 2, maxArgs: -1, refs: []int{0},
+		eval:    (*Validator).ValidateExcludeUnless,
+		message: func(f *field, r *rule) string { return "" },
+	},
+	"exclude_with": {
+		minArgs: 1, maxArgs: 1, refs: []int{0},
+		eval:    (*Validator).ValidateExcludeWith,
+		message: func(f *field, r *rule) string { return "" },
+	},
+	"exclude_without": {
+		minArgs: 1, maxArgs: -1, refs: []int{0},
+		eval:    (*Validator).ValidateExcludeWithout,
+		message: func(f *field, r *rule) string { return "" },
 	},
 
 	// ---------------------------------------------------------------------
@@ -183,7 +297,7 @@ var specs = map[string]*spec{
 	// ---------------------------------------------------------------------
 	"confirmed": {
 		maxArgs: 1, refs: []int{0},
-		eval: func(e *eval, r *rule) bool { return e.value == e.other(confirmationOf(e.f.name, r)) },
+		eval: (*Validator).ValidateConfirmed,
 		// The message goes on the field rather than on the confirmation, and it
 		// says what is wrong rather than which box to change: a form that
 		// reports "does not match" next to the first box gets the first box
@@ -192,99 +306,119 @@ var specs = map[string]*spec{
 	},
 	"same": {
 		minArgs: 1, maxArgs: 1, refs: []int{0},
-		eval:    func(e *eval, r *rule) bool { return e.value == e.other(r.args[0]) },
+		eval:    (*Validator).ValidateSame,
 		message: func(f *field, r *rule) string { return "must match " + str.Headline(r.args[0]) },
 	},
 	"different": {
-		minArgs: 1, maxArgs: 1, refs: []int{0},
-		eval: func(e *eval, r *rule) bool {
-			// Only compared when the other key was sent, as Laravel does: a
-			// field that is not in the form is not the same as this one.
-			if !e.has(r.args[0]) {
-				return true
-			}
-			return e.value != e.other(r.args[0])
-		},
-		message: func(f *field, r *rule) string { return "must be different from " + str.Headline(r.args[0]) },
+		minArgs: 1, maxArgs: -1, refs: []int{0},
+		eval:    (*Validator).ValidateDifferent,
+		message: func(f *field, r *rule) string { return "must be different from " + andHeadlined(r.args) },
 	},
 	"accepted": {
 		implicit: true,
-		eval:     func(e *eval, r *rule) bool { return filled(e.value) && contains(acceptable, e.value) },
+		eval:     (*Validator).ValidateAccepted,
 		message:  func(f *field, r *rule) string { return "must be accepted" },
+	},
+	"accepted_if": {
+		minArgs: 2, maxArgs: -1, implicit: true, refs: []int{0},
+		eval: (*Validator).ValidateAcceptedIf,
+		message: func(f *field, r *rule) string {
+			return fmt.Sprintf("must be accepted when %s is %s", str.Headline(r.args[0]), or(r.args[1:]))
+		},
 	},
 	"declined": {
 		implicit: true,
-		eval:     func(e *eval, r *rule) bool { return filled(e.value) && contains(declinable, e.value) },
+		eval:     (*Validator).ValidateDeclined,
 		message:  func(f *field, r *rule) string { return "must be declined" },
+	},
+	"declined_if": {
+		minArgs: 2, maxArgs: -1, implicit: true, refs: []int{0},
+		eval: (*Validator).ValidateDeclinedIf,
+		message: func(f *field, r *rule) string {
+			return fmt.Sprintf("must be declined when %s is %s", str.Headline(r.args[0]), or(r.args[1:]))
+		},
+	},
+	"current_password": {
+		maxArgs: 1,
+		eval:    (*Validator).ValidateCurrentPassword,
+		message: func(f *field, r *rule) string { return "is incorrect" },
 	},
 
 	// ---------------------------------------------------------------------
-	// Size. Polymorphic exactly as Laravel's is: see eval.size.
+	// Size. Polymorphic exactly as Laravel's getSize is: characters in a
+	// string, the value in a number, members in an array, KILOBYTES in a file.
 	// ---------------------------------------------------------------------
 	"min": {
 		minArgs: 1, maxArgs: 1, check: needSizes,
-		eval:    func(e *eval, r *rule) bool { return e.size(e.value) >= r.nums[0] },
+		eval:    (*Validator).ValidateMin,
 		message: func(f *field, r *rule) string { return "must be at least " + measure(f, r.args[0]) },
 	},
 	"max": {
 		minArgs: 1, maxArgs: 1, check: needSizes,
-		eval:    func(e *eval, r *rule) bool { return e.size(e.value) <= r.nums[0] },
+		eval:    (*Validator).ValidateMax,
 		message: func(f *field, r *rule) string { return "must be at most " + measure(f, r.args[0]) },
 	},
 	"size": {
 		minArgs: 1, maxArgs: 1, check: needSizes,
-		eval:    func(e *eval, r *rule) bool { return e.size(e.value) == r.nums[0] },
+		eval:    (*Validator).ValidateSize,
 		message: func(f *field, r *rule) string { return "must be exactly " + measure(f, r.args[0]) },
 	},
 	"between": {
 		minArgs: 2, maxArgs: 2, check: chain(needSizes, ascending),
-		eval: func(e *eval, r *rule) bool {
-			n := e.size(e.value)
-			return n >= r.nums[0] && n <= r.nums[1]
-		},
+		eval: (*Validator).ValidateBetween,
 		message: func(f *field, r *rule) string {
 			return fmt.Sprintf("must be between %s and %s", r.args[0], measure(f, r.args[1]))
 		},
 	},
 	"digits": {
 		minArgs: 1, maxArgs: 1, check: needWholeNumbers,
-		eval: func(e *eval, r *rule) bool {
-			return digitsOnly(e.value) && float64(len(e.value)) == r.nums[0]
-		},
+		eval:    (*Validator).ValidateDigits,
 		message: func(f *field, r *rule) string { return "must be " + r.args[0] + " digits" },
 	},
 	"digits_between": {
 		minArgs: 2, maxArgs: 2, check: chain(needWholeNumbers, ascending),
-		eval: func(e *eval, r *rule) bool {
-			n := float64(len(e.value))
-			return digitsOnly(e.value) && n >= r.nums[0] && n <= r.nums[1]
-		},
+		eval: (*Validator).ValidateDigitsBetween,
 		message: func(f *field, r *rule) string {
 			return fmt.Sprintf("must be between %s and %s digits", r.args[0], r.args[1])
 		},
 	},
+	"max_digits": {
+		minArgs: 1, maxArgs: 1, check: needWholeNumbers,
+		eval:    (*Validator).ValidateMaxDigits,
+		message: func(f *field, r *rule) string { return "must have at most " + r.args[0] + " digits" },
+	},
+	"min_digits": {
+		minArgs: 1, maxArgs: 1, check: needWholeNumbers,
+		eval:    (*Validator).ValidateMinDigits,
+		message: func(f *field, r *rule) string { return "must have at least " + r.args[0] + " digits" },
+	},
+	"multiple_of": {
+		minArgs: 1, maxArgs: 1, check: needNumbers,
+		eval:    (*Validator).ValidateMultipleOf,
+		message: func(f *field, r *rule) string { return "must be a multiple of " + r.args[0] },
+	},
 	"gt": {
 		minArgs: 1, maxArgs: 1, refs: []int{0},
-		eval:    func(e *eval, r *rule) bool { return e.size(e.value) > e.size(e.other(r.args[0])) },
-		message: func(f *field, r *rule) string { return "must be greater than " + str.Headline(r.args[0]) },
+		eval:    (*Validator).ValidateGt,
+		message: func(f *field, r *rule) string { return "must be greater than " + bound(r.args[0]) },
 	},
 	"gte": {
 		minArgs: 1, maxArgs: 1, refs: []int{0},
-		eval: func(e *eval, r *rule) bool { return e.size(e.value) >= e.size(e.other(r.args[0])) },
+		eval: (*Validator).ValidateGte,
 		message: func(f *field, r *rule) string {
-			return "must be greater than or equal to " + str.Headline(r.args[0])
+			return "must be greater than or equal to " + bound(r.args[0])
 		},
 	},
 	"lt": {
 		minArgs: 1, maxArgs: 1, refs: []int{0},
-		eval:    func(e *eval, r *rule) bool { return e.size(e.value) < e.size(e.other(r.args[0])) },
-		message: func(f *field, r *rule) string { return "must be less than " + str.Headline(r.args[0]) },
+		eval:    (*Validator).ValidateLt,
+		message: func(f *field, r *rule) string { return "must be less than " + bound(r.args[0]) },
 	},
 	"lte": {
 		minArgs: 1, maxArgs: 1, refs: []int{0},
-		eval: func(e *eval, r *rule) bool { return e.size(e.value) <= e.size(e.other(r.args[0])) },
+		eval: (*Validator).ValidateLte,
 		message: func(f *field, r *rule) string {
-			return "must be less than or equal to " + str.Headline(r.args[0])
+			return "must be less than or equal to " + bound(r.args[0])
 		},
 	},
 
@@ -293,26 +427,17 @@ var specs = map[string]*spec{
 	// ---------------------------------------------------------------------
 	"numeric": {
 		sizeIsValue: true,
-		eval:        func(e *eval, r *rule) bool { _, ok := number(e.value); return ok },
+		eval:        (*Validator).ValidateNumeric,
 		message:     func(f *field, r *rule) string { return "must be a number" },
 	},
 	"integer": {
 		sizeIsValue: true,
-		eval:        func(e *eval, r *rule) bool { _, ok := whole(e.value); return ok },
+		eval:        (*Validator).ValidateInteger,
 		message:     func(f *field, r *rule) string { return "must be a whole number" },
 	},
 	"decimal": {
 		minArgs: 1, maxArgs: 2, sizeIsValue: true, check: chain(needWholeNumbers, ascending),
-		eval: func(e *eval, r *rule) bool {
-			n, ok := decimalPlaces(e.value)
-			if !ok {
-				return false
-			}
-			if len(r.nums) == 1 {
-				return float64(n) == r.nums[0]
-			}
-			return float64(n) >= r.nums[0] && float64(n) <= r.nums[1]
-		},
+		eval: (*Validator).ValidateDecimal,
 		message: func(f *field, r *rule) string {
 			if len(r.args) == 1 {
 				return "must have " + r.args[0] + " decimal places"
@@ -321,139 +446,162 @@ var specs = map[string]*spec{
 		},
 	},
 	"boolean": {
-		// Laravel accepts only "0" and "1" from a form, and so does this. A
-		// checkbox sends "on", which is what `accepted` is for -- copying
-		// Laravel's list exactly matters more here than being accommodating,
-		// because somebody migrating will not re-test a rule that looks the
-		// same.
-		eval:    func(e *eval, r *rule) bool { return e.value == "0" || e.value == "1" },
+		eval:    (*Validator).ValidateBoolean,
 		message: func(f *field, r *rule) string { return "must be true or false" },
 	},
+	"string": {
+		eval:    (*Validator).ValidateString,
+		message: func(f *field, r *rule) string { return "must be text" },
+	},
 	"ascii": {
-		eval: func(e *eval, r *rule) bool {
-			for i := range len(e.value) {
-				if e.value[i] > unicode.MaxASCII {
-					return false
-				}
-			}
-			return true
-		},
+		eval:    (*Validator).ValidateAscii,
 		message: func(f *field, r *rule) string { return "must contain only ASCII characters" },
 	},
 	"json": {
-		eval:    func(e *eval, r *rule) bool { return json.Valid([]byte(e.value)) },
+		eval:    (*Validator).ValidateJson,
 		message: func(f *field, r *rule) string { return "must be valid JSON" },
+	},
+	"array": {
+		maxArgs: -1,
+		eval:    (*Validator).ValidateArray,
+		message: func(f *field, r *rule) string {
+			if len(r.args) == 0 {
+				return "must be a list of values"
+			}
+			return "may only contain " + and(r.args)
+		},
+	},
+	"list": {
+		eval:    (*Validator).ValidateList,
+		message: func(f *field, r *rule) string { return "must be a list of values" },
+	},
+	"distinct": {
+		maxArgs: -1, check: checkDistinct,
+		eval:    (*Validator).ValidateDistinct,
+		message: func(f *field, r *rule) string { return "has a duplicate value" },
+	},
+	"contains": {
+		minArgs: 1, maxArgs: -1,
+		eval:    (*Validator).ValidateContains,
+		message: func(f *field, r *rule) string { return "must contain " + and(r.args) },
+	},
+	"in_array": {
+		minArgs: 1, maxArgs: 1, refs: []int{0},
+		eval:    (*Validator).ValidateInArray,
+		message: func(f *field, r *rule) string { return "must be one of the values of " + str.Headline(r.args[0]) },
 	},
 
 	// ---------------------------------------------------------------------
 	// Dates. The layout is a Go layout; see checkLayout.
 	// ---------------------------------------------------------------------
 	"date": {
-		eval:    func(e *eval, r *rule) bool { _, ok := parseDate("", e.value); return ok },
+		eval:    (*Validator).ValidateDate,
 		message: func(f *field, r *rule) string { return "is not a valid date" },
 	},
 	"date_format": {
 		minArgs: 1, maxArgs: 1, check: checkLayout,
-		eval: func(e *eval, r *rule) bool {
-			t, err := time.Parse(r.args[0], e.value)
-			// The round trip is Laravel's `$date->format($format) == $value`:
-			// time.Parse accepts "2006-1-2" for the layout "2006-01-02", and a
-			// format that accepts two spellings of one day is not a format.
-			return err == nil && t.Format(r.args[0]) == e.value
-		},
+		eval:    (*Validator).ValidateDateFormat,
 		message: func(f *field, r *rule) string { return "must match the format " + r.args[0] },
+	},
+	"date_equals": {
+		minArgs: 1, maxArgs: 1, check: checkMoment,
+		eval:    (*Validator).ValidateDateEquals,
+		message: func(f *field, r *rule) string { return "must be the date " + moment(r.args[0]) },
 	},
 	"after": {
 		minArgs: 1, maxArgs: 1, check: checkMoment,
-		eval:    func(e *eval, r *rule) bool { return e.compareDates(r, func(c int) bool { return c > 0 }) },
+		eval:    (*Validator).ValidateAfter,
 		message: func(f *field, r *rule) string { return "must be a date after " + moment(r.args[0]) },
 	},
 	"after_or_equal": {
 		minArgs: 1, maxArgs: 1, check: checkMoment,
-		eval:    func(e *eval, r *rule) bool { return e.compareDates(r, func(c int) bool { return c >= 0 }) },
+		eval:    (*Validator).ValidateAfterOrEqual,
 		message: func(f *field, r *rule) string { return "must be a date on or after " + moment(r.args[0]) },
 	},
 	"before": {
 		minArgs: 1, maxArgs: 1, check: checkMoment,
-		eval:    func(e *eval, r *rule) bool { return e.compareDates(r, func(c int) bool { return c < 0 }) },
+		eval:    (*Validator).ValidateBefore,
 		message: func(f *field, r *rule) string { return "must be a date before " + moment(r.args[0]) },
 	},
 	"before_or_equal": {
 		minArgs: 1, maxArgs: 1, check: checkMoment,
-		eval:    func(e *eval, r *rule) bool { return e.compareDates(r, func(c int) bool { return c <= 0 }) },
+		eval:    (*Validator).ValidateBeforeOrEqual,
 		message: func(f *field, r *rule) string { return "must be a date on or before " + moment(r.args[0]) },
+	},
+	"timezone": {
+		eval:    (*Validator).ValidateTimezone,
+		message: func(f *field, r *rule) string { return "is not a valid time zone" },
 	},
 
 	// ---------------------------------------------------------------------
 	// String shape.
 	// ---------------------------------------------------------------------
 	"email": {
-		// Shape only. Deliverability is proven by sending mail, and a DNS
-		// lookup inside a form submission is a network round trip with a
-		// timeout nobody set, answering a question that is not the one asked.
-		//
-		// It accepts an argument list only so that Laravel's `email:dns` gets
-		// the reason rather than "takes no argument", which reads as an
-		// oversight.
-		maxArgs: -1, check: refuseEmailArguments,
-		eval:    func(e *eval, r *rule) bool { return emailShape(e.value) },
+		maxArgs: -1, check: checkEmailValidations,
+		eval:    (*Validator).ValidateEmail,
 		message: func(f *field, r *rule) string { return "is not a valid email address" },
 	},
 	"url": {
-		eval:    func(e *eval, r *rule) bool { return isURL(e.value) },
+		maxArgs: -1,
+		eval:    (*Validator).ValidateUrl,
 		message: func(f *field, r *rule) string { return "is not a valid URL" },
 	},
+	"active_url": {
+		eval:    (*Validator).ValidateActiveUrl,
+		message: func(f *field, r *rule) string { return "is not an active URL" },
+	},
 	"uuid": {
-		eval:    func(e *eval, r *rule) bool { return str.IsUUID(e.value) },
+		maxArgs: 1,
+		eval:    (*Validator).ValidateUuid,
 		message: func(f *field, r *rule) string { return "is not a valid UUID" },
 	},
 	"ulid": {
-		eval:    func(e *eval, r *rule) bool { return str.IsULID(e.value) },
+		eval:    (*Validator).ValidateUlid,
 		message: func(f *field, r *rule) string { return "is not a valid ULID" },
 	},
 	"alpha": {
 		maxArgs: 1, check: checkAscii,
-		eval:    func(e *eval, r *rule) bool { return alphabet(r, alphaUnicode, alphaASCII).MatchString(e.value) },
+		eval:    (*Validator).ValidateAlpha,
 		message: func(f *field, r *rule) string { return "must contain only letters" },
 	},
 	"alpha_dash": {
 		maxArgs: 1, check: checkAscii,
-		eval: func(e *eval, r *rule) bool { return alphabet(r, dashUnicode, dashASCII).MatchString(e.value) },
+		eval: (*Validator).ValidateAlphaDash,
 		message: func(f *field, r *rule) string {
 			return "must contain only letters, numbers, dashes and underscores"
 		},
 	},
 	"alpha_num": {
 		maxArgs: 1, check: checkAscii,
-		eval:    func(e *eval, r *rule) bool { return alphabet(r, numUnicode, numASCII).MatchString(e.value) },
+		eval:    (*Validator).ValidateAlphaNum,
 		message: func(f *field, r *rule) string { return "must contain only letters and numbers" },
 	},
 	"lowercase": {
-		eval:    func(e *eval, r *rule) bool { return strings.ToLower(e.value) == e.value },
+		eval:    (*Validator).ValidateLowercase,
 		message: func(f *field, r *rule) string { return "must be lowercase" },
 	},
 	"uppercase": {
-		eval:    func(e *eval, r *rule) bool { return strings.ToUpper(e.value) == e.value },
+		eval:    (*Validator).ValidateUppercase,
 		message: func(f *field, r *rule) string { return "must be uppercase" },
 	},
 	"starts_with": {
 		minArgs: 1, maxArgs: -1,
-		eval:    func(e *eval, r *rule) bool { return anyAffix(r.args, strings.HasPrefix, e.value) },
+		eval:    (*Validator).ValidateStartsWith,
 		message: func(f *field, r *rule) string { return "must start with " + or(r.args) },
 	},
 	"ends_with": {
 		minArgs: 1, maxArgs: -1,
-		eval:    func(e *eval, r *rule) bool { return anyAffix(r.args, strings.HasSuffix, e.value) },
+		eval:    (*Validator).ValidateEndsWith,
 		message: func(f *field, r *rule) string { return "must end with " + or(r.args) },
 	},
 	"doesnt_start_with": {
 		minArgs: 1, maxArgs: -1,
-		eval:    func(e *eval, r *rule) bool { return !anyAffix(r.args, strings.HasPrefix, e.value) },
+		eval:    (*Validator).ValidateDoesntStartWith,
 		message: func(f *field, r *rule) string { return "must not start with " + or(r.args) },
 	},
 	"doesnt_end_with": {
 		minArgs: 1, maxArgs: -1,
-		eval:    func(e *eval, r *rule) bool { return !anyAffix(r.args, strings.HasSuffix, e.value) },
+		eval:    (*Validator).ValidateDoesntEndWith,
 		message: func(f *field, r *rule) string { return "must not end with " + or(r.args) },
 	},
 
@@ -462,22 +610,27 @@ var specs = map[string]*spec{
 	// ---------------------------------------------------------------------
 	"in": {
 		minArgs: 1, maxArgs: -1,
-		eval:    func(e *eval, r *rule) bool { return contains(r.args, e.value) },
+		eval:    (*Validator).ValidateIn,
 		message: func(f *field, r *rule) string { return "is not one of the allowed values" },
 	},
 	"not_in": {
 		minArgs: 1, maxArgs: -1,
-		eval:    func(e *eval, r *rule) bool { return !contains(r.args, e.value) },
+		eval:    (*Validator).ValidateNotIn,
+		message: func(f *field, r *rule) string { return "is not one of the allowed values" },
+	},
+	"enum": {
+		minArgs: 1, maxArgs: -1,
+		eval:    (*Validator).ValidateEnum,
 		message: func(f *field, r *rule) string { return "is not one of the allowed values" },
 	},
 	"regex": {
 		minArgs: 1, maxArgs: 1, check: compilePattern,
-		eval:    func(e *eval, r *rule) bool { return r.re.MatchString(e.value) },
+		eval:    (*Validator).ValidateRegex,
 		message: func(f *field, r *rule) string { return "is not in the expected format" },
 	},
 	"not_regex": {
 		minArgs: 1, maxArgs: 1, check: compilePattern,
-		eval:    func(e *eval, r *rule) bool { return !r.re.MatchString(e.value) },
+		eval:    (*Validator).ValidateNotRegex,
 		message: func(f *field, r *rule) string { return "is not in the expected format" },
 	},
 
@@ -485,53 +638,75 @@ var specs = map[string]*spec{
 	// Network and colour shape.
 	// ---------------------------------------------------------------------
 	"ip": {
-		eval:    func(e *eval, r *rule) bool { _, ok := address(e.value); return ok },
+		eval:    (*Validator).ValidateIp,
 		message: func(f *field, r *rule) string { return "is not a valid IP address" },
 	},
 	"ipv4": {
-		eval: func(e *eval, r *rule) bool {
-			a, ok := address(e.value)
-			return ok && a.Is4()
-		},
+		eval:    (*Validator).ValidateIpv4,
 		message: func(f *field, r *rule) string { return "is not a valid IPv4 address" },
 	},
 	"ipv6": {
-		eval: func(e *eval, r *rule) bool {
-			a, ok := address(e.value)
-			return ok && a.Is6()
-		},
+		eval:    (*Validator).ValidateIpv6,
 		message: func(f *field, r *rule) string { return "is not a valid IPv6 address" },
 	},
 	"mac_address": {
-		eval:    func(e *eval, r *rule) bool { return macShape.MatchString(e.value) },
+		eval:    (*Validator).ValidateMacAddress,
 		message: func(f *field, r *rule) string { return "is not a valid MAC address" },
 	},
 	"hex_color": {
-		eval:    func(e *eval, r *rule) bool { return hexColorShape.MatchString(e.value) },
+		eval:    (*Validator).ValidateHexColor,
 		message: func(f *field, r *rule) string { return "is not a valid hex color" },
 	},
-	"timezone": {
-		eval: func(e *eval, r *rule) bool {
-			// "Local" is a Go spelling of "whatever this machine is set to",
-			// which is not a zone a form can mean -- and it would pass on the
-			// developer's laptop and on nothing else.
-			if e.value == "Local" {
-				return false
-			}
-			_, err := time.LoadLocation(e.value)
-			return err == nil
-		},
-		message: func(f *field, r *rule) string { return "is not a valid time zone" },
+
+	// ---------------------------------------------------------------------
+	// Uploads. The value is a File, not a string, and a size on one of these
+	// fields is measured in kilobytes.
+	// ---------------------------------------------------------------------
+	"file": {
+		eval:    (*Validator).ValidateFile,
+		message: func(f *field, r *rule) string { return "must be a file" },
+	},
+	"image": {
+		maxArgs: -1, check: checkImage,
+		eval:    (*Validator).ValidateImage,
+		message: func(f *field, r *rule) string { return "must be an image" },
+	},
+	"mimes": {
+		minArgs: 1, maxArgs: -1,
+		eval:    (*Validator).ValidateMimes,
+		message: func(f *field, r *rule) string { return "must be a file of type " + or(r.args) },
+	},
+	"mimetypes": {
+		minArgs: 1, maxArgs: -1,
+		eval:    (*Validator).ValidateMimetypes,
+		message: func(f *field, r *rule) string { return "must be a file of type " + or(r.args) },
+	},
+	"extensions": {
+		minArgs: 1, maxArgs: -1,
+		eval:    (*Validator).ValidateExtensions,
+		message: func(f *field, r *rule) string { return "must be a file of type " + or(r.args) },
+	},
+	"dimensions": {
+		minArgs: 1, maxArgs: -1, check: checkDimensions,
+		eval:    (*Validator).ValidateDimensions,
+		message: func(f *field, r *rule) string { return "does not have the required image dimensions" },
+	},
+
+	// ---------------------------------------------------------------------
+	// The database. Both take the Grant and both fail closed without one --
+	// RULE 17 has no exception for a read. See WithPresence.
+	// ---------------------------------------------------------------------
+	"exists": {
+		minArgs: 1, maxArgs: -1,
+		eval:    (*Validator).ValidateExists,
+		message: func(f *field, r *rule) string { return "does not exist" },
+	},
+	"unique": {
+		minArgs: 1, maxArgs: -1,
+		eval:    (*Validator).ValidateUnique,
+		message: func(f *field, r *rule) string { return "has already been taken" },
 	},
 }
-
-// acceptable and declinable are Laravel's lists for `accepted` and `declined`,
-// minus the values a form can never send: an HTML form carries strings, so the
-// booleans and integers in Laravel's arrays are unreachable here.
-var (
-	acceptable = []string{"yes", "on", "1", "true"}
-	declinable = []string{"no", "off", "0", "false"}
-)
 
 var (
 	// numericShape is PHP's is_numeric, minus the surrounding whitespace it
@@ -574,28 +749,6 @@ var dateLayouts = []string{
 	"2006-01-02 15:04:05",
 	"2006-01-02 15:04",
 	"2006-01-02",
-}
-
-// filled reports a value somebody actually answered. Laravel trims before
-// asking, so a box containing three spaces is empty, and "0" is not.
-func filled(v string) bool { return strings.TrimSpace(v) != "" }
-
-func contains(list []string, v string) bool {
-	for _, item := range list {
-		if item == v {
-			return true
-		}
-	}
-	return false
-}
-
-func anyAffix(list []string, match func(string, string) bool, v string) bool {
-	for _, affix := range list {
-		if match(v, affix) {
-			return true
-		}
-	}
-	return false
 }
 
 // number is PHP's is_numeric for a form value.
@@ -651,22 +804,6 @@ func emailShape(value string) bool {
 	return at > 0 && at != len(value)-1 && strings.Contains(value[at:], ".")
 }
 
-// isURL accepts http and https only, and demands a host.
-//
-// Laravel's list runs to two hundred schemes, including "javascript" through
-// Symfony's pattern -- a link a person is about to be sent to is http or it is
-// not a link this rule should approve.
-func isURL(v string) bool {
-	if strings.ContainsAny(v, " \t\r\n") {
-		return false
-	}
-	u, err := url.Parse(v)
-	if err != nil {
-		return false
-	}
-	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
-}
-
 // address parses an IP and refuses a zone, which PHP's FILTER_VALIDATE_IP also
 // refuses: "fe80::1%eth0" names an interface on one machine.
 func address(v string) (netip.Addr, bool) {
@@ -675,22 +812,6 @@ func address(v string) (netip.Addr, bool) {
 		return netip.Addr{}, false
 	}
 	return a, true
-}
-
-func alphabet(r *rule, unicoded, ascii *regexp.Regexp) *regexp.Regexp {
-	if len(r.args) == 1 {
-		return ascii
-	}
-	return unicoded
-}
-
-// confirmationOf is Laravel's validateConfirmed: the argument names the other
-// box, and without one it is this field with _confirmation after it.
-func confirmationOf(field string, r *rule) string {
-	if len(r.args) == 1 {
-		return r.args[0]
-	}
-	return field + "_confirmation"
 }
 
 // parseDate reads a value with the field's declared layout first, then with the
@@ -721,37 +842,21 @@ func startOfDay(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }
 
-// compareDates resolves the other moment -- a declared field, a keyword or a
-// literal -- and answers what the comparison says. An unreadable value on
-// either side fails: a date rule that cannot read the date has not been passed.
-func (e *eval) compareDates(r *rule, ok func(int) bool) bool {
-	mine, parsed := parseDate(e.f.layout, e.value)
-	if !parsed {
-		return false
-	}
-	theirs, parsed := e.moment(r.args[0])
-	if !parsed {
-		return false
-	}
-	return ok(mine.Compare(theirs))
-}
-
-func (e *eval) moment(arg string) (time.Time, bool) {
-	if at, isKeyword := keywords[arg]; isKeyword {
-		return at(time.Now()), true
-	}
-	if other, declared := e.set.byName[arg]; declared {
-		return parseDate(other.layout, e.other(arg))
-	}
-	return parseDate(e.f.layout, arg)
-}
-
 // moment renders the argument of after/before for a message.
 func moment(arg string) string {
 	if _, isKeyword := keywords[arg]; isKeyword {
 		return arg
 	}
 	if _, isDate := parseDate("", arg); isDate {
+		return arg
+	}
+	return str.Headline(arg)
+}
+
+// bound renders the argument of gt/gte/lt/lte for a message: a number is a
+// literal bound and anything else names another field.
+func bound(arg string) string {
+	if _, isNumber := number(arg); isNumber {
 		return arg
 	}
 	return str.Headline(arg)
@@ -764,6 +869,9 @@ func moment(arg string) string {
 func measure(f *field, arg string) string {
 	if f.numeric {
 		return arg
+	}
+	if f.file {
+		return arg + " kilobytes"
 	}
 	return arg + " characters"
 }

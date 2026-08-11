@@ -56,7 +56,7 @@ func TestEachRuleAcceptsAndRejectsWhatLaravelDoes(t *testing.T) {
 		{"digits:4", []string{"0000", "1234"}, []string{"123", "12345", "12a4", "+123"}},
 		{"digits_between:2,4", []string{"12", "1234"}, []string{"1", "12345", "12.3"}},
 
-		{"numeric", []string{"0", "-1", "1.5", ".5", "1e3", "+2"}, []string{"a", "1,5", "0x1A", "Inf", "NaN", "1 "}},
+		{"numeric", []string{"0", "-1", "1.5", ".5", "1e3", "+2", "1 "}, []string{"a", "1,5", "0x1A", "Inf", "NaN"}},
 		// "012" is refused, as PHP's FILTER_VALIDATE_INT refuses it. "" is not
 		// in either list: a rule that is not implicit does not run on a blank
 		// value, which TestANonImplicitRuleDoesNotRunOnABlankValue is about.
@@ -77,7 +77,8 @@ func TestEachRuleAcceptsAndRejectsWhatLaravelDoes(t *testing.T) {
 		{"date_format:02/01/2006", []string{"10/08/2026"}, []string{"2026-08-10"}},
 
 		{"email", []string{"a@b.co", "someone.else@sub.example.com"}, []string{"a", "@b.co", "a@", "a@b", "a b@c.co"}},
-		{"url", []string{"https://example.com", "http://example.com/a?b=1"}, []string{"example.com", "ftp://example.com", "javascript:alert(1)", "https://"}},
+		{"url", []string{"https://example.com", "http://example.com/a?b=1", "ftp://example.com"}, []string{"example.com", "javascript:alert(1)", "https://"}},
+		{"url:http,https", []string{"https://example.com"}, []string{"ftp://example.com"}},
 		{"uuid", []string{"0f3a5f5e-4d2b-4e3a-9c1d-1f2e3a4b5c6d"}, []string{"0f3a5f5e4d2b4e3a9c1d1f2e3a4b5c6d", "not-a-uuid"}},
 		{"ulid", []string{"01ARZ3NDEKTSV4RRFFQ69G5FAV"}, []string{"01ARZ3NDEKTSV4RRFFQ69G5FA", "81ARZ3NDEKTSV4RRFFQ69G5FAV", "01ARZ3NDEKTSV4RRFFQ69G5FAU"}},
 

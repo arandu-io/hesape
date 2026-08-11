@@ -92,12 +92,12 @@ func dispatch(t *testing.T, p *bus.PendingBatch) (bus.Batch, *bus.Memory, *recor
 }
 
 // handle plays one delivery: read the envelope, report the outcome.
-func handle(t *testing.T, store bus.Store, queue bus.Queue, j pushed, cause error) row {
+func handle(t *testing.T, store bus.BatchRepository, queue bus.Queue, j pushed, cause error) row {
 	t.Helper()
 	var r row
-	m, err := bus.Batching(j.Payload, &r)
+	m, err := bus.Batched(j.Payload, &r)
 	if err != nil {
-		t.Fatalf("Batching: %v", err)
+		t.Fatalf("Batched: %v", err)
 	}
 	if err := bus.Handled(context.Background(), grant(), store, queue, m, cause); err != nil {
 		t.Fatalf("Handled: %v", err)
@@ -113,8 +113,8 @@ func TestDispatchPushesEveryJobWithItsArguments(t *testing.T) {
 		Add("invoice.import", row{N: 2}).
 		OnQueue("imports"))
 
-	if b.Total != 2 || b.Pending != 2 || b.Failed != 0 {
-		t.Fatalf("counters = %d/%d/%d, want 2/2/0", b.Total, b.Pending, b.Failed)
+	if b.TotalJobs != 2 || b.PendingJobs != 2 || b.FailedJobs != 0 {
+		t.Fatalf("counters = %d/%d/%d, want 2/2/0", b.TotalJobs, b.PendingJobs, b.FailedJobs)
 	}
 	if b.TenantID != tenant {
 		t.Fatalf("tenant = %q, want %q", b.TenantID, tenant)
@@ -129,12 +129,12 @@ func TestDispatchPushesEveryJobWithItsArguments(t *testing.T) {
 			t.Errorf("job %d on queue %q, want imports", i, j.Queue)
 		}
 		var got row
-		m, err := bus.Batching(j.Payload, &got)
+		m, err := bus.Batched(j.Payload, &got)
 		if err != nil {
-			t.Fatalf("Batching: %v", err)
+			t.Fatalf("Batched: %v", err)
 		}
-		if m.Batch != b.ID {
-			t.Errorf("job %d belongs to batch %q, want %q", i, m.Batch, b.ID)
+		if m.BatchID != b.ID {
+			t.Errorf("job %d belongs to batch %q, want %q", i, m.BatchID, b.ID)
 		}
 		if got.N != i+1 {
 			t.Errorf("job %d carries n=%d, want %d", i, got.N, i+1)
@@ -173,7 +173,7 @@ func TestThenFiresOnceWhenEveryJobSucceeded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
-	if !after.Finished() || after.Pending != 0 || after.Progress() != 100 {
+	if !after.Finished() || after.PendingJobs != 0 || after.Progress() != 100 {
 		t.Errorf("batch = %+v, want finished, nothing pending, 100%%", after)
 	}
 }
@@ -194,14 +194,14 @@ func TestCallbacksCarryNoEnvelope(t *testing.T) {
 		}
 	}
 	var got row
-	m, err := bus.Batching(done.Payload, &got)
+	m, err := bus.Batched(done.Payload, &got)
 	if err != nil {
-		t.Fatalf("Batching: %v", err)
+		t.Fatalf("Batched: %v", err)
 	}
 	// A callback that belonged to the batch it closes would report to a
 	// counter that has already reached zero.
-	if m.Batch != "" {
-		t.Errorf("the callback belongs to batch %q, want none", m.Batch)
+	if m.BatchID != "" {
+		t.Errorf("the callback belongs to batch %q, want none", m.BatchID)
 	}
 	if got.N != 7 {
 		t.Errorf("the callback carries n=%d, want 7", got.N)
@@ -226,42 +226,45 @@ func TestFirstFailureStopsTheBatchAndFiresCatchOnce(t *testing.T) {
 	if got := queue.count("import.failed"); got != 1 {
 		t.Errorf("Catch fired %d times, want 1", got)
 	}
-	if got := queue.count("import.over"); got != 1 {
-		t.Errorf("Finally fired %d times, want 1", got)
-	}
 	if got := queue.count("import.done"); got != 0 {
 		t.Errorf("Then fired on a failed batch")
 	}
+	// Finally waits for every job to report, whichever way each went: two of
+	// the three are still owed.
+	if got := queue.count("import.over"); got != 0 {
+		t.Errorf("Finally fired %d times with two jobs still owed, want 0", got)
+	}
 
-	// The two jobs still queued are delivered and must skip their work.
-	m, err := bus.Batching(jobs[1].Payload, nil)
+	// The two jobs still queued are delivered and must skip their work: the
+	// first failure of a batch that does not allow them cancels it.
+	m, err := bus.Batched(jobs[1].Payload, nil)
+	if err != nil {
+		t.Fatalf("Batched: %v", err)
+	}
+	working, err := m.Batching(context.Background(), grant(), store)
 	if err != nil {
 		t.Fatalf("Batching: %v", err)
 	}
-	skip, err := m.Cancelled(context.Background(), grant(), store)
-	if err != nil {
-		t.Fatalf("Cancelled: %v", err)
-	}
-	if !skip {
+	if working {
 		t.Error("a job of a stopped batch was not told to skip")
 	}
 
-	// They still report, and reporting must not fire anything a second time.
+	// They still report, and reporting must not fire Catch a second time.
 	handle(t, store, queue, jobs[1], boom)
 	handle(t, store, queue, jobs[2], nil)
 	if got := queue.count("import.failed"); got != 1 {
 		t.Errorf("Catch fired %d times after the later reports, want 1", got)
 	}
 	if got := queue.count("import.over"); got != 1 {
-		t.Errorf("Finally fired %d times after the later reports, want 1", got)
+		t.Errorf("Finally fired %d times once every job had reported, want 1", got)
 	}
 
 	after, err := store.Find(context.Background(), grant(), b.ID)
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
-	if after.Failed != 2 || after.Pending != 0 {
-		t.Errorf("counters = failed %d, pending %d; want 2 and 0", after.Failed, after.Pending)
+	if after.FailedJobs != 2 || after.PendingJobs != 2 {
+		t.Errorf("counters = failed %d, pending %d; want 2 and 2", after.FailedJobs, after.PendingJobs)
 	}
 }
 
@@ -295,7 +298,15 @@ func TestAllowFailuresKeepsTheBatchGoing(t *testing.T) {
 	}
 }
 
-func TestCancelStopsTheWorkAndSuppressesThen(t *testing.T) {
+// TestCancelStopsTheWorkNotTheBookkeeping is Illuminate's behaviour, and it is
+// worth a test of its own because it surprises people: cancelling tells the
+// jobs still queued to skip, and skipping is *succeeding*, so the counter still
+// reaches zero and Then still fires.
+//
+// Batch::recordSuccessfulJob has no cancelled check -- see the clone. A batch
+// that must not report success when it is cancelled says so in the job that
+// Then names, which is a job like any other and can ask.
+func TestCancelStopsTheWorkNotTheBookkeeping(t *testing.T) {
 	t.Parallel()
 
 	b, store, queue := dispatch(t, bus.NewBatch("import").
@@ -313,12 +324,25 @@ func TestCancelStopsTheWorkAndSuppressesThen(t *testing.T) {
 		t.Fatalf("Cancel again: %v", err)
 	}
 
-	for _, j := range queue.all() {
+	jobs := queue.all()
+	m, err := bus.Batched(jobs[0].Payload, nil)
+	if err != nil {
+		t.Fatalf("Batched: %v", err)
+	}
+	working, err := m.Batching(ctx, grant(), store)
+	if err != nil {
+		t.Fatalf("Batching: %v", err)
+	}
+	if working {
+		t.Error("a job of a cancelled batch was not told to skip")
+	}
+
+	for _, j := range jobs {
 		handle(t, store, queue, j, nil)
 	}
 
-	if got := queue.count("import.done"); got != 0 {
-		t.Error("Then fired on a cancelled batch")
+	if got := queue.count("import.done"); got != 1 {
+		t.Errorf("Then fired %d times, want 1", got)
 	}
 	if got := queue.count("import.over"); got != 1 {
 		t.Errorf("Finally fired %d times, want 1", got)
@@ -341,9 +365,9 @@ func TestConcurrentReportsFireEachCallbackOnce(t *testing.T) {
 		wg.Add(1)
 		go func(j pushed) {
 			defer wg.Done()
-			m, err := bus.Batching(j.Payload, nil)
+			m, err := bus.Batched(j.Payload, nil)
 			if err != nil {
-				t.Errorf("Batching: %v", err)
+				t.Errorf("Batched: %v", err)
 				return
 			}
 			if err := bus.Handled(context.Background(), grant(), store, queue, m, nil); err != nil {
@@ -365,11 +389,11 @@ func TestBatchingLeavesAPayloadItDidNotWriteAlone(t *testing.T) {
 	t.Parallel()
 
 	var got row
-	m, err := bus.Batching([]byte(`{"n":9}`), &got)
+	m, err := bus.Batched([]byte(`{"n":9}`), &got)
 	if err != nil {
-		t.Fatalf("Batching: %v", err)
+		t.Fatalf("Batched: %v", err)
 	}
-	if m.Batch != "" || m.Chained() {
+	if m.BatchID != "" || len(m.Chained) != 0 {
 		t.Errorf("a job pushed on its own reported membership: %+v", m)
 	}
 	if got.N != 9 {
@@ -385,7 +409,7 @@ func TestBatchingLeavesAPayloadItDidNotWriteAlone(t *testing.T) {
 func TestBatchingRefusesAnEnvelopeFromAnotherFormat(t *testing.T) {
 	t.Parallel()
 
-	_, err := bus.Batching([]byte(`{"bus":99,"body":{"n":1}}`), nil)
+	_, err := bus.Batched([]byte(`{"bus":99,"body":{"n":1}}`), nil)
 	if err == nil || !strings.Contains(err.Error(), "envelope format 99") {
 		t.Fatalf("err = %v, want it to name the format it could not read", err)
 	}
@@ -440,23 +464,23 @@ func TestAHalfPushedBatchIsCancelled(t *testing.T) {
 
 	// The two already queued must skip their work rather than do a third of an
 	// import.
-	m, err := bus.Batching(queue.all()[0].Payload, nil)
+	m, err := bus.Batched(queue.all()[0].Payload, nil)
+	if err != nil {
+		t.Fatalf("Batched: %v", err)
+	}
+	working, err := m.Batching(context.Background(), grant(), store)
 	if err != nil {
 		t.Fatalf("Batching: %v", err)
 	}
-	skip, err := m.Cancelled(context.Background(), grant(), store)
-	if err != nil {
-		t.Fatalf("Cancelled: %v", err)
-	}
-	if !skip {
+	if working {
 		t.Error("a job of an abandoned batch was not told to skip")
 	}
 }
 
-func TestRecordOnAMissingBatchIsNotFound(t *testing.T) {
+func TestRecordingAgainstAMissingBatchIsNotFound(t *testing.T) {
 	t.Parallel()
 
-	_, err := bus.NewMemory().Record(context.Background(), grant(), "nope", true)
+	_, err := bus.NewMemory().DecrementPendingJobs(context.Background(), grant(), "nope", "job-1")
 	if !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("err = %v, want database.ErrNotFound", err)
 	}
@@ -484,8 +508,8 @@ func TestPruneTakesFinishedBatchesOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
-	if _, err := store.Record(ctx, grant(), done.ID, true); err != nil {
-		t.Fatalf("Record: %v", err)
+	if err := store.MarkAsFinished(ctx, grant(), done.ID); err != nil {
+		t.Fatalf("MarkAsFinished: %v", err)
 	}
 	running, err := bus.NewBatch("running").Add("invoice.import", row{N: 1}).
 		Dispatch(ctx, grant(), store, &recorder{})
@@ -505,12 +529,14 @@ func TestPruneTakesFinishedBatchesOnly(t *testing.T) {
 	}
 }
 
-func TestProgressRoundsDown(t *testing.T) {
+func TestProgressRoundsToTheNearestPercent(t *testing.T) {
 	t.Parallel()
 
-	b := bus.Batch{Total: 3, Pending: 1}
-	if got := b.Progress(); got != 66 {
-		t.Errorf("Progress = %d, want 66", got)
+	// Two of three succeeded: 66.67, which Illuminate's (int) round() reports
+	// as 67.
+	b := bus.Batch{TotalJobs: 3, PendingJobs: 1}
+	if got := b.Progress(); got != 67 {
+		t.Errorf("Progress = %d, want 67", got)
 	}
 	if got := (bus.Batch{}).Progress(); got != 0 {
 		t.Errorf("Progress of an empty batch = %d, want 0", got)

@@ -17,30 +17,30 @@ import (
 // so this middleware is safe to put on a worker that also runs jobs pushed on
 // their own.
 type SkipIfBatchCancelled struct {
-	batches bus.Store
+	batches bus.BatchRepository
 }
 
 var _ Middleware = (*SkipIfBatchCancelled)(nil)
 
-// NewSkipIfBatchCancelled returns the middleware over the store the batches
-// live in.
-func NewSkipIfBatchCancelled(batches bus.Store) *SkipIfBatchCancelled {
+// NewSkipIfBatchCancelled returns the middleware over the repository the
+// batches live in.
+func NewSkipIfBatchCancelled(batches bus.BatchRepository) *SkipIfBatchCancelled {
 	return &SkipIfBatchCancelled{batches: batches}
 }
 
 // Handle asks the batch, and skips the job if it was cancelled.
 func (m *SkipIfBatchCancelled) Handle(ctx context.Context, j *jobs.Job, next func(context.Context) error) error {
-	member, err := bus.Batching(j.Payload, nil)
+	batchable, err := bus.Batched(j.Payload, nil)
 	if err != nil {
 		// A payload the bus did not write is a job in no batch. It runs.
 		return next(ctx)
 	}
 
-	cancelled, err := member.Cancelled(ctx, jobs.GrantFor(j), m.batches)
+	worth, err := batchable.Batching(ctx, jobs.GrantFor(j), m.batches)
 	if err != nil {
 		return err
 	}
-	if cancelled {
+	if !worth {
 		return nil
 	}
 	return next(ctx)

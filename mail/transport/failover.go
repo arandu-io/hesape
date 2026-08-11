@@ -49,15 +49,15 @@ type Failover struct {
 	Transports []mail.Transport
 }
 
-// Name identifies the transport in a log line. The [mail.Sent] returned by Send
+// Name identifies the transport in a log line. The [mail.SentMessage] returned by Send
 // names the transport that actually accepted the message, which is the one
 // worth knowing.
 func (Failover) Name() string { return "failover" }
 
 // Send tries each transport in turn and returns as soon as one accepts.
-func (t Failover) Send(ctx context.Context, m mail.Message) (mail.Sent, error) {
+func (t Failover) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error) {
 	if len(t.Transports) == 0 {
-		return mail.Sent{}, errors.New("mail: the failover transport has nothing to fail over to")
+		return mail.SentMessage{}, errors.New("mail: the failover transport has nothing to fail over to")
 	}
 
 	failures := make([]error, 0, len(t.Transports))
@@ -80,7 +80,7 @@ func (t Failover) Send(ctx context.Context, m mail.Message) (mail.Sent, error) {
 		}
 	}
 
-	return mail.Sent{}, fmt.Errorf("mail: no transport accepted the message: %w", errors.Join(failures...))
+	return mail.SentMessage{}, fmt.Errorf("mail: no transport accepted the message: %w", errors.Join(failures...))
 }
 
 var _ mail.Transport = Failover{}

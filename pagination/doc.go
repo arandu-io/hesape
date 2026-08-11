@@ -12,7 +12,8 @@
 //     and it is the only one of the three that does not skip or repeat rows
 //     when the data changes underneath.
 //
-// The files it answers to, in the clone at laravel_illuminate/pagination:
+// The files it answers to, in the clone at laravel_illuminate/pagination,
+// which is the source this package was written from:
 //
 //	AbstractCursorPaginator.php
 //	AbstractPaginator.php
@@ -23,6 +24,22 @@
 //	PaginationState.php
 //	Paginator.php
 //	UrlWindow.php
+//	resources/views/*.blade.php
+//
+// # The names are Illuminate's
+//
+// Every method carries the name its PHP counterpart carries, and the
+// alterations are these: a name is capitalised to export it; an initialism is
+// spelled in one case, so url() is [LengthAwarePaginator.URL] and toJson() is
+// [LengthAwarePaginator.ToJSON]; where PHP throws, the Go method returns an
+// error; and where a static method carries its class in the identifier, the
+// class is gone, because Go has no static methods -- Cursor::fromEncoded is
+// [FromEncoded] and UrlWindow::make is [Make].
+//
+// Three names are functions rather than methods, because a Go method cannot
+// introduce a type parameter and the point of these three is to change the
+// element type: [Through], [ThroughSimple] and [ThroughCursor] are PHP's
+// through() on the three paginators. One name each, because Go cannot overload.
 //
 // # What a paginator is here
 //
@@ -37,24 +54,43 @@
 //
 // # No global resolvers
 //
-// Illuminate reads the current page, the current path and the query string from
-// four static closures installed by a service provider, which is what makes
-// $users->links() work with no arguments in a Blade file. There is no container
-// here (ADR 0001) and no facade (ADR 0002), so the request is read explicitly:
-// [OptionsFrom] takes the *url.URL and returns the [Options] every constructor
-// takes, and [CurrentPage] and [CurrentCursor] read the position out of it.
+// Illuminate reads the current page, the current path, the query string and the
+// current cursor from static closures a service provider installs through
+// PaginationState::resolveUsing, which is what makes $users->links() work with
+// no arguments in a Blade file. There is no container here (ADR 0001) and no
+// facade (ADR 0002), so the request is read explicitly: [OptionsFrom] takes the
+// *url.URL and returns the [Options] every constructor takes, and
+// [ResolveCurrentPage], [ResolveCurrentPath], [ResolveQueryString] and
+// [ResolveCurrentCursor] read the four pieces out of it.
 //
-// # No rendering
+// The five closure setters -- currentPageResolver, currentPathResolver,
+// queryStringResolver, currentCursorResolver, viewFactoryResolver -- and
+// PaginationState::resolveUsing itself are the container wiring, and are not
+// here.
 //
-// Illuminate ships nine Blade views and a useTailwind/useBootstrap switch.
-// Rendering lives in the view layer here, and the closed set of it: a paginator
-// exposes [LengthAwarePaginator.Links], a flat []Link the kyse Pagination
-// component walks. Nothing in this package writes HTML.
+// # The views are names here and components in the view layer
 //
-// Links carries the numbered pages and the "..." separators only. Previous and
-// next are [LengthAwarePaginator.PreviousPageURL] and
-// [LengthAwarePaginator.NextPageURL], because their label is a translated word
-// or an icon, and the core has no translator to ask.
+// Illuminate ships nine Blade files and a switch between them.
+// [DefaultView], [DefaultSimpleView], [UseTailwind] and [UseBootstrapFive] and
+// its siblings are here, and they carry the same nine names -- but a name is
+// all they are. Nothing in this package writes HTML: render(), toHtml() and the
+// view factory need a view factory out of the container, and rendering belongs
+// to the view layer.
+//
+// What a component renders from is [LengthAwarePaginator.Links]: a flat []Link
+// holding the numbered pages and a [Separator] wherever the window left pages
+// out, which is the elements array Illuminate passes to the Blade file, in the
+// order a pager draws them. [LengthAwarePaginator.LinkCollection] is the same
+// list with previous and next at its ends, and is what the JSON payload
+// carries.
+//
+// bootstrap-5.blade.php is the one that maps onto the kyse pagination component
+// with nothing left over: it reads hasPages, onFirstPage, previousPageUrl,
+// hasMorePages, nextPageUrl, firstItem, lastItem and total off the paginator,
+// and walks the elements printing a page number or the separator. The component
+// takes the paginator and calls the same methods -- there is no @lang, because
+// the labels come from the translation package, and no is_string test for the
+// separator, because a [Link] with an empty URL is one.
 //
 // # No interfaces
 //
@@ -62,4 +98,17 @@
 // They are absent on purpose: an interface belongs in the package that consumes
 // it, and until something consumes one, declaring it here would only be a name
 // to keep in step with the structs.
+//
+// # What PHP's language carries and Go's does not
+//
+// ArrayAccess (offsetExists, offsetGet, offsetSet, offsetUnset) is how PHP
+// writes $page[3]; Go indexes the slice [LengthAwarePaginator.Items] returns.
+// JsonSerializable is jsonSerialize; Go's name for that contract is
+// json.Marshaler, and MarshalJSON is it. IteratorAggregate is getIterator; the
+// Go spelling is the range-over-func [LengthAwarePaginator.GetIterator]
+// returns. __toString and the escapeWhenCastingToString flag that configures it
+// have no Go equivalent to configure.
+//
+// loadMorph and loadMorphCount forward to Eloquent relations on the collection,
+// and there is no Eloquent here yet.
 package pagination

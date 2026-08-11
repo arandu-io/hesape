@@ -2,29 +2,31 @@ package translation
 
 import "strings"
 
-// Plural reports which segment of a line a count selects in a locale, counting
-// from zero. English answers 0 for one and 1 for anything else; Japanese always
-// answers 0; Russian has three forms and Arabic six.
+// GetPluralIndex answers MessageSelector::getPluralIndex(). It reports which
+// segment of a line a count selects in a locale, counting from zero: English
+// answers 0 for one and 1 for anything else, Japanese always answers 0, Russian
+// has three forms and Arabic six.
 //
-// A rule is asked for a locale it may not know, and must answer anyway: 0 is
-// the answer for a language with no plural distinction and the safe one for a
-// language whose rule is not carried.
-type Plural func(locale string, n int) int
-
-// DefaultPlural is the plural rule of every language this package carries.
+// A locale whose rule is not carried answers 0, as PHP's default case does:
+// that is the right answer for a language with no plural distinction and the
+// safe one for a language nobody has written a rule for.
 //
-// It reads the language subtag only, so pt-BR and pt-PT resolve the same: no
-// region changes the plural forms of its language, and a table that repeated
-// every region would be longer without saying more. Case and the separator do
-// not matter -- pt_BR, pt-br and PT-BR are one locale.
+// The plural rules are derived from code of the Zend Framework (2010-09-25),
+// which is subject to the new BSD license -- the same provenance the PHP method
+// records.
 //
-// The count is read by magnitude: -2 selects the same form as 2.
-func DefaultPlural(locale string, n int) int {
-	if n < 0 {
-		n = -n
+// Two differences from the PHP switch, both in how the locale is read. It is
+// matched on the language subtag alone, so pt-BR and pt_BR and pt resolve the
+// same rule: no region in PHP's own table changes the plural forms of its
+// language, and PHP's list, which spells every locale with an underscore,
+// answers 0 for the hyphenated tag an Accept-Language header carries. And the
+// count is read by magnitude, so -2 selects the form 2 does.
+func (MessageSelector) GetPluralIndex(locale string, number int) int {
+	if number < 0 {
+		number = -number
 	}
 	if rule, ok := pluralRules[language(locale)]; ok {
-		return rule(n)
+		return rule(number)
 	}
 	return 0
 }

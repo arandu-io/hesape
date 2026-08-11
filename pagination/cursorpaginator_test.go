@@ -3,6 +3,7 @@ package pagination_test
 import (
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/arandu-io/hesape/pagination"
@@ -228,5 +229,70 @@ func TestThroughCursor(t *testing.T) {
 	}
 	if mapped.Cursor() != p.Cursor() {
 		t.Error("Through changed the cursor the page was read from")
+	}
+}
+
+// getCursorForItem is how a repository asks for the cursor of a row it has in
+// hand, rather than of the row at the edge of the page.
+func TestGetCursorForItem(t *testing.T) {
+	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, pagination.Options{Path: "/posts"})
+
+	parameters, err := p.GetParametersForItem(post{ID: 7})
+	if err != nil {
+		t.Fatalf("GetParametersForItem: %v", err)
+	}
+	if got, want := parameters["id"], "7"; got != want {
+		t.Errorf("parameters[id] = %q, want %q", got, want)
+	}
+
+	cursor, err := p.GetCursorForItem(post{ID: 7}, true)
+	if err != nil {
+		t.Fatalf("GetCursorForItem: %v", err)
+	}
+	if !cursor.PointsToNextItems() {
+		t.Error("PointsToNextItems = false, want true")
+	}
+	if got, _ := cursor.Parameter("id"); got != "7" {
+		t.Errorf("Parameter(id) = %q, want \"7\"", got)
+	}
+
+	backward, err := p.GetCursorForItem(post{ID: 7}, false)
+	if err != nil {
+		t.Fatalf("GetCursorForItem backwards: %v", err)
+	}
+	if !backward.PointsToPreviousItems() {
+		t.Error("PointsToPreviousItems = false, want true")
+	}
+}
+
+// A mapped page keeps the cursors it computed and loses the key function, which
+// was written against the row type that has just been mapped away.
+func TestGetCursorForItemAfterThroughCursor(t *testing.T) {
+	p := pagination.ThroughCursor(
+		pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, pagination.Options{Path: "/posts"}),
+		func(p post) int { return p.ID },
+	)
+
+	if _, err := p.GetCursorForItem(7, true); err == nil {
+		t.Error("GetCursorForItem on a mapped page returned no error")
+	}
+	if p.NextCursor() == nil {
+		t.Error("NextCursor = nil, want the cursor computed before the mapping")
+	}
+}
+
+func TestCursorNameMovesTheQueryParameter(t *testing.T) {
+	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, pagination.Options{Path: "/posts"})
+
+	if got, want := p.GetCursorName(), pagination.DefaultCursorName; got != want {
+		t.Errorf("GetCursorName = %q, want %q", got, want)
+	}
+
+	p.SetCursorName("comments")
+	if got, want := p.GetCursorName(), "comments"; got != want {
+		t.Errorf("GetCursorName = %q, want %q", got, want)
+	}
+	if got := p.NextPageURL(); !strings.Contains(got, "comments=") {
+		t.Errorf("NextPageURL = %q, want the cursor under the name that was set", got)
 	}
 }

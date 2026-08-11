@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,7 +38,7 @@ type Rules map[string]string
 // Messages overrides the sentence one rule puts on one field, keyed
 // "field.rule":
 //
-//	validation.MustCompile(rules, validation.WithMessages(validation.Messages{
+//	validation.MustCompile(rules, validation.WithMessageOverrides(validation.Messages{
 //		"email.required": "we need an address to send the receipt to",
 //	}))
 //
@@ -53,8 +54,13 @@ type settings struct {
 	messages Messages
 }
 
-// WithMessages replaces the default sentence for the named field and rule.
-func WithMessages(m Messages) Option {
+// WithMessageOverrides replaces the default sentence for the named field and
+// rule.
+//
+// It is not spelled WithMessages: that name belongs to
+// ValidationException::withMessages (ADR 0044), and this is a compile-time
+// override of a sentence rather than an exception built out of one.
+func WithMessageOverrides(m Messages) Option {
 	return func(s *settings) { s.messages = m }
 }
 
@@ -278,9 +284,15 @@ func (c *compiler) reject(f *field, name string) {
 	c.fail(f, name, "unknown rule %q", name)
 }
 
+// fileRules answers to Validator::$fileRules, minus the size rules it also
+// lists: these six are what make a field an upload, and so what makes `max:100`
+// on it mean a hundred kilobytes.
+var fileRules = []string{"file", "image", "mimes", "mimetypes", "extensions", "dimensions"}
+
 // flags reads the properties of a field that its own rules decide: whether a
-// size is measured in characters or by value, whether the field is optional,
-// where it stops, and what layout its dates are written in.
+// size is measured in characters, in kilobytes or by value, whether the field
+// is optional or nullable, where it stops, and what layout its dates are
+// written in.
 func (c *compiler) flags(f *field) {
 	for _, r := range f.rules {
 		switch {
@@ -288,11 +300,19 @@ func (c *compiler) flags(f *field) {
 			f.bail = true
 		case r.name == "sometimes":
 			f.sometimes = true
+		case r.name == "nullable":
+			f.nullable = true
 		case r.name == "date_format" && len(r.args) == 1:
 			f.layout = r.args[0]
 		}
 		if r.spec.sizeIsValue {
 			f.numeric = true
+		}
+		if r.spec.implicit {
+			f.hasImplicit = true
+		}
+		if slices.Contains(fileRules, r.name) {
+			f.file = true
 		}
 	}
 }
@@ -307,12 +327,9 @@ func (c *compiler) checkField(f *field) {
 				continue
 			}
 			if _, isNumber := number(r.args[i]); isNumber && comparisons[r.name] {
-				// Laravel accepts gt:10 as well as gt:other_field, and decides
-				// which was meant by whether a field called "10" happens to
-				// exist. That is an ambiguity, not a feature, and there is
-				// already one way to write a literal bound.
-				c.fail(f, r.name, "rule %q takes the name of another field, and %q is a number -- "+
-					"a literal bound is written with min: or max:", r.name, r.args[i])
+				// gt:10 is a literal bound, as it is in Laravel: the parameter
+				// is a number and no field of that name is declared, which is
+				// the fork validateGt itself makes. Not a failure.
 				continue
 			}
 			// The check that pays for itself: `confirmed` against a field name
@@ -362,7 +379,7 @@ func (c *compiler) checkCombinations(f *field) {
 
 	if in, out := f.rule("in"), f.rule("not_in"); in != nil && out != nil {
 		for _, v := range in.args {
-			if contains(out.args, v) {
+			if slices.Contains(out.args, v) {
 				c.fail(f, "in", "%q is in both in: and not_in:, so nothing can pass", v)
 				break
 			}
@@ -523,9 +540,21 @@ func needSizes(c *checkCtx) error {
 			return fmt.Errorf("rule %q needs a number that is not negative, got %q -- a bound "+
 				"below zero is written in Go, in the arandu:begin custom block", c.r.name, a)
 		}
-		if !c.f.numeric && n != float64(int64(n)) {
+		if !c.f.numeric && !c.f.file && n != float64(int64(n)) {
 			return fmt.Errorf("rule %q counts characters here, so it needs a whole number, got %q "+
 				"-- declare numeric, integer or decimal to bound the value instead", c.r.name, a)
+		}
+		c.r.nums = append(c.r.nums, n)
+	}
+	return nil
+}
+
+// needNumbers parses a plain numeric argument, which is what multiple_of takes.
+func needNumbers(c *checkCtx) error {
+	for _, a := range c.r.args {
+		n, ok := number(a)
+		if !ok {
+			return fmt.Errorf("rule %q needs a number, got %q", c.r.name, a)
 		}
 		c.r.nums = append(c.r.nums, n)
 	}
@@ -561,14 +590,84 @@ func checkAscii(c *checkCtx) error {
 	return nil
 }
 
-func refuseEmailArguments(c *checkCtx) error {
-	if len(c.r.args) == 0 {
-		return nil
+// emailValidations are the arguments `email` accepts, at Laravel's spelling.
+//
+// rfc, strict, filter and filter_unicode are one shape check here rather than
+// four validators: this package keeps one answer to "is this an address", and
+// four that could drift would drift. `dns` asks whether the domain resolves,
+// which is a lookup on the request path and is the only one that costs
+// anything. `spoof` is not among them -- it needs the Unicode confusables
+// table, which is a data set this package does not carry.
+var emailValidations = []string{"rfc", "strict", "filter", "filter_unicode", "dns"}
+
+func checkEmailValidations(c *checkCtx) error {
+	for _, a := range c.r.args {
+		if slices.Contains(emailValidations, a) {
+			continue
+		}
+		if a == "spoof" {
+			return fmt.Errorf("rule %q does not carry %q: it needs the Unicode confusables table, "+
+				"which is a data set rather than a check. Compare the address to the ones already "+
+				"stored, in the service", c.r.name, a)
+		}
+		return fmt.Errorf("rule %q takes %s, got %q", c.r.name, quoteAll(emailValidations), a)
 	}
-	return fmt.Errorf("rule %q takes no argument, got %q. Laravel's arguments to it -- dns, spoof, "+
-		"rfc -- put a network lookup on the request path, with a timeout nobody set, answering a "+
-		"question that is not the one that matters: an address that resolves is not an address "+
-		"that receives", c.r.name, strings.Join(c.r.args, ","))
+	return nil
+}
+
+// checkDistinct refuses an argument that is not one of the two the PHP reads,
+// so that a misspelt `ignorecase` is not silently no comparison at all.
+func checkDistinct(c *checkCtx) error {
+	for _, a := range c.r.args {
+		if a != "ignore_case" && a != "strict" {
+			return fmt.Errorf("rule %q takes %q or %q, got %q", c.r.name, "ignore_case", "strict", a)
+		}
+	}
+	return nil
+}
+
+// checkImage refuses an argument that is not the one the PHP reads.
+func checkImage(c *checkCtx) error {
+	for _, a := range c.r.args {
+		if a != "allow_svg" {
+			return fmt.Errorf("rule %q takes only %q as an argument, got %q", c.r.name, "allow_svg", a)
+		}
+	}
+	return nil
+}
+
+// dimensionConstraints are the keys `dimensions` reads. A key outside them is
+// ignored by the PHP and by anything reading the rule, which is a constraint
+// that looks written and is not.
+var dimensionConstraints = []string{
+	"width", "height", "min_width", "min_height", "max_width", "max_height",
+	"ratio", "min_ratio", "max_ratio",
+}
+
+func checkDimensions(c *checkCtx) error {
+	for _, a := range c.r.args {
+		key, value, named := strings.Cut(a, "=")
+		if !named {
+			return fmt.Errorf("rule %q takes named arguments, got %q -- they are written "+
+				"key=value, as in %q", c.r.name, a, "dimensions:min_width=100,ratio=3/2")
+		}
+		if !slices.Contains(dimensionConstraints, key) {
+			return fmt.Errorf("rule %q has no constraint %q; it reads %s",
+				c.r.name, key, quoteAll(dimensionConstraints))
+		}
+		if strings.HasSuffix(key, "ratio") {
+			if _, ok := parseRatio(value); !ok {
+				return fmt.Errorf("rule %q needs a ratio for %q and %q is not one: write it as "+
+					"%q or as %q", c.r.name, key, value, "3/2", "1.5")
+			}
+			continue
+		}
+		if _, err := strconv.Atoi(value); err != nil {
+			return fmt.Errorf("rule %q needs a whole number of pixels for %q, got %q",
+				c.r.name, key, value)
+		}
+	}
+	return nil
 }
 
 func compilePattern(c *checkCtx) error {

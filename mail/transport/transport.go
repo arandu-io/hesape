@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/smtp"
 	"strings"
@@ -37,11 +38,11 @@ func (SMTP) Name() string { return "smtp" }
 
 // Send delivers the message.
 //
-// The [mail.Sent] it returns carries no identifier: SMTP has no field for one,
+// The [mail.SentMessage] it returns carries no identifier: SMTP has no field for one,
 // and the id the receiving server assigns is in a reply line no client is
 // obliged to be given.
-func (t SMTP) Send(ctx context.Context, m mail.Message) (mail.Sent, error) {
-	sent := mail.Sent{Transport: t.Name()}
+func (t SMTP) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error) {
+	sent := mail.SentMessage{Transport: t.Name()}
 
 	timeout := t.Timeout
 	if timeout <= 0 {
@@ -55,14 +56,14 @@ func (t SMTP) Send(ctx context.Context, m mail.Message) (mail.Sent, error) {
 	if err != nil {
 		// The server was not reachable, which is the same kind of event as a
 		// provider answering 502: nothing about the message was refused.
-		return mail.Sent{}, mail.Retryable(fmt.Errorf("mail: dialing %s: %w", addr, err))
+		return mail.SentMessage{}, mail.Retryable(fmt.Errorf("mail: dialing %s: %w", addr, err))
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(timeout))
 
 	c, err := smtp.NewClient(conn, t.Host)
 	if err != nil {
-		return mail.Sent{}, mail.Retryable(fmt.Errorf("mail: %s: %w", addr, err))
+		return mail.SentMessage{}, mail.Retryable(fmt.Errorf("mail: %s: %w", addr, err))
 	}
 	defer c.Close()
 
@@ -71,65 +72,87 @@ func (t SMTP) Send(ctx context.Context, m mail.Message) (mail.Sent, error) {
 	// that is not encrypted, and it is right to.
 	if ok, _ := c.Extension("STARTTLS"); ok {
 		if err := c.StartTLS(&tls.Config{ServerName: t.Host}); err != nil {
-			return mail.Sent{}, fmt.Errorf("mail: starttls: %w", err)
+			return mail.SentMessage{}, fmt.Errorf("mail: starttls: %w", err)
 		}
 	}
 	if t.Username != "" {
 		if err := c.Auth(smtp.PlainAuth("", t.Username, t.Password, t.Host)); err != nil {
-			return mail.Sent{}, fmt.Errorf("mail: authenticating: %w", err)
+			return mail.SentMessage{}, fmt.Errorf("mail: authenticating: %w", err)
 		}
 	}
 
-	if err := c.Mail(m.From.Email); err != nil {
-		return mail.Sent{}, fmt.Errorf("mail: from %s: %w", m.From.Email, err)
+	if err := c.Mail(m.From.Address); err != nil {
+		return mail.SentMessage{}, fmt.Errorf("mail: from %s: %w", m.From.Address, err)
 	}
 	for _, a := range append(append(append([]mail.Address{}, m.To...), m.CC...), m.BCC...) {
-		if err := c.Rcpt(a.Email); err != nil {
-			return mail.Sent{}, fmt.Errorf("mail: to %s: %w", a.Email, err)
+		if err := c.Rcpt(a.Address); err != nil {
+			return mail.SentMessage{}, fmt.Errorf("mail: to %s: %w", a.Address, err)
 		}
 	}
 
 	w, err := c.Data()
 	if err != nil {
-		return mail.Sent{}, fmt.Errorf("mail: data: %w", err)
+		return mail.SentMessage{}, fmt.Errorf("mail: data: %w", err)
 	}
 	if _, err := w.Write([]byte(mail.Render(m))); err != nil {
-		return mail.Sent{}, fmt.Errorf("mail: writing the message: %w", err)
+		return mail.SentMessage{}, fmt.Errorf("mail: writing the message: %w", err)
 	}
 	if err := w.Close(); err != nil {
-		return mail.Sent{}, fmt.Errorf("mail: closing the message: %w", err)
+		return mail.SentMessage{}, fmt.Errorf("mail: closing the message: %w", err)
 	}
 	if err := c.Quit(); err != nil {
-		return mail.Sent{}, fmt.Errorf("mail: closing the session: %w", err)
+		return mail.SentMessage{}, fmt.Errorf("mail: closing the session: %w", err)
 	}
 	return sent, nil
 }
 
-// Log writes the message to the log instead of sending it.
+// Log writes the message to the log instead of sending it, and is
+// Illuminate\Mail\Transport\LogTransport.
 //
 // It is the development default, and what makes `aru dev` work with nothing
 // installed. The whole body is logged, because the reason to read it is to
 // follow the link inside.
-type Log struct{}
+type Log struct {
+	// logger is Illuminate's $logger. It is unexported because Illuminate has
+	// both the property and a logger() method of the same name, which PHP
+	// allows and Go does not; the method is what a Laravel developer calls, so
+	// the method wins and [NewLog] sets the field.
+	logger *slog.Logger
+}
+
+// NewLog is Illuminate's LogTransport::__construct.
+//
+// A nil logger means the one the context carries, which is what makes the zero
+// value useful: transport.Log{} logs wherever the request is logging.
+func NewLog(logger *slog.Logger) Log { return Log{logger: logger} }
 
 // Name identifies the transport in a log line.
 func (Log) Name() string { return "log" }
 
+// Logger is where this transport writes, and is Illuminate's
+// LogTransport::logger(). It is nil when the transport follows the context.
+func (t Log) Logger() *slog.Logger { return t.logger }
+
 // Send logs the message.
-func (t Log) Send(ctx context.Context, m mail.Message) (mail.Sent, error) {
+func (t Log) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error) {
 	to := make([]string, 0, len(m.To))
 	for _, a := range m.To {
-		to = append(to, a.Email)
+		to = append(to, a.Address)
 	}
 
-	log.For(ctx).Info("mail: this transport logs instead of sending",
+	logger := t.logger
+	if logger == nil {
+		logger = log.For(ctx)
+	}
+	logger.Info("mail: this transport logs instead of sending",
 		"to", strings.Join(to, ", "),
 		"subject", m.Subject,
 		"body", firstNonEmpty(m.Text, m.HTML))
-	return mail.Sent{Transport: t.Name()}, nil
+	return mail.SentMessage{Transport: t.Name()}, nil
 }
 
-// Array keeps what was sent, for a test to read.
+// Array keeps what was sent, for a test to read, and is
+// Illuminate\Mail\Transport\ArrayTransport.
 //
 // It is safe for concurrent use, because a test that sends from two goroutines
 // and reads from a third is a test that would otherwise fail under -race for a
@@ -143,15 +166,17 @@ type Array struct {
 func (*Array) Name() string { return "array" }
 
 // Send records the message.
-func (a *Array) Send(_ context.Context, m mail.Message) (mail.Sent, error) {
+func (a *Array) Send(_ context.Context, m mail.Message) (mail.SentMessage, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.sent = append(a.sent, m)
-	return mail.Sent{Transport: a.Name()}, nil
+	return mail.SentMessage{Transport: a.Name()}, nil
 }
 
-// Sent is everything sent so far, oldest first.
-func (a *Array) Sent() []mail.Message {
+// Messages is everything sent so far, oldest first, and is Illuminate's
+// ArrayTransport::messages(). It used to be called Sent, which is a name
+// Illuminate does not have; the callers inside this collection were moved.
+func (a *Array) Messages() []mail.Message {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return append([]mail.Message(nil), a.sent...)
@@ -167,12 +192,15 @@ func (a *Array) Last() (mail.Message, bool) {
 	return a.sent[len(a.sent)-1], true
 }
 
-// Reset forgets everything. A test that shares a transport between cases calls
+// Flush forgets everything and answers what it forgot, which is Illuminate's
+// ArrayTransport::flush(). A test that shares a transport between cases calls
 // it, and one that does not share it does not need to.
-func (a *Array) Reset() {
+func (a *Array) Flush() []mail.Message {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	was := a.sent
 	a.sent = nil
+	return was
 }
 
 func firstNonEmpty(a, b string) string {

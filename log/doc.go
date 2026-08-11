@@ -138,7 +138,7 @@
 //     [LogManager.Extend] are the two things a caller actually reached for it
 //     to change.
 //
-// The eleven driver factories, the tap chain and the Monolog handler plumbing
-// of LogManager are protected in PHP and are not part of the surface: what this
+// The driver factories, the tap chain and the Monolog handler plumbing of
+// LogManager are protected in PHP and are not part of the surface: what this
 // carries of them is above, under No Monolog.
 package log

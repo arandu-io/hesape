@@ -46,6 +46,25 @@ func (c *Chain) Add(name string, payload any) *Chain {
 	return c
 }
 
+// AddStep appends links that are already built.
+//
+// It is Add for the caller that has Steps in hand -- Dispatcher.Chain does --
+// and it is the only place in this package where a link joins a chain without
+// being serialized again.
+func (c *Chain) AddStep(jobs ...Step) *Chain {
+	for _, s := range jobs {
+		if !s.declared() {
+			c.fail(ErrNoName)
+			return c
+		}
+		c.jobs = append(c.jobs, s)
+	}
+	return c
+}
+
+// Jobs is the links described so far.
+func (c *Chain) Jobs() []Step { return append([]Step(nil), c.jobs...) }
+
 // Catch names the job dispatched when a link fails and the chain stops.
 //
 // There is no Then: the last link is the Then. A chain that wants a step after

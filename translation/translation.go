@@ -3,213 +3,277 @@ package translation
 import (
 	"fmt"
 	"maps"
+	"reflect"
 	"strings"
+	"sync"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Replace holds the arguments a line interpolates, keyed by the placeholder
-// name without its colon: Replace{"attribute": "email"} fills ":attribute".
+// name without its colon: Replace{"attribute": "email"} fills ":attribute",
+// ":Attribute" and ":ATTRIBUTE".
 //
 // Values are rendered with fmt.Sprint, so a count may be given as an int and a
-// duration as a time.Duration without the caller formatting it first.
+// duration as a time.Duration without the caller formatting it first. A value
+// of type func(string) string is what PHP's Closure is here: it replaces the
+// text between <name> and </name> rather than a placeholder.
 type Replace map[string]any
 
-// Translator resolves a key into a sentence.
+// Translator is Illuminate's Translation\Translator: it resolves a key into a
+// sentence.
 //
-// It is immutable once [New] returns and safe for concurrent use. Build one
-// where the application is wired and pass it to whatever renders text.
+// One instance answers every request. Illuminate's is not safe for concurrent
+// use and does not have to be -- a PHP process serves one request -- but this
+// one caches the groups it has loaded, and the setters below are callable at
+// any time, so every field is behind a lock.
 type Translator struct {
-	loaders    []Loader
-	namespaces map[string]Loader
-	locale     string
-	fallback   string
-	plural     Plural
-	missing    func(locale, key string)
+	mu sync.RWMutex
+
+	// loader is what the application was built with, and what GetLoader
+	// returns. lookup is that loader followed by the English lines that ship
+	// with this package.
+	loader Loader
+	lookup Loader
+
+	locale   string
+	fallback string
+
+	// loaded is namespace -> group -> locale -> lines, the array PHP calls
+	// $loaded: the groups this translator has already asked the loader for,
+	// plus whatever AddLines wrote straight into it.
+	loaded map[string]map[string]map[string]Lines
+
+	selector              Selector
+	determineLocalesUsing func(locales []string) []string
+	stringableHandlers    map[reflect.Type]func(any) string
+
+	missingTranslationKeyCallback func(key string, replace Replace, locale string, fallback bool) string
+	handleMissingTranslationKeys  bool
 }
 
-// Option configures a [Translator] at construction.
-type Option func(*Translator)
-
-// WithPlural replaces the table that decides which segment of a line a count
-// selects. [DefaultPlural] is used when this is not given.
-func WithPlural(p Plural) Option {
-	return func(t *Translator) {
-		if p != nil {
-			t.plural = p
-		}
-	}
-}
-
-// WithNamespace registers a catalogue reached by a prefixed key: the loader
-// registered as "shop" answers "shop::orders.title".
+// New answers Translator::__construct(), with the fallback locale the PHP
+// service provider sets straight after it.
 //
-// A namespace is how a module ships its own lines without writing into the
-// application catalogue. Its keys are resolved in that loader only -- there is
-// no fall through to the application, because a module that can be shadowed by
-// an unrelated key of the same name is a module whose text is not its own.
-func WithNamespace(name string, l Loader) Option {
-	return func(t *Translator) {
-		if name == "" || l == nil {
-			return
-		}
-		if t.namespaces == nil {
-			t.namespaces = make(map[string]Loader)
-		}
-		t.namespaces[name] = l
-	}
-}
-
-// WithMissingKey registers what to do when no catalogue carries a key. The
-// translator still returns the key itself; this is the hook that reports it, to
-// a logger in development or to a counter in production.
-func WithMissingKey(f func(locale, key string)) Option {
-	return func(t *Translator) { t.missing = f }
-}
-
-// New builds a translator over an application catalogue.
-//
-// locale is the locale used when a caller passes none, and fallback is the one
+// locale is the locale used when a caller passes none, and fallback the one
 // consulted when a key is missing from the locale asked for. The English lines
 // that ship with this package are answered after both, so auth, validation,
 // passwords and pagination resolve with no catalogue at all -- l may be nil.
-func New(l Loader, locale, fallback string, opts ...Option) *Translator {
+//
+// Illuminate registers the framework's own lang directory as a second path on
+// the FileLoader to the same end. Here it is a second loader, so that a
+// translator built over an [ArrayLoader] still answers them.
+func New(l Loader, locale, fallback string) *Translator {
 	t := &Translator{
-		locale:   locale,
-		fallback: fallback,
-		plural:   DefaultPlural,
+		loader:                       l,
+		fallback:                     fallback,
+		loaded:                       make(map[string]map[string]map[string]Lines),
+		selector:                     MessageSelector{},
+		stringableHandlers:           make(map[reflect.Type]func(any) string),
+		handleMissingTranslationKeys: true,
 	}
-	if l != nil {
-		t.loaders = append(t.loaders, l)
+	if l == nil {
+		t.loader = bundled
+		t.lookup = bundled
+	} else {
+		t.lookup = chain{l, bundled}
 	}
-	t.loaders = append(t.loaders, bundled)
-	for _, opt := range opts {
-		opt(t)
+	// PHP's constructor goes through setLocale, which rejects a locale holding
+	// a path separator. There is no exception to raise from a constructor that
+	// returns one value, so a rejected locale is the empty one, which every
+	// method below reads as "no locale given".
+	if err := t.SetLocale(locale); err != nil {
+		t.locale = ""
 	}
 	return t
 }
 
-// Locale reports the locale used when a caller passes none.
-func (t *Translator) Locale() string { return t.locale }
-
-// Fallback reports the locale consulted when a key is missing from the one
-// asked for.
-func (t *Translator) Fallback() string { return t.fallback }
-
-// Get answers Illuminate\Translation\Translator::get: the line stored under
-// key, with its placeholders replaced.
+// Get answers Translator::get(): the line stored under key, with its
+// placeholders replaced.
 //
-// An empty locale means the translator's own. A key no catalogue carries is
-// returned unchanged, after the [WithMissingKey] callback has seen it, so a
-// wrong key shows as itself on the page instead of as a blank.
+// The locale comes first here and the replacements last, because PHP's
+// signature -- get($key, $replace = [], $locale = null) -- is ordered by which
+// argument may be left out, and Go has no optional arguments to order for. An
+// empty locale still means the translator's own.
+//
+// A key no catalogue carries is returned unchanged, after the callback
+// registered by [Translator.HandleMissingKeysUsing] has seen it, so a wrong key
+// shows as itself on the page instead of as a blank.
+//
+// PHP returns string|array: a key naming a group and no item -- "messages"
+// rather than "messages.welcome" -- yields the whole group. This returns the
+// key in that case, because the return type is a sentence.
 func (t *Translator) Get(locale, key string, replace Replace) string {
-	line, _, ok := t.line(locale, key)
-	if !ok {
-		t.reportMissing(locale, key)
-		line = key
-	}
-	return interpolate(line, replace)
+	return t.get(locale, key, replace, true)
 }
 
-// Choice returns the segment of a line that count selects, with its
-// placeholders replaced.
+func (t *Translator) get(locale, key string, replace Replace, fallback bool) string {
+	locale = t.localeOr(locale)
+
+	// For JSON translations there is one file per locale, so it is loaded and
+	// the key looked up in it directly -- these are one level deep.
+	t.Load(AppNamespace, JSONGroup, locale)
+
+	t.mu.RLock()
+	line, found := t.loaded[AppNamespace][JSONGroup][locale][key]
+	t.mu.RUnlock()
+
+	if !found {
+		namespace, group, item := t.ParseKey(key)
+		if item == "" {
+			return t.makeReplacements(t.handleMissingTranslationKey(key, replace, locale, fallback), replace)
+		}
+
+		locales := []string{locale}
+		if fallback {
+			locales = t.localeArray(locale)
+		}
+		for _, at := range locales {
+			if l, ok := t.getLine(namespace, group, at, item, replace); ok {
+				return l
+			}
+		}
+
+		key = t.handleMissingTranslationKey(key, replace, locale, fallback)
+	}
+
+	// PHP's `$line ?: $key`: a line that is there but empty reads as missing,
+	// because an empty sentence on the page is indistinguishable from a bug.
+	if line == "" {
+		line = key
+	}
+	return t.makeReplacements(line, replace)
+}
+
+// Choice answers Translator::choice(): the segment of a line that a count
+// selects, with its placeholders replaced.
 //
 // The segments of a line are divided by "|" and may open with an explicit
 // condition, "{0}" for a single count and "[1,19]" or "[20,*]" for a range. The
 // first condition that matches wins; with no condition, the plural rule of the
-// locale chooses.
+// locale chooses. See [MessageSelector.Choose].
 //
-// ":count" is filled with count unless replace already carries it.
-func (t *Translator) Choice(locale, key string, count int, replace Replace) string {
-	line, at, ok := t.line(locale, key)
-	if !ok {
-		t.reportMissing(locale, key)
-		line, at = key, t.localeOr(locale)
-	}
+// ":count" is filled with count unless replace already carries it. PHP takes
+// Countable|int|float|array and counts what it is given; Go has len for that,
+// so this takes the number.
+func (t *Translator) Choice(locale, key string, number int, replace Replace) string {
+	locale = t.localeForChoice(key, locale)
+
+	line := t.Get(locale, key, nil)
+
 	if _, taken := replace["count"]; !taken {
 		replace = maps.Clone(replace)
 		if replace == nil {
 			replace = make(Replace, 1)
 		}
-		replace["count"] = count
+		replace["count"] = number
 	}
-	return interpolate(choose(line, count, at, t.plural), replace)
+
+	return t.makeReplacements(t.GetSelector().Choose(line, number, locale), replace)
 }
 
-// Has reports whether a line exists for key, in the given locale or in the
-// fallback.
-func (t *Translator) Has(locale, key string) bool {
-	_, _, ok := t.line(locale, key)
-	return ok
-}
-
-// line finds a key, and reports which locale answered -- Choice needs it,
-// because a line that only exists in the fallback pluralizes by the rule of the
-// fallback and not of the locale that was asked for.
-func (t *Translator) line(locale, key string) (string, string, bool) {
-	namespace, group, item := parseKey(key)
-	if item == "" {
-		return "", "", false
-	}
-
-	loaders := t.loaders
-	if namespace != "" {
-		l, registered := t.namespaces[namespace]
-		if !registered {
-			return "", "", false
-		}
-		loaders = []Loader{l}
-	}
-
-	for _, at := range t.localeChain(locale) {
-		for _, l := range loaders {
-			if line, ok := l.Load(at, group)[item]; ok {
-				return line, at, true
-			}
-		}
-	}
-	return "", "", false
-}
-
-// localeChain is the locale asked for and then the fallback, without repeating
-// one that is both.
-func (t *Translator) localeChain(locale string) []string {
+// localeForChoice answers Translator::localeForChoice(). A line that only
+// exists in the fallback pluralises by the rule of the fallback: picking the
+// segment by the rule of a language the line is not written in selects the
+// wrong one as soon as the two rules differ.
+func (t *Translator) localeForChoice(key, locale string) string {
 	locale = t.localeOr(locale)
-	if locale == t.fallback || t.fallback == "" {
-		return []string{locale}
+	if t.HasForLocale(locale, key) {
+		return locale
 	}
-	return []string{locale, t.fallback}
+	return t.GetFallback()
 }
 
-func (t *Translator) localeOr(locale string) string {
-	if locale == "" {
-		return t.locale
-	}
-	return locale
+// Has answers Translator::has(): whether a line exists for key, in the given
+// locale or in the fallback.
+func (t *Translator) Has(locale, key string) bool {
+	return t.has(locale, key, true)
 }
 
-func (t *Translator) reportMissing(locale, key string) {
-	if t.missing != nil {
-		t.missing(t.localeOr(locale), key)
-	}
+// HasForLocale answers Translator::hasForLocale(): whether a line exists for
+// key in the given locale alone, with no fall through to the fallback locale.
+func (t *Translator) HasForLocale(locale, key string) bool {
+	return t.has(locale, key, false)
 }
 
-// parseKey splits "namespace::group.item" into its three parts. The item keeps
-// every dot after the first, so "validation.min.string" is the item "min.string"
-// of the group "validation".
-func parseKey(key string) (namespace, group, item string) {
-	if i := strings.Index(key, "::"); i >= 0 {
-		namespace, key = key[:i], key[i+2:]
+func (t *Translator) has(locale, key string, fallback bool) bool {
+	locale = t.localeOr(locale)
+
+	// The handling of missing keys is disabled while the existence check runs,
+	// and put back to what it was afterwards: asking whether a line exists must
+	// not report it as missing.
+	t.mu.Lock()
+	handle := t.handleMissingTranslationKeys
+	t.handleMissingTranslationKeys = false
+	t.mu.Unlock()
+
+	line := t.get(locale, key, nil, fallback)
+
+	t.mu.Lock()
+	t.handleMissingTranslationKeys = handle
+	t.mu.Unlock()
+
+	// For JSON translations the loaded file holds the line under the key
+	// itself, so the key coming back is not proof of anything.
+	t.mu.RLock()
+	_, json := t.loaded[AppNamespace][JSONGroup][locale][key]
+	t.mu.RUnlock()
+	if json {
+		return true
 	}
-	group, item, _ = strings.Cut(key, ".")
-	return namespace, group, item
+
+	return line != key
 }
 
-// interpolate replaces every ":name" for which replace carries a name.
+// getLine answers Translator::getLine(): one line out of the loaded array, with
+// its replacements made.
 //
-// A placeholder with no argument is left as it stands. Illuminate blanks it,
-// which turns a forgotten argument into a sentence that reads as finished; here
-// it stays visible, and the missing colon is the report.
-func interpolate(line string, replace Replace) string {
-	if len(replace) == 0 || !strings.ContainsRune(line, ':') {
+// PHP also walks a nested array and replaces inside every one of its strings,
+// because a group may be asked for whole. A group is not a sentence here (see
+// [Translator.Get]), so this answers one line.
+func (t *Translator) getLine(namespace, group, locale, item string, replace Replace) (string, bool) {
+	t.Load(namespace, group, locale)
+
+	t.mu.RLock()
+	line, ok := t.loaded[namespace][group][locale][item]
+	t.mu.RUnlock()
+	if !ok || line == "" {
+		return "", false
+	}
+	return t.makeReplacements(line, replace), true
+}
+
+// makeReplacements answers Translator::makeReplacements(): the placeholders of
+// a line, filled.
+//
+// Three spellings of every name are replaced, as PHP builds three entries per
+// argument: ":name" with the value, ":Name" with the value's first letter
+// uppercased, and ":NAME" with the value uppercased. A form is offered so that
+// "The :attribute field is required." and ":Attribute is required." can share
+// one argument.
+//
+// A placeholder no argument names is left as it stands. PHP's strtr leaves it
+// too, and the longest name that does match wins at each position, so ":value"
+// does not eat the front of ":values" when both are given, and does eat it when
+// only ":value" is.
+//
+// An argument whose value is a func(string) string is PHP's Closure: it
+// replaces the text between <name> and </name>, which is how a sentence hands
+// part of itself to the caller to wrap.
+func (t *Translator) makeReplacements(line string, replace Replace) string {
+	if len(replace) == 0 {
+		return line
+	}
+
+	for key, value := range replace {
+		wrap, ok := value.(func(string) string)
+		if !ok {
+			continue
+		}
+		line = replaceWrapped(line, key, wrap)
+	}
+
+	if !strings.ContainsRune(line, ':') {
 		return line
 	}
 
@@ -221,16 +285,433 @@ func interpolate(line string, replace Replace) string {
 			continue
 		}
 		name := placeholder(line[i+1:])
-		value, ok := replace[name]
-		if !ok {
+		written := false
+		for n := len(name); n > 0; n-- {
+			value, form, ok := t.replacement(replace, name[:n])
+			if !ok {
+				continue
+			}
+			b.WriteString(form(value))
+			i += 1 + n
+			written = true
+			break
+		}
+		if !written {
 			b.WriteByte(':')
 			i++
-			continue
 		}
-		b.WriteString(fmt.Sprint(value))
-		i += 1 + len(name)
 	}
 	return b.String()
+}
+
+// replacement finds the argument one spelling of a placeholder names, and the
+// case that spelling asks for. ":attribute" is the value, ":Attribute" is
+// Str::ucfirst of it and ":ATTRIBUTE" is Str::upper of it.
+func (t *Translator) replacement(replace Replace, name string) (string, func(string) string, bool) {
+	if value, ok := replace[name]; ok {
+		if _, wrap := value.(func(string) string); wrap {
+			// A closure argument names a pair of tags, not a placeholder. PHP
+			// skips it before building the replacement table and so does this,
+			// rather than printing the function.
+			return "", nil, false
+		}
+		return t.stringify(value), func(s string) string { return s }, true
+	}
+	lower := strings.ToLower(name)
+	if lower == name {
+		return "", nil, false
+	}
+	value, ok := replace[lower]
+	if !ok {
+		return "", nil, false
+	}
+	if _, wrap := value.(func(string) string); wrap {
+		return "", nil, false
+	}
+	if name == strings.ToUpper(name) {
+		return t.stringify(value), strings.ToUpper, true
+	}
+	if name == ucfirst(lower) {
+		return t.stringify(value), ucfirst, true
+	}
+	return "", nil, false
+}
+
+// stringify renders one argument. A type a handler was registered for through
+// [Translator.Stringable] goes through it; anything else goes through
+// fmt.Sprint, which is where PHP's string cast went.
+func (t *Translator) stringify(value any) string {
+	if value == nil {
+		return ""
+	}
+	t.mu.RLock()
+	handler, ok := t.stringableHandlers[reflect.TypeOf(value)]
+	t.mu.RUnlock()
+	if ok {
+		return handler(value)
+	}
+	return fmt.Sprint(value)
+}
+
+// replaceWrapped answers the Closure branch of makeReplacements: every
+// <name>text</name> in the line, with text passed through the function.
+//
+// PHP matches /<name>(.*?)<\/name>/ without the s flag, so the text does not
+// cross a newline; neither does this.
+func replaceWrapped(line, name string, wrap func(string) string) string {
+	opening, closing := "<"+name+">", "</"+name+">"
+	var b strings.Builder
+	for {
+		start := strings.Index(line, opening)
+		if start < 0 {
+			break
+		}
+		rest := line[start+len(opening):]
+		end := strings.Index(rest, closing)
+		if end < 0 {
+			break
+		}
+		inner := rest[:end]
+		if strings.ContainsRune(inner, '\n') {
+			// A newline between the tags puts the match beyond what PHP's `.`
+			// spans, so the tags stay on the page as written.
+			b.WriteString(line[:start+len(opening)])
+			line = rest
+			continue
+		}
+		b.WriteString(line[:start])
+		b.WriteString(wrap(inner))
+		line = rest[end+len(closing):]
+	}
+	b.WriteString(line)
+	return b.String()
+}
+
+// AddLines answers Translator::addLines(): translation lines written straight
+// into the loaded array, under keys of the form "group.item".
+//
+// An empty namespace means [AppNamespace]. A group written this way is marked
+// loaded, so the loader is never asked for it -- which is how a test, or a
+// module registering its own text at boot, replaces a group rather than merging
+// into one.
+func (t *Translator) AddLines(lines map[string]string, locale, namespace string) {
+	if namespace == "" {
+		namespace = AppNamespace
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for key, value := range lines {
+		group, item, found := strings.Cut(key, ".")
+		if !found {
+			continue
+		}
+		t.set(namespace, group, locale, item, value)
+	}
+}
+
+// set writes one item into the loaded array, creating the levels above it. The
+// caller holds the write lock.
+func (t *Translator) set(namespace, group, locale, item, value string) {
+	if t.loaded[namespace] == nil {
+		t.loaded[namespace] = make(map[string]map[string]Lines)
+	}
+	if t.loaded[namespace][group] == nil {
+		t.loaded[namespace][group] = make(map[string]Lines)
+	}
+	if t.loaded[namespace][group][locale] == nil {
+		t.loaded[namespace][group][locale] = make(Lines)
+	}
+	t.loaded[namespace][group][locale][item] = value
+}
+
+// Load answers Translator::load(): it asks the loader for one group of one
+// locale and keeps what comes back.
+//
+// A group that is already loaded is not loaded again, which is what makes
+// [Translator.AddLines] and [Translator.SetLoaded] stick.
+func (t *Translator) Load(namespace, group, locale string) {
+	if t.isLoaded(namespace, group, locale) {
+		return
+	}
+
+	lines := t.lookup.Load(locale, group, namespace)
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.isLoadedLocked(namespace, group, locale) {
+		// Another request loaded it while this one was reading the files.
+		return
+	}
+	if t.loaded[namespace] == nil {
+		t.loaded[namespace] = make(map[string]map[string]Lines)
+	}
+	if t.loaded[namespace][group] == nil {
+		t.loaded[namespace][group] = make(map[string]Lines)
+	}
+	t.loaded[namespace][group][locale] = lines
+}
+
+// isLoaded answers Translator::isLoaded().
+func (t *Translator) isLoaded(namespace, group, locale string) bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.isLoadedLocked(namespace, group, locale)
+}
+
+func (t *Translator) isLoadedLocked(namespace, group, locale string) bool {
+	groups, ok := t.loaded[namespace]
+	if !ok {
+		return false
+	}
+	locales, ok := groups[group]
+	if !ok {
+		return false
+	}
+	_, ok = locales[locale]
+	return ok
+}
+
+// handleMissingTranslationKey answers
+// Translator::handleMissingTranslationKey(). It hands the key to the callback
+// registered by [Translator.HandleMissingKeysUsing] and returns whatever that
+// answers, or the key itself.
+func (t *Translator) handleMissingTranslationKey(key string, replace Replace, locale string, fallback bool) string {
+	t.mu.Lock()
+	callback := t.missingTranslationKeyCallback
+	if !t.handleMissingTranslationKeys || callback == nil {
+		t.mu.Unlock()
+		return key
+	}
+	// Prevent infinite loops: a callback that translates is not reported for
+	// the key it is reporting.
+	t.handleMissingTranslationKeys = false
+	t.mu.Unlock()
+
+	answered := callback(key, replace, locale, fallback)
+
+	t.mu.Lock()
+	t.handleMissingTranslationKeys = true
+	t.mu.Unlock()
+
+	if answered == "" {
+		return key
+	}
+	return answered
+}
+
+// HandleMissingKeysUsing answers Translator::handleMissingKeysUsing(): it
+// registers what runs when no catalogue carries a key.
+//
+// The translator still returns the key; this is the hook that reports it, to a
+// logger in development or to a counter in production, and it may answer with a
+// sentence of its own. A nil callback removes the one registered.
+func (t *Translator) HandleMissingKeysUsing(callback func(key string, replace Replace, locale string, fallback bool) string) *Translator {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.missingTranslationKeyCallback = callback
+	return t
+}
+
+// AddNamespace answers Translator::addNamespace(): it points a namespace at the
+// place its lines are loaded from, by forwarding to the loader.
+func (t *Translator) AddNamespace(namespace, hint string) {
+	t.lookup.AddNamespace(namespace, hint)
+}
+
+// AddPath answers Translator::addPath(): another directory of locale
+// directories for the loader to read.
+//
+// PHP calls addPath on the loader, which only the file loader has; a loader
+// with no paths ignores it, as it does in PHP for every loader but that one.
+func (t *Translator) AddPath(path string) {
+	if adder, ok := t.lookup.(interface{ AddPath(string) }); ok {
+		adder.AddPath(path)
+	}
+}
+
+// AddJSONPath answers Translator::addJsonPath(): another directory of per
+// locale JSON catalogues for the loader to read.
+func (t *Translator) AddJSONPath(path string) {
+	t.lookup.AddJSONPath(path)
+}
+
+// ParseKey answers Translator::parseKey(): a key split into namespace, group
+// and item.
+//
+// "messages.welcome" is the item "welcome" of the group "messages" in the
+// application namespace; "shop::orders.title" names the namespace "shop"; and
+// "validation.min.string" is the item "min.string", because everything after
+// the first dot is the item. A key with no dot names a group and no item, and
+// the item comes back empty.
+//
+// PHP returns a three element array and replaces a null namespace with "*";
+// this returns three strings and does the same.
+func (t *Translator) ParseKey(key string) (namespace, group, item string) {
+	if i := strings.Index(key, "::"); i >= 0 {
+		namespace, key = key[:i], key[i+2:]
+	}
+	if namespace == "" {
+		namespace = AppNamespace
+	}
+	group, item, _ = strings.Cut(key, ".")
+	return namespace, group, item
+}
+
+// localeArray answers Translator::localeArray(): the locales to be checked, in
+// order, being the one asked for and then the fallback.
+func (t *Translator) localeArray(locale string) []string {
+	locales := make([]string, 0, 2)
+	for _, l := range []string{t.localeOr(locale), t.GetFallback()} {
+		if l != "" && (len(locales) == 0 || locales[0] != l) {
+			locales = append(locales, l)
+		}
+	}
+
+	t.mu.RLock()
+	determine := t.determineLocalesUsing
+	t.mu.RUnlock()
+	if determine != nil {
+		return determine(locales)
+	}
+	return locales
+}
+
+// DetermineLocalesUsing answers Translator::determineLocalesUsing(): it
+// registers a callback that says which locales a key is looked for in, given
+// the locale asked for and the fallback.
+//
+// It is what a regional catalogue needs: a translator asked for pt-BR can
+// answer out of pt before it reaches the fallback.
+func (t *Translator) DetermineLocalesUsing(callback func(locales []string) []string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.determineLocalesUsing = callback
+}
+
+// GetSelector answers Translator::getSelector(): the thing that picks a segment
+// of a pluralised line.
+func (t *Translator) GetSelector() Selector {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.selector
+}
+
+// SetSelector answers Translator::setSelector(). A nil selector is ignored: a
+// translator with no selector cannot answer Choice at all.
+func (t *Translator) SetSelector(selector Selector) {
+	if selector == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.selector = selector
+}
+
+// GetLoader answers Translator::getLoader(): the loader this translator was
+// built with.
+//
+// It is not the loader the lookups go through -- that one is this loader
+// followed by the English lines that ship with the package. Returning the pair
+// would hand out a way to write into the bundled catalogue.
+func (t *Translator) GetLoader() Loader {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.loader
+}
+
+// Locale answers Translator::locale(): the locale used when a caller passes
+// none. It is [Translator.GetLocale] under the name that reads better in a
+// sentence, and PHP carries both.
+func (t *Translator) Locale() string { return t.GetLocale() }
+
+// GetLocale answers Translator::getLocale(): the locale used when a caller
+// passes none.
+func (t *Translator) GetLocale() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.locale
+}
+
+// SetLocale answers Translator::setLocale(): it sets the locale used when a
+// caller passes none.
+//
+// A locale holding "/" or "\" is refused, because a locale reaches the
+// filesystem as a directory name and one carrying a separator reads a catalogue
+// somewhere else. PHP throws InvalidArgumentException; this returns the error,
+// which is the alteration the package doc records.
+func (t *Translator) SetLocale(locale string) error {
+	if strings.ContainsAny(locale, `/\`) {
+		return fmt.Errorf("translation: invalid characters present in locale %q", locale)
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.locale = locale
+	return nil
+}
+
+// GetFallback answers Translator::getFallback(): the locale consulted when a
+// key is missing from the one asked for.
+func (t *Translator) GetFallback() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.fallback
+}
+
+// SetFallback answers Translator::setFallback().
+func (t *Translator) SetFallback(fallback string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.fallback = fallback
+}
+
+// SetLoaded answers Translator::setLoaded(): it replaces the loaded groups
+// wholesale, keyed by namespace, then group, then locale.
+//
+// Passing nil empties it, which is how a long lived process drops a catalogue
+// it has finished with.
+func (t *Translator) SetLoaded(loaded map[string]map[string]map[string]Lines) {
+	copied := make(map[string]map[string]map[string]Lines, len(loaded))
+	for namespace, groups := range loaded {
+		copied[namespace] = make(map[string]map[string]Lines, len(groups))
+		for group, locales := range groups {
+			copied[namespace][group] = make(map[string]Lines, len(locales))
+			for locale, lines := range locales {
+				copied[namespace][group][locale] = maps.Clone(lines)
+			}
+		}
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.loaded = copied
+}
+
+// Stringable answers Translator::stringable(): it registers how one type is
+// rendered when it is passed as a replacement.
+//
+// PHP names the type with a class name string, or reads it off the closure's
+// parameter. Go has neither, so the type comes as a zero value of it: pass
+// money.Amount{} to say how a money.Amount renders. The handler receives the
+// value that was passed to [Translator.Get] and must assert it back.
+//
+// A nil handler removes the one registered for the type.
+func (t *Translator) Stringable(class any, handler func(any) string) {
+	if class == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if handler == nil {
+		delete(t.stringableHandlers, reflect.TypeOf(class))
+		return
+	}
+	t.stringableHandlers[reflect.TypeOf(class)] = handler
+}
+
+func (t *Translator) localeOr(locale string) string {
+	if locale == "" {
+		return t.GetLocale()
+	}
+	return locale
 }
 
 // placeholder reads the name that follows a colon: letters, digits and
@@ -244,4 +725,13 @@ func placeholder(s string) string {
 		return s[:i]
 	}
 	return s
+}
+
+// ucfirst is Str::ucfirst: the first rune uppercased, and the rest left alone.
+func ucfirst(s string) string {
+	if s == "" {
+		return s
+	}
+	first, size := utf8.DecodeRuneInString(s)
+	return string(unicode.ToUpper(first)) + s[size:]
 }

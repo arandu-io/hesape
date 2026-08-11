@@ -1,5 +1,5 @@
-// Package cache is the cache: a Repository over a Store, the locks and the
-// rate limiter.
+// Package cache is the cache: a Repository over a Store, the stores, the locks,
+// the tags and the rate limiter.
 //
 // It mirrors Illuminate\Cache, and it is split the same way: Repository is the
 // thing an application calls, Store is the thing a backend implements. The
@@ -23,36 +23,65 @@
 //
 // # Every entry expires
 //
-// Put requires a ttl. Laravel's Cache::forever is refused: an entry with no
-// expiry is a second copy of the truth, and the day it diverges nobody knows it
-// exists.
+// Put requires a ttl. Laravel's Cache::forever is here and is written down as a
+// century rather than as an absence, because an entry with no expiry is a second
+// copy of the truth and the day it diverges nobody knows it exists. Reach for
+// Forever rarely.
+//
+// # The stores
+//
+// ArrayStore is in-process and is the default. FileStore is on disk, shared
+// between the processes of one machine. DatabaseStore is a table, and is the
+// only one whose locks survive the cache being emptied. NullStore keeps nothing.
+// MemoizedStore remembers, for one request, what another store already
+// answered. FailoverStore tries several in turn.
+//
+// The RESP store -- Dragonfly, Redis, Valkey, KeyDB, which are one product to
+// this collection (RULE 11) -- is in arandu-io/kv and arrives through
+// CacheManager.Extend, so that the driver is in the binaries that use it and no
+// others.
 //
 // # What is not here
 //
-// No Cache::store()/driver()/extend() and no tags. One cache, one way to reach
-// it (RULE 9); a second store is a second Repository built over a second Store,
-// wired in bootstrap, not selected by a string at the call site. No file or
-// database store: the in-process ArrayStore covers development and a single
-// instance, and anything beyond that is the kv adapter.
+// No Memcached, no APC and no DynamoDB: three backends this collection does not
+// carry. No SessionStore: a cache whose lifetime is a session is a session, and
+// hesape/session is where that lives. No LuaScripts, which RULE 11 refuses --
+// it is what keeps Dragonfly, Redis, Valkey and KeyDB one product to this
+// collection.
 //
-// The files it answers to, in the clone at laravel_illuminate/cache:
+// The files it answers to, in the clone at laravel_illuminate/cache -- which is
+// the source this package was written from, with
+// reference_laravel/framework/src/Illuminate/Cache as the second reading:
 //
-//	ArrayLock.php           -> ArrayStore, the Locking half
-//	ArrayStore.php          -> ArrayStore
-//	CacheLock.php           -> Lock
-//	HasCacheLock.php        -> Locking
-//	Lock.php                -> Lock
-//	RateLimiter.php         -> RateLimiter, Limit
-//	Repository.php          -> Repository, Get, GetMany, Pull, Remember
-//	RetrievesMultipleKeys.php -> Repository.PutMany, GetMany
-//	RedisStore.php          -> arandu-io/kv, as a Store
-//	RedisLock.php           -> arandu-io/kv, as a Locking
+//	ArrayLock.php             -> ArrayStore, the Locking half
+//	ArrayStore.php            -> ArrayStore
+//	CacheLock.php             -> Lock
+//	CacheManager.php          -> CacheManager, Config, StoreConfig
+//	Console/                  -> cache/console
+//	DatabaseLock.php          -> DatabaseStore, the Locking half
+//	DatabaseStore.php         -> DatabaseStore
+//	Events/                   -> cache/events
+//	FailoverStore.php         -> FailoverStore
+//	FileLock.php              -> FileStore, the Locking half
+//	FileStore.php             -> FileStore, Filesystem, LocalFilesystem
+//	HasCacheLock.php          -> Locking
+//	Lock.php                  -> Lock, Locks
+//	MemoizedStore.php         -> MemoizedStore
+//	NoLock.php                -> NoLock
+//	NullStore.php             -> NullStore
+//	RateLimiter.php           -> RateLimiter
+//	RateLimiting/Limit.php    -> Limit
+//	Repository.php            -> Repository, Get, Many, Pull, Remember, Flexible
+//	RetrievesMultipleKeys.php -> the Many and PutMany of every store here
+//	TagSet.php                -> TagSet
+//	TaggableStore.php         -> Taggable
+//	TaggedCache.php           -> TaggedCache
 //
-// The rest of the component does not arrive: ApcStore, DynamoDbStore,
-// FileStore, MemcachedStore, MemoizedStore, FailoverStore and SessionStore are
-// backends this collection does not ship; TagSet, TaggableStore, TaggedCache,
-// RedisTagSet and RedisTaggedCache are tags; CacheManager and
-// CacheServiceProvider are the container (ADR 0001); LuaScripts is refused by
-// RULE 11, which is what keeps Dragonfly, Redis, Valkey and KeyDB one product
-// to this collection.
+// The rest does not arrive, and each has a reason. ApcStore, ApcWrapper,
+// DynamoDbStore, DynamoDbLock, MemcachedStore, MemcachedLock,
+// MemcachedConnector and PhpRedisLock are backends this collection does not
+// carry. RedisStore, RedisLock, RedisTagSet and RedisTaggedCache are in
+// arandu-io/kv, with the driver they need. SessionStore belongs to
+// hesape/session. LuaScripts is RULE 11. CacheServiceProvider is the container
+// (ADR 0001), and so is CacheManager::setApplication.
 package cache

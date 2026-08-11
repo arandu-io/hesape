@@ -52,9 +52,9 @@ func TestCursorRoundTrip(t *testing.T) {
 	parameters := map[string]string{"created_at": "2026-08-10T16:35:00.123456Z", "id": "9f1c"}
 	want := pagination.NewCursor(parameters, true)
 
-	got, err := pagination.CursorFromEncoded(want.Encode())
+	got, err := pagination.FromEncoded(want.Encode())
 	if err != nil {
-		t.Fatalf("CursorFromEncoded = %v", err)
+		t.Fatalf("FromEncoded = %v", err)
 	}
 	for name, value := range parameters {
 		read, err := got.Parameter(name)
@@ -72,9 +72,9 @@ func TestCursorRoundTrip(t *testing.T) {
 
 func TestCursorRoundTripBackwards(t *testing.T) {
 	want := pagination.NewCursor(map[string]string{"id": "7"}, false)
-	got, err := pagination.CursorFromEncoded(want.Encode())
+	got, err := pagination.FromEncoded(want.Encode())
 	if err != nil {
-		t.Fatalf("CursorFromEncoded = %v", err)
+		t.Fatalf("FromEncoded = %v", err)
 	}
 	if got.PointsToNextItems() {
 		t.Error("PointsToNextItems = true, want false")
@@ -137,9 +137,9 @@ func TestCursorEncodeIsURLSafe(t *testing.T) {
 }
 
 func TestCursorEncodeEmptyParameters(t *testing.T) {
-	got, err := pagination.CursorFromEncoded(pagination.NewCursor(nil, true).Encode())
+	got, err := pagination.FromEncoded(pagination.NewCursor(nil, true).Encode())
 	if err != nil {
-		t.Fatalf("CursorFromEncoded = %v", err)
+		t.Fatalf("FromEncoded = %v", err)
 	}
 	if parameters := parametersOf(t, got); len(parameters) != 0 {
 		t.Errorf("parameters = %v, want empty", parameters)
@@ -149,17 +149,17 @@ func TestCursorEncodeEmptyParameters(t *testing.T) {
 	}
 }
 
-func TestCursorFromEncodedToleratesPadding(t *testing.T) {
+func TestFromEncodedToleratesPadding(t *testing.T) {
 	encoded := pagination.NewCursor(map[string]string{"id": "1"}, true).Encode()
-	if _, err := pagination.CursorFromEncoded(encoded + "=="); err != nil {
-		t.Fatalf("CursorFromEncoded with padding = %v", err)
+	if _, err := pagination.FromEncoded(encoded + "=="); err != nil {
+		t.Fatalf("FromEncoded with padding = %v", err)
 	}
 }
 
-func TestCursorFromEncodedRejectsRubbish(t *testing.T) {
+func TestFromEncodedRejectsRubbish(t *testing.T) {
 	for _, raw := range []string{"", "not base64 at all!!", "aGVsbG8"} {
-		if _, err := pagination.CursorFromEncoded(raw); !errors.Is(err, pagination.ErrCursor) {
-			t.Errorf("CursorFromEncoded(%q) error = %v, want ErrCursor", raw, err)
+		if _, err := pagination.FromEncoded(raw); !errors.Is(err, pagination.ErrCursor) {
+			t.Errorf("FromEncoded(%q) error = %v, want ErrCursor", raw, err)
 		}
 	}
 }
@@ -171,9 +171,9 @@ func TestCursorKeepsTheDigitsOfALargeKey(t *testing.T) {
 	const key = "9007199254740993" // 2^53 + 1: the first integer a float64 cannot hold
 	encoded := pagination.NewCursor(map[string]string{"id": key}, true).Encode()
 
-	got, err := pagination.CursorFromEncoded(encoded)
+	got, err := pagination.FromEncoded(encoded)
 	if err != nil {
-		t.Fatalf("CursorFromEncoded = %v", err)
+		t.Fatalf("FromEncoded = %v", err)
 	}
 	read, err := got.Parameter("id")
 	if err != nil {

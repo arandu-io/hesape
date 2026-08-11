@@ -37,7 +37,7 @@ type Resend struct {
 func (Resend) Name() string { return "resend" }
 
 // Send posts the message.
-func (t Resend) Send(ctx context.Context, m mail.Message) (mail.Sent, error) {
+func (t Resend) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error) {
 	body := map[string]any{
 		"from":    m.From.String(),
 		"to":      addressList(m.To),
@@ -70,14 +70,14 @@ func (t Resend) Send(ctx context.Context, m mail.Message) (mail.Sent, error) {
 		map[string]string{"Authorization": "Bearer " + t.Key},
 		body, resendError)
 	if err != nil {
-		return mail.Sent{}, err
+		return mail.SentMessage{}, err
 	}
 
 	var out struct {
 		ID string `json:"id"`
 	}
 	_ = json.Unmarshal(answer.body, &out)
-	return mail.Sent{ID: out.ID, Transport: t.Name()}, nil
+	return mail.SentMessage{ID: out.ID, Transport: t.Name()}, nil
 }
 
 // SendGrid sends through sendgrid.com.
@@ -102,7 +102,7 @@ type SendGrid struct {
 func (SendGrid) Name() string { return "sendgrid" }
 
 // Send posts the message.
-func (t SendGrid) Send(ctx context.Context, m mail.Message) (mail.Sent, error) {
+func (t SendGrid) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error) {
 	// One personalization holding every recipient. SendGrid's other reading of
 	// this field -- one personalization per recipient -- is a different feature
 	// (a separate message each, with its own substitutions), and using it here
@@ -148,12 +148,12 @@ func (t SendGrid) Send(ctx context.Context, m mail.Message) (mail.Sent, error) {
 		map[string]string{"Authorization": "Bearer " + t.Key},
 		body, sendgridError)
 	if err != nil {
-		return mail.Sent{}, err
+		return mail.SentMessage{}, err
 	}
 
 	// SendGrid answers 202 with an empty body and puts the identifier in a
 	// header, which is the one place a caller would never think to look.
-	return mail.Sent{ID: answer.header.Get("X-Message-Id"), Transport: t.Name()}, nil
+	return mail.SentMessage{ID: answer.header.Get("X-Message-Id"), Transport: t.Name()}, nil
 }
 
 // Postmark sends through postmarkapp.com.
@@ -190,7 +190,7 @@ type Postmark struct {
 func (Postmark) Name() string { return "postmark" }
 
 // Send posts the message.
-func (t Postmark) Send(ctx context.Context, m mail.Message) (mail.Sent, error) {
+func (t Postmark) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error) {
 	body := map[string]any{
 		"From":    m.From.String(),
 		"To":      strings.Join(addressList(m.To), ", "),
@@ -230,14 +230,14 @@ func (t Postmark) Send(ctx context.Context, m mail.Message) (mail.Sent, error) {
 		},
 		body, postmarkError)
 	if err != nil {
-		return mail.Sent{}, err
+		return mail.SentMessage{}, err
 	}
 
 	var out struct {
 		MessageID string `json:"MessageID"`
 	}
 	_ = json.Unmarshal(answer.body, &out)
-	return mail.Sent{ID: out.MessageID, Transport: t.Name()}, nil
+	return mail.SentMessage{ID: out.MessageID, Transport: t.Name()}, nil
 }
 
 // answer is what came back from a provider that accepted the message, in the
@@ -360,7 +360,7 @@ func addressList(list []mail.Address) []string {
 }
 
 func sendgridAddress(a mail.Address) map[string]string {
-	out := map[string]string{"email": a.Email}
+	out := map[string]string{"email": a.Address}
 	if a.Name != "" {
 		out["name"] = a.Name
 	}

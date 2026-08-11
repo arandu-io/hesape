@@ -182,6 +182,24 @@ func (s *MemoryStore) MarkAsRead(_ context.Context, g auth.Grant, id string) err
 	return fmt.Errorf("%w: notification %s", database.ErrNotFound, id)
 }
 
+// MarkAsUnread clears the stamp on one.
+func (s *MemoryStore) MarkAsUnread(_ context.Context, g auth.Grant, id string) error {
+	tenant, err := scope(g, ActionRead)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, r := range s.rows {
+		if r.ID != id || r.Tenant != tenant {
+			continue
+		}
+		s.rows[i].ReadAt = time.Time{}
+		return nil
+	}
+	return fmt.Errorf("%w: notification %s", database.ErrNotFound, id)
+}
+
 // MarkAllAsRead stamps every unread notification a recipient has.
 func (s *MemoryStore) MarkAllAsRead(_ context.Context, g auth.Grant, to Notifiable) error {
 	tenant, err := scope(g, ActionRead)

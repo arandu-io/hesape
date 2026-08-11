@@ -27,7 +27,7 @@ func mustBundled() Loader {
 	if err != nil {
 		panic("translation: the embedded catalogue has no lang directory: " + err.Error())
 	}
-	l, err := NewFS(root)
+	l, err := NewFileLoader(root, ".")
 	if err != nil {
 		panic("translation: the embedded catalogue does not parse: " + err.Error())
 	}

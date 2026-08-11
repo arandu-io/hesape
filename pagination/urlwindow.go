@@ -43,10 +43,14 @@ func NewURLWindow[T any](paginator *LengthAwarePaginator[T]) *URLWindow[T] {
 	return &URLWindow[T]{paginator: paginator}
 }
 
-// MakeURLWindow answers UrlWindow::make(), which is a static method: the type
-// is part of the identifier, and Go has no static methods to hang it on. It is
-// NewURLWindow followed by Get, in one call.
-func MakeURLWindow[T any](paginator *LengthAwarePaginator[T]) URLWindowRanges {
+// Make answers UrlWindow::make(). It is NewURLWindow followed by Get, in one
+// call.
+//
+// PHP writes UrlWindow::make($paginator) and Go has no static methods, so the
+// type is gone from the identifier and the package name stands in its place:
+// pagination.Make(p). The name is the PHP one because that is the one a reader
+// coming from Laravel searches for.
+func Make[T any](paginator *LengthAwarePaginator[T]) URLWindowRanges {
 	return NewURLWindow(paginator).Get()
 }
 

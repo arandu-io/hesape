@@ -50,16 +50,14 @@ func (e *HTTPError) Error() string {
 // Unwrap exposes the cause to errors.Is and errors.As.
 func (e *HTTPError) Unwrap() error { return e.Err }
 
-// Abort is the answer to Laravel's abort() helper, as a value.
+// Abort is Laravel's abort() helper, as a value.
 //
 //	return exception.Abort(http.StatusNotFound, "no invoice with that number")
 //
-// There is no abort_if and no throw_if: both are an if statement in a language
-// that has one in statement position, and both were refused by name in
-// docs/31. There is also no method on the request context, which is where the
-// audit found the previous attempt at this -- a helper nothing could reach is a
-// helper that does not exist. An error is reachable from every handler, from a
-// service three calls down, and from a job.
+// There is no method on the request context, which is where the audit found the
+// previous attempt at this -- a helper nothing could reach is a helper that does
+// not exist. An error is reachable from every handler, from a service three
+// calls down, and from a job.
 //
 // An empty message means the standard sentence for the status, so the common
 // case is exception.Abort(404, "").
@@ -69,6 +67,33 @@ func (e *HTTPError) Unwrap() error { return e.Err }
 // log without putting it on the page.
 func Abort(status int, message string) error {
 	return &HTTPError{Status: status, Message: message}
+}
+
+// AbortIf is Laravel's abort_if(): the failure when the condition holds, and
+// nil when it does not.
+//
+//	if err := exception.AbortIf(invoice.Locked, http.StatusConflict, "this invoice is closed"); err != nil {
+//		return err
+//	}
+//
+// The PHP throws, so its body ends at the call. Nothing here throws, so the
+// caller returns the error -- which is why this reads as one line and not as
+// the same if statement written twice.
+func AbortIf(condition bool, status int, message string) error {
+	if !condition {
+		return nil
+	}
+	return Abort(status, message)
+}
+
+// AbortUnless is Laravel's abort_unless(): the failure when the condition does
+// not hold.
+//
+//	if err := exception.AbortUnless(invoice != nil, http.StatusNotFound, ""); err != nil {
+//		return err
+//	}
+func AbortUnless(condition bool, status int, message string) error {
+	return AbortIf(!condition, status, message)
 }
 
 // StatusOf reports the HTTP status an error asks for, and whether it asked.

@@ -62,12 +62,12 @@ func TestPushUniqueQueuesOnceWhileTheClaimStands(t *testing.T) {
 	// And what was queued is the arguments, not an envelope: a unique job is
 	// not part of anything.
 	var got row
-	m, err := bus.Batching(queue.all()[0].Payload, &got)
+	m, err := bus.Batched(queue.all()[0].Payload, &got)
 	if err != nil {
-		t.Fatalf("Batching: %v", err)
+		t.Fatalf("Batched: %v", err)
 	}
-	if m.Batch != "" || got.N != 8 {
-		t.Errorf("queued %+v with membership %q, want n=8 and none", got, m.Batch)
+	if m.BatchID != "" || got.N != 8 {
+		t.Errorf("queued %+v with membership %q, want n=8 and none", got, m.BatchID)
 	}
 	if queue.all()[0].Queue != "reports" {
 		t.Errorf("landed on queue %q, want reports", queue.all()[0].Queue)

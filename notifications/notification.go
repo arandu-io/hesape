@@ -140,11 +140,26 @@ func (a *Anonymous) Route(c ChannelName, to string) *Anonymous {
 // NotifiableID is empty: there is no row.
 func (a *Anonymous) NotifiableID() string { return "" }
 
+// GetKey is empty, for the same reason.
+//
+// Illuminate declares it on AnonymousNotifiable with an empty body, so that the
+// broadcast channel can derive a channel name from any notifiable without
+// asking what kind it is. It answers the same here, and it is the reason the
+// broadcast channel refuses an anonymous recipient with no explicit route.
+func (a *Anonymous) GetKey() string { return "" }
+
 // NotifiableType is "anonymous".
 func (a *Anonymous) NotifiableType() string { return "anonymous" }
 
 // RouteFor answers with whatever Route recorded.
 func (a *Anonymous) RouteFor(c ChannelName) string { return a.routes[c] }
+
+// RouteNotificationFor is RouteFor.
+//
+// It is Illuminate's spelling, declared on AnonymousNotifiable and on the
+// RoutesNotifications trait, and it is here so that a recipient written against
+// either name works.
+func (a *Anonymous) RouteNotificationFor(c ChannelName) string { return a.RouteFor(c) }
 
 // Channels is every channel this recipient was routed at, sorted, which is what
 // a Notification's Via can return when it means "wherever this one can be

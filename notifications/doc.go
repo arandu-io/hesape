@@ -2,24 +2,28 @@
 // channels that person can be reached on.
 //
 // It mirrors Illuminate\Notifications. The files it answers to, in the clone at
-// laravel_illuminate/notifications:
+// laravel_illuminate/notifications (Laravel 13, illuminate/notifications
+// ^13.0):
 //
 //	Action.php                          -> messages.Action
 //	AnonymousNotifiable.php             -> Anonymous, Route
 //	ChannelManager.php                  -> Notifier (there is no manager to
 //	                                       resolve a driver from: the channels
 //	                                       are the argument)
+//	Channels/                           -> notifications/channels
 //	DatabaseNotification.php            -> Record
-//	DatabaseNotificationCollection.php  -> []Record
-//	HasDatabaseNotifications.php        -> Store
-//	Notifiable.php                      -> Notifiable
-//	Notification.php                    -> Notification
-//	NotificationSender.php              -> Notifier.Send, Notifier.SendMany
+//	DatabaseNotificationCollection.php  -> Records
+//	Events/                             -> notifications/events
+//	HasDatabaseNotifications.php        -> HasDatabaseNotifications, Store
+//	Messages/                           -> notifications/messages
+//	Notifiable.php                      -> Notifiable, RoutesNotifications and
+//	                                       HasDatabaseNotifications, which is
+//	                                       the two traits it is made of
+//	Notification.php                    -> Notification, NotificationBase
+//	NotificationSender.php              -> Notifier.Send, Notifier.SendNow
 //	NotificationServiceProvider.php     -> nothing (ADR 0001, ADR 0002)
-//	RoutesNotifications.php             -> Notifiable.RouteFor
-//	SendQueuedNotifications.php         -> nothing here; sending on the queue is
-//	                                       a job that calls Send, and it is
-//	                                       visible at the call site
+//	RoutesNotifications.php             -> RoutesNotifications
+//	SendQueuedNotifications.php         -> SendQueuedNotifications
 //
 // # The shape
 //
@@ -43,21 +47,32 @@
 // other row -- so it is reachable only through a Policy, on the way in and on
 // the way out (RULE 17).
 //
+// A model reaches the same thing under Illuminate's spelling by embedding
+// RoutesNotifications and HasDatabaseNotifications, which is what
+// `use Notifiable` does in PHP.
+//
+// # Notification is an interface, and Notification is also a base class
+//
+// In Illuminate a notification extends the Notification class, which gives it
+// an id and a locale. Here Notification is the interface a notification
+// satisfies -- two methods, checked by the compiler -- and NotificationBase is
+// the state it embeds. A notification that needs neither embeds nothing.
+//
 // # What is deliberately absent
 //
 // No ShouldQueue. Laravel decides between "send now" and "send later" by an
 // interface the notification class implements somewhere else, which makes a
 // call that sometimes blocks for two seconds and sometimes does not, with
-// nothing at the call site to say which. Sending on the queue here is a job
-// that calls Send.
+// nothing at the call site to say which. Sending on the queue here is
+// SendQueuedNotifications, pushed like any other job.
 //
-// No markdown notifications and no notification theme. Both are the second way
-// to draw a message body, which RULE 9 refuses and RULE 13 would drag Node
-// into. A mail notification carries structured lines and an action; the HTML
-// is drawn by the view layer from the same lines, and messages.Mail.PlainText
-// renders the text part with no template at all.
+// No notification theme, and no second way to draw a message body: RULE 9
+// refuses the second way and RULE 13 would drag Node in for the theme. A mail
+// notification carries structured lines and an action; messages.Mail.Render
+// draws the HTML from them and messages.Mail.PlainText the text, and the two
+// cannot disagree. A message that names a template hands it to the view layer,
+// which is a name and not an asset pipeline.
 //
-// No ChannelManager, no `Notification::` facade, no driver strings resolved
-// from configuration at send time. The channels an application has are the
-// slice passed to New.
+// No `Notification::` facade and no driver strings resolved from configuration
+// at send time. The channels an application has are the slice passed to New.
 package notifications

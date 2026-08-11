@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/cache/events"
 )
 
 // TagSet is the set of tags a TaggedCache writes under.
@@ -221,8 +222,24 @@ type TaggedCache struct {
 // O(entries), and the price is that flushed entries occupy the store until they
 // expire. Forever entries under a flushed tag occupy it for a century, which is
 // the strongest argument this package has against Forever.
+// It fires CacheFlushing and then CacheFlushed, as TaggedCache::flush() does.
+// Both carry the tags. Laravel's leave them out -- it builds the events with the
+// store name alone -- and a listener told that a cache was flushed without being
+// told which tags were flushed has been told something false, because the rest
+// of the store is untouched.
 func (t *TaggedCache) Flush(ctx context.Context, g auth.Grant) error {
-	return t.tags.Reset(ctx, g)
+	if t.events != nil {
+		t.event(events.NewCacheFlushing(t.GetName(), t.tagNames()))
+	}
+	err := t.tags.Reset(ctx, g)
+	if t.events != nil {
+		if err != nil {
+			t.event(events.NewCacheFlushFailed(t.GetName(), t.tagNames()))
+		} else {
+			t.event(events.NewCacheFlushed(t.GetName(), t.tagNames()))
+		}
+	}
+	return err
 }
 
 // Clear is Flush, as it is on Repository. It answers the clear() TaggedCache

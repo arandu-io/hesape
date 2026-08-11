@@ -44,6 +44,15 @@ func Recover(h *Handler) pipeline.Middleware[http.Handler] {
 				if v == http.ErrAbortHandler {
 					panic(v)
 				}
+				// Register was told the environment is "testing", where a
+				// process is not meant to be protected from itself: the panic
+				// travels up to the test that provoked it instead of being
+				// drawn as a page nobody is looking at. It is the same
+				// exception the PHP makes for "testing" when it decides not to
+				// install the shutdown handler.
+				if h.runningInTests() {
+					panic(v)
+				}
 
 				// Captured here and nowhere else: this is the only place where
 				// the line that panicked is still on the stack. skip is 4 --

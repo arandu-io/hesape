@@ -14,9 +14,9 @@ import (
 func advance(t *testing.T, queue *recorder, j pushed, cause error) row {
 	t.Helper()
 	var r row
-	m, err := bus.Batching(j.Payload, &r)
+	m, err := bus.Batched(j.Payload, &r)
 	if err != nil {
-		t.Fatalf("Batching: %v", err)
+		t.Fatalf("Batched: %v", err)
 	}
 	if err := bus.Handled(context.Background(), grant(), nil, queue, m, cause); err != nil {
 		t.Fatalf("Handled: %v", err)
@@ -98,11 +98,11 @@ func TestChainStopsAtTheFirstFailure(t *testing.T) {
 	}
 
 	var r row
-	m, err := bus.Batching(queue.all()[1].Payload, &r)
+	m, err := bus.Batched(queue.all()[1].Payload, &r)
 	if err != nil {
-		t.Fatalf("Batching: %v", err)
+		t.Fatalf("Batched: %v", err)
 	}
-	if m.Chained() {
+	if len(m.Chained) != 0 {
 		t.Error("the Catch job carries the rest of the chain")
 	}
 	if r.N != 9 {
@@ -137,9 +137,9 @@ func TestHandledSaysWhatIsMissing(t *testing.T) {
 	t.Parallel()
 
 	_, _, queue := dispatch(t, bus.NewBatch("import").Add("invoice.import", row{N: 1}))
-	m, err := bus.Batching(queue.all()[0].Payload, nil)
+	m, err := bus.Batched(queue.all()[0].Payload, nil)
 	if err != nil {
-		t.Fatalf("Batching: %v", err)
+		t.Fatalf("Batched: %v", err)
 	}
 
 	if err := bus.Handled(context.Background(), grant(), nil, queue, m, nil); err == nil {

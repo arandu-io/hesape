@@ -59,8 +59,8 @@ type RetrievingManyKeys struct {
 
 // NewRetrievingManyKeys returns the event.
 //
-// Key is the first of keys, and empty when there are none, which is what the
-// PHP's "$keys[0] ?? ''" does.
+// Key is the first of keys, and the empty string when there are none, which is
+// what the PHP's null-coalesced $keys[0] does.
 func NewRetrievingManyKeys(storeName string, keys []string, tags []string) *RetrievingManyKeys {
 	first := ""
 	if len(keys) > 0 {

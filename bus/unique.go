@@ -107,4 +107,61 @@ func ReleaseUnique(ctx context.Context, g auth.Grant, c *cache.Repository, key s
 
 // uniqueKey namespaces the claim, so it cannot collide with an application's
 // own cache entry of the same name.
-func uniqueKey(key string) string { return "bus:unique:" + key }
+func uniqueKey(key string) string { return UniqueLock{}.GetKey(UniqueJob{Key: key}) }
+
+// UniqueLock is the claim a unique job holds while it is in flight.
+//
+// It is Illuminate's UniqueLock: the same three methods over the same cache.
+// PushUnique is Acquire and a push in one call, and is what an application
+// uses; this is the pair underneath, for the handler that has to take or give
+// back a claim on its own -- a job released early because the work turned out
+// to be a no-op, a claim taken by a scheduler before it decides what to queue.
+type UniqueLock struct {
+	cache *cache.Repository
+}
+
+// NewUniqueLock returns the lock over a cache.
+func NewUniqueLock(c *cache.Repository) UniqueLock { return UniqueLock{cache: c} }
+
+// Acquire takes the claim, and reports whether it got it.
+//
+// False is not an error: "somebody already queued this" is the answer the
+// caller asked for.
+//
+// It is an atomic add in the cache rather than a cache.Lock, and that is not a
+// second kind of lock: a cache.Lock is held by a handle in one process's
+// memory, and the process that releases this claim is not the one that took it.
+// What crosses that gap is a key that is either there or not.
+func (u UniqueLock) Acquire(ctx context.Context, g auth.Grant, j UniqueJob) (bool, error) {
+	if j.Key == "" {
+		return false, ErrNoKey
+	}
+	if j.TTL <= 0 {
+		return false, fmt.Errorf("%w: the unique job %q has none, and a worker that dies holding the claim would silence it forever", cache.ErrNoTTL, j.Key)
+	}
+	if u.cache == nil {
+		return false, fmt.Errorf("bus: acquiring the claim on %q needs a cache", j.Key)
+	}
+	return u.cache.Add(ctx, g, u.GetKey(j), j.Name, j.TTL)
+}
+
+// Release gives the claim back, so the job can be queued again.
+//
+// Releasing a claim that has already expired is not an error: the caller wanted
+// it gone and it is.
+func (u UniqueLock) Release(ctx context.Context, g auth.Grant, j UniqueJob) error {
+	if j.Key == "" {
+		return ErrNoKey
+	}
+	if u.cache == nil {
+		return errors.New("bus: releasing a claim needs a cache")
+	}
+	return u.cache.Forget(ctx, g, u.GetKey(j))
+}
+
+// GetKey is the cache key a job's claim is held under.
+//
+// It is namespaced so that a claim cannot collide with an application's own
+// cache entry of the same name. It is already per tenant without saying so:
+// the cache prefixes every key with the tenant on the Grant (RULE 14).
+func (UniqueLock) GetKey(j UniqueJob) string { return "bus:unique:" + j.Key }

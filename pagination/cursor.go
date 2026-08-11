@@ -17,7 +17,7 @@ import (
 // one wrote, and the other way round.
 const pointsToNextItemsKey = "_pointsToNextItems"
 
-// ErrCursor is what CursorFromEncoded returns for a cursor it cannot read.
+// ErrCursor is what FromEncoded returns for a cursor it cannot read.
 // Callers that page a public list should treat it as "start from the
 // beginning", the way ResolveCurrentCursor does: a mangled cursor is a
 // truncated link in an e-mail client, not an attack worth a 400.
@@ -149,9 +149,13 @@ func (c Cursor) Encode() string {
 	return base64.RawURLEncoding.EncodeToString(encoded)
 }
 
-// CursorFromEncoded answers Cursor::fromEncoded(), which is a static method:
-// the type is part of the identifier, and Go has no static methods to hang it
-// on. Naming it FromEncoded alone would name no type at the package level.
+// FromEncoded answers Cursor::fromEncoded(). It reads a cursor back out of the
+// token Encode wrote.
+//
+// PHP writes Cursor::fromEncoded($token) and Go has no static methods, so the
+// type is gone from the identifier: pagination.FromEncoded(token). The name is
+// the PHP one, because that is the one a reader coming from Laravel searches
+// for.
 //
 // Padding is tolerated, so a cursor that travelled through something that pads
 // base64 still parses. Anything else -- empty, not base64, not a JSON object --
@@ -160,7 +164,7 @@ func (c Cursor) Encode() string {
 // Numbers keep the digits they were written with rather than going through a
 // float, so a cursor over a 64-bit key survives the round trip. A missing
 // _pointsToNextItems reads as backward, which is what PHP's null does.
-func CursorFromEncoded(encodedString string) (Cursor, error) {
+func FromEncoded(encodedString string) (Cursor, error) {
 	if encodedString == "" {
 		return Cursor{}, fmt.Errorf("%w: empty", ErrCursor)
 	}
@@ -231,7 +235,7 @@ func ResolveCurrentCursor(u *url.URL, cursorName string) *Cursor {
 	if raw == "" {
 		return nil
 	}
-	cursor, err := CursorFromEncoded(raw)
+	cursor, err := FromEncoded(raw)
 	if err != nil {
 		return nil
 	}

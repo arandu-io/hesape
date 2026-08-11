@@ -7,6 +7,7 @@ import (
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/notifications"
+	"github.com/arandu-io/hesape/notifications/events"
 	"github.com/arandu-io/hesape/notifications/messages"
 )
 
@@ -43,33 +44,61 @@ var _ notifications.Channel = (*Broadcast)(nil)
 // Name is "broadcast".
 func (*Broadcast) Name() notifications.ChannelName { return notifications.ChannelBroadcast }
 
-// Send pushes the payload to the channel the recipient is subscribed on.
+// Send pushes the payload to the channels the recipient is subscribed on.
 //
-// RouteFor answers with that channel name -- "user.42", "team.7" -- and an
-// empty answer is notifications.ErrNotAddressed: this recipient has no live
+// RouteFor answers with a channel name -- "user.42", "team.7" -- and an empty
+// answer is notifications.ErrNotAddressed: this recipient has no live
 // connection to push to, which is the normal state of most recipients most of
-// the time.
+// the time. A notification that names its own channels through Broadcastable
+// overrides the route, which is Illuminate's BroadcastNotificationCreated
+// preferring the notification's broadcastOn().
 func (c *Broadcast) Send(ctx context.Context, _ auth.Grant, to notifications.Notifiable, n notifications.Notification) (string, error) {
-	channel := to.RouteFor(notifications.ChannelBroadcast)
-	if channel == "" {
-		return "", notifications.ErrNotAddressed
-	}
 	buildable, ok := n.(BroadcastNotification)
 	if !ok {
 		return "", fmt.Errorf("notifications: %s named the broadcast channel and %T has no ToBroadcast", n.Key(), n)
+	}
+
+	message := buildable.ToBroadcast(to)
+	data, err := message.JSON()
+	if err != nil {
+		return "", err
+	}
+
+	created := events.BroadcastNotificationCreated{
+		NotifiableType: to.NotifiableType(),
+		NotifiableID:   to.NotifiableID(),
+		Key:            string(n.Key()),
+		Data:           data,
+		Event:          message.Event,
+	}
+	if id, ok := n.(notifications.Identified); ok {
+		created.ID = id.NotificationID()
+	}
+	if b, ok := n.(notifications.Broadcastable); ok {
+		created.Channels = b.BroadcastOn()
+	}
+	if len(created.Channels) == 0 {
+		if route := to.RouteFor(notifications.ChannelBroadcast); route != "" {
+			created.Channels = []string{route}
+		}
+	}
+
+	channels := created.BroadcastOn()
+	if len(channels) == 0 {
+		return "", notifications.ErrNotAddressed
 	}
 	if c.hub == nil {
 		return "", fmt.Errorf("notifications: the broadcast channel has no hub, and %s was meant to be pushed", n.Key())
 	}
 
-	message := buildable.ToBroadcast(to)
-	payload, err := message.JSON()
+	payload, err := created.BroadcastWith()
 	if err != nil {
 		return "", err
 	}
-	event := message.Event
-	if event == "" {
-		event = string(n.Key())
+	for _, channel := range channels {
+		if err := c.hub.Push(ctx, channel, created.BroadcastAs(), payload); err != nil {
+			return "", err
+		}
 	}
-	return "", c.hub.Push(ctx, channel, event, payload)
+	return "", nil
 }

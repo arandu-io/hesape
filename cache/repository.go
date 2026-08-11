@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/cache/events"
 )
 
 // foreverTTL is the deadline Forever, RememberForever and Sear write.
@@ -47,6 +49,11 @@ type Repository struct {
 	store     Store
 	namespace string
 
+	// name answers config['store']: the name the manager knows this store by.
+	// It is empty on a repository built with New, and it is what GetName --
+	// and therefore every event -- reports.
+	name string
+
 	// defaultTTL answers $default. Laravel reads it in one place -- the
 	// ArrayAccess write, $cache['k'] = $v -- which Go has no syntax for, and
 	// hands it to every TaggedCache tags() builds, which is what it is still
@@ -57,6 +64,11 @@ type Repository struct {
 	// repository builds is prefixed by the tag set's generation, so resetting
 	// the generation orphans every entry at once. See TaggedCache.
 	tags *TagSet
+
+	// events answers $events. It is nil until SetEventDispatcher, and a nil one
+	// fires nothing -- which is what Laravel's "$this->events?->dispatch()"
+	// does, and what keeps a cache built without a bus from needing one.
+	events Dispatcher
 }
 
 // New returns a repository over a store, under the default namespace.
@@ -86,22 +98,27 @@ func (r *Repository) Namespace(name string) *Repository {
 
 // Has reports whether a key is present and unexpired.
 //
-// It answers Repository::has(). Whoever is about to read the value should call
-// Get instead: asking and then reading is two round trips and a race, and the
-// answer to "is it there" is already in Get's error.
+// It answers Repository::has(), which is "! is_null($this->get($key))" -- so it
+// is a read, and it fires the same events a read fires. A hit rate computed from
+// CacheHit and CacheMissed counts these, in Laravel and here, which is one more
+// reason not to ask before reading.
+//
+// Whoever is about to read the value should call Get instead: asking and then
+// reading is two round trips and a race, and the answer to "is it there" is
+// already in Get's error.
+//
+// A key cached as null is present. Laravel's has() says it is not, because null
+// is how its store reports an absence; here ErrNotFound reports it, and "not
+// cached" and "cached as nothing" stay different -- which is the whole reason
+// ErrNotFound exists.
 func (r *Repository) Has(ctx context.Context, g auth.Grant, key string) (bool, error) {
-	full, err := r.key(ctx, g, key)
-	if err != nil {
+	if _, err := Get[any](ctx, r, g, key); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return false, nil
+		}
 		return false, err
 	}
-	switch _, err := r.store.Get(ctx, full); {
-	case err == nil:
-		return true, nil
-	case errors.Is(err, ErrNotFound):
-		return false, nil
-	default:
-		return false, err
-	}
+	return true, nil
 }
 
 // Missing reports whether a key is absent. It answers Repository::missing(),
@@ -122,6 +139,20 @@ func (r *Repository) Missing(ctx context.Context, g auth.Grant, key string) (boo
 // copy of the truth that nobody knows exists. Call Forever when that is what
 // you mean, so it is written down at the call site.
 func (r *Repository) Put(ctx context.Context, g auth.Grant, key string, value any, ttl time.Duration) error {
+	if ttl <= 0 {
+		return ErrNoTTL
+	}
+	r.eventWriting(key, value, ttl)
+	err := r.put(ctx, g, key, value, ttl)
+	r.eventWritten(key, value, ttl, err)
+	return err
+}
+
+// put is the write itself, without the events.
+//
+// It exists so PutMany can fire WritingManyKeys once for the batch instead of
+// WritingKey once per key, which is what Repository::putMany does.
+func (r *Repository) put(ctx context.Context, g auth.Grant, key string, value any, ttl time.Duration) error {
 	full, err := r.key(ctx, g, key)
 	if err != nil {
 		return err
@@ -151,12 +182,52 @@ func (r *Repository) Set(ctx context.Context, g auth.Grant, key string, value an
 // and it is why the method exists here rather than being written slightly
 // differently in each module.
 func (r *Repository) PutMany(ctx context.Context, g auth.Grant, values map[string]any, ttl time.Duration) error {
+	if ttl <= 0 {
+		return ErrNoTTL
+	}
+
+	keys := make([]string, 0, len(values))
+	written := make([]any, 0, len(values))
 	for key, value := range values {
-		if err := r.Put(ctx, g, key, value, ttl); err != nil {
+		keys = append(keys, key)
+		written = append(written, value)
+	}
+	sort.Sort(byKey{keys: keys, values: written})
+
+	if r.events != nil {
+		r.event(events.NewWritingManyKeys(r.GetName(), keys, written, seconds(ttl), r.tagNames()))
+	}
+
+	// One WritingManyKeys for the batch, then one KeyWritten per key, which is
+	// the sequence Repository::putMany fires. Put is not called: it would fire a
+	// WritingKey per key on top, and a listener counting writes would count each
+	// of them twice.
+	for i, key := range keys {
+		err := r.put(ctx, g, key, written[i], ttl)
+		r.eventWritten(key, written[i], ttl, err)
+		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// byKey sorts the keys of a PutMany and keeps the values alongside them.
+//
+// PHP's array preserves insertion order, so putMany writes in the order the
+// caller wrote it; a Go map has no order at all, and a batch that landed in a
+// different order on every call would make the events -- and any test over them
+// -- non-deterministic. Sorted is the one order both ends can agree on.
+type byKey struct {
+	keys   []string
+	values []any
+}
+
+func (b byKey) Len() int           { return len(b.keys) }
+func (b byKey) Less(i, j int) bool { return b.keys[i] < b.keys[j] }
+func (b byKey) Swap(i, j int) {
+	b.keys[i], b.keys[j] = b.keys[j], b.keys[i]
+	b.values[i], b.values[j] = b.values[j], b.values[i]
 }
 
 // SetMultiple is PutMany. It answers Repository::setMultiple(), the PSR-16
@@ -235,7 +306,10 @@ func (r *Repository) Forget(ctx context.Context, g auth.Grant, key string) error
 	if err != nil {
 		return err
 	}
-	return r.store.Forget(ctx, full)
+	r.eventForgetting(key)
+	err = r.store.Forget(ctx, full)
+	r.eventForgotten(key, err)
+	return err
 }
 
 // Delete is Forget. It answers Repository::delete(), the PSR-16 spelling, which
@@ -272,7 +346,19 @@ func (r *Repository) Flush(ctx context.Context, g auth.Grant) error {
 	if err != nil {
 		return err
 	}
-	return r.store.Flush(ctx, prefix)
+
+	if r.events != nil {
+		r.event(events.NewCacheFlushing(r.GetName(), r.tagNames()))
+	}
+	err = r.store.Flush(ctx, prefix)
+	if r.events != nil {
+		if err != nil {
+			r.event(events.NewCacheFlushFailed(r.GetName(), r.tagNames()))
+		} else {
+			r.event(events.NewCacheFlushed(r.GetName(), r.tagNames()))
+		}
+	}
+	return err
 }
 
 // Clear is Flush. It answers Repository::clear(), the PSR-16 spelling, which
@@ -295,7 +381,19 @@ func (r *Repository) FlushLocks(ctx context.Context) error {
 	if !ok {
 		return fmt.Errorf("%w: flushing locks", ErrUnsupported)
 	}
-	return store.FlushLocks(ctx)
+
+	if r.events != nil {
+		r.event(events.NewCacheLocksFlushing(r.GetName()))
+	}
+	err := store.FlushLocks(ctx)
+	if r.events != nil {
+		if err != nil {
+			r.event(events.NewCacheLocksFlushFailed(r.GetName()))
+		} else {
+			r.event(events.NewCacheLocksFlushed(r.GetName()))
+		}
+	}
+	return err
 }
 
 // Touch gives a live entry a new expiry and reports whether there was one.
@@ -384,10 +482,30 @@ func (r *Repository) Tags(names ...string) (*TaggedCache, error) {
 // GetName is the name this cache is known by.
 //
 // It answers Repository::getName(), which reads config['store'] -- the name of
-// the store the manager built this repository for. There is no manager here
-// (ADR 0001), so the name is the namespace, which is the thing that actually
-// distinguishes one repository over a store from another.
-func (r *Repository) GetName() string { return r.namespace }
+// the store the manager built this repository for. It is what goes into every
+// event, so a listener can tell which cache a hit came from.
+//
+// A repository built with New rather than by a CacheManager has no store name,
+// and answers with its namespace instead: that is the thing that distinguishes
+// one repository over a store from another, and an empty name in an event is
+// worth less than an imperfect one.
+func (r *Repository) GetName() string {
+	if r.name != "" {
+		return r.name
+	}
+	return r.namespace
+}
+
+// SetName returns a repository known by another name.
+//
+// It answers the config['store'] a CacheManager puts into the repositories it
+// builds. Laravel writes it through the constructor's $config; here it is a
+// method, because a repository is derived from another one rather than rebuilt.
+func (r *Repository) SetName(name string) *Repository {
+	out := *r
+	out.name = name
+	return &out
+}
 
 // SupportsTags reports whether this store can carry tags.
 //
@@ -458,11 +576,36 @@ func Get[T any](ctx context.Context, r *Repository, g auth.Grant, key string) (T
 	if err != nil {
 		return zero, err
 	}
+
+	r.eventRetrieving(key)
+	return get[T](ctx, r, full, key)
+}
+
+// get is the read itself, with the hit and miss events but without
+// RetrievingKey.
+//
+// It exists so Many fires RetrievingManyKeys once for the batch instead of a
+// RetrievingKey per key, which is what Repository::many does.
+func get[T any](ctx context.Context, r *Repository, full, key string) (T, error) {
+	var zero T
+
 	raw, err := r.store.Get(ctx, full)
 	if err != nil {
+		// A miss and a store that did not answer are the same event in Laravel,
+		// because its store returns null for both. They are not the same here --
+		// the error says which -- but the event fires for both, so a hit rate
+		// computed from CacheHit and CacheMissed still adds up.
+		r.eventMissed(key)
 		return zero, err
 	}
-	return decode[T](raw)
+
+	value, err := decode[T](raw)
+	if err != nil {
+		r.eventMissed(key)
+		return zero, err
+	}
+	r.eventHit(key, value)
+	return value, nil
 }
 
 // Many reads several values in one call.
@@ -475,9 +618,17 @@ func Get[T any](ctx context.Context, r *Repository, g auth.Grant, key string) (T
 // That means Many cannot tell a miss from a cached zero. Get can, and is what
 // to reach for when the difference matters.
 func Many[T any](ctx context.Context, r *Repository, g auth.Grant, keys ...string) (map[string]T, error) {
+	if r.events != nil {
+		r.event(events.NewRetrievingManyKeys(r.GetName(), keys, r.tagNames()))
+	}
+
 	out := make(map[string]T, len(keys))
 	for _, key := range keys {
-		v, err := Get[T](ctx, r, g, key)
+		full, err := r.key(ctx, g, key)
+		if err != nil {
+			return nil, err
+		}
+		v, err := get[T](ctx, r, full, key)
 		switch {
 		case err == nil:
 			out[key] = v
@@ -806,6 +957,21 @@ func flexibleCreatedKey(key string) string { return "flexible:created:" + key }
 
 // flexibleLockKey names the lock one refresher holds.
 func flexibleLockKey(key string) string { return "flexible:" + key }
+
+// ItemKey formats the key an item is really stored under.
+//
+// It answers Repository::itemKey(), which in Laravel is the identity and exists
+// so TaggedCache can override it. Here it is not the identity: the tenant, the
+// namespace and -- on a tagged repository -- the tag generation are all in front
+// of the caller's key, and this is where a caller finds out what that came to.
+//
+// Something eventually has to look in the store and find out where an entry
+// went, and this is the one honest way to ask. It takes a context because a
+// tagged repository reads, and sometimes mints, the tag generations before it
+// knows the answer.
+func (r *Repository) ItemKey(ctx context.Context, g auth.Grant, key string) (string, error) {
+	return r.key(ctx, g, key)
+}
 
 // key builds the full key: cache:<tenant>:<namespace>:<key>
 //

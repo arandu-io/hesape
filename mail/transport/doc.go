@@ -16,6 +16,28 @@
 // which is why writing a new one is small, and why they are a package of their
 // own rather than a growing file next to the Mailer.
 //
+// # The names
+//
+// The type names drop the Transport suffix, because the package supplies it:
+// [SMTP], [Log], [Array], [Resend], [SendGrid], [Postmark] and [Failover] read
+// as transport.Log and transport.Array at every call site. Two of the seven
+// have an Illuminate class behind them -- ArrayTransport and LogTransport --
+// and their *methods* carry Illuminate's names exactly: [Array.Messages] and
+// [Array.Flush] were called Sent and Reset here until 11/08/2026, which are
+// names Illuminate does not have, and [Log.Logger] was missing. ADR 0044 is
+// about the name somebody types, and it is the method they type.
+//
+// # Registration, not a switch
+//
+// Illuminate's MailManager::createSymfonyTransport is a switch that constructs
+// these classes directly. Go cannot do that here: this package imports mail, so
+// mail cannot import this one. [Register] inverts it, and the inversion is worth
+// keeping -- a transport somebody else writes arrives through the same door as
+// these seven, so there is one way to add one (RULE 9).
+//
+//	manager := mail.NewMailManager(config, views, events)
+//	transport.Register(manager)
+//
 // # Why these seven
 //
 // [SMTP] is the one every provider speaks, and it needs no dependency: net/smtp

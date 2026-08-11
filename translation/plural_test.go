@@ -8,7 +8,7 @@ import (
 
 // The families, one count per form. A wrong index here is a sentence that
 // disagrees with its own number, in a language the author does not read.
-func TestDefaultPluralPicksTheFormOfTheLanguage(t *testing.T) {
+func TestGetPluralIndexPicksTheFormOfTheLanguage(t *testing.T) {
 	for _, c := range []struct {
 		locale string
 		counts map[int]int
@@ -30,34 +30,35 @@ func TestDefaultPluralPicksTheFormOfTheLanguage(t *testing.T) {
 		{"ar", map[int]int{0: 0, 1: 1, 2: 2, 3: 3, 10: 3, 11: 4, 99: 4, 100: 5}},
 	} {
 		for count, want := range c.counts {
-			if got := translation.DefaultPlural(c.locale, count); got != want {
-				t.Errorf("DefaultPlural(%q, %d) = %d, want %d", c.locale, count, got, want)
+			if got := (translation.MessageSelector{}).GetPluralIndex(c.locale, count); got != want {
+				t.Errorf("GetPluralIndex(%q, %d) = %d, want %d", c.locale, count, got, want)
 			}
 		}
 	}
 }
 
 // The rule belongs to the language, and the region is only a spelling of it.
-func TestDefaultPluralIgnoresTheRegionAndTheSeparator(t *testing.T) {
+func TestGetPluralIndexIgnoresTheRegionAndTheSeparator(t *testing.T) {
 	for _, locale := range []string{"pt", "pt-BR", "pt_BR", "PT-br", "pt-PT"} {
-		if got := translation.DefaultPlural(locale, 2); got != 1 {
-			t.Errorf("DefaultPlural(%q, 2) = %d, want 1", locale, got)
+		if got := (translation.MessageSelector{}).GetPluralIndex(locale, 2); got != 1 {
+			t.Errorf("GetPluralIndex(%q, 2) = %d, want 1", locale, got)
 		}
 	}
 }
 
-func TestDefaultPluralReadsACountByMagnitude(t *testing.T) {
-	if got, want := translation.DefaultPlural("ru", -22), translation.DefaultPlural("ru", 22); got != want {
-		t.Errorf("DefaultPlural(ru, -22) = %d, want %d", got, want)
+func TestGetPluralIndexReadsACountByMagnitude(t *testing.T) {
+	selector := translation.MessageSelector{}
+	if got, want := selector.GetPluralIndex("ru", -22), selector.GetPluralIndex("ru", 22); got != want {
+		t.Errorf("GetPluralIndex(ru, -22) = %d, want %d", got, want)
 	}
 }
 
 // A language nobody wrote a rule for has to answer something, and the first
 // segment is the only one a catalogue is guaranteed to carry.
-func TestDefaultPluralAnswersZeroForAnUnknownLanguage(t *testing.T) {
+func TestGetPluralIndexAnswersZeroForAnUnknownLanguage(t *testing.T) {
 	for _, locale := range []string{"", "xx", "klingon"} {
-		if got := translation.DefaultPlural(locale, 7); got != 0 {
-			t.Errorf("DefaultPlural(%q, 7) = %d, want 0", locale, got)
+		if got := (translation.MessageSelector{}).GetPluralIndex(locale, 7); got != 0 {
+			t.Errorf("GetPluralIndex(%q, 7) = %d, want 0", locale, got)
 		}
 	}
 }

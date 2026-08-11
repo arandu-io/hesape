@@ -1,338 +1,445 @@
-// Package validation checks a submitted form against a set of rules.
-//
-// The surface is Laravel's, string rules included, so that somebody arriving
-// from it recognises the whole thing without reading anything:
-//
-//	var Register = validation.MustCompile(validation.Rules{
-//		"name":     "required|max:255",
-//		"email":    "required|email",
-//		"password": "required|min:12|confirmed",
-//	})
-//
-//	in, err := ctx.Validate(requests.Register)
-//	if err != nil {
-//		return err
-//	}
-//
-// A rule set is compiled ONCE, in a package-level variable, and every rule
-// string is parsed and checked there: an unknown rule, a missing or unparseable
-// argument, a pattern that does not compile, a cross-field reference naming a
-// field that does not exist -- each of those fails at boot, naming the field,
-// the rule and the file, and all of them are reported together. A rule set that
-// boots is a rule set whose names are all real.
-//
-// Sixty-one of Laravel's rules ship. Every one of the others is named in
-// refused.go with the reason it is not here and where the answer lives instead,
-// so a rule copied from a Laravel application gets an argument rather than
-// "unknown rule". Two of those reasons are worth knowing before writing
-// anything: `unique` and `exists` reach a repository and a rule set carries no
-// security.Grant (RULE 17), and `date_format` takes a Go layout
-// (date_format:2006-01-02), never a PHP one.
-//
-// There is no reflection and there are no struct tags. The rule set is data,
-// the request struct is written by hand or generated, and the values that
-// passed are read out of Input one at a time -- so a field nobody declared a
-// rule for cannot reach a repository through here.
-//
-// This is the package Illuminate\Validation answers to. The rule table in
-// rules.go is Concerns\ValidatesAttributes and Rules\*, the boot check in
-// compile.go is ValidationRuleParser, and the sentence a failure carries is
-// Concerns\FormatsMessages. Illuminate\Validation\Concerns and
-// Illuminate\Validation\Rules do not become packages of their own: a rule here
-// is one entry in one table, and splitting the arity, the check and the message
-// across three files is how a rule ends up accepting an argument nobody
-// validates. The pieces of the component that are not here are decisions rather
-// than gaps -- Factory, ValidationServiceProvider and the DatabasePresence
-// verifiers all assume a container and a repository reachable without a Grant,
-// which RULES 2 and 17 refuse, and NestedRules and ConditionalRules assume a
-// nested input, which a submitted form is not.
 package validation
 
 import (
-	"fmt"
-	"sort"
+	"context"
+	"net"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/arandu-io/hesape/auth"
 )
 
-// Errors maps a field to its messages. It serializes straight into the HTMX
-// partial that re-renders the form with inline errors.
-type Errors map[string][]string
+// Validator answers to Illuminate\Validation\Validator: one submitted request,
+// the rules written against it, and the answer.
+//
+// It is built by Make and it is not safe for concurrent use -- one belongs to
+// one request, as the PHP's does. The compiled Set behind it is read-only and
+// is shared by all of them.
+//
+// What is deliberately not here is Laravel's container: the rules that leave
+// the process take what they need through an option instead of resolving it out
+// of a service locator (ADR 0001 and 0002). That is `unique`, `exists`,
+// `current_password` and `active_url`, and each of them fails closed when the
+// thing it needs was not given.
+type Validator struct {
+	set  *Set
+	data Data
 
-// Add appends a message to a field. It is a no-op on a nil map, so a caller
-// that forgot to initialize the map does not panic in the middle of a request.
-func (e Errors) Add(field, msg string) {
-	if e == nil {
+	messages Errors
+	failed   map[string][]string
+	excluded []string
+
+	stopOnFirstFailure bool
+
+	// currentRule answers to Validator::$currentRule: the rule being run, which
+	// is how ValidateRegex reads the pattern compiled at boot instead of
+	// compiling it again on every request.
+	currentRule *rule
+
+	ctx       context.Context
+	grant     auth.Grant
+	presence  PresenceVerifier
+	passwords CurrentPasswordChecker
+	dns       Resolver
+	now       func() time.Time
+
+	// What follows is the state of Concerns\FormatsMessages: everything that
+	// decides which sentence a failure carries, and how the field and the value
+	// are spelled inside it. The PHP declares most of it public because a rule
+	// object reaches for it; here the two a rule reads are CustomMessages and
+	// CustomAttributes, and the rest is set through the With options.
+	//
+	// trans answers to $translator. A nil one is the whole difference between
+	// this package's short sentences and Laravel's: see getMessage.
+	trans                       Translator
+	customMessages              map[string]any
+	fallbackMessages            map[string]any
+	customAttributes            map[string]string
+	customValues                map[string]map[string]string
+	replacers                   map[string]ReplacerFunc
+	implicitAttributes          map[string][]string
+	implicitAttributesFormatter func(string) string
+
+	// after answers to $after: the callbacks Validator::after registers.
+	after []func()
+
+	// ensureExponentWithinAllowedRange answers to
+	// $ensureExponentWithinAllowedRangeUsing.
+	ensureExponentWithinAllowedRange func(scale int, attribute string, value any) bool
+
+	// exception answers to $exception, which is a class name there and the
+	// thing that builds one here.
+	exception func(*Validator) error
+}
+
+var defaultResolver Resolver = net.DefaultResolver
+
+// ValidatorOption is what a request hands a Validator that a boot-time rule set
+// cannot hold: the context it runs under, the Grant that authorizes its
+// queries, and the collaborators of the rules that leave the process.
+type ValidatorOption func(*Validator)
+
+// WithContext gives the Validator the request's context, so that a lookup or a
+// count query carries the request's deadline. Without it the context is
+// Background, and a rule that leaves the process has no deadline at all.
+func WithContext(ctx context.Context) ValidatorOption {
+	return func(v *Validator) { v.ctx = ctx }
+}
+
+// WithPresence gives `unique` and `exists` the Grant and the verifier they
+// need.
+//
+// The Grant is not optional and there is no way to pass a verifier without one:
+// RULE 17 says a read is authorized too, and "the validator only counts rows"
+// is how a count of rows becomes a way to ask whether another tenant has a
+// user with a given email.
+func WithPresence(g auth.Grant, p PresenceVerifier) ValidatorOption {
+	return func(v *Validator) { v.grant, v.presence = g, p }
+}
+
+// WithCurrentPassword gives `current_password` its checker.
+func WithCurrentPassword(c CurrentPasswordChecker) ValidatorOption {
+	return func(v *Validator) { v.passwords = c }
+}
+
+// WithResolver gives `active_url` and `email:dns` the resolver to ask. The
+// default is net.DefaultResolver; a test gives its own and makes no network
+// call at all.
+func WithResolver(r Resolver) ValidatorOption {
+	return func(v *Validator) { v.dns = r }
+}
+
+// WithClock sets the clock the relative date keywords read, so that a test of
+// `after:today` does not have to be run before midnight.
+func WithClock(now func() time.Time) ValidatorOption {
+	return func(v *Validator) { v.now = now }
+}
+
+// Make answers to Illuminate\Validation\Factory::make: a Validator over the
+// data and the rules.
+//
+// The rules are a compiled Set rather than an array of strings, because the
+// strings are parsed and checked at boot -- see MustCompile. The data is
+// copied, so that excluding a field does not reach back into the request's own
+// map.
+func Make(data Data, rules *Set, opts ...ValidatorOption) *Validator {
+	v := &Validator{set: rules, data: data.Clone(), failed: map[string][]string{}}
+	for _, opt := range opts {
+		opt(v)
+	}
+	return v
+}
+
+// StopOnFirstFailure answers to stopOnFirstFailure: leave after the first field
+// that fails, rather than reporting every field. It returns the Validator, as
+// the PHP returns $this.
+func (v *Validator) StopOnFirstFailure() *Validator {
+	v.stopOnFirstFailure = true
+	return v
+}
+
+// Passes answers to passes: run every rule and report whether nothing failed.
+func (v *Validator) Passes() bool {
+	v.messages = Errors{}
+	v.failed = map[string][]string{}
+	v.excluded = nil
+
+	for _, f := range v.set.fields {
+		if v.ShouldBeExcluded(f.name) {
+			v.data.Forget(f.name)
+			continue
+		}
+		if v.stopOnFirstFailure && v.messages.IsNotEmpty() {
+			break
+		}
+		for _, r := range f.rules {
+			v.validateAttribute(f, r)
+
+			if v.ShouldBeExcluded(f.name) {
+				break
+			}
+			if v.ShouldStopValidating(f.name) {
+				break
+			}
+		}
+	}
+	for _, f := range v.set.fields {
+		if v.ShouldBeExcluded(f.name) {
+			v.data.Forget(f.name)
+		}
+	}
+
+	// Here we will spin through all of the "after" hooks on this validator and
+	// fire them off. This gives the callbacks a chance to perform all kinds of
+	// other validation that needs to get wrapped up in this operation.
+	v.runAfterCallbacks()
+
+	return v.messages.IsEmpty()
+}
+
+// Fails answers to fails.
+func (v *Validator) Fails() bool { return !v.Passes() }
+
+// validateAttribute answers to validateAttribute.
+func (v *Validator) validateAttribute(f *field, r *rule) {
+	value := v.GetValue(f.name)
+	if !v.isValidatable(f, r, value) {
 		return
 	}
-	e[field] = append(e[field], msg)
-}
 
-// Any reports whether validation failed.
-func (e Errors) Any() bool { return len(e) > 0 }
+	v.currentRule = r
+	passed := r.spec.eval(v, f.name, value, r.args)
+	v.currentRule = nil
 
-// Error renders the errors with fields in a stable order, so that logs and
-// golden files do not change between runs.
-func (e Errors) Error() string {
-	fields := make([]string, 0, len(e))
-	for f := range e {
-		fields = append(fields, f)
-	}
-	sort.Strings(fields)
-
-	var b strings.Builder
-	b.WriteString("validation failed: ")
-	for i, f := range fields {
-		if i > 0 {
-			b.WriteString("; ")
-		}
-		fmt.Fprintf(&b, "%s (%s)", f, strings.Join(e[f], ", "))
-	}
-	return b.String()
-}
-
-// Validatable is implemented by every request type.
-type Validatable interface {
-	Validate() Errors
-}
-
-// The helper list below is short on purpose: domain rules do not belong to the
-// framework.
-
-// Required rejects an empty or blank value.
-func Required(e Errors, field, value string) {
-	if strings.TrimSpace(value) == "" {
-		e.Add(field, "is required")
+	if !passed {
+		v.AddFailure(f.name, r.name, r.args)
 	}
 }
 
-// MinLen counts runes, not bytes: a limit measured in bytes rejects valid input
-// in any language that needs more than one byte per character.
-func MinLen(e Errors, field, value string, n int) {
-	if len([]rune(value)) < n {
-		e.Add(field, fmt.Sprintf("must be at least %d characters", n))
+// isValidatable answers to isValidatable.
+func (v *Validator) isValidatable(f *field, r *rule, value any) bool {
+	if slices.Contains(excludeRules, r.name) {
+		return true
 	}
+	return v.presentOrRuleIsImplicit(r, f.name, value) &&
+		v.passesOptionalCheck(f) &&
+		v.isNotNullIfMarkedAsNullable(f, r) &&
+		v.hasNotFailedPreviousRuleIfPresenceRule(r, f.name)
 }
 
-// MaxLen counts runes, not bytes.
-func MaxLen(e Errors, field, value string, n int) {
-	if len([]rune(value)) > n {
-		e.Add(field, fmt.Sprintf("must be at most %d characters", n))
-	}
-}
-
-// Email checks the shape only. Deliverability is proven by sending mail, never
-// by a regular expression.
+// presentOrRuleIsImplicit answers to presentOrRuleIsImplicit.
 //
-// Whitespace is rejected rather than trimmed: an address with a space in it is
-// almost always a paste accident, and silently trimming input hides the mistake
-// from the person who made it.
-// The shape itself is emailShape, which the `email` rule also calls: two
-// implementations of "is this an address" would drift, and the one that drifted
-// would be whichever a screen did not exercise.
-func Email(e Errors, field, value string) {
-	if !emailShape(value) {
-		e.Add(field, "is not a valid email address")
+// This is what keeps `min:12` on an optional box nobody typed in from saying
+// "must be at least 12 characters" about a box the person deliberately left
+// alone. Dropping it is a real bug, not a simplification.
+func (v *Validator) presentOrRuleIsImplicit(r *rule, attribute string, value any) bool {
+	if s, ok := asString(value); ok && strings.TrimSpace(s) == "" {
+		return r.spec.implicit
 	}
+	return v.ValidatePresent(attribute, value, nil) || r.spec.implicit
 }
 
-// NotZero reports a value that was never filled in.
+// passesOptionalCheck answers to passesOptionalCheck: `sometimes` skips the
+// field entirely when its key was not sent at all.
 //
-// It is Required for everything that is not text. Required takes a string and
-// the generator used to hand it a literal "" for an int, a date or an amount --
-// so every required field of those types failed validation with "is required"
-// no matter what was sent, and the generated create endpoint could not be used
-// at all. Found by audit.
-//
-// A time.Time is asked rather than compared: a parsed "0001-01-01T00:00:00Z"
-// carries a location the zero value does not, so == says they differ when they
-// do not.
-//
-// Bool has no meaningful zero to reject -- false is an answer, not an absence --
-// and the specification refuses `required` on a bool for that reason.
-func NotZero[T comparable](e Errors, field string, value T) {
-	if t, ok := any(value).(time.Time); ok {
-		if t.IsZero() {
-			e.Add(field, "is required")
-		}
-		return
+// It is why the data can tell absent from present-and-empty, and that
+// difference is what a PATCH is made of.
+func (v *Validator) passesOptionalCheck(f *field) bool {
+	if !f.sometimes {
+		return true
 	}
-	var zero T
-	if value == zero {
-		e.Add(field, "is required")
-	}
+	return v.data.Has(f.name)
 }
 
-// Confirmed rejects a value its confirmation field does not repeat.
+// isNotNullIfMarkedAsNullable answers to isNotNullIfMarkedAsNullable.
 //
-// It is what a "confirm your password" box is for, and the message goes on the
-// confirmation rather than on the field itself: a form that reports "password
-// does not match" next to the first box tells the person to change the one they
-// meant, and they change it, and the form fails again.
-//
-// An empty confirmation is reported here rather than by Required, so the field
-// gets one message instead of two saying the same thing.
-func Confirmed(e Errors, field, value, confirmation string) {
-	if value == "" {
-		// Nothing to confirm yet. Whatever rule rejected the value itself has
-		// already said so, and a second message about the copy is noise.
-		return
+// `nullable` stops the chain when the value is NULL, not when it is empty:
+// those are two different answers, and only one of them is "the client said
+// there is nothing here".
+func (v *Validator) isNotNullIfMarkedAsNullable(f *field, r *rule) bool {
+	if r.spec.implicit || !f.nullable {
+		return true
 	}
-	if confirmation == "" {
-		e.Add(field, "is required")
-		return
-	}
-	if value != confirmation {
-		e.Add(field, "does not match")
-	}
+	return v.GetValue(f.name) != nil
 }
 
-// First answers to Illuminate\Support\MessageBag::first: the first message for
-// a key, or the first message of any key when none is given.
-//
-// The PHP's $key defaults to null; the variadic is how Go spells that, and only
-// the first key is read. A key with no messages is the empty string, which is
-// what the empty-string default of Arr::first returns there.
-//
-// With no key the field order is not stable -- a map has none -- so that form
-// answers "what is wrong" and not "which field". When which field failed
-// matters, pass the key.
-func (e Errors) First(key ...string) string {
-	if len(key) > 0 {
-		msgs := e[key[0]]
-		if len(msgs) == 0 {
-			return ""
-		}
-		return msgs[0]
-	}
-	for _, msgs := range e {
-		if len(msgs) > 0 {
-			return msgs[0]
-		}
-	}
-	return ""
-}
-
-// Get answers to Illuminate\Support\MessageBag::get: every message for a key.
-//
-// An absent key is an empty slice, as the PHP returns [], not null. The
-// wildcard form the PHP supports is not read here: this bag keys by the field
-// name the validator wrote, and no rule writes a star into one.
-func (e Errors) Get(key string) []string { return e[key] }
-
-// All answers to Illuminate\Support\MessageBag::all: every message in the bag,
-// with the fields in a stable order so two renders of the same failure agree.
-//
-// The PHP has no order to keep -- a PHP array remembers insertion -- and a Go
-// map has none to remember, so the fields are sorted.
-func (e Errors) All() []string {
-	out := make([]string, 0, len(e))
-	for _, field := range e.Keys() {
-		out = append(out, e[field]...)
-	}
-	return out
-}
-
-// Keys answers to Illuminate\Support\MessageBag::keys, sorted for the reason
-// All is.
-func (e Errors) Keys() []string {
-	fields := make([]string, 0, len(e))
-	for field := range e {
-		fields = append(fields, field)
-	}
-	sort.Strings(fields)
-	return fields
-}
-
-// Has answers to Illuminate\Support\MessageBag::has: every key given has at
-// least one message. No key at all is Any, as the PHP's null is.
-func (e Errors) Has(keys ...string) bool {
-	if len(keys) == 0 {
-		return e.Any()
-	}
-	for _, key := range keys {
-		if len(e[key]) == 0 {
-			return false
-		}
+// hasNotFailedPreviousRuleIfPresenceRule answers to
+// hasNotFailedPreviousRuleIfPresenceRule: a field that already failed does not
+// go to the database to fail again.
+func (v *Validator) hasNotFailedPreviousRuleIfPresenceRule(r *rule, attribute string) bool {
+	if r.name == "unique" || r.name == "exists" {
+		return !v.messages.Has(attribute)
 	}
 	return true
 }
 
-// HasAny answers to Illuminate\Support\MessageBag::hasAny: at least one of the
-// keys given has a message.
-func (e Errors) HasAny(keys ...string) bool {
-	for _, key := range keys {
-		if len(e[key]) > 0 {
+// ShouldStopValidating answers to shouldStopValidating.
+//
+// `bail` stops the field at its first failure. A failed implicit rule stops it
+// too, without being asked: `required` failing must not also produce "must be
+// at least 12 characters" about the same empty box.
+func (v *Validator) ShouldStopValidating(attribute string) bool {
+	f, declared := v.set.byName[attribute]
+	if !declared {
+		return false
+	}
+	if f.bail {
+		return v.messages.Has(attribute)
+	}
+	if !f.hasImplicit {
+		return false
+	}
+	for _, name := range v.failed[attribute] {
+		if slices.Contains(implicitRules, name) {
 			return true
 		}
 	}
 	return false
 }
 
-// Missing answers to Illuminate\Support\MessageBag::missing: not HasAny.
-func (e Errors) Missing(keys ...string) bool { return !e.HasAny(keys...) }
-
-// Messages answers to Illuminate\Support\MessageBag::messages: the raw map.
-func (e Errors) Messages() map[string][]string { return e }
-
-// GetMessages answers to Illuminate\Support\MessageBag::getMessages, which the
-// PHP defines as an alias of messages.
-func (e Errors) GetMessages() map[string][]string { return e.Messages() }
-
-// Count answers to Illuminate\Support\MessageBag::count: the number of
-// messages, not the number of fields.
-func (e Errors) Count() int {
-	n := 0
-	for _, msgs := range e {
-		n += len(msgs)
+// AddFailure answers to addFailure.
+//
+// An exclude rule never puts a message on the field: its failure removes the
+// field from the validated data instead, which is the whole of what the five
+// exclude rules do.
+func (v *Validator) AddFailure(attribute, rule string, parameters []string) {
+	if v.messages == nil {
+		v.messages = Errors{}
 	}
-	return n
+	if slices.Contains(excludeRules, rule) {
+		v.ExcludeAttribute(attribute)
+		return
+	}
+	v.messages.Add(attribute, v.MakeReplacements(
+		v.getMessage(attribute, rule), attribute, rule, parameters,
+	))
+	v.failed[attribute] = append(v.failed[attribute], rule)
 }
 
-// IsEmpty answers to Illuminate\Support\MessageBag::isEmpty.
-func (e Errors) IsEmpty() bool { return !e.Any() }
+// ExcludeAttribute answers to excludeAttribute.
+func (v *Validator) ExcludeAttribute(attribute string) {
+	if !slices.Contains(v.excluded, attribute) {
+		v.excluded = append(v.excluded, attribute)
+	}
+}
 
-// IsNotEmpty answers to Illuminate\Support\MessageBag::isNotEmpty.
-func (e Errors) IsNotEmpty() bool { return e.Any() }
-
-// Unique answers to Illuminate\Support\MessageBag::unique: All with the
-// repeats dropped, keeping the first of each.
-func (e Errors) Unique() []string {
-	seen := make(map[string]struct{})
-	out := make([]string, 0, len(e))
-	for _, msg := range e.All() {
-		if _, ok := seen[msg]; ok {
-			continue
+// ShouldBeExcluded answers to shouldBeExcluded.
+func (v *Validator) ShouldBeExcluded(attribute string) bool {
+	for _, excluded := range v.excluded {
+		if attribute == excluded || strings.HasPrefix(attribute, excluded+".") {
+			return true
 		}
-		seen[msg] = struct{}{}
-		out = append(out, msg)
+	}
+	return false
+}
+
+// messageFor is the sentence one failure puts on the field, after any override
+// the set carries.
+func (v *Validator) messageFor(attribute, ruleName string) string {
+	f, declared := v.set.byName[attribute]
+	if !declared {
+		return "is not valid"
+	}
+	r := f.rule(ruleName)
+	if r == nil {
+		return "is not valid"
+	}
+	return v.set.message(f, r)
+}
+
+// GetValue answers to getValue.
+func (v *Validator) GetValue(attribute string) any { return v.data.Get(attribute) }
+
+// SetValue answers to setValue.
+func (v *Validator) SetValue(attribute string, value any) { v.data[attribute] = value }
+
+// GetData answers to getData.
+func (v *Validator) GetData() Data { return v.data }
+
+// SetData answers to setData. The data is copied, for the reason Make copies
+// it.
+func (v *Validator) SetData(data Data) *Validator {
+	v.data = data.Clone()
+	return v
+}
+
+// Attributes answers to attributes: the data the rules run against.
+func (v *Validator) Attributes() Data { return v.data }
+
+// GetRules answers to getRules: the rule names written against each field.
+func (v *Validator) GetRules() map[string][]string {
+	out := make(map[string][]string, len(v.set.fields))
+	for _, f := range v.set.fields {
+		out[f.name] = v.set.RulesFor(f.name)
 	}
 	return out
 }
 
-// Forget answers to Illuminate\Support\MessageBag::forget: drop every message
-// for a key.
-func (e Errors) Forget(key string) Errors {
-	delete(e, key)
-	return e
+// SetRules answers to setRules: run against another compiled set.
+func (v *Validator) SetRules(rules *Set) *Validator {
+	v.set = rules
+	return v
 }
 
-// AddIf answers to Illuminate\Support\MessageBag::addIf.
-func (e Errors) AddIf(condition bool, field, msg string) Errors {
-	if condition {
-		e.Add(field, msg)
+// HasRule answers to hasRule: the field declares any of the named rules.
+func (v *Validator) HasRule(attribute string, rules []string) bool {
+	f, declared := v.set.byName[attribute]
+	if !declared {
+		return false
 	}
-	return e
+	for _, name := range rules {
+		if f.rule(name) != nil {
+			return true
+		}
+	}
+	return false
 }
 
-// Merge answers to Illuminate\Support\MessageBag::merge: the messages of other
-// appended to the ones already here.
-func (e Errors) Merge(other Errors) Errors {
-	if e == nil {
-		return e
+// Errors answers to errors: the message bag, run first if it has not been.
+func (v *Validator) Errors() Errors {
+	if v.messages == nil {
+		v.Passes()
 	}
-	for field, msgs := range other {
-		e[field] = append(e[field], msgs...)
+	return v.messages
+}
+
+// Messages answers to messages, which the PHP defines as the same bag errors
+// returns.
+func (v *Validator) Messages() Errors { return v.Errors() }
+
+// Failed answers to failed: the rules that failed, per attribute.
+func (v *Validator) Failed() map[string][]string {
+	if v.messages == nil {
+		v.Passes()
 	}
-	return e
+	return v.failed
+}
+
+// Validated answers to validated: the values that were declared, sent and not
+// rejected. It is the only way to read a submitted value out of a validated
+// request, so a field nobody wrote a rule for cannot reach a repository through
+// here.
+func (v *Validator) Validated() Input {
+	if v.messages == nil {
+		v.Passes()
+	}
+	out := make(Data, len(v.set.fields))
+	for _, f := range v.set.fields {
+		if v.messages.Has(f.name) || v.ShouldBeExcluded(f.name) {
+			continue
+		}
+		if value, sent := lookup(v.data, f.name); sent {
+			out[f.name] = value
+		}
+	}
+	return Input{data: out}
+}
+
+// Valid answers to valid: the data of every attribute that has no message.
+func (v *Validator) Valid() Data {
+	if v.messages == nil {
+		v.Passes()
+	}
+	out := make(Data, len(v.data))
+	for name, value := range v.data {
+		if !v.messages.Has(name) {
+			out[name] = value
+		}
+	}
+	return out
+}
+
+// Invalid answers to invalid: the data of every attribute that has one.
+func (v *Validator) Invalid() Data {
+	if v.messages == nil {
+		v.Passes()
+	}
+	out := make(Data, len(v.messages))
+	for name, value := range v.data {
+		if v.messages.Has(name) {
+			out[name] = value
+		}
+	}
+	return out
 }

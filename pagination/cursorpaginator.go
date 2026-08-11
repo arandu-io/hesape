@@ -1,5 +1,7 @@
 package pagination
 
+import "errors"
+
 // CursorPaginator is a page of a keyset walk: the rows on one side of a Cursor,
 // and the cursors that reach the pages either side of it.
 //
@@ -16,6 +18,7 @@ type CursorPaginator[T any] struct {
 	hasMore  bool
 	previous *Cursor
 	next     *Cursor
+	key      func(T) map[string]string
 	options  Options
 }
 
@@ -64,6 +67,7 @@ func CursorPaginate[T any](items []T, perPage int, cursor *Cursor, key func(T) m
 		perPage: perPage,
 		cursor:  cursor,
 		hasMore: hasMore,
+		key:     key,
 		options: opts.normalize(),
 	}
 	if len(items) > 0 {
@@ -119,6 +123,53 @@ func (p *CursorPaginator[T]) OnFirstPage() bool {
 // OnLastPage reports whether this page ends the result set.
 func (p *CursorPaginator[T]) OnLastPage() bool { return !p.HasMorePages() }
 
+// GetCursorForItem answers AbstractCursorPaginator::getCursorForItem(). It is
+// the cursor that reads the page beginning, or ending, at the given row.
+//
+// isNext says which side of the row the next query reads: true is the ordinary
+// forward page, false the backward one.
+//
+// PHP throws when it cannot read the ordering columns off the item; this
+// answers the error, and answers one on a paginator with no key function --
+// which is what ThroughCursor leaves behind, the key having been written
+// against the row type that was mapped away.
+func (p *CursorPaginator[T]) GetCursorForItem(item T, isNext bool) (Cursor, error) {
+	parameters, err := p.GetParametersForItem(item)
+	if err != nil {
+		return Cursor{}, err
+	}
+	return NewCursor(parameters, isNext), nil
+}
+
+// GetParametersForItem answers AbstractCursorPaginator::getParametersForItem().
+// It is the value the row has in each column the query orders by, keyed by
+// column name, which is what a [Cursor] is made of.
+//
+// PHP reads them off the model by attribute name, walking pivot relations for a
+// dotted one. Here the key function CursorPaginate was built with is what reads
+// them, because a Go row has no attribute bag to look a name up in.
+func (p *CursorPaginator[T]) GetParametersForItem(item T) (map[string]string, error) {
+	if p.key == nil {
+		return nil, errors.New("pagination: this paginator has no key function, so it cannot build a cursor for an item")
+	}
+	return p.key(item), nil
+}
+
+// GetCursorName answers AbstractCursorPaginator::getCursorName(). It returns
+// the query parameter the encoded cursor is written into.
+func (p *CursorPaginator[T]) GetCursorName() string { return p.options.CursorName }
+
+// SetCursorName answers AbstractCursorPaginator::setCursorName(). It sets the
+// query parameter the encoded cursor is written into, which is how two cursor
+// paginators appear on one screen without moving each other.
+func (p *CursorPaginator[T]) SetCursorName(name string) *CursorPaginator[T] {
+	if name == "" {
+		name = DefaultCursorName
+	}
+	p.options.CursorName = name
+	return p
+}
+
 // URL returns the address that reads the given cursor. A nil cursor is the
 // first page, whose URL carries no cursor parameter at all.
 func (p *CursorPaginator[T]) URL(cursor *Cursor) string {
@@ -149,9 +200,11 @@ func (p *CursorPaginator[T]) NextPageURL() string {
 // ThroughCursor returns the same page with every item passed through f.
 //
 // The cursors were computed when the page was built, from the rows as they came
-// out of the database, so mapping the items cannot invalidate them -- which is
-// the reason CursorPaginate keeps cursors rather than the key function. See
-// Through for why this is a function and why there are three of them.
+// out of the database, so mapping the items cannot invalidate them. The key
+// function does not come along: it was written against the row type that has
+// just been mapped away, and GetCursorForItem on the result says so rather than
+// keying the wrong row. See Through for why this is a function and why there
+// are three of them.
 func ThroughCursor[A, B any](p *CursorPaginator[A], f func(A) B) *CursorPaginator[B] {
 	items := make([]B, len(p.items))
 	for i, item := range p.items {

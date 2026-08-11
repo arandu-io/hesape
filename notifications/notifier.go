@@ -50,8 +50,10 @@ type Notifier struct {
 	byName map[ChannelName]Channel
 	events EventRecorder
 
-	mu         sync.RWMutex
-	suppressed map[Key]bool
+	mu             sync.RWMutex
+	suppressed     map[Key]bool
+	defaultChannel ChannelName
+	locale         string
 }
 
 // Option configures a Notifier at construction.
@@ -73,7 +75,10 @@ func WithEvents(r EventRecorder) Option {
 // otherwise show up as "half the notifications went to the wrong place": the
 // last one wins here, and Channels reports what is actually wired.
 func New(channels []Channel, opts ...Option) *Notifier {
-	n := &Notifier{byName: make(map[ChannelName]Channel, len(channels))}
+	n := &Notifier{
+		byName:         make(map[ChannelName]Channel, len(channels)),
+		defaultChannel: ChannelMail,
+	}
 	for _, c := range channels {
 		if c == nil {
 			continue
@@ -83,6 +88,57 @@ func New(channels []Channel, opts ...Option) *Notifier {
 	for _, o := range opts {
 		o(n)
 	}
+	return n
+}
+
+// Channel returns one wired channel by name.
+//
+// An empty name returns the default one, which is Illuminate's `channel(null)`
+// resolving to the default driver. A name nothing answers to is ErrNoChannel
+// rather than a nil Channel, because a nil Channel is a panic two frames later.
+func (n *Notifier) Channel(name ChannelName) (Channel, error) {
+	if name == "" {
+		name = n.GetDefaultDriver()
+	}
+	c, ok := n.byName[name]
+	if !ok {
+		return nil, fmt.Errorf("%w: %q, and the notifier was built with %v", ErrNoChannel, name, n.Channels())
+	}
+	return c, nil
+}
+
+// GetDefaultDriver is the channel used when nothing names one. It is "mail",
+// which is Illuminate's default too.
+func (n *Notifier) GetDefaultDriver() ChannelName {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.defaultChannel
+}
+
+// DeliversVia is GetDefaultDriver.
+//
+// Illuminate declares both on ChannelManager and so does this: `deliversVia` is
+// the one that reads well next to `deliverVia`, and `getDefaultDriver` is the
+// one the manager contract requires.
+func (n *Notifier) DeliversVia() ChannelName { return n.GetDefaultDriver() }
+
+// DeliverVia sets the channel used when nothing names one.
+func (n *Notifier) DeliverVia(name ChannelName) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.defaultChannel = name
+}
+
+// Locale sets the language every notification this Notifier sends is rendered
+// in, whatever the recipient's own preference.
+//
+// It is for the process that has one answer for all of them: a report generated
+// for an operator, a batch of invoices for one market. A notification that sets
+// its own locale still wins, which is Illuminate's order.
+func (n *Notifier) Locale(locale string) *Notifier {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.locale = locale
 	return n
 }
 
@@ -133,6 +189,17 @@ func (n *Notifier) Suppressed(k Key) bool {
 // transient SMTP failure loses the copy the user would have seen in the
 // morning.
 func (n *Notifier) Send(ctx context.Context, g auth.Grant, to Notifiable, note Notification) error {
+	return n.SendNow(ctx, g, to, note)
+}
+
+// SendNow delivers one notification immediately, over the channels given rather
+// than the ones the notification names.
+//
+// With no channels it is Send. With them it is the escape hatch Illuminate's
+// sendNow has: "this one, over these, whatever the notification usually does" --
+// the resend button on a support screen, and the retry of one channel that was
+// down when the rest went out.
+func (n *Notifier) SendNow(ctx context.Context, g auth.Grant, to Notifiable, note Notification, channels ...ChannelName) error {
 	if err := g.Check(ActionSend); err != nil {
 		return err
 	}
@@ -150,8 +217,14 @@ func (n *Notifier) Send(ctx context.Context, g auth.Grant, to Notifiable, note N
 		return nil
 	}
 
+	via := channels
+	if len(via) == 0 {
+		via = note.Via(to)
+	}
+	to = n.localized(to, note)
+
 	var errs []error
-	for _, name := range note.Via(to) {
+	for _, name := range via {
 		ch, ok := n.byName[name]
 		if !ok {
 			errs = append(errs, fmt.Errorf("%w: %s asked for %q, and the notifier was built with %v", ErrNoChannel, key, name, n.Channels()))
@@ -203,3 +276,31 @@ func (n *Notifier) record(e events.Event) {
 		n.events.Record(e)
 	}
 }
+
+// localized settles which language the channels render in, and hands the
+// channels a recipient that answers with it.
+//
+// The order is Illuminate's, in NotificationSender::preferredLocale: the
+// notification's own locale first, then the one set on the manager, then the
+// recipient's preference. A channel asks the recipient, so the first two are
+// applied by wrapping it.
+func (n *Notifier) localized(to Notifiable, note Notification) Notifiable {
+	if l, ok := note.(Localized); ok && l.PreferredLocale() != "" {
+		return inLocale{Notifiable: to, locale: l.PreferredLocale()}
+	}
+	n.mu.RLock()
+	locale := n.locale
+	n.mu.RUnlock()
+	if locale != "" {
+		return inLocale{Notifiable: to, locale: locale}
+	}
+	return to
+}
+
+// inLocale is a recipient whose language has been decided for them.
+type inLocale struct {
+	Notifiable
+	locale string
+}
+
+func (i inLocale) PreferredLocale() string { return i.locale }

@@ -15,21 +15,21 @@ import (
 // message, and a transport that returns nil proves nothing.
 func TestTheArrayTransportIsWhatATestReads(t *testing.T) {
 	box := &transport.Array{}
-	m := mail.New(box, nil, mail.Address{Email: "app@example.test"})
+	m := testMailer(box, echoView{}, "app@example.test")
 	ctx := context.Background()
 
 	_, _ = m.To("a@example.test").Send(ctx, welcome{Name: "A", Body: "one"})
 	_, _ = m.To("b@example.test").Send(ctx, welcome{Name: "B", Body: "two"})
 
-	if n := len(box.Sent()); n != 2 {
+	if n := len(box.Messages()); n != 2 {
 		t.Fatalf("kept %d messages, want 2", n)
 	}
 	if last, _ := box.Last(); last.Text != "two" {
 		t.Errorf("Last is not the most recent: %q", last.Text)
 	}
 
-	box.Reset()
-	if n := len(box.Sent()); n != 0 {
+	box.Flush()
+	if n := len(box.Messages()); n != 0 {
 		t.Errorf("Reset left %d", n)
 	}
 }
@@ -39,7 +39,7 @@ func TestTheArrayTransportIsWhatATestReads(t *testing.T) {
 // do with what it is proving.
 func TestTheArrayTransportIsSafeUnderRace(t *testing.T) {
 	box := &transport.Array{}
-	m := mail.New(box, nil, mail.Address{Email: "app@example.test"})
+	m := testMailer(box, echoView{}, "app@example.test")
 
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
@@ -47,12 +47,12 @@ func TestTheArrayTransportIsSafeUnderRace(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			_, _ = m.To("a@example.test").Send(context.Background(), welcome{Name: "A", Body: "one"})
-			_ = box.Sent()
+			_ = box.Messages()
 		}()
 	}
 	wg.Wait()
 
-	if n := len(box.Sent()); n != 8 {
+	if n := len(box.Messages()); n != 8 {
 		t.Errorf("kept %d messages, want 8", n)
 	}
 }
@@ -66,6 +66,21 @@ type welcome struct {
 func (w welcome) Envelope() mail.Envelope { return mail.Envelope{Subject: "Welcome, " + w.Name} }
 func (w welcome) Content() mail.Content   { return mail.Content{Text: w.Body} }
 
+// testMailer is mail.New with the mailer name and the global sender these tests
+// do not care about filled in.
+func testMailer(tr mail.Transport, views mail.Renderer, from string) *mail.Mailer {
+	m := mail.New("test", views, tr, nil)
+	m.AlwaysFrom(from)
+	return m
+}
+
+// echoView is a Renderer that answers with the name of the view it was asked
+// for, so a test can put the body it wants straight into Content.Text --
+// which, as in Illuminate, is a view name and not a body.
+type echoView struct{}
+
+func (echoView) RenderToString(name string, _ any) (string, error) { return name, nil }
+
 // TestFailoverStopsAtTheFirstTransportThatAccepts, and does not send twice: the
 // second delivery of a password reset is a second link, and the first one stops
 // working.
@@ -75,7 +90,7 @@ func TestFailoverStopsAtTheFirstTransportThatAccepts(t *testing.T) {
 	spare := &counting{id: "never"}
 
 	f := transport.Failover{Transports: []mail.Transport{broken, good, spare}}
-	sent, err := mail.New(f, nil, mail.Address{Email: "app@example.test"}).
+	sent, err := testMailer(f, echoView{}, "app@example.test").
 		To("you@example.test").Send(context.Background(), welcome{Name: "Ada", Body: "hi"})
 	if err != nil {
 		t.Fatalf("nothing accepted the message: %v", err)
@@ -100,7 +115,7 @@ func TestFailoverNamesEveryTransportThatRefused(t *testing.T) {
 		&counting{name: "second", err: errors.New("bad key")},
 	}}
 
-	_, err := mail.New(f, nil, mail.Address{Email: "app@example.test"}).
+	_, err := testMailer(f, echoView{}, "app@example.test").
 		To("you@example.test").Send(context.Background(), welcome{Name: "Ada", Body: "hi"})
 	if err == nil {
 		t.Fatal("a total failure was reported as a send")
@@ -135,7 +150,7 @@ func TestFailoverIsRetryableWhenAnyTransportMightAcceptLater(t *testing.T) {
 				&counting{name: "second", err: c.second},
 			}}
 
-			_, err := mail.New(f, nil, mail.Address{Email: "app@example.test"}).
+			_, err := testMailer(f, echoView{}, "app@example.test").
 				To("you@example.test").Send(context.Background(), welcome{Name: "Ada", Body: "hi"})
 			if err == nil {
 				t.Fatal("a total failure was reported as a send")
@@ -152,7 +167,7 @@ func TestFailoverIsRetryableWhenAnyTransportMightAcceptLater(t *testing.T) {
 // TestFailoverWithNothingToFailOverToIsAnError, rather than a message that goes
 // nowhere and reports success.
 func TestFailoverWithNothingToFailOverToIsAnError(t *testing.T) {
-	_, err := mail.New(transport.Failover{}, nil, mail.Address{Email: "app@example.test"}).
+	_, err := testMailer(transport.Failover{}, echoView{}, "app@example.test").
 		To("you@example.test").Send(context.Background(), welcome{Name: "Ada", Body: "hi"})
 	if err == nil {
 		t.Fatal("an empty failover reported a send")
@@ -171,7 +186,7 @@ func TestFailoverStopsWhenTheRequestIsGone(t *testing.T) {
 		second,
 	}}
 
-	if _, err := mail.New(f, nil, mail.Address{Email: "app@example.test"}).
+	if _, err := testMailer(f, echoView{}, "app@example.test").
 		To("you@example.test").Send(ctx, welcome{Name: "Ada", Body: "hi"}); err == nil {
 		t.Fatal("a cancelled send reported success")
 	}
@@ -196,10 +211,10 @@ func (c *counting) Name() string {
 	return c.name
 }
 
-func (c *counting) Send(context.Context, mail.Message) (mail.Sent, error) {
+func (c *counting) Send(context.Context, mail.Message) (mail.SentMessage, error) {
 	c.calls++
 	if c.err != nil {
-		return mail.Sent{}, c.err
+		return mail.SentMessage{}, c.err
 	}
-	return mail.Sent{ID: c.id, Transport: c.Name()}, nil
+	return mail.SentMessage{ID: c.id, Transport: c.Name()}, nil
 }

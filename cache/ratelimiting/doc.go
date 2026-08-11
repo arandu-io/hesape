@@ -13,7 +13,12 @@
 // Go a subpackage is a real boundary, and one struct on the far side of one is
 // an import for no gain.
 //
-// GlobalLimit and Unlimited do not arrive at all. A limit that allows
-// everything is a route with no limit on it, and a second way to write that is
-// a second way (RULE 9).
+// Limit::perSecond, perMinute, perMinutes, perHour, perDay, by, after,
+// response, fallbackKey and none are all there, under those names.
+//
+// GlobalLimit and Unlimited do not arrive as types. Both are one constructor's
+// worth of difference from Limit -- a key that is always empty, a maximum that
+// is always the largest integer -- and two more spellings of the same value is
+// a second way to write it (RULE 9). What they are for is reachable: cache.None
+// is Limit::none(), which is the only thing that ever returned an Unlimited.
 package ratelimiting

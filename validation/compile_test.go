@@ -106,14 +106,24 @@ func TestARuleReferencingAnUndeclaredFieldFailsAtCompile(t *testing.T) {
 	}
 }
 
-// TestALiteralBoundOnAComparisonFailsAtCompileNamingMinAndMax. Laravel accepts
-// gt:10 as well as gt:other_field and decides which was meant by whether a
-// field called "10" happens to exist.
-func TestALiteralBoundOnAComparisonFailsAtCompileNamingMinAndMax(t *testing.T) {
-	failures := refuse(t, validation.Rules{"quantity": "integer|gt:10"})
-	if !strings.Contains(failures[0].Msg, "min:") || !strings.Contains(failures[0].Msg, "max:") {
-		t.Errorf("Msg = %q, want it to name the rule that takes a literal", failures[0].Msg)
+// TestAComparisonTakesEitherALiteralBoundOrAFieldName, which is the fork
+// validateGt itself makes: the parameter is a number and no field of that name
+// is declared, so it is a bound.
+func TestAComparisonTakesEitherALiteralBoundOrAFieldName(t *testing.T) {
+	set, err := validation.Compile(validation.Rules{"quantity": "integer|gt:10"})
+	if err != nil {
+		t.Fatalf("a literal bound was refused: %v", err)
 	}
+	if _, errs := set.Validate(url.Values{"quantity": {"11"}}); errs.Any() {
+		t.Errorf("11 failed gt:10: %v", errs)
+	}
+	if _, errs := set.Validate(url.Values{"quantity": {"10"}}); !errs.Any() {
+		t.Error("10 passed gt:10")
+	}
+
+	// A name that is not a number still has to be declared, because a
+	// comparison against a field nobody wrote is a rule that never fires.
+	refuse(t, validation.Rules{"high": "integer|gt:nowhere"})
 }
 
 // TestRegexTakesTheRestOfTheChainIncludingPipes. Laravel's answer to this is
@@ -202,52 +212,59 @@ func TestDateFormatRejectsAPHPStyleLayout(t *testing.T) {
 	}
 }
 
-// TestUniqueAndExistsAreRefusedAtCompileNamingTheAlternative. They reach a
-// repository, and a rule set carries no security.Grant (RULES 2 and 17). The
-// message has to name where the answer lives, or it reads as an omission.
-func TestUniqueAndExistsAreRefusedAtCompileNamingTheAlternative(t *testing.T) {
+// TestUniqueAndExistsFailClosedWithoutAGrantAndAVerifier. They reach a
+// repository, and a rule set compiled at boot carries no security.Grant: the
+// Grant and the verifier arrive with the request, through WithPresence. RULE 17
+// has no exception for a read, so without them the rule does not pass quietly
+// -- it fails.
+func TestUniqueAndExistsFailClosedWithoutAGrantAndAVerifier(t *testing.T) {
 	for _, rule := range []string{"unique:users", "exists:users,id"} {
-		msg := refuse(t, validation.Rules{"email": rule})[0].Msg
-		if !strings.Contains(msg, "Grant") {
-			t.Errorf("%q was refused with %q, which does not say why", rule, msg)
+		set, err := validation.Compile(validation.Rules{"email": rule})
+		if err != nil {
+			t.Fatalf("Compile(%q) = %v", rule, err)
 		}
-	}
-
-	// current_password is refused for its own reason -- it needs the session
-	// and the hasher, not a repository -- so it names its own mechanism.
-	if msg := refuse(t, validation.Rules{"password": "current_password"})[0].Msg; !strings.Contains(msg, "RequireConfirmedPassword") {
-		t.Errorf("current_password was refused with %q, which does not name the alternative", msg)
-	}
-
-	unique := refuse(t, validation.Rules{"email": "unique:users"})[0].Msg
-	if !strings.Contains(unique, "unique index") || !strings.Contains(unique, "validation.Errors") {
-		t.Errorf("unique was refused with %q, which does not name the alternative", unique)
+		if _, errs := set.Validate(url.Values{"email": {"a@b.co"}}); !errs.Any() {
+			t.Errorf("%q passed with no verifier and no Grant", rule)
+		}
 	}
 }
 
-// TestEveryRuleLaravelHasIsEitherShippedOrRefusedWithAReason: a name that is
-// neither reads as a gap and invites a pull request adding it.
-func TestEveryRuleLaravelHasIsEitherShippedOrRefusedWithAReason(t *testing.T) {
-	// One name per group left out, and the file semantics of size.
-	for _, rule := range []string{
-		"string", "nullable", "int", "bool", "array", "list", "distinct", "in_array",
-		"file", "image", "mimes", "dimensions", "encoding",
-		"active_url",
-		"required_if_accepted", "prohibited_unless", "present_with", "accepted_if",
-		"exclude_if", "exclude_without",
-		"multiple_of", "max_digits", "min_digits",
-		"base64", "date_equals", "notregex",
+// TestEveryRuleLaravelHasIsShipped: a name that is not here reads as a gap and
+// invites a pull request adding it. One per family, plus every name the old
+// refusal list carried.
+func TestEveryRuleLaravelHasIsShipped(t *testing.T) {
+	for _, chain := range []string{
+		"string", "nullable", "array", "list", "distinct", "in_array:other",
+		"file", "image", "mimes:jpg", "mimetypes:image/jpeg", "extensions:jpg",
+		"dimensions:min_width=100",
+		"active_url", "current_password",
+		"required_if_accepted:other", "prohibited_unless:other,a", "present_with:other",
+		"accepted_if:other,a", "declined_if:other,a", "required_if_declined:other",
+		"prohibited_if:other,a", "prohibits:other", "missing_if:other,a",
+		"missing_unless:other,a", "missing_with:other", "missing_with_all:other",
+		"present_if:other,a", "present_unless:other,a", "present_with_all:other",
+		"required_with_all:other", "required_without_all:other",
+		"exclude", "exclude_if:other,a", "exclude_unless:other,a",
+		"exclude_with:other", "exclude_without:other",
+		"multiple_of:3", "max_digits:4", "min_digits:2", "date_equals:2026-01-01",
+		"contains:a", "enum:a,b", "required_array_keys:a",
+		"unique:users", "exists:users", "email:dns",
 	} {
-		failures := refuse(t, validation.Rules{"f": rule})
-		if strings.Contains(failures[0].Msg, "unknown rule") {
-			t.Errorf("%q is refused as unknown rather than with a reason", rule)
+		if _, err := validation.Compile(validation.Rules{"f": chain, "other": "sometimes"}); err != nil {
+			t.Errorf("Compile(%q) = %v", chain, err)
 		}
 	}
+}
 
-	// email:dns is an argument rather than a rule, and gets the same treatment.
-	failures := refuse(t, validation.Rules{"f": "email:dns"})
-	if !strings.Contains(failures[0].Msg, "network") && !strings.Contains(failures[0].Msg, "resolves") {
-		t.Errorf("email:dns was refused with %q", failures[0].Msg)
+// TestASecondSpellingOfARuleIsRedirectedRatherThanUnknown. What is left in the
+// refusal list is an alias somebody remembers wrong, and "unknown rule" reads
+// as an omission.
+func TestASecondSpellingOfARuleIsRedirectedRatherThanUnknown(t *testing.T) {
+	for _, rule := range []string{"int", "bool", "notregex", "array_keys", "base64", "same_as"} {
+		failures := refuse(t, validation.Rules{"f": rule})
+		if strings.Contains(failures[0].Msg, "unknown rule") {
+			t.Errorf("%q is refused as unknown rather than with a redirection", rule)
+		}
 	}
 }
 
@@ -302,11 +319,11 @@ func TestConflictingRulesOnOneFieldFailAtCompile(t *testing.T) {
 func TestAMessageKeyedOnSomethingTheSetDoesNotDeclareFailsAtCompile(t *testing.T) {
 	rules := validation.Rules{"email": "required|email"}
 
-	refuse(t, rules, validation.WithMessages(validation.Messages{"emial.required": "..."}))
-	refuse(t, rules, validation.WithMessages(validation.Messages{"email.max": "..."}))
-	refuse(t, rules, validation.WithMessages(validation.Messages{"email": "..."}))
+	refuse(t, rules, validation.WithMessageOverrides(validation.Messages{"emial.required": "..."}))
+	refuse(t, rules, validation.WithMessageOverrides(validation.Messages{"email.max": "..."}))
+	refuse(t, rules, validation.WithMessageOverrides(validation.Messages{"email": "..."}))
 
-	set, err := validation.Compile(rules, validation.WithMessages(validation.Messages{
+	set, err := validation.Compile(rules, validation.WithMessageOverrides(validation.Messages{
 		"email.required": "we need an address to send the receipt to",
 	}))
 	if err != nil {

@@ -62,6 +62,107 @@ func (r Record) Read() bool { return !r.ReadAt.IsZero() }
 // Unread reports whether they have not.
 func (r Record) Unread() bool { return r.ReadAt.IsZero() }
 
+// MarkAsRead stamps the notification read.
+//
+// Marking a notification that is already read changes nothing and does not move
+// the timestamp: the recipient wanted it read and it is.
+func (r Record) MarkAsRead(ctx context.Context, g auth.Grant, s Store) error {
+	if s == nil {
+		return errors.New("notifications: marking a notification read needs a store")
+	}
+	return s.MarkAsRead(ctx, g, r.ID)
+}
+
+// MarkAsUnread clears the stamp, so the notification is back in the bell menu.
+//
+// It is the undo of MarkAsRead, and Illuminate has it for the same reason: a
+// menu that marks everything read on open needs a way to put one back.
+func (r Record) MarkAsUnread(ctx context.Context, g auth.Grant, s Store) error {
+	if s == nil {
+		return errors.New("notifications: marking a notification unread needs a store")
+	}
+	return s.MarkAsUnread(ctx, g, r.ID)
+}
+
+// Notifiable is who the notification is for.
+//
+// In Illuminate it is a morphTo relation that loads the model. Here it is the
+// two columns that name the row -- the type and the id -- as something a
+// channel or a store can be handed. Loading the model is the application's job:
+// this package does not know what a "user" is and must not.
+func (r Record) Notifiable() Notifiable {
+	return recipient{kind: r.NotifiableType, id: r.NotifiableID}
+}
+
+// recipient is a Notifiable that is only its identity.
+type recipient struct{ kind, id string }
+
+func (r recipient) NotifiableID() string      { return r.id }
+func (r recipient) NotifiableType() string    { return r.kind }
+func (recipient) RouteFor(ChannelName) string { return "" }
+
+// Records is a page of stored notifications.
+//
+// It is Illuminate's DatabaseNotificationCollection, which is an Eloquent
+// collection with two methods on it. Here the collection is a slice, so what is
+// left is the two methods.
+type Records []Record
+
+// MarkAsRead stamps every notification in the page.
+//
+// It stops at the first error rather than carrying on, because the errors a
+// store returns here are "no such row" and "the Grant does not allow it", and
+// neither gets better on the next row.
+func (rs Records) MarkAsRead(ctx context.Context, g auth.Grant, s Store) error {
+	for _, r := range rs {
+		if err := r.MarkAsRead(ctx, g, s); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// MarkAsUnread clears the stamp on every notification in the page.
+func (rs Records) MarkAsUnread(ctx context.Context, g auth.Grant, s Store) error {
+	for _, r := range rs {
+		if err := r.MarkAsUnread(ctx, g, s); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Read is the ones the recipient has read.
+func (rs Records) Read() Records { return rs.filter(Record.Read) }
+
+// Unread is the ones they have not.
+func (rs Records) Unread() Records { return rs.filter(Record.Unread) }
+
+func (rs Records) filter(keep func(Record) bool) Records {
+	out := make(Records, 0, len(rs))
+	for _, r := range rs {
+		if keep(r) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// ScopeRead and ScopeUnread are the SQL conditions that keep only the read or
+// only the unread notifications.
+//
+// In Illuminate they are query scopes on the model, which is what a `where`
+// looks like when the query builder is the model. There is no query builder
+// here (docs/01-arquitetura.md rejects Active Record), so a scope is what it
+// always was underneath: a condition, written once, that a statement pastes in.
+//
+// TableStore uses them, and so does an application writing its own read model
+// over the same table.
+func ScopeRead() string { return "read_at IS NOT NULL" }
+
+// ScopeUnread is the condition for the notifications still in the bell menu.
+func ScopeUnread() string { return "read_at IS NULL" }
+
 // Store is where the database channel puts a notification and where the bell
 // menu reads it back.
 //
@@ -79,6 +180,9 @@ type Store interface {
 	// MarkAsRead stamps one. Marking a read notification read again is not an
 	// error and does not move the timestamp.
 	MarkAsRead(ctx context.Context, g auth.Grant, id string) error
+	// MarkAsUnread clears the stamp, putting the notification back in the bell
+	// menu. Marking an unread notification unread again is not an error.
+	MarkAsUnread(ctx context.Context, g auth.Grant, id string) error
 	// MarkAllAsRead stamps every unread one a recipient has.
 	MarkAllAsRead(ctx context.Context, g auth.Grant, to Notifiable) error
 	// Delete removes one. A missing row is database.ErrNotFound.

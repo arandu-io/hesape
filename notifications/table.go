@@ -58,7 +58,7 @@ func (s *TableStore) For(ctx context.Context, g auth.Grant, to Notifiable, limit
 
 // Unread is For, restricted to the ones not yet read.
 func (s *TableStore) Unread(ctx context.Context, g auth.Grant, to Notifiable, limit int) ([]Record, error) {
-	return s.list(ctx, g, to, limit, ` AND read_at IS NULL`)
+	return s.list(ctx, g, to, limit, " AND "+ScopeUnread())
 }
 
 func (s *TableStore) list(ctx context.Context, g auth.Grant, to Notifiable, limit int, extra string) ([]Record, error) {
@@ -117,6 +117,24 @@ func (s *TableStore) MarkAsRead(ctx context.Context, g auth.Grant, id string) er
 	// Zero rows means either "already read" or "no such row", and the two have
 	// to be told apart: the first is fine and the second is a bug in the
 	// caller.
+	if n, err := res.RowsAffected(); err == nil && n > 0 {
+		return nil
+	}
+	return s.mustExist(ctx, id, tenant)
+}
+
+// MarkAsUnread clears the stamp on one.
+func (s *TableStore) MarkAsUnread(ctx context.Context, g auth.Grant, id string) error {
+	tenant, err := scope(g, ActionRead)
+	if err != nil {
+		return err
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE `+Table+` SET read_at = NULL WHERE id = ? AND tenant = ? AND `+ScopeRead(),
+		id, tenant)
+	if err != nil {
+		return fmt.Errorf("notifications: marking %s unread: %w", id, err)
+	}
 	if n, err := res.RowsAffected(); err == nil && n > 0 {
 		return nil
 	}

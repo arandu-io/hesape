@@ -46,7 +46,7 @@ func (full) Via(notifications.Notifiable) []notifications.ChannelName {
 }
 
 func (full) ToMail(notifications.Notifiable) messages.Mail {
-	return messages.Mail{Subject: "Your invoice is paid"}.Line("Thank you.")
+	return messages.NewMail().Subject("Your invoice is paid").Line("Thank you.")
 }
 
 func (full) ToDatabase(notifications.Notifiable) messages.Database {
@@ -54,7 +54,7 @@ func (full) ToDatabase(notifications.Notifiable) messages.Database {
 }
 
 func (full) ToBroadcast(notifications.Notifiable) messages.Broadcast {
-	return messages.Broadcast{Data: map[string]string{"invoice": "2026-114"}}
+	return messages.Broadcast{Payload: map[string]string{"invoice": "2026-114"}}
 }
 
 // bare names channels it has no body for.
@@ -67,7 +67,7 @@ func (bare) Via(notifications.Notifiable) []notifications.ChannelName { return n
 type noSubject struct{ full }
 
 func (noSubject) ToMail(notifications.Notifiable) messages.Mail {
-	return messages.Mail{}.Line("a message nobody will open")
+	return messages.NewMail().Line("a message nobody will open")
 }
 
 type fakeMailer struct {
@@ -202,13 +202,38 @@ func TestBroadcastChannelPushesToTheSubscribedChannel(t *testing.T) {
 	if hub.event != "billing.invoice-paid" {
 		t.Fatalf("event = %q: it should fall back to the notification key", hub.event)
 	}
-	if string(hub.payload) != `{"invoice":"2026-114"}` {
-		t.Fatalf("payload = %s", hub.payload)
+	// The payload is the notification's own data plus the kind, which is what
+	// lets a client tell two notifications arriving in the same second apart.
+	for _, want := range []string{`"invoice":"2026-114"`, `"type":"billing.invoice-paid"`} {
+		if !strings.Contains(string(hub.payload), want) {
+			t.Fatalf("payload = %s, want it to carry %s", hub.payload, want)
+		}
+	}
+	// No id was set on the notification, and an empty one is left out rather
+	// than sent: a client that keys on it would key everything on "".
+	if strings.Contains(string(hub.payload), `"id"`) {
+		t.Fatalf("payload = %s, want no id", hub.payload)
 	}
 }
 
-func TestBroadcastChannelSkipsARecipientWithNoConnection(t *testing.T) {
-	_, err := channels.NewBroadcast(&fakeHub{}).Send(context.Background(), sendGrant(t), person{id: "u1"}, full{})
+// TestBroadcastChannelFallsBackToThePrivateChannel is Illuminate's
+// BroadcastNotificationCreated::channelName: a recipient with no explicit
+// broadcast route is still reachable on the channel named after it, and nobody
+// listening is not an error -- a live push is a courtesy on top of a stored
+// notification, never the only copy.
+func TestBroadcastChannelFallsBackToThePrivateChannel(t *testing.T) {
+	hub := &fakeHub{}
+	if _, err := channels.NewBroadcast(hub).Send(context.Background(), sendGrant(t), person{id: "u1"}, full{}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if hub.channel != "user.u1" {
+		t.Fatalf("pushed to %q, want the recipient's own channel", hub.channel)
+	}
+}
+
+func TestBroadcastChannelSkipsARecipientItCannotName(t *testing.T) {
+	to := notifications.Route(notifications.ChannelMail, "ada@example.com")
+	_, err := channels.NewBroadcast(&fakeHub{}).Send(context.Background(), sendGrant(t), to, full{})
 	if !errors.Is(err, notifications.ErrNotAddressed) {
 		t.Fatalf("want ErrNotAddressed, got %v", err)
 	}

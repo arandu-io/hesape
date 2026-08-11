@@ -186,6 +186,39 @@ func ResolveCurrentPage(u *url.URL, pageName string) int {
 	return page
 }
 
+// ResolveCurrentPath answers AbstractPaginator::resolveCurrentPath(). It reads
+// the address of the request being served, without its query string or
+// fragment, which is the base every page link is built on.
+//
+// Illuminate reads it through a static closure a service provider installs;
+// there is no container here (ADR 0001) and no facade (ADR 0002), so the URL is
+// passed in. A nil URL yields the default, as PHP's unset resolver does; PHP's
+// default is "/" and this takes it as an argument because Go has no default
+// ones.
+func ResolveCurrentPath(u *url.URL, def string) string {
+	if u == nil {
+		return def
+	}
+	base := *u
+	base.RawQuery = ""
+	base.ForceQuery = false
+	base.Fragment = ""
+	base.RawFragment = ""
+	return base.String()
+}
+
+// ResolveQueryString answers AbstractPaginator::resolveQueryString(). It reads
+// the query string of the request being served, which is what WithQueryString
+// carries onto every page link.
+//
+// A nil URL yields the default, as PHP's unset resolver does.
+func ResolveQueryString(u *url.URL, def url.Values) url.Values {
+	if u == nil {
+		return def
+	}
+	return u.Query()
+}
+
 // Link is one entry of a rendered pager: a numbered page, the previous or next
 // step, or the separator that stands for the pages a window left out.
 //

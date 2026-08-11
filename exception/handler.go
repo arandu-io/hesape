@@ -6,9 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/arandu-io/hesape/log"
 )
@@ -56,6 +59,14 @@ type Config struct {
 	// RenderJSONWhen decides whether a failure is answered as JSON rather than
 	// as a page. Nil means the default: the request asked for JSON.
 	RenderJSONWhen func(r *http.Request) bool
+
+	// Console says the process is running a command rather than serving
+	// requests, which is what RunningInConsole reports.
+	//
+	// PHP asks php_sapi_name(), because one installation serves both and the
+	// SAPI is the only way to tell them apart. A Go binary knows which of the
+	// two it started as, so the kernel says it here instead.
+	Console bool
 }
 
 // Handler decides what a failed request answers.
@@ -63,37 +74,217 @@ type Config struct {
 // It is Illuminate's exception handler: Report writes the failure down, Render
 // turns it into a response, and the two are separate because a failure that is
 // answered is still a failure that happened.
-type Handler struct{ cfg Config }
+//
+// Everything an application registers on it -- Reportable, Renderable, Map,
+// Ignore, Level, ThrottleUsing, BuildContextUsing -- is registered once at boot
+// and read on every request, so the handler is safe for concurrent use.
+type Handler struct {
+	cfg Config
+
+	mu sync.Mutex
+
+	// dontReport are the error sentinels never written to the log, on top of
+	// the ones the configuration named.
+	dontReport []error
+	// dontReportCallbacks inspect an error to decide whether to report it.
+	dontReportCallbacks []func(error) bool
+	// reportCallbacks are what Reportable registered.
+	reportCallbacks []*ReportableHandler
+	// renderCallbacks are what Renderable registered.
+	renderCallbacks []any
+	// levels maps an error sentinel to the level it is logged at.
+	levels []leveled
+	// throttleCallbacks decide how often an error may be reported.
+	throttleCallbacks []any
+	// throttles is the state behind them: how many times a key was reported in
+	// the window that is open.
+	throttles map[string]*throttleWindow
+	// contextCallbacks build the fields that go on the log line.
+	contextCallbacks []func(err error, context map[string]any) map[string]any
+	// exceptionMap is what Map registered.
+	exceptionMap []mapping
+	// dontFlash are the input attributes never carried back to a form.
+	dontFlash []string
+	// withoutDuplicates says an error is reported at most once.
+	withoutDuplicates bool
+	// reported is the set of errors already reported, for withoutDuplicates.
+	// The PHP uses a WeakMap keyed by the exception instance; this is keyed by
+	// the error value, which is the same identity for the pointer errors Go
+	// programs raise.
+	reported map[error]bool
+	// finalizeResponse is what RespondUsing registered.
+	finalizeResponse func(w http.ResponseWriter, r *http.Request, err error)
+	// shouldRenderJSONWhenCallback is what ShouldRenderJSONWhen registered.
+	shouldRenderJSONWhenCallback func(r *http.Request, err error) bool
+	// handlers is the legacy handler stack, which Error and PushError fill.
+	handlers []ErrorHandler
+	// environment is what Register was told the application is running as.
+	environment string
+}
+
+// leveled is one entry of the levels map: the PHP keys it by class name, which
+// Go has no run-time equivalent of, so the key is the sentinel errors.Is
+// compares against.
+type leveled struct {
+	target error
+	level  slog.Level
+}
+
+// mapping is one registered exception mapping.
+type mapping struct {
+	from error
+	to   func(error) error
+}
 
 // NewHandler returns the handler for a configuration.
-func NewHandler(cfg Config) *Handler { return &Handler{cfg: cfg} }
+func NewHandler(cfg Config) *Handler {
+	return &Handler{
+		cfg:       cfg,
+		reported:  map[error]bool{},
+		throttles: map[string]*throttleWindow{},
+	}
+}
 
-// Report writes the failure to the log, unless the configuration excludes it.
+// Report writes the failure to the log, unless something silenced it.
 //
 // The level comes from the status and not from a knob: below 500 the
 // application answered on purpose and it is a warning, 500 and above nobody
 // meant it and it is an error. A framework where every 404 arrives at ERROR is
-// a framework whose alerts get switched off.
+// a framework whose alerts get switched off. Level overrides that for a
+// sentinel that deserves a different one.
 func (h *Handler) Report(ctx context.Context, err error) {
-	if err == nil || h.dontReport(err) {
+	if err == nil {
 		return
 	}
-	status, known := classify(err)
-	l := log.For(ctx)
-	if known && status < http.StatusInternalServerError {
-		l.Warn("request refused", "status", status, "error", err)
+	err = h.mapException(err)
+	if h.shouldntReport(err) {
 		return
 	}
-	l.Error("request failed", "status", statusOr500(status, known), "error", err)
+	h.reportThrowable(ctx, err)
 }
 
-func (h *Handler) dontReport(err error) bool {
+// ShouldReport reports whether the error would be written to the log.
+func (h *Handler) ShouldReport(err error) bool { return !h.shouldntReport(err) }
+
+// reportThrowable reports through the error's own Report method, then through
+// the registered callbacks, and finally to the log.
+func (h *Handler) reportThrowable(ctx context.Context, err error) {
+	h.mu.Lock()
+	if h.withoutDuplicates && isComparable(err) {
+		h.reported[err] = true
+	}
+	callbacks := append([]*ReportableHandler(nil), h.reportCallbacks...)
+	h.mu.Unlock()
+
+	// An error that knows how to report itself does, and returning true means
+	// it is done -- the PHP stops on anything that is not false.
+	if own, ok := err.(interface{ Report() bool }); ok && own.Report() {
+		return
+	}
+
+	for _, callback := range callbacks {
+		if callback.Handles(err) && !callback.invoke(err) {
+			return
+		}
+	}
+
+	status, known := classify(err)
+	fields := []any{"status", statusOr500(status, known), "error", err}
+	for key, value := range h.buildExceptionContext(err) {
+		fields = append(fields, key, value)
+	}
+
+	l := log.For(ctx)
+	level, named := h.mapLogLevel(err)
+	switch {
+	case named:
+		l.Log(ctx, level, "request failed", fields...)
+	case known && status < http.StatusInternalServerError:
+		l.Warn("request refused", fields...)
+	default:
+		l.Error("request failed", fields...)
+	}
+}
+
+// shouldntReport reports whether the error is in the "do not report" list.
+func (h *Handler) shouldntReport(err error) bool {
 	for _, ignored := range h.cfg.DontReport {
 		if errors.Is(err, ignored) {
 			return true
 		}
 	}
-	return false
+
+	h.mu.Lock()
+	if h.withoutDuplicates && isComparable(err) && h.reported[err] {
+		h.mu.Unlock()
+		return true
+	}
+	ignoredList := append([]error(nil), h.dontReport...)
+	callbacks := append([]func(error) bool(nil), h.dontReportCallbacks...)
+	h.mu.Unlock()
+
+	for _, ignored := range ignoredList {
+		if errors.Is(err, ignored) {
+			return true
+		}
+	}
+	for _, callback := range callbacks {
+		if callback(err) {
+			return true
+		}
+	}
+
+	return h.throttled(err)
+}
+
+// mapLogLevel is the level Level named for this error, and whether one was.
+func (h *Handler) mapLogLevel(err error) (slog.Level, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, entry := range h.levels {
+		if errors.Is(err, entry.target) {
+			return entry.level, true
+		}
+	}
+	return slog.LevelError, false
+}
+
+// buildExceptionContext creates the fields that go on the log line.
+func (h *Handler) buildExceptionContext(err error) map[string]any {
+	context := map[string]any{}
+	if own, ok := err.(interface{ Context() map[string]any }); ok {
+		for key, value := range own.Context() {
+			context[key] = value
+		}
+	}
+
+	h.mu.Lock()
+	callbacks := append([]func(error, map[string]any) map[string]any(nil), h.contextCallbacks...)
+	h.mu.Unlock()
+
+	for _, callback := range callbacks {
+		for key, value := range callback(err, context) {
+			context[key] = value
+		}
+	}
+	return context
+}
+
+// mapException maps the error through a registered mapper, if one matches.
+func (h *Handler) mapException(err error) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, m := range h.exceptionMap {
+		if errors.Is(err, m.from) {
+			return m.to(err)
+		}
+	}
+	return err
+}
+
+func isComparable(err error) bool {
+	t := reflect.TypeOf(err)
+	return t != nil && t.Comparable()
 }
 
 // Render answers an error a handler returned.
@@ -111,11 +302,49 @@ func (h *Handler) Render(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	}
 	h.Report(r.Context(), err)
+
+	err = h.mapException(err)
+
+	// A callback that answered is the answer, and nothing else runs.
+	if h.renderViaCallbacks(w, r, err) {
+		h.finalizeRenderedResponse(w, r, err)
+		return
+	}
+
 	// A returned error carries no stack: nothing captured one where it was
 	// created. The frames from here show where the handler gave up, which is
 	// worth more than an empty Stack section and less than the truth, and the
 	// page does not claim otherwise.
 	h.answer(w, r, err, err, Capture(3, h.cfg.AppModule))
+	h.finalizeRenderedResponse(w, r, err)
+}
+
+// renderViaCallbacks tries to answer through the callbacks Renderable
+// registered, and reports whether one of them did.
+func (h *Handler) renderViaCallbacks(w http.ResponseWriter, r *http.Request, err error) bool {
+	h.mu.Lock()
+	callbacks := append([]any(nil), h.renderCallbacks...)
+	h.mu.Unlock()
+
+	for _, callback := range callbacks {
+		if !handles(callback, err) {
+			continue
+		}
+		if answered, _ := callHandler(callback, err, w, r).(bool); answered {
+			return true
+		}
+	}
+	return false
+}
+
+// finalizeRenderedResponse gives RespondUsing the last word on the response.
+func (h *Handler) finalizeRenderedResponse(w http.ResponseWriter, r *http.Request, err error) {
+	h.mu.Lock()
+	finalize := h.finalizeResponse
+	h.mu.Unlock()
+	if finalize != nil {
+		finalize(w, r, err)
+	}
 }
 
 // RenderForConsole answers a failure outside a request: a command, a job, a
@@ -140,7 +369,7 @@ func (h *Handler) RenderForConsole(w io.Writer, err error) {
 func (h *Handler) answer(w http.ResponseWriter, r *http.Request, value any, err error, frames []StackFrame) {
 	status, known := classify(err)
 
-	if h.wantsJSON(r) {
+	if h.shouldReturnJSON(r, err) {
 		h.renderJSON(w, r, statusOr500(status, known), messageFor(err, status))
 		return
 	}
@@ -198,7 +427,19 @@ func (h *Handler) renderJSON(w http.ResponseWriter, r *http.Request, status int,
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-func (h *Handler) wantsJSON(r *http.Request) bool {
+// shouldReturnJSON decides whether the failure is answered as JSON.
+//
+// ShouldRenderJSONWhen wins over Config.RenderJSONWhen, which wins over the
+// default, and the order is the one that matters: the callback is registered at
+// boot by an application that has already read its own configuration.
+func (h *Handler) shouldReturnJSON(r *http.Request, err error) bool {
+	h.mu.Lock()
+	callback := h.shouldRenderJSONWhenCallback
+	h.mu.Unlock()
+
+	if callback != nil {
+		return callback(r, err)
+	}
 	if h.cfg.RenderJSONWhen != nil {
 		return h.cfg.RenderJSONWhen(r)
 	}

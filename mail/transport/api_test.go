@@ -54,19 +54,19 @@ type note struct{ to string }
 
 func (note) Envelope() mail.Envelope {
 	return mail.Envelope{
-		From:    mail.Address{Email: "blog@example.com", Name: "The Blog"},
+		From:    mail.Address{Address: "blog@example.com", Name: "The Blog"},
 		Subject: "Confirm your address",
 		Tags:    []string{"account verification"},
 	}
 }
 
 func (note) Content() mail.Content {
-	return mail.Content{Text: "Open the link.", Data: nil}
+	return mail.Content{Text: "Open the link."}
 }
 
-func send(t *testing.T, tr mail.Transport, to string) (mail.Sent, error) {
+func send(t *testing.T, tr mail.Transport, to string) (mail.SentMessage, error) {
 	t.Helper()
-	return mail.New(tr, nil, mail.Address{Email: "blog@example.com"}).
+	return testMailer(tr, echoView{}, "blog@example.com").
 		To(to).Send(context.Background(), note{to: to})
 }
 
@@ -183,7 +183,7 @@ func TestSendGridPutsTextBeforeHTML(t *testing.T) {
 	p := &provider{status: http.StatusAccepted}
 	server := p.serve(t)
 
-	_, err := mail.New(transport.SendGrid{Key: "SG.k", Endpoint: server.URL}, fixedView{}, mail.Address{Email: "blog@example.com"}).
+	_, err := testMailer(transport.SendGrid{Key: "SG.k", Endpoint: server.URL}, fixedView{}, "blog@example.com").
 		To("reader@example.com").Send(context.Background(), bothParts{})
 	if err != nil {
 		t.Fatalf("the message was not accepted: %v", err)
@@ -208,8 +208,8 @@ func TestSendGridSendsOneMessageAndNotOnePerRecipient(t *testing.T) {
 	p := &provider{status: http.StatusAccepted}
 	server := p.serve(t)
 
-	_, err := mail.New(transport.SendGrid{Key: "SG.k", Endpoint: server.URL}, fixedView{}, mail.Address{Email: "blog@example.com"}).
-		To("a@example.com", "b@example.com").CC("c@example.com").
+	_, err := testMailer(transport.SendGrid{Key: "SG.k", Endpoint: server.URL}, fixedView{}, "blog@example.com").
+		To([]string{"a@example.com", "b@example.com"}).CC("c@example.com").
 		Send(context.Background(), bothParts{})
 	if err != nil {
 		t.Fatal(err)
@@ -237,7 +237,7 @@ func TestSendGridReadsItsIdentifierFromTheHeader(t *testing.T) {
 	}
 	server := p.serve(t)
 
-	sent, err := mail.New(transport.SendGrid{Key: "SG.k", Endpoint: server.URL}, fixedView{}, mail.Address{Email: "blog@example.com"}).
+	sent, err := testMailer(transport.SendGrid{Key: "SG.k", Endpoint: server.URL}, fixedView{}, "blog@example.com").
 		To("reader@example.com").Send(context.Background(), bothParts{})
 	if err != nil {
 		t.Fatal(err)
@@ -253,9 +253,8 @@ func TestPostmarkSendsWhatTheEnvelopeSaid(t *testing.T) {
 	p := &provider{answer: `{"MessageID":"pm-7","ErrorCode":0,"Message":"OK"}`}
 	server := p.serve(t)
 
-	sent, err := mail.New(transport.Postmark{Token: "tok", Stream: "outbound", Endpoint: server.URL},
-		nil, mail.Address{Email: "blog@example.com"}).
-		To("a@example.com", "b@example.com").Send(context.Background(), note{})
+	sent, err := testMailer(transport.Postmark{Token: "tok", Stream: "outbound", Endpoint: server.URL}, echoView{}, "blog@example.com").
+		To([]string{"a@example.com", "b@example.com"}).Send(context.Background(), note{})
 	if err != nil {
 		t.Fatalf("the message was not accepted: %v", err)
 	}
@@ -310,13 +309,20 @@ func TestPostmarksErrorCodeReachesTheCaller(t *testing.T) {
 type bothParts struct{}
 
 func (bothParts) Envelope() mail.Envelope {
-	return mail.Envelope{From: mail.Address{Email: "blog@example.com"}, Subject: "Both"}
+	return mail.Envelope{From: mail.Address{Address: "blog@example.com"}, Subject: "Both"}
 }
 func (bothParts) Content() mail.Content {
 	return mail.Content{View: "mail.note", Text: "the text part"}
 }
 
-// fixedView is a Renderer that answers with one string.
+// fixedView is a Renderer that answers with one string for the HTML view and
+// with the view's own name for everything else, so that a mailable naming two
+// views does not get the same body twice.
 type fixedView struct{}
 
-func (fixedView) RenderToString(string, any) (string, error) { return "<p>the html part</p>", nil }
+func (fixedView) RenderToString(name string, _ any) (string, error) {
+	if name == "mail.note" {
+		return "<p>the html part</p>", nil
+	}
+	return name, nil
+}
