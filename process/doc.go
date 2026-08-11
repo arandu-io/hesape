@@ -54,14 +54,56 @@
 // This is the one place the surface is deliberately narrower than Illuminate's,
 // and it is narrower by removing a footgun rather than by leaving work undone.
 //
+// # Several at once, and one after another
+//
+// Pool, InvokedProcessPool, ProcessPoolResults and Pipe are here under those
+// names, and so are the three methods of the factory that reach them:
+//
+//	results, err := factory.Concurrently(ctx, func(pool *process.Pool) {
+//		pool.As("build").Command("go", "build", "./...")
+//		pool.Command("go", "vet", "./...")
+//	}, nil)
+//
+//	result, err := factory.Pipe(ctx, func(pipe *process.Pipe) {
+//		pipe.Command("cat", "notes.txt")
+//		pipe.Command("grep", "-i", "todo")
+//	}, nil)
+//
+// Concurrently starts them all and waits; Factory.Pool is the same set started
+// and not waited for, which is what Signal, Running and Wait on the
+// InvokedProcessPool are for. A pipe feeds each process the output of the one
+// before it and stops at the first that exits non-zero, whose result is what
+// comes back.
+//
+// This used to say the four types were a gap rather than a decision, and that a
+// caller who wanted concurrently() wrote the errgroup themselves. They are
+// written now, and the gap is closed: a pool is goroutines under the same names
+// PHP gives it, so what a Laravel developer types is what runs.
+//
+// The key is the string a process is added under -- As names one, and a process
+// added without a name takes the next integer key, counted only among the
+// unnamed, exactly as PHP's array append numbers them. It is what the pool's
+// output handler is given alongside the chunk, so output from four programs at
+// once can be told apart.
+//
 // # What is not here, and why
 //
-// Pool, Pipe, InvokedProcessPool and ProcessPoolResults are the concurrency
-// surface. Running several programs at once is what a goroutine already is, and
-// feeding one program's output into the next is its Stdin fed from the other's
-// Output. They answer to nothing here, and that is a gap rather than a
-// decision: a caller who wants Illuminate's concurrently() writes the errgroup
-// themselves today.
+// Five public methods of the component have no counterpart.
+//
+// ProcessPoolResults::offsetExists, offsetGet, offsetSet and offsetUnset are
+// ArrayAccess -- the language interface behind $results[0] and
+// $results['build'] -- which is reason 1 of the porting rule: Go has no
+// operator to overload. Each is one line over the results array, and what it
+// does is index the collection [ProcessPoolResults.Collect] returns, which
+// holds them in the order the pool was built.
+//
+// PendingProcess::toSymfonyProcess builds and hands back a
+// Symfony\Component\Process\Process. It is reason 3: a library this ecosystem
+// does not carry. Illuminate\Process is a wrapper over Symfony's component and
+// that method is the way out of the wrapper; this package wraps os/exec, and
+// what the method would hand back does not exist here. Everything it configures
+// -- the working directory, the environment, the timeouts, the input, the tty
+// -- is set on the [PendingProcess] and applied by Run and Start.
 //
 // The output held in memory is not bounded. Illuminate does not bound it
 // either, and a bound that Laravel has no counterpart for was one this package

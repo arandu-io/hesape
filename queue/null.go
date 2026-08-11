@@ -24,8 +24,24 @@ var (
 	_ jobs.Driver = NullQueue{}
 )
 
+// GetConnectionName is "null".
+//
+// It answers getConnectionName() without the embedded connection struct the
+// other drivers use, because this one is a value with no state and giving it a
+// settable name would be the one field on it.
+func (NullQueue) GetConnectionName() string { return "null" }
+
 // Push discards the job.
 func (NullQueue) Push(context.Context, auth.Grant, jobs.Job) error { return nil }
+
+// PushRaw discards the job. It answers pushRaw().
+func (NullQueue) PushRaw(context.Context, auth.Grant, string, []byte, string) error { return nil }
+
+// DelayedSize is zero. It answers delayedSize().
+func (NullQueue) DelayedSize(context.Context, string) (int, error) { return 0, nil }
+
+// ReservedSize is zero. It answers reservedSize().
+func (NullQueue) ReservedSize(context.Context, string) (int, error) { return 0, nil }
 
 // PushOn discards the job.
 func (NullQueue) PushOn(context.Context, auth.Grant, string, jobs.Job) error { return nil }

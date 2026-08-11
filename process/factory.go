@@ -165,6 +165,38 @@ func (f *Factory) Start(ctx context.Context, command []string, output OutputHand
 	return f.NewPendingProcess().Start(ctx, command, output)
 }
 
+// Pool answers Factory::pool: a set of processes that run at the same time.
+//
+// It builds the pool and runs nothing. [Pool.Start] starts the processes,
+// [Pool.Run] and [Pool.Wait] start them and wait, and Concurrently is the one
+// line that does both.
+func (f *Factory) Pool(callback func(*Pool)) *Pool { return NewPool(f, callback) }
+
+// Pipe answers Factory::pipe: processes run one after another, each one reading
+// what the one before it wrote.
+//
+// PHP takes either a callback or an array of commands, and the array form is
+// the callback with one `$pipe->command($command)` per element. This takes the
+// callback, which is the form the array form is written in (RULE 9): a caller
+// with a list of commands ranges over it inside the callback.
+func (f *Factory) Pipe(ctx context.Context, callback func(*Pipe), output PoolOutputHandler) (ProcessResult, error) {
+	return NewPipe(f, callback).Run(ctx, output)
+}
+
+// Concurrently answers Factory::concurrently: run a pool of processes and wait
+// for them to finish.
+//
+// It is `(new Pool($this, $callback))->start($output)->wait()`, and it is the
+// method to reach for -- Pool is what it is built on, and is there for the
+// caller who wants the processes started and not waited for.
+func (f *Factory) Concurrently(ctx context.Context, callback func(*Pool), output PoolOutputHandler) (*ProcessPoolResults, error) {
+	started, err := f.Pool(callback).Start(ctx, output)
+	if err != nil {
+		return nil, err
+	}
+	return started.Wait()
+}
+
 // Result answers Factory::result: a fake result to register with Fake.
 func (f *Factory) Result(output any, errorOutput any, exitCode int) *FakeProcessResult {
 	return NewFakeProcessResult("", exitCode, output, errorOutput)

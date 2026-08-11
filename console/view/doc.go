@@ -5,6 +5,6 @@
 //
 //	TaskResult.php
 //
-// Nothing is implemented here yet. docs/31-reorganizacao-hesape.md says what
-// moves in, from where, and in which phase.
+// What a command renders with is the components package below this one. This
+// package holds only what both it and the command share: how a task ended.
 package view

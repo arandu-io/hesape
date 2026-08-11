@@ -1,0 +1,118 @@
+package database
+
+import (
+	"context"
+
+	"github.com/arandu-io/hesape/database/migrations"
+)
+
+// ForMigrations adapts a Connection to migrations.Connection.
+//
+// The migrations package declares its own narrow connection interface, because
+// it cannot import this one -- this one resolves migrations. The two
+// signatures differ in exactly two places, and both differences are the reason
+// this adapter is four methods rather than a type assertion:
+//
+//   - Select there takes no useReadPdo flag, and reads through the write pool.
+//     A migration that read from a replica would be reading a schema the
+//     replica has not been told about yet.
+//   - Pretend there answers the statements as strings, because the migrator
+//     prints them and has no use for the bindings.
+//
+// The result also satisfies migrations.TransactionalConnection and
+// migrations.PretendingConnection, so `aru migrate` gets its transaction
+// wrapping and its --pretend from the same value.
+func ForMigrations(connection *Connection) migrations.Connection {
+	return migrationConnection{connection}
+}
+
+// migrationConnection is what ForMigrations answers.
+type migrationConnection struct{ *Connection }
+
+// Select answers migrations.Connection.Select, on the write pool.
+func (m migrationConnection) Select(ctx context.Context, query string, bindings []any) ([]map[string]any, error) {
+	return m.Connection.Select(ctx, query, bindings, false)
+}
+
+// SupportsSchemaTransactions answers
+// migrations.TransactionalConnection.SupportsSchemaTransactions.
+//
+// PostgreSQL and SQLite roll DDL back; MySQL commits it the moment it runs, so
+// a failed migration there leaves the half it finished behind whatever anybody
+// wants. Saying so is what keeps the Migrator from opening a transaction that
+// would tell the operator a lie.
+func (m migrationConnection) SupportsSchemaTransactions() bool {
+	switch m.GetDriverName() {
+	case string(DialectPostgres), string(DialectSQLite):
+		return true
+	default:
+		return false
+	}
+}
+
+// Transaction answers migrations.TransactionalConnection.Transaction.
+func (m migrationConnection) Transaction(_ context.Context, callback func() error) error {
+	return m.Connection.Transaction(callback, 1)
+}
+
+// Pretend answers migrations.PretendingConnection.Pretend, as statements.
+func (m migrationConnection) Pretend(ctx context.Context, callback func() error) ([]string, error) {
+	entries, err := m.Connection.Pretend(ctx, func(*Connection) error { return callback() })
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, entry.Query)
+	}
+	return out, nil
+}
+
+// MigrationResolver adapts a ConnectionResolverInterface to
+// migrations.Resolver, which is the same adaptation one level up.
+type MigrationResolver struct {
+	// Resolver is the resolver being adapted: a DatabaseManager, or a
+	// ConnectionResolver built by hand.
+	Resolver ConnectionResolverInterface
+}
+
+// Connection answers migrations.Resolver.Connection.
+func (r MigrationResolver) Connection(name string) (migrations.Connection, error) {
+	connection, err := r.Resolver.Connection(name)
+	if err != nil {
+		return nil, err
+	}
+
+	concrete, ok := connection.(*Connection)
+	if !ok {
+		return nil, errNotAMigratableConnection
+	}
+	return ForMigrations(concrete), nil
+}
+
+// GetDefaultConnection answers migrations.Resolver.GetDefaultConnection.
+func (r MigrationResolver) GetDefaultConnection() string { return r.Resolver.GetDefaultConnection() }
+
+// SetDefaultConnection answers migrations.Resolver.SetDefaultConnection.
+func (r MigrationResolver) SetDefaultConnection(name string) { r.Resolver.SetDefaultConnection(name) }
+
+// errNotAMigratableConnection is what a resolver answering something that is
+// not a *Connection gets. It is possible only in a test that substituted the
+// interface, and saying which one is not there beats a nil dereference.
+var errNotAMigratableConnection = errNotMigratable{}
+
+type errNotMigratable struct{}
+
+func (errNotMigratable) Error() string {
+	return "database: this connection is not a *database.Connection, so migrations cannot run on it"
+}
+
+// The adapters satisfy the interfaces they exist for, checked here rather than
+// discovered at the call site.
+var (
+	_ migrations.Connection              = migrationConnection{}
+	_ migrations.TransactionalConnection = migrationConnection{}
+	_ migrations.PretendingConnection    = migrationConnection{}
+	_ migrations.Resolver                = MigrationResolver{}
+)

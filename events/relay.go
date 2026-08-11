@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
+	"github.com/arandu-io/hesape/cache"
 	"github.com/arandu-io/hesape/log"
 )
 
@@ -26,16 +26,6 @@ type PublisherFunc func(ctx context.Context, e Stored) error
 // Publish calls f.
 func (f PublisherFunc) Publish(ctx context.Context, e Stored) error { return f(ctx, e) }
 
-// Locker keeps N replicas from publishing the same event N times.
-//
-// The relay never constructs one: nil is correct for a single replica and wrong
-// for two, and github.com/arandu-io/kv implements this shape. What a missing
-// lock costs is duplicate delivery, which every consumer here has to tolerate
-// anyway, because delivery is at-least-once by design.
-type Locker interface {
-	Run(ctx context.Context, name string, ttl time.Duration, fn func(context.Context) error) error
-}
-
 // RelayOptions configures the relay.
 type RelayOptions struct {
 	// Interval is how often the outbox is polled. Default 1s.
@@ -53,8 +43,18 @@ type RelayOptions struct {
 	MaxAttempts int
 	// LockTTL bounds how long one pass may hold the lock. Default 30s.
 	LockTTL time.Duration
-	// Locker is the distributed lock. Nil means a single replica.
-	Locker Locker
+	// Locks keeps N replicas from publishing the same event N times. Nil means
+	// a single replica, and with more than one it means each of them publishes
+	// every event.
+	//
+	// It is cache.Locks and not an interface of this package's own. There used
+	// to be a Locker interface declared here, a second one in the kernel and a
+	// third implementation in the kv adapter; one lock in the collection is
+	// what replaced all three, and it is the same field the scheduler takes.
+	//
+	// What a missing lock costs is duplicate delivery, which every consumer
+	// here has to tolerate anyway, because delivery is at-least-once by design.
+	Locks *cache.Locks
 }
 
 func (o RelayOptions) withDefaults() RelayOptions {
@@ -118,27 +118,20 @@ func (r *Relay) Run(ctx context.Context) error {
 }
 
 // pass publishes one batch, under the lock when there is one.
+//
+// It is Cache::lock('outbox-relay', $ttl)->get($callback): the lock runs the
+// batch when it took it, and answers false when another replica holds it --
+// which is the lock working, not a failure, and logging it every second would
+// bury everything else. This used to read the refusal out of the error message
+// with strings.Contains, because the lock came from an adapter the core could
+// not import.
 func (r *Relay) pass(ctx context.Context) error {
-	if r.opts.Locker == nil {
+	if r.opts.Locks == nil {
 		return r.publishBatch(ctx)
 	}
 
-	err := r.opts.Locker.Run(ctx, "outbox-relay", r.opts.LockTTL, r.publishBatch)
-	if err != nil && isLocked(err) {
-		// Another replica is publishing. That is the lock working, not a
-		// failure, and logging it every second would bury everything else.
-		return nil
-	}
+	_, err := r.opts.Locks.Lock("outbox-relay", r.opts.LockTTL).Get(ctx, r.publishBatch)
 	return err
-}
-
-// isLocked recognizes "somebody else holds it" without importing the kv package.
-//
-// By message rather than by type, which is ugly and is the price of the core
-// not depending on the adapter. The alternative -- an exported sentinel in the
-// core that kv would have to import -- inverts the dependency the wrong way.
-func isLocked(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "lock is held")
 }
 
 // publishBatch publishes the oldest unpublished events.

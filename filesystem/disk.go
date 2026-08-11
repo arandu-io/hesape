@@ -86,26 +86,56 @@ type Adapter interface {
 type Disk struct {
 	name    string
 	adapter Adapter
+	config  Config
+
+	// mu guards the three callbacks below, which are set at wiring time and read
+	// on every request. They are the ones Illuminate's serveUsing(),
+	// buildTemporaryUrlsUsing() and buildTemporaryUploadUrlsUsing() install.
+	mu                 sync.RWMutex
+	serveUsing         ServeCallback
+	temporaryURL       TemporaryURLCallback
+	temporaryUploadURL TemporaryUploadURLCallback
 }
 
 // NewDisk names an adapter.
 //
 // The name is what appears in an error and in `aru` output; it is not part of
 // any path, so renaming a disk does not move a file.
-func NewDisk(name string, a Adapter) *Disk {
-	return &Disk{name: name, adapter: a}
+//
+// The optional [Config] is Illuminate's disk configuration array: it is what
+// [Disk.URL] reads a public base address out of, and what [Disk.GetConfig]
+// answers with. Passing none leaves it zero, which is a disk that has no public
+// address -- and saying so is the correct answer for one.
+func NewDisk(name string, a Adapter, cfg ...Config) *Disk {
+	d := &Disk{name: name, adapter: a}
+	if len(cfg) > 0 {
+		d.config = cfg[0]
+	}
+	return d
 }
 
 // Name returns the name this disk was registered under.
 func (d *Disk) Name() string { return d.name }
 
-// Adapter returns the driver underneath.
+// GetAdapter returns the driver underneath.
 //
 // It exists so [URLSigner] can ask whether the driver is a [Presigner], and so
 // a test can assert against the fake it installed. It is not a way around the
 // Grant: an Adapter takes stored paths, and the only thing that produces one is
 // [Key], which needs a Grant.
-func (d *Disk) Adapter() Adapter { return d.adapter }
+func (d *Disk) GetAdapter() Adapter { return d.adapter }
+
+// GetDriver returns the same driver [Disk.GetAdapter] does.
+//
+// In Illuminate the two answer with different objects: getDriver() hands back
+// the Flysystem FilesystemOperator and getAdapter() the Flysystem adapter
+// underneath it. There is no Flysystem here and therefore only one object, so
+// both names answer with it rather than one of them being missing for a reason
+// nobody could act on.
+func (d *Disk) GetDriver() Adapter { return d.adapter }
+
+// GetConfig returns the configuration this disk was built with.
+func (d *Disk) GetConfig() Config { return d.config }
 
 // Put writes a file under the tenant of the Grant.
 //
@@ -481,6 +511,8 @@ type Disks struct {
 	mu          sync.RWMutex
 	byName      map[string]*Disk
 	defaultDisk string
+	cloudDisk   string
+	creators    map[string]DriverCreator
 }
 
 // NewDisks returns an empty set whose default disk will be defaultName.
@@ -488,8 +520,20 @@ type Disks struct {
 // The default may be registered after this call -- configuration names it
 // before it is wired -- and asking for it before it exists is an error, not a
 // panic at boot.
-func NewDisks(defaultName string) *Disks {
-	return &Disks{byName: map[string]*Disk{}, defaultDisk: defaultName}
+//
+// An optional second name is the cloud disk, which is what [Disks.Cloud]
+// answers with: Illuminate reads it from filesystems.cloud, and a project with
+// one disk does not have to name it.
+func NewDisks(defaultName string, cloud ...string) *Disks {
+	ds := &Disks{
+		byName:      map[string]*Disk{},
+		defaultDisk: defaultName,
+		creators:    map[string]DriverCreator{},
+	}
+	if len(cloud) > 0 {
+		ds.cloudDisk = cloud[0]
+	}
+	return ds
 }
 
 // Add registers an adapter under a name and returns the disk it became.

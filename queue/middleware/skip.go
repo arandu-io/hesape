@@ -14,19 +14,24 @@ import (
 // not that it should be tried later -- for later, release it.
 //
 //	w := queue.NewWorker(q, queue.WorkerOptions{
-//		Middleware: []middleware.Middleware{middleware.SkipUnless(featureOn)},
+//		Middleware: []middleware.Middleware{middleware.Skip{}.Unless(featureOn)},
 //	})
+//
+// [Skip.When] and [Skip.Unless] are methods on the zero value because they are
+// statics in PHP -- `Skip::when($cond)` -- and `middleware.Skip{}.When(cond)` is
+// the same sentence. They were SkipWhen and SkipUnless, names that exist in no
+// Laravel application (ADR 0044).
 type Skip struct {
 	skip bool
 }
 
 var _ Middleware = Skip{}
 
-// SkipWhen skips the job when cond is true. It answers Skip::when().
-func SkipWhen(cond bool) Skip { return Skip{skip: cond} }
+// When skips the job when cond is true. It answers Skip::when().
+func (Skip) When(cond bool) Skip { return Skip{skip: cond} }
 
-// SkipUnless skips the job unless cond is true. It answers Skip::unless().
-func SkipUnless(cond bool) Skip { return Skip{skip: !cond} }
+// Unless skips the job unless cond is true. It answers Skip::unless().
+func (Skip) Unless(cond bool) Skip { return Skip{skip: !cond} }
 
 // Handle drops the job, or hands it on.
 func (m Skip) Handle(ctx context.Context, _ *jobs.Job, next func(context.Context) error) error {

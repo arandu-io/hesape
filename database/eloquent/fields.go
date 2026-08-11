@@ -1,0 +1,311 @@
+package eloquent
+
+import (
+	"fmt"
+	"reflect"
+	"strings"
+	"sync"
+	"time"
+)
+
+// field is one column of the entity struct: the name it has in the table and
+// where to find it in the struct.
+//
+// It stands in for what Illuminate reads out of $attributes. PHP needs no such
+// map because a row is an array there; here the row is a struct, and this is the
+// translation between the two.
+type field struct {
+	column string
+	index  []int
+}
+
+// fieldCache holds the column list per entity type. Reflection over a struct is
+// the same answer every time, and Hydrate asks for it once per row.
+var fieldCache sync.Map // reflect.Type -> []field
+
+// fieldsOf returns the columns of an entity type.
+//
+// Only exported fields are columns, and that is the design rather than a
+// limitation of reflection: an unexported field cannot be written from outside
+// its package, which is what $guarded tries to arrange at runtime (see the
+// package comment).
+//
+// The column name is the `db` tag up to its first comma; without a tag it is the
+// field name in snake case, which is Illuminate's own convention for a column.
+// A tag of "-" means the field is not a column at all.
+//
+// An embedded exported struct is flattened, so the columns of an embedded type
+// are columns of the outer one -- what a trait does for attributes in PHP. An
+// embedded struct with a `db` tag is treated as a column of its own instead,
+// which is how a driver-level type (sql.NullString, a custom scanner) stays one
+// value.
+func fieldsOf(t reflect.Type) []field {
+	if cached, ok := fieldCache.Load(t); ok {
+		return cached.([]field)
+	}
+	out := collectFields(t, nil)
+	fieldCache.Store(t, out)
+	return out
+}
+
+func collectFields(t reflect.Type, prefix []int) []field {
+	var out []field
+	for i := range t.NumField() {
+		f := t.Field(i)
+		if f.PkgPath != "" { // unexported: not a column, by design
+			continue
+		}
+		tag, tagged := f.Tag.Lookup("db")
+		name := strings.Split(tag, ",")[0]
+		if name == "-" {
+			continue
+		}
+		index := append(append([]int(nil), prefix...), i)
+		if f.Anonymous && !tagged {
+			inner := f.Type
+			if inner.Kind() == reflect.Pointer {
+				inner = inner.Elem()
+			}
+			if inner.Kind() == reflect.Struct && inner != reflect.TypeOf(time.Time{}) {
+				out = append(out, collectFields(inner, index)...)
+				continue
+			}
+		}
+		if name == "" {
+			name = columnName(f.Name)
+		}
+		out = append(out, field{column: name, index: index})
+	}
+	return out
+}
+
+// columnName is the column a field with no tag gets: the field name in snake
+// case, with an initialism kept whole.
+//
+// It is not str.Snake, and the difference is Go rather than a preference.
+// Illuminate's algorithm puts a delimiter before every capital, because a PHP
+// property is $userId; the Go convention is UserID, and Snake("ID", "_") is
+// "i_d". So a run of capitals is one word here: ID is id, UserID is user_id,
+// HTTPServer is http_server. The `db` tag is always there for the rest.
+func columnName(name string) string {
+	runes := []rune(name)
+	var out []rune
+	for i, r := range runes {
+		upper := r >= 'A' && r <= 'Z'
+		if upper && i > 0 {
+			previousLower := runes[i-1] >= 'a' && runes[i-1] <= 'z' || runes[i-1] >= '0' && runes[i-1] <= '9'
+			nextLower := i+1 < len(runes) && runes[i+1] >= 'a' && runes[i+1] <= 'z'
+			if previousLower || nextLower {
+				out = append(out, '_')
+			}
+		}
+		out = append(out, toLowerRune(r))
+	}
+	return string(out)
+}
+
+func toLowerRune(r rune) rune {
+	if r >= 'A' && r <= 'Z' {
+		return r + ('a' - 'A')
+	}
+	return r
+}
+
+// fieldByColumn finds the column in an entity type, reporting whether it exists.
+func fieldByColumn(t reflect.Type, column string) (field, bool) {
+	for _, f := range fieldsOf(t) {
+		if f.column == column {
+			return f, true
+		}
+	}
+	return field{}, false
+}
+
+// valueAt reads a column off an entity value.
+//
+// A nil pointer anywhere along an embedded chain reads as nil rather than
+// panicking, because a half-filled struct is an ordinary state between Hydrate
+// and Save.
+func valueAt(entity reflect.Value, f field) any {
+	v := entity
+	for depth, i := range f.index {
+		if v.Kind() == reflect.Pointer {
+			if v.IsNil() {
+				return nil
+			}
+			v = v.Elem()
+		}
+		_ = depth
+		v = v.Field(i)
+	}
+	if !v.IsValid() {
+		return nil
+	}
+	return v.Interface()
+}
+
+// settableAt returns the addressable destination for a column, allocating the
+// nil pointers it walks through -- what PHP does for free by assigning into an
+// array.
+func settableAt(entity reflect.Value, f field) (reflect.Value, bool) {
+	v := entity
+	for _, i := range f.index {
+		if v.Kind() == reflect.Pointer {
+			if v.IsNil() {
+				if !v.CanSet() {
+					return reflect.Value{}, false
+				}
+				v.Set(reflect.New(v.Type().Elem()))
+			}
+			v = v.Elem()
+		}
+		v = v.Field(i)
+	}
+	if !v.CanSet() {
+		return reflect.Value{}, false
+	}
+	return v, true
+}
+
+// timeLayouts are what a driver may hand back for a timestamp column.
+//
+// SQLite has no date type and returns text; the drivers that do have one return
+// a time.Time and never reach this list. Illuminate parses with the grammar's
+// date format and Carbon's fallbacks; this is the same idea with the layouts Go
+// spells out.
+var timeLayouts = []string{
+	time.RFC3339Nano,
+	time.RFC3339,
+	"2006-01-02 15:04:05.999999999 -0700 MST",
+	"2006-01-02T15:04:05",
+	"2006-01-02 15:04:05.999999",
+	"2006-01-02 15:04:05",
+	"2006-01-02",
+}
+
+// assign writes a value read from the database into a struct field.
+//
+// It is the half of Illuminate's cast system that Go still needs. The other half
+// -- 'int', 'bool', 'array', 'datetime' declared in $casts -- is the field's own
+// type here, which is why there is no $casts: the compiler already knows what
+// the column becomes.
+//
+// A conversion that would silently produce the wrong value is refused rather
+// than performed. Go converts an int to a string as a rune, so a numeric column
+// landing in a string field would read as "\x07" instead of "7"; that is an
+// error here.
+func assign(dst reflect.Value, value any) error {
+	if value == nil {
+		dst.Set(reflect.Zero(dst.Type()))
+		return nil
+	}
+
+	src := reflect.ValueOf(value)
+
+	if src.Type().AssignableTo(dst.Type()) {
+		dst.Set(src)
+		return nil
+	}
+
+	if dst.Kind() == reflect.Pointer {
+		inner := reflect.New(dst.Type().Elem())
+		if err := assign(inner.Elem(), value); err != nil {
+			return err
+		}
+		dst.Set(inner)
+		return nil
+	}
+
+	// A driver that hands back a pointer or a wrapped value is unwrapped once.
+	if src.Kind() == reflect.Pointer {
+		if src.IsNil() {
+			dst.Set(reflect.Zero(dst.Type()))
+			return nil
+		}
+		return assign(dst, src.Elem().Interface())
+	}
+
+	switch dst.Type() {
+	case reflect.TypeOf(time.Time{}):
+		return assignTime(dst, value)
+	}
+
+	switch dst.Kind() {
+	case reflect.String:
+		switch v := value.(type) {
+		case []byte:
+			dst.SetString(string(v))
+			return nil
+		case string:
+			dst.SetString(v)
+			return nil
+		}
+	case reflect.Bool:
+		switch v := value.(type) {
+		case int64:
+			dst.SetBool(v != 0)
+			return nil
+		case float64:
+			dst.SetBool(v != 0)
+			return nil
+		case []byte:
+			dst.SetBool(len(v) == 1 && v[0] != 0)
+			return nil
+		}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		if src.Type().ConvertibleTo(dst.Type()) && isNumeric(src.Kind()) {
+			dst.Set(src.Convert(dst.Type()))
+			return nil
+		}
+	case reflect.Slice:
+		if dst.Type().Elem().Kind() == reflect.Uint8 {
+			if s, ok := value.(string); ok {
+				dst.SetBytes([]byte(s))
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("eloquent: cannot put a %T into a %s field", value, dst.Type())
+}
+
+func assignTime(dst reflect.Value, value any) error {
+	switch v := value.(type) {
+	case time.Time:
+		dst.Set(reflect.ValueOf(v))
+		return nil
+	case []byte:
+		return assignTime(dst, string(v))
+	case string:
+		for _, layout := range timeLayouts {
+			if parsed, err := time.Parse(layout, v); err == nil {
+				dst.Set(reflect.ValueOf(parsed))
+				return nil
+			}
+		}
+		return fmt.Errorf("eloquent: %q is not a timestamp in any layout a driver writes", v)
+	}
+	return fmt.Errorf("eloquent: cannot put a %T into a time.Time field", value)
+}
+
+func isNumeric(k reflect.Kind) bool {
+	switch k {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return true
+	}
+	return false
+}
+
+// isZero reports whether a value is its type's zero value, which is how a model
+// decides whether an id was set without knowing the id's type.
+func isZero(value any) bool {
+	if value == nil {
+		return true
+	}
+	v := reflect.ValueOf(value)
+	return v.IsZero()
+}

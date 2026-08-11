@@ -1,0 +1,433 @@
+package relations
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+
+	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/database/eloquent/relations/concerns"
+	"github.com/arandu-io/hesape/database/query"
+)
+
+// Model is Illuminate\Database\Eloquent\Model, as a relation uses it.
+//
+// It is an alias rather than a declaration: the type is defined in
+// relations/concerns, because Go forbids a subpackage from importing its
+// parent and the traits in there need the same one. Aliasing it back means
+// relations.Model is that type, not a second one that looks like it.
+type Model = concerns.Model
+
+// Builder is Illuminate\Database\Eloquent\Builder, as a relation uses it.
+// Aliased from relations/concerns for the reason Model is.
+type Builder = concerns.Builder
+
+// ErrMultipleRecordsFound answers Illuminate\Database\MultipleRecordsFoundException.
+var ErrMultipleRecordsFound = errors.New("relations: more than one record matched a query that expected one")
+
+// ErrModelNotFound answers Illuminate\Database\Eloquent\ModelNotFoundException.
+var ErrModelNotFound = errors.New("relations: no query results for the model")
+
+// Relation answers the abstract Illuminate\Database\Eloquent\Relations\Relation.
+//
+// The abstract class is two things at once -- a contract of five methods every
+// relation implements, and a body of thirty every relation inherits. Go splits
+// them: this interface is the contract, and BaseRelation is the body, the same
+// division the query package makes between Grammar and BaseGrammar.
+//
+// The four methods that matter are AddEagerConstraints, InitRelation, Match and
+// GetEager. They are what turns N+1 queries into two, and they are worth
+// reading in that order: one query for the parents, one for every child of
+// every parent, and a dictionary in memory to put them together.
+type Relation interface {
+	// AddConstraints answers Relation::addConstraints: the where clauses that
+	// narrow the relation to one parent.
+	AddConstraints()
+
+	// AddEagerConstraints answers Relation::addEagerConstraints: the same
+	// narrowing, widened to every parent at once. This is the method that
+	// replaces N queries with one.
+	AddEagerConstraints(models []Model) error
+
+	// InitRelation answers Relation::initRelation: it seeds every parent with
+	// an empty value, so that a parent with no children answers an empty
+	// collection rather than a lazy load.
+	InitRelation(models []Model, relation string) []Model
+
+	// Match answers Relation::match: it distributes one flat result set over
+	// the parents it belongs to, in memory, with no further queries.
+	Match(models []Model, results []Model, relation string) ([]Model, error)
+
+	// GetResults answers Relation::getResults: the relation as the developer
+	// reads it -- one model for a has-one, many for a has-many.
+	GetResults(ctx context.Context, g auth.Grant) (any, error)
+
+	// GetEager answers Relation::getEager: the results for an eager load.
+	GetEager(ctx context.Context, g auth.Grant) ([]Model, error)
+
+	// GetQuery answers Relation::getQuery.
+	GetQuery() Builder
+
+	// GetParent answers Relation::getParent.
+	GetParent() Model
+
+	// GetRelated answers Relation::getRelated.
+	GetRelated() Model
+}
+
+// constraintsEnabled answers Relation::$constraints, the static flag
+// NoConstraints turns off while a relation is being built for an existence
+// query or an eager load.
+//
+// It is two variables rather than one because the flag is read from inside the
+// callback that turned it off -- every AddConstraints asks -- and a mutex held
+// across the callback would deadlock on the first read. The atomic carries the
+// value, and the guard serializes one NoConstraints against another, which is
+// the only overlap that could interleave two settings.
+//
+// It is global state and it is global state in PHP too: a relation built on
+// another goroutine while this one is inside NoConstraints sees the flag off.
+// That is the PHP's behaviour reproduced, not a race introduced -- and it is
+// why the window is one constructor wide.
+var (
+	constraintsEnabled atomic.Bool
+	constraintsGuard   sync.Mutex
+)
+
+func init() { constraintsEnabled.Store(true) }
+
+// NoConstraints answers Relation::noConstraints.
+//
+// It runs callback with the relation constraints turned off, which is how an
+// eager load gets a relation whose query is not already narrowed to one parent.
+func NoConstraints(callback func()) {
+	constraintsGuard.Lock()
+	defer constraintsGuard.Unlock()
+
+	previous := constraintsEnabled.Load()
+	constraintsEnabled.Store(false)
+	defer constraintsEnabled.Store(previous)
+
+	callback()
+}
+
+// ConstraintsEnabled reports whether relation constraints are being applied.
+// Every AddConstraints asks it first, which is the PHP's `if
+// (static::$constraints)`.
+func ConstraintsEnabled() bool { return constraintsEnabled.Load() }
+
+// selfJoinCount answers Relation::$selfJoinCount.
+var selfJoinCount struct {
+	sync.Mutex
+	value int
+}
+
+// BaseRelation answers the body of the abstract Relation class: everything it
+// implements rather than declares.
+//
+// A relation embeds it and supplies the five abstract methods. It is exported
+// for the same reason query.BaseGrammar is: embedding is how Go says "extends"
+// for the half that is code rather than contract.
+//
+// # There is no virtual dispatch, so the constructor does not call AddConstraints
+//
+// The PHP constructor ends with $this->addConstraints(), and late binding sends
+// it to the subclass. Embedding in Go does not: a call from here would reach
+// BaseRelation's own method and quietly build an unconstrained relation. So
+// each concrete constructor calls its own AddConstraints as its last statement,
+// and that is the one line of the PHP shape that had to move.
+type BaseRelation struct {
+	// Query is Relation::$query.
+	Query Builder
+
+	// Parent is Relation::$parent.
+	Parent Model
+
+	// Related is Relation::$related.
+	Related Model
+
+	// EagerKeysWereEmpty is Relation::$eagerKeysWereEmpty: set when the parents
+	// carried no keys at all, so that GetEager answers an empty collection
+	// instead of running `where in ()`.
+	EagerKeysWereEmpty bool
+}
+
+// NewBaseRelation answers the shared half of Relation::__construct.
+func NewBaseRelation(query Builder, parent Model) BaseRelation {
+	return BaseRelation{Query: query, Parent: parent, Related: query.GetModel()}
+}
+
+// GetQuery answers Relation::getQuery.
+func (r *BaseRelation) GetQuery() Builder { return r.Query }
+
+// GetRelationQuery answers Relation::getRelationQuery. CanBeOneOfMany overrides
+// it to point the constraints at the subquery.
+func (r *BaseRelation) GetRelationQuery() Builder { return r.Query }
+
+// GetBaseQuery answers Relation::getBaseQuery.
+func (r *BaseRelation) GetBaseQuery() *query.Builder { return r.Query.GetQuery() }
+
+// ToBase answers Relation::toBase.
+func (r *BaseRelation) ToBase() *query.Builder { return r.Query.GetQuery() }
+
+// GetParent answers Relation::getParent.
+func (r *BaseRelation) GetParent() Model { return r.Parent }
+
+// GetRelated answers Relation::getRelated.
+func (r *BaseRelation) GetRelated() Model { return r.Related }
+
+// GetQualifiedParentKeyName answers Relation::getQualifiedParentKeyName.
+func (r *BaseRelation) GetQualifiedParentKeyName() string {
+	return r.Parent.QualifyColumn(r.Parent.GetKeyName())
+}
+
+// CreatedAt answers Relation::createdAt.
+func (r *BaseRelation) CreatedAt() string { return r.Parent.GetCreatedAtColumn() }
+
+// UpdatedAt answers Relation::updatedAt.
+func (r *BaseRelation) UpdatedAt() string { return r.Parent.GetUpdatedAtColumn() }
+
+// RelatedUpdatedAt answers Relation::relatedUpdatedAt.
+func (r *BaseRelation) RelatedUpdatedAt() string { return r.Related.GetUpdatedAtColumn() }
+
+// Get answers Relation::get.
+//
+// It is the one place every relation's reads funnel through, and it is where
+// the tenant filter goes on. On a clone, so that reading a relation twice does
+// not add the clause twice, and before the Grant reaches the connection, so
+// that a read authorized for one customer cannot return another's rows.
+func (r *BaseRelation) Get(ctx context.Context, g auth.Grant, columns ...any) ([]Model, error) {
+	scoped, err := r.scoped(g)
+	if err != nil {
+		return nil, err
+	}
+	if len(columns) > 0 {
+		scoped = scoped.Select(columns...)
+	}
+	return scoped.Get(ctx, g)
+}
+
+// First answers the Builder::first that every one-result relation calls.
+func (r *BaseRelation) First(ctx context.Context, g auth.Grant) (Model, error) {
+	scoped, err := r.scoped(g)
+	if err != nil {
+		return nil, err
+	}
+	return scoped.First(ctx, g)
+}
+
+// GetEager answers Relation::getEager.
+//
+// The empty-keys branch is not an optimization. `where in ()` is a syntax error
+// on some engines and a match-nothing on others, and the parents that produced
+// no keys still have to come back with their relation initialized -- so the
+// query is skipped and the empty collection is the answer.
+func (r *BaseRelation) GetEager(ctx context.Context, g auth.Grant) ([]Model, error) {
+	if r.EagerKeysWereEmpty {
+		return []Model{}, nil
+	}
+	return r.Get(ctx, g)
+}
+
+// Sole answers Relation::sole.
+//
+// It carries two errors where the PHP throws two exceptions: nothing matched,
+// and more than one did. Both are the caller's assumption being wrong, and
+// both are worth telling apart.
+func (r *BaseRelation) Sole(ctx context.Context, g auth.Grant, columns ...any) (Model, error) {
+	scoped, err := r.scoped(g)
+	if err != nil {
+		return nil, err
+	}
+	if len(columns) > 0 {
+		scoped = scoped.Select(columns...)
+	}
+
+	results, err := scoped.Limit(2).Get(ctx, g)
+	if err != nil {
+		return nil, err
+	}
+
+	switch len(results) {
+	case 0:
+		return nil, fmt.Errorf("%w: table %s", ErrModelNotFound, r.Related.GetTable())
+	case 1:
+		return results[0], nil
+	default:
+		return nil, fmt.Errorf("%w: %d found on table %s", ErrMultipleRecordsFound, len(results), r.Related.GetTable())
+	}
+}
+
+// RawUpdate answers Relation::rawUpdate.
+func (r *BaseRelation) RawUpdate(ctx context.Context, g auth.Grant, attributes map[string]any) (int64, error) {
+	scoped, err := r.scoped(g)
+	if err != nil {
+		return 0, err
+	}
+	return scoped.Update(ctx, g, attributes)
+}
+
+// Touch answers Relation::touch: it stamps the related rows' updated_at.
+func (r *BaseRelation) Touch(ctx context.Context, g auth.Grant) error {
+	if !r.Related.UsesTimestamps() {
+		return nil
+	}
+	_, err := r.RawUpdate(ctx, g, map[string]any{
+		r.Related.GetUpdatedAtColumn(): r.Related.FreshTimestamp(),
+	})
+	return err
+}
+
+// GetRelationExistenceQuery answers Relation::getRelationExistenceQuery: the
+// subquery a whereHas compares against, which matches on column names rather
+// than on values.
+func (r *BaseRelation) GetRelationExistenceQuery(q Builder, parentQuery Builder, columns ...any) Builder {
+	if len(columns) == 0 {
+		columns = []any{"*"}
+	}
+	return q.Select(columns...).WhereColumn(
+		r.GetQualifiedParentKeyName(), "=", r.GetExistenceCompareKey(),
+	)
+}
+
+// GetRelationExistenceCountQuery answers
+// Relation::getRelationExistenceCountQuery.
+func (r *BaseRelation) GetRelationExistenceCountQuery(q Builder, parentQuery Builder) Builder {
+	counted := r.GetRelationExistenceQuery(q, parentQuery, query.Raw("count(*)"))
+	counted.GetQuery().SetBindings(nil, "select")
+	return counted
+}
+
+// GetExistenceCompareKey answers Relation::getExistenceCompareKey. Each
+// relation overrides it; the base answers the related model's key, which is
+// what a relation with no foreign key of its own would compare.
+func (r *BaseRelation) GetExistenceCompareKey() string {
+	return r.Related.QualifyColumn(r.Related.GetKeyName())
+}
+
+// GetRelationCountHash answers Relation::getRelationCountHash: the alias a
+// self-join needs so the same table can appear twice.
+func (r *BaseRelation) GetRelationCountHash(incrementJoinCount ...bool) string {
+	selfJoinCount.Lock()
+	defer selfJoinCount.Unlock()
+
+	if len(incrementJoinCount) == 0 || incrementJoinCount[0] {
+		hash := "arandu_reserved_" + strconv.Itoa(selfJoinCount.value)
+		selfJoinCount.value++
+		return hash
+	}
+	return "arandu_reserved_" + strconv.Itoa(selfJoinCount.value)
+}
+
+// GetKeys answers Relation::getKeys: every parent's key, deduplicated and
+// sorted.
+//
+// Sorted because the PHP sorts, and the PHP sorts because the emitted `in (...)`
+// is then stable between requests -- which is what lets a query log, a slow
+// query report and a prepared statement cache recognize the same query twice.
+func (r *BaseRelation) GetKeys(models []Model, key string) ([]any, error) {
+	seen := make(map[string]struct{}, len(models))
+	pairs := make([]struct {
+		sortKey string
+		value   any
+	}, 0, len(models))
+
+	for _, model := range models {
+		var value any
+		if key != "" {
+			value = model.GetAttribute(key)
+		} else {
+			value = model.GetKey()
+		}
+		if value == nil {
+			continue
+		}
+
+		dictionaryKey, err := concerns.GetDictionaryKey(value)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := seen[dictionaryKey]; ok {
+			continue
+		}
+		seen[dictionaryKey] = struct{}{}
+		pairs = append(pairs, struct {
+			sortKey string
+			value   any
+		}{dictionaryKey, value})
+	}
+
+	sort.SliceStable(pairs, func(i, j int) bool { return pairs[i].sortKey < pairs[j].sortKey })
+
+	keys := make([]any, 0, len(pairs))
+	for _, pair := range pairs {
+		keys = append(keys, pair.value)
+	}
+	return keys, nil
+}
+
+// WhereInEager answers Relation::whereInEager.
+//
+// The PHP picks between whereIn and whereIntegerInRaw by method name; the
+// choice is an optimization for integer keys that the base builder here does
+// not offer, so this is whereIn and the flag it sets is the part that matters:
+// an eager load with no keys must not run a query at all.
+func (r *BaseRelation) WhereInEager(key string, modelKeys []any, q ...Builder) {
+	target := r.Query
+	if len(q) > 0 && q[0] != nil {
+		target = q[0]
+	}
+
+	target.WhereIn(key, modelKeys)
+
+	if len(modelKeys) == 0 {
+		r.EagerKeysWereEmpty = true
+	}
+}
+
+// WhereInMethod answers Relation::whereInMethod.
+//
+// It reports whether the key is the model's own integer primary key, which is
+// the condition under which the PHP switches to whereIntegerInRaw. Kept because
+// the question it asks is real and a driver-aware builder will want it; the
+// answer changes no SQL today.
+func (r *BaseRelation) WhereInMethod(model Model, key string) string {
+	segments := strings.Split(key, ".")
+	last := segments[len(segments)-1]
+
+	if model.GetKeyName() == last && (model.GetKeyType() == "int" || model.GetKeyType() == "integer") {
+		return "whereIntegerInRaw"
+	}
+	return "whereIn"
+}
+
+// scoped returns the relation query narrowed to the Grant's tenant.
+//
+// Every read in this package goes through it. A relation that skipped it would
+// be the leak that is hardest to see: the parent query is right, the join is
+// right, and the rows that come back belong to somebody else.
+func (r *BaseRelation) scoped(g auth.Grant) (Builder, error) {
+	return concerns.ScopeTenant(r.Query.Clone(), r.Related, g)
+}
+
+// Every relation the PHP declares implements the contract, and the compiler
+// checks it here rather than at the first call site. A relation that stopped
+// satisfying it -- a signature drifting during a refactor -- would otherwise
+// only be caught by the one caller that eager loads it.
+var (
+	_ Relation = (*HasOne)(nil)
+	_ Relation = (*HasMany)(nil)
+	_ Relation = (*BelongsTo)(nil)
+	_ Relation = (*BelongsToMany)(nil)
+	_ Relation = (*MorphOne)(nil)
+	_ Relation = (*MorphMany)(nil)
+	_ Relation = (*MorphTo)(nil)
+	_ Relation = (*MorphToMany)(nil)
+	_ Relation = (*HasOneThrough)(nil)
+	_ Relation = (*HasManyThrough)(nil)
+)

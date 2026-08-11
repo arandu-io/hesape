@@ -16,7 +16,7 @@
 //	FailOnException.php          -> FailOnException
 //	RateLimited.php              -> RateLimited
 //	RateLimitedWithRedis.php     -> RateLimited, over a Redis-backed cache.Store
-//	Skip.php                     -> SkipWhen, SkipUnless
+//	Skip.php                     -> Skip.When, Skip.Unless
 //	SkipIfBatchCancelled.php     -> SkipIfBatchCancelled
 //	ThrottlesExceptions.php      -> ThrottlesExceptions
 //	ThrottlesExceptionsWithRedis.php -> ThrottlesExceptions, same

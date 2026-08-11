@@ -39,11 +39,16 @@ type Handlers interface {
 // The worker over a NullQueue is the registry with nothing to drain, which is
 // exactly what the sync connection is.
 type SyncQueue struct {
+	connection
 	handlers Handlers
 }
 
 // NewSyncQueue returns the queue.
-func NewSyncQueue(h Handlers) *SyncQueue { return &SyncQueue{handlers: h} }
+func NewSyncQueue(h Handlers) *SyncQueue {
+	q := &SyncQueue{handlers: h}
+	q.SetConnectionName(syncConnection)
+	return q
+}
 
 var (
 	_ Queue       = (*SyncQueue)(nil)
@@ -67,6 +72,22 @@ func (q *SyncQueue) Push(ctx context.Context, g auth.Grant, j jobs.Job) error {
 	popped := jobs.Popped(q, syncConnection, j)
 	return handler.Handle(ctx, jobs.GrantFor(popped), popped)
 }
+
+// PushRaw runs a job whose arguments are already encoded. It answers pushRaw().
+func (q *SyncQueue) PushRaw(ctx context.Context, g auth.Grant, name string, payload []byte, queue string) error {
+	j, err := jobs.New(g, queue, name, nil)
+	if err != nil {
+		return err
+	}
+	j.Payload = payload
+	return q.Push(ctx, g, j)
+}
+
+// DelayedSize is zero: a sync job has already run. It answers delayedSize().
+func (q *SyncQueue) DelayedSize(context.Context, string) (int, error) { return 0, nil }
+
+// ReservedSize is zero. It answers reservedSize().
+func (q *SyncQueue) ReservedSize(context.Context, string) (int, error) { return 0, nil }
 
 // PushOn runs the job, recording the queue it was meant for.
 func (q *SyncQueue) PushOn(ctx context.Context, g auth.Grant, queue string, j jobs.Job) error {

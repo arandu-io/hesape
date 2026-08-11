@@ -74,8 +74,8 @@ func TestPushAndPop(t *testing.T) {
 	if popped[0].Attempts != 1 {
 		t.Errorf("attempts = %d on the first delivery", popped[0].Attempts)
 	}
-	if popped[0].Connection() != "redis" {
-		t.Errorf("connection = %q", popped[0].Connection())
+	if popped[0].GetConnectionName() != "redis" {
+		t.Errorf("connection = %q", popped[0].GetConnectionName())
 	}
 }
 

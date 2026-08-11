@@ -16,15 +16,16 @@ import (
 
 // jobColumns is the projection every listing query returns.
 var jobColumns = []string{
-	"id", "queue", "name", "tenant_id", "payload",
-	"authorized_by", "action", "run_at", "attempts", "last_error",
+	"id", "queue", "name", "display_name", "tenant_id", "payload",
+	"authorized_by", "action", "run_at", "attempts", "exceptions",
+	"last_error", "attributes",
 }
 
 // jobRow builds one row of that projection.
 func jobRow(id, name string, runAt time.Time, attempts int64, lastError any) []driver.Value {
 	return []driver.Value{
-		id, jobs.DefaultQueue, name, tenant, "{}",
-		"system", "invoice.send", runAt, attempts, lastError,
+		id, jobs.DefaultQueue, name, nil, tenant, "{}",
+		"system", "invoice.send", runAt, attempts, int64(0), lastError, nil,
 	}
 }
 
@@ -50,23 +51,23 @@ func TestPushWritesTheJobRow(t *testing.T) {
 	}
 
 	args := state.argsFor("INSERT INTO jobs")
-	if len(args) != 9 {
+	if len(args) != 12 {
 		t.Fatalf("the insert bound %d arguments", len(args))
 	}
 	if got := args[0].Value; got != j.UUID {
 		t.Errorf("the row was written under %v, want %s", got, j.UUID)
 	}
-	if got := args[3].Value; got != tenant {
+	if got := args[4].Value; got != tenant {
 		t.Errorf("tenant_id = %v, want the one on the Grant", got)
 	}
 	// The Grant that authorized the push is on the row, because it is what the
 	// worker reissues the work under.
-	if got := args[6].Value; got != "invoice.send" {
+	if got := args[7].Value; got != "invoice.send" {
 		t.Errorf("action = %v", got)
 	}
-	runAt, isTime := args[7].Value.(time.Time)
+	runAt, isTime := args[8].Value.(time.Time)
 	if !isTime {
-		t.Fatalf("run_at was bound as %T", args[7].Value)
+		t.Fatalf("run_at was bound as %T", args[8].Value)
 	}
 	// UTC, always: an engine that compares timestamps as text stored a job from
 	// a UTC-3 machine three hours in the past and ran it immediately.
@@ -98,7 +99,7 @@ func TestLaterSchedulesTheJobForward(t *testing.T) {
 		t.Fatalf("Later: %v", err)
 	}
 
-	runAt, isTime := state.argsFor("INSERT INTO jobs")[7].Value.(time.Time)
+	runAt, isTime := state.argsFor("INSERT INTO jobs")[8].Value.(time.Time)
 	if !isTime {
 		t.Fatal("run_at was not bound as a time")
 	}
@@ -166,8 +167,8 @@ func TestPopClaimsWithACompareAndSet(t *testing.T) {
 	}
 	// The job carries the queue it came off, which is what lets the worker
 	// settle it without knowing which driver it is.
-	if popped[0].Connection() != "database" {
-		t.Errorf("connection = %q", popped[0].Connection())
+	if popped[0].GetConnectionName() != "database" {
+		t.Errorf("connection = %q", popped[0].GetConnectionName())
 	}
 }
 
@@ -231,8 +232,8 @@ func TestReleasePutsTheJobBackWithItsReason(t *testing.T) {
 	if got := args[1].Value; got != "the broker refused" {
 		t.Errorf("last_error = %v", got)
 	}
-	if !popped[0].Released() || popped[0].Deleted() {
-		t.Errorf("released = %v, deleted = %v", popped[0].Released(), popped[0].Deleted())
+	if !popped[0].IsReleased() || popped[0].IsDeleted() {
+		t.Errorf("released = %v, deleted = %v", popped[0].IsReleased(), popped[0].IsDeleted())
 	}
 }
 
@@ -255,7 +256,7 @@ func TestFailParksTheJob(t *testing.T) {
 	}
 	// fail() calls delete() in Laravel, and here too: a parked job is settled,
 	// and the worker must not settle it a second time.
-	if !popped[0].HasFailed() || !popped[0].DeletedOrReleased() {
+	if !popped[0].HasFailed() || !popped[0].IsDeletedOrReleased() {
 		t.Error("a parked job does not report itself settled")
 	}
 }
@@ -392,7 +393,9 @@ func TestTheModuleDeclaresNoSchemaForADriverThatOwnsNone(t *testing.T) {
 	if got := queue.NewModule(queue.NullQueue{}).Migrations(); len(got) != 0 {
 		t.Errorf("the NullQueue brought %d migrations", len(got))
 	}
-	if got := queue.NewModule(queue.NewDatabaseQueue(nil)).Migrations(); len(got) != 1 {
+	// Two: the jobs table, and the settings columns that were added to it once
+	// the per-job attributes had somewhere to travel.
+	if got := queue.NewModule(queue.NewDatabaseQueue(nil)).Migrations(); len(got) != 2 {
 		t.Errorf("the DatabaseQueue brought %d migrations, want the jobs table", len(got))
 	}
 }

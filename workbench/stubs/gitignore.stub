@@ -1,0 +1,13 @@
+# Build output.
+/dist/
+*.test
+*.out
+
+# Compiled views. kyse writes them from the .kyse.go sources, the build reads
+# them, and git never sees them.
+/storage/framework/views/
+
+# Local environment. Never commit a credential.
+.env
+.env.*
+!.env.example

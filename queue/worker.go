@@ -4,33 +4,83 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
+	"os"
+	"runtime"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/arandu-io/hesape/log"
+	"github.com/arandu-io/hesape/queue/events"
 	"github.com/arandu-io/hesape/queue/jobs"
 	"github.com/arandu-io/hesape/queue/middleware"
 )
 
 // WorkerOptions configures the loop.
 //
-// It answers Illuminate\Queue\WorkerOptions.
+// It answers Illuminate\Queue\WorkerOptions, field for field, plus the two this
+// collection needs that PHP cannot have: a Concurrency, because a Go worker
+// runs a batch at once rather than forking a process per job, and a Recorder,
+// because a job is instrumented like a request.
 type WorkerOptions struct {
+	// Name identifies this worker, for [PopUsing] and for the log line. It
+	// answers $name, and empty means "default".
+	Name string
 	// Queue is which queue to drain. Empty means jobs.DefaultQueue.
 	Queue string
 	// Concurrency is how many jobs run at once. Default 4.
+	//
+	// It has no counterpart in Laravel, where concurrency is more worker
+	// processes. Here one process drains a batch, and the batch is this wide.
 	Concurrency int
 	// Lease is how long a popped job stays invisible to other workers. It has
 	// to exceed the longest handler, or a second worker picks up work still in
 	// progress. Default 5 minutes.
+	//
+	// It answers the retry_after of Laravel's queue config rather than a field
+	// of WorkerOptions, because in PHP the visibility window belongs to the
+	// connection and here it belongs to the pop.
 	Lease time.Duration
-	// Poll is how long to wait before asking again when the queue was empty.
-	// Default 1 second.
-	Poll time.Duration
-	// MaxAttempts is how many failures a job gets before it is parked.
-	// Default 5.
-	MaxAttempts int
+	// Timeout is how long one handler may run before its context is cancelled.
+	// Zero means Lease.
+	//
+	// It answers $timeout. Laravel keeps this and retry_after apart and warns
+	// that the first must be shorter than the second; here it defaults to Lease
+	// so there is one number until somebody needs two, and a Timeout longer
+	// than the Lease is the misconfiguration that hands a running job to a
+	// second worker.
+	Timeout time.Duration
+	// Sleep is how long to wait before asking again when the queue was empty.
+	// Default 1 second. It answers $sleep.
+	Sleep time.Duration
+	// Rest is how long to wait after each job, whatever the queue holds. Zero
+	// means no rest. It answers $rest, and it exists to stop a fast queue from
+	// saturating a database that everything else shares.
+	Rest time.Duration
+	// MaxTries is how many deliveries a job gets before it is parked.
+	// Default 5. It answers $maxTries.
+	//
+	// A job's own jobs.Job.MaxTries overrides it, which is what makes one
+	// handler able to retry more than the rest.
+	MaxTries int
+	// Force runs the worker even while the application is down for
+	// maintenance. It answers $force.
+	Force bool
+	// StopWhenEmpty ends the loop the first time the queue has nothing.
+	// It answers $stopWhenEmpty, and it is what a pipeline step waits on.
+	StopWhenEmpty bool
+	// MaxJobs stops the worker after this many jobs. Zero means no limit.
+	// It answers $maxJobs.
+	MaxJobs int
+	// MaxTime stops the worker after this long. Zero means no limit.
+	// It answers $maxTime.
+	MaxTime time.Duration
+	// Memory stops the worker when the process is holding more than this many
+	// megabytes. Zero means no limit. It answers $memory.
+	Memory int
 	// Middleware wraps every job this worker runs, outermost first.
 	//
 	// It is the worker's list rather than the job's, because a job here is a
@@ -52,11 +102,15 @@ type WorkerOptions struct {
 	// audit. Pass the application's recorder to turn it on.
 	Recorder *log.Recorder
 	// Backoff returns how long to wait before attempt n. Default is
-	// exponential, capped at an hour.
+	// exponential, capped at an hour. It answers $backoff, which in PHP is a
+	// number or a list of numbers and here is the function both of those are.
 	Backoff func(attempt int) time.Duration
 }
 
 func (o WorkerOptions) withDefaults() WorkerOptions {
+	if o.Name == "" {
+		o.Name = "default"
+	}
 	if o.Queue == "" {
 		o.Queue = jobs.DefaultQueue
 	}
@@ -66,11 +120,14 @@ func (o WorkerOptions) withDefaults() WorkerOptions {
 	if o.Lease <= 0 {
 		o.Lease = 5 * time.Minute
 	}
-	if o.Poll <= 0 {
-		o.Poll = time.Second
+	if o.Timeout <= 0 {
+		o.Timeout = o.Lease
 	}
-	if o.MaxAttempts <= 0 {
-		o.MaxAttempts = 5
+	if o.Sleep <= 0 {
+		o.Sleep = time.Second
+	}
+	if o.MaxTries <= 0 {
+		o.MaxTries = 5
 	}
 	if o.Backoff == nil {
 		o.Backoff = ExponentialBackoff
@@ -96,6 +153,53 @@ func ExponentialBackoff(attempt int) time.Duration {
 	return wait
 }
 
+// PopCallback replaces how a worker chooses its next batch.
+//
+// It answers the callbacks registered by [PopUsing]: pop is the driver's own
+// pop, and what the callback returns is what the worker runs. Horizon uses the
+// PHP one to weight queues against each other, and this is the same seam.
+type PopCallback func(ctx context.Context, pop func(queue string) ([]*jobs.Job, error)) ([]*jobs.Job, error)
+
+var popCallbacks struct {
+	sync.RWMutex
+	byWorker map[string]PopCallback
+}
+
+// PopUsing registers how the worker called workerName chooses its next batch.
+//
+// It answers Worker::popUsing(), including the nil case: passing nil forgets
+// the callback rather than registering an empty one.
+func PopUsing(workerName string, callback PopCallback) {
+	popCallbacks.Lock()
+	defer popCallbacks.Unlock()
+	if callback == nil {
+		delete(popCallbacks.byWorker, workerName)
+		return
+	}
+	if popCallbacks.byWorker == nil {
+		popCallbacks.byWorker = map[string]PopCallback{}
+	}
+	popCallbacks.byWorker[workerName] = callback
+}
+
+// Cache is the little a worker asks of a cache store: whether somebody asked
+// for a restart, and whether this queue is paused.
+//
+// It is declared here rather than imported so the queue does not depend on a
+// store to run. cache.Store satisfies it. There is no auth.Grant on it and that
+// is deliberate: a restart signal and a pause are operational state about the
+// process, not data about a customer, so there is no tenant to scope them by
+// (RULE 14 is about data, and this is not data).
+type Cache interface {
+	Get(ctx context.Context, key string) ([]byte, error)
+	Put(ctx context.Context, key string, value []byte, ttl time.Duration) error
+	Forget(ctx context.Context, key string) error
+}
+
+// restartKey is where `aru queue:restart` leaves its timestamp. It answers
+// Laravel's illuminate:queue:restart.
+const restartKey = "hesape:queue:restart"
+
 // Worker runs jobs off a queue.
 //
 // It answers Illuminate\Queue\Worker, and it is also the handler registry:
@@ -108,8 +212,18 @@ func ExponentialBackoff(attempt int) time.Duration {
 // keeps the deploy story in doc 17 true.
 type Worker struct {
 	queue    Queue
+	manager  *QueueManager
 	handlers map[string]Handler
 	opts     WorkerOptions
+	cache    Cache
+	events   Dispatcher
+
+	// ShouldQuit ends the loop after the job in flight. It answers $shouldQuit,
+	// and it is what a signal handler sets.
+	ShouldQuit atomic.Bool
+	// Paused stops the worker taking new jobs without ending the loop. It
+	// answers $paused.
+	Paused atomic.Bool
 }
 
 // NewWorker returns the worker.
@@ -153,34 +267,152 @@ func (w *Worker) Names() []string {
 	return out
 }
 
-// Run drains the queue until the context is cancelled.
-func (w *Worker) Run(ctx context.Context) error {
-	logger := log.For(ctx).With("component", "worker", "queue", w.opts.Queue)
+// SetName names this worker, and returns it so the call chains.
+//
+// It answers setName(). The name is what [PopUsing] keys on.
+func (w *Worker) SetName(name string) *Worker {
+	w.opts.Name = name
+	return w
+}
+
+// SetCache gives the worker somewhere to read the restart signal and the pause
+// flag, and returns it so the call chains.
+//
+// It answers setCache(). Without one the worker never restarts on `aru
+// queue:restart` and never observes a paused queue -- which is what a test
+// wants and what a single-process deployment can live with.
+func (w *Worker) SetCache(c Cache) *Worker {
+	w.cache = c
+	return w
+}
+
+// SetEvents gives the worker somewhere to send its events, and returns it so
+// the call chains.
+//
+// It has no PHP counterpart because in Laravel the dispatcher is a constructor
+// argument resolved from the container. Nil means the events are not built at
+// all, which is what production looks like when nobody is listening.
+func (w *Worker) SetEvents(d Dispatcher) *Worker {
+	w.events = d
+	return w
+}
+
+// Options is the configuration this worker is running under.
+//
+// It has no PHP counterpart because there the options are an argument to
+// daemon(); here the worker holds them, and [WorkCommand] reads them so its
+// flags can override what the application built.
+func (w *Worker) Options() WorkerOptions { return w.opts }
+
+// SetOptions replaces the configuration, and returns the worker so the call
+// chains.
+//
+// It is the setter half of [Worker.Options], and it is what `queue:work
+// --queue=reports` uses. Calling it while the loop is running is a data race:
+// the options are read on every pass, and a command sets them before it starts
+// the worker.
+func (w *Worker) SetOptions(o WorkerOptions) *Worker {
+	w.opts = o.withDefaults()
+	return w
+}
+
+// FlushState forgets that the worker was ever asked to stop or pause.
+//
+// It answers WorkCommand::flushState(). A Worker is a long-lived object, and
+// the two flags a signal sets outlive the loop that read them: without this, a
+// worker started a second time in the same process -- which is what a test and
+// `queue:work --once` in a loop both do -- stops immediately because something
+// asked the first one to.
+func (w *Worker) FlushState() {
+	w.ShouldQuit.Store(false)
+	w.Paused.Store(false)
+}
+
+// Pause stops this worker taking new jobs, without ending its loop.
+//
+// It answers the SIGUSR2 handler in Worker::listenForSignals(), which sets
+// $paused. It is a method rather than a signal handler because Go's signal
+// handling belongs to the program, not to a library: `aru work` installs the
+// handlers and calls this.
+func (w *Worker) Pause() { w.Paused.Store(true) }
+
+// Resume lets this worker take jobs again. It answers the SIGCONT handler.
+func (w *Worker) Resume() { w.Paused.Store(false) }
+
+// Restart asks this worker to stop after the job it is holding.
+//
+// It answers the SIGQUIT, SIGTERM and SIGINT handlers, which set $shouldQuit.
+// The loop returns after the batch in flight, so a deploy does not lose work.
+func (w *Worker) Restart() { w.ShouldQuit.Store(true) }
+
+// GetManager is the manager this worker resolves connections through, or nil.
+// It answers getManager().
+func (w *Worker) GetManager() *QueueManager { return w.manager }
+
+// SetManager gives the worker a manager, so it can ask whether its queue is
+// paused. It answers setManager().
+func (w *Worker) SetManager(m *QueueManager) { w.manager = m }
+
+// Daemon drains the queue until it is told to stop, and returns the exit status.
+//
+// It answers Worker::daemon(). The connection, the queue and the options are on
+// the worker rather than arguments, because a Go worker is constructed with them
+// and a PHP one is resolved from a container and configured per call.
+//
+// The status is one of [ExitSuccess], [ExitError] and [ExitMemoryLimit], and it
+// is what `aru work` returns to the shell: a supervisor reads it to tell "asked
+// to stop" from "ran out of memory".
+func (w *Worker) Daemon(ctx context.Context) (int, error) {
+	logger := log.For(ctx).With("component", "worker", "queue", w.opts.Queue, "worker", w.opts.Name)
 	logger.Info("worker started", "concurrency", w.opts.Concurrency, "handlers", len(w.handlers))
+
+	lastRestart := w.getTimestampOfLastQueueRestart(ctx)
+	start := time.Now()
+	processed := 0
+
+	w.dispatch(events.WorkerStarting{
+		ConnectionName: w.connectionName(), Queue: w.opts.Queue, WorkerOptions: w.opts,
+	})
 
 	for {
 		if ctx.Err() != nil {
-			return nil
+			return w.Stop(ExitSuccess, Interrupted), nil
 		}
 
-		popped, err := w.queue.Pop(ctx, w.opts.Queue, w.opts.Concurrency, w.opts.Lease)
+		if !w.daemonShouldRun(ctx) {
+			// A paused worker still has to notice a restart or a memory limit,
+			// which is what pauseWorker checks after it sleeps.
+			if status, reason, stop := w.pauseWorker(ctx, lastRestart); stop {
+				return w.Stop(status, reason), nil
+			}
+			continue
+		}
+
+		popped, err := w.getNextJobs(ctx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				return nil
+				return w.Stop(ExitSuccess, Interrupted), nil
 			}
 			// A failed pop is not fatal: the store blinked, and the next poll
 			// tries again. Stopping the worker would turn a hiccup into a
 			// backlog nobody is draining.
 			logger.Warn("popping jobs failed", "error", err)
-			if !w.wait(ctx) {
-				return nil
+			if !w.wait(ctx, w.opts.Sleep) {
+				return w.Stop(ExitSuccess, Interrupted), nil
 			}
 			continue
 		}
 
 		if len(popped) == 0 {
-			if !w.wait(ctx) {
-				return nil
+			// An idle pass still has to reach stopIfNecessary, which is what
+			// notices `aru queue:restart`. It used to `continue` here, so a
+			// worker on a quiet queue never saw the restart signal at all and
+			// a deploy waited for a job that was not coming. Found by test.
+			if !w.wait(ctx, w.opts.Sleep) {
+				return w.Stop(ExitSuccess, Interrupted), nil
+			}
+			if status, reason, stop := w.stopIfNecessary(ctx, lastRestart, start, processed, 0); stop {
+				return w.Stop(status, reason), nil
 			}
 			continue
 		}
@@ -205,27 +437,57 @@ func (w *Worker) Run(ctx context.Context) error {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				w.runOne(ctx, j)
+				_ = w.Process(ctx, j)
 			}()
 		}
 		wg.Wait()
+		processed += len(popped)
+
+		if w.opts.Rest > 0 && !w.wait(ctx, w.opts.Rest) {
+			return w.Stop(ExitSuccess, Interrupted), nil
+		}
+
+		if status, reason, stop := w.stopIfNecessary(ctx, lastRestart, start, processed, len(popped)); stop {
+			return w.Stop(status, reason), nil
+		}
 	}
 }
 
-func (w *Worker) wait(ctx context.Context) bool {
-	select {
-	case <-ctx.Done():
-		return false
-	case <-time.After(w.opts.Poll):
-		return true
-	}
-}
-
-// runOne executes a job, instrumented when there is somewhere to send it.
+// RunNextJob takes one batch off the queue and runs it.
 //
-// That is the point of instrumenting it: "the nightly job is slow" is the same
-// investigation as "the page is slow", and it deserves the same page.
-func (w *Worker) runOne(ctx context.Context, j *jobs.Job) {
+// It answers Worker::runNextJob(), which is what `queue:work --once` calls: one
+// pass of the loop, with none of the bookkeeping that decides whether to make
+// another. An empty queue sleeps once and returns.
+func (w *Worker) RunNextJob(ctx context.Context) error {
+	popped, err := w.getNextJobs(ctx)
+	if err != nil {
+		return err
+	}
+	if len(popped) == 0 {
+		w.Sleep(ctx, w.opts.Sleep)
+		return nil
+	}
+	for _, j := range popped {
+		if err := w.Process(ctx, j); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Process runs one job, instrumented when there is somewhere to send it.
+//
+// It answers Worker::process(). That is the point of instrumenting it: "the
+// nightly job is slow" is the same investigation as "the page is slow", and it
+// deserves the same page.
+//
+// The error it returns is the handler's, after the job has been settled -- so a
+// caller that wants to know what happened can, and the daemon that does not
+// ignores it. Laravel rethrows for the same reason.
+func (w *Worker) Process(ctx context.Context, j *jobs.Job) error {
+	connectionName := j.GetConnectionName()
+	w.dispatch(events.JobProcessing{ConnectionName: connectionName, Job: j})
+
 	handler, known := w.handlers[j.Name]
 	if !known {
 		// An unknown name is not a failure to retry: no amount of retrying will
@@ -233,10 +495,23 @@ func (w *Worker) runOne(ctx context.Context, j *jobs.Job) {
 		err := fmt.Errorf("no handler registered for %s", j.Name)
 		log.For(ctx).Error("job has no handler", "job", j.Name, "id", j.UUID)
 		_ = j.Fail(ctx, err)
-		return
+		w.dispatch(events.JobFailed{ConnectionName: connectionName, Job: j, Exception: err})
+		return err
 	}
 
-	jobCtx, cancel := context.WithTimeout(ctx, w.opts.Lease)
+	// A job that already used up its deliveries before this one -- because it
+	// timed out rather than failed, so nothing ever recorded an error -- is
+	// parked here rather than run again.
+	if err := w.MarkJobAsFailedIfAlreadyExceedsMaxAttempts(ctx, j); err != nil {
+		w.dispatch(events.JobFailed{ConnectionName: connectionName, Job: j, Exception: err})
+		return err
+	}
+	if j.IsDeleted() {
+		w.dispatch(events.JobProcessed{ConnectionName: connectionName, Job: j})
+		return nil
+	}
+
+	jobCtx, cancel := context.WithTimeout(ctx, w.timeoutFor(j))
 	defer cancel()
 
 	// Only when a recorder is wired. See WorkerOptions.Recorder.
@@ -266,47 +541,16 @@ func (w *Worker) runOne(ctx context.Context, j *jobs.Job) {
 	}
 
 	if err != nil {
-		// A middleware that already released, deleted or parked the job has
-		// decided the outcome, and settling it a second time is how a job runs
-		// twice: WithoutOverlapping releases it for ten seconds and the worker
-		// underneath would release it again for the backoff, or park it.
-		if j.DeletedOrReleased() {
-			logger.Warn("job failed and was already settled by a middleware", "error", err)
-			return
-		}
-
-		// Attempts already counts this delivery -- Pop incremented it. Adding
-		// one here counted it twice, so MaxAttempts of N delivered N-1 times and
-		// MaxAttempts of 2 parked on the first failure with no retry at all.
-		// Found by audit; the in-memory queue used by the worker tests did not
-		// increment, which is why it never showed up here.
-		attempts := j.Attempts
-		if attempts < 1 {
-			attempts = 1
-		}
-		j.LastError = err.Error()
-
-		if attempts >= w.opts.MaxAttempts {
-			if failErr := j.Fail(ctx, err); failErr != nil {
-				logger.Error("parking the job failed", "error", failErr)
-			}
-			logger.Error("job parked after repeated failures", "attempts", attempts, "error", err)
-			return
-		}
-
-		wait := w.opts.Backoff(attempts)
-		if relErr := j.Release(ctx, wait); relErr != nil {
-			logger.Error("releasing the job failed", "error", relErr)
-		}
-		logger.Warn("job failed", "attempt", attempts, "retry_in", wait, "error", err)
-		return
+		w.handleJobException(ctx, j, err, logger)
+		return err
 	}
 
 	// A middleware that skipped the work returns no error and touches nothing,
 	// and that is "handled": the job is deleted below. One that released it
 	// said the opposite, and this is where the difference is read.
-	if j.DeletedOrReleased() {
-		return
+	if j.IsDeletedOrReleased() {
+		w.dispatch(events.JobProcessed{ConnectionName: connectionName, Job: j})
+		return nil
 	}
 
 	if err := j.Delete(ctx); err != nil {
@@ -314,13 +558,339 @@ func (w *Worker) runOne(ctx context.Context, j *jobs.Job) {
 		// the lease expires. That is at-least-once behaving as documented, and
 		// why a handler has to tolerate running twice.
 		logger.Error("deleting the job failed; it will run again", "error", err)
-		return
+		return nil
 	}
 
 	logger.Info("job done",
 		"duration_ms", duration.Milliseconds(),
 		"queries", col.QueryCount(),
 		"sql_ms", col.QueryTime().Milliseconds())
+	w.dispatch(events.JobProcessed{ConnectionName: connectionName, Job: j})
+	return nil
+}
+
+// handleJobException settles a job whose handler failed.
+//
+// It answers Worker::handleJobException(), in the order the PHP has it: decide
+// whether this failure is the last one, and only then release.
+func (w *Worker) handleJobException(ctx context.Context, j *jobs.Job, cause error, logger *slog.Logger) {
+	connectionName := j.GetConnectionName()
+	j.Exceptions++
+	w.dispatch(events.JobExceptionOccurred{ConnectionName: connectionName, Job: j, Exception: cause})
+
+	// A middleware that already released, deleted or parked the job has
+	// decided the outcome, and settling it a second time is how a job runs
+	// twice: WithoutOverlapping releases it for ten seconds and the worker
+	// underneath would release it again for the backoff, or park it.
+	if j.IsDeletedOrReleased() {
+		logger.Warn("job failed and was already settled by a middleware", "error", cause)
+		return
+	}
+
+	// Attempts already counts this delivery -- Pop incremented it. Adding
+	// one here counted it twice, so MaxTries of N delivered N-1 times and
+	// MaxTries of 2 parked on the first failure with no retry at all.
+	// Found by audit; the in-memory queue used by the worker tests did not
+	// increment, which is why it never showed up here.
+	attempts := j.Attempts
+	if attempts < 1 {
+		attempts = 1
+	}
+	j.LastError = cause.Error()
+
+	if w.shouldFail(j, attempts, cause) {
+		if failErr := j.Fail(ctx, cause); failErr != nil {
+			logger.Error("parking the job failed", "error", failErr)
+		}
+		logger.Error("job parked after repeated failures", "attempts", attempts, "error", cause)
+		w.dispatch(events.JobFailed{ConnectionName: connectionName, Job: j, Exception: cause})
+		return
+	}
+
+	wait := w.calculateBackoff(j, attempts)
+	if relErr := j.Release(ctx, wait); relErr != nil {
+		logger.Error("releasing the job failed", "error", relErr)
+	}
+	logger.Warn("job failed", "attempt", attempts, "retry_in", wait, "error", cause)
+	w.dispatch(events.JobReleasedAfterException{ConnectionName: connectionName, Job: j, Delay: wait})
+}
+
+// shouldFail decides whether this failure is the job's last.
+//
+// It folds Worker::markJobAsFailedIfWillExceedMaxAttempts,
+// markJobAsFailedIfWillExceedMaxExceptions and
+// markJobAsFailedIfItShouldFailOnTimeout into one predicate: the three PHP
+// methods each fail the job themselves, so a job that trips two of them is
+// failed twice, and here the decision is made once and acted on once.
+func (w *Worker) shouldFail(j *jobs.Job, attempts int, cause error) bool {
+	// A handler that says the work can never succeed is believed on the first
+	// delivery. Retrying it four more times is four more copies of the same
+	// error, an hour apart.
+	if errors.Is(cause, ErrManuallyFailed) {
+		return true
+	}
+	if until := j.RetryUntil(); !until.IsZero() {
+		return !time.Now().Before(until)
+	}
+	if j.ShouldFailOnTimeout() && errors.Is(cause, context.DeadlineExceeded) {
+		return true
+	}
+	if max := j.MaxExceptions(); max > 0 && j.Exceptions >= max {
+		return true
+	}
+	return attempts >= w.maxTriesFor(j)
+}
+
+// MarkJobAsFailedIfAlreadyExceedsMaxAttempts parks a job that used up its
+// deliveries without ever reporting an error.
+//
+// It answers Worker::markJobAsFailedIfAlreadyExceedsMaxAttempts(). The case it
+// exists for is a job that keeps timing out: the process dies with the job in
+// flight, the lease expires, the job comes back, and nothing ever ran the code
+// that counts a failure. Without this check that job is delivered forever.
+//
+// It returns the reason it parked the job, so the caller stops -- which is what
+// the PHP's `throw $e` does -- and nil when the job may run.
+func (w *Worker) MarkJobAsFailedIfAlreadyExceedsMaxAttempts(ctx context.Context, j *jobs.Job) error {
+	if until := j.RetryUntil(); !until.IsZero() {
+		if time.Now().Before(until) {
+			return nil
+		}
+	} else {
+		max := w.maxTriesFor(j)
+		if max <= 0 || j.Attempts <= max {
+			return nil
+		}
+	}
+
+	err := MaxAttemptsExceeded{}.ForJob(j, w.maxTriesFor(j))
+	if failErr := j.Fail(ctx, err); failErr != nil {
+		return failErr
+	}
+	return err
+}
+
+// maxTriesFor is the job's own limit when it has one, and the worker's when it
+// does not.
+func (w *Worker) maxTriesFor(j *jobs.Job) int {
+	if own := j.MaxTries(); own != 0 {
+		return own
+	}
+	return w.opts.MaxTries
+}
+
+// timeoutFor is the job's own timeout when it has one, and the worker's when it
+// does not. It answers Worker::timeoutForJob().
+func (w *Worker) timeoutFor(j *jobs.Job) time.Duration {
+	if own := j.Timeout(); own > 0 {
+		return own
+	}
+	return w.opts.Timeout
+}
+
+// calculateBackoff is how long to wait before the next delivery.
+//
+// It answers Worker::calculateBackoff(): the job's own schedule when it declared
+// one, and the worker's when it did not.
+func (w *Worker) calculateBackoff(j *jobs.Job, attempt int) time.Duration {
+	if own := j.Backoff(); own > 0 {
+		return own
+	}
+	return w.opts.Backoff(attempt)
+}
+
+// getNextJobs takes the next batch off the queue, through the registered pop
+// callback when there is one.
+//
+// It answers Worker::getNextJob(), which is one job in PHP and a batch here.
+func (w *Worker) getNextJobs(ctx context.Context) ([]*jobs.Job, error) {
+	pop := func(name string) ([]*jobs.Job, error) {
+		return w.queue.Pop(ctx, name, w.opts.Concurrency, w.opts.Lease)
+	}
+
+	w.dispatch(events.JobPopping{ConnectionName: w.connectionName(), Queue: w.opts.Queue})
+
+	popCallbacks.RLock()
+	callback, registered := popCallbacks.byWorker[w.opts.Name]
+	popCallbacks.RUnlock()
+
+	var (
+		popped []*jobs.Job
+		err    error
+	)
+	if registered {
+		popped, err = callback(ctx, pop)
+	} else {
+		popped, err = pop(w.opts.Queue)
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, j := range popped {
+		w.dispatch(events.JobPopped{ConnectionName: w.connectionName(), Job: j})
+	}
+	return popped, nil
+}
+
+// daemonShouldRun reports whether this pass of the loop may take work.
+//
+// It answers Worker::daemonShouldRun(): paused, down for maintenance, or a
+// Looping listener that said no.
+func (w *Worker) daemonShouldRun(ctx context.Context) bool {
+	if w.Paused.Load() {
+		return false
+	}
+	if w.manager != nil && !w.opts.Force && interruptionPolling.Load() {
+		if paused, err := w.manager.IsPaused(ctx, w.connectionName(), w.opts.Queue); err == nil && paused {
+			return false
+		}
+	}
+	if w.events != nil {
+		if answer := w.events.Until(events.Looping{
+			ConnectionName: w.connectionName(), Queue: w.opts.Queue,
+		}); answer == false {
+			return false
+		}
+	}
+	return true
+}
+
+// pauseWorker waits out one pass of a paused loop, and reports whether the
+// worker should stop while it is there.
+//
+// It answers Worker::pauseWorker(). The check afterwards is the point: a paused
+// worker still has to notice `aru queue:restart`, or a deploy waits for a queue
+// that will never resume.
+func (w *Worker) pauseWorker(ctx context.Context, lastRestart string) (int, WorkerStopReason, bool) {
+	sleep := w.opts.Sleep
+	if sleep <= 0 {
+		sleep = time.Second
+	}
+	if !w.wait(ctx, sleep) {
+		return ExitSuccess, Interrupted, true
+	}
+	return w.stopIfNecessary(ctx, lastRestart, time.Time{}, 0, 0)
+}
+
+// stopIfNecessary decides whether the loop ends, and why.
+//
+// It answers Worker::stopIfNecessary(), in the same order: the reasons are
+// checked most-urgent first, so a worker that is both out of memory and past
+// its job limit reports the memory.
+func (w *Worker) stopIfNecessary(ctx context.Context, lastRestart string, start time.Time, processed, lastBatch int) (int, WorkerStopReason, bool) {
+	switch {
+	case w.ShouldQuit.Load():
+		return ExitSuccess, Interrupted, true
+	case w.MemoryExceeded(w.opts.Memory):
+		return ExitMemoryLimit, MaxMemoryExceeded, true
+	case w.queueShouldRestart(ctx, lastRestart):
+		return ExitSuccess, ReceivedRestartSignal, true
+	case w.opts.StopWhenEmpty && lastBatch == 0:
+		return ExitSuccess, QueueEmpty, true
+	case w.opts.MaxTime > 0 && !start.IsZero() && time.Since(start) >= w.opts.MaxTime:
+		return ExitSuccess, MaxTimeExceeded, true
+	case w.opts.MaxJobs > 0 && processed >= w.opts.MaxJobs:
+		return ExitSuccess, MaxJobsExceeded, true
+	}
+	return ExitSuccess, "", false
+}
+
+// MemoryExceeded reports whether the process is holding more than limit
+// megabytes.
+//
+// It answers Worker::memoryExceeded(). Laravel reads memory_get_usage(true),
+// which is what PHP asked the operating system for; the closest number Go has
+// is MemStats.Sys, which is the same question. A limit of zero or less is no
+// limit, exactly as in PHP.
+func (w *Worker) MemoryExceeded(limitMB int) bool {
+	if limitMB <= 0 {
+		return false
+	}
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return m.Sys/1024/1024 >= uint64(limitMB)
+}
+
+// Stop ends the loop and returns the exit status.
+//
+// It answers Worker::stop(). The event goes out here rather than at each call
+// site, which is what makes "the worker stopped and this is why" one line in a
+// log instead of six places that might have logged it.
+func (w *Worker) Stop(status int, reason WorkerStopReason) int {
+	w.dispatch(events.WorkerStopping{Status: status, WorkerOptions: w.opts, Reason: reason})
+	return status
+}
+
+// Kill ends the process now.
+//
+// It answers Worker::kill(). It exists for the one case [Worker.Stop] cannot
+// serve: a handler that has stopped responding to its context, where returning
+// from the loop would wait forever on a goroutine that will never finish.
+// Everything else stops by returning.
+func (w *Worker) Kill(status int) {
+	w.dispatch(events.WorkerStopping{Status: status, WorkerOptions: w.opts})
+	os.Exit(status)
+}
+
+// Sleep waits for d, or until the context is cancelled.
+//
+// It answers Worker::sleep(). It takes the context that PHP does not have, and
+// that is the difference that matters: a worker asleep for three seconds when
+// SIGTERM arrives holds up the deploy for three seconds, and this one does not.
+func (w *Worker) Sleep(ctx context.Context, d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	w.wait(ctx, d)
+}
+
+// wait sleeps and reports whether it finished rather than being cancelled.
+func (w *Worker) wait(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+// queueShouldRestart reports whether somebody asked the workers to restart
+// since this one started. It answers Worker::queueShouldRestart().
+func (w *Worker) queueShouldRestart(ctx context.Context, lastRestart string) bool {
+	if w.cache == nil {
+		return false
+	}
+	return w.getTimestampOfLastQueueRestart(ctx) != lastRestart
+}
+
+// getTimestampOfLastQueueRestart reads the restart signal, or empty when there
+// is none. It answers Worker::getTimestampOfLastQueueRestart().
+func (w *Worker) getTimestampOfLastQueueRestart(ctx context.Context) string {
+	if w.cache == nil || !interruptionPolling.Load() {
+		return ""
+	}
+	stamp, err := w.cache.Get(ctx, restartKey)
+	if err != nil {
+		return ""
+	}
+	return string(stamp)
+}
+
+// connectionName is what this worker's jobs report as their connection.
+func (w *Worker) connectionName() string {
+	if named, says := w.queue.(interface{ GetConnectionName() string }); says {
+		return named.GetConnectionName()
+	}
+	return ""
+}
+
+// dispatch sends an event, when there is a dispatcher to send it to.
+func (w *Worker) dispatch(event any) {
+	if w.events != nil {
+		w.events.Dispatch(event)
+	}
 }
 
 // run wraps the handler in the worker's middleware, outermost first.
@@ -336,3 +906,7 @@ func (w *Worker) run(ctx context.Context, h Handler, j *jobs.Job) error {
 	}
 	return next(ctx)
 }
+
+// nowStamp is the value `aru queue:restart` writes: a Unix timestamp, as text,
+// because that is all a comparison needs and text is what every store holds.
+func nowStamp() string { return strconv.FormatInt(time.Now().UnixNano(), 10) }

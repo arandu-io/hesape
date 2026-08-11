@@ -11,6 +11,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"unicode/utf8"
+
+	"github.com/arandu-io/hesape/console/view/components"
 )
 
 // detailWidth is the column the right-hand side of a two column line ends at.
@@ -52,6 +54,27 @@ type IO struct {
 	args  []string
 	flags *flag.FlagSet
 
+	// input is the command line bound to what the signature declared, and it is
+	// what Argument, Option and their has* companions read.
+	input *Input
+
+	// verbosity is how much the command is allowed to say, and factory is the
+	// component set it renders with. Both are built on first use.
+	verbosity Verbosity
+	factory   *components.Factory
+
+	// base is the application root, which the components strip from a path.
+	base string
+
+	// signals is what Trap installed, and what Untrap takes back off.
+	signals *Signals
+
+	// newLinesWritten is how many line endings the last write left behind. It
+	// starts at 1 to account for the one the shell wrote after the command was
+	// typed, exactly as OutputStyle does, and it is the whole of what
+	// Illuminate\Console\Contracts\NewLineAware exists for.
+	newLinesWritten int
+
 	// tty is whether out is a terminal, and colour is whether it is a terminal
 	// that was not asked to stay plain. NO_COLOR is honoured because a build
 	// log that fills with escape sequences is a build log nobody reads.
@@ -78,12 +101,14 @@ func NewIO(name string, args []string, out, errOut io.Writer, in io.Reader) *IO 
 	}
 
 	o := &IO{
-		out:    out,
-		err:    errOut,
-		in:     in,
-		reader: bufio.NewReader(in),
-		name:   name,
-		args:   args,
+		out:             out,
+		err:             errOut,
+		in:              in,
+		reader:          bufio.NewReader(in),
+		name:            name,
+		args:            args,
+		verbosity:       VerbosityNormal,
+		newLinesWritten: 1,
 	}
 
 	if f, ok := out.(*os.File); ok && isTerminal(f) {
@@ -155,17 +180,33 @@ func (o *IO) Error(format string, a ...any) {
 	o.write(o.err, ansiRed, "error: "+format, a...)
 }
 
-// NewLine writes one blank line to the output. Call it twice for two: a count
-// argument would be a second way to write the same thing.
-func (o *IO) NewLine() { fmt.Fprintln(o.out) }
+// NewLine writes count blank lines to the output, and one when count is left
+// out.
+//
+// It answers InteractsWithIO::newLine. The mechanical difference is the
+// variadic, which is how a PHP default argument is spelt in Go.
+func (o *IO) NewLine(count ...int) {
+	n := 1
+	if len(count) > 0 {
+		n = count[0]
+	}
+	for range n {
+		fmt.Fprintln(o.out)
+	}
+	o.newLinesWritten += n
+}
 
 // write is the one place a line is formatted, painted and terminated.
 func (o *IO) write(w io.Writer, colour, format string, a ...any) {
+	if o.verbosity == VerbosityQuiet {
+		return
+	}
 	text := format
 	if len(a) > 0 {
 		text = fmt.Sprintf(format, a...)
 	}
 	fmt.Fprintln(w, o.paint(colour, text))
+	o.newLinesWritten = trailingNewLineCount(text) + 1
 }
 
 // paint wraps text in an escape sequence, or does not.
@@ -307,21 +348,11 @@ func (p *Progress) bar() string {
 }
 
 // Ask puts a question and returns the answer, or def when the answer is empty.
-func (o *IO) Ask(question, def string) (string, error) {
-	if def != "" {
-		fmt.Fprintf(o.out, "%s [%s] ", question, def)
-	} else {
-		fmt.Fprintf(o.out, "%s ", question)
-	}
-	answer, err := o.readLine()
-	if err != nil {
-		return "", err
-	}
-	if answer == "" {
-		return def, nil
-	}
-	return answer, nil
-}
+//
+// It answers InteractsWithIO::ask, which is one call to askQuestion in the PHP
+// too: the prompt is written and the answer read in one place, so a command
+// cannot ask in a shape the rest of the output does not use.
+func (o *IO) Ask(question, def string) (string, error) { return o.AskQuestion(question, def) }
 
 // Secret asks for a value the terminal must not show: a password, a token.
 //

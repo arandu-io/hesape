@@ -47,20 +47,32 @@
 // url.Values, and validating one inside the form pipeline would be a second way
 // to validate (RULE 9).
 //
-// # Three of Illuminate's methods are missing on purpose
+// # Two file APIs, and the line between them
 //
-// url() returns the permanent public address of a file, which only exists
-// because a public disk does. There is none here, so there is no such address:
-// the answer to "how do I link to this" is [URLSigner.TemporaryURL], and it
-// expires.
+// [Disk] is customer data: every method takes an [auth.Grant] and every path it
+// builds starts with a tenant. [Filesystem] is the application's own files --
+// stubs, compiled views, session files, cache entries -- and takes plain paths,
+// exactly as os.ReadFile does. Illuminate has the same two classes for the same
+// reason; the failure worth naming is putting an upload through the second one,
+// where there is no prefix and therefore no isolation.
 //
-// getVisibility() and setVisibility() are the same absence said twice. A stored
-// file is reachable by a Policy or not at all, and a per-object flag saying
-// otherwise would be a second authorization path (RULE 9).
+// [LockableFile] is what makes the second one safe to share between processes,
+// and [Filesystem.SharedGet] and [Filesystem.Put] with lock are the pattern.
 //
-// makeDirectory() has nothing to make. A directory here exists because a key
-// under it does -- [LocalFilesystemAdapter] creates the parents on the way in,
-// and an object store has no directories at all. Writing an empty marker object
-// to stand for one would put a key in every listing that [Disk.Get] then answers
-// ErrNotFound for.
+// # url(), getVisibility() and makeDirectory()
+//
+// All three are here, and each of them means less than its name suggests:
+//
+//   - [Disk.URL] is the permanent public address of a file. It carries no
+//     authorization at all, so it answers [ErrNoURL] unless the disk was
+//     configured with one. The answer for a tenant's file is
+//     [Disk.TemporaryURL] or [URLSigner.TemporaryURL], which expire.
+//   - [Disk.GetVisibility] and [Disk.SetVisibility] report and set what the
+//     STORE will hand out to somebody who never came through the application.
+//     They do not replace a Policy: every read here still takes a Grant
+//     (RULE 17).
+//   - [Disk.MakeDirectory] makes a directory on a driver that has them, and
+//     succeeds without doing anything on one that does not -- an object store
+//     has no directories, and a marker object standing in for one would put a
+//     key in every listing that [Disk.Get] then answers [ErrNotFound] for.
 package filesystem

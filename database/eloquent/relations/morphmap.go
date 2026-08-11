@@ -1,0 +1,161 @@
+package relations
+
+import (
+	"fmt"
+	"sort"
+	"sync"
+)
+
+// ErrMorphNotMapped is what a polymorphic read returns when the value in the
+// type column names nothing.
+//
+// It answers Illuminate\Database\ClassMorphViolationException, which the PHP
+// throws when requireMorphMap is on and a model has no alias. Here it is also
+// what an unknown alias produces on the way back, because there is no class
+// name in the column to fall back to.
+var ErrMorphNotMapped = fmt.Errorf("relations: morph type is not in the morph map")
+
+var morphMap = struct {
+	sync.RWMutex
+	entries  map[string]func() Model
+	required bool
+}{entries: map[string]func() Model{}, required: true}
+
+// MorphMap answers Relation::morphMap: it registers aliases and returns the map.
+//
+// # The map is mandatory here, and that is the better half of the trade
+//
+// In PHP the alias is optional: with no map, `commentable_type` holds
+// "App\Models\Post" and Eloquent instantiates the class by name. That works
+// until somebody moves the class, and then every row written before the move
+// points at a namespace that no longer exists -- a rename that has to be
+// followed by an UPDATE over the table, which is why the Laravel documentation
+// recommends the map anyway.
+//
+// Go has no class name at run time to write into the column, so the map is not
+// a recommendation here, it is the mechanism. What the column holds is an alias
+// the application chose -- "post", "video" -- and the type it points at can be
+// renamed, moved between packages, or split in two, without a single row of
+// data becoming unreadable. The constraint buys the thing the PHP has to
+// remember to ask for.
+//
+// The values are factories rather than instances, because every read needs a
+// fresh model and a shared one would be a data race the first time two requests
+// loaded the same morph type.
+//
+//	relations.MorphMap(map[string]func() relations.Model{
+//	    "post":  func() relations.Model { return &Post{} },
+//	    "video": func() relations.Model { return &Video{} },
+//	})
+//
+// merge defaults to true, as it does in the PHP.
+func MorphMap(entries map[string]func() Model, merge ...bool) map[string]func() Model {
+	morphMap.Lock()
+	defer morphMap.Unlock()
+
+	shouldMerge := len(merge) == 0 || merge[0]
+	if entries != nil {
+		if !shouldMerge {
+			morphMap.entries = map[string]func() Model{}
+		}
+		for alias, factory := range entries {
+			morphMap.entries[alias] = factory
+		}
+	}
+
+	return copyMorphMap()
+}
+
+// GetMorphMap returns the registered aliases. The PHP reads the public static
+// property; a package variable cannot be exported without letting a caller
+// replace the map mid-flight, so it is read through a function.
+func GetMorphMap() map[string]func() Model {
+	morphMap.RLock()
+	defer morphMap.RUnlock()
+	return copyMorphMap()
+}
+
+// EnforceMorphMap answers Relation::enforceMorphMap.
+func EnforceMorphMap(entries map[string]func() Model, merge ...bool) map[string]func() Model {
+	RequireMorphMap(true)
+	return MorphMap(entries, merge...)
+}
+
+// RequireMorphMap answers Relation::requireMorphMap.
+//
+// It is on by default here, which the PHP's is not. Turning it off cannot
+// restore the PHP's behaviour -- there is no class name in the column to
+// resolve -- so what it changes is only whether an unmapped alias is refused
+// early or fails later with a less helpful message.
+func RequireMorphMap(required ...bool) {
+	morphMap.Lock()
+	defer morphMap.Unlock()
+	morphMap.required = len(required) == 0 || required[0]
+}
+
+// RequiresMorphMap answers Relation::requiresMorphMap.
+func RequiresMorphMap() bool {
+	morphMap.RLock()
+	defer morphMap.RUnlock()
+	return morphMap.required
+}
+
+// GetMorphedModel answers Relation::getMorphedModel: the factory registered
+// under an alias, or nil.
+func GetMorphedModel(alias string) func() Model {
+	morphMap.RLock()
+	defer morphMap.RUnlock()
+	return morphMap.entries[alias]
+}
+
+// CreateModelByType answers MorphTo::createModelByType together with
+// Model::getActualClassNameForMorph.
+//
+// It carries an error where the PHP would either instantiate a class by name or
+// throw: an alias nobody registered is a row this process cannot read, and the
+// message says which alias and what is registered, because the answer is
+// always "add it to the morph map".
+func CreateModelByType(alias string) (Model, error) {
+	factory := GetMorphedModel(alias)
+	if factory == nil {
+		return nil, fmt.Errorf("%w: %q is not registered. Registered: %v", ErrMorphNotMapped, alias, registeredAliases())
+	}
+	return factory(), nil
+}
+
+// GetMorphAlias answers Relation::getMorphAlias.
+//
+// The PHP searches the map for a class name. A model here already knows the
+// alias it was registered under -- that is what GetMorphClass answers -- so the
+// search is a lookup, and its only remaining job is refusing a model that was
+// never registered while requireMorphMap is on.
+func GetMorphAlias(model Model) (string, error) {
+	alias := model.GetMorphClass()
+	if !RequiresMorphMap() {
+		return alias, nil
+	}
+	if GetMorphedModel(alias) == nil {
+		return "", fmt.Errorf("%w: the model on table %q answers the morph alias %q, which is not registered", ErrMorphNotMapped, model.GetTable(), alias)
+	}
+	return alias, nil
+}
+
+func copyMorphMap() map[string]func() Model {
+	out := make(map[string]func() Model, len(morphMap.entries))
+	for alias, factory := range morphMap.entries {
+		out[alias] = factory
+	}
+	return out
+}
+
+func registeredAliases() []string {
+	morphMap.RLock()
+	defer morphMap.RUnlock()
+
+	aliases := make([]string, 0, len(morphMap.entries))
+	for alias := range morphMap.entries {
+		aliases = append(aliases, alias)
+	}
+	sort.Strings(aliases)
+	return aliases
+}

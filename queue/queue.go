@@ -113,59 +113,19 @@ type Queue interface {
 // ErrNoConnection is returned when a connection nobody registered is asked for.
 var ErrNoConnection = fmt.Errorf("queue: no such connection")
 
-// Manager holds the configured connections and hands them out by name.
+// Dispatcher is the two things the queue asks of an event dispatcher.
 //
-// It answers Illuminate\Queue\QueueManager, minus the half of it that is the
-// container: there are no connectors and no lazy resolution from config, because
-// the application constructs its queues in bootstrap/app.go and passes them here
-// (ADR 0001). What is left is the part anybody actually calls -- `aru work
-// --connection=redis` has to turn a string into a queue, and the default
-// connection has to have a name.
-type Manager struct {
-	def         string
-	connections map[string]Queue
-}
-
-// NewManager returns an empty manager.
-func NewManager() *Manager {
-	return &Manager{connections: map[string]Queue{}}
-}
-
-// Extend registers a connection under a name.
+// It is declared here rather than imported so the queue does not depend on the
+// events package to run, and so a test can watch what a worker announced with
+// eight lines and no wiring. events.Dispatcher satisfies it.
 //
-// The first one registered becomes the default, so an application with one
-// queue never has to say which it means.
-func (m *Manager) Extend(name string, q Queue) *Manager {
-	if m.def == "" {
-		m.def = name
-	}
-	m.connections[name] = q
-	return m
-}
-
-// DefaultConnection is the name Connection uses when asked for "".
-func (m *Manager) DefaultConnection() string { return m.def }
-
-// SetDefaultConnection names the connection Connection uses when asked for "".
-func (m *Manager) SetDefaultConnection(name string) { m.def = name }
-
-// Connection returns a registered queue. An empty name means the default.
-func (m *Manager) Connection(name string) (Queue, error) {
-	if name == "" {
-		name = m.def
-	}
-	q, known := m.connections[name]
-	if !known {
-		return nil, fmt.Errorf("%w: %q. Register it with Extend in bootstrap/app.go", ErrNoConnection, name)
-	}
-	return q, nil
-}
-
-// Connections lists the registered names, for `aru queue:monitor` to print.
-func (m *Manager) Connections() []string {
-	out := make([]string, 0, len(m.connections))
-	for name := range m.connections {
-		out = append(out, name)
-	}
-	return out
+// Until is on it and not just Dispatch because of one listener: a Looping
+// listener that returns false stops the worker taking work, and halting on the
+// first answer is the only way to hear it.
+type Dispatcher interface {
+	// Dispatch sends an event to every listener and returns what they returned.
+	Dispatch(event any, payload ...any) []any
+	// Until sends an event and stops at the first listener that answers
+	// something other than nil.
+	Until(event any, payload ...any) any
 }

@@ -29,8 +29,8 @@ func signedIn(id, tenant string, roles ...string) session.Record[account] {
 	}
 }
 
-func newStore(secure bool) *session.Store[account] {
-	return session.NewStore(appKey, time.Hour, secure, session.NewArrayHandler[account]())
+func newStore(secure bool) *session.RecordStore[account] {
+	return session.NewRecordStore(appKey, time.Hour, secure, session.NewArrayHandler[account]())
 }
 
 // requestWithCookies replays the cookies a response set, which is how the
@@ -192,7 +192,7 @@ func TestAllWithoutCookie(t *testing.T) {
 }
 
 func TestExpiredSessionIsRejected(t *testing.T) {
-	store := session.NewStore(appKey, -time.Second, true, session.NewArrayHandler[account]())
+	store := session.NewRecordStore(appKey, -time.Second, true, session.NewArrayHandler[account]())
 	rec := httptest.NewRecorder()
 	if _, err := store.Start(context.Background(), rec, signedIn("u1", "t1")); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -260,7 +260,7 @@ func TestARememberedSessionOutlivesAPlainOne(t *testing.T) {
 // did not.
 func TestRememberNeverShortensASession(t *testing.T) {
 	long := 90 * 24 * time.Hour
-	store := session.NewStore(appKey, long, true, session.NewArrayHandler[account]())
+	store := session.NewRecordStore(appKey, long, true, session.NewArrayHandler[account]())
 
 	rec := httptest.NewRecorder()
 	if _, err := store.Start(context.Background(), rec, signedIn("u1", "t1"), session.Remember(true)); err != nil {
@@ -555,7 +555,7 @@ func (h forgetfulHandler) Write(ctx context.Context, id string, rec session.Reco
 // reported success, the stamp was never stored, and the person typed the right
 // password onto the same screen forever.
 func TestAHandlerThatDropsTheStampIsRefusedRatherThanLooping(t *testing.T) {
-	store := session.NewStore[account](appKey, time.Hour, true, forgetfulHandler{session.NewArrayHandler[account]()})
+	store := session.NewRecordStore[account](appKey, time.Hour, true, forgetfulHandler{session.NewArrayHandler[account]()})
 	ctx := context.Background()
 
 	rec := httptest.NewRecorder()

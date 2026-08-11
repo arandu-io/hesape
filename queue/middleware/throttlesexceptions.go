@@ -26,8 +26,14 @@ type ThrottlesExceptions struct {
 	limiter    *cache.RateLimiter
 	limit      cache.Limit
 	retryAfter time.Duration
+	backoff    time.Duration
 	byJob      bool
+	by         string
+	prefix     string
 	when       func(error) bool
+	deleteWhen func(error) bool
+	failWhen   func(error) bool
+	report     func(error) bool
 }
 
 var _ Middleware = (*ThrottlesExceptions)(nil)
@@ -53,6 +59,38 @@ func (m *ThrottlesExceptions) ByJob() *ThrottlesExceptions {
 	return m
 }
 
+// By counts against a key of your own instead of the job's name.
+//
+// It answers by(). Use it when the thing that is failing is neither the job nor
+// the record but something they share: an account, a region, a tenant of the
+// third party.
+func (m *ThrottlesExceptions) By(key string) *ThrottlesExceptions {
+	m.by = key
+	return m
+}
+
+// WithPrefix puts a prefix in front of the counter's key.
+//
+// It answers withPrefix(). Two middlewares over the same job name would
+// otherwise share one counter, and the failures of one would throttle the
+// other.
+func (m *ThrottlesExceptions) WithPrefix(prefix string) *ThrottlesExceptions {
+	m.prefix = prefix
+	return m
+}
+
+// Backoff is how long the jobs that arrive while the limit is spent wait before
+// they are eligible again.
+//
+// It answers backoff(). It is the pause on the closed circuit, where RetryAfter
+// is the wait after the failure that closed it: the first says how long the
+// dependency gets to recover, the second how soon the job that noticed tries
+// again.
+func (m *ThrottlesExceptions) Backoff(d time.Duration) *ThrottlesExceptions {
+	m.backoff = d
+	return m
+}
+
 // When narrows which failures are counted. A failure it says no to is returned
 // to the worker untouched, which parks the job on the usual schedule.
 func (m *ThrottlesExceptions) When(f func(error) bool) *ThrottlesExceptions {
@@ -60,11 +98,62 @@ func (m *ThrottlesExceptions) When(f func(error) bool) *ThrottlesExceptions {
 	return m
 }
 
+// DeleteWhen drops the job instead of releasing it, for the failures the
+// predicate claims.
+//
+// It answers deleteWhen(). It is for the failure that means the work is
+// pointless rather than early: the record was deleted while the job waited, and
+// releasing it would put it back for four more rounds of the same answer.
+func (m *ThrottlesExceptions) DeleteWhen(f func(error) bool) *ThrottlesExceptions {
+	m.deleteWhen = f
+	return m
+}
+
+// FailWhen parks the job instead of releasing it, for the failures the
+// predicate claims.
+//
+// It answers failWhen(). It is DeleteWhen's louder sibling: the work is
+// pointless and somebody should see that it was.
+func (m *ThrottlesExceptions) FailWhen(f func(error) bool) *ThrottlesExceptions {
+	m.failWhen = f
+	return m
+}
+
+// Report narrows which failures are worth reporting.
+//
+// It answers report(). A dependency that is down produces one failure per job,
+// and reporting every one of them is how the report becomes noise: the
+// predicate is what says "only the first", or "only the ones that are not
+// timeouts". A nil predicate reports everything, which is the PHP's default.
+//
+// It does not report anything itself. What it decides is what
+// [ThrottlesExceptions.ShouldReport] answers, and the caller's error reporter
+// is what acts on it -- this package has no business knowing where a report
+// goes.
+func (m *ThrottlesExceptions) Report(f func(error) bool) *ThrottlesExceptions {
+	m.report = f
+	return m
+}
+
+// ShouldReport reports whether a failure is worth reporting.
+//
+// It is the read half of [ThrottlesExceptions.Report], and it has no PHP name
+// because in PHP the middleware calls report() itself through a global helper.
+func (m *ThrottlesExceptions) ShouldReport(err error) bool {
+	return m.report == nil || m.report(err)
+}
+
 // Handle refuses while the failures are piling up, and counts the ones it sees.
 func (m *ThrottlesExceptions) Handle(ctx context.Context, j *jobs.Job, next func(context.Context) error) error {
 	name := m.limit.Key
-	if m.byJob {
+	switch {
+	case m.by != "":
+		name = m.by
+	case m.byJob:
 		name = j.UUID
+	}
+	if m.prefix != "" {
+		name = m.prefix + ":" + name
 	}
 	limit := m.limit.By(key(j, name))
 
@@ -85,12 +174,26 @@ func (m *ThrottlesExceptions) Handle(ctx context.Context, j *jobs.Job, next func
 		return err
 	}
 	if !res.OK {
-		return j.Release(ctx, res.RetryAfter+retryPadding)
+		wait := res.RetryAfter + retryPadding
+		if m.backoff > 0 {
+			wait = m.backoff
+		}
+		return j.Release(ctx, wait)
 	}
 
 	runErr := next(ctx)
 	if runErr == nil {
 		return nil
+	}
+	// Delete and fail are checked before the counter, exactly as the PHP checks
+	// them first: a failure that means the work is pointless is not evidence
+	// that the dependency is down, and counting it would throttle jobs that
+	// would have succeeded.
+	if m.deleteWhen != nil && m.deleteWhen(runErr) {
+		return j.Delete(ctx)
+	}
+	if m.failWhen != nil && m.failWhen(runErr) {
+		return j.Fail(ctx, runErr)
 	}
 	if m.when != nil && !m.when(runErr) {
 		return runErr

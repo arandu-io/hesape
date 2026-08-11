@@ -1,19 +1,24 @@
-// Package scheduler is Arandu's Console\Scheduling: the tasks a module
-// declares, and the loop that fires them.
+// Package scheduler has moved to console/scheduling.
 //
-// A scheduler built on a system cron exists because the runtime has no resident
-// process: cron calls a command every minute and the command decides what to
-// run. That is two artifacts and a dependency on the operating system.
+// It used to hold a scheduler of its own -- Task, Schedule, Scheduler and
+// Module -- built before this ecosystem mirrored Illuminate. Illuminate puts
+// the same thing in Console\Scheduling, and two schedulers is two ways to say
+// the same thing (RULE 9), so the second one is gone rather than kept beside
+// the first.
 //
-// Go has a resident process. The scheduler is a goroutine in the same binary,
-// which is also what keeps the deploy story of doc 17 true: one image, no
-// crontab to configure, nothing to forget when a machine is replaced.
+// What each piece became, in github.com/arandu-io/hesape/console/scheduling:
 //
-// What it does not do is retry. A task that fails is logged and diagnosed, and
-// the next window runs it again; work that needs its own retry budget enqueues a
-// job, and the queue owns the retry. Scheduler fires, queue persists.
+//	Task            -> Event, declared through Schedule.Call or Schedule.Command
+//	Task.Spec       -> Event.Cron, and the frequency methods that write it
+//	Task.Scope      -> Event.PerTenant
+//	Task.Singleton  -> Event.OnOneServer
+//	Task.Action     -> Event.Action
+//	Schedule (cron) -> CronExpression
+//	Scheduler       -> Runner, and the Module that ticks it
+//	Module          -> Module
+//	Schedulable     -> a module returning []console.Command, or a Schedule
 //
-// The pieces are Task, which a module declares; Schedule, the parsed cron
-// expression; Scheduler, the loop; and Module, which runs the loop in the
-// application process.
+// Nothing is declared here. The package is kept so an import that has not been
+// updated fails with this file open rather than with a path that no longer
+// resolves.
 package scheduler

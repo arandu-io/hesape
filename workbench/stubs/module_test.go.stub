@@ -1,0 +1,27 @@
+package {{package_name}}
+
+import (
+	"testing"
+
+	"github.com/arandu-io/hesape/routing"
+)
+
+// TestName pins the module's identifier.
+//
+// Route names are built from it, so a rename nobody noticed is a set of links
+// that stopped resolving -- in published pages, where it is expensive to find.
+func TestName(t *testing.T) {
+	if got, want := New().Name(), "{{lower_name}}"; got != want {
+		t.Fatalf("Name() = %q, want %q", got, want)
+	}
+}
+
+// TestRoutes registers the module against a fresh router.
+//
+// It is worth having on day one. Routes is where a duplicate route name or a
+// malformed pattern shows up, and without this it shows up during boot of the
+// whole application, where the failing line is three frames away from the module
+// that caused it.
+func TestRoutes(t *testing.T) {
+	New().Routes(routing.NewRouter())
+}

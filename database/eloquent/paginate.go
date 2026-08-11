@@ -1,0 +1,216 @@
+package eloquent
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/database/query"
+	"github.com/arandu-io/hesape/pagination"
+)
+
+// Paginate answers Builder::paginate.
+//
+// The page number is an argument where the PHP resolves it off the request
+// through Paginator::resolveCurrentPage, which is a static reaching for the
+// container (ADR 0001, ADR 0002). The caller has the request and reads it with
+// pagination.ResolveCurrentPage.
+//
+// perPage of zero means the model's own.
+func (b *Builder[T]) Paginate(g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.LengthAwarePaginator[*Model[T]], error) {
+	if perPage <= 0 {
+		perPage = b.model.GetPerPage()
+	}
+	if page < 1 {
+		page = 1
+	}
+
+	total, err := b.GetCountForPagination(g)
+	if err != nil {
+		return nil, err
+	}
+
+	items := Collection[T]{}
+	if total > 0 {
+		items, err = b.clone().ForPage(page, perPage).Get(g, columns...)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return pagination.Paginate(items.All(), int(total), perPage, page, opts), nil
+}
+
+// SimplePaginate answers Builder::simplePaginate: one page and the answer to "is
+// there another", without the count.
+func (b *Builder[T]) SimplePaginate(g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[*Model[T]], error) {
+	if perPage <= 0 {
+		perPage = b.model.GetPerPage()
+	}
+	if page < 1 {
+		page = 1
+	}
+
+	items, err := b.clone().
+		Offset((page-1)*perPage).
+		Limit(perPage+1).
+		Get(g, columns...)
+	if err != nil {
+		return nil, err
+	}
+	return pagination.SimplePaginate(items.All(), perPage, page, opts), nil
+}
+
+// GetCountForPagination answers Builder::getCountForPagination.
+//
+// The orders, the limit and the offset come off before the count, because a
+// count with a limit on it counts the page rather than the result set.
+func (b *Builder[T]) GetCountForPagination(g auth.Grant) (int64, error) {
+	counted := b.clone()
+	counted.query = counted.query.CloneWithout("columns", "orders", "limit", "offset")
+	return counted.Count(g)
+}
+
+// CursorPaginate answers Builder::cursorPaginate: the page after (or before) a
+// boundary named by value rather than by offset.
+//
+// It is the paginator to reach for past the first few pages: ForPage makes the
+// engine count and discard every row it skips, and a row inserted between two
+// requests shifts the boundary so that a row is never shown.
+//
+// cursor is nil for the first page. The columns the query orders by are the
+// cursor's parameters, so every one of them has to be selected -- the cursor is
+// built out of the rows that come back.
+func (b *Builder[T]) CursorPaginate(g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (*pagination.CursorPaginator[*Model[T]], error) {
+	if perPage <= 0 {
+		perPage = b.model.GetPerPage()
+	}
+	if len(b.query.Unions) > 0 {
+		return nil, fmt.Errorf("eloquent: cursor pagination over a union is not supported: the boundary conditions have to be repeated inside every branch, and this builder has no way to reach them")
+	}
+
+	paginated := b.clone()
+	orders := paginated.ensureOrderForCursorPagination(cursor != nil && cursor.PointsToPreviousItems())
+	if len(orders) == 0 {
+		return nil, fmt.Errorf("eloquent: cursor pagination needs an order it can compare against")
+	}
+
+	if cursor != nil {
+		if err := addCursorConditions(paginated.query, *cursor, orders, 0); err != nil {
+			return nil, err
+		}
+	}
+
+	items, err := paginated.Limit(perPage+1).Get(g, columns...)
+	if err != nil {
+		return nil, err
+	}
+
+	parameters := make([]string, 0, len(orders))
+	for _, order := range orders {
+		parameters = append(parameters, order.column)
+	}
+
+	key := func(model *Model[T]) map[string]string {
+		out := make(map[string]string, len(parameters))
+		for _, parameter := range parameters {
+			out[parameter] = fmt.Sprint(model.GetAttribute(afterLastDot(parameter)))
+		}
+		return out
+	}
+	return pagination.CursorPaginate(items.All(), perPage, cursor, key, opts), nil
+}
+
+// cursorOrder is one entry of what ensureOrderForCursorPagination returns: a
+// column the cursor compares against, and the direction it is read in.
+type cursorOrder struct {
+	column    string
+	direction string
+}
+
+// ensureOrderForCursorPagination answers
+// Builder::ensureOrderForCursorPagination.
+func (b *Builder[T]) ensureOrderForCursorPagination(shouldReverse bool) []cursorOrder {
+	b.enforceOrderBy()
+
+	if shouldReverse {
+		for i := range b.query.Orders {
+			b.query.Orders[i].Direction = flipDirection(b.query.Orders[i].Direction)
+		}
+		for i := range b.query.UnionOrders {
+			b.query.UnionOrders[i].Direction = flipDirection(b.query.UnionOrders[i].Direction)
+		}
+	}
+
+	orders := b.query.Orders
+	if len(b.query.UnionOrders) > 0 {
+		orders = b.query.UnionOrders
+	}
+
+	out := make([]cursorOrder, 0, len(orders))
+	for _, order := range orders {
+		if order.Direction == "" || order.Column == nil {
+			// An orderByRaw has no direction to compare against, which is what
+			// the PHP filters on before it builds the conditions.
+			continue
+		}
+		out = append(out, cursorOrder{column: fmt.Sprint(order.Column), direction: order.Direction})
+	}
+	return out
+}
+
+func flipDirection(direction string) string {
+	if direction == "asc" {
+		return "desc"
+	}
+	return "asc"
+}
+
+// addCursorConditions answers the closure of the same name inside
+// BuildsQueries::paginateUsingCursor.
+//
+// It reads: past the first ordering column, every earlier one has to be equal,
+// and this one has to be past the boundary -- or, if there is another column
+// after it, equal here and past the boundary there. That nesting is what makes a
+// compound cursor skip exactly the rows already seen.
+func addCursorConditions(q *query.Builder, cursor pagination.Cursor, orders []cursorOrder, i int) error {
+	if i > 0 {
+		previous := orders[i-1].column
+		value, err := cursor.Parameter(previous)
+		if err != nil {
+			return err
+		}
+		q.Where(cursorColumn(previous), "=", value)
+	}
+
+	order := orders[i]
+	value, err := cursor.Parameter(order.column)
+	if err != nil {
+		return err
+	}
+
+	operator := ">"
+	if order.direction != "asc" {
+		operator = "<"
+	}
+
+	var inner error
+	q.Where(func(nested *query.Builder) {
+		nested.Where(cursorColumn(order.column), operator, value)
+		if i < len(orders)-1 {
+			nested.OrWhere(func(deeper *query.Builder) {
+				inner = addCursorConditions(deeper, cursor, orders, i+1)
+			})
+		}
+	})
+	return inner
+}
+
+// cursorColumn answers getOriginalColumnNameForCursorPagination's last step: a
+// column that is an expression stays one, so that ordering by a function still
+// compares against the same function.
+func cursorColumn(column string) any {
+	if strings.ContainsAny(column, "()") {
+		return query.Raw(column)
+	}
+	return column
+}

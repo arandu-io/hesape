@@ -1,10 +1,13 @@
 // Package console mirrors Illuminate\Session\Console.
 //
 // The files it answers to, in the clone at
-// laravel_illuminate/session/Console:
+// laravel_illuminate/Session/Console:
 //
 //	SessionTableCommand.php
 //
-// Nothing is implemented here yet. docs/31-reorganizacao-hesape.md says what
-// moves in, from where, and in which phase.
+// [SessionTableCommand] writes the migration that creates the table
+// [session.DatabaseSessionHandler] reads. It writes a file and runs nothing: a
+// migration that ran itself would be N replicas racing each other at boot
+// (RULE 16), and emitting a file is what lets somebody read it before it
+// reaches production.
 package console

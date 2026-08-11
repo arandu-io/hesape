@@ -36,7 +36,7 @@ func NewModule() *Module { return &Module{} }
 //
 // In-process, like the scheduler and for the same reason: a second deployable
 // for background work is a second thing to monitor, page on, and forget to
-// restart. With more than one replica, give the relay a Locker -- otherwise
+// restart. With more than one replica, give the relay a cache.Locks -- otherwise
 // each one publishes every event.
 func WithRelay(r *Relay) *Module { return &Module{relay: r} }
 

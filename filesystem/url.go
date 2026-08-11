@@ -78,7 +78,7 @@ func (u *URLSigner) TemporaryURL(ctx context.Context, g auth.Grant, d *Disk, key
 	if err != nil {
 		return "", err
 	}
-	if p, ok := d.Adapter().(Presigner); ok {
+	if p, ok := d.GetAdapter().(Presigner); ok {
 		link, err := p.PresignGet(ctx, full, ttl)
 		if err != nil {
 			return "", d.wrap("presign", key, err)

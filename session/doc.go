@@ -1,9 +1,8 @@
-// Package session issues sessions, carries the one-shot flash across the
-// redirect that follows a rejected form, and mints the CSRF token bound to the
-// session.
+// Package session issues sessions, carries the flash across the redirect that
+// follows a rejected form, and mints the CSRF token bound to the session.
 //
 // It mirrors Illuminate\Session. The files it answers to, in the clone at
-// laravel_illuminate/session:
+// laravel_illuminate/Session:
 //
 //	ArraySessionHandler.php
 //	CacheBasedSessionHandler.php
@@ -21,27 +20,57 @@
 //
 // # What is here
 //
-//   - Store, the thing that starts, reads, regenerates and ends a session. The
-//     cookie carries the id and an HMAC of it, so a forged cookie is refused
-//     before a handler is touched.
-//   - Handler, where the records live between requests, and ArrayHandler, the
-//     one this package ships. A distributed store is an adapter -- see the kv
-//     repository.
-//   - Flash, the messages and the typed input of a rejected request, carried to
-//     the page the redirect lands on.
-//   - CSRF, the double-submit token bound to the session id.
+//   - [Store], Illuminate's Store: one session, loaded for one request, holding
+//     a bag of keys. The flash, the old input, the CSRF token and the previous
+//     URL live in it, which is to say everything that makes old() and $errors
+//     work on the page a rejected form is sent back to.
+//   - [SessionHandler] and the six handlers that implement it:
+//     [ArraySessionHandler], [NullSessionHandler], [FileSessionHandler],
+//     [CookieSessionHandler], [CacheBasedSessionHandler] and
+//     [DatabaseSessionHandler].
+//   - [EncryptedStore], the same session sealed before it reaches the handler.
+//   - [SessionManager], which builds one from configuration.
+//   - [RecordStore], the other kind of session store -- see below.
+//   - [Flash], the one-shot signed cookie that carries the messages and the
+//     typed input of a rejected request even when there is no session at all.
+//   - [CSRF], the double-submit token bound to the session id.
 //
-// # What is deliberately not here
+// The middleware is github.com/arandu-io/hesape/session/middleware:
+// StartSession and AuthenticateSession. The generator is
+// github.com/arandu-io/hesape/session/console: SessionTableCommand.
 //
-// The store is generic over the payload the application keeps in a session, so
-// this package knows nothing about who is signed in: the subject, the roles and
-// the tenant belong to the auth package, which builds the Record it hands to
-// Start. Two things this package DOES keep beside the payload are the
-// remember-me answer and the password confirmation stamp, because both decide
-// how long the record and its cookie live, and a lifetime computed from
-// something the caller may rewrite is not a lifetime.
+// TokenMismatchException is [ErrTokenMismatch]. An exception class with no
+// fields and no methods is a sentinel error in Go, and errors.Is is how a caller
+// asks the question `catch (TokenMismatchException)` asks.
 //
-// A session is not a bag of arbitrary keys either. There is no Get and no Put by
-// name: the payload is one typed value, written whole. Laravel's Session::get
-// exists because PHP has nowhere else to put a struct.
+// # Two stores, and which one to reach for
+//
+// [Store] is the Laravel one: string keys, dot notation, `mixed` values, flash
+// and old input. Reach for it for anything a page draws.
+//
+// [RecordStore] is the other half of what Illuminate spreads across Store,
+// SessionManager and StartSession -- signing the cookie, minting ids, reading
+// one typed [Record] back, ending every session of a subject at once. It is
+// generic over the payload, so what auth keeps about who is signed in is
+// checked by the compiler rather than asserted out of a map. They share
+// [Handler] and [Record]; nothing else is duplicated.
+//
+// # Two flashes, and which one to reach for
+//
+// [Store.Flash] is the session one: it needs a session, and it survives exactly
+// one request because [Store.Save] ages it.
+//
+// [Flash] is a signed cookie with no session behind it, and it exists for the
+// three screens that need the messages most -- sign in, sign up, password reset
+// -- which are submitted by somebody who has no session yet. Cleared on the read
+// rather than aged, so a message cannot appear on a page nobody submitted.
+//
+// # SymfonySessionDecorator is not here
+//
+// It exists to satisfy Symfony's HttpFoundation SessionInterface, and its
+// methods -- set(), clear(), getBag(), registerBag(), getMetadataBag() -- are
+// either aliases of [Store]'s own or bag plumbing from a framework Go has no
+// equivalent of. SessionServiceProvider is not here either: this collection has
+// no container (ADR 0001), and wiring is the application's, in one place a
+// person can read.
 package session

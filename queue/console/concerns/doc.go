@@ -1,10 +1,9 @@
-// Package concerns mirrors Illuminate\Queue\Console\Concerns.
+// Package concerns is what more than one queue command needs.
+//
+// It mirrors Illuminate\Queue\Console\Concerns, which in PHP is one trait.
 //
 // The files it answers to, in the clone at
 // laravel_illuminate/queue/Console/Concerns:
 //
-//	ParsesQueue.php
-//
-// Nothing is implemented here yet. docs/31-reorganizacao-hesape.md says what
-// moves in, from where, and in which phase.
+//	ParsesQueue.php -> ParsesQueue
 package concerns

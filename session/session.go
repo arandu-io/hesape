@@ -43,7 +43,7 @@ var (
 // Without an id and a tenant there is no question to ask: "every session of
 // subject 1" with no tenant reaches every customer (RULE 14), and "every session
 // of the empty subject" of one tenant is every session nobody has signed in on
-// -- the guests. Found by audit: Store.DestroyOthers refused both, and the
+// -- the guests. Found by audit: RecordStore.DestroyOthers refused both, and the
 // in-memory handler's DestroyIndex, which is exported and reachable without the
 // store, happily deleted every guest session of a tenant while the kv handler
 // answered the same call with an error. Two handlers that disagree is a bug that
@@ -61,7 +61,7 @@ var errNoSubjectScope = errors.New("session: signing out the other sessions need
 // hands stops working inside a billing cycle, where somebody notices.
 //
 // A store configured with a longer ttl than this keeps its own: see
-// Store.lifetime. Remember must never make a session shorter.
+// RecordStore.lifetime. Remember must never make a session shorter.
 const RememberLifetime = 30 * 24 * time.Hour
 
 // PasswordConfirmationWindow is how long typing the password again counts for.
@@ -181,7 +181,7 @@ type Handler[T any] interface {
 	// It must store every exported field of the Record it is given. A field it
 	// silently drops reads back as the zero value, which is a decision the
 	// application makes on stale information -- and only in the deployment that
-	// uses that handler, never in a test against ArrayHandler. Store.Confirm
+	// uses that handler, never in a test against ArrayHandler. RecordStore.Confirm
 	// checks the one field whose loss is otherwise undiagnosable; the rest are on
 	// the implementation.
 	Write(ctx context.Context, id string, rec Record[T], ttl time.Duration) error
@@ -206,30 +206,44 @@ type Handler[T any] interface {
 	// the tenant or the subject id to be empty: neither names a subject, and an
 	// implementation that treats the empty id as one signs out every session
 	// nobody has signed in on. Both refusals are made here as well as in
-	// Store.DestroyOthers, because this interface is exported and an
+	// RecordStore.DestroyOthers, because this interface is exported and an
 	// implementation is reachable without the store.
 	DestroyIndex(ctx context.Context, tenant, subjectID, keepID string) error
 }
 
-// Store issues and validates sessions.
+// RecordStore issues and validates sessions whose payload is one typed value.
 //
 // The cookie value is the session id plus an HMAC of it. The signature is
 // checked before the handler is touched, so a forged cookie never reaches the
 // store -- and, in a distributed store, never costs a network round trip.
-type Store[T any] struct {
+//
+// # Why this is not called Store
+//
+// [Store] is Illuminate\Session\Store: one session, loaded for one request,
+// holding a bag of keys. This is the other half of what Illuminate spreads
+// across Store, SessionManager and the StartSession middleware -- the thing that
+// mints an id, signs the cookie, reads a [Record] back and ends the session --
+// and it is generic over the payload, which Illuminate's cannot be.
+//
+// Both are here because both are used: [Store] is what a Laravel developer
+// reaches for and what the flash, the old input and the CSRF token live in;
+// this is what auth builds a session with when the payload is a struct and the
+// application would rather the compiler checked it. They share [Handler] and
+// [Record]; nothing else is duplicated between them.
+type RecordStore[T any] struct {
 	appKey  []byte
 	ttl     time.Duration
 	secure  bool
 	handler Handler[T]
 }
 
-// NewStore returns a store. Pass secure=false only in development: without the
+// NewRecordStore returns a store. Pass secure=false only in development: without the
 // Secure attribute the cookie travels over plain HTTP.
-func NewStore[T any](appKey []byte, ttl time.Duration, secure bool, h Handler[T]) *Store[T] {
+func NewRecordStore[T any](appKey []byte, ttl time.Duration, secure bool, h Handler[T]) *RecordStore[T] {
 	if h == nil {
 		h = NewArrayHandler[T]()
 	}
-	return &Store[T]{appKey: appKey, ttl: ttl, secure: secure, handler: h}
+	return &RecordStore[T]{appKey: appKey, ttl: ttl, secure: secure, handler: h}
 }
 
 // Option adjusts how a session is started.
@@ -268,7 +282,7 @@ func Remember(on bool) Option {
 // so they cannot disagree: a cookie that outlives its record is a session that
 // looks signed in and is not, and the person sees a login screen with no
 // explanation on their next click.
-func (s *Store[T]) lifetime(remembered bool) time.Duration {
+func (s *RecordStore[T]) lifetime(remembered bool) time.Duration {
 	if !remembered {
 		return s.ttl
 	}
@@ -285,7 +299,7 @@ func (s *Store[T]) lifetime(remembered bool) time.Duration {
 //
 // With no options it is what it has always been: a session for the store's
 // configured ttl. See Remember for the only thing there is to ask for.
-func (s *Store[T]) Start(ctx context.Context, w http.ResponseWriter, rec Record[T], opts ...Option) (string, error) {
+func (s *RecordStore[T]) Start(ctx context.Context, w http.ResponseWriter, rec Record[T], opts ...Option) (string, error) {
 	var set settings
 	for _, opt := range opts {
 		opt(&set)
@@ -322,7 +336,7 @@ func (s *Store[T]) Start(ctx context.Context, w http.ResponseWriter, rec Record[
 // is where remember-me is answered: the sign-in handler calls Regenerate, not
 // Start, so an option only Start accepted would be unreachable from the one
 // screen that has the checkbox on it.
-func (s *Store[T]) Regenerate(ctx context.Context, w http.ResponseWriter, oldID string, rec Record[T], opts ...Option) (string, error) {
+func (s *RecordStore[T]) Regenerate(ctx context.Context, w http.ResponseWriter, oldID string, rec Record[T], opts ...Option) (string, error) {
 	id, err := s.Start(ctx, w, rec, opts...)
 	if err != nil {
 		return "", err
@@ -339,7 +353,7 @@ func (s *Store[T]) Regenerate(ctx context.Context, w http.ResponseWriter, oldID 
 //
 // It is Laravel's Session::all(): the whole of what this session holds, in one
 // read, because there is nothing here to fetch by name.
-func (s *Store[T]) All(ctx context.Context, r *http.Request) (Record[T], error) {
+func (s *RecordStore[T]) All(ctx context.Context, r *http.Request) (Record[T], error) {
 	id := s.ID(r)
 	if id == "" {
 		return Record[T]{}, ErrNoSession
@@ -369,7 +383,7 @@ func (s *Store[T]) All(ctx context.Context, r *http.Request) (Record[T], error) 
 // It returns ErrConfirmationNotStored when the handler accepted the stamp and
 // did not keep it. A caller must report that rather than redirect: redirecting
 // sends the person back to the screen they just got right.
-func (s *Store[T]) Confirm(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+func (s *RecordStore[T]) Confirm(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 	id := s.ID(r)
 	if id == "" {
 		return ErrNoSession
@@ -426,7 +440,7 @@ func (s *Store[T]) Confirm(ctx context.Context, w http.ResponseWriter, r *http.R
 // The tenant comes from the record, which came from the Grant or the session,
 // never from the request (RULE 14). A record with no tenant is refused rather
 // than turned into a query that matches an id across every customer.
-func (s *Store[T]) DestroyOthers(ctx context.Context, rec Record[T], keepID string) error {
+func (s *RecordStore[T]) DestroyOthers(ctx context.Context, rec Record[T], keepID string) error {
 	if rec.SubjectID == "" || rec.Tenant == "" {
 		return errNoSubjectScope
 	}
@@ -441,7 +455,7 @@ func (s *Store[T]) DestroyOthers(ctx context.Context, rec Record[T], keepID stri
 // signing out has to clear it too -- a shared machine changes hands at exactly
 // that moment, and an address remembered before a sign-out is one nobody wants
 // afterwards. See httpx, and the report on this package's move.
-func (s *Store[T]) Invalidate(ctx context.Context, w http.ResponseWriter, id string) error {
+func (s *RecordStore[T]) Invalidate(ctx context.Context, w http.ResponseWriter, id string) error {
 	if id != "" {
 		if err := s.handler.Destroy(ctx, id); err != nil {
 			return err
@@ -462,7 +476,7 @@ func (s *Store[T]) Invalidate(ctx context.Context, w http.ResponseWriter, id str
 // ID returns the session id when the cookie signature is valid, and the empty
 // string otherwise. It is the value to hand to CSRF, which binds its token to
 // this id.
-func (s *Store[T]) ID(r *http.Request) string {
+func (s *RecordStore[T]) ID(r *http.Request) string {
 	c, err := r.Cookie(CookieName)
 	if err != nil {
 		return ""
@@ -481,7 +495,7 @@ func (s *Store[T]) ID(r *http.Request) string {
 // was written with that same value: a remembered session whose cookie still said
 // one hour was a session the browser threw away while the handler held it, and
 // the person was signed out an hour after ticking a box that promised a month.
-func (s *Store[T]) writeCookie(w http.ResponseWriter, id string, lifetime time.Duration) {
+func (s *RecordStore[T]) writeCookie(w http.ResponseWriter, id string, lifetime time.Duration) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     CookieName,
 		Value:    id + "." + s.sign(id),
@@ -493,7 +507,7 @@ func (s *Store[T]) writeCookie(w http.ResponseWriter, id string, lifetime time.D
 	})
 }
 
-func (s *Store[T]) sign(id string) string {
+func (s *RecordStore[T]) sign(id string) string {
 	m := hmac.New(sha256.New, s.appKey)
 	m.Write([]byte(CookieName))
 	m.Write([]byte{0})
@@ -572,7 +586,7 @@ func (h *ArrayHandler[T]) Destroy(ctx context.Context, id string) error {
 // the round trip the caller just made. A distributed handler cannot scan and
 // carries a real index -- see the kv adapter.
 func (h *ArrayHandler[T]) DestroyIndex(ctx context.Context, tenant, subjectID, keepID string) error {
-	// The same refusal Store.DestroyOthers makes, repeated here because this
+	// The same refusal RecordStore.DestroyOthers makes, repeated here because this
 	// method is exported and a caller can reach it without the store. It used to
 	// loop with whatever it was given: tenant "t1" and an empty subject id matched
 	// every session that had no subject on it, which is every guest, and the kv

@@ -9,6 +9,7 @@ import (
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database"
+	"github.com/arandu-io/hesape/queue/attributes"
 )
 
 // DefaultQueue is where a job goes when nobody said otherwise.
@@ -36,6 +37,12 @@ type Job struct {
 	Queue string
 	// Name routes the job to its handler: "invoice.send", "report.monthly".
 	Name string
+	// DisplayName is what a person reads on a console, a log line or the failed
+	// job list, and empty means Name. It answers the displayName key of
+	// Laravel's payload, and the only thing that sets it is a job that wraps
+	// another -- a queued closure, a queued listener -- where the name that
+	// routes and the name that explains are different strings.
+	DisplayName string
 	// TenantID is who the work belongs to. It comes from the Grant at Push, and
 	// the worker rebuilds a Grant from it -- a job with no tenant cannot be
 	// scoped, and everything downstream of it reads across customers.
@@ -56,6 +63,17 @@ type Job struct {
 	// needs at 3am is "this failed twelve times with this message".
 	Attempts  int
 	LastError string
+	// Exceptions counts the deliveries that ended in an error, which is not the
+	// same number as Attempts: a middleware that releases the job -- rate
+	// limited, overlapping -- spends an attempt without the handler ever having
+	// thrown. It is what Attributes.MaxExceptions is compared against, and in
+	// Laravel it is a counter in the cache keyed by the job's uuid.
+	Exceptions int
+	// Attributes are the per-job settings: tries, backoff, timeout, the queue
+	// and the connection. They are what Laravel puts on the job class as PHP
+	// attributes and reads into the payload envelope, and they travel with the
+	// job so the worker reads back exactly what the push declared.
+	Attributes attributes.Attributes
 
 	// driver is the queue this job came off. It is nil on a job that was built
 	// to be pushed and never popped, and that is what ErrDetached reports.
@@ -98,8 +116,82 @@ func Popped(d Driver, connection string, j Job) *Job {
 	return &j
 }
 
-// Connection is the name of the queue connection this job came off.
-func (j *Job) Connection() string { return j.connection }
+// GetConnectionName is the name of the queue connection this job came off.
+//
+// It answers getConnectionName(). It was called Connection, which is a name
+// nobody coming from Laravel would guess and which read as "the connection
+// object" rather than "the connection's name".
+func (j *Job) GetConnectionName() string { return j.connection }
+
+// SetConnectionName names the connection this job belongs to.
+//
+// It answers setConnectionName(). It returns nothing where PHP returns $this:
+// the fluent form exists in Laravel so a connector can chain onto the queue it
+// just built, and here the driver sets it when it pops.
+func (j *Job) SetConnectionName(name string) { j.connection = name }
+
+// GetQueue is the name of the queue the job belongs to. It answers getQueue().
+func (j *Job) GetQueue() string { return j.Queue }
+
+// GetName is the name of the queued job. It answers getName().
+//
+// Here it is the name a handler is registered under -- "invoice.send" -- where
+// Laravel's is a class and a method, "App\Jobs\SendInvoice@handle".
+func (j *Job) GetName() string { return j.Name }
+
+// GetJobID is the identifier of the job in its store. It answers getJobId().
+//
+// Here it is the same value as UUID, because the id is minted by the
+// application rather than handed back by the store: see database.NewID.
+func (j *Job) GetJobID() string { return j.UUID }
+
+// GetRawBody is the job's payload as it was stored. It answers getRawBody().
+//
+// In Laravel this is the whole envelope -- uuid, displayName, maxTries and the
+// serialized command -- because a driver stores one JSON string per job. Here
+// the envelope is the record's own columns and this is the arguments, which is
+// the half a handler decodes.
+func (j *Job) GetRawBody() []byte { return j.Payload }
+
+// MaxTries is how many deliveries this job gets before it is parked, or zero
+// when the worker's own limit decides. It answers maxTries().
+func (j *Job) MaxTries() int { return j.Attributes.Tries }
+
+// MaxExceptions is how many failures this job gets before it is parked, or zero
+// when only MaxTries decides. It answers maxExceptions().
+func (j *Job) MaxExceptions() int { return j.Attributes.MaxExceptions }
+
+// Backoff is how long to wait before the next delivery, or zero when the
+// worker's own schedule decides. It answers backoff().
+//
+// The attempt counts from one and the last entry repeats, which is what
+// Laravel's `$backoff[$attempts - 1] ?? last($backoff)` does with the
+// comma-separated list on the payload.
+func (j *Job) Backoff() time.Duration { return j.Attributes.BackoffFor(j.Attempts) }
+
+// Timeout is how long the handler may run, or zero when the worker's lease
+// decides. It answers timeout().
+func (j *Job) Timeout() time.Duration { return j.Attributes.Timeout }
+
+// ShouldFailOnTimeout reports whether running past the timeout parks the job
+// rather than releasing it. It answers shouldFailOnTimeout().
+func (j *Job) ShouldFailOnTimeout() bool { return j.Attributes.FailOnTimeout }
+
+// RetryUntil is the deadline after which this job stops being retried, whatever
+// MaxTries says, or the zero time when there is none. It answers retryUntil().
+func (j *Job) RetryUntil() time.Time { return j.Attributes.RetryUntil }
+
+// ResolveName is the name to show for this job. It answers resolveName().
+func (j *Job) ResolveName() string { return JobName{}.Resolve(j.Name, j) }
+
+// ResolveQueuedJobClass is the name of the work behind a wrapper job. It
+// answers resolveQueuedJobClass().
+//
+// In Laravel a queued closure and a queued listener both arrive as
+// CallQueuedHandler and the real class is inside the payload; here the wrapper
+// records what it wraps the same way, and an unwrapped job answers with its own
+// name.
+func (j *Job) ResolveQueuedJobClass() string { return JobName{}.ResolveClassName(j.Name, j) }
 
 // Decode unmarshals the payload into v.
 func (j *Job) Decode(v any) error {
@@ -145,26 +237,34 @@ func (j *Job) Fail(ctx context.Context, cause error) error {
 	if cause != nil {
 		j.LastError = cause.Error()
 	}
-	j.failed = true
+	j.MarkAsFailed()
 	j.deleted = true
 	return j.driver.FailJob(ctx, j, cause)
 }
 
-// Released reports whether the job was put back on its queue.
-func (j *Job) Released() bool { return j.released }
+// IsReleased reports whether the job was put back on its queue. It answers
+// isReleased().
+func (j *Job) IsReleased() bool { return j.released }
 
-// Deleted reports whether the job was removed.
-func (j *Job) Deleted() bool { return j.deleted }
+// IsDeleted reports whether the job was removed. It answers isDeleted().
+func (j *Job) IsDeleted() bool { return j.deleted }
 
-// HasFailed reports whether the job was parked.
+// HasFailed reports whether the job was parked. It answers hasFailed().
 func (j *Job) HasFailed() bool { return j.failed }
 
-// DeletedOrReleased reports whether the job has already been settled.
+// MarkAsFailed records that the job failed without telling the store.
+//
+// It answers markAsFailed(). It is the half of [Job.Fail] that does not park
+// the job: a handler that has already written its own failure somewhere calls
+// this so the worker does not release the job for another attempt.
+func (j *Job) MarkAsFailed() { j.failed = true }
+
+// IsDeletedOrReleased reports whether the job has already been settled.
 //
 // It answers isDeletedOrReleased(), and it is what the worker asks before it
 // acts on the outcome of a handler: a middleware may have released the job
 // before the handler ever ran, and settling it twice is how a job runs twice.
-func (j *Job) DeletedOrReleased() bool { return j.deleted || j.released }
+func (j *Job) IsDeletedOrReleased() bool { return j.deleted || j.released }
 
 // ErrNoTenant is returned when a Grant carries no tenant.
 //

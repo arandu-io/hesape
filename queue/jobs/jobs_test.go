@@ -77,8 +77,8 @@ func TestFailSettlesTheJob(t *testing.T) {
 	if !errors.Is(driver.failed, broken) {
 		t.Errorf("the driver was told %v", driver.failed)
 	}
-	if !j.HasFailed() || !j.Deleted() || !j.DeletedOrReleased() {
-		t.Errorf("failed = %v, deleted = %v", j.HasFailed(), j.Deleted())
+	if !j.HasFailed() || !j.IsDeleted() || !j.IsDeletedOrReleased() {
+		t.Errorf("failed = %v, deleted = %v", j.HasFailed(), j.IsDeleted())
 	}
 	// The reason is on the job, so a driver that stores it does not have to be
 	// handed it twice.
@@ -97,10 +97,10 @@ func TestReleaseIsNotADelete(t *testing.T) {
 	if driver.released != 10*time.Second {
 		t.Errorf("the driver was told %s", driver.released)
 	}
-	if !j.Released() || j.Deleted() || j.HasFailed() {
-		t.Errorf("released = %v, deleted = %v, failed = %v", j.Released(), j.Deleted(), j.HasFailed())
+	if !j.IsReleased() || j.IsDeleted() || j.HasFailed() {
+		t.Errorf("released = %v, deleted = %v, failed = %v", j.IsReleased(), j.IsDeleted(), j.HasFailed())
 	}
-	if !j.DeletedOrReleased() {
+	if !j.IsDeletedOrReleased() {
 		t.Error("a released job does not report itself settled, so the worker would settle it again")
 	}
 }
@@ -124,7 +124,7 @@ func TestADetachedJobSaysSo(t *testing.T) {
 
 func TestTheConnectionTravelsWithTheJob(t *testing.T) {
 	j := jobs.Popped(&settled{}, "redis", jobs.Job{UUID: "j-1", Name: "invoice.send"})
-	if j.Connection() != "redis" {
-		t.Errorf("connection = %q", j.Connection())
+	if j.GetConnectionName() != "redis" {
+		t.Errorf("connection = %q", j.GetConnectionName())
 	}
 }

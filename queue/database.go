@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -26,11 +27,33 @@ import (
 // queue that lives in the application's database (ADR 0044), and naming it
 // after the guarantee would hide it from everyone looking for the driver.
 type DatabaseQueue struct {
+	connection
 	db *database.DB
 }
 
 // NewDatabaseQueue returns the queue over db.
-func NewDatabaseQueue(db *database.DB) *DatabaseQueue { return &DatabaseQueue{db: db} }
+func NewDatabaseQueue(db *database.DB) *DatabaseQueue {
+	q := &DatabaseQueue{db: db}
+	q.SetConnectionName(databaseConnection)
+	return q
+}
+
+// GetDatabase is the connection this queue writes to.
+//
+// It answers getDatabase(). The queue and the application share it, which is
+// what makes a job pushed inside database.Transaction part of that transaction.
+func (q *DatabaseQueue) GetDatabase() *database.DB { return q.db }
+
+// GetQueue resolves a queue name, turning empty into the default.
+//
+// It answers getQueue(). It is exported because every method here starts with
+// it and a driver in another module has the same first line.
+func (q *DatabaseQueue) GetQueue(name string) string {
+	if name == "" {
+		return jobs.DefaultQueue
+	}
+	return name
+}
 
 var (
 	_ Queue       = (*DatabaseQueue)(nil)
@@ -75,6 +98,27 @@ CREATE INDEX idx_jobs_ready ON jobs (queue, failed_at, run_at);
 CREATE INDEX idx_jobs_parked ON jobs (failed_at);
 `,
 		Down: `DROP TABLE jobs;`,
+	}, {
+		// The per-job settings, which used to live nowhere: a job pushed with
+		// five tries got the worker's five whatever it asked for, because the
+		// number never reached the table. They travel as one JSON column rather
+		// than one column each -- see attributes.Attributes for why they are one
+		// struct -- and the two names beside it are the two things about a job
+		// that are neither its arguments nor a setting.
+		//
+		// Nullable with a default, so the previous release's binary keeps
+		// inserting without them during a rollout (RULE 16).
+		ID: "2026_08_11_000010_add_job_attributes_to_jobs_table",
+		Up: `
+ALTER TABLE jobs ADD COLUMN display_name TEXT;
+ALTER TABLE jobs ADD COLUMN attributes TEXT;
+ALTER TABLE jobs ADD COLUMN exceptions INTEGER NOT NULL DEFAULT 0;
+`,
+		Down: `
+ALTER TABLE jobs DROP COLUMN display_name;
+ALTER TABLE jobs DROP COLUMN attributes;
+ALTER TABLE jobs DROP COLUMN exceptions;
+`,
 	}}
 }
 
@@ -92,17 +136,42 @@ func (q *DatabaseQueue) Push(ctx context.Context, g auth.Grant, j jobs.Job) erro
 	}
 	j = jobs.Prepare(g, j)
 
-	_, err := q.db.ExecContext(ctx, `
+	settings, err := json.Marshal(j.Attributes)
+	if err != nil {
+		return fmt.Errorf("%w: %s: %w", ErrInvalidPayload, j.Name, err)
+	}
+
+	_, err = q.db.ExecContext(ctx, `
 		INSERT INTO jobs (
-			id, queue, name, tenant_id, payload, authorized_by, action,
-			run_at, attempts
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		j.UUID, j.Queue, j.Name, j.TenantID, string(j.Payload), j.AuthorizedBy, j.Action,
-		j.RunAt, j.Attempts)
+			id, queue, name, display_name, tenant_id, payload, authorized_by, action,
+			run_at, attempts, exceptions, attributes
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		j.UUID, j.Queue, j.Name, j.DisplayName, j.TenantID, string(j.Payload),
+		j.AuthorizedBy, j.Action, j.RunAt, j.Attempts, j.Exceptions, string(settings))
 	if err != nil {
 		return fmt.Errorf("queue: pushing %s: %w", j.Name, err)
 	}
 	return nil
+}
+
+// PushRaw adds a job whose arguments are already encoded.
+//
+// It answers pushRaw(). In Laravel the raw payload is the whole envelope --
+// uuid, maxTries, the serialized command -- and this is the seam a bridge uses
+// to put a job on a queue some other system will read. Here the envelope is the
+// record's columns, so what is raw is the arguments: bytes the caller already
+// has, that would only be unmarshalled and marshalled again on the way through
+// jobs.New.
+//
+// It goes through jobs.Authorized like every other push. Raw is about the
+// encoding, never about the authorization (RULE 17).
+func (q *DatabaseQueue) PushRaw(ctx context.Context, g auth.Grant, name string, payload []byte, queue string) error {
+	j, err := jobs.New(g, queue, name, nil)
+	if err != nil {
+		return err
+	}
+	j.Payload = payload
+	return q.Push(ctx, g, j)
 }
 
 // PushOn adds a job to a named queue.
@@ -344,8 +413,8 @@ func (q *DatabaseQueue) query(ctx context.Context, tail string, args ...any) ([]
 	// and then fails on the next word -- an error that names a keyword three
 	// tokens away from the actual problem.
 	rows, err := q.db.QueryContext(ctx, `
-		SELECT id, queue, name, tenant_id, payload, authorized_by, action,
-		       run_at, attempts, last_error
+		SELECT id, queue, name, display_name, tenant_id, payload, authorized_by, action,
+		       run_at, attempts, exceptions, last_error, attributes
 		FROM jobs
 		`+tail, args...)
 	if err != nil {
@@ -357,14 +426,89 @@ func (q *DatabaseQueue) query(ctx context.Context, tail string, args ...any) ([]
 	for rows.Next() {
 		var j jobs.Job
 		var payload string
-		var lastError sql.NullString
-		if err := rows.Scan(&j.UUID, &j.Queue, &j.Name, &j.TenantID, &payload,
-			&j.AuthorizedBy, &j.Action, &j.RunAt, &j.Attempts, &lastError); err != nil {
+		var displayName, lastError, settings sql.NullString
+		if err := rows.Scan(&j.UUID, &j.Queue, &j.Name, &displayName, &j.TenantID, &payload,
+			&j.AuthorizedBy, &j.Action, &j.RunAt, &j.Attempts, &j.Exceptions,
+			&lastError, &settings); err != nil {
 			return nil, fmt.Errorf("queue: reading the queue: %w", err)
 		}
 		j.Payload = []byte(payload)
+		j.DisplayName = displayName.String
 		j.LastError = lastError.String
+		if settings.String != "" {
+			// A row written before the settings column existed, or by a binary
+			// that predates it, decodes to the zero value -- which is what "the
+			// worker decides" already means. It is not an error, and treating
+			// it as one would fail every job queued during a rollout.
+			_ = json.Unmarshal([]byte(settings.String), &j.Attributes)
+		}
 		out = append(out, j)
 	}
 	return out, rows.Err()
+}
+
+// Release puts a job back on its queue, eligible again after delay.
+//
+// It answers release(), which is the driver-side half of jobs.Job.Release: a
+// handler and a middleware call the job, and the job calls this.
+func (q *DatabaseQueue) Release(ctx context.Context, queue string, j *jobs.Job, delay time.Duration) error {
+	j.Queue = q.GetQueue(queue)
+	return q.ReleaseJob(ctx, j, delay)
+}
+
+// DeleteAndRelease removes a reserved job and queues it again.
+//
+// It answers deleteAndRelease(). In Laravel the two statements are what a
+// release is, because the row is claimed by deletion and a retry is a new row.
+// Here a release is one UPDATE -- the row never left -- so this is that update,
+// and the name is kept because it is what a Laravel developer looks for.
+func (q *DatabaseQueue) DeleteAndRelease(ctx context.Context, queue string, j *jobs.Job, delay time.Duration) error {
+	return q.Release(ctx, queue, j, delay)
+}
+
+// DeleteReserved removes a reserved job by its id.
+//
+// It answers deleteReserved(). It is what a command reaches for when a job is
+// stuck: the row is gone and no worker will pick it up when the lease expires.
+func (q *DatabaseQueue) DeleteReserved(ctx context.Context, queue, id string) error {
+	if _, err := q.db.ExecContext(ctx, `DELETE FROM jobs WHERE id = ? AND queue = ?`,
+		id, q.GetQueue(queue)); err != nil {
+		return fmt.Errorf("queue: deleting %s: %w", id, err)
+	}
+	return nil
+}
+
+// DelayedSize is how many jobs are waiting for a time that has not come.
+//
+// It answers delayedSize(). It is the number [DatabaseQueue.PendingSize] leaves
+// out: a job scheduled for tomorrow is not a backlog, and counting it as one is
+// how a health check pages somebody at three in the morning about a report due
+// at nine.
+func (q *DatabaseQueue) DelayedSize(ctx context.Context, queue string) (int, error) {
+	var count int
+	err := q.db.QueryRowContext(ctx, `
+		SELECT count(*) FROM jobs
+		WHERE queue = ? AND failed_at IS NULL AND run_at > ?`,
+		q.GetQueue(queue), time.Now().UTC()).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("queue: counting the delayed jobs on %s: %w", queue, err)
+	}
+	return count, nil
+}
+
+// ReservedSize is how many jobs a worker is holding right now.
+//
+// It answers reservedSize(). A number that stays high while PendingSize stays
+// high is a worker that took work and stopped: the leases have not expired yet,
+// so nothing is visibly wrong, and this is what shows it.
+func (q *DatabaseQueue) ReservedSize(ctx context.Context, queue string) (int, error) {
+	var count int
+	err := q.db.QueryRowContext(ctx, `
+		SELECT count(*) FROM jobs
+		WHERE queue = ? AND failed_at IS NULL AND reserved_until >= ?`,
+		q.GetQueue(queue), time.Now().UTC()).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("queue: counting the reserved jobs on %s: %w", queue, err)
+	}
+	return count, nil
 }

@@ -87,8 +87,11 @@ func (m *WithoutOverlapping) Shared() *WithoutOverlapping {
 	return m
 }
 
-// LockKey is the name of the lock this job takes.
-func (m *WithoutOverlapping) LockKey(j *jobs.Job) string {
+// GetLockKey is the name of the lock this job takes.
+//
+// It answers getLockKey(). It was called LockKey, a name that exists in no
+// Laravel application (ADR 0044).
+func (m *WithoutOverlapping) GetLockKey(j *jobs.Job) string {
 	if m.shared {
 		return m.prefix + j.TenantID + ":" + m.key
 	}
@@ -97,7 +100,7 @@ func (m *WithoutOverlapping) LockKey(j *jobs.Job) string {
 
 // Handle takes the lock, runs the job, and gives the lock back.
 func (m *WithoutOverlapping) Handle(ctx context.Context, j *jobs.Job, next func(context.Context) error) error {
-	lock := m.locks.Lock(m.LockKey(j), m.expiresAfter)
+	lock := m.locks.Lock(m.GetLockKey(j), m.expiresAfter)
 
 	taken, err := lock.Get(ctx, next)
 	if err != nil {

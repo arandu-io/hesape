@@ -314,7 +314,7 @@ func TestTheWorkerRunsAndDeletes(t *testing.T) {
 	var gotGrant auth.Grant
 	done := make(chan struct{})
 
-	w := queue.NewWorker(q, queue.WorkerOptions{Poll: time.Millisecond})
+	w := queue.NewWorker(q, queue.WorkerOptions{Sleep: time.Millisecond})
 	w.HandleFunc("invoice.send", func(_ context.Context, g auth.Grant, j *jobs.Job) error {
 		got, gotGrant = j.UUID, g
 		close(done)
@@ -322,7 +322,7 @@ func TestTheWorkerRunsAndDeletes(t *testing.T) {
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() { _ = w.Run(ctx) }()
+	go func() { _ = mustDaemon(w, ctx) }()
 
 	select {
 	case <-done:
@@ -353,13 +353,13 @@ func TestAFailedJobIsReleasedThenParked(t *testing.T) {
 	j, _ := jobs.New(grant(), "", "invoice.send", nil)
 	_ = q.Push(context.Background(), grant(), j)
 
-	w := queue.NewWorker(q, queue.WorkerOptions{Poll: time.Millisecond, MaxAttempts: 2})
+	w := queue.NewWorker(q, queue.WorkerOptions{Sleep: time.Millisecond, MaxTries: 2})
 	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, *jobs.Job) error {
 		return errors.New("the invoice has no address")
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() { _ = w.Run(ctx) }()
+	go func() { _ = mustDaemon(w, ctx) }()
 	defer cancel()
 
 	waitFor(t, func() bool {
@@ -396,11 +396,11 @@ func TestAJobWithNoHandlerParksImmediately(t *testing.T) {
 	j, _ := jobs.New(grant(), "", "report.monthly", nil)
 	_ = q.Push(context.Background(), grant(), j)
 
-	w := queue.NewWorker(q, queue.WorkerOptions{Poll: time.Millisecond})
+	w := queue.NewWorker(q, queue.WorkerOptions{Sleep: time.Millisecond})
 	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, *jobs.Job) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() { _ = w.Run(ctx) }()
+	go func() { _ = mustDaemon(w, ctx) }()
 	defer cancel()
 
 	waitFor(t, func() bool {
@@ -412,11 +412,11 @@ func TestAJobWithNoHandlerParksImmediately(t *testing.T) {
 // TestTheWorkerStopsOnCancel: shutdown has to be clean, or a deploy leaves
 // workers holding leases nobody will release.
 func TestTheWorkerStopsOnCancel(t *testing.T) {
-	w := queue.NewWorker(&fakeQueue{}, queue.WorkerOptions{Poll: time.Millisecond})
+	w := queue.NewWorker(&fakeQueue{}, queue.WorkerOptions{Sleep: time.Millisecond})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan error, 1)
-	go func() { stopped <- w.Run(ctx) }()
+	go func() { stopped <- mustDaemon(w, ctx) }()
 
 	cancel()
 	select {
@@ -470,7 +470,7 @@ func TestTheBatchRunsInParallel(t *testing.T) {
 
 	w := queue.NewWorker(q, queue.WorkerOptions{
 		Concurrency: batch,
-		Poll:        time.Millisecond,
+		Sleep:       time.Millisecond,
 	})
 	w.HandleFunc("slow.thing", func(ctx context.Context, _ auth.Grant, _ *jobs.Job) error {
 		arrived <- struct{}{}
@@ -485,7 +485,7 @@ func TestTheBatchRunsInParallel(t *testing.T) {
 	ctx, stop := context.WithTimeout(context.Background(), 5*time.Second)
 	defer stop()
 	done := make(chan error, 1)
-	go func() { done <- w.Run(ctx) }()
+	go func() { done <- mustDaemon(w, ctx) }()
 
 	for i := range batch {
 		select {
@@ -517,7 +517,7 @@ func TestProductionBuildsNoCollector(t *testing.T) {
 	}
 
 	seen := make(chan *log.Collector, 1)
-	w := queue.NewWorker(q, queue.WorkerOptions{Poll: time.Millisecond})
+	w := queue.NewWorker(q, queue.WorkerOptions{Sleep: time.Millisecond})
 	w.HandleFunc("invoice.send", func(ctx context.Context, _ auth.Grant, _ *jobs.Job) error {
 		seen <- log.FromContext(ctx)
 		return nil
@@ -526,7 +526,7 @@ func TestProductionBuildsNoCollector(t *testing.T) {
 	ctx, stop := context.WithTimeout(context.Background(), 2*time.Second)
 	defer stop()
 	done := make(chan error, 1)
-	go func() { done <- w.Run(ctx) }()
+	go func() { done <- mustDaemon(w, ctx) }()
 
 	select {
 	case col := <-seen:
@@ -554,7 +554,7 @@ func TestARecorderPutsTheJobOnTheConsole(t *testing.T) {
 	}
 
 	recorder := log.NewRecorder(8)
-	w := queue.NewWorker(q, queue.WorkerOptions{Poll: time.Millisecond, Recorder: recorder})
+	w := queue.NewWorker(q, queue.WorkerOptions{Sleep: time.Millisecond, Recorder: recorder})
 	w.HandleFunc("invoice.send", func(ctx context.Context, _ auth.Grant, _ *jobs.Job) error {
 		// Something a person would want to see on the page.
 		log.FromContext(ctx).RecordEvent("invoice.rendered", nil)
@@ -564,7 +564,7 @@ func TestARecorderPutsTheJobOnTheConsole(t *testing.T) {
 	ctx, stop := context.WithTimeout(context.Background(), 2*time.Second)
 	defer stop()
 	done := make(chan error, 1)
-	go func() { done <- w.Run(ctx) }()
+	go func() { done <- mustDaemon(w, ctx) }()
 
 	deadline := time.Now().Add(2 * time.Second)
 	for recorder.Len() == 0 && time.Now().Before(deadline) {
@@ -595,8 +595,8 @@ func TestAMiddlewareThatReleasedTheJobIsNotOverruled(t *testing.T) {
 	_ = q.Push(context.Background(), grant(), j)
 
 	w := queue.NewWorker(q, queue.WorkerOptions{
-		Poll:        time.Millisecond,
-		MaxAttempts: 1, // the worker would park on the first failure
+		Sleep:    time.Millisecond,
+		MaxTries: 1, // the worker would park on the first failure
 		Middleware: []middleware.Middleware{
 			middleware.Func(func(ctx context.Context, j *jobs.Job, _ func(context.Context) error) error {
 				return j.Release(ctx, 10*time.Second)
@@ -609,7 +609,7 @@ func TestAMiddlewareThatReleasedTheJobIsNotOverruled(t *testing.T) {
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() { _ = w.Run(ctx) }()
+	go func() { _ = mustDaemon(w, ctx) }()
 	defer cancel()
 
 	waitFor(t, func() bool {
@@ -637,7 +637,7 @@ func TestAMiddlewareThatSkipsTheJobDeletesIt(t *testing.T) {
 	_ = q.Push(context.Background(), grant(), j)
 
 	w := queue.NewWorker(q, queue.WorkerOptions{
-		Poll: time.Millisecond,
+		Sleep: time.Millisecond,
 		Middleware: []middleware.Middleware{
 			middleware.Func(func(context.Context, *jobs.Job, func(context.Context) error) error {
 				return nil
@@ -650,11 +650,20 @@ func TestAMiddlewareThatSkipsTheJobDeletesIt(t *testing.T) {
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() { _ = w.Run(ctx) }()
+	go func() { _ = mustDaemon(w, ctx) }()
 	defer cancel()
 
 	waitFor(t, func() bool {
 		deleted, _, _ := q.state()
 		return len(deleted) == 1
 	}, "the skipped job was not deleted")
+}
+
+// mustDaemon runs the worker's loop and keeps only the error, so the tests that
+// only care that it stopped read the way they did when the loop returned one
+// value. Worker.Daemon answers Laravel's daemon(), which returns the exit
+// status the process is about to hand the shell.
+func mustDaemon(w *queue.Worker, ctx context.Context) error {
+	_, err := w.Daemon(ctx)
+	return err
 }

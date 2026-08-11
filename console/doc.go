@@ -1,11 +1,11 @@
 // Package console is what an application writes its own commands against.
 //
 // It is the command side of a project, and it is deliberately small: a Command
-// is a value with a name, a sentence of help and a function, a Registry is the
+// is a value with a name, a sentence of help and a function, a Application is the
 // slice of them a binary answers to, and an IO is the terminal that function
 // was handed. Nothing here scans a directory, instantiates a class it found or
 // parses a signature string at run time -- a command that is not in the
-// registry does not exist, and one that is in it with a broken signature does
+// application does not exist, and one that is in it with a broken signature does
 // not build.
 //
 // This package is not the aru CLI. aru is a separate binary that generates
@@ -20,7 +20,7 @@
 // # Isolation
 //
 // A command that must not run twice at once names a lock in Command.Isolated,
-// and a Registry given an issuer with WithLocks takes it before the command
+// and a Application given an issuer with WithLocks takes it before the command
 // runs. The lock is not prefixed by tenant, and that is deliberate: a lock per
 // tenant would let N replicas each run the task for a different tenant at the
 // same time, which is the problem and not the solution. See cache.Locks and
@@ -48,9 +48,34 @@
 //	QuestionHelper.php
 //	Signals.php
 //
-// Parser.php has no equivalent and never will: it exists to read a signature
-// string into arguments and options at run time, and here the flag set is
-// declared in Go and checked by the compiler. GeneratorCommand.php is aru, not
-// this package. Console\Scheduling is hesape/scheduler, at the top level, for
-// the reason docs/31 gives.
+// This paragraph used to say that Parser.php had no equivalent and never would,
+// that GeneratorCommand.php was aru's and not this package's, and that
+// Console\Scheduling lived at the top level as hesape/scheduler. All three are
+// out of date, and the corrections are the point of the package:
+//
+//   - Parse reads a signature. A command declares "{user} {--queue=}" and gets
+//     Argument and Option, which is what makes this the package an application
+//     writes commands against rather than a slice of closures. The flag set the
+//     paragraph described is still on IO, and it is the older path.
+//   - GeneratorCommand is here, because the framework's own packages generate
+//     files too -- a migration for the cache table is written by the cache
+//     package, not by the CLI.
+//   - Console\Scheduling is the scheduling package below this one, and
+//     hesape/scheduler is gone. Two schedulers is two ways to say the same
+//     thing (RULE 9).
+//
+// ContainerCommandLoader.php has no equivalent: it exists to resolve a command
+// class out of the container by name, and a Command here is a value that was
+// already built (ADR 0001). PromptValidationException.php has none either: it
+// carries a laravel/prompts validation failure, and the prompts on IO return an
+// error.
+//
+// # Concerns
+//
+// The seven traits in Concerns/ are not a package. A PHP trait is methods mixed
+// into a class, and in Go they are methods on the type that had them:
+// InteractsWithIO, ConfiguresPrompts, InteractsWithSignals and
+// PromptsForMissingInput are on IO; CallsCommands is on Application, as Call and
+// CallSilent; HasParameters is Command.Definition, over the signature; and
+// CreatesMatchingTest is on GeneratorCommand.
 package console

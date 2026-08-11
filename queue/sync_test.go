@@ -111,15 +111,15 @@ func TestTheNullQueueKeepsNothing(t *testing.T) {
 }
 
 func TestTheManagerHandsOutConnectionsByName(t *testing.T) {
-	m := queue.NewManager()
+	m := queue.NewQueueManager()
 	first := queue.NullQueue{}
 	m.Extend("database", first)
 	m.Extend("redis", queue.NewSyncQueue(registry()))
 
 	// The first one registered becomes the default, so an application with one
 	// queue never has to say which it means.
-	if m.DefaultConnection() != "database" {
-		t.Errorf("the default connection is %q", m.DefaultConnection())
+	if m.GetDefaultDriver() != "database" {
+		t.Errorf("the default connection is %q", m.GetDefaultDriver())
 	}
 	got, err := m.Connection("")
 	if err != nil {
@@ -133,9 +133,9 @@ func TestTheManagerHandsOutConnectionsByName(t *testing.T) {
 		t.Errorf("err = %v, want ErrNoConnection", err)
 	}
 
-	m.SetDefaultConnection("redis")
-	if m.DefaultConnection() != "redis" {
-		t.Errorf("the default connection is %q after being set", m.DefaultConnection())
+	m.SetDefaultDriver("redis")
+	if m.GetDefaultDriver() != "redis" {
+		t.Errorf("the default connection is %q after being set", m.GetDefaultDriver())
 	}
 	if len(m.Connections()) != 2 {
 		t.Errorf("the manager lists %v", m.Connections())

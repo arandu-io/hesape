@@ -4,15 +4,21 @@
 // The surface is Illuminate\Queue's -- Push, PushOn, Later, Bulk, Pop, Size,
 // Clear -- and the job itself is [github.com/arandu-io/hesape/queue/jobs].
 //
-// The contract lives in the collection and so do three of the drivers, for the
-// same reason as database.Repository: Push takes an auth.Grant, and the tenant
-// comes from it. Moving that into an optional package would make the guarantee
-// optional, and an optional guarantee is not one.
+// The clone this was written against is laravel_illuminate/queue.
 //
-//	DatabaseQueue  the application's own database (the default)
-//	SyncQueue      runs the job at Push, for tests and for a laptop
-//	NullQueue      accepts everything and keeps nothing
-//	RedisQueue     github.com/arandu-io/hesape/queue/connectors/redis
+// The contract lives in the collection and so do the drivers that need nothing
+// installed, for the same reason as database.Repository: Push takes an
+// auth.Grant, and the tenant comes from it. Moving that into an optional
+// package would make the guarantee optional, and an optional guarantee is not
+// one.
+//
+//	DatabaseQueue    the application's own database (the default)
+//	SyncQueue        runs the job at Push, for tests and for a laptop
+//	DeferredQueue    runs the job after the response, in this process
+//	BackgroundQueue  runs the job in another process
+//	FailoverQueue    writes to the first connection that accepts
+//	NullQueue        accepts everything and keeps nothing
+//	RedisQueue       github.com/arandu-io/hesape/queue/connectors/redis
 //
 // RedisQueue is a separate module because in Go there is no optional dependency
 // and a collection that carried a Redis client would put it in every project's
@@ -24,13 +30,13 @@
 // as the row it is about: it exists if and only if the write did. That is the
 // outbox guarantee -- the one the events package uses for events -- applied to
 // work, and it is the reason [DatabaseQueue] is the default driver rather than
-// the fallback one.
+// the fallback one. The relay that drains it is the [Worker].
 //
 // The name does not change because of it. This is DatabaseQueue because that is
 // what Laravel calls the queue that lives in the application's database (ADR
 // 0044); naming it Outbox would name the mechanism instead of the thing, and
 // hide it from everyone who came looking for the driver. The mechanism is
-// documented on the type, where somebody choosing a driver will read it.
+// what is underneath; the surface is the one a Laravel developer types.
 //
 // # At-least-once
 //
@@ -38,45 +44,57 @@
 // can die between doing the work and deleting the job, and no queue anywhere
 // solves that.
 //
+// # Where the rest of it lives
+//
+//	queue/attributes  the per-job settings: tries, backoff, timeout
+//	queue/connectors  opening a connection lazily
+//	queue/console     queue:work, queue:retry, queue:pause and the rest
+//	queue/events      what the queue announces about itself
+//	queue/failed      a dead letter list that outlives the queue
+//	queue/jobs        the job itself
+//	queue/middleware  what wraps the handling of one job
+//
 // # What it answers to in Laravel
 //
 // The files, in the clone at laravel_illuminate/queue:
 //
-//	DatabaseQueue.php    -> DatabaseQueue
-//	NullQueue.php        -> NullQueue
-//	Queue.php            -> Queue
-//	QueueManager.php     -> Manager
-//	RedisQueue.php       -> connectors/redis
-//	SyncQueue.php        -> SyncQueue
-//	Worker.php           -> Worker
-//	WorkerOptions.php    -> WorkerOptions
-//	CallQueuedHandler.php -> Handler, and the Worker's registry
+//	BackgroundQueue.php       -> BackgroundQueue
+//	BeanstalkdQueue.php       -- not coming, RULE 11
+//	CallQueuedClosure.php     -> CallQueuedClosure
+//	CallQueuedHandler.php     -> CallQueuedHandler
+//	DatabaseQueue.php         -> DatabaseQueue
+//	DeferredQueue.php         -> DeferredQueue
+//	FailoverQueue.php         -> FailoverQueue
+//	InteractsWithQueue.php    -> InteractsWithQueue
+//	InvalidPayloadException.php    -> ErrInvalidPayload
+//	Listener.php              -> Listener
+//	ListenerOptions.php       -> ListenerOptions
+//	LuaScripts.php            -- see below
+//	ManuallyFailedException.php    -> ErrManuallyFailed
+//	MaxAttemptsExceededException.php -> MaxAttemptsExceeded
+//	NullQueue.php             -> NullQueue
+//	Queue.php                 -> the connection struct, CreatePayload, LaterOn
+//	QueueManager.php          -> QueueManager
+//	QueueRoutes.php           -> QueueRoutes
+//	QueueServiceProvider.php  -- not coming, ADR 0002
+//	RedisQueue.php            -> connectors/redis
+//	SerializesModels.php      -> SerializesModels
+//	SerializesAndRestoresModelIdentifiers.php -> SerializesModels
+//	SqsQueue.php              -- not coming, RULE 11
+//	SyncQueue.php             -> SyncQueue
+//	TimeoutExceededException.php -> TimeoutExceeded
+//	Worker.php                -> Worker
+//	WorkerOptions.php         -> WorkerOptions
+//	WorkerStopReason.php      -> WorkerStopReason
 //
-// Still to arrive, with the phase each is named in by
-// docs/31-reorganizacao-hesape.md:
+// Beanstalkd and SQS are not coming: RULE 11 names the stores this collection
+// speaks to, and neither is one of them. QueueServiceProvider is the container
+// wiring ADR 0002 refused: the application constructs its queues in
+// bootstrap/app.go.
 //
-//	BackgroundQueue.php
-//	BeanstalkdQueue.php
-//	CallQueuedClosure.php
-//	DeferredQueue.php
-//	FailoverQueue.php
-//	InteractsWithQueue.php
-//	InvalidPayloadException.php
-//	Listener.php
-//	ListenerOptions.php
-//	LuaScripts.php
-//	ManuallyFailedException.php
-//	MaxAttemptsExceededException.php
-//	QueueRoutes.php
-//	QueueServiceProvider.php
-//	SerializesAndRestoresModelIdentifiers.php
-//	SerializesModels.php
-//	SqsQueue.php
-//	TimeoutExceededException.php
-//	WorkerStopReason.php
-//
-// Beanstalkd and SQS are not on that list because they are not coming: RULE 11
-// names the stores this collection speaks to, and neither is one of them. The
-// two SerializesModels traits answer a problem Go does not have -- a job
-// carries JSON, not a rehydrated object graph.
+// LuaScripts.php has no answer here and it is not a decision, it is a gap. The
+// seven scripts it holds are RedisQueue's storage layout expressed in Lua, and
+// the RESP driver in connectors/redis keeps its jobs in a different shape --
+// writing the scripts now would be seven functions with the right names and the
+// wrong behaviour, which is worse than seven that are missing.
 package queue

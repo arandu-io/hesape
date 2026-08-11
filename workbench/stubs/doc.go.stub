@@ -1,0 +1,21 @@
+// Package {{package_name}} is an Arandu module.
+//
+// A module is a directory that brings its own routes, its own migrations and
+// its own dependency graph. There is no container and no service discovery: the
+// application constructs it by hand in bootstrap/app.go and passes it to the
+// kernel.
+//
+//	app.Register({{package_name}}.New())
+//
+// [Module] is the whole public surface a host application needs. Everything it
+// registers, it registers in [Module.Routes]; everything it has to prepare
+// before serving goes in a Boot method, which is one of the optional interfaces
+// in github.com/arandu-io/hesape/foundation.
+//
+// # Authorization
+//
+// Every path that reaches data -- writes and reads alike -- takes an
+// auth.Grant and filters by auth.Tenant(g). That includes List, Find, reports
+// and exports. A read path without a policy is a data leak between tenants with
+// a technical name on it.
+package {{package_name}}

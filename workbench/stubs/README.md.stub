@@ -1,0 +1,26 @@
+# {{lower_vendor}}/{{lower_name}}
+
+An Arandu module.
+
+## Install
+
+    go get {{module_path}}
+
+## Wire
+
+Modules are composed by hand. Add it to `bootstrap/app.go`:
+
+    import "{{module_path}}"
+
+    app.Register({{package_name}}.New())
+
+There is nothing else to register: no provider to list, no config key to
+publish, no discovery step.
+
+## Develop
+
+    go test ./...
+
+## License
+
+MIT. See LICENSE.

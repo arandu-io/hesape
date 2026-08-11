@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -15,10 +16,23 @@ import (
 // database, prefix -- as a typed struct, because a map of strings is a set of
 // keys nobody can list and a typo in one of them is a default nobody chose.
 type Config struct {
-	// Address is host:port. It is one address, not a cluster: RESP sharding
-	// belongs to the deployment, and Dragonfly exists precisely so that a single
-	// node covers what a Redis cluster used to.
+	// Address is host:port. It is the single-node case, and it is the one
+	// almost everything wants: Dragonfly exists precisely so that a single node
+	// covers what a Redis cluster used to.
 	Address string
+
+	// Addresses is the cluster, when the deployment shards.
+	//
+	// It answers the `clusters` block of Laravel's database.php, and it is a
+	// field rather than a second connection type because that is all the
+	// difference amounts to here: go-redis routes by slot when it is given more
+	// than one address, and every command in this package is written the same
+	// either way.
+	//
+	// When it is set, Address is ignored. Nothing in this adapter uses a
+	// multi-key command across slots, which is what makes that safe -- see the
+	// note on Lua and modules in the package documentation.
+	Addresses []string
 
 	// Password is optional, and comes from configuration -- never from a
 	// literal.
@@ -51,16 +65,38 @@ type Config struct {
 // carries the application prefix, and what bypasses it does not. Client is the
 // hatch for the commands this type does not name.
 type Connection struct {
-	client *goredis.Client
+	// PacksPhpRedisValues is embedded so that Pack and the questions about
+	// serialization are where the PHP has them. Every answer is a constant --
+	// see the type.
+	PacksPhpRedisValues
+
+	client goredis.UniversalClient
 	prefix string
+
+	// mu guards the two fields the manager writes after construction. Laravel's
+	// Connection is a per-request object and needs no lock; this one is shared
+	// by every goroutine serving a request, and `go test -race` says so.
+	mu     sync.RWMutex
+	name   string
+	events Dispatcher
+}
+
+// Dispatcher is the slice of an event dispatcher this connection needs.
+//
+// It is declared here rather than imported so that the adapter's own module
+// does not pull the whole event system in to fire one event; hesape/events
+// satisfies it as written.
+type Dispatcher interface {
+	// Dispatch fires the event. The name is the event name and the payload is
+	// what listeners receive.
+	Dispatch(event any, payload ...any) []any
+	// Listen registers a listener for one or more event names.
+	Listen(events any, listener ...any)
 }
 
 // Connect opens the connection. It does not talk to the server: use Ping for
 // that, which is what the module health check does.
 func Connect(cfg Config) *Connection {
-	if cfg.Address == "" {
-		cfg.Address = "127.0.0.1:6379"
-	}
 	if cfg.DialTimeout == 0 {
 		cfg.DialTimeout = 5 * time.Second
 	}
@@ -68,9 +104,20 @@ func Connect(cfg Config) *Connection {
 		cfg.ReadTimeout = 3 * time.Second
 	}
 
+	addrs := cfg.Addresses
+	if len(addrs) == 0 {
+		if cfg.Address == "" {
+			cfg.Address = "127.0.0.1:6379"
+		}
+		addrs = []string{cfg.Address}
+	}
+
 	return &Connection{
-		client: goredis.NewClient(&goredis.Options{
-			Addr:         cfg.Address,
+		// NewUniversalClient returns the single-node client for one address and
+		// the cluster client for several, which is the whole of what
+		// PhpRedisConnector::connect and connectToCluster differ by.
+		client: goredis.NewUniversalClient(&goredis.UniversalOptions{
+			Addrs:        addrs,
 			Password:     cfg.Password,
 			DB:           cfg.Database,
 			DialTimeout:  cfg.DialTimeout,
@@ -86,7 +133,11 @@ func Connect(cfg Config) *Connection {
 // It answers Connection::client(). Everything reached through it bypasses Key,
 // so a command written here carries no application prefix unless it is built
 // with one.
-func (c *Connection) Client() *goredis.Client { return c.client }
+//
+// The type is the driver's UniversalClient interface because a clustered
+// connection is a different concrete type and the same set of commands; see
+// Config.Addresses.
+func (c *Connection) Client() goredis.UniversalClient { return c.client }
 
 // Prefix is what Key puts in front of every key, without its separator.
 //

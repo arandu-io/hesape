@@ -116,8 +116,8 @@ func TestWithoutOverlappingIsScopedByTenant(t *testing.T) {
 	theirs, theirQueue := job(t, other, "invoice.send")
 
 	m := middleware.NewWithoutOverlapping(locks, "acct-1")
-	if m.LockKey(mine) == m.LockKey(theirs) {
-		t.Fatalf("two tenants share the lock %q", m.LockKey(mine))
+	if m.GetLockKey(mine) == m.GetLockKey(theirs) {
+		t.Fatalf("two tenants share the lock %q", m.GetLockKey(mine))
 	}
 
 	inside := make(chan struct{})
@@ -274,19 +274,19 @@ func TestSkip(t *testing.T) {
 	j, _ := job(t, tenant, "invoice.send")
 
 	var whenRan bool
-	if err := middleware.SkipWhen(true).Handle(context.Background(), j, ran(&whenRan)); err != nil {
+	if err := (middleware.Skip{}).When(true).Handle(context.Background(), j, ran(&whenRan)); err != nil {
 		t.Fatal(err)
 	}
 	if whenRan {
-		t.Error("SkipWhen(true) ran the job")
+		t.Error("Skip{}.When(true) ran the job")
 	}
 
 	var unlessRan bool
-	if err := middleware.SkipUnless(true).Handle(context.Background(), j, ran(&unlessRan)); err != nil {
+	if err := (middleware.Skip{}).Unless(true).Handle(context.Background(), j, ran(&unlessRan)); err != nil {
 		t.Fatal(err)
 	}
 	if !unlessRan {
-		t.Error("SkipUnless(true) skipped the job")
+		t.Error("Skip{}.Unless(true) skipped the job")
 	}
 }
 
@@ -385,4 +385,76 @@ type pushRecorder struct {
 func (p *pushRecorder) Push(_ context.Context, _ auth.Grant, _, _ string, payload []byte) error {
 	p.payloads = append(p.payloads, payload)
 	return nil
+}
+
+// TestThrottlesExceptionsDropsWhatCannotSucceed: a failure that means the work
+// is pointless is not evidence that the dependency is down, so it is neither
+// counted nor released.
+func TestThrottlesExceptionsDropsWhatCannotSucceed(t *testing.T) {
+	limiter := cache.NewRateLimiter(cache.NewArrayStore())
+	gone := errors.New("the invoice was deleted")
+
+	dropping := middleware.NewThrottlesExceptions(limiter, cache.PerMinute(5)).
+		DeleteWhen(func(err error) bool { return errors.Is(err, gone) })
+	j, q := job(t, tenant, "invoice.send")
+	if err := dropping.Handle(context.Background(), j, func(context.Context) error { return gone }); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if q.deleted != 1 || len(q.released) != 0 {
+		t.Errorf("deleted = %d, released = %v, want the job dropped", q.deleted, q.released)
+	}
+
+	failing := middleware.NewThrottlesExceptions(limiter, cache.PerMinute(5)).
+		FailWhen(func(err error) bool { return errors.Is(err, gone) })
+	second, secondQueue := job(t, tenant, "invoice.send")
+	if err := failing.Handle(context.Background(), second, func(context.Context) error { return gone }); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if len(secondQueue.failed) != 1 || len(secondQueue.released) != 0 {
+		t.Errorf("failed = %v, released = %v, want the job parked", secondQueue.failed, secondQueue.released)
+	}
+}
+
+// TestThrottlesExceptionsCountsPerKey: By names what is actually failing, so
+// one account's broken integration does not throttle every other account's.
+func TestThrottlesExceptionsCountsPerKey(t *testing.T) {
+	limiter := cache.NewRateLimiter(cache.NewArrayStore())
+	broken := errors.New("the broker refused")
+	m := middleware.NewThrottlesExceptions(limiter, cache.PerMinute(1)).By("acct-1")
+
+	first, _ := job(t, tenant, "invoice.send")
+	_ = m.Handle(context.Background(), first, func(context.Context) error { return broken })
+
+	// A different key has its own budget, so the job runs.
+	other := middleware.NewThrottlesExceptions(limiter, cache.PerMinute(1)).By("acct-2")
+	second, secondQueue := job(t, tenant, "invoice.send")
+	var ranSecond bool
+	if err := other.Handle(context.Background(), second, ran(&ranSecond)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !ranSecond || len(secondQueue.released) != 0 {
+		t.Errorf("one key's failures throttled another: ran = %v, released = %v", ranSecond, secondQueue.released)
+	}
+}
+
+// TestThrottlesExceptionsReportIsAskedBeforeAnythingIsReported: a dependency
+// that is down produces one failure per job, and reporting all of them is how
+// the report becomes noise.
+func TestThrottlesExceptionsReportIsAskedBeforeAnythingIsReported(t *testing.T) {
+	limiter := cache.NewRateLimiter(cache.NewArrayStore())
+	timeout := errors.New("the broker timed out")
+
+	m := middleware.NewThrottlesExceptions(limiter, cache.PerMinute(5)).
+		Report(func(err error) bool { return !errors.Is(err, timeout) })
+
+	if m.ShouldReport(timeout) {
+		t.Error("a failure the predicate said no to is reportable")
+	}
+	if !m.ShouldReport(errors.New("something else")) {
+		t.Error("a failure the predicate said yes to is not reportable")
+	}
+	// No predicate reports everything, which is the PHP's default.
+	if !middleware.NewThrottlesExceptions(limiter, cache.PerMinute(5)).ShouldReport(timeout) {
+		t.Error("a middleware with no predicate refused to report")
+	}
 }

@@ -3,38 +3,38 @@
 // The files it answers to, in the clone at
 // laravel_illuminate/redis/Limiters:
 //
-//	ConcurrencyLimiter.php
-//	ConcurrencyLimiterBuilder.php
-//	DurationLimiter.php
-//	DurationLimiterBuilder.php
+//	ConcurrencyLimiter.php        -> ConcurrencyLimiter
+//	ConcurrencyLimiterBuilder.php -> ConcurrencyLimiterBuilder
+//	DurationLimiter.php           -> DurationLimiter
+//	DurationLimiterBuilder.php    -> DurationLimiterBuilder
 //
-// Nothing is implemented here, and DurationLimiter is the reason to say so out
-// loud rather than leave the directory looking unfinished.
+// Two limiters, and they answer different questions. DurationLimiter is "ten
+// per minute" -- a window with a count. ConcurrencyLimiter is "three at a
+// time" -- a semaphore with named slots. Laravel reaches them through
+// Redis::throttle() and Redis::funnel(), and so does this package, through
+// connections.Connection.Throttle and .Funnel.
 //
-// # DurationLimiter arrived as RedisStore.Increment
+// # Neither one uses Lua
 //
-// A duration limiter is N attempts per window, and this collection has one of
-// those: cache.RateLimiter counts against a cache.Store, and wiring
-// redis.RedisStore in is what makes the count distributed.
-//
-//	limiter := cache.NewRateLimiter(redis.NewRedisStore(conn))
-//
-// There were two rate limiters before -- an in-memory one in the HTTP
-// middleware, which counted per process, so N replicas allowed N times the
-// limit on the one endpoint where that gap is worth exploiting, and a second
-// one in the kv adapter. Writing a DurationLimiter here would be the third,
-// with its own window arithmetic and its own answer to what happens when the
-// server cannot be reached. That is precisely the second way RULE 9 refuses,
-// and cache.RateLimiter exists because it was already paid for once.
-//
-// # ConcurrencyLimiter does not arrive
-//
-// It is a semaphore, and Laravel's is a Lua script. RULE 11 refuses Lua, which
+// Laravel implements both as EVAL scripts. RULE 11 refuses Lua here, because it
 // is what keeps Dragonfly, Redis, Valkey and KeyDB one product to this
-// collection, so it would have to be a WATCH/MULTI/EXEC over a sorted set --
-// the shape RedisStore.ReleaseLock already uses. Nothing in the collection asks
-// for one: what wants to run alone runs under cache.Lock, and what wants a
-// bounded number of workers sets that number on the worker.
+// collection: the day something needs a script, three of the four stop being
+// drop-in. So the duration limiter is WATCH/MULTI/EXEC over the same three-field
+// hash, and the concurrency limiter is one `SET slot id NX EX n` per slot,
+// released by the compare-and-delete that RedisStore already uses.
 //
-// It arrives the day something needs it, and not before.
+// Each of those is a few lines longer than the script it replaces, and portable.
+// Portable is the feature.
+//
+// # This is not a third rate limiter
+//
+// cache.RateLimiter counts hits against a cache.Store and is what the HTTP
+// middleware uses; it is the general one, and pointing it at redis.RedisStore
+// is what makes it distributed. DurationLimiter is the RESP-native one, and it
+// is here because Redis::throttle() is a name a Laravel developer already
+// holds and because a limiter that can also block and wait is a different
+// contract from one that answers yes or no.
+//
+// If you are rate-limiting a route, reach for cache.RateLimiter. If you are
+// pacing a worker against somebody else's API, reach for these.
 package limiters

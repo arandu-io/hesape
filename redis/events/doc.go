@@ -3,15 +3,15 @@
 // The files it answers to, in the clone at
 // laravel_illuminate/redis/Events:
 //
-//	CommandExecuted.php
+//	CommandExecuted.php -> CommandExecuted
 //
-// Nothing is implemented here. CommandExecuted is dispatched by RedisManager on
-// every command so that Redis::listen() can see them, and there is no manager
-// here to dispatch it: ADR 0001 rejected the container, and the connection is
-// constructed and passed rather than resolved by name.
+// One event, fired by Connection.Command on every command that goes through
+// the wrapper, carrying the command, its arguments, how long it took and which
+// connection ran it. It is what Redis::listen() sees in Laravel, and
+// connections.Connection.Listen is the same registration here.
 //
-// What the event is used for -- how long each command took, and which ones --
-// is telemetry, and telemetry in this collection is the collector's. A second
-// event bus carrying the same facts would be a second place to look when a page
-// is slow (RULE 9).
+// It is off by default: a connection with no dispatcher fires nothing, and
+// RedisManager.EnableEvents is what turns it on. That is the Laravel default
+// too, and the reason is the same -- an event per command is an event per cache
+// read.
 package events

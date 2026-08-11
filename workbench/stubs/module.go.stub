@@ -1,0 +1,47 @@
+package {{package_name}}
+
+import (
+	"github.com/arandu-io/hesape/foundation"
+	"github.com/arandu-io/hesape/routing"
+)
+
+// Module is the {{lower_name}} module.
+//
+// Its collaborators are fields, filled by whoever constructs it. A module that
+// reaches for a global is a module no test can pin, and there is no global here
+// to reach for.
+type Module struct {
+	// arandu:begin custom
+	// arandu:end custom
+}
+
+// New builds the module.
+//
+// Give it what it needs as parameters -- a repository, a mailer, a clock -- and
+// keep them on the struct. The application calls this once, in bootstrap/app.go,
+// where it can see everything it is passing.
+func New() *Module {
+	return &Module{}
+}
+
+// Name is the stable identifier of the module: a lowercase slug, no spaces.
+//
+// It prefixes the module's route names and is what `aru routes` prints beside
+// them. Stable means a rename is a new module rather than the same one under
+// another name: the names built from it are in published links and in tests.
+func (m *Module) Name() string { return "{{lower_name}}" }
+
+// Routes registers the module's HTTP routes.
+//
+// The router is handed in, so nothing is registered on a global and there is
+// nothing to reset between tests. A module with no HTTP surface still
+// implements this and returns having registered nothing.
+func (m *Module) Routes(r *routing.Router) {
+	// arandu:begin custom
+	// arandu:end custom
+}
+
+// Compile-time proof that the module satisfies the contract. If
+// foundation.Module gains a method, the build stops here, on a line that names
+// the contract, rather than at whichever call site happens to be compiled first.
+var _ foundation.Module = (*Module)(nil)

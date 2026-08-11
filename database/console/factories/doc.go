@@ -5,6 +5,9 @@
 //
 //	FactoryMakeCommand.php
 //
-// Nothing is implemented here yet. docs/31-reorganizacao-hesape.md says what
-// moves in, from where, and in which phase.
+// Nothing is implemented here. FactoryMakeCommand generates an Eloquent model
+// factory -- a class extending Illuminate\Database\Eloquent\Factories\Factory,
+// resolved back to its model by naming convention. The generator cannot be
+// written before the thing it generates, so it belongs with
+// database/eloquent/factories rather than here, and it lands when that does.
 package factories
