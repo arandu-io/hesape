@@ -34,6 +34,28 @@ type HasOneOrManyThrough struct {
 	secondKey      string
 	localKey       string
 	secondLocalKey string
+
+	// withTrashedParents is what WithTrashedParents sets. PHP registers the
+	// soft-delete filter as a named global scope on the builder and removes it
+	// by name; relations.Builder has no scope registry, so the filter is applied
+	// at read time and this flag is what suppresses it.
+	withTrashedParents bool
+}
+
+// SoftDeletableThrough is what ThroughParentSoftDeletes asks of the
+// intermediate model.
+//
+// PHP writes $this->throughParent::isSoftDeletable(), a static call on whatever
+// class the model happens to be. Go has no late static binding and the Model
+// interface a relation works against says nothing about soft deletes -- so the
+// question is an optional interface, and a through parent that does not
+// implement it is simply not soft deletable.
+type SoftDeletableThrough interface {
+	// IsSoftDeletable answers Model::isSoftDeletable.
+	IsSoftDeletable() bool
+
+	// GetDeletedAtColumn answers SoftDeletes::getDeletedAtColumn.
+	GetDeletedAtColumn() string
 }
 
 // NewHasOneOrManyThrough answers HasOneOrManyThrough::__construct.
@@ -90,6 +112,42 @@ func (r *HasOneOrManyThrough) buildDictionary(results []Model) (map[string][]Mod
 	return dictionary, nil
 }
 
+// ThroughParentSoftDeletes answers
+// HasOneOrManyThrough::throughParentSoftDeletes.
+func (r *HasOneOrManyThrough) ThroughParentSoftDeletes() bool {
+	deletable, ok := r.throughParent.(SoftDeletableThrough)
+	return ok && deletable.IsSoftDeletable()
+}
+
+// WithTrashedParents answers HasOneOrManyThrough::withTrashedParents: the rows
+// whose intermediate parent was soft deleted come back too.
+//
+// PHP removes the 'SoftDeletableHasManyThrough' global scope from the query.
+// There is no scope registry on the builder a relation holds here, so the
+// filter is added by constrainThroughParents on the way to the database and
+// this turns it off. The name and the effect are the PHP's; the mechanism is
+// the one this collection has.
+func (r *HasOneOrManyThrough) WithTrashedParents() *HasOneOrManyThrough {
+	r.withTrashedParents = true
+	return r
+}
+
+// constrainThroughParents is the body of the global scope PHP registers in
+// performJoin: a row whose intermediate parent is soft deleted is not reachable
+// through it.
+//
+// It runs on the read rather than at construction because WithTrashedParents is
+// called after the constructor, and a filter already compiled into the join
+// could not be taken back off.
+func (r *HasOneOrManyThrough) constrainThroughParents(q Builder) Builder {
+	if r.withTrashedParents || !r.ThroughParentSoftDeletes() {
+		return q
+	}
+	deletable := r.throughParent.(SoftDeletableThrough)
+	q.GetQuery().WhereNull(r.throughParent.QualifyColumn(deletable.GetDeletedAtColumn()))
+	return q
+}
+
 // Get answers HasOneOrManyThrough::get: the select carries the intermediate key
 // so that Match has something to key on.
 func (r *HasOneOrManyThrough) Get(ctx context.Context, g auth.Grant, columns ...any) ([]Model, error) {
@@ -97,7 +155,7 @@ func (r *HasOneOrManyThrough) Get(ctx context.Context, g auth.Grant, columns ...
 	if err != nil {
 		return nil, err
 	}
-	return scoped.AddSelect(r.shouldSelect(columns)...).Get(ctx, g)
+	return r.constrainThroughParents(scoped).AddSelect(r.shouldSelect(columns)...).Get(ctx, g)
 }
 
 // GetEager answers Relation::getEager for a through relation.
@@ -114,7 +172,7 @@ func (r *HasOneOrManyThrough) First(ctx context.Context, g auth.Grant) (Model, e
 	if err != nil {
 		return nil, err
 	}
-	return scoped.AddSelect(r.shouldSelect(nil)...).First(ctx, g)
+	return r.constrainThroughParents(scoped).AddSelect(r.shouldSelect(nil)...).First(ctx, g)
 }
 
 // shouldSelect answers HasOneOrManyThrough::shouldSelect.
@@ -148,6 +206,31 @@ func (r *HasOneOrManyThrough) GetRelationExistenceQuery(q Builder, parentQuery B
 
 	return q.Select(columns...).WhereColumn(
 		r.GetQualifiedLocalKeyName(), "=", r.GetQualifiedFirstKeyName(),
+	)
+}
+
+// GetRelationExistenceQueryForThroughSelfRelation answers
+// HasOneOrManyThrough::getRelationExistenceQueryForThroughSelfRelation: the
+// existence subquery when the intermediate table is the same table the outer
+// query already names.
+//
+// The join has to alias the intermediate table, or the two references to it
+// collapse into one and the subquery correlates with itself. The alias is
+// GetRelationCountHash, which is what every self-join in this package uses.
+func (r *HasOneOrManyThrough) GetRelationExistenceQueryForThroughSelfRelation(q Builder, parentQuery Builder, columns ...any) Builder {
+	if len(columns) == 0 {
+		columns = []any{"*"}
+	}
+	hash := r.GetRelationCountHash()
+
+	q.Join(r.throughParent.GetTable()+" as "+hash, hash+"."+r.secondLocalKey, "=", r.GetQualifiedFarKeyName())
+
+	if deletable, ok := r.throughParent.(SoftDeletableThrough); ok && deletable.IsSoftDeletable() {
+		q.GetQuery().WhereNull(hash + "." + deletable.GetDeletedAtColumn())
+	}
+
+	return q.Select(columns...).WhereColumn(
+		stringifyFrom(parentQuery)+"."+r.localKey, "=", hash+"."+r.firstKey,
 	)
 }
 

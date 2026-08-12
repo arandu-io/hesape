@@ -76,4 +76,17 @@
 // RedisTagSet and RedisTaggedCache do not arrive: tags are not in this
 // collection (see hesape/cache). LuaScripts does not arrive, and the paragraph
 // above is why.
+//
+// # The two methods with no answer here
+//
+// Both are on RedisServiceProvider, and both are reason 2 of the porting rule
+// -- a method that exists only to serve the container and the service provider,
+// which ADR 0001 and ADR 0002 removed:
+//
+//   - register() binds 'redis' as a singleton over RedisManager and
+//     'redis.connection' as its default connection, reading the client name out
+//     of config('database.redis'). [Module] is what a kernel registers instead,
+//     and the connection is [connections.Connect] over a URL (ADR 0035).
+//   - provides() answers the two strings register() bound, which is the
+//     deferred-provider bookkeeping those bindings need and nothing else.
 package redis

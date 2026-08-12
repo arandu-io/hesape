@@ -26,4 +26,17 @@
 // this. The current Socialite's One/ (Twitter's OAuth 1), SocialiteManager,
 // Facades/ and Testing/ are outside what the clone covers; the manager and the
 // facade would be a container and a facade besides (ADR 0001, ADR 0002).
+//
+// # The five names a coverage count reports as absent
+//
+// tearDown, testGettingAuthUrlSetsStateInStorage,
+// testAuthUrlQueryStringConstruction, testStateMismatchThrowsException and
+// testAccessRequestCalledWithProperOptions are the public methods of
+// socialite/tests/OAuthTwoProviderTest.php. They are not surface: they are the
+// clone's own PHPUnit case, and all four assertions are ported under the same
+// names in oauthtwo/oauthtwo_test.go -- TestGettingAuthUrlSetsStateInStorage
+// and the rest. A count that skips _test.go files cannot see them, which is why
+// they are written down here. tearDown is PHPUnit's fixture hook; Go's
+// testing package has t.Cleanup and each test builds its own provider, so
+// there is nothing to tear down between them.
 package socialite

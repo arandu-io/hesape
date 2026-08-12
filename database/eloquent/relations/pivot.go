@@ -2,6 +2,7 @@ package relations
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -293,6 +294,13 @@ func (p *Pivot) Touch(ctx context.Context, g auth.Grant) error {
 	return p.Save(ctx, g)
 }
 
+// GetQueueableID answers AsPivot::getQueueableId for a pivot row.
+//
+// PHP's trait reads $this->attributes directly; the concern here holds no
+// attributes, so it is given the row. This is the no-argument method a caller
+// reaches, and it hands itself over.
+func (p *Pivot) GetQueueableID() any { return p.AsPivot.GetQueueableID(p) }
+
 // MorphPivot answers Illuminate\Database\Eloquent\Relations\MorphPivot: a pivot
 // row on a table shared by several parent types, so every statement it writes
 // carries the type as well as the keys.
@@ -322,6 +330,26 @@ func (p *MorphPivot) SetMorphClass(morphClass string) *MorphPivot {
 
 // GetMorphType answers MorphPivot::getMorphType.
 func (p *MorphPivot) GetMorphType() string { return p.morphType }
+
+// GetQueueableID answers MorphPivot::getQueueableId: the pair of keys of
+// AsPivot, plus the type column and the alias it holds.
+//
+// Without the type half, two rows of the same intermediate table -- a post's
+// tag and a video's tag, same tag id -- would serialize to the same identity
+// and a queued job would restore the wrong one.
+func (p *MorphPivot) GetQueueableID() any {
+	if _, ok := p.GetAttributes()[p.GetKeyName()]; ok {
+		return p.GetKey()
+	}
+	// AsPivot.GetForeignKey is the pivot column; Pivot.GetForeignKey is
+	// Model::getForeignKey and shadows it, so the concern is named outright.
+	foreign := p.AsPivot.GetForeignKey()
+	related := p.GetRelatedKey()
+	return fmt.Sprintf("%s:%v:%s:%v:%s:%s",
+		foreign, p.GetAttribute(foreign),
+		related, p.GetAttribute(related),
+		p.morphType, p.morphClass)
+}
 
 // SetKeysForSaveQuery answers MorphPivot::setKeysForSaveQuery.
 func (p *MorphPivot) SetKeysForSaveQuery(q Builder, model Model) Builder {

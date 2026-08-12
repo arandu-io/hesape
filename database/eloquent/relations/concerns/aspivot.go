@@ -1,5 +1,7 @@
 package concerns
 
+import "fmt"
+
 // AsPivot answers the trait of the same name: what a model gains by being the
 // row of an intermediate table.
 //
@@ -91,6 +93,26 @@ func (p *AsPivot) SetKeysForSelectQuery(query Builder, model Model) Builder {
 	return query.
 		Where(p.foreignKey, model.GetAttribute(p.foreignKey)).
 		Where(p.relatedKey, model.GetAttribute(p.relatedKey))
+}
+
+// GetQueueableID answers AsPivot::getQueueableId: what a queued job stores so
+// that it can find this row again.
+//
+// A pivot row usually has no id column, so there is nothing to store; the pair
+// of foreign keys is written out instead, in the PHP's own
+// "foreign:value:related:value" shape. The row is passed in because the trait
+// reads $this->attributes in PHP and this struct holds no attributes -- the
+// same reason SetKeysForSelectQuery takes it.
+//
+// The name carries the initialism in upper case, which is the one mechanical
+// change ADR 0044 allows without a note.
+func (p *AsPivot) GetQueueableID(model Model) any {
+	if _, ok := model.GetAttributes()[model.GetKeyName()]; ok {
+		return model.GetKey()
+	}
+	return fmt.Sprintf("%s:%v:%s:%v",
+		p.foreignKey, model.GetAttribute(p.foreignKey),
+		p.relatedKey, model.GetAttribute(p.relatedKey))
 }
 
 // SetKeysForSaveQuery answers AsPivot::setKeysForSaveQuery.

@@ -75,4 +75,17 @@
 //
 // No `Notification::` facade and no driver strings resolved from configuration
 // at send time. The channels an application has are the slice passed to New.
+//
+// # The two methods of the component with no answer here
+//
+// Both are on NotificationServiceProvider, and both are reason 2 of the porting
+// rule -- a method that exists only to serve the container and the service
+// provider, which ADR 0001 and ADR 0002 removed:
+//
+//   - register() binds ChannelManager as the 'Illuminate\Notifications\
+//     ChannelManager' singleton and aliases the two dispatcher contracts onto
+//     it. [New] takes the channels as an argument instead.
+//   - boot() registers the notification component's view namespace and the
+//     Blade `@notification` directive. The view layer here is kyse, which
+//     resolves a view by name at build time and has no namespace to register.
 package notifications

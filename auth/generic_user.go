@@ -38,6 +38,14 @@ func (u *GenericUser) GetAuthIdentifier() any {
 	return u.Attributes[u.GetAuthIdentifierName()]
 }
 
+// GetAuthIdentifierForBroadcasting is
+// Authenticatable::getAuthIdentifierForBroadcasting, which the trait answers
+// with the identifier itself. A user type that publishes a different id on a
+// channel overrides it; see [BroadcastsIdentifier] for why that is worth doing.
+func (u *GenericUser) GetAuthIdentifierForBroadcasting() any {
+	return u.GetAuthIdentifier()
+}
+
 // GetAuthPasswordName is GenericUser::getAuthPasswordName.
 func (u *GenericUser) GetAuthPasswordName() string {
 	return "password"

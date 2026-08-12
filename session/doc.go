@@ -70,7 +70,13 @@
 // It exists to satisfy Symfony's HttpFoundation SessionInterface, and its
 // methods -- set(), clear(), getBag(), registerBag(), getMetadataBag() -- are
 // either aliases of [Store]'s own or bag plumbing from a framework Go has no
-// equivalent of. SessionServiceProvider is not here either: this collection has
-// no container (ADR 0001), and wiring is the application's, in one place a
-// person can read.
+// equivalent of. SessionServiceProvider is not here either: its register() is
+// three container bindings -- 'session', 'session.store' and the start-session
+// middleware -- and this collection has no container (ADR 0001), so wiring is
+// the application's, in one place a person can read.
+//
+// DatabaseSessionHandler::setContainer() is absent for the same reason: it is
+// the setter half of the container the handler reaches into for the request,
+// the guard and the connection. [NewDatabaseSessionHandler] takes what it needs
+// as arguments, so there is nothing to inject afterwards (ADR 0045).
 package session

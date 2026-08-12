@@ -62,6 +62,32 @@ type TestResponse struct {
 	// not need it: that is assertPlainCookie.
 	Encrypter *encryption.Encrypter
 
+	// Flash is what reads the validation errors and the old input back off the
+	// response.
+	//
+	// The PHP finds both in the session, under 'errors' and '_old_input',
+	// because that is where a redirect from a rejected form leaves them. This
+	// framework leaves them in a signed one-shot cookie instead -- see
+	// session.Flash, and the reason it gives: the three forms that need them
+	// most are submitted by somebody who has no session at all. So the
+	// assertions that the PHP writes against session()->get('errors') are
+	// written here against the flash, over the same key the application signs
+	// it with.
+	//
+	// A test that asserts about errors or old input sets it. AssertSessionHas
+	// and AssertSessionMissing do not need it: those read the session store,
+	// which is a general key/value store in both languages.
+	Flash *session.Flash
+
+	// Streamed answers to `$this->baseResponse instanceof StreamedResponse`.
+	//
+	// The PHP asks the response what class it is. An *http.Response is the one
+	// class every response arrives as, so what the handler did is recorded
+	// rather than inferred -- the same reason Original is a field. A response
+	// that arrived over the wire chunked is streamed whether or not anybody set
+	// this, which is what AssertStreamed also reads.
+	Streamed bool
+
 	// content is the body, read once. An http.Response body is a stream that
 	// can be read to the end exactly once, and an assertion that consumed it
 	// would make the next one see an empty page.

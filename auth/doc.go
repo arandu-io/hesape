@@ -90,4 +90,14 @@
 //     there are no legacy Arandu cookies written in it.
 //   - SessionGuard::getRequest's Request::createFromGlobals(). Go has no
 //     request in a global; a guard that was given none has none.
+//   - Gate::guessPolicyNamesUsing and Gate::resolvePolicy. Both turn a class
+//     name into a policy class name by string -- App\Models\Post becomes
+//     App\Policies\PostPolicy -- and then instantiate it out of the container.
+//     Go resolves nothing by name at run time and has no container for the
+//     second half, so a policy is registered against the type it decides
+//     about; see Gate.Policy in hesape/auth/access.
+//   - ServiceProvider::register and ServiceProvider::provides, on
+//     AuthServiceProvider and PasswordResetServiceProvider. Deferred
+//     registration in a container, twice over.
+//   - Gate::setContainer. The container, once more.
 package auth

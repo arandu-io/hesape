@@ -318,6 +318,22 @@ type expectedError struct {
 	messages []string
 }
 
+// first is the message the PHP compares against, or empty when the caller named
+// a field without one.
+//
+// The PHP body of assertSessionHasErrors reads a pair as one key and one
+// message -- is_int($key) tells a bare name from a name-and-message pair -- so
+// a single message is what an assertion needs. The slice is here because
+// wrapErrors also accepts map[string][]string, which is the shape a message bag
+// hands back, and dropping the rest of it at the door would make the two
+// disagree.
+func (e expectedError) first() string {
+	if len(e.messages) == 0 {
+		return ""
+	}
+	return e.messages[0]
+}
+
 // wrapErrors answers to Arr::wrap over that argument, and to the `is_int($key)`
 // branch that tells a bare field name from a field-and-message pair.
 func wrapErrors(errors any) []expectedError {

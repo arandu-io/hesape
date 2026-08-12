@@ -41,6 +41,42 @@ type Authenticatable interface {
 	GetRememberTokenName() string
 }
 
+// BroadcastsIdentifier is the one method of the Illuminate\Auth\Authenticatable
+// trait that is not in the Contracts\Auth\Authenticatable interface:
+// getAuthIdentifierForBroadcasting.
+//
+// It is separate here for the same reason it is separate there. The trait
+// answers it with getAuthIdentifier and every model inherits that, so PHP can
+// add it without breaking anybody; adding a method to the Go interface would
+// break every user type an application already wrote. So this is an interface
+// of its own, and [AuthIdentifierForBroadcasting] falls back to the identifier
+// for a type that does not implement it -- which is exactly what the trait's
+// body does.
+//
+// What it is for: the id that goes out on a presence channel, which a person
+// other than its owner will read. A model whose primary key is a sequential
+// integer leaks how many customers there are and how new this one is, so this
+// is the seam where a UUID or a hashid is substituted.
+type BroadcastsIdentifier interface {
+	// GetAuthIdentifierForBroadcasting is getAuthIdentifierForBroadcasting.
+	GetAuthIdentifierForBroadcasting() any
+}
+
+// AuthIdentifierForBroadcasting returns the id to publish on a channel.
+//
+// It is the trait method as a function, because Go has no trait: a user type
+// that implements [BroadcastsIdentifier] answers with its own value, and every
+// other one answers with GetAuthIdentifier, as the PHP body does.
+func AuthIdentifierForBroadcasting(user Authenticatable) any {
+	if user == nil {
+		return nil
+	}
+	if b, ok := user.(BroadcastsIdentifier); ok {
+		return b.GetAuthIdentifierForBroadcasting()
+	}
+	return user.GetAuthIdentifier()
+}
+
 // UserProvider mirrors Illuminate\Contracts\Auth\UserProvider.
 //
 // It is the seam between a guard and wherever the users are kept. A guard knows

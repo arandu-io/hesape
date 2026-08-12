@@ -83,9 +83,17 @@
 //
 // DynamoBatchRepository has no equivalent and will not get one: a second store
 // with a different consistency model is a second set of rules for when a
-// callback fires, and DynamoDB is not a driver this collection carries.
-// BusServiceProvider has none either -- there is no container to register into
-// (ADR 0001).
+// callback fires, and DynamoDB is not a driver this collection carries. Its
+// four public methods go with it -- getDynamoClient(), getTable(),
+// createAwsDynamoTable() and deleteAwsDynamoTable() are the AWS SDK client, the
+// table name and the two DDL calls that make and drop the table.
+// BusServiceProvider has none either -- register() and provides() are the
+// container to register into (ADR 0001).
+//
+// Batch::jsonSerialize() is PHP's JsonSerializable, a language interface that
+// tells json_encode what an object looks like. Go's counterpart is
+// json.Marshaler, and [Batch] is a struct with json tags, so encoding/json
+// reads it directly and there is no hook to implement.
 //
 // Chain has no file of its own in illuminate/bus: Laravel's pending chain lives
 // in Foundation\Bus\PendingChain, which is the skeleton and not the library.

@@ -66,9 +66,19 @@
 //
 // ContainerCommandLoader.php has no equivalent: it exists to resolve a command
 // class out of the container by name, and a Command here is a value that was
-// already built (ADR 0001). PromptValidationException.php has none either: it
-// carries a laravel/prompts validation failure, and the prompts on IO return an
-// error.
+// already built (ADR 0001). Its two public methods go with it -- get($name)
+// makes the container build the class registered under a name, and getNames()
+// lists the names it could build -- and so does
+// Application::setContainerCommandLoader(), which installs it. [Application.Add]
+// takes the built command, and [Application.All] is the list.
+// PromptValidationException.php has none either: it carries a laravel/prompts
+// validation failure, and the prompts on IO return an error.
+//
+// Application::getLaravel(), Command::getLaravel() and Command::setLaravel()
+// are the container under its other name: they hand a command the application
+// instance so it can resolve services mid-run. A Command here is built with
+// what it needs, and the run gets a context.Context rather than a service
+// locator (ADR 0045).
 //
 // # Concerns
 //
