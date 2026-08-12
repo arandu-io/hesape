@@ -1,8 +1,8 @@
-package httpx
+package http
 
 import (
 	"net"
-	"net/http"
+	stdhttp "net/http"
 	"strings"
 
 	"github.com/arandu-io/hesape/auth"
@@ -91,12 +91,12 @@ func (c *Context) Cookie(name string) string {
 //
 //	return ctx.WithCookie(pref).Redirect("/settings")
 //
-// It is a plain http.Cookie and not a struct of this package's own: the standard
+// It is a plain stdhttp.Cookie and not a struct of this package's own: the standard
 // library's has every attribute there is, and a wrapper would have to be taught
 // each new one.
-func (c *Context) WithCookie(cookie *http.Cookie) *Context {
+func (c *Context) WithCookie(cookie *stdhttp.Cookie) *Context {
 	if cookie != nil {
-		http.SetCookie(c.Response, cookie)
+		stdhttp.SetCookie(c.Response, cookie)
 	}
 	return c
 }

@@ -3,7 +3,7 @@ package view
 import (
 	"net/http"
 
-	"github.com/arandu-io/hesape/httpx"
+	hhttp "github.com/arandu-io/hesape/http"
 	"github.com/arandu-io/hesape/routing"
 )
 
@@ -62,4 +62,4 @@ func (*Module) ReloadTag(stream string) string { return ReloadTag(stream) }
 // kernel asks every registered module whether it brings one, before any route
 // is registered. That is what makes ctx.View work without the application
 // calling a wiring function that somebody eventually forgets.
-func (*Module) Renderer() httpx.Renderer { return NewRenderer() }
+func (*Module) Renderer() hhttp.Renderer { return NewRenderer() }

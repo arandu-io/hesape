@@ -691,7 +691,7 @@ func (s *Store) PreviousURL() string {
 // It stores the address as it is given. Validating one is the caller's job and
 // deliberately not this package's: an address read off a request and redirected
 // to without a check is an open redirect, and the place to refuse it is where
-// the request is understood -- see hesape/httpx.
+// the request is understood -- see hesape/hhttp.
 func (s *Store) SetPreviousURL(u string) { s.Put(PreviousURLKey, u) }
 
 // PasswordConfirmed records that the subject has just typed their password

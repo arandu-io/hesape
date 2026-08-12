@@ -28,7 +28,7 @@
 //     being handed a request, and the stack answers with a Response, which no
 //     Pipeline[T] can say.
 //
-// hesape/httpx names the second one -- httpx.Middleware is an alias of
+// hesape/http names the second one -- hhttp.Middleware is an alias of
 // pipeline.Middleware[http.Handler] -- and hesape/routing composes it with
 // [Chain]. Neither of them has a composer of its own, and neither should get
 // one: there is one Chain and one Pipeline, and the choice between them is the

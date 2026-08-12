@@ -13,7 +13,7 @@ import (
 
 // request stands in for the request context a controller action receives.
 //
-// The real one is hesape/httpx.Context, and routing never names it: the type is
+// The real one is hesape/hhttp.Context, and routing never names it: the type is
 // a parameter, so a controller can be registered without this package knowing
 // what an answer looks like. Declaring a local one here is not a shortcut for
 // the test -- it is the property being tested.
@@ -22,7 +22,7 @@ type request struct {
 	r *http.Request
 }
 
-// adapt is what hesape/httpx.Action is: it builds the context, runs the action
+// adapt is what hesape/hhttp.Action is: it builds the context, runs the action
 // and decides what a returned error means. Here, "means" is a 500, which is
 // enough to prove the error travelled.
 func adapt(h func(*request) error) http.Handler {

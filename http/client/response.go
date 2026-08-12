@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -41,6 +42,13 @@ func NewResponseFromBytes(status int, body []byte, headers http.Header) *Respons
 			StatusCode: status,
 			Header:     headers,
 			Status:     fmt.Sprintf("%d %s", status, http.StatusText(status)),
+			// The body is carried on the *http.Response as well as on the
+			// Response, because HTTPResponse hands this one out and a stub
+			// returning it goes back through NewResponse -- which reads
+			// resp.Body and would dereference nil. It is the round trip a
+			// fake handler makes on every faked request.
+			Body:          io.NopCloser(bytes.NewReader(body)),
+			ContentLength: int64(len(body)),
 		},
 		body: body,
 	}

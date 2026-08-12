@@ -1,10 +1,10 @@
-package httpx_test
+package http_test
 
 import (
 	"strings"
 	"testing"
 
-	"github.com/arandu-io/hesape/httpx"
+	hhttp "github.com/arandu-io/hesape/http"
 )
 
 // LocalPath is the whole open-redirect defence of the collection, and the value
@@ -23,13 +23,13 @@ func TestNothingThatLeavesThisApplicationIsAcceptedAsADestination(t *testing.T) 
 		"a space a browser would strip": "/ /evil.example",
 	} {
 		t.Run(name, func(t *testing.T) {
-			if to, ok := httpx.LocalPath(raw); ok {
+			if to, ok := hhttp.LocalPath(raw); ok {
 				t.Fatalf("%q was accepted as %q, and a browser told to go there after a sign-in does not come back", raw, to)
 			}
 		})
 	}
 
-	if _, ok := httpx.LocalPath("/" + strings.Repeat("a", 1024)); ok {
+	if _, ok := hhttp.LocalPath("/" + strings.Repeat("a", 1024)); ok {
 		t.Error("an address longer than a cookie can hold was accepted, so the browser drops the cookie instead of us deciding not to write it")
 	}
 }
@@ -42,7 +42,7 @@ func TestAnOrdinaryPageAddressIsAccepted(t *testing.T) {
 		"/invoices/42#total",
 		"/faturas/n%C3%BAmero",
 	} {
-		if to, ok := httpx.LocalPath(raw); !ok || to != raw {
+		if to, ok := hhttp.LocalPath(raw); !ok || to != raw {
 			t.Errorf("%q is a page of this application and was refused, so somebody who followed a link to it signs in and lands on the front page", raw)
 		}
 	}

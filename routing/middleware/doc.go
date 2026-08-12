@@ -6,7 +6,7 @@
 // whose URL was not signed by this application, and is the other half of
 // routing.SignedRoute.
 //
-// Both are here rather than in hesape/httpx/middleware because both are about
+// Both are here rather than in hesape/http/middleware because both are about
 // the route: the throttle's budget belongs to an endpoint, and the signature is
 // over an address. What is in httpx/middleware applies to every request that
 // arrives, whichever route it is for.

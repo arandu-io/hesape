@@ -1,4 +1,4 @@
-package httpx
+package http
 
 // maxAddress is the longest address worth carrying.
 //

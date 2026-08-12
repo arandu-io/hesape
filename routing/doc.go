@@ -23,7 +23,7 @@
 // request layer above this one. Constructing the handler happens there now, and
 // a controller action reaches a route the same way any other handler does:
 //
-//	r.Get("/dashboard", httpx.Action(dashboard.Index)).Name("dashboard")
+//	r.Get("/dashboard", hhttp.Action(dashboard.Index)).Name("dashboard")
 //
 // Resource takes the adaptation as an argument for the same reason, which is
 // what lets this package register controller routes without importing the type
@@ -78,7 +78,7 @@
 // Pipeline.php has no counterpart here: composing middleware is
 // hesape/pipeline, generic over what it wraps, and this package uses it rather
 // than declaring a second one. Redirector.php and ResponseFactory.php answer in
-// hesape/httpx, which owns the request context and therefore owns what an
+// hesape/http, which owns the request context and therefore owns what an
 // answer looks like; the half of the signed-URL story that belongs here is
 // SignedRoute and middleware.ValidateSignature, over the Signer in
 // hesape/encryption.

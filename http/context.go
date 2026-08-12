@@ -1,9 +1,9 @@
-package httpx
+package http
 
 import (
 	"context"
 	"encoding/json"
-	"net/http"
+	stdhttp "net/http"
 
 	"github.com/arandu-io/hesape/log"
 )
@@ -22,8 +22,8 @@ import (
 type Context struct {
 	// Response and Request are exported: a handler that needs the standard
 	// library reaches for it directly instead of waiting for a wrapper.
-	Response http.ResponseWriter
-	Request  *http.Request
+	Response stdhttp.ResponseWriter
+	Request  *stdhttp.Request
 
 	render Renderer
 	urls   URLGenerator
@@ -36,7 +36,7 @@ type Context struct {
 // nothing else can swap a renderer or a URL table mid-request. hesape/routing
 // calls it once per request; a test that drives an action directly calls it with
 // nil for whichever of the two that action does not use.
-func NewContext(w http.ResponseWriter, r *http.Request, render Renderer, urls URLGenerator) *Context {
+func NewContext(w stdhttp.ResponseWriter, r *stdhttp.Request, render Renderer, urls URLGenerator) *Context {
 	return &Context{Response: w, Request: r, render: render, urls: urls}
 }
 
@@ -46,7 +46,7 @@ func NewContext(w http.ResponseWriter, r *http.Request, render Renderer, urls UR
 // the view package imports httpx, so httpx importing the view package back would
 // be a cycle. The kernel wires the concrete one at boot.
 type Renderer interface {
-	Render(ctx context.Context, w http.ResponseWriter, status int, name string, data any) error
+	Render(ctx context.Context, w stdhttp.ResponseWriter, status int, name string, data any) error
 }
 
 // URLGenerator turns the name of a route into its path.
@@ -76,7 +76,7 @@ type ExceptionHandler interface {
 	Report(ctx context.Context, err error)
 	// Render writes the answer: the debug page in development, a status page
 	// anywhere else.
-	Render(w http.ResponseWriter, r *http.Request, err error)
+	Render(w stdhttp.ResponseWriter, r *stdhttp.Request, err error)
 }
 
 // Ctx returns the request context, which carries the Collector, the logger and
@@ -127,7 +127,7 @@ func (c *Context) URL(name string, params ...string) string {
 // A map would compile and render blank on a typo, which is the failure this
 // framework exists to make impossible. `aru doctor` refuses a map here.
 func (c *Context) View(name string, data any) error {
-	return c.renderWith(http.StatusOK, name, data)
+	return c.renderWith(stdhttp.StatusOK, name, data)
 }
 
 // Fragment renders a partial with a status, for HTMX.
@@ -217,15 +217,15 @@ func (c *Context) RedirectRoute(name string, params ...string) error {
 //
 // 303 and not 302: after a POST, 303 is what tells the browser to GET the next
 // address instead of posting the body to it again.
-func Redirect(w http.ResponseWriter, r *http.Request, to string) {
+func Redirect(w stdhttp.ResponseWriter, r *stdhttp.Request, to string) {
 	if r.Header.Get("HX-Request") == "true" {
 		// A body alongside HX-Redirect is swapped in before the browser
 		// navigates, so there is deliberately none: 204.
 		w.Header().Set("HX-Redirect", to)
-		w.WriteHeader(http.StatusNoContent)
+		w.WriteHeader(stdhttp.StatusNoContent)
 		return
 	}
-	http.Redirect(w, r, to, http.StatusSeeOther)
+	stdhttp.Redirect(w, r, to, stdhttp.StatusSeeOther)
 }
 
 // Refuse answers a refusal that the person in front of the browser can see.
@@ -263,11 +263,11 @@ func Redirect(w http.ResponseWriter, r *http.Request, to string) {
 // It is one function and not a branch in each middleware, for the reason
 // Redirect above is one function: the last time this decision existed in three
 // copies, one of them was wrong.
-func Refuse(w http.ResponseWriter, r *http.Request, status int, message string) {
+func Refuse(w stdhttp.ResponseWriter, r *stdhttp.Request, status int, message string) {
 	if r.Header.Get("HX-Request") == "true" {
 		w.Header().Set("HX-Refresh", "true")
 	}
-	http.Error(w, message, status)
+	stdhttp.Error(w, message, status)
 }
 
 // JSON answers with JSON. It exists for the endpoints that are genuinely an

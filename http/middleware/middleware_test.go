@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/arandu-io/hesape/httpx/middleware"
+	"github.com/arandu-io/hesape/http/middleware"
 )
 
 // seen records the request as the handler under the middleware saw it.

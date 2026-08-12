@@ -1,20 +1,20 @@
-package httpx_test
+package http_test
 
 import (
 	"bytes"
 	"io"
 	"mime/multipart"
-	"net/http"
+	stdhttp "net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/arandu-io/hesape/filesystem"
-	"github.com/arandu-io/hesape/httpx"
+	hhttp "github.com/arandu-io/hesape/http"
 )
 
 // uploaded builds the request a browser makes when a form has a file on it.
-func uploaded(t *testing.T, field, filename, content string) *http.Request {
+func uploaded(t *testing.T, field, filename, content string) *stdhttp.Request {
 	t.Helper()
 
 	var body bytes.Buffer
@@ -30,15 +30,15 @@ func uploaded(t *testing.T, field, filename, content string) *http.Request {
 		t.Fatalf("closing the form: %v", err)
 	}
 
-	r := httptest.NewRequest(http.MethodPost, "/documents", &body)
+	r := httptest.NewRequest(stdhttp.MethodPost, "/documents", &body)
 	r.Header.Set("Content-Type", form.FormDataContentType())
 	return r
 }
 
 func TestAFileArrivesWithItsBytesReadableMoreThanOnce(t *testing.T) {
-	ctx := httpx.NewContext(httptest.NewRecorder(), uploaded(t, "document", "invoice.pdf", "%PDF-1.7"), nil, nil)
+	ctx := hhttp.NewContext(httptest.NewRecorder(), uploaded(t, "document", "invoice.pdf", "%PDF-1.7"), nil, nil)
 
-	up, err := httpx.File(ctx, "document")
+	up, err := hhttp.File(ctx, "document")
 	if err != nil {
 		t.Fatalf("File: %v", err)
 	}
@@ -70,9 +70,9 @@ func TestAFilenameThatReadsAsADirectoryIsNotOne(t *testing.T) {
 	// The name is what to call the file if it is ever offered back, never a key.
 	// filesystem.FromMultipart is where that is enforced, and this is the path
 	// that hands it the header.
-	ctx := httpx.NewContext(httptest.NewRecorder(), uploaded(t, "document", `..\..\etc\passwd`, "root:x:0:0"), nil, nil)
+	ctx := hhttp.NewContext(httptest.NewRecorder(), uploaded(t, "document", `..\..\etc\passwd`, "root:x:0:0"), nil, nil)
 
-	up, err := httpx.File(ctx, "document")
+	up, err := hhttp.File(ctx, "document")
 	if err != nil {
 		t.Fatalf("File: %v", err)
 	}
@@ -82,9 +82,9 @@ func TestAFilenameThatReadsAsADirectoryIsNotOne(t *testing.T) {
 }
 
 func TestAFieldWithNoFileInItSaysWhichFieldItWas(t *testing.T) {
-	ctx := httpx.NewContext(httptest.NewRecorder(), uploaded(t, "document", "invoice.pdf", "%PDF-1.7"), nil, nil)
+	ctx := hhttp.NewContext(httptest.NewRecorder(), uploaded(t, "document", "invoice.pdf", "%PDF-1.7"), nil, nil)
 
-	_, err := httpx.File(ctx, "attachment")
+	_, err := hhttp.File(ctx, "attachment")
 	if err == nil {
 		t.Fatal("a field nobody filled produced an upload")
 	}
@@ -96,9 +96,9 @@ func TestAFieldWithNoFileInItSaysWhichFieldItWas(t *testing.T) {
 func TestAnUploadIsCheckedAgainstRulesRatherThanTrusted(t *testing.T) {
 	// The rules live in hesape/filesystem; what this asserts is that what File
 	// returns is the value they take, so a handler has one shape to work with.
-	ctx := httpx.NewContext(httptest.NewRecorder(), uploaded(t, "document", "invoice.exe", "MZ"), nil, nil)
+	ctx := hhttp.NewContext(httptest.NewRecorder(), uploaded(t, "document", "invoice.exe", "MZ"), nil, nil)
 
-	up, err := httpx.File(ctx, "document")
+	up, err := hhttp.File(ctx, "document")
 	if err != nil {
 		t.Fatalf("File: %v", err)
 	}

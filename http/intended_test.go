@@ -1,28 +1,28 @@
-package httpx_test
+package http_test
 
 import (
-	"net/http"
+	stdhttp "net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/arandu-io/hesape/httpx"
+	hhttp "github.com/arandu-io/hesape/http"
 )
 
-func intended() *httpx.Intended {
-	return httpx.NewIntended([]byte(strings.Repeat("k", 32)), true)
+func intended() *hhttp.Intended {
+	return hhttp.NewIntended([]byte(strings.Repeat("k", 32)), true)
 }
 
 // remembered runs the guard's half of the round trip and hands back a request
 // carrying whatever cookie it wrote, which is what the browser would send to the
 // sign-in screen next.
-func remembered(i *httpx.Intended, refused *http.Request) *http.Request {
+func remembered(i *hhttp.Intended, refused *stdhttp.Request) *stdhttp.Request {
 	rec := httptest.NewRecorder()
 	i.Remember(rec, refused)
 
-	next := httptest.NewRequest(http.MethodGet, "/auth/login", nil)
+	next := httptest.NewRequest(stdhttp.MethodGet, "/auth/login", nil)
 	for _, c := range rec.Result().Cookies() {
 		next.AddCookie(c)
 	}
@@ -35,10 +35,10 @@ func remembered(i *httpx.Intended, refused *http.Request) *http.Request {
 // something already normalised: the shapes worth testing here are exactly the
 // ones that survive the server's own parse, and url.ParseRequestURI is what the
 // server calls.
-func asked(t *testing.T, target string) *http.Request {
+func asked(t *testing.T, target string) *stdhttp.Request {
 	t.Helper()
 
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequest(stdhttp.MethodGet, "/", nil)
 	u, err := url.ParseRequestURI(target)
 	if err != nil {
 		t.Fatalf("a server could not have received %q at all: %v", target, err)
@@ -50,7 +50,7 @@ func asked(t *testing.T, target string) *http.Request {
 func TestSomebodyTurnedAwayComesBackToThePageTheyAskedForAndNotTheFrontPage(t *testing.T) {
 	i := intended()
 
-	next := remembered(i, httptest.NewRequest(http.MethodGet, "/invoices/42?tab=lines", nil))
+	next := remembered(i, httptest.NewRequest(stdhttp.MethodGet, "/invoices/42?tab=lines", nil))
 	got := i.Take(httptest.NewRecorder(), next, "/")
 
 	if got != "/invoices/42?tab=lines" {
@@ -59,7 +59,7 @@ func TestSomebodyTurnedAwayComesBackToThePageTheyAskedForAndNotTheFrontPage(t *t
 }
 
 func TestSomebodyWhoWasNotTurnedAwayFromAnywhereGoesWhereTheApplicationSays(t *testing.T) {
-	got := intended().Take(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/auth/login", nil), "/dashboard")
+	got := intended().Take(httptest.NewRecorder(), httptest.NewRequest(stdhttp.MethodPost, "/auth/login", nil), "/dashboard")
 
 	if got != "/dashboard" {
 		t.Fatalf("a sign-in with no intended address went to %q, and the application asked for /dashboard", got)
@@ -71,7 +71,7 @@ func TestSomebodyWhoWasNotTurnedAwayFromAnywhereGoesWhereTheApplicationSays(t *t
 // weeks later, with nothing to explain it.
 func TestAnIntendedAddressIsUsedOnceAndThenForgotten(t *testing.T) {
 	i := intended()
-	next := remembered(i, httptest.NewRequest(http.MethodGet, "/invoices/42", nil))
+	next := remembered(i, httptest.NewRequest(stdhttp.MethodGet, "/invoices/42", nil))
 
 	rec := httptest.NewRecorder()
 	if got := i.Take(rec, next, "/"); got != "/invoices/42" {
@@ -80,7 +80,7 @@ func TestAnIntendedAddressIsUsedOnceAndThenForgotten(t *testing.T) {
 
 	var cleared bool
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == httpx.IntendedCookieName && c.MaxAge < 0 {
+		if c.Name == hhttp.IntendedCookieName && c.MaxAge < 0 {
 			cleared = true
 		}
 	}
@@ -90,7 +90,7 @@ func TestAnIntendedAddressIsUsedOnceAndThenForgotten(t *testing.T) {
 
 	// And the value itself does not work twice, whatever the browser does with
 	// the instruction above.
-	replay := httptest.NewRequest(http.MethodGet, "/auth/login", nil)
+	replay := httptest.NewRequest(stdhttp.MethodGet, "/auth/login", nil)
 	for _, c := range rec.Result().Cookies() {
 		replay.AddCookie(c)
 	}
@@ -128,9 +128,9 @@ func TestAnAddressPointingAtAnotherSiteNeverBecomesARedirect(t *testing.T) {
 // the application lands right after authenticating.
 func TestAnIntendedAddressThisApplicationDidNotWriteIsIgnored(t *testing.T) {
 	ours := intended()
-	theirs := httpx.NewIntended([]byte(strings.Repeat("f", 32)), true)
+	theirs := hhttp.NewIntended([]byte(strings.Repeat("f", 32)), true)
 
-	planted := remembered(theirs, httptest.NewRequest(http.MethodGet, "/admin/impersonate/1", nil))
+	planted := remembered(theirs, httptest.NewRequest(stdhttp.MethodGet, "/admin/impersonate/1", nil))
 
 	if got := ours.Take(httptest.NewRecorder(), planted, "/"); got != "/" {
 		t.Fatalf("a cookie signed with somebody else's key chose the destination: %q", got)
@@ -146,13 +146,13 @@ func TestAnIntendedAddressThisApplicationDidNotWriteIsIgnored(t *testing.T) {
 func TestAFragmentIsNotRememberedAsAPageAndABoostedNavigationIs(t *testing.T) {
 	i := intended()
 
-	fragment := httptest.NewRequest(http.MethodGet, "/inbox/rows?page=2", nil)
+	fragment := httptest.NewRequest(stdhttp.MethodGet, "/inbox/rows?page=2", nil)
 	fragment.Header.Set("HX-Request", "true")
 	if got := i.Take(httptest.NewRecorder(), remembered(i, fragment), "/"); got != "/" {
 		t.Errorf("after signing in they would land on the bare fragment %q, with no layout around it", got)
 	}
 
-	page := httptest.NewRequest(http.MethodGet, "/inbox?page=2", nil)
+	page := httptest.NewRequest(stdhttp.MethodGet, "/inbox?page=2", nil)
 	page.Header.Set("HX-Request", "true")
 	page.Header.Set("HX-Boosted", "true")
 	if got := i.Take(httptest.NewRecorder(), remembered(i, page), "/"); got != "/inbox?page=2" {
@@ -165,7 +165,7 @@ func TestAFragmentIsNotRememberedAsAPageAndABoostedNavigationIs(t *testing.T) {
 func TestOnlySomethingABrowserCanNavigateToIsRemembered(t *testing.T) {
 	i := intended()
 
-	posted := httptest.NewRequest(http.MethodPost, "/invoices/42/pay", nil)
+	posted := httptest.NewRequest(stdhttp.MethodPost, "/invoices/42/pay", nil)
 	if got := i.Take(httptest.NewRecorder(), remembered(i, posted), "/"); got != "/" {
 		t.Fatalf("signing in would have navigated to %q, which was a form submission", got)
 	}
@@ -173,11 +173,11 @@ func TestOnlySomethingABrowserCanNavigateToIsRemembered(t *testing.T) {
 
 func TestTheIntendedCookieIsNotReadableByScriptsAndDoesNotTravelInTheClear(t *testing.T) {
 	rec := httptest.NewRecorder()
-	intended().Remember(rec, httptest.NewRequest(http.MethodGet, "/invoices/42", nil))
+	intended().Remember(rec, httptest.NewRequest(stdhttp.MethodGet, "/invoices/42", nil))
 
 	var found bool
 	for _, c := range rec.Result().Cookies() {
-		if c.Name != httpx.IntendedCookieName {
+		if c.Name != hhttp.IntendedCookieName {
 			continue
 		}
 		found = true
@@ -187,8 +187,8 @@ func TestTheIntendedCookieIsNotReadableByScriptsAndDoesNotTravelInTheClear(t *te
 		if !c.Secure {
 			t.Error("the cookie travels over plain HTTP on an Intended configured for HTTPS")
 		}
-		if c.MaxAge <= 0 || time.Duration(c.MaxAge)*time.Second > httpx.IntendedLifetime {
-			t.Errorf("MaxAge = %d, and the address is worth keeping for %s", c.MaxAge, httpx.IntendedLifetime)
+		if c.MaxAge <= 0 || time.Duration(c.MaxAge)*time.Second > hhttp.IntendedLifetime {
+			t.Errorf("MaxAge = %d, and the address is worth keeping for %s", c.MaxAge, hhttp.IntendedLifetime)
 		}
 	}
 	if !found {
@@ -207,15 +207,15 @@ func TestSigningOutForgetsWhereTheLastPersonWasGoing(t *testing.T) {
 	i := intended()
 
 	refused := httptest.NewRecorder()
-	i.Remember(refused, httptest.NewRequest(http.MethodGet, "/customers/98213/invoices/44", nil))
+	i.Remember(refused, httptest.NewRequest(stdhttp.MethodGet, "/customers/98213/invoices/44", nil))
 
 	// The sign-out, which clears it beside invalidating the session.
 	out := httptest.NewRecorder()
 	i.Clear(out)
 
 	// The next person, with the browser as the sign-out left it.
-	next := httptest.NewRequest(http.MethodGet, "/auth/login", nil)
-	jar := map[string]*http.Cookie{}
+	next := httptest.NewRequest(stdhttp.MethodGet, "/auth/login", nil)
+	jar := map[string]*stdhttp.Cookie{}
 	for _, c := range refused.Result().Cookies() {
 		jar[c.Name] = c
 	}

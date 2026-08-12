@@ -3,7 +3,7 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/arandu-io/hesape/httpx"
+	hhttp "github.com/arandu-io/hesape/http"
 )
 
 // SecurityHeaders applies the default headers.
@@ -12,7 +12,7 @@ import (
 // operates through attributes rather than inline script. A module that truly
 // needs inline code asks for an explicit nonce -- there is no global
 // 'unsafe-inline' in this framework.
-func SecurityHeaders(dev bool) httpx.Middleware {
+func SecurityHeaders(dev bool) hhttp.Middleware {
 	csp := "default-src 'self'; " +
 		"script-src 'self'; " +
 		"style-src 'self'; " +

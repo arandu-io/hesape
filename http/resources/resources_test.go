@@ -164,7 +164,7 @@ func TestFilterRemovesMissingValues(t *testing.T) {
 
 func TestFilterMergesMergeValues(t *testing.T) {
 	data := map[string]any{
-		"name": "Bob",
+		"name":  "Bob",
 		"merge": NewMergeValue(map[string]any{"city": "NYC", "state": "NY"}),
 	}
 	result := Filter(data)
@@ -223,7 +223,6 @@ func TestJsonResponseBuilder(t *testing.T) {
 
 	body, err := builder.Build()
 	assertNotNil(t, body, "build result")
-	assertNotNil(t, err, "build error")
 	assertEqual(t, err, nil, "build should not error")
 
 	var parsed map[string]any

@@ -7,13 +7,13 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/arandu-io/hesape/httpx"
+	hhttp "github.com/arandu-io/hesape/http"
 	"github.com/arandu-io/hesape/validation"
 	"github.com/arandu-io/hesape/view"
 )
 
 func TestPageCarriesTheErrorsOfTheRequestThatRedirectedHere(t *testing.T) {
-	state := httpx.State{
+	state := hhttp.State{
 		Errors: validation.Errors{"password": {"must be at least 12 characters"}},
 		Old:    url.Values{"email": {"ada@example.test"}},
 	}
@@ -21,8 +21,8 @@ func TestPageCarriesTheErrorsOfTheRequestThatRedirectedHere(t *testing.T) {
 	// The state arrives the way the session middleware puts it there, and the
 	// handler below is the whole of what a controller writes.
 	req := httptest.NewRequest(http.MethodGet, "/signup", nil)
-	req = req.WithContext(httpx.WithState(req.Context(), state))
-	ctx := httpx.NewContext(httptest.NewRecorder(), req, nil, nil)
+	req = req.WithContext(hhttp.WithState(req.Context(), state))
+	ctx := hhttp.NewContext(httptest.NewRecorder(), req, nil, nil)
 
 	page := view.New(ctx, "Sign up").WithToken("csrf-token")
 
@@ -45,7 +45,7 @@ func TestPageCarriesTheErrorsOfTheRequestThatRedirectedHere(t *testing.T) {
 func TestAPageNobodyWasRejectedOnDrawsNothing(t *testing.T) {
 	// No state on the context at all, which is every request that was not
 	// redirected here from a rejection.
-	ctx := httpx.NewContext(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/signup", nil), nil, nil)
+	ctx := hhttp.NewContext(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/signup", nil), nil, nil)
 
 	page := view.New(ctx, "Sign up")
 

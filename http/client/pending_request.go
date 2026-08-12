@@ -24,6 +24,10 @@ import (
 type PendingRequest struct {
 	factory *Factory
 
+	// pool is set only on a request the pool itself built. It is what makes a
+	// verb record instead of send -- see Send.
+	pool *Pool
+
 	// Request configuration.
 	method  string
 	baseURL string
@@ -479,6 +483,19 @@ func (p *PendingRequest) Head(urlStr string, query map[string]string) (*Response
 // Send sends the request. It is the central method that all HTTP verb
 // methods delegate to.
 func (p *PendingRequest) Send(method, urlStr string, query map[string]string, data any) (*Response, error) {
+	// Inside a pool, a verb records the call instead of making it, and the
+	// pool makes them all at once when Send is called on it.
+	//
+	// PHP gets this from the promise its verbs return -- $pool->as('a')->get()
+	// hands back something unresolved, and Http::pool resolves the lot. Go has
+	// no promise, so the pending request knows which pool it belongs to and
+	// answers nil until that pool runs. A caller outside a pool never sees it,
+	// because a pending request only has a pool if the pool built it.
+	if p.pool != nil {
+		p.pool.record(p, method, urlStr, query, data)
+		return nil, nil
+	}
+
 	// Build the URL.
 	fullURL, err := p.buildURL(urlStr, query)
 	if err != nil {

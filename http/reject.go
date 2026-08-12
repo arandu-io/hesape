@@ -1,7 +1,7 @@
-package httpx
+package http
 
 import (
-	"net/http"
+	stdhttp "net/http"
 	"net/url"
 	"strings"
 
@@ -50,7 +50,7 @@ import (
 // messages. The query string is deliberately not included: it is already in the
 // address being returned to, and adding it would put the same values on the page
 // twice with a chance of the two disagreeing.
-func Reject(w http.ResponseWriter, r *http.Request, f *session.Flash, errs validation.Errors) {
+func Reject(w stdhttp.ResponseWriter, r *stdhttp.Request, f *session.Flash, errs validation.Errors) {
 	if f != nil {
 		// Parsed here rather than assumed: a handler that rejected on the first
 		// rule may never have read the body, and the whole value of what was
@@ -65,7 +65,7 @@ func Reject(w http.ResponseWriter, r *http.Request, f *session.Flash, errs valid
 	// route guards give for their own answers, arrived at from the other side.
 	w.Header().Set("Cache-Control", "no-store, private")
 
-	// Redirect and not http.Redirect: an HTMX request gets HX-Redirect and a
+	// Redirect and not stdhttp.Redirect: an HTMX request gets HX-Redirect and a
 	// plain one gets 303, decided in one place for every redirect the framework
 	// answers. See Redirect.
 	Redirect(w, r, Back(r))
@@ -82,7 +82,7 @@ func Reject(w http.ResponseWriter, r *http.Request, f *session.Flash, errs valid
 // unparseable one, one on another host, or a path [LocalPath] refuses. Landing
 // on the front page is a bad answer; landing on somebody else's site carrying
 // the fact that you just submitted a form is a worse one.
-func Back(r *http.Request) string {
+func Back(r *stdhttp.Request) string {
 	referer := r.Header.Get("Referer")
 	if referer == "" {
 		return "/"

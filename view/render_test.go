@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/arandu-io/hesape/httpx"
+	hhttp "github.com/arandu-io/hesape/http"
 	"github.com/arandu-io/hesape/log"
 	"github.com/arandu-io/hesape/view"
 )
@@ -35,7 +35,7 @@ func init() {
 //
 // It drives the Context the router builds rather than the router itself. The
 // router does not wire a renderer yet -- hesape/routing has no WithRenderer and
-// hesape/httpx has no Action, both still landing -- and a test of this package
+// hesape/http has no Action, both still landing -- and a test of this package
 // must not wait on that. What the wiring being missed looks like is guarded
 // where it actually happened: TestEveryAssetIsServed registers the module on a
 // real router, because the assets shipped 404 for weeks precisely because every
@@ -43,7 +43,7 @@ func init() {
 func TestTheControllerRendersByName(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	ctx := httpx.NewContext(rec, req, view.NewRenderer(), nil)
+	ctx := hhttp.NewContext(rec, req, view.NewRenderer(), nil)
 
 	if err := ctx.View("home", homeData{Name: "Paulo"}); err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ func TestTheControllerRendersByName(t *testing.T) {
 func TestAViewWithNoRendererSaysWhatToWire(t *testing.T) {
 	// A Context built without a renderer, which is what an application that
 	// never registered the view module hands every one of its handlers.
-	ctx := &httpx.Context{Response: httptest.NewRecorder(), Request: httptest.NewRequest("GET", "/", nil)}
+	ctx := &hhttp.Context{Response: httptest.NewRecorder(), Request: httptest.NewRequest("GET", "/", nil)}
 	err := ctx.View("home", homeData{})
 	if err == nil {
 		t.Fatal("rendering without a renderer succeeded")
@@ -140,7 +140,7 @@ func TestTheRenderIsOnTheTimeline(t *testing.T) {
 func TestAFragmentCarriesItsStatus(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
-	ctx := httpx.NewContext(rec, req, view.NewRenderer(), nil)
+	ctx := hhttp.NewContext(rec, req, view.NewRenderer(), nil)
 
 	if err := ctx.Fragment(http.StatusUnprocessableEntity, "home", homeData{Name: "erro"}); err != nil {
 		t.Fatal(err)

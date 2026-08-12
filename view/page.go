@@ -4,7 +4,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/arandu-io/hesape/httpx"
+	hhttp "github.com/arandu-io/hesape/http"
 	"github.com/arandu-io/hesape/str"
 	"github.com/arandu-io/hesape/validation"
 )
@@ -239,7 +239,7 @@ func (p Page) AdminLink() string { return p.AdminURL }
 // the navigation and the signed-in person are the controller's, because they are
 // decisions -- see the Layout interface on why the layout is never allowed to go
 // and fetch them.
-func New(ctx *httpx.Context, title string) Page {
+func New(ctx *hhttp.Context, title string) Page {
 	state := ctx.State()
 	return Page{
 		Title:  title,

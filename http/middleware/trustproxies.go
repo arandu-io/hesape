@@ -5,7 +5,7 @@ import (
 	"net/netip"
 	"strings"
 
-	"github.com/arandu-io/hesape/httpx"
+	hhttp "github.com/arandu-io/hesape/http"
 )
 
 // TrustProxies rewrites the request with what the proxy in front says, and only
@@ -45,9 +45,9 @@ import (
 // not read it off the request.
 //
 // It writes RemoteAddr without a port -- the proxy's port belonged to a
-// connection this request did not arrive on -- which httpx.Context.IP is written
+// connection this request did not arrive on -- which hhttp.Context.IP is written
 // to accept.
-func TrustProxies(trusted []netip.Prefix) httpx.Middleware {
+func TrustProxies(trusted []netip.Prefix) hhttp.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			peer, ok := addrOf(r.RemoteAddr)

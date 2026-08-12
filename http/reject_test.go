@@ -1,12 +1,12 @@
-package httpx_test
+package http_test
 
 import (
-	"net/http"
+	stdhttp "net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/arandu-io/hesape/httpx"
+	hhttp "github.com/arandu-io/hesape/http"
 	"github.com/arandu-io/hesape/session"
 	"github.com/arandu-io/hesape/validation"
 )
@@ -23,8 +23,8 @@ func failed() validation.Errors {
 
 // submitted is the request a form makes: a body, and the address of the page it
 // was on in the Referer.
-func submitted(target, referer string) *http.Request {
-	r := httptest.NewRequest(http.MethodPost, target, strings.NewReader("title=&body=a+draft"))
+func submitted(target, referer string) *stdhttp.Request {
+	r := httptest.NewRequest(stdhttp.MethodPost, target, strings.NewReader("title=&body=a+draft"))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	if referer != "" {
 		r.Header.Set("Referer", referer)
@@ -34,10 +34,10 @@ func submitted(target, referer string) *http.Request {
 
 func TestARejectedFormGoesBackToItselfWithTheMessagesAndWhatWasTyped(t *testing.T) {
 	rec := httptest.NewRecorder()
-	httpx.Reject(rec, submitted("http://example.test/posts", "http://example.test/posts/new"), flash(), failed())
+	hhttp.Reject(rec, submitted("http://example.test/posts", "http://example.test/posts/new"), flash(), failed())
 
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("answered %d, want %d", rec.Code, http.StatusSeeOther)
+	if rec.Code != stdhttp.StatusSeeOther {
+		t.Fatalf("answered %d, want %d", rec.Code, stdhttp.StatusSeeOther)
 	}
 	if to := rec.Header().Get("Location"); to != "/posts/new" {
 		t.Errorf("sent to %q, want the form it came from", to)
@@ -57,15 +57,15 @@ func TestARejectedFormUnderHTMXGetsHXRedirect(t *testing.T) {
 	req.Header.Set("HX-Request", "true")
 
 	rec := httptest.NewRecorder()
-	httpx.Reject(rec, req, flash(), failed())
+	hhttp.Reject(rec, req, flash(), failed())
 
 	// htmx does not swap a 4xx, so a body would be fetched and thrown away --
 	// which is the failure this whole path exists to remove.
 	if to := rec.Header().Get("HX-Redirect"); to != "/posts/new" {
 		t.Errorf("HX-Redirect = %q, want %q", to, "/posts/new")
 	}
-	if rec.Code != http.StatusNoContent {
-		t.Errorf("answered %d, want %d", rec.Code, http.StatusNoContent)
+	if rec.Code != stdhttp.StatusNoContent {
+		t.Errorf("answered %d, want %d", rec.Code, stdhttp.StatusNoContent)
 	}
 }
 
@@ -81,7 +81,7 @@ func TestRejectRefusesAForeignRefererAndFallsBackToRoot(t *testing.T) {
 	} {
 		t.Run(referer, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			httpx.Reject(rec, submitted("http://example.test/posts", referer), flash(), failed())
+			hhttp.Reject(rec, submitted("http://example.test/posts", referer), flash(), failed())
 
 			if to := rec.Header().Get("Location"); to != "/" {
 				t.Errorf("Referer %q sent the browser to %q", referer, to)
@@ -93,16 +93,16 @@ func TestRejectRefusesAForeignRefererAndFallsBackToRoot(t *testing.T) {
 func TestWhatWasTypedComesBackAndAPasswordNeverDoes(t *testing.T) {
 	// The flash is what carries it, and Reject is what fills the flash from the
 	// body -- including when the handler rejected before reading the body.
-	req := httptest.NewRequest(http.MethodPost, "http://example.test/signup",
+	req := httptest.NewRequest(stdhttp.MethodPost, "http://example.test/signup",
 		strings.NewReader("email=ada%40example.test&password=hunter2"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Referer", "http://example.test/signup")
 
 	rec := httptest.NewRecorder()
 	f := flash()
-	httpx.Reject(rec, req, f, failed())
+	hhttp.Reject(rec, req, f, failed())
 
-	next := httptest.NewRequest(http.MethodGet, "/signup", nil)
+	next := httptest.NewRequest(stdhttp.MethodGet, "/signup", nil)
 	// The browser navigating to the page the redirect pointed at. The Accept is
 	// what tells session.Flash this is a page somebody is about to read rather
 	// than a stylesheet or a fragment, and only a page spends the message.
@@ -128,19 +128,19 @@ func TestWhatWasTypedComesBackAndAPasswordNeverDoes(t *testing.T) {
 func TestBackKeepsTheQueryOfThePageTheFormWasOn(t *testing.T) {
 	// A form reached at /posts/new?from=drafts must come back to the same list,
 	// or the person lands on a page that has lost where they were.
-	req := httptest.NewRequest(http.MethodPost, "http://example.test/posts", nil)
+	req := httptest.NewRequest(stdhttp.MethodPost, "http://example.test/posts", nil)
 	req.Header.Set("Referer", "http://example.test/posts/new?from=drafts")
 
-	if got := httpx.Back(req); got != "/posts/new?from=drafts" {
+	if got := hhttp.Back(req); got != "/posts/new?from=drafts" {
 		t.Errorf("Back = %q, want the address with its query", got)
 	}
 }
 
 func TestBackAcceptsARefererThatIsAlreadyAPath(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "http://example.test/posts", nil)
+	req := httptest.NewRequest(stdhttp.MethodPost, "http://example.test/posts", nil)
 	req.Header.Set("Referer", "/posts/new")
 
-	if got := httpx.Back(req); got != "/posts/new" {
+	if got := hhttp.Back(req); got != "/posts/new" {
 		t.Errorf("Back = %q, want /posts/new", got)
 	}
 }

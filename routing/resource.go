@@ -9,16 +9,16 @@ import (
 //
 // C is the request context a controller action receives, and it is a type
 // parameter rather than a named type because that type lives above this
-// package: hesape/httpx owns the request context, the renderer and the answer
+// package: hesape/http owns the request context, the renderer and the answer
 // to a rejected form, and a router that imported it would be a router that had
 // to know what an answer looks like in order to match a path.
 //
 // The layer that owns C supplies the adapter, and the call reads:
 //
-//	routing.Resource(r, "invoices", InvoiceController{}, httpx.Action)
+//	routing.Resource(r, "invoices", InvoiceController{}, hhttp.Action)
 //
 // It is the same function a single route already goes through --
-// r.Get("/x", httpx.Action(c.Show)) -- passed by name instead of applied, so
+// r.Get("/x", hhttp.Action(c.Show)) -- passed by name instead of applied, so
 // Resource can apply it to the seven actions it finds.
 type Adapter[C any] func(func(*C) error) http.Handler
 
@@ -67,7 +67,7 @@ type (
 
 // Resource registers the REST routes a controller implements.
 //
-//	routing.Resource(r, "invoices", InvoiceController{}, httpx.Action)
+//	routing.Resource(r, "invoices", InvoiceController{}, hhttp.Action)
 //
 // The seven, in the conventional order and with the conventional names:
 //

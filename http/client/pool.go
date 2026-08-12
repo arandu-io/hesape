@@ -15,6 +15,15 @@ type Pool struct {
 	factory  *Factory
 	requests []poolRequest
 	mu       sync.Mutex
+
+	// keys maps a pending request this pool built to the key it answers
+	// under, so a verb can find its slot without the caller passing the key
+	// twice.
+	keys map[*PendingRequest]string
+
+	// unnamed counts the requests added without a name, which is what their
+	// numeric key comes from.
+	unnamed int
 }
 
 type poolRequest struct {
@@ -29,27 +38,61 @@ type poolRequest struct {
 
 // NewPool creates a Pool backed by the given Factory.
 func NewPool(f *Factory) *Pool {
-	return &Pool{factory: f}
+	return &Pool{factory: f, keys: make(map[*PendingRequest]string)}
 }
 
 // NewRequest adds a request with a numeric key.
+//
+// The key counts only the unnamed requests, as PHP's array append does: a pool
+// of As("a"), NewRequest(), As("b"), NewRequest() answers under "a", "0", "b"
+// and "1".
 func (p *Pool) NewRequest() *PendingRequest {
-	pr := p.factory.CreatePendingRequest()
-	p.requests = append(p.requests, poolRequest{
-		key:     fmt.Sprintf("%d", len(p.requests)),
-		pending: pr,
-	})
-	return pr
+	p.mu.Lock()
+	key := fmt.Sprintf("%d", p.unnamed)
+	p.unnamed++
+	p.mu.Unlock()
+	return p.claim(key)
 }
 
 // As adds a request with a named key.
 func (p *Pool) As(key string) *PendingRequest {
+	return p.claim(key)
+}
+
+// claim builds a pending request bound to this pool under a key.
+//
+// The binding is what makes the verb record rather than send: a request the
+// pool did not build has no pool, and behaves exactly as it did before.
+func (p *Pool) claim(key string) *PendingRequest {
 	pr := p.factory.CreatePendingRequest()
-	p.requests = append(p.requests, poolRequest{
-		key:     key,
-		pending: pr,
-	})
+	pr.pool = p
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.keys[pr] = key
 	return pr
+}
+
+// record is what a verb on a pooled request calls instead of sending.
+//
+// A second verb on the same pending request replaces the first rather than
+// adding a second entry: PHP's $pool->as('a')->get(...)->post(...) would be
+// one request too, because the key names one slot.
+func (p *Pool) record(pr *PendingRequest, method, url string, query map[string]string, data any) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	key, ok := p.keys[pr]
+	if !ok {
+		return
+	}
+	entry := poolRequest{key: key, pending: pr, method: method, url: url, query: query, data: data}
+	for i := range p.requests {
+		if p.requests[i].key == key {
+			p.requests[i] = entry
+			return
+		}
+	}
+	p.requests = append(p.requests, entry)
 }
 
 // GetRequests returns all pending requests in the pool.
@@ -77,6 +120,10 @@ func (p *Pool) Send(concurrency int) (map[string]*Response, error) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+
+			// Unbind before sending, or Send records the call a second time
+			// instead of making it.
+			r.pending.pool = nil
 
 			resp, err := r.pending.Send(r.method, r.url, r.query, r.data)
 			mu.Lock()

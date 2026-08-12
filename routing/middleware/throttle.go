@@ -16,7 +16,7 @@ import (
 // It is a parameter and not a call into a package, because how a refusal is
 // written is the request layer's decision -- an HTMX request needs a header
 // that a plain one does not, and getting that wrong is how a 429 became a
-// button that did nothing. hesape/httpx.Refuse is the function that fits, and
+// button that did nothing. hesape/hhttp.Refuse is the function that fits, and
 // passing it keeps the routing layer below the layer that owns the answer.
 //
 // The status and the sentence are this middleware's, and every implementation
@@ -35,7 +35,7 @@ type KeyFunc func(*http.Request) string
 //	r.Group(routing.Group{
 //		Prefix:     "/api",
 //		Middleware: []pipeline.Middleware[http.Handler]{
-//			middleware.Throttle(limiter, cache.PerMinute(60), middleware.KeyByIP, httpx.Refuse),
+//			middleware.Throttle(limiter, cache.PerMinute(60), middleware.KeyByIP, hhttp.Refuse),
 //		},
 //	})
 //

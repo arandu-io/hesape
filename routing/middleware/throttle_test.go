@@ -14,7 +14,7 @@ import (
 )
 
 // refused records what a middleware turned away, standing in for
-// hesape/httpx.Refuse.
+// hesape/hhttp.Refuse.
 type refusal struct {
 	status  int
 	message string

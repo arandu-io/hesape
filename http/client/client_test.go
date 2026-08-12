@@ -277,15 +277,15 @@ func TestAssertSentWithFake(t *testing.T) {
 	assertNoErr(t, err, "stubbed Get")
 	assertEqual(t, resp.Status(), 200, "status")
 
-	assertErr := f.AssertSent(func(r *http.Request) bool {
+	found := f.AssertSent(func(r *http.Request) bool {
 		return r.URL.String() == "https://api.example.com/users"
 	})
-	assertNoErr(t, assertErr, "AssertSent should find the request")
+	assertNoErr(t, found, "AssertSent should find the request")
 
-	assertErr2 := f.AssertSent(func(r *http.Request) bool {
+	notFound := f.AssertSent(func(r *http.Request) bool {
 		return r.URL.String() == "https://api.example.com/nonexistent"
 	})
-	assertErr(t, assertErr2, "AssertSent should not find nonexistent URL")
+	assertErr(t, notFound, "AssertSent should not find nonexistent URL")
 }
 
 func TestAssertNotSent(t *testing.T) {
@@ -447,10 +447,9 @@ func TestBatchConcurrentRequests(t *testing.T) {
 	var completed int
 	var captured map[string]*Response
 
-	batch := f.Pool()
-	pool := batch.(*Pool)
+	// Factory.Pool already answers with a *Pool; Batch wraps one.
+	pool := f.Pool()
 
-	// Use Pool directly since Batch wraps around it.
 	pool.As("x").Get(server.URL+"/x", nil)
 	pool.As("y").Get(server.URL+"/y", nil)
 

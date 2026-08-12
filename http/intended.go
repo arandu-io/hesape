@@ -1,7 +1,7 @@
-package httpx
+package http
 
 import (
-	"net/http"
+	stdhttp "net/http"
 	"time"
 
 	"github.com/arandu-io/hesape/encryption"
@@ -96,8 +96,8 @@ func NewIntended(appKey []byte, secure bool) *Intended {
 //
 // It writes nothing when there is nothing worth writing, so a caller has no
 // branch to get wrong.
-func (i *Intended) Remember(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+func (i *Intended) Remember(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	if r.Method != stdhttp.MethodGet {
 		return
 	}
 	if r.Header.Get("HX-Request") == "true" && r.Header.Get("HX-Boosted") != "true" {
@@ -108,7 +108,7 @@ func (i *Intended) Remember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{
+	stdhttp.SetCookie(w, &stdhttp.Cookie{
 		Name:     IntendedCookieName,
 		Value:    i.signer.Sign(intendedPurpose, to, IntendedLifetime),
 		Path:     "/",
@@ -118,7 +118,7 @@ func (i *Intended) Remember(w http.ResponseWriter, r *http.Request) {
 		// Lax and not Strict: the whole point is to be readable on the request
 		// that follows a sign-in, and every one of those is same-site anyway.
 		// The signature, not the attribute, is what makes the value trustworthy.
-		SameSite: http.SameSiteLaxMode,
+		SameSite: stdhttp.SameSiteLaxMode,
 	})
 }
 
@@ -148,7 +148,7 @@ func (i *Intended) Remember(w http.ResponseWriter, r *http.Request) {
 // It is consumed, not read: the cookie is cleared whatever it said, so the
 // address is used once. An address left standing is one a person meets again at
 // the next sign-in from this browser, weeks later, with no idea why.
-func (i *Intended) Take(w http.ResponseWriter, r *http.Request, fallback string) string {
+func (i *Intended) Take(w stdhttp.ResponseWriter, r *stdhttp.Request, fallback string) string {
 	c, err := r.Cookie(IntendedCookieName)
 	if err != nil {
 		// No cookie, so nothing to clear: writing the clearing header anyway
@@ -186,14 +186,14 @@ func (i *Intended) Take(w http.ResponseWriter, r *http.Request, fallback string)
 // [IntendedLifetime], and a shared machine changes hands at exactly that moment
 // -- the next person to sign in would be carried to the page the previous one
 // was refused. A sign-out handler calls it beside session.Invalidate.
-func (i *Intended) Clear(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
+func (i *Intended) Clear(w stdhttp.ResponseWriter) {
+	stdhttp.SetCookie(w, &stdhttp.Cookie{
 		Name:     IntendedCookieName,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
 		Secure:   i.secure,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: stdhttp.SameSiteLaxMode,
 	})
 }

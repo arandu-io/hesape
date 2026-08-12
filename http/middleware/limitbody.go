@@ -3,7 +3,7 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/arandu-io/hesape/httpx"
+	hhttp "github.com/arandu-io/hesape/http"
 )
 
 // LimitBodySize refuses a request body larger than max bytes.
@@ -24,7 +24,7 @@ import (
 // a limit nobody notices is wrong, and the right number is a property of what an
 // application accepts. An upload route that needs more takes a bigger one -- the
 // middleware is applied per group, like every other.
-func LimitBodySize(max int64) httpx.Middleware {
+func LimitBodySize(max int64) hhttp.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Body != nil {
