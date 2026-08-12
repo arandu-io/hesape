@@ -1,6 +1,9 @@
 package matching
 
-import "strings"
+import (
+	"net/http"
+	"strings"
+)
 
 // MethodValidator mirrors Illuminate\Routing\Matching\MethodValidator.
 //
@@ -8,12 +11,21 @@ import "strings"
 // accepted methods.
 type MethodValidator struct{}
 
-// Matches reports whether method is among the route's methods.
-func (v MethodValidator) Matches(route interface{ GetMethods() []string }, method string) bool {
-	for _, m := range route.GetMethods() {
-		if strings.EqualFold(m, method) {
+// Matches is MethodValidator::matches.
+func (v MethodValidator) Matches(route Route, req *http.Request) bool {
+	if req == nil {
+		return false
+	}
+	methods := route.Methods()
+	if len(methods) == 0 {
+		// A route registered without a method answers every method, which is
+		// what the mux does with a pattern that names none.
+		return true
+	}
+	for _, m := range methods {
+		if strings.EqualFold(m, req.Method) || m == "ANY" {
 			return true
 		}
 	}
-	return len(route.GetMethods()) == 0
+	return false
 }

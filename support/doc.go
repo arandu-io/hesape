@@ -49,7 +49,37 @@
 // AggregateServiceProvider.php, DefaultProviders.php and Reflector.php serve
 // the container, the facades and the service providers, which ADR 0001 and
 // ADR 0002 rejected. Nothing in them is reachable from a package that has none
-// of the three.
+// of the three. That covers driver, getDrivers, forgetDrivers, purge,
+// forgetInstance, getContainer, setContainer, setAsGlobal, useClass,
+// useFactory, booted, booting, callBootedCallbacks, callBootingCallbacks,
+// register, provides, isDeferred, commands, pathsToPublish, publishableGroups,
+// publishableMigrationPaths, publishableProviders, defaultProviders,
+// addProviderToBootstrapFile and setApplication.
+//
+// Composer.php -- dumpAutoloads, dumpOptimized, findComposer, hasPackage,
+// requirePackages, removePackages, setWorkingPath, getVersion, modify -- drives
+// the PHP package manager from application code, which is a thing to do when
+// the autoloader is a file that has to be regenerated. Go links its packages at
+// build time and the toolchain is `go mod`; there is nothing here to shell out
+// to at runtime.
+//
+// Reflector.php -- getClassAttribute, getClassAttributes, getParameterClassName,
+// getParameterClassNames, isCallable, isParameterSubclassOf,
+// isParameterBackedEnumWithStringBackingType -- reads PHP attributes and
+// parameter type hints to decide what to inject. It is the container's
+// eyesight, and there is no container.
+//
+// Pluralizer::inflector returns the Doctrine Inflector instance. The str
+// package carries the inflection itself; the getter exists in PHP so a caller
+// can reach past it into a third-party object, and there is no third-party
+// object to reach.
+//
+// getIterator, jsonSerialize, toHtmlString and toResponse are PHP interface
+// methods -- IteratorAggregate, JsonSerializable, Htmlable and Responsable.
+// Go's equivalents are range-over-func, MarshalJSON, and returning an
+// http.Handler, and the types here satisfy those instead. Uri is the one that
+// keeps both names: [Uri.ToHtml] and [Uri.ToResponse] are the PHP ones, because
+// a caller coming from Laravel types them.
 //
 // # The facades, which are not built
 //

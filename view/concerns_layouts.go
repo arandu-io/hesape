@@ -1,10 +1,9 @@
 package view
 
 import (
-	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 	"io"
-	"math/big"
 	"strings"
 	"sync"
 )
@@ -108,8 +107,9 @@ func (f *Factory) extendSectionLocked(name string, content string) {
 //
 //	YieldContent("sidebar", "<!-- no sidebar -->")
 func (f *Factory) YieldContent(name string, fallback ...string) string {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	// A write lock, not a read one: the placeholder is memoised on first ask.
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
 	content, ok := f.sections[name]
 	if !ok || content == "" {
@@ -126,9 +126,12 @@ func (f *Factory) YieldContent(name string, fallback ...string) string {
 	return content
 }
 
-// YieldSection yields the content of the last section opened.
+// YieldSection is ManagesLayouts::yieldSection.
 func (f *Factory) YieldSection() string {
-	return f.YieldContent(f.lastSection)
+	f.mu.RLock()
+	last := f.lastSection
+	f.mu.RUnlock()
+	return f.YieldContent(last)
 }
 
 // HasSection reports whether a section was defined and is non-empty.
@@ -161,10 +164,14 @@ func (f *Factory) GetSections() map[string]string {
 	return out
 }
 
-// FlushSections resets all sections and the section stack.
+// FlushSections is ManagesLayouts::flushSections.
 func (f *Factory) FlushSections() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.flushSectionsLocked()
+}
+
+func (f *Factory) flushSectionsLocked() {
 	f.sections = map[string]string{}
 	f.sectionStack = nil
 	f.lastSection = ""
@@ -179,17 +186,33 @@ func (f *Factory) SetSectionBuffer(content string) {
 	f.mu.Unlock()
 }
 
-// parentPlaceholder generates a unique placeholder for @parent
-// replacement in a section.
-func (f *Factory) parentPlaceholder(section string) string {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+// ParentPlaceholder is ManagesLayouts::parentPlaceholder.
+//
+// It is the marker @parent compiles to, and it has to be the same string every
+// time it is asked for within one process, because the section that writes it
+// and the section that replaces it are two different calls. It used to be
+// generated fresh from crypto/rand on every call, which meant @parent never
+// matched and the layout's own content was silently dropped.
+//
+// The salt is per Factory rather than per class, so two factories in one test
+// binary do not share markers.
+func (f *Factory) ParentPlaceholder(section string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.parentPlaceholderLocked(section)
 }
 
 func (f *Factory) parentPlaceholderLocked(section string) string {
-	n, _ := rand.Int(rand.Reader, big.NewInt(1<<62))
-	return fmt.Sprintf("##parent-%s-%x##", section, n)
+	if f.parentPlaceholders == nil {
+		f.parentPlaceholders = map[string]string{}
+	}
+	if marker, known := f.parentPlaceholders[section]; known {
+		return marker
+	}
+	sum := sha256.Sum256([]byte(f.parentSalt + section))
+	marker := fmt.Sprintf("##parent-placeholder-%x##", sum[:8])
+	f.parentPlaceholders[section] = marker
+	return marker
 }
 
 // renderSection writes a section directly to an io.Writer.

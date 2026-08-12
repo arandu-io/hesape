@@ -1,105 +1,114 @@
 package routing
 
-import (
-	"strings"
-)
+import "strings"
 
-// MergeGroupAttributes merges new group attributes into old, returning the
-// combined set. It is the Go shape of Laravel's RouteGroup::merge, for the
-// group stack the router does not keep (here a sub-router is created per
-// Group, so the merge is for the registrar and the URL generator, which read
-// attributes rather than hold a stack).
+// Merge is RouteGroup::merge. It folds a group's attributes into the ones it
+// is nested inside, and returns the combined set.
 //
-// The fields merged are prefix (concatenated with /), name (concatenated with
-// a dot), namespace (concatenated with \), where (union, new wins), and
-// middleware (old then new). Domain and controller replace rather than merge,
-// which is what Laravel does for them.
-func MergeGroupAttributes(new, old map[string]any) map[string]any {
+// Prefix concatenates with a slash, name with nothing (the dot is the
+// caller's, as in PHP), namespace with a backslash, where unions with the new
+// winning. Domain and controller replace rather than merge: a nested group
+// that names a domain is declaring one, not adding to one.
+//
+// prependExistingPrefix defaults to true. False puts the new prefix in front,
+// which is how a group registered under a versioned API root keeps the version
+// segment outermost.
+func Merge(attributes, old map[string]any, prependExistingPrefix ...bool) map[string]any {
+	prepend := len(prependExistingPrefix) == 0 || prependExistingPrefix[0]
+
 	out := map[string]any{}
 	for k, v := range old {
-		out[k] = v
-	}
-
-	if v, ok := new["prefix"].(string); ok {
-		out["prefix"] = formatPrefix(v, getString(out, "prefix"))
-	} else if v, ok := new["prefix"]; ok {
-		out["prefix"] = v
-	}
-
-	if v, ok := new["as"].(string); ok {
-		out["as"] = formatAs(v, getString(out, "as"))
-	}
-
-	if v, ok := new["namespace"].(string); ok {
-		out["namespace"] = formatNamespace(v, getString(out, "namespace"))
-	}
-
-	if v, ok := new["where"].(map[string]string); ok {
-		old := map[string]string{}
-		if existing, ok := out["where"].(map[string]string); ok {
-			old = existing
+		switch k {
+		case "namespace", "prefix", "where", "as":
+			// Replaced below by the formatted value.
+		default:
+			out[k] = v
 		}
-		out["where"] = formatWhere(v, old)
 	}
 
-	if v, ok := new["domain"].(string); ok {
-		out["domain"] = v
+	if _, declared := attributes["domain"]; declared {
+		delete(out, "domain")
+	}
+	if _, declared := attributes["controller"]; declared {
+		delete(out, "controller")
 	}
 
-	if v, ok := new["controller"].(string); ok {
-		out["controller"] = v
+	for k, v := range attributes {
+		switch k {
+		case "namespace", "prefix", "where", "as":
+		default:
+			out[k] = v
+		}
+	}
+
+	if ns := formatNamespace(attributes, old); ns != "" {
+		out["namespace"] = ns
+	}
+	if prefix := formatPrefix(attributes, old, prepend); prefix != "" {
+		out["prefix"] = prefix
+	}
+	if where := formatWhere(attributes, old); len(where) > 0 {
+		out["where"] = where
+	}
+	if as := formatAs(attributes, old); as != "" {
+		out["as"] = as
 	}
 
 	return out
 }
 
-// formatPrefix concatenates new onto old with a slash, trimming slashes on
-// both sides.
-func formatPrefix(new, old string) string {
-	new = strings.Trim(new, "/")
-	old = strings.Trim(old, "/")
-	if new == "" {
-		return old
+// formatNamespace is RouteGroup::formatNamespace.
+func formatNamespace(attributes, old map[string]any) string {
+	oldNamespace := getString(old, "namespace")
+
+	newNamespace, declared := attributes["namespace"].(string)
+	if !declared {
+		return oldNamespace
 	}
-	if old == "" {
-		return new
+	if oldNamespace != "" && !strings.HasPrefix(newNamespace, `\`) {
+		return strings.Trim(oldNamespace, `\`) + `\` + strings.Trim(newNamespace, `\`)
 	}
-	return old + "/" + new
+	return strings.Trim(newNamespace, `\`)
 }
 
-// formatAs concatenates new onto old literally, which is what Laravel does:
-// the dot is the caller's to remember in as, and the registrar's Name joins
-// with a dot instead.
-func formatAs(new, old string) string {
-	return old + new
+// formatPrefix is RouteGroup::formatPrefix.
+func formatPrefix(attributes, old map[string]any, prependExistingPrefix bool) string {
+	oldPrefix := getString(old, "prefix")
+
+	newPrefix, declared := attributes["prefix"].(string)
+	if !declared {
+		return oldPrefix
+	}
+	if prependExistingPrefix {
+		return strings.Trim(strings.Trim(oldPrefix, "/")+"/"+strings.Trim(newPrefix, "/"), "/")
+	}
+	return strings.Trim(strings.Trim(newPrefix, "/")+"/"+strings.Trim(oldPrefix, "/"), "/")
 }
 
-// formatNamespace concatenates new onto old with a backslash, unless new is
-// absolute (starts with \).
-func formatNamespace(new, old string) string {
-	new = strings.Trim(new, "\\")
-	if new == "" {
-		return old
-	}
-	if strings.HasPrefix(new, "\\") {
-		return strings.Trim(new, "\\")
-	}
-	if old == "" {
-		return new
-	}
-	return strings.Trim(old, "\\") + "\\" + new
-}
-
-// formatWhere unions new into old, new winning on conflict.
-func formatWhere(new, old map[string]string) map[string]string {
+// formatWhere is RouteGroup::formatWhere.
+func formatWhere(attributes, old map[string]any) map[string]string {
 	out := map[string]string{}
-	for k, v := range old {
-		out[k] = v
+	if existing, ok := old["where"].(map[string]string); ok {
+		for k, v := range existing {
+			out[k] = v
+		}
 	}
-	for k, v := range new {
-		out[k] = v
+	if incoming, ok := attributes["where"].(map[string]string); ok {
+		for k, v := range incoming {
+			out[k] = v
+		}
 	}
 	return out
+}
+
+// formatAs is RouteGroup::formatAs. PHP concatenates literally and the dot is
+// the caller's to remember; Route.Name is where the dot is joined for you.
+func formatAs(attributes, old map[string]any) string {
+	newAs := getString(attributes, "as")
+	if oldAs := getString(old, "as"); oldAs != "" {
+		return oldAs + newAs
+	}
+	return newAs
 }
 
 // getString reads a string field from a map, or empty.

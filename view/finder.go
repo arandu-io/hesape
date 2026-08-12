@@ -2,6 +2,7 @@ package view
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,15 +18,19 @@ import (
 // runtime one.
 type FileViewFinder struct {
 	mu         sync.RWMutex
+	files      fs.StatFS
 	paths      []string
 	extensions []string
 	hints      map[string][]string
 	views      map[string]string // name -> absolute path, cache
 }
 
-// NewFileViewFinder returns a finder that searches paths with the given
-// extensions, in order.
-func NewFileViewFinder(paths, extensions []string) *FileViewFinder {
+// NewFileViewFinder is FileViewFinder::__construct.
+//
+// files is the filesystem the finder reads; nil means the real one. It is the
+// first parameter because it is the first parameter in PHP, and it is what
+// makes the finder testable without writing a temporary tree.
+func NewFileViewFinder(files fs.StatFS, paths, extensions []string) *FileViewFinder {
 	if extensions == nil {
 		extensions = []string{".kyse.go"}
 	}
@@ -38,11 +43,36 @@ func NewFileViewFinder(paths, extensions []string) *FileViewFinder {
 		}
 	}
 	return &FileViewFinder{
+		files:      files,
 		paths:      resolved,
 		extensions: extensions,
 		hints:      map[string][]string{},
 		views:      map[string]string{},
 	}
+}
+
+// GetFilesystem is FileViewFinder::getFilesystem.
+//
+// nil is the real filesystem: the finder reaches for os directly when nobody
+// handed it one, which is the case in every non-test caller.
+func (f *FileViewFinder) GetFilesystem() fs.StatFS {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.files
+}
+
+// exists reports whether the candidate path is a file the finder can read.
+func (f *FileViewFinder) exists(candidate string) bool {
+	f.mu.RLock()
+	files := f.files
+	f.mu.RUnlock()
+
+	if files == nil {
+		_, err := os.Stat(candidate)
+		return err == nil
+	}
+	_, err := files.Stat(strings.TrimPrefix(filepath.ToSlash(candidate), "/"))
+	return err == nil
 }
 
 // Find returns the absolute path of a view, or an error naming where it
@@ -81,7 +111,7 @@ func (f *FileViewFinder) findUncached(name string) (string, error) {
 		for _, ext := range f.extensions {
 			candidate := filepath.Join(dir, normalized+ext)
 			tried = append(tried, candidate)
-			if _, err := os.Stat(candidate); err == nil {
+			if f.exists(candidate) {
 				return candidate, nil
 			}
 		}
@@ -107,7 +137,7 @@ func (f *FileViewFinder) findNamespaced(name string) (string, error) {
 		for _, ext := range f.extensions {
 			candidate := filepath.Join(dir, normalized+ext)
 			tried = append(tried, candidate)
-			if _, err := os.Stat(candidate); err == nil {
+			if f.exists(candidate) {
 				return candidate, nil
 			}
 		}

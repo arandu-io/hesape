@@ -1,9 +1,11 @@
 package view
 
 import (
+	"bytes"
 	"fmt"
 	"html"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/arandu-io/hesape/validation"
@@ -85,16 +87,45 @@ func (v *View) GetPath() string { return v.path }
 // SetPath changes the path.
 func (v *View) SetPath(path string) { v.path = path }
 
-// Render draws the view and returns the HTML.
+// Render is View::render.
 //
-// It increments the render counter, calls composers, gathers data, and runs
-// the compiled function. Errors are decorated with the view name.
-func (v *View) Render() (string, error) {
+// It increments the render counter, calls composers, gathers data, runs the
+// compiled function and then flushes the per-request state if nothing else is
+// still drawing. A failed render flushes unconditionally, so a half-filled set
+// of sections does not leak into the next page.
+func (v *View) Render() (string, error) { return v.render(nil) }
+
+// render is View::render with the callback the PHP signature carries.
+//
+// The callback runs after the contents exist and before the state is flushed,
+// which is the window Fragment and RenderSections read their answer in.
+func (v *View) render(after func()) (string, error) {
+	contents, err := v.renderContents()
+	if err != nil {
+		if v.factory != nil {
+			v.factory.FlushState()
+		}
+		return "", err
+	}
+
+	if after != nil {
+		after()
+	}
+	if v.factory != nil {
+		v.factory.FlushStateIfDoneRendering()
+	}
+	return contents, nil
+}
+
+// renderContents is View::renderContents.
+func (v *View) renderContents() (string, error) {
 	if v.factory != nil {
 		v.factory.IncrementRender()
 		defer v.factory.DecrementRender()
 
-		v.factory.CallComposer(v)
+		if err := v.factory.CallComposer(v); err != nil {
+			return "", err
+		}
 	}
 
 	// Pick up shared data that was added after construction.
@@ -113,7 +144,11 @@ func (v *View) Render() (string, error) {
 		}
 	}
 
-	buf := bufferPool.Get().(*strings.Builder)
+	// The buffer comes from the same pool the response renderer draws into, and
+	// it holds *bytes.Buffer. It used to be asserted to *strings.Builder here,
+	// which compiles -- the pool hands back an any -- and panics on the first
+	// render. Found by reading, not by a test, because nothing called it.
+	buf := bufferPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer func() {
 		buf.Reset()
@@ -153,7 +188,160 @@ func (v *View) String() string {
 func (v *View) ToHTML() string { return v.String() }
 
 // Gather returns the merged data without rendering.
+//
+// It answers no PHP method; GatherData below is View::gatherData, and this is
+// the shorter spelling the rest of this package already used when GatherData
+// was missing. Both return the same map.
 func (v *View) Gather() map[string]any { return v.GetData() }
+
+// GatherData is View::gatherData.
+//
+// The shared globals come first and the view's own data overrides them. A
+// nested *View in the data is drawn to a string before the parent runs, which
+// is what View::nest relies on.
+func (v *View) GatherData() map[string]any {
+	data := map[string]any{}
+	if v.factory != nil {
+		for k, val := range v.factory.GetShared() {
+			data[k] = val
+		}
+	} else {
+		for k, val := range v.shared {
+			data[k] = val
+		}
+	}
+	for k, val := range v.data {
+		data[k] = val
+	}
+
+	for k, val := range data {
+		if child, ok := val.(*View); ok {
+			rendered, err := child.Render()
+			if err != nil {
+				continue
+			}
+			data[k] = rendered
+		}
+	}
+	return data
+}
+
+// Name is View::name.
+func (v *View) Name() string { return v.GetName() }
+
+// GetFactory is View::getFactory.
+func (v *View) GetFactory() *Factory { return v.factory }
+
+// GetEngine is View::getEngine.
+func (v *View) GetEngine() *Renderer { return v.engine }
+
+// Fragment is View::fragment.
+//
+// It draws the whole view and hands back only the named region, which is what
+// an HTMX swap needs: the page is one template and the response is one piece
+// of it.
+func (v *View) Fragment(fragment string) (string, error) {
+	if v.factory == nil {
+		return "", fmt.Errorf("view: %q has no factory, so it has no fragments", v.name)
+	}
+	var part string
+	if _, err := v.render(func() { part = v.factory.GetFragment(fragment) }); err != nil {
+		return "", err
+	}
+	return part, nil
+}
+
+// Fragments is View::fragments.
+//
+// With no names it returns every fragment, in the order the view declared
+// them; with names it returns those, in the order asked for.
+func (v *View) Fragments(fragments ...string) (string, error) {
+	if fragments == nil {
+		return v.allFragments()
+	}
+
+	var out strings.Builder
+	for _, name := range fragments {
+		part, err := v.Fragment(name)
+		if err != nil {
+			return "", err
+		}
+		out.WriteString(part)
+	}
+	return out.String(), nil
+}
+
+// FragmentIf is View::fragmentIf.
+func (v *View) FragmentIf(condition bool, fragment string) (string, error) {
+	if condition {
+		return v.Fragment(fragment)
+	}
+	return v.Render()
+}
+
+// FragmentsIf is View::fragmentsIf.
+func (v *View) FragmentsIf(condition bool, fragments ...string) (string, error) {
+	if condition {
+		return v.Fragments(fragments...)
+	}
+	return v.Render()
+}
+
+// allFragments is View::allFragments.
+func (v *View) allFragments() (string, error) {
+	if v.factory == nil {
+		return "", nil
+	}
+
+	var captured map[string]string
+	if _, err := v.render(func() { captured = v.factory.GetFragments() }); err != nil {
+		return "", err
+	}
+
+	names := make([]string, 0, len(captured))
+	for name := range captured {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var out strings.Builder
+	for _, name := range names {
+		out.WriteString(captured[name])
+	}
+	return out.String(), nil
+}
+
+// RenderSections is View::renderSections.
+//
+// PHP passes a callback to render whose return value replaces the contents;
+// the callback there returns an array, so render's return type is whatever the
+// callback gives it. Go splits the two: Render keeps the string and this
+// returns the sections.
+func (v *View) RenderSections() (map[string]string, error) {
+	if v.factory == nil {
+		return map[string]string{}, nil
+	}
+	var sections map[string]string
+	if _, err := v.render(func() { sections = v.factory.GetSections() }); err != nil {
+		return nil, err
+	}
+	return sections, nil
+}
+
+// OffsetExists is View::offsetExists.
+func (v *View) OffsetExists(key string) bool {
+	_, ok := v.GetData()[key]
+	return ok
+}
+
+// OffsetGet is View::offsetGet.
+func (v *View) OffsetGet(key string) any { return v.GetData()[key] }
+
+// OffsetSet is View::offsetSet.
+func (v *View) OffsetSet(key string, value any) { v.With(key, value) }
+
+// OffsetUnset is View::offsetUnset.
+func (v *View) OffsetUnset(key string) { delete(v.data, key) }
 
 // RenderView renders a View to an io.Writer directly.
 func RenderView(w io.Writer, v *View) error {

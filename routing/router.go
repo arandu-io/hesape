@@ -62,6 +62,19 @@ type Router struct {
 	// viewRenderer renders the view a View route answers with; SetViewRenderer
 	// wires it and View uses it. The concrete is hesape/view.
 	viewRenderer ViewRenderer
+	// controllerDispatcher turns a controller name and an action into the
+	// handler a resource route calls. In Laravel the container resolves it;
+	// SetControllerDispatcher is the wiring here.
+	controllerDispatcher ControllerDispatcher
+	// implicitBindingCallback runs instead of the built-in implicit binding
+	// when SubstituteImplicitBindingsUsing set one.
+	implicitBindingCallback func(rt *Route, req *http.Request) error
+
+	// groupStack is the attributes of every enclosing group, outermost first.
+	// PHP pushes and pops one stack on a single router; a sub-router is created
+	// per Group here, so each carries the stack it was created under and
+	// nothing has to be popped.
+	groupStack []map[string]any
 }
 
 // Group is what a sub-router adds to everything registered under it.
@@ -111,6 +124,11 @@ func (r *Router) Group(g Group) *Router {
 		mws:    append(append([]pipeline.Middleware[http.Handler]{}, r.mws...), g.Middleware...),
 		table:  r.table,
 		root:   r.root,
+		groupStack: append(append([]map[string]any{}, r.groupStack...), map[string]any{
+			"prefix":     g.Prefix,
+			"as":         g.Name,
+			"middleware": g.Middleware,
+		}),
 	}
 }
 

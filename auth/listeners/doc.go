@@ -3,8 +3,11 @@
 // The files it answers to, in the clone at
 // laravel_illuminate/auth/Listeners:
 //
-//	SendEmailVerificationNotification.php
+//	SendEmailVerificationNotification.php -> [SendEmailVerificationNotification]
 //
-// Nothing is implemented here yet. docs/31-reorganizacao-hesape.md says what
-// moves in, from where, and in which phase.
+// One listener, for one event: a fresh registration whose account has an address
+// to confirm gets the link sent to it. It is the only thing in Illuminate\Auth
+// that listens rather than being listened to, and it is registered by the
+// application, not by this package -- there is no service provider to register it
+// from (ADR 0001).
 package listeners

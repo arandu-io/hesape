@@ -86,6 +86,11 @@ type Route struct {
 	// fallback marks a route registered with Fallback, so matching treats it
 	// as the last resort.
 	fallback bool
+	// lockSeconds and waitSeconds are what Block set: how long the route holds
+	// the session lock, and how long it waits to take it. nil is Laravel's
+	// null -- no lock at all.
+	lockSeconds *int
+	waitSeconds *int
 }
 
 // triState returns a pointer to b, the shape scopedBindings stores so the

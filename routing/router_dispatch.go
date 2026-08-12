@@ -1,9 +1,12 @@
 package routing
 
 import (
+	"context"
 	"net/http"
+	"regexp"
 	"strings"
 
+	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/pipeline"
 )
 
@@ -248,11 +251,9 @@ func (r *Router) CurrentRouteUses(req *http.Request, action string) bool {
 	return r.CurrentRouteAction(req) == action
 }
 
-// CurrentRouteNamed2 is an alias kept for the surface that reads the verb
-// form; CurrentRouteNamed is the canonical one.
-func (r *Router) CurrentRouteNamed2(req *http.Request, patterns ...string) bool {
-	return r.CurrentRouteNamed(req, patterns...)
-}
+// GetCurrentRoute is Router::getCurrentRoute. The request is the argument
+// because a router shared by every goroutine cannot hold the one in flight.
+func (r *Router) GetCurrentRoute(req *http.Request) *Route { return r.Current(req) }
 
 // Input returns a parameter of the current route, or def. It is Laravel's
 // input on the router, which reads the current route's parameter.
@@ -266,53 +267,57 @@ func (r *Router) Input(req *http.Request, key string, def ...any) any {
 	return nil
 }
 
-// Bind registers a custom binder for a parameter key. The binder resolves the
-// raw path value into the record the handler expects, and it MUST enforce
-// authorization and tenant against the Grant in the context (REGRA 17).
-func (r *Router) Bind(key string, fn BindingFunc) {
-	r.root.binders.Bind(strings.ReplaceAll(key, "-", "_"), fn)
-}
-
-// Model registers a binder for a parameter key using fn. It is the semantic
-// alias of Bind -- in Laravel, model takes a class and a callback; here the
-// callback is the whole binder, because Go has no container to resolve a class
-// from a string.
-func (r *Router) Model(key string, fn BindingFunc) {
-	r.Bind(key, fn)
-}
-
-// GetBindingCallback returns the binder for a key, or nil. It is what
-// SubstituteBindings reads.
-func (r *Router) GetBindingCallback(key string) BindingFunc {
-	if r.root.binders == nil || r.root.binders.m == nil {
-		return nil
-	}
-	return r.root.binders.m[strings.ReplaceAll(key, "-", "_")]
-}
-
-// SubstituteBindings resolves the explicit binders for the route's parameters,
-// installing the resolved values as per-request overrides. A parameter with no
-// binder is left as its raw string. The error is what a Missing handler or a
-// 404 answers with.
+// Bind is Router::bind. It registers a binder for a parameter key: the binder
+// resolves the raw path value into the record the handler expects.
 //
-// The binders receive the request context, which carries the auth.Grant, and a
-// binder that loads a record MUST filter by tenant (REGRA 17): a binder that
-// looks up by id without filtering delivers another customer's record through
-// the URL, which is the most direct form of the cross-tenant leak.
-func (r *Router) SubstituteBindings(rt *Route, req *http.Request) error {
+// The binder receives the auth.Grant and MUST filter by auth.Tenant(g)
+// (RULE 17). A binder that looks a record up by id alone delivers another
+// customer's row through the URL, which is the most direct form of the
+// cross-tenant leak.
+func (r *Router) Bind(key string, binder BindingFunc) {
+	r.root.binders.Bind(key, binder)
+}
+
+// Model is Router::model. It registers a model binding for a parameter key:
+// the parameter resolves through the record type's own ResolveRouteBinding,
+// under the Grant.
+//
+// PHP takes a class name and resolves it from the container; there is no
+// container here, so it takes a zero value of the type -- which is the same
+// thing the container would have handed the binder.
+func (r *Router) Model(key string, class UrlRoutable, callback ...MissingModelFunc) {
+	r.root.binders.Model(key, class, callback...)
+}
+
+// GetBindingCallback is Router::getBindingCallback.
+func (r *Router) GetBindingCallback(key string) BindingFunc {
+	return r.root.binders.GetBindingCallback(key)
+}
+
+// SubstituteBindings is Router::substituteBindings. It resolves the explicit
+// binders for the route's parameters and installs what they returned as the
+// value the handler reads.
+//
+// The Grant is a parameter and not something read out of the context, because
+// a parameter cannot be forgotten. Every binding is scoped by auth.Tenant(g),
+// and a Grant with no tenant is refused before anything is looked up.
+func (r *Router) SubstituteBindings(ctx context.Context, g auth.Grant, rt *Route, req *http.Request) error {
 	if rt == nil || req == nil || r.root.binders == nil {
 		return nil
 	}
+	if err := requireTenant(g); err != nil {
+		return err
+	}
 	for _, name := range rt.ParameterNames() {
-		fn := r.GetBindingCallback(name)
-		if fn == nil {
+		binder := r.GetBindingCallback(name)
+		if binder == nil {
 			continue
 		}
-		val := req.PathValue(name)
-		if val == "" {
+		value := rt.OriginalParameter(req, name)
+		if value == "" {
 			continue
 		}
-		resolved, err := fn(req.Context(), val, req)
+		resolved, err := binder(ctx, g, value, rt)
 		if err != nil {
 			return err
 		}
@@ -323,12 +328,21 @@ func (r *Router) SubstituteBindings(rt *Route, req *http.Request) error {
 	return nil
 }
 
-// SubstituteImplicitBindings resolves implicit bindings for the route using
-// the registered binders. It delegates to SubstituteBindings, which is the
-// explicit set; the implicit half -- reflecting a controller's type hints --
-// is not in Go, and the contract here is the explicit binder.
-func (r *Router) SubstituteImplicitBindings(rt *Route, req *http.Request) error {
-	return r.SubstituteBindings(rt, req)
+// SubstituteImplicitBindings is Router::substituteImplicitBindings. It runs
+// the implicit binding -- every parameter with a registered model, resolved
+// through it, scoped where the route asked for scoping -- or the callback
+// SubstituteImplicitBindingsUsing installed in its place.
+func (r *Router) SubstituteImplicitBindings(ctx context.Context, g auth.Grant, rt *Route, req *http.Request) error {
+	if callback := r.root.implicitBindingCallback; callback != nil {
+		return callback(rt, req)
+	}
+	return NewImplicitRouteBinding(r.root.binders).ResolveForRoute(ctx, g, rt, req)
+}
+
+// SubstituteImplicitBindingsUsing is Router::substituteImplicitBindingsUsing.
+func (r *Router) SubstituteImplicitBindingsUsing(callback func(rt *Route, req *http.Request) error) *Router {
+	r.root.implicitBindingCallback = callback
+	return r
 }
 
 // RespondWithRoute dispatches the named route directly, bypassing the mux's
@@ -368,74 +382,231 @@ func (r *Router) SetViewRenderer(vr ViewRenderer) {
 // GetViewRenderer returns the view renderer, or nil.
 func (r *Router) GetViewRenderer() ViewRenderer { return r.root.viewRenderer }
 
-// --- Resource delegation ---
+// --- Resource registration ---
 //
-// These return the PendingResourceRegistration the other fatia
-// (routing:URL+bindings) built. They are the Router surface for resource,
-// apiResource, singleton and their plural forms. The effective registration of
-// the seven routes happens through ResourceRegistrar, which calls the same
-// http.Handler path the function Resource[C] (in resource.go) uses -- so there
-// is one form of handler, and two ways to reach it: the function, which takes
-// a concrete controller and an Adapter; and the registrar, which takes a name
-// and a controller string and produces the pending registration. See doc.go
-// for the REGRA 9 analysis.
+// These are the Router surface for resource, apiResource, singleton and their
+// plural forms. There are two ways into the seven routes, and they are not two
+// forms of the same thing: Resource[C] (in resource.go) takes a concrete
+// controller value and an Adapter, and registers exactly the actions that
+// controller implements; these take a controller name and hand it to the
+// dispatcher the kernel wired, which is the shape a generated module and
+// `aru make:controller` produce.
+//
+// PHP registers on destruction. Go has no destructor, so Register commits:
+//
+//	r.Resource("invoices", "InvoiceController").Only("index", "show").Register()
 
-// Resource registers a resource controller and returns the pending
-// registration, for fluent configuration before the routes are committed.
-func (r *Router) Resource(name, controller string) *PendingResourceRegistration {
-	return NewResourceRegistrar(r).Resource(name, controller)
+// Resource is Router::resource.
+func (r *Router) Resource(name, controller string, options ...ResourceOptions) *PendingResourceRegistration {
+	return NewPendingResourceRegistration(NewResourceRegistrar(r), name, controller, firstOption(options))
 }
 
-// Resources registers several resource controllers at once.
-func (r *Router) Resources(resources map[string]string) {
-	reg := NewResourceRegistrar(r)
+// Resources is Router::resources.
+func (r *Router) Resources(resources map[string]string, options ...ResourceOptions) {
 	for name, controller := range resources {
-		reg.Resource(name, controller)
+		r.Resource(name, controller, options...).Register()
 	}
 }
 
-// ApiResource registers an API resource (index, show, store, update, destroy)
-// and returns the pending registration.
-func (r *Router) ApiResource(name, controller string) *PendingResourceRegistration {
-	pending := NewResourceRegistrar(r).Resource(name, controller)
-	pending.Except("create", "edit")
-	return pending
+// ApiResource is Router::apiResource: a resource without the two routes that
+// exist only to show a form.
+func (r *Router) ApiResource(name, controller string, options ...ResourceOptions) *PendingResourceRegistration {
+	opts := firstOption(options)
+	if len(opts.Only) > 0 {
+		filtered := make([]string, 0, len(opts.Only))
+		for _, m := range opts.Only {
+			if m != "create" && m != "edit" {
+				filtered = append(filtered, m)
+			}
+		}
+		opts.Only = filtered
+	} else {
+		opts.Except = append(append([]string{}, opts.Except...), "create", "edit")
+	}
+	return NewPendingResourceRegistration(NewResourceRegistrar(r), name, controller, opts)
 }
 
-// ApiResources registers several API resources at once.
-func (r *Router) ApiResources(resources map[string]string) {
+// ApiResources is Router::apiResources.
+func (r *Router) ApiResources(resources map[string]string, options ...ResourceOptions) {
 	for name, controller := range resources {
-		r.ApiResource(name, controller)
+		r.ApiResource(name, controller, options...).Register()
 	}
 }
 
-// Singleton registers a singleton resource and returns the pending
-// registration.
-func (r *Router) Singleton(name, controller string) *PendingSingletonResourceRegistration {
-	return NewResourceRegistrar(r).Singleton(name, controller)
+// Singleton is Router::singleton.
+func (r *Router) Singleton(name, controller string, options ...ResourceOptions) *PendingSingletonResourceRegistration {
+	return NewPendingSingletonResourceRegistration(NewResourceRegistrar(r), name, controller, firstOption(options))
 }
 
-// Singletons registers several singleton resources at once.
-func (r *Router) Singletons(singletons map[string]string) {
-	reg := NewResourceRegistrar(r)
+// Singletons is Router::singletons.
+func (r *Router) Singletons(singletons map[string]string, options ...ResourceOptions) {
 	for name, controller := range singletons {
-		reg.Singleton(name, controller)
+		r.Singleton(name, controller, options...).Register()
 	}
 }
 
-// ApiSingleton registers an API singleton (store, show, update, destroy) and
-// returns the pending registration.
-func (r *Router) ApiSingleton(name, controller string) *PendingSingletonResourceRegistration {
-	pending := NewResourceRegistrar(r).Singleton(name, controller)
-	pending.Except("edit")
-	return pending
+// ApiSingleton is Router::apiSingleton.
+func (r *Router) ApiSingleton(name, controller string, options ...ResourceOptions) *PendingSingletonResourceRegistration {
+	opts := firstOption(options)
+	opts.Except = append(append([]string{}, opts.Except...), "create", "edit")
+	return NewPendingSingletonResourceRegistration(NewResourceRegistrar(r), name, controller, opts)
 }
 
-// ApiSingletons registers several API singletons at once.
-func (r *Router) ApiSingletons(singletons map[string]string) {
+// ApiSingletons is Router::apiSingletons.
+func (r *Router) ApiSingletons(singletons map[string]string, options ...ResourceOptions) {
 	for name, controller := range singletons {
-		r.ApiSingleton(name, controller)
+		r.ApiSingleton(name, controller, options...).Register()
 	}
+}
+
+// firstOption reads the optional options argument, which PHP defaults to an
+// empty array.
+func firstOption(options []ResourceOptions) ResourceOptions {
+	if len(options) > 0 {
+		return options[0]
+	}
+	return ResourceOptions{}
+}
+
+// SingularResourceParameters is Router::singularResourceParameters.
+func (r *Router) SingularResourceParameters(singular ...bool) { SingularParameters(singular...) }
+
+// ResourceParameters is Router::resourceParameters.
+func (r *Router) ResourceParameters(parameters map[string]string) { SetParameters(parameters) }
+
+// ResourceVerbs is Router::resourceVerbs.
+func (r *Router) ResourceVerbs(verbs ...map[string]string) map[string]string { return Verbs(verbs...) }
+
+// ControllerDispatcher is Illuminate\Routing\Contracts\ControllerDispatcher.
+//
+// It turns a controller name and one of its actions into the handler that
+// answers. PHP resolves the controller out of the container and calls the
+// method by name; neither exists in Go, so the layer that knows how to build a
+// controller supplies this.
+type ControllerDispatcher interface {
+	// Dispatch is ControllerDispatcher::dispatch.
+	Dispatch(route *Route, controller, method string) http.Handler
+}
+
+// SetControllerDispatcher wires the dispatcher a resource route's handler goes
+// through. It answers the container binding RoutingServiceProvider makes, and
+// it is the same shape as SetViewRenderer: the kernel hands the router the one
+// thing it cannot build itself.
+func (r *Router) SetControllerDispatcher(dispatcher ControllerDispatcher) *Router {
+	r.root.controllerDispatcher = dispatcher
+	return r
+}
+
+// GetControllerDispatcher returns the dispatcher, or nil.
+func (r *Router) GetControllerDispatcher() ControllerDispatcher {
+	return r.root.controllerDispatcher
+}
+
+// AddRoute is Router::addRoute. It creates a route and puts it in the table,
+// which is what every verb method goes through.
+func (r *Router) AddRoute(methods []string, uri string, action http.Handler, mws ...pipeline.Middleware[http.Handler]) *Route {
+	if len(methods) == 0 {
+		return r.Any(uri, action, mws...)
+	}
+	return r.Match(methods, uri, action, mws...)
+}
+
+// NewRoute is Router::newRoute. It builds a route bound to this router without
+// registering it, for a caller assembling a table of its own.
+func (r *Router) NewRoute(methods []string, uri string, action http.Handler) *Route {
+	method := anyMethod
+	if len(methods) > 0 {
+		method = strings.ToUpper(methods[0])
+	}
+	route := &Route{
+		Method:     method,
+		Pattern:    joinPath(r.prefix, uri),
+		Module:     r.module,
+		namePrefix: r.name,
+		prefix:     r.prefix,
+		table:      r.table,
+		handler:    action,
+		mws:        append([]pipeline.Middleware[http.Handler]{}, r.mws...),
+		wheres:     map[string]*regexp.Regexp{},
+		defaults:   map[string]any{},
+		action:     map[string]any{"uses": "Closure", "controller": "Closure"},
+	}
+	for _, m := range methods[1:] {
+		route.siblings = append(route.siblings, &Route{Method: strings.ToUpper(m), Pattern: route.Pattern, handler: action})
+	}
+	return route.SetRouter(r)
+}
+
+// GatherRouteMiddleware is Router::gatherRouteMiddleware.
+func (r *Router) GatherRouteMiddleware(route *Route) []pipeline.Middleware[http.Handler] {
+	return r.ResolveMiddleware(route.GatherMiddleware(), route.ExcludedMiddleware())
+}
+
+// ResolveMiddleware is Router::resolveMiddleware. PHP resolves middleware
+// names through the alias and group registries and then sorts by priority;
+// here a middleware is already the function, so what is left is removing the
+// excluded ones and dropping duplicates.
+func (r *Router) ResolveMiddleware(middleware []pipeline.Middleware[http.Handler], excluded ...[]pipeline.Middleware[http.Handler]) []pipeline.Middleware[http.Handler] {
+	var drop []uintptr
+	if len(excluded) > 0 {
+		for _, mw := range excluded[0] {
+			drop = append(drop, middlewarePointer(mw))
+		}
+	}
+
+	out := make([]pipeline.Middleware[http.Handler], 0, len(middleware))
+	for _, mw := range middleware {
+		if containsPointer(drop, middlewarePointer(mw)) {
+			continue
+		}
+		out = append(out, mw)
+	}
+	return UniqueMiddleware(out)
+}
+
+// UniqueMiddleware is Router::uniqueMiddleware. It drops repeats while keeping
+// the first of each, so a middleware a group and a route both attached runs
+// once.
+func UniqueMiddleware(middleware []pipeline.Middleware[http.Handler]) []pipeline.Middleware[http.Handler] {
+	seen := make(map[uintptr]bool, len(middleware))
+	out := make([]pipeline.Middleware[http.Handler], 0, len(middleware))
+	for _, mw := range middleware {
+		p := middlewarePointer(mw)
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, mw)
+	}
+	return out
+}
+
+// HasGroupStack is Router::hasGroupStack.
+func (r *Router) HasGroupStack() bool { return len(r.groupStack) > 0 }
+
+// GetGroupStack is Router::getGroupStack. The attributes of every enclosing
+// group, outermost first.
+func (r *Router) GetGroupStack() []map[string]any {
+	return append([]map[string]any(nil), r.groupStack...)
+}
+
+// GetLastGroupPrefix is Router::getLastGroupPrefix.
+func (r *Router) GetLastGroupPrefix() string {
+	if !r.HasGroupStack() {
+		return ""
+	}
+	last := r.groupStack[len(r.groupStack)-1]
+	prefix, _ := last["prefix"].(string)
+	return prefix
+}
+
+// MergeWithLastGroup is Router::mergeWithLastGroup.
+func (r *Router) MergeWithLastGroup(attributes map[string]any, prependExistingPrefix ...bool) map[string]any {
+	var last map[string]any
+	if r.HasGroupStack() {
+		last = r.groupStack[len(r.groupStack)-1]
+	}
+	return Merge(attributes, last, prependExistingPrefix...)
 }
 
 // errRouteNotFound is the error RespondWithRoute returns for an unknown name.

@@ -32,6 +32,7 @@ type Factory struct {
 	composers []viewEvent
 	creators  []viewEvent
 	once      viewEventOnce
+	events    Dispatcher
 
 	// Engine resolver maps extensions to engines.
 	resolver *engines.Resolver
@@ -62,7 +63,7 @@ type Factory struct {
 	componentData        map[string]any
 	currentComponent     string
 	currentComponentData map[string]any
-	slots                map[string]ComponentSlot
+	slots                map[string]*ComponentSlot
 	slotStack            []string
 	componentBuffer      string
 	slotBuffer           string
@@ -80,8 +81,9 @@ type Factory struct {
 	renderCount  int
 	renderedOnce map[string]bool
 
-	// Parent placeholder salt.
-	parentSalt string
+	// Parent placeholder salt, and the marker memoised per section.
+	parentSalt         string
+	parentPlaceholders map[string]string
 }
 
 // NewFactory returns a Factory backed by the compiled view registry.
@@ -93,7 +95,7 @@ func NewFactory() *Factory {
 		sections:     map[string]string{},
 		pushes:       map[string][]string{},
 		prepends:     map[string][]string{},
-		slots:        map[string]ComponentSlot{},
+		slots:        map[string]*ComponentSlot{},
 		fragments:    map[string]string{},
 		renderedOnce: map[string]bool{},
 		parentSalt:   randomString(40),
@@ -379,33 +381,75 @@ func (f *Factory) MarkAsRenderedOnce(id string) {
 }
 
 // Flush clears caches and shared state. Use between requests in tests.
+//
+// It answers no single PHP method: there it is flushState plus the finder's
+// own flush, and the two are always called together.
 func (f *Factory) Flush() {
-	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.FlushState()
-	if f.finder != nil {
-		f.finder.Flush()
-	}
+	f.FlushFinderCache()
 }
 
-// FlushState resets per-request state: sections, stacks, components,
-// fragments, and the render count.
+// FlushState is Factory::flushState.
+//
+// It resets per-request state: sections, stacks, components, fragments and the
+// render count.
+//
+// It used to take the lock and then call the four Flush methods, each of which
+// takes the same lock. A sync.RWMutex is not reentrant, so the first call after
+// a render deadlocked the request that made it. Nothing called it, which is why
+// it survived.
 func (f *Factory) FlushState() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.FlushSections()
-	f.FlushStacks()
-	f.FlushComponents()
-	f.FlushFragments()
+	f.flushSectionsLocked()
+	f.flushStacksLocked()
+	f.flushComponentsLocked()
+	f.flushFragmentsLocked()
 	f.renderCount = 0
 	f.renderedOnce = map[string]bool{}
 }
 
-// FlushStateIfDoneRendering flushes state only if no views are rendering.
+// FlushStateIfDoneRendering is Factory::flushStateIfDoneRendering.
 func (f *Factory) FlushStateIfDoneRendering() {
 	if f.DoneRendering() {
 		f.FlushState()
 	}
+}
+
+// FlushFinderCache is Factory::flushFinderCache.
+func (f *Factory) FlushFinderCache() {
+	f.mu.RLock()
+	finder := f.finder
+	f.mu.RUnlock()
+	if finder != nil {
+		finder.Flush()
+	}
+}
+
+// GetDispatcher is Factory::getDispatcher.
+func (f *Factory) GetDispatcher() Dispatcher {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.events
+}
+
+// SetDispatcher is Factory::setDispatcher.
+func (f *Factory) SetDispatcher(events Dispatcher) {
+	f.mu.Lock()
+	f.events = events
+	f.mu.Unlock()
+}
+
+// Dispatcher is the half of Illuminate\Contracts\Events\Dispatcher the view
+// layer uses.
+//
+// The contract lives in the package that consumes it, which is why it is
+// declared here and not imported: a Factory that has one announces
+// "composing: name" and "creating: name" as it draws, and a Factory that has
+// none draws the same page without them.
+type Dispatcher interface {
+	// Dispatch fires the named event with the view being drawn.
+	Dispatch(event string, payload ...any)
 }
 
 // RenderToString is a convenience method that makes and renders a view in

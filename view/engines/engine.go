@@ -10,6 +10,36 @@ type Engine interface {
 	Get(path string, data map[string]any) (string, error)
 }
 
+// Base is the abstract Illuminate\View\Engines\Engine.
+//
+// PHP's abstract class holds one field and one method: the view drawn last,
+// which the exception message names. An engine embeds this to answer for it.
+type Base struct {
+	lastRendered string
+}
+
+// GetLastRendered is Engine::getLastRendered.
+func (e *Base) GetLastRendered() string { return e.lastRendered }
+
+// setLastRendered records the path being drawn.
+func (e *Base) setLastRendered(path string) { e.lastRendered = path }
+
+// CompilerInterface is Illuminate\View\Compilers\CompilerInterface.
+//
+// The contract is declared where it is consumed rather than beside the
+// implementation, which is what keeps view -> engines -> compilers -> view from
+// closing into a cycle.
+type CompilerInterface interface {
+	// GetCompiledPath is Compiler::getCompiledPath.
+	GetCompiledPath(path string) string
+
+	// IsExpired is Compiler::isExpired.
+	IsExpired(path string) (bool, error)
+
+	// Compile is CompilerInterface::compile.
+	Compile(path string) error
+}
+
 // Resolver mirrors Illuminate\View\Engines\EngineResolver.
 //
 // It maps engine names to constructors. In Arandu, the only engine is the
@@ -59,39 +89,95 @@ func (e *engineNotFoundError) Error() string {
 	return "view: engine " + e.name + " is not registered"
 }
 
-// Compiler mirrors Illuminate\View\Engines\CompilerEngine.
+// Compiler is Illuminate\View\Engines\CompilerEngine.
 //
-// In Arandu, there is no runtime compilation. The kyse compiler runs at build
-// time and produces Go functions. CompilerEngine delegates to the view
-// function registry via the view.Func interface.
+// In Arandu there is no runtime compilation on the hot path: the kyse compiler
+// runs at build time and produces Go functions. What survives from PHP is the
+// bookkeeping around it -- whether a path was already found current in this
+// process, and which path is being drawn when something fails.
 type Compiler struct {
-	render func(path string, data map[string]any) (string, error)
+	Base
+
+	compiler             CompilerInterface
+	evaluate             func(path string, data map[string]any) (string, error)
+	compiledOrNotExpired map[string]bool
 }
 
-// NewCompiler returns a CompilerEngine that renders compiled views.
-func NewCompiler(render func(path string, data map[string]any) (string, error)) *Compiler {
-	return &Compiler{render: render}
-}
-
-// Get renders the view at the given path with the given data.
-func (c *Compiler) Get(path string, data map[string]any) (string, error) {
-	return c.render(path, data)
-}
-
-// File mirrors Illuminate\View\Engines\FileEngine.
+// NewCompiler is CompilerEngine::__construct.
 //
-// It reads a raw file from disk. In Arandu, this is used during development
-// by `aru view:build` to read .kyse.go source files before compilation.
+// evaluate stands in for PhpEngine::evaluatePath, which has no counterpart: it
+// exists because PHP includes the compiled file at request time, and a compiled
+// view here is a Go function that was linked into the binary.
+func NewCompiler(compiler CompilerInterface, evaluate func(path string, data map[string]any) (string, error)) *Compiler {
+	return &Compiler{
+		compiler:             compiler,
+		evaluate:             evaluate,
+		compiledOrNotExpired: map[string]bool{},
+	}
+}
+
+// Get is CompilerEngine::get.
+func (c *Compiler) Get(path string, data map[string]any) (string, error) {
+	c.setLastRendered(path)
+
+	if c.compiler != nil && !c.compiledOrNotExpired[path] {
+		expired, err := c.compiler.IsExpired(path)
+		if err != nil {
+			return "", err
+		}
+		if expired {
+			if err := c.compiler.Compile(path); err != nil {
+				return "", err
+			}
+		}
+	}
+
+	compiled := path
+	if c.compiler != nil {
+		compiled = c.compiler.GetCompiledPath(path)
+	}
+
+	if c.evaluate == nil {
+		return "", &engineNotFoundError{name: "compiler"}
+	}
+
+	result, err := c.evaluate(compiled, data)
+	if err != nil {
+		return "", err
+	}
+
+	if c.compiledOrNotExpired == nil {
+		c.compiledOrNotExpired = map[string]bool{}
+	}
+	c.compiledOrNotExpired[path] = true
+	return result, nil
+}
+
+// GetCompiler is CompilerEngine::getCompiler.
+func (c *Compiler) GetCompiler() CompilerInterface { return c.compiler }
+
+// ForgetCompiledOrNotExpired is CompilerEngine::forgetCompiledOrNotExpired.
+func (c *Compiler) ForgetCompiledOrNotExpired() {
+	c.compiledOrNotExpired = map[string]bool{}
+}
+
+// File is Illuminate\View\Engines\FileEngine.
+//
+// It reads a raw file from disk. In Arandu that is `aru view:build` reading a
+// .kyse.go source before compiling it, never a request.
 type File struct {
+	Base
+
 	read func(path string) (string, error)
 }
 
-// NewFile returns a FileEngine that reads files with the given reader.
+// NewFile is FileEngine::__construct.
 func NewFile(read func(path string) (string, error)) *File {
 	return &File{read: read}
 }
 
-// Get reads the file at path and returns its content.
+// Get is FileEngine::get.
 func (e *File) Get(path string, _ map[string]any) (string, error) {
+	e.setLastRendered(path)
 	return e.read(path)
 }

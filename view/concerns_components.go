@@ -7,12 +7,6 @@ package view
 // and the component stack — they support the kyse-generated code, not a
 // runtime component discovery mechanism.
 
-// ComponentSlot holds the content and attributes of a component slot.
-type ComponentSlot struct {
-	Content    string
-	Attributes map[string]string
-}
-
 // StartComponent pushes a component onto the rendering stack.
 func (f *Factory) StartComponent(name string, data map[string]any) {
 	f.mu.Lock()
@@ -22,7 +16,7 @@ func (f *Factory) StartComponent(name string, data map[string]any) {
 	f.currentComponent = name
 	f.currentComponentData = data
 	if f.slots == nil {
-		f.slots = map[string]ComponentSlot{}
+		f.slots = map[string]*ComponentSlot{}
 	}
 }
 
@@ -57,16 +51,33 @@ func (f *Factory) RenderComponent() string {
 	return f.componentBuffer
 }
 
-// Slot begins capturing a named slot for the current component.
-func (f *Factory) Slot(name string, content string, attributes map[string]string) {
+// Slot is ManagesComponents::slot.
+//
+// Content given up front stores the slot directly; content left empty opens a
+// capture that EndSlot closes.
+func (f *Factory) Slot(name string, content string, attributes map[string]any) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	if content != "" {
-		f.slots[name] = ComponentSlot{Content: content, Attributes: attributes}
+		f.slots[name] = NewComponentSlot(content, attributes)
 		return
 	}
 	f.slotStack = append(f.slotStack, name)
+}
+
+// GetSlots returns the slots captured for the component being rendered.
+//
+// It answers no PHP method: in Blade the slots are ordinary variables the
+// compiled template closes over, and generated Go has to ask for them.
+func (f *Factory) GetSlots() map[string]*ComponentSlot {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	out := make(map[string]*ComponentSlot, len(f.slots))
+	for k, v := range f.slots {
+		out[k] = v
+	}
+	return out
 }
 
 // EndSlot closes the current slot capture.
@@ -82,7 +93,7 @@ func (f *Factory) EndSlot() {
 	name := f.slotStack[last]
 	f.slotStack = f.slotStack[:last]
 
-	f.slots[name] = ComponentSlot{Content: f.slotBuffer}
+	f.slots[name] = NewComponentSlot(f.slotBuffer, nil)
 	f.slotBuffer = ""
 }
 
@@ -107,15 +118,19 @@ func (f *Factory) GetConsumableComponentData(key string, fallback any) any {
 	return fallback
 }
 
-// FlushComponents resets all component state.
+// FlushComponents is ManagesComponents::flushComponents.
 func (f *Factory) FlushComponents() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.flushComponentsLocked()
+}
+
+func (f *Factory) flushComponentsLocked() {
 	f.componentStack = nil
 	f.componentData = nil
 	f.currentComponentData = nil
 	f.currentComponent = ""
-	f.slots = map[string]ComponentSlot{}
+	f.slots = map[string]*ComponentSlot{}
 	f.slotStack = nil
 	f.componentBuffer = ""
 	f.slotBuffer = ""

@@ -2,6 +2,7 @@ package support
 
 import (
 	"errors"
+	nethttp "net/http"
 	"net/url"
 	"sort"
 	"strconv"
@@ -333,6 +334,34 @@ func (u *Uri) WithFragment(fragment string) *Uri {
 
 // ToHtml answers to Uri::toHtml.
 func (u *Uri) ToHtml() string { return u.Value() }
+
+// Redirect answers to Uri::redirect.
+//
+// The PHP returns an Illuminate\Http\RedirectResponse. Returning ours would
+// make support import http, and http imports support -- so this hands back the
+// standard library's net/http.Handler, which is what a router mounts and what
+// a RedirectResponse ultimately is. The name and the arguments are Laravel's.
+//
+// headers is applied before the redirect is written, because WriteHeader
+// freezes the header map.
+func (u *Uri) Redirect(status int, headers map[string]string) nethttp.Handler {
+	value := u.Value()
+	return nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		for name, v := range headers {
+			w.Header().Set(name, v)
+		}
+		nethttp.Redirect(w, r, value, status)
+	})
+}
+
+// ToResponse answers to Uri::toResponse.
+//
+// The PHP takes the request and ignores it, redirecting with the default
+// status; this keeps the parameter for the same reason PHP has it -- it is the
+// Responsable contract -- and ignores it for the same reason.
+func (u *Uri) ToResponse(*nethttp.Request) nethttp.Handler {
+	return u.Redirect(nethttp.StatusFound, nil)
+}
 
 // Decode answers to Uri::decode: the URI with its query string written out
 // undecoded, which is what a person reads in a browser bar.

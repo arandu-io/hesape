@@ -19,11 +19,26 @@
 //	ThrottleRequestsWithRedis.php
 //	ValidateSignature.php
 //
-// SubstituteBindings.php has no counterpart and will not get one: it is
-// Laravel's implicit model binding, which resolves a route parameter into a
-// loaded record by reflecting on a controller's type hints. Reaching the record
-// is the service's job, behind a Policy, and the mechanism that would do it
-// here is the one docs/01 rejected by name.
+// SubstituteBindings.php has no counterpart HERE, and the reason is the Grant.
+//
+// The binding itself does exist -- [github.com/arandu-io/hesape/routing.Router.SubstituteBindings]
+// and [github.com/arandu-io/hesape/routing.ImplicitRouteBinding.ResolveForRoute]
+// -- but it lives in the routing package, where it takes an auth.Grant as a
+// parameter and refuses a Grant with no tenant before it looks anything up.
+//
+// A middleware cannot do that. It sees an http.Handler and a *http.Request, so
+// the Grant would have to be read out of the context, and a Grant read out of
+// the context is a Grant that can be absent: the middleware would then either
+// resolve without one -- reading every customer's rows for that id -- or push
+// the tenant filter into whatever the application wrote as its binder, which is
+// RULE 17 handed to the caller and therefore not enforced at all.
+//
+// There was a SubstituteBindings middleware here. It did exactly that: its doc
+// comment said "the binder MUST filter by tenant", it took no Grant, and its
+// parameter extraction never matched a parameter, so nothing it resolved was
+// ever observed to be wrong. It was deleted rather than fixed, because fixing
+// it would have made a second way to resolve a binding (RULE 9) and the way
+// that stays is the one the compiler checks.
 //
 // ThrottleRequestsWithRedis.php has no counterpart either, for the reason
 // hesape/cache gives: there is one RateLimiter and which store it counts in is

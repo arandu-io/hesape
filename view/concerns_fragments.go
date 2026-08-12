@@ -49,10 +49,14 @@ func (f *Factory) GetFragments() map[string]string {
 	return out
 }
 
-// FlushFragments resets all fragment state.
+// FlushFragments is ManagesFragments::flushFragments.
 func (f *Factory) FlushFragments() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.flushFragmentsLocked()
+}
+
+func (f *Factory) flushFragmentsLocked() {
 	f.fragments = map[string]string{}
 	f.fragmentStack = nil
 	f.fragmentBuffer = ""

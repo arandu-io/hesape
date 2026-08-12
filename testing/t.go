@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/arandu-io/hesape/testing/constraints"
 )
 
 // T is what an assertion in this package needs from the test it runs inside.
@@ -21,9 +23,14 @@ import (
 // ExpectationFailedException, which stops the test method. Continuing after a
 // failed assertion would let the assertions that follow read a response the
 // first one already proved wrong.
+// Logf is here for the dump methods rather than for the assertions: dump() and
+// dumpHeaders() have to write somewhere, and a test's own log is where output
+// belongs -- go test shows it beside the test that produced it and hides it
+// when the test passes, which is what dump() gets from PHPUnit's printer.
 type T interface {
 	Helper()
 	Fatalf(format string, args ...any)
+	Logf(format string, args ...any)
 }
 
 // fail answers to PHPUnit::fail.
@@ -45,6 +52,16 @@ func assertFalse(t T, condition bool, message string) {
 	t.Helper()
 	if condition {
 		fail(t, "%s", or(message, "Failed asserting that true is false."))
+	}
+}
+
+// assertNotTrue answers to PHPUnit::assertNotTrue: the value is anything other
+// than true. Fluent\Concerns\Has::missing is written with it rather than with
+// assertFalse, because Arr::has may answer with something that is neither.
+func assertNotTrue(t T, condition bool, message string) {
+	t.Helper()
+	if condition {
+		fail(t, "%s", or(message, "Failed asserting that true is not true."))
 	}
 }
 
@@ -73,6 +90,15 @@ func assertEquals(t T, expected, actual any, message string) {
 	if !loosely(expected, actual) {
 		fail(t, "%s", or(message, fmt.Sprintf(
 			"Failed asserting that %s matches expected %s.", export(actual), export(expected))))
+	}
+}
+
+// assertNotEquals answers to PHPUnit::assertNotEquals.
+func assertNotEquals(t T, expected, actual any, message string) {
+	t.Helper()
+	if loosely(expected, actual) {
+		fail(t, "%s", or(message, fmt.Sprintf(
+			"Failed asserting that %s is not equal to %s.", export(actual), export(expected))))
 	}
 }
 
@@ -220,6 +246,15 @@ func assertLessThanOrEqual(t T, expected, actual int, message string) {
 	if actual > expected {
 		fail(t, "%s", or(message, fmt.Sprintf(
 			"Failed asserting that %d is equal to or less than %d.", actual, expected)))
+	}
+}
+
+// assertThat answers to PHPUnit::assertThat: evaluate a constraint and report
+// what it says when it does not hold.
+func assertThat(t T, value any, c constraints.Constraint, message string) {
+	t.Helper()
+	if !c.Matches(value) {
+		fail(t, "%s", or(message, "Failed asserting that "+c.FailureDescription(value)))
 	}
 }
 

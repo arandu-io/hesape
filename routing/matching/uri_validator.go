@@ -1,21 +1,19 @@
 package matching
 
+import "net/http"
+
 // UriValidator mirrors Illuminate\Routing\Matching\UriValidator.
 //
-// It validates that the request path matches the route's URI pattern.
+// PHP matches the request path against the compiled path regex Symfony built.
+// There is no compiled route here -- the pattern is matched by the same code
+// the table's match uses -- so the validator asks the route, with the method
+// left out: the method is MethodValidator's question.
 type UriValidator struct{}
 
-// Matches reports whether rawPath matches the route's URI.
-//
-// In Go, path matching is handled by http.ServeMux and net/http already
-// separates the path from the query string. The URI validator delegates
-// to a simple prefix/suffix check and relies on the mux for the actual
-// pattern matching.
-func (v UriValidator) Matches(route interface{ GetURI() string }, path string) bool {
-	_ = route
-	_ = path
-	// The mux already matched. This is the shape for consistency with
-	// the PHP interface, and for the case where a custom router reads
-	// validators explicitly.
-	return true
+// Matches is UriValidator::matches.
+func (v UriValidator) Matches(route Route, req *http.Request) bool {
+	if req == nil {
+		return false
+	}
+	return route.Matches(req, false)
 }

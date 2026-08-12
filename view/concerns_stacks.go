@@ -98,10 +98,14 @@ func (f *Factory) YieldPushContent(name string, fallback ...string) string {
 	return result
 }
 
-// FlushStacks resets all pushes and prepends.
+// FlushStacks is ManagesStacks::flushStacks.
 func (f *Factory) FlushStacks() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.flushStacksLocked()
+}
+
+func (f *Factory) flushStacksLocked() {
 	f.pushes = map[string][]string{}
 	f.prepends = map[string][]string{}
 	f.pushStack = nil

@@ -56,14 +56,18 @@ func (f *Factory) Creator(views string, callback ViewCallback) {
 	})
 }
 
-// CallComposer invokes every composer whose pattern matches the view.
+// CallComposer is ManagesEvents::callComposer.
 func (f *Factory) CallComposer(v *View) error {
 	f.mu.RLock()
 	composers := make([]viewEvent, len(f.composers))
 	copy(composers, f.composers)
+	events := f.events
 	f.mu.RUnlock()
 
 	name := v.GetName()
+	if events != nil {
+		events.Dispatch("composing: "+name, v)
+	}
 	for _, evt := range composers {
 		if matchViewPattern(name, evt.views) {
 			if err := evt.callback(v); err != nil {
@@ -74,14 +78,18 @@ func (f *Factory) CallComposer(v *View) error {
 	return nil
 }
 
-// CallCreator invokes every creator whose pattern matches the view.
+// CallCreator is ManagesEvents::callCreator.
 func (f *Factory) CallCreator(v *View) error {
 	f.mu.RLock()
 	creators := make([]viewEvent, len(f.creators))
 	copy(creators, f.creators)
+	events := f.events
 	f.mu.RUnlock()
 
 	name := v.GetName()
+	if events != nil {
+		events.Dispatch("creating: "+name, v)
+	}
 	for _, evt := range creators {
 		if matchViewPattern(name, evt.views) {
 			if err := evt.callback(v); err != nil {
