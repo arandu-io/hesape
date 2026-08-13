@@ -1,12 +1,54 @@
 package database
 
 import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	dbevents "github.com/arandu-io/hesape/database/events"
 )
+
+// countingDriver is the smallest driver that reports an identifier: each Exec
+// answers the next integer. It is here rather than in fakedb_test.go because
+// that file is package database_test and these tests reach boundConnection,
+// which is unexported.
+type countingDriver struct{ n atomic.Int64 }
+
+var counting = &countingDriver{}
+
+func init() { sql.Register("arandu-counting", counting) }
+
+func (d *countingDriver) Open(string) (driver.Conn, error) { return &countingConn{d: d}, nil }
+
+type countingConn struct{ d *countingDriver }
+
+func (c *countingConn) Prepare(string) (driver.Stmt, error) { return nil, driver.ErrSkip }
+func (c *countingConn) Close() error                        { return nil }
+func (c *countingConn) Begin() (driver.Tx, error)           { return nil, driver.ErrSkip }
+
+func (c *countingConn) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+	return countingResult{id: c.d.n.Add(1)}, nil
+}
+
+type countingResult struct{ id int64 }
+
+func (r countingResult) LastInsertId() (int64, error) { return r.id, nil }
+func (countingResult) RowsAffected() (int64, error)   { return 1, nil }
+
+// openCountingPool opens a pool over that driver.
+func openCountingPool(t *testing.T) *sql.DB {
+	t.Helper()
+	pool, err := sql.Open("arandu-counting", "counting")
+	if err != nil {
+		t.Fatalf("opening the pool: %v", err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
+	return pool
+}
 
 func TestQueryExceptionMessageCarriesTheStatementAndValues(t *testing.T) {
 	err := NewQueryException(
@@ -253,5 +295,65 @@ func TestListenSeesEveryQuery(t *testing.T) {
 
 	if seen != 2 {
 		t.Fatalf("the listener saw %d queries, want 2", seen)
+	}
+}
+
+// TestInsertGetIDReadsTheIdentifierFromTheStatementThatCausedIt covers the path
+// that was unreachable: a query builder over a real Connection asking for the
+// identifier of the row it just inserted.
+//
+// It could not work before. The processor asks the connection through
+// LastInsertIDConnection, and the type that makes a Connection usable as a
+// query.Connection did not implement it -- so InsertGetID answered "this
+// connection cannot report the identifier it assigned" against every engine,
+// while every test that exercised it used a fake that could.
+//
+// The identifier is read from sql.Result rather than by asking the engine
+// afterwards. On a pooled connection the second question is answered by
+// whichever statement ran most recently, which is how one request comes to be
+// handed another request's row.
+func TestInsertGetIDReadsTheIdentifierFromTheStatementThatCausedIt(t *testing.T) {
+	connection := NewConnection(openCountingPool(t), "arandu", "", nil)
+
+	first, err := connection.InsertReturningID(context.Background(),
+		"insert into invoices (total) values (?)", []any{100})
+	if err != nil {
+		t.Fatalf("InsertReturningID: %v", err)
+	}
+	second, err := connection.InsertReturningID(context.Background(),
+		"insert into invoices (total) values (?)", []any{200})
+	if err != nil {
+		t.Fatalf("InsertReturningID: %v", err)
+	}
+
+	if first == 0 || second == 0 {
+		t.Fatalf("identifiers were %d and %d; a zero is indistinguishable from none", first, second)
+	}
+	if first == second {
+		t.Fatalf("both inserts reported %d, so the identifier is not the one the statement assigned", first)
+	}
+}
+
+// TestTheBoundConnectionAnswersTheProcessor proves the seam the processor uses.
+func TestTheBoundConnectionAnswersTheProcessor(t *testing.T) {
+	connection := NewConnection(openCountingPool(t), "arandu", "", nil)
+	bound := &boundConnection{connection: connection, ctx: context.Background()}
+
+	// Nothing inserted yet: it says so rather than answering zero, because a
+	// zero identifier reads like a row.
+	if _, err := bound.GetLastInsertID(""); err == nil {
+		t.Fatal("GetLastInsertID answered before any insert; a zero would read like a row")
+	}
+
+	if _, err := bound.Insert("insert into invoices (total) values (?)", []any{100}); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	id, err := bound.GetLastInsertID("")
+	if err != nil {
+		t.Fatalf("GetLastInsertID: %v", err)
+	}
+	if id == 0 {
+		t.Fatal("GetLastInsertID answered 0 after an insert that reported one")
 	}
 }

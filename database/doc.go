@@ -142,10 +142,16 @@
 // scans into whatever the caller passed to Scan, so the mode is the destination
 // and there is nothing to set beforehand.
 //
-// MySqlConnection::getLastInsertId runs SELECT LAST_INSERT_ID(). The standard
-// library returns it from the statement that caused it, through
-// sql.Result.LastInsertId, which is the same number without a second round
-// trip -- and a second way to ask would be RULE 9.
+// MySqlConnection::getLastInsertId runs SELECT LAST_INSERT_ID() against the
+// handle after the insert. The name is not carried, but the answer is: the
+// identifier is read from the statement that caused it, through
+// sql.Result.LastInsertId, by [Connection.InsertReturningID]. It is one round
+// trip instead of two, and it cannot answer about somebody else's row -- on a
+// pool, "the last identifier" is whoever inserted most recently, which is the
+// classic way one request is handed another request's id.
+//
+// The processor asks for it through processors.LastInsertIDConnection, and what
+// implements that is the binding Query builds per builder, not the pool.
 //
 // # dd, which ends the process
 //

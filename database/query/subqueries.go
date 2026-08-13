@@ -103,6 +103,38 @@ func (b *Builder) pend(sub *Builder, as string, table bool, kind, segment string
 	})
 }
 
+// forgetSubqueries drops the records whose clause is no longer on the builder.
+//
+// A record points at a clause by position and at its bindings by offset, so a
+// method that replaces the whole of either has to say so here. Leaving the
+// record would do one of two things at execution, and both are wrong: put the
+// subquery back into a from that was replaced, or refuse the statement because
+// the bindings it recorded are not where it left them.
+func (b *Builder) forgetSubqueries(match func(pendingSub) bool) {
+	if len(b.subqueries) == 0 {
+		return
+	}
+	kept := make([]pendingSub, 0, len(b.subqueries))
+	for _, sub := range b.subqueries {
+		if match(sub) {
+			continue
+		}
+		kept = append(kept, sub)
+	}
+	b.subqueries = kept
+}
+
+// forgetSubqueriesOfKind drops the records of one kind of clause.
+func (b *Builder) forgetSubqueriesOfKind(kind string) {
+	b.forgetSubqueries(func(sub pendingSub) bool { return sub.kind == kind })
+}
+
+// forgetSubqueriesOfSegment drops the records whose bindings lived in a segment
+// that has just been replaced.
+func (b *Builder) forgetSubqueriesOfSegment(segment string) {
+	b.forgetSubqueries(func(sub pendingSub) bool { return sub.segment == segment })
+}
+
 // SelectSub answers Builder::selectSub: a subquery as one column of the select
 // list.
 func (b *Builder) SelectSub(query any, as string) *Builder {

@@ -154,6 +154,7 @@ func NewBuilder(connection Connection, grammar Grammar, processor Processor) *Bu
 func (b *Builder) Select(columns ...any) *Builder {
 	b.Columns = nil
 	b.Bindings["select"] = nil
+	b.forgetSubqueriesOfKind("select")
 	if len(columns) == 0 {
 		columns = []any{"*"}
 	}
@@ -191,6 +192,7 @@ func (b *Builder) Distinct(columns ...any) *Builder {
 
 // From answers Builder::from. The table may be a string or an Expression.
 func (b *Builder) From(table any, as ...string) *Builder {
+	b.forgetSubqueriesOfKind("from")
 	if len(as) > 0 && as[0] != "" {
 		b.from = stringify(table) + " as " + as[0]
 		return b
@@ -201,6 +203,7 @@ func (b *Builder) From(table any, as ...string) *Builder {
 
 // FromRaw answers Builder::fromRaw.
 func (b *Builder) FromRaw(expression string, bindings ...any) *Builder {
+	b.forgetSubqueriesOfKind("from")
 	b.from = Raw(expression)
 	if len(bindings) > 0 {
 		b.AddBinding(bindings, "from")
@@ -797,6 +800,7 @@ func (b *Builder) SetBindings(bindings []any, typ string) *Builder {
 		return b
 	}
 	b.Bindings[typ] = bindings
+	b.forgetSubqueriesOfSegment(typ)
 	return b
 }
 
@@ -951,10 +955,12 @@ func (b *Builder) CloneWithout(properties ...string) *Builder {
 		switch strings.ToLower(property) {
 		case "columns":
 			out.Columns = nil
+			out.forgetSubqueriesOfKind("select")
 		case "wheres":
 			out.Wheres = nil
 		case "joins":
 			out.Joins = nil
+			out.forgetSubqueriesOfKind("join")
 		case "groups":
 			out.Groups = nil
 		case "havings":
@@ -986,6 +992,7 @@ func (b *Builder) CloneWithoutBindings(except ...string) *Builder {
 	for _, typ := range except {
 		if _, ok := out.Bindings[typ]; ok {
 			out.Bindings[typ] = nil
+			out.forgetSubqueriesOfSegment(typ)
 		}
 	}
 	return out

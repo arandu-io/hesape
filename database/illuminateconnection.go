@@ -219,6 +219,17 @@ func (c *Connection) Query(ctx context.Context) *query.Builder {
 type boundConnection struct {
 	connection *Connection
 	ctx        context.Context
+
+	// lastInsertID is what the most recent Insert through this binding was
+	// told the engine assigned.
+	//
+	// Holding it here is safe where holding it on the Connection would not be:
+	// a boundConnection is built by Query, once per builder, and never shared
+	// between goroutines, while a Connection is the pool and serves every
+	// request at once. On the pool, "the last identifier" is whoever inserted
+	// most recently, which is the classic way to hand one request another
+	// request's row.
+	lastInsertID int64
 }
 
 func (b *boundConnection) Select(q string, bindings []any, useReadPDO bool) ([]query.Record, error) {
@@ -226,7 +237,31 @@ func (b *boundConnection) Select(q string, bindings []any, useReadPDO bool) ([]q
 }
 
 func (b *boundConnection) Insert(q string, bindings []any) (bool, error) {
-	return b.connection.Insert(b.ctx, q, bindings)
+	// The identifier is read from the statement that caused it and kept for
+	// GetLastInsertID, so that InsertGetID costs one round trip rather than
+	// two. An error reporting it is not an error inserting: the row is in, and
+	// only a caller that asked for the identifier has a problem -- which is
+	// what GetLastInsertID reports, to that caller.
+	id, err := b.connection.InsertReturningID(b.ctx, q, bindings)
+	b.lastInsertID = id
+	return err == nil, err
+}
+
+// GetLastInsertID answers processors.LastInsertIDConnection, and through it
+// Connection::getLastInsertId.
+//
+// The sequence argument names the generator to ask, for an engine with more
+// than one. It is unused here because the engines that travel this path --
+// MySQL, MariaDB and SQLite -- have one per table and report it from the
+// statement. Postgres, which does have named sequences, never arrives: its
+// processor compiles RETURNING and reads the value out of the result set.
+func (b *boundConnection) GetLastInsertID(sequence string) (int64, error) {
+	if b.lastInsertID == 0 {
+		return 0, fmt.Errorf(
+			"database: no identifier was reported for the last insert on this query. " +
+				"The driver may not report one -- lib/pq does not -- in which case the insert needs a RETURNING clause and the processor for that engine")
+	}
+	return b.lastInsertID, nil
 }
 
 func (b *boundConnection) Update(q string, bindings []any) (int64, error) {
@@ -439,6 +474,52 @@ func (c *Connection) Statement(ctx context.Context, q string, bindings []any) (b
 	})
 
 	return ok, err
+}
+
+// InsertReturningID runs an insert and answers the identifier the engine
+// assigned to the row.
+//
+// It is what Connection::getLastInsertId is for, with the round trip removed:
+// the PHP inserts and then asks the handle for lastInsertId, while here the
+// statement that caused the identifier already reports it, through
+// sql.Result.LastInsertId. Asking a second time would be a second way and, on
+// a pooled connection, a second way that can answer about somebody else's row.
+//
+// Postgres does not travel this path at all: its processor compiles the insert
+// with a RETURNING clause and reads the identifier out of the result set, which
+// is why PostgresProcessor.ProcessInsertGetID calls Select rather than this.
+//
+// A driver that cannot report one -- lib/pq is the usual case -- returns an
+// error from LastInsertId, and it is passed through rather than flattened to a
+// zero, because a zero identifier reads like a row.
+func (c *Connection) InsertReturningID(ctx context.Context, q string, bindings []any) (int64, error) {
+	var id int64
+
+	err := c.run(ctx, q, bindings, func(runQuery string, runBindings []any) error {
+		if c.Pretending() {
+			return nil
+		}
+
+		pool, err := c.GetPDO()
+		if err != nil {
+			return err
+		}
+
+		c.RecordsHaveBeenModified(true)
+
+		result, err := pool.ExecContext(ctx, runQuery, c.PrepareBindings(runBindings)...)
+		if err != nil {
+			return err
+		}
+
+		id, err = result.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("database: the insert ran and the driver cannot report the identifier it assigned: %w", err)
+		}
+		return nil
+	})
+
+	return id, err
 }
 
 // AffectingStatement answers Connection::affectingStatement.

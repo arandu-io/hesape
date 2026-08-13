@@ -191,6 +191,63 @@ func TestASubqueryGivenAsSQLIsCompiledAsWritten(t *testing.T) {
 	}
 }
 
+// A record of a subquery points at its clause by position and at its bindings
+// by offset. A method that replaces the whole of either has to forget the
+// record, or the statement is refused for bindings that moved -- which is what
+// the count query of a paginated select subquery does: it clears the columns
+// and the select bindings both.
+func TestClearingAClauseForgetsTheSubqueryThatWasInIt(t *testing.T) {
+	connection := &fakeConnection{results: [][]query.Record{{{"aggregate": int64(3)}}}}
+	b := newTestBuilder(connection)
+	b.SelectSub(subFor(b, connection, "invoices").Where("total", ">", 1000), "spend")
+
+	total, err := b.GetCountForPagination(context.Background(), grant())
+	if err != nil {
+		t.Fatalf("GetCountForPagination: %v", err)
+	}
+	if total != 3 {
+		t.Errorf("the count is %d, want 3", total)
+	}
+	if got := countTenantFilters(connection.calls[0].sql); got != 1 {
+		t.Errorf("the count query compares the tenant %d time(s), want 1 -- the subquery is not in it:\n%s",
+			got, connection.calls[0].sql)
+	}
+}
+
+// Selecting again replaces the select list, and the subquery that was in it
+// goes with it rather than reappearing when the statement runs.
+func TestSelectingAgainDropsASubqueryFromTheSelectList(t *testing.T) {
+	connection := &fakeConnection{}
+	b := newTestBuilder(connection)
+	b.SelectSub(subFor(b, connection, "invoices"), "spend").Select("id")
+
+	if _, err := b.Get(context.Background(), grant()); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got := countTenantFilters(connection.calls[0].sql); got != 1 {
+		t.Errorf("the statement compares the tenant %d time(s), want 1:\n%s", got, connection.calls[0].sql)
+	}
+}
+
+// Reading from a table again replaces the from clause, and the subquery that
+// was there must not be put back.
+func TestFromAgainDropsTheSubqueryItReplaces(t *testing.T) {
+	connection := &fakeConnection{}
+	b := newTestBuilder(connection)
+	b.FromSub(subFor(b, connection, "invoices"), "i").From("users")
+
+	if _, err := b.Get(context.Background(), grant()); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	sql := connection.calls[0].sql
+	if strings.Contains(sql, "invoices") {
+		t.Errorf("the replaced subquery came back:\n%s", sql)
+	}
+	if got := countTenantFilters(sql); got != 1 {
+		t.Errorf("the statement compares the tenant %d time(s), want 1:\n%s", got, sql)
+	}
+}
+
 func sameBindings(got, want []any) bool {
 	if len(got) != len(want) {
 		return false

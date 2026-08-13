@@ -39,6 +39,7 @@ type fakeDB struct {
 	rows    map[string][]string // sql substring -> single column rows
 	failOn  string
 	failErr error
+	lastID  int64
 }
 
 // newFakeDB registers a fake and returns the handle plus its state.
@@ -120,7 +121,8 @@ func (c *fakeConn) ExecContext(_ context.Context, query string, args []driver.Na
 	if err := c.db.record(query, args); err != nil {
 		return nil, err
 	}
-	return fakeResult{}, nil
+	c.db.lastID++
+	return fakeResult{id: c.db.lastID}, nil
 }
 
 func (c *fakeConn) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
@@ -135,10 +137,12 @@ type fakeTx struct{ db *fakeDB }
 func (t *fakeTx) Commit() error   { return t.db.record("COMMIT", nil) }
 func (t *fakeTx) Rollback() error { return t.db.record("ROLLBACK", nil) }
 
-type fakeResult struct{}
+// fakeResult reports an identifier, because a driver that does is what
+// InsertGetID needs and a zero would be indistinguishable from "none".
+type fakeResult struct{ id int64 }
 
-func (fakeResult) LastInsertId() (int64, error) { return 0, nil }
-func (fakeResult) RowsAffected() (int64, error) { return 1, nil }
+func (r fakeResult) LastInsertId() (int64, error) { return r.id, nil }
+func (fakeResult) RowsAffected() (int64, error)   { return 1, nil }
 
 // fakeRows answers the shape of the migrations table: id, batch, applied_at.
 // One shape is enough because it is the only query the data package issues on
