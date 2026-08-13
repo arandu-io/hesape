@@ -1,6 +1,11 @@
 package concerns
 
-import "github.com/arandu-io/hesape/str"
+import (
+	"fmt"
+
+	"github.com/arandu-io/hesape/database/eloquent/relations"
+	"github.com/arandu-io/hesape/str"
+)
 
 // HasUniqueIDs answers
 // Illuminate\Database\Eloquent\Concerns\HasUniqueIds. The PHP spells the last
@@ -88,6 +93,45 @@ func HasUUIDs() HasUniqueIDs {
 // long before anybody suspects the key.
 func HasULIDs() HasUniqueIDs {
 	return HasUniqueIDs{Generator: str.ULID}
+}
+
+// ResolveRouteBindingQuery answers
+// HasUniqueStringIds::resolveRouteBindingQuery, which is the guard and nothing
+// else: the PHP's body refuses a value that cannot be a generated key and then
+// hands the query to parent::resolveRouteBindingQuery.
+//
+// So this returns the refusal rather than a query. The query is the builder's,
+// and every query in this framework is reached through an auth.Grant
+// (RULE 17) -- which a trait that cannot see the model cannot hold. field is
+// the column the route binds on, empty for the route key; routeKeyName and
+// keyName are what the model would answer, passed in for the same reason.
+//
+// It returns an error where the PHP throws ModelNotFoundException (ADR 0044,
+// mechanical change), and the error is the same one a missing row gives: a
+// malformed key and an absent row are the same 404, and telling them apart in
+// the response tells a stranger which keys exist.
+func (h *HasUniqueIDs) ResolveRouteBindingQuery(value, field, routeKeyName, keyName string) error {
+	if !h.UsesUniqueIDs() {
+		return nil
+	}
+
+	bound := field
+	if bound == "" {
+		bound = routeKeyName
+	}
+
+	columns := h.Columns
+	if len(columns) == 0 {
+		columns = []string{keyName}
+	}
+
+	if !contains(columns, bound) {
+		return nil
+	}
+	if IsValidUniqueID(value) {
+		return nil
+	}
+	return fmt.Errorf("%w: %s %q", relations.ErrModelNotFound, bound, value)
 }
 
 // IsValidUniqueID answers HasUuids::isValidUniqueId and

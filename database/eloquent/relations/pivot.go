@@ -8,6 +8,7 @@ import (
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database/eloquent/relations/concerns"
+	"github.com/arandu-io/hesape/database/query"
 )
 
 // Pivot answers Illuminate\Database\Eloquent\Relations\Pivot: the row of an
@@ -358,6 +359,80 @@ func (p *MorphPivot) GetQueueableID() any {
 		foreign, p.GetAttribute(foreign),
 		related, p.GetAttribute(related),
 		p.morphType, p.morphClass)
+}
+
+// NewQueryForRestoration answers MorphPivot::newQueryForRestoration.
+//
+// The PHP writes this body out again rather than reaching AsPivot's, because
+// the identifier carries a third pair -- the type column and the alias it holds
+// -- and so the query needs a third clause. This does the same, for the same
+// reason: without the type half, a post's tag row and a video's tag row share
+// an identity and a queued job restores whichever the database returns first.
+//
+// The error cases are the ones AsPivot documents: an empty list, a pivot with
+// no query, and an identifier that GetQueueableID did not write.
+func (p *MorphPivot) NewQueryForRestoration(ids ...any) (Builder, error) {
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("pivot restoration was given no identifier: the queued job stored nothing to find the row on %s by", p.GetTable())
+	}
+
+	q := p.NewQuery()
+	if q == nil {
+		return nil, errNoPivotQuery
+	}
+
+	first, composite := ids[0].(string)
+	if !composite || !strings.Contains(first, ":") {
+		return q.WhereKey(ids...), nil
+	}
+
+	if len(ids) == 1 {
+		segments, err := morphPivotSegments(first)
+		if err != nil {
+			return nil, err
+		}
+		for i := 0; i < len(segments); i += 2 {
+			q = q.Where(segments[i], segments[i+1])
+		}
+		return q, nil
+	}
+
+	// One parenthesized group per id, or the clauses of one row would filter
+	// the rows of the next and the query would match nothing.
+	base := q.GetQuery()
+	for _, id := range ids {
+		segments, err := morphPivotSegments(id)
+		if err != nil {
+			return nil, err
+		}
+		base.OrWhere(func(nested *query.Builder) {
+			for i := 0; i < len(segments); i += 2 {
+				nested.Where(segments[i], segments[i+1])
+			}
+		})
+	}
+	return q, nil
+}
+
+// morphPivotSegments splits one identifier written by MorphPivot.GetQueueableID
+// into its six segments: the foreign pair, the related pair, and the type pair.
+//
+// The PHP indexes into explode's result without counting it, so a malformed
+// identifier there becomes an undefined-index notice and a clause keyed on
+// null. That query restores nothing, or restores the wrong row, and both are
+// quieter than they should be -- so the count is checked.
+func morphPivotSegments(id any) ([]string, error) {
+	const segmentCount = 6
+
+	text, ok := id.(string)
+	if !ok {
+		return nil, fmt.Errorf("morph pivot restoration expected a composite identifier and got %T: the identifiers of one restore have to be all keys or all triples", id)
+	}
+	segments := strings.Split(text, ":")
+	if len(segments) != segmentCount {
+		return nil, fmt.Errorf("morph pivot restoration identifier %q has %d segments, expected %d: it was not written by GetQueueableID", text, len(segments), segmentCount)
+	}
+	return segments, nil
 }
 
 // SetKeysForSaveQuery answers MorphPivot::setKeysForSaveQuery.

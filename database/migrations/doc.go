@@ -63,9 +63,18 @@
 //	MigrationResult.php
 //	Migrator.php
 //
-// Migrator::requireFiles and Migrator::getFilesystem have no counterpart:
-// both exist to load PHP source at run time, which is the language facility Go
-// replaced with the compiler. The stubs are string constants rather than files
-// in a stubs/ directory, so `aru make:migration` works from any working
-// directory.
+// Three methods have no counterpart, and all three are the same skip:
+//
+//   - Migrator::requireFiles require_once s each migration file so that its
+//     class comes into existence. A Go migration is in the binary or it is not,
+//     and Register is where that is decided -- see the section above.
+//   - Migrator::getFilesystem and MigrationCreator::getFilesystem hand out the
+//     Filesystem the two of them read and write through. Neither holds one: the
+//     migrator reads the registry rather than a directory, and the creator's
+//     stubs are string constants rather than files in a stubs/ directory, which
+//     is also why `aru make:migration` works from any working directory.
+//
+// All three are ADR 0044's first exemption -- a PHP language facility, run-time
+// source loading, that Go answers with the compiler -- rather than a decision
+// to rename or reshape anything.
 package migrations

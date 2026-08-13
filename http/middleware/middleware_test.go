@@ -199,3 +199,64 @@ func TestABodyUnderTheLimitArrivesWhole(t *testing.T) {
 		t.Errorf("body = %q", got.body)
 	}
 }
+
+func TestAtNamesHostsThatTrustHostsWasNotBuiltWith(t *testing.T) {
+	t.Cleanup(middleware.FlushState)
+	middleware.At([]string{"trusted.test"}, true)
+
+	if got := middleware.Hosts(); len(got) != 1 || got[0] != "trusted.test" {
+		t.Fatalf("Hosts() = %v, want [trusted.test]", got)
+	}
+	if !middleware.TrustsSubdomains() {
+		t.Fatal("At asked for subdomains and TrustsSubdomains says otherwise")
+	}
+
+	mw := middleware.TrustHosts(nil, false)
+
+	for _, host := range []string{"trusted.test", "shop.trusted.test"} {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Host = host
+		if rec, _ := run(mw, r); rec.Code != http.StatusOK {
+			t.Fatalf("host %q was refused with %d", host, rec.Code)
+		}
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Host = "evil.test"
+	if rec, _ := run(mw, r); rec.Code != http.StatusBadRequest {
+		t.Fatalf("an untrusted host answered %d, want 400", rec.Code)
+	}
+}
+
+func TestFlushStateForgetsWhatAtWasTold(t *testing.T) {
+	middleware.At([]string{"trusted.test"}, true)
+	middleware.FlushState()
+
+	if got := middleware.Hosts(); got != nil {
+		t.Fatalf("Hosts() = %v after FlushState, want nil", got)
+	}
+	if middleware.TrustsSubdomains() {
+		t.Fatal("TrustsSubdomains survived FlushState")
+	}
+}
+
+func TestSkipWhenTakesTheRequestOutOfTheCorsHandling(t *testing.T) {
+	t.Cleanup(middleware.FlushState)
+	middleware.SkipWhen(func(r *http.Request) bool {
+		return strings.HasPrefix(r.URL.Path, "/internal/")
+	})
+
+	mw := middleware.HandleCors([]string{"*"}, []string{http.MethodGet}, nil, 0, false)
+
+	skipped := httptest.NewRequest(http.MethodGet, "/internal/health", nil)
+	skipped.Header.Set("Origin", "https://example.test")
+	if rec, _ := run(mw, skipped); rec.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatal("a skipped request should carry no CORS headers")
+	}
+
+	handled := httptest.NewRequest(http.MethodGet, "/public/health", nil)
+	handled.Header.Set("Origin", "https://example.test")
+	if rec, _ := run(mw, handled); rec.Header().Get("Access-Control-Allow-Origin") != "https://example.test" {
+		t.Fatal("a request that is not skipped should carry the CORS headers")
+	}
+}

@@ -284,6 +284,58 @@ func (b *builder) Insert(ctx context.Context, g auth.Grant, values []map[string]
 	return nil
 }
 
+// Upsert is the fake's Builder::upsert. It matches on uniqueBy rather than on a
+// real index, which is all a relation test needs: what is under test is which
+// columns the relation stamped onto each row, not what the engine does with a
+// conflict.
+func (b *builder) Upsert(ctx context.Context, g auth.Grant, values []map[string]any, uniqueBy, update []string) (int64, error) {
+	table := fmt.Sprint(b.base.GetFrom())
+	b.database.log = append(b.database.log, "upsert into "+table)
+
+	affected := int64(0)
+	for _, row := range values {
+		existing := b.matchOnUnique(table, row, uniqueBy)
+		if existing == nil {
+			b.database.tables[table] = append(b.database.tables[table], row)
+			affected++
+			continue
+		}
+		columns := update
+		if columns == nil {
+			for column := range row {
+				columns = append(columns, column)
+			}
+			sort.Strings(columns)
+		}
+		for _, column := range columns {
+			if value, ok := row[column]; ok {
+				existing[column] = value
+			}
+		}
+		affected++
+	}
+	return affected, nil
+}
+
+func (b *builder) matchOnUnique(table string, row map[string]any, uniqueBy []string) map[string]any {
+	if len(uniqueBy) == 0 {
+		return nil
+	}
+	for _, candidate := range b.database.tables[table] {
+		same := true
+		for _, column := range uniqueBy {
+			if !sameValue(candidate[column], row[column]) {
+				same = false
+				break
+			}
+		}
+		if same {
+			return candidate
+		}
+	}
+	return nil
+}
+
 func (b *builder) Update(ctx context.Context, g auth.Grant, values map[string]any) (int64, error) {
 	rows := b.run()
 	for _, row := range rows {

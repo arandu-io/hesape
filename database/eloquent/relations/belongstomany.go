@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/database"
 	"github.com/arandu-io/hesape/database/eloquent/relations/concerns"
 	"github.com/arandu-io/hesape/database/query"
 )
@@ -422,6 +423,89 @@ func (r *BelongsToMany) Create(ctx context.Context, g auth.Grant, attributes map
 		return nil, err
 	}
 	return instance, nil
+}
+
+// CreateOrFirst answers BelongsToMany::createOrFirst: create the related row
+// and attach it, and if somebody else created it first, attach theirs.
+//
+// It is the same race HasOneOrMany::createOrFirst loses, with one more way to
+// lose it, and the PHP body is two try blocks for exactly that reason. The first
+// insert can collide on the related table's unique index; the recovery then
+// finds the row somebody else wrote and attaches it, and that attach can collide
+// on the pivot's own unique index, because the other request is attaching it
+// too. The second collision is success -- the row exists and the link exists,
+// which is what the caller asked for -- so it is answered with the row rather
+// than the error.
+//
+// Every error that is not a unique violation is returned. A caller that gets a
+// row back from this method can rely on the link existing; one that got a row
+// back from a swallowed error could not.
+func (r *BelongsToMany) CreateOrFirst(ctx context.Context, g auth.Grant, attributes map[string]any, values map[string]any, joining map[string]any, touch ...bool) (Model, error) {
+	instance, err := r.Create(ctx, g, merge(attributes, values), joining, touch...)
+	if err == nil {
+		return instance, nil
+	}
+
+	var violation *database.UniqueConstraintViolationException
+	if !errors.As(err, &violation) {
+		return nil, err
+	}
+
+	existing, findErr := r.firstWhere(ctx, g, attributes)
+	if findErr != nil {
+		return nil, findErr
+	}
+	if existing == nil {
+		// Nothing matches the attributes, so the index that rejected the insert
+		// was not the one these attributes name. The original error says more.
+		return nil, err
+	}
+
+	attachErr := r.Attach(ctx, g, existing.GetAttribute(r.relatedKey), joining, touch...)
+	if attachErr == nil {
+		return existing, nil
+	}
+	if errors.As(attachErr, &violation) {
+		// The pivot row is already there, which is the state Attach was asked
+		// to reach. Another request reached it first.
+		return existing, nil
+	}
+	return nil, attachErr
+}
+
+// firstWhere answers the PHP's `$this->related->where($attributes)->first()`.
+//
+// The attributes are applied in sorted order, for the reason HasOneOrMany's
+// namesake gives: a Go map has no order, and a where clause whose columns
+// reorder between runs is a different SQL string every time.
+//
+// It reads through the related model's own query rather than the relation's.
+// The relation's query is joined to the pivot, and the row being looked for is
+// the one that exists but is not attached yet -- so a lookup through the join
+// would answer nothing and the method would loop back to the error it just
+// caught. The tenant filter is applied all the same, because RULE 17 does not
+// care which query object the read went out on.
+func (r *BelongsToMany) firstWhere(ctx context.Context, g auth.Grant, attributes map[string]any) (Model, error) {
+	q := r.Related.NewQuery()
+	if q == nil {
+		return nil, nil
+	}
+
+	scoped, err := concerns.ScopeTenant(q, r.Related, g)
+	if err != nil {
+		return nil, err
+	}
+
+	columns := make([]string, 0, len(attributes))
+	for column := range attributes {
+		columns = append(columns, column)
+	}
+	sort.Strings(columns)
+
+	for _, column := range columns {
+		scoped = scoped.Where(column, attributes[column])
+	}
+	return scoped.First(ctx, g)
 }
 
 // CreateMany answers BelongsToMany::createMany.

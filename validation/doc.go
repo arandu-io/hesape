@@ -56,6 +56,37 @@
 //   - `current_password` takes a CurrentPasswordChecker rather than resolving a
 //     guard and a hasher out of a container, which ADR 0002 refuses.
 //
+// # What is not ported, and why
+//
+// Nine public methods of the component have no name here. Each one, with the
+// ADR 0044 reason number:
+//
+//	Factory::getContainer, Factory::setContainer and Validator::setContainer --
+//	    reason 2: the container is held so that a custom rule extension can be
+//	    resolved out of it by class name at validation time. ADR 0001 removed
+//	    the container, and a rule here is an entry in a compiled table, so there
+//	    is nothing to resolve and nothing to hold.
+//	ValidationServiceProvider::provides -- reason 2: it names the three bindings
+//	    register() made, which is the deferred-provider bookkeeping and nothing
+//	    else.
+//	ValidatesWhenResolvedTrait::validateResolved -- reason 2: it is the hook the
+//	    container fires when it resolves a FormRequest, running
+//	    prepareForValidation, the authorize check and the validator in one go.
+//	    Nothing resolves anything here: a handler compiles a rule set at boot
+//	    and calls it, and the authorize check is auth.Grant, which RULE 14 puts
+//	    ahead of validation rather than inside it.
+//	NotPwnedVerifier::verify -- reason 3: it is the haveibeenpwned range API
+//	    over Illuminate's HTTP client. The question it answers is
+//	    [UncompromisedVerifier], which Rules\Password takes; the network call
+//	    belongs to whoever supplies one, so that this package stays a leaf.
+//	Concerns\FilterEmailValidation::unicode, ::isValid, ::getError and
+//	    ::getWarnings -- reason 3: the class is an adapter onto
+//	    egulias/email-validator, the library the `email:rfc`, `email:strict` and
+//	    `email:spoof` flavours are implemented by, and it is not carried here.
+//	    `email` is the shape check in [Validator.ValidateEmail], which answers
+//	    all four flavours with one answer rather than keeping four that drift
+//	    (RULE 9).
+//
 // # Reading what passed
 //
 // There is no reflection and there are no struct tags. The rule set is data,

@@ -191,18 +191,14 @@ func (m *BroadcastManager) UserRoutes(r Router) {
 // an alias of routes().
 func (m *BroadcastManager) ChannelRoutes(r Router) { m.Routes(r) }
 
-// SocketID is BroadcastManager::socket: the socket id of the connection that
+// Socket is BroadcastManager::socket: the socket id of the connection that
 // sent this request, read off the X-Socket-ID header.
 //
 // The PHP falls back to the ambient current request when given none. Go has no
 // ambient request, so the request is the argument, and a nil one answers the
 // empty string -- which is what the PHP's early return answers when nothing is
 // bound.
-//
-// The name is the one thing here that is not the PHP's: socket() answers a
-// socket id, and SocketID is what it is called at every call site in this
-// package.
-func (m *BroadcastManager) SocketID(r *http.Request) string {
+func (m *BroadcastManager) Socket(r *http.Request) string {
 	if r == nil {
 		return ""
 	}
@@ -400,10 +396,10 @@ func (m *BroadcastManager) SetDefaultDriver(name string) {
 	m.config.Default = name
 }
 
-// PurgeDrivers is BroadcastManager::purge: forget one resolved driver, so the
-// next call to Driver builds it again. An empty name is the default driver,
-// which is the PHP's `$name ??= $this->getDefaultDriver()`.
-func (m *BroadcastManager) PurgeDrivers(name string) {
+// Purge is BroadcastManager::purge: forget one resolved driver, so the next
+// call to Driver builds it again. An empty name is the default driver, which is
+// the PHP's `$name ??= $this->getDefaultDriver()`.
+func (m *BroadcastManager) Purge(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

@@ -96,8 +96,10 @@ type PendingRequest struct {
 	// DumpAndDie enables request/response dumping then exits.
 	dumpAndDie bool
 
-	// truncateExceptions limits exception message length.
-	truncateExceptions int
+	// truncateExceptions is PendingRequest::$truncateExceptionsAt, the PHP
+	// int|false|null: nil defers to the RequestException static, a pointer to
+	// zero is the PHP false, and a positive length cuts the body summary.
+	truncateExceptions *int
 }
 
 type multipartBuffer struct {
@@ -378,6 +380,21 @@ func (p *PendingRequest) Throw(callback func(*Response) error) *PendingRequest {
 		}
 		return nil
 	})
+	return p
+}
+
+// TruncateExceptionsAt is PendingRequest::truncateExceptionsAt: cut the body
+// summary of this request's exceptions at the given length.
+func (p *PendingRequest) TruncateExceptionsAt(length int) *PendingRequest {
+	p.truncateExceptions = &length
+	return p
+}
+
+// DontTruncateExceptions is PendingRequest::dontTruncateExceptions: let the
+// whole body into this request's exception messages.
+func (p *PendingRequest) DontTruncateExceptions() *PendingRequest {
+	zero := 0
+	p.truncateExceptions = &zero
 	return p
 }
 

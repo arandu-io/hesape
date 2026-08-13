@@ -5,13 +5,14 @@
 // laravel_illuminate/database/Eloquent/Concerns:
 //
 //	GuardsAttributes.php            -> guardsattributes.go
-//	HasAttributes.php               -> hasattributes.go
+//	HasAttributes.php               -> hasattributes.go, hasattributescasting.go
 //	HasEvents.php                   -> hasevents.go
 //	HasGlobalScopes.php             -> hasglobalscopes.go
 //	HasRelationships.php            -> hasrelationships.go
 //	HasTimestamps.php               -> hastimestamps.go
 //	HasUlids.php                    -> hasuniqueids.go (HasULIDs)
 //	HasUniqueIds.php                -> hasuniqueids.go
+//	HasUniqueStringIds.php          -> hasuniqueids.go
 //	HasUuids.php                    -> hasuniqueids.go (HasUUIDs)
 //	HidesAttributes.php             -> hidesattributes.go
 //	PreventsCircularRecursion.php   -> preventscircularrecursion.go
@@ -32,8 +33,46 @@
 //
 // # What is not here
 //
-// Casting. HasAttributes in the PHP is 2,584 lines, and most of them are the
-// cast system -- dates, enums, encrypted, hashed, custom cast classes. That
-// belongs in eloquent/casts, one implementation, and a copy here would be the
-// second answer to what a column means.
+// The cast implementations. HasAttributes in the PHP is 2,584 lines, and most
+// of them are the cast system -- dates, enums, encrypted, hashed, custom cast
+// classes. Those belong in eloquent/casts, one implementation, and a copy here
+// would be the second answer to what a column means. What is here is the
+// declaration side the PHP keeps in this trait -- getCasts, hasCast,
+// mergeCasts and the four encoders fromJson, fromFloat, fromDateTime and
+// fromEncryptedString -- in hasattributescasting.go.
+//
+// # What is skipped, and why (ADR 0044)
+//
+//   - HasAttributes::getMutatorMethods and getAttributeMarkedMutatorMethods.
+//     Both read a class's method list with get_class_methods and match it
+//     against a regular expression. Go cannot list a type's methods by name
+//     and read their return types, so the model registers each accessor with
+//     SetAttributeMutator instead. Motive (1), a PHP language feature.
+//   - HasEvents::bootHasEvents and resolveObserveAttributes,
+//     HasGlobalScopes::bootHasGlobalScopes and resolveGlobalScopeAttributes.
+//     All four read PHP attributes -- #[ObservedBy], #[ScopedBy] -- off the
+//     class with ReflectionClass, and hang them on the trait boot hook that
+//     Model::bootIfNotBooted calls by name. Go has neither class attributes
+//     nor a boot hook found by method name; a model here calls Observe and
+//     AddGlobalScope where a reader can see it. Motive (1).
+//   - HasUniqueStringIds::initializeHasUniqueStringIds. Its whole body sets
+//     the $usesUniqueIds property to true. Here that property is the Generator
+//     field being non-nil, which HasUUIDs and HasULIDs set, so there is
+//     nothing left for an initializer to do. Motive (1).
+//   - The whole of TransformsToResource: toResource, guessResource,
+//     guessResourceName and resolveResourceFromAttribute. All four build a
+//     class name out of the model's namespace and ask class_exists, or read a
+//     #[UseResource] attribute off the class. Go resolves no type from a name
+//     in a string, so a resource is a value a handler names. Motive (1).
+//   - HasRelationships::autoloadRelationsUsing, hasRelationAutoloadCallback,
+//     attemptToAutoloadRelation and withRelationshipAutoloading. They are
+//     automatic eager loading: reading an unloaded relation runs a query
+//     behind the caller. That is the lazy load this framework does not have,
+//     and a query with no auth.Grant on it breaks RULE 17 outright.
+//     GetRelationValue answers what is loaded and nothing else.
+//   - HasRelationships::through. It returns a PendingHasThroughRelationship
+//     built from a relation named by a string, which the PHP calls as a
+//     method. HasOneThrough and HasManyThrough are the two relations it can
+//     end at, and both are here already, spelled with the models rather than
+//     with their method names. Motive (1).
 package concerns

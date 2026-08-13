@@ -59,6 +59,36 @@
 // [LockableFile] is what makes the second one safe to share between processes,
 // and [Filesystem.SharedGet] and [Filesystem.Put] with lock are the pattern.
 //
+// # What is not ported, and why
+//
+// Ten public methods of the component have no name here. Each one, with the
+// ADR 0044 reason number:
+//
+//	Filesystem::getRequire and Filesystem::requireOnce -- reason 1: their bodies
+//	    are `require $path` and `require_once $path`, which load and execute PHP
+//	    at run time. A Go program is linked before it starts; the file a caller
+//	    would have required is a package it imports, and there is nothing here
+//	    that can be made to do the same thing.
+//	FilesystemServiceProvider::register, ::boot and ::setApplication -- reason 2:
+//	    they bind 'files' and 'filesystem' into the container, register the disk
+//	    names out of config('filesystems'), and publish the storage symlink. A
+//	    Disk here is constructed and passed, and there is no symlink at all --
+//	    the paragraph above says why.
+//	FilesystemManager::createS3Driver, ::createFtpDriver and ::createSftpDriver
+//	    -- reason 3: three drivers this ecosystem does not carry in the
+//	    collection. S3 is github.com/arandu-io/hesape/filesystem/s3, a module of
+//	    its own (ADR 0048), and it is [s3.New] rather than a driver string.
+//	    FTP and SFTP are league/flysystem adapters with no Go equivalent worth
+//	    keeping, and no second way to reach a file is added for them (RULE 9).
+//	AwsS3V3Adapter::getClient -- reason 3: it hands back the aws-sdk-php client
+//	    so that a caller can make a call the adapter does not expose. The S3
+//	    module speaks the protocol over net/http and has no client object to
+//	    hand back.
+//
+// join_paths() is here, as [JoinPaths]. It is a free function in the PHP's
+// functions.php, and Go has no snake_case, which is the mechanical change ADR
+// 0044 allows for an initial and says here.
+//
 // # url(), getVisibility() and makeDirectory()
 //
 // All three are here, and each of them means less than its name suggests:

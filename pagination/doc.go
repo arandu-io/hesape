@@ -68,14 +68,23 @@
 // PaginationState::resolveUsing itself are the container wiring, and are not
 // here.
 //
+// PaginationServiceProvider::register and PaginationServiceProvider::boot go
+// with them, both reason 2 of the porting rule: register is the single call to
+// PaginationState::resolveUsing($this->app) that installs those closures, and
+// boot registers the 'pagination' Blade view namespace and publishes the nine
+// files into the application. There is no view namespace to register here --
+// the view layer resolves a component by name at build time -- and nothing to
+// publish, because the pager is a kyse component the application already has.
+//
 // # The views are names here and components in the view layer
 //
 // Illuminate ships nine Blade files and a switch between them.
 // [DefaultView], [DefaultSimpleView], [UseTailwind] and [UseBootstrapFive] and
 // its siblings are here, and they carry the same nine names -- but a name is
-// all they are. Nothing in this package writes HTML: render(), toHtml() and the
-// view factory need a view factory out of the container, and rendering belongs
-// to the view layer.
+// all they are. Nothing in this package writes HTML: AbstractPaginator::render,
+// AbstractPaginator::toHtml and AbstractPaginator::viewFactory all end at a view
+// factory pulled out of the container, which ADR 0001 removed, and rendering
+// belongs to the view layer either way.
 //
 // What a component renders from is [LengthAwarePaginator.Links]: a flat []Link
 // holding the numbered pages and a [Separator] wherever the window left pages

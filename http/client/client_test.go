@@ -625,7 +625,7 @@ func TestRequestIsForm(t *testing.T) {
 
 func TestRequestException(t *testing.T) {
 	r := NewResponseFromBytes(422, []byte(`{"errors":{"name":["required"]}}`), nil)
-	exc := NewRequestException(r, 0)
+	exc := NewRequestException(r, nil)
 	assertNotNil(t, exc, "exception")
 	assertNotNil(t, exc.Response, "exception response")
 
@@ -633,6 +633,47 @@ func TestRequestException(t *testing.T) {
 	if !strings.Contains(msg, "422") {
 		t.Fatalf("exception message should contain status code, got: %s", msg)
 	}
+}
+
+func TestRequestExceptionTruncatesBody(t *testing.T) {
+	body := strings.Repeat("a", 400)
+	r := NewResponseFromBytes(500, []byte(body), nil)
+
+	short := NewRequestException(r, nil)
+	if strings.Contains(short.Error(), body) {
+		t.Fatal("the default truncation should have cut the body")
+	}
+	if !strings.Contains(short.Error(), "(truncated...)") {
+		t.Fatalf("expected the truncation marker, got: %s", short.Error())
+	}
+
+	full := r.DontTruncateExceptions().ToException()
+	if !strings.Contains(full.Error(), body) {
+		t.Fatal("DontTruncateExceptions should have let the whole body through")
+	}
+}
+
+func TestResponseToExceptionIsNilWhenSuccessful(t *testing.T) {
+	ok := NewResponseFromBytes(200, []byte(`{}`), nil)
+	if ok.ToException() != nil {
+		t.Fatal("a successful response has no exception")
+	}
+	if err := ok.ThrowIfClientError(); err != nil {
+		t.Fatalf("no client error to throw, got: %v", err)
+	}
+	if err := ok.ThrowUnlessStatus(201); err == nil {
+		t.Fatal("ThrowUnlessStatus should have thrown on a mismatched status")
+	}
+	if err := ok.ThrowUnlessStatus(200); err != nil {
+		t.Fatalf("ThrowUnlessStatus should be quiet on a match, got: %v", err)
+	}
+}
+
+func TestResponseUnprocessableContentAndReason(t *testing.T) {
+	r := NewResponseFromBytes(422, []byte(`{}`), nil)
+	assertEqual(t, r.UnprocessableContent(), true, "unprocessable content")
+	assertEqual(t, r.UnprocessableEntity(), true, "unprocessable entity")
+	assertEqual(t, r.Reason(), "Unprocessable Entity", "reason phrase")
 }
 
 func TestStrayRequestError(t *testing.T) {

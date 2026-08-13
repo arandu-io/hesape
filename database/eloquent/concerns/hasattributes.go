@@ -3,6 +3,8 @@ package concerns
 import (
 	"fmt"
 	"sort"
+
+	"github.com/arandu-io/hesape/database/eloquent/casts"
 )
 
 // HasAttributes answers Illuminate\Database\Eloquent\Concerns\HasAttributes:
@@ -19,6 +21,28 @@ type HasAttributes struct {
 	changes    map[string]any
 	previous   map[string]any
 	appends    []string
+
+	// casts answers the PHP's $casts property: what each column is declared to
+	// be. A value is either a string -- the built-in cast name, "datetime",
+	// "decimal:2" -- or a casts.CastsAttributes. The PHP holds a class-string
+	// there and resolves it with class_exists; Go cannot reach a type from a
+	// name in a string, so the value itself is held (ADR 0044, motive 1).
+	casts map[string]any
+
+	// mutators is the registry the PHP builds by reflection: a method whose
+	// return type is Attribute is that attribute's accessor and mutator. Go
+	// has no return-type reflection over methods, so the model registers the
+	// Attribute under its key and every has*Mutator lookup reads this.
+	mutators map[string]*casts.Attribute
+
+	// mutated is what getMutatedAttributes answers, and mutatedCached is the
+	// PHP's static $mutatorCache: computed once, rebuilt by
+	// CacheMutatedAttributes.
+	mutated       []string
+	mutatedCached bool
+
+	// dateFormat answers the PHP's $dateFormat property.
+	dateFormat string
 }
 
 // InitializeHasAttributes answers HasAttributes::initializeHasAttributes.

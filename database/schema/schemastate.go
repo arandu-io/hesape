@@ -2,7 +2,10 @@ package schema
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"sort"
+	"strings"
 
 	"github.com/arandu-io/hesape/auth"
 )
@@ -28,13 +31,21 @@ type SchemaState interface {
 	Load(ctx context.Context, g auth.Grant, path string) error
 }
 
+// ProcessFactory builds the command a schema state runs.
+//
+// It is a named type rather than a bare signature because three schema states
+// and their tests pass it around, and because it is the seam a test uses to
+// substitute a command that touches no database -- the PHP does the same thing
+// by handing Symfony a Process it built itself.
+type ProcessFactory func(ctx context.Context, name string, args ...string) *exec.Cmd
+
 // BaseSchemaState is the concrete half of Illuminate's abstract SchemaState: the
 // connection, the migration table's name, the process factory and the output
 // handler. A driver's schema state embeds it and adds Dump and Load.
 type BaseSchemaState struct {
 	connection     Connection
 	migrationTable string
-	processFactory func(ctx context.Context, name string, args ...string) *exec.Cmd
+	processFactory ProcessFactory
 	output         func(line string)
 }
 
@@ -43,7 +54,7 @@ type BaseSchemaState struct {
 // PHP takes an optional Filesystem, which Go's os package makes unnecessary. A
 // nil processFactory takes exec.CommandContext, and a nil output handler
 // discards, which is the empty closure the PHP installs.
-func NewBaseSchemaState(connection Connection, processFactory func(ctx context.Context, name string, args ...string) *exec.Cmd) *BaseSchemaState {
+func NewBaseSchemaState(connection Connection, processFactory ProcessFactory) *BaseSchemaState {
 	if processFactory == nil {
 		processFactory = exec.CommandContext
 	}
@@ -96,3 +107,45 @@ func (s *BaseSchemaState) Output(line string) { s.output(line) }
 
 // GetConnection returns the connection the state works against.
 func (s *BaseSchemaState) GetConnection() Connection { return s.connection }
+
+// processEnvironment answers what the PHP's baseVariables is for: the values a
+// dump or load command must be told without them appearing on a command line.
+//
+// PHP passes them as LARAVEL_LOAD_* variables and then interpolates them back
+// into a shell string with Symfony's ${:VAR} syntax, so that a password never
+// reaches the shell. Here the ordinary arguments are passed as arguments -- no
+// shell is involved at all, so there is nothing to interpolate and nothing to
+// quote -- and the environment is used only for what the client programs read
+// from it, which is the password. PGPASSWORD and MYSQL_PWD are how pg_dump and
+// mysqldump take one without it being visible in `ps`.
+//
+// The parent environment is inherited, because these programs also read PGHOST,
+// PGSSLMODE, HOME and the rest, and a schema dump that ignored the operator's
+// environment would fail in ways that have nothing to do with the schema.
+func (s *BaseSchemaState) processEnvironment(extra map[string]string) []string {
+	environment := os.Environ()
+
+	keys := make([]string, 0, len(extra))
+	for key := range extra {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		environment = append(environment, key+"="+extra[key])
+	}
+	return environment
+}
+
+// configuredHost answers the PHP's `is_array($config['host']) ? $config['host'][0] : $config['host']`.
+//
+// A read/write cluster is configured with a list of hosts, and a dump is one
+// connection to one server, so the PHP takes the first. GetConfig answers a
+// string here rather than a list, so the split is done on the way past.
+func (s *BaseSchemaState) configuredHost() string {
+	host := s.connection.GetConfig("host")
+	if first, _, found := strings.Cut(host, ","); found {
+		return strings.TrimSpace(first)
+	}
+	return host
+}

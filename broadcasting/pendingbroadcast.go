@@ -79,7 +79,7 @@ func (p *PendingBroadcast) Via(connection string) *PendingBroadcast {
 // The PHP takes no argument because dontBroadcastToCurrentUser reads the socket
 // id off the Broadcast facade. There is no facade and no ambient request here,
 // so the socket id is the argument -- see [InteractsWithSockets]. It comes from
-// [BroadcastManager.SocketID].
+// [BroadcastManager.Socket].
 func (p *PendingBroadcast) ToOthers(socket string) *PendingBroadcast {
 	if excludes, ok := p.event.(ExcludesCurrentUser); ok {
 		excludes.DontBroadcastToCurrentUser(socket)

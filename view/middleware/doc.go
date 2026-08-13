@@ -5,6 +5,6 @@
 //
 //	ShareErrorsFromSession.php
 //
-// Nothing is implemented here yet. docs/31-reorganizacao-hesape.md says what
-// moves in, from where, and in which phase.
+// [ShareErrorsFromSession] is the whole of it, and its handle() is
+// [ShareErrorsFromSession.Handle].
 package middleware

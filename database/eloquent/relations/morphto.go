@@ -32,7 +32,37 @@ type MorphTo struct {
 	morphableConstraints     map[string]func(Builder)
 	morphableEagerLoads      map[string][]string
 	morphableEagerLoadCounts map[string][]string
+
+	// trashed is what MorphTo::$macroBuffer holds for the three soft delete
+	// methods: a decision taken before the types are known, replayed on each
+	// per-type query once they are.
+	trashed morphTrashed
 }
+
+// morphTrashed is which soft deleted rows a MorphTo was asked for.
+//
+// PHP buffers the calls and replays them, so a second call layers on top of the
+// first. Here the last call wins, which is the same answer for every sequence
+// anybody writes -- withTrashed().onlyTrashed() reads as "only trashed" either
+// way -- and it is one field instead of a list of closures whose combined effect
+// has to be simulated to be known.
+type morphTrashed int
+
+const (
+	// morphTrashedDefault is a MorphTo nobody asked about soft deletes: the
+	// query is left alone, which is what the PHP does when the related model
+	// has no SoftDeletes and its hasMacro check fails.
+	morphTrashedDefault morphTrashed = iota
+
+	// morphTrashedWith answers withTrashed.
+	morphTrashedWith
+
+	// morphTrashedWithout answers withoutTrashed.
+	morphTrashedWithout
+
+	// morphTrashedOnly answers onlyTrashed.
+	morphTrashedOnly
+)
 
 // NewMorphTo answers MorphTo::__construct.
 //
@@ -130,6 +160,7 @@ func (r *MorphTo) getResultsByType(ctx context.Context, g auth.Grant, typ string
 	if constrain, ok := r.morphableConstraints[typ]; ok && constrain != nil {
 		constrain(q)
 	}
+	r.applyTrashed(q, instance)
 
 	scoped, err := concerns.ScopeTenant(q, instance, g)
 	if err != nil {
@@ -250,6 +281,67 @@ func (r *MorphTo) Constrain(callbacks map[string]func(Builder)) *MorphTo {
 		r.morphableConstraints[typ] = callback
 	}
 	return r
+}
+
+// WithTrashed answers MorphTo::withTrashed: soft deleted rows come back too.
+//
+// A MorphTo cannot answer this when it is called. The related model is named by
+// a column, so which types are involved -- and which of them are even soft
+// deletable -- is not known until the type column has been read. PHP records the
+// call in $macroBuffer and replays it on each per-type builder; this records it
+// in a field and applies it in getResultsByType, at the same moment and for the
+// same reason.
+//
+// A type that is not soft deletable is left alone rather than refused, which is
+// what the PHP's hasMacro check does. One feed of posts and videos where only
+// posts are soft deletable is the ordinary case, not a mistake.
+func (r *MorphTo) WithTrashed() *MorphTo {
+	r.trashed = morphTrashedWith
+	return r
+}
+
+// WithoutTrashed answers MorphTo::withoutTrashed: soft deleted rows are
+// excluded.
+//
+// The clause is added rather than a global scope being left in place. A relation
+// here holds no scope registry -- see WithTrashedParents on HasOneOrManyThrough
+// for the same trade -- so nothing filters deleted rows unless asked, and this
+// is the asking.
+func (r *MorphTo) WithoutTrashed() *MorphTo {
+	r.trashed = morphTrashedWithout
+	return r
+}
+
+// OnlyTrashed answers MorphTo::onlyTrashed: only soft deleted rows come back.
+func (r *MorphTo) OnlyTrashed() *MorphTo {
+	r.trashed = morphTrashedOnly
+	return r
+}
+
+// applyTrashed is MorphTo::replayMacros for the three soft delete methods: the
+// buffered decision, applied to one type's query now that the type is known.
+//
+// The instance is asked whether it is soft deletable at all, which is the
+// hasMacro check the PHP closures make. A model without the deleted_at column
+// gets no clause, because a filter on a column that does not exist is not a
+// stricter query -- it is an error from the database.
+func (r *MorphTo) applyTrashed(q Builder, instance Model) {
+	if r.trashed == morphTrashedDefault {
+		return
+	}
+
+	deletable, ok := instance.(SoftDeletableThrough)
+	if !ok || !deletable.IsSoftDeletable() {
+		return
+	}
+
+	column := instance.QualifyColumn(deletable.GetDeletedAtColumn())
+	switch r.trashed {
+	case morphTrashedWithout:
+		q.GetQuery().WhereNull(column)
+	case morphTrashedOnly:
+		q.WhereNotNull(column)
+	}
 }
 
 // GetMorphType answers MorphTo::getMorphType.

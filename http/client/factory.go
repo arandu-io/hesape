@@ -1,7 +1,14 @@
 package client
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/arandu-io/hesape/str"
 )
 
 // Factory mirrors Illuminate\Http\Client\Factory.
@@ -44,6 +51,38 @@ type Factory struct {
 
 	// recording, when true, stores every request-response pair.
 	recording bool
+
+	// dispatcher is Factory::$dispatcher, the events the client fires into.
+	dispatcher Dispatcher
+}
+
+// Dispatcher is the Illuminate\Contracts\Events\Dispatcher slice the client
+// uses: it fires RequestSending, ResponseReceived and ConnectionFailed.
+//
+// It runs on the calling goroutine, so a listener that blocks blocks the
+// request. Anything slow belongs on a queue.
+type Dispatcher interface {
+	// Dispatch delivers one event to whoever is listening.
+	Dispatch(event any)
+}
+
+// SetDispatcher sets the dispatcher the client fires its events into. The PHP
+// takes it through the constructor, which ADR 0001 rejected as a container
+// injection point, so it is a setter.
+func (f *Factory) SetDispatcher(dispatcher Dispatcher) *Factory {
+	f.dispatcher = dispatcher
+	return f
+}
+
+// GetDispatcher is Factory::getDispatcher: the dispatcher the client fires
+// into, or nil when nobody is listening.
+func (f *Factory) GetDispatcher() Dispatcher {
+	return f.dispatcher
+}
+
+// GetGlobalMiddleware is Factory::getGlobalMiddleware.
+func (f *Factory) GetGlobalMiddleware() []func(*http.Request, http.RoundTripper) http.RoundTripper {
+	return f.globalMiddleware
 }
 
 // StubCallback receives the outgoing *http.Request and returns a response
@@ -243,6 +282,108 @@ func (f *Factory) AssertSequencesAreEmpty() error {
 		}
 	}
 	return nil
+}
+
+// Response is Factory::response: a stub response for a fake to hand back.
+//
+// The PHP returns a promise wrapping a PSR-7 response, because Guzzle's stub
+// handler expects one; the fake handler here expects an *http.Response, so
+// that is what this returns. A nil body is the PHP null and produces an empty
+// body; anything that is not a string or a []byte is JSON-encoded and the
+// Content-Type header is set, which is what the PHP does for an array.
+//
+// It is a method and not a package function because the package already has a
+// type named Response -- Go has one namespace per package where PHP has one
+// per class, and Factory::response is called as Http::response().
+func (f *Factory) Response(body any, status int, headers http.Header) *http.Response {
+	if status == 0 {
+		status = http.StatusOK
+	}
+	if headers == nil {
+		headers = http.Header{}
+	}
+
+	var raw []byte
+	switch v := body.(type) {
+	case nil:
+	case string:
+		raw = []byte(v)
+	case []byte:
+		raw = v
+	default:
+		encoded, err := json.Marshal(v)
+		if err != nil {
+			// A body the caller cannot encode is a bug in the test, and a
+			// stub that swallowed it would fail somewhere else entirely.
+			raw = []byte(`{"error":` + strconv.Quote(err.Error()) + `}`)
+		} else {
+			raw = encoded
+		}
+		headers.Set("Content-Type", "application/json")
+	}
+
+	return &http.Response{
+		StatusCode:    status,
+		Status:        strconv.Itoa(status) + " " + http.StatusText(status),
+		Header:        headers,
+		Body:          io.NopCloser(bytes.NewReader(raw)),
+		ContentLength: int64(len(raw)),
+	}
+}
+
+// FailedRequest is Factory::failedRequest: the RequestException a stub hands
+// back when it wants the caller to see a failure it can inspect.
+func (f *Factory) FailedRequest(body any, status int, headers http.Header) *RequestException {
+	return NewRequestException(NewResponse(f.Response(body, status, headers)), nil)
+}
+
+// FailedConnection is Factory::failedConnection: a stub that fails to connect.
+//
+// The PHP builds the cURL message when no message is given; there is no cURL
+// here, so the message names the host the same way, because a test that
+// asserts on the text is asserting on the host.
+func (f *Factory) FailedConnection(message string) StubCallback {
+	return func(req *http.Request) (*http.Response, error) {
+		if message != "" {
+			return nil, NewConnectionException(message)
+		}
+		host := ""
+		if req != nil && req.URL != nil {
+			host = req.URL.Host
+		}
+		return nil, NewConnectionException("could not resolve host: " + host)
+	}
+}
+
+// Sequence is Factory::sequence: a ResponseSequence the caller installs itself.
+//
+// [Factory.FakeSequence] is the same sequence already wired to a URL pattern.
+// This one is the PHP's: it is registered for AssertSequencesAreEmpty and
+// handed back bare, for a caller that builds its own stub around it.
+func (f *Factory) Sequence() *ResponseSequence {
+	seq := NewResponseSequence()
+	f.sequences = append(f.sequences, seq)
+	return seq
+}
+
+// StubUrl is Factory::stubUrl: fake one URL pattern with one canned response.
+//
+// The PHP accepts an int status, a string body, a closure or a sequence; Go
+// has no such union, so it accepts the StubCallback that all four collapse
+// into, and [Factory.Response] builds the canned one.
+func (f *Factory) StubUrl(urlPattern string, callback StubCallback) *Factory {
+	return f.Fake(func(req *http.Request) (*http.Response, error) {
+		// Str::start($url, '*') in the PHP: a pattern without a leading
+		// wildcard still matches a URL that carries a scheme and a host.
+		pattern := urlPattern
+		if !strings.HasPrefix(pattern, "*") {
+			pattern = "*" + pattern
+		}
+		if !str.Is([]string{pattern}, req.URL.String(), false) {
+			return nil, nil
+		}
+		return callback(req)
+	})
 }
 
 // Pool creates a Pool for issuing concurrent requests.

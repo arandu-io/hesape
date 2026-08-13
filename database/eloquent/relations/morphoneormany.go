@@ -101,6 +101,21 @@ func (r *MorphOneOrMany) ForceCreate(ctx context.Context, g auth.Grant, attribut
 	return r.ApplyInverseRelationToModel(instance), nil
 }
 
+// Upsert answers MorphOneOrMany::upsert: HasOneOrMany's upsert with the morph
+// type stamped on every row as well as the foreign key.
+//
+// Both columns are needed and for the same reason. A comments table shared by
+// posts and videos keys a comment by the pair, so a row written with the id and
+// not the type belongs to whichever of the two happens to share the number --
+// which is a row appearing under the wrong parent, not a row appearing nowhere.
+func (r *MorphOneOrMany) Upsert(ctx context.Context, g auth.Grant, values []map[string]any, uniqueBy, update []string) (int64, error) {
+	typed := make([]map[string]any, 0, len(values))
+	for _, row := range values {
+		typed = append(typed, merge(row, map[string]any{r.GetMorphType(): r.morphClass}))
+	}
+	return r.HasOneOrMany.Upsert(ctx, g, typed, uniqueBy, update)
+}
+
 // GetRelationExistenceQuery answers MorphOneOrMany::getRelationExistenceQuery.
 func (r *MorphOneOrMany) GetRelationExistenceQuery(q Builder, parentQuery Builder, columns ...any) Builder {
 	return r.HasOneOrMany.

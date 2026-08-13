@@ -34,7 +34,10 @@ func NewJsonResponse(resource JsonResource) *JsonResponseBuilder {
 		resource:   resource,
 		status:     http.StatusOK,
 		additional: make(map[string]any),
-		wrap:       "data",
+		// The wrapper the class statics are on, so that [Wrap] and
+		// [WithoutWrapping] reach a response nobody passed them to -- which is
+		// the point of them being statics in the PHP.
+		wrap: Wrapper(),
 	}
 }
 
@@ -107,6 +110,11 @@ type ResourceCollection struct {
 	Resources    []JsonResource
 	PreserveKeys bool
 	collects     string
+
+	// preserveAllQueryParameters is ResourceCollection::$preserveAllQueryParameters.
+	preserveAllQueryParameters bool
+	// queryParameters is ResourceCollection::$queryParameters.
+	queryParameters map[string]string
 }
 
 // NewResourceCollection creates a ResourceCollection.

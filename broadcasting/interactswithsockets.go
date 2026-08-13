@@ -14,7 +14,7 @@ package broadcasting
 // reads the socket id off the Broadcast facade, which reads it off the ambient
 // current request. There is no facade (ADR 0001) and there is no ambient
 // request in Go -- a request is a value a handler holds -- so the socket id is
-// passed in. [BroadcastManager.SocketID] is where it comes from, and it reads
+// passed in. [BroadcastManager.Socket] is where it comes from, and it reads
 // the same X-Socket-ID header the facade does.
 type InteractsWithSockets struct {
 	// Socket is the socket id of the connection that raised the event, and the

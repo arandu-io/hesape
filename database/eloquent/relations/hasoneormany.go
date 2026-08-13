@@ -2,10 +2,12 @@ package relations
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/database"
 	"github.com/arandu-io/hesape/database/eloquent/relations/concerns"
 	"github.com/arandu-io/hesape/str"
 )
@@ -348,6 +350,84 @@ func (r *HasOneOrMany) FirstOrCreate(ctx context.Context, g auth.Grant, attribut
 		return instance, nil
 	}
 	return r.Create(ctx, g, merge(attributes, values))
+}
+
+// CreateOrFirst answers HasOneOrMany::createOrFirst: create the row, and if
+// somebody else created it first, read theirs.
+//
+// It is the race FirstOrCreate cannot win on its own. Two requests that both
+// find nothing both go on to insert, and one of them loses to the unique index;
+// this catches exactly that loss and answers the row the winner wrote. Every
+// other statement error is returned, because a NOT NULL violation answered with
+// a silent select is a bug that looks like a missing record.
+//
+// Two things the PHP does are not here, and neither is available to reach.
+// withSavepointIfNeeded belongs to ManagesTransactions, which this package does
+// not hold; and useWritePdo names a read/write split that this connection does
+// not offer. The retry reads through the same connection the insert used, which
+// is what useWritePdo is asking for in the first place.
+func (r *HasOneOrMany) CreateOrFirst(ctx context.Context, g auth.Grant, attributes, values map[string]any) (Model, error) {
+	instance, err := r.Create(ctx, g, merge(attributes, values))
+	if err == nil {
+		return instance, nil
+	}
+
+	var violation *database.UniqueConstraintViolationException
+	if !errors.As(err, &violation) {
+		return nil, err
+	}
+
+	existing, findErr := r.firstWhere(ctx, g, attributes)
+	if findErr != nil {
+		return nil, findErr
+	}
+	if existing == nil {
+		// The PHP rethrows the violation here. Nothing matched the attributes,
+		// so whatever the unique index rejected was not this row, and the
+		// original error is the one that says what actually happened.
+		return nil, err
+	}
+	return existing, nil
+}
+
+// Upsert answers HasOneOrMany::upsert: insert the rows, updating the ones that
+// collide, with the foreign key stamped on every one.
+//
+// The stamping is the whole point of the override. Without it an upsert through
+// a relation writes rows that belong to no parent, and they are invisible to
+// the relation that wrote them.
+//
+// The PHP's first line wraps a single row in an array so that upsert(['a' => 1])
+// and upsert([['a' => 1]]) both work. A Go signature says which one it takes, so
+// that branch has nothing to decide and is gone -- one of the shapes PHP needs a
+// run-time check for and Go gets from the type.
+func (r *HasOneOrMany) Upsert(ctx context.Context, g auth.Grant, values []map[string]any, uniqueBy, update []string) (int64, error) {
+	scoped, err := r.scoped(g)
+	if err != nil {
+		return 0, err
+	}
+
+	stamped := make([]map[string]any, 0, len(values))
+	for _, row := range values {
+		stamped = append(stamped, r.stampForeignKey(row))
+	}
+
+	return scoped.Upsert(ctx, g, stamped, uniqueBy, update)
+}
+
+// stampForeignKey copies row with the foreign key set to the parent's key.
+//
+// It copies rather than writing through, because the PHP mutates the caller's
+// array and Go's caller keeps the same map: an upsert that silently added a
+// column to the map the caller still holds would be a surprise on the second
+// use of it. MorphOneOrMany wraps this to add the type column.
+func (r *HasOneOrMany) stampForeignKey(row map[string]any) map[string]any {
+	stamped := make(map[string]any, len(row)+1)
+	for key, value := range row {
+		stamped[key] = value
+	}
+	stamped[r.GetForeignKeyName()] = r.GetParentKey()
+	return stamped
 }
 
 // UpdateOrCreate answers HasOneOrMany::updateOrCreate.

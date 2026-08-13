@@ -221,6 +221,15 @@ type Builder interface {
 	// Update answers Builder::update, returning rows affected.
 	Update(ctx context.Context, g auth.Grant, values map[string]any) (int64, error)
 
+	// Upsert answers Builder::upsert, returning rows affected.
+	//
+	// It is here because HasOneOrMany::upsert and MorphOneOrMany::upsert stamp
+	// the foreign key -- and the morph type -- onto every row and then hand the
+	// batch straight to the builder. Doing that one row at a time through Insert
+	// would turn one statement into N, which is the opposite of what a caller
+	// reaches for upsert to get.
+	Upsert(ctx context.Context, g auth.Grant, values []map[string]any, uniqueBy, update []string) (int64, error)
+
 	// Delete answers Builder::delete, returning rows affected.
 	Delete(ctx context.Context, g auth.Grant) (int64, error)
 

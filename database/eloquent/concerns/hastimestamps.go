@@ -119,6 +119,20 @@ func (h *HasTimestamps) GetUpdatedAtColumn() string {
 	return UpdatedAt
 }
 
+// GetDates answers HasAttributes::getDates: the columns that hold a date
+// without anybody having declared a cast for them.
+//
+// The PHP declares it on HasAttributes and reaches usesTimestamps and the two
+// column names through $this. A trait here cannot reach the model it was
+// embedded in, and all three live on HasTimestamps, so this is where the
+// method is -- the same answer, asked of the struct that has the fields.
+func (h *HasTimestamps) GetDates() []string {
+	if !h.UsesTimestamps() {
+		return []string{}
+	}
+	return []string{h.GetCreatedAtColumn(), h.GetUpdatedAtColumn()}
+}
+
 // SetTimestampColumns answers PHP's `const CREATED_AT` and `const UPDATED_AT`,
 // which a model redefines. Go has no constant a type can override, so the names
 // are fields.

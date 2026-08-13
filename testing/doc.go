@@ -16,8 +16,30 @@
 //	TestResponseAssert.php
 //	TestView.php
 //
-// Nothing is implemented here yet. docs/31-reorganizacao-hesape.md says what
-// moves in, from where, and in which phase.
+// # Skipped from TestResponseAssert.php and Constraints/ArraySubset.php
+//
+// Both classes are here -- the assertions of TestResponseAssert are the methods
+// of [TestResponse] itself, and ArraySubset is [constraints.ArraySubset]. Two
+// method names have no answer, and each one is a name PHPUnit owns rather than
+// Illuminate:
+//
+//	TestResponseAssert::withResponse -- reason 1: it is the constructor of a
+//	    class marked @internal whose entire body is __call and __callStatic,
+//	    forwarding every name to Assert and catching
+//	    ExpectationFailedException to append the response to the message. Go has
+//	    no __call, so there is nothing to forward and nothing to construct: a
+//	    failing TestResponse assertion adds the same context on the way in,
+//	    through TestResponse.messageWithContext, which is where
+//	    injectResponseContext ends up.
+//	Constraints\ArraySubset::evaluate -- reason 3: evaluate is PHPUnit's
+//	    template method, and PHPUnit is not carried here. Its own body is the
+//	    comparison, which is [constraints.ArraySubset.Matches] -- the name
+//	    PHPUnit's Constraint gives the same question, and the one
+//	    [constraints.Constraint] declares -- plus a SebastianBergmann
+//	    ComparisonFailure handed to fail(), which is
+//	    [constraints.ArraySubset.FailureDescription] here because a Go assertion
+//	    reports by returning the message rather than by throwing an object that
+//	    carries one.
 //
 // # Skipped from the parallel testing files
 //

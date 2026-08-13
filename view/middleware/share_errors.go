@@ -3,62 +3,50 @@ package middleware
 import (
 	"net/http"
 
+	hesapehttp "github.com/arandu-io/hesape/http"
 	"github.com/arandu-io/hesape/validation"
 	"github.com/arandu-io/hesape/view"
 )
 
-// ShareErrorsFromSession mirrors Illuminate\View\Middleware\ShareErrorsFromSession.
+// ShareErrorsFromSession answers to
+// Illuminate\View\Middleware\ShareErrorsFromSession.
 //
-// It reads validation errors from the session flash and shares them with every
-// view via Factory.Share("errors", ...). The middleware must run before any
-// route handler that renders views, so that error bags are always available to
-// the layout without every controller passing them.
+// It reads what the request that redirected here failed validation on and
+// shares it with every view as "errors", so that a layout can draw the messages
+// without every handler passing them along. A handler that had to carry them is
+// a handler that can forget to, and forgetting is invisible: the form comes back
+// blank.
 //
-// In Arandu, the errors are read from the httpx.State on the context (set by
-// the session middleware), not from a session interface directly. This is the
-// same mechanism that view.New uses to fill Page.Errors.
+// The errors are read from the framework's per-request state, which the session
+// middleware puts on the context when it spends the flash cookie. The PHP reads
+// them off the session store through the container; there is no container
+// (ADR 0001), and the state is already decoded by the time a view runs.
 type ShareErrorsFromSession struct {
+	// Factory is the view factory the errors are shared with. It answers to
+	// $view in the PHP, which is the Factory the container hands the middleware.
 	Factory *view.Factory
 }
 
-// NewShareErrorsFromSession returns a middleware that shares errors with all views.
+// NewShareErrorsFromSession answers to ShareErrorsFromSession::__construct.
 func NewShareErrorsFromSession(f *view.Factory) *ShareErrorsFromSession {
 	return &ShareErrorsFromSession{Factory: f}
 }
 
-// Middleware returns an HTTP middleware handler.
+// Handle answers to ShareErrorsFromSession::handle.
 //
-// Usage:
+// The signature is the one every middleware in this framework has --
+// func(http.Handler) http.Handler -- rather than PHP's ($request, $next),
+// because net/http passes the request to the handler and not to the middleware.
 //
-//	router.Use(middleware.NewShareErrorsFromSession(factory).Middleware())
-func (m *ShareErrorsFromSession) Middleware() func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if errs, ok := errorsFromContext(r.Context()); ok {
-				m.Factory.Share("errors", errs)
-			} else {
-				// Always share an empty bag so views can unconditionally check.
-				m.Factory.Share("errors", validation.Errors{})
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// errorsFromContext extracts the validation errors from the context state.
-func errorsFromContext(ctx interface{ Value(any) any }) (validation.Errors, bool) {
-	// The state is stored via httpx.WithState and accessed via httpx.StateFrom.
-	// We import the type directly to avoid a circular dependency.
-	type stateKeyType struct{}
-	stateVal := ctx.Value(stateKeyType{})
-	if stateVal == nil {
-		return nil, false
-	}
-	type state struct {
-		Errors validation.Errors
-	}
-	if s, ok := stateVal.(state); ok {
-		return s.Errors, len(s.Errors) > 0
-	}
-	return nil, false
+// An empty bag is shared when there are none, which is what the PHP's
+// `new ViewErrorBag` does: a view can read "errors" without asking first.
+func (m *ShareErrorsFromSession) Handle(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		errs := hesapehttp.StateFrom(r.Context()).Errors
+		if errs == nil {
+			errs = validation.Errors{}
+		}
+		m.Factory.Share("errors", errs)
+		next.ServeHTTP(w, r)
+	})
 }

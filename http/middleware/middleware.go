@@ -144,19 +144,28 @@ func CheckResponseForModifications(etag string, lastModified string) func(http.H
 // It validates that the request Host header matches the list of
 // trusted host patterns. A request with a non-matching host is
 // rejected with a 400 Bad Request.
+// Hosts named through [At] are trusted as well, and [At] can turn subdomain
+// matching on for them, which is what TrustHosts::hosts does in the PHP.
 func TrustHosts(hosts []string, subdomains bool) func(http.Handler) http.Handler {
-	hostSet := make(map[string]bool, len(hosts))
-	for _, h := range hosts {
-		hostSet[h] = true
-	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			trusted := hosts
+			matchSubdomains := subdomains
+			if always := Hosts(); len(always) > 0 {
+				trusted = append(append([]string{}, hosts...), always...)
+				matchSubdomains = matchSubdomains || TrustsSubdomains()
+			}
+			hostSet := make(map[string]bool, len(trusted))
+			for _, h := range trusted {
+				hostSet[h] = true
+			}
+
 			host := r.Host
 			if hostSet[host] {
 				next.ServeHTTP(w, r)
 				return
 			}
-			if subdomains {
+			if matchSubdomains {
 				for trusted := range hostSet {
 					if len(host) > len(trusted) && host[len(host)-len(trusted)-1] == '.' && host[len(host)-len(trusted):] == trusted {
 						next.ServeHTTP(w, r)
@@ -178,6 +187,11 @@ func TrustHosts(hosts []string, subdomains bool) func(http.Handler) http.Handler
 func HandleCors(allowedOrigins []string, allowedMethods []string, allowedHeaders []string, maxAge int, allowCredentials bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if shouldSkipCors(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			origin := r.Header.Get("Origin")
 			if origin == "" {
 				next.ServeHTTP(w, r)

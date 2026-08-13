@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/arandu-io/hesape/support"
 )
 
 // Response mirrors Illuminate\Http\Client\Response.
@@ -354,6 +356,48 @@ func (r *Response) UnprocessableEntity() bool { return r.Status() == http.Status
 
 // TooManyRequests reports whether the status is 429.
 func (r *Response) TooManyRequests() bool { return r.Status() == http.StatusTooManyRequests }
+
+// UnprocessableContent is DeterminesStatusCode::unprocessableContent: the 422
+// check under the name the RFC gave it. [Response.UnprocessableEntity] is the
+// same check under the name the older RFC gave it, and the PHP keeps both for
+// the same reason.
+func (r *Response) UnprocessableContent() bool {
+	return r.Status() == http.StatusUnprocessableEntity
+}
+
+// Reason is Response::reason: the reason phrase the server sent.
+//
+// The PHP reads it off the PSR-7 response, which keeps whatever the server
+// wrote; net/http keeps the whole status line, so the code is trimmed off the
+// front of it. When there is no status line -- a stubbed response -- the
+// registered text for the code stands in, which is what the server would have
+// sent.
+func (r *Response) Reason() string {
+	if r == nil || r.resp == nil {
+		return ""
+	}
+	line := r.resp.Status
+	code := fmt.Sprintf("%d ", r.resp.StatusCode)
+	if len(line) > len(code) && line[:len(code)] == code {
+		return line[len(code):]
+	}
+	if line != "" {
+		return line
+	}
+	return http.StatusText(r.resp.StatusCode)
+}
+
+// DumpHeaders is Response::dumpHeaders: write the response headers out where
+// the process can see them.
+func (r *Response) DumpHeaders() *Response {
+	support.Dump(r.Headers())
+	return r
+}
+
+// DdHeaders is Response::ddHeaders: dump the headers and end the process.
+func (r *Response) DdHeaders() {
+	support.Dd(r.Headers())
+}
 
 // StatusText returns the HTTP status text.
 func (r *Response) StatusText() string {
