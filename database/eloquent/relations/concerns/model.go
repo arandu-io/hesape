@@ -3,10 +3,12 @@ package concerns
 import (
 	"context"
 	"fmt"
+	"iter"
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database/query"
+	"github.com/arandu-io/hesape/pagination"
 )
 
 // Model is what a relation asks of Illuminate\Database\Eloquent\Model.
@@ -204,6 +206,31 @@ type Builder interface {
 
 	// Limit answers Builder::limit.
 	Limit(value int) Builder
+
+	// Offset answers Builder::offset.
+	//
+	// It is here for chunking. BelongsToMany::chunk and
+	// HasOneOrManyThrough::chunk hand the prepared query to the builder's own
+	// chunk, which walks it with forPage -- an offset and a limit per page.
+	Offset(value int) Builder
+
+	// Cursor answers Builder::cursor: the rows streamed one at a time rather
+	// than gathered into a slice.
+	//
+	// The error arrives beside each value, as iter.Seq2 does throughout this
+	// collection, because a stream can fail after it has already yielded rows
+	// and a signature that returned the error at the end would be read after
+	// the caller had acted on half the data.
+	Cursor(ctx context.Context, g auth.Grant) iter.Seq2[Model, error]
+
+	// Paginate answers Builder::paginate.
+	Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.LengthAwarePaginator[Model], error)
+
+	// SimplePaginate answers Builder::simplePaginate.
+	SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[Model], error)
+
+	// CursorPaginate answers Builder::cursorPaginate.
+	CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (*pagination.CursorPaginator[Model], error)
 
 	// Get answers Builder::get.
 	Get(ctx context.Context, g auth.Grant) ([]Model, error)

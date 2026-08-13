@@ -1,10 +1,19 @@
 // Package promises mirrors Illuminate\Http\Client\Promises.
 //
-// It holds promise implementations for async HTTP requests.
+// The files it answers to, in the clone at
+// laravel_illuminate/http/Client/Promises:
 //
-//	LazyPromise.php
-//	FluentPromise.php
+//	FluentPromise.php -> fluent_promise.go
+//	LazyPromise.php   -> lazy_promise.go
 //
-// In Go, async requests use goroutines and channels natively;
-// the package exists for parity with the Illuminate surface.
+// Both decorate a Guzzle promise in the PHP. There is no Guzzle here, so
+// [Deferred] stands in: a value that is not there yet, settled from whichever
+// goroutine is doing the work, with Wait blocking on a channel until it is.
+//
+// # Not mirrored, and why (ADR 0044)
+//
+//	FluentPromise::getGuzzlePromise    is GetUnderlyingPromise. The PHP name
+//	                                   says which library the decorated object
+//	                                   came from, and this package has never
+//	                                   heard of Guzzle.
 package promises

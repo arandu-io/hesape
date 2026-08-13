@@ -3,6 +3,8 @@ package client
 import (
 	"sync"
 	"time"
+
+	"github.com/arandu-io/hesape/support/deferpkg"
 )
 
 // Batch mirrors Illuminate\Http\Client\Batch.
@@ -98,6 +100,19 @@ func (b *Batch) Finally(callback func()) *Batch {
 func (b *Batch) Concurrency(limit int) *Batch {
 	b.concurrency = limit
 	return b
+}
+
+// Defer is Batch::defer: send the batch after the response has gone back to
+// the browser, rather than while it is waiting.
+//
+// The callback it hands back is the one the deferred-callback collection
+// invokes; nothing here runs it, which is what makes it deferred.
+func (b *Batch) Defer() *deferpkg.DeferredCallback {
+	return deferpkg.NewDeferredCallback(func() {
+		// The batch reports failures through the Catch callback the caller
+		// registered; there is nobody left to hand an error to out here.
+		_, _ = b.Send()
+	}, "", false)
 }
 
 // Send executes all requests in the batch.

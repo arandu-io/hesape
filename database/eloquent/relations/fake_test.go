@@ -3,6 +3,7 @@ package relations_test
 import (
 	"context"
 	"fmt"
+	"iter"
 	"sort"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database/eloquent/relations"
 	"github.com/arandu-io/hesape/database/query"
+	"github.com/arandu-io/hesape/pagination"
 )
 
 // The fakes below are a database small enough to reason about and honest about
@@ -248,8 +250,69 @@ func (b *builder) Limit(value int) relations.Builder {
 	return b
 }
 
+func (b *builder) Offset(value int) relations.Builder {
+	b.base.Offset(value)
+	return b
+}
+
 func (b *builder) Clone() relations.Builder {
 	return &builder{database: b.database, model: b.model, base: b.base.Clone()}
+}
+
+// Cursor streams what Get would have returned. The fake holds every row in a
+// map, so there is nothing to stream from -- what a relation test measures here
+// is that the rows arrive one at a time and carry their pivot, not that the
+// driver kept a statement open.
+func (b *builder) Cursor(ctx context.Context, g auth.Grant) iter.Seq2[relations.Model, error] {
+	return func(yield func(relations.Model, error) bool) {
+		models, err := b.Get(ctx, g)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		for _, model := range models {
+			if !yield(model, nil) {
+				return
+			}
+		}
+	}
+}
+
+func (b *builder) Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.LengthAwarePaginator[relations.Model], error) {
+	models, err := b.Get(ctx, g)
+	if err != nil {
+		return nil, err
+	}
+	return pagination.Paginate(pageSlice(models, perPage, page), len(models), perPage, page, opts), nil
+}
+
+func (b *builder) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[relations.Model], error) {
+	models, err := b.Get(ctx, g)
+	if err != nil {
+		return nil, err
+	}
+	return pagination.SimplePaginate(pageSlice(models, perPage, page), perPage, page, opts), nil
+}
+
+func (b *builder) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (*pagination.CursorPaginator[relations.Model], error) {
+	models, err := b.Get(ctx, g)
+	if err != nil {
+		return nil, err
+	}
+	return pagination.CursorPaginate(pageSlice(models, perPage, 1), perPage, cursor,
+		func(model relations.Model) map[string]string { return nil }, opts), nil
+}
+
+func pageSlice(models []relations.Model, perPage, page int) []relations.Model {
+	if perPage < 1 || page < 1 {
+		return nil
+	}
+	start := (page - 1) * perPage
+	if start >= len(models) {
+		return nil
+	}
+	end := min(start+perPage, len(models))
+	return models[start:end]
 }
 
 func (b *builder) Get(ctx context.Context, g auth.Grant) ([]relations.Model, error) {
@@ -384,7 +447,64 @@ func (b *builder) run() []map[string]any {
 		}
 		out = append(out, project(row, b.base.GetColumns()))
 	}
-	return out
+	return applyOrderLimitOffset(b.base, out)
+}
+
+// applyOrderLimitOffset is what a chunked read depends on and a single Get does
+// not: without it every page of a chunk returns the whole table, and the walk
+// either never ends or ends on the wrong page.
+//
+// The ordering handles only what these tests order by -- one column, either
+// direction -- because a fake that pretended to sort by an expression would be
+// claiming an answer it cannot check.
+func applyOrderLimitOffset(base *query.Builder, rows []map[string]any) []map[string]any {
+	for i := len(base.Orders) - 1; i >= 0; i-- {
+		order := base.Orders[i]
+		column := plain(fmt.Sprint(order.Column))
+		descending := strings.EqualFold(order.Direction, "desc")
+
+		sort.SliceStable(rows, func(a, b int) bool {
+			if descending {
+				return lessValue(rows[b][column], rows[a][column])
+			}
+			return lessValue(rows[a][column], rows[b][column])
+		})
+	}
+
+	if offset := base.GetOffset(); offset != nil {
+		if *offset >= len(rows) {
+			return nil
+		}
+		rows = rows[*offset:]
+	}
+	if limit := base.GetLimit(); limit != nil && *limit < len(rows) {
+		rows = rows[:*limit]
+	}
+	return rows
+}
+
+// lessValue orders the two kinds of key these tests use. Anything else compares
+// by its printed form, which is stable and is enough to page by.
+func lessValue(a, b any) bool {
+	left, leftOK := numeric(a)
+	right, rightOK := numeric(b)
+	if leftOK && rightOK {
+		return left < right
+	}
+	return fmt.Sprint(a) < fmt.Sprint(b)
+}
+
+func numeric(value any) (float64, bool) {
+	switch v := value.(type) {
+	case int:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case float64:
+		return v, true
+	default:
+		return 0, false
+	}
 }
 
 func joinRows(database *db, left []map[string]any, join *query.JoinClause) []map[string]any {
@@ -449,11 +569,21 @@ func matches(wheres []query.Where, row map[string]any) bool {
 
 		switch where.Type {
 		case "Basic":
-			if where.Operator != "=" {
+			switch where.Operator {
+			case "=":
+				if !sameValue(value, where.Value) {
+					return false
+				}
+			case ">", "<", ">=", "<=":
+				// The id-paged chunks page with these, and a fake that treated
+				// them as satisfied would not advance: every page would come
+				// back as page one and the walk would never end. It did, before
+				// this branch existed.
+				if !compares(value, where.Operator, where.Value) {
+					return false
+				}
+			default:
 				continue
-			}
-			if !sameValue(value, where.Value) {
-				return false
 			}
 		case "In":
 			found := false
@@ -474,6 +604,27 @@ func matches(wheres []query.Where, row map[string]any) bool {
 		}
 	}
 	return true
+}
+
+// compares orders two values the way lessValue does and answers the operator
+// against that order. A missing column is not greater or less than anything, so
+// it matches nothing, which is what SQL's NULL comparison does.
+func compares(value any, operator string, against any) bool {
+	if value == nil || against == nil {
+		return false
+	}
+
+	switch operator {
+	case ">":
+		return lessValue(against, value)
+	case "<":
+		return lessValue(value, against)
+	case ">=":
+		return !lessValue(value, against)
+	case "<=":
+		return !lessValue(against, value)
+	}
+	return false
 }
 
 // project applies the select list: a plain column is kept, and `x as y` is

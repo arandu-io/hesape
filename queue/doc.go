@@ -92,6 +92,50 @@
 // wiring ADR 0002 refused: the application constructs its queues in
 // bootstrap/app.go.
 //
+// # Method by method, so the list can be checked rather than believed
+//
+// Twenty-five public methods of the component have no name here. Each one, with
+// the ADR 0044 reason number:
+//
+//	BeanstalkdQueue::deleteMessage, ::getPheanstalk, Jobs\BeanstalkdJob::bury,
+//	    ::getPheanstalk, ::getPheanstalkJob, SqsQueue::getSqs, Jobs\SqsJob::getSqs
+//	    and ::getSqsJob -- reason 3, all eight. Beanstalkd and SQS are two stores
+//	    this collection does not speak to (RULE 11), and these are the driver
+//	    handles and the one operation -- bury -- that only Beanstalkd has. A job
+//	    that stops being delivered here is queue/failed, which every driver has.
+//	RedisQueue::getRedis, ::migrateExpiredJobs, Jobs\RedisJob::getRedisQueue and
+//	    ::getReservedJob -- reason 3: the RESP driver is queue/connectors/redis,
+//	    with the driver it needs. migrateExpiredJobs moves the reserved and
+//	    delayed sets back onto the ready list, which is LuaScripts, and the
+//	    paragraph below says why that is a gap rather than a decision.
+//	QueueServiceProvider::register, ::registerConnectors, ::provides,
+//	    QueueManager::getApplication, ::setApplication, Queue::getConfig,
+//	    ::setConfig, ::getContainer, ::setContainer and Jobs\Job::getContainer --
+//	    reason 2, all ten. They bind the manager, the connectors and the failed
+//	    job provider into the container, and hand the container and the raw
+//	    config array back so that a driver closure can resolve out of them. An
+//	    application constructs its queues in bootstrap/app.go and passes them
+//	    (ADR 0002); the configuration is a typed struct read at boot, not an
+//	    array a driver reaches into at push time.
+//	Capsule\Manager::addConnection, ::getQueueManager and ::registerConnectors --
+//	    reason 2: the capsule is Illuminate's way of using the queue outside a
+//	    Laravel application, which is a container built on the caller's behalf.
+//	    Outside an Arandu application the queue is the same [QueueManager] built
+//	    the same way, so there is nothing for a capsule to do (RULE 9).
+//	Jobs\Job::fire and ::getResolvedJob -- reason 2: fire() parses the class and
+//	    method out of the payload, resolves the class from the container and
+//	    calls it, and getResolvedJob hands back what it resolved. Here the name
+//	    routes to a handler registered by [Worker], which is the same lookup
+//	    written once and checkable at boot.
+//	Jobs\Job::uuid -- reason 1 for the shape, not for the name: PHP reads it
+//	    through an accessor because the property is protected. Here it is the
+//	    exported field jobs.Job.UUID, which is the same value getJobId() answers
+//	    and the reason the two are one field.
+//	CallQueuedClosure::create -- it is here, as [NewCallQueuedClosure]. PHP has
+//	    both a constructor taking an already-wrapped SerializableClosure and a
+//	    create() taking the raw Closure; Go has no closure serialization and
+//	    therefore only the one form (RULE 9).
+//
 // LuaScripts.php has no answer here and it is not a decision, it is a gap. The
 // seven scripts it holds are RedisQueue's storage layout expressed in Lua, and
 // the RESP driver in connectors/redis keeps its jobs in a different shape --

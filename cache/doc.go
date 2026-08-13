@@ -84,4 +84,32 @@
 // arandu-io/kv, with the driver they need. SessionStore belongs to
 // hesape/session. LuaScripts is RULE 11. CacheServiceProvider is the container
 // (ADR 0001), and so is CacheManager::setApplication.
+//
+// Method by method, so that the list can be checked rather than believed. Each
+// one with the ADR 0044 reason number:
+//
+//	RedisStore::connection, ::lockConnection, ::getRedis, RedisTagSet::addEntry,
+//	    ::entries, ::flushStaleEntries and RedisTaggedCache::flushStale --
+//	    reason 3, all seven. They are the RESP store, which is arandu-io/kv and
+//	    arrives through [CacheManager.Extend]. connection() and lockConnection()
+//	    also answer a second connection name for locks, which RULE 11 has no
+//	    room for: one product, one connection.
+//	MemcachedConnector::connect, ::getMemcached, MemcachedStore::getMemcached
+//	    and DynamoDbStore::getClient -- reason 3: two backends this collection
+//	    does not carry, and the driver handle each of them hands back.
+//	Console\ClearCommand::flushFacades -- reason 2: it calls Facade::clearResolvedInstance
+//	    for the bindings the command touched, and there are no facades
+//	    (ADR 0002). What it exists to fix -- a stale store held from before the
+//	    flush -- cannot happen when the store is the value the caller already
+//	    holds.
+//	Repository::offsetExists, ::offsetGet, ::offsetSet and ::offsetUnset --
+//	    reason 1: ArrayAccess is how PHP writes $cache['key']. Go has no
+//	    operator to overload; the four methods are [Repository.Has],
+//	    [Repository.Get], [Repository.Put] and [Repository.Forget], which is
+//	    what each of them forwards to -- and every one of those takes an
+//	    [auth.Grant], which a bracket has nowhere to put (RULE 14).
+//	CacheServiceProvider::register, ::provides and CacheManager::setApplication
+//	    -- reason 2: they bind 'cache', 'cache.store' and 'memcached.connector'
+//	    into the container and name them again for the deferred provider.
+//	    [NewCacheManager] takes the configuration and the stores instead.
 package cache

@@ -14,6 +14,9 @@
 //	ForeignKeyDefinition.php
 //	IndexDefinition.php
 //	SchemaState.php
+//	MySqlSchemaState.php
+//	PostgresSchemaState.php
+//	SqliteSchemaState.php
 //
 // # The names
 //
@@ -81,10 +84,20 @@
 //   - Fluent's offsetGet, offsetSet, jsonSerialize, toArray and __get: the same.
 //     The attribute bag is a typed struct here, and Command spells out the union
 //     of keys the way query.Where does for the query builder.
-//   - SqlServerBuilder and the SQL Server halves of every method: a driver this
-//     ecosystem does not carry.
-//   - The concrete SchemaState subclasses (MySqlSchemaState, PostgresSchemaState,
-//     SqliteSchemaState) shell out to mysqldump, pg_dump and sqlite3. The shared
-//     half, SchemaState.php, is here; the three subclasses were not in this
-//     slice.
+//   - SqlServerBuilder, SqlServerGrammar and the SQL Server halves of every
+//     method: a driver this ecosystem does not carry. Three method names exist
+//     only there and so exist nowhere here -- compileDefault,
+//     compileDropAllForeignKeys and compileDropDefaultConstraint, all of them
+//     about the named default constraints that are SQL Server's own way of
+//     spelling a column default.
+//   - The per-driver Builder subclasses (MySqlBuilder, PostgresBuilder,
+//     SQLiteBuilder, MariaDbBuilder) are one Builder here, because what differs
+//     between them is the SQL, and the SQL is the Grammar's. Their methods are
+//     on Builder under the PHP's names; the one that could not be, because it
+//     touches a file rather than the database, is RefreshDatabaseFile, which
+//     checks the driver where PHP relies on the class.
+//   - MariaDbSchemaState: MariaDB and MySQL share mysqldump, and the one place
+//     the PHP's subclass differs -- omitting --set-gtid-purged -- is a branch
+//     MySqlSchemaState already takes on Connection.IsMaria. A second type would
+//     be a second way to dump the same database, which RULE 9 refuses.
 package schema

@@ -104,7 +104,7 @@ func (f *File) GetMimeType() string {
 	if f.MimeTypeToReport != "" {
 		return f.MimeTypeToReport
 	}
-	return MimeTypeFrom(f.Name)
+	return From(f.Name)
 }
 
 // Close removes the temporary file. The PHP leaves it to the request ending; a

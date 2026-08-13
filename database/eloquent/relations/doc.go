@@ -23,6 +23,15 @@
 //	Pivot.php               -> pivot.go
 //	MorphPivot.php          -> pivot.go
 //
+// The thirteen walking methods that BelongsToMany and HasOneOrManyThrough each
+// declare -- chunk, chunkById, chunkByIdDesc, orderedChunkById, each, eachById,
+// lazy, lazyById, lazyByIdDesc, cursor, paginate, simplePaginate and
+// cursorPaginate -- have one body between them, in chunking.go. The two PHP
+// classes write them out twice because they sit on opposite branches of the
+// hierarchy and share no parent that could hold them; the only line that
+// differs is BelongsToMany hydrating the pivot on each page, which is a field
+// of the shared body rather than a second copy of it.
+//
 // # The four methods
 //
 // AddEagerConstraints, InitRelation, Match and GetEager are what turn a hundred

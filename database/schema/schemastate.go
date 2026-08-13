@@ -31,6 +31,16 @@ type SchemaState interface {
 	Load(ctx context.Context, g auth.Grant, path string) error
 }
 
+// The three concrete states implement the contract, checked here rather than at
+// the first call site: PHP declares dump and load abstract, so a subclass that
+// failed to supply one would not load at all, and this is the Go equivalent of
+// that failure arriving early.
+var (
+	_ SchemaState = (*MySqlSchemaState)(nil)
+	_ SchemaState = (*PostgresSchemaState)(nil)
+	_ SchemaState = (*SqliteSchemaState)(nil)
+)
+
 // ProcessFactory builds the command a schema state runs.
 //
 // It is a named type rather than a bare signature because three schema states

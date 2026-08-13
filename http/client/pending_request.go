@@ -11,6 +11,9 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/arandu-io/hesape/http/client/promises"
+	"github.com/arandu-io/hesape/str"
 )
 
 // PendingRequest mirrors Illuminate\Http\Client\PendingRequest.
@@ -85,6 +88,10 @@ type PendingRequest struct {
 
 	// Async mode: when true, Get/Post/etc. return immediately.
 	async bool
+
+	// promise is PendingRequest::$promise: what an asynchronous send left
+	// behind for the caller to wait on.
+	promise *promises.LazyPromise
 
 	// beforeSending callbacks run just before the request is sent.
 	beforeSending []func(*http.Request) error
@@ -275,6 +282,13 @@ func (p *PendingRequest) WithCookies(cookies []*http.Cookie, domain string) *Pen
 	return p
 }
 
+// MaxRedirects is PendingRequest::maxRedirects: how many redirects the request
+// follows before it gives up.
+func (p *PendingRequest) MaxRedirects(max int) *PendingRequest {
+	p.maxRedirects = max
+	return p
+}
+
 // WithoutRedirecting disables automatic redirect following.
 func (p *PendingRequest) WithoutRedirecting() *PendingRequest {
 	p.maxRedirects = 0
@@ -423,10 +437,25 @@ func (p *PendingRequest) Dd() *PendingRequest {
 	return p
 }
 
-// Async enables async mode. In async mode, Get/Post/etc. return immediately.
+// Async is PendingRequest::async: send without waiting.
+//
+// A verb called on an asynchronous request returns (nil, nil) and leaves a
+// promise on [PendingRequest.GetPromise]; waiting on that promise is what makes
+// the request go out, and what hands back the response.
 func (p *PendingRequest) Async(async bool) *PendingRequest {
 	p.async = async
 	return p
+}
+
+// GetPromise is PendingRequest::getPromise: the promise this request left
+// behind, or nil when it was not sent asynchronously.
+//
+// Wait on it for a (*Response, error): the value is the *Response.
+func (p *PendingRequest) GetPromise() promises.Promise {
+	if p.promise == nil {
+		return nil
+	}
+	return p.promise
 }
 
 // StubCallback registers a stub callback for this specific request.
@@ -465,6 +494,105 @@ func (p *PendingRequest) GetOptions() map[string]any {
 		"max_redirects":   p.maxRedirects,
 		"verify_tls":      p.verifyTLS,
 	}
+}
+
+// MergeOptions is PendingRequest::mergeOptions: this request's options with the
+// given ones laid over them, later maps winning.
+//
+// The PHP merges recursively because a Guzzle option can be an array of
+// headers; nothing in [PendingRequest.GetOptions] nests, so this is a flat
+// merge and says so.
+func (p *PendingRequest) MergeOptions(options ...map[string]any) map[string]any {
+	merged := p.GetOptions()
+	for _, option := range options {
+		for key, value := range option {
+			merged[key] = value
+		}
+	}
+	return merged
+}
+
+// SetHandler is PendingRequest::setHandler: the transport the request goes out
+// on.
+//
+// The PHP takes a Guzzle handler, the bottom of its middleware stack. Go's
+// counterpart is the http.RoundTripper on the client, which is where a caller
+// puts a recording or an offline transport.
+func (p *PendingRequest) SetHandler(handler http.RoundTripper) *PendingRequest {
+	client := p.BuildClient()
+	client.Transport = handler
+	return p.SetClient(client)
+}
+
+// BuildClient is PendingRequest::buildClient: the client this request will go
+// out on.
+func (p *PendingRequest) BuildClient() *http.Client {
+	if p.factory != nil && p.factory.client != nil {
+		return p.factory.client
+	}
+	return http.DefaultClient
+}
+
+// CreateClient is PendingRequest::createClient: a client configured the way
+// this request needs it, without touching the shared one.
+//
+// The PHP takes the Guzzle handler; this takes the transport, for the reason
+// [PendingRequest.SetHandler] gives. A nil transport keeps whatever the client
+// already had.
+func (p *PendingRequest) CreateClient(handler http.RoundTripper) *http.Client {
+	client := *p.BuildClient()
+	if handler != nil {
+		client.Transport = handler
+	}
+	client.Timeout = p.timeout
+	if p.maxRedirects == 0 {
+		client.CheckRedirect = func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	} else {
+		max := p.maxRedirects
+		client.CheckRedirect = func(_ *http.Request, via []*http.Request) error {
+			if len(via) >= max {
+				return fmt.Errorf("http client: stopped after %d redirects", max)
+			}
+			return nil
+		}
+	}
+	return &client
+}
+
+// RunBeforeSendingCallbacks is PendingRequest::runBeforeSendingCallbacks: run
+// what [PendingRequest.BeforeSending] registered, in the order it was
+// registered.
+//
+// The PHP returns the request the callbacks handed back; a Go callback mutates
+// the *http.Request in place and returns only what went wrong.
+func (p *PendingRequest) RunBeforeSendingCallbacks(req *http.Request) error {
+	for _, callback := range p.beforeSending {
+		if err := callback(req); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// IsAllowedRequestUrl is PendingRequest::isAllowedRequestUrl: whether a request
+// to this URL may leave the process when no stub matched it.
+//
+// Every URL is allowed until stray request prevention is on. After that only
+// the patterns given to [PendingRequest.AllowStrayRequests] or
+// [Factory.AllowStrayRequests] are, matched the way Str::is matches: a literal
+// string, or one with * standing for any run of characters.
+func (p *PendingRequest) IsAllowedRequestUrl(url string) bool {
+	preventing := p.preventStray || (p.factory != nil && p.factory.preventStray)
+	if !preventing {
+		return true
+	}
+	allowed := p.allowStray
+	if p.factory != nil {
+		allowed = append(append([]string{}, allowed...), p.factory.allowedStrayURLs...)
+	}
+	return str.Is(allowed, url, false)
 }
 
 // Get sends a GET request.
@@ -513,6 +641,26 @@ func (p *PendingRequest) Send(method, urlStr string, query map[string]string, da
 		return nil, nil
 	}
 
+	// An asynchronous request leaves a promise behind instead of a response.
+	// Nothing goes out until somebody waits on it, which is what the PHP's
+	// LazyPromise does inside a pool.
+	if p.async {
+		p.async = false
+		p.promise = promises.NewLazyPromise(func() promises.Promise {
+			deferred := promises.NewDeferred(nil)
+			go func() {
+				response, err := p.Send(method, urlStr, query, data)
+				if err != nil {
+					_ = deferred.Reject(err)
+					return
+				}
+				_ = deferred.Resolve(response)
+			}()
+			return deferred
+		})
+		return nil, nil
+	}
+
 	// Build the URL.
 	fullURL, err := p.buildURL(urlStr, query)
 	if err != nil {
@@ -549,25 +697,13 @@ func (p *PendingRequest) Send(method, urlStr string, query map[string]string, da
 	}
 
 	// Run before-sending callbacks.
-	for _, cb := range p.beforeSending {
-		if err := cb(req); err != nil {
-			return nil, fmt.Errorf("http client: before sending: %w", err)
-		}
+	if err := p.RunBeforeSendingCallbacks(req); err != nil {
+		return nil, fmt.Errorf("http client: before sending: %w", err)
 	}
 
-	// Determine the client to use.
-	client := http.DefaultClient
-	if p.factory != nil && p.factory.client != nil {
-		client = p.factory.client
-	}
-	// Make a copy so we don't mutate the shared client.
-	cc := *client
-	if p.maxRedirects == 0 {
-		cc.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		}
-	}
-	cc.Timeout = p.timeout
+	// The client this request goes out on, copied so the shared one is left
+	// alone.
+	cc := p.CreateClient(nil)
 
 	// Check stubs.
 	if stubResp, stubErr := p.findStub(req); stubResp != nil || stubErr != nil {
@@ -754,18 +890,7 @@ func (p *PendingRequest) findStub(req *http.Request) (*http.Response, error) {
 	}
 
 	// No stub matched. Check stray prevention.
-	if p.factory.preventStray || p.preventStray {
-		// Check allowed URLs.
-		for _, allowed := range p.factory.allowedStrayURLs {
-			if req.URL.String() == allowed {
-				return nil, nil
-			}
-		}
-		for _, allowed := range p.allowStray {
-			if req.URL.String() == allowed {
-				return nil, nil
-			}
-		}
+	if !p.IsAllowedRequestUrl(req.URL.String()) {
 		return nil, NewStrayRequestError(req.URL.String())
 	}
 

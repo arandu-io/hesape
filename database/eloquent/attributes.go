@@ -50,20 +50,26 @@ func (m *Model[T]) SetRawAttributes(attributes map[string]any, sync bool) error 
 // to a key with no field behind it: Fill drops it, ForceFill and
 // SetRawAttributes keep it.
 func (m *Model[T]) setAttributes(attributes map[string]any, keepUnknown bool) error {
+	var discarded []string
 	for _, key := range sortedKeys(attributes) {
 		value := attributes[key]
 		known, err := m.setAttribute(key, value)
 		if err != nil {
 			return err
 		}
-		if !known && keepUnknown {
+		if known {
+			continue
+		}
+		if keepUnknown {
 			if m.attributes == nil {
 				m.attributes = map[string]any{}
 			}
 			m.attributes[key] = value
+			continue
 		}
+		discarded = append(discarded, key)
 	}
-	return nil
+	return m.handleDiscardedAttributeViolation(discarded)
 }
 
 // SetAttribute answers Model::setAttribute.
@@ -105,10 +111,9 @@ func (m *Model[T]) setAttribute(key string, value any) (bool, error) {
 // GetAttribute answers Model::getAttribute.
 //
 // A key that is neither a column nor a raw attribute reads as nil, which is what
-// PHP answers for a missing key unless preventAccessingMissingAttributes is on.
-// That switch is not carried over: a Go field always exists, so the only way to
-// ask for something missing is to ask by a name the struct does not have, and
-// that is a typo the reader can see.
+// PHP answers for a missing key. PreventAccessingMissingAttributes turns that
+// read into a reported violation, as it does there -- and it catches much less
+// here, because a row is a struct and found.Entity.Naem does not build.
 func (m *Model[T]) GetAttribute(key string) any {
 	entity := reflect.ValueOf(m.Entity)
 	if f, ok := fieldByColumn(entity.Type(), key); ok {
@@ -120,6 +125,7 @@ func (m *Model[T]) GetAttribute(key string) any {
 	if related, ok := m.relations[key]; ok {
 		return related
 	}
+	m.handleMissingAttributeViolation(key)
 	return nil
 }
 

@@ -332,3 +332,100 @@ func TestTransformMissingValue(t *testing.T) {
 	_, isMissing := result.(MissingValue)
 	assertEqual(t, isMissing, true, "transform MissingValue should stay MissingValue")
 }
+
+// --- Resource, the class, and the statics it carries ---
+
+func TestResourceResolvesThroughTheFilter(t *testing.T) {
+	resource := Make(map[string]any{
+		"id":     7,
+		"name":   "Ada",
+		"secret": MissingValue{},
+	})
+
+	resolved := resource.Resolve()
+	assertEqual(t, len(resolved), 2, "resolved keys")
+	assertEqual(t, resolved["name"], "Ada", "name")
+	if _, present := resolved["secret"]; present {
+		t.Fatal("a missing value should not have survived Resolve")
+	}
+}
+
+func TestResourceToJsonAndToPrettyJson(t *testing.T) {
+	resource := Make(map[string]any{"name": "Ada"})
+
+	compact, err := resource.ToJson()
+	if err != nil {
+		t.Fatalf("ToJson: %v", err)
+	}
+	assertEqual(t, string(compact), `{"name":"Ada"}`, "compact json")
+
+	pretty, err := resource.ToPrettyJson()
+	if err != nil {
+		t.Fatalf("ToPrettyJson: %v", err)
+	}
+	assertEqual(t, string(pretty), "{\n    \"name\": \"Ada\"\n}", "pretty json")
+}
+
+func TestWrapChangesTheKeyEveryResponseIsNestedUnder(t *testing.T) {
+	t.Cleanup(FlushState)
+
+	Wrap("record")
+	body, err := NewJsonResponse(Make(map[string]any{"name": "Ada"})).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if _, present := decoded["record"]; !present {
+		t.Fatalf("expected the data under \"record\", got %s", body)
+	}
+
+	WithoutWrapping()
+	assertEqual(t, Wrapper(), "", "wrapper after WithoutWrapping")
+
+	FlushState()
+	assertEqual(t, Wrapper(), DefaultWrap, "wrapper after FlushState")
+}
+
+func TestAResourceIsNotResolvedFromARouteBinding(t *testing.T) {
+	resource := Make(map[string]any{"id": 1})
+
+	if _, err := resource.ResolveRouteBinding(1, ""); err != ErrNotRouteBindable {
+		t.Fatalf("ResolveRouteBinding error = %v, want ErrNotRouteBindable", err)
+	}
+	if _, err := resource.ResolveChildRouteBinding("comment", 1, ""); err != ErrNotRouteBindable {
+		t.Fatalf("ResolveChildRouteBinding error = %v, want ErrNotRouteBindable", err)
+	}
+	assertEqual(t, resource.GetRouteKeyName(), "", "route key name of an unroutable resource")
+}
+
+func TestGetIteratorWalksTheCollectionInOrder(t *testing.T) {
+	collection := Collection([]JsonResource{
+		Make(map[string]any{"n": 1}),
+		Make(map[string]any{"n": 2}),
+	})
+
+	var seen []any
+	for resource := range collection.GetIterator() {
+		seen = append(seen, resource.ToArray()["n"])
+	}
+	assertEqual(t, len(seen), 2, "resources walked")
+	assertEqual(t, seen[0], 1, "first")
+	assertEqual(t, seen[1], 2, "second")
+}
+
+func TestPreserveQueryAndWithQueryAreExclusive(t *testing.T) {
+	collection := NewResourceCollection(nil)
+
+	collection.PreserveQuery()
+	query, all := collection.QueryParameters()
+	assertEqual(t, all, true, "preserve all after PreserveQuery")
+	assertEqual(t, len(query), 0, "explicit parameters after PreserveQuery")
+
+	collection.WithQuery(map[string]string{"sort": "name"})
+	query, all = collection.QueryParameters()
+	assertEqual(t, all, false, "preserve all after WithQuery")
+	assertEqual(t, query["sort"], "name", "explicit parameter")
+}

@@ -410,6 +410,95 @@ func (c Collection[T]) Push(g auth.Grant) (bool, error) {
 	return true, nil
 }
 
+// NewCollection is HasCollection::newCollection.
+//
+// The PHP body resolves the collection class -- from a #[CollectedBy] attribute
+// or static::$collectionClass -- and then switches relationship autoloading on
+// when the strict flag asks for it. Go resolves no type from a name, and there
+// is no autoloading here (see the package comment on RULE 17), so what is left
+// of the body is the construction.
+func (m *Model[T]) NewCollection(models ...*Model[T]) Collection[T] {
+	return Collection[T](models)
+}
+
+// CountBy is Collection::countBy.
+//
+// The PHP override exists to change the return type: counting models by
+// something gives a collection of counts, not of models. Here that is the type
+// of the result, so this is a function -- the key is the caller's, and Go names
+// it in the signature rather than discovering it at run time.
+func CountBy[T any, K comparable](c Collection[T], countBy func(model *Model[T], key int) K) map[K]int {
+	return collections.CountBy(c.ToBase(), countBy)
+}
+
+// Map is Collection::map.
+//
+// The PHP answers a base collection when the callback returned anything that is
+// not a Model, and the Eloquent collection when everything it returned was one.
+// The compiler makes that choice here: a callback returning *Model[T] gives back
+// exactly what Collection[T] holds, and any other R gives a collection of R.
+func Map[T, R any](c Collection[T], callback func(model *Model[T], key int) R) collections.Collection[R] {
+	return collections.Map(c.ToBase(), callback)
+}
+
+// MapWithKeys is Collection::mapWithKeys.
+//
+// PHP returns a single-entry array from the callback; Go returns the pair, which
+// is what hesape/collections does with the same method. See Map for the return
+// type.
+func MapWithKeys[T any, K comparable, V any](c Collection[T], callback func(model *Model[T], key int) (K, V)) map[K]V {
+	return collections.MapWithKeys(c.ToBase(), callback)
+}
+
+// Zip is Collection::zip.
+//
+// It is a function and not a method for the reason collections.Zip is one, and
+// because the PHP override is there only to say the result no longer holds
+// models -- which the type says here.
+func Zip[T any](c Collection[T], items ...[]*Model[T]) collections.Collection[collections.Collection[*Model[T]]] {
+	return collections.Zip(c.ToBase(), items...)
+}
+
+// Flatten is Collection::flatten.
+//
+// The models are the leaves -- a model is not a list -- so this is the same
+// models as a collection of any, which is what Arr::flatten answers there for
+// the same input. The depth is optional and unlimited when omitted, as in PHP.
+func (c Collection[T]) Flatten(depth ...int) collections.Collection[any] {
+	items := make(collections.Collection[any], 0, len(c))
+	for _, model := range c {
+		items = append(items, model)
+	}
+	return collections.Flatten(items, depth...)
+}
+
+// Flip is Collection::flip: the models become the keys and their positions
+// become the values.
+//
+// The keys of a Collection[T] are positions, so flipping gives model to
+// position, and a model that repeats keeps the last position -- which is what
+// array_flip does there.
+func (c Collection[T]) Flip() map[*Model[T]]int {
+	return collections.Flip(c.ToBase())
+}
+
+// Pad is Collection::pad.
+//
+// A positive size pads on the right, a negative size on the left, and a size no
+// larger than the count returns the models unchanged. That is array_pad.
+func (c Collection[T]) Pad(size int, value *Model[T]) collections.Collection[*Model[T]] {
+	return c.ToBase().Pad(size, value)
+}
+
+// Partition is Collection::partition: the models passing the test, then the ones
+// failing it.
+//
+// The PHP returns a collection holding two collections; Go returns them as two
+// results, which is the same pair without the indexing.
+func (c Collection[T]) Partition(callback func(model *Model[T], key int) bool) (passed, failed collections.Collection[*Model[T]]) {
+	return c.ToBase().Partition(callback)
+}
+
 func containsValue(values []any, value any) bool {
 	for _, candidate := range values {
 		if reflect.DeepEqual(candidate, value) {

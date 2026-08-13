@@ -16,10 +16,18 @@ type RouteUri struct {
 	BindingFields map[string]string
 }
 
-// ParseRouteUri parses a URI, extracting {param:field} qualifiers into
-// BindingFields and leaving {param} (or {param?}) in the URI. It is the static
-// parse Laravel's RouteUri::parse does.
-func ParseRouteUri(uri string) RouteUri {
+// Parse answers to RouteUri::parse: it extracts the {param:field} qualifiers
+// into BindingFields and leaves {param} (or {param?}) in the URI.
+//
+// It is a method on the zero RouteUri rather than a package function, so that
+// the call keeps the name the PHP gives it:
+//
+//	RouteUri::parse($uri)                  // PHP
+//	routing.RouteUri{}.Parse(uri)          // Go
+//
+// A package-level Parse would have said nothing about what it parses, and this
+// package has two static parses -- RouteUri::parse and RouteAction::parse.
+func (RouteUri) Parse(uri string) RouteUri {
 	fields := map[string]string{}
 	out := uri
 
@@ -64,7 +72,7 @@ func (rt *Route) SetBindingFieldsFromUri() string {
 	if rt == nil {
 		return ""
 	}
-	parsed := ParseRouteUri(rt.Pattern)
+	parsed := RouteUri{}.Parse(rt.Pattern)
 	if len(parsed.BindingFields) > 0 {
 		if rt.bindingFields == nil {
 			rt.bindingFields = map[string]string{}

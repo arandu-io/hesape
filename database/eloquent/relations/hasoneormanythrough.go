@@ -2,9 +2,11 @@ package relations
 
 import (
 	"context"
+	"iter"
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database/eloquent/relations/concerns"
+	"github.com/arandu-io/hesape/pagination"
 )
 
 // ThroughKey is the alias the intermediate key is selected under.
@@ -173,6 +175,105 @@ func (r *HasOneOrManyThrough) First(ctx context.Context, g auth.Grant) (Model, e
 		return nil, err
 	}
 	return r.constrainThroughParents(scoped).AddSelect(r.shouldSelect(nil)...).First(ctx, g)
+}
+
+// prepareQueryBuilder answers HasOneOrManyThrough::prepareQueryBuilder: the
+// relation's query with its select applied, ready to be walked.
+//
+// It is scoped to the Grant's tenant here rather than at each call site, which
+// is the whole reason it takes one. Every method below reaches the database
+// through it, so there is exactly one place a chunked or paginated read could
+// have lost the tenant filter, and it is this line.
+func (r *HasOneOrManyThrough) prepareQueryBuilder(g auth.Grant) (Builder, error) {
+	scoped, err := concerns.ScopeTenant(r.Query.Clone(), r.Related, g)
+	if err != nil {
+		return nil, err
+	}
+	return r.constrainThroughParents(scoped).AddSelect(r.shouldSelect(nil)...), nil
+}
+
+// walker is the shared body of the thirteen walking methods, given this
+// relation's prepared query. A through relation hydrates no pivot.
+func (r *HasOneOrManyThrough) walker() chunker {
+	return chunker{
+		prepare: r.prepareQueryBuilder,
+		keyName: func() string { return r.Related.QualifyColumn(r.Related.GetKeyName()) },
+	}
+}
+
+// Chunk answers HasOneOrManyThrough::chunk: the results a page at a time, so a
+// table that does not fit in memory does not have to.
+//
+// The callback answers false to stop, as the PHP's does, and Chunk answers
+// false when it was stopped rather than exhausted.
+func (r *HasOneOrManyThrough) Chunk(ctx context.Context, g auth.Grant, count int, callback func(results []Model, page int) bool) (bool, error) {
+	return r.walker().chunk(ctx, g, count, callback)
+}
+
+// ChunkById answers HasOneOrManyThrough::chunkById: pages taken by comparing
+// against the last id seen rather than by an offset.
+//
+// The empty column and alias take the PHP's defaults, which are the related
+// model's qualified key and its key name.
+func (r *HasOneOrManyThrough) ChunkById(ctx context.Context, g auth.Grant, count int, callback func(results []Model, page int) bool, column, alias string) (bool, error) {
+	return r.walker().orderedChunkByID(ctx, g, count, callback, column, alias, false)
+}
+
+// ChunkByIdDesc answers HasOneOrManyThrough::chunkByIdDesc.
+func (r *HasOneOrManyThrough) ChunkByIdDesc(ctx context.Context, g auth.Grant, count int, callback func(results []Model, page int) bool, column, alias string) (bool, error) {
+	return r.walker().orderedChunkByID(ctx, g, count, callback, column, alias, true)
+}
+
+// Each answers HasOneOrManyThrough::each: chunk, one row at a time.
+func (r *HasOneOrManyThrough) Each(ctx context.Context, g auth.Grant, callback func(value Model, key int) bool, count int) (bool, error) {
+	return r.walker().each(ctx, g, callback, count)
+}
+
+// EachById answers HasOneOrManyThrough::eachById.
+func (r *HasOneOrManyThrough) EachById(ctx context.Context, g auth.Grant, callback func(value Model, key int) bool, count int, column, alias string) (bool, error) {
+	return r.walker().orderedChunkByID(ctx, g, count, func(results []Model, page int) bool {
+		for index, value := range results {
+			if !callback(value, (page-1)*count+index) {
+				return false
+			}
+		}
+		return true
+	}, column, alias, false)
+}
+
+// Lazy answers HasOneOrManyThrough::lazy: the chunked walk as a sequence.
+func (r *HasOneOrManyThrough) Lazy(ctx context.Context, g auth.Grant, chunkSize int) iter.Seq2[Model, error] {
+	return r.walker().lazy(ctx, g, chunkSize, false, "", "", false)
+}
+
+// LazyById answers HasOneOrManyThrough::lazyById.
+func (r *HasOneOrManyThrough) LazyById(ctx context.Context, g auth.Grant, chunkSize int, column, alias string) iter.Seq2[Model, error] {
+	return r.walker().lazy(ctx, g, chunkSize, true, column, alias, false)
+}
+
+// LazyByIdDesc answers HasOneOrManyThrough::lazyByIdDesc.
+func (r *HasOneOrManyThrough) LazyByIdDesc(ctx context.Context, g auth.Grant, chunkSize int, column, alias string) iter.Seq2[Model, error] {
+	return r.walker().lazy(ctx, g, chunkSize, true, column, alias, true)
+}
+
+// Cursor answers HasOneOrManyThrough::cursor: one statement, streamed.
+func (r *HasOneOrManyThrough) Cursor(ctx context.Context, g auth.Grant) iter.Seq2[Model, error] {
+	return r.walker().cursor(ctx, g)
+}
+
+// Paginate answers HasOneOrManyThrough::paginate.
+func (r *HasOneOrManyThrough) Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.LengthAwarePaginator[Model], error) {
+	return r.walker().paginate(ctx, g, perPage, page, opts, columns...)
+}
+
+// SimplePaginate answers HasOneOrManyThrough::simplePaginate.
+func (r *HasOneOrManyThrough) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[Model], error) {
+	return r.walker().simplePaginate(ctx, g, perPage, page, opts, columns...)
+}
+
+// CursorPaginate answers HasOneOrManyThrough::cursorPaginate.
+func (r *HasOneOrManyThrough) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (*pagination.CursorPaginator[Model], error) {
+	return r.walker().cursorPaginate(ctx, g, perPage, cursor, opts, columns...)
 }
 
 // shouldSelect answers HasOneOrManyThrough::shouldSelect.

@@ -212,3 +212,65 @@ func TestDiagnoseIsSilentWhenTheRelayIsKeepingUp(t *testing.T) {
 		t.Fatalf("a relay one second behind diagnosed %v", got)
 	}
 }
+
+// cancellingPublisher cancels the relay's context from inside Publish, which is
+// the exact moment the shutdown race opens.
+type cancellingPublisher struct {
+	cancel  context.CancelFunc
+	mu      sync.Mutex
+	names   []string
+	stopped chan struct{}
+}
+
+func newCancellingPublisher() *cancellingPublisher {
+	return &cancellingPublisher{stopped: make(chan struct{}, 1)}
+}
+
+func (p *cancellingPublisher) Publish(_ context.Context, e events.Stored) error {
+	p.mu.Lock()
+	p.names = append(p.names, e.Name)
+	p.mu.Unlock()
+
+	// The broker took the message. Now the process is asked to stop, before the
+	// relay has written down that it delivered anything.
+	if p.cancel != nil {
+		p.cancel()
+	}
+	select {
+	case p.stopped <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+// TestAShutdownBetweenPublishingAndMarkingStillMarks pins the window that made
+// TestWithRelayPublishesAndStops flaky.
+//
+// The relay publishes, and the shutdown lands before the row is marked. If the
+// mark rode the context the shutdown cancels, it would fail here, the row would
+// stay pending, and the next start would deliver the event a second time --
+// meaning that stopping the process is what caused the duplicate, and that the
+// wait in Close was waiting for the damage rather than preventing it.
+//
+// The width of the window is one database write, so on an idle machine the test
+// above passes either way. This one closes it on purpose.
+func TestAShutdownBetweenPublishingAndMarkingStillMarks(t *testing.T) {
+	publisher := newCancellingPublisher()
+	relay, table := relayOver(t, events.RelayOptions{Interval: time.Millisecond}, publisher)
+	table.add("invoice.paid", 0)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	publisher.cancel = cancel
+
+	if err := relay.Drain(ctx); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+
+	if got := publisher.names; len(got) != 1 || got[0] != "invoice.paid" {
+		t.Fatalf("published %v, want [invoice.paid]", got)
+	}
+	if got := table.delivered(); len(got) != 1 {
+		t.Fatalf("delivered %v, want the event marked published despite the cancellation", got)
+	}
+}

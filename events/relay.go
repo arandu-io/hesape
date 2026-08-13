@@ -134,6 +134,13 @@ func (r *Relay) pass(ctx context.Context) error {
 	return err
 }
 
+// markTimeout bounds the write that records an event as delivered.
+//
+// It is deliberately short. The write happens on a context the shutdown cannot
+// cancel -- see the note at the call site -- so it is the only thing standing
+// between an unreachable database and a Close that never returns.
+const markTimeout = 5 * time.Second
+
 // publishBatch publishes the oldest unpublished events.
 func (r *Relay) publishBatch(ctx context.Context) error {
 	pending, err := r.outbox.PendingAll(ctx, r.opts.Batch)
@@ -168,7 +175,26 @@ func (r *Relay) publishBatch(ctx context.Context) error {
 			continue
 		}
 
-		if err := r.outbox.MarkPublished(ctx, e.ID); err != nil {
+		// The mark runs on a context the shutdown does not cancel.
+		//
+		// It has to. Close cancels this context and then waits for the pass in
+		// flight, precisely so that an interrupted pass does not deliver the
+		// event twice -- and if the mark rode the same context, a cancellation
+		// landing between Publish and MarkPublished would fail the mark, and
+		// stopping the process would be the thing that caused the duplicate.
+		// The wait Close performs would have been waiting for the damage.
+		//
+		// Found by TestWithRelayPublishesAndStops, which was flaky rather than
+		// failing: the window is the width of one database write, so it opened
+		// only when the machine was busy enough -- the whole suite under -race.
+		//
+		// The timeout is what keeps Close from hanging: an unreachable database
+		// stops the shutdown after this long, and the event is delivered again
+		// on the next start, which is at-least-once behaving as documented.
+		mark, cancel := context.WithTimeout(context.WithoutCancel(ctx), markTimeout)
+		err := r.outbox.MarkPublished(mark, e.ID)
+		cancel()
+		if err != nil {
 			// The event was delivered and the mark failed, so the next pass
 			// delivers it again. That is at-least-once behaving exactly as
 			// documented, and it is why the consumer deduplicates on the id.

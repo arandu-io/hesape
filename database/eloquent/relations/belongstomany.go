@@ -3,6 +3,7 @@ package relations
 import (
 	"context"
 	"errors"
+	"iter"
 	"sort"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/arandu-io/hesape/database"
 	"github.com/arandu-io/hesape/database/eloquent/relations/concerns"
 	"github.com/arandu-io/hesape/database/query"
+	"github.com/arandu-io/hesape/pagination"
 )
 
 var errNoPivotQuery = errors.New("relations: this pivot was built without a query factory, so it cannot reach the database")
@@ -208,6 +210,114 @@ func (r *BelongsToMany) GetEager(ctx context.Context, g auth.Grant) ([]Model, er
 		return []Model{}, nil
 	}
 	return r.Get(ctx, g)
+}
+
+// prepareQueryBuilder answers BelongsToMany::prepareQueryBuilder: the relation's
+// query with the aliased pivot columns added to the select.
+//
+// The tenant filter goes on here, once, for every walking method below. The
+// pivot table is what says this customer's user has that customer's role, and a
+// paginated read that lost the filter would hand page two of somebody else's
+// memberships to a caller who is looking at a page number, not at the SQL.
+func (r *BelongsToMany) prepareQueryBuilder(g auth.Grant) (Builder, error) {
+	scoped, err := concerns.ScopeTenant(r.Query.Clone(), r.Related, g)
+	if err != nil {
+		return nil, err
+	}
+	return scoped.AddSelect(r.shouldSelect(nil)...), nil
+}
+
+// walker is the shared body of the thirteen walking methods, given this
+// relation's prepared query and its pivot hydration.
+//
+// The hydration is the one line that differs from the through relation's, and
+// it has to run on every page rather than once at the end: a caller that reads
+// $model->pivot inside the chunk callback -- which is the ordinary reason to
+// chunk a BelongsToMany -- would otherwise find nothing there.
+func (r *BelongsToMany) walker() chunker {
+	return chunker{
+		prepare: r.prepareQueryBuilder,
+		hydrate: r.hydratePivotRelation,
+		keyName: func() string { return r.Related.QualifyColumn(r.GetRelatedKeyName()) },
+	}
+}
+
+// Chunk answers BelongsToMany::chunk: the results a page at a time, with the
+// pivot hydrated on each page.
+func (r *BelongsToMany) Chunk(ctx context.Context, g auth.Grant, count int, callback func(results []Model, page int) bool) (bool, error) {
+	return r.walker().chunk(ctx, g, count, callback)
+}
+
+// ChunkById answers BelongsToMany::chunkById, which the PHP writes as
+// orderedChunkById with descending left false.
+func (r *BelongsToMany) ChunkById(ctx context.Context, g auth.Grant, count int, callback func(results []Model, page int) bool, column, alias string) (bool, error) {
+	return r.OrderedChunkById(ctx, g, count, callback, column, alias, false)
+}
+
+// ChunkByIdDesc answers BelongsToMany::chunkByIdDesc.
+func (r *BelongsToMany) ChunkByIdDesc(ctx context.Context, g auth.Grant, count int, callback func(results []Model, page int) bool, column, alias string) (bool, error) {
+	return r.OrderedChunkById(ctx, g, count, callback, column, alias, true)
+}
+
+// OrderedChunkById answers BelongsToMany::orderedChunkById: pages taken by
+// comparing against the last id seen, in the given direction.
+//
+// The empty column and alias take the PHP's defaults, which are the related
+// model's qualified key and the related key's name.
+func (r *BelongsToMany) OrderedChunkById(ctx context.Context, g auth.Grant, count int, callback func(results []Model, page int) bool, column, alias string, descending bool) (bool, error) {
+	return r.walker().orderedChunkByID(ctx, g, count, callback, column, alias, descending)
+}
+
+// Each answers BelongsToMany::each.
+func (r *BelongsToMany) Each(ctx context.Context, g auth.Grant, callback func(value Model, key int) bool, count int) (bool, error) {
+	return r.walker().each(ctx, g, callback, count)
+}
+
+// EachById answers BelongsToMany::eachById.
+func (r *BelongsToMany) EachById(ctx context.Context, g auth.Grant, callback func(value Model, key int) bool, count int, column, alias string) (bool, error) {
+	return r.OrderedChunkById(ctx, g, count, func(results []Model, page int) bool {
+		for index, value := range results {
+			if !callback(value, (page-1)*count+index) {
+				return false
+			}
+		}
+		return true
+	}, column, alias, false)
+}
+
+// Lazy answers BelongsToMany::lazy.
+func (r *BelongsToMany) Lazy(ctx context.Context, g auth.Grant, chunkSize int) iter.Seq2[Model, error] {
+	return r.walker().lazy(ctx, g, chunkSize, false, "", "", false)
+}
+
+// LazyById answers BelongsToMany::lazyById.
+func (r *BelongsToMany) LazyById(ctx context.Context, g auth.Grant, chunkSize int, column, alias string) iter.Seq2[Model, error] {
+	return r.walker().lazy(ctx, g, chunkSize, true, column, alias, false)
+}
+
+// LazyByIdDesc answers BelongsToMany::lazyByIdDesc.
+func (r *BelongsToMany) LazyByIdDesc(ctx context.Context, g auth.Grant, chunkSize int, column, alias string) iter.Seq2[Model, error] {
+	return r.walker().lazy(ctx, g, chunkSize, true, column, alias, true)
+}
+
+// Cursor answers BelongsToMany::cursor.
+func (r *BelongsToMany) Cursor(ctx context.Context, g auth.Grant) iter.Seq2[Model, error] {
+	return r.walker().cursor(ctx, g)
+}
+
+// Paginate answers BelongsToMany::paginate.
+func (r *BelongsToMany) Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.LengthAwarePaginator[Model], error) {
+	return r.walker().paginate(ctx, g, perPage, page, opts, columns...)
+}
+
+// SimplePaginate answers BelongsToMany::simplePaginate.
+func (r *BelongsToMany) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[Model], error) {
+	return r.walker().simplePaginate(ctx, g, perPage, page, opts, columns...)
+}
+
+// CursorPaginate answers BelongsToMany::cursorPaginate.
+func (r *BelongsToMany) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (*pagination.CursorPaginator[Model], error) {
+	return r.walker().cursorPaginate(ctx, g, perPage, cursor, opts, columns...)
 }
 
 // shouldSelect answers BelongsToMany::shouldSelect.

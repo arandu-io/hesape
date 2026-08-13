@@ -3,6 +3,7 @@ package jsonapi
 import (
 	"encoding/json"
 	"net/http"
+	"reflect"
 )
 
 // JsonApiResource mirrors Illuminate\Http\Resources\JsonApi\JsonApiResource.
@@ -17,6 +18,12 @@ type JsonApiResource struct {
 	Relationships map[string]any
 	Links         map[string]any
 	Meta          map[string]any
+
+	// usesRequestQueryString is ResolvesJsonApiElements::$usesRequestQueryString.
+	usesRequestQueryString bool
+	// includesPreviouslyLoadedRelationships is
+	// ResolvesJsonApiElements::$includesPreviouslyLoadedRelationships.
+	includesPreviouslyLoadedRelationships bool
 }
 
 // NewJsonApiResource creates a JsonApiResource.
@@ -28,6 +35,11 @@ func NewJsonApiResource(id, resourceType string) *JsonApiResource {
 		Relationships: make(map[string]any),
 		Links:         make(map[string]any),
 		Meta:          make(map[string]any),
+
+		// The PHP default: the query string drives the sparse fieldsets and
+		// the includes until ignoreFieldsAndIncludesInQueryString says
+		// otherwise.
+		usesRequestQueryString: true,
 	}
 }
 
@@ -130,25 +142,28 @@ func (e *ResourceIdentificationError) Error() string {
 	return "jsonapi resource identification error: " + e.Message
 }
 
-// AttemptingToDetermineID creates an error for resources without a
-// recognizable ID.
-func AttemptingToDetermineID(resource any) *ResourceIdentificationError {
+// AttemptingToDetermineIdFor is
+// ResourceIdentificationException::attemptingToDetermineIdFor: the resource
+// object has no id and nothing to derive one from.
+func AttemptingToDetermineIdFor(resource any) *ResourceIdentificationError {
 	return &ResourceIdentificationError{
-		Message: "attempting to determine ID for resource of type " + typeName(resource),
+		Message: "unable to resolve resource object ID for [" + typeName(resource) + "]",
 	}
 }
 
-// AttemptingToDetermineType creates an error for resources without a
-// recognizable type.
-func AttemptingToDetermineType(resource any) *ResourceIdentificationError {
+// AttemptingToDetermineTypeFor is
+// ResourceIdentificationException::attemptingToDetermineTypeFor: the resource
+// object has no type and nothing to derive one from.
+func AttemptingToDetermineTypeFor(resource any) *ResourceIdentificationError {
 	return &ResourceIdentificationError{
-		Message: "attempting to determine type for resource of type " + typeName(resource),
+		Message: "unable to resolve resource object type for [" + typeName(resource) + "]",
 	}
 }
 
+// typeName is the PHP's is_object($resource) ? $resource::class : gettype(...).
 func typeName(v any) string {
 	if v == nil {
 		return "nil"
 	}
-	return "resource"
+	return reflect.TypeOf(v).String()
 }

@@ -64,12 +64,28 @@ func NewBuilder[T any](q *query.Builder) *Builder[T] {
 	return &Builder[T]{query: q, eagerLoad: map[string]func(*query.Builder){}}
 }
 
+// NewEloquentBuilder answers Model::newEloquentBuilder.
+//
+// The PHP body picks the builder class: the one named by a #[UseEloquentBuilder]
+// attribute on the model, or static::$builder. Go resolves no type from a name
+// in an attribute, and a model that wants a wider query writes a type that
+// embeds Builder[T] and overrides this. It does not set the model, because
+// newModelQuery does that after, as there.
+func (m *Model[T]) NewEloquentBuilder(q *query.Builder) *Builder[T] {
+	return NewBuilder[T](q)
+}
+
+// NewBaseQueryBuilder answers Model::newBaseQueryBuilder.
+func (m *Model[T]) NewBaseQueryBuilder() *query.Builder {
+	q := query.NewBuilder(m.Connection, m.Grammar, m.Processor)
+	q.From(m.GetTable())
+	return q
+}
+
 // NewModelQuery answers Model::newModelQuery: a builder with no global scopes
 // and no eager loads.
 func (m *Model[T]) NewModelQuery() *Builder[T] {
-	q := query.NewBuilder(m.Connection, m.Grammar, m.Processor)
-	q.From(m.GetTable())
-	return NewBuilder[T](q).SetModel(m)
+	return m.NewEloquentBuilder(m.NewBaseQueryBuilder()).SetModel(m)
 }
 
 // NewQuery answers Model::newQuery: the model's query with its global scopes on.
@@ -171,6 +187,49 @@ func (b *Builder[T]) NewModelInstance(attributes map[string]any) (*Model[T], err
 		merged[key] = value
 	}
 	return b.model.NewInstance(merged, false)
+}
+
+// WithAttributes answers Builder::withAttributes: values that filter the query
+// and then fill whatever the query creates.
+//
+// asConditions is the PHP's third argument, defaulting to true, which Go spells
+// as a variadic nobody passes. Passing false keeps the values for
+// NewModelInstance without adding the where clauses -- which is what a relation
+// does with the foreign key it already constrained by another route.
+//
+// The single-column form of the PHP -- withAttributes('type', 'post') -- is not
+// a second method here: a map with one entry is that call, and PHP only needs
+// the pair because its arrays are its maps.
+func (b *Builder[T]) WithAttributes(attributes map[string]any, asConditions ...bool) *Builder[T] {
+	if optionalBool(asConditions) {
+		for _, column := range sortedKeys(attributes) {
+			b.Where(b.Qualify(column), "=", attributes[column])
+		}
+	}
+	if b.pendingAttributes == nil {
+		b.pendingAttributes = map[string]any{}
+	}
+	for column, value := range attributes {
+		b.pendingAttributes[column] = value
+	}
+	return b
+}
+
+// WithSavepointIfNeeded answers Builder::withSavepointIfNeeded: the callback
+// runs inside a savepoint when a transaction is already open, and plainly when
+// none is.
+//
+// The PHP asks the connection for its transaction level. query.Connection does
+// not declare one -- see Transactor for why this component does not widen it --
+// so the capability is asked for by assertion, and a connection that cannot
+// answer runs the callback as if no transaction were open, which is what a
+// level of zero means.
+func (b *Builder[T]) WithSavepointIfNeeded(scope func() error) error {
+	nested, ok := b.query.GetConnection().(Savepointer)
+	if !ok || nested.TransactionLevel() <= 0 {
+		return scope()
+	}
+	return nested.Transaction(scope)
 }
 
 // clone answers Builder::__clone.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/arandu-io/hesape/auth"
@@ -555,6 +556,42 @@ func (b *Builder) DropAllTables(ctx context.Context, g auth.Grant) error {
 		return err
 	}
 	return b.connection.Statement(ctx, sql)
+}
+
+// RefreshDatabaseFile answers SQLiteBuilder::refreshDatabaseFile: it empties the
+// database by truncating the file it lives in.
+//
+// It is the fastest way to drop everything in SQLite, and DropAllTables is the
+// slow way -- writable_schema, a delete, and a rebuild, which the PHP falls back
+// to only for a database that has no file. Passing the empty path takes the one
+// the connection is configured with, which is the PHP's null default.
+//
+// It refuses on any other driver and on an in-memory database, rather than
+// truncating a path that turns out to be something else. The PHP is guarded by
+// being on SQLiteBuilder, a class only the SQLite connection instantiates; this
+// package has one Builder for every driver, so the guard is a check. Truncating
+// a file is not a statement the database can refuse, so nothing downstream would
+// have caught it.
+func (b *Builder) RefreshDatabaseFile(ctx context.Context, g auth.Grant, path string) error {
+	if err := g.Check(ActionMigrate); err != nil {
+		return err
+	}
+
+	if driver := b.connection.GetDriverName(); driver != "sqlite" {
+		return fmt.Errorf("%w: refreshDatabaseFile empties the file a SQLite database lives in, and this connection is %s", ErrUnsupported, driver)
+	}
+
+	if path == "" {
+		path = b.connection.GetConfig("database")
+	}
+	if path == "" || isSqliteMemory(path) {
+		return fmt.Errorf("%w: this SQLite database is in memory, so there is no file to empty -- use DropAllTables", ErrUnsupported)
+	}
+
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		return fmt.Errorf("schema: emptying the SQLite database file %s: %w", path, err)
+	}
+	return nil
 }
 
 // DropAllViews answers Builder::dropAllViews.

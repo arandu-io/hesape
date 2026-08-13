@@ -52,7 +52,7 @@ var mimeTypes = struct {
 //
 // The PHP returns a Symfony MimeTypes instance; Go's mime package is a set of
 // functions rather than an object, so this returns the extension-to-type table
-// [MimeTypeFrom] and [MimeTypeGet] consult -- which is what a caller of the PHP
+// [From] and [Get] consult -- which is what a caller of the PHP
 // method reaches into it for.
 func GetMimeTypes() map[string]string {
 	mimeTypes.once.Do(func() {
@@ -69,20 +69,15 @@ func GetMimeTypes() map[string]string {
 	return out
 }
 
-// MimeTypeFrom answers to MimeType::from: the type for a filename, read off its
+// From answers to MimeType::from: the type for a filename, read off its
 // extension.
-//
-// It is MimeTypeFrom and not From because Go has one namespace per package and
-// PHP has one per class: MimeType::from, MimeType::get and MimeType::search are
-// three statics on a class whose whole purpose is the prefix, so the prefix is
-// kept.
-func MimeTypeFrom(filename string) string {
-	return MimeTypeGet(strings.TrimPrefix(path.Ext(filename), "."))
+func From(filename string) string {
+	return Get(strings.TrimPrefix(path.Ext(filename), "."))
 }
 
-// MimeTypeGet answers to MimeType::get: the type for an extension, or
+// Get answers to MimeType::get: the type for an extension, or
 // [DefaultMimeType].
-func MimeTypeGet(extension string) string {
+func Get(extension string) string {
 	table := GetMimeTypes()
 	extension = strings.ToLower(strings.TrimPrefix(extension, "."))
 	if extension == "" {
@@ -100,9 +95,9 @@ func MimeTypeGet(extension string) string {
 	return DefaultMimeType
 }
 
-// MimeTypeSearch answers to MimeType::search: an extension for a type, empty
+// Search answers to MimeType::search: an extension for a type, empty
 // when none is known. The PHP returns string|null; empty is the null.
-func MimeTypeSearch(contentType string) string {
+func Search(contentType string) string {
 	table := GetMimeTypes()
 	contentType = strings.ToLower(strings.TrimSpace(contentType))
 	if semi := strings.Index(contentType, ";"); semi >= 0 {

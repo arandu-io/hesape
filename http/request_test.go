@@ -985,3 +985,53 @@ func (t *testRoute) URI() string                         { return t.uri }
 // Ensure unused imports do not fail the build.
 var _ = url.Values{}
 var _ = io.EOF
+
+func TestWithFlashesToTheSessionThePageAfterTheRedirectReads(t *testing.T) {
+	store := newSessionStore(t)
+
+	redirect := NewRedirectResponse("/orders").SetSession(store)
+	redirect.With("status", "Order placed.")
+	redirect.With(map[string]any{"tone": "success", "count": 2})
+
+	if got := store.Get("status", nil); got != "Order placed." {
+		t.Fatalf("status = %v, want %q", got, "Order placed.")
+	}
+	if got := store.Get("tone", nil); got != "success" {
+		t.Fatalf("tone = %v, want %q", got, "success")
+	}
+	if got := store.Get("count", nil); got != 2 {
+		t.Fatalf("count = %v, want 2", got)
+	}
+}
+
+func TestWithOnARedirectWithNoSessionIsQuietRatherThanFatal(t *testing.T) {
+	// A redirect built outside a request has nowhere to flash to. The PHP
+	// would fatal on a null session; a handler that redirects from a place
+	// with no session should not take the process down.
+	redirect := NewRedirectResponse("/orders")
+	if redirect.With("status", "Order placed.") != redirect {
+		t.Fatal("With should chain even with no session behind it")
+	}
+}
+
+func TestAnUploadThatLiesAboutItsTypeKeepsBothAnswersApart(t *testing.T) {
+	// The browser announced an image; the name says otherwise. Neither is
+	// trusted over the other, and the two questions have two answers.
+	upload := NewUploadedFileFromPath("/tmp/upload", "invoice.exe", "image/jpeg", true)
+
+	if got := upload.GetClientOriginalExtension(); got != "exe" {
+		t.Fatalf("GetClientOriginalExtension() = %q, want %q", got, "exe")
+	}
+	if got := upload.GuessExtension(); got != "exe" {
+		t.Fatalf("GuessExtension() = %q, want %q -- the name, not the header", got, "exe")
+	}
+	// The registered extensions for a type differ between machines -- jpg,
+	// jpeg and jfif are all image/jpeg -- so what is asserted is that the
+	// answer came from the announced type and not from the name.
+	if got := upload.ClientExtension(); got == "" || got == "exe" {
+		t.Fatalf("ClientExtension() = %q, want the extension of the announced type", got)
+	}
+	if got := upload.HashName(); !strings.HasSuffix(got, ".exe") {
+		t.Fatalf("HashName() = %q, want it to end in the real extension", got)
+	}
+}

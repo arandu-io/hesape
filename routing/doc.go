@@ -75,6 +75,74 @@
 //	UrlGenerator.php
 //	ViewController.php
 //
+// # Method by method, so the list can be checked rather than believed
+//
+// Twenty-seven public methods of the component have no name here. Each one,
+// with the ADR 0044 reason number:
+//
+//	AbstractRouteCollection::compile, ::dumper, ::toSymfonyRouteCollection,
+//	    RouteCollection::toSymfonyRouteCollection, ::toCompiledRouteCollection,
+//	    Route::toSymfonyRoute, ::getCompiled and Router::setCompiledRoutes --
+//	    reason 3, all eight. They translate the route table into
+//	    symfony/routing's own objects and dump it as a compiled PHP matcher,
+//	    which is what `route:cache` writes. symfony/routing is not carried here
+//	    and there is nothing to compile to: matching is http.ServeMux, which
+//	    Go 1.22 gave method and path-parameter matching, and it is built once at
+//	    boot in the process that serves.
+//	Route::prepareForSerialization, RouteAction::containsSerializedClosure and
+//	    Route::flushController -- reason 1: a cached route table is PHP objects
+//	    written to disk, so a route whose action is a closure has to be turned
+//	    into a SerializableClosure first and the resolved controller instance
+//	    dropped. Go has neither closure serialization nor a route cache to write
+//	    -- the table is the program.
+//	Controller::callAction, ViewController::callAction,
+//	    ResolvesRouteDependencies::resolveMethodDependencies,
+//	    Route::signatureParameters, RouteSignatureParameters::fromAction,
+//	    Route::controllerMiddleware,
+//	    FiltersControllerMiddleware::methodExcludedByOptions and
+//	    MiddlewareNameResolver::resolve -- reason 2, all eight. They read a
+//	    controller method's parameter list by reflection, resolve each type out
+//	    of the container, and turn middleware named by string into the objects
+//	    that run -- including the only/except lists a controller declares about
+//	    its own methods. A handler here is an http.Handler the caller
+//	    constructed, and middleware is a pipeline.Middleware value passed to the
+//	    route, so there is no name to resolve and no parameter to inject.
+//	Route::setContainer, CompiledRouteCollection::setContainer,
+//	    Router::setContainer, Router::getCurrentRequest and
+//	    Router::prepareResponse -- reason 2: the container again, and the
+//	    ambient current request it is used to fetch. Every method here that
+//	    needs the request takes it -- [Router.Current], [Router.CurrentRouteName]
+//	    and the rest -- because a request read out of ambient state is a request
+//	    that can be the wrong one under concurrency. Turning a handler's return
+//	    value into a response belongs to hesape/http, which owns what an answer
+//	    looks like.
+//	AbstractRouteCollection::getIterator -- reason 1: IteratorAggregate is how
+//	    PHP writes foreach over the collection. [Routes.GetRoutes] returns the
+//	    slice, which range already walks.
+//	RouteAction::parse -- reason 1: it normalizes the many shapes a PHP action
+//	    can take -- a closure, "Controller@method", [Controller::class, 'method'],
+//	    an array with a 'uses' key, an invokable class -- into one array. There
+//	    is one shape here, http.Handler, so there is nothing to normalize
+//	    (RULE 9). RouteUri::parse is here, as [RouteUri.Parse].
+//	Middleware\ValidateSignature::relative, ::absolute,
+//	    Middleware\ThrottleRequests::using and ::shouldHashKeys -- reason 2:
+//	    each returns the middleware DEFINITION STRING that the kernel's alias
+//	    map resolves -- 'signed:relative', 'throttle:api' -- or sets a static
+//	    flag that changes how every throttle in the process keys its counter.
+//	    Middleware here is a value: [middleware.ValidateSignature] and
+//	    [middleware.Throttle] take what they need as arguments, and what a
+//	    request is counted against is the [middleware.KeyFunc] passed in, which
+//	    is where hashing a key would go if an application wanted one.
+//	Middleware\ValidateSignature::handle, Middleware\SubstituteBindings::handle
+//	    and Middleware\ThrottleRequests::handle -- reason 1 for the shape:
+//	    PHP's handle($request, $next) is a method because a middleware is an
+//	    object the pipeline instantiates. Here a middleware is a function, and
+//	    the closure [middleware.ValidateSignature] and [middleware.Throttle]
+//	    return IS handle -- there is no object left to hang it on.
+//	    SubstituteBindings has no middleware at all, and routing/middleware's
+//	    own doc says why: the binding takes an auth.Grant, and a middleware has
+//	    nowhere to get one that cannot be absent (RULE 17).
+//
 // Pipeline.php has no counterpart here: composing middleware is
 // hesape/pipeline, generic over what it wraps, and this package uses it rather
 // than declaring a second one. Redirector.php and ResponseFactory.php answer in

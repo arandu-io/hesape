@@ -15,10 +15,11 @@
 // import this one back and close a cycle. Go has no class hierarchy to hang the
 // static off, so the static lands beside what it builds.
 //
-// # The three MimeType statics keep their class prefix
+// # The three MimeType statics keep their names
 //
-// MimeType::from, MimeType::get and MimeType::search are [MimeTypeFrom],
-// [MimeTypeGet] and [MimeTypeSearch]. Go has one namespace per package where
-// PHP has one per class, and bare From, Get and Search in a package that also
-// holds a file factory would say nothing about what they read.
+// MimeType::from, MimeType::get and MimeType::search are [From], [Get] and
+// [Search]. They read bare in a package that also holds a file factory, and
+// that is the cost of ADR 0044: the name is the one the Laravel developer
+// types, and a prefix invented to read better in Go is a method that, to them,
+// is not there. Nothing else in this package claims those three names.
 package testing

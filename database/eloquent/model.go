@@ -87,6 +87,11 @@ type Model[T any] struct {
 	// this map.
 	RelationResolvers map[string]func(*Model[T]) Relation
 
+	// NamedScopes is what a PHP model declares as one scopeSomething method per
+	// scope. Go cannot look a method up by name, so a scope is registered here
+	// under its bare name, and Scopes and CallNamedScope resolve through it.
+	NamedScopes map[string]NamedScope[T]
+
 	attributes map[string]any
 	original   map[string]any
 	changes    map[string]any
@@ -190,6 +195,7 @@ func (m *Model[T]) NewInstance(attributes map[string]any, exists bool) (*Model[T
 		Grammar:           m.Grammar,
 		Processor:         m.Processor,
 		RelationResolvers: m.RelationResolvers,
+		NamedScopes:       m.NamedScopes,
 		Exists:            exists,
 		hidden:            slices.Clone(m.hidden),
 		visible:           slices.Clone(m.visible),
@@ -639,8 +645,17 @@ func (m *Model[T]) LoadAggregate(g auth.Grant, relations []string, column, funct
 //
 // The value is an any because the related rows are models of another type, and
 // a Go field cannot hold "some other model". Related is the typed way to read it.
+//
+// A name the model declares a relation for, asked for before anything loaded it,
+// is the lazy load this framework does not do: it answers false rather than
+// running a query, and PreventLazyLoading is what makes that answer loud.
 func (m *Model[T]) GetRelation(name string) (any, bool) {
 	value, ok := m.relations[name]
+	if !ok {
+		if _, declared := m.RelationResolvers[name]; declared {
+			m.handleLazyLoadingViolation(name)
+		}
+	}
 	return value, ok
 }
 
@@ -886,6 +901,19 @@ func (m *Model[T]) transaction(fn func() error) error {
 type Transactor interface {
 	// Transaction answers ConnectionInterface::transaction.
 	Transaction(callback func() error) error
+}
+
+// Savepointer is a Transactor that also reports how deep it already is.
+//
+// It is what Builder.WithSavepointIfNeeded asks for, and it is separate from
+// Transactor because a connection can be able to open a transaction without
+// being able to say whether one is open -- and guessing wrong there is either a
+// savepoint nobody asked for or a rollback that takes the caller's work with it.
+type Savepointer interface {
+	Transactor
+
+	// TransactionLevel answers ConnectionInterface::transactionLevel.
+	TransactionLevel() int
 }
 
 func containsDot(s string) bool {
