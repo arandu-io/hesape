@@ -112,10 +112,85 @@
 //
 // # What is not here
 //
-// Broadcasting, pruning, model inspection and the queued-entity resolver are
-// container and service-provider surface (ADR 0001, ADR 0002). Relations live in
-// eloquent/relations and reach this package through the Relation interface
-// declared in relation.go, which is declared here for the reason
-// query.Connection is declared in query: in Go the interface belongs with its
-// consumer, and relations imports this package for Builder.
+// Relations live in eloquent/relations and reach this package through the
+// Relation interface declared in relation.go, which is declared here for the
+// reason query.Connection is declared in query: in Go the interface belongs with
+// its consumer, and relations imports this package for Builder.
+//
+// # What is skipped, and why (ADR 0044)
+//
+// Every name below exists in the clone and does not exist here. Three motives
+// allow that -- a PHP language feature Go does not have, surface that only
+// serves the container or a service provider, and a driver this ecosystem does
+// not carry -- and each line says which.
+//
+//   - Model::setConnectionResolver and unsetConnectionResolver. Both write the
+//     static resolver a model looks its connection up in. There is no resolver
+//     and no container (ADR 0001): the connection is handed to NewModel and
+//     copied onto every instance, and SetConnection takes it alongside the
+//     name. Motive (2).
+//   - Model::clearBootedModels. Its body empties $booted, $bootedCallbacks,
+//     $classAttributes and $globalScopes -- the four statics that exist because
+//     a PHP class boots once per process. A Go value has no boot: the global
+//     scopes are a field on the model, and clearing them is building another
+//     model. Motive (1).
+//   - Model::initializeModelAttributes. Its body reads the #[Table] and
+//     #[Connection] PHP attributes off the class with reflection and fills in
+//     $table, $connection, $primaryKey, $keyType and $incrementing. Go has no
+//     class attributes, and those five are fields NewModel sets where a reader
+//     sees them. Motive (1).
+//   - Model::escapeWhenCastingToString. It decides whether __toString escapes
+//     for HTML, which exists because Blade interpolates an object by calling
+//     __toString on it. Go has no __toString and the view layer takes typed
+//     values. Motive (1).
+//   - Model::automaticallyEagerLoadRelationships and
+//     isAutomaticallyEagerLoadingRelationships, Collection::loadMissingRelationshipChain
+//     and withRelationshipAutoloading. All four are automatic eager loading:
+//     reading an unloaded relation runs a query behind the caller. That query
+//     carries no auth.Grant, which breaks RULE 17 outright, and eloquent/concerns
+//     refused the same four members of HasRelationships for the same reason.
+//     PreventLazyLoading is what is left of the pair, and its doc comment says
+//     what it means here.
+//   - Model::broadcastChannel, broadcastChannelRoute and withoutBroadcasting,
+//     and the whole of BroadcastsEvents, BroadcastsEventsAfterCommit and
+//     BroadcastableModelEventOccurred. They dispatch model events onto a
+//     broadcast connection resolved out of the container, and the channel name
+//     is built from the model's class name and namespace. Broadcasting is its
+//     own component; a model that must announce itself does it from the handler
+//     that saved it, where the reader can see it happen. Motive (2).
+//   - ModelInspector::inspect. It builds the `model:show` output by reflecting
+//     over a class found from a string, listing its relation methods and its
+//     casts. Neither lookup exists in Go. Motive (1).
+//   - Prunable::prunable, prune and pruneAll, and MassPrunable::prunable and
+//     pruneAll. The three-line bodies are the easy half; what makes them work is
+//     `model:prune`, which scans the application's files for classes using the
+//     trait and instantiates each by name. Go resolves no type from a file, and
+//     a prune that must be registered by hand is the delete the application
+//     already writes. Motive (2).
+//   - Builder::getMacro, hasMacro, getGlobalMacro and hasGlobalMacro. Macros are
+//     methods added to a class at run time and dispatched through __call, which
+//     Go has no form of. The decision, with what to write instead, is in
+//     macroable/doc.go. Motive (1).
+//   - Builder::withCasts. Its body is $model->mergeCasts($casts): a per-query
+//     override of what a column means. A column here is a struct field, and its
+//     type is the cast -- there is no map to merge into, and a query that
+//     changed a field's type would not compile against the entity it hydrates.
+//     Motive (1).
+//   - Collection::collapse. It is an #[\Override] that narrows the return type
+//     from static to Support\Collection, and its body is toBase()->collapse().
+//     Arr::collapse merges the items that are themselves lists, and a collection
+//     of models has none, so the PHP answers an empty collection for every input
+//     this method can receive. A Go method that can only ever return nothing is
+//     not the same method. The narrowing the override existed for is the
+//     compiler's here: ToBase, Flatten, Pad, Partition and Zip all say in their
+//     signature what they hand back. Motive (1).
+//   - HasCollection::resolveCollectionFromAttribute. It reads the #[CollectedBy]
+//     PHP attribute off the class to pick a collection subclass. Go has neither
+//     class attributes nor a type resolved from a name. Motive (1).
+//   - SoftDeletes::bootSoftDeletes and initializeSoftDeletes. Both are trait
+//     hooks PHP calls by method name at class boot: the first registers the
+//     SoftDeletingScope, the second casts deleted_at to a date. Go has no boot
+//     and no name lookup, so RegisterGlobalScopes registers the scope where the
+//     scopes are collected, and the cast is the type of the DeletedAt field.
+//     Motive (1).
 package eloquent

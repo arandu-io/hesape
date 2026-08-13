@@ -18,6 +18,18 @@
 //	PreventsCircularRecursion.php   -> preventscircularrecursion.go
 //	QueriesRelationships.php        -> queriesrelationships.go
 //
+// Two files come from one directory up, laravel_illuminate/database/Eloquent:
+//
+//	BroadcastsEvents.php                -> broadcastsevents.go
+//	BroadcastableModelEventOccurred.php -> broadcastablemodeleventoccurred.go
+//
+// BroadcastsEvents is a trait, and every other trait of a model is here; the
+// PHP keeps it out of Concerns/ for no reason it states. Its event class
+// follows it because nothing else builds one, and Model::broadcastChannel,
+// ::broadcastChannelRoute and ::withoutBroadcasting follow both, because they
+// are the rest of that one feature and splitting a feature across two packages
+// is how the two halves drift.
+//
 // # A trait is a struct, and a static is a package function
 //
 // Each trait is a struct a model embeds, which gives it the fields and the
@@ -75,4 +87,19 @@
 //     method. HasOneThrough and HasManyThrough are the two relations it can
 //     end at, and both are here already, spelled with the models rather than
 //     with their method names. Motive (1).
+//
+// # The tenant is in every channel, and it is added once
+//
+// Nothing in Illuminate prefixes a channel by tenant, and RULE 14 requires it:
+// "private-App.Models.Order.17" without one is a single channel shared by every
+// customer holding an order 17, and the first subscriber reads the others'
+// events. [BroadcastsEvents.BroadcastChannel] and
+// [BroadcastsEvents.BroadcastChannelRoute] answer the tenant-free name and
+// pattern, exactly as Model::broadcastChannel does, and
+// broadcasting.TenantChannel puts the tenant in front -- once, on the way into a
+// driver and again on the way out of the authentication endpoint, so the name
+// published and the name authorized cannot disagree (RULE 9). The tenant comes
+// from the auth.Grant a channel Policy produced and never from the channel the
+// client asked for, which is why a client asking for "private-orders.17" is
+// authorized for "acme:private-orders.17" and never gets to choose the "acme".
 package concerns
