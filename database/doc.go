@@ -126,4 +126,51 @@
 // persistence that proves no authorization decision, and RULE 17 requires one on
 // the way in and on the way out. docs/31-reorganizacao-hesape.md says what else
 // moves in and from where.
+//
+// # The twelve names the measurement still asks about
+//
+// # PDO, which Go does not have
+//
+// Connector::connect, getOptions, getDefaultOptions and setDefaultOptions
+// assemble a PDO options array and hand it to `new PDO`. There is no PDO here:
+// a driver registers itself with database/sql and everything it takes arrives
+// in the DSN. [Connector] is deliberately the smaller thing -- it says which
+// driver it linked and never opens a connection -- and Open resolves the rest
+// from DATABASE_URL, so there is one way in.
+//
+// Builder::fetchUsing sets PDO's fetch mode for the next query. database/sql
+// scans into whatever the caller passed to Scan, so the mode is the destination
+// and there is nothing to set beforehand.
+//
+// MySqlConnection::getLastInsertId runs SELECT LAST_INSERT_ID(). The standard
+// library returns it from the statement that caused it, through
+// sql.Result.LastInsertId, which is the same number without a second round
+// trip -- and a second way to ask would be RULE 9.
+//
+// # dd, which ends the process
+//
+// Builder::dd and ddRawSql dump and then call die(). A library that kills the
+// process is a library nobody can wrap, and the half that survives is the dump:
+// [github.com/arandu-io/hesape/database/query.Builder.Dump] and
+// [github.com/arandu-io/hesape/database/query.Builder.DumpRawSQL] write and hand
+// the builder back. Adding Dd next to them would be the same function with an
+// exit, which is a second way to do one thing and a way that cannot be tested.
+//
+// # getSchemaState, and the cycle it would close
+//
+// Connection::getSchemaState builds the dump-and-load helper for its driver.
+// The helpers exist -- [github.com/arandu-io/hesape/database/schema.NewMySqlSchemaState]
+// and its two siblings -- but they live in the schema package, which declares
+// its own narrow Connection interface and is imported BY this package's callers
+// rather than by this package. A getter here would have to import schema, and
+// schema would go on needing a connection: Go refuses the cycle, and the
+// constructor is the call site instead. It takes the connection and the process
+// factory, which is what the PHP getter reads off $this anyway.
+//
+// # The service provider and the seeder's container
+//
+// MigrationServiceProvider::provides, Seeder::setContainer and
+// Seeder::setCommand are the container and the console, wired by a provider.
+// ADR 0001 and ADR 0002 rejected both. A seeder here is handed what it needs;
+// see [Seeder].
 package database
