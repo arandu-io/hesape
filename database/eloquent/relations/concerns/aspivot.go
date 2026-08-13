@@ -1,6 +1,11 @@
 package concerns
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/arandu-io/hesape/database/query"
+)
 
 // AsPivot answers the trait of the same name: what a model gains by being the
 // row of an intermediate table.
@@ -118,6 +123,97 @@ func (p *AsPivot) GetQueueableID(model Model) any {
 // SetKeysForSaveQuery answers AsPivot::setKeysForSaveQuery.
 func (p *AsPivot) SetKeysForSaveQuery(query Builder, model Model) Builder {
 	return p.SetKeysForSelectQuery(query, model)
+}
+
+// NewQueryForRestoration answers AsPivot::newQueryForRestoration: the query that
+// finds again the rows GetQueueableID wrote down.
+//
+// It is the exact inverse of that method, and the two are worth reading
+// together. A pivot row with an id column serializes to the id and comes back
+// through WhereKey. One without serializes to "foreign:value:related:value", and
+// comes back by splitting that string into the pair of clauses it was made from.
+//
+// Several ids collapse into one query with a group per id, as the PHP's
+// newQueryForCollectionRestoration does -- protected there, folded in here,
+// because the branch is three lines and a separate unexported method would only
+// be reachable through this one anyway.
+//
+// Two mechanical changes, both from ADR 0044: the PHP's single mixed parameter
+// is variadic, since Go has no int|string|array; and a malformed identifier
+// returns an error where PHP would emit an undefined-index notice and build a
+// query keyed on null -- which restores nothing, or worse, the wrong row.
+//
+// The model is passed for the same reason SetKeysForSelectQuery takes it: this
+// concern holds no attributes and no query of its own.
+func (p *AsPivot) NewQueryForRestoration(model Model, ids ...any) (Builder, error) {
+	return p.newQueryForRestoration(model, ids, 2)
+}
+
+// newQueryForRestoration is AsPivot's and MorphPivot's shared body. The pairs
+// argument is how many column:value pairs the composite identifier carries --
+// two for a pivot, three for a morph pivot, whose third pair is the type.
+func (p *AsPivot) newQueryForRestoration(model Model, ids []any, pairs int) (Builder, error) {
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("pivot restoration was given no identifier: the queued job stored nothing to find the row on %s by", model.GetTable())
+	}
+
+	q := model.NewQuery()
+	if q == nil {
+		return nil, fmt.Errorf("pivot restoration cannot query %s: the pivot was built without a query", model.GetTable())
+	}
+
+	// A plain id is the ordinary Model::newQueryForRestoration, and the PHP
+	// hands the whole array to it rather than looping -- whereKey takes both.
+	if !isCompositeID(ids[0]) {
+		return q.WhereKey(ids...), nil
+	}
+
+	if len(ids) == 1 {
+		segments, err := splitCompositeID(ids[0], pairs)
+		if err != nil {
+			return nil, err
+		}
+		for i := 0; i < len(segments); i += 2 {
+			q = q.Where(segments[i], segments[i+1])
+		}
+		return q, nil
+	}
+
+	// Every id becomes its own parenthesized group, or the clauses of one row
+	// would filter the rows of the next and the query would match nothing.
+	base := q.GetQuery()
+	for _, id := range ids {
+		segments, err := splitCompositeID(id, pairs)
+		if err != nil {
+			return nil, err
+		}
+		base.OrWhere(func(nested *query.Builder) {
+			for i := 0; i < len(segments); i += 2 {
+				nested.Where(segments[i], segments[i+1])
+			}
+		})
+	}
+	return q, nil
+}
+
+// isCompositeID answers the PHP's str_contains($ids, ':').
+func isCompositeID(id any) bool {
+	text, ok := id.(string)
+	return ok && strings.Contains(text, ":")
+}
+
+// splitCompositeID answers the PHP's explode(':', $id), checking the count the
+// PHP indexes into blindly.
+func splitCompositeID(id any, pairs int) ([]string, error) {
+	text, ok := id.(string)
+	if !ok {
+		return nil, fmt.Errorf("pivot restoration expected a composite identifier and got %T: the identifiers of one restore have to be all keys or all pairs", id)
+	}
+	segments := strings.Split(text, ":")
+	if len(segments) != pairs*2 {
+		return nil, fmt.Errorf("pivot restoration identifier %q has %d segments, expected %d: it was not written by GetQueueableID", text, len(segments), pairs*2)
+	}
+	return segments, nil
 }
 
 // UnsetRelations answers AsPivot::unsetRelations. The parent and the related

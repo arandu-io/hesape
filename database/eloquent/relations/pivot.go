@@ -301,6 +301,15 @@ func (p *Pivot) Touch(ctx context.Context, g auth.Grant) error {
 // reaches, and it hands itself over.
 func (p *Pivot) GetQueueableID() any { return p.AsPivot.GetQueueableID(p) }
 
+// NewQueryForRestoration answers AsPivot::newQueryForRestoration for a pivot
+// row: the query that finds again what GetQueueableID wrote down.
+//
+// Like GetQueueableID above, this is the no-argument-model form a caller
+// reaches, handing itself to the concern that holds no attributes.
+func (p *Pivot) NewQueryForRestoration(ids ...any) (Builder, error) {
+	return p.AsPivot.NewQueryForRestoration(p, ids...)
+}
+
 // MorphPivot answers Illuminate\Database\Eloquent\Relations\MorphPivot: a pivot
 // row on a table shared by several parent types, so every statement it writes
 // carries the type as well as the keys.

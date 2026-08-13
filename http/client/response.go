@@ -19,6 +19,11 @@ type Response struct {
 	body    []byte
 	readErr error
 	closed  bool
+
+	// truncateExceptionsAt is Response::$truncateExceptionsAt, the PHP
+	// int|false|null: nil defers to the RequestException static, a pointer to
+	// zero is the PHP false, and a positive length cuts the body summary.
+	truncateExceptionsAt *int
 }
 
 // NewResponse creates a Response from an *http.Response. The body is read
@@ -223,7 +228,35 @@ func (r *Response) Throw(callback func(*Response) error) error {
 	if callback != nil {
 		return callback(r)
 	}
-	return NewRequestException(r, 0)
+	return r.ToException()
+}
+
+// ToException is Response::toException: the RequestException this response
+// would throw, or nil when it did not fail.
+//
+// The PHP returns RequestException|null; a nil *RequestException is the null.
+// Callers that assign it to an error must check for nil before returning it,
+// because a nil pointer in a non-nil interface is not a nil error.
+func (r *Response) ToException() *RequestException {
+	if !r.Failed() {
+		return nil
+	}
+	return NewRequestException(r, r.truncateExceptionsAt)
+}
+
+// TruncateExceptionsAt is Response::truncateExceptionsAt: cut the body summary
+// of this response's exception at the given length.
+func (r *Response) TruncateExceptionsAt(length int) *Response {
+	r.truncateExceptionsAt = &length
+	return r
+}
+
+// DontTruncateExceptions is Response::dontTruncateExceptions: let the whole
+// body into this response's exception message.
+func (r *Response) DontTruncateExceptions() *Response {
+	zero := 0
+	r.truncateExceptionsAt = &zero
+	return r
 }
 
 // ThrowIf calls throw if the condition is true.
@@ -242,6 +275,31 @@ func (r *Response) ThrowUnless(condition bool) error {
 // ThrowIfStatus calls throw if the response has the given status code.
 func (r *Response) ThrowIfStatus(statusCode int) error {
 	if r.Status() == statusCode {
+		return r.Throw(nil)
+	}
+	return nil
+}
+
+// ThrowUnlessStatus is Response::throwUnlessStatus: throw unless the response
+// carries the given status code.
+func (r *Response) ThrowUnlessStatus(statusCode int) error {
+	if r.Status() == statusCode {
+		return nil
+	}
+	return NewRequestException(r, r.truncateExceptionsAt)
+}
+
+// ThrowIfClientError is Response::throwIfClientError.
+func (r *Response) ThrowIfClientError() error {
+	if r.ClientError() {
+		return r.Throw(nil)
+	}
+	return nil
+}
+
+// ThrowIfServerError is Response::throwIfServerError.
+func (r *Response) ThrowIfServerError() error {
+	if r.ServerError() {
 		return r.Throw(nil)
 	}
 	return nil

@@ -108,4 +108,33 @@
 // env() is [Env].Get, and Sleep::sleep is [For] with a unit. The one that goes
 // the other way is once(): the class is a store nobody types, so [Once] is the
 // helper and the store is [Instance].
+//
+// # The rest of helpers.php
+//
+// literal() builds an anonymous object out of named arguments. Go has neither,
+// and the thing it stands in for -- a value with named fields, declared where it
+// is used -- is a struct literal.
+//
+// class_uses_recursive() and trait_uses_recursive() walk a class's traits. Go
+// has no traits: an embedded struct is a field, and what these answer is
+// answered by the type system.
+//
+// php_binary() and artisan_binary() find the interpreter and the console script
+// so that a command can re-invoke itself. An Arandu application is one compiled
+// binary and knows where it is: os.Executable.
+//
+// # MultipleInstanceManager
+//
+// getDefaultInstance, setDefaultInstance and getInstanceConfig belong to it, and
+// it is Manager with the instances keyed by name instead of by driver. Both are
+// container machinery, refused with the rest of it above.
+//
+// # The facades are not measured
+//
+// plans/cobertura.sh skips Support/Facades entirely, and this is the note that
+// says why so the skip is not mistaken for an oversight. Every method on a
+// facade forwards to a method on the package behind it -- Http::fakeSequence to
+// the HTTP client's, DB::prohibitDestructiveCommands to the connection's -- so
+// counting them here counts the same method twice, and counts it against a
+// package that was never going to hold it.
 package support
