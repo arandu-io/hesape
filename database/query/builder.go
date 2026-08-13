@@ -76,6 +76,11 @@ type Builder struct {
 	// result of Get, Pluck or Cursor before it is handed back.
 	AfterQueryCallbacks []func([]Record) []Record
 
+	// subqueries records the queries compiled into a from, a select or a join,
+	// so that scopeSubqueryClauses can put the tenant on each of them when the
+	// statement runs. See pendingSub.
+	subqueries []pendingSub
+
 	from        any
 	distinct    any
 	indexHint   *IndexHint
@@ -353,6 +358,21 @@ func (b *Builder) WhereBindings() []any {
 			}
 		case "Raw":
 			out = append(out, where.Values...)
+		case "Like", "valueBetween", "Fulltext",
+			"Date", "Time", "Day", "Month", "Year",
+			"JsonContains", "JsonOverlaps", "JsonLength":
+			// One value each, bound unless it compiled into the statement. The
+			// clause carries the value that was bound and not the one that was
+			// written, which is what makes this rebuildable -- see WhereLike.
+			if !IsExpression(where.Value) {
+				out = append(out, where.Value)
+			}
+		case "RowValues":
+			for _, value := range where.Values {
+				if !IsExpression(value) {
+					out = append(out, value)
+				}
+			}
 		case "Nested":
 			if where.Query != nil {
 				out = append(out, where.Query.WhereBindings()...)
@@ -504,16 +524,7 @@ func (b *Builder) CrossJoin(table any, first ...any) *Builder {
 }
 
 func (b *Builder) addJoin(typ string, table any, first any, args ...any) *Builder {
-	join := NewJoinClause(b, typ, table)
-	if callback, ok := first.(func(*JoinClause)); ok {
-		callback(join)
-	} else {
-		operator, second := prepareValueAndOperator(args...)
-		join.On(first, operator, second)
-	}
-	b.Joins = append(b.Joins, join)
-	b.AddBinding(join.GetBindings(), "join")
-	return b
+	return b.addJoinClause(typ, false, table, first, args...)
 }
 
 // GroupBy answers Builder::groupBy.
@@ -531,16 +542,10 @@ func (b *Builder) GroupByRaw(sql string, bindings ...any) *Builder {
 	return b
 }
 
-// Having answers Builder::having.
+// Having answers Builder::having. The body is in havings.go, shared with
+// OrHaving: the two differ by their conjunction and by nothing else.
 func (b *Builder) Having(column any, args ...any) *Builder {
-	operator, value := prepareValueAndOperator(args...)
-	b.Havings = append(b.Havings, Having{
-		Type: "Basic", Column: column, Operator: operator, Value: value, Boolean: "and",
-	})
-	if !IsExpression(value) {
-		b.AddBinding([]any{value}, "having")
-	}
-	return b
+	return b.addHaving("and", column, args...)
 }
 
 // HavingRaw answers Builder::havingRaw.
@@ -611,17 +616,20 @@ func (b *Builder) InRandomOrder(seed ...string) *Builder {
 }
 
 // Reorder answers Builder::reorder: it drops every order, and adds one back
-// when given a column.
-func (b *Builder) Reorder(column ...any) *Builder {
+// when given a column. Pass nil to drop the ordering and add nothing.
+func (b *Builder) Reorder(column any, direction ...string) *Builder {
 	b.Orders = nil
 	b.UnionOrders = nil
 	b.Bindings["order"] = nil
 	b.Bindings["unionOrder"] = nil
-	if len(column) > 0 && column[0] != nil {
-		return b.OrderBy(column[0])
+	if column == nil {
+		return b
 	}
-	return b
+	return b.OrderBy(column, direction...)
 }
+
+// ReorderDesc answers Builder::reorderDesc.
+func (b *Builder) ReorderDesc(column any) *Builder { return b.Reorder(column, "desc") }
 
 // Limit answers Builder::limit. A negative limit is dropped, as the PHP's
 // `if ($value >= 0)` does.
@@ -927,6 +935,7 @@ func (b *Builder) Clone() *Builder {
 	out.Orders = append([]Order(nil), b.Orders...)
 	out.Unions = append([]Union(nil), b.Unions...)
 	out.UnionOrders = append([]Order(nil), b.UnionOrders...)
+	out.subqueries = append([]pendingSub(nil), b.subqueries...)
 	out.Bindings = make(map[string][]any, len(b.Bindings))
 	for key, values := range b.Bindings {
 		out.Bindings[key] = append([]any(nil), values...)

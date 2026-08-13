@@ -69,4 +69,23 @@
 // packages landed. Rerun it before believing any number above:
 //
 //	grep -rln '"reflect"' --include='*.go' . | grep -v _test.go | grep -v reflection/doc.go
+//
+// # The four names the measurement still asks about
+//
+// Reflector::getClassAttribute and getParameterClassNames read PHP attributes
+// and parameter type hints off a ReflectionClass. They are how the container
+// decides what to inject and how #[ObservedBy] and #[ScopedBy] find their
+// classes -- both refused by ADR 0001, and both answered here by the type
+// system rather than by a lookup at run time.
+//
+// Reflector::isParameterSubclassOf asks whether a parameter's declared type is
+// a subclass of a name given as a string. In Go the question is a type
+// assertion, and the compiler asks it at the call.
+//
+// helpers.php's typeFromParameter, on the anonymous class that uses
+// ReflectsClosures, reads the type of a closure's first parameter so that
+// `once(fn (Foo $f) => ...)` can find out what Foo is. A Go function value
+// carries its parameter types in its own type, so the caller already has what
+// this recovers -- and where the value is needed generically, it is a type
+// parameter, which is the same fact stated where the compiler can check it.
 package reflection

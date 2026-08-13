@@ -159,4 +159,27 @@
 // operation that has to report per-host state into the Collector. Until then the
 // answer above is shorter than the component was, and it is testable: everything
 // it does goes through process.Factory.Fake, which the SSH client would not.
+//
+// # The eleven names the measurement still asks about
+//
+// They are the accessors of the three types the section above refuses, and they
+// are listed here by name so that the refusal covers the whole component rather
+// than only the methods somebody happened to think of.
+//
+//	SecLibGateway.connected, getConnection, getHost, getPort, getNewKey,
+//	nextLine, and GatewayInterface's connected and nextLine
+//	    The phpseclib driver and the interface it satisfies. The transport is
+//	    the ssh binary through hesape/process, which has no connection object
+//	    to hand back and no line to read one at a time -- a process's output is
+//	    a stream the caller ranges over.
+//
+//	RemoteManager.getDefaultConnection, setDefaultConnection
+//	    Choosing among named hosts held in configuration. There is no registry
+//	    of hosts here: the host is an argument to the command, from the caller's
+//	    own configuration.
+//
+//	Connection.getGateway, getOutput, setOutput, RemoteManager.setOutput
+//	    Swapping where the remote command's output is written. process takes an
+//	    OutputHandler for the same job, and it is a parameter rather than
+//	    something set on an object beforehand.
 package remote

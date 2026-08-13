@@ -132,6 +132,7 @@ func (g *fakeGrammar) CompileSelect(q *query.Builder) string {
 		columns = []any{"*"}
 	}
 	sql := "select " + g.Columnize(columns) + " from " + g.WrapTable(q.GetFrom())
+	sql += g.compileJoins(q)
 	sql += g.compileWheres(q)
 
 	if len(q.Orders) > 0 {
@@ -159,6 +160,24 @@ func (g *fakeGrammar) CompileSelect(q *query.Builder) string {
 		sql += " union " + g.CompileSelect(union.Query)
 	}
 	return sql
+}
+
+// compileJoins is here because a join against a subquery compiles that subquery
+// whole, and the tests about it read the statement to see whether the subquery
+// carries a tenant of its own.
+func (g *fakeGrammar) compileJoins(q *query.Builder) string {
+	var out strings.Builder
+	for _, join := range q.Joins {
+		if join.Lateral {
+			out.WriteString(" " + join.Type + " join lateral " + g.WrapTable(join.Table) + " on true")
+			continue
+		}
+		out.WriteString(" " + join.Type + " join " + g.WrapTable(join.Table))
+		if len(join.Wheres) > 0 {
+			out.WriteString(" on " + g.whereClauses(join.Builder))
+		}
+	}
+	return out.String()
 }
 
 func (g *fakeGrammar) compileWheres(q *query.Builder) string {

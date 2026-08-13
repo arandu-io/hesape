@@ -127,7 +127,9 @@
 //
 // getDefaultInstance, setDefaultInstance and getInstanceConfig belong to it, and
 // it is Manager with the instances keyed by name instead of by driver. Both are
-// container machinery, refused with the rest of it above.
+// container machinery, refused with the rest of it above -- as is
+// Manager::getDefaultDriver, the abstract each subclass fills in with a lookup
+// into the container's config.
 //
 // # The facades are not measured
 //

@@ -17,6 +17,13 @@ type JoinClause struct {
 	// Table is JoinClause::$table.
 	Table any
 
+	// Lateral answers Illuminate\Database\Query\JoinLateralClause, which in PHP
+	// is a subclass with no body at all: the grammar tells the two apart with
+	// `$join instanceof JoinLateralClause`. Go has no subclassing, and a second
+	// type here would be a second thing for the grammar and for Joins to hold,
+	// so the class becomes the flag its only use asks for.
+	Lateral bool
+
 	parentQuery *Builder
 }
 
@@ -33,6 +40,14 @@ func NewJoinClause(parentQuery *Builder, typ string, table any) *JoinClause {
 		Table:       table,
 		parentQuery: parentQuery,
 	}
+}
+
+// NewJoinLateralClause answers Builder::newJoinLateralClause, and stands in for
+// Illuminate\Database\Query\JoinLateralClause::__construct. See Lateral.
+func NewJoinLateralClause(parentQuery *Builder, typ string, table any) *JoinClause {
+	join := NewJoinClause(parentQuery, typ, table)
+	join.Lateral = true
+	return join
 }
 
 // On answers JoinClause::on.

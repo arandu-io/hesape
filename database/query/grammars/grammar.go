@@ -333,6 +333,20 @@ func (g *Grammar) CompileJoins(q *query.Builder, joins []*query.JoinClause) stri
 			tableAndNestedJoins = "(" + table + " " + d.CompileJoins(q, join.Joins) + ")"
 		}
 
+		// A lateral join has a shape of its own -- it takes no on clause, and
+		// the engines that have one spell it differently -- so the whole of it
+		// comes from the dialect. The PHP asks `$join instanceof
+		// JoinLateralClause`; query.JoinClause carries the flag instead.
+		if join.Lateral {
+			sql, err := d.CompileJoinLateral(join, tableAndNestedJoins)
+			if err != nil {
+				parts = append(parts, unsupportedJoin(err))
+				continue
+			}
+			parts = append(parts, sql)
+			continue
+		}
+
 		// A straight join is MySQL's; every other engine compiles the type
 		// straight through and lets the engine reject it, where the PHP throws
 		// from supportsStraightJoins.
@@ -1546,6 +1560,18 @@ func lastSegment(value, separator string) string {
 // error does.
 func unsupportedClause(err error) string {
 	return "1 = 0 /* " + strings.ReplaceAll(err.Error(), "*/", "* /") + " */"
+}
+
+// unsupportedJoin is a join the grammar cannot spell.
+//
+// A where clause that cannot be compiled becomes a false one, because a filter
+// nobody can spell must not widen the result. A join cannot take that route:
+// dropping it changes which rows come back in a direction that depends on the
+// join type, and an inner join dropped from a query is rows that were never
+// meant to be there. So the fragment is deliberately not SQL, the engine
+// refuses the statement, and the reason travels in the message.
+func unsupportedJoin(err error) string {
+	return "/* " + strings.ReplaceAll(err.Error(), "*/", "* /") + " */ unsupported join"
 }
 
 // sortedKeys is the column order of a values map. See CompileInsert.

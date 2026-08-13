@@ -147,6 +147,9 @@ func (b *Builder) scoped(ctx context.Context, g auth.Grant) (*Builder, error) {
 	if err := scoped.scopeSubqueries(ctx, g); err != nil {
 		return nil, err
 	}
+	if err := scoped.scopeSubqueryClauses(ctx, g); err != nil {
+		return nil, err
+	}
 	return scoped, nil
 }
 

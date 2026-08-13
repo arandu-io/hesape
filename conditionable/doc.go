@@ -74,4 +74,11 @@
 // There the argument is a bool computed by the caller before the call, which is
 // the same expression one line earlier. Carrying both would be two spellings of
 // one thing.
+//
+// HigherOrderWhenProxy::negateConditionOnCapture goes with the proxy. It is the
+// switch that makes one proxy serve both when and unless -- unless builds the
+// proxy and flips the flag, so the condition is inverted at the moment the next
+// read is captured. With no capture there is nothing to invert: the caller
+// writes Unless(cond, ...) or When(!cond, ...) and the negation is in the
+// expression, where a reader can see it.
 package conditionable
