@@ -237,43 +237,6 @@ func HandleCors(allowedOrigins []string, allowedMethods []string, allowedHeaders
 	}
 }
 
-// TrustProxies mirrors Illuminate\Http\Middleware\TrustProxies.
-//
-// It rewrites the request scheme and remote address based on the
-// X-Forwarded-Proto and X-Forwarded-For headers when the request
-// comes from a trusted proxy.
-func TrustProxiesHTTP(trusted []string, headers []string) func(http.Handler) http.Handler {
-	trustedSet := make(map[string]bool, len(trusted))
-	for _, t := range trusted {
-		trustedSet[t] = true
-	}
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Only trust if peer is in the trusted set.
-			peer := r.RemoteAddr
-			if !trustedSet[peer] && !trustedSet["*"] {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			for _, header := range headers {
-				switch header {
-				case "X-Forwarded-Proto":
-					if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" && r.URL != nil {
-						r.URL.Scheme = proto
-					}
-				case "X-Forwarded-For":
-					if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-						r.RemoteAddr = fwd
-					}
-				}
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
 // AddLinkHeadersForPreloadedAssets mirrors
 // Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets.
 //

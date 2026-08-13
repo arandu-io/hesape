@@ -35,4 +35,19 @@
 //	                                           rejected the container, so the
 //	                                           proxies are the argument to
 //	                                           TrustProxies.
+//
+// # There was a second TrustProxies, and it trusted everything
+//
+// middleware.go carried TrustProxiesHTTP alongside [TrustProxies], with no
+// callers and no tests. It is deleted. Two ways to do one thing is RULE 9, and
+// this pair was worse than that: the one that stays takes []netip.Prefix, and
+// the one that went took []string and compared them against r.RemoteAddr --
+// which carries the port, so a trusted "10.0.0.1" never matched "10.0.0.1:54321"
+// and every proxy was untrusted. It also accepted "*", which trusts any peer at
+// all: with it set, any client on the internet could send X-Forwarded-For and be
+// recorded as whatever address it liked. And it assigned the whole header value
+// to RemoteAddr, so a chained "a, b, c" became the remote address verbatim.
+//
+// A middleware that is wrong in the trusting direction is the kind nobody
+// notices, because everything keeps working.
 package middleware
