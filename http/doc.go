@@ -3,22 +3,31 @@
 // The files it answers to, in the clone at
 // laravel_illuminate/http:
 //
-//	Request.php                  -> request.go, input.go
-//	Concerns/InteractsWithInput.php   -> input.go
+//	Request.php                            -> request.go, input.go
+//	Concerns/InteractsWithInput.php        -> input.go
 //	Concerns/InteractsWithContentTypes.php -> content.go
-//	Concerns/InteractsWithFlashData.php -> flash.go
-//	Concerns/CanBePrecognitive.php  -> request.go
-//	File.php, FileHelpers.php      -> (Response fatia)
-//	JsonResponse.php               -> (Response fatia)
-//	RedirectResponse.php            -> (Response fatia)
-//	Response.php, ResponseTrait.php -> (Response fatia)
-//	StreamedEvent.php               -> (Response fatia)
-//	UploadedFile.php                -> (Response fatia)
+//	Concerns/InteractsWithFlashData.php    -> flash.go
+//	Concerns/CanBePrecognitive.php         -> request.go
+//	File.php, FileHelpers.php              -> file.go, uploaded_file.go
+//	JsonResponse.php                       -> json_response.go
+//	RedirectResponse.php                   -> redirect_response.go
+//	Response.php, ResponseTrait.php        -> response.go
+//	UploadedFile.php                       -> uploaded_file.go
 //
-// What this package implements is the Request half of Illuminate\Http: the
-// methods a controller action reaches for to read what the browser sent.
-// The Response half -- the methods that write the answer -- is the Response
-// fatia, written in parallel.
+// Sub-packages:
+//
+//	http/client     -> Illuminate\Http\Client
+//	http/exceptions -> Illuminate\Http\Exceptions
+//	http/middleware -> Illuminate\Http\Middleware
+//	http/resources  -> Illuminate\Http\Resources
+//	http/testing    -> Illuminate\Http\Testing
+//
+// # Not mirrored, and why (ADR 0044)
+//
+//	Request::offsetExists   are PHP's ArrayAccess, the interface behind
+//	Request::offsetGet      $request['email']. Go has no operator to
+//	Request::offsetSet      overload; Input, Has and Merge are the four
+//	Request::offsetUnset    methods under those names, and they are here.
 //
 // # Source used
 //

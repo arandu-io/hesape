@@ -700,3 +700,115 @@ func mapKeys(m map[string]*Response) []string {
 	}
 	return keys
 }
+
+func TestAnAsyncRequestLeavesAPromiseAndSendsWhenItIsWaitedOn(t *testing.T) {
+	f := NewFactory(nil)
+	sent := 0
+	f.Fake(func(r *http.Request) (*http.Response, error) {
+		sent++
+		return NewResponseFromBytes(200, []byte(`{"ok":true}`), nil).HTTPResponse(), nil
+	})
+
+	pending := f.CreatePendingRequest().Async(true)
+	resp, err := pending.Get("https://example.test/things", nil)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if resp != nil {
+		t.Fatal("an async request should not hand back a response")
+	}
+	if sent != 0 {
+		t.Fatal("an async request should not have gone out before it was waited on")
+	}
+
+	promise := pending.GetPromise()
+	if promise == nil {
+		t.Fatal("an async request should have left a promise behind")
+	}
+
+	value, err := promise.Wait(true)
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if sent != 1 {
+		t.Fatalf("the request went out %d times, want 1", sent)
+	}
+	waited, ok := value.(*Response)
+	if !ok || !waited.OK() {
+		t.Fatalf("the promise resolved to %v, want an OK response", value)
+	}
+}
+
+func TestFactoryResponseBuildsTheStubEveryFakeHandsBack(t *testing.T) {
+	f := NewFactory(nil)
+
+	resp := NewResponse(f.Response(map[string]any{"name": "Ada"}, 201, nil))
+	assertEqual(t, resp.Status(), 201, "status")
+	assertEqual(t, resp.Header("Content-Type"), "application/json", "content type")
+	assertEqual(t, resp.Body(), `{"name":"Ada"}`, "body")
+
+	empty := NewResponse(f.Response(nil, 0, nil))
+	assertEqual(t, empty.Status(), 200, "default status")
+	assertEqual(t, empty.Body(), "", "empty body")
+}
+
+func TestStubUrlOnlyAnswersForTheUrlItWasGiven(t *testing.T) {
+	f := NewFactory(nil)
+	f.PreventStrayRequests(true)
+	f.StubUrl("*example.test/allowed*", func(*http.Request) (*http.Response, error) {
+		return f.Response("yes", 200, nil), nil
+	})
+
+	resp, err := f.CreatePendingRequest().Get("https://example.test/allowed/thing", nil)
+	if err != nil {
+		t.Fatalf("the stubbed URL failed: %v", err)
+	}
+	assertEqual(t, resp.Body(), "yes", "stubbed body")
+
+	if _, err := f.CreatePendingRequest().Get("https://example.test/other", nil); err == nil {
+		t.Fatal("a URL the stub does not match should have been a stray request")
+	}
+}
+
+func TestFailedConnectionAndFailedRequestAreStubsThatFail(t *testing.T) {
+	f := NewFactory(nil)
+
+	f.Fake(f.FailedConnection(""))
+	_, err := f.CreatePendingRequest().Get("https://example.test/thing", nil)
+	if err == nil || !strings.Contains(err.Error(), "example.test") {
+		t.Fatalf("error = %v, want one naming the host", err)
+	}
+
+	failed := f.FailedRequest(map[string]any{"message": "nope"}, 422, nil)
+	assertEqual(t, failed.Response.Status(), 422, "failed request status")
+	if !strings.Contains(failed.Error(), "422") {
+		t.Fatalf("message = %q, want the status in it", failed.Error())
+	}
+}
+
+func TestIsAllowedRequestUrlMatchesPatternsAndNotOnlyLiterals(t *testing.T) {
+	f := NewFactory(nil)
+	p := f.CreatePendingRequest()
+
+	assertEqual(t, p.IsAllowedRequestUrl("https://anywhere.test/x"), true, "allowed before prevention")
+
+	f.PreventStrayRequests(true)
+	assertEqual(t, p.IsAllowedRequestUrl("https://anywhere.test/x"), false, "blocked after prevention")
+
+	f.AllowStrayRequests("https://anywhere.test/*")
+	f.PreventStrayRequests(true)
+	assertEqual(t, p.IsAllowedRequestUrl("https://anywhere.test/x"), true, "allowed by pattern")
+	assertEqual(t, p.IsAllowedRequestUrl("https://elsewhere.test/x"), false, "still blocked elsewhere")
+}
+
+func TestMergeOptionsLaysTheGivenOptionsOverTheRequestsOwn(t *testing.T) {
+	p := NewFactory(nil).CreatePendingRequest().MaxRedirects(9)
+
+	merged := p.MergeOptions(map[string]any{"max_redirects": 2}, map[string]any{"sink": "file"})
+	assertEqual(t, merged["max_redirects"], 2, "later option wins")
+	assertEqual(t, merged["sink"], "file", "added option")
+
+	if p.GetOptions()["max_redirects"] != 9 {
+		t.Fatal("MergeOptions must not write back onto the request")
+	}
+}
