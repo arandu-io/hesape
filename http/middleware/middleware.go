@@ -198,9 +198,21 @@ func HandleCors(allowedOrigins []string, allowedMethods []string, allowedHeaders
 				return
 			}
 
+			// The wildcard answers "*", and a named origin answers itself.
+			//
+			// Echoing the caller's own origin for a wildcard is what makes a
+			// permissive list readable by everybody WITH credentials, because it
+			// slips past the browser check that "*" plus credentials fails. The
+			// two are kept apart here, and CorsConfig.Valid refuses the
+			// combination at boot so this branch is never reached with both.
+			wildcard := false
 			allowed := false
 			for _, o := range allowedOrigins {
-				if o == "*" || o == origin {
+				if o == "*" {
+					wildcard, allowed = true, true
+					break
+				}
+				if o == origin {
 					allowed = true
 					break
 				}
@@ -211,8 +223,15 @@ func HandleCors(allowedOrigins []string, allowedMethods []string, allowedHeaders
 			}
 
 			h := w.Header()
-			h.Set("Access-Control-Allow-Origin", origin)
-			if allowCredentials {
+			if wildcard {
+				h.Set("Access-Control-Allow-Origin", "*")
+			} else {
+				h.Set("Access-Control-Allow-Origin", origin)
+			}
+			// Never with the wildcard. A response carrying both is refused by
+			// every browser, and the way people work around that is the leak
+			// this middleware used to have.
+			if allowCredentials && !wildcard {
 				h.Set("Access-Control-Allow-Credentials", "true")
 			}
 			h.Set("Vary", "Origin")

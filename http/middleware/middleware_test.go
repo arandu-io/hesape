@@ -257,7 +257,15 @@ func TestSkipWhenTakesTheRequestOutOfTheCorsHandling(t *testing.T) {
 
 	handled := httptest.NewRequest(http.MethodGet, "/public/health", nil)
 	handled.Header.Set("Origin", "https://example.test")
-	if rec, _ := run(mw, handled); rec.Header().Get("Access-Control-Allow-Origin") != "https://example.test" {
+	// "*" answers "*", and not the caller's own origin echoed back.
+	//
+	// This assertion used to expect the echo, which is what the middleware did.
+	// Without credentials the two behave the same for a browser, so the test
+	// passed -- and the moment credentials were turned on, the echo became the
+	// way every site on the internet reads a signed-in user's responses. The
+	// wildcard and a named origin are kept apart so that CorsConfig.Valid can
+	// refuse the one combination that leaks.
+	if rec, _ := run(mw, handled); rec.Header().Get("Access-Control-Allow-Origin") != "*" {
 		t.Fatal("a request that is not skipped should carry the CORS headers")
 	}
 }
