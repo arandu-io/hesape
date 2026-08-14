@@ -51,7 +51,7 @@ func TestPushWritesTheJobRow(t *testing.T) {
 	}
 
 	args := state.argsFor("INSERT INTO jobs")
-	if len(args) != 12 {
+	if len(args) != 13 {
 		t.Fatalf("the insert bound %d arguments", len(args))
 	}
 	if got := args[0].Value; got != j.UUID {
@@ -198,8 +198,91 @@ func TestPopOnlyLooksAtJobsThatAreDueAndNotRunning(t *testing.T) {
 		t.Fatalf("Pop: %v", err)
 	}
 
-	if !state.sawStatement("WHERE queue = ? AND failed_at IS NULL AND run_at <= ? AND (reserved_until IS NULL OR reserved_until < ?) ORDER BY run_at LIMIT ?") {
+	if !state.sawStatement("WHERE queue = ? AND failed_at IS NULL AND run_at <= ? AND (reserved_until IS NULL OR reserved_until < ?) ORDER BY COALESCE(created_at, run_at), id LIMIT ?") {
 		t.Fatalf("the candidate query changed shape: %v", state.statements())
+	}
+}
+
+// TestPopTakesTheJobThatWasQueuedFirst is the audit's input: A is pushed with a
+// delay of ten seconds, B is pushed straight after with none. Ten seconds later
+// both are eligible, and DatabaseQueue.php:298 hands over A -- orderBy('id',
+// 'asc') is insertion order, and a delayed job that has come due is older than
+// everything queued after it.
+//
+// Ordering by run_at handed over B, and it does that to every delayed job: the
+// job waits out its delay and then goes to the back of a queue that filled up
+// while it waited. On a busy queue that is not a reordering, it is a job that
+// never runs.
+//
+// The column standing in for the id is created_at, because an id here is a
+// random uuid and sorts by nothing (see database.NewID).
+func TestPopTakesTheJobThatWasQueuedFirst(t *testing.T) {
+	ctx := context.Background()
+	q, state := databaseQueue(t)
+
+	first, _ := jobs.New(grant(), "", "invoice.send", nil)
+	if err := q.Later(ctx, grant(), 10*time.Second, first); err != nil {
+		t.Fatalf("Later: %v", err)
+	}
+	second, _ := jobs.New(grant(), "", "invoice.send", nil)
+	if err := q.Push(ctx, grant(), second); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	inserts := state.argsForAll("INSERT INTO jobs")
+	if len(inserts) != 2 {
+		t.Fatalf("the queue issued %d inserts", len(inserts))
+	}
+	queuedAt := make([]time.Time, 0, 2)
+	for _, args := range inserts {
+		at, isTime := args[len(args)-1].Value.(time.Time)
+		if !isTime {
+			t.Fatalf("the last bound column is %T, want the created_at of the row", args[len(args)-1].Value)
+		}
+		if at.Location() != time.UTC {
+			t.Errorf("created_at was written in %s", at.Location())
+		}
+		queuedAt = append(queuedAt, at)
+	}
+	if queuedAt[1].Before(queuedAt[0]) {
+		t.Errorf("the second push is dated %s, before the first at %s", queuedAt[1], queuedAt[0])
+	}
+
+	if _, err := q.Pop(ctx, "mail", 1, time.Minute); err != nil {
+		t.Fatalf("Pop: %v", err)
+	}
+	if !state.sawStatement("ORDER BY COALESCE(created_at, run_at), id LIMIT ?") {
+		t.Fatalf("the candidates are not taken in the order they were queued: %v", state.statements())
+	}
+}
+
+// TestReleasingAJobWritesItsExceptionCount: Laravel keeps this count in the
+// cache under "job-exceptions:{uuid}" for a day, so it crosses deliveries. Here
+// the column exists and the release did not write it, so every delivery read
+// zero: a job with MaxExceptions 2 and MaxTries 5 was delivered five times
+// where Laravel delivers it twice.
+func TestReleasingAJobWritesItsExceptionCount(t *testing.T) {
+	ctx := context.Background()
+	q, state := databaseQueue(t)
+	state.answerWith("SELECT id, queue", jobColumns,
+		jobRow("j-1", "invoice.send", time.Now().Add(-time.Minute), 1, nil))
+
+	popped, err := q.Pop(ctx, "", 1, time.Minute)
+	if err != nil || len(popped) != 1 {
+		t.Fatalf("Pop: %v, %d", err, len(popped))
+	}
+
+	popped[0].Exceptions = 2
+	if err := popped[0].Release(ctx, time.Minute); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+
+	args := state.argsFor("UPDATE jobs SET run_at = ?, last_error = ?, exceptions = ?")
+	if args == nil {
+		t.Fatalf("Release issued %v", state.statements())
+	}
+	if got := args[2].Value; got != int64(2) {
+		t.Errorf("exceptions = %v, want 2", got)
 	}
 }
 
@@ -219,7 +302,7 @@ func TestReleasePutsTheJobBackWithItsReason(t *testing.T) {
 		t.Fatalf("Release: %v", err)
 	}
 
-	args := state.argsFor("UPDATE jobs SET run_at = ?, last_error = ?, reserved_until = NULL")
+	args := state.argsFor("UPDATE jobs SET run_at = ?, last_error = ?, exceptions = ?, created_at = ?, reserved_until = NULL")
 	if args == nil {
 		t.Fatalf("Release issued %v", state.statements())
 	}
@@ -348,7 +431,7 @@ func TestRetryResetsTheAttempts(t *testing.T) {
 	if err := q.Retry(context.Background(), "j-1"); err != nil {
 		t.Fatalf("Retry: %v", err)
 	}
-	if !state.sawStatement("UPDATE jobs SET failed_at = NULL, attempts = 0, last_error = NULL, reserved_until = NULL, run_at = ? WHERE id = ?") {
+	if !state.sawStatement("UPDATE jobs SET failed_at = NULL, attempts = 0, exceptions = 0, last_error = NULL, reserved_until = NULL, run_at = ?, created_at = ? WHERE id = ?") {
 		t.Fatalf("Retry issued %v", state.statements())
 	}
 }
@@ -393,9 +476,10 @@ func TestTheModuleDeclaresNoSchemaForADriverThatOwnsNone(t *testing.T) {
 	if got := queue.NewModule(queue.NullQueue{}).Migrations(); len(got) != 0 {
 		t.Errorf("the NullQueue brought %d migrations", len(got))
 	}
-	// Two: the jobs table, and the settings columns that were added to it once
-	// the per-job attributes had somewhere to travel.
-	if got := queue.NewModule(queue.NewDatabaseQueue(nil)).Migrations(); len(got) != 2 {
+	// Three: the jobs table, the settings columns that were added to it once
+	// the per-job attributes had somewhere to travel, and the created_at that
+	// carries the order jobs are taken in.
+	if got := queue.NewModule(queue.NewDatabaseQueue(nil)).Migrations(); len(got) != 3 {
 		t.Errorf("the DatabaseQueue brought %d migrations, want the jobs table", len(got))
 	}
 }

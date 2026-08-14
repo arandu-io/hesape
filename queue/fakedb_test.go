@@ -119,6 +119,21 @@ func (f *fakeDB) argsFor(substring string) []driver.NamedValue {
 	return nil
 }
 
+// argsForAll returns the arguments of every statement containing substring, in
+// the order they were issued. It is what argsFor cannot answer: whether two
+// pushes wrote what distinguishes them.
+func (f *fakeDB) argsForAll(substring string) [][]driver.NamedValue {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out [][]driver.NamedValue
+	for i, s := range f.stmts {
+		if strings.Contains(strings.Join(strings.Fields(s), " "), substring) {
+			out = append(out, f.args[i])
+		}
+	}
+	return out
+}
+
 func (f *fakeDB) answerFor(query string) (answer, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

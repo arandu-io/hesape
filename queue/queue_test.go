@@ -3,6 +3,7 @@ package queue_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/log"
 	"github.com/arandu-io/hesape/queue"
+	"github.com/arandu-io/hesape/queue/events"
 	"github.com/arandu-io/hesape/queue/jobs"
 	"github.com/arandu-io/hesape/queue/middleware"
 )
@@ -657,6 +659,340 @@ func TestAMiddlewareThatSkipsTheJobDeletesIt(t *testing.T) {
 		deleted, _, _ := q.state()
 		return len(deleted) == 1
 	}, "the skipped job was not deleted")
+}
+
+// deliveryDriver is the driver the redelivery tests run against: a release puts
+// the job back in line carrying the counters it now has, which is what a driver
+// that writes them to a row does and what fakeQueue -- which only records the
+// release -- cannot show.
+//
+// It is what the two counters that cross deliveries have to be proved against:
+// a limit that is only ever compared inside one call of Worker.Process is a
+// limit that has never been tested.
+type deliveryDriver struct {
+	ready    []jobs.Job
+	deleted  []jobs.Job
+	released []released
+	failed   []failure
+}
+
+var _ jobs.Driver = (*deliveryDriver)(nil)
+
+func (d *deliveryDriver) push(j jobs.Job) { d.ready = append(d.ready, jobRecord(j)) }
+
+// jobRecord is what a driver stores: the columns, and nothing of the delivery.
+// A real one writes a row and reads it back, so the released and deleted flags
+// -- which say what happened to one delivery -- do not survive into the next.
+func jobRecord(j jobs.Job) jobs.Job {
+	return jobs.Job{
+		UUID: j.UUID, Queue: j.Queue, Name: j.Name, DisplayName: j.DisplayName,
+		TenantID: j.TenantID, Payload: j.Payload, AuthorizedBy: j.AuthorizedBy,
+		Action: j.Action, RunAt: j.RunAt, Attempts: j.Attempts,
+		LastError: j.LastError, Exceptions: j.Exceptions, Attributes: j.Attributes,
+	}
+}
+
+// deliver hands over the next job, counting the delivery the way every real
+// driver does: the claim increments attempts, so Attempts includes this one.
+func (d *deliveryDriver) deliver() *jobs.Job {
+	j := d.ready[0]
+	d.ready = d.ready[1:]
+	j.Attempts++
+	return jobs.Popped(d, "delivery", j)
+}
+
+func (d *deliveryDriver) ReleaseJob(_ context.Context, j *jobs.Job, delay time.Duration) error {
+	d.released = append(d.released, released{job: *j, delay: delay})
+	// The row, as it now stands. The exception count is part of it, and a
+	// driver that dropped it here is the defect these tests exist for.
+	d.ready = append(d.ready, jobRecord(*j))
+	return nil
+}
+
+func (d *deliveryDriver) DeleteJob(_ context.Context, j *jobs.Job) error {
+	d.deleted = append(d.deleted, *j)
+	return nil
+}
+
+func (d *deliveryDriver) FailJob(_ context.Context, j *jobs.Job, cause error) error {
+	d.failed = append(d.failed, failure{job: *j, cause: cause})
+	return nil
+}
+
+// alwaysFails is the handler the redelivery tests run: the failure is the same
+// every time, so what changes between deliveries is only the bookkeeping.
+func alwaysFails(*queue.Worker) queue.HandlerFunc {
+	return func(context.Context, auth.Grant, *jobs.Job) error {
+		return errors.New("the payment gateway is down")
+	}
+}
+
+// TestMaxExceptionsIsCountedAcrossDeliveries is the audit's input: a job with
+// MaxExceptions 2 on a worker with MaxTries 5, and a handler that always fails.
+//
+// The PHP counts in the cache under "job-exceptions:{uuid}" with a day's ttl,
+// so the count survives the delivery; this counted in a field of the in-memory
+// job and the release did not write it down, so every delivery started from
+// zero and the job ran to MaxTries -- five deliveries where Laravel gives two.
+func TestMaxExceptionsIsCountedAcrossDeliveries(t *testing.T) {
+	ctx := context.Background()
+	d := &deliveryDriver{}
+	j, err := jobs.New(grant(), "", "invoice.send", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.Attributes.MaxExceptions = 2
+	d.push(j)
+
+	w := queue.NewWorker(&fakeQueue{}, queue.WorkerOptions{MaxTries: 5})
+	w.HandleFunc("invoice.send", alwaysFails(w))
+
+	for delivery := 1; delivery <= 5; delivery++ {
+		if len(d.ready) == 0 {
+			t.Fatalf("the job stopped being delivered after %d deliveries", delivery-1)
+		}
+		_ = w.Process(ctx, d.deliver())
+		if len(d.failed) == 0 {
+			continue
+		}
+		if delivery != 2 {
+			t.Fatalf("the job parked on delivery %d, want the 2nd: MaxExceptions is 2", delivery)
+		}
+		if got := d.failed[0].job.Exceptions; got != 2 {
+			t.Errorf("the parked job counted %d exceptions, want 2", got)
+		}
+		return
+	}
+	t.Fatal("the job was never parked: MaxExceptions of 2 did not survive the release")
+}
+
+// TestAReleasedJobCarriesItsExceptionCount is the same defect one level down:
+// whatever the worker counted has to reach the driver, or the next delivery
+// reads a job that has never failed.
+func TestAReleasedJobCarriesItsExceptionCount(t *testing.T) {
+	ctx := context.Background()
+	d := &deliveryDriver{}
+	j, err := jobs.New(grant(), "", "invoice.send", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.push(j)
+
+	w := queue.NewWorker(&fakeQueue{}, queue.WorkerOptions{MaxTries: 5})
+	w.HandleFunc("invoice.send", alwaysFails(w))
+
+	_ = w.Process(ctx, d.deliver())
+	if len(d.released) != 1 {
+		t.Fatalf("the job was released %d times, want once", len(d.released))
+	}
+	if got := d.released[0].job.Exceptions; got != 1 {
+		t.Errorf("the released job carries %d exceptions, want 1", got)
+	}
+
+	_ = w.Process(ctx, d.deliver())
+	if got := d.released[1].job.Exceptions; got != 2 {
+		t.Errorf("the second failure carries %d exceptions, want 2: the count is the job's, not the delivery's", got)
+	}
+}
+
+// TestAJobWithUnlimitedTriesIsNotParkedByTheWorkersLimit is the audit's fourth
+// input, in the spelling this package has for it.
+//
+// The PHP tells "no limit" from "not set" with null and 0:
+// markJobAsFailedIfWillExceedMaxAttempts returns early on "$maxTries > 0", and
+// markJobAsFailedIfAlreadyExceedsMaxAttempts on "$maxTries === 0". A Go int has
+// no null, so attributes.Attributes says a negative Tries is forever and a zero
+// is "the worker decides" -- and the negative did not work: maxTriesFor handed
+// the negative straight to "attempts >= maxTries", which is true on the first
+// delivery, so a job asking never to be parked was parked at once.
+func TestAJobWithUnlimitedTriesIsNotParkedByTheWorkersLimit(t *testing.T) {
+	ctx := context.Background()
+	d := &deliveryDriver{}
+	j, err := jobs.New(grant(), "", "invoice.send", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.Attributes.Tries = -1
+	d.push(j)
+
+	w := queue.NewWorker(&fakeQueue{}, queue.WorkerOptions{MaxTries: 3})
+	w.HandleFunc("invoice.send", alwaysFails(w))
+
+	for delivery := 1; delivery <= 4; delivery++ {
+		_ = w.Process(ctx, d.deliver())
+		if len(d.failed) != 0 {
+			t.Fatalf("the job was parked on delivery %d, and it asked never to be parked", delivery)
+		}
+	}
+	if len(d.released) != 4 {
+		t.Fatalf("the job was released %d times in 4 deliveries", len(d.released))
+	}
+}
+
+// TestAJobThatDeclaresNoTriesTakesTheWorkersLimit is the other half of the
+// pair: the zero value still means "the worker decides", which is what a job
+// that never mentioned tries has always meant.
+func TestAJobThatDeclaresNoTriesTakesTheWorkersLimit(t *testing.T) {
+	ctx := context.Background()
+	d := &deliveryDriver{}
+	j, err := jobs.New(grant(), "", "invoice.send", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.push(j)
+
+	w := queue.NewWorker(&fakeQueue{}, queue.WorkerOptions{MaxTries: 3})
+	w.HandleFunc("invoice.send", alwaysFails(w))
+
+	for delivery := 1; delivery <= 3; delivery++ {
+		_ = w.Process(ctx, d.deliver())
+	}
+	if len(d.failed) != 1 {
+		t.Fatalf("the job was parked %d times in 3 deliveries, want once on the 3rd", len(d.failed))
+	}
+}
+
+// dispatchedTypes is the sequence of events a dispatcher saw, by type name.
+// Order is what two of these tests are about, so the assertion is on the
+// sequence and not on the set.
+func dispatchedTypes(d *recordingDispatcher) []string {
+	out := make([]string, 0, len(d.dispatched))
+	for _, event := range d.dispatched {
+		out = append(out, fmt.Sprintf("%T", event))
+	}
+	return out
+}
+
+func indexOfType(seen []string, want string) int {
+	for i, name := range seen {
+		if name == want {
+			return i
+		}
+	}
+	return -1
+}
+
+// TestEveryDeliveryDispatchesJobAttempted: the event was declared, documented
+// as "dispatched after every delivery", and never dispatched by anything. A
+// listener counting deliveries -- the one thing it exists for -- counted none.
+func TestEveryDeliveryDispatchesJobAttempted(t *testing.T) {
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name    string
+		handler queue.HandlerFunc
+		failed  bool
+	}{
+		{"a delivery that worked", func(context.Context, auth.Grant, *jobs.Job) error { return nil }, false},
+		{"a delivery that failed", func(context.Context, auth.Grant, *jobs.Job) error {
+			return errors.New("the payment gateway is down")
+		}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &deliveryDriver{}
+			j, err := jobs.New(grant(), "", "invoice.send", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d.push(j)
+
+			bus := &recordingDispatcher{}
+			w := queue.NewWorker(&fakeQueue{}, queue.WorkerOptions{MaxTries: 5}).SetEvents(bus)
+			w.HandleFunc("invoice.send", tc.handler)
+
+			_ = w.Process(ctx, d.deliver())
+
+			var attempted []events.JobAttempted
+			for _, event := range bus.dispatched {
+				if e, is := event.(events.JobAttempted); is {
+					attempted = append(attempted, e)
+				}
+			}
+			if len(attempted) != 1 {
+				t.Fatalf("JobAttempted was dispatched %d times for one delivery, want once", len(attempted))
+			}
+			if failed := attempted[0].Exception != nil; failed != tc.failed {
+				t.Errorf("JobAttempted carries exception %v, want failed = %v", attempted[0].Exception, tc.failed)
+			}
+			if attempted[0].Successful() == tc.failed {
+				t.Errorf("Successful() = %v on %s", attempted[0].Successful(), tc.name)
+			}
+			// It is the last word on the delivery, as PHP's finally is.
+			if seen := dispatchedTypes(bus); seen[len(seen)-1] != "events.JobAttempted" {
+				t.Errorf("the events were %v, and JobAttempted is not the last", seen)
+			}
+		})
+	}
+}
+
+// TestAParkedJobAnnouncesJobFailedBeforeJobExceptionOccurred is the order
+// Worker::handleJobException has: failJob runs first and dispatches JobFailed
+// from inside $job->fail(), and raiseExceptionOccurredJobEvent runs after it.
+//
+// The doc comment on handleJobException claimed to be "in the order the PHP has
+// it" while doing the opposite, which is worse than not saying: a listener that
+// treats JobExceptionOccurred as "this one will be retried" -- the only reading
+// that makes it different from JobFailed -- was wrong on the last delivery of
+// every job.
+func TestAParkedJobAnnouncesJobFailedBeforeJobExceptionOccurred(t *testing.T) {
+	ctx := context.Background()
+	d := &deliveryDriver{}
+	j, err := jobs.New(grant(), "", "invoice.send", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.push(j)
+
+	bus := &recordingDispatcher{}
+	w := queue.NewWorker(&fakeQueue{}, queue.WorkerOptions{MaxTries: 1}).SetEvents(bus)
+	w.HandleFunc("invoice.send", alwaysFails(w))
+
+	_ = w.Process(ctx, d.deliver())
+	if len(d.failed) != 1 {
+		t.Fatalf("the job was not parked on its only delivery")
+	}
+
+	seen := dispatchedTypes(bus)
+	failedAt := indexOfType(seen, "events.JobFailed")
+	occurredAt := indexOfType(seen, "events.JobExceptionOccurred")
+	if failedAt < 0 || occurredAt < 0 {
+		t.Fatalf("the events were %v, want both JobFailed and JobExceptionOccurred", seen)
+	}
+	if failedAt > occurredAt {
+		t.Errorf("the events were %v, want JobFailed before JobExceptionOccurred", seen)
+	}
+}
+
+// TestAReleasedJobAnnouncesJobExceptionOccurredBeforeItIsReleased is the other
+// path through the same PHP method: nothing failed the job, so the event goes
+// out and the finally block releases it after.
+func TestAReleasedJobAnnouncesJobExceptionOccurredBeforeItIsReleased(t *testing.T) {
+	ctx := context.Background()
+	d := &deliveryDriver{}
+	j, err := jobs.New(grant(), "", "invoice.send", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.push(j)
+
+	bus := &recordingDispatcher{}
+	w := queue.NewWorker(&fakeQueue{}, queue.WorkerOptions{MaxTries: 5}).SetEvents(bus)
+	w.HandleFunc("invoice.send", alwaysFails(w))
+
+	_ = w.Process(ctx, d.deliver())
+
+	seen := dispatchedTypes(bus)
+	occurredAt := indexOfType(seen, "events.JobExceptionOccurred")
+	releasedAt := indexOfType(seen, "events.JobReleasedAfterException")
+	if occurredAt < 0 || releasedAt < 0 {
+		t.Fatalf("the events were %v", seen)
+	}
+	if occurredAt > releasedAt {
+		t.Errorf("the events were %v, want JobExceptionOccurred before JobReleasedAfterException", seen)
+	}
+	if indexOfType(seen, "events.JobFailed") >= 0 {
+		t.Errorf("a released job announced JobFailed: %v", seen)
+	}
 }
 
 // mustDaemon runs the worker's loop and keeps only the error, so the tests that

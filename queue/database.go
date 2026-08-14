@@ -119,6 +119,41 @@ ALTER TABLE jobs DROP COLUMN display_name;
 ALTER TABLE jobs DROP COLUMN attributes;
 ALTER TABLE jobs DROP COLUMN exceptions;
 `,
+	}, {
+		// created_at is the order Pop takes jobs in, which used to be run_at.
+		//
+		// Laravel orders the candidates by id (DatabaseQueue.php:298), and its
+		// id is an auto-incrementing integer, so the queue is first in, first
+		// out over whatever is eligible. Ordering by run_at is not: a job
+		// pushed with a ten second delay waits out the delay and then goes
+		// behind everything queued while it waited, again on every pass, and on
+		// a queue that is never empty it is a job that never runs.
+		//
+		// The id cannot do the job here because it is a random uuid and sorts
+		// by nothing (see database.NewID), so the column that carries the order
+		// is the one that says when the row was written.
+		//
+		// Nullable, and with no default, because SQLite refuses a non-constant
+		// default on ADD COLUMN: the rows already in the table are backfilled
+		// here, and the ones the previous release's binary writes during the
+		// rollout arrive NULL, which is what the COALESCE in Pop is for (RULE
+		// 16).
+		//
+		// No index of its own. The filter is still served by idx_jobs_ready,
+		// and what is left is a top-N sort under a LIMIT; an index on
+		// (queue, failed_at, created_at) would remove that sort, and it would
+		// need a DROP INDEX in Down, which MySQL spells "DROP INDEX x ON jobs"
+		// and the other two spell "DROP INDEX x". One portable migration is
+		// worth more than the sort.
+		ID: "2026_08_13_000010_add_created_at_to_jobs_table",
+		Up: `
+ALTER TABLE jobs ADD COLUMN created_at TIMESTAMP;
+
+UPDATE jobs SET created_at = run_at WHERE created_at IS NULL;
+`,
+		Down: `
+ALTER TABLE jobs DROP COLUMN created_at;
+`,
 	}}
 }
 
@@ -141,13 +176,18 @@ func (q *DatabaseQueue) Push(ctx context.Context, g auth.Grant, j jobs.Job) erro
 		return fmt.Errorf("%w: %s: %w", ErrInvalidPayload, j.Name, err)
 	}
 
+	// created_at is when the job entered the queue, and it is what Pop orders
+	// by: it is this table's answer to Laravel's auto-incrementing id. It is
+	// not RunAt -- a delayed job entered the queue when it was pushed, and is
+	// older than everything queued while it waited.
 	_, err = q.db.ExecContext(ctx, `
 		INSERT INTO jobs (
 			id, queue, name, display_name, tenant_id, payload, authorized_by, action,
-			run_at, attempts, exceptions, attributes
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			run_at, attempts, exceptions, attributes, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		j.UUID, j.Queue, j.Name, j.DisplayName, j.TenantID, string(j.Payload),
-		j.AuthorizedBy, j.Action, j.RunAt, j.Attempts, j.Exceptions, string(settings))
+		j.AuthorizedBy, j.Action, j.RunAt, j.Attempts, j.Exceptions, string(settings),
+		time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("queue: pushing %s: %w", j.Name, err)
 	}
@@ -211,6 +251,16 @@ func (q *DatabaseQueue) Bulk(ctx context.Context, g auth.Grant, js []jobs.Job) e
 //
 // The cost is that two workers can pick the same candidate and one of them
 // loses the claim. It gets nothing back, which is exactly right.
+//
+// The candidates come back in the order they were queued, which is what
+// getNextAvailableJob's orderBy('id', 'asc') is. It used to be ORDER BY run_at:
+// push A with a ten second delay and B with none, and ten seconds later both
+// are eligible and Laravel hands over A while this handed over B. Delaying a
+// job put it behind everything queued during its delay -- forever, on a queue
+// that is never empty. Found by audit. See the created_at migration.
+//
+// COALESCE, because a row written by the previous release's binary during a
+// rollout has no created_at and its run_at is the closest thing to one.
 func (q *DatabaseQueue) Pop(ctx context.Context, queue string, n int, lease time.Duration) ([]*jobs.Job, error) {
 	if queue == "" {
 		queue = jobs.DefaultQueue
@@ -226,7 +276,7 @@ func (q *DatabaseQueue) Pop(ctx context.Context, queue string, n int, lease time
 	candidates, err := q.query(ctx, `
 		WHERE queue = ? AND failed_at IS NULL AND run_at <= ?
 		  AND (reserved_until IS NULL OR reserved_until < ?)
-		ORDER BY run_at
+		ORDER BY COALESCE(created_at, run_at), id
 		LIMIT ?`, queue, now, now, n)
 	if err != nil {
 		return nil, err
@@ -269,13 +319,29 @@ func (q *DatabaseQueue) DeleteJob(ctx context.Context, j *jobs.Job) error {
 }
 
 // ReleaseJob puts the job back on its queue, eligible again after delay.
+//
+// It writes the exception count, and that is the whole reason a released job
+// can ever be parked by MaxExceptions: Laravel keeps the count in the cache
+// under "job-exceptions:{uuid}" for a day, so it crosses deliveries, and here
+// the column existed and nothing wrote it. Every delivery read zero, so a job
+// with MaxExceptions 2 and MaxTries 5 was delivered five times where Laravel
+// delivers it twice. Found by audit.
+//
+// created_at moves to now, because a released job goes to the back of the
+// queue. That is what Laravel does by construction -- deleteAndRelease removes
+// the row and inserts a new one, which gets a new id -- and leaving the
+// original there would put a job that has failed twice in front of work nobody
+// has looked at yet.
 func (q *DatabaseQueue) ReleaseJob(ctx context.Context, j *jobs.Job, delay time.Duration) error {
 	if delay < 0 {
 		delay = 0
 	}
-	_, err := q.db.ExecContext(ctx,
-		`UPDATE jobs SET run_at = ?, last_error = ?, reserved_until = NULL WHERE id = ?`,
-		time.Now().UTC().Add(delay), j.LastError, j.UUID)
+	now := time.Now().UTC()
+	_, err := q.db.ExecContext(ctx, `
+		UPDATE jobs SET run_at = ?, last_error = ?, exceptions = ?, created_at = ?,
+		                reserved_until = NULL
+		WHERE id = ?`,
+		now.Add(delay), j.LastError, j.Exceptions, now, j.UUID)
 	if err != nil {
 		return fmt.Errorf("queue: releasing %s: %w", j.UUID, err)
 	}
@@ -306,11 +372,18 @@ func (q *DatabaseQueue) Failed(ctx context.Context, limit int) ([]jobs.Job, erro
 }
 
 // Retry puts a failed job back in line with its attempts reset.
+//
+// The exception count is reset with them, for the reason Laravel forgets its
+// "job-exceptions:{uuid}" key when it parks a job: a retry that kept the count
+// would be parked again by the failure that parked it the first time, without
+// the handler ever having run. created_at moves to now for the reason it moves
+// on a release -- Laravel's retry writes a new row, with a new id, at the back.
 func (q *DatabaseQueue) Retry(ctx context.Context, uuid string) error {
+	now := time.Now().UTC()
 	_, err := q.db.ExecContext(ctx, `
-		UPDATE jobs SET failed_at = NULL, attempts = 0, last_error = NULL,
-		                reserved_until = NULL, run_at = ?
-		WHERE id = ?`, time.Now().UTC(), uuid)
+		UPDATE jobs SET failed_at = NULL, attempts = 0, exceptions = 0, last_error = NULL,
+		                reserved_until = NULL, run_at = ?, created_at = ?
+		WHERE id = ?`, now, now, uuid)
 	if err != nil {
 		return fmt.Errorf("queue: retrying %s: %w", uuid, err)
 	}

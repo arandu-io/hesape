@@ -135,17 +135,91 @@ func TestANamespaceThatCouldNameAnotherKeyIsRefused(t *testing.T) {
 	}
 }
 
-func TestAnEntryNeedsATTL(t *testing.T) {
+// TestPutWithATTLThatHasPassedForgetsTheKey is Repository::put(): "if
+// ($seconds <= 0) return $this->forget($key)".
+//
+// The input is the one the audit ran: put a value for a minute, then put
+// another with no ttl at all. This returned ErrNoTTL and wrote nothing, so the
+// key went on reading "old" -- the caller told the cache to stop serving a
+// value and the cache kept serving it.
+func TestPutWithATTLThatHasPassedForgetsTheKey(t *testing.T) {
 	ctx := context.Background()
 	r := newRepository()
 	g := grantFor("acme")
 
-	if err := r.Put(ctx, g, "k", "v", 0); !errors.Is(err, cache.ErrNoTTL) {
-		t.Fatalf("Put with no ttl = %v, want cache.ErrNoTTL", err)
+	if err := r.Put(ctx, g, "k", "old", time.Minute); err != nil {
+		t.Fatalf("Put: %v", err)
 	}
-	if _, err := r.Add(ctx, g, "k", "v", 0); !errors.Is(err, cache.ErrNoTTL) {
-		t.Fatalf("Add with no ttl = %v, want cache.ErrNoTTL", err)
+	if err := r.Put(ctx, g, "k", "new", 0); err != nil {
+		t.Fatalf("Put with no ttl = %v, want the key forgotten", err)
 	}
+	if _, err := cache.Get[string](ctx, r, g, "k"); !errors.Is(err, cache.ErrNotFound) {
+		got, _ := cache.Get[string](ctx, r, g, "k")
+		t.Fatalf("the key still reads %q, want it forgotten", got)
+	}
+
+	// A negative ttl is the same statement said differently: the entry expired
+	// before it was written.
+	if err := r.Put(ctx, g, "k", "old", time.Minute); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if err := r.Put(ctx, g, "k", "new", -time.Hour); err != nil {
+		t.Fatalf("Put with a negative ttl = %v", err)
+	}
+	if has, err := r.Has(ctx, g, "k"); err != nil || has {
+		t.Fatalf("has = %v, err = %v, want the key forgotten", has, err)
+	}
+}
+
+// TestPutManyWithATTLThatHasPassedForgetsTheKeys is the same line of
+// Repository::putMany(): "if ($seconds <= 0) return
+// $this->deleteMultiple(array_keys($values))".
+func TestPutManyWithATTLThatHasPassedForgetsTheKeys(t *testing.T) {
+	ctx := context.Background()
+	r := newRepository()
+	g := grantFor("acme")
+
+	if err := r.PutMany(ctx, g, map[string]any{"a": 1, "b": 2}, time.Minute); err != nil {
+		t.Fatalf("PutMany: %v", err)
+	}
+	if err := r.PutMany(ctx, g, map[string]any{"a": 3, "b": 4}, 0); err != nil {
+		t.Fatalf("PutMany with no ttl = %v, want the keys forgotten", err)
+	}
+	for _, key := range []string{"a", "b"} {
+		if has, err := r.Has(ctx, g, key); err != nil || has {
+			t.Fatalf("%q: has = %v, err = %v, want the key forgotten", key, has, err)
+		}
+	}
+}
+
+// TestAddWithATTLThatHasPassedAddsNothing is Repository::add(): "if ($seconds
+// <= 0) return false". Nothing is written, and the caller is told it did not
+// win -- which is what every other losing Add is told.
+func TestAddWithATTLThatHasPassedAddsNothing(t *testing.T) {
+	ctx := context.Background()
+	r := newRepository()
+	g := grantFor("acme")
+
+	added, err := r.Add(ctx, g, "leader", "one", 0)
+	if err != nil {
+		t.Fatalf("Add with no ttl = %v, want false and no error", err)
+	}
+	if added {
+		t.Fatal("Add with no ttl reported that it wrote")
+	}
+	if has, err := r.Has(ctx, g, "leader"); err != nil || has {
+		t.Fatalf("has = %v, err = %v, want nothing written", has, err)
+	}
+}
+
+// TestACounterNeedsATTL is the one of the three that keeps its error, and the
+// reason is in Repository.Increment's doc comment: Repository::increment() has
+// no ttl argument to copy a decision from.
+func TestACounterNeedsATTL(t *testing.T) {
+	ctx := context.Background()
+	r := newRepository()
+	g := grantFor("acme")
+
 	if _, err := r.Increment(ctx, g, "n", 1, 0); !errors.Is(err, cache.ErrNoTTL) {
 		t.Fatalf("Increment with no ttl = %v, want cache.ErrNoTTL", err)
 	}
@@ -356,6 +430,45 @@ func TestRememberComputesOnceAndThenReadsTheCache(t *testing.T) {
 	}
 	if first != second {
 		t.Fatalf("the miss returned %+v and the hit %+v: they have to be the same value, or the first request after a deploy behaves differently from the rest", first, second)
+	}
+}
+
+// TestRememberCachesAComputationThatCameBackWithNothing pins the one place
+// this Remember answers differently from Repository::remember(), so that the
+// difference is a decision somebody can read rather than an accident.
+//
+// The PHP asks "! is_null($value)", so a stored null is a miss and the callback
+// runs again on every request. Here a miss is ErrNotFound and a stored null is
+// a value, so a callback that comes back with nothing runs once. The whole
+// reason ErrNotFound exists in this package is to keep "not cached" and "cached
+// as nothing" apart -- see Repository.Has -- and Remember reading them as one
+// thing again would be the second meaning of null this package removed.
+//
+// The consequence is negative caching, which is what a caller usually wants:
+// "this customer has no plan" is exactly the answer that costs a query to
+// produce and is asked for on every request.
+func TestRememberCachesAComputationThatCameBackWithNothing(t *testing.T) {
+	ctx := context.Background()
+	r := newRepository()
+	g := grantFor("acme")
+
+	calls := 0
+	compute := func(context.Context) (*profile, error) {
+		calls++
+		return nil, nil
+	}
+
+	for range 2 {
+		got, err := cache.Remember(ctx, r, g, "plan", time.Minute, compute)
+		if err != nil {
+			t.Fatalf("Remember: %v", err)
+		}
+		if got != nil {
+			t.Fatalf("Remember = %+v, want nothing", got)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("compute ran %d times, want 1: a cached nothing is a hit here, and the PHP would have run it twice", calls)
 	}
 }
 

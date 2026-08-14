@@ -18,7 +18,13 @@ import (
 // the protocol -- that ZRem is the claim and exactly one worker wins it -- and a
 // fake that implements the happy path proves none of it.
 //
-// Without KV_ADDRESS these skip. CI sets it.
+// Without REDIS_ADDRESS these skip. CI sets it.
+//
+// The variable is the one hesape/redis reads, and it used to be KV_ADDRESS here
+// -- the name of the repository ADR 0048 folded in. Two modules speak RESP and
+// there is one protocol, so there is one variable (RULE 9): with two, whichever
+// name the runner exported ran one suite and skipped the other in silence, and
+// a skipped suite prints ok.
 
 const tenant = "11111111-1111-4111-8111-111111111111"
 
@@ -27,9 +33,9 @@ func grant() auth.Grant { return auth.SystemGrant("invoice.send", tenant) }
 func queue(t *testing.T) *redis.RedisQueue {
 	t.Helper()
 
-	address := os.Getenv("KV_ADDRESS")
+	address := os.Getenv("REDIS_ADDRESS")
 	if address == "" {
-		t.Skip("KV_ADDRESS is not set: start a RESP server and set it, e.g. KV_ADDRESS=127.0.0.1:6379")
+		t.Skip("REDIS_ADDRESS is not set: start a RESP server and set it, e.g. REDIS_ADDRESS=127.0.0.1:6379")
 	}
 
 	// A prefix per test AND per run, or a second run inside the same minute

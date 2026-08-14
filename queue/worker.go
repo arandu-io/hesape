@@ -484,15 +484,28 @@ func (w *Worker) RunNextJob(ctx context.Context) error {
 // The error it returns is the handler's, after the job has been settled -- so a
 // caller that wants to know what happened can, and the daemon that does not
 // ignores it. Laravel rethrows for the same reason.
-func (w *Worker) Process(ctx context.Context, j *jobs.Job) error {
+//
+// Every path out of it dispatches events.JobAttempted, which is what the PHP's
+// finally block does and what nothing here did: the event was declared and
+// documented as "dispatched after every delivery", and no code dispatched it,
+// so a listener counting deliveries -- the one thing it is for -- counted none.
+// Found by audit.
+func (w *Worker) Process(ctx context.Context, j *jobs.Job) (err error) {
 	connectionName := j.GetConnectionName()
+
+	// Deferred rather than written at each return, because there are six of
+	// them and the one that forgets is the bug this replaces.
+	defer func() {
+		w.dispatch(events.JobAttempted{ConnectionName: connectionName, Job: j, Exception: err})
+	}()
+
 	w.dispatch(events.JobProcessing{ConnectionName: connectionName, Job: j})
 
 	handler, known := w.handlers[j.Name]
 	if !known {
 		// An unknown name is not a failure to retry: no amount of retrying will
 		// register the handler. It parks immediately, where it can be seen.
-		err := fmt.Errorf("no handler registered for %s", j.Name)
+		err = fmt.Errorf("no handler registered for %s", j.Name)
 		log.For(ctx).Error("job has no handler", "job", j.Name, "id", j.UUID)
 		_ = j.Fail(ctx, err)
 		w.dispatch(events.JobFailed{ConnectionName: connectionName, Job: j, Exception: err})
@@ -502,7 +515,7 @@ func (w *Worker) Process(ctx context.Context, j *jobs.Job) error {
 	// A job that already used up its deliveries before this one -- because it
 	// timed out rather than failed, so nothing ever recorded an error -- is
 	// parked here rather than run again.
-	if err := w.MarkJobAsFailedIfAlreadyExceedsMaxAttempts(ctx, j); err != nil {
+	if err = w.MarkJobAsFailedIfAlreadyExceedsMaxAttempts(ctx, j); err != nil {
 		w.dispatch(events.JobFailed{ConnectionName: connectionName, Job: j, Exception: err})
 		return err
 	}
@@ -524,7 +537,7 @@ func (w *Worker) Process(ctx context.Context, j *jobs.Job) error {
 	jobCtx = log.Into(jobCtx, logger)
 
 	start := time.Now()
-	err := w.run(jobCtx, handler, j)
+	err = w.run(jobCtx, handler, j)
 	duration := time.Since(start)
 
 	if col != nil {
@@ -571,21 +584,32 @@ func (w *Worker) Process(ctx context.Context, j *jobs.Job) error {
 
 // handleJobException settles a job whose handler failed.
 //
-// It answers Worker::handleJobException(), in the order the PHP has it: decide
-// whether this failure is the last one, and only then release.
+// It answers Worker::handleJobException(), in the order the PHP has it: park
+// the job when this failure is its last, then announce the exception, then
+// release whatever is still unsettled.
+//
+// The order is the whole point, and this dispatched JobExceptionOccurred first
+// while the doc comment claimed to be "in the order the PHP has it". In the PHP
+// the parking happens inside markJobAsFailedIfWillExceedMaxAttempts, which
+// dispatches JobFailed from $job->fail(), and raiseExceptionOccurredJobEvent
+// runs after it. A listener that reads JobExceptionOccurred as "this one will
+// come back" -- the only reading that tells it apart from JobFailed -- was
+// wrong on the last delivery of every job. Found by audit.
 func (w *Worker) handleJobException(ctx context.Context, j *jobs.Job, cause error, logger *slog.Logger) {
 	connectionName := j.GetConnectionName()
 	j.Exceptions++
-	w.dispatch(events.JobExceptionOccurred{ConnectionName: connectionName, Job: j, Exception: cause})
 
 	// A middleware that already released, deleted or parked the job has
 	// decided the outcome, and settling it a second time is how a job runs
 	// twice: WithoutOverlapping releases it for ten seconds and the worker
 	// underneath would release it again for the backoff, or park it.
-	if j.IsDeletedOrReleased() {
-		logger.Warn("job failed and was already settled by a middleware", "error", cause)
-		return
-	}
+	//
+	// The PHP guards the same case with "if (! $job->hasFailed())" around the
+	// decision and "if (! isDeleted() && ! isReleased() && ! hasFailed())"
+	// around the release, and announces the exception either way -- which is
+	// what the event is for: it says the handler failed, not what became of the
+	// job.
+	settled := j.IsDeletedOrReleased()
 
 	// Attempts already counts this delivery -- Pop incremented it. Adding
 	// one here counted it twice, so MaxTries of N delivered N-1 times and
@@ -596,14 +620,26 @@ func (w *Worker) handleJobException(ctx context.Context, j *jobs.Job, cause erro
 	if attempts < 1 {
 		attempts = 1
 	}
-	j.LastError = cause.Error()
 
-	if w.shouldFail(j, attempts, cause) {
-		if failErr := j.Fail(ctx, cause); failErr != nil {
-			logger.Error("parking the job failed", "error", failErr)
+	parked := false
+	if !settled {
+		j.LastError = cause.Error()
+		if parked = w.shouldFail(j, attempts, cause); parked {
+			if failErr := j.Fail(ctx, cause); failErr != nil {
+				logger.Error("parking the job failed", "error", failErr)
+			}
+			logger.Error("job parked after repeated failures", "attempts", attempts, "error", cause)
+			w.dispatch(events.JobFailed{ConnectionName: connectionName, Job: j, Exception: cause})
 		}
-		logger.Error("job parked after repeated failures", "attempts", attempts, "error", cause)
-		w.dispatch(events.JobFailed{ConnectionName: connectionName, Job: j, Exception: cause})
+	}
+
+	w.dispatch(events.JobExceptionOccurred{ConnectionName: connectionName, Job: j, Exception: cause})
+
+	if settled {
+		logger.Warn("job failed and was already settled by a middleware", "error", cause)
+		return
+	}
+	if parked {
 		return
 	}
 
@@ -638,7 +674,13 @@ func (w *Worker) shouldFail(j *jobs.Job, attempts int, cause error) bool {
 	if max := j.MaxExceptions(); max > 0 && j.Exceptions >= max {
 		return true
 	}
-	return attempts >= w.maxTriesFor(j)
+	// "$maxTries > 0 && $job->attempts() >= $maxTries": a limit of zero or less
+	// is no limit, and a job under one is never parked for having been
+	// delivered often enough. See maxTriesFor.
+	if max := w.maxTriesFor(j); max > 0 {
+		return attempts >= max
+	}
+	return false
 }
 
 // MarkJobAsFailedIfAlreadyExceedsMaxAttempts parks a job that used up its
@@ -671,7 +713,21 @@ func (w *Worker) MarkJobAsFailedIfAlreadyExceedsMaxAttempts(ctx context.Context,
 }
 
 // maxTriesFor is the job's own limit when it has one, and the worker's when it
-// does not.
+// does not. A result of zero or less is no limit at all.
+//
+// The PHP is "! is_null($job->maxTries()) ? $job->maxTries() : $maxTries", and
+// it tells three things apart that a Go int cannot: null is "the worker
+// decides", 0 is "never park it", and n is n. attributes.Attributes resolves
+// that by spelling "never park it" as a negative Tries, because zero is the
+// value of a field nobody set.
+//
+// The negative went straight into "attempts >= maxTries", which is true on the
+// first delivery -- so a job asking never to be parked was parked at once,
+// which is the opposite of what it asked for and the reverse of the PHP, where
+// the job would still be running. Callers of this now read a non-positive
+// answer as "no limit", which is what markJobAsFailedIfWillExceedMaxAttempts
+// ("$maxTries > 0") and markJobAsFailedIfAlreadyExceedsMaxAttempts ("$maxTries
+// === 0") each do with their own. Found by audit.
 func (w *Worker) maxTriesFor(j *jobs.Job) int {
 	if own := j.MaxTries(); own != 0 {
 		return own

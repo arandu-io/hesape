@@ -94,7 +94,7 @@
 //
 // # Method by method, so the list can be checked rather than believed
 //
-// Twenty-five public methods of the component have no name here. Each one, with
+// Twenty-six public methods of the component have no name here. Each one, with
 // the ADR 0044 reason number:
 //
 //	BeanstalkdQueue::deleteMessage, ::getPheanstalk, Jobs\BeanstalkdJob::bury,
@@ -131,6 +131,35 @@
 //	    through an accessor because the property is protected. Here it is the
 //	    exported field jobs.Job.UUID, which is the same value getJobId() answers
 //	    and the reason the two are one field.
+//	Queue::fake -- reason 2: it is Facade::swap putting a QueueFake where the
+//	    'queue' binding was, so that everything the application pushes is
+//	    recorded and nothing is worked. There is no container (ADR 0001) and no
+//	    facade (ADR 0002), so there is no binding to swap, and a package-level
+//	    queue a test could swap would be shared mutable state that two tests
+//	    calling t.Parallel would fight over (ADR 0045). What a test writes
+//	    instead is the sync connection over a registry whose handler records
+//	    and does nothing else:
+//
+//	        w := queue.NewWorker(queue.NullQueue{}, queue.WorkerOptions{})
+//
+//	        var worked []string
+//	        w.HandleFunc("invoice.email", func(_ context.Context, _ auth.Grant, j *jobs.Job) error {
+//	            worked = append(worked, j.Name)
+//	            return nil
+//	        })
+//
+//	        emailInvoice(ctx, g, queue.NewSyncQueue(w))
+//
+//	        if len(worked) != 1 {
+//	            t.Fatalf("worked %d jobs, want 1", len(worked))
+//	        }
+//
+//	    The payload is encoded on the way in and decoded on the way out, which
+//	    is the round trip QueueFake only makes when serializeAndRestore was
+//	    asked for -- so a payload that does not survive the queue is found by
+//	    the test that pushed it rather than in production. [NullQueue] is the
+//	    variant for a test that only needs the push to be accepted, and the
+//	    registry is a local value: two tests hold two of them.
 //	CallQueuedClosure::create -- it is here, as [NewCallQueuedClosure]. PHP has
 //	    both a constructor taking an already-wrapped SerializableClosure and a
 //	    create() taking the raw Closure; Go has no closure serialization and

@@ -28,6 +28,11 @@
 // copy of the truth and the day it diverges nobody knows it exists. Reach for
 // Forever rarely.
 //
+// A ttl that has already passed is not an entry: Put and PutMany forget the
+// keys, and Add reports that it wrote nothing, which is what Repository::put,
+// Repository::putMany and Repository::add each do with "$seconds <= 0".
+// Increment is the exception, and its doc comment says why.
+//
 // # The stores
 //
 // ArrayStore is in-process and is the default. FileStore is on disk, shared

@@ -134,13 +134,25 @@ func (r *Repository) Missing(ctx context.Context, g auth.Grant, key string) (boo
 
 // Put stores a value for ttl, replacing whatever was there.
 //
-// It answers Repository::put(). The ttl is required rather than optional:
-// Laravel treats a null ttl as forever, and an entry with no expiry is a second
-// copy of the truth that nobody knows exists. Call Forever when that is what
-// you mean, so it is written down at the call site.
+// It answers Repository::put(). A ttl that has already passed forgets the key
+// rather than writing it -- "if ($seconds <= 0) return $this->forget($key)" --
+// because an entry that expires the moment it is written and an entry that is
+// not there are the same entry, and the shorter of the two ways to say it is
+// the one the caller wrote.
+//
+// This used to return ErrNoTTL and write nothing, which is the opposite: with
+// Put(k, "old", time.Minute) followed by Put(k, "new", 0), the second call was
+// refused and k went on reading "old". The caller had told the cache to stop
+// serving a value and the cache kept serving it. Found by audit.
+//
+// The ttl is still required rather than optional, which is where this parts
+// company with the PHP's default of null: Laravel treats a null ttl as forever,
+// and an entry with no expiry is a second copy of the truth that nobody knows
+// exists. Call Forever when that is what you mean, so it is written down at the
+// call site.
 func (r *Repository) Put(ctx context.Context, g auth.Grant, key string, value any, ttl time.Duration) error {
 	if ttl <= 0 {
-		return ErrNoTTL
+		return r.Forget(ctx, g, key)
 	}
 	r.eventWriting(key, value, ttl)
 	err := r.put(ctx, g, key, value, ttl)
@@ -181,11 +193,11 @@ func (r *Repository) Set(ctx context.Context, g auth.Grant, key string, value an
 // alternative would be a transaction across a store that may not have one --
 // and it is why the method exists here rather than being written slightly
 // differently in each module.
+//
+// A ttl that has already passed forgets the keys, which is the batch spelling
+// of what Put does and the same line of the PHP: "if ($seconds <= 0) return
+// $this->deleteMultiple(array_keys($values))".
 func (r *Repository) PutMany(ctx context.Context, g auth.Grant, values map[string]any, ttl time.Duration) error {
-	if ttl <= 0 {
-		return ErrNoTTL
-	}
-
 	keys := make([]string, 0, len(values))
 	written := make([]any, 0, len(values))
 	for key, value := range values {
@@ -193,6 +205,10 @@ func (r *Repository) PutMany(ctx context.Context, g auth.Grant, values map[strin
 		written = append(written, value)
 	}
 	sort.Sort(byKey{keys: keys, values: written})
+
+	if ttl <= 0 {
+		return r.DeleteMultiple(ctx, g, keys...)
+	}
 
 	if r.events != nil {
 		r.event(events.NewWritingManyKeys(r.GetName(), keys, written, seconds(ttl), r.tagNames()))
@@ -242,6 +258,17 @@ func (r *Repository) SetMultiple(ctx context.Context, g auth.Grant, values map[s
 // of them may do this": the first caller gets true, everybody else gets false,
 // and no two callers get true. A Get followed by a Put is the same code with a
 // race in the middle.
+//
+// A ttl that has already passed adds nothing and reports false, which is
+// Repository::add()'s "if ($seconds <= 0) return false" -- an entry that is
+// expired before it is written was not added. It returned ErrNoTTL, which said
+// the same thing louder and said it differently from Put, and one of the two
+// had to go.
+//
+// The trap that leaves behind is worth knowing: a lock built on Add with a ttl
+// that is computed and comes out zero never acquires, and never says why. The
+// caller is holding the ttl, and the false is the answer to the question it
+// asked.
 func (r *Repository) Add(ctx context.Context, g auth.Grant, key string, value any, ttl time.Duration) (bool, error) {
 	full, err := r.key(ctx, g, key)
 	if err != nil {
@@ -252,7 +279,7 @@ func (r *Repository) Add(ctx context.Context, g auth.Grant, key string, value an
 		return false, err
 	}
 	if ttl <= 0 {
-		return false, ErrNoTTL
+		return false, nil
 	}
 	return r.store.Add(ctx, full, raw, ttl)
 }
@@ -279,6 +306,16 @@ func (r *Repository) Forever(ctx context.Context, g auth.Grant, key string, valu
 // created at the top of an hour is gone an hour later however busy it was.
 //
 // An absent counter starts at zero.
+//
+// A ttl that has already passed is ErrNoTTL, and this is the one of the three
+// writes that keeps its error: Put forgets the key and Add reports that it did
+// not write, because Repository::put() and Repository::add() each say what to
+// do with a ttl that has passed. Repository::increment() has no ttl argument at
+// all -- its stores create the counter with forever -- so there is no body to
+// copy a decision from, and both candidates are worse than an error. Forgetting
+// the key would make Increment(k, 1, 0) delete a counter while reporting that
+// it raised one, and treating it as forever would mint exactly the immortal
+// counter this signature takes a ttl to prevent.
 func (r *Repository) Increment(ctx context.Context, g auth.Grant, key string, delta int64, ttl time.Duration) (int64, error) {
 	full, err := r.key(ctx, g, key)
 	if err != nil {
@@ -798,6 +835,23 @@ func (r *Repository) Array(ctx context.Context, g auth.Grant, key string) ([]any
 // A missing tenant is the exception, and it is deliberate: it is a bug in the
 // caller, not a cache miss, and computing anyway would hide it until the day
 // the value is wrong.
+//
+// A computation that came back with nothing is cached, and this is the one
+// place Remember answers differently from Repository::remember(). The PHP asks
+// "! is_null($value)", so a stored null reads as a miss and the callback runs
+// again on every request; here a miss is ErrNotFound and a stored null is a
+// value, so a callback returning nil twice runs once rather than twice.
+//
+// It is deliberate, and it is the package's existing decision rather than a new
+// one: keeping "not cached" apart from "cached as nothing" is the whole reason
+// ErrNotFound exists -- see Has -- and reading them as one thing here would put
+// back the second meaning of null this package removed. What it buys is
+// negative caching, which is usually the answer worth caching: "this customer
+// has no plan" costs a query to produce and is asked on every request.
+//
+// The cost is that a callback returning the zero value for a reason it expects
+// to change soon is remembered for the whole ttl. Return an error instead when
+// that is a failure, because an error is not cached.
 //
 // There is no stampede protection here, and there is none in Laravel either. N
 // requests missing the same key all compute. Add is the primitive to build it
