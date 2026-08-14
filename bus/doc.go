@@ -81,21 +81,86 @@
 //	UniqueLock.php                -> UniqueLock, PushUnique, ReleaseUnique
 //	UpdatedBatchJobCounts.php     -> UpdatedBatchJobCounts
 //
-// DynamoBatchRepository has no equivalent and will not get one: a second store
-// with a different consistency model is a second set of rules for when a
-// callback fires, and DynamoDB is not a driver this collection carries. Its
-// four public methods go with it -- getDynamoClient(), getTable(),
-// createAwsDynamoTable() and deleteAwsDynamoTable() are the AWS SDK client, the
-// table name and the two DDL calls that make and drop the table.
-// BusServiceProvider has none either -- register() and provides() are the
-// container to register into (ADR 0001).
+// # What is not ported, and why
 //
-// Batch::jsonSerialize() is PHP's JsonSerializable, a language interface that
-// tells json_encode what an object looks like. Go's counterpart is
-// json.Marshaler, and [Batch] is a struct with json tags, so encoding/json
+// With the numbered reason from ADR 0044: (1) a PHP language feature Go does not
+// have, (2) a method that only serves the container, a facade or a service
+// provider, (3) a driver this ecosystem does not carry.
+//
+// DynamoBatchRepository -- reason 3, the whole class. A second store with a
+// different consistency model is a second set of rules for when a callback
+// fires, and DynamoDB is not a driver this collection carries. What is written
+// here instead is [DatabaseBatchRepository], over the SQL table the migration
+// creates, with [Memory] for a test:
+//
+//   - DynamoBatchRepository::getDynamoClient hands out the AWS SDK client the
+//     repository was built with, so that a caller can reach past the repository
+//     to the store. The store here is the application's own database and
+//     [NewDatabaseBatchRepository] is handed it, so a caller that wants it
+//     already has it.
+//   - DynamoBatchRepository::getTable is the table the batches live in. It is
+//     job_batches, created by [Migrations] and named nowhere else, because a
+//     table the framework reads and writes is not one an application renames.
+//   - DynamoBatchRepository::createAwsDynamoTable and
+//     DynamoBatchRepository::deleteAwsDynamoTable are the two DDL calls that
+//     make and drop that table. Schema here is [Migrations], run by `aru
+//     migrate` as a pipeline step and never by the process that uses the table
+//     (RULE 16).
+//
+// BusServiceProvider -- reason 2, the whole class. ADR 0001 removed the
+// container and ADR 0002 the facade:
+//
+//   - BusServiceProvider::register binds Dispatcher as a singleton and aliases
+//     the two dispatcher contracts onto it, then picks the batch repository off
+//     a configuration string. [NewDispatcher] takes the queue and the repository
+//     as arguments, so which store batches land in is a line the application
+//     wrote rather than a string it configured.
+//   - BusServiceProvider::provides lists the five bindings that registration is
+//     deferred for. Nothing is deferred when nothing is resolved by name.
+//
+// Batch::jsonSerialize -- reason 1. It is PHP's JsonSerializable, a language
+// interface that tells json_encode what an object looks like. Go's counterpart
+// is json.Marshaler, and [Batch] is a struct with json tags, so encoding/json
 // reads it directly and there is no hook to implement.
 //
 // Chain has no file of its own in illuminate/bus: Laravel's pending chain lives
 // in Foundation\Bus\PendingChain, which is the skeleton and not the library.
-// It is here because a chain is half of what this package is about.
+// It is here because a chain is half of what this package is about, and
+// Bus::dispatchChain -- the facade method that builds one and dispatches it in
+// the same expression -- is [Dispatcher.DispatchChain].
+//
+// # Bus::fake, and what a test writes instead
+//
+// Bus::fake is reason 2 of ADR 0044 -- a method that only serves the container,
+// a facade or a service provider. It is Facade::swap putting a BusFake where
+// the dispatcher contract was bound, so that everything dispatched anywhere in
+// the application is recorded and nothing runs. There is neither container
+// (ADR 0001) nor facade (ADR 0002), so there is no binding to swap, and a
+// package-level dispatcher a test could swap would be shared mutable state
+// that two tests calling t.Parallel would fight over (ADR 0045).
+//
+// A test builds the dispatcher it wants, in one line, and the handler it maps
+// is the recording:
+//
+//	var ran []string
+//	d := bus.NewDispatcher(nil, bus.NewMemory()).Map(map[string]bus.Handler{
+//		"invoice.email": func(context.Context, auth.Grant, []byte) error {
+//			ran = append(ran, "invoice.email")
+//			return nil
+//		},
+//	})
+//
+//	importInvoices(ctx, g, d)
+//
+//	if len(ran) != 1 {
+//		t.Fatalf("ran %d jobs, want 1", len(ran))
+//	}
+//
+// A nil queue runs every job in this process, which is the half of Bus::fake a
+// test usually wants: assert what the work did, not that it was scheduled. The
+// other half -- assert it was queued and did not run -- is a [Queue] whose one
+// Push method appends to a slice, handed to [NewDispatcher] in place of the
+// nil. That interface has exactly one method for this reason, and [Memory] is
+// the batch repository that needs no table, so a batch is exercised end to end
+// with nothing installed and nothing shared between tests.
 package bus

@@ -93,19 +93,42 @@
 // package, so that this package sits underneath it. A *filesystem.Disk is a
 // [Disk] with no adapter.
 //
-// # What Illuminate has and this does not
+// # What is not ported, and why
 //
-// ImageServiceProvider (register, provides) is a service provider, which this
-// architecture does not have (ADR 0001, ADR 0002): an application builds an
-// [ImageManager] and keeps it.
+// With the numbered reason from ADR 0044: (1) a PHP language feature Go does not
+// have, (2) a method that only serves the container, a facade or a service
+// provider, (3) a driver this ecosystem does not carry.
 //
-// usingGd() and usingImagick() name PHP extensions. [Image.Using] takes the
-// name a driver was registered under, and the one registered here is
-// [StdDriverName].
+// Reason 2, the container and the service provider. ADR 0001 removed the
+// container and ADR 0002 the facade, and an application builds an
+// [ImageManager] and keeps it:
 //
-// ensureRequirementsAreMet() asks whether the intervention/image package is
-// installed. There is nothing to install and nothing to ask.
+//   - ImageServiceProvider::register scopes an [ImageManager] under the name
+//     'image', built with the application so that its getDefaultDriver can read
+//     `images.default` off the configuration. [NewImageManager] takes no
+//     application and defaults to [StdDriverName];
+//     [ImageManager.SetDefaultDriver] is the same choice made in a line the
+//     application wrote.
+//   - ImageServiceProvider::provides lists that one binding, which is what makes
+//     the provider deferrable. Nothing is deferred when nothing is resolved by
+//     name.
 //
-// __serialize() throws to stop an image being serialized. Go has no serializer
-// that would reach into an unexported field, so there is nothing to refuse.
+// Reason 3, a driver this ecosystem does not carry. GD and Imagick are PHP
+// extensions, reached through the intervention/image Composer package; the
+// driver here is this package, on image/jpeg, image/png and image/gif:
+//
+//   - Image::usingGd and Image::usingImagick each name one of those two
+//     extensions and hand it to Image::using. [Image.Using] is here and takes
+//     the name a driver was registered under; the one registered is
+//     [StdDriverName], and another goes in with [ImageManager.Extend].
+//   - InterventionDriver::ensureRequirementsAreMet asks whether the
+//     intervention/image package is installed and throws with the composer
+//     command to run. There is nothing to install: a driver here is a [Driver]
+//     the caller already built, so a missing one is a compile error and a
+//     format with no encoder is named at the encode -- see "Which formats"
+//     above.
+//
+// Reason 1, the PHP language. Image::__serialize throws to stop an image being
+// serialized. Go has no serializer that would reach into an unexported field, so
+// there is nothing to refuse.
 package image

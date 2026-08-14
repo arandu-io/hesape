@@ -77,7 +77,7 @@
 //
 // # Method by method, so the list can be checked rather than believed
 //
-// Twenty-seven public methods of the component have no name here. Each one,
+// Twenty-eight public methods of the component have no name here. Each one,
 // with the ADR 0044 reason number:
 //
 //	AbstractRouteCollection::compile, ::dumper, ::toSymfonyRouteCollection,
@@ -107,6 +107,17 @@
 //	    its own methods. A handler here is an http.Handler the caller
 //	    constructed, and middleware is a pipeline.Middleware value passed to the
 //	    route, so there is no name to resolve and no parameter to inject.
+//	Route::controllerDispatcher -- reason 2: its whole body asks the container
+//	    whether the ControllerDispatcher contract is bound, makes it if it is,
+//	    and otherwise builds the default one over that same container. Both
+//	    halves are the container. What is written here instead is
+//	    [Router.SetControllerDispatcher], which the kernel calls once with the
+//	    dispatcher the application built -- it is the binding, made explicit --
+//	    and [Router.GetControllerDispatcher], which is what a resource route
+//	    reads on the way to its handler. A router that was given none has none,
+//	    and the resource route answers 500 naming the controller and the action
+//	    rather than constructing a default that has no container to resolve a
+//	    controller out of.
 //	Route::setContainer, CompiledRouteCollection::setContainer,
 //	    Router::setContainer, Router::getCurrentRequest and
 //	    Router::prepareResponse -- reason 2: the container again, and the

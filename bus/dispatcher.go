@@ -241,6 +241,21 @@ func (d *Dispatcher) Chain(jobs ...Step) *Chain {
 	return NewChain().AddStep(jobs...)
 }
 
+// DispatchChain pushes a chain of the given jobs, first link first.
+//
+// It is Bus::dispatchChain, which PHP writes on the facade: it builds a pending
+// chain out of the jobs it was handed and dispatches it in the same expression.
+// Chain is the same chain left undispatched, and it is what a caller who still
+// has a queue or a Catch job to name reaches for.
+//
+// The chain goes to this dispatcher's queue. A dispatcher built without one
+// refuses the chain instead of running the first link in process: the rest of a
+// chain travels inside the payload of the link that is running, so a first link
+// that ran without being queued would take the remaining links with it.
+func (d *Dispatcher) DispatchChain(ctx context.Context, g auth.Grant, jobs ...Step) error {
+	return d.Chain(jobs...).Dispatch(ctx, g, d.queue)
+}
+
 // Repository is the batch repository this dispatcher was given, so that a
 // PendingBatch built by Batch can be dispatched against the same one.
 func (d *Dispatcher) Repository() BatchRepository { return d.repository }

@@ -150,6 +150,78 @@ func TestHandledSaysWhatIsMissing(t *testing.T) {
 	}
 }
 
+// TestDispatchChainQueuesTheFirstLinkAndCarriesTheRest covers Bus::dispatchChain:
+// the jobs handed to it become a chain and that chain is dispatched in the same
+// call, so the first link is queued and the others travel inside it.
+func TestDispatchChainQueuesTheFirstLinkAndCarriesTheRest(t *testing.T) {
+	t.Parallel()
+
+	queue := &recorder{}
+	d := bus.NewDispatcher(queue, nil)
+
+	err := d.DispatchChain(context.Background(), grant(),
+		job(t, "export.rows", row{N: 1}),
+		job(t, "export.compress", row{N: 2}),
+		job(t, "export.email", row{N: 3}),
+	)
+	if err != nil {
+		t.Fatalf("DispatchChain: %v", err)
+	}
+
+	if got := queue.names(); len(got) != 1 || got[0] != "export.rows" {
+		t.Fatalf("queued %v, want only export.rows", got)
+	}
+
+	var first row
+	m, err := bus.Batched(queue.all()[0].Payload, &first)
+	if err != nil {
+		t.Fatalf("Batched: %v", err)
+	}
+	if first.N != 1 {
+		t.Errorf("the queued link carries n=%d, want 1", first.N)
+	}
+	if len(m.Chained) != 2 {
+		t.Fatalf("the queued link carries %d remaining links, want 2", len(m.Chained))
+	}
+	if m.Chained[0].Name != "export.compress" || m.Chained[1].Name != "export.email" {
+		t.Errorf("the remaining links are %+v, want compress then email", m.Chained)
+	}
+
+	// The chain runs to its end from the envelope alone, which is what makes
+	// dispatching it in one call the same thing as building it and dispatching it.
+	if got := advance(t, queue, queue.all()[0], nil); got.N != 1 {
+		t.Errorf("the first link replayed as n=%d, want 1", got.N)
+	}
+	if got := queue.names(); len(got) != 2 || got[1] != "export.compress" {
+		t.Fatalf("queued %v, want export.compress second", got)
+	}
+}
+
+// TestDispatchChainRefusesWhatAChainRefuses: DispatchChain is Chain.Dispatch, so
+// the empty chain, the missing tenant and the dispatcher with no queue are
+// reported rather than half-run.
+func TestDispatchChainRefusesWhatAChainRefuses(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	queue := &recorder{}
+
+	if err := bus.NewDispatcher(queue, nil).DispatchChain(ctx, grant()); !errors.Is(err, bus.ErrEmptyChain) {
+		t.Errorf("err = %v, want ErrEmptyChain", err)
+	}
+
+	err := bus.NewDispatcher(queue, nil).DispatchChain(ctx, auth.Grant{}, job(t, "export.rows", row{N: 1}))
+	if !errors.Is(err, bus.ErrNoTenant) {
+		t.Errorf("err = %v, want ErrNoTenant", err)
+	}
+
+	// A dispatcher with no queue cannot push a chain: running the first link in
+	// process would take the links it carries with it.
+	if err := bus.NewDispatcher(nil, nil).DispatchChain(ctx, grant(), job(t, "export.rows", row{N: 1})); err == nil {
+		t.Error("a chain was dispatched with no queue and nobody complained")
+	}
+}
+
 func TestChainRefusesTheEmptyAndTheUngranted(t *testing.T) {
 	t.Parallel()
 

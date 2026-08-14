@@ -49,4 +49,22 @@
 // Every fake is safe to use from a test that calls t.Parallel: records are
 // written and read under a mutex, and a truth test always runs on a copy, so a
 // callback that asks the fake another question does not deadlock.
+//
+// What this package is not, and where the double a test installs comes from.
+//
+// These are the Illuminate types with the Illuminate signatures: the Queue a
+// QueueFake stands in for is push($job, $data, $queue), not the one
+// hesape/queue declares, which carries a context and an auth.Grant. So a fake
+// here does not satisfy a collection contract and is not meant to -- it is
+// what the component looks like, for somebody reading across from the PHP.
+//
+// There is also no way to install one. In Laravel the shortcut is the facade
+// swapping a container binding, and there is neither facade nor container
+// (ADR 0001, ADR 0002); a package-level slot a test could swap would be shared
+// mutable state, which two tests calling t.Parallel would fight over. A double
+// is built and passed, and each package says what to build in its own doc: the
+// dispatcher a test owns in events, transport.Array in mail, Capture in
+// notifications, the sync connection in queue, a dispatcher with no queue in
+// bus, a local adapter over t.TempDir in filesystem, and a Reportable that
+// stops in exception.
 package fakes

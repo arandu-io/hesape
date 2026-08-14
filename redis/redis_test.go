@@ -3,7 +3,10 @@ package redis_test
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -945,5 +948,97 @@ func TestBothHandlersAgreeOnAnUnknownSession(t *testing.T) {
 	}
 	if !errors.Is(inMemory, session.ErrExpired) {
 		t.Errorf("the in-memory handler answers %v", inMemory)
+	}
+}
+
+// TestNothingUsesLuaOrModules is RULE 11 written as a test.
+//
+// RESP is one protocol and four products, and that is only true while nothing
+// here needs a script or a module: Dragonfly, Valkey and KeyDB answer SET NX,
+// WATCH/MULTI/EXEC and ZADD exactly as Redis does, and stop being drop-in
+// replacements the moment an EVAL or a JSON.SET shows up. This adapter exists
+// so the choice between the four is a connection string, so the restriction is
+// the feature.
+//
+// It is why the lock releases through WATCH/MULTI/EXEC instead of the canonical
+// one-line script, why the session index is a sorted set rather than a JSON
+// document, and why both limiters are transactions where Laravel's are EVAL.
+// Each of those is a few lines longer, and a reviewer with a deadline will
+// reach for the script that is shorter -- which is what this test is here to
+// catch, because a script passes every other test in this file.
+//
+// The queue connector has the same test over its own source. Two modules speak
+// RESP and both have to keep the promise.
+func TestNothingUsesLuaOrModules(t *testing.T) {
+	// The exempt file is Connection.eval and Connection.evalsha, which are part
+	// of the Illuminate Connection surface and are the application's hatch once
+	// it has picked a server. Nothing in this module calls them, which is what
+	// every other file being checked proves.
+	const exempt = "connections/commands.go"
+	exemptHere := []string{".Eval(", ".EvalSha("}
+
+	forbidden := []string{
+		// Lua.
+		".Eval(", ".EvalSha(", ".EvalRO(", ".EvalShaRO(",
+		".ScriptLoad(", ".ScriptExists(", ".ScriptFlush(",
+		// Functions, which are Lua with a nicer name.
+		".FunctionLoad(", ".FCall(", ".FCallRO(",
+		// RedisJSON and RediSearch.
+		".JSONSet(", ".JSONGet(", ".JSONMerge(", ".FTSearch(", ".FTCreate(",
+	}
+
+	var sources []string
+	err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		// Test files are skipped because this one names the forbidden calls in
+		// order to look for them, and would report itself.
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		sources = append(sources, filepath.ToSlash(path))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) == 0 {
+		t.Fatal("no source files were read, so this test proves nothing")
+	}
+
+	for _, path := range sources {
+		source, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(source)
+
+		for _, call := range forbidden {
+			if !strings.Contains(text, call) {
+				continue
+			}
+			if path == exempt && slices.Contains(exemptHere, call) {
+				continue
+			}
+			t.Errorf("%s calls %s: RESP stops being four products (RULE 11)", path, call)
+		}
+	}
+
+	// The exemption is checked rather than assumed. If the two passthroughs are
+	// renamed or moved, the carve-out above silently starts covering a file
+	// that no longer needs it -- and the next script to arrive lands in the one
+	// place nobody is looking.
+	commands, err := os.ReadFile(exempt)
+	if err != nil {
+		t.Fatalf("the exempt file is gone, so the exemption above is stale: %v", err)
+	}
+	for _, call := range exemptHere {
+		if !strings.Contains(string(commands), call) {
+			t.Errorf("%s no longer calls %s: drop it from the exemption", exempt, call)
+		}
 	}
 }

@@ -61,7 +61,7 @@
 //
 // # What is not ported, and why
 //
-// Ten public methods of the component have no name here. Each one, with the
+// Twelve public methods of the component have no name here. Each one, with the
 // ADR 0044 reason number:
 //
 //	Filesystem::getRequire and Filesystem::requireOnce -- reason 1: their bodies
@@ -84,6 +84,31 @@
 //	    so that a caller can make a call the adapter does not expose. The S3
 //	    module speaks the protocol over net/http and has no client object to
 //	    hand back.
+//	Storage::fake and Storage::persistentFake -- reason 2, both: each one
+//	    replaces the named disk inside the facade's manager with a local one
+//	    rooted at storage/framework/testing/disks, so that code reaching for
+//	    Storage::disk('s3') gets the local one instead. There is no facade and
+//	    no manager to reach into (ADR 0002), so a test builds the disk it wants
+//	    and passes it, the same way it passes every other collaborator:
+//
+//	        adapter, err := filesystem.NewLocalFilesystemAdapter(t.TempDir())
+//	        if err != nil {
+//	            t.Fatal(err)
+//	        }
+//	        disk := filesystem.NewDisk("local", adapter)
+//
+//	        archiveInvoice(ctx, g, disk)
+//
+//	        disk.AssertExists(ctx, t, g, "invoices/2026-114.pdf")
+//
+//	    t.TempDir() is what makes it Storage::fake rather than a real disk: the
+//	    directory is made for this test and removed when it ends, so two tests
+//	    running in parallel cannot see each other's files -- which the shared
+//	    root under storage/ is why the PHP has to suffix it with the parallel
+//	    testing token. persistentFake is the same two lines with a directory of
+//	    your own in place of t.TempDir(), which is the whole of what the second
+//	    method changes. The assertions are already here, on [Disk]:
+//	    AssertExists, AssertMissing, AssertCount and AssertDirectoryEmpty.
 //
 // join_paths() is here, as [JoinPaths]. It is a free function in the PHP's
 // functions.php, and Go has no snake_case, which is the mechanical change ADR

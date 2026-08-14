@@ -13,11 +13,14 @@
 // returns the default straight, which is the same intent said once. Everything
 // else in the package is identical in both copies.
 //
-// CookieServiceProvider.php is not mirrored, and its register() is the one
-// method of this component with no answer here. It registers the jar in the
-// container and reads config, which ADR 0001 and ADR 0002 rejected: an
-// application builds its own jar with [NewCookieJar] and
-// [CookieJar.SetDefaultPathAndDomain].
+// CookieServiceProvider.php is not mirrored, and CookieServiceProvider::register
+// is the one method of this component with no answer here -- reason 2 of ADR
+// 0044, a method that only serves the container, a facade or a service provider.
+// Its body binds a CookieJar as the 'cookie' singleton and calls
+// setDefaultPathAndDomain with four keys read out of the session configuration,
+// which ADR 0001 and ADR 0002 rejected. What is written here instead is those
+// same two calls, in the application's own wiring and with the four values in
+// sight: [NewCookieJar] and [CookieJar.SetDefaultPathAndDomain].
 //
 // The three methods of CookieValuePrefix are static, and they are reached
 // through the [CookieValuePrefix] value rather than as package functions, so
