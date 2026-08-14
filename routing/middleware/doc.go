@@ -8,7 +8,7 @@
 //
 // Both are here rather than in hesape/http/middleware because both are about
 // the route: the throttle's budget belongs to an endpoint, and the signature is
-// over an address. What is in httpx/middleware applies to every request that
+// over an address. What is in http/middleware applies to every request that
 // arrives, whichever route it is for.
 //
 // It mirrors Illuminate\Routing\Middleware. The files it answers to, in the

@@ -12,7 +12,7 @@ import (
 // hesape/session, hesape/cookie and hesape/exception all produce middleware, and
 // none of them may import this package -- exception in particular is what
 // answers a failure that never reached a Context. With an alias they return
-// pipeline.Middleware[stdhttp.Handler] and it IS an httpx.Middleware; with a
+// pipeline.Middleware[stdhttp.Handler] and it IS an http.Middleware; with a
 // defined type each of them would have to import the layer that calls it, which
 // is the cycle this collection is being reorganised to remove.
 //

@@ -9,7 +9,7 @@ under the names a Laravel developer already knows.
 ```go
 import (
     "github.com/arandu-io/hesape/auth"
-    "github.com/arandu-io/hesape/httpx"
+    "github.com/arandu-io/hesape/http"
     "github.com/arandu-io/hesape/mail"
 )
 ```
@@ -57,9 +57,14 @@ Laravel in 5.1), `Macroable` (a method's receiver must be declared in its own
 package), `Reflection` (it is the mechanism this framework's thesis rejects),
 and `Workbench` (it is a console generator, so it is `aru`).
 
-Two names differ from Illuminate's, both because the standard library already
-has the word: `Http` is `httpx`, and `Testing` is `arandutest` — the precedent
-is `net/http/httptest`.
+One name differs from Illuminate's: `Testing` is `arandutest`, because a path
+segment called `testing` shadows the standard library package every `_test.go`
+imports — the precedent is `net/http/httptest`.
+
+`Http` is `http`, like Illuminate's. A file that imports it alongside
+`net/http` aliases ours, so `http` goes on meaning `net/http` as it does
+everywhere else in Go. ADR 0047 settles it; the collection never shipped an
+`httpx`, and this file used to say it did.
 
 ## Licence
 

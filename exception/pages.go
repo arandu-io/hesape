@@ -28,7 +28,7 @@ type PageData struct {
 //
 // It is declared here rather than imported because the view layer sits above
 // this package and importing it back would be a cycle -- the same reason
-// httpx.Renderer is declared where it is consumed. The view package satisfies
+// http.Renderer is declared where it is consumed. The view package satisfies
 // it without knowing this package exists.
 //
 // Has is what makes the fallback safe: this package asks before it renders, so

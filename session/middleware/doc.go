@@ -12,7 +12,7 @@
 // whose password has changed underneath it, which is what makes "change my
 // password" sign out the other browsers.
 //
-// Both return pipeline.Middleware[http.Handler], which is what httpx.Middleware
+// Both return pipeline.Middleware[http.Handler], which is what http.Middleware
 // is an alias of, so they compose with everything else without this package
 // importing the HTTP layer.
 //

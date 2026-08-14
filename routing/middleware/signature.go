@@ -15,7 +15,7 @@ import (
 //	signed := r.Group(routing.Group{
 //		Prefix:     "/unsubscribe",
 //		Middleware: []pipeline.Middleware[http.Handler]{
-//			middleware.ValidateSignature(signer, httpx.Refuse),
+//			middleware.ValidateSignature(signer, http.Refuse),
 //		},
 //	})
 //

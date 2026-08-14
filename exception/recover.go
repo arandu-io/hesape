@@ -22,7 +22,7 @@ import (
 // and carries the request id so the operator can correlate it with the
 // structured log.
 //
-// It returns a pipeline.Middleware[http.Handler] rather than naming httpx's
+// It returns a pipeline.Middleware[http.Handler] rather than naming http's
 // alias, which is what lets this package produce middleware without importing
 // the routing layer that will call it.
 func Recover(h *Handler) pipeline.Middleware[http.Handler] {

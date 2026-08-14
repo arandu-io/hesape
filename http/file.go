@@ -31,7 +31,7 @@ import (
 func File(c *Context, field string) (filesystem.Upload, error) {
 	f, header, err := c.Request.FormFile(field)
 	if err != nil {
-		return filesystem.Upload{}, fmt.Errorf("httpx: no file arrived in the %q field: %w", field, err)
+		return filesystem.Upload{}, fmt.Errorf("http: no file arrived in the %q field: %w", field, err)
 	}
 	// Closed immediately: Upload.Open opens its own reader, and may be called
 	// more than once. Holding this one would be a descriptor per upload kept for

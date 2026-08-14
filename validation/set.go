@@ -118,7 +118,7 @@ func (s *Set) Source() (file string, line int) { return s.file, s.line }
 //
 // The returned Errors is nil when nothing failed. Assigning it to an error
 // interface makes that interface non-nil even so, because the type is not nil
-// -- callers ask Any(), and httpx.Context.Validate returns a plain nil for
+// -- callers ask Any(), and http.Context.Validate returns a plain nil for
 // exactly this reason.
 func (s *Set) Validate(values url.Values) (Input, Errors) {
 	v := Make(DataFrom(values), s)

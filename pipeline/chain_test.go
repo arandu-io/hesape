@@ -13,7 +13,7 @@ import (
 
 // TestMiddlewareOrder pins the contract: the first middleware in the list is the
 // outermost, so the pipeline order is the order of execution. This is the test
-// that travelled with Chain from httpx, and the assertion is unchanged -- the
+// that travelled with Chain from http, and the assertion is unchanged -- the
 // composition became generic, the order did not.
 func TestMiddlewareOrder(t *testing.T) {
 	var order []string
@@ -55,7 +55,7 @@ func TestChainWithoutMiddlewareReturnsTheHandler(t *testing.T) {
 	}
 }
 
-// TestChainIsGenericOverTheHandler is why the type moved out of httpx: the same
+// TestChainIsGenericOverTheHandler is why the type moved out of http: the same
 // composition has to serve a handler that is not an http.Handler.
 func TestChainIsGenericOverTheHandler(t *testing.T) {
 	type command func(string) string

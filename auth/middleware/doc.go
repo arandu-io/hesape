@@ -13,7 +13,7 @@
 // # The shape of a middleware here
 //
 // Each one is a struct with a Handle method, and Handle is
-// func(http.Handler) http.Handler -- which is what httpx.Middleware is an alias
+// func(http.Handler) http.Handler -- which is what http.Middleware is an alias
 // of, so they compose with pipeline.Chain like everything else. The name is
 // Laravel's (ADR 0044): Handle, never ServeHTTP.
 //

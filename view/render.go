@@ -60,7 +60,7 @@ func Registered() []string {
 	return out
 }
 
-// Renderer draws a view. It is the concrete side of httpx.Renderer.
+// Renderer draws a view. It is the concrete side of http.Renderer.
 type Renderer struct{}
 
 // NewRenderer returns the renderer. The kernel hands it to the router at boot.

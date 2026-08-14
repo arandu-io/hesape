@@ -95,7 +95,7 @@ func NewStartSession(manager *session.SessionManager, locks LockFactory) *StartS
 // Handle is StartSession::handle, with StartSession::handleRequestWhileBlocking
 // and StartSession::handleStatefulRequest behind it.
 //
-// It returns pipeline.Middleware[http.Handler], which is what httpx.Middleware
+// It returns pipeline.Middleware[http.Handler], which is what http.Middleware
 // is an alias of -- so this composes with everything else without this package
 // importing the HTTP layer.
 //

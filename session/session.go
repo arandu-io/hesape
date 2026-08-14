@@ -483,7 +483,7 @@ func (s *RecordStore[T]) DestroyOthers(ctx context.Context, rec Record[T], keepI
 // the sign-in screen: that cookie belongs to the package that writes it, and
 // signing out has to clear it too -- a shared machine changes hands at exactly
 // that moment, and an address remembered before a sign-out is one nobody wants
-// afterwards. See httpx, and the report on this package's move.
+// afterwards. See http, and the report on this package's move.
 func (s *RecordStore[T]) Invalidate(ctx context.Context, w http.ResponseWriter, id string) error {
 	if id != "" {
 		if err := s.handler.Destroy(ctx, id); err != nil {

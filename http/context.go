@@ -43,7 +43,7 @@ func NewContext(w stdhttp.ResponseWriter, r *stdhttp.Request, render Renderer, u
 // Renderer draws a named view with typed data.
 //
 // It is an interface here, and implemented in the view package, for one reason:
-// the view package imports httpx, so httpx importing the view package back would
+// the view package imports http, so http importing the view package back would
 // be a cycle. The kernel wires the concrete one at boot.
 type Renderer interface {
 	Render(ctx context.Context, w stdhttp.ResponseWriter, status int, name string, data any) error
