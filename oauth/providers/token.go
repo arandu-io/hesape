@@ -1,4 +1,4 @@
-package oauthtwo
+package providers
 
 import (
 	"encoding/json"
@@ -43,7 +43,7 @@ func (t AccessToken) Has(key string) bool {
 	return ok
 }
 
-// parseAccessResponse answers OAuthTwoProvider::parseAccessResponse() and the
+// parseAccessResponse answers Provider::parseAccessResponse() and the
 // two overrides of it.
 //
 // Illuminate needs three versions of this method -- parse_str for the base,
@@ -56,7 +56,7 @@ func parseAccessResponse(body []byte) (AccessToken, error) {
 	if strings.HasPrefix(trimmed, "{") {
 		var raw map[string]any
 		if err := json.Unmarshal([]byte(trimmed), &raw); err != nil {
-			return nil, fmt.Errorf("socialite: the access token response is not valid JSON: %w", err)
+			return nil, fmt.Errorf("oauth: the access token response is not valid JSON: %w", err)
 		}
 		out := make(AccessToken, len(raw))
 		for k, v := range raw {
@@ -67,7 +67,7 @@ func parseAccessResponse(body []byte) (AccessToken, error) {
 
 	values, err := url.ParseQuery(trimmed)
 	if err != nil {
-		return nil, fmt.Errorf("socialite: the access token response could not be read: %w", err)
+		return nil, fmt.Errorf("oauth: the access token response could not be read: %w", err)
 	}
 	out := make(AccessToken, len(values))
 	for k := range values {

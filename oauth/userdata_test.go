@@ -1,14 +1,14 @@
-package socialite_test
+package oauth_test
 
 import (
 	"reflect"
 	"testing"
 
-	"github.com/arandu-io/hesape/socialite"
+	"github.com/arandu-io/hesape/oauth"
 )
 
 func TestUserDataKeepsWhatTheProviderSent(t *testing.T) {
-	user := socialite.NewUserData(map[string]any{
+	user := oauth.NewUserData(map[string]any{
 		"id":       float64(1234567),
 		"login":    "grace",
 		"verified": true,
@@ -35,7 +35,7 @@ func TestUserDataKeepsWhatTheProviderSent(t *testing.T) {
 // TestStringConvertsWhatJSONMadeOfIt: an id is a JSON number, and a number
 // printed carelessly reaches the database as 1.234567e+06.
 func TestStringConvertsWhatJSONMadeOfIt(t *testing.T) {
-	user := socialite.NewUserData(map[string]any{
+	user := oauth.NewUserData(map[string]any{
 		"id":       float64(1234567),
 		"score":    2.5,
 		"verified": true,
@@ -59,7 +59,7 @@ func TestStringConvertsWhatJSONMadeOfIt(t *testing.T) {
 }
 
 func TestTheZeroUserDataIsUsable(t *testing.T) {
-	var user socialite.UserData
+	var user oauth.UserData
 	if user.Has("anything") || user.String("anything") != "" || len(user.All()) != 0 {
 		t.Fatal("the zero UserData must answer as an empty one")
 	}

@@ -1,4 +1,4 @@
-package oauthtwo
+package providers
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arandu-io/hesape/socialite"
+	"github.com/arandu-io/hesape/oauth"
 	"github.com/arandu-io/hesape/str"
 )
 
@@ -30,32 +30,32 @@ type HTTPClient interface {
 // is the last thing the process ever does.
 var defaultClient = &http.Client{Timeout: 30 * time.Second}
 
-// OAuthTwoProvider answers Illuminate\Socialite\OAuthTwo\OAuthTwoProvider: the
+// Provider answers Illuminate\Socialite\OAuthTwo\Provider: the
 // authorization code flow, from the redirect out to the user data back.
 //
 // Illuminate's is abstract, and its four subclasses override three endpoints
 // and, in two cases, how the token request is sent. In Go a subclass that
 // changes three strings is three strings, so the four are constructors --
 // [NewGithubProvider], [NewGoogleProvider], [NewFacebookProvider],
-// [NewStripeProvider] -- and [NewOAuthTwoProvider] is the fifth, for a service
+// [NewStripeProvider] -- and [NewProvider] is the fifth, for a service
 // this package does not carry.
 //
 // The flow is two handlers:
 //
 //	// GET /auth/github
-//	store := oauthtwo.NewCookieStateStore(w, r)
-//	provider := oauthtwo.NewGithubProvider(store, id, secret).RedirectURL(callback)
+//	store := providers.NewCookieStateStore(w, r)
+//	provider := providers.NewGithubProvider(store, id, secret).RedirectURL(callback)
 //	provider.Redirect(w, r)
 //
 //	// GET /auth/github/callback
-//	store := oauthtwo.NewCookieStateStore(w, r)
-//	provider := oauthtwo.NewGithubProvider(store, id, secret).RedirectURL(callback)
+//	store := providers.NewCookieStateStore(w, r)
+//	provider := providers.NewGithubProvider(store, id, secret).RedirectURL(callback)
 //	user, token, err := provider.User(r)
 //
 // A provider carries the state store for one request pair and is not safe to
 // share between requests: two people signing in at once would be two goroutines
 // writing one cookie.
-type OAuthTwoProvider struct {
+type Provider struct {
 	state  StateStoreInterface
 	client HTTPClient
 
@@ -88,14 +88,14 @@ type OAuthTwoProvider struct {
 	userDataQuery map[string]string
 }
 
-// NewOAuthTwoProvider answers OAuthTwoProvider::__construct(), with the three
+// NewProvider answers Provider::__construct(), with the three
 // endpoints Illuminate's subclasses supply by overriding a method each.
 //
 // It is the way to reach a provider this package does not carry. The four it
 // does carry have constructors of their own, and those set the scope delimiter
 // and the default scope as well.
-func NewOAuthTwoProvider(state StateStoreInterface, clientID, secret, authEndpoint, accessEndpoint, userDataEndpoint string) *OAuthTwoProvider {
-	return &OAuthTwoProvider{
+func NewProvider(state StateStoreInterface, clientID, secret, authEndpoint, accessEndpoint, userDataEndpoint string) *Provider {
+	return &Provider{
 		state:              state,
 		clientID:           clientID,
 		secret:             secret,
@@ -109,7 +109,7 @@ func NewOAuthTwoProvider(state StateStoreInterface, clientID, secret, authEndpoi
 	}
 }
 
-// GetAuthURL answers OAuthTwoProvider::getAuthUrl(): where to send the browser,
+// GetAuthURL answers Provider::getAuthUrl(): where to send the browser,
 // with the state stored on the way past.
 //
 // Storing the state is the point of the method, not a detail of it. Everything
@@ -118,16 +118,16 @@ func NewOAuthTwoProvider(state StateStoreInterface, clientID, secret, authEndpoi
 //
 // options is Illuminate's optional array, and it is applied last, so a provider
 // asking for prompt=consent or a login_hint can say so.
-func (p *OAuthTwoProvider) GetAuthURL(callbackURL string, options ...map[string]string) (string, error) {
+func (p *Provider) GetAuthURL(callbackURL string, options ...map[string]string) (string, error) {
 	query := url.Values{}
 
 	if p.usesState() {
 		if p.state == nil {
-			return "", errors.New("socialite: this provider has no state store, and the callback cannot be verified without one (pass one, or call Stateless)")
+			return "", errors.New("oauth: this provider has no state store, and the callback cannot be verified without one (pass one, or call Stateless)")
 		}
 		state := str.Random(40)
 		if err := p.state.SetState(state); err != nil {
-			return "", fmt.Errorf("socialite: storing the state: %w", err)
+			return "", fmt.Errorf("oauth: storing the state: %w", err)
 		}
 		query.Set("state", state)
 	}
@@ -154,13 +154,13 @@ func (p *OAuthTwoProvider) GetAuthURL(callbackURL string, options ...map[string]
 // Redirect answers the current Laravel's redirect(): [GetAuthURL] and the 302
 // that goes with it.
 //
-// It sends the browser to the URL set by [OAuthTwoProvider.RedirectURL], which
+// It sends the browser to the URL set by [Provider.RedirectURL], which
 // is also the redirect_uri the provider is told to come back to -- they are one
 // value because a provider that was told one address and sent to another
 // refuses the exchange.
-func (p *OAuthTwoProvider) Redirect(w http.ResponseWriter, r *http.Request) error {
+func (p *Provider) Redirect(w http.ResponseWriter, r *http.Request) error {
 	if p.redirectURL == "" {
-		return errors.New("socialite: this provider has no redirect URL (call RedirectURL with the address the provider will call back)")
+		return errors.New("oauth: this provider has no redirect URL (call RedirectURL with the address the provider will call back)")
 	}
 	target, err := p.GetAuthURL(p.redirectURL)
 	if err != nil {
@@ -170,7 +170,7 @@ func (p *OAuthTwoProvider) Redirect(w http.ResponseWriter, r *http.Request) erro
 	return nil
 }
 
-// GetAccessToken answers OAuthTwoProvider::getAccessToken(): the code in the
+// GetAccessToken answers Provider::getAccessToken(): the code in the
 // callback, exchanged for a token.
 //
 // The state is verified first, and a mismatch is [ErrStateMismatch] before any
@@ -180,14 +180,14 @@ func (p *OAuthTwoProvider) Redirect(w http.ResponseWriter, r *http.Request) erro
 //
 // options is Illuminate's optional array and is applied last, so grant_type can
 // be replaced the way the PHP allows.
-func (p *OAuthTwoProvider) GetAccessToken(r *http.Request, options ...map[string]string) (AccessToken, error) {
+func (p *Provider) GetAccessToken(r *http.Request, options ...map[string]string) (AccessToken, error) {
 	if p.usesState() {
 		if p.state == nil {
-			return nil, errors.New("socialite: this provider has no state store, and the callback cannot be verified without one (pass one, or call Stateless)")
+			return nil, errors.New("oauth: this provider has no state store, and the callback cannot be verified without one (pass one, or call Stateless)")
 		}
 		stored, err := p.state.GetState()
 		if err != nil {
-			return nil, fmt.Errorf("socialite: reading the stored state: %w", err)
+			return nil, fmt.Errorf("oauth: reading the stored state: %w", err)
 		}
 		if err := Verify(stored, r.FormValue("state")); err != nil {
 			return nil, err
@@ -198,9 +198,9 @@ func (p *OAuthTwoProvider) GetAccessToken(r *http.Request, options ...map[string
 		// The provider sends error=access_denied when the person says no, and
 		// saying so is more useful than an empty exchange that fails later.
 		if reason := r.FormValue("error"); reason != "" {
-			return nil, fmt.Errorf("socialite: the provider refused the authorization: %s", reason)
+			return nil, fmt.Errorf("oauth: the provider refused the authorization: %s", reason)
 		}
-		return nil, errors.New("socialite: the callback carries no authorization code")
+		return nil, errors.New("oauth: the callback carries no authorization code")
 	}
 
 	form := url.Values{}
@@ -225,12 +225,12 @@ func (p *OAuthTwoProvider) GetAccessToken(r *http.Request, options ...map[string
 		return nil, err
 	}
 	if token.GetValue() == "" {
-		return nil, fmt.Errorf("socialite: the provider returned no access token: %s", firstLine(string(body)))
+		return nil, fmt.Errorf("oauth: the provider returned no access token: %s", firstLine(string(body)))
 	}
 	return token, nil
 }
 
-// executeAccessRequest answers OAuthTwoProvider::executeAccessRequest().
+// executeAccessRequest answers Provider::executeAccessRequest().
 //
 // Illuminate's base sends a GET with every field in the query string, and two
 // of its four subclasses override it to POST instead. This posts for all of
@@ -238,10 +238,10 @@ func (p *OAuthTwoProvider) GetAccessToken(r *http.Request, options ...map[string
 // document: client_secret in a query string is client_secret in an access log,
 // in a proxy's history and in a Referer header, and no provider requires it
 // there.
-func (p *OAuthTwoProvider) executeAccessRequest(ctx context.Context, form url.Values) ([]byte, error) {
+func (p *Provider) executeAccessRequest(ctx context.Context, form url.Values) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.accessEndpoint, strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, fmt.Errorf("socialite: building the access token request: %w", err)
+		return nil, fmt.Errorf("oauth: building the access token request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
@@ -251,30 +251,30 @@ func (p *OAuthTwoProvider) executeAccessRequest(ctx context.Context, form url.Va
 
 	resp, err := p.GetHTTPClient().Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("socialite: requesting the access token: %w", err)
+		return nil, fmt.Errorf("oauth: requesting the access token: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil, fmt.Errorf("socialite: reading the access token response: %w", err)
+		return nil, fmt.Errorf("oauth: reading the access token response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, fmt.Errorf("socialite: the access token request answered %d: %s", resp.StatusCode, firstLine(string(body)))
+		return nil, fmt.Errorf("oauth: the access token request answered %d: %s", resp.StatusCode, firstLine(string(body)))
 	}
 	return body, nil
 }
 
-// GetUserData answers OAuthTwoProvider::getUserData(): who the token belongs
+// GetUserData answers Provider::getUserData(): who the token belongs
 // to, as the provider describes them.
 //
 // Illuminate puts the token in the query string. This puts it in the
 // Authorization header, because GitHub and Google both stopped accepting it in
 // the query string, and a token in a URL is logged everywhere a secret in a URL
 // is logged.
-func (p *OAuthTwoProvider) GetUserData(ctx context.Context, token AccessToken) (socialite.UserData, error) {
+func (p *Provider) GetUserData(ctx context.Context, token AccessToken) (oauth.UserData, error) {
 	if p.userDataEndpoint == "" {
-		return socialite.UserData{}, errors.New("socialite: this provider has no user data endpoint")
+		return oauth.UserData{}, errors.New("oauth: this provider has no user data endpoint")
 	}
 
 	endpoint := p.userDataEndpoint
@@ -292,147 +292,147 @@ func (p *OAuthTwoProvider) GetUserData(ctx context.Context, token AccessToken) (
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return socialite.UserData{}, fmt.Errorf("socialite: building the user data request: %w", err)
+		return oauth.UserData{}, fmt.Errorf("oauth: building the user data request: %w", err)
 	}
 	req.Header.Set("Authorization", p.userDataAuthScheme+" "+token.GetValue())
 	req.Header.Set("Accept", p.userDataAccept)
 
 	resp, err := p.GetHTTPClient().Do(req)
 	if err != nil {
-		return socialite.UserData{}, fmt.Errorf("socialite: requesting the user data: %w", err)
+		return oauth.UserData{}, fmt.Errorf("oauth: requesting the user data: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return socialite.UserData{}, fmt.Errorf("socialite: reading the user data: %w", err)
+		return oauth.UserData{}, fmt.Errorf("oauth: reading the user data: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return socialite.UserData{}, fmt.Errorf("socialite: the user data request answered %d: %s", resp.StatusCode, firstLine(string(body)))
+		return oauth.UserData{}, fmt.Errorf("oauth: the user data request answered %d: %s", resp.StatusCode, firstLine(string(body)))
 	}
 
 	var raw map[string]any
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return socialite.UserData{}, fmt.Errorf("socialite: the user data is not valid JSON: %w", err)
+		return oauth.UserData{}, fmt.Errorf("oauth: the user data is not valid JSON: %w", err)
 	}
-	return socialite.NewUserData(raw), nil
+	return oauth.NewUserData(raw), nil
 }
 
 // User answers the current Laravel's user(): the callback, verified, exchanged
 // and resolved, in one call.
 //
 // It answers the token as well as the person. Illuminate hangs the token on its
-// User object; a [socialite.UserData] is the provider's own map, and putting
+// User object; a [oauth.UserData] is the provider's own map, and putting
 // this package's data among the provider's is how a caller ends up reading
 // "token" out of a bag where GitHub could have put one of its own.
-func (p *OAuthTwoProvider) User(r *http.Request) (socialite.UserData, AccessToken, error) {
+func (p *Provider) User(r *http.Request) (oauth.UserData, AccessToken, error) {
 	token, err := p.GetAccessToken(r)
 	if err != nil {
-		return socialite.UserData{}, nil, err
+		return oauth.UserData{}, nil, err
 	}
 	user, err := p.GetUserData(r.Context(), token)
 	if err != nil {
-		return socialite.UserData{}, token, err
+		return oauth.UserData{}, token, err
 	}
 	return user, token, nil
 }
 
-// GetStateStore answers OAuthTwoProvider::getStateStore().
-func (p *OAuthTwoProvider) GetStateStore() StateStoreInterface { return p.state }
+// GetStateStore answers Provider::getStateStore().
+func (p *Provider) GetStateStore() StateStoreInterface { return p.state }
 
-// SetStateStore answers OAuthTwoProvider::setStateStore().
-func (p *OAuthTwoProvider) SetStateStore(state StateStoreInterface) *OAuthTwoProvider {
+// SetStateStore answers Provider::setStateStore().
+func (p *Provider) SetStateStore(state StateStoreInterface) *Provider {
 	p.state = state
 	return p
 }
 
-// GetHTTPClient answers OAuthTwoProvider::getHttpClient(), including its
+// GetHTTPClient answers Provider::getHttpClient(), including its
 // fallback: a client nobody supplied is a default one.
-func (p *OAuthTwoProvider) GetHTTPClient() HTTPClient {
+func (p *Provider) GetHTTPClient() HTTPClient {
 	if p.client != nil {
 		return p.client
 	}
 	return defaultClient
 }
 
-// SetHTTPClient answers OAuthTwoProvider::setHttpClient().
-func (p *OAuthTwoProvider) SetHTTPClient(client HTTPClient) *OAuthTwoProvider {
+// SetHTTPClient answers Provider::setHttpClient().
+func (p *Provider) SetHTTPClient(client HTTPClient) *Provider {
 	p.client = client
 	return p
 }
 
-// GetScope answers OAuthTwoProvider::getScope(): what was asked for, or the
+// GetScope answers Provider::getScope(): what was asked for, or the
 // provider's default when nothing was.
-func (p *OAuthTwoProvider) GetScope() []string {
+func (p *Provider) GetScope() []string {
 	if len(p.scope) > 0 {
 		return p.scope
 	}
 	return p.GetDefaultScope()
 }
 
-// GetDefaultScope answers OAuthTwoProvider::getDefaultScope(), which each
+// GetDefaultScope answers Provider::getDefaultScope(), which each
 // subclass overrides and each constructor here sets.
-func (p *OAuthTwoProvider) GetDefaultScope() []string { return p.defaultScope }
+func (p *Provider) GetDefaultScope() []string { return p.defaultScope }
 
-// SetScope answers OAuthTwoProvider::setScope(): the scopes, replacing whatever
+// SetScope answers Provider::setScope(): the scopes, replacing whatever
 // was there.
 //
 // Illuminate takes a string or an array and casts; a variadic tail is that cast.
-func (p *OAuthTwoProvider) SetScope(scope ...string) *OAuthTwoProvider {
+func (p *Provider) SetScope(scope ...string) *Provider {
 	return p.SetScopes(scope...)
 }
 
 // SetScopes answers the current Laravel's setScopes(), which is
-// [OAuthTwoProvider.SetScope] under the name the newer Socialite gave it.
+// [Provider.SetScope] under the name the newer Socialite gave it.
 // Duplicates are dropped, as they are there.
-func (p *OAuthTwoProvider) SetScopes(scopes ...string) *OAuthTwoProvider {
+func (p *Provider) SetScopes(scopes ...string) *Provider {
 	p.scope = unique(scopes)
 	return p
 }
 
 // Scopes answers the current Laravel's scopes(): the given scopes merged with
 // the ones already asked for.
-func (p *OAuthTwoProvider) Scopes(scopes ...string) *OAuthTwoProvider {
+func (p *Provider) Scopes(scopes ...string) *Provider {
 	p.scope = unique(append(append([]string{}, p.scope...), scopes...))
 	return p
 }
 
-// AddScope answers OAuthTwoProvider::addScope(): one more scope.
+// AddScope answers Provider::addScope(): one more scope.
 //
 // Illuminate appends to a list that starts empty, so the first call to this
 // replaces the provider's default rather than adding to it. That is the PHP's
-// behaviour and it is kept: [OAuthTwoProvider.Scopes] is the call that adds to
+// behaviour and it is kept: [Provider.Scopes] is the call that adds to
 // what is already there.
-func (p *OAuthTwoProvider) AddScope(scope string) *OAuthTwoProvider {
+func (p *Provider) AddScope(scope string) *Provider {
 	p.scope = unique(append(p.scope, scope))
 	return p
 }
 
-// GetScopeDelimiter answers OAuthTwoProvider::getScopeDelimiter().
-func (p *OAuthTwoProvider) GetScopeDelimiter() string { return p.scopeDelimiter }
+// GetScopeDelimiter answers Provider::getScopeDelimiter().
+func (p *Provider) GetScopeDelimiter() string { return p.scopeDelimiter }
 
-// SetScopeDelimiter answers OAuthTwoProvider::setScopeDelimiter().
+// SetScopeDelimiter answers Provider::setScopeDelimiter().
 //
 // The PHP assigns from $scopeDelimiter, a variable its own signature does not
 // declare, so the call silently sets the delimiter to null and every scope
 // after it is joined by nothing. This assigns the argument, which is what the
 // method is named for; mirroring the typo would be a method with the right name
 // and the wrong behaviour, and nobody checks those.
-func (p *OAuthTwoProvider) SetScopeDelimiter(delimiter string) *OAuthTwoProvider {
+func (p *Provider) SetScopeDelimiter(delimiter string) *Provider {
 	p.scopeDelimiter = delimiter
 	return p
 }
 
 // RedirectURL answers the current Laravel's redirectUrl(): where the provider
 // sends the browser back to.
-func (p *OAuthTwoProvider) RedirectURL(url string) *OAuthTwoProvider {
+func (p *Provider) RedirectURL(url string) *Provider {
 	p.redirectURL = url
 	return p
 }
 
 // With answers the current Laravel's with(): extra parameters on the
 // authorization request, such as prompt or login_hint.
-func (p *OAuthTwoProvider) With(parameters map[string]string) *OAuthTwoProvider {
+func (p *Provider) With(parameters map[string]string) *Provider {
 	p.parameters = map[string]string{}
 	for k, v := range parameters {
 		p.parameters[k] = v
@@ -447,33 +447,33 @@ func (p *OAuthTwoProvider) With(parameters map[string]string) *OAuthTwoProvider 
 // a convenience. Without the state there is nothing tying the callback to the
 // request that caused it, which is the attack [ErrStateMismatch] describes. Use
 // it where there is genuinely no session, and nowhere else.
-func (p *OAuthTwoProvider) Stateless() *OAuthTwoProvider {
+func (p *Provider) Stateless() *Provider {
 	p.stateless = true
 	return p
 }
 
-// usesState answers OAuthTwoProvider::usesState().
-func (p *OAuthTwoProvider) usesState() bool { return !p.stateless }
+// usesState answers Provider::usesState().
+func (p *Provider) usesState() bool { return !p.stateless }
 
-// formattedScope answers OAuthTwoProvider::getFormattedScope().
-func (p *OAuthTwoProvider) formattedScope() string {
+// formattedScope answers Provider::getFormattedScope().
+func (p *Provider) formattedScope() string {
 	return strings.Join(p.GetScope(), p.scopeDelimiter)
 }
 
 // redirectTarget is the redirect_uri sent to the provider: the one that was
 // configured, and the callback that was passed only when none was.
-func (p *OAuthTwoProvider) redirectTarget(fallback string) string {
+func (p *Provider) redirectTarget(fallback string) string {
 	if p.redirectURL != "" {
 		return p.redirectURL
 	}
 	return fallback
 }
 
-// currentURL answers OAuthTwoProvider::getCurrentUrl().
+// currentURL answers Provider::getCurrentUrl().
 //
 // It is a fallback and not the way this should work. The host comes off the
 // request, which is a header a client wrote, so behind a proxy it is whatever
-// the proxy passed through -- [OAuthTwoProvider.RedirectURL] is the value the
+// the proxy passed through -- [Provider.RedirectURL] is the value the
 // provider is checking against and the one to set.
 func currentURL(r *http.Request) string {
 	if r == nil {

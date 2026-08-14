@@ -1,4 +1,4 @@
-package oauthtwo_test
+package providers_test
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/arandu-io/hesape/socialite/oauthtwo"
+	"github.com/arandu-io/hesape/oauth/providers"
 )
 
 // fakeStore is the state store the PHP test mocks.
@@ -66,8 +66,8 @@ func answering(status int, body string) *fakeClient {
 	}}
 }
 
-func provider(store oauthtwo.StateStoreInterface) *oauthtwo.OAuthTwoProvider {
-	return oauthtwo.NewOAuthTwoProvider(store, "client", "secret",
+func provider(store providers.StateStoreInterface) *providers.Provider {
+	return providers.NewProvider(store, "client", "secret",
 		"https://auth.test/authorize", "https://auth.test/token", "https://auth.test/me")
 }
 
@@ -124,7 +124,7 @@ func TestAuthUrlQueryStringConstruction(t *testing.T) {
 
 func TestGoogleSeparatesScopesWithASpace(t *testing.T) {
 	store := &fakeStore{}
-	raw, err := oauthtwo.NewGoogleProvider(store, "client", "secret").GetAuthURL("https://app.test/callback")
+	raw, err := providers.NewGoogleProvider(store, "client", "secret").GetAuthURL("https://app.test/callback")
 	if err != nil {
 		t.Fatalf("GetAuthURL: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestGoogleSeparatesScopesWithASpace(t *testing.T) {
 	if got := values.Get("scope"); got != "openid profile email" {
 		t.Fatalf("scope = %q, want the three joined by spaces", got)
 	}
-	if got := oauthtwo.NewGoogleProvider(store, "c", "s").GetScopeDelimiter(); got != " " {
+	if got := providers.NewGoogleProvider(store, "c", "s").GetScopeDelimiter(); got != " " {
 		t.Fatalf("delimiter = %q, want a space", got)
 	}
 }
@@ -148,7 +148,7 @@ func TestStateMismatchThrowsException(t *testing.T) {
 	p := provider(store).SetHTTPClient(client)
 
 	r := httptest.NewRequest(http.MethodGet, "/callback?state=bar&code=blah", nil)
-	if _, err := p.GetAccessToken(r); !errors.Is(err, oauthtwo.ErrStateMismatch) {
+	if _, err := p.GetAccessToken(r); !errors.Is(err, providers.ErrStateMismatch) {
 		t.Fatalf("err = %v, want ErrStateMismatch", err)
 	}
 	if len(client.seen) != 0 {
@@ -165,11 +165,11 @@ func TestAnEmptyStateIsAMismatch(t *testing.T) {
 		{"", "something"},
 		{"something", ""},
 	} {
-		if err := oauthtwo.Verify(tc.stored, tc.returned); !errors.Is(err, oauthtwo.ErrStateMismatch) {
+		if err := providers.Verify(tc.stored, tc.returned); !errors.Is(err, providers.ErrStateMismatch) {
 			t.Errorf("Verify(%q, %q) = %v, want ErrStateMismatch", tc.stored, tc.returned, err)
 		}
 	}
-	if err := oauthtwo.Verify("same", "same"); err != nil {
+	if err := providers.Verify("same", "same"); err != nil {
 		t.Fatalf("Verify of two equal states = %v, want nil", err)
 	}
 }
@@ -178,24 +178,24 @@ func TestAnEmptyStateIsAMismatch(t *testing.T) {
 // stated as a test: Illuminate's GithubProvider overrides stateMismatch() to
 // return false, and this does not.
 func TestTheStateIsCheckedForEveryProvider(t *testing.T) {
-	for name, build := range map[string]func(oauthtwo.StateStoreInterface) *oauthtwo.OAuthTwoProvider{
-		"github": func(s oauthtwo.StateStoreInterface) *oauthtwo.OAuthTwoProvider {
-			return oauthtwo.NewGithubProvider(s, "c", "s")
+	for name, build := range map[string]func(providers.StateStoreInterface) *providers.Provider{
+		"github": func(s providers.StateStoreInterface) *providers.Provider {
+			return providers.NewGithubProvider(s, "c", "s")
 		},
-		"google": func(s oauthtwo.StateStoreInterface) *oauthtwo.OAuthTwoProvider {
-			return oauthtwo.NewGoogleProvider(s, "c", "s")
+		"google": func(s providers.StateStoreInterface) *providers.Provider {
+			return providers.NewGoogleProvider(s, "c", "s")
 		},
-		"facebook": func(s oauthtwo.StateStoreInterface) *oauthtwo.OAuthTwoProvider {
-			return oauthtwo.NewFacebookProvider(s, "c", "s")
+		"facebook": func(s providers.StateStoreInterface) *providers.Provider {
+			return providers.NewFacebookProvider(s, "c", "s")
 		},
-		"stripe": func(s oauthtwo.StateStoreInterface) *oauthtwo.OAuthTwoProvider {
-			return oauthtwo.NewStripeProvider(s, "c", "s")
+		"stripe": func(s providers.StateStoreInterface) *providers.Provider {
+			return providers.NewStripeProvider(s, "c", "s")
 		},
 	} {
 		store := &fakeStore{state: "asked-for-this"}
 		p := build(store).SetHTTPClient(answering(http.StatusOK, `{"access_token":"t"}`))
 		r := httptest.NewRequest(http.MethodGet, "/callback?state=somebody-elses&code=blah", nil)
-		if _, err := p.GetAccessToken(r); !errors.Is(err, oauthtwo.ErrStateMismatch) {
+		if _, err := p.GetAccessToken(r); !errors.Is(err, providers.ErrStateMismatch) {
 			t.Errorf("%s: err = %v, want ErrStateMismatch", name, err)
 		}
 	}
@@ -348,9 +348,9 @@ func TestGetUserDataSendsTheTokenInAHeader(t *testing.T) {
 	client := &fakeClient{handler: func(*http.Request) (*http.Response, error) {
 		return respond(http.StatusOK, `{"id":1234567,"login":"grace","name":"Grace"}`), nil
 	}}
-	p := oauthtwo.NewGithubProvider(&fakeStore{}, "client", "secret").SetHTTPClient(client)
+	p := providers.NewGithubProvider(&fakeStore{}, "client", "secret").SetHTTPClient(client)
 
-	user, err := p.GetUserData(context.Background(), oauthtwo.AccessToken{"access_token": "tok"})
+	user, err := p.GetUserData(context.Background(), providers.AccessToken{"access_token": "tok"})
 	if err != nil {
 		t.Fatalf("GetUserData: %v", err)
 	}
@@ -382,7 +382,7 @@ func TestUserAnswersWithBothThePersonAndTheToken(t *testing.T) {
 		return respond(http.StatusOK, `{"sub":"42","email":"grace@example.test"}`), nil
 	}}
 	store := &fakeStore{state: "bar"}
-	p := oauthtwo.NewGoogleProvider(store, "client", "secret").SetHTTPClient(client)
+	p := providers.NewGoogleProvider(store, "client", "secret").SetHTTPClient(client)
 
 	r := httptest.NewRequest(http.MethodGet, "/callback?state=bar&code=blah", nil)
 	user, token, err := p.User(r)
@@ -403,7 +403,7 @@ func TestUserAnswersWithBothThePersonAndTheToken(t *testing.T) {
 func TestStripeAuthenticatesTheTokenRequestWithAHeader(t *testing.T) {
 	store := &fakeStore{state: "bar"}
 	client := answering(http.StatusOK, `{"access_token":"tok","stripe_user_id":"acct_1"}`)
-	p := oauthtwo.NewStripeProvider(store, "client", "sk_test").SetHTTPClient(client)
+	p := providers.NewStripeProvider(store, "client", "sk_test").SetHTTPClient(client)
 
 	r := httptest.NewRequest(http.MethodGet, "/callback?state=bar&code=blah", nil)
 	token, err := p.GetAccessToken(r)
@@ -422,7 +422,7 @@ func TestStripeAuthenticatesTheTokenRequestWithAHeader(t *testing.T) {
 }
 
 func TestScopesMergeAndSetScopesReplace(t *testing.T) {
-	p := oauthtwo.NewGithubProvider(&fakeStore{}, "c", "s")
+	p := providers.NewGithubProvider(&fakeStore{}, "c", "s")
 
 	if got := strings.Join(p.GetScope(), ","); got != "user:email" {
 		t.Fatalf("default scope = %q, want user:email", got)
@@ -528,7 +528,7 @@ func TestRedirectNeedsARedirectURL(t *testing.T) {
 func TestTheCookieStoreKeepsTheStateForOneCallback(t *testing.T) {
 	out := httptest.NewRecorder()
 	first := httptest.NewRequest(http.MethodGet, "/auth/start", nil)
-	store := oauthtwo.NewCookieStateStore(out, first)
+	store := providers.NewCookieStateStore(out, first)
 	if err := store.SetState("the-state"); err != nil {
 		t.Fatalf("SetState: %v", err)
 	}
@@ -538,7 +538,7 @@ func TestTheCookieStoreKeepsTheStateForOneCallback(t *testing.T) {
 		t.Fatalf("%d cookies were set, want one", len(cookies))
 	}
 	c := cookies[0]
-	if c.Name != oauthtwo.StateCookieName || c.Value != "the-state" {
+	if c.Name != providers.StateCookieName || c.Value != "the-state" {
 		t.Fatalf("cookie = %s=%s, want the state", c.Name, c.Value)
 	}
 	if !c.HttpOnly || c.SameSite != http.SameSiteLaxMode {
@@ -549,7 +549,7 @@ func TestTheCookieStoreKeepsTheStateForOneCallback(t *testing.T) {
 	callback := httptest.NewRequest(http.MethodGet, "/auth/callback", nil)
 	callback.AddCookie(c)
 
-	read := oauthtwo.NewCookieStateStore(back, callback)
+	read := providers.NewCookieStateStore(back, callback)
 	got, err := read.GetState()
 	if err != nil {
 		t.Fatalf("GetState: %v", err)
@@ -564,7 +564,7 @@ func TestTheCookieStoreKeepsTheStateForOneCallback(t *testing.T) {
 }
 
 func TestTheCookieStoreAnswersEmptyWhenNothingWasStored(t *testing.T) {
-	store := oauthtwo.NewCookieStateStore(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/callback", nil))
+	store := providers.NewCookieStateStore(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/callback", nil))
 	got, err := store.GetState()
 	if err != nil {
 		t.Fatalf("GetState: %v", err)
@@ -574,7 +574,7 @@ func TestTheCookieStoreAnswersEmptyWhenNothingWasStored(t *testing.T) {
 	}
 	// And an empty state never verifies, which is what makes the missing
 	// cookie a refusal rather than a pass.
-	if err := oauthtwo.Verify(got, "anything"); !errors.Is(err, oauthtwo.ErrStateMismatch) {
+	if err := providers.Verify(got, "anything"); !errors.Is(err, providers.ErrStateMismatch) {
 		t.Fatalf("err = %v, want ErrStateMismatch", err)
 	}
 }
@@ -595,7 +595,7 @@ func TestTheWholeFlow(t *testing.T) {
 	// The redirect.
 	out := httptest.NewRecorder()
 	start := httptest.NewRequest(http.MethodGet, "/auth/start", nil)
-	p := provider(oauthtwo.NewCookieStateStore(out, start)).
+	p := provider(providers.NewCookieStateStore(out, start)).
 		RedirectURL("https://app.test/callback").
 		SetHTTPClient(client)
 	if err := p.Redirect(out, start); err != nil {
@@ -613,7 +613,7 @@ func TestTheWholeFlow(t *testing.T) {
 	for _, c := range out.Result().Cookies() {
 		callback.AddCookie(c)
 	}
-	q := provider(oauthtwo.NewCookieStateStore(back, callback)).
+	q := provider(providers.NewCookieStateStore(back, callback)).
 		RedirectURL("https://app.test/callback").
 		SetHTTPClient(client)
 
@@ -630,10 +630,10 @@ func TestTheWholeFlow(t *testing.T) {
 
 	// And the same callback presented a second time is refused, because the
 	// state went with the first one.
-	replay := provider(oauthtwo.NewCookieStateStore(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/auth/callback?code=the-code&state="+state, nil))).
+	replay := provider(providers.NewCookieStateStore(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/auth/callback?code=the-code&state="+state, nil))).
 		SetHTTPClient(client)
 	replayed := httptest.NewRequest(http.MethodGet, "/auth/callback?code=the-code&state="+state, nil)
-	if _, err := replay.GetAccessToken(replayed); !errors.Is(err, oauthtwo.ErrStateMismatch) {
+	if _, err := replay.GetAccessToken(replayed); !errors.Is(err, providers.ErrStateMismatch) {
 		t.Fatalf("err = %v, want the replay refused", err)
 	}
 }

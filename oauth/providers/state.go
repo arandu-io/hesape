@@ -1,4 +1,4 @@
-package oauthtwo
+package providers
 
 import (
 	"crypto/subtle"
@@ -21,7 +21,7 @@ import (
 // The state is what closes it. A random string is stored before the redirect
 // and compared on the way back, so a callback nobody here asked for has nothing
 // to match.
-var ErrStateMismatch = errors.New("socialite: the state in the callback does not match the one that was stored")
+var ErrStateMismatch = errors.New("oauth: the state in the callback does not match the one that was stored")
 
 // StateStoreInterface answers
 // Illuminate\Socialite\OAuthTwo\StateStoreInterface: where the state waits
@@ -85,8 +85,8 @@ const stateLifetime = 10 * time.Minute
 // One store serves one request pair, because it holds the writer it sets the
 // cookie on:
 //
-//	store := oauthtwo.NewCookieStateStore(w, r)
-//	provider := oauthtwo.NewGithubProvider(store, id, secret)
+//	store := providers.NewCookieStateStore(w, r)
+//	provider := providers.NewGithubProvider(store, id, secret)
 type CookieStateStore struct {
 	w http.ResponseWriter
 	r *http.Request
@@ -118,7 +118,7 @@ func (s *CookieStateStore) path() string {
 // SetState answers StateStoreInterface::setState().
 func (s *CookieStateStore) SetState(state string) error {
 	if s.w == nil {
-		return errors.New("socialite: this state store has no response to write the cookie to")
+		return errors.New("oauth: this state store has no response to write the cookie to")
 	}
 	http.SetCookie(s.w, &http.Cookie{
 		Name:     s.name(),
@@ -144,7 +144,7 @@ func (s *CookieStateStore) SetState(state string) error {
 // Laravel's session pull() does.
 func (s *CookieStateStore) GetState() (string, error) {
 	if s.r == nil {
-		return "", errors.New("socialite: this state store has no request to read the cookie from")
+		return "", errors.New("oauth: this state store has no request to read the cookie from")
 	}
 	c, err := s.r.Cookie(s.name())
 	if err != nil {

@@ -1,4 +1,4 @@
-package oauthtwo
+package providers
 
 // The four providers the clone carries, as four constructors.
 //
@@ -18,9 +18,9 @@ package oauthtwo
 // delimiter of each provider, and the default scopes where they still exist.
 
 // NewFacebookProvider answers Illuminate\Socialite\OAuthTwo\FacebookProvider.
-func NewFacebookProvider(state StateStoreInterface, clientID, secret string) *OAuthTwoProvider {
+func NewFacebookProvider(state StateStoreInterface, clientID, secret string) *Provider {
 	const version = "v23.0"
-	p := NewOAuthTwoProvider(state, clientID, secret,
+	p := NewProvider(state, clientID, secret,
 		"https://www.facebook.com/"+version+"/dialog/oauth",
 		"https://graph.facebook.com/"+version+"/oauth/access_token",
 		"https://graph.facebook.com/"+version+"/me",
@@ -40,8 +40,8 @@ func NewFacebookProvider(state StateStoreInterface, clientID, secret string) *OA
 // Illuminate's overrides stateMismatch() to return false, which turns the state
 // check off for GitHub alone. That override is not here; the package comment
 // says why.
-func NewGithubProvider(state StateStoreInterface, clientID, secret string) *OAuthTwoProvider {
-	p := NewOAuthTwoProvider(state, clientID, secret,
+func NewGithubProvider(state StateStoreInterface, clientID, secret string) *Provider {
+	p := NewProvider(state, clientID, secret,
 		"https://github.com/login/oauth/authorize",
 		"https://github.com/login/oauth/access_token",
 		"https://api.github.com/user",
@@ -56,8 +56,8 @@ func NewGithubProvider(state StateStoreInterface, clientID, secret string) *OAut
 }
 
 // NewGoogleProvider answers Illuminate\Socialite\OAuthTwo\GoogleProvider.
-func NewGoogleProvider(state StateStoreInterface, clientID, secret string) *OAuthTwoProvider {
-	p := NewOAuthTwoProvider(state, clientID, secret,
+func NewGoogleProvider(state StateStoreInterface, clientID, secret string) *Provider {
+	p := NewProvider(state, clientID, secret,
 		"https://accounts.google.com/o/oauth2/auth",
 		"https://www.googleapis.com/oauth2/v4/token",
 		"https://www.googleapis.com/oauth2/v3/userinfo",
@@ -72,11 +72,11 @@ func NewGoogleProvider(state StateStoreInterface, clientID, secret string) *OAut
 // NewStripeProvider answers Illuminate\Socialite\OAuthTwo\StripeProvider.
 //
 // Stripe Connect has no user data endpoint -- Illuminate's
-// getUserDataEndpoint() returns an empty string -- so [OAuthTwoProvider.User]
-// and [OAuthTwoProvider.GetUserData] fail on it, saying so. What comes back
+// getUserDataEndpoint() returns an empty string -- so [Provider.User]
+// and [Provider.GetUserData] fail on it, saying so. What comes back
 // from the exchange is the connected account's id, in the token.
-func NewStripeProvider(state StateStoreInterface, clientID, secret string) *OAuthTwoProvider {
-	p := NewOAuthTwoProvider(state, clientID, secret,
+func NewStripeProvider(state StateStoreInterface, clientID, secret string) *Provider {
+	p := NewProvider(state, clientID, secret,
 		"https://connect.stripe.com/oauth/authorize",
 		"https://connect.stripe.com/oauth/token",
 		"",
