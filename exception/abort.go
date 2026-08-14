@@ -31,10 +31,28 @@ type HTTPError struct {
 	Message string
 	// Err is the cause, when there was one. It is reported and never shown.
 	Err error
+	// Headers are what the answer carries besides the status: the Retry-After
+	// of a 429, the WWW-Authenticate of a 401.
+	//
+	// It is HttpException::getHeaders, which every displayer in the PHP copies
+	// onto the response. Nothing here had it, so a 429 went out with no
+	// Retry-After and a client had nothing to obey. Abort does not take them --
+	// the common failure has none -- so an answer that carries headers is
+	// written as the value it is:
+	//
+	//	&exception.HTTPError{
+	//		Status:  http.StatusTooManyRequests,
+	//		Headers: http.Header{"Retry-After": {"30"}},
+	//	}
+	Headers http.Header
 }
 
-// Error implements error. It carries the status because this string ends up in
-// a log line, where the number is the first thing anybody looks for.
+// Error has no Illuminate counterpart: it is what implements the error
+// interface here, where PHP has a base Exception the engine already knows how
+// to print.
+//
+// It carries the status because this string ends up in a log line, where the
+// number is the first thing anybody looks for.
 func (e *HTTPError) Error() string {
 	msg := e.Message
 	if msg == "" {
@@ -47,10 +65,11 @@ func (e *HTTPError) Error() string {
 	return out
 }
 
-// Unwrap exposes the cause to errors.Is and errors.As.
+// Unwrap has no Illuminate counterpart: it is what answers errors.Is and
+// errors.As here, exposing the cause the way PHP walks its own previous chain.
 func (e *HTTPError) Unwrap() error { return e.Err }
 
-// Abort is Laravel's abort() helper, as a value.
+// Abort is Application::abort -- what the abort() helper calls -- as a value.
 //
 //	return exception.Abort(http.StatusNotFound, "no invoice with that number")
 //
@@ -69,8 +88,8 @@ func Abort(status int, message string) error {
 	return &HTTPError{Status: status, Message: message}
 }
 
-// AbortIf is Laravel's abort_if(): the failure when the condition holds, and
-// nil when it does not.
+// AbortIf is the abort_if() helper, which throws through Application::abort:
+// the failure when the condition holds, and nil when it does not.
 //
 //	if err := exception.AbortIf(invoice.Locked, http.StatusConflict, "this invoice is closed"); err != nil {
 //		return err
@@ -86,8 +105,8 @@ func AbortIf(condition bool, status int, message string) error {
 	return Abort(status, message)
 }
 
-// AbortUnless is Laravel's abort_unless(): the failure when the condition does
-// not hold.
+// AbortUnless is the abort_unless() helper, which throws through
+// Application::abort: the failure when the condition does not hold.
 //
 //	if err := exception.AbortUnless(invoice != nil, http.StatusNotFound, ""); err != nil {
 //		return err
@@ -96,7 +115,8 @@ func AbortUnless(condition bool, status int, message string) error {
 	return AbortIf(!condition, status, message)
 }
 
-// StatusOf reports the HTTP status an error asks for, and whether it asked.
+// StatusOf is Handler::isHttpException and the getStatusCode that follows it,
+// in one answer: the HTTP status an error asks for, and whether it asked.
 //
 // It is what the routing layer calls with whatever a controller action
 // returned. False means nobody claimed the error, which is a 500 and, in

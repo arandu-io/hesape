@@ -24,15 +24,21 @@ type Module struct {
 	done chan struct{}
 }
 
-// NewModule returns the module with no relay: the table exists, events are
-// stored, and nothing publishes them yet.
+// NewModule has no Illuminate counterpart: it returns the module with no relay,
+// so the table exists, events are stored, and nothing publishes them yet.
+//
+// The PHP's wiring is EventServiceProvider::register, which binds the dispatcher
+// into the container. There is no container and no service provider (ADR 0001);
+// a module is the Arandu contract that replaces both, and it wires nothing --
+// the application does that in bootstrap/app.go.
 //
 // That is a useful state rather than a broken one. Storing is what cannot be
 // recovered later; publishing can start on the day there is something to
 // publish to.
 func NewModule() *Module { return &Module{} }
 
-// WithRelay returns the module running the relay in this process.
+// WithRelay has no Illuminate counterpart: it returns the module running the
+// relay in this process.
 //
 // In-process, like the scheduler and for the same reason: a second deployable
 // for background work is a second thing to monitor, page on, and forget to
@@ -40,10 +46,13 @@ func NewModule() *Module { return &Module{} }
 // each one publishes every event.
 func WithRelay(r *Relay) *Module { return &Module{relay: r} }
 
-// Name is the module identifier.
+// Name has no Illuminate counterpart: it is the module identifier, and the
+// module contract is Arandu's rather than Laravel's.
 func (*Module) Name() string { return "events" }
 
-// Start begins the relay loop, and only the process that serves calls it.
+// Start has no Illuminate counterpart: it begins the relay loop, and only the
+// process that serves calls it. There is nothing to start in Laravel, because
+// there is nothing to relay.
 //
 // It used to be Boot, which every command calls: each `aru work` replica ran a
 // relay of its own, and so did `aru routes`. The lock made the duplicate
@@ -66,7 +75,8 @@ func (m *Module) Start(ctx context.Context) error {
 	return nil
 }
 
-// Close stops the relay and waits for the pass in flight.
+// Close has no Illuminate counterpart: it stops the relay and waits for the pass
+// in flight. PHP has no long-lived process to shut down.
 //
 // Waiting matters: a pass interrupted between publishing and marking published
 // delivers the event again on the next start, and that is the duplicate this
@@ -97,7 +107,8 @@ const maxLag = time.Minute
 // health check: by the time the health check trips, somebody is already paged.
 const hintLag = 30 * time.Second
 
-// Diagnose says what is wrong with event delivery, in a sentence.
+// Diagnose has no Illuminate counterpart: it says what is wrong with event
+// delivery, in a sentence.
 //
 // This is the hint doc 27 asks for: "invoice.paid has been waiting four minutes
 // -- is the relay running?". It shows up on the error page, next to the failure
@@ -123,7 +134,8 @@ func (m *Module) Diagnose(ctx context.Context) []string {
 	return out
 }
 
-// Health fails when the outbox is falling behind.
+// Health has no Illuminate counterpart: it fails when the outbox is falling
+// behind.
 //
 // A relay that stopped looks exactly like a relay with nothing to do, and the
 // age of the oldest pending event is what tells them apart. Without this, the

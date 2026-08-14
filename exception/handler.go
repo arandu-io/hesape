@@ -136,7 +136,8 @@ type mapping struct {
 	to   func(error) error
 }
 
-// NewHandler returns the handler for a configuration.
+// NewHandler is Handler::__construct, which takes the container this collection
+// does not have (ADR 0001): the configuration arrives as a value instead.
 func NewHandler(cfg Config) *Handler {
 	return &Handler{
 		cfg:       cfg,
@@ -145,7 +146,8 @@ func NewHandler(cfg Config) *Handler {
 	}
 }
 
-// Report writes the failure to the log, unless something silenced it.
+// Report is Handler::report: it writes the failure to the log, unless something
+// silenced it.
 //
 // The level comes from the status and not from a knob: below 500 the
 // application answered on purpose and it is a warning, 500 and above nobody
@@ -163,7 +165,8 @@ func (h *Handler) Report(ctx context.Context, err error) {
 	h.reportThrowable(ctx, err)
 }
 
-// ShouldReport reports whether the error would be written to the log.
+// ShouldReport is Handler::shouldReport: whether the error would be written to
+// the log.
 func (h *Handler) ShouldReport(err error) bool { return !h.shouldntReport(err) }
 
 // reportThrowable reports through the error's own Report method, then through
@@ -287,7 +290,9 @@ func isComparable(err error) bool {
 	return t != nil && t.Comparable()
 }
 
-// Render answers an error a handler returned.
+// Render is Handler::render, writing the answer instead of returning one.
+//
+// It answers an error a handler returned.
 //
 // This is the path that did not exist: every error leaving a controller became
 // a panic, and every panic became 500, so an authorization refusal and a
@@ -295,19 +300,28 @@ func isComparable(err error) bool {
 // through Abort, or through the sentinel table in classify -- and what it says
 // is the answer.
 //
-// It reports before it renders, because a response written to a client that
-// went away is still a failure somebody has to know about.
+// It does not report. Report and Render are the two halves the type doc
+// separates, and the caller calls both -- which is what the kernel does in the
+// PHP, where handle() reports and then renders. This used to report on the way
+// in, so an application written that way logged every failure twice.
 func (h *Handler) Render(w http.ResponseWriter, r *http.Request, err error) {
 	if err == nil {
 		return
 	}
-	h.Report(r.Context(), err)
 
 	err = h.mapException(err)
 
+	// RespondUsing prepares the response, so it runs before anything has been
+	// written: a header set after WriteHeader never leaves the process, which
+	// made the callback a no-op for the one thing it is mostly used for. A
+	// callback that answered the request itself is the answer, and nothing else
+	// runs -- that is the PHP returning a response of its own from here.
+	if h.finalizeRenderedResponse(w, r, err) {
+		return
+	}
+
 	// A callback that answered is the answer, and nothing else runs.
 	if h.renderViaCallbacks(w, r, err) {
-		h.finalizeRenderedResponse(w, r, err)
 		return
 	}
 
@@ -316,7 +330,6 @@ func (h *Handler) Render(w http.ResponseWriter, r *http.Request, err error) {
 	// worth more than an empty Stack section and less than the truth, and the
 	// page does not claim otherwise.
 	h.answer(w, r, err, err, Capture(3, h.cfg.AppModule))
-	h.finalizeRenderedResponse(w, r, err)
 }
 
 // renderViaCallbacks tries to answer through the callbacks Renderable
@@ -337,18 +350,23 @@ func (h *Handler) renderViaCallbacks(w http.ResponseWriter, r *http.Request, err
 	return false
 }
 
-// finalizeRenderedResponse gives RespondUsing the last word on the response.
-func (h *Handler) finalizeRenderedResponse(w http.ResponseWriter, r *http.Request, err error) {
+// finalizeRenderedResponse gives RespondUsing the response before it is
+// written, and reports whether the callback answered it itself.
+func (h *Handler) finalizeRenderedResponse(w http.ResponseWriter, r *http.Request, err error) bool {
 	h.mu.Lock()
 	finalize := h.finalizeResponse
 	h.mu.Unlock()
-	if finalize != nil {
-		finalize(w, r, err)
+	if finalize == nil {
+		return false
 	}
+
+	p := &probe{ResponseWriter: w}
+	finalize(p, r, err)
+	return p.wrote
 }
 
-// RenderForConsole answers a failure outside a request: a command, a job, a
-// scheduled task.
+// RenderForConsole is Handler::renderForConsole: the answer to a failure
+// outside a request -- a command, a job, a scheduled task.
 //
 // The same classification, none of the HTML. A status is printed when the error
 // claimed one, because a command that hits a 403 from a policy should say so
@@ -368,6 +386,7 @@ func (h *Handler) RenderForConsole(w io.Writer, err error) {
 // panicked with -- and err is the same thing when it happened to be an error.
 func (h *Handler) answer(w http.ResponseWriter, r *http.Request, value any, err error, frames []StackFrame) {
 	status, known := classify(err)
+	applyErrorHeaders(w, err)
 
 	if h.shouldReturnJSON(r, err) {
 		h.renderJSON(w, r, statusOr500(status, known), messageFor(err, status))
@@ -377,7 +396,7 @@ func (h *Handler) answer(w http.ResponseWriter, r *http.Request, value any, err 
 	// Nobody claimed it, so it is a defect rather than an answer, and in
 	// development a defect is worth a page that says where it came from.
 	if !known && h.cfg.Dev {
-		h.renderDebug(w, r, value, frames)
+		h.renderDebug(w, r, statusOr500(status, known), value, frames)
 		return
 	}
 
@@ -475,6 +494,25 @@ func messageFor(err error, status int) string {
 		return he.Message
 	}
 	return statusMessage(statusOr500(status, status != 0))
+}
+
+// applyErrorHeaders copies onto the response what the error asked to carry.
+//
+// It is the $exception->getHeaders() that every displayer in the PHP passes to
+// the Response it builds. Nothing here did it, so a 429 went out with no
+// Retry-After and a 401 with no WWW-Authenticate -- a status the client could
+// read and no instruction it could obey. It runs before anything is written,
+// because a header set after WriteHeader is a header nobody receives.
+func applyErrorHeaders(w http.ResponseWriter, err error) {
+	var he *HTTPError
+	if !errors.As(err, &he) || len(he.Headers) == 0 {
+		return
+	}
+	for key, values := range he.Headers {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
 }
 
 func statusOr500(status int, known bool) int {

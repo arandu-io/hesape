@@ -275,3 +275,131 @@ func TestThrottleUsingCapsHowOftenAnErrorIsReported(t *testing.T) {
 		t.Fatalf("%d lines, want the throttle to have stopped at two", lines.Len())
 	}
 }
+
+// TestAThrottleOfNoAttemptsNeverReports: MaxAttempts was read as "no throttle
+// asked for" and the error was reported every time -- the opposite answer. The
+// PHP hands the limit to the rate limiter, which allows zero attempts and
+// therefore reports nothing, and it is what an application writes when it wants
+// an error counted somewhere else and never logged.
+func TestAThrottleOfNoAttemptsNeverReports(t *testing.T) {
+	h, ctx, lines := reporting(t, exception.Config{})
+
+	h.ThrottleUsing(func(*declined) exception.Throttle {
+		return exception.Throttle{Key: "silenced"}
+	})
+
+	for range 3 {
+		h.Report(ctx, &declined{Reason: "expired card"})
+	}
+
+	if lines.Len() != 0 {
+		t.Fatalf("%d lines, want none: a throttle of no attempts reports nothing", lines.Len())
+	}
+}
+
+// TestAnUnlimitedThrottleReportsEveryTime is Limit::none(), which is what the
+// PHP falls back to when no callback answered.
+func TestAnUnlimitedThrottleReportsEveryTime(t *testing.T) {
+	h, ctx, lines := reporting(t, exception.Config{})
+
+	h.ThrottleUsing(func(*declined) exception.Throttle { return exception.Unlimited })
+
+	for range 3 {
+		h.Report(ctx, &declined{Reason: "expired card"})
+	}
+
+	if lines.Len() != 3 {
+		t.Fatalf("%d lines, want all three", lines.Len())
+	}
+}
+
+// causes is an error that carries several others, which makes it a struct with
+// a slice in it -- and a value of that type cannot be compared with ==.
+//
+// Go's way of asking "is this that error" about a type like this is an Is
+// method, which is what errors.Is calls and what the PHP's instanceof answers
+// for every exception it looks at.
+type causes struct{ of []error }
+
+func (c causes) Error() string { return "several things went wrong" }
+
+func (c causes) Is(target error) bool { _, ok := target.(causes); return ok }
+
+// TestIgnoreAcceptsAnErrorThatCannotBeCompared: the list membership test was
+// item == target, and == on two interfaces panics when their dynamic type is the
+// same and not comparable. Two errors of one such type took the process down
+// inside Ignore -- while reportThrowable next door already guarded against
+// exactly this.
+func TestIgnoreAcceptsAnErrorThatCannotBeCompared(t *testing.T) {
+	first := causes{of: []error{errors.New("a")}}
+	second := causes{of: []error{errors.New("b")}}
+
+	h, ctx, lines := reporting(t, exception.Config{})
+	h.Ignore(first)
+	h.Ignore(second)
+
+	h.Report(ctx, first)
+	h.Report(ctx, second)
+	if lines.Len() != 0 {
+		t.Fatalf("%d lines, want both ignored: %v", lines.Len(), lines.All())
+	}
+
+	h.StopIgnoring(first)
+	h.Report(ctx, first)
+	if lines.Len() != 1 {
+		t.Fatalf("%d lines, want the error back in the log once it stopped being ignored", lines.Len())
+	}
+}
+
+// TestLevelRegisteredTwiceKeepsTheLast: the levels were a list read from the
+// front, so the first registration won. The PHP writes $this->levels[$type],
+// which is an assignment: the last one wins.
+func TestLevelRegisteredTwiceKeepsTheLast(t *testing.T) {
+	noisy := errors.New("the third-party API was slow again")
+	h, ctx, lines := reporting(t, exception.Config{})
+
+	h.Level(noisy, slog.LevelWarn)
+	h.Level(noisy, slog.LevelDebug)
+	h.Report(ctx, noisy)
+
+	all := lines.All()
+	if len(all) != 1 || all[0].Level != slog.LevelDebug {
+		t.Fatalf("lines = %v, want one line at DEBUG, which is what was registered last", all)
+	}
+}
+
+// TestRenderDoesNotReport: it reported on the way in, so an application that
+// followed the PHP -- report, then render, which is what the kernel does there
+// -- logged every failure twice.
+func TestRenderDoesNotReport(t *testing.T) {
+	h, ctx, lines := reporting(t, exception.Config{})
+	failure := exception.Abort(http.StatusConflict, "this invoice is closed")
+
+	h.Report(ctx, failure)
+	h.Render(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx), failure)
+
+	if lines.Len() != 1 {
+		t.Fatalf("%d lines, want the one the caller asked for: %v", lines.Len(), lines.All())
+	}
+}
+
+// TestRespondUsingReachesTheClient: the callback ran after the response had been
+// written, and a header set after WriteHeader never leaves the process. The
+// recorder's Result() is the snapshot taken when the status line went out, which
+// is what the client actually got.
+func TestRespondUsingReachesTheClient(t *testing.T) {
+	h := exception.NewHandler(exception.Config{})
+	h.RespondUsing(func(w http.ResponseWriter, _ *http.Request, _ error) {
+		w.Header().Set("X-Answered-By", "the application")
+	})
+
+	rec := httptest.NewRecorder()
+	h.Render(rec, httptest.NewRequest(http.MethodGet, "/", nil), exception.Abort(http.StatusNotFound, ""))
+
+	if got := rec.Result().Header.Get("X-Answered-By"); got != "the application" {
+		t.Fatalf("the client got X-Answered-By = %q, want the callback's header", got)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want the page to have answered as well", rec.Code)
+	}
+}

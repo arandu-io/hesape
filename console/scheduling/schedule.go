@@ -265,7 +265,9 @@ func (s *Schedule) ServerShouldRun(ctx context.Context, event *Event, at time.Ti
 	return answer, nil
 }
 
-// ForgetMutexCache drops what ServerShouldRun remembered.
+// ForgetMutexCache has no Illuminate counterpart: it drops what ServerShouldRun
+// remembered. PHP never clears Schedule::$mutexCache, because there the process
+// is one schedule:run and it exits at the end of the tick.
 //
 // The cache is scoped to one tick: the runner calls this between them, and
 // without it a replica that lost one window would lose every window afterwards.
@@ -275,7 +277,7 @@ func (s *Schedule) ForgetMutexCache() { clear(s.mutexCache) }
 //
 // It answers Schedule::dueEvents.
 func (s *Schedule) DueEvents(at time.Time) []*Event {
-	down := s.DownForMaintenance != nil && s.DownForMaintenance()
+	down := s.downForMaintenance()
 
 	due := make([]*Event, 0, len(s.events))
 	for _, event := range s.events {
@@ -284,6 +286,12 @@ func (s *Schedule) DueEvents(at time.Time) []*Event {
 		}
 	}
 	return due
+}
+
+// downForMaintenance reports whether the application is down, and reads false
+// when nobody said.
+func (s *Schedule) downForMaintenance() bool {
+	return s.DownForMaintenance != nil && s.DownForMaintenance()
 }
 
 // Events returns every declared event.

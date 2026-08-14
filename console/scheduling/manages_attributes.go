@@ -60,7 +60,9 @@ func (e *Event) WithoutOverlapping(expiresAt ...int) *Event {
 	})
 }
 
-// ExpiresAt is how many minutes the overlap lock lives.
+// ExpiresAt is ManagesAttributes::$expiresAt: how many minutes the overlap lock
+// lives. PHP reads the public property, and Go cannot have a field and a method
+// of the same name.
 func (e *Event) ExpiresAt() int { return e.expiresAt }
 
 // OnOneServer allows the event to run on exactly one replica per window.
@@ -73,7 +75,8 @@ func (e *Event) OnOneServer() *Event {
 	return e
 }
 
-// RunsOnOneServer reports whether the event was limited to one replica.
+// RunsOnOneServer is ManagesAttributes::$onOneServer: it reports whether the
+// event was limited to one replica.
 func (e *Event) RunsOnOneServer() bool { return e.onOneServer }
 
 // RunInBackground sends the command to the background.
@@ -85,7 +88,8 @@ func (e *Event) RunInBackground() *Event {
 	return e
 }
 
-// RunsInBackground reports whether the event was sent to the background.
+// RunsInBackground is ManagesAttributes::$runInBackground: it reports whether
+// the event was sent to the background.
 func (e *Event) RunsInBackground() bool { return e.runInBackground }
 
 // When registers a callback that has to return true for the event to run.
@@ -139,18 +143,19 @@ func (e *Event) Description(description string) *Event {
 	return e
 }
 
-// GetDescription is the description, or empty.
+// GetDescription is ManagesAttributes::$description: the description, or empty.
 //
 // PHP reads the public property; Go cannot have a field and a method of the same
 // name, so the setter keeps the Laravel spelling and the reader is named for
 // what it does.
 func (e *Event) GetDescription() string { return e.description }
 
-// GetTimezone is the timezone the expression is evaluated in, or nil for the
-// timezone of the process.
+// GetTimezone is ManagesAttributes::$timezone: the timezone the expression is
+// evaluated in, or nil for the timezone of the process.
 func (e *Event) GetTimezone() *time.Location { return e.timezone }
 
-// Action is what the event's Grant is issued for.
+// Action has no Illuminate counterpart: it is what the event's Grant is issued
+// for.
 //
 // It is not in the PHP, and it is what RULE 17 requires: a scheduled task
 // reaches a repository the same way a request does, through a Grant that a
@@ -162,11 +167,12 @@ func (e *Event) Action(action auth.Action) *Event {
 	return e
 }
 
-// GetAction is what the event is authorized for.
+// GetAction has no Illuminate counterpart: it is what the event is authorized
+// for, and it reads what Action set.
 func (e *Event) GetAction() auth.Action { return e.action }
 
-// PerTenant expands the event to one run per tenant, each with its own Grant and
-// its own lock.
+// PerTenant has no Illuminate counterpart: it expands the event to one run per
+// tenant, each with its own Grant and its own lock.
 //
 // It is not in the PHP either. RULE 14 says the tenant comes from the Grant and
 // never from a path or a flag, so a task that reads a customer's rows says here
@@ -176,10 +182,12 @@ func (e *Event) PerTenant() *Event {
 	return e
 }
 
-// RunsPerTenant reports whether the event is expanded to one run per tenant.
+// RunsPerTenant has no Illuminate counterpart: it reports whether the event is
+// expanded to one run per tenant.
 func (e *Event) RunsPerTenant() bool { return e.perTenant }
 
-// Tenant fixes the tenant this copy of the event runs for.
+// Tenant has no Illuminate counterpart: it fixes the tenant this copy of the
+// event runs for.
 //
 // The runner calls it while expanding a per-tenant event; a schedule that pins
 // one tenant by hand calls it too.
@@ -188,7 +196,7 @@ func (e *Event) Tenant(tenant string) *Event {
 	return e
 }
 
-// Grant is the authorization this run carries.
+// Grant has no Illuminate counterpart: it is the authorization this run carries.
 //
 // It is auth.SystemGrant of the event's action and tenant, which is the one way
 // a scheduled task reaches a repository.

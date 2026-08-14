@@ -61,4 +61,38 @@
 //
 // The __call forwarding in NullDispatcher is PHP's, and Go has no method
 // missing hook. The methods that mattered are written out.
+//
+// # There is no Event::fake, because there is nothing global to swap
+//
+// Event::fake, Event::fakeExcept, Event::fakeFor and Event::fakeExceptFor are
+// reason 2, all four -- the ADR 0044 reason for a method that only serves the
+// container, a facade or a service provider. Each of them is Facade::swap: it
+// puts an EventFake where the 'events' binding was, so that every event() in
+// the application lands in the fake without anything else changing. There is
+// no container (ADR 0001) and no facade (ADR 0002), so there is no binding to
+// put it in -- and a package-level dispatcher a test could swap would be
+// shared mutable state, which is the one thing ADR 0045 names as worse than
+// the container itself: two tests calling t.Parallel would fight over it.
+//
+// What a test writes instead is the dispatcher it builds for itself, which is
+// already faked by having none of the application's listeners on it:
+//
+//	d := events.NewDispatcher()
+//
+//	var shipped []OrderShipped
+//	d.Listen(func(e OrderShipped) { shipped = append(shipped, e) })
+//
+//	placeOrder(ctx, g, d)
+//
+//	if len(shipped) != 1 {
+//		t.Fatalf("the order shipped %d times, want 1", len(shipped))
+//	}
+//
+// Event::fakeExcept is the same dispatcher with the listeners you do want on
+// it, which is the argument you leave in rather than the one you take out.
+// Event::fakeFor and Event::fakeExceptFor are the scope of the variable: d
+// stops existing when the function that built it returns, and that is what the
+// PHP's callable argument is buying -- a fake that does not outlive the block
+// it was wanted in. Here nothing outlives its block, so there is no second
+// form of it.
 package events

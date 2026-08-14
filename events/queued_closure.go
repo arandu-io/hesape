@@ -27,27 +27,32 @@ type QueuedClosure struct {
 	catchCallbacks []any
 }
 
-// Queueable creates a new queued closure event listener.
+// Queueable is QueuedClosure::__construct under the name the PHP gives it: it
+// creates a new queued closure event listener.
 //
 // It answers the queueable() function in the PHP's functions.php, which is the
-// only thing that file holds.
+// only thing that file holds and which does nothing but construct one of these.
 func Queueable(closure any) *QueuedClosure {
 	return &QueuedClosure{Closure: closure}
 }
 
-// OnConnection sets the desired connection for the job.
+// OnConnection is QueuedClosure::onConnection: it sets the desired connection
+// for the job.
+//
+// The PHP passes the argument through enum_value(), because a connection may be
+// named by a backed enum there. Go has no enum, so a name is a string.
 func (q *QueuedClosure) OnConnection(connection string) *QueuedClosure {
 	q.connection = connection
 	return q
 }
 
-// OnQueue sets the desired queue for the job.
+// OnQueue is QueuedClosure::onQueue: it sets the desired queue for the job.
 func (q *QueuedClosure) OnQueue(queue string) *QueuedClosure {
 	q.queue = queue
 	return q
 }
 
-// OnGroup sets the desired job "group".
+// OnGroup is QueuedClosure::onGroup: it sets the desired job "group".
 //
 // Only some queues support it, which is what the PHP says as well.
 func (q *QueuedClosure) OnGroup(group string) *QueuedClosure {
@@ -55,7 +60,8 @@ func (q *QueuedClosure) OnGroup(group string) *QueuedClosure {
 	return q
 }
 
-// WithDeduplicator sets the callback that generates the deduplication ID.
+// WithDeduplicator is QueuedClosure::withDeduplicator: it sets the callback that
+// generates the deduplication ID.
 //
 // The PHP wraps a Closure in a SerializableClosure so it survives the trip
 // through the queue. Nothing here is serialized -- a Go job is a value the
@@ -65,7 +71,8 @@ func (q *QueuedClosure) WithDeduplicator(deduplicator func() string) *QueuedClos
 	return q
 }
 
-// Delay sets the delay before the job becomes available.
+// Delay is QueuedClosure::delay: it sets the delay before the job becomes
+// available.
 //
 // The PHP takes DateTimeInterface|DateInterval|int; a Go duration is the one of
 // the three that means the same thing everywhere.
@@ -74,13 +81,19 @@ func (q *QueuedClosure) Delay(delay time.Duration) *QueuedClosure {
 	return q
 }
 
-// Catch registers a callback invoked if the queued listener job fails.
+// Catch is QueuedClosure::catch: it registers a callback invoked if the queued
+// listener job fails.
+//
+// The name is unchanged because catch is not a keyword in Go, and a method named
+// for what it does is worth more than a method renamed to avoid a keyword that
+// is not there.
 func (q *QueuedClosure) Catch(closure any) *QueuedClosure {
 	q.catchCallbacks = append(q.catchCallbacks, closure)
 	return q
 }
 
-// Resolve returns the listener that puts the closure on the queue.
+// Resolve is QueuedClosure::resolve: it returns the listener that puts the
+// closure on the queue.
 //
 // The PHP calls the global dispatch() helper here. There are no global helpers
 // in this collection (ADR 0002), so the queue comes from the dispatcher the

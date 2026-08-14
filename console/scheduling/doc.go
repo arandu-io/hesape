@@ -46,4 +46,10 @@
 // companions, which set RepeatSeconds and leave the expression on every minute
 // -- exactly as Laravel does, because a schedule that says "@every 90s" is a
 // busy loop with a nicer name.
+//
+// What makes that true is Runner.repeatEvents, which is
+// ScheduleRunCommand::repeatEvents: after the due events have run, the ones that
+// repeat are run again every RepeatSeconds until the minute is over. Without it
+// the frequency methods were a field nobody read, and EveryFifteenSeconds ran
+// once a minute.
 package scheduling

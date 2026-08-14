@@ -18,13 +18,15 @@ type ReportableHandler struct {
 	shouldStop bool
 }
 
-// Stop indicates that report handling should stop after invoking this callback.
+// Stop is ReportableHandler::stop: report handling stops after invoking this
+// callback.
 func (r *ReportableHandler) Stop() *ReportableHandler {
 	r.shouldStop = true
 	return r
 }
 
-// Handles reports whether the callback handles the given error.
+// Handles is ReportableHandler::handles: whether the callback handles the given
+// error.
 //
 // The PHP reads the closure's type hint. A Go closure carries the same
 // information in the type of its first parameter, and it is read the same way:
@@ -40,7 +42,7 @@ func (r *ReportableHandler) invoke(err error) bool {
 	return !r.shouldStop
 }
 
-// Reportable registers a reportable callback.
+// Reportable is Handler::reportable: it registers a reportable callback.
 //
 //	h.Reportable(func(err *QueryError) bool {
 //		telemetry.Record(err)
@@ -59,7 +61,7 @@ func (h *Handler) Reportable(reportUsing any) *ReportableHandler {
 	return handler
 }
 
-// Renderable registers a renderable callback.
+// Renderable is Handler::renderable: it registers a renderable callback.
 //
 //	h.Renderable(func(err *PaymentDeclined, w http.ResponseWriter, r *http.Request) bool {
 //		...
@@ -78,7 +80,7 @@ func (h *Handler) Renderable(renderUsing any) *Handler {
 	return h
 }
 
-// Map registers a new exception mapping.
+// Map is Handler::map: it registers a new exception mapping.
 //
 //	h.Map(sql.ErrNoRows, func(err error) error {
 //		return exception.Abort(http.StatusNotFound, "")
@@ -94,7 +96,7 @@ func (h *Handler) Map(from error, to func(err error) error) *Handler {
 	return h
 }
 
-// Ignore indicates that the given errors should not be reported.
+// Ignore is Handler::ignore: the given errors are not reported.
 func (h *Handler) Ignore(errs ...error) *Handler {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -106,13 +108,13 @@ func (h *Handler) Ignore(errs ...error) *Handler {
 	return h
 }
 
-// DontReport indicates that the given errors should not be reported.
+// DontReport is Handler::dontReport: the given errors are not reported.
 //
 // It is the alias of Ignore, which is what the PHP says of it as well.
 func (h *Handler) DontReport(errs ...error) *Handler { return h.Ignore(errs...) }
 
-// DontReportWhen registers a callback that decides whether an error is
-// reported.
+// DontReportWhen is Handler::dontReportWhen: it registers a callback that
+// decides whether an error is reported.
 func (h *Handler) DontReportWhen(dontReportWhen func(err error) bool) *Handler {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -120,7 +122,8 @@ func (h *Handler) DontReportWhen(dontReportWhen func(err error) bool) *Handler {
 	return h
 }
 
-// StopIgnoring removes the given errors from the list of ignored ones.
+// StopIgnoring is Handler::stopIgnoring: it removes the given errors from the
+// list of ignored ones.
 func (h *Handler) StopIgnoring(errs ...error) *Handler {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -135,7 +138,8 @@ func (h *Handler) StopIgnoring(errs ...error) *Handler {
 	return h
 }
 
-// DontReportDuplicates reports an error at most once.
+// DontReportDuplicates is Handler::dontReportDuplicates: an error is reported
+// at most once.
 //
 // The PHP keys a WeakMap by the exception instance. Go has no weak map and no
 // exception instance: the key is the error value, which is the same identity
@@ -148,20 +152,46 @@ func (h *Handler) DontReportDuplicates() *Handler {
 	return h
 }
 
-// Level sets the log level for the given error.
+// Level is Handler::level: it sets the log level for the given error.
 //
 // The PHP keys by exception class and takes a PSR level string; here the key is
 // the sentinel errors.Is compares against, and the level is slog's, which is
 // what this collection logs through.
+//
+// Naming the same error twice replaces the level, because $this->levels[$type]
+// is an assignment: the last call is the one that meant it. This appended, and
+// mapLogLevel reads from the front, so the first call won and the second was a
+// line that did nothing. The entry keeps its place in the list, which is the
+// other half of what the PHP does -- an assignment to an existing key does not
+// move it, and the order is what decides between two different errors that both
+// match.
 func (h *Handler) Level(target error, level slog.Level) *Handler {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	for i, entry := range h.levels {
+		if sameError(entry.target, target) {
+			h.levels[i].level = level
+			return h
+		}
+	}
 	h.levels = append(h.levels, leveled{target: target, level: level})
 	return h
 }
 
-// ShouldRenderJSONWhen registers the callback that decides whether a failure is
-// answered as JSON.
+// sameError reports whether two registered targets are the same key.
+//
+// A PHP array key is a class name and two of them are the same string or they
+// are not. The nearest thing here is the identity of the sentinel, and == on two
+// interfaces panics when their dynamic type is the same and not comparable, so
+// it is guarded: an error that cannot be compared is never the same key as
+// anything, which leaves it registered twice and the first one winning.
+func sameError(a, b error) bool {
+	return isComparable(a) && isComparable(b) && a == b
+}
+
+// ShouldRenderJSONWhen is Handler::shouldRenderJsonWhen: it registers the
+// callback that decides whether a failure is answered as JSON.
 //
 // The PHP spells it shouldRenderJsonWhen; Go spells an initialism in capitals,
 // which is the one change ADR 0044 asks to be said out loud.
@@ -172,7 +202,8 @@ func (h *Handler) ShouldRenderJSONWhen(callback func(r *http.Request, err error)
 	return h
 }
 
-// RespondUsing registers the callback that prepares the final response.
+// RespondUsing is Handler::respondUsing: it registers the callback that
+// prepares the final response.
 //
 // The PHP hands the callback the response and returns a new one. Nothing here
 // returns a response: the callback is given the writer the answer was written
@@ -184,8 +215,8 @@ func (h *Handler) RespondUsing(callback func(w http.ResponseWriter, r *http.Requ
 	return h
 }
 
-// BuildContextUsing registers a callback that builds the fields logged with an
-// error.
+// BuildContextUsing is Handler::buildContextUsing: it registers a callback that
+// builds the fields logged with an error.
 func (h *Handler) BuildContextUsing(contextCallback func(err error, context map[string]any) map[string]any) *Handler {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -193,8 +224,8 @@ func (h *Handler) BuildContextUsing(contextCallback func(err error, context map[
 	return h
 }
 
-// DontFlash indicates that the given attributes are never carried back to a
-// form after a validation failure.
+// DontFlash is Handler::dontFlash: the given attributes are never carried back
+// to a form after a validation failure.
 //
 // The three the PHP starts with -- password, password_confirmation and
 // current_password -- are already excluded, and this adds to them.
@@ -213,13 +244,14 @@ func (h *Handler) DontFlash(attributes ...string) *Handler {
 // was told. It is the PHP's $dontFlash default.
 var neverFlashed = []string{"current_password", "password", "password_confirmation"}
 
-// FlashableInput returns the input with everything DontFlash named removed.
+// FlashableInput is the Arr::except that Handler::invalid does with $dontFlash:
+// the input with everything DontFlash named removed.
 //
 // The PHP does the removal inside invalid(), where it builds the redirect that
 // carries the old input back to the form. This package answers failures, it
-// does not route, so the removal is a method and the redirect belongs to
-// whoever builds it. There is no PHP name for it because the PHP reads the
-// property directly, which Go cannot do from another package.
+// does not route, so the removal is a method of its own and the redirect
+// belongs to whoever builds it -- reading the property from another package,
+// which is what the PHP does, is not something Go allows.
 func (h *Handler) FlashableInput(input map[string]any) map[string]any {
 	h.mu.Lock()
 	hidden := append(append([]string(nil), neverFlashed...), h.dontFlash...)
@@ -240,18 +272,31 @@ func (h *Handler) FlashableInput(input map[string]any) map[string]any {
 // is kept in this process. Two replicas therefore throttle separately, which is
 // the honest cost of not depending on a shared store from here.
 //
-// The zero value is Limit::none(): no throttling at all.
+// The zero value reports nothing, because zero attempts is zero attempts.
+// Unlimited is the one that throttles nothing.
 type Throttle struct {
 	// Key groups the errors that share a budget. Empty means one budget per
 	// error type, which is what the PHP defaults to.
 	Key string
-	// MaxAttempts is how many reports fit in the window. Zero or less is
-	// unlimited.
+	// MaxAttempts is how many reports fit in the window.
+	//
+	// Zero is zero: the error is never reported. That is what the PHP does with
+	// it -- the limit goes to the rate limiter, which allows no attempt and
+	// reports nothing -- and this used to read zero as "no throttle was asked
+	// for" and report every time, which is the opposite answer to the one
+	// written down. Unlimited is how a callback says it wants no budget.
 	MaxAttempts int
 	// Decay is how long the window lasts. Zero means a minute, which is the
 	// PHP's default decay.
 	Decay time.Duration
 }
+
+// Unlimited is Limit::none(): the error is reported every time.
+//
+// It is what a ThrottleUsing callback returns when it has looked at the error
+// and decided it wants no budget on it, and it is what the handler falls back to
+// when no callback answered at all.
+var Unlimited = Throttle{MaxAttempts: -1}
 
 // throttleWindow is one open budget: when it started and how much of it is left.
 type throttleWindow struct {
@@ -259,8 +304,8 @@ type throttleWindow struct {
 	count   int
 }
 
-// ThrottleUsing registers a callback that decides how often an error may be
-// reported.
+// ThrottleUsing is Handler::throttleUsing: it registers a callback that decides
+// how often an error may be reported.
 //
 //	h.ThrottleUsing(func(err *QueryError) exception.Throttle {
 //		return exception.Throttle{MaxAttempts: 10, Decay: time.Minute}
@@ -276,23 +321,32 @@ func (h *Handler) ThrottleUsing(throttleUsing any) *Handler {
 }
 
 // throttled reports whether this error has used up its budget.
+//
+// A callback that answered has answered, whatever it answered: the PHP breaks
+// out of its loop on anything that is not null, and Limit::none() is a value
+// like any other. Reading a budget of zero as "no answer" is what made
+// Throttle{MaxAttempts: 0} report every time instead of never.
 func (h *Handler) throttled(err error) bool {
 	h.mu.Lock()
 	callbacks := append([]any(nil), h.throttleCallbacks...)
 	h.mu.Unlock()
 
-	var throttle Throttle
+	throttle := Unlimited
 	for _, callback := range callbacks {
 		if !handles(callback, err) {
 			continue
 		}
-		if answer, ok := callHandler(callback, err).(Throttle); ok && answer.MaxAttempts > 0 {
+		if answer, ok := callHandler(callback, err).(Throttle); ok {
 			throttle = answer
 			break
 		}
 	}
-	if throttle.MaxAttempts <= 0 {
+	if throttle.MaxAttempts < 0 {
 		return false
+	}
+	if throttle.MaxAttempts == 0 {
+		// Zero attempts fit in the window, so this one does not.
+		return true
 	}
 
 	key := throttle.Key
@@ -315,9 +369,18 @@ func (h *Handler) throttled(err error) bool {
 	return window.count > throttle.MaxAttempts
 }
 
+// containsError reports whether the list already names the error.
+//
+// It compares with errors.Is, and that is not a matter of taste: == on two
+// interface values panics at run time when their dynamic type is the same and
+// not comparable, which is what an error carrying several causes looks like --
+// a struct with a slice in it. Two of those handed to Ignore took the process
+// down, while reportThrowable next door had guarded against the same thing all
+// along. errors.Is tests comparability before it compares, and it is how the
+// rest of this package asks whether one error is another.
 func containsError(list []error, target error) bool {
 	for _, item := range list {
-		if item == target {
+		if errors.Is(target, item) {
 			return true
 		}
 	}

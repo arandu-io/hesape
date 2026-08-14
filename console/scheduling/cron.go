@@ -15,8 +15,8 @@ import (
 // and this is eighty lines.
 //
 // Five fields, not six: no seconds. Sub-minute repetition is Event.RepeatSeconds,
-// exactly as it is in Laravel -- the expression stays every-minute and the
-// runner loops within the minute.
+// exactly as it is in Laravel -- the expression stays every-minute and
+// Runner.repeatEvents loops within the minute.
 //
 // What it supports is the syntax people write: `*`, `5`, `1-5`, `*/15`,
 // `1,15,30`, and the shorthands `@hourly`, `@daily`, `@midnight`, `@weekly` and
@@ -30,7 +30,9 @@ type CronExpression struct {
 	spec    string
 }
 
-// String returns the expression it was parsed from, for schedule:list.
+// String has no Illuminate counterpart: it is what answers
+// dragonmantank/cron-expression's CronExpression::getExpression here, and it
+// returns the expression it was parsed from, for schedule:list.
 func (c CronExpression) String() string { return c.spec }
 
 // fieldSet is which values of one field match. Fixed size because every cron
@@ -38,10 +40,10 @@ func (c CronExpression) String() string { return c.spec }
 // versus none.
 type fieldSet [60]bool
 
-// ParseCronExpression reads a cron expression.
+// ParseCronExpression has no Illuminate counterpart: it reads a cron expression.
 //
-// It answers `new CronExpression($spec)`, which throws where this returns an
-// error.
+// It answers `new CronExpression($spec)` in dragonmantank/cron-expression, which
+// throws where this returns an error.
 func ParseCronExpression(spec string) (CronExpression, error) {
 	trimmed := strings.TrimSpace(spec)
 
@@ -83,7 +85,8 @@ func ParseCronExpression(spec string) (CronExpression, error) {
 	return c, nil
 }
 
-// MustParseCronExpression is ParseCronExpression for a constant.
+// MustParseCronExpression has no Illuminate counterpart: it is
+// ParseCronExpression for a constant.
 //
 // It panics, which is right for an expression written in source: a schedule
 // nobody can parse must not reach the runner.

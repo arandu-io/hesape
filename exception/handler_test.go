@@ -123,20 +123,23 @@ func TestHTMXGetsAPageAndNotJSON(t *testing.T) {
 // DontReport is a list of sentinels and not a list of statuses: a 404 from a
 // bad link and a 404 from a repository that lost a row are the same status and
 // different news.
+//
+// It goes through Report and not through Render, because Render no longer
+// reports: the two are the two halves the caller calls, which is what the PHP's
+// kernel does.
 func TestDontReportSilencesOnlyWhatItNames(t *testing.T) {
 	quiet := errors.New("the client hung up")
 
 	logger, lines := log.Capture()
 	h := exception.NewHandler(exception.Config{DontReport: []error{quiet}})
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	r = r.WithContext(log.Into(r.Context(), logger))
+	ctx := log.Into(context.Background(), logger)
 
-	h.Render(httptest.NewRecorder(), r, fmt.Errorf("writing the response: %w", quiet))
+	h.Report(ctx, fmt.Errorf("writing the response: %w", quiet))
 	if lines.Len() != 0 {
 		t.Fatalf("a silenced error was reported: %v", lines.All())
 	}
 
-	h.Render(httptest.NewRecorder(), r, errors.New("something else"))
+	h.Report(ctx, errors.New("something else"))
 	if lines.Len() == 0 {
 		t.Fatal("an error nobody silenced went unreported")
 	}

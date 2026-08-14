@@ -114,22 +114,28 @@ func splitTime(value string) (int, int, error) {
 // and the runner loops within the minute, which is what repeatEvery sets up.
 func (e *Event) EverySecond() *Event { return e.repeatEvery(1) }
 
-// EveryTwoSeconds runs the event every two seconds.
+// EveryTwoSeconds is ManagesFrequencies::everyTwoSeconds: it runs the event
+// every two seconds.
 func (e *Event) EveryTwoSeconds() *Event { return e.repeatEvery(2) }
 
-// EveryFiveSeconds runs the event every five seconds.
+// EveryFiveSeconds is ManagesFrequencies::everyFiveSeconds: it runs the event
+// every five seconds.
 func (e *Event) EveryFiveSeconds() *Event { return e.repeatEvery(5) }
 
-// EveryTenSeconds runs the event every ten seconds.
+// EveryTenSeconds is ManagesFrequencies::everyTenSeconds: it runs the event
+// every ten seconds.
 func (e *Event) EveryTenSeconds() *Event { return e.repeatEvery(10) }
 
-// EveryFifteenSeconds runs the event every fifteen seconds.
+// EveryFifteenSeconds is ManagesFrequencies::everyFifteenSeconds: it runs the
+// event every fifteen seconds.
 func (e *Event) EveryFifteenSeconds() *Event { return e.repeatEvery(15) }
 
-// EveryTwentySeconds runs the event every twenty seconds.
+// EveryTwentySeconds is ManagesFrequencies::everyTwentySeconds: it runs the
+// event every twenty seconds.
 func (e *Event) EveryTwentySeconds() *Event { return e.repeatEvery(20) }
 
-// EveryThirtySeconds runs the event every thirty seconds.
+// EveryThirtySeconds is ManagesFrequencies::everyThirtySeconds: it runs the
+// event every thirty seconds.
 func (e *Event) EveryThirtySeconds() *Event { return e.repeatEvery(30) }
 
 // repeatEvery is ManagesFrequencies::repeatEvery.
@@ -150,25 +156,32 @@ func (e *Event) repeatEvery(seconds int) *Event {
 // It answers ManagesFrequencies::everyMinute.
 func (e *Event) EveryMinute() *Event { return e.spliceIntoPosition(1, "*") }
 
-// EveryTwoMinutes runs the event every two minutes.
+// EveryTwoMinutes is ManagesFrequencies::everyTwoMinutes: it runs the event
+// every two minutes.
 func (e *Event) EveryTwoMinutes() *Event { return e.spliceIntoPosition(1, "*/2") }
 
-// EveryThreeMinutes runs the event every three minutes.
+// EveryThreeMinutes is ManagesFrequencies::everyThreeMinutes: it runs the event
+// every three minutes.
 func (e *Event) EveryThreeMinutes() *Event { return e.spliceIntoPosition(1, "*/3") }
 
-// EveryFourMinutes runs the event every four minutes.
+// EveryFourMinutes is ManagesFrequencies::everyFourMinutes: it runs the event
+// every four minutes.
 func (e *Event) EveryFourMinutes() *Event { return e.spliceIntoPosition(1, "*/4") }
 
-// EveryFiveMinutes runs the event every five minutes.
+// EveryFiveMinutes is ManagesFrequencies::everyFiveMinutes: it runs the event
+// every five minutes.
 func (e *Event) EveryFiveMinutes() *Event { return e.spliceIntoPosition(1, "*/5") }
 
-// EveryTenMinutes runs the event every ten minutes.
+// EveryTenMinutes is ManagesFrequencies::everyTenMinutes: it runs the event
+// every ten minutes.
 func (e *Event) EveryTenMinutes() *Event { return e.spliceIntoPosition(1, "*/10") }
 
-// EveryFifteenMinutes runs the event every fifteen minutes.
+// EveryFifteenMinutes is ManagesFrequencies::everyFifteenMinutes: it runs the
+// event every fifteen minutes.
 func (e *Event) EveryFifteenMinutes() *Event { return e.spliceIntoPosition(1, "*/15") }
 
-// EveryThirtyMinutes runs the event every thirty minutes.
+// EveryThirtyMinutes is ManagesFrequencies::everyThirtyMinutes: it runs the
+// event every thirty minutes.
 func (e *Event) EveryThirtyMinutes() *Event { return e.spliceIntoPosition(1, "*/30") }
 
 // Hourly runs the event at the top of every hour.
@@ -188,22 +201,26 @@ func (e *Event) EveryOddHour(offset ...int) *Event {
 	return e.hourBasedSchedule(joinIntsOrZero(offset), "1-23/2")
 }
 
-// EveryTwoHours runs the event every two hours.
+// EveryTwoHours is ManagesFrequencies::everyTwoHours: it runs the event every
+// two hours.
 func (e *Event) EveryTwoHours(offset ...int) *Event {
 	return e.hourBasedSchedule(joinIntsOrZero(offset), "*/2")
 }
 
-// EveryThreeHours runs the event every three hours.
+// EveryThreeHours is ManagesFrequencies::everyThreeHours: it runs the event
+// every three hours.
 func (e *Event) EveryThreeHours(offset ...int) *Event {
 	return e.hourBasedSchedule(joinIntsOrZero(offset), "*/3")
 }
 
-// EveryFourHours runs the event every four hours.
+// EveryFourHours is ManagesFrequencies::everyFourHours: it runs the event every
+// four hours.
 func (e *Event) EveryFourHours(offset ...int) *Event {
 	return e.hourBasedSchedule(joinIntsOrZero(offset), "*/4")
 }
 
-// EverySixHours runs the event every six hours.
+// EverySixHours is ManagesFrequencies::everySixHours: it runs the event every
+// six hours.
 func (e *Event) EverySixHours(offset ...int) *Event {
 	return e.hourBasedSchedule(joinIntsOrZero(offset), "*/6")
 }
@@ -270,25 +287,28 @@ func (e *Event) Weekends() *Event {
 	return e.Days(fmt.Sprintf("%d,%d", Saturday, Sunday))
 }
 
-// Mondays runs the event only on Mondays.
+// Mondays is ManagesFrequencies::mondays: it runs the event only on Mondays.
 func (e *Event) Mondays() *Event { return e.Days(strconv.Itoa(Monday)) }
 
-// Tuesdays runs the event only on Tuesdays.
+// Tuesdays is ManagesFrequencies::tuesdays: it runs the event only on Tuesdays.
 func (e *Event) Tuesdays() *Event { return e.Days(strconv.Itoa(Tuesday)) }
 
-// Wednesdays runs the event only on Wednesdays.
+// Wednesdays is ManagesFrequencies::wednesdays: it runs the event only on
+// Wednesdays.
 func (e *Event) Wednesdays() *Event { return e.Days(strconv.Itoa(Wednesday)) }
 
-// Thursdays runs the event only on Thursdays.
+// Thursdays is ManagesFrequencies::thursdays: it runs the event only on
+// Thursdays.
 func (e *Event) Thursdays() *Event { return e.Days(strconv.Itoa(Thursday)) }
 
-// Fridays runs the event only on Fridays.
+// Fridays is ManagesFrequencies::fridays: it runs the event only on Fridays.
 func (e *Event) Fridays() *Event { return e.Days(strconv.Itoa(Friday)) }
 
-// Saturdays runs the event only on Saturdays.
+// Saturdays is ManagesFrequencies::saturdays: it runs the event only on
+// Saturdays.
 func (e *Event) Saturdays() *Event { return e.Days(strconv.Itoa(Saturday)) }
 
-// Sundays runs the event only on Sundays.
+// Sundays is ManagesFrequencies::sundays: it runs the event only on Sundays.
 func (e *Event) Sundays() *Event { return e.Days(strconv.Itoa(Sunday)) }
 
 // Weekly runs the event at midnight on Sunday.
@@ -352,7 +372,17 @@ func (e *Event) LastDayOfMonth(t ...string) *Event {
 // DaysOfMonth runs the event on the given days of the month, at midnight.
 //
 // It answers ManagesFrequencies::daysOfMonth.
+//
+// Naming no day panics. It used to splice the "0" that joinInts falls back to,
+// and "0 0 0 * *" is not a cron expression: there is no zeroth day of the month,
+// so Schedule refused the expression at registration and the application did not
+// start. The PHP writes an empty field there and its parser throws for the same
+// reason; the mistake is the empty call, and this is the last place it can still
+// be named.
 func (e *Event) DaysOfMonth(days ...int) *Event {
+	if len(days) == 0 {
+		panic("scheduling: DaysOfMonth needs at least one day of the month")
+	}
 	e.DailyAt("0:0")
 	return e.spliceIntoPosition(3, joinInts(days))
 }

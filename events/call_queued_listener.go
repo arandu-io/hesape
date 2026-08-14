@@ -55,42 +55,55 @@ type CallQueuedListener struct {
 	deduplicator func() string
 }
 
-// NewCallQueuedListener creates a new job instance.
+// NewCallQueuedListener is CallQueuedListener::__construct: it creates a new job
+// instance.
 func NewCallQueuedListener(class any, method string, data []any) *CallQueuedListener {
 	return &CallQueuedListener{Class: class, Method: method, Data: data}
 }
 
-// Handle handles the queued job: it calls the listener's method with the data.
+// Handle is CallQueuedListener::handle: it calls the listener's method with the
+// data.
 //
 // The PHP takes the container, because all it has is the listener's class name.
-// This has the listener, so it takes nothing.
+// This has the listener, so it takes nothing. The two steps it opens with drop
+// out with the container: prepareData() unserializes data that arrived as a
+// string, and nothing here is serialized; setJobInstanceIfNecessary() hands the
+// resolved instance its Job, and there is no instance to resolve.
 func (j *CallQueuedListener) Handle() any {
 	return callMethod(j.Class, j.Method, j.Data)
 }
 
-// ShouldBeUnique reports whether the listener should be unique.
+// ShouldBeUnique is CallQueuedListener::shouldBeUnique: it reports whether the
+// listener should be unique.
 func (j *CallQueuedListener) ShouldBeUnique() bool { return j.shouldBeUnique }
 
-// ShouldBeUniqueUntilProcessing reports whether the listener should be unique
-// only until processing begins.
+// ShouldBeUniqueUntilProcessing is
+// CallQueuedListener::shouldBeUniqueUntilProcessing: it reports whether the
+// listener should be unique only until processing begins.
 func (j *CallQueuedListener) ShouldBeUniqueUntilProcessing() bool {
 	return j.shouldBeUniqueUntilProcessing
 }
 
-// UniqueID returns the unique ID for the listener.
+// UniqueID is CallQueuedListener::uniqueId: it returns the unique ID for the
+// listener.
 //
 // The PHP spells it uniqueId; Go spells an initialism in capitals, which is the
 // one change ADR 0044 asks to be said out loud.
 func (j *CallQueuedListener) UniqueID() any { return j.uniqueID }
 
-// UniqueFor returns how long the unique lock is held.
+// UniqueFor is CallQueuedListener::uniqueFor: it returns how long the unique
+// lock is held.
 //
 // The PHP returns seconds as an int, which is the same thing a duration says
 // without the unit having to be remembered.
 func (j *CallQueuedListener) UniqueFor() time.Duration { return j.uniqueFor }
 
-// UniqueVia returns the cache store the unique lock is kept in, or nil when the
-// listener does not name one.
+// UniqueVia is CallQueuedListener::uniqueVia: it returns the cache store the
+// unique lock is kept in, or nil when the listener does not name one.
+//
+// The PHP calls the listener's own uniqueVia() with the job's data spread across
+// its parameters; here it is called with none, because the optional interface
+// that asks for it has to fix one signature.
 //
 // The PHP types the return as Illuminate\Contracts\Cache\Repository. There is
 // no contracts package in this collection and this one must not depend on the
@@ -105,14 +118,23 @@ func (j *CallQueuedListener) UniqueVia() any {
 	return via.UniqueVia()
 }
 
-// WithDeduplicator sets the callback that generates the deduplication ID.
+// WithDeduplicator is Queueable::withDeduplicator, the trait CallQueuedListener
+// uses: it sets the callback that generates the deduplication ID.
+//
+// The PHP wraps a Closure in a SerializableClosure so it survives the trip
+// through the queue; nothing here is serialized, so the callback is kept as it
+// was given.
 func (j *CallQueuedListener) WithDeduplicator(deduplicator func() string) *CallQueuedListener {
 	j.deduplicator = deduplicator
 	return j
 }
 
-// Deduplicator returns the deduplication ID, or the empty string when the job
-// has no deduplicator.
+// Deduplicator reads Queueable::$deduplicator, which the PHP leaves public for
+// the queue connection to call: it returns the deduplication ID, or the empty
+// string when the job has no deduplicator.
+//
+// It is a method rather than a field because Go cannot have both under one
+// name, which is the same reason the four uniqueness properties became methods.
 func (j *CallQueuedListener) Deduplicator() string {
 	if j.deduplicator == nil {
 		return ""
@@ -120,8 +142,8 @@ func (j *CallQueuedListener) Deduplicator() string {
 	return j.deduplicator()
 }
 
-// Failed calls the failed method on the listener, with the event and the
-// failure, when the listener has one.
+// Failed is CallQueuedListener::failed: it calls the failed method on the
+// listener, with the event and the failure, when the listener has one.
 func (j *CallQueuedListener) Failed(err error) {
 	if !hasMethod(j.Class, "Failed") {
 		return
@@ -129,6 +151,10 @@ func (j *CallQueuedListener) Failed(err error) {
 	callMethod(j.Class, "Failed", append(append([]any(nil), j.Data...), err))
 }
 
-// DisplayName returns the display name for the queued job, which is the
-// listener's type.
+// DisplayName is CallQueuedListener::displayName: it returns the display name
+// for the queued job, which is the listener's type.
+//
+// The PHP returns the class name it was constructed with; the nearest thing
+// here is the type of the listener value, because a Go type is not addressable
+// by name at run time.
 func (j *CallQueuedListener) DisplayName() string { return typeName(j.Class) }

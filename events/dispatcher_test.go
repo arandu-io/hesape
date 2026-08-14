@@ -3,6 +3,7 @@ package events_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -407,6 +408,143 @@ func TestAQueuedListenerIsPushedRatherThanCalled(t *testing.T) {
 	if !listener.ran {
 		t.Fatal("the job did not reach the listener")
 	}
+}
+
+// mutableInvoice is an event the caller keeps a pointer to. Mutating it after
+// the dispatch is what proves whether the job kept a copy.
+type mutableInvoice struct{ Amount int }
+
+// recordAmount goes to the queue, so what it will be handed is whatever reached
+// the job rather than whatever the caller's pointer holds by then.
+type recordAmount struct{}
+
+func (recordAmount) ShouldQueue(any) bool   { return true }
+func (recordAmount) Handle(*mutableInvoice) {}
+
+// TestAQueuedListenerSeesTheEventAsItWasDispatched: the dispatcher used to hand
+// the caller's own event to the job, so
+//
+//	e := &mutableInvoice{Amount: 100}
+//	d.Dispatch(e)
+//	e.Amount = 0
+//
+// left the worker looking at 0. The PHP's createQueuedHandlerCallable() clones
+// every object argument before queueing, and 100 is what the event was at the
+// instant it was dispatched.
+func TestAQueuedListenerSeesTheEventAsItWasDispatched(t *testing.T) {
+	queue := &fakeQueue{}
+	d := events.NewDispatcher().SetQueueResolver(func() events.Queue { return queue })
+	d.Listen(mutableInvoice{}, recordAmount{})
+
+	e := &mutableInvoice{Amount: 100}
+	d.Dispatch(e)
+	e.Amount = 0
+
+	if len(queue.jobs) != 1 {
+		t.Fatalf("%d jobs pushed, want one", len(queue.jobs))
+	}
+	got, ok := queue.jobs[0].Data[0].(*mutableInvoice)
+	if !ok {
+		t.Fatalf("job data = %v, want the event", queue.jobs[0].Data)
+	}
+	if got == e {
+		t.Fatal("the job carries the caller's own event, so every later mutation still reaches the worker")
+	}
+	if got.Amount != 100 {
+		t.Fatalf("the job carries Amount = %d, want the 100 the event held when it was dispatched", got.Amount)
+	}
+}
+
+// routedListener chooses where its job goes from the event it was handed, which
+// is viaConnection($event) in the PHP.
+type routedListener struct{}
+
+func (routedListener) ShouldQueue(any) bool { return true }
+func (routedListener) Handle(invoicePaid)   {}
+
+func (routedListener) ViaConnection(event any) string {
+	if paid, ok := event.(invoicePaid); ok && paid.Number != "" {
+		return "redis"
+	}
+	return "sync"
+}
+
+func (routedListener) ViaQueue(event any) string {
+	if paid, ok := event.(invoicePaid); ok && paid.Number != "" {
+		return "billing"
+	}
+	return "default"
+}
+
+func (routedListener) WithDelay(event any) time.Duration {
+	if paid, ok := event.(invoicePaid); ok && paid.Number != "" {
+		return time.Minute
+	}
+	return 0
+}
+
+// TestAQueuedListenerRoutesOnTheEvent: the three routing methods took no
+// argument, so a listener that picks its connection from the event value did not
+// satisfy the interface at all -- the job kept the empty connection and went to
+// the default one, with nothing said. The PHP passes the event:
+// $listener->viaConnection($arguments[0]).
+func TestAQueuedListenerRoutesOnTheEvent(t *testing.T) {
+	queue := &fakeQueue{}
+	d := events.NewDispatcher().SetQueueResolver(func() events.Queue { return queue })
+	d.Listen("invoice.paid", routedListener{})
+
+	d.Dispatch("invoice.paid", invoicePaid{Number: "2026-01"})
+
+	if len(queue.jobs) != 1 {
+		t.Fatalf("%d jobs pushed, want one", len(queue.jobs))
+	}
+	job := queue.jobs[0]
+	if job.Connection != "redis" || job.Queue != "billing" || job.Delay != time.Minute {
+		t.Fatalf("job routed to %q/%q after %v, want redis/billing after a minute", job.Connection, job.Queue, job.Delay)
+	}
+}
+
+// TestListeningWithAClassNameIsRefused: d.Listen(event, "App\\Listeners\\Notifier")
+// used to return as if it had registered something, and then no listener ever
+// ran. There is no container to resolve a name with (ADR 0001), so the only
+// honest answers are to resolve it or to refuse it, and refusing at Listen is
+// the one that names the line that was wrong.
+func TestListeningWithAClassNameIsRefused(t *testing.T) {
+	defer func() {
+		reason, ok := recover().(string)
+		if !ok {
+			t.Fatal("a class name was accepted as a listener, and nothing would ever have run")
+		}
+		if !strings.Contains(reason, `App\Listeners\Notifier`) {
+			t.Fatalf("the refusal says %q, and does not name the listener that was refused", reason)
+		}
+	}()
+
+	events.NewDispatcher().Listen("invoice.paid", `App\Listeners\Notifier`)
+}
+
+// TestListeningWithAValueThatAnswersNothingIsRefused: the same silence, reached
+// by a value with neither Handle nor Invoke on it.
+func TestListeningWithAValueThatAnswersNothingIsRefused(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("a value with no Handle and no Invoke was accepted, and nothing would ever have run")
+		}
+	}()
+
+	events.NewDispatcher().Listen("invoice.paid", invoicePaid{})
+}
+
+// TestListeningWithAMethodThatIsNotThereIsRefused: a ClassListener naming a
+// method the value does not have was accepted and then never called.
+func TestListeningWithAMethodThatIsNotThereIsRefused(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("a method that does not exist was accepted, and nothing would ever have run")
+		}
+	}()
+
+	events.NewDispatcher().Listen("invoice.paid", events.ClassListener{Class: &notifier{}, Method: "WhenVoided"})
 }
 
 func TestQueueableClosureCarriesItsQueueOntoTheJob(t *testing.T) {

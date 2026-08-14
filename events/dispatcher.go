@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -57,6 +58,88 @@ type Subscriber interface {
 type ShouldQueue interface {
 	ShouldQueue(event any) bool
 }
+
+// The interfaces below are the optional methods a queued listener may declare to
+// shape the job the dispatcher pushes for it. Every one of them is asked with
+// the event being dispatched, because the PHP asks with it: queueHandler() calls
+// $listener->viaConnection($arguments[0]) and propagateListenerOptions() spreads
+// $data into backoff(), tries(), retryUntil(), messageGroup(), uniqueId(),
+// uniqueFor() and deduplicator(). A listener that does not care about the event
+// ignores the parameter; the event is nil when the event was dispatched with no
+// payload, which is isset($arguments[0]) being false in the PHP.
+//
+// They were written inline at the type assertion, and without the parameter, so
+// a listener that chose its connection from the event value satisfied nothing:
+// the job kept the empty connection, went to the default one, and said nothing
+// about it. An anonymous interface cannot be asserted against at compile time,
+// which is why these are named -- a listener can now write
+//
+//	var _ events.ViaConnection = (*Notifier)(nil)
+//
+// and hear about the wrong signature from the compiler rather than from
+// production.
+type (
+	// ViaConnection names the queue connection the listener's job is pushed to.
+	// It is viaConnection() in the PHP.
+	ViaConnection interface {
+		ViaConnection(event any) string
+	}
+
+	// ViaQueue names the queue the listener's job is pushed onto. It is
+	// viaQueue() in the PHP.
+	ViaQueue interface {
+		ViaQueue(event any) string
+	}
+
+	// WithDelay is how long the job waits before it becomes available. It is
+	// withDelay() in the PHP, which returns a date, an interval or seconds; a
+	// duration is the one of the three that means the same thing everywhere.
+	WithDelay interface {
+		WithDelay(event any) time.Duration
+	}
+
+	// Tries is how many times the job may be attempted. It is tries() in the PHP.
+	Tries interface {
+		Tries(event any) int
+	}
+
+	// Backoff is how long to wait before retrying after an uncaught failure. It
+	// is backoff() in the PHP.
+	Backoff interface {
+		Backoff(event any) time.Duration
+	}
+
+	// RetryUntil is when the job stops being retried. It is retryUntil() in the
+	// PHP.
+	RetryUntil interface {
+		RetryUntil(event any) time.Time
+	}
+
+	// MessageGroup is the group the job belongs to on the queues that have them.
+	// It is messageGroup() in the PHP.
+	MessageGroup interface {
+		MessageGroup(event any) string
+	}
+
+	// Deduplicator is the deduplication ID for the job. The PHP's deduplicator()
+	// returns the closure that generates it; here the method is that closure,
+	// asked with the event the job was built from.
+	Deduplicator interface {
+		Deduplicator(event any) string
+	}
+
+	// UniqueID is the key a unique listener is unique by. It is uniqueId() in
+	// the PHP.
+	UniqueID interface {
+		UniqueID(event any) any
+	}
+
+	// UniqueFor is how long the unique lock is held. It is uniqueFor() in the
+	// PHP, which returns seconds.
+	UniqueFor interface {
+		UniqueFor(event any) time.Duration
+	}
+)
 
 // ShouldDispatchAfterCommit marks an event that waits for the transaction.
 //
@@ -134,7 +217,8 @@ type deferredEvent struct {
 	halt    bool
 }
 
-// NewDispatcher returns a dispatcher with nothing registered.
+// NewDispatcher is Dispatcher::__construct: it returns a dispatcher with nothing
+// registered.
 //
 // The PHP constructor takes the container, which is what resolves a class
 // listener and a subscriber given by name. There is no container here (ADR
@@ -147,7 +231,8 @@ func NewDispatcher() *Dispatcher {
 	}
 }
 
-// Listen registers an event listener with the dispatcher.
+// Listen is Dispatcher::listen: it registers an event listener with the
+// dispatcher.
 //
 //	d.Listen("invoice.paid", func(e Stored) error { ... })
 //	d.Listen([]string{"invoice.paid", "invoice.voided"}, listener)
@@ -171,12 +256,16 @@ func (d *Dispatcher) Listen(events any, listener ...any) {
 
 	if l == nil {
 		if queued, ok := events.(*QueuedClosure); ok {
-			for _, name := range firstParameterTypes(queued.Closure) {
+			names := firstParameterTypes(queued.Closure)
+			assertNamesAnEvent(queued.Closure, names)
+			for _, name := range names {
 				d.Listen(name, queued.Resolve(d))
 			}
 			return
 		}
-		if names := firstParameterTypes(events); len(names) > 0 {
+		if isFunc(events) {
+			names := firstParameterTypes(events)
+			assertNamesAnEvent(events, names)
 			for _, name := range names {
 				d.Listen(name, events)
 			}
@@ -187,6 +276,7 @@ func (d *Dispatcher) Listen(events any, listener ...any) {
 	if queued, ok := l.(*QueuedClosure); ok {
 		l = queued.Resolve(d)
 	}
+	assertListenable(l)
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -206,7 +296,8 @@ func (d *Dispatcher) setupWildcardListen(event string, listener any) {
 	d.wildcardsCache = map[string][]Listener{}
 }
 
-// HasListeners reports whether a given event has listeners.
+// HasListeners is Dispatcher::hasListeners: it reports whether a given event has
+// listeners.
 func (d *Dispatcher) HasListeners(eventName string) bool {
 	d.mu.Lock()
 	_, direct := d.listeners[eventName]
@@ -215,8 +306,8 @@ func (d *Dispatcher) HasListeners(eventName string) bool {
 	return direct || pattern || d.HasWildcardListeners(eventName)
 }
 
-// HasWildcardListeners reports whether the given event has any wildcard
-// listeners.
+// HasWildcardListeners is Dispatcher::hasWildcardListeners: it reports whether
+// the given event has any wildcard listeners.
 func (d *Dispatcher) HasWildcardListeners(eventName string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -228,7 +319,7 @@ func (d *Dispatcher) HasWildcardListeners(eventName string) bool {
 	return false
 }
 
-// Push registers an event and payload to be fired later.
+// Push is Dispatcher::push: it registers an event and payload to be fired later.
 //
 // It is Flush that fires it, and the mechanism is the PHP's: a listener is
 // registered against the event name with "_pushed" appended, and dispatching
@@ -240,15 +331,20 @@ func (d *Dispatcher) Push(event string, payload ...any) {
 	})
 }
 
-// Flush fires a set of pushed events.
+// Flush is Dispatcher::flush: it fires a set of pushed events.
 func (d *Dispatcher) Flush(event string) {
 	d.Dispatch(event + "_pushed")
 }
 
-// Subscribe registers an event subscriber with the dispatcher.
+// Subscribe is Dispatcher::subscribe: it registers an event subscriber with the
+// dispatcher.
 //
 // A string in the returned map is the name of a method on the subscriber, which
 // is the same shorthand the PHP accepts; anything else is a listener.
+//
+// The PHP begins with resolveSubscriber(), which makes an instance when the
+// subscriber was given by name. There is no container (ADR 0001), so a
+// subscriber is always the value itself and there is nothing to resolve.
 func (d *Dispatcher) Subscribe(subscriber Subscriber) {
 	for event, listeners := range subscriber.Subscribe(d) {
 		for _, listener := range listeners {
@@ -261,7 +357,8 @@ func (d *Dispatcher) Subscribe(subscriber Subscriber) {
 	}
 }
 
-// Until fires an event until the first non-nil response is returned.
+// Until is Dispatcher::until: it fires an event until the first non-nil response
+// is returned.
 //
 // It is the PHP's dispatch($event, $payload, halt: true), which is the only
 // thing until() does there. Go has no default argument for $halt, so the two
@@ -270,7 +367,8 @@ func (d *Dispatcher) Until(event any, payload ...any) any {
 	return d.dispatch(event, payload, true)
 }
 
-// Dispatch fires an event and calls the listeners.
+// Dispatch is Dispatcher::dispatch with $halt left false: it fires an event and
+// calls the listeners.
 //
 // It returns what each listener returned, in order. A listener that returns
 // false stops the ones after it, exactly as in the PHP -- and a listener that
@@ -359,7 +457,8 @@ func parseEventAndPayload(event any, payload []any) (string, []any) {
 	return typeName(event), []any{event}
 }
 
-// GetListeners returns all of the listeners for a given event name, prepared.
+// GetListeners is Dispatcher::getListeners: it returns all of the listeners for
+// a given event name, prepared.
 //
 // The PHP also merges the listeners registered against the interfaces the event
 // class implements. Go has no way to ask "which interfaces does this name
@@ -396,7 +495,12 @@ func (d *Dispatcher) getWildcardListeners(eventName string) []Listener {
 	return wildcards
 }
 
-// GetRawListeners returns the raw, unprepared listeners.
+// GetRawListeners is Dispatcher::getRawListeners: it returns the raw, unprepared
+// listeners.
+//
+// The PHP hands back its own array, which PHP then copies on write. Go would
+// hand back the live map, so this copies it: a caller that ranged over the
+// result while another goroutine registered a listener would race.
 func (d *Dispatcher) GetRawListeners() map[string][]any {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -408,7 +512,8 @@ func (d *Dispatcher) GetRawListeners() map[string][]any {
 	return out
 }
 
-// MakeListener prepares a registered listener for calling.
+// MakeListener is Dispatcher::makeListener: it prepares a registered listener
+// for calling.
 //
 // PHP declares this as makeListener($listener, $wildcard = false); Go has no
 // default argument, so the flag is always written out.
@@ -427,6 +532,10 @@ func (d *Dispatcher) MakeListener(listener any, wildcard bool) Listener {
 		return d.CreateClassListener(l, wildcard)
 	case *QueuedClosure:
 		return l.Resolve(d)
+	case string:
+		// Listen refuses this already; MakeListener is exported, so it is the
+		// other door onto the same rule. See assertListenable.
+		panic(refusedClassName(l))
 	}
 
 	// A value that is not a function is the PHP's class-string listener: the
@@ -443,7 +552,8 @@ func (d *Dispatcher) MakeListener(listener any, wildcard bool) Listener {
 	}
 }
 
-// CreateClassListener creates a listener out of an object and a method.
+// CreateClassListener is Dispatcher::createClassListener: it creates a listener
+// out of an object and a method.
 //
 // The PHP resolves the class out of the IoC container; here the value is
 // already the value, which is the whole of what dropping the container changes
@@ -466,14 +576,11 @@ func (d *Dispatcher) createClassCallable(listener any) func(args []any) any {
 	if pair, ok := listener.(ClassListener); ok {
 		class, method = pair.Class, pair.Method
 	}
-	if method == "" {
-		method = "Handle"
-	}
-	if !hasMethod(class, method) {
-		// The PHP falls back to __invoke, which Go does not have: a value is
-		// not callable. The nearest thing is a method named for it.
-		method = "Invoke"
-	}
+	// resolveMethod falls back to Invoke, which is the PHP's __invoke under the
+	// only name Go can call it by: a value is not callable. It returns the empty
+	// string when the listener answers with nothing, which Listen and
+	// MakeListener have already refused.
+	method = resolveMethod(class, method)
 
 	if d.handlerShouldBeQueued(class) {
 		return func(args []any) any {
@@ -510,7 +617,19 @@ func (d *Dispatcher) handlerShouldBeDispatchedAfterDatabaseTransactions(class an
 }
 
 // createQueuedHandlerCallable puts the listener on the queue.
+//
+// The arguments are copied first, which is the array_map(clone) the PHP opens
+// this method with. It matters because the job is run later: without the copy,
+//
+//	e := &InvoicePaid{Amount: 100}
+//	d.Dispatch(e)
+//	e.Amount = 0
+//
+// left the worker looking at 0. An event is a value at the instant it was
+// dispatched, and mutating it afterwards must not change what was dispatched.
 func (d *Dispatcher) createQueuedHandlerCallable(class any, method string, args []any) any {
+	args = cloneArguments(args)
+
 	if wants, ok := class.(ShouldQueue); ok {
 		var event any
 		if len(args) > 0 {
@@ -523,13 +642,57 @@ func (d *Dispatcher) createQueuedHandlerCallable(class any, method string, args 
 	return d.queueHandler(class, method, args)
 }
 
+// cloneArguments copies the arguments a queued listener is called with, which is
+// the PHP's array_map(fn ($a) => is_object($a) ? clone $a : $a, ...).
+//
+// A pointer is the nearest thing Go has to a PHP object: it is what a later
+// mutation travels through. Everything else was already copied on its way into
+// the any, which is what PHP's non-object branch amounts to. The copy is
+// shallow, as clone is: a pointer field inside the event still points where it
+// did.
+//
+// A context.Context is left alone. It is not part of the event -- it is the
+// ambient deadline and cancellation of the pass that dispatched -- and copying
+// what it points at would produce a context whose parent no longer reaches it.
+func cloneArguments(args []any) []any {
+	if len(args) == 0 {
+		return args
+	}
+
+	cloned := make([]any, len(args))
+	for i, arg := range args {
+		cloned[i] = cloneArgument(arg)
+	}
+	return cloned
+}
+
+// cloneArgument copies one argument. See cloneArguments.
+func cloneArgument(arg any) any {
+	if arg == nil || isContext(arg) {
+		return arg
+	}
+
+	v := reflect.ValueOf(arg)
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		return arg
+	}
+
+	copied := reflect.New(v.Type().Elem())
+	copied.Elem().Set(v.Elem())
+	return copied.Interface()
+}
+
 // queueHandler pushes the listener's job onto the queue.
 //
 // The PHP acquires a UniqueLock through the cache before pushing a unique job.
 // There is no cache here -- this package would have to depend on it -- so the
 // job carries what it knows about uniqueness and the queue is what enforces it.
 func (d *Dispatcher) queueHandler(class any, method string, args []any) any {
-	return d.push(d.propagateListenerOptions(class, NewCallQueuedListener(class, method, args)))
+	var event any
+	if len(args) > 0 {
+		event = args[0]
+	}
+	return d.push(d.propagateListenerOptions(class, event, NewCallQueuedListener(class, method, args)))
 }
 
 // push sends a job to the connection and queue it asked for.
@@ -559,30 +722,34 @@ func (d *Dispatcher) push(job *CallQueuedListener) any {
 // The PHP reads a dozen optional methods and properties off the listener. Go
 // has no properties, so each one that survives is an optional interface, and
 // the ones that only exist to carry a PHP attribute do not survive.
-func (d *Dispatcher) propagateListenerOptions(listener any, job *CallQueuedListener) *CallQueuedListener {
-	if v, ok := listener.(interface{ ViaConnection() string }); ok {
-		job.Connection = v.ViaConnection()
+//
+// Every one of those interfaces takes the event, because the PHP asks with it.
+// The two marker interfaces below stay written inline: they take no argument, so
+// there is no signature for a listener to get wrong.
+func (d *Dispatcher) propagateListenerOptions(listener, event any, job *CallQueuedListener) *CallQueuedListener {
+	if v, ok := listener.(ViaConnection); ok {
+		job.Connection = v.ViaConnection(event)
 	}
-	if v, ok := listener.(interface{ ViaQueue() string }); ok {
-		job.Queue = v.ViaQueue()
+	if v, ok := listener.(ViaQueue); ok {
+		job.Queue = v.ViaQueue(event)
 	}
-	if v, ok := listener.(interface{ WithDelay() time.Duration }); ok {
-		job.Delay = v.WithDelay()
+	if v, ok := listener.(WithDelay); ok {
+		job.Delay = v.WithDelay(event)
 	}
-	if v, ok := listener.(interface{ Tries() int }); ok {
-		job.Tries = v.Tries()
+	if v, ok := listener.(Tries); ok {
+		job.Tries = v.Tries(event)
 	}
-	if v, ok := listener.(interface{ Backoff() time.Duration }); ok {
-		job.Backoff = v.Backoff()
+	if v, ok := listener.(Backoff); ok {
+		job.Backoff = v.Backoff(event)
 	}
-	if v, ok := listener.(interface{ RetryUntil() time.Time }); ok {
-		job.RetryUntil = v.RetryUntil()
+	if v, ok := listener.(RetryUntil); ok {
+		job.RetryUntil = v.RetryUntil(event)
 	}
-	if v, ok := listener.(interface{ MessageGroup() string }); ok {
-		job.MessageGroup = v.MessageGroup()
+	if v, ok := listener.(MessageGroup); ok {
+		job.MessageGroup = v.MessageGroup(event)
 	}
-	if v, ok := listener.(interface{ Deduplicator() string }); ok {
-		job.WithDeduplicator(v.Deduplicator)
+	if v, ok := listener.(Deduplicator); ok {
+		job.WithDeduplicator(func() string { return v.Deduplicator(event) })
 	}
 	if v, ok := listener.(interface{ ShouldBeUnique() bool }); ok {
 		job.shouldBeUnique = v.ShouldBeUnique()
@@ -591,11 +758,11 @@ func (d *Dispatcher) propagateListenerOptions(listener any, job *CallQueuedListe
 		job.shouldBeUniqueUntilProcessing = v.ShouldBeUniqueUntilProcessing()
 	}
 	if job.shouldBeUnique {
-		if v, ok := listener.(interface{ UniqueID() any }); ok {
-			job.uniqueID = v.UniqueID()
+		if v, ok := listener.(UniqueID); ok {
+			job.uniqueID = v.UniqueID(event)
 		}
-		if v, ok := listener.(interface{ UniqueFor() time.Duration }); ok {
-			job.uniqueFor = v.UniqueFor()
+		if v, ok := listener.(UniqueFor); ok {
+			job.uniqueFor = v.UniqueFor(event)
 		}
 	}
 	if v, ok := listener.(ShouldHandleEventsAfterCommit); ok {
@@ -604,7 +771,8 @@ func (d *Dispatcher) propagateListenerOptions(listener any, job *CallQueuedListe
 	return job
 }
 
-// Forget removes a set of listeners from the dispatcher.
+// Forget is Dispatcher::forget: it removes a set of listeners from the
+// dispatcher.
 func (d *Dispatcher) Forget(event string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -626,7 +794,8 @@ func (d *Dispatcher) forget(event string) {
 	}
 }
 
-// ForgetPushed forgets all of the pushed listeners.
+// ForgetPushed is Dispatcher::forgetPushed: it forgets all of the pushed
+// listeners.
 func (d *Dispatcher) ForgetPushed() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -648,7 +817,8 @@ func (d *Dispatcher) resolveQueue() Queue {
 	return resolver()
 }
 
-// SetQueueResolver sets the queue implementation the dispatcher pushes through.
+// SetQueueResolver is Dispatcher::setQueueResolver: it sets the queue
+// implementation the dispatcher pushes through.
 func (d *Dispatcher) SetQueueResolver(resolver func() Queue) *Dispatcher {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -667,8 +837,14 @@ func (d *Dispatcher) resolveTransactionManager() TransactionManager {
 	return resolver()
 }
 
-// SetTransactionManagerResolver sets the database transaction manager the
-// dispatcher hangs after-commit work on.
+// SetTransactionManagerResolver is Dispatcher::setTransactionManagerResolver: it
+// sets the database transaction manager the dispatcher hangs after-commit work
+// on.
+//
+// Unlike the PHP, leaving it unset is allowed: resolveTransactionManager()
+// there calls the resolver whatever it holds, and here a missing one reads as no
+// transaction manager. EventServiceProvider::register always sets it in Laravel,
+// and there is no service provider to do that here (ADR 0001).
 func (d *Dispatcher) SetTransactionManagerResolver(resolver func() TransactionManager) *Dispatcher {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -676,7 +852,8 @@ func (d *Dispatcher) SetTransactionManagerResolver(resolver func() TransactionMa
 	return d
 }
 
-// Defer runs callback while holding events back, then dispatches them.
+// Defer is Dispatcher::defer: it runs callback while holding events back, then
+// dispatches them.
 //
 // Passing event names defers only those; passing none defers every event, which
 // is the PHP's $events = null.
@@ -721,7 +898,8 @@ func (d *Dispatcher) Defer(callback func() any, events ...string) any {
 	return result
 }
 
-// Publish hands a stored event to the listeners registered for its name.
+// Publish has no Illuminate counterpart: it is where the outbox meets the
+// registry, handing a stored event to the listeners registered for its name.
 //
 // This is where the mechanism and the surface meet: the outbox stores, the
 // relay reads, and the listeners were registered with Listen. A Dispatcher is
@@ -824,6 +1002,108 @@ func typeNameOf(t reflect.Type) string {
 		return t.String()
 	}
 	return t.PkgPath() + "." + t.Name()
+}
+
+// isFunc reports whether the value is a function.
+func isFunc(v any) bool {
+	return v != nil && reflect.TypeOf(v).Kind() == reflect.Func
+}
+
+// assertListenable panics when the listener could never be called.
+//
+// The PHP accepts a class name here and resolves it out of the container when
+// the event fires. There is no container (ADR 0001), so
+//
+//	d.Listen("invoice.paid", "App\\Listeners\\Notifier")
+//
+// registered a listener that was then quietly never called: MakeListener took
+// the string for a class listener, looked for Handle and then Invoke on a
+// string, found neither, and answered nil for every event for the life of the
+// process. The same silence swallowed a value with no Handle on it and a
+// ClassListener naming a method that is not there.
+//
+// Registering is the last moment at which the line that was wrong can still be
+// named, so a listener that could never be called is refused here. Either it
+// resolves or it refuses; what it must not do is accept and not deliver.
+func assertListenable(listener any) {
+	switch l := listener.(type) {
+	case nil:
+		panic("events: a nil listener would never be called")
+	case string:
+		panic(refusedClassName(l))
+	case Listener, func(event string, payload []any) any, *QueuedClosure:
+		return
+	case ClassListener:
+		if resolveMethod(l.Class, l.Method) == "" {
+			panic(fmt.Sprintf(
+				"events: the listener %s has no method %s and no Invoke, so it would never be called",
+				typeName(l.Class), quotedMethod(l.Method),
+			))
+		}
+		return
+	}
+
+	if isFunc(listener) {
+		return
+	}
+	if resolveMethod(listener, "") == "" {
+		panic(fmt.Sprintf(
+			"events: the listener %s has no Handle and no Invoke, so it would never be called",
+			typeName(listener),
+		))
+	}
+}
+
+// assertNamesAnEvent panics when a closure registered on its own names no event.
+//
+// The PHP reads the type of the closure's first parameter and registers it
+// against that; a closure with nothing to read registers against nothing, and
+// each() over an empty collection is silence. Here it is refused, for the reason
+// assertListenable is.
+func assertNamesAnEvent(closure any, names []string) {
+	if len(names) == 0 {
+		panic(fmt.Sprintf(
+			"events: the listener %s names no event: its first parameter is the event it listens for, so pass the event name as well",
+			typeName(closure),
+		))
+	}
+}
+
+// refusedClassName is the refusal a class-name listener earns, in one place
+// because Listen and MakeListener are two doors onto the same rule.
+func refusedClassName(listener string) string {
+	return fmt.Sprintf(
+		"events: the listener [%s] is a class name, and there is no container to resolve one (ADR 0001): register the listener value itself",
+		listener,
+	)
+}
+
+// quotedMethod names the method a ClassListener asked for, or Handle when it
+// asked for none.
+func quotedMethod(method string) string {
+	if method == "" {
+		return "Handle"
+	}
+	return method
+}
+
+// resolveMethod returns the method a class listener answers with, or the empty
+// string when it answers with none.
+//
+// It is the head of the PHP's createClassCallable(): the default is handle(),
+// and a class without the named method falls back to __invoke, which Go spells
+// Invoke because a value is not callable.
+func resolveMethod(class any, method string) string {
+	if method == "" {
+		method = "Handle"
+	}
+	if hasMethod(class, method) {
+		return method
+	}
+	if hasMethod(class, "Invoke") {
+		return "Invoke"
+	}
+	return ""
 }
 
 // hasMethod reports whether the value has an exported method of that name.

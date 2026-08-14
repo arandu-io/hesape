@@ -28,11 +28,11 @@
 //	                       ThrottleUsing, BuildContextUsing, DontFlash
 //	ReportableHandler.php  ReportableHandler, with Handles and Stop
 //
-// Two methods of the legacy Handler have no equivalent, and both for the same
-// reason: they are hooks into the PHP runtime. handleError is the callback
-// set_error_handler installs, which promotes a warning or a notice into an
-// exception -- Go has neither. handleShutdown is what
-// register_shutdown_function installs to catch a fatal error on the way out --
+// Two methods of the legacy Handler have no equivalent, and both are reason 1
+// of ADR 0044 -- a PHP language feature Go does not have. Handler::handleError
+// is the callback set_error_handler installs, which promotes a warning or a
+// notice into an exception, and Go has neither. Handler::handleShutdown is what
+// register_shutdown_function installs to catch a fatal error on the way out;
 // Go has no shutdown hook, and a runtime fatal cannot be observed at all. What
 // is left of the three is recover(), which is Recover, and Register is where a
 // kernel gets it from.
@@ -43,6 +43,13 @@
 // a panic into a value the Handler answers, and the routing layer hands the
 // Handler whatever a controller action returned. One Handler, one decision about
 // what the person in front of the browser sees.
+//
+// Report and Render are two calls and the caller makes both, which is what the
+// kernel does in the PHP: it reports the throwable and then renders it. Render
+// used to report on its way in as well, so an application written that way wrote
+// every failure to the log twice. Recover is the exception and says so where it
+// does it: a panic is news whatever it classifies as, so it logs what it caught
+// itself.
 //
 // # Abort is a returned error, not a call that never comes back
 //
@@ -90,6 +97,36 @@
 // An application overrides a status page by providing a view named errors/404,
 // errors/403 and so on, and wiring it through Config.Views. Nothing is required:
 // the built-in pages answer until somebody wants their own.
+//
+// # Exceptions::fake, and what a test writes instead
+//
+// Exceptions::fake is reason 2 of ADR 0044 -- a method that only serves the
+// container, a facade or a service provider. It is Facade::swap putting an
+// ExceptionHandlerFake where the handler contract was bound, so that a failure
+// anywhere in the application is recorded instead of logged. There is no
+// container (ADR 0001) and no facade (ADR 0002), so there is no binding to
+// swap, and a package-level handler a test could swap would be shared mutable
+// state that two tests calling t.Parallel would fight over (ADR 0045).
+//
+// The [Handler] a test holds is one it built, and the recording is a callback
+// on it:
+//
+//	var reported []error
+//	h := exception.NewHandler(exception.Config{})
+//	h.Reportable(func(err error) { reported = append(reported, err) }).Stop()
+//
+//	placeOrder(ctx, g, h)
+//
+//	if len(reported) != 1 {
+//		t.Fatalf("reported %d failures, want 1", len(reported))
+//	}
+//
+// [ReportableHandler.Stop] is what makes it a fake rather than a bystander:
+// reporting ends at the callback, so nothing reaches the log and the test
+// output stays the failures the test itself printed. What the fake offers on
+// top of recording is here under Illuminate's own names -- [Handler.Ignore],
+// [Handler.Map], [Handler.Level] and [Handler.DontReportDuplicates] -- and each
+// is set on the handler the test owns, so two handlers never see each other.
 //
 // # Absolute rule
 //

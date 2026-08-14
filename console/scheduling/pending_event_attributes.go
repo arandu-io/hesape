@@ -17,7 +17,8 @@ type PendingEventAttributes struct {
 	schedule *Schedule
 }
 
-// NewPendingEventAttributes returns an empty set of attributes.
+// NewPendingEventAttributes is PendingEventAttributes::__construct: it returns
+// an empty set of attributes.
 func NewPendingEventAttributes(schedule *Schedule) *PendingEventAttributes {
 	return &PendingEventAttributes{
 		Event:    &Event{expression: "* * * * *", expiresAt: defaultExpiresAt},
@@ -25,8 +26,10 @@ func NewPendingEventAttributes(schedule *Schedule) *PendingEventAttributes {
 	}
 }
 
-// Attributes returns the event the attributes are collected on, so the
-// frequency methods chain from a group the way they chain from an event.
+// Attributes has no Illuminate counterpart: it returns the event the attributes
+// are collected on, so the frequency methods chain from a group the way they
+// chain from an event. PHP gets them from two traits, and Go gets them from the
+// embedded Event.
 func (p *PendingEventAttributes) Attributes() *Event { return p.Event }
 
 // Schedule returns the schedule the group belongs to.

@@ -23,7 +23,8 @@ type Publisher interface {
 // PublisherFunc adapts a function to Publisher.
 type PublisherFunc func(ctx context.Context, e Stored) error
 
-// Publish calls f.
+// Publish has no Illuminate counterpart: it calls f, which is the adapter half
+// of PublisherFunc.
 func (f PublisherFunc) Publish(ctx context.Context, e Stored) error { return f(ctx, e) }
 
 // RelayOptions configures the relay.
@@ -84,12 +85,13 @@ type Relay struct {
 	opts      RelayOptions
 }
 
-// NewRelay returns the relay.
+// NewRelay has no Illuminate counterpart: it returns what answers at-least-once
+// delivery here, and Laravel has nothing that reads a table and republishes it.
 func NewRelay(o *Outbox, p Publisher, opts RelayOptions) *Relay {
 	return &Relay{outbox: o, publisher: p, opts: opts.withDefaults()}
 }
 
-// Run polls until the context is cancelled.
+// Run has no Illuminate counterpart: it polls until the context is cancelled.
 //
 // It is started by the module at boot and stopped at shutdown, in the same
 // process as the application -- like the scheduler, and for the same reason: a
@@ -204,7 +206,8 @@ func (r *Relay) publishBatch(ctx context.Context) error {
 	return nil
 }
 
-// Drain publishes everything pending, once, and returns.
+// Drain has no Illuminate counterpart: it publishes everything pending, once,
+// and returns.
 //
 // This is what a test uses. There is no synchronous mode -- the test runs the
 // same code path as production, with the relay executed inline instead of on a
@@ -214,13 +217,14 @@ func (r *Relay) Drain(ctx context.Context) error {
 	return r.publishBatch(ctx)
 }
 
-// Parked returns the events that gave up, for the diagnosis and for whoever is
-// deciding whether to retry them.
+// Parked has no Illuminate counterpart: it returns the events that gave up, for
+// the diagnosis and for whoever is deciding whether to retry them.
 func (r *Relay) Parked(ctx context.Context, limit int) ([]Stored, error) {
 	return r.outbox.Parked(ctx, limit)
 }
 
-// Lag is how long the oldest unpublished event has been waiting.
+// Lag has no Illuminate counterpart: it is how long the oldest unpublished event
+// has been waiting.
 //
 // This is the number that matters: a relay that stopped looks exactly like a
 // relay with nothing to do, and only the age of the oldest pending event tells

@@ -71,7 +71,12 @@ func headline(v any) string {
 // is the only place the panicking line is still on the stack. A returned error
 // carries no stack at all, and the frames it gets show where the Handler was
 // called -- see docs/31, section on what this cannot do.
-func (h *Handler) renderDebug(w http.ResponseWriter, r *http.Request, value any, frames []StackFrame) {
+//
+// status is passed in for the same kind of reason: the page is the same page
+// whatever the failure classified as, and the status is the failure's answer.
+// It was 500 here and the caller had no say, so a 404 drawn by the debug
+// displayer went out as a 500.
+func (h *Handler) renderDebug(w http.ResponseWriter, r *http.Request, status int, value any, frames []StackFrame) {
 	d := viewData{
 		Title:   headline(value),
 		Kind:    fmt.Sprintf("%T", value),
@@ -95,7 +100,7 @@ func (h *Handler) renderDebug(w http.ResponseWriter, r *http.Request, value any,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusInternalServerError)
+	w.WriteHeader(status)
 	_ = debugTmpl.Execute(w, d)
 }
 
@@ -188,7 +193,7 @@ th{color:var(--dim);font-weight:500}
   <details class="frame {{if not .IsApp}}vendor{{end}}" {{if .IsApp}}open{{end}}>
     <summary><span class="fn">{{.Func}}</span><br>
       <span class="loc">{{.File}}:{{.Line}}</span>
-      <a href="{{editorLink $.Editor .File .Line}}">open in editor</a>
+      {{with editorLink $.Editor .File .Line}}<a href="{{.}}">open in editor</a>{{end}}
     </summary>
     {{if .Snippet}}<pre>{{range .Snippet}}{{.}}
 {{end}}</pre>{{end}}

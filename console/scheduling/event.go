@@ -93,6 +93,14 @@ type Event struct {
 	// what a sub-minute repeat counts from.
 	lastChecked time.Time
 
+	// now is the clock lastChecked and ShouldRepeatNow read. Nil means time.Now.
+	//
+	// The runner sets it to its own, so the loop that repeats an event within
+	// the minute and the event deciding whether it is time agree on what time it
+	// is. Nothing else sets it: an event asked in isolation reads the wall
+	// clock, which is what the PHP's Date::now() is.
+	now func() time.Time
+
 	// callback is set when the event is a closure rather than a command line,
 	// and execute calls it instead of starting a process.
 	//
@@ -186,15 +194,35 @@ func (e *Event) IsRepeatable() bool { return e.repeatSeconds > 0 }
 // ShouldRepeatNow reports whether enough of the minute has passed for the next
 // repeat.
 //
-// It answers Event::shouldRepeatNow.
+// It answers Event::shouldRepeatNow. Runner.repeatEvents is what calls it; it
+// had no caller at all, which is what made EveryFifteenSeconds a schedule that
+// ran once a minute.
 func (e *Event) ShouldRepeatNow() bool {
 	if !e.IsRepeatable() || e.lastChecked.IsZero() {
 		return false
 	}
-	return int(time.Since(e.lastChecked).Seconds()) >= e.repeatSeconds
+	return int(e.clock().Sub(e.lastChecked).Seconds()) >= e.repeatSeconds
 }
 
-// RepeatSeconds is how often the event repeats within a minute, or zero.
+// clock is the time the event reads, defaulted.
+func (e *Event) clock() time.Time {
+	if e.now != nil {
+		return e.now()
+	}
+	return time.Now()
+}
+
+// useClock points the event at the runner's clock. A nil clock leaves the event
+// on the wall clock.
+func (e *Event) useClock(now func() time.Time) {
+	if now != nil {
+		e.now = now
+	}
+}
+
+// RepeatSeconds is ManagesAttributes::$repeatSeconds: how often the event
+// repeats within a minute, or zero. PHP reads the public property, and null
+// there is zero here.
 func (e *Event) RepeatSeconds() int { return e.repeatSeconds }
 
 // start runs the before callbacks and then the command.
@@ -345,7 +373,7 @@ func (e *Event) RunsInEnvironment(environment string) bool {
 // It answers Event::filtersPass, including that it records the time: a
 // sub-minute repeat counts from the last check.
 func (e *Event) FiltersPass(ctx context.Context) bool {
-	e.lastChecked = time.Now()
+	e.lastChecked = e.clock()
 
 	for _, filter := range e.filters {
 		if !filter(ctx) {

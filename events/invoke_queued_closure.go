@@ -6,14 +6,21 @@ package events
 // data, and this is what calls it.
 type InvokeQueuedClosure struct{}
 
-// Handle handles the event: it calls the closure with the arguments the event
-// was dispatched with.
+// Handle is InvokeQueuedClosure::handle: it calls the closure with the arguments
+// the event was dispatched with.
+//
+// The PHP is handed a SerializableClosure and unwraps it with getClosure(); a Go
+// closure is not serialized, so it arrives as it was given.
 func (InvokeQueuedClosure) Handle(closure any, arguments []any) any {
 	return callFunc(closure, arguments)
 }
 
-// Failed handles a job failure: every catch callback is called with the
-// arguments and, last, the failure.
+// Failed is InvokeQueuedClosure::failed: it handles a job failure, calling every
+// catch callback with the arguments and, last, the failure.
+//
+// The first parameter is the closure the job carries, which this never reads and
+// which the PHP does not read either: both take it because the job's data is
+// positional and the closure is the first of it.
 func (InvokeQueuedClosure) Failed(_ any, arguments []any, catchCallbacks []any, err error) {
 	arguments = append(append([]any(nil), arguments...), err)
 

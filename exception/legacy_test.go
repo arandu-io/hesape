@@ -208,3 +208,47 @@ func TestRegisterOutsideTestingDrawsThePage(t *testing.T) {
 		t.Fatalf("the panic value reached the page: %s", rec.Body.String())
 	}
 }
+
+// TestPlainDisplayerCarriesTheErrorsHeaders: the PHP's PlainDisplayer copies
+// $exception->getHeaders() onto the response, and this dropped them -- which
+// turns a 429 into a 429 nobody can retry correctly and a 401 into one no client
+// knows how to answer.
+func TestPlainDisplayerCarriesTheErrorsHeaders(t *testing.T) {
+	h := exception.NewHandler(exception.Config{})
+	err := &exception.HTTPError{
+		Status:  http.StatusTooManyRequests,
+		Headers: http.Header{"Retry-After": {"30"}},
+	}
+
+	rec := httptest.NewRecorder()
+	h.Displayer().Display(rec, httptest.NewRequest(http.MethodGet, "/", nil), err)
+
+	if got := rec.Result().Header.Get("Retry-After"); got != "30" {
+		t.Fatalf("Retry-After = %q, want the 30 the error asked for", got)
+	}
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", rec.Code)
+	}
+}
+
+// TestDebugDisplayerAnswersTheStatusTheErrorAskedFor: both PHP displayers
+// answer $exception->getStatusCode(), and this one always answered 500 -- so a
+// 404 in development was a 500 to every client, and a test written against the
+// status could not tell the two apart.
+func TestDebugDisplayerAnswersTheStatusTheErrorAskedFor(t *testing.T) {
+	h := exception.NewHandler(exception.Config{Dev: true})
+
+	rec := httptest.NewRecorder()
+	h.Displayer().Display(rec, httptest.NewRequest(http.MethodGet, "/", nil), exception.Abort(http.StatusNotFound, "no invoice"))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want the 404 the error asked for", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	h.Displayer().Display(rec, httptest.NewRequest(http.MethodGet, "/", nil), errors.New("nobody claimed this"))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 for an error nobody claimed", rec.Code)
+	}
+}

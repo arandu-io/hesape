@@ -7,7 +7,10 @@ import (
 	"github.com/arandu-io/hesape/pipeline"
 )
 
-// Recover captures panics and hands them to the Handler.
+// Recover is Handler::registerExceptionHandler, which is the set_exception_handler
+// that installs handleUncaughtException: it captures what escaped and hands it
+// to the Handler. Here what escapes is a panic and the only place to catch one
+// is a deferred recover, so this is middleware rather than a runtime hook.
 //
 // Order matters and is not a matter of taste: Recover must be the outermost
 // middleware, or a panic raised in any other middleware escapes without a page;
@@ -67,8 +70,11 @@ func Recover(h *Handler) pipeline.Middleware[http.Handler] {
 						h.renderDump(w, r)
 						return
 					}
-					// DumpDie is a no-op outside development, so arriving here
-					// means the sentinel came from somewhere else.
+					// DumpDie aborts wherever it is called, so arriving here is a
+					// forgotten dd() on a production path. It is logged by name
+					// and then answered as the error page below, which is the
+					// point: the alternative was a 200 with the dump written
+					// into the middle of the response.
 					log.For(ctx).Error("dump-and-die sentinel outside development")
 				}
 

@@ -59,7 +59,8 @@ type CacheEventMutex struct {
 	held  map[string]*cache.Lock
 }
 
-// NewCacheEventMutex returns the mutex over an issuer.
+// NewCacheEventMutex is CacheEventMutex::__construct: it returns the mutex over
+// an issuer.
 func NewCacheEventMutex(locks *cache.Locks) *CacheEventMutex {
 	return &CacheEventMutex{locks: locks, held: map[string]*cache.Lock{}}
 }
@@ -69,7 +70,7 @@ func NewCacheEventMutex(locks *cache.Locks) *CacheEventMutex {
 // It answers CacheEventMutex::useStore.
 func (m *CacheEventMutex) UseStore(locks *cache.Locks) { m.locks = locks }
 
-// Create takes the mutex for the event.
+// Create is CacheEventMutex::create: it takes the mutex for the event.
 //
 // A lock another process holds is false and no error: that is the mutex working.
 func (m *CacheEventMutex) Create(ctx context.Context, event *Event) (bool, error) {
@@ -90,7 +91,7 @@ func (m *CacheEventMutex) Create(ctx context.Context, event *Event) (bool, error
 	return true, nil
 }
 
-// Exists reports whether the mutex is held.
+// Exists is CacheEventMutex::exists: it reports whether the mutex is held.
 //
 // It takes the lock to find out and gives it straight back, which is what the
 // PHP does with its negated get().
@@ -146,7 +147,8 @@ type CacheSchedulingMutex struct {
 	locks *cache.Locks
 }
 
-// NewCacheSchedulingMutex returns the mutex over an issuer.
+// NewCacheSchedulingMutex is CacheSchedulingMutex::__construct: it returns the
+// mutex over an issuer.
 func NewCacheSchedulingMutex(locks *cache.Locks) *CacheSchedulingMutex {
 	return &CacheSchedulingMutex{locks: locks}
 }
@@ -156,7 +158,7 @@ func NewCacheSchedulingMutex(locks *cache.Locks) *CacheSchedulingMutex {
 // It answers CacheSchedulingMutex::useStore.
 func (m *CacheSchedulingMutex) UseStore(locks *cache.Locks) { m.locks = locks }
 
-// Create claims the window for this replica.
+// Create is CacheSchedulingMutex::create: it claims the window for this replica.
 //
 // The lock is taken and never released: it marks the window as claimed rather
 // than guarding the work as a mutex would.
@@ -174,7 +176,8 @@ func (m *CacheSchedulingMutex) Create(ctx context.Context, event *Event, at time
 	return true, nil
 }
 
-// Exists reports whether the window is already claimed.
+// Exists is CacheSchedulingMutex::exists: it reports whether the window is
+// already claimed.
 func (m *CacheSchedulingMutex) Exists(ctx context.Context, event *Event, at time.Time) (bool, error) {
 	if m.locks == nil {
 		return false, errors.New("scheduling: the scheduling mutex has no lock issuer")
