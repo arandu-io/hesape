@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/auth/access/events"
 	"github.com/arandu-io/hesape/str"
 )
 
@@ -66,6 +67,15 @@ type Gate struct {
 	beforeCallbacks       []BeforeCallback
 	afterCallbacks        []AfterCallback
 	defaultDenialResponse *Response
+
+	// observer receives a events.GateEvaluated after every decision, and is nil on a
+	// Gate nobody called Observe on.
+	//
+	// It is a field and not a package-level dispatcher because a package-level
+	// one is reachable from anywhere and assignable at init by anything in the
+	// build -- which for an audit trail means the thing being audited can turn
+	// it off from a file nobody reads.
+	observer func(events.GateEvaluated)
 }
 
 // NewGate is the Gate constructor.
@@ -387,7 +397,8 @@ func (g *Gate) Inspect(ctx context.Context, s auth.Subject, ability string, argu
 // it as an allow or a denial.
 //
 // The PHP returns mixed and so does this: nil, a bool, a *Response or an error.
-// It dispatches no event -- see the package documentation for GateEvaluated.
+// It fires events.GateEvaluated when an observer was given, after the answer is
+// settled. See [Gate.Observe].
 func (g *Gate) Raw(ctx context.Context, s auth.Subject, ability string, arguments ...any) any {
 	user := g.resolveUser(s)
 
@@ -430,6 +441,20 @@ func (g *Gate) callAfterCallbacks(ctx context.Context, user auth.Subject, abilit
 		}
 	}
 
+	// After the answer, never before, and its return value is ignored.
+	//
+	// An observer that could change the result would be a second authorization
+	// path, and RULE 17 allows one. What it is for is the record: every decision
+	// the application makes passes through here, and this is the only place that
+	// sees all of them with the answer attached.
+	if g.observer != nil {
+		g.observer(events.GateEvaluated{
+			Subject:   user,
+			Ability:   ability,
+			Result:    result,
+			Arguments: arguments,
+		})
+	}
 	return result
 }
 
@@ -670,4 +695,19 @@ func truthy(v any) bool {
 	}
 
 	return true
+}
+
+// Observe hands the Gate somewhere to send events.GateEvaluated, and answers a copy.
+//
+// It answers a copy rather than mutating, so that a Gate handed to two places
+// cannot have its audit trail redirected by one of them. It is the same shape as
+// ForUser, which the PHP has for the same reason.
+//
+// Illuminate resolves the dispatcher out of the container and fires
+// unconditionally. There is no container (ADR 0001), so the destination is an
+// argument, and a Gate given none does no work and allocates nothing.
+func (g *Gate) Observe(observer func(events.GateEvaluated)) *Gate {
+	copied := *g
+	copied.observer = observer
+	return &copied
 }

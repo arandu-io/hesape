@@ -87,8 +87,10 @@
 // instead of its signature. A policy that says nothing about guests denies them.
 //
 // Gate::dispatchGateEvaluatedEvent fires GateEvaluated through the dispatcher it
-// resolves out of the container. Reason 2 for the resolution; the event itself
-// belongs to auth/access/events and is not implemented yet.
+// resolves out of the container. Reason 2 for the resolution, and only for it:
+// the event is written, in auth/access/events, and [Gate.Observe] is where the
+// destination arrives -- as an argument, since there is no container to resolve
+// one from. A Gate given none does no work.
 //
 // HandlesAuthorization's allow() and deny() are protected trait methods. An
 // unexported method promoted from an embedded struct is not callable by the
