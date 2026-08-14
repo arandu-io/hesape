@@ -26,6 +26,12 @@ type field struct {
 	name  string
 	rules []*rule
 
+	// primary is the wildcard name this field was expanded from -- "items.*.price"
+	// for "items.0.price" -- and empty for a field written without one. It is
+	// Laravel's $implicitAttributes read backwards, and it is what lets a
+	// message override still be keyed on the name somebody wrote.
+	primary string
+
 	// bail stops the field at its first failure.
 	bail bool
 	// sometimes skips the field entirely when its key was not sent at all --
@@ -123,9 +129,18 @@ func (s *Set) Validate(values url.Values) (Input, Errors) {
 }
 
 // message is the sentence one failure puts on the field, after any override.
+//
+// An expanded field answers to the name it was written under as well: the
+// override is keyed "items.*.price.required" because that is what the rule set
+// declares, and the failure lands on "items.0.price".
 func (s *Set) message(f *field, r *rule) string {
 	if custom, ok := s.messages[f.name+"."+r.name]; ok {
 		return custom
+	}
+	if f.primary != "" {
+		if custom, ok := s.messages[f.primary+"."+r.name]; ok {
+			return custom
+		}
 	}
 	return r.spec.message(f, r)
 }

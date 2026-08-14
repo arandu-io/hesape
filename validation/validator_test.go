@@ -104,3 +104,162 @@ func TestErrorsSatisfiesError(t *testing.T) {
 		t.Fatalf("Error() = %q", err.Error())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The three defects an audit ran against the PHP body, each with the input that
+// proved it. Every test below failed before the fix and passes after it.
+// ---------------------------------------------------------------------------
+
+// TestWildcardDependentRuleReplacesAsterisksInItsParameters is the input the
+// audit ran, and it failed OPEN: the rule set said foo.*.bar is required
+// whenever foo.*.baz was sent, the request sent foo.0.baz, and nothing failed.
+//
+// Two steps of Validator::validateAttribute were missing. The attribute was
+// never expanded against the data, so the rule ran against the literal key
+// "foo.*.bar"; and the parameter was handed to required_with as the literal
+// "foo.*.baz", which names nothing a request can hold. The whole of
+// $dependentRules -- the family that decides whether a field is required -- was
+// inert on any set written with a wildcard.
+func TestWildcardDependentRuleReplacesAsterisksInItsParameters(t *testing.T) {
+	set := validation.MustCompile(validation.Rules{"foo.*.bar": "required_with:foo.*.baz"})
+
+	v := validation.Make(validation.Data{"foo": []any{map[string]any{"baz": "x"}}}, set)
+	if v.Passes() {
+		t.Fatalf("foo.0.baz was sent and foo.0.bar was not, and the set passed")
+	}
+	if got := v.Errors().Get("foo.0.bar"); len(got) != 1 {
+		t.Fatalf("errors = %v, want one message on foo.0.bar", v.Errors())
+	}
+
+	// The other half of the rule: with the sibling absent, nothing is required.
+	absent := validation.Make(validation.Data{"foo": []any{map[string]any{"other": "x"}}}, set)
+	if !absent.Passes() {
+		t.Fatalf("foo.0.baz was not sent and foo.0.bar was demanded anyway: %v", absent.Errors())
+	}
+
+	// And the member that did send both passes while its sibling fails, which
+	// is what expanding per member is for.
+	mixed := validation.Make(validation.Data{"foo": []any{
+		map[string]any{"baz": "x", "bar": "here"},
+		map[string]any{"baz": "x"},
+	}}, set)
+	if mixed.Passes() {
+		t.Fatal("the second member is missing bar and the set passed")
+	}
+	if got := mixed.Errors().Get("foo.0.bar"); len(got) != 0 {
+		t.Errorf("the member that sent bar failed: %v", got)
+	}
+	if got := mixed.Errors().Get("foo.1.bar"); len(got) != 1 {
+		t.Errorf("errors = %v, want one message on foo.1.bar", mixed.Errors())
+	}
+}
+
+// TestWildcardFieldsAreExpandedAgainstTheData: a failure is reported under the
+// key the request actually carries, not under the pattern that was written.
+// "foo.*.bar is required" names nothing anybody can fix.
+func TestWildcardFieldsAreExpandedAgainstTheData(t *testing.T) {
+	set := validation.MustCompile(validation.Rules{"items.*.price": "required|numeric"})
+
+	v := validation.Make(validation.Data{"items": []any{
+		validation.Data{"price": "10"},
+		validation.Data{"price": "abc"},
+	}}, set)
+
+	if v.Passes() {
+		t.Fatal("a non-numeric price passed")
+	}
+	if got := v.Errors().Get("items.1.price"); len(got) != 1 {
+		t.Fatalf("errors = %v, want one message on items.1.price", v.Errors())
+	}
+	if got := v.Errors().Get("items.*.price"); len(got) != 0 {
+		t.Errorf("a failure was reported under the pattern rather than the key: %v", got)
+	}
+}
+
+// TestSizeComparesExactlyRatherThanInFloat64 is the audit's second input: two
+// whole numbers a float64 cannot tell apart, one of them over the limit.
+//
+// Illuminate's getSize hands a string to BigNumber, which compares at arbitrary
+// precision. This package compared in float64, and 9007199254740993 and
+// 9007199254740992 are the same float64 -- so a monetary or quota limit was
+// passable by one unit of rounding.
+func TestSizeComparesExactlyRatherThanInFloat64(t *testing.T) {
+	set := validation.MustCompile(validation.Rules{"amount": "numeric|max:9007199254740992"})
+
+	over := validation.Make(validation.Data{"amount": "9007199254740993"}, set)
+	if over.Passes() {
+		t.Fatal("9007199254740993 passed max:9007199254740992 -- the comparison is still in float64")
+	}
+
+	at := validation.Make(validation.Data{"amount": "9007199254740992"}, set)
+	if !at.Passes() {
+		t.Fatalf("the limit itself was rejected: %v", at.Errors())
+	}
+
+	// The same in the other direction, so that min is not fixed by accident.
+	low := validation.MustCompile(validation.Rules{"amount": "numeric|min:9007199254740993"})
+	if under := validation.Make(validation.Data{"amount": "9007199254740992"}, low); under.Passes() {
+		t.Fatal("9007199254740992 passed min:9007199254740993")
+	}
+}
+
+// TestDateFormatTakesSeveralLayoutsAndReadsANumericValue is the audit's third
+// input. Illuminate's validateDateFormat walks every parameter and passes when
+// any of them matches, and it accepts a numeric value because is_numeric does.
+//
+// Here the rule took at most one layout -- the second was a boot failure -- and
+// asked is_string, so a JSON body that sent 20240301 without quotes was
+// rejected by a rule that Laravel passes.
+func TestDateFormatTakesSeveralLayoutsAndReadsANumericValue(t *testing.T) {
+	set := validation.MustCompile(validation.Rules{"d": "date_format:2006-01-02,2006-01-02 15:04:05"})
+
+	for _, value := range []string{"2026-03-01", "2026-03-01 10:30:00"} {
+		v := validation.Make(validation.Data{"d": value}, set)
+		if !v.Passes() {
+			t.Errorf("%q matched neither layout: %v", value, v.Errors())
+		}
+	}
+	if v := validation.Make(validation.Data{"d": "01/03/2026"}, set); v.Passes() {
+		t.Error("a value matching neither layout passed")
+	}
+
+	numeric := validation.MustCompile(validation.Rules{"d": "date_format:20060102"})
+	if v := validation.Make(validation.Data{"d": 20260301}, numeric); !v.Passes() {
+		t.Errorf("a JSON body that sent the date unquoted was rejected: %v", v.Errors())
+	}
+}
+
+// TestAnUploadThatDidNotFinishFailsAsUploaded is the same method's other
+// missing branch. Illuminate reports `uploaded` on a file rule or an implicit
+// rule when the upload itself did not complete -- the file was too large for
+// the server, and nothing was written. The English line for it was in lang.go
+// and no code path could reach it, so a truncated upload was reported as
+// whatever the next rule happened to think of the empty file.
+func TestAnUploadThatDidNotFinishFailsAsUploaded(t *testing.T) {
+	set := validation.MustCompile(validation.Rules{"avatar": "required|image|max:100"})
+
+	v := validation.Make(validation.Data{"avatar": truncatedUpload{}}, set)
+
+	if v.Passes() {
+		t.Fatal("an upload that did not finish passed")
+	}
+	if got := v.Failed()["avatar"]; len(got) == 0 || got[0] != "uploaded" {
+		t.Fatalf("failed rules = %v, want uploaded first", got)
+	}
+	if got := v.Errors().First("avatar"); got != "failed to upload" {
+		t.Errorf("message = %q, want the sentence for uploaded", got)
+	}
+}
+
+// truncatedUpload is an upload the server never finished writing, which is the
+// only state `uploaded` exists to report.
+type truncatedUpload struct{}
+
+func (truncatedUpload) GetPath() string                    { return "" }
+func (truncatedUpload) GetRealPath() string                { return "" }
+func (truncatedUpload) GetSize() int64                     { return 0 }
+func (truncatedUpload) GetMimeType() string                { return "" }
+func (truncatedUpload) GetExtension() string               { return "" }
+func (truncatedUpload) GuessExtension() string             { return "" }
+func (truncatedUpload) GetClientOriginalExtension() string { return "" }
+func (truncatedUpload) IsValid() bool                      { return false }

@@ -1,7 +1,6 @@
 package validation
 
 import (
-	"strconv"
 	"strings"
 )
 
@@ -228,8 +227,8 @@ func replaceComparison(v *Validator, message, attribute, rule string, parameters
 	if value == nil {
 		return strings.ReplaceAll(message, ":value", v.GetDisplayableAttribute(other))
 	}
-	size := v.GetSize(attribute, value)
-	return strings.ReplaceAll(message, ":value", strconv.FormatFloat(size, 'f', -1, 64))
+	size, _ := v.GetSize(attribute, value)
+	return strings.ReplaceAll(message, ":value", sizeText(size))
 }
 
 // replaceDate answers to replaceBefore and the four rules the PHP routes into

@@ -123,7 +123,7 @@ func (v *Validator) AddRules(rules *Set) *Validator {
 	if rules == nil {
 		return v
 	}
-	v.set = mergeSets(v.set, rules)
+	v.explodeRules(mergeSets(v.initialRules, rules))
 
 	return v
 }
@@ -148,11 +148,11 @@ func (v *Validator) Sometimes(attributes []string, rules *Set, callback func(pay
 		if !callback(payload, v.GetValue(attribute)) {
 			continue
 		}
-		v.set = mergeSets(v.set, &Set{
+		v.explodeRules(mergeSets(v.initialRules, &Set{
 			fields:   []*field{f},
 			byName:   map[string]*field{attribute: f},
 			messages: rules.messages,
-		})
+		}))
 	}
 
 	return v
@@ -374,11 +374,16 @@ func (v *Validator) EnsureExponentWithinAllowedRangeUsing(callback func(scale in
 	return v
 }
 
-// EnsureExponentWithinAllowedRange asks that check, and answers true when
-// nothing was registered -- which is what the PHP's null callback means.
+// EnsureExponentWithinAllowedRange asks that check.
+//
+// With nothing registered the answer is the PHP's own default -- an exponent
+// between -1000 and 1000 -- and not "yes". This method answered true for every
+// scale, so "1e100000" had the range check the doc comment above promises and
+// the range was infinite: getSize never refused an exponent, which is half of
+// what an audit found while proving that getSize compared in float64.
 func (v *Validator) EnsureExponentWithinAllowedRange(scale int, attribute string, value any) bool {
 	if v.ensureExponentWithinAllowedRange == nil {
-		return true
+		return scale <= 1000 && scale >= -1000
 	}
 	return v.ensureExponentWithinAllowedRange(scale, attribute, value)
 }

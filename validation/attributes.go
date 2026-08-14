@@ -3,6 +3,7 @@ package validation
 import (
 	"context"
 	"math"
+	"math/big"
 	"net/url"
 	"regexp"
 	"slices"
@@ -416,13 +417,13 @@ func (v *Validator) ValidateBetween(attribute string, value any, parameters []st
 	if !v.RequireParameterCount(2, parameters, "between") {
 		return false
 	}
-	low, ok := number(strings.TrimSpace(parameters[0]))
-	high, okHigh := number(strings.TrimSpace(parameters[1]))
-	if !ok || !okHigh {
+	low, okLow := exactParameter(parameters[0])
+	high, okHigh := exactParameter(parameters[1])
+	size, okSize := v.GetSize(attribute, value)
+	if !okLow || !okHigh || !okSize {
 		return false
 	}
-	size := v.GetSize(attribute, value)
-	return size >= low && size <= high
+	return size.Cmp(low) >= 0 && size.Cmp(high) <= 0
 }
 
 // ValidateMin answers to validateMin.
@@ -430,8 +431,9 @@ func (v *Validator) ValidateMin(attribute string, value any, parameters []string
 	if !v.RequireParameterCount(1, parameters, "min") {
 		return false
 	}
-	low, ok := number(strings.TrimSpace(parameters[0]))
-	return ok && v.GetSize(attribute, value) >= low
+	low, okLow := exactParameter(parameters[0])
+	size, okSize := v.GetSize(attribute, value)
+	return okLow && okSize && size.Cmp(low) >= 0
 }
 
 // ValidateMax answers to validateMax. An upload that did not finish fails
@@ -443,8 +445,9 @@ func (v *Validator) ValidateMax(attribute string, value any, parameters []string
 	if up, ok := value.(UploadedFile); ok && !up.IsValid() {
 		return false
 	}
-	high, ok := number(strings.TrimSpace(parameters[0]))
-	return ok && v.GetSize(attribute, value) <= high
+	high, okHigh := exactParameter(parameters[0])
+	size, okSize := v.GetSize(attribute, value)
+	return okHigh && okSize && size.Cmp(high) <= 0
 }
 
 // ValidateSize answers to validateSize.
@@ -456,8 +459,9 @@ func (v *Validator) ValidateSize(attribute string, value any, parameters []strin
 	if !v.RequireParameterCount(1, parameters, "size") {
 		return false
 	}
-	want, ok := number(strings.TrimSpace(parameters[0]))
-	return ok && v.GetSize(attribute, value) == want
+	want, okWant := exactParameter(parameters[0])
+	size, okSize := v.GetSize(attribute, value)
+	return okWant && okSize && size.Cmp(want) == 0
 }
 
 // ValidateGt answers to validateGt.
@@ -490,10 +494,11 @@ func (v *Validator) compareToAnother(attribute string, value any, parameters []s
 	}
 	other := v.GetValue(parameters[0])
 
-	bound, isBound := number(strings.TrimSpace(parameters[0]))
+	bound, isBound := exactParameter(parameters[0])
 	if other == nil && isBound {
 		if _, numeric := numberOf(value); numeric {
-			return ok(compareFloats(v.GetSize(attribute, value), bound))
+			size, okSize := v.GetSize(attribute, value)
+			return okSize && ok(size.Cmp(bound))
 		}
 	}
 	if isBound {
@@ -502,26 +507,18 @@ func (v *Validator) compareToAnother(attribute string, value any, parameters []s
 		return false
 	}
 	if v.HasRule(attribute, numericRules) {
-		mine, mineOK := numberOf(value)
-		theirs, theirsOK := numberOf(other)
+		mine, mineOK := exactNumber(value)
+		theirs, theirsOK := exactNumber(other)
 		if mineOK && theirsOK {
-			return ok(compareFloats(mine, theirs))
+			return ok(mine.Cmp(theirs))
 		}
 	}
 	if !sameType(value, other) {
 		return false
 	}
-	return ok(compareFloats(v.GetSize(attribute, value), v.GetSize(parameters[0], other)))
-}
-
-func compareFloats(a, b float64) int {
-	switch {
-	case a < b:
-		return -1
-	case a > b:
-		return 1
-	}
-	return 0
+	mine, mineOK := v.GetSize(attribute, value)
+	theirs, theirsOK := v.GetSize(parameters[0], other)
+	return mineOK && theirsOK && ok(mine.Cmp(theirs))
 }
 
 // GetSize answers to getSize: what min, max, size, between and the four
@@ -532,18 +529,48 @@ func compareFloats(a, b float64) int {
 // is how many characters it has. Characters, never bytes: a limit in bytes
 // rejects valid input in every language that needs more than one byte for a
 // letter.
-func (v *Validator) GetSize(attribute string, value any) float64 {
-	hasNumeric := v.HasRule(attribute, numericRules)
-	if n, ok := numberOf(value); ok && hasNumeric {
-		return n
+//
+// The size is a *big.Rat and not a float64, which is what an audit proved
+// wrong: the PHP hands getSize's answer to BigNumber, which compares at
+// arbitrary precision, and 9007199254740993 and 9007199254740992 are the SAME
+// float64. So "numeric|max:9007199254740992" passed on the value
+// 9007199254740993, and a monetary limit or a quota was over-runnable by one
+// unit of rounding. math/big is stdlib and the comparison is now exact.
+//
+// The bool is the MathException ensureExponentWithinAllowedRange throws: an
+// exponent outside the allowed range gives a value no size at all, and Go has
+// no throw. Every caller fails the rule on it, which is the closed answer.
+func (v *Validator) GetSize(attribute string, value any) (*big.Rat, bool) {
+	if text, isNumber := numericText(value); isNumber && v.HasRule(attribute, numericRules) {
+		if !v.exponentWithinAllowedRange(attribute, text, value) {
+			return nil, false
+		}
+		return exactText(text)
 	}
 	if n, ok := countOf(value); ok {
-		return float64(n)
+		return new(big.Rat).SetInt64(int64(n)), true
 	}
 	if f, ok := asFile(value); ok {
-		return float64(f.GetSize()) / 1024
+		return new(big.Rat).SetFrac64(f.GetSize(), 1024), true
 	}
-	return float64(len([]rune(stringOf(value))))
+	return new(big.Rat).SetInt64(int64(len([]rune(stringOf(value))))), true
+}
+
+// exponentWithinAllowedRange answers to
+// ValidatesAttributes::ensureExponentWithinAllowedRange, which returns the value
+// or throws a MathException. There is no throw here, so the answer is the
+// question itself and the size has none.
+func (v *Validator) exponentWithinAllowedRange(attribute, text string, value any) bool {
+	_, exponent, written := strings.Cut(strings.ToLower(text), "e")
+	if !written {
+		return true
+	}
+	scale, err := strconv.Atoi(strings.TrimPrefix(exponent, "+"))
+	if err != nil {
+		// PHP's (int) cast of text it cannot read is zero, which is in range.
+		scale = 0
+	}
+	return v.EnsureExponentWithinAllowedRange(scale, attribute, value)
 }
 
 // ValidateDigits answers to validateDigits.
@@ -720,19 +747,37 @@ func (v *Validator) ValidateDate(attribute string, value any, parameters []strin
 // means something else in the host language; compile.go refuses a PHP format at
 // boot rather than accepting one that then rejects every date. Said here as ADR
 // 0044 asks, because it is a change a reader has to know about.
+//
+// What is NOT a change, and was one until an audit ran it: the PHP walks every
+// parameter and passes when ANY of them matches, and it takes a numeric value
+// because is_numeric does. This took one layout -- date_format:2006-01-02,2006-01-02
+// 15:04:05 was a boot failure, "takes at most 1 argument" -- and asked
+// is_string, so a JSON body that sent 20240301 unquoted was refused by a rule
+// that Laravel passes. Both are back.
 func (v *Validator) ValidateDateFormat(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "date_format") {
 		return false
 	}
-	s, ok := asString(value)
-	if !ok {
-		return false
+	s, isString := asString(value)
+	if !isString {
+		// PHP: `! is_string($value) && ! is_numeric($value)` refuses; a number
+		// is read as the text it prints as, which is what the cast in
+		// DateTime::createFromFormat does with it.
+		if _, isNumber := numberOf(value); !isNumber {
+			return false
+		}
+		s = stringOf(value)
 	}
-	t, err := time.Parse(parameters[0], s)
-	// The round trip is the PHP's `$date->format($format) == $value`:
-	// time.Parse accepts "2006-1-2" for the layout "2006-01-02", and a format
-	// that accepts two spellings of one day is not a format.
-	return err == nil && t.Format(parameters[0]) == s
+	for _, layout := range parameters {
+		t, err := time.Parse(layout, s)
+		// The round trip is the PHP's `$date->format($format) == $value`:
+		// time.Parse accepts "2006-1-2" for the layout "2006-01-02", and a
+		// format that accepts two spellings of one day is not a format.
+		if err == nil && t.Format(layout) == s {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidateBefore answers to validateBefore.

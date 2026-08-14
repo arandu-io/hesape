@@ -30,7 +30,7 @@
 //	Validator                     validator.go
 //	Support\MessageBag            messages.go, as Errors
 //	Rules\*                       rules_objects.go
-//	ValidationRuleParser          compile.go, at boot instead of per request
+//	ValidationRuleParser          compile.go at boot, parser.go per request
 //	Concerns\FormatsMessages      the message func of each rule in rules.go
 //	ValidationException           CompileErrors, at boot rather than at runtime
 //

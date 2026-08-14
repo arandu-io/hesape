@@ -297,3 +297,25 @@ func TestAFactoryReplacerReachesTheMessage(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+// TestEveryDependentRuleIsARuleThisPackageHas: $dependentRules is written out
+// by hand, and a name misspelled in it fails OPEN -- the rule keeps the literal
+// "foo.*.baz", finds no field, and passes. The catalogue is the only thing that
+// can prove the spelling.
+func TestEveryDependentRuleIsARuleThisPackageHas(t *testing.T) {
+	for _, name := range dependentRules {
+		if _, known := specs[name]; !known {
+			t.Errorf("dependent rule %q is not a rule this package has", name)
+		}
+	}
+}
+
+// TestEveryUploadedFileRuleIsARuleThisPackageHas, for the same reason: the list
+// decides whether a truncated upload is reported as `uploaded` at all.
+func TestEveryUploadedFileRuleIsARuleThisPackageHas(t *testing.T) {
+	for _, name := range uploadedFileRules {
+		if _, known := specs[name]; !known {
+			t.Errorf("file rule %q is not a rule this package has", name)
+		}
+	}
+}

@@ -302,7 +302,9 @@ func (c *compiler) flags(f *field) {
 			f.sometimes = true
 		case r.name == "nullable":
 			f.nullable = true
-		case r.name == "date_format" && len(r.args) == 1:
+		case r.name == "date_format" && len(r.args) >= 1:
+			// getDateFormat answers to the FIRST parameter, as the PHP's does:
+			// the rule reads several layouts, the date comparisons read one.
 			f.layout = r.args[0]
 		}
 		if r.spec.sizeIsValue {
@@ -432,7 +434,11 @@ func looksLikeARule(pattern string) string {
 
 func (c *compiler) checkMessages() {
 	for _, key := range slices.Sorted(maps.Keys(c.set.messages)) {
-		fieldName, ruleName, ok := strings.Cut(key, ".")
+		// The LAST dot, not the first: a field name carries dots -- "items.*.price"
+		// -- and a rule name never does. Cutting at the first one read
+		// "items.*.price.required" as the field "items" and could not find it,
+		// so no nested or wildcard field could carry a message override at all.
+		fieldName, ruleName, ok := cutLast(key, ".")
 		f := c.set.byName[fieldName]
 		if !ok || f == nil {
 			c.errs = append(c.errs, CompileError{
@@ -446,6 +452,15 @@ func (c *compiler) checkMessages() {
 			c.fail(f, ruleName, "a message is keyed %q, and %q declares no rule %q", key, fieldName, ruleName)
 		}
 	}
+}
+
+// cutLast is strings.Cut around the LAST separator rather than the first.
+func cutLast(s, sep string) (before, after string, found bool) {
+	i := strings.LastIndex(s, sep)
+	if i < 0 {
+		return s, "", false
+	}
+	return s[:i], s[i+len(sep):], true
 }
 
 // splitChain splits a chain on "|", except that a regular expression takes
@@ -696,24 +711,37 @@ const theLayout = "2006-01-02"
 // "Y-m-d" and time.Parse("Y-m-d", "Y-m-d") succeeds, so the layout would boot
 // and then reject every date anybody ever sent. Two different instants that
 // format identically is what proves the layout contains no date at all.
+//
+// Every layout is checked, because the rule takes several: validateDateFormat
+// walks its whole parameter list and passes when any one of them matches, so a
+// layout written wrong in the second position would be as silent as one written
+// wrong in the first.
 func checkLayout(c *checkCtx) error {
-	layout := c.r.args[0]
+	for _, layout := range c.r.args {
+		if err := checkOneLayout(c.r.name, layout); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkOneLayout(ruleName, layout string) error {
 	one := time.Date(2006, 1, 2, 15, 4, 5, 0, time.UTC)
 	two := time.Date(2011, 11, 12, 3, 45, 6, 0, time.UTC)
 	if one.Format(layout) == two.Format(layout) {
 		return fmt.Errorf("rule %q needs a Go layout and %q is not one -- it renders the same text "+
 			"for every instant. A Go layout spells the date out: %q, never %q",
-			c.r.name, layout, theLayout, "Y-m-d")
+			ruleName, layout, theLayout, "Y-m-d")
 	}
 	rendered := one.Format(layout)
 	parsed, err := time.Parse(layout, rendered)
 	if err != nil {
 		return fmt.Errorf("rule %q has a layout that cannot read what it writes: %q renders %q, "+
-			"which does not parse back (%s)", c.r.name, layout, rendered, err)
+			"which does not parse back (%s)", ruleName, layout, rendered, err)
 	}
 	if parsed.Format(layout) != rendered {
 		return fmt.Errorf("rule %q has a layout that does not round-trip: %q renders %q and reads "+
-			"it back as %q", c.r.name, layout, rendered, parsed.Format(layout))
+			"it back as %q", ruleName, layout, rendered, parsed.Format(layout))
 	}
 	return nil
 }

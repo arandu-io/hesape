@@ -3,6 +3,7 @@ package validation
 import (
 	"context"
 	"net"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -23,7 +24,16 @@ import (
 // `current_password` and `active_url`, and each of them fails closed when the
 // thing it needs was not given.
 type Validator struct {
-	set  *Set
+	// initialRules answers to $initialRules: the compiled set as it was
+	// written, wildcards and all. set answers to $rules: the same set with
+	// every wildcard expanded against the data this request carries.
+	//
+	// Two of them for the reason the PHP keeps two: the expansion depends on
+	// the data, so adding a rule or replacing the data has to expand again, and
+	// expanding an already-expanded set would find nothing to expand.
+	initialRules *Set
+	set          *Set
+
 	data Data
 
 	messages Errors
@@ -124,11 +134,87 @@ func WithClock(now func() time.Time) ValidatorOption {
 // copied, so that excluding a field does not reach back into the request's own
 // map.
 func Make(data Data, rules *Set, opts ...ValidatorOption) *Validator {
-	v := &Validator{set: rules, data: data.Clone(), failed: map[string][]string{}}
+	v := &Validator{data: data.Clone(), failed: map[string][]string{}}
 	for _, opt := range opts {
 		opt(v)
 	}
+	v.explodeRules(rules)
 	return v
+}
+
+// explodeRules answers to Validator::addRules, which is where the PHP's
+// constructor turns "items.*.price" into one rule per item the request actually
+// sent -- and where this package did nothing at all.
+//
+// A set with no wildcard in it is kept as it is, pointer and all: it is shared
+// by every request, and a set nobody has to expand must not be copied per
+// request either.
+func (v *Validator) explodeRules(rules *Set) {
+	v.initialRules = rules
+	v.implicitAttributes = map[string][]string{}
+
+	if !slices.ContainsFunc(rules.fields, func(f *field) bool { return strings.Contains(f.name, "*") }) {
+		v.set = rules
+		return
+	}
+
+	parser := NewValidationRuleParser(v.data)
+
+	expanded := &Set{
+		byName:   make(map[string]*field, len(rules.byName)),
+		messages: rules.messages,
+		file:     rules.file,
+		line:     rules.line,
+	}
+	for _, f := range rules.fields {
+		if !strings.Contains(f.name, "*") {
+			expanded.fields = append(expanded.fields, f)
+			expanded.byName[f.name] = f
+			continue
+		}
+		for _, key := range parser.explodeWildcardRules(f.name) {
+			if _, already := expanded.byName[key]; already {
+				continue
+			}
+			member := *f
+			member.name, member.primary = key, f.name
+			expanded.fields = append(expanded.fields, &member)
+			expanded.byName[key] = &member
+			v.implicitAttributes[f.name] = append(v.implicitAttributes[f.name], key)
+		}
+	}
+	v.set = expanded
+}
+
+// dependentRules answers to Validator::$dependentRules: the rules whose
+// parameters name OTHER FIELDS rather than values, and so the rules whose
+// asterisks have to be replaced with the keys the attribute expanded to.
+//
+// Getting this list wrong fails open, which is why it is written out rather
+// than inferred: every rule that decides whether a field is required is on it,
+// and one that is missing goes back to being handed the literal "foo.*.baz" --
+// a name no request can hold, so the rule finds nothing and passes.
+var dependentRules = []string{
+	"accepted_if", "after", "after_or_equal", "before", "before_or_equal",
+	"confirmed", "declined_if", "different", "exclude_if", "exclude_unless",
+	"exclude_with", "exclude_without", "gt", "gte", "lt", "lte", "missing_if",
+	"missing_unless", "missing_with", "missing_with_all", "present_if",
+	"present_unless", "present_with", "present_with_all", "prohibited",
+	"prohibited_if", "prohibited_if_accepted", "prohibited_if_declined",
+	"prohibited_unless", "prohibits", "required_if", "required_if_accepted",
+	"required_if_declined", "required_unless", "required_with",
+	"required_with_all", "required_without", "required_without_all", "same",
+	"unique",
+}
+
+// uploadedFileRules answers to Validator::$fileRules, which is the six that
+// make a field an upload PLUS the four size rules. The list in compile.go is
+// the first six on their own, because that is what makes `max:100` mean a
+// hundred kilobytes; this one is what validateAttribute asks before it reports
+// a failed upload.
+var uploadedFileRules = []string{
+	"between", "dimensions", "extensions", "file", "image", "max", "mimes",
+	"mimetypes", "min", "size",
 }
 
 // StopOnFirstFailure answers to stopOnFirstFailure: leave after the first field
@@ -183,18 +269,110 @@ func (v *Validator) Fails() bool { return !v.Passes() }
 
 // validateAttribute answers to validateAttribute.
 func (v *Validator) validateAttribute(f *field, r *rule) {
+	// First we will get the correct keys for the given attribute in case the
+	// field is nested in an array. Then we determine if the given rule accepts
+	// other field names as parameters. If so, we will replace any asterisks
+	// found in the parameters with the correct keys.
+	//
+	// This is the step that was missing, and it failed OPEN: the whole of
+	// $dependentRules -- required_with, required_if, same, different, the four
+	// comparisons, confirmed, prohibits, unique -- was handed the literal
+	// parameter "foo.*.baz", which names nothing a request can hold. The lookup
+	// found nothing, "required when the sibling is present" found no sibling,
+	// and a form written with a wildcard accepted what it was written to
+	// refuse.
+	parameters := r.args
+	if slices.Contains(dependentRules, r.name) {
+		if keys := v.getExplicitKeys(f.name); len(keys) > 0 {
+			parameters = replaceAsterisksInParameters(parameters, keys)
+		}
+	}
+
 	value := v.GetValue(f.name)
+
+	// If the attribute is a file, we will verify that the file upload was
+	// actually successful and if it wasn't we will add a failure for the
+	// attribute. Files may not successfully upload if they are too large based
+	// on the server's settings so we will bail in this case.
+	if isUploadedAndInvalid(value) &&
+		(v.HasRule(f.name, uploadedFileRules) || v.HasRule(f.name, implicitRules)) {
+		v.AddFailure(f.name, "uploaded", nil)
+		return
+	}
+
 	if !v.isValidatable(f, r, value) {
 		return
 	}
 
 	v.currentRule = r
-	passed := r.spec.eval(v, f.name, value, r.args)
+	passed := r.spec.eval(v, f.name, value, parameters)
 	v.currentRule = nil
 
 	if !passed {
-		v.AddFailure(f.name, r.name, r.args)
+		v.AddFailure(f.name, r.name, parameters)
 	}
+}
+
+// isUploadedAndInvalid is the first half of the PHP's `$value instanceof
+// UploadedFile && ! $value->isValid()`.
+func isUploadedAndInvalid(value any) bool {
+	up, isUpload := value.(UploadedFile)
+	return isUpload && !up.IsValid()
+}
+
+// getExplicitKeys answers to Validator::getExplicitKeys: the keys an expanded
+// attribute filled its wildcards with. "foo.1.bar.spark.baz" gives [1, spark]
+// for "foo.*.bar.*.baz".
+func (v *Validator) getExplicitKeys(attribute string) []string {
+	primary := v.getPrimaryAttribute(attribute)
+	if !strings.Contains(primary, "*") {
+		return nil
+	}
+
+	pattern, err := regexp.Compile(`^` + strings.ReplaceAll(regexp.QuoteMeta(primary), `\*`, `([^.]+)`))
+	if err != nil {
+		return nil
+	}
+	if keys := pattern.FindStringSubmatch(attribute); keys != nil {
+		return keys[1:]
+	}
+	return nil
+}
+
+// replaceAsterisksInParameters answers to
+// Validator::replaceAsterisksInParameters: vsprintf over the parameter with
+// each asterisk turned into a key.
+//
+// The PHP throws when there are fewer keys than asterisks. There is nothing to
+// throw here and nothing sensible to guess, so the asterisks past the last key
+// are left as they were written -- the rule then finds no field, which is the
+// behaviour that was wrong everywhere and is now wrong only where the rule set
+// asks for a key the attribute does not have.
+func replaceAsterisksInParameters(parameters, keys []string) []string {
+	out := make([]string, len(parameters))
+	for i, field := range parameters {
+		out[i] = fillAsterisks(field, keys)
+	}
+	return out
+}
+
+func fillAsterisks(field string, keys []string) string {
+	parts := strings.Split(field, "*")
+	if len(parts) == 1 {
+		return field
+	}
+
+	var b strings.Builder
+	b.WriteString(parts[0])
+	for i, part := range parts[1:] {
+		if i < len(keys) {
+			b.WriteString(keys[i])
+		} else {
+			b.WriteString("*")
+		}
+		b.WriteString(part)
+	}
+	return b.String()
 }
 
 // isValidatable answers to isValidatable.
@@ -314,6 +492,16 @@ func (v *Validator) ShouldBeExcluded(attribute string) bool {
 	return false
 }
 
+// raisedRules are the sentences for the failures the validator reports itself,
+// which no field declares and so no spec carries.
+//
+// `uploaded` is the only one, and it had no reachable sentence at all: the
+// English line for it exists in lang.go and nothing ever raised the failure,
+// because validateAttribute had no branch for an upload that did not finish.
+// It is not in specs on purpose -- specs is what a rule string may name, and
+// nobody writes `uploaded` into one.
+var raisedRules = map[string]string{"uploaded": "failed to upload"}
+
 // messageFor is the sentence one failure puts on the field, after any override
 // the set carries.
 func (v *Validator) messageFor(attribute, ruleName string) string {
@@ -321,11 +509,13 @@ func (v *Validator) messageFor(attribute, ruleName string) string {
 	if !declared {
 		return "is not valid"
 	}
-	r := f.rule(ruleName)
-	if r == nil {
-		return "is not valid"
+	if r := f.rule(ruleName); r != nil {
+		return v.set.message(f, r)
 	}
-	return v.set.message(f, r)
+	if sentence, raised := raisedRules[ruleName]; raised {
+		return sentence
+	}
+	return "is not valid"
 }
 
 // GetValue answers to getValue.
@@ -341,6 +531,9 @@ func (v *Validator) GetData() Data { return v.data }
 // it.
 func (v *Validator) SetData(data Data) *Validator {
 	v.data = data.Clone()
+	// The wildcards were expanded against the OLD data, and "items.*.price"
+	// means the items this request sent.
+	v.explodeRules(v.initialRules)
 	return v
 }
 
@@ -358,7 +551,7 @@ func (v *Validator) GetRules() map[string][]string {
 
 // SetRules answers to setRules: run against another compiled set.
 func (v *Validator) SetRules(rules *Set) *Validator {
-	v.set = rules
+	v.explodeRules(rules)
 	return v
 }
 

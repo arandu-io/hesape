@@ -2,6 +2,7 @@ package validation
 
 import (
 	"fmt"
+	"math/big"
 	"net/netip"
 	"regexp"
 	"strconv"
@@ -499,9 +500,9 @@ var specs = map[string]*spec{
 		message: func(f *field, r *rule) string { return "is not a valid date" },
 	},
 	"date_format": {
-		minArgs: 1, maxArgs: 1, check: checkLayout,
+		minArgs: 1, maxArgs: -1, check: checkLayout,
 		eval:    (*Validator).ValidateDateFormat,
-		message: func(f *field, r *rule) string { return "must match the format " + r.args[0] },
+		message: func(f *field, r *rule) string { return "must match the format " + or(r.args) },
 	},
 	"date_equals": {
 		minArgs: 1, maxArgs: 1, check: checkMoment,
@@ -761,6 +762,69 @@ func number(v string) (float64, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// numericText is is_numeric plus the PHP's trim(): the TEXT of a value that is
+// a number, which is what getSize hands to BigNumber. A float64 read back out
+// of a form has already lost the digits this exists to keep, so the text is
+// what travels.
+func numericText(v any) (string, bool) {
+	if s, isString := asString(v); isString {
+		s = strings.TrimSpace(s)
+		if _, isNumber := number(s); !isNumber {
+			return "", false
+		}
+		return s, true
+	}
+	if _, isNumber := numberOf(v); !isNumber {
+		return "", false
+	}
+	return stringOf(v), true
+}
+
+// exactText reads numeric text at arbitrary precision, which is what
+// BigNumber::of does with the same string.
+//
+// big.Rat reads a fraction as well ("1/2"), and no caller reaches here with
+// one: every path asks number() first, and is_numeric has no spelling for a
+// fraction.
+func exactText(s string) (*big.Rat, bool) {
+	r, ok := new(big.Rat).SetString(s)
+	return r, ok
+}
+
+// exactNumber is exactText for a value rather than a string.
+func exactNumber(v any) (*big.Rat, bool) {
+	text, isNumber := numericText(v)
+	if !isNumber {
+		return nil, false
+	}
+	return exactText(text)
+}
+
+// exactParameter reads the bound a size rule was written with. PHP lets
+// BigNumber::of throw on text that is not a number; the rule fails here
+// instead, which is what every other malformed parameter already does.
+func exactParameter(p string) (*big.Rat, bool) {
+	p = strings.TrimSpace(p)
+	if _, isNumber := number(p); !isNumber {
+		return nil, false
+	}
+	return exactText(p)
+}
+
+// sizeText renders a size into a message. An integer prints as one; anything
+// else prints as the decimal PHP would have printed, never as the "3/2" a
+// big.Rat spells by default -- that is not a number anybody typed into a form.
+func sizeText(size *big.Rat) string {
+	if size == nil {
+		return ""
+	}
+	if size.IsInt() {
+		return size.Num().String()
+	}
+	f, _ := size.Float64()
+	return strconv.FormatFloat(f, 'f', -1, 64)
 }
 
 // whole is FILTER_VALIDATE_INT for a form value.

@@ -4,6 +4,7 @@ import (
 	"maps"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -15,6 +16,11 @@ import (
 // Compile does the same walk at boot for a rule set written in a package-level
 // variable. These are the same steps as a value, for the caller that builds a
 // rule set from something that is not a literal.
+//
+// The wildcard half is NOT boot work and cannot be: "items.*.price" means the
+// items this request sent, so Validator.explodeRules calls
+// explodeWildcardRules once per request, over the compiled set. It called
+// nothing at all until an audit proved a wildcard rule set inert.
 
 // ExplodedRules answers to the stdClass ValidationRuleParser::explode returns:
 // the rules with every wildcard expanded, and the wildcard keys that produced
@@ -259,10 +265,128 @@ func InitializeAndGatherData(attribute string, masterData Data) map[string]any {
 
 // initializeAttributeOnData answers to
 // ValidationData::initializeAttributeOnData.
+//
+// The data_set call is the whole point of the method, and it was missing: a
+// wildcard attribute NOBODY SENT A VALUE FOR still has to produce a key, or the
+// rules written against it never run. With "foo.*.bar" against
+// {"foo": [{"baz": "x"}]} the flattened data holds only foo.0.baz, so
+// explodeWildcardRules found no key, the field expanded to nothing, and
+// "foo.*.bar": "required_with:foo.*.baz" passed on a request that PHP fails.
+// Filling foo.0.bar with null is what puts the key there.
+//
+// The slice of the request is deep-copied first. A PHP array is a value and
+// copies itself on write; a Go map and a Go slice are references, so writing
+// the null through would write it into the request's own data.
 func initializeAttributeOnData(attribute string, masterData Data) Data {
 	explicitPath := GetLeadingExplicitAttributePath(attribute)
 
-	return ExtractDataFromPath(explicitPath, masterData)
+	data, _ := deepClone(ExtractDataFromPath(explicitPath, masterData)).(Data)
+
+	if !strings.Contains(attribute, "*") || strings.HasSuffix(attribute, "*") {
+		return data
+	}
+
+	filled, _ := dataSet(data, strings.Split(attribute, "."), nil).(Data)
+
+	return filled
+}
+
+// dataSet answers to the data_set helper as ValidationData calls it: write the
+// value at the dotted path, walking every member where the path says "*", and
+// making the levels it needs on the way.
+//
+// The PHP passes $overwrite = true, which is safe there and here for the same
+// reason: the target is the throwaway copy this gathers KEYS out of, and the
+// values are read back from the request by extractValuesForWildcards.
+func dataSet(target any, segments []string, value any) any {
+	if len(segments) == 0 {
+		return value
+	}
+	segment, rest := segments[0], segments[1:]
+
+	if segment == "*" {
+		switch node := target.(type) {
+		case Data:
+			for key, inner := range node {
+				node[key] = dataSet(inner, rest, value)
+			}
+			return node
+		case map[string]any:
+			return dataSet(Data(node), segments, value)
+		case []any:
+			for i, inner := range node {
+				node[i] = dataSet(inner, rest, value)
+			}
+			return node
+		}
+		// PHP: a target the wildcard cannot walk becomes an empty array, and
+		// the loop over it writes nothing.
+		return Data{}
+	}
+
+	switch node := target.(type) {
+	case Data:
+		if len(rest) == 0 {
+			node[segment] = value
+			return node
+		}
+		inner, held := node[segment]
+		if !held {
+			inner = Data{}
+		}
+		node[segment] = dataSet(inner, rest, value)
+		return node
+	case map[string]any:
+		return dataSet(Data(node), segments, value)
+	case []any:
+		i, err := strconv.Atoi(segment)
+		if err != nil || i < 0 || i >= len(node) {
+			// PHP grows the array here. A request cannot address past the end
+			// of what it sent, and inventing a member would invent a field.
+			return node
+		}
+		if len(rest) == 0 {
+			node[i] = value
+			return node
+		}
+		node[i] = dataSet(node[i], rest, value)
+		return node
+	}
+
+	// Not accessible: PHP replaces it with an array and writes into that.
+	made := Data{}
+	if len(rest) == 0 {
+		made[segment] = value
+		return made
+	}
+	made[segment] = dataSet(Data{}, rest, value)
+	return made
+}
+
+// deepClone copies a slice of the request all the way down, so that dataSet
+// cannot write through to the map the caller handed in.
+func deepClone(value any) any {
+	switch node := value.(type) {
+	case Data:
+		out := make(Data, len(node))
+		for key, item := range node {
+			out[key] = deepClone(item)
+		}
+		return out
+	case map[string]any:
+		out := make(Data, len(node))
+		for key, item := range node {
+			out[key] = deepClone(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(node))
+		for i, item := range node {
+			out[i] = deepClone(item)
+		}
+		return out
+	}
+	return value
 }
 
 // extractValuesForWildcards answers to
