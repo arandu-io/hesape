@@ -164,6 +164,11 @@ func (p *EloquentUserProvider) RetrieveByCredentials(ctx context.Context, creden
 // invite flow that has never had a password set must not be signed in to by
 // offering an empty one.
 //
+// A password that is not a string is coerced rather than refused, and an empty
+// one is handed to the hasher rather than refused early. Both are what the PHP
+// does, and neither used to be -- see [passwordOf] for the login body that
+// proved it.
+//
 // The context is unused because nothing here touches storage; it is on the
 // signature because auth.UserProvider declares it, so that a provider which does
 // need one can be written without changing the contract.

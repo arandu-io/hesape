@@ -100,4 +100,16 @@
 //     AuthServiceProvider and PasswordResetServiceProvider. Deferred
 //     registration in a container, twice over.
 //   - Gate::setContainer. The container, once more.
+//   - Auth::routes, reason 2. It is a Facade method and nothing else: it asks
+//     the application whether laravel/ui's service provider is loaded, throws
+//     with the composer command to run if it is not, and otherwise calls the
+//     router macro that provider registered. There is no facade (ADR 0002), no
+//     application to ask (ADR 0001) and no macro to call (macros are __call).
+//     The nine routes it registers are published into the project by
+//     `go run github.com/arandu-io/ui@latest auth`, into the application's own
+//     routes file, where they can be read and edited (ADR 0026). That is the
+//     one way to get them: a framework method that mounts routes nobody wrote
+//     would be the second, and it would mount them with a handler whose
+//     auth.Grant nothing in the application chose -- which is where a tenant
+//     starts coming from a path instead of from the Grant (RULE 14).
 package auth

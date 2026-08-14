@@ -3,9 +3,11 @@ package users
 import (
 	"crypto/subtle"
 	"errors"
+	"fmt"
 	"maps"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/arandu-io/hesape/auth"
@@ -193,12 +195,101 @@ func tokensMatch(stored, given string) bool {
 }
 
 // passwordOf reads the plain password out of the credentials, the way
-// $credentials['password'] does. A missing key and a value that is not a string
-// are the PHP's null: not a password, so not a match.
+// $credentials['password'] does.
+//
+// # What was wrong, and the input that proved it
+//
+// It was a strict type assertion, credentials["password"].(string), and a
+// credentials map does not hold only strings. A login body of
+//
+//	{"email": "ana@example.com", "password": 12345}
+//
+// decodes through encoding/json into map[string]any{"password": float64(12345)},
+// the assertion failed, and the account could never be signed in to -- with no
+// message saying why, because validateCredentials answers bool and the guard
+// reports a refusal identical to a wrong password.
+//
+// The PHP has no assertion to fail. validateCredentials tests is_null and hands
+// the value to password_verify(string $password, string $hash); Illuminate does
+// not declare strict_types, so 12345 is coerced to "12345" and the sign-in
+// works. So the coercion is done here, in [plainPassword], for every shape PHP
+// would have coerced.
+//
+// # And the early return that is gone
+//
+// This also refused an empty password before reaching the hasher. The PHP does
+// not: "" goes into password_verify like any other value and is refused there,
+// in the time a bcrypt comparison takes. Returning early made the empty password
+// the one refusal that costs nothing, which is a difference a clock can read --
+// SessionGuard.Attempt hides it inside its timebox, but a provider is public and
+// is called directly by anything that authenticates without a guard.
+//
+// A missing key and a nil value are still false. Those are the PHP's is_null,
+// which is the one guard validateCredentials really has.
 func passwordOf(credentials map[string]any) (string, bool) {
-	plain, ok := credentials["password"].(string)
-	if !ok || plain == "" {
+	return plainPassword(credentials["password"])
+}
+
+// plainPassword answers PHP's coercion of $credentials['password'] into the
+// string parameter of password_verify.
+//
+// Every case below is a value PHP renders on the way into that call. A number
+// becomes its decimal form -- which is the case that matters, because that is
+// what a JSON body's unquoted password decodes to. A bool becomes "1" or "",
+// which is what (string)true and (string)false give. A fmt.Stringer is an object
+// with __toString. A []byte is text a form parser or a driver handed over as
+// bytes, and stringOf in genericuser.go reads a column the same way.
+//
+// Anything else -- a slice, a map, a struct with no String method -- is false.
+// PHP raises a TypeError there and the request ends in a 500; false refuses the
+// sign-in instead, for the reason hashing.AuthHasher.Check gives: this contract
+// answers bool and has nowhere to put the error, and refusing is the direction
+// that fails safely.
+//
+// Floats are formatted with the shortest form that round-trips, so 12345.0 is
+// "12345" and 1.5 is "1.5", which is what PHP prints for both. The two
+// renderings part company only in the exponent range, where PHP writes "1.0E+21"
+// and this writes the digits out; no login body carries one.
+func plainPassword(value any) (string, bool) {
+	switch v := value.(type) {
+	case nil:
+		return "", false
+	case string:
+		return v, true
+	case []byte:
+		return string(v), true
+	case bool:
+		if v {
+			return "1", true
+		}
+		return "", true
+	case int:
+		return strconv.Itoa(v), true
+	case int8:
+		return strconv.FormatInt(int64(v), 10), true
+	case int16:
+		return strconv.FormatInt(int64(v), 10), true
+	case int32:
+		return strconv.FormatInt(int64(v), 10), true
+	case int64:
+		return strconv.FormatInt(v, 10), true
+	case uint:
+		return strconv.FormatUint(uint64(v), 10), true
+	case uint8:
+		return strconv.FormatUint(uint64(v), 10), true
+	case uint16:
+		return strconv.FormatUint(uint64(v), 10), true
+	case uint32:
+		return strconv.FormatUint(uint64(v), 10), true
+	case uint64:
+		return strconv.FormatUint(v, 10), true
+	case float32:
+		return strconv.FormatFloat(float64(v), 'f', -1, 32), true
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64), true
+	case fmt.Stringer:
+		return v.String(), true
+	default:
 		return "", false
 	}
-	return plain, true
 }
