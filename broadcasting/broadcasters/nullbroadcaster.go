@@ -32,7 +32,7 @@ func (n *NullBroadcaster) Auth(ctx context.Context, channel string) (auth.Grant,
 
 // ValidAuthenticationResponse is NullBroadcaster::validAuthenticationResponse,
 // whose body is a comment.
-func (n *NullBroadcaster) ValidAuthenticationResponse(ctx context.Context, g auth.Grant, result any) (any, error) {
+func (n *NullBroadcaster) ValidAuthenticationResponse(ctx context.Context, g auth.Grant, channel broadcasting.Channel, result any) (any, error) {
 	return nil, nil
 }
 

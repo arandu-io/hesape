@@ -47,7 +47,7 @@ func (l *LogBroadcaster) Auth(ctx context.Context, channel string) (auth.Grant, 
 
 // ValidAuthenticationResponse is LogBroadcaster::validAuthenticationResponse,
 // whose body is a comment.
-func (l *LogBroadcaster) ValidAuthenticationResponse(ctx context.Context, g auth.Grant, result any) (any, error) {
+func (l *LogBroadcaster) ValidAuthenticationResponse(ctx context.Context, g auth.Grant, channel broadcasting.Channel, result any) (any, error) {
 	return nil, nil
 }
 
@@ -58,8 +58,14 @@ func (l *LogBroadcaster) ValidAuthenticationResponse(ctx context.Context, g auth
 // pretty-printed JSON after it. The channel names are the ones that would go on
 // the wire, tenant included -- a log that showed "orders.17" while the broker
 // saw "acme:orders.17" would be the wrong evidence.
+//
+// It names them through the embedded [Broadcaster.FormatChannels] rather than
+// calling broadcasting.TenantChannels itself. That is not a rename: the
+// promoted method used to be the one that dropped the tenant, so a driver that
+// wanted the tenant had to know not to use it. Now it is the one that adds it,
+// and this call is what keeps it from going untested and drifting again.
 func (l *LogBroadcaster) Broadcast(ctx context.Context, g auth.Grant, channels []broadcasting.Channel, event string, payload map[string]any) error {
-	names, err := broadcasting.TenantChannels(g, channels)
+	names, err := l.FormatChannels(g, channels)
 	if err != nil {
 		return err
 	}

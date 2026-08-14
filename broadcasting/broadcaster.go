@@ -34,7 +34,13 @@ type Broadcaster interface {
 	// parameter, cannot be supplied by the caller being authorized.
 	//
 	// The channel is the raw name the client asked for, prefix and all:
-	// "private-orders.17". The driver normalizes it.
+	// "private-orders.17". The driver normalizes it, and refuses it outright if
+	// it names a tenant -- see [RequestedChannel].
+	//
+	// The Grant is the answer, not the response. A driver that authorized
+	// nobody answers the zero Grant, and the zero Grant fails
+	// auth.Grant.Check([ChannelJoin]); a caller that reads only the response is
+	// reading a body a driver may have produced without deciding anything.
 	Auth(ctx context.Context, channel string) (auth.Grant, any, error)
 
 	// ValidAuthenticationResponse is Broadcaster::validAuthenticationResponse:
@@ -46,7 +52,15 @@ type Broadcaster interface {
 	// is on the Grant, and reading it there is the difference between a response
 	// about the person who was authorized and a response about whoever sent the
 	// bytes.
-	ValidAuthenticationResponse(ctx context.Context, g auth.Grant, result any) (any, error)
+	//
+	// channel is the channel the client asked for, without a tenant. It is a
+	// parameter because the answer has to say what it is an answer about: the
+	// PHP encodes the bare literal `true` for a private channel, and a relay
+	// given a bare `true` signs the socket onto the string the client sent. The
+	// implementations name the channel out of [TenantChannel](g, channel) and
+	// put that name in the body, which is why this method cannot be called
+	// without a Grant.
+	ValidAuthenticationResponse(ctx context.Context, g auth.Grant, channel Channel, result any) (any, error)
 
 	// Broadcast is Broadcaster::broadcast: it publishes the event.
 	//

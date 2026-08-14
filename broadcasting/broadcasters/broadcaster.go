@@ -13,13 +13,14 @@ import (
 	"github.com/arandu-io/hesape/broadcasting"
 )
 
-// ChannelJoin is the auth.Action every channel authorization is issued for.
+// ChannelJoin is [broadcasting.ChannelJoin], which is where the action is
+// declared so that BroadcastController can check the Grant a driver answered.
 //
-// It has no counterpart in Illuminate, because Illuminate's channel callback is
-// the decision. Here a decision is made by a Policy and produces an auth.Grant,
-// and a Grant is issued for an action -- so listening on a channel is an action
-// with a name, and auth.Grant.Check refuses a Grant issued for anything else.
-const ChannelJoin auth.Action = "broadcasting.join"
+// It stays spelled here because this is the package that issues the Grant, and
+// it is the same constant rather than a second one: two spellings of an action
+// is a Grant that passes Check in one package and fails it in the other
+// (RULE 9).
+const ChannelJoin = broadcasting.ChannelJoin
 
 // ErrChannelUndecided is what a channel handler returns to say the pattern it
 // was registered under does not apply after all, so the search should carry on
@@ -311,19 +312,29 @@ func (b *Broadcaster) RetrieveUser(ctx context.Context, channel string) (auth.Su
 // FormatChannels is Broadcaster::formatChannels: the channels as the strings a
 // driver puts on the wire.
 //
-// It does not add the tenant. [broadcasting.TenantChannels] does, and each
-// driver calls it in Broadcast, where the Grant is -- see RULE 14 and
-// [RedisBroadcaster.FormatChannels].
-func (b *Broadcaster) FormatChannels(channels []broadcasting.Channel) []string {
-	names := make([]string, 0, len(channels))
-	for _, channel := range channels {
-		names = append(names, channel.String())
-	}
-
-	return names
+// What was wrong: this method used to take `channels []broadcasting.Channel`
+// and answer `channel.String()` for each one, dropping the tenant. It had no
+// caller and no test, and Go has no virtual dispatch -- it was promoted into
+// LogBroadcaster and NullBroadcaster, neither of which shadows it, and only
+// RedisBroadcaster shadowed it with the version that takes a Grant. There was
+// no call proving it wrong, and that was the danger: the next driver written by
+// copying one of the other two would have inherited a tenant-less name
+// formatter in silence, and `d.FormatChannels(channels)` would have compiled.
+//
+// It now takes the Grant, so it cannot. Every driver inherits the tenant, and
+// [RedisBroadcaster.FormatChannels] shadows this only to put the Redis key
+// prefix in front of what this answers -- it does not decide the tenant a
+// second time (RULE 9).
+func (b *Broadcaster) FormatChannels(g auth.Grant, channels []broadcasting.Channel) ([]string, error) {
+	return broadcasting.TenantChannels(g, channels)
 }
 
 // ChannelNameMatchesPattern is Broadcaster::channelNameMatchesPattern.
+//
+// It carries no tenant and needs none: both arguments are already normalized
+// names, which is what [UsePusherChannelConventions.NormalizeChannelName]
+// answers and what the walk in [Broadcaster.VerifyUserCanAccessChannel] matches
+// against.
 func (b *Broadcaster) ChannelNameMatchesPattern(channel, pattern string) bool {
 	b.mu.RLock()
 	compiled, ok := b.patterns[pattern]

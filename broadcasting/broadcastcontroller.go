@@ -46,6 +46,14 @@ func NewBroadcastController(broadcast *BroadcastManager) *BroadcastController {
 // The refusal is 403, which is what AccessDeniedHttpException renders to. The
 // body is deliberately the same sentence for every refusal: the reason a
 // channel was denied is a fact about somebody else's data.
+//
+// What was wrong here: this handler read the driver's answer as
+// `_, response, err := driver.Auth(...)` and threw the Grant away, so the only
+// thing standing between the request and a 200 was a non-nil error -- and
+// LogBroadcaster.Auth and NullBroadcaster.Auth both answer (auth.Grant{}, nil,
+// nil), which is no error at all. Every subscription against either driver was
+// answered with a success body by a driver that had authorized nobody. The
+// Grant is now checked for [ChannelJoin], which those two zero Grants fail.
 func (c *BroadcastController) Authenticate(w http.ResponseWriter, r *http.Request) {
 	driver, err := c.broadcast.Driver("")
 	if err != nil {
@@ -56,8 +64,15 @@ func (c *BroadcastController) Authenticate(w http.ResponseWriter, r *http.Reques
 
 	channel := r.FormValue(ChannelNameField)
 
-	_, response, err := driver.Auth(r.Context(), channel)
+	g, response, err := driver.Auth(r.Context(), channel)
 	if err != nil {
+		http.Error(w, "This action is unauthorized.", http.StatusForbidden)
+
+		return
+	}
+	// The Grant is what says a Policy ran and whose channel this is. A driver
+	// that decided nothing answers the zero Grant, and it never reaches a 200.
+	if err := g.Check(ChannelJoin); err != nil {
 		http.Error(w, "This action is unauthorized.", http.StatusForbidden)
 
 		return

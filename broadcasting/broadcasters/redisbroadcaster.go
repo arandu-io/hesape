@@ -77,16 +77,36 @@ func NewRedisBroadcaster(redis RedisFactory, connection, prefix string) *RedisBr
 // refusal is auth.ErrForbidden, and the auth.Grant that comes back is what the
 // published channel name is built from (RULE 14). The subject comes from the
 // context and never from the request being authorized.
+//
+// Three things were wrong in this body, all in the two lines that read the
+// client's string:
+//
+//   - `strings.Replace(channel, r.prefix, "", 1)` removed the first occurrence
+//     of the prefix anywhere in the name, not the prefix. With the prefix "ac",
+//     "private-acme.17" became "private-me.17" and the subscription was
+//     authorized against a channel nobody registered. It is strings.CutPrefix
+//     now.
+//   - `r.IsGuardedChannel(channel)` was asked about the raw wire name. See
+//     [UsePusherChannelConventions.IsGuardedChannel].
+//   - nothing here ever produced the name the event is published under, so the
+//     tenant never entered the authorization at all. The name the client asked
+//     for now goes through [broadcasting.RequestedChannel], which refuses a
+//     client that names a tenant, and the authorized name is built from the
+//     Grant by ValidAuthenticationResponse -- the same [broadcasting.TenantChannel]
+//     Broadcast writes with.
 func (r *RedisBroadcaster) Auth(ctx context.Context, channel string) (auth.Grant, any, error) {
-	if channel == "" {
-		return auth.Grant{}, nil, fmt.Errorf("%w: no channel was asked for", auth.ErrForbidden)
+	unprefixed, _ := strings.CutPrefix(channel, r.prefix)
+
+	requested, err := broadcasting.RequestedChannel(unprefixed)
+	if err != nil {
+		return auth.Grant{}, nil, fmt.Errorf("%w: %w", auth.ErrForbidden, err)
 	}
 
-	name := r.NormalizeChannelName(strings.Replace(channel, r.prefix, "", 1))
+	name := r.NormalizeChannelName(requested.Name)
 
-	if r.IsGuardedChannel(channel) {
+	if r.IsGuardedChannel(requested.Name) {
 		if _, ok := r.RetrieveUser(ctx, name); !ok {
-			return auth.Grant{}, nil, fmt.Errorf("%w: %s is guarded and nothing on the context says who is asking", auth.ErrForbidden, channel)
+			return auth.Grant{}, nil, fmt.Errorf("%w: %s is guarded and nothing on the context says who is asking", auth.ErrForbidden, requested.Name)
 		}
 	}
 
@@ -95,7 +115,7 @@ func (r *RedisBroadcaster) Auth(ctx context.Context, channel string) (auth.Grant
 		return auth.Grant{}, nil, err
 	}
 
-	response, err := r.ValidAuthenticationResponse(ctx, g, result)
+	response, err := r.ValidAuthenticationResponse(ctx, g, requested, result)
 	if err != nil {
 		return auth.Grant{}, nil, err
 	}
@@ -106,31 +126,45 @@ func (r *RedisBroadcaster) Auth(ctx context.Context, channel string) (auth.Grant
 // ValidAuthenticationResponse is RedisBroadcaster::validAuthenticationResponse:
 // the JSON document the socket client is sent back.
 //
-// A boolean result is encoded on its own, which is the whole answer for a
-// private channel. Anything else is the presence channel's user_info, wrapped
-// in channel_data beside the identifier of whoever was authorized.
+// A boolean result is the whole answer for a private channel. Anything else is
+// the presence channel's user_info, wrapped in channel_data beside the
+// identifier of whoever was authorized.
 //
 // That identifier is auth.Grant.Subject().ID. The PHP asks the user model for
 // getAuthIdentifierForBroadcasting() and falls back to getAuthIdentifier();
 // there is one identifier on an auth.Subject, and taking it off the Grant
 // rather than off the request is what makes it the id that was authorized
 // rather than the id that was claimed.
-func (r *RedisBroadcaster) ValidAuthenticationResponse(ctx context.Context, g auth.Grant, result any) (any, error) {
-	if allowed, ok := result.(bool); ok {
-		encoded, err := json.Marshal(allowed)
-		if err != nil {
-			return nil, broadcasting.WrapBroadcastError(err, "broadcasting: encoding the authentication response: %v", err)
-		}
-
-		return string(encoded), nil
+//
+// The "channel" key is the deliberate difference from the PHP, and it is the
+// fix. What was wrong: `json_encode(true)` is what the PHP answers for a
+// private channel, and this method answered the same -- the literal `true`,
+// with nothing saying what it was true about. The relay heard yes without
+// hearing yes-to-what, so it signed the socket onto the string the client had
+// sent, which is the only channel name it had. The name in the body now comes
+// from [RedisBroadcaster.FormatChannels], which is the function
+// [RedisBroadcaster.Broadcast] names its channels with: one Grant, one name,
+// both sides of the wire (RULE 9, RULE 14).
+//
+// It is also why this method cannot be called without a Grant that carries a
+// tenant. A Grant that does not is refused here, and Auth answers the refusal.
+func (r *RedisBroadcaster) ValidAuthenticationResponse(ctx context.Context, g auth.Grant, channel broadcasting.Channel, result any) (any, error) {
+	names, err := r.FormatChannels(g, []broadcasting.Channel{channel})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", auth.ErrForbidden, err)
 	}
 
-	encoded, err := json.Marshal(map[string]any{
-		"channel_data": map[string]any{
+	document := map[string]any{"channel": names[0]}
+	if allowed, ok := result.(bool); ok {
+		document["auth"] = allowed
+	} else {
+		document["channel_data"] = map[string]any{
 			"user_id":   g.Subject().ID,
 			"user_info": result,
-		},
-	})
+		}
+	}
+
+	encoded, err := json.Marshal(document)
 	if err != nil {
 		return nil, broadcasting.WrapBroadcastError(err, "broadcasting: encoding the authentication response: %v", err)
 	}
@@ -199,9 +233,15 @@ func (r *RedisBroadcaster) Broadcast(ctx context.Context, g auth.Grant, channels
 //
 // It shadows the embedded [Broadcaster.FormatChannels] rather than overriding
 // it, because Go has no virtual dispatch; every call inside this driver reaches
-// this one.
+// this one. What it adds is the Redis key prefix and nothing else -- the tenant
+// is decided once, by the embedded method it calls, and not a second time here.
+//
+// Auth reaches this too, through
+// [RedisBroadcaster.ValidAuthenticationResponse]. That is the single origin the
+// audit asked for: the name the authorization examines and the name Broadcast
+// publishes are the same string built by the same call from the same Grant.
 func (r *RedisBroadcaster) FormatChannels(g auth.Grant, channels []broadcasting.Channel) ([]string, error) {
-	names, err := broadcasting.TenantChannels(g, channels)
+	names, err := r.Broadcaster.FormatChannels(g, channels)
 	if err != nil {
 		return nil, err
 	}
