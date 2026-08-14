@@ -343,6 +343,14 @@ func (b *Builder) WhereBindings() []any {
 	for _, where := range b.Wheres {
 		switch where.Type {
 		case "Basic":
+			// A Basic clause carries a subquery only when WhereSubCount built
+			// it, and then the subquery is on the left of the comparison: its
+			// bindings come first because that is the order the clause
+			// compiles in. Reading them off the clause is what lets this list be
+			// rebuilt after scopeSubqueries has put the tenant on the subquery.
+			if where.Query != nil {
+				out = append(out, where.Query.GetBindings()...)
+			}
 			if !IsExpression(where.Value) {
 				out = append(out, where.Value)
 			}

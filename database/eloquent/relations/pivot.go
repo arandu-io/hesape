@@ -307,8 +307,11 @@ func (p *Pivot) GetQueueableID() any { return p.AsPivot.GetQueueableID(p) }
 //
 // Like GetQueueableID above, this is the no-argument-model form a caller
 // reaches, handing itself to the concern that holds no attributes.
-func (p *Pivot) NewQueryForRestoration(ids ...any) (Builder, error) {
-	return p.AsPivot.NewQueryForRestoration(p, ids...)
+//
+// The Grant is what it used to be missing, and what AsPivot's namesake explains:
+// the restoration read a shared table with no tenant on it.
+func (p *Pivot) NewQueryForRestoration(g auth.Grant, ids ...any) (Builder, error) {
+	return p.AsPivot.NewQueryForRestoration(p, g, ids...)
 }
 
 // MorphPivot answers Illuminate\Database\Eloquent\Relations\MorphPivot: a pivot
@@ -370,15 +373,23 @@ func (p *MorphPivot) GetQueueableID() any {
 // an identity and a queued job restores whichever the database returns first.
 //
 // The error cases are the ones AsPivot documents: an empty list, a pivot with
-// no query, and an identifier that GetQueueableID did not write.
-func (p *MorphPivot) NewQueryForRestoration(ids ...any) (Builder, error) {
+// no query, and an identifier that GetQueueableID did not write. So is the
+// Grant, and so is what it fixes: a morph pivot restored without one read every
+// customer's rows of a table that is shared twice over -- by tenant and by
+// parent type.
+func (p *MorphPivot) NewQueryForRestoration(g auth.Grant, ids ...any) (Builder, error) {
 	if len(ids) == 0 {
 		return nil, fmt.Errorf("pivot restoration was given no identifier: the queued job stored nothing to find the row on %s by", p.GetTable())
 	}
 
-	q := p.NewQuery()
-	if q == nil {
+	unscoped := p.NewQuery()
+	if unscoped == nil {
 		return nil, errNoPivotQuery
+	}
+
+	q, err := concerns.ScopeTenant(unscoped, p, g)
+	if err != nil {
+		return nil, err
 	}
 
 	first, composite := ids[0].(string)

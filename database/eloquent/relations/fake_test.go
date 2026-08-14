@@ -29,6 +29,15 @@ type db struct {
 	// log is every statement that reached the connection, in order. The eager
 	// loading tests are assertions about its length.
 	log []string
+
+	// bound is the bindings of every select the connection ran, in the order the
+	// compiled statement reads them.
+	//
+	// It is what a subquery join can be checked with. A derived table is SQL by
+	// the time it reaches a connection, so this fake cannot evaluate one and no
+	// count of rows can say whether the query inside it was filtered -- the value
+	// it binds is the only place that shows.
+	bound [][]any
 }
 
 func newDB() *db { return &db{tables: map[string][]map[string]any{}} }
@@ -415,7 +424,7 @@ func (b *builder) Delete(ctx context.Context, g auth.Grant) (int64, error) {
 	keep := make([]map[string]any, 0, len(b.database.tables[table]))
 	removed := 0
 	for _, row := range b.database.tables[table] {
-		if matches(b.base.Wheres, row) {
+		if matches(b.base.Wheres, row, nil) {
 			removed++
 			continue
 		}
@@ -436,13 +445,17 @@ func (b *builder) run() []map[string]any {
 	table := fmt.Sprint(b.base.GetFrom())
 	rows := b.database.tables[table]
 
+	// The joined tables are remembered so that a filter on one of their columns
+	// is answered by the joined row and by nothing else. See matches.
+	joined := map[string]bool{}
 	for _, join := range b.base.Joins {
+		joined[fmt.Sprint(join.Table)] = true
 		rows = joinRows(b.database, rows, join)
 	}
 
 	out := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		if !matches(b.base.Wheres, row) {
+		if !matches(b.base.Wheres, row, joined) {
 			continue
 		}
 		out = append(out, project(row, b.base.GetColumns()))
@@ -529,9 +542,19 @@ func joinRows(database *db, left []map[string]any, join *query.JoinClause) []map
 	return out
 }
 
+// joinMatches evaluates a join condition against the pair of rows.
+//
+// A condition comparing two columns is the join itself. One comparing a column
+// with a value -- `on role_user.tenant_id = ?` -- filters the right-hand row,
+// and it used to be skipped here: every clause that was not a Column was read as
+// satisfied, so a tenant filter written onto the join would have passed without
+// filtering anything and the test that relied on it would have proved nothing.
 func joinMatches(wheres []query.Where, left, right map[string]any, table string) bool {
 	for _, where := range wheres {
 		if where.Type != "Column" {
+			if !matches([]query.Where{where}, qualifiedRow(right, table), nil) {
+				return false
+			}
 			continue
 		}
 		first := resolve(left, right, table, fmt.Sprint(where.First))
@@ -541,6 +564,17 @@ func joinMatches(wheres []query.Where, left, right map[string]any, table string)
 		}
 	}
 	return true
+}
+
+// qualifiedRow is a row readable under its plain column names and under the ones
+// qualified by its table, which is how a join condition names them.
+func qualifiedRow(row map[string]any, table string) map[string]any {
+	out := make(map[string]any, len(row)*2)
+	for key, value := range row {
+		out[key] = value
+		out[table+"."+key] = value
+	}
+	return out
 }
 
 // resolve reads a qualified column off whichever side of the join owns it.
@@ -557,13 +591,20 @@ func resolve(left, right map[string]any, table, column string) any {
 // matches evaluates the clauses this fake understands. Anything else is treated
 // as satisfied, so a test that depends on a clause has to be a clause listed
 // here -- an unsupported filter cannot silently pass a leak.
-func matches(wheres []query.Where, row map[string]any) bool {
+//
+// joined names the tables this row was joined with. It is what keeps the
+// fallback below honest: a filter on a joined table's column is answered by the
+// joined row or by nothing, never by the column the row from the other table
+// happens to carry under the same name. Both tables have a tenant_id, and
+// reading the wrong one is how a pivot with no filter of its own passed for one
+// that had one.
+func matches(wheres []query.Where, row map[string]any, joined map[string]bool) bool {
 	for _, where := range wheres {
 		// A joined row holds the other table's columns under their qualified
 		// name, so the qualified lookup is tried first and the plain one second.
 		column := fmt.Sprint(where.Column)
 		value, present := row[column]
-		if !present {
+		if !present && !namesJoinedTable(joined, column) {
 			value, present = row[plain(column)]
 		}
 
@@ -604,6 +645,13 @@ func matches(wheres []query.Where, row map[string]any) bool {
 		}
 	}
 	return true
+}
+
+// namesJoinedTable reports whether the column is qualified by one of the tables
+// the row was joined with.
+func namesJoinedTable(joined map[string]bool, column string) bool {
+	index := strings.LastIndex(column, ".")
+	return index >= 0 && joined[column[:index]]
 }
 
 // compares orders two values the way lessValue does and answers the operator
@@ -675,6 +723,7 @@ type connection struct{ database *db }
 
 func (c *connection) Select(sql string, bindings []any, useReadPDO bool) ([]query.Record, error) {
 	c.database.log = append(c.database.log, sql)
+	c.database.bound = append(c.database.bound, bindings)
 
 	out := make([]query.Record, 0)
 	for _, row := range c.database.tables[tableOfSQL(sql)] {

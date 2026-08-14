@@ -2,6 +2,7 @@ package query_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -171,5 +172,98 @@ func TestASubqueryIsNotAWayPastTheTenantCheck(t *testing.T) {
 	}
 	if len(connection.calls) != 0 {
 		t.Errorf("a statement reached the connection anyway: %v", connection.calls)
+	}
+}
+
+// A subquery on the LEFT of a comparison -- `(select count(*) from invoices
+// where invoices.user_id = users.id) > 3` -- is the shape Eloquent's has-query
+// takes when EXISTS cannot answer, and it was the shape with no builder method
+// behind it: both copies of that query assembled the clause by hand, freezing
+// the subquery into a raw column, and nothing could scope it afterwards.
+//
+// WhereSubCount keeps the builder on the clause. This is the same leak as the
+// where-exists one above, counted the same way.
+func TestASubqueryComparedAgainstACountCarriesTheTenantToo(t *testing.T) {
+	connection := &fakeConnection{}
+	b := newTestBuilder(connection)
+
+	sub := query.NewBuilder(connection, b.GetGrammar(), b.GetProcessor()).
+		From("invoices").
+		Select(query.Raw("count(*)")).
+		WhereColumn("invoices.user_id", "=", "users.id")
+	b.WhereSubCount(sub, ">", 3, "and")
+
+	if _, err := b.Get(context.Background(), grant()); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	call := connection.calls[0]
+	if got := countTenantFilters(call.sql); got != 2 {
+		t.Errorf("the statement compares the tenant %d time(s), want 2 -- one for the outer query and one for the counted subquery:\n%s", got, call.sql)
+	}
+	if got, want := strings.Count(call.sql, "?"), len(call.bindings); got != want {
+		t.Fatalf("the statement has %d placeholders and %d bindings:\n%s\n%v", got, want, call.sql, call.bindings)
+	}
+	// The outer tenant, then the group scoped puts the rest of the clauses in:
+	// the subquery's own tenant and the number it is compared against. That is
+	// the order the statement reads them in.
+	want := []any{"acme", "acme", 3}
+	for i := range want {
+		if call.bindings[i] != want[i] {
+			t.Fatalf("bindings = %v, want %v", call.bindings, want)
+		}
+	}
+}
+
+// The scoping is done once, on the statement, and the builder the caller kept
+// is untouched: running it again under another Grant must not carry the first
+// tenant's filter into the second tenant's statement.
+func TestScopingACountComparisonLeavesTheCallersBuilderAlone(t *testing.T) {
+	connection := &fakeConnection{}
+	b := newTestBuilder(connection)
+
+	sub := query.NewBuilder(connection, b.GetGrammar(), b.GetProcessor()).
+		From("invoices").
+		Select(query.Raw("count(*)"))
+	b.WhereSubCount(sub, ">", 3, "and")
+
+	if _, err := b.Get(context.Background(), grant()); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if _, err := b.Get(context.Background(), auth.SystemGrant("invoice.read", "globex")); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	second := connection.calls[1]
+	if strings.Contains(fmt.Sprint(second.bindings), "acme") {
+		t.Errorf("the second statement carries the first tenant: %v", second.bindings)
+	}
+	if got := countTenantFilters(second.sql); got != 2 {
+		t.Errorf("the second statement compares the tenant %d time(s), want 2:\n%s", got, second.sql)
+	}
+}
+
+// A group is shared between the builder and every statement built from it:
+// Clone copies the where slice and not the builders the clauses point at. So
+// the descent into a group is made on a copy, and this is what says so --
+// running the same builder twice used to leave the first statement's tenant
+// filter inside the group, and a chunked walk grew one per page.
+func TestScopingAGroupTwiceDoesNotStackItsFilters(t *testing.T) {
+	connection := &fakeConnection{}
+	b := newTestBuilder(connection)
+	b.Where(func(group *query.Builder) {
+		group.WhereExists(func(sub *query.Builder) { sub.From("invoices") }, "and", false)
+	})
+
+	for range 2 {
+		if _, err := b.Get(context.Background(), grant()); err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+	}
+
+	for i, call := range connection.calls {
+		if got := countTenantFilters(call.sql); got != 2 {
+			t.Errorf("statement %d compares the tenant %d time(s), want 2:\n%s", i, got, call.sql)
+		}
 	}
 }

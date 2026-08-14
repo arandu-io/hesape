@@ -141,16 +141,124 @@ func (b *Builder) scoped(ctx context.Context, g auth.Grant) (*Builder, error) {
 		scoped.Where(b.qualifyTenantColumn(), "=", tenant)
 	}
 
-	if err := scoped.scopeUnions(ctx, g); err != nil {
-		return nil, err
-	}
-	if err := scoped.scopeSubqueries(ctx, g); err != nil {
-		return nil, err
-	}
-	if err := scoped.scopeSubqueryClauses(ctx, g); err != nil {
+	if err := scoped.ScopeNested(ctx, g); err != nil {
 		return nil, err
 	}
 	return scoped, nil
+}
+
+// ScopeNested puts the tenant on every query nested inside this one: the far
+// side of a union, the subquery of a `where exists`, of a `where in` and of a
+// count comparison, and the subqueries compiled into a from, a select or a join.
+//
+// It is the second half of scoped, and it is exported because it is the half the
+// eloquent builder has to end in too. That builder cannot call scoped whole: it
+// filters by the model's own tenant column, which a model whose table has none
+// sets to the empty string, and TenantColumn here is a constant on purpose --
+// see its comment. The nested half has no such difference, and it is where every
+// leak found so far lived, so there is one of it and both builders run it.
+//
+// Until it was exported the eloquent builder reached none of it. GetModels sent
+// b.query.ToSQL() straight to the connection, so scopeUnions, scopeSubqueries
+// and scopeSubqueryClauses were dead code on the path the application uses:
+// Users.WithCount("posts").Get(g) came back with every tenant's posts counted
+// into posts_count, and WhereHas("posts", ...) filtered one tenant's users by
+// another tenant's rows.
+//
+// It runs on the statement being built and never on the builder the caller
+// holds -- scoped calls it on a clone, and the eloquent builder on the clone
+// ApplyScopes made.
+func (b *Builder) ScopeNested(ctx context.Context, g auth.Grant) error {
+	if err := b.scopeUnions(ctx, g); err != nil {
+		return err
+	}
+	if err := b.scopeSubqueries(ctx, g); err != nil {
+		return err
+	}
+	if err := b.scopeSubqueryClauses(ctx, g); err != nil {
+		return err
+	}
+	return b.scopeJoins(ctx, g)
+}
+
+// scopeJoins filters every table this query joins.
+//
+// A join contributes no filter of its own: the tenant clause names the table in
+// the from, and everything the query reaches by joining is read whole. That is
+// how a pivot row belonging to one customer came to grant a role in another --
+// the role was filtered, the row that granted it was not.
+//
+// The relations package closes the same hole for the joins it writes itself
+// (concerns.ScopeTenant), and this closes it for the joins it does not: an
+// existence subquery -- whereHas, has, withCount over a BelongsToMany or a
+// HasManyThrough -- is built with no Grant and reaches the connection through
+// the subquery pass above, which scopes each subquery's own from and nothing it
+// joins. Putting the pass here means the subquery gets it on the way through.
+//
+// A derived table -- the `(select ...) as alias` a subquery join compiles to --
+// is skipped: it has no tenant column of its own, and the query inside it was
+// scoped by scopeSubqueryClauses a moment ago. A table already carrying the
+// filter is skipped too, so scoping twice does not write the clause twice.
+//
+// Everything else is filtered without asking whether the table is partitioned,
+// and the reason is which way each mistake fails. A shared table filtered here
+// yields a statement the engine refuses by name, which is a build that stops. A
+// partitioned table left unfiltered yields a read that crosses customers and
+// looks right.
+func (b *Builder) scopeJoins(ctx context.Context, g auth.Grant) error {
+	if len(b.Joins) == 0 {
+		return nil
+	}
+
+	tenant, err := b.tenantFor(ctx, g)
+	if err != nil {
+		return err
+	}
+
+	for _, join := range b.Joins {
+		table, ok := joinedTableName(join.Table)
+		if !ok {
+			continue
+		}
+		column := table + "." + TenantColumn
+		if b.hasFilterOn(column) {
+			continue
+		}
+		b.Where(column, "=", tenant)
+	}
+	return nil
+}
+
+// joinedTableName answers the name a joined table's columns are qualified by,
+// and whether there is one at all.
+//
+// The alias wins when the join declares one: `users as recent` is referred to
+// by the alias, and the real name resolves to nothing. An expression is not a
+// table name and reports false, which is what skips a derived table.
+func joinedTableName(table any) (string, bool) {
+	name, ok := table.(string)
+	if !ok {
+		return "", false
+	}
+
+	name = strings.TrimSpace(name)
+	if index := strings.Index(strings.ToLower(name), " as "); index >= 0 {
+		name = strings.TrimSpace(name[index+len(" as "):])
+	}
+	if name == "" {
+		return "", false
+	}
+	return name, true
+}
+
+// hasFilterOn reports whether the query already compares column with a value.
+func (b *Builder) hasFilterOn(column string) bool {
+	for _, where := range b.Wheres {
+		if where.Type == "Basic" && fmt.Sprint(where.Column) == column {
+			return true
+		}
+	}
+	return false
 }
 
 // scopeSubqueries puts the tenant on every query nested inside a where clause.
@@ -182,15 +290,42 @@ func (b *Builder) scopeSubqueries(ctx context.Context, g auth.Grant) error {
 			b.Wheres[i] = where
 			changed = true
 
+		case "Basic":
+			// A subquery on the left of a comparison -- `(select count(*) from
+			// posts where ...) > 3` -- which only WhereSubCount builds, and only
+			// it puts a Query on a Basic clause. The comparison is compiled from
+			// the builder rather than kept as the SQL it was written as, so the
+			// column is rendered again here, now that the subquery carries its
+			// tenant.
+			scoped, err := where.Query.scoped(ctx, g)
+			if err != nil {
+				return err
+			}
+			where.Query = scoped
+			where.Column = Raw("(" + scoped.ToSQL() + ")")
+			b.Wheres[i] = where
+			changed = true
+
 		case "Nested":
 			// A parenthesised group of the SAME query. It is already under the
 			// outer filter and must not be scoped again -- scoped() builds one
 			// of these itself to wrap what it found, so scoping it here would
 			// wrap the wrapper forever. It is descended into, because the group
 			// may hold an Exists.
-			if err := where.Query.scopeSubqueries(ctx, g); err != nil {
+			//
+			// The group is copied first. Clone copies the where slice but not
+			// the builders the clauses point at, so the group a caller wrote
+			// with Where(func(group)) is the same object on the builder and on
+			// every statement built from it: descending into it without a copy
+			// wrote the tenant onto the caller's query. Running that builder
+			// again added a second filter inside the first, and a chunked walk
+			// grew one per page.
+			group := where.Query.Clone()
+			if err := group.scopeSubqueries(ctx, g); err != nil {
 				return err
 			}
+			where.Query = group
+			b.Wheres[i] = where
 			changed = true
 		}
 	}

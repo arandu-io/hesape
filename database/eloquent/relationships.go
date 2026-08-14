@@ -60,17 +60,19 @@ func (b *Builder[T]) addHasWhere(rel Relation, operator string, count int, boole
 // addWhereCountQuery answers QueriesRelationships::addWhereCountQuery: the
 // subquery compared against a number, as an expression on the left of the
 // operator.
+//
+// It used to assemble that clause here, freezing sub.ToSQL() into the column of
+// a Basic where. The subquery was gone by the time anything could scope it, and
+// nothing did: Users.Has("posts", ">", 3).Get(auth.SystemGrant("user.list",
+// "acme")) ran `(select count(*) from "posts" where "users"."id" =
+// "posts"."user_id") > 3` with no posts.tenant_id in it, so one tenant's users
+// were selected by counting every tenant's posts.
+//
+// query.WhereSubCount keeps the builder on the clause, and prepare scopes it
+// through query.Builder.ScopeNested. That is the same door the query builder's
+// own statements go through, and it is the only one.
 func (b *Builder[T]) addWhereCountQuery(sub *query.Builder, operator string, count int, boolean string) *Builder[T] {
-	sql := sub.ToSQL()
-	b.query.AddBinding(sub.GetBindings(), "where")
-	where := query.Where{
-		Type:     "Basic",
-		Column:   query.Raw("(" + sql + ")"),
-		Operator: operator,
-		Value:    query.Raw(fmt.Sprint(count)),
-		Boolean:  boolean,
-	}
-	b.query.Wheres = append(b.query.Wheres, where)
+	b.query.WhereSubCount(sub, operator, count, boolean)
 	return b
 }
 
@@ -275,6 +277,15 @@ func WhereBelongsTo[T, R any](b *Builder[T], relationshipName string, related ..
 // relation, aliased onto the row.
 //
 // A name may carry an alias -- "posts as recent_posts" -- exactly as there.
+//
+// The subselect goes in through query.SelectSub, and the exists form through
+// query.SelectExistsSub, which are the methods that record a subquery so the
+// tenant can be put on it when the Grant arrives. This used to write the column
+// itself, with AddSelect and SelectRaw over sub.ToSQL(), and a subquery compiled
+// into a raw column is a subquery nothing can scope: Users.WithCount("posts").
+// Get(auth.SystemGrant("user.list", "acme")) answered every row with the number
+// of posts EVERY tenant had, and WithSum("orders", "total") handed one tenant
+// another tenant's revenue as a scalar.
 func (b *Builder[T]) WithAggregate(relations []string, column, function string) *Builder[T] {
 	if len(relations) == 0 {
 		return b
@@ -314,14 +325,13 @@ func (b *Builder[T]) WithAggregate(relations []string, column, function string) 
 		}
 
 		if function == "exists" {
-			b.SelectRaw(fmt.Sprintf("exists(%s) as %s", sub.ToSQL(), b.model.Grammar.Wrap(alias)), sub.GetBindings()...)
+			b.query.SelectExistsSub(sub, alias)
 			continue
 		}
 		if function == "" {
 			sub.Limit(1)
 		}
-		b.AddSelect(query.Raw("(" + sub.ToSQL() + ") as " + b.model.Grammar.Wrap(alias)))
-		b.query.AddBinding(sub.GetBindings(), "select")
+		b.query.SelectSub(sub, alias)
 	}
 	return b
 }

@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"slices"
@@ -287,11 +288,44 @@ func (b *Builder[T]) prepare(g auth.Grant) (*Builder[T], error) {
 	prepared := b.ApplyScopes()
 	prepared.prepared = true
 
-	if column := prepared.model.TenantColumn; column != "" {
-		isolateWheres(prepared.query)
-		prepared.query.Where(prepared.model.QualifyColumn(column), "=", tenant)
+	if err := prepared.scopeToTenant(g, tenant); err != nil {
+		return nil, err
 	}
 	return prepared, nil
+}
+
+// scopeToTenant is the only place a tenant lands on an eloquent statement: the
+// model's own filter, and then the nested half of the query builder's scoped.
+//
+// It is called on a builder nobody else holds -- prepare on the clone
+// ApplyScopes made, ForceDelete on its own -- because the filter belongs to the
+// statement and not to the query the caller kept: running the same builder twice
+// under two Grants must not leave the first tenant's filter on the second
+// tenant's statement.
+//
+// The second half is not a second filter, it is the rest of the same one.
+// query.Builder.ScopeNested puts the tenant on the far side of a union, on the
+// subquery of a `where exists`, a `where in` and a count comparison, and on the
+// subqueries compiled into a from, a select or a join. Nothing here reached it
+// until now: GetModels ran b.query.ToSQL() straight at the connection, so the
+// filter written above was the whole of the tenant scoping, and it only ever
+// named the outer table. That is what leaked --
+// Users.WithCount("posts").Get(auth.SystemGrant("user.list", "acme")) emitted
+// `select "users".*, (select count(*) from "posts" where "users"."id" =
+// "posts"."user_id") as "posts_count" from "users" where "users"."tenant_id" =
+// ?`, and every tenant's posts were counted into every row.
+//
+// The context is Background because this package carries none, for the reason
+// its doc comment gives: the connection contract takes no context, so a
+// signature that accepted one could not pass it on. All ScopeNested does with it
+// is refuse to build a statement whose context is already cancelled, and there
+// is nothing here for that to cancel.
+func (b *Builder[T]) scopeToTenant(g auth.Grant, tenant string) error {
+	if column := b.model.TenantColumn; column != "" {
+		isolateWheres(b.query)
+		b.query.Where(b.model.QualifyColumn(column), "=", tenant)
+	}
+	return b.query.ScopeNested(context.Background(), g)
 }
 
 // isolateWheres wraps every where already on the query in a single group, so
@@ -1076,9 +1110,8 @@ func (b *Builder[T]) ForceDelete(g auth.Grant) (int64, error) {
 		return 0, ErrNoTenant
 	}
 	forced := b.clone()
-	if column := b.model.TenantColumn; column != "" {
-		isolateWheres(forced.query)
-		forced.query.Where(b.model.QualifyColumn(column), "=", tenant)
+	if err := forced.scopeToTenant(g, tenant); err != nil {
+		return 0, err
 	}
 	return forced.runDelete()
 }

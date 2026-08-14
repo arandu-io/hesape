@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database/query"
 )
 
@@ -145,21 +146,35 @@ func (p *AsPivot) SetKeysForSaveQuery(query Builder, model Model) Builder {
 //
 // The model is passed for the same reason SetKeysForSelectQuery takes it: this
 // concern holds no attributes and no query of its own.
-func (p *AsPivot) NewQueryForRestoration(model Model, ids ...any) (Builder, error) {
-	return p.newQueryForRestoration(model, ids, 2)
+//
+// # What leaked
+//
+// It took no Grant, and a query built without one is a query with no tenant on
+// it. An audit proved it with the pair of clauses this method writes: a job that
+// serialized "user_id:1:role_id:admin" restored it with `select * from role_user
+// where user_id = 1 and role_id = 'admin'`, over a table every customer shares,
+// and the row that came back was whichever the database returned first. Save and
+// Delete on the same pivot were scoped; only the way back from a queue was not.
+func (p *AsPivot) NewQueryForRestoration(model Model, g auth.Grant, ids ...any) (Builder, error) {
+	return p.newQueryForRestoration(model, g, ids, 2)
 }
 
 // newQueryForRestoration is AsPivot's and MorphPivot's shared body. The pairs
 // argument is how many column:value pairs the composite identifier carries --
 // two for a pivot, three for a morph pivot, whose third pair is the type.
-func (p *AsPivot) newQueryForRestoration(model Model, ids []any, pairs int) (Builder, error) {
+func (p *AsPivot) newQueryForRestoration(model Model, g auth.Grant, ids []any, pairs int) (Builder, error) {
 	if len(ids) == 0 {
 		return nil, fmt.Errorf("pivot restoration was given no identifier: the queued job stored nothing to find the row on %s by", model.GetTable())
 	}
 
-	q := model.NewQuery()
-	if q == nil {
+	unscoped := model.NewQuery()
+	if unscoped == nil {
 		return nil, fmt.Errorf("pivot restoration cannot query %s: the pivot was built without a query", model.GetTable())
+	}
+
+	q, err := ScopeTenant(unscoped, model, g)
+	if err != nil {
+		return nil, err
 	}
 
 	// A plain id is the ordinary Model::newQueryForRestoration, and the PHP

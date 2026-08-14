@@ -47,6 +47,138 @@ func TestBelongsToManyEagerLoadsInOneQueryWithThePivot(t *testing.T) {
 	}
 }
 
+// TestBelongsToManyDoesNotReadAnotherTenantsPivotRow is RULE 17 on the table
+// the join brings in.
+//
+// The role belongs to this customer and the pivot row that grants it does not:
+// nobody in acme ever gave user 1 the auditor role, the other customer gave
+// their own user 1 that role, and the two tables are shared. So the join used to
+// match, `roles.tenant_id = 'acme'` used to pass, and the user was handed a role
+// another customer granted -- privilege escalation between customers, with every
+// row in the answer belonging to the right tenant.
+//
+// The pivot columns came across too: the seat level below is the other
+// customer's, hydrated onto this customer's role.
+func TestBelongsToManyDoesNotReadAnotherTenantsPivotRow(t *testing.T) {
+	database, users := seedRoles()
+	database.seed("role_user", map[string]any{
+		"user_id": "1", "role_id": "auditor", "tenant_id": "other", "seat_level": "enterprise",
+	})
+
+	ctx, g := context.Background(), auth.SystemGrant("role.view", "acme")
+
+	roles, err := rolesOf(database, users[0]).WithPivot("seat_level").Get(ctx, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := rolesSeenBy(roles); strings.Join(got, ",") != "admin,editor" {
+		t.Fatalf("user 1 came back with the roles %v, want the two acme granted: auditor is reachable only through another customer's pivot row", got)
+	}
+
+	for _, role := range roles {
+		pivot, ok := role.GetRelation("pivot")
+		if !ok {
+			t.Fatalf("role %v came back without its pivot", role.GetAttribute("id"))
+		}
+		if seat := pivot.(relations.Model).GetAttribute("seat_level"); seat != nil {
+			t.Errorf("the pivot carried seat_level %v, which is a value only the other customer's row holds", seat)
+		}
+	}
+}
+
+// TestBelongsToManyEagerLoadDoesNotReadAnotherTenantsPivotRow is the same leak
+// on the path that matters more: an eager load answers for every parent at once,
+// so one unfiltered join hands the extra role to whichever parent the pivot row
+// names.
+func TestBelongsToManyEagerLoadDoesNotReadAnotherTenantsPivotRow(t *testing.T) {
+	database, users := seedRoles()
+	database.seed("role_user", map[string]any{
+		"user_id": "2", "role_id": "auditor", "tenant_id": "other",
+	})
+
+	ctx, g := context.Background(), auth.SystemGrant("role.view", "acme")
+
+	models := asModels(users)
+	if _, err := relations.EagerLoadRelation(ctx, g, models, "roles", eagerRolesOf(database, users[0]), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, _ := models[1].GetRelation("roles")
+	if got := rolesSeenBy(loaded.([]relations.Model)); strings.Join(got, ",") != "editor" {
+		t.Fatalf("user 2 was eager loaded with %v, want only editor: the auditor row belongs to another customer", got)
+	}
+}
+
+// TestBelongsToManyChunkDoesNotReadAnotherTenantsPivotRow covers the second
+// place the filter goes on: prepareQueryBuilder, which is the query the thirteen
+// walking methods share. A page is a read, and the join is the same join.
+func TestBelongsToManyChunkDoesNotReadAnotherTenantsPivotRow(t *testing.T) {
+	database, user := seedManyRoles()
+
+	// A role of this customer that this customer never granted, and the other
+	// customer's pivot row that points at it.
+	database.seed("roles", map[string]any{"id": "g", "tenant_id": "acme"})
+	database.seed("role_user", map[string]any{"user_id": "1", "role_id": "g", "tenant_id": "other"})
+
+	ctx, g := context.Background(), auth.SystemGrant("role.view", "acme")
+
+	var seen []string
+	if _, err := rolesOf(database, user).Chunk(ctx, g, 2, func(results []relations.Model, _ int) bool {
+		seen = append(seen, rolesSeenBy(results)...)
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, id := range seen {
+		if id == "g" {
+			t.Fatalf("a paged read returned the role %q, granted by another customer's pivot row: %v", id, seen)
+		}
+	}
+	if len(seen) != 6 {
+		t.Fatalf("the walk saw %d rows (%v), want the tenant's 6", len(seen), seen)
+	}
+}
+
+// TestPivotRestorationOnlyFindsTheGrantsTenant is the third place the tenant was
+// missing, and the only one on a path with no join at all.
+//
+// A queued job serializes a pivot row as "user_id:1:role_id:admin" and restores
+// it later. The query that finds it again used to be `select * from role_user
+// where user_id = 1 and role_id = 'admin'` -- no tenant, so the first row that
+// matched could be any customer's, and the pivot table is shared.
+func TestPivotRestorationOnlyFindsTheGrantsTenant(t *testing.T) {
+	database, users := seedRoles()
+	database.seed("role_user", map[string]any{
+		"user_id": "1", "role_id": "admin", "tenant_id": "other", "seat_level": "enterprise",
+	})
+
+	ctx, g := context.Background(), auth.SystemGrant("role.assign", "acme")
+
+	pivot, ok := rolesOf(database, users[0]).
+		NewPivot(map[string]any{"user_id": "1", "role_id": "admin"}, true).(*relations.Pivot)
+	if !ok {
+		t.Fatal("the relation built something that is not a Pivot")
+	}
+
+	restore, err := pivot.NewQueryForRestoration(g, pivot.GetQueueableID())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := restore.Get(ctx, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("the restoration found %d rows, want the one belonging to the Grant's tenant", len(rows))
+	}
+	if tenant := rows[0].GetAttribute("tenant_id"); tenant != "acme" {
+		t.Fatalf("the restored row belongs to tenant %v, want acme", tenant)
+	}
+}
+
 // TestAttachStampsTheTenantOnThePivotRow is RULE 14 on the write side of a
 // shared table.
 //

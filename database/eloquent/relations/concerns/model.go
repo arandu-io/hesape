@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"strings"
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
@@ -312,23 +313,122 @@ func RequireTenant(g auth.Grant) (string, error) {
 	return tenant, nil
 }
 
-// ScopeTenant returns b filtered by the tenant g carries.
+// ScopeTenant returns b filtered by the tenant g carries -- on the model's own
+// table, and on every table the query joins.
 //
 // Every relation calls it on the way to the database, on the eager path exactly
 // as on the lazy one. The eager path is the one that matters: a with() whose
 // parent query is correctly scoped and whose child query is not returns the
 // right parents carrying another customer's children, and nothing in the result
 // looks wrong.
+//
+// # What leaked
+//
+// It used to filter the model's table and nothing else, and a join contributes
+// no filter of its own: query.Builder.scoped qualifies the tenant column on the
+// table in the from clause, so every table brought in by a join was read whole.
+// An audit found the same hole in three relations at once, and the one that
+// proved it was BelongsToMany.Get: `select roles.*, role_user.user_id as
+// pivot_user_id from roles inner join role_user on roles.id = role_user.role_id
+// where role_user.user_id = 1 and roles.tenant_id = 'acme'` matched the pivot
+// row (user_id 1, role_id 'admin', tenant_id 'B') -- another customer's grant --
+// and handed this customer's user the role, with B's pivot columns hydrated onto
+// it. HasOneOrManyThrough.performJoin had it on the intermediate table.
+//
+// Patching those two would have left the door open for the third relation to
+// join a table, so the filter goes on here, where every read already passes: a
+// table this query joins is filtered on TenantColumn, whoever joined it.
+//
+// # Why a where and not a join condition
+//
+// `on role_user.tenant_id = ?` and `where role_user.tenant_id = ?` select the
+// same rows of an inner join, and every join in this package is an inner join.
+// The where is the one that can be added here: a join clause hands its bindings
+// to the parent's join segment when the join is declared (see addJoinClause), so
+// a condition added afterwards would compile into the statement with its value
+// sitting in another join's placeholder.
 func ScopeTenant(b Builder, m Model, g auth.Grant) (Builder, error) {
 	tenant, err := RequireTenant(g)
 	if err != nil {
 		return nil, err
 	}
+
+	b = scopeJoinedTables(b, tenant)
+
 	column := TenantColumnFor(m)
 	if column == "" {
 		return b, nil
 	}
 	return b.Where(m.QualifyColumn(column), tenant), nil
+}
+
+// scopeJoinedTables filters every table b joins on TenantColumn.
+//
+// A derived table -- the `(select ...) as alias` a subquery join compiles to --
+// is skipped: it has no tenant column of its own, and the query inside it is
+// scoped where it was built, by query.Builder's subquery pass.
+//
+// A table that already carries the filter is skipped too, so that scoping a
+// query twice does not write the clause twice.
+//
+// Everything else is filtered, without asking whether the table is partitioned:
+// there is no model behind a joined table to ask, an intermediate table is the
+// one thing in this package that is known to be partitioned -- newPivotStatement
+// has always assumed it on the write side -- and the two failures are not
+// comparable. A shared table joined here yields a statement the engine refuses
+// by name, which is a build that stops; the filter left off yields a read that
+// crosses customers and looks right. Tenanted opts a model's own table out, and
+// a joined table that has to be opted out belongs beside it.
+func scopeJoinedTables(b Builder, tenant string) Builder {
+	base := b.GetQuery()
+	if base == nil {
+		return b
+	}
+
+	for _, join := range base.Joins {
+		table, ok := joinedTableName(join.Table)
+		if !ok {
+			continue
+		}
+		column := table + "." + TenantColumn
+		if hasFilterOn(base, column) {
+			continue
+		}
+		b = b.Where(column, tenant)
+	}
+	return b
+}
+
+// joinedTableName answers the name a joined table's columns are qualified by,
+// and whether there is one at all.
+//
+// The alias wins when the join declares one -- `users as arandu_reserved_0` is
+// referred to by the alias and the real name resolves to nothing. An expression
+// is not a table name and reports false.
+func joinedTableName(table any) (string, bool) {
+	name, ok := table.(string)
+	if !ok {
+		return "", false
+	}
+
+	name = strings.TrimSpace(name)
+	if index := strings.Index(strings.ToLower(name), " as "); index >= 0 {
+		name = strings.TrimSpace(name[index+len(" as "):])
+	}
+	if name == "" {
+		return "", false
+	}
+	return name, true
+}
+
+// hasFilterOn reports whether the query already compares column with a value.
+func hasFilterOn(q *query.Builder, column string) bool {
+	for _, where := range q.Wheres {
+		if where.Type == "Basic" && fmt.Sprint(where.Column) == column {
+			return true
+		}
+	}
+	return false
 }
 
 // ScopeTenantQuery is ScopeTenant for a base query builder.

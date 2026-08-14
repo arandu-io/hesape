@@ -56,6 +56,10 @@ type CanBeOneOfMany struct {
 	isOneOfMany       bool
 	relationName      string
 	oneOfManySubQuery Builder
+
+	// oneOfManyJoins repeats the join that went on the relation's own query, for
+	// the existence query that needs the same one. See MergeOneOfManyJoinsTo.
+	oneOfManyJoins []func(target Builder)
 }
 
 // OfMany answers CanBeOneOfMany::ofMany.
@@ -99,7 +103,7 @@ func (c *CanBeOneOfMany) OfMany(columns []OfManyColumn, relation string) error {
 		}
 
 		if index == len(columns)-1 {
-			c.addOneOfManyJoinSubQuery(c.OneOfManyQuery(), subQuery, on)
+			c.joinOneOfManySubQueryToRelation(subQuery, on)
 		}
 
 		previousSubQuery, previousColumns = subQuery, on
@@ -158,12 +162,14 @@ func (c *CanBeOneOfMany) QualifyRelatedColumn(column string) string {
 
 // MergeOneOfManyJoinsTo answers CanBeOneOfMany::mergeOneOfManyJoinsTo: the
 // existence query needs the same join the relation query got.
+//
+// The PHP copies the beforeQuery callbacks the join was deferred inside. There
+// is no deferral here any more -- see addOneOfManyJoinSubQuery -- so what is
+// repeated is the join itself, against the target's query.
 func (c *CanBeOneOfMany) MergeOneOfManyJoinsTo(target Builder) {
-	source := c.OneOfManyQuery().GetQuery()
-	destination := target.GetQuery()
-
-	destination.BeforeQueryCallbacks = append(destination.BeforeQueryCallbacks, source.BeforeQueryCallbacks...)
-	destination.ApplyBeforeQueryCallbacks()
+	for _, join := range c.oneOfManyJoins {
+		join(target)
+	}
 }
 
 // getDefaultOneOfManyJoinAlias answers
@@ -207,26 +213,46 @@ func (c *CanBeOneOfMany) newOneOfManySubQuery(groupBy []any, columns []string, a
 
 // addOneOfManyJoinSubQuery answers CanBeOneOfMany::addOneOfManyJoinSubQuery.
 //
-// The PHP calls joinSub, which the base builder in this collection does not
-// have. The join is written out instead: the compiled subquery becomes the
-// table expression and its bindings are merged into the join segment, which is
-// what joinSub does with three fewer lines of ceremony.
+// # What leaked
+//
+// It used to write the join out by hand, inside a beforeQuery callback: the
+// subquery was compiled to SQL, wrapped in a raw table expression and joined,
+// with its bindings merged into the join segment. Two things followed from that,
+// and both were a tenant leak.
+//
+// The subquery had no tenant of its own, and nothing could add one. A raw
+// expression is SQL by the time it reaches the statement, so the aggregate ran
+// over every customer's rows: user.LatestPost() took `max(posts.id)` across the
+// whole table, and the relation resolved to whatever this customer's post
+// happened to share that id with -- or to nothing at all, which is the quieter
+// half of the same bug.
+//
+// And the callback ran at compile time, after the tenant pass had already
+// looked at the query, so even a join that could have been filtered was not
+// there to be seen when anything went looking.
+//
+// JoinSub is what fixes both. It records the subquery as a pending one, which is
+// exactly what query.Builder's tenant pass replaces at execution -- with the
+// same query, scoped -- and it registers the join now rather than at compile
+// time.
 func (c *CanBeOneOfMany) addOneOfManyJoinSubQuery(parent Builder, subQuery Builder, on []string) {
-	alias := c.relationName
+	parent.GetQuery().JoinSub(subQuery.GetQuery(), c.relationName, func(join *query.JoinClause) {
+		for _, column := range on {
+			join.On(c.QualifySubSelectColumn(column+"_aggregate"), "=", c.QualifyRelatedColumn(column))
+		}
+		if c.AddOneOfManyJoinSubQueryConstraints != nil {
+			c.AddOneOfManyJoinSubQueryConstraints(join)
+		}
+	}, nil, nil, "inner", false)
+}
 
-	parent.GetQuery().BeforeQuery(func(b *query.Builder) {
-		sub := subQuery.GetQuery()
-		sub.ApplyBeforeQueryCallbacks()
-
-		b.AddBinding(sub.GetBindings(), "join")
-		b.Join(query.Raw("("+sub.ToSQL()+") as "+alias), func(join *query.JoinClause) {
-			for _, column := range on {
-				join.On(c.QualifySubSelectColumn(column+"_aggregate"), "=", c.QualifyRelatedColumn(column))
-			}
-			if c.AddOneOfManyJoinSubQueryConstraints != nil {
-				c.AddOneOfManyJoinSubQueryConstraints(join)
-			}
-		})
+// joinOneOfManySubQueryToRelation is the last of ofMany's joins: the one that
+// goes on the relation's own query rather than on another subquery, and
+// therefore the one the existence query has to be able to repeat.
+func (c *CanBeOneOfMany) joinOneOfManySubQueryToRelation(subQuery Builder, on []string) {
+	c.addOneOfManyJoinSubQuery(c.OneOfManyQuery(), subQuery, on)
+	c.oneOfManyJoins = append(c.oneOfManyJoins, func(target Builder) {
+		c.addOneOfManyJoinSubQuery(target, subQuery, on)
 	})
 }
 

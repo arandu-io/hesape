@@ -176,6 +176,15 @@ func WithExists(q relations.Builder, name string, relation relations.Relation) r
 
 // WithAggregate answers QueriesRelationships::withAggregate: the subquery goes
 // into the select list, aliased to relation_function.
+//
+// The column goes in through query.SelectSub, which is the method that records a
+// subquery so the tenant can be put on it when the Grant arrives. This wrote the
+// column itself -- AddSelect over sub.ToSQL(), with the bindings added by hand --
+// which is the same leak the eloquent builder's copy of this function had, found
+// by the audit that ran Users.WithCount("posts").Get(auth.SystemGrant(
+// "user.list", "acme")) and got a posts_count over every tenant's posts. A
+// subquery compiled into a raw column is a subquery nothing can scope
+// afterwards, and there is one way to write one.
 func WithAggregate(q relations.Builder, name string, relation relations.Relation, column any, function string) relations.Builder {
 	existence := relation.GetQuery()
 	if relationQuery, ok := relation.(existenceQueryBuilder); ok {
@@ -188,8 +197,7 @@ func WithAggregate(q relations.Builder, name string, relation relations.Relation
 	sub := existence.GetQuery()
 	sub.ApplyBeforeQueryCallbacks()
 
-	q.GetQuery().AddBinding(sub.GetBindings(), "select")
-	q.AddSelect(query.Raw("(" + sub.ToSQL() + ") as " + AggregateAlias(name, function, column)))
+	q.GetQuery().SelectSub(sub, AggregateAlias(name, function, column))
 	return q
 }
 
@@ -237,18 +245,17 @@ type existenceQueryBuilder interface {
 
 // addWhereCountQuery answers QueriesRelationships::addWhereCountQuery: the
 // comparison forms, where EXISTS cannot answer.
+//
+// The clause is built by query.WhereSubCount, which keeps the subquery on it so
+// the tenant can be put on it when the Grant arrives. This froze sub.ToSQL()
+// into a Raw column instead -- the same clause, written the same way, in the
+// eloquent builder's copy of this function, and the audit proved that one leaked:
+// Has("posts", ">", 3) compared against a count over every tenant's posts.
 func addWhereCountQuery(q relations.Builder, existence relations.Builder, operator string, count int, boolean string) relations.Builder {
 	sub := existence.GetQuery()
 	sub.ApplyBeforeQueryCallbacks()
 
-	q.GetQuery().AddBinding(sub.GetBindings(), "where")
-
-	clause := query.Raw("(" + sub.ToSQL() + ")")
-	if boolean == "or" {
-		q.GetQuery().OrWhere(clause, operator, count)
-		return q
-	}
-	q.Where(clause, operator, count)
+	q.GetQuery().WhereSubCount(sub, operator, count, boolean)
 	return q
 }
 

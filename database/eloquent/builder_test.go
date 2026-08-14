@@ -2,6 +2,7 @@ package eloquent
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -287,11 +288,17 @@ func TestWhereHasCompilesAnExistsSubquery(t *testing.T) {
 	}
 
 	sql := conn.last().SQL
-	if !strings.Contains(sql, `exists (select * from "posts" where "posts"."user_id" = "users"."id" and "published" = ?)`) {
-		t.Fatalf("SQL = %q, want the correlated exists whereHas compiles to", sql)
+	// The subquery carries a tenant of its own. Without it the exists asked
+	// whether ANY tenant had a matching post, which selected this tenant's users
+	// by another tenant's rows -- the shape this test used to assert.
+	if !strings.Contains(sql, `exists (select * from "posts" where "posts"."tenant_id" = ? and ("posts"."user_id" = "users"."id" and "published" = ?))`) {
+		t.Fatalf("SQL = %q, want the correlated exists whereHas compiles to, scoped", sql)
 	}
-	if got := conn.last().Bindings[0]; got != true {
-		t.Errorf("bindings = %v, want the subquery's binding first", conn.last().Bindings)
+	if got := conn.last().Bindings[0]; got != "acme" {
+		t.Errorf("bindings = %v, want the subquery's tenant first", conn.last().Bindings)
+	}
+	if got := conn.last().Bindings[1]; got != true {
+		t.Errorf("bindings = %v, want the subquery's own binding after its tenant", conn.last().Bindings)
 	}
 }
 
@@ -304,9 +311,18 @@ func TestHasWithACountCompilesTheSubqueryAsAComparison(t *testing.T) {
 		t.Fatalf("Get: %v", err)
 	}
 
-	sql := conn.last().SQL
-	if !strings.Contains(sql, `(select count(*) from "posts"`) || !strings.Contains(sql, `>= 3`) {
-		t.Fatalf("SQL = %q, want the count subquery compared against 3", sql)
+	last := conn.last()
+	if !strings.Contains(last.SQL, `(select count(*) from "posts" where "posts"."tenant_id" = ?`) {
+		t.Fatalf("SQL = %q, want the count subquery scoped by its own tenant", last.SQL)
+	}
+	if !strings.Contains(last.SQL, `>= ?`) {
+		t.Fatalf("SQL = %q, want the count subquery compared against a bound number", last.SQL)
+	}
+	// The subquery's tenant, then the number it is compared against, then the
+	// outer tenant: the clause carries its own bindings, so the list is rebuilt
+	// in the order the statement reads them.
+	if want := []any{"acme", 3, "acme"}; !slices.Equal(last.Bindings, want) {
+		t.Errorf("bindings = %v, want %v", last.Bindings, want)
 	}
 }
 
@@ -343,8 +359,8 @@ func TestWithCountAddsTheAliasedSubselect(t *testing.T) {
 	}
 
 	sql := conn.last().SQL
-	if !strings.Contains(sql, `(select count(*) from "posts" where "posts"."user_id" = "users"."id") as "posts_count"`) {
-		t.Fatalf("SQL = %q, want the aggregate subselect aliased posts_count", sql)
+	if !strings.Contains(sql, `(select count(*) from "posts" where "posts"."tenant_id" = ? and ("posts"."user_id" = "users"."id")) as "posts_count"`) {
+		t.Fatalf("SQL = %q, want the aggregate subselect aliased posts_count, scoped", sql)
 	}
 	if !strings.Contains(sql, `"users".*`) {
 		t.Errorf("SQL = %q: withAggregate selects the table's own columns before it adds the subselect", sql)
@@ -537,8 +553,8 @@ func TestEagerLoadConstraintsNarrowTheSubqueryAndNotTheOuterOne(t *testing.T) {
 	}
 
 	sql := conn.last().SQL
-	if !strings.Contains(sql, `from "posts" where "posts"."user_id" = "users"."id" and "published" = ?`) {
-		t.Fatalf("SQL = %q, want the constraint inside the subquery", sql)
+	if !strings.Contains(sql, `from "posts" where "posts"."tenant_id" = ? and ("posts"."user_id" = "users"."id" and "published" = ?)`) {
+		t.Fatalf("SQL = %q, want the constraint inside the subquery, under the subquery's own tenant", sql)
 	}
 	if strings.Contains(sql, `from "users" where "published"`) {
 		t.Errorf("SQL = %q: the constraint narrowed the outer query, which is a filter the caller never asked for", sql)

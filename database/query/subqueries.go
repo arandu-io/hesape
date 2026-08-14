@@ -47,6 +47,7 @@ type pendingSub struct {
 	segment string   // the binding segment its values live in
 	offset  int      // where in that segment they start
 	length  int      // how many of them there are
+	prefix  string   // the operator the subquery is written under, e.g. "exists"
 }
 
 // resolveSub unwraps the Closure|Builder|string a subquery argument may be.
@@ -75,19 +76,24 @@ func (b *Builder) resolveSub(query any) (*Builder, string, []any, error) {
 	}
 }
 
-// aliased spells "(sql) as alias", quoting the alias as a table or as a column.
-func (b *Builder) aliased(sql, as string, table bool) Expression {
+// aliased spells "prefix (sql) as alias", quoting the alias as a table or as a
+// column. The prefix is empty for every subquery but the one SelectExistsSub
+// writes.
+func (b *Builder) aliased(prefix, sql, as string, table bool) Expression {
+	if prefix != "" {
+		prefix += " "
+	}
 	if b.Grammar == nil {
-		return Raw("(" + sql + ") as " + as)
+		return Raw(prefix + "(" + sql + ") as " + as)
 	}
 	if table {
-		return Raw("(" + sql + ") as " + b.Grammar.WrapTable(as))
+		return Raw(prefix + "(" + sql + ") as " + b.Grammar.WrapTable(as))
 	}
-	return Raw("(" + sql + ") as " + b.Grammar.Wrap(as))
+	return Raw(prefix + "(" + sql + ") as " + b.Grammar.Wrap(as))
 }
 
 // pend records a subquery so the tenant can be put on it at execution.
-func (b *Builder) pend(sub *Builder, as string, table bool, kind, segment string, index, offset, length int) {
+func (b *Builder) pend(sub *Builder, as string, table bool, kind, segment string, index, offset, length int, prefix string) {
 	if sub == nil {
 		return
 	}
@@ -100,6 +106,7 @@ func (b *Builder) pend(sub *Builder, as string, table bool, kind, segment string
 		segment: segment,
 		offset:  offset,
 		length:  length,
+		prefix:  prefix,
 	})
 }
 
@@ -138,22 +145,79 @@ func (b *Builder) forgetSubqueriesOfSegment(segment string) {
 // SelectSub answers Builder::selectSub: a subquery as one column of the select
 // list.
 func (b *Builder) SelectSub(query any, as string) *Builder {
+	return b.selectSub(query, as, "")
+}
+
+// SelectExistsSub is SelectSub for a subquery asked as a yes or no: it compiles
+// to `exists (select ...) as alias`.
+//
+// The PHP has no such method -- withExists writes the whole column with
+// selectRaw, and the eloquent builder here copied that. A subquery written as
+// raw SQL is a subquery nothing can scope afterwards, which is what
+// Users.WithExists("posts").Get(g) proved: the column asked whether ANY tenant
+// had a post for that user. This is selectSub with the one operator that column
+// needs, so the exists form goes through the same bookkeeping every other
+// subquery does. See pendingSub.
+func (b *Builder) SelectExistsSub(query any, as string) *Builder {
+	return b.selectSub(query, as, "exists")
+}
+
+// selectSub is the body of SelectSub and SelectExistsSub.
+func (b *Builder) selectSub(query any, as, prefix string) *Builder {
 	sub, sql, bindings, err := b.resolveSub(query)
 	if err != nil {
 		return b.refuse("and", err)
 	}
 
 	offset := len(b.Bindings["select"])
-	b.AddSelect(b.aliased(sql, as, false))
+	b.AddSelect(b.aliased(prefix, sql, as, false))
 	b.AddBinding(bindings, "select")
-	b.pend(sub, as, false, "select", "select", len(b.Columns)-1, offset, len(bindings))
+	b.pend(sub, as, false, "select", "select", len(b.Columns)-1, offset, len(bindings), prefix)
+	return b
+}
+
+// WhereSubCount is the clause Eloquent's addWhereCountQuery compiles: a subquery
+// on the LEFT of a comparison, `(select count(*) from posts where posts.user_id
+// = users.id) > 3`.
+//
+// The builder had no method for that shape, so both copies of the eloquent
+// has-query wrote the clause by hand, as a Basic where whose column was
+// Raw("(" + sub.ToSQL() + ")"). A subquery frozen into a Raw is a subquery
+// nothing can scope afterwards, and this one was never scoped by anything:
+// Users.Has("posts", ">", 3).Get(auth.SystemGrant("user.list", "acme")) emitted
+// `(select count(*) from "posts" where "users"."id" = "posts"."user_id") > 3`,
+// with no posts.tenant_id anywhere in it, so one tenant's users were filtered by
+// every tenant's posts.
+//
+// The clause keeps the builder it was compiled from, which is why it can be
+// scoped: scopeSubqueries scopes that builder under the Grant and renders the
+// column again from it. The SQL written here is what an unscoped ToSQL shows,
+// exactly as it is for every other subquery in this file.
+func (b *Builder) WhereSubCount(sub *Builder, operator string, count int, boolean string) *Builder {
+	if boolean == "" {
+		boolean = "and"
+	}
+	if sub == nil {
+		return b.refuse(boolean, errors.New("query: a count comparison was given no subquery to count"))
+	}
+
+	b.Wheres = append(b.Wheres, Where{
+		Type:     "Basic",
+		Column:   Raw("(" + sub.ToSQL() + ")"),
+		Operator: operator,
+		Value:    count,
+		Query:    sub,
+		Boolean:  boolean,
+	})
+	b.AddBinding(sub.GetBindings(), "where")
+	b.AddBinding([]any{count}, "where")
 	return b
 }
 
 // SelectExpression answers Builder::selectExpression: an expression as one
 // column, under an alias. It binds nothing, because an expression is SQL.
 func (b *Builder) SelectExpression(expression any, as string) *Builder {
-	return b.AddSelect(b.aliased(stringify(expression), as, false))
+	return b.AddSelect(b.aliased("", stringify(expression), as, false))
 }
 
 // FromSub answers Builder::fromSub: the query reads from a subquery rather than
@@ -165,9 +229,9 @@ func (b *Builder) FromSub(query any, as string) *Builder {
 	}
 
 	offset := len(b.Bindings["from"])
-	b.from = b.aliased(sql, as, true)
+	b.from = b.aliased("", sql, as, true)
 	b.AddBinding(bindings, "from")
-	b.pend(sub, as, true, "from", "from", 0, offset, len(bindings))
+	b.pend(sub, as, true, "from", "from", 0, offset, len(bindings), "")
 	return b
 }
 
@@ -188,9 +252,9 @@ func (b *Builder) JoinSub(query any, as string, first any, operator, second any,
 	offset := len(b.Bindings["join"])
 	b.AddBinding(bindings, "join")
 
-	expression := b.aliased(sql, as, true)
+	expression := b.aliased("", sql, as, true)
 	b.addJoinClause(typ, isWhere, expression, first, operator, second)
-	b.pend(sub, as, true, "join", "join", len(b.Joins)-1, offset, len(bindings))
+	b.pend(sub, as, true, "join", "join", len(b.Joins)-1, offset, len(bindings), "")
 	return b
 }
 
@@ -225,8 +289,8 @@ func (b *Builder) CrossJoinSub(query any, as string) *Builder {
 	offset := len(b.Bindings["join"])
 	b.AddBinding(bindings, "join")
 
-	b.Joins = append(b.Joins, NewJoinClause(b, "cross", b.aliased(sql, as, true)))
-	b.pend(sub, as, true, "join", "join", len(b.Joins)-1, offset, len(bindings))
+	b.Joins = append(b.Joins, NewJoinClause(b, "cross", b.aliased("", sql, as, true)))
+	b.pend(sub, as, true, "join", "join", len(b.Joins)-1, offset, len(bindings), "")
 	return b
 }
 
@@ -244,8 +308,8 @@ func (b *Builder) JoinLateral(query any, as string, typ string) *Builder {
 	offset := len(b.Bindings["join"])
 	b.AddBinding(bindings, "join")
 
-	b.Joins = append(b.Joins, NewJoinLateralClause(b, typ, b.aliased(sql, as, true)))
-	b.pend(sub, as, true, "join", "join", len(b.Joins)-1, offset, len(bindings))
+	b.Joins = append(b.Joins, NewJoinLateralClause(b, typ, b.aliased("", sql, as, true)))
+	b.pend(sub, as, true, "join", "join", len(b.Joins)-1, offset, len(bindings), "")
 	return b
 }
 
@@ -277,7 +341,7 @@ func (b *Builder) scopeSubqueryClauses(ctx context.Context, g auth.Grant) error 
 			return err
 		}
 
-		expression := b.aliased(scoped.ToSQL(), sub.as, sub.table)
+		expression := b.aliased(sub.prefix, scoped.ToSQL(), sub.as, sub.table)
 		switch sub.kind {
 		case "from":
 			b.from = expression

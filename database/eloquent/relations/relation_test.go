@@ -172,6 +172,136 @@ func TestHasManyThroughReachesTheFarParentThroughTheJoin(t *testing.T) {
 	}
 }
 
+// TestHasManyThroughDoesNotReachThroughAnotherTenantsRow is RULE 17 on the
+// intermediate table.
+//
+// The country is this customer's and so is the post. What is not is the user
+// row that links them: this customer's user 1 lives in another country
+// entirely, and the row that says user 1 is Brazilian belongs to the other
+// customer. The join used to bring it in unfiltered -- constrainThroughParents
+// added `users.deleted_at is null` and no tenant -- so the country came back
+// with a post it can only be reached through somebody else's row, carrying that
+// row's key under ThroughKey.
+func TestHasManyThroughDoesNotReachThroughAnotherTenantsRow(t *testing.T) {
+	database := newDB()
+
+	country := newModel(database, "countries", "country", map[string]any{"id": "br", "tenant_id": "acme"})
+	through := newModel(database, "users", "user", nil)
+
+	database.seed("users",
+		map[string]any{"id": "1", "country_id": "pt", "tenant_id": "acme"},
+		map[string]any{"id": "1", "country_id": "br", "tenant_id": "other"},
+	)
+	database.seed("posts",
+		map[string]any{"id": "10", "user_id": "1", "title": "acme post", "tenant_id": "acme"},
+	)
+
+	var relation *relations.HasManyThrough
+	relations.NoConstraints(func() {
+		relation = relations.NewHasManyThrough(
+			newModel(database, "posts", "post", nil).NewQuery(),
+			country, through,
+			"country_id", "user_id", "id", "id",
+		)
+	})
+
+	ctx, g := context.Background(), auth.SystemGrant("post.view", "acme")
+
+	models := []relations.Model{country}
+	if _, err := relations.EagerLoadRelation(ctx, g, models, "posts", relation, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, _ := country.GetRelation("posts")
+	posts := loaded.([]relations.Model)
+	if len(posts) != 0 {
+		t.Fatalf("the country came back with %d posts, want none: the only path to them runs through another customer's user row", len(posts))
+	}
+}
+
+// TestLatestOfManyAggregatesOnlyTheGrantsTenant is RULE 17 inside the subquery
+// a one-of-many relation joins.
+//
+// latestOfMany picks a row with `max(posts.id)`, taken in a grouped subquery and
+// joined back. The subquery used to be compiled to raw SQL and joined by hand
+// inside a beforeQuery callback, which put it out of reach of every tenant pass
+// -- so the maximum was taken over every customer's posts. The post below with
+// the higher id belongs to another customer, and the aggregate that ignores the
+// tenant answers with its id, which this customer's relation then resolves to a
+// post it does not have.
+//
+// What is asserted is what the statement bound, and it is asserted rather than
+// counted for a reason worth stating: a derived table is SQL by the time it
+// reaches a connection, so this fake has no way to evaluate one, and the value
+// bound inside it is the only place the filter shows. The statement binds the
+// tenant twice -- once for the table it reads from, once inside the subquery --
+// and the subquery's comes first, because the join is compiled before the where.
+func TestLatestOfManyAggregatesOnlyTheGrantsTenant(t *testing.T) {
+	database := newDB()
+
+	user := newModel(database, "users", "user", map[string]any{"id": "1", "tenant_id": "acme"})
+	database.seed("posts",
+		map[string]any{"id": "10", "user_id": "1", "title": "the one acme wrote", "tenant_id": "acme"},
+		map[string]any{"id": "99", "user_id": "1", "title": "another customer's", "tenant_id": "other"},
+	)
+
+	relation := relations.NewHasOne(
+		newModel(database, "posts", "post", nil).NewQuery(), user, "user_id", "id")
+	if err := relation.LatestOfMany("id", "latest_post"); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, g := context.Background(), auth.SystemGrant("post.view", "acme")
+
+	rows, err := relation.GetQuery().GetQuery().Get(ctx, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || !sameValue(rows[0]["id"], "10") {
+		t.Fatalf("the relation read %v, want this customer's only post", rows)
+	}
+
+	bound := database.bound[len(database.bound)-1]
+	tenants := 0
+	for _, binding := range bound {
+		if binding == "acme" {
+			tenants++
+		}
+	}
+	if tenants != 2 {
+		t.Fatalf("the statement bound the tenant %d times (%v), want 2: one for posts and one inside the aggregate subquery", tenants, bound)
+	}
+	if len(bound) == 0 || bound[0] != "acme" {
+		t.Fatalf("the statement begins with the binding %v, want the tenant: the subquery is joined before the where clause, so the first value belongs to the aggregate", bound)
+	}
+}
+
+// TestOneOfManyExistenceQueryCarriesTheSameJoin is what MergeOneOfManyJoinsTo
+// owes the existence query: a whereHas over a latestOfMany relation has to join
+// the same aggregate the relation joins, or it asks whether the parent has any
+// post rather than whether it has that one.
+//
+// It is here because the mechanism changed: the join used to be a deferred
+// callback the merge copied, and is now the join itself, repeated.
+func TestOneOfManyExistenceQueryCarriesTheSameJoin(t *testing.T) {
+	database := newDB()
+
+	user := newModel(database, "users", "user", map[string]any{"id": "1", "tenant_id": "acme"})
+	relation := relations.NewHasOne(
+		newModel(database, "posts", "post", nil).NewQuery(), user, "user_id", "id")
+	if err := relation.LatestOfMany("id", "latest_post"); err != nil {
+		t.Fatal(err)
+	}
+
+	existence := newModel(database, "posts", "post", nil).NewQuery()
+	parent := newModel(database, "users", "user", nil).NewQuery()
+	relation.GetRelationExistenceQuery(existence, parent)
+
+	if joins := existence.GetQuery().Joins; len(joins) != 1 {
+		t.Fatalf("the existence query carries %d joins, want the one the relation aggregates through", len(joins))
+	}
+}
+
 // TestSoleTellsTheTwoWrongAnswersApart.
 func TestSoleTellsTheTwoWrongAnswersApart(t *testing.T) {
 	database, users, _ := seedBlog()
