@@ -256,19 +256,6 @@ func HandleCors(allowedOrigins []string, allowedMethods []string, allowedHeaders
 	}
 }
 
-// AddLinkHeadersForPreloadedAssets mirrors
-// Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets.
-//
-// It adds Link headers for preloaded assets to enable HTTP/2 server
-// push.
-func AddLinkHeadersForPreloadedAssets(limit int) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
 func joinHeaders(values []string) string {
 	result := ""
 	for i, v := range values {

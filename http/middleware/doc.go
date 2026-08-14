@@ -3,7 +3,6 @@
 // The files it answers to, in the clone at
 // laravel_illuminate/http/Middleware:
 //
-//	AddLinkHeadersForPreloadedAssets.php -> middleware.go
 //	CheckResponseForModifications.php    -> middleware.go
 //	FrameGuard.php                       -> middleware.go
 //	HandleCors.php                       -> middleware.go, state.go
@@ -17,6 +16,24 @@
 // handle method, because that is the shape net/http composes. The class
 // statics -- what the PHP configures from bootstrap/app.go -- are package
 // functions in state.go.
+//
+// # AddLinkHeadersForPreloadedAssets does not exist here
+//
+// The PHP emits a Link: rel=preload header naming the assets Vite said it
+// preloaded -- Vite::preloadedAssets(), read out of a build manifest. There is
+// no manifest here and no Vite: RULE 13 keeps Node out of the toolchain, and the
+// assets are embedded with go:embed and served content-addressed, with the hash
+// in the path.
+//
+// It was written as a middleware that took a limit and passed the request
+// through untouched, with a doc comment saying it added Link headers. That is
+// worse than the absence: nothing fails, the header never appears, and the
+// reason is invisible to whoever wired it. Removed, and named here instead.
+//
+// If a preload hint is wanted later it is one header on a response whose asset
+// URLs the renderer already knows, and it is not this shape. HTTP/2 server push,
+// which the PHP's own doc comment mentions, is not the reason to build it:
+// Chrome removed push in 2022.
 //
 // # Not mirrored, and why (ADR 0044)
 //
