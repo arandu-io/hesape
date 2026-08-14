@@ -46,4 +46,22 @@
 // reflection, and there is no Eloquent. DumpCommand has none either -- it
 // shells out to pg_dump and mysqldump, which is the same argument the `db`
 // command's doc makes above.
+//
+// # Command::handle, once for every command in this collection
+//
+// Every command of Illuminate\Database declares handle(): DbCommand::handle,
+// DumpCommand::handle, MonitorCommand::handle, PruneCommand::handle,
+// ShowCommand::handle, ShowModelCommand::handle, TableCommand::handle,
+// WipeCommand::handle, and the same method on the ten commands of
+// Console\Migrations, Console\Seeds and Console\Factories. It is the name of
+// one thing said eighteen times, because there it is the method a Symfony
+// command subclass overrides.
+//
+// A command here is not a subclass, so there is nothing to override: what PHP
+// writes inside handle() is the Run field of the console.Command value the
+// functions below return, and console.Command.Handle is that field called by
+// its Laravel name. hesape/console declares it once, on the type every one of
+// these commands is a value of, so the name is reached through the value rather
+// than redeclared eighteen times -- and a command with no Run is refused at
+// wiring time instead of at the run.
 package console
