@@ -22,16 +22,34 @@
 // tracing header, the Collector behind that console. The live reload in
 // reload.go follows a restart in development and costs nothing anywhere else.
 //
-// # What is not here yet
+// # What is not here, and is not coming
 //
-// Kernel itself, RendererProvider and Builtins are still waiting. [Module]
-// is not: it named a router, hesape/routing now has one, and it landed here
-// because the four adapter packages ADR 0048 folds in implement it and cannot
-// compile without it.
+// Kernel, RendererProvider and Builtins are not in this package, and as of
+// 14/08/2026 that is settled rather than pending. [Module] is here for a reason
+// that does not apply to them: it named a router, hesape/routing now has one,
+// and it landed here because the four adapter packages ADR 0048 folds in
+// implement it and cannot compile without it.
 //
-// The remaining three name a boot sequence, a view renderer and a console
-// command. Declaring any of them from up here to unblock the kernel would be a
-// second definition of it (RULE 9), thrown away the day the real one lands.
-// Until then they stay in github.com/arandu-io/framework/kernel, which is what
-// docs/31-reorganizacao-hesape.md means by moving in phases.
+// The other three are the boot sequence, the view renderer and the console
+// command, and they belong to the layer above. ADR 0049 fixed the line: of the
+// 37 illuminate/* packages laravel/framework publishes, none is Foundation --
+// it ships only inside the framework itself. So the boot lives in
+// github.com/arandu-io/framework/foundation, where Kernel is now Application
+// and RendererProvider is declared, and this package keeps the vocabulary a
+// module needs to declare itself.
+//
+// The split is not aesthetic. If Module moved up with them, this module would
+// have to require the framework to compile its own adapters -- a circular
+// module dependency, and a second line in a go.mod that has one. The precedent
+// is exact: Illuminate\Contracts\Foundation\Application is split out,
+// Illuminate\Foundation\Application is not.
+//
+// Builtins is the one that has neither a home nor a shape yet. The reasons are
+// written where the decision has to be taken, in that package's doc.go.
+//
+// This section used to say the three were "still waiting" and named
+// framework/kernel as where they stayed. That was true when it was written and
+// stopped being true when foundation landed; it is corrected rather than
+// deleted, because a doc comment is published on pkg.go.dev and a reader who
+// remembers the old sentence deserves to see what replaced it.
 package foundation
