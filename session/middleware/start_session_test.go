@@ -2,6 +2,7 @@ package middleware_test
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -141,8 +142,18 @@ func TestThePreviousURLIsOnlyRememberedForAPageSomebodyNavigatedTo(t *testing.T)
 		return out
 	}
 
-	if got := remembered(pageRequest(http.MethodGet, "/invoices?page=2")); got != "/invoices?page=2" {
-		t.Fatalf("a page navigation was not remembered: %q", got)
+	// The whole address, scheme and host included. It used to be
+	// r.URL.RequestURI(), where PHP stores $request->fullUrl(): a "back" built
+	// from a path alone loses the host, so a redirect after signing in on one
+	// host lands on whichever host answers the redirect.
+	if got := remembered(pageRequest(http.MethodGet, "/invoices?page=2")); got != "http://example.com/invoices?page=2" {
+		t.Fatalf("a page navigation was not remembered whole: %q", got)
+	}
+	secure := pageRequest(http.MethodGet, "/invoices")
+	secure.TLS = &tls.ConnectionState{}
+	secure.Host = "app.example.test"
+	if got := remembered(secure); got != "https://app.example.test/invoices" {
+		t.Fatalf("the scheme and host were not remembered: %q", got)
 	}
 	if got := remembered(pageRequest(http.MethodPost, "/invoices")); got != "" {
 		t.Fatalf("a POST was remembered: %q", got)

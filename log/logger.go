@@ -51,29 +51,50 @@ var levelNames = []struct {
 	{"emergency", LevelEmergency},
 }
 
+// ParseLevel is the lookup half of ParsesLogConfiguration::level, over the same
+// eight names ParsesLogConfiguration::$levels holds. The half that reads the
+// configuration and falls back to debug is LogManager's levelLocked.
+//
 // ParseLevel turns a configured level name into a level.
 //
-// It accepts the eight PSR-3 names, case-insensitively, plus "warn" for
-// LevelWarning -- which is what slog calls it and what an existing LOG_LEVEL
-// already says. An unknown name is an error rather than a silent fallback to
-// info: a typo in LOG_LEVEL that quietly restores the default is how a
-// production process ends up logging more than it was told to.
+// It accepts the eight PSR-3 names and nothing else. An unknown name is an
+// error rather than a silent fallback: a typo in LOG_LEVEL that quietly
+// restores the default is how a production process ends up logging more than it
+// was told to.
+//
+// # Four spellings that used to be accepted
+//
+// It lowercased and trimmed first, and took "warn" as a fifth name for warning,
+// so "WARNING", " info " and "warn" all parsed. PHP reads $levels with isset and
+// every one of those misses it and throws. The widening was not free: two names
+// for one level is two spellings of the same configuration, which is the thing
+// RULE 9 is about, and it is spelled "warning" in the eight that the handler
+// renders back -- so LOG_LEVEL=warn configured a level that never prints under
+// that name.
+//
+// The level returned beside the error is debug, and it used to be info. It is
+// the value LogManager.levelLocked falls back to for a configuration with no
+// level in it at all, and two different defaults for the same case is one of
+// them being wrong wherever the two are read next to each other.
 func ParseLevel(s string) (slog.Level, error) {
-	want := strings.ToLower(strings.TrimSpace(s))
-	if want == "warn" {
-		return LevelWarning, nil
-	}
 	for _, l := range levelNames {
-		if l.name == want {
+		if l.name == s {
 			return l.level, nil
 		}
 	}
-	return LevelInfo, &UnknownLevelError{Name: s}
+	return LevelDebug, &UnknownLevelError{Name: s}
 }
 
 // UnknownLevelError is what ParseLevel returns for a name outside the eight.
 type UnknownLevelError struct{ Name string }
 
+// Error is the message of the InvalidArgumentException that
+// ParsesLogConfiguration::level throws, which in PHP is the bare string
+// "Invalid log level." and says neither what was read nor what was expected.
+//
+// This one names the rejected value and lists the eight names that would have
+// been accepted, because the only reason anybody reads this message is to fix
+// the value in the configuration.
 func (e *UnknownLevelError) Error() string {
 	names := make([]string, 0, len(levelNames))
 	for _, l := range levelNames {
@@ -93,6 +114,10 @@ func levelName(l slog.Level) string {
 	return l.String()
 }
 
+// New has no Illuminate counterpart: no logger exists there that LogManager did
+// not build out of config/logging.php, and this is the root *slog.Logger a Go
+// process has before any configuration has been read.
+//
 // New returns the root logger: readable text in development, JSON
 // everywhere else, so it reaches the aggregator without fragile parsing.
 func New(env string, level slog.Level) *slog.Logger {
@@ -114,11 +139,18 @@ func New(env string, level slog.Level) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(os.Stdout, opts))
 }
 
+// Into has no Illuminate counterpart: there the request logger is the 'log'
+// singleton in the container, and the container is rejected (ADR 0001), so the
+// carrier is the context.Context.
+//
 // Into stores the request-scoped logger in the context.
 func Into(ctx context.Context, l *slog.Logger) context.Context {
 	return context.WithValue(ctx, ctxLoggerKey{}, l)
 }
 
+// Middleware has no Illuminate counterpart: nothing has to install the logger
+// there, because the facade reaches the container from any point of the request.
+//
 // Middleware installs the application logger at the very top of the pipeline.
 //
 // Without it, For(ctx) inside a request falls back to slog.Default(), which
@@ -134,6 +166,9 @@ func Middleware(l *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
+// For has no Illuminate counterpart: it is the read side of Into, and it stands
+// where a Laravel application writes the Log facade.
+//
 // For returns the request logger. It never returns nil.
 //
 // This is the only way to log inside a handler or a service. There is no
@@ -146,6 +181,10 @@ func For(ctx context.Context) *slog.Logger {
 	return slog.Default()
 }
 
+// With has no Illuminate counterpart: Logger::withContext is answered by
+// [Logger.WithContext], which mutates one Logger, and this is slog's own With
+// stored on the context so that everything downstream inherits the fields.
+//
 // With attaches fields to the logger the context carries, and returns the
 // context.
 //
@@ -169,6 +208,9 @@ func With(ctx context.Context, args ...any) context.Context {
 	return context.WithValue(ctx, ctxFieldsKey{}, carried)
 }
 
+// Field has no Illuminate counterpart: PSR-3 context is an associative array,
+// which needs no constructor, and a slog.Attr does.
+//
 // Field is one structured field.
 //
 // It is slog.Any under a name that says what it is at the call site, and it is
@@ -178,6 +220,9 @@ func Field(key string, value any) slog.Attr {
 	return slog.Any(key, value)
 }
 
+// Fields has no Illuminate counterpart: PHP reads Logger::$context back off the
+// object, and a *slog.Logger will not say what it carries.
+//
 // Fields returns the fields With attached to this context, in the order they
 // were attached.
 //

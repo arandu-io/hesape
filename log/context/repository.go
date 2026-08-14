@@ -60,7 +60,8 @@ func New(dispatcher Dispatcher) *Repository {
 	}
 }
 
-// Into stores the repository in ctx and returns the new context.
+// Into has no Illuminate counterpart: it stores the repository in ctx and
+// returns the new context.
 //
 // It has no counterpart in Illuminate, where the repository is one object per
 // process resolved through the container and reached through the Context facade.
@@ -71,7 +72,8 @@ func Into(ctx context.Context, repository *Repository) context.Context {
 	return context.WithValue(ctx, repositoryKey{}, repository)
 }
 
-// For returns the repository ctx carries, or nil when it carries none.
+// For has no Illuminate counterpart: it returns the repository ctx carries, or
+// nil when it carries none.
 //
 // It is the read side of Into, and stands where Illuminate writes Context::.
 // Every method is safe on a nil receiver, so a caller may use the result without

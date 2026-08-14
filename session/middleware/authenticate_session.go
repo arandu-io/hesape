@@ -48,16 +48,16 @@ type AuthenticateSession struct {
 	redirectTo func(r *http.Request) string
 }
 
-// NewAuthenticateSession returns the middleware.
+// NewAuthenticateSession is AuthenticateSession::__construct.
 func NewAuthenticateSession(auth Guard) *AuthenticateSession {
 	return &AuthenticateSession{auth: auth}
 }
 
-// RedirectUsing sets what the middleware sends somebody to when their session
-// is ended. Returning "" answers 401 instead of redirecting.
+// RedirectUsing is AuthenticateSession::redirectUsing.
 //
-// Illuminate's is a static method. See the field it sets for why this one is
-// not.
+// It sets what the middleware sends somebody to when their session is ended.
+// Returning "" answers 401 instead of redirecting. Illuminate's is a static
+// method; see the field it sets for why this one is not.
 func (m *AuthenticateSession) RedirectUsing(callback func(r *http.Request) string) *AuthenticateSession {
 	m.redirectTo = callback
 	return m
@@ -67,7 +67,15 @@ func (m *AuthenticateSession) RedirectUsing(callback func(r *http.Request) strin
 // is Illuminate's "password_hash_"+driver.
 func passwordHashKey(driver string) string { return "password_hash_" + driver }
 
-// Handle is the middleware.
+// Handle is AuthenticateSession::handle, with
+// AuthenticateSession::storePasswordHashInSession and
+// AuthenticateSession::logout behind it.
+//
+// One branch of the PHP is absent: the SessionGuard::viaRemember arm, which
+// compares the hash carried inside Laravel's recaller cookie. There is no
+// recaller cookie here -- remember-me lengthens the session itself, see
+// session.Remember -- so a remembered session is checked by the same session
+// key as any other, and there is no second copy of the hash to disagree with it.
 func (m *AuthenticateSession) Handle(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		store, ok := Session(r.Context())

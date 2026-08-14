@@ -7,14 +7,32 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
-	"os"
+	"net/url"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/arandu-io/hesape/filesystem"
 )
+
+// sessionIsExpired is the one place the expiry boundary is written, for the
+// three handlers that draw one.
+//
+// age is how long since the session was last written, and lifetime is how long a
+// session lives. It is strictly greater, so the session whose age is exactly the
+// lifetime is kept: PHP reads it back on `$session['time'] >= $expiration` in
+// the array handler, `lastModified >= now->subMinutes($minutes)` in the file
+// handler, and `last_activity < now - lifetime` in the database one -- three
+// spellings of the same boundary.
+//
+// All three read `>=` here, which is the other side of it: a session exactly two
+// hours old under a two-hour lifetime came back there and came back empty here.
+// It is one comparison rather than three because three copies of a boundary is
+// three places for the next one to drift.
+func sessionIsExpired(age, lifetime time.Duration) bool { return age > lifetime }
 
 // ArraySessionHandler keeps sessions in the process memory.
 //
@@ -36,22 +54,33 @@ type arraySession struct {
 	written time.Time
 }
 
-// NewArraySessionHandler returns an empty in-memory handler whose sessions live
-// for lifetime.
+// NewArraySessionHandler is ArraySessionHandler::__construct.
+//
+// It returns an empty in-memory handler whose sessions live for lifetime. The
+// PHP takes minutes; this takes a duration, because Go has one.
 func NewArraySessionHandler(lifetime time.Duration) *ArraySessionHandler {
 	return &ArraySessionHandler{storage: map[string]arraySession{}, lifetime: lifetime}
 }
 
 var _ SessionHandler = (*ArraySessionHandler)(nil)
 
-// Open does nothing. There is nothing to open.
+// Open is ArraySessionHandler::open. There is nothing to open.
 func (h *ArraySessionHandler) Open(context.Context, string, string) error { return nil }
 
-// Close does nothing.
+// Close is ArraySessionHandler::close. It does nothing.
 func (h *ArraySessionHandler) Close(context.Context) error { return nil }
 
-// Read returns the payload, or "" when the id is unknown or the session has
-// been idle for longer than the lifetime.
+// Read is ArraySessionHandler::read.
+//
+// It returns the payload, or "" when the id is unknown or the session has been
+// idle for longer than the lifetime.
+//
+// The boundary is the PHP's: it keeps the session whose age is exactly the
+// lifetime, because `$session['time'] >= $expiration` is a comparison against
+// now minus the lifetime. This used to drop it, so a session written exactly two
+// hours ago under a two-hour lifetime read back there and read back empty here
+// -- a person signed out one request early, on the clock tick nobody reproduces
+// on purpose.
 func (h *ArraySessionHandler) Read(_ context.Context, sessionID string) (string, error) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -60,13 +89,13 @@ func (h *ArraySessionHandler) Read(_ context.Context, sessionID string) (string,
 	if !ok {
 		return "", nil
 	}
-	if time.Since(entry.written) >= h.lifetime {
+	if sessionIsExpired(time.Since(entry.written), h.lifetime) {
 		return "", nil
 	}
 	return entry.data, nil
 }
 
-// Write stores the payload and stamps it.
+// Write is ArraySessionHandler::write. It stores the payload and stamps it.
 func (h *ArraySessionHandler) Write(_ context.Context, sessionID, data string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -74,7 +103,7 @@ func (h *ArraySessionHandler) Write(_ context.Context, sessionID, data string) e
 	return nil
 }
 
-// Destroy removes the session, if present.
+// Destroy is ArraySessionHandler::destroy. It removes the session, if present.
 func (h *ArraySessionHandler) Destroy(_ context.Context, sessionID string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -82,15 +111,19 @@ func (h *ArraySessionHandler) Destroy(_ context.Context, sessionID string) error
 	return nil
 }
 
-// GC removes every session idle for longer than lifetime and reports how many
-// went.
+// GC is ArraySessionHandler::gc.
+//
+// It removes every session idle for longer than lifetime and reports how many
+// went. The entry whose age is exactly the lifetime is kept -- `$session['time']
+// < $expiration` is what PHP deletes on -- which is the boundary
+// [ArraySessionHandler.Read] names.
 func (h *ArraySessionHandler) GC(_ context.Context, lifetime time.Duration) (int, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	deleted := 0
 	for id, entry := range h.storage {
-		if time.Since(entry.written) >= lifetime {
+		if sessionIsExpired(time.Since(entry.written), lifetime) {
 			delete(h.storage, id)
 			deleted++
 		}
@@ -105,27 +138,29 @@ func (h *ArraySessionHandler) GC(_ context.Context, lifetime time.Duration) (int
 // the session does not have to branch on whether there is one.
 type NullSessionHandler struct{}
 
-// NewNullSessionHandler returns the handler that keeps nothing.
+// NewNullSessionHandler has no Illuminate counterpart: NullSessionHandler.php
+// declares no constructor, and this is what stands in for `new
+// NullSessionHandler` where there is no container to do it (ADR 0001).
 func NewNullSessionHandler() *NullSessionHandler { return &NullSessionHandler{} }
 
 var _ SessionHandler = (*NullSessionHandler)(nil)
 
-// Open does nothing.
+// Open is NullSessionHandler::open. It does nothing.
 func (h *NullSessionHandler) Open(context.Context, string, string) error { return nil }
 
-// Close does nothing.
+// Close is NullSessionHandler::close. It does nothing.
 func (h *NullSessionHandler) Close(context.Context) error { return nil }
 
-// Read always answers with an empty session.
+// Read is NullSessionHandler::read. It always answers with an empty session.
 func (h *NullSessionHandler) Read(context.Context, string) (string, error) { return "", nil }
 
-// Write discards the payload.
+// Write is NullSessionHandler::write. It discards the payload.
 func (h *NullSessionHandler) Write(context.Context, string, string) error { return nil }
 
-// Destroy does nothing.
+// Destroy is NullSessionHandler::destroy. It does nothing.
 func (h *NullSessionHandler) Destroy(context.Context, string) error { return nil }
 
-// GC has nothing to collect.
+// GC is NullSessionHandler::gc. It has nothing to collect.
 func (h *NullSessionHandler) GC(context.Context, time.Duration) (int, error) { return 0, nil }
 
 // FileSessionHandler stores each session as a file in a directory.
@@ -144,8 +179,11 @@ type FileSessionHandler struct {
 	lifetime time.Duration
 }
 
-// NewFileSessionHandler returns a handler over a directory, creating it when it
-// is not there.
+// NewFileSessionHandler is FileSessionHandler::__construct.
+//
+// It returns a handler over a directory, creating it when it is not there --
+// the PHP constructor only records the path, and PHP's Filesystem::put makes
+// the directory on the first write.
 func NewFileSessionHandler(files *filesystem.Filesystem, path string, lifetime time.Duration) (*FileSessionHandler, error) {
 	if path == "" {
 		return nil, errors.New("session: the file handler needs a directory")
@@ -161,10 +199,10 @@ func NewFileSessionHandler(files *filesystem.Filesystem, path string, lifetime t
 
 var _ SessionHandler = (*FileSessionHandler)(nil)
 
-// Open does nothing. The directory was made by the constructor.
+// Open is FileSessionHandler::open. The directory was made by the constructor.
 func (h *FileSessionHandler) Open(context.Context, string, string) error { return nil }
 
-// Close does nothing.
+// Close is FileSessionHandler::close. It does nothing.
 func (h *FileSessionHandler) Close(context.Context) error { return nil }
 
 // file is where a session lives.
@@ -177,8 +215,12 @@ func (h *FileSessionHandler) file(sessionID string) string {
 	return filepath.Join(h.path, filepath.Base(sessionID))
 }
 
-// Read returns the payload, or "" when the file is missing or older than the
-// lifetime.
+// Read is FileSessionHandler::read.
+//
+// It returns the payload, or "" when the file is missing or older than the
+// lifetime. A file modified exactly one lifetime ago is kept, which is the
+// boundary [ArraySessionHandler.Read] names: PHP reads it when
+// `lastModified >= now->subMinutes($minutes)`.
 func (h *FileSessionHandler) Read(_ context.Context, sessionID string) (string, error) {
 	path := h.file(sessionID)
 	if !h.files.IsFile(path) {
@@ -188,7 +230,7 @@ func (h *FileSessionHandler) Read(_ context.Context, sessionID string) (string, 
 	if err != nil {
 		return "", err
 	}
-	if time.Since(modified) >= h.lifetime {
+	if sessionIsExpired(time.Since(modified), h.lifetime) {
 		return "", nil
 	}
 	body, err := h.files.SharedGet(path)
@@ -201,38 +243,63 @@ func (h *FileSessionHandler) Read(_ context.Context, sessionID string) (string, 
 	return string(body), nil
 }
 
-// Write stores the payload under an exclusive lock.
+// Write is FileSessionHandler::write. It stores the payload under an exclusive
+// lock.
 func (h *FileSessionHandler) Write(_ context.Context, sessionID, data string) error {
 	return h.files.Put(h.file(sessionID), []byte(data), true)
 }
 
-// Destroy removes the file, if present.
+// Destroy is FileSessionHandler::destroy. It removes the file, if present.
 func (h *FileSessionHandler) Destroy(_ context.Context, sessionID string) error {
 	return h.files.Delete(h.file(sessionID))
 }
 
-// GC removes every session file older than lifetime and reports how many went.
+// GC is FileSessionHandler::gc.
+//
+// It removes every session file older than lifetime and reports how many went.
+//
+// The sweep is the Finder's:
+// `Finder::create()->in($path)->files()->ignoreDotFiles(true)->date('<= now - $lifetime seconds')`.
+// That is a recursive walk over files, skipping anything whose name starts with
+// a dot. This did the opposite of both halves -- it read one level and deleted
+// everything it found -- so a session written into a subdirectory was never
+// collected and grew forever, while the .gitignore that is how an empty storage
+// directory survives a clone went on the first sweep. Both were silent.
+//
+// A dot directory is not descended into either, which is the second half of what
+// ignoreDotFiles means to the Finder.
 func (h *FileSessionHandler) GC(_ context.Context, lifetime time.Duration) (int, error) {
-	entries, err := os.ReadDir(h.path)
-	if err != nil {
-		return 0, fmt.Errorf("session: listing %s: %w", h.path, err)
-	}
 	deleted := 0
-	for _, entry := range entries {
+	err := filepath.WalkDir(h.path, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(entry.Name(), ".") && path != h.path {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if entry.IsDir() {
-			continue
+			return nil
 		}
 		info, err := entry.Info()
 		if err != nil {
-			continue
+			// The file went between the walk and the stat, which is another
+			// process collecting the same directory. It is gone either way.
+			return nil
 		}
 		if time.Since(info.ModTime()) < lifetime {
-			continue
+			return nil
 		}
-		if err := h.files.Delete(filepath.Join(h.path, entry.Name())); err != nil {
-			return deleted, err
+		if err := h.files.Delete(path); err != nil {
+			return err
 		}
 		deleted++
+		return nil
+	})
+	if err != nil {
+		return deleted, fmt.Errorf("session: collecting %s: %w", h.path, err)
 	}
 	return deleted, nil
 }
@@ -269,7 +336,7 @@ type CookieSessionHandler struct {
 	expireOnClose bool
 }
 
-// NewCookieSessionHandler returns the handler.
+// NewCookieSessionHandler is CookieSessionHandler::__construct.
 //
 // expireOnClose gives the cookie no expiry, so the browser drops it when it is
 // closed.
@@ -282,16 +349,18 @@ var (
 	_ RequestAware   = (*CookieSessionHandler)(nil)
 )
 
-// SetRequest hands the handler the request it reads the cookie off.
+// SetRequest is CookieSessionHandler::setRequest.
+//
+// It hands the handler the request it reads the cookie off.
 //
 // [Store.SetRequestOnHandler] calls it, and [StartSession] calls that before
 // [Store.Start]. Without it there is nothing to read and every session is empty.
 func (h *CookieSessionHandler) SetRequest(r *http.Request) { h.request = r }
 
-// Open does nothing.
+// Open is CookieSessionHandler::open. It does nothing.
 func (h *CookieSessionHandler) Open(context.Context, string, string) error { return nil }
 
-// Close does nothing.
+// Close is CookieSessionHandler::close. It does nothing.
 func (h *CookieSessionHandler) Close(context.Context) error { return nil }
 
 // cookiePayload is what travels: the session, and when it stops being valid.
@@ -304,8 +373,16 @@ type cookiePayload struct {
 	Expires int64  `json:"expires"`
 }
 
-// Read returns the payload carried by the request's cookie, or "" when there is
+// Read is CookieSessionHandler::read.
+//
+// It returns the payload carried by the request's cookie, or "" when there is
 // none, it is unreadable, or it has run out.
+//
+// The value is percent-decoded first, unless it already begins with the brace
+// that opens the JSON -- which is the cookie a jar handed over after decoding it
+// itself. The discriminator is exact: a percent-encoded payload begins "%7B" and
+// can begin nothing else, so there is no input the two readings both claim. See
+// [CookieSessionHandler.Write] for what is on the wire and why.
 func (h *CookieSessionHandler) Read(_ context.Context, sessionID string) (string, error) {
 	if h.request == nil {
 		return "", nil
@@ -314,12 +391,16 @@ func (h *CookieSessionHandler) Read(_ context.Context, sessionID string) (string
 	if err != nil || c.Value == "" {
 		return "", nil
 	}
-	decoded, err := base64.RawURLEncoding.DecodeString(c.Value)
-	if err != nil {
-		return "", nil
+	value := c.Value
+	if !strings.HasPrefix(value, "{") {
+		decoded, err := url.QueryUnescape(value)
+		if err != nil {
+			return "", nil
+		}
+		value = decoded
 	}
 	var payload cookiePayload
-	if err := json.Unmarshal(decoded, &payload); err != nil {
+	if err := json.Unmarshal([]byte(value), &payload); err != nil {
 		return "", nil
 	}
 	if time.Now().Unix() > payload.Expires {
@@ -328,7 +409,24 @@ func (h *CookieSessionHandler) Read(_ context.Context, sessionID string) (string
 	return payload.Data, nil
 }
 
-// Write queues the cookie carrying the session.
+// Write is CookieSessionHandler::write. It queues the cookie carrying the
+// session.
+//
+// # What is on the wire
+//
+// json_encode(['data' => ..., 'expires' => ...]), percent-encoded. That is
+// byte for byte what a Laravel application puts there: the PHP queues the JSON
+// and Symfony's Cookie::__toString rawurlencodes it on the way into the header,
+// and PHP urldecodes $_COOKIE on the way back.
+//
+// It used to be base64 of the same JSON, and the reason given was that a cookie
+// value cannot hold a quote, a comma or a semicolon -- true, and net/http's
+// SetCookie sanitises those bytes away rather than encoding them, which is why
+// the encoding has to happen here and not in the jar. But base64 is not the
+// encoding the other side uses. A cookie written by a Laravel application read
+// back here as an empty session and a cookie written here read back empty
+// there, both silently, both starting a fresh session: the exact failure that
+// waits until two applications share one domain in production to appear.
 func (h *CookieSessionHandler) Write(_ context.Context, sessionID, data string) error {
 	encoded, err := json.Marshal(cookiePayload{
 		Data:    data,
@@ -341,20 +439,19 @@ func (h *CookieSessionHandler) Write(_ context.Context, sessionID, data string) 
 	if h.expireOnClose {
 		lifetime = 0
 	}
-	// Base64 because a cookie value cannot hold a quote, a comma or a semicolon,
-	// and JSON is made of the first of those. net/http drops the invalid bytes
-	// and logs, which reads as a session that silently forgets everything.
-	h.cookie.Queue(sessionID, base64.RawURLEncoding.EncodeToString(encoded), lifetime)
+	h.cookie.Queue(sessionID, url.QueryEscape(string(encoded)), lifetime)
 	return nil
 }
 
-// Destroy queues the cookie that tells the browser to drop it.
+// Destroy is CookieSessionHandler::destroy. It queues the cookie that tells the
+// browser to drop it.
 func (h *CookieSessionHandler) Destroy(_ context.Context, sessionID string) error {
 	h.cookie.Forget(sessionID)
 	return nil
 }
 
-// GC has nothing to collect: the browser expires the cookie.
+// GC is CookieSessionHandler::gc. There is nothing to collect: the browser
+// expires the cookie.
 func (h *CookieSessionHandler) GC(context.Context, time.Duration) (int, error) { return 0, nil }
 
 // Cache is the part of a cache [CacheBasedSessionHandler] uses.
@@ -384,38 +481,42 @@ type CacheBasedSessionHandler struct {
 	lifetime time.Duration
 }
 
-// NewCacheBasedSessionHandler returns the handler.
+// NewCacheBasedSessionHandler is CacheBasedSessionHandler::__construct.
 func NewCacheBasedSessionHandler(cache Cache, lifetime time.Duration) *CacheBasedSessionHandler {
 	return &CacheBasedSessionHandler{cache: cache, lifetime: lifetime}
 }
 
 var _ SessionHandler = (*CacheBasedSessionHandler)(nil)
 
-// GetCache returns the cache underneath.
+// GetCache is CacheBasedSessionHandler::getCache. It returns the cache
+// underneath.
 func (h *CacheBasedSessionHandler) GetCache() Cache { return h.cache }
 
-// Open does nothing.
+// Open is CacheBasedSessionHandler::open. It does nothing.
 func (h *CacheBasedSessionHandler) Open(context.Context, string, string) error { return nil }
 
-// Close does nothing.
+// Close is CacheBasedSessionHandler::close. It does nothing.
 func (h *CacheBasedSessionHandler) Close(context.Context) error { return nil }
 
-// Read returns the payload, or "" when the key is not there.
+// Read is CacheBasedSessionHandler::read. It returns the payload, or "" when
+// the key is not there.
 func (h *CacheBasedSessionHandler) Read(ctx context.Context, sessionID string) (string, error) {
 	return h.cache.Get(ctx, sessionID)
 }
 
-// Write stores the payload for the session lifetime.
+// Write is CacheBasedSessionHandler::write. It stores the payload for the
+// session lifetime.
 func (h *CacheBasedSessionHandler) Write(ctx context.Context, sessionID, data string) error {
 	return h.cache.Put(ctx, sessionID, data, h.lifetime)
 }
 
-// Destroy removes it.
+// Destroy is CacheBasedSessionHandler::destroy. It removes it.
 func (h *CacheBasedSessionHandler) Destroy(ctx context.Context, sessionID string) error {
 	return h.cache.Forget(ctx, sessionID)
 }
 
-// GC has nothing to collect: the cache expires entries itself.
+// GC is CacheBasedSessionHandler::gc. There is nothing to collect: the cache
+// expires entries itself.
 func (h *CacheBasedSessionHandler) GC(context.Context, time.Duration) (int, error) { return 0, nil }
 
 // Connection is the part of a database [DatabaseSessionHandler] uses.
@@ -453,7 +554,8 @@ type DatabaseSessionHandler struct {
 	exists     bool
 }
 
-// NewDatabaseSessionHandler returns the handler.
+// NewDatabaseSessionHandler is DatabaseSessionHandler::__construct, without the
+// container argument -- see [DatabaseSessionHandler] and ADR 0045.
 //
 // table is quoted into the statements as an identifier, so it must be a name the
 // application chose and never one that came from a request. It is checked for
@@ -492,21 +594,33 @@ var (
 	_ ExistenceAwareInterface = (*DatabaseSessionHandler)(nil)
 )
 
-// SetExists tells the handler whether the row is already there, which is what
-// decides between an insert and an update.
+// SetExists is DatabaseSessionHandler::setExists.
+//
+// It tells the handler whether the row is already there, which is what decides
+// between an insert and an update.
 func (h *DatabaseSessionHandler) SetExists(value bool) { h.exists = value }
 
-// Open does nothing. The connection was opened by whoever passed it in.
+// Open is DatabaseSessionHandler::open. The connection was opened by whoever
+// passed it in.
 func (h *DatabaseSessionHandler) Open(context.Context, string, string) error { return nil }
 
-// Close does nothing, and deliberately does not close the connection: it is
-// shared with the rest of the application.
+// Close is DatabaseSessionHandler::close. It does nothing, and deliberately
+// does not close the connection: it is shared with the rest of the application.
 func (h *DatabaseSessionHandler) Close(context.Context) error { return nil }
 
-// Read returns the payload, or "" when the row is missing or too old.
+// Read is DatabaseSessionHandler::read, with DatabaseSessionHandler::expired
+// folded into it.
 //
-// It records that the row exists even when the session has expired, because the
-// row is still there and the write that follows has to be an update.
+// It returns the payload, or "" when the row is missing or too old. It records
+// that the row exists even when the session has expired, because the row is
+// still there and the write that follows has to be an update.
+//
+// One departure from the PHP: a row whose payload is not valid base64 reads back
+// empty rather than as the garbage base64_decode returns for it.
+//
+// The row whose last_activity is exactly one lifetime old is live, which is what
+// `last_activity < now - lifetime` makes of it there. It used to be expired
+// here, the boundary [ArraySessionHandler.Read] names.
 func (h *DatabaseSessionHandler) Read(ctx context.Context, sessionID string) (string, error) {
 	var payload string
 	var lastActivity int64
@@ -521,7 +635,7 @@ func (h *DatabaseSessionHandler) Read(ctx context.Context, sessionID string) (st
 	}
 
 	h.exists = true
-	if time.Since(time.Unix(lastActivity, 0)) >= h.lifetime {
+	if sessionIsExpired(time.Since(time.Unix(lastActivity, 0)), h.lifetime) {
 		return "", nil
 	}
 	decoded, err := base64.StdEncoding.DecodeString(payload)
@@ -534,7 +648,12 @@ func (h *DatabaseSessionHandler) Read(ctx context.Context, sessionID string) (st
 	return string(decoded), nil
 }
 
-// Write inserts or updates the row.
+// Write is DatabaseSessionHandler::write, with performInsert and performUpdate
+// folded into it.
+//
+// It inserts or updates the row. The three columns the PHP fills out of the
+// container -- user_id, ip_address and user_agent -- are left null; see
+// [DatabaseSessionHandler].
 func (h *DatabaseSessionHandler) Write(ctx context.Context, sessionID, data string) error {
 	payload := base64.StdEncoding.EncodeToString([]byte(data))
 	now := time.Now().Unix()
@@ -571,7 +690,7 @@ func (h *DatabaseSessionHandler) Write(ctx context.Context, sessionID, data stri
 	return nil
 }
 
-// Destroy removes the row.
+// Destroy is DatabaseSessionHandler::destroy. It removes the row.
 func (h *DatabaseSessionHandler) Destroy(ctx context.Context, sessionID string) error {
 	if _, err := h.connection.ExecContext(ctx, `DELETE FROM `+h.table+` WHERE id = $1`, sessionID); err != nil {
 		return fmt.Errorf("session: deleting the session row: %w", err)
@@ -579,7 +698,9 @@ func (h *DatabaseSessionHandler) Destroy(ctx context.Context, sessionID string) 
 	return nil
 }
 
-// GC removes every row idle for longer than lifetime and reports how many went.
+// GC is DatabaseSessionHandler::gc.
+//
+// It removes every row idle for longer than lifetime and reports how many went.
 func (h *DatabaseSessionHandler) GC(ctx context.Context, lifetime time.Duration) (int, error) {
 	cutoff := time.Now().Add(-lifetime).Unix()
 	result, err := h.connection.ExecContext(ctx, `DELETE FROM `+h.table+` WHERE last_activity <= $1`, cutoff)

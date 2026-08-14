@@ -164,6 +164,10 @@ func (o *IO) SetOutput(out io.Writer) {
 	o.factory = nil
 }
 
+// Input has no Illuminate counterpart: InteractsWithIO::setInput has no getter
+// beside it, because $this->input is a protected property the command reads
+// directly.
+//
 // Input returns the command line bound to the signature, or nil when the
 // command declared none.
 func (o *IO) Input() *Input { return o.input }
@@ -173,15 +177,19 @@ func (o *IO) Input() *Input { return o.input }
 // It answers InteractsWithIO::setInput.
 func (o *IO) SetInput(in *Input) { o.input = in }
 
+// SetBase is what Mutators\EnsureRelativePaths::__invoke reads out of the
+// container: the application root a path is printed relative to.
+//
 // SetBase records the application root, which the components strip from a path
 // before printing it.
-//
-// It answers what Mutators\EnsureRelativePaths reads out of the container.
 func (o *IO) SetBase(base string) {
 	o.base = base
 	o.factory = nil
 }
 
+// Verbosity has no Illuminate counterpart: $verbosity is protected, and
+// InteractsWithIO::parseVerbosity is the only thing that reads it.
+//
 // Verbosity is the level the command is running at.
 func (o *IO) Verbosity() Verbosity { return o.verbosity }
 
@@ -190,24 +198,28 @@ func (o *IO) Verbosity() Verbosity { return o.verbosity }
 // It answers InteractsWithIO::setVerbosity.
 func (o *IO) SetVerbosity(level Verbosity) { o.verbosity = level }
 
-// SetVerbosityNamed sets the level from one of the words a command may write
-// instead of a constant: v, vv, vvv, quiet, normal.
+// SetVerbosityNamed is InteractsWithIO::setVerbosity given one of the words in
+// $verbosityMap: v, vv, vvv, quiet, normal.
 //
-// It answers the string half of setVerbosity's mixed argument, which
-// parseVerbosity resolves. An unknown word leaves the level alone, exactly as
+// It is the string half of setVerbosity's mixed argument, which
+// InteractsWithIO::parseVerbosity resolves. An unknown word leaves the level alone, exactly as
 // the PHP does: a typo in a log call must not silence the command.
 func (o *IO) SetVerbosityNamed(level string) { o.verbosity = ParseVerbosity(level, o.verbosity) }
 
-// IsQuiet reports whether the command was told to say nothing: -q.
+// IsQuiet is OutputStyle::isQuiet: whether the command was told to say nothing,
+// which is -q.
 func (o *IO) IsQuiet() bool { return o.verbosity == VerbosityQuiet }
 
-// IsVerbose reports whether the command was told to say more: -v.
+// IsVerbose is OutputStyle::isVerbose: whether the command was told to say more,
+// which is -v.
 func (o *IO) IsVerbose() bool { return o.verbosity >= VerbosityVerbose }
 
-// IsVeryVerbose reports whether the command was told to say much more: -vv.
+// IsVeryVerbose is OutputStyle::isVeryVerbose: whether the command was told to
+// say much more, which is -vv.
 func (o *IO) IsVeryVerbose() bool { return o.verbosity >= VerbosityVeryVerbose }
 
-// IsDebug reports whether the command was told to say everything: -vvv.
+// IsDebug is OutputStyle::isDebug: whether the command was told to say
+// everything, which is -vvv.
 func (o *IO) IsDebug() bool { return o.verbosity >= VerbosityDebug }
 
 // HasArgument reports whether the argument is declared in the signature.

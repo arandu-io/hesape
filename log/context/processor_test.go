@@ -1,8 +1,11 @@
 package context_test
 
 import (
+	"bytes"
 	stdcontext "context"
+	"encoding/json"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,6 +115,60 @@ func TestWithoutARepositoryTheRecordPassesThrough(t *testing.T) {
 	}
 	if got := next.fields(t); len(got) != 1 {
 		t.Fatalf("an empty repository added %v", got)
+	}
+}
+
+// TestADerivedLoggerDoesNotRepeatTheKey is the defect a person meets as a log
+// line no parser can read. A name spoken with .With lives on the handler and
+// never on the record, so walking the record found nothing and the repository's
+// entry was added beside it: logger.With("order_id", "B") under a repository
+// holding order_id C wrote {"order_id":"C","order_id":"B"}. The same collision
+// on the record itself resolved the other way, so the two spellings of "the
+// caller already said this" disagreed.
+func TestADerivedLoggerDoesNotRepeatTheKey(t *testing.T) {
+	var written bytes.Buffer
+	logger := slog.
+		New(logcontext.NewContextLogProcessor(slog.NewJSONHandler(&written, nil))).
+		With("order_id", "B")
+
+	ctx := logcontext.Into(stdcontext.Background(), newRepository().Add("order_id", "C"))
+	logger.InfoContext(ctx, "the message")
+
+	if got := strings.Count(written.String(), `"order_id"`); got != 1 {
+		t.Fatalf("the line names order_id %d times: %s", got, written.String())
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(written.Bytes(), &decoded); err != nil {
+		t.Fatalf("the line is not JSON: %v", err)
+	}
+	if decoded["order_id"] != "B" {
+		t.Fatalf("order_id = %v, want the value the caller derived the logger with", decoded["order_id"])
+	}
+}
+
+// TestAGroupIsANamespaceOfItsOwn: a name claimed before WithGroup is not the
+// name the group holds, so the repository's entry still reaches the group.
+func TestAGroupIsANamespaceOfItsOwn(t *testing.T) {
+	var written bytes.Buffer
+	logger := slog.
+		New(logcontext.NewContextLogProcessor(slog.NewJSONHandler(&written, nil))).
+		With("order_id", "B").
+		WithGroup("request")
+
+	ctx := logcontext.Into(stdcontext.Background(), newRepository().Add("order_id", "C"))
+	logger.InfoContext(ctx, "the message")
+
+	var decoded struct {
+		OrderID string `json:"order_id"`
+		Request struct {
+			OrderID string `json:"order_id"`
+		} `json:"request"`
+	}
+	if err := json.Unmarshal(written.Bytes(), &decoded); err != nil {
+		t.Fatalf("the line is not JSON: %v", err)
+	}
+	if decoded.OrderID != "B" || decoded.Request.OrderID != "C" {
+		t.Fatalf("got %q outside the group and %q inside it", decoded.OrderID, decoded.Request.OrderID)
 	}
 }
 

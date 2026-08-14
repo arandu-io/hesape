@@ -116,6 +116,11 @@
 // a no-op on a nil receiver -- zero cost, not "low cost", and there are
 // allocation tests that hold it to that.
 //
+// [DumpDie] is the one exception, and deliberately: the recording half does
+// nothing without a Collector, and the die half runs everywhere. A forgotten
+// dd() ends the request wherever it is called, exactly as PHP's does, because
+// the alternative is a 200 with the dump written into the middle of the page.
+//
 // The error page itself is not here: it renders a failure rather than recording
 // one, and it lives in the exception package.
 //

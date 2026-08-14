@@ -22,6 +22,10 @@ type BufferedConsoleOutput struct {
 	out    io.Writer
 }
 
+// NewBufferedConsoleOutput has no Illuminate counterpart: BufferedConsoleOutput
+// declares no constructor, because the ConsoleOutput it extends finds the
+// streams itself and there is nothing left to pass.
+//
 // NewBufferedConsoleOutput returns the output.
 //
 // out is where the bytes go on their way past, and nil means nowhere: that is

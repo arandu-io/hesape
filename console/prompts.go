@@ -27,9 +27,10 @@ func (QuestionHelper) WritePrompt(question, def string) string {
 	return fmt.Sprintf("%s [%s] ", question, def)
 }
 
-// ConfigurePrompts decides whether the command may ask anything.
+// ConfigurePrompts is Concerns\ConfiguresPrompts::configurePrompts, reduced to
+// the one decision it makes here: whether the command may ask anything.
 //
-// It answers Concerns\ConfiguresPrompts. The PHP installs fallbacks into
+// The PHP installs fallbacks into
 // laravel/prompts for the terminals it cannot draw on; the part that matters
 // here is the one decision it makes: a command run with --no-interaction, or
 // with nothing on its input, does not ask -- it takes the default and carries
@@ -43,7 +44,8 @@ func (o *IO) ConfigurePrompts() {
 	}
 }
 
-// Interactive reports whether the command may prompt.
+// Interactive is Symfony's InputInterface::isInteractive, which
+// ConfiguresPrompts::configurePrompts reads to decide whether a prompt may run.
 //
 // A command with no signature may: it was started from a terminal and nobody
 // said otherwise.

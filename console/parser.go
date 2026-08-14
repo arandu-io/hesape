@@ -65,10 +65,12 @@ type Argument struct {
 	Default []string
 }
 
-// IsRequired reports whether the command refuses to run without the argument.
+// IsRequired is Symfony's InputArgument::isRequired: whether the command refuses
+// to run without the argument.
 func (a Argument) IsRequired() bool { return a.Mode&ArgumentRequired != 0 }
 
-// IsArray reports whether the argument swallows every remaining operand.
+// IsArray is Symfony's InputArgument::isArray: whether the argument swallows
+// every remaining operand.
 func (a Argument) IsArray() bool { return a.Mode&ArgumentIsArray != 0 }
 
 // Option is one --flag of a command.
@@ -94,15 +96,18 @@ type Option struct {
 	Default []string
 }
 
-// AcceptValue reports whether the option takes a value at all.
+// AcceptValue is Symfony's InputOption::acceptValue: whether the option takes a
+// value at all.
 func (o Option) AcceptValue() bool {
 	return o.Mode&(OptionValueRequired|OptionValueOptional) != 0
 }
 
-// IsValueRequired reports whether --name must be followed by a value.
+// IsValueRequired is Symfony's InputOption::isValueRequired: whether --name must
+// be followed by a value.
 func (o Option) IsValueRequired() bool { return o.Mode&OptionValueRequired != 0 }
 
-// IsArray reports whether the flag may be repeated and collects every value.
+// IsArray is Symfony's InputOption::isArray: whether the flag may be repeated
+// and collects every value.
 func (o Option) IsArray() bool { return o.Mode&OptionValueIsArray != 0 }
 
 // tokenPattern finds every {...} in a signature. It is Parser.php's regex.
@@ -176,6 +181,10 @@ func Parse(expression string) (name string, arguments []Argument, options []Opti
 	return name, arguments, options, nil
 }
 
+// MustParse has no Illuminate counterpart: it is Parser::parse for a signature
+// written in source, where the InvalidArgumentException PHP throws has nobody to
+// catch it.
+//
 // MustParse is Parse for a signature written in source.
 //
 // It panics, which is right for a constant: a command whose signature does not

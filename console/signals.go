@@ -45,7 +45,10 @@ type Signals struct {
 	wg       sync.WaitGroup
 }
 
-// NewSignals returns an empty registrar.
+// NewSignals is Signals::__construct, over nothing: PHP is handed Symfony's
+// SignalRegistry and snapshots the handlers already on it, and here the previous
+// handlers stay where they are because Go delivers a signal to every channel
+// that asked for it.
 func NewSignals() *Signals { return &Signals{done: make(chan struct{})} }
 
 // Register installs a handler for one signal.

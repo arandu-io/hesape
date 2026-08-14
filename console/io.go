@@ -82,6 +82,9 @@ type IO struct {
 	colour bool
 }
 
+// NewIO is OutputStyle::__construct, over three streams and the command name
+// rather than an InputInterface and an OutputInterface.
+//
 // NewIO returns the terminal for one command.
 //
 // The registry builds one per run, and a test builds one directly: that is the
@@ -118,6 +121,9 @@ func NewIO(name string, args []string, out, errOut io.Writer, in io.Reader) *IO 
 	return o
 }
 
+// Flags has no Illuminate counterpart: it is Go's flag package, and the
+// Illuminate path is the signature Parser::parse reads.
+//
 // Flags returns the flag set of this command, created on first use.
 //
 // The command declares its options on it and parses the arguments:
@@ -138,6 +144,9 @@ func (o *IO) Flags() *flag.FlagSet {
 	return o.flags
 }
 
+// Args has no Illuminate counterpart: it is the unparsed tail of the command
+// line, where InteractsWithIO::arguments goes through a definition first.
+//
 // Args are the arguments that followed the command name.
 //
 // Before the flag set is parsed they are all of them; after, they are what is
@@ -149,6 +158,9 @@ func (o *IO) Args() []string {
 	return o.args
 }
 
+// Line is InteractsWithIO::line, with a format string where PHP takes a style
+// name and a verbosity.
+//
 // Line writes one line to the output, verbatim.
 //
 // It is the default, and it is what carries the answer the command was run
@@ -157,12 +169,18 @@ func (o *IO) Args() []string {
 // are the same bytes.
 func (o *IO) Line(format string, a ...any) { o.write(o.out, "", format, a...) }
 
-// Info writes a line that reports progress or a fact worth reading.
+// Info is InteractsWithIO::info: a line that reports progress or a fact worth
+// reading.
 func (o *IO) Info(format string, a ...any) { o.write(o.out, ansiGreen, format, a...) }
 
-// Comment writes an aside: the detail that helps but is not the answer.
+// Comment is InteractsWithIO::comment: an aside, the detail that helps but is
+// not the answer. PHP paints it with Symfony's yellow "comment" style and this
+// dims it.
 func (o *IO) Comment(format string, a ...any) { o.write(o.out, ansiDim, format, a...) }
 
+// Warn is InteractsWithIO::warn, on the error stream and prefixed: PHP writes it
+// to the output stream in yellow, with nothing in front of it.
+//
 // Warn writes to the error stream, prefixed, for something that is off but did
 // not stop the command.
 //
@@ -172,6 +190,9 @@ func (o *IO) Warn(format string, a ...any) {
 	o.write(o.err, ansiYellow, "warning: "+format, a...)
 }
 
+// Error is InteractsWithIO::error, on the error stream and prefixed: PHP writes
+// it to the output stream, in the "error" style and with nothing in front of it.
+//
 // Error writes to the error stream, prefixed, for what went wrong.
 //
 // Returning the error is still what ends the command: this only says it out
@@ -217,6 +238,10 @@ func (o *IO) paint(colour, text string) string {
 	return colour + text + ansiReset
 }
 
+// Table is InteractsWithIO::table, without the style arguments: PHP hands the
+// rows to Symfony's Table helper, which draws a border, and this lines the
+// columns up with spaces and draws none.
+//
 // Table writes rows under headers, in columns that line up.
 //
 // The columns are sized to the content, which is what makes the output usable
@@ -241,6 +266,9 @@ func (o *IO) Table(headers []string, rows [][]string) {
 	_ = w.Flush()
 }
 
+// TwoColumnDetail is TwoColumnDetail::render, at a fixed width: PHP counts the
+// dots from the terminal width, capped at 150.
+//
 // TwoColumnDetail writes a label on the left and its value on the right, joined
 // by dots.
 //
@@ -262,6 +290,9 @@ func (o *IO) detail(left, right, colour string) {
 	fmt.Fprintf(o.out, "%s %s %s\n", left, o.paint(ansiDim, strings.Repeat(".", dots)), o.paint(colour, right))
 }
 
+// Task is Task::render, minus the run time: PHP prints how long the work took
+// between the dots and the outcome, and this prints the outcome alone.
+//
 // Task runs fn and reports whether it worked, on one line.
 //
 // The line is written when fn returns, so the outcome is on the same line as
@@ -277,6 +308,10 @@ func (o *IO) Task(description string, fn func() error) error {
 	return nil
 }
 
+// Progress has no Illuminate counterpart: the bar is Symfony's ProgressBar,
+// which InteractsWithIO::withProgressBar creates and drives rather than hands
+// back.
+//
 // Progress starts a bar over total steps.
 //
 // On a terminal it redraws one line as the work advances. Everywhere else it
@@ -296,7 +331,7 @@ type Progress struct {
 	done    bool
 }
 
-// Advance moves the bar on by n steps. It never passes the total.
+// Advance is Symfony's ProgressBar::advance. It never passes the total.
 func (p *Progress) Advance(n int) {
 	if p == nil || p.done {
 		return
@@ -308,7 +343,7 @@ func (p *Progress) Advance(n int) {
 	p.render()
 }
 
-// Finish completes the bar and ends the line.
+// Finish is Symfony's ProgressBar::finish, and it ends the line.
 //
 // Calling it twice does nothing the second time, so a deferred Finish beside an
 // explicit one is not two bars.
@@ -354,6 +389,10 @@ func (p *Progress) bar() string {
 // cannot ask in a shape the rest of the output does not use.
 func (o *IO) Ask(question, def string) (string, error) { return o.AskQuestion(question, def) }
 
+// Secret is InteractsWithIO::secret without its $fallback: PHP falls back to
+// reading the value in the clear when the echo cannot be turned off, and this
+// returns an error instead.
+//
 // Secret asks for a value the terminal must not show: a password, a token.
 //
 // When the input is a terminal the echo is turned off for the duration and put
@@ -384,6 +423,9 @@ func (o *IO) Secret(question string) (string, error) {
 	return answer, err
 }
 
+// Confirm is InteractsWithIO::confirm, asked again rather than assumed: PHP's
+// ConfirmationQuestion reads anything that does not start with y as no.
+//
 // Confirm asks a yes or no question, and keeps asking until it gets one.
 //
 // An answer that is neither is a typo, not a no: acting on it would be acting
@@ -411,6 +453,9 @@ func (o *IO) Confirm(question string, def bool) (bool, error) {
 	}
 }
 
+// Choice is InteractsWithIO::choice without its $attempts and $multiple: one
+// option comes back, and a wrong answer is asked again however many times.
+//
 // Choice offers a numbered list and returns the option that was picked.
 //
 // It accepts the number or the option itself, because the number is what is

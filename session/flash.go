@@ -109,7 +109,12 @@ type Flash struct {
 	secure bool
 }
 
-// NewFlash returns a Flash over the application key.
+// NewFlash has no Illuminate counterpart: the PHP pair this stands in for --
+// RedirectResponse::withErrors and RedirectResponse::withInput -- is two
+// methods on the redirect, reaching the session through the container. There is
+// nothing to construct there, and the key has to arrive from somewhere here.
+//
+// It returns a Flash over the application key.
 //
 // The same key as the session, the CSRF token and the signed links, because
 // they are the same secret: an attacker who has it does not need four. Pass
@@ -119,8 +124,14 @@ func NewFlash(appKey []byte, secure bool) *Flash {
 	return &Flash{signer: encryption.NewSigner(appKey), secure: secure}
 }
 
-// Write puts the messages and what was typed in the browser, for the page the
-// rejected request is about to be redirected to.
+// Write is RedirectResponse::withErrors and RedirectResponse::withInput taken
+// together, on a signed cookie instead of the session.
+//
+// It puts the messages and what was typed in the browser, for the page the
+// rejected request is about to be redirected to. The PHP flashes both into the
+// session under 'errors' and '_old_input'; a request with no session -- sign
+// in, sign up, password reset -- gets nothing from that, which is why this is
+// a cookie.
 //
 // errs is map[string][]string rather than validation.Errors so that this package
 // keeps importing nothing above it. validation.Errors IS that type and assigns
@@ -158,10 +169,13 @@ func (f *Flash) Write(w http.ResponseWriter, errs map[string][]string, old url.V
 	})
 }
 
-// Take returns what Write stored and clears it, so it survives exactly one
+// Take is Store::getOldInput and the read of the 'errors' bag taken together,
+// with Store::ageFlashData replaced by a clear.
+//
+// It returns what Write stored and clears it, so it survives exactly one
 // request.
 //
-// Cleared on the read and not counted down like Laravel's ageFlashData, which
+// Cleared on the read and not counted down like Store::ageFlashData, which
 // keeps the data for the request that reads it AND ages it afterwards -- a
 // second-request window in which a reload shows the message again. A message
 // that outlives its redirect appears on a page nobody submitted, and the person

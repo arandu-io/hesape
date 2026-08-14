@@ -64,13 +64,23 @@
 //     hesape/scheduler is gone. Two schedulers is two ways to say the same
 //     thing (RULE 9).
 //
-// ContainerCommandLoader.php has no equivalent: it exists to resolve a command
-// class out of the container by name, and a Command here is a value that was
-// already built (ADR 0001). Its two public methods go with it -- get($name)
-// makes the container build the class registered under a name, and getNames()
-// lists the names it could build -- and so does
-// Application::setContainerCommandLoader(), which installs it. [Application.Add]
-// takes the built command, and [Application.All] is the list.
+// ContainerCommandLoader.php has no equivalent, and its two public methods go
+// with it -- reason 2 of ADR 0044, a method that only serves the container. The
+// class is Symfony's lazy command loader over Laravel's container: it holds a
+// map of name to class name so that a command is built only when it is asked
+// for. A Command here is a value that was already built (ADR 0001), so there is
+// nothing left to defer.
+//
+//   - ContainerCommandLoader::get makes the container build the class
+//     registered under a name. [Application.Find] returns the registered value,
+//     with false where PHP throws CommandNotFoundException.
+//   - ContainerCommandLoader::getNames lists the names it could build.
+//     [Application.Names] is that list without the hidden commands, which is
+//     what a person is offered, and [Application.All] is the commands
+//     themselves.
+//   - Application::setContainerCommandLoader installs the loader.
+//     [Application.Add] takes the built command instead.
+//
 // PromptValidationException.php has none either: it carries a laravel/prompts
 // validation failure, and the prompts on IO return an error.
 //

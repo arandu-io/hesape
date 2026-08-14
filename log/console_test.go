@@ -147,21 +147,90 @@ func TestTheOriginLinkOpensTheEditor(t *testing.T) {
 	}
 }
 
+// TestEveryEditorHasAScheme: the table knew four names and answered vscode://
+// for everything else, so a person who configured emacs, phpstorm, sublime or
+// idea got a link into an editor they do not have -- the configuration read,
+// echoed back, and ignored.
 func TestEveryEditorHasAScheme(t *testing.T) {
 	for editor, want := range map[string]string{
-		"vscode": "vscode://file",
-		"cursor": "cursor://file",
-		"goland": "jetbrains://goland/navigate",
-		"zed":    "zed://file",
-		"":       "vscode://file", // unset falls back rather than emitting nothing
+		"vscode":   "vscode://file",
+		"cursor":   "cursor://file",
+		"goland":   "jetbrains://goland/navigate",
+		"zed":      "zed://file",
+		"emacs":    "emacs://open",
+		"phpstorm": "phpstorm://open",
+		"sublime":  "subl://open",
+		"idea":     "idea://open",
+		"textmate": "txmt://open",
+		"xdebug":   "xdebug://",
 	} {
 		got := log.EditorLink(editor, "/src/app/main.go", 42)
 		if !strings.HasPrefix(got, want) {
 			t.Errorf("%s = %q, want the %s scheme", editor, got, want)
 		}
-		if !strings.HasSuffix(got, "42") {
+		if !strings.Contains(got, "42") {
 			t.Errorf("%s = %q, want it to carry the line number", editor, got)
 		}
+		if !strings.Contains(got, "/src/app/main.go") {
+			t.Errorf("%s = %q, want it to carry the file", editor, got)
+		}
+	}
+}
+
+// TestTheConsolePageDoesNotRenderAnEmptyHref is the other half of
+// TestNoEditorIsNoLink: an anchor with no href is a link back to the page it is
+// on, so clicking "open in editor" reloaded the debug console. With no editor
+// configured the origin renders as plain text.
+func TestTheConsolePageDoesNotRenderAnEmptyHref(t *testing.T) {
+	recorder := log.NewRecorder(10)
+	col := log.NewCollector("no-editor")
+	col.RecordQuery("SELECT 1", nil, time.Millisecond, 1, nil)
+	log.Dump(log.WithCollector(context.Background(), col), "value", 1)
+	recorder.Record(log.Recorded{
+		RequestID: "no-editor",
+		Method:    http.MethodGet,
+		Path:      "/customers",
+		Status:    200,
+		Duration:  time.Millisecond,
+		At:        time.Now(),
+		Collector: col,
+	})
+
+	body := get(t, log.NewConsole(recorder, ""), log.ConsolePath+"/no-editor").Body.String()
+	if strings.Contains(body, `href=""`) {
+		t.Errorf("the page carries an anchor with no href:\n%s", body)
+	}
+}
+
+// TestNoEditorIsNoLink: PHP returns nothing when app.editor is unset and the
+// frame renders without a link. Answering vscode:// there was a link that opens
+// nothing, and opens nothing in a way that reads as a broken debug page rather
+// than as an editor nobody configured.
+func TestNoEditorIsNoLink(t *testing.T) {
+	for _, editor := range []string{"", "notepad", "VSCode"} {
+		if got := log.EditorLink(editor, "/src/app/main.go", 42); got != "" {
+			t.Errorf("EditorLink(%q) = %q, want no link at all", editor, got)
+		}
+	}
+}
+
+// TestTheEditorLinkLeavesTheContainer: the frame was recorded inside the
+// container, at /app, and the editor is outside it. Without the rewrite the link
+// is built, rendered, clicked, and opens nothing.
+func TestTheEditorLinkLeavesTheContainer(t *testing.T) {
+	got := log.EditorLink("vscode", "/app/handler.go", 7, log.PathRewrite{
+		From: "/app",
+		To:   "/Users/ana/project",
+	})
+	if want := "vscode://file/Users/ana/project/handler.go:7"; got != want {
+		t.Errorf("EditorLink = %q, want %q", got, want)
+	}
+
+	// Only the root is translated, and only once: a path that repeats the root
+	// deeper down keeps it.
+	got = log.EditorLink("vscode", "/app/vendor/app/x.go", 1, log.PathRewrite{From: "/app", To: "/src"})
+	if want := "vscode://file/src/vendor/app/x.go:1"; got != want {
+		t.Errorf("EditorLink = %q, want %q", got, want)
 	}
 }
 

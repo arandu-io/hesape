@@ -48,5 +48,6 @@ type Description struct {
 	Description string
 }
 
-// Apply writes the description onto a command.
+// Apply is what Command::configureFromAttributes does with the Description
+// attribute it found: it writes the description onto a command.
 func (d Description) Apply(c *console.Command) { c.Description = d.Description }

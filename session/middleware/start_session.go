@@ -15,7 +15,10 @@ import (
 // nothing outside this package can collide with it.
 type storeKey struct{}
 
-// WithSession puts a session on a context.
+// WithSession is Request::setLaravelSession.
+//
+// It puts a session on a context, because Go's request has no field to hang one
+// on.
 //
 // It is what [StartSession] does before calling the handler, and what a test
 // does to run a handler without the middleware in front of it.
@@ -23,12 +26,12 @@ func WithSession(ctx context.Context, s *session.Store) context.Context {
 	return context.WithValue(ctx, storeKey{}, s)
 }
 
-// Session returns the session [StartSession] put on the request, and false when
-// there is none.
+// Session is Request::session, with Request::hasSession folded into the second
+// result.
 //
-// It stands in for Illuminate's $request->session(): Go's request has no
-// methods to hang one on, so the session travels on the context and this is the
-// one way back out of it.
+// It returns the session [StartSession] put on the request, and false when there
+// is none. The session travels on the context, because Go's request has no
+// methods to hang one on, and this is the one way back out of it.
 //
 // The false case is not hypothetical and must not be ignored: a route mounted
 // without this middleware, a request answered by the error handler before it
@@ -74,7 +77,11 @@ type StartSession struct {
 	locks   LockFactory
 }
 
-// NewStartSession returns the middleware.
+// NewStartSession is StartSession::__construct.
+//
+// The PHP's second argument is a resolver that fetches the cache factory out of
+// the container; this takes the [LockFactory] itself, because there is no
+// container to fetch one from (ADR 0001).
 //
 // locks may be nil. When it is and the configuration asks for blocking,
 // [StartSession.Handle] refuses the request rather than serving it unlocked:
@@ -85,11 +92,18 @@ func NewStartSession(manager *session.SessionManager, locks LockFactory) *StartS
 	return &StartSession{manager: manager, locks: locks}
 }
 
-// Handle is the middleware.
+// Handle is StartSession::handle, with StartSession::handleRequestWhileBlocking
+// and StartSession::handleStatefulRequest behind it.
 //
 // It returns pipeline.Middleware[http.Handler], which is what httpx.Middleware
 // is an alias of -- so this composes with everything else without this package
 // importing the HTTP layer.
+//
+// Two things the PHP reads off the route and this does not: Route::locksFor and
+// Route::waitsFor. Blocking is configuration-wide here, so a route that asked
+// for a longer hold in Laravel gets the configured one. And a request the PHP
+// would have refused to block -- one with no route bound -- is blocked here,
+// because the lock is named from the session id and needs nothing else.
 func (m *StartSession) Handle(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !m.sessionConfigured() {
@@ -152,12 +166,11 @@ func (m *StartSession) handleStatefulRequest(w http.ResponseWriter, r *http.Requ
 	finish.run()
 }
 
-// GetSession returns the session for this request, with the id the browser
-// sent on it.
+// GetSession is StartSession::getSession.
 //
-// It is Illuminate's getSession(), and it is exported for the same reason: a
-// test and a handler outside the pipeline need the same session the middleware
-// would have built.
+// It returns the session for this request, with the id the browser sent on it,
+// and it is exported for the reason the PHP's is public: a test and a handler
+// outside the pipeline need the same session the middleware would have built.
 func (m *StartSession) GetSession(r *http.Request) (*session.Store, error) {
 	store, err := m.manager.Driver("")
 	if err != nil {
@@ -224,6 +237,13 @@ func (f *finisher) run() {
 // Only a GET that is a whole page: a POST is not somewhere to return to, and
 // neither is the stylesheet or the HTMX fragment that the page fires on
 // arrival. Remembering one of those is a sign-in that lands on a fragment.
+//
+// What is stored is the whole address, which is $request->fullUrl() in the PHP.
+// It used to be r.URL.RequestURI() -- path and query and nothing else -- so a
+// redirect built from it lost the scheme and the host. On one host that reads
+// the same; across two, or behind a redirect the browser resolves against
+// whatever it is currently on, it is a sign-in that lands somewhere else, and
+// http:// is what a scheme-less address downgrades to.
 func (m *StartSession) storeCurrentURL(r *http.Request, store *session.Store) {
 	if r.Method != http.MethodGet {
 		return
@@ -234,7 +254,27 @@ func (m *StartSession) storeCurrentURL(r *http.Request, store *session.Store) {
 	if !strings.Contains(r.Header.Get("Accept"), "text/html") {
 		return
 	}
-	store.SetPreviousURL(r.URL.RequestURI())
+	store.SetPreviousURL(fullURL(r))
+}
+
+// fullURL is Request::fullUrl: scheme, host, path and query.
+//
+// The scheme is read off the connection and never off X-Forwarded-Proto. A
+// header a client sets is a value a client controls, and this one ends up in a
+// redirect the browser follows after a sign-in -- so trusting it hands whoever
+// sends the request the choice of where the session lands. A deployment behind a
+// terminating proxy sets the scheme where the proxy is trusted, which is not
+// here.
+func fullURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	host := r.Host
+	if host == "" {
+		host = r.URL.Host
+	}
+	return scheme + "://" + host + r.URL.RequestURI()
 }
 
 // addCookieToResponse writes the cookie carrying the session id.

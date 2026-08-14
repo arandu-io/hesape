@@ -51,7 +51,8 @@ type CacheCommandMutex struct {
 	held map[string]*cache.Lock
 }
 
-// NewCacheCommandMutex returns the mutex over an issuer.
+// NewCacheCommandMutex is CacheCommandMutex::__construct, over a lock issuer
+// rather than the cache factory.
 func NewCacheCommandMutex(locks *cache.Locks) *CacheCommandMutex {
 	return &CacheCommandMutex{locks: locks, ttl: DefaultIsolationTTL, held: map[string]*cache.Lock{}}
 }
@@ -65,10 +66,10 @@ func (m *CacheCommandMutex) UseStore(locks *cache.Locks) *CacheCommandMutex {
 	return m
 }
 
-// ExpiresAfter sets how long a lock this mutex takes lives.
+// ExpiresAfter is the isolationLockExpiresAt hook that CacheCommandMutex::create
+// looks for on the command by method_exists, set once on the mutex instead.
 //
-// It answers the isolationLockExpiresAt hook, which PHP looks for on the
-// command by method_exists.
+// It sets how long a lock this mutex takes lives.
 func (m *CacheCommandMutex) ExpiresAfter(ttl time.Duration) *CacheCommandMutex {
 	if ttl > 0 {
 		m.ttl = ttl
@@ -76,6 +77,9 @@ func (m *CacheCommandMutex) ExpiresAfter(ttl time.Duration) *CacheCommandMutex {
 	return m
 }
 
+// Create is CacheCommandMutex::create, minus the branch for a store that issues
+// no locks: there is one lock issuer here, so there is no add() fallback.
+//
 // Create takes the mutex for the command.
 //
 // A lock another process holds is false and no error: that is the mutex working.
@@ -97,7 +101,8 @@ func (m *CacheCommandMutex) Create(ctx context.Context, command Command) (bool, 
 	return true, nil
 }
 
-// Exists reports whether the mutex is held.
+// Exists is CacheCommandMutex::exists, and it answers true for the lock this
+// process took rather than going to the store for it.
 //
 // It takes the lock to find out and gives it straight back, which is what the
 // PHP does with its tap over $lock->get().
@@ -124,6 +129,9 @@ func (m *CacheCommandMutex) Exists(ctx context.Context, command Command) (bool, 
 	return false, nil
 }
 
+// Forget is CacheCommandMutex::forget, owned rather than forced: the PHP calls
+// forceRelease, which deletes the lock whoever took it.
+//
 // Forget releases the mutex this process took.
 //
 // A mutex this process does not hold is left alone and reported as not

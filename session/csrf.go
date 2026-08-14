@@ -28,12 +28,19 @@ type CSRF struct {
 	ttl time.Duration
 }
 
-// NewCSRF returns a token issuer keyed by the application key.
+// NewCSRF has no Illuminate counterpart: Laravel has no token issuer object at
+// all -- the token is a random string [Store.RegenerateToken] puts in the
+// session, and PreventRequestForgery compares it. This is what has to exist
+// once the token carries its own expiry instead of living in a store.
 func NewCSRF(appKey []byte, ttl time.Duration) *CSRF {
 	return &CSRF{key: appKey, ttl: ttl}
 }
 
-// Issue generates a token for a session.
+// Issue is Store::regenerateToken and Store::token taken together: the PHP
+// mints forty random characters into the session and reads them back, and this
+// mints a signed one that carries its own expiry, so there is nothing to store.
+//
+// It generates a token for a session.
 //
 // An empty session id is accepted, and is not an oversight: the forms that need
 // the protection most -- sign in, sign up, password reset -- are submitted by
@@ -48,7 +55,12 @@ func (c *CSRF) Issue(sessionID string) (string, error) {
 	return payload + "." + c.sign(sessionID, payload), nil
 }
 
-// Validate checks signature, expiry and the binding to the session.
+// Validate is PreventRequestForgery::tokensMatch, which VerifyCsrfToken is the
+// deprecated name of.
+//
+// It checks signature, expiry and the binding to the session. The PHP compares
+// the submitted token with the one in the session; there is no session copy
+// here, so the three facts are checked against the signature instead.
 func (c *CSRF) Validate(sessionID, token string) error {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {

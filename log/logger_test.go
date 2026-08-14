@@ -160,10 +160,9 @@ func TestParseLevelKnowsTheEightNames(t *testing.T) {
 	for name, want := range map[string]slog.Level{
 		"debug":     log.LevelDebug,
 		"info":      log.LevelInfo,
-		"NOTICE":    log.LevelNotice,
+		"notice":    log.LevelNotice,
 		"warning":   log.LevelWarning,
-		"warn":      log.LevelWarning,
-		" Error ":   log.LevelError,
+		"error":     log.LevelError,
 		"critical":  log.LevelCritical,
 		"alert":     log.LevelAlert,
 		"emergency": log.LevelEmergency,
@@ -179,15 +178,32 @@ func TestParseLevelKnowsTheEightNames(t *testing.T) {
 	}
 }
 
+// TestTheEightNamesAreTheOnlyEight: it lowercased and trimmed first and took
+// "warn" as a fifth name for warning, so "WARNING", " info " and "warn" all
+// parsed where PHP's isset($levels[$level]) misses every one of them. Two
+// spellings of one level is two spellings of one configuration value, and
+// LOG_LEVEL=warn named a level the handler never prints under that name.
+func TestTheEightNamesAreTheOnlyEight(t *testing.T) {
+	for _, name := range []string{"warn", "WARNING", " info ", "Debug", "INFO", ""} {
+		if _, err := log.ParseLevel(name); err == nil {
+			t.Errorf("ParseLevel(%q) was accepted, and PHP throws for it", name)
+		}
+	}
+}
+
 // TestAnUnknownLevelIsAnError: a typo in LOG_LEVEL that quietly restores the
 // default is how a production process ends up logging more than it was told to.
+//
+// The level beside the error is debug, which is what LogManager falls back to
+// for a configuration with no level in it: it used to be info, and two different
+// defaults for the same case is one of them being wrong.
 func TestAnUnknownLevelIsAnError(t *testing.T) {
 	got, err := log.ParseLevel("verbose")
 	if err == nil {
 		t.Fatal("ParseLevel accepted a name outside the eight")
 	}
-	if got != log.LevelInfo {
-		t.Errorf("level = %v, want info as the safe value alongside the error", got)
+	if got != log.LevelDebug {
+		t.Errorf("level = %v, want debug -- the same fallback LogManager uses", got)
 	}
 	if !strings.Contains(err.Error(), "verbose") || !strings.Contains(err.Error(), "emergency") {
 		t.Errorf("error = %q, want it to name the input and the accepted set", err)

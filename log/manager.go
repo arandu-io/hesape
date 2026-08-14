@@ -143,7 +143,7 @@ func (m *LogManager) Build(config ChannelConfig) (*Logger, error) {
 	return m.getLocked(onDemandChannel, &config)
 }
 
-// onDemandChannel is the slot Illuminate::build unsets and then resolves into.
+// onDemandChannel is the slot LogManager::build unsets and then resolves into.
 const onDemandChannel = "ondemand"
 
 // Stack answers Illuminate\Log\LogManager::stack: a new aggregate logger over

@@ -18,6 +18,9 @@ type Value struct {
 	flag    bool
 }
 
+// String has no Illuminate counterpart: it is the string case of the mixed that
+// InteractsWithIO::argument returns.
+//
 // String is the value as one string. An array value is its first element, and a
 // value that was never given is empty.
 func (v Value) String() string {
@@ -27,9 +30,15 @@ func (v Value) String() string {
 	return v.values[0]
 }
 
+// Slice has no Illuminate counterpart: it is the array case of the same mixed,
+// which InteractsWithIO::option returns for a repeated flag.
+//
 // Slice is every value that was given, in order.
 func (v Value) Slice() []string { return append([]string(nil), v.values...) }
 
+// Bool has no Illuminate counterpart: it is the bool case of the mixed that
+// InteractsWithIO::option returns, made a decision rather than a truthiness test.
+//
 // Bool is whether a flag was given.
 //
 // A flag that takes no value is true when it is present. One that takes a value
@@ -46,6 +55,9 @@ func (v Value) Bool() bool {
 	return true
 }
 
+// Int has no Illuminate counterpart: PHP juggles the string where it is used,
+// and InteractsWithIO::option hands back whatever was typed.
+//
 // Int is the value as a number.
 func (v Value) Int() (int, error) {
 	n, err := strconv.Atoi(strings.TrimSpace(v.String()))
@@ -55,6 +67,10 @@ func (v Value) Int() (int, error) {
 	return n, nil
 }
 
+// Present has no Illuminate counterpart:
+// PromptsForMissingInput::promptForMissingArguments asks whether the value is
+// empty instead, which cannot tell a default apart from an answer.
+//
 // Present reports whether the value was given on the command line, as opposed
 // to standing in from a default.
 func (v Value) Present() bool { return v.present }
@@ -77,6 +93,9 @@ type Input struct {
 	interactive bool
 }
 
+// NewInput is Symfony's Input::__construct over the definition Parser::parse
+// returned.
+//
 // NewInput returns the input for a definition, before anything is parsed.
 //
 // Every declared argument and option starts on its default, so a command that
@@ -102,18 +121,25 @@ func NewInput(arguments []Argument, options []Option) *Input {
 	return in
 }
 
+// Definition is Symfony's InputDefinition::getArguments and
+// InputDefinition::getOptions at once, returning what Parser::parse produced.
+//
 // Definition returns the arguments and options the input was built from, so the
 // help can render them without a second copy of the signature.
 func (in *Input) Definition() ([]Argument, []Option) { return in.arguments, in.options }
 
-// Interactive reports whether the command may prompt.
+// Interactive is Symfony's InputInterface::isInteractive: whether the command
+// may prompt.
 func (in *Input) Interactive() bool { return in.interactive }
 
+// SetInteractive is Symfony's InputInterface::setInteractive.
+//
 // SetInteractive turns prompting on or off, which is what --no-interaction does
 // and what a command calling another passes on.
 func (in *Input) SetInteractive(interactive bool) { in.interactive = interactive }
 
-// Parse binds one command line to the definition.
+// Parse is Symfony's ArgvInput::parse, the token loop that binds a command line
+// to the definition.
 //
 // argv is what followed the command name. Everything after a bare "--" is an
 // operand, however many dashes it starts with, which is how a value that looks
@@ -288,7 +314,8 @@ func (in *Input) HasArgument(name string) bool {
 	return found
 }
 
-// Argument returns one argument.
+// Argument is Symfony's InputInterface::getArgument, which
+// InteractsWithIO::argument delegates to.
 func (in *Input) Argument(name string) Value {
 	if v, found := in.argumentValues[name]; found {
 		return *v
@@ -296,7 +323,8 @@ func (in *Input) Argument(name string) Value {
 	return Value{}
 }
 
-// Arguments returns every argument, keyed by name.
+// Arguments is Symfony's InputInterface::getArguments: every argument, keyed by
+// name.
 func (in *Input) Arguments() map[string]Value {
 	out := make(map[string]Value, len(in.argumentValues))
 	for name, v := range in.argumentValues {
@@ -305,13 +333,15 @@ func (in *Input) Arguments() map[string]Value {
 	return out
 }
 
-// HasOption reports whether the option is declared in the command signature.
+// HasOption is Symfony's InputInterface::hasOption: whether the option is
+// declared in the command signature.
 func (in *Input) HasOption(name string) bool {
 	_, found := in.optionValues[name]
 	return found
 }
 
-// Option returns one option.
+// Option is Symfony's InputInterface::getOption, which InteractsWithIO::option
+// delegates to.
 func (in *Input) Option(name string) Value {
 	if v, found := in.optionValues[name]; found {
 		return *v
@@ -319,7 +349,7 @@ func (in *Input) Option(name string) Value {
 	return Value{}
 }
 
-// Options returns every option, keyed by name.
+// Options is Symfony's InputInterface::getOptions: every option, keyed by name.
 func (in *Input) Options() map[string]Value {
 	out := make(map[string]Value, len(in.optionValues))
 	for name, v := range in.optionValues {

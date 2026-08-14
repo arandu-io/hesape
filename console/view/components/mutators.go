@@ -15,18 +15,20 @@ type Mutator func(string) string
 // dynamicContent is the [something] a message highlights.
 var dynamicContent = regexp.MustCompile(`\[([^\]]+)\]`)
 
-// EnsureDynamicContentIsHighlighted emboldens every [bracketed] run.
+// EnsureDynamicContentIsHighlighted is
+// EnsureDynamicContentIsHighlighted::__invoke: it emboldens every [bracketed] run.
 //
-// It answers Mutators\EnsureDynamicContentIsHighlighted. The escape sequence is
+// The escape sequence is
 // written here rather than a markup tag, because there is no formatter between
 // this and the terminal.
 func EnsureDynamicContentIsHighlighted(s string) string {
 	return dynamicContent.ReplaceAllString(s, ansiBold+"[$1]"+ansiReset)
 }
 
-// EnsureNoPunctuation drops a trailing . ? ! or : .
+// EnsureNoPunctuation is EnsureNoPunctuation::__invoke: it drops a trailing . ? !
+// or : .
 //
-// It answers Mutators\EnsureNoPunctuation, and it is what keeps a task
+// It is what keeps a task
 // description from reading "migrating the database. ....... DONE".
 func EnsureNoPunctuation(s string) string {
 	if endsWithPunctuation(s) {
@@ -35,10 +37,11 @@ func EnsureNoPunctuation(s string) string {
 	return s
 }
 
-// EnsurePunctuation adds a full stop when there is none.
+// EnsurePunctuation is EnsurePunctuation::__invoke: it adds a full stop when
+// there is none.
 //
-// It answers Mutators\EnsurePunctuation: a line component is a sentence, and a
-// sentence ends.
+// A line component is a sentence, and a sentence ends. The empty string is where
+// the two part: PHP returns "." for it, this returns "".
 func EnsurePunctuation(s string) string {
 	if s == "" || endsWithPunctuation(s) {
 		return s
@@ -46,9 +49,10 @@ func EnsurePunctuation(s string) string {
 	return s + "."
 }
 
-// EnsureRelativePaths strips the application root from every path in the text.
+// EnsureRelativePaths is EnsureRelativePaths::__invoke, curried over the root: it
+// strips the application root from every path in the text.
 //
-// It answers Mutators\EnsureRelativePaths. PHP reads the root from the
+// PHP reads the root from the
 // container; here it is given, because a component that reaches for a global to
 // shorten a path is a component no test can pin. Base is set by the Factory.
 func EnsureRelativePaths(base string) Mutator {

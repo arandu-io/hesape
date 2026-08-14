@@ -24,7 +24,6 @@ func TestNilCollectorIsSafe(t *testing.T) {
 	col.RecordEvent("something", nil)
 	col.RecordExternal("GET", "https://example.test", 200, time.Millisecond)
 	log.Dump(ctx, "label", 42)
-	log.DumpDie(ctx, "label", 42) // must not panic without a Collector
 
 	if got := col.SlowQueries(time.Millisecond); got != nil {
 		t.Fatalf("SlowQueries on a nil Collector = %v, want nil", got)
@@ -129,6 +128,26 @@ func TestDumpDiePanicsWithTheRecognizedSentinel(t *testing.T) {
 	}()
 
 	log.DumpDie(ctx, "last thing I saw", "value")
+}
+
+// TestDumpDieAbortsWithoutACollector is the half that used to be missing. A
+// forgotten dd() ends the request in Laravel whatever the environment is; here
+// the nil Collector made DumpDie return, so the handler carried on, the response
+// went out with a 200, and the dump landed in the middle of it. Recover already
+// knows what to do with the sentinel outside development -- it logs it and
+// answers the error page -- and it never got the chance.
+func TestDumpDieAbortsWithoutACollector(t *testing.T) {
+	defer func() {
+		v := recover()
+		if v == nil {
+			t.Fatal("DumpDie returned without a Collector: the request would answer 200 with the dump inside it")
+		}
+		if !log.IsDumpDie(v) {
+			t.Fatalf("panic value = %v, which Recover would treat as a real 500", v)
+		}
+	}()
+
+	log.DumpDie(context.Background(), "label", 42)
 }
 
 func TestIsDumpDieRejectsOtherPanics(t *testing.T) {

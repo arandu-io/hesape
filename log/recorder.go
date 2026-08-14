@@ -48,6 +48,10 @@ type Recorder struct {
 	count int
 }
 
+// NewRecorder has no Illuminate counterpart: it is what keeps finished requests
+// for the debug page here, and PHP-FPM gives a request its own process, so
+// nothing there survives the response to be kept.
+//
 // NewRecorder returns a ring buffer of the given size. A size of zero or less
 // uses DefaultRecorderSize.
 func NewRecorder(size int) *Recorder {
@@ -57,6 +61,9 @@ func NewRecorder(size int) *Recorder {
 	return &Recorder{entries: make([]Recorded, size)}
 }
 
+// Record has no Illuminate counterpart, for the same reason NewRecorder has
+// none. Telescope stores the equivalent, and it stores it in a database.
+//
 // Record stores a finished request, discarding the oldest when full.
 func (r *Recorder) Record(e Recorded) {
 	if r == nil {
@@ -72,6 +79,8 @@ func (r *Recorder) Record(e Recorded) {
 	}
 }
 
+// Recent has no Illuminate counterpart, for the same reason Record has none.
+//
 // Recent returns the stored requests, newest first. A limit of zero or less
 // returns all of them.
 func (r *Recorder) Recent(limit int) []Recorded {
@@ -93,6 +102,8 @@ func (r *Recorder) Recent(limit int) []Recorded {
 	return out
 }
 
+// Find has no Illuminate counterpart, for the same reason Record has none.
+//
 // Find returns one request by id.
 //
 // This is what `aru trace` resolves: you have a request id from a log line or
@@ -113,6 +124,8 @@ func (r *Recorder) Find(requestID string) (Recorded, bool) {
 	return Recorded{}, false
 }
 
+// Len has no Illuminate counterpart, for the same reason Record has none.
+//
 // Len is how many requests are stored.
 func (r *Recorder) Len() int {
 	if r == nil {
@@ -139,6 +152,9 @@ type Timeline struct {
 	Other time.Duration
 }
 
+// Percent has no Illuminate counterpart, for the same reason Timeline itself has
+// none.
+//
 // Percent returns d as a percentage of the total, rounded down. Zero total
 // gives zero rather than a division by zero on a request that finished in under
 // a microsecond.
@@ -149,6 +165,9 @@ func (t Timeline) Percent(d time.Duration) int {
 	return int(d * 100 / t.Total)
 }
 
+// Timeline has no Illuminate counterpart: the error page there lists queries and
+// never says what share of the request they were.
+//
 // Timeline breaks the request duration down by where it was spent.
 func (c *Collector) Timeline(total time.Duration) Timeline {
 	if c == nil {
@@ -180,6 +199,9 @@ func (c *Collector) Timeline(total time.Duration) Timeline {
 	return t
 }
 
+// StatusClass has no Illuminate counterpart: it is a presentation detail of the
+// console, and the console is not Illuminate's.
+//
 // StatusClass groups a status code for the console, so the list can be scanned
 // without reading every number.
 func (e Recorded) StatusClass() string {

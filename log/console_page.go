@@ -126,7 +126,7 @@ var consoleDetail = template.Must(template.New("detail").Parse(`<!doctype html>
     <td class="muted">{{.Args}}</td>
     <td class="num">{{.Rows}}</td>
     <td class="num">{{.Duration}}</td>
-    <td><a href="{{.Link}}">{{.Origin}}</a></td>
+    <td>{{if .Link}}<a href="{{.Link}}">{{.Origin}}</a>{{else}}{{.Origin}}{{end}}</td>
     <td>
       {{if .Slow}}<span class="tag warn">slow</span> {{end}}
       {{if .Repeated}}<span class="tag bad">&times;{{.Repeated}}</span>{{end}}
@@ -139,7 +139,7 @@ var consoleDetail = template.Must(template.New("detail").Parse(`<!doctype html>
 {{if .Dumps}}
 <h2>Dumps ({{len .Dumps}})</h2>
 {{range .Dumps}}
-<p class="muted">{{.Label}} &middot; {{.At}} &middot; <a href="{{.Link}}">{{.Origin}}</a></p>
+<p class="muted">{{.Label}} &middot; {{.At}} &middot; {{if .Link}}<a href="{{.Link}}">{{.Origin}}</a>{{else}}{{.Origin}}{{end}}</p>
 <pre>{{.Value}}</pre>
 {{end}}
 {{end}}

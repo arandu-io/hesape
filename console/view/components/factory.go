@@ -41,7 +41,7 @@ type Factory struct {
 	base   string
 }
 
-// NewFactory returns the factory for one output.
+// NewFactory is Factory::__construct: it returns the factory for one output.
 //
 // base is the application root that EnsureRelativePaths strips from a path, and
 // empty means paths are printed as they came.
@@ -49,76 +49,90 @@ func NewFactory(output Output, base string) *Factory {
 	return &Factory{output: output, base: base}
 }
 
-// Output returns the stream the components render into.
+// Output has no Illuminate counterpart: Factory::$output is protected and PHP
+// declares no accessor for it. It returns the stream the components render into.
 func (f *Factory) Output() Output { return f.output }
 
-// Alert renders a message in a box, in capitals.
+// Alert is Factory::__call dispatching to Alert::render: it renders a message in
+// a box, in capitals.
 func (f *Factory) Alert(message string, verbosity ...Verbosity) {
 	NewAlert(f.output, f.base).Render(message, verbosity...)
 }
 
-// BulletList renders one line per element.
+// BulletList is Factory::__call dispatching to BulletList::render: it renders one
+// line per element.
 func (f *Factory) BulletList(elements []string, verbosity ...Verbosity) {
 	NewBulletList(f.output, f.base).Render(elements, verbosity...)
 }
 
-// Line renders a labelled sentence in one of the four styles: info, success,
-// warn, error.
+// Line is Factory::__call dispatching to Line::render: it renders a labelled
+// sentence in one of the four styles: info, success, warn, error.
 func (f *Factory) Line(style, message string, verbosity ...Verbosity) {
 	NewLineComponent(f.output, f.base).Render(style, message, verbosity...)
 }
 
-// Info renders an informational line.
+// Info is Factory::__call dispatching to Info::render: it renders an
+// informational line.
 func (f *Factory) Info(message string, verbosity ...Verbosity) {
 	NewInfo(f.output, f.base).Render(message, verbosity...)
 }
 
-// Success renders a line that reports something worked.
+// Success is Factory::__call dispatching to Success::render: it renders a line
+// that reports something worked.
 func (f *Factory) Success(message string, verbosity ...Verbosity) {
 	NewSuccess(f.output, f.base).Render(message, verbosity...)
 }
 
-// Warn renders a line about something that is off but did not stop the command.
+// Warn is Factory::__call dispatching to Warn::render: it renders a line about
+// something that is off but did not stop the command.
 func (f *Factory) Warn(message string, verbosity ...Verbosity) {
 	NewWarn(f.output, f.base).Render(message, verbosity...)
 }
 
-// Error renders a line about what went wrong.
+// Error is Factory::__call dispatching to Error::render: it renders a line about
+// what went wrong.
 func (f *Factory) Error(message string, verbosity ...Verbosity) {
 	NewError(f.output, f.base).Render(message, verbosity...)
 }
 
-// TwoColumnDetail renders a label and its value, joined by dots.
+// TwoColumnDetail is Factory::__call dispatching to TwoColumnDetail::render: it
+// renders a label and its value, joined by dots.
 func (f *Factory) TwoColumnDetail(first, second string, verbosity ...Verbosity) {
 	NewTwoColumnDetail(f.output, f.base).Render(first, second, verbosity...)
 }
 
-// Task runs the work and reports how it went, on one line.
+// Task is Factory::__call dispatching to Task::render: it runs the work and
+// reports how it went, on one line.
 func (f *Factory) Task(description string, task TaskFunc, verbosity ...Verbosity) error {
 	return NewTask(f.output, f.base).Render(description, task, verbosity...)
 }
 
-// Ask puts a question and returns the answer.
+// Ask is Factory::__call dispatching to Ask::render: it puts a question and
+// returns the answer.
 func (f *Factory) Ask(question, def string) (string, error) {
 	return NewAsk(f.output, f.base).Render(question, def)
 }
 
-// AskWithCompletion is Ask with a list the terminal completes from.
+// AskWithCompletion is Factory::__call dispatching to AskWithCompletion::render:
+// it is Ask with a list the terminal completes from.
 func (f *Factory) AskWithCompletion(question string, choices []string, def string) (string, error) {
 	return NewAskWithCompletion(f.output, f.base).Render(question, choices, def)
 }
 
-// Secret asks for a value the terminal must not show.
+// Secret is Factory::__call dispatching to Secret::render: it asks for a value
+// the terminal must not show.
 func (f *Factory) Secret(question string) (string, error) {
 	return NewSecret(f.output, f.base).Render(question)
 }
 
-// Confirm asks a yes or no question.
+// Confirm is Factory::__call dispatching to Confirm::render: it asks a yes or no
+// question.
 func (f *Factory) Confirm(question string, def bool) (bool, error) {
 	return NewConfirm(f.output, f.base).Render(question, def)
 }
 
-// Choice offers a numbered list and returns the option that was picked.
+// Choice is Factory::__call dispatching to Choice::render: it offers a numbered
+// list and returns the option that was picked.
 func (f *Factory) Choice(question string, choices []string, def string) (string, error) {
 	return NewChoice(f.output, f.base).Render(question, choices, def)
 }

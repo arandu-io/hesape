@@ -40,6 +40,10 @@ type Console struct {
 	nPlusOne int
 }
 
+// NewConsole has no Illuminate counterpart: the request inspector is Telescope,
+// which is a package a project installs, and this is core (see the package
+// comment for why).
+//
 // NewConsole returns the console over a recorder.
 func NewConsole(r *Recorder, editor string) *Console {
 	return &Console{
@@ -50,6 +54,10 @@ func NewConsole(r *Recorder, editor string) *Console {
 	}
 }
 
+// Handler has no Illuminate counterpart, for the same reason NewConsole has
+// none: what it serves is Telescope's two screens, and Telescope is not
+// Illuminate.
+//
 // Handler serves the list and the detail.
 //
 // One handler for both, because the router matches the prefix and the id under

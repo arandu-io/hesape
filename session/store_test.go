@@ -2,11 +2,14 @@ package session_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1024,5 +1027,165 @@ func TestTheFileDriverIsBuiltFromConfiguration(t *testing.T) {
 	}
 	if !filesystem.NewFilesystem().IsDirectory(dir) {
 		t.Fatal("the session directory was not made")
+	}
+}
+
+// TestOnlyTakesTopLevelKeys: Store::only is Arr::only, which is
+// array_intersect_key over the top level and reaches into nothing. This read
+// each key in dot notation, so Only(["user.name"]) returned a key the PHP has no
+// way of returning and the two disagreed on what a whitelist is. Except stays in
+// dot notation, because Arr::except is Arr::forget and that one does walk.
+func TestOnlyTakesTopLevelKeys(t *testing.T) {
+	s := startedStore(t, session.NewArraySessionHandler(time.Hour))
+	s.Put("user", map[string]any{"name": "Ana", "email": "ana@example.test"})
+
+	if got := s.Only([]string{"user.name"}); len(got) != 0 {
+		t.Errorf("Only reached inside a nested map: %v", got)
+	}
+	got := s.Only([]string{"user"})
+	if len(got) != 1 {
+		t.Fatalf("Only([\"user\"]) = %v, want the whole map under one key", got)
+	}
+
+	// Except is the other half, and it does walk.
+	if except := s.Except([]string{"user.name"}); except["user"].(map[string]any)["name"] != nil {
+		t.Errorf("Except stopped walking: %v", except)
+	}
+}
+
+// TestIncrementCountsANumberWrittenAsText: PHP's + coerces first, so a key
+// holding the string "5" counts as five and increment returns 6. This read it as
+// zero and returned 1, which silently restarts a counter that has been through
+// anything that stringifies -- a form value, a header, an older release.
+func TestIncrementCountsANumberWrittenAsText(t *testing.T) {
+	s := startedStore(t, session.NewArraySessionHandler(time.Hour))
+
+	s.Put("views", "5")
+	if got := s.Increment("views", 1); got != 6 {
+		t.Errorf(`Increment over "5" = %d, want 6`, got)
+	}
+	s.Put("ratio", "5.7")
+	if got := s.Increment("ratio", 1); got != 6 {
+		t.Errorf(`Increment over "5.7" = %d, want 6`, got)
+	}
+	// Text that is not a number is still zero: PHP warns and takes 0, and an
+	// error on a path whose whole purpose is not to have one is worse.
+	s.Put("name", "Ana")
+	if got := s.Increment("name", 1); got != 1 {
+		t.Errorf(`Increment over "Ana" = %d, want 1`, got)
+	}
+}
+
+// TestPushKeepsWhatWasAlreadyThere: PHP raises an Error for `$array[] =` over a
+// scalar, so nothing is lost there. This started a fresh list and dropped the
+// value that was in the key -- silent data loss, on the one call whose name says
+// it only adds.
+func TestPushKeepsWhatWasAlreadyThere(t *testing.T) {
+	s := startedStore(t, session.NewArraySessionHandler(time.Hour))
+
+	s.Put("cart", "apple")
+	s.Push("cart", "pear")
+
+	cart, ok := s.Get("cart").([]any)
+	if !ok || len(cart) != 2 {
+		t.Fatalf("cart = %v, want both values", s.Get("cart"))
+	}
+	if cart[0] != "apple" || cart[1] != "pear" {
+		t.Errorf("cart = %v, want the old value first", cart)
+	}
+}
+
+// TestTheFileHandlerCollectsTheWayTheFinderDoes: PHP builds the sweep with
+// Finder::create()->in($path)->files()->ignoreDotFiles(true), which walks
+// subdirectories and skips dot files. This did the opposite of both: it read one
+// level and deleted anything it found, so a storage directory holding a
+// .gitignore -- which is how the directory survives a clone at all -- lost it on
+// the first sweep.
+func TestTheFileHandlerCollectsTheWayTheFinderDoes(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "sessions")
+	handler, err := session.NewFileSessionHandler(nil, dir, time.Hour)
+	if err != nil {
+		t.Fatalf("file handler: %v", err)
+	}
+	ctx := context.Background()
+
+	if err := handler.Write(ctx, strings.Repeat("h", 40), "payload"); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("*\n"), 0o600); err != nil {
+		t.Fatalf("gitignore: %v", err)
+	}
+	nested := filepath.Join(dir, "shard")
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, strings.Repeat("i", 40)), []byte("payload"), 0o600); err != nil {
+		t.Fatalf("nested session: %v", err)
+	}
+
+	deleted, err := handler.GC(ctx, time.Nanosecond)
+	if err != nil {
+		t.Fatalf("gc: %v", err)
+	}
+	if deleted != 2 {
+		t.Errorf("collected %d sessions, want the two under the directory", deleted)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".gitignore")); err != nil {
+		t.Errorf("the sweep deleted the dot file the Finder skips: %v", err)
+	}
+}
+
+// TestTheCookieHandlerWritesTheJSONLaravelWrites: the wire shape was base64 of
+// the JSON, so a cookie written by a Laravel application read back here as an
+// empty session and a cookie written here read back empty there -- an
+// interoperability break that only shows in production, on the day somebody puts
+// the two behind one domain. json_encode is what the PHP queues, and
+// rawurlencode is what Symfony's Cookie does to it on the way out; net/http
+// sanitises instead of encoding, so the encoding is done here.
+func TestTheCookieHandlerWritesTheJSONLaravelWrites(t *testing.T) {
+	jar := &fakeJar{}
+	handler := session.NewCookieSessionHandler(jar, time.Hour, false)
+	ctx := context.Background()
+	id := strings.Repeat("j", 40)
+
+	if err := handler.Write(ctx, id, `{"subject":"1"}`); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	decoded, err := url.QueryUnescape(jar.queued[id])
+	if err != nil {
+		t.Fatalf("the cookie is not percent-encoded: %v", err)
+	}
+	var payload struct {
+		Data    string `json:"data"`
+		Expires int64  `json:"expires"`
+	}
+	if err := json.Unmarshal([]byte(decoded), &payload); err != nil {
+		t.Fatalf("the cookie does not hold the JSON Laravel writes: %v (%q)", err, decoded)
+	}
+	if payload.Data != `{"subject":"1"}` || payload.Expires == 0 {
+		t.Fatalf("payload = %+v", payload)
+	}
+}
+
+// TestTheCookieHandlerReadsWhatLaravelWrote is the other direction, and it is
+// the one that matters: the cookie below was produced by PHP, and it used to
+// read back as an empty session.
+func TestTheCookieHandlerReadsWhatLaravelWrote(t *testing.T) {
+	handler := session.NewCookieSessionHandler(&fakeJar{}, time.Hour, false)
+	id := strings.Repeat("k", 40)
+
+	laravel := `{"data":"a:1:{s:7:\"subject\";s:1:\"1\";}","expires":` +
+		strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10) + `}`
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.AddCookie(&http.Cookie{Name: id, Value: url.QueryEscape(laravel)})
+	handler.SetRequest(r)
+
+	got, err := handler.Read(context.Background(), id)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if got != `a:1:{s:7:"subject";s:1:"1";}` {
+		t.Fatalf("got %q, want the payload the PHP wrote", got)
 	}
 }
