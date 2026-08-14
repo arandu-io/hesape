@@ -26,12 +26,19 @@ var ErrNoRecipient = errors.New("mail: no recipient")
 // to import a transport it does not name.
 type ErrRetryable struct{ err error }
 
+// Error has no PHP counterpart: the retryable half of a delivery failure is
+// Symfony's TransportException hierarchy, which NotificationSender catches by
+// class rather than by a marker on the error.
 func (e ErrRetryable) Error() string { return e.err.Error() }
+
+// Unwrap has no PHP counterpart, for the reason [ErrRetryable.Error] gives.
 func (e ErrRetryable) Unwrap() error { return e.err }
 
 // Retryable marks err as worth trying again, and is how a transport outside
 // this package builds an [ErrRetryable]. It returns nil for a nil error, so it
 // can wrap a result without a check around it.
+//
+// Retryable has no PHP counterpart, for the reason ErrRetryable.Error gives.
 func Retryable(err error) error {
 	if err == nil {
 		return nil

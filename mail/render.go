@@ -35,6 +35,8 @@ import (
 // the body in multipart/related, and two body parts are multipart/alternative
 // inside that. The order matters: a client that finds the inline image outside
 // the related part shows it as a second attachment instead of in the message.
+//
+// Render is Mailable::render.
 func Render(m Message) string {
 	var b strings.Builder
 

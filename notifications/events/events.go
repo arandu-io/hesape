@@ -1,22 +1,3 @@
-// Package events names the three things that can happen to a notification on
-// its way out, and builds the hesape/events value that records each of them.
-//
-// It mirrors Illuminate\Notifications\Events. The files it answers to, in the
-// clone at laravel_illuminate/notifications/Events:
-//
-//	NotificationSending.php            -> Sending, NewSending
-//	NotificationSent.php               -> Sent, NewSent
-//	NotificationFailed.php             -> Failed, NewFailed
-//	BroadcastNotificationCreated.php   -> BroadcastNotificationCreated
-//
-// In Laravel these are classes a listener type-hints. Here they are event
-// names on the outbox, because that is the one way an application learns that
-// something happened (hesape/events) -- a second listener registry next to it
-// is the second way RULE 9 refuses.
-//
-// The constructors take strings rather than the notifications types so that
-// hesape/notifications can import this package to emit them. The payload is
-// what a consumer needs and nothing that would drag a row along.
 package events
 
 import (
@@ -25,7 +6,9 @@ import (
 	"github.com/arandu-io/hesape/events"
 )
 
-// The event names. They are the vocabulary a listener subscribes to.
+// The event names. They are the vocabulary a listener subscribes to, and they
+// are what NotificationSending, NotificationSent and NotificationFailed are as
+// classes in PHP.
 const (
 	// Sending is recorded before a channel is asked to deliver.
 	Sending = "notification.sending"
@@ -36,10 +19,17 @@ const (
 	Failed = "notification.failed"
 )
 
-// Aggregate is what these events happen to, for the outbox.
+// Aggregate is what these events happen to, for the outbox. It has no PHP
+// counterpart: there an event is a class and the dispatcher matches on its
+// name.
 const Aggregate = "notification"
 
 // Payload is what a consumer of the three events receives.
+//
+// It is the four public properties NotificationSending, NotificationSent and
+// NotificationFailed each declare -- $notifiable, $notification, $channel and
+// $response -- with the notifiable spelled out as its two columns and the
+// notification as its Key.
 //
 // It carries names and ids, never the notification value itself: the body of a
 // notification is somebody's password reset link, and an outbox row is read by
@@ -62,16 +52,16 @@ type Payload struct {
 	Error string `json:"error,omitempty"`
 }
 
-// NewSending returns the event recorded before a channel is asked to deliver.
+// NewSending is NotificationSending::__construct.
 func NewSending(p Payload) events.Event { return newEvent(Sending, p) }
 
-// NewSent returns the event recorded after a successful delivery.
+// NewSent is NotificationSent::__construct. The receipt is its $response.
 func NewSent(p Payload, receipt string) events.Event {
 	p.Receipt = receipt
 	return newEvent(Sent, p)
 }
 
-// NewFailed returns the event recorded when a channel refused or broke.
+// NewFailed is NotificationFailed::__construct. The cause is its $data.
 //
 // The cause is flattened to its message: an outbox row is JSON, and an error
 // value is not.

@@ -296,3 +296,148 @@ func TestCursorNameMovesTheQueryParameter(t *testing.T) {
 		t.Errorf("NextPageURL = %q, want the cursor under the name that was set", got)
 	}
 }
+
+func TestCursorPaginatorCarriesTheQueryStringOntoItsURLs(t *testing.T) {
+	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey,
+		pagination.Options{Path: "/posts"})
+
+	// appends() drops the cursor parameter, because the paginator writes that
+	// one itself -- the `if ($key !== $this->cursorName)` in addQuery().
+	p.Appends(map[string]string{"sort": "newest", "cursor": "hijacked"}).
+		Appends("tag", "go").
+		Fragment("results")
+
+	next := p.NextPageURL()
+	for _, want := range []string{"sort=newest", "tag=go", "cursor=", "#results"} {
+		if !strings.Contains(next, want) {
+			t.Fatalf("next page URL %q is missing %q", next, want)
+		}
+	}
+	if strings.Contains(next, "hijacked") {
+		t.Fatalf("next page URL %q carries the appended cursor, and the paginator owns that parameter", next)
+	}
+}
+
+func TestCursorPaginatorWithQueryStringDropsTheCursor(t *testing.T) {
+	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey,
+		pagination.Options{Path: "/posts"})
+
+	p.WithQueryString(map[string][]string{
+		"sort":   {"newest"},
+		"cursor": {"hijacked"},
+	})
+
+	next := p.NextPageURL()
+	if !strings.Contains(next, "sort=newest") {
+		t.Fatalf("next page URL %q lost the request's query string", next)
+	}
+	if strings.Contains(next, "hijacked") {
+		t.Fatalf("next page URL %q carries the request's cursor, which is the one being replaced", next)
+	}
+}
+
+func TestCursorPaginatorPathIsFluent(t *testing.T) {
+	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, pagination.Options{})
+
+	if got := p.WithPath("/archive").Path(); got != "/archive" {
+		t.Fatalf("Path = %q after WithPath", got)
+	}
+	if got := p.SetPath("/posts").Path(); got != "/posts" {
+		t.Fatalf("Path = %q after SetPath", got)
+	}
+	if !strings.HasPrefix(p.NextPageURL(), "/posts") {
+		t.Fatalf("next page URL %q does not use the path that was set", p.NextPageURL())
+	}
+	if got := p.GetOptions().Path; got != "/posts" {
+		t.Fatalf("GetOptions().Path = %q", got)
+	}
+}
+
+func TestCursorPaginatorCollectionAccessors(t *testing.T) {
+	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, pagination.Options{Path: "/posts"})
+
+	if p.IsEmpty() || !p.IsNotEmpty() {
+		t.Fatal("a page of ten rows reports itself empty")
+	}
+	if got := len(p.GetCollection()); got != 10 {
+		t.Fatalf("GetCollection has %d rows, want 10", got)
+	}
+
+	seen := 0
+	for i, item := range p.GetIterator() {
+		if item.ID != i+1 {
+			t.Fatalf("row %d is %d", i, item.ID)
+		}
+		seen++
+	}
+	if seen != 10 {
+		t.Fatalf("the iterator yielded %d rows, want 10", seen)
+	}
+
+	// setCollection replaces the rows and leaves the cursors alone: they were
+	// computed from the rows the database returned.
+	next := p.NextCursor().Encode()
+	p.SetCollection(ascending(100, 2))
+	if got := ids(p.Items()); !slices.Equal(got, []int{100, 101}) {
+		t.Fatalf("Items = %v after SetCollection", got)
+	}
+	if p.NextCursor().Encode() != next {
+		t.Fatal("SetCollection moved the next cursor")
+	}
+
+	empty := pagination.CursorPaginate([]post(nil), 10, nil, postKey, pagination.Options{})
+	if !empty.IsEmpty() || empty.IsNotEmpty() {
+		t.Fatal("a page of no rows does not report itself empty")
+	}
+}
+
+func TestCursorPaginatorToArrayCarriesBothCursors(t *testing.T) {
+	first := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey,
+		pagination.Options{Path: "/posts"})
+
+	got := first.ToArray()
+	// The keys are Illuminate's, and prev_cursor is null on the first page --
+	// PHP's `$this->previousCursor()?->encode()`.
+	if got["prev_cursor"] != nil {
+		t.Fatalf("prev_cursor = %v on the first page", got["prev_cursor"])
+	}
+	if got["prev_page_url"] != nil {
+		t.Fatalf("prev_page_url = %v on the first page", got["prev_page_url"])
+	}
+	if got["next_cursor"] != first.NextCursor().Encode() {
+		t.Fatalf("next_cursor = %v", got["next_cursor"])
+	}
+	if got["per_page"] != 10 {
+		t.Fatalf("per_page = %v", got["per_page"])
+	}
+	if got["path"] != "/posts" {
+		t.Fatalf("path = %v", got["path"])
+	}
+
+	body, err := first.ToJSON()
+	if err != nil {
+		t.Fatalf("ToJSON: %v", err)
+	}
+	for _, want := range []string{`"next_cursor"`, `"prev_cursor":null`, `"data"`} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("the JSON payload %s is missing %q", body, want)
+		}
+	}
+
+	pretty, err := first.ToPrettyJSON()
+	if err != nil {
+		t.Fatalf("ToPrettyJSON: %v", err)
+	}
+	if !strings.Contains(string(pretty), "\n    ") {
+		t.Fatalf("ToPrettyJSON is not indented four spaces: %s", pretty)
+	}
+
+	// MarshalJSON is jsonSerialize: the paginator itself is encodable.
+	direct, err := first.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	if string(direct) != string(body) {
+		t.Fatalf("MarshalJSON and ToJSON disagree:\n%s\n%s", direct, body)
+	}
+}

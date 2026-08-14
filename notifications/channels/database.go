@@ -10,12 +10,17 @@ import (
 )
 
 // DatabaseNotification is what a notification implements to be stored.
+//
+// It is the toDatabase()/toArray() DatabaseChannel::getData looks for by name
+// on the notification. Only toDatabase is here: two names for one payload is
+// the second way RULE 9 refuses, and toArray is the one PHP falls back to.
 type DatabaseNotification interface {
 	// ToDatabase is the payload the bell menu renders from.
 	ToDatabase(to notifications.Notifiable) messages.Database
 }
 
-// Database stores a notification as a row.
+// Database stores a notification as a row. It is
+// Illuminate\Notifications\Channels\DatabaseChannel.
 //
 // It is the channel behind the bell menu: the copy that is still there when the
 // e-mail was filtered, and the one the recipient can mark as read.
@@ -24,14 +29,19 @@ type Database struct {
 }
 
 // NewDatabase returns the database channel over a Store.
+//
+// It has no PHP counterpart: DatabaseChannel has no constructor and reaches the
+// notifiable's relation directly.
 func NewDatabase(s notifications.Store) *Database { return &Database{store: s} }
 
 var _ notifications.Channel = (*Database)(nil)
 
-// Name is "database".
+// Name is "database". It has no PHP counterpart, for the reason
+// [Mail.Name] gives.
 func (*Database) Name() notifications.ChannelName { return notifications.ChannelDatabase }
 
-// Send writes the row and answers with its id.
+// Send is DatabaseChannel::send, and the payload it writes is
+// DatabaseChannel::buildPayload.
 //
 // The Grant goes straight through to the Store, which is where the tenant is
 // read off it. Nothing here decides who may be notified; that decision is the

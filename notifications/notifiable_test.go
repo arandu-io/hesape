@@ -296,6 +296,49 @@ func TestAnonymousHasNoKey(t *testing.T) {
 	}
 }
 
+// TestRoutesAddressesEveryChannelInTheMap covers Notification::routes: one
+// anonymous recipient, one route() per entry, and nothing else.
+func TestRoutesAddressesEveryChannelInTheMap(t *testing.T) {
+	t.Parallel()
+
+	to := notifications.Routes(map[notifications.ChannelName]string{
+		notifications.ChannelMail:      "ada@example.com",
+		notifications.ChannelBroadcast: "invoices.42",
+	})
+
+	if got := to.RouteFor(notifications.ChannelMail); got != "ada@example.com" {
+		t.Errorf("the mail address is %q, want ada@example.com", got)
+	}
+	if got := to.RouteFor(notifications.ChannelBroadcast); got != "invoices.42" {
+		t.Errorf("the broadcast route is %q, want invoices.42", got)
+	}
+	if got := to.Channels(); len(got) != 2 {
+		t.Errorf("channels = %v, want both of them", got)
+	}
+	// It is Route for more than one channel, so what it builds answers the same
+	// way: an anonymous recipient with no row and no key behind it.
+	if to.NotifiableType() != "anonymous" || to.GetKey() != "" {
+		t.Errorf("type = %q, key = %q, want anonymous and empty", to.NotifiableType(), to.GetKey())
+	}
+	// A channel that was never routed answers empty rather than guessing.
+	if got := to.RouteFor(notifications.ChannelDatabase); got != "" {
+		t.Errorf("an unrouted channel answered %q", got)
+	}
+}
+
+// TestRoutesOfNothingIsAddressedNowhere: PHP's empty array makes a notifiable
+// with an empty $routes, and so does a nil map.
+func TestRoutesOfNothingIsAddressedNowhere(t *testing.T) {
+	t.Parallel()
+
+	if got := notifications.Routes(nil).Channels(); len(got) != 0 {
+		t.Errorf("channels = %v, want none", got)
+	}
+	if got := notifications.Routes(map[notifications.ChannelName]string{}).RouteFor(notifications.ChannelMail); got != "" {
+		t.Errorf("RouteFor = %q, want empty", got)
+	}
+}
+
 func TestSendQueuedNotificationsSendsToEveryRecipient(t *testing.T) {
 	t.Parallel()
 

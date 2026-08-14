@@ -37,7 +37,7 @@ type BroadcastNotificationCreated struct {
 	Type string
 }
 
-// BroadcastOn is the channels the notification should be pushed on.
+// BroadcastOn is BroadcastNotificationCreated::broadcastOn.
 //
 // Illuminate wraps each one in a PrivateChannel; there is no channel type here
 // yet -- hesape/broadcasting is a later layer -- so what travels is the name,
@@ -53,7 +53,11 @@ func (b BroadcastNotificationCreated) BroadcastOn() []string {
 	return nil
 }
 
-// ChannelName is the recipient's own channel: the type and the key, dotted.
+// ChannelName is BroadcastNotificationCreated::channelName: the recipient's own
+// channel, the type and the key dotted.
+//
+// It is protected there and exported here, because a channel derived from a
+// notifiable is the one thing a caller has to be able to check.
 //
 // Illuminate builds it from the class name with the backslashes turned into
 // dots, plus the model's key. Here the type is already a name that was chosen
@@ -65,7 +69,7 @@ func (b BroadcastNotificationCreated) ChannelName() string {
 	return b.NotifiableType + "." + b.NotifiableID
 }
 
-// BroadcastWith is the payload the client receives.
+// BroadcastWith is BroadcastNotificationCreated::broadcastWith.
 //
 // It is the notification's own data with the id and the type added, which is
 // what Illuminate merges in: a client that receives two notifications in one
@@ -91,7 +95,7 @@ func (b BroadcastNotificationCreated) BroadcastWith() (json.RawMessage, error) {
 	return raw, nil
 }
 
-// BroadcastType is what the payload calls the notification.
+// BroadcastType is BroadcastNotificationCreated::broadcastType.
 //
 // Illuminate answers with the class name. Here it is the Key, which is the name
 // that was chosen to be stable -- a class name changes when somebody moves a
@@ -103,7 +107,7 @@ func (b BroadcastNotificationCreated) BroadcastType() string {
 	return b.Key
 }
 
-// BroadcastAs is the event name the client listens for.
+// BroadcastAs is BroadcastNotificationCreated::broadcastAs.
 //
 // Empty falls back to the notification's Key, which is what a client subscribes
 // to when it cares about one kind, and to "notification" when there is not even

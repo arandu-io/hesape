@@ -36,7 +36,7 @@ type NotificationBase struct {
 
 // Locale sets the language this notification is sent in, and returns a copy.
 //
-// It beats the recipient's own preference, which is Illuminate's order: a
+// It is Notification::locale. It beats the recipient's own preference, which is Illuminate's order: a
 // notification that has been told which language to use has been told for a
 // reason, usually because it is about something the sender chose the words for.
 func (n NotificationBase) Locale(locale string) NotificationBase {
@@ -46,7 +46,8 @@ func (n NotificationBase) Locale(locale string) NotificationBase {
 
 // NotificationID is the id of this delivery.
 //
-// Illuminate reads `$notification->id` as a property; a property read in Go is
+// It is the read of Notification::$id, which the SerializesModels trait fills
+// and NotificationSender::sendToNotifiable sets. Illuminate reads `$notification->id` as a property; a property read in Go is
 // a method, and this is it. It is what ties the copy pushed to a browser to the
 // copy stored in the bell menu.
 func (n NotificationBase) NotificationID() string { return n.ID }
@@ -62,11 +63,14 @@ type Identified interface {
 // PreferredLocale is the language the notification asked for, or the empty
 // string when it asked for none.
 //
+// It is the read of Notification::$locale, which
+// NotificationSender::preferredLocale does inline.
+//
 // It satisfies Localized, which is the one question the Notifier asks about a
 // language whether it is asking a notification or a recipient.
 func (n NotificationBase) PreferredLocale() string { return n.LocaleName }
 
-// BroadcastOn is the channels the notification should broadcast on.
+// BroadcastOn is Notification::broadcastOn.
 //
 // Empty is the default and means "the recipient's own private channel", which
 // the broadcast channel derives from the notifiable. A notification that must
@@ -107,7 +111,9 @@ type RoutesNotifications struct {
 }
 
 // RouteFor is the address on a channel, or the empty string when the recipient
-// cannot be reached there. It is what satisfies Notifiable.
+// cannot be reached there. It is what satisfies Notifiable, and it is
+// RouteNotificationFor under that interface's spelling --
+// RoutesNotifications::routeNotificationFor is the only name PHP has.
 //
 // Illuminate looks for a `routeNotificationForMail` method by string and falls
 // back to the model's `email` attribute. Here it is a map, because a route
@@ -115,11 +121,13 @@ type RoutesNotifications struct {
 // renames a method.
 func (r RoutesNotifications) RouteFor(c ChannelName) string { return r.Routes[c] }
 
-// RouteNotificationFor is RouteFor under Illuminate's spelling, so that a model
-// ported from PHP keeps compiling.
+// RouteNotificationFor is RoutesNotifications::routeNotificationFor.
+//
+// It is RouteFor under Illuminate's spelling, so that a model ported from PHP
+// keeps compiling.
 func (r RoutesNotifications) RouteNotificationFor(c ChannelName) string { return r.RouteFor(c) }
 
-// Notify sends a notification to the given recipient.
+// Notify is RoutesNotifications::notify.
 //
 // The recipient is an argument rather than the receiver because the receiver is
 // the embedded struct and not the model that embeds it: Go has no `$this` that
@@ -132,8 +140,8 @@ func (r RoutesNotifications) Notify(ctx context.Context, g auth.Grant, to Notifi
 	return r.Notifier.Send(ctx, g, to, n)
 }
 
-// NotifyNow sends a notification immediately, optionally over the given
-// channels rather than the ones the notification names.
+// NotifyNow is RoutesNotifications::notifyNow: send immediately, optionally
+// over the given channels rather than the ones the notification names.
 //
 // In Illuminate the two differ because `notify` queues a notification that
 // implements ShouldQueue. Nothing here queues on its own -- sending on the
@@ -157,7 +165,12 @@ type HasDatabaseNotifications struct {
 	Store Store
 }
 
-// Notifications is the recipient's notifications, newest first.
+// Notifications is HasDatabaseNotifications::notifications, the recipient's
+// notifications newest first.
+//
+// PHP returns a morphMany relation and the caller decides how much of it to
+// pull; here the page size is an argument, because a relation nobody limited is
+// the query that pages in four years of rows.
 func (h HasDatabaseNotifications) Notifications(ctx context.Context, g auth.Grant, to Notifiable, limit int) (Records, error) {
 	if h.Store == nil {
 		return nil, errors.New("notifications: this recipient has no store to read from")
@@ -165,7 +178,7 @@ func (h HasDatabaseNotifications) Notifications(ctx context.Context, g auth.Gran
 	return h.Store.For(ctx, g, to, limit)
 }
 
-// UnreadNotifications is the ones they have not read.
+// UnreadNotifications is HasDatabaseNotifications::unreadNotifications.
 func (h HasDatabaseNotifications) UnreadNotifications(ctx context.Context, g auth.Grant, to Notifiable, limit int) (Records, error) {
 	if h.Store == nil {
 		return nil, errors.New("notifications: this recipient has no store to read from")
@@ -173,7 +186,7 @@ func (h HasDatabaseNotifications) UnreadNotifications(ctx context.Context, g aut
 	return h.Store.Unread(ctx, g, to, limit)
 }
 
-// ReadNotifications is the ones they have read.
+// ReadNotifications is HasDatabaseNotifications::readNotifications.
 //
 // Illuminate has a `read` query scope for it; there is no scope here because
 // there is no query builder, so the filter runs over what Notifications

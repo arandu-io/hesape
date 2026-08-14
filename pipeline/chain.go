@@ -4,6 +4,9 @@ import "context"
 
 // Middleware wraps a handler and returns a handler of the same type.
 //
+// It is a type and not a method, so no PHP method answers to it: the shape it
+// names is the element of the $pipes array Pipeline::through takes, curried.
+//
 // H is whatever the caller already handles with: http.Handler for a request, a
 // job handler for queued work. Nothing is invented for a particular H, which is
 // what keeps middleware written elsewhere in the Go ecosystem compatible.
@@ -13,7 +16,7 @@ type Middleware[H any] func(H) H
 // so the order of the list is the order of execution. With no middleware it
 // returns h.
 //
-// It is Pipeline::carry() with the passable curried into the handler: the same
+// It is Pipeline::carry with the passable curried into the handler: the same
 // onion, built once instead of on every call, for stacks whose answer is not
 // the value they were given. [Pipeline] is the other shape, and the package
 // comment says which is which.
@@ -26,6 +29,9 @@ func Chain[H any](h H, mws ...Middleware[H]) H {
 
 // Identity returns h unchanged.
 //
+// It has no PHP counterpart: there a stage that does nothing is written
+// `fn ($passable, $next) => $next($passable)` at each call site.
+//
 // It is the Middleware[H] to hand back when there is nothing to wrap. A feature
 // that is switched off still has to produce a value where one is being
 // collected into a slice, and the alternative -- a nil middleware that Chain
@@ -33,6 +39,9 @@ func Chain[H any](h H, mws ...Middleware[H]) H {
 func Identity[H any](h H) H { return h }
 
 // Handler ends a pipeline whose passable is a value rather than a request.
+//
+// It is a type and not a method, so no PHP method answers to it: the shape it
+// names is the $destination Pipeline::then takes, curried.
 //
 // The context is first because it always is, and the error is returned rather
 // than handled here: what a failure means belongs to the caller that built the

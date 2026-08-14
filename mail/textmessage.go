@@ -17,6 +17,8 @@ type TextMessage struct {
 }
 
 // NewTextMessage wraps a message for the plain-text pass.
+//
+// NewTextMessage is TextMessage::__construct.
 func NewTextMessage(m *Message) *TextMessage { return &TextMessage{Message: m} }
 
 // Embed answers the empty string: there is nothing to embed in plain text.

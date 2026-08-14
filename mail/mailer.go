@@ -52,19 +52,27 @@ func New(name string, views Renderer, transport Transport, events Dispatcher) *M
 }
 
 // Name is which mailer this is, as configured.
+//
+// Name reads Mailer::$name, a public property PHP declares no getter for.
 func (m *Mailer) Name() string { return m.name }
 
 // AlwaysFrom sets the sender every message goes out with unless it names one.
+//
+// AlwaysFrom is Mailer::alwaysFrom.
 func (m *Mailer) AlwaysFrom(address string, name ...string) {
 	m.from = NewAddress(address, name...)
 }
 
 // AlwaysReplyTo sets the reply-to every message goes out with.
+//
+// AlwaysReplyTo is Mailer::alwaysReplyTo.
 func (m *Mailer) AlwaysReplyTo(address string, name ...string) {
 	m.replyTo = NewAddress(address, name...)
 }
 
 // AlwaysReturnPath sets the bounce address every message goes out with.
+//
+// AlwaysReturnPath is Mailer::alwaysReturnPath.
 func (m *Mailer) AlwaysReturnPath(address string) { m.returnPath = address }
 
 // AlwaysTo redirects every message to one address, dropping cc and bcc.
@@ -72,6 +80,8 @@ func (m *Mailer) AlwaysReturnPath(address string) { m.returnPath = address }
 // It is what a development or staging environment sets so that a test run
 // cannot reach a customer. The addresses it replaced are recorded in X-To, X-Cc
 // and X-Bcc headers, so the message that arrives still says who it was for.
+//
+// AlwaysTo is Mailer::alwaysTo.
 func (m *Mailer) AlwaysTo(address string, name ...string) {
 	m.to = NewAddress(address, name...)
 }
@@ -82,32 +92,44 @@ func (m *Mailer) AlwaysTo(address string, name ...string) {
 //
 // It returns a pending message rather than sending, so cc and bcc chain in the
 // order they are read.
+//
+// To is Mailer::to.
 func (m *Mailer) To(users any, name ...string) *PendingMail {
 	return (&PendingMail{mailer: m}).To(users, name...)
 }
 
 // CC begins a message with a carbon copy recipient. Illuminate spells it cc.
+//
+// CC is Mailer::cc.
 func (m *Mailer) CC(users any, name ...string) *PendingMail {
 	return (&PendingMail{mailer: m}).CC(users, name...)
 }
 
 // BCC begins a message with a blind carbon copy recipient. Illuminate spells it
 // bcc.
+//
+// BCC is Mailer::bcc.
 func (m *Mailer) BCC(users any, name ...string) *PendingMail {
 	return (&PendingMail{mailer: m}).BCC(users, name...)
 }
 
 // HTML sends a message whose only part is the HTML given.
+//
+// HTML is Mailer::html.
 func (m *Mailer) HTML(ctx context.Context, html string, callback func(*Message)) (SentMessage, error) {
 	return m.Send(ctx, ViewParts{HTMLString: html}, nil, callback)
 }
 
 // Raw sends a message whose only part is the text given.
+//
+// Raw is Mailer::raw.
 func (m *Mailer) Raw(ctx context.Context, text string, callback func(*Message)) (SentMessage, error) {
 	return m.Send(ctx, ViewParts{Raw: text}, nil, callback)
 }
 
 // Plain sends a message whose only part is the named text view.
+//
+// Plain is Mailer::plain.
 func (m *Mailer) Plain(ctx context.Context, view string, data any, callback func(*Message)) (SentMessage, error) {
 	return m.Send(ctx, ViewParts{Text: view}, data, callback)
 }
@@ -137,6 +159,8 @@ func (m *Mailer) Render(view any, data any) (string, error) {
 // sent, which is Illuminate's third argument. All three of Illuminate's
 // arguments are spelled out because the optional ones are of different types
 // and a variadic tail cannot tell them apart.
+//
+// Send is Mailer::send.
 func (m *Mailer) Send(ctx context.Context, view any, data any, callback func(*Message)) (SentMessage, error) {
 	if mailable, ok := view.(Mailable); ok {
 		return m.sendMailable(ctx, mailable, nil)
@@ -166,6 +190,10 @@ func (m *Mailer) SendNow(ctx context.Context, view any, data any, callback func(
 // buildView(); it is a method here because that is what the assertions need. A
 // test builds the message and asks it questions, which is what
 // $mailable->assertHasTo() does in PHP.
+//
+// Build is the render half of Mailer::sendMailable, which is protected there
+// and does both in one step. It is exported here so that a caller can look at
+// a rendered message without sending it, which is what every assertion needs.
 func (m *Mailer) Build(ctx context.Context, mailable Mailable) (*Message, error) {
 	return (&PendingMail{mailer: m}).Build(ctx, mailable)
 }
@@ -177,12 +205,16 @@ func (m *Mailer) GetSymfonyTransport() Transport { return m.transport }
 
 // SetSymfonyTransport swaps the transport, which is what a test that wants the
 // array transport for one case does.
+//
+// SetSymfonyTransport is Mailer::setSymfonyTransport.
 func (m *Mailer) SetSymfonyTransport(t Transport) { m.transport = t }
 
 // GetViewFactory is Illuminate's Mailer::getViewFactory().
 func (m *Mailer) GetViewFactory() Renderer { return m.views }
 
 // SetQueue wires the queue that Queue and Later push onto.
+//
+// SetQueue is Mailer::setQueue.
 func (m *Mailer) SetQueue(q QueueFactory) *Mailer {
 	m.queue = q
 	return m
@@ -190,6 +222,9 @@ func (m *Mailer) SetQueue(q QueueFactory) *Mailer {
 
 // SetMarkdown wires the renderer that a mailable with a markdown content uses.
 // Illuminate resolves it from the container; ADR 0001 has no container.
+//
+// SetMarkdown has no PHP counterpart: Mailer::markdownRenderer resolves the
+// Markdown renderer out of the container (ADR 0001).
 func (m *Mailer) SetMarkdown(md *Markdown) *Mailer {
 	m.markdown = md
 	return m
@@ -197,27 +232,37 @@ func (m *Mailer) SetMarkdown(md *Markdown) *Mailer {
 
 // Queue pushes a mailable onto the queue instead of sending it. The queue name
 // is optional, as it is in Illuminate.
+//
+// Queue is Mailer::queue.
 func (m *Mailer) Queue(ctx context.Context, mailable Mailable, queue ...string) (string, error) {
 	return (&PendingMail{mailer: m}).Queue(ctx, mailable, queue...)
 }
 
 // OnQueue pushes a mailable onto the named queue.
+//
+// OnQueue is Mailer::onQueue.
 func (m *Mailer) OnQueue(ctx context.Context, queue string, mailable Mailable) (string, error) {
 	return m.Queue(ctx, mailable, queue)
 }
 
 // QueueOn pushes a mailable onto the named queue. Illuminate carries both
 // spellings, with a comment saying why; both are here for the same reason.
+//
+// QueueOn is Mailer::queueOn.
 func (m *Mailer) QueueOn(ctx context.Context, queue string, mailable Mailable) (string, error) {
 	return m.OnQueue(ctx, queue, mailable)
 }
 
 // Later pushes a mailable onto the queue, to be sent after the delay.
+//
+// Later is Mailer::later.
 func (m *Mailer) Later(ctx context.Context, delay time.Duration, mailable Mailable, queue ...string) (string, error) {
 	return (&PendingMail{mailer: m}).Later(ctx, delay, mailable, queue...)
 }
 
 // LaterOn pushes a mailable onto the named queue, to be sent after the delay.
+//
+// LaterOn is Mailer::laterOn.
 func (m *Mailer) LaterOn(ctx context.Context, queue string, delay time.Duration, mailable Mailable) (string, error) {
 	return m.Later(ctx, delay, mailable, queue)
 }

@@ -23,6 +23,8 @@ import (
 // that sends somebody back to the debugger.
 
 // AssertFrom asserts the message is from the given address.
+//
+// AssertFrom is Mailable::assertFrom.
 func (m *Message) AssertFrom(t *testing.T, address string, name ...string) *Message {
 	t.Helper()
 	if !m.HasFrom(address, name...) {
@@ -33,6 +35,8 @@ func (m *Message) AssertFrom(t *testing.T, address string, name ...string) *Mess
 }
 
 // AssertTo asserts the address is a recipient.
+//
+// AssertTo is Mailable::assertTo.
 func (m *Message) AssertTo(t *testing.T, address string, name ...string) *Message {
 	t.Helper()
 	if !m.HasTo(address, name...) {
@@ -44,6 +48,8 @@ func (m *Message) AssertTo(t *testing.T, address string, name ...string) *Messag
 
 // AssertHasTo asserts the address is a recipient, and is Illuminate's alias of
 // AssertTo.
+//
+// AssertHasTo is Mailable::assertHasTo.
 func (m *Message) AssertHasTo(t *testing.T, address string, name ...string) *Message {
 	t.Helper()
 	return m.AssertTo(t, address, name...)
@@ -51,6 +57,8 @@ func (m *Message) AssertHasTo(t *testing.T, address string, name ...string) *Mes
 
 // AssertHasCC asserts the address is a carbon copy recipient. Illuminate spells
 // it assertHasCc.
+//
+// AssertHasCC is Mailable::assertHasCc.
 func (m *Message) AssertHasCC(t *testing.T, address string, name ...string) *Message {
 	t.Helper()
 	if !m.HasCC(address, name...) {
@@ -62,6 +70,8 @@ func (m *Message) AssertHasCC(t *testing.T, address string, name ...string) *Mes
 
 // AssertHasBCC asserts the address is a blind carbon copy recipient.
 // Illuminate spells it assertHasBcc.
+//
+// AssertHasBCC is Mailable::assertHasBcc.
 func (m *Message) AssertHasBCC(t *testing.T, address string, name ...string) *Message {
 	t.Helper()
 	if !m.HasBCC(address, name...) {
@@ -72,6 +82,8 @@ func (m *Message) AssertHasBCC(t *testing.T, address string, name ...string) *Me
 }
 
 // AssertHasReplyTo asserts the address is a "reply to" recipient.
+//
+// AssertHasReplyTo is Mailable::assertHasReplyTo.
 func (m *Message) AssertHasReplyTo(t *testing.T, address string, name ...string) *Message {
 	t.Helper()
 	if !m.HasReplyTo(address, name...) {
@@ -82,6 +94,8 @@ func (m *Message) AssertHasReplyTo(t *testing.T, address string, name ...string)
 }
 
 // AssertHasSubject asserts the message carries exactly this subject.
+//
+// AssertHasSubject is Mailable::assertHasSubject.
 func (m *Message) AssertHasSubject(t *testing.T, subject string) *Message {
 	t.Helper()
 	if !m.HasSubject(subject) {
@@ -97,6 +111,8 @@ func (m *Message) AssertHasSubject(t *testing.T, subject string) *Message {
 // to, because the body it is searching is escaped: asserting on "Ada & Co"
 // against a body containing "Ada &amp; Co" fails for a reason that has nothing
 // to do with the message. The optional escape argument is PHP's $escape = true.
+//
+// AssertSeeInHTML is Mailable::assertSeeInHtml.
 func (m *Message) AssertSeeInHTML(t *testing.T, s string, escape ...bool) *Message {
 	t.Helper()
 	needle := escaped(s, escape...)
@@ -108,6 +124,8 @@ func (m *Message) AssertSeeInHTML(t *testing.T, s string, escape ...bool) *Messa
 
 // AssertDontSeeInHTML asserts the text does not appear in the HTML part.
 // Illuminate spells it assertDontSeeInHtml.
+//
+// AssertDontSeeInHTML is Mailable::assertDontSeeInHtml.
 func (m *Message) AssertDontSeeInHTML(t *testing.T, s string, escape ...bool) *Message {
 	t.Helper()
 	needle := escaped(s, escape...)
@@ -119,6 +137,8 @@ func (m *Message) AssertDontSeeInHTML(t *testing.T, s string, escape ...bool) *M
 
 // AssertSeeInOrderInHTML asserts the texts appear in the HTML part, in this
 // order. Illuminate spells it assertSeeInOrderInHtml.
+//
+// AssertSeeInOrderInHTML is Mailable::assertSeeInOrderInHtml.
 func (m *Message) AssertSeeInOrderInHTML(t *testing.T, strs []string, escape ...bool) *Message {
 	t.Helper()
 	needles := make([]string, len(strs))
@@ -134,6 +154,8 @@ func (m *Message) AssertSeeInOrderInHTML(t *testing.T, strs []string, escape ...
 
 // AssertSeeInText asserts the text appears in the plain-text part. Nothing is
 // escaped: the plain-text part is not HTML.
+//
+// AssertSeeInText is Mailable::assertSeeInText.
 func (m *Message) AssertSeeInText(t *testing.T, s string) *Message {
 	t.Helper()
 	if !strings.Contains(m.Text, s) {
@@ -143,6 +165,8 @@ func (m *Message) AssertSeeInText(t *testing.T, s string) *Message {
 }
 
 // AssertDontSeeInText asserts the text does not appear in the plain-text part.
+//
+// AssertDontSeeInText is Mailable::assertDontSeeInText.
 func (m *Message) AssertDontSeeInText(t *testing.T, s string) *Message {
 	t.Helper()
 	if strings.Contains(m.Text, s) {
@@ -153,6 +177,8 @@ func (m *Message) AssertDontSeeInText(t *testing.T, s string) *Message {
 
 // AssertSeeInOrderInText asserts the texts appear in the plain-text part, in
 // this order.
+//
+// AssertSeeInOrderInText is Mailable::assertSeeInOrderInText.
 func (m *Message) AssertSeeInOrderInText(t *testing.T, strs []string) *Message {
 	t.Helper()
 	if missing, ok := seeInOrder(m.Text, strs); !ok {
@@ -163,6 +189,8 @@ func (m *Message) AssertSeeInOrderInText(t *testing.T, strs []string) *Message {
 }
 
 // AssertHasAttachment asserts the file is attached.
+//
+// AssertHasAttachment is Mailable::assertHasAttachment.
 func (m *Message) AssertHasAttachment(t *testing.T, file any, options ...AttachOptions) *Message {
 	t.Helper()
 	if !m.HasAttachment(file, options...) {
@@ -172,6 +200,8 @@ func (m *Message) AssertHasAttachment(t *testing.T, file any, options ...AttachO
 }
 
 // AssertHasAttachedData asserts these exact bytes are attached under this name.
+//
+// AssertHasAttachedData is Mailable::assertHasAttachedData.
 func (m *Message) AssertHasAttachedData(t *testing.T, data []byte, name string, options ...AttachOptions) *Message {
 	t.Helper()
 	if !m.HasAttachedData(data, name, options...) {
@@ -182,6 +212,8 @@ func (m *Message) AssertHasAttachedData(t *testing.T, data []byte, name string, 
 
 // AssertHasAttachmentFromStorage asserts a path on the default disk is
 // attached.
+//
+// AssertHasAttachmentFromStorage is Mailable::assertHasAttachmentFromStorage.
 func (m *Message) AssertHasAttachmentFromStorage(t *testing.T, p, name string, options ...AttachOptions) *Message {
 	t.Helper()
 	if !m.HasAttachmentFromStorage(p, name, options...) {
@@ -192,6 +224,9 @@ func (m *Message) AssertHasAttachmentFromStorage(t *testing.T, p, name string, o
 
 // AssertHasAttachmentFromStorageDisk asserts a path on the named disk is
 // attached.
+//
+// AssertHasAttachmentFromStorageDisk is
+// Mailable::assertHasAttachmentFromStorageDisk.
 func (m *Message) AssertHasAttachmentFromStorageDisk(t *testing.T, disk, p, name string, options ...AttachOptions) *Message {
 	t.Helper()
 	if !m.HasAttachmentFromStorageDisk(disk, p, name, options...) {
@@ -202,6 +237,8 @@ func (m *Message) AssertHasAttachmentFromStorageDisk(t *testing.T, disk, p, name
 }
 
 // AssertHasTag asserts the message carries this tag.
+//
+// AssertHasTag is Mailable::assertHasTag.
 func (m *Message) AssertHasTag(t *testing.T, tag string) *Message {
 	t.Helper()
 	if !m.HasTag(tag) {
@@ -215,6 +252,8 @@ func (m *Message) AssertHasTag(t *testing.T, tag string) *Message {
 }
 
 // AssertHasMetadata asserts the message carries this key with this value.
+//
+// AssertHasMetadata is Mailable::assertHasMetadata.
 func (m *Message) AssertHasMetadata(t *testing.T, key, value string) *Message {
 	t.Helper()
 	if !m.HasMetadata(key, value) {

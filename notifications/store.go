@@ -93,13 +93,16 @@ type MemoryStore struct {
 }
 
 // NewMemoryStore returns an empty store.
+//
+// It has no PHP counterpart: an Eloquent model is bound to a connection, and
+// the in-memory equivalent there is SQLite.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{now: func() time.Time { return time.Now().UTC() }}
 }
 
 var _ Store = (*MemoryStore)(nil)
 
-// Save writes one.
+// Save writes one. It is the Model::create inside DatabaseChannel::send.
 func (s *MemoryStore) Save(_ context.Context, g auth.Grant, r Record) (Record, error) {
 	tenant, err := scope(g, ActionSend)
 	if err != nil {
@@ -115,12 +118,14 @@ func (s *MemoryStore) Save(_ context.Context, g auth.Grant, r Record) (Record, e
 	return row, nil
 }
 
-// For returns the most recent notifications for a recipient, newest first.
+// For returns the most recent notifications for a recipient, newest first. It
+// is HasDatabaseNotifications::notifications, executed.
 func (s *MemoryStore) For(_ context.Context, g auth.Grant, to Notifiable, limit int) ([]Record, error) {
 	return s.list(g, to, limit, false)
 }
 
-// Unread is For, restricted to the ones not yet read.
+// Unread is For, restricted to the ones not yet read. It is
+// HasDatabaseNotifications::unreadNotifications, executed.
 func (s *MemoryStore) Unread(_ context.Context, g auth.Grant, to Notifiable, limit int) ([]Record, error) {
 	return s.list(g, to, limit, true)
 }
@@ -162,7 +167,7 @@ func (s *MemoryStore) list(g auth.Grant, to Notifiable, limit int, unreadOnly bo
 	return out, nil
 }
 
-// MarkAsRead stamps one.
+// MarkAsRead stamps one. It is DatabaseNotification::markAsRead, executed.
 func (s *MemoryStore) MarkAsRead(_ context.Context, g auth.Grant, id string) error {
 	tenant, err := scope(g, ActionRead)
 	if err != nil {
@@ -182,7 +187,8 @@ func (s *MemoryStore) MarkAsRead(_ context.Context, g auth.Grant, id string) err
 	return fmt.Errorf("%w: notification %s", database.ErrNotFound, id)
 }
 
-// MarkAsUnread clears the stamp on one.
+// MarkAsUnread clears the stamp on one. It is
+// DatabaseNotification::markAsUnread, executed.
 func (s *MemoryStore) MarkAsUnread(_ context.Context, g auth.Grant, id string) error {
 	tenant, err := scope(g, ActionRead)
 	if err != nil {
@@ -200,7 +206,9 @@ func (s *MemoryStore) MarkAsUnread(_ context.Context, g auth.Grant, id string) e
 	return fmt.Errorf("%w: notification %s", database.ErrNotFound, id)
 }
 
-// MarkAllAsRead stamps every unread notification a recipient has.
+// MarkAllAsRead stamps every unread notification a recipient has. It is
+// DatabaseNotificationCollection::markAsRead over the whole relation, as one
+// statement rather than a row at a time.
 func (s *MemoryStore) MarkAllAsRead(_ context.Context, g auth.Grant, to Notifiable) error {
 	tenant, err := scope(g, ActionRead)
 	if err != nil {
@@ -223,7 +231,7 @@ func (s *MemoryStore) MarkAllAsRead(_ context.Context, g auth.Grant, to Notifiab
 	return nil
 }
 
-// Delete removes one.
+// Delete removes one. It is Model::delete on a DatabaseNotification.
 func (s *MemoryStore) Delete(_ context.Context, g auth.Grant, id string) error {
 	tenant, err := scope(g, ActionDelete)
 	if err != nil {

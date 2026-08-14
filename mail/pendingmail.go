@@ -66,6 +66,9 @@ type PendingMail struct {
 }
 
 // Err is what went wrong in a fluent call that had no way to say so.
+//
+// Err has no PHP counterpart: PendingMail throws, and a method that returns
+// the receiver cannot.
 func (p *PendingMail) Err() error { return p.err }
 
 // viewDataCallback is Illuminate's static Mailable::$viewDataCallback.
@@ -80,6 +83,8 @@ func BuildViewDataUsing(callback func(mailable Mailable) map[string]any) {
 }
 
 // Locale sets the locale the message is rendered in.
+//
+// Locale is PendingMail::locale, and Mailable::locale.
 func (p *PendingMail) Locale(locale string) *PendingMail {
 	p.locale = locale
 	return p
@@ -87,6 +92,8 @@ func (p *PendingMail) Locale(locale string) *PendingMail {
 
 // To adds recipients. The argument is a string, an [Address], a slice of
 // either, or a map of address to name -- which is the "mixed" Illuminate takes.
+//
+// To is PendingMail::to, and Mailable::to.
 func (p *PendingMail) To(users any, name ...string) *PendingMail {
 	p.to = uniqueAddresses(append(p.to, addressesOf(users, name...)...))
 	if p.locale == "" {
@@ -98,36 +105,48 @@ func (p *PendingMail) To(users any, name ...string) *PendingMail {
 }
 
 // CC adds carbon copy recipients. Illuminate spells it cc.
+//
+// CC is PendingMail::cc, and Mailable::cc.
 func (p *PendingMail) CC(users any, name ...string) *PendingMail {
 	p.cc = uniqueAddresses(append(p.cc, addressesOf(users, name...)...))
 	return p
 }
 
 // BCC adds blind carbon copy recipients. Illuminate spells it bcc.
+//
+// BCC is PendingMail::bcc, and Mailable::bcc.
 func (p *PendingMail) BCC(users any, name ...string) *PendingMail {
 	p.bcc = uniqueAddresses(append(p.bcc, addressesOf(users, name...)...))
 	return p
 }
 
 // From sets the sender.
+//
+// From is Mailable::from.
 func (p *PendingMail) From(address any, name ...string) *PendingMail {
 	p.from = uniqueAddresses(append(p.from, addressesOf(address, name...)...))
 	return p
 }
 
 // ReplyTo adds a reply-to address.
+//
+// ReplyTo is Mailable::replyTo.
 func (p *PendingMail) ReplyTo(address any, name ...string) *PendingMail {
 	p.replyTo = uniqueAddresses(append(p.replyTo, addressesOf(address, name...)...))
 	return p
 }
 
 // Subject sets the subject. A mailable whose envelope names one wins over this.
+//
+// Subject is Mailable::subject.
 func (p *PendingMail) Subject(subject string) *PendingMail {
 	p.subject = subject
 	return p
 }
 
 // View sets the HTML view and, optionally, what it renders from.
+//
+// View is Mailable::view.
 func (p *PendingMail) View(view string, data ...any) *PendingMail {
 	p.view = view
 	return p.withData(data)
@@ -141,6 +160,8 @@ func (p *PendingMail) HTML(html string) *PendingMail {
 }
 
 // Text sets the plain-text view and, optionally, what it renders from.
+//
+// Text is Mailable::text.
 func (p *PendingMail) Text(view string, data ...any) *PendingMail {
 	p.textView = view
 	return p.withData(data)
@@ -148,12 +169,16 @@ func (p *PendingMail) Text(view string, data ...any) *PendingMail {
 
 // Markdown sets the markdown view the message is drawn from. It produces both
 // parts at once, which is the reason markdown mailables exist.
+//
+// Markdown is Mailable::markdown.
 func (p *PendingMail) Markdown(view string, data ...any) *PendingMail {
 	p.markdownView = view
 	return p.withData(data)
 }
 
 // With adds view data. The key is a string with a value, or a map merged whole.
+//
+// With is Mailable::with.
 func (p *PendingMail) With(key any, value ...any) *PendingMail {
 	if p.viewData == nil {
 		p.viewData = map[string]any{}
@@ -184,6 +209,8 @@ func (p *PendingMail) withData(data []any) *PendingMail {
 }
 
 // Attach adds a file. The file is a path, an [*Attachment] or an [Attachable].
+//
+// Attach is Mailable::attach.
 func (p *PendingMail) Attach(file any, options ...AttachOptions) *PendingMail {
 	o := firstOption(options)
 
@@ -207,6 +234,8 @@ func (p *PendingMail) Attach(file any, options ...AttachOptions) *PendingMail {
 
 // AttachMany adds several files at once. See [Message.AttachMany] for the
 // shapes an element may take.
+//
+// AttachMany is Mailable::attachMany.
 func (p *PendingMail) AttachMany(files ...any) *PendingMail {
 	for _, file := range files {
 		if with, ok := file.(AttachedFile); ok {
@@ -219,6 +248,8 @@ func (p *PendingMail) AttachMany(files ...any) *PendingMail {
 }
 
 // AttachData adds bytes as an attachment under the given name.
+//
+// AttachData is Mailable::attachData.
 func (p *PendingMail) AttachData(data []byte, name string, options ...AttachOptions) *PendingMail {
 	o := firstOption(options)
 	for _, existing := range p.rawAttachments {
@@ -232,12 +263,16 @@ func (p *PendingMail) AttachData(data []byte, name string, options ...AttachOpti
 
 // AttachFromStorage attaches a path on the default disk. An empty name means
 // the path's last segment.
+//
+// AttachFromStorage is Mailable::attachFromStorage.
 func (p *PendingMail) AttachFromStorage(path, name string, options ...AttachOptions) *PendingMail {
 	return p.AttachFromStorageDisk("", path, name, options...)
 }
 
 // AttachFromStorageDisk attaches a path on the named disk, reading nothing
 // until the message is built.
+//
+// AttachFromStorageDisk is Mailable::attachFromStorageDisk.
 func (p *PendingMail) AttachFromStorageDisk(disk, path, name string, options ...AttachOptions) *PendingMail {
 	msg := &Message{DiskAttachments: p.diskAttachments}
 	msg.AttachFromStorageDisk(disk, path, name, options...)
@@ -254,12 +289,16 @@ func (p *PendingMail) attachBytes(data []byte, name string, o AttachOptions) {
 }
 
 // Tag adds a tag, for the providers that group by one.
+//
+// Tag is Mailable::tag.
 func (p *PendingMail) Tag(value string) *PendingMail {
 	p.tags = append(p.tags, value)
 	return p
 }
 
 // Metadata adds a metadata pair, for the providers that carry them.
+//
+// Metadata is Mailable::metadata.
 func (p *PendingMail) Metadata(key string, value ...string) *PendingMail {
 	if p.metadata == nil {
 		p.metadata = map[string]string{}
@@ -274,6 +313,8 @@ func (p *PendingMail) Metadata(key string, value ...string) *PendingMail {
 
 // Priority sets the priority, where 1 is the highest and 5 the lowest.
 // Illuminate defaults the level to 3 and so does an empty call here.
+//
+// Priority is Mailable::priority.
 func (p *PendingMail) Priority(level ...int) *PendingMail {
 	p.priority = 3
 	if len(level) > 0 {
@@ -290,6 +331,9 @@ func (p *PendingMail) Mailer(name string) *PendingMail {
 }
 
 // Theme names the markdown theme this message is rendered with.
+//
+// Theme writes Mailable::$theme, which PHP sets as a property and
+// Markdown::theme reads.
 func (p *PendingMail) Theme(theme string) *PendingMail {
 	p.theme = theme
 	return p
@@ -300,6 +344,8 @@ func (p *PendingMail) Theme(theme string) *PendingMail {
 //
 // Symfony in the name is Laravel's MIME library; the callback gets a [*Message]
 // here, which is the same object under a different library's name.
+//
+// WithSymfonyMessage is Mailable::withSymfonyMessage.
 func (p *PendingMail) WithSymfonyMessage(callback func(*Message)) *PendingMail {
 	p.callbacks = append(p.callbacks, callback)
 	return p
@@ -311,6 +357,8 @@ func (p *PendingMail) WithSymfonyMessage(callback func(*Message)) *PendingMail {
 // them with $viewData; this does the same with a struct's exported fields, so
 // that a view can name a field of the mailable directly. It takes the mailable
 // because in Go the mailable is not this object.
+//
+// BuildViewData is Mailable::buildViewData.
 func (p *PendingMail) BuildViewData(mailable Mailable) any {
 	content := mailable.Content()
 
@@ -374,6 +422,10 @@ func exportedFields(v any) map[string]any {
 // createMessage(), in the order that file runs them: the mailable's own
 // envelope, content, attachments and headers are read, then the addresses
 // collected here are merged in, then the views are rendered exactly once.
+//
+// Build is Mailable::prepareMailableForDelivery, which is protected there. It
+// is exported here because a caller with no container needs a rendered message
+// to assert against.
 func (p *PendingMail) Build(ctx context.Context, mailable Mailable) (*Message, error) {
 	if p.mailer == nil {
 		return nil, errors.New("mail: this pending message has no mailer")
@@ -517,6 +569,8 @@ func (p *PendingMail) renderInto(msg *Message, mailable Mailable) error {
 // deliberate: a call that sometimes blocks for two seconds and sometimes does
 // not, decided by an interface the mailable implements somewhere else, is a
 // call nobody can reason about from the line they are reading.
+//
+// Send is PendingMail::send.
 func (p *PendingMail) Send(ctx context.Context, mailable Mailable) (SentMessage, error) {
 	if p.mailer == nil {
 		return SentMessage{}, errors.New("mail: this pending message has no mailer")
@@ -542,6 +596,8 @@ func (p *PendingMail) Render(ctx context.Context, mailable Mailable) (string, er
 
 // Queue pushes the mailable onto the queue as a [SendQueuedMailable]. The queue
 // name is optional, as it is in Illuminate.
+//
+// Queue is PendingMail::queue.
 func (p *PendingMail) Queue(ctx context.Context, mailable Mailable, queue ...string) (string, error) {
 	if p.mailer == nil || p.mailer.queue == nil {
 		return "", ErrNoQueue
@@ -554,6 +610,8 @@ func (p *PendingMail) Queue(ctx context.Context, mailable Mailable, queue ...str
 }
 
 // Later pushes the mailable onto the queue, to be sent after the delay.
+//
+// Later is PendingMail::later.
 func (p *PendingMail) Later(ctx context.Context, delay time.Duration, mailable Mailable, queue ...string) (string, error) {
 	if p.mailer == nil || p.mailer.queue == nil {
 		return "", ErrNoQueue

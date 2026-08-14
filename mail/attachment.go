@@ -144,6 +144,8 @@ func (a *Attachment) As(name string) *Attachment {
 }
 
 // WithMime sets the content type.
+//
+// WithMime is Attachment::withMime.
 func (a *Attachment) WithMime(mime string) *Attachment {
 	a.mime = mime
 	return a

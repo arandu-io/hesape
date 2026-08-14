@@ -15,7 +15,7 @@ import (
 // returns $this, and a promoted method would return the embedded value instead
 // of the paginator -- which breaks the chaining those methods exist for.
 
-// addQuery answers AbstractPaginator::addQuery(). It records one query string
+// addQuery is AbstractPaginator::addQuery. It records one query string
 // parameter, and drops the one holding the position: the paginator writes that
 // itself, and letting a caller append it would make two of them fight over the
 // same key.
@@ -29,7 +29,7 @@ func addQuery(o *Options, reserved, key, value string) {
 	o.Query.Set(key, value)
 }
 
-// appendQuery answers AbstractPaginator::appends().
+// appendQuery is AbstractPaginator::appends.
 //
 // PHP declares the parameter as array|string|null, a union Go has no type for,
 // so it arrives as any and is opened here. A nil key is ignored, exactly as PHP
@@ -94,7 +94,7 @@ func nullable[T comparable](value T) any {
 	return value
 }
 
-// prettyJSON answers toPrettyJson(). PHP's JSON_PRETTY_PRINT indents with four
+// prettyJSON is the JSON_PRETTY_PRINT half of toPrettyJson(). PHP's JSON_PRETTY_PRINT indents with four
 // spaces, so this does too: the two outputs diff cleanly against each other.
 func prettyJSON(value any) ([]byte, error) {
 	return json.MarshalIndent(value, "", "    ")

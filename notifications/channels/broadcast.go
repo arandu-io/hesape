@@ -14,6 +14,11 @@ import (
 // Broadcaster is the little the broadcast channel needs to reach a browser that
 // is connected right now.
 //
+// It is the Illuminate\Contracts\Events\Dispatcher that
+// BroadcastChannel::__construct takes, narrowed: there the dispatch of a
+// ShouldBroadcast event is what makes the push happen, and here the push is a
+// call.
+//
 // It is a seam to hesape/broadcasting, which is layer 5 of
 // docs/31-reorganizacao-hesape.md and does not exist yet. The signature is the
 // one a hub can satisfy with no adaptation: a channel name, an event name and a
@@ -26,25 +31,31 @@ type Broadcaster interface {
 }
 
 // BroadcastNotification is what a notification implements to be pushed live.
+//
+// It is the toBroadcast()/toArray() BroadcastChannel::getData looks for by name
+// on the notification. Only toBroadcast is here, for the reason
+// [DatabaseNotification] gives.
 type BroadcastNotification interface {
 	// ToBroadcast is the payload the browser receives.
 	ToBroadcast(to notifications.Notifiable) messages.Broadcast
 }
 
-// Broadcast pushes a notification to a connected browser.
+// Broadcast pushes a notification to a connected browser. It is
+// Illuminate\Notifications\Channels\BroadcastChannel.
 type Broadcast struct {
 	hub Broadcaster
 }
 
-// NewBroadcast returns the broadcast channel over a hub.
+// NewBroadcast is BroadcastChannel::__construct.
 func NewBroadcast(h Broadcaster) *Broadcast { return &Broadcast{hub: h} }
 
 var _ notifications.Channel = (*Broadcast)(nil)
 
-// Name is "broadcast".
+// Name is "broadcast". It has no PHP counterpart, for the reason [Mail.Name]
+// gives.
 func (*Broadcast) Name() notifications.ChannelName { return notifications.ChannelBroadcast }
 
-// Send pushes the payload to the channels the recipient is subscribed on.
+// Send is BroadcastChannel::send.
 //
 // RouteFor answers with a channel name -- "user.42", "team.7" -- and an empty
 // answer is notifications.ErrNotAddressed: this recipient has no live

@@ -405,3 +405,84 @@ func TestPipelineCanBeSentTwice(t *testing.T) {
 		t.Fatalf("results = %d and %d, want 4 and 10", first, second)
 	}
 }
+
+func TestWhenAddsAPipeOnlyWhenTheConditionHolds(t *testing.T) {
+	add := func(suffix string) pipeline.Pipe[string] {
+		return func(passable string, next pipeline.Destination[string]) (string, error) {
+			return next(passable + suffix)
+		}
+	}
+	build := func(condition bool) (string, error) {
+		return pipeline.New[string]().
+			Send("a").
+			Through(add("b")).
+			When(condition, func(p *pipeline.Pipeline[string]) *pipeline.Pipeline[string] {
+				return p.Pipe(add("c"))
+			}, nil).
+			ThenReturn()
+	}
+
+	got, err := build(true)
+	if err != nil {
+		t.Fatalf("When(true): %v", err)
+	}
+	if got != "abc" {
+		t.Fatalf("When(true) = %q, want abc", got)
+	}
+
+	got, err = build(false)
+	if err != nil {
+		t.Fatalf("When(false): %v", err)
+	}
+	if got != "ab" {
+		t.Fatalf("When(false) = %q, want ab", got)
+	}
+}
+
+func TestWhenTakesTheDefaultBranch(t *testing.T) {
+	mark := func(suffix string) func(*pipeline.Pipeline[string]) *pipeline.Pipeline[string] {
+		return func(p *pipeline.Pipeline[string]) *pipeline.Pipeline[string] {
+			return p.Pipe(func(passable string, next pipeline.Destination[string]) (string, error) {
+				return next(passable + suffix)
+			})
+		}
+	}
+
+	// PHP's when($value, $callback, $default) runs the default when the value is
+	// falsy, and unless is when with the condition negated.
+	got, err := pipeline.New[string]().Send("a").When(false, mark("x"), mark("y")).ThenReturn()
+	if err != nil {
+		t.Fatalf("When: %v", err)
+	}
+	if got != "ay" {
+		t.Fatalf("When(false, x, y) = %q, want ay", got)
+	}
+
+	got, err = pipeline.New[string]().Send("a").Unless(true, mark("x"), mark("y")).ThenReturn()
+	if err != nil {
+		t.Fatalf("Unless: %v", err)
+	}
+	if got != "ay" {
+		t.Fatalf("Unless(true, x, y) = %q, want ay", got)
+	}
+
+	got, err = pipeline.New[string]().Send("a").Unless(false, mark("x"), mark("y")).ThenReturn()
+	if err != nil {
+		t.Fatalf("Unless: %v", err)
+	}
+	if got != "ax" {
+		t.Fatalf("Unless(false, x, y) = %q, want ax", got)
+	}
+}
+
+func TestWhenWithNoBranchChangesNothing(t *testing.T) {
+	// Both branches are optional in PHP: when($value) with no callback returns a
+	// proxy, and the framework's own uses pass nil for the default.
+	got, err := pipeline.New[string]().Send("a").When(true, nil, nil).Unless(true, nil, nil).ThenReturn()
+	if err != nil {
+		t.Fatalf("When: %v", err)
+	}
+	if got != "a" {
+		t.Fatalf("= %q, want a", got)
+	}
+}

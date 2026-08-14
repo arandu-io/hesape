@@ -23,14 +23,14 @@ type Hub[T any] struct {
 	pipelines map[string]func(p *Pipeline[T], passable T) (T, error)
 }
 
-// NewHub returns an empty Hub over T. It answers `new Hub($container)` without
-// the container, which ADR 0002 rejected: the callback that defines a pipeline
+// NewHub is Hub::__construct. It answers `new Hub($container)` without the
+// container, which ADR 0002 rejected: the callback that defines a pipeline
 // closes over whatever its pipes need.
 func NewHub[T any]() *Hub[T] {
 	return &Hub[T]{}
 }
 
-// Pipeline defines a named pipeline. It answers pipeline().
+// Pipeline is Hub::pipeline: it defines a named pipeline.
 //
 // Defining a name twice keeps the second callback, as assigning the array key
 // twice does.
@@ -44,15 +44,15 @@ func (h *Hub[T]) Pipeline(name string, callback func(p *Pipeline[T], passable T)
 	h.pipelines[name] = callback
 }
 
-// Defaults defines the default named pipeline. It answers defaults(), which is
+// Defaults is Hub::defaults: it defines the default named pipeline, which is
 // pipeline('default', $callback) -- the pipeline [Hub.Pipe] reaches for when it
 // is given no name.
 func (h *Hub[T]) Defaults(callback func(p *Pipeline[T], passable T) (T, error)) {
 	h.Pipeline("default", callback)
 }
 
-// Pipe sends an object through one of the available pipelines. It answers
-// pipe($object, $pipeline = null).
+// Pipe is Hub::pipe: it sends an object through one of the available
+// pipelines.
 //
 // At most one name may be given, which is PHP's optional argument, and an empty
 // one is no name: both reach the pipeline [Hub.Defaults] defined, because PHP

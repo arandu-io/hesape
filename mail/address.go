@@ -23,6 +23,10 @@ func NewAddress(address string, name ...string) Address {
 }
 
 // String renders the address the way a header carries it.
+//
+// String has no PHP counterpart: Mailables\Address declares a constructor and
+// two public properties, and the RFC 5322 form is built by whatever writes the
+// header.
 func (a Address) String() string {
 	if a.Name == "" {
 		return a.Address
@@ -33,6 +37,9 @@ func (a Address) String() string {
 // Valid reports whether the address parses. It is checked before a transport is
 // asked to do anything, so a typo fails at the call rather than as a bounce
 // three minutes later.
+//
+// Valid has no PHP counterpart: Mailables\Address accepts whatever string it
+// is given, and the transport is what refuses it.
 func (a Address) Valid() bool {
 	if a.Address == "" {
 		return false

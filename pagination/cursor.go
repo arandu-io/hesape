@@ -51,7 +51,7 @@ type Cursor struct {
 	pointsToNextItems bool
 }
 
-// NewCursor answers Cursor::__construct().
+// NewCursor is Cursor::__construct.
 //
 // parameters maps the name of each ordering column to the value it has in the
 // boundary row. The set must match the ORDER BY exactly: a cursor over
@@ -75,7 +75,7 @@ func NewCursor(parameters map[string]string, pointsToNextItems bool) Cursor {
 	return Cursor{parameters: copied, pointsToNextItems: pointsToNextItems}
 }
 
-// Parameter answers Cursor::parameter(). It returns the value the boundary row
+// Parameter is Cursor::parameter. It returns the value the boundary row
 // has in the named ordering column.
 //
 // A name the cursor does not carry is an error, where PHP throws
@@ -90,7 +90,7 @@ func (c Cursor) Parameter(parameterName string) (string, error) {
 	return value, nil
 }
 
-// Parameters answers Cursor::parameters(). It returns the values of the named
+// Parameters is Cursor::parameters. It returns the values of the named
 // ordering columns, in the order asked for, and fails on the first name the
 // cursor does not carry.
 func (c Cursor) Parameters(parameterNames []string) ([]string, error) {
@@ -105,16 +105,16 @@ func (c Cursor) Parameters(parameterNames []string) ([]string, error) {
 	return values, nil
 }
 
-// PointsToNextItems answers Cursor::pointsToNextItems(). It reports whether the
+// PointsToNextItems is Cursor::pointsToNextItems. It reports whether the
 // query reading from this cursor walks forward.
 func (c Cursor) PointsToNextItems() bool { return c.pointsToNextItems }
 
-// PointsToPreviousItems answers Cursor::pointsToPreviousItems(). It reports
+// PointsToPreviousItems is Cursor::pointsToPreviousItems. It reports
 // whether the query reading from this cursor walks backward, and so returns its
 // rows in reverse order.
 func (c Cursor) PointsToPreviousItems() bool { return !c.pointsToNextItems }
 
-// ToArray answers Cursor::toArray(). It is the parameters with the direction
+// ToArray is Cursor::toArray. It is the parameters with the direction
 // merged in under _pointsToNextItems, which is the shape Encode writes.
 //
 // An ordering column actually named _pointsToNextItems would collide with the
@@ -130,7 +130,7 @@ func (c Cursor) ToArray() map[string]any {
 	return out
 }
 
-// Encode answers Cursor::encode(). It renders the cursor as one URL-safe token:
+// Encode is Cursor::encode. It renders the cursor as one URL-safe token:
 // base64 of the JSON of ToArray, with "+" and "/" replaced by "-" and "_" and
 // the padding removed, which is exactly base64url without padding.
 //
@@ -149,7 +149,7 @@ func (c Cursor) Encode() string {
 	return base64.RawURLEncoding.EncodeToString(encoded)
 }
 
-// FromEncoded answers Cursor::fromEncoded(). It reads a cursor back out of the
+// FromEncoded is Cursor::fromEncoded. It reads a cursor back out of the
 // token Encode wrote.
 //
 // PHP writes Cursor::fromEncoded($token) and Go has no static methods, so the
@@ -216,7 +216,7 @@ func cursorParameterString(value any) (string, bool) {
 	}
 }
 
-// ResolveCurrentCursor answers AbstractCursorPaginator::resolveCurrentCursor().
+// ResolveCurrentCursor is AbstractCursorPaginator::resolveCurrentCursor.
 //
 // Illuminate reads the cursor through a static closure a service provider
 // installs; there is no container here (ADR 0001) and no facade (ADR 0002), so

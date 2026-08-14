@@ -16,7 +16,7 @@ type URLWindow[T any] struct {
 	paginator *LengthAwarePaginator[T]
 }
 
-// URLWindowRanges is what UrlWindow::get() returns: three page-to-URL ranges,
+// URLWindowRanges is what UrlWindow::get returns: three page-to-URL ranges,
 // any of which may be absent.
 //
 // PHP returns an array under the keys first, slider and last, with null for the
@@ -38,12 +38,12 @@ type URLWindowRanges struct {
 	Last map[int]string
 }
 
-// NewURLWindow answers UrlWindow::__construct().
+// NewURLWindow is UrlWindow::__construct.
 func NewURLWindow[T any](paginator *LengthAwarePaginator[T]) *URLWindow[T] {
 	return &URLWindow[T]{paginator: paginator}
 }
 
-// Make answers UrlWindow::make(). It is NewURLWindow followed by Get, in one
+// Make is UrlWindow::make. It is NewURLWindow followed by Get, in one
 // call.
 //
 // PHP writes UrlWindow::make($paginator) and Go has no static methods, so the
@@ -54,7 +54,7 @@ func Make[T any](paginator *LengthAwarePaginator[T]) URLWindowRanges {
 	return NewURLWindow(paginator).Get()
 }
 
-// Get answers UrlWindow::get(). It is the window of URLs to be shown.
+// Get is UrlWindow::get. It is the window of URLs to be shown.
 func (w *URLWindow[T]) Get() URLWindowRanges {
 	first, slider, last := w.pages()
 	return URLWindowRanges{
@@ -99,25 +99,25 @@ func (w *URLWindow[T]) pages() (first, slider, last []int) {
 	}
 }
 
-// GetAdjacentURLRange answers UrlWindow::getAdjacentUrlRange(). It is the run
+// GetAdjacentURLRange is UrlWindow::getAdjacentUrlRange. It is the run
 // of pages onEachSide either side of the current one.
 func (w *URLWindow[T]) GetAdjacentURLRange(onEachSide int) map[int]string {
 	return w.paginator.urlsFor(w.adjacent(onEachSide))
 }
 
-// GetStart answers UrlWindow::getStart(). It is the first two pages, the cap at
+// GetStart is UrlWindow::getStart. It is the first two pages, the cap at
 // the beginning of a slider.
 func (w *URLWindow[T]) GetStart() map[int]string {
 	return w.paginator.urlsFor(w.start())
 }
 
-// GetFinish answers UrlWindow::getFinish(). It is the last two pages, the cap
+// GetFinish is UrlWindow::getFinish. It is the last two pages, the cap
 // at the end of a slider.
 func (w *URLWindow[T]) GetFinish() map[int]string {
 	return w.paginator.urlsFor(w.finish())
 }
 
-// HasPages answers UrlWindow::hasPages(). It reports whether the paginator
+// HasPages is UrlWindow::hasPages. It reports whether the paginator
 // being presented spans more than one page.
 //
 // It is not the paginator's own HasPages: this one asks only about the number

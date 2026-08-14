@@ -41,6 +41,9 @@ func (SMTP) Name() string { return "smtp" }
 // The [mail.SentMessage] it returns carries no identifier: SMTP has no field for one,
 // and the id the receiving server assigns is in a reply line no client is
 // obliged to be given.
+//
+// Send has no Illuminate class behind it: MailManager::createSmtpTransport
+// builds Symfony's EsmtpTransport.
 func (t SMTP) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error) {
 	sent := mail.SentMessage{Transport: t.Name()}
 
@@ -134,6 +137,8 @@ func (Log) Name() string { return "log" }
 func (t Log) Logger() *slog.Logger { return t.logger }
 
 // Send logs the message.
+//
+// Send is LogTransport::send.
 func (t Log) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error) {
 	to := make([]string, 0, len(m.To))
 	for _, a := range m.To {
@@ -166,6 +171,8 @@ type Array struct {
 func (*Array) Name() string { return "array" }
 
 // Send records the message.
+//
+// Send is ArrayTransport::send.
 func (a *Array) Send(_ context.Context, m mail.Message) (mail.SentMessage, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -183,6 +190,9 @@ func (a *Array) Messages() []mail.Message {
 }
 
 // Last is the most recent message, and whether there was one.
+//
+// Last has no PHP counterpart: ArrayTransport::messages returns the whole
+// collection and the caller takes its last element.
 func (a *Array) Last() (mail.Message, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

@@ -13,18 +13,20 @@
 //     when the data changes underneath.
 //
 // The files it answers to, in the clone at laravel_illuminate/pagination,
-// which is the source this package was written from:
+// which is the source this package was written from (Laravel 13,
+// illuminate/pagination ^13.0):
 //
-//	AbstractCursorPaginator.php
-//	AbstractPaginator.php
-//	Cursor.php
-//	CursorPaginator.php
-//	LengthAwarePaginator.php
-//	PaginationServiceProvider.php
-//	PaginationState.php
-//	Paginator.php
-//	UrlWindow.php
-//	resources/views/*.blade.php
+//	AbstractCursorPaginator.php     -> CursorPaginator
+//	AbstractPaginator.php           -> LengthAwarePaginator, Paginator
+//	Cursor.php                      -> Cursor
+//	CursorPaginator.php             -> CursorPaginator
+//	LengthAwarePaginator.php        -> LengthAwarePaginator
+//	PaginationServiceProvider.php   -> nothing (ADR 0001, ADR 0002)
+//	PaginationState.php             -> OptionsFrom
+//	Paginator.php                   -> Paginator
+//	UrlWindow.php                   -> URLWindow, URLWindowRanges, Make
+//	resources/views/*.blade.php     -> DefaultView and the five Use* switches,
+//	                                   as names; the drawing is the view layer
 //
 // # The names are Illuminate's
 //
@@ -63,10 +65,13 @@
 // [ResolveCurrentPage], [ResolveCurrentPath], [ResolveQueryString] and
 // [ResolveCurrentCursor] read the four pieces out of it.
 //
-// The five closure setters -- currentPageResolver, currentPathResolver,
-// queryStringResolver, currentCursorResolver, viewFactoryResolver -- and
+// The five closure setters -- AbstractPaginator::currentPageResolver,
+// AbstractPaginator::currentPathResolver, AbstractPaginator::queryStringResolver,
+// AbstractPaginator::viewFactoryResolver and
+// AbstractCursorPaginator::currentCursorResolver -- and
 // PaginationState::resolveUsing itself are the container wiring, and are not
-// here.
+// here. They are listed with their reason under "The methods with no answer
+// here" below.
 //
 // PaginationServiceProvider::register and PaginationServiceProvider::boot go
 // with them, both reason 2 of the porting rule: register is the single call to
@@ -108,16 +113,75 @@
 // it, and until something consumes one, declaring it here would only be a name
 // to keep in step with the structs.
 //
-// # What PHP's language carries and Go's does not
+// # The methods with no answer here
 //
-// ArrayAccess (offsetExists, offsetGet, offsetSet, offsetUnset) is how PHP
-// writes $page[3]; Go indexes the slice [LengthAwarePaginator.Items] returns.
-// JsonSerializable is jsonSerialize; Go's name for that contract is
-// json.Marshaler, and MarshalJSON is it. IteratorAggregate is getIterator; the
-// Go spelling is the range-over-func [LengthAwarePaginator.GetIterator]
-// returns. __toString and the escapeWhenCastingToString flag that configures it
-// have no Go equivalent to configure.
+// Every one of them, with the numbered reason from ADR 0044: (1) a PHP language
+// feature Go does not have, (2) a method that only serves the container, a
+// facade or a service provider, (3) a driver this ecosystem does not carry.
 //
-// loadMorph and loadMorphCount forward to Eloquent relations on the collection,
-// and there is no Eloquent here yet.
+// Reason 1, the PHP language:
+//
+//   - AbstractPaginator::offsetExists, ::offsetGet, ::offsetSet, ::offsetUnset
+//     and the same four on AbstractCursorPaginator are ArrayAccess, which is how
+//     PHP writes $page[3]. Go indexes the slice [LengthAwarePaginator.Items]
+//     returns.
+//   - AbstractPaginator::__call and AbstractCursorPaginator::__call forward an
+//     unknown method to the underlying Collection. That is the magic-method
+//     family.
+//   - AbstractPaginator::__toString, AbstractCursorPaginator::__toString and
+//     AbstractPaginator::escapeWhenCastingToString, the flag that configures the
+//     first two. Go has no cast to string to hook.
+//   - AbstractPaginator::jsonSerialize and its three siblings are
+//     JsonSerializable; Go's name for that contract is json.Marshaler, and
+//     MarshalJSON is it, so the method is here under Go's spelling for the same
+//     interface.
+//   - AbstractPaginator::getIterator is IteratorAggregate; the Go spelling is
+//     the range-over-func [LengthAwarePaginator.GetIterator] returns, and it is
+//     here too.
+//
+// Reason 2, the container and the service provider:
+//
+//   - AbstractPaginator::currentPageResolver, AbstractPaginator::currentPathResolver
+//     and AbstractCursorPaginator::currentCursorResolver install static closures
+//     that read the request out of the application. [OptionsFrom] takes the
+//     *url.URL instead.
+//   - AbstractPaginator::queryStringResolver installs the closure that answers
+//     `$app['request']->query()`. Its only caller is resolveQueryString, and
+//     [ResolveQueryString] reads the query off the *url.URL it is handed, so
+//     there is no static to set and nothing to set it from.
+//   - AbstractPaginator::viewFactoryResolver installs the closure that answers
+//     `$app['view']`. Nothing here renders -- see the section above -- so there
+//     is no factory to resolve; a component takes the paginator and reads
+//     [LengthAwarePaginator.Links] off it.
+//   - PaginationState::resolveUsing is the single call that installs those five,
+//     and it is the only caller any of them has.
+//   - AbstractPaginator::viewFactory and AbstractCursorPaginator::viewFactory
+//     pull the view factory out of the container.
+//   - LengthAwarePaginator::links, ::render, CursorPaginator::links, ::render,
+//     Paginator::links, ::render, AbstractPaginator::toHtml and
+//     AbstractCursorPaginator::toHtml all end at that factory.
+//     [LengthAwarePaginator.Links] and [LengthAwarePaginator.LinkCollection] are
+//     the data they render from; the drawing belongs to the view layer.
+//   - PaginationServiceProvider::register is that one call to
+//     PaginationState::resolveUsing, and ::boot registers the 'pagination' Blade
+//     view namespace and publishes the nine files. There is no view namespace
+//     here -- the view layer resolves a component by name at build time -- and
+//     nothing to publish, because the pager is a kyse component the application
+//     already has.
+//
+// Reason 3, a driver this ecosystem does not carry:
+//
+//   - AbstractPaginator::loadMorph, ::loadMorphCount and the same two on
+//     AbstractCursorPaginator forward to Eloquent polymorphic relations. There
+//     is no Eloquent here, and docs/01-arquitetura.md rejects Active Record.
+//
+// The protected members answer to nothing on purpose: AbstractPaginator::
+// isValidPageNumber, ::appendArray, ::addQuery, ::buildFragment,
+// ::setCurrentPage, ::setItems, ::elements; AbstractCursorPaginator::
+// getPivotParameterForItem, ::ensureParameterIsPrimitive, ::appendArray,
+// ::addQuery, ::buildFragment, ::setItems; UrlWindow::getSmallSlider,
+// ::getUrlSlider, ::getSliderTooCloseToBeginning, ::getSliderTooCloseToEnding,
+// ::getFullSlider, ::currentPage, ::lastPage. Each is the body of an exported
+// method above it, and each is unexported here for the reason it is protected
+// there.
 package pagination

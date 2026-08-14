@@ -23,6 +23,8 @@ type Headers struct {
 
 // ReferencesString is the References header as one field value: each id wrapped
 // in angle brackets, separated by spaces.
+//
+// ReferencesString is Headers::referencesString.
 func (h Headers) ReferencesString() string {
 	out := make([]string, 0, len(h.References))
 	for _, id := range h.References {

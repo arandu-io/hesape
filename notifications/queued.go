@@ -54,7 +54,12 @@ type SendQueuedNotifications struct {
 	OnFailure func(cause error)
 }
 
-// Handle sends the notification. It is what the worker calls.
+// Handle is SendQueuedNotifications::handle: it sends the notification, and is
+// what the worker calls.
+//
+// PHP is handed the ChannelManager by the container's method injection; here it
+// is an argument, along with the ctx the I/O needs and the Grant every send
+// takes.
 func (j SendQueuedNotifications) Handle(ctx context.Context, g auth.Grant, n *Notifier) error {
 	if n == nil {
 		return errors.New("notifications: sending a queued notification needs a notifier")
@@ -66,7 +71,8 @@ func (j SendQueuedNotifications) Handle(ctx context.Context, g auth.Grant, n *No
 	return errors.Join(errs...)
 }
 
-// DisplayName is what the job is called on a dashboard and in a log line.
+// DisplayName is SendQueuedNotifications::displayName: what the job is called
+// on a dashboard and in a log line.
 //
 // Illuminate answers with the notification's class name. Here it is the Key,
 // which is the name that was chosen to be stable (see Key) rather than the one
@@ -78,17 +84,18 @@ func (j SendQueuedNotifications) DisplayName() string {
 	return string(j.Notification.Key())
 }
 
-// Failed is called when the worker gives up on the job.
+// Failed is SendQueuedNotifications::failed, called when the worker gives up on
+// the job.
 func (j SendQueuedNotifications) Failed(cause error) {
 	if j.OnFailure != nil {
 		j.OnFailure(cause)
 	}
 }
 
-// Backoff is how long a released notification waits before a worker may take it
-// again. Zero means the worker's own default.
+// Backoff is SendQueuedNotifications::backoff: how long a released notification
+// waits before a worker may take it again. Zero means the worker's own default.
 func (j SendQueuedNotifications) Backoff() time.Duration { return j.BackoffFor }
 
-// RetryUntil is when the worker stops retrying. The zero time means the
-// worker's own limit stands.
+// RetryUntil is SendQueuedNotifications::retryUntil: when the worker stops
+// retrying. The zero time means the worker's own limit stands.
 func (j SendQueuedNotifications) RetryUntil() time.Time { return j.RetryUntilAt }

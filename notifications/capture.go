@@ -9,6 +9,11 @@ import (
 
 // Delivery is one notification handed to one channel, as a capturing channel
 // recorded it.
+//
+// Nothing in Illuminate\Notifications answers to it: the equivalent is the
+// $notifications array inside Illuminate\Support\Testing\Fakes\
+// NotificationFake, which is a different component and is reached by swapping a
+// facade binding. Every exported name in this file is in the same position.
 type Delivery struct {
 	// Channel is which one took it.
 	Channel ChannelName
@@ -32,7 +37,8 @@ type Deliveries struct {
 	list []Delivery
 }
 
-// All returns a copy of everything recorded, in the order it happened.
+// All returns a copy of everything recorded, in the order it happened. It has
+// no PHP counterpart, for the reason [Delivery] gives.
 func (d *Deliveries) All() []Delivery {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -41,14 +47,16 @@ func (d *Deliveries) All() []Delivery {
 	return out
 }
 
-// Len is how many deliveries were recorded.
+// Len is how many deliveries were recorded. It has no PHP counterpart, for the
+// reason [Delivery] gives.
 func (d *Deliveries) Len() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return len(d.list)
 }
 
-// For returns the deliveries of one kind of notification.
+// For returns the deliveries of one kind of notification. It has no PHP
+// counterpart, for the reason [Delivery] gives.
 func (d *Deliveries) For(k Key) []Delivery {
 	var out []Delivery
 	for _, one := range d.All() {
@@ -61,6 +69,9 @@ func (d *Deliveries) For(k Key) []Delivery {
 
 // Sent reports whether a kind of notification reached a recipient on any
 // channel. It is the assertion a test writes nine times out of ten.
+//
+// It has no PHP counterpart, for the reason [Delivery] gives: the nearest thing
+// is NotificationFake::assertSentTo, in a different component.
 func (d *Deliveries) Sent(k Key, to Notifiable) bool {
 	if to == nil {
 		return false
@@ -75,7 +86,8 @@ func (d *Deliveries) Sent(k Key, to Notifiable) bool {
 	return false
 }
 
-// Reset forgets everything, for a test that reuses one Notifier across cases.
+// Reset forgets everything, for a test that reuses one Notifier across cases. It
+// has no PHP counterpart, for the reason [Delivery] gives.
 func (d *Deliveries) Reset() {
 	d.mu.Lock()
 	defer d.mu.Unlock()

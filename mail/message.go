@@ -98,6 +98,9 @@ type Message struct {
 }
 
 // Err is what went wrong in a fluent call that had no way to say so.
+//
+// Err has no PHP counterpart: Message::attach throws, and a method that
+// returns the receiver cannot.
 func (m *Message) Err() error { return m.err }
 
 // sameFile compares two attachment sources the way Illuminate's unique('file')
@@ -133,6 +136,8 @@ func (m *Message) GetSymfonyMessage() *Message { return m }
 
 // Sender sets the Sender header, which is who actually submitted the message
 // when that is not who it is from.
+//
+// Sender is Message::sender.
 func (m *Message) Sender(address any, name ...string) *Message {
 	if list := addressesOf(address, name...); len(list) > 0 {
 		m.sender = list[0]
@@ -142,24 +147,35 @@ func (m *Message) Sender(address any, name ...string) *Message {
 
 // GetSender is the Sender header, for a transport that has to write it. Symfony
 // answers Illuminate here; this is the reader for the setter above.
+//
+// GetSender has no PHP counterpart in Illuminate: it reads what
+// Message::sender wrote, which PHP reads back off the Symfony Email.
 func (m *Message) GetSender() Address { return m.sender }
 
 // ReturnPath sets the address bounces go to.
+//
+// ReturnPath is Message::returnPath.
 func (m *Message) ReturnPath(address string) *Message {
 	m.returnPath = address
 	return m
 }
 
 // GetReturnPath is the bounce address, for a transport that has to write it.
+//
+// GetReturnPath has no PHP counterpart, for the reason GetSender gives.
 func (m *Message) GetReturnPath() string { return m.returnPath }
 
 // Priority sets the message priority, where 1 is the highest and 5 the lowest.
+//
+// Priority is Message::priority.
 func (m *Message) Priority(level int) *Message {
 	m.priority = level
 	return m
 }
 
 // GetPriority is the priority, zero when none was set.
+//
+// GetPriority has no PHP counterpart, for the reason GetSender gives.
 func (m *Message) GetPriority() int { return m.priority }
 
 // ForgetTo removes every "to" address, recording what it removed in an X-To
@@ -168,6 +184,8 @@ func (m *Message) GetPriority() int { return m.priority }
 // The debug header is Illuminate's, and it is the point of the method: the
 // global "to" of a development mailer redirects everything to one inbox, and
 // without X-To the message that arrives no longer says who it was for.
+//
+// ForgetTo is Message::forgetTo.
 func (m *Message) ForgetTo() *Message {
 	if len(m.To) > 0 {
 		m.addAddressDebugHeader("X-To", m.To)
@@ -178,6 +196,8 @@ func (m *Message) ForgetTo() *Message {
 
 // ForgetCC removes every carbon copy address, recording what it removed in an
 // X-Cc header. Illuminate spells it forgetCc.
+//
+// ForgetCC is Message::forgetCc.
 func (m *Message) ForgetCC() *Message {
 	if len(m.CC) > 0 {
 		m.addAddressDebugHeader("X-Cc", m.CC)
@@ -188,6 +208,8 @@ func (m *Message) ForgetCC() *Message {
 
 // ForgetBCC removes every blind carbon copy address, recording what it removed
 // in an X-Bcc header. Illuminate spells it forgetBcc.
+//
+// ForgetBCC is Message::forgetBcc.
 func (m *Message) ForgetBCC() *Message {
 	if len(m.BCC) > 0 {
 		m.addAddressDebugHeader("X-Bcc", m.BCC)
@@ -209,6 +231,8 @@ func (m *Message) addAddressDebugHeader(header string, list []Address) {
 
 // Attach adds a file to the message. The file is a path, an [*Attachment] or an
 // [Attachable], which is the "mixed" Illuminate accepts.
+//
+// Attach is Message::attach, and Mailable::attach.
 func (m *Message) Attach(file any, options ...AttachOptions) *Message {
 	o := firstOption(options)
 
@@ -237,6 +261,8 @@ func (m *Message) Attach(file any, options ...AttachOptions) *Message {
 // may be paths and whose values may be option arrays; the Go equivalent is a
 // list whose elements are paths, attachments, or [AttachedFile] when a file
 // needs options of its own.
+//
+// AttachMany is Mailable::attachMany.
 func (m *Message) AttachMany(files ...any) *Message {
 	for _, file := range files {
 		if with, ok := file.(AttachedFile); ok {
@@ -249,6 +275,8 @@ func (m *Message) AttachMany(files ...any) *Message {
 }
 
 // AttachData adds bytes as an attachment under the given name.
+//
+// AttachData is Message::attachData, and Mailable::attachData.
 func (m *Message) AttachData(data []byte, name string, options ...AttachOptions) *Message {
 	o := firstOption(options)
 	for _, existing := range m.RawAttachments {
@@ -262,6 +290,8 @@ func (m *Message) AttachData(data []byte, name string, options ...AttachOptions)
 
 // AttachFromStorage attaches a path on the default disk. An empty name means
 // the path's last segment.
+//
+// AttachFromStorage is Mailable::attachFromStorage.
 func (m *Message) AttachFromStorage(p, name string, options ...AttachOptions) *Message {
 	return m.AttachFromStorageDisk("", p, name, options...)
 }
@@ -270,6 +300,8 @@ func (m *Message) AttachFromStorage(p, name string, options ...AttachOptions) *M
 //
 // Nothing is read here: the row is recorded and the disk is asked at send time,
 // which is what lets a queued mailable carry an attachment across a process.
+//
+// AttachFromStorageDisk is Mailable::attachFromStorageDisk.
 func (m *Message) AttachFromStorageDisk(disk, p, name string, options ...AttachOptions) *Message {
 	if name == "" {
 		name = path.Base(p)
@@ -294,6 +326,8 @@ func (m *Message) attachBytes(data []byte, name string, o AttachOptions) {
 
 // Embed puts a file in the message and answers the cid: reference the body uses
 // to show it inline.
+//
+// Embed is Message::embed.
 func (m *Message) Embed(file any) string {
 	if a, ok := file.(Attachable); ok {
 		file = a.ToMailAttachment()
@@ -323,6 +357,8 @@ func (m *Message) Embed(file any) string {
 
 // EmbedData puts bytes in the message and answers the cid: reference for them.
 // The content type is optional in Illuminate and arrives as a variadic tail.
+//
+// EmbedData is Message::embedData.
 func (m *Message) EmbedData(data []byte, name string, contentType ...string) string {
 	part := embedded{Data: data, Name: name}
 	if len(contentType) > 0 {
@@ -358,13 +394,19 @@ func mimeTypeOf(name string) string {
 }
 
 // UsesMailer reports whether this message goes out through the named mailer.
+//
+// UsesMailer is Mailable::usesMailer.
 func (m *Message) UsesMailer(mailer string) bool { return m.mailerName == mailer }
 
 // HasFrom reports whether the message is from the given address.
+//
+// HasFrom is Mailable::hasFrom.
 func (m *Message) HasFrom(address string, name ...string) bool { return m.IsFrom(address, name...) }
 
 // HasAttachment reports whether the file is already attached. The file is a
 // path, an [*Attachment] or an [Attachable], as it is for Attach.
+//
+// HasAttachment is Mailable::hasAttachment.
 func (m *Message) HasAttachment(file any, options ...AttachOptions) bool {
 	o := firstOption(options)
 
@@ -408,6 +450,8 @@ func (m *Message) HasAttachment(file any, options ...AttachOptions) bool {
 
 // HasAttachedData reports whether these exact bytes are attached under this
 // name.
+//
+// HasAttachedData is Mailable::hasAttachedData.
 func (m *Message) HasAttachedData(data []byte, name string, options ...AttachOptions) bool {
 	o := firstOption(options)
 	for _, existing := range m.RawAttachments {
@@ -420,12 +464,16 @@ func (m *Message) HasAttachedData(data []byte, name string, options ...AttachOpt
 
 // HasAttachmentFromStorage reports whether a path on the default disk is
 // attached. An empty name means the path's last segment.
+//
+// HasAttachmentFromStorage is Mailable::hasAttachmentFromStorage.
 func (m *Message) HasAttachmentFromStorage(p, name string, options ...AttachOptions) bool {
 	return m.HasAttachmentFromStorageDisk("", p, name, options...)
 }
 
 // HasAttachmentFromStorageDisk reports whether a path on the named disk is
 // attached.
+//
+// HasAttachmentFromStorageDisk is Mailable::hasAttachmentFromStorageDisk.
 func (m *Message) HasAttachmentFromStorageDisk(disk, p, name string, options ...AttachOptions) bool {
 	if name == "" {
 		name = path.Base(p)

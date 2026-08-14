@@ -1,9 +1,12 @@
 package notifications
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strings"
+
+	"github.com/arandu-io/hesape/auth"
 )
 
 // Key is the stable name of a kind of notification: "auth.password-reset",
@@ -114,10 +117,19 @@ type Localized interface {
 // goes to a person the system does not have an account for -- the invitation
 // e-mail being the case everybody hits.
 type Anonymous struct {
+	// Notifier is who Notify and NotifyNow send with. In PHP the notifiable
+	// finds the dispatcher in the container; here it is handed one (ADR 0001),
+	// which is also what lets a test hand it a Capture.
+	Notifier *Notifier
+
 	routes map[ChannelName]string
 }
 
 // Route starts an anonymous recipient, addressed on one channel.
+//
+// It is AnonymousNotifiable::route, reached as a constructor: PHP writes
+// `Notification::route('mail', $addr)` on the facade, and the facade is what
+// ADR 0002 removed, so the package function is where the first route goes.
 //
 //	notifier.Send(ctx, g, notifications.Route(notifications.ChannelMail, addr), Invite{})
 //
@@ -128,7 +140,35 @@ func Route(c ChannelName, to string) *Anonymous {
 	return (&Anonymous{}).Route(c, to)
 }
 
+// Routes starts an anonymous recipient addressed on several channels at once.
+//
+// It is Notification::routes, which PHP writes on the facade as
+// `Notification::routes(['mail' => $address, 'vonage' => $number])`: it makes
+// one AnonymousNotifiable and calls route() for every entry. It is [Route] for
+// more than one channel, and it is here as a package function for the reason
+// [Route] is -- the facade it hangs off is what ADR 0002 removed.
+//
+//	to := notifications.Routes(map[notifications.ChannelName]string{
+//		notifications.ChannelMail:      "ada@example.com",
+//		notifications.ChannelBroadcast: "invoices.42",
+//	})
+//
+// A "route" here is an address, not a URL pattern: nothing in this package
+// registers an HTTP route, and none of these addresses reaches a repository.
+// An empty or nil map makes a recipient with nowhere to be reached, which is
+// what PHP's empty array makes too: [Anonymous.Channels] answers empty, and a
+// notification whose Via reads it goes nowhere.
+func Routes(to map[ChannelName]string) *Anonymous {
+	a := &Anonymous{}
+	for c, address := range to {
+		a.Route(c, address)
+	}
+	return a
+}
+
 // Route adds an address on another channel and returns the same recipient.
+//
+// It is AnonymousNotifiable::route.
 func (a *Anonymous) Route(c ChannelName, to string) *Anonymous {
 	if a.routes == nil {
 		a.routes = make(map[ChannelName]string)
@@ -138,9 +178,14 @@ func (a *Anonymous) Route(c ChannelName, to string) *Anonymous {
 }
 
 // NotifiableID is empty: there is no row.
+//
+// It answers the Notifiable interface, which has no PHP counterpart:
+// Illuminate finds the morph id on the Eloquent model at store time.
 func (a *Anonymous) NotifiableID() string { return "" }
 
 // GetKey is empty, for the same reason.
+//
+// It is AnonymousNotifiable::getKey.
 //
 // Illuminate declares it on AnonymousNotifiable with an empty body, so that the
 // broadcast channel can derive a channel name from any notifiable without
@@ -149,21 +194,58 @@ func (a *Anonymous) NotifiableID() string { return "" }
 func (a *Anonymous) GetKey() string { return "" }
 
 // NotifiableType is "anonymous".
+//
+// It answers the Notifiable interface and has no PHP counterpart: Illuminate
+// reads the morph type off the Eloquent model, and an AnonymousNotifiable never
+// reaches a table.
 func (a *Anonymous) NotifiableType() string { return "anonymous" }
 
 // RouteFor answers with whatever Route recorded.
+//
+// It is RouteNotificationFor under the Notifiable interface's spelling; the two
+// are one method in PHP, where AnonymousNotifiable::routeNotificationFor is the
+// only name.
 func (a *Anonymous) RouteFor(c ChannelName) string { return a.routes[c] }
 
-// RouteNotificationFor is RouteFor.
+// RouteNotificationFor is AnonymousNotifiable::routeNotificationFor.
 //
 // It is Illuminate's spelling, declared on AnonymousNotifiable and on the
 // RoutesNotifications trait, and it is here so that a recipient written against
 // either name works.
 func (a *Anonymous) RouteNotificationFor(c ChannelName) string { return a.RouteFor(c) }
 
+// Notify is AnonymousNotifiable::notify.
+//
+// PHP reaches the dispatcher through the container; ADR 0001 removed the
+// container, so the Notifier is a field on the recipient, exactly as it is on
+// RoutesNotifications. The recipient is not an argument the way it is there: an
+// Anonymous is itself the notifiable, so it can hand itself over.
+func (a *Anonymous) Notify(ctx context.Context, g auth.Grant, n Notification) error {
+	if a.Notifier == nil {
+		return errors.New("notifications: this recipient has no notifier to send with")
+	}
+	return a.Notifier.Send(ctx, g, a, n)
+}
+
+// NotifyNow is AnonymousNotifiable::notifyNow.
+//
+// In Illuminate the two differ because notify() queues a notification that
+// implements ShouldQueue. Nothing here queues on its own -- sending on the queue
+// is SendQueuedNotifications, pushed at the call site -- so what NotifyNow adds
+// is the channel override, which is the second argument PHP gives it.
+func (a *Anonymous) NotifyNow(ctx context.Context, g auth.Grant, n Notification, channels ...ChannelName) error {
+	if a.Notifier == nil {
+		return errors.New("notifications: this recipient has no notifier to send with")
+	}
+	return a.Notifier.SendNow(ctx, g, a, n, channels...)
+}
+
 // Channels is every channel this recipient was routed at, sorted, which is what
 // a Notification's Via can return when it means "wherever this one can be
 // reached".
+//
+// It has no PHP counterpart: Illuminate reads the $routes property straight off
+// the object, and a property read in Go over an unexported map is a method.
 func (a *Anonymous) Channels() []ChannelName {
 	out := make([]ChannelName, 0, len(a.routes))
 	for c := range a.routes {
@@ -174,6 +256,9 @@ func (a *Anonymous) Channels() []ChannelName {
 }
 
 // Valid reports whether a Key is one: lowercase, dotted, no spaces.
+//
+// It has no PHP counterpart: Illuminate writes the notification's class name to
+// the type column, and a class name is checked by the parser.
 //
 // It is checked before anything is stored because the Key is written to a
 // column that is filtered on and read back by name, and a key with a stray

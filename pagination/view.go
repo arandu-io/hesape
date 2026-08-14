@@ -26,7 +26,8 @@ var (
 	defaultSimpleView = SimpleTailwindView
 )
 
-// DefaultView answers both AbstractPaginator::$defaultView, the static property
+// DefaultView is AbstractPaginator::defaultView and reads back
+// AbstractPaginator::$defaultView, the static property
 // a view reads, and AbstractPaginator::defaultView(), the static method that
 // writes it. Called with a view it sets the default and returns it; called with
 // none it reads.
@@ -47,7 +48,8 @@ func DefaultView(view ...string) string {
 	return defaultView
 }
 
-// DefaultSimpleView answers AbstractPaginator::$defaultSimpleView and
+// DefaultSimpleView is AbstractPaginator::defaultSimpleView and reads back
+// AbstractPaginator::$defaultSimpleView, and
 // AbstractPaginator::defaultSimpleView(), for the pager that has only previous
 // and next. It reads and writes the same way [DefaultView] does.
 func DefaultSimpleView(view ...string) string {
@@ -59,29 +61,29 @@ func DefaultSimpleView(view ...string) string {
 	return defaultSimpleView
 }
 
-// UseTailwind answers AbstractPaginator::useTailwind(). It is the default.
+// UseTailwind is AbstractPaginator::useTailwind. It is the default.
 func UseTailwind() {
 	DefaultView(TailwindView)
 	DefaultSimpleView(SimpleTailwindView)
 }
 
-// UseBootstrap answers AbstractPaginator::useBootstrap(), which is
+// UseBootstrap is AbstractPaginator::useBootstrap, which is
 // [UseBootstrapFour] under the name it had before there were four and five.
 func UseBootstrap() { UseBootstrapFour() }
 
-// UseBootstrapThree answers AbstractPaginator::useBootstrapThree().
+// UseBootstrapThree is AbstractPaginator::useBootstrapThree.
 func UseBootstrapThree() {
 	DefaultView(BootstrapThreeView)
 	DefaultSimpleView(SimpleBootstrapThreeView)
 }
 
-// UseBootstrapFour answers AbstractPaginator::useBootstrapFour().
+// UseBootstrapFour is AbstractPaginator::useBootstrapFour.
 func UseBootstrapFour() {
 	DefaultView(BootstrapFourView)
 	DefaultSimpleView(SimpleBootstrapFourView)
 }
 
-// UseBootstrapFive answers AbstractPaginator::useBootstrapFive().
+// UseBootstrapFive is AbstractPaginator::useBootstrapFive.
 func UseBootstrapFive() {
 	DefaultView(BootstrapFiveView)
 	DefaultSimpleView(SimpleBootstrapFiveView)

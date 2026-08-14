@@ -27,7 +27,7 @@ type LengthAwarePaginator[T any] struct {
 	options     Options
 }
 
-// Paginate answers LengthAwarePaginator::__construct(). It returns the page
+// Paginate is LengthAwarePaginator::__construct. It returns the page
 // holding items, out of total rows.
 //
 // The items are the rows of this page as the repository read them; nothing is
@@ -71,60 +71,60 @@ func Paginate[T any](items []T, total, perPage, currentPage int, opts Options) *
 	}
 }
 
-// Items answers items(). It returns the rows of this page, in the order they
+// Items is AbstractPaginator::items. It returns the rows of this page, in the order they
 // were read.
 func (p *LengthAwarePaginator[T]) Items() []T { return p.items }
 
-// Count answers count(). It returns how many rows this page holds, which is at
+// Count is AbstractPaginator::count, which is PHP's Countable. It returns how many rows this page holds, which is at
 // most PerPage and is less on the last page.
 func (p *LengthAwarePaginator[T]) Count() int { return len(p.items) }
 
-// IsEmpty answers isEmpty(). It reports whether this page holds no rows.
+// IsEmpty is AbstractPaginator::isEmpty. It reports whether this page holds no rows.
 func (p *LengthAwarePaginator[T]) IsEmpty() bool { return len(p.items) == 0 }
 
-// IsNotEmpty answers isNotEmpty(). It reports whether this page holds any rows.
+// IsNotEmpty is AbstractPaginator::isNotEmpty. It reports whether this page holds any rows.
 func (p *LengthAwarePaginator[T]) IsNotEmpty() bool { return len(p.items) > 0 }
 
-// GetIterator answers getIterator(). It ranges over the rows of this page with
+// GetIterator is AbstractPaginator::getIterator. It ranges over the rows of this page with
 // their offsets.
 //
 // PHP returns an ArrayIterator because IteratorAggregate demands one; Go's
 // range-over-func is the same thing under another name.
 func (p *LengthAwarePaginator[T]) GetIterator() iter.Seq2[int, T] { return seq2(p.items) }
 
-// GetCollection answers getCollection(). It returns the rows this page holds.
+// GetCollection is AbstractPaginator::getCollection. It returns the rows this page holds.
 //
 // Illuminate distinguishes the Collection from the plain array items() returns;
 // here both are the same slice, and both names are kept because both are called.
 func (p *LengthAwarePaginator[T]) GetCollection() []T { return p.items }
 
-// SetCollection answers setCollection(). It replaces the rows this page holds,
+// SetCollection is AbstractPaginator::setCollection. It replaces the rows this page holds,
 // leaving every number -- total, last page, current page -- alone.
 func (p *LengthAwarePaginator[T]) SetCollection(items []T) *LengthAwarePaginator[T] {
 	p.items = items
 	return p
 }
 
-// GetOptions answers getOptions(). It returns the options this page builds its
+// GetOptions is AbstractPaginator::getOptions. It returns the options this page builds its
 // URLs from, with the defaults already applied.
 func (p *LengthAwarePaginator[T]) GetOptions() Options { return p.options }
 
-// Total answers total(). It returns how many rows the whole result set holds.
+// Total is LengthAwarePaginator::total. It returns how many rows the whole result set holds.
 func (p *LengthAwarePaginator[T]) Total() int { return p.total }
 
-// PerPage answers perPage(). It returns the page size the paginator was built
+// PerPage is AbstractPaginator::perPage. It returns the page size the paginator was built
 // with.
 func (p *LengthAwarePaginator[T]) PerPage() int { return p.perPage }
 
-// CurrentPage answers currentPage(). It returns the page being read, counting
+// CurrentPage is AbstractPaginator::currentPage. It returns the page being read, counting
 // from one.
 func (p *LengthAwarePaginator[T]) CurrentPage() int { return p.currentPage }
 
-// LastPage answers lastPage(). It returns the number of the final page, and is
+// LastPage is LengthAwarePaginator::lastPage. It returns the number of the final page, and is
 // at least one -- an empty result set still has a page one to show the reader.
 func (p *LengthAwarePaginator[T]) LastPage() int { return p.lastPage }
 
-// FirstItem answers firstItem(). It returns the one-based index, in the whole
+// FirstItem is AbstractPaginator::firstItem. It returns the one-based index, in the whole
 // result set, of the first row on this page.
 //
 // It is zero when the page is empty, where PHP returns null: Go has no null int
@@ -136,7 +136,7 @@ func (p *LengthAwarePaginator[T]) FirstItem() int {
 	return (p.currentPage-1)*p.perPage + 1
 }
 
-// LastItem answers lastItem(). It returns the one-based index, in the whole
+// LastItem is AbstractPaginator::lastItem. It returns the one-based index, in the whole
 // result set, of the last row on this page, and zero when the page is empty.
 //
 // FirstItem and LastItem are the two numbers in "showing 21 to 40 of 512".
@@ -147,7 +147,7 @@ func (p *LengthAwarePaginator[T]) LastItem() int {
 	return p.FirstItem() + len(p.items) - 1
 }
 
-// HasPages answers hasPages(). It reports whether there is anywhere to go from
+// HasPages is AbstractPaginator::hasPages. It reports whether there is anywhere to go from
 // here, which is the test for rendering a pager at all.
 //
 // It is not "more than one page": a reader who followed a stale link to page 4
@@ -157,17 +157,17 @@ func (p *LengthAwarePaginator[T]) HasPages() bool {
 	return p.currentPage != 1 || p.HasMorePages()
 }
 
-// HasMorePages answers hasMorePages(). It reports whether a page follows this
+// HasMorePages is LengthAwarePaginator::hasMorePages. It reports whether a page follows this
 // one.
 func (p *LengthAwarePaginator[T]) HasMorePages() bool { return p.currentPage < p.lastPage }
 
-// OnFirstPage answers onFirstPage(). It reports whether this is page one.
+// OnFirstPage is AbstractPaginator::onFirstPage. It reports whether this is page one.
 func (p *LengthAwarePaginator[T]) OnFirstPage() bool { return p.currentPage <= 1 }
 
-// OnLastPage answers onLastPage(). It reports whether this is the final page.
+// OnLastPage is AbstractPaginator::onLastPage. It reports whether this is the final page.
 func (p *LengthAwarePaginator[T]) OnLastPage() bool { return !p.HasMorePages() }
 
-// URL answers url(). It returns the address of the given page; a page below one
+// URL is AbstractPaginator::url. It returns the address of the given page; a page below one
 // is read as one.
 func (p *LengthAwarePaginator[T]) URL(page int) string {
 	if page < 1 {
@@ -176,7 +176,7 @@ func (p *LengthAwarePaginator[T]) URL(page int) string {
 	return p.options.url(p.options.PageName, strconv.Itoa(page))
 }
 
-// GetURLRange answers getUrlRange(). It returns the address of every page from
+// GetURLRange is AbstractPaginator::getUrlRange. It returns the address of every page from
 // start to end inclusive, keyed by page number.
 func (p *LengthAwarePaginator[T]) GetURLRange(start, end int) map[int]string {
 	return p.urlsFor(pageRange(start, end))
@@ -196,7 +196,7 @@ func (p *LengthAwarePaginator[T]) urlsFor(pages []int) map[int]string {
 	return out
 }
 
-// PreviousPageURL answers previousPageUrl(). It returns the address of the page
+// PreviousPageURL is AbstractPaginator::previousPageUrl. It returns the address of the page
 // before this one, and the empty string on page one, where PHP returns null.
 func (p *LengthAwarePaginator[T]) PreviousPageURL() string {
 	if p.currentPage <= 1 {
@@ -205,7 +205,7 @@ func (p *LengthAwarePaginator[T]) PreviousPageURL() string {
 	return p.URL(p.currentPage - 1)
 }
 
-// NextPageURL answers nextPageUrl(). It returns the address of the page after
+// NextPageURL is LengthAwarePaginator::nextPageUrl. It returns the address of the page after
 // this one, and the empty string on the last page.
 func (p *LengthAwarePaginator[T]) NextPageURL() string {
 	if !p.HasMorePages() {
@@ -214,26 +214,26 @@ func (p *LengthAwarePaginator[T]) NextPageURL() string {
 	return p.URL(p.currentPage + 1)
 }
 
-// Path answers path(). It returns the base path the page links are built on.
+// Path is AbstractPaginator::path. It returns the base path the page links are built on.
 func (p *LengthAwarePaginator[T]) Path() string { return p.options.Path }
 
-// SetPath answers setPath(). It sets the base path the page links are built on.
+// SetPath is AbstractPaginator::setPath. It sets the base path the page links are built on.
 func (p *LengthAwarePaginator[T]) SetPath(path string) *LengthAwarePaginator[T] {
 	p.options.Path = path
 	return p
 }
 
-// WithPath answers withPath(), which in Illuminate is setPath under the name
+// WithPath is AbstractPaginator::withPath, which in Illuminate is setPath under the name
 // the fluent calls read better with.
 func (p *LengthAwarePaginator[T]) WithPath(path string) *LengthAwarePaginator[T] {
 	return p.SetPath(path)
 }
 
-// GetPageName answers getPageName(). It returns the query parameter the page
+// GetPageName is AbstractPaginator::getPageName. It returns the query parameter the page
 // number is written into.
 func (p *LengthAwarePaginator[T]) GetPageName() string { return p.options.PageName }
 
-// SetPageName answers setPageName(). It sets the query parameter the page
+// SetPageName is AbstractPaginator::setPageName. It sets the query parameter the page
 // number is written into, which is how two paginators appear on one screen
 // without moving each other.
 func (p *LengthAwarePaginator[T]) SetPageName(name string) *LengthAwarePaginator[T] {
@@ -241,7 +241,7 @@ func (p *LengthAwarePaginator[T]) SetPageName(name string) *LengthAwarePaginator
 	return p
 }
 
-// OnEachSide answers onEachSide(). It sets how many numbered links sit either
+// OnEachSide is AbstractPaginator::onEachSide. It sets how many numbered links sit either
 // side of the current page before the window collapses into a separator.
 //
 // Illuminate exposes this as a public property as well as a setter; only the
@@ -255,7 +255,7 @@ func (p *LengthAwarePaginator[T]) OnEachSide(count int) *LengthAwarePaginator[T]
 	return p
 }
 
-// Fragment answers fragment(). It sets the fragment appended after a "#", so a
+// Fragment is AbstractPaginator::fragment. It sets the fragment appended after a "#", so a
 // page link can land on the table rather than the top of the document.
 //
 // PHP's fragment() is a getter when called with no argument and a setter
@@ -267,7 +267,7 @@ func (p *LengthAwarePaginator[T]) Fragment(fragment string) *LengthAwarePaginato
 	return p
 }
 
-// Appends answers appends(). It carries extra query string values onto every
+// Appends is AbstractPaginator::appends. It carries extra query string values onto every
 // generated URL, which is what keeps a filter or a sort selected while the
 // reader walks the pages.
 //
@@ -283,7 +283,7 @@ func (p *LengthAwarePaginator[T]) Appends(key any, value ...string) *LengthAware
 	return p
 }
 
-// WithQueryString answers withQueryString(). It carries every parameter of the
+// WithQueryString is AbstractPaginator::withQueryString. It carries every parameter of the
 // current request onto the generated URLs.
 //
 // Illuminate reads them from a static closure a service provider installs;
@@ -294,7 +294,7 @@ func (p *LengthAwarePaginator[T]) WithQueryString(query url.Values) *LengthAware
 	return p
 }
 
-// Links is the data behind links(): the numbered window a pager renders, being
+// Links is the data behind LengthAwarePaginator::links: the numbered window a pager renders, being
 // the pages near this one, the first two and the last two, and a Separator
 // wherever pages were left out.
 //
@@ -333,7 +333,7 @@ func (p *LengthAwarePaginator[T]) Links() []Link {
 	return links
 }
 
-// LinkCollection answers linkCollection(). It is Links with the previous step
+// LinkCollection is LengthAwarePaginator::linkCollection. It is Links with the previous step
 // prepended and the next step appended, which is the "links" array of the JSON
 // payload.
 //
@@ -358,7 +358,7 @@ func (p *LengthAwarePaginator[T]) LinkCollection() []Link {
 	return append(links, next)
 }
 
-// ToArray answers toArray(). It is the payload Illuminate serialises a
+// ToArray is LengthAwarePaginator::toArray. It is the payload Illuminate serialises a
 // length-aware page to, key for key.
 func (p *LengthAwarePaginator[T]) ToArray() map[string]any {
 	return map[string]any{
@@ -378,27 +378,27 @@ func (p *LengthAwarePaginator[T]) ToArray() map[string]any {
 	}
 }
 
-// MarshalJSON answers jsonSerialize(), which is PHP's JsonSerializable; Go's
+// MarshalJSON is LengthAwarePaginator::jsonSerialize, which is PHP's JsonSerializable; Go's
 // name for the same contract is json.Marshaler. It makes the paginator itself
 // encodable, so a handler can hand one to a JSON encoder.
 func (p *LengthAwarePaginator[T]) MarshalJSON() ([]byte, error) {
 	return json.Marshal(p.ToArray())
 }
 
-// ToJSON answers toJson(). PHP takes json_encode flags and returns a string;
+// ToJSON is LengthAwarePaginator::toJson. PHP takes json_encode flags and returns a string;
 // this returns the bytes and the error json.Marshal reports, which is where the
 // exception went.
 func (p *LengthAwarePaginator[T]) ToJSON() ([]byte, error) {
 	return json.Marshal(p.ToArray())
 }
 
-// ToPrettyJSON answers toPrettyJson(). It is ToJSON indented four spaces, as
+// ToPrettyJSON is LengthAwarePaginator::toPrettyJson. It is ToJSON indented four spaces, as
 // PHP's JSON_PRETTY_PRINT indents.
 func (p *LengthAwarePaginator[T]) ToPrettyJSON() ([]byte, error) {
 	return prettyJSON(p.ToArray())
 }
 
-// Through answers through(): the same page with every item passed through f,
+// Through is AbstractPaginator::through: the same page with every item passed through f,
 // which is how a page of database rows becomes a page of whatever the view is
 // written against without recomputing a single number.
 //

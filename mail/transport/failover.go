@@ -55,6 +55,9 @@ type Failover struct {
 func (Failover) Name() string { return "failover" }
 
 // Send tries each transport in turn and returns as soon as one accepts.
+//
+// Send has no Illuminate class behind it: MailManager::createFailoverTransport
+// builds Symfony's FailoverTransport.
 func (t Failover) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error) {
 	if len(t.Transports) == 0 {
 		return mail.SentMessage{}, errors.New("mail: the failover transport has nothing to fail over to")

@@ -26,4 +26,7 @@ type MessageSent struct {
 // that turns $event->message into $this->sent->getOriginalMessage(); PHP magic
 // accessors have no Go twin, so the method carries the name of the call it
 // forwarded to.
+//
+// GetOriginalMessage is MessageSent::__get, whose one supported key is
+// 'message': the message as it was before the transport touched it.
 func (e MessageSent) GetOriginalMessage() *Message { return e.Sent.Message }

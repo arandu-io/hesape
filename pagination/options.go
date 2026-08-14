@@ -41,6 +41,12 @@ const (
 
 // Options is everything a paginator needs to write the URL of another page.
 //
+// It is the $options array the three constructors take, plus the four static
+// resolvers AbstractPaginator reads its defaults from. No PHP method answers to
+// it: there the array is unpacked onto properties by
+// AbstractPaginator::__construct and the resolvers are installed by
+// PaginationState::resolveUsing.
+//
 // The zero value is usable: it paginates the path "/" with no extra query, the
 // parameter names "page" and "cursor", and three links either side. Every
 // constructor takes an Options by value and normalises its own copy, so filling
@@ -145,6 +151,11 @@ func (o Options) url(name, value string) string {
 // path and the query is carried over, so a page link keeps every filter the
 // reader chose.
 //
+// It is PaginationState::resolveUsing without the container: that method
+// installs four closures that read the request out of the application, and this
+// reads the same four things out of the *url.URL and hands them back as a value
+// (ADR 0001).
+//
 // A nil URL yields the zero Options, normalised.
 func OptionsFrom(u *url.URL) Options {
 	if u == nil {
@@ -158,7 +169,7 @@ func OptionsFrom(u *url.URL) Options {
 	return Options{Path: base.String(), Query: u.Query()}.normalize()
 }
 
-// ResolveCurrentPage answers AbstractPaginator::resolveCurrentPage(). It reads
+// ResolveCurrentPage is AbstractPaginator::resolveCurrentPage. It reads
 // the page number out of the URL of the request being served.
 //
 // Illuminate reads it through a static closure a service provider installs;
@@ -186,7 +197,7 @@ func ResolveCurrentPage(u *url.URL, pageName string) int {
 	return page
 }
 
-// ResolveCurrentPath answers AbstractPaginator::resolveCurrentPath(). It reads
+// ResolveCurrentPath is AbstractPaginator::resolveCurrentPath. It reads
 // the address of the request being served, without its query string or
 // fragment, which is the base every page link is built on.
 //
@@ -207,7 +218,7 @@ func ResolveCurrentPath(u *url.URL, def string) string {
 	return base.String()
 }
 
-// ResolveQueryString answers AbstractPaginator::resolveQueryString(). It reads
+// ResolveQueryString is AbstractPaginator::resolveQueryString. It reads
 // the query string of the request being served, which is what WithQueryString
 // carries onto every page link.
 //
@@ -243,7 +254,9 @@ type Link struct {
 	Active bool
 }
 
-// MarshalJSON writes the link the way Illuminate's linkCollection() does: the
+// MarshalJSON has no PHP method to answer to: a link in PHP is an array inside
+// LengthAwarePaginator::linkCollection, and it is encoded by whatever encodes
+// the payload around it. It writes the link the way linkCollection does: the
 // keys url, label, page and active, with url and page null rather than zero
 // where there is no page to link to. A client that tests for null -- which is
 // what the PHP payload taught it to do -- would follow a link to "" otherwise.

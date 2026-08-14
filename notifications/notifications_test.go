@@ -194,3 +194,71 @@ func TestMigrationsCreateTheTable(t *testing.T) {
 		}
 	}
 }
+
+func TestAnonymousNotifySendsThroughItsOwnNotifier(t *testing.T) {
+	chans, sent := notifications.Capture(notifications.ChannelMail)
+	n := notifications.New(chans)
+
+	to := notifications.Route(notifications.ChannelMail, "ada@example.com")
+	to.Notifier = n
+
+	if err := to.Notify(context.Background(), sendGrant(t), invoicePaid{
+		number: "2026-114",
+		via:    []notifications.ChannelName{notifications.ChannelMail},
+	}); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+
+	all := sent.All()
+	if len(all) != 1 {
+		t.Fatalf("%d deliveries, want 1", len(all))
+	}
+	// The recipient hands itself over, which is what AnonymousNotifiable::notify
+	// does in PHP and what RoutesNotifications cannot do from an embedded struct.
+	if all[0].Route != "ada@example.com" {
+		t.Fatalf("delivered to %q", all[0].Route)
+	}
+	if all[0].To.NotifiableType() != "anonymous" {
+		t.Fatalf("delivered to a %q", all[0].To.NotifiableType())
+	}
+}
+
+func TestAnonymousNotifyNowOverridesTheChannels(t *testing.T) {
+	chans, sent := notifications.Capture(notifications.ChannelMail, notifications.ChannelBroadcast)
+	n := notifications.New(chans)
+
+	to := notifications.Route(notifications.ChannelMail, "ada@example.com").
+		Route(notifications.ChannelBroadcast, "guest.7")
+	to.Notifier = n
+
+	// The notification names mail and database; notifyNow's channel argument is
+	// what decides instead, exactly as it does in PHP.
+	err := to.NotifyNow(context.Background(), sendGrant(t), invoicePaid{number: "2026-114"},
+		notifications.ChannelBroadcast)
+	if err != nil {
+		t.Fatalf("NotifyNow: %v", err)
+	}
+
+	all := sent.All()
+	if len(all) != 1 {
+		t.Fatalf("%d deliveries, want 1", len(all))
+	}
+	if all[0].Channel != notifications.ChannelBroadcast {
+		t.Fatalf("delivered over %q, want broadcast", all[0].Channel)
+	}
+}
+
+func TestAnonymousWithNoNotifierSaysSo(t *testing.T) {
+	to := notifications.Route(notifications.ChannelMail, "ada@example.com")
+
+	err := to.Notify(context.Background(), sendGrant(t), invoicePaid{number: "2026-114"})
+	if err == nil {
+		t.Fatal("Notify with no notifier = nil, want a refusal")
+	}
+	if !strings.Contains(err.Error(), "notifier") {
+		t.Fatalf("the refusal is %q, and it should name what is missing", err)
+	}
+	if err := to.NotifyNow(context.Background(), sendGrant(t), invoicePaid{number: "2026-114"}); err == nil {
+		t.Fatal("NotifyNow with no notifier = nil, want a refusal")
+	}
+}

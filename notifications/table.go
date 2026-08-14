@@ -24,6 +24,9 @@ type TableStore struct {
 }
 
 // NewTableStore returns a Store over an open connection.
+//
+// It has no PHP counterpart: an Eloquent model finds its connection through the
+// container.
 func NewTableStore(db *database.DB) *TableStore {
 	return &TableStore{db: db, now: func() time.Time { return time.Now().UTC() }}
 }
@@ -32,7 +35,7 @@ var _ Store = (*TableStore)(nil)
 
 const columns = `id, tenant, notifiable_type, notifiable_id, notification_key, data, read_at, created_at`
 
-// Save writes one.
+// Save writes one. It is the Model::create inside DatabaseChannel::send.
 func (s *TableStore) Save(ctx context.Context, g auth.Grant, r Record) (Record, error) {
 	tenant, err := scope(g, ActionSend)
 	if err != nil {
@@ -51,12 +54,14 @@ func (s *TableStore) Save(ctx context.Context, g auth.Grant, r Record) (Record, 
 	return row, nil
 }
 
-// For returns the most recent notifications for a recipient, newest first.
+// For returns the most recent notifications for a recipient, newest first. It
+// is HasDatabaseNotifications::notifications, executed.
 func (s *TableStore) For(ctx context.Context, g auth.Grant, to Notifiable, limit int) ([]Record, error) {
 	return s.list(ctx, g, to, limit, "")
 }
 
-// Unread is For, restricted to the ones not yet read.
+// Unread is For, restricted to the ones not yet read. It is
+// HasDatabaseNotifications::unreadNotifications, executed.
 func (s *TableStore) Unread(ctx context.Context, g auth.Grant, to Notifiable, limit int) ([]Record, error) {
 	return s.list(ctx, g, to, limit, " AND "+ScopeUnread())
 }
@@ -97,7 +102,7 @@ func (s *TableStore) list(ctx context.Context, g auth.Grant, to Notifiable, limi
 	return out, nil
 }
 
-// MarkAsRead stamps one.
+// MarkAsRead stamps one. It is DatabaseNotification::markAsRead, executed.
 //
 // Which row the Grant was issued for is decided by the Authorize call that
 // produced it; what this statement guarantees is the tenant. A row belonging to
@@ -123,7 +128,8 @@ func (s *TableStore) MarkAsRead(ctx context.Context, g auth.Grant, id string) er
 	return s.mustExist(ctx, id, tenant)
 }
 
-// MarkAsUnread clears the stamp on one.
+// MarkAsUnread clears the stamp on one. It is
+// DatabaseNotification::markAsUnread, executed.
 func (s *TableStore) MarkAsUnread(ctx context.Context, g auth.Grant, id string) error {
 	tenant, err := scope(g, ActionRead)
 	if err != nil {
@@ -141,7 +147,9 @@ func (s *TableStore) MarkAsUnread(ctx context.Context, g auth.Grant, id string) 
 	return s.mustExist(ctx, id, tenant)
 }
 
-// MarkAllAsRead stamps every unread notification a recipient has.
+// MarkAllAsRead stamps every unread notification a recipient has. It is
+// DatabaseNotificationCollection::markAsRead over the whole relation, as one
+// statement rather than a row at a time.
 func (s *TableStore) MarkAllAsRead(ctx context.Context, g auth.Grant, to Notifiable) error {
 	tenant, err := scope(g, ActionRead)
 	if err != nil {
@@ -160,7 +168,7 @@ func (s *TableStore) MarkAllAsRead(ctx context.Context, g auth.Grant, to Notifia
 	return nil
 }
 
-// Delete removes one.
+// Delete removes one. It is Model::delete on a DatabaseNotification.
 func (s *TableStore) Delete(ctx context.Context, g auth.Grant, id string) error {
 	tenant, err := scope(g, ActionDelete)
 	if err != nil {

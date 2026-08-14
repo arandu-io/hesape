@@ -93,6 +93,8 @@ func (m *Markdown) clone() *Markdown {
 // Render draws the markdown template into HTML, with the theme's stylesheet
 // applied by the inliner. Illuminate's third argument is optional and arrives
 // here as a variadic tail.
+//
+// Render is Markdown::render.
 func (m *Markdown) Render(view string, data any, inliner ...Inliner) (string, error) {
 	if m.view == nil {
 		return "", errNoMarkdownView
@@ -124,6 +126,8 @@ func (m *Markdown) Render(view string, data any, inliner ...Inliner) (string, er
 // Illuminate does: a template full of conditionals leaves blank lines behind
 // wherever a branch did not fire, and a message that opens with nine of them
 // looks broken.
+//
+// RenderText is Markdown::renderText.
 func (m *Markdown) RenderText(view string, data any) (string, error) {
 	if m.view == nil {
 		return "", errNoMarkdownView
@@ -155,11 +159,15 @@ func (m *Markdown) themeView() string {
 
 // HTMLComponentPaths is where the HTML components are looked up. Illuminate
 // spells it htmlComponentPaths.
+//
+// HTMLComponentPaths is Markdown::htmlComponentPaths.
 func (m *Markdown) HTMLComponentPaths() []string {
 	return suffixed(m.paths(), "/html")
 }
 
 // TextComponentPaths is where the plain-text components are looked up.
+//
+// TextComponentPaths is Markdown::textComponentPaths.
 func (m *Markdown) TextComponentPaths() []string {
 	return suffixed(m.paths(), "/text")
 }
@@ -194,21 +202,31 @@ func (m *Markdown) paths() []string {
 const defaultComponentPath = "mail"
 
 // LoadComponentsFrom replaces the registered component paths.
+//
+// LoadComponentsFrom is Markdown::loadComponentsFrom.
 func (m *Markdown) LoadComponentsFrom(paths []string) {
 	m.componentPaths = append([]string(nil), paths...)
 }
 
 // Theme sets the theme this renderer draws with.
+//
+// Theme is Markdown::theme.
 func (m *Markdown) Theme(theme string) *Markdown {
 	m.theme = theme
 	return m
 }
 
 // GetTheme is the theme this renderer draws with.
+//
+// GetTheme is Markdown::getTheme.
 func (m *Markdown) GetTheme() string { return m.theme }
 
 // SetInliner replaces the stylesheet inliner. Illuminate passes one per call to
 // render(); this is the same choice made once.
+//
+// SetInliner has no PHP counterpart: Markdown::render takes the inliner as its
+// third argument and falls back to a class name resolved out of the container
+// (ADR 0001).
 func (m *Markdown) SetInliner(in Inliner) *Markdown {
 	m.inliner = in
 	return m
@@ -238,6 +256,8 @@ func Converter(config ...MarkdownConverter) *MarkdownConverter {
 }
 
 // Convert renders markdown into HTML.
+//
+// Convert is the CommonMarkConverter::convert that Markdown::parse calls.
 func (c *MarkdownConverter) Convert(text string) string {
 	if c.HTMLInput == "escape" {
 		text = escaped(text)
@@ -285,6 +305,8 @@ func Parse(text string, encoded ...bool) string {
 
 // WithSecuredEncoding turns on the escaping [Parse] describes, for every parse
 // from here on. It is global state, as it is in Illuminate.
+//
+// WithSecuredEncoding is Markdown::withSecuredEncoding.
 func WithSecuredEncoding() {
 	securedEncoding.Lock()
 	defer securedEncoding.Unlock()
@@ -292,6 +314,8 @@ func WithSecuredEncoding() {
 }
 
 // WithoutSecuredEncoding turns it off again.
+//
+// WithoutSecuredEncoding is Markdown::withoutSecuredEncoding.
 func WithoutSecuredEncoding() {
 	securedEncoding.Lock()
 	defer securedEncoding.Unlock()
@@ -300,6 +324,9 @@ func WithoutSecuredEncoding() {
 
 // SecuredEncoding reports whether the escaping is on. Illuminate reads its
 // static property directly, which Go cannot do across a mutex.
+//
+// SecuredEncoding reads Markdown::$withSecuredEncoding, a static property PHP
+// declares no getter for.
 func SecuredEncoding() bool {
 	securedEncoding.RLock()
 	defer securedEncoding.RUnlock()
@@ -308,4 +335,6 @@ func SecuredEncoding() bool {
 
 // FlushState puts the global state back where it started, and is what a test
 // calls between cases.
+//
+// FlushState is Markdown::flushState.
 func FlushState() { WithoutSecuredEncoding() }

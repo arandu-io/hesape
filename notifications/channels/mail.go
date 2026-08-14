@@ -11,6 +11,9 @@ import (
 
 // Mailer is the little the mail channel needs to send a message.
 //
+// It is the Illuminate\Contracts\Mail\Factory that MailChannel::__construct
+// takes, narrowed to the one call MailChannel::send makes on it.
+//
 // It is a seam to hesape/mail, which is layer 4 of
 // docs/31-reorganizacao-hesape.md and does not exist yet. When it does, the
 // adapter is a dozen lines: turn a messages.Mail into the envelope and the two
@@ -28,6 +31,11 @@ type Mailer interface {
 }
 
 // MailNotification is what a notification implements to travel by e-mail.
+//
+// It is the toMail() MailChannel::send looks for by name on the notification.
+// Naming it as an interface is what turns "Call to undefined method toMail"
+// into an error the compiler can raise, and it is why a notification that never
+// goes by e-mail carries no empty toMail.
 type MailNotification interface {
 	// ToMail is the message, built for this recipient. The recipient is an
 	// argument because their name goes in the greeting and their id goes in
@@ -35,20 +43,28 @@ type MailNotification interface {
 	ToMail(to notifications.Notifiable) messages.Mail
 }
 
-// Mail delivers a notification as an e-mail.
+// Mail delivers a notification as an e-mail. It is
+// Illuminate\Notifications\Channels\MailChannel.
 type Mail struct {
 	mailer Mailer
 }
 
-// NewMail returns the mail channel.
+// NewMail is MailChannel::__construct.
+//
+// PHP also takes a Markdown renderer, because MailChannel::buildMarkdownHtml
+// renders a template under a theme. There is no theme here (RULE 13) and
+// messages.Mail renders itself, so there is nothing to hand it.
 func NewMail(m Mailer) *Mail { return &Mail{mailer: m} }
 
 var _ notifications.Channel = (*Mail)(nil)
 
 // Name is "mail".
+//
+// It has no PHP counterpart: there the name is the string the container
+// resolved the driver by, and the driver never learns it.
 func (*Mail) Name() notifications.ChannelName { return notifications.ChannelMail }
 
-// Send builds the message and hands it to the Mailer.
+// Send is MailChannel::send.
 //
 // A recipient with no address is notifications.ErrNotAddressed, which the
 // Notifier treats as "not reachable this way" and not as a failure: somebody
