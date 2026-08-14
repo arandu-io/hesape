@@ -812,3 +812,139 @@ func TestMergeOptionsLaysTheGivenOptionsOverTheRequestsOwn(t *testing.T) {
 		t.Fatal("MergeOptions must not write back onto the request")
 	}
 }
+
+// --- Audit regressions: Response::throw, Response::throwIfStatus ---
+
+// TestResponseThrowRunsTheCallbackAndStillReturnsTheException pins
+// Response::throw down to the PHP, where the callback is wrapped in tap() and
+// so is a side effect: the exception is thrown whatever the callback does.
+// This returned the callback's own nil and made the 500 disappear, which is
+// what the documented ->throw(fn ($r, $e) => Log::error(...)) idiom does.
+func TestResponseThrowRunsTheCallbackAndStillReturnsTheException(t *testing.T) {
+	r := NewResponseFromBytes(500, []byte(`server error`), nil)
+
+	var gotResponse *Response
+	var gotException *RequestException
+	err := r.Throw(func(resp *Response, e *RequestException) {
+		gotResponse, gotException = resp, e
+	})
+
+	assertErr(t, err, "a 500 must throw even when a callback ran")
+	if gotResponse != r {
+		t.Fatal("the callback must receive the response, as the PHP's first argument")
+	}
+	if gotException == nil {
+		t.Fatal("the callback must receive the exception, as the PHP's second argument")
+	}
+	if err.(*RequestException) != gotException {
+		t.Fatal("the exception the callback saw must be the one that is returned")
+	}
+}
+
+// TestResponseThrowIfStatusThrowsOnASuccessfulStatus pins
+// Response::throwIfStatus, which throws whenever the status matches and does
+// not consult failed(). A 201 matched by ThrowIfStatus(201) returned nil.
+func TestResponseThrowIfStatusThrowsOnASuccessfulStatus(t *testing.T) {
+	r := NewResponseFromBytes(201, []byte(`created`), nil)
+
+	assertErr(t, r.ThrowIfStatus(201), "throwIfStatus(201) on a 201 must throw")
+	assertNoErr(t, r.ThrowIfStatus(202), "throwIfStatus(202) on a 201 must not throw")
+}
+
+// --- Audit regressions: PendingRequest::retry ---
+
+// countingTransport counts the requests that reach it and fails every one of
+// them, which is the connection error the retry loop never repeated.
+type countingTransport struct {
+	attempts atomic.Int32
+}
+
+func (c *countingTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	c.attempts.Add(1)
+	return nil, fmt.Errorf("dial tcp: connection refused")
+}
+
+// TestRetryWithoutAWhenCallbackStillRetries pins Http::retry(3) with no
+// callback, which is the common form: the PHP's ternary falls through to true
+// and three attempts are made. A nil callback turned the retry off entirely.
+func TestRetryWithoutAWhenCallbackStillRetries(t *testing.T) {
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) < 3 {
+			w.WriteHeader(500)
+			return
+		}
+		w.WriteHeader(200)
+	}))
+	defer server.Close()
+
+	f := NewFactory(server.Client())
+	p := f.CreatePendingRequest().Retry(3, time.Millisecond, nil, true)
+
+	resp, err := p.Get(server.URL, nil)
+	assertNoErr(t, err, "the third attempt succeeds")
+	assertEqual(t, resp.Status(), 200, "final status")
+	assertEqual(t, int(attempts.Load()), 3, "attempts")
+}
+
+// TestRetryMakesAtMostTheNumberOfAttemptsAskedFor pins the count: the PHP's
+// retry($times) is a total, not a number of extra tries. Retry(3) made four
+// requests.
+func TestRetryMakesAtMostTheNumberOfAttemptsAskedFor(t *testing.T) {
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(500)
+	}))
+	defer server.Close()
+
+	f := NewFactory(server.Client())
+	p := f.CreatePendingRequest().Retry(3, time.Millisecond, func(*http.Response, error) bool {
+		return true
+	}, true)
+
+	_, err := p.Get(server.URL, nil)
+	assertErr(t, err, "every attempt failed, so the exception is returned")
+	assertEqual(t, int(attempts.Load()), 3, "attempts")
+}
+
+// TestRetryRepeatsAConnectionError pins the case retry exists for. The loop
+// returned as soon as the transport failed, so a refused connection was tried
+// once.
+func TestRetryRepeatsAConnectionError(t *testing.T) {
+	transport := &countingTransport{}
+
+	f := NewFactory(&http.Client{Transport: transport})
+	p := f.CreatePendingRequest().Retry(3, time.Millisecond, nil, true)
+
+	_, err := p.Get("https://example.test/thing", nil)
+	assertErr(t, err, "the connection never came up")
+	assertEqual(t, int(transport.attempts.Load()), 3, "attempts")
+}
+
+// TestRetryDoesNotRepeatWhenTheCallbackSaysNot pins the callback's veto, and
+// that it is handed the exception rather than a nil second argument.
+func TestRetryDoesNotRepeatWhenTheCallbackSaysNot(t *testing.T) {
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(429)
+	}))
+	defer server.Close()
+
+	var sawException bool
+	f := NewFactory(server.Client())
+	p := f.CreatePendingRequest().Retry(3, time.Millisecond, func(_ *http.Response, err error) bool {
+		sawException = err != nil
+		return false
+	}, false)
+
+	resp, err := p.Get(server.URL, nil)
+	assertNoErr(t, err, "throw is off, so the response comes back")
+	assertEqual(t, resp.Status(), 429, "status")
+	assertEqual(t, int(attempts.Load()), 1, "attempts")
+	assertEqual(t, sawException, true, "the callback must be handed the exception")
+}

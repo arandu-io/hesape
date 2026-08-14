@@ -358,9 +358,52 @@ func (r *Request) IP() string {
 	return addr
 }
 
-// IPs answers to Request::ips: the chain of client addresses. With no proxy in
-// front, this is a list of one.
+// forwardedForKey is the context key the trust-proxies middleware writes the
+// chain under. It is an unexported type so nothing outside can collide with it
+// or overwrite it.
+type forwardedForKey struct{}
+
+// WithForwardedFor returns a context carrying the chain of client addresses
+// the trust-proxies middleware worked out, nearest hop first.
+//
+// The middleware calls it, because it is the only thing that knows which
+// proxies are ours: the chain cannot be recovered from the request afterwards,
+// which is why [Request.IPs] could not answer with one. It is exported for
+// that, and for the test that drives a request past the middleware.
+//
+// Only the first entry is verified. Everything to the left of it was written
+// by whoever that is and can say anything at all, which is why [Request.IP] --
+// what a rate limit, a throttle or a log line is keyed by -- is the first and
+// never the last.
+func WithForwardedFor(parent context.Context, chain []string) context.Context {
+	return context.WithValue(parent, forwardedForKey{}, chain)
+}
+
+// ForwardedForFrom returns the chain of client addresses on a request context,
+// or nil when no trusted proxy put one there.
+func ForwardedForFrom(ctx context.Context) []string {
+	chain, _ := ctx.Value(forwardedForKey{}).([]string)
+	return chain
+}
+
+// IPs answers to Request::ips: the chain of client addresses, nearest hop
+// first. With no proxy in front, this is a list of one.
+//
+// It is Symfony's getClientIps, which Illuminate's ips() delegates to: the
+// X-Forwarded-For entries plus the address the request actually came from,
+// with our own proxies removed, reversed so that ips()[0] is ip(). It used to
+// return the one address and no chain, so behind a proxy sending
+// "X-Forwarded-For: 1.1.1.1, 2.2.2.2" it answered with a single element where
+// the PHP answers with two. The doc said "the chain of client addresses" and
+// there was never a chain.
+//
+// Only the first entry is trustworthy. See [WithForwardedFor].
 func (r *Request) IPs() []string {
+	if chain := ForwardedForFrom(r.request.Context()); len(chain) > 0 {
+		out := make([]string, len(chain))
+		copy(out, chain)
+		return out
+	}
 	ip := r.IP()
 	if ip == "" {
 		return nil

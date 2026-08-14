@@ -56,12 +56,23 @@ func TrustProxies(trusted []netip.Prefix) hhttp.Middleware {
 				return
 			}
 
-			if client, ok := forwardedFor(r.Header.Values("X-Forwarded-For"), trusted); ok {
+			if chain := forwardedFor(r.Header.Values("X-Forwarded-For"), peer, trusted); len(chain) > 0 {
 				// Mutating the request rather than cloning it: the server made
 				// this one for this request and nothing else holds it, and a
 				// clone per request to change one field is a copy of every
 				// header on every request.
-				r.RemoteAddr = client.String()
+				r.RemoteAddr = chain[0].String()
+
+				// The whole chain goes on the context, because this is the only
+				// place that knows which hops are ours and hhttp.Request.IPs
+				// has no way to work it out later. Attaching it does mean a
+				// context value per proxied request, which is why it is one
+				// slice and not one value per hop.
+				addresses := make([]string, len(chain))
+				for i, addr := range chain {
+					addresses[i] = addr.String()
+				}
+				r = r.WithContext(hhttp.WithForwardedFor(r.Context(), addresses))
 			}
 			if scheme := forwardedProto(r.Header.Get("X-Forwarded-Proto")); scheme != "" {
 				// URL.Scheme is empty on a server-side request, so this is a
@@ -75,35 +86,53 @@ func TrustProxies(trusted []netip.Prefix) hhttp.Middleware {
 	}
 }
 
-// forwardedFor picks the visitor out of the X-Forwarded-For chain.
+// forwardedFor works the X-Forwarded-For chain out, nearest hop first: the
+// visitor is the first entry and the rest is what the header claimed came
+// before them.
 //
 // The header may arrive more than once, and the values concatenate in order, so
 // they are read as one list. An entry that does not parse ends the walk: past it
 // the chain cannot be reasoned about, and the nearest thing that is certainly
-// real is the hop to its right.
-func forwardedFor(values []string, trusted []netip.Prefix) (netip.Addr, bool) {
+// real is the hop to its right. Nothing is returned in that case, and the peer
+// stands.
+//
+// This is Symfony's normalizeAndFilterClientIps, which Request::ips is built
+// on: the peer completes the chain, our own proxies come out of it -- they are
+// infrastructure and not visitors -- and what is left is reversed. It used to
+// return the visitor alone, which is all the middleware needed and half of what
+// the request needed.
+func forwardedFor(values []string, peer netip.Addr, trusted []netip.Prefix) []netip.Addr {
 	var chain []netip.Addr
 	for _, value := range values {
 		for _, part := range strings.Split(value, ",") {
 			addr, ok := addrOf(strings.TrimSpace(part))
 			if !ok {
-				return netip.Addr{}, false
+				return nil
 			}
 			chain = append(chain, addr)
 		}
 	}
 	if len(chain) == 0 {
-		return netip.Addr{}, false
+		return nil
 	}
+	chain = append(chain, peer)
 
+	// Walk from the nearest hop outwards, dropping every entry that is one of
+	// ours wherever it sits -- a hop inside the trusted prefixes is
+	// infrastructure and not a visitor, and a client that writes one of our
+	// addresses into the header does not become one by saying so.
+	var out []netip.Addr
 	for i := len(chain) - 1; i >= 0; i-- {
 		if !within(trusted, chain[i]) {
-			return chain[i], true
+			out = append(out, chain[i])
 		}
 	}
-	// Trusted the whole way down. The leftmost entry is the only candidate
-	// left, and it is the one the first proxy wrote.
-	return chain[0], true
+	if len(out) == 0 {
+		// Trusted the whole way down. The leftmost entry is the only candidate
+		// left, and it is the one the first proxy wrote.
+		return []netip.Addr{chain[0]}
+	}
+	return out
 }
 
 // forwardedProto reads the scheme the browser used, or empty.

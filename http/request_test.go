@@ -1035,3 +1035,97 @@ func TestAnUploadThatLiesAboutItsTypeKeepsBothAnswersApart(t *testing.T) {
 		t.Fatalf("HashName() = %q, want it to end in the real extension", got)
 	}
 }
+
+// --- Audit regressions: vendor content type negotiation ---
+
+// TestMatchesTypeMatchesAVendorSuffix pins Request::matchesType, which strips
+// the subtype off the first argument and looks for it as a "+suffix" in the
+// second. It was written the other way round -- the suffix was taken off the
+// second argument and looked for in the first -- and the "+json" it then
+// searched for could never appear in a bare "json", so every case answered
+// false. Verified against the PHP with php -r for each row below.
+func TestMatchesTypeMatchesAVendorSuffix(t *testing.T) {
+	cases := []struct {
+		actual string
+		typ    string
+		want   bool
+	}{
+		{"application/json", "application/vnd.api+json", true},
+		{"application/xml", "application/atom+xml", true},
+		{"application/json", "application/json", true},
+		{"application/vnd.api+json", "application/json", false},
+		{"text/html", "application/json", false},
+		{"application/json", "application/+json", false},
+		{"json", "application/vnd.api+json", false},
+		{"application/json", "text/vnd.api+json", false},
+	}
+
+	for _, c := range cases {
+		if got := MatchesType(c.actual, c.typ); got != c.want {
+			t.Errorf("MatchesType(%q, %q) = %v, want %v", c.actual, c.typ, got, c.want)
+		}
+	}
+}
+
+// TestAcceptsAVendorContentType pins what the broken matchesType cost the
+// caller: an API that answers application/vnd.api+json saw every request
+// asking for it as a request asking for something else.
+func TestAcceptsAVendorContentType(t *testing.T) {
+	r := newRequest(t, "GET", "/things", nil)
+	r.request.Header.Set("Accept", "application/json")
+
+	if !r.Accepts("application/vnd.api+json") {
+		t.Error("Accept: application/json must accept application/vnd.api+json")
+	}
+	if !r.AcceptsJSON() {
+		t.Error("Accept: application/json must accept JSON")
+	}
+	if r.Accepts("text/html") {
+		t.Error("Accept: application/json must not accept text/html")
+	}
+	// Prefers reads the pair the other way round -- the caller's type is the
+	// plain one and the Accept header is where the suffix sits -- so it is the
+	// mirror of the case above, and both were false before. Verified against
+	// the PHP with php -r, including that the reverse pair is NULL there.
+	vendor := newRequest(t, "GET", "/things", nil)
+	vendor.request.Header.Set("Accept", "application/vnd.api+json")
+	if got := vendor.Prefers("text/html", "application/json"); got != "application/json" {
+		t.Errorf("Prefers = %q, want application/json", got)
+	}
+	if got := r.Prefers("application/vnd.api+json"); got != "" {
+		t.Errorf("Prefers = %q, want empty: the PHP answers null for this pair", got)
+	}
+}
+
+// --- Audit regression: the forwarded chain ---
+
+// TestIPsReturnsTheWholeForwardedChain pins Request::ips, which is
+// Symfony's getClientIps: the X-Forwarded-For entries plus the peer, with the
+// trusted proxies removed, nearest hop first. It returned a list of one on
+// every request, so the doc comment's "chain of client addresses" was never a
+// chain.
+func TestIPsReturnsTheWholeForwardedChain(t *testing.T) {
+	r := newRequest(t, "GET", "/", nil)
+	r.request.RemoteAddr = "2.2.2.2:1234"
+	r.request = r.request.WithContext(WithForwardedFor(r.request.Context(), []string{"2.2.2.2", "1.1.1.1"}))
+
+	ips := r.IPs()
+	if len(ips) != 2 || ips[0] != "2.2.2.2" || ips[1] != "1.1.1.1" {
+		t.Fatalf("IPs = %v, want [2.2.2.2 1.1.1.1]", ips)
+	}
+	if r.IP() != ips[0] {
+		t.Fatalf("IP = %q, want the first of the chain %q", r.IP(), ips[0])
+	}
+}
+
+// TestIPsWithoutAProxyIsAListOfOne pins the direct case, which is the one the
+// old implementation happened to get right.
+func TestIPsWithoutAProxyIsAListOfOne(t *testing.T) {
+	r := newRequest(t, "GET", "/", nil)
+	r.request.RemoteAddr = "9.9.9.9:5000"
+
+	ips := r.IPs()
+	if len(ips) != 1 || ips[0] != "9.9.9.9" {
+		t.Fatalf("IPs = %v, want [9.9.9.9]", ips)
+	}
+}

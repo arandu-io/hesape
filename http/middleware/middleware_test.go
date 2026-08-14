@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	hhttp "github.com/arandu-io/hesape/http"
 	"github.com/arandu-io/hesape/http/middleware"
 )
 
@@ -258,5 +259,70 @@ func TestSkipWhenTakesTheRequestOutOfTheCorsHandling(t *testing.T) {
 	handled.Header.Set("Origin", "https://example.test")
 	if rec, _ := run(mw, handled); rec.Header().Get("Access-Control-Allow-Origin") != "https://example.test" {
 		t.Fatal("a request that is not skipped should carry the CORS headers")
+	}
+}
+
+// TestTheWholeForwardedChainReachesTheRequest pins the other half of the
+// audit's Request::ips finding: the middleware knew the chain and threw it
+// away, keeping only the one address it wrote onto RemoteAddr, so
+// hhttp.Request.IPs had nothing to answer with but a list of one.
+//
+// The chain it leaves is Symfony's getClientIps: the forwarded entries plus
+// the peer, with our own proxies removed, nearest hop first. Only the first is
+// verified -- everything to the left of it was written by whoever that is --
+// which is why IP is the first and not the last.
+func TestTheWholeForwardedChainReachesTheRequest(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.3:8080"
+	r.Header.Set("X-Forwarded-For", "1.1.1.1, 2.2.2.2")
+
+	var chain []string
+	var remote string
+	middleware.TrustProxies(private)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		chain = hhttp.NewRequest(r).IPs()
+		remote = r.RemoteAddr
+	})).ServeHTTP(httptest.NewRecorder(), r)
+
+	if remote != "2.2.2.2" {
+		t.Fatalf("RemoteAddr = %q, want the nearest hop that is not ours", remote)
+	}
+	if len(chain) != 2 || chain[0] != "2.2.2.2" || chain[1] != "1.1.1.1" {
+		t.Fatalf("IPs = %v, want [2.2.2.2 1.1.1.1]", chain)
+	}
+}
+
+// TestOurOwnProxiesAreNotInTheChain pins the filtering: a hop inside the
+// trusted prefixes is infrastructure, not a visitor, and Symfony drops it.
+func TestOurOwnProxiesAreNotInTheChain(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.3:8080"
+	r.Header.Add("X-Forwarded-For", "203.0.113.9, 198.51.100.4")
+	r.Header.Add("X-Forwarded-For", "10.0.0.9")
+
+	var chain []string
+	middleware.TrustProxies(private)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		chain = hhttp.NewRequest(r).IPs()
+	})).ServeHTTP(httptest.NewRecorder(), r)
+
+	if len(chain) != 2 || chain[0] != "198.51.100.4" || chain[1] != "203.0.113.9" {
+		t.Fatalf("IPs = %v, want [198.51.100.4 203.0.113.9]", chain)
+	}
+}
+
+// TestAnUntrustedPeerLeavesNoChain pins that nothing is attached when the
+// request did not come from a proxy we trust: the list of one the raw
+// RemoteAddr gives is the whole truth there.
+func TestAnUntrustedPeerLeavesNoChain(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "203.0.113.7:44321"
+	r.Header.Set("X-Forwarded-For", "1.1.1.1, 2.2.2.2")
+
+	var chain []string
+	middleware.TrustProxies(private)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		chain = hhttp.NewRequest(r).IPs()
+	})).ServeHTTP(httptest.NewRecorder(), r)
+
+	if len(chain) != 1 || chain[0] != "203.0.113.7" {
+		t.Fatalf("IPs = %v, want [203.0.113.7]", chain)
 	}
 }

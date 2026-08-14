@@ -221,16 +221,25 @@ func (r *Response) Close() error {
 	return nil
 }
 
-// Throw calls throw on a failed response. If callback is non-nil, it is
-// called to create the error; otherwise a RequestException is returned.
-func (r *Response) Throw(callback func(*Response) error) error {
+// Throw is Response::throw: the RequestException a failed response carries,
+// or nil when it did not fail.
+//
+// The callback is a side effect and never a substitute. The PHP wraps it in
+// tap() -- throw tap($this->toException(), fn ($e) => $callback($this, $e)) --
+// so the exception goes up whatever the callback returns, and the documented
+// idiom ->throw(fn ($r, $e) => Log::error(...)) logs *and* throws. This
+// returned the callback's own error instead, so the idiom's nil made a 500
+// disappear; it also handed the callback one argument where the PHP hands it
+// two, the response and the exception.
+func (r *Response) Throw(callback func(*Response, *RequestException)) error {
 	if !r.Failed() {
 		return nil
 	}
+	exception := r.ToException()
 	if callback != nil {
-		return callback(r)
+		callback(r, exception)
 	}
-	return r.ToException()
+	return exception
 }
 
 // ToException is Response::toException: the RequestException this response
@@ -261,8 +270,9 @@ func (r *Response) DontTruncateExceptions() *Response {
 	return r
 }
 
-// ThrowIf calls throw if the condition is true.
-func (r *Response) ThrowIf(condition bool, callback func(*Response) error) error {
+// ThrowIf is Response::throwIf: throw when the condition holds and the
+// response failed. The callback is the side effect [Response.Throw] describes.
+func (r *Response) ThrowIf(condition bool, callback func(*Response, *RequestException)) error {
 	if condition {
 		return r.Throw(callback)
 	}
@@ -274,10 +284,18 @@ func (r *Response) ThrowUnless(condition bool) error {
 	return r.ThrowIf(!condition, nil)
 }
 
-// ThrowIfStatus calls throw if the response has the given status code.
+// ThrowIfStatus is Response::throwIfStatus: throw when the response carries
+// the given status code.
+//
+// It does not consult failed(). The PHP throws a RequestException the moment
+// the status matches, whatever the status is, which is what makes
+// throwIfStatus(201) a usable assertion. This went through Throw, which
+// returns nil for anything below 400, so every status a caller could name
+// under 400 was silently accepted -- the mirror image of throwUnlessStatus,
+// which was already right.
 func (r *Response) ThrowIfStatus(statusCode int) error {
 	if r.Status() == statusCode {
-		return r.Throw(nil)
+		return NewRequestException(r, r.truncateExceptionsAt)
 	}
 	return nil
 }

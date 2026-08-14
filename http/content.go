@@ -111,7 +111,12 @@ func (r *Request) Prefers(contentTypes ...string) string {
 		for _, contentType := range contentTypes {
 			typeLower := strings.ToLower(contentType)
 			acceptLower := strings.ToLower(accept)
-			if matchesType(acceptLower, typeLower) || acceptLower == strings.SplitN(typeLower, "/", 2)[0]+"/*" {
+			// The arguments are the other way round from Accepts, as they are
+			// in the PHP: here the caller's type is the plain one and the
+			// Accept header is where the vendor suffix may be. They were both
+			// written the same way here, which only stopped mattering when
+			// matchesType itself was fixed.
+			if matchesType(typeLower, acceptLower) || acceptLower == strings.SplitN(typeLower, "/", 2)[0]+"/*" {
 				return contentType
 			}
 		}
@@ -137,26 +142,38 @@ func (r *Request) GetAcceptableContentTypes() []string {
 // the PHP's accepts and prefers both use.
 func MatchesType(actual, typ string) bool { return matchesType(actual, typ) }
 
-// matchesType checks whether two content types match. "application/json"
-// matches "application/json" and "application/vnd.api+json" matches
-// "application/json" (the +json suffix).
+// matchesType checks whether two content types match.
+//
+// The direction is not symmetric and the PHP's is the one that matters:
+// actual is the plain type and typ is where the vendor suffix may be, so
+// matchesType("application/json", "application/vnd.api+json") is true and the
+// same pair the other way round is false. The PHP splits actual on the slash
+// and looks for its subtype as a "+suffix" inside typ:
+//
+//	preg_match('#'.$split[0].'/.+\+'.$split[1].'#', $type)
+//
+// This was written inside out -- the suffix was taken off typ and looked for
+// on the end of actual's subtype -- and since actual's subtype is a bare
+// "json" at that point, strings.HasSuffix("json", "+json") is false for every
+// input there is. Every vendor type negotiated as if it did not match, so an
+// API answering application/vnd.api+json saw Accepts and Prefers refuse it.
 func matchesType(actual, typ string) bool {
 	if actual == typ {
 		return true
 	}
-	parts := strings.SplitN(actual, "/", 2)
-	if len(parts) != 2 {
+	slash := strings.Index(actual, "/")
+	if slash < 0 {
 		return false
 	}
-	// application/json matches application/vnd.api+json via the +json suffix
-	if strings.Contains(typ, "+") {
-		typeParts := strings.SplitN(typ, "/", 2)
-		if len(typeParts) != 2 {
-			return false
-		}
-		suffixParts := strings.SplitN(typeParts[1], "+", 2)
-		if len(suffixParts) == 2 {
-			return parts[0] == typeParts[0] && strings.HasSuffix(parts[1], "+"+suffixParts[1])
+
+	// The PHP's pattern is unanchored, so this is a search rather than a
+	// comparison: "application/" then at least one character (the ".+", which
+	// is why "application/+json" does not match) then "+json".
+	prefix, suffix := actual[:slash+1], "+"+actual[slash+1:]
+	for i := 0; i+len(prefix) < len(typ); i++ {
+		if strings.HasPrefix(typ[i:], prefix) &&
+			strings.Contains(typ[i+len(prefix)+1:], suffix) {
+			return true
 		}
 	}
 	return false

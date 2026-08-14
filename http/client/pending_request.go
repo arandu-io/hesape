@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -320,7 +321,21 @@ func (p *PendingRequest) ConnectTimeout(d time.Duration) *PendingRequest {
 	return p
 }
 
-// Retry configures automatic retry on failure.
+// Retry is PendingRequest::retry: how many times the request may be attempted.
+//
+// times is a total and includes the first send, as the PHP's is: Retry(3)
+// makes at most three requests, not four. delay is what is waited between
+// them.
+//
+// when decides whether a failure is worth repeating and is handed the raw
+// response, if one arrived, and the failure itself -- a *RequestException when
+// the response failed, or the transport's error when the connection did. A nil
+// when repeats every failure, which is what Http::retry(3) means in the PHP
+// and is the ordinary way to call this.
+//
+// throw is the PHP's $throw: when more than one attempt was asked for and the
+// last one still failed, the failure comes back as an error rather than as a
+// response. It is on by default.
 func (p *PendingRequest) Retry(times int, delay time.Duration, when func(*http.Response, error) bool, throw bool) *PendingRequest {
 	p.retryTimes = times
 	p.retryDelay = delay
@@ -375,24 +390,22 @@ func (p *PendingRequest) AfterResponse(callback func(*Response) error) *PendingR
 	return p
 }
 
-// Throw enables throwing on 4xx/5xx responses.
-func (p *PendingRequest) Throw(callback func(*Response) error) *PendingRequest {
-	if callback != nil {
-		// Custom throw callback.
-		p.afterResponse = append(p.afterResponse, func(r *Response) error {
-			if r.Failed() {
-				return callback(r)
-			}
-			return nil
-		})
-		return p
-	}
-	// Default: throw on any 4xx/5xx.
+// Throw is PendingRequest::throw: turn a failed response into an error.
+//
+// The callback is the side effect [Response.Throw] describes and never a
+// substitute -- the PHP reaches the same $response->throw($this->throwCallback)
+// and the same tap(). This ran the callback in place of building the
+// exception, so a callback that only logged made the failure vanish.
+func (p *PendingRequest) Throw(callback func(*Response, *RequestException)) *PendingRequest {
 	p.afterResponse = append(p.afterResponse, func(r *Response) error {
-		if r.Failed() {
-			return NewRequestException(r, p.truncateExceptions)
+		if !r.Failed() {
+			return nil
 		}
-		return nil
+		exception := NewRequestException(r, p.truncateExceptions)
+		if callback != nil {
+			callback(r, exception)
+		}
+		return exception
 	})
 	return p
 }
@@ -668,72 +681,149 @@ func (p *PendingRequest) Send(method, urlStr string, query map[string]string, da
 	}
 
 	// Build the request body.
+	//
+	// It is buffered rather than streamed because an attempt consumes the
+	// reader and a retry needs the same bytes again. The old loop reused the
+	// spent reader, so every repeated request went out with an empty body.
 	body, contentType, err := p.buildBody(data)
 	if err != nil {
 		return nil, fmt.Errorf("http client: building body: %w", err)
+	}
+	var payload []byte
+	if body != nil {
+		if payload, err = io.ReadAll(body); err != nil {
+			return nil, fmt.Errorf("http client: reading body: %w", err)
+		}
 	}
 	if contentType != "" && p.headers.Get("Content-Type") == "" {
 		p.headers.Set("Content-Type", contentType)
 	}
 
-	// Build the *http.Request.
-	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, method, fullURL, body)
-	if err != nil {
-		return nil, fmt.Errorf("http client: creating request: %w", err)
-	}
-
-	// Apply headers.
-	req.Header = p.headers.Clone()
-
-	// Apply auth.
-	if p.token != "" {
-		req.Header.Set("Authorization", p.tokenType+" "+p.token)
-	}
-	if p.basicUser != "" {
-		req.SetBasicAuth(p.basicUser, p.basicPass)
-	}
-
-	// Run before-sending callbacks.
-	if err := p.RunBeforeSendingCallbacks(req); err != nil {
-		return nil, fmt.Errorf("http client: before sending: %w", err)
-	}
-
-	// The client this request goes out on, copied so the shared one is left
+	// The client these requests go out on, copied so the shared one is left
 	// alone.
 	cc := p.CreateClient(nil)
 
-	// Check stubs.
-	if stubResp, stubErr := p.findStub(req); stubResp != nil || stubErr != nil {
-		if p.factory != nil && p.factory.recording {
-			p.factory.RecordRequestResponsePair(req, stubResp, stubErr)
+	// The number of attempts, which is a total and not a number of extras:
+	// PHP's retry($times, ...) counts the first send. Retry was configured
+	// with zero until somebody asked for it, and zero still means one send.
+	attempts := p.retryTimes
+	if attempts < 1 {
+		attempts = 1
+	}
+
+	// One deadline per attempt, released when Send returns. A single deadline
+	// spanning every attempt would spend the caller's budget on the attempts
+	// that already failed.
+	var cancels []context.CancelFunc
+	defer func() {
+		for _, cancel := range cancels {
+			cancel()
 		}
-		if stubErr != nil {
-			return nil, stubErr
+	}()
+
+	for attempt := 1; ; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
+		cancels = append(cancels, cancel)
+
+		var reader io.Reader
+		if payload != nil {
+			reader = bytes.NewReader(payload)
 		}
-		resp := NewResponse(stubResp)
-		for _, cb := range p.afterResponse {
-			if err := cb(resp); err != nil {
-				return nil, err
+
+		req, err := http.NewRequestWithContext(ctx, method, fullURL, reader)
+		if err != nil {
+			return nil, fmt.Errorf("http client: creating request: %w", err)
+		}
+
+		// Apply headers.
+		req.Header = p.headers.Clone()
+
+		// Apply auth.
+		if p.token != "" {
+			req.Header.Set("Authorization", p.tokenType+" "+p.token)
+		}
+		if p.basicUser != "" {
+			req.SetBasicAuth(p.basicUser, p.basicPass)
+		}
+
+		// Run before-sending callbacks.
+		if err := p.RunBeforeSendingCallbacks(req); err != nil {
+			return nil, fmt.Errorf("http client: before sending: %w", err)
+		}
+
+		resp, httpResp, attemptErr := p.attempt(cc, req)
+
+		// A stray request is the test saying a stub is missing. Repeating it
+		// only makes the same complaint three times.
+		var stray *StrayRequestError
+		if errors.As(attemptErr, &stray) {
+			return nil, attemptErr
+		}
+
+		// What went wrong on this attempt, which is either the transport
+		// failing or the response having failed. The PHP hands the retry
+		// callback a ConnectionException in the first case and the response's
+		// own RequestException in the second; this passed nil for both.
+		failure := attemptErr
+		if failure == nil && resp != nil && resp.Failed() {
+			failure = NewRequestException(resp, p.truncateExceptions)
+		}
+		if failure == nil {
+			return resp, nil
+		}
+
+		// Whether to try again. A nil callback is the PHP's ternary falling
+		// through to true, not the retry being switched off -- Http::retry(3)
+		// with no callback is the ordinary way to call it, and it used to make
+		// exactly one request.
+		shouldRetry := true
+		if p.retryWhen != nil {
+			shouldRetry = p.retryWhen(httpResp, failure)
+		}
+
+		if attempt < attempts && shouldRetry {
+			if p.retryDelay > 0 {
+				time.Sleep(p.retryDelay)
 			}
+			continue
+		}
+
+		// Out of attempts. A transport failure is returned as it is; a failed
+		// response is turned into an exception only when more than one attempt
+		// was asked for and throwing was left on, which is the PHP's
+		// "if ($potentialTries > 1 && $this->retryThrow)".
+		if attemptErr != nil {
+			return nil, attemptErr
+		}
+		if attempts > 1 && p.retryThrow {
+			return nil, failure
 		}
 		return resp, nil
 	}
+}
 
-	// Send the request.
-	httpResp, err := cc.Do(req)
-	if err != nil {
-		if p.factory != nil && p.factory.recording {
-			p.factory.RecordRequestResponsePair(req, nil, err)
+// attempt sends one request and builds its Response.
+//
+// It answers to the body of the closure the PHP hands to retry(): the stub
+// stands in for the handler Guzzle would have called, the response is
+// recorded, and the after-response callbacks run. The error it returns is the
+// attempt's failure -- a transport error, a stubbed connection failure, or
+// whatever an after-response callback objected to -- and the caller decides
+// whether that failure is worth repeating.
+func (p *PendingRequest) attempt(cc *http.Client, req *http.Request) (*Response, *http.Response, error) {
+	httpResp, err := p.findStub(req)
+	if httpResp == nil && err == nil {
+		httpResp, err = cc.Do(req)
+		if err != nil {
+			err = fmt.Errorf("http client: %w", err)
 		}
-		return nil, fmt.Errorf("http client: %w", err)
 	}
 
-	// Record.
 	if p.factory != nil && p.factory.recording {
-		p.factory.RecordRequestResponsePair(req, httpResp, nil)
+		p.factory.RecordRequestResponsePair(req, httpResp, err)
+	}
+	if err != nil {
+		return nil, nil, err
 	}
 
 	resp := NewResponse(httpResp)
@@ -742,7 +832,7 @@ func (p *PendingRequest) Send(method, urlStr string, query map[string]string, da
 	if p.sink != nil {
 		if _, err := io.Copy(p.sink, httpResp.Body); err != nil {
 			httpResp.Body.Close()
-			return nil, fmt.Errorf("http client: sinking body: %w", err)
+			return nil, httpResp, fmt.Errorf("http client: sinking body: %w", err)
 		}
 		httpResp.Body.Close()
 		_ = resp.Close()
@@ -752,34 +842,11 @@ func (p *PendingRequest) Send(method, urlStr string, query map[string]string, da
 	for _, cb := range p.afterResponse {
 		if err := cb(resp); err != nil {
 			httpResp.Body.Close()
-			return nil, err
+			return resp, httpResp, err
 		}
 	}
 
-	// Retry if configured.
-	if p.retryTimes > 0 && resp.Failed() && p.retryWhen != nil && p.retryWhen(httpResp, nil) {
-		for i := 0; i < p.retryTimes; i++ {
-			time.Sleep(p.retryDelay)
-			httpResp.Body.Close()
-			req2, _ := http.NewRequestWithContext(ctx, method, fullURL, body)
-			req2.Header = req.Header
-			httpResp, err = cc.Do(req2)
-			if err != nil {
-				continue
-			}
-			resp = NewResponse(httpResp)
-			if !resp.Failed() || (p.retryWhen != nil && !p.retryWhen(httpResp, nil)) {
-				break
-			}
-		}
-		// If still failed after retries and throw is enabled, return error.
-		if p.retryThrow && resp.Failed() {
-			httpResp.Body.Close()
-			return nil, NewRequestException(resp, p.truncateExceptions)
-		}
-	}
-
-	return resp, nil
+	return resp, httpResp, nil
 }
 
 // Pool executes a callback that adds requests to a Pool and sends them
