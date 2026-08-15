@@ -32,8 +32,14 @@ type Dispatcher interface {
 	Listen(listener func(event any))
 }
 
-// ErrNoDispatcher answers the RuntimeException that
-// Illuminate\Log\Logger::listen throws when no event dispatcher was set.
+// ErrNoDispatcher is what Listen answers on a Logger built without a dispatcher.
+//
+// The dispatcher is optional, so this is not a broken Logger: it writes every
+// line it is given and fires no event. What it cannot do is register a listener,
+// because there is nothing to register with -- and answering an error there is
+// better than accepting a callback that would never be called.
+//
+// Answers the RuntimeException Illuminate\Log\Logger::listen throws.
 var ErrNoDispatcher = errors.New("log: events dispatcher has not been set")
 
 // Logger answers Illuminate\Log\Logger: the eight PSR-3 levels, an accumulated

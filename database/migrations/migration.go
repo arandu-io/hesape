@@ -130,8 +130,18 @@ func (m BaseMigration) ShouldRun() bool { return true }
 // WithinTransaction answers Migration::$withinTransaction.
 func (m BaseMigration) WithinTransaction() bool { return !m.OutsideTransaction }
 
-// MigrationResult answers Illuminate\Database\Migrations\MigrationResult, the
-// backed enum the Migrator writes next to a migration's name.
+// MigrationResult is how one migration turned out: Success, Failure or
+// Skipped. Its String is the word the Migrator prints beside the migration's
+// name.
+//
+// Skipped is the case worth knowing about, and it is not a failure: a migration
+// whose ShouldRun answers false is passed over deliberately -- the guard exists
+// for a migration that only applies to one engine, or one deployment -- and the
+// run carries on. The numbers are the PHP's own, so a value written down by one
+// side reads the same on the other.
+//
+// Answers Illuminate\Database\Migrations\MigrationResult, the backed enum the
+// Migrator writes next to a migration's name.
 type MigrationResult int
 
 // The three cases of MigrationResult, with the PHP's own values.

@@ -68,15 +68,28 @@ func FlushState() {
 	wrapState.Unlock()
 }
 
-// Arrayable is the Illuminate\Contracts\Support\Arrayable slice that
-// JsonResource::toArray reaches for on the resource it wraps.
+// Arrayable is what a wrapped value implements when it knows how to present
+// itself as a map. [Resource.ToArray] looks for it before falling back to
+// encoding/json, so a model that implements it decides exactly which fields
+// reach the response instead of having them read off its struct tags.
+//
+// Answers Illuminate\Contracts\Support\Arrayable.
 type Arrayable interface {
 	// ToArray answers to Arrayable::toArray.
 	ToArray() map[string]any
 }
 
-// UrlRoutable is the Illuminate\Contracts\Routing\UrlRoutable slice that
-// DelegatesToResource forwards to.
+// UrlRoutable is what a wrapped value implements when a URL segment can
+// identify it: it reports the key that does the identifying and the name that
+// key goes by in a route.
+//
+// [Resource.GetRouteKey] and [Resource.GetRouteKeyName] forward to the wrapped
+// value when it implements this, and answer empty when it does not. A resource
+// is never routable itself -- [Resource.ResolveRouteBinding] always fails with
+// [ErrNotRouteBindable] -- so what a resource can do is repeat the identity of
+// the model it dresses, and no more.
+//
+// Answers Illuminate\Contracts\Routing\UrlRoutable.
 type UrlRoutable interface {
 	// GetRouteKey answers to UrlRoutable::getRouteKey.
 	GetRouteKey() any

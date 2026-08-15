@@ -297,9 +297,12 @@ func Duplicates[T any, K comparable](c Collection[T], key func(value T, k int) K
 	return Collection[K](out)
 }
 
-// DuplicatesStrict answers to
-// Illuminate\Support\Collection::duplicatesStrict. Go's == is already PHP's
-// ===, so this is Duplicates under Illuminate's second name.
+// DuplicatesStrict reports the keys that appear more than once, exactly as
+// Duplicates does. PHP carries two functions because loose == and strict ===
+// find different repeats there; Go's == is already the strict comparison, so
+// the two collapse into one behaviour and this name forwards to Duplicates.
+//
+// Answers Illuminate\Support\Collection::duplicatesStrict.
 func DuplicatesStrict[T any, K comparable](c Collection[T], key func(value T, k int) K) Collection[K] {
 	return Duplicates(c, key)
 }
@@ -442,8 +445,15 @@ func Where[T any, V cmp.Ordered](c Collection[T], key func(item T) V, operator s
 	})
 }
 
-// FirstWhere answers to
-// Illuminate\Support\Traits\EnumeratesValues::firstWhere.
+// FirstWhere returns the first item whose projected key satisfies the
+// comparison. It is Where followed by First, and takes the same operator set
+// Where documents.
+//
+// The second result is false when nothing matches, so a zero-valued item is
+// never mistaken for a hit. The whole collection is filtered before the first
+// survivor is taken, so this is a convenience over Where, not a cheaper scan.
+//
+// Answers Illuminate\Support\Traits\EnumeratesValues::firstWhere.
 func FirstWhere[T any, V cmp.Ordered](c Collection[T], key func(item T) V, operator string, value V) (T, bool) {
 	return Where(c, key, operator, value).First(nil)
 }
@@ -468,15 +478,24 @@ func WhereIn[T any, V comparable](c Collection[T], key func(item T) V, values []
 	})
 }
 
-// WhereInStrict answers to
-// Illuminate\Support\Traits\EnumeratesValues::whereInStrict. Go's == is
-// already PHP's ===, so this is WhereIn under Illuminate's second name.
+// WhereInStrict keeps the items whose projected key is one of values, exactly
+// as WhereIn does. PHP carries two functions because its in_array compares
+// loosely unless asked otherwise; Go's == is already the strict comparison, so
+// this name forwards to WhereIn.
+//
+// Answers Illuminate\Support\Traits\EnumeratesValues::whereInStrict.
 func WhereInStrict[T any, V comparable](c Collection[T], key func(item T) V, values []V) Collection[T] {
 	return WhereIn(c, key, values)
 }
 
-// WhereNotIn answers to
-// Illuminate\Support\Traits\EnumeratesValues::whereNotIn.
+// WhereNotIn keeps the items whose projected key is absent from values: the
+// complement of WhereIn, and the way to exclude a known set without spelling
+// out the negated predicate.
+//
+// The order of the collection survives, and values is loaded into a set
+// before the scan, so the cost is one pass regardless of how long values is.
+//
+// Answers Illuminate\Support\Traits\EnumeratesValues::whereNotIn.
 func WhereNotIn[T any, V comparable](c Collection[T], key func(item T) V, values []V) Collection[T] {
 	want := make(map[V]struct{}, len(values))
 	for _, v := range values {
@@ -488,8 +507,12 @@ func WhereNotIn[T any, V comparable](c Collection[T], key func(item T) V, values
 	})
 }
 
-// WhereNotInStrict answers to
-// Illuminate\Support\Traits\EnumeratesValues::whereNotInStrict.
+// WhereNotInStrict keeps the items whose projected key is absent from values,
+// exactly as WhereNotIn does. PHP carries two functions because its in_array
+// compares loosely unless asked otherwise; Go's == is already the strict
+// comparison, so this name forwards to WhereNotIn.
+//
+// Answers Illuminate\Support\Traits\EnumeratesValues::whereNotInStrict.
 func WhereNotInStrict[T any, V comparable](c Collection[T], key func(item T) V, values []V) Collection[T] {
 	return WhereNotIn(c, key, values)
 }
@@ -504,8 +527,14 @@ func WhereBetween[T any, V cmp.Ordered](c Collection[T], key func(item T) V, fro
 	})
 }
 
-// WhereNotBetween answers to
-// Illuminate\Support\Traits\EnumeratesValues::whereNotBetween.
+// WhereNotBetween keeps the items whose projected key falls outside the
+// range: below from, or above to.
+//
+// Both ends count as inside, so an item sitting exactly on from or on to is
+// dropped. That makes this the exact complement of WhereBetween -- every item
+// is kept by one of the two and by neither twice.
+//
+// Answers Illuminate\Support\Traits\EnumeratesValues::whereNotBetween.
 func WhereNotBetween[T any, V cmp.Ordered](c Collection[T], key func(item T) V, from, to V) Collection[T] {
 	return c.Filter(func(item T, _ int) bool {
 		v := key(item)
@@ -521,8 +550,13 @@ func WhereNull[T any, V any](c Collection[T], key func(item T) *V) Collection[T]
 	return c.Filter(func(item T, _ int) bool { return key(item) == nil })
 }
 
-// WhereNotNull answers to
-// Illuminate\Support\Traits\EnumeratesValues::whereNotNull.
+// WhereNotNull keeps the items whose accessor returns a non-nil pointer, and
+// drops those where the field is absent. It is the complement of WhereNull.
+//
+// The accessor returns a pointer because a pointer is how a field that may be
+// absent is spelled in Go, where PHP spells it null.
+//
+// Answers Illuminate\Support\Traits\EnumeratesValues::whereNotNull.
 func WhereNotNull[T any, V any](c Collection[T], key func(item T) *V) Collection[T] {
 	return c.Filter(func(item T, _ int) bool { return key(item) != nil })
 }
@@ -562,8 +596,11 @@ func ContainsStrict[T comparable](c Collection[T], value T) bool {
 	return false
 }
 
-// DoesntContainStrict answers to
-// Illuminate\Support\Collection::doesntContainStrict.
+// DoesntContainStrict reports whether no item equals value. It is the
+// negation of ContainsStrict, and exists so the absent case reads as its own
+// call rather than as an exclamation mark in front of somebody else's.
+//
+// Answers Illuminate\Support\Collection::doesntContainStrict.
 func DoesntContainStrict[T comparable](c Collection[T], value T) bool {
 	return !ContainsStrict(c, value)
 }
@@ -642,8 +679,17 @@ func Intersect[T comparable](c Collection[T], items []T) Collection[T] {
 	})
 }
 
-// IntersectUsing answers to
-// Illuminate\Support\Collection::intersectUsing.
+// IntersectUsing keeps the items that match something in items, with the
+// match decided by compare instead of by ==. compare returns zero for equal,
+// the convention of the cmp and slices packages.
+//
+// It is Intersect for element types that == cannot decide, or should not:
+// a struct with a field to ignore, or a name to match without regard to case.
+// Each item is walked against items until one matches, so the cost is the
+// product of the two lengths where Intersect is linear. Reach for it when ==
+// cannot answer the question, not by default.
+//
+// Answers Illuminate\Support\Collection::intersectUsing.
 func IntersectUsing[T any](c Collection[T], items []T, compare func(a, b T) int) Collection[T] {
 	return c.Filter(func(v T, _ int) bool {
 		for _, other := range items {

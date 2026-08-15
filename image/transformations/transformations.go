@@ -25,7 +25,15 @@ type Transformation interface {
 	TransformationName() string
 }
 
-// Blur answers Illuminate\Image\Transformations\Blur.
+// Blur softens the whole canvas: every pixel is averaged with the ones around
+// it, so noise and fine detail go and the broad shapes stay. There is no way to
+// blur part of an image -- crop first if that is what you want.
+//
+// Amount is a strength, not a distance in pixels, and the driver decides how
+// far it reaches. Zero is a no-op: the canvas comes out of the pipeline
+// untouched rather than rejected.
+//
+// Answers Illuminate\Image\Transformations\Blur.
 type Blur struct {
 	// Amount is Illuminate's $amount, 0 to 100. Illuminate\Image\Image.Blur
 	// clamps it to that range before it gets here.
@@ -60,7 +68,15 @@ type Cover struct {
 // TransformationName answers Cover::class.
 func (Cover) TransformationName() string { return "Cover" }
 
-// Crop answers Illuminate\Image\Transformations\Crop.
+// Crop cuts a rectangle out of the image and throws the rest away. Nothing is
+// scaled: the result is Width by Height at the original resolution, taken from
+// the source starting at X, Y, which are counted from the top left corner.
+//
+// The rectangle is not required to fit inside the source. Whatever part of it
+// hangs over an edge has no pixels to take, and that part of the result stays
+// transparent.
+//
+// Answers Illuminate\Image\Transformations\Crop.
 type Crop struct {
 	Width  int
 	Height int
@@ -71,8 +87,12 @@ type Crop struct {
 // TransformationName answers Crop::class.
 func (Crop) TransformationName() string { return "Crop" }
 
-// FlipHorizontally answers Illuminate\Image\Transformations\FlipHorizontally:
-// left becomes right.
+// FlipHorizontally mirrors the image across its vertical centre line: the
+// leftmost column of pixels becomes the rightmost. The dimensions do not
+// change, no pixel is interpolated, and applying it twice gives the original
+// back.
+//
+// Answers Illuminate\Image\Transformations\FlipHorizontally.
 type FlipHorizontally struct{}
 
 // TransformationName answers FlipHorizontally::class.
@@ -85,7 +105,15 @@ type FlipVertically struct{}
 // TransformationName answers FlipVertically::class.
 func (FlipVertically) TransformationName() string { return "FlipVertically" }
 
-// Grayscale answers Illuminate\Image\Transformations\Grayscale.
+// Grayscale drops the colour and keeps the brightness: every pixel becomes the
+// grey of its own luminance. Transparency survives untouched, and the image
+// stays in a colour format -- this makes the picture grey, it does not make the
+// file smaller by storing one channel instead of three.
+//
+// It is not reversible. The colour is gone from the pipeline's output, so an
+// image needed in both forms has to be derived twice from the original.
+//
+// Answers Illuminate\Image\Transformations\Grayscale.
 type Grayscale struct{}
 
 // TransformationName answers Grayscale::class.
@@ -113,7 +141,17 @@ type Resize struct {
 // TransformationName answers Resize::class.
 func (Resize) TransformationName() string { return "Resize" }
 
-// Rotate answers Illuminate\Image\Transformations\Rotate.
+// Rotate turns the image around its centre. The canvas grows to the bounding
+// box of the turned rectangle, so no corner is cut off -- a square rotated by
+// 45 degrees comes back wider and taller than it went in, and only a multiple
+// of 90 degrees keeps the dimensions (swapped, for the odd multiples).
+//
+// The turn opens up triangles of empty canvas at the corners, and Background is
+// what goes in them. A right angle is a straight copy of the pixels; any other
+// angle samples between them, so repeated rotation of the same image softens
+// it.
+//
+// Answers Illuminate\Image\Transformations\Rotate.
 type Rotate struct {
 	// Angle is degrees clockwise, as Illuminate documents it.
 	Angle float64
@@ -142,7 +180,15 @@ type Scale struct {
 // TransformationName answers Scale::class.
 func (Scale) TransformationName() string { return "Scale" }
 
-// Sharpen answers Illuminate\Image\Transformations\Sharpen.
+// Sharpen makes edges read as crisper by pushing the contrast up where the
+// image already changes fast. It adds no detail that was not there: what it
+// works on is the difference between the image and a softened copy of itself,
+// so it recovers the look of definition a resize cost and nothing more.
+//
+// Amount is how much of that difference is added back, and a high value shows
+// as a bright halo tracing every edge. Zero is a no-op.
+//
+// Answers Illuminate\Image\Transformations\Sharpen.
 type Sharpen struct {
 	// Amount is Illuminate's $amount, 0 to 100.
 	Amount int

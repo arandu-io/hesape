@@ -61,8 +61,17 @@ func PluralStudly(value string, count ...int) string {
 	return head + Plural(word, count...)
 }
 
-// PluralPascal answers for Str::pluralPascal. Illuminate defines it as an alias
-// of Str::pluralStudly, and so does this.
+// PluralPascal pluralizes the last word of a Pascal case string and leaves
+// everything in front of it alone: PluralPascal("VerifiedHuman") is
+// "VerifiedHumans". That last word is found by splitting in front of every
+// capital, so PluralPascal("HTTPServer") is "HTTPServers". The optional count
+// behaves as in [Plural]: a count of one returns the value untouched.
+//
+// It is [PluralStudly] under the other name for the same convention, and the
+// two are interchangeable in every call.
+//
+// Answers Str::pluralPascal, which Illuminate defines as an alias of
+// Str::pluralStudly.
 func PluralPascal(value string, count ...int) string { return PluralStudly(value, count...) }
 
 // Counted answers for Str::counted. It is the count and the noun agreeing with

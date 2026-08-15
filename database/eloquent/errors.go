@@ -40,8 +40,18 @@ var ErrNoKey = errors.New("eloquent: no primary key defined on model")
 // an empty collection: there is no model to take the table from.
 var ErrEmptyCollection = errors.New("eloquent: unable to create query for empty collection")
 
-// ErrRelationNotFound answers
-// Illuminate\Database\Eloquent\RelationNotFoundException.
+// ErrRelationNotFound is returned when a query names a relation the model never
+// registered: an eager load of "author" on a model that declares no author, a
+// nested path whose second segment does not exist on the model the first
+// segment reaches, or a route binding through a relation that is not there.
+//
+// Wrapping it always carries the name and the table, because the useful part of
+// the message is which relation was asked for on which model. It is a
+// programming mistake rather than a runtime condition -- the fix is the
+// declaration, not a retry -- so callers usually let it travel rather than
+// matching on it.
+//
+// Answers Illuminate\Database\Eloquent\RelationNotFoundException.
 var ErrRelationNotFound = errors.New("eloquent: call to undefined relationship")
 
 // ErrNamedScopeNotFound is what CallNamedScope reports for a scope the model
@@ -99,8 +109,17 @@ func modelNotFound(table string, ids ...any) error {
 	return &ModelNotFoundError{Model: table, IDs: ids}
 }
 
-// ErrJSONEncoding answers Illuminate\Database\Eloquent\JsonEncodingException.
-// The PHP spells it JsonEncodingException.
+// ErrJSONEncoding is the sentinel every failure to turn a model, an attribute
+// or a resource into JSON wraps.
+//
+// The wrapping is done by ForModel, ForAttribute and the resource helper below,
+// each of which adds what encoding failed and on which row -- a cast that
+// produced a value encoding/json refuses, an attribute holding something with
+// no JSON form. Callers match on this with errors.Is when they want to answer
+// one status for any encoding failure; the message says which row to look at.
+//
+// Answers Illuminate\Database\Eloquent\JsonEncodingException. The PHP spells it
+// JsonEncodingException.
 var ErrJSONEncoding = errors.New("eloquent: json encoding failed")
 
 // ForModel answers JsonEncodingException::forModel.

@@ -117,8 +117,17 @@ func MigrateCommand(deps Deps) console.Command {
 	}
 }
 
-// RollbackCommand answers
-// Illuminate\Database\Console\Migrations\RollbackCommand: `aru migrate:rollback`.
+// RollbackCommand builds `aru migrate:rollback`, which undoes the last batch of
+// migrations by running their Down in reverse order.
+//
+// The unit is the batch, not the migration: everything `aru migrate` applied in
+// one run comes off in one rollback. --step=N undoes that many migrations
+// instead, and --batch=N undoes one named batch. --pretend prints the
+// statements and runs none. It is isolated under the "migrate" lock, so two
+// deploys cannot roll back the same batch at once, and it says so and stops
+// when the migration table does not exist yet.
+//
+// Answers Illuminate\Database\Console\Migrations\RollbackCommand.
 func RollbackCommand(deps Deps) console.Command {
 	return console.Command{
 		Name:        "migrate:rollback",
@@ -160,8 +169,16 @@ func RollbackCommand(deps Deps) console.Command {
 	}
 }
 
-// ResetCommand answers
-// Illuminate\Database\Console\Migrations\ResetCommand: `aru migrate:reset`.
+// ResetCommand builds `aru migrate:reset`, which rolls back every migration
+// that ever ran, newest first, leaving an empty schema.
+//
+// It is rollback without a stopping point: every Down, in one pass. That makes
+// it a development command -- on a database with data in it, the Downs are what
+// drop the tables. --pretend prints the statements and runs none, which is the
+// only safe way to point it at anything shared. It is isolated under the
+// "migrate" lock and does nothing when the migration table does not exist.
+//
+// Answers Illuminate\Database\Console\Migrations\ResetCommand.
 func ResetCommand(deps Deps) console.Command {
 	return console.Command{
 		Name:        "migrate:reset",
@@ -295,8 +312,15 @@ func FreshCommand(deps Deps) console.Command {
 	}
 }
 
-// StatusCommand answers
-// Illuminate\Database\Console\Migrations\StatusCommand: `aru migrate:status`.
+// StatusCommand builds `aru migrate:status`, which prints a table of every
+// migration file with its batch number and whether it has run.
+//
+// It compares the files on disk against the rows in the migration table, so it
+// answers the question a deploy asks before it starts: is this database at the
+// version this binary expects. --pending lists only what has not run yet. It
+// changes nothing, which is why it takes no isolation lock.
+//
+// Answers Illuminate\Database\Console\Migrations\StatusCommand.
 func StatusCommand(deps Deps) console.Command {
 	return console.Command{
 		Name:        "migrate:status",
@@ -350,8 +374,15 @@ func StatusCommand(deps Deps) console.Command {
 	}
 }
 
-// InstallCommand answers
-// Illuminate\Database\Console\Migrations\InstallCommand: `aru migrate:install`.
+// InstallCommand builds `aru migrate:install`, which creates the table the
+// migrator records applied migrations in.
+//
+// It exists to create that table on its own, ahead of anything else -- for a
+// database where the schema is loaded from a dump and the migrator only has to
+// know what has already run. `aru migrate` creates the table itself when it is
+// missing, so nothing normally needs this.
+//
+// Answers Illuminate\Database\Console\Migrations\InstallCommand.
 func InstallCommand(deps Deps) console.Command {
 	return console.Command{
 		Name:        "migrate:install",

@@ -132,8 +132,17 @@ func (c *AnonymousJsonApiResourceCollection) ToResponse() map[string]any {
 	return result
 }
 
-// ResourceIdentificationError mirrors
-// Illuminate\Http\Resources\JsonApi\Exceptions\ResourceIdentificationException.
+// ResourceIdentificationError is returned when a resource object cannot be
+// given the id or the type that JSON:API requires of every one of them: the
+// value being serialized carries neither, and there is nothing to derive one
+// from. The document cannot be built at all, so there is no partial answer to
+// send.
+//
+// Build it through [AttemptingToDetermineIdFor] or
+// [AttemptingToDetermineTypeFor], which name which of the two is missing and
+// on what Go type -- the fix is on the resource, not at the call site.
+//
+// Answers Illuminate\Http\Resources\JsonApi\Exceptions\ResourceIdentificationException.
 type ResourceIdentificationError struct {
 	Message string
 }

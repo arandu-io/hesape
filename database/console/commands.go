@@ -60,7 +60,16 @@ type TableInfo struct {
 	Size int64
 }
 
-// Commands answers the commands of Illuminate\Database\Console.
+// Commands builds every database command in this package against one Deps, so
+// an application registers the whole group in a single call rather than naming
+// each command and threading the same dependencies through all six.
+//
+// The group is db, db:show, db:table, db:monitor, db:wipe and model:prune. The
+// migration and seed commands are not here: they need a Migrator and a seeder
+// registry this package does not have, and they are built by
+// database/console/migrations and database/console/seeds.
+//
+// Answers the commands of Illuminate\Database\Console.
 func Commands(deps Deps) []console.Command {
 	return []console.Command{
 		DbCommand(deps),
@@ -237,8 +246,15 @@ func ShowCommand(deps Deps) console.Command {
 	}
 }
 
-// TableCommand answers Illuminate\Database\Console\TableCommand:
-// `aru db:table`.
+// TableCommand builds `aru db:table`, which prints one table's name, row count
+// and size on disk.
+//
+// The table is the first argument. Called with none, it lists the tables of the
+// connection and asks which one, so the command is usable without knowing the
+// schema by heart. It reads through Deps.Tables and fails with a message
+// saying so when the application registered none.
+//
+// Answers Illuminate\Database\Console\TableCommand.
 func TableCommand(deps Deps) console.Command {
 	return console.Command{
 		Name:        "db:table",

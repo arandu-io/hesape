@@ -308,8 +308,16 @@ func FreezeSecond(callback ...func()) time.Time {
 	return TravelTo(Now().Truncate(time.Second), callback...)
 }
 
-// ErrUnknownDelay is what Illuminate\Support\InteractsWithTime raises through
-// PHP's type juggling when a delay is neither a date, an interval nor a number.
+// ErrUnknownDelay states the three shapes a delay may take: an instant
+// (time.Time), a span (time.Duration) or a plain count of seconds. Anything
+// else carries no duration and cannot be turned into one.
+//
+// [SecondsUntil], [AvailableAt] and [ParseDateInterval] never return it -- they
+// take a value they cannot read as zero, so a delay of the wrong type schedules
+// work for right now instead of failing. It is here for a caller that has to
+// reject such a value rather than fall back, and it is the error to return.
+//
+// Answers Illuminate\Support\InteractsWithTime.
 var ErrUnknownDelay = errors.New("support: delay must be a time.Time, a time.Duration or a number of seconds")
 
 // SecondsUntil answers to InteractsWithTime::secondsUntil: how many seconds

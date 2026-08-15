@@ -40,7 +40,14 @@ type ExplodedRules struct {
 	ImplicitAttributes map[string][]string
 }
 
-// ValidationRuleParser answers to Illuminate\Validation\ValidationRuleParser.
+// ValidationRuleParser turns a rule set as it was written into the rule set the
+// validator runs: one list of rules per attribute, with every wildcard
+// attribute -- "items.*.price" -- replaced by the concrete keys the request
+// actually carries. It holds the request data because that expansion cannot be
+// decided without it, and it remembers which wildcard each expanded key came
+// from, so a message can name the field the way the caller wrote it.
+//
+// Answers Illuminate\Validation\ValidationRuleParser.
 type ValidationRuleParser struct {
 	// Data answers to the public $data: the request the wildcards are expanded
 	// against, because "items.*" means the items that were actually sent.

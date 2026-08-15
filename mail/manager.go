@@ -51,7 +51,15 @@ type MailerConfig struct {
 	Options map[string]string
 }
 
-// ManagerConfig is Laravel's config/mail.php.
+// ManagerConfig is everything a [MailManager] needs to build mailers: the set
+// of named mailers it can hand out, which one answers when nobody names one,
+// and the addresses and markdown settings they all inherit.
+//
+// An application fills one of these at boot and passes it to [NewMailManager].
+// The addresses here are defaults, not overrides -- a [MailerConfig] that names
+// its own From, ReplyTo, To or ReturnPath wins for that mailer.
+//
+// Answers Laravel's config/mail.php.
 type ManagerConfig struct {
 	// Default is the mailer used when nobody names one.
 	Default string
@@ -69,8 +77,17 @@ type ManagerConfig struct {
 	Markdown MarkdownConfig
 }
 
-// TransportCreator builds a transport out of its configuration, and is
-// Illuminate's create*Transport method turned into a value.
+// TransportCreator turns one mailer's configuration into the [Transport] that
+// delivers for it. It is what [MailManager.Extend] registers under a driver
+// name, and what [MailManager.CreateSymfonyTransport] calls when a
+// configuration asks for that name.
+//
+// It runs once per mailer, the first time that mailer is resolved, and it may
+// call back into the manager: a failover creator reads the configurations of
+// the mailers it fails over to and builds each of them this way.
+//
+// Answers Illuminate\Mail\MailManager's create*Transport methods, as a value
+// rather than a method name.
 type TransportCreator func(cfg MailerConfig) (Transport, error)
 
 // MailManager is Illuminate\Mail\MailManager: every configured mailer, built on

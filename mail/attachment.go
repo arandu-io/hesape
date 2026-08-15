@@ -175,7 +175,17 @@ type attachTarget interface {
 	attachBytes(data []byte, name string, o AttachOptions)
 }
 
-// ErrAttachmentNeedsName is Illuminate's
+// ErrAttachmentNeedsName is returned by [Attachment.AttachTo] when an
+// attachment made of bytes has no filename. An attachment built from a path
+// can always fall back to the base name of that path; one built from data --
+// [FromData] with no name, or a generated report -- has nothing to fall back
+// to, and a part with no filename is a part the recipient's client shows as
+// untitled.
+//
+// The caller fixes it at the point of building: As on the attachment, or the
+// As field of the [AttachOptions] passed to AttachTo.
+//
+// Answers Illuminate\Mail\Attachment's
 // RuntimeException('Attachment requires a filename to be specified.').
 var ErrAttachmentNeedsName = errors.New("mail: an attachment built from data needs a filename")
 

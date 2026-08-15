@@ -56,7 +56,15 @@ func NewConnectionEvent(connection Connection) ConnectionEvent {
 	return ConnectionEvent{Connection: connection, ConnectionName: name}
 }
 
-// ConnectionEstablished answers Illuminate\Database\Events\ConnectionEstablished.
+// ConnectionEstablished is dispatched by the DatabaseManager the first time a
+// named connection is built, and again when one is reconnected.
+//
+// It fires once per connection rather than once per query, which makes it the
+// place to configure a connection the moment it exists: set a session variable,
+// register a query listener, record that the pool grew. A listener that runs
+// per query wants QueryExecuted instead.
+//
+// Answers Illuminate\Database\Events\ConnectionEstablished.
 type ConnectionEstablished struct{ ConnectionEvent }
 
 // NewConnectionEstablished answers `new ConnectionEstablished($connection)`.
@@ -64,7 +72,16 @@ func NewConnectionEstablished(connection Connection) *ConnectionEstablished {
 	return &ConnectionEstablished{NewConnectionEvent(connection)}
 }
 
-// TransactionBeginning answers Illuminate\Database\Events\TransactionBeginning.
+// TransactionBeginning is dispatched after a transaction level opens on a
+// connection.
+//
+// Every level fires it, not only the outermost: a nested transaction is a
+// savepoint, and the savepoint counts. A listener that only wants the real
+// transaction has to read the connection's level itself, because the event
+// carries nothing but the connection. It fires after the statement succeeded,
+// so a listener seeing it knows the transaction is open.
+//
+// Answers Illuminate\Database\Events\TransactionBeginning.
 type TransactionBeginning struct{ ConnectionEvent }
 
 // NewTransactionBeginning answers `new TransactionBeginning($connection)`.
@@ -83,7 +100,17 @@ func NewTransactionCommitting(connection Connection) *TransactionCommitting {
 	return &TransactionCommitting{NewConnectionEvent(connection)}
 }
 
-// TransactionCommitted answers Illuminate\Database\Events\TransactionCommitted.
+// TransactionCommitted is dispatched after a transaction level closes
+// successfully.
+//
+// Every level fires it, so releasing a savepoint fires it as well as the
+// outermost commit. Only the outermost one has actually reached the server --
+// TransactionCommitting is the event that fires exactly once for that, just
+// before it does. Work that must not happen unless the data is durable belongs
+// after the outermost commit, which means this event alone is not enough to
+// decide it.
+//
+// Answers Illuminate\Database\Events\TransactionCommitted.
 type TransactionCommitted struct{ ConnectionEvent }
 
 // NewTransactionCommitted answers `new TransactionCommitted($connection)`.
@@ -91,7 +118,16 @@ func NewTransactionCommitted(connection Connection) *TransactionCommitted {
 	return &TransactionCommitted{NewConnectionEvent(connection)}
 }
 
-// TransactionRolledBack answers Illuminate\Database\Events\TransactionRolledBack.
+// TransactionRolledBack is dispatched after a rollback has been carried out on
+// a connection.
+//
+// A rollback to a savepoint fires it too, so it does not on its own mean the
+// whole transaction was abandoned -- only that the connection is back at some
+// earlier level. It is the signal for undoing what was done outside the
+// database on the strength of a write that is now gone: a cache entry primed
+// early, a counter held in memory.
+//
+// Answers Illuminate\Database\Events\TransactionRolledBack.
 type TransactionRolledBack struct{ ConnectionEvent }
 
 // NewTransactionRolledBack answers `new TransactionRolledBack($connection)`.
@@ -215,8 +251,15 @@ type Migration interface {
 	GetConnection() string
 }
 
-// MigrationEvent answers Illuminate\Database\Events\MigrationEvent, the
-// abstract base MigrationStarted and MigrationEnded extend.
+// MigrationEvent is the pair of fields every single-migration event carries:
+// which migration, and which direction it is being run in.
+//
+// It is embedded by MigrationStarted and MigrationEnded rather than inherited,
+// so both read the same two fields under the same names. Nothing dispatches
+// this on its own -- it is only ever the embedded half of one of those.
+//
+// Answers Illuminate\Database\Events\MigrationEvent, the abstract base
+// MigrationStarted and MigrationEnded extend.
 type MigrationEvent struct {
 	// Migration is MigrationEvent::$migration.
 	Migration Migration
@@ -230,7 +273,15 @@ func NewMigrationEvent(migration Migration, method string) MigrationEvent {
 	return MigrationEvent{Migration: migration, Method: method}
 }
 
-// MigrationStarted answers Illuminate\Database\Events\MigrationStarted.
+// MigrationStarted is dispatched by the Migrator immediately before one
+// migration's Up or Down is called.
+//
+// It fires inside the transaction the migration runs in, where the engine has
+// transactional DDL, so a listener writing to the same connection is writing
+// inside that transaction. A migration skipped by ShouldRun does not fire it;
+// MigrationSkipped does.
+//
+// Answers Illuminate\Database\Events\MigrationStarted.
 type MigrationStarted struct{ MigrationEvent }
 
 // NewMigrationStarted answers `new MigrationStarted($migration, $method)`.
@@ -238,7 +289,15 @@ func NewMigrationStarted(migration Migration, method string) *MigrationStarted {
 	return &MigrationStarted{NewMigrationEvent(migration, method)}
 }
 
-// MigrationEnded answers Illuminate\Database\Events\MigrationEnded.
+// MigrationEnded is dispatched after one migration's Up or Down returned
+// without an error.
+//
+// A migration that failed does not fire it -- the error stops the run before
+// this point -- so seeing MigrationStarted with no MigrationEnded for the same
+// name is exactly the signature of a migration that broke. It fires before the
+// transaction commits, so the schema change is not durable yet.
+//
+// Answers Illuminate\Database\Events\MigrationEnded.
 type MigrationEnded struct{ MigrationEvent }
 
 // NewMigrationEnded answers `new MigrationEnded($migration, $method)`.
@@ -258,8 +317,15 @@ func NewMigrationSkipped(migrationName string) *MigrationSkipped {
 	return &MigrationSkipped{MigrationName: migrationName}
 }
 
-// MigrationsEvent answers Illuminate\Database\Events\MigrationsEvent, the
-// abstract base MigrationsStarted and MigrationsEnded extend.
+// MigrationsEvent is the pair of fields the whole-run events carry: the
+// direction, and the options the run was given.
+//
+// It is embedded by MigrationsStarted and MigrationsEnded, which bracket a
+// whole `aru migrate` or `aru migrate:rollback` -- the plural to
+// MigrationEvent's singular. Nothing dispatches this on its own.
+//
+// Answers Illuminate\Database\Events\MigrationsEvent, the abstract base
+// MigrationsStarted and MigrationsEnded extend.
 type MigrationsEvent struct {
 	// Method is MigrationsEvent::$method: "up" or "down".
 	Method string
@@ -273,7 +339,15 @@ func NewMigrationsEvent(method string, options map[string]any) MigrationsEvent {
 	return MigrationsEvent{Method: method, Options: options}
 }
 
-// MigrationsStarted answers Illuminate\Database\Events\MigrationsStarted.
+// MigrationsStarted is dispatched once at the top of a run that has something
+// to do, before the first migration is touched.
+//
+// A run with nothing pending fires NoPendingMigrations instead and never fires
+// this, so it means "the schema is about to change". It is the hook for the
+// things that bracket a whole deploy step: put the application into
+// maintenance, open a span, take a note of the time.
+//
+// Answers Illuminate\Database\Events\MigrationsStarted.
 type MigrationsStarted struct{ MigrationsEvent }
 
 // NewMigrationsStarted answers `new MigrationsStarted($method, $options)`.
@@ -281,7 +355,14 @@ func NewMigrationsStarted(method string, options map[string]any) *MigrationsStar
 	return &MigrationsStarted{NewMigrationsEvent(method, options)}
 }
 
-// MigrationsEnded answers Illuminate\Database\Events\MigrationsEnded.
+// MigrationsEnded is dispatched once at the end of a run in which every
+// migration succeeded.
+//
+// The run stops at the first failure, so a failed run fires MigrationsStarted
+// and never this: the pair is the signal that the schema reached the state the
+// binary expects. It is where the bracket MigrationsStarted opened is closed.
+//
+// Answers Illuminate\Database\Events\MigrationsEnded.
 type MigrationsEnded struct{ MigrationsEvent }
 
 // NewMigrationsEnded answers `new MigrationsEnded($method, $options)`.
@@ -289,7 +370,15 @@ func NewMigrationsEnded(method string, options map[string]any) *MigrationsEnded 
 	return &MigrationsEnded{NewMigrationsEvent(method, options)}
 }
 
-// NoPendingMigrations answers Illuminate\Database\Events\NoPendingMigrations.
+// NoPendingMigrations is dispatched when a run found nothing to do: `aru
+// migrate` with every migration already applied, or `aru migrate:rollback` with
+// nothing left to undo.
+//
+// It takes the place of the Started/Ended pair rather than joining it, so a
+// listener that brackets a run has to treat this as the third possible shape.
+// It is not a failure -- a deploy that changes no schema is the normal case.
+//
+// Answers Illuminate\Database\Events\NoPendingMigrations.
 type NoPendingMigrations struct {
 	// Method is NoPendingMigrations::$method: "up" or "down".
 	Method string
@@ -322,7 +411,18 @@ func NewMigrationsPruned(connection Connection, path string) *MigrationsPruned {
 	return &MigrationsPruned{Connection: connection, ConnectionName: name, Path: path}
 }
 
-// SchemaDumped answers Illuminate\Database\Events\SchemaDumped.
+// SchemaDumped reports that a connection's whole schema was written to a file,
+// and where.
+//
+// The dump is what replaces years of migration files: a single SQL file the
+// engine's own tool produced, loaded in one step by a fresh database instead of
+// replayed migration by migration. Nothing in this package dispatches the
+// event -- SchemaState.Dump does the work and the command that drives it lives
+// in the application -- so it exists so that a project wiring `schema:dump`
+// fires the event a Laravel developer already listens for, and so that a
+// listener can add the file to a release artifact.
+//
+// Answers Illuminate\Database\Events\SchemaDumped.
 type SchemaDumped struct {
 	// Connection is SchemaDumped::$connection.
 	Connection Connection
@@ -343,7 +443,16 @@ func NewSchemaDumped(connection Connection, path string) *SchemaDumped {
 	return &SchemaDumped{Connection: connection, ConnectionName: name, Path: path}
 }
 
-// SchemaLoaded answers Illuminate\Database\Events\SchemaLoaded.
+// SchemaLoaded reports that a schema file was run against a connection, and
+// which file.
+//
+// It is the other half of SchemaDumped: the migrator loads the dump into an
+// empty database and then applies only the migrations written since. Nothing
+// here dispatches it, for the same reason -- SchemaState.Load does the work,
+// and the event is the vocabulary an application uses when it wires the
+// command.
+//
+// Answers Illuminate\Database\Events\SchemaLoaded.
 type SchemaLoaded struct {
 	// Connection is SchemaLoaded::$connection.
 	Connection Connection
@@ -383,7 +492,16 @@ func NewModelsPruned(model string, count int) *ModelsPruned {
 	return &ModelsPruned{Model: model, Count: count}
 }
 
-// ModelPruningStarting answers Illuminate\Database\Events\ModelPruningStarting.
+// ModelPruningStarting is dispatched by `aru model:prune` before it prunes
+// anything, carrying the names of everything it is about to prune.
+//
+// It fires once for the whole command, in sorted order, and only when there is
+// at least one registered prunable. Because the list is complete before the
+// first deletion, a listener can log or refuse on the whole set rather than
+// discovering it one ModelsPruned at a time. --pretend still fires it: the
+// names are what pretending is for.
+//
+// Answers Illuminate\Database\Events\ModelPruningStarting.
 type ModelPruningStarting struct {
 	// Models is ModelPruningStarting::$models.
 	Models []string
@@ -394,7 +512,14 @@ func NewModelPruningStarting(models []string) *ModelPruningStarting {
 	return &ModelPruningStarting{Models: models}
 }
 
-// ModelPruningFinished answers Illuminate\Database\Events\ModelPruningFinished.
+// ModelPruningFinished is dispatched by `aru model:prune` once every registered
+// prunable has run, carrying the same list ModelPruningStarting carried.
+//
+// The command stops at the first prunable that errors, so this not arriving
+// after a ModelPruningStarting means one of them failed. How many rows each one
+// removed is in the ModelsPruned events between the two, not here.
+//
+// Answers Illuminate\Database\Events\ModelPruningFinished.
 type ModelPruningFinished struct {
 	// Models is ModelPruningFinished::$models.
 	Models []string

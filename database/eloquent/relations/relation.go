@@ -23,14 +23,40 @@ import (
 // relations.Model is that type, not a second one that looks like it.
 type Model = concerns.Model
 
-// Builder is Illuminate\Database\Eloquent\Builder, as a relation uses it.
-// Aliased from relations/concerns for the reason Model is.
+// Builder is the query a relation narrows and then runs: the interface of
+// selects, wheres, joins and orders every relation in this package builds on
+// top of, with a context and an auth.Grant on every method that reaches the
+// database.
+//
+// It is an alias rather than a declaration, for the reason Model is: the
+// interface is defined in relations/concerns because the traits there need the
+// same one and Go forbids a subpackage from importing its parent. Aliasing it
+// back means relations.Builder is that interface, not a second one shaped like
+// it.
+//
+// Answers Illuminate\Database\Eloquent\Builder, as a relation uses it.
 type Builder = concerns.Builder
 
-// ErrMultipleRecordsFound answers Illuminate\Database\MultipleRecordsFoundException.
+// ErrMultipleRecordsFound is returned by the singular reads on a relation --
+// Sole, and the pivot lookups that expect one row -- when the query matched
+// more than one.
+//
+// It means the relation is not as unique as the caller assumed: a has-one
+// pointing at a column with duplicates, or a pivot row that exists twice. The
+// wrapping message carries the count and the table.
+//
+// Answers Illuminate\Database\MultipleRecordsFoundException.
 var ErrMultipleRecordsFound = errors.New("relations: more than one record matched a query that expected one")
 
-// ErrModelNotFound answers Illuminate\Database\Eloquent\ModelNotFoundException.
+// ErrModelNotFound is returned by the failing reads on a relation -- the ones
+// that must produce a row -- when the query matched none.
+//
+// It is the sentinel a handler turns into a 404. The reads that tolerate a miss
+// answer nil instead, so seeing this error means the caller asked for a row
+// that has to exist. The wrapping message carries the table, and the key when
+// the lookup had one.
+//
+// Answers Illuminate\Database\Eloquent\ModelNotFoundException.
 var ErrModelNotFound = errors.New("relations: no query results for the model")
 
 // Relation answers the abstract Illuminate\Database\Eloquent\Relations\Relation.

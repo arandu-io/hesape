@@ -94,10 +94,31 @@ func Supported(key []byte, cipher Cipher) bool {
 // Encrypter::previousKeys throw when the key length does not match the cipher.
 var ErrUnsupportedCipher = errors.New("encryption: unsupported cipher or incorrect key length; the supported cipher is: aes-256-gcm")
 
-// ErrEncrypt answers to Illuminate\Contracts\Encryption\EncryptException.
+// ErrEncrypt wraps every failure on the way out: the value would not serialise
+// to JSON, or the cipher refused the key.
+//
+// It is not a mistake a caller recovers from by trying something else. Both
+// causes are configuration -- a key of the wrong length, or a value holding
+// something json.Marshal cannot represent -- so a handler that reaches it
+// should report and stop, not retry.
+//
+// The underlying error is wrapped, so errors.Is finds this one and %v still
+// prints what actually went wrong.
+//
+// Answers Illuminate\Contracts\Encryption\EncryptException.
 var ErrEncrypt = errors.New("encryption: could not encrypt the data")
 
-// ErrDecrypt answers to Illuminate\Contracts\Encryption\DecryptException.
+// ErrDecrypt is the answer to anything that arrives and does not decrypt: a
+// payload that was tampered with, one encrypted under a different key, or one
+// that is not a payload at all.
+//
+// The three are deliberately indistinguishable from outside. Telling a caller
+// WHICH of them happened tells an attacker whether their forgery got closer,
+// which is the oracle that makes padding attacks work. errInvalidPayload wraps
+// this one for the same reason -- it is more specific inside the package and
+// identical to anyone outside it.
+//
+// Answers Illuminate\Contracts\Encryption\DecryptException.
 //
 // Every failure below wraps it, so a caller answers "this value is not ours"
 // once rather than switching on four reasons it is not. The reasons are still

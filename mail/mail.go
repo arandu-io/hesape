@@ -132,8 +132,17 @@ type Renderer interface {
 	RenderToString(name string, data any) (string, error)
 }
 
-// Dispatcher is the slice of Illuminate\Contracts\Events\Dispatcher the Mailer
-// uses: one call that can veto, and one that only announces.
+// Dispatcher is how a [Mailer] tells the application that a message is about to
+// go out, and that one went out. Two calls, because the two moments differ in
+// what a listener is allowed to do: before sending, a listener can refuse and
+// the message is dropped; after sending, the message is already gone and there
+// is nothing to refuse.
+//
+// It is the whole of the event system this package needs. A Mailer with no
+// dispatcher sends every message and announces nothing, so wiring one is
+// optional.
+//
+// Answers the part of Illuminate\Contracts\Events\Dispatcher the Mailer uses.
 type Dispatcher interface {
 	// Until reports whether the send should go ahead. It is Illuminate's
 	// $events->until($event) !== false: a listener that refuses stops the
@@ -154,8 +163,17 @@ type FilesystemFactory interface {
 	Disk(name string) Disk
 }
 
-// Disk is the slice of Illuminate\Contracts\Filesystem\Filesystem that
-// attachments need: the bytes, and what to call them.
+// Disk is one place files are stored, as an attachment sees it: the two
+// questions [FromStorageDisk] and attachFromStorage ask of a stored file, which
+// are its bytes and its content type. Nothing about writing, listing or
+// deleting appears here, because building a message never does any of that.
+//
+// Both are asked late -- when the attachment is resolved, not when it is
+// declared -- so a mailable that names a path can be built in a request and
+// read on a worker.
+//
+// Answers the part of Illuminate\Contracts\Filesystem\Filesystem that
+// attachments need.
 type Disk interface {
 	Get(path string) ([]byte, error)
 	MimeType(path string) (string, error)
@@ -184,8 +202,17 @@ type QueueFactory interface {
 	Connection(name string) Queue
 }
 
-// Queue is the slice of Illuminate\Contracts\Queue\Queue that queueing a
-// mailable needs: push now, and push later.
+// Queue is one queue connection, as a mailable being sent in the background
+// sees it: hand a job over to be run as soon as a worker is free, or after a
+// delay. [PendingMail.Queue] uses the first, [PendingMail.Later] the second,
+// and both return whatever identifier the connection gave the job.
+//
+// The queue name is a parameter rather than part of the connection because a
+// single connection carries many, and which one a mailable goes on is decided
+// at the call.
+//
+// Answers the part of Illuminate\Contracts\Queue\Queue that queueing a mailable
+// needs.
 type Queue interface {
 	PushOn(ctx context.Context, queue string, job any) (string, error)
 	LaterOn(ctx context.Context, queue string, delay time.Duration, job any) (string, error)

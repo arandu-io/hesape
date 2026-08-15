@@ -89,12 +89,26 @@ type KeyChunkable[T any] interface {
 // value under two names.
 var ErrRecordNotFound = errors.New("No record found for the given query.")
 
-// ErrRecordsNotFound answers Illuminate\Database\RecordsNotFoundException,
-// which Sole raises when nothing matched.
+// ErrRecordsNotFound is what Sole returns when the query matched no row at all.
+//
+// Sole is the query that asserts "there is exactly one of these", so both ways
+// of being wrong are errors: none is this one, more than one is
+// MultipleRecordsFoundError. A caller that would rather have a zero value than
+// an error wants First, not Sole.
+//
+// Answers Illuminate\Database\RecordsNotFoundException.
 var ErrRecordsNotFound = errors.New("records not found")
 
-// MultipleRecordsFoundError answers
-// Illuminate\Database\MultipleRecordsFoundException: Sole found more than one.
+// MultipleRecordsFoundError is what Sole returns when the query matched more
+// than one row, and it carries how many it saw.
+//
+// Sole reads two rows and stops, so Count is the number it actually fetched
+// rather than the size of the whole result set -- enough to say "this is not
+// unique", which is the only thing the caller can act on. The uniqueness the
+// query assumed is missing, which is usually a missing unique index or a
+// filter that lost a column.
+//
+// Answers Illuminate\Database\MultipleRecordsFoundException.
 type MultipleRecordsFoundError struct {
 	// Count is MultipleRecordsFoundException::$count.
 	Count int

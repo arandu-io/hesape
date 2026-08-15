@@ -24,7 +24,18 @@ type Route interface {
 	Matches(req *http.Request, includeMethod bool) bool
 }
 
-// ValidatorInterface mirrors Illuminate\Routing\Matching\ValidatorInterface.
+// ValidatorInterface is one question asked of a route and a request: does this
+// route answer it? This package has the four implementations that matter --
+// [UriValidator], [MethodValidator], [SchemeValidator] and [HostValidator] --
+// and a route answers a request only when every one of them says so.
+//
+// hesape/routing.Route.GetValidators returns the four in the order PHP lists
+// them, which is the set a caller ranges over. Nothing here dispatches a
+// request: the mux has already picked a route by method and path, and these
+// exist for the callers that still have to ask -- a middleware, a URL
+// generator, a custom dispatcher.
+//
+// Mirrors Illuminate\Routing\Matching\ValidatorInterface.
 type ValidatorInterface interface {
 	// Matches is ValidatorInterface::matches.
 	Matches(route Route, req *http.Request) bool

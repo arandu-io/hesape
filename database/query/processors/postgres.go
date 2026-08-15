@@ -7,8 +7,18 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// PostgresProcessor answers
-// Illuminate\Database\Query\Processors\PostgresProcessor.
+// PostgresProcessor is the Processor for Postgres: it reads back an inserted
+// identifier from the returning clause, and turns the catalogue's one-letter
+// codes into words.
+//
+// Postgres reports an insert's identifier as a row rather than out of band, so
+// ProcessInsertGetID runs the statement as a select -- against the write
+// connection, because a replica has not seen the row yet. Everything else here
+// is the schema introspection: pg_type stores a kind as "e" and a category as
+// "n", and ProcessTypes, ProcessColumns, ProcessIndexes and ProcessForeignKeys
+// spell those out so `aru db:show` reads the same whatever the engine.
+//
+// Answers Illuminate\Database\Query\Processors\PostgresProcessor.
 type PostgresProcessor struct {
 	Processor
 }

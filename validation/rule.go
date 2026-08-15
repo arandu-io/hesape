@@ -45,14 +45,25 @@ type ImplicitRule interface {
 	Implicit() bool
 }
 
-// DataAwareRule answers to Illuminate\Contracts\Validation\DataAwareRule.
+// DataAwareRule is implemented by a rule object that has to see the whole
+// request and not only the one value it was written against -- a check that
+// compares two fields, for instance. Before asking such a rule whether the value
+// passes, the validator hands it every value it is validating. A rule that looks
+// only at its own value does not implement it and is not given the data.
+//
+// Answers Illuminate\Contracts\Validation\DataAwareRule.
 type DataAwareRule interface {
 	// SetData answers to DataAwareRule::setData.
 	SetData(data Data)
 }
 
-// ValidatorAwareRule answers to
-// Illuminate\Contracts\Validation\ValidatorAwareRule.
+// ValidatorAwareRule is implemented by a rule object that needs the validator
+// running it -- to phrase its message through the same translator, to read the
+// custom messages and attribute names in force, or to reach a value it was not
+// handed. The validator passes itself in before asking whether the value passes,
+// and the rule keeps it for the length of that run.
+//
+// Answers Illuminate\Contracts\Validation\ValidatorAwareRule.
 type ValidatorAwareRule interface {
 	// SetValidator answers to ValidatorAwareRule::setValidator.
 	SetValidator(validator *Validator)
@@ -105,8 +116,13 @@ func (v *Validator) ValidateUsingCustomRule(attribute string, value any, rule Ru
 // Illuminate\Validation\ClosureValidationRule.
 // ---------------------------------------------------------------------------
 
-// ClosureValidationRule answers to
-// Illuminate\Validation\ClosureValidationRule: a rule written as a function.
+// ClosureValidationRule is a rule written as a function rather than as a type,
+// for a check that does not deserve a type of its own. The callback is handed
+// the attribute, its value, a fail function and the validator, and reports a
+// problem by calling fail with the sentence to show. Each call to fail adds one
+// message, and a callback that never calls it passes.
+//
+// Answers Illuminate\Validation\ClosureValidationRule.
 type ClosureValidationRule struct {
 	// Callback answers to the public $callback. It is handed the same four
 	// arguments the PHP hands its closure.

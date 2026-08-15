@@ -9,7 +9,22 @@ import (
 	"github.com/arandu-io/hesape/database/schema"
 )
 
-// PostgresGrammar answers Illuminate\Database\Schema\Grammars\PostgresGrammar.
+// PostgresGrammar turns a Blueprint into Postgres DDL, and compiles the
+// catalogue queries that read a Postgres schema back.
+//
+// What it changes about the base grammar: DDL runs inside a transaction, so a
+// failed migration leaves no half-built schema; an auto-incrementing integer is
+// a serial type rather than a modifier; a timestamp carries its time zone or
+// explicitly does not; an index can name an operator class, which is what makes
+// a full-text, spatial or vector index reachable at all; and dropping a table,
+// view, type or domain is one statement for the whole list.
+//
+// The introspection half -- CompileTables, CompileColumns, CompileIndexes,
+// CompileForeignKeys -- reads pg_catalog rather than information_schema,
+// because information_schema does not describe an index at all: its name, its
+// access method and the order of its columns are only in pg_index.
+//
+// Answers Illuminate\Database\Schema\Grammars\PostgresGrammar.
 type PostgresGrammar struct{ *BaseGrammar }
 
 // NewPostgresGrammar answers `new PostgresGrammar($connection)`.

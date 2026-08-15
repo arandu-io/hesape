@@ -94,8 +94,15 @@ func Studly(value string) string {
 
 var studlyBoundaries = strings.NewReplacer("-", " ", "_", " ")
 
-// Pascal answers for Str::pascal. Illuminate defines it as an alias of
-// Str::studly, and so does this.
+// Pascal converts a string to Pascal case: Pascal("invoice_line") and
+// Pascal("invoice-line") are both "InvoiceLine". Only the first letter of each
+// dash-, underscore- or space-separated part is touched, so Pascal("HTTPServer")
+// is "HTTPServer" and not "HttpServer".
+//
+// It is [Studly] under the other name for the same convention, and the two are
+// interchangeable in every call.
+//
+// Answers Str::pascal, which Illuminate defines as an alias of Str::studly.
 func Pascal(value string) string { return Studly(value) }
 
 // Camel answers for Str::camel. It is Studly with a lowercase initial:

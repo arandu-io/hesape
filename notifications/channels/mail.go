@@ -43,8 +43,17 @@ type MailNotification interface {
 	ToMail(to notifications.Notifiable) messages.Mail
 }
 
-// Mail delivers a notification as an e-mail. It is
-// Illuminate\Notifications\Channels\MailChannel.
+// Mail is the channel that delivers a notification as an e-mail. It asks the
+// recipient for the address it routes to, asks the notification for the message
+// through [MailNotification], fills in the recipient's locale when the message
+// did not set one, validates it, and hands it to the [Mailer] it was built
+// with.
+//
+// A recipient with no address is notifications.ErrNotAddressed, which the
+// Notifier treats as "not reachable this way" and not as a failure: somebody
+// who never confirmed an e-mail address still gets the row in their bell menu.
+//
+// Answers Illuminate\Notifications\Channels\MailChannel.
 type Mail struct {
 	mailer Mailer
 }

@@ -25,12 +25,21 @@ import (
 	"strings"
 )
 
-// ErrItemNotFound answers to Illuminate\Support\ItemNotFoundException, which
-// Arr::sole throws when nothing matched.
+// ErrItemNotFound is returned by [Sole] when nothing in the list matched: the
+// caller asked for exactly one item and got none. It reports the shape of the
+// data, not a mistake in the call, so match it with errors.Is and decide what
+// an empty result means here -- a missing record, a default, an empty page.
+//
+// Answers Illuminate\Support\ItemNotFoundException.
 var ErrItemNotFound = errors.New("arr: item not found")
 
-// ErrMultipleItemsFound answers to Illuminate\Support\MultipleItemsFoundException,
-// which Arr::sole throws when more than one item matched.
+// ErrMultipleItemsFound is returned by [Sole] when more than one item matched:
+// the caller asked for exactly one and the filter was not selective enough.
+// Only the fact is reported, never how many matched or which -- reaching it
+// means either the callback is too loose or the list holds a duplicate that
+// should not be there.
+//
+// Answers Illuminate\Support\MultipleItemsFoundException.
 var ErrMultipleItemsFound = errors.New("arr: multiple items found")
 
 // Arrayer is the Go form of Illuminate\Contracts\Support\Arrayable: a value

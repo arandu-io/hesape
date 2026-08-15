@@ -36,8 +36,18 @@ func (stringableCast) Set(model any, key string, value any, attributes map[strin
 	return map[string]any{key: text}, nil
 }
 
-// AsHtmlString answers Illuminate\Database\Eloquent\Casts\AsHtmlString. The PHP
-// spells the class AsHtmlString, so the type does too.
+// AsHtmlString casts a text column into a support.HtmlString: markup the view
+// layer prints as it stands, without escaping it again.
+//
+// Use it for a column the application itself produced -- rendered Markdown, a
+// stored template fragment. Do not use it for anything a user typed: the whole
+// meaning of the cast is that escaping is skipped, so a column carrying user
+// input becomes stored cross-site scripting the moment it is rendered.
+//
+// Writing stores the string unchanged, and a null column reads as nil.
+//
+// Answers Illuminate\Database\Eloquent\Casts\AsHtmlString. The PHP spells the
+// class AsHtmlString, so the type does too.
 type AsHtmlString struct{}
 
 // CastUsing answers AsHtmlString::castUsing.
@@ -65,8 +75,16 @@ func (htmlStringCast) Set(model any, key string, value any, attributes map[strin
 	return map[string]any{key: text}, nil
 }
 
-// AsUri answers Illuminate\Database\Eloquent\Casts\AsUri. The PHP spells the
-// class AsUri, so the type does too, rather than AsURI.
+// AsUri casts a text column into a *support.Uri, so an attribute holding a URL
+// arrives with its scheme, host, path and query already parsed instead of as a
+// string every caller parses again.
+//
+// Writing stores the URI's string form, and a null column reads as nil. A
+// column the parser rejects returns an error rather than a half-built value:
+// the malformed row is reported where it is read, not where it is later used.
+//
+// Answers Illuminate\Database\Eloquent\Casts\AsUri. The PHP spells the class
+// AsUri, so the type does too, rather than AsURI.
 type AsUri struct{}
 
 // CastUsing answers AsUri::castUsing.

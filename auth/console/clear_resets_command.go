@@ -7,23 +7,41 @@ import (
 	"github.com/arandu-io/hesape/console"
 )
 
-// BrokerFactory is the part of
-// Illuminate\Contracts\Auth\PasswordBrokerFactory this command uses.
+// BrokerFactory hands out password brokers by name. An application can have
+// more than one -- a broker per kind of account, each with its own token store
+// and its own expiry -- and the command's optional name argument is what picks
+// between them.
+//
+// Only the one method the command calls is declared, and it is declared here
+// rather than imported, so the command compiles and is tested without the
+// package that builds brokers.
+//
+// Answers the part of Illuminate\Contracts\Auth\PasswordBrokerFactory this
+// command uses.
 type BrokerFactory interface {
 	// Broker is PasswordBrokerFactory::broker. The empty name means the default
 	// broker, which is what PHP's null argument means.
 	Broker(name string) (Broker, error)
 }
 
-// Broker is the part of Illuminate\Auth\Passwords\PasswordBroker this command
+// Broker is one password broker: the thing that mints a reset token, gets it
+// delivered, and redeems it when the person comes back with it. This command
+// resets nobody's password -- it needs the broker only to reach the store those
+// tokens sit in.
+//
+// Answers the part of Illuminate\Auth\Passwords\PasswordBroker this command
 // uses.
 type Broker interface {
 	// GetRepository is PasswordBroker::getRepository.
 	GetRepository() TokenRepository
 }
 
-// TokenRepository is the part of
-// Illuminate\Auth\Passwords\TokenRepositoryInterface this command uses.
+// TokenRepository is where a broker keeps its reset tokens -- a database table
+// or a cache, depending on how the broker was built. This command needs one
+// thing of it: throw away the records whose lifetime has passed.
+//
+// Answers the part of Illuminate\Auth\Passwords\TokenRepositoryInterface this
+// command uses.
 type TokenRepository interface {
 	// DeleteExpired is TokenRepositoryInterface::deleteExpired. The context is
 	// the fifth mechanical change (see hesape/auth's contracts.go): it is a

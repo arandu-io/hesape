@@ -173,12 +173,23 @@ func (e *LostConnectionException) Error() string { return e.Message }
 // does because there is only one.
 var ErrRecordNotFound = concerns.ErrRecordNotFound
 
-// ErrRecordsNotFound answers Illuminate\Database\RecordsNotFoundException,
-// which Sole raises when nothing matched.
+// ErrRecordsNotFound is what Sole returns when the query matched no row at all.
+//
+// It is the same value as concerns.ErrRecordsNotFound, re-exported for the same
+// reason ErrRecordNotFound is: Sole lives in that package, and errors.Is has to
+// give the same answer under either name.
+//
+// Answers Illuminate\Database\RecordsNotFoundException.
 var ErrRecordsNotFound = concerns.ErrRecordsNotFound
 
-// MultipleRecordsFoundException answers
-// Illuminate\Database\MultipleRecordsFoundException: Sole matched more than one.
+// MultipleRecordsFoundException is what Sole returns when the query matched
+// more than one row, and it carries how many it saw.
+//
+// It is an alias of concerns.MultipleRecordsFoundError, not a second type: a
+// value built by either package satisfies errors.As under both names. See that
+// type for what the count means.
+//
+// Answers Illuminate\Database\MultipleRecordsFoundException.
 type MultipleRecordsFoundException = concerns.MultipleRecordsFoundError
 
 // NewMultipleRecordsFoundException answers its constructor.

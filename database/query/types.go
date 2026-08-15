@@ -65,7 +65,19 @@ type Aggregate struct {
 	Columns  []any
 }
 
-// IndexHint answers Illuminate\Database\Query\IndexHint.
+// IndexHint is the index a query asks the planner to use, force or ignore: what
+// Builder.UseIndex, ForceIndex and IgnoreIndex record, and what the grammar
+// compiles into the from clause.
+//
+// Type is one of "hint", "force" and "ignore", and Index is the index name. A
+// builder holds at most one, so setting a second replaces the first.
+//
+// A hint changes the plan and never the rows, which is why a grammar is free to
+// compile it to nothing: the base Grammar does, SQLite honours only "force",
+// and an index name that is not a bare identifier is dropped rather than
+// interpolated, because an identifier cannot be bound.
+//
+// Answers Illuminate\Database\Query\IndexHint.
 type IndexHint struct {
 	Type  string
 	Index string

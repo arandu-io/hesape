@@ -146,8 +146,16 @@ func (c *ResourceCollection) Count() int {
 	return len(c.Resources)
 }
 
-// AnonymousResourceCollection mirrors Illuminate's anonymous collection.
-// It is a ResourceCollection that knows which resource class it collects.
+// AnonymousResourceCollection is a [ResourceCollection] that also records the
+// name of the resource type it was built from, and that is all it adds.
+//
+// It exists for the ordinary index action: a handler returning a list of
+// resources has no collection type of its own to name, but something still has
+// to carry the wrapping and the pagination metadata for the list. [Collection]
+// returns one of these, and a caller who wants the collection named declares
+// their own type instead.
+//
+// Answers Illuminate\Http\Resources\Json\AnonymousResourceCollection.
 type AnonymousResourceCollection struct {
 	ResourceCollection
 }

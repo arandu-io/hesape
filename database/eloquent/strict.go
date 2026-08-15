@@ -19,8 +19,17 @@ var ErrLazyLoadingViolation = errors.New("eloquent: attempted to lazy load a rel
 // PreventSilentlyDiscardingAttributes is on and a key has no column behind it.
 var ErrMassAssignment = errors.New("eloquent: attribute does not exist on the model")
 
-// ErrMissingAttribute answers
-// Illuminate\Database\Eloquent\MissingAttributeException.
+// ErrMissingAttribute names reading an attribute a persisted model does not
+// have -- a key that is neither a column nor a raw attribute -- once
+// PreventAccessingMissingAttributes is on.
+//
+// Nothing in this package returns it. GetAttribute answers one value and has no
+// error to return, so the violation is reported through the callback
+// HandleMissingAttributeViolationUsing registered, and this is the error that
+// callback has to report or wrap. Without a callback the read is simply nil,
+// which is why the switch alone changes nothing.
+//
+// Answers Illuminate\Database\Eloquent\MissingAttributeException.
 var ErrMissingAttribute = errors.New("eloquent: attribute does not exist on the model")
 
 // strict holds what PHP keeps in static properties on Model.

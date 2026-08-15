@@ -389,8 +389,16 @@ func (r *HasOneOrManyThrough) GetSecondLocalKeyName() string { return r.secondLo
 // relation is narrowed by.
 func (r *HasOneOrManyThrough) GetParentKey() any { return r.farParent.GetAttribute(r.localKey) }
 
-// HasManyThrough answers
-// Illuminate\Database\Eloquent\Relations\HasManyThrough.
+// HasManyThrough is the many end of a relation that reaches its rows through an
+// intermediate table: a country's posts, where posts belong to users and users
+// belong to the country.
+//
+// There is no column on posts naming the country, so the query joins users and
+// filters on the country's key. GetResults answers the matching rows, or an
+// empty slice when the far parent has no key yet -- an unsaved parent has no
+// children, and the join would otherwise match every row.
+//
+// Answers Illuminate\Database\Eloquent\Relations\HasManyThrough.
 type HasManyThrough struct {
 	HasOneOrManyThrough
 }
@@ -455,7 +463,18 @@ func (r *HasManyThrough) One() *HasOneThrough {
 	return one
 }
 
-// HasOneThrough answers Illuminate\Database\Eloquent\Relations\HasOneThrough.
+// HasOneThrough is the singular end of the same join HasManyThrough makes: a
+// mechanic's car owner, through the car.
+//
+// It is HasManyThrough narrowed to the first row. What it adds is a default:
+// where the many form answers an empty slice, this one answers whatever
+// WithDefault was given -- so a caller reads fields off the result without
+// testing for nil first. With no default configured the miss is still nil.
+//
+// It also compares related models, which is what makes Is and IsNot work
+// against a relation that has to be resolved before it can be compared.
+//
+// Answers Illuminate\Database\Eloquent\Relations\HasOneThrough.
 type HasOneThrough struct {
 	HasOneOrManyThrough
 	concerns.SupportsDefaultModels

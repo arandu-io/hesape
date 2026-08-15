@@ -98,8 +98,18 @@ func (c encryptedCollectionCast) Set(model any, key string, value any, attribute
 	return map[string]any{key: payload}, nil
 }
 
-// AsEncryptedArrayObject answers
-// Illuminate\Database\Eloquent\Casts\AsEncryptedArrayObject.
+// AsEncryptedArrayObject casts a text column holding an encrypted JSON object
+// into an *ArrayObject, and encrypts it again on the way back to the database.
+//
+// It is AsEncryptedCollection for an object rather than an array: reading
+// decrypts the column and decodes it into a keyed bag, writing encodes the bag
+// and encrypts it, and a value the column cannot be read as an object reads as
+// nil. Serializing the model gives the plain map, not the ciphertext.
+//
+// The column is opaque to the database, so nothing can be queried, indexed or
+// sorted by what is inside it. That is the trade the cast exists to make.
+//
+// Answers Illuminate\Database\Eloquent\Casts\AsEncryptedArrayObject.
 type AsEncryptedArrayObject struct {
 	// Encrypter is what the Crypt facade is in the PHP.
 	Encrypter *encryption.Encrypter

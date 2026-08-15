@@ -162,7 +162,26 @@ type StatefulGuard interface {
 	Logout(ctx context.Context)
 }
 
-// SupportsBasicAuth mirrors Illuminate\Contracts\Auth\SupportsBasicAuth.
+// SupportsBasicAuth is the optional half of a guard that can sign a caller in
+// straight from the Authorization: Basic header, with no login form and no
+// session to start. A guard declares it when a username and a password on every
+// request is a way in: the machine calling an endpoint, and the internal tool
+// nobody wants to build a sign-in screen for.
+//
+// Both methods take the column the username is matched against -- the e-mail
+// address by default -- and extra conditions the lookup must also satisfy, and
+// both answer nil when the request may carry on. Basic starts a session and
+// does nothing when somebody is already signed in; OnceBasic authenticates for
+// this request only and writes nothing.
+//
+// It is a separate interface and not more methods on Guard, so that a guard
+// with no business accepting a password on every request simply does not have
+// them. [github.com/arandu-io/hesape/auth/middleware.AuthenticateWithBasicAuth]
+// asserts for it and answers 500 when the assertion fails, because a guard
+// wired where basic auth was expected is a configuration mistake and not a bad
+// password.
+//
+// Answers Illuminate\Contracts\Auth\SupportsBasicAuth.
 type SupportsBasicAuth interface {
 	// Basic is basic.
 	Basic(ctx context.Context, field string, extraConditions map[string]any) error
@@ -171,7 +190,18 @@ type SupportsBasicAuth interface {
 	OnceBasic(ctx context.Context, field string, extraConditions map[string]any) error
 }
 
-// CanResetPassword mirrors Illuminate\Contracts\Auth\CanResetPassword.
+// CanResetPassword is what a user type must satisfy to take part in a password
+// reset. It answers with the address a reset link is sent to, and it knows how
+// to send one. A type without it can sign in and cannot recover an account: the
+// broker refuses it with passwords.ErrCannotResetPassword.
+//
+// The address is asked for rather than read off a field because it is not
+// necessarily the sign-in identifier, and because it is what the stored record
+// is keyed by -- both token repositories hash it to find the token again.
+// Sending is asked of the user rather than done for them because what arrives
+// is an application's own message, on its own template, over its own transport.
+//
+// Answers Illuminate\Contracts\Auth\CanResetPassword.
 type CanResetPassword interface {
 	// GetEmailForPasswordReset is getEmailForPasswordReset.
 	GetEmailForPasswordReset() string
@@ -180,7 +210,21 @@ type CanResetPassword interface {
 	SendPasswordResetNotification(ctx context.Context, token string) error
 }
 
-// MustVerifyEmail mirrors Illuminate\Contracts\Auth\MustVerifyEmail.
+// MustVerifyEmail is what a user type must satisfy for an application to hold
+// it to a confirmed e-mail address. It reports whether the address has been
+// confirmed, stamps it as confirmed, sends the message that asks, and answers
+// with the address that message goes to.
+//
+// It is a type assertion and not a flag on the user. The
+// [github.com/arandu-io/hesape/auth/middleware.EnsureEmailIsVerified]
+// middleware asks whether the signed-in user implements this interface and lets
+// a user type that does not through untouched, so an application with two kinds
+// of account only confirms the addresses of the kind that has one.
+//
+// [MustVerifyEmailTrait] is the ready implementation a user type embeds to
+// answer all four methods.
+//
+// Answers Illuminate\Contracts\Auth\MustVerifyEmail.
 type MustVerifyEmail interface {
 	// HasVerifiedEmail is hasVerifiedEmail.
 	HasVerifiedEmail() bool

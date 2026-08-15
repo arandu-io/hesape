@@ -32,7 +32,12 @@ import (
 // Rules\In and Rules\NotIn.
 // ---------------------------------------------------------------------------
 
-// In answers to Illuminate\Validation\Rules\In.
+// In builds the "in" rule -- the value must be one of a fixed list -- without
+// the caller spelling the rule string by hand. String renders every value
+// quoted, so one containing a comma survives the parameter list instead of
+// splitting into two allowed values. Build one with NewIn.
+//
+// Answers Illuminate\Validation\Rules\In.
 type In struct {
 	rule   string
 	values []string
@@ -44,7 +49,11 @@ func NewIn(values ...string) *In { return &In{rule: "in", values: values} }
 // String answers to In::__toString.
 func (r *In) String() string { return r.rule + ":" + quotedList(r.values) }
 
-// NotIn answers to Illuminate\Validation\Rules\NotIn.
+// NotIn builds the "not_in" rule -- the value must be none of a fixed list --
+// with the same quoting In uses, so a listed value containing a comma is still
+// one value. Build one with NewNotIn.
+//
+// Answers Illuminate\Validation\Rules\NotIn.
 type NotIn struct {
 	rule   string
 	values []string
@@ -70,8 +79,14 @@ func quotedList(values []string) string {
 // Rules\ArrayRule.
 // ---------------------------------------------------------------------------
 
-// ArrayRule answers to Illuminate\Validation\Rules\ArrayRule, which the PHP
-// already spells with the suffix because "array" is a reserved word there.
+// ArrayRule builds the "array" rule: the value must be an array, and when keys
+// are given it may hold no key outside that list, which is how a nested object
+// arriving from a form is kept to the shape it was meant to have. With no keys
+// it renders the bare "array". The name carries the suffix here for the reason
+// it carries one in the PHP -- "array" is a reserved word there, and the plain
+// name is not available.
+//
+// Answers Illuminate\Validation\Rules\ArrayRule.
 type ArrayRule struct{ keys []string }
 
 // NewArrayRule answers to the ArrayRule constructor and to Rule::array.
@@ -89,7 +104,14 @@ func (r *ArrayRule) String() string {
 // Rules\ExcludeIf, Rules\ProhibitedIf and Rules\RequiredIf.
 // ---------------------------------------------------------------------------
 
-// ExcludeIf answers to Illuminate\Validation\Rules\ExcludeIf.
+// ExcludeIf renders the "exclude" rule when its condition holds and an empty
+// string when it does not, so a field can be dropped from a rule set without
+// branching around the set itself. An excluded attribute is removed from the
+// validated data rather than reported: it is not part of this request, which is
+// a different thing from being wrong, and no message is put on it. Build one
+// with NewExcludeIf.
+//
+// Answers Illuminate\Validation\Rules\ExcludeIf.
 type ExcludeIf struct{ Condition bool }
 
 // NewExcludeIf answers to the ExcludeIf constructor and to Rule::excludeIf.
@@ -108,7 +130,12 @@ func (r *ExcludeIf) String() string {
 	return ""
 }
 
-// ProhibitedIf answers to Illuminate\Validation\Rules\ProhibitedIf.
+// ProhibitedIf renders the "prohibited" rule when its condition holds and an
+// empty string when it does not. A prohibited attribute fails whenever it
+// arrived with a value at all, which refuses a field that must not accompany
+// this request instead of quietly ignoring it. Build one with NewProhibitedIf.
+//
+// Answers Illuminate\Validation\Rules\ProhibitedIf.
 type ProhibitedIf struct{ Condition bool }
 
 // NewProhibitedIf answers to the ProhibitedIf constructor and to
@@ -123,7 +150,13 @@ func (r *ProhibitedIf) String() string {
 	return ""
 }
 
-// RequiredIf answers to Illuminate\Validation\Rules\RequiredIf.
+// RequiredIf renders the "required" rule when its condition holds and an empty
+// string when it does not, so a field is demanded only in the case the caller
+// decides. The condition is a bool settled before the rule set is built; a
+// condition that has to look at the request is required_if, which is a rule name
+// and takes the other field as its parameter. Build one with NewRequiredIf.
+//
+// Answers Illuminate\Validation\Rules\RequiredIf.
 type RequiredIf struct{ Condition bool }
 
 // NewRequiredIf answers to the RequiredIf constructor and to Rule::requiredIf.
@@ -210,7 +243,13 @@ func (r *Date) String() string {
 // Rules\Numeric.
 // ---------------------------------------------------------------------------
 
-// Numeric answers to Illuminate\Validation\Rules\Numeric.
+// Numeric builds a whole chain of numeric rules for one field -- bounds, digit
+// counts, decimal places, comparisons against another field -- without the
+// caller remembering any of their names. It always begins with "numeric", and
+// String renders the chain with repeats dropped, because several of the methods
+// add "integer" of their own. Build one with NewNumeric.
+//
+// Answers Illuminate\Validation\Rules\Numeric.
 type Numeric struct{ constraints []string }
 
 // NewNumeric answers to the Numeric constructor and to Rule::numeric.
@@ -315,7 +354,13 @@ func number64(value float64) string { return strconv.FormatFloat(value, 'f', -1,
 // Rules\Dimensions.
 // ---------------------------------------------------------------------------
 
-// Dimensions answers to Illuminate\Validation\Rules\Dimensions.
+// Dimensions builds the "dimensions" rule: the pixel width and height an
+// uploaded image must have or stay within, and the aspect ratio it must match.
+// Each method sets one constraint, and String renders them all as a single rule
+// in a fixed order rather than the order they were set, since a Go map remembers
+// none. Build one with NewDimensions.
+//
+// Answers Illuminate\Validation\Rules\Dimensions.
 type Dimensions struct{ constraints map[string]string }
 
 // NewDimensions answers to the Dimensions constructor and to Rule::dimensions.
@@ -558,8 +603,13 @@ func (r *FileRule) buildMimetypes() []string {
 // Rules\Email.
 // ---------------------------------------------------------------------------
 
-// EmailRule answers to Illuminate\Validation\Rules\Email. It carries the suffix
-// because Email is already the one-value helper.
+// EmailRule builds the "email" rule together with the list of checks it should
+// run: the RFC reading, a stricter one, an MX record lookup on the domain, the
+// spoofing check, and the native one. With nothing asked for it renders the bare
+// "email", which is the shape check alone. Build one with NewEmailRule. It
+// carries the suffix because Email is already the one-value helper here.
+//
+// Answers Illuminate\Validation\Rules\Email.
 type EmailRule struct{ validations []string }
 
 // NewEmailRule answers to the Email constructor and to Rule::email.
@@ -617,8 +667,14 @@ func (r *EmailRule) String() string {
 // Rules\Unique and Rules\Exists, over Rules\DatabaseRule.
 // ---------------------------------------------------------------------------
 
-// DatabaseRule answers to the Illuminate\Validation\Rules\DatabaseRule trait:
-// the table, the column and the extra conditions Unique and Exists share.
+// DatabaseRule holds what the two database rules have in common: the table and
+// the column to look in, the extra conditions that narrow the search, and the
+// query callbacks registered through Using. Unique and Exists embed it rather
+// than repeat it, so the Where methods below are written once and read as
+// methods on either; FormatWheres renders the conditions into the parameter list
+// each of them builds. It is not useful on its own.
+//
+// Answers the Illuminate\Validation\Rules\DatabaseRule trait.
 type DatabaseRule struct {
 	table  string
 	column string
@@ -689,7 +745,13 @@ func columnOr(given []string, def string) string {
 	return def
 }
 
-// Unique answers to Illuminate\Validation\Rules\Unique.
+// Unique builds the "unique" rule: no row in the table may already hold this
+// value in the column. Ignore names the one row allowed to hold it, which is how
+// a form that edits an existing record does not collide with itself. The check
+// is a read of the table, so it runs only with a Grant carrying a tenant and
+// counts only that tenant's rows. Build one with NewUnique.
+//
+// Answers Illuminate\Validation\Rules\Unique.
 type Unique struct {
 	DatabaseRule
 	ignore   string
@@ -725,7 +787,14 @@ func (r *Unique) String() string {
 	}, ","), ",")
 }
 
-// Exists answers to Illuminate\Validation\Rules\Exists.
+// Exists builds the "exists" rule: some row in the table must already hold this
+// value in the column, which is how an identifier arriving from a form is
+// checked before anything is written against it. The check is a read of the
+// table, so it runs only with a Grant carrying a tenant and counts only that
+// tenant's rows -- an identifier belonging to somebody else does not exist as
+// far as this rule is concerned. Build one with NewExists.
+//
+// Answers Illuminate\Validation\Rules\Exists.
 type Exists struct{ DatabaseRule }
 
 // NewExists answers to the Exists constructor and to Rule::exists.

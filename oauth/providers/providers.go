@@ -17,7 +17,14 @@ package providers
 // the clone is the shape -- the class names, the method names, the scope
 // delimiter of each provider, and the default scopes where they still exist.
 
-// NewFacebookProvider answers Illuminate\Socialite\OAuthTwo\FacebookProvider.
+// NewFacebookProvider builds a [Provider] wired to Facebook Login: the login
+// dialog, the Graph token endpoint and the Graph /me endpoint, all pinned to
+// one API version, with scopes separated by commas and "email" asked for by
+// default. Graph answers with an id and nothing else unless the fields are
+// named, so the user data request carries the field list that fills the
+// profile. The caller adds its callback URL and drives the flow from there.
+//
+// Answers Illuminate\Socialite\OAuthTwo\FacebookProvider.
 func NewFacebookProvider(state StateStoreInterface, clientID, secret string) *Provider {
 	const version = "v23.0"
 	p := NewProvider(state, clientID, secret,
@@ -55,7 +62,13 @@ func NewGithubProvider(state StateStoreInterface, clientID, secret string) *Prov
 	return p
 }
 
-// NewGoogleProvider answers Illuminate\Socialite\OAuthTwo\GoogleProvider.
+// NewGoogleProvider builds a [Provider] wired to Sign in with Google: the
+// accounts.google.com authorization endpoint, the googleapis.com token and
+// userinfo endpoints, scopes separated by spaces, and openid, profile and email
+// asked for by default. The caller adds its callback URL and drives the flow
+// from there.
+//
+// Answers Illuminate\Socialite\OAuthTwo\GoogleProvider.
 func NewGoogleProvider(state StateStoreInterface, clientID, secret string) *Provider {
 	p := NewProvider(state, clientID, secret,
 		"https://accounts.google.com/o/oauth2/auth",

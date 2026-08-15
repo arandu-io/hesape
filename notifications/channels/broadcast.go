@@ -40,8 +40,18 @@ type BroadcastNotification interface {
 	ToBroadcast(to notifications.Notifiable) messages.Broadcast
 }
 
-// Broadcast pushes a notification to a connected browser. It is
-// Illuminate\Notifications\Channels\BroadcastChannel.
+// Broadcast is the channel that pushes a notification to a browser connected
+// right now. It asks the notification for its payload through
+// [BroadcastNotification], works out which channel names to push to -- the ones
+// the notification names itself, or the one the recipient routes to -- and
+// hands each of them to the [Broadcaster] it was built with.
+//
+// A recipient with no live connection is notifications.ErrNotAddressed rather
+// than a failure, which is the normal state of most recipients most of the
+// time: the push is a courtesy on top of a stored notification, never the only
+// copy.
+//
+// Answers Illuminate\Notifications\Channels\BroadcastChannel.
 type Broadcast struct {
 	hub Broadcaster
 }

@@ -14,7 +14,18 @@ func (e *HttpClientException) Error() string {
 	return "http client error: " + e.Message
 }
 
-// ConnectionException mirrors Illuminate\Http\Client\ConnectionException.
+// ConnectionException is returned when the request never reached the server:
+// the host did not resolve, the connection was refused, or the transport gave
+// up before a status line came back. There is no [Response] to inspect,
+// because none arrived.
+//
+// It is not the same failure as a response that arrived carrying a failing
+// status -- that one is a [RequestException]. The retry callback is handed
+// this error when the transport failed and the other one when the server
+// answered badly, so a caller that treats them alike is retrying two different
+// problems with one policy.
+//
+// Answers Illuminate\Http\Client\ConnectionException.
 type ConnectionException struct {
 	HttpClientException
 }
@@ -38,7 +49,18 @@ var requestExceptionTruncateAt = struct {
 	length int
 }{length: DefaultRequestExceptionTruncateAt}
 
-// RequestException mirrors Illuminate\Http\Client\RequestException.
+// RequestException is returned when a response did come back and the caller
+// asked for a failing one to be treated as an error: [Response.Throw],
+// [Response.ThrowIfStatus] and the retry loop that ran out of attempts all
+// build one. The response stays on the value, so whatever handles the error
+// can still read the status, the headers and the body.
+//
+// Its message is the status code followed by a summary of the body, cut at the
+// truncation length so that one log line does not swallow a whole HTML error
+// page. TruncateExceptionsAt decides that length when it is set on the
+// instance; otherwise the package-level [TruncateAt] does.
+//
+// Answers Illuminate\Http\Client\RequestException.
 type RequestException struct {
 	HttpClientException
 	Response *Response
@@ -142,7 +164,13 @@ func (e *StrayRequestError) Error() string {
 	return "http client: attempt to send request without a matching stub: " + e.URI
 }
 
-// BatchInProgressError mirrors Illuminate\Http\Client\BatchInProgressException.
+// BatchInProgressError is returned by [Batch.Send] when that batch has already
+// been sent. A batch collects its requests once and dispatches them once, so
+// the second call is a mistake in the calling code rather than a transient
+// failure -- going ahead with it would put every request in the batch on the
+// wire a second time.
+//
+// Answers Illuminate\Http\Client\BatchInProgressException.
 type BatchInProgressError struct {
 	HttpClientException
 }

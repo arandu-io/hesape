@@ -11,8 +11,18 @@ import (
 	"github.com/arandu-io/hesape/database/events"
 )
 
-// Dispatcher answers Illuminate\Contracts\Events\Dispatcher, narrowed to the
-// one method the Migrator calls on it.
+// Dispatcher is where the Migrator sends the events of a run -- started,
+// ended, one migration started, one skipped, nothing to do.
+//
+// It is one method because that is all the Migrator ever does with an event
+// dispatcher: it publishes and never subscribes. Declaring the whole contract
+// would make anything that wants to watch a migration implement listener
+// registration it does not use, and would make this package depend on a
+// dispatcher rather than on the idea of one. A Migrator with none dispatches
+// nothing and migrates the same.
+//
+// Answers Illuminate\Contracts\Events\Dispatcher, narrowed to the one method
+// the Migrator calls on it.
 type Dispatcher interface {
 	// Dispatch fires an event.
 	Dispatch(event any)

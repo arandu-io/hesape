@@ -121,8 +121,14 @@ func NewPrivateChannelFor(h HasBroadcastChannel) Channel {
 // NewPresenceChannel is Illuminate\Broadcasting\PresenceChannel::__construct.
 func NewPresenceChannel(name string) Channel { return Channel{Name: PresenceChannelPrefix + name} }
 
-// NewEncryptedPrivateChannel is
-// Illuminate\Broadcasting\EncryptedPrivateChannel::__construct.
+// NewEncryptedPrivateChannel names a private channel whose payloads are
+// encrypted end to end, with the "private-encrypted-" prefix that says so.
+//
+// The prefix is not decoration: it is how the client knows to decrypt, and how
+// the broadcaster knows to encrypt. A channel that carries the prefix and is not
+// encrypted, or the reverse, fails at the far end with nothing useful said.
+//
+// Answers Illuminate\Broadcasting\EncryptedPrivateChannel::__construct.
 func NewEncryptedPrivateChannel(name string) Channel {
 	return Channel{Name: EncryptedPrivateChannelPrefix + name}
 }

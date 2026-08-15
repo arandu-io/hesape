@@ -6,11 +6,27 @@ import (
 	"strings"
 )
 
-// DefaultMessageFormat answers to the $format property of
-// Illuminate\Support\MessageBag, whose default is ":message".
+// DefaultMessageFormat is what a [MessageBag] wraps its messages in until
+// [MessageBag.SetFormat] says otherwise: nothing at all, the message on its own.
+//
+// A format is a template read on the way out, in [MessageBag.Get],
+// [MessageBag.First] and [MessageBag.All]: ":message" is replaced by the
+// message and ":key" by the key it is filed under, so a bag set to
+// "<li>:message</li>" hands every message back already wrapped. The messages
+// held in the bag are never changed, only the copies it returns.
+//
+// Answers the $format property of Illuminate\Support\MessageBag.
 const DefaultMessageFormat = ":message"
 
-// MessageProvider answers to Illuminate\Contracts\Support\MessageProvider.
+// MessageProvider is implemented by a value that carries validation messages
+// and can hand them over as a [MessageBag]. Taking the interface instead of the
+// bag lets a caller pass whatever produced the errors and leave it to decide
+// which messages to expose.
+//
+// *MessageBag implements it by returning itself, so any type that holds a bag
+// satisfies it by delegating one method.
+//
+// Answers Illuminate\Contracts\Support\MessageProvider.
 type MessageProvider interface {
 	// GetMessageBag answers to MessageProvider::getMessageBag.
 	GetMessageBag() *MessageBag

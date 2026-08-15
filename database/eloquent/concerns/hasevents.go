@@ -2,7 +2,17 @@ package concerns
 
 import "sync"
 
-// Event answers the model events Illuminate\Database\Eloquent\Concerns\HasEvents
+// Event names a moment in a model's life that a listener can be registered
+// for: retrieved, saving, created, deleting and the rest, declared as constants
+// below.
+//
+// It is a string rather than an integer because the name is the identity: it is
+// what HasEvents keys its listener registry by, what a custom event registered
+// by an application is spelled as, and what shows up in a log line. Anything
+// declared as an Event is fireable, including a name this package does not
+// define.
+//
+// Answers the model events Illuminate\Database\Eloquent\Concerns\HasEvents
 // declares in $observables.
 type Event string
 

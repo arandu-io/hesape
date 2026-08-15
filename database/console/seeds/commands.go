@@ -26,7 +26,11 @@ type Deps struct {
 	SeederPath string
 }
 
-// Commands answers the commands of Illuminate\Database\Console\Seeds.
+// Commands builds the two seed commands against one Deps, so an application
+// registers both in a single call: db:seed, which runs a seeder, and
+// make:seeder, which writes a new one.
+//
+// Answers the commands of Illuminate\Database\Console\Seeds.
 func Commands(deps Deps) []console.Command {
 	return []console.Command{SeedCommand(deps), SeederMakeCommand(deps)}
 }

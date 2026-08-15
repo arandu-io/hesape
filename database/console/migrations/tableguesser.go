@@ -2,8 +2,17 @@ package migrations
 
 import "regexp"
 
-// CreatePatterns answers
-// Illuminate\Database\Console\Migrations\TableGuesser::CREATE_PATTERNS.
+// CreatePatterns are the migration names Guess reads as creating a table, with
+// the table in the first capture group: create_invoices_table and
+// create_invoices both name invoices.
+//
+// They are tried before ChangePatterns, and the first match wins, so a name
+// that could be read either way is read as a create. Exported because they are
+// the whole definition of what "this migration creates a table" means, and a
+// caller that wants to test a name against them without going through Guess
+// can.
+//
+// Answers Illuminate\Database\Console\Migrations\TableGuesser::CREATE_PATTERNS.
 var CreatePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^create_(\w+)_table$`),
 	regexp.MustCompile(`^create_(\w+)$`),
