@@ -83,6 +83,6 @@
 //	    nothing left to do.
 //
 // The compiler that turns a .kyse.go file into the Go this package runs is not
-// in here yet. It is aru/internal/kyse today, and docs/31-reorganizacao-hesape.md
+// in here yet. It is aru/internal/kyse today, and 20-components/DOC-hesape-reorganization.md
 // moves it to view/compilers conditioned on ADR 0047.
 package view

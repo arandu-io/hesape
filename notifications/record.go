@@ -68,7 +68,7 @@ func (r Record) Unread() bool { return r.ReadAt.IsZero() }
 // MarkAsRead is DatabaseNotification::markAsRead.
 //
 // The store is an argument because a Record is a row and not an Active Record
-// object with a connection inside it (docs/01-arquitetura.md), and the Grant is
+// object with a connection inside it (00-meta/DOC-architecture.md), and the Grant is
 // one because stamping somebody's notification read is a write on their data.
 //
 // Marking a notification that is already read changes nothing and does not move
@@ -167,7 +167,7 @@ func (rs Records) filter(keep func(Record) bool) Records {
 //
 // In Illuminate they are query scopes on the model, which is what a `where`
 // looks like when the query builder is the model. There is no query builder
-// here (docs/01-arquitetura.md rejects Active Record), so a scope is what it
+// here (00-meta/DOC-architecture.md rejects Active Record), so a scope is what it
 // always was underneath: a condition, written once, that a statement pastes in.
 //
 // TableStore uses them, and so does an application writing its own read model
@@ -182,7 +182,7 @@ func ScopeUnread() string { return "read_at IS NULL" }
 // menu reads it back.
 //
 // It has no PHP counterpart: there DatabaseNotification is an Eloquent model
-// and the query builder is the model, which docs/01-arquitetura.md rejects.
+// and the query builder is the model, which 00-meta/DOC-architecture.md rejects.
 //
 // Every method takes a Grant, reads included. A notification is somebody's
 // invoice, somebody's password reset, somebody's mention -- a list endpoint

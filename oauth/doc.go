@@ -21,7 +21,7 @@
 // It is not an OAuth 2 authorization SERVER. This package is the client half:
 // it sends somebody to a provider and reads back who they are. Being the
 // provider -- issuing tokens for other applications to consume -- is a separate
-// thing and is deferred, see docs/06-escopo.md.
+// thing and is deferred, see 00-meta/DOC-scope.md.
 //
 // It is also not golang.org/x/oauth2. That library is the token exchange and
 // nothing above it. What this adds is the part every application writes by hand

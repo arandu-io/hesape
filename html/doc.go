@@ -69,7 +69,7 @@
 // tag. It does not close the scheme hole. `Link("javascript:alert(1)", ...)`
 // produces a link that runs script when clicked, in PHP and here, because the
 // URL is well-formed and the danger is in what it means rather than in how it
-// is written. docs/31-reorganizacao-hesape.md:574 records that this is open
+// is written. 20-components/DOC-hesape-reorganization.md records that this is open
 // across the whole view layer, kyse included, and that it is a decision to take
 // knowingly rather than by omission. Until it is taken, do not pass a URL that
 // came from a person to [HtmlBuilder.Link], [HtmlBuilder.Image] or

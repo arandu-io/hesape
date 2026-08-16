@@ -15,7 +15,7 @@ import (
 // takes, narrowed to the one call MailChannel::send makes on it.
 //
 // It is a seam to hesape/mail, which is layer 4 of
-// docs/31-reorganizacao-hesape.md and does not exist yet. When it does, the
+// 20-components/DOC-hesape-reorganization.md and does not exist yet. When it does, the
 // adapter is a dozen lines: turn a messages.Mail into the envelope and the two
 // rendered parts, and hand it to the Mailer there.
 //

@@ -20,7 +20,7 @@ import (
 // call.
 //
 // It is a seam to hesape/broadcasting, which is layer 5 of
-// docs/31-reorganizacao-hesape.md and does not exist yet. The signature is the
+// 20-components/DOC-hesape-reorganization.md and does not exist yet. The signature is the
 // one a hub can satisfy with no adaptation: a channel name, an event name and a
 // JSON payload.
 type Broadcaster interface {

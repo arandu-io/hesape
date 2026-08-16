@@ -74,7 +74,7 @@ func NewWorkbenchMakeCommand(creator *PackageCreator, config Config, processes *
 // Command is the console.Command value a binary registers.
 //
 // PHP's $name is "workbench", after the directory the packages land in. The
-// name here is "make:package", which is what docs/31-reorganizacao-hesape.md:123
+// name here is "make:package", which is what 20-components/DOC-hesape-reorganization.md
 // settled on: it is the verb a person reaches for, and it groups with the other
 // make: commands they already type.
 func (c *WorkbenchMakeCommand) Command() console.Command {

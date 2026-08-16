@@ -368,7 +368,7 @@ func (r *TestResponse) AssertViewIs(value string) *TestResponse {
 //
 // The PHP has two more branches, for an Eloquent model and an Eloquent
 // collection, which compare by key rather than by value. There is no Active
-// Record here -- docs/01-arquitetura.md rejected it -- so a record is compared
+// Record here -- 00-meta/DOC-architecture.md rejected it -- so a record is compared
 // like any other value.
 func (r *TestResponse) AssertViewHas(key any, value ...any) *TestResponse {
 	r.t.Helper()

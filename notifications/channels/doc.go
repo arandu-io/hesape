@@ -26,7 +26,7 @@
 //
 // Mail names a Mailer and Broadcast names a Broadcaster rather than importing
 // hesape/mail and hesape/broadcasting, which are layers 4 and 5 of
-// docs/31-reorganizacao-hesape.md and are not filled yet. Naming the little a
+// 20-components/DOC-hesape-reorganization.md and are not filled yet. Naming the little a
 // channel needs is the Go answer either way: a package that imports the whole
 // mailer to send one message is a package that cannot be tested without one.
 package channels

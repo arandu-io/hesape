@@ -5,6 +5,6 @@
 //
 //	AssertableJson.php
 //
-// Nothing is implemented here yet. docs/31-reorganizacao-hesape.md says what
+// Nothing is implemented here yet. 20-components/DOC-hesape-reorganization.md says what
 // moves in, from where, and in which phase.
 package fluent

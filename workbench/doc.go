@@ -3,7 +3,7 @@
 // It answers to Illuminate\Workbench, which was six files and thirteen public
 // methods (measured against laravel_illuminate/workbench, the archived
 // illuminate/workbench at v5.0.0). Laravel deleted it in 5.1, and
-// docs/31-reorganizacao-hesape.md:123 says what replaces it: a console command,
+// 20-components/DOC-hesape-reorganization.md says what replaces it: a console command,
 // `aru make:package`. That is what this is -- the generator, with the console
 // command that drives it.
 //

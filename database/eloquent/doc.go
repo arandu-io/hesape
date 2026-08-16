@@ -36,7 +36,7 @@
 //
 // # $fillable and $guarded do not exist here, and nothing replaces them
 //
-// They are the first thing a Laravel developer looks for, so: docs/01-arquitetura.md
+// They are the first thing a Laravel developer looks for, so: 00-meta/DOC-architecture.md
 // rejected both, and the answer is the initial letter of the field.
 //
 // Mass assignment is dangerous in PHP because every property is reachable and

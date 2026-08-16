@@ -19,7 +19,7 @@
 // the framework's surface. That inventory is worth more than the package would
 // have been, so it was measured and written down instead.
 //
-// docs/32-mapa-de-contratos.md crosses all 150 contracts against this module,
+// 60-contracts/MOC-contracts.md crosses all 150 contracts against this module,
 // one row each, and reports for every one of them whether the hesape has the
 // whole method set (EXISTS), part of it (PARTIAL, with the missing PHP method
 // names listed), or nothing at all (MISSING). It is ordered MISSING first,

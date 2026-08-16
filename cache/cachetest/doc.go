@@ -4,7 +4,7 @@
 //
 // # Nothing is here yet, and that is deliberate
 //
-// This tree was written from docs/31-reorganizacao-hesape.md before a line of
+// This tree was written from 20-components/DOC-hesape-reorganization.md before a line of
 // code moved. The attempt before it fixed things one at a time, and one at a
 // time does not reorganize a structure.
 //

@@ -167,7 +167,7 @@ func (rec Record[T]) PasswordConfirmedWithin(window time.Duration) bool {
 //
 // The core ships ArrayHandler only, which is enough for development and for a
 // single instance. The kv adapter provides the distributed store with active
-// invalidation; see docs/05-repositorios.md.
+// invalidation; see 00-meta/DOC-repositories.md.
 type Handler[T any] interface {
 	// Read returns the record, or ErrExpired when the handler does not hold the
 	// id -- expired, evicted, or destroyed by a logout elsewhere.

@@ -64,7 +64,7 @@ func statusTitle(status int) string {
 // application that has not been touched must still answer its own 404, and
 // because they have to render when the view build is what broke (RULE 13).
 //
-// The tone follows docs/04-marca.md: say what happened, say what to do, no
+// The tone follows 00-meta/DOC-brand.md: say what happened, say what to do, no
 // apology and no exclamation mark.
 func statusMessage(status int) string {
 	switch status {

@@ -46,7 +46,7 @@
 // runs in a different process from the one that dispatched the batch -- often a
 // different build -- and Go cannot serialize a closure across that gap. Laravel
 // can, by serializing the closure's bytecode, and it is listed in
-// docs/31-reorganizacao-hesape.md as impossible in Go rather than unwanted. A
+// 20-components/DOC-hesape-reorganization.md as impossible in Go rather than unwanted. A
 // named job is the same thing with the indirection made visible.
 //
 // It is also why each moment names one job where Illuminate takes a list: a

@@ -124,7 +124,7 @@
 //
 // Eloquent has no counterpart and never will: Post::find(1)->update() is
 // persistence that proves no authorization decision, and RULE 17 requires one on
-// the way in and on the way out. docs/31-reorganizacao-hesape.md says what else
+// the way in and on the way out. 20-components/DOC-hesape-reorganization.md says what else
 // moves in and from where.
 //
 // # The twelve names the measurement still asks about

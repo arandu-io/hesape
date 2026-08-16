@@ -21,7 +21,7 @@
 //
 // Laravel deleted it in 5.1 and the successor is Envoy, a separate tool with a
 // Blade-flavoured task file. Its neighbours in that product line -- Forge and
-// Envoyer -- are refused by name in docs/06-escopo.md:161 and :164.
+// Envoyer -- are refused by name in 00-meta/DOC-scope.md.
 //
 // # The driver is not the cost, and that is why this needed deciding
 //
@@ -68,7 +68,7 @@
 //
 // # The two reasons that decide it
 //
-// First, RULE 9. docs/17-deploy.md is the deployment path: build a static
+// First, RULE 9. 00-meta/DOC-deployment.md is the deployment path: build a static
 // binary, build an OCI image, let the platform roll it out, and run `aru
 // migrate` as a pipeline step and never at boot (RULE 16). A task runner that
 // opens a shell on a named production host is a second deployment path beside
@@ -81,7 +81,7 @@
 // architecture -- would be false, and it would be false in the place with the
 // most reach.
 //
-// docs/31-reorganizacao-hesape.md:122 and :408 already said "nada" for this
+// 20-components/DOC-hesape-reorganization.md already said "nada" for this
 // component. This file is that decision with the weighing written down, so the
 // next person does not have to redo it.
 //

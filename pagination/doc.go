@@ -173,7 +173,7 @@
 //
 //   - AbstractPaginator::loadMorph, ::loadMorphCount and the same two on
 //     AbstractCursorPaginator forward to Eloquent polymorphic relations. There
-//     is no Eloquent here, and docs/01-arquitetura.md rejects Active Record.
+//     is no Eloquent here, and 00-meta/DOC-architecture.md rejects Active Record.
 //
 // The protected members answer to nothing on purpose: AbstractPaginator::
 // isValidPageNumber, ::appendArray, ::addQuery, ::buildFragment,

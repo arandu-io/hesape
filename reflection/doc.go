@@ -36,7 +36,7 @@
 // reflection got in anyway, so it was counted. ADR 0046 audits eight non-test
 // files line by line, at twenty-one call sites, giving for each one what it is
 // for and whether a generic or an interface could replace it. Read the audit in
-// docs/adr/0046-macro-condicao-e-reflexao.md.
+// 10-adr/ADR-0046-macroable-conditionable-reflection.md.
 //
 // The repository total is larger than the audited set and moves faster: thirteen
 // non-test files at the last measurement, with collections/arr alone answering
