@@ -142,9 +142,7 @@ func TestRunReportsAFailedExitAsAResultAndNotAsAnError(t *testing.T) {
 
 	res, err := helperCommand("exit", "3").Run(t.Context(), nil, nil)
 
-	// A command that exits non-zero is not an error, and that is the behaviour
-	// under test rather than a shortcut: Laravel's run() does not throw for it,
-	// failed() reports it, and Throw is what raises it.
+	// A command that exits non-zero is not an error.
 	if err != nil {
 		t.Fatalf("a command that exited 3 came back as an error: %v", err)
 	}
@@ -384,9 +382,6 @@ func TestALoudProgramsOutputIsKeptWhole(t *testing.T) {
 	t.Parallel()
 
 	// The package used to cap what it kept and flag the result as truncated.
-	// Illuminate does neither, and ADR 0044 makes the surface Illuminate's, so
-	// this is the test that says what happens instead: everything is kept, and
-	// the handler is handed everything too.
 	var mu sync.Mutex
 	var heard int
 	res, err := helperCommand("spew", "5000").Run(t.Context(), nil, func(_ Stream, buffer string) {

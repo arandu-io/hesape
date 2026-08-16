@@ -87,9 +87,9 @@ func TestInlineMarkdown(t *testing.T) {
 	}
 }
 
-// TestMarkdownPassesRawHTMLThrough records the choice league/commonmark makes
-// by default and Illuminate keeps: raw HTML in the source is raw HTML in the
-// output, so untrusted Markdown has to be sanitized after this.
+// TestMarkdownPassesRawHTMLThrough records the choice: raw HTML in the source
+// is raw HTML in the output, so untrusted Markdown has to be sanitized after
+// this.
 func TestMarkdownPassesRawHTMLThrough(t *testing.T) {
 	if got := str.Markdown("<script>alert(1)</script>"); got != "<script>alert(1)</script>\n" {
 		t.Errorf("Markdown of a script tag = %q", got)

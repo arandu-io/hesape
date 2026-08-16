@@ -11,21 +11,17 @@ import (
 	"strings"
 )
 
-// stableSort sorts s in place with compare, keeping equal elements in the order
-// they had. Illuminate sorts with uasort, which is stable since PHP 8.0, so a
-// sort that reordered ties would not answer to the same method.
+// stableSort sorts s in place with compare, keeping equal elements in the
+// order they had. Every sort in this package is stable, and callers rely on
+// it: a sort that reordered ties would make repeated passes non-reproducible.
 func stableSort[T any](s []T, compare func(a, b T) int) {
 	sort.SliceStable(s, func(i, j int) bool { return compare(s[i], s[j]) < 0 })
 }
 
-// Filter answers to Illuminate\Support\Collection::filter.
+// Filter keeps the elements the callback passes.
 //
-// The PHP takes an optional callback and drops the falsy values when it is
-// absent; Go has no falsy, so the callback is required. Pass a nil callback to
-// get the collection back unchanged, which is the closest thing to "keep
-// everything" a typed language can offer.
-//
-// The result is empty rather than nil when nothing passes.
+// A nil callback keeps everything, and the result is empty rather than nil
+// when nothing passes.
 func (c Collection[T]) Filter(callback func(value T, key int) bool) Collection[T] {
 	if callback == nil {
 		return c.Values()
@@ -39,9 +35,8 @@ func (c Collection[T]) Filter(callback func(value T, key int) bool) Collection[T
 	return out
 }
 
-// Reject answers to
-// Illuminate\Support\Traits\EnumeratesValues::reject: Filter with the
-// predicate negated.
+// Reject is Filter with the predicate negated: it drops the elements the
+// callback passes. A nil callback keeps everything.
 func (c Collection[T]) Reject(callback func(value T, key int) bool) Collection[T] {
 	if callback == nil {
 		return c.Values()
@@ -49,12 +44,11 @@ func (c Collection[T]) Reject(callback func(value T, key int) bool) Collection[T
 	return c.Filter(func(value T, key int) bool { return !callback(value, key) })
 }
 
-// First answers to Illuminate\Support\Collection::first.
+// First returns the first element passing the test.
 //
-// A nil callback returns the first element, which is what the PHP does with no
-// argument. The second result is false when the collection is empty or nothing
-// matches, and the first is then the zero value -- the PHP returns its $default
-// there, and a caller who wants one writes the fallback at the call site.
+// A nil callback returns the first element. The second result is false when
+// the collection is empty or nothing matches, and the first is then the zero
+// value, so the caller writes the fallback at the call site.
 func (c Collection[T]) First(callback func(value T, key int) bool) (T, bool) {
 	for i, v := range c {
 		if callback == nil || callback(v, i) {
@@ -65,9 +59,8 @@ func (c Collection[T]) First(callback func(value T, key int) bool) (T, bool) {
 	return zero, false
 }
 
-// FirstOrFail answers to Illuminate\Support\Collection::firstOrFail.
-//
-// It returns ErrItemNotFound where the PHP throws ItemNotFoundException.
+// FirstOrFail returns the first element passing the test, or ErrItemNotFound
+// when nothing matches.
 func (c Collection[T]) FirstOrFail(callback func(value T, key int) bool) (T, error) {
 	if value, ok := c.First(callback); ok {
 		return value, nil
@@ -76,7 +69,7 @@ func (c Collection[T]) FirstOrFail(callback func(value T, key int) bool) (T, err
 	return zero, ErrItemNotFound
 }
 
-// Last answers to Illuminate\Support\Collection::last.
+// Last returns the last element passing the test.
 //
 // A nil callback returns the last element. The second result is false when
 // nothing matches, as in First.
@@ -90,11 +83,10 @@ func (c Collection[T]) Last(callback func(value T, key int) bool) (T, bool) {
 	return zero, false
 }
 
-// Sole answers to Illuminate\Support\Collection::sole.
+// Sole returns the one element passing the test.
 //
-// It returns ErrItemNotFound where the PHP throws ItemNotFoundException and
-// ErrMultipleItemsFound where it throws MultipleItemsFoundException. The count
-// the PHP exception carries is wrapped into the message.
+// It returns ErrItemNotFound when nothing matches, and a
+// MultipleItemsFoundError carrying the count when more than one does.
 func (c Collection[T]) Sole(callback func(value T, key int) bool) (T, error) {
 	matched := c.Filter(callback)
 	var zero T
@@ -108,11 +100,9 @@ func (c Collection[T]) Sole(callback func(value T, key int) bool) (T, error) {
 	}
 }
 
-// HasSole answers to Illuminate\Support\Collection::hasSole: exactly one
-// element passes the test.
+// HasSole reports whether exactly one element passes the test.
 //
-// A nil callback counts the whole collection, which is what the PHP does when
-// $key is null and the unless() guard skips the filter.
+// A nil callback counts the whole collection instead of filtering it.
 func (c Collection[T]) HasSole(callback func(value T, key int) bool) bool {
 	if callback == nil {
 		return len(c) == 1
@@ -120,12 +110,10 @@ func (c Collection[T]) HasSole(callback func(value T, key int) bool) bool {
 	return len(c.Filter(callback)) == 1
 }
 
-// HasMany answers to
-// Illuminate\Support\Traits\EnumeratesValues::hasMany: at least two elements
-// pass the test.
+// HasMany reports whether at least two elements pass the test.
 //
-// The PHP stops at two matches (filter()->take(2)->count() === 2) and so does
-// this, which is what makes it cheap on a long collection.
+// The walk stops at the second match, which is what makes it cheap on a long
+// collection. A nil callback reads the length instead.
 func (c Collection[T]) HasMany(callback func(value T, key int) bool) bool {
 	if callback == nil {
 		return len(c) >= 2
@@ -142,19 +130,16 @@ func (c Collection[T]) HasMany(callback func(value T, key int) bool) bool {
 	return false
 }
 
-// ContainsManyItems answers to
-// Illuminate\Support\Collection::containsManyItems, which the PHP marks
-// deprecated in 12.50.0 and defines as a call to hasMany.
+// ContainsManyItems reports whether at least two elements pass the test. It is
+// HasMany, which is the name to prefer.
 func (c Collection[T]) ContainsManyItems(callback func(value T, key int) bool) bool {
 	return c.HasMany(callback)
 }
 
-// ForPage answers to
-// Illuminate\Support\Traits\EnumeratesValues::forPage: the perPage elements of
-// the one-based page.
+// ForPage returns the perPage elements of the one-based page.
 //
-// A page below one reads from the start, because the PHP clamps the offset with
-// max(0, ...) rather than counting backwards.
+// A page below one reads from the start: the offset is clamped at zero rather
+// than counting backwards. A negative perPage yields nothing.
 func (c Collection[T]) ForPage(page, perPage int) Collection[T] {
 	offset := (page - 1) * perPage
 	if offset < 0 {
@@ -166,12 +151,11 @@ func (c Collection[T]) ForPage(page, perPage int) Collection[T] {
 	return c.Slice(offset, perPage)
 }
 
-// PipeThrough answers to
-// Illuminate\Support\Traits\EnumeratesValues::pipeThrough: the collection fed
-// through the callbacks in order, each one receiving what the previous returned.
+// PipeThrough feeds the collection through the callbacks in order, each one
+// receiving what the previous returned.
 //
-// The PHP types the result as mixed because a pipe may return anything; a Go
-// pipe returns a collection, and Pipe is there for the shape that does not.
+// Every callback here takes and returns a collection; Pipe is there for the
+// shape that returns something else.
 func (c Collection[T]) PipeThrough(callbacks ...func(collection Collection[T]) Collection[T]) Collection[T] {
 	carry := c
 	for _, callback := range callbacks {
@@ -180,30 +164,24 @@ func (c Collection[T]) PipeThrough(callbacks ...func(collection Collection[T]) C
 	return carry
 }
 
-// Dump answers to
-// Illuminate\Support\Traits\EnumeratesValues::dump: write the elements to
-// standard output and return the collection so the call can sit inside a chain.
+// Dump writes the elements to standard output and returns the collection, so
+// the call can sit inside a chain.
 func (c Collection[T]) Dump() Collection[T] {
 	fmt.Fprintf(os.Stdout, "%#v\n", c.All())
 	return c
 }
 
-// Dd answers to
-// Illuminate\Support\Traits\EnumeratesValues::dd: dump and die.
-//
-// The PHP dd() ends the request; this ends the process with status 1. It never
-// returns, which is why nothing here is chainable.
+// Dd writes the elements to standard output and ends the process with status
+// 1. It never returns, which is why it is not chainable.
 func (c Collection[T]) Dd() {
 	c.Dump()
 	os.Exit(1)
 }
 
-// Each answers to
-// Illuminate\Support\Traits\EnumeratesValues::each.
+// Each hands every element to the callback in order.
 //
-// The callback stops the walk by returning false, exactly as the PHP breaks
-// when the callback returns false. It returns the collection so the call can be
-// chained.
+// The callback stops the walk by returning false. It returns the collection so
+// the call can be chained.
 func (c Collection[T]) Each(callback func(value T, key int) bool) Collection[T] {
 	for i, v := range c {
 		if !callback(v, i) {
@@ -213,11 +191,9 @@ func (c Collection[T]) Each(callback func(value T, key int) bool) Collection[T] 
 	return c
 }
 
-// Every answers to
-// Illuminate\Support\Traits\EnumeratesValues::every.
+// Every reports whether every element passes the test.
 //
-// An empty collection returns true, as the PHP does: there is no element to
-// fail the test.
+// An empty collection returns true: there is no element to fail the test.
 func (c Collection[T]) Every(callback func(value T, key int) bool) bool {
 	for i, v := range c {
 		if !callback(v, i) {
@@ -227,27 +203,26 @@ func (c Collection[T]) Every(callback func(value T, key int) bool) bool {
 	return true
 }
 
-// Contains answers to Illuminate\Support\Collection::contains taking a truth
-// test. For the value form, which needs comparison, use ContainsStrict.
+// Contains reports whether any element passes the test. To search for a value
+// rather than run a test, use ContainsStrict.
 func (c Collection[T]) Contains(callback func(value T, key int) bool) bool {
 	_, ok := c.First(callback)
 	return ok
 }
 
-// Some answers to
-// Illuminate\Support\Traits\EnumeratesValues::some, which the PHP defines as an
-// alias of contains.
+// Some reports whether any element passes the test. It is Contains.
 func (c Collection[T]) Some(callback func(value T, key int) bool) bool {
 	return c.Contains(callback)
 }
 
-// DoesntContain answers to Illuminate\Support\Collection::doesntContain.
+// DoesntContain reports whether no element passes the test. It is the negation
+// of Contains.
 func (c Collection[T]) DoesntContain(callback func(value T, key int) bool) bool {
 	return !c.Contains(callback)
 }
 
-// ContainsOneItem answers to
-// Illuminate\Support\Collection::containsOneItem.
+// ContainsOneItem reports whether exactly one element passes the test. A nil
+// callback reads the length instead.
 func (c Collection[T]) ContainsOneItem(callback func(value T, key int) bool) bool {
 	if callback == nil {
 		return len(c) == 1
@@ -255,12 +230,10 @@ func (c Collection[T]) ContainsOneItem(callback func(value T, key int) bool) boo
 	return len(c.Filter(callback)) == 1
 }
 
-// Percentage answers to
-// Illuminate\Support\Traits\EnumeratesValues::percentage: the share of elements
-// passing the test, from 0 to 100, rounded to precision decimal places.
+// Percentage returns the share of elements passing the test, from 0 to 100,
+// rounded to precision decimal places.
 //
-// The second result is false on an empty collection, where the PHP returns
-// null.
+// The second result is false on an empty collection.
 func (c Collection[T]) Percentage(callback func(value T, key int) bool, precision int) (float64, bool) {
 	if len(c) == 0 {
 		return 0, false
@@ -270,12 +243,9 @@ func (c Collection[T]) Percentage(callback func(value T, key int) bool, precisio
 	return math.Round(raw*factor) / factor, true
 }
 
-// Partition answers to
-// Illuminate\Support\Traits\EnumeratesValues::partition: the elements passing
-// the test, then the ones failing it.
+// Partition returns the elements passing the test, then the ones failing it.
 //
-// The PHP returns a collection holding two collections; Go returns them as two
-// results, which is the same pair without the indexing. Neither half is nil.
+// Neither half is nil, and the two together hold every element exactly once.
 func (c Collection[T]) Partition(callback func(value T, key int) bool) (passed, failed Collection[T]) {
 	passed = make(Collection[T], 0, len(c))
 	failed = make(Collection[T], 0, len(c))
@@ -289,12 +259,11 @@ func (c Collection[T]) Partition(callback func(value T, key int) bool) (passed, 
 	return passed, failed
 }
 
-// Slice answers to Illuminate\Support\Collection::slice.
+// Slice returns the run of elements starting at offset.
 //
 // A negative offset counts from the end, and a negative length stops that many
-// elements before the end, exactly as array_slice does. Omit length to read to
-// the end. Only the first length is used; the variadic is how Go spells PHP's
-// default argument.
+// elements before the end. Omit length to read to the end; only the first one
+// is used, the variadic standing in for an optional argument.
 func (c Collection[T]) Slice(offset int, length ...int) Collection[T] {
 	start := offset
 	if start < 0 {
@@ -328,10 +297,8 @@ func (c Collection[T]) Slice(offset int, length ...int) Collection[T] {
 	return out
 }
 
-// Take answers to Illuminate\Support\Collection::take.
-//
-// A negative limit takes that many from the end, as the PHP does by slicing
-// with a negative offset.
+// Take returns the first limit elements. A negative limit takes that many from
+// the end instead.
 func (c Collection[T]) Take(limit int) Collection[T] {
 	if limit < 0 {
 		return c.Slice(limit, -limit)
@@ -339,11 +306,10 @@ func (c Collection[T]) Take(limit int) Collection[T] {
 	return c.Slice(0, limit)
 }
 
-// Skip answers to Illuminate\Support\Collection::skip.
+// Skip returns everything past the first count elements.
 func (c Collection[T]) Skip(count int) Collection[T] { return c.Slice(count) }
 
-// TakeWhile answers to Illuminate\Support\Collection::takeWhile: the leading
-// run of elements passing the test.
+// TakeWhile returns the leading run of elements passing the test.
 func (c Collection[T]) TakeWhile(callback func(value T, key int) bool) Collection[T] {
 	for i, v := range c {
 		if !callback(v, i) {
@@ -353,14 +319,13 @@ func (c Collection[T]) TakeWhile(callback func(value T, key int) bool) Collectio
 	return c.Values()
 }
 
-// TakeUntil answers to Illuminate\Support\Collection::takeUntil: the elements
-// before the first one passing the test.
+// TakeUntil returns the elements before the first one passing the test.
 func (c Collection[T]) TakeUntil(callback func(value T, key int) bool) Collection[T] {
 	return c.TakeWhile(func(value T, key int) bool { return !callback(value, key) })
 }
 
-// SkipWhile answers to Illuminate\Support\Collection::skipWhile: everything
-// from the first element failing the test onwards.
+// SkipWhile returns everything from the first element failing the test
+// onwards.
 func (c Collection[T]) SkipWhile(callback func(value T, key int) bool) Collection[T] {
 	for i, v := range c {
 		if !callback(v, i) {
@@ -370,17 +335,16 @@ func (c Collection[T]) SkipWhile(callback func(value T, key int) bool) Collectio
 	return Collection[T]{}
 }
 
-// SkipUntil answers to Illuminate\Support\Collection::skipUntil: everything
-// from the first element passing the test onwards.
+// SkipUntil returns everything from the first element passing the test
+// onwards.
 func (c Collection[T]) SkipUntil(callback func(value T, key int) bool) Collection[T] {
 	return c.SkipWhile(func(value T, key int) bool { return !callback(value, key) })
 }
 
-// Chunk answers to Illuminate\Support\Collection::chunk.
+// Chunk breaks the collection into runs of size elements.
 //
-// A size below one yields an empty collection, which is what the PHP's
-// array_chunk guard produces rather than an endless loop. The last chunk is
-// short when the length does not divide evenly.
+// A size below one yields an empty collection rather than looping forever. The
+// last chunk is short when the length does not divide evenly.
 func Chunk[T any](c Collection[T], size int) Collection[Collection[T]] {
 	if size < 1 {
 		return Collection[Collection[T]]{}
@@ -392,9 +356,8 @@ func Chunk[T any](c Collection[T], size int) Collection[Collection[T]] {
 	return out
 }
 
-// ChunkWhile answers to Illuminate\Support\Collection::chunkWhile: a new chunk
-// starts whenever the callback reports false for the element against the chunk
-// built so far.
+// ChunkWhile breaks the collection wherever the callback reports false for an
+// element against the chunk built so far, which starts a new chunk.
 func ChunkWhile[T any](c Collection[T], callback func(value T, key int, chunk Collection[T]) bool) Collection[Collection[T]] {
 	out := Collection[Collection[T]]{}
 	var chunk Collection[T]
@@ -412,10 +375,10 @@ func ChunkWhile[T any](c Collection[T], callback func(value T, key int, chunk Co
 	return out
 }
 
-// Split answers to Illuminate\Support\Collection::split: the elements dealt
-// into numberOfGroups groups, the earlier groups taking the remainder.
+// Split deals the elements into numberOfGroups groups, the earlier groups
+// taking the remainder.
 //
-// It returns ErrInvalidArgument where the PHP throws InvalidArgumentException.
+// It returns ErrInvalidArgument when numberOfGroups is below one.
 func Split[T any](c Collection[T], numberOfGroups int) (Collection[Collection[T]], error) {
 	if numberOfGroups < 1 {
 		return nil, fmt.Errorf("%w: number of groups must be at least 1, got %d", ErrInvalidArgument, numberOfGroups)
@@ -442,10 +405,10 @@ func Split[T any](c Collection[T], numberOfGroups int) (Collection[Collection[T]
 	return groups, nil
 }
 
-// SplitIn answers to Illuminate\Support\Collection::splitIn: chunks of the size
-// that fits numberOfGroups groups, the last one short.
+// SplitIn returns chunks of the size that fits numberOfGroups groups, the last
+// one short.
 //
-// It returns ErrInvalidArgument where the PHP throws InvalidArgumentException.
+// It returns ErrInvalidArgument when numberOfGroups is below one.
 func SplitIn[T any](c Collection[T], numberOfGroups int) (Collection[Collection[T]], error) {
 	if numberOfGroups < 1 {
 		return nil, fmt.Errorf("%w: number of groups must be at least 1, got %d", ErrInvalidArgument, numberOfGroups)
@@ -454,11 +417,10 @@ func SplitIn[T any](c Collection[T], numberOfGroups int) (Collection[Collection[
 	return Chunk(c, size), nil
 }
 
-// Sliding answers to Illuminate\Support\Collection::sliding: a sliding window
-// of size elements, advancing step at a time.
+// Sliding returns a sliding window of size elements, advancing step at a time.
 //
-// It returns ErrInvalidArgument where the PHP throws InvalidArgumentException.
-// A collection shorter than the window yields no chunk.
+// It returns ErrInvalidArgument when size or step is below one. A collection
+// shorter than the window yields no chunk.
 func Sliding[T any](c Collection[T], size, step int) (Collection[Collection[T]], error) {
 	switch {
 	case size < 1:
@@ -477,10 +439,9 @@ func Sliding[T any](c Collection[T], size, step int) (Collection[Collection[T]],
 	return out, nil
 }
 
-// Nth answers to Illuminate\Support\Collection::nth: every step-th element,
-// starting at offset.
+// Nth returns every step-th element, starting at offset.
 //
-// It returns ErrInvalidArgument where the PHP throws InvalidArgumentException.
+// It returns ErrInvalidArgument when step is below one.
 func (c Collection[T]) Nth(step, offset int) (Collection[T], error) {
 	if step < 1 {
 		return nil, fmt.Errorf("%w: step value must be at least 1, got %d", ErrInvalidArgument, step)
@@ -495,10 +456,11 @@ func (c Collection[T]) Nth(step, offset int) (Collection[T], error) {
 	return out, nil
 }
 
-// Splice answers to Illuminate\Support\Collection::splice.
+// Splice removes a run of elements, optionally putting the replacement in its
+// place, and returns what it removed.
 //
-// The PHP mutates the receiver and returns what it removed; so does this, which
-// is why it takes a pointer. Omit length to cut to the end.
+// It mutates the receiver, which is why it takes a pointer. A nil length cuts
+// to the end; a negative length stops that many elements before it.
 func (c *Collection[T]) Splice(offset int, length *int, replacement ...T) Collection[T] {
 	items := *c
 	start := offset
@@ -539,11 +501,11 @@ func (c *Collection[T]) Splice(offset int, length *int, replacement ...T) Collec
 	return removed
 }
 
-// Sort answers to Illuminate\Support\Collection::sort.
+// Sort orders a copy of the elements with compare, which returns zero for
+// equal, the convention of the cmp and slices packages.
 //
-// The PHP sorts by the values themselves when given no callback; Go cannot
-// compare an arbitrary T, so the comparison is required. It is stable, as
-// uasort is.
+// The comparison is required, because Go cannot compare an arbitrary T; a nil
+// compare returns the copy unsorted. The sort is stable.
 func (c Collection[T]) Sort(compare func(a, b T) int) Collection[T] {
 	out := c.Values()
 	if compare != nil {
@@ -552,8 +514,7 @@ func (c Collection[T]) Sort(compare func(a, b T) int) Collection[T] {
 	return out
 }
 
-// SortDesc answers to Illuminate\Support\Collection::sortDesc: Sort with the
-// comparison reversed.
+// SortDesc is Sort with the comparison reversed.
 func (c Collection[T]) SortDesc(compare func(a, b T) int) Collection[T] {
 	if compare == nil {
 		return c.Values()
@@ -561,10 +522,10 @@ func (c Collection[T]) SortDesc(compare func(a, b T) int) Collection[T] {
 	return c.Sort(func(a, b T) int { return -compare(a, b) })
 }
 
-// Shuffle answers to Illuminate\Support\Collection::shuffle.
+// Shuffle returns a copy of the elements in a random order.
 //
-// It draws from crypto/rand, because the core carries no other source and a
-// shuffle seeded from the clock is a shuffle an attacker can replay.
+// It draws from crypto/rand: a shuffle seeded from the clock is a shuffle an
+// attacker can replay. When the draw fails the copy is returned as it stands.
 func (c Collection[T]) Shuffle() Collection[T] {
 	out := c.Values()
 	for i := len(out) - 1; i > 0; i-- {
@@ -578,10 +539,9 @@ func (c Collection[T]) Shuffle() Collection[T] {
 	return out
 }
 
-// Random answers to Illuminate\Support\Collection::random.
+// Random returns number elements picked at random.
 //
-// It returns ErrInvalidArgument when number exceeds the length, which is what
-// Arr::random throws there.
+// It returns ErrInvalidArgument when number is negative or exceeds the length.
 func (c Collection[T]) Random(number int) (Collection[T], error) {
 	if number < 0 || number > len(c) {
 		return nil, fmt.Errorf("%w: cannot take %d items from a collection of %d", ErrInvalidArgument, number, len(c))
@@ -589,11 +549,9 @@ func (c Collection[T]) Random(number int) (Collection[T], error) {
 	return c.Shuffle().Slice(0, number), nil
 }
 
-// Implode answers to Illuminate\Support\Collection::implode taking the glue
-// only: the elements rendered with format and joined.
+// Implode renders each element with value and joins the results with glue.
 //
-// The PHP reads a property name off each element when given one; Go has the
-// stringer instead, so the rendering is the callback.
+// A nil value renders each element with fmt.Sprint.
 func (c Collection[T]) Implode(glue string, value func(item T) string) string {
 	parts := make([]string, len(c))
 	for i, v := range c {
@@ -606,11 +564,10 @@ func (c Collection[T]) Implode(glue string, value func(item T) string) string {
 	return strings.Join(parts, glue)
 }
 
-// Join answers to Illuminate\Support\Collection::join: Implode, except that the
-// last element is attached with finalGlue.
+// Join is Implode, except that the last element is attached with finalGlue.
 //
-// An empty finalGlue is Implode, one element is that element, and no element is
-// the empty string -- the three cases the PHP spells out.
+// An empty finalGlue is Implode, one element is that element, and no element
+// is the empty string.
 func (c Collection[T]) Join(glue, finalGlue string, value func(item T) string) string {
 	if finalGlue == "" {
 		return c.Implode(glue, value)
@@ -624,18 +581,16 @@ func (c Collection[T]) Join(glue, finalGlue string, value func(item T) string) s
 	return c.Slice(0, len(c)-1).Implode(glue, value) + finalGlue + c.Slice(len(c)-1).Implode(glue, value)
 }
 
-// Tap answers to
-// Illuminate\Support\Traits\EnumeratesValues::tap: hand the collection to the
-// callback and return it unchanged.
+// Tap hands the collection to the callback and returns it unchanged.
 func (c Collection[T]) Tap(callback func(collection Collection[T])) Collection[T] {
 	callback(c)
 	return c
 }
 
-// When answers to Illuminate\Support\Traits\Conditionable::when.
+// When runs callback on the collection when condition holds, and otherwise on
+// the other branch.
 //
-// The PHP takes a truthy value and a default branch; both are here, the default
-// being nil for "do nothing".
+// Either branch may be nil, which returns the collection unchanged.
 func (c Collection[T]) When(condition bool, callback, otherwise func(collection Collection[T]) Collection[T]) Collection[T] {
 	if condition {
 		if callback == nil {
@@ -649,42 +604,35 @@ func (c Collection[T]) When(condition bool, callback, otherwise func(collection 
 	return otherwise(c)
 }
 
-// Unless answers to Illuminate\Support\Traits\Conditionable::unless: When with
-// the condition negated.
+// Unless is When with the condition negated.
 func (c Collection[T]) Unless(condition bool, callback, otherwise func(collection Collection[T]) Collection[T]) Collection[T] {
 	return c.When(!condition, callback, otherwise)
 }
 
-// WhenEmpty answers to
-// Illuminate\Support\Traits\EnumeratesValues::whenEmpty.
+// WhenEmpty is When with the condition that the collection has no elements.
 func (c Collection[T]) WhenEmpty(callback, otherwise func(collection Collection[T]) Collection[T]) Collection[T] {
 	return c.When(len(c) == 0, callback, otherwise)
 }
 
-// WhenNotEmpty answers to
-// Illuminate\Support\Traits\EnumeratesValues::whenNotEmpty.
+// WhenNotEmpty is When with the condition that the collection has at least one
+// element.
 func (c Collection[T]) WhenNotEmpty(callback, otherwise func(collection Collection[T]) Collection[T]) Collection[T] {
 	return c.When(len(c) > 0, callback, otherwise)
 }
 
-// UnlessEmpty answers to
-// Illuminate\Support\Traits\EnumeratesValues::unlessEmpty, which the PHP
-// defines as an alias of whenNotEmpty.
+// UnlessEmpty is WhenNotEmpty.
 func (c Collection[T]) UnlessEmpty(callback, otherwise func(collection Collection[T]) Collection[T]) Collection[T] {
 	return c.WhenNotEmpty(callback, otherwise)
 }
 
-// UnlessNotEmpty answers to
-// Illuminate\Support\Traits\EnumeratesValues::unlessNotEmpty, which the PHP
-// defines as an alias of whenEmpty.
+// UnlessNotEmpty is WhenEmpty.
 func (c Collection[T]) UnlessNotEmpty(callback, otherwise func(collection Collection[T]) Collection[T]) Collection[T] {
 	return c.WhenEmpty(callback, otherwise)
 }
 
-// Only answers to Illuminate\Support\Collection::only: the elements at the
-// given indices, in the collection's order.
+// Only returns the elements at the given indices, in the collection's order.
 //
-// An index outside the collection is skipped, as a missing key is in PHP.
+// An index outside the collection is skipped.
 func (c Collection[T]) Only(keys ...int) Collection[T] {
 	wanted := make(map[int]struct{}, len(keys))
 	for _, k := range keys {
@@ -699,8 +647,7 @@ func (c Collection[T]) Only(keys ...int) Collection[T] {
 	return out
 }
 
-// Except answers to Illuminate\Support\Collection::except: everything but the
-// elements at the given indices.
+// Except returns everything but the elements at the given indices.
 func (c Collection[T]) Except(keys ...int) Collection[T] {
 	unwanted := make(map[int]struct{}, len(keys))
 	for _, k := range keys {
@@ -715,9 +662,8 @@ func (c Collection[T]) Except(keys ...int) Collection[T] {
 	return out
 }
 
-// Replace answers to Illuminate\Support\Collection::replace: the elements of
-// items overwrite the ones at the same index, and the ones past the end are
-// appended.
+// Replace overwrites the elements at the indices items names, and appends the
+// ones past the end in ascending index order. A negative index is ignored.
 func (c Collection[T]) Replace(items map[int]T) Collection[T] {
 	out := c.Values()
 	extra := make([]int, 0, len(items))
@@ -737,9 +683,5 @@ func (c Collection[T]) Replace(items map[int]T) Collection[T] {
 	return out
 }
 
-// Sort is stable and so is SortKeys; the PHP's ksort has no meaning on a list,
-// whose keys are already its order.
-
 // CountBy, GroupBy, KeyBy and the rest that change the element type are
-// functions in functions.go, because a Go method cannot declare a type
-// parameter.
+// package functions, because a Go method cannot declare a type parameter.

@@ -154,8 +154,8 @@ func TestForHumans(t *testing.T) {
 	}
 }
 
-// TestFormatWithoutAPrecision pins the default Illuminate inherits from ICU:
-// three digits at most, with the trailing zeros gone.
+// TestFormatWithoutAPrecision pins the default digit count: three at most, with
+// the trailing zeros gone.
 func TestFormatWithoutAPrecision(t *testing.T) {
 	cases := []struct {
 		value float64
@@ -176,7 +176,7 @@ func TestFormatWithoutAPrecision(t *testing.T) {
 
 // TestFormatMaxPrecisionOverridesPrecision keeps the two apart: a maximum
 // precision is an upper bound that drops trailing zeros, and it wins over the
-// exact count, which is the order Illuminate sets the two attributes in.
+// exact count.
 func TestFormatMaxPrecisionOverridesPrecision(t *testing.T) {
 	if got := Format(1234.5, 4, 4); got != "1,234.5" {
 		t.Errorf("Format(1234.5, 4, 4) = %q, want %q", got, "1,234.5")

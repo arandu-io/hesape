@@ -141,10 +141,10 @@ var debugTmpl = template.Must(template.New("debug").Funcs(template.FuncMap{
 	// "#ZgotmplZ". Without this, every "open in editor" link on the page is
 	// silently dead, because vscode:// and zed:// are not on that list.
 	//
-	// It forwards to log.EditorLink, which is where the one implementation
-	// lives: the debug console needs the same links, and two copies is two
-	// places to add the next editor (RULE 9). The wrapper this package used to
-	// export was that second copy.
+	// It forwards to log.EditorLink, which is where the one implementation lives:
+	// the debug console needs the same links, and two copies is two places to add
+	// the next editor. The wrapper this package used to export was that second
+	// copy.
 	"editorLink": func(editor, file string, line int) template.URL {
 		return template.URL(log.EditorLink(editor, file, line))
 	},

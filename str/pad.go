@@ -2,13 +2,13 @@ package str
 
 import "strings"
 
-// PadLeft answers for Str::padLeft. It grows the string to the given number of
-// characters by putting pad in front of it, repeating and cutting pad as
-// needed; passing no pad uses a space.
+// PadLeft grows the string to the given number of characters by putting pad in
+// front of it, repeating and cutting pad as needed; passing no pad uses a
+// space.
 //
-// A length no greater than the string already has returns it untouched, which
-// is what str_pad does, so PadLeft("hello", 3) is "hello" and not "hel". An
-// empty pad returns it untouched too; PHP raises a ValueError for that one.
+// A length no greater than the string already has returns it untouched, so
+// PadLeft("hello", 3) is "hello" and not "hel". An empty pad returns it
+// untouched too.
 func PadLeft(value string, length int, pad ...string) string {
 	short, filler := padRoom(value, length, pad)
 	if short <= 0 {
@@ -17,8 +17,7 @@ func PadLeft(value string, length int, pad ...string) string {
 	return padRepeat(filler, short) + value
 }
 
-// PadRight answers for Str::padRight. It is PadLeft with the padding behind the
-// string.
+// PadRight is PadLeft with the padding behind the string.
 func PadRight(value string, length int, pad ...string) string {
 	short, filler := padRoom(value, length, pad)
 	if short <= 0 {
@@ -27,9 +26,8 @@ func PadRight(value string, length int, pad ...string) string {
 	return value + padRepeat(filler, short)
 }
 
-// PadBoth answers for Str::padBoth. It splits the padding between the two ends,
-// giving the odd character to the right side, as str_pad does with
-// STR_PAD_BOTH.
+// PadBoth splits the padding between the two ends, giving the odd character to
+// the right side.
 func PadBoth(value string, length int, pad ...string) string {
 	short, filler := padRoom(value, length, pad)
 	if short <= 0 {
@@ -62,13 +60,12 @@ func padRepeat(filler string, n int) string {
 	return string(out)
 }
 
-// WordCount answers for Str::wordCount. It counts the words in the string,
-// where a word is a run of letters and of the extra characters given.
+// WordCount counts the words in the string, where a word is a run of letters
+// and of the extra characters given.
 //
-// It is PHP's str_word_count, which means an apostrophe and a hyphen are part
-// of a word but cannot open one -- and a hyphen cannot close the string --
-// unless the caller names them in characters. Letters are the ASCII ones,
-// because str_word_count reads bytes through the C locale.
+// An apostrophe and a hyphen are part of a word but cannot open one -- and a
+// hyphen cannot close the string -- unless the caller names them in characters.
+// Letters are the ASCII ones, because the counting reads bytes.
 func WordCount(value string, characters ...string) int {
 	extra := ""
 	if len(characters) > 0 {
@@ -104,14 +101,13 @@ func WordCount(value string, characters ...string) int {
 	return count
 }
 
-// WordWrap answers for Str::wordWrap. It breaks the string into lines of at
-// most the given number of characters, breaking at spaces and writing brk where
-// it breaks; a word longer than the line is left whole unless cutLongWords is
-// set.
+// WordWrap breaks the string into lines of at most the given number of
+// characters, breaking at spaces and writing brk where it breaks; a word longer
+// than the line is left whole unless cutLongWords is set.
 //
-// It is PHP's wordwrap, which counts bytes rather than characters and treats an
-// occurrence of brk already in the string as a line that has ended. A width of
-// zero or less returns the string untouched; PHP raises a ValueError for it.
+// It counts bytes rather than characters, and treats an occurrence of brk
+// already in the string as a line that has ended. A width of zero or less
+// returns the string untouched.
 func WordWrap(value string, characters int, brk string, cutLongWords bool) string {
 	if value == "" || brk == "" || characters <= 0 {
 		return value

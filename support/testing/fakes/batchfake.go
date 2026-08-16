@@ -5,29 +5,26 @@ import (
 	"time"
 )
 
-// UpdatedBatchJobCounts is the little of Illuminate\Bus\UpdatedBatchJobCounts
-// that the batch fakes hand back: what a batch's counters became after a job
-// finished or failed.
+// UpdatedBatchJobCounts is what a batch's counters became after a job finished
+// or failed.
 //
-// The real one lives in the bus package, which is another package's to write;
-// this is the shape the fakes return, and the fakes always return it empty,
-// because a fake batch never runs a job.
+// The batch fakes always return it empty, because a fake batch never runs a
+// job.
 type UpdatedBatchJobCounts struct {
-	// PendingJobs answers UpdatedBatchJobCounts::$pendingJobs.
+	// PendingJobs is how many jobs of the batch have yet to run.
 	PendingJobs int
-	// FailedJobs answers UpdatedBatchJobCounts::$failedJobs.
+	// FailedJobs is how many jobs of the batch failed.
 	FailedJobs int
 }
 
-// AllJobsHaveRanExactlyOnce answers
-// UpdatedBatchJobCounts::allJobsHaveRanExactlyOnce.
+// AllJobsHaveRanExactlyOnce reports whether nothing is pending and nothing
+// failed.
 func (c UpdatedBatchJobCounts) AllJobsHaveRanExactlyOnce() bool {
 	return c.PendingJobs == 0 && c.FailedJobs == 0
 }
 
-// BatchFake answers Illuminate\Support\Testing\Fakes\BatchFake: the batch a
-// faked bus hands back, which remembers what was added to it and never runs
-// anything.
+// BatchFake is the batch a faked bus hands back. It remembers what was added
+// to it and never runs anything.
 //
 // It is safe to use from a test that calls t.Parallel: the fields a method
 // writes are written under a mutex, and Add is the one a job that fans out
@@ -35,35 +32,34 @@ func (c UpdatedBatchJobCounts) AllJobsHaveRanExactlyOnce() bool {
 type BatchFake struct {
 	mu sync.Mutex
 
-	// ID answers Batch::$id. The initialism is upper case because Go spells
-	// it that way.
+	// ID identifies the batch.
 	ID string
-	// Name answers Batch::$name.
+	// Name is what the batch is called, and may be empty.
 	Name string
-	// TotalJobs answers Batch::$totalJobs.
+	// TotalJobs is how many jobs the batch holds.
 	TotalJobs int
-	// PendingJobs answers Batch::$pendingJobs.
+	// PendingJobs is how many have yet to run.
 	PendingJobs int
-	// FailedJobs answers Batch::$failedJobs.
+	// FailedJobs is how many failed.
 	FailedJobs int
-	// FailedJobIDs answers Batch::$failedJobIds.
+	// FailedJobIDs identifies the jobs that failed.
 	FailedJobIDs []string
-	// Options answers Batch::$options.
+	// Options are the batch's settings, keyed by name.
 	Options map[string]any
-	// CreatedAt answers Batch::$createdAt.
+	// CreatedAt is when the batch was made.
 	CreatedAt time.Time
-	// CancelledAt answers Batch::$cancelledAt. The zero time is PHP's null.
+	// CancelledAt is when the batch was cancelled, and is zero until it is.
 	CancelledAt time.Time
-	// FinishedAt answers Batch::$finishedAt. The zero time is PHP's null.
+	// FinishedAt is when the batch finished, and is zero until it does.
 	FinishedAt time.Time
 
-	// added answers BatchFake::$added, the jobs Add was handed.
+	// added holds the jobs [BatchFake.Add] was handed.
 	added []any
-	// deleted answers BatchFake::$deleted.
+	// deleted records that [BatchFake.Delete] was called.
 	deleted bool
 }
 
-// NewBatchFake answers BatchFake::__construct.
+// NewBatchFake builds a batch carrying the given counts and stamps.
 func NewBatchFake(
 	id string,
 	name string,
@@ -90,13 +86,13 @@ func NewBatchFake(
 	}
 }
 
-// Fresh answers BatchFake::fresh: itself, because nothing stored it anywhere
-// it could go stale.
+// Fresh returns the batch itself: nothing stored it anywhere it could go
+// stale.
 func (b *BatchFake) Fresh() *BatchFake {
 	return b
 }
 
-// Add answers BatchFake::add: the jobs are remembered and the total grows.
+// Add remembers the jobs, grows the total and returns the batch.
 func (b *BatchFake) Add(jobs ...any) *BatchFake {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -105,75 +101,65 @@ func (b *BatchFake) Add(jobs ...any) *BatchFake {
 	return b
 }
 
-// Added answers BatchFake::$added, the jobs Add was handed.
-//
-// PHP reads the public property; a Go field named Added and a method named Add
-// would be two names for one thing on the same type, so the jobs are read
-// through this and written through Add.
+// Added returns a copy of the jobs [BatchFake.Add] was handed.
 func (b *BatchFake) Added() []any {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]any(nil), b.added...)
 }
 
-// RecordSuccessfulJob answers BatchFake::recordSuccessfulJob, and does nothing,
-// as the PHP does.
+// RecordSuccessfulJob does nothing: a fake batch never runs a job.
 func (b *BatchFake) RecordSuccessfulJob(jobID string) {}
 
-// DecrementPendingJobs answers BatchFake::decrementPendingJobs, and does
-// nothing, as the PHP does.
+// DecrementPendingJobs does nothing: the counts are fixed when the batch is
+// made.
 func (b *BatchFake) DecrementPendingJobs(jobID string) {}
 
-// RecordFailedJob answers BatchFake::recordFailedJob, and does nothing, as the
-// PHP does.
+// RecordFailedJob does nothing: a fake batch never runs a job.
 func (b *BatchFake) RecordFailedJob(jobID string, err error) {}
 
-// IncrementFailedJobs answers BatchFake::incrementFailedJobs, and hands back
-// empty counts, as the PHP does.
+// IncrementFailedJobs does nothing and returns empty counts.
 func (b *BatchFake) IncrementFailedJobs(jobID string) UpdatedBatchJobCounts {
 	return UpdatedBatchJobCounts{}
 }
 
-// Cancel answers BatchFake::cancel: the batch is marked cancelled now.
+// Cancel stamps the batch as cancelled at this moment.
 func (b *BatchFake) Cancel() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.CancelledAt = time.Now()
 }
 
-// Cancelled answers Batch::cancelled.
+// Cancelled reports whether the batch was cancelled.
 func (b *BatchFake) Cancelled() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return !b.CancelledAt.IsZero()
 }
 
-// Delete answers BatchFake::delete: the batch is marked deleted, and stays in
-// memory so that Deleted can answer.
+// Delete marks the batch deleted. It stays in memory, so
+// [BatchFake.Deleted] can still be asked.
 func (b *BatchFake) Delete() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.deleted = true
 }
 
-// Deleted answers BatchFake::deleted.
+// Deleted reports whether the batch was deleted.
 func (b *BatchFake) Deleted() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.deleted
 }
 
-// Finish answers the finishedAt stamp BatchRepositoryFake::markAsFinished
-// writes. It is not a method of the PHP BatchFake -- there the repository
-// assigns the public property -- and it exists because a Go field written from
-// another type would be written without the lock the rest of the type takes.
+// Finish stamps the batch as finished at the given moment.
 func (b *BatchFake) Finish(at time.Time) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.FinishedAt = at
 }
 
-// Finished answers Batch::finished.
+// Finished reports whether the batch has finished.
 func (b *BatchFake) Finished() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()

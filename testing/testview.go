@@ -8,35 +8,32 @@ import (
 	"github.com/arandu-io/hesape/view"
 )
 
-// TestView answers to Illuminate\Testing\TestView: a view that has been drawn,
-// with the assertions worth making about the HTML it produced and about the
-// data it was handed.
+// TestView is a view that has been drawn, with the assertions worth making
+// about the HTML it produced and about the data it was handed.
 //
-// It keeps both halves the PHP keeps -- the view and the rendered string --
-// because the two families of assertion read different things. AssertSee and
-// the rest read the rendered HTML; AssertViewHas and the rest read the view's
-// gathered data, which is the only place a binding the template never printed
-// is still visible.
+// AssertSee and the rest read the rendered HTML; AssertViewHas and the rest
+// read the view's gathered data, which is the only place a binding the
+// template never printed is still visible.
 //
-// Every assertion returns the view, so they chain the way the PHP's do:
+// Every assertion returns the view.
 //
 //	rendered.AssertViewHas("user").AssertSee("Alice").AssertDontSee("Draft")
 type TestView struct {
 	t T
 
-	// view answers to $view: the view before it was drawn.
+	// view is the view before it was drawn.
 	view *view.View
 
-	// rendered answers to $rendered: the contents the view produced, drawn once
-	// in the constructor the way the PHP draws them once there.
+	// rendered is the contents the view produced, drawn once by
+	// [NewTestView] so that every assertion reads the same output.
 	rendered string
 }
 
-// NewTestView answers to TestView::__construct.
+// NewTestView renders the view and wraps it for assertion.
 //
-// It returns (*TestView, error) where the PHP throws: the constructor's one
-// statement of substance is $view->render(), which throws on a template that
-// cannot be drawn, and view.View.Render answers with an error instead.
+// It returns an error for a nil view and for a view that would not render, so
+// a template failure is reported where it happened rather than as an empty
+// page three assertions later.
 func NewTestView(t T, v *view.View) (*TestView, error) {
 	if v == nil {
 		return nil, fmt.Errorf("testing: NewTestView needs a view to render, and got nil")
@@ -50,20 +47,12 @@ func NewTestView(t T, v *view.View) (*TestView, error) {
 	return &TestView{t: t, view: v, rendered: rendered}, nil
 }
 
-// AssertViewHas answers to TestView::assertViewHas: the view was bound this
-// piece of data.
+// AssertViewHas asserts the view was bound this piece of data, and this value
+// when one is given.
 //
-// key stands for the PHP's `string|array $key`: a name, or the whole set of
-// bindings, in which case it is AssertViewHasAll. The variadic value stands for
-// `$value = null`: without one it asserts only that the name is bound.
-//
-// The PHP branches on what the value is, and three of its four branches are
-// here. A func(any) bool is the Closure branch: the binding is handed to it and
-// the assertion is what it answers. Anything else is compared with ==, which is
-// assertEquals. The fourth branch -- Model and EloquentCollection compared with
-// $model->is() -- has no counterpart, because this framework carries no Active
-// Record to compare that way; such a binding falls to the == branch, where two
-// records with the same fields are equal.
+// A value of func(any) bool is handed the binding and must report true.
+// Anything else is compared loosely. A key that is really a set of bindings is
+// handed to [TestView.AssertViewHasAll].
 func (v *TestView) AssertViewHas(key any, value ...any) *TestView {
 	v.t.Helper()
 
@@ -96,18 +85,13 @@ func (v *TestView) AssertViewHas(key any, value ...any) *TestView {
 	return v
 }
 
-// AssertViewHasAll answers to TestView::assertViewHasAll: every one of these
-// bindings is there.
+// AssertViewHasAll asserts every one of these bindings is there.
 //
-// bindings stands for the PHP's `array $bindings`, whose keys the method reads
-// twice over: a string key is a name with an expected value, an int key is a
-// name on its own. Go has no map that holds both, so the two shapes are two
-// arguments it accepts -- a map[string]any for name and value, a []string or
-// []any for names alone.
+// The bindings are a map[string]any for name and value, or a []string or []any
+// for names alone. Anything else fails the test.
 //
-// The names are visited in sorted order rather than in the order they were
-// written, so that a run that fails names the same binding every time; Go's map
-// iteration has no order to preserve.
+// Map keys are visited in sorted order, so that a run that fails names the
+// same binding every time.
 func (v *TestView) AssertViewHasAll(bindings any) *TestView {
 	v.t.Helper()
 
@@ -136,8 +120,7 @@ func (v *TestView) AssertViewHasAll(bindings any) *TestView {
 	return v
 }
 
-// AssertViewMissing answers to TestView::assertViewMissing: the view was not
-// bound this piece of data.
+// AssertViewMissing asserts the view was not bound this piece of data.
 func (v *TestView) AssertViewMissing(key string) *TestView {
 	v.t.Helper()
 
@@ -148,7 +131,7 @@ func (v *TestView) AssertViewMissing(key string) *TestView {
 	return v
 }
 
-// AssertViewEmpty answers to TestView::assertViewEmpty: the view drew nothing.
+// AssertViewEmpty asserts the view drew nothing.
 func (v *TestView) AssertViewEmpty() *TestView {
 	v.t.Helper()
 
@@ -158,10 +141,8 @@ func (v *TestView) AssertViewEmpty() *TestView {
 	return v
 }
 
-// AssertSee answers to TestView::assertSee: the text is in the rendered view.
-//
-// escape stands for the PHP's `$escape = true`, which is what makes
-// AssertSee("Tom & Jerry") match a view that drew it as "Tom &amp; Jerry".
+// AssertSee asserts the text is in the rendered view. The text is HTML-escaped
+// first unless escape is given as false.
 func (v *TestView) AssertSee(value string, escape ...bool) *TestView {
 	v.t.Helper()
 
@@ -169,8 +150,8 @@ func (v *TestView) AssertSee(value string, escape ...bool) *TestView {
 	return v
 }
 
-// AssertSeeInOrder answers to TestView::assertSeeInOrder: the strings are in
-// the rendered view, each one after the last.
+// AssertSeeInOrder asserts the strings are in the rendered view, each one
+// after the last.
 func (v *TestView) AssertSeeInOrder(values []string, escape ...bool) *TestView {
 	v.t.Helper()
 
@@ -178,8 +159,8 @@ func (v *TestView) AssertSeeInOrder(values []string, escape ...bool) *TestView {
 	return v
 }
 
-// AssertSeeText answers to TestView::assertSeeText: the text is in the
-// rendered view once the tags are taken off.
+// AssertSeeText asserts the text is in the rendered view once the tags are
+// taken off.
 //
 // It is the one to reach for when markup breaks the words up: "Hello
 // <b>Alice</b>" contains "Hello Alice" only after the tags are gone.
@@ -190,7 +171,8 @@ func (v *TestView) AssertSeeText(value string, escape ...bool) *TestView {
 	return v
 }
 
-// AssertSeeTextInOrder answers to TestView::assertSeeTextInOrder.
+// AssertSeeTextInOrder asserts the strings are in the rendered view once the
+// tags are taken off, each one after the last.
 func (v *TestView) AssertSeeTextInOrder(values []string, escape ...bool) *TestView {
 	v.t.Helper()
 
@@ -198,8 +180,7 @@ func (v *TestView) AssertSeeTextInOrder(values []string, escape ...bool) *TestVi
 	return v
 }
 
-// AssertDontSee answers to TestView::assertDontSee: the text is not in the
-// rendered view.
+// AssertDontSee asserts the text is not in the rendered view.
 func (v *TestView) AssertDontSee(value string, escape ...bool) *TestView {
 	v.t.Helper()
 
@@ -207,7 +188,8 @@ func (v *TestView) AssertDontSee(value string, escape ...bool) *TestView {
 	return v
 }
 
-// AssertDontSeeText answers to TestView::assertDontSeeText.
+// AssertDontSeeText asserts the text is not in the rendered view once the tags
+// are taken off.
 func (v *TestView) AssertDontSeeText(value string, escape ...bool) *TestView {
 	v.t.Helper()
 
@@ -215,12 +197,11 @@ func (v *TestView) AssertDontSeeText(value string, escape ...bool) *TestView {
 	return v
 }
 
-// ToString answers to TestView::__toString, which is the whole of what
-// implementing Stringable buys the PHP: the rendered contents.
+// ToString returns the rendered view.
 func (v *TestView) ToString() string { return v.rendered }
 
-// testViewIsArray answers to `is_array($key)` over the shapes a PHP array
-// arrives as here: the bindings with their values, or the names alone.
+// testViewIsArray reads a key that is really a set of bindings: a map of names
+// to values, or a list of names alone.
 func testViewIsArray(key any) (any, bool) {
 	switch k := key.(type) {
 	case map[string]any:

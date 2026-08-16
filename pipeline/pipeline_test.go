@@ -19,8 +19,8 @@ func record(order *[]string, name string) pipeline.Pipe[string] {
 	}
 }
 
-// TestThenRunsThePipesInOrder: the first pipe given to Through is the outermost,
-// which is what array_reverse plus array_reduce produces in PHP.
+// TestThenRunsThePipesInOrder: the first pipe given to Through is the
+// outermost.
 func TestThenRunsThePipesInOrder(t *testing.T) {
 	var order []string
 
@@ -129,8 +129,8 @@ func TestPipeCanStopThePipeline(t *testing.T) {
 	}
 }
 
-// TestErrorFromAPipeComesBack: PHP throws out of then() and handleException()
-// rethrows; here the error is returned, and nothing downstream ran.
+// TestErrorFromAPipeComesBack checks that a pipe's error is returned from Then
+// and that nothing downstream of it ran.
 func TestErrorFromAPipeComesBack(t *testing.T) {
 	boom := errors.New("pipeline_test: boom")
 	reached := false
@@ -232,9 +232,8 @@ func TestThroughCopiesTheCallersSlice(t *testing.T) {
 	}
 }
 
-// TestFinallyRunsOnSuccessWithTheSentPassable: PHP hands the callback
-// $this->passable, the field, which no pipe can reach -- not the value the
-// pipes passed each other.
+// TestFinallyRunsOnSuccessWithTheSentPassable checks that the callback is
+// handed the value given to Send, not the value the pipes passed each other.
 func TestFinallyRunsOnSuccessWithTheSentPassable(t *testing.T) {
 	var seen string
 	calls := 0
@@ -281,9 +280,8 @@ func TestFinallyRunsWhenAPipeFails(t *testing.T) {
 	}
 }
 
-// TestFinallyRunsWhenAPipePanics: PHP's finally block runs while a Throwable is
-// on its way out, and so does the deferred call here. The panic keeps going --
-// nothing in Illuminate swallows it.
+// TestFinallyRunsWhenAPipePanics checks that the deferred callback runs while
+// the panic is on its way out, and that the panic keeps going.
 func TestFinallyRunsWhenAPipePanics(t *testing.T) {
 	ran := false
 
@@ -324,9 +322,8 @@ func TestFinallyKeepsTheSecondCallback(t *testing.T) {
 	}
 }
 
-// TestThenWithoutADestinationFails, and fails before anything else happens: in
-// PHP the destination is a typed argument, so it fails before then() reaches
-// its try block and therefore before finally.
+// TestThenWithoutADestinationFails checks that a nil destination fails before
+// anything else happens -- before the pipes and before the Finally callback.
 func TestThenWithoutADestinationFails(t *testing.T) {
 	ran := false
 	reached := false
@@ -372,8 +369,8 @@ func TestNilPipeFailsWhenThePipelineReachesIt(t *testing.T) {
 	}
 }
 
-// TestNilPipeIsHarmlessWhenNobodyReachesIt: PHP does not evaluate a stage that
-// an earlier pipe never calls, and neither does this.
+// TestNilPipeIsHarmlessWhenNobodyReachesIt checks that a stage an earlier pipe
+// never calls is never evaluated, so a nil one behind a stop is not an error.
 func TestNilPipeIsHarmlessWhenNobodyReachesIt(t *testing.T) {
 	stop := pipeline.Pipe[int](func(int, pipeline.Destination[int]) (int, error) { return 9, nil })
 
@@ -448,8 +445,8 @@ func TestWhenTakesTheDefaultBranch(t *testing.T) {
 		}
 	}
 
-	// PHP's when($value, $callback, $default) runs the default when the value is
-	// falsy, and unless is when with the condition negated.
+	// When runs the second callback when the condition is false, and Unless is
+	// When with the condition negated.
 	got, err := pipeline.New[string]().Send("a").When(false, mark("x"), mark("y")).ThenReturn()
 	if err != nil {
 		t.Fatalf("When: %v", err)
@@ -476,8 +473,8 @@ func TestWhenTakesTheDefaultBranch(t *testing.T) {
 }
 
 func TestWhenWithNoBranchChangesNothing(t *testing.T) {
-	// Both branches are optional in PHP: when($value) with no callback returns a
-	// proxy, and the framework's own uses pass nil for the default.
+	// Both branches are optional: a nil callback for the branch taken leaves
+	// the pipeline unchanged rather than failing.
 	got, err := pipeline.New[string]().Send("a").When(true, nil, nil).Unless(true, nil, nil).ThenReturn()
 	if err != nil {
 		t.Fatalf("When: %v", err)

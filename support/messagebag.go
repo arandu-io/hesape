@@ -14,8 +14,6 @@ import (
 // message and ":key" by the key it is filed under, so a bag set to
 // "<li>:message</li>" hands every message back already wrapped. The messages
 // held in the bag are never changed, only the copies it returns.
-//
-// Answers the $format property of Illuminate\Support\MessageBag.
 const DefaultMessageFormat = ":message"
 
 // MessageProvider is implemented by a value that carries validation messages
@@ -25,30 +23,28 @@ const DefaultMessageFormat = ":message"
 //
 // *MessageBag implements it by returning itself, so any type that holds a bag
 // satisfies it by delegating one method.
-//
-// Answers Illuminate\Contracts\Support\MessageProvider.
 type MessageProvider interface {
-	// GetMessageBag answers to MessageProvider::getMessageBag.
+	// GetMessageBag returns the messages the value carries.
 	GetMessageBag() *MessageBag
 }
 
-// MessageBag answers to Illuminate\Support\MessageBag: the keyed list of
-// messages a validator hands to a view, which is what $errors is.
+// MessageBag is the keyed list of messages a validator hands to a view.
 //
-// PHP arrays keep insertion order, so this carries the key order beside the
-// map: All, Keys and Unique walk the keys in the order they were first added.
+// A map has no order of its own, so the bag carries the key order beside it:
+// [MessageBag.All], [MessageBag.Keys] and [MessageBag.Unique] walk the keys in
+// the order they were first added.
 type MessageBag struct {
 	messages map[string][]string
 	order    []string
 	format   string
 }
 
-// NewMessageBag answers to MessageBag::__construct. Each value is deduplicated
-// the way array_unique does, keeping the first occurrence.
+// NewMessageBag builds a bag over the given messages. Each list is
+// deduplicated, keeping the first occurrence.
 //
-// PHP takes an ordered array; a Go map has no order, so the keys of messages
-// are sorted to make the bag deterministic. Keys added later with Add keep
-// their insertion order.
+// A map has no order, so the initial keys are sorted to make the bag
+// deterministic. Keys added later with [MessageBag.Add] keep their insertion
+// order.
 func NewMessageBag(messages map[string][]string) *MessageBag {
 	b := &MessageBag{
 		messages: make(map[string][]string, len(messages)),
@@ -79,15 +75,15 @@ func unique(values []string) []string {
 	return out
 }
 
-// Keys answers to MessageBag::keys.
+// Keys returns the keys the bag holds messages under, in order.
 func (b *MessageBag) Keys() []string {
 	out := make([]string, len(b.order))
 	copy(out, b.order)
 	return out
 }
 
-// Add answers to MessageBag::add. A key and message pair already in the bag is
-// not added twice.
+// Add files a message under a key and returns the bag. A key and message pair
+// the bag already holds is not added twice.
 func (b *MessageBag) Add(key, message string) *MessageBag {
 	if !b.isUnique(key, message) {
 		return b
@@ -102,7 +98,7 @@ func (b *MessageBag) Add(key, message string) *MessageBag {
 	return b
 }
 
-// AddIf answers to MessageBag::addIf.
+// AddIf adds the message only when the condition holds, and returns the bag.
 func (b *MessageBag) AddIf(boolean bool, key, message string) *MessageBag {
 	if boolean {
 		return b.Add(key, message)
@@ -123,11 +119,10 @@ func (b *MessageBag) isUnique(key, message string) bool {
 	return true
 }
 
-// Merge answers to MessageBag::merge. Like array_merge_recursive it appends,
-// so a key present on both sides ends up with both lists, duplicates included.
+// Merge appends the given messages and returns the bag, so a key present on
+// both sides ends up carrying both lists, duplicates included.
 //
-// PHP also accepts a MessageProvider; pass provider.GetMessageBag().GetMessages()
-// for that case.
+// To merge a [MessageProvider], pass provider.GetMessageBag().GetMessages().
 func (b *MessageBag) Merge(messages map[string][]string) *MessageBag {
 	if b.messages == nil {
 		b.messages = map[string][]string{}
@@ -146,8 +141,8 @@ func (b *MessageBag) Merge(messages map[string][]string) *MessageBag {
 	return b
 }
 
-// Has answers to MessageBag::has. With no key it answers Any, the way the PHP
-// answers a null key. With several keys every one of them must have a message.
+// Has reports whether the bag holds a message for every key given. With no key
+// it reports whether the bag holds anything at all.
 func (b *MessageBag) Has(keys ...string) bool {
 	if b.IsEmpty() {
 		return false
@@ -163,8 +158,8 @@ func (b *MessageBag) Has(keys ...string) bool {
 	return true
 }
 
-// HasAny answers to MessageBag::hasAny. With no key it is false, the way the
-// PHP default of an empty array is.
+// HasAny reports whether the bag holds a message for any key given. With no
+// key it is false.
 func (b *MessageBag) HasAny(keys ...string) bool {
 	if b.IsEmpty() {
 		return false
@@ -177,14 +172,14 @@ func (b *MessageBag) HasAny(keys ...string) bool {
 	return false
 }
 
-// Missing answers to MessageBag::missing.
+// Missing reports whether the bag holds no message for any of the keys.
 func (b *MessageBag) Missing(keys ...string) bool {
 	return !b.HasAny(keys...)
 }
 
-// First answers to MessageBag::first. An empty key stands for the PHP null and
-// takes the first message in the whole bag. The variadic format stands for the
-// optional $format argument; only the first is read.
+// First returns the first message under the key, or the empty string when
+// there is none. An empty key takes the first message in the whole bag. The
+// variadic argument overrides the bag's format; only the first is read.
 func (b *MessageBag) First(key string, format ...string) string {
 	var messages []string
 	if key == "" {
@@ -198,12 +193,9 @@ func (b *MessageBag) First(key string, format ...string) string {
 	return messages[0]
 }
 
-// Get answers to MessageBag::get. A key holding a * matches every key of the
-// bag the way Str::is matches there: * stands for any run of characters,
-// including none, and every other rune is literal.
-//
-// The PHP returns a nested array for a wildcard key because its arrays are
-// untyped; this flattens the matches in key order.
+// Get returns the messages under the key, formatted. A key holding a * is a
+// pattern: * stands for any run of characters, including none, and every other
+// rune is literal. The matches come back flattened, in key order.
 func (b *MessageBag) Get(key string, format ...string) []string {
 	f := b.checkFormat(format...)
 	if messages, ok := b.messages[key]; ok {
@@ -225,9 +217,9 @@ func (b *MessageBag) getMessagesForWildcardKey(key, format string) []string {
 	return out
 }
 
-// wildcardIs is what Str::is does, kept unexported here so the message bag has
-// no dependency of its own: * stands for any run of characters, and every
-// other rune is literal.
+// wildcardIs matches a pattern against a value: * stands for any run of
+// characters, and every other rune is literal. It is kept here so the message
+// bag carries no dependency of its own.
 func wildcardIs(pattern, value string) bool {
 	if pattern == value {
 		return true
@@ -250,7 +242,7 @@ func wildcardIs(pattern, value string) bool {
 	return strings.HasSuffix(rest, parts[len(parts)-1])
 }
 
-// All answers to MessageBag::all.
+// All returns every message in the bag, in key order, formatted.
 func (b *MessageBag) All(format ...string) []string {
 	f := b.checkFormat(format...)
 	all := []string{}
@@ -260,12 +252,13 @@ func (b *MessageBag) All(format ...string) []string {
 	return all
 }
 
-// Unique answers to MessageBag::unique.
+// Unique returns every message in the bag with duplicates dropped, keeping the
+// first occurrence.
 func (b *MessageBag) Unique(format ...string) []string {
 	return unique(b.All(format...))
 }
 
-// Forget answers to MessageBag::forget.
+// Forget drops every message under the key and returns the bag.
 func (b *MessageBag) Forget(key string) *MessageBag {
 	if _, ok := b.messages[key]; !ok {
 		return b
@@ -301,7 +294,7 @@ func (b *MessageBag) checkFormat(format ...string) string {
 	return b.GetFormat()
 }
 
-// Messages answers to MessageBag::messages.
+// Messages returns a copy of the messages, keyed by field, unformatted.
 func (b *MessageBag) Messages() map[string][]string {
 	out := make(map[string][]string, len(b.messages))
 	for k, v := range b.messages {
@@ -312,13 +305,16 @@ func (b *MessageBag) Messages() map[string][]string {
 	return out
 }
 
-// GetMessages answers to MessageBag::getMessages.
+// GetMessages returns a copy of the messages, the same as
+// [MessageBag.Messages].
 func (b *MessageBag) GetMessages() map[string][]string { return b.Messages() }
 
-// GetMessageBag answers to MessageBag::getMessageBag.
+// GetMessageBag returns the bag itself, so *MessageBag satisfies
+// [MessageProvider].
 func (b *MessageBag) GetMessageBag() *MessageBag { return b }
 
-// GetFormat answers to MessageBag::getFormat.
+// GetFormat returns the format messages are wrapped in, which is
+// [DefaultMessageFormat] when none was set.
 func (b *MessageBag) GetFormat() string {
 	if b.format == "" {
 		return DefaultMessageFormat
@@ -326,8 +322,8 @@ func (b *MessageBag) GetFormat() string {
 	return b.format
 }
 
-// SetFormat answers to MessageBag::setFormat. The PHP default of ":message" is
-// what an empty format means here.
+// SetFormat sets the format messages are wrapped in and returns the bag. An
+// empty format means [DefaultMessageFormat].
 func (b *MessageBag) SetFormat(format string) *MessageBag {
 	if format == "" {
 		format = DefaultMessageFormat
@@ -336,16 +332,17 @@ func (b *MessageBag) SetFormat(format string) *MessageBag {
 	return b
 }
 
-// IsEmpty answers to MessageBag::isEmpty.
+// IsEmpty reports whether the bag holds no message.
 func (b *MessageBag) IsEmpty() bool { return !b.Any() }
 
-// IsNotEmpty answers to MessageBag::isNotEmpty.
+// IsNotEmpty reports whether the bag holds any message.
 func (b *MessageBag) IsNotEmpty() bool { return b.Any() }
 
-// Any answers to MessageBag::any.
+// Any reports whether the bag holds any message.
 func (b *MessageBag) Any() bool { return b.Count() > 0 }
 
-// Count answers to MessageBag::count: every message, not every key.
+// Count returns how many messages the bag holds, counting messages and not
+// keys.
 func (b *MessageBag) Count() int {
 	n := 0
 	for _, v := range b.messages {
@@ -354,11 +351,10 @@ func (b *MessageBag) Count() int {
 	return n
 }
 
-// ToArray answers to MessageBag::toArray.
+// ToArray returns a copy of the messages, keyed by field.
 func (b *MessageBag) ToArray() map[string][]string { return b.GetMessages() }
 
-// ToJson answers to MessageBag::toJson. The PHP throws on a bad encode, so
-// this returns (string, error).
+// ToJson encodes the messages as JSON, or returns the error encoding raised.
 func (b *MessageBag) ToJson() (string, error) {
 	raw, err := json.Marshal(b.jsonValue())
 	if err != nil {
@@ -367,8 +363,8 @@ func (b *MessageBag) ToJson() (string, error) {
 	return string(raw), nil
 }
 
-// MarshalJSON answers to MessageBag::jsonSerialize, under the name the Go
-// encoder looks for.
+// MarshalJSON encodes the messages, so a MessageBag nests inside another
+// encoded value. An empty bag encodes as {}.
 func (b *MessageBag) MarshalJSON() ([]byte, error) {
 	return json.Marshal(b.jsonValue())
 }
@@ -381,7 +377,8 @@ func (b *MessageBag) jsonValue() map[string][]string {
 	return out
 }
 
-// String answers to MessageBag::__toString.
+// String returns the messages as JSON, or "{}" when they cannot be encoded, so
+// MessageBag satisfies fmt.Stringer.
 func (b *MessageBag) String() string {
 	s, err := b.ToJson()
 	if err != nil {

@@ -2,22 +2,22 @@ package support
 
 import "strings"
 
-// processUtilsFacade is Illuminate\Support\ProcessUtils, reached through the
-// [ProcessUtils] value because every method of the PHP class is static.
+// processUtilsFacade carries the process helpers, reached through the
+// [ProcessUtils] value rather than constructed.
 type processUtilsFacade struct{}
 
-// ProcessUtils answers to Illuminate\Support\ProcessUtils, which the PHP copied
-// from Symfony 3. support.ProcessUtils.EscapeArgument(...) reads as
-// ProcessUtils::escapeArgument.
+// ProcessUtils holds the helpers for handing arguments to a shell.
 var ProcessUtils processUtilsFacade
 
-// EscapeArgument answers to ProcessUtils::escapeArgument: a string made safe to
-// hand a shell as one argument.
+// EscapeArgument returns the string made safe to hand a shell as one argument.
 //
-// The PHP branches on DIRECTORY_SEPARATOR; this branches on [Windows_os], which
-// is the same question. Everywhere but Windows the argument is single quoted
-// and every single quote inside it is closed, escaped and reopened, which no
-// shell can read as the end of the argument.
+// The quoting rules differ by platform, so this branches on [Windows_os].
+// Everywhere but Windows the argument is single quoted and every single quote
+// inside it is closed, escaped and reopened, which no shell can read as the
+// end of the argument. On Windows the argument is double quoted, an embedded
+// quote is escaped, a trailing backslash is doubled so it cannot escape the
+// closing quote, and a run wrapped in percent signs is broken up so the shell
+// does not expand it as an environment variable.
 func (processUtilsFacade) EscapeArgument(argument string) string {
 	if !Windows_os() {
 		return "'" + strings.ReplaceAll(argument, "'", `'\''`) + "'"
@@ -51,9 +51,8 @@ func (processUtilsFacade) EscapeArgument(argument string) string {
 	return escaped.String()
 }
 
-// splitKeepingQuotes is preg_split('/(")/', $argument, -1, PREG_SPLIT_NO_EMPTY
-// | PREG_SPLIT_DELIM_CAPTURE): the runs between double quotes, with the quotes
-// themselves kept as their own parts and nothing empty.
+// splitKeepingQuotes returns the runs between double quotes, with the quotes
+// themselves kept as parts of their own and nothing empty.
 func splitKeepingQuotes(argument string) []string {
 	parts := []string{}
 	current := strings.Builder{}
@@ -74,7 +73,8 @@ func splitKeepingQuotes(argument string) []string {
 	return parts
 }
 
-// isSurroundedBy answers to the protected ProcessUtils::isSurroundedBy.
+// isSurroundedBy reports whether the argument opens and closes with char and
+// has something between the two.
 func isSurroundedBy(argument string, char byte) bool {
 	return len(argument) > 2 && argument[0] == char && argument[len(argument)-1] == char
 }

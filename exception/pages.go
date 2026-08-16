@@ -58,11 +58,9 @@ func statusTitle(status int) string {
 
 // statusMessage is the sentence shown when the caller did not write one.
 //
-// These are the pages Laravel ships as resources/views/errors/*.blade.php, and
-// the audit found there was no equivalent directory anywhere: a 404 answered
-// with an empty body. They live here rather than in the skeleton because an
-// application that has not been touched must still answer its own 404, and
-// because they have to render when the view build is what broke (RULE 13).
+// They live here rather than in the skeleton because an application that has
+// not been touched must still answer its own 404, and because they have to
+// render when the view build is what broke.
 //
 // The tone follows 00-meta/DOC-brand.md: say what happened, say what to do, no
 // apology and no exclamation mark.
@@ -94,8 +92,8 @@ func statusMessage(status int) string {
 // statusPage writes the built-in page for a status.
 //
 // One template and a table of sentences, not eight files: eight files is eight
-// places for the markup to drift, and the only thing that differs between a 403
-// and a 503 is two strings (RULE 9).
+// places for the markup to drift, and the only thing that differs between a
+// 403 and a 503 is two strings.
 func statusPage(w http.ResponseWriter, d PageData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	// A status page is about this request and this account. A shared cache must

@@ -6,46 +6,43 @@ import (
 	"strings"
 )
 
-// Constraint answers to PHPUnit\Framework\Constraint\Constraint, which the
-// constraints in Illuminate\Testing extend.
+// Constraint is a reusable matcher. It is what an assertion evaluates a value
+// against, and what it reads its failure message from.
 //
-// PHPUnit is not a dependency this collection carries, so the base class it
-// gives them is written here as the three methods the subclasses override.
-// assertThat is what calls them.
+// Implement it to write a comparison more than one assertion can share.
 type Constraint interface {
-	// Matches answers to Constraint::matches.
+	// Matches reports whether the value satisfies the constraint.
 	Matches(other any) bool
 
-	// FailureDescription answers to Constraint::failureDescription.
+	// FailureDescription is what a failure should say about the value. It is
+	// read only after Matches has answered false.
 	FailureDescription(other any) string
 
-	// String answers to Constraint::toString.
+	// String names the constraint.
 	String() string
 }
 
-// SeeInOrder answers to Illuminate\Testing\Constraints\SeeInOrder: the values
-// appear in the content, each one after the last.
+// SeeInOrder matches a string in which the given values appear, each one after
+// the last.
 //
-// It is the constraint behind TestResponse::assertSeeInOrder, and the reason
-// that assertion is worth having: three assertSee calls pass on a page that
-// shows the three in any order, and "the total is above the line items" is an
-// order.
+// It is not safe for concurrent use: Matches records which value failed, so a
+// SeeInOrder is built for one assertion and used by it.
 type SeeInOrder struct {
-	// content answers to $content: the string under validation.
+	// content is the string under test.
 	content string
 
-	// failedValue answers to $failedValue: the last value that did not appear
-	// where it had to. It is written by Matches and read by
-	// FailureDescription, which is the order PHPUnit calls them in.
+	// failedValue is the last value that did not appear where it had to. It is
+	// written by Matches and read by FailureDescription.
 	failedValue string
 }
 
-// NewSeeInOrder answers to SeeInOrder::__construct.
+// NewSeeInOrder returns a constraint over the given content.
 func NewSeeInOrder(content string) *SeeInOrder {
 	return &SeeInOrder{content: content}
 }
 
-// Matches answers to SeeInOrder::matches.
+// Matches reports whether other, which must be a []string, appears in the
+// content in that order. Anything else does not match.
 //
 // Both sides are entity-decoded first, so a page that writes an apostrophe as
 // &#039; still matches the apostrophe a test wrote. An empty value is skipped
@@ -79,11 +76,13 @@ func (c *SeeInOrder) Matches(other any) bool {
 	return true
 }
 
-// FailureDescription answers to SeeInOrder::failureDescription.
+// FailureDescription names the content and the value that was not found where
+// it had to be. It is meaningful only after [SeeInOrder.Matches] returned
+// false.
 func (c *SeeInOrder) FailureDescription(other any) string {
 	return fmt.Sprintf("Failed asserting that '%s' contains \"%s\" in specified order.",
 		c.content, c.failedValue)
 }
 
-// String answers to SeeInOrder::toString, which returns the class name.
+// String names the constraint.
 func (c *SeeInOrder) String() string { return "SeeInOrder" }

@@ -112,7 +112,7 @@ func TestAssertDatabaseMissingPassesWhenNothingMatches(t *testing.T) {
 
 // The count is of the table, not of a match: counting matching rows is
 // AssertDatabaseHas answered with a number, and one question gets one way to
-// ask it (RULE 9).
+// ask it.
 func TestAssertDatabaseCountAsksAboutTheWholeTable(t *testing.T) {
 	db, fake := newFakeDB(t)
 	fake.count = 3

@@ -6,38 +6,32 @@ import (
 	"strings"
 )
 
-// Markdown answers for Str::markdown. It renders CommonMark, with the GitHub
-// flavour's strikethrough, task lists, tables and bare-URL autolinking, as
-// HTML.
+// Markdown renders CommonMark, with the GitHub flavour's strikethrough, task
+// lists, tables and bare-URL autolinking, as HTML.
 //
 //	Markdown("# Hello")   // "<h1>Hello</h1>\n"
 //	Markdown("*hello*")   // "<p><em>hello</em></p>\n"
 //
-// Raw HTML passes through untouched, which is league/commonmark's own default
-// and Illuminate's. Rendering untrusted Markdown therefore renders untrusted
-// HTML: sanitize it after this, before it reaches a page.
+// Raw HTML passes through untouched. Rendering untrusted Markdown therefore
+// renders untrusted HTML: sanitize it after this, before it reaches a page.
 //
-// Illuminate's $options and $extensions configure league/commonmark and add
-// parsers to it. There is no equivalent here and there will not be one: this
-// package carries no third-party dependency, so the renderer is this file, and
-// a second way to spell a document is what RULE 9 refuses.
+// There is nothing to configure and there will not be: the renderer is this
+// file, and one way to spell a document is enough.
 func Markdown(s string) string {
 	var b strings.Builder
 	renderBlocks(splitLines(s), &b)
 	return b.String()
 }
 
-// InlineMarkdown answers for Str::inlineMarkdown. It renders only the inline
-// part of CommonMark -- emphasis, code spans, links, images -- with no block
-// element around it.
+// InlineMarkdown renders only the inline part of CommonMark -- emphasis, code
+// spans, links, images -- with no block element around it.
 //
 //	InlineMarkdown("**Hello World**") // "<strong>Hello World</strong>\n"
 //
-// It is Illuminate's InlinesOnlyExtension: a heading marker or a list marker is
-// left standing as text, because there is no block parser to read it.
+// A heading marker or a list marker is left standing as text, because there is
+// no block parser to read it.
 //
-// The note on $options, $extensions and raw HTML in the comment on Markdown
-// holds here too.
+// The note on raw HTML in the comment on Markdown holds here too.
 func InlineMarkdown(s string) string {
 	return renderInline(strings.TrimRight(s, "\n")) + "\n"
 }
@@ -111,7 +105,7 @@ func isIndentedCode(line string) bool {
 }
 
 // renderFencedCode reads a fenced code block and writes it out with the info
-// string as a language class, the way league/commonmark writes it.
+// string as a language class.
 func renderFencedCode(lines []string, i int, b *strings.Builder) int {
 	m := fenceOpen.FindStringSubmatch(lines[i])
 	fence, info := m[1], strings.TrimSpace(m[2])
@@ -350,8 +344,7 @@ func startsBlock(line string) bool {
 		htmlBlockStart.MatchString(line)
 }
 
-// renderHTMLBlock passes a run of raw HTML through to the output, which is what
-// league/commonmark does with its default html_input of allow.
+// renderHTMLBlock passes a run of raw HTML through to the output untouched.
 func renderHTMLBlock(lines []string, i int, b *strings.Builder) int {
 	for i < len(lines) && strings.TrimSpace(lines[i]) != "" {
 		b.WriteString(lines[i] + "\n")
@@ -480,7 +473,8 @@ func countIndent(line string) int {
 	return n
 }
 
-// escapeHTML escapes the four characters league/commonmark escapes in text.
+// htmlEscaper escapes the four characters that cannot stand for themselves in
+// HTML text.
 var htmlEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
 
 func escapeHTML(s string) string { return htmlEscaper.Replace(s) }

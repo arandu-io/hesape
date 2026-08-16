@@ -223,8 +223,7 @@ func TestQueueFakeAssertPushedWithChain(t *testing.T) {
 	queue.AssertPushedWithChain(r, reflect.TypeFor[sampleJob](), []any{reflect.TypeFor[otherJob]()}, nil)
 	assertPasses(t, r)
 
-	// A value in the chain is compared by value, as the PHP compares two
-	// serialized jobs.
+	// A value in the chain is compared by value.
 	r = &recorder{}
 	queue.AssertPushedWithChain(r, reflect.TypeFor[sampleJob](), []any{otherJob{Name: "second"}}, nil)
 	assertPasses(t, r)
@@ -345,7 +344,7 @@ func TestQueueFakeSizeCountsOneQueue(t *testing.T) {
 	if got := queue.Size("invoices"); got != 2 {
 		t.Errorf("Size(invoices) = %d, want 2", got)
 	}
-	// The empty name is PHP's null: the default queue, not "every queue".
+	// The empty name is the default queue, not "every queue".
 	if got := queue.Size(""); got != 1 {
 		t.Errorf("Size() = %d, want 1", got)
 	}

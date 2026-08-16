@@ -2,24 +2,14 @@ package testing
 
 import "sort"
 
-// LoggedExceptionCollection answers to
-// Illuminate\Testing\LoggedExceptionCollection: every error the application
-// logged while a request was being handled.
+// LoggedExceptionCollection is every error the application logged while a
+// request was being handled, in the order they were logged.
 //
-// In PHP it is an empty subclass of Collection, and the whole of it is the
-// name -- what it carries is errors, so a failing assertion can say which one
-// the handler swallowed instead of only that the status was 500. Here it is a
-// slice for the same reason: the type exists to be named in a signature, not to
-// add behaviour.
-//
-// The collection methods PHP inherits from Collection are not repeated on it;
-// the ones a test actually reaches for are [LoggedExceptionCollection.First],
-// [LoggedExceptionCollection.Last] and [LoggedExceptionCollection.IsEmpty], and
-// anything else is a range over the slice.
+// It is a slice because the type exists to be named in a signature, not to add
+// behaviour.
 type LoggedExceptionCollection []error
 
-// First answers to Collection::first. It returns nil when nothing was logged,
-// which is the same answer PHP gives.
+// First returns the first error logged, or nil when nothing was.
 func (c LoggedExceptionCollection) First() error {
 	if len(c) == 0 {
 		return nil
@@ -27,7 +17,7 @@ func (c LoggedExceptionCollection) First() error {
 	return c[0]
 }
 
-// Last answers to Collection::last.
+// Last returns the last error logged, or nil when nothing was.
 //
 // It is the one a failure message uses: when a handler catches an error, logs
 // it and answers 500, the last logged error is the cause, and printing it is
@@ -39,13 +29,14 @@ func (c LoggedExceptionCollection) Last() error {
 	return c[len(c)-1]
 }
 
-// IsEmpty answers to Collection::isEmpty.
+// IsEmpty reports whether nothing was logged.
 func (c LoggedExceptionCollection) IsEmpty() bool { return len(c) == 0 }
 
-// Count answers to Collection::count.
+// Count returns how many errors were logged.
 func (c LoggedExceptionCollection) Count() int { return len(c) }
 
-// Push answers to Collection::push.
+// Push appends errors and returns the extended collection, the way append
+// does.
 func (c LoggedExceptionCollection) Push(errs ...error) LoggedExceptionCollection {
 	return append(c, errs...)
 }

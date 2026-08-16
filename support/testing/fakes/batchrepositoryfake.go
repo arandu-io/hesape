@@ -5,10 +5,8 @@ import (
 	"time"
 )
 
-// BatchRepositoryFake answers
-// Illuminate\Support\Testing\Fakes\BatchRepositoryFake: the batch store a
-// faked bus writes to, which keeps the batches in memory and never touches a
-// database.
+// BatchRepositoryFake is the batch store a faked bus writes to. It keeps the
+// batches in memory and never touches a database.
 //
 // It is safe to use from a test that calls t.Parallel: every batch is stored
 // and read under a mutex.
@@ -21,15 +19,13 @@ type BatchRepositoryFake struct {
 	order   []string
 }
 
-// NewBatchRepositoryFake answers BatchRepositoryFake's implicit constructor.
+// NewBatchRepositoryFake returns an empty batch store.
 func NewBatchRepositoryFake() *BatchRepositoryFake {
 	return &BatchRepositoryFake{batches: map[string]*BatchFake{}}
 }
 
-// Get answers BatchRepositoryFake::get: every batch, in the order it was
-// stored.
-//
-// The PHP takes a limit and a cursor and ignores both, and so does this.
+// Get returns every batch, in the order it was stored. The limit and the
+// cursor are ignored: the store is small enough to hand back whole.
 func (r *BatchRepositoryFake) Get(limit int, before any) []*BatchFake {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -41,16 +37,15 @@ func (r *BatchRepositoryFake) Get(limit int, before any) []*BatchFake {
 	return batches
 }
 
-// Find answers BatchRepositoryFake::find: the batch with that id, or nil when
-// there is none, which is the PHP's null.
+// Find returns the batch with that id, or nil when the store holds none.
 func (r *BatchRepositoryFake) Find(batchID string) *BatchFake {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.batches[batchID]
 }
 
-// Store answers BatchRepositoryFake::store: a BatchFake is made for the
-// pending batch and kept under a fresh ordered id.
+// Store makes a [BatchFake] for the pending batch and keeps it under a fresh
+// ordered id, which sorts in the order the batches were stored.
 //
 // Every job counts as pending, none as failed, which is the state a batch is
 // in the moment it is dispatched.
@@ -77,25 +72,22 @@ func (r *BatchRepositoryFake) Store(batch *PendingBatchFake) *BatchFake {
 	return stored
 }
 
-// IncrementTotalJobs answers BatchRepositoryFake::incrementTotalJobs, and does
-// nothing, as the PHP does.
+// IncrementTotalJobs does nothing: a fake batch's counts are fixed when it is
+// stored.
 func (r *BatchRepositoryFake) IncrementTotalJobs(batchID string, amount int) {}
 
-// DecrementPendingJobs answers BatchRepositoryFake::decrementPendingJobs, and
-// hands back empty counts, as the PHP does.
+// DecrementPendingJobs does nothing and returns empty counts.
 func (r *BatchRepositoryFake) DecrementPendingJobs(batchID string, jobID string) UpdatedBatchJobCounts {
 	return UpdatedBatchJobCounts{}
 }
 
-// IncrementFailedJobs answers BatchRepositoryFake::incrementFailedJobs, and
-// hands back empty counts, as the PHP does.
+// IncrementFailedJobs does nothing and returns empty counts.
 func (r *BatchRepositoryFake) IncrementFailedJobs(batchID string, jobID string) UpdatedBatchJobCounts {
 	return UpdatedBatchJobCounts{}
 }
 
-// MarkAsFinished answers BatchRepositoryFake::markAsFinished: the batch is
-// stamped with the moment it finished, and an id that is not stored is
-// ignored, as the PHP ignores it.
+// MarkAsFinished stamps the batch with the moment it finished. An id the
+// store does not hold is ignored.
 func (r *BatchRepositoryFake) MarkAsFinished(batchID string) {
 	r.mu.Lock()
 	batch := r.batches[batchID]
@@ -106,7 +98,8 @@ func (r *BatchRepositoryFake) MarkAsFinished(batchID string) {
 	}
 }
 
-// Cancel answers BatchRepositoryFake::cancel.
+// Cancel marks the batch cancelled. An id the store does not hold is
+// ignored.
 func (r *BatchRepositoryFake) Cancel(batchID string) {
 	r.mu.Lock()
 	batch := r.batches[batchID]
@@ -117,8 +110,7 @@ func (r *BatchRepositoryFake) Cancel(batchID string) {
 	}
 }
 
-// Delete answers BatchRepositoryFake::delete: the batch is forgotten entirely,
-// which is what unset() does there.
+// Delete forgets the batch entirely, dropping it from the order too.
 func (r *BatchRepositoryFake) Delete(batchID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -135,12 +127,11 @@ func (r *BatchRepositoryFake) Delete(batchID string) {
 	}
 }
 
-// Transaction answers BatchRepositoryFake::transaction: the callback is called,
-// with nothing around it, because there is no storage to open a transaction on.
+// Transaction calls the callback with nothing around it: there is no storage
+// to open a transaction on.
 func (r *BatchRepositoryFake) Transaction(callback func() any) any {
 	return callback()
 }
 
-// RollBack answers BatchRepositoryFake::rollBack, and does nothing, as the PHP
-// does. The name is the PHP's, capital B and all.
+// RollBack does nothing: there is no transaction to roll back.
 func (r *BatchRepositoryFake) RollBack() {}

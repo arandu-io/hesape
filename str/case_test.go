@@ -7,10 +7,10 @@ import (
 	"github.com/arandu-io/hesape/str"
 )
 
-// A run of capitals becomes one delimiter per capital, because the PHP inserts
-// the delimiter before every upper-case letter without asking whether the
-// previous one was upper-case too: preg_replace('/(.)(?=[A-Z])/u', '$1_').
-// An existing hyphen is left alone, because ucwords does not break on it.
+// A run of capitals becomes one delimiter per capital, because the delimiter
+// goes in before every upper-case letter without asking whether the previous
+// one was upper-case too. An existing hyphen is left alone, because the word
+// splitting does not break on it.
 func TestSnakeMatchesTheRegexIlluminateUses(t *testing.T) {
 	for in, want := range map[string]string{
 		"PurchaseOrder":  "purchase_order",
@@ -43,7 +43,7 @@ func TestKebabIsSnakeWithHyphens(t *testing.T) {
 }
 
 // TestStudlyAcceptsEverySpelling: the developer this is for types the class
-// name, and `aru make:module` takes the module name.
+// name however it comes to hand, and a generator takes the module name.
 func TestStudlyAcceptsEverySpelling(t *testing.T) {
 	for in, want := range map[string]string{
 		"invoice_line":  "InvoiceLine",
@@ -87,9 +87,8 @@ func TestUcfirstLeavesTheRestAlone(t *testing.T) {
 	}
 }
 
-// Headline title cases every word, which is what Str::headline does: it maps
-// Str::title over the parts and joins them with a space. The sentence-cased
-// version this replaces was an Arandu divergence.
+// Headline title cases every word: it maps Title over the parts and joins them
+// with a space.
 func TestHeadlineTitleCasesEveryWord(t *testing.T) {
 	for in, want := range map[string]string{
 		"WelcomeEmail":          "Welcome Email",
@@ -116,9 +115,8 @@ func TestTitleCapitalizesEveryWordAndKeepsSpacing(t *testing.T) {
 	}
 }
 
-// TestUcsplitSplitsOnTheCapitals covers what the removed Words() helper used to
-// do. Str::words is the word limiter, not a splitter, so the splitting question
-// belongs to Str::ucsplit.
+// TestUcsplitSplitsOnTheCapitals covers the splitting question: Words is the
+// word limiter and not a splitter, so splitting belongs to Ucsplit.
 func TestUcsplitSplitsOnTheCapitals(t *testing.T) {
 	if got := str.Ucsplit(""); len(got) != 0 {
 		t.Errorf("Ucsplit(%q) = %#v, want empty", "", got)

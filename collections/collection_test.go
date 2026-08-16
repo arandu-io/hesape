@@ -8,9 +8,9 @@ import (
 	"github.com/arandu-io/hesape/collections"
 )
 
-// The edges Illuminate handles and a Go port is likely to drop: the empty
-// collection, the key that is not there, the negative count, the index past the
-// end and the callback that never matches.
+// The edges an implementation is likely to drop: the empty collection, the key
+// that is not there, the negative count, the index past the end and the
+// callback that never matches.
 
 func TestGetOutOfRange(t *testing.T) {
 	c := collections.Collect([]int{1, 2, 3})
@@ -132,8 +132,8 @@ func TestNegativeAndZeroCounts(t *testing.T) {
 }
 
 func TestMapSpreadAppendsTheKey(t *testing.T) {
-	// $chunk[] = $key before the spread, which is the half of the PHP that
-	// reading the signature alone does not show.
+	// The position is appended to the chunk before the spread, which reading
+	// the signature alone does not show.
 	c := collections.Collect([][]any{{"a", "b"}, {"c", "d"}})
 	got := collections.MapSpread(c, func(values ...any) []any { return values })
 	want := collections.Collection[[]any]{{"a", "b", 0}, {"c", "d", 1}}

@@ -1,29 +1,10 @@
-// Package traits mirrors Illuminate\Support\Traits.
+// Package traits declares nothing, and is kept only so the import path
+// resolves.
 //
-// The files it answers to, in the clone at
-// laravel_illuminate/support/Traits:
-//
-//	CapsuleManagerTrait.php
-//	Dumpable.php
-//	ForwardsCalls.php
-//	InteractsWithData.php
-//	Localizable.php
-//	ReflectsClosures.php
-//	Tappable.php
-//
-// A PHP trait is copied into the class that uses it, so its methods answer as
-// that class's own. Go has no traits, and a package of them would be a package
-// nobody imports on purpose. So the five that are mirrored live in the support
-// package, next to the types that use them:
-//
-//	Dumpable          -> support.Dump, support.Dd
-//	ForwardsCalls     -> support.ForwardCallTo, support.ForwardDecoratedCallTo
-//	InteractsWithData -> embedded in support.Fluent, support.UriQueryString
-//	                     and support.ValidatedInput
-//	Localizable       -> support.WithLocale
-//	Tappable          -> support.Tap
-//
-// CapsuleManagerTrait serves the container, which ADR 0001 rejected.
-// ReflectsClosures reads a closure's parameter types, which Go cannot do: a
-// func value carries no names and no parameter list at run time.
+// Shared behaviour lives in the support package, next to the types that use
+// it: support.Dump and support.Dd write a value out, support.ForwardCallTo and
+// support.ForwardDecoratedCallTo relay a call to another object,
+// support.WithLocale runs a callback under a locale, support.Tap hands a value
+// to a callback and returns it, and the typed data accessors are embedded in
+// support.Fluent, support.UriQueryString and support.ValidatedInput.
 package traits

@@ -12,11 +12,10 @@ import (
 	"github.com/arandu-io/hesape/collections"
 )
 
-// Collapse answers to Arr::collapse: one level of nesting removed.
+// Collapse removes one level of nesting.
 //
-// The PHP keeps only the elements that are arrays or Collections and drops
-// everything else before merging, and so does this. The typed form, over a
-// slice of slices, is collections.Collapse.
+// Only the elements that are themselves indexable contribute; everything else
+// is dropped. The typed form, over a slice of slices, is collections.Collapse.
 func Collapse(array []any) []any {
 	out := []any{}
 	for _, values := range array {
@@ -29,12 +28,12 @@ func Collapse(array []any) []any {
 	return out
 }
 
-// CrossJoin answers to Arr::crossJoin: the cartesian product of the lists, one
-// tuple per combination.
+// CrossJoin returns the cartesian product of the lists, one tuple per
+// combination.
 //
-// The PHP folds from [[]], so crossing nothing gives one empty tuple, crossing
-// a single list wraps each of its elements on its own, and crossing an empty
-// list yields nothing at all. All three hold here.
+// The product is folded from a single empty tuple, so crossing nothing gives
+// one empty tuple, crossing a single list wraps each of its elements on its
+// own, and crossing an empty list yields nothing at all.
 func CrossJoin[T any](arrays ...[]T) [][]T {
 	results := [][]T{{}}
 	for _, array := range arrays {
@@ -51,13 +50,10 @@ func CrossJoin[T any](arrays ...[]T) [][]T {
 	return results
 }
 
-// First answers to Arr::first: the first element passing the test.
+// First returns the first element passing the test.
 //
-// A nil callback returns the first element, which is what the PHP does with no
-// argument. The second result is false where the PHP returns its $default: the
-// slice is empty, or nothing matched.
-//
-// helpers.php's head() is this with a nil callback.
+// A nil callback returns the first element. The second result is false when
+// the slice is empty or nothing matched.
 func First[T any](array []T, callback func(value T, key int) bool) (T, bool) {
 	for i, v := range array {
 		if callback == nil || callback(v, i) {
@@ -68,13 +64,11 @@ func First[T any](array []T, callback func(value T, key int) bool) (T, bool) {
 	return zero, false
 }
 
-// Last answers to Arr::last: the last element passing the test.
+// Last returns the last element passing the test.
 //
-// The PHP reverses the array and calls first, so the callback still sees the
-// original keys; this walks backwards, which is the same thing without the
-// copy.
-//
-// helpers.php's last() is this with a nil callback.
+// The slice is walked backwards rather than reversed, and the callback still
+// sees each element's original position. A nil callback returns the last
+// element.
 func Last[T any](array []T, callback func(value T, key int) bool) (T, bool) {
 	for i := len(array) - 1; i >= 0; i-- {
 		if callback == nil || callback(array[i], i) {
@@ -85,11 +79,11 @@ func Last[T any](array []T, callback func(value T, key int) bool) (T, bool) {
 	return zero, false
 }
 
-// Take answers to Arr::take: the first limit elements, or the last ones when
-// limit is negative.
+// Take returns the first limit elements, or the last ones when limit is
+// negative.
 //
 // A limit of zero gives nothing, and a limit larger than the slice gives the
-// whole slice, which is what array_slice does.
+// whole slice. The result is always a fresh slice.
 func Take[T any](array []T, limit int) []T {
 	if limit < 0 {
 		if -limit >= len(array) {
@@ -103,15 +97,13 @@ func Take[T any](array []T, limit int) []T {
 	return append([]T{}, array[:limit]...)
 }
 
-// Flatten answers to Arr::flatten: a nested structure squashed into one level.
+// Flatten squashes a nested structure into one level.
 //
-// The depth is optional and unlimited when omitted, as the PHP's INF default
-// is. A depth of 1 removes one level of nesting. Only the first depth is used;
-// the variadic is how Go spells a PHP default argument.
+// The depth is optional and unlimited when omitted; a depth of 1 removes one
+// level of nesting. Only the first depth is used.
 //
-// A nested map contributes its values in ascending key order, because
-// array_values on an associative array takes the values in the order the array
-// holds them and a Go map holds none.
+// A nested map contributes its values in ascending key order, since a Go map
+// holds no order of its own.
 func Flatten(array []any, depth ...int) []any {
 	limit := -1
 	if len(depth) > 0 {
@@ -136,9 +128,9 @@ func flattenInto(out []any, array []any, depth int) []any {
 	return out
 }
 
-// Every answers to Arr::every: every element passes the test.
+// Every reports whether every element passes the test.
 //
-// An empty slice passes, as PHP's array_all does: there is no element to fail.
+// An empty slice passes: there is no element to fail the test.
 func Every[T any](array []T, callback func(value T, key int) bool) bool {
 	for i, v := range array {
 		if !callback(v, i) {
@@ -148,7 +140,7 @@ func Every[T any](array []T, callback func(value T, key int) bool) bool {
 	return true
 }
 
-// Some answers to Arr::some: at least one element passes the test.
+// Some reports whether at least one element passes the test.
 func Some[T any](array []T, callback func(value T, key int) bool) bool {
 	for i, v := range array {
 		if callback(v, i) {
@@ -158,12 +150,10 @@ func Some[T any](array []T, callback func(value T, key int) bool) bool {
 	return false
 }
 
-// Join answers to Arr::join: the elements glued together, the last one attached
-// with finalGlue.
+// Join glues the elements together, attaching the last one with finalGlue.
 //
-// An empty finalGlue is a plain implode, one element is that element and no
-// element is the empty string -- the three cases the PHP spells out. The PHP's
-// finalGlue default of "" is passed explicitly here.
+// An empty finalGlue joins with glue throughout, one element is that element
+// and no element is the empty string.
 func Join(array []string, glue, finalGlue string) string {
 	if finalGlue == "" {
 		return strings.Join(array, glue)
@@ -177,12 +167,10 @@ func Join(array []string, glue, finalGlue string) string {
 	return strings.Join(array[:len(array)-1], glue) + finalGlue + array[len(array)-1]
 }
 
-// KeyBy answers to Arr::keyBy: the elements keyed by what the callback reads
-// off each one.
+// KeyBy keys the elements by what the callback reads off each one.
 //
-// The PHP takes a field name or a callback and routes both through
-// Collection::keyBy; Go names the field with an accessor. When two elements
-// share a key the later one wins, as it does in PHP.
+// The field is named with an accessor rather than a string. When two elements
+// share a key the later one wins.
 func KeyBy[T any](array []T, keyBy func(value T, key int) string) map[string]T {
 	out := make(map[string]T, len(array))
 	for i, v := range array {
@@ -191,11 +179,8 @@ func KeyBy[T any](array []T, keyBy func(value T, key int) string) map[string]T {
 	return out
 }
 
-// Map answers to Arr::map.
-//
-// The PHP passes ($value, $key) and falls back to ($value) when the callback
-// takes one argument; a Go callback declares what it wants, so both are the
-// same signature here.
+// Map returns the result of the callback for every element, in order. The
+// callback is handed the element and its position.
 func Map[T, U any](array []T, callback func(value T, key int) U) []U {
 	out := make([]U, len(array))
 	for i, v := range array {
@@ -204,11 +189,8 @@ func Map[T, U any](array []T, callback func(value T, key int) U) []U {
 	return out
 }
 
-// MapWithKeys answers to Arr::mapWithKeys.
-//
-// The PHP callback returns an associative array and every pair in it is folded
-// into the result; a Go callback returns the one pair, which is the shape every
-// call in Illuminate itself uses.
+// MapWithKeys builds a map from the key and value the callback returns for
+// every element. A repeated key keeps the last value.
 func MapWithKeys[T, V any](array []T, callback func(value T, key int) (string, V)) map[string]V {
 	out := make(map[string]V, len(array))
 	for i, v := range array {
@@ -218,13 +200,12 @@ func MapWithKeys[T, V any](array []T, callback func(value T, key int) (string, V
 	return out
 }
 
-// MapSpread answers to Arr::mapSpread: each nested chunk spread across the
-// callback's arguments.
+// MapSpread spreads each nested chunk across the callback's arguments.
 //
-// The PHP appends the key to the chunk before spreading it, so the callback
-// receives the chunk's elements and then the key. That is easy to miss reading
-// the signature and it is why this takes [][]any rather than a typed chunk: the
-// trailing key is an int and the elements are not.
+// The position is appended to the chunk before it is spread, so the callback
+// receives the chunk's elements and then that position. That is easy to miss
+// reading the signature, and it is why this takes [][]any rather than a typed
+// chunk: the trailing key is an int and the elements need not be.
 func MapSpread[U any](array [][]any, callback func(values ...any) U) []U {
 	out := make([]U, len(array))
 	for i, chunk := range array {
@@ -236,22 +217,19 @@ func MapSpread[U any](array [][]any, callback func(values ...any) U) []U {
 	return out
 }
 
-// Prepend answers to Arr::prepend: the value put at the front.
+// Prepend puts the value at the front of a fresh slice.
 //
-// The PHP has a three-argument form, prepend($array, $value, $key), which
-// writes the pair in front of an associative array. A Go map has no order for
-// that to be visible in, so m[key] = value is the whole of it; the list form is
-// this one.
+// There is no keyed form: a Go map has no order for a key written at the front
+// to be visible in, so writing the entry is the whole of it.
 func Prepend[T any](array []T, value T) []T {
 	return append(append(make([]T, 0, len(array)+1), value), array...)
 }
 
-// Pluck answers to Arr::pluck: one field read off every element.
+// Pluck reads one field off every element.
 //
-// The PHP returns a list when no $key is given and an array keyed by that field
-// when one is, so its return type is mixed. Go says mixed with any: the result
-// is a []any with no key, and a map[string]any with one. Both paths resolve
-// their argument with DataGet, exactly as the PHP resolves it with data_get.
+// With no key the result is a []any; with one it is a map[string]any keyed by
+// that second field, which is why the return type is any. Both the value and
+// the key are resolved with DataGet, so either may be a "dot" path.
 func Pluck(array []any, value string, key ...string) any {
 	if len(key) == 0 {
 		out := make([]any, 0, len(array))
@@ -270,12 +248,11 @@ func Pluck(array []any, value string, key ...string) any {
 	return out
 }
 
-// Select answers to Arr::select: each element reduced to the named keys.
+// Select reduces every element to the named keys.
 //
-// The PHP reads a key off an array element and a property off an object one.
-// The Go counterpart of the property is an exported struct field of the same
-// name, which is what From uses too. A key an element does not have is left
-// out rather than filled with nil.
+// A key is read as an index into an indexable element, and failing that as an
+// exported struct field of the same name. A key an element does not have is
+// left out rather than filled with nil.
 func Select(array []any, keys ...string) []map[string]any {
 	out := make([]map[string]any, len(array))
 	for i, item := range array {
@@ -294,8 +271,8 @@ func Select(array []any, keys ...string) []map[string]any {
 	return out
 }
 
-// field reads an exported struct field by name, following a pointer. It stands
-// in for PHP's isset($item->{$key}).
+// field reads an exported struct field by name, following a pointer, and
+// reports whether there was one.
 func field(item any, name string) (any, bool) {
 	if item == nil {
 		return nil, false
@@ -317,15 +294,13 @@ func field(item any, name string) (any, bool) {
 	return found.Interface(), true
 }
 
-// Random answers to Arr::random: number elements picked at random.
+// Random returns number elements picked at random.
 //
 // It returns ErrInvalidArgument when more elements are asked for than there
-// are, which is what the PHP throws. A number of zero or less gives an empty
-// slice rather than an error, because the PHP returns [] there without looking
-// at the count.
+// are. A number of zero or less gives an empty slice rather than an error.
 //
-// The draw is from crypto/rand: the core carries no other source, and a shuffle
-// seeded from the clock is a shuffle an attacker can replay.
+// The draw is from crypto/rand: a shuffle seeded from the clock is a shuffle
+// an attacker can replay.
 func Random[T any](array []T, number int) ([]T, error) {
 	if number > len(array) {
 		return nil, fmt.Errorf("%w: you requested %d items, but there are only %d items available", ErrInvalidArgument, number, len(array))
@@ -336,10 +311,10 @@ func Random[T any](array []T, number int) ([]T, error) {
 	return Shuffle(array)[:number], nil
 }
 
-// Shuffle answers to Arr::shuffle: the elements in a random order.
+// Shuffle returns the elements in a random order.
 //
-// The PHP renumbers the keys, so the result is a list; the Go result is a new
-// slice and the receiver is untouched.
+// The result is a new slice and the argument is untouched. When the draw fails
+// the copy is returned as it stands.
 func Shuffle[T any](array []T) []T {
 	out := append(make([]T, 0, len(array)), array...)
 	for i := len(out) - 1; i > 0; i-- {
@@ -353,11 +328,12 @@ func Shuffle[T any](array []T) []T {
 	return out
 }
 
-// Sole answers to Arr::sole: the one element passing the test.
+// Sole returns the one element passing the test. A nil callback takes the
+// whole slice.
 //
-// It returns ErrItemNotFound where the PHP throws ItemNotFoundException and a
-// collections.MultipleItemsFoundError, which carries the count and unwraps to
-// ErrMultipleItemsFound, where it throws MultipleItemsFoundException.
+// It returns ErrItemNotFound when nothing matches, and a
+// collections.MultipleItemsFoundError -- which carries the count and unwraps
+// to ErrMultipleItemsFound -- when more than one does.
 func Sole[T any](array []T, callback func(value T, key int) bool) (T, error) {
 	matched := array
 	if callback != nil {
@@ -374,17 +350,11 @@ func Sole[T any](array []T, callback func(value T, key int) bool) (T, error) {
 	}
 }
 
-// Sort answers to Arr::sort.
+// Sort orders the elements by the value the callback reads off each one.
 //
-// The PHP routes to Collection::sortBy, so its callback reads the value to
-// order by and is not a comparator -- Collection::sort is the one that takes a
-// comparator. The projection is required here because the PHP's null callback
-// orders by the values themselves and Go cannot compare an arbitrary T.
-//
-// The PHP keeps the original keys attached to the sorted values, so sorting the
-// list [3,1,2] leaves an array keyed 1,2,0. A Go slice renumbers.
-//
-// The sort is stable, as PHP's is since 8.0.
+// The callback is a projection and not a comparator, and it is required: Go
+// cannot compare an arbitrary T. The result is a new slice, renumbered from
+// zero, and the sort is stable.
 func Sort[T any, V cmp.Ordered](array []T, callback func(value T, key int) V) []T {
 	type keyed struct {
 		item T
@@ -402,7 +372,7 @@ func Sort[T any, V cmp.Ordered](array []T, callback func(value T, key int) V) []
 	return out
 }
 
-// SortDesc answers to Arr::sortDesc: Sort with the order reversed.
+// SortDesc is Sort with the order reversed.
 func SortDesc[T any, V cmp.Ordered](array []T, callback func(value T, key int) V) []T {
 	sorted := Sort(array, callback)
 	for i, j := 0, len(sorted)-1; i < j; i, j = i+1, j-1 {
@@ -411,10 +381,9 @@ func SortDesc[T any, V cmp.Ordered](array []T, callback func(value T, key int) V
 	return sorted
 }
 
-// Where answers to Arr::where: the elements passing the test.
+// Where keeps the elements passing the test.
 //
-// The PHP's array_filter keeps the keys, which on a list leaves gaps; a Go
-// slice closes them.
+// The survivors close the gaps and are renumbered from zero.
 func Where[T any](array []T, callback func(value T, key int) bool) []T {
 	out := make([]T, 0, len(array))
 	for i, v := range array {
@@ -425,16 +394,14 @@ func Where[T any](array []T, callback func(value T, key int) bool) []T {
 	return out
 }
 
-// Reject answers to Arr::reject: Where with the test negated.
+// Reject is Where with the test negated.
 func Reject[T any](array []T, callback func(value T, key int) bool) []T {
 	return Where(array, func(value T, key int) bool { return !callback(value, key) })
 }
 
-// Partition answers to Arr::partition: the elements passing the test, then the
-// ones failing it.
+// Partition returns the elements passing the test, then the ones failing it.
 //
-// The PHP returns one array holding two; Go returns them as two results, which
-// is the same pair without the indexing. Neither half is nil.
+// Neither half is nil, and the two together hold every element exactly once.
 func Partition[T any](array []T, callback func(value T, key int) bool) (passed, failed []T) {
 	passed = make([]T, 0, len(array))
 	failed = make([]T, 0, len(array))
@@ -448,16 +415,15 @@ func Partition[T any](array []T, callback func(value T, key int) bool) (passed, 
 	return passed, failed
 }
 
-// WhereNotNull answers to Arr::whereNotNull: the elements that are not nil.
+// WhereNotNull keeps the elements that are not nil.
 func WhereNotNull(array []any) []any {
 	return Where(array, func(value any, _ int) bool { return value != nil })
 }
 
-// ExceptValues answers to Arr::exceptValues: everything but the values given.
+// ExceptValues keeps everything but the values given.
 //
-// The PHP has a $strict flag choosing between == and ===; Go's == is already
-// ===, so there is no flag. Its array_filter keeps the keys and leaves gaps in
-// a list; a Go slice closes them.
+// Comparison is by ==, and the survivors close the gaps and are renumbered
+// from zero.
 func ExceptValues[T comparable](array []T, values ...T) []T {
 	unwanted := make(map[T]struct{}, len(values))
 	for _, value := range values {
@@ -469,7 +435,8 @@ func ExceptValues[T comparable](array []T, values ...T) []T {
 	})
 }
 
-// OnlyValues answers to Arr::onlyValues: only the values given.
+// OnlyValues keeps only the values given. It is the complement of
+// ExceptValues.
 func OnlyValues[T comparable](array []T, values ...T) []T {
 	wanted := make(map[T]struct{}, len(values))
 	for _, value := range values {
@@ -481,13 +448,12 @@ func OnlyValues[T comparable](array []T, values ...T) []T {
 	})
 }
 
-// Wrap answers to Arr::wrap: nil becomes an empty list, an array stays as it
-// is, and anything else is put in a list on its own.
+// Wrap turns nil into an empty list, leaves a []any as it is, and puts
+// anything else in a list on its own.
 //
-// A slice of another element type is an array in PHP's sense too, so it is
-// converted rather than wrapped. A map is not: PHP would hand it back
-// unchanged, and a []any cannot carry its keys, so it is wrapped whole, which
-// keeps it reachable.
+// A slice or array of another element type is converted rather than wrapped.
+// A map is wrapped whole, because a []any cannot carry its keys, which at
+// least keeps it reachable.
 func Wrap(value any) []any {
 	if value == nil {
 		return []any{}

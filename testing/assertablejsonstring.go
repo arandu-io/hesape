@@ -8,32 +8,28 @@ import (
 	"strings"
 )
 
-// AssertableJSONString answers to Illuminate\Testing\AssertableJsonString: a
-// JSON payload with the assertions worth making about it.
-//
-// It is what TestResponse::decodeResponseJson hands back, and every assertJson*
-// on TestResponse is one call into here.
+// AssertableJSONString is a decoded JSON payload with the assertions worth
+// making about it.
 type AssertableJSONString struct {
 	t T
 
-	// JSONValue answers to the public $json: what was handed in, before it was
-	// decoded. The field is named for what it holds because JSON is the
-	// method that reads the decoded half.
+	// JSONValue is what was handed in, before it was decoded. It is named for
+	// what it holds, because [AssertableJSONString.JSON] is the method that
+	// reads the decoded half.
 	JSONValue any
 
-	// decoded answers to $decoded.
+	// decoded is the payload once decoded, or nil when it would not decode.
 	decoded any
 }
 
-// NewAssertableJSONString answers to AssertableJsonString::__construct.
+// NewAssertableJSONString wraps a payload for assertion.
 //
-// A string is decoded; anything else is taken as the already decoded value,
-// which is what the PHP does for an array, a Jsonable and a JsonSerializable at
-// once -- Go has no three interfaces to tell apart, so the values that are not
-// strings are canonicalised into the shape json.Unmarshal would have produced.
+// A string or a byte slice is decoded; anything else is taken as the already
+// decoded value.
 //
-// A string that is not JSON leaves decoded nil, which is what json_decode
-// returning null means, and it is the state decodeResponseJson checks for.
+// Input that is not JSON leaves [AssertableJSONString.Decoded] nil rather than
+// failing here, which is the state [TestResponse.DecodeResponseJSON] checks
+// for so it can report the exception the route logged instead.
 func NewAssertableJSONString(t T, jsonable any) *AssertableJSONString {
 	a := &AssertableJSONString{t: t, JSONValue: jsonable}
 
@@ -55,15 +51,11 @@ func NewAssertableJSONString(t T, jsonable any) *AssertableJSONString {
 	return a
 }
 
-// Decoded is the decoded payload, which the PHP reads as the protected
-// $decoded from inside the class and through data_get from outside.
+// Decoded is the decoded payload.
 func (a *AssertableJSONString) Decoded() any { return a.decoded }
 
-// JSON answers to AssertableJsonString::json: read a value by dotted path, or
-// the whole payload when no path is given.
-//
-// The variadic key stands for the PHP's `$key = null`, whose absence means the
-// whole payload.
+// JSON reads a value by dotted path, or the whole payload when no path is
+// given.
 func (a *AssertableJSONString) JSON(key ...string) any {
 	if len(key) == 0 || key[0] == "" {
 		return a.decoded
@@ -71,7 +63,8 @@ func (a *AssertableJSONString) JSON(key ...string) any {
 	return dataGet(a.decoded, key[0])
 }
 
-// AssertCount answers to AssertableJsonString::assertCount.
+// AssertCount asserts the payload, or what is at the given dot path, has the
+// expected number of entries.
 func (a *AssertableJSONString) AssertCount(count int, key ...string) *AssertableJSONString {
 	a.t.Helper()
 
@@ -84,13 +77,10 @@ func (a *AssertableJSONString) AssertCount(count int, key ...string) *Assertable
 	return a
 }
 
-// AssertExact answers to AssertableJsonString::assertExact: the payload is the
-// given value and nothing else.
+// AssertExact asserts the payload is the given value and nothing else.
 //
-// The PHP flattens both sides with Arr::dot, sorts the keys and rebuilds, so
-// that two payloads differing only in the order their keys were written compare
-// equal. encoding/json already writes object keys in sorted order, so encoding
-// both sides is the same normalisation with one step instead of three.
+// encoding/json already writes object keys in sorted order, so encoding both
+// sides is the same normalisation with one step instead of three.
 func (a *AssertableJSONString) AssertExact(data any) *AssertableJSONString {
 	a.t.Helper()
 
@@ -101,8 +91,7 @@ func (a *AssertableJSONString) AssertExact(data any) *AssertableJSONString {
 	return a
 }
 
-// AssertSimilar answers to AssertableJsonString::assertSimilar: the same
-// payload, in any order.
+// AssertSimilar asserts the payload is the given value, in any order.
 func (a *AssertableJSONString) AssertSimilar(data any) *AssertableJSONString {
 	a.t.Helper()
 
@@ -113,13 +102,12 @@ func (a *AssertableJSONString) AssertSimilar(data any) *AssertableJSONString {
 	return a
 }
 
-// AssertFragment answers to AssertableJsonString::assertFragment: every pair in
-// the given value appears somewhere in the payload.
+// AssertFragment asserts every pair in the given value appears somewhere in
+// the payload.
 //
-// The mechanism is the PHP's, and it is worth knowing about: the payload is
-// encoded to one sorted string and each pair is looked for as text. It is why a
-// fragment matches at any depth, and why it can match a pair that is nested
-// somewhere the test did not mean.
+// The search is over the encoded payload, which is why a fragment matches at
+// any depth -- and why it can match a pair nested somewhere the test did not
+// mean.
 func (a *AssertableJSONString) AssertFragment(data any) *AssertableJSONString {
 	a.t.Helper()
 
@@ -136,7 +124,8 @@ func (a *AssertableJSONString) AssertFragment(data any) *AssertableJSONString {
 	return a
 }
 
-// AssertMissing answers to AssertableJsonString::assertMissing.
+// AssertMissing asserts no pair in the given value appears in the payload.
+// Passing exact as true is [AssertableJSONString.AssertMissingExact] instead.
 func (a *AssertableJSONString) AssertMissing(data any, exact bool) *AssertableJSONString {
 	a.t.Helper()
 
@@ -157,11 +146,12 @@ func (a *AssertableJSONString) AssertMissing(data any, exact bool) *AssertableJS
 	return a
 }
 
-// AssertMissingExact answers to AssertableJsonString::assertMissingExact: the
-// payload does not carry the whole of the given value.
+// AssertMissingExact asserts the payload does not carry the whole of the given
+// value.
 //
-// One pair missing is enough, which is what makes it the exact form: assertMissing
-// fails when any pair is present, this one only when they all are.
+// One pair missing is enough to pass, which is what makes it the exact form:
+// [AssertableJSONString.AssertMissing] fails when any pair is present, this
+// one only when they all are.
 func (a *AssertableJSONString) AssertMissingExact(data any) *AssertableJSONString {
 	a.t.Helper()
 
@@ -178,7 +168,7 @@ func (a *AssertableJSONString) AssertMissingExact(data any) *AssertableJSONStrin
 	return a
 }
 
-// AssertMissingPath answers to AssertableJsonString::assertMissingPath.
+// AssertMissingPath asserts nothing is at the dot path.
 func (a *AssertableJSONString) AssertMissingPath(path string) *AssertableJSONString {
 	a.t.Helper()
 
@@ -186,12 +176,11 @@ func (a *AssertableJSONString) AssertMissingPath(path string) *AssertableJSONStr
 	return a
 }
 
-// AssertPath answers to AssertableJsonString::assertPath: the value at the path
-// is the expected one, of the expected type.
+// AssertPath asserts the value at the path is the expected one, of the
+// expected type.
 //
-// expect stands for the PHP's mixed: a value, or a func(any) bool where the PHP
-// takes a Closure. The closure form is a truth test over what is at the path,
-// and it is how a test says "an id, whatever it turned out to be".
+// An expectation of func(any) bool is a truth test over what is at the path,
+// which is how a test says "an id, whatever it turned out to be".
 func (a *AssertableJSONString) AssertPath(path string, expect any) *AssertableJSONString {
 	a.t.Helper()
 
@@ -204,8 +193,8 @@ func (a *AssertableJSONString) AssertPath(path string, expect any) *AssertableJS
 	return a
 }
 
-// AssertPathCanonicalizing answers to
-// AssertableJsonString::assertPathCanonicalizing.
+// AssertPathCanonicalizing asserts the value at the path is the expected one
+// once both sides are sorted, so order does not count.
 func (a *AssertableJSONString) AssertPathCanonicalizing(path string, expect any) *AssertableJSONString {
 	a.t.Helper()
 
@@ -213,26 +202,25 @@ func (a *AssertableJSONString) AssertPathCanonicalizing(path string, expect any)
 	return a
 }
 
-// AssertStructure answers to AssertableJsonString::assertStructure: the payload
-// has these keys, nested this way.
+// AssertStructure asserts the payload has these keys, nested this way. Passing
+// exact as true also asserts there are no other keys at each level.
 //
 // # How a structure is written
 //
-// A PHP structure array mixes integer keys with string keys in one literal, and
-// Go has no such array. The two halves are written separately:
+// The two halves are written separately:
 //
-//   - []any or []string is the integer-keyed half: every element is a key the
-//     payload has to carry, and nothing is said about what is under it.
-//   - map[string]any is the string-keyed half: every key has to be carried, and
-//     its value is the structure of what is under it. A nil value says nothing
-//     about what is under it, which is how the integer-keyed spelling is
+//   - []any or []string names keys only: every element is a key the payload
+//     has to carry, and nothing is said about what is under it.
+//   - map[string]any names keys and their contents: every key has to be
+//     carried, and its value is the structure of what is under it. A nil value
+//     says nothing about what is under it, which is how the keys-only form is
 //     written inside a map.
 //
 // The key "*" is the wildcard, and it applies the structure under it to every
 // element of the payload at that level.
 //
-// responseData stands for the PHP's second argument: the value to check instead
-// of this payload, which is how the wildcard recurses. Pass nil from a test.
+// Pass nil for responseData from a test: it is how the recursion hands a
+// nested level back to itself.
 func (a *AssertableJSONString) AssertStructure(structure, responseData any, exact bool) *AssertableJSONString {
 	a.t.Helper()
 
@@ -284,7 +272,8 @@ func (a *AssertableJSONString) AssertStructure(structure, responseData any, exac
 	return a
 }
 
-// AssertSubset answers to AssertableJsonString::assertSubset.
+// AssertSubset asserts the payload carries at least the given value. Passing
+// strict as true compares by identity rather than loosely.
 func (a *AssertableJSONString) AssertSubset(data any, strict bool) *AssertableJSONString {
 	a.t.Helper()
 
@@ -294,27 +283,30 @@ func (a *AssertableJSONString) AssertSubset(data any, strict bool) *AssertableJS
 	return a
 }
 
-// Count answers to AssertableJsonString::count.
+// Count returns the number of entries in the payload, or 0 when it is not
+// countable.
 func (a *AssertableJSONString) Count() int {
 	n, _ := count(a.decoded)
 	return n
 }
 
-// assertJSONMessage answers to AssertableJsonString::assertJsonMessage.
+// assertJSONMessage is the failure message the subset assertion carries: what
+// was looked for and the payload it was looked for in, both indented.
 func (a *AssertableJSONString) assertJSONMessage(data any) string {
 	return fmt.Sprintf("Unable to find JSON: \n\n[%s]\n\nwithin response JSON:\n\n[%s].\n\n",
 		mustEncodePretty(canonical(data)), mustEncodePretty(a.decoded))
 }
 
-// pair is one key and value of a PHP array being walked. The key is a string
-// for a map and an int for a list, which is the distinction jsonSearchStrings
+// pair is one key and value of a payload being walked. The key is a string for
+// a map and an int for a list, which is the distinction jsonSearchStrings
 // needs.
 type pair struct {
 	key   any
 	value any
 }
 
-// asMap renders the pair the way the failure message encodes it: [$key => $value].
+// asMap renders the pair as the one-entry container a failure message encodes:
+// a map for a string key, a one-element list for an index.
 func (p pair) asMap() any {
 	if key, ok := p.key.(string); ok {
 		return map[string]any{key: p.value}
@@ -322,9 +314,9 @@ func (p pair) asMap() any {
 	return []any{p.value}
 }
 
-// pairs answers to the `foreach ($array as $key => $value)` the fragment
-// assertions run, over both PHP array shapes. Map keys come out sorted, so a
-// failure names the same pair on every run.
+// pairs walks a decoded payload as key/value pairs, for the fragment
+// assertions. Map keys come out sorted, so a failure names the same pair on
+// every run.
 func pairs(v any) []pair {
 	switch value := v.(type) {
 	case map[string]any:
@@ -344,8 +336,8 @@ func pairs(v any) []pair {
 	}
 }
 
-// jsonSearchStrings answers to AssertableJsonString::jsonSearchStrings: the
-// encoded pair, without its enclosing brackets, followed by each of the three
+// jsonSearchStrings renders the needles a fragment search looks for: the
+// encoded pair without its enclosing brackets, followed by each of the three
 // characters that can end it inside a larger document.
 func jsonSearchStrings(key, value any) []string {
 	needle := mustEncode(pair{key: key, value: value}.asMap())
@@ -355,7 +347,7 @@ func jsonSearchStrings(key, value any) []string {
 	return []string{needle + "]", needle + "}", needle + ","}
 }
 
-// containsAny answers to Str::contains with an iterable of needles.
+// containsAny reports whether the haystack contains any of the needles.
 func containsAny(haystack string, needles []string) bool {
 	for _, needle := range needles {
 		if strings.Contains(haystack, needle) {
@@ -365,8 +357,7 @@ func containsAny(haystack string, needles []string) bool {
 	return false
 }
 
-// structureKeys answers to the `(new Collection($structure))->map(...)->values()`
-// in assertStructure: the key each entry requires, sorted.
+// structureKeys returns the key each entry of a structure requires, sorted.
 func structureKeys(structure any) []string {
 	var keys []string
 
@@ -388,8 +379,7 @@ func structureKeys(structure any) []string {
 }
 
 // sortedKeys is the keys of a decoded payload, sorted, for the exact structure
-// comparison. A list answers with its indices written out, which is what
-// (new Collection($list))->keys() gives in the PHP.
+// comparison. A list answers with its indices written out.
 func sortedKeys(v any) []string {
 	switch value := v.(type) {
 	case map[string]any:
@@ -415,8 +405,8 @@ func sortedMapKeys(m map[string]any) []string {
 	return keys
 }
 
-// elements is the values of a decoded payload, in order: what the PHP's
-// `foreach ($this->decoded as $responseDataItem)` walks.
+// elements returns the values of a decoded payload, in order. A map answers
+// with its values in sorted key order.
 func elements(v any) []any {
 	switch value := v.(type) {
 	case []any:
@@ -441,12 +431,12 @@ func orEmpty(v any) any {
 	return v
 }
 
-// dataGet answers to data_get: read a value out of a decoded payload by dotted
-// path.
+// dataGet reads a value out of a decoded payload by dotted path, descending
+// through maps by key and lists by index.
 //
-// arr.Get is the same walk and is used everywhere a map is the root; it takes a
-// map[string]any, and a JSON response is as often a list at the root, which is
-// the whole of why this is written here.
+// arr.Get is the same walk and is used everywhere a map is the root; it takes
+// a map[string]any, and a JSON response is as often a list at the root, which
+// is the whole of why this is written here.
 func dataGet(root any, key string) any {
 	if key == "" {
 		return root
@@ -463,7 +453,8 @@ func dataGet(root any, key string) any {
 	return current
 }
 
-// dataHas answers to Arr::has over a decoded payload.
+// dataHas reports whether a decoded payload has anything at the dotted path.
+// An empty path is false.
 func dataHas(root any, key string) bool {
 	if key == "" {
 		return false

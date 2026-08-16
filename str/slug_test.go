@@ -6,9 +6,9 @@ import (
 	"github.com/arandu-io/hesape/str"
 )
 
-// TestSlugKeepsAccentedRunes is the defect this package was extracted to fix.
-// The font vendorer dropped them, so two families that differ only in their
-// accents wrote to one file and the second silently won.
+// TestSlugKeepsAccentedRunes pins the fold: an accented rune becomes the letter
+// it is built on, so two names that differ only in their accents do not slug to
+// one and the same address.
 func TestSlugKeepsAccentedRunes(t *testing.T) {
 	for in, want := range map[string]string{
 		"Young Serif":                "young-serif",

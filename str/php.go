@@ -8,8 +8,8 @@ import (
 	"unicode"
 )
 
-// phpDirname is PHP's dirname with one level: the path with its last component
-// gone, "." for a bare name, "/" for the root, and "" for the empty string.
+// phpDirname is the path with its last component gone: "." for a bare name,
+// "/" for the root, and "" for the empty string.
 func phpDirname(path string) string {
 	if path == "" {
 		return ""
@@ -29,9 +29,9 @@ func phpDirname(path string) string {
 	}
 }
 
-// chunkRunes is PHP's mb_str_split: the string cut into pieces of the given
-// number of characters, with the last one holding what is left. A size below
-// one has no answer, so nothing comes back.
+// chunkRunes cuts the string into pieces of the given number of characters,
+// with the last one holding what is left. A size below one has no answer, so
+// nothing comes back.
 func chunkRunes(s string, size int) []string {
 	if size < 1 {
 		return nil
@@ -47,8 +47,8 @@ func chunkRunes(s string, size int) []string {
 	return out
 }
 
-// sscanf is PHP's sscanf in its array-returning form, reduced to the verbs a
-// caller of Stringable.Scan reaches for. See the comment there.
+// sscanf reads the fields a format names off the front of the subject and
+// returns them as strings. The verbs it knows are listed on Stringable.Scan.
 func sscanf(subject, format string) []string {
 	var out []string
 	s, f := []rune(subject), []rune(format)
@@ -130,8 +130,8 @@ func scanField(s []rune, verb rune) (string, int) {
 	}
 }
 
-// phpIntval is PHP's intval: the longest integer at the front of the string in
-// the given base, and zero when there is none.
+// phpIntval is the longest integer at the front of the string in the given
+// base, and zero when there is none.
 func phpIntval(s string, base int) int {
 	s = strings.TrimSpace(s)
 	end := 0
@@ -177,8 +177,8 @@ func digitValue(c byte) int {
 	}
 }
 
-// phpFloatval is PHP's floatval: the longest decimal at the front of the
-// string, and zero when there is none.
+// phpFloatval is the longest decimal at the front of the string, and zero when
+// there is none.
 func phpFloatval(s string) float64 {
 	s = strings.TrimSpace(s)
 	end := 0
@@ -219,7 +219,7 @@ func phpFloatval(s string) float64 {
 	return v
 }
 
-// phpDateTokens maps the letters PHP's date() format uses to the reference
+// phpDateTokens maps the letters a date format is written with to the reference
 // times Go's layouts are written with. A letter not here has no Go equivalent
 // and makes goLayout refuse the format.
 var phpDateTokens = map[byte]string{
@@ -232,8 +232,8 @@ var phpDateTokens = map[byte]string{
 	'e': "MST", 'T': "MST", 'P': "-07:00", 'O': "-0700",
 }
 
-// goLayout translates a PHP date() format into the Go layout that reads the
-// same text. A backslash escapes the letter behind it, as it does in PHP.
+// goLayout translates a single-letter date format into the Go layout that reads
+// the same text. A backslash escapes the letter behind it.
 func goLayout(format string) (string, error) {
 	var b strings.Builder
 	b.Grow(len(format) * 2)
@@ -259,7 +259,7 @@ func goLayout(format string) (string, error) {
 }
 
 // parseLayouts are the writings of a time that a machine produces, tried in
-// order. It is what Date::parse reaches for without a format.
+// order when no format was given.
 var parseLayouts = []string{
 	time.RFC3339Nano,
 	time.RFC3339,
@@ -279,8 +279,8 @@ var parseLayouts = []string{
 	time.ANSIC,
 }
 
-// parseDate reads a time out of a string with no format given, the way
-// Date::parse does. A layout that carries no zone is read as UTC.
+// parseDate reads a time out of a string with no format given. A layout that
+// carries no zone is read as UTC.
 func parseDate(value string) (time.Time, error) {
 	value = strings.TrimSpace(value)
 	for _, layout := range parseLayouts {

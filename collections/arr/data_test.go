@@ -35,7 +35,7 @@ func TestDataGetPlainPath(t *testing.T) {
 }
 
 func TestDataGetAlwaysSplitsWhereArrGetDoesNot(t *testing.T) {
-	// Arr::get checks the exact key first; data_get never does.
+	// Get checks the exact key first; DataGet never does.
 	data := map[string]any{"user.name": "flat", "user": map[string]any{"name": "nested"}}
 	if got, _ := arr.DataGet(data, "user.name"); got != "nested" {
 		t.Errorf("DataGet = %v, want the walked path", got)
@@ -53,8 +53,8 @@ func TestDataGetWildcard(t *testing.T) {
 }
 
 func TestDataGetNestedWildcardCollapses(t *testing.T) {
-	// The PHP collapses when a further '*' is left in the remaining key, so
-	// this is a flat list of names and not a list of lists.
+	// A further '*' left in the remaining key collapses a level, so this is a
+	// flat list of names and not a list of lists.
 	got, ok := arr.DataGet(users(), "users.*.roles.*.name")
 	if !ok || !reflect.DeepEqual(got, []any{"admin", "editor", "viewer"}) {
 		t.Errorf("DataGet(nested *) = (%v, %v)", got, ok)

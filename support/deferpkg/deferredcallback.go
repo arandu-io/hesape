@@ -6,24 +6,21 @@ import (
 	"sync"
 )
 
-// DeferredCallback answers to
-// Illuminate\Support\Defer\DeferredCallback: work put off until the response
-// has been sent, named so it can be called off before it runs.
+// DeferredCallback is work put off until the response has been sent, carrying
+// a name so it can be called off before it runs.
 //
-// The PHP holds $callback, $name and $always as public properties and has a
-// method for two of the three. Go has one namespace for a field and a method,
-// so the properties are read through [DeferredCallback.GetName],
-// [DeferredCallback.GetAlways] and [DeferredCallback.GetCallback], and the
-// PHP's own names stay on the writers.
+// [DeferredCallback.Name] and [DeferredCallback.Always] write the two
+// settings; [DeferredCallback.GetName], [DeferredCallback.GetAlways] and
+// [DeferredCallback.GetCallback] read them back, because a field and a method
+// cannot share one name in Go.
 type DeferredCallback struct {
 	callback func()
 	name     string
 	always   bool
 }
 
-// NewDeferredCallback answers to DeferredCallback::__construct. An empty name
-// stands for the PHP null and is filled with a random one, which is the
-// Str::uuid the PHP falls back to.
+// NewDeferredCallback builds a deferred callback. An empty name is filled with
+// a random one, so the callback is not deduplicated against another.
 func NewDeferredCallback(callback func(), name string, always bool) *DeferredCallback {
 	if name == "" {
 		name = randomName()
@@ -31,8 +28,8 @@ func NewDeferredCallback(callback func(), name string, always bool) *DeferredCal
 	return &DeferredCallback{callback: callback, name: name, always: always}
 }
 
-// randomName is the (string) Str::uuid() of the PHP constructor, narrowed to
-// what it is used for: a name no other callback will have.
+// randomName returns a version 4 UUID, used as a name no other callback will
+// have. An unreadable random source yields the empty string.
 func randomName() string {
 	raw := make([]byte, 16)
 	if _, err := rand.Read(raw); err != nil {
@@ -45,16 +42,15 @@ func randomName() string {
 		hex.EncodeToString(raw[10:16])
 }
 
-// Name answers to DeferredCallback::name: the name the callback can be called
-// off by.
+// Name sets the name the callback can be called off by, and returns the
+// callback.
 func (d *DeferredCallback) Name(name string) *DeferredCallback {
 	d.name = name
 	return d
 }
 
-// Always answers to DeferredCallback::always: run even when the request or the
-// job failed. The variadic argument stands for the PHP $always, whose default
-// is true.
+// Always marks the callback to run even when the request or the job failed,
+// and returns the callback. The variadic argument defaults to true.
 func (d *DeferredCallback) Always(always ...bool) *DeferredCallback {
 	d.always = true
 	if len(always) > 0 {
@@ -63,21 +59,18 @@ func (d *DeferredCallback) Always(always ...bool) *DeferredCallback {
 	return d
 }
 
-// GetName reads the public $name property, which [DeferredCallback.Name]
-// already answers to as a writer.
+// GetName returns the name the callback was registered under.
 func (d *DeferredCallback) GetName() string { return d.name }
 
-// GetAlways reads the public $always property, which
-// [DeferredCallback.Always] already answers to as a writer.
+// GetAlways reports whether the callback runs even when the request or the job
+// failed.
 func (d *DeferredCallback) GetAlways() bool { return d.always }
 
-// GetCallback reads the public $callback property.
+// GetCallback returns the func the callback will run.
 func (d *DeferredCallback) GetCallback() func() { return d.callback }
 
-// Invoke answers to DeferredCallback::__invoke: run the callback.
-//
-// The PHP name is a language interface Go has no counterpart for, so the call
-// is spelled out.
+// Invoke runs the callback. A nil receiver, or a callback with no func, does
+// nothing.
 func (d *DeferredCallback) Invoke() {
 	if d == nil || d.callback == nil {
 		return
@@ -85,22 +78,20 @@ func (d *DeferredCallback) Invoke() {
 	d.callback()
 }
 
-// DeferredCallbackCollection answers to
-// Illuminate\Support\Defer\DeferredCallbackCollection: every callback put off
-// during one request, in the order they were deferred.
+// DeferredCallbackCollection holds every callback put off during one request,
+// in the order they were deferred. It is safe for concurrent use.
 type DeferredCallbackCollection struct {
 	mu        sync.Mutex
 	callbacks []*DeferredCallback
 }
 
-// NewDeferredCallbackCollection is the `new DeferredCallbackCollection` the PHP
-// writes, which has no constructor of its own.
+// NewDeferredCallbackCollection returns an empty collection.
 func NewDeferredCallbackCollection() *DeferredCallbackCollection {
 	return &DeferredCallbackCollection{}
 }
 
-// First answers to DeferredCallbackCollection::first. An empty collection has
-// no first callback, so this is nil, where the PHP raises an undefined index.
+// First returns the callback deferred earliest, or nil when the collection is
+// empty.
 func (c *DeferredCallbackCollection) First() *DeferredCallback {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -110,15 +101,15 @@ func (c *DeferredCallbackCollection) First() *DeferredCallback {
 	return c.callbacks[0]
 }
 
-// Invoke answers to DeferredCallbackCollection::invoke: run every callback and
-// empty the collection.
+// Invoke runs every callback and empties the collection.
 func (c *DeferredCallbackCollection) Invoke() { c.InvokeWhen(nil) }
 
-// InvokeWhen answers to DeferredCallbackCollection::invokeWhen. A nil test
-// stands for the PHP null, which runs everything.
+// InvokeWhen empties the collection and runs the callbacks the test accepts. A
+// nil test accepts all of them.
 //
-// A callback that panics is caught and dropped, which is the rescue() the PHP
-// wraps every call in: one deferred callback must not take the others down.
+// Duplicates are dropped first, so of two callbacks deferred under one name
+// only the later one runs. A callback that panics is recovered and dropped:
+// one deferred callback must not take the others down.
 func (c *DeferredCallbackCollection) InvokeWhen(when func(callback *DeferredCallback) bool) {
 	if when == nil {
 		when = func(*DeferredCallback) bool { return true }
@@ -137,15 +128,13 @@ func (c *DeferredCallbackCollection) InvokeWhen(when func(callback *DeferredCall
 	}
 }
 
-// rescue is the rescue() helper the PHP calls: run it, and swallow whatever it
-// raises.
+// rescue runs the callback and swallows whatever it panics with.
 func rescue(callback *DeferredCallback) {
 	defer func() { _ = recover() }()
 	callback.Invoke()
 }
 
-// Forget answers to DeferredCallbackCollection::forget: drop every callback
-// deferred under the given name.
+// Forget drops every callback deferred under the given name.
 func (c *DeferredCallbackCollection) Forget(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -158,9 +147,8 @@ func (c *DeferredCallbackCollection) Forget(name string) {
 	c.callbacks = kept
 }
 
-// forgetDuplicates answers to the protected
-// DeferredCallbackCollection::forgetDuplicates: of two callbacks under one
-// name, the later one stands.
+// forgetDuplicates keeps, of two callbacks deferred under one name, only the
+// later one, and leaves the survivors in the order they were deferred.
 //
 // The caller holds the lock.
 func (c *DeferredCallbackCollection) forgetDuplicates() {
@@ -180,9 +168,8 @@ func (c *DeferredCallbackCollection) forgetDuplicates() {
 	c.callbacks = kept
 }
 
-// OffsetSet answers to DeferredCallbackCollection::offsetSet: with a negative
-// offset, which stands for the PHP null, the callback is appended, and that is
-// what $collection[] = $callback does.
+// OffsetSet writes the callback at the given offset. A negative offset, or one
+// past the end, appends instead.
 func (c *DeferredCallbackCollection) OffsetSet(offset int, callback *DeferredCallback) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -193,7 +180,8 @@ func (c *DeferredCallbackCollection) OffsetSet(offset int, callback *DeferredCal
 	c.callbacks[offset] = callback
 }
 
-// OffsetExists answers to DeferredCallbackCollection::offsetExists.
+// OffsetExists reports whether the collection holds the given offset, once
+// duplicates have been dropped.
 func (c *DeferredCallbackCollection) OffsetExists(offset int) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -201,8 +189,8 @@ func (c *DeferredCallbackCollection) OffsetExists(offset int) bool {
 	return offset >= 0 && offset < len(c.callbacks)
 }
 
-// OffsetGet answers to DeferredCallbackCollection::offsetGet. An offset the
-// collection does not hold is nil, where the PHP raises an undefined index.
+// OffsetGet returns the callback at the given offset, or nil when the
+// collection does not hold it.
 func (c *DeferredCallbackCollection) OffsetGet(offset int) *DeferredCallback {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -213,7 +201,8 @@ func (c *DeferredCallbackCollection) OffsetGet(offset int) *DeferredCallback {
 	return c.callbacks[offset]
 }
 
-// OffsetUnset answers to DeferredCallbackCollection::offsetUnset.
+// OffsetUnset drops the callback at the given offset. An offset the collection
+// does not hold is a no-op.
 func (c *DeferredCallbackCollection) OffsetUnset(offset int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -224,7 +213,8 @@ func (c *DeferredCallbackCollection) OffsetUnset(offset int) {
 	c.callbacks = append(c.callbacks[:offset], c.callbacks[offset+1:]...)
 }
 
-// Count answers to DeferredCallbackCollection::count.
+// Count returns how many callbacks the collection holds, once duplicates have
+// been dropped.
 func (c *DeferredCallbackCollection) Count() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()

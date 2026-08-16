@@ -1,9 +1,4 @@
-// Package testing mirrors Illuminate\Support\Testing.
+// Package testing groups the test doubles this module ships.
 //
-// It holds only subpackages.
-//
-// Nothing is implemented here, and nothing will be: this path is a namespace in
-// PHP and the content lives one level down. In Go a package is a compilation
-// unit rather than a name, and an empty one buys nothing -- it just appears in
-// go list and on pkg.go.dev with nothing in it.
+// It declares nothing itself. The doubles live in the fakes subpackage.
 package testing

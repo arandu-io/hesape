@@ -13,31 +13,26 @@ import (
 	"github.com/arandu-io/hesape/view"
 )
 
-// This file is the third of the three TestResponse is written across: the
-// session, the validation errors, the view and the streamed body.
+// The session, validation error, view and streamed-body assertions on
+// [TestResponse].
 //
-// Where the errors come from is the one place this file is not a transcription.
-// The PHP reads session()->get('errors') and session()->hasOldInput(), because a
-// redirect from a rejected form leaves both in the session. This framework
-// leaves both in a signed one-shot cookie -- session.Flash, for the reason it
-// states: sign in, sign up and password reset are submitted by somebody who has
-// no session at all. Reading the session here would be an assertion that never
-// sees what the application actually wrote, so the error and old-input
-// assertions read the flash instead, through TestResponse.Flash.
+// The validation errors and the old input are not in the session. They travel
+// in a signed one-shot cookie -- session.Flash, for the reason it states: sign
+// in, sign up and password reset are submitted by somebody who has no session
+// at all. Reading the session for them would be an assertion that never sees
+// what the application actually wrote, so those assertions read the flash
+// through [TestResponse.Flash], and say so when it is not set.
 //
-// AssertSessionHas, AssertSessionHasAll and AssertSessionMissing are unaffected:
-// the session store is a general key/value store in both languages, and those
-// three read it.
+// [TestResponse.AssertSessionHas], [TestResponse.AssertSessionHasAll] and
+// [TestResponse.AssertSessionMissing] are unaffected: they read the session
+// store, which is a general key/value store.
 
-// AssertSessionHas answers to TestResponse::assertSessionHas.
+// AssertSessionHas asserts the session holds the key, and the value too when
+// one is given.
 //
-// key stands for the PHP's `string|array`: a string, or a map[string]any or
-// []string, which route to AssertSessionHasAll the way the PHP's is_array check
-// does.
-//
-// value stands for the PHP's `$value = null`. Passing none asserts only that the
-// key is there. Passing a func(any) bool stands for the PHP's Closure: it is
-// handed what is in the session and has to answer true.
+// Passing no value asserts only that the key is there. A value of
+// func(any) bool is called with what is stored and must report true. A key
+// that is really a set of bindings is handed to [TestResponse.AssertSessionHasAll].
 func (r *TestResponse) AssertSessionHas(key any, value ...any) *TestResponse {
 	r.t.Helper()
 
@@ -66,13 +61,11 @@ func (r *TestResponse) AssertSessionHas(key any, value ...any) *TestResponse {
 	return r
 }
 
-// AssertSessionHasAll answers to TestResponse::assertSessionHasAll.
+// AssertSessionHasAll asserts the session holds every one of these bindings.
 //
-// The PHP's `$bindings` is one array holding both shapes: an integer key means
-// "this key is present", a string key means "this key holds that value". Go has
-// no array that is both, so the presence-only entries are written with a nil
-// value, which is the same nil AssertSessionHas already reads as "no value
-// given".
+// A nil value asks only that the key is there, which is the same nil
+// [TestResponse.AssertSessionHas] reads as "no value given". Keys are walked
+// in sorted order, so a failure message is stable.
 func (r *TestResponse) AssertSessionHasAll(bindings map[string]any) *TestResponse {
 	r.t.Helper()
 
@@ -86,12 +79,14 @@ func (r *TestResponse) AssertSessionHasAll(bindings map[string]any) *TestRespons
 	return r
 }
 
-// AssertSessionHasInput answers to TestResponse::assertSessionHasInput.
+// AssertSessionHasInput asserts the old input holds the key, and the value too
+// when one is given.
 //
-// The PHP reads session()->hasOldInput(). Here the old input is on the flash
-// cookie the rejected request wrote, so TestResponse.Flash has to be set.
+// The old input is on the flash cookie the rejected request wrote, so
+// [TestResponse.Flash] has to be set.
 //
-// key and value carry the same three shapes AssertSessionHas takes.
+// key and value carry the same three shapes [TestResponse.AssertSessionHas]
+// takes.
 func (r *TestResponse) AssertSessionHasInput(key any, value ...any) *TestResponse {
 	r.t.Helper()
 
@@ -124,21 +119,16 @@ func (r *TestResponse) AssertSessionHasInput(key any, value ...any) *TestRespons
 	return r
 }
 
-// AssertSessionHasErrors answers to TestResponse::assertSessionHasErrors.
+// AssertSessionHasErrors asserts these fields were rejected, and that the
+// message about each contains what was named.
 //
-// keys stands for the PHP's `$keys = []`: nil or an empty slice asserts only
-// that there are errors at all; a string or []string names the fields that must
-// have one; a map[string]any pairs a field with the message it must carry.
+// format and errorBag are two named parameters rather than one variadic,
+// because they are two different things and a caller passing one string should
+// not have to guess which.
 //
-// format and errorBag stand for `$format = null` and `$errorBag = 'default'`.
-// The empty string means the PHP's default in both: MessageBag's own format, and
-// the default bag. Two named parameters rather than one variadic, because they
-// are two different things and a caller passing one string should not have to
-// guess which.
-//
-// Named bags: the flash this framework writes carries one bag, so any name other
-// than the default finds it empty. session.Flash says why -- what it carries is
-// what one rejected request produced.
+// The flash carries one bag, so any errorBag other than the default finds it
+// empty. session.Flash says why -- what it carries is what one rejected
+// request produced.
 func (r *TestResponse) AssertSessionHasErrors(keys any, format string, errorBag string) *TestResponse {
 	r.t.Helper()
 
@@ -161,14 +151,14 @@ func (r *TestResponse) AssertSessionHasErrors(keys any, format string, errorBag 
 	return r
 }
 
-// AssertSessionHasErrorsIn answers to TestResponse::assertSessionHasErrorsIn:
-// the same assertion with the bag named first.
+// AssertSessionHasErrorsIn is [TestResponse.AssertSessionHasErrors] with the
+// bag named first.
 func (r *TestResponse) AssertSessionHasErrorsIn(errorBag string, keys any, format string) *TestResponse {
 	r.t.Helper()
 	return r.AssertSessionHasErrors(keys, format, errorBag)
 }
 
-// AssertSessionHasNoErrors answers to TestResponse::assertSessionHasNoErrors.
+// AssertSessionHasNoErrors asserts nothing was rejected.
 //
 // The failure prints every bag it found, because "the session has errors" is not
 // an answer anybody can act on and the message that follows it is.
@@ -181,11 +171,11 @@ func (r *TestResponse) AssertSessionHasNoErrors() *TestResponse {
 	return r
 }
 
-// AssertSessionDoesntHaveErrors answers to
-// TestResponse::assertSessionDoesntHaveErrors.
+// AssertSessionDoesntHaveErrors asserts these fields were not rejected.
 //
-// With no keys it is AssertSessionHasNoErrors. With keys it asserts about those
-// fields only, and a response that produced no errors at all passes.
+// With no keys it is [TestResponse.AssertSessionHasNoErrors]. With keys it
+// asserts about those fields only, and a response that produced no errors at
+// all passes.
 func (r *TestResponse) AssertSessionDoesntHaveErrors(keys any, format string, errorBag string) *TestResponse {
 	r.t.Helper()
 
@@ -214,9 +204,8 @@ func (r *TestResponse) AssertSessionDoesntHaveErrors(keys any, format string, er
 	return r
 }
 
-// AssertSessionMissing answers to TestResponse::assertSessionMissing.
-//
-// key stands for the PHP's `string|array`.
+// AssertSessionMissing asserts the session does not hold the key, or any of
+// them when a list is given.
 func (r *TestResponse) AssertSessionMissing(key any) *TestResponse {
 	r.t.Helper()
 
@@ -232,15 +221,11 @@ func (r *TestResponse) AssertSessionMissing(key any) *TestResponse {
 	return r
 }
 
-// AssertValid answers to TestResponse::assertValid.
+// AssertValid asserts these fields were not rejected, and with nil keys that
+// nothing was.
 //
-// A JSON response is handed to AssertJSONMissingValidationErrors, the way the
-// PHP hands it over when the content type says application/json.
-//
-// keys stands for `$keys = null`: nil asserts that there are no errors at all,
-// and a string or []string names the fields that must not have one. errorBag
-// and responseKey stand for `'default'` and `'errors'`; the empty string means
-// the PHP's default in both.
+// A JSON response is handed to [TestResponse.AssertJSONMissingValidationErrors]
+// instead, reading responseKey, which defaults to "errors".
 func (r *TestResponse) AssertValid(keys any, errorBag string, responseKey string) *TestResponse {
 	r.t.Helper()
 
@@ -268,13 +253,11 @@ func (r *TestResponse) AssertValid(keys any, errorBag string, responseKey string
 	return r
 }
 
-// AssertInvalid answers to TestResponse::assertInvalid.
+// AssertInvalid asserts these fields were rejected, and that the message about
+// each contains what was named.
 //
-// A JSON response is handed to AssertJSONValidationErrors.
-//
-// errors stands for the PHP's `$errors = null`: a string or []string names the
-// fields that must have an error, and a map[string]any pairs a field with a
-// message it must carry -- matched by substring, as Str::contains does.
+// A JSON response is handed to [TestResponse.AssertJSONValidationErrors]
+// instead, reading responseKey, which defaults to "errors".
 func (r *TestResponse) AssertInvalid(errors any, errorBag string, responseKey string) *TestResponse {
 	r.t.Helper()
 
@@ -312,11 +295,11 @@ func (r *TestResponse) AssertInvalid(errors any, errorBag string, responseKey st
 	return r
 }
 
-// AssertOnlyInvalid answers to TestResponse::assertOnlyInvalid: these fields
-// have errors and no others do.
+// AssertOnlyInvalid asserts these fields have errors and no others do.
 //
-// It is the half AssertInvalid is not. A rule that rejects one field too many
-// passes AssertInvalid, because the field it was asked about is in the list.
+// It is the half [TestResponse.AssertInvalid] is not. A rule that rejects one
+// field too many passes AssertInvalid, because the field it was asked about is
+// in the list.
 func (r *TestResponse) AssertOnlyInvalid(errors any, errorBag string, responseKey string) *TestResponse {
 	r.t.Helper()
 
@@ -347,8 +330,7 @@ func (r *TestResponse) AssertOnlyInvalid(errors any, errorBag string, responseKe
 	return r
 }
 
-// AssertViewIs answers to TestResponse::assertViewIs: the handler rendered that
-// view and not another.
+// AssertViewIs asserts the handler rendered that view and not another.
 func (r *TestResponse) AssertViewIs(value string) *TestResponse {
 	r.t.Helper()
 
@@ -360,16 +342,12 @@ func (r *TestResponse) AssertViewIs(value string) *TestResponse {
 	return r
 }
 
-// AssertViewHas answers to TestResponse::assertViewHas.
+// AssertViewHas asserts the view was bound this key, and this value when one
+// is given.
 //
-// key stands for the PHP's `string|array`, and takes dot notation the way
-// Arr::get does. value stands for `$value = null`, and a func(any) bool stands
-// for the PHP's Closure.
-//
-// The PHP has two more branches, for an Eloquent model and an Eloquent
-// collection, which compare by key rather than by value. There is no Active
-// Record here -- 00-meta/DOC-architecture.md rejected it -- so a record is compared
-// like any other value.
+// Passing no value asserts only that the key is there. A value of
+// func(any) bool is called with what was bound and must report true. A key
+// that is really a set of bindings is handed to [TestResponse.AssertViewHasAll].
 func (r *TestResponse) AssertViewHas(key any, value ...any) *TestResponse {
 	r.t.Helper()
 
@@ -402,8 +380,8 @@ func (r *TestResponse) AssertViewHas(key any, value ...any) *TestResponse {
 	return r
 }
 
-// AssertViewHasAll answers to TestResponse::assertViewHasAll. A nil value asks
-// only that the key is there, which is what the PHP's integer key does.
+// AssertViewHasAll asserts the view was bound every one of these. A nil value
+// asks only that the key is there.
 func (r *TestResponse) AssertViewHasAll(bindings map[string]any) *TestResponse {
 	r.t.Helper()
 
@@ -417,7 +395,7 @@ func (r *TestResponse) AssertViewHasAll(bindings map[string]any) *TestResponse {
 	return r
 }
 
-// AssertViewMissing answers to TestResponse::assertViewMissing.
+// AssertViewMissing asserts the view was not bound this key.
 func (r *TestResponse) AssertViewMissing(key string) *TestResponse {
 	r.t.Helper()
 
@@ -430,8 +408,8 @@ func (r *TestResponse) AssertViewMissing(key string) *TestResponse {
 	return r
 }
 
-// ViewData answers to TestResponse::viewData: one value the handler passed to
-// the view, for an assertion this class does not have.
+// ViewData returns one value the handler passed to the view, for an assertion
+// this type does not have.
 func (r *TestResponse) ViewData(key string) any {
 	r.t.Helper()
 
@@ -442,12 +420,10 @@ func (r *TestResponse) ViewData(key string) any {
 	return rendered.GatherData()[key]
 }
 
-// AssertStreamed answers to TestResponse::assertStreamed.
+// AssertStreamed asserts the response was streamed.
 //
-// The PHP asks whether the response is a StreamedResponse or a
-// StreamedJsonResponse. Go has one response type, so this reads the two signals
-// that survive: what the handler recorded on TestResponse.Streamed, and the
-// chunked transfer encoding a streamed body arrives under.
+// It reads two signals: what the handler recorded on [TestResponse.Streamed],
+// and the chunked transfer encoding a streamed body arrives under.
 func (r *TestResponse) AssertStreamed() *TestResponse {
 	r.t.Helper()
 
@@ -456,7 +432,7 @@ func (r *TestResponse) AssertStreamed() *TestResponse {
 	return r
 }
 
-// AssertNotStreamed answers to TestResponse::assertNotStreamed.
+// AssertNotStreamed asserts the response was not streamed.
 func (r *TestResponse) AssertNotStreamed() *TestResponse {
 	r.t.Helper()
 
@@ -465,7 +441,7 @@ func (r *TestResponse) AssertNotStreamed() *TestResponse {
 	return r
 }
 
-// AssertStreamedContent answers to TestResponse::assertStreamedContent.
+// AssertStreamedContent asserts the streamed body is exactly this.
 func (r *TestResponse) AssertStreamedContent(value string) *TestResponse {
 	r.t.Helper()
 
@@ -473,27 +449,23 @@ func (r *TestResponse) AssertStreamedContent(value string) *TestResponse {
 	return r
 }
 
-// AssertStreamedJSONContent answers to
-// TestResponse::assertStreamedJsonContent: the streamed body is that value
-// encoded.
+// AssertStreamedJSONContent asserts the streamed body is that value encoded.
 func (r *TestResponse) AssertStreamedJSONContent(value any) *TestResponse {
 	r.t.Helper()
 	return r.AssertStreamedContent(mustEncode(value))
 }
 
-// StreamedContent answers to TestResponse::streamedContent.
+// StreamedContent returns the streamed body.
 //
-// The PHP buffers the output the response writes when it is sent, because a
-// StreamedResponse has no body until then. Here the body was already read off
-// the wire by NewTestResponse, so it is the body.
+// The body was already read off the wire by [NewTestResponse], so it is simply
+// the body.
 func (r *TestResponse) StreamedContent() string { return r.GetContent() }
 
-// OffsetExists answers to TestResponse::offsetExists, the ArrayAccess method
-// `isset($response['name'])` reaches.
+// OffsetExists reports whether the key is in the view's data, or failing that
+// in the decoded JSON body.
 //
-// PHP has no way to write `$response['name']`; Go has no way to overload it. The
-// four Offset methods are the interface written out, which is what a test that
-// reaches for a value by key calls instead.
+// It is one of the four Offset methods, which are how a test reaches for a
+// value by key.
 func (r *TestResponse) OffsetExists(offset string) bool {
 	if rendered := r.responseView(); rendered != nil {
 		_, found := rendered.GatherData()[offset]
@@ -507,8 +479,7 @@ func (r *TestResponse) OffsetExists(offset string) bool {
 	return found
 }
 
-// OffsetGet answers to TestResponse::offsetGet: the view's data by key, or the
-// decoded JSON body's.
+// OffsetGet returns the view's data at the key, or the decoded JSON body's.
 func (r *TestResponse) OffsetGet(offset string) any {
 	r.t.Helper()
 
@@ -522,32 +493,32 @@ func (r *TestResponse) OffsetGet(offset string) any {
 	return decoded[offset]
 }
 
-// OffsetSet answers to TestResponse::offsetSet, which throws: a response is what
-// came back and there is nothing to write to.
+// OffsetSet always fails the test: a response is what came back, and there is
+// nothing to write to.
 //
-// The PHP throws LogicException. This fails the test with the same sentence,
-// because a test that reached here has a bug in it and carrying on would hide
-// where.
+// It fails rather than doing nothing, because a test that reached here has a
+// bug in it and carrying on would hide where.
 func (r *TestResponse) OffsetSet(offset string, value any) {
 	r.t.Helper()
 	fail(r.t, "Response data may not be mutated using array access.")
 }
 
-// OffsetUnset answers to TestResponse::offsetUnset, which throws for the same
-// reason OffsetSet does.
+// OffsetUnset always fails the test, for the same reason
+// [TestResponse.OffsetSet] does.
 func (r *TestResponse) OffsetUnset(offset string) {
 	r.t.Helper()
 	fail(r.t, "Response data may not be mutated using array access.")
 }
 
-// responseView answers to TestResponse::responseHasView, with the view itself
-// rather than a bool: every caller of the PHP's wants it straight after.
+// responseView returns the view the handler rendered, or nil. It hands back
+// the view rather than a bool, because every caller wants it straight after.
 func (r *TestResponse) responseView() *view.View {
 	rendered, _ := r.Original.(*view.View)
 	return rendered
 }
 
-// ensureResponseHasView answers to TestResponse::ensureResponseHasView.
+// ensureResponseHasView returns the rendered view, failing the test when the
+// response is not one. The view assertions open with it.
 func (r *TestResponse) ensureResponseHasView() *view.View {
 	r.t.Helper()
 
@@ -571,8 +542,8 @@ func (r *TestResponse) isStreamed() bool {
 	return slices.Contains(r.BaseResponse.TransferEncoding, "chunked")
 }
 
-// respondsWithJSON answers to the `Content-Type === 'application/json'` check
-// AssertValid, AssertInvalid and AssertOnlyInvalid open with.
+// respondsWithJSON reports whether the response is JSON. AssertValid,
+// AssertInvalid and AssertOnlyInvalid open with it to pick which half to run.
 func (r *TestResponse) respondsWithJSON() bool {
 	if r.BaseResponse == nil {
 		return false
@@ -583,7 +554,8 @@ func (r *TestResponse) respondsWithJSON() bool {
 // requireErrors reads the validation errors off the flash the response wrote.
 //
 // It answers with an empty bag rather than nil for a response that flashed
-// nothing, because AssertSessionHasNoErrors and AssertValid have to pass on one.
+// nothing, because [TestResponse.AssertSessionHasNoErrors] and
+// [TestResponse.AssertValid] have to pass on one.
 func (r *TestResponse) requireErrors() *support.ViewErrorBag {
 	r.t.Helper()
 
@@ -600,7 +572,7 @@ func (r *TestResponse) requireErrors() *support.ViewErrorBag {
 // It goes through session.Flash.Take rather than decoding the cookie here, so
 // there is one verifier and not two: Take is what checks the signature, the
 // purpose and the expiry, and a second decoder would be a second answer to "is
-// this flash trustworthy" (RULE 9).
+// this flash trustworthy".
 //
 // Take spends the flash the way a page read does, which needs a GET asking for
 // HTML and somewhere to write the clearing cookie. Neither leaves this function.
@@ -647,8 +619,9 @@ func (discardWriter) Header() http.Header         { return http.Header{} }
 func (discardWriter) Write(b []byte) (int, error) { return len(b), nil }
 func (discardWriter) WriteHeader(int)             {}
 
-// sessionBindings answers to the `is_array($key)` branch the session and view
-// assertions open with: the key that is really a set of bindings.
+// sessionBindings reads a key that is really a set of bindings, which is the
+// branch the session and view assertions open with. A list of names becomes a
+// map to nil, which reads as "no value given".
 func sessionBindings(key any) (map[string]any, bool) {
 	switch v := key.(type) {
 	case map[string]any:
@@ -670,7 +643,7 @@ func sessionBindings(key any) (map[string]any, bool) {
 	}
 }
 
-// oldInput answers to Store::getOldInput over what the flash carried.
+// oldInput reads one field back out of the old input the flash carried.
 //
 // A field the form sent once reads back as a string, which is what the page that
 // redisplays it puts in the value attribute; a field sent more than once reads
@@ -688,8 +661,8 @@ func oldInput(old url.Values, key string) any {
 	}
 }
 
-// formatOrDefault turns the PHP's `$format = null` into the variadic
-// MessageBag.Get takes.
+// formatOrDefault turns an optional format string into the variadic argument
+// MessageBag.Get takes. An empty format means "use the default".
 func formatOrDefault(format string) []string {
 	if format == "" {
 		return nil
@@ -697,7 +670,7 @@ func formatOrDefault(format string) []string {
 	return []string{format}
 }
 
-// orDefault stands for a PHP parameter default that is not the empty string.
+// orDefault returns value, or fallback when value is empty.
 func orDefault(value, fallback string) string {
 	if value == "" {
 		return fallback
@@ -705,8 +678,8 @@ func orDefault(value, fallback string) string {
 	return value
 }
 
-// bagsForMessage answers to the closure assertSessionHasNoErrors builds its
-// failure message from.
+// bagsForMessage flattens every error bag to its messages, which is what
+// [TestResponse.AssertSessionHasNoErrors] prints on failure.
 func bagsForMessage(errors *support.ViewErrorBag) map[string][]string {
 	out := map[string][]string{}
 	for name, bag := range errors.GetBags() {

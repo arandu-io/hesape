@@ -14,16 +14,15 @@ import (
 
 // TestingT is the part of *testing.T that an assertion uses.
 //
-// PHPUnit's assertions are static calls on PHPUnit\Framework\Assert, which
-// knows the running test through global state. Go has no such thing, so every
-// assertion here takes the test as its first argument. *testing.T, *testing.B
-// and *testing.F all satisfy this interface, and a recorder that captures the
-// message satisfies it too -- which is how this package tests its own failure
-// messages, something testing.TB cannot do because it is sealed.
+// There is no ambient running test to find, so every assertion here takes the
+// test as its first argument. *testing.T, *testing.B and *testing.F all
+// satisfy this interface, and a recorder that captures the message satisfies
+// it too -- which is how this package tests its own failure messages,
+// something testing.TB cannot do because it is sealed.
 //
-// Errorf rather than Fatalf: PHPUnit aborts the test on the first failed
-// assertion, and Go's convention is to report and carry on, so that a test that
-// checks three things reports all three failures in one run.
+// The assertions call Errorf rather than Fatalf, so a test that checks three
+// things reports all three failures in one run instead of stopping at the
+// first.
 type TestingT interface {
 	// Helper marks the caller as a test helper, so a failure points at the
 	// line in the test rather than at the line inside this package.
@@ -32,25 +31,23 @@ type TestingT interface {
 	Errorf(format string, args ...any)
 }
 
-// Fake marks the fakes in this package, and answers the empty
-// Illuminate\Support\Testing\Fakes\Fake interface.
+// Fake marks the fakes in this package.
 //
-// The PHP is an interface with no methods, which Go cannot express as a marker:
-// every type satisfies an empty Go interface. It carries one unexported method
-// instead, so only the fakes in this package are Fake.
+// It carries one unexported method rather than none, because every type
+// satisfies an empty interface and the marker would then mark nothing.
 type Fake interface {
 	isFake()
 }
 
-// The fakes stand in for the contracts they answer, and these lines say so at
+// The fakes stand in for the contracts they satisfy, and these lines say so at
 // compile time: a method that drifts from the contract is a fake that cannot be
 // installed where the real thing was, and the drift is worth finding here
 // rather than at the call site.
 //
 // BusFake is not among them. Its fluent setters -- PipeThrough, Map,
-// SerializeAndRestore -- answer the concrete type so that a chain reads, and
-// PHP's `return $this` covaries where Go's does not. QueueingDispatcher
-// describes what a BusFake forwards to, which is the real dispatcher.
+// SerializeAndRestore -- return the concrete type so that a chain reads, and a
+// return type does not covary in Go. QueueingDispatcher describes what a
+// BusFake forwards to, which is the real dispatcher.
 var (
 	_ Fake             = (*MailFake)(nil)
 	_ Fake             = (*QueueFake)(nil)
@@ -63,12 +60,10 @@ var (
 	_ ExceptionHandler = (*ExceptionHandlerFake)(nil)
 )
 
-// class answers PHP's get_class(): the type a fake files a recorded value
-// under.
+// class returns the type a fake files a recorded value under.
 //
-// A pointer is filed under the type it points at. PHP has no pointers, and
-// get_class(new OrderShipped) is one string however the object was passed
-// around, so &OrderShipped{} and OrderShipped{} are the same class here.
+// A pointer is filed under the type it points at, so &OrderShipped{} and
+// OrderShipped{} are recorded under one class.
 func class(v any) reflect.Type {
 	t := reflect.TypeOf(v)
 	for t != nil && t.Kind() == reflect.Pointer {
@@ -77,7 +72,8 @@ func class(v any) reflect.Type {
 	return t
 }
 
-// className is get_class() as the string an assertion message prints.
+// className returns the class of a value as the string an assertion message
+// prints. A nil value is "<nil>".
 func className(v any) string {
 	t := class(v)
 	if t == nil {
@@ -86,9 +82,9 @@ func className(v any) string {
 	return t.String()
 }
 
-// classToken normalizes what an assertion was handed in place of PHP's
-// SomeJob::class: a reflect.Type (from reflect.TypeFor[SomeJob]()), a value of
-// the type, or a plain string naming an event.
+// classToken normalizes the token an assertion names a type with: a
+// reflect.Type (from reflect.TypeFor[SomeJob]()), a value of the type, or a
+// plain string naming an event.
 //
 // A string token has no reflect.Type -- string events exist only in EventFake --
 // so it returns nil and callers fall back to comparing names.
@@ -123,9 +119,10 @@ func tokenName(token any) string {
 	}
 }
 
-// sameClass answers the array lookup PHP does with get_class($job) as the key:
-// QueueFake, EventFake, BusFake and NotificationFake all file records under the
-// exact class, so a subclass does not answer for its parent there.
+// sameClass reports whether a value was recorded under exactly the token's
+// class. QueueFake, EventFake, BusFake and NotificationFake all file records
+// under the exact class, so an embedding type does not match the type it
+// embeds.
 func sameClass(v any, token any) bool {
 	t := classToken(token)
 	if t == nil {
@@ -137,13 +134,12 @@ func sameClass(v any, token any) bool {
 	return class(v) == t
 }
 
-// instanceOf answers PHP's `$value instanceof $type`, which is what
-// MailFake::mailablesOf filters with -- and the reason a mailable that embeds
-// another one is found by an assertion naming the embedded type.
+// instanceOf reports whether a value satisfies the token, which is the looser
+// test MailFake filters with -- and the reason a mailable that embeds another
+// one is found by an assertion naming the embedded type.
 //
 // An interface token is satisfied by the value's own type or by a pointer to
-// it, because a method set declared on a pointer receiver is the ordinary way
-// to write one in Go and PHP draws no such line.
+// it. Any other token falls through to [sameClass].
 func instanceOf(v any, token any) bool {
 	if tk, ok := token.(reflect.Type); ok && tk.Kind() == reflect.Interface {
 		t := reflect.TypeOf(v)
@@ -158,16 +154,15 @@ func instanceOf(v any, token any) bool {
 	return sameClass(v, token)
 }
 
-// restore answers PHP's unserialize(serialize($value)), which the fakes use to
-// simulate the round trip a job makes through the queue: a payload that only
-// exists in memory does not survive it, and a test that never round-trips finds
-// that out in production.
+// restore simulates the round trip a job makes through the queue: a payload
+// that only exists in memory does not survive it, and a test that never
+// round-trips finds that out in production.
 //
-// Go has no generic serializer, so the round trip is encoding/json, which is
-// what a job payload travels as in this ecosystem anyway. A value that cannot
-// be marshalled -- one holding a channel or a func -- is recorded unchanged
-// rather than dropped, because losing the record would fail the assertion for a
-// reason that has nothing to do with what the test is checking.
+// The round trip is encoding/json, which is what a job payload travels as. A
+// value that cannot be marshalled -- one holding a channel or a func -- is
+// recorded unchanged rather than dropped, because losing the record would fail
+// the assertion for a reason that has nothing to do with what the test is
+// checking.
 func restore(v any) any {
 	if v == nil {
 		return nil
@@ -191,10 +186,10 @@ func restore(v any) any {
 	return out.Elem().Interface()
 }
 
-// plural answers Illuminate\Support\Str::plural for the one word the assertion
-// messages need. The full pluralizer lives in the str package; a fake message
-// that says "1 times" reads as a bug in the test framework, and this is the
-// whole of what it takes to avoid that.
+// plural adds an s to the word unless the count is one. The full pluralizer
+// lives in the string package; a failure message that says "1 times" reads as
+// a bug in the test framework, and this is the whole of what it takes to avoid
+// that.
 func plural(word string, count int) string {
 	if count == 1 {
 		return word
@@ -202,8 +197,7 @@ func plural(word string, count int) string {
 	return word + "s"
 }
 
-// callFn calls a truth test that may be nil, which is how every PHP assertion
-// here spells "no truth test": `$callback = $callback ?: fn () => true`.
+// callFn calls a truth test that may be nil. A nil test accepts everything.
 func callFn[T any](callback func(T) bool, value T) bool {
 	if callback == nil {
 		return true
@@ -250,9 +244,8 @@ func countedAre(count int, noun string) string {
 	return fmt.Sprintf("%d %s are", count, plural(noun, count))
 }
 
-// classNames answers PHP's array_keys() over an array keyed by get_class():
-// the distinct class of each recorded value, in the order each was first
-// recorded.
+// classNames returns the distinct class of each recorded value, in the order
+// each was first recorded.
 //
 // The order is the order of the first record of that class, not alphabetical,
 // because a failure message that lists what happened in the order it happened
@@ -272,7 +265,7 @@ func classNames(values []any) []string {
 }
 
 // classCounts renders one line per distinct class, with how many of it were
-// recorded: PHP's "OrderShipped dispatched 2 times".
+// recorded, as in "OrderShipped dispatched 2 times".
 func classCounts(values []any, verb string) []string {
 	counts := make(map[string]int, len(values))
 	for _, value := range values {
@@ -286,12 +279,12 @@ func classCounts(values []any, verb string) []string {
 	return lines
 }
 
-// uuid answers Illuminate\Support\Str::uuid: a random version 4 UUID.
+// uuid returns a random version 4 UUID.
 //
-// The full one lives in the str package. This is the whole of what the fakes
-// ask of it -- a NotificationFake stamps an id on a notification that arrived
-// without one -- and reaching across packages for sixteen random bytes would
-// be the larger cost.
+// The full generator lives in the string package. This is the whole of what
+// the fakes ask of it -- a NotificationFake stamps an id on a notification
+// that arrived without one -- and reaching across packages for sixteen random
+// bytes would be the larger cost.
 func uuid() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -313,15 +306,14 @@ var orderedClock struct {
 	counter uint16
 }
 
-// orderedUUID answers Illuminate\Support\Str::orderedUuid: a UUID whose bytes
-// sort in the order it was created, which is what a batch id is for.
+// orderedUUID returns a UUID whose bytes sort in the order it was created,
+// which is what a batch id is for. It is a version 7: 48 bits of Unix
+// milliseconds, then a counter, then random.
 //
-// Laravel makes a timestamp-first UUID for the same reason RFC 9562 made
-// version 7, so this is a version 7: 48 bits of Unix milliseconds, then a
-// counter, then random. The counter is the monotonic form RFC 9562 describes,
-// and it is what makes the promise in the name true -- a plain version 7 ties
-// with itself when two ids are made inside one millisecond, which is every
-// batch a test dispatches in a loop.
+// The counter is the monotonic form RFC 9562 describes, and it is what makes
+// the promise in the name true -- a plain version 7 ties with itself when two
+// ids are made inside one millisecond, which is every batch a test dispatches
+// in a loop. It is safe to call from several goroutines.
 func orderedUUID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {

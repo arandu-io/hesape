@@ -10,68 +10,61 @@ import (
 	hesapetesting "github.com/arandu-io/hesape/testing"
 )
 
-// AssertableJSON answers to Illuminate\Testing\Fluent\AssertableJson: a JSON
-// payload asserted about one property at a time, where every property has to be
-// accounted for.
+// AssertableJSON is a JSON payload asserted about one property at a time,
+// where every property has to be accounted for.
 //
-// The accounting is the point. assertJson says "these pairs are in there";
-// this says "these are the properties, and there are no others", which is the
-// assertion that notices the field somebody added without meaning to publish
-// it. Etc is how a scope opts out of it.
+// The accounting is the point. A fragment assertion says "these pairs are in
+// there"; this says "these are the properties, and there are no others", which
+// is the assertion that notices the field somebody added without meaning to
+// publish it. [AssertableJSON.Etc] is how a scope opts out of it, and
+// [AssertableJSON.Interacted] is what enforces it.
 type AssertableJSON struct {
 	t hesapetesting.T
 
-	// props answers to $props: the properties in the current scope.
+	// props are the properties in the current scope.
 	props map[string]any
 
 	// keys is the order props are walked in.
 	//
-	// A PHP array keeps the order its keys were inserted in, and first() and
-	// each() rely on it. A Go map has no order and encoding/json does not keep
-	// the document's, so a list keeps its index order and an object is walked
-	// sorted: not the order the response was written in, but the same order on
-	// every run, which is what a test needs from it.
+	// A Go map has no order and encoding/json does not keep the document's, so a
+	// list keeps its index order and an object is walked sorted: not the order
+	// the response was written in, but the same order on every run, which is what
+	// a test needs from it.
 	keys []string
 
-	// path answers to $path: the dotted path to the current scope. Empty is the
-	// PHP's null, which is the root.
+	// path is the dotted path to the current scope, empty at the root.
 	path string
 
-	// interacted answers to $interacted.
+	// interacted are the properties the test has named in this scope.
 	interacted []string
 }
 
-// FromArray answers to AssertableJson::fromArray.
+// FromArray wraps an already decoded payload.
 func FromArray(t hesapetesting.T, data any) *AssertableJSON {
 	props, keys := toProps(data)
 	return &AssertableJSON{t: t, props: props, keys: keys}
 }
 
-// FromAssertableJSONString answers to
-// AssertableJson::fromAssertableJsonString.
+// FromAssertableJSONString wraps a decoded response payload.
 //
-// It is also the spelling of TestResponse::assertJson's closure form. The PHP
-// overloads assertJson on the type of its argument -- an array is a subset
-// assertion, a closure is this -- and Go has neither the union parameter nor
-// the import cycle that overload would need, because Illuminate\Testing\Fluent
-// uses Illuminate\Testing and assertJson would have to use Fluent back. So the
-// array form stays on TestResponse::AssertJSON and the closure form is written
-// here:
+// It is the entry point to the property-by-property form, where the whole-
+// payload form stays on TestResponse.AssertJSON:
 //
 //	json := fluent.FromAssertableJSONString(t, response.DecodeResponseJSON())
 //	json.Has("data", 3).Where("data.0.name", "Alice")
 //	json.Interacted()
 //
-// Interacted is the call assertJson makes for you at the end of the closure. It
-// is what fails when the response carries a property the test never named.
+// Interacted is the call that must close the sequence. It is what fails when
+// the response carries a property the test never named.
 func FromAssertableJSONString(t hesapetesting.T, json *hesapetesting.AssertableJSONString) *AssertableJSON {
 	return FromArray(t, json.JSON())
 }
 
-// ToArray answers to AssertableJson::toArray.
+// ToArray returns the properties in the current scope.
 func (a *AssertableJSON) ToArray() map[string]any { return a.props }
 
-// dotPath answers to AssertableJson::dotPath.
+// dotPath returns the dotted path to a key in the current scope, for a failure
+// message that names where in the payload it was looking.
 func (a *AssertableJSON) dotPath(key ...string) string {
 	name := ""
 	if len(key) > 0 {
@@ -83,7 +76,8 @@ func (a *AssertableJSON) dotPath(key ...string) string {
 	return strings.TrimRight(a.path+"."+name, ".")
 }
 
-// prop answers to AssertableJson::prop.
+// prop reads a property of the current scope, or the whole scope when no key
+// is given.
 func (a *AssertableJSON) prop(key ...string) any {
 	if len(key) == 0 || key[0] == "" {
 		return a.props
@@ -91,8 +85,8 @@ func (a *AssertableJSON) prop(key ...string) any {
 	return arr.Get(a.props, key[0], nil)
 }
 
-// scope answers to AssertableJson::scope: assert about what is under a key,
-// with the same accounting.
+// scope asserts about what is under a key, with the same accounting. It fails
+// when the property is not something that can be descended into.
 func (a *AssertableJSON) scope(key string, callback func(*AssertableJSON)) *AssertableJSON {
 	a.t.Helper()
 
@@ -109,16 +103,18 @@ func (a *AssertableJSON) scope(key string, callback func(*AssertableJSON)) *Asse
 	return a
 }
 
-// Scope is scope() reachable from a test, which the PHP reaches through has()
-// with a closure. It is the same call, and it is here because a test that only
-// wants to descend should not have to say has() twice.
+// Scope asserts about what is under a key, with the same accounting, and
+// records that the key was named.
+//
+// It exists so a test that only wants to descend does not have to assert the
+// property exists first.
 func (a *AssertableJSON) Scope(key string, callback func(*AssertableJSON)) *AssertableJSON {
 	a.t.Helper()
 	a.interactsWith(key)
 	return a.scope(key, callback)
 }
 
-// First answers to AssertableJson::first: assert about the first child.
+// First asserts about the first child of this scope. An empty scope fails.
 func (a *AssertableJSON) First(callback func(*AssertableJSON)) *AssertableJSON {
 	a.t.Helper()
 
@@ -139,8 +135,8 @@ func (a *AssertableJSON) First(callback func(*AssertableJSON)) *AssertableJSON {
 	return a.scope(key, callback)
 }
 
-// Each answers to AssertableJson::each: assert the same thing about every
-// child.
+// Each asserts the same thing about every child of this scope. An empty scope
+// fails.
 func (a *AssertableJSON) Each(callback func(*AssertableJSON)) *AssertableJSON {
 	a.t.Helper()
 
@@ -159,11 +155,9 @@ func (a *AssertableJSON) Each(callback func(*AssertableJSON)) *AssertableJSON {
 	return a
 }
 
-// toProps reads a decoded value as the array a scope is made of.
-//
-// A PHP array is a list and a map at once, so a list becomes its indices as
-// keys -- which is exactly what json_decode(..., true) hands the PHP for a JSON
-// array, and what makes has('0') and first() work on one.
+// toProps reads a decoded value as the properties a scope is made of, with the
+// order to walk them in. A list is keyed by its indices; anything that is
+// neither map nor list is an empty scope.
 func toProps(v any) (map[string]any, []string) {
 	switch value := v.(type) {
 	case map[string]any:
@@ -189,8 +183,8 @@ func toProps(v any) (map[string]any, []string) {
 	}
 }
 
-// asString reads a PHP `string|int $key` as the key it names. A property is
-// reached by name in both shapes, and a list's names are its indices.
+// asString reads a key that may be a name or an index as the name it uses. A
+// list's names are its indices.
 func asString(key any) string {
 	switch value := key.(type) {
 	case string:
@@ -202,7 +196,7 @@ func asString(key any) string {
 	}
 }
 
-// asInt reads a PHP `string|int` as the size it means.
+// asInt reads a key as the size it means, or -1 when it is not a number.
 func asInt(key any) int {
 	switch value := key.(type) {
 	case int:
@@ -236,5 +230,5 @@ func sortedIntMapKeys(m map[string]int) []string {
 	return keys
 }
 
-// joinComma answers to implode(', ', $keys).
+// joinComma renders a list of names for a failure message.
 func joinComma(values []string) string { return strings.Join(values, ", ") }

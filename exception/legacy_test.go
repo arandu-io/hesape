@@ -44,7 +44,8 @@ func TestAHandlerThatAnswersStopsTheOnesBehindIt(t *testing.T) {
 }
 
 // A handler that fails while handling a failure must not take the process with
-// it: the PHP wraps each one to avoid a white screen of death.
+// it: each one is wrapped so that a failure inside a handler is not a blank
+// page.
 func TestAHandlerThatPanicsDoesNotTakeTheProcessWithIt(t *testing.T) {
 	h := exception.NewHandler(exception.Config{})
 	h.PushError(func(error, int, bool) any { panic("the handler itself failed") })
@@ -209,7 +210,7 @@ func TestRegisterOutsideTestingDrawsThePage(t *testing.T) {
 	}
 }
 
-// TestPlainDisplayerCarriesTheErrorsHeaders: the PHP's PlainDisplayer copies
+// TestPlainDisplayerCarriesTheErrorsHeaders pins that the plain displayer copies
 // $exception->getHeaders() onto the response, and this dropped them -- which
 // turns a 429 into a 429 nobody can retry correctly and a 401 into one no client
 // knows how to answer.
@@ -231,7 +232,7 @@ func TestPlainDisplayerCarriesTheErrorsHeaders(t *testing.T) {
 	}
 }
 
-// TestDebugDisplayerAnswersTheStatusTheErrorAskedFor: both PHP displayers
+// TestDebugDisplayerAnswersTheStatusTheErrorAskedFor pins that the displayers
 // answer $exception->getStatusCode(), and this one always answered 500 -- so a
 // 404 in development was a 500 to every client, and a test written against the
 // status could not tell the two apart.

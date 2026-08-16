@@ -12,7 +12,7 @@ import (
 	"github.com/arandu-io/hesape/encryption"
 )
 
-// inProject writes a .env in a temporary working directory, the way a generated
+// inProject writes a.env in a temporary working directory, the way a generated
 // project has one, and undoes what Load put in the process environment.
 //
 // The cleanup is not optional. Load fills the environment of the running
@@ -42,7 +42,7 @@ func inProject(t *testing.T, content string) {
 	}
 }
 
-// emptyProject makes an empty directory the working directory: no .env at all,
+// emptyProject makes an empty directory the working directory: no.env at all,
 // which is what a container looks like.
 func emptyProject(t *testing.T) {
 	t.Helper()
@@ -90,7 +90,7 @@ export HTTP_ADDR=:9000
 	}
 }
 
-// TestQuotesAreOptionalAndStripped: both forms appear in every .env anyone has
+// TestQuotesAreOptionalAndStripped: both forms appear in every.env anyone has
 // ever written, and a value that keeps its quotes fails much later -- as a
 // token that does not verify or a path that does not exist.
 func TestQuotesAreOptionalAndStripped(t *testing.T) {
@@ -137,9 +137,9 @@ DATABASE_URL=`+dsn+`
 
 // TestTheEnvironmentWinsOverTheFile is the rule that keeps production intact.
 //
-// The orchestrator sets the real values. A .env that got copied into an image by
-// accident must not be able to overrule them -- otherwise a stale file decides
-// which database a deployment talks to.
+// The orchestrator sets the real values. A.env that got copied into an image
+// by accident must not be able to overrule them -- otherwise a stale file
+// decides which database a deployment talks to.
 func TestTheEnvironmentWinsOverTheFile(t *testing.T) {
 	inProject(t, `APP_KEY=`+strings.Repeat("f", encryption.KeySize)+`
 APP_NAME=from-the-file
@@ -218,9 +218,9 @@ func TestAMalformedLineNamesTheFileAndTheLine(t *testing.T) {
 	}
 }
 
-// TestThereIsNoInterpolation: ${OTHER} is where a .env format stops being a
+// TestThereIsNoInterpolation: ${OTHER} is where a.env format stops being a
 // format and starts being a language, and a language has to be maintained
-// forever (RULE 15). The value is what the file says it is.
+// forever. The value is what the file says it is.
 func TestThereIsNoInterpolation(t *testing.T) {
 	inProject(t, `APP_KEY=`+strings.Repeat("k", encryption.KeySize)+`
 APP_NAME=${OTHER}-suffix
@@ -252,11 +252,11 @@ func TestLoadDotenvStandsAlone(t *testing.T) {
 
 // TestANewProjectCanRunMigrate is the defect, reproduced.
 //
-// `aru new crm` writes this file -- the skeleton's .env.example with a fresh
+// `aru new crm` writes this file -- the skeleton's.env.example with a fresh
 // base64 APP_KEY substituted in -- and prints "cd crm && aru migrate". Before
 // the loader existed, nothing read it: migrate called config.Load, found an
-// empty APP_KEY and died with "run `aru key:generate`", naming the command that
-// had already been run.
+// empty APP_KEY and died with "run `aru key:generate`", naming the command
+// that had already been run.
 //
 // The last mile -- `aru new` cloning the skeleton and the binary dispatching
 // "migrate" -- lives in the aru and arandu repositories. What migrate needs from

@@ -2,39 +2,33 @@ package testing
 
 import "net/http"
 
-// This file answers to Illuminate\Testing\Concerns\AssertsStatusCodes.
+// The status assertions on [TestResponse].
 //
-// The PHP is a trait mixed into TestResponse. Go has no traits, and a trait
-// method returns $this -- which an embedded Go struct cannot do -- so the
-// methods are on TestResponse itself and the file keeps the trait's name.
-//
-// Every one of them is one call to AssertStatus. They exist because
-// AssertStatus(403) says a number and AssertForbidden says what the number
-// means, and the failure a test reads at three in the morning is the second
-// one.
+// Every one of them is one call to [TestResponse.AssertStatus]. They exist
+// because AssertStatus(403) says a number and AssertForbidden says what the
+// number means, and the failure a test reads at three in the morning is the
+// second one.
 
-// AssertOK answers to AssertsStatusCodes::assertOk: 200.
+// AssertOK asserts a 200 status.
 func (r *TestResponse) AssertOK() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusOK)
 }
 
-// AssertCreated answers to AssertsStatusCodes::assertCreated: 201.
+// AssertCreated asserts a 201 status.
 func (r *TestResponse) AssertCreated() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusCreated)
 }
 
-// AssertAccepted answers to AssertsStatusCodes::assertAccepted: 202.
+// AssertAccepted asserts a 202 status.
 func (r *TestResponse) AssertAccepted() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusAccepted)
 }
 
-// AssertNoContent answers to AssertsStatusCodes::assertNoContent: the status,
-// 204 unless another is given, and an empty body.
-//
-// The variadic status stands for the PHP's `$status = 204`.
+// AssertNoContent asserts the status -- 204 unless another is given -- and an
+// empty body.
 func (r *TestResponse) AssertNoContent(status ...int) *TestResponse {
 	r.t.Helper()
 
@@ -48,130 +42,121 @@ func (r *TestResponse) AssertNoContent(status ...int) *TestResponse {
 	return r
 }
 
-// AssertMovedPermanently answers to
-// AssertsStatusCodes::assertMovedPermanently: 301.
+// AssertMovedPermanently asserts a 301 status.
 func (r *TestResponse) AssertMovedPermanently() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusMovedPermanently)
 }
 
-// AssertFound answers to AssertsStatusCodes::assertFound: 302.
+// AssertFound asserts a 302 status.
 func (r *TestResponse) AssertFound() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusFound)
 }
 
-// AssertNotModified answers to AssertsStatusCodes::assertNotModified: 304.
+// AssertNotModified asserts a 304 status.
 func (r *TestResponse) AssertNotModified() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusNotModified)
 }
 
-// AssertTemporaryRedirect answers to
-// AssertsStatusCodes::assertTemporaryRedirect: 307.
+// AssertTemporaryRedirect asserts a 307 status.
 func (r *TestResponse) AssertTemporaryRedirect() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusTemporaryRedirect)
 }
 
-// AssertPermanentRedirect answers to
-// AssertsStatusCodes::assertPermanentRedirect: 308.
+// AssertPermanentRedirect asserts a 308 status.
 func (r *TestResponse) AssertPermanentRedirect() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusPermanentRedirect)
 }
 
-// AssertBadRequest answers to AssertsStatusCodes::assertBadRequest: 400.
+// AssertBadRequest asserts a 400 status.
 func (r *TestResponse) AssertBadRequest() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusBadRequest)
 }
 
-// AssertUnauthorized answers to AssertsStatusCodes::assertUnauthorized: 401.
+// AssertUnauthorized asserts a 401 status.
 func (r *TestResponse) AssertUnauthorized() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusUnauthorized)
 }
 
-// AssertPaymentRequired answers to
-// AssertsStatusCodes::assertPaymentRequired: 402.
+// AssertPaymentRequired asserts a 402 status.
 func (r *TestResponse) AssertPaymentRequired() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusPaymentRequired)
 }
 
-// AssertForbidden answers to AssertsStatusCodes::assertForbidden: 403.
+// AssertForbidden asserts a 403 status.
 func (r *TestResponse) AssertForbidden() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusForbidden)
 }
 
-// AssertNotFound answers to AssertsStatusCodes::assertNotFound: 404.
+// AssertNotFound asserts a 404 status.
 func (r *TestResponse) AssertNotFound() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusNotFound)
 }
 
-// AssertMethodNotAllowed answers to
-// AssertsStatusCodes::assertMethodNotAllowed: 405.
+// AssertMethodNotAllowed asserts a 405 status.
 func (r *TestResponse) AssertMethodNotAllowed() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusMethodNotAllowed)
 }
 
-// AssertNotAcceptable answers to AssertsStatusCodes::assertNotAcceptable: 406.
+// AssertNotAcceptable asserts a 406 status.
 func (r *TestResponse) AssertNotAcceptable() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusNotAcceptable)
 }
 
-// AssertRequestTimeout answers to AssertsStatusCodes::assertRequestTimeout: 408.
+// AssertRequestTimeout asserts a 408 status.
 func (r *TestResponse) AssertRequestTimeout() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusRequestTimeout)
 }
 
-// AssertConflict answers to AssertsStatusCodes::assertConflict: 409.
+// AssertConflict asserts a 409 status.
 func (r *TestResponse) AssertConflict() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusConflict)
 }
 
-// AssertGone answers to AssertsStatusCodes::assertGone: 410.
+// AssertGone asserts a 410 status.
 func (r *TestResponse) AssertGone() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusGone)
 }
 
-// AssertUnsupportedMediaType answers to
-// AssertsStatusCodes::assertUnsupportedMediaType: 415.
+// AssertUnsupportedMediaType asserts a 415 status.
 func (r *TestResponse) AssertUnsupportedMediaType() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusUnsupportedMediaType)
 }
 
-// AssertUnprocessable answers to AssertsStatusCodes::assertUnprocessable: 422.
+// AssertUnprocessable asserts a 422 status.
 func (r *TestResponse) AssertUnprocessable() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusUnprocessableEntity)
 }
 
-// AssertTooManyRequests answers to
-// AssertsStatusCodes::assertTooManyRequests: 429.
+// AssertTooManyRequests asserts a 429 status.
 func (r *TestResponse) AssertTooManyRequests() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusTooManyRequests)
 }
 
-// AssertInternalServerError answers to
-// AssertsStatusCodes::assertInternalServerError: 500.
+// AssertInternalServerError asserts a 500 status.
 func (r *TestResponse) AssertInternalServerError() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusInternalServerError)
 }
 
-// AssertServiceUnavailable answers to
-// AssertsStatusCodes::assertServiceUnavailable: 503.
+// AssertServiceUnavailable asserts a 503 status.
 func (r *TestResponse) AssertServiceUnavailable() *TestResponse {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusServiceUnavailable)

@@ -73,8 +73,8 @@ func TestGetMissingKey(t *testing.T) {
 }
 
 func TestGetPrefersTheExactKeyOverThePath(t *testing.T) {
-	// PHP checks static::exists($array, $key) before it splits, so a key that
-	// itself holds a dot is found rather than walked.
+	// Get tries the whole key before it splits, so a key that itself holds a
+	// dot is found rather than walked.
 	data := map[string]any{
 		"user.name": "flat",
 		"user":      map[string]any{"name": "nested"},
@@ -191,7 +191,7 @@ func TestSetWritesThroughAList(t *testing.T) {
 		t.Fatalf("Set through a list position: %v", data)
 	}
 	// Past the end there is no position to write into, and a Go slice cannot
-	// grow a key the way a PHP array does.
+	// grow a key.
 	arr.Set(data, "users.5.name", "Cida")
 	if _, ok := arr.Get(data, "users.5.name"); ok {
 		t.Error("Set past the end of a list must not invent a position")
@@ -415,8 +415,8 @@ func TestTypedReaders(t *testing.T) {
 		t.Errorf("Array = (%v, %v)", got, err)
 	}
 
-	// The PHP asks is_float, which an integer fails, and is_int, which a float
-	// fails.
+	// The two number readers do not cross: an int is not a float, and a float
+	// is not an integer.
 	if _, err := arr.Float(data, "i"); !errors.Is(err, arr.ErrInvalidArgument) {
 		t.Error("Float over an int must report the type error")
 	}
@@ -583,7 +583,7 @@ func TestMapFamily(t *testing.T) {
 	}); !reflect.DeepEqual(got, map[string]int{"a": 1, "b": 2}) {
 		t.Errorf("MapWithKeys = %v", got)
 	}
-	// The PHP appends the key to the chunk before spreading it.
+	// The position is appended to the chunk before it is spread.
 	got := arr.MapSpread([][]any{{"a", "b"}, {"c", "d"}}, func(values ...any) []any { return values })
 	want := [][]any{{"a", "b", 0}, {"c", "d", 1}}
 	if !reflect.DeepEqual(got, want) {

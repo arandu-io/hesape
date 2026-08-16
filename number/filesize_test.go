@@ -28,9 +28,9 @@ func TestFileSize(t *testing.T) {
 	}
 }
 
-// TestFileSizeStepsUpAtNineTenthsOfTheBase pins Illuminate's own bound: the
-// unit changes when the count is more than nine tenths of the base, not when it
-// reaches the base, so 999 bytes read as a kilobyte.
+// TestFileSizeStepsUpAtNineTenthsOfTheBase pins the bound: the unit changes
+// when the count is more than nine tenths of the base, not when it reaches the
+// base, so 999 bytes read as a kilobyte.
 func TestFileSizeStepsUpAtNineTenthsOfTheBase(t *testing.T) {
 	if got := FileSize(999, 0, -1, false); got != "1 KB" {
 		t.Errorf("FileSize(999, 0, -1, false) = %q, want %q", got, "1 KB")
@@ -61,9 +61,9 @@ func TestFileSizeBinaryPrefix(t *testing.T) {
 	}
 }
 
-// TestFileSizeLeavesANegativeCountAlone records the shape Illuminate has: the
-// loop bound is a plain greater-than, which no negative count passes, so the
-// value keeps the byte unit instead of being scaled.
+// TestFileSizeLeavesANegativeCountAlone records the shape of the loop: its
+// bound is a plain greater-than, which no negative count passes, so the value
+// keeps the byte unit instead of being scaled.
 func TestFileSizeLeavesANegativeCountAlone(t *testing.T) {
 	if got := FileSize(-1000, 0, -1, false); got != "-1,000 B" {
 		t.Errorf("FileSize(-1000, 0, -1, false) = %q, want %q", got, "-1,000 B")

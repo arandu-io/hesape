@@ -14,32 +14,24 @@ import (
 // T is what an assertion in this package needs from the test it runs inside.
 // The standard library's *testing.T satisfies it.
 //
-// It answers to PHPUnit's Assert class, which Illuminate\Testing calls into
-// statically. PHP has one ambient test context; Go passes it, so every
-// constructor here takes a T where the PHP constructor takes none. That is the
-// only structural difference between this package and Illuminate\Testing.
-//
-// Fatalf rather than Errorf: a PHPUnit assertion throws
-// ExpectationFailedException, which stops the test method. Continuing after a
-// failed assertion would let the assertions that follow read a response the
-// first one already proved wrong.
-// Logf is here for the dump methods rather than for the assertions: dump() and
-// dumpHeaders() have to write somewhere, and a test's own log is where output
-// belongs -- go test shows it beside the test that produced it and hides it
-// when the test passes, which is what dump() gets from PHPUnit's printer.
+// Continuing after a failed assertion would let the assertions that follow
+// read a response the first one already proved wrong. Logf is here for the
+// dump methods rather than for the assertions: dump() and dumpHeaders() have
+// to write somewhere, and a test's own log is where output belongs -- go test
+// shows it beside the test that produced it and hides it when the test passes.
 type T interface {
 	Helper()
 	Fatalf(format string, args ...any)
 	Logf(format string, args ...any)
 }
 
-// fail answers to PHPUnit::fail.
+// fail reports a failure and stops the test.
 func fail(t T, format string, args ...any) {
 	t.Helper()
 	t.Fatalf(format, args...)
 }
 
-// assertTrue answers to PHPUnit::assertTrue.
+// assertTrue fails unless the condition is true.
 func assertTrue(t T, condition bool, message string) {
 	t.Helper()
 	if !condition {
@@ -47,7 +39,7 @@ func assertTrue(t T, condition bool, message string) {
 	}
 }
 
-// assertFalse answers to PHPUnit::assertFalse.
+// assertFalse fails unless the condition is false.
 func assertFalse(t T, condition bool, message string) {
 	t.Helper()
 	if condition {
@@ -55,9 +47,7 @@ func assertFalse(t T, condition bool, message string) {
 	}
 }
 
-// assertNotTrue answers to PHPUnit::assertNotTrue: the value is anything other
-// than true. Fluent\Concerns\Has::missing is written with it rather than with
-// assertFalse, because Arr::has may answer with something that is neither.
+// assertNotTrue fails unless the value is anything other than true.
 func assertNotTrue(t T, condition bool, message string) {
 	t.Helper()
 	if condition {
@@ -65,7 +55,8 @@ func assertNotTrue(t T, condition bool, message string) {
 	}
 }
 
-// assertSame answers to PHPUnit::assertSame: identity, not equality.
+// assertSame fails unless the two values are identical. It is identity, not
+// equality.
 func assertSame(t T, expected, actual any, message string) {
 	t.Helper()
 	if !identical(expected, actual) {
@@ -74,7 +65,7 @@ func assertSame(t T, expected, actual any, message string) {
 	}
 }
 
-// assertNotSame answers to PHPUnit::assertNotSame.
+// assertNotSame fails when the two values are identical.
 func assertNotSame(t T, expected, actual any, message string) {
 	t.Helper()
 	if identical(expected, actual) {
@@ -83,8 +74,8 @@ func assertNotSame(t T, expected, actual any, message string) {
 	}
 }
 
-// assertEquals answers to PHPUnit::assertEquals: PHP's loose comparison, which
-// holds a string and the number it spells to be equal.
+// assertEquals fails unless the two values compare loosely equal, which holds
+// a string and the number it spells to be equal.
 func assertEquals(t T, expected, actual any, message string) {
 	t.Helper()
 	if !loosely(expected, actual) {
@@ -93,7 +84,7 @@ func assertEquals(t T, expected, actual any, message string) {
 	}
 }
 
-// assertNotEquals answers to PHPUnit::assertNotEquals.
+// assertNotEquals fails when the two values compare loosely equal.
 func assertNotEquals(t T, expected, actual any, message string) {
 	t.Helper()
 	if loosely(expected, actual) {
@@ -102,7 +93,7 @@ func assertNotEquals(t T, expected, actual any, message string) {
 	}
 }
 
-// assertNull answers to PHPUnit::assertNull.
+// assertNull fails unless the value is nil.
 func assertNull(t T, actual any, message string) {
 	t.Helper()
 	if !isNil(actual) {
@@ -110,7 +101,7 @@ func assertNull(t T, actual any, message string) {
 	}
 }
 
-// assertNotNull answers to PHPUnit::assertNotNull.
+// assertNotNull fails when the value is nil.
 func assertNotNull(t T, actual any, message string) {
 	t.Helper()
 	if isNil(actual) {
@@ -118,8 +109,8 @@ func assertNotNull(t T, actual any, message string) {
 	}
 }
 
-// assertEmpty answers to PHPUnit::assertEmpty, with PHP's notion of empty:
-// null, false, zero, the empty string and the empty array.
+// assertEmpty fails unless the value is empty: nil, false, zero, the empty
+// string, "0", and the empty list or map.
 func assertEmpty(t T, actual any, message string) {
 	t.Helper()
 	if !empty(actual) {
@@ -127,7 +118,7 @@ func assertEmpty(t T, actual any, message string) {
 	}
 }
 
-// assertNotEmpty answers to PHPUnit::assertNotEmpty.
+// assertNotEmpty fails when the value is empty.
 func assertNotEmpty(t T, actual any, message string) {
 	t.Helper()
 	if empty(actual) {
@@ -135,7 +126,8 @@ func assertNotEmpty(t T, actual any, message string) {
 	}
 }
 
-// assertCount answers to PHPUnit::assertCount.
+// assertCount fails unless the value is countable and its length is the one
+// expected.
 func assertCount(t T, expected int, actual any, message string) {
 	t.Helper()
 	n, ok := count(actual)
@@ -149,7 +141,7 @@ func assertCount(t T, expected int, actual any, message string) {
 	}
 }
 
-// assertStringContainsString answers to PHPUnit::assertStringContainsString.
+// assertStringContainsString fails unless the haystack contains the needle.
 func assertStringContainsString(t T, needle, haystack, message string) {
 	t.Helper()
 	if !strings.Contains(haystack, needle) {
@@ -158,8 +150,7 @@ func assertStringContainsString(t T, needle, haystack, message string) {
 	}
 }
 
-// assertStringNotContainsString answers to
-// PHPUnit::assertStringNotContainsString.
+// assertStringNotContainsString fails when the haystack contains the needle.
 func assertStringNotContainsString(t T, needle, haystack, message string) {
 	t.Helper()
 	if strings.Contains(haystack, needle) {
@@ -168,8 +159,8 @@ func assertStringNotContainsString(t T, needle, haystack, message string) {
 	}
 }
 
-// assertArrayHasKey answers to PHPUnit::assertArrayHasKey. It looks at one
-// level, not at a dot path -- Arr::has is the one that walks.
+// assertArrayHasKey fails unless the map has the key. It looks at one level,
+// not at a dot path.
 func assertArrayHasKey(t T, key string, array any, message string) {
 	t.Helper()
 	m, ok := array.(map[string]any)
@@ -179,7 +170,8 @@ func assertArrayHasKey(t T, key string, array any, message string) {
 	}
 }
 
-// assertContains answers to PHPUnit::assertContains.
+// assertContains fails unless one element of the haystack compares loosely
+// equal to the needle.
 func assertContains(t T, needle any, haystack []string, message string) {
 	t.Helper()
 	for _, item := range haystack {
@@ -191,7 +183,8 @@ func assertContains(t T, needle any, haystack []string, message string) {
 		"Failed asserting that %s contains %s.", export(haystack), export(needle))))
 }
 
-// assertNotContains answers to PHPUnit::assertNotContains.
+// assertNotContains fails when an element of the haystack compares loosely
+// equal to the needle.
 func assertNotContains(t T, needle any, haystack []string, message string) {
 	t.Helper()
 	for _, item := range haystack {
@@ -203,8 +196,8 @@ func assertNotContains(t T, needle any, haystack []string, message string) {
 	}
 }
 
-// assertEqualsCanonicalizing answers to
-// PHPUnit::assertEqualsCanonicalizing: equal once both sides are sorted.
+// assertEqualsCanonicalizing fails unless the two values are equal once both
+// sides are sorted, so the order of a list does not count.
 func assertEqualsCanonicalizing(t T, expected, actual any, message string) {
 	t.Helper()
 	if !loosely(sortRecursive(expected), sortRecursive(actual)) {
@@ -214,8 +207,7 @@ func assertEqualsCanonicalizing(t T, expected, actual any, message string) {
 	}
 }
 
-// assertIsArray answers to PHPUnit::assertIsArray. A PHP array is either a
-// list or a string-keyed map, so both Go shapes pass.
+// assertIsArray fails unless the value is a list, an array or a map.
 func assertIsArray(t T, actual any, message string) {
 	t.Helper()
 	switch actual.(type) {
@@ -231,7 +223,7 @@ func assertIsArray(t T, actual any, message string) {
 	fail(t, "%s", or(message, fmt.Sprintf("Failed asserting that %s is of type array.", export(actual))))
 }
 
-// assertGreaterThanOrEqual answers to PHPUnit::assertGreaterThanOrEqual.
+// assertGreaterThanOrEqual fails unless actual is at least expected.
 func assertGreaterThanOrEqual(t T, expected, actual int, message string) {
 	t.Helper()
 	if actual < expected {
@@ -240,7 +232,7 @@ func assertGreaterThanOrEqual(t T, expected, actual int, message string) {
 	}
 }
 
-// assertLessThanOrEqual answers to PHPUnit::assertLessThanOrEqual.
+// assertLessThanOrEqual fails unless actual is at most expected.
 func assertLessThanOrEqual(t T, expected, actual int, message string) {
 	t.Helper()
 	if actual > expected {
@@ -249,8 +241,8 @@ func assertLessThanOrEqual(t T, expected, actual int, message string) {
 	}
 }
 
-// assertThat answers to PHPUnit::assertThat: evaluate a constraint and report
-// what it says when it does not hold.
+// assertThat evaluates a constraint and reports what it says when it does not
+// hold.
 func assertThat(t T, value any, c constraints.Constraint, message string) {
 	t.Helper()
 	if !c.Matches(value) {
@@ -265,7 +257,8 @@ func or(message, fallback string) string {
 	return message
 }
 
-// identical answers to PHP's === for the values json.Unmarshal produces.
+// identical reports whether two values are the same value, over the shapes
+// json.Unmarshal produces.
 //
 // Numbers are the one place where a literal DeepEqual would be wrong rather
 // than strict: json.Unmarshal gives every number as a float64, so an expected
@@ -274,8 +267,9 @@ func identical(a, b any) bool {
 	return reflect.DeepEqual(canonical(a), canonical(b))
 }
 
-// loosely answers to PHP's ==: identical, or the same number written as a
-// string on one side and a number on the other.
+// loosely reports whether two values are equal under a relaxed comparison:
+// identical, or the same number written as a string on one side and a number
+// on the other.
 func loosely(a, b any) bool {
 	if identical(a, b) {
 		return true
@@ -408,7 +402,8 @@ func isNil(v any) bool {
 	}
 }
 
-// empty answers to PHP's empty(): null, false, 0, "", "0" and the empty array.
+// empty reports whether a value counts as empty: nil, false, 0, "", "0" and
+// the empty list or map.
 func empty(v any) bool {
 	if isNil(v) {
 		return true
@@ -454,8 +449,8 @@ func mapHas(m map[string]any, key string) bool {
 	return ok
 }
 
-// export answers to PHPUnit's exporter: the value as a test reader can read
-// it in a failure message.
+// export renders a value the way a test reader can read it in a failure
+// message.
 func export(v any) string {
 	if v == nil {
 		return "null"
@@ -470,8 +465,8 @@ func export(v any) string {
 	return encoded
 }
 
-// encode answers to json_encode with JSON_UNESCAPED_SLASHES and
-// JSON_UNESCAPED_UNICODE, optionally JSON_PRETTY_PRINT.
+// encode renders a value as JSON, leaving slashes and non-ASCII unescaped,
+// optionally indented.
 func encode(v any, pretty bool) (string, error) {
 	var b strings.Builder
 	enc := json.NewEncoder(&b)
@@ -501,9 +496,8 @@ func mustEncodePretty(v any) string {
 	return encoded
 }
 
-// sortRecursive answers to Arr::sortRecursive: sort every list by its encoded
-// form, all the way down, so that two payloads that differ only in order come
-// out the same. Object keys need no sorting -- encoding/json already writes
+// sortRecursive sorts every list by its encoded form, all the way down, so
+// that two payloads that differ only in order come out the same. Object keys need no sorting -- encoding/json already writes
 // them in order.
 func sortRecursive(v any) any {
 	switch value := canonical(v).(type) {

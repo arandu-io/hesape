@@ -7,11 +7,11 @@ import (
 	"github.com/arandu-io/hesape/collections"
 )
 
-// This file is the JSON half of Illuminate\Testing\TestResponse. Every
-// assertion here is one call into AssertableJSONString, which is where the
-// work is.
+// The JSON assertions on [TestResponse]. Every one of them is a single call
+// into [AssertableJSONString], which is where the work is.
 
-// DecodeResponseJSON answers to TestResponse::decodeResponseJson.
+// DecodeResponseJSON decodes the body and returns it as an
+// [AssertableJSONString].
 //
 // A body that is not JSON is a failure here rather than three assertions later,
 // and when the request logged an exception that exception is what the failure
@@ -34,36 +34,27 @@ func (r *TestResponse) DecodeResponseJSON() *AssertableJSONString {
 	return testJSON
 }
 
-// JSON answers to TestResponse::json.
+// JSON returns the decoded payload, or the part of it at the given dot path.
+// At most one path may be given.
 func (r *TestResponse) JSON(key ...string) any {
 	r.t.Helper()
 	return r.DecodeResponseJSON().JSON(key...)
 }
 
-// Collect answers to TestResponse::collect.
+// Collect returns what is at the given dot path as a collection.
 //
-// The PHP wraps the decoded value in a Collection, which keeps string keys.
-// collections.Collection is a slice, so an object at the path comes back as its
-// values in key order and a list comes back as itself -- which is what the
+// collections.Collection is a slice, so an object at the path comes back as
+// its values in key order and a list comes back as itself -- which is what the
 // assertion this feeds is about either way.
 func (r *TestResponse) Collect(key ...string) collections.Collection[any] {
 	r.t.Helper()
 	return collections.Collection[any](elements(r.JSON(key...)))
 }
 
-// AssertJSON answers to TestResponse::assertJson: the response carries at
-// least this.
+// AssertJSON asserts the response carries at least this. Passing strict as
+// true asks for an exact match instead.
 //
-// The variadic strict stands for the PHP's `$strict = false`: === instead of
-// ==, which is the difference between a payload carrying the number 1 and one
-// carrying the string "1".
-//
-// The PHP's other form -- assertJson(fn (AssertableJson $json) => ...) -- is
-// spelled fluent.FromAssertableJSONString(t, response.DecodeResponseJSON()).
-// PHP overloads on the argument's type and Go has no union parameter; more to
-// the point, Illuminate\Testing\Fluent uses Illuminate\Testing, so the closure
-// form here would be an import cycle, which PHP allows and Go does not. See the
-// doc comment on fluent.FromAssertableJSONString.
+// See the doc comment on fluent.FromAssertableJSONString.
 func (r *TestResponse) AssertJSON(value any, strict ...bool) *TestResponse {
 	r.t.Helper()
 
@@ -72,7 +63,7 @@ func (r *TestResponse) AssertJSON(value any, strict ...bool) *TestResponse {
 	return r
 }
 
-// AssertJSONPath answers to TestResponse::assertJsonPath.
+// AssertJSONPath asserts the value at the dot path is the one expected.
 func (r *TestResponse) AssertJSONPath(path string, expect any) *TestResponse {
 	r.t.Helper()
 
@@ -80,8 +71,8 @@ func (r *TestResponse) AssertJSONPath(path string, expect any) *TestResponse {
 	return r
 }
 
-// AssertJSONPathCanonicalizing answers to
-// TestResponse::assertJsonPathCanonicalizing.
+// AssertJSONPathCanonicalizing asserts the value at the dot path is the one
+// expected once both sides are sorted, so order does not count.
 func (r *TestResponse) AssertJSONPathCanonicalizing(path string, expect any) *TestResponse {
 	r.t.Helper()
 
@@ -89,7 +80,7 @@ func (r *TestResponse) AssertJSONPathCanonicalizing(path string, expect any) *Te
 	return r
 }
 
-// AssertExactJSON answers to TestResponse::assertExactJson.
+// AssertExactJSON asserts the payload is exactly this, key for key.
 func (r *TestResponse) AssertExactJSON(data any) *TestResponse {
 	r.t.Helper()
 
@@ -97,7 +88,8 @@ func (r *TestResponse) AssertExactJSON(data any) *TestResponse {
 	return r
 }
 
-// AssertSimilarJSON answers to TestResponse::assertSimilarJson.
+// AssertSimilarJSON asserts the payload is this once both sides are sorted, so
+// the order of a list does not count.
 func (r *TestResponse) AssertSimilarJSON(data any) *TestResponse {
 	r.t.Helper()
 
@@ -105,7 +97,8 @@ func (r *TestResponse) AssertSimilarJSON(data any) *TestResponse {
 	return r
 }
 
-// AssertJSONFragment answers to TestResponse::assertJsonFragment.
+// AssertJSONFragment asserts the given key/value pairs appear somewhere in the
+// payload.
 func (r *TestResponse) AssertJSONFragment(data any) *TestResponse {
 	r.t.Helper()
 
@@ -113,7 +106,7 @@ func (r *TestResponse) AssertJSONFragment(data any) *TestResponse {
 	return r
 }
 
-// AssertJSONFragments answers to TestResponse::assertJsonFragments.
+// AssertJSONFragments asserts each fragment appears somewhere in the payload.
 func (r *TestResponse) AssertJSONFragments(data []any) *TestResponse {
 	r.t.Helper()
 
@@ -123,9 +116,8 @@ func (r *TestResponse) AssertJSONFragments(data []any) *TestResponse {
 	return r
 }
 
-// AssertJSONMissing answers to TestResponse::assertJsonMissing.
-//
-// The variadic exact stands for the PHP's `$exact = false`.
+// AssertJSONMissing asserts the payload does not carry this. Passing exact as
+// true compares the fragment whole rather than pair by pair.
 func (r *TestResponse) AssertJSONMissing(data any, exact ...bool) *TestResponse {
 	r.t.Helper()
 
@@ -133,7 +125,8 @@ func (r *TestResponse) AssertJSONMissing(data any, exact ...bool) *TestResponse 
 	return r
 }
 
-// AssertJSONMissingExact answers to TestResponse::assertJsonMissingExact.
+// AssertJSONMissingExact asserts the payload does not carry this fragment
+// whole.
 func (r *TestResponse) AssertJSONMissingExact(data any) *TestResponse {
 	r.t.Helper()
 
@@ -141,7 +134,7 @@ func (r *TestResponse) AssertJSONMissingExact(data any) *TestResponse {
 	return r
 }
 
-// AssertJSONMissingPath answers to TestResponse::assertJsonMissingPath.
+// AssertJSONMissingPath asserts nothing is at the dot path.
 func (r *TestResponse) AssertJSONMissingPath(path string) *TestResponse {
 	r.t.Helper()
 
@@ -149,11 +142,10 @@ func (r *TestResponse) AssertJSONMissingPath(path string) *TestResponse {
 	return r
 }
 
-// AssertJSONStructure answers to TestResponse::assertJsonStructure.
+// AssertJSONStructure asserts the payload has the keys the structure names.
+// Other keys are allowed.
 //
-// How a structure is written is on AssertableJSONString.AssertStructure. The
-// variadic responseData stands for the PHP's second argument, which recursion
-// uses and a test does not.
+// How a structure is written is on [AssertableJSONString.AssertStructure].
 func (r *TestResponse) AssertJSONStructure(structure any, responseData ...any) *TestResponse {
 	r.t.Helper()
 
@@ -161,8 +153,8 @@ func (r *TestResponse) AssertJSONStructure(structure any, responseData ...any) *
 	return r
 }
 
-// AssertExactJSONStructure answers to
-// TestResponse::assertExactJsonStructure: these keys, and no others.
+// AssertExactJSONStructure asserts the payload has the keys the structure
+// names and no others.
 func (r *TestResponse) AssertExactJSONStructure(structure any, responseData ...any) *TestResponse {
 	r.t.Helper()
 
@@ -170,7 +162,8 @@ func (r *TestResponse) AssertExactJSONStructure(structure any, responseData ...a
 	return r
 }
 
-// AssertJSONCount answers to TestResponse::assertJsonCount.
+// AssertJSONCount asserts the payload, or what is at the given dot path, has
+// the expected number of entries.
 func (r *TestResponse) AssertJSONCount(count int, key ...string) *TestResponse {
 	r.t.Helper()
 
@@ -178,8 +171,7 @@ func (r *TestResponse) AssertJSONCount(count int, key ...string) *TestResponse {
 	return r
 }
 
-// AssertJSONIsArray answers to TestResponse::assertJsonIsArray: what is at the
-// key is a JSON array.
+// AssertJSONIsArray asserts what is at the key is a JSON array.
 func (r *TestResponse) AssertJSONIsArray(key ...string) *TestResponse {
 	r.t.Helper()
 
@@ -188,7 +180,7 @@ func (r *TestResponse) AssertJSONIsArray(key ...string) *TestResponse {
 	return r
 }
 
-// AssertJSONIsObject answers to TestResponse::assertJsonIsObject.
+// AssertJSONIsObject asserts what is at the key is a JSON object.
 func (r *TestResponse) AssertJSONIsObject(key ...string) *TestResponse {
 	r.t.Helper()
 
@@ -197,17 +189,12 @@ func (r *TestResponse) AssertJSONIsObject(key ...string) *TestResponse {
 	return r
 }
 
-// AssertJSONValidationErrors answers to
-// TestResponse::assertJsonValidationErrors: the payload rejected these fields,
-// and said these things about them.
-//
-// errors stands for the PHP's `string|array`:
+// AssertJSONValidationErrors asserts the payload rejected these fields, and
+// said these things about them.
 //
 //	"email"                                    the field was rejected
 //	[]string{"email", "name"}                  both were
 //	map[string]any{"email": "must be unique"}  and this is in the message
-//
-// The variadic responseKey stands for the PHP's `$responseKey = 'errors'`.
 func (r *TestResponse) AssertJSONValidationErrors(errors any, responseKey ...string) *TestResponse {
 	r.t.Helper()
 
@@ -234,9 +221,8 @@ func (r *TestResponse) AssertJSONValidationErrors(errors any, responseKey ...str
 	return r
 }
 
-// AssertOnlyJSONValidationErrors answers to
-// TestResponse::assertOnlyJsonValidationErrors: these fields were rejected and
-// no others.
+// AssertOnlyJSONValidationErrors asserts these fields were rejected and no
+// others.
 func (r *TestResponse) AssertOnlyJSONValidationErrors(errors any, responseKey ...string) *TestResponse {
 	r.t.Helper()
 
@@ -262,8 +248,7 @@ func (r *TestResponse) AssertOnlyJSONValidationErrors(errors any, responseKey ..
 	return r
 }
 
-// AssertJSONValidationErrorFor answers to
-// TestResponse::assertJsonValidationErrorFor.
+// AssertJSONValidationErrorFor asserts the payload rejected this one field.
 func (r *TestResponse) AssertJSONValidationErrorFor(key string, responseKey ...string) *TestResponse {
 	r.t.Helper()
 
@@ -275,11 +260,9 @@ func (r *TestResponse) AssertJSONValidationErrorFor(key string, responseKey ...s
 	return r
 }
 
-// AssertJSONMissingValidationErrors answers to
-// TestResponse::assertJsonMissingValidationErrors: none of these fields was
-// rejected.
-//
-// keys nil is the PHP's `$keys = null`: no field was rejected at all.
+// AssertJSONMissingValidationErrors asserts none of these fields was rejected.
+// A nil argument asserts there were no validation errors at all, and an empty
+// body passes.
 func (r *TestResponse) AssertJSONMissingValidationErrors(keys any, responseKey ...string) *TestResponse {
 	r.t.Helper()
 
@@ -311,22 +294,19 @@ func (r *TestResponse) AssertJSONMissingValidationErrors(keys any, responseKey .
 	return r
 }
 
-// expectedError is one entry of the `string|array $errors` the validation
-// assertions take: the field, and what the message about it has to contain.
+// expectedError is one entry of what the validation assertions take: the
+// field, and what the message about it has to contain.
 type expectedError struct {
 	key      string
 	messages []string
 }
 
-// first is the message the PHP compares against, or empty when the caller named
-// a field without one.
+// first is the message to compare against, or empty when the caller named a
+// field without one.
 //
-// The PHP body of assertSessionHasErrors reads a pair as one key and one
-// message -- is_int($key) tells a bare name from a name-and-message pair -- so
-// a single message is what an assertion needs. The slice is here because
-// wrapErrors also accepts map[string][]string, which is the shape a message bag
-// hands back, and dropping the rest of it at the door would make the two
-// disagree.
+// The slice behind it is here because wrapErrors also accepts
+// map[string][]string, which is the shape a message bag hands back, and
+// dropping the rest of it at the door would make the two disagree.
 func (e expectedError) first() string {
 	if len(e.messages) == 0 {
 		return ""
@@ -334,8 +314,9 @@ func (e expectedError) first() string {
 	return e.messages[0]
 }
 
-// wrapErrors answers to Arr::wrap over that argument, and to the `is_int($key)`
-// branch that tells a bare field name from a field-and-message pair.
+// wrapErrors normalises what the validation assertions take -- a field name, a
+// list of them, or a map from field to message or messages -- into a list of
+// [expectedError]. Map keys come out sorted, so a failure message is stable.
 func wrapErrors(errors any) []expectedError {
 	switch value := errors.(type) {
 	case nil:
@@ -389,8 +370,8 @@ func wrapErrors(errors any) []expectedError {
 	}
 }
 
-// errorsAt answers to `Arr::get($this->json(), $responseKey) ?? []`, read as
-// the field-to-messages map every branch below walks.
+// errorsAt reads the bag at the given key of a decoded payload as the
+// field-to-messages map every branch below walks. A missing key is empty.
 func errorsAt(decoded any, responseKey string) map[string][]string {
 	return normaliseErrors(dataGet(decoded, responseKey))
 }
@@ -398,9 +379,8 @@ func errorsAt(decoded any, responseKey string) map[string][]string {
 // normaliseErrors reads a bag of validation errors, however it was written, as
 // field to messages.
 //
-// The PHP has one shape because a MessageBag has one shape. Here the errors may
-// have come back from a JSON body, from validation.Errors or from a
-// support.ViewErrorBag, and all three are the same fact.
+// Here the errors may have come back from a JSON body, from validation.Errors
+// or from a support.ViewErrorBag, and all three are the same fact.
 func normaliseErrors(value any) map[string][]string {
 	out := map[string][]string{}
 
@@ -428,8 +408,7 @@ func normaliseErrors(value any) map[string][]string {
 	}
 
 	// Anything else with a GetMessages of its own: support.MessageBag,
-	// support.ViewErrorBag and validation.Errors all have one, and it is the
-	// method the PHP calls at this point too.
+	// support.ViewErrorBag and validation.Errors all have one.
 	if bag, ok := value.(interface{ GetMessages() map[string][]string }); ok {
 		for key, messages := range bag.GetMessages() {
 			out[key] = messages
@@ -438,8 +417,8 @@ func normaliseErrors(value any) map[string][]string {
 	return out
 }
 
-// containsMessage answers to the Str::contains loop the validation assertions
-// run over one field's messages.
+// containsMessage reports whether any of one field's messages contains the
+// expected text.
 func containsMessage(messages []string, expected string) bool {
 	for _, message := range messages {
 		if strings.Contains(message, expected) {
@@ -449,7 +428,8 @@ func containsMessage(messages []string, expected string) bool {
 	return false
 }
 
-// jsonErrorMessage answers to the $errorMessage the validation assertions build.
+// jsonErrorMessage is the tail the validation assertions append to a failure:
+// every error the payload carried, so the reader sees what was there instead.
 func jsonErrorMessage(errors map[string][]string) string {
 	if len(errors) == 0 {
 		return "Response does not have JSON validation errors."
@@ -466,7 +446,7 @@ func sortedStringKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-// first answers to a PHP parameter whose default is null.
+// first returns the single optional value, or nil.
 func first(values []any) any {
 	if len(values) == 0 {
 		return nil
@@ -474,7 +454,8 @@ func first(values []any) any {
 	return values[0]
 }
 
-// firstOr answers to a PHP parameter with a default value.
+// firstOr returns the single optional string, or def when it is absent or
+// empty.
 func firstOr(values []string, def string) string {
 	if len(values) == 0 || values[0] == "" {
 		return def

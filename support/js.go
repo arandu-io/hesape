@@ -8,21 +8,20 @@ import (
 	"github.com/arandu-io/hesape/support/arr"
 )
 
-// Js answers to Illuminate\Support\Js: data turned into a JavaScript
-// expression that is safe to drop inside an HTML attribute.
+// Js is data turned into a JavaScript expression meant to be dropped inside an
+// HTML attribute.
 //
-// The escaping is what makes it safe, and it is the escaping the PHP asks for
-// with JSON_HEX_TAG, JSON_HEX_APOS, JSON_HEX_AMP and JSON_HEX_QUOT: inside a
-// string, <, >, ', & and " leave as <, >, ', & and ",
-// so none of them can close the attribute or open a tag. A forward slash leaves
-// as \/, which is what PHP's json_encode does unless told otherwise.
+// The encoding escapes inside string literals only, leaving the structural
+// characters of the JSON alone: a forward slash leaves as \/, so a literal
+// cannot close a script element. Anything that is not a scalar comes back
+// wrapped in a JSON.parse call, so the browser parses it instead of the
+// JavaScript parser reading an object literal.
 type Js struct {
 	js string
 }
 
-// NewJs answers to Js::__construct. The PHP $flags and $depth have no
-// counterpart in encoding/json and are not taken; the PHP throws JsonException,
-// so this returns (*Js, error).
+// NewJs turns the data into a JavaScript expression, or returns the error
+// encoding it raised.
 func NewJs(data any) (*Js, error) {
 	expression, err := convertDataToJavaScriptExpression(data)
 	if err != nil {
@@ -31,12 +30,12 @@ func NewJs(data any) (*Js, error) {
 	return &Js{js: expression}, nil
 }
 
-// From answers to Js::from.
+// From turns the data into a JavaScript expression, the same as [NewJs].
 func From(data any) (*Js, error) { return NewJs(data) }
 
-// Encode answers to Js::encode: the data as JSON, escaped the way the class
-// needs it. A [Jsonable] is asked for its own JSON and an [arr.Arrayer] -- the
-// Go form of Illuminate\Contracts\Support\Arrayable -- for its array first.
+// Encode returns the data as JSON, escaped the way [Js] needs it. A [Jsonable]
+// is asked for its own JSON first, and an [arr.Arrayer] that is not already a
+// json.Marshaler is asked for its map first.
 func Encode(data any) (string, error) {
 	if jsonable, ok := data.(Jsonable); ok {
 		encoded, err := jsonable.ToJson()
@@ -60,7 +59,9 @@ func Encode(data any) (string, error) {
 	return jsHexEscape(strings.TrimRight(buffer.String(), "\n")), nil
 }
 
-// convertDataToJavaScriptExpression is Js::convertDataToJavaScriptExpression.
+// convertDataToJavaScriptExpression encodes the data and wraps it as an
+// expression: a [Js] is already one, a string becomes a single-quoted literal,
+// and everything else goes through convertJsonToJavaScriptExpression.
 func convertDataToJavaScriptExpression(data any) (string, error) {
 	if js, ok := data.(*Js); ok {
 		return js.ToHtml(), nil
@@ -77,9 +78,10 @@ func convertDataToJavaScriptExpression(data any) (string, error) {
 	return convertJsonToJavaScriptExpression(encoded)
 }
 
-// convertJsonToJavaScriptExpression is Js::convertJsonToJavaScriptExpression:
-// anything that is not a scalar comes back as a JSON.parse call, so that the
-// browser parses it instead of the JavaScript parser reading an object literal.
+// convertJsonToJavaScriptExpression wraps anything that is not a scalar in a
+// JSON.parse call, so the browser parses it instead of the JavaScript parser
+// reading an object literal. An empty array or object, and a scalar, are left
+// as they are.
 func convertJsonToJavaScriptExpression(encoded string) (string, error) {
 	if encoded == "[]" || encoded == "{}" {
 		return encoded, nil
@@ -94,9 +96,10 @@ func convertJsonToJavaScriptExpression(encoded string) (string, error) {
 	return encoded, nil
 }
 
-// jsHexEscape applies JSON_HEX_TAG, JSON_HEX_APOS, JSON_HEX_AMP, JSON_HEX_QUOT
-// and PHP's default slash escaping to the contents of every string literal in
-// the JSON, leaving the structural characters alone.
+// jsHexEscape walks the JSON and rewrites the contents of every string
+// literal, leaving the structural characters alone. A forward slash inside a
+// literal leaves as \/, and any other escape pair is carried through as it
+// stands.
 func jsHexEscape(encoded string) string {
 	var b strings.Builder
 	b.Grow(len(encoded))
@@ -143,7 +146,7 @@ func jsHexEscape(encoded string) string {
 	return b.String()
 }
 
-// ToHtml answers to Js::toHtml.
+// ToHtml returns the expression. A nil receiver returns the empty string.
 func (j *Js) ToHtml() string {
 	if j == nil {
 		return ""
@@ -151,5 +154,5 @@ func (j *Js) ToHtml() string {
 	return j.js
 }
 
-// String answers to Js::__toString.
+// String returns the expression, so Js satisfies fmt.Stringer.
 func (j *Js) String() string { return j.ToHtml() }

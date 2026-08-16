@@ -3,9 +3,8 @@ package number
 import "strings"
 
 // currencySymbols holds the currencies whose symbol a reader of en-US is
-// expected to recognise. A code that is not here is printed as itself, which is
-// what ICU falls back to as well, so the table can stay short and correct
-// instead of long and half wrong.
+// expected to recognise. A code that is not here is printed as itself, so the
+// table can stay short and correct instead of long and half wrong.
 var currencySymbols = map[string]string{
 	"AUD": "A$",
 	"BRL": "R$",
@@ -55,15 +54,13 @@ var currencyDigits = map[string]int{
 	"XPF": 0,
 }
 
-// Currency answers for Number::currency. It renders v as an amount in the
-// given ISO 4217 currency. The code is read case-insensitively and decides two
-// things: the symbol, and how many digits the currency keeps after the decimal
-// point — two for most, none for the yen, three for the dinars.
+// Currency renders v as an amount in the given ISO 4217 currency. The code is
+// read case-insensitively and decides two things: the symbol, and how many
+// digits the currency keeps after the decimal point — two for most, none for
+// the yen, three for the dinars.
 //
-// The argument is named `in` after Illuminate's own, and an empty one falls
-// back to DefaultCurrency, exactly as Illuminate falls back to Number::$currency.
-// The optional argument is Illuminate's $precision, which overrides the digit
-// count the currency itself carries; $locale has no equivalent here.
+// An empty currency falls back to DefaultCurrency. The optional argument is a
+// precision, which overrides the digit count the currency itself carries.
 //
 // A code with no symbol in the table is printed in front of the amount as it
 // was given. The sign leads, as it does in en-US.

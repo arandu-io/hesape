@@ -5,23 +5,18 @@ import (
 	"reflect"
 )
 
-// The five readers of Arr.php that assert a type: array, boolean, float,
-// integer and string. Each one reads a "dot" path through Arr::get and throws
-// InvalidArgumentException when what it finds is of the wrong type. Here they
-// return that as ErrInvalidArgument, and the message keeps the PHP's shape --
-// the PHP prints gettype($value), Go prints the Go type, which is the same
-// sentence with a more precise noun.
+// The five readers that assert a type -- Array, Boolean, Float, Integer and
+// String -- each read a "dot" path through Get and return ErrInvalidArgument
+// when what they find is of another type.
 //
-// Each takes the PHP's optional $default as a variadic, which is how Go spells
-// a default argument. Only the first is used. With no default and no value at
-// the key, the PHP asks is_string(null) and throws; so does this.
+// Each takes an optional default as a variadic; only the first is used. With
+// no default and no value at the key, the read fails rather than yielding the
+// zero value.
 
-// Array answers to Arr::array: the list at the "dot" path.
+// Array returns the list at the "dot" path.
 //
-// One divergence, stated because it is the only place a Go slice cannot stand
-// in for a PHP array: where the value is an associative array, is_array() is
-// true in PHP and the map is handed back, but a []any cannot carry keys. That
-// case reports ErrInvalidArgument; Get returns the map itself.
+// A map at that path is not a list and reports ErrInvalidArgument, since a
+// []any cannot carry keys; Get returns the map itself.
 func Array(array any, key string, def ...[]any) ([]any, error) {
 	value, ok := Get(array, key)
 	if !ok {
@@ -40,7 +35,7 @@ func Array(array any, key string, def ...[]any) ([]any, error) {
 	return nil, typeError(key, "an array", value)
 }
 
-// Boolean answers to Arr::boolean: the bool at the "dot" path.
+// Boolean returns the bool at the "dot" path.
 func Boolean(array any, key string, def ...bool) (bool, error) {
 	value, ok := Get(array, key)
 	if !ok {
@@ -55,11 +50,10 @@ func Boolean(array any, key string, def ...bool) (bool, error) {
 	return false, typeError(key, "a boolean", value)
 }
 
-// Float answers to Arr::float: the float at the "dot" path.
+// Float returns the float at the "dot" path.
 //
-// The PHP asks is_float, which is false for an integer, and so is this: a value
-// stored as an int is not a float. Both Go float widths answer to the one PHP
-// float.
+// A value stored as an int is not a float and fails. Both float widths are
+// accepted and returned as a float64.
 func Float(array any, key string, def ...float64) (float64, error) {
 	value, ok := Get(array, key)
 	if !ok {
@@ -77,11 +71,10 @@ func Float(array any, key string, def ...float64) (float64, error) {
 	return 0, typeError(key, "a float", value)
 }
 
-// Integer answers to Arr::integer: the int at the "dot" path.
+// Integer returns the int at the "dot" path.
 //
-// The PHP asks is_int, which is false for a float. Go's several integer widths
-// all answer to the one PHP integer, so any of them is accepted and returned as
-// an int.
+// A value stored as a float is not an integer and fails. Every signed and
+// unsigned integer width is accepted and returned as an int.
 func Integer(array any, key string, def ...int) (int, error) {
 	value, ok := Get(array, key)
 	if !ok {
@@ -100,7 +93,7 @@ func Integer(array any, key string, def ...int) (int, error) {
 	return 0, typeError(key, "an integer", value)
 }
 
-// String answers to Arr::string: the string at the "dot" path.
+// String returns the string at the "dot" path.
 func String(array any, key string, def ...string) (string, error) {
 	value, ok := Get(array, key)
 	if !ok {
@@ -115,9 +108,8 @@ func String(array any, key string, def ...string) (string, error) {
 	return "", typeError(key, "a string", value)
 }
 
-// typeError builds the sentence Arr.php builds: "Array value for key [%s] must
-// be %s, %s found." The PHP names the type with gettype; Go names it with the
-// type itself, and calls an absent value nil where the PHP calls it NULL.
+// typeError builds the message the typed readers fail with: the key, the type
+// that was wanted and the type that was found. An absent value is named nil.
 func typeError(key, want string, got any) error {
 	if got == nil {
 		return fmt.Errorf("%w: array value for key [%s] must be %s, nil found", ErrInvalidArgument, key, want)

@@ -178,7 +178,7 @@ type Response struct {
 	path string
 }
 
-// AssertStatus answers TestResponse::assertStatus, and fails unless the status is the one expected.
+// AssertStatus fails unless the status is the one expected.
 //
 // The body is printed on failure, because the answer to "why is this a 500" is
 // in it and finding out otherwise means running the test again with a print.
@@ -190,10 +190,10 @@ func (r *Response) AssertStatus(want int) *Response {
 	return r
 }
 
-// AssertOk answers TestResponse::assertOk: AssertStatus(200).
+// AssertOk asserts a 200 status. It is [Response.AssertStatus] with that code.
 func (r *Response) AssertOk() *Response { return r.AssertStatus(http.StatusOK) }
 
-// AssertSee answers TestResponse::assertSee, and fails unless the text is in the body.
+// AssertSee fails unless the text is in the body.
 func (r *Response) AssertSee(text string) *Response {
 	r.t.Helper()
 	if !strings.Contains(r.rec.Body.String(), text) {
@@ -202,7 +202,7 @@ func (r *Response) AssertSee(text string) *Response {
 	return r
 }
 
-// AssertDontSee answers TestResponse::assertDontSee, and fails when the text is in the body.
+// AssertDontSee fails when the text is in the body.
 //
 // It is the half people skip, and the half that catches a leak: a draft in a
 // public listing, an address in a page that should not name one, a button
@@ -215,7 +215,7 @@ func (r *Response) AssertDontSee(text string) *Response {
 	return r
 }
 
-// AssertRedirect answers TestResponse::assertRedirect, and fails unless the response sends the client to that address.
+// AssertRedirect fails unless the response sends the client to that address.
 //
 // It reads HX-Redirect as well as Location, because a handler answering an HTMX
 // request redirects with a header and a 204 -- and a test that only reads
@@ -233,7 +233,8 @@ func (r *Response) AssertRedirect(want string) *Response {
 	return r
 }
 
-// GetContent answers TestResponse::getContent: what came back, for an assertion this package does not have.
+// GetContent returns the response body, for an assertion this package does not
+// have.
 func (r *Response) GetContent() string { return r.rec.Body.String() }
 
 // Header reads one response header.

@@ -5,13 +5,12 @@ import (
 	"slices"
 )
 
-// This file holds the Illuminate methods that only mean something when the
-// keys of the collection are keys and not positions: everything the PHP
-// implements with array_diff_assoc, array_intersect_key, ksort and their kin.
+// This file holds the operations that only mean something when the keys are
+// keys and not positions. A Collection[T] is a list, so they take a map[K]V
+// instead.
 //
-// A Collection[T] is a list, so those take a map[K]V instead. The PHP array
-// they answer to is an ordered map; a Go map has no order, so a method whose
-// PHP result depends on key order returns a Collection[V], which does.
+// A Go map has no order, so an operation whose result depends on key order
+// returns a Collection[V], which does have one.
 
 // sortedKeys returns the keys of m in ascending order. Go randomises map
 // iteration on purpose, and every function here that produces a list has to be
@@ -25,8 +24,7 @@ func sortedKeys[K cmp.Ordered, V any](m map[K]V) []K {
 	return keys
 }
 
-// DiffAssoc is Collection::diffAssoc, which the PHP implements with
-// array_diff_assoc: the entries whose key and value together are absent from
+// DiffAssoc keeps the entries whose key and value together are absent from
 // items.
 //
 // An entry survives when items has no such key, or has it with another value.
@@ -42,12 +40,11 @@ func DiffAssoc[K comparable, V comparable](array, items map[K]V) map[K]V {
 	return out
 }
 
-// DiffAssocUsing is Collection::diffAssocUsing, which the PHP implements with
-// array_diff_uassoc: DiffAssoc with the keys compared by the callback rather
-// than by equality.
+// DiffAssocUsing is DiffAssoc with the keys compared by the callback rather
+// than by ==.
 //
-// As in the PHP the callback compares keys only; values are still compared by
-// equality. It reports zero when two keys are the same key.
+// The callback compares keys only; values are still compared by ==. It reports
+// zero when two keys are the same key.
 func DiffAssocUsing[K comparable, V comparable](array, items map[K]V, compare func(a, b K) int) map[K]V {
 	out := make(map[K]V, len(array))
 	for k, v := range array {
@@ -65,12 +62,11 @@ func DiffAssocUsing[K comparable, V comparable](array, items map[K]V, compare fu
 	return out
 }
 
-// DiffKeys is Collection::diffKeys, which the PHP implements with
-// array_diff_key: the entries whose key is absent from items, whatever the
+// DiffKeys keeps the entries whose key is absent from items, whatever the
 // values on either side are.
 //
-// items may hold a different value type for exactly that reason: the PHP types
-// its parameter iterable<TKey, mixed>.
+// items may hold a different value type, for exactly that reason: only its
+// keys are read.
 func DiffKeys[K comparable, V, W any](array map[K]V, items map[K]W) map[K]V {
 	out := make(map[K]V, len(array))
 	for k, v := range array {
@@ -82,8 +78,8 @@ func DiffKeys[K comparable, V, W any](array map[K]V, items map[K]W) map[K]V {
 	return out
 }
 
-// DiffKeysUsing is Collection::diffKeysUsing, which the PHP implements with
-// array_diff_ukey: DiffKeys with the keys compared by the callback.
+// DiffKeysUsing is DiffKeys with the keys compared by the callback rather than
+// by ==.
 func DiffKeysUsing[K comparable, V, W any](array map[K]V, items map[K]W, compare func(a, b K) int) map[K]V {
 	out := make(map[K]V, len(array))
 	for k, v := range array {
@@ -101,8 +97,7 @@ func DiffKeysUsing[K comparable, V, W any](array map[K]V, items map[K]W, compare
 	return out
 }
 
-// IntersectAssoc is Collection::intersectAssoc, which the PHP implements with
-// array_intersect_assoc: the entries items has under the same key with the same
+// IntersectAssoc keeps the entries items has under the same key with the same
 // value.
 func IntersectAssoc[K comparable, V comparable](array, items map[K]V) map[K]V {
 	out := make(map[K]V, len(array))
@@ -114,9 +109,8 @@ func IntersectAssoc[K comparable, V comparable](array, items map[K]V) map[K]V {
 	return out
 }
 
-// IntersectAssocUsing is Collection::intersectAssocUsing, which the PHP
-// implements with array_intersect_uassoc: IntersectAssoc with the keys compared
-// by the callback.
+// IntersectAssocUsing is IntersectAssoc with the keys compared by the callback
+// rather than by ==.
 func IntersectAssocUsing[K comparable, V comparable](array, items map[K]V, compare func(a, b K) int) map[K]V {
 	out := make(map[K]V, len(array))
 	for k, v := range array {
@@ -130,8 +124,7 @@ func IntersectAssocUsing[K comparable, V comparable](array, items map[K]V, compa
 	return out
 }
 
-// IntersectByKeys is Collection::intersectByKeys, which the PHP implements with
-// array_intersect_key: the entries whose key items also has.
+// IntersectByKeys keeps the entries whose key items also has.
 //
 // The values kept are this map's, never items'.
 func IntersectByKeys[K comparable, V, W any](array map[K]V, items map[K]W) map[K]V {
@@ -144,11 +137,10 @@ func IntersectByKeys[K comparable, V, W any](array map[K]V, items map[K]W) map[K
 	return out
 }
 
-// SortKeys is Collection::sortKeys, which the PHP implements with ksort.
+// SortKeys returns the values of the map ascending by key.
 //
-// The PHP returns a collection still carrying its keys, in key order. A Go map
-// cannot carry an order, so the ordering is the result: the values, ascending
-// by key. Keys over the same map gives the keys in the matching order.
+// A Go map cannot carry an order, so the ordering is the result rather than a
+// property of it. Keys over the same map gives the keys in the matching order.
 func SortKeys[K cmp.Ordered, V any](array map[K]V) Collection[V] {
 	keys := sortedKeys(array)
 	out := make(Collection[V], len(keys))
@@ -158,19 +150,17 @@ func SortKeys[K cmp.Ordered, V any](array map[K]V) Collection[V] {
 	return out
 }
 
-// SortKeysDesc is Collection::sortKeysDesc, which the PHP implements with
-// krsort: SortKeys with the order reversed.
+// SortKeysDesc is SortKeys with the order reversed.
 func SortKeysDesc[K cmp.Ordered, V any](array map[K]V) Collection[V] {
 	return SortKeys(array).Reverse()
 }
 
-// SortKeysUsing is Collection::sortKeysUsing, which the PHP implements with
-// uksort: the values ordered by the callback applied to their keys.
+// SortKeysUsing returns the values ordered by the callback applied to their
+// keys.
 //
 // The keys are put in ascending order before the callback sorts them, so that
-// keys the callback calls equal come out in a fixed order instead of the random
-// one Go gives map iteration. The PHP inherits the array's insertion order
-// there, which is just as arbitrary and rather less reproducible.
+// keys the callback calls equal come out in a fixed order instead of the
+// random one Go gives map iteration.
 func SortKeysUsing[K cmp.Ordered, V any](array map[K]V, compare func(a, b K) int) Collection[V] {
 	keys := sortedKeys(array)
 	stableSort(keys, compare)
@@ -181,23 +171,21 @@ func SortKeysUsing[K cmp.Ordered, V any](array map[K]V, compare func(a, b K) int
 	return out
 }
 
-// Keys is Collection::keys for a collection whose keys are keys, where the
-// method of the same name on Collection[T] answers for a list.
+// Keys returns the keys of the map, where the method of the same name on
+// Collection[T] returns the positions of a list.
 //
-// They come out ascending, which is the order SortKeys puts their values in, so
-// the two walked together pair each value with the key it came from.
+// They come out ascending, which is the order SortKeys puts their values in,
+// so the two walked together pair each value with the key it came from.
 func Keys[K cmp.Ordered, V any](array map[K]V) Collection[K] {
 	return Collection[K](sortedKeys(array))
 }
 
-// MergeRecursive is Collection::mergeRecursive, which the PHP implements with
-// array_merge_recursive.
+// MergeRecursive merges items into array, descending wherever both sides hold
+// a map under a key.
 //
-// Where both sides hold a map under a key, the maps merge. Where a key is on
-// both sides and either side is not a map, the two values become a []any
-// holding both -- a value already a []any contributes its elements rather than
-// itself, which is how array_merge_recursive grows a list across repeated
-// merges. Merge, without the recursion, keeps only the second value.
+// Where a key is on both sides and either side is not a map, the two values
+// become a []any holding both -- a value already a []any contributes its
+// elements rather than itself, so a list grows across repeated merges.
 func MergeRecursive(array, items map[string]any) map[string]any {
 	out := make(map[string]any, len(array)+len(items))
 	for k, v := range array {
@@ -220,8 +208,8 @@ func MergeRecursive(array, items map[string]any) map[string]any {
 	return out
 }
 
-// asList is PHP's promotion of a scalar to an array before array_merge_recursive
-// concatenates the two.
+// asList wraps a value in a []any unless it already is one, so that two values
+// found under the same key can be concatenated.
 func asList(value any) []any {
 	if list, ok := value.([]any); ok {
 		return list
@@ -229,13 +217,11 @@ func asList(value any) []any {
 	return []any{value}
 }
 
-// ReplaceRecursive is Collection::replaceRecursive, which the PHP implements
-// with array_replace_recursive.
+// ReplaceRecursive lets items win at every key, except where both sides hold a
+// map or both hold a []any: those descend.
 //
-// items wins at every key, except where both sides hold a map or both hold a
-// []any: those descend, so replacing {"a":[1,2,3]} with {"a":[9]} gives
-// {"a":[9,2,3]} rather than {"a":[9]}. Replace, without the recursion, gives
-// the latter.
+// Replacing {"a":[1,2,3]} with {"a":[9]} therefore gives {"a":[9,2,3]} and not
+// {"a":[9]}.
 func ReplaceRecursive(array, items map[string]any) map[string]any {
 	out := make(map[string]any, len(array)+len(items))
 	for k, v := range array {
@@ -276,12 +262,10 @@ func replaceRecursiveValue(existing, replacement any) any {
 	return out
 }
 
-// CollapseWithKeys is Collection::collapseWithKeys: the maps in the collection
-// flattened into one, keeping their keys.
+// CollapseWithKeys flattens the maps in the collection into one, keeping their
+// keys.
 //
-// The PHP folds them with array_replace, so a key held by more than one element
-// ends up with the value of the last. Elements that are not arrays are dropped
-// there; in Go the element type says they cannot occur.
+// A key held by more than one element ends up with the value of the last.
 func CollapseWithKeys[K comparable, V any](c Collection[map[K]V]) map[K]V {
 	out := make(map[K]V)
 	for _, item := range c {

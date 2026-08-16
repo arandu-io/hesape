@@ -8,7 +8,7 @@ import (
 
 // TestTheEmptyStringSurvivesEveryTransformation walks the functions that take a
 // subject and asks each for the empty string, because that is the argument a
-// caller passes without meaning to and the one PHP quietly answers for.
+// caller passes without meaning to.
 func TestTheEmptyStringSurvivesEveryTransformation(t *testing.T) {
 	cases := []struct {
 		name string
@@ -44,7 +44,7 @@ func TestTheEmptyStringSurvivesEveryTransformation(t *testing.T) {
 	}
 }
 
-// TestLimitWithALimitSmallerThanTheEnding pins the shape PHP has: the ending is
+// TestLimitWithALimitSmallerThanTheEnding pins the shape: the ending is
 // appended to whatever survived the cut and is never counted against the limit,
 // so an ending longer than the limit comes back longer than the limit.
 func TestLimitWithALimitSmallerThanTheEnding(t *testing.T) {
@@ -68,7 +68,7 @@ func TestLimitWithALimitSmallerThanTheEnding(t *testing.T) {
 	}
 }
 
-// TestSubstrWithANegativeStart walks the four corners of PHP's substr: a start
+// TestSubstrWithANegativeStart walks the four corners of Substr: a start
 // counted from the end, a start past the end, a negative length and a window
 // that closes before it opens.
 func TestSubstrWithANegativeStart(t *testing.T) {
@@ -95,8 +95,8 @@ func TestSubstrWithANegativeStart(t *testing.T) {
 	}
 }
 
-// TestPadWithAWidthSmallerThanTheString records that PHP's str_pad never
-// shortens: a width at or below the length of the string returns it whole.
+// TestPadWithAWidthSmallerThanTheString records that padding never shortens: a
+// width at or below the length of the string returns it whole.
 func TestPadWithAWidthSmallerThanTheString(t *testing.T) {
 	for _, width := range []int{-5, 0, 3, 7} {
 		if got := str.PadLeft("Laravel", width, "_"); got != "Laravel" {
@@ -117,9 +117,8 @@ func TestPadWithAWidthSmallerThanTheString(t *testing.T) {
 	}
 }
 
-// TestWordsWithACountOfZero pins the branch Illuminate falls through: the
-// pattern it builds for a count below one does not match, so the subject comes
-// back untouched and no ending is appended.
+// TestWordsWithACountOfZero pins the branch a count below one takes: the
+// subject comes back untouched and no ending is appended.
 func TestWordsWithACountOfZero(t *testing.T) {
 	for _, count := range []int{0, -1, -100} {
 		if got := str.Words("one two three", count, "..."); got != "one two three" {
@@ -134,9 +133,8 @@ func TestWordsWithACountOfZero(t *testing.T) {
 	}
 }
 
-// TestMaskWithANegativeIndex walks the corners of Str::mask: an index counted
-// from the end, one past either end, a length of zero and an empty mask
-// character.
+// TestMaskWithANegativeIndex walks the corners of Mask: an index counted from
+// the end, one past either end, a length of zero and an empty mask character.
 func TestMaskWithANegativeIndex(t *testing.T) {
 	cases := []struct {
 		value     string
@@ -162,9 +160,9 @@ func TestMaskWithANegativeIndex(t *testing.T) {
 	}
 }
 
-// TestPluralWithACount pins the two guards Pluralizer::plural runs before it
-// reaches the inflector: a count of one either way, and a value that does not
-// end in a word character.
+// TestPluralWithACount pins the two guards Plural runs before it reaches the
+// inflector: a count of one either way, and a value that does not end in a word
+// character.
 func TestPluralWithACount(t *testing.T) {
 	cases := []struct {
 		value string

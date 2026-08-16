@@ -20,32 +20,9 @@ import (
 // the public contract of the framework -- change it and the whole ecosystem
 // breaks, so change it with great care.
 //
-// # What it answers to in Laravel
-//
-// Illuminate\Support\ServiceProvider is the shape: register() declares what the
-// component brings and boot() runs once the rest of the application is up, and
-// loadRoutesFrom(), loadMigrationsFrom() and loadViewsFrom() are how a package
-// hands the framework the three things it ships. Here Routes is
-// loadRoutesFrom(), [Migratable] is loadMigrationsFrom(), [Bootable] is boot(),
-// and register() has no counterpart at all: what it registers is a binding in a
-// container, and constructing the value and passing it is the whole of that
-// (ADR 0001, ADR 0045).
-//
-// # Why the name is Module and not ServiceProvider
-//
-// ADR 0044 says a name is Laravel's without exception, and this is the case
-// where following that rule would mislead rather than orient. A ServiceProvider
-// provides services TO a container: it is named after the mechanism ADR 0001
-// rejected, and somebody arriving from Laravel would open it looking for
-// $this->app->singleton and find no app to call it on. What this interface
-// names is the vertical slice of ADR 0003 -- a directory with its routes, its
-// migrations, its policies and its repository, composed by hand in
-// bootstrap/app.go -- and Module is what docs/01 has called that since before
-// the framework had a router.
-//
-// The rule is about vocabulary a Laravel developer already holds. It is not
-// worth spending on a word whose meaning here would be the opposite of the one
-// they hold.
+// What this interface names is a vertical slice: a directory with its routes,
+// its migrations, its policies and its repository, composed by hand in
+// bootstrap/app.go.
 //
 // Everything below is optional and independent of Module: a module implements
 // as many of these as it has reasons to, and a module that implements none of
@@ -61,10 +38,9 @@ type Module interface {
 
 	// Routes registers the module's HTTP routes.
 	//
-	// It is Laravel's loadRoutesFrom(), with the difference that the routes are
-	// code rather than a file the framework requires: the router is handed in,
-	// so nothing is registered on a global and there is nothing to reset
-	// between tests.
+	// The routes are code rather than a file the framework loads: the router is
+	// handed in, so nothing is registered on a global and there is nothing to
+	// reset between tests.
 	//
 	// A module with no HTTP surface -- a relay, a scheduler-only module -- still
 	// implements it and returns having registered nothing. An empty
@@ -126,7 +102,7 @@ const (
 	// Global runs the task once for the whole instance.
 	//
 	// It gets the zero Grant, because [auth.SystemGrant] refuses an empty
-	// tenant (RULE 14) -- so a global task cannot pass any Check and cannot
+	// tenant -- so a global task cannot pass any Check and cannot
 	// reach a repository. That is a constraint rather than an oversight: global
 	// work is cleaning temporary files, warming a cache, checking a
 	// certificate. Work that reads a customer's rows is PerTenant, and having

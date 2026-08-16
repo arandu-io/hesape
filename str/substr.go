@@ -6,21 +6,18 @@ import (
 	"unicode/utf8"
 )
 
-// Length answers for Str::length. It is the number of characters in the
-// string, not the number of bytes, so Length("café") is 4.
-//
-// The encoding argument is gone: Go strings are UTF-8 and there is nothing to
-// choose.
+// Length is the number of characters in the string, not the number of bytes, so
+// Length("café") is 4.
 func Length(value string) int { return runeLen(value) }
 
 func runeLen(s string) int { return utf8.RuneCountInString(s) }
 
-// Substr answers for Str::substr. It returns the portion of the string given
-// by start and length, counted in characters.
+// Substr returns the portion of the string given by start and length, counted
+// in characters.
 //
 // A negative start counts back from the end. A negative length stops that many
 // characters short of the end. Passing no length runs to the end of the
-// string, which is what PHP's null default does.
+// string.
 func Substr(value string, start int, length ...int) string {
 	return string(substrRunes([]rune(value), start, length...))
 }
@@ -48,8 +45,8 @@ func substrRunes(rs []rune, start int, length ...int) []rune {
 	return rs[start:end]
 }
 
-// Take answers for Str::take. It returns the first limit characters of the
-// string, or the last limit characters when limit is negative.
+// Take returns the first limit characters of the string, or the last limit
+// characters when limit is negative.
 func Take(value string, limit int) string {
 	if limit < 0 {
 		return Substr(value, limit)
@@ -57,12 +54,11 @@ func Take(value string, limit int) string {
 	return Substr(value, 0, limit)
 }
 
-// CharAt answers for Str::charAt. It returns the character at the given index,
-// counting back from the end when the index is negative.
+// CharAt returns the character at the given index, counting back from the end
+// when the index is negative.
 //
-// PHP returns false when the index is out of range; the second result is that
-// false, because the empty string is not distinguishable from a character on
-// its own.
+// The second result is false when the index is out of range, because the empty
+// string is not distinguishable from a character on its own.
 func CharAt(subject string, index int) (string, bool) {
 	rs := []rune(subject)
 	n := len(rs)
@@ -76,11 +72,11 @@ func CharAt(subject string, index int) (string, bool) {
 	return string(substrRunes(rs, index, 1)), true
 }
 
-// Position answers for Str::position. It is the character index of the first
-// occurrence of needle at or after offset.
+// Position is the character index of the first occurrence of needle at or after
+// offset.
 //
-// PHP returns false when the needle is absent; this returns -1, the way
-// strings.Index does, because a character index is never negative.
+// It returns -1 when the needle is absent, the way strings.Index does, because
+// a character index is never negative.
 func Position(haystack, needle string, offset int) int {
 	rs := []rune(haystack)
 	n := len(rs)
@@ -97,13 +93,12 @@ func Position(haystack, needle string, offset int) int {
 	return offset + runeLen(string(rs[offset:])[:i])
 }
 
-// Limit answers for Str::limit. It cuts the string to at most limit display
-// columns and appends end when it had to cut.
+// Limit cuts the string to at most limit display columns and appends end when
+// it had to cut.
 //
-// Columns, not bytes: a full-width character counts as two, the way PHP's
-// mb_strwidth counts it. When preserveWords is true the cut is moved back to
-// the last whitespace, and HTML tags and line breaks are removed first, which
-// is what Illuminate does.
+// Columns, not bytes: a full-width character counts as two. When preserveWords
+// is true the cut is moved back to the last whitespace, and HTML tags and line
+// breaks are removed first.
 func Limit(value string, limit int, end string, preserveWords bool) string {
 	if strWidth(value) <= limit {
 		return value
@@ -125,13 +120,11 @@ func Limit(value string, limit int, end string, preserveWords bool) string {
 	return trimmed + end
 }
 
-// Words answers for Str::words. It cuts the string to at most words words and
-// appends end when it had to cut. Whitespace inside what survives is left
-// exactly as it was found.
+// Words cuts the string to at most words words and appends end when it had to
+// cut. Whitespace inside what survives is left exactly as it was found.
 //
-// A words count of zero or less returns the string untouched, because the
-// pattern Illuminate builds for it does not compile and the method falls
-// through to returning the subject.
+// A words count of zero or less returns the string untouched, with no ending
+// appended.
 func Words(value string, words int, end string) string {
 	if words <= 0 {
 		return value
@@ -157,12 +150,11 @@ func Words(value string, words int, end string) string {
 	return rtrimDefault(string(rs[:i])) + end
 }
 
-// Squish answers for Str::squish. It trims both ends and collapses every run
-// of whitespace inside the string to a single space.
+// Squish trims both ends and collapses every run of whitespace inside the
+// string to a single space.
 //
-// The two Hangul filler characters count as whitespace here, as they do in
-// Illuminate, because they are invisible and a person pasting text carries
-// them in without knowing.
+// The two Hangul filler characters count as whitespace here, because they are
+// invisible and a person pasting text carries them in without knowing.
 func Squish(value string) string {
 	var b strings.Builder
 	b.Grow(len(value))
@@ -183,9 +175,9 @@ func Squish(value string) string {
 
 func isSquishSpace(r rune) bool { return unicode.IsSpace(r) || r == 0x3164 || r == 0x1160 }
 
-// Trim answers for Str::trim. With no charlist it removes whitespace, the byte
-// order mark, the zero width space and the left-to-right mark from both ends;
-// with one it removes exactly the characters given.
+// Trim removes characters from both ends of the string. With no charlist it
+// removes whitespace, the byte order mark, the zero width space and the
+// left-to-right mark; with one it removes exactly the characters given.
 func Trim(value string, charlist ...string) string {
 	if len(charlist) == 0 {
 		return strings.TrimFunc(value, isTrimDefault)
@@ -193,7 +185,7 @@ func Trim(value string, charlist ...string) string {
 	return strings.Trim(value, charlist[0])
 }
 
-// Ltrim answers for Str::ltrim. It is Trim on the left side only.
+// Ltrim is Trim on the left side only.
 func Ltrim(value string, charlist ...string) string {
 	if len(charlist) == 0 {
 		return strings.TrimLeftFunc(value, isTrimDefault)
@@ -201,7 +193,7 @@ func Ltrim(value string, charlist ...string) string {
 	return strings.TrimLeft(value, charlist[0])
 }
 
-// Rtrim answers for Str::rtrim. It is Trim on the right side only.
+// Rtrim is Trim on the right side only.
 func Rtrim(value string, charlist ...string) string {
 	if len(charlist) == 0 {
 		return strings.TrimRightFunc(value, isTrimDefault)
@@ -213,12 +205,12 @@ func isTrimDefault(r rune) bool {
 	return unicode.IsSpace(r) || r == 0 || r == 0xFEFF || r == 0x200B || r == 0x200E
 }
 
-// rtrimDefault is PHP's rtrim with its default character list, which is the
-// one Str::limit and Str::words use before appending their ending.
+// rtrimDefault trims spaces, tabs, line breaks, NULs and vertical tabs off the
+// right end, which is what Limit and Words do before appending their ending.
 func rtrimDefault(s string) string { return strings.TrimRight(s, " \t\n\r\x00\x0B") }
 
-// After answers for Str::after. It is everything past the first occurrence of
-// search, or the whole string when search is empty or absent.
+// After is everything past the first occurrence of search, or the whole string
+// when search is empty or absent.
 func After(subject, search string) string {
 	if search == "" {
 		return subject
@@ -230,8 +222,8 @@ func After(subject, search string) string {
 	return subject[i+len(search):]
 }
 
-// AfterLast answers for Str::afterLast. It is everything past the last
-// occurrence of search, or the whole string when search is empty or absent.
+// AfterLast is everything past the last occurrence of search, or the whole
+// string when search is empty or absent.
 func AfterLast(subject, search string) string {
 	if search == "" {
 		return subject
@@ -243,8 +235,8 @@ func AfterLast(subject, search string) string {
 	return subject[i+len(search):]
 }
 
-// Before answers for Str::before. It is everything up to the first occurrence
-// of search, or the whole string when search is empty or absent.
+// Before is everything up to the first occurrence of search, or the whole
+// string when search is empty or absent.
 func Before(subject, search string) string {
 	if search == "" {
 		return subject
@@ -256,8 +248,8 @@ func Before(subject, search string) string {
 	return subject[:i]
 }
 
-// BeforeLast answers for Str::beforeLast. It is everything up to the last
-// occurrence of search, or the whole string when search is empty or absent.
+// BeforeLast is everything up to the last occurrence of search, or the whole
+// string when search is empty or absent.
 func BeforeLast(subject, search string) string {
 	if search == "" {
 		return subject
@@ -269,9 +261,8 @@ func BeforeLast(subject, search string) string {
 	return subject[:i]
 }
 
-// Between answers for Str::between. It is the largest portion sitting after
-// the first from and before the last to. The whole string comes back when
-// either delimiter is empty.
+// Between is the largest portion sitting after the first from and before the
+// last to. The whole string comes back when either delimiter is empty.
 func Between(subject, from, to string) string {
 	if from == "" || to == "" {
 		return subject
@@ -279,9 +270,8 @@ func Between(subject, from, to string) string {
 	return BeforeLast(After(subject, from), to)
 }
 
-// BetweenFirst answers for Str::betweenFirst. It is the smallest portion
-// sitting after the first from and before the first to. The whole string comes
-// back when either delimiter is empty.
+// BetweenFirst is the smallest portion sitting after the first from and before
+// the first to. The whole string comes back when either delimiter is empty.
 func BetweenFirst(subject, from, to string) string {
 	if from == "" || to == "" {
 		return subject
@@ -289,9 +279,8 @@ func BetweenFirst(subject, from, to string) string {
 	return Before(After(subject, from), to)
 }
 
-// Start answers for Str::start. It begins the string with a single instance of
-// prefix, collapsing a prefix that is already there more than once:
-// Start("//api", "/") is "/api".
+// Start begins the string with a single instance of prefix, collapsing a prefix
+// that is already there more than once: Start("//api", "/") is "/api".
 func Start(value, prefix string) string {
 	if prefix == "" {
 		return value
@@ -302,9 +291,8 @@ func Start(value, prefix string) string {
 	return prefix + value
 }
 
-// Finish answers for Str::finish. It caps the string with a single instance of
-// cap, collapsing a cap that is already there more than once: Finish("path//",
-// "/") is "path/".
+// Finish caps the string with a single instance of cap, collapsing a cap that
+// is already there more than once: Finish("path//", "/") is "path/".
 func Finish(value, cap string) string {
 	if cap == "" {
 		return value
@@ -315,9 +303,8 @@ func Finish(value, cap string) string {
 	return value + cap
 }
 
-// ChopStart answers for Str::chopStart. It removes the first of the given
-// needles that the string starts with, and leaves the string alone when it
-// starts with none of them.
+// ChopStart removes the first of the given needles that the string starts with,
+// and leaves the string alone when it starts with none of them.
 func ChopStart(subject string, needle ...string) string {
 	for _, n := range needle {
 		if strings.HasPrefix(subject, n) {
@@ -327,9 +314,8 @@ func ChopStart(subject string, needle ...string) string {
 	return subject
 }
 
-// ChopEnd answers for Str::chopEnd. It removes the first of the given needles
-// that the string ends with, and leaves the string alone when it ends with
-// none of them.
+// ChopEnd removes the first of the given needles that the string ends with, and
+// leaves the string alone when it ends with none of them.
 func ChopEnd(subject string, needle ...string) string {
 	for _, n := range needle {
 		if strings.HasSuffix(subject, n) {
@@ -339,13 +325,13 @@ func ChopEnd(subject string, needle ...string) string {
 	return subject
 }
 
-// Mask answers for Str::mask. It replaces a run of the string, starting at
-// index, with the first character of character repeated:
+// Mask replaces a run of the string, starting at index, with the first
+// character of character repeated:
 // Mask("paulo@example.com", "*", 3, 8) is "pau********le.com".
 //
 // A negative index counts back from the end. Passing no length runs to the end
-// of the string, which is what PHP's null default does; a length of zero masks
-// nothing and returns the string untouched.
+// of the string; a length of zero masks nothing and returns the string
+// untouched.
 //
 // It is not redaction. The length of the answer still tells the reader how
 // long the secret was, which for a password is more than it should learn.
@@ -375,12 +361,11 @@ func Mask(value, character string, index int, length ...int) string {
 	return string(rs)
 }
 
-// SubstrCount answers for Str::substrCount. It counts the non-overlapping
-// occurrences of needle from offset onwards, in bytes, the way PHP's
-// substr_count does.
+// SubstrCount counts the non-overlapping occurrences of needle from offset
+// onwards, in bytes.
 //
-// PHP raises a ValueError for an empty needle; this returns zero, because
-// there is no count that answers the question.
+// An empty needle returns zero, because there is no count that answers the
+// question.
 func SubstrCount(haystack, needle string, offset int, length ...int) int {
 	if needle == "" {
 		return 0
@@ -402,9 +387,8 @@ func SubstrCount(haystack, needle string, offset int, length ...int) int {
 	return strings.Count(window, needle)
 }
 
-// SubstrReplace answers for Str::substrReplace. It replaces the portion of the
-// string given by offset and length, in bytes, the way PHP's substr_replace
-// does.
+// SubstrReplace replaces the portion of the string given by offset and length,
+// in bytes.
 //
 // A negative offset counts back from the end, a negative length stops that
 // many bytes short of the end, and passing no length replaces everything from
@@ -428,12 +412,11 @@ func SubstrReplace(value, replace string, offset int, length ...int) string {
 	return value[:offset] + replace + value[end:]
 }
 
-// Excerpt answers for Str::excerpt. It cuts an excerpt out of the text around
-// the first case-insensitive occurrence of phrase, keeping radius characters
-// on each side and marking a cut end with omission.
+// Excerpt cuts an excerpt out of the text around the first case-insensitive
+// occurrence of phrase, keeping radius characters on each side and marking a
+// cut end with omission.
 //
-// PHP returns null when the phrase is not in the text; the second result is
-// that null.
+// The second result is false when the phrase is not in the text.
 func Excerpt(text, phrase string, radius int, omission string) (string, bool) {
 	i := strings.Index(Lower(text), Lower(phrase))
 	if i < 0 {
@@ -456,8 +439,8 @@ func Excerpt(text, phrase string, radius int, omission string) (string, bool) {
 	return startWithRadius + matched + endWithRadius, true
 }
 
-// strWidth is PHP's mb_strwidth: a full-width character is two columns wide
-// and everything else is one.
+// strWidth is the display width of a string: a full-width character is two
+// columns wide and everything else is one.
 func strWidth(s string) int {
 	w := 0
 	for _, r := range s {
@@ -482,8 +465,8 @@ func runeWidth(r rune) int {
 	}
 }
 
-// strimWidth is PHP's mb_strimwidth with an empty trim marker: it keeps the
-// leading characters that fit in the given number of columns.
+// strimWidth keeps the leading characters that fit in the given number of
+// columns, with no marker in the place of what it dropped.
 func strimWidth(s string, width int) string {
 	used := 0
 	for i, r := range s {
@@ -496,8 +479,8 @@ func strimWidth(s string, width int) string {
 	return s
 }
 
-// collapseLineBreaks is the '/[\n\r]+/' replacement Str::limit runs before it
-// looks for a word boundary.
+// collapseLineBreaks turns every run of line breaks into one space, which Limit
+// does before it looks for a word boundary.
 func collapseLineBreaks(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -519,8 +502,8 @@ func collapseLineBreaks(s string) string {
 	return b.String()
 }
 
-// stripTags is PHP's strip_tags, reduced to what Str::limit needs: everything
-// between an opening angle bracket and the next closing one goes.
+// stripTags removes everything between an opening angle bracket and the next
+// closing one.
 func stripTags(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))

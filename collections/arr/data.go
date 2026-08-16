@@ -6,40 +6,32 @@ import (
 	"strings"
 )
 
-// The five global helpers of helpers.php that walk a "dot" path: data_get,
-// data_has, data_set, data_fill and data_forget. They are here rather than in
-// the parent package because each is Arr::get, Arr::set or Arr::forget with
-// wildcard segments added, and they read a structure with the same primitives.
+// The five Data walkers -- DataGet, DataHas, DataSet, DataFill and
+// DataForget -- are Get, Set and Forget with wildcard segments added, and they
+// read a structure with the same primitives.
 //
-// A PHP global function is lower_snake_case and a Go exported identifier is
-// PascalCase, so data_get is DataGet. That is the same "capitalise to export"
-// the rest of this package applies, carried across the underscore.
-//
-// One behaviour differs from Arr::get and is easy to trip over: data_get always
-// splits on dots. Arr::get tries the whole key first, so a key that itself
-// contains a dot is found; data_get never looks for one.
+// One behaviour differs from Get and is easy to trip over: a Data walker
+// always splits on dots. Get tries the whole key first, so a key that itself
+// contains a dot is found; a Data walker never looks for one.
 
-// DataGet answers to helpers.php's data_get: read a value out of nested arrays
-// and structs with a "dot" path, wildcards included.
+// DataGet reads a value out of nested maps, slices and structs with a "dot"
+// path, wildcards included.
 //
-// The segments the PHP gives a meaning to are all here. A segment of "*" reads
-// every element at this level and gathers them into a []any; "{first}" and
-// "{last}" resolve to the first and the last key at this level; and a backslash
-// in front of any of the three -- "\*", "\{first}", "\{last}" -- names that
-// literal key instead.
+// A segment of "*" reads every element at this level and gathers them into a
+// []any; "{first}" and "{last}" resolve to the first and the last key at this
+// level; and a backslash in front of any of the three -- "\*", "\{first}",
+// "\{last}" -- names that literal key instead.
 //
-// Two wildcards in one path collapse one level, as the PHP's
-// in_array('*', $key) check does: "users.*.roles.*.name" is a flat list of
-// names, not a list of lists.
+// Two wildcards in one path collapse one level, so "users.*.roles.*.name" is a
+// flat list of names and not a list of lists.
 //
-// The second result is false where the PHP returns its $default. Inside a
-// wildcard a segment that misses contributes nil to the result rather than
-// failing the whole read, which is what the PHP's inner data_get($item, $key)
-// with a null default does.
+// The second result is false when the path leads nowhere. Inside a wildcard a
+// segment that misses contributes nil to the result rather than failing the
+// whole read.
 //
-// A struct field of the matching name answers for the PHP's object property.
-// The first and last key of a Go map are its keys in ascending order, since a
-// map has no insertion order for array_key_first to read.
+// A segment also matches an exported struct field of that name. The first and
+// last key of a map are its keys in ascending order, since a map holds no
+// order of its own.
 func DataGet(target any, key string) (any, bool) {
 	return dataGet(target, strings.Split(key, "."))
 }
@@ -102,11 +94,10 @@ func dataGet(target any, segments []string) (any, bool) {
 	return target, true
 }
 
-// DataHas answers to helpers.php's data_has: the "dot" path leads somewhere.
+// DataHas reports whether the "dot" path leads somewhere.
 //
-// The PHP gives no meaning to a wildcard here -- data_has walks plain segments
-// only -- and neither does this. An empty key reports false, as the PHP's
-// `is_null($key) || $key === []` guard does.
+// A wildcard has no meaning here: only plain segments are walked. An empty key
+// reports false.
 func DataHas(target any, key string) bool {
 	if key == "" {
 		return false
@@ -125,24 +116,20 @@ func DataHas(target any, key string) bool {
 	return true
 }
 
-// DataSet answers to helpers.php's data_set: write a value at a "dot" path,
-// creating the maps along the way, with "*" writing to every element at that
-// level.
+// DataSet writes a value at a "dot" path, creating the maps along the way,
+// with "*" writing to every element at that level.
 //
-// The PHP takes the target by reference. A Go map or slice is already a
-// reference and is written through, but a target that was not an array has to
-// be created, and the result carries that back -- so the return value is the
-// one to keep.
+// A map or slice target is already a reference and is written through, but a
+// target that was not indexable has to be created, and the result carries that
+// back -- so the return value is the one to keep.
 //
-// The optional overwrite is the PHP's fourth argument, true by default. Only
-// the first is used; the variadic is how Go spells a PHP default argument.
+// The optional overwrite is true by default; only the first one is used.
 // DataFill is this with it set to false.
 //
-// Two divergences, both from a Go slice being fixed in length. A segment naming
-// a position past the end of a []any turns that list into a keyed array in PHP;
-// here the write is dropped. And PHP writes into an object's properties, which
-// Go can only do through an addressable struct, so a struct on the path is left
-// alone rather than half-written.
+// Two writes are dropped rather than attempted, both because a Go slice is
+// fixed in length and a struct on the path is not addressable here: a segment
+// naming a position past the end of a []any, and a segment naming a struct
+// field.
 func DataSet(target any, key string, value any, overwrite ...bool) any {
 	over := true
 	if len(overwrite) > 0 {
@@ -194,18 +181,16 @@ func dataSet(target any, segments []string, value any, overwrite bool) any {
 	return fresh
 }
 
-// DataFill answers to helpers.php's data_fill: DataSet that does not overwrite
-// what is already there.
+// DataFill is DataSet that does not overwrite what is already there.
 func DataFill(target any, key string, value any) any {
 	return DataSet(target, key, value, false)
 }
 
-// DataForget answers to helpers.php's data_forget: remove what sits at a "dot"
-// path, with "*" removing it from every element at that level.
+// DataForget removes what sits at a "dot" path, with "*" removing it from
+// every element at that level.
 //
-// The PHP takes the target by reference; the result is the one to keep, for the
-// reason DataSet's is. Removing a position from a []any closes the gap, where
-// PHP's unset leaves the other positions under the keys they had.
+// The result is the one to keep, for the reason DataSet's is. Removing a
+// position from a []any closes the gap: a Go slice cannot hold a hole.
 func DataForget(target any, key string) any {
 	return dataForget(target, strings.Split(key, "."))
 }

@@ -7,10 +7,10 @@ import (
 	"github.com/arandu-io/hesape/pipeline"
 )
 
-// Recover is Handler::registerExceptionHandler, which is the set_exception_handler
-// that installs handleUncaughtException: it captures what escaped and hands it
-// to the Handler. Here what escapes is a panic and the only place to catch one
-// is a deferred recover, so this is middleware rather than a runtime hook.
+// Recover is the middleware that turns a panic into a handled failure: it
+// captures what escaped and hands it to the Handler. The only place to catch a
+// panic is a deferred recover, which is why this is middleware rather than a
+// hook installed once at boot.
 //
 // Order matters and is not a matter of taste: Recover must be the outermost
 // middleware, or a panic raised in any other middleware escapes without a page;
@@ -47,12 +47,9 @@ func Recover(h *Handler) pipeline.Middleware[http.Handler] {
 				if v == http.ErrAbortHandler {
 					panic(v)
 				}
-				// Register was told the environment is "testing", where a
-				// process is not meant to be protected from itself: the panic
-				// travels up to the test that provoked it instead of being
-				// drawn as a page nobody is looking at. It is the same
-				// exception the PHP makes for "testing" when it decides not to
-				// install the shutdown handler.
+				// Register was told the environment is "testing", where a process is not
+				// meant to be protected from itself: the panic travels up to the test that
+				// provoked it instead of being drawn as a page nobody is looking at.
 				if h.runningInTests() {
 					panic(v)
 				}

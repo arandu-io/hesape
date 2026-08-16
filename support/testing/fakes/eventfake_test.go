@@ -281,8 +281,8 @@ func TestEventFakeForwardsWhatItDoesNotRecord(t *testing.T) {
 		t.Error("Subscribe should reach the real dispatcher")
 	}
 
-	// These four do nothing on purpose, as the PHP does; the test is that they
-	// do not reach the dispatcher and do not panic.
+	// These four do nothing on purpose; the test is that they do not reach
+	// the dispatcher and do not panic.
 	events.Push("fakes.orderShipped", nil)
 	events.Flush("fakes.orderShipped")
 	events.Forget("fakes.orderShipped")

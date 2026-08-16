@@ -91,8 +91,7 @@ func TestDontReportDuplicates(t *testing.T) {
 	}
 }
 
-// declined is an error type a callback can be written against, which is how the
-// PHP decides which reportable handles which exception.
+// declined is an error type a callback can be written against.
 type declined struct{ Reason string }
 
 func (d *declined) Error() string { return "payment declined: " + d.Reason }
@@ -277,10 +276,7 @@ func TestThrottleUsingCapsHowOftenAnErrorIsReported(t *testing.T) {
 }
 
 // TestAThrottleOfNoAttemptsNeverReports: MaxAttempts was read as "no throttle
-// asked for" and the error was reported every time -- the opposite answer. The
-// PHP hands the limit to the rate limiter, which allows zero attempts and
-// therefore reports nothing, and it is what an application writes when it wants
-// an error counted somewhere else and never logged.
+// asked for" and the error was reported every time -- the opposite answer.
 func TestAThrottleOfNoAttemptsNeverReports(t *testing.T) {
 	h, ctx, lines := reporting(t, exception.Config{})
 
@@ -297,8 +293,8 @@ func TestAThrottleOfNoAttemptsNeverReports(t *testing.T) {
 	}
 }
 
-// TestAnUnlimitedThrottleReportsEveryTime is Limit::none(), which is what the
-// PHP falls back to when no callback answered.
+// TestAnUnlimitedThrottleReportsEveryTime pins the fallback used when no
+// throttle callback answered.
 func TestAnUnlimitedThrottleReportsEveryTime(t *testing.T) {
 	h, ctx, lines := reporting(t, exception.Config{})
 
@@ -317,8 +313,7 @@ func TestAnUnlimitedThrottleReportsEveryTime(t *testing.T) {
 // a slice in it -- and a value of that type cannot be compared with ==.
 //
 // Go's way of asking "is this that error" about a type like this is an Is
-// method, which is what errors.Is calls and what the PHP's instanceof answers
-// for every exception it looks at.
+// method.
 type causes struct{ of []error }
 
 func (c causes) Error() string { return "several things went wrong" }
@@ -352,8 +347,7 @@ func TestIgnoreAcceptsAnErrorThatCannotBeCompared(t *testing.T) {
 }
 
 // TestLevelRegisteredTwiceKeepsTheLast: the levels were a list read from the
-// front, so the first registration won. The PHP writes $this->levels[$type],
-// which is an assignment: the last one wins.
+// front, so the first registration won.
 func TestLevelRegisteredTwiceKeepsTheLast(t *testing.T) {
 	noisy := errors.New("the third-party API was slow again")
 	h, ctx, lines := reporting(t, exception.Config{})
@@ -368,9 +362,7 @@ func TestLevelRegisteredTwiceKeepsTheLast(t *testing.T) {
 	}
 }
 
-// TestRenderDoesNotReport: it reported on the way in, so an application that
-// followed the PHP -- report, then render, which is what the kernel does there
-// -- logged every failure twice.
+// TestRenderDoesNotReport: it reported on the way in.
 func TestRenderDoesNotReport(t *testing.T) {
 	h, ctx, lines := reporting(t, exception.Config{})
 	failure := exception.Abort(http.StatusConflict, "this invoice is closed")

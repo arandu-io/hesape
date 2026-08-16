@@ -2,42 +2,37 @@ package fakes
 
 import "time"
 
-// PendingChainFake answers
-// Illuminate\Support\Testing\Fakes\PendingChainFake.
+// PendingChainFake is a chain of jobs waiting to be dispatched onto a
+// [BusFake].
 //
-// It is what Bus::chain(jobs) hands back while the bus is faked: the same chain
-// the real PendingChain builds, whose Dispatch writes the rest of the chain
-// onto the first job and hands that job to the fake bus, so that
-// AssertChained has a chain to read.
-//
-// The connection, queue and delay are the ones the real PendingChain carries;
-// a first job that answers Chainable is told about all three, and one that does
-// not is dispatched as it stands -- which is what an unset property is in PHP.
+// A first job that satisfies [Chainable] is told the connection, the queue,
+// the rest of the chain and the delay; one that does not is dispatched as it
+// stands.
 type PendingChainFake struct {
 	bus *BusFake
 
-	// Job answers PendingChain::$job, the first job of the chain.
+	// Job is the first job of the chain.
 	Job any
-	// Chain answers PendingChain::$chain, the jobs behind the first.
+	// Chain is the jobs queued behind the first.
 	Chain []any
-	// Connection answers PendingChain::$connection.
+	// Connection is the connection the chain runs on, and may be empty.
 	Connection string
-	// Queue answers PendingChain::$queue.
+	// Queue is the queue the chain runs on, and may be empty.
 	Queue string
-	// Delay answers PendingChain::$delay.
+	// Delay is how long the chain waits before running.
 	Delay time.Duration
 }
 
-// NewPendingChainFake answers PendingChainFake::__construct.
+// NewPendingChainFake builds a pending chain over a first job and the jobs
+// behind it, bound to the bus that will dispatch it.
 func NewPendingChainFake(bus *BusFake, job any, chain []any) *PendingChainFake {
 	return &PendingChainFake{bus: bus, Job: job, Chain: chain}
 }
 
-// Dispatch answers PendingChainFake::dispatch.
+// Dispatch dispatches the chain on the bus and returns what the bus returned.
+// A nil first job dispatches nothing.
 //
-// A func() first job becomes a CallQueuedClosure, which is what the PHP does
-// with a Closure, and the chain, connection, queue and delay are written onto
-// the job before it goes to the bus, exactly as they are there.
+// A func() first job is wrapped in a [CallQueuedClosure] first.
 func (p *PendingChainFake) Dispatch() any {
 	job := p.Job
 	if closure, ok := job.(func()); ok {

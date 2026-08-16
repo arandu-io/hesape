@@ -1,7 +1,4 @@
-// Package exceptions mirrors Illuminate\Support\Exceptions.
+// Package exceptions holds the error types the support packages share.
 //
-// The files it answers to, in the clone at
-// laravel_illuminate/support/Exceptions:
-//
-//	MathException.php
+// It declares [MathException], handed back when a number cannot be written out.
 package exceptions

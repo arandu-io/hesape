@@ -1,20 +1,17 @@
 package exceptions
 
-// MathException answers to Illuminate\Support\Exceptions\MathException: the
-// RuntimeException Number::spell and the currency and percentage writers raise
-// when they are handed a number they cannot write.
-//
-// The PHP class carries nothing but its name; in Go an error carries its
-// message, so this does.
+// MathException is the error handed back when a number cannot be written out:
+// the spelling, currency and percentage writers return it for a value they
+// cannot render.
 type MathException struct {
-	// Message is what the PHP passes to the RuntimeException constructor.
+	// Message says why the number could not be written.
 	Message string
 }
 
-// NewMathException answers to `new MathException($message)`.
+// NewMathException builds a MathException carrying the given message.
 func NewMathException(message string) *MathException {
 	return &MathException{Message: message}
 }
 
-// Error is the getMessage of the PHP exception, under the name Go looks for.
+// Error returns the message, so MathException satisfies error.
 func (e *MathException) Error() string { return e.Message }

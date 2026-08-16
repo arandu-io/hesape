@@ -17,75 +17,60 @@ import (
 	"github.com/arandu-io/hesape/testing/constraints"
 )
 
-// TestResponse answers to Illuminate\Testing\TestResponse: what came back from
-// a request, with the assertions worth making about it.
+// TestResponse is what came back from a request, with the assertions worth
+// making about it.
 //
-// It is the largest and most used class in Illuminate\Testing, and it is
-// written across three files here: this one for the status, the headers, the
-// cookies and the body; testresponse_json.go for the JSON payload; and
-// testresponse_session.go for the session, the view and the validation errors.
-//
-// Every assertion returns the response, so they chain the way the PHP's do:
+// Every assertion returns the response.
 //
 //	response.AssertOK().AssertSee("Invoices").AssertDontSee("Draft")
 type TestResponse struct {
 	t T
 
-	// BaseRequest answers to the public $baseRequest.
+	// BaseRequest is the request that produced this response.
 	BaseRequest *http.Request
 
-	// BaseResponse answers to the public $baseResponse.
+	// BaseResponse is the response itself.
 	BaseResponse *http.Response
 
-	// Exceptions answers to the public $exceptions: what the request logged on
-	// its way through. TestResponseAssert reads the last one to put it in the
-	// failure message, which is done by messageWithContext here.
+	// Exceptions is what the request logged on its way through. The last one is
+	// appended to a failure message by messageWithContext.
 	Exceptions LoggedExceptionCollection
 
-	// Original answers to $response->original, which the PHP reaches through
-	// __get. It is what the handler returned before it became bytes -- a
-	// *view.View, for the assertView* family -- and it is a field because Go
-	// has no __get and no response object to proxy to yet.
+	// Original is what the handler returned before it became bytes -- a
+	// *view.View, for the view assertions. It is recorded rather than inferred,
+	// because the bytes no longer say what produced them.
 	Original any
 
-	// URL is what app('url') resolves to in the PHP.
+	// URL is the generator the location assertions resolve against.
 	//
-	// assertLocation, assertRedirectBack, assertRedirectToRoute and
-	// assertRedirectToSignedRoute are written against the URL generator, and
-	// the PHP reaches it through the container. Go has no container, so the
-	// test that needs those four hands one over; the rest of the class does
-	// not touch it.
+	// AssertLocation, AssertRedirectBack, AssertRedirectToRoute and
+	// AssertRedirectToSignedRoute need it, and say so when it is missing rather
+	// than guessing. Nothing else here touches it.
 	URL *routing.UrlGenerator
 
-	// Encrypter is what app('encrypter') resolves to in the PHP, and it is what
-	// assertCookie decrypts with. A test asserting about a plain cookie does
-	// not need it: that is assertPlainCookie.
+	// Encrypter is what [TestResponse.AssertCookie] decrypts with. A test
+	// asserting about an unencrypted cookie does not need it: that is
+	// [TestResponse.AssertPlainCookie].
 	Encrypter *encryption.Encrypter
 
 	// Flash is what reads the validation errors and the old input back off the
 	// response.
 	//
-	// The PHP finds both in the session, under 'errors' and '_old_input',
-	// because that is where a redirect from a rejected form leaves them. This
-	// framework leaves them in a signed one-shot cookie instead -- see
-	// session.Flash, and the reason it gives: the three forms that need them
-	// most are submitted by somebody who has no session at all. So the
-	// assertions that the PHP writes against session()->get('errors') are
-	// written here against the flash, over the same key the application signs
-	// it with.
+	// They travel in a signed one-shot cookie rather than in the session -- see
+	// session.Flash, and the reason it gives: the three forms that need them most
+	// are submitted by somebody who has no session at all.
 	//
 	// A test that asserts about errors or old input sets it. AssertSessionHas
 	// and AssertSessionMissing do not need it: those read the session store,
 	// which is a general key/value store in both languages.
 	Flash *session.Flash
 
-	// Streamed answers to `$this->baseResponse instanceof StreamedResponse`.
+	// Streamed records that the handler streamed the response.
 	//
-	// The PHP asks the response what class it is. An *http.Response is the one
-	// class every response arrives as, so what the handler did is recorded
-	// rather than inferred -- the same reason Original is a field. A response
-	// that arrived over the wire chunked is streamed whether or not anybody set
-	// this, which is what AssertStreamed also reads.
+	// Every response arrives as an *http.Response, so what the handler did is
+	// recorded rather than inferred -- the same reason Original is a field. A
+	// response that arrived chunked is streamed whether or not anybody set this,
+	// which AssertStreamed also reads.
 	Streamed bool
 
 	// content is the body, read once. An http.Response body is a stream that
@@ -94,14 +79,14 @@ type TestResponse struct {
 	content []byte
 }
 
-// NewTestResponse answers to TestResponse::__construct.
+// NewTestResponse wraps a response and the request that produced it.
 //
 // The body is read here and closed, because it is a stream that can be read
 // once and every assertion below reads it.
 //
-// request stands for the PHP's `$request = null`. It is what the session, the
-// URL resolution and the view are read through, so an assertion that needs one
-// says so rather than reaching for an ambient request.
+// The request is what the session, the URL resolution and the view are read
+// through, so an assertion that needs one says so rather than reaching for an
+// ambient request.
 func NewTestResponse(t T, response *http.Response, request *http.Request) *TestResponse {
 	r := &TestResponse{t: t, BaseResponse: response, BaseRequest: request}
 
@@ -116,19 +101,20 @@ func NewTestResponse(t T, response *http.Response, request *http.Request) *TestR
 	return r
 }
 
-// FromBaseResponse answers to TestResponse::fromBaseResponse.
+// FromBaseResponse is [NewTestResponse] under the name that reads better at a
+// call site building one from a response already in hand.
 func FromBaseResponse(t T, response *http.Response, request *http.Request) *TestResponse {
 	return NewTestResponse(t, response, request)
 }
 
-// WithExceptions answers to TestResponse::withExceptions.
+// WithExceptions sets what the request logged, which a failure message then
+// carries. It returns the response.
 func (r *TestResponse) WithExceptions(exceptions LoggedExceptionCollection) *TestResponse {
 	r.Exceptions = exceptions
 	return r
 }
 
-// GetStatusCode answers to Response::getStatusCode, which TestResponse reaches
-// through __call.
+// GetStatusCode returns the status, or 0 when there is no response.
 func (r *TestResponse) GetStatusCode() int {
 	if r.BaseResponse == nil {
 		return 0
@@ -136,8 +122,8 @@ func (r *TestResponse) GetStatusCode() int {
 	return r.BaseResponse.StatusCode
 }
 
-// Headers answers to $response->headers, which TestResponse reaches through
-// __get.
+// Headers returns the response headers, or an empty set when there is no
+// response.
 func (r *TestResponse) Headers() http.Header {
 	if r.BaseResponse == nil {
 		return http.Header{}
@@ -145,28 +131,27 @@ func (r *TestResponse) Headers() http.Header {
 	return r.BaseResponse.Header
 }
 
-// GetContent answers to Response::getContent.
+// GetContent returns the body, which was read once when the response was
+// wrapped.
 func (r *TestResponse) GetContent() string { return string(r.content) }
 
-// Content answers to Illuminate\Http\Response::content, which is getContent
-// under the name the Illuminate side of the hierarchy gives it. Both are here
-// because both are in the PHP surface, and they are the same bytes.
+// Content is [TestResponse.GetContent] under a shorter name.
 func (r *TestResponse) Content() string { return r.GetContent() }
 
-// isSuccessful answers to Response::isSuccessful.
+// isSuccessful reports whether the status is in the 2xx range.
 func (r *TestResponse) isSuccessful() bool {
 	code := r.GetStatusCode()
 	return code >= 200 && code < 300
 }
 
-// isServerError answers to Response::isServerError.
+// isServerError reports whether the status is in the 5xx range.
 func (r *TestResponse) isServerError() bool {
 	code := r.GetStatusCode()
 	return code >= 500 && code < 600
 }
 
-// isRedirect answers to Response::isRedirect, whose list is the one the
-// redirect assertions print.
+// isRedirect reports whether the status is one of the redirect codes the
+// redirect assertions print: 201, 301, 302, 303, 307 and 308.
 func (r *TestResponse) isRedirect() bool {
 	switch r.GetStatusCode() {
 	case http.StatusCreated,
@@ -180,7 +165,7 @@ func (r *TestResponse) isRedirect() bool {
 	return false
 }
 
-// AssertSuccessful answers to TestResponse::assertSuccessful.
+// AssertSuccessful asserts a status in the 2xx range.
 func (r *TestResponse) AssertSuccessful() *TestResponse {
 	r.t.Helper()
 
@@ -189,8 +174,8 @@ func (r *TestResponse) AssertSuccessful() *TestResponse {
 	return r
 }
 
-// AssertSuccessfulPrecognition answers to
-// TestResponse::assertSuccessfulPrecognition.
+// AssertSuccessfulPrecognition asserts an empty 204 carrying a
+// Precognition-Success header set to "true".
 func (r *TestResponse) AssertSuccessfulPrecognition() *TestResponse {
 	r.t.Helper()
 
@@ -203,7 +188,7 @@ func (r *TestResponse) AssertSuccessfulPrecognition() *TestResponse {
 	return r
 }
 
-// AssertServerError answers to TestResponse::assertServerError.
+// AssertServerError asserts a status in the 5xx range.
 func (r *TestResponse) AssertServerError() *TestResponse {
 	r.t.Helper()
 
@@ -212,7 +197,7 @@ func (r *TestResponse) AssertServerError() *TestResponse {
 	return r
 }
 
-// AssertStatus answers to TestResponse::assertStatus.
+// AssertStatus asserts the status is the one expected.
 func (r *TestResponse) AssertStatus(status int) *TestResponse {
 	r.t.Helper()
 
@@ -221,16 +206,14 @@ func (r *TestResponse) AssertStatus(status int) *TestResponse {
 	return r
 }
 
-// statusMessageWithDetails answers to
-// TestResponse::statusMessageWithDetails.
+// statusMessageWithDetails is the message the status assertions share, naming
+// what was expected and what arrived.
 func (r *TestResponse) statusMessageWithDetails(expected any, actual int) string {
 	return fmt.Sprintf("Expected response status code [%v] but received %d.", expected, actual)
 }
 
-// AssertRedirect answers to TestResponse::assertRedirect.
-//
-// The variadic uri stands for the PHP's `$uri = null`: without one it asserts
-// only that the response redirects.
+// AssertRedirect asserts a redirect status, and the location too when one is
+// given. At most one location may be given.
 func (r *TestResponse) AssertRedirect(uri ...string) *TestResponse {
 	r.t.Helper()
 
@@ -243,7 +226,8 @@ func (r *TestResponse) AssertRedirect(uri ...string) *TestResponse {
 	return r
 }
 
-// AssertRedirectContains answers to TestResponse::assertRedirectContains.
+// AssertRedirectContains asserts a redirect status whose location contains the
+// given text.
 func (r *TestResponse) AssertRedirectContains(uri string) *TestResponse {
 	r.t.Helper()
 
@@ -256,7 +240,8 @@ func (r *TestResponse) AssertRedirectContains(uri string) *TestResponse {
 	return r
 }
 
-// AssertRedirectBack answers to TestResponse::assertRedirectBack.
+// AssertRedirectBack asserts a redirect to the previous location. It needs
+// [TestResponse.URL] to know where back is, and says so when it is missing.
 func (r *TestResponse) AssertRedirectBack() *TestResponse {
 	r.t.Helper()
 
@@ -272,9 +257,8 @@ func (r *TestResponse) AssertRedirectBack() *TestResponse {
 	return r.AssertLocation(r.URL.Previous(""))
 }
 
-// AssertRedirectToRoute answers to TestResponse::assertRedirectToRoute.
-//
-// The variadic parameters stand for the PHP's `$parameters = []`.
+// AssertRedirectToRoute asserts a redirect to the named route, built with the
+// parameters given. It needs [TestResponse.URL] to turn the name into a URL.
 func (r *TestResponse) AssertRedirectToRoute(name string, parameters ...map[string]any) *TestResponse {
 	r.t.Helper()
 
@@ -296,11 +280,9 @@ func (r *TestResponse) AssertRedirectToRoute(name string, parameters ...map[stri
 	return r.AssertLocation(uri)
 }
 
-// AssertRedirectToSignedRoute answers to
-// TestResponse::assertRedirectToSignedRoute.
-//
-// name stands for the PHP's `$name = null`: the empty string asserts only that
-// the location carries a valid signature, without saying which route it is.
+// AssertRedirectToSignedRoute asserts a redirect to a route whose signature is
+// valid, and to the named route too when a name is given. An empty name checks
+// only the signature. It needs [TestResponse.URL] to check the signature.
 func (r *TestResponse) AssertRedirectToSignedRoute(name string, parameters map[string]any, absolute bool) *TestResponse {
 	r.t.Helper()
 
@@ -338,9 +320,9 @@ func (r *TestResponse) AssertRedirectToSignedRoute(name string, parameters map[s
 	return r
 }
 
-// withoutSignature answers to the fullUrlWithQuery(['signature' => null,
-// 'expires' => null]) in assertRedirectToSignedRoute: the location with the two
-// parameters the signature added taken back off.
+// withoutSignature returns the location with the two query parameters the
+// signature added -- signature and expires -- taken back off, so it can be
+// compared against the route as it was built.
 func withoutSignature(u *url.URL) string {
 	if u == nil {
 		return ""
@@ -355,10 +337,8 @@ func withoutSignature(u *url.URL) string {
 	return strings.TrimSuffix(clean.String(), "?")
 }
 
-// AssertHeader answers to TestResponse::assertHeader.
-//
-// The variadic value stands for the PHP's `$value = null`: without one it
-// asserts only that the header is there.
+// AssertHeader asserts the header is present, and holds the value too when one
+// is given. At most one value may be given, and a nil one checks only presence.
 func (r *TestResponse) AssertHeader(headerName string, value ...any) *TestResponse {
 	r.t.Helper()
 
@@ -375,7 +355,7 @@ func (r *TestResponse) AssertHeader(headerName string, value ...any) *TestRespon
 	return r
 }
 
-// AssertHeaderMissing answers to TestResponse::assertHeaderMissing.
+// AssertHeaderMissing asserts the header is not present.
 func (r *TestResponse) AssertHeaderMissing(headerName string) *TestResponse {
 	r.t.Helper()
 
@@ -384,13 +364,15 @@ func (r *TestResponse) AssertHeaderMissing(headerName string) *TestResponse {
 	return r
 }
 
-// hasHeader answers to HeaderBag::has.
+// hasHeader reports whether the header is present, even when its value is
+// empty.
 func (r *TestResponse) hasHeader(name string) bool {
 	_, ok := r.Headers()[http.CanonicalHeaderKey(name)]
 	return ok
 }
 
-// AssertLocation answers to TestResponse::assertLocation.
+// AssertLocation asserts the Location header points at the given URI, compared
+// as absolute URLs.
 func (r *TestResponse) AssertLocation(uri string) *TestResponse {
 	r.t.Helper()
 
@@ -398,8 +380,8 @@ func (r *TestResponse) AssertLocation(uri string) *TestResponse {
 	return r
 }
 
-// to answers to app('url')->to($uri): the URI as an absolute URL, so that a
-// path and the full URL of the same place compare equal.
+// to renders a URI as an absolute URL, so that a path and the full URL of the
+// same place compare equal.
 //
 // With no URL generator it resolves against the request instead, which is where
 // the generator's own root comes from; with neither, the URI is compared as it
@@ -420,10 +402,8 @@ func (r *TestResponse) to(uri string) string {
 	return r.BaseRequest.URL.ResolveReference(parsed).String()
 }
 
-// AssertDownload answers to TestResponse::assertDownload.
-//
-// The variadic filename stands for the PHP's `$filename = null`: without one it
-// asserts only that a download was offered.
+// AssertDownload asserts the response offers a file download, and that it
+// carries the given filename when one is given.
 func (r *TestResponse) AssertDownload(filename ...string) *TestResponse {
 	r.t.Helper()
 
@@ -462,21 +442,18 @@ func (r *TestResponse) AssertDownload(filename ...string) *TestResponse {
 	return r
 }
 
-// AssertPlainCookie answers to TestResponse::assertPlainCookie: the cookie is
-// there and holds the value, unencrypted.
-//
-// The variadic value stands for the PHP's `$value = null`.
+// AssertPlainCookie asserts the cookie is there and holds the value,
+// unencrypted.
 func (r *TestResponse) AssertPlainCookie(cookieName string, value ...any) *TestResponse {
 	r.t.Helper()
 	return r.assertCookie(cookieName, value, false, false)
 }
 
-// AssertCookie answers to TestResponse::assertCookie: the cookie is there and,
-// when a value is given, decrypts to it.
+// AssertCookie asserts the cookie is there and, when a value is given,
+// decrypts to it.
 //
-// The variadic value stands for the PHP's `$value = null, $encrypted = true,
-// $unserialize = false`. Passing nothing asserts only that the cookie is there;
-// passing a value asserts what it holds, decrypting first.
+// Passing nothing asserts only that the cookie is there; passing a value
+// asserts what it holds, decrypting first.
 func (r *TestResponse) AssertCookie(cookieName string, value ...any) *TestResponse {
 	r.t.Helper()
 	return r.assertCookie(cookieName, value, true, false)
@@ -499,7 +476,8 @@ func (r *TestResponse) assertCookie(cookieName string, value []any, encrypted, u
 	return r
 }
 
-// AssertCookieExpired answers to TestResponse::assertCookieExpired.
+// AssertCookieExpired asserts the cookie is there and its expiry is in the
+// past.
 func (r *TestResponse) AssertCookieExpired(cookieName string) *TestResponse {
 	r.t.Helper()
 
@@ -515,7 +493,8 @@ func (r *TestResponse) AssertCookieExpired(cookieName string) *TestResponse {
 	return r
 }
 
-// AssertCookieNotExpired answers to TestResponse::assertCookieNotExpired.
+// AssertCookieNotExpired asserts the cookie is there and its expiry is unset
+// or in the future.
 func (r *TestResponse) AssertCookieNotExpired(cookieName string) *TestResponse {
 	r.t.Helper()
 
@@ -531,7 +510,7 @@ func (r *TestResponse) AssertCookieNotExpired(cookieName string) *TestResponse {
 	return r
 }
 
-// AssertCookieMissing answers to TestResponse::assertCookieMissing.
+// AssertCookieMissing asserts the cookie is not on the response.
 func (r *TestResponse) AssertCookieMissing(cookieName string) *TestResponse {
 	r.t.Helper()
 
@@ -540,16 +519,11 @@ func (r *TestResponse) AssertCookieMissing(cookieName string) *TestResponse {
 	return r
 }
 
-// GetCookie answers to TestResponse::getCookie.
+// GetCookie returns the named cookie, or nil when it is not on the response.
 //
-// decrypt needs the Encrypter, which is what app('encrypter') resolves to in
-// the PHP. Without one the test is told to set it rather than handed the
-// ciphertext, because an assertion comparing a value against ciphertext fails
-// for a response that is right.
-//
-// unserialize is the PHP's second decrypt argument. PHP serialisation is not a
-// format this collection writes, so it is accepted and ignored: a cookie here
-// carries a string.
+// decrypt needs the Encrypter. Without one the test is told to set it rather
+// than handed the ciphertext, because an assertion comparing a value against
+// ciphertext fails for a response that is right.
 func (r *TestResponse) GetCookie(cookieName string, decrypt, unserialize bool) *http.Cookie {
 	if r.BaseResponse == nil {
 		return nil
@@ -586,8 +560,7 @@ func (r *TestResponse) GetCookie(cookieName string, decrypt, unserialize bool) *
 	return nil
 }
 
-// AssertContent answers to TestResponse::assertContent: the body is exactly
-// this.
+// AssertContent asserts the body is exactly this.
 func (r *TestResponse) AssertContent(value string) *TestResponse {
 	r.t.Helper()
 
@@ -595,11 +568,8 @@ func (r *TestResponse) AssertContent(value string) *TestResponse {
 	return r
 }
 
-// AssertSee answers to TestResponse::assertSee: the text is on the page.
-//
-// value stands for the PHP's `string|array`: one string, or a []string. escape
-// stands for `$escape = true`, which is what makes AssertSee("Tom & Jerry")
-// match a page that wrote it as "Tom &amp; Jerry".
+// AssertSee asserts the text is on the page. The text is HTML-escaped first
+// unless escape is given as false.
 func (r *TestResponse) AssertSee(value any, escape ...bool) *TestResponse {
 	r.t.Helper()
 
@@ -609,15 +579,13 @@ func (r *TestResponse) AssertSee(value any, escape ...bool) *TestResponse {
 	return r
 }
 
-// AssertSeeHTML answers to TestResponse::assertSeeHtml: assertSee without the
-// escaping.
+// AssertSeeHTML is [TestResponse.AssertSee] without the escaping.
 func (r *TestResponse) AssertSeeHTML(value any) *TestResponse {
 	r.t.Helper()
 	return r.AssertSee(value, false)
 }
 
-// AssertSeeInOrder answers to TestResponse::assertSeeInOrder: the strings are
-// on the page, each after the last.
+// AssertSeeInOrder asserts the strings are on the page, each after the last.
 //
 // It is the assertion three AssertSee calls are not: they pass on a page that
 // shows the three in any order, and "the total is under the line items" is an
@@ -629,14 +597,14 @@ func (r *TestResponse) AssertSeeInOrder(values []string, escape ...bool) *TestRe
 	return r
 }
 
-// AssertSeeHTMLInOrder answers to TestResponse::assertSeeHtmlInOrder.
+// AssertSeeHTMLInOrder is [TestResponse.AssertSeeInOrder] without the
+// escaping.
 func (r *TestResponse) AssertSeeHTMLInOrder(values []string) *TestResponse {
 	r.t.Helper()
 	return r.AssertSeeInOrder(values, false)
 }
 
-// AssertSeeText answers to TestResponse::assertSeeText: the text is on the
-// page once the tags are taken off.
+// AssertSeeText asserts the text is on the page once the tags are taken off.
 //
 // It is the one to reach for when the words are broken up by markup: "Hello
 // <b>Alice</b>" contains "Hello Alice" only after the tags are gone.
@@ -650,7 +618,8 @@ func (r *TestResponse) AssertSeeText(value any, escape ...bool) *TestResponse {
 	return r
 }
 
-// AssertSeeTextInOrder answers to TestResponse::assertSeeTextInOrder.
+// AssertSeeTextInOrder asserts the strings are on the page once the tags are
+// taken off, each after the last.
 func (r *TestResponse) AssertSeeTextInOrder(values []string, escape ...bool) *TestResponse {
 	r.t.Helper()
 
@@ -658,8 +627,7 @@ func (r *TestResponse) AssertSeeTextInOrder(values []string, escape ...bool) *Te
 	return r
 }
 
-// AssertDontSee answers to TestResponse::assertDontSee: the text is not on the
-// page.
+// AssertDontSee asserts the text is not on the page.
 //
 // It is the half people skip and the half that catches a leak: a draft in a
 // public listing, an address on a page that should not name one, a button
@@ -673,13 +641,14 @@ func (r *TestResponse) AssertDontSee(value any, escape ...bool) *TestResponse {
 	return r
 }
 
-// AssertDontSeeHTML answers to TestResponse::assertDontSeeHtml.
+// AssertDontSeeHTML is [TestResponse.AssertDontSee] without the escaping.
 func (r *TestResponse) AssertDontSeeHTML(value any) *TestResponse {
 	r.t.Helper()
 	return r.AssertDontSee(value, false)
 }
 
-// AssertDontSeeText answers to TestResponse::assertDontSeeText.
+// AssertDontSeeText asserts the text is not on the page once the tags are
+// taken off.
 func (r *TestResponse) AssertDontSeeText(value any, escape ...bool) *TestResponse {
 	r.t.Helper()
 
@@ -690,12 +659,8 @@ func (r *TestResponse) AssertDontSeeText(value any, escape ...bool) *TestRespons
 	return r
 }
 
-// Dump answers to TestResponse::dump: print the body, decoded when it is JSON.
-//
-// The PHP writes to the output; this writes to the test's log, which go test
-// shows beside the test that produced it and hides when the test passes.
-//
-// The variadic key stands for the PHP's `$key = null`.
+// Dump logs the body, decoded and indented when it is JSON. A key logs only
+// that part of the payload.
 func (r *TestResponse) Dump(key ...string) *TestResponse {
 	r.t.Helper()
 
@@ -715,7 +680,7 @@ func (r *TestResponse) Dump(key ...string) *TestResponse {
 	return r
 }
 
-// DumpHeaders answers to TestResponse::dumpHeaders.
+// DumpHeaders logs the response headers.
 func (r *TestResponse) DumpHeaders() *TestResponse {
 	r.t.Helper()
 
@@ -723,10 +688,8 @@ func (r *TestResponse) DumpHeaders() *TestResponse {
 	return r
 }
 
-// DumpSession answers to TestResponse::dumpSession.
-//
-// The variadic keys stand for the PHP's `$keys = []`: without any, the whole
-// session.
+// DumpSession logs the session, or only the given keys when there are any. It
+// logs nothing when the response carries no session.
 func (r *TestResponse) DumpSession(keys ...string) *TestResponse {
 	r.t.Helper()
 
@@ -743,12 +706,10 @@ func (r *TestResponse) DumpSession(keys ...string) *TestResponse {
 	return r
 }
 
-// DDHeaders answers to TestResponse::ddHeaders.
+// DDHeaders logs the response headers and stops the test.
 //
-// The PHP dumps and calls exit(1), which ends the process. Ending the process
-// under go test would take every other test with it, so this ends the test:
-// the dump is printed and the test stops where the call is, which is what
-// exit(1) does for the one test PHPUnit is running.
+// Ending the process would take every other test with it, so this ends the
+// test instead: the dump is printed and the test stops where the call is.
 func (r *TestResponse) DDHeaders() *TestResponse {
 	r.t.Helper()
 
@@ -757,7 +718,7 @@ func (r *TestResponse) DDHeaders() *TestResponse {
 	return r
 }
 
-// DDBody answers to TestResponse::ddBody.
+// DDBody logs the body and stops the test.
 func (r *TestResponse) DDBody(key ...string) *TestResponse {
 	r.t.Helper()
 
@@ -766,7 +727,7 @@ func (r *TestResponse) DDBody(key ...string) *TestResponse {
 	return r
 }
 
-// DDJSON answers to TestResponse::ddJson.
+// DDJSON logs the decoded payload and stops the test.
 func (r *TestResponse) DDJSON(key ...string) *TestResponse {
 	r.t.Helper()
 
@@ -775,7 +736,7 @@ func (r *TestResponse) DDJSON(key ...string) *TestResponse {
 	return r
 }
 
-// DDSession answers to TestResponse::ddSession.
+// DDSession logs the session and stops the test.
 func (r *TestResponse) DDSession(keys ...string) *TestResponse {
 	r.t.Helper()
 
@@ -784,14 +745,14 @@ func (r *TestResponse) DDSession(keys ...string) *TestResponse {
 	return r
 }
 
-// session answers to TestResponse::session.
+// session returns the session store the request carried, or nil.
 //
-// The PHP resolves app('session.store') and starts it. Go has no container: the
-// session travels on the request's context, which is where the middleware that
-// started it put it and where every handler reads it. A response built without
-// a request, or from one that never went through the session middleware, has
-// none -- and the session assertions say so rather than passing over an empty
-// store, which would be an assertion that proves nothing.
+// The session travels on the request's context, which is where the middleware
+// that started it put it and where every handler reads it. A response built
+// without a request, or from one that never went through the session
+// middleware, has none -- and the session assertions say so rather than
+// passing over an empty store, which would be an assertion that proves
+// nothing.
 func (r *TestResponse) session() *session.Store {
 	if r.BaseRequest == nil {
 		return nil
@@ -812,12 +773,10 @@ func (r *TestResponse) requireSession() *session.Store {
 	return store
 }
 
-// messageWithContext answers to
-// TestResponseAssert::injectResponseContext: the failure, with what the request
-// logged appended to it.
+// messageWithContext returns the failure message with the last exception the
+// request logged appended to it.
 //
-// The PHP catches the failed expectation and rewrites its message. Go has no
-// exception to catch, so the context is added on the way in instead. The
+// The context is added on the way in rather than caught on the way out. The
 // errors flashed to the session and the ones in the JSON body are appended by
 // the assertions that read them, which is where they are already decoded.
 func (r *TestResponse) messageWithContext(message string) string {
@@ -833,8 +792,8 @@ func (r *TestResponse) messageWithContext(message string) string {
 	return fmt.Sprintf("%s\n\nThe following exception occurred during the last request:\n\n%v\n", message, last)
 }
 
-// wrapStrings answers to Arr::wrap over the `string|array $value` the see
-// assertions take.
+// wrapStrings normalises what the see assertions take -- a string, a list of
+// them, or anything printable -- into a list of strings.
 func wrapStrings(value any) []string {
 	switch v := value.(type) {
 	case nil:
@@ -854,8 +813,8 @@ func wrapStrings(value any) []string {
 	}
 }
 
-// escapeAll answers to `$escape ? array_map(e(...), $value) : $value`. The
-// variadic stands for the PHP's `$escape = true`.
+// escapeAll HTML-escapes every value unless escape is given as false, which is
+// the choice the see assertions pass through.
 func escapeAll(values []string, escape []bool) []string {
 	if len(escape) > 0 && !escape[0] {
 		return values
@@ -868,11 +827,10 @@ func escapeAll(values []string, escape []bool) []string {
 	return out
 }
 
-// stripTags answers to strip_tags: the text of a page, with the markup taken
-// off.
+// stripTags returns the text of a page with the markup taken off.
 //
-// It is what makes assertSeeText find "Hello Alice" in "Hello <b>Alice</b>",
-// and PHP has it as a builtin where Go does not.
+// It is what makes [TestResponse.AssertSeeText] find "Hello Alice" in
+// "Hello <b>Alice</b>". An unclosed tag swallows the rest of the input.
 func stripTags(html string) string {
 	var out strings.Builder
 	out.Grow(len(html))
@@ -896,7 +854,7 @@ func stripTags(html string) string {
 
 		end := strings.IndexByte(html[i:], '>')
 		if end < 0 {
-			// An unclosed tag swallows the rest, which is what strip_tags does.
+			// An unclosed tag swallows the rest.
 			return out.String()
 		}
 		i += end + 1
@@ -905,11 +863,7 @@ func stripTags(html string) string {
 	return out.String()
 }
 
-// firstMap answers to a PHP parameter whose default is an empty array.
-//
-// The value type is any and not string because the PHP passes route parameters
-// straight to route(), which accepts anything a URL segment can be written
-// from -- an int id, a record with a route key, a string slug.
+// firstMap returns the single optional map, or an empty one.
 func firstMap(values []map[string]any) map[string]any {
 	if len(values) == 0 {
 		return map[string]any{}

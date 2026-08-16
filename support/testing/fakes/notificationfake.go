@@ -8,79 +8,64 @@ import (
 // Notifiable is the little of a notifiable entity that a NotificationFake asks
 // of what it is sending to: the key it files the record under, which is what
 // tells one user from another.
-//
-// PHP calls getKey() on the model and casts the result to a string; a Go value
-// answers with the string itself.
 type Notifiable interface {
-	// GetKey answers Illuminate\Database\Eloquent\Model::getKey.
+	// GetKey returns the key that tells this notifiable from another.
 	GetKey() string
 }
 
-// Notification is the little of Illuminate\Notifications\Notification that a
-// NotificationFake asks of what it records: the channels the notification says
-// it goes out on.
+// Notification is what a [NotificationFake] asks of what it records: the
+// channels the notification says it goes out on.
 //
-// A notification that does not answer this is recorded on no channel, and the
-// PHP skips a notifiable whose channels come back empty -- so a notification
-// with no Via never lands anywhere, there or here.
+// A notification that does not satisfy it is recorded on no channel.
 type Notification interface {
-	// Via answers Notification::via.
+	// Via returns the channels the notification goes out on for this
+	// notifiable.
 	Via(notifiable any) []string
 }
 
-// NotificationIdentity is answered by a notification that carries the
-// Notification::$id the dispatcher stamps on it, so that the same notification
-// sent to ten people is one notification.
+// NotificationIdentity is satisfied by a notification carrying the id the
+// dispatcher stamps on it, so the same notification sent to ten people is one
+// notification.
 //
-// It is optional: a notification that does not answer it is recorded without an
-// id, and no assertion in this package reads one.
+// It is optional: a notification that does not satisfy it is recorded without
+// an id, and no assertion in this package reads one.
 type NotificationIdentity interface {
-	// ID answers Notification::$id. The initialism is upper case because Go
-	// spells it that way.
+	// ID returns the id the notification was stamped with.
 	ID() string
-	// SetID writes Notification::$id.
+	// SetID stamps the notification with an id.
 	SetID(id string)
 }
 
-// ShouldSend is answered by a notification that decides, per notifiable and per
-// channel, whether it goes out at all.
-//
-// PHP checks method_exists($notification, 'shouldSend') and drops the channel
-// when the answer is false; a channel it does not answer for is kept.
+// ShouldSend is satisfied by a notification that decides, per notifiable and
+// per channel, whether it goes out at all.
 type ShouldSend interface {
-	// ShouldSend answers Notification::shouldSend.
+	// ShouldSend reports whether the notification goes out to this notifiable
+	// on this channel.
 	ShouldSend(notifiable any, channel string) bool
 }
 
-// HasLocalePreference answers
-// Illuminate\Contracts\Translation\HasLocalePreference: the locale a notifiable
+// HasLocalePreference is satisfied by a notifiable that states the locale it
 // would rather be written to in.
 type HasLocalePreference interface {
-	// PreferredLocale answers HasLocalePreference::preferredLocale.
+	// PreferredLocale returns the locale the notifiable prefers.
 	PreferredLocale() string
 }
 
-// AnonymousNotifiable answers Illuminate\Notifications\AnonymousNotifiable: the
-// notifiable a notification sent on demand goes to, which is nobody in
-// particular.
-//
-// Its key is empty, as the PHP's getKey() returns null, and that is what files
-// every on-demand notification under one entry -- which is what
-// AssertSentOnDemand reads.
+// AnonymousNotifiable is the notifiable a notification sent on demand goes to,
+// which is nobody in particular.
 type AnonymousNotifiable struct {
-	// Routes answers AnonymousNotifiable::$routes: the address per channel.
+	// Routes is the address to deliver to, per channel.
 	Routes map[string]string
 }
 
-// NewAnonymousNotifiable answers `new AnonymousNotifiable`.
+// NewAnonymousNotifiable returns an anonymous notifiable with no routes.
 func NewAnonymousNotifiable() *AnonymousNotifiable {
 	return &AnonymousNotifiable{Routes: map[string]string{}}
 }
 
-// Route answers AnonymousNotifiable::route: where this channel should deliver.
-//
-// PHP throws for the database channel, which cannot address a row that does not
-// exist; the error is returned rather than thrown, as Go returns one.
+// Route sets where the channel should deliver, and returns the notifiable. The
+// database channel is an error: an on-demand notification has no row to write
+// against.
 func (a *AnonymousNotifiable) Route(channel string, route string) (*AnonymousNotifiable, error) {
 	if channel == "database" {
 		return a, fmt.Errorf("the database channel does not support on-demand notifications")
@@ -92,7 +77,7 @@ func (a *AnonymousNotifiable) Route(channel string, route string) (*AnonymousNot
 	return a, nil
 }
 
-// GetKey answers AnonymousNotifiable::getKey, which the PHP leaves empty.
+// GetKey returns the empty string: an anonymous notifiable has no key.
 func (a *AnonymousNotifiable) GetKey() string { return "" }
 
 // sentNotification is one recorded notification: what went out, to whom, on
@@ -121,33 +106,30 @@ func (s sentNotification) describe() string {
 	return line
 }
 
-// NotificationFake answers
-// Illuminate\Support\Testing\Fakes\NotificationFake: the notification
-// dispatcher a test installs so that nothing is delivered, and every
-// notification can be asserted on afterwards.
+// NotificationFake is the notification dispatcher a test installs so that
+// nothing is delivered, and every notification can be asserted on
+// afterwards.
 //
 // It is safe to use from a test that calls t.Parallel: every record is written
 // and read under a mutex, and a truth test runs on a copy rather than while the
 // lock is held.
 type NotificationFake struct {
 	mu sync.Mutex
-	// locale answers NotificationFake::$locale, which is public there. It is
-	// unexported here because a Go type cannot carry both a field Locale and
-	// the fluent Locale setter the PHP has, and the setter is the one a test
-	// calls.
+	// locale is written into every record that carries none of its own.
 	locale              string
 	notifications       []sentNotification
 	serializeAndRestore bool
 }
 
-// NewNotificationFake answers NotificationFake's implicit constructor.
+// NewNotificationFake returns a dispatcher that records everything and
+// delivers nothing.
 func NewNotificationFake() *NotificationFake {
 	return &NotificationFake{}
 }
 
 func (f *NotificationFake) isFake() {}
 
-// AssertSentOnDemand answers NotificationFake::assertSentOnDemand: a
+// AssertSentOnDemand fails the test unless a
 // notification went out to nobody in particular, addressed by route rather than
 // by model.
 func (f *NotificationFake) AssertSentOnDemand(t TestingT, notification any, callback any) {
@@ -155,19 +137,11 @@ func (f *NotificationFake) AssertSentOnDemand(t TestingT, notification any, call
 	f.AssertSentTo(t, NewAnonymousNotifiable(), notification, callback)
 }
 
-// AssertSentTo answers NotificationFake::assertSentTo: it fails unless the
+// AssertSentTo fails the test unless the
 // notifiable was sent a notification of the given type and the truth test
 // accepted it.
 //
-// The notifiable may be one value or a slice of them, and a slice is asserted
-// for every element, as the PHP does -- an empty slice is a failure there, and
-// is one here, because an assertion over nothing passes without checking
-// anything.
-//
-// The callback slot is whatever the PHP accepts: nil for no truth test, an int
-// to assert a count, a func(notification any) bool, or a
-// func(notification any, channels []string) bool, which is the two-argument
-// closure the PHP passes the channels to.
+// The notifiable may be one value or a slice of them.
 func (f *NotificationFake) AssertSentTo(t TestingT, notifiable any, notification any, callback any) {
 	t.Helper()
 
@@ -204,13 +178,15 @@ func (f *NotificationFake) AssertSentTo(t TestingT, notifiable any, notification
 	)
 }
 
-// AssertSentOnDemandTimes answers NotificationFake::assertSentOnDemandTimes.
+// AssertSentOnDemandTimes fails the test unless a notification of the given
+// type was sent on demand exactly that many times.
 func (f *NotificationFake) AssertSentOnDemandTimes(t TestingT, notification any, times int) {
 	t.Helper()
 	f.AssertSentToTimes(t, NewAnonymousNotifiable(), notification, times)
 }
 
-// AssertSentToTimes answers NotificationFake::assertSentToTimes: how many times
+// AssertSentToTimes fails the test unless the notifiable was sent exactly that
+// many of them. It counts how many times
 // this notifiable was sent it.
 func (f *NotificationFake) AssertSentToTimes(t TestingT, notifiable any, notification any, times int) {
 	t.Helper()
@@ -229,8 +205,9 @@ func (f *NotificationFake) AssertSentToTimes(t TestingT, notifiable any, notific
 	)
 }
 
-// AssertNotSentTo answers NotificationFake::assertNotSentTo. The callback slot
-// takes the same forms as AssertSentTo, minus the count.
+// AssertNotSentTo fails the test when the notifiable was sent one. The
+// callback slot takes the same forms as [NotificationFake.AssertSentTo], minus
+// the count.
 func (f *NotificationFake) AssertNotSentTo(t TestingT, notifiable any, notification any, callback any) {
 	t.Helper()
 
@@ -262,7 +239,7 @@ func (f *NotificationFake) AssertNotSentTo(t TestingT, notifiable any, notificat
 	)
 }
 
-// AssertNothingSent answers NotificationFake::assertNothingSent.
+// AssertNothingSent fails the test unless nothing was sent at all.
 func (f *NotificationFake) AssertNothingSent(t TestingT) {
 	t.Helper()
 
@@ -277,7 +254,7 @@ func (f *NotificationFake) AssertNothingSent(t TestingT) {
 	)
 }
 
-// AssertNothingSentTo answers NotificationFake::assertNothingSentTo: nothing at
+// AssertNothingSentTo fails the test unless nothing at
 // all reached this notifiable, of any type.
 func (f *NotificationFake) AssertNothingSentTo(t TestingT, notifiable any) {
 	t.Helper()
@@ -309,7 +286,8 @@ func (f *NotificationFake) AssertNothingSentTo(t TestingT, notifiable any) {
 	)
 }
 
-// AssertSentTimes answers NotificationFake::assertSentTimes: how many times the
+// AssertSentTimes fails the test unless the notification went out exactly that
+// many times, counting how many times the
 // notification went out in total, to everybody.
 func (f *NotificationFake) AssertSentTimes(t TestingT, notification any, expectedCount int) {
 	t.Helper()
@@ -332,7 +310,7 @@ func (f *NotificationFake) AssertSentTimes(t TestingT, notification any, expecte
 	)
 }
 
-// AssertCount answers NotificationFake::assertCount: the total number of
+// AssertCount fails the test unless the total number of
 // notifications sent, of every type and to everybody.
 func (f *NotificationFake) AssertCount(t TestingT, expectedCount int) {
 	t.Helper()
@@ -349,7 +327,7 @@ func (f *NotificationFake) AssertCount(t TestingT, expectedCount int) {
 	)
 }
 
-// Sent answers NotificationFake::sent: the notifications of the given type that
+// Sent returns the notifications of the given type that
 // went to this notifiable and that the truth test accepted, in the order they
 // were sent.
 func (f *NotificationFake) Sent(notifiable any, notification any, callback any) []any {
@@ -365,23 +343,24 @@ func (f *NotificationFake) Sent(notifiable any, notification any, callback any) 
 	return found
 }
 
-// HasSent answers NotificationFake::hasSent.
+// HasSent reports whether the notifiable was sent a notification of that type
+// at all.
 func (f *NotificationFake) HasSent(notifiable any, notification any) bool {
 	return len(f.sentRecords(notifiable, notification, nil)) > 0
 }
 
-// Send answers NotificationFake::send, which is SendNow: a fake has no queue to
-// put a notification on.
+// Send is [NotificationFake.SendNow]: a fake has no queue to put a
+// notification on.
 func (f *NotificationFake) Send(notifiables any, notification any) {
 	f.SendNow(notifiables, notification, nil)
 }
 
-// SendNow answers NotificationFake::sendNow: one record per notifiable, on the
-// channels the notification says it goes out on.
+// SendNow writes one record per notifiable, on the channels the notification
+// says it goes out on.
 //
-// The channels given here win over the notification's own Via, as they do
-// there; a notifiable whose channels come back empty is skipped, and that is
-// how a notification that has decided not to go out leaves no record.
+// The channels given here win over the notification's own Via. A notifiable
+// whose channels come back empty is skipped, which is how a notification that
+// decided not to go out leaves no record.
 func (f *NotificationFake) SendNow(notifiables any, notification any, channels []string) {
 	list, ok := notifiableList(notifiables)
 	if !ok {
@@ -459,25 +438,23 @@ func (f *NotificationFake) record(notifiable any, notification any, channels []s
 	})
 }
 
-// NotificationLocale is answered by a notification that carries the
-// Notification::$locale it was sent with, which wins over the locale the fake
-// was told to use.
+// NotificationLocale is satisfied by a notification carrying the locale it was
+// sent with, which wins over the locale the fake was told to use.
 //
-// It is optional, as the property is: a notification without one falls through
-// to the fake's locale and then to the notifiable's preference.
+// It is optional: a notification without one falls through to the fake's
+// locale and then to the notifiable's preference.
 type NotificationLocale interface {
-	// NotificationLocale answers Notification::$locale.
+	// NotificationLocale returns the locale the notification carries.
 	NotificationLocale() string
 }
 
-// Channel answers NotificationFake::channel, and hands back nothing, as the PHP
-// does: a faked dispatcher has no channel to build.
+// Channel returns nil: a faked dispatcher has no channel to build.
 func (f *NotificationFake) Channel(name string) any {
 	return nil
 }
 
-// Locale answers NotificationFake::locale: the locale every notification
-// recorded after this is recorded in, unless it carries one of its own.
+// Locale sets the locale every later record is written in, unless the
+// notification carries one of its own, and returns the fake.
 func (f *NotificationFake) Locale(locale string) *NotificationFake {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -485,9 +462,9 @@ func (f *NotificationFake) Locale(locale string) *NotificationFake {
 	return f
 }
 
-// SerializeAndRestore answers NotificationFake::serializeAndRestore: whether a
-// queued notification is put through the round trip the queue would put it
-// through before it is recorded.
+// SerializeAndRestore says whether a queued notification is put through the
+// round trip the queue would put it through before it is recorded, and returns
+// the fake.
 func (f *NotificationFake) SerializeAndRestore(serializeAndRestore bool) *NotificationFake {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -495,9 +472,8 @@ func (f *NotificationFake) SerializeAndRestore(serializeAndRestore bool) *Notifi
 	return f
 }
 
-// SentNotifications answers NotificationFake::sentNotifications: every record,
-// keyed by the class of the notifiable and then by its key, which is how the
-// PHP nests them.
+// SentNotifications returns every record, keyed by the class of the notifiable
+// and then by its key.
 func (f *NotificationFake) SentNotifications() map[string]map[string][]any {
 	sent := map[string]map[string][]any{}
 	for _, record := range f.snapshot() {
@@ -518,8 +494,8 @@ func (f *NotificationFake) snapshot() []sentNotification {
 	return append([]sentNotification(nil), f.notifications...)
 }
 
-// sentRecords answers NotificationFake::notificationsFor plus the truth test:
-// the records filed under this notifiable and this exact class.
+// sentRecords returns the records filed under this notifiable and this exact
+// notification class, and accepted by the truth test.
 func (f *NotificationFake) sentRecords(notifiable any, notification any, test func(sentNotification) bool) []sentNotification {
 	class := className(notifiable)
 	key := notifiableKey(notifiable)
@@ -553,9 +529,7 @@ func notifiableKey(notifiable any) string {
 // Collection`: whether the assertion was handed several notifiables rather than
 // one.
 //
-// A string is not a list here even though Go could range over its bytes, and a
-// map is not one either: the PHP means an array of notifiables, and a value
-// that is not a slice is one notifiable.
+// A string is not a list here even though Go could range over its bytes.
 func notifiableList(notifiable any) ([]any, bool) {
 	if list, ok := notifiable.([]any); ok {
 		return list, true

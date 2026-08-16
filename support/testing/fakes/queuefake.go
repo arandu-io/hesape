@@ -7,119 +7,104 @@ import (
 	"time"
 )
 
-// Queue is the little of Illuminate\Contracts\Queue\Queue that a QueueFake
-// needs from the queue it stands in for.
+// Queue is what a [QueueFake] needs from the queue it stands in for.
 //
-// A fake only reaches for it when Except named a job that must go to the real
-// queue; a fake built with a nil queue and no Except never touches it.
+// A fake only reaches for it when [QueueFake.Except] named a job that must go
+// to the real queue; a fake built with a nil queue and no Except never touches
+// it.
 type Queue interface {
-	// Connection answers Queue::connection: the connection by name, which is
-	// what a job carrying its own connection is pushed through.
+	// Connection returns the queue for the named connection, which is what a
+	// job carrying its own connection is pushed through.
 	Connection(name string) Queue
-	// Push answers Queue::push.
+	// Push puts the job on the named queue.
 	Push(job any, data any, queue string)
-	// PushRaw answers Queue::pushRaw.
+	// PushRaw puts an already-encoded payload on the named queue.
 	PushRaw(payload string, queue string, options map[string]any)
-	// Later answers Queue::later.
+	// Later puts the job on the named queue after the delay.
 	Later(delay time.Duration, job any, data any, queue string)
-	// Bulk answers Queue::bulk.
+	// Bulk puts several jobs on the named queue at once.
 	Bulk(jobs []any, data any, queue string)
-	// Size answers Queue::size.
+	// Size returns how many jobs the named queue holds.
 	Size(queue string) int
-	// Pop answers Queue::pop.
+	// Pop takes the next job off the named queue.
 	Pop(queue string) any
 }
 
-// Queueable is the little of Illuminate\Bus\Queueable that a QueueFake reads
-// off a job it is about to hand to the real queue.
-//
-// The PHP reads the public property with isset($job->connection); a Go value
-// answers for itself, and a job that does not implement this goes to the
-// default connection, which is what an unset property means there.
+// Queueable is what a [QueueFake] reads off a job it is about to hand to the
+// real queue.
 type Queueable interface {
-	// Connection answers Queueable::$connection.
+	// Connection returns the connection the job asked to run on.
 	Connection() string
 }
 
-// Chained is answered by a job that carries a chain of jobs behind it, and is
-// what AssertPushedWithChain and BusFake's chain assertions read.
+// Chained is satisfied by a job carrying a chain of jobs behind it, and is what
+// [QueueFake.AssertPushedWithChain] and the chain assertions of [BusFake] read.
 //
-// The PHP reads Queueable::$chained, an array of serialized jobs. Here the
-// jobs themselves: Go has no serialize(), and the round trip the PHP does is
-// an artefact of storing a chain in a string column, not part of the assertion.
+// It returns the jobs themselves rather than an encoded form of them.
 type Chained interface {
-	// Chained answers Queueable::$chained.
+	// Chained returns the jobs queued behind this one.
 	Chained() []any
 }
 
-// Chainable is answered by a job a PendingChainFake can configure before it
-// goes out: the first job of a chain, which Laravel writes the rest of the
-// chain and the connection, queue and delay onto.
+// Chainable is satisfied by a job a [PendingChainFake] can configure before it
+// goes out: the first job of a chain.
 type Chainable interface {
 	Chained
-	// Chain answers Queueable::chain.
+	// Chain sets the jobs queued behind this one.
 	Chain(jobs []any)
-	// AllOnConnection answers Queueable::allOnConnection.
+	// AllOnConnection puts the whole chain on the named connection.
 	AllOnConnection(connection string)
-	// AllOnQueue answers Queueable::allOnQueue.
+	// AllOnQueue puts the whole chain on the named queue.
 	AllOnQueue(queue string)
-	// Delay answers Queueable::delay.
+	// Delay holds the chain back for the given duration.
 	Delay(delay time.Duration)
 }
 
-// QueuedListener is the little of Illuminate\Events\CallQueuedListener that
-// ListenersPushed reads off a pushed job.
-//
-// The class is a string because that is what the PHP stores: a queued listener
-// carries the name of the class to resolve when the job is worked, not the
-// class itself.
+// QueuedListener is what [QueueFake.ListenersPushed] reads off a pushed job to
+// recognize a queued event listener.
 type QueuedListener interface {
-	// ListenerClass answers CallQueuedListener::$class.
+	// ListenerClass names the listener that was queued.
 	ListenerClass() string
-	// ListenerData answers CallQueuedListener::$data.
+	// ListenerData returns the arguments it was queued with.
 	ListenerData() []any
 }
 
-// CallQueuedClosure answers Illuminate\Queue\CallQueuedClosure: what a closure
-// becomes when it is pushed onto the queue, and the class AssertClosurePushed
-// looks for.
+// CallQueuedClosure is what a closure becomes when it is pushed onto the
+// queue, and the type [QueueFake.AssertClosurePushed] looks for.
 type CallQueuedClosure struct {
-	// Closure answers CallQueuedClosure::$closure.
+	// Closure is the func that was queued.
 	Closure func()
 }
 
-// NewCallQueuedClosure answers CallQueuedClosure::create.
+// NewCallQueuedClosure wraps a closure so it can be pushed onto the queue.
 func NewCallQueuedClosure(closure func()) *CallQueuedClosure {
 	return &CallQueuedClosure{Closure: closure}
 }
 
-// PushedJob is one record of QueueFake's $jobs array: the job, the queue it
-// was named onto, and the data pushed beside it.
-//
-// PHP stores the three under the keys 'job', 'queue' and 'data'; a struct is
-// the same three, and it is what a truth test taking more than the job reads.
+// PushedJob is one recorded push: the job, the queue it was named onto, and the
+// data pushed beside it.
 type PushedJob struct {
-	// Job answers the 'job' key.
+	// Job is what was pushed.
 	Job any
-	// Queue answers the 'queue' key. Empty is PHP's null: the default queue.
+	// Queue is the queue it was named onto, and may be empty.
 	Queue string
-	// Data answers the 'data' key.
+	// Data is whatever was pushed beside it.
 	Data any
 }
 
-// RawPush is one record of QueueFake's $rawPushes array, and answers the
-// RawPushType the PHP documents: payload, queue and options.
+// RawPush is one recorded raw push: the payload, the queue it was named onto,
+// and the options it carried.
 type RawPush struct {
-	// Payload answers the 'payload' key.
+	// Payload is the already-encoded job.
 	Payload string
-	// Queue answers the 'queue' key. Empty is PHP's null.
+	// Queue is the queue it was named onto, and may be empty.
 	Queue string
-	// Options answers the 'options' key.
+	// Options are the settings it carried.
 	Options map[string]any
 }
 
-// QueueFake answers Illuminate\Support\Testing\Fakes\QueueFake: the queue a
-// test installs so that nothing is worked, and every push can be asserted on.
+// QueueFake is the queue a test installs so that nothing is worked, and every
+// push can be asserted on.
 //
 // It is safe to use from a test that calls t.Parallel: every record is written
 // and read under a mutex, and a truth test runs on a copy rather than while
@@ -127,7 +112,7 @@ type RawPush struct {
 // deadlock.
 type QueueFake struct {
 	mu sync.Mutex
-	// queue answers QueueFake::$queue, the original queue, public in PHP.
+	// queue is the real queue the fake stands in for.
 	// It is unexported here because Queue() would collide with the queue
 	// name a record carries; OriginalQueue reads it.
 	queue               Queue
@@ -139,35 +124,30 @@ type QueueFake struct {
 	connectionName      string
 }
 
-// NewQueueFake answers QueueFake::__construct.
+// NewQueueFake builds a queue that records the named job types and forwards
+// the rest.
 //
-// The PHP takes the application first, to build the QueueManager it extends;
-// the container is rejected here (ADR 0001), so the queue it stands in for
-// comes first instead. A nil queue is the ordinary case: it is only reached
-// for by a job that Except sent to the real thing.
+// A nil queue is the ordinary case: it is only reached for by a job that
+// Except sent to the real thing.
 func NewQueueFake(queue Queue, jobsToFake ...any) *QueueFake {
 	return &QueueFake{queue: queue, jobsToFake: jobsToFake}
 }
 
 func (f *QueueFake) isFake() {}
 
-// OriginalQueue answers QueueFake::$queue, the queue the fake stands in for.
-//
-// PHP reads the public property; a Go method cannot be called $queue, and
-// Queue is taken by the interface, so the name says which queue it is.
+// OriginalQueue returns the queue the fake stands in for, which may be nil.
 func (f *QueueFake) OriginalQueue() Queue {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.queue
 }
 
-// Except answers QueueFake::except: the jobs that should reach the real queue
+// Except names the jobs that should reach the real queue
 // instead of being recorded.
 //
-// The new ones go in front of the ones already there, which is the order the
-// PHP's merge() puts them in. The slice is copied rather than appended to,
-// because a caller who spread their own slice into the call would find it
-// written through otherwise.
+// The new ones go in front of the ones already there. The slice is copied
+// rather than appended to, because a caller who spread their own slice into
+// the call would find it written through otherwise.
 func (f *QueueFake) Except(jobs ...any) *QueueFake {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -175,19 +155,11 @@ func (f *QueueFake) Except(jobs ...any) *QueueFake {
 	return f
 }
 
-// AssertPushed answers QueueFake::assertPushed: it fails unless a job of the
+// AssertPushed fails the test unless a job of the
 // given type was pushed and the truth test accepted it.
 //
-// The type is named the way Go names one, with reflect.TypeFor[SendInvoice]()
-// where the PHP writes SendInvoice::class; a value of the type works too.
-//
-// The callback slot is whatever the PHP accepts there, and means the same
-// thing: nil for no truth test, an int to assert a count, or one of the three
-// truth tests -- func(job any) bool, func(job any, queue string) bool or
-// func(job any, queue string, data any) bool, which are the one, two and three
-// arguments the PHP closure may declare. Go has no overloading, so the slot is
-// typed any and a form it does not know is reported as a failure naming the
-// forms it does.
+// Go has no overloading, so the slot is typed any and a form it does not know
+// is reported as a failure naming the forms it does.
 func (f *QueueFake) AssertPushed(t TestingT, job any, callback any) {
 	t.Helper()
 
@@ -212,12 +184,10 @@ func (f *QueueFake) AssertPushed(t TestingT, job any, callback any) {
 	)
 }
 
-// AssertPushedTimes answers QueueFake::assertPushedTimes: it fails unless
+// AssertPushedTimes fails the test unless
 // exactly that many jobs of the type were pushed.
 //
-// PHP reaches it by passing a number where assertPushed takes a callback, and
-// so does AssertPushed here. It is also a method of its own, and public rather
-// than protected, as it already is in the current Laravel.
+// It is also a method of its own.
 func (f *QueueFake) AssertPushedTimes(t TestingT, job any, times int) {
 	t.Helper()
 
@@ -234,7 +204,7 @@ func (f *QueueFake) AssertPushedTimes(t TestingT, job any, times int) {
 	)
 }
 
-// AssertPushedOn answers QueueFake::assertPushedOn: the job was pushed, and
+// AssertPushedOn fails the test unless the job was pushed, and
 // onto that queue.
 func (f *QueueFake) AssertPushedOn(t TestingT, queue string, job any, callback any) {
 	t.Helper()
@@ -267,15 +237,11 @@ func (f *QueueFake) AssertPushedOn(t TestingT, queue string, job any, callback a
 	)
 }
 
-// AssertPushedWithChain answers QueueFake::assertPushedWithChain: the job was
+// AssertPushedWithChain fails the test unless the job was
 // pushed, and the chain behind it is the one expected.
 //
 // An element of the expected chain may be a class token, a value, or a
-// func(job any) bool truth test, and each element is judged on its own. The
-// PHP decides once for the whole chain -- every element an object, or every
-// element a class name -- and a mixed chain there never matches; this is what
-// BusFake::assertChained already does per element in the PHP, and it agrees
-// with QueueFake on both of the chains QueueFake can match.
+// func(job any) bool truth test, and each element is judged on its own.
 func (f *QueueFake) AssertPushedWithChain(t TestingT, job any, expectedChain []any, callback any) {
 	t.Helper()
 
@@ -292,7 +258,7 @@ func (f *QueueFake) AssertPushedWithChain(t TestingT, job any, expectedChain []a
 	f.assertPushedWithChain(t, "AssertPushedWithChain", job, expectedChain, test)
 }
 
-// AssertPushedWithoutChain answers QueueFake::assertPushedWithoutChain: the job
+// AssertPushedWithoutChain fails the test unless the job
 // was pushed, and nothing is chained behind it.
 func (f *QueueFake) AssertPushedWithoutChain(t TestingT, job any, callback any) {
 	t.Helper()
@@ -334,22 +300,22 @@ func (f *QueueFake) assertPushedWithChain(t TestingT, name string, job any, expe
 	)
 }
 
-// AssertClosurePushed answers QueueFake::assertClosurePushed: a closure was
+// AssertClosurePushed fails the test unless a closure was
 // pushed onto the queue.
 func (f *QueueFake) AssertClosurePushed(t TestingT, callback any) {
 	t.Helper()
 	f.AssertPushed(t, reflect.TypeFor[CallQueuedClosure](), callback)
 }
 
-// AssertClosureNotPushed answers QueueFake::assertClosureNotPushed.
+// AssertClosureNotPushed fails the test when a closure was pushed onto the
+// queue.
 func (f *QueueFake) AssertClosureNotPushed(t TestingT, callback any) {
 	t.Helper()
 	f.AssertNotPushed(t, reflect.TypeFor[CallQueuedClosure](), callback)
 }
 
-// AssertNotPushed answers QueueFake::assertNotPushed. The callback slot takes
-// the same forms as AssertPushed, minus the count: PHP does not accept one
-// here either.
+// AssertNotPushed fails the test when a job of the given type was pushed and
+// the callback accepted it.
 func (f *QueueFake) AssertNotPushed(t TestingT, job any, callback any) {
 	t.Helper()
 
@@ -369,7 +335,7 @@ func (f *QueueFake) AssertNotPushed(t TestingT, job any, callback any) {
 	)
 }
 
-// AssertCount answers QueueFake::assertCount: the total number of jobs pushed,
+// AssertCount fails the test unless the total number of jobs pushed,
 // of every type.
 func (f *QueueFake) AssertCount(t TestingT, expectedCount int) {
 	t.Helper()
@@ -385,7 +351,7 @@ func (f *QueueFake) AssertCount(t TestingT, expectedCount int) {
 	)
 }
 
-// AssertNothingPushed answers QueueFake::assertNothingPushed.
+// AssertNothingPushed fails the test unless nothing was pushed at all.
 func (f *QueueFake) AssertNothingPushed(t TestingT) {
 	t.Helper()
 
@@ -400,7 +366,7 @@ func (f *QueueFake) AssertNothingPushed(t TestingT) {
 	)
 }
 
-// Pushed answers QueueFake::pushed: the jobs of the given type that the truth
+// Pushed returns the jobs of the given type that the truth
 // test accepted, in the order they were pushed. The callback slot takes the
 // same forms as AssertPushed, minus the count.
 //
@@ -419,7 +385,7 @@ func (f *QueueFake) Pushed(job any, callback any) []any {
 	return jobs
 }
 
-// PushedRaw answers QueueFake::pushedRaw: the raw payloads the truth test
+// PushedRaw returns the raw payloads the truth test
 // accepted. A nil truth test accepts all of them.
 func (f *QueueFake) PushedRaw(callback func(payload string, queue string, options map[string]any) bool) []RawPush {
 	f.mu.Lock()
@@ -436,12 +402,8 @@ func (f *QueueFake) PushedRaw(callback func(payload string, queue string, option
 	return found
 }
 
-// ListenersPushed answers QueueFake::listenersPushed: the queued listeners
+// ListenersPushed returns the queued listeners
 // pushed for the given listener class.
-//
-// The class is named as the PHP names it, by string, because that is what a
-// queued listener carries; the truth test gets the event, the listener, the
-// queue and the data, which are the four the PHP closure declares.
 func (f *QueueFake) ListenersPushed(listenerClass string, callback func(event any, listener QueuedListener, queue string, data any) bool) []QueuedListener {
 	pushed := f.snapshot()
 
@@ -465,20 +427,19 @@ func (f *QueueFake) ListenersPushed(listenerClass string, callback func(event an
 	return found
 }
 
-// HasPushed answers QueueFake::hasPushed: whether a job of the type was pushed
+// HasPushed reports whether a job of the type was pushed
 // at all, truth test aside.
 func (f *QueueFake) HasPushed(job any) bool {
 	return len(f.pushedRecords(job, nil)) > 0
 }
 
-// Connection answers QueueFake::connection: the fake stands in for every
+// Connection returns the fake itself: it stands in for every
 // connection, so it answers itself whatever the name.
 func (f *QueueFake) Connection(name string) Queue {
 	return f
 }
 
-// Size answers QueueFake::size: how many jobs were pushed onto that queue.
-// The empty name is PHP's null, the default queue.
+// Size returns how many jobs were pushed onto that queue.
 func (f *QueueFake) Size(queue string) int {
 	count := 0
 	for _, record := range f.snapshot() {
@@ -489,11 +450,10 @@ func (f *QueueFake) Size(queue string) int {
 	return count
 }
 
-// Push answers QueueFake::push: it records the job, or hands it to the real
+// Push records the job, or hands it to the real
 // queue when Except named it.
 //
-// A func() pushed here becomes a CallQueuedClosure, which is what the PHP does
-// with a Closure, and is why AssertClosurePushed has a class to look for.
+// A func() pushed here becomes a CallQueuedClosure.
 func (f *QueueFake) Push(job any, data any, queue string) {
 	if closure, ok := job.(func()); ok {
 		job = NewCallQueuedClosure(closure)
@@ -514,7 +474,7 @@ func (f *QueueFake) Push(job any, data any, queue string) {
 	f.jobs = append(f.jobs, PushedJob{Job: recorded, Queue: queue, Data: data})
 }
 
-// pushToRealQueue answers the else branch of QueueFake::push: a job carrying
+// pushToRealQueue hands a job to the real queue: a job carrying
 // its own connection goes through that connection, and every other job goes
 // through the queue as it was handed over.
 func (f *QueueFake) pushToRealQueue(job any, data any, queue string) {
@@ -534,11 +494,10 @@ func (f *QueueFake) pushToRealQueue(job any, data any, queue string) {
 	real.Push(job, data, queue)
 }
 
-// ShouldFakeJob answers QueueFake::shouldFakeJob: whether the job is recorded
+// ShouldFakeJob reports whether the job is recorded
 // or pushed for real.
 //
-// A fake built without a list of jobs to fake fakes everything, which is what
-// an empty $jobsToFake means; Except wins over it, as shouldDispatchJob does.
+// A fake built without a list of jobs to fake fakes everything.
 func (f *QueueFake) ShouldFakeJob(job any) bool {
 	f.mu.Lock()
 	toFake := append([]any(nil), f.jobsToFake...)
@@ -561,45 +520,43 @@ func (f *QueueFake) ShouldFakeJob(job any) bool {
 	return false
 }
 
-// PushRaw answers QueueFake::pushRaw: the payload is recorded, never sent.
+// PushRaw records the payload, and never sends it.
 func (f *QueueFake) PushRaw(payload string, queue string, options map[string]any) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.rawPushes = append(f.rawPushes, RawPush{Payload: payload, Queue: queue, Options: options})
 }
 
-// Later answers QueueFake::later: the same as Push, delay and all. The delay
-// is accepted and dropped, as the PHP drops it: a fake that honoured it would
-// make every test that schedules a job slow.
+// Later records the job as [QueueFake.Push] does. The delay is accepted and
+// dropped rather than slept.
 func (f *QueueFake) Later(delay time.Duration, job any, data any, queue string) {
 	f.Push(job, data, queue)
 }
 
-// PushOn answers QueueFake::pushOn.
+// PushOn records the job as pushed onto the named queue.
 func (f *QueueFake) PushOn(queue string, job any, data any) {
 	f.Push(job, data, queue)
 }
 
-// LaterOn answers QueueFake::laterOn.
+// LaterOn records the job as pushed onto the named queue, dropping the delay.
 func (f *QueueFake) LaterOn(queue string, delay time.Duration, job any, data any) {
 	f.Push(job, data, queue)
 }
 
-// Pop answers QueueFake::pop, and does nothing, as the PHP does: a fake queue
+// Pop returns nil: a fake queue
 // is never worked, so there is no job to hand back.
 func (f *QueueFake) Pop(queue string) any {
 	return nil
 }
 
-// Bulk answers QueueFake::bulk: each job pushed in turn.
+// Bulk records each job in turn.
 func (f *QueueFake) Bulk(jobs []any, data any, queue string) {
 	for _, job := range jobs {
 		f.Push(job, data, queue)
 	}
 }
 
-// PushedJobs answers QueueFake::pushedJobs: every record, keyed by the class
-// of the job, which is how the PHP stores them.
+// PushedJobs returns every record, keyed by the class of the job.
 func (f *QueueFake) PushedJobs() map[string][]PushedJob {
 	pushed := f.snapshot()
 	jobs := make(map[string][]PushedJob, len(pushed))
@@ -610,14 +567,14 @@ func (f *QueueFake) PushedJobs() map[string][]PushedJob {
 	return jobs
 }
 
-// RawPushes answers QueueFake::rawPushes.
+// RawPushes returns a copy of every raw payload recorded, in order.
 func (f *QueueFake) RawPushes() []RawPush {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]RawPush(nil), f.rawPushes...)
 }
 
-// SerializeAndRestore answers QueueFake::serializeAndRestore: whether a job is
+// SerializeAndRestore says whether a job is
 // put through the round trip the queue would put it through before it is
 // recorded.
 func (f *QueueFake) SerializeAndRestore(serializeAndRestore bool) *QueueFake {
@@ -627,15 +584,16 @@ func (f *QueueFake) SerializeAndRestore(serializeAndRestore bool) *QueueFake {
 	return f
 }
 
-// GetConnectionName answers QueueFake::getConnectionName, which the PHP leaves
-// empty.
+// GetConnectionName returns the connection name the fake reports, which is
+// empty until [QueueFake.SetConnectionName] sets one.
 func (f *QueueFake) GetConnectionName() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.connectionName
 }
 
-// SetConnectionName answers QueueFake::setConnectionName.
+// SetConnectionName sets the connection name the fake reports, and returns the
+// fake.
 func (f *QueueFake) SetConnectionName(name string) *QueueFake {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -650,7 +608,7 @@ func (f *QueueFake) snapshot() []PushedJob {
 	return append([]PushedJob(nil), f.jobs...)
 }
 
-// pushedRecords answers the array lookup PHP does with $this->jobs[$job]: the
+// pushedRecords returns the
 // records filed under the exact class, then the truth test.
 func (f *QueueFake) pushedRecords(job any, test func(PushedJob) bool) []PushedJob {
 	var found []PushedJob
@@ -669,7 +627,7 @@ func (f *QueueFake) pushedRecords(job any, test func(PushedJob) bool) []PushedJo
 // pushTest normalizes the truth test forms QueueFake accepts into the one the
 // filter uses. It reports the failure itself when handed a form it does not
 // know, and answers false so the caller stops; a nil test is accepted from
-// every form, which is PHP's `$callback ?: fn () => true`.
+// every form.
 func pushTest(t TestingT, name string, callback any) (func(PushedJob) bool, bool) {
 	switch cb := callback.(type) {
 	case nil:
@@ -698,8 +656,8 @@ func pushTest(t TestingT, name string, callback any) (func(PushedJob) bool, bool
 	}
 }
 
-// chainOf answers $job->chained for a job that carries one, and an empty chain
-// for a job that does not -- which is what an unset property is in PHP.
+// chainOf returns the chain behind a job that satisfies [Chained], and nil for
+// a job that does not.
 func chainOf(job any) []any {
 	chained, ok := job.(Chained)
 	if !ok {
@@ -708,9 +666,9 @@ func chainOf(job any) []any {
 	return chained.Chained()
 }
 
-// matchesChain answers the per-element comparison BusFake::assertChained makes:
+// matchesChain compares a chain element by element:
 // a class token or a name matches by class, a truth test is asked, and anything
-// else is compared by value the way the PHP compares two serialized jobs.
+// else is compared by value.
 func matchesChain(chain []any, expected []any) bool {
 	if len(chain) != len(expected) {
 		return false

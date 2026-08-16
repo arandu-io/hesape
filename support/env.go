@@ -8,22 +8,19 @@ import (
 	"sync"
 )
 
-// EnvRepository answers to Dotenv\Repository\RepositoryInterface, narrowed to
-// the one call Env makes on it.
+// EnvRepository is a source of environment variables.
 type EnvRepository interface {
-	// Get answers to RepositoryInterface::get: the raw value and whether the
-	// variable is set at all, which is the null the PHP returns when it is not.
+	// Get returns the raw value of a variable and whether it is set at all.
 	Get(key string) (string, bool)
 }
 
 // EnvRepositoryFunc lets a plain function be an [EnvRepository].
 type EnvRepositoryFunc func(key string) (string, bool)
 
-// Get answers to RepositoryInterface::get.
+// Get calls f.
 func (f EnvRepositoryFunc) Get(key string) (string, bool) { return f(key) }
 
-// processEnvRepository is the PutenvAdapter of the PHP: the process
-// environment, which in Go is the only one there is.
+// processEnvRepository reads the process environment.
 type processEnvRepository struct{}
 
 func (processEnvRepository) Get(key string) (string, bool) { return os.LookupEnv(key) }
@@ -33,7 +30,7 @@ type envAdapters struct {
 	repositories []EnvRepository
 }
 
-// Get answers to RepositoryInterface::get, asking each adapter in turn.
+// Get asks each repository in turn and returns the first value found.
 func (a envAdapters) Get(key string) (string, bool) {
 	for _, repository := range a.repositories {
 		if v, ok := repository.Get(key); ok {
@@ -45,13 +42,9 @@ func (a envAdapters) Get(key string) (string, bool) {
 
 type envFacade struct{}
 
-// Env answers to Illuminate\Support\Env. It is a value rather than a type
-// because every method of the PHP class is static: support.Env.Get(key, nil)
-// reads as Env::get($key).
-//
-// It is also the env() helper of helpers.php, which is Env::get and nothing
-// else; PHP keeps class and function names apart and Go does not, so the one
-// name is this.
+// Env reads environment variables, parsing the well-known literals into the
+// values they name. It is a value rather than a type because a process has one
+// environment: support.Env.Get(key) is the whole call.
 var Env envFacade
 
 var (
@@ -62,8 +55,8 @@ var (
 	envCustomName = map[string]int{}
 )
 
-// EnablePutenv answers to Env::enablePutenv: read the process environment
-// again, and drop the repository that was built without it.
+// EnablePutenv puts the process environment back in the read path, and drops
+// the repository built without it so the next read rebuilds.
 func (envFacade) EnablePutenv() {
 	envMu.Lock()
 	defer envMu.Unlock()
@@ -71,11 +64,9 @@ func (envFacade) EnablePutenv() {
 	envRepository = nil
 }
 
-// DisablePutenv answers to Env::disablePutenv: stop reading the process
-// environment, so that only the adapters given to [envFacade.Extend] answer.
-//
-// The PHP drops one adapter of several and keeps $_ENV and $_SERVER; Go has no
-// $_ENV, so the process environment is the adapter this drops.
+// DisablePutenv takes the process environment out of the read path, so only
+// the repositories registered through Extend answer. The repository built with
+// it is dropped, so the next read rebuilds.
 func (envFacade) DisablePutenv() {
 	envMu.Lock()
 	defer envMu.Unlock()
@@ -83,9 +74,10 @@ func (envFacade) DisablePutenv() {
 	envRepository = nil
 }
 
-// Extend answers to Env::extend: register another adapter. The variadic
-// argument stands for the PHP $name, which is null; a name given twice replaces
-// the adapter registered under it.
+// Extend registers another repository, built on first use, and drops the
+// repository already built so the next read rebuilds. The variadic argument
+// names it: a name given twice replaces the repository registered under it,
+// and an unnamed repository is always appended.
 func (envFacade) Extend(callback func() EnvRepository, name ...string) {
 	envMu.Lock()
 	defer envMu.Unlock()
@@ -100,8 +92,9 @@ func (envFacade) Extend(callback func() EnvRepository, name ...string) {
 	envCustom = append(envCustom, callback)
 }
 
-// GetRepository answers to Env::getRepository: the repository every read goes
-// through, built once and kept.
+// GetRepository returns the repository every read goes through, building it
+// once and keeping it. It asks the process environment first, unless
+// DisablePutenv took it out, then each registered repository in turn.
 func (envFacade) GetRepository() EnvRepository {
 	envMu.Lock()
 	defer envMu.Unlock()
@@ -121,18 +114,17 @@ func (envFacade) GetRepository() EnvRepository {
 	return envRepository
 }
 
-// quotedEnvValue is the /\A(['"])(.*)\1\z/ of Env::getOption.
+// quotedEnvValue matches a value wrapped in matching single or double quotes.
 var quotedEnvValue = regexp.MustCompile(`^(['"])([\s\S]*)(['"])$`)
 
-// Get answers to Env::get. The variadic argument stands for the PHP $default,
-// which is null; a default that is a func() any is invoked, as PHP's value()
-// does.
+// Get returns the value of a variable, falling back to the optional default,
+// which is nil when not given. A default that is a func() any is invoked and
+// its result returned.
 //
 // The strings "true", "(true)", "false", "(false)", "empty", "(empty)", "null"
 // and "(null)" become the value they name, in any case, and a quoted value
-// loses its quotes -- which is what the PHP getOption does. A variable set to
-// "null" reads as nil and does not fall back to the default, because the PHP
-// Option is Some(null) there.
+// loses its quotes. A variable set to "null" reads as nil and does not fall
+// back to the default: the variable is set, and nil is what it is set to.
 func (envFacade) Get(key string, def ...any) any {
 	raw, ok := Env.GetRepository().Get(key)
 	if !ok {
@@ -141,8 +133,8 @@ func (envFacade) Get(key string, def ...any) any {
 	return parseEnvValue(raw)
 }
 
-// GetOrFail answers to Env::getOrFail. The PHP throws RuntimeException, so this
-// returns (any, error).
+// GetOrFail returns the value of a variable, parsed as Get parses it, or an
+// error naming the variable when it is not set.
 func (envFacade) GetOrFail(key string) (any, error) {
 	raw, ok := Env.GetRepository().Get(key)
 	if !ok {

@@ -111,8 +111,8 @@ func TestStringableExplodeAndSplit(t *testing.T) {
 
 func TestStringableScan(t *testing.T) {
 	if got := str.Of("filename.jpg").Scan("%[^.].%s"); len(got) != 0 {
-		// An unsupported verb ends the scan, which is the shape sscanf has for
-		// a format it cannot read.
+		// An unsupported verb ends the scan, and what was read up to there is
+		// the answer.
 		t.Logf("Scan with an unsupported verb returned %v", got)
 	}
 	got := str.Of("Paulo Lima 42").Scan("%s %s %d")

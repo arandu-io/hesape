@@ -1,19 +1,20 @@
-// Package arr is Illuminate\Support\Arr.
+// Package arr holds the helpers for reading and reshaping maps and slices:
+// dotted-key access ([Get], [Set], [Has], [Forget]), subsetting ([Only],
+// [Except], [Where]), flattening ([Dot], [Undot], [Collapse]) and query-string
+// rendering ([Query]).
 //
-// Every exported function answers to the static method of the same name on the
-// PHP class: Arr::get is [Get], Arr::sortRecursiveDesc is [SortRecursiveDesc].
-// The names are the ecosystem's, not ours, and they are not translated.
+// # Two shapes
 //
-// # The shape of a PHP array
+// Each function takes the shape it walks: map[string]any where it reads keys,
+// and a slice where it walks a list. The doc comment on each one says which.
 //
-// A PHP array is an ordered map that doubles as a list. Go splits the two:
-// map[string]any is the keyed form, []T the list form. Each function takes the
-// shape its PHP body actually walks -- Get, Set and Forget take the map, First,
-// Where and Partition take the list -- and every doc comment says which.
+// A key holding dots is a path. [Get] and [Has] descend through nested maps,
+// and a numeric segment indexes into a nested slice, so one path can cross
+// both shapes; [Set] creates the levels that are missing.
 //
-// Go maps carry no insertion order. Where the PHP body produces order-dependent
-// output from a keyed array ([Divide], [Query], [Dot] over nested lists) the Go
-// body sorts the keys, so the result is stable across runs.
+// A map carries no order of its own, so wherever the output would otherwise
+// depend on one -- [Divide], [Query], [Dot] over nested values, [Undot] -- the
+// keys are sorted first and the result is stable across runs.
 package arr
 
 import (
@@ -29,8 +30,6 @@ import (
 // caller asked for exactly one item and got none. It reports the shape of the
 // data, not a mistake in the call, so match it with errors.Is and decide what
 // an empty result means here -- a missing record, a default, an empty page.
-//
-// Answers Illuminate\Support\ItemNotFoundException.
 var ErrItemNotFound = errors.New("arr: item not found")
 
 // ErrMultipleItemsFound is returned by [Sole] when more than one item matched:
@@ -38,18 +37,15 @@ var ErrItemNotFound = errors.New("arr: item not found")
 // Only the fact is reported, never how many matched or which -- reaching it
 // means either the callback is too loose or the list holds a duplicate that
 // should not be there.
-//
-// Answers Illuminate\Support\MultipleItemsFoundException.
 var ErrMultipleItemsFound = errors.New("arr: multiple items found")
 
-// Arrayer is the Go form of Illuminate\Contracts\Support\Arrayable: a value
-// that knows how to present itself as a keyed array.
+// Arrayer is a value that knows how to present itself as a keyed map.
 type Arrayer interface {
 	ToArray() map[string]any
 }
 
-// value mirrors the PHP value() helper: a closure default is invoked, every
-// other default is returned unchanged.
+// value invokes a func() any and returns its result; every other value is
+// returned unchanged.
 func value(v any) any {
 	if fn, ok := v.(func() any); ok {
 		return fn()
@@ -57,8 +53,8 @@ func value(v any) any {
 	return v
 }
 
-// Accessible answers to Arr::accessible. It reports whether the value can be
-// indexed at all -- in PHP an array or an ArrayAccess, in Go a map or a slice.
+// Accessible reports whether the value can be indexed at all: a map, a slice
+// or an array.
 func Accessible(v any) bool {
 	if v == nil {
 		return false
@@ -71,10 +67,8 @@ func Accessible(v any) bool {
 	}
 }
 
-// Arrayable answers to Arr::arrayable. It reports whether the value can be
-// turned into an array: a map, a slice, an [Arrayer] or a json.Marshaler,
-// which are the Go counterparts of PHP's Arrayable, Traversable, Jsonable and
-// JsonSerializable.
+// Arrayable reports whether the value can be turned into an array: a map, a
+// slice, an array, an [Arrayer] or a json.Marshaler.
 func Arrayable(v any) bool {
 	if v == nil {
 		return false
@@ -88,8 +82,8 @@ func Arrayable(v any) bool {
 	return Accessible(v)
 }
 
-// Add answers to Arr::add. It writes the value under the dotted key only when
-// nothing is there yet, and returns the same map.
+// Add writes the value under the dotted key only when nothing is there yet,
+// and returns the same map.
 func Add(array map[string]any, key string, v any) map[string]any {
 	if Get(array, key, nil) == nil {
 		return Set(array, key, v)
@@ -97,11 +91,11 @@ func Add(array map[string]any, key string, v any) map[string]any {
 	return array
 }
 
-// Array answers to Arr::array: read a dotted key and require it to be a list.
-// The PHP throws InvalidArgumentException; the Go returns the error.
+// Array reads a dotted key and requires the value to be a []any, returning an
+// error naming the key and the type found when it is not.
 //
-// A nil default is PHP's null default, which fails the type check unless the
-// key is present.
+// A nil default means no default, which fails the type check unless the key is
+// present.
 func Array(array map[string]any, key string, def []any) ([]any, error) {
 	var raw any
 	if def == nil {
@@ -116,11 +110,11 @@ func Array(array map[string]any, key string, def []any) ([]any, error) {
 	return v, nil
 }
 
-// Boolean answers to Arr::boolean: read a dotted key and require it to be a
-// bool. The PHP throws InvalidArgumentException; the Go returns the error.
+// Boolean reads a dotted key and requires the value to be a bool, returning an
+// error naming the key and the type found when it is not.
 //
-// The default is a pointer so that nil can be PHP's null default, which fails
-// the type check unless the key is present.
+// The default is a pointer so that nil can mean no default, which fails the
+// type check unless the key is present.
 func Boolean(array map[string]any, key string, def *bool) (bool, error) {
 	raw := getWithPointerDefault(array, key, def)
 	v, ok := raw.(bool)
@@ -130,8 +124,9 @@ func Boolean(array map[string]any, key string, def *bool) (bool, error) {
 	return v, nil
 }
 
-// Float answers to Arr::float: read a dotted key and require it to be a float.
-// The PHP throws InvalidArgumentException; the Go returns the error.
+// Float reads a dotted key and requires the value to be a float64, returning
+// an error naming the key and the type found when it is not. A nil default
+// means no default.
 func Float(array map[string]any, key string, def *float64) (float64, error) {
 	raw := getWithPointerDefault(array, key, def)
 	v, ok := raw.(float64)
@@ -141,8 +136,9 @@ func Float(array map[string]any, key string, def *float64) (float64, error) {
 	return v, nil
 }
 
-// Integer answers to Arr::integer: read a dotted key and require it to be an
-// int. The PHP throws InvalidArgumentException; the Go returns the error.
+// Integer reads a dotted key and requires the value to be an int, returning an
+// error naming the key and the type found when it is not. A nil default means
+// no default.
 func Integer(array map[string]any, key string, def *int) (int, error) {
 	raw := getWithPointerDefault(array, key, def)
 	v, ok := raw.(int)
@@ -152,8 +148,9 @@ func Integer(array map[string]any, key string, def *int) (int, error) {
 	return v, nil
 }
 
-// String answers to Arr::string: read a dotted key and require it to be a
-// string. The PHP throws InvalidArgumentException; the Go returns the error.
+// String reads a dotted key and requires the value to be a string, returning
+// an error naming the key and the type found when it is not. A nil default
+// means no default.
 func String(array map[string]any, key string, def *string) (string, error) {
 	raw := getWithPointerDefault(array, key, def)
 	v, ok := raw.(string)
@@ -170,7 +167,8 @@ func getWithPointerDefault[T any](array map[string]any, key string, def *T) any 
 	return Get(array, key, *def)
 }
 
-// typeName is the Go answer to PHP's gettype() inside the type-check messages.
+// typeName names a value's type for the type-check messages. A nil value is
+// reported as NULL.
 func typeName(v any) string {
 	if v == nil {
 		return "NULL"
@@ -178,7 +176,7 @@ func typeName(v any) string {
 	return reflect.TypeOf(v).String()
 }
 
-// Collapse answers to Arr::collapse: one flat list out of a list of lists.
+// Collapse returns one flat list out of a list of lists.
 func Collapse[T any](array [][]T) []T {
 	results := []T{}
 	for _, values := range array {
@@ -187,8 +185,8 @@ func Collapse[T any](array [][]T) []T {
 	return results
 }
 
-// CrossJoin answers to Arr::crossJoin: every permutation of the given lists,
-// one list per permutation, in the order the PHP produces them.
+// CrossJoin returns every combination of the given lists, one list per
+// combination, with the last list varying fastest.
 func CrossJoin[T any](arrays ...[]T) [][]T {
 	results := [][]T{{}}
 	for _, array := range arrays {
@@ -205,8 +203,8 @@ func CrossJoin[T any](arrays ...[]T) [][]T {
 	return results
 }
 
-// Divide answers to Arr::divide: the keys in one list, the values in another.
-// The keys are sorted, because a Go map has no order of its own.
+// Divide returns the keys in one list and the values in another, aligned by
+// position. The keys are sorted, because a map has no order of its own.
 func Divide(array map[string]any) ([]string, []any) {
 	keys := sortedKeys(array)
 	values := make([]any, 0, len(keys))
@@ -216,9 +214,9 @@ func Divide(array map[string]any) ([]string, []any) {
 	return keys, values
 }
 
-// Dot answers to Arr::dot: a nested array flattened into one level whose keys
-// are joined with dots. Nested lists are walked too, keyed by their index, as
-// the PHP does. An empty nested array is kept as a value, not descended into.
+// Dot returns a nested map flattened into one level, its keys joined with dots
+// and carrying the given prefix. Nested lists are walked too, keyed by their
+// index. An empty nested map or list is kept as a value, not descended into.
 func Dot(array map[string]any, prepend string) map[string]any {
 	results := map[string]any{}
 	dotInto(results, array, prepend)
@@ -263,7 +261,7 @@ func dotEntry(results map[string]any, newKey string, v any) {
 	}
 }
 
-// Undot answers to Arr::undot: a dotted, flattened array expanded back out.
+// Undot expands a dotted, flattened map back out into nested maps.
 func Undot(array map[string]any) map[string]any {
 	results := map[string]any{}
 	for _, key := range sortedKeys(array) {
@@ -272,26 +270,20 @@ func Undot(array map[string]any) map[string]any {
 	return results
 }
 
-// Except answers to Arr::except: everything but the given dotted keys. The
-// PHP copies the array before forgetting; so does this.
+// Except returns everything but the given dotted keys. The map is copied
+// first, so the original is left alone.
 func Except(array map[string]any, keys ...string) map[string]any {
 	result := cloneMap(array)
 	Forget(result, keys...)
 	return result
 }
 
-// ExceptValues answers to Arr::exceptValues: everything but the given values.
-//
-// The PHP $strict flag chooses between loose and strict comparison; Go compares
-// only strictly, so there is no flag to pass.
+// ExceptValues returns everything but the given values, compared with ==.
 func ExceptValues[T comparable](array []T, values ...T) []T {
 	return rejectValues(array, values, false)
 }
 
-// OnlyValues answers to Arr::onlyValues: only the given values.
-//
-// The PHP $strict flag chooses between loose and strict comparison; Go compares
-// only strictly, so there is no flag to pass.
+// OnlyValues returns only the given values, compared with ==.
 func OnlyValues[T comparable](array []T, values ...T) []T {
 	return rejectValues(array, values, true)
 }
@@ -310,8 +302,8 @@ func rejectValues[T comparable](array []T, values []T, keep bool) []T {
 	return results
 }
 
-// Exists answers to Arr::exists: whether the exact key is present. It does not
-// read dots; [Has] does.
+// Exists reports whether the exact key is present. It does not read dots;
+// [Has] does.
 func Exists(array map[string]any, key string) bool {
 	if array == nil {
 		return false
@@ -320,9 +312,8 @@ func Exists(array map[string]any, key string) bool {
 	return ok
 }
 
-// Forget answers to Arr::forget: remove one or many dotted keys. The PHP takes
-// the array by reference and returns nothing; a Go map is already a reference,
-// so this mutates in place and returns nothing too.
+// Forget removes one or many dotted keys. A map is a reference, so this
+// mutates in place and returns nothing.
 func Forget(array map[string]any, keys ...string) {
 	if len(keys) == 0 {
 		return
@@ -351,12 +342,12 @@ func Forget(array map[string]any, keys ...string) {
 	}
 }
 
-// From answers to Arr::from: the underlying array of the given value. A map, a
-// slice, an [Arrayer], a json.Marshaler or a struct all convert; a scalar is
-// the error the PHP throws as InvalidArgumentException.
+// From returns the underlying array of the given value. A map, a slice, an
+// [Arrayer], a json.Marshaler or a struct all convert; a scalar, and nil, are
+// an error.
 //
-// The result is map[string]any for keyed values and []any for lists, which is
-// the one place a PHP array's double life survives into Go.
+// The result is map[string]any for keyed values and []any for lists, so the
+// caller type-asserts on the shape it expects.
 func From(items any) (any, error) {
 	switch v := items.(type) {
 	case nil:
@@ -405,11 +396,11 @@ func From(items any) (any, error) {
 	}
 }
 
-// Get answers to Arr::get: read a value by dotted key, falling back to the
-// default. A default that is a func() any is invoked, as PHP's value() does.
+// Get reads a value by dotted key, falling back to the default. A default that
+// is a func() any is invoked and its result returned.
 //
-// The empty key is PHP's null key and returns the whole array. A numeric
-// segment indexes into a nested list, because a PHP array is both shapes.
+// The empty key returns the whole map. A numeric segment indexes into a nested
+// []any, so one path can cross both shapes.
 func Get(array map[string]any, key string, def any) any {
 	if array == nil {
 		return value(def)
@@ -451,8 +442,8 @@ func descend(current any, segment string) (any, bool) {
 	}
 }
 
-// Has answers to Arr::has: whether every one of the dotted keys is present.
-// An empty array or an empty key list is false, as it is in PHP.
+// Has reports whether every one of the dotted keys is present. An empty map,
+// or an empty key list, is false.
 func Has(array map[string]any, keys ...string) bool {
 	if len(array) == 0 || len(keys) == 0 {
 		return false
@@ -473,8 +464,8 @@ func Has(array map[string]any, keys ...string) bool {
 	return true
 }
 
-// HasAll answers to Arr::hasAll: whether every one of the dotted keys is
-// present. The PHP keeps it beside has() as the explicit spelling.
+// HasAll reports whether every one of the dotted keys is present, which is
+// what [Has] reports under a name that says so.
 func HasAll(array map[string]any, keys ...string) bool {
 	if len(array) == 0 || len(keys) == 0 {
 		return false
@@ -487,7 +478,8 @@ func HasAll(array map[string]any, keys ...string) bool {
 	return true
 }
 
-// HasAny answers to Arr::hasAny: whether any one of the dotted keys is present.
+// HasAny reports whether any one of the dotted keys is present. An empty map,
+// or an empty key list, is false.
 func HasAny(array map[string]any, keys ...string) bool {
 	if len(array) == 0 || len(keys) == 0 {
 		return false
@@ -500,8 +492,7 @@ func HasAny(array map[string]any, keys ...string) bool {
 	return false
 }
 
-// IsAssoc answers to Arr::isAssoc: whether the value is a keyed array rather
-// than a list. In Go that is the question of whether it is a map.
+// IsAssoc reports whether the value is a map rather than a list.
 func IsAssoc(v any) bool {
 	if v == nil {
 		return false
@@ -509,8 +500,7 @@ func IsAssoc(v any) bool {
 	return reflect.TypeOf(v).Kind() == reflect.Map
 }
 
-// IsList answers to Arr::isList: whether the value is a list. In Go that is
-// the question of whether it is a slice or an array.
+// IsList reports whether the value is a slice or an array.
 func IsList(v any) bool {
 	if v == nil {
 		return false
@@ -523,9 +513,8 @@ func IsList(v any) bool {
 	}
 }
 
-// KeyBy answers to Arr::keyBy: key a list by the value the callback returns.
-// The PHP also accepts a field name, which reaches the field through data_get;
-// in Go the callback is the one spelling.
+// KeyBy keys a list by the string the callback returns for each item. Two
+// items yielding the same key leave the later one.
 func KeyBy[T any](array []T, keyBy func(T) string) map[string]T {
 	results := make(map[string]T, len(array))
 	for _, item := range array {
@@ -534,7 +523,8 @@ func KeyBy[T any](array []T, keyBy func(T) string) map[string]T {
 	return results
 }
 
-// Only answers to Arr::only: the subset of the array under the given keys.
+// Only returns the subset of the map under the given exact keys. A key the map
+// does not hold is skipped.
 func Only(array map[string]any, keys ...string) map[string]any {
 	results := map[string]any{}
 	for _, key := range keys {
@@ -545,7 +535,7 @@ func Only(array map[string]any, keys ...string) map[string]any {
 	return results
 }
 
-// PrependKeysWith answers to Arr::prependKeysWith: every key given a prefix.
+// PrependKeysWith returns a new map with every key given the prefix.
 func PrependKeysWith(array map[string]any, prependWith string) map[string]any {
 	results := make(map[string]any, len(array))
 	for k, v := range array {
@@ -554,17 +544,16 @@ func PrependKeysWith(array map[string]any, prependWith string) map[string]any {
 	return results
 }
 
-// Pull answers to Arr::pull: read a dotted key and remove it. The PHP takes
-// the array by reference; a Go map is already a reference.
+// Pull reads a dotted key and removes it, returning the value or the default.
+// A map is a reference, so the removal is seen by every holder of it.
 func Pull(array map[string]any, key string, def any) any {
 	v := Get(array, key, def)
 	Forget(array, key)
 	return v
 }
 
-// Push answers to Arr::push: append values to the list living under a dotted
-// key. The PHP throws when the key does not hold an array; the Go returns the
-// error.
+// Push appends values to the list living under a dotted key and returns the
+// same map. A key holding something other than a []any is an error.
 func Push(array map[string]any, key string, values ...any) (map[string]any, error) {
 	target, err := Array(array, key, []any{})
 	if err != nil {
@@ -574,7 +563,7 @@ func Push(array map[string]any, key string, values ...any) (map[string]any, erro
 	return Set(array, key, target), nil
 }
 
-// Select answers to Arr::select: keep only the given keys of every item.
+// Select keeps only the given keys of every item in the list.
 func Select(array []map[string]any, keys ...string) []map[string]any {
 	results := make([]map[string]any, 0, len(array))
 	for _, item := range array {
@@ -589,13 +578,11 @@ func Select(array []map[string]any, keys ...string) []map[string]any {
 	return results
 }
 
-// Set answers to Arr::set: write a value under a dotted key, creating the
-// levels that are missing. The PHP takes the array by reference and returns it;
-// a Go map is already a reference, and the same map comes back.
+// Set writes a value under a dotted key, creating the levels that are missing,
+// and returns the same map.
 //
-// The empty key is PHP's null key, which replaces the whole array; a Go map
-// cannot be replaced through its own reference, so the empty key is a no-op and
-// the map is returned unchanged.
+// A map cannot be replaced through its own reference, so an empty key is a
+// no-op and the map comes back unchanged. A nil map is a no-op too.
 func Set(array map[string]any, key string, v any) map[string]any {
 	if array == nil || key == "" {
 		return array

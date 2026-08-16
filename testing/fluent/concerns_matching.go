@@ -9,19 +9,13 @@ import (
 	hesapetesting "github.com/arandu-io/hesape/testing"
 )
 
-// This file answers to Illuminate\Testing\Fluent\Concerns\Matching.
-//
-// The PHP is a trait mixed into AssertableJson. Go has no traits, so the
-// methods are on AssertableJSON itself and the file keeps the trait's name.
+// The value assertions on [AssertableJSON].
 
-// Where answers to Matching::where: the property is the expected value.
+// Where asserts the property is the expected value.
 //
-// expected stands for the PHP's `mixed|Closure`: a value, or a func(any) bool
-// where the PHP takes a Closure. The closure form receives what is at the key,
-// where the PHP wraps an array in a Collection first.
+// An expectation of func(any) bool is handed what is at the key and must
+// report true.
 //
-// The PHP calls ensureSorted() on both sides before comparing, so that two
-// objects differing only in the order their keys were written compare equal.
 // There is nothing to do here: a Go map has no order to sort, and the
 // comparison is over decoded JSON.
 func (a *AssertableJSON) Where(key string, expected any) *AssertableJSON {
@@ -42,7 +36,7 @@ func (a *AssertableJSON) Where(key string, expected any) *AssertableJSON {
 	return a
 }
 
-// WhereNot answers to Matching::whereNot: the property is anything but that.
+// WhereNot asserts the property is anything but that.
 func (a *AssertableJSON) WhereNot(key string, expected any) *AssertableJSON {
 	a.t.Helper()
 
@@ -62,7 +56,7 @@ func (a *AssertableJSON) WhereNot(key string, expected any) *AssertableJSON {
 	return a
 }
 
-// WhereNull answers to Matching::whereNull.
+// WhereNull asserts the property is there and is null.
 func (a *AssertableJSON) WhereNull(key string) *AssertableJSON {
 	a.t.Helper()
 
@@ -72,7 +66,7 @@ func (a *AssertableJSON) WhereNull(key string) *AssertableJSON {
 	return a
 }
 
-// WhereNotNull answers to Matching::whereNotNull.
+// WhereNotNull asserts the property is there and is not null.
 func (a *AssertableJSON) WhereNotNull(key string) *AssertableJSON {
 	a.t.Helper()
 
@@ -82,7 +76,8 @@ func (a *AssertableJSON) WhereNotNull(key string) *AssertableJSON {
 	return a
 }
 
-// WhereAll answers to Matching::whereAll.
+// WhereAll asserts every one of these properties is its expected value. Keys
+// are visited in sorted order, so a failure names the same one every run.
 func (a *AssertableJSON) WhereAll(bindings map[string]any) *AssertableJSON {
 	a.t.Helper()
 
@@ -92,16 +87,8 @@ func (a *AssertableJSON) WhereAll(bindings map[string]any) *AssertableJSON {
 	return a
 }
 
-// WhereType answers to Matching::whereType: the property is of that JSON type.
-//
-// expected stands for the PHP's `string|array`: one name, several names
-// separated by "|", or a []string. The names are PHP's gettype() names, because
-// that is what the assertion compares against: boolean, integer, double,
-// string, array, object, null.
-//
-// A JSON number arrives here as a float64 and reaches the PHP as an int when it
-// has no fractional part, so an integral number is "integer" and the rest are
-// "double" -- otherwise whereType("id", "integer") would never hold.
+// WhereType asserts the property is of that JSON type. Several types may be
+// given, and any one of them satisfies it.
 func (a *AssertableJSON) WhereType(key string, expected any) *AssertableJSON {
 	a.t.Helper()
 
@@ -124,7 +111,8 @@ func (a *AssertableJSON) WhereType(key string, expected any) *AssertableJSON {
 	return a
 }
 
-// WhereAllType answers to Matching::whereAllType.
+// WhereAllType asserts every one of these properties is of its expected JSON
+// type.
 func (a *AssertableJSON) WhereAllType(bindings map[string]any) *AssertableJSON {
 	a.t.Helper()
 
@@ -134,16 +122,13 @@ func (a *AssertableJSON) WhereAllType(bindings map[string]any) *AssertableJSON {
 	return a
 }
 
-// WhereContains answers to Matching::whereContains: the property carries each
-// of the expected values.
+// WhereContains asserts the property carries each of the expected values,
+// either as an element or as the value of that key on an element.
 //
-// It looks in two places, as the PHP does: the entries of the property itself,
-// and the value under key in each of its entries. That second one is what makes
-// whereContains("name", "Alice") hold for a list of objects that each have a
-// name.
+// That second one is what makes whereContains("name", "Alice") hold for a list
+// of objects that each have a name.
 //
-// expected is one value or a list of them, which is what `new Collection($expected)`
-// does to a scalar in the PHP.
+// expected is one value or a list of them.
 func (a *AssertableJSON) WhereContains(key string, expected any) *AssertableJSON {
 	a.t.Helper()
 
@@ -160,8 +145,8 @@ func (a *AssertableJSON) WhereContains(key string, expected any) *AssertableJSON
 		missing = append(missing, search)
 	}
 
-	// The PHP picks its message on whether any of the values that are missing
-	// is a closure, because "does not contain [Closure]" says nothing.
+	// A missing value that is a truth test gets its own message, because
+	// printing the function itself would say nothing.
 	for _, item := range missing {
 		if _, isClosure := item.(func(any) bool); isClosure {
 			hesapetesting.AssertEmpty(a.t, missing, fmt.Sprintf(
@@ -175,7 +160,8 @@ func (a *AssertableJSON) WhereContains(key string, expected any) *AssertableJSON
 	return a
 }
 
-// containsStrict answers to Collection::containsStrict with one argument.
+// containsStrict reports whether the haystack holds an element equal to the
+// search value, or one the search function reports true for.
 func containsStrict(haystack any, search any) bool {
 	if test, ok := search.(func(any) bool); ok {
 		for _, item := range entries(haystack) {
@@ -194,8 +180,8 @@ func containsStrict(haystack any, search any) bool {
 	return false
 }
 
-// containsStrictBy answers to Collection::containsStrict with a key and a
-// value: an entry whose key holds the value.
+// containsStrictBy reports whether the haystack holds an element whose key
+// holds the search value, or one the search function reports true for.
 func containsStrictBy(haystack any, key string, search any) bool {
 	for _, item := range entries(haystack) {
 		object, ok := item.(map[string]any)
@@ -219,7 +205,8 @@ func containsStrictBy(haystack any, key string, search any) bool {
 	return false
 }
 
-// entries is the values of a decoded array, in either PHP shape.
+// entries returns the values of a decoded payload, in order. A map answers
+// with its values in sorted key order.
 func entries(v any) []any {
 	switch value := v.(type) {
 	case []any:
@@ -237,7 +224,7 @@ func entries(v any) []any {
 	}
 }
 
-// wrapValues answers to `new Collection($expected)`: a list stays a list,
+// wrapValues normalises an expectation into a list: a list stays a list,
 // anything else becomes a list of one.
 func wrapValues(expected any) []any {
 	switch value := expected.(type) {
@@ -254,12 +241,11 @@ func wrapValues(expected any) []any {
 	}
 }
 
-// sameJSON is PHP's === for the values json.Unmarshal produces: the same
-// document, written the same way.
+// sameJSON reports whether two values are the same JSON document.
 //
-// It is not the assertion -- that is AssertSame -- but the predicate
-// containsStrict needs, and encoding both sides is what makes an int written in
-// a test equal the float64 the decoder produced for the same number.
+// It is not an assertion but the predicate containsStrict needs, and encoding
+// both sides is what makes an int written in a test equal the float64 the
+// decoder produced for the same number.
 func sameJSON(a, b any) bool {
 	left, err := json.Marshal(a)
 	if err != nil {
@@ -272,7 +258,8 @@ func sameJSON(a, b any) bool {
 	return string(left) == string(right)
 }
 
-// getType answers to strtolower(gettype($value)) over a decoded JSON value.
+// getType names the JSON type of a decoded value: null, boolean, string,
+// integer, double or array.
 func getType(v any) string {
 	switch value := v.(type) {
 	case nil:

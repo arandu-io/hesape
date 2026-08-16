@@ -7,9 +7,8 @@ import (
 	"strings"
 )
 
-// First answers to Arr::first: the first item passing the truth test, or the
-// default when nothing passes. A nil callback is PHP's null callback and takes
-// the first item of all.
+// First returns the first item passing the truth test, or the default when
+// nothing passes. A nil callback takes the first item of all.
 func First[T any](array []T, callback func(item T, key int) bool, def T) T {
 	if callback == nil {
 		if len(array) == 0 {
@@ -25,8 +24,8 @@ func First[T any](array []T, callback func(item T, key int) bool, def T) T {
 	return def
 }
 
-// Last answers to Arr::last: the last item passing the truth test, or the
-// default when nothing passes. A nil callback takes the last item of all.
+// Last returns the last item passing the truth test, or the default when
+// nothing passes. A nil callback takes the last item of all.
 func Last[T any](array []T, callback func(item T, key int) bool, def T) T {
 	if callback == nil {
 		if len(array) == 0 {
@@ -42,8 +41,8 @@ func Last[T any](array []T, callback func(item T, key int) bool, def T) T {
 	return def
 }
 
-// Take answers to Arr::take: the first limit items, or the last abs(limit)
-// items when the limit is negative.
+// Take returns the first limit items, or the last abs(limit) items when the
+// limit is negative. The result is always a fresh slice.
 func Take[T any](array []T, limit int) []T {
 	if limit < 0 {
 		if -limit >= len(array) {
@@ -57,9 +56,8 @@ func Take[T any](array []T, limit int) []T {
 	return append([]T{}, array[:limit]...)
 }
 
-// Flatten answers to Arr::flatten: a multi-dimensional list squashed into one
-// level. A depth of 1 flattens one level; a depth of zero or less is PHP's
-// INF default and flattens all the way down.
+// Flatten squashes a multi-dimensional list into one level. A depth of 1
+// flattens one level; a depth of zero or less flattens all the way down.
 func Flatten(array []any, depth int) []any {
 	result := []any{}
 	for _, item := range array {
@@ -77,7 +75,8 @@ func Flatten(array []any, depth int) []any {
 	return result
 }
 
-// Every answers to Arr::every: whether every item passes the truth test.
+// Every reports whether every item passes the truth test. An empty list is
+// true.
 func Every[T any](array []T, callback func(item T, key int) bool) bool {
 	for i, item := range array {
 		if !callback(item, i) {
@@ -87,7 +86,7 @@ func Every[T any](array []T, callback func(item T, key int) bool) bool {
 	return true
 }
 
-// Some answers to Arr::some: whether any item passes the truth test.
+// Some reports whether any item passes the truth test. An empty list is false.
 func Some[T any](array []T, callback func(item T, key int) bool) bool {
 	for i, item := range array {
 		if callback(item, i) {
@@ -97,8 +96,8 @@ func Some[T any](array []T, callback func(item T, key int) bool) bool {
 	return false
 }
 
-// Join answers to Arr::join: the items joined by glue, with the last one
-// joined by finalGlue when finalGlue is not empty.
+// Join returns the items joined by glue, with the last one joined by finalGlue
+// instead when finalGlue is not empty.
 func Join(array []string, glue, finalGlue string) string {
 	if finalGlue == "" {
 		return strings.Join(array, glue)
@@ -112,7 +111,8 @@ func Join(array []string, glue, finalGlue string) string {
 	return strings.Join(array[:len(array)-1], glue) + finalGlue + array[len(array)-1]
 }
 
-// Map answers to Arr::map: the callback run over every item, keys kept.
+// Map returns the callback run over every item, in order. The callback is
+// given the item and its index.
 func Map[T, U any](array []T, callback func(item T, key int) U) []U {
 	results := make([]U, 0, len(array))
 	for i, item := range array {
@@ -121,8 +121,8 @@ func Map[T, U any](array []T, callback func(item T, key int) U) []U {
 	return results
 }
 
-// MapWithKeys answers to Arr::mapWithKeys: the callback returns the key and
-// the value of each item, and the pairs are merged into one map.
+// MapWithKeys merges into one map the pairs the callback returns for each
+// item. A key returned twice leaves the later value.
 func MapWithKeys[T, V any](array []T, callback func(item T, key int) map[string]V) map[string]V {
 	result := map[string]V{}
 	for i, item := range array {
@@ -133,9 +133,8 @@ func MapWithKeys[T, V any](array []T, callback func(item T, key int) map[string]
 	return result
 }
 
-// MapSpread answers to Arr::mapSpread: the callback run over every nested
-// chunk, receiving the chunk's items followed by the chunk's key, as the PHP
-// spread does.
+// MapSpread runs the callback over every nested chunk, passing the chunk's
+// items followed by the chunk's index.
 func MapSpread[T any](array [][]any, callback func(args ...any) T) []T {
 	results := make([]T, 0, len(array))
 	for i, chunk := range array {
@@ -145,21 +144,15 @@ func MapSpread[T any](array [][]any, callback func(args ...any) T) []T {
 	return results
 }
 
-// Prepend answers to Arr::prepend: the value pushed onto the front.
-//
-// The PHP third argument prepends under a key instead, which only means
-// anything because a PHP array remembers its order. A Go map does not, so
-// prepending to one is [Set].
+// Prepend returns a new list with the value pushed onto the front. To write
+// into a map instead, use [Set]: a map has no front.
 func Prepend[T any](array []T, v T) []T {
 	return append([]T{v}, array...)
 }
 
-// Random answers to Arr::random: the given number of items, picked at random.
-// Asking for more than the array holds is the error the PHP throws as
-// InvalidArgumentException.
-//
-// The PHP null count returns a bare item rather than an array of one; in Go
-// that is Random(array, 1) and its single element.
+// Random returns the given number of items, picked at random and without
+// repetition. Asking for more than the list holds is an error; asking for none
+// or fewer gives an empty list.
 func Random[T any](array []T, number int) ([]T, error) {
 	if number > len(array) {
 		return nil, &countError{requested: number, available: len(array)}
@@ -175,7 +168,7 @@ func Random[T any](array []T, number int) ([]T, error) {
 	return results, nil
 }
 
-// Shuffle answers to Arr::shuffle: a shuffled copy of the list.
+// Shuffle returns a shuffled copy of the list, leaving the original alone.
 func Shuffle[T any](array []T) []T {
 	result := append([]T{}, array...)
 	rand.Shuffle(len(result), func(i, j int) {
@@ -184,9 +177,9 @@ func Shuffle[T any](array []T) []T {
 	return result
 }
 
-// Sole answers to Arr::sole: the one item that matches. Nothing matching is
+// Sole returns the one item that matches. Nothing matching is
 // [ErrItemNotFound]; more than one is [ErrMultipleItemsFound]. A nil callback
-// takes the whole list, as PHP's null callback does.
+// takes the whole list.
 func Sole[T any](array []T, callback func(item T, key int) bool) (T, error) {
 	var zero T
 	matched := array
@@ -203,11 +196,8 @@ func Sole[T any](array []T, callback func(item T, key int) bool) (T, error) {
 	}
 }
 
-// Sort answers to Arr::sort: a sorted copy of the list.
-//
-// The PHP argument is a sort-key callback or a dotted field name resolved
-// through data_get; the Go argument is the comparison itself, which is the one
-// spelling a typed language needs.
+// Sort returns a sorted copy of the list, leaving the original alone. The
+// argument is the comparison itself, and the sort is stable.
 func Sort[T any](array []T, compare func(a, b T) int) []T {
 	result := append([]T{}, array...)
 	sort.SliceStable(result, func(i, j int) bool {
@@ -216,17 +206,14 @@ func Sort[T any](array []T, compare func(a, b T) int) []T {
 	return result
 }
 
-// SortDesc answers to Arr::sortDesc: a sorted copy of the list, descending.
+// SortDesc returns a sorted copy of the list, descending.
 func SortDesc[T any](array []T, compare func(a, b T) int) []T {
 	return Sort(array, func(a, b T) int { return -compare(a, b) })
 }
 
-// SortRecursive answers to Arr::sortRecursive: the list sorted by value, and
-// every nested list sorted too.
-//
-// The PHP sort flags choose a comparison mode; Go compares numbers as numbers
-// and strings as strings, which is what SORT_REGULAR asks for, so there is no
-// flag to pass. Nested maps keep their contents: a Go map has no order to sort.
+// SortRecursive returns the list sorted by value, with every nested list
+// sorted too. Numbers compare as numbers and everything else by its rendering.
+// Nested maps are left as they are: a map has no order to sort.
 func SortRecursive(array []any, descending bool) []any {
 	result := make([]any, 0, len(array))
 	for _, v := range array {
@@ -245,12 +232,13 @@ func SortRecursive(array []any, descending bool) []any {
 	return result
 }
 
-// SortRecursiveDesc answers to Arr::sortRecursiveDesc.
+// SortRecursiveDesc returns the list sorted descending by value, with every
+// nested list sorted too.
 func SortRecursiveDesc(array []any) []any {
 	return SortRecursive(array, true)
 }
 
-// Where answers to Arr::where: the items passing the truth test.
+// Where returns the items passing the truth test.
 func Where[T any](array []T, callback func(item T, key int) bool) []T {
 	results := []T{}
 	for i, item := range array {
@@ -261,13 +249,13 @@ func Where[T any](array []T, callback func(item T, key int) bool) []T {
 	return results
 }
 
-// Reject answers to Arr::reject: the items failing the truth test.
+// Reject returns the items failing the truth test.
 func Reject[T any](array []T, callback func(item T, key int) bool) []T {
 	return Where(array, func(item T, key int) bool { return !callback(item, key) })
 }
 
-// Partition answers to Arr::partition: the items that passed and the items
-// that failed, in that order.
+// Partition returns the items that passed and the items that failed, in that
+// order.
 func Partition[T any](array []T, callback func(item T, key int) bool) (passed, failed []T) {
 	passed, failed = []T{}, []T{}
 	for i, item := range array {
@@ -280,13 +268,14 @@ func Partition[T any](array []T, callback func(item T, key int) bool) (passed, f
 	return passed, failed
 }
 
-// WhereNotNull answers to Arr::whereNotNull: the items that are not nil.
+// WhereNotNull returns the items that are not nil.
 func WhereNotNull(array []any) []any {
 	return Where(array, func(item any, _ int) bool { return item != nil })
 }
 
-// Wrap answers to Arr::wrap: nil becomes the empty list, a list stays as it is,
-// and anything else is wrapped in a list of one.
+// Wrap turns a value into a list: nil becomes the empty list, a slice or an
+// array becomes a []any of its elements, and anything else is wrapped in a
+// list of one.
 func Wrap(v any) []any {
 	if v == nil {
 		return []any{}
@@ -305,10 +294,9 @@ func Wrap(v any) []any {
 	return []any{v}
 }
 
-// Pluck answers to Arr::pluck: one value read out of every item by dotted
-// path. With an empty key the result is a []any in the items' order; with a
-// key it is a map[string]any keyed by that path, which is the PHP's own pair
-// of return shapes.
+// Pluck reads one value out of every item by dotted path. With an empty key
+// the result is a []any in the items' order; with a key it is a
+// map[string]any keyed by the value found at that path.
 func Pluck(array []any, value, key string) any {
 	if key == "" {
 		results := make([]any, 0, len(array))
@@ -324,8 +312,9 @@ func Pluck(array []any, value, key string) any {
 	return results
 }
 
-// dataGet is the data_get() the PHP body leans on, narrowed to the shapes a Go
-// value actually takes here.
+// dataGet reads a dotted path out of an item, converting it with [From] first
+// when it is not already a map. An empty path is the item itself, and a path
+// that cannot be reached is nil.
 func dataGet(item any, path string) any {
 	if path == "" {
 		return item

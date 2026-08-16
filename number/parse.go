@@ -9,23 +9,19 @@ import (
 )
 
 // ErrNotANumber is returned by Parse, ParseInt and ParseFloat for a string with
-// no number at the front of it. Illuminate returns false there; this is the
-// error that false becomes.
+// no number at the front of it.
 var ErrNotANumber = errors.New("number: string does not begin with a number")
 
-// Parse answers for Number::parse. It reads a formatted number back:
+// Parse reads a formatted number back:
 //
 //	Parse("1,234.56") // 1234.56
 //	Parse("-1,234")   // -1234
 //
 // The group separator is dropped before the digits are read, which is what
 // makes a formatted string round-trip. Reading stops at the first character
-// that cannot belong to the number, the way ICU's own parser stops, so
-// "1,234 units" is 1234 and not an error.
+// that cannot belong to the number, so "1,234 units" is 1234 and not an error.
 //
-// Illuminate's $type selects between a double and a 32-bit integer; ParseFloat
-// and ParseInt are those two choices, and this is the double. $locale has no
-// equivalent here; see the package comment.
+// The reading is not locale-aware; see the package comment.
 func Parse(s string) (float64, error) {
 	cleaned := strings.Map(dropGroupSeparators, strings.TrimSpace(s))
 
@@ -36,17 +32,11 @@ func Parse(s string) (float64, error) {
 	return v, nil
 }
 
-// ParseFloat answers for Number::parseFloat. It is Parse with Illuminate's
-// TYPE_DOUBLE, which is the default, so the two agree.
+// ParseFloat parses the leading number in s as a float64.
 func ParseFloat(s string) (float64, error) { return Parse(s) }
 
-// ParseInt answers for Number::parseInt. It is Parse with Illuminate's
-// TYPE_INT32: the fraction is dropped towards zero rather than rounded, so
-// ParseInt("1,234.99") is 1234.
-//
-// Illuminate clamps the result to 32 bits, because that is what its ICU
-// constant names; this returns an int and does not clamp, because on every
-// platform Go builds for an int is at least that wide.
+// ParseInt parses the leading number in s as an int. The fraction is dropped
+// towards zero rather than rounded, so ParseInt("1,234.99") is 1234.
 func ParseInt(s string) (int, error) {
 	v, err := Parse(s)
 	if err != nil {
@@ -67,8 +57,8 @@ func dropGroupSeparators(r rune) rune {
 }
 
 // numericPrefix is the longest leading run that can be a decimal number: a
-// sign, digits, a point with more digits, and an exponent. Everything past it
-// is what ICU stops at.
+// sign, digits, a point with more digits, and an exponent. Reading stops at the
+// first character past it.
 func numericPrefix(s string) string {
 	i, n := 0, len(s)
 	if i < n && (s[i] == '+' || s[i] == '-') {

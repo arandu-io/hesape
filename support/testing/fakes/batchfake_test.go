@@ -47,7 +47,7 @@ func TestBatchFakeCancelAndDelete(t *testing.T) {
 		t.Error("Delete should mark the batch, and leave it readable")
 	}
 
-	// The three that do nothing on purpose, as the PHP does.
+	// The three that do nothing on purpose.
 	batch.RecordSuccessfulJob("1")
 	batch.DecrementPendingJobs("1")
 	batch.RecordFailedJob("1", nil)
@@ -146,7 +146,7 @@ func TestBatchRepositoryFakeTransactionJustCalls(t *testing.T) {
 	if !called || got != "answer" {
 		t.Errorf("Transaction called=%v answered=%v, want it to call and answer", called, got)
 	}
-	// It does nothing on purpose, as the PHP does.
+	// It does nothing on purpose.
 	repository.RollBack()
 	repository.IncrementTotalJobs("1", 5)
 	if counts := repository.DecrementPendingJobs("1", "job"); counts != (UpdatedBatchJobCounts{}) {

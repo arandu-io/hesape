@@ -73,8 +73,8 @@ func TestDeferRunsNothingUntilTheCallbackIsInvoked(t *testing.T) {
 		return 1, nil
 	})
 
-	// Nothing has started: Illuminate hands back a DeferredCallback and the
-	// kernel invokes it after the response.
+	// Nothing has started: Defer only hands back the callback, and the caller
+	// decides when it runs.
 	time.Sleep(10 * time.Millisecond)
 	if ran.Load() {
 		t.Fatal("Defer started the task before the callback was invoked")
@@ -308,9 +308,7 @@ func TestTheThreeFactoriesAnswerWithTheSameDriver(t *testing.T) {
 func TestAFactoryDriverRunsTasksInArgumentOrder(t *testing.T) {
 	t.Parallel()
 
-	// The last task finishes first. PHP's sync driver holds the order by
-	// running the tasks in a row; here they run at the same time and the order
-	// is held by where the result is written.
+	// The last task finishes first.
 	done := make(chan struct{})
 	got, err := concurrency.NewManager[string](nil).CreateSyncDriver().Run(context.Background(),
 		func(ctx context.Context) (string, error) { <-done; return "first", nil },
@@ -388,8 +386,7 @@ func TestDriverWithoutANameIsTheDefaultInstance(t *testing.T) {
 	if def != byName {
 		t.Fatal("Driver() did not answer with the default instance")
 	}
-	// An empty name is no name, which is what `$pipeline ?: 'default'` and
-	// `$name ?: $this->getDefaultInstance()` do with the falsy string.
+	// An empty name is no name.
 	empty, err := m.Driver("")
 	if err != nil {
 		t.Fatalf("Driver(\"\"): %v", err)

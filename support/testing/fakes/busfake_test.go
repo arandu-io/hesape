@@ -55,8 +55,7 @@ func (d *spyBusDispatcher) Map(commands map[string]string)            { d.mapped
 func TestBusFakeAssertDispatchedCoversAllThreeWays(t *testing.T) {
 	t.Parallel()
 
-	// A job dispatched synchronously answers AssertDispatched, as it does in
-	// the PHP: the three ledgers are counted together there.
+	// A job dispatched synchronously answers AssertDispatched.
 	bus := NewBusFake(nil)
 	bus.DispatchSync(sendReceipt{}, nil)
 

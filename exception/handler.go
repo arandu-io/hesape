@@ -50,10 +50,8 @@ type Config struct {
 
 	// DontReport are the errors never written to the log.
 	//
-	// It is Laravel's $dontReport, and it is a list of sentinels compared with
-	// errors.Is -- not a list of statuses. "Do not log 404" is the wrong shape:
-	// a 404 from a bad link and a 404 from a repository that lost a row are the
-	// same status and different news.
+	// "Do not log 404" is the wrong shape: a 404 from a bad link and a 404 from a
+	// repository that lost a row are the same status and different news.
 	DontReport []error
 
 	// RenderJSONWhen decides whether a failure is answered as JSON rather than
@@ -63,17 +61,12 @@ type Config struct {
 	// Console says the process is running a command rather than serving
 	// requests, which is what RunningInConsole reports.
 	//
-	// PHP asks php_sapi_name(), because one installation serves both and the
-	// SAPI is the only way to tell them apart. A Go binary knows which of the
-	// two it started as, so the kernel says it here instead.
+	// A Go binary knows which of the two it started as, so the kernel says it
+	// here instead.
 	Console bool
 }
 
 // Handler decides what a failed request answers.
-//
-// It is Illuminate's exception handler: Report writes the failure down, Render
-// turns it into a response, and the two are separate because a failure that is
-// answered is still a failure that happened.
 //
 // Everything an application registers on it -- Reportable, Renderable, Map,
 // Ignore, Level, ThrottleUsing, BuildContextUsing -- is registered once at boot
@@ -108,9 +101,6 @@ type Handler struct {
 	// withoutDuplicates says an error is reported at most once.
 	withoutDuplicates bool
 	// reported is the set of errors already reported, for withoutDuplicates.
-	// The PHP uses a WeakMap keyed by the exception instance; this is keyed by
-	// the error value, which is the same identity for the pointer errors Go
-	// programs raise.
 	reported map[error]bool
 	// finalizeResponse is what RespondUsing registered.
 	finalizeResponse func(w http.ResponseWriter, r *http.Request, err error)
@@ -122,7 +112,7 @@ type Handler struct {
 	environment string
 }
 
-// leveled is one entry of the levels map: the PHP keys it by class name, which
+// leveled is one entry of the levels map, which
 // Go has no run-time equivalent of, so the key is the sentinel errors.Is
 // compares against.
 type leveled struct {
@@ -136,8 +126,8 @@ type mapping struct {
 	to   func(error) error
 }
 
-// NewHandler is Handler::__construct, which takes the container this collection
-// does not have (ADR 0001): the configuration arrives as a value instead.
+// NewHandler builds a Handler. Nothing is resolved from a registry: the
+// configuration arrives as a value.
 func NewHandler(cfg Config) *Handler {
 	return &Handler{
 		cfg:       cfg,
@@ -146,7 +136,7 @@ func NewHandler(cfg Config) *Handler {
 	}
 }
 
-// Report is Handler::report: it writes the failure to the log, unless something
+// Report writes the failure to the log, unless something
 // silenced it.
 //
 // The level comes from the status and not from a knob: below 500 the
@@ -165,7 +155,7 @@ func (h *Handler) Report(ctx context.Context, err error) {
 	h.reportThrowable(ctx, err)
 }
 
-// ShouldReport is Handler::shouldReport: whether the error would be written to
+// ShouldReport reports whether the error would be written to
 // the log.
 func (h *Handler) ShouldReport(err error) bool { return !h.shouldntReport(err) }
 
@@ -179,8 +169,8 @@ func (h *Handler) reportThrowable(ctx context.Context, err error) {
 	callbacks := append([]*ReportableHandler(nil), h.reportCallbacks...)
 	h.mu.Unlock()
 
-	// An error that knows how to report itself does, and returning true means
-	// it is done -- the PHP stops on anything that is not false.
+	// An error that knows how to report itself does, and returning true means it
+	// is done.
 	if own, ok := err.(interface{ Report() bool }); ok && own.Report() {
 		return
 	}
@@ -290,7 +280,7 @@ func isComparable(err error) bool {
 	return t != nil && t.Comparable()
 }
 
-// Render is Handler::render, writing the answer instead of returning one.
+// Render writes the answer for a failed request instead of returning one.
 //
 // It answers an error a handler returned.
 //
@@ -301,9 +291,8 @@ func isComparable(err error) bool {
 // is the answer.
 //
 // It does not report. Report and Render are the two halves the type doc
-// separates, and the caller calls both -- which is what the kernel does in the
-// PHP, where handle() reports and then renders. This used to report on the way
-// in, so an application written that way logged every failure twice.
+// separates, and the caller calls both. This used to report on the way in, so
+// an application written that way logged every failure twice.
 func (h *Handler) Render(w http.ResponseWriter, r *http.Request, err error) {
 	if err == nil {
 		return
@@ -315,7 +304,7 @@ func (h *Handler) Render(w http.ResponseWriter, r *http.Request, err error) {
 	// written: a header set after WriteHeader never leaves the process, which
 	// made the callback a no-op for the one thing it is mostly used for. A
 	// callback that answered the request itself is the answer, and nothing else
-	// runs -- that is the PHP returning a response of its own from here.
+	// runs.
 	if h.finalizeRenderedResponse(w, r, err) {
 		return
 	}
@@ -365,7 +354,7 @@ func (h *Handler) finalizeRenderedResponse(w http.ResponseWriter, r *http.Reques
 	return p.wrote
 }
 
-// RenderForConsole is Handler::renderForConsole: the answer to a failure
+// RenderForConsole is the answer to a failure
 // outside a request -- a command, a job, a scheduled task.
 //
 // The same classification, none of the HTML. A status is printed when the error
@@ -498,11 +487,10 @@ func messageFor(err error, status int) string {
 
 // applyErrorHeaders copies onto the response what the error asked to carry.
 //
-// It is the $exception->getHeaders() that every displayer in the PHP passes to
-// the Response it builds. Nothing here did it, so a 429 went out with no
-// Retry-After and a 401 with no WWW-Authenticate -- a status the client could
-// read and no instruction it could obey. It runs before anything is written,
-// because a header set after WriteHeader is a header nobody receives.
+// Nothing here did it, so a 429 went out with no Retry-After and a 401 with no
+// WWW-Authenticate -- a status the client could read and no instruction it
+// could obey. It runs before anything is written, because a header set after
+// WriteHeader is a header nobody receives.
 func applyErrorHeaders(w http.ResponseWriter, err error) {
 	var he *HTTPError
 	if !errors.As(err, &he) || len(he.Headers) == 0 {

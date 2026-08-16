@@ -35,22 +35,21 @@ var ordinalWords = map[string]string{
 	"seventy": "seventieth", "eighty": "eightieth", "ninety": "ninetieth",
 }
 
-// Spell answers for Number::spell. It writes v out in words.
+// Spell writes v out in words.
 //
 //	Spell(10)     // "ten"
 //	Spell(-2)     // "minus two"
 //	Spell(1234)   // "one thousand two hundred thirty-four"
 //	Spell(1.25)   // "one point two five"
 //
-// The optional arguments are Illuminate's $after and $until, in that order: a
-// value at or below $after, or at or above $until, is written in digits by
-// Format instead of in words. Passing neither spells every value.
+// The optional arguments bound the range that is spelled, in that order: a
+// value at or below the first, or at or above the second, is written in digits
+// by Format instead of in words. Passing neither spells every value.
 //
-//	Spell(9, 10)      // "9"    -- $after
-//	Spell(11, 0, 10)  // "11"   -- $until
+//	Spell(9, 10)     // "9"  -- at or below the lower bound
+//	Spell(11, 0, 10) // "11" -- at or above the upper bound
 //
-// $locale has no equivalent here; the words are English. See the package
-// comment.
+// The words are English; see the package comment.
 func Spell(v float64, bounds ...int) string {
 	if s, ok := special(v); ok {
 		return s
@@ -82,16 +81,14 @@ func Spell(v float64, bounds ...int) string {
 	return b.String()
 }
 
-// SpellOrdinal answers for Number::spellOrdinal. It writes v out in words in
-// ordinal form.
+// SpellOrdinal writes v out in words in ordinal form.
 //
 //	SpellOrdinal(1)   // "first"
 //	SpellOrdinal(21)  // "twenty-first"
 //	SpellOrdinal(100) // "one hundredth"
 //
-// Only the last word changes, which is how the ICU ruleset builds it. A
-// fraction has no ordinal, so it is dropped: Illuminate's ruleset has no rule
-// for one either. $locale has no equivalent here; the words are English.
+// Only the last word changes. A fraction has no ordinal, so it is dropped. The
+// words are English; see the package comment.
 func SpellOrdinal(v float64) string {
 	if s, ok := special(v); ok {
 		return s
@@ -104,7 +101,7 @@ func SpellOrdinal(v float64) string {
 }
 
 // ordinalize turns the last word of a spelled cardinal into its ordinal, which
-// is the whole of the %spellout-ordinal ruleset once the cardinal is written.
+// is the whole of the difference between the two forms.
 func ordinalize(spelled string) string {
 	i := strings.LastIndexAny(spelled, " -")
 	head, last := "", spelled

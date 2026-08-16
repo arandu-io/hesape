@@ -10,10 +10,9 @@ import (
 
 // entry is one process of a pool or a pipe, under the key it was added with.
 //
-// PHP keeps them in one array, where a string key and an appended integer key
-// live together and the insertion order is the array's order. Go has no such
-// map, so the order is the slice and the key is written down beside the
-// process.
+// A Go map keeps no insertion order and cannot hold a named and a positional
+// key in one sequence, so the order is the slice and the key is written down
+// beside the process.
 type entry struct {
 	key     string
 	process *PendingProcess
@@ -22,10 +21,9 @@ type entry struct {
 // keyed holds the pending processes of a pool or a pipe in the order they were
 // added, which is the half Pool and Pipe have in common.
 //
-// The unkeyed counter answers PHP's `$this->pendingProcesses[] = $process`: an
-// appended element takes the next integer key, counted only among the integer
-// keys, so a pool with one `as('build')` and two unkeyed processes keys them
-// "build", "0" and "1".
+// A process added without a key takes the next integer key, counted only among
+// the unkeyed ones, so a pool with one As("build") and two unkeyed processes
+// keys them "build", "0" and "1".
 type keyed struct {
 	entries []entry
 	next    int
@@ -36,8 +34,8 @@ func (k *keyed) as(factory *Factory, key string) *PendingProcess {
 	process := factory.NewPendingProcess()
 	for i := range k.entries {
 		if k.entries[i].key == key {
-			// PHP writes into the same array slot, so the position the key
-			// already has is the position it keeps.
+			// The process is written into the slot the key already has, so the
+			// position it holds in the pool does not change.
 			k.entries[i].process = process
 			return process
 		}
@@ -54,17 +52,14 @@ func (k *keyed) command(factory *Factory, command []string) *PendingProcess {
 	return process
 }
 
-// Pool answers Illuminate\Process\Pool: a set of processes that run at once.
+// Pool is a set of processes that run at once.
 //
 //	results, err := factory.Concurrently(ctx, func(pool *process.Pool) {
 //		pool.As("build").Command("go", "build", "./...")
 //		pool.Command("go", "vet", "./...")
 //	}, nil)
 //
-// The callback is not run when the pool is built. It runs at Start, which is
-// what PHP does -- `call_user_func($this->callback, $this)` is the first line
-// of start() -- so a pool defined once and started twice starts fresh both
-// times.
+// The callback is not run when the pool is built. It runs at Start.
 //
 // A Pool is not safe for concurrent use, and does not need to be: it is built
 // by one callback and started by the goroutine that built it. What runs at once
@@ -76,12 +71,12 @@ type Pool struct {
 }
 
 // NewPool answers the Pool constructor. [Factory.Pool] is how a caller reaches
-// it, exactly as Process::pool is in PHP.
+// it.
 func NewPool(factory *Factory, callback func(*Pool)) *Pool {
 	return &Pool{factory: factory, callback: callback}
 }
 
-// As adds a process to the pool under a key. PHP's Pool::as.
+// As adds a process to the pool under a key.
 //
 // The key names the process in the output handler and in the results, which is
 // what it is for: without it a process is known by its position.
@@ -89,27 +84,22 @@ func (p *Pool) As(key string) *PendingProcess { return p.as(p.factory, key) }
 
 // Command adds a process to the pool under the next integer key.
 //
-// It is `$pool->command(...)`, which PHP delivers through Pool::__call
-// forwarding to the factory and appending the result. Go has no method missing
-// hook, so the one form that starts a process is written out; everything else
-// the PHP proxies -- path, timeout, env, input -- is a method of the
-// [PendingProcess] this returns, and reads the same way chained onto it.
+// Go has no method missing hook, so the one form that starts a process is
+// written out.
 func (p *Pool) Command(command ...string) *PendingProcess {
 	return p.command(p.factory, command)
 }
 
-// Start runs the callback and starts every process it defined. PHP's
-// Pool::start.
+// Start runs the callback and starts every process it defined.
 //
 // The processes are started in the order they were added and none of them is
 // waited for, so they run at the same time. The output handler is called with
-// the key of the process the chunk came from, which is PHP's
-// `function ($type, $buffer, $key)`; pass nil for no handler.
+// the key of the process the chunk came from.
 //
 // A process that could not be started ends the start and the error names it.
-// The ones already started are still running: [InvokedProcessPool.Wait] on what
-// the caller has is not reachable, so this signals nothing and leaves them --
-// the same thing PHP does, since an exception there abandons the pool too.
+// The ones already started are still running: [InvokedProcessPool.Wait] on
+// what the caller has is not reachable, so this signals nothing and leaves
+// them.
 func (p *Pool) Start(ctx context.Context, output PoolOutputHandler) (*InvokedProcessPool, error) {
 	if p.callback != nil {
 		// Defined afresh, so a pool started twice starts the same set twice
@@ -136,11 +126,10 @@ func (p *Pool) Start(ctx context.Context, output PoolOutputHandler) (*InvokedPro
 	return invoked, nil
 }
 
-// Run starts the pool and waits for it. PHP's Pool::run, which is wait().
+// Run starts the pool and waits for it.
 func (p *Pool) Run(ctx context.Context) (*ProcessPoolResults, error) { return p.Wait(ctx) }
 
-// Wait starts the pool and waits for it. PHP's Pool::wait, which is
-// `$this->start()->wait()`.
+// Wait starts the pool and waits for it.
 func (p *Pool) Wait(ctx context.Context) (*ProcessPoolResults, error) {
 	started, err := p.Start(ctx, nil)
 	if err != nil {
@@ -155,20 +144,14 @@ type invokedEntry struct {
 	process InvokedProcess
 }
 
-// InvokedProcessPool answers Illuminate\Process\InvokedProcessPool: the
+// InvokedProcessPool is the
 // processes of a pool, started and still running.
 type InvokedProcessPool struct {
 	processes []invokedEntry
 }
 
 // Signal sends a signal to every process still running, and answers with the
-// ones it signalled. PHP's InvokedProcessPool::signal.
-//
-// PHP takes the signal number and Go takes an os.Signal, which is what
-// [InvokedProcess.Signal] takes for the same reason. Where the PHP throws, this
-// returns the error, and it returns the processes it had already signalled with
-// it -- a signal that failed on the third of five is worth seeing along with
-// the two that took it.
+// ones it signalled.
 func (p *InvokedProcessPool) Signal(signal os.Signal) (collections.Collection[InvokedProcess], error) {
 	signalled := collections.Collection[InvokedProcess]{}
 	for _, e := range p.processes {
@@ -183,8 +166,7 @@ func (p *InvokedProcessPool) Signal(signal os.Signal) (collections.Collection[In
 	return signalled, nil
 }
 
-// Running answers the processes of the pool that are still going. PHP's
-// InvokedProcessPool::running.
+// Running answers the processes of the pool that are still going.
 func (p *InvokedProcessPool) Running() collections.Collection[InvokedProcess] {
 	out := collections.Collection[InvokedProcess]{}
 	for _, e := range p.processes {
@@ -195,7 +177,7 @@ func (p *InvokedProcessPool) Running() collections.Collection[InvokedProcess] {
 	return out
 }
 
-// Wait waits for every process of the pool. PHP's InvokedProcessPool::wait.
+// Wait waits for every process of the pool.
 //
 // Every process is waited for even after one of them fails to be waited for,
 // because the alternative is a pool that leaves children running and a caller
@@ -217,9 +199,7 @@ func (p *InvokedProcessPool) Wait() (*ProcessPoolResults, error) {
 	return results, first
 }
 
-// Count answers how many processes the pool holds. PHP's
-// InvokedProcessPool::count, which is the Countable interface -- a Go caller
-// calls the method, and there is no len() to overload.
+// Count answers how many processes the pool holds.
 func (p *InvokedProcessPool) Count() int { return len(p.processes) }
 
 // resultEntry is one finished process of a pool, under its key.
@@ -228,22 +208,19 @@ type resultEntry struct {
 	result ProcessResult
 }
 
-// ProcessPoolResults answers Illuminate\Process\ProcessPoolResults: what a pool
+// ProcessPoolResults is what a pool
 // of processes finished with.
 //
-// The results are in the order the processes were added to the pool, which is
-// the order PHP's array keeps them in.
+// The results are in the order the processes were added to the pool.
 type ProcessPoolResults struct {
 	results []resultEntry
 }
 
-// Collect answers the results as a collection. PHP's
-// ProcessPoolResults::collect.
+// Collect answers the results as a collection.
 //
-// PHP hands back a Collection keyed by the pool's keys, because a PHP array
-// carries the key and the order at once. A [collections.Collection] is an
-// ordered list, as its own documentation says, so this is the results in the
-// order the pool was built and the key is the position.
+// A [collections.Collection] is an ordered list, as its own documentation
+// says, so this is the results in the order the pool was built and the key is
+// the position.
 func (r *ProcessPoolResults) Collect() collections.Collection[ProcessResult] {
 	out := make(collections.Collection[ProcessResult], 0, len(r.results))
 	for _, e := range r.results {
@@ -252,7 +229,7 @@ func (r *ProcessPoolResults) Collect() collections.Collection[ProcessResult] {
 	return out
 }
 
-// Pipe answers Illuminate\Process\Pipe: processes run one after another, each
+// Pipe runs processes one after another, each
 // one reading what the one before it wrote.
 //
 //	result, err := factory.Pipe(ctx, func(pipe *process.Pipe) {
@@ -260,8 +237,8 @@ func (r *ProcessPoolResults) Collect() collections.Collection[ProcessResult] {
 //		pipe.Command("grep", "-i", "todo")
 //	}, nil)
 //
-// The first process that fails ends the pipe and its result is what comes back,
-// which is PHP's `if ($previousProcessResult && $previousProcessResult->failed())`.
+// The first process that fails ends the pipe and its result is what comes
+// back.
 type Pipe struct {
 	factory  *Factory
 	callback func(*Pipe)
@@ -269,31 +246,29 @@ type Pipe struct {
 }
 
 // NewPipe answers the Pipe constructor. [Factory.Pipe] is how a caller reaches
-// it, exactly as Process::pipe is in PHP.
+// it.
 func NewPipe(factory *Factory, callback func(*Pipe)) *Pipe {
 	return &Pipe{factory: factory, callback: callback}
 }
 
-// As adds a process to the pipe under a key. PHP's Pipe::as.
+// As adds a process to the pipe under a key.
 func (p *Pipe) As(key string) *PendingProcess { return p.as(p.factory, key) }
 
 // Command adds a process to the pipe under the next integer key.
 //
-// It is `$pipe->command(...)`, which PHP delivers through Pipe::__call. What
-// [Pool.Command] says about that applies here.
+// What [Pool.Command] says about that applies here.
 func (p *Pipe) Command(command ...string) *PendingProcess {
 	return p.command(p.factory, command)
 }
 
-// Run runs the callback and then the processes, in order. PHP's Pipe::run.
+// Run runs the callback and then the processes, in order.
 //
 // Each process after the first is given the output of the one before it as its
 // standard input, and a process that exits non-zero stops the pipe -- its
 // result is returned, and nothing after it runs. The output handler is called
 // with the key of the process the chunk came from; pass nil for no handler.
 //
-// A pipe with no processes answers a nil result and a nil error, which is what
-// PHP's reduce over an empty array does.
+// A pipe with no processes answers a nil result and a nil error.
 func (p *Pipe) Run(ctx context.Context, output PoolOutputHandler) (ProcessResult, error) {
 	if p.callback != nil {
 		p.entries = nil

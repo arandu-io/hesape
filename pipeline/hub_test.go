@@ -172,8 +172,7 @@ func TestZeroValueHubIsUsable(t *testing.T) {
 func TestHubIsUsedFromSeveralGoroutines(t *testing.T) {
 	t.Parallel()
 
-	// Pipelines are defined at boot and sent through while serving. PHP has one
-	// process per request and no lock; a Go binary has one Hub and many.
+	// Pipelines are defined at boot and sent through while serving.
 	hub := pipeline.NewHub[string]()
 	hub.Defaults(func(p *pipeline.Pipeline[string], passable string) (string, error) {
 		return p.Send(passable).Through(upper).ThenReturn()

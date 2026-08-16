@@ -142,8 +142,8 @@ func TestEnvIsAndIsProduction(t *testing.T) {
 	}
 }
 
-// TestLoadDecodesBase64Key covers the format `aru key:generate` emits: 32 random
-// bytes are not printable, so the value in .env is always encoded.
+// TestLoadDecodesBase64Key covers the format `aru key:generate` emits: 32
+// random bytes are not printable, so the value in.env is always encoded.
 func TestLoadDecodesBase64Key(t *testing.T) {
 	emptyProject(t)
 	raw := make([]byte, encryption.KeySize)

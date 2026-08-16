@@ -13,26 +13,25 @@ import (
 	"github.com/arandu-io/hesape/support/arr"
 )
 
-// Uri answers to Illuminate\Support\Uri: a parsed URI whose every writer hands
-// back a new instance and leaves the old one alone.
-//
-// The PHP wraps league/uri; this wraps net/url, which is the standard library's
-// answer to the same job and keeps the core free of third-party code.
+// Uri is a parsed URI whose every writer hands back a new instance and leaves
+// the old one alone. It wraps a *url.URL, so this package carries no
+// dependency of its own.
 type Uri struct {
 	uri *url.URL
 }
 
-// UrlGenerator is the part of Illuminate\Contracts\Routing\UrlGenerator that
-// Uri calls. The routing package fills it in; support declares only what it
-// needs, so it carries no dependency on routing.
+// UrlGenerator builds absolute URLs for named routes and actions. The routing
+// package fills it in; only what [Uri] calls is declared here, so this package
+// carries no dependency on routing.
 type UrlGenerator interface {
-	// To answers to UrlGenerator::to.
+	// To returns an absolute URL for the given path.
 	To(path string) string
-	// Route answers to UrlGenerator::route.
+	// Route returns the URL of a named route, with its parameters filled in.
 	Route(name string, parameters map[string]any, absolute bool) (string, error)
-	// SignedRoute answers to UrlGenerator::signedRoute.
+	// SignedRoute returns the URL of a named route carrying a signature, and
+	// an expiry when one is given.
 	SignedRoute(name string, parameters map[string]any, expiration *time.Time, absolute bool) (string, error)
-	// Action answers to UrlGenerator::action.
+	// Action returns the URL of a controller action.
 	Action(action string, parameters map[string]any, absolute bool) (string, error)
 }
 
@@ -41,12 +40,12 @@ var (
 	urlGeneratorResolver func() UrlGenerator
 )
 
-// ErrNoUrlGenerator is what Uri::to, Uri::route, Uri::signedRoute and
-// Uri::action hit when no resolver was set. The PHP calls null and fatals; this
-// returns the error instead.
+// ErrNoUrlGenerator is returned by [To], [Route], [SignedRoute] and [Action]
+// when no resolver was set, or when the resolver returned nothing.
 var ErrNoUrlGenerator = errors.New("support: no URL generator resolver has been set")
 
-// SetUrlGeneratorResolver answers to Uri::setUrlGeneratorResolver.
+// SetUrlGeneratorResolver sets the function that hands back the
+// [UrlGenerator]. It is process-wide.
 func SetUrlGeneratorResolver(resolver func() UrlGenerator) {
 	urlGeneratorMu.Lock()
 	defer urlGeneratorMu.Unlock()
@@ -67,8 +66,7 @@ func generator() (UrlGenerator, error) {
 	return g, nil
 }
 
-// NewUri answers to Uri::__construct. The PHP throws on a URI it cannot parse,
-// so this returns (*Uri, error).
+// NewUri parses a URI, returning the error when it cannot be read.
 func NewUri(uri string) (*Uri, error) {
 	parsed, err := url.Parse(uri)
 	if err != nil {
@@ -77,10 +75,10 @@ func NewUri(uri string) (*Uri, error) {
 	return &Uri{uri: parsed}, nil
 }
 
-// Of answers to Uri::of.
+// Of parses a URI, the same as [NewUri].
 func Of(uri string) (*Uri, error) { return NewUri(uri) }
 
-// To answers to Uri::to: an absolute URL for the path, from the URL generator.
+// To returns an absolute URI for the path, built by the [UrlGenerator].
 func To(path string) (*Uri, error) {
 	g, err := generator()
 	if err != nil {
@@ -89,7 +87,7 @@ func To(path string) (*Uri, error) {
 	return NewUri(g.To(path))
 }
 
-// Route answers to Uri::route.
+// Route returns the URI of a named route, with its parameters filled in.
 func Route(name string, parameters map[string]any, absolute bool) (*Uri, error) {
 	g, err := generator()
 	if err != nil {
@@ -102,7 +100,8 @@ func Route(name string, parameters map[string]any, absolute bool) (*Uri, error) 
 	return NewUri(generated)
 }
 
-// SignedRoute answers to Uri::signedRoute.
+// SignedRoute returns the URI of a named route carrying a signature, and an
+// expiry when one is given.
 func SignedRoute(name string, parameters map[string]any, expiration *time.Time, absolute bool) (*Uri, error) {
 	g, err := generator()
 	if err != nil {
@@ -115,13 +114,13 @@ func SignedRoute(name string, parameters map[string]any, expiration *time.Time, 
 	return NewUri(generated)
 }
 
-// TemporarySignedRoute answers to Uri::temporarySignedRoute, which is
-// signedRoute with the expiration moved to the front.
+// TemporarySignedRoute is [SignedRoute] with the expiry required and moved to
+// the front.
 func TemporarySignedRoute(name string, expiration time.Time, parameters map[string]any, absolute bool) (*Uri, error) {
 	return SignedRoute(name, parameters, &expiration, absolute)
 }
 
-// Action answers to Uri::action.
+// Action returns the URI of a controller action.
 func Action(action string, parameters map[string]any, absolute bool) (*Uri, error) {
 	g, err := generator()
 	if err != nil {
@@ -134,11 +133,11 @@ func Action(action string, parameters map[string]any, absolute bool) (*Uri, erro
 	return NewUri(generated)
 }
 
-// Scheme answers to Uri::scheme.
+// Scheme returns the URI's scheme.
 func (u *Uri) Scheme() string { return u.uri.Scheme }
 
-// User answers to Uri::user. With withPassword it is the whole user info, the
-// way the PHP getUserInfo is.
+// User returns the user name, or the whole user info when withPassword is
+// true. A URI carrying neither is the empty string.
 func (u *Uri) User(withPassword bool) string {
 	if u.uri.User == nil {
 		return ""
@@ -149,7 +148,8 @@ func (u *Uri) User(withPassword bool) string {
 	return u.uri.User.Username()
 }
 
-// Password answers to Uri::password.
+// Password returns the password, or the empty string when the URI carries
+// none.
 func (u *Uri) Password() string {
 	if u.uri.User == nil {
 		return ""
@@ -158,10 +158,10 @@ func (u *Uri) Password() string {
 	return password
 }
 
-// Host answers to Uri::host.
+// Host returns the host, without the port.
 func (u *Uri) Host() string { return u.uri.Hostname() }
 
-// Port answers to Uri::port. A URI with no port is zero, which is the PHP null.
+// Port returns the port, or zero when the URI carries none.
 func (u *Uri) Port() int {
 	port, err := strconv.Atoi(u.uri.Port())
 	if err != nil {
@@ -170,8 +170,8 @@ func (u *Uri) Port() int {
 	return port
 }
 
-// Path answers to Uri::path: the path with its slashes trimmed off both ends.
-// An empty or missing path is a single "/", which is what the PHP returns.
+// Path returns the path with its slashes trimmed off both ends. An empty or
+// missing path is a single "/".
 func (u *Uri) Path() string {
 	path := strings.Trim(u.uri.Path, "/")
 	if path == "" {
@@ -180,7 +180,8 @@ func (u *Uri) Path() string {
 	return path
 }
 
-// PathSegments answers to Uri::pathSegments. An empty path is an empty list.
+// PathSegments returns the path split on its slashes. An empty path is an
+// empty list.
 func (u *Uri) PathSegments() []string {
 	path := u.Path()
 	if path == "/" {
@@ -189,12 +190,15 @@ func (u *Uri) PathSegments() []string {
 	return strings.Split(path, "/")
 }
 
-// Query answers to Uri::query.
+// Query returns the query string as a [UriQueryString].
 func (u *Uri) Query() *UriQueryString { return NewUriQueryString(u) }
 
-// Fragment answers to Uri::fragment.
+// Fragment returns the fragment, without its leading hash.
 func (u *Uri) Fragment() string { return u.uri.Fragment }
 
+// with copies the URI, applies the change to the copy and returns it, so the
+// receiver is never written to. The user info is copied too, because the copy
+// would otherwise share the pointer.
 func (u *Uri) with(mutate func(*url.URL)) *Uri {
 	copied := *u.uri
 	if u.uri.User != nil {
@@ -205,13 +209,13 @@ func (u *Uri) with(mutate func(*url.URL)) *Uri {
 	return &Uri{uri: &copied}
 }
 
-// WithScheme answers to Uri::withScheme.
+// WithScheme returns a copy carrying the given scheme.
 func (u *Uri) WithScheme(scheme string) *Uri {
 	return u.with(func(n *url.URL) { n.Scheme = scheme })
 }
 
-// WithUser answers to Uri::withUser. The variadic argument stands for the PHP
-// $password, which is null.
+// WithUser returns a copy carrying the given user, and the password when one
+// is given. An empty user drops the user info entirely.
 func (u *Uri) WithUser(user string, password ...string) *Uri {
 	return u.with(func(n *url.URL) {
 		switch {
@@ -225,7 +229,8 @@ func (u *Uri) WithUser(user string, password ...string) *Uri {
 	})
 }
 
-// WithHost answers to Uri::withHost.
+// WithHost returns a copy carrying the given host, keeping whatever port the
+// URI already had.
 func (u *Uri) WithHost(host string) *Uri {
 	return u.with(func(n *url.URL) {
 		if port := u.uri.Port(); port != "" {
@@ -236,7 +241,7 @@ func (u *Uri) WithHost(host string) *Uri {
 	})
 }
 
-// WithPort answers to Uri::withPort. A zero port is the PHP null and removes it.
+// WithPort returns a copy carrying the given port. A zero port removes it.
 func (u *Uri) WithPort(port int) *Uri {
 	return u.with(func(n *url.URL) {
 		if port == 0 {
@@ -247,8 +252,8 @@ func (u *Uri) WithPort(port int) *Uri {
 	})
 }
 
-// WithPath answers to Uri::withPath. The path is given a leading slash, which
-// is the Str::start the PHP calls.
+// WithPath returns a copy carrying the given path, which is given a leading
+// slash when it does not already have one.
 func (u *Uri) WithPath(path string) *Uri {
 	return u.with(func(n *url.URL) {
 		if !strings.HasPrefix(path, "/") {
@@ -258,9 +263,9 @@ func (u *Uri) WithPath(path string) *Uri {
 	})
 }
 
-// WithQuery answers to Uri::withQuery: the pairs written into the query string
-// by dotted key. The variadic argument stands for the PHP $merge, which is
-// true; with false the query is replaced instead.
+// WithQuery returns a copy with the pairs written into the query string by
+// dotted key. The variadic argument is whether to merge into the query already
+// there and defaults to true; false replaces it instead.
 func (u *Uri) WithQuery(query map[string]any, merge ...bool) *Uri {
 	newQuery := map[string]any{}
 	if firstOr(merge, true) {
@@ -272,8 +277,8 @@ func (u *Uri) WithQuery(query map[string]any, merge ...bool) *Uri {
 	return u.with(func(n *url.URL) { n.RawQuery = arr.Query(newQuery) })
 }
 
-// WithQueryIfMissing answers to Uri::withQueryIfMissing: only the keys the
-// query string does not already carry.
+// WithQueryIfMissing returns a copy carrying only the keys the query string
+// does not already hold.
 func (u *Uri) WithQueryIfMissing(query map[string]any) *Uri {
 	current := u.Query()
 	pending := map[string]any{}
@@ -285,9 +290,9 @@ func (u *Uri) WithQueryIfMissing(query map[string]any) *Uri {
 	return u.WithQuery(pending)
 }
 
-// PushOntoQuery answers to Uri::pushOntoQuery: append to the list a query
-// parameter holds. A list already holding the value is left alone, which is the
-// array_unique the PHP runs on a list; a keyed value is appended to blindly.
+// PushOntoQuery appends to the list a query parameter holds. A list already
+// holding the value is left alone; a single value becomes a list of the two,
+// with no such check.
 func (u *Uri) PushOntoQuery(key string, v any) *Uri {
 	current := arr.Get(u.Query().ToArray(), key, nil)
 	values := arr.Wrap(v)
@@ -315,32 +320,30 @@ func (u *Uri) PushOntoQuery(key string, v any) *Uri {
 	}
 }
 
-// WithoutQuery answers to Uri::withoutQuery: the query string without the given
-// keys.
+// WithoutQuery returns a copy whose query string has dropped the given keys.
 func (u *Uri) WithoutQuery(keys ...string) *Uri {
 	return u.ReplaceQuery(arr.Except(u.Query().ToArray(), keys...))
 }
 
-// ReplaceQuery answers to Uri::replaceQuery: the query string thrown away and
-// written again from the given pairs.
+// ReplaceQuery returns a copy whose query string is thrown away and written
+// again from the given pairs.
 func (u *Uri) ReplaceQuery(query map[string]any) *Uri {
 	return u.WithQuery(query, false)
 }
 
-// WithFragment answers to Uri::withFragment.
+// WithFragment returns a copy carrying the given fragment.
 func (u *Uri) WithFragment(fragment string) *Uri {
 	return u.with(func(n *url.URL) { n.Fragment = fragment })
 }
 
-// ToHtml answers to Uri::toHtml.
+// ToHtml returns the URI as markup, ready to write into a template.
 func (u *Uri) ToHtml() string { return u.Value() }
 
-// Redirect answers to Uri::redirect.
+// Redirect returns a handler that redirects to this URI with the given status.
 //
-// The PHP returns an Illuminate\Http\RedirectResponse. Returning ours would
-// make support import http, and http imports support -- so this hands back the
-// standard library's net/http.Handler, which is what a router mounts and what
-// a RedirectResponse ultimately is. The name and the arguments are Laravel's.
+// It hands back a net/http.Handler rather than a response type of this
+// framework's, because such a type lives in the http package and that package
+// imports this one.
 //
 // headers is applied before the redirect is written, because WriteHeader
 // freezes the header map.
@@ -354,17 +357,16 @@ func (u *Uri) Redirect(status int, headers map[string]string) nethttp.Handler {
 	})
 }
 
-// ToResponse answers to Uri::toResponse.
+// ToResponse returns a handler that redirects to this URI with status 302.
 //
-// The PHP takes the request and ignores it, redirecting with the default
-// status; this keeps the parameter for the same reason PHP has it -- it is the
-// Responsable contract -- and ignores it for the same reason.
+// The request is taken and ignored: the parameter is there so the method fits
+// the shape a caller turning a value into a response expects.
 func (u *Uri) ToResponse(*nethttp.Request) nethttp.Handler {
 	return u.Redirect(nethttp.StatusFound, nil)
 }
 
-// Decode answers to Uri::decode: the URI with its query string written out
-// undecoded, which is what a person reads in a browser bar.
+// Decode returns the URI with its query string percent-decoded, which is what
+// a person reads in a browser bar.
 func (u *Uri) Decode() string {
 	query := u.Query()
 	if len(query.ToArray()) == 0 {
@@ -378,29 +380,27 @@ func (u *Uri) Decode() string {
 	return full[:index+1] + query.Decode()
 }
 
-// Value answers to Uri::value, which is the PHP __toString.
+// Value returns the URI written out as a string.
 func (u *Uri) Value() string { return u.uri.String() }
 
-// String answers to Uri::__toString.
+// String returns the URI written out, so Uri satisfies fmt.Stringer.
 func (u *Uri) String() string { return u.Value() }
 
-// IsEmpty answers to Uri::isEmpty.
+// IsEmpty reports whether the URI written out is blank.
 func (u *Uri) IsEmpty() bool { return strings.TrimSpace(u.Value()) == "" }
 
-// GetUri answers to Uri::getUri: the parsed URI underneath. The PHP hands back
-// a League UriInterface; this hands back the *url.URL it wraps.
+// GetUri returns the *url.URL underneath. Writing to it writes through to this
+// Uri, which every other method avoids.
 func (u *Uri) GetUri() *url.URL { return u.uri }
 
-// UriQueryString answers to Illuminate\Support\UriQueryString: the query string
-// of a [Uri], read as nested data. The typed readers of
-// Illuminate\Support\Traits\InteractsWithData are promoted from the embedded
-// trait, exactly as the PHP class gets them.
+// UriQueryString is the query string of a [Uri], read as nested data. The
+// typed readers of the embedded data source read that data.
 type UriQueryString struct {
 	dataSource
 	uri *Uri
 }
 
-// NewUriQueryString answers to UriQueryString::__construct.
+// NewUriQueryString builds the query string reader for a [Uri].
 func NewUriQueryString(uri *Uri) *UriQueryString {
 	q := &UriQueryString{uri: uri}
 	q.dataSource = dataSource{
@@ -410,8 +410,8 @@ func NewUriQueryString(uri *Uri) *UriQueryString {
 	return q
 }
 
-// All answers to UriQueryString::all. With no key it is the whole query string;
-// with keys it is the subset under them.
+// All returns the whole query string when given no key, and the subset under
+// the given dotted keys otherwise.
 func (q *UriQueryString) All(keys ...string) map[string]any {
 	query := q.ToArray()
 	if len(keys) == 0 {
@@ -424,13 +424,14 @@ func (q *UriQueryString) All(keys ...string) map[string]any {
 	return results
 }
 
-// Get answers to UriQueryString::get: one parameter by dotted key.
+// Get returns one parameter by dotted key, falling back to the optional
+// default.
 func (q *UriQueryString) Get(key string, def ...any) any {
 	return arr.Get(q.ToArray(), key, firstOr(def, nil))
 }
 
-// Decode answers to UriQueryString::decode, which is PHP's rawurldecode of the
-// whole query string.
+// Decode returns the whole query string percent-decoded, or as it stands when
+// it cannot be decoded.
 func (q *UriQueryString) Decode() string {
 	decoded, err := url.PathUnescape(q.Value())
 	if err != nil {
@@ -439,7 +440,8 @@ func (q *UriQueryString) Decode() string {
 	return decoded
 }
 
-// Value answers to UriQueryString::value, which is the PHP __toString.
+// Value returns the raw query string, or the empty string when there is no
+// URI behind it.
 func (q *UriQueryString) Value() string {
 	if q.uri == nil || q.uri.uri == nil {
 		return ""
@@ -447,17 +449,16 @@ func (q *UriQueryString) Value() string {
 	return q.uri.uri.RawQuery
 }
 
-// ToArray answers to UriQueryString::toArray: the query string as nested data,
-// which is what League's QueryString::extract builds.
+// ToArray returns the query string as nested data.
 //
-// A key is decoded before its brackets are read, so a%5Bb%5D=c and a[b]=c are
-// the same nesting, as they are in PHP.
+// A key is decoded before its brackets are read, so a%5Bb%5D=c and a[b]=c give
+// the same nesting.
 func (q *UriQueryString) ToArray() map[string]any {
 	return parseQueryString(q.Value())
 }
 
-// parseQueryString is QueryString::extract: key[sub]=value and key[]=value read
-// back into nested maps and lists.
+// parseQueryString reads key[sub]=value and key[]=value back into nested maps
+// and lists. A pair carrying no key is skipped.
 func parseQueryString(raw string) map[string]any {
 	results := map[string]any{}
 	if raw == "" {
@@ -519,8 +520,8 @@ func setQueryValue(target map[string]any, segments []string, v string) {
 	setQueryValue(child, segments[1:], v)
 }
 
-// rawURLDecode is PHP's rawurldecode: percent-triplets become bytes and a plus
-// stays a plus.
+// rawURLDecode turns percent-triplets back into bytes, leaving a plus as a
+// plus. A string that cannot be decoded is returned as it stands.
 func rawURLDecode(s string) string {
 	decoded, err := url.PathUnescape(s)
 	if err != nil {

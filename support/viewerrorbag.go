@@ -2,26 +2,25 @@ package support
 
 import "sort"
 
-// DefaultErrorBag answers to the 'default' key ViewErrorBag reads when no bag
-// is named.
+// DefaultErrorBag is the key a [ViewErrorBag] reads when no bag is named.
 const DefaultErrorBag = "default"
 
-// ViewErrorBag answers to Illuminate\Support\ViewErrorBag: the several named
-// MessageBags a request can carry, with one of them called "default".
+// ViewErrorBag holds the named [MessageBag] values a request carries, one of
+// them under [DefaultErrorBag].
 //
-// The PHP forwards unknown calls to the default bag through __call. Go has no
-// __call, so the read side of MessageBag is written out below.
+// The read side of MessageBag is repeated on this type, each method reading
+// the default bag, so a view does not have to name it.
 type ViewErrorBag struct {
 	bags map[string]*MessageBag
 }
 
-// NewViewErrorBag builds the empty bag of bags the PHP gets from `new`.
+// NewViewErrorBag returns a ViewErrorBag holding no bags.
 func NewViewErrorBag() *ViewErrorBag {
 	return &ViewErrorBag{bags: map[string]*MessageBag{}}
 }
 
-// HasBag answers to ViewErrorBag::hasBag. An empty key stands for the PHP
-// default of 'default'.
+// HasBag reports whether a bag is held under the key. An empty key means
+// [DefaultErrorBag].
 func (v *ViewErrorBag) HasBag(key string) bool {
 	if key == "" {
 		key = DefaultErrorBag
@@ -30,8 +29,9 @@ func (v *ViewErrorBag) HasBag(key string) bool {
 	return ok
 }
 
-// GetBag answers to ViewErrorBag::getBag. A key with no bag gives an empty
-// MessageBag, never nil, so a view can call First on it.
+// GetBag returns the bag under the key, or an empty [MessageBag] when there is
+// none. It is never nil, so a view can call First on it unguarded. An empty
+// key means [DefaultErrorBag].
 func (v *ViewErrorBag) GetBag(key string) *MessageBag {
 	if key == "" {
 		key = DefaultErrorBag
@@ -42,7 +42,7 @@ func (v *ViewErrorBag) GetBag(key string) *MessageBag {
 	return NewMessageBag(nil)
 }
 
-// GetBags answers to ViewErrorBag::getBags.
+// GetBags returns a copy of the map of bags, keyed by name.
 func (v *ViewErrorBag) GetBags() map[string]*MessageBag {
 	out := make(map[string]*MessageBag, len(v.bags))
 	for k, bag := range v.bags {
@@ -51,7 +51,8 @@ func (v *ViewErrorBag) GetBags() map[string]*MessageBag {
 	return out
 }
 
-// Put answers to ViewErrorBag::put.
+// Put stores a bag under the key and returns the ViewErrorBag. An empty key
+// means [DefaultErrorBag].
 func (v *ViewErrorBag) Put(key string, bag *MessageBag) *ViewErrorBag {
 	if v.bags == nil {
 		v.bags = map[string]*MessageBag{}
@@ -63,17 +64,18 @@ func (v *ViewErrorBag) Put(key string, bag *MessageBag) *ViewErrorBag {
 	return v
 }
 
-// Any answers to ViewErrorBag::any: whether the default bag has messages.
+// Any reports whether the default bag holds any message.
 func (v *ViewErrorBag) Any() bool { return v.Count() > 0 }
 
-// Count answers to ViewErrorBag::count: the messages in the default bag.
+// Count returns how many messages the default bag holds.
 func (v *ViewErrorBag) Count() int { return v.GetBag(DefaultErrorBag).Count() }
 
-// String answers to ViewErrorBag::__toString.
+// String returns the default bag as JSON, so ViewErrorBag satisfies
+// fmt.Stringer.
 func (v *ViewErrorBag) String() string { return v.GetBag(DefaultErrorBag).String() }
 
-// Names lists the named bags, sorted. It stands for iterating $bags, which the
-// PHP does through the array itself.
+// Names lists the bag names, sorted. A map has no order of its own, so sorted
+// is the only order that can be promised.
 func (v *ViewErrorBag) Names() []string {
 	out := make([]string, 0, len(v.bags))
 	for k := range v.bags {
@@ -83,63 +85,63 @@ func (v *ViewErrorBag) Names() []string {
 	return out
 }
 
-// First answers to MessageBag::first on the default bag, through __call.
+// First returns the first message under the key in the default bag.
 func (v *ViewErrorBag) First(key string, format ...string) string {
 	return v.GetBag(DefaultErrorBag).First(key, format...)
 }
 
-// Get answers to MessageBag::get on the default bag, through __call.
+// Get returns the messages under the key in the default bag.
 func (v *ViewErrorBag) Get(key string, format ...string) []string {
 	return v.GetBag(DefaultErrorBag).Get(key, format...)
 }
 
-// All answers to MessageBag::all on the default bag, through __call.
+// All returns every message in the default bag.
 func (v *ViewErrorBag) All(format ...string) []string {
 	return v.GetBag(DefaultErrorBag).All(format...)
 }
 
-// Unique answers to MessageBag::unique on the default bag, through __call.
+// Unique returns every message in the default bag, with duplicates dropped.
 func (v *ViewErrorBag) Unique(format ...string) []string {
 	return v.GetBag(DefaultErrorBag).Unique(format...)
 }
 
-// Has answers to MessageBag::has on the default bag, through __call.
+// Has reports whether the default bag holds a message for every key given.
 func (v *ViewErrorBag) Has(keys ...string) bool {
 	return v.GetBag(DefaultErrorBag).Has(keys...)
 }
 
-// HasAny answers to MessageBag::hasAny on the default bag, through __call.
+// HasAny reports whether the default bag holds a message for any key given.
 func (v *ViewErrorBag) HasAny(keys ...string) bool {
 	return v.GetBag(DefaultErrorBag).HasAny(keys...)
 }
 
-// Missing answers to MessageBag::missing on the default bag, through __call.
+// Missing reports whether the default bag holds no message for any of the
+// keys.
 func (v *ViewErrorBag) Missing(keys ...string) bool {
 	return v.GetBag(DefaultErrorBag).Missing(keys...)
 }
 
-// Keys answers to MessageBag::keys on the default bag, through __call.
+// Keys lists the keys the default bag holds messages under.
 func (v *ViewErrorBag) Keys() []string { return v.GetBag(DefaultErrorBag).Keys() }
 
-// Messages answers to MessageBag::messages on the default bag, through __call.
+// Messages returns the default bag's messages, keyed by field.
 func (v *ViewErrorBag) Messages() map[string][]string {
 	return v.GetBag(DefaultErrorBag).Messages()
 }
 
-// ToArray answers to MessageBag::toArray on the default bag, through __call:
-// the messages of the default bag, keyed by field, which is what a view writes
-// out when it dumps $errors.
+// ToArray returns the default bag's messages keyed by field, which is what a
+// view writes out when it dumps the errors.
 func (v *ViewErrorBag) ToArray() map[string][]string {
 	return v.GetBag(DefaultErrorBag).ToArray()
 }
 
-// ToJson answers to MessageBag::toJson on the default bag, through __call.
+// ToJson encodes the default bag's messages as JSON.
 func (v *ViewErrorBag) ToJson() (string, error) {
 	return v.GetBag(DefaultErrorBag).ToJson()
 }
 
-// IsEmpty answers to MessageBag::isEmpty on the default bag, through __call.
+// IsEmpty reports whether the default bag holds no message.
 func (v *ViewErrorBag) IsEmpty() bool { return v.GetBag(DefaultErrorBag).IsEmpty() }
 
-// IsNotEmpty answers to MessageBag::isNotEmpty on the default bag, through __call.
+// IsNotEmpty reports whether the default bag holds any message.
 func (v *ViewErrorBag) IsNotEmpty() bool { return v.GetBag(DefaultErrorBag).IsNotEmpty() }

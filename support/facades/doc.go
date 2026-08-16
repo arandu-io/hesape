@@ -1,24 +1,8 @@
-// Package facades mirrors Illuminate\Support\Facades.
+// Package facades declares nothing, and never will.
 //
-// Nothing is built here, and nothing will be: ADR 0002 rejected facades. A
-// facade is __callStatic over a container lookup, and this framework has
-// neither. What a facade reaches, the package that owns it exports directly.
-//
-// The list is kept because it is the exact index of what a Laravel application
-// touches. The files, in the clone at laravel_illuminate/support/Facades:
-//
-//	App.php             Artisan.php         Auth.php            Blade.php
-//	Broadcast.php       Bus.php             Cache.php           Concurrency.php
-//	Config.php          Context.php         Cookie.php          Crypt.php
-//	DB.php              Date.php            Event.php           Exceptions.php
-//	Facade.php          File.php            Gate.php            Hash.php
-//	Http.php            Lang.php            Log.php             Mail.php
-//	Notification.php    ParallelTesting.php Password.php        Pipeline.php
-//	Process.php         Queue.php           RateLimiter.php     Redirect.php
-//	Redis.php           Request.php         Response.php        Route.php
-//	Schedule.php        Schema.php          Session.php         Storage.php
-//	URL.php             Validator.php       View.php            Vite.php
-//
-// Date is the one whose seam still exists, because a test has to be able to
-// move the clock: it is support.Now, support.Travel and support.FreezeTime.
+// There are no global accessors that resolve a service on demand: each package
+// exports what it owns, and a caller imports that package and calls it. Where a
+// test needs to replace something, the package that owns it says how -- moving
+// the clock, for one, is support.Travel, support.FreezeTime and
+// support.TravelBack.
 package facades

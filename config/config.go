@@ -77,7 +77,7 @@ type App struct {
 // Load reads the environment and validates it. It fails at boot, not on the
 // first request.
 //
-// A .env in the working directory is read first, and it only fills variables
+// A.env in the working directory is read first, and it only fills variables
 // the environment does not already define -- see [LoadDotenv]. It is read here
 // rather than by the application, because a step the application has to
 // remember is a step that gets forgotten: this one was, and `aru migrate`
@@ -89,8 +89,8 @@ func Load() (App, error) {
 
 	// The key is parsed by encryption, not here. It is the same key encryption
 	// signs with, and a second reader of the same variable is a second answer to
-	// "is this key valid" (RULE 9). Naming the variable is this package's part:
-	// the error has to send a reader to a line of a .env file.
+	// "is this key valid". Naming the variable is this package's part: the error
+	// has to send a reader to a line of a.env file.
 	key, err := encryption.ParseKey(String("APP_KEY", ""))
 	if err != nil {
 		return App{}, fmt.Errorf("APP_KEY: %w", err)

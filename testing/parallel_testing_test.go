@@ -6,9 +6,7 @@ import (
 	gotesting "testing"
 )
 
-// parallelTestingFixed is a token resolver that always answers the same token,
-// which is what Illuminate\Testing\Concerns\RunsInParallel installs for each
-// worker before it fires the process callbacks.
+// parallelTestingFixed is a token resolver that always answers the same token.
 func parallelTestingFixed(token string) func() (string, bool) {
 	return func() (string, bool) { return token, true }
 }

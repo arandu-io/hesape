@@ -2,7 +2,7 @@ package process
 
 import "strings"
 
-// fakeOutputLine is one entry of a description's output, the PHP
+// fakeOutputLine is one entry of a description's output: the
 // ['type' => 'out'|'err', 'buffer' => string].
 type fakeOutputLine struct {
 	stream Stream
@@ -13,14 +13,11 @@ type fakeOutputLine struct {
 // than as a result: what it prints, in what order, on which stream, how long it
 // stays running, and what it exits with.
 //
-// It answers to Illuminate\Process\FakeProcessDescription, and Factory.Describe
-// is where one comes from. It is what a test reaches for when the code under
-// test starts a process and watches it -- a result alone cannot be watched,
-// because it has already happened.
+// It is what a test reaches for when the code under test starts a process and
+// watches it -- a result alone cannot be watched, because it has already
+// happened.
 //
-// PHP exposes $processId, $output, $exitCode and $runIterations as public
-// properties beside the methods of the same names. Go cannot have both, so the
-// methods win (ADR 0044) and the state is unexported.
+// Go cannot have both, so the methods win and the state is unexported.
 type FakeProcessDescription struct {
 	processID     int
 	output        []fakeOutputLine
@@ -28,23 +25,19 @@ type FakeProcessDescription struct {
 	runIterations int
 }
 
-// NewFakeProcessDescription is PHP's constructor, which takes nothing but does
+// NewFakeProcessDescription builds an empty description, which takes nothing but does
 // not start blank: the process id is 1000, the way it is there.
 func NewFakeProcessDescription() *FakeProcessDescription {
 	return &FakeProcessDescription{processID: 1000}
 }
 
-// ID sets the process id the fake will report. PHP's id.
-//
-// Named for PHP's id() rather than for the operating system's word: what
-// InvokedProcess.ID answers is the pid, and this is what it will answer.
+// ID sets the process id the fake will report.
 func (d *FakeProcessDescription) ID(processID int) *FakeProcessDescription {
 	d.processID = processID
 	return d
 }
 
-// Output describes a line of standard output. PHP's output, whose array|string
-// is a string for one line or a []string for several.
+// Output describes a line of standard output.
 //
 // Each line is stored with exactly one trailing newline, however many it was
 // written with -- a described line is a line, and a test that wrote one without
@@ -53,7 +46,7 @@ func (d *FakeProcessDescription) Output(output any) *FakeProcessDescription {
 	return d.describe(Out, output)
 }
 
-// ErrorOutput describes a line of error output. PHP's errorOutput.
+// ErrorOutput describes a line of error output.
 //
 // Order is kept across both streams: a description that writes a line out, then
 // a line err, then a line out replays them in that order, which is what makes
@@ -75,18 +68,16 @@ func (d *FakeProcessDescription) describe(stream Stream, output any) *FakeProces
 }
 
 // ReplaceOutput drops everything described on standard output and puts the
-// given string there instead. PHP's replaceOutput.
+// given string there instead.
 //
 // The replacement goes on the end of the description, not where the dropped
-// lines were, because that is what PHP's array append does -- which matters
-// when the description also has error output: replacing the standard output
-// moves it after it.
+// lines were.
 func (d *FakeProcessDescription) ReplaceOutput(output string) *FakeProcessDescription {
 	return d.replace(Out, output)
 }
 
 // ReplaceErrorOutput drops everything described on standard error and puts the
-// given string there instead. PHP's replaceErrorOutput.
+// given string there instead.
 func (d *FakeProcessDescription) ReplaceErrorOutput(output string) *FakeProcessDescription {
 	return d.replace(Err, output)
 }
@@ -105,21 +96,20 @@ func (d *FakeProcessDescription) replace(stream Stream, output string) *FakeProc
 	return d
 }
 
-// ExitCode sets the status the fake will exit with. PHP's exitCode.
+// ExitCode sets the status the fake will exit with.
 func (d *FakeProcessDescription) ExitCode(exitCode int) *FakeProcessDescription {
 	d.exitCode = exitCode
 	return d
 }
 
 // Iterations sets how many times Running answers true before the fake is
-// finished. PHP's iterations, which is a second name for runsFor there and
-// forwards to it here as well.
+// finished.
 func (d *FakeProcessDescription) Iterations(iterations int) *FakeProcessDescription {
 	return d.RunsFor(iterations)
 }
 
-// RunsFor sets how many times Running answers true before the fake is finished.
-// PHP's runsFor.
+// RunsFor sets how many times Running answers true before the fake is
+// finished.
 //
 // It is a count of questions, not a length of time: a fake never really runs,
 // so the only thing a test can control is how long the loop that watches it
@@ -130,7 +120,7 @@ func (d *FakeProcessDescription) RunsFor(iterations int) *FakeProcessDescription
 }
 
 // ToProcessResult is the whole description collapsed into the result it ends
-// with. PHP's toProcessResult.
+// with.
 func (d *FakeProcessDescription) ToProcessResult(command string) ProcessResult {
 	return &FakeProcessResult{
 		command:     command,
@@ -140,10 +130,7 @@ func (d *FakeProcessDescription) ToProcessResult(command string) ProcessResult {
 	}
 }
 
-// resolveOutput joins one stream of the description. It is PHP's
-// resolveOutput/resolveErrorOutput, including their ending: a stream with
-// anything in it ends in exactly one newline, and an empty one is empty rather
-// than a lone newline.
+// resolveOutput joins one stream of the description.
 func (d *FakeProcessDescription) resolveOutput(stream Stream) string {
 	var joined strings.Builder
 	found := false

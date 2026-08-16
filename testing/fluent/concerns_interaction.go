@@ -6,13 +6,10 @@ import (
 	hesapetesting "github.com/arandu-io/hesape/testing"
 )
 
-// This file answers to Illuminate\Testing\Fluent\Concerns\Interaction.
-//
-// The PHP is a trait mixed into AssertableJson. Go has no traits, so the
-// methods are on AssertableJSON itself and the file keeps the trait's name.
+// The accounting on [AssertableJSON]: which properties the test named, and
+// what happens to the ones it did not.
 
-// interactsWith answers to Interaction::interactsWith: record that the test
-// said something about this property.
+// interactsWith records that the test said something about this property.
 //
 // A dotted key counts as an interaction with its first segment: a test that
 // asserted about data.name has accounted for data, and what is inside it is the
@@ -31,7 +28,7 @@ func (a *AssertableJSON) interactsWith(key string) {
 	a.interacted = append(a.interacted, name)
 }
 
-// Interacted answers to Interaction::interacted: every property in this scope
+// Interacted asserts that every property in this scope
 // was accounted for.
 //
 // It is what the whole class is for. A response that grew a field nobody meant
@@ -62,7 +59,8 @@ func (a *AssertableJSON) Interacted() {
 	hesapetesting.AssertSame(a.t, []string{}, orEmptyStrings(unexpected), message)
 }
 
-// Etc answers to Interaction::etc: stop accounting for this scope.
+// Etc stops accounting for this scope, so [AssertableJSON.Interacted] passes
+// whatever else the payload carries here.
 //
 // It is the escape hatch, and it is worth using sparingly: a scope with Etc on
 // it asserts about what the test named and nothing about what it did not, which

@@ -1,15 +1,14 @@
-// Package deferpkg mirrors Illuminate\Support\Defer.
+// Package deferpkg holds work put off until after the response has been sent.
 //
-// The files it answers to, in the clone at
-// laravel_illuminate/support/Defer:
+// [DeferredCallback] is one such piece of work, carrying a name so it can be
+// called off before it runs. [DeferredCallbackCollection] holds everything
+// deferred during one request and runs it in order, keeping only the last
+// callback registered under any one name and swallowing a panic from one so it
+// does not take the others down.
 //
-//	DeferredCallback.php
-//	DeferredCallbackCollection.php
+// Callbacks are registered through support.Defer, which reaches the collection
+// support.DeferredCallbackCollection returns.
 //
-// Named deferpkg because `defer` is a Go keyword and cannot be a package
-// name. It is the one place the mirror cannot be literal, and ADR 0044 allows
-// the suffix for exactly this.
-//
-// The defer() function of the PHP's own functions.php lives in the support
-// package, where its namespace puts it, as support.Defer.
+// The package is named deferpkg because defer is a Go keyword and cannot be a
+// package name.
 package deferpkg

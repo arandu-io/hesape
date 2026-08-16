@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// The pages Laravel ships as resources/views/errors/*.blade.php. The audit
+// The status pages this package ships. The audit
 // found there was no equivalent anywhere, so a 404 answered with an empty body.
 func TestEveryShippedStatusHasItsOwnSentence(t *testing.T) {
 	statuses := []int{
@@ -74,7 +74,7 @@ func TestTheStatusPageIsSelfContained(t *testing.T) {
 			t.Errorf("the page does not carry %q", want)
 		}
 	}
-	// RULE 13: no CDN, no external stylesheet, no script. The page has to render
+	// No CDN, no external stylesheet, no script. The page has to render
 	// when the asset build is what broke.
 	for _, forbidden := range []string{"<script", "http://", "https://", "<link"} {
 		if strings.Contains(body, forbidden) {

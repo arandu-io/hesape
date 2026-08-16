@@ -215,7 +215,7 @@ func TestInteger(t *testing.T) {
 		t.Fatalf("Integer error: %v", err)
 	}
 
-	// PHP has one integer type. Every Go integer kind answers to it.
+	// Every Go integer kind is accepted, not just int.
 	wide := config.NewRepository(map[string]any{"n": int64(9), "u": uint8(3)})
 	if got, err := wide.Integer("n"); err != nil || got != 9 {
 		t.Fatalf("Integer on an int64: %d, %v", got, err)
@@ -301,8 +301,8 @@ func TestArray(t *testing.T) {
 		t.Fatalf("Array error: %v", err)
 	}
 
-	// A section with string keys is an array in PHP and a map here. The error
-	// says where to read it rather than dropping the keys.
+	// A section with string keys is a map, not a list. The error says where to
+	// read it rather than dropping the keys.
 	if _, err := r.Array("app"); err == nil {
 		t.Fatal("Array on a section with string keys: no error, want one")
 	}
@@ -337,8 +337,7 @@ func TestCollection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Collection(app.providers): %v", err)
 	}
-	// It is Illuminate\Support\Collection, so the result carries that type's
-	// methods rather than being a bare slice.
+	// The result carries the collection methods rather than being a bare slice.
 	if !reflect.DeepEqual([]any(got), []any{"first", "second"}) {
 		t.Fatalf("Collection(app.providers): %v", got)
 	}
@@ -364,7 +363,7 @@ func TestSet(t *testing.T) {
 		t.Errorf("a path that did not exist: %v", got)
 	}
 
-	// A level that exists but is not a map is replaced by one, as Arr::set does.
+	// A level that exists but is not a map is replaced by one.
 	r.Set("app.name.first", "nested")
 	if got := r.Get("app.name.first"); got != "nested" {
 		t.Errorf("after nesting under a scalar: %v", got)
@@ -427,8 +426,8 @@ func TestPush(t *testing.T) {
 	if err := r.Push("app.name", "x"); err == nil {
 		t.Error("Push onto a string: no error, want one")
 	}
-	// A key present with a nil value returns nil, not the default: PHP fatals
-	// on the array_unshift that follows, so this is an error.
+	// A key present with a nil value returns nil, not the default, and nil is
+	// not a list, so pushing onto it is an error.
 	if err := r.Push("app.fallback", "x"); err == nil {
 		t.Error("Push onto a nil value: no error, want one")
 	}

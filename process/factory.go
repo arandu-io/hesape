@@ -10,17 +10,11 @@ import (
 	"github.com/arandu-io/hesape/str"
 )
 
-// FakeHandler is one entry of the array Factory::fake takes.
+// FakeHandler is one command pattern and the answer Fake gives for it.
 //
-// PHP passes an associative array from command pattern to result, where the
-// value may be a string, a ProcessResult, a FakeProcessDescription, a
-// FakeProcessSequence, or a closure returning any of those. Go has no untyped
-// map that carries a pattern and a heterogeneous value with the order intact --
-// and order is load-bearing here, because fakeFor takes the first pattern that
-// matches -- so it is a slice of this.
-//
-// Command is the pattern, matched with Str::is: "git *" answers every git
-// command, "*" answers everything, and empty means the same as "*".
+// Go has no untyped map that carries a pattern and a heterogeneous value with
+// the order intact -- and order is load-bearing here, because fakeFor takes
+// the first pattern that matches -- so it is a slice of this.
 type FakeHandler struct {
 	// Command is the pattern. Empty and "*" both match anything.
 	Command string
@@ -32,8 +26,7 @@ type FakeHandler struct {
 }
 
 // callback normalises Result into the closure PendingProcess.fakeFor hands
-// back, which is what PHP gets for free because a value and a closure returning
-// it are both callable there.
+// back.
 func (h FakeHandler) callback() func(*PendingProcess) any {
 	if fn, ok := h.Result.(func(*PendingProcess) any); ok {
 		return fn
@@ -41,22 +34,21 @@ func (h FakeHandler) callback() func(*PendingProcess) any {
 	return func(*PendingProcess) any { return h.Result }
 }
 
-// ranProcess is one entry of Factory::$recorded: the process as configured and
-// the result it produced.
+// ranProcess is one entry of the recording: the process as configured and the
+// result it produced.
 type ranProcess struct {
 	process *PendingProcess
 	result  ProcessResult
 }
 
-// Factory answers Illuminate\Process\Factory.
+// Factory makes processes.
 //
 // It is the entry point of the component: Factory.Run for a command that runs,
 // Factory.Fake for a test that must not shell out, and Factory.Pool for a set
 // that runs at once.
 //
-// It is safe for concurrent use. Illuminate's is not, and does not need to be:
-// a pool there runs each process in sequence under the hood. Here a pool is
-// goroutines, and the recording they all write to is behind a mutex.
+// It is safe for concurrent use. Here a pool is goroutines, and the recording
+// they all write to is behind a mutex.
 type Factory struct {
 	mu sync.Mutex
 
@@ -67,21 +59,17 @@ type Factory struct {
 	preventStray bool
 }
 
-// NewFactory constructs a Factory. Illuminate resolves one from the container,
-// which this framework does not have (ADR 0001), so an application holds one
-// and hands it to whatever runs a process.
+// NewFactory constructs a Factory.
 func NewFactory() *Factory { return &Factory{} }
 
-// Fake answers Factory::fake.
+// Fake registers fake answers and puts the factory in recording mode.
 //
 // It puts the factory in recording mode, so every process made from it answers
 // from the handlers instead of running. Calling it with no handlers fakes
-// everything with an empty successful result, which is PHP's `fake()` with no
-// argument.
+// everything with an empty successful result.
 //
 // Handlers are matched in order and the first match wins, so a "*" registered
-// first answers everything after it. That is Illuminate's behaviour and it is
-// the mistake people make: put the specific patterns first.
+// first answers everything after it.
 func (f *Factory) Fake(handlers ...FakeHandler) *Factory {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -94,14 +82,14 @@ func (f *Factory) Fake(handlers ...FakeHandler) *Factory {
 	return f
 }
 
-// IsRecording answers Factory::isRecording.
+// IsRecording reports whether Fake has been called.
 func (f *Factory) IsRecording() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.recording
 }
 
-// Record answers Factory::record.
+// Record adds a process and the result it produced to the recording.
 func (f *Factory) Record(process *PendingProcess, result ProcessResult) *Factory {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -109,7 +97,7 @@ func (f *Factory) Record(process *PendingProcess, result ProcessResult) *Factory
 	return f
 }
 
-// RecordIfRecording answers Factory::recordIfRecording.
+// RecordIfRecording records the process and its result when recording is on.
 func (f *Factory) RecordIfRecording(process *PendingProcess, result ProcessResult) *Factory {
 	if f.IsRecording() {
 		f.Record(process, result)
@@ -117,7 +105,7 @@ func (f *Factory) RecordIfRecording(process *PendingProcess, result ProcessResul
 	return f
 }
 
-// PreventStrayProcesses answers Factory::preventStrayProcesses.
+// PreventStrayProcesses makes a command no handler matched an error.
 //
 // With it on, a command that no handler matched is an error instead of running
 // for real. It is the guard that turns "somebody forgot to fake git" from a
@@ -133,19 +121,18 @@ func (f *Factory) PreventStrayProcesses(prevent ...bool) *Factory {
 	return f
 }
 
-// PreventingStrayProcesses answers Factory::preventingStrayProcesses.
+// PreventingStrayProcesses reports whether unmatched commands are refused.
 func (f *Factory) PreventingStrayProcesses() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.preventStray
 }
 
-// AllowStrayProcesses is the inverse of PreventStrayProcesses. Illuminate has
-// no such method because its argument defaults to true and false turns it off;
-// this exists so the intent reads at the call site.
+// AllowStrayProcesses is the inverse of PreventStrayProcesses.
 func (f *Factory) AllowStrayProcesses() *Factory { return f.PreventStrayProcesses(false) }
 
-// NewPendingProcess answers Factory::newPendingProcess.
+// NewPendingProcess builds a process bound to this factory, carrying the fake
+// handlers registered so far.
 func (f *Factory) NewPendingProcess() *PendingProcess {
 	p := NewPendingProcess(f)
 	f.mu.Lock()
@@ -154,41 +141,33 @@ func (f *Factory) NewPendingProcess() *PendingProcess {
 	return p.WithFakeHandlers(handlers)
 }
 
-// Run answers Factory::run, which PHP reaches through __call forwarding to a
-// new PendingProcess.
+// Run builds a pending process and runs the command to completion.
 func (f *Factory) Run(ctx context.Context, command []string, output OutputHandler) (ProcessResult, error) {
 	return f.NewPendingProcess().Run(ctx, command, output)
 }
 
-// Start answers Factory::start, by the same forwarding.
+// Start builds a pending process and starts the command without waiting.
 func (f *Factory) Start(ctx context.Context, command []string, output OutputHandler) (InvokedProcess, error) {
 	return f.NewPendingProcess().Start(ctx, command, output)
 }
 
-// Pool answers Factory::pool: a set of processes that run at the same time.
+// Pool describes a set of processes that run at the same time.
 //
 // It builds the pool and runs nothing. [Pool.Start] starts the processes,
 // [Pool.Run] and [Pool.Wait] start them and wait, and Concurrently is the one
 // line that does both.
 func (f *Factory) Pool(callback func(*Pool)) *Pool { return NewPool(f, callback) }
 
-// Pipe answers Factory::pipe: processes run one after another, each one reading
-// what the one before it wrote.
+// Pipe runs processes one after another, each one reading what the one before
+// it wrote.
 //
-// PHP takes either a callback or an array of commands, and the array form is
-// the callback with one `$pipe->command($command)` per element. This takes the
-// callback, which is the form the array form is written in (RULE 9): a caller
-// with a list of commands ranges over it inside the callback.
+// This takes the callback, which is the form the array form is written in: a
+// caller with a list of commands ranges over it inside the callback.
 func (f *Factory) Pipe(ctx context.Context, callback func(*Pipe), output PoolOutputHandler) (ProcessResult, error) {
 	return NewPipe(f, callback).Run(ctx, output)
 }
 
-// Concurrently answers Factory::concurrently: run a pool of processes and wait
-// for them to finish.
-//
-// It is `(new Pool($this, $callback))->start($output)->wait()`, and it is the
-// method to reach for -- Pool is what it is built on, and is there for the
-// caller who wants the processes started and not waited for.
+// Concurrently runs a pool of processes and waits for them to finish.
 func (f *Factory) Concurrently(ctx context.Context, callback func(*Pool), output PoolOutputHandler) (*ProcessPoolResults, error) {
 	started, err := f.Pool(callback).Start(ctx, output)
 	if err != nil {
@@ -197,29 +176,28 @@ func (f *Factory) Concurrently(ctx context.Context, callback func(*Pool), output
 	return started.Wait()
 }
 
-// Result answers Factory::result: a fake result to register with Fake.
+// Result builds a fake result to register with Fake.
 func (f *Factory) Result(output any, errorOutput any, exitCode int) *FakeProcessResult {
 	return NewFakeProcessResult("", exitCode, output, errorOutput)
 }
 
-// Describe answers Factory::describe: a fake description, for a process that is
-// started rather than run and whose output arrives over time.
+// Describe builds a fake description, for a process that is started rather than
+// run and whose output arrives over time.
 func (f *Factory) Describe() *FakeProcessDescription {
 	return NewFakeProcessDescription()
 }
 
-// Sequence answers Factory::sequence: a series of results, one per call, for a
-// command that is run more than once and answers differently each time.
+// Sequence builds a series of results, one per call, for a command that is run
+// more than once and answers differently each time.
 func (f *Factory) Sequence(processes ...any) *FakeProcessSequence {
 	return NewFakeProcessSequence(processes...)
 }
 
-// Recorded answers what Factory::$recorded holds: the command line of every
-// process that ran, in order.
+// Recorded is the command line of every process that ran, in order.
 //
-// Illuminate exposes the array itself and its assertions read it. The command
-// lines are what an assertion failure has to print, so this returns them rather
-// than the pending processes, and the assertions below use it for their message.
+// The command lines are what an assertion failure has to print, so this
+// returns them rather than the pending processes, and the assertions below use
+// it for their message.
 //
 // The line is PendingProcess.String, which is what a fake pattern is matched
 // against -- for the reason matchesCommand is one function: rendering it any
@@ -235,12 +213,7 @@ func (f *Factory) Recorded() []string {
 	return out
 }
 
-// AssertRan answers Factory::assertRan.
-//
-// Illuminate throws a PHPUnit assertion; Go takes *testing.T, calls t.Helper()
-// so the failure points at the caller, and prints every command that did run --
-// "assertRan: nothing matched" is a message that sends somebody to a debugger,
-// and the list is the answer they would have gone looking for.
+// AssertRan fails the test when no recorded command matched the pattern.
 func (f *Factory) AssertRan(t *testing.T, pattern string) {
 	t.Helper()
 	if n := f.countRan(pattern); n == 0 {
@@ -248,7 +221,8 @@ func (f *Factory) AssertRan(t *testing.T, pattern string) {
 	}
 }
 
-// AssertRanTimes answers Factory::assertRanTimes.
+// AssertRanTimes fails the test unless exactly times recorded commands matched
+// the pattern.
 func (f *Factory) AssertRanTimes(t *testing.T, pattern string, times int) {
 	t.Helper()
 	if n := f.countRan(pattern); n != times {
@@ -256,7 +230,7 @@ func (f *Factory) AssertRanTimes(t *testing.T, pattern string, times int) {
 	}
 }
 
-// AssertNotRan answers Factory::assertNotRan.
+// AssertNotRan fails the test when a recorded command matched the pattern.
 func (f *Factory) AssertNotRan(t *testing.T, pattern string) {
 	t.Helper()
 	if n := f.countRan(pattern); n != 0 {
@@ -264,13 +238,13 @@ func (f *Factory) AssertNotRan(t *testing.T, pattern string) {
 	}
 }
 
-// AssertDidntRun answers Factory::assertDidntRun, the alias of assertNotRan.
+// AssertDidntRun is AssertNotRan under its other name.
 func (f *Factory) AssertDidntRun(t *testing.T, pattern string) {
 	t.Helper()
 	f.AssertNotRan(t, pattern)
 }
 
-// AssertNothingRan answers Factory::assertNothingRan.
+// AssertNothingRan fails the test when any process ran at all.
 func (f *Factory) AssertNothingRan(t *testing.T) {
 	t.Helper()
 	if ran := f.Recorded(); len(ran) > 0 {
@@ -294,9 +268,8 @@ func (f *Factory) countRan(pattern string) int {
 // matchesCommand reports whether a fake or assertion pattern answers a command
 // line, and is the single implementation of that question.
 //
-// PHP asks it with Str::is, and it is asked in two places -- fakeFor when the
-// process runs, and the assertions when the test checks. Two implementations
-// would be a fake that answers a command an assertion then says never ran.
+// Two implementations would be a fake that answers a command an assertion then
+// says never ran.
 //
 // An empty pattern and "*" both match anything, which is what an entry with no
 // Command means.

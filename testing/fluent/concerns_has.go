@@ -7,17 +7,12 @@ import (
 	hesapetesting "github.com/arandu-io/hesape/testing"
 )
 
-// This file answers to Illuminate\Testing\Fluent\Concerns\Has.
-//
-// The PHP is a trait mixed into AssertableJson. Go has no traits, so the
-// methods are on AssertableJSON itself and the file keeps the trait's name.
+// The existence and size assertions on [AssertableJSON].
 
-// Count answers to Has::count: the scope, or the property at a key, has that
-// many entries.
+// Count asserts the scope, or the property at a key, has that many entries.
 //
-// The variadic length stands for the PHP's `?int $length = null`. Without it,
-// key is the expected size of the current scope; with it, key names the
-// property and length is its expected size.
+// Without it, key is the expected size of the current scope; with it, key
+// names the property and length is its expected size.
 func (a *AssertableJSON) Count(key any, length ...int) *AssertableJSON {
 	a.t.Helper()
 
@@ -36,7 +31,8 @@ func (a *AssertableJSON) Count(key any, length ...int) *AssertableJSON {
 	return a
 }
 
-// CountBetween answers to Has::countBetween.
+// CountBetween asserts the scope has at least minimum and at most maximum
+// entries.
 func (a *AssertableJSON) CountBetween(minimum, maximum int) *AssertableJSON {
 	a.t.Helper()
 
@@ -55,19 +51,15 @@ func (a *AssertableJSON) CountBetween(minimum, maximum int) *AssertableJSON {
 	return a
 }
 
-// Has answers to Has::has: the property exists, and optionally has that many
+// Has asserts the property exists, and optionally that it has that many
 // entries or holds what the callback asserts.
-//
-// The variadic argument stands for the PHP's `$length = null, ?Closure
-// $callback = null`, which is three calls in one method:
 //
 //	Has("data")                       the property exists
 //	Has("data", 3)                    it exists and holds three
 //	Has("data", func(j) { ... })      it exists, and this is true of what is in it
 //	Has("data", 3, func(j) { ... })   it holds three, and this is true of the first
 //
-// An int key with nothing after it is Count, which is what the PHP does with
-// has(3).
+// An int key with nothing after it is [AssertableJSON.Count].
 func (a *AssertableJSON) Has(key any, args ...any) *AssertableJSON {
 	a.t.Helper()
 
@@ -101,11 +93,10 @@ func (a *AssertableJSON) Has(key any, args ...any) *AssertableJSON {
 	return a
 }
 
-// HasAll answers to Has::hasAll: every one of the properties exists.
+// HasAll asserts every one of the properties exists.
 //
-// The PHP takes one array or a list of arguments, and the array mixes bare
-// names with name-to-size pairs. Go has no such array, so a string argument is
-// a bare name and a map[string]int argument is the pairs:
+// A string argument is a bare name, a []string is several of them, and a
+// map[string]int is a name with the size it must have:
 //
 //	HasAll("id", "name")
 //	HasAll(map[string]int{"roles": 2}, "name")
@@ -130,7 +121,7 @@ func (a *AssertableJSON) HasAll(keys ...any) *AssertableJSON {
 	return a
 }
 
-// HasAny answers to Has::hasAny: at least one of the properties exists.
+// HasAny asserts at least one of the properties exists.
 func (a *AssertableJSON) HasAny(keys ...string) *AssertableJSON {
 	a.t.Helper()
 
@@ -144,7 +135,7 @@ func (a *AssertableJSON) HasAny(keys ...string) *AssertableJSON {
 	return a
 }
 
-// MissingAll answers to Has::missingAll.
+// MissingAll asserts none of the properties is there.
 func (a *AssertableJSON) MissingAll(keys ...string) *AssertableJSON {
 	a.t.Helper()
 
@@ -154,12 +145,12 @@ func (a *AssertableJSON) MissingAll(keys ...string) *AssertableJSON {
 	return a
 }
 
-// Missing answers to Has::missing: the property is not there.
+// Missing asserts the property is not there.
 //
 // It is the half that catches a leak -- a password hash in a user payload, an
-// internal note on a public resource -- and Etc is what turns the whole
-// accounting off, so a scope that says Etc should still say Missing about what
-// must not be there.
+// internal note on a public resource -- and [AssertableJSON.Etc] turns the
+// whole accounting off, so a scope that says Etc should still say Missing
+// about what must not be there.
 func (a *AssertableJSON) Missing(key string) *AssertableJSON {
 	a.t.Helper()
 
@@ -168,8 +159,8 @@ func (a *AssertableJSON) Missing(key string) *AssertableJSON {
 	return a
 }
 
-// readHasArgs sorts the variadic tail of Has into the PHP's $length and
-// $callback.
+// readHasArgs sorts the variadic tail of [AssertableJSON.Has] into the
+// expected size and the callback, in either order.
 func readHasArgs(args []any) (length int, hasLength bool, callback func(*AssertableJSON)) {
 	for _, arg := range args {
 		switch value := arg.(type) {

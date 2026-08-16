@@ -7,32 +7,27 @@ import (
 	"time"
 )
 
-// ErrNoDurationSpecified answers to the RuntimeException Sleep::pullPending
-// raises when a unit is asked for and no number is pending.
-//
-// The message is the PHP one, capital and full stop included, because it is
-// what a person searching for the failure has read before.
+// ErrNoDurationSpecified is held on a [Sleep] when a unit is asked for and no
+// number is pending, and handed back by [Sleep.Goodnight].
 var ErrNoDurationSpecified = errors.New("No duration specified.")
 
-// ErrUnknownDurationUnit answers to the RuntimeException Sleep::goodnight
-// raises when a number was given and no unit ever followed it.
+// ErrUnknownDurationUnit is returned by [Sleep.Goodnight] when a number was
+// given and no unit ever followed it.
 var ErrUnknownDurationUnit = errors.New("Unknown duration unit.")
 
-// Sleep answers to Illuminate\Support\Sleep: a duration built up unit by unit,
-// which a test can capture instead of waiting out.
+// Sleep is a duration built up unit by unit, which a test can capture instead
+// of waiting out.
 //
-// The PHP sleeps in __destruct, so the object never has to be told to. Go has
-// no destructor, so the sleep happens when [Sleep.Goodnight] -- the name of the
-// method the PHP __destruct delegates to -- or [Sleep.Then] is called. That is
-// the one difference; every other name is the PHP one.
+// Nothing is slept until [Sleep.Goodnight] or [Sleep.Then] is called: there is
+// no destructor to sleep from, so the end of the chain is where the wait
+// happens. Calling either twice sleeps once.
 type Sleep struct {
-	// Duration answers to the public $duration property. The PHP holds a
-	// CarbonInterval; a time.Duration already carries its unit.
+	// Duration is how long the sleep has been built up to so far.
 	Duration time.Duration
 
-	// while answers to the public $while property. It is not a field named
-	// While because [Sleep.While] already is, and Go has one namespace for
-	// the two.
+	// while keeps the sleep repeating for as long as it returns true. It is
+	// not named While because [Sleep.While] already is, and a field and a
+	// method cannot share one name in Go.
 	while func() bool
 
 	pending      *float64
@@ -49,24 +44,19 @@ var (
 	sleepSyncWithCarbon bool
 )
 
-// newSleep answers to Sleep::__construct.
+// newSleep builds a sleep that will wait unless told otherwise.
 func newSleep(duration any) *Sleep {
 	s := &Sleep{shouldSleep: true}
 	return s.duration(duration)
 }
 
-// For answers to Sleep::for. The PHP takes a DateInterval or a number; here a
-// time.Duration is the interval and any other number is pending until a unit
-// method names it.
-//
-// Sleep::sleep is this with the unit already named -- Sleep::sleep(2) is
-// For(2).Seconds() -- and it does not get a name of its own here, because the
-// type holds it.
+// For starts a sleep. A time.Duration is the whole duration; any other number
+// is left pending until a unit method names it, as in For(2).Seconds().
 func For(duration any) *Sleep { return newSleep(duration) }
 
-// Until answers to Sleep::until: sleep until the given instant. The PHP also
-// accepts a numeric timestamp, and so does this: an integer is read as seconds
-// since the epoch. An instant already past is no sleep at all.
+// Until starts a sleep that runs until the given instant, which is a time.Time
+// or a number of seconds since the epoch. An instant already past is no sleep
+// at all.
 func Until(timestamp any) *Sleep {
 	var target time.Time
 	switch t := timestamp.(type) {
@@ -82,11 +72,11 @@ func Until(timestamp any) *Sleep {
 	return newSleep(target.Sub(Now()))
 }
 
-// Usleep answers to Sleep::usleep: the given number of microseconds.
+// Usleep starts a sleep of the given number of microseconds.
 func Usleep(duration int) *Sleep { return newSleep(duration).Microseconds() }
 
-// duration answers to the protected Sleep::duration. A negative interval is
-// clamped to nothing, which is what the totalMicroseconds check does.
+// duration sets the sleep from a time.Duration, or leaves a number pending for
+// a unit method. A negative duration is clamped to nothing.
 func (s *Sleep) duration(duration any) *Sleep {
 	if d, ok := duration.(time.Duration); ok {
 		if d < 0 {
@@ -114,9 +104,9 @@ func (s *Sleep) duration(duration any) *Sleep {
 	return s
 }
 
-// pullPending answers to the protected Sleep::pullPending. The PHP throws; the
-// error is held on the instance and handed back by [Sleep.Goodnight], because a
-// fluent call cannot return one.
+// pullPending takes the pending number, clamped at zero, and clears it. With
+// nothing pending it stops the sleep and holds [ErrNoDurationSpecified] on the
+// instance, because a fluent call has no room to return an error.
 func (s *Sleep) pullPending() float64 {
 	if s.pending == nil {
 		s.shouldNotSleep()
@@ -138,45 +128,47 @@ func (s *Sleep) add(unit time.Duration) *Sleep {
 	return s
 }
 
-// Minutes answers to Sleep::minutes.
+// Minutes reads the pending number as minutes and adds it to the duration.
 func (s *Sleep) Minutes() *Sleep { return s.add(time.Minute) }
 
-// Minute answers to Sleep::minute.
+// Minute is [Sleep.Minutes] under the singular name.
 func (s *Sleep) Minute() *Sleep { return s.Minutes() }
 
-// Seconds answers to Sleep::seconds.
+// Seconds reads the pending number as seconds and adds it to the duration.
 func (s *Sleep) Seconds() *Sleep { return s.add(time.Second) }
 
-// Second answers to Sleep::second.
+// Second is [Sleep.Seconds] under the singular name.
 func (s *Sleep) Second() *Sleep { return s.Seconds() }
 
-// Milliseconds answers to Sleep::milliseconds.
+// Milliseconds reads the pending number as milliseconds and adds it to the
+// duration.
 func (s *Sleep) Milliseconds() *Sleep { return s.add(time.Millisecond) }
 
-// Millisecond answers to Sleep::millisecond.
+// Millisecond is [Sleep.Milliseconds] under the singular name.
 func (s *Sleep) Millisecond() *Sleep { return s.Milliseconds() }
 
-// Microseconds answers to Sleep::microseconds.
+// Microseconds reads the pending number as microseconds and adds it to the
+// duration.
 func (s *Sleep) Microseconds() *Sleep { return s.add(time.Microsecond) }
 
-// Microsecond answers to Sleep::microsecond.
+// Microsecond is [Sleep.Microseconds] under the singular name.
 func (s *Sleep) Microsecond() *Sleep { return s.Microseconds() }
 
-// And answers to Sleep::and: another number, waiting for its unit.
+// And leaves another number pending, waiting for its unit.
 func (s *Sleep) And(duration any) *Sleep {
 	pending := toFloat(duration)
 	s.pending = &pending
 	return s
 }
 
-// While answers to Sleep::while: keep sleeping while the callback says so.
+// While keeps the sleep repeating for as long as the callback returns true.
 func (s *Sleep) While(callback func() bool) *Sleep {
 	s.while = callback
 	return s
 }
 
-// When answers to Sleep::when: sleep only when the condition holds. The PHP
-// takes a bool or a Closure receiving the instance, and so does this.
+// When sleeps only when the condition holds. The condition is a bool, a
+// func() bool or a func(*Sleep) bool; anything else is read for its truth.
 func (s *Sleep) When(condition any) *Sleep {
 	switch c := condition.(type) {
 	case bool:
@@ -191,7 +183,8 @@ func (s *Sleep) When(condition any) *Sleep {
 	return s
 }
 
-// Unless answers to Sleep::unless.
+// Unless sleeps only when the condition does not hold. It accepts the same
+// shapes as [Sleep.When].
 func (s *Sleep) Unless(condition any) *Sleep {
 	switch c := condition.(type) {
 	case bool:
@@ -205,15 +198,14 @@ func (s *Sleep) Unless(condition any) *Sleep {
 	}
 }
 
-// shouldNotSleep answers to the protected Sleep::shouldNotSleep.
+// shouldNotSleep marks the sleep so that nothing is waited out.
 func (s *Sleep) shouldNotSleep() *Sleep {
 	s.shouldSleep = false
 	return s
 }
 
-// Then answers to Sleep::then: sleep, then run the callback and hand back what
-// it returned. The PHP throws out of the sleep, so this returns (any, error)
-// and does not run the callback when the sleep failed.
+// Then sleeps, then runs the callback and hands back what it returned. A sleep
+// that failed returns its error and the callback does not run.
 func (s *Sleep) Then(then func() any) (any, error) {
 	if err := s.Goodnight(); err != nil {
 		return nil, err
@@ -222,11 +214,13 @@ func (s *Sleep) Then(then func() any) (any, error) {
 	return then(), nil
 }
 
-// Goodnight answers to the protected Sleep::goodnight, which the PHP calls from
-// __destruct. Go has no destructor, so this is where the sleep happens, and it
-// is what a Go caller writes at the end of the chain.
+// Goodnight waits the duration out, and is what a caller writes at the end of
+// the chain. Calling it twice sleeps once.
 //
-// Calling it twice sleeps once, the way the PHP alreadySlept flag arranges.
+// A number left without a unit is [ErrUnknownDurationUnit]. While a test is
+// faking, nothing is waited: the duration is recorded, every callback
+// registered with [WhenFakingSleep] is run with it, and the pinned clock moves
+// forward by it when [SyncWithCarbon] asked for that.
 func (s *Sleep) Goodnight() error {
 	if s.alreadySlept || !s.shouldSleep {
 		return s.err
@@ -284,9 +278,13 @@ func (s *Sleep) Goodnight() error {
 	return nil
 }
 
-// Fake answers to Sleep::fake: stay awake and record what would have been
-// slept. The variadic argument stands for the PHP $value and $syncWithCarbon,
-// in that order, whose defaults are true and false.
+// Fake makes every later sleep record its duration instead of waiting it out,
+// and clears whatever was recorded before.
+//
+// The variadic argument is whether to fake and whether to move the pinned
+// clock forward by each sleep, in that order, defaulting to true and false.
+// The setting is process-wide, so a test that calls it cannot run in parallel
+// with one that does not.
 func Fake(options ...bool) {
 	sleepMu.Lock()
 	defer sleepMu.Unlock()
@@ -299,24 +297,24 @@ func Fake(options ...bool) {
 	sleepFakeCallbacks = nil
 }
 
-// SyncWithCarbon answers to Sleep::syncWithCarbon: while faking, move the
-// pinned "now" forward by every sleep. The variadic argument stands for the PHP
-// $value, whose default is true.
+// SyncWithCarbon says whether a faked sleep moves the pinned "now" forward by
+// its duration. The variadic argument defaults to true.
 func SyncWithCarbon(value ...bool) {
 	sleepMu.Lock()
 	defer sleepMu.Unlock()
 	sleepSyncWithCarbon = firstOr(value, true)
 }
 
-// WhenFakingSleep answers to Sleep::whenFakingSleep: a callback run with every
-// duration that was captured instead of slept.
+// WhenFakingSleep registers a callback run with every duration that was
+// recorded instead of slept.
 func WhenFakingSleep(callback func(duration time.Duration)) {
 	sleepMu.Lock()
 	defer sleepMu.Unlock()
 	sleepFakeCallbacks = append(sleepFakeCallbacks, callback)
 }
 
-// sleepRecorded is the protected static $sequence, copied out under the lock.
+// sleepRecorded returns a copy of the recorded durations, taken under the
+// lock.
 func sleepRecorded() []time.Duration {
 	sleepMu.Lock()
 	defer sleepMu.Unlock()
@@ -325,9 +323,12 @@ func sleepRecorded() []time.Duration {
 	return out
 }
 
-// AssertSlept answers to Sleep::assertSlept. PHPUnit's static Assert has no Go
-// counterpart, so the testing.TB is the first argument, as it is everywhere in
-// Go. The variadic argument stands for the PHP $times, whose default is 1.
+// AssertSlept fails the test unless exactly the expected number of recorded
+// durations pass the truth test. The variadic argument is that number and
+// defaults to 1.
+//
+// The testing.TB is the first argument because there is no ambient running
+// test to find: the caller hands its own in.
 func AssertSlept(t testing.TB, expected func(duration time.Duration) bool, times ...int) {
 	t.Helper()
 	want := firstOr(times, 1)
@@ -342,7 +343,8 @@ func AssertSlept(t testing.TB, expected func(duration time.Duration) bool, times
 	}
 }
 
-// AssertSleptTimes answers to Sleep::assertSleptTimes.
+// AssertSleptTimes fails the test unless exactly that many sleeps were
+// recorded.
 func AssertSleptTimes(t testing.TB, expected int) {
 	t.Helper()
 	count := len(sleepRecorded())
@@ -351,8 +353,9 @@ func AssertSleptTimes(t testing.TB, expected int) {
 	}
 }
 
-// AssertSequence answers to Sleep::assertSequence. A nil entry stands for the
-// PHP null, which skips the comparison at that position.
+// AssertSequence fails the test unless the recorded sleeps match the given
+// ones, in order and in number. A nil entry skips the comparison at that
+// position.
 func AssertSequence(t testing.TB, sequence []*Sleep) {
 	t.Helper()
 	AssertSleptTimes(t, len(sequence))
@@ -369,14 +372,14 @@ func AssertSequence(t testing.TB, sequence []*Sleep) {
 	}
 }
 
-// AssertNeverSlept answers to Sleep::assertNeverSlept.
+// AssertNeverSlept fails the test unless no sleep was recorded at all.
 func AssertNeverSlept(t testing.TB) {
 	t.Helper()
 	AssertSleptTimes(t, 0)
 }
 
-// AssertInsomniac answers to Sleep::assertInsomniac: sleeping was asked for,
-// but every duration was zero.
+// AssertInsomniac fails the test unless every recorded sleep was of zero
+// duration: sleeping was asked for, but nothing would have been waited.
 func AssertInsomniac(t testing.TB) {
 	t.Helper()
 	for _, duration := range sleepRecorded() {

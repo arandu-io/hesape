@@ -10,36 +10,27 @@ import (
 	"github.com/arandu-io/hesape/collections"
 )
 
-// Repository mirrors Illuminate\Config\Repository: the dotted-key store behind
-// config('app.name').
+// Repository is the dotted-key configuration store: a nested tree of maps and
+// lists read and written by keys such as "app.name".
 //
 // It sits beside [App] rather than replacing it. [App] is what the framework
 // reads -- a wrong field is a compile error there -- and this is what an
-// application reads when the key is only known at runtime, which is what a
-// Laravel developer types. A first-party package that reaches for a string key
-// instead of a struct field is doing it wrong; that is the only rule about
-// which of the two to use.
+// application reads when the key is only known at runtime. A first-party
+// package that reaches for a string key instead of a struct field is doing it
+// wrong; that is the only rule about which of the two to use.
 //
-// Every method is safe for concurrent use. Illuminate has no lock because PHP
-// has no shared process; a long-lived Go binary does, and a Set racing a Get is
-// a crash rather than a stale read.
+// Every method is safe for concurrent use.
 //
-// Values are copied in and out. In PHP an array is a value, so
-// config()->get('database') hands back a copy and mutating it changes nothing;
-// a Go map is a reference, and returning the live one would hand a caller the
-// ability to edit configuration by accident -- and to race the lock while doing
-// it. [Repository.Get], [Repository.All] and the constructor deep-copy any
-// map[string]any and []any they cross.
+// Values are copied in and out. [Repository.Get], [Repository.All] and the
+// constructor deep-copy any map[string]any and []any they cross.
 type Repository struct {
 	mu    sync.RWMutex
 	items map[string]any
 }
 
-// NewRepository answers to __construct: it creates a configuration repository
-// over the given items.
+// NewRepository creates a configuration repository over the given items.
 //
-// A nil map is the empty repository, as an omitted $items is in PHP. The items
-// are deep-copied, so the caller's map is not the repository's map.
+// The items are deep-copied, so the caller's map is not the repository's map.
 func NewRepository(items map[string]any) *Repository {
 	copied, _ := clone(items).(map[string]any)
 	if copied == nil {
@@ -48,11 +39,11 @@ func NewRepository(items map[string]any) *Repository {
 	return &Repository{items: copied}
 }
 
-// Has answers to has: it reports whether the given configuration value exists.
+// Has reports whether the given configuration value exists.
 //
-// It mirrors Arr::has. A key present with a nil value exists -- the question is
-// about the key, not the value. An empty repository answers false to every key,
-// including the empty one, which is what PHP's `if (! $array)` does.
+// A key present with a nil value exists -- the question is about the key, not
+// the value. An empty repository answers false to every key, including the
+// empty one.
 func (r *Repository) Has(key string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -64,15 +55,11 @@ func (r *Repository) Has(key string) bool {
 	return ok
 }
 
-// Get answers to get: it returns the specified configuration value.
+// Get returns the specified configuration value, or the optional default when
+// the key is missing.
 //
-// At most one default may be given, mirroring PHP's optional $default; with
-// none, a missing key reads as nil. A default of func() any is called rather
-// than returned, which is what value() does to a closure default in PHP.
-//
-// The array form of the PHP argument -- get(['a', 'b' => 1]) -- is
-// [Repository.GetMany]. Go has no overload, and PHP dispatches to getMany for
-// it anyway.
+// A default of func() any is called rather than returned. Only the first
+// default is read; the rest are ignored.
 func (r *Repository) Get(key string, def ...any) any {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -83,13 +70,10 @@ func (r *Repository) Get(key string, def ...any) any {
 	return value(first(def))
 }
 
-// GetMany answers to getMany: it returns many configuration values at once.
+// GetMany returns many configuration values at once.
 //
-// Each entry maps a key to the default used when that key is missing. PHP
-// accepts the two shapes in one array -- a numeric entry is a bare key with a
-// null default, a string entry is key => default -- so ['a', 'b' => 1] is
-// written here as {"a": nil, "b": 1}. A nil default is called if it is a
-// func() any, as everywhere else.
+// Each entry maps a key to the default used when that key is missing. A nil
+// default is called if it is a func() any, as everywhere else.
 //
 // The result is never nil, and it holds one entry per requested key.
 func (r *Repository) GetMany(keys map[string]any) map[string]any {
@@ -107,12 +91,9 @@ func (r *Repository) GetMany(keys map[string]any) map[string]any {
 	return out
 }
 
-// String answers to string: it returns the specified string configuration
-// value.
+// String returns the specified string configuration value.
 //
-// The InvalidArgumentException PHP throws when the value is not a string is the
-// error. The check is is_string, so it is the type and not a conversion: an int
-// is an error, not "42".
+// The check is on the type and not a conversion: an int is an error, not "42".
 func (r *Repository) String(key string, def ...any) (string, error) {
 	v := r.Get(key, def...)
 	s, ok := v.(string)
@@ -122,13 +103,10 @@ func (r *Repository) String(key string, def ...any) (string, error) {
 	return s, nil
 }
 
-// Integer answers to integer: it returns the specified integer configuration
-// value.
+// Integer returns the specified integer configuration value. Every signed and
+// unsigned integer kind is accepted.
 //
-// The InvalidArgumentException PHP throws when the value is not an integer is
-// the error. PHP has one integer type and Go has ten, so every integer kind
-// answers here; a float does not, because is_int rejects it in PHP too. A value
-// too large for int is an error rather than a truncation.
+// A value too large for int is an error rather than a truncation.
 func (r *Repository) Integer(key string, def ...any) (int, error) {
 	v := r.Get(key, def...)
 	switch t := v.(type) {
@@ -169,11 +147,10 @@ func (r *Repository) Integer(key string, def ...any) (int, error) {
 	}
 }
 
-// Float answers to float: it returns the specified float configuration value.
+// Float returns the specified float configuration value.
 //
-// The InvalidArgumentException PHP throws when the value is not a float is the
-// error. An integer is not a float, here as in is_float: config values are
-// written by hand, and 0 where 0.0 was meant is worth a message.
+// An integer is not a float: config values are written by hand, and 0 where
+// 0.0 was meant is worth a message.
 func (r *Repository) Float(key string, def ...any) (float64, error) {
 	v := r.Get(key, def...)
 	switch t := v.(type) {
@@ -186,11 +163,9 @@ func (r *Repository) Float(key string, def ...any) (float64, error) {
 	}
 }
 
-// Boolean answers to boolean: it returns the specified boolean configuration
-// value.
+// Boolean returns the specified boolean configuration value.
 //
-// The InvalidArgumentException PHP throws when the value is not a boolean is
-// the error. It is is_bool and not a cast, so "true" and 1 are errors.
+// It is a type check and not a cast, so "true" and 1 are errors.
 func (r *Repository) Boolean(key string, def ...any) (bool, error) {
 	v := r.Get(key, def...)
 	b, ok := v.(bool)
@@ -200,14 +175,9 @@ func (r *Repository) Boolean(key string, def ...any) (bool, error) {
 	return b, nil
 }
 
-// Array answers to array: it returns the specified array configuration value.
+// Array returns the specified array configuration value.
 //
-// The InvalidArgumentException PHP throws when the value is not an array is the
-// error.
-//
-// A PHP array is both the list and the map, and a Go method returns one type.
-// This is the list -- config('app.providers'), the shape array() and
-// collection() were added for. A section with string keys is a map[string]any
+// This is the list shape only. A section with string keys is a map[string]any
 // and is read with [Repository.Get] or by its sub-keys; asking for it here is
 // an error that says so, rather than a silent conversion that would drop the
 // keys.
@@ -223,14 +193,9 @@ func (r *Repository) Array(key string, def ...any) ([]any, error) {
 	return l, nil
 }
 
-// Collection answers to collection: it returns the specified array
-// configuration value as a collection.
+// Collection returns the specified array configuration value as a collection.
 //
-// Illuminate wraps the array in Illuminate\Support\Collection, and this wraps
-// it in the mirror of that class, [collections.Collection]. It is
-// [Repository.Array] plus the wrap, exactly as the PHP is: the error is the one
-// array() raises, because collection() is `new Collection($this->array(...))`
-// and a value that is not an array never reaches the constructor.
+// It is [Repository.Array] plus the wrap.
 //
 // collections.Collection[any] has []any as its underlying type, so a caller
 // that only ranges over the result reads it as a list; a caller that wants
@@ -243,14 +208,11 @@ func (r *Repository) Collection(key string, def ...any) (collections.Collection[
 	return collections.Collection[any](list), nil
 }
 
-// Set answers to set: it sets a given configuration value.
+// Set sets a given configuration value, creating the intermediate levels the
+// dotted key names.
 //
-// The key is a dotted path and the intermediate levels are created as needed,
-// as Arr::set does. A level that exists but is not a map is replaced by one,
-// which is PHP's `if (! is_array($array[$key])) $array[$key] = []`.
-//
-// The array form -- set(['a' => 1, 'b' => 2]) -- is one call per key. Go has no
-// overload, and PHP's version is a loop over exactly this.
+// A level that exists but is not a map is replaced by one. Setting several
+// keys is one call per key.
 func (r *Repository) Set(key string, val any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -258,14 +220,10 @@ func (r *Repository) Set(key string, val any) {
 	assign(r.items, key, clone(val))
 }
 
-// Prepend answers to prepend: it prepends a value onto an array configuration
-// value.
+// Prepend prepends a value onto an array configuration value. A missing key
+// starts an empty list.
 //
-// A missing key starts an empty list, as `$this->get($key, [])` does. A key
-// that holds something other than a list is the error, because the
-// array_unshift PHP reaches for next is a TypeError on anything else -- nil
-// included, since a key present with a null value returns null and not the
-// default.
+// A key that holds something other than a list is the error.
 func (r *Repository) Prepend(key string, val any) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -278,7 +236,7 @@ func (r *Repository) Prepend(key string, val any) error {
 	return nil
 }
 
-// Push answers to push: it pushes a value onto an array configuration value.
+// Push pushes a value onto an array configuration value.
 //
 // It is [Repository.Prepend] at the other end, with the same rule about a key
 // that is not a list.
@@ -294,11 +252,9 @@ func (r *Repository) Push(key string, val any) error {
 	return nil
 }
 
-// All answers to all: it returns all of the configuration items for the
-// application.
+// All returns all of the configuration items for the application.
 //
-// The result is a deep copy. PHP hands back a copy because an array is a value
-// there; editing what this returns changes nothing, which is the same promise.
+// The result is a deep copy.
 func (r *Repository) All() map[string]any {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -307,12 +263,9 @@ func (r *Repository) All() map[string]any {
 	return all
 }
 
-// lookup resolves a dotted key against items, mirroring Arr::get and the
-// existence half of Arr::has in one pass -- they walk the same path, and two
-// copies of this walk would be two answers to "does app.name exist".
-//
-// The literal key wins over the path, as in PHP: a top-level item actually
-// named "a.b" is found before "a" is descended into.
+// lookup resolves a dotted key against items and reports whether it was found.
+// Reading and testing for existence are the same walk, and two copies of it
+// would be two answers to "does app.name exist".
 func lookup(items map[string]any, key string) (any, bool) {
 	if v, ok := items[key]; ok {
 		return v, true
@@ -333,8 +286,7 @@ func lookup(items map[string]any, key string) (any, bool) {
 }
 
 // index reads one segment out of one level. A map is read by key and a list by
-// position, because a PHP list is an array whose keys are 0, 1, 2 and
-// config('app.providers.0') resolves there.
+// position.
 func index(container any, segment string) (any, bool) {
 	switch t := container.(type) {
 	case map[string]any:
@@ -351,9 +303,7 @@ func index(container any, segment string) (any, bool) {
 	}
 }
 
-// assign writes val at a dotted key, mirroring Arr::set. Unlike lookup it does
-// not try the literal key first: PHP explodes on "." unconditionally here, so
-// Set("a.b", 1) always nests and never creates a top-level "a.b".
+// assign writes val at a dotted key, creating the intermediate maps it names.
 func assign(items map[string]any, key string, val any) {
 	segments := strings.Split(key, ".")
 	level := items
@@ -383,9 +333,7 @@ func listAt(items map[string]any, key string) ([]any, error) {
 	return append(make([]any, 0, len(l)+1), l...), nil
 }
 
-// first returns the single optional default. More than one is a call PHP could
-// not have written, and the rest are ignored rather than made into a panic on a
-// read path.
+// first returns the single optional default.
 func first(def []any) any {
 	if len(def) == 0 {
 		return nil
@@ -393,9 +341,8 @@ func first(def []any) any {
 	return def[0]
 }
 
-// value mirrors the global value(): a default that is a function is the result
-// of calling it, and anything else is itself. It is how PHP lets
-// string($key, fn () => expensive()) skip the work when the key is present.
+// value resolves a default: one that is a func() any is the result of calling
+// it, and anything else is itself.
 func value(v any) any {
 	if f, ok := v.(func() any); ok {
 		return f()
@@ -425,21 +372,18 @@ func clone(v any) any {
 	}
 }
 
-// typeError is the InvalidArgumentException the typed readers throw, with the
-// same sentence and the same gettype name for the value.
+// typeError is the error the typed readers return when the stored value is not
+// the type asked for. It names the key, the wanted type and the type found.
 func typeError(key, want string, v any) error {
 	return fmt.Errorf("configuration value for key [%s] must be %s, %s given", key, want, phpType(v))
 }
 
 // rangeError reports a value that is an integer but does not fit in an int.
-// PHP has no such case, having one integer width; Go does, and truncating
-// silently would be a port number that is not the one in the file.
 func rangeError(key string, v any) error {
 	return fmt.Errorf("configuration value for key [%s] is out of range for int: %v", key, v)
 }
 
-// phpType names a value the way gettype does, so the message a Go developer
-// reads is the message the Laravel documentation quotes.
+// phpType names the type of a value for the messages [typeError] builds.
 func phpType(v any) string {
 	switch v.(type) {
 	case nil:

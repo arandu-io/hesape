@@ -5,171 +5,162 @@ import (
 	"github.com/arandu-io/hesape/testing/exceptions"
 )
 
-// This file answers to Illuminate\Testing\Assert.
-//
-// The PHP is `abstract class Assert extends PHPUnit\Framework\Assert`: one
-// method of its own, assertArraySubset, and every assertion the component makes
-// inherited from PHPUnit and reachable as Assert::assertTrue and the rest.
-// PHPUnit is not a dependency this collection carries -- go test is the runner
-// -- so the inherited half is written out below, over the T that stands in for
-// PHPUnit's ambient test case.
-//
-// They are exported because Fluent uses them: Fluent\Concerns\Has, Matching and
-// Interaction call PHPUnit\Framework\Assert directly, which in Go is one
-// package importing another.
-//
-// Every one of them takes the T first, where the PHP takes none, and a message
-// last, where the PHP takes an optional one. The empty message means the same
-// as the omitted argument: use the assertion's own wording.
+// The bare assertions. Every one of them takes the [T] first, and an empty
+// message means "use the assertion's own wording".
 
-// AssertTrue answers to Assert::assertTrue.
+// AssertTrue fails unless the condition is true.
 func AssertTrue(t T, condition bool, message string) {
 	t.Helper()
 	assertTrue(t, condition, message)
 }
 
-// AssertFalse answers to Assert::assertFalse.
+// AssertFalse fails unless the condition is false.
 func AssertFalse(t T, condition bool, message string) {
 	t.Helper()
 	assertFalse(t, condition, message)
 }
 
-// AssertNotTrue answers to Assert::assertNotTrue.
+// AssertNotTrue fails unless the value is anything other than true.
 func AssertNotTrue(t T, condition bool, message string) {
 	t.Helper()
 	assertNotTrue(t, condition, message)
 }
 
-// AssertSame answers to Assert::assertSame.
+// AssertSame fails unless the two values are identical. It is identity, not
+// equality.
 func AssertSame(t T, expected, actual any, message string) {
 	t.Helper()
 	assertSame(t, expected, actual, message)
 }
 
-// AssertNotSame answers to Assert::assertNotSame.
+// AssertNotSame fails when the two values are identical.
 func AssertNotSame(t T, expected, actual any, message string) {
 	t.Helper()
 	assertNotSame(t, expected, actual, message)
 }
 
-// AssertEquals answers to Assert::assertEquals.
+// AssertEquals fails unless the two values compare loosely equal, which holds
+// a string and the number it spells to be equal.
 func AssertEquals(t T, expected, actual any, message string) {
 	t.Helper()
 	assertEquals(t, expected, actual, message)
 }
 
-// AssertNotEquals answers to Assert::assertNotEquals.
+// AssertNotEquals fails when the two values compare loosely equal.
 func AssertNotEquals(t T, expected, actual any, message string) {
 	t.Helper()
 	assertNotEquals(t, expected, actual, message)
 }
 
-// AssertEqualsCanonicalizing answers to Assert::assertEqualsCanonicalizing.
+// AssertEqualsCanonicalizing fails unless the two values are equal once both
+// sides are sorted, so the order of a list does not count.
 func AssertEqualsCanonicalizing(t T, expected, actual any, message string) {
 	t.Helper()
 	assertEqualsCanonicalizing(t, expected, actual, message)
 }
 
-// AssertNull answers to Assert::assertNull.
+// AssertNull fails unless the value is nil.
 func AssertNull(t T, actual any, message string) {
 	t.Helper()
 	assertNull(t, actual, message)
 }
 
-// AssertNotNull answers to Assert::assertNotNull.
+// AssertNotNull fails when the value is nil.
 func AssertNotNull(t T, actual any, message string) {
 	t.Helper()
 	assertNotNull(t, actual, message)
 }
 
-// AssertEmpty answers to Assert::assertEmpty.
+// AssertEmpty fails unless the value is empty: nil, false, zero, the empty
+// string, "0", and the empty list or map.
 func AssertEmpty(t T, actual any, message string) {
 	t.Helper()
 	assertEmpty(t, actual, message)
 }
 
-// AssertNotEmpty answers to Assert::assertNotEmpty.
+// AssertNotEmpty fails when the value is empty.
 func AssertNotEmpty(t T, actual any, message string) {
 	t.Helper()
 	assertNotEmpty(t, actual, message)
 }
 
-// AssertCount answers to Assert::assertCount.
+// AssertCount fails unless the value is countable and its length is the one
+// expected.
 func AssertCount(t T, expected int, actual any, message string) {
 	t.Helper()
 	assertCount(t, expected, actual, message)
 }
 
-// AssertContains answers to Assert::assertContains.
+// AssertContains fails unless one element of the haystack compares loosely
+// equal to the needle.
 func AssertContains(t T, needle any, haystack []string, message string) {
 	t.Helper()
 	assertContains(t, needle, haystack, message)
 }
 
-// AssertNotContains answers to Assert::assertNotContains.
+// AssertNotContains fails when an element of the haystack compares loosely
+// equal to the needle.
 func AssertNotContains(t T, needle any, haystack []string, message string) {
 	t.Helper()
 	assertNotContains(t, needle, haystack, message)
 }
 
-// AssertStringContainsString answers to Assert::assertStringContainsString.
+// AssertStringContainsString fails unless the haystack contains the needle.
 func AssertStringContainsString(t T, needle, haystack, message string) {
 	t.Helper()
 	assertStringContainsString(t, needle, haystack, message)
 }
 
-// AssertStringNotContainsString answers to
-// Assert::assertStringNotContainsString.
+// AssertStringNotContainsString fails when the haystack contains the needle.
 func AssertStringNotContainsString(t T, needle, haystack, message string) {
 	t.Helper()
 	assertStringNotContainsString(t, needle, haystack, message)
 }
 
-// AssertArrayHasKey answers to Assert::assertArrayHasKey.
+// AssertArrayHasKey fails unless the map has the key. It looks at one level,
+// not at a dot path.
 func AssertArrayHasKey(t T, key string, array any, message string) {
 	t.Helper()
 	assertArrayHasKey(t, key, array, message)
 }
 
-// AssertIsArray answers to Assert::assertIsArray.
+// AssertIsArray fails unless the value is a list, an array or a map.
 func AssertIsArray(t T, actual any, message string) {
 	t.Helper()
 	assertIsArray(t, actual, message)
 }
 
-// AssertGreaterThanOrEqual answers to Assert::assertGreaterThanOrEqual.
+// AssertGreaterThanOrEqual fails unless actual is at least expected.
 func AssertGreaterThanOrEqual(t T, expected, actual int, message string) {
 	t.Helper()
 	assertGreaterThanOrEqual(t, expected, actual, message)
 }
 
-// AssertLessThanOrEqual answers to Assert::assertLessThanOrEqual.
+// AssertLessThanOrEqual fails unless actual is at most expected.
 func AssertLessThanOrEqual(t T, expected, actual int, message string) {
 	t.Helper()
 	assertLessThanOrEqual(t, expected, actual, message)
 }
 
-// AssertThat answers to Assert::assertThat.
+// AssertThat evaluates a constraint and reports what it says when it does not
+// hold.
 func AssertThat(t T, value any, c constraints.Constraint, message string) {
 	t.Helper()
 	assertThat(t, value, c, message)
 }
 
-// Fail answers to Assert::fail.
+// Fail reports a failure with the given message and stops the test.
 func Fail(t T, message string) {
 	t.Helper()
 	fail(t, "%s", message)
 }
 
-// AssertArraySubset answers to Assert::assertArraySubset: the value carries
-// everything the subset names, and may carry more.
+// AssertArraySubset fails unless the value carries everything the subset
+// names. It may carry more.
 //
-// It returns an error where the PHP throws InvalidArgumentException, which is
-// the (T, error) change: an argument of the wrong shape is the caller's
-// mistake, not a failed expectation, and reporting it as a failure would file
-// it under the thing being tested.
-//
-// checkForIdentity is the PHP's third argument: === instead of ==.
+// checkForIdentity picks the comparison: identity when true, the relaxed one
+// when false. The error result reports an argument that is neither a list nor
+// a map, and no assertion is made in that case.
 func AssertArraySubset(t T, subset, array any, checkForIdentity bool, msg string) error {
 	t.Helper()
 
@@ -182,9 +173,8 @@ func AssertArraySubset(t T, subset, array any, checkForIdentity bool, msg string
 
 	constraint := constraints.NewArraySubset(canonical(subset), checkForIdentity)
 
-	// PHP compares with === or == at the language level; the constraint takes
-	// the comparison instead. These two are the same operators, written for the
-	// values json.Unmarshal produces.
+	// The constraint takes the comparison rather than hard-coding one, so the
+	// same matcher serves both modes over the values json.Unmarshal produces.
 	constraint.Equals = identical
 	if !checkForIdentity {
 		constraint.Equals = loosely
@@ -194,7 +184,8 @@ func AssertArraySubset(t T, subset, array any, checkForIdentity bool, msg string
 	return nil
 }
 
-// isArrayish answers to `is_array($x) || $x instanceof ArrayAccess`.
+// isArrayish reports whether a value is something with a length: a list, an
+// array or a map.
 func isArrayish(v any) bool {
 	if v == nil {
 		return false

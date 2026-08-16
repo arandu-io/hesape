@@ -6,8 +6,8 @@ import (
 	"unicode"
 )
 
-// The three casing caches Illuminate keeps as $snakeCache, $camelCache and
-// $studlyCache. They are read on every call and cleared only by FlushCache.
+// The three casing caches. They are read on every call and cleared only by
+// FlushCache.
 var (
 	caseCacheMu sync.RWMutex
 	snakeCache  = map[string]string{}
@@ -29,8 +29,7 @@ func cachedCase(cache map[string]string, key string, compute func() string) stri
 	return v
 }
 
-// FlushCache answers for Str::flushCache. It empties the snake, camel and
-// studly caches.
+// FlushCache empties the snake, camel and studly caches.
 func FlushCache() {
 	caseCacheMu.Lock()
 	clear(snakeCache)
@@ -39,13 +38,13 @@ func FlushCache() {
 	caseCacheMu.Unlock()
 }
 
-// Snake answers for Str::snake. It converts a string to snake case with the
-// given delimiter: Snake("PurchaseOrder", "_") is "purchase_order".
+// Snake converts a string to snake case with the given delimiter:
+// Snake("PurchaseOrder", "_") is "purchase_order".
 //
-// It is Illuminate's algorithm, which means a run of capitals becomes one
-// delimiter per capital -- Snake("HTTPServer", "_") is "h_t_t_p_server" -- and
-// a string that is already all lowercase letters is returned untouched, so
-// Snake("foo-bar", "_") is "foo-bar" and not "foo_bar".
+// A delimiter goes in before every capital, one per capital, so
+// Snake("HTTPServer", "_") is "h_t_t_p_server". A string that is already all
+// lowercase letters is returned untouched, so Snake("foo-bar", "_") is
+// "foo-bar" and not "foo_bar".
 func Snake(value, delimiter string) string {
 	return cachedCase(snakeCache, value+"\x00"+delimiter, func() string {
 		if ctypeLower(value) {
@@ -72,11 +71,10 @@ func Snake(value, delimiter string) string {
 	})
 }
 
-// Kebab answers for Str::kebab. It is Snake with a hyphen:
-// Kebab("WelcomeEmail") is "welcome-email".
+// Kebab is Snake with a hyphen: Kebab("WelcomeEmail") is "welcome-email".
 func Kebab(value string) string { return Snake(value, "-") }
 
-// Studly answers for Str::studly. It converts a string to studly caps:
+// Studly converts a string to studly caps:
 // Studly("invoice_line") and Studly("invoice-line") are both "InvoiceLine".
 //
 // Only the first letter of each dash-, underscore- or space-separated part is
@@ -101,18 +99,16 @@ var studlyBoundaries = strings.NewReplacer("-", " ", "_", " ")
 //
 // It is [Studly] under the other name for the same convention, and the two are
 // interchangeable in every call.
-//
-// Answers Str::pascal, which Illuminate defines as an alias of Str::studly.
 func Pascal(value string) string { return Studly(value) }
 
-// Camel answers for Str::camel. It is Studly with a lowercase initial:
-// Camel("purchase_order") is "purchaseOrder".
+// Camel is Studly with a lowercase initial: Camel("purchase_order") is
+// "purchaseOrder".
 func Camel(value string) string {
 	return cachedCase(camelCache, value, func() string { return Lcfirst(Studly(value)) })
 }
 
-// Ucfirst answers for Str::ucfirst. It uppercases the first character and
-// leaves the rest of the string alone.
+// Ucfirst uppercases the first character and leaves the rest of the string
+// alone.
 func Ucfirst(value string) string {
 	if value == "" {
 		return value
@@ -121,8 +117,8 @@ func Ucfirst(value string) string {
 	return strings.ToUpper(string(rs[0])) + string(rs[1:])
 }
 
-// Lcfirst answers for Str::lcfirst. It lowercases the first character and
-// leaves the rest of the string alone.
+// Lcfirst lowercases the first character and leaves the rest of the string
+// alone.
 func Lcfirst(value string) string {
 	if value == "" {
 		return value
@@ -131,8 +127,8 @@ func Lcfirst(value string) string {
 	return strings.ToLower(string(rs[0])) + string(rs[1:])
 }
 
-// Ucsplit answers for Str::ucsplit. It splits a string into pieces in front of
-// every uppercase letter, dropping the empty pieces:
+// Ucsplit splits a string into pieces in front of every uppercase letter,
+// dropping the empty pieces:
 // Ucsplit("EmailNotificationSent") is ["Email", "Notification", "Sent"].
 func Ucsplit(value string) []string {
 	var out []string
@@ -149,19 +145,17 @@ func Ucsplit(value string) []string {
 	return out
 }
 
-// Lower answers for Str::lower. It lowercases the whole string.
+// Lower lowercases the whole string.
 func Lower(value string) string { return strings.ToLower(value) }
 
-// Upper answers for Str::upper. It uppercases the whole string.
+// Upper uppercases the whole string.
 func Upper(value string) string { return strings.ToUpper(value) }
 
-// Title answers for Str::title. It uppercases the first letter of every word
-// and lowercases the rest of each one: Title("welcome EMAIL") is "Welcome
-// Email".
+// Title uppercases the first letter of every word and lowercases the rest of
+// each one: Title("welcome EMAIL") is "Welcome Email".
 //
 // A word starts after any character that is not a letter, which is what makes
-// Title("hello-world") "Hello-World" and Title("o'neil") "O'Neil", the way
-// PHP's mb_convert_case does with MB_CASE_TITLE.
+// Title("hello-world") "Hello-World" and Title("o'neil") "O'Neil".
 func Title(value string) string {
 	var b strings.Builder
 	b.Grow(len(value))
@@ -181,8 +175,7 @@ func Title(value string) string {
 	return b.String()
 }
 
-// The case modes Str::convertCase accepts, with the values PHP gives
-// MB_CASE_UPPER, MB_CASE_LOWER, MB_CASE_TITLE and MB_CASE_FOLD.
+// The case modes ConvertCase accepts.
 const (
 	CaseUpper = 0
 	CaseLower = 1
@@ -190,13 +183,11 @@ const (
 	CaseFold  = 3
 )
 
-// ConvertCase answers for Str::convertCase. The mode is one of CaseUpper,
-// CaseLower, CaseTitle or CaseFold; PHP defaults the argument to MB_CASE_FOLD,
-// and Go has no default arguments, so pass CaseFold for that.
+// ConvertCase converts a string in the given mode, which is one of CaseUpper,
+// CaseLower, CaseTitle or CaseFold. There is no default: name the one wanted.
 //
-// The encoding argument is gone: Go strings are UTF-8 and there is nothing to
-// choose. CaseFold is Unicode simple case folding, which for every alphabet
-// this package can reach is lowercasing.
+// CaseFold is Unicode simple case folding, which for every alphabet this
+// package can reach is lowercasing.
 func ConvertCase(value string, mode int) string {
 	switch mode {
 	case CaseUpper:
@@ -208,8 +199,8 @@ func ConvertCase(value string, mode int) string {
 	}
 }
 
-// Headline answers for Str::headline. It converts a string to a title-cased
-// sentence: Headline("EmailNotificationSent") and
+// Headline converts a string to a title-cased sentence:
+// Headline("EmailNotificationSent") and
 // Headline("email_notification_sent") are both "Email Notification Sent".
 func Headline(value string) string {
 	parts := strings.Split(value, " ")
@@ -223,8 +214,7 @@ func Headline(value string) string {
 
 	var kept []string
 	for _, piece := range strings.Split(collapsed, "_") {
-		// array_filter drops every falsy value, which in PHP is the empty
-		// string and also the string "0".
+		// An empty piece is dropped, and so is a piece that is only "0".
 		if piece != "" && piece != "0" {
 			kept = append(kept, piece)
 		}
@@ -234,8 +224,8 @@ func Headline(value string) string {
 
 var headlineBoundaries = strings.NewReplacer("-", "_", " ", "_")
 
-// apaMinorWords are the words Str::apa leaves lowercase when they are short
-// enough and not at the start of the title.
+// apaMinorWords are the words Apa leaves lowercase when they are short enough
+// and not at the start of the title.
 var apaMinorWords = map[string]bool{
 	"and": true, "as": true, "but": true, "for": true, "if": true, "nor": true,
 	"or": true, "so": true, "yet": true, "a": true, "an": true, "the": true,
@@ -249,9 +239,9 @@ var apaMinorWords = map[string]bool{
 // that the word after one of them is capitalized even when it is minor.
 var apaEndPunctuation = map[string]bool{".": true, "!": true, "?": true, ":": true, "—": true, ",": true}
 
-// Apa answers for Str::apa. It converts a string to APA-style title case,
-// which leaves minor words of three letters or fewer lowercase unless they
-// open the title or follow end punctuation.
+// Apa converts a string to APA-style title case, which leaves minor words of
+// three letters or fewer lowercase unless they open the title or follow end
+// punctuation.
 //
 // See https://apastyle.apa.org/style-grammar-guidelines/capitalization/title-case.
 func Apa(value string) string {
@@ -291,8 +281,8 @@ func Apa(value string) string {
 	return strings.Join(words, " ")
 }
 
-// ctypeLower is PHP's ctype_lower: every byte is an ASCII lowercase letter, and
-// the empty string is not.
+// ctypeLower reports whether every byte is an ASCII lowercase letter. The empty
+// string is not.
 func ctypeLower(s string) bool {
 	if s == "" {
 		return false
@@ -305,8 +295,8 @@ func ctypeLower(s string) bool {
 	return true
 }
 
-// ucwords is PHP's ucwords: it uppercases the first letter of the string and
-// every letter that follows one of PHP's default word delimiters.
+// ucwords uppercases the first ASCII lowercase letter of the string and every
+// one that follows a whitespace byte.
 func ucwords(s string) string {
 	b := []byte(s)
 	boundary := true

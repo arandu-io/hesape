@@ -1,40 +1,36 @@
 package fakes
 
-// PendingBatchFake answers Illuminate\Support\Testing\Fakes\PendingBatchFake.
+// PendingBatchFake is a batch of jobs waiting to be dispatched onto a
+// [BusFake].
 //
-// It is what Bus::batch(jobs) hands back while the bus is faked: the batch is
-// recorded when it is dispatched instead of being stored and worked, and it is
-// the value a truth test given to AssertBatched is handed.
-//
-// The PHP extends PendingBatch and inherits the fluent setters -- name(),
-// onQueue(), then(), catch() -- from it. Those belong to the bus package, and
-// what the fake reads of them is the three properties below, which a test sets
-// directly: a Go type cannot have both a field Name and a method Name, and the
-// property is what BatchRepositoryFake::store reads.
+// The three settings are plain fields a test writes to directly, rather than
+// setter methods, because a type cannot carry both a field Name and a method
+// Name.
 type PendingBatchFake struct {
 	bus *BusFake
 
-	// Jobs answers PendingBatch::$jobs.
+	// Jobs are the jobs the batch will dispatch.
 	Jobs []any
-	// Name answers PendingBatch::$name.
+	// Name is what the batch is called, and may be empty.
 	Name string
-	// Options answers PendingBatch::$options.
+	// Options are the batch's settings, keyed by name.
 	Options map[string]any
 }
 
-// NewPendingBatchFake answers PendingBatchFake::__construct.
+// NewPendingBatchFake builds a pending batch over the given jobs, bound to the
+// bus that will record it.
 func NewPendingBatchFake(bus *BusFake, jobs []any) *PendingBatchFake {
 	return &PendingBatchFake{bus: bus, Jobs: jobs, Options: map[string]any{}}
 }
 
-// Dispatch answers PendingBatchFake::dispatch: the batch is recorded on the
-// fake bus, and the batch the repository made for it is handed back.
+// Dispatch records the batch on the bus and returns the [BatchFake] made for
+// it.
 func (p *PendingBatchFake) Dispatch() *BatchFake {
 	return p.bus.RecordPendingBatch(p)
 }
 
-// DispatchAfterResponse answers PendingBatchFake::dispatchAfterResponse. It is
-// Dispatch: with no response to wait for, there is no later.
+// DispatchAfterResponse is [PendingBatchFake.Dispatch]: with no response to
+// wait for, there is no later.
 func (p *PendingBatchFake) DispatchAfterResponse() *BatchFake {
 	return p.bus.RecordPendingBatch(p)
 }

@@ -5,20 +5,18 @@ import (
 	"unicode/utf8"
 )
 
-// Slug answers for Str::slug. It is the text as an address:
-// Slug("Josefin Sans Café", "-") is "josefin-sans-cafe".
+// Slug is the text as an address: Slug("Josefin Sans Café", "-") is
+// "josefin-sans-cafe".
 //
-// The PHP defaults the separator to "-"; Go has no default arguments, so it is
-// required here, as it is on Snake. Pass "" to run the words together.
+// The separator is required, as it is on Snake, because Go has no default
+// arguments. Pass "" to run the words together.
 //
 // It folds to ASCII first, so an accented rune becomes the letter it is built
-// on instead of disappearing. The version this replaced dropped it, which meant
-// two font families whose names differed only in their accents wrote to the
-// same file, and the second one silently won.
+// on instead of disappearing: two names differing only in their accents would
+// otherwise slug to one and the same address.
 //
-// An at sign becomes the word "at" before anything else happens -- the PHP's
-// $dictionary default -- which is what keeps two addresses at different hosts
-// from slugging to the same thing.
+// An at sign becomes the word "at" before anything else happens, which is what
+// keeps two addresses at different hosts from slugging to the same thing.
 func Slug(s, separator string) string {
 	folded := strings.ToLower(strings.ReplaceAll(ASCII(s), "@", " at "))
 
@@ -42,11 +40,11 @@ func Slug(s, separator string) string {
 // ASCII folds a string to ASCII: "Ação" becomes "Acao", "Straße" becomes
 // "Strasse".
 //
-// It is a table, not a transliterator. ADR 0004 keeps golang.org/x/text out of
-// the core, so what is covered is Latin-1 Supplement and Latin Extended-A --
-// every language written in a Latin alphabet -- and a rune outside it is
-// dropped rather than guessed at. Greek, Cyrillic and CJK come out empty, and a
-// caller that slugs a title in one of those has to carry its own key.
+// It is a table, not a transliterator: what it covers is Latin-1 Supplement and
+// Latin Extended-A -- every language written in a Latin alphabet -- and a rune
+// outside it is dropped rather than guessed at. Greek, Cyrillic and CJK come
+// out empty, and a caller that slugs a title in one of those has to carry its
+// own key.
 func ASCII(s string) string {
 	if isASCII(s) {
 		return s

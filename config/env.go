@@ -14,7 +14,7 @@ import (
 // four conversions. A second copy of "read an int, fall back on nonsense" is
 // how two settings end up disagreeing about what an empty value means.
 //
-// All of them read the environment [Load] has already populated from .env, so
+// All of them read the environment [Load] has already populated from.env, so
 // none of them are correct before Load has run.
 
 // String returns the value of key, or fallback when it is unset or empty.
@@ -52,7 +52,7 @@ func MustString(key string) string {
 // unset, empty or not one of the accepted spellings.
 //
 // The accepted spellings are 1/true/yes/on and 0/false/no/off, in any case,
-// because all six appear in .env files people have already written. Anything
+// because all six appear in.env files people have already written. Anything
 // else falls back instead of failing: a boolean is never the setting worth
 // refusing to boot over, and Validate is where a combination that matters is
 // refused.

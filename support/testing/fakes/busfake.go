@@ -5,57 +5,54 @@ import (
 	"sync"
 )
 
-// QueueingDispatcher is the little of
-// Illuminate\Contracts\Bus\QueueingDispatcher that a BusFake needs from the
-// dispatcher it stands in for.
+// QueueingDispatcher is what a [BusFake] needs from the dispatcher it stands
+// in for.
 //
-// A fake only reaches for it when Except named a job that must be dispatched
-// for real, or when a caller asks it about a handler; a fake built with a nil
-// dispatcher and no Except never touches it.
+// A fake only reaches for it when [BusFake.Except] named a job that must be
+// dispatched for real, or when a caller asks it about a handler; a fake built
+// with a nil dispatcher and no Except never touches it.
 type QueueingDispatcher interface {
-	// Dispatch answers Dispatcher::dispatch.
+	// Dispatch sends the command wherever it belongs, queue included.
 	Dispatch(command any) any
-	// DispatchSync answers Dispatcher::dispatchSync.
+	// DispatchSync runs the command in the current process on purpose.
 	DispatchSync(command any, handler any) any
-	// DispatchNow answers Dispatcher::dispatchNow.
+	// DispatchNow runs the command in the current process.
 	DispatchNow(command any, handler any) any
-	// DispatchToQueue answers QueueingDispatcher::dispatchToQueue.
+	// DispatchToQueue puts the command on the queue.
 	DispatchToQueue(command any) any
-	// PipeThrough answers Dispatcher::pipeThrough.
+	// PipeThrough sets the pipes every command passes through.
 	PipeThrough(pipes []any)
-	// HasCommandHandler answers Dispatcher::hasCommandHandler.
+	// HasCommandHandler reports whether a handler is registered for the
+	// command.
 	HasCommandHandler(command any) bool
-	// GetCommandHandler answers Dispatcher::getCommandHandler.
+	// GetCommandHandler returns the handler registered for the command.
 	GetCommandHandler(command any) any
-	// Map answers Dispatcher::map: command class name to handler class name.
+	// Map registers handlers by name, keyed by the command they handle.
 	Map(commands map[string]string)
 }
 
-// ChainedBatch is the little of Illuminate\Bus\ChainedBatch that a chain
-// assertion asks of a chained job: the batch it stands for, so that a truth
-// test can be run against it.
+// ChainedBatch is what a chain assertion asks of a chained job: the batch it
+// stands for, so a truth test can be run against it.
 type ChainedBatch interface {
-	// ToPendingBatch answers ChainedBatch::toPendingBatch.
+	// ToPendingBatch returns the batch the chained job stands for.
 	ToPendingBatch() *PendingBatchFake
 }
 
-// ChainedBatchTruthTest answers
-// Illuminate\Support\Testing\Fakes\ChainedBatchTruthTest: a truth test about a
-// batch that sits inside a chain, which is what BusFake::chainedBatch makes and
-// AssertChained recognises among the links of a chain.
+// ChainedBatchTruthTest is a truth test about a batch sitting inside a chain,
+// which [BusFake.ChainedBatch] makes and [BusFake.AssertChained] recognizes
+// among the links of a chain.
 type ChainedBatchTruthTest struct {
 	callback func(batch *PendingBatchFake) bool
 }
 
-// NewChainedBatchTruthTest answers ChainedBatchTruthTest::__construct.
+// NewChainedBatchTruthTest wraps a callback as a truth test about a chained
+// batch.
 func NewChainedBatchTruthTest(callback func(batch *PendingBatchFake) bool) *ChainedBatchTruthTest {
 	return &ChainedBatchTruthTest{callback: callback}
 }
 
-// Invoke answers ChainedBatchTruthTest::__invoke.
-//
-// PHP calls the object itself; Go has no such thing, so the call has a name,
-// and Invoke is what the language calls it.
+// Invoke runs the truth test against the batch. A nil test accepts every
+// batch.
 func (c *ChainedBatchTruthTest) Invoke(batch *PendingBatchFake) bool {
 	if c == nil || c.callback == nil {
 		return true
@@ -63,7 +60,7 @@ func (c *ChainedBatchTruthTest) Invoke(batch *PendingBatchFake) bool {
 	return c.callback(batch)
 }
 
-// BusFake answers Illuminate\Support\Testing\Fakes\BusFake: the command bus a
+// BusFake is the command bus a
 // test installs so that no job is handled, and every dispatch, chain and batch
 // can be asserted on afterwards.
 //
@@ -72,7 +69,7 @@ func (c *ChainedBatchTruthTest) Invoke(batch *PendingBatchFake) bool {
 // lock is held.
 type BusFake struct {
 	mu sync.Mutex
-	// dispatcher answers BusFake::$dispatcher, public in PHP.
+	// dispatcher is the real dispatcher the fake stands in for.
 	dispatcher            QueueingDispatcher
 	jobsToFake            []any
 	jobsToDispatch        []any
@@ -84,12 +81,10 @@ type BusFake struct {
 	serializeAndRestore   bool
 }
 
-// NewBusFake answers BusFake::__construct.
+// NewBusFake builds a bus that records the named job types and forwards the
+// rest.
 //
-// The PHP takes the batch repository third and defaults it to a
-// BatchRepositoryFake; here the fake repository is always the one, because a
-// bus that records instead of dispatching has nothing to store a batch in for
-// real. A nil dispatcher is the ordinary case.
+// A nil dispatcher is the ordinary case.
 func NewBusFake(dispatcher QueueingDispatcher, jobsToFake ...any) *BusFake {
 	return &BusFake{
 		dispatcher:      dispatcher,
@@ -100,7 +95,7 @@ func NewBusFake(dispatcher QueueingDispatcher, jobsToFake ...any) *BusFake {
 
 func (f *BusFake) isFake() {}
 
-// OriginalDispatcher answers BusFake::$dispatcher, the dispatcher the fake
+// OriginalDispatcher returns the dispatcher the fake
 // stands in for.
 func (f *BusFake) OriginalDispatcher() QueueingDispatcher {
 	f.mu.Lock()
@@ -108,7 +103,7 @@ func (f *BusFake) OriginalDispatcher() QueueingDispatcher {
 	return f.dispatcher
 }
 
-// Except answers BusFake::except: the jobs that should reach the real
+// Except names the jobs that should reach the real
 // dispatcher instead of being recorded.
 func (f *BusFake) Except(jobs ...any) *BusFake {
 	f.mu.Lock()
@@ -117,15 +112,13 @@ func (f *BusFake) Except(jobs ...any) *BusFake {
 	return f
 }
 
-// AssertDispatched answers BusFake::assertDispatched: it fails unless a job of
-// the given type was dispatched, in any of the three ways -- to the queue,
-// synchronously, or after the response -- and the truth test accepted it.
+// AssertDispatched fails the test unless a job of the given type was
+// dispatched, in any of the three ways -- to the queue, synchronously, or
+// after the response -- and the callback accepted it.
 //
-// The type is named the way Go names one, with reflect.TypeFor[ChargeCard]()
-// where the PHP writes ChargeCard::class; a value of the type works too.
-//
-// The callback slot is whatever the PHP accepts there: nil for no truth test,
-// an int to assert a count, or a func(job any) bool.
+// The callback slot accepts nil (any job of the type), an int (an exact
+// count), or a func(job any) bool. Any other form fails the test naming the
+// ones that are accepted.
 func (f *BusFake) AssertDispatched(t TestingT, command any, callback any) {
 	t.Helper()
 
@@ -151,15 +144,15 @@ func (f *BusFake) AssertDispatched(t TestingT, command any, callback any) {
 	)
 }
 
-// AssertDispatchedOnce answers BusFake::assertDispatchedOnce, which the current
-// Laravel has and the clone does not: dispatched exactly once.
+// AssertDispatchedOnce fails the test unless the job was dispatched exactly
+// once.
 func (f *BusFake) AssertDispatchedOnce(t TestingT, command any) {
 	t.Helper()
 	f.AssertDispatchedTimes(t, command, 1)
 }
 
-// AssertDispatchedTimes answers BusFake::assertDispatchedTimes: the three ways
-// of dispatching, counted together.
+// AssertDispatchedTimes fails the test unless the job was dispatched exactly
+// that many times, counting the three ways of dispatching together.
 func (f *BusFake) AssertDispatchedTimes(t TestingT, command any, times int) {
 	t.Helper()
 
@@ -176,7 +169,7 @@ func (f *BusFake) AssertDispatchedTimes(t TestingT, command any, times int) {
 	)
 }
 
-// AssertNotDispatched answers BusFake::assertNotDispatched: in none of the
+// AssertNotDispatched fails the test when the job was dispatched in any of the
 // three ways.
 func (f *BusFake) AssertNotDispatched(t TestingT, command any, callback any) {
 	t.Helper()
@@ -200,9 +193,9 @@ func (f *BusFake) AssertNotDispatched(t TestingT, command any, callback any) {
 	)
 }
 
-// AssertNothingDispatched answers BusFake::assertNothingDispatched, which reads
-// the jobs dispatched to the queue, as the PHP does -- a job dispatched
-// synchronously or after the response is not one of them.
+// AssertNothingDispatched fails the test unless nothing was dispatched to the
+// queue. It reads only that ledger: a job dispatched synchronously or after
+// the response is not one of them.
 func (f *BusFake) AssertNothingDispatched(t TestingT) {
 	t.Helper()
 
@@ -217,8 +210,9 @@ func (f *BusFake) AssertNothingDispatched(t TestingT) {
 	)
 }
 
-// AssertDispatchedSync answers BusFake::assertDispatchedSync: dispatched in the
-// current process on purpose.
+// AssertDispatchedSync fails the test unless the job was dispatched in the
+// current process on purpose. The callback slot takes the same forms as
+// [BusFake.AssertDispatched].
 func (f *BusFake) AssertDispatchedSync(t TestingT, command any, callback any) {
 	t.Helper()
 
@@ -242,7 +236,8 @@ func (f *BusFake) AssertDispatchedSync(t TestingT, command any, callback any) {
 	)
 }
 
-// AssertDispatchedSyncTimes answers BusFake::assertDispatchedSyncTimes.
+// AssertDispatchedSyncTimes fails the test unless the job was dispatched
+// synchronously exactly that many times.
 func (f *BusFake) AssertDispatchedSyncTimes(t TestingT, command any, times int) {
 	t.Helper()
 
@@ -259,7 +254,8 @@ func (f *BusFake) AssertDispatchedSyncTimes(t TestingT, command any, times int) 
 	)
 }
 
-// AssertNotDispatchedSync answers BusFake::assertNotDispatchedSync.
+// AssertNotDispatchedSync fails the test when the job was dispatched
+// synchronously and the callback accepted it.
 func (f *BusFake) AssertNotDispatchedSync(t TestingT, command any, callback any) {
 	t.Helper()
 
@@ -279,8 +275,8 @@ func (f *BusFake) AssertNotDispatchedSync(t TestingT, command any, callback any)
 	)
 }
 
-// AssertDispatchedAfterResponse answers
-// BusFake::assertDispatchedAfterResponse.
+// AssertDispatchedAfterResponse fails the test unless the job was dispatched
+// after the response was sent.
 func (f *BusFake) AssertDispatchedAfterResponse(t TestingT, command any, callback any) {
 	t.Helper()
 
@@ -304,8 +300,8 @@ func (f *BusFake) AssertDispatchedAfterResponse(t TestingT, command any, callbac
 	)
 }
 
-// AssertDispatchedAfterResponseTimes answers
-// BusFake::assertDispatchedAfterResponseTimes.
+// AssertDispatchedAfterResponseTimes fails the test unless the job was
+// dispatched after the response exactly that many times.
 func (f *BusFake) AssertDispatchedAfterResponseTimes(t TestingT, command any, times int) {
 	t.Helper()
 
@@ -322,8 +318,8 @@ func (f *BusFake) AssertDispatchedAfterResponseTimes(t TestingT, command any, ti
 	)
 }
 
-// AssertNotDispatchedAfterResponse answers
-// BusFake::assertNotDispatchedAfterResponse.
+// AssertNotDispatchedAfterResponse fails the test when the job was dispatched
+// after the response and the callback accepted it.
 func (f *BusFake) AssertNotDispatchedAfterResponse(t TestingT, command any, callback any) {
 	t.Helper()
 
@@ -343,18 +339,15 @@ func (f *BusFake) AssertNotDispatchedAfterResponse(t TestingT, command any, call
 	)
 }
 
-// AssertChained answers BusFake::assertChained: the first element of the chain
-// was dispatched, with the rest of it chained behind.
+// AssertChained fails the test unless the first element of the chain was
+// dispatched with the rest of it chained behind.
 //
 // Each element may be a class token, a value, a func(job any) bool truth test,
-// or a ChainedBatchTruthTest, and each is judged on its own, as the PHP judges
-// them. An empty chain asserts that the first job went out with nothing behind
-// it, which is what AssertDispatchedWithoutChain says in one word.
+// or a ChainedBatchTruthTest. An empty chain asserts that the first job went
+// out with nothing behind it, which is what AssertDispatchedWithoutChain says
+// in one word.
 //
-// A truth test in the first slot names no class: the PHP reads the class off
-// the closure's parameter type, and Go cannot look at one at runtime, so the
-// test is asked about every job dispatched and the one it accepts is the one
-// that led the chain. Put a class token first when the class matters.
+// Put a class token first when the class matters.
 func (f *BusFake) AssertChained(t TestingT, expectedChain []any) {
 	t.Helper()
 
@@ -372,10 +365,10 @@ func (f *BusFake) AssertChained(t TestingT, expectedChain []any) {
 	case reflect.Type, string:
 		// The token names the class, and nothing more is asked of the job.
 	case func(job any) bool:
-		// PHP reads the class off the closure's parameter type. Go cannot look
-		// at a parameter type at runtime, so a truth test in the first slot
-		// stands on its own: it is asked about every job dispatched, whatever
-		// its class, and the one it accepts is the one that led the chain.
+		// A parameter type cannot be read at run time, so a truth test in the
+		// first slot stands on its own: it is asked about every job
+		// dispatched, whatever its class, and the one it accepts is the one
+		// that led the chain.
 		token, test = nil, tk
 	case *ChainedBatchTruthTest:
 		token = nil
@@ -384,8 +377,7 @@ func (f *BusFake) AssertChained(t TestingT, expectedChain []any) {
 			return ok && tk.Invoke(batch.ToPendingBatch())
 		}
 	default:
-		// A value stands for itself: the job dispatched has to equal it, which
-		// is the serialize() comparison the PHP makes.
+		// A value stands for itself: the job dispatched has to equal it.
 		want := command
 		test = func(job any) bool { return reflect.DeepEqual(restore(job), restore(want)) }
 	}
@@ -393,7 +385,7 @@ func (f *BusFake) AssertChained(t TestingT, expectedChain []any) {
 	f.assertChainOf(t, "AssertChained", token, rest, test)
 }
 
-// AssertDispatchedWithoutChain answers BusFake::assertDispatchedWithoutChain:
+// AssertDispatchedWithoutChain fails the test unless
 // the job was dispatched, and nothing is chained behind it.
 func (f *BusFake) AssertDispatchedWithoutChain(t TestingT, command any, callback any) {
 	t.Helper()
@@ -452,21 +444,21 @@ func (f *BusFake) assertChainOf(t TestingT, name string, command any, expectedCh
 	)
 }
 
-// AssertNothingChained answers BusFake::assertNothingChained, which is
-// AssertNothingDispatched, as it is there.
+// AssertNothingChained is [BusFake.AssertNothingDispatched]: a chain is
+// recorded on the same ledger.
 func (f *BusFake) AssertNothingChained(t TestingT) {
 	t.Helper()
 	f.AssertNothingDispatched(t)
 }
 
-// ChainedBatch answers BusFake::chainedBatch: a truth test about a batch that
-// sits inside a chain, to be put where a chained job would go.
+// ChainedBatch builds a truth test about a batch sitting inside a chain, to be
+// put where a chained job would go in [BusFake.AssertChained].
 func (f *BusFake) ChainedBatch(callback func(batch *PendingBatchFake) bool) *ChainedBatchTruthTest {
 	return NewChainedBatchTruthTest(callback)
 }
 
-// AssertBatched answers BusFake::assertBatched: a batch the truth test accepted
-// was dispatched.
+// AssertBatched fails the test unless a batch the truth test accepted was
+// dispatched.
 func (f *BusFake) AssertBatched(t TestingT, callback func(batch *PendingBatchFake) bool) {
 	t.Helper()
 
@@ -481,7 +473,8 @@ func (f *BusFake) AssertBatched(t TestingT, callback func(batch *PendingBatchFak
 	)
 }
 
-// AssertBatchCount answers BusFake::assertBatchCount.
+// AssertBatchCount fails the test unless exactly that many batches were
+// dispatched.
 func (f *BusFake) AssertBatchCount(t TestingT, count int) {
 	t.Helper()
 
@@ -496,7 +489,7 @@ func (f *BusFake) AssertBatchCount(t TestingT, count int) {
 	)
 }
 
-// AssertNothingBatched answers BusFake::assertNothingBatched.
+// AssertNothingBatched fails the test unless no batch was dispatched at all.
 func (f *BusFake) AssertNothingBatched(t TestingT) {
 	t.Helper()
 
@@ -511,15 +504,15 @@ func (f *BusFake) AssertNothingBatched(t TestingT) {
 	)
 }
 
-// AssertNothingPlaced answers BusFake::assertNothingPlaced: nothing dispatched,
-// chained or batched.
+// AssertNothingPlaced fails the test unless nothing was dispatched, chained or
+// batched.
 func (f *BusFake) AssertNothingPlaced(t TestingT) {
 	t.Helper()
 	f.AssertNothingDispatched(t)
 	f.AssertNothingBatched(t)
 }
 
-// Dispatched answers BusFake::dispatched: the jobs of the given type that the
+// Dispatched returns the jobs of the given type that the
 // truth test accepted, in the order they were dispatched to the queue.
 func (f *BusFake) Dispatched(command any, callback any) []any {
 	test, ok := jobTest(nil, "Dispatched", callback)
@@ -529,7 +522,8 @@ func (f *BusFake) Dispatched(command any, callback any) []any {
 	return f.matching(f.snapshotCommands(), command, test)
 }
 
-// DispatchedSync answers BusFake::dispatchedSync.
+// DispatchedSync returns the jobs of the given type dispatched synchronously
+// that the truth test accepted, in order.
 func (f *BusFake) DispatchedSync(command any, callback any) []any {
 	test, ok := jobTest(nil, "DispatchedSync", callback)
 	if !ok {
@@ -538,7 +532,8 @@ func (f *BusFake) DispatchedSync(command any, callback any) []any {
 	return f.matching(f.snapshotSync(), command, test)
 }
 
-// DispatchedAfterResponse answers BusFake::dispatchedAfterResponse.
+// DispatchedAfterResponse returns the jobs of the given type dispatched after
+// the response that the truth test accepted, in order.
 func (f *BusFake) DispatchedAfterResponse(command any, callback any) []any {
 	test, ok := jobTest(nil, "DispatchedAfterResponse", callback)
 	if !ok {
@@ -547,7 +542,8 @@ func (f *BusFake) DispatchedAfterResponse(command any, callback any) []any {
 	return f.matching(f.snapshotAfterResponse(), command, test)
 }
 
-// Batched answers BusFake::batched: the batches the truth test accepted.
+// Batched returns the batches the truth test accepted, in the order they were
+// dispatched.
 func (f *BusFake) Batched(callback func(batch *PendingBatchFake) bool) []*PendingBatchFake {
 	batches := f.DispatchedBatches()
 	if len(batches) == 0 {
@@ -564,22 +560,25 @@ func (f *BusFake) Batched(callback func(batch *PendingBatchFake) bool) []*Pendin
 	return found
 }
 
-// HasDispatched answers BusFake::hasDispatched.
+// HasDispatched reports whether a job of the type was dispatched to the queue
+// at all.
 func (f *BusFake) HasDispatched(command any) bool {
 	return len(f.matching(f.snapshotCommands(), command, nil)) > 0
 }
 
-// HasDispatchedSync answers BusFake::hasDispatchedSync.
+// HasDispatchedSync reports whether a job of the type was dispatched
+// synchronously at all.
 func (f *BusFake) HasDispatchedSync(command any) bool {
 	return len(f.matching(f.snapshotSync(), command, nil)) > 0
 }
 
-// HasDispatchedAfterResponse answers BusFake::hasDispatchedAfterResponse.
+// HasDispatchedAfterResponse reports whether a job of the type was dispatched
+// after the response at all.
 func (f *BusFake) HasDispatchedAfterResponse(command any) bool {
 	return len(f.matching(f.snapshotAfterResponse(), command, nil)) > 0
 }
 
-// Dispatch answers BusFake::dispatch: the job is recorded, or handed to the
+// Dispatch records the job, or hands it to the
 // real dispatcher when Except named it.
 func (f *BusFake) Dispatch(command any) any {
 	if !f.shouldFakeJob(command) {
@@ -595,7 +594,8 @@ func (f *BusFake) Dispatch(command any) any {
 	return nil
 }
 
-// DispatchSync answers BusFake::dispatchSync.
+// DispatchSync records the job on the synchronous ledger, or hands it to the
+// real dispatcher when the fake was not told to intercept it.
 func (f *BusFake) DispatchSync(command any, handler any) any {
 	if !f.shouldFakeJob(command) {
 		if dispatcher := f.OriginalDispatcher(); dispatcher != nil {
@@ -610,8 +610,7 @@ func (f *BusFake) DispatchSync(command any, handler any) any {
 	return nil
 }
 
-// DispatchNow answers BusFake::dispatchNow, which files under the same ledger
-// as Dispatch, as the PHP does.
+// DispatchNow files the job on the same ledger as [BusFake.DispatchSync].
 func (f *BusFake) DispatchNow(command any, handler any) any {
 	if !f.shouldFakeJob(command) {
 		if dispatcher := f.OriginalDispatcher(); dispatcher != nil {
@@ -626,7 +625,8 @@ func (f *BusFake) DispatchNow(command any, handler any) any {
 	return nil
 }
 
-// DispatchToQueue answers BusFake::dispatchToQueue.
+// DispatchToQueue records the job on the queue ledger, or hands it to the real
+// dispatcher when the fake was not told to intercept it.
 func (f *BusFake) DispatchToQueue(command any) any {
 	if !f.shouldFakeJob(command) {
 		if dispatcher := f.OriginalDispatcher(); dispatcher != nil {
@@ -641,11 +641,7 @@ func (f *BusFake) DispatchToQueue(command any) any {
 	return nil
 }
 
-// DispatchAfterResponse answers BusFake::dispatchAfterResponse.
-//
-// A job that is not faked goes through the real dispatcher's Dispatch, not
-// through an after-response path: that is what the PHP does, and it is why a
-// job sent to the real bus by Except arrives before the response there too.
+// DispatchAfterResponse records the job on the after-response ledger.
 func (f *BusFake) DispatchAfterResponse(command any) any {
 	if !f.shouldFakeJob(command) {
 		if dispatcher := f.OriginalDispatcher(); dispatcher != nil {
@@ -660,8 +656,8 @@ func (f *BusFake) DispatchAfterResponse(command any) any {
 	return nil
 }
 
-// Chain answers BusFake::chain: a chain of jobs that records instead of going
-// out when it is dispatched.
+// Chain begins a chain of jobs that records instead of going out when it is
+// dispatched.
 func (f *BusFake) Chain(jobs []any) *PendingChainFake {
 	if len(jobs) == 0 {
 		return NewPendingChainFake(f, nil, nil)
@@ -669,8 +665,8 @@ func (f *BusFake) Chain(jobs []any) *PendingChainFake {
 	return NewPendingChainFake(f, jobs[0], append([]any(nil), jobs[1:]...))
 }
 
-// FindBatch answers BusFake::findBatch: the batch with that id, from the fake
-// repository, or nil when there is none.
+// FindBatch returns the batch with that id from the fake repository, or nil
+// when there is none.
 func (f *BusFake) FindBatch(batchID string) *BatchFake {
 	f.mu.Lock()
 	repository := f.batchRepository
@@ -678,24 +674,23 @@ func (f *BusFake) FindBatch(batchID string) *BatchFake {
 	return repository.Find(batchID)
 }
 
-// Batch answers BusFake::batch: a batch of jobs that records instead of being
-// stored when it is dispatched.
+// Batch begins a batch of jobs that records instead of being stored when it is
+// dispatched.
 func (f *BusFake) Batch(jobs []any) *PendingBatchFake {
 	return NewPendingBatchFake(f, append([]any(nil), jobs...))
 }
 
-// DispatchFakeBatch answers BusFake::dispatchFakeBatch: an empty batch under
-// the given name, dispatched, so that a test that needs a batch to hand to
-// something has one.
+// DispatchFakeBatch dispatches an empty batch under the given name, so a test
+// that needs a batch to hand to something has one.
 func (f *BusFake) DispatchFakeBatch(name string) *BatchFake {
 	batch := f.Batch(nil)
 	batch.Name = name
 	return batch.Dispatch()
 }
 
-// RecordPendingBatch answers BusFake::recordPendingBatch: the batch is
-// remembered for AssertBatched, and stored in the fake repository, which is
-// what hands back the BatchFake the caller gets.
+// RecordPendingBatch remembers the batch for [BusFake.AssertBatched] and
+// stores it in the fake repository, which is what makes the [BatchFake] the
+// caller gets.
 func (f *BusFake) RecordPendingBatch(batch *PendingBatchFake) *BatchFake {
 	f.mu.Lock()
 	f.batches = append(f.batches, batch)
@@ -705,11 +700,10 @@ func (f *BusFake) RecordPendingBatch(batch *PendingBatchFake) *BatchFake {
 	return repository.Store(batch)
 }
 
-// shouldFakeJob answers BusFake::shouldFakeJob.
+// shouldFakeJob reports whether the job is recorded rather than forwarded.
 //
-// A fake built without a list of jobs to fake fakes everything, which is what
-// an empty $jobsToFake means; Except wins over it. A token may be a class, or a
-// func(job any) bool, which is the Closure form.
+// A fake built without a list of jobs to fake fakes everything. A token may be
+// a class, or a func(job any) bool, which is the Closure form.
 func (f *BusFake) shouldFakeJob(command any) bool {
 	f.mu.Lock()
 	toFake := append([]any(nil), f.jobsToFake...)
@@ -740,7 +734,7 @@ func matchesJobToken(tokens []any, command any) bool {
 	return false
 }
 
-// SerializeAndRestore answers BusFake::serializeAndRestore: whether a job is
+// SerializeAndRestore says whether a job is
 // put through the round trip the queue would put it through before it is
 // recorded.
 func (f *BusFake) SerializeAndRestore(serializeAndRestore bool) *BusFake {
@@ -750,8 +744,10 @@ func (f *BusFake) SerializeAndRestore(serializeAndRestore bool) *BusFake {
 	return f
 }
 
-// representationLocked answers BusFake::getCommandRepresentation. The caller
-// holds the lock.
+// representationLocked returns the form a job is recorded in, put through the
+// queue's round trip when [BusFake.SerializeAndRestore] asked for that.
+//
+// The caller holds the lock.
 func (f *BusFake) representationLocked(command any) any {
 	if f.serializeAndRestore {
 		return restore(command)
@@ -759,7 +755,8 @@ func (f *BusFake) representationLocked(command any) any {
 	return command
 }
 
-// PipeThrough answers BusFake::pipeThrough, forwarded to the real dispatcher.
+// PipeThrough forwards to the real dispatcher and returns the fake. A fake
+// with no dispatcher drops the call.
 func (f *BusFake) PipeThrough(pipes []any) *BusFake {
 	if dispatcher := f.OriginalDispatcher(); dispatcher != nil {
 		dispatcher.PipeThrough(pipes)
@@ -767,7 +764,8 @@ func (f *BusFake) PipeThrough(pipes []any) *BusFake {
 	return f
 }
 
-// HasCommandHandler answers BusFake::hasCommandHandler, forwarded.
+// HasCommandHandler forwards to the real dispatcher, and returns false when
+// there is none.
 func (f *BusFake) HasCommandHandler(command any) bool {
 	dispatcher := f.OriginalDispatcher()
 	if dispatcher == nil {
@@ -776,7 +774,8 @@ func (f *BusFake) HasCommandHandler(command any) bool {
 	return dispatcher.HasCommandHandler(command)
 }
 
-// GetCommandHandler answers BusFake::getCommandHandler, forwarded.
+// GetCommandHandler forwards to the real dispatcher, and returns nil when
+// there is none.
 func (f *BusFake) GetCommandHandler(command any) any {
 	dispatcher := f.OriginalDispatcher()
 	if dispatcher == nil {
@@ -785,7 +784,8 @@ func (f *BusFake) GetCommandHandler(command any) any {
 	return dispatcher.GetCommandHandler(command)
 }
 
-// Map answers BusFake::map, forwarded: command class name to handler class
+// Map forwards to the real dispatcher and returns the fake: handler names
+// keyed by the command class
 // name.
 func (f *BusFake) Map(commands map[string]string) *BusFake {
 	if dispatcher := f.OriginalDispatcher(); dispatcher != nil {
@@ -794,7 +794,7 @@ func (f *BusFake) Map(commands map[string]string) *BusFake {
 	return f
 }
 
-// DispatchedBatches answers BusFake::dispatchedBatches.
+// DispatchedBatches returns a copy of every batch dispatched, in order.
 func (f *BusFake) DispatchedBatches() []*PendingBatchFake {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -819,8 +819,8 @@ func (f *BusFake) snapshotAfterResponse() []any {
 	return append([]any(nil), f.commandsAfterResponse...)
 }
 
-// matching answers the array lookup PHP does with $this->commands[$command]:
-// the jobs filed under that exact class, then the truth test.
+// matching returns the jobs filed under that exact class and accepted by the
+// truth test.
 func (f *BusFake) matching(records []any, command any, test func(any) bool) []any {
 	var found []any
 	for _, job := range records {
@@ -836,9 +836,9 @@ func (f *BusFake) matching(records []any, command any, test func(any) bool) []an
 }
 
 // everything renders what was dispatched, in all three ways, for a failure
-// message: the PHP says only that the job was not dispatched, and the reader is
-// left to guess whether it went out synchronously, went out after the response,
-// or never went out at all.
+// message. Naming only the job that was missing would leave the reader to
+// guess whether it went out synchronously, went out after the response, or
+// never went out at all.
 func (f *BusFake) everything() string {
 	commands := f.snapshotCommands()
 	sync := f.snapshotSync()

@@ -10,8 +10,8 @@ var (
 	// having its ampersand escaped.
 	entityReference = regexp.MustCompile(`^&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});`)
 
-	// rawInlineTag is an HTML tag written inside a paragraph, which
-	// league/commonmark passes through with its default html_input of allow.
+	// rawInlineTag is an HTML tag written inside a paragraph, which passes
+	// through to the output untouched.
 	rawInlineTag = regexp.MustCompile(`^<(/?[A-Za-z][A-Za-z0-9-]*(\s[^<>]*)?/?|!--.*?--)>`)
 
 	// autolink is the <...> form, which needs a scheme or an email address.

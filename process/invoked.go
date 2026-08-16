@@ -15,12 +15,8 @@ import (
 // InvokedProcess is a command that was started and has not finished being dealt
 // with.
 //
-// It answers to Illuminate\Contracts\Process\InvokedProcess, the contract both
-// Illuminate\Process\InvokedProcess and FakeInvokedProcess implement -- an
-// interface here for the same reason: Start hands back a real process or a
-// faked one and the caller is not supposed to be able to tell.
-//
-// The shape a caller writes is PHP's:
+// It is an interface because Start hands back a real process or a faked one and
+// the caller is not supposed to be able to tell.
 //
 //	invoked, err := factory.Start(ctx, []string{"go", "build", "./..."}, nil)
 //	for invoked.Running() {
@@ -28,46 +24,40 @@ import (
 //	}
 //	result, err := invoked.Wait(nil)
 type InvokedProcess interface {
-	// ID is the process id the operating system gave the program. PHP's id.
+	// ID is the process id the operating system gave the program.
 	ID() int
-	// Signal sends a signal to the program. PHP's signal, which takes the
-	// signal number; Go's own Process.Signal takes an os.Signal and that is
-	// what this takes.
+	// Signal sends a signal to the program.
 	Signal(signal os.Signal) error
-	// Stop asks the program to end, and kills it when it does not. It is the
-	// newer Laravel's InvokedProcess::stop, which the clone predates.
+	// Stop asks the program to end, and kills it when it does not.
 	Stop(timeout time.Duration, signal os.Signal) error
-	// Running reports whether the program is still going. PHP's running.
+	// Running reports whether the program is still going.
 	Running() bool
 	// Output is everything the program has written on standard output so far.
-	// PHP's output.
 	Output() string
-	// ErrorOutput is everything written on standard error so far. PHP's
-	// errorOutput.
+	// ErrorOutput is everything written on standard error so far.
 	ErrorOutput() string
 	// LatestOutput is everything written on standard output since the last
-	// time this was asked. PHP's latestOutput.
+	// time this was asked.
 	LatestOutput() string
-	// LatestErrorOutput is the same for standard error. PHP's
-	// latestErrorOutput.
+	// LatestErrorOutput is the same for standard error.
 	LatestErrorOutput() string
-	// Wait waits for the program to finish. PHP's wait, whose optional output
-	// callable is this handler; pass nil to keep the one Start was given.
+	// Wait waits for the program to finish. The handler takes over from the
+	// one Start was given; pass nil to keep it.
 	Wait(output OutputHandler) (ProcessResult, error)
 }
 
 // stopTimeout is how long Stop waits between asking and killing when the caller
-// named no timeout. It is PHP's default of ten seconds.
+// named no timeout.
 const stopTimeout = 10 * time.Second
 
 // waitDelay bounds how long the wait keeps reading after the program itself has
 // exited.
 //
-// A child that spawned children of its own hands them the same pipes, and those
-// stay open after it dies -- so a wait with no bound is a command that finished
-// and a caller that never returns. Five seconds is long enough that a normal
-// exit never notices and short enough that a stuck one is a hiccup rather than
-// a hang. PHP has no equivalent because Symfony reads the pipes itself.
+// A child that spawned children of its own hands them the same pipes, and
+// those stay open after it dies -- so a wait with no bound is a command that
+// finished and a caller that never returns. Five seconds is long enough that a
+// normal exit never notices and short enough that a stuck one is a hiccup
+// rather than a hang.
 const waitDelay = 5 * time.Second
 
 // invokedProcess is the InvokedProcess of a program that really started.
@@ -105,8 +95,7 @@ type invokedProcess struct {
 
 var _ InvokedProcess = (*invokedProcess)(nil)
 
-// ID is the process id. PHP's id, which returns null before the process exists;
-// this returns 0, which is not a pid on any system this runs on.
+// ID is the process id.
 func (i *invokedProcess) ID() int {
 	if i.cmd.Process == nil {
 		return 0
@@ -114,11 +103,10 @@ func (i *invokedProcess) ID() int {
 	return i.cmd.Process.Pid
 }
 
-// Signal sends a signal to the program. PHP's signal.
+// Signal sends a signal to the program.
 //
-// It carries the platform's rules rather than hiding them: on Windows only Kill
-// is delivered. Signalling a process that has already exited is an error, which
-// is what Symfony does with the same call.
+// It carries the platform's rules rather than hiding them: on Windows only
+// Kill is delivered. Signalling a process that has already exited is an error.
 func (i *invokedProcess) Signal(signal os.Signal) error {
 	if i.cmd.Process == nil {
 		return errors.New("process: signalling a command that was never started")
@@ -131,9 +119,8 @@ func (i *invokedProcess) Signal(signal os.Signal) error {
 
 // Stop asks the program to end and kills it if it has not ended in time.
 //
-// It is the newer Laravel's stop: the signal is sent, and after the timeout the
-// program is killed outright. A zero timeout means ten seconds and a nil signal
-// means SIGTERM, which are PHP's two defaults.
+// The signal is sent, and after the timeout the program is killed outright. A
+// zero timeout means ten seconds and a nil signal means SIGTERM.
 func (i *invokedProcess) Stop(timeout time.Duration, signal os.Signal) error {
 	if !i.Running() {
 		return nil
@@ -161,7 +148,7 @@ func (i *invokedProcess) Stop(timeout time.Duration, signal os.Signal) error {
 	}
 }
 
-// Running reports whether the program is still going. PHP's running.
+// Running reports whether the program is still going.
 //
 // It answers about the moment it was asked -- a program can exit between the
 // answer and the next line -- and it becomes false on its own, without anybody
@@ -175,30 +162,28 @@ func (i *invokedProcess) Running() bool {
 	}
 }
 
-// Output is everything written on standard output so far. PHP's output.
+// Output is everything written on standard output so far.
 func (i *invokedProcess) Output() string { return i.stdout.all() }
 
-// ErrorOutput is everything written on standard error so far. PHP's
-// errorOutput.
+// ErrorOutput is everything written on standard error so far.
 func (i *invokedProcess) ErrorOutput() string { return i.stderr.all() }
 
 // LatestOutput is everything written on standard output since the last call.
-// PHP's latestOutput, which is Symfony's getIncrementalOutput.
 func (i *invokedProcess) LatestOutput() string { return i.stdout.incremental() }
 
-// LatestErrorOutput is the same for standard error. PHP's latestErrorOutput.
+// LatestErrorOutput is the same for standard error.
 func (i *invokedProcess) LatestErrorOutput() string { return i.stderr.incremental() }
 
-// Wait waits for the program to finish and reports what happened. PHP's wait.
+// Wait waits for the program to finish and reports what happened.
 //
 // A handler passed here takes over from the one Start was given, for whatever
 // output has not arrived yet. It can be called more than once and from more
 // than one goroutine: the answer is worked out once and every call gets it.
 //
-// A command that exited non-zero comes back with a nil error, because in
-// Laravel a failed command is a result and not an exception -- ProcessResult.
-// Throw is what turns it into one. The error is for the program that timed out,
-// or whose context the caller cancelled.
+// A command that exited non-zero comes back with a nil error, because a failed
+// command is a result rather than a failure of the call; ProcessResult.Throw is
+// what turns it into one. The error is for the program that timed out, or whose
+// context the caller cancelled.
 func (i *invokedProcess) Wait(output OutputHandler) (ProcessResult, error) {
 	if output != nil {
 		i.sink.mu.Lock()
@@ -230,9 +215,8 @@ func (i *invokedProcess) classify(err error) error {
 	if err == nil {
 		return nil
 	}
-	// The caller gave up first: their cancellation, not our limit, and the
-	// error they get back is the one they can test with errors.Is. PHP has no
-	// counterpart because PHP has no context.
+	// The caller gave up first: their cancellation, not our limit, and the error
+	// they get back is the one they can test with errors.Is.
 	if cause := i.parent.Err(); cause != nil {
 		return fmt.Errorf("process: [%s]: %w", i.command, cause)
 	}
@@ -251,9 +235,8 @@ func (i *invokedProcess) classify(err error) error {
 			Timeout: i.timeout,
 		}
 	}
-	// A non-zero exit is not an error here, and that is Laravel's behaviour
-	// rather than a shortcut: run() does not throw for it, failed() reports it
-	// and throw() is what raises it.
+	// A non-zero exit is not an error here: Failed reports it and Throw is
+	// what raises it.
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
 		return nil
@@ -264,9 +247,7 @@ func (i *invokedProcess) classify(err error) error {
 // watchIdle kills the program when it has gone quiet for too long.
 //
 // The timer is reset on every chunk either stream produces, so a program that
-// prints anything at all is never touched. It is Symfony's idle timeout, which
-// os/exec has no notion of: a context deadline bounds the total, and the total
-// is the one limit a hung download never reaches.
+// prints anything at all is never touched.
 func (i *invokedProcess) watchIdle(silence time.Duration, bump chan struct{}) {
 	timer := time.NewTimer(silence)
 	defer timer.Stop()

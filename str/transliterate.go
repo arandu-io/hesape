@@ -5,23 +5,19 @@ import (
 	"unicode/utf8"
 )
 
-// Transliterate answers for Str::transliterate. It writes the string in ASCII,
-// putting unknown in the place of every rune it has no ASCII spelling for.
+// Transliterate writes the string in ASCII, putting unknown in the place of
+// every rune it has no ASCII spelling for.
 //
 //	Transliterate("Ação", "?", false)  // "Acao"
 //	Transliterate("ⓐⓑⓒ", "?", false)   // "abc"
 //	Transliterate("🎂", "H", false)    // "H"
 //
-// PHP defaults unknown to "?"; Go has no default arguments, so it is required.
-// Pass the empty string to drop what cannot be spelled, which is what ASCII
-// does.
+// The unknown spelling is required, because Go has no default arguments. Pass
+// the empty string to drop what cannot be spelled, which is what ASCII does.
 //
-// Illuminate's $strict switches voku/portable-ascii to the intl transliterator,
-// which knows Greek, Cyrillic and the CJK readings. There is no intl here and
-// ADR 0004 keeps golang.org/x/text out of the core, so strict changes nothing:
-// both modes answer from the tables in this package. It is an argument kept for
-// the shape of the call, and a script outside those tables comes back as
-// unknown either way.
+// strict changes nothing: both modes answer from the tables in this package,
+// and a script outside them -- Greek, Cyrillic, the CJK readings -- comes back
+// as unknown either way.
 func Transliterate(s, unknown string, strict bool) string {
 	_ = strict
 	var b strings.Builder

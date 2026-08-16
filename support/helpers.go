@@ -14,20 +14,16 @@ import (
 	"github.com/arandu-io/hesape/support/deferpkg"
 )
 
-// The helpers of helpers.php whose PHP name carries an underscore keep it. The
-// only change ADR 0044 allows is the initial capital that exports the name, so
-// throw_if is Throw_if: a person searching for what they type in Laravel finds
-// it, which is the whole point of the rule.
-
 // exit is os.Exit behind a name a test can replace, so that Dd and
 // ValidatedInput.Dd can be exercised without taking the test process down.
 var exit = os.Exit
 
-// Append_config answers to the append_config() helper: numeric keys pushed past
-// 9999 so a merge appends them instead of writing over what is there.
+// Append_config renumbers the numeric keys of a map past 9999, so a merge
+// appends them instead of writing over what is already there.
 //
-// A PHP array mixes numeric and string keys; a Go map is keyed by string, so a
-// numeric key is one whose text is a number.
+// A key counts as numeric when its text parses as a number. The numeric keys
+// are renumbered in sorted order and every other key is carried through
+// untouched.
 func Append_config(array map[string]any) map[string]any {
 	start := 9999
 	out := make(map[string]any, len(array))
@@ -47,8 +43,9 @@ func Append_config(array map[string]any) map[string]any {
 	return out
 }
 
-// Blank answers to the blank() helper: nothing there at all. A string of spaces
-// is blank, a number and a bool never are, and an empty list or map is.
+// Blank reports whether there is nothing there at all. A string of spaces is
+// blank, a number and a bool never are, an empty slice, map, array or channel
+// is, and a nil pointer, interface or func is; a pointer is read through.
 func Blank(v any) bool {
 	switch typed := v.(type) {
 	case nil:
@@ -77,12 +74,12 @@ func Blank(v any) bool {
 	}
 }
 
-// Filled answers to the filled() helper.
+// Filled reports whether the value is not [Blank].
 func Filled(v any) bool { return !Blank(v) }
 
-// Class_basename answers to the class_basename() helper: the class name with
-// its namespace off. In Go it is the type name with its package path off, and a
-// pointer is read through, the way the PHP reads an object.
+// Class_basename returns the type name with its package path off. A string is
+// read as the name itself, and a pointer type is read through. An untyped nil
+// gives the empty string.
 func Class_basename(class any) string {
 	name, ok := class.(string)
 	if !ok {
@@ -102,8 +99,8 @@ func Class_basename(class any) string {
 	return name
 }
 
-// htmlEscapes is htmlspecialchars with ENT_QUOTES: the five characters that can
-// end an attribute or open a tag, and nothing else.
+// htmlEscapes rewrites the five characters that can end an attribute or open a
+// tag, and nothing else.
 var htmlEscapes = strings.NewReplacer(
 	"&", "&amp;",
 	"<", "&lt;",
@@ -112,16 +109,16 @@ var htmlEscapes = strings.NewReplacer(
 	"'", "&#039;",
 )
 
-// htmlEscapesKeepingEntities is the same with $doubleEncode false: an ampersand
-// that already opens an entity is left alone.
+// alreadyAnEntity matches an ampersand that already opens an entity, named or
+// numeric, which [E] leaves alone when told not to double-encode.
 var alreadyAnEntity = regexp.MustCompile(`&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);`)
 
-// E answers to the e() helper: the HTML-special characters of a value written
-// as entities, so it cannot escape the attribute it is put in.
+// E writes the HTML-special characters of a value as entities, so it cannot
+// escape the attribute it is put in.
 //
-// An [Htmlable] says its own HTML and is not escaped again, which is what the
-// PHP does with Htmlable. The variadic argument stands for the PHP
-// $doubleEncode, whose default is true.
+// An [Htmlable] states its own markup and is not escaped again. The variadic
+// argument is whether to double-encode and defaults to true; false leaves an
+// ampersand that already opens an entity alone.
 func E(v any, doubleEncode ...bool) string {
 	if htmlable, ok := v.(Htmlable); ok {
 		return htmlable.ToHtml()
@@ -147,18 +144,18 @@ func E(v any, doubleEncode ...bool) string {
 	return b.String()
 }
 
-// Laravel_cloud answers to the laravel_cloud() helper: whether the application
-// is running on Laravel Cloud, which is one environment variable set to "1".
+// Laravel_cloud reports whether the hosting platform of that name is running
+// this process, which it marks with an environment variable set to "1".
 func Laravel_cloud() bool {
 	return os.Getenv("LARAVEL_CLOUD") == "1"
 }
 
-// Object_get answers to the object_get() helper: a value read out of a struct
-// by dotted key. An empty key gives the object itself, and a missing name gives
-// the default.
+// Object_get reads a value out of a struct or a map by dotted key. An empty
+// key gives the object itself, and a name that cannot be reached gives the
+// optional default, which is nil when not given.
 //
-// The PHP reads a property; Go reads an exported field of a struct, or a key of
-// a map, which is what a PHP property access reaches.
+// Each segment reads an exported struct field or a map key, through
+// [Optional], so a nil anywhere along the path stops the walk.
 func Object_get(object any, key string, def ...any) any {
 	if strings.TrimSpace(key) == "" {
 		return object
@@ -174,11 +171,11 @@ func Object_get(object any, key string, def ...any) any {
 	return current
 }
 
-// Preg_replace_array answers to the preg_replace_array() helper: each match of
-// the pattern replaced by the next value of the list, in order.
+// Preg_replace_array replaces each match of the pattern with the next value of
+// the list, in order. A match past the end of the list is replaced with
+// nothing, and a pattern that will not compile leaves the subject alone.
 //
-// The pattern is a Go regular expression, not a PCRE one; the PHP delimiters
-// are not part of it.
+// The pattern is a Go regular expression, carrying no delimiters.
 func Preg_replace_array(pattern string, replacements []string, subject string) string {
 	expression, err := regexp.Compile(pattern)
 	if err != nil {
@@ -195,13 +192,16 @@ func Preg_replace_array(pattern string, replacements []string, subject string) s
 	})
 }
 
-// Retry answers to the retry() helper: run the callback again while it fails,
-// up to the given number of attempts.
+// Retry runs the callback again while it fails, up to the given number of
+// attempts, and returns the last error when the attempts run out.
 //
-// The PHP takes an int or an array of backoff milliseconds for $times, and an
-// int or a Closure for $sleepMilliseconds; so does this. The variadic argument
-// stands for $sleepMilliseconds and $when, in that order, whose defaults are 0
-// and null. The PHP rethrows the last error, so this returns (any, error).
+// times is an int count of attempts, or a []int of backoff milliseconds, one
+// per retry. The variadic argument is the pause between attempts and the test
+// that decides whether to retry, in that order: the pause is an int of
+// milliseconds, a func() int or a func(attempt int, err error) int, and
+// defaults to none; the test is a func(err error) bool, and by default every
+// error is retried. The pause goes through [Usleep], so a test that called
+// [Fake] captures it instead of serving it.
 func Retry(times any, callback func(attempt int) (any, error), options ...any) (any, error) {
 	var backoff []int
 	remaining := 0
@@ -253,12 +253,8 @@ func Retry(times any, callback func(attempt int) (any, error), options ...any) (
 	}
 }
 
-// Tap answers to the tap() helper: hand the value to the callback, then hand
-// the value back.
-//
-// The PHP is generic over mixed; this is generic over T. A null callback gives
-// back a HigherOrderTapProxy there, which is __call and has no Go counterpart,
-// so a nil callback here simply returns the value.
+// Tap hands the value to the callback, then hands the value back. A nil
+// callback returns the value untouched.
 func Tap[T any](v T, callback func(T)) T {
 	if callback != nil {
 		callback(v)
@@ -266,9 +262,8 @@ func Tap[T any](v T, callback func(T)) T {
 	return v
 }
 
-// Throw_if answers to the throw_if() helper. The PHP throws; Go has no
-// exceptions, so this hands the error back when the condition holds and nil
-// when it does not.
+// Throw_if returns the error when the condition holds, and nil when it does
+// not.
 func Throw_if(condition bool, err error) error {
 	if condition {
 		return err
@@ -276,16 +271,15 @@ func Throw_if(condition bool, err error) error {
 	return nil
 }
 
-// Throw_unless answers to the throw_unless() helper. See [Throw_if] on the
-// returned error.
+// Throw_unless returns the error when the condition does not hold, and nil
+// when it does.
 func Throw_unless(condition bool, err error) error {
 	return Throw_if(!condition, err)
 }
 
-// Transform answers to the transform() helper: the callback's value when the
-// value is filled, and the default when it is blank.
-//
-// The variadic argument stands for the PHP $default, which is null.
+// Transform returns the callback's result when the value is [Filled], and the
+// optional default when it is [Blank]. With no default, a blank value gives
+// the zero R.
 func Transform[T, R any](v T, callback func(T) R, def ...R) R {
 	if Filled(any(v)) {
 		return callback(v)
@@ -294,22 +288,17 @@ func Transform[T, R any](v T, callback func(T) R, def ...R) R {
 	return firstOr(def, zero)
 }
 
-// Windows_os answers to the windows_os() helper.
+// Windows_os reports whether the process is running on Windows.
 func Windows_os() bool { return runtime.GOOS == "windows" }
 
-// With answers to the with() helper: the value passed through the callback.
-//
-// The PHP hands back the value untouched when $callback is null; in Go that is
-// the value itself, with nothing to call, so the callback is required.
+// With returns the value passed through the callback. The callback is
+// required: a value passed through nothing is the value itself.
 func With[T, R any](v T, callback func(T) R) R { return callback(v) }
 
-// Dump answers to the dump() call the Dumpable trait makes, and to
-// Dumpable::dump: write the values out where the process can see them, then
-// hand the first one back.
+// Dump writes the values to standard error with %#v, one per line, and returns
+// the first of them; with no value it returns nil.
 //
-// The PHP uses Symfony's VarDumper; the standard library has no such thing, so
-// this writes Go's own %#v to standard error, which is where a dump belongs
-// when standard output is the response.
+// Standard error is where a dump belongs when standard output is the response.
 func Dump(values ...any) any {
 	for _, v := range values {
 		fmt.Fprintf(os.Stderr, "%#v\n", v)
@@ -320,29 +309,24 @@ func Dump(values ...any) any {
 	return values[0]
 }
 
-// Dd answers to Dumpable::dd: dump the values and end the process.
+// Dd dumps the values and ends the process with status 1.
 func Dd(values ...any) {
 	Dump(values...)
 	exit(1)
 }
 
-// Application answers to the part of
-// Illuminate\Contracts\Foundation\Application that Localizable::withLocale
-// touches. The PHP reaches it through the container, which ADR 0001 rejected,
-// so the caller hands it in.
+// Application is the part of the running application that [WithLocale]
+// touches. Nothing is resolved from a registry, so the caller hands it in.
 type Application interface {
-	// GetLocale answers to Application::getLocale.
+	// GetLocale returns the locale the application is running under.
 	GetLocale() string
-	// SetLocale answers to Application::setLocale.
+	// SetLocale sets the locale the application runs under.
 	SetLocale(locale string)
 }
 
-// WithLocale answers to Localizable::withLocale: run the callback under the
-// given locale and put the old one back afterwards, whatever happens.
-//
-// An empty locale stands for the PHP falsy locale and runs the callback as it
-// is. The application is the first argument because the PHP reads it off the
-// container.
+// WithLocale runs the callback under the given locale and puts the old one
+// back afterwards, whatever happens. An empty locale, or a nil application,
+// runs the callback as it stands.
 func WithLocale(app Application, locale string, callback func() any) any {
 	if locale == "" || app == nil {
 		return callback()
@@ -353,8 +337,8 @@ func WithLocale(app Application, locale string, callback func() any) any {
 	return callback()
 }
 
-// ErrBadMethodCall answers to the BadMethodCallException that
-// ForwardsCalls::throwBadMethodCallException raises.
+// ErrBadMethodCall is returned when a call is forwarded to a method the target
+// does not carry.
 type ErrBadMethodCall struct {
 	// Class is the type the call was forwarded to.
 	Class string
@@ -362,24 +346,23 @@ type ErrBadMethodCall struct {
 	Method string
 }
 
-// Error writes the PHP message: Call to undefined method Class::method().
+// Error names the type the call was forwarded to and the method called on it.
 func (e *ErrBadMethodCall) Error() string {
 	return fmt.Sprintf("Call to undefined method %s::%s()", e.Class, e.Method)
 }
 
-// ThrowBadMethodCallException answers to the protected static
-// ForwardsCalls::throwBadMethodCallException. The PHP throws, so this builds
-// the error and hands it back.
+// ThrowBadMethodCallException builds an [ErrBadMethodCall] naming the object's
+// type and the method, and returns it.
 func ThrowBadMethodCallException(object any, method string) error {
 	return &ErrBadMethodCall{Class: Class_basename(object), Method: method}
 }
 
-// ForwardCallTo answers to the protected ForwardsCalls::forwardCallTo: call the
-// named method on the object and give back what it returned.
+// ForwardCallTo calls the named method on the object through reflection and
+// returns what it returned, one entry per result.
 //
-// The PHP forwards through __call, which Go has no counterpart for, so the call
-// is made through reflection. A method the object does not carry is
-// [ErrBadMethodCall], which is the BadMethodCallException the PHP throws.
+// A method the object does not carry, and a non-variadic method handed the
+// wrong number of arguments, are both [ErrBadMethodCall]. A nil argument is
+// passed as the zero value of the parameter it lands on.
 func ForwardCallTo(object any, method string, parameters ...any) ([]any, error) {
 	rv := reflect.ValueOf(object)
 	if !rv.IsValid() {
@@ -413,9 +396,9 @@ func ForwardCallTo(object any, method string, parameters ...any) ([]any, error) 
 	return out, nil
 }
 
-// ForwardDecoratedCallTo answers to the protected
-// ForwardsCalls::forwardDecoratedCallTo: the same call, except that an object
-// handing itself back becomes the decorator handing itself back.
+// ForwardDecoratedCallTo is [ForwardCallTo] with one change: a result that is
+// the object itself comes back as the decorator, so a chained call keeps
+// returning the decorator.
 func ForwardDecoratedCallTo(decorator, object any, method string, parameters ...any) ([]any, error) {
 	returned, err := ForwardCallTo(object, method, parameters...)
 	if err != nil {
@@ -434,12 +417,9 @@ var (
 	deferredCollection *deferpkg.DeferredCallbackCollection
 )
 
-// DeferredCallbackCollection answers to the
-// app(DeferredCallbackCollection::class) the defer() helper resolves: the one
-// collection every deferred callback of this process lands in.
-//
-// The PHP reads it off the container, which ADR 0001 rejected; here it is the
-// package's own, built once.
+// DeferredCallbackCollection returns the one collection every deferred
+// callback of this process lands in, building it on first use. Nothing is
+// resolved from a registry: the collection is this package's own.
 func DeferredCallbackCollection() *deferpkg.DeferredCallbackCollection {
 	deferredMu.Lock()
 	defer deferredMu.Unlock()
@@ -449,14 +429,12 @@ func DeferredCallbackCollection() *deferpkg.DeferredCallbackCollection {
 	return deferredCollection
 }
 
-// Defer answers to the defer() function of functions.php: put the callback off
-// until the response has been sent, and hand back the handle it can be called
-// off by.
+// Defer puts the callback off until the response has been sent, and returns
+// the handle it can be called off by.
 //
-// The variadic argument stands for the PHP $name and $always, in that order,
-// whose defaults are null and false. The PHP also answers the collection itself
-// when $callback is null; that is [DeferredCallbackCollection], because Go
-// cannot return two types from one call.
+// The variadic argument is the name and then the always flag, defaulting to an
+// empty name and false; an empty name is filled with a random one. To reach
+// the collection itself, call [DeferredCallbackCollection].
 func Defer(callback func(), options ...any) *deferpkg.DeferredCallback {
 	name := ""
 	if len(options) > 0 {

@@ -200,7 +200,7 @@ func TestViewAssertViewHas(t *testing.T) {
 	rendered.AssertViewHas("title", "Receipts")
 	fake.assertFailed(t)
 
-	// A dotted path walks into the bound data, which is Arr::get in the PHP.
+	// A dotted path walks into the bound data.
 	rendered, fake = testViewRendered(t, testViewPageName)
 	rendered.AssertViewHas("user.name", "Alice")
 	fake.assertPassed(t)
@@ -241,7 +241,7 @@ func TestViewAssertViewHasAll(t *testing.T) {
 	rendered.AssertViewHasAll(map[string]any{"title": "Invoices", "count": 9})
 	fake.assertFailed(t)
 
-	// The names alone are the PHP's int-keyed entries.
+	// A list of names alone asserts only that each key is bound.
 	rendered, fake = testViewRendered(t, testViewPageName)
 	rendered.AssertViewHasAll([]string{"title", "count", "user"})
 	fake.assertPassed(t)

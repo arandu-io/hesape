@@ -7,8 +7,8 @@ import (
 	"strings"
 )
 
-// countError is the InvalidArgumentException Arr::random throws when more items
-// are asked for than the array holds.
+// countError is returned by [Random] when more items are asked for than the
+// list holds.
 type countError struct {
 	requested int
 	available int
@@ -18,11 +18,11 @@ func (e *countError) Error() string {
 	return fmt.Sprintf("you requested %d items, but there are only %d items available", e.requested, e.available)
 }
 
-// Query answers to Arr::query: the array as an RFC 3986 query string, nested
-// values written as key[sub]=value the way http_build_query writes them.
+// Query renders the map as an RFC 3986 query string, writing nested values as
+// key[sub]=value and nested lists by index. A nil value is dropped.
 //
-// PHP keeps the array's insertion order; a Go map has none, so the keys are
-// sorted and the string is the same on every run.
+// A map has no order of its own, so the keys are sorted and the string is the
+// same on every run.
 func Query(array map[string]any) string {
 	pairs := queryPairs("", array)
 	return strings.Join(pairs, "&")
@@ -59,8 +59,8 @@ func childKey(prefix, key string) string {
 	return prefix + "[" + key + "]"
 }
 
-// rawURLEncode is PHP's rawurlencode: everything outside the RFC 3986
-// unreserved set becomes a percent-triplet, and a space is %20, never a plus.
+// rawURLEncode percent-encodes everything outside the RFC 3986 unreserved set.
+// A space becomes %20, never a plus.
 func rawURLEncode(s string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); i++ {
@@ -76,8 +76,9 @@ func rawURLEncode(s string) string {
 	return b.String()
 }
 
-// toKey renders a value the way PHP renders it inside a query string or as an
-// array key: true is 1, false is 0, and a float keeps no trailing zeros.
+// toKey renders a value for use inside a query string, or as a map key: nil is
+// the empty string, true is 1, false is 0, and a float keeps no trailing
+// zeros.
 func toKey(v any) string {
 	switch value := v.(type) {
 	case nil:
@@ -98,18 +99,18 @@ func toKey(v any) string {
 	}
 }
 
-// ToCssClasses answers to Arr::toCssClasses: a class list built out of plain
-// classes and conditional ones.
+// ToCssClasses builds a class list out of plain classes and conditional ones.
 //
 // A string element is always kept; a map[string]bool element keeps the keys
-// whose condition is true, sorted, since a Go map has no order. That pair of
-// element shapes is the PHP array that mixes numeric and string keys.
+// whose condition is true, sorted, since a map has no order of its own. Any
+// other element is dropped.
 func ToCssClasses(array any) string {
 	return strings.Join(conditionalList(array, ""), " ")
 }
 
-// ToCssStyles answers to Arr::toCssStyles: a style list built out of plain
-// styles and conditional ones, every entry finished with a semicolon.
+// ToCssStyles builds a style list out of plain styles and conditional ones,
+// every entry finished with a semicolon. The elements are read as
+// [ToCssClasses] reads them.
 func ToCssStyles(array any) string {
 	return strings.Join(conditionalList(array, ";"), " ")
 }
@@ -136,8 +137,8 @@ func conditionalList(array any, suffix string) []string {
 	return entries
 }
 
-// finish is Str::finish, kept private because the string package already owns
-// the public spelling.
+// finish appends cap to s unless s already ends with it. It is kept private
+// because the string package owns the exported spelling.
 func finish(s, cap string) string {
 	if cap == "" || strings.HasSuffix(s, cap) {
 		return s
@@ -145,8 +146,8 @@ func finish(s, cap string) string {
 	return s + cap
 }
 
-// compareValues orders two values the way PHP's SORT_REGULAR does: numbers
-// against numbers, strings against strings, and anything else by its rendering.
+// compareValues orders two values: numbers against numbers, and anything else
+// by its rendering.
 func compareValues(a, b any) int {
 	an, aok := asFloat(a)
 	bn, bok := asFloat(b)

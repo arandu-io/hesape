@@ -6,19 +6,17 @@ import (
 	"github.com/arandu-io/hesape/support/arr"
 )
 
-// ValidatedInput answers to Illuminate\Support\ValidatedInput: what
-// $request->validate() hands back, which is the input that passed the rules and
-// nothing else.
+// ValidatedInput carries the input that passed validation, and nothing else.
 //
-// The typed readers of Illuminate\Support\Traits\InteractsWithData -- String,
-// Integer, Float, Boolean, Array, Date, Only, Except, Collect, Has, Missing --
-// are promoted from the embedded trait, exactly as the PHP class gets them.
+// The typed readers of the embedded data source -- String, Integer, Float,
+// Boolean, Array, Date, Only, Except, Collect, Has, Missing -- read that
+// input.
 type ValidatedInput struct {
 	dataSource
 	input map[string]any
 }
 
-// NewValidatedInput answers to ValidatedInput::__construct.
+// NewValidatedInput builds a ValidatedInput over a copy of the given input.
 func NewValidatedInput(input map[string]any) *ValidatedInput {
 	v := &ValidatedInput{input: map[string]any{}}
 	for key, held := range input {
@@ -31,8 +29,8 @@ func NewValidatedInput(input map[string]any) *ValidatedInput {
 	return v
 }
 
-// Merge answers to ValidatedInput::merge: a new instance carrying this input
-// with the given items written over it.
+// Merge returns a new ValidatedInput carrying this input with the given items
+// written over it. The receiver is left alone.
 func (v *ValidatedInput) Merge(items map[string]any) *ValidatedInput {
 	merged := v.All()
 	for key, held := range items {
@@ -41,8 +39,8 @@ func (v *ValidatedInput) Merge(items map[string]any) *ValidatedInput {
 	return NewValidatedInput(merged)
 }
 
-// All answers to ValidatedInput::all. With no key it is the whole input; with
-// keys it is the subset under them, read by dotted key.
+// All returns the whole input when given no key, and the subset under the
+// given dotted keys otherwise.
 func (v *ValidatedInput) All(keys ...string) map[string]any {
 	if len(keys) == 0 {
 		out := make(map[string]any, len(v.input))
@@ -58,10 +56,8 @@ func (v *ValidatedInput) All(keys ...string) map[string]any {
 	return results
 }
 
-// Keys answers to ValidatedInput::keys.
-//
-// A PHP array keeps insertion order and a Go map has none, so the keys come
-// back sorted, which is the only order a map can promise.
+// Keys returns the top-level keys, sorted. A map has no order of its own, so
+// sorted is the only order that can be promised.
 func (v *ValidatedInput) Keys() []string {
 	keys := make([]string, 0, len(v.input))
 	for key := range v.input {
@@ -71,21 +67,17 @@ func (v *ValidatedInput) Keys() []string {
 	return keys
 }
 
-// Input answers to ValidatedInput::input: one item by dotted key. The variadic
-// argument stands for the PHP $default, which is null; an empty key stands for
-// the PHP null key and gives back everything.
+// Input returns one item by dotted key, falling back to the optional default,
+// which is nil when not given. An empty key returns everything.
 func (v *ValidatedInput) Input(key string, def ...any) any {
 	return arr.Get(v.All(), key, firstOr(def, nil))
 }
 
-// ToArray answers to ValidatedInput::toArray.
+// ToArray returns a copy of the whole input.
 func (v *ValidatedInput) ToArray() map[string]any { return v.All() }
 
-// Dump answers to ValidatedInput::dump: write the input out where the process
-// can see it. With keys it is only those.
-//
-// The PHP uses Symfony's VarDumper; there is no such thing in the standard
-// library, so this is [Dump], which writes to standard error.
+// Dump writes the input to standard error through [Dump] and returns the
+// ValidatedInput. Given keys, only those are written.
 func (v *ValidatedInput) Dump(keys ...string) *ValidatedInput {
 	if len(keys) > 0 {
 		Dump(v.Only(keys...))
@@ -95,7 +87,7 @@ func (v *ValidatedInput) Dump(keys ...string) *ValidatedInput {
 	return v
 }
 
-// Dd answers to ValidatedInput::dd: dump, then end the process with status 1.
+// Dd dumps, then ends the process with status 1.
 func (v *ValidatedInput) Dd(keys ...string) {
 	v.Dump(keys...)
 	exit(1)

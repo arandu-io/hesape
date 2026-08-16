@@ -2,27 +2,23 @@ package support
 
 import "reflect"
 
-// Optional answers to Illuminate\Support\Optional: a wrapper that answers nil
-// for anything the value underneath does not have, instead of blowing up.
+// Optional wraps a value and hands back nil for anything that value does not
+// have, so a caller reading into it does not have to check at every step.
 //
-// In PHP the whole class is magic methods -- __get, __isset, __call and the
-// four ArrayAccess offsets. Go has neither property access nor dynamic calls,
-// so each one is a method here, named after the PHP method it answers to.
+// A nil Optional, and one wrapping nil, read the same: every lookup is nil.
 type Optional struct {
 	value any
 }
 
-// NewOptional answers to Optional::__construct, and to the optional() helper of
-// helpers.php.
+// NewOptional wraps a value, which may be nil.
 func NewOptional(value any) *Optional { return &Optional{value: value} }
 
-// Value hands back the value being wrapped. The PHP reads the protected
-// property directly, which Go cannot do from outside the package.
+// Value returns the value being wrapped.
 func (o *Optional) Value() any { return o.value }
 
-// Get answers to Optional::__get: a property of the value underneath, or nil.
-// A map is read by key and a struct by field name, both of which are what a
-// PHP property access reaches.
+// Get returns the member of the value underneath named by key, or nil. A map
+// is read by key and a struct by exported field name, with pointers followed;
+// anything else is nil.
 func (o *Optional) Get(key string) any {
 	if o == nil || o.value == nil {
 		return nil
@@ -55,12 +51,11 @@ func (o *Optional) Get(key string) any {
 	}
 }
 
-// IsSet answers to Optional::__isset: whether the value underneath carries the
-// name at all.
+// IsSet reports whether [Optional.Get] finds anything non-nil under the key.
 func (o *Optional) IsSet(key string) bool { return o.Get(key) != nil }
 
-// OffsetExists answers to Optional::offsetExists: whether the value is
-// accessible as an array and holds the key.
+// OffsetExists reports whether the value underneath is a map[string]any that
+// holds the key.
 func (o *Optional) OffsetExists(key string) bool {
 	if o == nil || o.value == nil {
 		return false
@@ -73,18 +68,19 @@ func (o *Optional) OffsetExists(key string) bool {
 	return exists
 }
 
-// OffsetGet answers to Optional::offsetGet.
+// OffsetGet returns the value under the key, the same as [Optional.Get].
 func (o *Optional) OffsetGet(key string) any { return o.Get(key) }
 
-// OffsetSet answers to Optional::offsetSet: a write that happens only when the
-// value underneath is accessible as an array, and is dropped otherwise.
+// OffsetSet writes under the key, but only when the value underneath is a
+// map[string]any. Any other value drops the write.
 func (o *Optional) OffsetSet(key string, v any) {
 	if m, ok := o.value.(map[string]any); ok {
 		m[key] = v
 	}
 }
 
-// OffsetUnset answers to Optional::offsetUnset.
+// OffsetUnset deletes the key, but only when the value underneath is a
+// map[string]any. Any other value drops the call.
 func (o *Optional) OffsetUnset(key string) {
 	if m, ok := o.value.(map[string]any); ok {
 		delete(m, key)

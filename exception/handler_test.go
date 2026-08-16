@@ -125,8 +125,7 @@ func TestHTMXGetsAPageAndNotJSON(t *testing.T) {
 // different news.
 //
 // It goes through Report and not through Render, because Render no longer
-// reports: the two are the two halves the caller calls, which is what the PHP's
-// kernel does.
+// reports: the two are the two halves the caller calls.
 func TestDontReportSilencesOnlyWhatItNames(t *testing.T) {
 	quiet := errors.New("the client hung up")
 

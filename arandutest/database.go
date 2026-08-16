@@ -30,10 +30,6 @@ type Match map[string]any
 //		"email":  "alice@example.com",
 //	})
 //
-// This is Laravel's assertDatabaseHas, and it is the first helper anybody
-// misses: a handler test that only reads the response proves the page said it
-// worked, which is exactly what a handler that forgot to commit also says.
-//
 // It reads the table directly, with no auth.Grant, and that is the point rather
 // than an oversight (see the package comment): it checks what the
 // Grant-protected path wrote, so it cannot be that path. It is also why the
@@ -71,9 +67,9 @@ func AssertDatabaseMissing(t *testing.T, ctx context.Context, db *database.DB, t
 // AssertDatabaseCount fails unless the table holds exactly that many rows.
 //
 // It takes no match, which is deliberate: counting matching rows is
-// AssertDatabaseHas answered with a number, and two ways to ask one question is
-// what RULE 9 refuses. What this one answers is the question a match cannot --
-// that the handler wrote one row and not three, and that the seeder ran once.
+// AssertDatabaseHas answered with a number. What this one answers is the
+// question a match cannot -- that the handler wrote one row and not three, and
+// that the seeder ran once.
 func AssertDatabaseCount(t *testing.T, ctx context.Context, db *database.DB, table string, want int) {
 	t.Helper()
 

@@ -68,8 +68,7 @@ func TestMailFakeQueuedIsNotSent(t *testing.T) {
 	t.Parallel()
 
 	mailer := NewMailFake()
-	// A mailable that says it belongs on the queue is queued by Send, as the
-	// PHP queues it.
+	// A mailable that says it belongs on the queue is queued by Send.
 	mailer.Send(newsletterMail{})
 
 	r := &recorder{}
@@ -85,7 +84,7 @@ func TestMailFakeQueuedIsNotSent(t *testing.T) {
 	mailer.AssertSent(r, reflect.TypeFor[newsletterMail](), nil)
 	assertFails(t, r, "Did you mean to use AssertQueued()")
 
-	// SendNow overrides it, as it does there.
+	// SendNow overrides that and records it as sent.
 	mailer = NewMailFake()
 	mailer.SendNow(newsletterMail{})
 
@@ -132,7 +131,7 @@ func TestMailFakeMailerIsClearedAfterOneMessage(t *testing.T) {
 	r := &recorder{}
 	mailer.AssertSent(r, reflect.TypeFor[receiptMail](), nil)
 	// The first went through ses and the second did not: the mailer is cleared
-	// after each message, as the PHP clears it.
+	// after each message.
 	assertFails(t, r, "through the [ses] mailer")
 
 	mailer = NewMailFake()
@@ -158,7 +157,7 @@ func TestMailFakePendingMailQueuesAndSends(t *testing.T) {
 	mailer.AssertNothingSent(r)
 	assertPasses(t, r)
 
-	// PendingMailFake::send records as sent whatever the mailable implements.
+	// Send on a pending message records as sent whatever the mailable is.
 	mailer = NewMailFake()
 	mailer.To("a@x").Send(newsletterMail{})
 

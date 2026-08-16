@@ -1,21 +1,14 @@
-// Package constraints mirrors Illuminate\Testing\Constraints.
+// Package constraints holds the reusable matchers the assertions evaluate.
 //
-// The files it answers to, in the clone at
-// laravel_illuminate/testing/Constraints:
+// A constraint answers three questions -- does this value match, what should a
+// failure say, and what is this constraint called -- which is the whole of
+// [Constraint]. Writing a comparison here rather than inside an assertion is
+// what lets more than one assertion share it.
 //
-//	ArraySubset.php
-//	CountInDatabase.php
-//	HasInDatabase.php
-//	NotSoftDeletedInDatabase.php
-//	SeeInOrder.php
-//	SoftDeletedInDatabase.php
+// [ArraySubset] matches a value that carries at least what a subset names.
+// [SeeInOrder] matches a string that carries several values, each after the
+// last.
 //
-// [ArraySubset] and [SeeInOrder] are here. The four database constraints are
-// not: they ask a connection whether a row is there, which is the assertion
-// half of hesape/arandutest, where the connection already is.
-//
-// [Constraint] is PHPUnit\Framework\Constraint\Constraint, which the clone
-// extends but does not carry. Its three methods are the ones the clone
-// overrides -- matches, failureDescription and toString -- and nothing else,
-// because nothing else is reached from here.
+// There is no database constraint here. Asking a connection whether a row is
+// there belongs to hesape/arandutest, where the connection already is.
 package constraints

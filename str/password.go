@@ -2,8 +2,7 @@ package str
 
 import "crypto/rand"
 
-// The four character sets Str::password draws from, spelled the way Illuminate
-// spells them.
+// The four character sets Password draws from.
 const (
 	passwordLetters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	passwordNumbers = "0123456789"
@@ -11,20 +10,18 @@ const (
 	passwordSpaces  = " "
 )
 
-// Password answers for Str::password. It is a random password of the given
-// length, drawn from the sets that are switched on.
+// Password is a random password of the given length, drawn from the sets that
+// are switched on.
 //
-//	Password(32, true, true, true, false) // Illuminate's own defaults
+//	Password(32, true, true, true, false)
 //
-// PHP defaults length to 32 and letters, numbers and symbols to true with
-// spaces false; Go has no default arguments, so all five are required.
+// All five arguments are required, because Go has no default arguments.
 //
 // Every set that is on contributes one character up front, so a password that
 // asks for symbols has a symbol in it. Those characters count against the
 // length and the rest is drawn from the sets together, then the whole thing is
 // shuffled -- which is why a length shorter than the number of sets still comes
-// back with one character from each and is longer than asked for, exactly as in
-// Illuminate.
+// back with one character from each and is longer than asked for.
 //
 // With every set switched off there is nothing to draw from and the answer is
 // empty.
@@ -56,8 +53,8 @@ func Password(length int, letters, numbers, symbols, spaces bool) string {
 	return string(password)
 }
 
-// randomIndex is PHP's random_int(0, n-1) from the system source: a uniform
-// index with the modulo bias rejected rather than folded in.
+// randomIndex is a uniform index below n, from the system source, with the
+// modulo bias rejected rather than folded in.
 func randomIndex(n int) int {
 	if n <= 1 {
 		return 0
@@ -73,8 +70,8 @@ func randomIndex(n int) int {
 	}
 }
 
-// shuffle is the Fisher-Yates that Collection::shuffle runs, drawing every swap
-// from the system source.
+// shuffle is a Fisher-Yates shuffle, drawing every swap from the system
+// source.
 func shuffle(b []byte) {
 	for i := len(b) - 1; i > 0; i-- {
 		j := randomIndex(i + 1)

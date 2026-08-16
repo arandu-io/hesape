@@ -1,42 +1,33 @@
 package collections
 
-// Collection is Illuminate\Support\Collection.
+// Collection is an ordered list of values, and the key of an element is its
+// index.
 //
-// The PHP class wraps a PHP array, which is an ordered map: it carries keys and
-// values together, and half of the class exists to keep the two in step. Go has
-// no such type, so Collection is a list -- the shape a PHP collection has in
-// almost every application -- and the key of an element is its index. Every
-// method that the PHP names after a key is documented here with the index it
-// reads instead.
-//
-// It is declared as a slice rather than a struct so that a []T can be handed to
-// it and taken back out without a copy, and so that len, range and the slices
-// package keep working on it.
+// It is declared as a slice rather than a struct so that a []T can be handed
+// to it and taken back out without a copy, and so that len, range and the
+// slices package keep working on it.
 type Collection[T any] []T
 
-// Collect is the collect() helper of helpers.php.
+// Collect wraps items in a Collection. It is the constructor an application
+// actually types.
 //
-// It is the constructor an application actually types. The result shares the
-// backing array with items, exactly as the PHP shares nothing and everything at
-// once: mutate one and the other sees it, up to the point a method reallocates.
+// The result shares the backing array with items: mutate one and the other
+// sees it, up to the point a method reallocates.
 func Collect[T any](items []T) Collection[T] { return Collection[T](items) }
 
-// Make is Enumerable::make.
-//
-// It is Collect under the name the PHP gives the static constructor.
+// Make wraps items in a Collection, as Collect does.
 func Make[T any](items []T) Collection[T] { return Collection[T](items) }
 
-// Empty is Enumerable::empty.
-//
-// It returns an empty collection that is not nil, so that appending to it and
-// comparing its length behave the same as on a collection that had elements.
+// Empty returns an empty collection that is not nil, so that appending to it
+// and comparing its length behave the same as on a collection that had
+// elements.
 func Empty[T any]() Collection[T] { return Collection[T]{} }
 
-// Times is Enumerable::times.
+// Times builds a collection of number elements from the callback.
 //
-// The callback receives 1, 2, ... number, one-based, as the PHP does. A number
-// below one yields an empty collection rather than an error, which is what
-// makes Sliding safe to write in terms of it.
+// The callback receives 1, 2, ... number, one-based. A number below one yields
+// an empty collection rather than an error, which is what makes Sliding safe
+// to write in terms of it.
 func Times[T any](number int, callback func(int) T) Collection[T] {
 	if number < 1 {
 		return Collection[T]{}
@@ -48,11 +39,10 @@ func Times[T any](number int, callback func(int) T) Collection[T] {
 	return out
 }
 
-// Range is Enumerable::range.
+// Range counts from from to to, inclusive.
 //
-// It counts from from to to inclusive. A step of zero is treated as one, and a
-// negative step, or a to below from, counts downwards -- the PHP delegates to
-// range(), which does the same.
+// A step of zero is treated as one, and a negative step, or a to below from,
+// counts downwards.
 func Range(from, to, step int) Collection[int] {
 	if step == 0 {
 		step = 1
@@ -73,11 +63,8 @@ func Range(from, to, step int) Collection[int] {
 	return out
 }
 
-// Wrap is Enumerable::wrap.
-//
-// The PHP turns null into [], a single value into [value] and an array into
-// itself. A variadic parameter says all three in Go: Wrap[int]() is empty,
-// Wrap(1) holds one element, and Wrap(s...) holds the slice.
+// Wrap gathers its arguments into a collection: Wrap[int]() is empty, Wrap(1)
+// holds one element, and Wrap(s...) holds the slice.
 func Wrap[T any](value ...T) Collection[T] {
 	if value == nil {
 		return Collection[T]{}
@@ -85,13 +72,10 @@ func Wrap[T any](value ...T) Collection[T] {
 	return Collection[T](value)
 }
 
-// Unwrap is Enumerable::unwrap.
-//
-// It gives back the plain slice underneath, which is what the PHP does when the
-// argument is a collection.
+// Unwrap gives back the plain slice underneath the collection.
 func Unwrap[T any](value Collection[T]) []T { return []T(value) }
 
-// All is Collection::all.
+// All returns the elements as a plain slice.
 //
 // The result is never nil: an empty collection gives an empty slice, so that a
 // caller can append to it without checking.
@@ -102,20 +86,19 @@ func (c Collection[T]) All() []T {
 	return []T(c)
 }
 
-// Count is Collection::count.
+// Count reports the number of elements.
 func (c Collection[T]) Count() int { return len(c) }
 
-// IsEmpty is Collection::isEmpty.
+// IsEmpty reports whether the collection holds no elements.
 func (c Collection[T]) IsEmpty() bool { return len(c) == 0 }
 
-// IsNotEmpty is EnumeratesValues::isNotEmpty.
+// IsNotEmpty reports whether the collection holds at least one element.
 func (c Collection[T]) IsNotEmpty() bool { return len(c) > 0 }
 
-// Get is Collection::get.
+// Get returns the element at the index.
 //
-// The key of an element in a list is its index. The second result is false
-// where the PHP would return the $default, so the caller supplies the default
-// at the call site instead of passing it in.
+// The second result is false when the index is out of range, so the caller
+// supplies the fallback at the call site instead of passing one in.
 func (c Collection[T]) Get(key int) (T, bool) {
 	if key < 0 || key >= len(c) {
 		var zero T
@@ -124,10 +107,8 @@ func (c Collection[T]) Get(key int) (T, bool) {
 	return c[key], true
 }
 
-// Has is Collection::has.
-//
-// It reports whether every index given is within the collection. With no index
-// it reports false, as the PHP does for an empty key list.
+// Has reports whether every index given is within the collection. With no
+// index it reports false.
 func (c Collection[T]) Has(keys ...int) bool {
 	if len(keys) == 0 {
 		return false
@@ -140,9 +121,7 @@ func (c Collection[T]) Has(keys ...int) bool {
 	return true
 }
 
-// HasAny is Collection::hasAny.
-//
-// It reports whether at least one index given is within the collection.
+// HasAny reports whether at least one index given is within the collection.
 func (c Collection[T]) HasAny(keys ...int) bool {
 	for _, k := range keys {
 		if k >= 0 && k < len(c) {
@@ -152,9 +131,7 @@ func (c Collection[T]) HasAny(keys ...int) bool {
 	return false
 }
 
-// Keys is Collection::keys.
-//
-// The keys of a list are its indices, so this is 0, 1, ... count-1.
+// Keys returns the indices of the elements: 0, 1, ... Count()-1.
 func (c Collection[T]) Keys() Collection[int] {
 	out := make(Collection[int], len(c))
 	for i := range c {
@@ -163,26 +140,22 @@ func (c Collection[T]) Keys() Collection[int] {
 	return out
 }
 
-// Values is Collection::values.
-//
-// The PHP renumbers the keys; a list is already numbered, so this is a copy,
-// which is still worth having because it detaches the result from the receiver.
+// Values returns a copy of the elements, detached from the receiver: writing
+// to the result does not reach the collection it came from.
 func (c Collection[T]) Values() Collection[T] {
 	out := make(Collection[T], len(c))
 	copy(out, c)
 	return out
 }
 
-// Collect is Enumerable::collect.
-//
-// It returns a fresh collection holding the same elements.
+// Collect returns a fresh collection holding the same elements.
 func (c Collection[T]) Collect() Collection[T] { return c.Values() }
 
-// Put is Collection::put.
+// Put writes the value at the index and returns the receiver, so that calls
+// chain.
 //
-// The key of a list is an index. Writing past the end grows the collection with
-// zero values up to that index, which is what assigning to a high key does to a
-// PHP array. It returns the receiver so that calls chain.
+// Writing past the end grows the collection with zero values up to that
+// index. A negative index is ignored.
 func (c *Collection[T]) Put(key int, value T) *Collection[T] {
 	if key < 0 {
 		return c
@@ -195,43 +168,32 @@ func (c *Collection[T]) Put(key int, value T) *Collection[T] {
 	return c
 }
 
-// Push is Collection::push.
-//
-// It appends every value and returns the receiver.
+// Push appends every value and returns the receiver.
 func (c *Collection[T]) Push(values ...T) *Collection[T] {
 	*c = append(*c, values...)
 	return c
 }
 
-// Add is Collection::add.
-//
-// It appends one element. The PHP keeps it apart from push because push is
-// variadic and add is not; both append.
+// Add appends one element and returns the receiver.
 func (c *Collection[T]) Add(item T) *Collection[T] {
 	*c = append(*c, item)
 	return c
 }
 
-// Unshift is Collection::unshift.
-//
-// It puts the values at the front, in the order given.
+// Unshift puts the values at the front, in the order given, and returns the
+// receiver.
 func (c *Collection[T]) Unshift(values ...T) *Collection[T] {
 	*c = append(append(make(Collection[T], 0, len(*c)+len(values)), values...), *c...)
 	return c
 }
 
-// Prepend is Collection::prepend.
-//
-// The PHP takes an optional key; a list has no key to give, so this is Unshift
-// with a single value, which is the form the PHP is called in.
+// Prepend puts a single value at the front. It is Unshift of one element.
 func (c *Collection[T]) Prepend(value T) *Collection[T] { return c.Unshift(value) }
 
-// Pop is Collection::pop.
+// Pop removes the last count elements and returns them, most recent first.
 //
-// It removes the last count elements and returns them, most recent first, as
-// the PHP does when count is above one. The PHP returns the bare element when
-// count is one; a Go function has one return type, so this always returns a
-// collection.
+// A count of zero or less, or an empty collection, gives an empty result; a
+// count above the length takes everything.
 func (c *Collection[T]) Pop(count int) Collection[T] {
 	if count <= 0 || len(*c) == 0 {
 		return Collection[T]{}
@@ -248,10 +210,9 @@ func (c *Collection[T]) Pop(count int) Collection[T] {
 	return out
 }
 
-// Shift is Collection::shift.
-//
-// It removes the first count elements and returns them in order. As with Pop,
-// the PHP's single-element return collapses to a collection here.
+// Shift removes the first count elements and returns them in order. As with
+// Pop, a count of zero or less gives an empty result and a count above the
+// length takes everything.
 func (c *Collection[T]) Shift(count int) Collection[T] {
 	if count <= 0 || len(*c) == 0 {
 		return Collection[T]{}
@@ -265,10 +226,8 @@ func (c *Collection[T]) Shift(count int) Collection[T] {
 	return out
 }
 
-// Forget is Collection::forget.
-//
-// It removes the elements at the given indices. Removing from a list closes the
-// gap, where the PHP would leave a hole in the key sequence.
+// Forget removes the elements at the given indices. The survivors close the
+// gap and are renumbered.
 func (c *Collection[T]) Forget(keys ...int) *Collection[T] {
 	drop := make(map[int]struct{}, len(keys))
 	for _, k := range keys {
@@ -285,10 +244,8 @@ func (c *Collection[T]) Forget(keys ...int) *Collection[T] {
 	return c
 }
 
-// Pull is Collection::pull.
-//
-// It reads the element at the index and removes it. The second result is false
-// when the index is out of range, where the PHP returns the $default.
+// Pull reads the element at the index and removes it. The second result is
+// false when the index is out of range, and nothing is removed then.
 func (c *Collection[T]) Pull(key int) (T, bool) {
 	v, ok := c.Get(key)
 	if !ok {
@@ -298,10 +255,8 @@ func (c *Collection[T]) Pull(key int) (T, bool) {
 	return v, true
 }
 
-// GetOrPut is Collection::getOrPut.
-//
-// It returns the element at the index, or writes the value there and returns it
-// when the index is not filled yet.
+// GetOrPut returns the element at the index, or writes the value there and
+// returns it when the index is not filled yet.
 func (c *Collection[T]) GetOrPut(key int, value T) T {
 	if v, ok := c.Get(key); ok {
 		return v
@@ -310,11 +265,8 @@ func (c *Collection[T]) GetOrPut(key int, value T) T {
 	return value
 }
 
-// Transform is Collection::transform.
-//
-// It replaces every element with the result of the callback, in place. Unlike
-// Map it cannot change the element type, which is exactly the distinction the
-// PHP draws between the two.
+// Transform replaces every element with the result of the callback, in place.
+// Unlike Map it cannot change the element type.
 func (c *Collection[T]) Transform(callback func(T) T) *Collection[T] {
 	for i, v := range *c {
 		(*c)[i] = callback(v)
@@ -322,10 +274,8 @@ func (c *Collection[T]) Transform(callback func(T) T) *Collection[T] {
 	return c
 }
 
-// Concat is Collection::concat.
-//
-// It appends the source to a copy of the collection and leaves the receiver
-// alone, which is where it differs from Push.
+// Concat appends the source to a copy of the collection and leaves the
+// receiver alone, which is where it differs from Push.
 func (c Collection[T]) Concat(source []T) Collection[T] {
 	out := make(Collection[T], 0, len(c)+len(source))
 	out = append(out, c...)
@@ -333,18 +283,11 @@ func (c Collection[T]) Concat(source []T) Collection[T] {
 	return out
 }
 
-// Merge is Collection::merge.
-//
-// On a list the PHP's array_merge appends, because numeric keys are renumbered
-// rather than overwritten. That is what this does.
+// Merge appends items to a copy of the collection. It is Concat.
 func (c Collection[T]) Merge(items []T) Collection[T] { return c.Concat(items) }
 
-// Union is Collection::union.
-//
-// The PHP's + operator keeps the element already at a key and takes from the
-// argument only the keys the receiver does not have. On a list that means the
-// receiver wins for every index it has, and the tail of items past its length
-// is appended.
+// Union keeps the receiver's element at every index it has, and appends the
+// tail of items past that length.
 func (c Collection[T]) Union(items []T) Collection[T] {
 	out := make(Collection[T], 0, max(len(c), len(items)))
 	out = append(out, c...)
@@ -354,7 +297,7 @@ func (c Collection[T]) Union(items []T) Collection[T] {
 	return out
 }
 
-// Reverse is Collection::reverse.
+// Reverse returns the elements in the opposite order.
 func (c Collection[T]) Reverse() Collection[T] {
 	out := make(Collection[T], len(c))
 	for i, v := range c {
@@ -363,15 +306,15 @@ func (c Collection[T]) Reverse() Collection[T] {
 	return out
 }
 
-// CrossJoin is Collection::crossJoin: the cartesian product of the collection
-// with every list given, one tuple per combination.
+// CrossJoin returns the cartesian product of the collection with every list
+// given, one tuple per combination.
 //
-// The PHP starts Arr::crossJoin from [[]] and folds each array into it, so
-// crossing nothing wraps each element on its own -- [1,2] becomes [[1],[2]] --
-// and crossing an empty list yields nothing at all. Both hold here.
+// The product is folded from a single empty tuple, so crossing nothing wraps
+// each element on its own -- [1,2] becomes [[1],[2]] -- and crossing an empty
+// list yields nothing at all.
 //
-// It is a function and not a method for the reason Chunk is: a method that
-// instantiated Collection[Collection[T]] from inside Collection[T] would be an
+// It is a function and not a method for the reason Chunk is: instantiating
+// Collection[Collection[T]] from inside a method of Collection[T] is an
 // instantiation cycle, which Go rejects.
 func CrossJoin[T any](c Collection[T], lists ...[]T) Collection[Collection[T]] {
 	results := Collection[Collection[T]]{Collection[T]{}}
@@ -389,12 +332,10 @@ func CrossJoin[T any](c Collection[T], lists ...[]T) Collection[Collection[T]] {
 	return results
 }
 
-// Zip is Collection::zip: the collection paired position by position with the
-// lists given.
+// Zip pairs the collection position by position with the lists given.
 //
-// The PHP hands the positions to array_map, which pads the short arrays with
-// null; Go pads with the zero value of T, because a typed slice has no null.
-// The result is as long as the longest input.
+// A short input is padded with the zero value of T, and the result is as long
+// as the longest input.
 //
 // It is a function and not a method for the reason CrossJoin is.
 func Zip[T any](c Collection[T], items ...[]T) Collection[Collection[T]] {
@@ -424,11 +365,9 @@ func Zip[T any](c Collection[T], items ...[]T) Collection[Collection[T]] {
 	return out
 }
 
-// Multiply is Collection::multiply: the elements repeated multiplier times, in
-// order.
+// Multiply returns the elements repeated multiplier times, in order.
 //
-// A multiplier of zero or less gives an empty collection, because the PHP loop
-// never runs.
+// A multiplier of zero or less gives an empty collection.
 func (c Collection[T]) Multiply(multiplier int) Collection[T] {
 	if multiplier <= 0 {
 		return Collection[T]{}
@@ -440,19 +379,13 @@ func (c Collection[T]) Multiply(multiplier int) Collection[T] {
 	return out
 }
 
-// ToBase is Collection::toBase.
-//
-// The PHP hands back a plain Illuminate\Support\Collection, which matters only
-// where a subclass -- an Eloquent collection -- has to be dropped to the base
-// class. Nothing here subclasses, so this is a detached copy under the name the
-// PHP gives it.
+// ToBase returns a detached copy of the collection, as Values does.
 func (c Collection[T]) ToBase() Collection[T] { return c.Values() }
 
-// Pad is Collection::pad.
+// Pad grows the collection to size elements, filling with value.
 //
-// A positive size pads on the right, a negative size on the left, and a size
+// A positive size pads on the right and a negative size on the left. A size
 // whose magnitude is not larger than the count returns the elements unchanged.
-// That is array_pad.
 func (c Collection[T]) Pad(size int, value T) Collection[T] {
 	n := size
 	left := false

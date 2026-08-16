@@ -11,25 +11,22 @@ import (
 	"github.com/arandu-io/hesape/support/arr"
 )
 
-// ErrMalformedConfigurationURL answers to the InvalidArgumentException
-// ConfigurationUrlParser::parseUrl raises.
-//
-// The message is the PHP one, capital and full stop included.
+// ErrMalformedConfigurationURL is returned when the configuration URL cannot
+// be read.
 var ErrMalformedConfigurationURL = errors.New("The database configuration URL is malformed.")
 
-// ConfigurationUrlParser answers to
-// Illuminate\Support\ConfigurationUrlParser: the reader that turns a single
-// DATABASE_URL into the connection options a driver wants.
+// ConfigurationUrlParser turns a single database URL into the connection
+// options a driver wants.
 type ConfigurationUrlParser struct{}
 
-// NewConfigurationUrlParser is the `new ConfigurationUrlParser` the PHP writes,
-// which has no constructor of its own.
+// NewConfigurationUrlParser returns a parser. It carries no state, so the zero
+// value works just as well.
 func NewConfigurationUrlParser() *ConfigurationUrlParser { return &ConfigurationUrlParser{} }
 
 var (
 	driverAliasesMu sync.RWMutex
 
-	// driverAliases answers to the protected static $driverAliases property.
+	// driverAliases maps a URL scheme to the driver it selects.
 	driverAliases = map[string]string{
 		"mssql":      "sqlsrv",
 		"mysql2":     "mysql", // RDS
@@ -41,16 +38,17 @@ var (
 	}
 )
 
-// sqliteTripleSlash is the '#^(sqlite3?):///#' of ConfigurationUrlParser::parseUrl.
+// sqliteTripleSlash matches a hostless sqlite URL, whose path would otherwise
+// be eaten by the parser.
 var sqliteTripleSlash = regexp.MustCompile(`^(sqlite3?):///`)
 
-// ParseConfiguration answers to ConfigurationUrlParser::parseConfiguration: the
-// configuration with the url key read out and spread over driver, database,
-// host, port, username, password and whatever the query string carried.
+// ParseConfiguration returns the configuration with its url key read out and
+// spread over driver, database, host, port, username, password and whatever
+// the query string carried.
 //
-// The PHP accepts an array or a bare string, and so does this. The PHP throws
-// InvalidArgumentException on a URL it cannot read, so this returns
-// (map[string]any, error).
+// The configuration is a map, or a bare string taken as the URL itself; nil
+// and any other type give an empty map. A URL that cannot be read is
+// [ErrMalformedConfigurationURL].
 func (p *ConfigurationUrlParser) ParseConfiguration(config any) (map[string]any, error) {
 	settings := map[string]any{}
 	switch c := config.(type) {
@@ -85,8 +83,7 @@ func (p *ConfigurationUrlParser) ParseConfiguration(config any) (map[string]any,
 	return settings, nil
 }
 
-// urlComponents is the array parse_url returns, narrowed to the keys the parser
-// reads.
+// urlComponents holds the parts of a URL the parser reads.
 type urlComponents struct {
 	scheme string
 	host   string
@@ -97,9 +94,8 @@ type urlComponents struct {
 	query  string
 }
 
-// parseConfigurationURL answers to the protected
-// ConfigurationUrlParser::parseUrl, sqlite rewrite included: sqlite:///db is
-// given the null host the PHP gives it, so the path survives parsing.
+// parseConfigurationURL splits a URL into its parts. A hostless sqlite URL is
+// given a placeholder host first, so its path survives parsing.
 func parseConfigurationURL(raw string) (urlComponents, error) {
 	raw = sqliteTripleSlash.ReplaceAllString(raw, "$1://null/")
 	parsed, err := url.Parse(raw)
@@ -120,9 +116,9 @@ func parseConfigurationURL(raw string) (urlComponents, error) {
 	return components, nil
 }
 
-// getPrimaryOptions answers to the protected
-// ConfigurationUrlParser::getPrimaryOptions. A component the URL does not carry
-// is left out, which is what the array_filter on null does.
+// getPrimaryOptions reads driver, database, host, port, username and password
+// out of the URL. A component the URL does not carry is left out entirely, so
+// it does not write over a value the configuration already held.
 func (p *ConfigurationUrlParser) getPrimaryOptions(parsed urlComponents) map[string]any {
 	options := map[string]any{}
 	if driver := p.getDriver(parsed); driver != "" {
@@ -146,7 +142,8 @@ func (p *ConfigurationUrlParser) getPrimaryOptions(parsed urlComponents) map[str
 	return options
 }
 
-// getDriver answers to the protected ConfigurationUrlParser::getDriver.
+// getDriver returns the driver the scheme selects, through the alias table
+// when the scheme has one, and the scheme itself otherwise.
 func (p *ConfigurationUrlParser) getDriver(parsed urlComponents) string {
 	if parsed.scheme == "" {
 		return ""
@@ -159,8 +156,8 @@ func (p *ConfigurationUrlParser) getDriver(parsed urlComponents) string {
 	return parsed.scheme
 }
 
-// getDatabase answers to the protected ConfigurationUrlParser::getDatabase: the
-// path with its leading slash off, and nothing at all when there is no path.
+// getDatabase returns the path with its leading slash off, and nothing at all
+// when there is no path.
 func (p *ConfigurationUrlParser) getDatabase(parsed urlComponents) string {
 	if parsed.path == "" || parsed.path == "/" {
 		return ""
@@ -168,8 +165,8 @@ func (p *ConfigurationUrlParser) getDatabase(parsed urlComponents) string {
 	return strings.TrimPrefix(parsed.path, "/")
 }
 
-// getQueryOptions answers to the protected
-// ConfigurationUrlParser::getQueryOptions, which is PHP's parse_str.
+// getQueryOptions reads the query string into a map, each value converted to
+// the type its text names.
 func (p *ConfigurationUrlParser) getQueryOptions(parsed urlComponents) map[string]any {
 	if parsed.query == "" {
 		return map[string]any{}
@@ -177,8 +174,8 @@ func (p *ConfigurationUrlParser) getQueryOptions(parsed urlComponents) map[strin
 	return parseStringsToNativeTypes(parseQueryString(parsed.query)).(map[string]any)
 }
 
-// parseStringsToNativeTypes answers to the protected
-// ConfigurationUrlParser::parseStringsToNativeTypes.
+// parseStringsToNativeTypes walks a value and converts every string it reaches
+// with [parseStringToNativeType], descending into maps and slices.
 func parseStringsToNativeTypes(v any) any {
 	switch typed := v.(type) {
 	case map[string]any:
@@ -200,11 +197,12 @@ func parseStringsToNativeTypes(v any) any {
 	}
 }
 
-// parseStringToNativeType is json_decode on one value: "true" is a bool, "5432"
-// is a number, and anything the decoder refuses stays the string it was.
+// parseStringToNativeType converts a string to the type its text names:
+// "true" is a bool, "5432" is a number, and anything the JSON decoder refuses
+// stays the string it was.
 //
-// PHP reads a whole number as an int; encoding/json reads every number as a
-// float64, so an integral number is handed back as an int.
+// The decoder reads every number as a float64, so an integral one is handed
+// back as an int.
 func parseStringToNativeType(v string) any {
 	var decoded any
 	if err := json.Unmarshal([]byte(v), &decoded); err != nil {
@@ -216,7 +214,8 @@ func parseStringToNativeType(v string) any {
 	return decoded
 }
 
-// GetDriverAliases answers to ConfigurationUrlParser::getDriverAliases.
+// GetDriverAliases returns a copy of the table mapping a URL scheme to the
+// driver it selects.
 func GetDriverAliases() map[string]string {
 	driverAliasesMu.RLock()
 	defer driverAliasesMu.RUnlock()
@@ -227,7 +226,8 @@ func GetDriverAliases() map[string]string {
 	return out
 }
 
-// AddDriverAlias answers to ConfigurationUrlParser::addDriverAlias.
+// AddDriverAlias registers a URL scheme and the driver it selects, replacing
+// whatever the scheme mapped to before.
 func AddDriverAlias(alias, driver string) {
 	driverAliasesMu.Lock()
 	defer driverAliasesMu.Unlock()

@@ -9,23 +9,21 @@ import (
 	"time"
 )
 
-// Clock answers to what Carbon is used for in Illuminate\Support\Carbon and
-// Illuminate\Support\DateFactory: the one place "now" comes from, so a test can
-// replace it.
+// Clock is the one place "now" comes from, so a test can replace it.
 //
-// Carbon itself is not mirrored as a type. time.Time already is the value, and
-// a second date type would be a second way to hold an instant. What is mirrored
-// is the seam Carbon opens with setTestNow: [Now], [SetTestNow], [Travel],
-// [TravelTo], [TravelBack] and [FreezeTime] keep the names a test types.
+// There is no date type of this package's own: time.Time already is the value,
+// and a second one would be a second way to hold an instant. The seam is this
+// interface, and a test reaches it through [Use], [UseCallable], [SetTestNow],
+// [Travel], [TravelTo], [TravelBack] and [FreezeTime].
 type Clock interface {
-	// Now answers to Carbon::now.
+	// Now returns the current instant.
 	Now() time.Time
 }
 
-// SystemClock is the Clock the framework runs on outside a test: time.Now.
+// SystemClock is the [Clock] the framework runs on outside a test: time.Now.
 type SystemClock struct{}
 
-// Now answers to Carbon::now, read from the operating system.
+// Now returns the current instant, read from the operating system.
 func (SystemClock) Now() time.Time { return time.Now() }
 
 var (
@@ -34,8 +32,8 @@ var (
 	testNow *time.Time
 )
 
-// Now answers to Carbon::now and to Date::now: the current instant, or the
-// instant a test pinned with [SetTestNow].
+// Now returns the current instant, or the instant a test pinned with
+// [SetTestNow]. It reads the [Clock] that [Use] set.
 func Now() time.Time {
 	clockMu.RLock()
 	defer clockMu.RUnlock()
@@ -45,22 +43,19 @@ func Now() time.Time {
 	return clock.Now()
 }
 
-// Today answers to Carbon::today: midnight of the current day, in the current
-// location.
+// Today returns midnight of the current day, in the current location.
 func Today() time.Time {
 	n := Now()
 	return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, n.Location())
 }
 
-// Tomorrow answers to Carbon::tomorrow.
+// Tomorrow returns midnight of the day after [Today].
 func Tomorrow() time.Time { return Today().AddDate(0, 0, 1) }
 
-// Yesterday answers to Carbon::yesterday.
+// Yesterday returns midnight of the day before [Today].
 func Yesterday() time.Time { return Today().AddDate(0, 0, -1) }
 
-// parseLayouts are the shapes Carbon::parse accepts that a Go program actually
-// writes. Carbon leans on strtotime, which has no equivalent in the standard
-// library; these are tried in order.
+// parseLayouts are the layouts [Parse] tries, in order.
 var parseLayouts = []string{
 	time.RFC3339Nano,
 	time.RFC3339,
@@ -76,11 +71,12 @@ var parseLayouts = []string{
 	time.RFC1123,
 }
 
-// Parse answers to Carbon::parse. The PHP throws InvalidFormatException on a
-// string it cannot read, so this returns (time.Time, error).
+// Parse reads a date out of a string, returning an error naming the string
+// when no layout matches.
 //
-// A time-only string is placed on the day [Now] reports, which is what Carbon
-// does.
+// The empty string and "now" are [Now]; "today", "tomorrow" and "yesterday"
+// are the calls of those names. A time-only string is placed on the day [Now]
+// reports. Everything else is read in the local location.
 func Parse(value string) (time.Time, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -113,37 +109,36 @@ func Parse(value string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("support: could not parse date [%s]", value)
 }
 
-// CreateFromFormat answers to Carbon::createFromFormat, with a Go layout in
-// place of the PHP format string; the PHP throws, so this returns an error.
+// CreateFromFormat reads a date out of a string against the given layout, in
+// the local location.
 func CreateFromFormat(layout, value string) (time.Time, error) {
 	return time.ParseInLocation(layout, value, time.Local)
 }
 
-// CreateFromTimestamp answers to Carbon::createFromTimestamp: seconds since the
-// epoch.
+// CreateFromTimestamp returns the instant the given number of seconds after
+// the epoch.
 func CreateFromTimestamp(timestamp int64) time.Time {
 	return time.Unix(timestamp, 0)
 }
 
-// CreateFromTimestampMs answers to Carbon::createFromTimestampMs.
+// CreateFromTimestampMs returns the instant the given number of milliseconds
+// after the epoch.
 func CreateFromTimestampMs(timestamp int64) time.Time {
 	return time.UnixMilli(timestamp)
 }
 
-// ErrNotAnOrderedID is what Carbon::createFromId hits through Ulid::fromString
-// and Uuid::fromString when the string is neither.
+// ErrNotAnOrderedID is returned by [CreateFromId] when the string is neither
+// an ordered UUID nor a ULID.
 var ErrNotAnOrderedID = errors.New("support: id is neither an ordered UUID nor a ULID")
 
 // crockford is the alphabet a ULID is written in, which leaves out I, L, O and
 // U so that no two characters can be misread for each other.
 const crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
-// CreateFromId answers to Carbon::createFromId: the instant an ordered UUID or
-// a ULID was made at, which both carry in their first 48 bits.
-//
-// The PHP leans on ramsey/uuid and symfony/uid; the milliseconds are read here
-// instead, because the core carries no third-party code. A string that is
-// neither is [ErrNotAnOrderedID], which is what the PHP throws.
+// CreateFromId returns the instant an ordered UUID or a ULID was made at,
+// which both carry in their first 48 bits. The milliseconds are read here
+// rather than through a library, so this package carries no dependency of its
+// own. A string that is neither is [ErrNotAnOrderedID].
 func CreateFromId(id string) (time.Time, error) {
 	if milliseconds, ok := ulidMilliseconds(id); ok {
 		return time.UnixMilli(milliseconds), nil
@@ -154,8 +149,8 @@ func CreateFromId(id string) (time.Time, error) {
 	return time.Time{}, ErrNotAnOrderedID
 }
 
-// ulidMilliseconds is Ulid::isValid followed by getDateTime: 26 Crockford
-// characters, of which the first 10 are the milliseconds.
+// ulidMilliseconds reads the timestamp out of a ULID: 26 Crockford
+// characters, of which the first 10 carry the milliseconds.
 func ulidMilliseconds(id string) (int64, bool) {
 	if len(id) != 26 {
 		return 0, false
@@ -173,9 +168,8 @@ func ulidMilliseconds(id string) (int64, bool) {
 	return milliseconds, true
 }
 
-// orderedUUIDMilliseconds is Uuid::getDateTime for the ordered shapes: the
-// first 48 bits are the milliseconds, which is version 7 and the ordered UUID
-// Laravel writes.
+// orderedUUIDMilliseconds reads the timestamp out of a time-ordered UUID: the
+// first 48 bits carry the milliseconds, which is what version 7 puts there.
 func orderedUUIDMilliseconds(id string) (int64, bool) {
 	hex := strings.ReplaceAll(id, "-", "")
 	if len(hex) != 32 {
@@ -193,8 +187,8 @@ func orderedUUIDMilliseconds(id string) (int64, bool) {
 	return milliseconds, true
 }
 
-// SetTestNow answers to Carbon::setTestNow: pin the instant every later [Now]
-// reports. A nil value is the PHP null and hands time back to the clock.
+// SetTestNow pins the instant every later [Now] reports. A nil value unpins,
+// handing time back to the [Clock].
 func SetTestNow(value *time.Time) {
 	clockMu.Lock()
 	defer clockMu.Unlock()
@@ -206,7 +200,8 @@ func SetTestNow(value *time.Time) {
 	testNow = &pinned
 }
 
-// GetTestNow answers to Carbon::getTestNow, nil when nothing is pinned.
+// GetTestNow returns a copy of the pinned instant, or nil when nothing is
+// pinned.
 func GetTestNow() *time.Time {
 	clockMu.RLock()
 	defer clockMu.RUnlock()
@@ -217,11 +212,11 @@ func GetTestNow() *time.Time {
 	return &pinned
 }
 
-// HasTestNow answers to Carbon::hasTestNow.
+// HasTestNow reports whether an instant is pinned.
 func HasTestNow() bool { return GetTestNow() != nil }
 
-// WithTestNow answers to Carbon::withTestNow: run the callback with the instant
-// pinned, then put back whatever was pinned before.
+// WithTestNow runs the callback with the instant pinned, then puts back
+// whatever was pinned before.
 func WithTestNow(value time.Time, callback func()) {
 	previous := GetTestNow()
 	SetTestNow(&value)
@@ -229,9 +224,8 @@ func WithTestNow(value time.Time, callback func()) {
 	callback()
 }
 
-// Use answers to DateFactory::use: the Clock every later [Now] reads. The PHP
-// takes a class name, a callable or a Carbon factory; here it is the one seam
-// that matters, the Clock.
+// Use sets the [Clock] every later [Now] reads. A nil clock restores
+// [SystemClock].
 func Use(c Clock) {
 	clockMu.Lock()
 	defer clockMu.Unlock()
@@ -241,19 +235,14 @@ func Use(c Clock) {
 	clock = c
 }
 
-// clockFunc lets a plain function be a [Clock], which is what
-// DateFactory::useCallable takes.
+// clockFunc lets a plain function be a [Clock].
 type clockFunc func() time.Time
 
-// Now answers to Carbon::now, read from the function.
+// Now returns the instant the function reports.
 func (f clockFunc) Now() time.Time { return f() }
 
-// UseCallable answers to DateFactory::useCallable: the function every later
-// [Now] reads.
-//
-// DateFactory::useClass and DateFactory::useFactory take a Carbon subclass name
-// and a Carbon factory, neither of which Go has: there is no class string and
-// no second date type. The Clock is what is left of the three.
+// UseCallable sets the function every later [Now] reads. A nil callable is
+// [UseDefault].
 func UseCallable(callable func() time.Time) {
 	if callable == nil {
 		UseDefault()
@@ -262,8 +251,7 @@ func UseCallable(callable func() time.Time) {
 	Use(clockFunc(callable))
 }
 
-// UseDefault answers to DateFactory::useDefault: back to the system clock, with
-// nothing pinned.
+// UseDefault restores [SystemClock] and unpins whatever was pinned.
 func UseDefault() {
 	clockMu.Lock()
 	defer clockMu.Unlock()
@@ -271,18 +259,15 @@ func UseDefault() {
 	testNow = nil
 }
 
-// Travel answers to travel() of Illuminate\Foundation\Testing\Concerns\
-// InteractsWithTime: move the pinned "now" by the given amount and return it.
-//
-// The PHP returns a Wormhole so the unit can be chained -- travel(5)->days().
-// A time.Duration already carries its unit, so the Go call is
+// Travel moves the pinned "now" by the given amount and returns it. A
+// time.Duration already carries its unit, so a five-day jump is
 // Travel(5 * 24 * time.Hour).
 func Travel(d time.Duration) time.Time {
 	return TravelTo(Now().Add(d))
 }
 
-// TravelTo answers to travelTo(): pin "now" at the given instant and return it.
-// With a callback, the PHP runs it and travels back; so does this.
+// TravelTo pins "now" at the given instant and returns it. Given a callback,
+// it runs the callback and then travels back.
 func TravelTo(value time.Time, callback ...func()) time.Time {
 	SetTestNow(&value)
 	if len(callback) > 0 && callback[0] != nil {
@@ -292,18 +277,17 @@ func TravelTo(value time.Time, callback ...func()) time.Time {
 	return value
 }
 
-// TravelBack answers to travelBack(): unpin "now".
+// TravelBack unpins "now".
 func TravelBack() { SetTestNow(nil) }
 
-// FreezeTime answers to freezeTime(): pin "now" where it already is, so that
-// nothing moves while the callback runs. With no callback it stays frozen until
-// [TravelBack].
+// FreezeTime pins "now" where it already is, so nothing moves while the
+// callback runs. With no callback it stays frozen until [TravelBack].
 func FreezeTime(callback ...func()) time.Time {
 	return TravelTo(Now(), callback...)
 }
 
-// FreezeSecond answers to freezeSecond(): freeze on the start of the current
-// second, so a comparison against a whole second holds.
+// FreezeSecond freezes on the start of the current second, so a comparison
+// against a whole second holds.
 func FreezeSecond(callback ...func()) time.Time {
 	return TravelTo(Now().Truncate(time.Second), callback...)
 }
@@ -316,15 +300,11 @@ func FreezeSecond(callback ...func()) time.Time {
 // take a value they cannot read as zero, so a delay of the wrong type schedules
 // work for right now instead of failing. It is here for a caller that has to
 // reject such a value rather than fall back, and it is the error to return.
-//
-// Answers Illuminate\Support\InteractsWithTime.
 var ErrUnknownDelay = errors.New("support: delay must be a time.Time, a time.Duration or a number of seconds")
 
-// SecondsUntil answers to InteractsWithTime::secondsUntil: how many seconds
-// separate now from the delay, never below zero.
-//
-// The PHP trait takes DateTimeInterface|DateInterval|int; Go takes the same
-// three shapes as time.Time, time.Duration and an integer count of seconds.
+// SecondsUntil returns how many seconds separate now from the delay. The delay
+// is a time.Time, a time.Duration or a number of seconds; anything else reads
+// as zero. An instant already past reads as zero rather than a negative count.
 func SecondsUntil(delay any) int64 {
 	switch d := delay.(type) {
 	case time.Time:
@@ -341,8 +321,9 @@ func SecondsUntil(delay any) int64 {
 	}
 }
 
-// AvailableAt answers to InteractsWithTime::availableAt: the UNIX timestamp the
-// delay lands on.
+// AvailableAt returns the UNIX timestamp the delay lands on. The delay is a
+// time.Time, a time.Duration or a number of seconds; anything else lands on
+// now.
 func AvailableAt(delay any) int64 {
 	switch d := delay.(type) {
 	case time.Time:
@@ -359,8 +340,8 @@ func AvailableAt(delay any) int64 {
 	}
 }
 
-// ParseDateInterval answers to InteractsWithTime::parseDateInterval: an
-// interval becomes the instant it lands on, everything else is left alone.
+// ParseDateInterval turns a time.Duration into the instant it lands on, and
+// leaves every other value alone.
 func ParseDateInterval(delay any) any {
 	if d, ok := delay.(time.Duration); ok {
 		return Now().Add(d)
@@ -368,17 +349,13 @@ func ParseDateInterval(delay any) any {
 	return delay
 }
 
-// CurrentTime answers to InteractsWithTime::currentTime: now as a UNIX
-// timestamp.
+// CurrentTime returns [Now] as a UNIX timestamp.
 func CurrentTime() int64 { return Now().Unix() }
 
-// RunTimeForHumans answers to InteractsWithTime::runTimeForHumans: the span
-// between the two instants, written the way a console line writes it. Below one
-// second it is milliseconds with two decimals; above it, the short cascade
-// Carbon prints, as in "1s 250ms".
-//
-// The PHP takes two float microtimes; Go takes the instants themselves, and an
-// absent end is now.
+// RunTimeForHumans writes the span between the two instants the way a console
+// line writes it. At one second or below it is milliseconds with two decimals;
+// above it, a short cascade of units, as in "1s 250ms". An absent end is
+// [Now], and an end before the start reads as zero.
 func RunTimeForHumans(start time.Time, end ...time.Time) string {
 	finish := Now()
 	if len(end) > 0 && !end[0].IsZero() {
@@ -394,8 +371,8 @@ func RunTimeForHumans(start time.Time, end ...time.Time) string {
 	return forHumans(runTime)
 }
 
-// forHumans is CarbonInterval::cascade()->forHumans(short: true), narrowed to
-// the units a run time ever reaches.
+// forHumans writes a duration as a short cascade of units, down to
+// milliseconds, dropping the units it does not reach. Zero is "0ms".
 func forHumans(d time.Duration) string {
 	parts := []string{}
 	units := []struct {
@@ -423,7 +400,8 @@ func forHumans(d time.Duration) string {
 	return strings.Join(parts, " ")
 }
 
-// toSeconds reads the numeric shapes PHP would juggle into an int.
+// toSeconds reads any numeric shape, or a numeric string, as a count of
+// seconds. Anything else is zero.
 func toSeconds(delay any) int64 {
 	switch n := delay.(type) {
 	case nil:

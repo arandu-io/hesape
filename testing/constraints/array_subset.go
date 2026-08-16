@@ -6,46 +6,37 @@ import (
 	"reflect"
 )
 
-// ArraySubset answers to Illuminate\Testing\Constraints\ArraySubset: the value
-// contains everything the subset says, and may contain more.
+// ArraySubset matches a value that contains everything the subset names, and
+// may contain more.
 //
-// It is the constraint behind Assert::assertArraySubset, which is what
-// TestResponse::assertJson is built on. The mechanism is the PHP's:
-// array_replace_recursive the subset over the actual value, and see whether the
-// actual value changed. Nothing changed means everything the subset asked for
-// was already there.
+// The test is to overlay the subset onto the value and compare: nothing
+// changed means everything the subset asked for was already there.
 type ArraySubset struct {
-	// Subset answers to $subset: what the value has to contain.
+	// Subset is what the value has to contain.
 	Subset any
 
-	// Strict answers to $strict: === rather than ==. It is what
-	// assertJson($value, true) turns on, and it is the difference between a
-	// response that carries the number 1 and one that carries the string "1".
+	// Strict asks for identity rather than a relaxed comparison. It records the
+	// caller's choice; Equals is what actually performs it.
 	Strict bool
 
-	// Equals stands for the PHP operators the comparison is written with.
+	// Equals is the comparison, and defaults to reflect.DeepEqual when nil.
 	//
-	// evaluate() is one line -- `$other === $patched` or `$other == $patched`
-	// -- because PHP resolves both at the language level, over values that are
-	// always arrays, strings, numbers, booleans or null. Go has ==, but it
-	// panics on maps and slices and it holds int(1) and float64(1) apart, which
-	// is the same JSON number written twice. So the comparison is passed in:
-	// Assert::assertArraySubset hands over the one Illuminate\Testing uses for
-	// === and ==, and a constraint built by hand falls back to
-	// reflect.DeepEqual.
+	// It is a field because Go's == panics on maps and slices, and because it
+	// holds int(1) and float64(1) apart -- which is the same JSON number
+	// written twice.
 	Equals func(a, b any) bool
 }
 
-// NewArraySubset answers to ArraySubset::__construct.
+// NewArraySubset returns a constraint over the given subset. Set Equals on the
+// result to choose the comparison.
 func NewArraySubset(subset any, strict bool) *ArraySubset {
 	return &ArraySubset{Subset: subset, Strict: strict}
 }
 
-// Matches answers to ArraySubset::evaluate with $returnResult true.
+// Matches reports whether the value carries everything the subset names.
 //
-// The failing half of evaluate() -- building a ComparisonFailure and calling
-// fail() -- is FailureDescription here, because a Go assertion reports by
-// returning a message rather than by throwing an object that carries one.
+// It overlays the subset onto the value and compares the two with Equals, or
+// with reflect.DeepEqual when Equals is nil.
 func (c *ArraySubset) Matches(other any) bool {
 	actual := toArray(other)
 	patched := replaceRecursive(actual, toArray(c.Subset))
@@ -57,30 +48,24 @@ func (c *ArraySubset) Matches(other any) bool {
 	return equals(actual, patched)
 }
 
-// FailureDescription answers to ArraySubset::failureDescription.
+// FailureDescription names the subset that was not carried.
 func (c *ArraySubset) FailureDescription(other any) string {
 	return "an array " + c.String()
 }
 
-// String answers to ArraySubset::toString.
+// String names the constraint and the subset it looks for.
 func (c *ArraySubset) String() string {
 	return "has the subset " + export(c.Subset)
 }
 
-// toArray answers to ArraySubset::toArray: whatever came in, seen as the array
-// the comparison runs over.
-//
-// A PHP array is a list and a map at once, so both Go shapes pass through
-// unchanged and anything else is left alone -- a scalar compared against a
-// scalar is still a comparison, and turning it into a one-element array here
-// would make it a different one.
+// toArray returns the value the comparison runs over.
 func toArray(v any) any { return v }
 
-// replaceRecursive answers to array_replace_recursive.
+// replaceRecursive overlays subset onto other and returns the result.
 //
-// Keys in the subset win, except where both sides hold an array: there it
-// descends, which is what makes the constraint a subset check on every level
-// rather than only the top one.
+// Keys in the subset win, except where both sides hold a map or a list: there
+// it descends, which is what makes the constraint a subset check on every
+// level rather than only the top one.
 func replaceRecursive(other, subset any) any {
 	switch s := subset.(type) {
 	case map[string]any:
@@ -106,8 +91,8 @@ func replaceRecursive(other, subset any) any {
 		if !ok {
 			return subset
 		}
-		// array_replace_recursive matches lists by position and keeps whatever
-		// the longer of the two has past the end of the other.
+		// Lists are matched by position, keeping whatever the longer of the
+		// two has past the end of the other.
 		out := make([]any, max(len(o), len(s)))
 		copy(out, o)
 		for i, v := range s {
@@ -124,8 +109,7 @@ func replaceRecursive(other, subset any) any {
 	}
 }
 
-// export answers to the Exporter toString() calls: the subset as a reader of
-// the failure can read it.
+// export renders a value the way a reader of the failure message can read it.
 func export(v any) string {
 	encoded, err := json.Marshal(v)
 	if err != nil {

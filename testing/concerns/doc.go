@@ -1,18 +1,6 @@
-// Package concerns mirrors Illuminate\Testing\Concerns.
+// Package concerns is empty, and it stays empty.
 //
-// The files it answers to, in the clone at
-// laravel_illuminate/testing/Concerns:
-//
-//	AssertsStatusCodes.php
-//	RunsInParallel.php
-//	TestDatabases.php
-//
-// Nothing is implemented here, and nothing will be. A concern is a PHP trait:
-// a set of methods mixed into a class from outside it. Go has no such thing --
-// a method's receiver must be declared in the same package as the method -- so
-// what a trait carries lands directly on the type that had it, in the package
-// that declares that type.
-//
-// It is the same reason ADR 0046 gives for Macroable and Conditionable not
-// being packages, and it applies here without a second decision being needed.
+// The assertions it would hold are methods on testing.TestResponse, because a
+// method's receiver must be declared in the same package as the method. The
+// status assertions live in hesape/testing, on the type that has them.
 package concerns

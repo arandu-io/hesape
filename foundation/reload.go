@@ -62,7 +62,7 @@ import (
 //
 // # Why the script is a file and not inline
 //
-// The CSP is script-src 'self' (RULE 13), and an inline <script> is refused by
+// The CSP is script-src 'self', and an inline <script> is refused by
 // it -- the browser would drop the tag silently and the feature would appear
 // simply not to work. So the script is registered as an ordinary asset and
 // referenced by src, content-addressed like every other one. It costs one
@@ -71,9 +71,9 @@ import (
 // # What is deliberately not here
 //
 // No CSS hot-swap, no state preservation, no module replacement. Those need a
-// client-side runtime and a module graph, which is the JavaScript build RULE 13
-// exists to refuse. A full reload against a Go server that restarts in under a
-// second is a fair trade, and it is one behaviour rather than two.
+// client-side runtime and a module graph, which is a JavaScript build this
+// framework does not have. A full reload against a Go server that restarts in
+// under a second is a fair trade, and it is one behaviour rather than two.
 
 // reloadPath is where the browser asks. Under _arandu with health and the
 // console, so one prefix covers everything the framework mounts.

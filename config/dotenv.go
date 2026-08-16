@@ -11,11 +11,11 @@ import (
 // envFile is the file [Load] reads before it reads the environment.
 //
 // One name, and it is not configurable. There is no --env-file flag and no
-// variable that moves it: a second place to put configuration is a second place
-// to look for it when the wrong value is in effect (RULE 9).
+// variable that moves it: a second place to put configuration is a second
+// place to look for it when the wrong value is in effect.
 const envFile = ".env"
 
-// LoadDotenv fills the gaps in the process environment from ./.env.
+// LoadDotenv fills the gaps in the process environment from./.env.
 //
 // [Load] calls it, and calling it directly is for the one case Load does not
 // cover: a program that reads the environment without building an [App], such
@@ -23,7 +23,7 @@ const envFile = ".env"
 //
 // # Why it exists
 //
-// `aru new crm` writes a .env with a fresh APP_KEY and then prints "cd crm &&
+// `aru new crm` writes a.env with a fresh APP_KEY and then prints "cd crm &&
 // aru migrate". Nothing read that file, so the first command of every new
 // project died with "APP_KEY must be 32 bytes, got 0 (run `aru key:generate`)"
 // -- telling the reader to generate the key that was already on disk.
@@ -32,7 +32,7 @@ const envFile = ".env"
 //
 // A variable that is already defined in the environment always wins; the file
 // only fills what is missing. That is what keeps production intact: the
-// orchestrator sets the real values, and a .env that got copied into an image
+// orchestrator sets the real values, and a.env that got copied into an image
 // by accident cannot override them. Never invert this.
 //
 // "Already defined" means present, not non-empty. A deployment that exports a
@@ -46,7 +46,7 @@ const envFile = ".env"
 // That is all of it. No ${INTERPOLATION}, no multi-line values, no include, no
 // inline comment after a value -- a # in a password is a # in a password. A
 // line the format does not cover is an error naming the file and the line
-// rather than a variable that silently did not arrive (RULE 15).
+// rather than a variable that silently did not arrive.
 //
 // A missing file is not an error. That is production: the environment is
 // already populated and there is no file at all.

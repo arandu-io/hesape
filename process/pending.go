@@ -14,26 +14,21 @@ import (
 	"time"
 )
 
-// defaultTimeout is how long a command may run when nobody said. It is PHP's
-// sixty seconds, and it is a default rather than no limit because a command
-// with no limit is how a deploy hangs.
+// defaultTimeout is how long a command may run when nobody said.
 const defaultTimeout = 60 * time.Second
 
 // PendingProcess is a command being described, before it runs.
 //
-// It answers to Illuminate\Process\PendingProcess, and it is the fluent builder
-// a Laravel developer already knows:
+// It is a fluent builder: every setter returns the receiver, so calls chain.
 //
 //	result, err := factory.NewPendingProcess().
 //		Path("/srv/app").
 //		Timeout(2 * time.Minute).
 //		Run(ctx, []string{"go", "test", "./..."}, nil)
 //
-// PHP exposes $command, $path, $timeout and the rest as public properties
-// beside the setters of the same name. Go cannot have a field and a method
-// called the same thing, so the setters keep the Illuminate names (ADR 0044)
-// and the state is unexported; String is how a fake handler or an assertion
-// reads back the command line.
+// Go cannot have a field and a method of the same name, so the state is
+// unexported and only the setters are public; String is how a fake handler or
+// an assertion reads back the command line.
 type PendingProcess struct {
 	factory      *Factory
 	command      []string
@@ -48,49 +43,38 @@ type PendingProcess struct {
 	fakeHandlers []FakeHandler
 }
 
-// NewPendingProcess builds a pending process bound to a factory. It is PHP's
-// constructor, which takes the same one argument -- the factory is what holds
-// the fakes and the recording, and a nil one is a process that always really
-// runs.
+// NewPendingProcess builds a pending process bound to a factory.
 func NewPendingProcess(factory *Factory) *PendingProcess {
 	return &PendingProcess{factory: factory, timeout: defaultTimeout}
 }
 
 // String is the command line, rendered the way a person would type it.
-//
-// It stands for reading PHP's public $command property, which Go has no room
-// for beside the Command method, and it is the exact string fake patterns and
-// string assertions are matched against.
 func (p *PendingProcess) String() string { return commandLine(p.command) }
 
-// Command sets the program and its arguments. PHP's command.
+// Command sets the program and its arguments.
 //
-// PHP takes array|string and lets Symfony escape the string form into a shell
-// line. This takes only the array form, and there is no string form to add:
-// see the package comment.
+// This takes only the array form, and there is no string form to add: see the
+// package comment.
 func (p *PendingProcess) Command(command ...string) *PendingProcess {
 	p.command = command
 	return p
 }
 
-// Path sets the working directory. PHP's path.
+// Path sets the working directory.
 func (p *PendingProcess) Path(path string) *PendingProcess {
 	p.path = path
 	return p
 }
 
-// Timeout sets how long the whole run may take. PHP's timeout.
+// Timeout sets how long the whole run may take.
 //
-// PHP counts seconds because that is what Symfony takes; this takes a
-// time.Duration, which is the same number with its unit written down. Zero is
-// no limit, which is what Forever sets.
+// Zero is no limit, which is what Forever sets.
 func (p *PendingProcess) Timeout(timeout time.Duration) *PendingProcess {
 	p.timeout = timeout
 	return p
 }
 
-// IdleTimeout sets how long the program may go without writing anything. PHP's
-// idleTimeout, in a Duration for the reason Timeout is.
+// IdleTimeout sets how long the program may go without writing anything.
 //
 // It is the bound that catches what a total timeout does not: a fetch whose
 // peer stopped answering, or a compiler waiting on a lock, both of which sit
@@ -101,28 +85,22 @@ func (p *PendingProcess) IdleTimeout(timeout time.Duration) *PendingProcess {
 	return p
 }
 
-// Forever removes the time limit. PHP's forever, which sets the timeout to
-// null.
+// Forever removes the time limit.
 func (p *PendingProcess) Forever() *PendingProcess {
 	p.timeout = 0
 	return p
 }
 
-// Env sets environment variables for the program. PHP's env.
+// Env sets environment variables for the program.
 //
 // They are added to the ones this process already has, not substituted for
-// them, which is what Symfony does with the same array -- os/exec would replace
-// the environment wholesale, and the caller who forgets to copy os.Environ
-// first ships a program that cannot find PATH. A name already set is overridden
-// by the value here.
+// them. A name already set is overridden by the value here.
 func (p *PendingProcess) Env(environment map[string]string) *PendingProcess {
 	p.environment = environment
 	return p
 }
 
-// Input sets what is written to the program's standard input. PHP's input,
-// whose union of string, resource and Traversable is a string, a []byte or an
-// io.Reader here.
+// Input sets what is written to the program's standard input.
 //
 // Standard input is closed once it has been written. Without an Input the
 // program reads an immediately closed input, never the terminal -- a command
@@ -132,19 +110,15 @@ func (p *PendingProcess) Input(input any) *PendingProcess {
 	return p
 }
 
-// Quietly discards the program's output instead of keeping it. PHP's quietly,
-// which calls Symfony's disableOutput.
+// Quietly discards the program's output instead of keeping it.
 //
-// Output and ErrorOutput then answer empty rather than throwing, which is the
-// one place this differs from PHP: a result that cannot be read is a result
-// nobody can log.
+// Output and ErrorOutput then answer empty rather than throwing.
 func (p *PendingProcess) Quietly() *PendingProcess {
 	p.quietly = true
 	return p
 }
 
-// Tty hands the program this process's own terminal. PHP's tty, whose default
-// argument of true is the empty call here.
+// Tty hands the program this process's own terminal.
 //
 // Output is not captured in this mode -- it goes straight to the terminal --
 // and the run fails if there is no terminal to hand over, which SupportsTty
@@ -154,9 +128,8 @@ func (p *PendingProcess) Tty(tty ...bool) *PendingProcess {
 	return p
 }
 
-// SupportsTty reports whether this machine has a terminal to hand over. It is
-// the newer Laravel's supportsTty, which the clone predates, and it is
-// Symfony's isTtySupported: whether /dev/tty can be opened.
+// SupportsTty reports whether this machine has a terminal to hand over, by
+// asking whether /dev/tty can be opened.
 func (p *PendingProcess) SupportsTty() bool {
 	terminal, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
@@ -167,35 +140,30 @@ func (p *PendingProcess) SupportsTty() bool {
 }
 
 // Options sets the attributes the operating system is handed when the process
-// is created. PHP's options, which are the ones it passes to proc_open.
+// is created.
 //
-// It is the same escape hatch under a different name: proc_open's options are
-// PHP's way to reach the process creation call, and SysProcAttr is Go's. What
-// is in it differs by platform, which is true on both sides.
+// What is in it differs by platform, which is true on both sides.
 func (p *PendingProcess) Options(options *syscall.SysProcAttr) *PendingProcess {
 	p.options = options
 	return p
 }
 
 // WithFakeHandlers gives the pending process the fakes it should answer with.
-// PHP's withFakeHandlers, which the factory calls on every process it makes.
 func (p *PendingProcess) WithFakeHandlers(fakeHandlers []FakeHandler) *PendingProcess {
 	p.fakeHandlers = fakeHandlers
 	return p
 }
 
-// Run runs the command and waits for it. PHP's run.
+// Run runs the command and waits for it.
 //
-// The command may be given here or with Command; nil here keeps the one already
-// set, which is PHP's `$command ?: $this->command`. The output handler is
-// PHP's second argument and may be nil.
+// The command may be given here or with Command; nil here keeps the one
+// already set.
 //
 // A command that exits non-zero is not an error: the result comes back with a
-// nil error and Failed reports it, exactly as in PHP. The error is for the
-// program that could not start, ran out of time, or was stray.
+// nil error and Failed reports it. The error is for the program that could not
+// start, ran out of time, or was stray.
 //
-// ctx has no counterpart in PHP and comes first because that is where Go puts
-// it. Cancelling it kills the program.
+// Cancelling it kills the program.
 func (p *PendingProcess) Run(ctx context.Context, command []string, output OutputHandler) (ProcessResult, error) {
 	if len(command) > 0 {
 		p.command = command
@@ -221,7 +189,7 @@ func (p *PendingProcess) Run(ctx context.Context, command []string, output Outpu
 	return invoked.Wait(nil)
 }
 
-// Start starts the command and returns while it is still running. PHP's start.
+// Start starts the command and returns while it is still running.
 //
 // The caller must call Wait on what comes back, or the program is never reaped.
 func (p *PendingProcess) Start(ctx context.Context, command []string, output OutputHandler) (InvokedProcess, error) {
@@ -246,10 +214,6 @@ func (p *PendingProcess) Start(ctx context.Context, command []string, output Out
 }
 
 // start is the real thing: no fake matched, so a program is launched.
-//
-// It stands for PHP's toSymfonyProcess followed by Symfony's start, and it is
-// where every setting on the pending process turns into something os/exec
-// understands.
 func (p *PendingProcess) start(ctx context.Context, output OutputHandler) (*invokedProcess, error) {
 	if ctx == nil {
 		return nil, errors.New("process: a nil context")
@@ -309,8 +273,8 @@ func (p *PendingProcess) start(ctx context.Context, output OutputHandler) (*invo
 	}
 
 	if p.tty {
-		// Symfony's TTY mode hands the child this process's own descriptors,
-		// so there is nothing left to capture and nothing to hand a handler.
+		// TTY mode hands the child this process's own descriptors, so there is
+		// nothing left to capture and nothing to hand a handler.
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	} else {
 		cmd.Stdin = stdin
@@ -332,9 +296,7 @@ func (p *PendingProcess) start(ctx context.Context, output OutputHandler) (*invo
 	if p.idleTimeout > 0 {
 		go invoked.watchIdle(p.idleTimeout, shared.bump)
 	}
-	// Reaped by this goroutine and not by Wait, so that Running becomes false
-	// on its own: `for invoked.Running()` is the loop PHP writes, and it never
-	// ends if only Wait can settle the process.
+	// Reaped by this goroutine and not by Wait.
 	go func() {
 		waitErr := cmd.Wait()
 		close(invoked.watching)
@@ -391,10 +353,7 @@ func (p *PendingProcess) stdin() (io.Reader, error) {
 	}
 }
 
-// fakeFor is the handler for a command line, or nil when none matched. PHP's
-// protected fakeFor, which takes the first pattern that is "*" or that Str::is
-// matches -- so order of registration decides, and a "*" registered first wins
-// over everything after it.
+// fakeFor is the handler for a command line, or nil when none matched.
 func (p *PendingProcess) fakeFor(command string) func(*PendingProcess) any {
 	for _, handler := range p.fakeHandlers {
 		if matchesCommand(handler.Command, command) {
@@ -404,9 +363,7 @@ func (p *PendingProcess) fakeFor(command string) func(*PendingProcess) any {
 	return nil
 }
 
-// resolveSynchronousFake turns what a handler returned into a result. PHP's
-// protected method of the same name, including the order of the cases: a
-// sequence is resolved by taking its next entry and starting again.
+// resolveSynchronousFake turns what a handler returned into a result.
 func (p *PendingProcess) resolveSynchronousFake(command string, fake func(*PendingProcess) any) (ProcessResult, error) {
 	switch result := fake(p).(type) {
 	case string:
@@ -431,10 +388,9 @@ func (p *PendingProcess) resolveSynchronousFake(command string, fake func(*Pendi
 }
 
 // resolveAsynchronousFake turns what a handler returned into a started fake.
-// PHP's protected method of the same name.
 //
 // A plain result becomes a description that prints it all at once and is
-// finished on the first question, which is what PHP builds from the same input.
+// finished on the first question.
 func (p *PendingProcess) resolveAsynchronousFake(command string, output OutputHandler, fake func(*PendingProcess) any) (*FakeInvokedProcess, error) {
 	switch result := fake(p).(type) {
 	case string:

@@ -107,8 +107,7 @@ func TestNotificationFakeAssertSentToASliceOfNotifiables(t *testing.T) {
 	notifications.AssertSentTo(r, []any{user{Key: "1"}, user{Key: "2"}}, reflect.TypeFor[welcomeNote](), nil)
 	assertPasses(t, r)
 
-	// An assertion over nothing passes without checking anything, so an empty
-	// slice is the caller's mistake, as it is in the PHP.
+	// An assertion over nothing passes without checking anything.
 	r = &recorder{}
 	notifications.AssertSentTo(r, []any{}, reflect.TypeFor[welcomeNote](), nil)
 	assertFails(t, r, "no notifiable given")
@@ -352,7 +351,7 @@ func TestNotificationFakeSentAndHasSent(t *testing.T) {
 func TestNotificationFakeSerializeAndRestore(t *testing.T) {
 	t.Parallel()
 
-	// Only a queued notification takes the round trip, as in the PHP.
+	// Only a queued notification takes the round trip.
 	notifications := NewNotificationFake().SerializeAndRestore(true)
 	inline := &invoicePaid{Amount: 10}
 	notifications.Send(user{Key: "1"}, inline)

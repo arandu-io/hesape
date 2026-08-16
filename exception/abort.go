@@ -10,19 +10,15 @@ import (
 
 // StatusPageExpired is 419, which is not in any RFC.
 //
-// Laravel answers an expired or missing CSRF token with it, and the whole
-// ecosystem -- browsers, proxies, monitoring dashboards, the person reading the
-// access log -- has learned to read 419 as "your page went stale, reload it".
-// 403 would be the standard answer and it is the wrong one: it says the account
-// may not do this, when the account may, and the form is simply old.
+// 403 would be the standard answer and it is the wrong one: it says the
+// account may not do this, when the account may, and the form is simply old.
 const StatusPageExpired = 419
 
 // HTTPError is an error that names the answer it wants.
 //
 // It is what Abort returns and the only thing an application uses to choose a
 // status. The Message is shown to whoever made the request, in every
-// environment, so it is written for them: it is the developer's own sentence,
-// the way Laravel's abort(403, '...') is, and never a driver's error text.
+// environment, so it is written for them: it is the developer's own sentence.
 type HTTPError struct {
 	// Status is the HTTP status to answer with.
 	Status int
@@ -34,11 +30,9 @@ type HTTPError struct {
 	// Headers are what the answer carries besides the status: the Retry-After
 	// of a 429, the WWW-Authenticate of a 401.
 	//
-	// It is HttpException::getHeaders, which every displayer in the PHP copies
-	// onto the response. Nothing here had it, so a 429 went out with no
-	// Retry-After and a client had nothing to obey. Abort does not take them --
-	// the common failure has none -- so an answer that carries headers is
-	// written as the value it is:
+	// Nothing here had it, so a 429 went out with no Retry-After and a client had
+	// nothing to obey. Abort does not take them -- the common failure has none --
+	// so an answer that carries headers is written as the value it is:
 	//
 	//	&exception.HTTPError{
 	//		Status:  http.StatusTooManyRequests,
@@ -47,9 +41,7 @@ type HTTPError struct {
 	Headers http.Header
 }
 
-// Error has no Illuminate counterpart: it is what implements the error
-// interface here, where PHP has a base Exception the engine already knows how
-// to print.
+// Error is what makes an *HTTPError satisfy the error interface.
 //
 // It carries the status because this string ends up in a log line, where the
 // number is the first thing anybody looks for.
@@ -65,11 +57,10 @@ func (e *HTTPError) Error() string {
 	return out
 }
 
-// Unwrap has no Illuminate counterpart: it is what answers errors.Is and
-// errors.As here, exposing the cause the way PHP walks its own previous chain.
+// Unwrap exposes the cause, so errors.Is and errors.As reach through it.
 func (e *HTTPError) Unwrap() error { return e.Err }
 
-// Abort is Application::abort -- what the abort() helper calls -- as a value.
+// Abort builds a failure as a value rather than raising one.
 //
 //	return exception.Abort(http.StatusNotFound, "no invoice with that number")
 //
@@ -88,16 +79,14 @@ func Abort(status int, message string) error {
 	return &HTTPError{Status: status, Message: message}
 }
 
-// AbortIf is the abort_if() helper, which throws through Application::abort:
-// the failure when the condition holds, and nil when it does not.
+// AbortIf is the abort_if() helper.
 //
 //	if err := exception.AbortIf(invoice.Locked, http.StatusConflict, "this invoice is closed"); err != nil {
 //		return err
 //	}
 //
-// The PHP throws, so its body ends at the call. Nothing here throws, so the
-// caller returns the error -- which is why this reads as one line and not as
-// the same if statement written twice.
+// Nothing here throws, so the caller returns the error -- which is why this
+// reads as one line and not as the same if statement written twice.
 func AbortIf(condition bool, status int, message string) error {
 	if !condition {
 		return nil
@@ -105,8 +94,7 @@ func AbortIf(condition bool, status int, message string) error {
 	return Abort(status, message)
 }
 
-// AbortUnless is the abort_unless() helper, which throws through
-// Application::abort: the failure when the condition does not hold.
+// AbortUnless is the abort_unless() helper.
 //
 //	if err := exception.AbortUnless(invoice != nil, http.StatusNotFound, ""); err != nil {
 //		return err
@@ -115,8 +103,8 @@ func AbortUnless(condition bool, status int, message string) error {
 	return AbortIf(!condition, status, message)
 }
 
-// StatusOf is Handler::isHttpException and the getStatusCode that follows it,
-// in one answer: the HTTP status an error asks for, and whether it asked.
+// StatusOf reads an error chain and answers two things at once: the HTTP status
+// the error asks for, and whether it asked at all.
 //
 // It is what the routing layer calls with whatever a controller action
 // returned. False means nobody claimed the error, which is a 500 and, in
@@ -125,7 +113,7 @@ func StatusOf(err error) (int, bool) { return classify(err) }
 
 // classify is the closed table of what the collection's own errors mean.
 //
-// Closed is the point (RULE 15). Every entry here is a sentinel this collection
+// Closed is the point. Every entry here is a sentinel this collection
 // declares, so the list cannot grow with an application's own errors -- those
 // say what they want with Abort, which is the one mechanism, and cannot end up
 // with two ways to mean 403.
@@ -146,7 +134,7 @@ func classify(err error) (int, bool) {
 	// A policy refused, or a repository was reached without a Grant. Both are
 	// auth.ErrForbidden, and both are 403 rather than 404: this collection does
 	// not hide the existence of a resource behind a status, because the tenant
-	// filter has already decided what exists at all (RULE 14).
+	// filter has already decided what exists at all.
 	case errors.Is(err, auth.ErrForbidden):
 		return http.StatusForbidden, true
 	case errors.Is(err, session.ErrTokenMismatch):

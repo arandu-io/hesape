@@ -9,11 +9,9 @@ import (
 
 // FakeInvokedProcess is a started process that was never started.
 //
-// It answers to Illuminate\Process\FakeInvokedProcess, and it is what
-// PendingProcess.Start hands back when a fake handler matched. It replays a
-// FakeProcessDescription: every question asked of it -- ID, Running, Signal --
-// hands the output handler one more line, so a test's watching loop sees output
-// arrive the way it would from a program.
+// It replays a FakeProcessDescription: every question asked of it -- ID,
+// Running, Signal -- hands the output handler one more line, so a test's
+// watching loop sees output arrive the way it would from a program.
 //
 // That is the part worth knowing before writing a test against it: the output
 // does not arrive on its own, because nothing is running. It arrives because
@@ -32,17 +30,15 @@ type FakeInvokedProcess struct {
 
 var _ InvokedProcess = (*FakeInvokedProcess)(nil)
 
-// NewFakeInvokedProcess is PHP's constructor: the command line the fake stands
+// NewFakeInvokedProcess builds a fake: the command line the fake stands
 // for, and the description it replays.
 func NewFakeInvokedProcess(command string, process *FakeProcessDescription) *FakeInvokedProcess {
 	return &FakeInvokedProcess{command: command, process: process}
 }
 
-// ID is the process id the description was given. PHP's id.
+// ID is the process id the description was given.
 //
-// Asking hands the output handler one more line, which is PHP's behaviour and
-// not an accident of this port: a loop that polls the process is the only clock
-// a fake has.
+// Asking hands the output handler one more line.
 func (p *FakeInvokedProcess) ID() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -50,7 +46,7 @@ func (p *FakeInvokedProcess) ID() int {
 	return p.process.processID
 }
 
-// Signal records a signal against the fake. PHP's signal.
+// Signal records a signal against the fake.
 //
 // Nothing is killed, because nothing is running; HasReceivedSignal is how a
 // test asks whether the code under test sent it. The error is always nil, and
@@ -64,7 +60,6 @@ func (p *FakeInvokedProcess) Signal(signal os.Signal) error {
 }
 
 // HasReceivedSignal reports whether Signal was called with the given signal.
-// PHP's hasReceivedSignal.
 func (p *FakeInvokedProcess) HasReceivedSignal(signal os.Signal) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -76,9 +71,7 @@ func (p *FakeInvokedProcess) HasReceivedSignal(signal os.Signal) bool {
 	return false
 }
 
-// Stop records a stop against the fake and finishes it. It is the newer
-// Laravel's InvokedProcess::stop, which the clone does not have; the signal is
-// recorded the way Signal records one, and both arguments may be zero.
+// Stop records a stop against the fake and finishes it.
 func (p *FakeInvokedProcess) Stop(timeout time.Duration, signal os.Signal) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -90,7 +83,7 @@ func (p *FakeInvokedProcess) Stop(timeout time.Duration, signal os.Signal) error
 	return nil
 }
 
-// Running reports whether the fake still counts as running. PHP's running.
+// Running reports whether the fake still counts as running.
 //
 // It answers true as many times as the description's RunsFor, then false
 // forever -- and on the answer that turns false it flushes every remaining line
@@ -114,9 +107,8 @@ func (p *FakeInvokedProcess) Running() bool {
 	return true
 }
 
-// emitNextLine hands the output handler the next line neither cursor has passed
-// yet, and reports whether there was one. It is PHP's
-// invokeOutputHandlerWithNextLineOfOutput, cursors and all.
+// emitNextLine hands the output handler the next line neither cursor has
+// passed yet, and reports whether there was one.
 //
 // Called with the lock held.
 func (p *FakeInvokedProcess) emitNextLine() bool {
@@ -140,12 +132,11 @@ func (p *FakeInvokedProcess) emitNextLine() bool {
 	return false
 }
 
-// Output is the standard output the fake has produced so far. PHP's output.
+// Output is the standard output the fake has produced so far.
 //
 // So far, and not in total: only lines the cursor has reached count, so a test
 // that asks before the fake has been polled sees less than the description
-// holds. Asking advances the cursor by one line first, which is PHP's
-// latestOutput call at the top of the same method.
+// holds. Asking advances the cursor by one line first.
 func (p *FakeInvokedProcess) Output() string {
 	p.LatestOutput()
 
@@ -154,8 +145,7 @@ func (p *FakeInvokedProcess) Output() string {
 	return p.collected(Out, p.nextOutputIndex)
 }
 
-// ErrorOutput is the error output the fake has produced so far. PHP's
-// errorOutput.
+// ErrorOutput is the error output the fake has produced so far.
 func (p *FakeInvokedProcess) ErrorOutput() string {
 	p.LatestErrorOutput()
 
@@ -165,10 +155,6 @@ func (p *FakeInvokedProcess) ErrorOutput() string {
 }
 
 // collected joins one stream up to a cursor. Called with the lock held.
-//
-// The ending is PHP's, and PHP's is odd on purpose or by accident: an empty
-// stream comes back as a single newline rather than as nothing, because the
-// rtrim runs on the join and the newline is concatenated after it.
 func (p *FakeInvokedProcess) collected(stream Stream, upTo int) string {
 	var joined strings.Builder
 	for i := 0; i < upTo && i < len(p.process.output); i++ {
@@ -180,8 +166,7 @@ func (p *FakeInvokedProcess) collected(stream Stream, upTo int) string {
 }
 
 // LatestOutput is the next line of standard output, and the empty string once
-// there are none left. PHP's latestOutput, which is Symfony's
-// getIncrementalOutput.
+// there are none left.
 //
 // One line, not everything since the last call: the cursor moves by one
 // matching entry, and by every non-matching one it stepped over on the way.
@@ -191,7 +176,7 @@ func (p *FakeInvokedProcess) LatestOutput() string {
 	return p.latest(Out)
 }
 
-// LatestErrorOutput is the next line of error output. PHP's latestErrorOutput.
+// LatestErrorOutput is the next line of error output.
 func (p *FakeInvokedProcess) LatestErrorOutput() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -214,12 +199,11 @@ func (p *FakeInvokedProcess) latest(stream Stream) string {
 }
 
 // Wait finishes the fake and returns the result the description ends with.
-// PHP's wait.
 //
-// A handler passed here replaces the one Start was given, as it does in PHP.
-// With any handler at all, every line still unread is flushed to it before the
-// result comes back -- which is what makes a fake started process end up having
-// printed everything, whether the test polled it or not.
+// A handler passed here replaces the one Start was given. With any handler at
+// all, every line still unread is flushed to it before the result comes back
+// -- which is what makes a fake started process end up having printed
+// everything, whether the test polled it or not.
 func (p *FakeInvokedProcess) Wait(output OutputHandler) (ProcessResult, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -240,16 +224,14 @@ func (p *FakeInvokedProcess) Wait(output OutputHandler) (ProcessResult, error) {
 }
 
 // PredictProcessResult is the result this fake will end with, asked before it
-// ends. PHP's predictProcessResult, which the factory uses to record a started
-// fake at the moment it starts.
+// ends.
 func (p *FakeInvokedProcess) PredictProcessResult() ProcessResult {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.process.ToProcessResult(p.command)
 }
 
-// WithOutputHandler sets the handler every question will feed. PHP's
-// withOutputHandler, which takes the callable Start was given.
+// WithOutputHandler sets the handler every question will feed.
 func (p *FakeInvokedProcess) WithOutputHandler(output OutputHandler) *FakeInvokedProcess {
 	p.mu.Lock()
 	defer p.mu.Unlock()

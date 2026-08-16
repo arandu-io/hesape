@@ -8,17 +8,17 @@ import (
 )
 
 // Number is the set of types Sum can add. It is written out here rather than
-// imported, because the core carries no dependency beyond golang.org/x/crypto.
-// Complex numbers are absent on purpose: nothing a Sum is asked for in an
-// application is complex, and admitting them would make the zero value of an
-// empty sum harder to explain than it is worth.
+// imported, so that the package carries no dependency for it.
+//
+// Complex numbers are absent on purpose: admitting them would make the zero
+// value of an empty sum harder to explain than it is worth.
 type Number interface {
 	~int | ~int8 | ~int16 | ~int32 | ~int64 |
 		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr |
 		~float32 | ~float64
 }
 
-// Map answers to Illuminate\Support\Collection::map.
+// Map returns the result of the callback for every element, in order.
 //
 // It is a function and not a method because the callback changes the element
 // type, and a Go method cannot declare a type parameter.
@@ -30,14 +30,12 @@ func Map[T, U any](c Collection[T], callback func(value T, key int) U) Collectio
 	return Collection[U](out)
 }
 
-// MapSpread answers to
-// Illuminate\Support\Traits\EnumeratesValues::mapSpread: each nested chunk
-// spread across the callback's arguments.
+// MapSpread spreads each nested chunk across the callback's arguments.
 //
-// The PHP appends the key to the chunk before spreading it -- $chunk[] = $key
-// -- so the callback receives the chunk's elements and then the position. That
-// is why the element type is []any and not []T: the trailing key is an int and
-// the elements need not be.
+// The position is appended to the chunk before it is spread, so the callback
+// receives the chunk's elements and then that position. That is why the
+// element type is []any and not []T: the trailing key is an int and the
+// elements need not be.
 func MapSpread[U any](c Collection[[]any], callback func(values ...any) U) Collection[U] {
 	out := make([]U, len(c))
 	for i, chunk := range c {
@@ -46,11 +44,11 @@ func MapSpread[U any](c Collection[[]any], callback func(values ...any) U) Colle
 	return Collection[U](out)
 }
 
-// EachSpread answers to
-// Illuminate\Support\Traits\EnumeratesValues::eachSpread.
+// EachSpread hands each nested chunk to the callback, spread across its
+// arguments, and returns the collection unchanged.
 //
 // As in MapSpread the position is appended to the chunk before it is spread.
-// Returning false from the callback stops the walk, as it does in PHP.
+// Returning false from the callback stops the walk.
 func EachSpread(c Collection[[]any], callback func(values ...any) bool) Collection[[]any] {
 	for i, chunk := range c {
 		if !callback(spreadWithKey(chunk, i)...) {
@@ -60,7 +58,7 @@ func EachSpread(c Collection[[]any], callback func(values ...any) bool) Collecti
 	return c
 }
 
-// spreadWithKey is the PHP's $chunk[] = $key, done on a copy so that the
+// spreadWithKey appends the key to the chunk, on a copy, so that the
 // collection's own chunk is not grown by being spread.
 func spreadWithKey(chunk []any, key int) []any {
 	out := make([]any, 0, len(chunk)+1)
@@ -68,10 +66,10 @@ func spreadWithKey(chunk []any, key int) []any {
 	return append(out, key)
 }
 
-// MapInto answers to Illuminate\Support\Traits\EnumeratesValues::mapInto.
+// MapInto builds a U from every element by handing it to into.
 //
-// PHP names a class and calls its constructor with the item; Go has no class
-// name to pass, so the constructor itself is the argument.
+// The constructor itself is the argument: Go cannot reach a type from a name
+// in a string, so there is no class name to pass.
 func MapInto[T, U any](c Collection[T], into func(value T) U) Collection[U] {
 	out := make([]U, len(c))
 	for i, v := range c {
@@ -80,7 +78,7 @@ func MapInto[T, U any](c Collection[T], into func(value T) U) Collection[U] {
 	return Collection[U](out)
 }
 
-// FlatMap answers to Illuminate\Support\Traits\EnumeratesValues::flatMap.
+// FlatMap concatenates the slice the callback returns for every element.
 func FlatMap[T, U any](c Collection[T], callback func(value T, key int) []U) Collection[U] {
 	out := make([]U, 0, len(c))
 	for i, v := range c {
@@ -89,11 +87,11 @@ func FlatMap[T, U any](c Collection[T], callback func(value T, key int) []U) Col
 	return Collection[U](out)
 }
 
-// Pluck answers to Illuminate\Support\Collection::pluck.
+// Pluck reads one field off every element.
 //
-// PHP names a field with a string; Go names it with an accessor. The optional
-// $key argument of pluck($value, $key) is MapWithKeys here, because Go cannot
-// infer the type of a key that was not passed.
+// The field is named with an accessor rather than a string, because Go cannot
+// reach a field from a name at run time. To key the result by a second field,
+// use MapWithKeys.
 func Pluck[T, V any](c Collection[T], value func(item T) V) Collection[V] {
 	out := make([]V, len(c))
 	for i, v := range c {
@@ -102,9 +100,8 @@ func Pluck[T, V any](c Collection[T], value func(item T) V) Collection[V] {
 	return Collection[V](out)
 }
 
-// Value answers to Illuminate\Support\Traits\EnumeratesValues::value: the
-// field of the first item. The second result is false on an empty collection,
-// where PHP returns the default.
+// Value reads one field off the first item. The second result is false on an
+// empty collection.
 func Value[T, V any](c Collection[T], key func(item T) V) (V, bool) {
 	if len(c) == 0 {
 		var zero V
@@ -113,7 +110,8 @@ func Value[T, V any](c Collection[T], key func(item T) V) (V, bool) {
 	return key(c[0]), true
 }
 
-// Reduce answers to Illuminate\Support\Traits\EnumeratesValues::reduce.
+// Reduce folds the elements into a single value, starting from initial and
+// carrying the callback's result forward.
 func Reduce[T, A any](c Collection[T], callback func(carry A, value T, key int) A, initial A) A {
 	carry := initial
 	for i, v := range c {
@@ -122,20 +120,16 @@ func Reduce[T, A any](c Collection[T], callback func(carry A, value T, key int) 
 	return carry
 }
 
-// ReduceWithKeys answers to
-// Illuminate\Support\Traits\EnumeratesValues::reduceWithKeys, which Illuminate
-// defines as reduce under a name that says the key is passed.
+// ReduceWithKeys is Reduce, under a name that says the key is passed to the
+// callback.
 func ReduceWithKeys[T, A any](c Collection[T], callback func(carry A, value T, key int) A, initial A) A {
 	return Reduce(c, callback, initial)
 }
 
-// ReduceSpread answers to
-// Illuminate\Support\Traits\EnumeratesValues::reduceSpread: a reduction that
-// carries several accumulators at once.
+// ReduceSpread is a reduction that carries several accumulators at once.
 //
-// PHP throws UnexpectedValueException when the reducer returns something other
-// than an array; the Go signature makes that unrepresentable except by
-// returning a nil slice, which is reported as ErrUnexpectedValue.
+// A reducer that returns a nil slice stops the fold and is reported as
+// ErrUnexpectedValue.
 func ReduceSpread[T, A any](c Collection[T], callback func(carry []A, value T, key int) []A, initial ...A) ([]A, error) {
 	carry := append(make([]A, 0, len(initial)), initial...)
 	for i, v := range c {
@@ -147,24 +141,23 @@ func ReduceSpread[T, A any](c Collection[T], callback func(carry []A, value T, k
 	return carry, nil
 }
 
-// Pipe answers to Illuminate\Support\Traits\EnumeratesValues::pipe.
+// Pipe hands the whole collection to the callback and returns its result.
 func Pipe[T, U any](c Collection[T], callback func(collection Collection[T]) U) U {
 	return callback(c)
 }
 
-// PipeInto answers to Illuminate\Support\Traits\EnumeratesValues::pipeInto.
+// PipeInto builds a U from the whole collection by handing it to into.
 //
-// PHP names a class and calls its constructor with the collection; Go passes
-// the constructor.
+// As in MapInto the constructor itself is the argument.
 func PipeInto[T, U any](c Collection[T], into func(collection Collection[T]) U) U {
 	return into(c)
 }
 
-// GroupBy answers to Illuminate\Support\Collection::groupBy.
+// GroupBy gathers the items under the key the callback reads off each one.
 //
-// Within each group the items keep the order they had in the collection. PHP's
-// $preserveKeys argument has no counterpart, because the keys of a
-// Collection[T] are positions and a group renumbers them.
+// Within each group the items keep the order they had in the collection. The
+// keys of a Collection[T] are positions, and a group renumbers them, so the
+// original positions are not preserved.
 func GroupBy[T any, K comparable](c Collection[T], groupBy func(value T, key int) K) map[K]Collection[T] {
 	out := make(map[K]Collection[T])
 	for i, v := range c {
@@ -174,9 +167,9 @@ func GroupBy[T any, K comparable](c Collection[T], groupBy func(value T, key int
 	return out
 }
 
-// KeyBy answers to Illuminate\Support\Collection::keyBy.
+// KeyBy keys the items by what the callback reads off each one.
 //
-// When two items share a key the later one wins, as it does in PHP.
+// When two items share a key the later one wins.
 func KeyBy[T any, K comparable](c Collection[T], keyBy func(value T, key int) K) map[K]T {
 	out := make(map[K]T, len(c))
 	for i, v := range c {
@@ -185,7 +178,7 @@ func KeyBy[T any, K comparable](c Collection[T], keyBy func(value T, key int) K)
 	return out
 }
 
-// CountBy answers to Illuminate\Support\Collection::countBy.
+// CountBy counts how many items fall under each key the callback reads.
 func CountBy[T any, K comparable](c Collection[T], countBy func(value T, key int) K) map[K]int {
 	out := make(map[K]int)
 	for i, v := range c {
@@ -194,9 +187,8 @@ func CountBy[T any, K comparable](c Collection[T], countBy func(value T, key int
 	return out
 }
 
-// MapWithKeys answers to Illuminate\Support\Collection::mapWithKeys.
-//
-// PHP returns a single-entry array from the callback; Go returns the pair.
+// MapWithKeys builds a map from the key and value the callback returns for
+// every element. A repeated key keeps the last value.
 func MapWithKeys[T any, K comparable, V any](c Collection[T], callback func(value T, key int) (K, V)) map[K]V {
 	out := make(map[K]V, len(c))
 	for i, v := range c {
@@ -206,9 +198,8 @@ func MapWithKeys[T any, K comparable, V any](c Collection[T], callback func(valu
 	return out
 }
 
-// MapToDictionary answers to
-// Illuminate\Support\Collection::mapToDictionary: every key keeps all the
-// values mapped onto it, in order.
+// MapToDictionary is MapWithKeys where every key keeps all the values mapped
+// onto it, in order, rather than only the last.
 func MapToDictionary[T any, K comparable, V any](c Collection[T], callback func(value T, key int) (K, V)) map[K][]V {
 	out := make(map[K][]V)
 	for i, v := range c {
@@ -218,9 +209,7 @@ func MapToDictionary[T any, K comparable, V any](c Collection[T], callback func(
 	return out
 }
 
-// MapToGroups answers to
-// Illuminate\Support\Traits\EnumeratesValues::mapToGroups, which Illuminate
-// defines as mapToDictionary with each bucket wrapped in a collection.
+// MapToGroups is MapToDictionary with each bucket wrapped in a collection.
 func MapToGroups[T any, K comparable, V any](c Collection[T], callback func(value T, key int) (K, V)) map[K]Collection[V] {
 	out := make(map[K]Collection[V])
 	for k, v := range MapToDictionary(c, callback) {
@@ -229,10 +218,9 @@ func MapToGroups[T any, K comparable, V any](c Collection[T], callback func(valu
 	return out
 }
 
-// Flip answers to Illuminate\Support\Collection::flip.
+// Flip maps every value to its position.
 //
-// The keys of a Collection[T] are positions, so flipping gives value to
-// position. When a value repeats, the last position wins, as in PHP.
+// When a value repeats, the last position wins.
 func Flip[T comparable](c Collection[T]) map[T]int {
 	out := make(map[T]int, len(c))
 	for i, v := range c {
@@ -241,10 +229,10 @@ func Flip[T comparable](c Collection[T]) map[T]int {
 	return out
 }
 
-// Combine answers to Illuminate\Support\Collection::combine: this collection
-// supplies the keys and values supplies the values.
+// Combine builds a map, this collection supplying the keys and values the
+// values.
 //
-// Pairing stops at the shorter of the two, where PHP raises a warning.
+// Pairing stops at the shorter of the two.
 func Combine[K comparable, V any](keys Collection[K], values []V) map[K]V {
 	n := min(len(keys), len(values))
 	out := make(map[K]V, n)
@@ -254,7 +242,7 @@ func Combine[K comparable, V any](keys Collection[K], values []V) map[K]V {
 	return out
 }
 
-// Unique answers to Illuminate\Support\Traits\EnumeratesValues::unique.
+// Unique drops the items whose key the callback has already produced.
 //
 // The first item carrying a key is the one kept, and the order of the
 // collection survives.
@@ -272,17 +260,15 @@ func Unique[T any, K comparable](c Collection[T], key func(value T, k int) K) Co
 	return Collection[T](out)
 }
 
-// UniqueStrict answers to
-// Illuminate\Support\Traits\EnumeratesValues::uniqueStrict.
-//
-// Go's == is already PHP's ===, so this is Unique under the second name
-// Illuminate gives it.
+// UniqueStrict drops the repeated keys exactly as Unique does. Go's == is
+// already an identity comparison, so the two collapse into one behaviour and
+// this name forwards to Unique.
 func UniqueStrict[T any, K comparable](c Collection[T], key func(value T, k int) K) Collection[T] {
 	return Unique(c, key)
 }
 
-// Duplicates answers to Illuminate\Support\Collection::duplicates: the keys
-// that appear more than once, in the order their repeats appear.
+// Duplicates reports the keys that appear more than once, in the order their
+// repeats appear. A key seen three times is reported twice.
 func Duplicates[T any, K comparable](c Collection[T], key func(value T, k int) K) Collection[K] {
 	seen := make(map[K]struct{}, len(c))
 	out := make([]K, 0)
@@ -298,20 +284,17 @@ func Duplicates[T any, K comparable](c Collection[T], key func(value T, k int) K
 }
 
 // DuplicatesStrict reports the keys that appear more than once, exactly as
-// Duplicates does. PHP carries two functions because loose == and strict ===
-// find different repeats there; Go's == is already the strict comparison, so
-// the two collapse into one behaviour and this name forwards to Duplicates.
-//
-// Answers Illuminate\Support\Collection::duplicatesStrict.
+// Duplicates does. Go's == is already an identity comparison, so the two
+// collapse into one behaviour and this name forwards to Duplicates.
 func DuplicatesStrict[T any, K comparable](c Collection[T], key func(value T, k int) K) Collection[K] {
 	return Duplicates(c, key)
 }
 
-// Sum answers to Illuminate\Support\Traits\EnumeratesValues::sum.
+// Sum adds the number the projection reads off every element.
 //
-// It returns the zero of N on an empty collection, as PHP returns 0. There is
-// no form without the projection: over a collection of numbers, pass a function
-// that returns its argument.
+// It returns the zero of N on an empty collection. There is no form without
+// the projection: over a collection of numbers, pass a function that returns
+// its argument.
 func Sum[T any, N Number](c Collection[T], value func(item T) N) N {
 	var total N
 	for _, v := range c {
@@ -320,9 +303,9 @@ func Sum[T any, N Number](c Collection[T], value func(item T) N) N {
 	return total
 }
 
-// Avg answers to Illuminate\Support\Traits\EnumeratesValues::avg.
+// Avg returns the mean of the number the projection reads off every element.
 //
-// The second result is false on an empty collection, where PHP returns null.
+// The second result is false on an empty collection.
 func Avg[T any, N Number](c Collection[T], value func(item T) N) (float64, bool) {
 	if len(c) == 0 {
 		return 0, false
@@ -330,16 +313,15 @@ func Avg[T any, N Number](c Collection[T], value func(item T) N) (float64, bool)
 	return float64(Sum(c, value)) / float64(len(c)), true
 }
 
-// Average answers to Illuminate\Support\Traits\EnumeratesValues::average,
-// which Illuminate defines as an alias of avg.
+// Average is Avg.
 func Average[T any, N Number](c Collection[T], value func(item T) N) (float64, bool) {
 	return Avg(c, value)
 }
 
-// Median answers to Illuminate\Support\Collection::median.
+// Median returns the middle of the numbers the projection reads.
 //
-// With an even count it averages the two middle values, as PHP does. The second
-// result is false on an empty collection, where PHP returns null.
+// With an even count it averages the two middle values. The second result is
+// false on an empty collection.
 func Median[T any, N Number](c Collection[T], value func(item T) N) (float64, bool) {
 	if len(c) == 0 {
 		return 0, false
@@ -356,10 +338,9 @@ func Median[T any, N Number](c Collection[T], value func(item T) N) (float64, bo
 	return (values[middle-1] + values[middle]) / 2, true
 }
 
-// Mode answers to Illuminate\Support\Collection::mode: the values that occur
-// most often, sorted ascending.
+// Mode returns the values that occur most often, sorted ascending.
 //
-// The result is nil on an empty collection, where PHP returns null.
+// The result is nil on an empty collection.
 func Mode[T any, N cmp.Ordered](c Collection[T], value func(item T) N) []N {
 	if len(c) == 0 {
 		return nil
@@ -382,9 +363,9 @@ func Mode[T any, N cmp.Ordered](c Collection[T], value func(item T) N) []N {
 	return out
 }
 
-// Min answers to Illuminate\Support\Traits\EnumeratesValues::min.
+// Min returns the smallest value the projection reads.
 //
-// The second result is false on an empty collection, where PHP returns null.
+// The second result is false on an empty collection.
 func Min[T any, V cmp.Ordered](c Collection[T], value func(item T) V) (V, bool) {
 	var lowest V
 	if len(c) == 0 {
@@ -397,7 +378,9 @@ func Min[T any, V cmp.Ordered](c Collection[T], value func(item T) V) (V, bool) 
 	return lowest, true
 }
 
-// Max answers to Illuminate\Support\Traits\EnumeratesValues::max.
+// Max returns the largest value the projection reads.
+//
+// The second result is false on an empty collection.
 func Max[T any, V cmp.Ordered](c Collection[T], value func(item T) V) (V, bool) {
 	var highest V
 	if len(c) == 0 {
@@ -410,8 +393,8 @@ func Max[T any, V cmp.Ordered](c Collection[T], value func(item T) V) (V, bool) 
 	return highest, true
 }
 
-// SortBy answers to Illuminate\Support\Collection::sortBy. The sort is stable,
-// as PHP's is.
+// SortBy orders the elements by the value the callback reads off each one. The
+// sort is stable.
 func SortBy[T any, V cmp.Ordered](c Collection[T], callback func(value T, key int) V) Collection[T] {
 	type keyed struct {
 		item T
@@ -429,16 +412,16 @@ func SortBy[T any, V cmp.Ordered](c Collection[T], callback func(value T, key in
 	return Collection[T](out)
 }
 
-// SortByDesc answers to Illuminate\Support\Collection::sortByDesc.
+// SortByDesc is SortBy with the order reversed.
 func SortByDesc[T any, V cmp.Ordered](c Collection[T], callback func(value T, key int) V) Collection[T] {
 	return SortBy(c, callback).Reverse()
 }
 
-// Where answers to Illuminate\Support\Traits\EnumeratesValues::where.
+// Where keeps the items whose projected key compares to value under the
+// operator.
 //
-// The operator is one of "=", "==", "===", "!=", "<>", "!==", ">", ">=", "<",
-// "<=", the same set PHP accepts. PHP's two-argument form where($key, $value)
-// is this with "=". An unknown operator matches nothing, as in PHP.
+// The operator is one of "=", "==", "===", "!=", "<>", "!==", ">", ">=", "<"
+// and "<=". An unknown operator matches nothing.
 func Where[T any, V cmp.Ordered](c Collection[T], key func(item T) V, operator string, value V) Collection[T] {
 	return c.Filter(func(item T, _ int) bool {
 		return compareOperator(key(item), operator, value)
@@ -452,21 +435,20 @@ func Where[T any, V cmp.Ordered](c Collection[T], key func(item T) V, operator s
 // The second result is false when nothing matches, so a zero-valued item is
 // never mistaken for a hit. The whole collection is filtered before the first
 // survivor is taken, so this is a convenience over Where, not a cheaper scan.
-//
-// Answers Illuminate\Support\Traits\EnumeratesValues::firstWhere.
 func FirstWhere[T any, V cmp.Ordered](c Collection[T], key func(item T) V, operator string, value V) (T, bool) {
 	return Where(c, key, operator, value).First(nil)
 }
 
-// WhereStrict answers to
-// Illuminate\Support\Traits\EnumeratesValues::whereStrict.
-//
-// Go's == is already PHP's ===, so no operator is taken.
+// WhereStrict keeps the items whose projected key equals value. It takes no
+// operator: Go's == is already an identity comparison.
 func WhereStrict[T any, V comparable](c Collection[T], key func(item T) V, value V) Collection[T] {
 	return c.Filter(func(item T, _ int) bool { return key(item) == value })
 }
 
-// WhereIn answers to Illuminate\Support\Traits\EnumeratesValues::whereIn.
+// WhereIn keeps the items whose projected key is one of values.
+//
+// The order of the collection survives, and values is loaded into a set before
+// the scan, so the cost is one pass regardless of how long values is.
 func WhereIn[T any, V comparable](c Collection[T], key func(item T) V, values []V) Collection[T] {
 	want := make(map[V]struct{}, len(values))
 	for _, v := range values {
@@ -479,11 +461,8 @@ func WhereIn[T any, V comparable](c Collection[T], key func(item T) V, values []
 }
 
 // WhereInStrict keeps the items whose projected key is one of values, exactly
-// as WhereIn does. PHP carries two functions because its in_array compares
-// loosely unless asked otherwise; Go's == is already the strict comparison, so
-// this name forwards to WhereIn.
-//
-// Answers Illuminate\Support\Traits\EnumeratesValues::whereInStrict.
+// as WhereIn does. Go's == is already an identity comparison, so this name
+// forwards to WhereIn.
 func WhereInStrict[T any, V comparable](c Collection[T], key func(item T) V, values []V) Collection[T] {
 	return WhereIn(c, key, values)
 }
@@ -494,8 +473,6 @@ func WhereInStrict[T any, V comparable](c Collection[T], key func(item T) V, val
 //
 // The order of the collection survives, and values is loaded into a set
 // before the scan, so the cost is one pass regardless of how long values is.
-//
-// Answers Illuminate\Support\Traits\EnumeratesValues::whereNotIn.
 func WhereNotIn[T any, V comparable](c Collection[T], key func(item T) V, values []V) Collection[T] {
 	want := make(map[V]struct{}, len(values))
 	for _, v := range values {
@@ -508,18 +485,14 @@ func WhereNotIn[T any, V comparable](c Collection[T], key func(item T) V, values
 }
 
 // WhereNotInStrict keeps the items whose projected key is absent from values,
-// exactly as WhereNotIn does. PHP carries two functions because its in_array
-// compares loosely unless asked otherwise; Go's == is already the strict
-// comparison, so this name forwards to WhereNotIn.
-//
-// Answers Illuminate\Support\Traits\EnumeratesValues::whereNotInStrict.
+// exactly as WhereNotIn does. Go's == is already an identity comparison, so
+// this name forwards to WhereNotIn.
 func WhereNotInStrict[T any, V comparable](c Collection[T], key func(item T) V, values []V) Collection[T] {
 	return WhereNotIn(c, key, values)
 }
 
-// WhereBetween answers to
-// Illuminate\Support\Traits\EnumeratesValues::whereBetween. Both ends are
-// included, as in PHP.
+// WhereBetween keeps the items whose projected key falls in the range. Both
+// ends are included.
 func WhereBetween[T any, V cmp.Ordered](c Collection[T], key func(item T) V, from, to V) Collection[T] {
 	return c.Filter(func(item T, _ int) bool {
 		v := key(item)
@@ -533,8 +506,6 @@ func WhereBetween[T any, V cmp.Ordered](c Collection[T], key func(item T) V, fro
 // Both ends count as inside, so an item sitting exactly on from or on to is
 // dropped. That makes this the exact complement of WhereBetween -- every item
 // is kept by one of the two and by neither twice.
-//
-// Answers Illuminate\Support\Traits\EnumeratesValues::whereNotBetween.
 func WhereNotBetween[T any, V cmp.Ordered](c Collection[T], key func(item T) V, from, to V) Collection[T] {
 	return c.Filter(func(item T, _ int) bool {
 		v := key(item)
@@ -542,10 +513,10 @@ func WhereNotBetween[T any, V cmp.Ordered](c Collection[T], key func(item T) V, 
 	})
 }
 
-// WhereNull answers to
-// Illuminate\Support\Traits\EnumeratesValues::whereNull.
+// WhereNull keeps the items whose accessor returns a nil pointer.
 //
-// PHP's null on a field is Go's nil pointer, so the accessor returns a pointer.
+// The accessor returns a pointer because a pointer is how a field that may be
+// absent is spelled in Go.
 func WhereNull[T any, V any](c Collection[T], key func(item T) *V) Collection[T] {
 	return c.Filter(func(item T, _ int) bool { return key(item) == nil })
 }
@@ -554,16 +525,12 @@ func WhereNull[T any, V any](c Collection[T], key func(item T) *V) Collection[T]
 // drops those where the field is absent. It is the complement of WhereNull.
 //
 // The accessor returns a pointer because a pointer is how a field that may be
-// absent is spelled in Go, where PHP spells it null.
-//
-// Answers Illuminate\Support\Traits\EnumeratesValues::whereNotNull.
+// absent is spelled in Go.
 func WhereNotNull[T any, V any](c Collection[T], key func(item T) *V) Collection[T] {
 	return c.Filter(func(item T, _ int) bool { return key(item) != nil })
 }
 
-// WhereInstanceOf answers to
-// Illuminate\Support\Traits\EnumeratesValues::whereInstanceOf: the items whose
-// dynamic type is U.
+// WhereInstanceOf keeps the items whose dynamic type is U.
 func WhereInstanceOf[T, U any](c Collection[T]) Collection[T] {
 	return c.Filter(func(item T, _ int) bool {
 		_, ok := any(item).(U)
@@ -571,9 +538,8 @@ func WhereInstanceOf[T, U any](c Collection[T]) Collection[T] {
 	})
 }
 
-// Ensure answers to Illuminate\Support\Traits\EnumeratesValues::ensure: it
-// returns the collection unchanged when every item is a U, and an error naming
-// the first item that is not, where PHP throws UnexpectedValueException.
+// Ensure returns the collection unchanged when every item is a U, and
+// ErrUnexpectedValue naming the first item that is not.
 func Ensure[T, U any](c Collection[T]) (Collection[T], error) {
 	for i, v := range c {
 		if _, ok := any(v).(U); !ok {
@@ -584,9 +550,8 @@ func Ensure[T, U any](c Collection[T]) (Collection[T], error) {
 	return c, nil
 }
 
-// ContainsStrict answers to
-// Illuminate\Support\Collection::containsStrict, and to the form of contains
-// that takes a bare value: Go's == is PHP's ===.
+// ContainsStrict reports whether any item equals value. It is the search by
+// value, where Contains runs a test.
 func ContainsStrict[T comparable](c Collection[T], value T) bool {
 	for _, v := range c {
 		if v == value {
@@ -599,15 +564,12 @@ func ContainsStrict[T comparable](c Collection[T], value T) bool {
 // DoesntContainStrict reports whether no item equals value. It is the
 // negation of ContainsStrict, and exists so the absent case reads as its own
 // call rather than as an exclamation mark in front of somebody else's.
-//
-// Answers Illuminate\Support\Collection::doesntContainStrict.
 func DoesntContainStrict[T comparable](c Collection[T], value T) bool {
 	return !ContainsStrict(c, value)
 }
 
-// Search answers to Illuminate\Support\Collection::search: the key of the
-// first item equal to value. The second result is false where PHP returns
-// false.
+// Search returns the index of the first item equal to value. The second result
+// is false when there is none.
 func Search[T comparable](c Collection[T], value T) (int, bool) {
 	for i, v := range c {
 		if v == value {
@@ -617,10 +579,9 @@ func Search[T comparable](c Collection[T], value T) (int, bool) {
 	return 0, false
 }
 
-// Before answers to Illuminate\Support\Collection::before.
+// Before returns the item sitting just before the first one equal to value.
 //
-// The second result is false when the value is absent or is the first item,
-// where PHP returns null.
+// The second result is false when the value is absent or is the first item.
 func Before[T comparable](c Collection[T], value T) (T, bool) {
 	i, ok := Search(c, value)
 	if !ok || i == 0 {
@@ -630,7 +591,9 @@ func Before[T comparable](c Collection[T], value T) (T, bool) {
 	return c[i-1], true
 }
 
-// After answers to Illuminate\Support\Collection::after.
+// After returns the item sitting just after the first one equal to value.
+//
+// The second result is false when the value is absent or is the last item.
 func After[T comparable](c Collection[T], value T) (T, bool) {
 	i, ok := Search(c, value)
 	if !ok || i == len(c)-1 {
@@ -640,8 +603,7 @@ func After[T comparable](c Collection[T], value T) (T, bool) {
 	return c[i+1], true
 }
 
-// Diff answers to Illuminate\Support\Collection::diff: the items not present
-// in items.
+// Diff keeps the items not present in items.
 func Diff[T comparable](c Collection[T], items []T) Collection[T] {
 	drop := make(map[T]struct{}, len(items))
 	for _, v := range items {
@@ -653,8 +615,12 @@ func Diff[T comparable](c Collection[T], items []T) Collection[T] {
 	})
 }
 
-// DiffUsing answers to Illuminate\Support\Collection::diffUsing, which takes
-// the comparison rather than relying on the default one.
+// DiffUsing is Diff with the match decided by compare instead of by ==.
+// compare returns zero for equal, the convention of the cmp and slices
+// packages.
+//
+// Each item is walked against items until one matches, so the cost is the
+// product of the two lengths where Diff is linear.
 func DiffUsing[T any](c Collection[T], items []T, compare func(a, b T) int) Collection[T] {
 	return c.Filter(func(v T, _ int) bool {
 		for _, other := range items {
@@ -666,8 +632,7 @@ func DiffUsing[T any](c Collection[T], items []T, compare func(a, b T) int) Coll
 	})
 }
 
-// Intersect answers to Illuminate\Support\Collection::intersect: the items
-// also present in items.
+// Intersect keeps the items also present in items.
 func Intersect[T comparable](c Collection[T], items []T) Collection[T] {
 	keep := make(map[T]struct{}, len(items))
 	for _, v := range items {
@@ -688,8 +653,6 @@ func Intersect[T comparable](c Collection[T], items []T) Collection[T] {
 // Each item is walked against items until one matches, so the cost is the
 // product of the two lengths where Intersect is linear. Reach for it when ==
 // cannot answer the question, not by default.
-//
-// Answers Illuminate\Support\Collection::intersectUsing.
 func IntersectUsing[T any](c Collection[T], items []T, compare func(a, b T) int) Collection[T] {
 	return c.Filter(func(v T, _ int) bool {
 		for _, other := range items {
@@ -701,7 +664,7 @@ func IntersectUsing[T any](c Collection[T], items []T, compare func(a, b T) int)
 	})
 }
 
-// Collapse answers to Illuminate\Support\Collection::collapse.
+// Collapse concatenates the inner collections into one, in order.
 func Collapse[T any](c Collection[Collection[T]]) Collection[T] {
 	out := make([]T, 0, len(c))
 	for _, inner := range c {
@@ -710,10 +673,11 @@ func Collapse[T any](c Collection[Collection[T]]) Collection[T] {
 	return Collection[T](out)
 }
 
-// Flatten answers to Illuminate\Support\Collection::flatten.
+// Flatten squashes a nested structure into one level.
 //
-// The depth is optional and unlimited when omitted, as in PHP. A nested value
-// is a []any or a Collection[any]; anything else is a leaf.
+// The depth is optional and unlimited when omitted; only the first one is
+// used. A nested value is a []any or a Collection[any]; anything else is a
+// leaf.
 func Flatten(c Collection[any], depth ...int) Collection[any] {
 	limit := -1
 	if len(depth) > 0 {
@@ -743,8 +707,8 @@ func flattenInto(out []any, items []any, depth int) []any {
 	return out
 }
 
-// Select answers to Illuminate\Support\Collection::select: each item reduced
-// to the named keys.
+// Select reduces every item to the named keys. A key an item does not have is
+// left out rather than filled with the zero value.
 func Select[T any](c Collection[map[string]T], keys ...string) Collection[map[string]T] {
 	out := make([]map[string]T, len(c))
 	for i, item := range c {
@@ -759,8 +723,8 @@ func Select[T any](c Collection[map[string]T], keys ...string) Collection[map[st
 	return Collection[map[string]T](out)
 }
 
-// Dot answers to Illuminate\Support\Collection::dot: the collection flattened
-// into single-level "dot" keys, the keys being the positions.
+// Dot flattens the collection into single-level "dot" keys, the top-level key
+// of each element being its position.
 func Dot(c Collection[any]) map[string]any {
 	out := make(map[string]any, len(c))
 	for i, v := range c {
@@ -794,8 +758,7 @@ func dotInto(out map[string]any, prefix string, value any) {
 	}
 }
 
-// Undot answers to Illuminate\Support\Collection::undot: "dot" keys expanded
-// back into nested maps.
+// Undot expands "dot" keys back into nested maps.
 func Undot(m map[string]any) map[string]any {
 	out := map[string]any{}
 	for k, v := range m {
@@ -817,8 +780,8 @@ func setDotted(m map[string]any, key string, value any) {
 	m[parts[len(parts)-1]] = value
 }
 
-// compareOperator applies one of PHP's comparison operators. An operator the
-// list does not name matches nothing, which is what operatorForWhere does.
+// compareOperator applies the comparison the operator names. An operator the
+// list does not name matches nothing.
 func compareOperator[V cmp.Ordered](left V, operator string, right V) bool {
 	switch operator {
 	case "=", "==", "===":

@@ -2,23 +2,23 @@ package support
 
 import "time"
 
-// Timebox answers to Illuminate\Support\Timebox: run a callback and do not
-// come back before the given number of microseconds has passed, so that the
-// time a check took says nothing about its result.
+// Timebox runs a callback and does not return before the given number of
+// microseconds has passed, so that the time a check took says nothing about
+// its result.
 type Timebox struct {
-	// EarlyReturn answers to the $earlyReturn property.
+	// EarlyReturn lifts the wait: the box returns as soon as the callback
+	// does.
 	EarlyReturn bool
 }
 
-// NewTimebox is the `new Timebox` the PHP writes, which has no constructor of
-// its own.
+// NewTimebox returns a timebox that waits out its full duration.
 func NewTimebox() *Timebox {
 	return &Timebox{}
 }
 
-// Call answers to Timebox::call: invoke the callback inside the timebox and
-// return what it returned. An error from the callback is held until the box
-// has been waited out, then returned, the way the PHP rethrows.
+// Call runs the callback inside the timebox and returns what it returned. An
+// error from the callback is held until the box has been waited out, so a
+// failure does not come back any sooner than a success.
 func (t *Timebox) Call(callback func(*Timebox) (any, error), microseconds int) (any, error) {
 	start := time.Now()
 
@@ -36,21 +36,21 @@ func (t *Timebox) Call(callback func(*Timebox) (any, error), microseconds int) (
 	return result, nil
 }
 
-// ReturnEarly answers to Timebox::returnEarly.
+// ReturnEarly lifts the wait, and returns the timebox.
 func (t *Timebox) ReturnEarly() *Timebox {
 	t.EarlyReturn = true
 	return t
 }
 
-// DontReturnEarly answers to Timebox::dontReturnEarly.
+// DontReturnEarly restores the wait, and returns the timebox.
 func (t *Timebox) DontReturnEarly() *Timebox {
 	t.EarlyReturn = false
 	return t
 }
 
-// usleep answers to the protected Timebox::usleep, which goes through
-// Sleep::usleep and not through the operating system directly -- so a test that
-// called [Fake] captures the wait instead of serving it.
+// usleep waits through [Usleep] rather than through the operating system
+// directly, so a test that called [Fake] captures the wait instead of serving
+// it.
 func (t *Timebox) usleep(remainder time.Duration) {
 	_ = Usleep(int(remainder / time.Microsecond)).Goodnight()
 }

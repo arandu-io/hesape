@@ -12,14 +12,11 @@ import (
 	"github.com/arandu-io/hesape/number"
 )
 
-// Plural answers for Str::plural and for Pluralizer::plural, which it is: in
-// Illuminate the first forwards straight to the second. It is the plural of an
-// English noun -- "purchase_order" becomes "purchase_orders", "person" becomes
-// "people", "knife" becomes "knives".
+// Plural is the plural of an English noun -- "purchase_order" becomes
+// "purchase_orders", "person" becomes "people", "knife" becomes "knives".
 //
-// The optional count is Illuminate's $count, which defaults to 2. A count of
-// one in either sign returns the word untouched, so Plural("rule", 1) is
-// "rule".
+// The optional count defaults to two. A count of one in either sign returns the
+// word untouched, so Plural("rule", 1) is "rule".
 //
 // It pluralizes the last word and leaves the rest alone, so a compound name
 // keeps its shape: "sales_person" is "sales_people", not "sales_persons". The
@@ -27,9 +24,8 @@ import (
 // "INVOICES" -- because this names a table in one call site and a heading in
 // the next.
 //
-// A value that does not end in a letter, a digit or a non-ASCII rune is
-// returned untouched, which is the guard Pluralizer::plural runs before it
-// reaches the inflector: "rule!" and "rule " stay as they are.
+// A value that does not end in a letter, a digit or a non-ASCII rune is not a
+// word and is returned untouched: "rule!" and "rule " stay as they are.
 //
 // English pluralization has hundreds of exceptions and this handles the ones a
 // schema meets. Everything the tables in this file do not name takes -s or -es
@@ -49,13 +45,13 @@ func Plural(s string, count ...int) string {
 	return head + matchCase(word, pluralize(strings.ToLower(word)))
 }
 
-// PluralStudly answers for Str::pluralStudly. It pluralizes the last word of a
-// studly caps string and leaves everything in front of it alone:
-// PluralStudly("VerifiedHuman") is "VerifiedHumans".
+// PluralStudly pluralizes the last word of a studly caps string and leaves
+// everything in front of it alone: PluralStudly("VerifiedHuman") is
+// "VerifiedHumans".
 //
-// Illuminate finds that last word by splitting in front of every capital, which
-// is why PluralStudly("HTTPServer") is "HTTPServers" and not "HTTPServer" with
-// the run of capitals pluralized.
+// That last word is found by splitting in front of every capital, which is why
+// PluralStudly("HTTPServer") is "HTTPServers" and not "HTTPServer" with the run
+// of capitals pluralized.
 func PluralStudly(value string, count ...int) string {
 	head, word := splitBeforeUpper(value)
 	return head + Plural(word, count...)
@@ -69,31 +65,27 @@ func PluralStudly(value string, count ...int) string {
 //
 // It is [PluralStudly] under the other name for the same convention, and the
 // two are interchangeable in every call.
-//
-// Answers Str::pluralPascal, which Illuminate defines as an alias of
-// Str::pluralStudly.
 func PluralPascal(value string, count ...int) string { return PluralStudly(value, count...) }
 
-// Counted answers for Str::counted. It is the count and the noun agreeing with
-// it: Counted("rule", 1) is "1 rule" and Counted("rule", 3) is "3 rules".
+// Counted is the count and the noun agreeing with it: Counted("rule", 1) is
+// "1 rule" and Counted("rule", 3) is "3 rules".
 //
-// The count is formatted the way Illuminate formats it, through Number::format,
-// so Counted("row", 1000) is "1,000 rows".
+// The count goes through number.Format, so Counted("row", 1000) is
+// "1,000 rows".
 func Counted(value string, count int) string {
 	return number.Format(float64(count)) + " " + Plural(value, count)
 }
 
 // PluralN is the old name of Counted, with its arguments the other way around.
 //
-// Deprecated: it is an invented name for Str::counted. Call Counted instead.
-// It stays because callers outside this package still name it.
+// Deprecated: call Counted instead. It stays because callers outside this
+// package still name it.
 func PluralN(n int, singular string) string {
 	return strconv.Itoa(n) + " " + Plural(singular, n)
 }
 
-// Singular answers for Str::singular and for Pluralizer::singular. It is the
-// singular of an English noun: "purchase_orders" becomes "purchase_order",
-// "people" becomes "person", "knives" becomes "knife".
+// Singular is the singular of an English noun: "purchase_orders" becomes
+// "purchase_order", "people" becomes "person", "knives" becomes "knife".
 //
 // It is Plural read backwards, with the same tables and the same treatment of
 // compounds and case. English does not invert cleanly -- "axes" is the plural of
@@ -108,9 +100,8 @@ func Singular(s string) string {
 	return head + matchCase(word, singularize(strings.ToLower(word)))
 }
 
-// pluralizerUncountable is Pluralizer::$uncountable, the public list of
-// non-noun word forms the inflector must not touch. It is checked by Plural
-// only, exactly as Illuminate checks it.
+// pluralizerUncountable is the list of non-noun word forms the inflector must
+// not touch. It is checked by Plural only.
 var pluralizerUncountable = map[string]bool{
 	"recommended": true,
 	"related":     true,
@@ -124,17 +115,14 @@ var ErrLanguageNotSupported = errors.New("str: unsupported inflector language")
 // from any goroutine to set.
 var languageMu sync.RWMutex
 
-// language is Pluralizer::$language, whose default is "english".
+// language is the language the inflector works in, and it starts as "english".
 var language = "english"
 
-// UseLanguage answers for Pluralizer::useLanguage. It names the language the
-// inflector works in.
+// UseLanguage names the language the inflector works in.
 //
-// Illuminate hands the name to Doctrine's InflectorFactory, which throws for a
-// language it has no rules for; this returns ErrLanguageNotSupported instead,
-// which is the (T, error) shape an exception takes here. English is the only
-// language this package carries rules for, so it is the only one accepted --
-// Plural and Singular would otherwise keep answering in English under another
+// English is the only language this package carries rules for, so it is the
+// only one accepted, and anything else returns ErrLanguageNotSupported. Plural
+// and Singular would otherwise keep answering in English under another
 // language's name, which is worse than refusing.
 func UseLanguage(lang string) error {
 	if !strings.EqualFold(lang, "english") {
@@ -146,25 +134,21 @@ func UseLanguage(lang string) error {
 	return nil
 }
 
-// Language reports the language UseLanguage last accepted. It answers for
-// Pluralizer::$language, which Illuminate keeps protected and reads back
-// through the inflector it builds.
+// Language reports the language UseLanguage last accepted.
 func Language() string {
 	languageMu.RLock()
 	defer languageMu.RUnlock()
 	return language
 }
 
-// inflectableTail is Pluralizer::plural's '/^(.*)[A-Za-z0-9\x{0080}-\x{FFFF}]$/u'
-// guard: a value that does not end in a letter, a digit or a rune past ASCII is
-// not a word and is returned as it stands.
+// inflectableTail is Plural's guard: a value that does not end in a letter, a
+// digit or a rune past ASCII is not a word and is returned as it stands.
 var inflectableTail = regexp.MustCompile(`[A-Za-z0-9\x{0080}-\x{FFFF}]$`)
 
 func endsInflectable(s string) bool { return inflectableTail.MatchString(s) }
 
-// splitBeforeUpper is Str::pluralStudly's
-// preg_split('/(.)(?=[A-Z])/u', $value, -1, PREG_SPLIT_DELIM_CAPTURE) followed
-// by array_pop: everything up to the last capital, and the word starting at it.
+// splitBeforeUpper cuts a value at its last capital: everything in front of it,
+// and the word starting at it.
 func splitBeforeUpper(value string) (head, word string) {
 	rs := []rune(value)
 	for i := len(rs) - 1; i > 0; i-- {
@@ -179,8 +163,9 @@ func splitBeforeUpper(value string) (head, word string) {
 // itself. Only the last word inflects: "purchase_order" pluralizes "order" and
 // "PurchaseOrder" pluralizes "Order".
 //
-// It finds the boundary the way delimit does, which is what keeps the answer
-// spelled the way the argument was -- PurchaseOrders, not Purchaseorders.
+// The boundary is a separator or a change of case, which is what keeps the
+// answer spelled the way the argument was -- PurchaseOrders, not
+// Purchaseorders.
 func splitTail(s string) (head, word string) {
 	rs := []rune(s)
 	for i := len(rs) - 1; i >= 0; i-- {

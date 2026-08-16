@@ -20,8 +20,8 @@ func TestLimitCountsRunes(t *testing.T) {
 		{"the quick brown fox", 10, "...", "the quick..."},
 		{"short", 20, "...", "short"},
 		{"ação entre sócios", 4, "…", "ação…"},
-		// A limit of zero still gets the ellipsis: mb_strwidth is above it, so
-		// the PHP falls past the early return and appends $end to nothing.
+		// A limit of zero still gets the ellipsis: the width is above it, so the
+		// early return is skipped and the ending is appended to nothing.
 		{"anything", 0, "...", "..."},
 		{"", 5, "...", ""},
 	} {
@@ -40,9 +40,8 @@ func TestWords(t *testing.T) {
 		{"the quick brown fox", 2, "the quick..."},
 		{"the quick brown fox", 4, "the quick brown fox"},
 		{"the quick brown fox", 9, "the quick brown fox"},
-		// A count of zero returns the subject: the pattern Illuminate builds
-		// carries the quantifier {1,0}, which does not compile, and preg_match
-		// failing leaves $value untouched.
+		// A count of zero returns the subject untouched, with no ending
+		// appended.
 		{"one", 0, "one"},
 		{"", 3, ""},
 	} {
@@ -101,10 +100,9 @@ func TestStartAndFinishCollapseRepeats(t *testing.T) {
 	}
 }
 
-// The PHP's $length defaults to null, which mb_substr reads as "to the end";
-// the variadic spells that as no argument at all. A length of zero is a length
-// of zero, and masks nothing -- mb_substr returns the empty segment and the
-// method returns the subject untouched.
+// No length argument at all means "to the end". A length of zero is a length of
+// zero and masks nothing: the segment comes out empty and the subject comes
+// back untouched.
 func TestMask(t *testing.T) {
 	for _, c := range []struct {
 		in     string
