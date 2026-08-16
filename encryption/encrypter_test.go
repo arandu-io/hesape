@@ -104,7 +104,7 @@ func TestTheEnvelopeIsTheOneLaravelWrites(t *testing.T) {
 
 	iv, err := base64.StdEncoding.DecodeString(*fields.IV)
 	if err != nil || len(iv) != 12 {
-		t.Errorf("the iv decodes to %d bytes (err %v), want 12 -- the aes-256-gcm nonce size", len(iv), err)
+		t.Errorf("the iv decodes to %d bytes (err %v), want 12 -- GCM takes a 96-bit nonce, which is what makes the counter block deterministic", len(iv), err)
 	}
 	tag, err := base64.StdEncoding.DecodeString(*fields.Tag)
 	if err != nil || len(tag) != 16 {
