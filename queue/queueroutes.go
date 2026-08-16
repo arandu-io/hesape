@@ -7,9 +7,8 @@ import (
 
 // Route is where a job goes when nothing at the call site said.
 //
-// It answers the two-element array Laravel stores per class -- [$connection,
-// $queue] -- as a struct, because a pair positional in an array is a pair
-// somebody eventually puts in the wrong order.
+// It is a struct rather than a pair, because two strings side by side are two
+// strings somebody eventually puts in the wrong order.
 type Route struct {
 	// Connection is the queue connection, by the name it was registered under.
 	// Empty means the default.
@@ -20,19 +19,16 @@ type Route struct {
 
 // QueueRoutes says which connection and which queue a job name belongs on.
 //
-// It answers Illuminate\Queue\QueueRoutes. It exists so "reports go on the slow
-// queue" is written once, at boot, instead of at every dispatch -- and so that
-// moving them is one line rather than a search.
+// It exists so "reports go on the slow queue" is written once, at boot, instead
+// of at every dispatch -- and so that moving them is one line rather than a
+// search.
 //
 //	m.Route("report.monthly", "reports", "")
 //	m.Route("invoice.send", "", "redis")
 //
-// Laravel keys the table by class and walks the parents, the interfaces and the
-// traits of a job looking for a match, so a route can be declared for
-// ShouldBeSlow and inherited by everything that implements it. Here the key is
-// the job name, and there is no hierarchy to walk: a name is a name. What that
-// costs is the inherited route; what it buys is that the routing of a job is
-// one lookup a person can predict.
+// The key is the job name and there is no hierarchy to walk: a name is a name.
+// What that costs is a route inherited by a family of jobs; what it buys is
+// that the routing of a job is one lookup a person can predict.
 type QueueRoutes struct {
 	mu     sync.RWMutex
 	routes map[string]Route
@@ -41,7 +37,7 @@ type QueueRoutes struct {
 // NewQueueRoutes returns an empty table.
 func NewQueueRoutes() *QueueRoutes { return &QueueRoutes{routes: map[string]Route{}} }
 
-// Set registers the route for a job name. It answers set().
+// Set registers the route for a job name.
 //
 // An empty queue or connection means "the default", and setting a name twice
 // replaces the first -- the table is built at boot, in one place, and the last
@@ -53,8 +49,6 @@ func (r *QueueRoutes) Set(name, queue, connection string) {
 }
 
 // GetRoute is the route for a job name, and whether there is one.
-//
-// It answers getRoute(), which returns null in PHP where this returns false.
 func (r *QueueRoutes) GetRoute(name string) (Route, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

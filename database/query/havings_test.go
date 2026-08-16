@@ -59,8 +59,7 @@ func TestOrHavingRawWritesTheSQLAsGiven(t *testing.T) {
 	assertBindings(t, b, 100, 5)
 }
 
-// A having opened with a callback is a nested group, which is what passing a
-// Closure does in PHP.
+// A having opened with a callback is a nested group.
 func TestHavingWithACallbackNests(t *testing.T) {
 	b := mysqlBuilder().GroupBy("plan").Having(func(group *query.Builder) {
 		group.Having("count", ">", 1)

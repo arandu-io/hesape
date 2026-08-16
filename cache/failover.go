@@ -14,8 +14,7 @@ import (
 // FailoverStore tries each store in turn and answers with the first one that
 // worked.
 //
-// It answers Illuminate\Cache\FailoverStore. It is for the cache that must not
-// be a single point of failure: put the fast store first and the durable one
+// It is for the cache that must not be a single point of failure: put the fast store first and the durable one
 // after it, and a cache that goes down becomes a slower cache instead of an
 // outage.
 //
@@ -48,10 +47,9 @@ var (
 
 // ErrAllStoresFailed is returned when every store in a failover set refused.
 //
-// It answers the RuntimeException('All failover cache stores failed.') Laravel
-// throws, and it is only reached when the set is empty: with stores in it, the
-// last one's own error is returned instead, because "the cache is down" is less
-// use than "the connection was refused".
+// It is only reached when the set is empty: with stores in it, the last one's
+// own error is returned instead, because "the cache is down" is less use than
+// "the connection was refused".
 var ErrAllStoresFailed = errors.New("cache: every store in the failover set failed")
 
 // NewFailoverStore returns a store over an ordered set of others.
@@ -211,8 +209,6 @@ func (s *FailoverStore) FlushStaleTags(ctx context.Context) error {
 }
 
 // GetPrefix is the prefix of the first store that has one.
-//
-// It answers FailoverStore::getPrefix().
 func (s *FailoverStore) GetPrefix() string {
 	prefix, err := attemptOnAllStores(s, func(store Store) (string, error) {
 		prefixed, ok := store.(interface{ GetPrefix() string })
@@ -276,11 +272,10 @@ func (s *FailoverStore) RestoreLock(name, owner string) *Lock { return s.Lock(na
 
 // attemptOnAllStores runs fn against each store until one of them answers.
 //
-// It answers FailoverStore::attemptOnAllStores(), including the bookkeeping that
-// is the reason it is one function: the set of stores that failed this time
-// replaces the set that failed last time, and only the newly failing ones get an
-// event. Laravel keeps it in a finally block so a set that all fail still leaves
-// the record straight, and so does this.
+// The bookkeeping is the reason it is one function: the set of stores that
+// failed this time replaces the set that failed last time, only the newly
+// failing ones get an event, and the replacement happens even when every store
+// fails, so the record stays straight.
 //
 // It is a function and not a method because it is generic over what fn returns,
 // and a method cannot take a type parameter in Go.

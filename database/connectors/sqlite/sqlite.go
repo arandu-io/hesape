@@ -10,7 +10,7 @@
 // binary. mattn/go-sqlite3 is faster and needs cgo, which costs the deploy story
 // this framework is built on.
 //
-// This is the default in .env because it needs nothing installed (ADR 0009).
+// This is the default in .env because it needs nothing installed.
 //
 // It is its own module even so, and that is the case that made the rule: the
 // skeleton used to carry pgx into every SQLite-only project, vulnerability
@@ -25,10 +25,9 @@ import (
 
 // SQLiteConnector names the driver the blank import above linked in.
 //
-// It is Illuminate\Database\Connectors\SQLiteConnector. The one thing
-// Illuminate's has that this does not is the check for a missing database file:
-// here a missing file is created, and the directory above it too, in
-// database.Open -- SQLite creates the file and never the directory.
+// It does not check for a missing database file: a missing file is created, and
+// the directory above it too, in database.Open -- SQLite creates the file and
+// never the directory.
 type SQLiteConnector struct{}
 
 // Dialect reports the connection this connector answers for.

@@ -8,13 +8,13 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// BlueprintState answers Illuminate\Database\Schema\BlueprintState.
+// BlueprintState is the shape a table already has, kept up to date as a
+// blueprint's commands are compiled.
 //
 // SQLite cannot alter most of a table, so the SQLite grammar rebuilds it: it
 // creates a table with the shape the blueprint asks for, copies the rows over,
-// drops the original and renames. To do that it has to know the shape the table
-// already has, which is what this reads from the server and then keeps up to
-// date as the blueprint's commands are compiled.
+// drops the original and renames, and this is what it reads from the server to
+// do it.
 type BlueprintState struct {
 	blueprint  *Blueprint
 	connection Connection
@@ -25,10 +25,11 @@ type BlueprintState struct {
 	foreignKeys []*ForeignKeyDefinition
 }
 
-// NewBlueprintState answers BlueprintState::__construct.
+// NewBlueprintState builds a BlueprintState for blueprint's table.
 //
-// It carries a context and an auth.Grant where the PHP carries neither, because
-// the constructor reads three catalogues off the server. See Blueprint.ToSQL.
+// It takes a context and an auth.Grant because the constructor reads three
+// catalogues off the server -- the table's columns, indexes and foreign keys.
+// See Blueprint.ToSQL.
 func NewBlueprintState(ctx context.Context, g auth.Grant, blueprint *Blueprint, connection Connection) (*BlueprintState, error) {
 	s := &BlueprintState{blueprint: blueprint, connection: connection}
 	builder := NewBuilder(connection)
@@ -108,21 +109,20 @@ func NewBlueprintState(ctx context.Context, g auth.Grant, blueprint *Blueprint, 
 	return s, nil
 }
 
-// GetPrimaryKey answers BlueprintState::getPrimaryKey.
+// GetPrimaryKey returns the table's primary key index, or nil if it has none.
 func (s *BlueprintState) GetPrimaryKey() *IndexDefinition { return s.primaryKey }
 
-// GetColumns answers BlueprintState::getColumns.
+// GetColumns returns the table's current columns.
 func (s *BlueprintState) GetColumns() []*ColumnDefinition { return s.columns }
 
-// GetIndexes answers BlueprintState::getIndexes.
+// GetIndexes returns the table's current indexes, other than its primary key.
 func (s *BlueprintState) GetIndexes() []*IndexDefinition { return s.indexes }
 
-// GetForeignKeys answers BlueprintState::getForeignKeys.
+// GetForeignKeys returns the table's current foreign keys.
 func (s *BlueprintState) GetForeignKeys() []*ForeignKeyDefinition { return s.foreignKeys }
 
-// Update answers BlueprintState::update: it applies one compiled command to the
-// remembered shape, so that the rebuild statement sees the table as it will be
-// rather than as it was.
+// Update applies one compiled command to the remembered shape, so that the
+// rebuild statement sees the table as it will be rather than as it was.
 func (s *BlueprintState) Update(command *Command) {
 	switch command.Name {
 	case "alter":
@@ -209,7 +209,8 @@ func (s *BlueprintState) Update(command *Command) {
 	}
 }
 
-// replaceColumns answers the PHP's str_replace over an index's column list.
+// replaceColumns returns a copy of columns, with occurrences of from replaced
+// by to in every string element; non-string elements pass through unchanged.
 func replaceColumns(columns []any, from, to string) []any {
 	out := make([]any, len(columns))
 	for i, column := range columns {
@@ -234,5 +235,5 @@ func sameColumns(a, b []any) bool {
 	return true
 }
 
-// wrapParens answers Str::wrap($default, '(', ')').
+// wrapParens wraps value in parentheses.
 func wrapParens(value string) string { return "(" + value + ")" }

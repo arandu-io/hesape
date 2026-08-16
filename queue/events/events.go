@@ -8,11 +8,10 @@ import (
 
 // WorkerStopReason is why a worker's loop ended.
 //
-// It answers Illuminate\Queue\WorkerStopReason, which is a root-level enum in
-// PHP. It is declared here, and re-exported from the queue package under the
-// name a Laravel developer types, because [WorkerStopping] carries it and the
-// queue package is the one that dispatches these events -- a type in the queue
-// package would make this package import it back.
+// It is declared here, and re-exported from the queue package, because
+// [WorkerStopping] carries it and the queue package is the one that dispatches
+// these events -- a type in the queue package would make this package import it
+// back.
 type WorkerStopReason string
 
 const (
@@ -36,8 +35,8 @@ func (r WorkerStopReason) String() string { return string(r) }
 
 // JobQueueing is dispatched before a job is written to its store.
 //
-// It answers Illuminate\Queue\Events\JobQueueing. It is the only hook that runs
-// while the push can still be stopped, which is what an audit listener wants.
+// It is the only hook that runs while the push can still be stopped, which is
+// what an audit listener wants.
 type JobQueueing struct {
 	// ConnectionName is the queue connection the job is going to.
 	ConnectionName string
@@ -51,8 +50,8 @@ type JobQueueing struct {
 
 // Payload is the job's arguments, as they were encoded.
 //
-// It answers payload(), which in PHP decodes the JSON envelope; here the
-// envelope is the record's own fields and this is the half a handler decodes.
+// The envelope is the record's own fields, and this is the half a handler
+// decodes.
 func (e JobQueueing) Payload() []byte {
 	if e.Job == nil {
 		return nil
@@ -61,16 +60,13 @@ func (e JobQueueing) Payload() []byte {
 }
 
 // JobQueued is dispatched after a job has been written to its store.
-//
-// It answers Illuminate\Queue\Events\JobQueued.
 type JobQueued struct {
 	// ConnectionName is the queue connection the job went to.
 	ConnectionName string
 	// Queue is the queue it went onto.
 	Queue string
-	// ID is the job's identifier in the store. It answers $id, and here it is
-	// always the job's UUID: the id is minted by the application rather than
-	// handed back by the store.
+	// ID is the job's identifier in the store. It is always the job's UUID: the
+	// id is minted by the application rather than handed back by the store.
 	ID string
 	// Job is the record that was written.
 	Job *jobs.Job
@@ -78,7 +74,7 @@ type JobQueued struct {
 	Delay time.Duration
 }
 
-// Payload is the job's arguments, as they were encoded. It answers payload().
+// Payload is the job's arguments, as they were encoded.
 func (e JobQueued) Payload() []byte {
 	if e.Job == nil {
 		return nil
@@ -87,8 +83,6 @@ func (e JobQueued) Payload() []byte {
 }
 
 // JobPopping is dispatched before a worker asks its queue for work.
-//
-// It answers Illuminate\Queue\Events\JobPopping.
 type JobPopping struct {
 	// ConnectionName is the connection being asked.
 	ConnectionName string
@@ -97,19 +91,14 @@ type JobPopping struct {
 }
 
 // JobPopped is dispatched for each job a worker took off its queue.
-//
-// It answers Illuminate\Queue\Events\JobPopped.
 type JobPopped struct {
 	// ConnectionName is the connection it came off.
 	ConnectionName string
-	// Job is the job. It is never nil: Laravel dispatches this with a null job
-	// when the queue was empty, and here an empty batch dispatches nothing.
+	// Job is the job. It is never nil: an empty batch dispatches nothing.
 	Job *jobs.Job
 }
 
 // JobProcessing is dispatched before a handler runs.
-//
-// It answers Illuminate\Queue\Events\JobProcessing.
 type JobProcessing struct {
 	// ConnectionName is the connection the job came off.
 	ConnectionName string
@@ -118,8 +107,6 @@ type JobProcessing struct {
 }
 
 // JobProcessed is dispatched after a handler finished without an error.
-//
-// It answers Illuminate\Queue\Events\JobProcessed.
 type JobProcessed struct {
 	// ConnectionName is the connection the job came off.
 	ConnectionName string
@@ -129,8 +116,8 @@ type JobProcessed struct {
 
 // JobAttempted is dispatched after every delivery, whether it worked or not.
 //
-// It answers Illuminate\Queue\Events\JobAttempted. It is the one event a
-// listener can use to count deliveries without subscribing to two.
+// It is the one event a listener can use to count deliveries without
+// subscribing to two.
 type JobAttempted struct {
 	// ConnectionName is the connection the job came off.
 	ConnectionName string
@@ -142,17 +129,14 @@ type JobAttempted struct {
 
 // Successful reports whether the delivery ended without an error.
 //
-// It answers successful(), which in PHP also checks that the job was not
-// released -- a job that a middleware put back has not succeeded, it has been
-// postponed.
+// A released job reports false: one that a middleware put back has not
+// succeeded, it has been postponed.
 func (e JobAttempted) Successful() bool {
 	return e.Exception == nil && (e.Job == nil || !e.Job.IsReleased())
 }
 
 // JobExceptionOccurred is dispatched when a handler returned an error, before
 // anything has been decided about the job.
-//
-// It answers Illuminate\Queue\Events\JobExceptionOccurred.
 type JobExceptionOccurred struct {
 	// ConnectionName is the connection the job came off.
 	ConnectionName string
@@ -165,9 +149,8 @@ type JobExceptionOccurred struct {
 // JobReleasedAfterException is dispatched when a failed job was put back on its
 // queue for another try.
 //
-// It answers Illuminate\Queue\Events\JobReleasedAfterException. It is the
-// counterpart of [JobFailed]: every failed delivery ends in exactly one of the
-// two.
+// It is the counterpart of [JobFailed]: every failed delivery ends in exactly
+// one of the two.
 type JobReleasedAfterException struct {
 	// ConnectionName is the connection the job came off.
 	ConnectionName string
@@ -179,8 +162,8 @@ type JobReleasedAfterException struct {
 
 // JobFailed is dispatched when a job gave up and was parked.
 //
-// It answers Illuminate\Queue\Events\JobFailed. This is the one an application
-// alerts on: a job here will not run again until somebody retries it.
+// This is the one an application alerts on: a job here will not run again until
+// somebody retries it.
 type JobFailed struct {
 	// ConnectionName is the connection the job came off.
 	ConnectionName string
@@ -191,8 +174,6 @@ type JobFailed struct {
 }
 
 // JobTimedOut is dispatched when a handler ran past its timeout.
-//
-// It answers Illuminate\Queue\Events\JobTimedOut.
 type JobTimedOut struct {
 	// ConnectionName is the connection the job came off.
 	ConnectionName string
@@ -201,14 +182,12 @@ type JobTimedOut struct {
 }
 
 // JobRetryRequested is dispatched when a person put a failed job back in line.
-//
-// It answers Illuminate\Queue\Events\JobRetryRequested.
 type JobRetryRequested struct {
 	// Job is the job that was retried.
 	Job *jobs.Job
 }
 
-// Payload is the retried job's arguments. It answers payload().
+// Payload is the retried job's arguments.
 func (e JobRetryRequested) Payload() []byte {
 	if e.Job == nil {
 		return nil
@@ -218,9 +197,8 @@ func (e JobRetryRequested) Payload() []byte {
 
 // Looping is dispatched at the top of every pass of a worker's loop.
 //
-// It answers Illuminate\Queue\Events\Looping. A listener that returns false
-// stops the worker taking work on this pass, which is how an application pauses
-// its own queues without a cache.
+// A listener that returns false stops the worker taking work on this pass,
+// which is how an application pauses its own queues without a cache.
 type Looping struct {
 	// ConnectionName is the connection being drained.
 	ConnectionName string
@@ -231,8 +209,8 @@ type Looping struct {
 // QueueBusy is dispatched by `aru queue:monitor` when a queue is over its
 // threshold.
 //
-// It answers Illuminate\Queue\Events\QueueBusy. It is the event an application
-// turns into a page: a queue that only grows is a worker that is not running.
+// It is the event an application turns into a page: a queue that only grows is
+// a worker that is not running.
 type QueueBusy struct {
 	// ConnectionName is the connection.
 	ConnectionName string
@@ -243,8 +221,6 @@ type QueueBusy struct {
 }
 
 // QueuePaused is dispatched when a queue was paused.
-//
-// It answers Illuminate\Queue\Events\QueuePaused.
 type QueuePaused struct {
 	// ConnectionName is the connection.
 	ConnectionName string
@@ -255,8 +231,6 @@ type QueuePaused struct {
 }
 
 // QueueResumed is dispatched when a paused queue was resumed.
-//
-// It answers Illuminate\Queue\Events\QueueResumed.
 type QueueResumed struct {
 	// ConnectionName is the connection.
 	ConnectionName string
@@ -267,9 +241,8 @@ type QueueResumed struct {
 // QueueFailedOver is dispatched when a failover queue moved on to the next
 // connection.
 //
-// It answers Illuminate\Queue\Events\QueueFailedOver. It fires once per
-// connection that went down, not once per job: a broker that is refusing
-// everything would otherwise produce one event per push.
+// It fires once per connection that went down, not once per job: a broker that
+// is refusing everything would otherwise produce one event per push.
 type QueueFailedOver struct {
 	// ConnectionName is the connection that failed.
 	ConnectionName string
@@ -280,8 +253,6 @@ type QueueFailedOver struct {
 }
 
 // WorkerStarting is dispatched once, before a worker's first pass.
-//
-// It answers Illuminate\Queue\Events\WorkerStarting.
 type WorkerStarting struct {
 	// ConnectionName is the connection being drained.
 	ConnectionName string
@@ -299,8 +270,8 @@ type WorkerStarting struct {
 
 // WorkerStopping is dispatched once, after a worker's loop ended.
 //
-// It answers Illuminate\Queue\Events\WorkerStopping. Status and Reason are what
-// a supervisor reads to decide whether to start it again.
+// Status and Reason are what a supervisor reads to decide whether to start it
+// again.
 type WorkerStopping struct {
 	// Status is the exit status the process will return.
 	Status int

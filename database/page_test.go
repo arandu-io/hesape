@@ -108,7 +108,7 @@ func TestFindReportsErrNotFound(t *testing.T) {
 
 // TestAMissRespectsTheTenant: a row belonging to somebody else must be
 // indistinguishable from a row that is not there, on the read path as much as
-// on the write path (RULE 17).
+// on the write path.
 func TestAMissRespectsTheTenant(t *testing.T) {
 	repo := fixture()
 

@@ -13,8 +13,7 @@ import (
 	"github.com/arandu-io/hesape/database"
 )
 
-// BatchesTable is where batches are stored. The name is Laravel's, because the
-// vocabulary is (RULE 10).
+// BatchesTable is where batches are stored.
 const BatchesTable = "job_batches"
 
 // DatabaseBatchRepository is the BatchRepository over the application's own
@@ -69,11 +68,10 @@ func Migrations() []database.Migration {
 		// and anything that takes part in a key is database.KeyText -- see
 		// there for why TEXT is not portable in one.
 		//
-		// options is one TEXT column of JSON rather than a column per setting,
-		// for the reason Illuminate keeps one serialized column: nothing queries
-		// a batch by the name of its Catch job and never will, they are read
-		// together and written once, and a column per field would be a migration
-		// the first time a callback grows an option.
+		// options is one TEXT column of JSON rather than a column per setting:
+		// nothing queries a batch by the name of its Catch job and never will,
+		// they are read together and written once, and a column per field would
+		// be a migration the first time a callback grows an option.
 		Up: `CREATE TABLE ` + BatchesTable + ` (
 			id             ` + database.KeyText + ` PRIMARY KEY,
 			tenant_id      ` + database.KeyText + ` NOT NULL,
@@ -98,13 +96,12 @@ const columns = `id, tenant_id, name, total_jobs, pending_jobs, failed_jobs,
 
 // Get returns batches newest first.
 //
-// Illuminate orders by id and pages on `id < $before`, which works there
-// because its ids are ordered uuids. database.NewID is a version 4 uuid and is
-// not ordered, so the order here is created_at and the id breaks the tie -- the
+// database.NewID is a version 4 uuid and is not ordered, so paging cannot be
+// `id < before`: the order is created_at with the id breaking the tie, and the
 // index the migration declares is on exactly that pair.
 //
-// before is still a batch id, as Illuminate's is. Its timestamp is read first,
-// which is one extra statement per page and the price of an unordered id.
+// before is still a batch id. Its timestamp is read first, which is one extra
+// statement per page and the price of an unordered id.
 func (d *DatabaseBatchRepository) Get(ctx context.Context, g auth.Grant, limit int, before string) ([]Batch, error) {
 	tenant, err := tenantOf(g)
 	if err != nil {
@@ -246,9 +243,9 @@ const recordAttempts = 10
 // DecrementPendingJobs records one job that succeeded.
 func (d *DatabaseBatchRepository) DecrementPendingJobs(ctx context.Context, g auth.Grant, batchID, jobID string) (UpdatedBatchJobCounts, error) {
 	return d.update(ctx, g, batchID, func(b Batch) Batch {
-		// Unconditionally, as Illuminate does: a duplicate delivery of the
-		// last job takes the counter to -1 rather than leaving it at 0, and
-		// that is exactly what stops Then from firing a second time.
+		// Unconditionally: a duplicate delivery of the last job takes the
+		// counter to -1 rather than leaving it at 0, and that is exactly what
+		// stops Then from firing a second time.
 		b.PendingJobs--
 		b.FailedJobIDs = withoutFailure(b.FailedJobIDs, jobID)
 		b.FailedJobs = len(b.FailedJobIDs)
@@ -423,10 +420,8 @@ func (d *DatabaseBatchRepository) Transaction(ctx context.Context, fn func(ctx c
 
 // RollBack does nothing.
 //
-// Illuminate needs it because a batch callback runs inside the worker's
-// transaction and may have to abandon it from the outside. Here a transaction
-// is the scope of Transaction's closure: returning an error from it is what
-// rolls back, and there is nothing to reach in from outside.
+// A transaction here is the scope of Transaction's closure: returning an error
+// from it is what rolls back, and there is nothing to reach in from outside.
 func (d *DatabaseBatchRepository) RollBack(context.Context) error { return nil }
 
 // Prune deletes finished batches created before the cut.
@@ -467,9 +462,8 @@ func (d *DatabaseBatchRepository) GetConnection() *database.DB { return d.db }
 
 // SetConnection points the repository at another handle.
 //
-// Illuminate has it so that a test can swap the connection under a repository
-// the container already built. It is here for the same reason and for the same
-// caller.
+// It is for the test that has to swap the connection under a repository it
+// already built.
 func (d *DatabaseBatchRepository) SetConnection(db *database.DB) { d.db = db }
 
 // scanner is what both *sql.Row and *sql.Rows are.

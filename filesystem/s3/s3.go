@@ -1,7 +1,7 @@
 // Package s3 is object storage over the S3 protocol.
 //
-// It is Illuminate\Filesystem\AwsS3V3Adapter: the driver a Disk is given when
-// the files do not live on the machine serving them. The package is named for
+// It is the driver a Disk is given when the files do not live on the machine
+// serving them. The package is named for
 // the protocol rather than for a vendor, so one implementation covers Cloudflare
 // R2, Amazon S3, DigitalOcean Spaces, Backblaze B2 and MinIO.
 //
@@ -11,7 +11,7 @@
 // implementation, and the root module of hesape declares one dependency in
 // total. In Go there is no optional dependency, so the only way for
 // `go get github.com/arandu-io/hesape` not to bring this along is for this to be
-// a module of its own (ADR 0048).
+// a module of its own.
 //
 // # R2 is the default
 //

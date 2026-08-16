@@ -11,24 +11,20 @@ import (
 	"strings"
 )
 
-// pointsToNextItemsKey is the name Illuminate's Cursor::toArray() merges the
-// direction in under. It is kept byte for byte because the encoded cursor
-// travels in URLs and in API payloads: a Go paginator has to read a token a PHP
-// one wrote, and the other way round.
+// pointsToNextItemsKey is the key the direction travels under inside an encoded
+// cursor. It is fixed byte for byte, because the token travels in URLs and in
+// API payloads and has to read the same on both ends.
 const pointsToNextItemsKey = "_pointsToNextItems"
 
 // ErrCursor is what FromEncoded returns for a cursor it cannot read.
 // Callers that page a public list should treat it as "start from the
 // beginning", the way ResolveCurrentCursor does: a mangled cursor is a
 // truncated link in an e-mail client, not an attack worth a 400.
-//
-// Illuminate's Cursor::fromEncoded returns null instead, having no error to
-// return.
 var ErrCursor = errors.New("pagination: malformed cursor")
 
-// Cursor is Illuminate's Pagination\Cursor: a position in an ordered result
-// set, being the values of the columns the query orders by for the row at one
-// edge of a page, plus the direction the next query walks in.
+// Cursor is a position in an ordered result set: the values of the columns the
+// query orders by for the row at one edge of a page, plus the direction the next
+// query walks in.
 //
 // It is what keyset pagination replaces OFFSET with. OFFSET makes the database
 // count and discard every row it skips, so page 500 costs five hundred pages of
@@ -43,15 +39,15 @@ var ErrCursor = errors.New("pagination: malformed cursor")
 // timestamp keeps its subsecond digits -- a cursor rounded to the second walks
 // past every row that shares it.
 //
-// The fields are unexported because Illuminate reads them through parameter(),
-// parameters(), pointsToNextItems() and pointsToPreviousItems(), and a struct
-// with both would offer two ways to ask the same question.
+// The fields are unexported because they are read through Parameter,
+// Parameters, PointsToNextItems and PointsToPreviousItems, and exporting them
+// too would offer two ways to ask the same question.
 type Cursor struct {
 	parameters        map[string]string
 	pointsToNextItems bool
 }
 
-// NewCursor is Cursor::__construct.
+// NewCursor builds a cursor over the ordering columns of a boundary row.
 //
 // parameters maps the name of each ordering column to the value it has in the
 // boundary row. The set must match the ORDER BY exactly: a cursor over
@@ -60,8 +56,7 @@ type Cursor struct {
 // rows in silence.
 //
 // pointsToNextItems reports which side of the boundary the next query reads.
-// True is forward, the ordinary "next page" -- it is the default in PHP, which
-// has default arguments and Go does not. False is backward, and a backward
+// True is forward, the ordinary "next page". False is backward, and a backward
 // query returns its rows in reverse order; CursorPaginate turns them around
 // again.
 //
@@ -75,11 +70,11 @@ func NewCursor(parameters map[string]string, pointsToNextItems bool) Cursor {
 	return Cursor{parameters: copied, pointsToNextItems: pointsToNextItems}
 }
 
-// Parameter is Cursor::parameter. It returns the value the boundary row
-// has in the named ordering column.
+// Parameter returns the value the boundary row has in the named ordering
+// column.
 //
-// A name the cursor does not carry is an error, where PHP throws
-// UnexpectedValueException. It is not an empty string, because an empty string
+// A name the cursor does not carry is an error. It is not an empty string,
+// because an empty string
 // is a legitimate value for a nullable column and telling the two apart is the
 // difference between reading the next page and reading the first one again.
 func (c Cursor) Parameter(parameterName string) (string, error) {
@@ -90,9 +85,8 @@ func (c Cursor) Parameter(parameterName string) (string, error) {
 	return value, nil
 }
 
-// Parameters is Cursor::parameters. It returns the values of the named
-// ordering columns, in the order asked for, and fails on the first name the
-// cursor does not carry.
+// Parameters returns the values of the named ordering columns, in the order
+// asked for, and fails on the first name the cursor does not carry.
 func (c Cursor) Parameters(parameterNames []string) ([]string, error) {
 	values := make([]string, 0, len(parameterNames))
 	for _, name := range parameterNames {
@@ -105,22 +99,21 @@ func (c Cursor) Parameters(parameterNames []string) ([]string, error) {
 	return values, nil
 }
 
-// PointsToNextItems is Cursor::pointsToNextItems. It reports whether the
-// query reading from this cursor walks forward.
+// PointsToNextItems reports whether the query reading from this cursor walks
+// forward.
 func (c Cursor) PointsToNextItems() bool { return c.pointsToNextItems }
 
-// PointsToPreviousItems is Cursor::pointsToPreviousItems. It reports
-// whether the query reading from this cursor walks backward, and so returns its
-// rows in reverse order.
+// PointsToPreviousItems reports whether the query reading from this cursor
+// walks backward, and so returns its rows in reverse order.
 func (c Cursor) PointsToPreviousItems() bool { return !c.pointsToNextItems }
 
-// ToArray is Cursor::toArray. It is the parameters with the direction
-// merged in under _pointsToNextItems, which is the shape Encode writes.
+// ToArray is the parameters with the direction merged in under
+// _pointsToNextItems, which is the shape Encode writes.
 //
 // An ordering column actually named _pointsToNextItems would collide with the
-// direction, in Go exactly as in PHP. It is not defended against here: doing so
-// would change the encoding, and a cursor that no PHP paginator can read is a
-// worse fault than a column name nobody uses.
+// direction. It is not defended against here: doing so would change the
+// encoding, and a token no other reader of the same format can parse is a worse
+// fault than a column name nobody uses.
 func (c Cursor) ToArray() map[string]any {
 	out := make(map[string]any, len(c.parameters)+1)
 	for name, value := range c.parameters {
@@ -130,9 +123,9 @@ func (c Cursor) ToArray() map[string]any {
 	return out
 }
 
-// Encode is Cursor::encode. It renders the cursor as one URL-safe token:
-// base64 of the JSON of ToArray, with "+" and "/" replaced by "-" and "_" and
-// the padding removed, which is exactly base64url without padding.
+// Encode renders the cursor as one URL-safe token: base64 of the JSON of
+// ToArray, with "+" and "/" replaced by "-" and "_" and the padding removed,
+// which is exactly base64url without padding.
 //
 // It is encoding rather than encryption: anybody can read it, and anybody can
 // write one. That is why a repository validates the parameter names it takes
@@ -149,21 +142,15 @@ func (c Cursor) Encode() string {
 	return base64.RawURLEncoding.EncodeToString(encoded)
 }
 
-// FromEncoded is Cursor::fromEncoded. It reads a cursor back out of the
-// token Encode wrote.
-//
-// PHP writes Cursor::fromEncoded($token) and Go has no static methods, so the
-// type is gone from the identifier: pagination.FromEncoded(token). The name is
-// the PHP one, because that is the one a reader coming from Laravel searches
-// for.
+// FromEncoded reads a cursor back out of the token Encode wrote.
 //
 // Padding is tolerated, so a cursor that travelled through something that pads
 // base64 still parses. Anything else -- empty, not base64, not a JSON object --
-// is ErrCursor, where PHP returns null.
+// is ErrCursor.
 //
 // Numbers keep the digits they were written with rather than going through a
 // float, so a cursor over a 64-bit key survives the round trip. A missing
-// _pointsToNextItems reads as backward, which is what PHP's null does.
+// direction reads as backward.
 func FromEncoded(encodedString string) (Cursor, error) {
 	if encodedString == "" {
 		return Cursor{}, fmt.Errorf("%w: empty", ErrCursor)
@@ -216,12 +203,11 @@ func cursorParameterString(value any) (string, bool) {
 	}
 }
 
-// ResolveCurrentCursor is AbstractCursorPaginator::resolveCurrentCursor.
+// ResolveCurrentCursor reads the cursor out of the URL of the request being
+// served.
 //
-// Illuminate reads the cursor through a static closure a service provider
-// installs; there is no container here (ADR 0001) and no facade (ADR 0002), so
-// the URL of the request being served is passed in. A cursor that is absent or
-// does not parse is nil, which every constructor reads as "the first page".
+// The URL is passed in rather than reached for. A cursor that is absent or does
+// not parse is nil, which every constructor reads as "the first page".
 //
 // An empty cursorName means DefaultCursorName.
 func ResolveCurrentCursor(u *url.URL, cursorName string) *Cursor {

@@ -47,8 +47,8 @@ func TestBelongsToManyEagerLoadsInOneQueryWithThePivot(t *testing.T) {
 	}
 }
 
-// TestBelongsToManyDoesNotReadAnotherTenantsPivotRow is RULE 17 on the table
-// the join brings in.
+// TestBelongsToManyDoesNotReadAnotherTenantsPivotRow covers the table the join
+// brings in.
 //
 // The role belongs to this customer and the pivot row that grants it does not:
 // nobody in acme ever gave user 1 the auditor role, the other customer gave
@@ -179,8 +179,8 @@ func TestPivotRestorationOnlyFindsTheGrantsTenant(t *testing.T) {
 	}
 }
 
-// TestAttachStampsTheTenantOnThePivotRow is RULE 14 on the write side of a
-// shared table.
+// TestAttachStampsTheTenantOnThePivotRow covers the write side of a shared
+// table.
 //
 // A pivot row written without the tenant is a row every scoped read will miss
 // -- an attach that reports success and a relation that comes back empty.

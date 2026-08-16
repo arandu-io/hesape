@@ -17,28 +17,24 @@ import (
 	"github.com/arandu-io/hesape/routing/exceptions"
 )
 
-// ResponseFactory mirrors Illuminate\Routing\ResponseFactory: the one place a
-// handler asks for an answer of a given shape -- a body, a view, JSON, a
-// stream, a file, a redirect -- instead of assembling one by hand.
+// ResponseFactory is the one place a handler asks for an answer of a given
+// shape -- a body, a view, JSON, a stream, a file, a redirect -- instead of
+// assembling one by hand.
 //
-// It holds the two collaborators the PHP constructor takes: a [ViewRenderer],
-// which is this package's seam onto the view layer, and a [Redirector]. Every
-// method named Redirect* is a delegation to that redirector and nothing else,
-// exactly as in the PHP -- there is one redirect mechanism in this package, not
-// two (RULE 9), which is why those methods answer with the [Redirect] the
-// Redirector builds rather than with an hhttp.RedirectResponse.
-//
-// The names are the Laravel names (ADR 0044). The single spelling liberty is
-// acronym casing, which Go writes upper: ResponseFactory::json is [JSON] and
-// ResponseFactory::jsonp is [JSONP].
+// It holds two collaborators: a [ViewRenderer], which is this package's seam
+// onto the view layer, and a [Redirector]. Every method named Redirect* is a
+// delegation to that redirector and nothing else -- there is one redirect
+// mechanism in this package, not two, which is why those methods answer with
+// the [Redirect] the Redirector builds rather than with an
+// hhttp.RedirectResponse.
 type ResponseFactory struct {
-	// view answers to ResponseFactory::$view.
+	// view is this package's seam onto the view layer.
 	view ViewRenderer
-	// redirector answers to ResponseFactory::$redirector.
+	// redirector builds every Redirect* response.
 	redirector *Redirector
 }
 
-// NewResponseFactory answers to ResponseFactory::__construct.
+// NewResponseFactory builds a ResponseFactory from its two collaborators.
 //
 // Either collaborator may be nil, and the method that needs the missing one
 // says so rather than panicking: a project that never returns a view has no
@@ -47,35 +43,31 @@ func NewResponseFactory(view ViewRenderer, redirector *Redirector) *ResponseFact
 	return &ResponseFactory{view: view, redirector: redirector}
 }
 
-// Make answers to ResponseFactory::make: a response around a body.
+// Make builds a response around a body.
 //
-// The PHP defaults are status 200 and no headers; a status of 0 means that
-// default here, as it does everywhere else in this package. The PHP throws
-// InvalidArgumentException when the content cannot be encoded, so this returns
-// (*hhttp.Response, error).
+// A status of 0 means 200 with no headers, as it does everywhere else in this
+// package. It returns (*hhttp.Response, error) so a body that cannot be
+// encoded is reported rather than panicking.
 func (f *ResponseFactory) Make(content any, status int, headers http.Header) (*hhttp.Response, error) {
 	return hhttp.NewResponse(content, responseFactoryStatus(status, http.StatusOK), responseFactoryHeaders(headers))
 }
 
-// NoContent answers to ResponseFactory::noContent: an empty body under a status
-// that says there is nothing to read. A status of 0 means the PHP default, 204.
+// NoContent builds an empty body under a status that says there is nothing to
+// read. A status of 0 means 204.
 func (f *ResponseFactory) NoContent(status int, headers http.Header) (*hhttp.Response, error) {
 	return f.Make("", responseFactoryStatus(status, http.StatusNoContent), headers)
 }
 
-// View answers to ResponseFactory::view: render a named view and answer with
-// what it drew.
+// View renders a named view and answers with what it drew.
 //
 // It goes through [ViewRenderer], which is the seam this package already uses
 // to reach the view layer without importing it.
 //
-// The PHP accepts string|array for the view and calls ViewFactory::first on the
-// array, answering with the first of several names that exists. Go has no such
-// union and the seam has no First, so this takes the one name; a caller that
-// wants a fallback chooses it before calling.
+// This takes a single view name; a caller that wants a fallback among several
+// names chooses one before calling.
 //
-// The PHP throws when the template is missing or fails, so this returns
-// (*hhttp.Response, error).
+// It returns (*hhttp.Response, error), so a missing or failing template is
+// reported rather than panicking.
 func (f *ResponseFactory) View(view string, data any, status int, headers http.Header) (*hhttp.Response, error) {
 	if f.view == nil {
 		return nil, errors.New("routing: expected a view renderer on the response factory, got none")
@@ -90,22 +82,20 @@ func (f *ResponseFactory) View(view string, data any, status int, headers http.H
 	return f.Make(body.String(), status, headers)
 }
 
-// JSON answers to ResponseFactory::json. The name is the PHP one with the
-// acronym in Go casing.
+// JSON builds a response whose body is data encoded as JSON.
 //
-// The options word is the PHP JSON_* flags, whose constants live in hhttp; the
-// PHP default is JsonResponse::DEFAULT_ENCODING_OPTIONS, four hex-escaping
-// flags encoding/json has no counterpart for, so 0 is the default here.
+// options is a bitmask of hhttp's JSON* flags. encoding/json has no
+// counterpart for a hex-escaping default, so 0 -- no flags -- is the default
+// here.
 //
-// The PHP throws InvalidArgumentException when encoding fails, so this returns
-// (*hhttp.JsonResponse, error).
+// It returns (*hhttp.JsonResponse, error), so data that cannot be encoded is
+// reported rather than panicking.
 func (f *ResponseFactory) JSON(data any, status int, headers http.Header, options int) (*hhttp.JsonResponse, error) {
 	return hhttp.NewJsonResponse(data, responseFactoryStatus(status, http.StatusOK), responseFactoryHeaders(headers), options)
 }
 
-// JSONP answers to ResponseFactory::jsonp: [JSON] with the payload wrapped in a
-// call to the named callback, which turns the Content-Type into text/javascript.
-// The name is the PHP one with the acronym in Go casing.
+// JSONP is [JSON] with the payload wrapped in a call to the named callback,
+// which turns the Content-Type into text/javascript.
 func (f *ResponseFactory) JSONP(callback string, data any, status int, headers http.Header, options int) (*hhttp.JsonResponse, error) {
 	response, err := f.JSON(data, status, headers, options)
 	if err != nil {
@@ -114,14 +104,13 @@ func (f *ResponseFactory) JSONP(callback string, data any, status int, headers h
 	return response.SetCallback(callback), nil
 }
 
-// Stream answers to ResponseFactory::stream: a response whose body is written
-// as it is produced, rather than assembled and then sent.
+// Stream builds a response whose body is written as it is produced, rather
+// than assembled and then sent.
 //
-// The PHP callback echoes and the output buffer is flushed for it; here the
-// callback is handed an io.Writer that flushes after every write, so the bytes
-// reach the client at the point the PHP's flush() would have sent them. It also
-// receives a context, because a stream is I/O that outlives the call that
-// started it and the client may hang up mid-body.
+// The callback is handed an io.Writer that flushes after every write, so the
+// bytes reach the client as soon as they are written. It also receives a
+// context, because a stream is I/O that outlives the call that started it and
+// the client may hang up mid-body.
 func (f *ResponseFactory) Stream(callback StreamCallback, status int, headers http.Header) *StreamedResponse {
 	return &StreamedResponse{
 		Callback: callback,
@@ -130,12 +119,11 @@ func (f *ResponseFactory) Stream(callback StreamCallback, status int, headers ht
 	}
 }
 
-// StreamJSON answers to ResponseFactory::streamJson: encode the value straight
-// onto the wire instead of building the whole document in memory first.
+// StreamJSON encodes the value straight onto the wire instead of building the
+// whole document in memory first.
 //
-// The PHP answers with Symfony's StreamedJsonResponse; here it is a
-// [StreamedResponse] whose callback is the encoder, because a second streaming
-// response type would be a second way to stream (RULE 9).
+// It answers with a [StreamedResponse] whose callback is the encoder, rather
+// than a dedicated streaming-JSON response type.
 //
 // encodingOptions is the same flag word [JSON] takes.
 func (f *ResponseFactory) StreamJSON(data any, status int, headers http.Header, encodingOptions int) *StreamedResponse {
@@ -149,24 +137,19 @@ func (f *ResponseFactory) StreamJSON(data any, status int, headers http.Header, 
 	return response
 }
 
-// EventStream answers to ResponseFactory::eventStream: a server-sent event
-// stream, with the three headers that stop a proxy or a browser from buffering
-// it.
+// EventStream builds a server-sent event stream, with the three headers that
+// stop a proxy or a browser from buffering it.
 //
-// The PHP callback is a generator that yields a message at a time; the Go
-// counterpart is an iter.Seq, which is the same thing -- a producer that is
-// pulled, not a slice built in advance. A message that is an
-// *hhttp.StreamedEvent names its own event; anything else is sent under
-// "update", and a value that is neither a string nor a number is encoded as
-// JSON, which is what Js::encode does there.
+// callback is an iter.Seq: a producer that is pulled, not a slice built in
+// advance. A message that is an *hhttp.StreamedEvent names its own event;
+// anything else is sent under "update", and a value that is neither a string
+// nor a number is encoded as JSON.
 //
-// endStreamWith is the PHP's optional argument, whose default is "</stream>":
-// omit it for that default, and pass nil to close the stream without a final
-// event. Passing an *hhttp.StreamedEvent names the closing event.
+// endStreamWith is optional and defaults to "</stream>": omit it for that
+// default, and pass nil to close the stream without a final event. Passing an
+// *hhttp.StreamedEvent names the closing event.
 //
-// The PHP checks connection_aborted() before each message; here the iteration
-// stops when the request context is done, which is the same question asked of
-// the standard library.
+// The iteration stops when the request context is done.
 func (f *ResponseFactory) EventStream(callback iter.Seq[any], headers http.Header, endStreamWith ...any) *StreamedResponse {
 	end := any(responseFactoryDefaultEndStream)
 	if len(endStreamWith) > 0 {
@@ -195,8 +178,8 @@ func (f *ResponseFactory) EventStream(callback iter.Seq[any], headers http.Heade
 		if failure != nil {
 			return failure
 		}
-		// The PHP writes the closing event outside the loop, so it is written
-		// even when the loop stopped early.
+		// The closing event is written outside the loop, so it happens even
+		// when the loop stopped early.
 		if responseFactoryFilled(end) {
 			if _, err := io.WriteString(w, responseFactoryEvent(end)); err != nil {
 				return err
@@ -206,16 +189,15 @@ func (f *ResponseFactory) EventStream(callback iter.Seq[any], headers http.Heade
 	}, http.StatusOK, merged)
 }
 
-// StreamDownload answers to ResponseFactory::streamDownload: a [Stream] the
-// browser saves instead of showing, because of the Content-Disposition header.
+// StreamDownload is a [Stream] the browser saves instead of showing, because
+// of the Content-Disposition header.
 //
-// The PHP wraps whatever the callback throws in a StreamedResponseException,
-// since by then the status and the headers are already gone and there is no
-// error page left to send; this wraps the returned error in
-// exceptions.StreamedResponseError for the same reason.
+// By the time the callback runs, the status and the headers are already sent
+// and there is no error page left to send, so a failure is wrapped in
+// exceptions.StreamedResponseError rather than returned bare.
 //
-// An empty name leaves the header off, as a null does in the PHP. An empty
-// disposition means the PHP default, "attachment".
+// An empty name leaves the header off. An empty disposition defaults to
+// "attachment".
 func (f *ResponseFactory) StreamDownload(callback StreamCallback, name string, headers http.Header, disposition string) *StreamedResponse {
 	response := f.Stream(callback, http.StatusOK, headers)
 	response.wrapErrors = true
@@ -230,17 +212,16 @@ func (f *ResponseFactory) StreamDownload(callback StreamCallback, name string, h
 	return response
 }
 
-// Download answers to ResponseFactory::download: send a file from disk under a
-// Content-Disposition that makes the browser save it.
+// Download sends a file from disk under a Content-Disposition that makes the
+// browser save it.
 //
-// The PHP takes SplFileInfo|string; this takes the path, and the file is opened
-// when the response is sent rather than read into memory when it is built --
-// [BinaryFileResponse] serves it through http.ServeContent, so a range request
-// and a conditional request are answered the way the standard library answers
-// them.
+// It takes the path, and the file is opened when the response is sent rather
+// than read into memory when it is built -- [BinaryFileResponse] serves it
+// through http.ServeContent, so a range request and a conditional request are
+// answered the way the standard library answers them.
 //
-// An empty name means the file's own base name, as a null does in the PHP. An
-// empty disposition means the PHP default, "attachment".
+// An empty name means the file's own base name. An empty disposition defaults
+// to "attachment".
 func (f *ResponseFactory) Download(path, name string, headers http.Header, disposition string) *BinaryFileResponse {
 	response := &BinaryFileResponse{Path: path, Headers: responseFactoryHeaders(headers)}
 	if name == "" {
@@ -249,17 +230,15 @@ func (f *ResponseFactory) Download(path, name string, headers http.Header, dispo
 	return response.SetContentDisposition(responseFactoryDisposition(disposition), name, responseFactoryFallbackName(name))
 }
 
-// File answers to ResponseFactory::file: send the raw contents of a file, with
-// no Content-Disposition, so a PDF or an image is shown rather than saved.
+// File sends the raw contents of a file, with no Content-Disposition, so a
+// PDF or an image is shown rather than saved.
 //
-// The PHP takes SplFileInfo|string; this takes the path, for the reason
-// [Download] does.
+// It takes the path, for the reason [Download] does.
 func (f *ResponseFactory) File(path string, headers http.Header) *BinaryFileResponse {
 	return &BinaryFileResponse{Path: path, Headers: responseFactoryHeaders(headers)}
 }
 
-// RedirectTo answers to ResponseFactory::redirectTo. It is Redirector.To, which
-// is what the PHP delegates to.
+// RedirectTo delegates to Redirector.To.
 func (f *ResponseFactory) RedirectTo(path string, status int, headers http.Header, secure *bool) (*Redirect, error) {
 	if f.redirector == nil {
 		return nil, responseFactoryNoRedirector()
@@ -267,11 +246,7 @@ func (f *ResponseFactory) RedirectTo(path string, status int, headers http.Heade
 	return f.redirector.To(path, responseFactoryStatus(status, http.StatusFound), headers, secure), nil
 }
 
-// RedirectToRoute answers to ResponseFactory::redirectToRoute. It is
-// Redirector.Route.
-//
-// The PHP takes BackedEnum|string for the route; the enum case is a PHP
-// language feature, and the name it carries is the string this takes.
+// RedirectToRoute delegates to Redirector.Route.
 func (f *ResponseFactory) RedirectToRoute(route string, parameters map[string]any, status int, headers http.Header) (*Redirect, error) {
 	if f.redirector == nil {
 		return nil, responseFactoryNoRedirector()
@@ -279,8 +254,7 @@ func (f *ResponseFactory) RedirectToRoute(route string, parameters map[string]an
 	return f.redirector.Route(route, parameters, responseFactoryStatus(status, http.StatusFound), headers)
 }
 
-// RedirectToAction answers to ResponseFactory::redirectToAction. It is
-// Redirector.Action.
+// RedirectToAction delegates to Redirector.Action.
 func (f *ResponseFactory) RedirectToAction(action string, parameters map[string]any, status int, headers http.Header) (*Redirect, error) {
 	if f.redirector == nil {
 		return nil, responseFactoryNoRedirector()
@@ -288,9 +262,8 @@ func (f *ResponseFactory) RedirectToAction(action string, parameters map[string]
 	return f.redirector.Action(action, parameters, responseFactoryStatus(status, http.StatusFound), headers)
 }
 
-// RedirectGuest answers to ResponseFactory::redirectGuest. It is
-// Redirector.Guest: the redirect that remembers where the visitor was going, so
-// a sign-in can send them back there.
+// RedirectGuest delegates to Redirector.Guest: the redirect that remembers
+// where the visitor was going, so a sign-in can send them back there.
 func (f *ResponseFactory) RedirectGuest(path string, status int, headers http.Header, secure *bool) (*Redirect, error) {
 	if f.redirector == nil {
 		return nil, responseFactoryNoRedirector()
@@ -298,10 +271,10 @@ func (f *ResponseFactory) RedirectGuest(path string, status int, headers http.He
 	return f.redirector.Guest(path, responseFactoryStatus(status, http.StatusFound), headers, secure), nil
 }
 
-// RedirectToIntended answers to ResponseFactory::redirectToIntended. It is
-// Redirector.Intended: the other half of [RedirectGuest].
+// RedirectToIntended delegates to Redirector.Intended: the other half of
+// [RedirectGuest].
 //
-// An empty default means the PHP default, "/".
+// An empty default falls back to "/".
 func (f *ResponseFactory) RedirectToIntended(def string, status int, headers http.Header, secure *bool) (*Redirect, error) {
 	if f.redirector == nil {
 		return nil, responseFactoryNoRedirector()
@@ -312,18 +285,15 @@ func (f *ResponseFactory) RedirectToIntended(def string, status int, headers htt
 	return f.redirector.Intended(def, responseFactoryStatus(status, http.StatusFound), headers, secure), nil
 }
 
-// StreamCallback is the $callback ResponseFactory::stream, streamDownload and
-// eventStream take. The PHP echoes into the output buffer; this writes to w,
-// which flushes after every write.
+// StreamCallback is the callback [ResponseFactory.Stream], StreamDownload and
+// EventStream take. It writes to w, which flushes after every write.
 //
-// The context is the request's: it is done when the client hangs up, which is
-// the question connection_aborted() answers there.
+// The context is the request's: it is done when the client hangs up.
 type StreamCallback func(ctx context.Context, w io.Writer) error
 
-// StreamedResponse mirrors Symfony's StreamedResponse, which
-// ResponseFactory::stream, streamJson, eventStream and streamDownload all
-// answer with: a status, a set of headers and a body that is produced while it
-// is being sent.
+// StreamedResponse is a status, a set of headers and a body that is produced
+// while it is being sent. [ResponseFactory.Stream], StreamJSON, EventStream
+// and StreamDownload all build one.
 //
 // The fields are public because the whole point of returning a response instead
 // of writing one is that a caller may still add a header to it.
@@ -335,13 +305,12 @@ type StreamedResponse struct {
 	// Headers are sent before the first byte of the body.
 	Headers http.Header
 	// wrapErrors reports whether a failure from the callback is wrapped in an
-	// exceptions.StreamedResponseError. Only StreamDownload sets it, which is
-	// the only PHP method that wraps.
+	// exceptions.StreamedResponseError. Only StreamDownload sets it.
 	wrapErrors bool
 }
 
-// SendContent answers to Symfony's StreamedResponse::sendContent: write the
-// headers, the status and then the body, flushing as it goes.
+// SendContent writes the headers, the status and then the body, flushing as it
+// goes.
 //
 // It returns what the callback returned, which ServeHTTP cannot: by the time
 // the callback fails the status line is already sent, so there is nowhere left
@@ -388,9 +357,8 @@ func (r *StreamedResponse) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	_ = r.SendContent(w, req)
 }
 
-// BinaryFileResponse mirrors Symfony's BinaryFileResponse, which
-// ResponseFactory::download and file answer with: a path on disk plus the
-// headers to send it under.
+// BinaryFileResponse is a path on disk plus the headers to send it under.
+// [ResponseFactory.Download] and File both build one.
 //
 // The bytes are read when the response is sent, never before, so a large file
 // costs a descriptor and not memory.
@@ -402,11 +370,11 @@ type BinaryFileResponse struct {
 	Headers http.Header
 }
 
-// SetContentDisposition answers to BinaryFileResponse::setContentDisposition:
-// say whether the browser saves the file or shows it, and under what name.
+// SetContentDisposition says whether the browser saves the file or shows it,
+// and under what name.
 //
 // The fallback is the ASCII name a client that does not understand RFC 5987
-// falls back to, which is what ResponseFactory::fallbackName produces.
+// falls back to, which is what [responseFactoryFallbackName] produces.
 func (r *BinaryFileResponse) SetContentDisposition(disposition, name, fallback string) *BinaryFileResponse {
 	if r.Headers == nil {
 		r.Headers = http.Header{}
@@ -415,9 +383,9 @@ func (r *BinaryFileResponse) SetContentDisposition(disposition, name, fallback s
 	return r
 }
 
-// SendContent answers to Symfony's BinaryFileResponse::sendContent: open the
-// file and hand it to http.ServeContent, which picks the status -- 200, 206 for
-// a range request, 304 for a conditional one -- and streams the bytes.
+// SendContent opens the file and hands it to http.ServeContent, which picks
+// the status -- 200, 206 for a range request, 304 for a conditional one --
+// and streams the bytes.
 func (r *BinaryFileResponse) SendContent(w http.ResponseWriter, req *http.Request) error {
 	if w == nil {
 		return errors.New("routing: expected a response writer to send a file into, got none")
@@ -446,16 +414,15 @@ func (r *BinaryFileResponse) SendContent(w http.ResponseWriter, req *http.Reques
 }
 
 // ServeHTTP makes a BinaryFileResponse an http.Handler. A file that cannot be
-// opened is a 404, which is what Symfony's FileException becomes once the
-// exception handler has had it.
+// opened answers 404.
 func (r *BinaryFileResponse) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if err := r.SendContent(w, req); err != nil {
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 	}
 }
 
-// responseFactoryDefaultEndStream is the PHP default of the $endStreamWith
-// argument of ResponseFactory::eventStream.
+// responseFactoryDefaultEndStream is the default value of EventStream's
+// endStreamWith argument.
 const responseFactoryDefaultEndStream = "</stream>"
 
 // responseFactoryDefaultEvent is the event name eventStream sends a message
@@ -468,7 +435,7 @@ func responseFactoryNoRedirector() error {
 	return errors.New("routing: expected a redirector on the response factory, got none")
 }
 
-// responseFactoryStatus applies a PHP default argument: zero means the default.
+// responseFactoryStatus applies a default: zero means def.
 func responseFactoryStatus(status, def int) int {
 	if status == 0 {
 		return def
@@ -476,7 +443,7 @@ func responseFactoryStatus(status, def int) int {
 	return status
 }
 
-// responseFactoryDisposition applies the PHP default of $disposition.
+// responseFactoryDisposition applies the default disposition, "attachment".
 func responseFactoryDisposition(disposition string) string {
 	if disposition == "" {
 		return "attachment"
@@ -496,7 +463,7 @@ func responseFactoryHeaders(headers http.Header) http.Header {
 }
 
 // responseFactoryApplyHeaders writes a header bag onto a response writer,
-// replacing rather than appending, which is what Symfony's send() does.
+// replacing rather than appending.
 func responseFactoryApplyHeaders(w http.ResponseWriter, headers http.Header) {
 	target := w.Header()
 	for key, values := range headers {
@@ -507,9 +474,8 @@ func responseFactoryApplyHeaders(w http.ResponseWriter, headers http.Header) {
 	}
 }
 
-// responseFactoryFlushWriter is the io.Writer a StreamCallback is handed: every
-// write reaches the client, which is what the PHP's ob_flush() plus flush()
-// pair does after each event.
+// responseFactoryFlushWriter is the io.Writer a StreamCallback is handed:
+// every write reaches the client immediately.
 type responseFactoryFlushWriter struct {
 	w       io.Writer
 	flusher http.Flusher
@@ -529,12 +495,11 @@ func (fw *responseFactoryFlushWriter) Flush() {
 	}
 }
 
-// responseFactoryEvent frames one server-sent event, which is what the three
-// echo lines of ResponseFactory::eventStream produce.
+// responseFactoryEvent frames one server-sent event.
 //
 // hhttp.StreamedEvent already knows the wire format and already encodes a
 // payload that is neither a string nor a number as JSON, so this only supplies
-// the default event name the PHP supplies.
+// the default event name.
 func responseFactoryEvent(message any) string {
 	if event, ok := message.(*hhttp.StreamedEvent); ok && event != nil {
 		name := event.Event
@@ -548,8 +513,8 @@ func responseFactoryEvent(message any) string {
 	return (&hhttp.StreamedEvent{Event: responseFactoryDefaultEvent, Data: message}).String()
 }
 
-// responseFactoryFilled answers to the filled() helper the PHP guards the
-// closing event with: nil and the empty string are not filled.
+// responseFactoryFilled reports whether value should be treated as present:
+// nil and the empty string are not filled.
 func responseFactoryFilled(value any) bool {
 	switch typed := value.(type) {
 	case nil:
@@ -579,8 +544,8 @@ func responseFactoryEncodeJSON(w io.Writer, data any, options int) error {
 	return nil
 }
 
-// responseFactoryBaseName is the file's own name, which Symfony's
-// BinaryFileResponse uses when download() was given no name.
+// responseFactoryBaseName is the file's own name, used by Download when given
+// no name.
 func responseFactoryBaseName(path string) string {
 	// Deliberately not filepath.Base: the name goes into an HTTP header, where
 	// the separator is "/" whatever the server's operating system thinks.
@@ -591,14 +556,13 @@ func responseFactoryBaseName(path string) string {
 	return trimmed
 }
 
-// responseFactoryFallbackName answers to ResponseFactory::fallbackName: the
-// ASCII name a client that does not read RFC 5987 falls back to.
+// responseFactoryFallbackName is the ASCII name a client that does not read
+// RFC 5987 falls back to.
 //
-// The PHP is str_replace('%', ”, Str::ascii($name)). Str::ascii transliterates
-// -- "ç" becomes "c" -- from a table this module does not carry, so a character
-// outside ASCII is dropped rather than approximated; the real name still
-// travels, in the filename* parameter. The two characters Symfony refuses in a
-// fallback, "/" and "\", are dropped too, along with the control characters.
+// A character outside ASCII is dropped rather than transliterated, since this
+// module carries no transliteration table; the real name still travels, in
+// the filename* parameter. "/" and "\" are dropped too, along with the
+// control characters.
 func responseFactoryFallbackName(name string) string {
 	var out strings.Builder
 	for _, r := range name {
@@ -616,9 +580,8 @@ func responseFactoryFallbackName(name string) string {
 	return out.String()
 }
 
-// responseFactoryMakeDisposition answers to Symfony's
-// ResponseHeaderBag::makeDisposition, which both streamDownload and download
-// build their Content-Disposition with.
+// responseFactoryMakeDisposition builds the Content-Disposition header value
+// that StreamDownload and Download both send.
 func responseFactoryMakeDisposition(disposition, name, fallback string) string {
 	quoted := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(fallback)
 	out := disposition + `; filename="` + quoted + `"`

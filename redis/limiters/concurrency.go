@@ -10,22 +10,18 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 )
 
-// ConcurrencyLimiter answers Illuminate\Redis\Limiters\ConcurrencyLimiter.
+// ConcurrencyLimiter is a semaphore: MaxLocks named slots, each held by one
+// caller for at most ReleaseAfter.
 //
-// It is a semaphore: MaxLocks named slots, each held by one caller for at most
-// ReleaseAfter. It is the shape behind Laravel's
-// Redis::funnel('key')->limit(3)->then(...) -- three exports at a time, and the
-// fourth waits.
+// "Three exports at a time, and the fourth waits", spelled as a limiter.
 //
-// # No Lua
+// # No server-side script
 //
-// Laravel acquires with an MGET over every slot followed by a SET inside one
-// script, and releases with the canonical compare-and-delete script. Neither is
-// available under RULE 11, which keeps Dragonfly, Redis, Valkey and KeyDB
-// interchangeable, so acquisition is a `SET slot id NX EX n` per slot -- atomic
-// on its own, and cheaper than the script it replaces because the first free
-// slot ends the loop -- and release is the WATCH/MULTI/EXEC that RedisStore
-// already uses to release a lock.
+// Dragonfly, Redis, Valkey and KeyDB stay interchangeable only while nothing
+// needs a script, so acquisition is a `SET slot id NX EX n` per slot -- atomic
+// on its own, and cheap because the first free slot ends the loop -- and
+// release is the WATCH/MULTI/EXEC that RedisStore already uses to release a
+// lock.
 type ConcurrencyLimiter struct {
 	redis        Connection
 	name         string
@@ -43,13 +39,11 @@ func NewConcurrencyLimiter(conn Connection, name string, maxLocks int64, release
 
 // Block waits up to timeout for a slot, runs callback, and gives the slot back.
 //
-// The slot is released whether callback succeeded or failed, which is the PHP's
-// try/catch and matters more here: a slot held by a returning error is a slot
-// held until releaseAfter expires.
+// The slot is released whether callback succeeded or failed: a slot held by a
+// returning error is a slot held until releaseAfter expires.
 //
-// sleepFor is how long to wait between attempts; zero takes Laravel's 250ms.
-// A nil callback acquires the slot, releases it and returns, which is the PHP's
-// `return true`.
+// sleepFor is how long to wait between attempts; zero takes the 250ms default.
+// A nil callback acquires the slot, releases it and returns.
 func (l *ConcurrencyLimiter) Block(ctx context.Context, timeout time.Duration, callback func(context.Context) error, sleepFor time.Duration) error {
 	if sleepFor <= 0 {
 		sleepFor = 250 * time.Millisecond
@@ -145,16 +139,14 @@ func randomID() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
-// ConcurrencyLimiterBuilder answers
-// Illuminate\Redis\Limiters\ConcurrencyLimiterBuilder.
+// ConcurrencyLimiterBuilder configures a ConcurrencyLimiter.
 //
 // It is what Connection.Funnel returns:
 //
 //	conn.Funnel("export").Limit(3).Then(ctx, run, nil)
 //
-// The fields are unexported and the setters are the API. Laravel's are public
-// properties AND fluent methods with the same names, which Go does not allow on
-// one type -- and of the two, the method is the one every call site uses.
+// The fields are unexported and the setters are the API, so there is one way to
+// configure the limiter rather than two.
 type ConcurrencyLimiterBuilder struct {
 	connection   Connection
 	name         string
@@ -164,9 +156,8 @@ type ConcurrencyLimiterBuilder struct {
 	sleepFor     time.Duration
 }
 
-// NewConcurrencyLimiterBuilder builds the builder, with Laravel's defaults:
-// sixty seconds of holding, three seconds of waiting, 250 milliseconds between
-// attempts.
+// NewConcurrencyLimiterBuilder builds the builder: sixty seconds of holding,
+// three seconds of waiting, 250 milliseconds between attempts.
 func NewConcurrencyLimiterBuilder(conn Connection, name string) *ConcurrencyLimiterBuilder {
 	return &ConcurrencyLimiterBuilder{
 		connection:   conn,
@@ -204,7 +195,7 @@ func (b *ConcurrencyLimiterBuilder) Sleep(d time.Duration) *ConcurrencyLimiterBu
 // Then executes callback if a lock is obtained, and failure if the wait ran
 // out.
 //
-// A nil failure re-raises ErrLimiterTimeout, which is the PHP's `throw $e`.
+// A nil failure returns ErrLimiterTimeout to the caller.
 func (b *ConcurrencyLimiterBuilder) Then(ctx context.Context, callback func(context.Context) error, failure func(error) error) error {
 	err := NewConcurrencyLimiter(b.connection, b.name, b.maxLocks, b.releaseAfter).
 		Block(ctx, b.timeout, callback, b.sleepFor)

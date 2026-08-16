@@ -1,24 +1,19 @@
 package mail
 
-// TextMessage is Illuminate\Mail\TextMessage: the message as the plain-text
-// part sees it.
+// TextMessage is the message as the plain-text part sees it.
 //
-// It exists for one reason, and Illuminate's implementation is the whole
-// argument: embed() and embedData() answer the empty string. A markdown
-// mailable renders the same template twice, once as HTML and once as text, and
-// the text pass must not emit a cid: reference for an image nothing will
-// display -- it would arrive as the literal text "cid:9f3c...@arandu" in the
-// middle of a sentence.
+// It exists for one reason: [TextMessage.Embed] and [TextMessage.EmbedData]
+// answer the empty string. A markdown mailable renders the same template twice,
+// once as HTML and once as text, and the text pass must not emit a cid:
+// reference for an image nothing will display -- it would arrive as the literal
+// text "cid:9f3c...@arandu" in the middle of a sentence.
 //
-// Everything else forwards to the message underneath, which is what
-// Illuminate's ForwardsCalls does there and what embedding does here.
+// Everything else is the embedded [Message], unchanged.
 type TextMessage struct {
 	*Message
 }
 
 // NewTextMessage wraps a message for the plain-text pass.
-//
-// NewTextMessage is TextMessage::__construct.
 func NewTextMessage(m *Message) *TextMessage { return &TextMessage{Message: m} }
 
 // Embed answers the empty string: there is nothing to embed in plain text.

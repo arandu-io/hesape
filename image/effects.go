@@ -25,13 +25,11 @@ func grayscale(src *stdimage.RGBA) *stdimage.RGBA {
 	return dst
 }
 
-// blurRadius turns Illuminate's 0-to-100 amount into a radius in pixels.
+// blurRadius turns a 0-to-100 amount into a radius in pixels.
 //
-// Illuminate hands the number to Intervention, which hands it to GD as a count
-// of 3x3 Gaussian passes, so what the number means there is "how many times",
-// not "how far". Here it is a radius, five points to the pixel: the default
-// blur(5) softens by one pixel and blur(100) by twenty, which lands in the same
-// place as the PHP for the values people actually pass.
+// Amount is a strength, not a distance, so it is scaled down: five points to
+// the pixel. The default blur(5) softens by one pixel and blur(100) by
+// twenty.
 func blurRadius(amount int) int {
 	if amount <= 0 {
 		return 0
@@ -128,11 +126,10 @@ func boxBlurVertical(src *stdimage.RGBA, r int) *stdimage.RGBA {
 // sharpen is an unsharp mask: the difference between the canvas and a blurred
 // copy of it, added back on top.
 //
-// Illuminate's amount is 0 to 100 and it reaches GD as the strength of a
-// sharpening convolution. Here it is the strength of the mask, with 100 adding
-// the full difference twice over -- past that the halo around every edge is
-// more visible than the detail it was meant to recover, which is why the number
-// is clamped before it arrives.
+// Amount is 0 to 100, the strength of the mask, with 100 adding the full
+// difference twice over -- past that the halo around every edge is more
+// visible than the detail it was meant to recover, which is why the number is
+// clamped before it arrives.
 func sharpen(src *stdimage.RGBA, amount int) *stdimage.RGBA {
 	if amount <= 0 {
 		return src

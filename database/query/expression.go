@@ -1,30 +1,28 @@
 package query
 
-// Expression answers Illuminate\Database\Query\Expression.
+// Expression is a value the grammar must not wrap in identifier quotes and must
+// not turn into a placeholder.
 //
-// A value the grammar must not wrap in identifier quotes and must not turn into
-// a placeholder. Everything the query builder accepts as a column or a value
-// also accepts an Expression, exactly as in PHP.
+// Everything the query builder accepts as a column or a value also accepts an
+// Expression.
 type Expression struct {
 	value any
 }
 
-// Raw answers `new Expression($value)` and Illuminate's `DB::raw()` helper.
+// Raw builds an Expression out of a value.
 func Raw(value any) Expression {
 	return Expression{value: value}
 }
 
-// GetValue answers Expression::getValue.
-//
-// The PHP takes the grammar so a grammar-aware expression can render itself; the
-// value carried here is already final, so the grammar is accepted and ignored to
-// keep the signature recognisable.
+// GetValue returns the wrapped value. The grammar parameter is accepted and
+// ignored: the value carried here is already final, and the parameter exists
+// only so Expression satisfies the same signature as a grammar-aware value.
 func (e Expression) GetValue(grammar Grammar) any {
 	return e.value
 }
 
-// Value returns the wrapped value without a grammar. It is the mechanical
-// convenience the PHP does not need because `getValue` is always reachable.
+// Value returns the wrapped value without requiring a grammar argument, for
+// callers that have no grammar handy and do not need one.
 func (e Expression) Value() any {
 	return e.value
 }
@@ -34,7 +32,7 @@ func (e Expression) String() string {
 	return stringify(e.value)
 }
 
-// IsExpression answers Grammar::isExpression.
+// IsExpression reports whether value is an Expression or a *Expression.
 func IsExpression(value any) bool {
 	switch value.(type) {
 	case Expression, *Expression:

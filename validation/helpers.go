@@ -12,8 +12,8 @@ type Validatable interface {
 }
 
 // The helper list below is short on purpose: it is what a hand-written request
-// type reaches for, and domain rules do not belong to the framework. Everything
-// with a Laravel name is a rule in the table, not a function here.
+// type reaches for, and domain rules do not belong to the framework. Anything
+// that has a rule name is a rule in the catalogue, not a function here.
 
 // Required rejects an empty or blank value. It is the `required` rule for one
 // value, without a rule set.

@@ -1,30 +1,22 @@
-// Package events is Illuminate\Events: a dispatcher, its listeners, and an
-// outbox underneath.
+// Package events is a dispatcher, its listeners, and an outbox underneath.
 //
-// # The surface is Laravel's
+// # The dispatcher
 //
-// Listen, Dispatch, Until, Subscribe, Push, Flush, Forget, ForgetPushed,
-// GetListeners, MakeListener, CreateClassListener, Defer -- the names, the
-// arguments and the behaviour are Dispatcher.php's, read from the body and not
-// from the signature. A wildcard listener is handed the event name and the
-// payload; every other listener is handed the payload spread across its
-// parameters; a listener that returns false stops the ones behind it; Until is
-// dispatch with $halt set, which is all until() does in the PHP.
+// Listen registers, Dispatch fires, and the two are all most code touches.
+// Until returns the first non-nil response and leaves the listeners behind it
+// uncalled; a listener that returns false stops the ones behind it without
+// discarding what has already been collected; a wildcard listener is handed the
+// event name and the payload, and every other listener is handed the payload
+// spread across its parameters. Push and Flush hold a dispatch back and release
+// it, Subscribe registers a value that registers its own listeners, and Forget
+// removes them.
 //
-// The files this package answers to, in the clone at laravel_illuminate/events,
-// which is Laravel 13:
+// A listener registered against an interface the event happens to implement is
+// not found: Go cannot go from a name to a type at run time, and an interface
+// is structural rather than declared, so there is nothing to walk. Register
+// against the event.
 //
-//	CallQueuedListener.php
-//	Dispatcher.php
-//	EventServiceProvider.php
-//	InvokeQueuedClosure.php
-//	NullDispatcher.php
-//	QueuedClosure.php
-//	functions.php
-//
-// EventServiceProvider::register is the one method with no equivalent: it binds
-// the dispatcher into the container, and there is no container (ADR 0001).
-// Wire the dispatcher in bootstrap/app.go, which is where an Arandu project
+// The dispatcher is wired in bootstrap/app.go, which is where an Arandu project
 // wires everything.
 //
 // # The outbox is the mechanism
@@ -45,37 +37,16 @@
 // consumer deduplicates on Stored.ID, and that is why the id is stable and why
 // it travels with the event.
 //
-// # What is not here
+// An event that has to leave the process goes through the outbox. The
+// dispatcher itself broadcasts nothing.
 //
-// Three things in Dispatcher.php have no Go equivalent, and each one is a
-// language difference rather than a decision:
+// # Testing
 //
-// addInterfaceListeners walks class_implements($eventName) to find the
-// listeners registered against the event's interfaces. Go cannot go from a name
-// to a type at run time, and an interface is structural rather than declared,
-// so there is nothing to walk.
-//
-// broadcastEvent pulls a BroadcastFactory out of the container. There is no
-// container (ADR 0001), and an event that has to leave the process goes through
-// the outbox, which is the one delivery this package owns.
-//
-// The __call forwarding in NullDispatcher is PHP's, and Go has no method
-// missing hook. The methods that mattered are written out.
-//
-// # There is no Event::fake, because there is nothing global to swap
-//
-// Event::fake, Event::fakeExcept, Event::fakeFor and Event::fakeExceptFor are
-// reason 2, all four -- the ADR 0056 reason for a method that only serves the
-// container, a facade or a service provider. Each of them is Facade::swap: it
-// puts an EventFake where the 'events' binding was, so that every event() in
-// the application lands in the fake without anything else changing. There is
-// no container (ADR 0001) and no facade (ADR 0002), so there is no binding to
-// put it in -- and a package-level dispatcher a test could swap would be
-// shared mutable state, which is the one thing ADR 0045 names as worse than
-// the container itself: two tests calling t.Parallel would fight over it.
-//
-// What a test writes instead is the dispatcher it builds for itself, which is
-// already faked by having none of the application's listeners on it:
+// There is nothing global to swap, and a package-level dispatcher a test could
+// swap would be shared mutable state that two tests calling t.Parallel would
+// fight over. What a test writes instead is the dispatcher it builds for
+// itself, which is already isolated by having none of the application's
+// listeners on it:
 //
 //	d := events.NewDispatcher()
 //
@@ -88,11 +59,7 @@
 //		t.Fatalf("the order shipped %d times, want 1", len(shipped))
 //	}
 //
-// Event::fakeExcept is the same dispatcher with the listeners you do want on
-// it, which is the argument you leave in rather than the one you take out.
-// Event::fakeFor and Event::fakeExceptFor are the scope of the variable: d
-// stops existing when the function that built it returns, and that is what the
-// PHP's callable argument is buying -- a fake that does not outlive the block
-// it was wanted in. Here nothing outlives its block, so there is no second
-// form of it.
+// Keeping some listeners is registering the ones you want rather than removing
+// the ones you do not, and scoping the substitution is the scope of the
+// variable: d stops existing when the function that built it returns.
 package events

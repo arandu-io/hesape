@@ -7,8 +7,8 @@ import (
 
 // FakeJob is a job that came off nothing, and records what was done to it.
 //
-// It answers Illuminate\Queue\Jobs\FakeJob. It is what a test wires when it
-// wants to call a handler directly and then ask whether the handler released,
+// It is what a test wires when it wants to call a handler directly and then ask
+// whether the handler released,
 // deleted or failed its job -- without a store, a worker or a transaction.
 //
 //	f := jobs.NewFakeJob("invoice.send", tenant)
@@ -23,11 +23,11 @@ type FakeJob struct {
 	*Job
 
 	// ReleaseDelay is how long the job asked to wait before its next delivery.
-	// It answers $releaseDelay, and it is zero on a job that was not released.
+	// It is zero on a job that was not released.
 	ReleaseDelay time.Duration
 
-	// FailedWith is the cause the job was parked with. It answers $failedWith,
-	// and it is nil on a job that was not parked.
+	// FailedWith is the cause the job was parked with. It is nil on a job that
+	// was not parked.
 	FailedWith error
 }
 
@@ -36,8 +36,7 @@ var _ Driver = (*FakeJob)(nil)
 // NewFakeJob returns a job for name, belonging to tenant, that came off a fake
 // queue.
 //
-// Attempts is 1, which is what Laravel's FakeJob answers: the job is being
-// handled, and the handling counts.
+// Attempts is 1: the job is being handled, and the handling counts.
 func NewFakeJob(name, tenant string) *FakeJob {
 	f := &FakeJob{}
 	f.Job = Popped(f, "fake", Job{

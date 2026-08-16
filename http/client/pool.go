@@ -6,9 +6,7 @@ import (
 	"sync"
 )
 
-// Pool mirrors Illuminate\Http\Client\Pool.
-//
-// It collects concurrent HTTP requests and sends them as a batch. Each
+// Pool collects concurrent HTTP requests and sends them as a batch. Each
 // request is keyed either by a numeric index (NewRequest) or by a
 // string key (As).
 type Pool struct {
@@ -43,9 +41,8 @@ func NewPool(f *Factory) *Pool {
 
 // NewRequest adds a request with a numeric key.
 //
-// The key counts only the unnamed requests, as PHP's array append does: a pool
-// of As("a"), NewRequest(), As("b"), NewRequest() answers under "a", "0", "b"
-// and "1".
+// The key counts only the unnamed requests: a pool of As("a"), NewRequest(),
+// As("b"), NewRequest() answers under "a", "0", "b" and "1".
 func (p *Pool) NewRequest() *PendingRequest {
 	p.mu.Lock()
 	key := fmt.Sprintf("%d", p.unnamed)
@@ -75,8 +72,8 @@ func (p *Pool) claim(key string) *PendingRequest {
 // record is what a verb on a pooled request calls instead of sending.
 //
 // A second verb on the same pending request replaces the first rather than
-// adding a second entry: PHP's $pool->as('a')->get(...)->post(...) would be
-// one request too, because the key names one slot.
+// adding a second entry: pool.As("a").Get(...) followed by .Post(...) is one
+// request too, because the key names one slot.
 func (p *Pool) record(pr *PendingRequest, method, url string, query map[string]string, data any) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -145,7 +142,6 @@ func (p *Pool) Send(concurrency int) (map[string]*Response, error) {
 	return results, nil
 }
 
-// __call-like proxy: delegates HTTP verb methods to a new request.
-// In Go, callers use As(key).Get(url, nil) directly.
 // Pool provides NewRequest() and As(key) as access points; callers chain
-// from the returned *PendingRequest.
+// HTTP verb methods directly from the returned *PendingRequest, such as
+// As(key).Get(url, nil).

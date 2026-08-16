@@ -1,16 +1,8 @@
-// Package contracts mirrors Illuminate\Routing\Contracts.
+// Package contracts is empty, and stays that way: an interface lives in the
+// package that consumes it, not in one of its own.
 //
-// The files it answers to, in the clone at
-// laravel_illuminate/routing/Contracts:
-//
-//	CallableDispatcher.php
-//	ControllerDispatcher.php
-//
-// Nothing is implemented here, and nothing will be. An interface lives in the
-// package that CONSUMES it, not in one of its own -- docs/13 fixed that, and
-// ADR 0045 is where it is argued.
-//
-// A contracts package is a PHP necessity: the implementation is resolved out of
-// the container by interface name, so the name has to exist somewhere both sides
-// can see. Nothing is resolved by name here.
+// A contracts package exists in some frameworks because an implementation is
+// resolved out of a container by interface name, so the name has to exist
+// somewhere both sides can see. Nothing is resolved by name here, so there is
+// nothing for this package to hold.
 package contracts

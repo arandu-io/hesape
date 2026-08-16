@@ -41,8 +41,7 @@ func TestTheJobAnswersItsOwnSettings(t *testing.T) {
 	if j.Backoff() != time.Minute {
 		t.Errorf("the second attempt waits %s", j.Backoff())
 	}
-	// And the last entry repeats once the list runs out, which is what
-	// Laravel's `?? last($backoff)` does.
+	// And the last entry repeats once the list runs out.
 	j.Attempts = 9
 	if j.Backoff() != time.Minute {
 		t.Errorf("the ninth attempt waits %s, want the last entry", j.Backoff())
@@ -75,16 +74,15 @@ func TestTheJobAnswersItsNames(t *testing.T) {
 	if j.ResolveName() != "send an invoice" {
 		t.Errorf("resolveName = %q", j.ResolveName())
 	}
-	// The class behind a wrapper is still the routing name: the two only differ
-	// in PHP because the wrapper is a class and the routing key is the class.
+	// The class behind a wrapper is still the routing name.
 	if j.ResolveQueuedJobClass() != "invoice.send" {
 		t.Errorf("resolveQueuedJobClass = %q", j.ResolveQueuedJobClass())
 	}
 }
 
-// TestJobNameParseUnderstandsThePhpForm: a payload written by a bridge from a
-// PHP application still carries "Class@method", and routing it to the class
-// beats failing to route it.
+// TestJobNameParseUnderstandsThePhpForm: a record written by another system
+// pushing onto the same store can still carry "Name@method", and routing it to
+// the name beats failing to route it.
 func TestJobNameParseUnderstandsThePhpForm(t *testing.T) {
 	class, method := jobs.JobName{}.Parse("App\\Jobs\\SendInvoice@handle")
 	if class != "App\\Jobs\\SendInvoice" || method != "handle" {

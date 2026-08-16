@@ -13,62 +13,60 @@ import (
 )
 
 const (
-	// defaultRememberDuration is the PHP's $rememberDuration: 576000 minutes,
-	// the 400 days a browser will keep a cookie for.
+	// defaultRememberDuration is how long the "remember me" cookie is good for
+	// when nobody sets a duration: 576000 minutes, the 400 days a browser will
+	// keep a cookie for.
 	defaultRememberDuration = 576000
 
-	// defaultTimeboxDuration is the PHP constructor's $timeboxDuration default,
-	// in microseconds.
+	// defaultTimeboxDuration is the minimum an attempt is held open for when
+	// none is configured, in microseconds.
 	defaultTimeboxDuration = 200000
 
-	// defaultHashKey is the PHP's 'base-key-for-password-hash-mac', the key
-	// hashPasswordForCookie falls back to when the application has none.
+	// defaultHashKey is the key [SessionGuard.HashPasswordForCookie] falls back
+	// to when the application has none.
 	defaultHashKey = "base-key-for-password-hash-mac"
 
-	// rememberTokenLength is the 60 of Str::random(60).
+	// rememberTokenLength is how many characters a remember token has.
 	rememberTokenLength = 60
 
-	// sessionGuardClass stands in for the PHP's static::class in getName and
-	// getRecallerName. Those two hash the class name so that two guards of
-	// different classes cannot read each other's session key; Go has no
-	// subclassing and no late static binding, so the name is fixed here.
+	// sessionGuardClass is the type name [SessionGuard.GetName] and
+	// [SessionGuard.GetRecallerName] hash into their keys, so that two guards of
+	// different types cannot read each other's session entry. Go has no
+	// subclassing, so the name is fixed here rather than read off the receiver.
 	//
-	// It is not the PHP's string, and it must not be: a session written by a
-	// Laravel application is not one this guard should silently adopt.
+	// It is this package's own import path, and it must be: a session written by
+	// some other framework's guard is not one this guard should silently adopt.
 	sessionGuardClass = "github.com/arandu-io/hesape/auth.SessionGuard"
 
-	// rememberTokenAlphabet is what Str::random draws from.
+	// rememberTokenAlphabet is the set of characters a remember token is drawn
+	// from.
 	rememberTokenAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 )
 
 var (
-	// ErrCookieJarNotSet is the RuntimeException getCookieJar throws: the guard
-	// was asked for the cookie jar and nobody set one.
+	// ErrCookieJarNotSet reports that the guard was asked for the cookie jar and
+	// nobody set one.
 	ErrCookieJarNotSet = errors.New("auth: cookie jar has not been set")
 
-	// ErrHasherNotSet is what LogoutOtherDevices answers when the guard has no
-	// hasher. The PHP reaches the Hash facade, which is the container path
-	// (ADR 0001); here the hasher is a field, and an unset one is a wiring
+	// ErrHasherNotSet is what [SessionGuard.LogoutOtherDevices] answers when the
+	// guard has no hasher. The hasher is a field, and an unset one is a wiring
 	// mistake rather than a wrong password.
 	ErrHasherNotSet = errors.New("auth: hasher has not been set")
 
-	// ErrPasswordMismatch is the InvalidArgumentException
-	// rehashUserPasswordForDeviceLogout throws: "The given password does not
-	// match the current password."
+	// ErrPasswordMismatch reports that the password given to
+	// [SessionGuard.LogoutOtherDevices] is not the account's current password.
 	ErrPasswordMismatch = errors.New("auth: the given password does not match the current password")
 
-	// ErrInvalidBasicCredentials is failedBasicResponse: the
-	// UnauthorizedHttpException('Basic', 'Invalid credentials.') the PHP throws.
+	// ErrInvalidBasicCredentials reports that the HTTP Basic credentials on the
+	// request did not check out.
 	//
-	// The PHP's exception also carries the WWW-Authenticate challenge, because
-	// in Laravel an exception renders itself into a response. Here the response
-	// is the caller's: a middleware that gets this error writes 401 and the
-	// Basic realm.
+	// It carries no WWW-Authenticate challenge: the response is the caller's, and
+	// a middleware that gets this error writes 401 and the Basic realm.
 	ErrInvalidBasicCredentials = errors.New("auth: invalid credentials")
 )
 
-// SessionGuard is Illuminate\Auth\SessionGuard: the guard behind a browser
-// session, and the one a form login goes through.
+// SessionGuard is the guard behind a browser session, and the one a form login
+// goes through.
 //
 // It is the whole of the sign-in flow -- the attempt, the timebox that hides
 // whether the account exists, the session id that is regenerated on the way in,
@@ -77,61 +75,67 @@ var (
 //
 // It is stateful and it is per request: it caches the user it resolved, the
 // request it reads cookies from, and whether logout was called. Build one per
-// request, as Laravel does, and do not share it between goroutines.
+// request, and do not share it between goroutines.
 type SessionGuard struct {
 	GuardHelpers
 
-	// Name is the PHP's `public readonly string $name`: the guard's name in the
-	// authentication configuration, typically "web". Go has no readonly; set it
-	// through [NewSessionGuard] and leave it alone, because [SessionGuard.GetName]
-	// and [SessionGuard.GetRecallerName] are built from it.
+	// Name is the guard's name in the authentication configuration, typically
+	// "web". Set it through [NewSessionGuard] and leave it alone, because
+	// [SessionGuard.GetName] and [SessionGuard.GetRecallerName] are built from
+	// it.
 	Name string
 
-	// Hasher is the Hash facade that rehashUserPasswordForDeviceLogout calls.
+	// Hasher checks and rewrites the account's password hash.
 	//
-	// A facade is the container path (ADR 0001) and there is none here, so the
-	// hasher is a field. [SessionGuard.LogoutOtherDevices] is the only method
-	// that reads it, and it answers [ErrHasherNotSet] when it is nil.
+	// [SessionGuard.LogoutOtherDevices] is the only method that reads it, and it
+	// answers [ErrHasherNotSet] when it is nil.
 	Hasher Hasher
 
-	// lastAttempted is $lastAttempted: the user the last attempt retrieved,
-	// whether or not the password matched.
+	// lastAttempted is the user the last attempt retrieved, whether or not the
+	// password matched.
 	lastAttempted Authenticatable
 
-	// viaRemember is $viaRemember.
+	// viaRemember records that the user was resolved from the "remember me"
+	// cookie rather than from the session.
 	viaRemember bool
 
-	// rememberDuration is $rememberDuration, in minutes.
+	// rememberDuration is how long the "remember me" cookie is good for, in
+	// minutes.
 	rememberDuration int
 
-	// session is $session.
+	// session is where the authenticated user's identifier is kept.
 	session Session
 
-	// cookie is $cookie, the Illuminate cookie creator service.
+	// cookie makes and queues the cookies the guard writes.
 	cookie CookieJar
 
-	// request is $request.
+	// request is what the guard reads cookies and Basic credentials from.
 	request Request
 
-	// events is $events.
+	// events is the dispatcher the guard fires on, and a nil one fires nothing.
 	events Dispatcher
 
-	// timebox is $timebox.
+	// timebox holds every attempt open for a minimum time, so that a refusal
+	// cannot be timed.
 	timebox Timebox
 
-	// timeboxDuration is $timeboxDuration, in microseconds.
+	// timeboxDuration is that minimum, in microseconds.
 	timeboxDuration int
 
-	// rehashOnLogin is $rehashOnLogin.
+	// rehashOnLogin asks the provider to upgrade a weakly hashed password once
+	// the plain one is in hand.
 	rehashOnLogin bool
 
-	// hashKey is $hashKey, the application key hashPasswordForCookie uses.
+	// hashKey is the application key [SessionGuard.HashPasswordForCookie] signs
+	// with.
 	hashKey string
 
-	// loggedOut is $loggedOut.
+	// loggedOut records that logout was called, after which the guard resolves
+	// nobody.
 	loggedOut bool
 
-	// recallAttempted is $recallAttempted.
+	// recallAttempted records that the recaller cookie already had its one
+	// chance on this request.
 	recallAttempted bool
 }
 
@@ -140,19 +144,18 @@ var (
 	_ SupportsBasicAuth = (*SessionGuard)(nil)
 )
 
-// NewSessionGuard is SessionGuard::__construct.
+// NewSessionGuard returns a guard called name, reading its accounts from
+// provider and keeping the signed-in identifier in session.
 //
-// The PHP defaults five of these arguments and Go has none, so every one is
-// passed. Two are still filled in the way the PHP fills them: a nil timebox
-// becomes [NewTimebox], its `?: new Timebox`, and a timeboxDuration of 0
-// becomes 200000, its default -- a zero there would switch off the wait that
-// keeps a failed attempt from being timed, and nobody would see it go.
-// rehashOnLogin has no such treatment, because false is a real setting: pass
-// true for the PHP's default.
+// Every argument is passed, and two are filled in when they arrive empty: a nil
+// timebox becomes [NewTimebox], and a timeboxDuration of 0 becomes 200000
+// microseconds -- a zero there would switch off the wait that keeps a failed
+// attempt from being timed, and nobody would see it go. rehashOnLogin gets no
+// such treatment, because false is a real setting.
 //
-// The cookie jar and the event dispatcher are not arguments in the PHP either.
-// Set them with [SessionGuard.SetCookieJar] and [SessionGuard.SetDispatcher],
-// which is what AuthManager does.
+// The cookie jar and the event dispatcher are not arguments. Set them with
+// [SessionGuard.SetCookieJar] and [SessionGuard.SetDispatcher], which is what
+// [AuthManager] does.
 func NewSessionGuard(
 	name string,
 	provider UserProvider,
@@ -186,7 +189,7 @@ func NewSessionGuard(
 	return guard
 }
 
-// User is SessionGuard::user: the authenticated user, or nil.
+// User is the authenticated user, or nil.
 //
 // It resolves once per request and caches: the id in the session names the
 // user, and when it names nobody the recaller cookie gets one chance to. A user
@@ -194,11 +197,10 @@ func NewSessionGuard(
 // session is written and the Login event fires with remember true -- which is
 // why a person who ticked the box never sees the sign-in form again.
 //
-// The Guard contract gives it no context.Context, because the PHP has no
-// argument there to transpose; the lookup runs on the request's context. A
-// provider that fails is a provider that found nobody, for the same reason:
-// there is nowhere to put the error, and a guard that cannot read the user
-// store has no user.
+// The Guard contract gives it no context.Context, so the lookup runs on the
+// request's context. A provider that fails is a provider that found nobody, for
+// the same reason: there is nowhere to put the error, and a guard that cannot
+// read the user store has no user.
 func (g *SessionGuard) User() Authenticatable {
 	if g.loggedOut {
 		return nil
@@ -239,8 +241,8 @@ func (g *SessionGuard) User() Authenticatable {
 	return g.user
 }
 
-// userFromRecaller is SessionGuard::userFromRecaller: the user the "remember
-// me" cookie names, at most once per request.
+// userFromRecaller is the user the "remember me" cookie names, at most once per
+// request.
 func (g *SessionGuard) userFromRecaller(ctx context.Context, recaller *Recaller) Authenticatable {
 	if !recaller.Valid() || g.recallAttempted {
 		return nil
@@ -258,7 +260,7 @@ func (g *SessionGuard) userFromRecaller(ctx context.Context, recaller *Recaller)
 	return user
 }
 
-// recaller is SessionGuard::recaller: the recaller cookie on this request.
+// recaller is the recaller cookie on this request, or nil.
 func (g *SessionGuard) recaller() *Recaller {
 	if g.request == nil {
 		return nil
@@ -270,7 +272,7 @@ func (g *SessionGuard) recaller() *Recaller {
 	return nil
 }
 
-// ID is SessionGuard::id: the authenticated user's identifier.
+// ID is the authenticated user's identifier.
 //
 // It falls back to the id in the session, so a request that has not resolved
 // the user yet still knows who it is about.
@@ -285,8 +287,7 @@ func (g *SessionGuard) ID() any {
 	return g.session.Get(g.GetName())
 }
 
-// Once is SessionGuard::once: sign in for this request only, with no session
-// and no cookie.
+// Once signs in for this request only, with no session and no cookie.
 func (g *SessionGuard) Once(ctx context.Context, credentials map[string]any) bool {
 	g.fireAttemptEvent(credentials, false)
 
@@ -303,11 +304,9 @@ func (g *SessionGuard) Once(ctx context.Context, credentials map[string]any) boo
 	return false
 }
 
-// OnceUsingID is SessionGuard::onceUsingId: sign the given id in for this
-// request only.
+// OnceUsingID signs the given id in for this request only.
 //
-// The PHP answers false when there is no such user; the contract answers with
-// an Authenticatable, so this answers nil.
+// It answers nil when no such user exists.
 func (g *SessionGuard) OnceUsingID(ctx context.Context, id any) Authenticatable {
 	if user := g.retrieveByID(ctx, id); user != nil {
 		g.SetUser(user)
@@ -317,8 +316,8 @@ func (g *SessionGuard) OnceUsingID(ctx context.Context, id any) Authenticatable 
 	return nil
 }
 
-// Validate is SessionGuard::validate: are these credentials good, without
-// signing anybody in.
+// Validate reports whether these credentials are good, without signing anybody
+// in.
 //
 // It runs inside the timebox, and only a match asks to return early. That is
 // the whole point: an address nobody registered and an address with the wrong
@@ -343,11 +342,11 @@ func (g *SessionGuard) Validate(ctx context.Context, credentials map[string]any)
 	return ok
 }
 
-// Basic is SessionGuard::basic: sign in from the HTTP Basic header, with a
-// session, unless somebody is signed in already.
+// Basic signs in from the HTTP Basic header, with a session, unless somebody is
+// signed in already.
 //
-// The PHP returns a response or throws; this returns nil when the request may
-// carry on and [ErrInvalidBasicCredentials] when it may not.
+// It returns nil when the request may carry on and
+// [ErrInvalidBasicCredentials] when it may not.
 func (g *SessionGuard) Basic(ctx context.Context, field string, extraConditions map[string]any) error {
 	if g.Check() {
 		return nil
@@ -362,7 +361,7 @@ func (g *SessionGuard) Basic(ctx context.Context, field string, extraConditions 
 	return g.failedBasicResponse()
 }
 
-// OnceBasic is SessionGuard::onceBasic: a stateless HTTP Basic sign-in.
+// OnceBasic is a stateless HTTP Basic sign-in: no session, no cookie.
 func (g *SessionGuard) OnceBasic(ctx context.Context, field string, extraConditions map[string]any) error {
 	credentials := g.basicCredentials(g.GetRequest(), field)
 
@@ -372,7 +371,8 @@ func (g *SessionGuard) OnceBasic(ctx context.Context, field string, extraConditi
 	return nil
 }
 
-// attemptBasic is SessionGuard::attemptBasic.
+// attemptBasic signs in from the request's Basic header, and reports whether it
+// worked.
 func (g *SessionGuard) attemptBasic(ctx context.Context, request Request, field string, extraConditions map[string]any) bool {
 	if request == nil || request.GetUser() == "" {
 		return false
@@ -381,8 +381,7 @@ func (g *SessionGuard) attemptBasic(ctx context.Context, request Request, field 
 	return g.Attempt(ctx, mergeCredentials(g.basicCredentials(request, field), extraConditions), false)
 }
 
-// basicCredentials is SessionGuard::basicCredentials: the Basic header as a
-// credentials map.
+// basicCredentials reads the Basic header as a credentials map.
 func (g *SessionGuard) basicCredentials(request Request, field string) map[string]any {
 	if request == nil {
 		return map[string]any{field: "", "password": ""}
@@ -390,12 +389,12 @@ func (g *SessionGuard) basicCredentials(request Request, field string) map[strin
 	return map[string]any{field: request.GetUser(), "password": request.GetPassword()}
 }
 
-// failedBasicResponse is SessionGuard::failedBasicResponse.
+// failedBasicResponse is what a refused Basic sign-in answers with.
 func (g *SessionGuard) failedBasicResponse() error {
 	return ErrInvalidBasicCredentials
 }
 
-// Attempt is SessionGuard::attempt: the sign-in a login form calls.
+// Attempt is the sign-in a login form calls.
 //
 // Everything happens inside the timebox, and only success returns early, so a
 // refusal takes the configured minimum however early it was decided.
@@ -432,15 +431,14 @@ func (g *SessionGuard) Attempt(ctx context.Context, credentials map[string]any, 
 	return ok
 }
 
-// AttemptWhen is SessionGuard::attemptWhen: [SessionGuard.Attempt], with
-// callbacks that get a veto after the password matched.
+// AttemptWhen is [SessionGuard.Attempt], with callbacks that get a veto after
+// the password matched.
 //
 // It is where "this account is suspended" belongs -- a check that must not
 // change the answer to "is this the right password", and must not tell the
 // person guessing which of the two failed.
 //
-// The PHP takes array|callable|null and runs it through Arr::wrap; Go takes the
-// slice, and one callback is a slice of one.
+// A single callback is a slice of one, and a nil entry is skipped.
 func (g *SessionGuard) AttemptWhen(ctx context.Context, credentials map[string]any, callbacks []func(user Authenticatable, guard *SessionGuard) bool, remember bool) bool {
 	attempted, _ := g.timebox.Call(func(timebox Timebox) (any, error) {
 		g.fireAttemptEvent(credentials, remember)
@@ -471,7 +469,8 @@ func (g *SessionGuard) AttemptWhen(ctx context.Context, credentials map[string]a
 	return ok
 }
 
-// hasValidCredentials is SessionGuard::hasValidCredentials.
+// hasValidCredentials reports whether the credentials check out against user,
+// and fires [Validated] when they do.
 func (g *SessionGuard) hasValidCredentials(ctx context.Context, user Authenticatable, credentials map[string]any) bool {
 	validated := user != nil && g.provider.ValidateCredentials(ctx, user, credentials)
 
@@ -482,7 +481,8 @@ func (g *SessionGuard) hasValidCredentials(ctx context.Context, user Authenticat
 	return validated
 }
 
-// shouldLogin is SessionGuard::shouldLogin.
+// shouldLogin runs the callbacks and reports whether every one of them allowed
+// the sign-in.
 func (g *SessionGuard) shouldLogin(callbacks []func(user Authenticatable, guard *SessionGuard) bool, user Authenticatable) bool {
 	for _, callback := range callbacks {
 		if callback == nil {
@@ -495,21 +495,21 @@ func (g *SessionGuard) shouldLogin(callbacks []func(user Authenticatable, guard 
 	return true
 }
 
-// rehashPasswordIfRequired is SessionGuard::rehashPasswordIfRequired: upgrade a
-// hash made with weaker parameters, now that the plain password is in hand.
+// rehashPasswordIfRequired upgrades a hash made with weaker parameters, now
+// that the plain password is in hand.
 //
-// The PHP returns nothing and so does this: the sign-in already succeeded, and
-// a hash that could not be rewritten is not a reason to refuse it.
+// It returns nothing: the sign-in already succeeded, and a hash that could not
+// be rewritten is not a reason to refuse it.
 func (g *SessionGuard) rehashPasswordIfRequired(ctx context.Context, user Authenticatable, credentials map[string]any) {
 	if g.rehashOnLogin && user != nil {
 		_ = g.provider.RehashPasswordIfRequired(ctx, user, credentials, false)
 	}
 }
 
-// LoginUsingID is SessionGuard::loginUsingId.
+// LoginUsingID signs the given id in, queueing the "remember me" cookie when
+// remember is true.
 //
-// The PHP answers false when there is no such user; this answers nil, for the
-// reason [SessionGuard.OnceUsingID] gives.
+// It answers nil when no such user exists.
 func (g *SessionGuard) LoginUsingID(ctx context.Context, id any, remember bool) Authenticatable {
 	if user := g.retrieveByID(ctx, id); user != nil {
 		g.Login(ctx, user, remember)
@@ -519,8 +519,8 @@ func (g *SessionGuard) LoginUsingID(ctx context.Context, id any, remember bool) 
 	return nil
 }
 
-// Login is SessionGuard::login: put the user in the session, and in the cookie
-// if they asked to be remembered.
+// Login puts the user in the session, and in the cookie if they asked to be
+// remembered.
 //
 // The session id is regenerated here, which is what stops a session handed to
 // the browser before sign-in from being one after it.
@@ -543,21 +543,23 @@ func (g *SessionGuard) Login(ctx context.Context, user Authenticatable, remember
 	g.SetUser(user)
 }
 
-// updateSession is SessionGuard::updateSession.
+// updateSession writes the identifier to the session and regenerates the
+// session id.
 func (g *SessionGuard) updateSession(ctx context.Context, id any) {
 	g.session.Put(g.GetName(), id)
 
 	_ = g.session.Regenerate(ctx, true)
 }
 
-// ensureRememberTokenIsSet is SessionGuard::ensureRememberTokenIsSet.
+// ensureRememberTokenIsSet gives the user a remember token when they have none.
 func (g *SessionGuard) ensureRememberTokenIsSet(ctx context.Context, user Authenticatable) {
 	if user.GetRememberToken() == "" {
 		g.cycleRememberToken(ctx, user)
 	}
 }
 
-// queueRecallerCookie is SessionGuard::queueRecallerCookie.
+// queueRecallerCookie queues the "remember me" cookie for this user: the
+// identifier, the remember token and a MAC of the password hash.
 func (g *SessionGuard) queueRecallerCookie(user Authenticatable) error {
 	jar, err := g.GetCookieJar()
 	if err != nil {
@@ -578,22 +580,21 @@ func (g *SessionGuard) queueRecallerCookie(user Authenticatable) error {
 	return nil
 }
 
-// createRecaller is SessionGuard::createRecaller.
+// createRecaller builds the "remember me" cookie holding value.
 func (g *SessionGuard) createRecaller(value string) (*http.Cookie, error) {
 	jar, err := g.GetCookieJar()
 	if err != nil {
 		return nil, err
 	}
 
-	// The PHP passes three arguments and lets the factory default the rest.
-	// hesape/cookie takes Symfony's whole list, so the defaults are written out:
+	// The jar takes the whole attribute list, so the defaults are written out:
 	// the jar's path and domain, its secure setting, http only, not raw, and the
 	// jar's SameSite.
 	return jar.Make(g.GetRecallerName(), value, g.getRememberDuration(), "", "", nil, true, false, http.SameSiteDefaultMode), nil
 }
 
-// HashPasswordForCookie is SessionGuard::hashPasswordForCookie: a MAC of the
-// password hash, for the third segment of the recaller.
+// HashPasswordForCookie is a MAC of the password hash, for the third segment of
+// the recaller.
 //
 // It is what lets AuthenticateSession notice that the password changed since
 // the cookie was written, without the cookie carrying the hash itself.
@@ -609,8 +610,7 @@ func (g *SessionGuard) HashPasswordForCookie(passwordHash string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// Logout is SessionGuard::logout: out of this application, everywhere the
-// cookie reached.
+// Logout signs the user out of this application, everywhere the cookie reached.
 //
 // It cycles the remember token, so the recaller cookie sitting in another
 // browser stops naming anybody.
@@ -634,8 +634,7 @@ func (g *SessionGuard) Logout(ctx context.Context) {
 	g.loggedOut = true
 }
 
-// LogoutCurrentDevice is SessionGuard::logoutCurrentDevice: out of this
-// browser only.
+// LogoutCurrentDevice signs the user out of this browser only.
 //
 // It does not cycle the remember token, so the cookie in the other browser
 // keeps working. That is the difference from [SessionGuard.Logout], and it is
@@ -655,7 +654,8 @@ func (g *SessionGuard) LogoutCurrentDevice() {
 	g.loggedOut = true
 }
 
-// clearUserDataFromStorage is SessionGuard::clearUserDataFromStorage.
+// clearUserDataFromStorage removes the session entry and forgets the recaller
+// cookie.
 func (g *SessionGuard) clearUserDataFromStorage() error {
 	g.session.Remove(g.GetName())
 
@@ -673,8 +673,7 @@ func (g *SessionGuard) clearUserDataFromStorage() error {
 	return nil
 }
 
-// cycleRememberToken is SessionGuard::cycleRememberToken: a new remember token,
-// on the user and in the store.
+// cycleRememberToken writes a new remember token, on the user and in the store.
 func (g *SessionGuard) cycleRememberToken(ctx context.Context, user Authenticatable) {
 	token := randomToken(rememberTokenLength)
 
@@ -683,17 +682,16 @@ func (g *SessionGuard) cycleRememberToken(ctx context.Context, user Authenticata
 	_ = g.provider.UpdateRememberToken(ctx, user, token)
 }
 
-// LogoutOtherDevices is SessionGuard::logoutOtherDevices: invalidate this
-// person's other sessions, keeping this one.
+// LogoutOtherDevices invalidates this person's other sessions, keeping this
+// one.
 //
 // It works by rehashing the password, which changes the MAC every other
 // session's recaller carries -- so the AuthenticateSession middleware turns
 // them away on their next request. The application must be using that
 // middleware for this to mean anything.
 //
-// The PHP declares a user as its return and its body returns nothing, so the
-// answer is always nil when the password matched; the signature is kept as the
-// PHP declares it. A password that does not match is [ErrPasswordMismatch].
+// The returned user is always nil when the password matched. A password that
+// does not match is [ErrPasswordMismatch].
 func (g *SessionGuard) LogoutOtherDevices(ctx context.Context, password string) (Authenticatable, error) {
 	if g.User() == nil {
 		return nil, nil
@@ -704,9 +702,9 @@ func (g *SessionGuard) LogoutOtherDevices(ctx context.Context, password string) 
 		return nil, err
 	}
 
-	// The PHP asks the cookie jar only when there is no recaller on the request,
-	// because || stops at the first true. So does this, which is why a guard
-	// with no jar and a recaller in hand does not fail here.
+	// The cookie jar is asked only when there is no recaller on the request,
+	// which is why a guard with no jar and a recaller in hand does not fail
+	// here.
 	reissue := g.recaller() != nil
 	if !reissue {
 		jar, err := g.GetCookieJar()
@@ -727,8 +725,8 @@ func (g *SessionGuard) LogoutOtherDevices(ctx context.Context, password string) 
 	return result, nil
 }
 
-// rehashUserPasswordForDeviceLogout is
-// SessionGuard::rehashUserPasswordForDeviceLogout.
+// rehashUserPasswordForDeviceLogout checks the given password against the
+// account's and asks the provider to rehash it.
 func (g *SessionGuard) rehashUserPasswordForDeviceLogout(ctx context.Context, password string) (Authenticatable, error) {
 	user := g.User()
 
@@ -747,78 +745,76 @@ func (g *SessionGuard) rehashUserPasswordForDeviceLogout(ctx context.Context, pa
 	return nil, nil
 }
 
-// Attempting is SessionGuard::attempting: register a listener for the
-// [Attempting] event.
+// Attempting registers a listener for the [Attempting] event.
 //
-// The PHP takes mixed, and so does this: what a listener may be is the
-// dispatcher's business, not the guard's.
+// It takes any: what a listener may be is the dispatcher's business, not the
+// guard's.
 func (g *SessionGuard) Attempting(callback any) {
 	if g.events != nil {
 		g.events.Listen(Attempting{}, callback)
 	}
 }
 
-// fireAttemptEvent is SessionGuard::fireAttemptEvent.
+// fireAttemptEvent dispatches [Attempting].
 func (g *SessionGuard) fireAttemptEvent(credentials map[string]any, remember bool) {
 	if g.events != nil {
 		g.events.Dispatch(Attempting{Guard: g.Name, Credentials: credentials, Remember: remember})
 	}
 }
 
-// fireValidatedEvent is SessionGuard::fireValidatedEvent.
+// fireValidatedEvent dispatches [Validated].
 func (g *SessionGuard) fireValidatedEvent(user Authenticatable) {
 	if g.events != nil {
 		g.events.Dispatch(Validated{Guard: g.Name, User: user})
 	}
 }
 
-// fireLoginEvent is SessionGuard::fireLoginEvent.
+// fireLoginEvent dispatches [Login].
 func (g *SessionGuard) fireLoginEvent(user Authenticatable, remember bool) {
 	if g.events != nil {
 		g.events.Dispatch(Login{Guard: g.Name, User: user, Remember: remember})
 	}
 }
 
-// fireAuthenticatedEvent is SessionGuard::fireAuthenticatedEvent.
+// fireAuthenticatedEvent dispatches [Authenticated].
 func (g *SessionGuard) fireAuthenticatedEvent(user Authenticatable) {
 	if g.events != nil {
 		g.events.Dispatch(Authenticated{Guard: g.Name, User: user})
 	}
 }
 
-// fireOtherDeviceLogoutEvent is SessionGuard::fireOtherDeviceLogoutEvent.
+// fireOtherDeviceLogoutEvent dispatches [OtherDeviceLogout].
 func (g *SessionGuard) fireOtherDeviceLogoutEvent(user Authenticatable) {
 	if g.events != nil {
 		g.events.Dispatch(OtherDeviceLogout{Guard: g.Name, User: user})
 	}
 }
 
-// fireFailedEvent is SessionGuard::fireFailedEvent.
+// fireFailedEvent dispatches [Failed].
 func (g *SessionGuard) fireFailedEvent(user Authenticatable, credentials map[string]any) {
 	if g.events != nil {
 		g.events.Dispatch(Failed{Guard: g.Name, User: user, Credentials: credentials})
 	}
 }
 
-// GetLastAttempted is SessionGuard::getLastAttempted: the user the last attempt
-// retrieved, whether or not the password matched.
+// GetLastAttempted is the user the last attempt retrieved, whether or not the
+// password matched.
 func (g *SessionGuard) GetLastAttempted() Authenticatable {
 	return g.lastAttempted
 }
 
-// GetName is SessionGuard::getName: the session key the user id is kept under.
+// GetName is the session key the user id is kept under.
 func (g *SessionGuard) GetName() string {
 	return "login_" + g.Name + "_" + classHash(sessionGuardClass)
 }
 
-// GetRecallerName is SessionGuard::getRecallerName: the name of the "remember
-// me" cookie.
+// GetRecallerName is the name of the "remember me" cookie.
 func (g *SessionGuard) GetRecallerName() string {
 	return "remember_" + g.Name + "_" + classHash(sessionGuardClass)
 }
 
-// ViaRemember is SessionGuard::viaRemember: this session came from the cookie,
-// not from a password typed in this browser session.
+// ViaRemember reports that this session came from the cookie, not from a
+// password typed in this browser session.
 //
 // A destructive action is the right moment to read it and ask for the password
 // again.
@@ -826,23 +822,22 @@ func (g *SessionGuard) ViaRemember() bool {
 	return g.viaRemember
 }
 
-// getRememberDuration is SessionGuard::getRememberDuration.
+// getRememberDuration is how many minutes the "remember me" cookie is good for.
 func (g *SessionGuard) getRememberDuration() int {
 	return g.rememberDuration
 }
 
-// SetRememberDuration is SessionGuard::setRememberDuration: how many minutes
-// the "remember me" cookie is good for.
+// SetRememberDuration sets how many minutes the "remember me" cookie is good
+// for, and returns the guard.
 func (g *SessionGuard) SetRememberDuration(minutes int) *SessionGuard {
 	g.rememberDuration = minutes
 
 	return g
 }
 
-// GetCookieJar is SessionGuard::getCookieJar.
+// GetCookieJar is the cookie jar the guard writes through.
 //
-// The PHP throws a RuntimeException when nobody set one; this answers
-// [ErrCookieJarNotSet], which is ADR 0044's second mechanical change.
+// It answers [ErrCookieJarNotSet] when nobody set one.
 func (g *SessionGuard) GetCookieJar() (CookieJar, error) {
 	if g.cookie == nil {
 		return nil, ErrCookieJarNotSet
@@ -850,36 +845,36 @@ func (g *SessionGuard) GetCookieJar() (CookieJar, error) {
 	return g.cookie, nil
 }
 
-// SetCookieJar is SessionGuard::setCookieJar.
+// SetCookieJar sets the cookie jar the guard writes through.
 func (g *SessionGuard) SetCookieJar(cookie CookieJar) {
 	g.cookie = cookie
 }
 
-// GetDispatcher is SessionGuard::getDispatcher.
+// GetDispatcher is the event dispatcher the guard fires on, nil when none was
+// set.
 func (g *SessionGuard) GetDispatcher() Dispatcher {
 	return g.events
 }
 
-// SetDispatcher is SessionGuard::setDispatcher.
+// SetDispatcher sets the event dispatcher the guard fires on.
 func (g *SessionGuard) SetDispatcher(events Dispatcher) {
 	g.events = events
 }
 
-// GetSession is SessionGuard::getSession.
+// GetSession is the session the guard keeps the user identifier in.
 func (g *SessionGuard) GetSession() Session {
 	return g.session
 }
 
-// GetUser is SessionGuard::getUser: the user already resolved, without
-// resolving one.
+// GetUser is the user already resolved, without resolving one.
 func (g *SessionGuard) GetUser() Authenticatable {
 	return g.user
 }
 
-// SetUser is SessionGuard::setUser.
+// SetUser sets the authenticated user.
 //
-// It undoes a logout, as the PHP's does, and it fires [Authenticated]. It
-// returns nothing, because the Guard contract's SetUser returns nothing.
+// It undoes a logout, and it fires [Authenticated]. It returns nothing, because
+// the Guard contract's SetUser returns nothing.
 func (g *SessionGuard) SetUser(user Authenticatable) {
 	g.user = user
 
@@ -888,23 +883,23 @@ func (g *SessionGuard) SetUser(user Authenticatable) {
 	g.fireAuthenticatedEvent(user)
 }
 
-// GetRequest is SessionGuard::getRequest.
+// GetRequest is the request the guard reads cookies and Basic credentials from.
 //
-// The PHP falls back to Request::createFromGlobals(). Go has no request in a
-// global: it arrives at a handler and is passed in, so a guard that was given
-// none has none, and this answers nil.
+// There is no fallback: a request arrives at a handler and is passed in, never
+// read out of a global, so a guard that was given none has none and this
+// answers nil.
 func (g *SessionGuard) GetRequest() Request {
 	return g.request
 }
 
-// SetRequest is SessionGuard::setRequest.
+// SetRequest sets the request the guard reads from, and returns the guard.
 func (g *SessionGuard) SetRequest(request Request) *SessionGuard {
 	g.request = request
 
 	return g
 }
 
-// GetTimebox is SessionGuard::getTimebox.
+// GetTimebox is the timebox every attempt is held open by.
 func (g *SessionGuard) GetTimebox() Timebox {
 	return g.timebox
 }
@@ -921,8 +916,8 @@ func (g *SessionGuard) context() context.Context {
 	return context.Background()
 }
 
-// retrieveByID is $this->provider->retrieveById with the error read as the
-// PHP's null.
+// retrieveByID asks the provider for the user with this id, reading an error as
+// nobody.
 func (g *SessionGuard) retrieveByID(ctx context.Context, id any) Authenticatable {
 	user, err := g.provider.RetrieveByID(ctx, id)
 	if err != nil {
@@ -931,8 +926,8 @@ func (g *SessionGuard) retrieveByID(ctx context.Context, id any) Authenticatable
 	return user
 }
 
-// retrieveByCredentials is $this->provider->retrieveByCredentials with the
-// error read as the PHP's null.
+// retrieveByCredentials asks the provider for the user these credentials name,
+// reading an error as nobody.
 func (g *SessionGuard) retrieveByCredentials(ctx context.Context, credentials map[string]any) Authenticatable {
 	user, err := g.provider.RetrieveByCredentials(ctx, credentials)
 	if err != nil {
@@ -941,8 +936,8 @@ func (g *SessionGuard) retrieveByCredentials(ctx context.Context, credentials ma
 	return user
 }
 
-// mergeCredentials is the array_merge the two Basic methods write: the extra
-// conditions win, as the second array does in PHP.
+// mergeCredentials merges the maps the two Basic methods build: the extra
+// conditions win.
 func mergeCredentials(credentials, extra map[string]any) map[string]any {
 	merged := make(map[string]any, len(credentials)+len(extra))
 	for key, value := range credentials {
@@ -954,14 +949,15 @@ func mergeCredentials(credentials, extra map[string]any) map[string]any {
 	return merged
 }
 
-// classHash is the sha1(static::class) of getName and getRecallerName.
+// classHash is the SHA-1 of the guard's type name, as it appears in the session
+// and cookie keys.
 func classHash(class string) string {
 	sum := sha1.Sum([]byte(class))
 	return hex.EncodeToString(sum[:])
 }
 
-// randomToken is Str::random: a token of the given length, from the operating
-// system's randomness.
+// randomToken is a token of the given length, drawn from the operating system's
+// randomness.
 func randomToken(length int) string {
 	bytes := make([]byte, length)
 	if _, err := rand.Read(bytes); err != nil {
@@ -977,99 +973,99 @@ func randomToken(length int) string {
 	return string(token)
 }
 
-// Attempting is Illuminate\Auth\Events\Attempting: somebody is trying to sign
-// in, before anything has been looked up.
+// Attempting announces that somebody is trying to sign in, before anything has
+// been looked up.
 //
-// The eight events below are Illuminate\Auth\Events, and they are here rather
-// than in hesape/auth/events because the root of auth imports nothing outside
-// the standard library (see doc.go) and a guard cannot fire an event it cannot
-// name. A listener registers against the value, as hesape/events does:
+// The eight events below live here rather than in the auth/events subpackage
+// because the root of auth imports nothing outside the standard library (see
+// doc.go) and a guard cannot fire an event it cannot name. A listener registers
+// against the value:
 //
 //	dispatcher.Listen(auth.Login{}, func(e auth.Login) { ... })
 type Attempting struct {
-	// Guard is $guard: the name of the guard.
+	// Guard is the name of the guard.
 	Guard string
 
-	// Credentials is $credentials.
+	// Credentials are the credentials the attempt was made with, and they hold
+	// the plain password: a listener that logs this map writes a password to the
+	// log.
 	Credentials map[string]any
 
-	// Remember is $remember.
+	// Remember indicates whether the person asked to be remembered.
 	Remember bool
 }
 
-// Authenticated is Illuminate\Auth\Events\Authenticated: a user was resolved
-// for this request.
+// Authenticated announces that a user was resolved for this request.
 type Authenticated struct {
-	// Guard is $guard.
+	// Guard is the name of the guard.
 	Guard string
 
-	// User is $user.
+	// User is the authenticated user.
 	User Authenticatable
 }
 
-// Validated is Illuminate\Auth\Events\Validated: the credentials were good,
-// before anybody was signed in.
+// Validated announces that the credentials were good, before anybody was signed
+// in.
 type Validated struct {
-	// Guard is $guard.
+	// Guard is the name of the guard.
 	Guard string
 
-	// User is $user.
+	// User is the user the credentials named.
 	User Authenticatable
 }
 
-// Login is Illuminate\Auth\Events\Login: somebody signed in.
+// Login announces that somebody signed in.
 type Login struct {
-	// Guard is $guard.
+	// Guard is the name of the guard.
 	Guard string
 
-	// User is $user.
+	// User is the user who signed in.
 	User Authenticatable
 
-	// Remember is $remember.
+	// Remember indicates whether the person asked to be remembered.
 	Remember bool
 }
 
-// Logout is Illuminate\Auth\Events\Logout: somebody signed out, everywhere.
+// Logout announces that somebody signed out, everywhere.
 type Logout struct {
-	// Guard is $guard.
+	// Guard is the name of the guard.
 	Guard string
 
-	// User is $user.
+	// User is the user who signed out.
 	User Authenticatable
 }
 
-// CurrentDeviceLogout is Illuminate\Auth\Events\CurrentDeviceLogout: somebody
-// signed out of this browser only.
+// CurrentDeviceLogout announces that somebody signed out of this browser only.
 type CurrentDeviceLogout struct {
-	// Guard is $guard.
+	// Guard is the name of the guard.
 	Guard string
 
-	// User is $user.
+	// User is the user who signed out.
 	User Authenticatable
 }
 
-// OtherDeviceLogout is Illuminate\Auth\Events\OtherDeviceLogout: somebody
-// invalidated their other sessions.
+// OtherDeviceLogout announces that somebody invalidated their other sessions.
 type OtherDeviceLogout struct {
-	// Guard is $guard.
+	// Guard is the name of the guard.
 	Guard string
 
-	// User is $user.
+	// User is the user whose other sessions ended.
 	User Authenticatable
 }
 
-// Failed is Illuminate\Auth\Events\Failed: an attempt that did not work.
+// Failed announces an attempt that did not work.
 //
 // User is the account the credentials named, and it is nil when they named
 // nobody. It is the event a "somebody tried to sign in to your account" notice
 // listens for.
 type Failed struct {
-	// Guard is $guard.
+	// Guard is the name of the guard.
 	Guard string
 
-	// User is $user, nil when the credentials matched no account.
+	// User is the account the credentials named, nil when they matched none.
 	User Authenticatable
 
-	// Credentials is $credentials.
+	// Credentials are the credentials the attempt was made with. See
+	// [Attempting.Credentials]: they hold the plain password.
 	Credentials map[string]any
 }

@@ -7,21 +7,19 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 )
 
-// DurationLimiter answers Illuminate\Redis\Limiters\DurationLimiter.
+// DurationLimiter is N acquisitions per window.
 //
-// It is N acquisitions per window: the first Acquire opens a window of Decay,
-// the next MaxLocks-1 are let through, and everything after that is refused
-// until the window rolls over. It is the shape behind Laravel's
-// Redis::throttle('key')->allow(10)->every(60).
+// The first Acquire opens a window of Decay, the next MaxLocks-1 are let
+// through, and everything after that is refused until the window rolls over --
+// "ten per minute", spelled as a limiter.
 //
-// # No Lua
+// # No server-side script
 //
-// Laravel's is a Lua script. This one is WATCH/MULTI/EXEC over a hash with the
-// same three fields -- start, end, count -- because RULE 11 keeps Dragonfly,
-// Redis, Valkey and KeyDB one product to this collection, and a script is the
-// first thing that stops being true of all four. The optimistic transaction
-// retries when another acquirer got there first, which is what the script's
-// atomicity bought.
+// It is WATCH/MULTI/EXEC over a hash with three fields -- start, end, count --
+// because Dragonfly, Redis, Valkey and KeyDB stay one product to this
+// collection only while nothing needs a script. The optimistic transaction
+// retries when another acquirer got there first, which is what a script's
+// atomicity would have bought.
 type DurationLimiter struct {
 	redis    Connection
 	name     string
@@ -30,8 +28,8 @@ type DurationLimiter struct {
 
 	// DecaysAt is the Unix time in seconds at which the current window ends.
 	//
-	// It is exported because Laravel's is public and a caller prints it: the
-	// Retry-After header of a throttled response is this minus now.
+	// It is exported because a caller prints it: the Retry-After header of a
+	// throttled response is this minus now.
 	DecaysAt int64
 
 	// Remaining is the number of slots left in the current window.
@@ -40,17 +38,17 @@ type DurationLimiter struct {
 
 // NewDurationLimiter builds the limiter.
 //
-// decay is the window; Laravel takes seconds and this takes a Duration, which
-// is the one mechanical change -- a limiter configured with 60 that meant
-// minutes is a bug nobody sees for a week.
+// decay is the window, and it is a Duration rather than a count of seconds: a
+// limiter configured with 60 that meant minutes is a bug nobody sees for a
+// week.
 func NewDurationLimiter(conn Connection, name string, maxLocks int64, decay time.Duration) *DurationLimiter {
 	return &DurationLimiter{redis: conn, name: name, maxLocks: maxLocks, decay: decay}
 }
 
 // Acquire attempts to acquire the lock, and reports whether it got it.
 //
-// It updates DecaysAt and Remaining on every call, hit or miss, exactly as the
-// PHP does -- a refused caller still needs to know when to come back.
+// It updates DecaysAt and Remaining on every call, hit or miss -- a refused
+// caller still needs to know when to come back.
 func (l *DurationLimiter) Acquire(ctx context.Context) (bool, error) {
 	key := l.redis.Key(l.name)
 	seconds := int64(l.decay / time.Second)
@@ -63,7 +61,7 @@ func (l *DurationLimiter) Acquire(ctx context.Context) (bool, error) {
 		now := time.Now().Unix()
 
 		// No window, or the window has passed: open a new one holding this
-		// acquisition. This is the PHP's reset().
+		// acquisition.
 		if end == 0 || now < start || now > end {
 			_, err := tx.TxPipelined(ctx, func(p goredis.Pipeliner) error {
 				p.HSet(ctx, key, "start", now, "end", now+seconds, "count", 1)
@@ -105,11 +103,9 @@ func (l *DurationLimiter) Acquire(ctx context.Context) (bool, error) {
 // TooManyAttempts reports whether the key has been "accessed" too many times,
 // without taking a slot.
 //
-// It updates DecaysAt and Remaining like Acquire does. Laravel's version leaves
-// those two swapped when no window is open -- its script returns
-// {0, now + decay} into [decaysAt, remaining] -- so the answer is right and the
-// fields are not. This one fills both, which is the only place its behaviour
-// differs from the PHP.
+// It updates DecaysAt and Remaining like Acquire does, including when no window
+// is open: an answer that is right while the two fields are stale is an answer
+// a caller cannot build a Retry-After from.
 func (l *DurationLimiter) TooManyAttempts(ctx context.Context) (bool, error) {
 	key := l.redis.Key(l.name)
 	seconds := int64(l.decay / time.Second)
@@ -142,9 +138,8 @@ func (l *DurationLimiter) Clear(ctx context.Context) error {
 
 // Block waits up to timeout for a slot and then runs callback.
 //
-// A nil callback makes it a wait-until-allowed, which is what the PHP's
-// `return true` amounts to. sleep is how long to wait between attempts; zero
-// takes Laravel's 750ms default.
+// A nil callback makes it a wait-until-allowed. sleepFor is how long to wait
+// between attempts; zero takes the 750ms default.
 //
 // It returns ErrLimiterTimeout when the wait runs out, and the context's error
 // when the caller went away -- a request that was cancelled must stop queueing
@@ -180,8 +175,9 @@ func (l *DurationLimiter) Block(ctx context.Context, timeout time.Duration, call
 // transact runs fn inside an optimistic transaction on key, retrying while
 // another acquirer wins the race.
 //
-// It is what the Lua script bought in one line of PHP, spelled out: WATCH the
-// hash, read it, queue the writes, EXEC, and start over if EXEC was refused.
+// It is the atomicity a server-side script would have given, spelled out: WATCH
+// the hash, read it, queue the writes, EXEC, and start over if EXEC was
+// refused.
 func (l *DurationLimiter) transact(ctx context.Context, key string, fn func(tx *goredis.Tx, start, end, count int64) error) error {
 	// Ten is enough for any real contention and small enough that a pathological
 	// case fails loudly instead of spinning.
@@ -223,7 +219,7 @@ func toInt(v any) int64 {
 	return n
 }
 
-// DurationLimiterBuilder answers Illuminate\Redis\Limiters\DurationLimiterBuilder.
+// DurationLimiterBuilder configures a DurationLimiter.
 //
 // It is what Connection.Throttle returns, and it exists so the call reads as a
 // sentence:
@@ -241,8 +237,8 @@ type DurationLimiterBuilder struct {
 	sleepFor   time.Duration
 }
 
-// NewDurationLimiterBuilder builds the builder, with Laravel's defaults: three
-// seconds of waiting, 750 milliseconds between attempts.
+// NewDurationLimiterBuilder builds the builder: three seconds of waiting, 750
+// milliseconds between attempts.
 func NewDurationLimiterBuilder(conn Connection, name string) *DurationLimiterBuilder {
 	return &DurationLimiterBuilder{
 		connection: conn,
@@ -279,7 +275,7 @@ func (b *DurationLimiterBuilder) Sleep(d time.Duration) *DurationLimiterBuilder 
 // Then executes callback if a lock is obtained, and failure if the wait ran
 // out.
 //
-// A nil failure re-raises ErrLimiterTimeout, which is the PHP's `throw $e`.
+// A nil failure returns ErrLimiterTimeout to the caller.
 func (b *DurationLimiterBuilder) Then(ctx context.Context, callback func(context.Context) error, failure func(error) error) error {
 	err := NewDurationLimiter(b.connection, b.name, b.maxLocks, b.decay).
 		Block(ctx, b.timeout, callback, b.sleepFor)

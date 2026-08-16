@@ -213,8 +213,8 @@ func TestAnonymousNotifySendsThroughItsOwnNotifier(t *testing.T) {
 	if len(all) != 1 {
 		t.Fatalf("%d deliveries, want 1", len(all))
 	}
-	// The recipient hands itself over, which is what AnonymousNotifiable::notify
-	// does in PHP and what RoutesNotifications cannot do from an embedded struct.
+	// The recipient hands itself over, which is what RoutesNotifications cannot
+	// do from an embedded struct.
 	if all[0].Route != "ada@example.com" {
 		t.Fatalf("delivered to %q", all[0].Route)
 	}
@@ -231,8 +231,8 @@ func TestAnonymousNotifyNowOverridesTheChannels(t *testing.T) {
 		Route(notifications.ChannelBroadcast, "guest.7")
 	to.Notifier = n
 
-	// The notification names mail and database; notifyNow's channel argument is
-	// what decides instead, exactly as it does in PHP.
+	// The notification names mail and database; the channel argument to
+	// NotifyNow is what decides instead.
 	err := to.NotifyNow(context.Background(), sendGrant(t), invoicePaid{number: "2026-114"},
 		notifications.ChannelBroadcast)
 	if err != nil {

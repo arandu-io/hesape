@@ -9,19 +9,19 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// The chunking half of Illuminate\Database\Concerns\BuildsQueries, and the two
-// methods of Builder that keyset chunking is built on.
+// The chunking half of the query builder, and the two methods keyset chunking
+// is built on.
 //
 // Every statement issued here goes through Get, so every chunk carries the
 // tenant of the Grant. A walk that filtered on the first page and not on the
 // rest would be a leak that only shows up on a table big enough to need
 // chunking, which is every table that matters.
 
-// errRequiresOrderBy answers the RuntimeException that
-// Builder::enforceOrderBy throws.
+// errRequiresOrderBy is the error returned when a query has no ordering to
+// chunk or walk by.
 var errRequiresOrderBy = errors.New("query: you must specify an orderBy clause when using this function")
 
-// enforceOrderBy answers Builder::enforceOrderBy.
+// enforceOrderBy returns errRequiresOrderBy unless the query has an ordering.
 //
 // Chunking and lazy walking both read the result set in pieces, and a result
 // set with no ordering has no pieces: the engine is free to return the rows in
@@ -34,11 +34,12 @@ func (b *Builder) enforceOrderBy() error {
 	return nil
 }
 
-// defaultKeyName answers Builder::defaultKeyName, which is protected there.
+// defaultKeyName is the column chunking and lazy walking use when the caller
+// names none.
 func (b *Builder) defaultKeyName() string { return "id" }
 
-// ForPageAfterId answers Builder::forPageAfterId: the next page of results
-// after a given id.
+// ForPageAfterId narrows the query to the next page of results after a given
+// id.
 //
 // The existing ordering on that column is dropped and the column is ordered by
 // again, last: the boundary is only a boundary if the rows come back in the
@@ -62,8 +63,8 @@ func (b *Builder) ForPageAfterId(perPage int, lastId any, column string) *Builde
 	return b.OrderBy(column, "asc").Limit(perPage)
 }
 
-// ForPageBeforeId answers Builder::forPageBeforeId: the previous page of
-// results before a given id. See ForPageAfterId.
+// ForPageBeforeId narrows the query to the previous page of results before a
+// given id. See ForPageAfterId.
 func (b *Builder) ForPageBeforeId(perPage int, lastId any, column string) *Builder {
 	if column == "" {
 		column = b.defaultKeyName()
@@ -78,12 +79,12 @@ func (b *Builder) ForPageBeforeId(perPage int, lastId any, column string) *Build
 	return b.OrderBy(column, "desc").Limit(perPage)
 }
 
-// removeExistingOrdersFor answers Builder::removeExistingOrdersFor.
+// removeExistingOrdersFor drops any existing ordering on column, so it can be
+// re-added last as the chunk boundary's tiebreaker.
 //
-// The PHP compares the column with ===, which for two strings is what comparing
-// their text is. An Expression is compared by the SQL it carries rather than by
-// identity, because two Expressions holding the same text order by the same
-// thing and keeping both would order by it twice.
+// An Expression is compared by the SQL it carries rather than by identity,
+// because two Expressions holding the same text order by the same thing and
+// keeping both would order by it twice.
 func (b *Builder) removeExistingOrdersFor(column string) []Order {
 	out := make([]Order, 0, len(b.Orders))
 	for _, order := range b.Orders {
@@ -95,11 +96,8 @@ func (b *Builder) removeExistingOrdersFor(column string) []Order {
 	return out
 }
 
-// Chunk answers Concerns\BuildsQueries::chunk.
-//
-// It walks the result set by offset, a page at a time, and stops when the
-// callback answers false -- which is the PHP's `=== false`, written as a bool
-// because Go has one.
+// Chunk walks the result set by offset, a page at a time, and stops when the
+// callback returns false.
 //
 // This is the chunking that skips rows. Between two pages the table can change,
 // and every insert before the offset shifts a row past the boundary that was
@@ -152,11 +150,12 @@ func (b *Builder) Chunk(ctx context.Context, g auth.Grant, count int, callback f
 	}
 }
 
-// ChunkMap answers Concerns\BuildsQueries::chunkMap.
+// ChunkMap chunks the query and runs callback over every row, collecting the
+// results into a single slice.
 //
-// The PHP's TReturn is any here: a method in Go cannot introduce a type
-// parameter of its own, and making this a function instead of a method would
-// take it out of the chain it is written in.
+// The return type is any rather than a type parameter: a method in Go cannot
+// introduce a type parameter of its own, and making this a function instead of
+// a method would take it out of the chain it is written in.
 func (b *Builder) ChunkMap(ctx context.Context, g auth.Grant, callback func(row Record) any, count int) ([]any, error) {
 	if count < 1 {
 		count = 1000
@@ -174,12 +173,11 @@ func (b *Builder) ChunkMap(ctx context.Context, g auth.Grant, callback func(row 
 	return out, nil
 }
 
-// Each answers Concerns\BuildsQueries::each.
+// Each chunks the query and runs callback over every row, passing each row's
+// position inside its own chunk as the index.
 //
-// The index is the row's position inside its chunk, which is what the PHP's
-// `foreach ($results as $key => $value)` yields over a fresh Collection per
-// chunk. EachById counts from the start of the walk instead, and the difference
-// is deliberate in both.
+// EachById counts from the start of the walk instead, and the difference is
+// deliberate in both.
 func (b *Builder) Each(ctx context.Context, g auth.Grant, callback func(row Record, index int) bool, count int) (bool, error) {
 	if count < 1 {
 		count = 1000
@@ -194,9 +192,9 @@ func (b *Builder) Each(ctx context.Context, g auth.Grant, callback func(row Reco
 	})
 }
 
-// ChunkById answers Concerns\BuildsQueries::chunkById.
+// ChunkById is the chunk that does not skip rows.
 //
-// This is the chunk that does not skip rows. Instead of counting rows to reach
+// Instead of counting rows to reach
 // page n, each page asks for the rows after the last id of the page before it,
 // so an insert or a delete anywhere in the table moves no boundary. It is the
 // one to use for anything that walks a table while the application is running.
@@ -210,13 +208,12 @@ func (b *Builder) ChunkById(ctx context.Context, g auth.Grant, count int, callba
 	return b.OrderedChunkById(ctx, g, count, callback, column, alias, false)
 }
 
-// ChunkByIdDesc answers Concerns\BuildsQueries::chunkByIdDesc: ChunkById
-// walking from the highest id down.
+// ChunkByIdDesc is ChunkById walking from the highest id down.
 func (b *Builder) ChunkByIdDesc(ctx context.Context, g auth.Grant, count int, callback func(rows []Record, page int) bool, column, alias string) (bool, error) {
 	return b.OrderedChunkById(ctx, g, count, callback, column, alias, true)
 }
 
-// OrderedChunkById answers Concerns\BuildsQueries::orderedChunkById.
+// OrderedChunkById is the shared body of ChunkById and ChunkByIdDesc.
 //
 // Each page runs on a copy of the query, because ForPageAfterId adds a where
 // and rewrites the ordering: applying that to the query itself would leave the
@@ -288,10 +285,12 @@ func (b *Builder) OrderedChunkById(ctx context.Context, g auth.Grant, count int,
 	}
 }
 
-// EachById answers Concerns\BuildsQueries::eachById.
+// EachById chunks the query by id and runs callback over every row, passing
+// each row's position since the start of the walk as the index.
 //
-// The index counts from the start of the walk, not from the start of the chunk:
-// it is the PHP's (($page - 1) * $count) + $key.
+// The index counts from the start of the walk, not from the start of the
+// chunk: it is (page-1)*count + i, computed from the page ChunkById reports
+// and the row's position inside it.
 func (b *Builder) EachById(ctx context.Context, g auth.Grant, callback func(row Record, index int) bool, count int, column, alias string) (bool, error) {
 	if count < 1 {
 		count = 1000
@@ -306,13 +305,14 @@ func (b *Builder) EachById(ctx context.Context, g auth.Grant, callback func(row 
 	}, column, alias)
 }
 
-// Lazy answers Concerns\BuildsQueries::lazy.
+// Lazy walks the result set by offset, a page at a time, and returns an
+// iter.Seq2 that yields one row at a time without materialising the whole
+// result set.
 //
-// The PHP returns a LazyCollection, which is a closure producing a generator. A
-// Go iter.Seq2 is that closure. The second value is the error, because a walk
-// that fails halfway has nowhere else to report it and a sequence that just
-// stopped early would read as "the table ended here" -- which is the same
-// answer as success and is why this is not a Seq of rows.
+// The second value is the error, because a walk that fails halfway has nowhere
+// else to report it and a sequence that just stopped early would read as "the
+// table ended here" -- which is the same answer as success and is why this is
+// not a Seq of rows.
 //
 // The sequence walks by offset and skips rows for the reason Chunk does. LazyById
 // is the one that holds still.
@@ -345,20 +345,18 @@ func (b *Builder) Lazy(ctx context.Context, g auth.Grant, chunkSize int) iter.Se
 	}
 }
 
-// LazyById answers Concerns\BuildsQueries::lazyById: Lazy walking by key
-// instead of by offset, so that a table written to during the walk neither
-// repeats a row nor skips one.
+// LazyById is Lazy walking by key instead of by offset, so that a table
+// written to during the walk neither repeats a row nor skips one.
 func (b *Builder) LazyById(ctx context.Context, g auth.Grant, chunkSize int, column, alias string) iter.Seq2[Record, error] {
 	return b.orderedLazyById(ctx, g, chunkSize, column, alias, false)
 }
 
-// LazyByIdDesc answers Concerns\BuildsQueries::lazyByIdDesc.
+// LazyByIdDesc is LazyById walking from the highest id down.
 func (b *Builder) LazyByIdDesc(ctx context.Context, g auth.Grant, chunkSize int, column, alias string) iter.Seq2[Record, error] {
 	return b.orderedLazyById(ctx, g, chunkSize, column, alias, true)
 }
 
-// orderedLazyById answers Concerns\BuildsQueries::orderedLazyById, which is
-// protected there.
+// orderedLazyById is the shared body of LazyById and LazyByIdDesc.
 func (b *Builder) orderedLazyById(ctx context.Context, g auth.Grant, chunkSize int, column, alias string, descending bool) iter.Seq2[Record, error] {
 	return func(yield func(Record, error) bool) {
 		if chunkSize < 1 {
@@ -404,7 +402,8 @@ func (b *Builder) orderedLazyById(ctx context.Context, g auth.Grant, chunkSize i
 	}
 }
 
-// Cursor answers Builder::cursor.
+// Cursor streams the query's rows one at a time, without loading the result
+// set into memory.
 //
 // It is the one read that does not materialise its rows: the connection hands
 // them over one at a time, and nothing here holds more than the row being

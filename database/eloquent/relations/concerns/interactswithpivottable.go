@@ -592,9 +592,9 @@ func (p *InteractsWithPivotTable) freshTimestamp() time.Time {
 
 // stampTenant puts the tenant on every row on its way into the pivot table.
 //
-// The where clause on a select is only half of RULE 14. A row inserted without
-// the column is a row no scoped read will ever return -- an attach that appears
-// to work and a relation that comes back empty -- and on a table with a nullable
+// The where clause on a select is only half of it. A row inserted without the
+// column is a row no scoped read will ever return -- an attach that appears to
+// work and a relation that comes back empty -- and on a table with a nullable
 // tenant it is a row every tenant can see.
 func (p *InteractsWithPivotTable) stampTenant(records []map[string]any, g auth.Grant) []map[string]any {
 	tenant := auth.Tenant(g)

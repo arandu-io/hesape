@@ -1,12 +1,6 @@
-// Package channels is the three ways the collection can deliver a
-// notification.
-//
-// It mirrors Illuminate\Notifications\Channels. The files it answers to, in the
-// clone at laravel_illuminate/notifications/Channels:
-//
-//	MailChannel.php       -> Mail
-//	DatabaseChannel.php   -> Database
-//	BroadcastChannel.php  -> Broadcast
+// Package channels is the three ways a notification can be delivered: [Mail]
+// sends it as an e-mail, [Database] stores it as a row, and [Broadcast] pushes
+// it to a browser that is connected right now.
 //
 // A channel is deliberately thin. Authorization, the choice of channels,
 // suppression and the events all happened in notifications.Notifier before it
@@ -25,8 +19,9 @@
 // # The seams
 //
 // Mail names a Mailer and Broadcast names a Broadcaster rather than importing
-// hesape/mail and hesape/broadcasting, which are layers 4 and 5 of
-// 20-components/DOC-hesape-reorganization.md and are not filled yet. Naming the little a
-// channel needs is the Go answer either way: a package that imports the whole
-// mailer to send one message is a package that cannot be tested without one.
+// hesape/mail and hesape/broadcasting. Naming the little a channel needs is
+// what keeps the view registry, every transport and the driver registry from
+// standing behind every package that sends a notification, and a package that
+// imports the whole mailer to send one message is a package that cannot be
+// tested without one.
 package channels

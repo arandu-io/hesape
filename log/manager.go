@@ -17,92 +17,70 @@ import (
 	logcontext "github.com/arandu-io/hesape/log/context"
 )
 
-// Config answers config/logging.php: the default channel and the channels
+// Config is the logging configuration: the default channel and the channels
 // themselves.
 //
-// Illuminate reads this out of the container, through $app['config']. There is
-// no container here (ADR 0001), so the manager is handed the configuration it
-// would otherwise resolve.
+// A manager is handed it whole rather than resolving it from anywhere.
 type Config struct {
-	// Default answers logging.default: the channel Driver and Channel resolve
-	// when asked for none.
+	// Default names the channel Driver and Channel resolve when asked for none.
 	Default string
 
-	// Env is the application environment. It answers two things Illuminate reads
-	// off the application: getFallbackChannelName, which names a channel that did
-	// not name itself, and the choice of format for a channel that did not choose
-	// one -- readable text under "dev", JSON everywhere else, which is the same
-	// word New reads.
+	// Env is the application environment, and it decides two things: the name
+	// stamped on a channel that did not name itself, and the format of a channel
+	// that did not choose one -- readable text under "dev", JSON everywhere else.
 	Env string
 
-	// Channels answers logging.channels.
+	// Channels are the configured channels, by name.
 	Channels map[string]ChannelConfig
 }
 
-// ChannelConfig answers one entry of logging.channels.
-//
-// The field names are the array keys Illuminate reads, capitalised. The keys
-// that only exist to configure a Monolog handler this ecosystem does not carry
-// -- handler, processors, formatter, tap, action_level -- have no field: see the
-// package documentation for why.
+// ChannelConfig is the configuration of one channel.
 type ChannelConfig struct {
-	// Driver answers `driver`: "single", "daily", "monthly", "stack", "stderr",
-	// "errorlog", "null", "custom", or a name registered with Extend.
+	// Driver selects the implementation: "single", "daily", "monthly", "stack",
+	// "stderr", "errorlog", "null", "custom", or a name registered with Extend.
 	Driver string
 
-	// Name answers `name`, the channel name stamped on every line. Empty falls
-	// back to Config.Env, which is Illuminate's getFallbackChannelName.
+	// Name is the channel name stamped on every line. Empty falls back to
+	// Config.Env.
 	Name string
 
-	// Level answers `level`, one of the eight PSR-3 names. Empty is "debug",
-	// which is the default ParsesLogConfiguration::level applies.
+	// Level is the lowest level the channel writes, one of the eight names
+	// ParseLevel accepts. Empty is "debug".
 	Level string
 
-	// Path answers `path`, the file the single and daily drivers write to.
+	// Path is the file the single, daily and monthly drivers write to.
 	Path string
 
-	// Days answers `days`, how many daily files to keep. Zero is Illuminate's
-	// default of 7. MaxFiles wins over it when both are set.
+	// Days is how many daily files to keep. Zero means 7. MaxFiles wins over it
+	// when both are set.
 	Days int
 
-	// MaxFiles answers `max_files`, which Illuminate reads before `days` on the
-	// daily driver and is the only thing the monthly driver reads. Zero is the
-	// default the driver names: 7 files for daily, 3 for monthly.
-	//
-	// It is the one thing here that comes from the current Laravel rather than
-	// from the clone -- see the package documentation.
+	// MaxFiles is how many rotated files to keep. It is read before Days on the
+	// daily driver, and it is the only count the monthly driver reads. Zero is
+	// the default the driver names: 7 files for daily, 3 for monthly.
 	MaxFiles int
 
-	// Channels answers `channels`, the channels a stack fans out to.
+	// Channels are the channels a stack fans out to.
 	Channels []string
 
-	// IgnoreExceptions answers `ignore_exceptions`: a stack whose handler fails
-	// keeps going through the rest, which is what WhatFailureGroupHandler does.
+	// IgnoreExceptions swallows what a stack's handlers report. Every handler is
+	// written to either way; without it the failures come back joined.
 	IgnoreExceptions bool
 
-	// Format is "text" or "json". Empty follows Config.Env.
-	//
-	// It replaces Illuminate's `formatter`, which names a Monolog formatter
-	// class. slog ships exactly these two handlers, and the package
-	// documentation says why there is no third.
+	// Format is "text" or "json", the two handlers slog ships. Empty follows
+	// Config.Env.
 	Format string
 
-	// Writer is where the stderr, errorlog and null drivers write, and it is the
-	// Go stand-in for the stream a Monolog StreamHandler is opened on. Empty
-	// means the destination the driver names.
+	// Writer is where the stderr and errorlog drivers write. Empty means the
+	// process error output.
 	Writer io.Writer
 
-	// Via answers `via` for the custom driver: the factory that builds the
-	// logger.
+	// Via is the factory the custom driver calls to build the logger.
 	Via func(config ChannelConfig) (*slog.Logger, error)
 }
 
-// LogManager answers Illuminate\Log\LogManager: it resolves channels by name,
-// caches them, shares context across them, and is itself a logger that writes to
-// the default channel.
-//
-// The name is Illuminate's rather than the shorter one Go would pick, because
-// LogManager is the name a Laravel developer already knows.
+// LogManager resolves channels by name, caches them, shares context across them,
+// and is itself a logger that writes to the default channel.
 //
 // A LogManager is safe for concurrent use.
 type LogManager struct {
@@ -114,13 +92,10 @@ type LogManager struct {
 	customCreators map[string]func(config ChannelConfig) (*slog.Logger, error)
 }
 
-// NewLogManager answers Illuminate\Log\LogManager::__construct.
+// NewLogManager returns a manager over config, firing its events on dispatcher.
 //
-// Illuminate takes the application and reads the configuration out of it. Here
-// the configuration arrives directly, and the dispatcher -- which Illuminate
-// resolves as $app['events'] -- with it. Both may be zero: a manager with no
-// channels resolves nothing and falls back to the emergency logger, which is
-// what Illuminate does with a missing channel.
+// Both may be zero: a manager with no channels resolves nothing and falls back
+// to the emergency logger, which is also where a missing channel lands.
 func NewLogManager(config Config, dispatcher Dispatcher) *LogManager {
 	return &LogManager{
 		config:         config,
@@ -131,11 +106,10 @@ func NewLogManager(config Config, dispatcher Dispatcher) *LogManager {
 	}
 }
 
-// Build answers Illuminate\Log\LogManager::build: an on-demand channel from a
-// configuration that is not in the file.
+// Build returns an on-demand channel from a configuration that is not in Config.
 //
-// It drops the previously built one first, under Illuminate's own name for the
-// slot, "ondemand", so two Build calls never hand back the same logger.
+// It drops the previously built one first, so two Build calls never hand back
+// the same logger.
 func (m *LogManager) Build(config ChannelConfig) (*Logger, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -143,14 +117,13 @@ func (m *LogManager) Build(config ChannelConfig) (*Logger, error) {
 	return m.getLocked(onDemandChannel, &config)
 }
 
-// onDemandChannel is the slot LogManager::build unsets and then resolves into.
+// onDemandChannel is the cache slot Build clears and then resolves into.
 const onDemandChannel = "ondemand"
 
-// Stack answers Illuminate\Log\LogManager::stack: a new aggregate logger over
-// the named channels.
+// Stack returns a new aggregate logger over the named channels.
 //
-// channel names the stack, and empty is PHP's null default, which falls back to
-// Config.Env. The result is not cached, exactly as Illuminate does not cache it.
+// channel names the stack, and empty falls back to Config.Env. The result is not
+// cached.
 func (m *LogManager) Stack(channels []string, channel string) (*Logger, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -162,25 +135,25 @@ func (m *LogManager) Stack(channels []string, channel string) (*Logger, error) {
 	return NewLogger(logger, m.dispatcher).WithContext(m.sharedContext), nil
 }
 
-// Channel answers Illuminate\Log\LogManager::channel: the channel by name, or
-// the default one when the name is empty.
+// Channel returns the channel by name, or the default one when the name is
+// empty.
 //
-// Illuminate swallows a failure into the emergency logger and returns it. This
-// returns that same emergency logger and the failure, so a caller that wants to
-// keep logging can ignore the error and a caller that wants to know can read it.
+// A failure returns the emergency logger and the error both, so a caller that
+// wants to keep logging can ignore the error and a caller that wants to know can
+// read it.
 func (m *LogManager) Channel(channel string) (*Logger, error) {
 	return m.Driver(channel)
 }
 
-// Driver answers Illuminate\Log\LogManager::driver, which is what Channel calls.
+// Driver returns the channel by name, and is what Channel calls.
 func (m *LogManager) Driver(driver string) (*Logger, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.getLocked(m.parseDriverLocked(driver), nil)
 }
 
-// getLocked answers Illuminate\Log\LogManager::get: the cache, then the resolve,
-// then the shared context, and the emergency logger when any of it fails.
+// getLocked is the cache, then the resolve, then the shared context, and the
+// emergency logger when any of it fails.
 //
 // The caller holds m.mu. It is recursive -- a stack resolves its members through
 // it -- which is why the lock is taken by the exported methods and not here.
@@ -199,8 +172,8 @@ func (m *LogManager) getLocked(name string, config *ChannelConfig) (*Logger, err
 	return channel, nil
 }
 
-// resolveLocked answers Illuminate\Log\LogManager::resolve: the configuration
-// for the name, then the driver that configuration asks for.
+// resolveLocked finds the configuration for the name, then builds the driver
+// that configuration asks for.
 func (m *LogManager) resolveLocked(name string, config *ChannelConfig) (*slog.Logger, error) {
 	if config == nil {
 		found, ok := m.config.Channels[name]
@@ -234,8 +207,7 @@ func (m *LogManager) resolveLocked(name string, config *ChannelConfig) (*slog.Lo
 	}
 }
 
-// createSingleDriverLocked answers
-// Illuminate\Log\LogManager::createSingleDriver: one file, appended to.
+// createSingleDriverLocked builds the single driver: one file, appended to.
 func (m *LogManager) createSingleDriverLocked(config ChannelConfig) (*slog.Logger, error) {
 	if config.Path == "" {
 		return nil, errors.New("log: the single driver needs a path")
@@ -247,13 +219,10 @@ func (m *LogManager) createSingleDriverLocked(config ChannelConfig) (*slog.Logge
 	return m.buildLoggerLocked(config, file)
 }
 
-// createDailyDriverLocked answers
-// Illuminate\Log\LogManager::createDailyDriver: one file per day, keeping only
-// the newest of them, which is Monolog's RotatingFileHandler.
+// createDailyDriverLocked builds the daily driver: one file per day, keeping
+// only the newest of them.
 //
-// The count is `max_files`, then `days`, then 7 -- the clone reads only `days`,
-// and `max_files` is the current Laravel's, which the package documentation
-// names as the second source.
+// The count is MaxFiles, then Days, then 7.
 func (m *LogManager) createDailyDriverLocked(config ChannelConfig) (*slog.Logger, error) {
 	keep := config.MaxFiles
 	if keep <= 0 {
@@ -265,13 +234,8 @@ func (m *LogManager) createDailyDriverLocked(config ChannelConfig) (*slog.Logger
 	return m.createRotatingDriverLocked(config, filePerDay, keep, "daily")
 }
 
-// createMonthlyDriverLocked answers
-// Illuminate\Log\LogManager::createMonthlyDriver: one file per month, keeping
-// the last `max_files` of them, three by default.
-//
-// It has no counterpart in the clone; it is the current Laravel's, and it is
-// here because a `monthly` channel in config/logging.php is something a Laravel
-// developer writes today and would otherwise fail as an unsupported driver.
+// createMonthlyDriverLocked builds the monthly driver: one file per month,
+// keeping the last MaxFiles of them, three by default.
 func (m *LogManager) createMonthlyDriverLocked(config ChannelConfig) (*slog.Logger, error) {
 	keep := config.MaxFiles
 	if keep <= 0 {
@@ -280,9 +244,7 @@ func (m *LogManager) createMonthlyDriverLocked(config ChannelConfig) (*slog.Logg
 	return m.createRotatingDriverLocked(config, filePerMonth, keep, "monthly")
 }
 
-// createRotatingDriverLocked answers
-// Illuminate\Log\LogManager::createRotatingDriver, which the daily and monthly
-// drivers both go through.
+// createRotatingDriverLocked is the body the daily and monthly drivers share.
 func (m *LogManager) createRotatingDriverLocked(config ChannelConfig, format string, keep int, driver string) (*slog.Logger, error) {
 	if config.Path == "" {
 		return nil, fmt.Errorf("log: the %s driver needs a path", driver)
@@ -290,29 +252,26 @@ func (m *LogManager) createRotatingDriverLocked(config ChannelConfig, format str
 	return m.buildLoggerLocked(config, &rotatingWriter{path: config.Path, format: format, keep: keep})
 }
 
-// The two date formats Monolog's RotatingFileHandler names FILE_PER_DAY and
-// FILE_PER_MONTH, written as Go layouts. They are what goes in the file name
-// between the base and the extension.
+// The two rotation periods, written as Go layouts. They are what goes in the
+// file name between the base and the extension.
 const (
 	filePerDay   = time.DateOnly
 	filePerMonth = "2006-01"
 )
 
-// The counts the two rotating drivers fall back to: Illuminate's
-// `$config['max_files'] ?? $config['days'] ?? 7` and `$config['max_files'] ?? 3`.
+// The counts the two rotating drivers fall back to when the configuration names
+// none.
 const (
 	defaultDailyFiles   = 7
 	defaultMonthlyFiles = 3
 )
 
-// createStackDriverLocked answers
-// Illuminate\Log\LogManager::createStackDriver: one logger over the handlers of
-// every named channel.
+// createStackDriverLocked builds the stack driver: one logger over the handlers
+// of every named channel.
 //
-// Illuminate stamps the record with the stack's own channel name and lets each
-// handler format it. Here every handler keeps the name of the channel that
-// configured it, because a stack in Go is those handlers themselves and stamping
-// again would put two `channel` keys on one line.
+// Every handler keeps the name of the channel that configured it, because a
+// stack here is those handlers themselves and stamping the stack's own name over
+// them would put two `channel` keys on one line.
 func (m *LogManager) createStackDriverLocked(config ChannelConfig) (*slog.Logger, error) {
 	if len(config.Channels) == 0 {
 		return nil, errors.New("log: a stack needs at least one channel")
@@ -329,10 +288,8 @@ func (m *LogManager) createStackDriverLocked(config ChannelConfig) (*slog.Logger
 	return slog.New(&multiHandler{handlers: handlers, ignoreExceptions: config.IgnoreExceptions}), nil
 }
 
-// createErrorlogDriverLocked answers
-// Illuminate\Log\LogManager::createErrorlogDriver, and serves the `stderr`
-// channel too: PHP's error_log writes to the process error output, and so does
-// this.
+// createErrorlogDriverLocked builds the errorlog driver, and the stderr driver
+// with it: both write to the process error output.
 func (m *LogManager) createErrorlogDriverLocked(config ChannelConfig) (*slog.Logger, error) {
 	destination := config.Writer
 	if destination == nil {
@@ -341,15 +298,13 @@ func (m *LogManager) createErrorlogDriverLocked(config ChannelConfig) (*slog.Log
 	return m.buildLoggerLocked(config, destination)
 }
 
-// createNullDriverLocked answers the `null` channel of config/logging.php, the
-// one Illuminate resolves to when running unit tests: it discards everything.
+// createNullDriverLocked builds the null driver: it discards everything.
 func (m *LogManager) createNullDriverLocked(config ChannelConfig) (*slog.Logger, error) {
 	return m.buildLoggerLocked(config, io.Discard)
 }
 
-// createCustomDriverLocked answers
-// Illuminate\Log\LogManager::createCustomDriver: the factory named by `via`
-// builds the logger.
+// createCustomDriverLocked builds the custom driver: the factory in
+// ChannelConfig.Via builds the logger.
 func (m *LogManager) createCustomDriverLocked(config ChannelConfig) (*slog.Logger, error) {
 	if config.Via == nil {
 		return nil, errors.New("log: the custom driver needs a via factory")
@@ -358,8 +313,7 @@ func (m *LogManager) createCustomDriverLocked(config ChannelConfig) (*slog.Logge
 }
 
 // buildLoggerLocked is the part every driver shares: the level, the format, the
-// channel name, and the context processor Illuminate pushes onto every resolved
-// channel.
+// channel name, and the context processor every resolved channel carries.
 func (m *LogManager) buildLoggerLocked(config ChannelConfig, destination io.Writer) (*slog.Logger, error) {
 	level, err := m.levelLocked(config)
 	if err != nil {
@@ -369,8 +323,8 @@ func (m *LogManager) buildLoggerLocked(config ChannelConfig, destination io.Writ
 	return slog.New(handler).With(slog.String("channel", m.parseChannelLocked(config))), nil
 }
 
-// levelLocked answers ParsesLogConfiguration::level: the configured level, or
-// debug, and an error rather than the InvalidArgumentException PHP throws.
+// levelLocked resolves the channel level: the configured one, or debug, and an
+// error when the configured name is not a level.
 func (m *LogManager) levelLocked(config ChannelConfig) (slog.Level, error) {
 	if config.Level == "" {
 		return LevelDebug, nil
@@ -382,10 +336,8 @@ func (m *LogManager) levelLocked(config ChannelConfig) (slog.Level, error) {
 	return level, nil
 }
 
-// parseChannelLocked answers ParsesLogConfiguration::parseChannel together with
-// LogManager::getFallbackChannelName: the configured name, then the environment,
-// then "production" -- which is what Illuminate falls back to when the
-// application has no bound env.
+// parseChannelLocked resolves the name stamped on every line: the configured
+// name, then the environment, then "production".
 func (m *LogManager) parseChannelLocked(config ChannelConfig) string {
 	if config.Name != "" {
 		return config.Name
@@ -408,8 +360,8 @@ func (m *LogManager) formatLocked(config ChannelConfig) string {
 	return "json"
 }
 
-// parseDriverLocked answers Illuminate\Log\LogManager::parseDriver: the name,
-// trimmed, or the default when none was given.
+// parseDriverLocked trims the name, and falls back to the default when none was
+// given.
 func (m *LogManager) parseDriverLocked(driver string) string {
 	driver = strings.TrimSpace(driver)
 	if driver == "" {
@@ -418,14 +370,12 @@ func (m *LogManager) parseDriverLocked(driver string) string {
 	return driver
 }
 
-// createEmergencyLoggerLocked answers
-// Illuminate\Log\LogManager::createEmergencyLogger: the logger that exists so a
-// broken logging configuration does not take the request down with it.
+// createEmergencyLoggerLocked builds the logger that exists so a broken logging
+// configuration does not take the request down with it.
 //
 // It writes to the path of an "emergency" channel when one is configured, and to
 // the process error output otherwise, because there is no application storage
-// path to guess at here. It logs the failure on the way out, exactly as
-// Illuminate does inside its catch.
+// path to guess at here. It logs the failure on the way out.
 func (m *LogManager) createEmergencyLoggerLocked(cause error) *Logger {
 	var destination io.Writer = os.Stderr
 	if config, ok := m.config.Channels["emergency"]; ok && config.Path != "" {
@@ -441,8 +391,8 @@ func (m *LogManager) createEmergencyLoggerLocked(cause error) *Logger {
 	return logger
 }
 
-// ShareContext answers Illuminate\Log\LogManager::shareContext: context that
-// every channel gets, the ones already resolved included.
+// ShareContext adds context that every channel gets, the ones already resolved
+// included.
 func (m *LogManager) ShareContext(fields map[string]any) *LogManager {
 	m.mu.Lock()
 	channels := slices.Collect(maps.Values(m.channels))
@@ -455,21 +405,20 @@ func (m *LogManager) ShareContext(fields map[string]any) *LogManager {
 	return m
 }
 
-// SharedContext answers Illuminate\Log\LogManager::sharedContext: the context
-// shared across channels and stacks.
+// SharedContext returns the context shared across channels and stacks.
 //
-// It is a copy, because the caller of a PHP array getter gets a copy too.
+// It is a copy, so writing to it changes nothing the manager holds.
 func (m *LogManager) SharedContext() map[string]any {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return maps.Clone(m.sharedContext)
 }
 
-// WithoutContext answers Illuminate\Log\LogManager::withoutContext: drop the
-// given keys from every resolved channel, or clear them all.
+// WithoutContext drops the given keys from every resolved channel, or clears
+// them all when given none.
 //
-// It leaves the shared context alone, exactly as Illuminate does -- the two are
-// separate, and FlushSharedContext is the one that clears the shared half.
+// It leaves the shared context alone: the two are separate, and
+// FlushSharedContext is the one that clears the shared half.
 func (m *LogManager) WithoutContext(keys ...string) *LogManager {
 	m.mu.Lock()
 	channels := slices.Collect(maps.Values(m.channels))
@@ -481,7 +430,7 @@ func (m *LogManager) WithoutContext(keys ...string) *LogManager {
 	return m
 }
 
-// FlushSharedContext answers Illuminate\Log\LogManager::flushSharedContext.
+// FlushSharedContext clears the context shared across channels.
 func (m *LogManager) FlushSharedContext() *LogManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -489,27 +438,24 @@ func (m *LogManager) FlushSharedContext() *LogManager {
 	return m
 }
 
-// GetDefaultDriver answers Illuminate\Log\LogManager::getDefaultDriver:
-// logging.default.
+// GetDefaultDriver returns the name of the default channel.
 func (m *LogManager) GetDefaultDriver() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.config.Default
 }
 
-// SetDefaultDriver answers Illuminate\Log\LogManager::setDefaultDriver.
+// SetDefaultDriver sets the name of the default channel.
 func (m *LogManager) SetDefaultDriver(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.config.Default = name
 }
 
-// Extend answers Illuminate\Log\LogManager::extend: register a factory for a
-// driver name the manager does not know.
+// Extend registers a factory for a driver name the manager does not know.
 //
-// PHP binds the closure to the manager so that it can reach the protected
-// helpers. Nothing here is reachable that way, so the factory receives only the
-// channel configuration, which is what the closure reads in practice.
+// The factory receives only the channel configuration; nothing inside the
+// manager is reachable from it.
 func (m *LogManager) Extend(driver string, callback func(config ChannelConfig) (*slog.Logger, error)) *LogManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -517,77 +463,73 @@ func (m *LogManager) Extend(driver string, callback func(config ChannelConfig) (
 	return m
 }
 
-// ForgetChannel answers Illuminate\Log\LogManager::forgetChannel: drop the
-// resolved channel so the next call builds it again.
+// ForgetChannel drops the resolved channel so the next call builds it again.
 func (m *LogManager) ForgetChannel(driver string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.channels, m.parseDriverLocked(driver))
 }
 
-// GetChannels answers Illuminate\Log\LogManager::getChannels: every channel
-// resolved so far, by name. It is a copy of the map, and the loggers in it are
-// the live ones.
+// GetChannels returns every channel resolved so far, by name. It is a copy of
+// the map, and the loggers in it are the live ones.
 func (m *LogManager) GetChannels() map[string]*Logger {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return maps.Clone(m.channels)
 }
 
-// Emergency answers Illuminate\Log\LogManager::emergency: it writes to the
-// default channel. The eight levels and Log all do this.
+// Emergency logs at the emergency level. The eight levels and Log all write to
+// the default channel.
 func (m *LogManager) Emergency(ctx context.Context, message any, fields ...map[string]any) {
 	m.Log(ctx, LevelEmergency, message, fields...)
 }
 
-// Alert answers Illuminate\Log\LogManager::alert.
+// Alert logs at the alert level.
 func (m *LogManager) Alert(ctx context.Context, message any, fields ...map[string]any) {
 	m.Log(ctx, LevelAlert, message, fields...)
 }
 
-// Critical answers Illuminate\Log\LogManager::critical.
+// Critical logs at the critical level.
 func (m *LogManager) Critical(ctx context.Context, message any, fields ...map[string]any) {
 	m.Log(ctx, LevelCritical, message, fields...)
 }
 
-// Error answers Illuminate\Log\LogManager::error.
+// Error logs at the error level.
 func (m *LogManager) Error(ctx context.Context, message any, fields ...map[string]any) {
 	m.Log(ctx, LevelError, message, fields...)
 }
 
-// Warning answers Illuminate\Log\LogManager::warning.
+// Warning logs at the warning level.
 func (m *LogManager) Warning(ctx context.Context, message any, fields ...map[string]any) {
 	m.Log(ctx, LevelWarning, message, fields...)
 }
 
-// Notice answers Illuminate\Log\LogManager::notice.
+// Notice logs at the notice level.
 func (m *LogManager) Notice(ctx context.Context, message any, fields ...map[string]any) {
 	m.Log(ctx, LevelNotice, message, fields...)
 }
 
-// Info answers Illuminate\Log\LogManager::info.
+// Info logs at the info level.
 func (m *LogManager) Info(ctx context.Context, message any, fields ...map[string]any) {
 	m.Log(ctx, LevelInfo, message, fields...)
 }
 
-// Debug answers Illuminate\Log\LogManager::debug.
+// Debug logs at the debug level.
 func (m *LogManager) Debug(ctx context.Context, message any, fields ...map[string]any) {
 	m.Log(ctx, LevelDebug, message, fields...)
 }
 
-// Log answers Illuminate\Log\LogManager::log: log at an arbitrary level, on the
-// default channel.
+// Log logs at an arbitrary level, on the default channel.
 //
 // A channel that will not resolve does not silence the line: Driver hands back
-// the emergency logger, and the line goes there, which is the whole reason
-// Illuminate builds one.
+// the emergency logger, and the line goes there.
 func (m *LogManager) Log(ctx context.Context, level slog.Level, message any, fields ...map[string]any) {
 	channel, _ := m.Driver("")
 	channel.Log(ctx, level, message, fields...)
 }
 
-// newHandler builds the handler for a format: the two slog ships, under the
-// eight PSR-3 level names New also renders.
+// newHandler builds the handler for a format: the two slog ships, rendering the
+// level under one of the eight names ParseLevel accepts back.
 func newHandler(destination io.Writer, format string, level slog.Level) slog.Handler {
 	opts := &slog.HandlerOptions{
 		Level: level,
@@ -608,17 +550,15 @@ func newHandler(destination io.Writer, format string, level slog.Level) slog.Han
 
 // multiHandler is the stack: one record into every handler.
 //
-// ignoreExceptions answers `ignore_exceptions`, which in Illuminate wraps the
-// handlers in a WhatFailureGroupHandler -- a handler that fails does not stop
-// the ones after it and does not surface. Without it, the failures come back
-// joined, because slog has somewhere to put them and Monolog does not.
+// ignoreExceptions swallows what the handlers report: a handler that fails does
+// not stop the ones after it and does not surface. Without it, the failures come
+// back joined.
 type multiHandler struct {
 	handlers         []slog.Handler
 	ignoreExceptions bool
 }
 
-// Enabled reports whether any handler in the stack wants the level. Monolog asks
-// the same question of the group.
+// Enabled reports whether any handler in the stack wants the level.
 func (h *multiHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	for _, sub := range h.handlers {
 		if sub.Enabled(ctx, level) {
@@ -667,7 +607,7 @@ func (h *multiHandler) WithGroup(name string) slog.Handler {
 }
 
 // openLogFile opens a log file for appending, creating the directory it lives in
-// the way Monolog's StreamHandler does.
+// when that directory is missing.
 func openLogFile(path string) (*os.File, error) {
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -677,13 +617,11 @@ func openLogFile(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 }
 
-// rotatingWriter is Monolog's RotatingFileHandler: one file per period, named
-// after the configured path with the date before the extension, and only the
-// last `keep` of them kept.
+// rotatingWriter writes one file per period, named after the configured path
+// with the date before the extension, and keeps only the last `keep` of them.
 //
 // format is the period -- filePerDay or filePerMonth -- and it is the whole
-// difference between the daily and the monthly driver, exactly as it is the
-// whole difference in Monolog.
+// difference between the daily and the monthly driver.
 type rotatingWriter struct {
 	mu      sync.Mutex
 	path    string
@@ -720,15 +658,14 @@ func (w *rotatingWriter) Write(p []byte) (int, error) {
 	return w.file.Write(p)
 }
 
-// rotatingPath is Monolog's default rotating filename: base-YYYY-MM-DD.ext for
-// a daily channel and base-YYYY-MM.ext for a monthly one.
+// rotatingPath builds the rotated file name: base-YYYY-MM-DD.ext for a daily
+// channel and base-YYYY-MM.ext for a monthly one.
 func rotatingPath(path, period string) string {
 	ext := filepath.Ext(path)
 	return strings.TrimSuffix(path, ext) + "-" + period + ext
 }
 
-// prune deletes everything past the newest `keep` files, which is what
-// RotatingFileHandler does when it rotates.
+// prune deletes everything past the newest `keep` files, on every rotation.
 func (w *rotatingWriter) prune() {
 	if w.keep <= 0 {
 		return

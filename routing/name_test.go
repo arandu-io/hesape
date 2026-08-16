@@ -127,8 +127,8 @@ func TestAGroupNamesWhatIsUnderIt(t *testing.T) {
 	}
 }
 
-// TestAGroupNamePrefixEndingInADotIsNotDoubled, because Laravel's own
-// convention writes it that way and a caller arriving from there will.
+// TestAGroupNamePrefixEndingInADotIsNotDoubled: a group name prefix that
+// already ends in a dot is not doubled when a route name is joined to it.
 func TestAGroupNamePrefixEndingInADotIsNotDoubled(t *testing.T) {
 	r := routing.NewRouter()
 	r.Group(routing.Group{Prefix: "/admin", Name: "admin."}).Get("/users", ok).Name("users")
@@ -138,8 +138,8 @@ func TestAGroupNamePrefixEndingInADotIsNotDoubled(t *testing.T) {
 	}
 }
 
-// TestAnUnnamedRouteHasNoName is what FormatRoutes prints short, and it is the
-// promise the old exported Name field did not keep: it was never written to.
+// TestAnUnnamedRouteHasNoName is what FormatRoutes prints short: RouteName is
+// empty until Name is called.
 func TestAnUnnamedRouteHasNoName(t *testing.T) {
 	r := routing.NewRouter()
 	r.Get("/unnamed", ok)

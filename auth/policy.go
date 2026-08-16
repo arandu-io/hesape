@@ -45,15 +45,15 @@ type Subject struct {
 	// Only the session store's Start and Regenerate set it, from the Remember
 	// option, and they overwrite whatever the caller put here: a field set by hand
 	// on the way in would be a second way to ask for a longer session, and there
-	// is one (RULE 9).
+	// is only ever one.
 	//
-	// A policy may also read it. Laravel exposes the same fact as viaRemember, and
-	// for the same use: a session nobody has authenticated for a month is the
-	// right moment to ask for the password again before a destructive action.
+	// A policy may also read it: a session nobody has authenticated for a month
+	// is the right moment to ask for the password again before a destructive
+	// action.
 	Remembered bool
 
 	// PasswordConfirmedAt is when the subject last typed their password again on
-	// an already open session -- Laravel's auth.password_confirmed_at.
+	// an already open session.
 	//
 	// It exists so a sensitive action can demand the password once and then leave
 	// the person alone for a while, instead of on every click. Ask through the
@@ -103,8 +103,8 @@ type Subject struct {
 // default is closed.
 //
 // The tenant is required and is the application's, from configuration. A
-// visitor cannot choose whose rows they read, and RULE 14 is not suspended
-// because nobody signed in.
+// visitor cannot choose whose rows they read, and nothing about that is
+// suspended because nobody signed in.
 func Guest(tenant string) Subject {
 	return Subject{Tenant: tenant, guest: true}
 }
@@ -196,9 +196,9 @@ func Authorize[T any](ctx context.Context, p Policy[T], s Subject, a Action, res
 
 // Allows asks the same question as Authorize and answers yes or no.
 //
-// It is Laravel's Gate::allows, and it exists for the view: a template that
-// draws a delete button has to know whether the button would work, and it has
-// no use for the Grant or for the sentence explaining the refusal.
+// It exists for the view: a template that draws a delete button has to know
+// whether the button would work, and it has no use for the Grant or for the
+// sentence explaining the refusal.
 //
 // It is not a second way to authorize, because it cannot authorize anything --
 // it throws the Grant away, and without a Grant no repository is reachable. A

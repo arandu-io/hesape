@@ -7,14 +7,13 @@ import (
 	"strings"
 )
 
-// Config is one disk's configuration: Illuminate's `filesystems.disks.<name>`
-// array, as a struct.
+// Config is one disk's configuration.
 //
 // It is typed rather than a map because a disk configured with a misspelled key
 // is a disk that boots and then behaves like a different one -- the local driver
 // silently rooted at the working directory, the public URL silently absent. A
 // struct makes the misspelling a compile error, which is the whole argument for
-// build configuration being typed here (RULE 9).
+// build configuration being typed here.
 type Config struct {
 	// Driver names which creator builds the adapter: "local", "scoped", or a
 	// name registered with [Disks.Extend].
@@ -48,17 +47,16 @@ type Config struct {
 
 // DriverCreator builds an adapter out of a configuration.
 //
-// It is what [Disks.Extend] registers, and it is the extension point Illuminate
-// spells `Storage::extend`. It receives the disk's name because a driver often
+// It is what [Disks.Extend] registers. It receives the disk's name because a
+// driver often
 // wants it in an error message, and because the local driver puts it in the
 // signed-URL route.
 type DriverCreator func(name string, cfg Config) (Adapter, error)
 
 // Drive returns a disk by name. The empty name is the default disk.
 //
-// It is Illuminate's drive(), which is disk() under the older name it kept for
-// compatibility. Both are here for the reason both are there: a project moving
-// over finds the call it wrote.
+// It is [Disks.Disk] under a second name, so a project moving over finds the
+// call it wrote either way.
 func (ds *Disks) Drive(name string) (*Disk, error) { return ds.Disk(name) }
 
 // Cloud returns the disk named as the cloud disk when the set was built.
@@ -97,7 +95,7 @@ func (ds *Disks) Set(name string, disk *Disk) *Disks {
 //
 // It is what an adapter living in its own module hooks into: the S3 driver is
 // github.com/arandu-io/hesape/filesystem/s3, a separate module because in Go
-// there is no optional dependency (ADR 0048), and the application that imports
+// there is no optional dependency, and the application that imports
 // it registers it here in one line. That is why there is no CreateS3Driver on
 // this type -- the root module cannot import its own submodule, and a creator
 // that lied about being able to build one would fail at boot instead of at
@@ -111,8 +109,8 @@ func (ds *Disks) Extend(driver string, creator DriverCreator) *Disks {
 
 // Build makes a disk out of a configuration without registering it.
 //
-// It is Illuminate's build(): the one-off disk, for a job that needs a
-// directory nobody named in configuration. Register it with [Disks.Set] or
+// It is the one-off disk, for a job that needs a directory nobody named in
+// configuration. Register it with [Disks.Set] or
 // [Disks.Add] if it should be reachable by name.
 func (ds *Disks) Build(name string, cfg Config) (*Disk, error) {
 	switch cfg.Driver {
@@ -188,10 +186,10 @@ func (ds *Disks) Purge(name string) {
 // ScopedAdapter is an [Adapter] that stores everything under a prefix of
 // another one.
 //
-// It is what Illuminate's "scoped" driver is: a path prefix and nothing else.
-// It is deliberately not a place to put a tenant -- the tenant prefix comes from
-// [Key] and from the Grant (RULE 14), and a driver that could add one would be a
-// second place isolation is decided.
+// It is the "scoped" driver: a path prefix and nothing else. It is deliberately
+// not a place to put a tenant -- the tenant prefix comes from [Key] and from the
+// Grant, and a driver that could add one would be a second place isolation is
+// decided.
 type ScopedAdapter struct {
 	inner  Adapter
 	prefix string

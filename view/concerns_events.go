@@ -6,8 +6,6 @@ import (
 	"sync"
 )
 
-// ManagesEvents mirrors Illuminate\View\Concerns\ManagesEvents.
-//
 // View composers and creators are callbacks that run before a view renders.
 // A composer runs every time; a creator runs only the first time.
 
@@ -56,7 +54,8 @@ func (f *Factory) Creator(views string, callback ViewCallback) {
 	})
 }
 
-// CallComposer is ManagesEvents::callComposer.
+// CallComposer dispatches a composing event for the view, then runs every
+// composer registered for it.
 func (f *Factory) CallComposer(v *View) error {
 	f.mu.RLock()
 	composers := make([]viewEvent, len(f.composers))
@@ -78,7 +77,8 @@ func (f *Factory) CallComposer(v *View) error {
 	return nil
 }
 
-// CallCreator is ManagesEvents::callCreator.
+// CallCreator dispatches a creating event for the view, then runs every
+// creator registered for it.
 func (f *Factory) CallCreator(v *View) error {
 	f.mu.RLock()
 	creators := make([]viewEvent, len(f.creators))

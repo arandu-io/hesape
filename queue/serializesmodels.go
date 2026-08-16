@@ -9,14 +9,13 @@ import (
 
 // ModelIdentifier is a record reduced to what finds it again.
 //
-// It answers Illuminate\Contracts\Database\ModelIdentifier: the value
-// SerializesModels puts on the wire in place of a model. Class is what the
-// application registered a finder under, ID is the primary key, and Relations
-// are the relations to load back with it.
+// It is what [SerializesModels] puts on the wire in place of a record. Class is
+// what the application registered a finder under, ID is the primary key, and
+// Relations are the relations to load back with it.
 type ModelIdentifier struct {
 	// Class names the kind of record. It is a string a finder is registered
-	// under -- "invoice", "user" -- where PHP puts the class name, because Go
-	// has no way to turn a name back into a type.
+	// under -- "invoice", "user" -- because Go cannot reach a type from a name
+	// in a string.
 	Class string
 	// ID is the primary key.
 	ID string
@@ -27,10 +26,9 @@ type ModelIdentifier struct {
 	// Connection names the database connection it came from, and empty means
 	// the default.
 	Connection string
-	// TenantID is who it belongs to. It is not in Laravel's identifier, and it
-	// is the thing that makes restoring one safe: the finder is given a Grant
-	// built for this tenant, so a payload that names another customer's row
-	// finds nothing (RULE 14).
+	// TenantID is who it belongs to, and it is the thing that makes restoring
+	// one safe: the finder is given a Grant built for this tenant, so a payload
+	// that names another customer's row finds nothing.
 	TenantID string
 }
 
@@ -38,7 +36,7 @@ type ModelIdentifier struct {
 //
 // It is what the application registers so a job can carry an id instead of a
 // document. It takes the Grant the job runs under, which is what makes the
-// reload obey the same policy the original read did (RULE 17).
+// reload obey the same policy the original read did.
 type ModelFinder func(ctx context.Context, g auth.Grant, id ModelIdentifier) (any, error)
 
 // ErrMissingModel is returned when a record a job's payload names is gone.
@@ -50,17 +48,10 @@ var ErrMissingModel = fmt.Errorf("queue: the record this job is about no longer 
 
 // SerializesModels keeps records out of job payloads.
 //
-// It answers Illuminate\Queue\SerializesModels and its half,
-// SerializesAndRestoresModelIdentifiers. In PHP the trait hooks __sleep and
-// __wakeup so a job class that holds an Eloquent model puts a ModelIdentifier
-// on the wire and gets the model back on the other side, reloaded from the
-// database.
-//
-// Go has no __sleep, so the mechanism cannot be automatic and the rule it
-// enforces still is: a payload carries ids and facts, never a document. This
-// type is that rule with a name and a finder registry --
-// [SerializesModels.RestoreModel] is the reload, and it is the method the PHP
-// trait is named for.
+// The rule it enforces is that a payload carries ids and facts, never a
+// document: a record goes on the wire as a [ModelIdentifier] and is loaded back
+// on the other side. This type is that rule with a name and a finder registry,
+// and [SerializesModels.RestoreModel] is the reload.
 //
 //	var models queue.SerializesModels
 //	models.FindModelsUsing("invoice", func(ctx context.Context, g auth.Grant, id queue.ModelIdentifier) (any, error) {
@@ -78,10 +69,9 @@ type SerializesModels struct {
 
 // FindModelsUsing registers how to load a kind of record back.
 //
-// It has no PHP name because PHP needs none: there the class name in the
-// payload is enough to resolve the model out of the container. Here the name is
-// a string and this is what turns it into code, which is the same trade the
-// [Worker] makes for job names (ADR 0001).
+// The class on an identifier is a string, and this is what turns it into code
+// -- the same trade the [Worker] makes for job names, because Go cannot reach a
+// type from a name in a string.
 func (s *SerializesModels) FindModelsUsing(class string, find ModelFinder) *SerializesModels {
 	if s.finders == nil {
 		s.finders = map[string]ModelFinder{}
@@ -92,9 +82,9 @@ func (s *SerializesModels) FindModelsUsing(class string, find ModelFinder) *Seri
 
 // RestoreModel loads the record an identifier names.
 //
-// It answers restoreModel(). The Grant is rebuilt from the identifier's tenant,
-// so the reload is scoped to the customer the job belongs to and a payload
-// naming another customer's row finds nothing (RULE 14, RULE 17).
+// The Grant is rebuilt from the identifier's tenant, so the reload is scoped to
+// the customer the job belongs to and a payload naming another customer's row
+// finds nothing.
 //
 // A record that is gone comes back as an error wrapping [ErrMissingModel], not
 // as a nil the handler has to remember to check.
@@ -119,10 +109,9 @@ func (s *SerializesModels) RestoreModel(ctx context.Context, action auth.Action,
 
 // GetSerializedPropertyValue is what goes on the wire in place of a record.
 //
-// It answers getSerializedPropertyValue() from
-// SerializesAndRestoresModelIdentifiers. A value that can identify itself is
-// reduced to its identifier; everything else is passed through, because a
-// payload of plain facts is already what it should be.
+// A value that can identify itself is reduced to its identifier; everything
+// else is passed through, because a payload of plain facts is already what it
+// should be.
 func (s *SerializesModels) GetSerializedPropertyValue(value any) any {
 	if model, can := value.(Identifiable); can {
 		return model.ModelIdentifier()
@@ -132,8 +121,6 @@ func (s *SerializesModels) GetSerializedPropertyValue(value any) any {
 
 // GetRestoredPropertyValue is the record an identifier names, or the value
 // itself when it is not one.
-//
-// It answers getRestoredPropertyValue().
 func (s *SerializesModels) GetRestoredPropertyValue(ctx context.Context, action auth.Action, value any) (any, error) {
 	if id, is := value.(ModelIdentifier); is {
 		return s.RestoreModel(ctx, action, id)
@@ -143,9 +130,8 @@ func (s *SerializesModels) GetRestoredPropertyValue(ctx context.Context, action 
 
 // Identifiable is a record that can say what finds it again.
 //
-// It is what a domain type implements so [SerializesModels] can reduce it. The
-// name is new: in PHP the check is `$value instanceof Model`, and there is no
-// Model here to check against (ADR 0001 rejected Active Record).
+// It is what a domain type implements so [SerializesModels] can reduce it: a
+// record says what finds it again, rather than a base class being recognized.
 type Identifiable interface {
 	// ModelIdentifier is what finds this record again.
 	ModelIdentifier() ModelIdentifier

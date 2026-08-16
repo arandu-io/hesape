@@ -29,7 +29,7 @@ const AssetPath = "/_arandu/assets/"
 //
 // The framework embeds a default under this name and RegisterStylesheet
 // replaces it. Not a second file, not a second URL, not a cascade order: one
-// name, one URL, one set of bytes (RULE 9).
+// name, one URL, one set of bytes.
 const Stylesheet = "app.css"
 
 const stylesheetType = "text/css; charset=utf-8"
@@ -93,11 +93,12 @@ func newAsset(name, contentType string, body []byte) *asset {
 // characters of the SHA-256 of its bytes.
 //
 // It is exported because one thing outside this repository has to produce the
-// same string. `aru font:add` writes an absolute src: into the stylesheet it
-// generates, and it has to name the font's own hash -- a URL carrying any other
-// hash is served without caching, by design, so a relative url() inheriting the
-// STYLESHEET's hash means the font is re-downloaded on every page view. Eighteen
-// kilobytes, every request, silently.
+// same string. The font-registration step of the CLI writes an absolute src:
+// into the stylesheet it generates, and it has to name the font's own hash --
+// a URL carrying any other hash is served without caching, by design, so a
+// relative url() inheriting the STYLESHEET's hash means the font is
+// re-downloaded on every page view. Eighteen kilobytes, every request,
+// silently.
 //
 // The CLI is a separate module and cannot import this one, so it computes the
 // same three lines. That is a contract across a repository boundary, which is
@@ -110,7 +111,7 @@ func AssetHash(body []byte) string {
 
 // RegisterStylesheet replaces the embedded stylesheet with the application's.
 //
-// `aru view:build` compiles resources/css/app.css into assets/app.css, and the
+// The view build compiles resources/css/app.css into assets/app.css, and the
 // skeleton hands those bytes over from init(), the same shape as Register:
 //
 //	//go:embed assets/app.css
@@ -150,7 +151,7 @@ func RegisterStylesheet(css []byte) {
 //
 // It is the transport primitive and it knows nothing about what it carries: a
 // name, a content type and the bytes. What kinds of file an application ships
-// is the view stack's question, not this package's -- kyse/fonts vendors faces
+// is the view stack's question, not this package's -- font vendoring flows
 // through here, and anything else that needs a content-addressed URL can too.
 //
 // It used to be RegisterFont, with a table of font extensions and a preload
@@ -259,8 +260,8 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(a.body)
 }
 
-// Version reports the served version of each asset, for `aru doctor` and for
-// the debug page.
+// Version reports the served version of each asset, for diagnostic tooling
+// and for the debug page.
 //
 // It reports what is served rather than what is embedded, so a stylesheet that
 // never reached the browser shows up here as the framework's hash next to a

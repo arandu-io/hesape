@@ -21,8 +21,8 @@ var ErrRefusedUpload = errors.New("filesystem: the upload was refused")
 //
 // It is the "own contract" that validation points at: a file is not in
 // url.Values, and validating one inside the form pipeline would need a second
-// input shape and a second set of rules, which is a second way to validate
-// (RULE 9). An upload is checked here, against [UploadRules], and stored with
+// input shape and a second set of rules, which is a second way to validate. An
+// upload is checked here, against [UploadRules], and stored with
 // [Disk.Put].
 //
 // Everything on it except Size came from the client and is a string somebody
@@ -128,8 +128,7 @@ func (u Upload) Check(r UploadRules) error {
 // The name is drawn at random and keeps only the extension, which is the point
 // of the call: the announced filename is a string the client chose, and storing
 // under it means two people uploading "scan.pdf" overwrite each other -- and
-// that somebody who guesses a filename guesses a key. Illuminate's putFile does
-// the same thing for the same reason.
+// that somebody who guesses a filename guesses a key.
 //
 // It does not check [UploadRules]. Checking is [Upload.Check], called where the
 // answer can be shown to the person who picked the file; folding it in here
@@ -139,11 +138,11 @@ func (d *Disk) PutFile(ctx context.Context, g auth.Grant, directory string, u Up
 	return d.PutFileAs(ctx, g, directory, u, randomName()+u.Extension())
 }
 
-// randomName draws the forty characters Illuminate's hashName draws.
+// randomName draws the forty random characters a stored file is named with.
 //
 // It does not call str.Random, which is the same forty characters, because that
-// one answers to Str::createRandomStringsUsing -- a test hook that makes the
-// value deterministic process-wide. A deterministic name is fine for a token in
+// one answers to a test hook that makes the value deterministic process-wide. A
+// deterministic name is fine for a token in
 // a fixture and is not fine here: unpredictability is half of why this call
 // exists, and a global that can switch it off is a global somebody will switch
 // off in a test helper that also runs in staging.

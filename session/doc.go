@@ -1,29 +1,12 @@
 // Package session issues sessions, carries the flash across the redirect that
 // follows a rejected form, and mints the CSRF token bound to the session.
 //
-// It mirrors Illuminate\Session. The files it answers to, in the clone at
-// laravel_illuminate/Session:
-//
-//	ArraySessionHandler.php
-//	CacheBasedSessionHandler.php
-//	CookieSessionHandler.php
-//	DatabaseSessionHandler.php
-//	EncryptedStore.php
-//	ExistenceAwareInterface.php
-//	FileSessionHandler.php
-//	NullSessionHandler.php
-//	SessionManager.php
-//	SessionServiceProvider.php
-//	Store.php
-//	SymfonySessionDecorator.php
-//	TokenMismatchException.php
-//
 // # What is here
 //
-//   - [Store], Illuminate's Store: one session, loaded for one request, holding
-//     a bag of keys. The flash, the old input, the CSRF token and the previous
-//     URL live in it, which is to say everything that makes old() and $errors
-//     work on the page a rejected form is sent back to.
+//   - [Store]: one session, loaded for one request, holding a bag of keys.
+//     The flash, the old input, the CSRF token and the previous URL live in
+//     it, which is to say everything a page needs to redisplay the old
+//     input and validation errors of a rejected form.
 //   - [SessionHandler] and the six handlers that implement it:
 //     [ArraySessionHandler], [NullSessionHandler], [FileSessionHandler],
 //     [CookieSessionHandler], [CacheBasedSessionHandler] and
@@ -39,20 +22,18 @@
 // StartSession and AuthenticateSession. The generator is
 // github.com/arandu-io/hesape/session/console: SessionTableCommand.
 //
-// TokenMismatchException is [ErrTokenMismatch]. An exception class with no
-// fields and no methods is a sentinel error in Go, and errors.Is is how a caller
-// asks the question `catch (TokenMismatchException)` asks.
+// [ErrTokenMismatch] is a sentinel error: no fields, no methods, checked
+// with errors.Is.
 //
 // # Two stores, and which one to reach for
 //
-// [Store] is the Laravel one: string keys, dot notation, `mixed` values, flash
-// and old input. Reach for it for anything a page draws.
+// [Store] holds string keys in dot notation with values of any type, plus
+// flash and old input. Reach for it for anything a page draws.
 //
-// [RecordStore] is the other half of what Illuminate spreads across Store,
-// SessionManager and StartSession -- signing the cookie, minting ids, reading
-// one typed [Record] back, ending every session of a subject at once. It is
-// generic over the payload, so what auth keeps about who is signed in is
-// checked by the compiler rather than asserted out of a map. They share
+// [RecordStore] is the store for signing the cookie, minting ids, reading
+// one typed [Record] back, and ending every session of a subject at once.
+// It is generic over the payload, so what auth keeps about who is signed in
+// is checked by the compiler rather than asserted out of a map. They share
 // [Handler] and [Record]; nothing else is duplicated.
 //
 // # Two flashes, and which one to reach for
@@ -64,19 +45,4 @@
 // three screens that need the messages most -- sign in, sign up, password reset
 // -- which are submitted by somebody who has no session yet. Cleared on the read
 // rather than aged, so a message cannot appear on a page nobody submitted.
-//
-// # SymfonySessionDecorator is not here
-//
-// It exists to satisfy Symfony's HttpFoundation SessionInterface, and its
-// methods -- set(), clear(), getBag(), registerBag(), getMetadataBag() -- are
-// either aliases of [Store]'s own or bag plumbing from a framework Go has no
-// equivalent of. SessionServiceProvider is not here either: its register() is
-// three container bindings -- 'session', 'session.store' and the start-session
-// middleware -- and this collection has no container (ADR 0001), so wiring is
-// the application's, in one place a person can read.
-//
-// DatabaseSessionHandler::setContainer() is absent for the same reason: it is
-// the setter half of the container the handler reaches into for the request,
-// the guard and the connection. [NewDatabaseSessionHandler] takes what it needs
-// as arguments, so there is nothing to inject afterwards (ADR 0045).
 package session

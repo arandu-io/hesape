@@ -49,7 +49,7 @@ func TestDeferredQueueRunsAfterTheCallerHasMovedOn(t *testing.T) {
 }
 
 // TestDeferredQueueRefusesAForgedJobAtThePush: a refusal that happened on
-// another goroutine after the response is a refusal nobody sees (RULE 17).
+// another goroutine after the response is a refusal nobody sees.
 func TestDeferredQueueRefusesAForgedJobAtThePush(t *testing.T) {
 	w := queue.NewWorker(queue.NullQueue{}, queue.WorkerOptions{})
 	q := queue.NewDeferredQueue(w).DeferUsing(func(func()) {
@@ -171,8 +171,7 @@ func TestCreatePayloadCarriesTheJobsOwnSettings(t *testing.T) {
 	}
 }
 
-// invoiceArgs is a job's arguments that declare their own settings, which is
-// what attributes.Attributes replaces the PHP attributes with.
+// invoiceArgs is a job's arguments that declare their own settings.
 type invoiceArgs struct {
 	ID string
 }
@@ -234,8 +233,7 @@ func TestInteractsWithQueueRecordsWhatTheHandlerDecided(t *testing.T) {
 }
 
 // TestInteractsWithQueueOutsideAWorkerIsSafe: a handler called directly, with
-// no job, must not panic -- which is what the PHP's `if ($this->job)` guards
-// buy.
+// no job, must not panic.
 func TestInteractsWithQueueOutsideAWorkerIsSafe(t *testing.T) {
 	var handler queue.InteractsWithQueue
 	if got := handler.Attempts(); got != 1 {

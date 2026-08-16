@@ -8,12 +8,12 @@ import (
 	"github.com/arandu-io/hesape/database/eloquent/relations/concerns"
 )
 
-// BelongsTo answers Illuminate\Database\Eloquent\Relations\BelongsTo: the
-// inverse, where the foreign key is on this table and points at the other one.
+// BelongsTo is the inverse relation, where the foreign key is on this table and
+// points at the other one.
 //
-// The PHP calls the model holding the key $child rather than $parent, and keeps
-// both names for the same object, because the base class calls it the parent
-// and it reads backwards here. Both are kept, for the same reason.
+// The model holding the key is reachable as both the child and the parent: the
+// shared half calls it the parent, and "parent" reads backwards for the row that
+// carries the key.
 type BelongsTo struct {
 	BaseRelation
 	concerns.SupportsDefaultModels

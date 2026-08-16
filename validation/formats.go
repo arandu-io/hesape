@@ -11,59 +11,54 @@ import (
 	"github.com/arandu-io/hesape/support/arr"
 )
 
-// This file answers to Illuminate\Validation\Concerns\FormatsMessages: how a
-// failure becomes a sentence, and what a caller can do to change it.
+// This file is how a failure becomes a sentence, and what a caller can do to
+// change it.
 //
 // The rule table decides WHETHER a field failed. Everything here decides what it
-// then says, and the order is the PHP's: an inline message passed to the
-// validator, then validation.custom.<attribute>.<rule> from the translator, then
-// the size variant of a size rule, then validation.<rule>, then the fallback
-// messages a custom rule registered.
+// then says, in this order: an inline message passed to the validator, then
+// validation.custom.<attribute>.<rule> from the translator, then the size
+// variant of a size rule, then validation.<rule>, then the fallback messages a
+// custom rule registered.
 //
-// The one difference is the last step. Laravel's last resort is the translation
-// key itself -- "validation.required" rendered to the person -- because a
-// Laravel application always has a translator. Here a Validator built with none
-// falls back to the sentence the compiled rule set carries ("is required"),
-// which is what this package said before this file existed, so wiring a
-// translator adds Laravel's sentences and wiring none changes nothing.
+// The last resort is the sentence the compiled rule set carries ("is required"),
+// never a bare translation key rendered to a person. So a Validator built with
+// no translator still says something, and wiring one only changes the
+// wording.
 
-// sizeRules answers to Validator::$sizeRules: the eight rules whose message
-// depends on what is being measured -- a number, a file, a list or a string.
+// sizeRules are the eight rules whose message depends on what is being measured
+// -- a number, a file, a list or a string.
 var sizeRules = []string{"size", "between", "min", "max", "gt", "lt", "gte", "lte"}
 
-// Translator answers to Illuminate\Contracts\Translation\Translator, narrowed to
-// the two methods Illuminate\Validation reaches for.
+// Translator is the catalogue messages are read out of, narrowed to the two
+// methods this package reaches for.
 //
-// Get returns any because the PHP returns mixed: a language line is a string,
-// and a key naming a group -- "validation.custom", "validation.attributes",
-// "validation.min" -- is an array. A key with no line answers with the key
-// itself, which is what every "is there a custom message" check here compares
-// against.
+// Get returns any because a language line is a string and a key naming a group
+// -- "validation.custom", "validation.attributes", "validation.min" -- is a map.
+// A key with no line answers with the key itself, which is what every "is there
+// a custom message" check here compares against.
 //
 // The locale is a parameter rather than state, as it is on
 // hesape/translation.Translator: the locale belongs to the request. The empty
 // string means the translator's own default.
 type Translator interface {
-	// Get answers to Translator::get.
+	// Get returns the line under the key, or the key itself when there is none.
 	Get(key string, replace map[string]any, locale string) any
-	// Choice answers to Translator::choice.
+	// Choice returns the line under the key, in the form that number calls for.
 	Choice(key string, number int, replace map[string]any, locale string) string
 }
 
 // WithTranslator gives the Validator the catalogue its messages are read out of,
 // which is what turns "is required" into "The name field is required.".
 //
-// Laravel resolves one out of the container and cannot be built without it (ADR
-// 0001 refuses the container). Without one the compiled rule set's own sentences
-// are used, and every other layer -- inline messages, custom attribute names,
-// the :placeholders -- still applies.
+// It is optional. Without one the compiled rule set's own sentences are used,
+// and every other layer -- inline messages, custom attribute names, the
+// :placeholders -- still applies.
 func WithTranslator(t Translator) ValidatorOption {
 	return func(v *Validator) { v.trans = t }
 }
 
-// WithCustomMessages answers to the $messages argument of Factory::make: the
-// sentence one field and one rule produce, keyed "field.rule", "rule" or
-// "field", with "*" allowed in the field.
+// WithCustomMessages sets the sentence one field and one rule produce, keyed
+// "field.rule", "rule" or "field", with "*" allowed in the field.
 //
 // A value is a sentence, or -- for a size rule -- a group of them keyed by
 // "numeric", "file", "array" and "string".
@@ -71,16 +66,14 @@ func WithCustomMessages(messages map[string]any) ValidatorOption {
 	return func(v *Validator) { v.customMessages = messages }
 }
 
-// WithCustomAttributes answers to the $attributes argument of Factory::make: how
-// a field is named inside a sentence, which is Laravel's attributes() and its
-// validation.attributes lines.
+// WithCustomAttributes sets how a field is named inside a sentence, which is
+// what the validation.attributes lines of a catalogue also carry.
 func WithCustomAttributes(attributes map[string]string) ValidatorOption {
 	return func(v *Validator) { v.customAttributes = attributes }
 }
 
-// WithCustomValues answers to Validator::setValueNames: how one value of one
-// field is spelled inside a sentence, so that ":value" reads "credit card" and
-// not "cc".
+// WithCustomValues sets how one value of one field is spelled inside a sentence,
+// so that ":value" reads "credit card" and not "cc".
 func WithCustomValues(values map[string]map[string]string) ValidatorOption {
 	return func(v *Validator) { v.customValues = values }
 }
@@ -95,21 +88,22 @@ func (v *Validator) translator() Translator {
 	return v.trans
 }
 
-// GetTranslator answers to Validator::getTranslator.
+// GetTranslator returns the catalogue messages are read out of, which is never
+// nil: without one it is a translator that finds no line.
 func (v *Validator) GetTranslator() Translator { return v.translator() }
 
-// SetTranslator answers to Validator::setTranslator.
+// SetTranslator sets the catalogue messages are read out of.
 func (v *Validator) SetTranslator(translator Translator) { v.trans = translator }
 
-// CustomMessages answers to the public $customMessages, which a rule object
-// reads to build a sibling validator that says the same things.
+// CustomMessages returns the inline messages in force, which a rule object reads
+// to build a sibling validator that says the same things.
 func (v *Validator) CustomMessages() map[string]any { return v.customMessages }
 
-// CustomAttributes answers to the public $customAttributes, read for the reason
+// CustomAttributes returns the field names in force, read for the reason
 // CustomMessages is.
 func (v *Validator) CustomAttributes() map[string]string { return v.customAttributes }
 
-// SetCustomMessages answers to Validator::setCustomMessages.
+// SetCustomMessages merges more inline messages into the ones in force.
 func (v *Validator) SetCustomMessages(messages map[string]any) *Validator {
 	if v.customMessages == nil {
 		v.customMessages = map[string]any{}
@@ -119,14 +113,14 @@ func (v *Validator) SetCustomMessages(messages map[string]any) *Validator {
 	return v
 }
 
-// SetAttributeNames answers to Validator::setAttributeNames.
+// SetAttributeNames replaces the field names in force.
 func (v *Validator) SetAttributeNames(attributes map[string]string) *Validator {
 	v.customAttributes = attributes
 
 	return v
 }
 
-// AddCustomAttributes answers to Validator::addCustomAttributes.
+// AddCustomAttributes merges more field names into the ones in force.
 func (v *Validator) AddCustomAttributes(attributes map[string]string) *Validator {
 	if v.customAttributes == nil {
 		v.customAttributes = map[string]string{}
@@ -136,14 +130,14 @@ func (v *Validator) AddCustomAttributes(attributes map[string]string) *Validator
 	return v
 }
 
-// SetValueNames answers to Validator::setValueNames.
+// SetValueNames replaces the value names in force.
 func (v *Validator) SetValueNames(values map[string]map[string]string) *Validator {
 	v.customValues = values
 
 	return v
 }
 
-// AddCustomValues answers to Validator::addCustomValues.
+// AddCustomValues merges more value names into the ones in force.
 func (v *Validator) AddCustomValues(values map[string]map[string]string) *Validator {
 	if v.customValues == nil {
 		v.customValues = map[string]map[string]string{}
@@ -153,23 +147,22 @@ func (v *Validator) AddCustomValues(values map[string]map[string]string) *Valida
 	return v
 }
 
-// SetFallbackMessages answers to Validator::setFallbackMessages: the sentence a
-// rule registered with Factory.Extend says when nothing else names one.
+// SetFallbackMessages sets the sentence a rule registered with Factory.Extend
+// says when nothing else names one.
 func (v *Validator) SetFallbackMessages(messages map[string]any) {
 	v.fallbackMessages = messages
 }
 
-// SetImplicitAttributesFormatter answers to
-// Validator::setImplicitAttributesFormatter: how a wildcard attribute that
-// nothing named is spelled.
+// SetImplicitAttributesFormatter sets how a wildcard attribute that nothing named
+// is spelled.
 func (v *Validator) SetImplicitAttributesFormatter(formatter func(string) string) *Validator {
 	v.implicitAttributesFormatter = formatter
 
 	return v
 }
 
-// AddReplacer answers to Validator::addReplacer: how one rule fills the
-// placeholders of its own message.
+// AddReplacer registers how one rule fills the placeholders of its own
+// message.
 func (v *Validator) AddReplacer(rule string, replacer ReplacerFunc) {
 	if v.replacers == nil {
 		v.replacers = map[string]ReplacerFunc{}
@@ -177,7 +170,7 @@ func (v *Validator) AddReplacer(rule string, replacer ReplacerFunc) {
 	v.replacers[str.Snake(rule, "_")] = replacer
 }
 
-// AddReplacers answers to Validator::addReplacers.
+// AddReplacers registers several replacers at once.
 func (v *Validator) AddReplacers(replacers map[string]ReplacerFunc) {
 	for rule, replacer := range replacers {
 		v.AddReplacer(rule, replacer)
@@ -188,8 +181,8 @@ func (v *Validator) AddReplacers(replacers map[string]ReplacerFunc) {
 // The message itself.
 // ---------------------------------------------------------------------------
 
-// getMessage answers to FormatsMessages::getMessage: the sentence one attribute
-// and one rule produce, before its placeholders are filled.
+// getMessage returns the sentence one attribute and one rule produce, before its
+// placeholders are filled.
 func (v *Validator) getMessage(attribute, rule string) string {
 	lowerRule := str.Snake(rule, "_")
 
@@ -235,14 +228,14 @@ func (v *Validator) getMessage(attribute, rule string) string {
 		}
 	}
 
-	// Laravel's last resort is the translation key. Here it is the sentence the
-	// compiled rule set carries, which is the one the field is drawn with.
+	// The last resort is the sentence the compiled rule set carries, which is
+	// the one the field is drawn with.
 	return v.messageFor(attribute, lowerRule)
 }
 
-// getInlineMessage answers to FormatsMessages::getInlineMessage: the message the
-// caller passed to the validator, with the size variant picked out when the
-// entry is a group and the rule measures something.
+// getInlineMessage returns the message the caller passed to the validator, with
+// the size variant picked out when the entry is a group and the rule measures
+// something.
 func (v *Validator) getInlineMessage(attribute, rule string) (string, bool) {
 	entry, found := v.getFromLocalArray(attribute, str.Snake(rule, "_"), v.customMessages)
 	if !found {
@@ -256,14 +249,13 @@ func (v *Validator) getInlineMessage(attribute, rule string) (string, bool) {
 	return sentence, isSentence
 }
 
-// getFromLocalArray answers to FormatsMessages::getFromLocalArray: the message a
-// source array holds for one attribute and rule, by the three keys the PHP tries
-// in order -- "attribute.rule", "rule", "attribute" -- with a source key
-// containing "*" matched as a pattern.
+// getFromLocalArray returns the message a source map holds for one attribute and
+// rule, by three keys tried in order -- "attribute.rule", "rule", "attribute" --
+// with a source key containing "*" matched as a pattern.
 //
-// The source keys are read in sorted order. A PHP array remembers the order it
-// was written in and a Go map remembers none, so two patterns that both match
-// would otherwise answer differently between runs.
+// The source keys are read in sorted order, because a Go map remembers none and
+// two patterns that both match would otherwise answer differently between
+// runs.
 func (v *Validator) getFromLocalArray(attribute, lowerRule string, source map[string]any) (any, bool) {
 	keys := []string{attribute + "." + lowerRule, lowerRule, attribute}
 
@@ -301,9 +293,8 @@ func (v *Validator) getFromLocalArray(attribute, lowerRule string, source map[st
 	return nil, false
 }
 
-// getCustomMessageFromTranslator answers to
-// FormatsMessages::getCustomMessageFromTranslator: the first of the given keys
-// the translator holds a line for, trying an exact match and then a wildcard one
+// getCustomMessageFromTranslator returns the first of the given keys the
+// translator holds a line for, trying an exact match and then a wildcard one
 // under validation.custom, and answering with the last key when it holds none.
 func (v *Validator) getCustomMessageFromTranslator(keys []string) string {
 	for _, key := range keys {
@@ -328,8 +319,8 @@ func (v *Validator) getCustomMessageFromTranslator(keys []string) string {
 	return keys[len(keys)-1]
 }
 
-// getWildcardCustomMessages answers to
-// FormatsMessages::getWildcardCustomMessages.
+// getWildcardCustomMessages returns the line whose key matches the search as a
+// pattern, and def when none does.
 func (v *Validator) getWildcardCustomMessages(messages map[string]any, search, def string) string {
 	for _, key := range slices.Sorted(maps.Keys(messages)) {
 		if search == key || (strings.Contains(key, "*") && str.Is([]string{key}, search, false)) {
@@ -339,7 +330,7 @@ func (v *Validator) getWildcardCustomMessages(messages map[string]any, search, d
 	return def
 }
 
-// getSizeMessage answers to FormatsMessages::getSizeMessage.
+// getSizeMessage returns the line of a size rule.
 //
 // There are four types of size validation. The attribute may be a number, a
 // file, a list or a string, so the line is read out of the group its type names.
@@ -349,7 +340,8 @@ func (v *Validator) getSizeMessage(attribute, rule string) string {
 	return line(v.translator().Get(key, nil, ""), key)
 }
 
-// getAttributeType answers to FormatsMessages::getAttributeType.
+// getAttributeType names what an attribute's size measures: numeric, file, array
+// or string.
 func (v *Validator) getAttributeType(attribute string) string {
 	// We assume that the attributes present in the file array are files, so if
 	// the attribute does not have a numeric rule and is not a file we consider
@@ -366,11 +358,10 @@ func (v *Validator) getAttributeType(attribute string) string {
 	return "string"
 }
 
-// MakeReplacements answers to FormatsMessages::makeReplacements: every
-// placeholder of a message filled in with what actually happened.
+// MakeReplacements fills every placeholder of a message with what actually
+// happened.
 //
-// It is public in the PHP because a rule object reaches for it, and it is
-// exported here for the same reason.
+// It is exported because a rule object reaches for it.
 func (v *Validator) MakeReplacements(message, attribute, rule string, parameters []string) string {
 	message = v.replaceAttributePlaceholder(message, v.GetDisplayableAttribute(attribute))
 
@@ -390,15 +381,12 @@ func (v *Validator) MakeReplacements(message, attribute, rule string, parameters
 	return message
 }
 
-// GetDisplayableAttribute answers to
-// FormatsMessages::getDisplayableAttribute: the name of a field as a sentence
-// names it.
+// GetDisplayableAttribute returns the name of a field as a sentence names it.
 //
-// The last line of the PHP is str_replace('_', ' ', Str::snake($attribute)), and
-// that is the whole of the default: "password_confirmation" reads "password
-// confirmation", LOWERCASE. It is not Str::headline -- the name sits inside the
-// sentence ("The password confirmation field must match") and never at the head
-// of one, so it is never capitalised here.
+// The default is the snake-cased name with its underscores turned into spaces:
+// "password_confirmation" reads "password confirmation", LOWERCASE. The name
+// sits inside the sentence ("The password confirmation field must match") and
+// never at the head of one, so it is never capitalised here.
 func (v *Validator) GetDisplayableAttribute(attribute string) string {
 	primaryAttribute := v.getPrimaryAttribute(attribute)
 
@@ -436,8 +424,8 @@ func (v *Validator) GetDisplayableAttribute(attribute string) string {
 	return strings.ReplaceAll(str.Snake(attribute, "_"), "_", " ")
 }
 
-// getPrimaryAttribute answers to Validator::getPrimaryAttribute: given "name.0",
-// the "name.*" it was expanded from.
+// getPrimaryAttribute returns the wildcard an attribute was expanded from: given
+// "name.0", the "name.*".
 func (v *Validator) getPrimaryAttribute(attribute string) string {
 	for _, unparsed := range slices.Sorted(maps.Keys(v.implicitAttributes)) {
 		if slices.Contains(v.implicitAttributes[unparsed], attribute) {
@@ -448,8 +436,8 @@ func (v *Validator) getPrimaryAttribute(attribute string) string {
 	return attribute
 }
 
-// getAttributeFromTranslations answers to
-// FormatsMessages::getAttributeFromTranslations.
+// getAttributeFromTranslations returns the field name the validation.attributes
+// lines carry, and empty when they carry none.
 func (v *Validator) getAttributeFromTranslations(name string) string {
 	attributes, isGroup := v.translator().Get("validation.attributes", nil, "").(map[string]any)
 	if !isGroup {
@@ -458,9 +446,8 @@ func (v *Validator) getAttributeFromTranslations(name string) string {
 	return v.getAttributeFromLocalArray(name, dotStrings(arr.Dot(attributes, "")))
 }
 
-// getAttributeFromLocalArray answers to
-// FormatsMessages::getAttributeFromLocalArray, with the source keys read in
-// sorted order for the reason getFromLocalArray sorts them.
+// getAttributeFromLocalArray returns the field name a source map holds, with the
+// keys read in sorted order for the reason getFromLocalArray sorts them.
 func (v *Validator) getAttributeFromLocalArray(attribute string, source map[string]string) string {
 	if name, held := source[attribute]; held {
 		return name
@@ -473,31 +460,30 @@ func (v *Validator) getAttributeFromLocalArray(attribute string, source map[stri
 	return ""
 }
 
-// replaceAttributePlaceholder answers to
-// FormatsMessages::replaceAttributePlaceholder: the three spellings of
-// :attribute, which is how a line chooses its own capitalisation.
+// replaceAttributePlaceholder fills the three spellings of :attribute, which is
+// how a line chooses its own capitalisation.
 func (v *Validator) replaceAttributePlaceholder(message, value string) string {
 	message = strings.ReplaceAll(message, ":attribute", value)
 	message = strings.ReplaceAll(message, ":ATTRIBUTE", str.Upper(value))
 	return strings.ReplaceAll(message, ":Attribute", str.Ucfirst(value))
 }
 
-// replaceIndexPlaceholder answers to
-// FormatsMessages::replaceIndexPlaceholder.
+// replaceIndexPlaceholder fills :index with the member's position, counted from
+// zero.
 func (v *Validator) replaceIndexPlaceholder(message, attribute string) string {
 	return v.replaceIndexOrPositionPlaceholder(message, attribute, "index", nil)
 }
 
-// replacePositionPlaceholder answers to
-// FormatsMessages::replacePositionPlaceholder: the index counted from one.
+// replacePositionPlaceholder fills :position with the member's position, counted
+// from one.
 func (v *Validator) replacePositionPlaceholder(message, attribute string) string {
 	return v.replaceIndexOrPositionPlaceholder(message, attribute, "position", func(segment int) int {
 		return segment + 1
 	})
 }
 
-// replaceIndexOrPositionPlaceholder answers to
-// FormatsMessages::replaceIndexOrPositionPlaceholder.
+// replaceIndexOrPositionPlaceholder is the body the index and position
+// placeholders share, in all three of their spellings.
 func (v *Validator) replaceIndexOrPositionPlaceholder(message, attribute, placeholder string, modifier func(int) int) string {
 	if modifier == nil {
 		modifier = func(value int) int { return value }
@@ -526,8 +512,8 @@ func (v *Validator) replaceIndexOrPositionPlaceholder(message, attribute, placeh
 	return message
 }
 
-// numberToIndexOrPositionWord answers to
-// FormatsMessages::numberToIndexOrPositionWord.
+// numberToIndexOrPositionWord names the first ten positions in words, and gives
+// the number back for anything past them.
 func numberToIndexOrPositionWord(value int) string {
 	words := []string{
 		1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth",
@@ -539,10 +525,8 @@ func numberToIndexOrPositionWord(value int) string {
 	return "other"
 }
 
-// replaceInputPlaceholder answers to
-// FormatsMessages::replaceInputPlaceholder: :input is what was actually sent,
-// which is the placeholder that turns "is invalid" into a sentence somebody can
-// act on.
+// replaceInputPlaceholder fills :input with what was actually sent, which is the
+// placeholder that turns "is invalid" into a sentence somebody can act on.
 func (v *Validator) replaceInputPlaceholder(message, attribute string) string {
 	actualValue := v.GetValue(attribute)
 
@@ -553,9 +537,8 @@ func (v *Validator) replaceInputPlaceholder(message, attribute string) string {
 	return message
 }
 
-// GetDisplayableValue answers to FormatsMessages::getDisplayableValue: how a
-// value is spelled inside a message, after the custom values an application
-// declared and the validation.values lines.
+// GetDisplayableValue returns how a value is spelled inside a message, after the
+// custom values an application declared and the validation.values lines.
 func (v *Validator) GetDisplayableValue(attribute string, value any) string {
 	if group, held := v.customValues[attribute]; held {
 		if name, named := group[stringOf(value)]; named {
@@ -587,7 +570,8 @@ func (v *Validator) GetDisplayableValue(attribute string, value any) string {
 	return stringOf(value)
 }
 
-// getAttributeList answers to FormatsMessages::getAttributeList.
+// getAttributeList spells a list of field names the way a sentence names each of
+// them.
 func (v *Validator) getAttributeList(values []string) []string {
 	attributes := make([]string, len(values))
 
@@ -614,8 +598,8 @@ func line(value any, key string) string {
 	return key
 }
 
-// param reads one parameter, answering the empty string where the PHP would
-// notice an undefined offset.
+// param reads one parameter, answering the empty string for a position past the
+// end.
 func param(parameters []string, i int) string {
 	if i < 0 || i >= len(parameters) {
 		return ""
@@ -623,7 +607,7 @@ func param(parameters []string, i int) string {
 	return parameters[i]
 }
 
-// isScalar answers to is_scalar.
+// isScalar reports whether the value is a single one: text, a bool or a number.
 func isScalar(value any) bool {
 	switch value.(type) {
 	case string, bool, int, int8, int16, int32, int64,
@@ -664,9 +648,8 @@ func dotStrings(flattened map[string]any) map[string]string {
 	return out
 }
 
-// wildcardPattern compiles a source key containing "*" into the pattern the PHP
-// builds with preg_quote: a star matches one segment, and the whole key must
-// match.
+// wildcardPattern compiles a source key containing "*" into a pattern: a star
+// matches one segment, and the whole key must match.
 func wildcardPattern(sourceKey string) *regexp.Regexp {
 	pattern := strings.ReplaceAll(regexp.QuoteMeta(sourceKey), `\*`, `([^.]*)`)
 	compiled, err := regexp.Compile(`^` + pattern + `$`)
@@ -678,7 +661,7 @@ func wildcardPattern(sourceKey string) *regexp.Regexp {
 	return compiled
 }
 
-// replaceIgnoreCase answers to str_ireplace, which the index and position
+// replaceIgnoreCase replaces without regard to case, which the index and position
 // placeholders are read with so that :INDEX and :Index land too.
 func replaceIgnoreCase(subject, search, replacement string) string {
 	if search == "" {

@@ -20,8 +20,8 @@ const tenant = "11111111-1111-4111-8111-111111111111"
 
 func grant() auth.Grant { return auth.SystemGrant("invoice.send", tenant) }
 
-// TestAJobWithoutATenantIsRefused is RULE 14 at the queue. A job with no tenant
-// cannot be scoped, and everything the handler touches would read across
+// TestAJobWithoutATenantIsRefused checks the tenant at the queue. A job with no
+// tenant cannot be scoped, and everything the handler touches would read across
 // customers.
 func TestAJobWithoutATenantIsRefused(t *testing.T) {
 	_, err := jobs.New(auth.SystemGrant("invoice.send", ""), "", "invoice.send", nil)
@@ -380,7 +380,7 @@ func TestAFailedJobIsReleasedThenParked(t *testing.T) {
 		t.Errorf("the job came back immediately, with no backoff: %s", rel[0].delay)
 	}
 
-	// The second attempt reaches MaxAttempts and parks.
+	// The second attempt reaches the try limit and parks.
 	second := j
 	second.Attempts = 1
 	_ = q.Push(context.Background(), grant(), second)
@@ -727,13 +727,12 @@ func alwaysFails(*queue.Worker) queue.HandlerFunc {
 	}
 }
 
-// TestMaxExceptionsIsCountedAcrossDeliveries is the audit's input: a job with
-// MaxExceptions 2 on a worker with MaxTries 5, and a handler that always fails.
+// TestMaxExceptionsIsCountedAcrossDeliveries: a job with MaxExceptions 2 on a
+// worker with MaxTries 5, and a handler that always fails.
 //
-// The PHP counts in the cache under "job-exceptions:{uuid}" with a day's ttl,
-// so the count survives the delivery; this counted in a field of the in-memory
-// job and the release did not write it down, so every delivery started from
-// zero and the job ran to MaxTries -- five deliveries where Laravel gives two.
+// The count has to survive the delivery. Counting it only in the in-memory job,
+// with the release not writing it down, starts every delivery from zero and
+// runs the job to MaxTries -- five deliveries where two were asked for.
 func TestMaxExceptionsIsCountedAcrossDeliveries(t *testing.T) {
 	ctx := context.Background()
 	d := &deliveryDriver{}
@@ -795,16 +794,13 @@ func TestAReleasedJobCarriesItsExceptionCount(t *testing.T) {
 	}
 }
 
-// TestAJobWithUnlimitedTriesIsNotParkedByTheWorkersLimit is the audit's fourth
-// input, in the spelling this package has for it.
+// TestAJobWithUnlimitedTriesIsNotParkedByTheWorkersLimit checks the negative
+// Tries.
 //
-// The PHP tells "no limit" from "not set" with null and 0:
-// markJobAsFailedIfWillExceedMaxAttempts returns early on "$maxTries > 0", and
-// markJobAsFailedIfAlreadyExceedsMaxAttempts on "$maxTries === 0". A Go int has
-// no null, so attributes.Attributes says a negative Tries is forever and a zero
-// is "the worker decides" -- and the negative did not work: maxTriesFor handed
-// the negative straight to "attempts >= maxTries", which is true on the first
-// delivery, so a job asking never to be parked was parked at once.
+// A Go int has to carry three answers: attributes.Attributes says a negative
+// Tries is forever and a zero is "the worker decides". Handing the negative
+// straight to "attempts >= maxTries" is true on the first delivery, so a job
+// asking never to be parked would be parked at once.
 func TestAJobWithUnlimitedTriesIsNotParkedByTheWorkersLimit(t *testing.T) {
 	ctx := context.Background()
 	d := &deliveryDriver{}
@@ -917,7 +913,7 @@ func TestEveryDeliveryDispatchesJobAttempted(t *testing.T) {
 			if attempted[0].Successful() == tc.failed {
 				t.Errorf("Successful() = %v on %s", attempted[0].Successful(), tc.name)
 			}
-			// It is the last word on the delivery, as PHP's finally is.
+			// It is the last word on the delivery.
 			if seen := dispatchedTypes(bus); seen[len(seen)-1] != "events.JobAttempted" {
 				t.Errorf("the events were %v, and JobAttempted is not the last", seen)
 			}
@@ -926,14 +922,12 @@ func TestEveryDeliveryDispatchesJobAttempted(t *testing.T) {
 }
 
 // TestAParkedJobAnnouncesJobFailedBeforeJobExceptionOccurred is the order
-// Worker::handleJobException has: failJob runs first and dispatches JobFailed
-// from inside $job->fail(), and raiseExceptionOccurredJobEvent runs after it.
+// handleJobException has: the parking runs first and dispatches JobFailed, and
+// the exception is announced after it.
 //
-// The doc comment on handleJobException claimed to be "in the order the PHP has
-// it" while doing the opposite, which is worse than not saying: a listener that
-// treats JobExceptionOccurred as "this one will be retried" -- the only reading
-// that makes it different from JobFailed -- was wrong on the last delivery of
-// every job.
+// A listener that treats JobExceptionOccurred as "this one will be retried" --
+// the only reading that makes it different from JobFailed -- is wrong on the
+// last delivery of every job when the two go out in the other order.
 func TestAParkedJobAnnouncesJobFailedBeforeJobExceptionOccurred(t *testing.T) {
 	ctx := context.Background()
 	d := &deliveryDriver{}
@@ -964,8 +958,8 @@ func TestAParkedJobAnnouncesJobFailedBeforeJobExceptionOccurred(t *testing.T) {
 }
 
 // TestAReleasedJobAnnouncesJobExceptionOccurredBeforeItIsReleased is the other
-// path through the same PHP method: nothing failed the job, so the event goes
-// out and the finally block releases it after.
+// path through the same method: nothing parked the job, so the event goes out
+// and the release happens after it.
 func TestAReleasedJobAnnouncesJobExceptionOccurredBeforeItIsReleased(t *testing.T) {
 	ctx := context.Background()
 	d := &deliveryDriver{}
@@ -997,8 +991,8 @@ func TestAReleasedJobAnnouncesJobExceptionOccurredBeforeItIsReleased(t *testing.
 
 // mustDaemon runs the worker's loop and keeps only the error, so the tests that
 // only care that it stopped read the way they did when the loop returned one
-// value. Worker.Daemon answers Laravel's daemon(), which returns the exit
-// status the process is about to hand the shell.
+// value. Worker.Daemon returns the exit status the process is about to hand the
+// shell.
 func mustDaemon(w *queue.Worker, ctx context.Context) error {
 	_, err := w.Daemon(ctx)
 	return err

@@ -9,23 +9,21 @@ import (
 // Config is every cache store an application has, and which of them is the
 // default.
 //
-// It answers the config/cache.php Laravel reads through the container. It is a
-// typed struct and not a map of strings because a build configuration that is
-// checked by the compiler is a misconfiguration found at build time rather than
-// at the first cache miss (RULE 9).
+// It is a typed struct and not a map of strings because a build configuration
+// that is checked by the compiler is a misconfiguration found at build time
+// rather than at the first cache miss.
 type Config struct {
-	// Default is the store Store and Driver return when nobody names one. It
-	// answers cache.default; an empty one means "null", which is what Laravel
-	// falls back to.
+	// Default is the store Store and Driver return when nobody names one. An
+	// empty one means "null".
 	Default string
 
 	// Prefix goes in front of every key a store writes, under the tenant and
-	// the namespace. It answers cache.prefix, and it is the one for sharing a
-	// backend with another application -- not for separating tenants, which is
-	// Repository's job and is not optional (RULE 14).
+	// the namespace. It is the one for sharing a backend with another
+	// application -- not for separating tenants, which is Repository's job and
+	// is not optional.
 	Prefix string
 
-	// Stores is every store by name. It answers cache.stores.
+	// Stores is every store by name.
 	Stores map[string]StoreConfig
 }
 
@@ -37,85 +35,76 @@ type Config struct {
 // person choosing between them wants one page.
 type StoreConfig struct {
 	// Driver names the kind: "array", "file", "database", "null", "failover",
-	// or anything Extend registered. It answers config['driver'].
+	// or anything Extend registered.
 	Driver string
 
 	// Name is what this store is called, and it is filled in by Resolve from
-	// the key in Config.Stores. It answers the config['store'] Laravel adds in
-	// resolve(), and it is what every event reports.
+	// the key in Config.Stores. It is what every event reports.
 	Name string
 
-	// Prefix overrides Config.Prefix for this store. It answers
-	// config['prefix'].
+	// Prefix overrides Config.Prefix for this store.
 	Prefix string
 
-	// NoEvents turns the events off for this store. It answers the
-	// config['events'] => false the memo and failover drivers pass, inverted so
-	// that the zero value keeps them on -- which is Laravel's default.
+	// NoEvents turns the events off for this store. The memo and failover
+	// drivers set it, and it is negative so that the zero value keeps the
+	// events on.
 	NoEvents bool
 
-	// Path is the directory the file driver writes in. It answers
-	// config['path'].
+	// Path is the directory the file driver writes in.
 	Path string
 
-	// LockPath is the directory the file driver keeps locks in. It answers
-	// config['lock_path'], and setting it is what makes FlushLocks possible.
+	// LockPath is the directory the file driver keeps locks in. Setting it is
+	// what makes FlushLocks possible.
 	LockPath string
 
-	// Permission is the mode the file driver gives what it creates. It answers
-	// config['permission']; zero leaves whatever the umask produced.
+	// Permission is the mode the file driver gives what it creates; zero leaves
+	// whatever the umask produced.
 	Permission fs.FileMode
 
-	// Connection is the database driver's connection. It answers
-	// config['connection'], resolved: there is no container here to look a name
-	// up in (ADR 0001), so the connection itself is what the configuration
-	// carries.
+	// Connection is the database driver's connection, already resolved: there
+	// is nothing here to look a name up in, so the connection itself is what
+	// the configuration carries.
 	Connection Connection
 
-	// LockConnection is the connection the database driver manages locks on. It
-	// answers config['lock_connection'].
+	// LockConnection is the connection the database driver manages locks on.
 	LockConnection Connection
 
-	// Table is the database driver's table. It answers config['table'].
+	// Table is the database driver's table.
 	Table string
 
-	// LockTable is the database driver's lock table. It answers
-	// config['lock_table']; empty means "cache_locks".
+	// LockTable is the database driver's lock table; empty means "cache_locks".
 	LockTable string
 
-	// Stores is the failover driver's ordered set of store names. It answers
-	// config['stores'].
+	// Stores is the failover driver's ordered set of store names.
 	Stores []string
 }
 
 // Creator builds a repository for a driver the manager does not know.
 //
-// It answers the Closure passed to CacheManager::extend(). It takes the manager
-// so a creator can reach the other stores -- which is what the failover driver
-// does -- and returns the finished repository, because a driver that needs a
-// store this package has never heard of also decides how to wrap it.
+// It takes the manager so a creator can reach the other stores -- which is what
+// the failover driver does -- and returns the finished repository, because a
+// driver that needs a store this package has never heard of also decides how to
+// wrap it.
 type Creator func(m *CacheManager, config StoreConfig) (*Repository, error)
 
 // CacheManager is every cache store an application has, by name.
 //
-// It answers Illuminate\Cache\CacheManager. It resolves a store the first time
-// it is asked for and keeps it, so Store("redis") called in forty places is one
-// connection and not forty.
+// It resolves a store the first time it is asked for and keeps it, so
+// Store("redis") called in forty places is one connection and not forty.
 //
-// It is not a container and it is not a facade (ADR 0001, ADR 0002). It holds a
-// Config that was built at wiring time, and the thing it hands back is an
-// ordinary *Repository that a caller could equally have built itself. What it
-// buys is the one place that knows what "the file store" means, so a second
-// module cannot decide it means a different directory.
+// It is not a container. It holds a Config that was built at wiring time, and
+// the thing it hands back is an ordinary *Repository that a caller could
+// equally have built itself. What it buys is the one place that knows what "the
+// file store" means, so a second module cannot decide it means a different
+// directory.
 //
-// The drivers it knows are array, file, database, null and failover -- Laravel's
-// list, less the ones this collection does not carry. Redis is not one of them:
-// the RESP store lives in arandu-io/kv and importing it here would put the
-// driver in every binary that caches anything. Register it with Extend, which is
-// what Extend is for -- and which is how Laravel's own packages add a driver too.
+// The drivers it builds are array, file, database, null and failover. Redis is
+// not one of them: the RESP store is hesape/redis, a separate module, so that
+// its driver ships only in the binaries that use it. Register it with Extend,
+// which is what Extend is for.
 //
-// Memo is not a driver either, in Laravel or here. It is a method, because a
-// memoized store is per request and a configuration is not.
+// Memo is not a driver either. It is a method, because a memoized store is per
+// request and a configuration is not.
 //
 // A CacheManager is safe for concurrent use.
 type CacheManager struct {
@@ -127,10 +116,6 @@ type CacheManager struct {
 }
 
 // NewCacheManager returns the manager over a configuration.
-//
-// It answers CacheManager::__construct(), which takes the application; this
-// takes the configuration, because the configuration is the only thing it ever
-// asked the application for.
 func NewCacheManager(config Config) *CacheManager {
 	return &CacheManager{
 		config:   config,
@@ -142,10 +127,9 @@ func NewCacheManager(config Config) *CacheManager {
 // Store returns the named store, wrapped in a repository, building it the first
 // time.
 //
-// It answers CacheManager::store(). An empty name means the default. The
-// repository is kept, so two callers asking for the same store get the same one
-// -- which matters for the memo store, whose whole value is that it is shared
-// for the length of a request.
+// An empty name means the default. The repository is kept, so two callers
+// asking for the same store get the same one -- which matters for the memo
+// store, whose whole value is that it is shared for the length of a request.
 func (m *CacheManager) Store(name string) (*Repository, error) {
 	if name == "" {
 		name = m.GetDefaultDriver()
@@ -174,23 +158,21 @@ func (m *CacheManager) Store(name string) (*Repository, error) {
 	return store, nil
 }
 
-// Driver is Store. It answers CacheManager::driver(), which Laravel implements
-// as "return $this->store($driver)".
+// Driver is Store under another name.
 func (m *CacheManager) Driver(driver string) (*Repository, error) { return m.Store(driver) }
 
 // Memo returns a repository that remembers, for as long as it is held, what the
 // named store already answered.
 //
-// It answers CacheManager::memo(). The repository is kept like any other, so
-// every caller asking for the same memo store shares one map -- which is the
-// point: four parts of one request asking for the same feature flag make one
-// round trip.
+// The repository is kept like any other, so every caller asking for the same
+// memo store shares one map -- which is the point: four parts of one request
+// asking for the same feature flag make one round trip.
 //
 // Hold it for a request or a job and let it go. One held for the life of the
 // process never forgets anything: see MemoizedStore.
 //
-// Its events are off, as they are in Laravel, because the store underneath
-// already fired them and a memoized hit is not a second cache hit.
+// Its events are off, because the store underneath already fired them and a
+// memoized hit is not a second cache hit.
 func (m *CacheManager) Memo(driver string) (*Repository, error) {
 	if driver == "" {
 		driver = m.GetDefaultDriver()
@@ -221,9 +203,8 @@ func (m *CacheManager) Memo(driver string) (*Repository, error) {
 
 // Resolve builds the named store, without keeping it.
 //
-// It answers CacheManager::resolve(), including the refusal: a name that is not
-// in the configuration is an error naming it, because the alternative is a cache
-// that silently does nothing.
+// A name that is not in the configuration is an error naming it, because the
+// alternative is a cache that silently does nothing.
 func (m *CacheManager) Resolve(name string) (*Repository, error) {
 	if name == "null" {
 		return m.Build(StoreConfig{Driver: "null", Name: "null"})
@@ -243,10 +224,9 @@ func (m *CacheManager) Resolve(name string) (*Repository, error) {
 
 // Build makes a repository out of one store's configuration.
 //
-// It answers CacheManager::build(). It is exported there and here for the same
-// reason: a store that exists for one job, built from a configuration nobody
-// wants to name, is a real thing -- Laravel calls it "ondemand", and so does
-// this when the configuration carries no name.
+// It is exported because a store that exists for one job, built from a
+// configuration nobody wants to name, is a real thing. A configuration carrying
+// no name is called "ondemand".
 func (m *CacheManager) Build(config StoreConfig) (*Repository, error) {
 	if config.Name == "" {
 		config.Name = "ondemand"
@@ -302,17 +282,16 @@ func (m *CacheManager) Build(config StoreConfig) (*Repository, error) {
 		config.NoEvents = true
 		return m.Repository(NewFailoverStore(m.events, config.Stores, stores...), config), nil
 	default:
-		return nil, fmt.Errorf("cache: the driver %q is not one this package builds. Register it with Extend, which is how the RESP store in arandu-io/kv arrives", config.Driver)
+		return nil, fmt.Errorf("cache: the driver %q is not one this package builds. Register it with Extend, which is how the RESP store in hesape/redis arrives", config.Driver)
 	}
 }
 
 // Repository wraps a store in a repository, with the events wired unless the
 // configuration turned them off.
 //
-// It answers CacheManager::repository(). It is exported in Laravel and here
-// because a driver registered with Extend has to be able to build the same kind
-// of repository the built-in ones do, and doing it by hand means getting the
-// event wiring right by hand.
+// It is exported because a driver registered with Extend has to be able to
+// build the same kind of repository the built-in ones do, and doing it by hand
+// means getting the event wiring right by hand.
 func (m *CacheManager) Repository(store Store, config StoreConfig) *Repository {
 	out := New(store).SetName(config.Name)
 
@@ -328,10 +307,9 @@ func (m *CacheManager) Repository(store Store, config StoreConfig) *Repository {
 
 // SetEventDispatcher sets the dispatcher new repositories are built with.
 //
-// It answers the protected CacheManager::setEventDispatcher(). It does not
-// touch the repositories already built: RefreshEventDispatcher does that, and
-// keeping the two apart is what lets an application wire the bus after the cache
-// without every store having been built with a nil one.
+// It does not touch the repositories already built: RefreshEventDispatcher does
+// that, and keeping the two apart is what lets an application wire the bus after
+// the cache without every store having been built with a nil one.
 func (m *CacheManager) SetEventDispatcher(d Dispatcher) *CacheManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -341,9 +319,9 @@ func (m *CacheManager) SetEventDispatcher(d Dispatcher) *CacheManager {
 
 // RefreshEventDispatcher re-sets the dispatcher on every store already built.
 //
-// It answers CacheManager::refreshEventDispatcher(). It is what an application
-// calls after the event bus exists: the stores resolved during boot were built
-// without one, and this is what gives it to them.
+// It is what an application calls after the event bus exists: the stores
+// resolved during boot were built without one, and this is what gives it to
+// them.
 func (m *CacheManager) RefreshEventDispatcher() *CacheManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -359,9 +337,8 @@ func (m *CacheManager) RefreshEventDispatcher() *CacheManager {
 
 // GetDefaultDriver is the store that is used when nobody names one.
 //
-// It answers CacheManager::getDefaultDriver(), including the fallback: an
-// application that configured no default gets "null", which caches nothing and
-// breaks nothing.
+// An application that configured no default gets "null", which caches nothing
+// and breaks nothing.
 func (m *CacheManager) GetDefaultDriver() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -374,9 +351,8 @@ func (m *CacheManager) GetDefaultDriver() string {
 
 // SetDefaultDriver sets it.
 //
-// It answers CacheManager::setDefaultDriver(). It does not forget the store that
-// was the default: call ForgetDriver for that, which is the same separation
-// Laravel has.
+// It does not forget the store that was the default: call ForgetDriver for
+// that.
 func (m *CacheManager) SetDefaultDriver(name string) *CacheManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -386,8 +362,7 @@ func (m *CacheManager) SetDefaultDriver(name string) *CacheManager {
 
 // ForgetDriver drops the named stores, so the next Store rebuilds them.
 //
-// It answers CacheManager::forgetDriver(). No names means the default one,
-// which is what "$name ??= $this->getDefaultDriver()" does.
+// No names means the default one.
 func (m *CacheManager) ForgetDriver(names ...string) *CacheManager {
 	if len(names) == 0 {
 		names = []string{m.GetDefaultDriver()}
@@ -401,11 +376,8 @@ func (m *CacheManager) ForgetDriver(names ...string) *CacheManager {
 	return m
 }
 
-// Purge drops one store, so the next Store rebuilds it.
-//
-// It answers CacheManager::purge(). It is ForgetDriver for one name, and it is
-// here because it is there: Laravel keeps both, and a Laravel developer reaching
-// for the one they know should find it.
+// Purge drops one store, so the next Store rebuilds it. It is ForgetDriver for
+// a single name. An empty name means the default one.
 func (m *CacheManager) Purge(name string) {
 	if name == "" {
 		name = m.GetDefaultDriver()
@@ -417,13 +389,13 @@ func (m *CacheManager) Purge(name string) {
 
 // Extend registers a driver this package does not know.
 //
-// It answers CacheManager::extend(). It is how the RESP store in arandu-io/kv
-// arrives, and how anything else does: the creator is called with the manager
-// and the configuration, and returns the finished repository.
+// It is how the RESP store in hesape/redis arrives -- that store is a separate
+// module, so registering it here is what keeps its driver out of binaries that
+// do not use it -- and how anything else does: the creator is called with the
+// manager and the configuration, and returns the finished repository.
 //
-// It replaces a creator of the same name rather than refusing, which is what the
-// PHP's assignment does -- so an application can override a built-in driver by
-// registering one with its name.
+// It replaces a creator of the same name rather than refusing, so an
+// application can override a built-in driver by registering one with its name.
 func (m *CacheManager) Extend(driver string, creator Creator) *CacheManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()

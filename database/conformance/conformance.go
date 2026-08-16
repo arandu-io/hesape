@@ -11,9 +11,9 @@
 // One suite rather than one per connector, for the same reason there is one
 // Repository contract: a claim that holds on SQLite and not on MySQL is not a
 // claim this framework can make. What is asserted here is the portable subset
-// itself -- the types, the keys and the round trips that ADR 0009 promises are
-// the same everywhere. It is what turns "swapping the driver duplicates
-// nothing" (RULE 11) from an assertion into a measurement.
+// itself -- the types, the keys and the round trips that are meant to be the
+// same everywhere. It is what turns "swapping the driver duplicates nothing"
+// from an assertion into a measurement.
 //
 // A connector's test calls Run with a DSN taken from the environment and skips
 // when it is empty, so `go test ./...` still passes with nothing installed:

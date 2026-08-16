@@ -6,12 +6,12 @@ import (
 	"time"
 )
 
-// MailerConfig is one entry of Laravel's config/mail.php "mailers" array.
+// MailerConfig is one configured mailer: which driver builds it, what that
+// driver needs, and the addresses it sends with.
 //
-// Illuminate reads an untyped array out of the container's config repository
-// and every driver picks the keys it knows. A struct is what that array is, and
-// it is typed here because a misspelt key in PHP is a transport that silently
-// falls back and a misspelt field in Go does not compile.
+// It is a struct rather than a map so that a misspelt key does not compile,
+// where a misspelt key in an untyped configuration is a transport that silently
+// falls back.
 type MailerConfig struct {
 	// Name is the key this mailer is configured under.
 	Name string
@@ -58,8 +58,6 @@ type MailerConfig struct {
 // An application fills one of these at boot and passes it to [NewMailManager].
 // The addresses here are defaults, not overrides -- a [MailerConfig] that names
 // its own From, ReplyTo, To or ReturnPath wins for that mailer.
-//
-// Answers Laravel's config/mail.php.
 type ManagerConfig struct {
 	// Default is the mailer used when nobody names one.
 	Default string
@@ -85,23 +83,19 @@ type ManagerConfig struct {
 // It runs once per mailer, the first time that mailer is resolved, and it may
 // call back into the manager: a failover creator reads the configurations of
 // the mailers it fails over to and builds each of them this way.
-//
-// Answers Illuminate\Mail\MailManager's create*Transport methods, as a value
-// rather than a method name.
 type TransportCreator func(cfg MailerConfig) (Transport, error)
 
-// MailManager is Illuminate\Mail\MailManager: every configured mailer, built on
-// demand and kept.
+// MailManager is every configured mailer, built on demand and kept.
 //
 // # Why the transports are registered rather than switched on
 //
-// Illuminate's createSymfonyTransport is a switch over method names, and each
-// arm constructs a transport class from the same namespace. Go would need this
-// package to import github.com/arandu-io/hesape/mail/transport, which imports
-// this one -- a cycle the compiler refuses. So the drivers register themselves:
-// transport.Register(manager) adds the seven this collection carries, and
-// Extend adds anybody else's under exactly the same mechanism. There is one way
-// to add a transport, and the built-in ones do not get a private door.
+// Constructing the transports by name here would need this package to import
+// github.com/arandu-io/hesape/mail/transport, which imports this one -- a cycle
+// the compiler refuses. So the drivers register themselves:
+// transport.Register(manager) adds the seven that package carries, and
+// [MailManager.Extend] adds anybody else's under exactly the same mechanism.
+// There is one way to add a transport, and the built-in ones do not get a
+// private door.
 type MailManager struct {
 	mu sync.Mutex
 
@@ -115,9 +109,9 @@ type MailManager struct {
 	creators map[string]TransportCreator
 }
 
-// NewMailManager is Illuminate's MailManager::__construct. It takes the
-// configuration and the view factory where PHP takes the application, because
-// ADR 0001 has no container to ask.
+// NewMailManager builds a manager over a configuration. The transports it can
+// hand out are the ones registered on it afterwards, and the dispatcher is
+// optional.
 func NewMailManager(config ManagerConfig, views Renderer, events Dispatcher) *MailManager {
 	return &MailManager{
 		config:   config,
@@ -129,10 +123,6 @@ func NewMailManager(config ManagerConfig, views Renderer, events Dispatcher) *Ma
 }
 
 // SetQueue wires the queue every mailer this manager builds pushes onto.
-//
-// SetQueue is Mailer::setQueue, applied to every mailer this manager resolves.
-// MailManager::resolve reaches the queue through the container in PHP (ADR
-// 0001).
 func (m *MailManager) SetQueue(q QueueFactory) *MailManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -142,10 +132,6 @@ func (m *MailManager) SetQueue(q QueueFactory) *MailManager {
 
 // SetMarkdown wires the markdown renderer every mailer this manager builds
 // uses.
-//
-// SetMarkdown has no PHP counterpart:
-// MailServiceProvider::registerMarkdownRenderer binds the renderer into the
-// container (ADR 0001, ADR 0002).
 func (m *MailManager) SetMarkdown(md *Markdown) *MailManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -161,8 +147,6 @@ func (m *MailManager) SetMarkdown(md *Markdown) *MailManager {
 // means a creator can call back into this manager: holding the lock across that
 // call is a deadlock, and it is the kind that only shows up in the one
 // configuration nobody tested.
-//
-// Mailer is MailManager::mailer.
 func (m *MailManager) Mailer(name string) (*Mailer, error) {
 	if name == "" {
 		name = m.GetDefaultDriver()
@@ -186,9 +170,7 @@ func (m *MailManager) Mailer(name string) (*Mailer, error) {
 	return built, nil
 }
 
-// Driver is Mailer under the name the rest of Illuminate's managers use.
-//
-// Driver is MailManager::driver.
+// Driver is [MailManager.Mailer] under the name the other managers use.
 func (m *MailManager) Driver(name string) (*Mailer, error) { return m.Mailer(name) }
 
 func (m *MailManager) resolve(name string) (*Mailer, error) {
@@ -199,10 +181,8 @@ func (m *MailManager) resolve(name string) (*Mailer, error) {
 	return m.Build(cfg)
 }
 
-// Build makes a mailer out of a configuration, which is Illuminate's on-demand
-// mailer when the configuration was never registered.
-//
-// Build is MailManager::build.
+// Build makes a mailer out of a configuration that was never registered, for
+// the one send that needs it. The mailer is returned rather than kept.
 func (m *MailManager) Build(cfg MailerConfig) (*Mailer, error) {
 	transport, err := m.CreateSymfonyTransport(cfg)
 	if err != nil {
@@ -228,12 +208,8 @@ func (m *MailManager) Build(cfg MailerConfig) (*Mailer, error) {
 	return built, nil
 }
 
-// CreateSymfonyTransport builds the transport a configuration names.
-//
-// Symfony in the name is Laravel's mailer library; what comes back is a
-// [Transport].
-//
-// CreateSymfonyTransport is MailManager::createSymfonyTransport.
+// CreateSymfonyTransport builds the [Transport] a configuration names, and
+// fails when no driver is registered under that name.
 func (m *MailManager) CreateSymfonyTransport(cfg MailerConfig) (Transport, error) {
 	if cfg.Transport == "" {
 		return nil, fmt.Errorf("mail: unsupported mail transport []")
@@ -251,10 +227,6 @@ func (m *MailManager) CreateSymfonyTransport(cfg MailerConfig) (Transport, error
 
 // ConfigFor is the configuration of a named mailer, and is what a composite
 // transport creator -- failover, round robin -- asks for to build its parts.
-//
-// ConfigFor is MailManager::getConfig, which is protected there and exported
-// here because a caller with no container has nowhere else to read a mailer's
-// configuration from.
 func (m *MailManager) ConfigFor(name string) (MailerConfig, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -295,8 +267,6 @@ func (m *MailManager) setGlobalAddresses(mailer *Mailer, cfg MailerConfig) {
 }
 
 // GetDefaultDriver is which mailer is used when nobody names one.
-//
-// GetDefaultDriver is MailManager::getDefaultDriver.
 func (m *MailManager) GetDefaultDriver() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -306,8 +276,6 @@ func (m *MailManager) GetDefaultDriver() string {
 func (m *MailManager) defaultDriver() string { return m.config.Default }
 
 // SetDefaultDriver changes which mailer is used when nobody names one.
-//
-// SetDefaultDriver is MailManager::setDefaultDriver.
 func (m *MailManager) SetDefaultDriver(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -316,8 +284,6 @@ func (m *MailManager) SetDefaultDriver(name string) {
 
 // Purge forgets one built mailer, so the next call builds it again. An empty
 // name means the default.
-//
-// Purge is MailManager::purge.
 func (m *MailManager) Purge(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -328,8 +294,6 @@ func (m *MailManager) Purge(name string) {
 }
 
 // Extend registers a transport driver under a name a configuration can ask for.
-//
-// Extend is MailManager::extend.
 func (m *MailManager) Extend(driver string, callback TransportCreator) *MailManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -338,8 +302,6 @@ func (m *MailManager) Extend(driver string, callback TransportCreator) *MailMana
 }
 
 // ForgetMailers forgets every built mailer.
-//
-// ForgetMailers is MailManager::forgetMailers.
 func (m *MailManager) ForgetMailers() *MailManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()

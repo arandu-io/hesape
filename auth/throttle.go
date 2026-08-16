@@ -50,8 +50,8 @@ const (
 	// ten guesses across a boundary -- five in the last instant of one window
 	// and five in the first instant of the next -- and five a minute after that.
 	// The same arithmetic as the route limiter, kept deliberately: a second,
-	// cleverer notion of "window" in the same framework is what RULE 9 refuses,
-	// and doubling five is not what makes an online guessing run work.
+	// cleverer notion of "window" in the same framework is a second thing to
+	// maintain, and doubling five is not what makes an online guessing run work.
 	SignInWindow = time.Minute
 )
 
@@ -94,17 +94,17 @@ const (
 //
 // So: a second interface, and deliberately not a second mechanism. The
 // in-memory implementation below is what the core ships; a kv-backed one has
-// this same shape, which is what makes it an adapter rather than a mode
-// (RULE 11). The context is on all three methods for that implementation's
-// sake -- it is the one that talks over a socket, and a sign-in form that
-// cannot give up on a wedged counter is a sign-in form that hangs.
+// this same shape, which is what makes it an adapter rather than a mode. The
+// context is on all three methods for that implementation's sake -- it is the
+// one that talks over a socket, and a sign-in form that cannot give up on a
+// wedged counter is a sign-in form that hangs.
 type SignInThrottle interface {
 	// Attempt records one sign-in attempt against this identity from this
 	// address and reports whether it may go ahead. A refused attempt costs
 	// nothing, so hammering a locked-out account does not extend the lockout.
 	//
 	// The tenant is part of the key: a rate limit shared across tenants is one
-	// customer's traffic locking another customer's users out (RULE 14).
+	// customer's traffic locking another customer's users out.
 	Attempt(ctx context.Context, tenant, identity, client string) (retryAfter time.Duration, ok bool)
 
 	// Refund gives back the unit Attempt took, for an attempt that never

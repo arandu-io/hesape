@@ -1,10 +1,3 @@
-// Package events mirrors Illuminate\Http\Client\Events.
-//
-// It holds the events dispatched during an HTTP client request lifecycle.
-//
-//	RequestSending.php
-//	ResponseReceived.php
-//	ConnectionFailed.php
 package events
 
 import "net/http"

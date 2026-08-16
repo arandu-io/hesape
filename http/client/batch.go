@@ -7,11 +7,9 @@ import (
 	"github.com/arandu-io/hesape/support/deferpkg"
 )
 
-// Batch mirrors Illuminate\Http\Client\Batch.
-//
-// It collects requests to send concurrently, with callbacks for
-// progress, error handling, and completion. The PHP version uses
-// Guzzle's Pool; this version uses goroutines.
+// Batch collects requests to send concurrently, with callbacks for
+// progress, error handling, and completion. It uses goroutines to send
+// them.
 type Batch struct {
 	factory     *Factory
 	requests    []batchRequest
@@ -102,8 +100,8 @@ func (b *Batch) Concurrency(limit int) *Batch {
 	return b
 }
 
-// Defer is Batch::defer: send the batch after the response has gone back to
-// the browser, rather than while it is waiting.
+// Defer sends the batch after the response has gone back to the browser,
+// rather than while it is waiting.
 //
 // The callback it hands back is the one the deferred-callback collection
 // invokes; nothing here runs it, which is what makes it deferred.

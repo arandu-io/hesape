@@ -76,11 +76,9 @@ func TestAlertDoesNotUppercaseTheEscapeSequences(t *testing.T) {
 	}
 }
 
-// TestAlertPaintsEveryColumnOfEveryLine: the PHP view is
-// `w-full mx-2 py-1 mt-1 bg-yellow text-black text-center uppercase`, so the
-// band is the terminal width less the two-column margin, it is three lines tall,
-// and the message sits in the middle of it. Painting only the message is what
-// made the alert a yellow word instead of a yellow box.
+// TestAlertPaintsEveryColumnOfEveryLine verifies the whole band is painted:
+// the terminal width less the two-column margin, three lines tall, with the
+// message centered in the middle one.
 func TestAlertPaintsEveryColumnOfEveryLine(t *testing.T) {
 	out := &recordingOutput{width: 40}
 	NewAlert(out, "").Render("something happened")
@@ -115,9 +113,8 @@ func TestAlertPaintsEveryColumnOfEveryLine(t *testing.T) {
 	}
 }
 
-// TestBulletListPaintsTheWholeLine: the PHP view is `<div class="text-gray
-// mx-2">⇂ element</div>`, so the gray covers the element as well as the mark.
-// Painting the mark alone left every element in the default colour.
+// TestBulletListPaintsTheWholeLine verifies the dim colour covers the whole
+// line, not just the leading mark.
 func TestBulletListPaintsTheWholeLine(t *testing.T) {
 	out := &recordingOutput{width: 80}
 	NewBulletList(out, "").Render([]string{"the first", "the second"})
@@ -135,10 +132,8 @@ func TestBulletListPaintsTheWholeLine(t *testing.T) {
 	}
 }
 
-// TestTwoColumnDetailWithoutASecondColumn: the view puts one ml-1 before the
-// dots and a second one before the value, so a line with no value spends five
-// columns on margins and not six. TwoColumnDetail("Cache", "") emitted 139 dots
-// where the PHP emits 140.
+// TestTwoColumnDetailWithoutASecondColumn verifies a line with no value
+// spends five columns on margins, not six.
 func TestTwoColumnDetailWithoutASecondColumn(t *testing.T) {
 	out := &recordingOutput{width: 150}
 	NewTwoColumnDetail(out, "").Render("Cache", "")
@@ -159,9 +154,8 @@ func TestTwoColumnDetailWithASecondColumn(t *testing.T) {
 	}
 }
 
-// TestWidthFallsBackToEightyWithoutATerminal: Symfony's Terminal answers 80 when
-// it cannot measure, and this answered 150 -- so a run with no terminal produced
-// a line seventy columns wider than the PHP's.
+// TestWidthFallsBackToEightyWithoutATerminal verifies a run with no terminal
+// falls back to a width of 80.
 func TestWidthFallsBackToEightyWithoutATerminal(t *testing.T) {
 	out := &recordingOutput{width: 0}
 	NewTwoColumnDetail(out, "").Render("Cache", "")
@@ -171,10 +165,8 @@ func TestWidthFallsBackToEightyWithoutATerminal(t *testing.T) {
 	}
 }
 
-// TestLineRefusesAnUnknownStyle: PHP indexes a four-entry array with the style
-// name, so an unknown one is a TypeError that ends the command. Rendering it as
-// an info line with a made-up title is a command that reports success in the
-// wrong colour and carries on.
+// TestLineRefusesAnUnknownStyle verifies an unknown style panics rather than
+// rendering with a made-up title.
 func TestLineRefusesAnUnknownStyle(t *testing.T) {
 	defer func() {
 		if recovered := recover(); recovered == nil {
@@ -196,9 +188,9 @@ func TestTheFourKnownStylesStillRender(t *testing.T) {
 	}
 }
 
-// TestRunTimeForHumans: PHP formats anything up to a second with two decimals
-// and cascades everything above it into the largest units that fit. This
-// reported 123ms for 123.456ms and 90.00s for a minute and a half.
+// TestRunTimeForHumans verifies formatRunTime formats anything up to a
+// second with two decimals and cascades everything above it into the
+// largest units that fit.
 func TestRunTimeForHumans(t *testing.T) {
 	for _, tc := range []struct {
 		elapsed time.Duration
@@ -218,9 +210,8 @@ func TestRunTimeForHumans(t *testing.T) {
 	}
 }
 
-// TestVisibleWidthOfPureEscapes: a string that is nothing but an escape sequence
-// takes no columns, and counting its runes is what put four phantom columns into
-// the dot arithmetic of a line whose value had already been reset.
+// TestVisibleWidthOfPureEscapes verifies a string that is nothing but an
+// escape sequence takes no columns.
 func TestVisibleWidthOfPureEscapes(t *testing.T) {
 	if got := visibleWidth(ansiReset); got != 0 {
 		t.Errorf("visibleWidth(reset) = %d, want 0", got)

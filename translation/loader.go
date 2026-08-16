@@ -19,9 +19,8 @@ import (
 type Lines map[string]string
 
 // AppNamespace is the namespace of the application's own lines, the one a key
-// with no "::" resolves in. Illuminate spells it "*" and so does this, because
-// the same string is the key of the loaded array and travels through
-// [Translator.AddLines].
+// with no "::" resolves in. It is the key the lines are stored under, and it
+// travels through [Translator.AddLines].
 const AppNamespace = "*"
 
 // JSONGroup is the group the per locale JSON catalogue is loaded under. It is
@@ -29,45 +28,40 @@ const AppNamespace = "*"
 // loaded["*"]["*"][locale] -- which is where [Translator.Get] looks first.
 const JSONGroup = "*"
 
-// Loader mirrors Illuminate\Contracts\Translation\Loader: the thing that
-// answers with the lines of a group in a locale.
+// Loader answers with the lines of a group in a locale.
 //
-// It returns nil for a group it does not carry, which is not an error, and is
-// what PHP's empty array means: a catalogue is not required to translate
-// everything, and the [Translator] falls through to the fallback locale and then
-// to the English lines that ship here.
+// It returns nil for a group it does not carry, which is not an error: a
+// catalogue is not required to translate everything, and the [Translator] falls
+// through to the fallback locale and then to the English lines that ship here.
 //
-// AddNamespace and AddJSONPath are on the contract because [Translator] forwards
-// to them; a loader with no notion of a path implements them as no-ops, exactly
-// as [ArrayLoader] does in PHP.
+// AddNamespace and AddJSONPath are on the contract because [Translator]
+// forwards to them; a loader with no notion of a path implements them as
+// no-ops, as [ArrayLoader] does.
 type Loader interface {
-	// Load answers load($locale, $group, $namespace). An empty namespace means
-	// AppNamespace, and the pair ("*", "*") asks for the JSON catalogue of the
-	// locale.
+	// Load reads one group of one locale. An empty namespace means
+	// AppNamespace, and the pair ("*", "*") asks for the JSON catalogue of
+	// the locale.
 	Load(locale, group, namespace string) Lines
 
 	// AddNamespace answers addNamespace(): it points a namespace at the place
 	// its lines are loaded from.
 	AddNamespace(namespace, hint string)
 
-	// AddJSONPath answers addJsonPath(). The name is addJsonPath in PHP; Go
-	// spells an initialism in one case, and this package writes JSON.
+	// AddJSONPath registers a directory holding per locale JSON catalogues.
 	AddJSONPath(path string)
 
-	// Namespaces answers namespaces(): every registered namespace, mapped to
-	// its hint.
+	// Namespaces is every registered namespace, mapped to its hint.
 	Namespaces() map[string]string
 }
 
-// ArrayLoader is Illuminate's Translation\ArrayLoader: a catalogue written in
-// Go rather than read from files. It is what a test translates against.
+// ArrayLoader is a catalogue written in Go rather than read from files. It is
+// what a test translates against.
 //
-// It is safe for concurrent use, which PHP's is not: one loader answers every
-// request here, and [ArrayLoader.AddMessages] may be called while it does.
+// It is safe for concurrent use: one loader answers every request, and
+// [ArrayLoader.AddMessages] may be called while it does.
 type ArrayLoader struct {
 	mu sync.RWMutex
-	// messages is namespace -> locale -> group -> lines, which is the shape
-	// PHP's $messages array has.
+	// messages is namespace -> locale -> group -> lines.
 	messages map[string]map[string]map[string]Lines
 }
 
@@ -77,8 +71,8 @@ func NewArrayLoader() *ArrayLoader {
 	return &ArrayLoader{messages: make(map[string]map[string]map[string]Lines)}
 }
 
-// Load answers ArrayLoader::load(). An empty namespace is read as
-// [AppNamespace], as PHP's `$namespace ?: '*'` reads null.
+// Load reads one group of one locale. An empty namespace is read as
+// [AppNamespace].
 func (l *ArrayLoader) Load(locale, group, namespace string) Lines {
 	if namespace == "" {
 		namespace = AppNamespace
@@ -96,8 +90,8 @@ func (l *ArrayLoader) AddNamespace(namespace, hint string) {}
 // same reason.
 func (l *ArrayLoader) AddJSONPath(path string) {}
 
-// AddMessages answers ArrayLoader::addMessages(). It stores one group of one
-// locale, and returns the loader so that calls chain as PHP's $this does.
+// AddMessages stores one group of one locale, and returns the loader so that
+// calls chain.
 //
 // An empty namespace means [AppNamespace]. The lines are copied, so the caller
 // keeps no way to write into a loader that requests are reading.
@@ -120,18 +114,16 @@ func (l *ArrayLoader) AddMessages(locale, group string, messages Lines, namespac
 	return l
 }
 
-// Namespaces answers ArrayLoader::namespaces(), which is always empty.
+// Namespaces is always empty for an [ArrayLoader].
 func (l *ArrayLoader) Namespaces() map[string]string { return map[string]string{} }
 
-// FileLoader is Illuminate's Translation\FileLoader: a catalogue read from a
-// filesystem.
+// FileLoader is a catalogue read from a filesystem.
 //
 // A group lives at <path>/<locale>/<group>.json, a namespaced group at the
 // hint registered for the namespace, an override of a namespaced group at
 // <path>/vendor/<namespace>/<locale>/<group>.json, and the JSON catalogue of a
-// locale at <path>/<locale>.json. Those are the four shapes PHP reads, with
-// .json where PHP has .php -- a language file is data, and Go has no `require`
-// to run one.
+// locale at <path>/<locale>.json. Those are the four shapes it reads. A
+// language file is data, never code.
 //
 // Every path is read through one fs.FS. A caller reading the project's lang
 // directory passes os.DirFS; the English lines that ship with this package are
@@ -189,8 +181,8 @@ func (l *FileLoader) Load(locale, group, namespace string) Lines {
 	return l.loadNamespaced(locale, group, namespace)
 }
 
-// loadNamespaced answers FileLoader::loadNamespaced(). A namespace with no hint
-// has no lines, which is PHP's empty array.
+// loadNamespaced reads a group registered under a namespace. A namespace with
+// no hint has no lines.
 func (l *FileLoader) loadNamespaced(locale, group, namespace string) Lines {
 	l.mu.RLock()
 	hint, registered := l.hints[namespace]
@@ -274,18 +266,17 @@ func (l *FileLoader) Namespaces() map[string]string {
 	return maps.Clone(l.hints)
 }
 
-// AddPath answers FileLoader::addPath(). The path is read the first time a
-// group under it is asked for; a file there that does not parse is skipped,
-// because PHP's addPath returns void and there is nowhere here to report from.
-// [NewFileLoader] is where a malformed catalogue is an error.
+// AddPath registers a directory of catalogues. The path is read the first time
+// a group under it is asked for; a file there that does not parse is skipped,
+// because there is nowhere here to report it from. [NewFileLoader] is where a
+// malformed catalogue is an error.
 func (l *FileLoader) AddPath(p string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.paths = append(l.paths, p)
 }
 
-// AddJSONPath answers FileLoader::addJsonPath(), for the per locale JSON
-// catalogue. PHP spells it addJsonPath; Go spells an initialism in one case.
+// AddJSONPath registers a directory holding per locale JSON catalogues.
 func (l *FileLoader) AddJSONPath(p string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -335,7 +326,7 @@ func (l *FileLoader) read(name string) Lines {
 }
 
 // parse reads one catalogue file and flattens it. An absent file is no lines
-// and no error, which is PHP's `if ($this->files->exists(...))`.
+// and no error.
 func (l *FileLoader) parse(name string) (Lines, error) {
 	raw, err := fs.ReadFile(l.files, name)
 	if err != nil {
@@ -470,9 +461,8 @@ func flatten(out Lines, prefix string, in map[string]any) error {
 // over the ones after it.
 //
 // It is how the English lines that ship with this package are answered after
-// the application catalogue: Illuminate registers the framework's lang
-// directory as a second path on the FileLoader, and this is that, for a
-// [Translator] built over a loader of any kind.
+// the application catalogue, for a [Translator] built over a loader of any
+// kind.
 type chain []Loader
 
 func (c chain) Load(locale, group, namespace string) Lines {
@@ -511,8 +501,7 @@ func (c chain) Namespaces() map[string]string {
 	return out
 }
 
-// AddPath forwards to every loader of the chain that has one, which is what
-// Translator::addPath does through PHP's dynamic dispatch.
+// AddPath forwards to every loader of the chain that has one.
 func (c chain) AddPath(p string) {
 	for _, l := range c {
 		if adder, ok := l.(interface{ AddPath(string) }); ok {

@@ -9,8 +9,7 @@ import (
 )
 
 func TestPerMinutesTakesTheWindowFirst(t *testing.T) {
-	// The argument order Laravel gives perMinutes, and the one that catches
-	// everybody out: the window comes first.
+	// The argument order that catches everybody out: the window comes first.
 	l := cache.PerMinutes(5, 100)
 
 	if l.Decay != 5*time.Minute {

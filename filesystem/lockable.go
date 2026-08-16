@@ -9,7 +9,7 @@ import (
 )
 
 // ErrLockTimeout is returned when a lock was asked for without blocking and
-// somebody else holds it. It is Illuminate's LockTimeoutException.
+// somebody else holds it.
 var ErrLockTimeout = errors.New("filesystem: the file is locked by another process")
 
 // ErrNoFileLocking is returned on a platform whose kernel this package has no
@@ -19,7 +19,7 @@ var ErrNoFileLocking = errors.New("filesystem: file locking is not available on 
 
 // LockableFile is a file held open with an advisory lock around it.
 //
-// It is Illuminate's LockableFile, and it exists for one job: two processes
+// It exists for one job: two processes
 // writing the same file -- a session, a cache entry, a compiled view -- where a
 // reader must see either the old contents or the new ones and never half of
 // each. [Filesystem.SharedGet] and [Filesystem.Put] with lock are the two
@@ -41,9 +41,8 @@ type LockableFile struct {
 // NewLockableFile opens a file, creating the directory that holds it when the
 // mode asks for creation.
 //
-// mode is the flag set os.OpenFile takes -- os.O_RDONLY to read, and
-// os.O_CREATE|os.O_RDWR to write -- which is where PHP's "r"/"c+" strings map
-// to. Illuminate's constructor is the same two cases.
+// mode is the flag set os.OpenFile takes: os.O_RDONLY to read, and
+// os.O_CREATE|os.O_RDWR to write.
 func NewLockableFile(path string, mode int) (*LockableFile, error) {
 	if mode&(os.O_CREATE) != 0 {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

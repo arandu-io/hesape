@@ -105,9 +105,8 @@ func TestACookieRenamedIsNotReadAsTheOtherOne(t *testing.T) {
 }
 
 func TestAValueThatDoesNotDecryptLeavesTheRequestWithoutThatCookie(t *testing.T) {
-	// PHP sets the cookie to null, which reads back as present and empty.
-	// Dropping it is the answer that cannot be mistaken for a cookie whose
-	// value really is "".
+	// Dropping the cookie is the answer that cannot be mistaken for a cookie
+	// whose value really is "".
 	t.Cleanup(middleware.FlushState)
 
 	encrypt := middleware.NewEncryptCookies(newEncrypter(t, key))
@@ -146,8 +145,8 @@ func TestAValueEncryptedUnderAnotherApplicationsKeyIsDropped(t *testing.T) {
 
 func TestAValueWrittenUnderAPreviousKeyIsStillRead(t *testing.T) {
 	// The key was rotated and the browser still holds what the old key wrote.
-	// GetAllKeys is what CookieValuePrefix::validate walks, so the prefix has
-	// to match under the old key too.
+	// GetAllKeys returns every key Validate walks, so the prefix has to match
+	// under the old key too.
 	t.Cleanup(middleware.FlushState)
 
 	old := middleware.NewEncryptCookies(newEncrypter(t, otherKey))
@@ -254,8 +253,8 @@ func TestExceptDropsDuplicatesAndFlushStatePutsItBack(t *testing.T) {
 func TestSerializedIsFalseAndIgnoresTheName(t *testing.T) {
 	t.Cleanup(middleware.FlushState)
 
-	// The flag is per application, not per cookie, which is why the PHP takes
-	// a name it never reads.
+	// The flag is per application, not per cookie: Serialized takes a name it
+	// never reads.
 	if middleware.Serialized("one") || middleware.Serialized("two") {
 		t.Error("serialized() = true, and no released method sets $serialize")
 	}
@@ -294,10 +293,10 @@ func TestTheCookieAttributesSurviveEncryption(t *testing.T) {
 }
 
 func TestAQueuedCookieIsEncryptedToo(t *testing.T) {
-	// Laravel's global stack has EncryptCookies outside
-	// AddQueuedCookiesToResponse, so what the jar queues is encrypted on the
-	// way past. If the order were the other way round the queue would go out
-	// in the clear, which is the mistake this test is here to catch.
+	// EncryptCookies goes outside AddQueuedCookiesToResponse, so what the jar
+	// queues is encrypted on the way past. If the order were the other way
+	// round the queue would go out in the clear, which is the mistake this
+	// test is here to catch.
 	t.Cleanup(middleware.FlushState)
 
 	jar := cookie.NewCookieJar()

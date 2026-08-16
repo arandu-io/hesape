@@ -252,8 +252,8 @@ func TestNameBasenameDirnameAndExtension(t *testing.T) {
 	if got := f.Dirname("/tmp/x/report.pdf"); got != "/tmp/x" {
 		t.Fatalf("dirname: %q", got)
 	}
-	// Illuminate answers "pdf" and not ".pdf", which is what a caller comparing
-	// against a configured list has written down.
+	// "pdf" and not ".pdf", which is what a caller comparing against a
+	// configured list has written down.
 	if got := f.Extension("/tmp/report.pdf"); got != "pdf" {
 		t.Fatalf("extension: %q", got)
 	}

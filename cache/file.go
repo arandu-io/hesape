@@ -17,17 +17,13 @@ import (
 
 // Filesystem is the slice of a file system FileStore needs.
 //
-// It answers Illuminate\Filesystem\Filesystem, method for method, for the
-// handful of calls FileStore makes -- and it is declared here rather than
-// imported because hesape/filesystem is being written in parallel and a store
-// that could not compile until it landed would block on it. When it lands, this
-// interface is what its Filesystem satisfies.
+// It is the handful of calls FileStore makes, and it is declared here rather
+// than imported so that this store does not depend on hesape/filesystem to
+// compile. The Filesystem of that module satisfies this interface.
 //
-// PutIfAbsent is the one method with no counterpart there. Laravel gets the
-// same guarantee out of LockableFile::getExclusiveLock() -- open the file, take
-// an exclusive lock, look, write -- which is four calls describing one
-// operation. The operation is "create it only if nobody else did", the file
-// system offers it atomically, and FileStore.Add is nothing but that.
+// PutIfAbsent is the one method that is not an ordinary file operation: it is
+// "create it only if nobody else did", the file system offers it atomically,
+// and FileStore.Add is nothing but that.
 type Filesystem interface {
 	// Get returns the contents of a file.
 	Get(path string) ([]byte, error)
@@ -81,8 +77,7 @@ func (LocalFilesystem) Get(path string) ([]byte, error) { return os.ReadFile(pat
 // Put writes contents to a file through a temporary one, then renames it.
 //
 // The rename is what makes it atomic: a reader arriving mid-write sees the old
-// file or the new one, never half of the new one. Laravel passes `true` to
-// Filesystem::put for the same reason, which is its lock flag.
+// file or the new one, never half of the new one.
 func (LocalFilesystem) Put(path string, contents []byte, mode fs.FileMode) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
 	if err != nil {
@@ -210,23 +205,21 @@ func (LocalFilesystem) Chmod(path string, mode fs.FileMode) error { return os.Ch
 
 // FileStore is the cache on disk.
 //
-// It answers Illuminate\Cache\FileStore. It is the store for a single machine
-// that wants its cache to survive a restart, and for several processes on that
-// machine to share one -- which is exactly what ArrayStore cannot do. It is
-// still not the store for N replicas: a Forget on one machine leaves the others
-// serving the old value until the ttl runs out, and when that matters the store
-// is the RESP one in arandu-io/kv.
+// It is the store for a single machine that wants its cache to survive a
+// restart, and for several processes on that machine to share one -- which is
+// exactly what ArrayStore cannot do. It is still not the store for N replicas:
+// a Forget on one machine leaves the others serving the old value until the ttl
+// runs out, and when that matters the store is the RESP one in hesape/redis, a
+// separate module registered through CacheManager.Extend.
 //
 // # The layout
 //
 // One file per entry, at directory/xx/yy/<sha1 of the key>, where xx and yy are
-// the first four characters of that hash. The two levels are Laravel's, and
-// they are there because a hundred thousand files in one directory is a
-// directory nothing can list.
+// the first four characters of that hash. The two levels are there because a
+// hundred thousand files in one directory is a directory nothing can list.
 //
-// The file begins with ten digits of unix expiry, which is Laravel's header
-// exactly. What follows it is not: three digits of millisecond, eight hex digits
-// of key length, then the key, then the value.
+// The file begins with ten digits of unix expiry, then three digits of
+// millisecond, eight hex digits of key length, then the key, then the value.
 //
 // The key is stored because Store.Flush takes a prefix -- one tenant's slice of
 // one namespace -- and a hashed path cannot be matched against one. Without it,
@@ -243,10 +236,10 @@ type FileStore struct {
 
 	// mu serializes the read-modify-write of Increment within this process.
 	//
-	// Across processes it is not serialized, and neither is Laravel's: two
-	// machines incrementing the same counter in the same instant can lose one of
-	// the two. A counter that has to be exact belongs in a store that counts
-	// atomically, which is what the RESP store does.
+	// Across processes it is not serialized: two of them incrementing the same
+	// counter in the same instant can lose one of the two. A counter that has
+	// to be exact belongs in a store that counts atomically, which is what the
+	// RESP store does.
 	mu sync.Mutex
 }
 
@@ -260,9 +253,8 @@ var (
 
 // NewFileStore returns a store over a directory.
 //
-// It answers FileStore::__construct(). Pass LocalFilesystem{} for files unless
-// something is standing in for the disk. A permission of zero leaves whatever
-// the umask produced, which is what a null $filePermission does in Laravel.
+// Pass LocalFilesystem{} for files unless something is standing in for the
+// disk. A permission of zero leaves whatever the umask produced.
 func NewFileStore(files Filesystem, directory string, permission fs.FileMode) *FileStore {
 	if files == nil {
 		files = LocalFilesystem{}
@@ -272,8 +264,7 @@ func NewFileStore(files Filesystem, directory string, permission fs.FileMode) *F
 
 // Path is the file a key is stored in.
 //
-// It answers FileStore::path(). It is exported there and here for the same
-// reason: something eventually has to go and look.
+// It is exported because something eventually has to go and look.
 func (s *FileStore) Path(key string) string {
 	sum := sha1.Sum([]byte(key))
 	hash := hex.EncodeToString(sum[:])
@@ -292,20 +283,16 @@ func (s *FileStore) lockPath(key string) string {
 }
 
 // GetFilesystem returns the file system this store writes through.
-//
-// It answers FileStore::getFilesystem().
 func (s *FileStore) GetFilesystem() Filesystem { return s.files }
 
 // GetDirectory is the working directory of the cache.
-//
-// It answers FileStore::getDirectory().
 func (s *FileStore) GetDirectory() string { return s.directory }
 
 // SetDirectory sets the working directory of the cache and returns the store.
 //
-// It answers FileStore::setDirectory(). Like the PHP it mutates: a store is
-// built at wiring time and read afterwards, and the deriving that Repository
-// does is for the object an application passes around, which this is not.
+// It mutates rather than derives: a store is built at wiring time and read
+// afterwards, and the deriving that Repository does is for the object an
+// application passes around, which this is not.
 func (s *FileStore) SetDirectory(directory string) *FileStore {
 	s.directory = directory
 	return s
@@ -313,24 +300,19 @@ func (s *FileStore) SetDirectory(directory string) *FileStore {
 
 // SetLockDirectory sets where locks are kept and returns the store.
 //
-// It answers FileStore::setLockDirectory(). Point it somewhere other than the
-// cache directory and FlushLocks becomes possible: see HasSeparateLockStore.
+// Point it somewhere other than the cache directory and FlushLocks becomes
+// possible: see HasSeparateLockStore.
 func (s *FileStore) SetLockDirectory(directory string) *FileStore {
 	s.lockDir = directory
 	return s
 }
 
-// GetPrefix is the empty string.
-//
-// It answers FileStore::getPrefix(), and the answer is the same as Laravel's
-// for the same reason: the prefixing that matters -- tenant and namespace --
-// happens in Repository, where it can be got right once (RULE 14).
+// GetPrefix is the empty string: the prefixing that matters -- tenant and
+// namespace -- happens in Repository, where it can be got right once.
 func (s *FileStore) GetPrefix() string { return "" }
 
-// HasSeparateLockStore reports whether locks live apart from entries.
-//
-// It answers FileStore::hasSeparateLockStore(): a lock directory was set, and
-// it is not the cache directory.
+// HasSeparateLockStore reports whether locks live apart from entries: a lock
+// directory was set, and it is not the cache directory.
 func (s *FileStore) HasSeparateLockStore() bool {
 	return s.lockDir != "" && s.lockDir != s.directory
 }
@@ -347,9 +329,9 @@ func (s *FileStore) Get(_ context.Context, key string) ([]byte, error) {
 
 // payload reads an entry and returns its value and how long it has left.
 //
-// It answers FileStore::getPayload(). A file that cannot be read, cannot be
-// parsed, or has expired is a miss -- and the last two also delete it, because
-// a file nothing can use is a file nothing will ever remove.
+// A file that cannot be read, cannot be parsed, or has expired is a miss --
+// and the last two also delete it, because a file nothing can use is a file
+// nothing will ever remove.
 func (s *FileStore) payload(key string) ([]byte, time.Duration, error) {
 	path := s.Path(key)
 
@@ -374,9 +356,6 @@ func (s *FileStore) payload(key string) ([]byte, time.Duration, error) {
 }
 
 // Many returns the stored bytes for several keys at once.
-//
-// It answers the many() of the RetrievesMultipleKeys trait: every key asked for
-// is in the result, and the misses carry nil.
 func (s *FileStore) Many(ctx context.Context, keys []string) (map[string][]byte, error) {
 	out := make(map[string][]byte, len(keys))
 	for _, key := range keys {
@@ -402,9 +381,6 @@ func (s *FileStore) Put(_ context.Context, key string, value []byte, ttl time.Du
 }
 
 // PutMany stores several values under one ttl.
-//
-// It answers the putMany() of RetrievesMultipleKeys, and like the trait it is a
-// loop: a directory has nothing to roll back to.
 func (s *FileStore) PutMany(ctx context.Context, values map[string][]byte, ttl time.Duration) error {
 	for key, value := range values {
 		if err := s.Put(ctx, key, value, ttl); err != nil {
@@ -424,8 +400,8 @@ func (s *FileStore) write(path, key string, value []byte, ttl time.Duration) err
 
 // ensureDirectory creates the shard a path lives in.
 //
-// It answers FileStore::ensureCacheDirectoryExists(), including the second
-// chmod: two levels are created at once, so both of them are checked.
+// The permission is applied twice: two levels are created at once, so both of
+// them are checked.
 func (s *FileStore) ensureDirectory(path string) error {
 	dir := filepath.Dir(path)
 	if s.files.Exists(dir) {
@@ -443,12 +419,10 @@ func (s *FileStore) ensureDirectory(path string) error {
 
 // Add stores value only if the key is absent, and reports whether it did.
 //
-// It answers FileStore::add(), and it is atomic across processes: the entry is
-// written to a temporary file and linked into place, and exactly one of N
-// racers gets the link.
+// It is atomic across processes: the entry is written to a temporary file and
+// linked into place, and exactly one of N racers gets the link.
 //
-// An entry that is there but expired is replaced, which is the branch Laravel
-// reaches after reading the expiry through its exclusive lock.
+// An entry that is there but expired is replaced.
 func (s *FileStore) Add(_ context.Context, key string, value []byte, ttl time.Duration) (bool, error) {
 	if ttl <= 0 {
 		return false, ErrNoTTL
@@ -487,19 +461,17 @@ func (s *FileStore) Add(_ context.Context, key string, value []byte, ttl time.Du
 
 // Forever stores a value with no expiry the caller has to think about.
 //
-// It answers FileStore::forever(), where the expiry is written as 9999999999 --
-// a date in 2286. Here it is a century out, which is the same idea with the same
-// arithmetic behind it: see Repository.Forever.
+// The expiry is written a century out rather than left off: see
+// Repository.Forever.
 func (s *FileStore) Forever(ctx context.Context, key string, value []byte) error {
 	return s.Put(ctx, key, value, foreverTTL)
 }
 
 // Increment adds delta to the counter under key and returns the new value.
 //
-// It answers FileStore::increment(), including the part that is easy to miss:
-// the counter keeps the deadline it was created with. Laravel writes it back
-// with $raw['time'], the seconds remaining, and refreshing it instead would make
-// a fixed window one that never closes.
+// The part that is easy to miss: the counter keeps the deadline it was created
+// with. The remaining time is written back unchanged, because refreshing it
+// instead would make a fixed window one that never closes.
 func (s *FileStore) Increment(_ context.Context, key string, delta int64, ttl time.Duration) (int64, error) {
 	if ttl <= 0 {
 		return 0, ErrNoTTL
@@ -529,17 +501,14 @@ func (s *FileStore) Increment(_ context.Context, key string, delta int64, ttl ti
 	return n, nil
 }
 
-// Decrement subtracts delta from the counter under key.
-//
-// It answers FileStore::decrement(), which is increment with the sign turned
-// round.
+// Decrement subtracts delta from the counter under key. It is Increment with
+// the sign turned round.
 func (s *FileStore) Decrement(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error) {
 	return s.Increment(ctx, key, -delta, ttl)
 }
 
-// Touch gives a live entry a new expiry and reports whether there was one.
-//
-// It answers FileStore::touch(). An absent key is false and is not created.
+// Touch gives a live entry a new expiry and reports whether there was one. An
+// absent key is false and is not created.
 func (s *FileStore) Touch(_ context.Context, key string, ttl time.Duration) (bool, error) {
 	if ttl <= 0 {
 		return false, ErrNoTTL
@@ -562,9 +531,9 @@ func (s *FileStore) Touch(_ context.Context, key string, ttl time.Duration) (boo
 
 // Forget removes a key, present or not.
 //
-// It answers FileStore::forget(), including the companion entry: a flexible
-// value keeps its timestamp under a second key, and leaving that behind would
-// have the next reader age a value that is no longer there.
+// The companion entry goes with it: a flexible value keeps its timestamp under
+// a second key, and leaving that behind would have the next reader age a value
+// that is no longer there.
 func (s *FileStore) Forget(_ context.Context, key string) error {
 	if err := s.files.Delete(s.Path(key)); err != nil {
 		return err
@@ -574,11 +543,9 @@ func (s *FileStore) Forget(_ context.Context, key string) error {
 
 // Flush removes every entry whose key begins with prefix.
 //
-// Laravel's flush() deletes every directory under the cache directory, because
-// its store holds one application's cache and nothing else. This one holds every
-// tenant's, so it reads each entry's key and removes the ones in the prefix --
-// which is what the key in the file header is for. An empty prefix removes
-// everything, which is Laravel's flush() exactly.
+// This store holds every tenant's cache, so it reads each entry's key and
+// removes the ones in the prefix -- which is what the key in the file header is
+// for. An empty prefix removes everything.
 func (s *FileStore) Flush(_ context.Context, prefix string) error {
 	if !s.files.IsDirectory(s.directory) {
 		return nil
@@ -594,7 +561,7 @@ func (s *FileStore) Flush(_ context.Context, prefix string) error {
 	})
 }
 
-// flushEverything removes the shard directories, which is Laravel's flush().
+// flushEverything removes the shard directories under root.
 func (s *FileStore) flushEverything(root string) error {
 	dirs, err := s.files.Directories(root)
 	if err != nil {
@@ -610,10 +577,9 @@ func (s *FileStore) flushEverything(root string) error {
 
 // FlushLocks releases every lock this store holds.
 //
-// It answers FileStore::flushLocks(), including the refusal: a store keeping its
-// locks in the cache directory cannot empty the first without emptying the
-// second, and says so instead of doing it. Call SetLockDirectory to make it
-// possible.
+// A store keeping its locks in the cache directory cannot empty the first
+// without emptying the second, and says so instead of doing it. Call
+// SetLockDirectory to make it possible.
 func (s *FileStore) FlushLocks(_ context.Context) error {
 	if !s.HasSeparateLockStore() {
 		return fmt.Errorf("%w: flushing locks needs a lock directory separate from the cache directory, and this store has none", ErrUnsupported)
@@ -733,15 +699,11 @@ func (s *FileStore) CurrentOwner(_ context.Context, key string) (string, error) 
 }
 
 // Lock returns a handle on a named lock. It does not touch the store.
-//
-// It answers FileStore::lock().
 func (s *FileStore) Lock(name string, ttl time.Duration, owner string) *Lock {
 	return &Lock{store: s, name: name, ttl: ttl, owner: owner, held: owner != ""}
 }
 
 // RestoreLock returns a handle on a lock owner already holds.
-//
-// It answers FileStore::restoreLock().
 func (s *FileStore) RestoreLock(name, owner string) *Lock { return s.Lock(name, 0, owner) }
 
 // fileHeader is the fixed part of an entry file: ten digits of unix expiry,
@@ -751,18 +713,16 @@ const fileHeader = 10 + 3 + 8
 
 // encodeFileEntry lays out one entry.
 //
-// The expiry comes first and is ten digits wide, which is Laravel's header
-// exactly -- and which stays ten digits until the year 2286. Anything past that
-// is clamped, as FileStore::expiration() clamps it, because an eleven-digit
-// header would be a file the previous version of the binary reads as a different
+// The expiry comes first and is ten digits wide, which stays ten digits until
+// the year 2286. Anything past that is clamped, because an eleven-digit header
+// would be a file the previous version of the binary reads as a different
 // entry.
 //
-// The three digits after it are the millisecond, and they are not Laravel's. Its
-// file store keeps whole seconds, so a ttl of eighty milliseconds is anything
-// from expired-on-arrival to alive for a second -- and the tests that pin the
-// behaviour of a cache are all written in fractions of a second, because nobody
-// waits an hour for a suite. The precision is here so that a store on disk
-// expires when it was told to.
+// The three digits after it are the millisecond. Without them a ttl of eighty
+// milliseconds would be anything from expired-on-arrival to alive for a second
+// -- and the tests that pin the behaviour of a cache are all written in
+// fractions of a second, because nobody waits an hour for a suite. The
+// precision is here so that a store on disk expires when it was told to.
 func encodeFileEntry(key string, value []byte, expires time.Time) []byte {
 	unix := expires.Unix()
 	millis := expires.Nanosecond() / int(time.Millisecond)

@@ -18,22 +18,10 @@ import (
 
 // Route is the minimal view of the matched route the request needs.
 //
-// The concrete type is hesape/routing.Route, which is being written by another
-// agent. The interface is declared here so that hesape/http does not import
-// hesape/routing, which would be a cycle: routing builds the request, and the
-// request needs the route's name and parameters, not the router itself.
-//
-// What is here is the half the PHP Request touches:
-//
-//	RouteName  answers to Route::getName()
-//	Parameter  answers to Route::parameter($name, $default)
-//	Parameters answers to Route::parameters()
-//	Methods    answers to Route::methods()
-//	Domain     answers to Route::getDomain()
-//	URI        answers to Route::uri()
-//
-// routing.Route currently exposes RouteName and Pattern only. The rest is
-// reported in stillMissing.
+// The concrete type is hesape/routing.Route. The interface is declared here
+// so that hesape/http does not import hesape/routing, which would be a
+// cycle: routing builds the request, and the request needs the route's name
+// and parameters, not the router itself.
 type Route interface {
 	RouteName() string
 	Parameter(name string, def ...any) any
@@ -43,31 +31,30 @@ type Route interface {
 	URI() string
 }
 
-// Request mirrors Illuminate\Http\Request. It wraps a *net/http.Request and
-// answers the methods a controller action reaches for: the input the body and
-// the query string carried, the headers, the cookies, the files, the session
-// that survived the redirect, and the route that matched.
+// Request wraps a *net/http.Request and provides the methods a controller
+// action reaches for: the input the body and the query string carried, the
+// headers, the cookies, the files, the session that survived the redirect,
+// and the route that matched.
 //
-// The tenant NEVER comes from the request (REGRA 14). There is no method here
-// that reads a tenant id out of a path parameter, a query string, a header or a
-// body field, and adding one would be the most direct route to a cross-tenant
-// leak. The tenant is on the auth.Grant the policy mints, and the repository
-// reads it from there. If a method here seems to offer tenant access, it does
-// not -- it is here because the PHP has it, and the doc says what it is for.
+// The tenant NEVER comes from the request. There is no method here that
+// reads a tenant id out of a path parameter, a query string, a header or a
+// body field, and adding one would be the most direct route to a
+// cross-tenant leak. The tenant is on the auth.Grant the policy mints, and
+// the repository reads it from there. If a method here seems to offer
+// tenant access, it does not.
 //
-// A note on names (ADR 0044): every method is the PHP method's name with the
-// initial uppercase Go requires. Input is Input, never Get. Old is Old, never
-// Previous. Initialisms are upper case: FullURL, IsJSON. The PHP throws and
-// this returns (T, error) where it does.
+// A note on names: method names use the initial uppercase Go requires.
+// Input is Input, never Get. Old is Old, never Previous. Initialisms are
+// upper case: FullURL, IsJSON. Where a failure can happen, the method
+// returns (T, error).
 type Request struct {
-	// request is the standard library request this wraps. It is unexported so
-	// that the Illuminate surface is the only surface; a caller that needs the
-	// raw request reaches it through RawRequest.
+	// request is the standard library request this wraps. It is unexported
+	// so that Request's own methods are the only surface; a caller that
+	// needs the raw request reaches it through RawRequest.
 	request *stdhttp.Request
 
 	// session is the session store the middleware set. Old, Flash and Flush
-	// read it; when it is nil they answer as the PHP does without a session:
-	// Old returns the default, Flash panics.
+	// read it; when it is nil, Old returns the default and Flash panics.
 	session *session.Store
 
 	// json is the decoded JSON body, cached after the first read. The body of
@@ -76,20 +63,20 @@ type Request struct {
 	json       map[string]any
 	jsonParsed bool
 
-	// userResolver answers to $userResolver: the closure the auth middleware
-	// installs, which returns the signed-in user.
+	// userResolver is the closure the auth middleware installs, which
+	// returns the signed-in user.
 	userResolver func(guard string) any
 
-	// routeResolver answers to $routeResolver: the closure the router
-	// installs, which returns the matched route.
+	// routeResolver is the closure the router installs, which returns the
+	// matched route.
 	routeResolver func() Route
 
-	// precognitive answers to $attributes->get('precognitive', false): whether
-	// this request was marked as a precognitive validation request.
+	// precognitive is whether this request was marked as a precognitive
+	// validation request.
 	precognitive bool
 
-	// cachedAccept and acceptableContentTypes cache the Accept header and its
-	// parsed form, the way Symfony's Request does.
+	// cachedAccept and acceptableContentTypes cache the Accept header and
+	// its parsed form.
 	cachedAccept           string
 	acceptableContentTypes []string
 }
@@ -100,16 +87,15 @@ func NewRequest(r *stdhttp.Request) *Request {
 	return &Request{request: r}
 }
 
-// RawRequest returns the *net/http.Request this wraps, for the rare case that
-// needs something the Illuminate surface does not cover. It is not the common
-// path: the methods on Request are what a controller should reach for.
+// RawRequest returns the *net/http.Request this wraps, for the rare case
+// that needs something Request's own methods do not cover. It is not the
+// common path: the methods on Request are what a controller should reach
+// for.
 func (r *Request) RawRequest() *stdhttp.Request { return r.request }
 
-// CreateFrom answers to Request::createFrom: a new Request built from another,
-// sharing its query, body, headers, session and resolvers. It is what a
-// middleware that needs a modified copy of the request uses; in Go the more
-// common pattern is r.Clone(), but the PHP name is kept for the developer who
-// looks for it.
+// CreateFrom is a new Request built from another, sharing its query, body,
+// headers, session and resolvers. It is what a middleware that needs a
+// modified copy of the request uses.
 func CreateFrom(from *Request) *Request {
 	out := &Request{
 		request:       from.request,
@@ -121,16 +107,16 @@ func CreateFrom(from *Request) *Request {
 	return out
 }
 
-// Method answers to Request::method: the HTTP method, upper case.
+// Method is the HTTP method, upper case.
 func (r *Request) Method() string { return r.request.Method }
 
-// IsMethod answers to Request::isMethod: case-insensitive method match.
+// IsMethod reports a case-insensitive method match.
 func (r *Request) IsMethod(method string) bool {
 	return strings.EqualFold(r.request.Method, method)
 }
 
-// Path answers to Request::path: the path without leading or trailing slashes,
-// "/" when the path is empty.
+// Path is the path without leading or trailing slashes, "/" when the path
+// is empty.
 func (r *Request) Path() string {
 	pattern := strings.Trim(r.request.URL.Path, "/")
 	if pattern == "" {
@@ -139,7 +125,7 @@ func (r *Request) Path() string {
 	return pattern
 }
 
-// DecodedPath answers to Request::decodedPath: the path, URL-decoded.
+// DecodedPath is the path, URL-decoded.
 func (r *Request) DecodedPath() string {
 	decoded, err := url.PathUnescape(r.Path())
 	if err != nil {
@@ -148,8 +134,8 @@ func (r *Request) DecodedPath() string {
 	return decoded
 }
 
-// Segment answers to Request::segment: the nth segment of the path (1-based),
-// or default when the index is out of range.
+// Segment is the nth segment of the path (1-based), or default when the
+// index is out of range.
 func (r *Request) Segment(index int, def ...string) string {
 	segments := r.Segments()
 	if index < 1 || index > len(segments) {
@@ -161,8 +147,7 @@ func (r *Request) Segment(index int, def ...string) string {
 	return segments[index-1]
 }
 
-// Segments answers to Request::segments: the non-empty parts of the decoded
-// path, split on "/".
+// Segments is the non-empty parts of the decoded path, split on "/".
 func (r *Request) Segments() []string {
 	decoded := r.DecodedPath()
 	parts := strings.Split(decoded, "/")
@@ -175,15 +160,14 @@ func (r *Request) Segments() []string {
 	return out
 }
 
-// URL answers to Request::url: the request URL without the query string. It is
-// the address a link inside the page uses, so that the application keeps working
-// behind a proxy, on a staging host and on somebody's laptop.
+// URL is the request URL without the query string. It is the address a
+// link inside the page uses, so that the application keeps working behind a
+// proxy, on a staging host and on somebody's laptop.
 //
-// The PHP builds this from scheme + host + path; the Go *http.Request carries
-// scheme and host in URL when it was parsed from a full target, and in Host
-// when it arrived over the wire. Both are checked, so a test that builds a
-// request from "http://example.com/path" and a server that builds one from
-// "/path" both get the right answer.
+// *http.Request carries scheme and host in URL when it was parsed from a
+// full target, and in Host when it arrived over the wire. Both are checked,
+// so a test that builds a request from "http://example.com/path" and a
+// server that builds one from "/path" both get the right answer.
 func (r *Request) URL() string {
 	scheme := r.request.URL.Scheme
 	host := r.request.URL.Host
@@ -201,8 +185,7 @@ func (r *Request) URL() string {
 	return strings.TrimRight(uri, "/")
 }
 
-// FullURL answers to Request::fullUrl: the full URL, scheme and host included,
-// with the query string.
+// FullURL is the full URL, scheme and host included, with the query string.
 func (r *Request) FullURL() string {
 	scheme := r.request.URL.Scheme
 	if scheme == "" {
@@ -214,8 +197,8 @@ func (r *Request) FullURL() string {
 	return scheme + "://" + r.request.Host + r.request.URL.RequestURI()
 }
 
-// FullURLWithQuery answers to Request::fullUrlWithQuery: the full URL with the
-// given query parameters merged into the existing ones.
+// FullURLWithQuery is the full URL with the given query parameters merged
+// into the existing ones.
 func (r *Request) FullURLWithQuery(query map[string]string) string {
 	values := r.request.URL.Query()
 	for k, v := range query {
@@ -233,8 +216,7 @@ func (r *Request) FullURLWithQuery(query map[string]string) string {
 	return base + separator + encoded
 }
 
-// FullURLWithoutQuery answers to Request::fullUrlWithoutQuery: the full URL
-// without the given query parameters.
+// FullURLWithoutQuery is the full URL without the given query parameters.
 func (r *Request) FullURLWithoutQuery(keys ...string) string {
 	values := r.request.URL.Query()
 	for _, key := range keys {
@@ -248,14 +230,13 @@ func (r *Request) FullURLWithoutQuery(keys ...string) string {
 	return base + "?" + encoded
 }
 
-// Root answers to Request::root: the root URL, scheme and host, without a
-// trailing slash.
+// Root is the root URL, scheme and host, without a trailing slash.
 func (r *Request) Root() string {
 	return strings.TrimRight(r.SchemeAndHttpHost(), "/")
 }
 
-// Is answers to Request::is: whether the decoded path matches any of the
-// patterns. "*" is the only wildcard.
+// Is reports whether the decoded path matches any of the patterns. "*" is
+// the only wildcard.
 func (r *Request) Is(patterns ...string) bool {
 	decoded := r.DecodedPath()
 	for _, pattern := range patterns {
@@ -266,8 +247,8 @@ func (r *Request) Is(patterns ...string) bool {
 	return false
 }
 
-// RouteIs answers to Request::routeIs: whether the route name matches any of
-// the patterns. Returns false when no route is set.
+// RouteIs reports whether the route name matches any of the patterns.
+// Returns false when no route is set.
 func (r *Request) RouteIs(patterns ...string) bool {
 	route := r.matchedRoute()
 	if route == nil {
@@ -282,8 +263,8 @@ func (r *Request) RouteIs(patterns ...string) bool {
 	return false
 }
 
-// FullURLIs answers to Request::fullUrlIs: whether the full URL matches any of
-// the patterns. "*" is the only wildcard.
+// FullURLIs reports whether the full URL matches any of the patterns. "*"
+// is the only wildcard.
 func (r *Request) FullURLIs(patterns ...string) bool {
 	full := r.FullURL()
 	for _, pattern := range patterns {
@@ -294,7 +275,7 @@ func (r *Request) FullURLIs(patterns ...string) bool {
 	return false
 }
 
-// Host answers to Request::host: the host name, without the port.
+// Host is the host name, without the port.
 func (r *Request) Host() string {
 	host := r.request.Host
 	if h, _, err := net.SplitHostPort(host); err == nil {
@@ -303,12 +284,11 @@ func (r *Request) Host() string {
 	return host
 }
 
-// HTTPHost answers to Request::httpHost: the host as the browser sent it, port
-// included when the browser sent one.
+// HTTPHost is the host as the browser sent it, port included when the
+// browser sent one.
 func (r *Request) HTTPHost() string { return r.request.Host }
 
-// SchemeAndHttpHost answers to Request::schemeAndHttpHost: scheme + "://" +
-// host.
+// SchemeAndHttpHost is scheme + "://" + host.
 func (r *Request) SchemeAndHttpHost() string {
 	scheme := "http"
 	if r.request.TLS != nil {
@@ -317,23 +297,23 @@ func (r *Request) SchemeAndHttpHost() string {
 	return scheme + "://" + r.request.Host
 }
 
-// Secure answers to Request::secure: whether the request was over TLS.
+// Secure reports whether the request was over TLS.
 func (r *Request) Secure() bool { return r.request.TLS != nil }
 
-// Ajax answers to Request::ajax: whether the request was made by XMLHttpRequest.
-// htmx sends this header too; see WantsJSON for why htmx is deliberately
-// excluded there.
+// Ajax reports whether the request was made by XMLHttpRequest. htmx sends
+// this header too; see WantsJSON for why htmx is deliberately excluded
+// there.
 func (r *Request) Ajax() bool {
 	return r.request.Header.Get("X-Requested-With") == "XMLHttpRequest"
 }
 
-// PJAX answers to Request::pjax: whether the request carries the X-PJAX header.
+// PJAX reports whether the request carries the X-PJAX header.
 func (r *Request) PJAX() bool {
 	return r.request.Header.Get("X-PJAX") != ""
 }
 
-// PreferSafeContent answers to Symfony's isPreferSafeContent: whether the
-// Prefer header asks for safe content.
+// PreferSafeContent reports whether the Prefer header asks for safe
+// content.
 func (r *Request) PreferSafeContent() bool {
 	prefer := r.request.Header.Get("Prefer")
 	for _, part := range strings.Split(prefer, ",") {
@@ -348,8 +328,8 @@ func (r *Request) PreferSafeContent() bool {
 	return false
 }
 
-// IP answers to Request::ip: the client address, without the port. Behind a
-// proxy it is whatever the trust-proxies middleware wrote onto RemoteAddr.
+// IP is the client address, without the port. Behind a proxy it is
+// whatever the trust-proxies middleware wrote onto RemoteAddr.
 func (r *Request) IP() string {
 	addr := r.request.RemoteAddr
 	if host, _, err := net.SplitHostPort(addr); err == nil {
@@ -386,15 +366,14 @@ func ForwardedForFrom(ctx context.Context) []string {
 	return chain
 }
 
-// IPs answers to Request::ips: the chain of client addresses, nearest hop
-// first. With no proxy in front, this is a list of one.
+// IPs is the chain of client addresses, nearest hop first. With no proxy in
+// front, this is a list of one.
 //
-// It is Symfony's getClientIps, which Illuminate's ips() delegates to: the
-// X-Forwarded-For entries plus the address the request actually came from,
-// with our own proxies removed, reversed so that ips()[0] is ip(). It used to
-// return the one address and no chain, so behind a proxy sending
-// "X-Forwarded-For: 1.1.1.1, 2.2.2.2" it answered with a single element where
-// the PHP answers with two. The doc said "the chain of client addresses" and
+// It is the X-Forwarded-For entries plus the address the request actually
+// came from, with our own proxies removed, reversed so that IPs()[0] is
+// IP(). It used to return the one address and no chain, so behind a proxy
+// sending "X-Forwarded-For: 1.1.1.1, 2.2.2.2" it answered with a single
+// element instead of two: the doc said "the chain of client addresses" and
 // there was never a chain.
 //
 // Only the first entry is trustworthy. See [WithForwardedFor].
@@ -411,14 +390,14 @@ func (r *Request) IPs() []string {
 	return []string{ip}
 }
 
-// UserAgent answers to Request::userAgent: the User-Agent header, or empty.
+// UserAgent is the User-Agent header, or empty.
 func (r *Request) UserAgent() string {
 	return r.request.Header.Get("User-Agent")
 }
 
-// BearerToken answers to Request::bearerToken: the token of an Authorization:
-// Bearer header, or empty. The scheme is compared case-insensitively (RFC 9110)
-// and the value is trimmed.
+// BearerToken is the token of an Authorization: Bearer header, or empty.
+// The scheme is compared case-insensitively (RFC 9110) and the value is
+// trimmed.
 func (r *Request) BearerToken() string {
 	header := r.request.Header.Get("Authorization")
 	position := strings.Index(strings.ToLower(header), "bearer ")
@@ -432,8 +411,8 @@ func (r *Request) BearerToken() string {
 	return strings.TrimSpace(token)
 }
 
-// Header answers to Request::header: the first value of a header, or default
-// when the header is absent. The name is canonicalised by net/http.
+// Header is the first value of a header, or default when the header is
+// absent. The name is canonicalised by net/http.
 func (r *Request) Header(name string, def ...string) string {
 	value := r.request.Header.Get(name)
 	if value != "" {
@@ -445,15 +424,15 @@ func (r *Request) Header(name string, def ...string) string {
 	return ""
 }
 
-// HasHeader answers to Request::hasHeader: whether a header is present,
-// including when its value is empty.
+// HasHeader reports whether a header is present, including when its value
+// is empty.
 func (r *Request) HasHeader(name string) bool {
 	return len(r.request.Header.Values(name)) > 0
 }
 
-// Server answers to Request::server: a server variable, or default. The common
-// CGI-style keys are mapped from the request; an unknown HTTP_* key falls back
-// to the corresponding header.
+// Server is a server variable, or default. The common CGI-style keys are
+// mapped from the request; an unknown HTTP_* key falls back to the
+// corresponding header.
 func (r *Request) Server(key string, def ...string) string {
 	value := r.serverVar(key)
 	if value != "" {
@@ -503,8 +482,7 @@ func (r *Request) serverVar(key string) string {
 	return ""
 }
 
-// Cookie answers to Request::cookie: the value of a cookie, or default when the
-// browser sent none.
+// Cookie is the value of a cookie, or default when the browser sent none.
 func (r *Request) Cookie(name string, def ...string) string {
 	cookie, err := r.request.Cookie(name)
 	if err == nil {
@@ -516,13 +494,13 @@ func (r *Request) Cookie(name string, def ...string) string {
 	return ""
 }
 
-// HasCookie answers to Request::hasCookie: whether a cookie is present.
+// HasCookie reports whether a cookie is present.
 func (r *Request) HasCookie(name string) bool {
 	_, err := r.request.Cookie(name)
 	return err == nil
 }
 
-// Keys answers to Request::keys: the keys of all input and files, merged.
+// Keys is the keys of all input and files, merged.
 func (r *Request) Keys() []string {
 	input := r.inputMap()
 	files := r.allFilesMap()
@@ -543,9 +521,8 @@ func (r *Request) Keys() []string {
 	return out
 }
 
-// Merge answers to Request::merge: merge the given input into the request's
-// input source, overwriting existing keys. Returns the request, as the PHP
-// returns $this.
+// Merge merges the given input into the request's input source, overwriting
+// existing keys. Returns the request, so calls can chain.
 func (r *Request) Merge(input map[string]any) *Request {
 	source := r.inputSource()
 	for k, v := range input {
@@ -555,8 +532,8 @@ func (r *Request) Merge(input map[string]any) *Request {
 	return r
 }
 
-// MergeIfMissing answers to Request::mergeIfMissing: merge the given input only
-// for keys that are missing from the request.
+// MergeIfMissing merges the given input only for keys that are missing from
+// the request.
 func (r *Request) MergeIfMissing(input map[string]any) *Request {
 	source := r.inputSource()
 	for k, v := range input {
@@ -568,7 +545,7 @@ func (r *Request) MergeIfMissing(input map[string]any) *Request {
 	return r
 }
 
-// Replace answers to Request::replace: replace the input source entirely.
+// Replace replaces the input source entirely.
 func (r *Request) Replace(input map[string]any) *Request {
 	r.replaceInputSource(input)
 	return r
@@ -599,11 +576,11 @@ func (r *Request) replaceInputSource(source map[string]any) {
 	r.request.Form = values
 }
 
-// ToArray answers to Request::toArray: all input and files as a map.
+// ToArray is all input and files as a map.
 func (r *Request) ToArray() map[string]any { return r.All() }
 
-// Json answers to Request::json: the decoded JSON body. With a key, returns the
-// value at the dotted path; without, returns the whole payload.
+// Json is the decoded JSON body. With a key, returns the value at the
+// dotted path; without, returns the whole payload.
 func (r *Request) Json(key string, def ...any) any {
 	payload := r.jsonPayload()
 	if key == "" {
@@ -615,7 +592,7 @@ func (r *Request) Json(key string, def ...any) any {
 	return dataGet(payload, key, nil)
 }
 
-// SetJson answers to Request::setJson: replace the cached JSON payload.
+// SetJson replaces the cached JSON payload.
 func (r *Request) SetJson(payload map[string]any) *Request {
 	r.json = payload
 	r.jsonParsed = true
@@ -645,9 +622,8 @@ func (r *Request) jsonPayload() map[string]any {
 	return r.json
 }
 
-// Fingerprint answers to Request::fingerprint: a unique hash of the route
-// methods, domain, URI and client IP. Panics when no route is set, as the PHP
-// throws RuntimeException.
+// Fingerprint is a unique hash of the route methods, domain, URI and client
+// IP. Panics when no route is set.
 func (r *Request) Fingerprint() string {
 	route := r.matchedRoute()
 	if route == nil {
@@ -662,8 +638,8 @@ func sha1Hex(s string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// User answers to Request::user: the authenticated user, via the resolver the
-// auth middleware installed. Returns nil when no resolver is set.
+// User is the authenticated user, via the resolver the auth middleware
+// installed. Returns nil when no resolver is set.
 func (r *Request) User(guard ...string) any {
 	if r.userResolver == nil {
 		return nil
@@ -675,14 +651,13 @@ func (r *Request) User(guard ...string) any {
 	return r.userResolver(g)
 }
 
-// SetUserResolver answers to Request::setUserResolver.
+// SetUserResolver sets the resolver User calls.
 func (r *Request) SetUserResolver(resolver func(guard string) any) *Request {
 	r.userResolver = resolver
 	return r
 }
 
-// GetUserResolver answers to Request::getUserResolver: the installed resolver,
-// or a no-op when none was set.
+// GetUserResolver is the installed resolver, or a no-op when none was set.
 func (r *Request) GetUserResolver() func(guard string) any {
 	if r.userResolver == nil {
 		return func(string) any { return nil }
@@ -690,10 +665,10 @@ func (r *Request) GetUserResolver() func(guard string) any {
 	return r.userResolver
 }
 
-// Route answers to Request::route: the matched route, or a specific parameter
-// from it. With no arguments, returns the Route. With a string argument,
-// returns the parameter of that name from the route. With a default, returns
-// the default when the parameter is absent.
+// Route is the matched route, or a specific parameter from it. With no
+// arguments, returns the Route. With a string argument, returns the
+// parameter of that name from the route. With a default, returns the
+// default when the parameter is absent.
 //
 // Returns nil when no resolver is set.
 func (r *Request) Route(args ...any) any {
@@ -719,14 +694,13 @@ func (r *Request) matchedRoute() Route {
 	return r.routeResolver()
 }
 
-// SetRouteResolver answers to Request::setRouteResolver.
+// SetRouteResolver sets the resolver Route calls.
 func (r *Request) SetRouteResolver(resolver func() Route) *Request {
 	r.routeResolver = resolver
 	return r
 }
 
-// GetRouteResolver answers to Request::getRouteResolver: the installed
-// resolver, or a no-op when none was set.
+// GetRouteResolver is the installed resolver, or a no-op when none was set.
 func (r *Request) GetRouteResolver() func() Route {
 	if r.routeResolver == nil {
 		return func() Route { return nil }
@@ -734,11 +708,10 @@ func (r *Request) GetRouteResolver() func() Route {
 	return r.routeResolver
 }
 
-// HasSession answers to Request::hasSession: whether a session store was set.
+// HasSession reports whether a session store was set.
 func (r *Request) HasSession() bool { return r.session != nil }
 
-// Session answers to Request::session: the session store. Panics when none is
-// set, as the PHP throws RuntimeException.
+// Session is the session store. Panics when none is set.
 func (r *Request) Session() *session.Store {
 	if r.session == nil {
 		panic("http: session store not set on request")
@@ -746,31 +719,32 @@ func (r *Request) Session() *session.Store {
 	return r.session
 }
 
-// SetSession answers to Request::setLaravelSession.
+// SetSession sets the session store.
 func (r *Request) SetSession(s *session.Store) *Request {
 	r.session = s
 	return r
 }
 
-// SetPrecognitive marks the request as precognitive, the way the PHP sets the
-// attribute the IsPrecognitive reader checks.
+// SetPrecognitive marks the request as precognitive, which IsPrecognitive
+// then reports.
 func (r *Request) SetPrecognitive() *Request {
 	r.precognitive = true
 	return r
 }
 
-// IsPrecognitive answers to Request::isPrecognitive.
+// IsPrecognitive reports whether the request was marked as a precognitive
+// validation request.
 func (r *Request) IsPrecognitive() bool { return r.precognitive }
 
-// IsAttemptingPrecognition answers to Request::isAttemptingPrecognition:
-// whether the Precognition header is "true".
+// IsAttemptingPrecognition reports whether the Precognition header is
+// "true".
 func (r *Request) IsAttemptingPrecognition() bool {
 	return r.request.Header.Get("Precognition") == "true"
 }
 
-// FilterPrecognitiveRules answers to Request::filterPrecognitiveRules: when the
-// Precognition-Validate-Only header is present, returns only the rules whose
-// attribute matches one of its patterns; otherwise returns the rules unchanged.
+// FilterPrecognitiveRules returns only the rules whose attribute matches one
+// of the Precognition-Validate-Only header's patterns, when that header is
+// present; otherwise it returns the rules unchanged.
 func (r *Request) FilterPrecognitiveRules(rules map[string]any) map[string]any {
 	if !r.HasHeader("Precognition-Validate-Only") {
 		return rules
@@ -796,37 +770,27 @@ func (r *Request) shouldValidatePrecognitiveAttribute(attribute string, patterns
 	return false
 }
 
-// Prefetch answers to Request::prefetch: whether the request is a browser
-// prefetch.
+// Prefetch reports whether the request is a browser prefetch.
 func (r *Request) Prefetch() bool {
 	return strings.EqualFold(r.serverVar("HTTP_X_MOZ"), "prefetch") ||
 		strings.EqualFold(r.request.Header.Get("Purpose"), "prefetch") ||
 		strings.EqualFold(r.request.Header.Get("Sec-Purpose"), "prefetch")
 }
 
-// Instance answers to Request::instance: the request itself. It exists for API
-// parity with the PHP; in Go the caller already has the value.
+// Instance is the request itself.
 func (r *Request) Instance() *Request { return r }
 
-// URI answers to Request::uri: the URI of the request. The PHP returns a
-// Uri instance; Go has none, so it returns the full URL string, which is what
-// a caller uses it for.
+// URI is the full URL string.
 func (r *Request) URI() string { return r.FullURL() }
 
-// Capture answers to Request::capture: build a request from the PHP globals.
-// Go has no globals to read from; a request arrives already built as a
-// *http.Request. This is here for API parity and returns NewRequest called on
-// the given *http.Request.
+// Capture returns NewRequest called on the given *http.Request.
 func Capture(r *stdhttp.Request) *Request { return NewRequest(r) }
 
-// CreateFromBase answers to Request::createFromBase: build an Illuminate
-// request from a base request. In Go there is no Symfony base to convert from,
-// so it is NewRequest under the PHP name.
+// CreateFromBase returns NewRequest called on the given *http.Request.
 func CreateFromBase(r *stdhttp.Request) *Request { return NewRequest(r) }
 
-// Duplicate answers to Request::duplicate: a copy of the request with optional
-// overrides for query, post, cookies and server. Nil arguments keep the
-// original.
+// Duplicate is a copy of the request with optional overrides for query,
+// post, cookies and server. Nil arguments keep the original.
 func (r *Request) Duplicate(query, post, cookies, server map[string]any) *Request {
 	out := CreateFrom(r)
 	if query != nil {
@@ -847,9 +811,9 @@ func (r *Request) Duplicate(query, post, cookies, server map[string]any) *Reques
 	return out
 }
 
-// SetRequestLocale answers to Request::setRequestLocale. The locale is stored
-// on the request for the view layer to read. It is a string because Go has no
-// locale type, and the view layer reads it through the same string.
+// SetRequestLocale stores the locale on the request for the view layer to
+// read. It is a string because Go has no locale type, and the view layer
+// reads it through the same string.
 func (r *Request) SetRequestLocale(locale string) *Request {
 	if r.request == nil {
 		return r
@@ -861,7 +825,8 @@ func (r *Request) SetRequestLocale(locale string) *Request {
 	return r
 }
 
-// SetDefaultRequestLocale answers to Request::setDefaultRequestLocale.
+// SetDefaultRequestLocale stores the default locale on the request, for the
+// view layer to fall back to.
 func (r *Request) SetDefaultRequestLocale(locale string) *Request {
 	if r.request == nil {
 		return r
@@ -871,13 +836,11 @@ func (r *Request) SetDefaultRequestLocale(locale string) *Request {
 	return r
 }
 
-// GetSession answers to Request::getSession: the session store. Panics when
-// none is set, as the PHP throws SessionNotFoundException. It is Session()
-// under the PHP name the Symfony interface declares.
+// GetSession is the session store. Panics when none is set. It is an alias
+// for Session.
 func (r *Request) GetSession() *session.Store { return r.Session() }
 
-// SetLaravelSession answers to Request::setLaravelSession. It is SetSession
-// under the PHP name.
+// SetLaravelSession is an alias for SetSession.
 func (r *Request) SetLaravelSession(s *session.Store) *Request { return r.SetSession(s) }
 
 // requestLocaleKey and defaultRequestLocaleKey are the context keys for the

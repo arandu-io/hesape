@@ -1,7 +1,7 @@
 package mail
 
-// MessageSending is Illuminate\Mail\Events\MessageSending: fired before the
-// transport is asked to do anything, and the one event a listener can refuse.
+// MessageSending is fired before the transport is asked to do anything, and is
+// the one event a listener can refuse.
 //
 // A listener that answers false to [Dispatcher.Until] stops the message. That
 // is what a "do not e-mail this address" list is, and what a staging
@@ -13,8 +13,8 @@ type MessageSending struct {
 	Data any
 }
 
-// MessageSent is Illuminate\Mail\Events\MessageSent: fired after the transport
-// accepted the message. Nobody can refuse it -- it already happened.
+// MessageSent is fired after the transport accepted the message. Nobody can
+// refuse it -- it already happened.
 type MessageSent struct {
 	// Sent is the receipt, including the provider's identifier for the message.
 	Sent SentMessage
@@ -22,11 +22,6 @@ type MessageSent struct {
 	Data any
 }
 
-// GetOriginalMessage is what was sent. Illuminate reaches it through a __get
-// that turns $event->message into $this->sent->getOriginalMessage(); PHP magic
-// accessors have no Go twin, so the method carries the name of the call it
-// forwarded to.
-//
-// GetOriginalMessage is MessageSent::__get, whose one supported key is
-// 'message': the message as it was before the transport touched it.
+// GetOriginalMessage is the message as it was before the transport touched it,
+// and is nil when the receipt was built without one.
 func (e MessageSent) GetOriginalMessage() *Message { return e.Sent.Message }

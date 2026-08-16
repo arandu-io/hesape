@@ -9,16 +9,9 @@
 // which is why they are constants here rather than string literals at the four
 // places that would otherwise spell them.
 //
-// The files it answers to, in the clone at
-// laravel_illuminate/bus/Events (Laravel 13, illuminate/bus ^13.0):
-//
-//	BatchCanceled.php   -> BatchCancelled, NewBatchCancelled
-//	BatchDispatched.php -> BatchDispatched, NewBatchDispatched
-//	BatchFinished.php   -> BatchFinished, NewBatchFinished
-//
-// In Illuminate each of the three carries the whole Batch object. Here the
-// payload is the batch's identity and counters: an outbox row is JSON, and the
-// callbacks a Batch holds are jobs rather than values a listener could run.
+// The payload of each is the batch's identity and its counters, not the whole
+// batch: an outbox row is JSON, and the callbacks a batch holds are jobs rather
+// than values a listener could run.
 package events
 
 import (
@@ -30,9 +23,8 @@ import (
 // The three names. Dotted and lowercase, like every other event in the
 // collection.
 //
-// Cancelled is spelled with two Ls. Laravel's file is BatchCanceled with one,
-// which is the American spelling of a word Laravel spells the British way
-// everywhere else; the collection picks one spelling and this is it.
+// Cancelled is spelled with two Ls, which is the spelling the collection uses
+// everywhere.
 const (
 	// BatchDispatched is published when a batch's jobs have been queued.
 	BatchDispatched = "batch.dispatched"

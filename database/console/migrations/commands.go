@@ -12,11 +12,9 @@ import (
 
 // Deps is what the migration commands need to do their work.
 //
-// In PHP each command takes its collaborators through the constructor and the
-// container fills them in. There is no container (ADR 0001), so the
-// collaborators are a value the application builds where it wires everything
-// else -- which is also what makes every command below testable with a fake
-// migrator and no database.
+// The collaborators are a value the application builds where it wires
+// everything else, which is also what makes every command below testable with a
+// fake migrator and no database.
 type Deps struct {
 	// Migrator is the migrator the commands drive.
 	Migrator *migrations.Migrator
@@ -40,13 +38,11 @@ type Deps struct {
 	Wipe func(ctx context.Context, connection string) error
 }
 
-// Commands answers the ten commands of
-// Illuminate\Database\Console\Migrations, as values the console registry takes.
+// Commands answers the migration commands as values the console registry takes.
 //
-// PHP discovers commands by scanning a namespace; here they are a slice,
-// because the listing and the compiler should read the same thing -- a command
-// missing from it does not exist, and one in it with a broken Run does not
-// build.
+// They are a slice rather than something discovered, because the listing and
+// the compiler should read the same thing -- a command missing from it does not
+// exist, and one in it with a broken Run does not build.
 func Commands(deps Deps) []console.Command {
 	return []console.Command{
 		MigrateCommand(deps),
@@ -60,12 +56,10 @@ func Commands(deps Deps) []console.Command {
 	}
 }
 
-// MigrateCommand answers
-// Illuminate\Database\Console\Migrations\MigrateCommand: `aru migrate`.
+// MigrateCommand builds `aru migrate`.
 //
-// It is isolated, which is Laravel's `implements Isolatable` and RULE 16's
-// other half: two migrators against one database is the failure the rule exists
-// to prevent, and naming the lock is what stops the second one starting.
+// It is isolated: two migrators against one database is the failure to prevent,
+// and naming the lock is what stops the second one starting.
 func MigrateCommand(deps Deps) console.Command {
 	return console.Command{
 		Name:        "migrate",
@@ -126,8 +120,6 @@ func MigrateCommand(deps Deps) console.Command {
 // statements and runs none. It is isolated under the "migrate" lock, so two
 // deploys cannot roll back the same batch at once, and it says so and stops
 // when the migration table does not exist yet.
-//
-// Answers Illuminate\Database\Console\Migrations\RollbackCommand.
 func RollbackCommand(deps Deps) console.Command {
 	return console.Command{
 		Name:        "migrate:rollback",
@@ -177,8 +169,6 @@ func RollbackCommand(deps Deps) console.Command {
 // drop the tables. --pretend prints the statements and runs none, which is the
 // only safe way to point it at anything shared. It is isolated under the
 // "migrate" lock and does nothing when the migration table does not exist.
-//
-// Answers Illuminate\Database\Console\Migrations\ResetCommand.
 func ResetCommand(deps Deps) console.Command {
 	return console.Command{
 		Name:        "migrate:reset",
@@ -208,8 +198,7 @@ func ResetCommand(deps Deps) console.Command {
 	}
 }
 
-// RefreshCommand answers
-// Illuminate\Database\Console\Migrations\RefreshCommand: `aru migrate:refresh`.
+// RefreshCommand builds `aru migrate:refresh`.
 //
 // It resets and re-runs, which is not the same as fresh: refresh goes through
 // every Down, so a migration whose Down is wrong fails here rather than
@@ -259,8 +248,7 @@ func RefreshCommand(deps Deps) console.Command {
 	}
 }
 
-// FreshCommand answers
-// Illuminate\Database\Console\Migrations\FreshCommand: `aru migrate:fresh`.
+// FreshCommand builds `aru migrate:fresh`.
 //
 // It drops every table and migrates from nothing, which is why it refuses to
 // run without a Wipe the application handed over deliberately: "drop
@@ -319,8 +307,6 @@ func FreshCommand(deps Deps) console.Command {
 // answers the question a deploy asks before it starts: is this database at the
 // version this binary expects. --pending lists only what has not run yet. It
 // changes nothing, which is why it takes no isolation lock.
-//
-// Answers Illuminate\Database\Console\Migrations\StatusCommand.
 func StatusCommand(deps Deps) console.Command {
 	return console.Command{
 		Name:        "migrate:status",
@@ -381,8 +367,6 @@ func StatusCommand(deps Deps) console.Command {
 // database where the schema is loaded from a dump and the migrator only has to
 // know what has already run. `aru migrate` creates the table itself when it is
 // missing, so nothing normally needs this.
-//
-// Answers Illuminate\Database\Console\Migrations\InstallCommand.
 func InstallCommand(deps Deps) console.Command {
 	return console.Command{
 		Name:        "migrate:install",
@@ -406,12 +390,10 @@ func InstallCommand(deps Deps) console.Command {
 	}
 }
 
-// MigrateMakeCommand answers
-// Illuminate\Database\Console\Migrations\MigrateMakeCommand:
-// `aru make:migration`.
+// MigrateMakeCommand builds `aru make:migration`.
 //
-// The name is snake case, and the table is guessed from it exactly as the PHP
-// guesses -- create_invoices_table gives a CREATE stub for invoices,
+// The name is snake case, and the table is guessed from it --
+// create_invoices_table gives a CREATE stub for invoices,
 // add_paid_at_to_invoices gives an ALTER stub for the same table.
 func MigrateMakeCommand(deps Deps) console.Command {
 	return console.Command{
@@ -461,8 +443,8 @@ func MigrateMakeCommand(deps Deps) console.Command {
 	}
 }
 
-// pathsOf answers BaseCommand::getMigrationPaths: the --path when it was given,
-// and the application's own otherwise.
+// pathsOf returns the --path when it was given, and the application's own
+// otherwise.
 func pathsOf(path, fallback string) []string {
 	if path != "" {
 		return strings.Split(path, ",")

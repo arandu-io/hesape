@@ -12,8 +12,6 @@ import (
 // ResourceRegistrar registers the REST routes of a resource controller:
 // index, create, store, show, edit, update and destroy, each at its
 // conventional path and under its conventional name.
-//
-// It mirrors Illuminate\Routing\ResourceRegistrar.
 type ResourceRegistrar struct {
 	router *Router
 
@@ -21,20 +19,22 @@ type ResourceRegistrar struct {
 	// first time a resource is registered through this registrar.
 	parameters map[string]string
 	// singular marks the registrar as having been asked for singular
-	// parameters, which is PHP's $parameters === 'singular'.
+	// parameters.
 	singular bool
 }
 
-// resourceDefaults is ResourceRegistrar::$resourceDefaults.
+// resourceDefaults are the seven actions of a full resource, in the
+// conventional order.
 var resourceDefaults = []string{"index", "create", "store", "show", "edit", "update", "destroy"}
 
-// singletonResourceDefaults is ResourceRegistrar::$singletonResourceDefaults.
+// singletonResourceDefaults are the three actions of a singleton resource
+// with neither Creatable nor Destroyable set.
 var singletonResourceDefaults = []string{"show", "edit", "update"}
 
-// The three pieces of state PHP keeps as class statics. A Go process serves
-// many requests at once where PHP serves one, so they are behind a lock: these
-// are set at boot and read on every registration, and a test that sets them
-// runs beside a test that reads them.
+// The three pieces of shared, package-level state below. A Go process serves
+// many requests at once, so they are behind a lock: these are set at boot and
+// read on every registration, and a test that sets them runs beside a test
+// that reads them.
 var (
 	resourceMu         sync.RWMutex
 	parameterMap       = map[string]string{}
@@ -42,12 +42,12 @@ var (
 	resourceVerbs      = map[string]string{"create": "create", "edit": "edit"}
 )
 
-// NewResourceRegistrar is ResourceRegistrar::__construct.
+// NewResourceRegistrar returns a registrar for router.
 func NewResourceRegistrar(router *Router) *ResourceRegistrar {
 	return &ResourceRegistrar{router: router}
 }
 
-// ResourceOptions is the options array PHP passes through register.
+// ResourceOptions configures how a resource registers its routes.
 //
 // It is a struct and not a map because every key of it is read by name, and a
 // misspelled key in a map is a silently ignored option.
@@ -96,8 +96,7 @@ type ResourceOptions struct {
 	Destroyable bool
 }
 
-// Register is ResourceRegistrar::register. It registers the resource's routes
-// and returns them.
+// Register registers the resource's routes and returns them.
 func (r *ResourceRegistrar) Register(name, controller string, options ResourceOptions) *Routes {
 	if len(options.Parameters) > 0 && r.parameters == nil {
 		r.parameters = options.Parameters
@@ -131,8 +130,9 @@ func (r *ResourceRegistrar) Register(name, controller string, options ResourceOp
 	return collection
 }
 
-// Singleton is ResourceRegistrar::singleton. A singleton resource is one
-// record with no id in its path -- a profile, a subscription.
+// Singleton registers a singleton resource's routes and returns them. A
+// singleton resource is one record with no id in its path -- a profile, a
+// subscription.
 func (r *ResourceRegistrar) Singleton(name, controller string, options ResourceOptions) *Routes {
 	if len(options.Parameters) > 0 && r.parameters == nil {
 		r.parameters = options.Parameters
@@ -166,8 +166,7 @@ func (r *ResourceRegistrar) Singleton(name, controller string, options ResourceO
 	return collection
 }
 
-// optionsForMethod applies the per-action middleware overrides, which is what
-// PHP does at the top of its register loop.
+// optionsForMethod applies the per-action middleware overrides.
 func (r *ResourceRegistrar) optionsForMethod(method string, options ResourceOptions) ResourceOptions {
 	out := options
 	if mws, ok := options.MiddlewareFor[method]; ok {
@@ -180,8 +179,8 @@ func (r *ResourceRegistrar) optionsForMethod(method string, options ResourceOpti
 }
 
 // trashedApplies reports whether an action may resolve soft-deleted records.
-// An empty list means the three that act on one record, which is PHP's
-// array_intersect with ['show', 'edit', 'update'].
+// An empty list means the three that act on one record: show, edit and
+// update.
 func trashedApplies(method string, options ResourceOptions) bool {
 	if len(options.Trashed) == 0 {
 		return method == "show" || method == "edit" || method == "update"
@@ -194,7 +193,8 @@ func trashedApplies(method string, options ResourceOptions) bool {
 	return false
 }
 
-// prefixedResource is ResourceRegistrar::prefixedResource.
+// prefixedResource splits a slash-prefixed resource name into its prefix and
+// registers the resource under a sub-router with that prefix.
 func (r *ResourceRegistrar) prefixedResource(name, controller string, options ResourceOptions) *Routes {
 	name, prefix := r.getResourcePrefix(name)
 	sub := NewResourceRegistrar(r.router.Group(Group{Prefix: prefix}))
@@ -202,7 +202,7 @@ func (r *ResourceRegistrar) prefixedResource(name, controller string, options Re
 	return sub.Register(name, controller, options)
 }
 
-// prefixedSingleton is ResourceRegistrar::prefixedSingleton.
+// prefixedSingleton is prefixedResource for Singleton.
 func (r *ResourceRegistrar) prefixedSingleton(name, controller string, options ResourceOptions) *Routes {
 	name, prefix := r.getResourcePrefix(name)
 	sub := NewResourceRegistrar(r.router.Group(Group{Prefix: prefix}))
@@ -210,14 +210,15 @@ func (r *ResourceRegistrar) prefixedSingleton(name, controller string, options R
 	return sub.Singleton(name, controller, options)
 }
 
-// getResourcePrefix is ResourceRegistrar::getResourcePrefix.
+// getResourcePrefix splits a slash-separated resource name into its own last
+// segment and the prefix before it.
 func (r *ResourceRegistrar) getResourcePrefix(name string) (string, string) {
 	segments := strings.Split(name, "/")
 	prefix := strings.Join(segments[:len(segments)-1], "/")
 	return segments[len(segments)-1], prefix
 }
 
-// getResourceMethods is ResourceRegistrar::getResourceMethods.
+// getResourceMethods filters defaults by the Only and Except options.
 func (r *ResourceRegistrar) getResourceMethods(defaults []string, options ResourceOptions) []string {
 	methods := defaults
 
@@ -252,8 +253,7 @@ func (r *ResourceRegistrar) getResourceMethods(defaults []string, options Resour
 	return methods
 }
 
-// addResourceMethod dispatches to the seven adders. PHP builds the method name
-// with string concatenation and calls it; Go names them.
+// addResourceMethod dispatches to the seven adders by name.
 func (r *ResourceRegistrar) addResourceMethod(method, name, base, controller string, options ResourceOptions) *Route {
 	switch method {
 	case "index":
@@ -275,50 +275,50 @@ func (r *ResourceRegistrar) addResourceMethod(method, name, base, controller str
 	}
 }
 
-// addResourceIndex is ResourceRegistrar::addResourceIndex.
+// addResourceIndex registers the GET index route.
 func (r *ResourceRegistrar) addResourceIndex(name, base, controller string, options ResourceOptions) *Route {
 	uri := r.GetResourceUri(name)
 	options.Missing = nil
 	return r.register(http.MethodGet, uri, name, controller, "index", options)
 }
 
-// addResourceCreate is ResourceRegistrar::addResourceCreate.
+// addResourceCreate registers the GET create-form route.
 func (r *ResourceRegistrar) addResourceCreate(name, base, controller string, options ResourceOptions) *Route {
 	uri := r.GetResourceUri(name) + "/" + Verbs()["create"]
 	options.Missing = nil
 	return r.register(http.MethodGet, uri, name, controller, "create", options)
 }
 
-// addResourceStore is ResourceRegistrar::addResourceStore.
+// addResourceStore registers the POST store route.
 func (r *ResourceRegistrar) addResourceStore(name, base, controller string, options ResourceOptions) *Route {
 	uri := r.GetResourceUri(name)
 	options.Missing = nil
 	return r.register(http.MethodPost, uri, name, controller, "store", options)
 }
 
-// addResourceShow is ResourceRegistrar::addResourceShow.
+// addResourceShow registers the GET show route.
 func (r *ResourceRegistrar) addResourceShow(name, base, controller string, options ResourceOptions) *Route {
 	name = r.getShallowName(name, options)
 	uri := r.GetResourceUri(name) + "/{" + base + "}"
 	return r.register(http.MethodGet, uri, name, controller, "show", options)
 }
 
-// addResourceEdit is ResourceRegistrar::addResourceEdit.
+// addResourceEdit registers the GET edit-form route.
 func (r *ResourceRegistrar) addResourceEdit(name, base, controller string, options ResourceOptions) *Route {
 	name = r.getShallowName(name, options)
 	uri := r.GetResourceUri(name) + "/{" + base + "}/" + Verbs()["edit"]
 	return r.register(http.MethodGet, uri, name, controller, "edit", options)
 }
 
-// addResourceUpdate is ResourceRegistrar::addResourceUpdate. It answers PUT
-// and PATCH, as PHP does, from one registration.
+// addResourceUpdate registers the update route, answering both PUT and PATCH
+// from one registration.
 func (r *ResourceRegistrar) addResourceUpdate(name, base, controller string, options ResourceOptions) *Route {
 	name = r.getShallowName(name, options)
 	uri := r.GetResourceUri(name) + "/{" + base + "}"
 	return r.registerMatch([]string{http.MethodPut, http.MethodPatch}, uri, name, controller, "update", options)
 }
 
-// addResourceDestroy is ResourceRegistrar::addResourceDestroy.
+// addResourceDestroy registers the DELETE destroy route.
 func (r *ResourceRegistrar) addResourceDestroy(name, base, controller string, options ResourceOptions) *Route {
 	name = r.getShallowName(name, options)
 	uri := r.GetResourceUri(name) + "/{" + base + "}"
@@ -345,49 +345,51 @@ func (r *ResourceRegistrar) addSingletonMethod(method, name, controller string, 
 	}
 }
 
-// addSingletonCreate is ResourceRegistrar::addSingletonCreate.
+// addSingletonCreate registers the GET create-form route.
 func (r *ResourceRegistrar) addSingletonCreate(name, controller string, options ResourceOptions) *Route {
 	uri := r.GetResourceUri(name) + "/" + Verbs()["create"]
 	options.Missing = nil
 	return r.register(http.MethodGet, uri, name, controller, "create", options)
 }
 
-// addSingletonStore is ResourceRegistrar::addSingletonStore.
+// addSingletonStore registers the POST store route.
 func (r *ResourceRegistrar) addSingletonStore(name, controller string, options ResourceOptions) *Route {
 	uri := r.GetResourceUri(name)
 	options.Missing = nil
 	return r.register(http.MethodPost, uri, name, controller, "store", options)
 }
 
-// addSingletonShow is ResourceRegistrar::addSingletonShow.
+// addSingletonShow registers the GET show route.
 func (r *ResourceRegistrar) addSingletonShow(name, controller string, options ResourceOptions) *Route {
 	uri := r.GetResourceUri(name)
 	options.Missing = nil
 	return r.register(http.MethodGet, uri, name, controller, "show", options)
 }
 
-// addSingletonEdit is ResourceRegistrar::addSingletonEdit.
+// addSingletonEdit registers the GET edit-form route.
 func (r *ResourceRegistrar) addSingletonEdit(name, controller string, options ResourceOptions) *Route {
 	name = r.getShallowName(name, options)
 	uri := r.GetResourceUri(name) + "/" + Verbs()["edit"]
 	return r.register(http.MethodGet, uri, name, controller, "edit", options)
 }
 
-// addSingletonUpdate is ResourceRegistrar::addSingletonUpdate.
+// addSingletonUpdate registers the update route, answering both PUT and
+// PATCH from one registration.
 func (r *ResourceRegistrar) addSingletonUpdate(name, controller string, options ResourceOptions) *Route {
 	name = r.getShallowName(name, options)
 	uri := r.GetResourceUri(name)
 	return r.registerMatch([]string{http.MethodPut, http.MethodPatch}, uri, name, controller, "update", options)
 }
 
-// addSingletonDestroy is ResourceRegistrar::addSingletonDestroy.
+// addSingletonDestroy registers the DELETE destroy route.
 func (r *ResourceRegistrar) addSingletonDestroy(name, controller string, options ResourceOptions) *Route {
 	name = r.getShallowName(name, options)
 	uri := r.GetResourceUri(name)
 	return r.register(http.MethodDelete, uri, name, controller, "destroy", options)
 }
 
-// getShallowName is ResourceRegistrar::getShallowName.
+// getShallowName returns name's own last segment when Shallow is set,
+// dropping the nested parent prefix; otherwise it returns name unchanged.
 func (r *ResourceRegistrar) getShallowName(name string, options ResourceOptions) string {
 	if !options.Shallow {
 		return name
@@ -396,7 +398,8 @@ func (r *ResourceRegistrar) getShallowName(name string, options ResourceOptions)
 	return segments[len(segments)-1]
 }
 
-// setResourceBindingFields is ResourceRegistrar::setResourceBindingFields.
+// setResourceBindingFields applies the resource's binding fields to route's
+// parameters.
 func (r *ResourceRegistrar) setResourceBindingFields(route *Route, bindingFields map[string]string) {
 	fields := map[string]string{}
 	for _, name := range route.ParameterNames() {
@@ -405,8 +408,8 @@ func (r *ResourceRegistrar) setResourceBindingFields(route *Route, bindingFields
 	route.SetBindingFields(fields)
 }
 
-// GetResourceUri is ResourceRegistrar::getResourceUri. A nested name becomes
-// the parent's path with the parent's wildcard in it, and the resource's own
+// GetResourceUri returns the resource's base path. A nested name becomes the
+// parent's path with the parent's wildcard in it, and the resource's own
 // wildcard removed -- the adders put it back where they need it.
 func (r *ResourceRegistrar) GetResourceUri(resource string) string {
 	if !strings.Contains(resource, ".") {
@@ -419,7 +422,8 @@ func (r *ResourceRegistrar) GetResourceUri(resource string) string {
 	return strings.ReplaceAll(uri, "/{"+r.GetResourceWildcard(segments[len(segments)-1])+"}", "")
 }
 
-// getNestedResourceUri is ResourceRegistrar::getNestedResourceUri.
+// getNestedResourceUri joins every segment of a dot-separated resource name
+// with its own wildcard.
 func (r *ResourceRegistrar) getNestedResourceUri(segments []string) string {
 	out := make([]string, 0, len(segments))
 	for _, s := range segments {
@@ -428,10 +432,9 @@ func (r *ResourceRegistrar) getNestedResourceUri(segments []string) string {
 	return strings.Join(out, "/")
 }
 
-// GetResourceWildcard is ResourceRegistrar::getResourceWildcard. It turns a
-// resource segment into the parameter name that stands for one of them:
-// "invoices" becomes "invoice", and a dash becomes an underscore because that
-// is what a path parameter may carry.
+// GetResourceWildcard turns a resource segment into the parameter name that
+// stands for one of them: "invoices" becomes "invoice", and a dash becomes an
+// underscore because that is what a path parameter may carry.
 func (r *ResourceRegistrar) GetResourceWildcard(value string) string {
 	resourceMu.RLock()
 	mapped, global := parameterMap[value]
@@ -450,7 +453,8 @@ func (r *ResourceRegistrar) GetResourceWildcard(value string) string {
 	return strings.ReplaceAll(value, "-", "_")
 }
 
-// getResourceRouteName is ResourceRegistrar::getResourceRouteName.
+// getResourceRouteName builds a route's name from the resource name, the
+// action, and the Names and As options.
 func (r *ResourceRegistrar) getResourceRouteName(resource, method string, options ResourceOptions) string {
 	name := resource
 
@@ -471,9 +475,9 @@ func (r *ResourceRegistrar) getResourceRouteName(resource, method string, option
 	return strings.Trim(prefix+name+"."+method, ".")
 }
 
-// register creates one route of the resource and applies the options that
-// getResourceAction carries in PHP: the name, the action string, the
-// middleware, the where constraints and the missing-model handler.
+// register creates one route of the resource and applies its options: the
+// name, the action string, the middleware, the where constraints and the
+// missing-model handler.
 func (r *ResourceRegistrar) register(method, uri, name, controller, action string, options ResourceOptions) *Route {
 	return r.finish(r.router.handle(method, uri, r.handlerFor(controller, action), options.Middleware...), name, controller, action, options)
 }
@@ -527,8 +531,8 @@ func (r *ResourceRegistrar) handlerFor(controller, action string) http.Handler {
 	})
 }
 
-// SingularParameters is ResourceRegistrar::singularParameters. It sets whether
-// an unmapped resource segment is singularised into its wildcard.
+// SingularParameters sets whether an unmapped resource segment is
+// singularised into its wildcard.
 func SingularParameters(singular ...bool) {
 	value := true
 	if len(singular) > 0 {
@@ -539,8 +543,7 @@ func SingularParameters(singular ...bool) {
 	resourceMu.Unlock()
 }
 
-// GetParameters is ResourceRegistrar::getParameters. It returns the global
-// wildcard map.
+// GetParameters returns the global wildcard map.
 func GetParameters() map[string]string {
 	resourceMu.RLock()
 	defer resourceMu.RUnlock()
@@ -551,8 +554,7 @@ func GetParameters() map[string]string {
 	return out
 }
 
-// SetParameters is ResourceRegistrar::setParameters. It replaces the global
-// wildcard map.
+// SetParameters replaces the global wildcard map.
 func SetParameters(parameters map[string]string) {
 	resourceMu.Lock()
 	defer resourceMu.Unlock()
@@ -562,9 +564,9 @@ func SetParameters(parameters map[string]string) {
 	}
 }
 
-// Verbs is ResourceRegistrar::verbs. Called with nothing it returns the verbs
-// used in resource URIs; called with a map it merges them, which is how
-// "create" becomes "criar" for an application in another language.
+// Verbs, called with nothing, returns the verbs used in resource URIs; called
+// with a map, it merges them, which is how "create" becomes "criar" for an
+// application in another language.
 func Verbs(verbs ...map[string]string) map[string]string {
 	if len(verbs) == 0 || len(verbs[0]) == 0 {
 		resourceMu.RLock()

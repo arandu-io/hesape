@@ -2,10 +2,8 @@ package access
 
 import "net/http"
 
-// HandlesAuthorization is the Illuminate\Auth\Access\HandlesAuthorization trait.
-//
-// A PHP trait is a set of methods copied into a class; the Go form of that is an
-// embedded struct, so a policy embeds this one and gains the same two methods:
+// HandlesAuthorization is the two denial shorthands a policy embeds to reach
+// without importing them:
 //
 //	type PostPolicy struct {
 //		access.HandlesAuthorization
@@ -15,19 +13,19 @@ import "net/http"
 //		return p.DenyAsNotFound("no post with that id", nil)
 //	}
 //
-// Gate embeds it too, exactly as the PHP class does with `use HandlesAuthorization`.
+// [Gate] embeds it too.
 //
-// The trait's other two methods, allow() and deny(), are protected. An
-// unexported method promoted from an embedded struct is not callable by the
-// package that embeds it, so they are the package functions Allow and Deny.
+// The allow and deny shorthands are the package functions [Allow] and [Deny]
+// instead: an unexported method promoted from an embedded struct is not
+// callable by the package that embeds it.
 type HandlesAuthorization struct{}
 
-// DenyWithStatus is HandlesAuthorization::denyWithStatus.
+// DenyWithStatus is a denial that answers with the given HTTP status.
 func (HandlesAuthorization) DenyWithStatus(status int, message string, code any) *Response {
 	return DenyWithStatus(status, message, code)
 }
 
-// DenyAsNotFound is HandlesAuthorization::denyAsNotFound.
+// DenyAsNotFound is a denial that answers 404.
 func (HandlesAuthorization) DenyAsNotFound(message string, code any) *Response {
 	return DenyWithStatus(http.StatusNotFound, message, code)
 }

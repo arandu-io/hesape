@@ -13,8 +13,8 @@ import (
 // UniqueJob is a job that must not be queued twice while one is still in
 // flight.
 //
-// It is Laravel's ShouldBeUnique, and the case it exists for is the one every
-// application meets: a button that recalculates a report, pressed four times
+// The case it exists for is the one every application meets: a button that
+// recalculates a report, pressed four times
 // because the first press showed no feedback. Four jobs, four identical
 // reports, four times the work -- and none of it wrong enough to notice.
 type UniqueJob struct {
@@ -111,7 +111,6 @@ func uniqueKey(key string) string { return UniqueLock{}.GetKey(UniqueJob{Key: ke
 
 // UniqueLock is the claim a unique job holds while it is in flight.
 //
-// It is Illuminate's UniqueLock: the same three methods over the same cache.
 // PushUnique is Acquire and a push in one call, and is what an application
 // uses; this is the pair underneath, for the handler that has to take or give
 // back a claim on its own -- a job released early because the work turned out
@@ -163,5 +162,5 @@ func (u UniqueLock) Release(ctx context.Context, g auth.Grant, j UniqueJob) erro
 //
 // It is namespaced so that a claim cannot collide with an application's own
 // cache entry of the same name. It is already per tenant without saying so:
-// the cache prefixes every key with the tenant on the Grant (RULE 14).
+// the cache prefixes every key with the tenant on the Grant.
 func (UniqueLock) GetKey(j UniqueJob) string { return "bus:unique:" + j.Key }

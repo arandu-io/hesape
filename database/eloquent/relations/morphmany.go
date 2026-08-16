@@ -6,8 +6,8 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// MorphMany answers Illuminate\Database\Eloquent\Relations\MorphMany: the
-// comments of a post, on a table that also holds the comments of a video.
+// MorphMany is the comments of a post, on a table that also holds the comments
+// of a video.
 type MorphMany struct {
 	MorphOneOrMany
 }

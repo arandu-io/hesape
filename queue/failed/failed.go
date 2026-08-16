@@ -10,21 +10,19 @@ import (
 
 // FailedJob is one job that gave up.
 //
-// It answers the row Laravel's failed_jobs table holds, field for field, plus
-// the tenant every record in this collection carries.
+// It is the record a dead letter list holds: what the job was, whose it was,
+// why it gave up and when.
 type FailedJob struct {
-	// ID identifies this failure. In Laravel it is an auto-increment integer
-	// and the job's own uuid is a second column; here both are the job's UUID,
-	// because the id is minted by the application and a second one would only
-	// be a second thing to quote at somebody.
+	// ID identifies this failure. It is the job's own UUID, because the id is
+	// minted by the application and a second one would only be a second thing
+	// to quote at somebody.
 	ID string
 	// UUID is the job's identifier, which is the same string as ID. It is kept
-	// because it is what Laravel's DatabaseUuidFailedJobProvider indexes and
-	// what `aru queue:retry` takes.
+	// because it is what a provider indexes and what `aru queue:retry` takes.
 	UUID string
-	// TenantID is who the work belonged to. It is not in Laravel, which has no
-	// tenant, and it is not optional: a failed job list that crossed customers
-	// would be one customer reading another's payloads (RULE 14).
+	// TenantID is who the work belonged to, and it is not optional: a failed
+	// job list that crossed customers would be one customer reading another's
+	// payloads.
 	TenantID string
 	// Connection is the queue connection it was on.
 	Connection string
@@ -42,14 +40,13 @@ type FailedJob struct {
 
 // FailedJobProvider is where a job goes when it gives up.
 //
-// It answers Illuminate\Queue\Failed\FailedJobProviderInterface, with the two
-// changes this collection makes everywhere: a context, and an auth.Grant.
+// Every method takes a context and an auth.Grant.
 //
 // The Grant is not decoration. A failed job carries a customer's payload, and
 // "list the failed jobs" is a read like any other -- so it takes a Grant and
 // every implementation filters by auth.Tenant(g). A provider that answered
 // across tenants would be the one query in the collection that leaks, and it
-// would leak the arguments of every job every customer ever queued (RULE 17).
+// would leak the arguments of every job every customer ever queued.
 type FailedJobProvider interface {
 	// Log records a job that gave up, and returns the id it was recorded under.
 	Log(ctx context.Context, g auth.Grant, job FailedJob) (string, error)
@@ -74,10 +71,9 @@ type FailedJobProvider interface {
 
 // CountableFailedJobProvider is a provider that can say how many.
 //
-// It answers Illuminate\Queue\Failed\CountableFailedJobProvider. It is a second
-// interface rather than a sixth method for the reason it is in PHP: counting is
-// what a monitor does every minute, and a provider that would have to load
-// every row to answer should not pretend it can.
+// It is a second interface rather than a sixth method on [FailedJobProvider]:
+// counting is what a monitor does every minute, and a provider that would have
+// to load every row to answer should not pretend it can.
 type CountableFailedJobProvider interface {
 	// Count is how many failed jobs there are. An empty connection or queue
 	// means every one.
@@ -85,8 +81,6 @@ type CountableFailedJobProvider interface {
 }
 
 // PrunableFailedJobProvider is a provider that can drop old entries.
-//
-// It answers Illuminate\Queue\Failed\PrunableFailedJobProvider.
 type PrunableFailedJobProvider interface {
 	// Prune removes the entries that failed before this instant, and returns
 	// how many went.

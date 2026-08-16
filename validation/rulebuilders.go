@@ -8,61 +8,51 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// This file answers to Illuminate\Validation\Rules and to
-// Illuminate\Validation\Rule.
+// This file is the rule builders: a typed way to write a rule that a caller
+// could also have typed by hand.
 //
-// Rule is a class of static methods in the PHP because PHP has nowhere else to
-// put a function; each of them is a constructor here, so Rule::in([...]) is
-// NewIn(...) and Rule::password() is PasswordDefault().
-//
-// Most of these build the same rule string somebody could have typed, which is
-// what Stringable means there and String means here:
+// Most of them build exactly that rule string, and String is what renders it:
 //
 //	validation.MustCompile(validation.Rules{
 //		"role":  rules.In("admin", "editor").String(),
 //		"price": NewNumeric().Min(0).Max(1000).String(),
 //	})
 //
-// Two are spelled with the suffix Laravel itself puts on Rules\ArrayRule, and
-// for the same reason -- the plain name is already taken: Rules\File is FileRule
-// because File is the upload interface, and Rules\Email is EmailRule because
-// Email is the one-value helper.
+// Three carry a Rule suffix because the plain name is already taken: ArrayRule
+// because array is a type, FileRule because File is the upload interface, and
+// EmailRule because Email is the one-value helper.
 
 // ---------------------------------------------------------------------------
-// Rules\In and Rules\NotIn.
+// The membership rules.
 // ---------------------------------------------------------------------------
 
 // In builds the "in" rule -- the value must be one of a fixed list -- without
 // the caller spelling the rule string by hand. String renders every value
 // quoted, so one containing a comma survives the parameter list instead of
 // splitting into two allowed values. Build one with NewIn.
-//
-// Answers Illuminate\Validation\Rules\In.
 type In struct {
 	rule   string
 	values []string
 }
 
-// NewIn answers to the In constructor and to Rule::in.
+// NewIn returns an `in` rule over the given values.
 func NewIn(values ...string) *In { return &In{rule: "in", values: values} }
 
-// String answers to In::__toString.
+// String renders the rule, every value quoted.
 func (r *In) String() string { return r.rule + ":" + quotedList(r.values) }
 
 // NotIn builds the "not_in" rule -- the value must be none of a fixed list --
 // with the same quoting In uses, so a listed value containing a comma is still
 // one value. Build one with NewNotIn.
-//
-// Answers Illuminate\Validation\Rules\NotIn.
 type NotIn struct {
 	rule   string
 	values []string
 }
 
-// NewNotIn answers to the NotIn constructor and to Rule::notIn.
+// NewNotIn returns a `not_in` rule over the given values.
 func NewNotIn(values ...string) *NotIn { return &NotIn{rule: "not_in", values: values} }
 
-// String answers to NotIn::__toString.
+// String renders the rule, every value quoted.
 func (r *NotIn) String() string { return r.rule + ":" + quotedList(r.values) }
 
 // quotedList is the escaping both do: every value quoted, and a quote inside one
@@ -76,23 +66,21 @@ func quotedList(values []string) string {
 }
 
 // ---------------------------------------------------------------------------
-// Rules\ArrayRule.
+// The array rule.
 // ---------------------------------------------------------------------------
 
 // ArrayRule builds the "array" rule: the value must be an array, and when keys
 // are given it may hold no key outside that list, which is how a nested object
 // arriving from a form is kept to the shape it was meant to have. With no keys
-// it renders the bare "array". The name carries the suffix here for the reason
-// it carries one in the PHP -- "array" is a reserved word there, and the plain
-// name is not available.
-//
-// Answers Illuminate\Validation\Rules\ArrayRule.
+// it renders the bare "array". The name carries a suffix because array is a
+// type.
 type ArrayRule struct{ keys []string }
 
-// NewArrayRule answers to the ArrayRule constructor and to Rule::array.
+// NewArrayRule returns an `array` rule, restricted to the given keys when any
+// are named.
 func NewArrayRule(keys ...string) *ArrayRule { return &ArrayRule{keys: keys} }
 
-// String answers to ArrayRule::__toString.
+// String renders the rule, with the keys when there are any.
 func (r *ArrayRule) String() string {
 	if len(r.keys) == 0 {
 		return "array"
@@ -101,7 +89,7 @@ func (r *ArrayRule) String() string {
 }
 
 // ---------------------------------------------------------------------------
-// Rules\ExcludeIf, Rules\ProhibitedIf and Rules\RequiredIf.
+// The three rules settled before the request is read.
 // ---------------------------------------------------------------------------
 
 // ExcludeIf renders the "exclude" rule when its condition holds and an empty
@@ -110,19 +98,15 @@ func (r *ArrayRule) String() string {
 // validated data rather than reported: it is not part of this request, which is
 // a different thing from being wrong, and no message is put on it. Build one
 // with NewExcludeIf.
-//
-// Answers Illuminate\Validation\Rules\ExcludeIf.
 type ExcludeIf struct{ Condition bool }
 
-// NewExcludeIf answers to the ExcludeIf constructor and to Rule::excludeIf.
-//
-// The PHP takes a Closure or a bool and refuses anything else with an
-// InvalidArgumentException; a Go signature refuses it at compile time, and a
-// caller with a closure calls it.
+// NewExcludeIf returns an ExcludeIf over a condition already settled. A caller
+// holding a closure calls it: the condition is a bool, so nothing else can be
+// passed by mistake.
 func NewExcludeIf(condition bool) *ExcludeIf { return &ExcludeIf{Condition: condition} }
 
-// String answers to ExcludeIf::__toString: the rule when the condition holds,
-// and nothing at all when it does not.
+// String renders `exclude` when the condition holds, and nothing at all when it
+// does not.
 func (r *ExcludeIf) String() string {
 	if r.Condition {
 		return "exclude"
@@ -134,15 +118,13 @@ func (r *ExcludeIf) String() string {
 // empty string when it does not. A prohibited attribute fails whenever it
 // arrived with a value at all, which refuses a field that must not accompany
 // this request instead of quietly ignoring it. Build one with NewProhibitedIf.
-//
-// Answers Illuminate\Validation\Rules\ProhibitedIf.
 type ProhibitedIf struct{ Condition bool }
 
-// NewProhibitedIf answers to the ProhibitedIf constructor and to
-// Rule::prohibitedIf.
+// NewProhibitedIf returns a ProhibitedIf over a condition already settled.
 func NewProhibitedIf(condition bool) *ProhibitedIf { return &ProhibitedIf{Condition: condition} }
 
-// String answers to ProhibitedIf::__toString.
+// String renders `prohibited` when the condition holds, and nothing at all when
+// it does not.
 func (r *ProhibitedIf) String() string {
 	if r.Condition {
 		return "prohibited"
@@ -155,14 +137,13 @@ func (r *ProhibitedIf) String() string {
 // decides. The condition is a bool settled before the rule set is built; a
 // condition that has to look at the request is required_if, which is a rule name
 // and takes the other field as its parameter. Build one with NewRequiredIf.
-//
-// Answers Illuminate\Validation\Rules\RequiredIf.
 type RequiredIf struct{ Condition bool }
 
-// NewRequiredIf answers to the RequiredIf constructor and to Rule::requiredIf.
+// NewRequiredIf returns a RequiredIf over a condition already settled.
 func NewRequiredIf(condition bool) *RequiredIf { return &RequiredIf{Condition: condition} }
 
-// String answers to RequiredIf::__toString.
+// String renders `required` when the condition holds, and nothing at all when it
+// does not.
 func (r *RequiredIf) String() string {
 	if r.Condition {
 		return "required"
@@ -171,55 +152,57 @@ func (r *RequiredIf) String() string {
 }
 
 // ---------------------------------------------------------------------------
-// Rules\Date.
+// The date rules.
 // ---------------------------------------------------------------------------
 
-// Date answers to Illuminate\Validation\Rules\Date: the date rules of one field,
-// written without remembering their names.
+// Date builds the date rules of one field, without the caller remembering their
+// names. Build one with NewDate.
 type Date struct {
 	format      string
 	constraints []string
 }
 
-// NewDate answers to the Date constructor and to Rule::date.
+// NewDate returns a Date carrying no constraint yet.
 func NewDate() *Date { return &Date{} }
 
-// Format answers to Date::format. The layout is a GO layout --
-// Format("2006-01-02"), never "Y-m-d" -- for the reason date_format takes one.
+// Format sets the layout the value has to be written in, which makes the rule
+// date_format rather than date. It is a GO layout -- Format("2006-01-02"),
+// never "Y-m-d".
 func (r *Date) Format(format string) *Date {
 	r.format = format
 
 	return r
 }
 
-// BeforeToday answers to Date::beforeToday.
+// BeforeToday adds before:today.
 func (r *Date) BeforeToday() *Date { return r.Before("today") }
 
-// AfterToday answers to Date::afterToday.
+// AfterToday adds after:today.
 func (r *Date) AfterToday() *Date { return r.After("today") }
 
-// TodayOrBefore answers to Date::todayOrBefore.
+// TodayOrBefore adds before_or_equal:today.
 func (r *Date) TodayOrBefore() *Date { return r.BeforeOrEqual("today") }
 
-// TodayOrAfter answers to Date::todayOrAfter.
+// TodayOrAfter adds after_or_equal:today.
 func (r *Date) TodayOrAfter() *Date { return r.AfterOrEqual("today") }
 
-// Before answers to Date::before.
+// Before adds before, against the given moment.
 func (r *Date) Before(date string) *Date { return r.addRule("before:" + date) }
 
-// After answers to Date::after.
+// After adds after, against the given moment.
 func (r *Date) After(date string) *Date { return r.addRule("after:" + date) }
 
-// BeforeOrEqual answers to Date::beforeOrEqual.
+// BeforeOrEqual adds before_or_equal, against the given moment.
 func (r *Date) BeforeOrEqual(date string) *Date { return r.addRule("before_or_equal:" + date) }
 
-// AfterOrEqual answers to Date::afterOrEqual.
+// AfterOrEqual adds after_or_equal, against the given moment.
 func (r *Date) AfterOrEqual(date string) *Date { return r.addRule("after_or_equal:" + date) }
 
-// Between answers to Date::between.
+// Between adds after and before, so both ends are exclusive.
 func (r *Date) Between(from, to string) *Date { return r.After(from).Before(to) }
 
-// BetweenOrEqual answers to Date::betweenOrEqual.
+// BetweenOrEqual adds after_or_equal and before_or_equal, so both ends are
+// inclusive.
 func (r *Date) BetweenOrEqual(from, to string) *Date {
 	return r.AfterOrEqual(from).BeforeOrEqual(to)
 }
@@ -230,7 +213,7 @@ func (r *Date) addRule(rules string) *Date {
 	return r
 }
 
-// String answers to Date::__toString.
+// String renders the chain, starting with date or with date_format.
 func (r *Date) String() string {
 	head := "date"
 	if r.format != "" {
@@ -240,7 +223,7 @@ func (r *Date) String() string {
 }
 
 // ---------------------------------------------------------------------------
-// Rules\Numeric.
+// The numeric rules.
 // ---------------------------------------------------------------------------
 
 // Numeric builds a whole chain of numeric rules for one field -- bounds, digit
@@ -248,19 +231,17 @@ func (r *Date) String() string {
 // caller remembering any of their names. It always begins with "numeric", and
 // String renders the chain with repeats dropped, because several of the methods
 // add "integer" of their own. Build one with NewNumeric.
-//
-// Answers Illuminate\Validation\Rules\Numeric.
 type Numeric struct{ constraints []string }
 
-// NewNumeric answers to the Numeric constructor and to Rule::numeric.
+// NewNumeric returns a Numeric carrying `numeric` and nothing else yet.
 func NewNumeric() *Numeric { return &Numeric{constraints: []string{"numeric"}} }
 
-// Between answers to Numeric::between.
+// Between adds between, both bounds inclusive.
 func (r *Numeric) Between(min, max float64) *Numeric {
 	return r.addRule("between:" + number64(min) + "," + number64(max))
 }
 
-// Decimal answers to Numeric::decimal.
+// Decimal adds decimal: exactly min places, or between min and max of them.
 func (r *Numeric) Decimal(min int, max ...int) *Numeric {
 	rule := "decimal:" + strconv.Itoa(min)
 	if len(max) > 0 {
@@ -269,59 +250,59 @@ func (r *Numeric) Decimal(min int, max ...int) *Numeric {
 	return r.addRule(rule)
 }
 
-// Different answers to Numeric::different.
+// Different adds different, against the named field.
 func (r *Numeric) Different(field string) *Numeric { return r.addRule("different:" + field) }
 
-// Digits answers to Numeric::digits.
+// Digits adds integer and digits: exactly this many of them.
 func (r *Numeric) Digits(length int) *Numeric {
 	return r.Integer().addRule("digits:" + strconv.Itoa(length))
 }
 
-// DigitsBetween answers to Numeric::digitsBetween.
+// DigitsBetween adds integer and digits_between.
 func (r *Numeric) DigitsBetween(min, max int) *Numeric {
 	return r.Integer().addRule("digits_between:" + strconv.Itoa(min) + "," + strconv.Itoa(max))
 }
 
-// GreaterThan answers to Numeric::greaterThan.
+// GreaterThan adds gt, against the named field.
 func (r *Numeric) GreaterThan(field string) *Numeric { return r.addRule("gt:" + field) }
 
-// GreaterThanOrEqualTo answers to Numeric::greaterThanOrEqualTo.
+// GreaterThanOrEqualTo adds gte, against the named field.
 func (r *Numeric) GreaterThanOrEqualTo(field string) *Numeric { return r.addRule("gte:" + field) }
 
-// Integer answers to Numeric::integer.
+// Integer adds integer.
 func (r *Numeric) Integer() *Numeric { return r.addRule("integer") }
 
-// LessThan answers to Numeric::lessThan.
+// LessThan adds lt, against the named field.
 func (r *Numeric) LessThan(field string) *Numeric { return r.addRule("lt:" + field) }
 
-// LessThanOrEqualTo answers to Numeric::lessThanOrEqualTo.
+// LessThanOrEqualTo adds lte, against the named field.
 func (r *Numeric) LessThanOrEqualTo(field string) *Numeric { return r.addRule("lte:" + field) }
 
-// Max answers to Numeric::max.
+// Max adds max.
 func (r *Numeric) Max(value float64) *Numeric { return r.addRule("max:" + number64(value)) }
 
-// MaxDigits answers to Numeric::maxDigits.
+// MaxDigits adds max_digits.
 func (r *Numeric) MaxDigits(value int) *Numeric {
 	return r.addRule("max_digits:" + strconv.Itoa(value))
 }
 
-// Min answers to Numeric::min.
+// Min adds min.
 func (r *Numeric) Min(value float64) *Numeric { return r.addRule("min:" + number64(value)) }
 
-// MinDigits answers to Numeric::minDigits.
+// MinDigits adds min_digits.
 func (r *Numeric) MinDigits(value int) *Numeric {
 	return r.addRule("min_digits:" + strconv.Itoa(value))
 }
 
-// MultipleOf answers to Numeric::multipleOf.
+// MultipleOf adds multiple_of.
 func (r *Numeric) MultipleOf(value float64) *Numeric {
 	return r.addRule("multiple_of:" + number64(value))
 }
 
-// Same answers to Numeric::same.
+// Same adds same, against the named field.
 func (r *Numeric) Same(field string) *Numeric { return r.addRule("same:" + field) }
 
-// Exactly answers to Numeric::exactly.
+// Exactly adds integer and size.
 func (r *Numeric) Exactly(value int) *Numeric {
 	return r.Integer().addRule("size:" + strconv.Itoa(value))
 }
@@ -332,8 +313,8 @@ func (r *Numeric) addRule(rules string) *Numeric {
 	return r
 }
 
-// String answers to Numeric::__toString, with the repeats dropped as the PHP's
-// array_unique drops them -- Digits and Exactly both add `integer`.
+// String renders the chain, with the repeats dropped -- Digits and Exactly both
+// add `integer`.
 func (r *Numeric) String() string {
 	seen := make(map[string]struct{}, len(r.constraints))
 	out := make([]string, 0, len(r.constraints))
@@ -347,11 +328,11 @@ func (r *Numeric) String() string {
 	return strings.Join(out, "|")
 }
 
-// number64 renders a bound without a trailing zero, as PHP renders one.
+// number64 renders a bound without a trailing zero.
 func number64(value float64) string { return strconv.FormatFloat(value, 'f', -1, 64) }
 
 // ---------------------------------------------------------------------------
-// Rules\Dimensions.
+// The image dimension rules.
 // ---------------------------------------------------------------------------
 
 // Dimensions builds the "dimensions" rule: the pixel width and height an
@@ -359,41 +340,39 @@ func number64(value float64) string { return strconv.FormatFloat(value, 'f', -1,
 // Each method sets one constraint, and String renders them all as a single rule
 // in a fixed order rather than the order they were set, since a Go map remembers
 // none. Build one with NewDimensions.
-//
-// Answers Illuminate\Validation\Rules\Dimensions.
 type Dimensions struct{ constraints map[string]string }
 
-// NewDimensions answers to the Dimensions constructor and to Rule::dimensions.
+// NewDimensions returns a Dimensions carrying no constraint yet.
 func NewDimensions() *Dimensions { return &Dimensions{constraints: map[string]string{}} }
 
-// Width answers to Dimensions::width.
+// Width sets the exact width, in pixels.
 func (r *Dimensions) Width(value int) *Dimensions { return r.set("width", value) }
 
-// Height answers to Dimensions::height.
+// Height sets the exact height, in pixels.
 func (r *Dimensions) Height(value int) *Dimensions { return r.set("height", value) }
 
-// MinWidth answers to Dimensions::minWidth.
+// MinWidth sets the lowest width, in pixels.
 func (r *Dimensions) MinWidth(value int) *Dimensions { return r.set("min_width", value) }
 
-// MinHeight answers to Dimensions::minHeight.
+// MinHeight sets the lowest height, in pixels.
 func (r *Dimensions) MinHeight(value int) *Dimensions { return r.set("min_height", value) }
 
-// MaxWidth answers to Dimensions::maxWidth.
+// MaxWidth sets the highest width, in pixels.
 func (r *Dimensions) MaxWidth(value int) *Dimensions { return r.set("max_width", value) }
 
-// MaxHeight answers to Dimensions::maxHeight.
+// MaxHeight sets the highest height, in pixels.
 func (r *Dimensions) MaxHeight(value int) *Dimensions { return r.set("max_height", value) }
 
-// Ratio answers to Dimensions::ratio.
+// Ratio sets the exact aspect ratio, width over height.
 func (r *Dimensions) Ratio(value float64) *Dimensions { return r.setRatio("ratio", value) }
 
-// MinRatio answers to Dimensions::minRatio.
+// MinRatio sets the lowest aspect ratio.
 func (r *Dimensions) MinRatio(value float64) *Dimensions { return r.setRatio("min_ratio", value) }
 
-// MaxRatio answers to Dimensions::maxRatio.
+// MaxRatio sets the highest aspect ratio.
 func (r *Dimensions) MaxRatio(value float64) *Dimensions { return r.setRatio("max_ratio", value) }
 
-// RatioBetween answers to Dimensions::ratioBetween.
+// RatioBetween sets both ends of the aspect ratio.
 func (r *Dimensions) RatioBetween(min, max float64) *Dimensions {
 	return r.setRatio("min_ratio", min).setRatio("max_ratio", max)
 }
@@ -410,15 +389,14 @@ func (r *Dimensions) setRatio(key string, value float64) *Dimensions {
 	return r
 }
 
-// dimensionOrder is the order the constraints are written in. A PHP array
-// remembers the order they were set in and a Go map remembers none, so the
-// spelling is fixed here rather than left to the map.
+// dimensionOrder is the order the constraints are written in. A Go map remembers
+// no order, so the spelling is fixed here rather than left to the map.
 var dimensionOrder = []string{
 	"width", "height", "min_width", "min_height",
 	"max_width", "max_height", "ratio", "min_ratio", "max_ratio",
 }
 
-// String answers to Dimensions::__toString.
+// String renders the constraints as one rule, in dimensionOrder.
 func (r *Dimensions) String() string {
 	pairs := make([]string, 0, len(r.constraints))
 	for _, key := range dimensionOrder {
@@ -430,12 +408,12 @@ func (r *Dimensions) String() string {
 }
 
 // ---------------------------------------------------------------------------
-// Rules\File and Rules\ImageFile.
+// The upload rules.
 // ---------------------------------------------------------------------------
 
-// FileRule answers to Illuminate\Validation\Rules\File. It carries the suffix
-// because File is already the upload interface here, which is what
-// Symfony\Component\HttpFoundation\File\File is there.
+// FileRule builds the rules an upload has to pass: what it may be, and how big
+// it may be. It carries the suffix because File is already the upload interface.
+// Build one with NewFileRule, or with NewImageFile.
 type FileRule struct {
 	allowedMimetypes  []string
 	allowedExtensions []string
@@ -446,11 +424,11 @@ type FileRule struct {
 	allowSvg          bool
 }
 
-// NewFileRule answers to the File constructor and to Rule::file.
+// NewFileRule returns a FileRule that asks only for an upload that finished.
 func NewFileRule() *FileRule { return &FileRule{} }
 
-// NewImageFile answers to the ImageFile constructor, to Rule::imageFile and to
-// the static File::image.
+// NewImageFile returns a FileRule that asks for an image, and for an SVG too
+// when allowSvg is true.
 func NewImageFile(allowSvg ...bool) *FileRule {
 	r := &FileRule{image: true}
 	if len(allowSvg) > 0 {
@@ -459,65 +437,65 @@ func NewImageFile(allowSvg ...bool) *FileRule {
 	return r
 }
 
-// Types answers to the static File::types: the MIME types or extensions the
-// upload may be.
+// Types returns a FileRule over the media types or extensions the upload may
+// be.
 func Types(mimetypes ...string) *FileRule {
 	return &FileRule{allowedMimetypes: mimetypes}
 }
 
-// Extensions answers to File::extensions: the extension the BROWSER sent, which
-// is not the same question Mimes asks.
+// Extensions sets the extensions the upload may carry. It is the extension the
+// BROWSER sent, which is not the same question the content asks.
 func (r *FileRule) Extensions(extensions ...string) *FileRule {
 	r.allowedExtensions = extensions
 
 	return r
 }
 
-// Size answers to File::size: exactly this many kilobytes.
+// Size sets the exact size, in kilobytes.
 func (r *FileRule) Size(size int) *FileRule {
 	r.minimumFileSize, r.maximumFileSize = &size, &size
 
 	return r
 }
 
-// Between answers to File::between.
+// Between sets both ends of the size, in kilobytes.
 func (r *FileRule) Between(minSize, maxSize int) *FileRule {
 	r.minimumFileSize, r.maximumFileSize = &minSize, &maxSize
 
 	return r
 }
 
-// Min answers to File::min.
+// Min sets the smallest size, in kilobytes.
 func (r *FileRule) Min(size int) *FileRule {
 	r.minimumFileSize = &size
 
 	return r
 }
 
-// Max answers to File::max.
+// Max sets the largest size, in kilobytes.
 func (r *FileRule) Max(size int) *FileRule {
 	r.maximumFileSize = &size
 
 	return r
 }
 
-// Dimensions answers to ImageFile::dimensions.
+// Dimensions adds the dimension rule the builder rendered.
 func (r *FileRule) Dimensions(dimensions *Dimensions) *FileRule {
 	return r.Rules(dimensions.String())
 }
 
-// Rules answers to File::rules: more rules merged into the ones this builds.
+// Rules merges more rules into the ones this builds.
 func (r *FileRule) Rules(rules ...string) *FileRule {
 	r.customRules = append(r.customRules, rules...)
 
 	return r
 }
 
-// ToKilobytes answers to File::toKilobytes: "2mb" is 2000 kilobytes, as the PHP
-// counts them -- a thousand, not 1024.
+// ToKilobytes reads a size written with a suffix: "2mb" is 2000 kilobytes -- a
+// thousand, not 1024.
 //
-// The PHP throws on a suffix it does not know; the second value is how Go spells
-// that, and an unsuffixed number is refused there too.
+// The bool is false for a suffix it does not know, and for a number written with
+// no suffix at all.
 func ToKilobytes(size string) (int, bool) {
 	size = strings.ToLower(strings.TrimSpace(size))
 
@@ -537,7 +515,8 @@ func ToKilobytes(size string) (int, bool) {
 	return 0, false
 }
 
-// String answers to File::buildValidationRules, rendered as the chain it is.
+// String renders the chain: what the upload may be, then how big it may be, then
+// whatever Rules added.
 func (r *FileRule) String() string {
 	head := "file"
 	if r.image {
@@ -573,8 +552,8 @@ func (r *FileRule) String() string {
 	return strings.Join(append(rules, r.customRules...), "|")
 }
 
-// buildMimetypes answers to File::buildMimetypes: a type with a slash is a MIME
-// type and everything else is an extension, so the two become two rules.
+// buildMimetypes splits what Types was given: a name with a slash is a media type
+// and everything else is an extension, so the two become two rules.
 func (r *FileRule) buildMimetypes() []string {
 	if len(r.allowedMimetypes) == 0 {
 		return nil
@@ -600,7 +579,7 @@ func (r *FileRule) buildMimetypes() []string {
 }
 
 // ---------------------------------------------------------------------------
-// Rules\Email.
+// The email rule.
 // ---------------------------------------------------------------------------
 
 // EmailRule builds the "email" rule together with the list of checks it should
@@ -608,15 +587,13 @@ func (r *FileRule) buildMimetypes() []string {
 // spoofing check, and the native one. With nothing asked for it renders the bare
 // "email", which is the shape check alone. Build one with NewEmailRule. It
 // carries the suffix because Email is already the one-value helper here.
-//
-// Answers Illuminate\Validation\Rules\Email.
 type EmailRule struct{ validations []string }
 
-// NewEmailRule answers to the Email constructor and to Rule::email.
+// NewEmailRule returns an EmailRule asking for the shape check alone.
 func NewEmailRule() *EmailRule { return &EmailRule{} }
 
-// RfcCompliant answers to Email::rfcCompliant. Strict adds the stricter reading,
-// which is Email::strict.
+// RfcCompliant asks for the RFC reading, or for the stricter one when strict is
+// true.
 func (r *EmailRule) RfcCompliant(strict ...bool) *EmailRule {
 	if len(strict) > 0 && strict[0] {
 		return r.add("strict")
@@ -624,16 +601,17 @@ func (r *EmailRule) RfcCompliant(strict ...bool) *EmailRule {
 	return r.add("rfc")
 }
 
-// Strict answers to Email::strict.
+// Strict asks for the stricter reading.
 func (r *EmailRule) Strict() *EmailRule { return r.add("strict") }
 
-// ValidateMxRecord answers to Email::validateMxRecord.
+// ValidateMxRecord asks for the lookup on the domain.
 func (r *EmailRule) ValidateMxRecord() *EmailRule { return r.add("dns") }
 
-// PreventSpoofing answers to Email::preventSpoofing.
+// PreventSpoofing asks for the spoofing check.
 func (r *EmailRule) PreventSpoofing() *EmailRule { return r.add("spoof") }
 
-// WithNativeValidation answers to Email::withNativeValidation.
+// WithNativeValidation asks for the native check, allowing unicode when told
+// to.
 func (r *EmailRule) WithNativeValidation(allowUnicode ...bool) *EmailRule {
 	if len(allowUnicode) > 0 && allowUnicode[0] {
 		return r.add("filter_unicode")
@@ -641,7 +619,7 @@ func (r *EmailRule) WithNativeValidation(allowUnicode ...bool) *EmailRule {
 	return r.add("filter")
 }
 
-// Rules answers to Email::rules.
+// Rules merges more checks into the ones this asks for.
 func (r *EmailRule) Rules(rules ...string) *EmailRule {
 	r.validations = append(r.validations, rules...)
 
@@ -664,7 +642,7 @@ func (r *EmailRule) String() string {
 }
 
 // ---------------------------------------------------------------------------
-// Rules\Unique and Rules\Exists, over Rules\DatabaseRule.
+// The two database rules, over what they share.
 // ---------------------------------------------------------------------------
 
 // DatabaseRule holds what the two database rules have in common: the table and
@@ -673,63 +651,63 @@ func (r *EmailRule) String() string {
 // than repeat it, so the Where methods below are written once and read as
 // methods on either; FormatWheres renders the conditions into the parameter list
 // each of them builds. It is not useful on its own.
-//
-// Answers the Illuminate\Validation\Rules\DatabaseRule trait.
 type DatabaseRule struct {
 	table  string
 	column string
 	wheres [][2]string
 
-	// using answers to $using: the query callbacks Using registers.
+	// using is the query callbacks Using registers.
 	using []func(query any)
 }
 
-// ResolveTableName answers to DatabaseRule::resolveTableName. The PHP resolves a
-// model class name into its table; there are no models here (ADR: no Active
-// Record), so a table name is a table name.
+// ResolveTableName returns the table a rule queries. There are no models here, so
+// a table name is already the table name.
 func (r *DatabaseRule) ResolveTableName(table string) string { return table }
 
-// Where answers to DatabaseRule::where.
+// Where narrows the search to rows holding value in column.
 func (r *DatabaseRule) Where(column, value string) *DatabaseRule {
 	r.wheres = append(r.wheres, [2]string{column, value})
 
 	return r
 }
 
-// WhereNot answers to DatabaseRule::whereNot.
+// WhereNot narrows the search to rows NOT holding value in column.
 func (r *DatabaseRule) WhereNot(column, value string) *DatabaseRule {
 	return r.Where(column, "!"+value)
 }
 
-// WhereNull answers to DatabaseRule::whereNull.
+// WhereNull narrows the search to rows holding null in column.
 func (r *DatabaseRule) WhereNull(column string) *DatabaseRule { return r.Where(column, "NULL") }
 
-// WhereNotNull answers to DatabaseRule::whereNotNull.
+// WhereNotNull narrows the search to rows holding anything but null in column.
 func (r *DatabaseRule) WhereNotNull(column string) *DatabaseRule {
 	return r.Where(column, "NOT_NULL")
 }
 
-// WhereIn answers to DatabaseRule::whereIn.
+// WhereIn narrows the search to rows holding one of the values in column.
 func (r *DatabaseRule) WhereIn(column string, values ...string) *DatabaseRule {
 	return r.Where(column, strings.Join(values, ","))
 }
 
-// WhereNotIn answers to DatabaseRule::whereNotIn.
+// WhereNotIn narrows the search to rows holding none of the values in column.
 func (r *DatabaseRule) WhereNotIn(column string, values ...string) *DatabaseRule {
 	return r.Where(column, "!"+strings.Join(values, ","))
 }
 
-// WithoutTrashed answers to DatabaseRule::withoutTrashed.
+// WithoutTrashed narrows the search to rows that are not soft deleted. The
+// column defaults to deleted_at.
 func (r *DatabaseRule) WithoutTrashed(deletedAtColumn ...string) *DatabaseRule {
 	return r.WhereNull(columnOr(deletedAtColumn, "deleted_at"))
 }
 
-// OnlyTrashed answers to DatabaseRule::onlyTrashed.
+// OnlyTrashed narrows the search to rows that are soft deleted. The column
+// defaults to deleted_at.
 func (r *DatabaseRule) OnlyTrashed(deletedAtColumn ...string) *DatabaseRule {
 	return r.WhereNotNull(columnOr(deletedAtColumn, "deleted_at"))
 }
 
-// FormatWheres answers to DatabaseRule::formatWheres.
+// FormatWheres renders the conditions into the trailing parameters of the rule,
+// column then value, every value quoted.
 func (r *DatabaseRule) FormatWheres() string {
 	pairs := make([]string, len(r.wheres))
 	for i, where := range r.wheres {
@@ -750,16 +728,14 @@ func columnOr(given []string, def string) string {
 // a form that edits an existing record does not collide with itself. The check
 // is a read of the table, so it runs only with a Grant carrying a tenant and
 // counts only that tenant's rows. Build one with NewUnique.
-//
-// Answers Illuminate\Validation\Rules\Unique.
 type Unique struct {
 	DatabaseRule
 	ignore   string
 	idColumn string
 }
 
-// NewUnique answers to the Unique constructor and to Rule::unique. The column
-// defaults to "NULL", which the PHP reads as "the attribute's own name".
+// NewUnique returns a `unique` rule over the table. The column defaults to
+// "NULL", which the rule reads as the attribute's own name.
 func NewUnique(table string, column ...string) *Unique {
 	return &Unique{
 		DatabaseRule: DatabaseRule{table: table, column: columnOr(column, "NULL")},
@@ -767,8 +743,8 @@ func NewUnique(table string, column ...string) *Unique {
 	}
 }
 
-// Ignore answers to Unique::ignore: the row this check is allowed to find,
-// which is the row being edited.
+// Ignore names the row this check is allowed to find, which is the row being
+// edited.
 func (r *Unique) Ignore(id string, idColumn ...string) *Unique {
 	r.ignore = id
 	r.idColumn = columnOr(idColumn, "id")
@@ -776,7 +752,7 @@ func (r *Unique) Ignore(id string, idColumn ...string) *Unique {
 	return r
 }
 
-// String answers to Unique::__toString.
+// String renders the rule, with the ignored row and the conditions.
 func (r *Unique) String() string {
 	ignore := "NULL"
 	if r.ignore != "" {
@@ -793,16 +769,15 @@ func (r *Unique) String() string {
 // table, so it runs only with a Grant carrying a tenant and counts only that
 // tenant's rows -- an identifier belonging to somebody else does not exist as
 // far as this rule is concerned. Build one with NewExists.
-//
-// Answers Illuminate\Validation\Rules\Exists.
 type Exists struct{ DatabaseRule }
 
-// NewExists answers to the Exists constructor and to Rule::exists.
+// NewExists returns an `exists` rule over the table. The column defaults to
+// "NULL", which the rule reads as the attribute's own name.
 func NewExists(table string, column ...string) *Exists {
 	return &Exists{DatabaseRule{table: table, column: columnOr(column, "NULL")}}
 }
 
-// String answers to Exists::__toString.
+// String renders the rule, with the conditions.
 func (r *Exists) String() string {
 	return strings.TrimRight(strings.Join([]string{
 		"exists:" + r.table, r.column, r.FormatWheres(),
@@ -810,27 +785,24 @@ func (r *Exists) String() string {
 }
 
 // ---------------------------------------------------------------------------
-// Rules\Password.
+// The password rule.
 // ---------------------------------------------------------------------------
 
-// UncompromisedVerifier answers to
-// Illuminate\Contracts\Validation\UncompromisedVerifier: whether a password has
-// appeared in a data leak.
+// UncompromisedVerifier answers whether a password has appeared in a data leak.
 //
-// Laravel's NotPwnedVerifier asks haveibeenpwned over its HTTP client, with the
-// k-anonymity prefix so that the password itself never leaves. That is a network
-// call and belongs with the client, so what is here is the question.
+// Asking a breach service is a network call and belongs with whoever owns the
+// HTTP client, so what is here is only the question.
 type UncompromisedVerifier interface {
-	// Verify answers to UncompromisedVerifier::verify: false when the value has
-	// appeared more times than the threshold allows.
+	// Verify reports false when the value has appeared more times than the
+	// threshold allows.
 	Verify(value string, threshold int) bool
 }
 
-// Password answers to Illuminate\Validation\Rules\Password.
+// Password is the password policy of one field: a length, the kinds of character
+// it must carry, and whether it has appeared in a leak.
 //
-// It is the one rule object most often reached for, and it cannot be a rule
-// string: it holds a verifier and it says four different things depending on
-// which part failed. It runs through Validator.After:
+// It cannot be a rule string: it holds a verifier, and it says four different
+// things depending on which part failed. It runs through Validator.After:
 //
 //	v.After(func(v *validation.Validator) {
 //		v.ValidateUsingCustomRule("password", v.GetValue("password"), rule)
@@ -854,24 +826,25 @@ type Password struct {
 	data      Data
 }
 
-// defaultPasswordCallback answers to the static Password::$defaultCallback.
+// defaultPasswordCallback is what PasswordDefaults registered, and what
+// PasswordDefault answers with.
 var defaultPasswordCallback func() *Password
 
-// NewPassword answers to the Password constructor. A minimum below one is
-// raised to one, as the PHP raises it.
+// NewPassword returns a policy asking for a minimum length. A minimum below one
+// is raised to one.
 func NewPassword(min int) *Password {
 	return &Password{min: max(min, 1)}
 }
 
-// PasswordMin answers to the static Password::min.
+// PasswordMin returns a policy asking for a minimum length.
 func PasswordMin(size int) *Password { return NewPassword(size) }
 
-// PasswordDefaults answers to Password::defaults called WITH a callback: the
-// configuration every later PasswordDefault answers with.
+// PasswordDefaults registers the policy every later PasswordDefault answers
+// with.
 func PasswordDefaults(callback func() *Password) { defaultPasswordCallback = callback }
 
-// PasswordDefault answers to the static Password::default, and to
-// Password::defaults called with none.
+// PasswordDefault returns the registered policy, or a minimum of eight when none
+// was registered.
 func PasswordDefault() *Password {
 	if defaultPasswordCallback == nil {
 		return PasswordMin(8)
@@ -882,26 +855,26 @@ func PasswordDefault() *Password {
 	return PasswordMin(8)
 }
 
-// PasswordRequired answers to the static Password::required: the default
-// configuration, and the field marked required.
+// PasswordRequired returns the `required` rule string and the default policy,
+// which are the two things a required password field takes.
 func PasswordRequired() (string, *Password) { return "required", PasswordDefault() }
 
-// PasswordSometimes answers to the static Password::sometimes.
+// PasswordSometimes returns the `sometimes` rule string and the default policy.
 func PasswordSometimes() (string, *Password) { return "sometimes", PasswordDefault() }
 
-// Max answers to Password::max.
+// Max sets the longest the password may be.
 func (p *Password) Max(size int) *Password {
 	p.max = size
 
 	return p
 }
 
-// Uncompromised answers to Password::uncompromised: refuse a password that has
-// appeared in a data leak more times than the threshold allows.
+// Uncompromised refuses a password that has appeared in a data leak more times
+// than the threshold allows.
 //
-// The verifier is a parameter because Laravel resolves it out of the container,
-// which ADR 0001 refuses. A nil verifier FAILS the check rather than passing it:
-// "we could not ask" is not "it is safe".
+// The verifier is a parameter because nothing here resolves one. A nil verifier
+// FAILS the check rather than passing it: "we could not ask" is not "it is
+// safe".
 func (p *Password) Uncompromised(verifier UncompromisedVerifier, threshold ...int) *Password {
 	p.uncompromised = true
 	p.verifier = verifier
@@ -912,45 +885,43 @@ func (p *Password) Uncompromised(verifier UncompromisedVerifier, threshold ...in
 	return p
 }
 
-// MixedCase answers to Password::mixedCase.
+// MixedCase asks for at least one letter of each case.
 func (p *Password) MixedCase() *Password {
 	p.mixedCase = true
 
 	return p
 }
 
-// Letters answers to Password::letters.
+// Letters asks for at least one letter.
 func (p *Password) Letters() *Password {
 	p.letters = true
 
 	return p
 }
 
-// Numbers answers to Password::numbers.
+// Numbers asks for at least one number.
 func (p *Password) Numbers() *Password {
 	p.numbers = true
 
 	return p
 }
 
-// Symbols answers to Password::symbols.
+// Symbols asks for at least one symbol.
 func (p *Password) Symbols() *Password {
 	p.symbols = true
 
 	return p
 }
 
-// Rules answers to Password::rules: more rules merged into the ones this
-// enforces.
+// Rules merges more rules into the ones this policy enforces.
 func (p *Password) Rules(rules ...string) *Password {
 	p.customRules = append(p.customRules, rules...)
 
 	return p
 }
 
-// AppliedRules answers to Password::appliedRules: what this rule is currently
-// asking for, which is what a "your password must" list on the form is drawn
-// from.
+// AppliedRules returns what this policy is currently asking for, which is what a
+// "your password must" list on the form is drawn from.
 func (p *Password) AppliedRules() map[string]any {
 	return map[string]any{
 		"min":                  p.min,
@@ -965,17 +936,18 @@ func (p *Password) AppliedRules() map[string]any {
 	}
 }
 
-// SetValidator answers to Password::setValidator.
+// SetValidator hands the rule the validator running it, so that its messages
+// come from the same translator.
 func (p *Password) SetValidator(validator *Validator) { p.validator = validator }
 
-// SetData answers to Password::setData.
+// SetData hands the rule the data being validated.
 func (p *Password) SetData(data Data) { p.data = data }
 
-// Passes answers to Password::passes.
+// Passes reports whether the value satisfies the policy, and Message says what
+// failed when it does not.
 //
-// The PHP builds a sibling validator over `string|min:N` plus the custom rules
-// and hangs the four character checks off its after hook. This does the same,
-// with the sibling compiled from the same chain.
+// The length and the merged rules are checked by a sibling validator compiled
+// from the same chain; the four character checks run after it.
 func (p *Password) Passes(attribute string, value any) bool {
 	p.messages = nil
 
@@ -1067,18 +1039,18 @@ func (p *Password) line(key, fallback string) string {
 	return fallback
 }
 
-// Message answers to Password::message.
+// Message returns what the last Passes refused, one sentence per failed check.
 func (p *Password) Message() []string { return p.messages }
 
-// fail answers to Password::fail.
+// fail records the messages and reports false, so a check can return it
+// directly.
 func (p *Password) fail(messages ...string) bool {
 	p.messages = append(p.messages, messages...)
 
 	return false
 }
 
-// hasMixedCase is the PHP's /(\p{Ll}+.*\p{Lu})|(\p{Lu}+.*\p{Ll})/u: at least one
-// of each case, in either order.
+// hasMixedCase reports at least one letter of each case, in either order.
 func hasMixedCase(value string) bool {
 	var lower, upper bool
 	for _, r := range value {
@@ -1092,8 +1064,7 @@ func hasMixedCase(value string) bool {
 	return lower && upper
 }
 
-// isSymbolRune is the PHP's /\p{Z}|\p{S}|\p{P}/u: a separator, a symbol or a
-// punctuation mark.
+// isSymbolRune reports a separator, a symbol or a punctuation mark.
 func isSymbolRune(r rune) bool {
 	return unicode.IsSpace(r) || unicode.Is(unicode.Z, r) ||
 		unicode.IsSymbol(r) || unicode.IsPunct(r)
@@ -1109,15 +1080,14 @@ func containsRune(value string, is func(rune) bool) bool {
 }
 
 // ---------------------------------------------------------------------------
-// Rules\Enum, Rules\Can and Rules\AnyOf.
+// The three rules that need more than a rule string.
 // ---------------------------------------------------------------------------
 
-// Enum answers to Illuminate\Validation\Rules\Enum: the value must be one of the
-// cases of a type.
+// Enum is the rule that the value must be one of the cases of a type.
 //
-// PHP reads the cases off the enum class at runtime; Go has no enum and no
-// reflection is used here, so the cases are given. Only and Except then narrow
-// them exactly as the PHP narrows them.
+// Go has no enum type to read the cases off, and no reflection is used here, so
+// the cases are given. Only and Except then narrow them. Build one with
+// NewEnum.
 type Enum struct {
 	cases  []string
 	only   []string
@@ -1126,24 +1096,25 @@ type Enum struct {
 	validator *Validator
 }
 
-// NewEnum answers to the Enum constructor and to Rule::enum.
+// NewEnum returns an Enum over the given cases.
 func NewEnum(cases ...string) *Enum { return &Enum{cases: cases} }
 
-// Only answers to Enum::only.
+// Only narrows the cases to these, and nothing else passes.
 func (r *Enum) Only(values ...string) *Enum {
 	r.only = values
 
 	return r
 }
 
-// Except answers to Enum::except.
+// Except narrows the cases by removing these.
 func (r *Enum) Except(values ...string) *Enum {
 	r.except = values
 
 	return r
 }
 
-// Passes answers to Enum::passes.
+// Passes reports whether the value is one of the cases, after Only and Except
+// have narrowed them.
 func (r *Enum) Passes(attribute string, value any) bool {
 	if value == nil {
 		return false
@@ -1163,7 +1134,7 @@ func (r *Enum) Passes(attribute string, value any) bool {
 	return r.isDesirable(text)
 }
 
-// isDesirable answers to Enum::isDesirable.
+// isDesirable applies Only, then Except, to a value already known to be a case.
 func (r *Enum) isDesirable(value string) bool {
 	switch {
 	case len(r.only) > 0:
@@ -1174,20 +1145,20 @@ func (r *Enum) isDesirable(value string) bool {
 	return true
 }
 
-// Message answers to Enum::message.
+// Message returns the sentence for a value outside the cases.
 func (r *Enum) Message() []string {
 	return []string{translatedOr(r.validator, "validation.enum", "The selected :attribute is invalid.")}
 }
 
-// SetValidator answers to Enum::setValidator.
+// SetValidator hands the rule the validator running it, so that its message
+// comes from the same translator.
 func (r *Enum) SetValidator(validator *Validator) { r.validator = validator }
 
-// Can answers to Illuminate\Validation\Rules\Can: the value is one the current
-// subject is allowed to choose.
+// Can is the rule that the value is one the current subject is allowed to
+// choose.
 //
-// Laravel asks the Gate facade. RULE 17 says the same thing with the Grant, so
-// the question is asked through the Authorizer the caller gives -- there is no
-// facade to reach for (ADR 0002).
+// The question is asked through the callback the caller gives, against the
+// Grant the validator carries. Build one with NewCan.
 type Can struct {
 	ability   string
 	arguments []string
@@ -1196,15 +1167,16 @@ type Can struct {
 	validator *Validator
 }
 
-// NewCan answers to the Can constructor and to Rule::can.
+// NewCan returns a Can that asks allows about the ability.
 func NewCan(allows func(g auth.Grant, ability string, arguments []string, value any) bool, ability string, arguments ...string) *Can {
 	return &Can{ability: ability, arguments: arguments, allows: allows}
 }
 
-// Passes answers to Can::passes.
+// Passes reports what the callback says about the Grant, the ability and the
+// value.
 //
-// A nil check FAILS rather than passes: "nobody wired the authorizer" is not
-// "everybody is allowed", and RULE 17 is the reason this rule exists.
+// A missing callback FAILS rather than passes: "nobody wired the authorizer" is
+// not "everybody is allowed".
 func (r *Can) Passes(attribute string, value any) bool {
 	if r.allows == nil || r.validator == nil {
 		return false
@@ -1212,27 +1184,29 @@ func (r *Can) Passes(attribute string, value any) bool {
 	return r.allows(r.validator.grant, r.ability, r.arguments, value)
 }
 
-// Message answers to Can::message.
+// Message returns the sentence for a value the subject may not choose.
 func (r *Can) Message() []string {
 	return []string{translatedOr(r.validator, "validation.can",
 		"The :attribute field contains an unauthorized value.")}
 }
 
-// SetValidator answers to Can::setValidator.
+// SetValidator hands the rule the validator running it, which is where the Grant
+// and the translator come from.
 func (r *Can) SetValidator(validator *Validator) { r.validator = validator }
 
-// AnyOf answers to Illuminate\Validation\Rules\AnyOf: the value passes when it
-// passes any one of the given rule sets.
+// AnyOf is the rule that the value passes when it passes any one of the given
+// rule sets. Build one with NewAnyOf.
 type AnyOf struct {
 	sets []*Set
 
 	validator *Validator
 }
 
-// NewAnyOf answers to the AnyOf constructor and to Rule::anyOf.
+// NewAnyOf returns an AnyOf over the given sets.
 func NewAnyOf(sets ...*Set) *AnyOf { return &AnyOf{sets: sets} }
 
-// Passes answers to AnyOf::passes.
+// Passes reports whether the value passes any one of the sets, each run over the
+// validator's data with this attribute replaced.
 func (r *AnyOf) Passes(attribute string, value any) bool {
 	for _, set := range r.sets {
 		if set == nil {
@@ -1251,16 +1225,17 @@ func (r *AnyOf) Passes(attribute string, value any) bool {
 	return false
 }
 
-// Message answers to AnyOf::message.
+// Message returns the sentence for a value that passed none of the sets.
 func (r *AnyOf) Message() []string {
 	return []string{translatedOr(r.validator, "validation.any_of", "The :attribute field is invalid.")}
 }
 
-// SetValidator answers to AnyOf::setValidator.
+// SetValidator hands the rule the validator running it, which is where the data
+// and the translator come from.
 func (r *AnyOf) SetValidator(validator *Validator) { r.validator = validator }
 
-// translatedOr is the `$message === 'validation.x' ? [...] : $message` the three
-// rules above each write out.
+// translatedOr reads the line out of the translator, falling back to the English
+// sentence when there is no translator or no line under the key.
 func translatedOr(v *Validator, key, fallback string) string {
 	if v == nil || v.trans == nil {
 		return fallback
@@ -1281,31 +1256,30 @@ func containsString(list []string, value string) bool {
 }
 
 // ---------------------------------------------------------------------------
-// Illuminate\Validation\Rule, for the two that build no rule of their own.
+// The three that build no rule string of their own.
 // ---------------------------------------------------------------------------
 
-// When answers to Rule::when: the rules an attribute gets when a condition
-// holds, and the ones it gets when it does not.
+// When returns the rules an attribute gets when a condition holds, and the ones
+// it gets when it does not.
 func When(condition func(Data) bool, rules string, defaultRules ...string) *ConditionalRules {
 	return NewConditionalRules(condition, rules, defaultRules...)
 }
 
-// Unless answers to Rule::unless, which the PHP defines as When with the
-// condition turned around.
+// Unless is When with the condition turned around.
 func Unless(condition func(Data) bool, rules string, defaultRules ...string) *ConditionalRules {
 	return NewConditionalRules(func(data Data) bool {
 		return condition == nil || !condition(data)
 	}, rules, defaultRules...)
 }
 
-// ForEach answers to Rule::forEach: rules for one member of an array, decided by
-// looking at that member.
+// ForEach returns rules for one member of an array, decided by looking at that
+// member.
 func ForEach(callback func(value any, attribute string, data Data) Rules) *NestedRules {
 	return NewNestedRules(callback)
 }
 
-// Using answers to DatabaseRule::using: a query callback the rule runs instead
-// of the conditions it would otherwise build.
+// Using registers a query callback the rule runs instead of the conditions it
+// would otherwise build.
 //
 // The query is any because the builder belongs to hesape/database and this
 // package does not import it -- a rule carries the callback and the repository
@@ -1316,15 +1290,12 @@ func (r *DatabaseRule) Using(callback func(query any)) *DatabaseRule {
 	return r
 }
 
-// QueryCallbacks answers to DatabaseRule::queryCallbacks.
+// QueryCallbacks returns the callbacks Using registered.
 func (r *DatabaseRule) QueryCallbacks() []func(query any) { return r.using }
 
-// IgnoreModel answers to Unique::ignoreModel: the row being edited, named by its
-// key rather than by the record itself.
-//
-// The PHP takes an Eloquent model and reads $model->getKeyName() off it. There
-// is no Active Record here (docs/01 rejects it), so the key and its column are
-// what arrive -- which is the only thing the PHP reads off the model anyway.
+// IgnoreModel names the row being edited by its key rather than by the record
+// itself. There are no records to pass here, so it is Ignore under a second
+// name.
 func (r *Unique) IgnoreModel(key string, idColumn ...string) *Unique {
 	return r.Ignore(key, idColumn...)
 }

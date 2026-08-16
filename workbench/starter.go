@@ -10,20 +10,16 @@ import (
 
 // StarterDepth is how far below the workbench path [Start] looks for a module.
 //
-// It is PHP's depth('<= 3') on the Finder, and it is enough for the
-// vendor/name/go.mod that [PackageCreator.Create] writes.
+// Three is enough for the vendor/name/go.mod that [PackageCreator.Create]
+// writes.
 const StarterDepth = 3
 
-// Start answers to Illuminate\Workbench\Starter::start.
+// Start finds the modules below the workbench path and returns their
+// directories, sorted.
 //
-// PHP finds every autoload.php below the workbench path and requires it, which
-// makes the packages in there loadable by the running application. Go has no
-// runtime require and no autoloader: what makes a local module reachable from
-// the application that imports it is a go.work entry, decided before the build
-// rather than during it.
-//
-// So this finds the modules and returns their directories, sorted, and the
-// caller does the one thing left:
+// It loads nothing: what makes a local module reachable from the application
+// that imports it is a go.work entry, decided before the build rather than
+// during it. So the caller does the one thing left:
 //
 //	directories, err := workbench.Start("./workbench")
 //	if err != nil {
@@ -38,7 +34,7 @@ const StarterDepth = 3
 // between two machines.
 //
 // A path that does not exist is not an error: it is a project with no workbench,
-// which is nearly all of them. It answers nil.
+// which is nearly all of them. It returns nil.
 func Start(path string) ([]string, error) {
 	root, err := os.Stat(path)
 	if err != nil {
@@ -57,9 +53,8 @@ func Start(path string) ([]string, error) {
 			return err
 		}
 		if entry.IsDir() {
-			// PHP bounds the search with depth('<= 3'); the same bound here
-			// keeps a stray vendor/ or a nested checkout from being walked in
-			// full on every call.
+			// The depth bound keeps a stray vendor/ or a nested checkout from
+			// being walked in full on every call.
 			if depth(path, current) > StarterDepth {
 				return fs.SkipDir
 			}

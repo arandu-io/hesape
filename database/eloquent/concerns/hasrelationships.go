@@ -8,18 +8,15 @@ import (
 	"github.com/arandu-io/hesape/str"
 )
 
-// HasRelationships answers
-// Illuminate\Database\Eloquent\Concerns\HasRelationships: the loaded-relations
-// bag on the model, and the factories that build a relation from a pair of
-// models.
+// HasRelationships is the loaded-relations bag on the model, and the factories
+// that build a relation from a pair of models.
 //
-// The factories are functions rather than methods because they need both ends
-// -- PHP reaches the second through `new $related`, and a class name is not a
-// type here. What they keep from the PHP is the guessing: pass the empty string
-// for a key and the convention fills it in, which is the PHP's null.
+// The factories are functions rather than methods because they need both ends,
+// and the second is a type this one cannot construct from a name. They still
+// guess: pass the empty string for a key and the convention fills it in.
 type HasRelationships struct {
 	// MorphClass is the alias this model is registered under in the morph map.
-	// It is what GetMorphClass answers and what a *_type column holds.
+	// It is what GetMorphClass returns and what a *_type column holds.
 	MorphClass string
 
 	relations map[string]any
@@ -28,7 +25,7 @@ type HasRelationships struct {
 	resolvers map[string]func(any) relations.Relation
 }
 
-// GetRelations answers HasRelationships::getRelations.
+// GetRelations returns every loaded relation.
 func (h *HasRelationships) GetRelations() map[string]any {
 	if h.relations == nil {
 		h.relations = map[string]any{}
@@ -36,32 +33,32 @@ func (h *HasRelationships) GetRelations() map[string]any {
 	return h.relations
 }
 
-// GetRelation answers HasRelationships::getRelation.
+// GetRelation returns the value loaded for a relation, and whether it was
+// loaded at all.
 //
-// The second result reports whether it was loaded, where the PHP throws
-// RelationNotFoundException. The difference matters here more than there: a
-// relation that was never loaded and a relation that is legitimately empty are
-// the same value in Go, and only this flag tells them apart.
+// A relation that was never loaded and a relation that is legitimately
+// empty are the same value in Go, and only the second result tells them
+// apart.
 func (h *HasRelationships) GetRelation(relation string) (any, bool) {
 	value, ok := h.GetRelations()[relation]
 	return value, ok
 }
 
-// RelationLoaded answers HasRelationships::relationLoaded.
+// RelationLoaded reports whether relation has a loaded value.
 func (h *HasRelationships) RelationLoaded(relation string) bool {
 	_, ok := h.GetRelations()[relation]
 	return ok
 }
 
-// SetRelation answers HasRelationships::setRelation.
+// SetRelation records value as the loaded relation named relation.
 func (h *HasRelationships) SetRelation(relation string, value any) {
 	h.GetRelations()[relation] = value
 }
 
-// UnsetRelation answers HasRelationships::unsetRelation.
+// UnsetRelation removes the loaded relation named relation.
 func (h *HasRelationships) UnsetRelation(relation string) { delete(h.GetRelations(), relation) }
 
-// SetRelations answers HasRelationships::setRelations.
+// SetRelations replaces every loaded relation.
 func (h *HasRelationships) SetRelations(values map[string]any) {
 	h.relations = map[string]any{}
 	for name, value := range values {
@@ -69,23 +66,25 @@ func (h *HasRelationships) SetRelations(values map[string]any) {
 	}
 }
 
-// UnsetRelations answers HasRelationships::unsetRelations.
+// UnsetRelations removes every loaded relation.
 func (h *HasRelationships) UnsetRelations() { h.relations = map[string]any{} }
 
-// GetTouchedRelations answers HasRelationships::getTouchedRelations.
+// GetTouchedRelations returns the relations whose owner gets touched when
+// this model is saved.
 func (h *HasRelationships) GetTouchedRelations() []string { return h.touches }
 
-// SetTouchedRelations answers HasRelationships::setTouchedRelations.
+// SetTouchedRelations replaces the relations whose owner gets touched when
+// this model is saved.
 func (h *HasRelationships) SetTouchedRelations(touches []string) { h.touches = touches }
 
-// Touches answers HasRelationships::touches.
+// Touches reports whether relation is in the touched list.
 func (h *HasRelationships) Touches(relation string) bool { return contains(h.touches, relation) }
 
-// GetMorphClass answers HasRelationships::getMorphClass.
+// GetMorphClass returns the alias this model is registered under in the
+// morph map.
 func (h *HasRelationships) GetMorphClass() string { return h.MorphClass }
 
-// GetMorphs answers HasRelationships::getMorphs: the pair of column names a
-// polymorphic relation reads.
+// GetMorphs returns the pair of column names a polymorphic relation reads.
 func GetMorphs(name, typ, id string) (string, string) {
 	if typ == "" {
 		typ = name + "_type"
@@ -96,8 +95,8 @@ func GetMorphs(name, typ, id string) (string, string) {
 	return typ, id
 }
 
-// JoiningTable answers HasRelationships::joiningTable: the conventional name of
-// an intermediate table, the two model names in alphabetical order.
+// JoiningTable returns the conventional name of an intermediate table, the
+// two model names in alphabetical order.
 //
 // Alphabetical is what makes it the same table from both sides -- role_user
 // whether you start at the user or at the role -- and it is why a many-to-many
@@ -111,26 +110,26 @@ func JoiningTable(parent, related relations.Model) string {
 	return strings.Join(segments, "_")
 }
 
-// HasOne answers HasRelationships::hasOne.
+// HasOne returns a has-one relation from parent to related.
 //
-// An empty foreignKey is the PHP's null: the parent's conventional foreign key,
+// An empty foreignKey defaults to the parent's conventional foreign key,
 // user_id for a model whose alias is user.
 func HasOne(parent, related relations.Model, foreignKey, localKey string) *relations.HasOne {
 	foreignKey, localKey = defaultHasKeys(parent, foreignKey, localKey)
 	return relations.NewHasOne(related.NewQuery(), parent, related.QualifyColumn(foreignKey), localKey)
 }
 
-// HasMany answers HasRelationships::hasMany.
+// HasMany returns a has-many relation from parent to related.
 func HasMany(parent, related relations.Model, foreignKey, localKey string) *relations.HasMany {
 	foreignKey, localKey = defaultHasKeys(parent, foreignKey, localKey)
 	return relations.NewHasMany(related.NewQuery(), parent, related.QualifyColumn(foreignKey), localKey)
 }
 
-// BelongsTo answers HasRelationships::belongsTo.
+// BelongsTo returns a belongs-to relation from child to related.
 //
-// relation is the name the relation is read under, and it is required where the
-// PHP guesses it from the calling method's name through debug_backtrace. It is
-// not decoration: associate and dissociate write the loaded relation under it.
+// relation is the name the relation is read under, and it is required
+// rather than guessed from the call site. It is not decoration: associate
+// and dissociate write the loaded relation under it.
 func BelongsTo(child, related relations.Model, foreignKey, ownerKey, relation string) *relations.BelongsTo {
 	if foreignKey == "" {
 		foreignKey = str.Snake(relation, "_") + "_" + related.GetKeyName()
@@ -141,7 +140,7 @@ func BelongsTo(child, related relations.Model, foreignKey, ownerKey, relation st
 	return relations.NewBelongsTo(related.NewQuery(), child, foreignKey, ownerKey, relation)
 }
 
-// MorphOne answers HasRelationships::morphOne.
+// MorphOne returns a morph-one relation from parent to related.
 func MorphOne(parent, related relations.Model, name, typ, id, localKey string) *relations.MorphOne {
 	typ, id = GetMorphs(name, typ, id)
 	if localKey == "" {
@@ -150,7 +149,7 @@ func MorphOne(parent, related relations.Model, name, typ, id, localKey string) *
 	return relations.NewMorphOne(related.NewQuery(), parent, related.QualifyColumn(typ), related.QualifyColumn(id), localKey)
 }
 
-// MorphMany answers HasRelationships::morphMany.
+// MorphMany returns a morph-many relation from parent to related.
 func MorphMany(parent, related relations.Model, name, typ, id, localKey string) *relations.MorphMany {
 	typ, id = GetMorphs(name, typ, id)
 	if localKey == "" {
@@ -159,18 +158,17 @@ func MorphMany(parent, related relations.Model, name, typ, id, localKey string) 
 	return relations.NewMorphMany(related.NewQuery(), parent, related.QualifyColumn(typ), related.QualifyColumn(id), localKey)
 }
 
-// MorphTo answers HasRelationships::morphTo.
+// MorphTo returns a morph-to relation on parent.
 //
-// related is the model whose query the relation starts from. In PHP there is
-// none until the type column is read, and the builder is built per type inside
-// getEager; the same happens here -- this one only carries a connection and is
-// replaced per type -- but Go needs something concrete to start with.
+// related only carries a connection to start from, and is replaced per
+// type once the type column is read: Go needs something concrete to start
+// with, where the query is otherwise built fresh per type.
 func MorphTo(parent, related relations.Model, name, typ, id, ownerKey string) *relations.MorphTo {
 	typ, id = GetMorphs(str.Snake(name, "_"), typ, id)
 	return relations.NewMorphTo(related.NewQuery(), parent, id, ownerKey, typ, name)
 }
 
-// BelongsToMany answers HasRelationships::belongsToMany.
+// BelongsToMany returns a many-to-many relation from parent to related.
 func BelongsToMany(parent, related relations.Model, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relation string) *relations.BelongsToMany {
 	if table == "" {
 		table = JoiningTable(parent, related)
@@ -194,7 +192,8 @@ func BelongsToMany(parent, related relations.Model, table, foreignPivotKey, rela
 	)
 }
 
-// MorphToMany answers HasRelationships::morphToMany.
+// MorphToMany returns a polymorphic many-to-many relation from parent to
+// related.
 func MorphToMany(parent, related relations.Model, name, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relation string, inverse bool) *relations.MorphToMany {
 	if table == "" {
 		table = str.Plural(name)
@@ -218,8 +217,8 @@ func MorphToMany(parent, related relations.Model, name, table, foreignPivotKey, 
 	)
 }
 
-// MorphedByMany answers HasRelationships::morphedByMany: the other side of a
-// morphToMany, where this model is what the intermediate table points at.
+// MorphedByMany returns the other side of a MorphToMany, where this model
+// is what the intermediate table points at.
 func MorphedByMany(parent, related relations.Model, name, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relation string) *relations.MorphToMany {
 	if foreignPivotKey == "" {
 		foreignPivotKey = parent.GetForeignKey()
@@ -230,13 +229,15 @@ func MorphedByMany(parent, related relations.Model, name, table, foreignPivotKey
 	return MorphToMany(parent, related, name, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relation, true)
 }
 
-// HasManyThrough answers HasRelationships::hasManyThrough.
+// HasManyThrough returns a has-many-through relation from farParent to
+// related.
 func HasManyThrough(farParent, through, related relations.Model, firstKey, secondKey, localKey, secondLocalKey string) *relations.HasManyThrough {
 	firstKey, secondKey, localKey, secondLocalKey = defaultThroughKeys(farParent, through, firstKey, secondKey, localKey, secondLocalKey)
 	return relations.NewHasManyThrough(related.NewQuery(), farParent, through, firstKey, secondKey, localKey, secondLocalKey)
 }
 
-// HasOneThrough answers HasRelationships::hasOneThrough.
+// HasOneThrough returns a has-one-through relation from farParent to
+// related.
 func HasOneThrough(farParent, through, related relations.Model, firstKey, secondKey, localKey, secondLocalKey string) *relations.HasOneThrough {
 	firstKey, secondKey, localKey, secondLocalKey = defaultThroughKeys(farParent, through, firstKey, secondKey, localKey, secondLocalKey)
 	return relations.NewHasOneThrough(related.NewQuery(), farParent, through, firstKey, secondKey, localKey, secondLocalKey)

@@ -5,20 +5,18 @@ import (
 	"strings"
 )
 
-// ValidationException answers to Illuminate\Validation\ValidationException: the
-// error a failed Validate carries, and what a controller catches to answer 422.
+// ValidationException is the error a failed Validate carries, and what a
+// controller reads to answer 422.
 //
-// The PHP is thrown and this is returned, which is the one change Go forces.
-// Everything a caller reads off it is the PHP's: Errors for the bag, GetStatus
-// for the code, GetErrorBag for the named bag a redirect flashes it into, and
-// GetRedirectTo for where that redirect goes.
+// Errors is the bag, GetStatus the code, GetErrorBag the named bag a redirect
+// flashes it into, and GetRedirectTo where that redirect goes.
 type ValidationException struct {
-	// validator answers to the public $validator.
+	// validator is the run that failed.
 	validator *Validator
 
-	// response answers to the public $response: the answer the HTTP layer
-	// already prepared, when it prepared one. It is any because the response
-	// belongs to that layer and this package does not import it.
+	// response is the answer the HTTP layer already prepared, when it prepared
+	// one. It is any because the response belongs to that layer and this
+	// package does not import it.
 	response any
 
 	status     int
@@ -28,15 +26,14 @@ type ValidationException struct {
 	message string
 }
 
-// The status a failed validation answers with, which is Laravel's default and
-// the number every client is written against.
+// The status a failed validation answers with, and the number every client is
+// written against.
 const defaultValidationStatus = 422
 
-// NewValidationException answers to the ValidationException constructor.
+// NewValidationException returns the error a failed run is turned into.
 //
-// The PHP's $response and $errorBag default to null and "default"; the variadic
-// response is how Go spells the first, and the bag starts at "default" and is
-// changed with ErrorBag.
+// The variadic response is the answer the HTTP layer already prepared, when it
+// prepared one. The bag starts at "default" and is changed with ErrorBag.
 func NewValidationException(validator *Validator, response ...any) *ValidationException {
 	e := &ValidationException{
 		validator: validator,
@@ -51,8 +48,8 @@ func NewValidationException(validator *Validator, response ...any) *ValidationEx
 	return e
 }
 
-// WithMessages answers to ValidationException::withMessages: an exception built
-// from a plain map of messages, for a failure that no rule produced.
+// WithMessages returns an exception built from a plain map of messages, for a
+// failure that no rule produced.
 func WithMessages(messages map[string][]string) *ValidationException {
 	validator := Make(Data{}, &Set{byName: map[string]*field{}})
 	validator.messages = Errors{}
@@ -66,8 +63,8 @@ func WithMessages(messages map[string][]string) *ValidationException {
 	return NewValidationException(validator)
 }
 
-// summarizeValidation answers to ValidationException::summarize: the first
-// message, and how many more there were.
+// summarizeValidation renders the first message, and how many more there
+// were.
 func summarizeValidation(validator *Validator) string {
 	if validator == nil {
 		return "The given data was invalid."
@@ -92,11 +89,11 @@ func summarizeValidation(validator *Validator) string {
 	return message
 }
 
-// Error is the summary the PHP passes to the Exception constructor.
+// Error is the summary: the first message, and how many more there were.
 func (e *ValidationException) Error() string { return e.message }
 
-// Errors answers to ValidationException::errors: every validation message, keyed
-// by the field it belongs to. It is what a controller turns into a 422 body.
+// Errors returns every validation message, keyed by the field it belongs to. It
+// is what a controller turns into a 422 body.
 func (e *ValidationException) Errors() map[string][]string {
 	if e.validator == nil {
 		return map[string][]string{}
@@ -104,25 +101,23 @@ func (e *ValidationException) Errors() map[string][]string {
 	return e.validator.Errors().Messages()
 }
 
-// Validator answers to the public $validator.
+// Validator returns the run that failed.
 func (e *ValidationException) Validator() *Validator { return e.validator }
 
-// Status answers to ValidationException::status: the HTTP status code to answer
-// with. It returns the exception, as the PHP returns $this.
+// Status sets the HTTP status code to answer with. It returns the exception, so
+// calls chain.
 func (e *ValidationException) Status(status int) *ValidationException {
 	e.status = status
 
 	return e
 }
 
-// GetStatus reads the code Status set. The PHP reads the public $status
-// directly; a Go field cannot carry the same name as the method that sets it, so
-// the pair is spelled the way GetResponse already is.
+// GetStatus reads the code Status set. A field cannot carry the same name as the
+// method that sets it, so the pair is spelled the way GetResponse already is.
 func (e *ValidationException) GetStatus() int { return e.status }
 
-// ErrorBag answers to ValidationException::errorBag: the name of the bag a
-// redirect flashes the messages into, so that two forms on one page do not draw
-// each other's errors.
+// ErrorBag names the bag a redirect flashes the messages into, so that two forms
+// on one page do not draw each other's errors.
 func (e *ValidationException) ErrorBag(errorBag string) *ValidationException {
 	e.errorBag = errorBag
 
@@ -132,8 +127,8 @@ func (e *ValidationException) ErrorBag(errorBag string) *ValidationException {
 // GetErrorBag reads the bag ErrorBag named, for the reason GetStatus exists.
 func (e *ValidationException) GetErrorBag() string { return e.errorBag }
 
-// RedirectTo answers to ValidationException::redirectTo: where the client is
-// sent back to, which is the form it came from.
+// RedirectTo names where the client is sent back to, which is the form it came
+// from.
 func (e *ValidationException) RedirectTo(url string) *ValidationException {
 	e.redirectTo = url
 
@@ -143,7 +138,7 @@ func (e *ValidationException) RedirectTo(url string) *ValidationException {
 // GetRedirectTo reads the URL RedirectTo named, for the reason GetStatus exists.
 func (e *ValidationException) GetRedirectTo() string { return e.redirectTo }
 
-// GetResponse answers to ValidationException::getResponse.
+// GetResponse returns the answer the HTTP layer prepared, when it prepared one.
 func (e *ValidationException) GetResponse() any { return e.response }
 
 // sortedKeys is the stable order a Go map has none of.

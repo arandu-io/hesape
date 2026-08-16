@@ -2,26 +2,26 @@ package eloquent
 
 import "reflect"
 
-// Scope answers Illuminate\Database\Eloquent\Scope: a filter every query on a
-// model carries until somebody removes it by name.
+// Scope is a filter every query on a model carries until somebody removes it by
+// name.
 type Scope[T any] interface {
-	// Apply answers Scope::apply.
+	// Apply adds the scope's filter to builder's query.
 	Apply(builder *Builder[T], model *Model[T])
 }
 
-// ScopeExtender is the optional half of a Scope: Illuminate calls extend() when
-// the scope has it, which is how SoftDeletingScope hangs withTrashed and
-// onlyTrashed off the builder. PHP asks method_exists; Go asks the type.
+// ScopeExtender is the optional half of a Scope: it is called when the scope
+// implements it, which is how SoftDeletingScope hangs WithTrashed and
+// OnlyTrashed off the builder.
 type ScopeExtender[T any] interface {
-	// Extend answers Scope::extend.
+	// Extend adds whatever methods or state this scope hangs off builder.
 	Extend(builder *Builder[T])
 }
 
-// AddGlobalScope answers HasGlobalScopes::addGlobalScope.
+// AddGlobalScope registers scope under identifier: every query on the model
+// carries it until WithoutGlobalScope removes it by that name.
 //
-// The identifier is the class name in PHP, where a scope is always a class. Here
-// it is given, because a closure has no name and because removing a scope by
-// name is the whole point of WithoutGlobalScope.
+// The identifier is given rather than derived, because a closure scope (see
+// ScopeFunc) has no name of its own.
 func (m *Model[T]) AddGlobalScope(identifier string, scope Scope[T]) *Model[T] {
 	if m.globalScopes == nil {
 		m.globalScopes = map[string]Scope[T]{}
@@ -30,20 +30,20 @@ func (m *Model[T]) AddGlobalScope(identifier string, scope Scope[T]) *Model[T] {
 	return m
 }
 
-// GetGlobalScopes answers HasGlobalScopes::getGlobalScopes.
+// GetGlobalScopes returns every scope registered on the model.
 func (m *Model[T]) GetGlobalScopes() map[string]Scope[T] { return cloneScopes(m.globalScopes) }
 
-// HasGlobalScope answers HasGlobalScopes::hasGlobalScope.
+// HasGlobalScope reports whether a scope is registered under identifier.
 func (m *Model[T]) HasGlobalScope(identifier string) bool {
 	_, ok := m.globalScopes[identifier]
 	return ok
 }
 
-// funcScope is a Scope written as a function, which is what passing a Closure to
-// addGlobalScope does in PHP.
+// funcScope is a Scope written as a function, for the closure form of
+// AddGlobalScope.
 type funcScope[T any] func(*Builder[T])
 
-// Apply answers Scope::apply.
+// Apply calls f with builder.
 func (f funcScope[T]) Apply(builder *Builder[T], _ *Model[T]) { f(builder) }
 
 // ScopeFunc wraps a function as a Scope, for the closure form of
@@ -61,8 +61,8 @@ func cloneScopes[T any](in map[string]Scope[T]) map[string]Scope[T] {
 	return out
 }
 
-// scopeIdentifier answers what PHP's get_class($scope) gives withoutGlobalScope
-// when it is handed the scope rather than its name.
+// scopeIdentifier returns the type name of scope, for removing a scope that
+// was registered by value rather than by name.
 func scopeIdentifier[T any](scope Scope[T]) string {
 	t := reflect.TypeOf(scope)
 	if t == nil {

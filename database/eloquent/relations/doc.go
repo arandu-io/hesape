@@ -1,36 +1,12 @@
-// Package relations mirrors Illuminate\Database\Eloquent\Relations: the sixteen
-// relation types, and the eager loading that keeps them from being N+1 queries.
+// Package relations holds the sixteen relation types, and the eager loading that
+// keeps them from being N+1 queries.
 //
-// The source is the clone at laravel_illuminate/database/Eloquent/Relations,
-// read as PHP rather than as documentation -- the bodies decide, because a
-// method with the right name and the wrong behaviour is worse than a missing
-// one: nobody checks it.
-//
-//	Relation.php            -> relation.go, morphmap.go
-//	HasOneOrMany.php        -> hasoneormany.go
-//	HasOne.php              -> hasone.go
-//	HasMany.php             -> hasmany.go
-//	BelongsTo.php           -> belongsto.go
-//	BelongsToMany.php       -> belongstomany.go
-//	MorphOneOrMany.php      -> morphoneormany.go
-//	MorphOne.php            -> morphone.go
-//	MorphMany.php           -> morphmany.go
-//	MorphTo.php             -> morphto.go
-//	MorphToMany.php         -> morphtomany.go
-//	HasOneOrManyThrough.php -> hasoneormanythrough.go
-//	HasOneThrough.php       -> hasoneormanythrough.go
-//	HasManyThrough.php      -> hasoneormanythrough.go
-//	Pivot.php               -> pivot.go
-//	MorphPivot.php          -> pivot.go
-//
-// The thirteen walking methods that BelongsToMany and HasOneOrManyThrough each
-// declare -- chunk, chunkById, chunkByIdDesc, orderedChunkById, each, eachById,
-// lazy, lazyById, lazyByIdDesc, cursor, paginate, simplePaginate and
-// cursorPaginate -- have one body between them, in chunking.go. The two PHP
-// classes write them out twice because they sit on opposite branches of the
-// hierarchy and share no parent that could hold them; the only line that
-// differs is BelongsToMany hydrating the pivot on each page, which is a field
-// of the shared body rather than a second copy of it.
+// The thirteen walking methods BelongsToMany and HasOneOrManyThrough each expose
+// -- Chunk, ChunkByID, ChunkByIDDesc, OrderedChunkByID, Each, EachByID, Lazy,
+// LazyByID, LazyByIDDesc, Cursor, Paginate, SimplePaginate and CursorPaginate --
+// have one body between them, in chunking.go. The only line that differs is
+// BelongsToMany hydrating the pivot on each page, which is a field of the shared
+// body rather than a second copy of it.
 //
 // # The four methods
 //
@@ -45,14 +21,14 @@
 //
 // # Every read takes the Grant, and every read filters by tenant
 //
-// RULE 17 has no read half that is optional. GetResults, Get, First, GetEager,
-// Attach, Detach and Sync all take a context and an auth.Grant, and every
-// statement is narrowed to auth.Tenant(g) before it leaves -- on the eager path
-// as much as the lazy one. The eager path is where it matters most: a with()
-// whose parent query is correctly scoped and whose child query is not returns
-// the right parents carrying another customer's children, and every row on the
-// screen looks like it belongs there. A Grant carrying no tenant is refused
-// rather than compiled into `tenant_id = ”`.
+// GetResults, Get, First, GetEager, Attach, Detach and Sync all take a context
+// and an auth.Grant, and every statement is narrowed to auth.Tenant(g) before it
+// leaves -- on the eager path as much as the lazy one. The eager path is where
+// it matters most: a parent query that is correctly scoped and a child query
+// that is not returns the right parents carrying another customer's children,
+// and every row on the screen looks like it belongs there. A Grant carrying no
+// tenant is refused rather than compiled into a comparison with the empty
+// string.
 //
 // The query builder decides no such thing -- it builds SQL. What is enforced
 // here is that a relation cannot be executed without the Grant that authorized
@@ -60,27 +36,20 @@
 //
 // # The morph map is mandatory here, and that is the trade being bought
 //
-// In PHP the *_type column can hold a class name, and Eloquent instantiates it.
-// There is no class name at run time in Go, so the column holds an alias
-// registered with MorphMap and the type it names can be renamed, moved or split
-// without a single stored row becoming unreadable. Laravel recommends the map
-// for exactly this reason; here it is the mechanism rather than the advice, and
-// an unregistered alias is an error that says which alias and what is
-// registered.
+// There is no type resolved from a name at run time in Go, so a *_type column
+// holds an alias registered with MorphMap. The type it names can then be
+// renamed, moved or split without a single stored row becoming unreadable. An
+// unregistered alias is an error that says which alias and what is registered.
 //
-// # What Go changed, and what it did not
+// # Construction and overrides
 //
-// The names are Illuminate's, capitalized (ADR 0044): Where, OrderBy, Attach,
-// Detach, Sync, SyncWithoutDetaching, WithPivot, WithTimestamps, As. The
-// mechanical changes are three, and each is written where it happens: a method
-// that throws returns (T, error); an initialism is upper case (parseIds ->
-// ParseIDs, laravel_through_key -> ThroughKey); and a PHP trait becomes a
-// struct to embed whose abstract methods arrive as function fields.
+// An initialism is upper case: ParseIDs, ThroughKey. A shared behaviour is a
+// struct to embed, and the parts a subtype must supply arrive as function
+// fields.
 //
-// The one shape that had to move is virtual dispatch. The PHP constructor ends
-// with $this->addConstraints() and late binding sends it to the subclass; Go
-// embedding does not, so each concrete constructor calls its own AddConstraints
-// as its last statement, and an override the parent needs to reach -- the
-// aliased pivot columns, the one-of-many relation query -- is a field the
-// subtype sets rather than a method it redeclares.
+// The one shape that had to move is virtual dispatch. Go embedding does not
+// dispatch to the outer type, so each concrete constructor calls its own
+// AddConstraints as its last statement, and an override the shared half needs to
+// reach -- the aliased pivot columns, the one-of-many relation query -- is a
+// field the subtype sets rather than a method it redeclares.
 package relations

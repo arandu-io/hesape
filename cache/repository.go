@@ -16,29 +16,25 @@ import (
 
 // foreverTTL is the deadline Forever, RememberForever and Sear write.
 //
-// Laravel's forever means "no expiry recorded". A Store here is promised a
-// positive ttl -- that promise is what lets every backend skip deciding what
-// zero means -- so forever is the longest deadline the package is willing to
-// write down instead of a special case that every adapter would implement
-// slightly differently.
+// A Store here is promised a positive ttl -- that promise is what lets every
+// backend skip deciding what zero means -- so forever is the longest deadline
+// the package is willing to write down instead of a special case that every
+// adapter would implement slightly differently.
 //
 // A century, and not the largest duration Go can hold, because an adapter that
 // turns a ttl into a unix timestamp for a server to store must be able to hold
 // the answer.
 const foreverTTL = 100 * 365 * 24 * time.Hour
 
-// defaultCacheTime is the default number of seconds an item is stored for.
-//
-// It answers the $default = 3600 of Illuminate\Cache\Repository, hour for hour.
+// defaultCacheTime is how long an item is stored for when no ttl is given.
 const defaultCacheTime = time.Hour
 
 // Repository is the cache an application calls.
 //
-// It answers Illuminate\Cache\Repository, and it is the tenant-scoped,
-// JSON-encoding, expiry-enforcing layer over a Store -- the only one of the two
-// that an application ever holds. Every method takes an auth.Grant, and the
-// tenant comes from it: not from the request, not from a field somebody filled
-// in (RULE 14).
+// It is the tenant-scoped, JSON-encoding, expiry-enforcing layer over a Store --
+// the only one of the two that an application ever holds. Every method takes an
+// auth.Grant, and the tenant comes from it: not from the request, not from a
+// field somebody filled in.
 //
 // It does not run a policy. Holding a Grant is already proof that one ran:
 // Grant has no exported fields and cannot be written as a literal, so a caller
@@ -49,15 +45,13 @@ type Repository struct {
 	store     Store
 	namespace string
 
-	// name answers config['store']: the name the manager knows this store by.
-	// It is empty on a repository built with New, and it is what GetName --
-	// and therefore every event -- reports.
+	// name is the name the manager knows this store by. It is empty on a
+	// repository built with New, and it is what GetName -- and therefore every
+	// event -- reports.
 	name string
 
-	// defaultTTL answers $default. Laravel reads it in one place -- the
-	// ArrayAccess write, $cache['k'] = $v -- which Go has no syntax for, and
-	// hands it to every TaggedCache tags() builds, which is what it is still
-	// here for.
+	// defaultTTL is carried into every TaggedCache that Tags builds. Nothing on
+	// this type takes an optional ttl, so that is the whole of its job here.
 	defaultTTL time.Duration
 
 	// tags is nil on an untagged repository. When it is not, every key this
@@ -65,17 +59,16 @@ type Repository struct {
 	// the generation orphans every entry at once. See TaggedCache.
 	tags *TagSet
 
-	// events answers $events. It is nil until SetEventDispatcher, and a nil one
-	// fires nothing -- which is what Laravel's "$this->events?->dispatch()"
-	// does, and what keeps a cache built without a bus from needing one.
+	// events is nil until SetEventDispatcher, and a nil one fires nothing,
+	// which keeps a cache built without a bus from needing one.
 	events Dispatcher
 }
 
 // New returns a repository over a store, under the default namespace.
 //
-// It answers Repository::__construct(). Use Namespace to separate caches of
-// different kinds: "user", "invoice-total". Two namespaces over one store
-// cannot collide, and clearing one leaves the other alone.
+// Use Namespace to separate caches of different kinds: "user",
+// "invoice-total". Two namespaces over one store cannot collide, and clearing
+// one leaves the other alone.
 func New(s Store) *Repository {
 	return &Repository{store: s, namespace: "cache", defaultTTL: defaultCacheTime}
 }
@@ -98,19 +91,17 @@ func (r *Repository) Namespace(name string) *Repository {
 
 // Has reports whether a key is present and unexpired.
 //
-// It answers Repository::has(), which is "! is_null($this->get($key))" -- so it
-// is a read, and it fires the same events a read fires. A hit rate computed from
-// CacheHit and CacheMissed counts these, in Laravel and here, which is one more
-// reason not to ask before reading.
+// It is a read, and it fires the same events a read fires. A hit rate computed
+// from CacheHit and CacheMissed counts these, which is one more reason not to
+// ask before reading.
 //
 // Whoever is about to read the value should call Get instead: asking and then
 // reading is two round trips and a race, and the answer to "is it there" is
 // already in Get's error.
 //
-// A key cached as null is present. Laravel's has() says it is not, because null
-// is how its store reports an absence; here ErrNotFound reports it, and "not
-// cached" and "cached as nothing" stay different -- which is the whole reason
-// ErrNotFound exists.
+// A key cached as null is present: ErrNotFound is what reports an absence, so
+// "not cached" and "cached as nothing" stay different -- which is the whole
+// reason ErrNotFound exists.
 func (r *Repository) Has(ctx context.Context, g auth.Grant, key string) (bool, error) {
 	if _, err := Get[any](ctx, r, g, key); err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -121,9 +112,9 @@ func (r *Repository) Has(ctx context.Context, g auth.Grant, key string) (bool, e
 	return true, nil
 }
 
-// Missing reports whether a key is absent. It answers Repository::missing(),
-// and like the PHP it is the negation of Has and nothing else -- it exists
-// because "if (! Cache::has(...))" reads worse than "if Cache::missing(...)".
+// Missing reports whether a key is absent. It is the negation of Has and
+// nothing else -- it exists because "if !has" reads worse than "if missing" at
+// the call site.
 func (r *Repository) Missing(ctx context.Context, g auth.Grant, key string) (bool, error) {
 	has, err := r.Has(ctx, g, key)
 	if err != nil {
@@ -134,22 +125,16 @@ func (r *Repository) Missing(ctx context.Context, g auth.Grant, key string) (boo
 
 // Put stores a value for ttl, replacing whatever was there.
 //
-// It answers Repository::put(). A ttl that has already passed forgets the key
-// rather than writing it -- "if ($seconds <= 0) return $this->forget($key)" --
-// because an entry that expires the moment it is written and an entry that is
-// not there are the same entry, and the shorter of the two ways to say it is
-// the one the caller wrote.
+// A ttl that has already passed forgets the key rather than writing it, because
+// an entry that expires the moment it is written and an entry that is not there
+// are the same entry, and the shorter of the two ways to say it is the one the
+// caller wrote. Refusing the write instead would leave the previous value in
+// place: the caller would have told the cache to stop serving something and the
+// cache would go on serving it.
 //
-// This used to return ErrNoTTL and write nothing, which is the opposite: with
-// Put(k, "old", time.Minute) followed by Put(k, "new", 0), the second call was
-// refused and k went on reading "old". The caller had told the cache to stop
-// serving a value and the cache kept serving it. Found by audit.
-//
-// The ttl is still required rather than optional, which is where this parts
-// company with the PHP's default of null: Laravel treats a null ttl as forever,
-// and an entry with no expiry is a second copy of the truth that nobody knows
-// exists. Call Forever when that is what you mean, so it is written down at the
-// call site.
+// The ttl is required rather than optional, because an entry with no expiry is
+// a second copy of the truth that nobody knows exists. Call Forever when that
+// is what you mean, so it is written down at the call site.
 func (r *Repository) Put(ctx context.Context, g auth.Grant, key string, value any, ttl time.Duration) error {
 	if ttl <= 0 {
 		return r.Forget(ctx, g, key)
@@ -163,7 +148,7 @@ func (r *Repository) Put(ctx context.Context, g auth.Grant, key string, value an
 // put is the write itself, without the events.
 //
 // It exists so PutMany can fire WritingManyKeys once for the batch instead of
-// WritingKey once per key, which is what Repository::putMany does.
+// WritingKey once per key.
 func (r *Repository) put(ctx context.Context, g auth.Grant, key string, value any, ttl time.Duration) error {
 	full, err := r.key(ctx, g, key)
 	if err != nil {
@@ -179,24 +164,21 @@ func (r *Repository) put(ctx context.Context, g auth.Grant, key string, value an
 	return r.store.Put(ctx, full, raw, ttl)
 }
 
-// Set is Put. It answers Repository::set(), which is the PSR-16 spelling of the
-// same call and which Laravel implements as "return $this->put(...)".
+// Set is Put under another name.
 func (r *Repository) Set(ctx context.Context, g auth.Grant, key string, value any, ttl time.Duration) error {
 	return r.Put(ctx, g, key, value, ttl)
 }
 
 // PutMany stores several values under one ttl.
 //
-// It answers Repository::putMany(). It is a loop, and it is honest about being
-// one: it is not atomic, and a failure part-way through leaves the entries it
-// already wrote in place. That is the right failure for a cache -- the
-// alternative would be a transaction across a store that may not have one --
-// and it is why the method exists here rather than being written slightly
-// differently in each module.
+// It is a loop, and it is honest about being one: it is not atomic, and a
+// failure part-way through leaves the entries it already wrote in place. That
+// is the right failure for a cache -- the alternative would be a transaction
+// across a store that may not have one -- and it is why the method exists here
+// rather than being written slightly differently in each module.
 //
 // A ttl that has already passed forgets the keys, which is the batch spelling
-// of what Put does and the same line of the PHP: "if ($seconds <= 0) return
-// $this->deleteMultiple(array_keys($values))".
+// of what Put does.
 func (r *Repository) PutMany(ctx context.Context, g auth.Grant, values map[string]any, ttl time.Duration) error {
 	keys := make([]string, 0, len(values))
 	written := make([]any, 0, len(values))
@@ -214,10 +196,9 @@ func (r *Repository) PutMany(ctx context.Context, g auth.Grant, values map[strin
 		r.event(events.NewWritingManyKeys(r.GetName(), keys, written, seconds(ttl), r.tagNames()))
 	}
 
-	// One WritingManyKeys for the batch, then one KeyWritten per key, which is
-	// the sequence Repository::putMany fires. Put is not called: it would fire a
-	// WritingKey per key on top, and a listener counting writes would count each
-	// of them twice.
+	// One WritingManyKeys for the batch, then one KeyWritten per key. Put is
+	// not called: it would fire a WritingKey per key on top, and a listener
+	// counting writes would count each of them twice.
 	for i, key := range keys {
 		err := r.put(ctx, g, key, written[i], ttl)
 		r.eventWritten(key, written[i], ttl, err)
@@ -230,10 +211,9 @@ func (r *Repository) PutMany(ctx context.Context, g auth.Grant, values map[strin
 
 // byKey sorts the keys of a PutMany and keeps the values alongside them.
 //
-// PHP's array preserves insertion order, so putMany writes in the order the
-// caller wrote it; a Go map has no order at all, and a batch that landed in a
-// different order on every call would make the events -- and any test over them
-// -- non-deterministic. Sorted is the one order both ends can agree on.
+// A Go map has no iteration order, and a batch that landed in a different order
+// on every call would make the events -- and any test over them --
+// non-deterministic. Sorted is the one order every caller can agree on.
 type byKey struct {
 	keys   []string
 	values []any
@@ -246,24 +226,19 @@ func (b byKey) Swap(i, j int) {
 	b.values[i], b.values[j] = b.values[j], b.values[i]
 }
 
-// SetMultiple is PutMany. It answers Repository::setMultiple(), the PSR-16
-// spelling, which Laravel implements as "return $this->putMany(...)".
+// SetMultiple is PutMany under another name.
 func (r *Repository) SetMultiple(ctx context.Context, g auth.Grant, values map[string]any, ttl time.Duration) error {
 	return r.PutMany(ctx, g, values, ttl)
 }
 
 // Add stores a value only if the key is absent, and reports whether it did.
 //
-// It answers Repository::add(). It is the atomic primitive underneath "only one
-// of them may do this": the first caller gets true, everybody else gets false,
-// and no two callers get true. A Get followed by a Put is the same code with a
-// race in the middle.
+// It is the atomic primitive underneath "only one of them may do this": the
+// first caller gets true, everybody else gets false, and no two callers get
+// true. A Get followed by a Put is the same code with a race in the middle.
 //
-// A ttl that has already passed adds nothing and reports false, which is
-// Repository::add()'s "if ($seconds <= 0) return false" -- an entry that is
-// expired before it is written was not added. It returned ErrNoTTL, which said
-// the same thing louder and said it differently from Put, and one of the two
-// had to go.
+// A ttl that has already passed adds nothing and reports false -- an entry that
+// is expired before it is written was not added.
 //
 // The trap that leaves behind is worth knowing: a lock built on Add with a ttl
 // that is computed and comes out zero never acquires, and never says why. The
@@ -286,9 +261,9 @@ func (r *Repository) Add(ctx context.Context, g auth.Grant, key string, value an
 
 // Forever stores a value with no expiry the caller has to think about.
 //
-// It answers Repository::forever(). "No expiry" is written down as a century,
-// because a Store is promised a positive ttl and a special case for zero is a
-// thing every backend would get subtly different.
+// "No expiry" is written down as a century, because a Store is promised a
+// positive ttl and a special case for zero is a thing every backend would get
+// subtly different.
 //
 // Reach for it rarely. An entry that never expires is a second copy of the
 // truth, and the day it diverges from the first nothing notices; Put with a ttl
@@ -299,20 +274,14 @@ func (r *Repository) Forever(ctx context.Context, g auth.Grant, key string, valu
 
 // Increment adds delta to a counter and returns the new value.
 //
-// It answers Repository::increment(). Laravel's takes no ttl because its stores
-// create the counter with forever; this one takes the ttl the counter should
-// live for, and the ttl applies to the counter's whole life: it is set when the
-// counter is created and is not refreshed by later increments, so a counter
-// created at the top of an hour is gone an hour later however busy it was.
+// The ttl is the counter's whole life: it is set when the counter is created
+// and is not refreshed by later increments, so a counter created at the top of
+// an hour is gone an hour later however busy it was.
 //
 // An absent counter starts at zero.
 //
 // A ttl that has already passed is ErrNoTTL, and this is the one of the three
-// writes that keeps its error: Put forgets the key and Add reports that it did
-// not write, because Repository::put() and Repository::add() each say what to
-// do with a ttl that has passed. Repository::increment() has no ttl argument at
-// all -- its stores create the counter with forever -- so there is no body to
-// copy a decision from, and both candidates are worse than an error. Forgetting
+// writes that keeps its error rather than reinterpreting the ttl. Forgetting
 // the key would make Increment(k, 1, 0) delete a counter while reporting that
 // it raised one, and treating it as forever would mint exactly the immortal
 // counter this signature takes a ttl to prevent.
@@ -327,17 +296,13 @@ func (r *Repository) Increment(ctx context.Context, g auth.Grant, key string, de
 	return r.store.Increment(ctx, full, delta, ttl)
 }
 
-// Decrement subtracts delta from a counter and returns the new value.
-//
-// It answers Repository::decrement(), and it is what the PHP is: increment with
-// the sign turned round.
+// Decrement subtracts delta from a counter and returns the new value. It is
+// Increment with the sign turned round.
 func (r *Repository) Decrement(ctx context.Context, g auth.Grant, key string, delta int64, ttl time.Duration) (int64, error) {
 	return r.Increment(ctx, g, key, -delta, ttl)
 }
 
 // Forget removes a key. Removing what is not there is not an error.
-//
-// It answers Repository::forget().
 func (r *Repository) Forget(ctx context.Context, g auth.Grant, key string) error {
 	full, err := r.key(ctx, g, key)
 	if err != nil {
@@ -349,18 +314,15 @@ func (r *Repository) Forget(ctx context.Context, g auth.Grant, key string) error
 	return err
 }
 
-// Delete is Forget. It answers Repository::delete(), the PSR-16 spelling, which
-// Laravel implements as "return $this->forget($key)".
+// Delete is Forget under another name.
 func (r *Repository) Delete(ctx context.Context, g auth.Grant, key string) error {
 	return r.Forget(ctx, g, key)
 }
 
 // DeleteMultiple removes several keys.
 //
-// It answers Repository::deleteMultiple(). Laravel keeps going after a failure
-// and reports whether all of them worked; this stops at the first error,
-// because the caller gets the error itself rather than a bool that says
-// something went wrong without saying what.
+// It stops at the first error, so the caller gets the error itself rather than
+// a bool that says something went wrong without saying what.
 func (r *Repository) DeleteMultiple(ctx context.Context, g auth.Grant, keys ...string) error {
 	for _, key := range keys {
 		if err := r.Forget(ctx, g, key); err != nil {
@@ -375,9 +337,6 @@ func (r *Repository) DeleteMultiple(ctx context.Context, g auth.Grant, keys ...s
 // It is not "empty the cache". A cache:clear that emptied the store would clear
 // every other tenant on the way past, and in a SaaS that is an outage caused by
 // a support request.
-//
-// It answers the flush() that Laravel's Repository forwards to the store
-// through __call, which is what Cache::flush() reaches.
 func (r *Repository) Flush(ctx context.Context, g auth.Grant) error {
 	prefix, err := r.prefix(g)
 	if err != nil {
@@ -398,21 +357,18 @@ func (r *Repository) Flush(ctx context.Context, g auth.Grant) error {
 	return err
 }
 
-// Clear is Flush. It answers Repository::clear(), the PSR-16 spelling, which
-// Laravel implements as "$this->store->flush()".
+// Clear is Flush under another name.
 func (r *Repository) Clear(ctx context.Context, g auth.Grant) error {
 	return r.Flush(ctx, g)
 }
 
 // FlushLocks releases every lock the store holds.
 //
-// It answers Repository::flushLocks(), including the refusal: a store that
-// cannot flush its locks returns ErrUnsupported rather than pretending. Ask
-// SupportsFlushingLocks first if the answer matters.
+// A store that cannot flush its locks returns ErrUnsupported rather than
+// pretending. Ask SupportsFlushingLocks first if the answer matters.
 //
-// It takes no Grant because a lock has no tenant, which is one of the three
-// documented exceptions to RULE 14 (docs/15): a scheduler lock covers the whole
-// instance.
+// It takes no Grant because a lock has no tenant: a scheduler lock covers the
+// whole instance.
 func (r *Repository) FlushLocks(ctx context.Context) error {
 	store, ok := r.store.(CanFlushLocks)
 	if !ok {
@@ -435,11 +391,8 @@ func (r *Repository) FlushLocks(ctx context.Context) error {
 
 // Touch gives a live entry a new expiry and reports whether there was one.
 //
-// It answers Repository::touch(). A ttl of zero means forever, as it does in
-// Laravel, where a null ttl "will retain the item forever".
-//
-// An absent key is false and is not created: touching a miss would turn it into
-// an entry holding nothing.
+// A ttl of zero means forever. An absent key is false and is not created:
+// touching a miss would turn it into an entry holding nothing.
 func (r *Repository) Touch(ctx context.Context, g auth.Grant, key string, ttl time.Duration) (bool, error) {
 	full, err := r.key(ctx, g, key)
 	if err != nil {
@@ -475,12 +428,12 @@ func (r *Repository) Touch(ctx context.Context, g auth.Grant, key string, ttl ti
 // WithoutOverlapping runs fn while holding a lock, so two of them cannot run at
 // once.
 //
-// It answers Repository::withoutOverlapping(). lockFor is how long the lock
-// survives a process that dies holding it; waitFor is how long this caller is
-// willing to queue before giving up with ErrLockTimeout.
+// lockFor is how long the lock survives a process that dies holding it;
+// waitFor is how long this caller is willing to queue before giving up with
+// ErrLockTimeout.
 //
 // The store must be able to hold a lock. One that cannot returns
-// ErrUnsupported, which is the BadMethodCallException with a Go spelling.
+// ErrUnsupported.
 func (r *Repository) WithoutOverlapping(ctx context.Context, g auth.Grant, key string, fn func(context.Context) error, lockFor, waitFor time.Duration) error {
 	store, ok := r.store.(Locking)
 	if !ok {
@@ -498,15 +451,14 @@ func (r *Repository) WithoutOverlapping(ctx context.Context, g auth.Grant, key s
 
 // Tags begins a tagged operation on this repository.
 //
-// It answers Repository::tags(). The returned TaggedCache is the whole
-// Repository surface again, with every key prefixed by the tag set's
-// generation -- so TaggedCache.Flush is a single write per tag that orphans
-// every entry carrying it, rather than a scan.
+// The returned TaggedCache is the whole Repository surface again, with every
+// key prefixed by the tag set's generation -- so TaggedCache.Flush is a single
+// write per tag that orphans every entry carrying it, rather than a scan.
 //
-// Laravel throws when the store cannot tag. Every Store here can: a tag is an
-// ordinary entry holding a generation id, so tagging needs Get, Put and Forget
-// and nothing a Store does not already have. The error is for the one thing
-// that is still wrong, which is asking for no tags at all.
+// Every Store can tag: a tag is an ordinary entry holding a generation id, so
+// tagging needs Get, Put and Forget and nothing a Store does not already have.
+// The error is for the one thing that is still wrong, which is asking for no
+// tags at all.
 func (r *Repository) Tags(names ...string) (*TaggedCache, error) {
 	if len(names) == 0 {
 		return nil, errors.New("cache: tags() needs at least one tag, and none of them tags everything")
@@ -516,11 +468,9 @@ func (r *Repository) Tags(names ...string) (*TaggedCache, error) {
 	return &TaggedCache{Repository: &tagged}, nil
 }
 
-// GetName is the name this cache is known by.
-//
-// It answers Repository::getName(), which reads config['store'] -- the name of
-// the store the manager built this repository for. It is what goes into every
-// event, so a listener can tell which cache a hit came from.
+// GetName is the name this cache is known by: the name of the store the
+// manager built this repository for. It is what goes into every event, so a
+// listener can tell which cache a hit came from.
 //
 // A repository built with New rather than by a CacheManager has no store name,
 // and answers with its namespace instead: that is the thing that distinguishes
@@ -533,11 +483,10 @@ func (r *Repository) GetName() string {
 	return r.namespace
 }
 
-// SetName returns a repository known by another name.
-//
-// It answers the config['store'] a CacheManager puts into the repositories it
-// builds. Laravel writes it through the constructor's $config; here it is a
-// method, because a repository is derived from another one rather than rebuilt.
+// SetName returns a repository known by another name. It is the name a
+// CacheManager stamps on the repositories it builds, and it is a method rather
+// than a constructor argument because a repository is derived from another one
+// rather than rebuilt.
 func (r *Repository) SetName(name string) *Repository {
 	out := *r
 	out.name = name
@@ -546,16 +495,14 @@ func (r *Repository) SetName(name string) *Repository {
 
 // SupportsTags reports whether this store can carry tags.
 //
-// It answers Repository::supportsTags(), and the answer is always yes: see
-// Tags.
+// Every Store in this package satisfies Taggable, so the answer is yes for all
+// of them; a store registered from elsewhere answers for itself.
 func (r *Repository) SupportsTags() bool {
 	_, ok := r.store.(Taggable)
 	return ok
 }
 
 // SupportsFlushingLocks reports whether FlushLocks will work.
-//
-// It answers Repository::supportsFlushingLocks().
 func (r *Repository) SupportsFlushingLocks() bool {
 	_, ok := r.store.(CanFlushLocks)
 	return ok
@@ -563,16 +510,14 @@ func (r *Repository) SupportsFlushingLocks() bool {
 
 // GetDefaultCacheTime is how long an item is stored for when nobody says.
 //
-// It answers Repository::getDefaultCacheTime(). Nothing on this type takes an
-// optional ttl -- Put requires one -- so its one job is to be carried into the
-// TaggedCache that Tags builds, exactly as it is in Laravel.
+// Nothing on this type takes an optional ttl -- Put requires one -- so its one
+// job is to be carried into the TaggedCache that Tags builds.
 func (r *Repository) GetDefaultCacheTime() time.Duration { return r.defaultTTL }
 
 // SetDefaultCacheTime returns a repository with another default.
 //
-// It answers Repository::setDefaultCacheTime(). Laravel mutates and returns
-// $this; this derives, for the reason Namespace derives: a repository handed to
-// two modules must not change underneath one of them.
+// It derives rather than mutates, for the reason Namespace derives: a
+// repository handed to two modules must not change underneath one of them.
 func (r *Repository) SetDefaultCacheTime(ttl time.Duration) *Repository {
 	out := *r
 	out.defaultTTL = ttl
@@ -581,16 +526,14 @@ func (r *Repository) SetDefaultCacheTime(ttl time.Duration) *Repository {
 
 // GetStore returns the store underneath.
 //
-// It answers Repository::getStore(). It is the hatch for a caller that needs
-// something of the backend the Repository does not offer -- and reaching
-// through it skips the tenant prefix, so whatever is done there is done to
-// every tenant at once.
+// It is the hatch for a caller that needs something of the backend the
+// Repository does not offer -- and reaching through it skips the tenant prefix,
+// so whatever is done there is done to every tenant at once.
 func (r *Repository) GetStore() Store { return r.store }
 
 // SetStore returns a repository over another store.
 //
-// It answers Repository::setStore(). Laravel mutates and returns static; this
-// derives, for the reason SetDefaultCacheTime derives.
+// It derives rather than mutates, for the reason SetDefaultCacheTime derives.
 func (r *Repository) SetStore(s Store) *Repository {
 	out := *r
 	out.store = s
@@ -599,9 +542,9 @@ func (r *Repository) SetStore(s Store) *Repository {
 
 // Get reads a value.
 //
-// It answers Repository::get(). It returns ErrNotFound when the key is absent,
-// which the caller is expected to treat as "compute it", not as an error to
-// propagate -- and usually the caller should be Remember instead.
+// It returns ErrNotFound when the key is absent, which the caller is expected
+// to treat as "compute it", not as an error to propagate -- and usually the
+// caller should be Remember instead.
 //
 // It is a function and not a method because a method cannot take a type
 // parameter in Go. Every generic entry point in this package has the repository
@@ -622,16 +565,15 @@ func Get[T any](ctx context.Context, r *Repository, g auth.Grant, key string) (T
 // RetrievingKey.
 //
 // It exists so Many fires RetrievingManyKeys once for the batch instead of a
-// RetrievingKey per key, which is what Repository::many does.
+// RetrievingKey per key.
 func get[T any](ctx context.Context, r *Repository, full, key string) (T, error) {
 	var zero T
 
 	raw, err := r.store.Get(ctx, full)
 	if err != nil {
-		// A miss and a store that did not answer are the same event in Laravel,
-		// because its store returns null for both. They are not the same here --
-		// the error says which -- but the event fires for both, so a hit rate
-		// computed from CacheHit and CacheMissed still adds up.
+		// A miss and a store that did not answer are different here -- the error
+		// says which -- but CacheMissed fires for both, so a hit rate computed
+		// from CacheHit and CacheMissed still adds up.
 		r.eventMissed(key)
 		return zero, err
 	}
@@ -647,10 +589,8 @@ func get[T any](ctx context.Context, r *Repository, full, key string) (T, error)
 
 // Many reads several values in one call.
 //
-// It answers Repository::many(), including the part that surprises people:
-// every key asked for is in the result. Laravel documents it as "items not
-// found in the cache will have a null value"; here a miss is the zero value of
-// T, which is as close as a typed map gets to null.
+// Every key asked for is in the result, including the part that surprises
+// people: a miss comes back as the zero value of T.
 //
 // That means Many cannot tell a miss from a cached zero. Get can, and is what
 // to reach for when the difference matters.
@@ -670,13 +610,11 @@ func Many[T any](ctx context.Context, r *Repository, g auth.Grant, keys ...strin
 		case err == nil:
 			out[key] = v
 		case errors.Is(err, ErrNotFound):
-			// Repository::many returns one entry per requested key, carrying
-			// null for the misses, so every key asked for comes back. Go has no
-			// null to put in a T and the zero value stands in for it.
+			// Every key asked for comes back, so a miss needs something to
+			// carry, and the zero value of T is what it carries.
 			//
 			// That means a missing counter and a counter cached at 0 read the
-			// same here, exactly as is_null is the only way to tell them apart
-			// in PHP. A caller that must distinguish them reaches for Get,
+			// same here. A caller that must distinguish them reaches for Get,
 			// which reports ErrNotFound.
 			var zero T
 			out[key] = zero
@@ -687,19 +625,16 @@ func Many[T any](ctx context.Context, r *Repository, g auth.Grant, keys ...strin
 	return out, nil
 }
 
-// GetMultiple is Many. It answers Repository::getMultiple(), the PSR-16
-// spelling, which Laravel implements by building a defaults array and calling
-// many().
+// GetMultiple is Many under another name.
 func GetMultiple[T any](ctx context.Context, r *Repository, g auth.Grant, keys []string) (map[string]T, error) {
 	return Many[T](ctx, r, g, keys...)
 }
 
 // Pull reads a value and forgets it.
 //
-// It answers Repository::pull(). It is the one-shot read: a flash value, a
-// token that may be spent once. The forget happens after a successful read, so
-// a miss leaves nothing to delete and a decode failure leaves the entry for
-// whoever can read it.
+// It is the one-shot read: a flash value, a token that may be spent once. The
+// forget happens after a successful read, so a miss leaves nothing to delete
+// and a decode failure leaves the entry for whoever can read it.
 func Pull[T any](ctx context.Context, r *Repository, g auth.Grant, key string) (T, error) {
 	v, err := Get[T](ctx, r, g, key)
 	if err != nil {
@@ -713,10 +648,9 @@ func Pull[T any](ctx context.Context, r *Repository, g auth.Grant, key string) (
 
 // String reads a value that must be a string.
 //
-// It answers Repository::string(). A value that is stored but is not a string
-// is an error naming the key and what was there, which is the
-// InvalidArgumentException Laravel throws; a key that is absent is ErrNotFound,
-// so a caller can still tell "wrong type" from "not cached".
+// A value that is stored but is not a string is an error naming the key and
+// what was there; a key that is absent is ErrNotFound, so a caller can still
+// tell "wrong type" from "not cached".
 func (r *Repository) String(ctx context.Context, g auth.Grant, key string) (string, error) {
 	v, err := Get[any](ctx, r, g, key)
 	if err != nil {
@@ -731,10 +665,8 @@ func (r *Repository) String(ctx context.Context, g auth.Grant, key string) (stri
 
 // Integer reads a value that must be an integer.
 //
-// It answers Repository::integer(). Like the PHP, which runs the value through
-// FILTER_VALIDATE_INT, a numeric string is accepted: "42" is 42. A number with
-// a fractional part is not -- Laravel's filter rejects it too -- and neither is
-// anything else.
+// A numeric string is accepted: "42" is 42. A number with a fractional part is
+// not, and neither is anything else.
 func (r *Repository) Integer(ctx context.Context, g auth.Grant, key string) (int, error) {
 	v, err := Get[any](ctx, r, g, key)
 	if err != nil {
@@ -760,9 +692,7 @@ func (r *Repository) Integer(ctx context.Context, g auth.Grant, key string) (int
 
 // Float reads a value that must be a float.
 //
-// It answers Repository::float(). Like the PHP, which runs the value through
-// FILTER_VALIDATE_FLOAT, a numeric string is accepted and so is a whole number:
-// 42 is 42.0.
+// A numeric string is accepted and so is a whole number: 42 is 42.0.
 func (r *Repository) Float(ctx context.Context, g auth.Grant, key string) (float64, error) {
 	v, err := Get[any](ctx, r, g, key)
 	if err != nil {
@@ -788,9 +718,8 @@ func (r *Repository) Float(ctx context.Context, g auth.Grant, key string) (float
 
 // Boolean reads a value that must be a boolean.
 //
-// It answers Repository::boolean(). Strictly a boolean: Laravel's is_bool check
-// refuses 1 and "true", and so does this, because a cache that quietly agreed
-// that 1 means true is a cache that quietly agrees that 2 does.
+// Strictly a boolean: 1 and "true" are refused, because a cache that quietly
+// agreed that 1 means true is a cache that quietly agrees that 2 does.
 func (r *Repository) Boolean(ctx context.Context, g auth.Grant, key string) (bool, error) {
 	v, err := Get[any](ctx, r, g, key)
 	if err != nil {
@@ -805,10 +734,9 @@ func (r *Repository) Boolean(ctx context.Context, g auth.Grant, key string) (boo
 
 // Array reads a value that must be a list.
 //
-// It answers Repository::array(). PHP's array is two things Go keeps apart: a
-// list and a map. This is the list; a cached object is read with
-// Get[map[string]any] and a cached struct with Get[T], both of which say more
-// about the value than array() ever could.
+// This is the list only. A cached object is read with Get[map[string]any] and a
+// cached struct with Get[T], both of which say more about the value than a bare
+// list does.
 func (r *Repository) Array(ctx context.Context, g auth.Grant, key string) ([]any, error) {
 	v, err := Get[any](ctx, r, g, key)
 	if err != nil {
@@ -823,9 +751,9 @@ func (r *Repository) Array(ctx context.Context, g auth.Grant, key string) ([]any
 
 // Remember returns the cached value, computing and storing it on a miss.
 //
-// It answers Repository::remember(). This is the shape that belongs in a
-// service, and having it here is what keeps the get-check-compute-put sequence
-// from being written slightly differently in every module.
+// This is the shape that belongs in a service, and having it here is what keeps
+// the get-check-compute-put sequence from being written slightly differently in
+// every module.
 //
 // A store that is unreachable is not an outage: anything other than a missing
 // tenant falls through and computes, and a failure to store is not a failure to
@@ -836,16 +764,10 @@ func (r *Repository) Array(ctx context.Context, g auth.Grant, key string) ([]any
 // caller, not a cache miss, and computing anyway would hide it until the day
 // the value is wrong.
 //
-// A computation that came back with nothing is cached, and this is the one
-// place Remember answers differently from Repository::remember(). The PHP asks
-// "! is_null($value)", so a stored null reads as a miss and the callback runs
-// again on every request; here a miss is ErrNotFound and a stored null is a
-// value, so a callback returning nil twice runs once rather than twice.
-//
-// It is deliberate, and it is the package's existing decision rather than a new
-// one: keeping "not cached" apart from "cached as nothing" is the whole reason
-// ErrNotFound exists -- see Has -- and reading them as one thing here would put
-// back the second meaning of null this package removed. What it buys is
+// A computation that came back with nothing is cached, and it is deliberate: a
+// miss is ErrNotFound and a stored nil is a value, so a callback returning nil
+// twice runs once rather than twice. Keeping "not cached" apart from "cached as
+// nothing" is the whole reason ErrNotFound exists -- see Has. What it buys is
 // negative caching, which is usually the answer worth caching: "this customer
 // has no plan" costs a query to produce and is asked on every request.
 //
@@ -853,10 +775,10 @@ func (r *Repository) Array(ctx context.Context, g auth.Grant, key string) ([]any
 // to change soon is remembered for the whole ttl. Return an error instead when
 // that is a failure, because an error is not cached.
 //
-// There is no stampede protection here, and there is none in Laravel either. N
-// requests missing the same key all compute. Add is the primitive to build it
-// on when something needs it, and it is not built in because the fix has a cost
-// -- everybody waiting on one computation -- that only some callers want to pay.
+// There is no stampede protection here: N requests missing the same key all
+// compute. Add is the primitive to build it on when something needs it, and it
+// is not built in because the fix has a cost -- everybody waiting on one
+// computation -- that only some callers want to pay.
 func Remember[T any](ctx context.Context, r *Repository, g auth.Grant, key string, ttl time.Duration, compute func(context.Context) (T, error)) (T, error) {
 	var zero T
 
@@ -894,14 +816,13 @@ func Remember[T any](ctx context.Context, r *Repository, g auth.Grant, key strin
 // RememberForever returns the cached value, computing and storing it with no
 // expiry on a miss.
 //
-// It answers Repository::rememberForever(). See Forever for what "no expiry"
-// means here, and for why it is worth a second thought before reaching for it.
+// See Forever for what "no expiry" means here, and for why it is worth a second
+// thought before reaching for it.
 func RememberForever[T any](ctx context.Context, r *Repository, g auth.Grant, key string, compute func(context.Context) (T, error)) (T, error) {
 	return Remember(ctx, r, g, key, foreverTTL, compute)
 }
 
-// Sear is RememberForever. It answers Repository::sear(), which Laravel
-// implements as "return $this->rememberForever($key, $callback)".
+// Sear is RememberForever, under its shorter name.
 func Sear[T any](ctx context.Context, r *Repository, g auth.Grant, key string, compute func(context.Context) (T, error)) (T, error) {
 	return RememberForever(ctx, r, g, key, compute)
 }
@@ -909,10 +830,10 @@ func Sear[T any](ctx context.Context, r *Repository, g auth.Grant, key string, c
 // Flexible returns the cached value, and refreshes it in the background once it
 // has gone stale.
 //
-// It answers Repository::flexible(). fresh is how long the value is served
-// without a thought; stale is how long it is still served while a refresh runs
-// behind it. A reader arriving after fresh has passed gets the old value
-// immediately and pays nothing; one arriving after stale has passed computes.
+// fresh is how long the value is served without a thought; stale is how long it
+// is still served while a refresh runs behind it. A reader arriving after fresh
+// has passed gets the old value immediately and pays nothing; one arriving
+// after stale has passed computes.
 //
 // This is the answer to a cache stampede on a value that is expensive and not
 // exact -- a dashboard total, a count of things. It is not the answer for a
@@ -1005,8 +926,8 @@ func flexibleRefresh[T any](ctx context.Context, r *Repository, g auth.Grant, ke
 }
 
 // flexibleCreatedKey names the companion entry holding when the value was
-// computed. Laravel spells it "illuminate:cache:flexible:created:{key}"; the
-// namespace is already in the key here, so the prefix does not repeat it.
+// computed. The tenant and the namespace are already in front of it, so the
+// prefix does not repeat them.
 func flexibleCreatedKey(key string) string { return "flexible:created:" + key }
 
 // flexibleLockKey names the lock one refresher holds.
@@ -1014,10 +935,9 @@ func flexibleLockKey(key string) string { return "flexible:" + key }
 
 // ItemKey formats the key an item is really stored under.
 //
-// It answers Repository::itemKey(), which in Laravel is the identity and exists
-// so TaggedCache can override it. Here it is not the identity: the tenant, the
-// namespace and -- on a tagged repository -- the tag generation are all in front
-// of the caller's key, and this is where a caller finds out what that came to.
+// It is not the identity: the tenant, the namespace and -- on a tagged
+// repository -- the tag generation are all in front of the caller's key, and
+// this is where a caller finds out what that came to.
 //
 // Something eventually has to look in the store and find out where an entry
 // went, and this is the one honest way to ask. It takes a context because a
@@ -1093,9 +1013,8 @@ func encode(v any) ([]byte, error) {
 // decode is encode's other half.
 //
 // Numbers come back as json.Number and not float64 when the target is any, so
-// String, Integer and Float can tell 1 from 1.0 and from "1" -- which is the
-// distinction Laravel's is_int, is_float and FILTER_VALIDATE_INT are making,
-// and which a float64 has already thrown away.
+// String, Integer and Float can tell 1 from 1.0 and from "1" -- a distinction a
+// float64 has already thrown away.
 func decode[T any](raw []byte) (T, error) {
 	var v T
 	dec := json.NewDecoder(bytes.NewReader(raw))

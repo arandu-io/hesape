@@ -2,8 +2,6 @@ package view
 
 import "strings"
 
-// ManagesTranslations mirrors Illuminate\View\Concerns\ManagesTranslations.
-//
 // The @lang directive captures a translation block; the compiler calls
 // StartTranslation to open the block and RenderTranslation to evaluate it.
 

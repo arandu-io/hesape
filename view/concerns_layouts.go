@@ -8,11 +8,9 @@ import (
 	"sync"
 )
 
-// ManagesLayouts mirrors Illuminate\View\Concerns\ManagesLayouts.
-//
-// These are methods on Factory, replicating the PHP trait. A view extending a
-// layout is rendered in two passes: the child is evaluated to fill sections,
-// then the layout renders with the sections inserted.
+// These are methods on Factory. A view extending a layout is rendered in two
+// passes: the child is evaluated to fill sections, then the layout renders
+// with the sections inserted.
 
 // StartSection opens a section for capture. If content is given, it extends
 // an existing section directly.
@@ -126,7 +124,7 @@ func (f *Factory) YieldContent(name string, fallback ...string) string {
 	return content
 }
 
-// YieldSection is ManagesLayouts::yieldSection.
+// YieldSection returns the content of the most recently started section.
 func (f *Factory) YieldSection() string {
 	f.mu.RLock()
 	last := f.lastSection
@@ -164,7 +162,7 @@ func (f *Factory) GetSections() map[string]string {
 	return out
 }
 
-// FlushSections is ManagesLayouts::flushSections.
+// FlushSections resets every piece of per-render section state.
 func (f *Factory) FlushSections() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -186,13 +184,13 @@ func (f *Factory) SetSectionBuffer(content string) {
 	f.mu.Unlock()
 }
 
-// ParentPlaceholder is ManagesLayouts::parentPlaceholder.
+// ParentPlaceholder returns the marker @parent compiles to.
 //
-// It is the marker @parent compiles to, and it has to be the same string every
-// time it is asked for within one process, because the section that writes it
-// and the section that replaces it are two different calls. It used to be
-// generated fresh from crypto/rand on every call, which meant @parent never
-// matched and the layout's own content was silently dropped.
+// It has to be the same string every time it is asked for within one
+// process, because the section that writes it and the section that replaces
+// it are two different calls. It used to be generated fresh from
+// crypto/rand on every call, which meant @parent never matched and the
+// layout's own content was silently dropped.
 //
 // The salt is per Factory rather than per class, so two factories in one test
 // binary do not share markers.

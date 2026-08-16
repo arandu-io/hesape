@@ -10,10 +10,10 @@ import "sync"
 // The kernel asks for it through an optional interface and supplies the address
 // of the stream, which is the one thing it owns.
 //
-// Why it is a file rather than an inline <script>: the CSP is script-src 'self'
-// (RULE 13). An inline tag is refused by it -- silently, which would read as the
-// feature simply not working -- so this is registered like every other asset and
-// referenced by its content-addressed URL.
+// Why it is a file rather than an inline <script>: the CSP is script-src
+// 'self'. An inline tag is refused by it -- silently, which would read as the
+// feature simply not working -- so this is registered like every other asset
+// and referenced by its content-addressed URL.
 
 // reloadAsset is the file name the script is served under.
 const reloadAsset = "arandu-reload.js"

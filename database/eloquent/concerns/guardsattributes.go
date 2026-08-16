@@ -5,11 +5,10 @@ import (
 	"sync"
 )
 
-// GuardsAttributes answers
-// Illuminate\Database\Eloquent\Concerns\GuardsAttributes: which attributes may
-// be set from a payload the application did not write.
+// GuardsAttributes decides which attributes may be set from a payload the
+// application did not write.
 //
-// It is the difference between fill and forceFill, and the reason it exists is
+// It is the difference between Fill and ForceFill, and the reason it exists is
 // the request body: an update that copies every field of a form into a model
 // will happily copy is_admin if nothing says otherwise. The default guard is
 // ["*"], so a model that declares nothing is fully guarded and mass assignment

@@ -2,24 +2,18 @@ package broadcasting
 
 import "fmt"
 
-// BroadcastError is Illuminate\Broadcasting\BroadcastException.
+// BroadcastError is what a driver returns when a broadcast could not be
+// published.
 //
-// The name carries the second mechanical change of ADR 0044: PHP throws, Go
-// returns an error, and a Go type that implements error is called an Error.
-//
-// Illuminate's class is an empty RuntimeException subclass; everything it
-// carries is the message the thrower builds. RedisBroadcaster is the one place
-// that raises it, and it raises it for a connection that failed -- so the cause
-// is kept here rather than flattened into the message, because errors.Is on the
-// driver's error is how a caller tells "the broker is down" from "the payload
-// would not encode".
+// The cause is kept rather than flattened into the message, because errors.Is
+// on the driver's error is how a caller tells "the broker is down" from "the
+// payload would not encode".
 type BroadcastError struct {
 	message string
 	cause   error
 }
 
-// NewBroadcastError builds the error with a formatted message, which is how the
-// PHP raises it: sprintf('Redis error: %s.', $e->getMessage()).
+// NewBroadcastError builds the error with a formatted message.
 func NewBroadcastError(format string, args ...any) *BroadcastError {
 	return &BroadcastError{message: fmt.Sprintf(format, args...)}
 }
@@ -30,8 +24,7 @@ func WrapBroadcastError(cause error, format string, args ...any) *BroadcastError
 	return &BroadcastError{message: fmt.Sprintf(format, args...), cause: cause}
 }
 
-// Error implements error with the exception's message, which is
-// Exception::getMessage.
+// Error implements error with the message the error was built with.
 func (e *BroadcastError) Error() string { return e.message }
 
 // Unwrap exposes the driver failure underneath to errors.Is and errors.As. It

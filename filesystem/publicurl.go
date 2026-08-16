@@ -56,7 +56,7 @@ type PresignPutter interface {
 // tenant uploaded, the answer is [Disk.TemporaryURL], which expires, or a route
 // that runs a Policy and calls [Serve].
 //
-// It takes a Grant anyway (RULE 17): handing out the address of a file is a
+// It takes a Grant anyway: handing out the address of a file is a
 // read, and the caller has to have been allowed to reach the file to be allowed
 // to publish where it lives.
 //

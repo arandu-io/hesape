@@ -19,8 +19,7 @@ import (
 // Rules is the rule set of one request, keyed by the name of the form input --
 // the same name components.FieldProps.Name carries.
 //
-// The spelling is Laravel's, so somebody arriving from it recognises the whole
-// thing without reading anything:
+// A field's rules are one string, and the whole set is written in one place:
 //
 //	var Register = validation.MustCompile(validation.Rules{
 //		"name":     "required|max:255",
@@ -57,9 +56,9 @@ type settings struct {
 // WithMessageOverrides replaces the default sentence for the named field and
 // rule.
 //
-// It is not spelled WithMessages: that name belongs to
-// ValidationException::withMessages (ADR 0044), and this is a compile-time
-// override of a sentence rather than an exception built out of one.
+// It is not spelled WithMessages: that name belongs to WithMessages on a
+// ValidationException, and this is a compile-time override of a sentence rather
+// than an exception built out of one.
 func WithMessageOverrides(m Messages) Option {
 	return func(s *settings) { s.messages = m }
 }
@@ -284,9 +283,8 @@ func (c *compiler) reject(f *field, name string) {
 	c.fail(f, name, "unknown rule %q", name)
 }
 
-// fileRules answers to Validator::$fileRules, minus the size rules it also
-// lists: these six are what make a field an upload, and so what makes `max:100`
-// on it mean a hundred kilobytes.
+// fileRules are the six rules that make a field an upload, and so what makes
+// `max:100` on it mean a hundred kilobytes.
 var fileRules = []string{"file", "image", "mimes", "mimetypes", "extensions", "dimensions"}
 
 // flags reads the properties of a field that its own rules decide: whether a
@@ -303,8 +301,8 @@ func (c *compiler) flags(f *field) {
 		case r.name == "nullable":
 			f.nullable = true
 		case r.name == "date_format" && len(r.args) >= 1:
-			// getDateFormat answers to the FIRST parameter, as the PHP's does:
-			// the rule reads several layouts, the date comparisons read one.
+			// GetDateFormat reads the FIRST parameter: the rule accepts
+			// several layouts, and the date comparisons read one.
 			f.layout = r.args[0]
 		}
 		if r.spec.sizeIsValue {
@@ -329,13 +327,13 @@ func (c *compiler) checkField(f *field) {
 				continue
 			}
 			if _, isNumber := number(r.args[i]); isNumber && comparisons[r.name] {
-				// gt:10 is a literal bound, as it is in Laravel: the parameter
-				// is a number and no field of that name is declared, which is
-				// the fork validateGt itself makes. Not a failure.
+				// gt:10 is a literal bound: the parameter is a number and no
+				// field of that name is declared, which is the fork the rule
+				// itself makes. Not a failure.
 				continue
 			}
 			// The check that pays for itself: `confirmed` against a field name
-			// that does not exist is Laravel's most common silent pass. The
+			// that does not exist is the most common silent pass there is. The
 			// rule compares against the empty string for ever and nothing
 			// anywhere says so.
 			c.fail(f, r.name, "rule %q points at %q, which this rule set does not declare",
@@ -466,11 +464,9 @@ func cutLast(s, sep string) (before, after string, found bool) {
 // splitChain splits a chain on "|", except that a regular expression takes
 // everything to the end of it.
 //
-// Laravel's answer to a pipe inside a pattern is that you cannot use the string
-// form at all: it splits on "|" unconditionally and the documented fix is to
-// pass the rules as an array. An array form here would be a second spelling of
-// a rule set (RULE 9), so the answer is position instead -- regex: and
-// not_regex: run to the end, at most one may appear, and it must be last.
+// A pipe inside a pattern is settled by position rather than by a second way of
+// writing a rule set: regex: and not_regex: run to the end, at most one may
+// appear, and it must be last.
 //
 // The pattern is taken verbatim. There is no escape character, which matters:
 // `\|` in a Go regular expression already means a literal pipe, so unescaping
@@ -496,8 +492,8 @@ func splitChain(chain string) []string {
 
 // parseArgs reads the argument list of one rule.
 //
-// It is one RFC 4180 record, which is Laravel's str_getcsv: `in:"a,b",c` is two
-// values, `a,b` and `c`. A regular expression is not a list and is taken whole.
+// It is one RFC 4180 record: `in:"a,b",c` is two values, `a,b` and `c`. A
+// regular expression is not a list and is taken whole.
 func parseArgs(name, rest string, hasArgs bool) ([]string, error) {
 	if !hasArgs || rest == "" {
 		return nil, nil
@@ -605,7 +601,7 @@ func checkAscii(c *checkCtx) error {
 	return nil
 }
 
-// emailValidations are the arguments `email` accepts, at Laravel's spelling.
+// emailValidations are the arguments `email` accepts.
 //
 // rfc, strict, filter and filter_unicode are one shape check here rather than
 // four validators: this package keeps one answer to "is this an address", and
@@ -630,7 +626,7 @@ func checkEmailValidations(c *checkCtx) error {
 	return nil
 }
 
-// checkDistinct refuses an argument that is not one of the two the PHP reads,
+// checkDistinct refuses an argument that is not one of the two `distinct` reads,
 // so that a misspelt `ignorecase` is not silently no comparison at all.
 func checkDistinct(c *checkCtx) error {
 	for _, a := range c.r.args {
@@ -641,7 +637,7 @@ func checkDistinct(c *checkCtx) error {
 	return nil
 }
 
-// checkImage refuses an argument that is not the one the PHP reads.
+// checkImage refuses an argument that is not the one `image` reads.
 func checkImage(c *checkCtx) error {
 	for _, a := range c.r.args {
 		if a != "allow_svg" {
@@ -651,9 +647,9 @@ func checkImage(c *checkCtx) error {
 	return nil
 }
 
-// dimensionConstraints are the keys `dimensions` reads. A key outside them is
-// ignored by the PHP and by anything reading the rule, which is a constraint
-// that looks written and is not.
+// dimensionConstraints are the keys `dimensions` reads. A key outside them would
+// be ignored by the rule, which is a constraint that looks written and is
+// not.
 var dimensionConstraints = []string{
 	"width", "height", "min_width", "min_height", "max_width", "max_height",
 	"ratio", "min_ratio", "max_ratio",
@@ -688,24 +684,23 @@ func checkDimensions(c *checkCtx) error {
 func compilePattern(c *checkCtx) error {
 	re, err := regexp.Compile(c.r.args[0])
 	if err != nil {
-		// Laravel never compiles a pattern until a request touches it, so an
-		// unclosed group is a 500 on the first form somebody submits. Here it
-		// is a boot failure naming the field.
+		// A pattern compiled only when a request touches it makes an unclosed
+		// group a 500 on the first form somebody submits. Here it is a boot
+		// failure naming the field.
 		return fmt.Errorf("rule %q has a pattern that does not compile: %s", c.r.name, err)
 	}
 	c.r.re = re
 	return nil
 }
 
-// theLayout is the layout suggested when a Laravel one is written by mistake.
+// theLayout is the layout suggested when a layout of another language is written
+// by mistake.
 const theLayout = "2006-01-02"
 
-// checkLayout refuses a PHP date format.
+// checkLayout refuses a date format that is not a Go layout.
 //
-// date_format takes a GO layout: date_format:2006-01-02, never date_format:Y-m-d.
-// It is the one Laravel string that cannot be copied, because the string means
-// something else in the host language -- the same reason a kyse template ends
-// in .go.
+// date_format takes a GO layout: date_format:2006-01-02, never
+// date_format:Y-m-d.
 //
 // The round trip alone does not catch it: time.Now().Format("Y-m-d") returns
 // "Y-m-d" and time.Parse("Y-m-d", "Y-m-d") succeeds, so the layout would boot

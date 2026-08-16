@@ -21,65 +21,55 @@ import (
 
 // WorkerOptions configures the loop.
 //
-// It answers Illuminate\Queue\WorkerOptions, field for field, plus the two this
-// collection needs that PHP cannot have: a Concurrency, because a Go worker
-// runs a batch at once rather than forking a process per job, and a Recorder,
-// because a job is instrumented like a request.
+// Two of the fields are there because of how this worker runs: a Concurrency,
+// because it drains a batch at once rather than one job per process, and a
+// Recorder, because a job is instrumented like a request.
 type WorkerOptions struct {
-	// Name identifies this worker, for [PopUsing] and for the log line. It
-	// answers $name, and empty means "default".
+	// Name identifies this worker, for [PopUsing] and for the log line. Empty
+	// means "default".
 	Name string
 	// Queue is which queue to drain. Empty means jobs.DefaultQueue.
 	Queue string
 	// Concurrency is how many jobs run at once. Default 4.
 	//
-	// It has no counterpart in Laravel, where concurrency is more worker
-	// processes. Here one process drains a batch, and the batch is this wide.
+	// One process drains a batch, and the batch is this wide.
 	Concurrency int
 	// Lease is how long a popped job stays invisible to other workers. It has
 	// to exceed the longest handler, or a second worker picks up work still in
 	// progress. Default 5 minutes.
-	//
-	// It answers the retry_after of Laravel's queue config rather than a field
-	// of WorkerOptions, because in PHP the visibility window belongs to the
-	// connection and here it belongs to the pop.
 	Lease time.Duration
 	// Timeout is how long one handler may run before its context is cancelled.
 	// Zero means Lease.
 	//
-	// It answers $timeout. Laravel keeps this and retry_after apart and warns
-	// that the first must be shorter than the second; here it defaults to Lease
-	// so there is one number until somebody needs two, and a Timeout longer
-	// than the Lease is the misconfiguration that hands a running job to a
-	// second worker.
+	// It defaults to Lease so there is one number until somebody needs two, and
+	// a Timeout longer than the Lease is the misconfiguration that hands a
+	// running job to a second worker.
 	Timeout time.Duration
 	// Sleep is how long to wait before asking again when the queue was empty.
-	// Default 1 second. It answers $sleep.
+	// Default 1 second.
 	Sleep time.Duration
 	// Rest is how long to wait after each job, whatever the queue holds. Zero
-	// means no rest. It answers $rest, and it exists to stop a fast queue from
-	// saturating a database that everything else shares.
+	// means no rest. It exists to stop a fast queue from saturating a database
+	// that everything else shares.
 	Rest time.Duration
 	// MaxTries is how many deliveries a job gets before it is parked.
-	// Default 5. It answers $maxTries.
+	// Default 5.
 	//
 	// A job's own jobs.Job.MaxTries overrides it, which is what makes one
 	// handler able to retry more than the rest.
 	MaxTries int
 	// Force runs the worker even while the application is down for
-	// maintenance. It answers $force.
+	// maintenance.
 	Force bool
-	// StopWhenEmpty ends the loop the first time the queue has nothing.
-	// It answers $stopWhenEmpty, and it is what a pipeline step waits on.
+	// StopWhenEmpty ends the loop the first time the queue has nothing. It is
+	// what a pipeline step waits on.
 	StopWhenEmpty bool
 	// MaxJobs stops the worker after this many jobs. Zero means no limit.
-	// It answers $maxJobs.
 	MaxJobs int
 	// MaxTime stops the worker after this long. Zero means no limit.
-	// It answers $maxTime.
 	MaxTime time.Duration
 	// Memory stops the worker when the process is holding more than this many
-	// megabytes. Zero means no limit. It answers $memory.
+	// megabytes. Zero means no limit.
 	Memory int
 	// Middleware wraps every job this worker runs, outermost first.
 	//
@@ -96,14 +86,13 @@ type WorkerOptions struct {
 	// Collector is built, log.FromContext returns nil, and every Record method
 	// is a no-op on a nil receiver. Zero cost, not low cost.
 	//
-	// It used to build a Collector on every job unconditionally and then throw
-	// it away -- so production paid for recording every query with its bound
-	// arguments and its caller frames, and nobody could read any of it. Found by
-	// audit. Pass the application's recorder to turn it on.
+	// Building a Collector on every job unconditionally would make production
+	// pay for recording every query with its bound arguments and its caller
+	// frames, with nobody able to read any of it. Pass the application's
+	// recorder to turn it on.
 	Recorder *log.Recorder
 	// Backoff returns how long to wait before attempt n. Default is
-	// exponential, capped at an hour. It answers $backoff, which in PHP is a
-	// number or a list of numbers and here is the function both of those are.
+	// exponential, capped at an hour.
 	Backoff func(attempt int) time.Duration
 }
 
@@ -155,9 +144,9 @@ func ExponentialBackoff(attempt int) time.Duration {
 
 // PopCallback replaces how a worker chooses its next batch.
 //
-// It answers the callbacks registered by [PopUsing]: pop is the driver's own
-// pop, and what the callback returns is what the worker runs. Horizon uses the
-// PHP one to weight queues against each other, and this is the same seam.
+// It is what [PopUsing] registers: pop is the driver's own pop, and what the
+// callback returns is what the worker runs. It is the seam for weighting
+// queues against each other.
 type PopCallback func(ctx context.Context, pop func(queue string) ([]*jobs.Job, error)) ([]*jobs.Job, error)
 
 var popCallbacks struct {
@@ -167,8 +156,7 @@ var popCallbacks struct {
 
 // PopUsing registers how the worker called workerName chooses its next batch.
 //
-// It answers Worker::popUsing(), including the nil case: passing nil forgets
-// the callback rather than registering an empty one.
+// Passing nil forgets the callback rather than registering an empty one.
 func PopUsing(workerName string, callback PopCallback) {
 	popCallbacks.Lock()
 	defer popCallbacks.Unlock()
@@ -188,28 +176,25 @@ func PopUsing(workerName string, callback PopCallback) {
 // It is declared here rather than imported so the queue does not depend on a
 // store to run. cache.Store satisfies it. There is no auth.Grant on it and that
 // is deliberate: a restart signal and a pause are operational state about the
-// process, not data about a customer, so there is no tenant to scope them by
-// (RULE 14 is about data, and this is not data).
+// process, not data about a customer, so there is no tenant to scope them by.
 type Cache interface {
 	Get(ctx context.Context, key string) ([]byte, error)
 	Put(ctx context.Context, key string, value []byte, ttl time.Duration) error
 	Forget(ctx context.Context, key string) error
 }
 
-// restartKey is where `aru queue:restart` leaves its timestamp. It answers
-// Laravel's illuminate:queue:restart.
+// restartKey is where `aru queue:restart` leaves its timestamp.
 const restartKey = "hesape:queue:restart"
 
 // Worker runs jobs off a queue.
 //
-// It answers Illuminate\Queue\Worker, and it is also the handler registry:
-// something has to turn the name on the wire into code, and in Laravel that is
-// the container unserializing a class. Here it is a map somebody filled in, so
-// the set of names a binary can run is visible at the call site.
+// It is also the handler registry: something has to turn the name on the wire
+// into code, and here it is a map somebody filled in, so the set of names a
+// binary can run is visible at the call site.
 //
-// In the same binary as the application, started by `aru work`, which is the
-// same image with a different argument. Not a second artifact: one image is what
-// keeps the deploy story in doc 17 true.
+// It runs in the same binary as the application, started by `aru work`, which
+// is the same image with a different argument. Not a second artifact: one image
+// is one thing to build, ship and roll back.
 type Worker struct {
 	queue    Queue
 	manager  *QueueManager
@@ -218,11 +203,10 @@ type Worker struct {
 	cache    Cache
 	events   Dispatcher
 
-	// ShouldQuit ends the loop after the job in flight. It answers $shouldQuit,
-	// and it is what a signal handler sets.
+	// ShouldQuit ends the loop after the job in flight. It is what a signal
+	// handler sets.
 	ShouldQuit atomic.Bool
-	// Paused stops the worker taking new jobs without ending the loop. It
-	// answers $paused.
+	// Paused stops the worker taking new jobs without ending the loop.
 	Paused atomic.Bool
 }
 
@@ -269,7 +253,7 @@ func (w *Worker) Names() []string {
 
 // SetName names this worker, and returns it so the call chains.
 //
-// It answers setName(). The name is what [PopUsing] keys on.
+// The name is what [PopUsing] keys on.
 func (w *Worker) SetName(name string) *Worker {
 	w.opts.Name = name
 	return w
@@ -278,9 +262,9 @@ func (w *Worker) SetName(name string) *Worker {
 // SetCache gives the worker somewhere to read the restart signal and the pause
 // flag, and returns it so the call chains.
 //
-// It answers setCache(). Without one the worker never restarts on `aru
-// queue:restart` and never observes a paused queue -- which is what a test
-// wants and what a single-process deployment can live with.
+// Without one the worker never restarts on `aru queue:restart` and never
+// observes a paused queue -- which is what a test wants and what a
+// single-process deployment can live with.
 func (w *Worker) SetCache(c Cache) *Worker {
 	w.cache = c
 	return w
@@ -289,9 +273,8 @@ func (w *Worker) SetCache(c Cache) *Worker {
 // SetEvents gives the worker somewhere to send its events, and returns it so
 // the call chains.
 //
-// It has no PHP counterpart because in Laravel the dispatcher is a constructor
-// argument resolved from the container. Nil means the events are not built at
-// all, which is what production looks like when nobody is listening.
+// Nil means the events are not built at all, which is what production looks
+// like when nobody is listening.
 func (w *Worker) SetEvents(d Dispatcher) *Worker {
 	w.events = d
 	return w
@@ -299,9 +282,8 @@ func (w *Worker) SetEvents(d Dispatcher) *Worker {
 
 // Options is the configuration this worker is running under.
 //
-// It has no PHP counterpart because there the options are an argument to
-// daemon(); here the worker holds them, and [WorkCommand] reads them so its
-// flags can override what the application built.
+// The worker holds its options, and [WorkCommand] reads them so its flags can
+// override what the application built.
 func (w *Worker) Options() WorkerOptions { return w.opts }
 
 // SetOptions replaces the configuration, and returns the worker so the call
@@ -318,11 +300,10 @@ func (w *Worker) SetOptions(o WorkerOptions) *Worker {
 
 // FlushState forgets that the worker was ever asked to stop or pause.
 //
-// It answers WorkCommand::flushState(). A Worker is a long-lived object, and
-// the two flags a signal sets outlive the loop that read them: without this, a
-// worker started a second time in the same process -- which is what a test and
-// `queue:work --once` in a loop both do -- stops immediately because something
-// asked the first one to.
+// A Worker is a long-lived object, and the two flags a signal sets outlive the
+// loop that read them: without this, a worker started a second time in the same
+// process -- which is what a test and `queue:work --once` in a loop both do --
+// stops immediately because something asked the first one to.
 func (w *Worker) FlushState() {
 	w.ShouldQuit.Store(false)
 	w.Paused.Store(false)
@@ -330,34 +311,30 @@ func (w *Worker) FlushState() {
 
 // Pause stops this worker taking new jobs, without ending its loop.
 //
-// It answers the SIGUSR2 handler in Worker::listenForSignals(), which sets
-// $paused. It is a method rather than a signal handler because Go's signal
-// handling belongs to the program, not to a library: `aru work` installs the
-// handlers and calls this.
+// It is a method rather than a signal handler because signal handling belongs
+// to the program, not to a library: `aru work` installs the handlers and calls
+// this.
 func (w *Worker) Pause() { w.Paused.Store(true) }
 
-// Resume lets this worker take jobs again. It answers the SIGCONT handler.
+// Resume lets this worker take jobs again.
 func (w *Worker) Resume() { w.Paused.Store(false) }
 
 // Restart asks this worker to stop after the job it is holding.
 //
-// It answers the SIGQUIT, SIGTERM and SIGINT handlers, which set $shouldQuit.
 // The loop returns after the batch in flight, so a deploy does not lose work.
 func (w *Worker) Restart() { w.ShouldQuit.Store(true) }
 
 // GetManager is the manager this worker resolves connections through, or nil.
-// It answers getManager().
 func (w *Worker) GetManager() *QueueManager { return w.manager }
 
 // SetManager gives the worker a manager, so it can ask whether its queue is
-// paused. It answers setManager().
+// paused.
 func (w *Worker) SetManager(m *QueueManager) { w.manager = m }
 
 // Daemon drains the queue until it is told to stop, and returns the exit status.
 //
-// It answers Worker::daemon(). The connection, the queue and the options are on
-// the worker rather than arguments, because a Go worker is constructed with them
-// and a PHP one is resolved from a container and configured per call.
+// The connection, the queue and the options are on the worker rather than
+// arguments, because a worker is constructed with them.
 //
 // The status is one of [ExitSuccess], [ExitError] and [ExitMemoryLimit], and it
 // is what `aru work` returns to the shell: a supervisor reads it to tell "asked
@@ -405,9 +382,9 @@ func (w *Worker) Daemon(ctx context.Context) (int, error) {
 
 		if len(popped) == 0 {
 			// An idle pass still has to reach stopIfNecessary, which is what
-			// notices `aru queue:restart`. It used to `continue` here, so a
-			// worker on a quiet queue never saw the restart signal at all and
-			// a deploy waited for a job that was not coming. Found by test.
+			// notices `aru queue:restart`. Skipping it on an idle pass leaves
+			// a worker on a quiet queue never seeing the restart signal at
+			// all, and a deploy waiting for a job that is not coming.
 			if !w.wait(ctx, w.opts.Sleep) {
 				return w.Stop(ExitSuccess, Interrupted), nil
 			}
@@ -420,12 +397,12 @@ func (w *Worker) Daemon(ctx context.Context) (int, error) {
 		// The batch runs in parallel, because the lease was taken for all of it
 		// at once.
 		//
-		// It used to run serially, which made Concurrency a lie in the one way
-		// that costs data: Pop hid all n jobs for the same Lease, so with
-		// Concurrency 4, Lease 5m and a two-minute handler, the fourth job
-		// started at minute six -- past its own lease, already visible to
-		// another worker, and running in both. At-least-once turned into
-		// exactly-twice for the tail of every batch. Found by audit.
+		// Running the batch serially would make Concurrency a lie in the one
+		// way that costs data: Pop hides all n jobs for the same Lease, so
+		// with Concurrency 4, Lease 5m and a two-minute handler, the fourth
+		// job would start at minute six -- past its own lease, already visible
+		// to another worker, and running in both. At-least-once would turn
+		// into exactly-twice for the tail of every batch.
 		//
 		// The batch is sized by Concurrency, so running all of it at once is
 		// exactly Concurrency jobs in flight, not Concurrency squared.
@@ -455,9 +432,9 @@ func (w *Worker) Daemon(ctx context.Context) (int, error) {
 
 // RunNextJob takes one batch off the queue and runs it.
 //
-// It answers Worker::runNextJob(), which is what `queue:work --once` calls: one
-// pass of the loop, with none of the bookkeeping that decides whether to make
-// another. An empty queue sleeps once and returns.
+// It is what `queue:work --once` calls: one pass of the loop, with none of the
+// bookkeeping that decides whether to make another. An empty queue sleeps once
+// and returns.
 func (w *Worker) RunNextJob(ctx context.Context) error {
 	popped, err := w.getNextJobs(ctx)
 	if err != nil {
@@ -477,24 +454,20 @@ func (w *Worker) RunNextJob(ctx context.Context) error {
 
 // Process runs one job, instrumented when there is somewhere to send it.
 //
-// It answers Worker::process(). That is the point of instrumenting it: "the
-// nightly job is slow" is the same investigation as "the page is slow", and it
-// deserves the same page.
+// Instrumenting it is the point: "the nightly job is slow" is the same
+// investigation as "the page is slow", and it deserves the same page.
 //
 // The error it returns is the handler's, after the job has been settled -- so a
 // caller that wants to know what happened can, and the daemon that does not
-// ignores it. Laravel rethrows for the same reason.
+// ignores it.
 //
-// Every path out of it dispatches events.JobAttempted, which is what the PHP's
-// finally block does and what nothing here did: the event was declared and
-// documented as "dispatched after every delivery", and no code dispatched it,
-// so a listener counting deliveries -- the one thing it is for -- counted none.
-// Found by audit.
+// Every path out of it dispatches events.JobAttempted, which is what makes that
+// event usable for counting deliveries.
 func (w *Worker) Process(ctx context.Context, j *jobs.Job) (err error) {
 	connectionName := j.GetConnectionName()
 
 	// Deferred rather than written at each return, because there are six of
-	// them and the one that forgets is the bug this replaces.
+	// them and the one that forgets is a delivery nobody counted.
 	defer func() {
 		w.dispatch(events.JobAttempted{ConnectionName: connectionName, Job: j, Exception: err})
 	}()
@@ -584,17 +557,11 @@ func (w *Worker) Process(ctx context.Context, j *jobs.Job) (err error) {
 
 // handleJobException settles a job whose handler failed.
 //
-// It answers Worker::handleJobException(), in the order the PHP has it: park
-// the job when this failure is its last, then announce the exception, then
-// release whatever is still unsettled.
-//
-// The order is the whole point, and this dispatched JobExceptionOccurred first
-// while the doc comment claimed to be "in the order the PHP has it". In the PHP
-// the parking happens inside markJobAsFailedIfWillExceedMaxAttempts, which
-// dispatches JobFailed from $job->fail(), and raiseExceptionOccurredJobEvent
-// runs after it. A listener that reads JobExceptionOccurred as "this one will
-// come back" -- the only reading that tells it apart from JobFailed -- was
-// wrong on the last delivery of every job. Found by audit.
+// The order is the whole point: park the job when this failure is its last,
+// then announce the exception, then release whatever is still unsettled. A
+// listener reads JobExceptionOccurred as "this one will come back" -- the only
+// reading that tells it apart from JobFailed -- and announcing it before the
+// parking makes that reading wrong on the last delivery of every job.
 func (w *Worker) handleJobException(ctx context.Context, j *jobs.Job, cause error, logger *slog.Logger) {
 	connectionName := j.GetConnectionName()
 	j.Exceptions++
@@ -604,18 +571,15 @@ func (w *Worker) handleJobException(ctx context.Context, j *jobs.Job, cause erro
 	// twice: WithoutOverlapping releases it for ten seconds and the worker
 	// underneath would release it again for the backoff, or park it.
 	//
-	// The PHP guards the same case with "if (! $job->hasFailed())" around the
-	// decision and "if (! isDeleted() && ! isReleased() && ! hasFailed())"
-	// around the release, and announces the exception either way -- which is
-	// what the event is for: it says the handler failed, not what became of the
-	// job.
+	// The exception is announced either way, which is what the event is for: it
+	// says the handler failed, not what became of the job.
 	settled := j.IsDeletedOrReleased()
 
-	// Attempts already counts this delivery -- Pop incremented it. Adding
-	// one here counted it twice, so MaxTries of N delivered N-1 times and
-	// MaxTries of 2 parked on the first failure with no retry at all.
-	// Found by audit; the in-memory queue used by the worker tests did not
-	// increment, which is why it never showed up here.
+	// Attempts already counts this delivery -- Pop incremented it. Adding one
+	// here counts it twice, so MaxTries of N delivers N-1 times and MaxTries of
+	// 2 parks on the first failure with no retry at all. The in-memory queue
+	// the worker tests use does not increment, so that miscount does not show
+	// there.
 	attempts := j.Attempts
 	if attempts < 1 {
 		attempts = 1
@@ -653,11 +617,10 @@ func (w *Worker) handleJobException(ctx context.Context, j *jobs.Job, cause erro
 
 // shouldFail decides whether this failure is the job's last.
 //
-// It folds Worker::markJobAsFailedIfWillExceedMaxAttempts,
-// markJobAsFailedIfWillExceedMaxExceptions and
-// markJobAsFailedIfItShouldFailOnTimeout into one predicate: the three PHP
-// methods each fail the job themselves, so a job that trips two of them is
-// failed twice, and here the decision is made once and acted on once.
+// The manual failure, the retry deadline, the timeout, the exception count and
+// the try count are one predicate rather than five checks that each park the
+// job themselves: a job that trips two of them would otherwise be failed twice,
+// and here the decision is made once and acted on once.
 func (w *Worker) shouldFail(j *jobs.Job, attempts int, cause error) bool {
 	// A handler that says the work can never succeed is believed on the first
 	// delivery. Retrying it four more times is four more copies of the same
@@ -674,9 +637,8 @@ func (w *Worker) shouldFail(j *jobs.Job, attempts int, cause error) bool {
 	if max := j.MaxExceptions(); max > 0 && j.Exceptions >= max {
 		return true
 	}
-	// "$maxTries > 0 && $job->attempts() >= $maxTries": a limit of zero or less
-	// is no limit, and a job under one is never parked for having been
-	// delivered often enough. See maxTriesFor.
+	// A limit of zero or less is no limit, and a job under one is never parked
+	// for having been delivered often enough. See maxTriesFor.
 	if max := w.maxTriesFor(j); max > 0 {
 		return attempts >= max
 	}
@@ -686,13 +648,13 @@ func (w *Worker) shouldFail(j *jobs.Job, attempts int, cause error) bool {
 // MarkJobAsFailedIfAlreadyExceedsMaxAttempts parks a job that used up its
 // deliveries without ever reporting an error.
 //
-// It answers Worker::markJobAsFailedIfAlreadyExceedsMaxAttempts(). The case it
-// exists for is a job that keeps timing out: the process dies with the job in
-// flight, the lease expires, the job comes back, and nothing ever ran the code
-// that counts a failure. Without this check that job is delivered forever.
+// The case it exists for is a job that keeps timing out: the process dies with
+// the job in flight, the lease expires, the job comes back, and nothing ever
+// ran the code that counts a failure. Without this check that job is delivered
+// forever.
 //
-// It returns the reason it parked the job, so the caller stops -- which is what
-// the PHP's `throw $e` does -- and nil when the job may run.
+// It returns the reason it parked the job, so the caller stops, and nil when
+// the job may run.
 func (w *Worker) MarkJobAsFailedIfAlreadyExceedsMaxAttempts(ctx context.Context, j *jobs.Job) error {
 	if until := j.RetryUntil(); !until.IsZero() {
 		if time.Now().Before(until) {
@@ -715,19 +677,14 @@ func (w *Worker) MarkJobAsFailedIfAlreadyExceedsMaxAttempts(ctx context.Context,
 // maxTriesFor is the job's own limit when it has one, and the worker's when it
 // does not. A result of zero or less is no limit at all.
 //
-// The PHP is "! is_null($job->maxTries()) ? $job->maxTries() : $maxTries", and
-// it tells three things apart that a Go int cannot: null is "the worker
-// decides", 0 is "never park it", and n is n. attributes.Attributes resolves
-// that by spelling "never park it" as a negative Tries, because zero is the
-// value of a field nobody set.
+// Three answers have to be told apart and a Go int carries only two of them by
+// itself: "the worker decides", "never park it", and a number.
+// attributes.Attributes resolves that by spelling "never park it" as a negative
+// Tries, because zero is the value of a field nobody set.
 //
-// The negative went straight into "attempts >= maxTries", which is true on the
-// first delivery -- so a job asking never to be parked was parked at once,
-// which is the opposite of what it asked for and the reverse of the PHP, where
-// the job would still be running. Callers of this now read a non-positive
-// answer as "no limit", which is what markJobAsFailedIfWillExceedMaxAttempts
-// ("$maxTries > 0") and markJobAsFailedIfAlreadyExceedsMaxAttempts ("$maxTries
-// === 0") each do with their own. Found by audit.
+// A negative fed straight into "attempts >= maxTries" is true on the first
+// delivery, so a job asking never to be parked would be parked at once. Callers
+// read a non-positive answer here as "no limit" instead.
 func (w *Worker) maxTriesFor(j *jobs.Job) int {
 	if own := j.MaxTries(); own != 0 {
 		return own
@@ -736,7 +693,7 @@ func (w *Worker) maxTriesFor(j *jobs.Job) int {
 }
 
 // timeoutFor is the job's own timeout when it has one, and the worker's when it
-// does not. It answers Worker::timeoutForJob().
+// does not.
 func (w *Worker) timeoutFor(j *jobs.Job) time.Duration {
 	if own := j.Timeout(); own > 0 {
 		return own
@@ -746,8 +703,8 @@ func (w *Worker) timeoutFor(j *jobs.Job) time.Duration {
 
 // calculateBackoff is how long to wait before the next delivery.
 //
-// It answers Worker::calculateBackoff(): the job's own schedule when it declared
-// one, and the worker's when it did not.
+// It is the job's own schedule when it declared one, and the worker's when it
+// did not.
 func (w *Worker) calculateBackoff(j *jobs.Job, attempt int) time.Duration {
 	if own := j.Backoff(); own > 0 {
 		return own
@@ -757,8 +714,6 @@ func (w *Worker) calculateBackoff(j *jobs.Job, attempt int) time.Duration {
 
 // getNextJobs takes the next batch off the queue, through the registered pop
 // callback when there is one.
-//
-// It answers Worker::getNextJob(), which is one job in PHP and a batch here.
 func (w *Worker) getNextJobs(ctx context.Context) ([]*jobs.Job, error) {
 	pop := func(name string) ([]*jobs.Job, error) {
 		return w.queue.Pop(ctx, name, w.opts.Concurrency, w.opts.Lease)
@@ -790,8 +745,8 @@ func (w *Worker) getNextJobs(ctx context.Context) ([]*jobs.Job, error) {
 
 // daemonShouldRun reports whether this pass of the loop may take work.
 //
-// It answers Worker::daemonShouldRun(): paused, down for maintenance, or a
-// Looping listener that said no.
+// It is false when this worker is paused, when the queue it drains is paused,
+// or when a Looping listener said no.
 func (w *Worker) daemonShouldRun(ctx context.Context) bool {
 	if w.Paused.Load() {
 		return false
@@ -814,9 +769,8 @@ func (w *Worker) daemonShouldRun(ctx context.Context) bool {
 // pauseWorker waits out one pass of a paused loop, and reports whether the
 // worker should stop while it is there.
 //
-// It answers Worker::pauseWorker(). The check afterwards is the point: a paused
-// worker still has to notice `aru queue:restart`, or a deploy waits for a queue
-// that will never resume.
+// The check afterwards is the point: a paused worker still has to notice `aru
+// queue:restart`, or a deploy waits for a queue that will never resume.
 func (w *Worker) pauseWorker(ctx context.Context, lastRestart string) (int, WorkerStopReason, bool) {
 	sleep := w.opts.Sleep
 	if sleep <= 0 {
@@ -830,9 +784,8 @@ func (w *Worker) pauseWorker(ctx context.Context, lastRestart string) (int, Work
 
 // stopIfNecessary decides whether the loop ends, and why.
 //
-// It answers Worker::stopIfNecessary(), in the same order: the reasons are
-// checked most-urgent first, so a worker that is both out of memory and past
-// its job limit reports the memory.
+// The reasons are checked most-urgent first, so a worker that is both out of
+// memory and past its job limit reports the memory.
 func (w *Worker) stopIfNecessary(ctx context.Context, lastRestart string, start time.Time, processed, lastBatch int) (int, WorkerStopReason, bool) {
 	switch {
 	case w.ShouldQuit.Load():
@@ -854,10 +807,9 @@ func (w *Worker) stopIfNecessary(ctx context.Context, lastRestart string, start 
 // MemoryExceeded reports whether the process is holding more than limit
 // megabytes.
 //
-// It answers Worker::memoryExceeded(). Laravel reads memory_get_usage(true),
-// which is what PHP asked the operating system for; the closest number Go has
-// is MemStats.Sys, which is the same question. A limit of zero or less is no
-// limit, exactly as in PHP.
+// The number read is MemStats.Sys, which is what the runtime has taken from the
+// operating system rather than what is live. A limit of zero or less is no
+// limit.
 func (w *Worker) MemoryExceeded(limitMB int) bool {
 	if limitMB <= 0 {
 		return false
@@ -869,9 +821,9 @@ func (w *Worker) MemoryExceeded(limitMB int) bool {
 
 // Stop ends the loop and returns the exit status.
 //
-// It answers Worker::stop(). The event goes out here rather than at each call
-// site, which is what makes "the worker stopped and this is why" one line in a
-// log instead of six places that might have logged it.
+// The event goes out here rather than at each call site, which is what makes
+// "the worker stopped and this is why" one line in a log instead of six places
+// that might have logged it.
 func (w *Worker) Stop(status int, reason WorkerStopReason) int {
 	w.dispatch(events.WorkerStopping{Status: status, WorkerOptions: w.opts, Reason: reason})
 	return status
@@ -879,10 +831,10 @@ func (w *Worker) Stop(status int, reason WorkerStopReason) int {
 
 // Kill ends the process now.
 //
-// It answers Worker::kill(). It exists for the one case [Worker.Stop] cannot
-// serve: a handler that has stopped responding to its context, where returning
-// from the loop would wait forever on a goroutine that will never finish.
-// Everything else stops by returning.
+// It exists for the one case [Worker.Stop] cannot serve: a handler that has
+// stopped responding to its context, where returning from the loop would wait
+// forever on a goroutine that will never finish. Everything else stops by
+// returning.
 func (w *Worker) Kill(status int) {
 	w.dispatch(events.WorkerStopping{Status: status, WorkerOptions: w.opts})
 	os.Exit(status)
@@ -890,9 +842,9 @@ func (w *Worker) Kill(status int) {
 
 // Sleep waits for d, or until the context is cancelled.
 //
-// It answers Worker::sleep(). It takes the context that PHP does not have, and
-// that is the difference that matters: a worker asleep for three seconds when
-// SIGTERM arrives holds up the deploy for three seconds, and this one does not.
+// Taking the context is the point: a worker asleep for three seconds when
+// SIGTERM arrives would hold up the deploy for three seconds, and this one does
+// not.
 func (w *Worker) Sleep(ctx context.Context, d time.Duration) {
 	if d <= 0 {
 		return
@@ -913,7 +865,7 @@ func (w *Worker) wait(ctx context.Context, d time.Duration) bool {
 }
 
 // queueShouldRestart reports whether somebody asked the workers to restart
-// since this one started. It answers Worker::queueShouldRestart().
+// since this one started.
 func (w *Worker) queueShouldRestart(ctx context.Context, lastRestart string) bool {
 	if w.cache == nil {
 		return false
@@ -922,7 +874,7 @@ func (w *Worker) queueShouldRestart(ctx context.Context, lastRestart string) boo
 }
 
 // getTimestampOfLastQueueRestart reads the restart signal, or empty when there
-// is none. It answers Worker::getTimestampOfLastQueueRestart().
+// is none.
 func (w *Worker) getTimestampOfLastQueueRestart(ctx context.Context) string {
 	if w.cache == nil || !interruptionPolling.Load() {
 		return ""

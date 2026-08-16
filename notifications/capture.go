@@ -9,11 +9,6 @@ import (
 
 // Delivery is one notification handed to one channel, as a capturing channel
 // recorded it.
-//
-// Nothing in Illuminate\Notifications answers to it: the equivalent is the
-// $notifications array inside Illuminate\Support\Testing\Fakes\
-// NotificationFake, which is a different component and is reached by swapping a
-// facade binding. Every exported name in this file is in the same position.
 type Delivery struct {
 	// Channel is which one took it.
 	Channel ChannelName
@@ -37,8 +32,8 @@ type Deliveries struct {
 	list []Delivery
 }
 
-// All returns a copy of everything recorded, in the order it happened. It has
-// no PHP counterpart, for the reason [Delivery] gives.
+// All returns a copy of everything recorded, in the order it happened. It is a
+// copy, so a caller reading it cannot race a send still in flight.
 func (d *Deliveries) All() []Delivery {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -47,16 +42,14 @@ func (d *Deliveries) All() []Delivery {
 	return out
 }
 
-// Len is how many deliveries were recorded. It has no PHP counterpart, for the
-// reason [Delivery] gives.
+// Len is how many deliveries were recorded.
 func (d *Deliveries) Len() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return len(d.list)
 }
 
-// For returns the deliveries of one kind of notification. It has no PHP
-// counterpart, for the reason [Delivery] gives.
+// For returns the deliveries of one kind of notification, across every channel.
 func (d *Deliveries) For(k Key) []Delivery {
 	var out []Delivery
 	for _, one := range d.All() {
@@ -70,8 +63,7 @@ func (d *Deliveries) For(k Key) []Delivery {
 // Sent reports whether a kind of notification reached a recipient on any
 // channel. It is the assertion a test writes nine times out of ten.
 //
-// It has no PHP counterpart, for the reason [Delivery] gives: the nearest thing
-// is NotificationFake::assertSentTo, in a different component.
+// A nil recipient is false rather than a match on everything.
 func (d *Deliveries) Sent(k Key, to Notifiable) bool {
 	if to == nil {
 		return false
@@ -86,8 +78,7 @@ func (d *Deliveries) Sent(k Key, to Notifiable) bool {
 	return false
 }
 
-// Reset forgets everything, for a test that reuses one Notifier across cases. It
-// has no PHP counterpart, for the reason [Delivery] gives.
+// Reset forgets everything, for a test that reuses one Notifier across cases.
 func (d *Deliveries) Reset() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -110,12 +101,12 @@ func (d *Deliveries) add(one Delivery) {
 //		t.Fatal("the customer was not told the invoice was paid")
 //	}
 //
-// With no names it captures the three channels the collection implements, which
+// With no names it captures the three channels this package implements, which
 // is what a test of "was anything sent at all" wants.
 //
-// It is Laravel's Notification::fake, wired the way everything else here is
-// wired: by being passed in, rather than by swapping a binding in a container
-// that the code under test resolves from behind your back.
+// The channels are passed in rather than installed somewhere global, so two
+// tests running in parallel record into two different [Deliveries] and neither
+// can see the other's.
 func Capture(names ...ChannelName) ([]Channel, *Deliveries) {
 	if len(names) == 0 {
 		names = []ChannelName{ChannelMail, ChannelDatabase, ChannelBroadcast}

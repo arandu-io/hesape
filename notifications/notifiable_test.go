@@ -13,8 +13,8 @@ import (
 	"github.com/arandu-io/hesape/notifications/messages"
 )
 
-// member is a model that embeds the two traits, the way a Laravel model uses
-// them.
+// member is a model that embeds both helpers, the way an application model
+// uses them.
 type member struct {
 	notifications.RoutesNotifications
 	notifications.HasDatabaseNotifications
@@ -109,8 +109,9 @@ func TestARecipientWithNoNotifierSaysSo(t *testing.T) {
 	}
 }
 
-// TestTheLocaleOrderIsTheNotificationThenTheManagerThenTheRecipient is
-// Illuminate's NotificationSender::preferredLocale.
+// TestTheLocaleOrderIsTheNotificationThenTheManagerThenTheRecipient checks the
+// order the locale is resolved in: the notification wins, then the manager's
+// default, then the recipient's own preference.
 func TestTheLocaleOrderIsTheNotificationThenTheManagerThenTheRecipient(t *testing.T) {
 	t.Parallel()
 
@@ -326,8 +327,8 @@ func TestRoutesAddressesEveryChannelInTheMap(t *testing.T) {
 	}
 }
 
-// TestRoutesOfNothingIsAddressedNowhere: PHP's empty array makes a notifiable
-// with an empty $routes, and so does a nil map.
+// TestRoutesOfNothingIsAddressedNowhere checks that a notifiable built with no
+// routes at all is reachable on no channel, rather than failing on a nil map.
 func TestRoutesOfNothingIsAddressedNowhere(t *testing.T) {
 	t.Parallel()
 

@@ -265,8 +265,8 @@ func TestDatabaseRepositoryCancelIsIdempotentAndSaysWhenThereIsNoBatch(t *testin
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
-	// Cancelling stamps both columns, as Illuminate's does: nothing the jobs
-	// still queued could report would change the outcome.
+	// Cancelling stamps both columns: nothing the jobs still queued could
+	// report would change the outcome.
 	if !got.Cancelled() || !got.Finished() {
 		t.Errorf("batch = %+v, want cancelled and finished", got)
 	}

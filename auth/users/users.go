@@ -28,11 +28,11 @@ import (
 // by the name they are taken under.
 const (
 	// RetrieveUser is the action every read in this package is authorized
-	// under: retrieveById, retrieveByToken and retrieveByCredentials.
+	// under: RetrieveByID, RetrieveByToken and RetrieveByCredentials.
 	RetrieveUser auth.Action = "user.retrieve"
 
 	// UpdateUser is the action the two writes are authorized under:
-	// updateRememberToken and rehashPasswordIfRequired.
+	// UpdateRememberToken and RehashPasswordIfRequired.
 	UpdateUser auth.Action = "user.update"
 )
 
@@ -41,60 +41,54 @@ const (
 //
 // It is the one thing this package cannot check at compile time. The
 // constructor is declared as func() auth.Authenticatable because that is the
-// contract a guard consumes; hydration is Eloquent's, not Authenticatable's, so
-// it is asked for by assertion. Wire a user type that embeds *eloquent.Model[T]
-// -- or write the two methods -- and this never fires.
+// contract a guard consumes, and filling a value from a row is not part of that
+// contract, so it is asked for by assertion instead. Wire a user type that
+// embeds *eloquent.Model[T] -- or write the two methods -- and this never fires.
 var ErrNotHydratable = errors.New("users: the model cannot be filled from a row (it does not implement users.Hydratable)")
 
 // ErrNoPassword is what RehashPasswordIfRequired answers when the credentials
 // it was handed carry no password to hash.
 //
-// The PHP reads $credentials['password'] straight into hasher->make() and lets
-// PHP raise on the missing key. A named error is the same event with the cause
-// written down: rehashing happens right after a sign-in that already proved a
-// plain password, so an absent one means the caller passed different credentials
-// to the check and to the rehash.
+// Rehashing happens right after a sign-in that already proved a plain password,
+// so an absent one means the caller passed different credentials to the check
+// and to the rehash.
 var ErrNoPassword = errors.New("users: the credentials carry no password")
 
-// Hydratable is the one thing an Eloquent model gives a user provider that
+// Hydratable is the one thing a user provider needs of a user type that
 // auth.Authenticatable does not declare: filling an instance from one row.
 //
-// It answers Illuminate\Database\Eloquent\Model::setRawAttributes, which is what
-// Eloquent\Builder::hydrate calls on every record it turns into a model. In PHP
-// the provider never names it, because $query->first() comes back as a model
-// already; here the query builder answers with a query.Record, and the step from
-// row to user has to be somewhere.
+// The query builder answers with a query.Record, so the step from row to user
+// has to be somewhere, and this is it.
 //
 // The signature is hesape/database/eloquent's, unchanged, so a user type that
 // embeds *eloquent.Model[T] satisfies this by embedding it.
 type Hydratable interface {
-	// SetRawAttributes answers Model::setRawAttributes. sync decides whether the
+	// SetRawAttributes writes the row onto the value. sync decides whether the
 	// original attributes are synced, and hydration passes true.
 	SetRawAttributes(attributes map[string]any, sync bool) error
 }
 
-// Fillable is Illuminate\Database\Eloquent\Model::forceFill, which
-// rehashPasswordIfRequired calls to put the new hash on the model it was handed.
+// Fillable is what RehashPasswordIfRequired needs to put the new hash on the
+// user it was handed.
 //
-// It is separate from Hydratable because the two do different things:
-// setRawAttributes replaces the row, forceFill merges into it. Rehashing with
+// It is separate from [Hydratable] because the two do different things:
+// SetRawAttributes replaces the row, ForceFill merges into it. Rehashing with
 // the first would leave a user holding nothing but a password.
 //
 // A user type that does not implement it is still rehashed in storage; only the
 // instance in memory keeps the old hash, and it is about to be replaced by the
 // next read anyway.
 type Fillable interface {
-	// ForceFill answers Model::forceFill.
+	// ForceFill merges the attributes into the value, past any guard on them.
 	ForceFill(attributes map[string]any) error
 }
 
 // hydrate turns one row into the user type the provider was built with.
 //
-// It answers the part of Eloquent\Builder::hydrate that a provider depends on.
-// A nil record is the PHP's null result and yields a nil user, which is what
-// every retrieve method returns when nothing matched -- an interface holding a
-// typed nil would compare unequal to nil at the call site, which is the bug this
-// signature exists to avoid.
+// A nil record yields a nil user, which is what every retrieve method returns
+// when nothing matched -- an interface holding a typed nil would compare
+// unequal to nil at the call site, which is the bug this signature exists to
+// avoid.
 func hydrate(newModel func() auth.Authenticatable, record query.Record) (auth.Authenticatable, error) {
 	if record == nil {
 		return nil, nil
@@ -110,14 +104,13 @@ func hydrate(newModel func() auth.Authenticatable, record query.Record) (auth.Au
 	return user, nil
 }
 
-// filterCredentials answers the array_filter that opens retrieveByCredentials:
-// every key holding the word "password" is dropped before a where clause is
-// built from it.
+// filterCredentials drops every key holding the word "password" before a where
+// clause is built from it.
 //
 // Looking a user up BY their password is a lookup nobody can index and a
 // comparison no database does in constant time, so the column never reaches the
-// statement. The check is on the key and not on an exact match, which is the
-// PHP's str_contains: password, password_confirmation and old_password all go.
+// statement. The check is on the key containing the word and not on an exact
+// match: password, password_confirmation and old_password all go.
 func filterCredentials(credentials map[string]any) map[string]any {
 	out := make(map[string]any, len(credentials))
 	for key, value := range credentials {
@@ -129,20 +122,18 @@ func filterCredentials(credentials map[string]any) map[string]any {
 	return out
 }
 
-// applyCredentials answers the foreach that follows it: each remaining
-// credential becomes a clause on the query.
+// applyCredentials turns each remaining credential into a clause on the query.
 //
-// The three shapes are the PHP's three. An array or an Arrayable becomes a
-// whereIn -- a slice of anything does here, found by reflection, because a
-// caller writing []string{"a","b"} means the same thing as []any{"a","b"} and a
-// type switch on []any alone would quietly compile it to a comparison against a
-// slice. A Closure becomes func(*query.Builder), invoked on the query so it can
-// add whatever it likes. Anything else is an equality.
+// There are three shapes. A slice of anything becomes a WhereIn, found by
+// reflection, because a caller writing []string{"a","b"} means the same thing
+// as []any{"a","b"} and a type switch on []any alone would quietly compile the
+// first into a comparison against a slice. A func(*query.Builder) is invoked on
+// the query so it can add whatever it likes. Anything else is an equality.
 //
-// The keys are applied in sorted order. A PHP array remembers the order it was
-// written in and a Go map does not, and the clauses are ANDed together -- so the
-// rows returned are the same either way, and the statement is the same on every
-// run, which is what makes it readable in a log and checkable in a test.
+// The keys are applied in sorted order. A Go map has none of its own, and the
+// clauses are ANDed together -- so the rows returned are the same either way,
+// and the statement is the same on every run, which is what makes it readable
+// in a log and checkable in a test.
 func applyCredentials(q *query.Builder, credentials map[string]any) {
 	for _, key := range slices.Sorted(maps.Keys(credentials)) {
 		value := credentials[key]
@@ -159,9 +150,8 @@ func applyCredentials(q *query.Builder, credentials map[string]any) {
 	}
 }
 
-// asSlice answers PHP's is_array($value) || $value instanceof Arrayable for a
-// Go value: any slice is a list of values to match against, except a []byte,
-// which is one value that happens to be bytes.
+// asSlice reads a credential as a list of values to match against: any slice
+// is one, except a []byte, which is a single value that happens to be bytes.
 func asSlice(value any) ([]any, bool) {
 	if values, ok := value.([]any); ok {
 		return values, true
@@ -180,13 +170,12 @@ func asSlice(value any) ([]any, bool) {
 	return out, true
 }
 
-// tokensMatch answers hash_equals: the remember token stored on the row and the
-// one that came in on the cookie are compared in time that does not depend on
-// how many leading bytes agree.
+// tokensMatch compares the remember token stored on the row with the one that
+// came in on the cookie, in time that does not depend on how many leading bytes
+// agree.
 //
-// An empty stored token never matches, which is the PHP's `$rememberToken &&`
-// -- a user who has never been remembered has an empty column, and an empty
-// cookie must not authenticate them.
+// An empty stored token never matches: a user who has never been remembered has
+// an empty column, and an empty cookie must not authenticate them.
 func tokensMatch(stored, given string) bool {
 	if stored == "" {
 		return false
@@ -194,62 +183,47 @@ func tokensMatch(stored, given string) bool {
 	return subtle.ConstantTimeCompare([]byte(stored), []byte(given)) == 1
 }
 
-// passwordOf reads the plain password out of the credentials, the way
-// $credentials['password'] does.
+// passwordOf reads the plain password out of the credentials.
 //
-// # What was wrong, and the input that proved it
+// # Why it is not a string assertion
 //
-// It was a strict type assertion, credentials["password"].(string), and a
-// credentials map does not hold only strings. A login body of
+// A credentials map does not hold only strings. A login body of
 //
 //	{"email": "ana@example.com", "password": 12345}
 //
 // decodes through encoding/json into map[string]any{"password": float64(12345)},
-// the assertion failed, and the account could never be signed in to -- with no
-// message saying why, because validateCredentials answers bool and the guard
-// reports a refusal identical to a wrong password.
+// so credentials["password"].(string) would fail and the account could never be
+// signed in to -- with no message saying why, because ValidateCredentials
+// answers bool and the guard reports a refusal identical to a wrong password.
+// The value is coerced instead, in [plainPassword].
 //
-// The PHP has no assertion to fail. validateCredentials tests is_null and hands
-// the value to password_verify(string $password, string $hash); Illuminate does
-// not declare strict_types, so 12345 is coerced to "12345" and the sign-in
-// works. So the coercion is done here, in [plainPassword], for every shape PHP
-// would have coerced.
+// # And why an empty password is not refused early
 //
-// # And the early return that is gone
+// An empty string goes to the hasher like any other value and is refused there,
+// in the time a bcrypt comparison takes. Returning early would make the empty
+// password the one refusal that costs nothing, which is a difference a clock can
+// read -- SessionGuard.Attempt hides it inside its timebox, but a provider is
+// public and is called directly by anything that authenticates without a guard.
 //
-// This also refused an empty password before reaching the hasher. The PHP does
-// not: "" goes into password_verify like any other value and is refused there,
-// in the time a bcrypt comparison takes. Returning early made the empty password
-// the one refusal that costs nothing, which is a difference a clock can read --
-// SessionGuard.Attempt hides it inside its timebox, but a provider is public and
-// is called directly by anything that authenticates without a guard.
-//
-// A missing key and a nil value are still false. Those are the PHP's is_null,
-// which is the one guard validateCredentials really has.
+// A missing key and a nil value are false.
 func passwordOf(credentials map[string]any) (string, bool) {
 	return plainPassword(credentials["password"])
 }
 
-// plainPassword answers PHP's coercion of $credentials['password'] into the
-// string parameter of password_verify.
+// plainPassword coerces a credential value into the string the hasher takes.
 //
-// Every case below is a value PHP renders on the way into that call. A number
-// becomes its decimal form -- which is the case that matters, because that is
-// what a JSON body's unquoted password decodes to. A bool becomes "1" or "",
-// which is what (string)true and (string)false give. A fmt.Stringer is an object
-// with __toString. A []byte is text a form parser or a driver handed over as
-// bytes, and stringOf in genericuser.go reads a column the same way.
+// A number becomes its decimal form -- which is the case that matters, because
+// that is what a JSON body's unquoted password decodes to. A bool becomes "1"
+// or "". A fmt.Stringer becomes its String. A []byte is text a form parser or a
+// driver handed over as bytes, and stringOf in genericuser.go reads a column
+// the same way.
 //
-// Anything else -- a slice, a map, a struct with no String method -- is false.
-// PHP raises a TypeError there and the request ends in a 500; false refuses the
-// sign-in instead, for the reason hashing.AuthHasher.Check gives: this contract
-// answers bool and has nowhere to put the error, and refusing is the direction
-// that fails safely.
+// Anything else -- a slice, a map, a struct with no String method -- is false,
+// for the reason hashing.AuthHasher.Check gives: this contract answers bool and
+// has nowhere to put an error, and refusing is the direction that fails safely.
 //
 // Floats are formatted with the shortest form that round-trips, so 12345.0 is
-// "12345" and 1.5 is "1.5", which is what PHP prints for both. The two
-// renderings part company only in the exponent range, where PHP writes "1.0E+21"
-// and this writes the digits out; no login body carries one.
+// "12345" and 1.5 is "1.5". No login body carries one in the exponent range.
 func plainPassword(value any) (string, bool) {
 	switch v := value.(type) {
 	case nil:

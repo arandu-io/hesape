@@ -11,10 +11,8 @@ import (
 
 // defaultLockTimeout is how long a database lock is held when nobody says.
 //
-// It answers the $defaultLockTimeoutInSeconds = 86400 of
-// Illuminate\Cache\DatabaseStore, a day for a day. It is not a sensible time to
-// hold a lock; it is a sensible time for one to survive the process that died
-// holding it, which is the only job it has.
+// A day is not a sensible time to hold a lock; it is a sensible time for one to
+// survive the process that died holding it, which is the only job it has.
 const defaultLockTimeout = 24 * time.Hour
 
 // defaultLockLottery is how often acquiring a lock also prunes the expired ones.
@@ -43,9 +41,8 @@ type Connection interface {
 // NamedConnection is the optional half of Connection: one that knows what it is
 // called.
 //
-// It answers Illuminate\Database\ConnectionInterface::getName(), and it is a
-// second interface rather than a method on Connection because *sql.DB has no
-// name and would stop satisfying it.
+// It is a second interface rather than a method on Connection because *sql.DB
+// has no name and would stop satisfying it.
 type NamedConnection interface {
 	Connection
 
@@ -55,9 +52,8 @@ type NamedConnection interface {
 
 // DatabaseStore is the cache in a table.
 //
-// It answers Illuminate\Cache\DatabaseStore. It is the store for an application
-// that already has a database and does not want a second piece of
-// infrastructure -- which is a real position, and the reason Laravel ships it.
+// It is the store for an application that already has a database and does not
+// want a second piece of infrastructure.
 //
 // It is the slowest store here and it is the only one that is shared, durable
 // and transactional at the same time. Reach for it when the alternative is no
@@ -69,14 +65,12 @@ type NamedConnection interface {
 //
 // The cache table has key (primary), value and expiration. The lock table has
 // key (primary), owner and expiration. Both are what `aru make:cache-table`
-// writes, and both are Laravel's, column for column.
+// writes.
 //
-// The expiration is unix milliseconds, where Laravel's is unix seconds. That is
-// the one difference, and it is why the column is a BIGINT: Store.Put is given a
-// duration and a store whose resolution is a second cannot honour a ttl shorter
-// than one -- it would either expire the entry on arrival or keep it for most of
-// a second longer than it was told. Laravel never meets that, because its ttl is
-// already a whole number of seconds by the time the store sees it.
+// The expiration is unix milliseconds, and that is why the column is a BIGINT:
+// Store.Put is given a duration, and a store whose resolution is a second
+// cannot honour a ttl shorter than one -- it would either expire the entry on
+// arrival or keep it for most of a second longer than it was told.
 type DatabaseStore struct {
 	connection     Connection
 	lockConnection Connection
@@ -97,9 +91,8 @@ var (
 
 // NewDatabaseStore returns a store over a table.
 //
-// It answers DatabaseStore::__construct(). An empty lockTable means
-// "cache_locks", which is Laravel's default and is what keeps FlushLocks
-// possible -- see HasSeparateLockStore.
+// An empty lockTable means "cache_locks". A lock table separate from the cache
+// table is what keeps FlushLocks possible -- see HasSeparateLockStore.
 func NewDatabaseStore(connection Connection, table, prefix, lockTable string) *DatabaseStore {
 	if lockTable == "" {
 		lockTable = "cache_locks"
@@ -115,13 +108,9 @@ func NewDatabaseStore(connection Connection, table, prefix, lockTable string) *D
 }
 
 // GetConnection returns the connection the entries are read and written on.
-//
-// It answers DatabaseStore::getConnection().
 func (s *DatabaseStore) GetConnection() Connection { return s.connection }
 
 // SetConnection sets that connection and returns the store.
-//
-// It answers DatabaseStore::setConnection().
 func (s *DatabaseStore) SetConnection(c Connection) *DatabaseStore {
 	s.connection = c
 	return s
@@ -129,8 +118,6 @@ func (s *DatabaseStore) SetConnection(c Connection) *DatabaseStore {
 
 // GetLockConnection returns the connection the locks are managed on, and nil
 // when there is none.
-//
-// It answers DatabaseStore::getLockConnection().
 func (s *DatabaseStore) GetLockConnection() Connection { return s.lockConnection }
 
 // SetLockConnection sets that connection and returns the store.
@@ -157,16 +144,12 @@ func (s *DatabaseStore) GetConnectionName() string {
 }
 
 // GetPrefix is what goes in front of every key this store writes.
-//
-// It answers DatabaseStore::getPrefix().
 func (s *DatabaseStore) GetPrefix() string { return s.prefix }
 
 // SetPrefix sets it. It answers DatabaseStore::setPrefix().
 func (s *DatabaseStore) SetPrefix(prefix string) { s.prefix = prefix }
 
 // HasSeparateLockStore reports whether the locks live in another table.
-//
-// It answers DatabaseStore::hasSeparateLockStore().
 func (s *DatabaseStore) HasSeparateLockStore() bool { return s.lockTable != s.table }
 
 // lockConn is the connection the locks are managed on: the one that was set for
@@ -264,10 +247,10 @@ func (s *DatabaseStore) Many(ctx context.Context, keys []string) (map[string][]b
 
 // Put stores value for ttl, replacing whatever was there.
 //
-// It is an update, and an insert when the update matched nothing. Laravel emits
-// an upsert, which is a different statement on every grammar; this is one pair
-// that every database this package supports understands, and the outcome --
-// last writer wins -- is the same.
+// It is an update, and an insert when the update matched nothing. An upsert is
+// a different statement on every dialect; this is one pair that every database
+// this package supports understands, and the outcome -- last writer wins -- is
+// the same.
 func (s *DatabaseStore) Put(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	if ttl <= 0 {
 		return ErrNoTTL
@@ -348,13 +331,13 @@ func (s *DatabaseStore) Forever(ctx context.Context, key string, value []byte) e
 
 // Increment adds delta to the counter under key and returns the new value.
 //
-// It answers DatabaseStore::increment(). The counter keeps the deadline it was
-// created with, which is what makes a fixed window fixed.
+// The counter keeps the deadline it was created with, which is what makes a
+// fixed window fixed.
 //
-// It is not atomic across connections. Laravel's runs inside a transaction with
-// SELECT ... FOR UPDATE; that is a row lock this interface cannot ask for
-// without a transaction, and a counter that has to be exact belongs in a store
-// that counts atomically. What it does instead is refuse to widen the race: the
+// It is not atomic across connections: an exact count would need a row lock,
+// which this interface cannot ask for without a transaction, and a counter that
+// has to be exact belongs in a store that counts atomically. What it does
+// instead is refuse to widen the race: the
 // update carries the value it read in its WHERE, so a lost update is a lost
 // count and never a wrong one.
 func (s *DatabaseStore) Increment(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error) {
@@ -413,16 +396,11 @@ func (s *DatabaseStore) increment(ctx context.Context, key string, delta int64) 
 }
 
 // Decrement subtracts delta from the counter under key.
-//
-// It answers DatabaseStore::decrement().
 func (s *DatabaseStore) Decrement(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error) {
 	return s.Increment(ctx, key, -delta, ttl)
 }
 
 // Touch gives a live entry a new expiry and reports whether there was one.
-//
-// It answers DatabaseStore::touch(), including the WHERE that keeps it honest:
-// an expired row is not touched back to life.
 func (s *DatabaseStore) Touch(ctx context.Context, key string, ttl time.Duration) (bool, error) {
 	if ttl <= 0 {
 		return false, ErrNoTTL
@@ -469,9 +447,8 @@ func (s *DatabaseStore) ForgetIfExpired(ctx context.Context, key string) error {
 
 // Flush removes every entry whose key begins with prefix.
 //
-// Laravel's flush() empties the table, because its store holds one
-// application's cache. This one holds every tenant's, so it deletes by prefix --
-// an empty one empties the table, which is Laravel's flush() exactly.
+// This store holds every tenant's cache, so it deletes by prefix. An empty
+// prefix empties the table.
 func (s *DatabaseStore) Flush(ctx context.Context, prefix string) error {
 	if prefix == "" {
 		_, err := s.connection.ExecContext(ctx, "DELETE FROM "+s.table)
@@ -568,10 +545,9 @@ func (s *DatabaseStore) CurrentOwner(ctx context.Context, key string) (string, e
 
 // PruneExpiredLocks deletes the locks that are past their expiration.
 //
-// It answers DatabaseLock::pruneExpiredLocks(). AcquireLock runs it two times in
-// a hundred, which is Laravel's lottery, so the table stays bounded without any
-// one caller paying for it often. Call it directly from a scheduled task to make
-// it certain.
+// AcquireLock runs it two times in a hundred, so the table stays bounded
+// without any one caller paying for it often. Call it directly from a scheduled
+// task to make it certain.
 func (s *DatabaseStore) PruneExpiredLocks(ctx context.Context) error {
 	_, err := s.lockConn().ExecContext(ctx,
 		"DELETE FROM "+s.lockTable+" WHERE expiration <= ?", nowMillis())
@@ -579,15 +555,11 @@ func (s *DatabaseStore) PruneExpiredLocks(ctx context.Context) error {
 }
 
 // Lock returns a handle on a named lock. It does not touch the store.
-//
-// It answers DatabaseStore::lock().
 func (s *DatabaseStore) Lock(name string, ttl time.Duration, owner string) *Lock {
 	return &Lock{store: s, name: name, ttl: ttl, owner: owner, held: owner != ""}
 }
 
 // RestoreLock returns a handle on a lock owner already holds.
-//
-// It answers DatabaseStore::restoreLock().
 func (s *DatabaseStore) RestoreLock(name, owner string) *Lock { return s.Lock(name, 0, owner) }
 
 // drawLottery decides whether this acquisition pays for the pruning.

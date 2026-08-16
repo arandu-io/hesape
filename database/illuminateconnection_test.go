@@ -13,7 +13,7 @@ import (
 )
 
 // countingDriver is the smallest driver that reports an identifier: each Exec
-// answers the next integer. It is here rather than in fakedb_test.go because
+// returns the next integer. It is here rather than in fakedb_test.go because
 // that file is package database_test and these tests reach boundConnection,
 // which is unexported.
 type countingDriver struct{ n atomic.Int64 }

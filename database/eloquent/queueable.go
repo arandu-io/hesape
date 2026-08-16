@@ -6,43 +6,39 @@ import (
 	"slices"
 )
 
-// ErrMixedQueueableConnections answers the LogicException
-// Collection::getQueueableConnection throws: a queued collection whose models
-// are not all on one connection cannot be restored, because the job records one
-// connection name.
+// ErrMixedQueueableConnections is what GetQueueableConnection returns for a
+// queued collection whose models are not all on one connection: it cannot
+// be restored, because the job records one connection name.
 var ErrMixedQueueableConnections = errors.New("eloquent: queueing collections with multiple model connections is not supported")
 
 // Queueable is what GetQueueableRelations recurses into: a value hanging off a
 // loaded relation that can name its own.
 //
-// It is Illuminate\Contracts\Queue\QueueableEntity and QueueableCollection
-// narrowed to the one method this walk asks of them. The contracts package
-// itself is a written decision rather than a package here (ADR 0002); an
-// interface with one method, declared where it is consumed, is what Go does with
-// the rest of it.
+// It is one method, declared where it is consumed.
 type Queueable interface {
-	// GetQueueableRelations is QueueableEntity::getQueueableRelations.
+	// GetQueueableRelations returns the names of this value's own loaded
+	// relations that a queued job restores along with it.
 	GetQueueableRelations() []string
 }
 
-// GetQueueableID is Model::getQueueableId: what a queued job writes down so it
-// can find this row again. The PHP spells it getQueueableId.
+// GetQueueableID returns what a queued job writes down so it can find this
+// row again.
 func (m *Model[T]) GetQueueableID() any { return m.GetKey() }
 
-// GetQueueableConnection is Model::getQueueableConnection.
+// GetQueueableConnection returns the name of the connection this model
+// uses, for a queued job to restore it on.
 func (m *Model[T]) GetQueueableConnection() string { return m.GetConnectionName() }
 
-// GetQueueableRelations is Model::getQueueableRelations: the loaded relations a
-// job restores along with the row.
+// GetQueueableRelations returns the loaded relations a job restores along
+// with the row.
 //
-// The PHP skips a loaded key with no method behind it, because there anything
-// can be put in $relations; here the equivalent is a name the model registered a
-// resolver for, since a relation with no resolver cannot be loaded again on the
-// other side of the queue.
+// A loaded relation with no registered resolver is skipped, since a
+// relation with no resolver cannot be loaded again on the other side of the
+// queue.
 //
-// The order is sorted rather than insertion order: a Go map has none, and a job
-// payload that differs between two runs over the same row is a payload nobody
-// can diff.
+// The order is sorted rather than insertion order: a Go map has none, and a
+// job payload that differs between two runs over the same row is a payload
+// nobody can diff.
 func (m *Model[T]) GetQueueableRelations() []string {
 	out := []string{}
 	for _, name := range sortedKeys(m.relations) {
@@ -61,15 +57,13 @@ func (m *Model[T]) GetQueueableRelations() []string {
 	return out
 }
 
-// GetQueueableClass is Collection::getQueueableClass: the type of the models
-// being queued.
+// GetQueueableClass returns the type name of the models being queued.
 //
-// The PHP also refuses a collection holding more than one class, which is the
-// LogicException it throws. A Collection[T] cannot hold two, so the refusal has
-// nothing left to refuse and the check is gone rather than always passing.
+// A Collection[T] cannot hold two model types, so there is no mixed-type
+// case left to refuse.
 //
-// It answers the empty string for an empty collection, where the PHP returns
-// null: there is no model to take the class from either way.
+// It returns the empty string for an empty collection: there is no model to
+// take the name from.
 func (c Collection[T]) GetQueueableClass() string {
 	if c.IsEmpty() {
 		return ""
@@ -77,8 +71,7 @@ func (c Collection[T]) GetQueueableClass() string {
 	return reflect.TypeFor[T]().Name()
 }
 
-// GetQueueableIDs is Collection::getQueueableIds. The PHP spells it
-// getQueueableIds.
+// GetQueueableIDs returns the queueable id of every model.
 func (c Collection[T]) GetQueueableIDs() []any {
 	if c.IsEmpty() {
 		return []any{}
@@ -90,11 +83,11 @@ func (c Collection[T]) GetQueueableIDs() []any {
 	return out
 }
 
-// GetQueueableRelations is Collection::getQueueableRelations: the relations
-// every model in the collection has loaded.
+// GetQueueableRelations returns the relations every model in the collection
+// has loaded.
 //
-// It is the intersection and not the union, as there: a relation loaded on one
-// row and not on another cannot be restored for the whole collection.
+// It is the intersection and not the union: a relation loaded on one row
+// and not on another cannot be restored for the whole collection.
 func (c Collection[T]) GetQueueableRelations() []string {
 	if c.IsEmpty() {
 		return []string{}
@@ -109,11 +102,9 @@ func (c Collection[T]) GetQueueableRelations() []string {
 	return shared
 }
 
-// GetQueueableConnection is Collection::getQueueableConnection.
-//
-// The PHP throws a LogicException when the models disagree; here that is
-// ErrMixedQueueableConnections, and the empty collection answers the empty
-// string where the PHP returns null.
+// GetQueueableConnection returns the connection name shared by every model,
+// or ErrMixedQueueableConnections when they disagree. An empty collection
+// returns the empty string.
 func (c Collection[T]) GetQueueableConnection() (string, error) {
 	if c.IsEmpty() {
 		return "", nil

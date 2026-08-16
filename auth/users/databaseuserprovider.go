@@ -7,8 +7,8 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// Connection is the part of Illuminate\Database\ConnectionInterface that a user
-// provider asks for: a query builder against one table.
+// Connection is the part of a database connection a user provider asks for: a
+// query builder against one table.
 //
 // It is declared here, with its consumer, rather than imported from the database
 // package -- the same choice query.Connection makes, and for the same reason. A
@@ -17,55 +17,52 @@ import (
 //
 // *database.Connection satisfies it as written.
 type Connection interface {
-	// Table answers ConnectionInterface::table. The context is the fifth
-	// mechanical change of ADR 0044: a hesape builder binds its connection at the
-	// moment it is made, so the context enters here.
+	// Table opens a builder against a table. It takes a context because a
+	// hesape builder binds its connection at the moment it is made.
 	Table(ctx context.Context, table any, as ...string) *query.Builder
 }
 
-// DatabaseUserProvider answers Illuminate\Auth\DatabaseUserProvider: the
-// UserProvider that reads a table directly and wraps each row in a GenericUser.
+// DatabaseUserProvider is the auth.UserProvider that reads a table directly and
+// wraps each row in a [GenericUser].
 //
-// It is EloquentUserProvider with the model taken out. There is no user type to
-// construct and nothing to hydrate, which is what it is for: an application that
-// has not declared a user struct, or a second table of users that does not
+// It is [EloquentUserProvider] with the model taken out. There is no user type
+// to construct and nothing to hydrate, which is what it is for: an application
+// that has not declared a user struct, or a second table of users that does not
 // deserve one.
 //
-// Everything the Eloquent provider's doc says about the Grant is true here.
-// Every statement is taken under auth.SystemGrant, because a provider runs
-// before there is a subject to authorize; the action is RetrieveUser or
-// UpdateUser; and the tenant comes from configuration, never from the request
-// (RULE 14). Reads are scoped exactly as writes are (RULE 17).
+// Everything [EloquentUserProvider] says about the Grant is true here. Every
+// statement is taken under auth.SystemGrant, because a provider runs before
+// there is a subject to authorize; the action is RetrieveUser or UpdateUser;
+// and the tenant comes from configuration, never from the request. Reads are
+// scoped exactly as writes are.
 type DatabaseUserProvider struct {
-	// connection answers $connection.
+	// connection is where the table is opened.
 	connection Connection
 
-	// hasher answers $hasher.
+	// hasher checks and rewrites the stored password hash.
 	hasher auth.Hasher
 
-	// table answers $table.
+	// table is the name of the table the users live in.
 	table string
 
-	// tenant is the tenant every statement this provider issues is scoped by.
+	// tenant is what every statement this provider issues is scoped by.
 	tenant string
 }
 
 // Verify at compile time that the provider is the contract a guard consumes.
 var _ auth.UserProvider = (*DatabaseUserProvider)(nil)
 
-// NewDatabaseUserProvider answers DatabaseUserProvider::__construct.
+// NewDatabaseUserProvider returns a provider over the named table.
 //
-// The fourth argument is the tenant every statement is filtered by. It has no
-// counterpart in the PHP, which has no tenants; see the type's doc for where it
-// must come from.
+// The fourth argument is the tenant every statement is filtered by; see the
+// type's doc for where it must come from.
 func NewDatabaseUserProvider(connection Connection, hasher auth.Hasher, table, tenant string) *DatabaseUserProvider {
 	return &DatabaseUserProvider{connection: connection, hasher: hasher, table: table, tenant: tenant}
 }
 
-// RetrieveByID answers DatabaseUserProvider::retrieveById. The PHP spells the
-// last word Id.
+// RetrieveByID finds the account with this identifier.
 //
-// A nil user and a nil error is the PHP's null: nobody has that identifier.
+// A nil user and a nil error mean nobody has that identifier.
 func (p *DatabaseUserProvider) RetrieveByID(ctx context.Context, identifier any) (auth.Authenticatable, error) {
 	record, err := p.getTable(ctx).Find(ctx, p.grant(RetrieveUser), identifier)
 	if err != nil {
@@ -74,10 +71,9 @@ func (p *DatabaseUserProvider) RetrieveByID(ctx context.Context, identifier any)
 	return p.getGenericUser(record), nil
 }
 
-// RetrieveByToken answers DatabaseUserProvider::retrieveByToken.
+// RetrieveByToken is the user behind a "remember me" cookie.
 //
-// The comparison is hash_equals: constant time, and an empty stored token never
-// matches.
+// The comparison is constant time, and an empty stored token never matches.
 func (p *DatabaseUserProvider) RetrieveByToken(ctx context.Context, identifier any, token string) (auth.Authenticatable, error) {
 	retrieved, err := p.RetrieveByID(ctx, identifier)
 	if err != nil || retrieved == nil {
@@ -89,13 +85,11 @@ func (p *DatabaseUserProvider) RetrieveByToken(ctx context.Context, identifier a
 	return retrieved, nil
 }
 
-// UpdateRememberToken answers DatabaseUserProvider::updateRememberToken.
+// UpdateRememberToken writes a new remember token for this account.
 //
-// The instance the caller holds is updated as well as the row. The PHP does not
-// -- it writes the column and leaves the object it was handed carrying the old
-// token -- and the difference shows the moment a guard sets a cookie from the
-// user it just updated. Doing both is what the Eloquent provider does there, so
-// this is the two providers agreeing rather than a new behaviour.
+// The instance the caller holds is updated as well as the row, which matters
+// the moment a guard sets a cookie from the user it just updated.
+// [EloquentUserProvider] does both too.
 func (p *DatabaseUserProvider) UpdateRememberToken(ctx context.Context, user auth.Authenticatable, token string) error {
 	user.SetRememberToken(token)
 
@@ -105,7 +99,7 @@ func (p *DatabaseUserProvider) UpdateRememberToken(ctx context.Context, user aut
 	return err
 }
 
-// RetrieveByCredentials answers DatabaseUserProvider::retrieveByCredentials.
+// RetrieveByCredentials finds the account these credentials name.
 //
 // Every key holding the word "password" is dropped before a clause is built, and
 // credentials that are nothing but password keys match nobody rather than
@@ -126,8 +120,8 @@ func (p *DatabaseUserProvider) RetrieveByCredentials(ctx context.Context, creden
 	return p.getGenericUser(record), nil
 }
 
-// ValidateCredentials answers DatabaseUserProvider::validateCredentials. It is
-// the Eloquent provider's method, unchanged, as it is in the PHP.
+// ValidateCredentials reports whether these credentials belong to this account.
+// It is [EloquentUserProvider.ValidateCredentials], unchanged.
 func (p *DatabaseUserProvider) ValidateCredentials(_ context.Context, user auth.Authenticatable, credentials map[string]any) bool {
 	plain, ok := passwordOf(credentials)
 	if !ok {
@@ -140,12 +134,12 @@ func (p *DatabaseUserProvider) ValidateCredentials(_ context.Context, user auth.
 	return p.hasher.Check(plain, hashed)
 }
 
-// RehashPasswordIfRequired answers
-// DatabaseUserProvider::rehashPasswordIfRequired.
+// RehashPasswordIfRequired upgrades a hash that was made with weaker parameters
+// than the ones in force.
 //
-// The PHP writes the column with an update statement here rather than through a
-// model, because there is no model; that is what this does too, and it updates
-// the GenericUser it was handed so the rest of the request reads the new hash.
+// There is no model to write through, so the column is written by the statement,
+// and the [GenericUser] it was handed is updated so that the rest of the request
+// reads the new hash.
 func (p *DatabaseUserProvider) RehashPasswordIfRequired(ctx context.Context, user auth.Authenticatable, credentials map[string]any, force bool) error {
 	if !p.hasher.NeedsRehash(user.GetAuthPassword()) && !force {
 		return nil
@@ -173,8 +167,7 @@ func (p *DatabaseUserProvider) RehashPasswordIfRequired(ctx context.Context, use
 	return nil
 }
 
-// getGenericUser answers the protected DatabaseUserProvider::getGenericUser: a
-// row becomes a user, and no row becomes no user.
+// getGenericUser turns a row into a user, and no row into no user.
 //
 // The nil is returned as an untyped nil rather than as a (*GenericUser)(nil)
 // inside an interface, because the second compares unequal to nil at every call
@@ -186,8 +179,8 @@ func (p *DatabaseUserProvider) getGenericUser(record query.Record) auth.Authenti
 	return NewGenericUser(record)
 }
 
-// getTable answers the connection->table($this->table) that opens every method
-// of the PHP class.
+// getTable opens a builder against the user table, which is how every method
+// here starts.
 func (p *DatabaseUserProvider) getTable(ctx context.Context) *query.Builder {
 	return p.connection.Table(ctx, p.table)
 }

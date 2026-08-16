@@ -1,16 +1,12 @@
 package query
 
-// When answers Illuminate\Support\Traits\Conditionable::when, the trait the
-// PHP builder uses.
+// When runs the callback only if the condition holds, and hands the builder
+// back either way.
 //
-// Three mechanical changes, all of them forced by Go. The condition is a bool
-// rather than PHP's truthy mixed, because there is no truthiness to lean on and
-// the caller writing the expression is the one who knows what makes it true.
-// The callback mutates the builder and returns nothing, rather than returning a
-// value the PHP then coalesces with $this -- every method on Builder already
-// mutates and returns the receiver, so a callback that returned something would
-// be a second convention. And the zero and one argument forms are absent, since
-// they answer with a HigherOrderWhenProxy built on __get and __call.
+// The condition is a bool, because the caller writing the expression is the one
+// who knows what makes it true. The callback mutates the builder and returns
+// nothing: every method on Builder already mutates and returns the receiver, so
+// a callback that returned something would be a second convention.
 //
 // A nil callback on a true condition leaves the builder untouched instead of
 // failing, which is what Collection.When does with the same argument.
@@ -18,10 +14,6 @@ package query
 //	q.From("posts").
 //		When(published, func(q *query.Builder) { q.Where("published", true) }, nil).
 //		OrderBy("id")
-//
-// The Laravel spelling of the first line is db.table('posts'), which is
-// Connection::table and is not written yet. From is Builder::from, and is the
-// entry point that exists today.
 func (b *Builder) When(condition bool, callback, otherwise func(*Builder)) *Builder {
 	if condition {
 		if callback != nil {
@@ -35,8 +27,7 @@ func (b *Builder) When(condition bool, callback, otherwise func(*Builder)) *Buil
 	return b
 }
 
-// Unless answers Illuminate\Support\Traits\Conditionable::unless: When with the
-// condition negated, which is how the PHP defines it too.
+// Unless is When with the condition negated.
 func (b *Builder) Unless(condition bool, callback, otherwise func(*Builder)) *Builder {
 	return b.When(!condition, callback, otherwise)
 }

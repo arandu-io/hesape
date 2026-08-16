@@ -1,23 +1,22 @@
 package schema
 
-// Command is one entry of Illuminate\Database\Schema\Blueprint::$commands.
+// Command is one command of a Blueprint.
 //
-// PHP appends an untyped Illuminate\Support\Fluent per command, with a
-// different key set for each Name. The union of those keys is spelled out here
-// so the grammar can read them, exactly as query.Where does for the query
-// builder's clauses.
+// Each Name reads a different subset of the fields; the union of them is spelled
+// out here so the grammar can read them, exactly as query.Where does for the
+// query builder's clauses.
 //
-// IndexDefinition and ForeignKeyDefinition are not separate values: in PHP they
-// are the very Fluent that was appended, subclassed, so here they are typed
-// handles over this struct. Whatever the caller chains onto them is what the
+// IndexDefinition and ForeignKeyDefinition are not separate values but typed
+// handles over this struct, so whatever the caller chains onto them is what the
 // grammar compiles.
 type Command struct {
-	// Name is the command, spelled as PHP spells it: create, add, change,
-	// dropColumn, renameIndex, tableComment. The grammar is selected by it.
+	// Name is the command: create, add, change, dropColumn, renameIndex,
+	// tableComment. The grammar is selected by it.
 	Name string
 
-	// ShouldBeSkipped answers $command->shouldBeSkipped. The MySQL grammar sets
-	// it on the primary key command it folded into the create table statement.
+	// ShouldBeSkipped marks a command the grammar has already folded into
+	// another statement. The MySQL grammar sets it on the primary key command
+	// it folded into the create table statement.
 	ShouldBeSkipped bool
 
 	// Column is the column an add, change, comment or
@@ -55,9 +54,9 @@ type Command struct {
 	OnUpdate   string
 
 	// Deferrable, InitiallyImmediate, NotValid and NullsNotDistinct are the
-	// Postgres constraint modifiers. They are pointers because the PHP
-	// distinguishes "not set" from false: an unset deferrable emits nothing,
-	// and a false one emits "not deferrable".
+	// Postgres constraint modifiers. They are pointers because "not set" must
+	// be distinguishable from false: an unset deferrable emits nothing, and a
+	// false one emits "not deferrable".
 	Deferrable         *bool
 	InitiallyImmediate *bool
 	NotValid           *bool
@@ -71,13 +70,13 @@ type Command struct {
 	Instant bool
 
 	// isColumnDefinition marks the placeholder a bare ColumnDefinition occupies
-	// in the command list while the table is being altered. PHP appends the
-	// ColumnDefinition itself and rewrites it into an add or change command in
-	// addImpliedCommands; the marker is how the same rewrite finds it here.
+	// in the command list while the table is being altered. addImpliedCommands
+	// rewrites it into an add or change command, and the marker is how that
+	// rewrite finds it here.
 	isColumnDefinition bool
 }
 
-// NewCommand answers Blueprint::createCommand.
+// NewCommand returns a new Command named name.
 func NewCommand(name string) *Command {
 	return &Command{Name: name}
 }

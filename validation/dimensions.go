@@ -14,11 +14,10 @@ import (
 	_ "image/png"
 )
 
-// imageDimensions answers to the @getimagesize($value->getRealPath()) of
-// validateDimensions.
+// imageDimensions measures an image, which is what `dimensions` compares.
 //
-// A File that carries its own dimensions() -- which Illuminate\Http\UploadedFile
-// does -- is asked rather than read, which is the branch the PHP takes first.
+// A File that carries its own size -- a Dimensioner -- is asked rather than
+// read, and only that fails back to decoding the header of the bytes.
 func imageDimensions(f File) (width, height int, ok bool) {
 	if d, isDimensioner := f.(Dimensioner); isDimensioner {
 		return d.Dimensions()

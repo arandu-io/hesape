@@ -17,7 +17,7 @@ import (
 
 // Func is what a compiled view is: a function that writes HTML.
 //
-// `aru view:build` emits one per `.kyse.go` and registers it by name. The data
+// The view build emits one per `.kyse.go` and registers it by name. The data
 // arrives as `any` and the generated function asserts it back to the struct the
 // view declared -- which is why a wrong type is an error naming both sides
 // rather than a blank page.
@@ -47,8 +47,8 @@ func Register(name string, f Func) {
 	views[name] = f
 }
 
-// Registered returns the known view names, sorted. `aru doctor` reads it to
-// check that every ctx.View("x") has a view named x.
+// Registered returns the known view names, sorted. Diagnostic tooling reads
+// it to check that every ctx.View("x") has a view named x.
 func Registered() []string {
 	mu.RLock()
 	defer mu.RUnlock()

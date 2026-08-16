@@ -2,13 +2,13 @@ package routing
 
 import "strings"
 
-// Merge is RouteGroup::merge. It folds a group's attributes into the ones it
-// is nested inside, and returns the combined set.
+// Merge folds a group's attributes into the ones it is nested inside, and
+// returns the combined set.
 //
 // Prefix concatenates with a slash, name with nothing (the dot is the
-// caller's, as in PHP), namespace with a backslash, where unions with the new
-// winning. Domain and controller replace rather than merge: a nested group
-// that names a domain is declaring one, not adding to one.
+// caller's), namespace with a backslash, where unions with the new winning.
+// Domain and controller replace rather than merge: a nested group that names
+// a domain is declaring one, not adding to one.
 //
 // prependExistingPrefix defaults to true. False puts the new prefix in front,
 // which is how a group registered under a versioned API root keeps the version
@@ -57,7 +57,7 @@ func Merge(attributes, old map[string]any, prependExistingPrefix ...bool) map[st
 	return out
 }
 
-// formatNamespace is RouteGroup::formatNamespace.
+// formatNamespace merges a group's namespace with the enclosing one.
 func formatNamespace(attributes, old map[string]any) string {
 	oldNamespace := getString(old, "namespace")
 
@@ -71,7 +71,7 @@ func formatNamespace(attributes, old map[string]any) string {
 	return strings.Trim(newNamespace, `\`)
 }
 
-// formatPrefix is RouteGroup::formatPrefix.
+// formatPrefix merges a group's prefix with the enclosing one.
 func formatPrefix(attributes, old map[string]any, prependExistingPrefix bool) string {
 	oldPrefix := getString(old, "prefix")
 
@@ -85,7 +85,7 @@ func formatPrefix(attributes, old map[string]any, prependExistingPrefix bool) st
 	return strings.Trim(strings.Trim(newPrefix, "/")+"/"+strings.Trim(oldPrefix, "/"), "/")
 }
 
-// formatWhere is RouteGroup::formatWhere.
+// formatWhere merges a group's where constraints with the enclosing one's.
 func formatWhere(attributes, old map[string]any) map[string]string {
 	out := map[string]string{}
 	if existing, ok := old["where"].(map[string]string); ok {
@@ -101,8 +101,9 @@ func formatWhere(attributes, old map[string]any) map[string]string {
 	return out
 }
 
-// formatAs is RouteGroup::formatAs. PHP concatenates literally and the dot is
-// the caller's to remember; Route.Name is where the dot is joined for you.
+// formatAs concatenates a group's name prefix with the enclosing one's,
+// literally: the dot is the caller's to remember here. Route.Name is where
+// the dot is joined for you.
 func formatAs(attributes, old map[string]any) string {
 	newAs := getString(attributes, "as")
 	if oldAs := getString(old, "as"); oldAs != "" {

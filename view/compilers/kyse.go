@@ -11,18 +11,17 @@ import (
 
 // DirectiveHandler is the callable a custom directive registers.
 //
-// It answers the callable BladeCompiler::directive takes: it receives the
-// expression written between the parentheses, already stripped of them, and
-// returns what the directive compiles to.
+// It receives the expression written between the parentheses, already
+// stripped of them, and returns what the directive compiles to.
 type DirectiveHandler func(expression string) string
 
-// ConditionHandler is the callable BladeCompiler::if registers.
+// ConditionHandler is the callable [KyseCompiler.If] registers.
 //
-// It is variadic where PHP is variadic, and returns bool because that is what
-// BladeCompiler::check calls it for.
+// It is variadic so a condition can take any number of parameters, and
+// returns bool because that is what [KyseCompiler.Check] calls it for.
 type ConditionHandler func(parameters ...any) bool
 
-// AnonymousComponentPath is one entry of BladeCompiler::$anonymousComponentPaths.
+// AnonymousComponentPath is one entry of the anonymous component search path.
 type AnonymousComponentPath struct {
 	// Path is the directory the components are read from.
 	Path string
@@ -35,7 +34,7 @@ type AnonymousComponentPath struct {
 }
 
 // ErrInvalidDirectiveName is returned by Directive for a name that is not a
-// bare word. It answers the InvalidArgumentException PHP throws.
+// bare word.
 var ErrInvalidDirectiveName = errors.New("view/compilers: directive names must contain only alphanumeric characters and underscores")
 
 // ErrConditionMissing is returned by Check for a condition that was never
@@ -44,47 +43,42 @@ var ErrConditionMissing = errors.New("view/compilers: condition is not registere
 
 var directiveNamePattern = regexp.MustCompile(`^\w+(?:::\w+)?$`)
 
-// KyseCompiler mirrors Illuminate\View\Compilers\BladeCompiler.
+// KyseCompiler is the concrete view compiler.
 //
-// The tool is named kyse and the source extension is .kyse.go, because Blade
-// is the PHP tool and this is not it. The method names are Laravel's, because
-// what a directive is called and what registering one is called is the
-// vocabulary a Laravel developer already has (ADR 0044).
-//
-// What it compiles into is Go rather than PHP. The closed set of built-in
-// directives -- @if, @foreach, @section, @yield -- is emitted by the kyse
-// front end in aru/internal/kyse, which owns the grammar (RULE 15). What lives
-// here is the machinery around that set: the custom directive registry, the
-// condition registry, the component aliases and namespaces, the echo format,
-// the raw-block store and the precompiler chain. A directive this compiler
-// does not know is left untouched, so that the two halves compose instead of
-// racing.
+// The source extension is .kyse.go, and what it compiles into is Go. The
+// closed set of built-in directives -- @if, @foreach, @section, @yield -- is
+// emitted by a separate front end that owns the grammar. What lives here is
+// the machinery around that set: the custom directive registry, the
+// condition registry, the component aliases and namespaces, the echo
+// format, the raw-block store and the precompiler chain. A directive this
+// compiler does not know is left untouched, so that the two halves compose
+// instead of racing.
 //
 // The zero value is not usable; create one with NewKyseCompiler.
 type KyseCompiler struct {
 	*Compiler
 
-	// extensions are the callables BladeCompiler::extend registers.
+	// extensions are the callables Extend registers.
 	extensions []func(string) string
 
-	// customDirectives are the handlers BladeCompiler::directive registers.
+	// customDirectives are the handlers Directive registers.
 	customDirectives map[string]DirectiveHandler
 
-	// conditions are the callables BladeCompiler::if registers.
+	// conditions are the callables If registers.
 	conditions map[string]ConditionHandler
 
 	// prepareCallbacks are the callables prepareStringsForCompilationUsing
 	// registers.
 	prepareCallbacks []func(string) string
 
-	// precompilers are the callables BladeCompiler::precompiler registers.
+	// precompilers are the callables Precompiler registers.
 	precompilers []func(string) string
 
 	// echoFormat is the format a regular echo compiles through.
 	echoFormat string
 
-	// echoHandlers are the handlers BladeCompiler::stringable registers,
-	// keyed by the type name the value reports.
+	// echoHandlers are the handlers Stringable registers, keyed by the type
+	// name the value reports.
 	echoHandlers map[string]func(any) any
 
 	// footer holds lines appended after the template body.
@@ -106,7 +100,7 @@ type KyseCompiler struct {
 	tags *ComponentTagCompiler
 }
 
-// NewKyseCompiler is BladeCompiler::__construct.
+// NewKyseCompiler returns a compiler backed by a cache at cachePath.
 func NewKyseCompiler(cachePath, basePath string, shouldCache bool) (*KyseCompiler, error) {
 	base, err := NewCompiler(cachePath, basePath, shouldCache, "go", true)
 	if err != nil {
@@ -127,9 +121,9 @@ func NewKyseCompiler(cachePath, basePath string, shouldCache bool) (*KyseCompile
 	return c, nil
 }
 
-// Compile is BladeCompiler::compile and CompilerInterface::compile.
-//
-// It returns error where PHP relies on the Filesystem throwing.
+// Compile reads path, compiles it, and writes the result to the cache. It
+// returns an error if the source cannot be read or the result cannot be
+// written.
 func (c *KyseCompiler) Compile(path string) error {
 	if path != "" {
 		c.SetPath(path)
@@ -152,12 +146,11 @@ func (c *KyseCompiler) Compile(path string) error {
 	return os.WriteFile(compiled, []byte(contents), 0o644)
 }
 
-// CompileString is BladeCompiler::compileString.
-//
-// The order is PHP's: the prepare callbacks, then the raw blocks are lifted
-// out, then comments, then component tags, then the precompilers, then the
-// extensions, the statements and the echos, and finally the raw blocks and
-// the footer go back in.
+// CompileString compiles value into Go, in this order: the prepare
+// callbacks run, then the raw blocks are lifted out, then comments, then
+// component tags, then the precompilers, then the extensions, the
+// statements and the echos, and finally the raw blocks and the footer go
+// back in.
 func (c *KyseCompiler) CompileString(value string) string {
 	c.footer = nil
 	c.rawBlocks = nil
@@ -194,7 +187,7 @@ func (c *KyseCompiler) CompileString(value string) string {
 	).Replace(result)
 }
 
-// StripParentheses is BladeCompiler::stripParentheses.
+// StripParentheses removes one matching pair of enclosing parentheses.
 func (c *KyseCompiler) StripParentheses(expression string) string {
 	if strings.HasPrefix(expression, "(") && strings.HasSuffix(expression, ")") && len(expression) >= 2 {
 		return expression[1 : len(expression)-1]
@@ -202,19 +195,19 @@ func (c *KyseCompiler) StripParentheses(expression string) string {
 	return expression
 }
 
-// Extend is BladeCompiler::extend.
+// Extend registers a function that runs over the whole template as part of
+// compilation.
 func (c *KyseCompiler) Extend(compiler func(string) string) {
 	c.extensions = append(c.extensions, compiler)
 }
 
-// GetExtensions is BladeCompiler::getExtensions.
+// GetExtensions returns the functions registered with Extend.
 func (c *KyseCompiler) GetExtensions() []func(string) string { return c.extensions }
 
-// If is BladeCompiler::if.
-//
-// It registers the condition under name and the four directives PHP registers
-// with it: @name, @unlessname, @elsename and @endname. The emitted text calls
-// Check, which is what makes the registered callback run at compile time.
+// If registers the condition under name and the four directives that come
+// with it: @name, @unlessname, @elsename and @endname. The emitted text
+// calls Check, which is what makes the registered callback run at compile
+// time.
 func (c *KyseCompiler) If(name string, callback ConditionHandler) {
 	c.conditions[name] = callback
 
@@ -239,9 +232,8 @@ func (c *KyseCompiler) If(name string, callback ConditionHandler) {
 	_ = c.Directive("end"+name, func(string) string { return "}" })
 }
 
-// Check is BladeCompiler::check.
-//
-// It returns (bool, error) where PHP calls a missing key and fatals.
+// Check runs the condition registered under name with parameters, and
+// returns an error if none was registered.
 func (c *KyseCompiler) Check(name string, parameters ...any) (bool, error) {
 	condition, ok := c.conditions[name]
 	if !ok {
@@ -250,11 +242,12 @@ func (c *KyseCompiler) Check(name string, parameters ...any) (bool, error) {
 	return condition(parameters...), nil
 }
 
-// Component is BladeCompiler::component.
+// Component registers class under alias, computing a default alias from the
+// class name when alias is empty.
 //
-// PHP swaps its two arguments when the alias looks like a class name; that
-// swap exists because PHP has one untyped argument list, and it is kept here
-// so that the same call site works.
+// If alias looks like a class path (it contains a backslash) while class
+// does not, the two are swapped before proceeding, so that a call site
+// written with the arguments in either order works the same.
 func (c *KyseCompiler) Component(class, alias, prefix string) {
 	if alias != "" && strings.Contains(alias, "\\") {
 		class, alias = alias, class
@@ -276,28 +269,26 @@ func (c *KyseCompiler) Component(class, alias, prefix string) {
 	c.classComponentAliases[alias] = class
 }
 
-// Components is BladeCompiler::components.
-//
-// PHP takes one array whose numeric keys mean "guess the alias" and whose
-// string keys mean class => alias. Go has no such array: the map is class to
-// alias, and an empty alias is the numeric-key case.
+// Components registers many components at once from a map of class to
+// alias. An empty alias means "guess it from the class name," the same as
+// calling Component with an empty alias.
 func (c *KyseCompiler) Components(components map[string]string, prefix string) {
 	for class, alias := range components {
 		c.Component(class, alias, prefix)
 	}
 }
 
-// GetClassComponentAliases is BladeCompiler::getClassComponentAliases.
+// GetClassComponentAliases returns the registered class-to-alias map.
 func (c *KyseCompiler) GetClassComponentAliases() map[string]string {
 	return c.classComponentAliases
 }
 
-// AnonymousComponentPath is BladeCompiler::anonymousComponentPath.
+// AnonymousComponentPath registers a directory of anonymous components
+// under prefix.
 //
-// PHP finishes by resolving the view factory out of the container and calling
-// addNamespace on it. There is no container here (ADR 0001), so the entry
-// carries the prefix hash and the caller registers the namespace on the
-// factory it already holds.
+// There is no container to resolve a view factory from and register the
+// namespace on automatically, so the entry carries the prefix hash and the
+// caller registers the namespace on the factory it already holds.
 func (c *KyseCompiler) AnonymousComponentPath(path, prefix string) {
 	seed := prefix
 	if seed == "" {
@@ -310,7 +301,8 @@ func (c *KyseCompiler) AnonymousComponentPath(path, prefix string) {
 	})
 }
 
-// AnonymousComponentNamespace is BladeCompiler::anonymousComponentNamespace.
+// AnonymousComponentNamespace maps prefix to a namespace derived from
+// directory.
 func (c *KyseCompiler) AnonymousComponentNamespace(directory, prefix string) {
 	if prefix == "" {
 		prefix = directory
@@ -318,27 +310,31 @@ func (c *KyseCompiler) AnonymousComponentNamespace(directory, prefix string) {
 	c.anonymousComponentNamespaces[prefix] = strings.Trim(strings.ReplaceAll(directory, "/", "."), ". ")
 }
 
-// ComponentNamespace is BladeCompiler::componentNamespace.
+// ComponentNamespace maps prefix to namespace for class-based components.
 func (c *KyseCompiler) ComponentNamespace(namespace, prefix string) {
 	c.classComponentNamespaces[prefix] = namespace
 }
 
-// GetAnonymousComponentPaths is BladeCompiler::getAnonymousComponentPaths.
+// GetAnonymousComponentPaths returns the registered anonymous component
+// directories.
 func (c *KyseCompiler) GetAnonymousComponentPaths() []AnonymousComponentPath {
 	return c.anonymousComponentPaths
 }
 
-// GetAnonymousComponentNamespaces is BladeCompiler::getAnonymousComponentNamespaces.
+// GetAnonymousComponentNamespaces returns the registered prefix-to-namespace
+// map for anonymous components.
 func (c *KyseCompiler) GetAnonymousComponentNamespaces() map[string]string {
 	return c.anonymousComponentNamespaces
 }
 
-// GetClassComponentNamespaces is BladeCompiler::getClassComponentNamespaces.
+// GetClassComponentNamespaces returns the registered prefix-to-namespace map
+// for class-based components.
 func (c *KyseCompiler) GetClassComponentNamespaces() map[string]string {
 	return c.classComponentNamespaces
 }
 
-// AliasComponent is BladeCompiler::aliasComponent.
+// AliasComponent registers a directive pair -- @alias and @endalias -- that
+// start and render the component at path.
 func (c *KyseCompiler) AliasComponent(path, alias string) {
 	if alias == "" {
 		alias = lastSegment(path, ".")
@@ -352,12 +348,11 @@ func (c *KyseCompiler) AliasComponent(path, alias string) {
 	_ = c.Directive("end"+alias, func(string) string { return "RenderComponent()" })
 }
 
-// Include is BladeCompiler::include.
-//
-// It is the older spelling of AliasInclude and delegates to it, as PHP does.
+// Include is an older spelling of AliasInclude, and delegates to it.
 func (c *KyseCompiler) Include(path, alias string) { c.AliasInclude(path, alias) }
 
-// AliasInclude is BladeCompiler::aliasInclude.
+// AliasInclude registers a directive that compiles to an Include call for
+// path.
 func (c *KyseCompiler) AliasInclude(path, alias string) {
 	if alias == "" {
 		alias = lastSegment(path, ".")
@@ -371,20 +366,18 @@ func (c *KyseCompiler) AliasInclude(path, alias string) {
 	})
 }
 
-// BindDirective is BladeCompiler::bindDirective.
+// BindDirective registers a directive whose handler takes the compiler as
+// an explicit argument, for a handler that needs it.
 //
-// PHP binds the handler closure to the compiler so that the handler can call
-// $this. A Go handler that needs the compiler closes over it, so the two
-// spellings differ only in that this one exists for the call site to keep
-// reading the same.
+// A closure could already capture c from its enclosing scope without this,
+// but the call site reads the same as it would for a plain
+// func(string) string, which is why this variant exists.
 func (c *KyseCompiler) BindDirective(name string, handler func(*KyseCompiler, string) string) error {
 	return c.Directive(name, func(expression string) string { return handler(c, expression) })
 }
 
-// Directive is BladeCompiler::directive.
-//
-// It returns error where PHP throws InvalidArgumentException for a name that
-// is not a bare word.
+// Directive registers handler under name, and returns
+// ErrInvalidDirectiveName if name is not a bare word.
 func (c *KyseCompiler) Directive(name string, handler DirectiveHandler) error {
 	if !directiveNamePattern.MatchString(name) {
 		return fmt.Errorf("%w: %s", ErrInvalidDirectiveName, name)
@@ -393,44 +386,46 @@ func (c *KyseCompiler) Directive(name string, handler DirectiveHandler) error {
 	return nil
 }
 
-// GetCustomDirectives is BladeCompiler::getCustomDirectives.
+// GetCustomDirectives returns the registered directive handlers.
 func (c *KyseCompiler) GetCustomDirectives() map[string]DirectiveHandler {
 	return c.customDirectives
 }
 
-// PrepareStringsForCompilationUsing is
-// BladeCompiler::prepareStringsForCompilationUsing.
+// PrepareStringsForCompilationUsing registers a function that transforms
+// the template before compilation begins.
 func (c *KyseCompiler) PrepareStringsForCompilationUsing(callback func(string) string) *KyseCompiler {
 	c.prepareCallbacks = append(c.prepareCallbacks, callback)
 	return c
 }
 
-// Precompiler is BladeCompiler::precompiler.
+// Precompiler registers a function that runs over the template after
+// component tags are expanded, before directives and echos are compiled.
 func (c *KyseCompiler) Precompiler(precompiler func(string) string) {
 	c.precompilers = append(c.precompilers, precompiler)
 }
 
-// SetEchoFormat is BladeCompiler::setEchoFormat.
+// SetEchoFormat sets the format string a regular echo compiles through.
 func (c *KyseCompiler) SetEchoFormat(format string) { c.echoFormat = format }
 
-// WithDoubleEncoding is BladeCompiler::withDoubleEncoding.
+// WithDoubleEncoding sets the echo format to double-encode entities.
 func (c *KyseCompiler) WithDoubleEncoding() { c.SetEchoFormat("Text(%s, true)") }
 
-// WithoutDoubleEncoding is BladeCompiler::withoutDoubleEncoding.
+// WithoutDoubleEncoding sets the echo format to leave entities as they are.
 func (c *KyseCompiler) WithoutDoubleEncoding() { c.SetEchoFormat("Text(%s, false)") }
 
-// WithoutComponentTags is BladeCompiler::withoutComponentTags.
+// WithoutComponentTags turns off <x-...> tag expansion.
 func (c *KyseCompiler) WithoutComponentTags() { c.compilesComponentTags = false }
 
 // AddFooter appends a line to be emitted after the template body.
 //
-// PHP writes $this->footer[] from inside CompilesLayouts; Go has no
-// protected, so the concerns reach it through this.
+// Go has no protected field, so this is how code outside this file reaches
+// the footer.
 func (c *KyseCompiler) AddFooter(line string) { c.footer = append(c.footer, line) }
 
-// compileComments is Concerns\CompilesComments::compileComments.
+// commentPattern matches {{-- --}} comments.
 var commentPattern = regexp.MustCompile(`(?s)\{\{--.*?--\}\}`)
 
+// compileComments strips {{-- --}} comments from value.
 func (c *KyseCompiler) compileComments(value string) string {
 	return commentPattern.ReplaceAllString(value, "")
 }
@@ -440,7 +435,8 @@ var (
 	phpBlockPattern = regexp.MustCompile(`(?s)(^|[^@])@php(.*?)@endphp`)
 )
 
-// storeUncompiledBlocks is BladeCompiler::storeUncompiledBlocks.
+// storeUncompiledBlocks lifts @verbatim and @php block contents out of
+// value, replacing each with a placeholder restoreRawContent later resolves.
 func (c *KyseCompiler) storeUncompiledBlocks(value string) string {
 	if strings.Contains(value, "@verbatim") {
 		value = verbatimPattern.ReplaceAllStringFunc(value, func(match string) string {
@@ -457,20 +453,23 @@ func (c *KyseCompiler) storeUncompiledBlocks(value string) string {
 	return value
 }
 
-// storeRawBlock is BladeCompiler::storeRawBlock.
+// storeRawBlock records value and returns the placeholder that stands in
+// for it.
 func (c *KyseCompiler) storeRawBlock(value string) string {
 	c.rawBlocks = append(c.rawBlocks, value)
 	return c.getRawPlaceholder(strconv.Itoa(len(c.rawBlocks) - 1))
 }
 
-// getRawPlaceholder is BladeCompiler::getRawPlaceholder.
+// getRawPlaceholder returns the placeholder text for the raw block at index
+// replace.
 func (c *KyseCompiler) getRawPlaceholder(replace string) string {
 	return "@__raw_block_" + replace + "__@"
 }
 
 var rawPlaceholderPattern = regexp.MustCompile(`@__raw_block_(\d+)__@`)
 
-// restoreRawContent is BladeCompiler::restoreRawContent.
+// restoreRawContent replaces every raw-block placeholder in result with the
+// content it stands in for.
 func (c *KyseCompiler) restoreRawContent(result string) string {
 	result = rawPlaceholderPattern.ReplaceAllStringFunc(result, func(match string) string {
 		index, err := strconv.Atoi(rawPlaceholderPattern.FindStringSubmatch(match)[1])
@@ -483,7 +482,8 @@ func (c *KyseCompiler) restoreRawContent(result string) string {
 	return result
 }
 
-// addFooters is BladeCompiler::addFooters.
+// addFooters appends the footer lines to result, in reverse registration
+// order.
 func (c *KyseCompiler) addFooters(result string) string {
 	reversed := make([]string, 0, len(c.footer))
 	for i := len(c.footer) - 1; i >= 0; i-- {
@@ -492,7 +492,8 @@ func (c *KyseCompiler) addFooters(result string) string {
 	return strings.TrimRight(result, "\n") + "\n\n" + strings.Join(reversed, "\n")
 }
 
-// compileExtensions is BladeCompiler::compileExtensions.
+// compileExtensions runs every function registered with Extend over value,
+// in registration order.
 func (c *KyseCompiler) compileExtensions(value string) string {
 	for _, compiler := range c.extensions {
 		value = compiler(value)
@@ -500,12 +501,12 @@ func (c *KyseCompiler) compileExtensions(value string) string {
 	return value
 }
 
-// compileStatements is BladeCompiler::compileStatements.
+// compileStatements expands every @directive in template.
 //
-// PHP matches directives with a recursive regular expression, which RE2 has
-// no equivalent for and will not grow one. The scan below is that regex read
-// out loud: find an @, take the name, and if a parenthesis follows, walk to
-// its balanced close counting quotes on the way.
+// Matching a directive with a balanced parenthesis group needs recursion,
+// which RE2 does not support and will not grow. The scan below does it by
+// hand: find an @, take the name, and if a parenthesis follows, walk to its
+// balanced close counting quotes on the way.
 func (c *KyseCompiler) compileStatements(template string) string {
 	var out strings.Builder
 	for i := 0; i < len(template); {
@@ -529,8 +530,8 @@ func (c *KyseCompiler) compileStatements(template string) string {
 		expression, after := scanDirectiveExpression(template, next)
 		handler, ok := c.customDirectives[name]
 		if !ok {
-			// A directive this compiler does not own belongs to the kyse front
-			// end. It goes through untouched rather than being mangled.
+			// A directive this compiler does not own belongs to a separate
+			// front end. It goes through untouched rather than being mangled.
 			out.WriteString(template[i:after])
 			i = after
 			continue
@@ -608,8 +609,8 @@ func isWordByte(b byte) bool {
 		(b >= 'A' && b <= 'Z')
 }
 
-// kebab is Str::kebab, kept local so this package stays on the standard
-// library.
+// kebab converts a name to kebab-case, kept local so this package stays on
+// the standard library.
 func kebab(value string) string {
 	var out strings.Builder
 	for i := 0; i < len(value); i++ {
@@ -629,7 +630,7 @@ func kebab(value string) string {
 	return out.String()
 }
 
-// classBasename is class_basename: the last backslash-separated segment.
+// classBasename returns the last backslash-separated segment of class.
 func classBasename(class string) string { return lastSegment(class, "\\") }
 
 func lastSegment(value, separator string) string {

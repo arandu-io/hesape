@@ -10,19 +10,18 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// The remainder of Illuminate\Database\Query\Builder: the vector clauses, the
-// insert that reports what it wrote, and the dump that prints the statement
-// rather than running it.
+// The remainder of the query builder: the vector clauses, the insert that
+// reports what it wrote, and the dump that prints the statement rather than
+// running it.
 
-// SelectVectorDistance answers Builder::selectVectorDistance: the distance
-// between a column's embedding and the vector given, as a column of the result.
+// SelectVectorDistance adds the distance between a column's embedding and the
+// vector given, as a column of the result.
 //
-// as defaults to the column's name with _distance appended, as the PHP does
-// with $column.'_distance'.
+// as defaults to the column's name with _distance appended.
 //
-// The PHP also accepts a string as the vector and turns it into an embedding
-// through Str::of($text)->toEmbeddings(), which calls a model provider. That
-// argument shape is not here, for the reason WhereVectorDistanceLessThan gives.
+// Accepting a string as the vector, and turning it into an embedding through a
+// model provider, is not supported here, for the reason
+// WhereVectorDistanceLessThan gives.
 func (b *Builder) SelectVectorDistance(column any, vector []float64, as string) *Builder {
 	encoded, err := json.Marshal(vector)
 	if err != nil {
@@ -36,7 +35,8 @@ func (b *Builder) SelectVectorDistance(column any, vector []float64, as string) 
 	return b.AddSelect(Raw("(" + b.wrapColumn(column) + " <=> ?) as " + b.wrapColumn(as)))
 }
 
-// OrderByVectorDistance answers Builder::orderByVectorDistance: nearest first.
+// OrderByVectorDistance orders by the distance between a column's embedding
+// and the vector given, nearest first.
 func (b *Builder) OrderByVectorDistance(column any, vector []float64) *Builder {
 	encoded, err := json.Marshal(vector)
 	if err != nil {
@@ -54,19 +54,18 @@ func (b *Builder) OrderByVectorDistance(column any, vector []float64) *Builder {
 	return b
 }
 
-// InsertOrIgnoreReturningGrammar is the part of
-// Illuminate\Database\Query\Grammars\Grammar that compiles an insert which
-// skips the rows that would collide and reports the ones it wrote. It is asked
+// InsertOrIgnoreReturningGrammar is the part of a grammar that compiles an
+// insert which skips the rows that would collide and reports the ones it wrote.
+// It is asked
 // for rather than declared on Grammar, for the reason InsertUsingGrammar is.
 type InsertOrIgnoreReturningGrammar interface {
-	// CompileInsertOrIgnoreReturning answers
-	// Grammar::compileInsertOrIgnoreReturning.
+	// CompileInsertOrIgnoreReturning compiles an insert that skips colliding
+	// rows and returns the ones it wrote.
 	CompileInsertOrIgnoreReturning(query *Builder, values []map[string]any, uniqueBy, returning []string) (string, error)
 }
 
-// InsertOrIgnoreReturning answers Builder::insertOrIgnoreReturning: the insert
-// that lets the engine drop the rows that would collide, and answers with the
-// rows it kept rather than with a count.
+// InsertOrIgnoreReturning inserts rows, letting the engine drop the ones that
+// would collide, and returns the rows it kept rather than a count.
 //
 // The rows carry the tenant of the Grant, as every insert here does, and the
 // statement goes to the write connection: the rows it returns were written
@@ -109,12 +108,10 @@ func (b *Builder) InsertOrIgnoreReturning(ctx context.Context, g auth.Grant, val
 	return query.Connection.Select(sql, query.CleanBindings(flattenRows(rows)), false)
 }
 
-// Dump answers Builder::dump: it writes the statement and its bindings, and
-// hands the query back so the chain continues.
+// Dump writes the statement and its bindings, and hands the query back so the
+// chain continues.
 //
-// The PHP writes through the container's dumper to whatever is rendering the
-// response. There is no container (ADR 0001), so the destination is an
-// argument, as it is on DumpRawSQL.
+// The destination is an argument, as it is on DumpRawSQL.
 //
 // What it prints is the query as written, without the tenant filter, because
 // the filter belongs to the statement and not to the builder. DumpRawSQL takes

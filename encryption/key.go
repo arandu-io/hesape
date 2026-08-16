@@ -24,10 +24,8 @@ const keyPrefix = "base64:"
 // GenerateKey returns a new application key, already written the way a .env
 // file has to hold it: keyPrefix followed by KeySize random bytes in base64.
 //
-// It answers to KeyGenerateCommand::generateRandomKey, not to the static
-// Encrypter::generateKey -- the PHP of the same name returns raw bytes, and
-// that one is [Cipher.GenerateKey]. The two are one call apart:
-// GenerateKey() is "base64:" plus base64 of AES256GCM.GenerateKey().
+// [Cipher.GenerateKey] is the one that returns raw bytes. The two are one call
+// apart: GenerateKey is "base64:" plus base64 of AES256GCM.GenerateKey().
 //
 // It returns the encoded string rather than the raw bytes on purpose. The
 // caller that wants a key wants to print it or write it down, and if it were
@@ -46,12 +44,9 @@ func GenerateKey() string {
 	return keyPrefix + base64.StdEncoding.EncodeToString(key)
 }
 
-// ErrMissingAppKey answers Illuminate\Encryption\MissingAppKeyException, the
-// RuntimeException that EncryptionServiceProvider::key throws when the
-// configured key is empty. Its message is the one the PHP constructor defaults
-// to, with the command that fixes it appended -- the PHP prints that separately,
-// from the exception renderer, and there is no renderer between ParseKey and the
-// process that is refusing to start.
+// ErrMissingAppKey is what [ParseKey] returns when the configured key is
+// empty. Its message names the command that fixes it, because there is no
+// renderer between [ParseKey] and the process that is refusing to start.
 //
 // It is a distinct error and not the length error below because the two are
 // different mistakes: a missing key means the application was never keyed, and a
@@ -63,10 +58,7 @@ var ErrMissingAppKey = errors.New("encryption: no application encryption key has
 // accepting both the base64 form GenerateKey emits and a raw KeySize-byte
 // string typed by hand.
 //
-// It answers the protected EncryptionServiceProvider::parseKey together with
-// the EncryptionServiceProvider::key it calls: the empty key is
-// [ErrMissingAppKey], which is the MissingAppKeyException the PHP throws for
-// exactly that case.
+// The empty key is [ErrMissingAppKey].
 //
 // The length is checked here rather than by the caller, so that a key that
 // parses is a key that works. Refusing it at boot is the whole point: a short

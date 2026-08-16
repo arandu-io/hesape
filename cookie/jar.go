@@ -8,77 +8,65 @@ import (
 	"github.com/arandu-io/hesape/support"
 )
 
-// foreverMinutes is the 576000 CookieJar::forever() passes to make(): 400 days,
-// the longest expiry a browser will keep since Chrome 104 clamped it.
+// foreverMinutes is 576000, the minutes [CookieJar.Forever] passes to
+// [CookieJar.Make]: 400 days, the longest expiry a browser will keep since
+// Chrome 104 clamped it.
 const foreverMinutes = 576000
 
-// forgetMinutes is the -2628000 CookieJar::forget() passes to make(): five years
-// in the past, which is how the class expires a cookie.
+// forgetMinutes is -2628000, the minutes [CookieJar.Forget] passes to
+// [CookieJar.Make]: five years in the past, which is how a cookie is
+// expired.
 const forgetMinutes = -2628000
 
-// CookieJar answers to Illuminate\Cookie\CookieJar.
+// CookieJar holds the application's default path, domain, secure and
+// SameSite settings, and a queue of cookies waiting to be written onto a
+// response.
 //
-// It builds cookies with the application's defaults filled in, and it holds a
-// queue: a handler that wants to set a cookie calls [CookieJar.Queue] and never
-// touches the http.ResponseWriter, and the middleware in cookie/middleware
+// A handler that wants to set a cookie calls [CookieJar.Queue] and never
+// touches the http.ResponseWriter; the middleware in cookie/middleware
 // writes the queue onto the response on its way out. That indirection is the
 // point of the component -- whoever writes the cookie does not need the
 // response in hand.
 //
-// The cookie built is a *net/http.Cookie, not a type of this package's own.
-// Illuminate returns a Symfony Cookie because PHP has no cookie in its standard
-// library; Go does, and every handler, test and middleware already speaks it.
-// Illuminate's constructor arguments land on it like this:
+// The cookie built is a *net/http.Cookie, not a type of this package's own:
+// net/http already defines one, and every handler, test and middleware
+// already speaks it.
 //
-//	$name      -> Name
-//	$value     -> Value
-//	$minutes   -> Expires and MaxAge together (see [CookieJar.Make])
-//	$path      -> Path
-//	$domain    -> Domain
-//	$secure    -> Secure
-//	$httpOnly  -> HttpOnly
-//	$sameSite  -> SameSite
-//	$raw       -> nothing; see [CookieJar.Make]
-//
-// A CookieJar is safe for use from several goroutines, which the PHP class has
-// no need to be. The queue is still per request: the middleware calls
-// [CookieJar.Clone] once per request and puts the copy in the context, because
-// one process here serves many requests at once and one process there served
-// exactly one.
+// A CookieJar is safe for use from several goroutines. The queue is still
+// per request: the middleware calls [CookieJar.Clone] once per request and
+// puts the copy in the context, because one process here serves many
+// requests at once.
 type CookieJar struct {
 	mu sync.Mutex
 
-	// path is the $path property, "/" out of the constructor.
+	// path is the default cookie path, "/" out of the constructor.
 	path string
-	// domain is the $domain property, null out of the constructor.
+	// domain is the default cookie domain, empty out of the constructor.
 	domain string
-	// secure is the $secure property, which the PHP docblock describes as
-	// "defaults to null" -- unset, distinct from false. A nil pointer is that
-	// null, and [CookieJar.Make] falls back to it only when its own argument
-	// is nil too.
+	// secure is the default secure flag: nil means unset, distinct from a
+	// false that was set explicitly. [CookieJar.Make] falls back to it only
+	// when its own argument is nil too.
 	secure *bool
-	// sameSite is the $sameSite property, 'lax' out of the constructor.
+	// sameSite is the default SameSite mode, lax out of the constructor.
 	sameSite http.SameSite
 
-	// queued is the $queued property: cookies keyed by name and then by path.
-	// names and the paths inside each entry carry the insertion order PHP gets
-	// from its arrays for free, which queued() and getQueuedCookies() read.
+	// queued is every cookie waiting to be written, keyed by name and then by
+	// path. names and the paths inside each pathQueue track insertion order
+	// explicitly, since a Go map does not, and [CookieJar.GetQueuedCookies]
+	// reads it back in that order.
 	queued map[string]*pathQueue
 	names  []string
 }
 
-// pathQueue is one entry of $queued: the cookies for a single name, keyed by
+// pathQueue is one entry of queued: the cookies for a single name, keyed by
 // path, in the order the paths were first queued.
 type pathQueue struct {
 	byPath map[string]*http.Cookie
 	paths  []string
 }
 
-// NewCookieJar answers to CookieJar's property initializers: path "/", no
-// domain, secure unset, SameSite lax, and an empty queue.
-//
-// PHP writes no constructor for this class, so there is nothing to mirror by
-// name. Go has no property initializers, so the defaults live here.
+// NewCookieJar returns a jar with the default path "/", no domain, secure
+// unset, SameSite lax, and an empty queue.
 func NewCookieJar() *CookieJar {
 	return &CookieJar{
 		path:     "/",
@@ -87,13 +75,11 @@ func NewCookieJar() *CookieJar {
 	}
 }
 
-// Clone answers to PHP's clone on a CookieJar: a shallow copy, carrying the
-// same defaults and the cookies queued so far.
+// Clone returns a shallow copy of the jar, carrying the same defaults and
+// the cookies queued so far.
 //
-// The middleware calls it once per request. In PHP the jar is a singleton and
-// the process dies with the response, so its queue is a per-request queue by
-// accident of the runtime; here the process outlives the request and a shared
-// queue would hand one visitor's cookie to the next.
+// The middleware calls it once per request: the process outlives the
+// request, and a shared queue would hand one visitor's cookie to the next.
 func (j *CookieJar) Clone() *CookieJar {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -122,34 +108,28 @@ func (j *CookieJar) Clone() *CookieJar {
 	return c
 }
 
-// Make answers to CookieJar::make(). It builds a cookie with the jar's defaults
-// filled in wherever the call left an argument unset. It does not queue it.
+// Make builds a cookie with the jar's defaults filled in wherever the call
+// left an argument unset. It does not queue it.
 //
-// PHP gives every argument after $value a default; Go has none, so a call
-// passes all nine. The unset values are spelled the way PHP spells null:
+// Go has no default arguments, so a call passes all nine positions
+// explicitly. Each parameter has its own spelling for "unset":
 //
-//   - path "" and domain "" fall back to the jar, exactly as PHP's `?:` does,
-//     where an empty string is falsy and lands on the default too
-//   - secure nil falls back to the jar, and a non-nil pointer wins even when it
-//     points at false -- PHP's is_bool($secure) check, which is why the argument
-//     is a pointer and not a bool
+//   - path "" and domain "" fall back to the jar's default
+//   - secure nil falls back to the jar, and a non-nil pointer wins even when
+//     it points at false -- which is why the argument is a pointer and not a
+//     bool
 //   - sameSite http.SameSiteDefaultMode, the zero value, falls back to the jar
 //
-// $minutes becomes two fields. Zero is a session cookie: no Expires, no MaxAge,
-// which is the 0 expiry Symfony reads as "until the browser closes". Anything
-// else is [support.Now] plus that many minutes in Expires -- the availableAt()
-// of InteractsWithTime, so a test that freezes the clock sees a fixed date --
-// and the same span in seconds in MaxAge. Both are written, as Symfony writes
-// both. A negative count leaves MaxAge negative, which net/http renders as
-// Max-Age=0, the same header Symfony emits when it clamps a past expiry.
+// minutes becomes two fields. Zero is a session cookie: no Expires and no
+// MaxAge are written, which a browser keeps only until it closes. Anything
+// else is [support.Now] plus that many minutes in Expires, so a test that
+// freezes the clock sees a fixed date, and the same span in seconds in
+// MaxAge. A negative count leaves MaxAge negative, which net/http renders as
+// Max-Age=0, clamping the cookie to an immediate expiry.
 //
-// $raw becomes no field, and this is the one argument that does not survive.
-// Symfony percent-encodes a cookie value unless $raw says not to; net/http
-// never percent-encodes one, it writes the value through and quotes it only
-// when it holds a space or a comma. So a cookie made here is always raw in
-// Symfony's sense. The argument stays in its position so the call reads like
-// the PHP one, and so that the day this package needs to speak to a PHP
-// application's encoding there is a place to put it.
+// raw becomes no field: net/http never percent-encodes a cookie value, and
+// quotes it only when it holds a space or a comma, so there is nothing for
+// the argument to switch. It stays in the signature, accepted and ignored.
 func (j *CookieJar) Make(name, value string, minutes int, path, domain string, secure *bool, httpOnly, raw bool, sameSite http.SameSite) *http.Cookie {
 	_ = raw
 
@@ -171,37 +151,34 @@ func (j *CookieJar) Make(name, value string, minutes int, path, domain string, s
 	return c
 }
 
-// Forever answers to CookieJar::forever(). It is [CookieJar.Make] with 576000
-// minutes, the 400 days the PHP docblock calls "forever".
+// Forever is [CookieJar.Make] with foreverMinutes.
 func (j *CookieJar) Forever(name, value, path, domain string, secure *bool, httpOnly, raw bool, sameSite http.SameSite) *http.Cookie {
 	return j.Make(name, value, foreverMinutes, path, domain, secure, httpOnly, raw, sameSite)
 }
 
-// Forget answers to CookieJar::forget(). It builds an empty cookie dated five
-// years ago, which is how the browser is told to drop the one it has.
+// Forget builds an empty cookie dated five years ago, which is how the
+// browser is told to drop the one it has.
 //
-// It only takes name, path and domain, as PHP does: everything else is the
-// default, so a cookie made with non-default secure or SameSite settings is
-// forgotten by a header that does not match it. That is the PHP behaviour, kept
-// on purpose -- deleting a cookie the browser will not match is a bug worth
-// finding in the same place a Laravel developer already knows to look.
+// It only takes name, path and domain: everything else is the default, so a
+// cookie made with non-default secure or SameSite settings is forgotten by a
+// header that does not match it. That mismatch is deliberate: deleting a
+// cookie the browser will not match is a bug worth surfacing, not one this
+// method should silently paper over.
 //
-// It does not queue. CookieJar::expire() is the one that queues.
+// It does not queue. [CookieJar.Expire] is the one that queues.
 func (j *CookieJar) Forget(name, path, domain string) *http.Cookie {
 	return j.Make(name, "", forgetMinutes, path, domain, nil, true, false, http.SameSiteDefaultMode)
 }
 
-// Queue answers to CookieJar::queue(). The cookie is sent with the next
-// response, by the AddQueuedCookiesToResponse middleware.
-//
-// PHP takes a variadic that is either a Cookie or the argument list of make().
-// Go has no such dispatch, and the second form is written by nesting the calls:
+// Queue schedules cookie to be sent with the next response, by the
+// AddQueuedCookiesToResponse middleware. A cookie built with
+// [CookieJar.Make] can be queued in the same call:
 //
 //	jar.Queue(jar.Make("name", "value", 60, "", "", nil, true, false, 0))
 //
-// A cookie already queued under the same name and path is replaced, and keeps
-// the position it had, which is what assigning into a PHP array does. A nil
-// cookie is ignored rather than panicking.
+// A cookie already queued under the same name and path is replaced in
+// place, keeping the position it had. A nil cookie is ignored rather than
+// panicking.
 func (j *CookieJar) Queue(cookie *http.Cookie) {
 	if cookie == nil {
 		return
@@ -225,19 +202,17 @@ func (j *CookieJar) Queue(cookie *http.Cookie) {
 	q.byPath[cookie.Path] = cookie
 }
 
-// Expire answers to CookieJar::expire(). It queues the cookie [CookieJar.Forget]
-// builds, so the browser drops it when the response goes out.
+// Expire queues the cookie [CookieJar.Forget] builds, so the browser drops
+// it when the response goes out.
 func (j *CookieJar) Expire(name, path, domain string) {
 	j.Queue(j.Forget(name, path, domain))
 }
 
-// Unqueue answers to CookieJar::unqueue(). It takes a cookie back off the queue
-// before the response is written.
+// Unqueue takes a cookie back off the queue before the response is written.
 //
-// An empty path is PHP's null: every path queued under that name goes. A path
-// that is not queued is not an error, as unset() on a missing key is not. When
-// the last path under a name goes, so does the name, which is the empty() check
-// in the PHP.
+// An empty path means every path queued under that name goes. A path that
+// is not queued is not an error. When the last path under a name goes, so
+// does the name.
 func (j *CookieJar) Unqueue(name, path string) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -266,23 +241,22 @@ func (j *CookieJar) dropName(name string) {
 	j.names = without(j.names, name)
 }
 
-// HasQueued answers to CookieJar::hasQueued(). An empty path asks about any
-// path, the way PHP's null does.
+// HasQueued reports whether a cookie is queued under key. An empty path asks
+// about any path.
 func (j *CookieJar) HasQueued(key, path string) bool {
 	return j.Queued(key, nil, path) != nil
 }
 
-// Queued answers to CookieJar::queued(). It returns the queued cookie, or def
-// when there is none.
+// Queued returns the queued cookie, or def when there is none.
 //
-// PHP's $default is mixed and this one is a *http.Cookie, because every caller
-// in the framework passes null and a caller that wants something else can write
-// the comparison. Passing nil is that null.
+// def is a *http.Cookie rather than an any, because every caller in this
+// framework passes nil for it; a caller that wants something else can write
+// the comparison itself.
 //
-// An empty path is PHP's null and returns the cookie queued most recently under
-// that name -- Arr::last over the paths. Re-queueing an existing path does not
-// make it the most recent, because reassigning a PHP array key does not move it
-// to the end either.
+// An empty path returns the cookie queued most recently under that name --
+// the last path in insertion order. Re-queueing an existing path does not
+// move it to the end: only the first time a path is queued affects the
+// order.
 func (j *CookieJar) Queued(key string, def *http.Cookie, path string) *http.Cookie {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -300,13 +274,13 @@ func (j *CookieJar) Queued(key string, def *http.Cookie, path string) *http.Cook
 	return def
 }
 
-// GetQueuedCookies answers to CookieJar::getQueuedCookies(): every queued
-// cookie, flattened out of the name-then-path nesting.
+// GetQueuedCookies returns every queued cookie, flattened out of the
+// name-then-path nesting.
 //
-// The order is the order they were first queued, name by name and then path by
-// path, which is what Arr::flatten gives PHP. It matters: two Set-Cookie headers
-// for the same name and different paths are both sent, and the browser keeps
-// both, so the order is what a test can assert on.
+// The order is the order they were first queued, name by name and then path
+// by path. It matters: two Set-Cookie headers for the same name and
+// different paths are both sent, and the browser keeps both, so the order
+// is what a test can assert on.
 func (j *CookieJar) GetQueuedCookies() []*http.Cookie {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -321,8 +295,7 @@ func (j *CookieJar) GetQueuedCookies() []*http.Cookie {
 	return out
 }
 
-// FlushQueuedCookies answers to CookieJar::flushQueuedCookies(). It empties the
-// queue and returns the jar, as the PHP returns $this.
+// FlushQueuedCookies empties the queue and returns the jar, for chaining.
 func (j *CookieJar) FlushQueuedCookies() *CookieJar {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -332,16 +305,14 @@ func (j *CookieJar) FlushQueuedCookies() *CookieJar {
 	return j
 }
 
-// SetDefaultPathAndDomain answers to CookieJar::setDefaultPathAndDomain(). It
-// sets what [CookieJar.Make] fills in for a call that leaves an argument unset,
-// and returns the jar, as the PHP returns $this.
+// SetDefaultPathAndDomain sets what [CookieJar.Make] fills in for a call
+// that leaves an argument unset, and returns the jar, for chaining.
 //
-// The assignment is direct, as it is in PHP: passing "" for path clears the "/"
-// the jar started with rather than keeping it, and passing
-// http.SameSiteDefaultMode clears the lax default, which is PHP's null. secure
-// is a bool and not a pointer here because the PHP signature defaults it to
-// false rather than to null -- this is the call that decides, so there is
-// nothing left to fall back to.
+// The assignment is direct: passing "" for path clears the "/" the jar
+// started with rather than keeping it, and passing http.SameSiteDefaultMode
+// clears the lax default. secure is a bool and not a pointer here, because
+// this is the call that decides the default -- there is nothing left to
+// fall back to.
 func (j *CookieJar) SetDefaultPathAndDomain(path, domain string, secure bool, sameSite http.SameSite) *CookieJar {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -350,9 +321,8 @@ func (j *CookieJar) SetDefaultPathAndDomain(path, domain string, secure bool, sa
 	return j
 }
 
-// getPathAndDomain answers to CookieJar::getPathAndDomain(), the protected
-// method every builder goes through: the argument if it says something, the
-// jar's default if it does not.
+// getPathAndDomain is the method every builder goes through: the argument
+// if it says something, the jar's default if it does not.
 func (j *CookieJar) getPathAndDomain(path, domain string, secure *bool, sameSite http.SameSite) (string, string, bool, http.SameSite) {
 	j.mu.Lock()
 	defer j.mu.Unlock()

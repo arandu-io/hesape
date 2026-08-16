@@ -23,5 +23,5 @@ import (
 // converts and a slice type does not.
 //
 // Compose with pipeline.Chain. There is no Chain here: a second one, differing
-// only in being non-generic, is a second way to do the same thing (RULE 9).
+// only in being non-generic, is a second way to do the same thing.
 type Middleware = pipeline.Middleware[stdhttp.Handler]

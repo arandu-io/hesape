@@ -34,10 +34,9 @@ const intendedPurpose = "session.intended"
 
 // Intended is where somebody was going when a guard turned them away.
 //
-// It is Routing\Redirector::guest() and ::intended(), which is why it lives with
-// the rest of what answers a request rather than with the session: the value it
-// carries is an address, the whole of its correctness is [LocalPath], and
-// hesape/session never validates a URL.
+// It lives with the rest of what answers a request rather than with the
+// session: the value it carries is an address, the whole of its correctness
+// is [LocalPath], and hesape/session never validates a URL.
 //
 // It holds no state of its own -- the address is in a signed cookie in the
 // browser -- so one value serves every request, and it is wired once at boot
@@ -60,10 +59,10 @@ func NewIntended(appKey []byte, secure bool) *Intended {
 // Remember records where this request was going, so that the sign-in screen it
 // is about to be sent to can finish the journey.
 //
-// It is Laravel's redirect()->guest(): the guard is the only thing that knows
-// what the person was reaching for, and by the time they have typed a password
-// that request is gone. Without it every sign-in ends at the front page, and
-// somebody who followed a link to one invoice has to find it again.
+// The guard is the only thing that knows what the person was reaching for,
+// and by the time they have typed a password that request is gone. Without
+// it every sign-in ends at the front page, and somebody who followed a link
+// to one invoice has to find it again.
 //
 // # Why it is signed rather than merely same-site
 //
@@ -124,8 +123,7 @@ func (i *Intended) Remember(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 
 // Take returns the address Remember stored, and clears it.
 //
-// It is Laravel's redirect()->intended($fallback), and it is meant to be the
-// whole of a sign-in handler's last line:
+// It is meant to be the whole of a sign-in handler's last line:
 //
 //	return ctx.Redirect(intended.Take(ctx.Response, ctx.Request, "/"))
 //

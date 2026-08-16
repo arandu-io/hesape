@@ -8,15 +8,15 @@ import (
 	"sync"
 )
 
-// DefaultMimeType is what MimeType::get answers when nothing is known about an
-// extension: Symfony's Arr::first(...) ?? 'application/octet-stream'.
+// DefaultMimeType is what Get answers when nothing is known about an
+// extension.
 const DefaultMimeType = "application/octet-stream"
 
-// mimeTypes answers to MimeType::$mime, the Symfony MimeTypes instance the PHP
-// keeps in a static. Go has mime.TypeByExtension, which reads the same tables
-// the operating system carries, plus the table below for the extensions that
-// are not on every machine -- a test that passes on a laptop and fails on a
-// build box because /etc/mime.types differs is the failure this closes.
+// mimeTypes is the extension-to-type table this package consults before
+// falling back to mime.TypeByExtension, which reads tables the operating
+// system carries. The table below covers the extensions that are not on
+// every machine -- a test that passes on a laptop and fails on a build box
+// because /etc/mime.types differs is the failure this closes.
 var mimeTypes = struct {
 	once  sync.Once
 	extra map[string]string
@@ -48,12 +48,7 @@ var mimeTypes = struct {
 	},
 }
 
-// GetMimeTypes answers to MimeType::getMimeTypes: the table this package reads.
-//
-// The PHP returns a Symfony MimeTypes instance; Go's mime package is a set of
-// functions rather than an object, so this returns the extension-to-type table
-// [From] and [Get] consult -- which is what a caller of the PHP
-// method reaches into it for.
+// GetMimeTypes is the extension-to-type table [From] and [Get] consult.
 func GetMimeTypes() map[string]string {
 	mimeTypes.once.Do(func() {
 		for extension, contentType := range mimeTypes.extra {
@@ -69,14 +64,12 @@ func GetMimeTypes() map[string]string {
 	return out
 }
 
-// From answers to MimeType::from: the type for a filename, read off its
-// extension.
+// From is the type for a filename, read off its extension.
 func From(filename string) string {
 	return Get(strings.TrimPrefix(path.Ext(filename), "."))
 }
 
-// Get answers to MimeType::get: the type for an extension, or
-// [DefaultMimeType].
+// Get is the type for an extension, or [DefaultMimeType].
 func Get(extension string) string {
 	table := GetMimeTypes()
 	extension = strings.ToLower(strings.TrimPrefix(extension, "."))
@@ -95,8 +88,7 @@ func Get(extension string) string {
 	return DefaultMimeType
 }
 
-// Search answers to MimeType::search: an extension for a type, empty
-// when none is known. The PHP returns string|null; empty is the null.
+// Search is an extension for a type, empty when none is known.
 func Search(contentType string) string {
 	table := GetMimeTypes()
 	contentType = strings.ToLower(strings.TrimSpace(contentType))

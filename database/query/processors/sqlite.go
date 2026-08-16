@@ -7,7 +7,7 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// SQLiteProcessor answers Illuminate\Database\Query\Processors\SQLiteProcessor.
+// SQLiteProcessor is the Processor for SQLite.
 //
 // SQLite reports less about a column than the other two do, so this is the one
 // processor that reads the CREATE TABLE statement back: the collation and the
@@ -19,14 +19,15 @@ type SQLiteProcessor struct {
 
 var _ query.Processor = (*SQLiteProcessor)(nil)
 
-// NewSQLiteProcessor answers `new SQLiteProcessor`.
+// NewSQLiteProcessor creates a SQLiteProcessor.
 func NewSQLiteProcessor() *SQLiteProcessor { return &SQLiteProcessor{} }
 
-// ProcessColumns answers SQLiteProcessor::processColumns.
+// ProcessColumns normalises the columns of a column listing, reading the
+// collation and any generated expression out of the CREATE TABLE
+// statement.
 //
-// The optional argument is the CREATE TABLE statement; without it the collation
-// and the generated expression come back nil, which is what the PHP's default
-// empty string produces too.
+// The optional argument is that statement; without it the collation and the
+// generated expression come back nil.
 func (p *SQLiteProcessor) ProcessColumns(results []query.Record, sql ...string) []query.Record {
 	statement := ""
 	if len(sql) > 0 {
@@ -83,11 +84,11 @@ func (p *SQLiteProcessor) ProcessColumns(results []query.Record, sql ...string) 
 	return out
 }
 
-// ProcessIndexes answers SQLiteProcessor::processIndexes.
+// ProcessIndexes normalises the columns of an index listing.
 //
-// SQLite reports the implicit index of a composite primary key alongside the
-// key itself, so when more than one index calls itself primary the named one is
-// dropped and the real key is kept.
+// SQLite reports the implicit index of a composite primary key alongside
+// the key itself, so when more than one index calls itself primary the
+// named one is dropped and the real key is kept.
 func (p *SQLiteProcessor) ProcessIndexes(results []query.Record) []query.Record {
 	primaries := 0
 
@@ -121,8 +122,9 @@ func (p *SQLiteProcessor) ProcessIndexes(results []query.Record) []query.Record 
 	return indexes
 }
 
-// ProcessForeignKeys answers SQLiteProcessor::processForeignKeys. SQLite does
-// not name a foreign key, so the name is nil rather than invented.
+// ProcessForeignKeys normalises the columns of a foreign key listing.
+// SQLite does not name a foreign key, so the name is nil rather than
+// invented.
 func (p *SQLiteProcessor) ProcessForeignKeys(results []query.Record) []query.Record {
 	out := make([]query.Record, 0, len(results))
 
@@ -141,7 +143,8 @@ func (p *SQLiteProcessor) ProcessForeignKeys(results []query.Record) []query.Rec
 	return out
 }
 
-// typeName answers strtok($type, "("): "varchar(255)" is a varchar.
+// typeName strips a trailing size or precision: "varchar(255)" is a
+// varchar.
 func typeName(typ string) string {
 	if i := strings.Index(typ, "("); i >= 0 {
 		return typ[:i]

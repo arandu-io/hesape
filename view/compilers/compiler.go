@@ -10,21 +10,15 @@ import (
 )
 
 // ErrCachePathMissing is returned by NewCompiler when no cache path is given.
-//
-// It answers the InvalidArgumentException Compiler::__construct throws:
-// "Please provide a valid cache path."
 var ErrCachePathMissing = errors.New("view/compilers: provide a valid cache path")
 
-// Compiler mirrors Illuminate\View\Compilers\Compiler.
+// Compiler is a plain struct that a concrete compiler embeds. Its filesystem
+// is the os package: there is one, it is the disk, and a second one would be
+// a second way to read a file.
 //
-// PHP declares it abstract and composes a Filesystem into it. Here it is a
-// plain struct that a concrete compiler embeds, and the filesystem is the os
-// package: there is one, it is the disk, and a second one would be a second
-// way to read a file (RULE 9).
-//
-// The cache path is storage/framework/views, the same place `aru view:build`
-// writes to, and the compiled extension is go rather than php because what
-// comes out the other side is Go source that the toolchain then builds.
+// The cache path is storage/framework/views, the same place the view build
+// writes to. The compiled extension is go, because what comes out the other
+// side is Go source that the toolchain then builds.
 type Compiler struct {
 	// cachePath is where compiled views are written.
 	cachePath string
@@ -45,10 +39,8 @@ type Compiler struct {
 	path string
 }
 
-// NewCompiler is Compiler::__construct.
-//
-// It returns (*Compiler, error) where PHP throws InvalidArgumentException.
-// An empty compiledExtension defaults to "go".
+// NewCompiler returns a Compiler, or ErrCachePathMissing if cachePath is
+// empty. An empty compiledExtension defaults to "go".
 func NewCompiler(cachePath, basePath string, shouldCache bool, compiledExtension string, shouldCheckTimestamps bool) (*Compiler, error) {
 	if cachePath == "" {
 		return nil, ErrCachePathMissing
@@ -65,21 +57,18 @@ func NewCompiler(cachePath, basePath string, shouldCache bool, compiledExtension
 	}, nil
 }
 
-// GetCompiledPath is Compiler::getCompiledPath.
+// GetCompiledPath returns the cache path path compiles to.
 //
-// PHP hashes with xxh128, which the Go standard library does not carry and
-// which is not worth a dependency for a cache file name. The digest is the
-// first 32 hex digits of SHA-256 over the same input, so the shape of the
-// name -- 32 hex digits and the compiled extension -- is unchanged.
+// The digest is the first 32 hex digits of SHA-256 over the input, chosen
+// over a third-party hash so that a cache file name costs no dependency.
 func (c *Compiler) GetCompiledPath(path string) string {
 	sum := sha256.Sum256([]byte("v2" + after(path, c.basePath)))
 	return filepath.Join(c.cachePath, hex.EncodeToString(sum[:])[:32]+"."+c.compiledExtension)
 }
 
-// IsExpired is Compiler::isExpired.
-//
-// It returns (bool, error) where PHP throws ErrorException: a view whose
-// source cannot be stat'ed is not silently treated as current.
+// IsExpired reports whether the compiled output for path is stale, and
+// returns an error rather than silently treating an unreadable source as
+// current.
 func (c *Compiler) IsExpired(path string) (bool, error) {
 	if !c.shouldCache {
 		return true, nil
@@ -106,34 +95,33 @@ func (c *Compiler) IsExpired(path string) (bool, error) {
 	return !sourceInfo.ModTime().Before(compiledInfo.ModTime()), nil
 }
 
-// GetPath is BladeCompiler::getPath.
+// GetPath returns the path of the file currently being compiled.
 func (c *Compiler) GetPath() string { return c.path }
 
-// SetPath is BladeCompiler::setPath.
+// SetPath sets the path of the file currently being compiled.
 func (c *Compiler) SetPath(path string) { c.path = path }
 
 // GetCachePath reports where compiled views are written.
 //
-// PHP reads $this->cachePath from inside the class hierarchy; Go has no
-// protected, so the accessor is the way a compiler in another package asks.
+// Go has no protected field, so this accessor is how a compiler in another
+// package reads it.
 func (c *Compiler) GetCachePath() string { return c.cachePath }
 
-// ensureCompiledDirectoryExists is Compiler::ensureCompiledDirectoryExists.
+// ensureCompiledDirectoryExists creates the directory path is written into,
+// if it does not already exist.
 func (c *Compiler) ensureCompiledDirectoryExists(path string) error {
 	return os.MkdirAll(filepath.Dir(path), 0o755)
 }
 
-// shortHash is the 32 hex digits PHP gets from hash('xxh128', ...). The
-// digest differs; the shape and the purpose -- a stable directory name for a
-// prefix -- do not.
+// shortHash returns 32 hex digits: a stable directory name for a prefix.
 func shortHash(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])[:32]
 }
 
 // after returns the part of subject after the first occurrence of search,
-// or subject itself when search is empty or absent. It is Str::after, kept
-// local so that this package depends on nothing but the standard library.
+// or subject itself when search is empty or absent. Kept local so that this
+// package depends on nothing but the standard library.
 func after(subject, search string) string {
 	if search == "" {
 		return subject

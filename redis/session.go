@@ -17,9 +17,8 @@ import (
 // ErrNoTenant is returned when an operation that is scoped to a customer is
 // given no tenant, or one that cannot be part of a key.
 //
-// An error rather than a fallback bucket, which is RULE 14 with teeth: "sign
-// subject 1 out everywhere" without a tenant reaches the subject 1 of every
-// customer.
+// An error rather than a fallback bucket: "sign subject 1 out everywhere"
+// without a tenant would reach the subject 1 of every customer.
 var ErrNoTenant = errors.New("redis: the operation needs a tenant, and none was given")
 
 // errNoSubject is the refusal behind a bulk sign-out with no subject to scope
@@ -31,9 +30,8 @@ var errNoSubject = errors.New("redis: signing out every session of a subject nee
 
 // CacheBasedSessionHandler is the distributed session handler.
 //
-// It answers Illuminate\Session\CacheBasedSessionHandler, which is what the
-// redis session driver is in Laravel. The collection ships
-// session.ArrayHandler, which is correct for one instance and wrong for two:
+// The collection ships session.ArrayHandler, which is correct for one instance
+// and wrong for two:
 // behind a load balancer, half the requests land on the replica that never saw
 // the login. This is the same interface, over RESP, and swapping it in is one
 // line in bootstrap.
@@ -189,9 +187,9 @@ func (h *CacheBasedSessionHandler[T]) DestroyIndex(ctx context.Context, tenant, 
 // the one being written -- so any later write repairs it instead of
 // compounding.
 //
-// ZADD, ZREMRANGEBYSCORE, ZRANGE and PEXPIREAT, and nothing else: no Lua, no
-// RedisJSON, so Dragonfly, Valkey and KeyDB answer it exactly as Redis does
-// (RULE 11).
+// ZADD, ZREMRANGEBYSCORE, ZRANGE and PEXPIREAT, and nothing else: no script and
+// no RedisJSON, so Dragonfly, Valkey and KeyDB answer it exactly as Redis
+// does.
 func (h *CacheBasedSessionHandler[T]) index(ctx context.Context, id string, rec session.Record[T], ttl time.Duration) error {
 	if rec.Tenant == "" || rec.SubjectID == "" {
 		return nil

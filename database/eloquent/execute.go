@@ -6,15 +6,15 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// This file holds the bodies of Illuminate\Database\Query\Builder's select,
-// insert, insertGetId, update, upsert, delete and aggregate.
+// The statements this package issues: select, insert, insert-returning-id,
+// update, upsert, delete and the aggregates.
 //
 // They run here rather than in the query package because running a statement
 // takes a Grant and building SQL does not: query.Builder is the SQL, and the
-// layer that holds the authorization is the layer that issues it (RULE 17). The
-// SQL itself is still the grammar's -- nothing here concatenates a fragment.
+// layer that holds the authorization is the layer that issues it. The SQL
+// itself is still the grammar's -- nothing here concatenates a fragment.
 
-// runSelect answers Builder::runSelect.
+// runSelect runs the query's SELECT and returns the rows.
 func (b *Builder[T]) runSelect() ([]query.Record, error) {
 	sql := b.query.ToSQL()
 	rows, err := b.model.Connection.Select(sql, b.query.GetBindings(), !b.query.UsingWritePDO())
@@ -27,11 +27,10 @@ func (b *Builder[T]) runSelect() ([]query.Record, error) {
 	return rows, nil
 }
 
-// runInsert answers Builder::insert.
+// runInsert runs an INSERT for values, and reports whether it succeeded.
 //
-// The rows are sorted by column name before they are compiled and bound, which
-// is the same ksort the PHP applies to a batch insert -- and the only ordering
-// available here, since a Go map has none.
+// The rows are sorted by column name before they are compiled and bound,
+// which is the only ordering available here, since a Go map has none.
 func (b *Builder[T]) runInsert(values []map[string]any) (bool, error) {
 	if len(values) == 0 {
 		return true, nil
@@ -52,7 +51,8 @@ func (b *Builder[T]) runInsert(values []map[string]any) (bool, error) {
 	return ok, nil
 }
 
-// runInsertGetID answers Builder::insertGetId. The PHP spells it insertGetId.
+// runInsertGetID runs an INSERT for one row and returns the value generated
+// for sequence.
 func (b *Builder[T]) runInsertGetID(values map[string]any, sequence string) (int64, error) {
 	b.query.ApplyBeforeQueryCallbacks()
 
@@ -70,7 +70,8 @@ func (b *Builder[T]) runInsertGetID(values map[string]any, sequence string) (int
 	return id, nil
 }
 
-// runUpdate answers Builder::update.
+// runUpdate runs an UPDATE for values and returns the number of rows
+// affected.
 func (b *Builder[T]) runUpdate(values map[string]any) (int64, error) {
 	b.query.ApplyBeforeQueryCallbacks()
 
@@ -84,10 +85,10 @@ func (b *Builder[T]) runUpdate(values map[string]any) (int64, error) {
 	return affected, nil
 }
 
-// runUpsert answers Builder::upsert.
+// runUpsert issues the upsert.
 //
-// Illuminate runs it through affectingStatement; query.Connection spells that
-// Update -- a statement that reports how many rows it touched.
+// It goes through query.Connection's Update -- a statement that reports how many
+// rows it touched.
 func (b *Builder[T]) runUpsert(values []map[string]any, uniqueBy, update []string) (int64, error) {
 	b.query.ApplyBeforeQueryCallbacks()
 
@@ -106,7 +107,7 @@ func (b *Builder[T]) runUpsert(values []map[string]any, uniqueBy, update []strin
 	return affected, nil
 }
 
-// runDelete answers Builder::delete.
+// runDelete runs a DELETE and returns the number of rows affected.
 func (b *Builder[T]) runDelete() (int64, error) {
 	b.query.ApplyBeforeQueryCallbacks()
 
@@ -120,8 +121,8 @@ func (b *Builder[T]) runDelete() (int64, error) {
 	return affected, nil
 }
 
-// runAggregate answers Builder::aggregate: the one row an aggregate select
-// returns, read out of the column the grammar aliases as "aggregate".
+// runAggregate returns the one row an aggregate select returns, read out of
+// the column the grammar aliases as "aggregate".
 func (b *Builder[T]) runAggregate(function string, columns []any) (any, error) {
 	aggregate := b.clone()
 	aggregate.query = aggregate.query.
@@ -144,8 +145,9 @@ func (b *Builder[T]) runAggregate(function string, columns []any) (any, error) {
 	return nil, fmt.Errorf("eloquent: the %s query on %s came back without an aggregate column", function, b.model.GetTable())
 }
 
-// cleanBindings answers Grammar::cleanBindings: an Expression is SQL and never a
-// binding, so it is dropped from the list rather than sent as a value.
+// cleanBindings drops every query.Expression from bindings: an expression
+// is SQL and never a binding, so it is dropped from the list rather than
+// sent as a value.
 func cleanBindings(bindings []any) []any {
 	out := make([]any, 0, len(bindings))
 	for _, binding := range bindings {

@@ -2,11 +2,11 @@ package middleware
 
 import "time"
 
-// CorsConfig is config/cors.php.
+// CorsConfig is the CORS policy a project configures.
 //
-// It is declared here, in the package that reads it, per ADR 0051: without a
-// container nothing looks a value up by key, so the middleware is handed its
-// settings and the compiler checks the field.
+// It is declared here, in the package that reads it: without a container
+// nothing looks a value up by key, so the middleware is handed its settings
+// and the compiler checks the field.
 //
 // It exists as a type and not as five parameters because of what the five
 // permit in combination. See [CorsConfig.Valid].
@@ -76,11 +76,9 @@ func (c CorsConfig) Valid() error {
 // DefaultCorsConfig is what a project gets without configuring anything: no
 // origin allowed.
 //
-// Laravel's config/cors.php ships allowed_origins => ['*'] with
-// supports_credentials => false, scoped to api/* -- which is safe there because
-// the API is token-authenticated and carries no cookie. This framework's
-// requests carry a session cookie by design, so the same default would be a
-// different thing entirely.
+// An allow-all default would be unsafe here: this framework's requests carry
+// a session cookie by design, and a permissive origin list combined with
+// credentials is exactly the leak Valid refuses.
 //
 // An empty list means the middleware adds no header and the browser refuses the
 // cross-origin read, which is the correct answer for an application that has

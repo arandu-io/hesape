@@ -31,13 +31,14 @@ func TestEachRuleAcceptsAndRejectsWhatLaravelDoes(t *testing.T) {
 		good  []string
 		bad   []string
 	}{
-		// "0" is an answer; three spaces are not. Laravel trims before asking.
+		// "0" is an answer; three spaces are not, because the value is trimmed
+		// before it is asked about.
 		{"required", []string{"0", "false", "a"}, []string{"", " ", "\t\n"}},
 		{"filled", []string{"0", "a"}, []string{" "}},
 		{"prohibited", []string{"", "   "}, []string{"a", "0"}},
 
-		// Consent takes Laravel's lists exactly. "on" is what a ticked checkbox
-		// sends; "yes" and "true" are what an API client sends instead.
+		// "on" is what a ticked checkbox sends; "yes" and "true" are what an
+		// API client sends instead.
 		{"accepted", []string{"yes", "on", "1", "true"}, []string{"", "0", "no", "TRUE", "ok"}},
 		{"declined", []string{"no", "off", "0", "false"}, []string{"", "1", "yes", "FALSE"}},
 
@@ -57,21 +58,21 @@ func TestEachRuleAcceptsAndRejectsWhatLaravelDoes(t *testing.T) {
 		{"digits_between:2,4", []string{"12", "1234"}, []string{"1", "12345", "12.3"}},
 
 		{"numeric", []string{"0", "-1", "1.5", ".5", "1e3", "+2", "1 "}, []string{"a", "1,5", "0x1A", "Inf", "NaN"}},
-		// "012" is refused, as PHP's FILTER_VALIDATE_INT refuses it. "" is not
-		// in either list: a rule that is not implicit does not run on a blank
+		// "012" is refused for its leading zero. "" is not in either list: a
+		// rule that is not implicit does not run on a blank
 		// value, which TestANonImplicitRuleDoesNotRunOnABlankValue is about.
 		{"integer", []string{"0", "-1", "12", "+3"}, []string{"1.0", "012", "a"}},
 		{"decimal:2", []string{"1.00", "0.15", "-3.99"}, []string{"1.0", "1", "1.000", "1e2"}},
 		{"decimal:1,3", []string{"1.0", "1.00", "1.000"}, []string{"1", "1.0000"}},
 
-		// Laravel's boolean accepts only "0" and "1" from a form. A ticked
-		// checkbox sends "on", which is what `accepted` is for.
+		// `boolean` accepts only "0" and "1" from a form. A ticked checkbox
+		// sends "on", which is what `accepted` is for.
 		{"boolean", []string{"0", "1"}, []string{"true", "on", "yes", "2"}},
 		{"ascii", []string{"abc", "a-1_2"}, []string{"José", "ação"}},
 		{"json", []string{`{"a":1}`, `[]`, `1`, `"x"`}, []string{`{`, `{a:1}`}},
 
 		{"date", []string{"2026-08-10", "2026-08-10 09:30:00", "2026-08-10T09:30:00Z"}, []string{"10/08/2026", "next thursday", "2026-13-01"}},
-		// A Go layout, never a PHP one. The round trip is what refuses
+		// A Go layout, and nothing else. The round trip is what refuses
 		// "2026-8-1" for the layout "2006-01-02".
 		{"date_format:2006-01-02", []string{"2026-08-10"}, []string{"2026-8-1", "2026-08-10T00:00:00Z", "10/08/2026"}},
 		{"date_format:02/01/2006", []string{"10/08/2026"}, []string{"2026-08-10"}},
@@ -82,7 +83,7 @@ func TestEachRuleAcceptsAndRejectsWhatLaravelDoes(t *testing.T) {
 		{"uuid", []string{"0f3a5f5e-4d2b-4e3a-9c1d-1f2e3a4b5c6d"}, []string{"0f3a5f5e4d2b4e3a9c1d1f2e3a4b5c6d", "not-a-uuid"}},
 		{"ulid", []string{"01ARZ3NDEKTSV4RRFFQ69G5FAV"}, []string{"01ARZ3NDEKTSV4RRFFQ69G5FA", "81ARZ3NDEKTSV4RRFFQ69G5FAV", "01ARZ3NDEKTSV4RRFFQ69G5FAU"}},
 
-		// alpha defaults to Unicode, as Laravel's does, and takes :ascii.
+		// alpha defaults to Unicode, and takes :ascii to narrow it.
 		{"alpha", []string{"abc", "José", "ação"}, []string{"ab1", "a-b", "a b"}},
 		{"alpha:ascii", []string{"abc"}, []string{"José"}},
 		{"alpha_dash", []string{"a-b_1", "José-1"}, []string{"a b", "a.b"}},
@@ -127,9 +128,9 @@ func TestEachRuleAcceptsAndRejectsWhatLaravelDoes(t *testing.T) {
 	}
 }
 
-// TestSizeCountsRunesForAStringAndValueForANumber is Laravel's $numericRules
-// gate, and it is silent when it is wrong: "5" is one character and the number
-// five, so max:3 says opposite things about the same box.
+// TestSizeCountsRunesForAStringAndValueForANumber is the numeric gate, and it is
+// silent when it is wrong: "5" is one character and the number five, so max:3
+// says opposite things about the same box.
 func TestSizeCountsRunesForAStringAndValueForANumber(t *testing.T) {
 	if errs := run(t, "max:3", "12345"); !errs.Any() {
 		t.Error("five characters passed max:3 on a string field")
@@ -168,7 +169,7 @@ func TestConfirmedComparesTheFieldLaravelNames(t *testing.T) {
 
 // TestSameAndDifferentReadTheOtherFieldAsLaravelDoes: `same` compares against
 // the empty string when the other box was not sent, and `different` does not
-// compare at all -- Laravel's asymmetry, and copying it is the point.
+// compare at all. The asymmetry is deliberate.
 func TestSameAndDifferentReadTheOtherFieldAsLaravelDoes(t *testing.T) {
 	set := mustCompile(t, validation.Rules{"a": "same:b", "b": "sometimes"})
 	if _, errs := set.Validate(url.Values{"a": {"x"}}); !errs.Any() {
@@ -184,9 +185,8 @@ func TestSameAndDifferentReadTheOtherFieldAsLaravelDoes(t *testing.T) {
 	}
 }
 
-// TestRequiredIfOnlyFiresWhenTheOtherFieldWasSent: Laravel returns early when
-// the other key is absent rather than treating its absence as a value, so a
-// form that does not carry the field cannot be answering it.
+// TestRequiredIfOnlyFiresWhenTheOtherFieldWasSent: an absent key is not a value,
+// so a form that does not carry the field cannot be answering it.
 func TestRequiredIfOnlyFiresWhenTheOtherFieldWasSent(t *testing.T) {
 	set := mustCompile(t, validation.Rules{"reason": "required_if:status,rejected", "status": "sometimes"})
 
@@ -216,8 +216,8 @@ func TestRequiredUnlessFiresWhenTheOtherFieldIsAbsent(t *testing.T) {
 	}
 }
 
-// TestRequiredWithAndWithoutAskAboutAnyOfTheirFields, which is Laravel's
-// allFailingRequired/anyFailingRequired pair read the right way round.
+// TestRequiredWithAndWithoutAskAboutAnyOfTheirFields: `required_with` fires when
+// ANY of them is present, `required_without` when ANY of them is missing.
 func TestRequiredWithAndWithoutAskAboutAnyOfTheirFields(t *testing.T) {
 	with := mustCompile(t, validation.Rules{"city": "required_with:street,postcode"})
 	if _, errs := with.Validate(url.Values{}); errs.Any() {
@@ -247,8 +247,8 @@ func TestComparisonsReadAnotherFieldAndMeasureLikeSizeDoes(t *testing.T) {
 		t.Errorf("11 failed gt:low against 10: %v", errs)
 	}
 
-	// Without a numeric rule the comparison is by length, exactly as Laravel's
-	// getSize is -- "9" is not greater than "10", it is shorter.
+	// Without a numeric rule the comparison is by length -- "9" is not greater
+	// than "10", it is shorter.
 	words := mustCompile(t, validation.Rules{"long": "gt:short", "short": "sometimes"})
 	if _, errs := words.Validate(url.Values{"long": {"9"}, "short": {"10"}}); !errs.Any() {
 		t.Error("a one-character value passed gt against a two-character one")

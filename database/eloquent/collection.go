@@ -8,37 +8,31 @@ import (
 	"github.com/arandu-io/hesape/collections"
 )
 
-// Collection answers Illuminate\Database\Eloquent\Collection: the models a query
-// came back with.
+// Collection is the models a query came back with.
 //
-// The PHP class extends Support\Collection and inherits a hundred methods. Go
-// has no inheritance, so what it inherits lives in hesape/collections and ToBase
-// converts to it -- which is the same method toBase() has there, doing the same
-// job for a different reason.
-//
-// Only the methods Eloquent adds or overrides are here. They are the ones that
-// know the items are models: keyed by their key, reloaded from their table,
-// hidden and appended per model.
+// The general collection vocabulary lives in hesape/collections, and ToBase
+// converts to it. Only the methods that know the items are models are here:
+// keyed by their key, reloaded from their table, hidden and appended per model.
 type Collection[T any] []*Model[T]
 
-// ToBase answers Collection::toBase.
+// ToBase returns the models as a collections.Collection.
 func (c Collection[T]) ToBase() collections.Collection[*Model[T]] {
 	return collections.Collect([]*Model[T](c))
 }
 
-// All answers Collection::all.
+// All returns the models as a plain slice.
 func (c Collection[T]) All() []*Model[T] { return []*Model[T](c) }
 
-// Count answers Collection::count.
+// Count returns the number of models.
 func (c Collection[T]) Count() int { return len(c) }
 
-// IsEmpty answers Collection::isEmpty.
+// IsEmpty reports whether there are no models.
 func (c Collection[T]) IsEmpty() bool { return len(c) == 0 }
 
-// IsNotEmpty answers Collection::isNotEmpty.
+// IsNotEmpty reports the opposite of IsEmpty.
 func (c Collection[T]) IsNotEmpty() bool { return len(c) > 0 }
 
-// First answers Collection::first: the first model, or nil when there is none.
+// First returns the first model, or nil when there is none.
 func (c Collection[T]) First() *Model[T] {
 	if len(c) == 0 {
 		return nil
@@ -46,7 +40,7 @@ func (c Collection[T]) First() *Model[T] {
 	return c[0]
 }
 
-// ModelKeys answers Collection::modelKeys.
+// ModelKeys returns the primary key of every model.
 func (c Collection[T]) ModelKeys() []any {
 	out := make([]any, 0, len(c))
 	for _, model := range c {
@@ -55,8 +49,7 @@ func (c Collection[T]) ModelKeys() []any {
 	return out
 }
 
-// Find answers Collection::find: the model with this key, out of the ones
-// already in hand.
+// Find returns the model with this key, out of the ones already in hand.
 func (c Collection[T]) Find(key any) *Model[T] {
 	for _, model := range c {
 		if reflect.DeepEqual(model.GetKey(), key) {
@@ -66,7 +59,7 @@ func (c Collection[T]) Find(key any) *Model[T] {
 	return nil
 }
 
-// FindOrFail answers Collection::findOrFail.
+// FindOrFail returns the model with this key, or an error when none matches.
 func (c Collection[T]) FindOrFail(key any) (*Model[T], error) {
 	if model := c.Find(key); model != nil {
 		return model, nil
@@ -78,7 +71,8 @@ func (c Collection[T]) FindOrFail(key any) (*Model[T], error) {
 	return nil, modelNotFound(table, key)
 }
 
-// Contains answers Collection::contains, in its key and model forms.
+// Contains reports whether key -- a key value, or a *Model[T] to compare by
+// key -- matches one of the models.
 func (c Collection[T]) Contains(key any) bool {
 	if model, ok := key.(*Model[T]); ok {
 		for _, candidate := range c {
@@ -91,13 +85,11 @@ func (c Collection[T]) Contains(key any) bool {
 	return c.Find(key) != nil
 }
 
-// DoesntContain answers Collection::doesntContain.
+// DoesntContain reports the opposite of Contains.
 func (c Collection[T]) DoesntContain(key any) bool { return !c.Contains(key) }
 
-// Pluck answers Collection::pluck: one attribute of every model.
-//
-// PHP hands back a Support\Collection of mixed; here it is a slice of any, for
-// the same reason: the value is whatever that column holds.
+// Pluck returns one attribute of every model, as a slice of any: the value
+// is whatever that column holds.
 func (c Collection[T]) Pluck(column string) []any {
 	out := make([]any, 0, len(c))
 	for _, model := range c {
@@ -106,8 +98,8 @@ func (c Collection[T]) Pluck(column string) []any {
 	return out
 }
 
-// GetDictionary answers Collection::getDictionary: the models keyed by their
-// key, which is how every set operation here compares them.
+// GetDictionary returns the models keyed by their key, which is how every
+// set operation here compares them.
 func (c Collection[T]) GetDictionary() map[any]*Model[T] {
 	out := make(map[any]*Model[T], len(c))
 	for _, model := range c {
@@ -116,8 +108,8 @@ func (c Collection[T]) GetDictionary() map[any]*Model[T] {
 	return out
 }
 
-// Merge answers Collection::merge: the other models added, with a key that is
-// already here replaced rather than repeated.
+// Merge returns the other models added, with a key that is already here
+// replaced rather than repeated.
 func (c Collection[T]) Merge(items Collection[T]) Collection[T] {
 	out := make(Collection[T], 0, len(c)+len(items))
 	out = append(out, c...)
@@ -135,7 +127,7 @@ func (c Collection[T]) Merge(items Collection[T]) Collection[T] {
 	return out
 }
 
-// Load answers Collection::load: eager load these relations onto every model.
+// Load eager loads these relations onto every model.
 func (c Collection[T]) Load(g auth.Grant, relations ...string) error {
 	if len(c) == 0 || len(relations) == 0 {
 		return nil
@@ -144,7 +136,8 @@ func (c Collection[T]) Load(g auth.Grant, relations ...string) error {
 	return q.EagerLoadRelations(g, c)
 }
 
-// LoadMissing answers Collection::loadMissing: the same, minus what is loaded.
+// LoadMissing eager loads these relations onto every model, skipping the
+// ones already loaded.
 func (c Collection[T]) LoadMissing(g auth.Grant, relations ...string) error {
 	if len(c) == 0 {
 		return nil
@@ -166,11 +159,12 @@ func (c Collection[T]) LoadMissing(g auth.Grant, relations ...string) error {
 	return nil
 }
 
-// LoadAggregate answers Collection::loadAggregate.
+// LoadAggregate loads function over column of each relation onto every
+// model.
 //
-// It reads the aggregate columns for the keys already in hand and force fills
-// them onto the models, which is what the PHP does -- the columns are not
-// declared on the entity, so they land as raw attributes.
+// It reads the aggregate columns for the keys already in hand and force
+// fills them onto the models. The columns are not declared on the entity,
+// so they land as raw attributes.
 func (c Collection[T]) LoadAggregate(g auth.Grant, relations []string, column, function string) error {
 	if len(c) == 0 || len(relations) == 0 {
 		return nil
@@ -210,39 +204,39 @@ func (c Collection[T]) LoadAggregate(g auth.Grant, relations []string, column, f
 	return nil
 }
 
-// LoadCount answers Collection::loadCount.
+// LoadCount loads the count of each relation onto every model.
 func (c Collection[T]) LoadCount(g auth.Grant, relations ...string) error {
 	return c.LoadAggregate(g, relations, "*", "count")
 }
 
-// LoadMax answers Collection::loadMax.
+// LoadMax loads the max of column over each relation onto every model.
 func (c Collection[T]) LoadMax(g auth.Grant, relations []string, column string) error {
 	return c.LoadAggregate(g, relations, column, "max")
 }
 
-// LoadMin answers Collection::loadMin.
+// LoadMin loads the min of column over each relation onto every model.
 func (c Collection[T]) LoadMin(g auth.Grant, relations []string, column string) error {
 	return c.LoadAggregate(g, relations, column, "min")
 }
 
-// LoadSum answers Collection::loadSum.
+// LoadSum loads the sum of column over each relation onto every model.
 func (c Collection[T]) LoadSum(g auth.Grant, relations []string, column string) error {
 	return c.LoadAggregate(g, relations, column, "sum")
 }
 
-// LoadAvg answers Collection::loadAvg.
+// LoadAvg loads the average of column over each relation onto every model.
 func (c Collection[T]) LoadAvg(g auth.Grant, relations []string, column string) error {
 	return c.LoadAggregate(g, relations, column, "avg")
 }
 
-// LoadExists answers Collection::loadExists.
+// LoadExists loads whether each relation exists onto every model.
 func (c Collection[T]) LoadExists(g auth.Grant, relations ...string) error {
 	return c.LoadAggregate(g, relations, "*", "exists")
 }
 
-// Fresh answers Collection::fresh: the same rows, read again.
+// Fresh returns the same rows, read again.
 //
-// A model that has since been deleted drops out of the result, as it does there.
+// A model that has since been deleted drops out of the result.
 func (c Collection[T]) Fresh(g auth.Grant, with ...string) (Collection[T], error) {
 	if len(c) == 0 {
 		return Collection[T]{}, nil
@@ -270,7 +264,7 @@ func (c Collection[T]) Fresh(g auth.Grant, with ...string) (Collection[T], error
 	return out, nil
 }
 
-// Diff answers Collection::diff: the models that are not in the other set.
+// Diff returns the models that are not in items.
 func (c Collection[T]) Diff(items Collection[T]) Collection[T] {
 	out := Collection[T]{}
 	for _, model := range c {
@@ -281,7 +275,7 @@ func (c Collection[T]) Diff(items Collection[T]) Collection[T] {
 	return out
 }
 
-// Intersect answers Collection::intersect.
+// Intersect returns the models that are also in items.
 func (c Collection[T]) Intersect(items Collection[T]) Collection[T] {
 	out := Collection[T]{}
 	if len(items) == 0 {
@@ -295,7 +289,7 @@ func (c Collection[T]) Intersect(items Collection[T]) Collection[T] {
 	return out
 }
 
-// Unique answers Collection::unique: one model per key, the first one seen.
+// Unique returns one model per key, the first one seen.
 func (c Collection[T]) Unique() Collection[T] {
 	out := Collection[T]{}
 	for _, model := range c {
@@ -306,7 +300,7 @@ func (c Collection[T]) Unique() Collection[T] {
 	return out
 }
 
-// Only answers Collection::only: the models with these keys.
+// Only returns the models with these keys.
 func (c Collection[T]) Only(keys ...any) Collection[T] {
 	out := Collection[T]{}
 	for _, model := range c {
@@ -317,7 +311,7 @@ func (c Collection[T]) Only(keys ...any) Collection[T] {
 	return out
 }
 
-// Except answers Collection::except: the models without these keys.
+// Except returns the models without these keys.
 func (c Collection[T]) Except(keys ...any) Collection[T] {
 	out := Collection[T]{}
 	for _, model := range c {
@@ -328,7 +322,7 @@ func (c Collection[T]) Except(keys ...any) Collection[T] {
 	return out
 }
 
-// MakeVisible answers Collection::makeVisible, on every model.
+// MakeVisible calls Model.MakeVisible on every model.
 func (c Collection[T]) MakeVisible(attributes ...string) Collection[T] {
 	for _, model := range c {
 		model.MakeVisible(attributes...)
@@ -336,7 +330,7 @@ func (c Collection[T]) MakeVisible(attributes ...string) Collection[T] {
 	return c
 }
 
-// MakeHidden answers Collection::makeHidden, on every model.
+// MakeHidden calls Model.MakeHidden on every model.
 func (c Collection[T]) MakeHidden(attributes ...string) Collection[T] {
 	for _, model := range c {
 		model.MakeHidden(attributes...)
@@ -344,7 +338,7 @@ func (c Collection[T]) MakeHidden(attributes ...string) Collection[T] {
 	return c
 }
 
-// SetVisible answers Collection::setVisible.
+// SetVisible calls Model.SetVisible on every model.
 func (c Collection[T]) SetVisible(visible ...string) Collection[T] {
 	for _, model := range c {
 		model.SetVisible(visible...)
@@ -352,7 +346,7 @@ func (c Collection[T]) SetVisible(visible ...string) Collection[T] {
 	return c
 }
 
-// SetHidden answers Collection::setHidden.
+// SetHidden calls Model.SetHidden on every model.
 func (c Collection[T]) SetHidden(hidden ...string) Collection[T] {
 	for _, model := range c {
 		model.SetHidden(hidden...)
@@ -360,7 +354,7 @@ func (c Collection[T]) SetHidden(hidden ...string) Collection[T] {
 	return c
 }
 
-// Append answers Collection::append, on every model.
+// Append calls Model.Append on every model.
 func (c Collection[T]) Append(attributes ...string) Collection[T] {
 	for _, model := range c {
 		model.Append(attributes...)
@@ -368,7 +362,7 @@ func (c Collection[T]) Append(attributes ...string) Collection[T] {
 	return c
 }
 
-// SetAppends answers Collection::setAppends.
+// SetAppends calls Model.SetAppends on every model.
 func (c Collection[T]) SetAppends(appends ...string) Collection[T] {
 	for _, model := range c {
 		model.SetAppends(appends...)
@@ -376,11 +370,10 @@ func (c Collection[T]) SetAppends(appends ...string) Collection[T] {
 	return c
 }
 
-// ToQuery answers Collection::toQuery: a query over exactly these rows.
+// ToQuery returns a query over exactly these rows.
 //
-// The PHP also refuses a collection of mixed classes; a Go collection cannot
-// hold two model types, so the only refusal left is the empty one -- with no
-// model there is no table to query.
+// A Go collection cannot hold two model types, so the only refusal is the
+// empty one -- with no model there is no table to query.
 func (c Collection[T]) ToQuery() (*Builder[T], error) {
 	first := c.First()
 	if first == nil {
@@ -389,7 +382,7 @@ func (c Collection[T]) ToQuery() (*Builder[T], error) {
 	return first.NewModelQuery().WhereKey(c.ModelKeys()), nil
 }
 
-// ToArray answers Collection::toArray.
+// ToArray returns every model, serialised.
 func (c Collection[T]) ToArray() []map[string]any {
 	out := make([]map[string]any, 0, len(c))
 	for _, model := range c {
@@ -398,8 +391,8 @@ func (c Collection[T]) ToArray() []map[string]any {
 	return out
 }
 
-// Push answers Model::push for every model, which is what makes a loaded
-// relation pushable. See Model.Push.
+// Push calls Model.Push on every model, which is what makes a loaded
+// relation pushable.
 func (c Collection[T]) Push(g auth.Grant) (bool, error) {
 	for _, model := range c {
 		pushed, err := model.Push(g)
@@ -410,60 +403,52 @@ func (c Collection[T]) Push(g auth.Grant) (bool, error) {
 	return true, nil
 }
 
-// NewCollection is HasCollection::newCollection.
+// NewCollection builds the Collection a query's models are handed back in.
 //
-// The PHP body resolves the collection class -- from a #[CollectedBy] attribute
-// or static::$collectionClass -- and then switches relationship autoloading on
-// when the strict flag asks for it. Go resolves no type from a name, and there
-// is no autoloading here (see the package comment on RULE 17), so what is left
-// of the body is the construction.
+// There is one collection type and no automatic relation loading, so this is the
+// construction and nothing else.
 func (m *Model[T]) NewCollection(models ...*Model[T]) Collection[T] {
 	return Collection[T](models)
 }
 
-// CountBy is Collection::countBy.
+// CountBy counts the models by the key countBy returns for each one.
 //
-// The PHP override exists to change the return type: counting models by
-// something gives a collection of counts, not of models. Here that is the type
-// of the result, so this is a function -- the key is the caller's, and Go names
-// it in the signature rather than discovering it at run time.
+// It is a function rather than a method because the result is a map keyed
+// by K, not a Collection[T]: the key type is the caller's, and Go names it
+// in the signature rather than discovering it at run time.
 func CountBy[T any, K comparable](c Collection[T], countBy func(model *Model[T], key int) K) map[K]int {
 	return collections.CountBy(c.ToBase(), countBy)
 }
 
-// Map is Collection::map.
+// Map returns the result of calling callback on every model, as a
+// collections.Collection[R].
 //
-// The PHP answers a base collection when the callback returned anything that is
-// not a Model, and the Eloquent collection when everything it returned was one.
-// The compiler makes that choice here: a callback returning *Model[T] gives back
-// exactly what Collection[T] holds, and any other R gives a collection of R.
+// The compiler decides the result type: a callback returning *Model[T]
+// gives back exactly what Collection[T] holds, and any other R gives a
+// collection of R.
 func Map[T, R any](c Collection[T], callback func(model *Model[T], key int) R) collections.Collection[R] {
 	return collections.Map(c.ToBase(), callback)
 }
 
-// MapWithKeys is Collection::mapWithKeys.
-//
-// PHP returns a single-entry array from the callback; Go returns the pair, which
-// is what hesape/collections does with the same method. See Map for the return
-// type.
+// MapWithKeys returns the key/value pairs callback returns for every model,
+// as a map. See Map for how the value type is decided.
 func MapWithKeys[T any, K comparable, V any](c Collection[T], callback func(model *Model[T], key int) (K, V)) map[K]V {
 	return collections.MapWithKeys(c.ToBase(), callback)
 }
 
-// Zip is Collection::zip.
+// Zip pairs up c with each of items, position by position.
 //
-// It is a function and not a method for the reason collections.Zip is one, and
-// because the PHP override is there only to say the result no longer holds
-// models -- which the type says here.
+// It is a function and not a method for the reason collections.Zip is one:
+// the result no longer holds models, which the return type already says.
 func Zip[T any](c Collection[T], items ...[]*Model[T]) collections.Collection[collections.Collection[*Model[T]]] {
 	return collections.Zip(c.ToBase(), items...)
 }
 
-// Flatten is Collection::flatten.
+// Flatten returns the same models as a collection of any.
 //
-// The models are the leaves -- a model is not a list -- so this is the same
-// models as a collection of any, which is what Arr::flatten answers there for
-// the same input. The depth is optional and unlimited when omitted, as in PHP.
+// The models are the leaves -- a model is not a list -- so flattening them
+// changes only the element type. The depth is optional and unlimited when
+// omitted.
 func (c Collection[T]) Flatten(depth ...int) collections.Collection[any] {
 	items := make(collections.Collection[any], 0, len(c))
 	for _, model := range c {
@@ -472,29 +457,23 @@ func (c Collection[T]) Flatten(depth ...int) collections.Collection[any] {
 	return collections.Flatten(items, depth...)
 }
 
-// Flip is Collection::flip: the models become the keys and their positions
-// become the values.
+// Flip returns the models as keys and their positions as values.
 //
 // The keys of a Collection[T] are positions, so flipping gives model to
-// position, and a model that repeats keeps the last position -- which is what
-// array_flip does there.
+// position, and a model that repeats keeps the last position.
 func (c Collection[T]) Flip() map[*Model[T]]int {
 	return collections.Flip(c.ToBase())
 }
 
-// Pad is Collection::pad.
+// Pad returns the models padded with value to size elements.
 //
-// A positive size pads on the right, a negative size on the left, and a size no
-// larger than the count returns the models unchanged. That is array_pad.
+// A positive size pads on the right, a negative size on the left, and a
+// size no larger than the count returns the models unchanged.
 func (c Collection[T]) Pad(size int, value *Model[T]) collections.Collection[*Model[T]] {
 	return c.ToBase().Pad(size, value)
 }
 
-// Partition is Collection::partition: the models passing the test, then the ones
-// failing it.
-//
-// The PHP returns a collection holding two collections; Go returns them as two
-// results, which is the same pair without the indexing.
+// Partition returns the models passing callback, then the ones failing it.
 func (c Collection[T]) Partition(callback func(model *Model[T], key int) bool) (passed, failed collections.Collection[*Model[T]]) {
 	return c.ToBase().Partition(callback)
 }

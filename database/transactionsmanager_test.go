@@ -24,9 +24,9 @@ func TestAfterCommitRunsOnlyWhenTheOutermostTransactionCommits(t *testing.T) {
 
 	manager.Commit("primary", 1, 0)
 
-	// Innermost first, which is the PHP's order and not the obvious one: the
-	// savepoint commit stages its record into the committed list before the
-	// outer one gets there, and the list is run in the order it was built.
+	// Innermost first, which is not the obvious order: the savepoint commit
+	// stages its record into the committed list before the outer one gets
+	// there, and the list is run in the order it was built.
 	if strings.Join(ran, ",") != "inner,outer" {
 		t.Fatalf("the callbacks ran as %v", ran)
 	}

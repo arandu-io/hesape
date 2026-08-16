@@ -15,12 +15,8 @@ import (
 // Only the one method the command calls is declared, and it is declared here
 // rather than imported, so the command compiles and is tested without the
 // package that builds brokers.
-//
-// Answers the part of Illuminate\Contracts\Auth\PasswordBrokerFactory this
-// command uses.
 type BrokerFactory interface {
-	// Broker is PasswordBrokerFactory::broker. The empty name means the default
-	// broker, which is what PHP's null argument means.
+	// Broker is the broker of that name. The empty name means the default one.
 	Broker(name string) (Broker, error)
 }
 
@@ -28,23 +24,16 @@ type BrokerFactory interface {
 // delivered, and redeems it when the person comes back with it. This command
 // resets nobody's password -- it needs the broker only to reach the store those
 // tokens sit in.
-//
-// Answers the part of Illuminate\Auth\Passwords\PasswordBroker this command
-// uses.
 type Broker interface {
-	// GetRepository is PasswordBroker::getRepository.
+	// GetRepository is where that broker keeps its tokens.
 	GetRepository() TokenRepository
 }
 
 // TokenRepository is where a broker keeps its reset tokens -- a database table
 // or a cache, depending on how the broker was built. This command needs one
 // thing of it: throw away the records whose lifetime has passed.
-//
-// Answers the part of Illuminate\Auth\Passwords\TokenRepositoryInterface this
-// command uses.
 type TokenRepository interface {
-	// DeleteExpired is TokenRepositoryInterface::deleteExpired. The context is
-	// the fifth mechanical change (see hesape/auth's contracts.go): it is a
+	// DeleteExpired sweeps those records. It takes a context because it is a
 	// DELETE against a table that can be large, and a command somebody stopped
 	// with ctrl-C must not leave one running.
 	DeleteExpired(ctx context.Context) error
@@ -57,23 +46,22 @@ type TokenRepository interface {
 // that grows for a year before anybody looks.
 var ErrNoBrokerFactory = errors.New("auth: auth:clear-resets has no password broker factory")
 
-// The name, signature and description of the command, which are PHP's
-// $signature and $description character for character.
+// The name, signature and description of the command.
 const (
-	// Name is the AsCommand attribute's name.
+	// Name is what the command is called on the command line.
 	Name = "auth:clear-resets"
-	// Signature is Command::$signature.
+	// Signature is that name with its one optional argument.
 	Signature = "auth:clear-resets {name? : The name of the password broker}"
-	// Description is Command::$description, lowercased to match the rest of the
-	// listing this console prints.
+	// Description is the line the listing shows, lowercased to match the rest of
+	// what this console prints.
 	Description = "flush expired password reset tokens"
 )
 
-// ClearResetsCommand is Illuminate\Auth\Console\ClearResetsCommand.
+// ClearResetsCommand deletes the password reset tokens whose lifetime has
+// passed.
 //
-// It deletes the password reset tokens whose lifetime has passed. Run it from
-// the scheduler; it is safe to run twice, and it takes no lock, because deleting
-// an already deleted row is nothing.
+// Run it from the scheduler; it is safe to run twice, and it takes no lock,
+// because deleting an already deleted row is nothing.
 type ClearResetsCommand struct {
 	brokers BrokerFactory
 }
@@ -85,8 +73,7 @@ func NewClearResetsCommand(brokers BrokerFactory) *ClearResetsCommand {
 
 // Command is the value the console registry takes.
 //
-// It has no counterpart in PHP, where a command IS a class and the application
-// finds it by scanning. hesape/console holds a slice of values instead, so that
+// Nothing is found by scanning: hesape/console holds a slice of values, so that
 // the listing and the compiler read the same registry -- see console.Command.
 func (c *ClearResetsCommand) Command() console.Command {
 	return console.Command{
@@ -96,18 +83,14 @@ func (c *ClearResetsCommand) Command() console.Command {
 	}
 }
 
-// Handle executes the console command.
+// Handle executes the console command: it finds the broker the name argument
+// picks and sweeps its expired tokens.
 //
-// It is ClearResetsCommand::handle:
+// The IO is the second parameter because a command holds no state of its own:
+// the arguments arrive with the run.
 //
-//	$this->laravel['auth.password']->broker($this->argument('name'))->getRepository()->deleteExpired();
-//	$this->components->info('Expired reset tokens cleared successfully.');
-//
-// The IO is the second parameter because PHP reads the argument off $this and Go
-// has no such state on the command: the arguments arrive with the run.
-//
-// PHP returns void and lets an exception become a non-zero exit. The error is
-// returned here, which is the same outcome through the console's own exit path.
+// A failure is returned rather than printed, and the console's own exit path
+// turns it into a non-zero status.
 func (c *ClearResetsCommand) Handle(ctx context.Context, o *console.IO) error {
 	if c.brokers == nil {
 		return ErrNoBrokerFactory

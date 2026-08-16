@@ -13,68 +13,60 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// The execution half of Illuminate\Database\Query\Builder, and the two
-// exception classes of Illuminate\Database that it raises.
+// The execution half of the query builder, and the errors it raises.
 //
-// The classes live in Illuminate\Database rather than in Query; they are
-// declared here for the reason the Connection interface is declared here --
-// database imports this package, so naming them there would close the cycle.
+// The errors are declared here for the reason the Connection interface is
+// declared here -- database imports this package, so naming them there would
+// close the cycle.
 var (
-	// ErrRecordNotFound answers Illuminate\Database\RecordNotFoundException,
-	// which FirstOrFail throws.
+	// ErrRecordNotFound is what FirstOrFail returns when nothing matched.
 	ErrRecordNotFound = errors.New("query: no record found for the given query")
 
-	// ErrRecordsNotFound answers Illuminate\Database\RecordsNotFoundException,
-	// which Sole throws when nothing matched.
+	// ErrRecordsNotFound is what Sole returns when nothing matched.
 	ErrRecordsNotFound = errors.New("query: no records found for the given query")
 
-	// ErrMultipleRecordsFound answers
-	// Illuminate\Database\MultipleRecordsFoundException, which Sole throws when
-	// more than one row matched. The message carries the count, as the PHP
-	// constructor does.
+	// ErrMultipleRecordsFound is what Sole returns when more than one row
+	// matched. The message carries the count.
 	ErrMultipleRecordsFound = errors.New("query: multiple records found")
 )
 
 // TenantColumn is the column every statement this package issues is filtered
 // by, and the column every row it writes carries.
 //
-// It is a constant and not a setting. RULE 14 says the tenant comes off the
-// Grant and from nowhere else; a per-query column name would be a second place
+// It is a constant and not a setting. The tenant comes off the Grant and from
+// nowhere else; a per-query column name would be a second place
 // for it to come from, and the query that got it wrong would still compile, still
 // run, and still return another customer's rows.
 const TenantColumn = "tenant_id"
 
 // GroupLimitRow is the alias the group-limit compilation gives its row-number
-// column. Get strips it out of every row, as the PHP's withoutGroupLimitKeys
-// does, because it is scaffolding of the query rather than data anybody asked
-// for.
+// column. Get strips it out of every row, because it is scaffolding of the
+// query rather than data anybody asked for.
 //
-// The PHP spells it laravel_row. It is exported here because the grammar that
-// emits the alias and the builder that strips it have to agree on one string,
-// and two spellings of it is a stray column in somebody's result set.
+// It is exported because the grammar that emits the alias and the builder that
+// strips it have to agree on one string, and two spellings of it is a stray
+// column in somebody's result set.
 const GroupLimitRow = "hesape_row"
 
 // GroupLimitGroup is the prefix of the user-variable assignment the MySQL
 // group-limit compilation puts in the select list, and the second key Get
-// strips. The PHP spells it "@laravel_group := ".
+// strips.
 const GroupLimitGroup = "@hesape_group := "
 
-// AffectingConnection is the part of Illuminate\Database\ConnectionInterface
-// that the write half of the builder reaches for and Connection does not
-// declare: affectingStatement, the statement that answers with a row count.
+// AffectingConnection is the part of a connection that the write half of the
+// builder reaches for and Connection does not declare: the statement that
+// returns a row count.
 //
-// A connection that does not implement it still works. Illuminate's
-// Connection::update is written as `return $this->affectingStatement($query,
-// $bindings)` -- the same call under a second name -- so Update is what the
+// A connection that does not implement it still works: Update is what the
 // fallback uses, and the count means the same thing.
 type AffectingConnection interface {
-	// AffectingStatement answers Connection::affectingStatement.
+	// AffectingStatement runs a statement and returns the number of rows
+	// affected.
 	AffectingStatement(query string, bindings []any) (int64, error)
 }
 
-// CursorConnection is the part of Illuminate\Database\ConnectionInterface that
-// Cursor needs: a select that yields its rows one at a time instead of
-// materialising them.
+// CursorConnection is the part of a connection that Cursor needs: a select that
+// yields its rows one at a time instead of materialising them.
 //
 // A connection that does not implement it makes Cursor fail rather than fall
 // back to a buffered select. The fallback would work and would be a lie: the
@@ -82,31 +74,30 @@ type AffectingConnection interface {
 // memory, and finding out by being killed is worse than finding out by an
 // error.
 type CursorConnection interface {
-	// Cursor answers Connection::cursor.
+	// Cursor runs a select and yields its rows one at a time.
 	Cursor(query string, bindings []any, useReadPDO bool) (func(yield func(Record, error) bool), error)
 }
 
-// PreparesBindings is Illuminate\Database\Connection::prepareBindings, which
-// turns a driver-specific value into one the driver accepts. ToRawSQL asks for
-// it, and takes the bindings unchanged from a connection that has no opinion.
+// PreparesBindings turns a driver-specific value into one the driver accepts.
+// ToRawSQL asks for it, and takes the bindings unchanged from a connection that
+// has no opinion.
 type PreparesBindings interface {
-	// PrepareBindings answers Connection::prepareBindings.
+	// PrepareBindings turns a driver-specific value into one the driver
+	// accepts.
 	PrepareBindings(bindings []any) []any
 }
 
 // scoped is the single door every statement in this package goes through.
 //
-// It answers no method of the PHP, because the PHP has nothing to answer: the
-// tenant is this framework's (RULE 14, RULE 17), and it is applied here, at the
-// last possible moment, so that no execution path can be written that skips it.
+// The tenant is applied here, at the last possible moment, so that no execution
+// path can be written that skips it.
 //
 // Three things happen, in this order.
 //
-// The context is checked. The Connection this package was handed is Illuminate's
-// ConnectionInterface, which has no context to carry a deadline into the driver,
-// so the whole of what a cancelled context can do is stop the statement from
-// being issued. That is checked once per execution, which means once per chunk
-// of a chunked walk.
+// The context is checked. The Connection this package was handed carries no
+// context into the driver, so the whole of what a cancelled context can do is
+// stop the statement from being issued. That is checked once per execution,
+// which means once per chunk of a chunked walk.
 //
 // The Grant is required to carry a tenant. auth.Tenant on the zero Grant, and on
 // a Grant that auth.SystemGrant refused, is the empty string -- and a Grant
@@ -229,8 +220,8 @@ func (b *Builder) scopeJoins(ctx context.Context, g auth.Grant) error {
 	return nil
 }
 
-// joinedTableName answers the name a joined table's columns are qualified by,
-// and whether there is one at all.
+// joinedTableName returns the name a joined table's columns are qualified
+// by, and whether there is one at all.
 //
 // The alias wins when the join declares one: `users as recent` is referred to
 // by the alias, and the real name resolves to nothing. An expression is not a
@@ -371,10 +362,9 @@ func (b *Builder) qualifyTenantColumn() string { return b.qualify(TenantColumn) 
 
 // qualify names a column on the table the query reads from.
 //
-// The alias wins when the table has one. The PHP's delete() writes the same
-// kind of qualification as `$this->from.'.id'`, which yields "users as u.id" on
-// an aliased table -- a wart this cannot afford to copy, because a tenant filter
-// that fails to compile is a query somebody deletes to make the build pass.
+// The alias wins when the table has one: `users as u` qualifies as `u.id`,
+// not `users as u.id` -- a tenant filter that fails to compile is a query
+// somebody deletes to make the build pass.
 //
 // A table that is an Expression gets the bare column: there is no name to
 // qualify with, and guessing one out of raw SQL is worse than not qualifying.
@@ -401,11 +391,9 @@ func describeTable(from any) string {
 	return "an unnamed table"
 }
 
-// runSelect answers Builder::runSelect.
+// runSelect runs the query's compiled select and returns its rows.
 //
-// The PHP passes $this->fetchUsing as a fourth argument, which is the argument
-// list of PDOStatement::fetchAll. There is no PDO here and no fetch mode to
-// choose: a row arrives as a Record either way.
+// There is no fetch mode to choose: a row arrives as a Record either way.
 func (b *Builder) runSelect() ([]Record, error) {
 	if b.Connection == nil {
 		return nil, errors.New("query: the builder has no connection to run against")
@@ -413,7 +401,7 @@ func (b *Builder) runSelect() ([]Record, error) {
 	return b.Connection.Select(b.ToSQL(), b.GetBindings(), !b.UsingWritePDO())
 }
 
-// affectingStatement runs a statement that answers with a row count, through
+// affectingStatement runs a statement that returns a row count, through
 // AffectingConnection when the connection has it and through Update when it
 // does not.
 func (b *Builder) affectingStatement(query string, bindings []any) (int64, error) {
@@ -426,15 +414,11 @@ func (b *Builder) affectingStatement(query string, bindings []any) (int64, error
 	return b.Connection.Update(query, bindings)
 }
 
-// Get answers Builder::get.
+// Get runs the query and returns its rows.
 //
-// The columns are variadic where the PHP defaults them to ['*'], and they only
-// apply when nothing was selected already -- the PHP's `$this->columns ??=`.
-//
-// The PHP saves $this->columns and puts it back at the end, because it selects
-// on the query it was called on. There is nothing to put back here: the tenant
-// clause is added to a copy, and the copy is what the columns are set on, so the
-// builder the caller holds is untouched either way.
+// The columns are variadic and default to every column; they only apply when
+// nothing was selected already. They are set on the scoped copy the tenant
+// clause is added to, so the builder the caller holds is never mutated.
 func (b *Builder) Get(ctx context.Context, g auth.Grant, columns ...any) ([]Record, error) {
 	query, err := b.scoped(ctx, g)
 	if err != nil {
@@ -457,8 +441,8 @@ func (b *Builder) Get(ctx context.Context, g auth.Grant, columns ...any) ([]Reco
 	return rows, nil
 }
 
-// withoutGroupLimitKeys answers Builder::withoutGroupLimitKeys: it drops the
-// bookkeeping columns a group limit adds to the select list.
+// withoutGroupLimitKeys drops the bookkeeping columns a group limit adds to
+// the select list.
 func withoutGroupLimitKeys(query *Builder, rows []Record) []Record {
 	remove := []string{GroupLimitRow}
 	if limit := query.GetGroupLimit(); limit != nil && limit.Column != "" {
@@ -478,8 +462,8 @@ func withoutGroupLimitKeys(query *Builder, rows []Record) []Record {
 	return rows
 }
 
-// wrapColumns answers Arr::wrap on the argument of get(), pluck() and their
-// kind: no columns at all means every column.
+// wrapColumns normalizes the columns argument of Get, Pluck and their kind:
+// no columns at all means every column.
 func wrapColumns(columns []any) []any {
 	if len(columns) == 0 {
 		return []any{"*"}
@@ -487,10 +471,10 @@ func wrapColumns(columns []any) []any {
 	return columns
 }
 
-// First answers Concerns\BuildsQueries::first.
+// First returns the first row the query matches, or nil if none did.
 //
-// A nil Record is the PHP's null: no row matched. The error is for a statement
-// that failed, which is a different outcome and reads differently at the call
+// A nil Record means no row matched. The error is for a statement that
+// failed, which is a different outcome and reads differently at the call
 // site.
 func (b *Builder) First(ctx context.Context, g auth.Grant, columns ...any) (Record, error) {
 	rows, err := b.Limit(1).Get(ctx, g, columns...)
@@ -503,11 +487,11 @@ func (b *Builder) First(ctx context.Context, g auth.Grant, columns ...any) (Reco
 	return rows[0], nil
 }
 
-// FirstOrFail answers Concerns\BuildsQueries::firstOrFail.
+// FirstOrFail returns the first row the query matches, or an error if none
+// did.
 //
-// The PHP takes an optional message and throws RecordNotFoundException with it.
-// Here the message is a variadic string wrapping ErrRecordNotFound, so
-// errors.Is still recognises it however it was worded.
+// The message is a variadic string wrapping ErrRecordNotFound, so errors.Is
+// still recognises it however it was worded.
 func (b *Builder) FirstOrFail(ctx context.Context, g auth.Grant, columns []any, message ...string) (Record, error) {
 	row, err := b.First(ctx, g, columns...)
 	if err != nil {
@@ -522,12 +506,13 @@ func (b *Builder) FirstOrFail(ctx context.Context, g auth.Grant, columns []any, 
 	return nil, ErrRecordNotFound
 }
 
-// FirstOr answers Eloquent\Builder::firstOr, the sibling of FindOr.
+// FirstOr returns the first row the query matches, or the result of callback
+// if none did. It is the sibling of FindOr, spelled out here as well so that
+// the two read the same and a caller who reaches for one finds the other.
 //
-// Query\Builder has findOr and not firstOr; the pair is spelled out here so that
-// the two read the same, and because a caller who reached for one looks for the
-// other. The PHP's TValue is a Record: a method in Go cannot take a type
-// parameter of its own.
+// The result is a Record rather than a type parameter of the callback's own
+// choosing: a method cannot declare type parameters beyond what its receiver
+// already has, and *Builder has none.
 func (b *Builder) FirstOr(ctx context.Context, g auth.Grant, columns []any, callback func() (Record, error)) (Record, error) {
 	row, err := b.First(ctx, g, columns...)
 	if err != nil {
@@ -542,21 +527,16 @@ func (b *Builder) FirstOr(ctx context.Context, g auth.Grant, columns []any, call
 	return callback()
 }
 
-// Find answers Builder::find.
+// Find adds an id filter and returns the first matching row.
 //
-// It adds the where to the builder it is called on, as the PHP does, so calling
-// it twice with two ids asks for a row that is both.
+// It adds the where to the builder it is called on, so calling it twice with
+// two ids asks for a row that is both.
 func (b *Builder) Find(ctx context.Context, g auth.Grant, id any, columns ...any) (Record, error) {
 	return b.Where("id", "=", id).First(ctx, g, columns...)
 }
 
-// FindOr answers Builder::findOr.
-//
-// The PHP's first argument may be the callback, because PHP can tell a Closure
-// from an array at run time and reorder its own arguments. Here the two are
-// separate parameters, and the columns may be nil.
-//
-// TValue is a Record for the reason FirstOr's is.
+// FindOr adds an id filter and returns the first matching row, or the
+// result of callback if none matched. The columns may be nil.
 func (b *Builder) FindOr(ctx context.Context, g auth.Grant, id any, columns []any, callback func() (Record, error)) (Record, error) {
 	row, err := b.Find(ctx, g, id, columns...)
 	if err != nil {
@@ -571,10 +551,11 @@ func (b *Builder) FindOr(ctx context.Context, g auth.Grant, id any, columns []an
 	return callback()
 }
 
-// Sole answers Concerns\BuildsQueries::sole.
+// Sole returns the query's only matching row, and errors if there is not
+// exactly one.
 //
 // It reads two rows to find out whether there is more than one, and reports
-// ErrRecordsNotFound or ErrMultipleRecordsFound where the PHP throws.
+// ErrRecordsNotFound or ErrMultipleRecordsFound.
 func (b *Builder) Sole(ctx context.Context, g auth.Grant, columns ...any) (Record, error) {
 	rows, err := b.Limit(2).Get(ctx, g, columns...)
 	if err != nil {
@@ -590,12 +571,12 @@ func (b *Builder) Sole(ctx context.Context, g auth.Grant, columns ...any) (Recor
 	}
 }
 
-// Value answers Builder::value.
+// Value returns the value of column from the query's first matching row.
 //
-// The PHP casts the row to an array and takes array_first of it. A Record is a
-// map and a map has no first, so the value is the only one when the row holds
-// one, and otherwise the one under the column's own name -- with the table
-// qualifier and the alias stripped, which is what the driver keys it by.
+// A Record is a map and a map has no first, so the value is the only one when
+// the row holds one, and otherwise the one under the column's own name --
+// with the table qualifier and the alias stripped, which is what the driver
+// keys it by.
 func (b *Builder) Value(ctx context.Context, g auth.Grant, column any) (any, error) {
 	row, err := b.First(ctx, g, column)
 	if err != nil {
@@ -604,12 +585,12 @@ func (b *Builder) Value(ctx context.Context, g auth.Grant, column any) (any, err
 	return firstValue(row, column), nil
 }
 
-// RawValue answers Builder::rawValue.
+// RawValue returns the value of a raw expression from the query's first
+// matching row.
 //
 // Alias the expression -- rawValue("count(*) as total") -- when the query
-// already selects something. The PHP takes the first column of the row, and the
-// first column of a Go map is not a thing; the alias is the name the value is
-// found under.
+// already selects something: a Go map has no first column, so the alias is
+// the name the value is found under.
 func (b *Builder) RawValue(ctx context.Context, g auth.Grant, expression string, bindings ...any) (any, error) {
 	row, err := b.SelectRaw(expression, bindings...).First(ctx, g)
 	if err != nil {
@@ -618,7 +599,8 @@ func (b *Builder) RawValue(ctx context.Context, g auth.Grant, expression string,
 	return firstValue(row, expression), nil
 }
 
-// SoleValue answers Builder::soleValue.
+// SoleValue returns the value of column from the query's only matching row,
+// erroring as Sole does if there is not exactly one.
 func (b *Builder) SoleValue(ctx context.Context, g auth.Grant, column any) (any, error) {
 	row, err := b.Sole(ctx, g, column)
 	if err != nil {
@@ -627,8 +609,8 @@ func (b *Builder) SoleValue(ctx context.Context, g auth.Grant, column any) (any,
 	return firstValue(row, column), nil
 }
 
-// firstValue is the PHP's array_first over a row, for a Record that has no
-// order to be first in. See Value.
+// firstValue returns the one value of a row that holds exactly one, or the
+// value under column's own name otherwise. See Value.
 func firstValue(row Record, column any) any {
 	if len(row) == 0 {
 		return nil
@@ -644,17 +626,12 @@ func firstValue(row Record, column any) any {
 	return nil
 }
 
-// Pluck answers Builder::pluck.
+// Pluck returns the values of column across every matching row, in row
+// order, and -- only when a key column is named -- the same values keyed by
+// it. keyed is nil when no key column was given.
 //
-// The PHP returns a Collection that is a list when no key column is given and a
-// map keyed by that column when one is. A Go function has one return type, so
-// both come back: the values in row order, and -- only when a key was named --
-// the same values under it. keyed is nil otherwise, which is the difference the
-// PHP expresses by the shape of the Collection.
-//
-// The keys are strings. PHP array keys are int or string and everything else
-// becomes one on the way in; formatting them here is that same coercion, in the
-// one place it can be seen.
+// The keys are always strings: a key value is formatted to a string on the
+// way in, whatever type it arrived as.
 func (b *Builder) Pluck(ctx context.Context, g auth.Grant, column any, key ...any) (values []any, keyed map[string]any, err error) {
 	var keyColumn any
 	if len(key) > 0 {
@@ -685,8 +662,8 @@ func (b *Builder) Pluck(ctx context.Context, g auth.Grant, column any, key ...an
 	}
 
 	// A qualified or aliased column cannot be read out of a row: the driver
-	// keys the row by the column itself. The PHP strips the table here for the
-	// same reason.
+	// keys the row by the column itself, so the table qualifier is stripped
+	// here before the row is read.
 	name := stripTableForPluck(column)
 	keyName := ""
 	if keyColumn != nil {
@@ -695,10 +672,9 @@ func (b *Builder) Pluck(ctx context.Context, g auth.Grant, column any, key ...an
 	return pluckFromColumn(rows, name, keyName)
 }
 
-// pluckFromColumn answers Builder::pluckFromObjectColumn and
-// Builder::pluckFromArrayColumn, which are one function here because a Record
-// is always a map: PHP has the pair because a row may arrive as a stdClass or
-// as an array, depending on the fetch mode.
+// pluckFromColumn reads column (and, if key is given, key) out of every row,
+// returning the values in row order and, when key was given, the same values
+// keyed by it. A Record is always a map, so there is only the one function.
 func pluckFromColumn(rows []Record, column, key string) ([]any, map[string]any, error) {
 	values := make([]any, 0, len(rows))
 	var keyed map[string]any
@@ -714,8 +690,8 @@ func pluckFromColumn(rows []Record, column, key string) ([]any, map[string]any, 
 	return values, keyed, nil
 }
 
-// stripTableForPluck answers Builder::stripTableForPluck: it takes the last
-// segment after " as ", or after the dots when there is no alias.
+// stripTableForPluck takes the last segment of column after " as ", or after
+// the dots when there is no alias.
 func stripTableForPluck(column any) string {
 	if column == nil {
 		return ""
@@ -730,7 +706,8 @@ func stripTableForPluck(column any) string {
 	return name
 }
 
-// Implode answers Builder::implode.
+// Implode plucks column across every matching row and joins the values with
+// glue.
 func (b *Builder) Implode(ctx context.Context, g auth.Grant, column any, glue string) (string, error) {
 	values, _, err := b.Pluck(ctx, g, column)
 	if err != nil {
@@ -743,7 +720,7 @@ func (b *Builder) Implode(ctx context.Context, g auth.Grant, column any, glue st
 	return strings.Join(parts, glue), nil
 }
 
-// Exists answers Builder::exists.
+// Exists reports whether the query matches at least one row.
 //
 // It compiles to the grammar's exists statement -- a select wrapped so the
 // engine can stop at the first row -- rather than counting.
@@ -768,7 +745,7 @@ func (b *Builder) Exists(ctx context.Context, g auth.Grant) (bool, error) {
 	return truthy(rows[0]["exists"]), nil
 }
 
-// DoesntExist answers Builder::doesntExist.
+// DoesntExist reports whether the query matches no rows.
 func (b *Builder) DoesntExist(ctx context.Context, g auth.Grant) (bool, error) {
 	exists, err := b.Exists(ctx, g)
 	if err != nil {
@@ -777,12 +754,12 @@ func (b *Builder) DoesntExist(ctx context.Context, g auth.Grant) (bool, error) {
 	return !exists, nil
 }
 
-// ExistsOr answers Builder::existsOr: it runs the callback when nothing exists.
+// ExistsOr reports whether the query matches at least one row, running
+// callback when it does not.
 //
-// The PHP returns true or whatever the callback returned. Here the bool is the
-// answer to the question -- did rows exist -- and the callback contributes only
-// its error, because a callback that returned a value would have to return the
-// same type as `true`.
+// The bool is the answer to the question -- did rows exist -- and the callback
+// contributes only its error, because a callback that returned a value would
+// have to return the same type as `true`.
 func (b *Builder) ExistsOr(ctx context.Context, g auth.Grant, callback func() error) (bool, error) {
 	exists, err := b.Exists(ctx, g)
 	if err != nil {
@@ -797,8 +774,8 @@ func (b *Builder) ExistsOr(ctx context.Context, g auth.Grant, callback func() er
 	return false, callback()
 }
 
-// DoesntExistOr answers Builder::doesntExistOr: it runs the callback when rows
-// do exist. The bool is read as ExistsOr's is.
+// DoesntExistOr reports whether the query matches no rows, running callback
+// when rows do exist. The bool is read as ExistsOr's is.
 func (b *Builder) DoesntExistOr(ctx context.Context, g auth.Grant, callback func() error) (bool, error) {
 	doesntExist, err := b.DoesntExist(ctx, g)
 	if err != nil {
@@ -813,12 +790,12 @@ func (b *Builder) DoesntExistOr(ctx context.Context, g auth.Grant, callback func
 	return false, callback()
 }
 
-// ToRawSQL answers Builder::toRawSql: the statement with the bindings written
-// into it, for reading rather than for running.
+// ToRawSQL returns the statement with the bindings written into it, for
+// reading rather than for running.
 //
 // It carries an error because escaping a value needs a connection to escape
-// through, and Grammar.Escape reports that rather than handing back a value that
-// looks quoted and is not.
+// through, and Grammar.Escape reports that rather than handing back a value
+// that looks quoted and is not.
 //
 // It takes the Grant because what it prints has to be what would run, tenant
 // clause and all. A raw SQL dump that showed a query without its tenant filter
@@ -836,13 +813,11 @@ func (b *Builder) ToRawSQL(ctx context.Context, g auth.Grant) (string, error) {
 	return substituteBindingsIntoRawSQL(query.Grammar, sql, bindings)
 }
 
-// DumpRawSQL answers Builder::dumpRawSql.
+// DumpRawSQL writes the statement with its bindings substituted in.
 //
-// The PHP's dump() writes through the container's dumper to whatever is
-// rendering the response. There is no container (ADR 0001), so the destination
-// is an argument, and a failed substitution is written out too -- a dump that
-// printed nothing and returned would be the least helpful debugging tool there
-// is.
+// The destination is an argument, and a failed substitution is written out too
+// -- a dump that printed nothing and returned would be the least helpful
+// debugging tool there is.
 func (b *Builder) DumpRawSQL(ctx context.Context, g auth.Grant, w io.Writer) *Builder {
 	sql, err := b.ToRawSQL(ctx, g)
 	if err != nil {
@@ -853,8 +828,8 @@ func (b *Builder) DumpRawSQL(ctx context.Context, g auth.Grant, w io.Writer) *Bu
 	return b
 }
 
-// substituteBindingsIntoRawSQL answers
-// Query\Grammars\Grammar::substituteBindingsIntoRawSql.
+// substituteBindingsIntoRawSQL writes sql with each placeholder replaced by
+// its escaped binding, in order.
 //
 // It walks the statement rather than replacing every "?", because a "?" inside a
 // string literal is a character and not a placeholder, and Postgres has
@@ -905,23 +880,22 @@ func substituteBindingsIntoRawSQL(grammar Grammar, sql string, bindings []any) (
 	return out.String(), nil
 }
 
-// Raw answers Builder::raw.
+// Raw returns value wrapped as an Expression.
 //
-// The PHP asks the connection for the expression so a connection can subclass
-// it. Nothing here does, and Raw is the package function that builds one.
+// It is a method on Builder for symmetry with the fluent chain; Raw is the
+// package function that actually builds one.
 func (b *Builder) Raw(value any) Expression { return Raw(value) }
 
-// CastBinding answers Builder::castBinding.
+// CastBinding returns value unchanged.
 //
-// The PHP unwraps a backed enum into its scalar. Go's answer to a backed enum is
-// a named type over a scalar, which the driver already sees as the scalar, so
-// there is nothing to unwrap and the value passes through. It stays because it
-// is the one place a future cast would go, and because a caller looking for it
-// should find it rather than conclude it is missing.
+// A named type over a scalar is already seen by the driver as the scalar, so
+// there is nothing to unwrap. It stays because it is the one place a future
+// cast would go, and because a caller looking for it should find it rather
+// than conclude it is missing.
 func (b *Builder) CastBinding(value any) any { return value }
 
-// CleanBindings answers Builder::cleanBindings: it drops the expressions, which
-// were compiled into the statement and have no placeholder to fill.
+// CleanBindings drops the expressions from bindings, which were compiled
+// into the statement and have no placeholder to fill.
 func (b *Builder) CleanBindings(bindings []any) []any {
 	out := make([]any, 0, len(bindings))
 	for _, binding := range bindings {
@@ -933,8 +907,7 @@ func (b *Builder) CleanBindings(bindings []any) []any {
 	return out
 }
 
-// Tap answers Concerns\BuildsQueries::tap: it hands the query to the callback
-// and returns the query.
+// Tap hands the query to callback and returns the query.
 func (b *Builder) Tap(callback func(*Builder)) *Builder {
 	if callback != nil {
 		callback(b)
@@ -942,11 +915,8 @@ func (b *Builder) Tap(callback func(*Builder)) *Builder {
 	return b
 }
 
-// Pipe answers Concerns\BuildsQueries::pipe.
-//
-// The PHP returns what the callback returned, or $this when it returned null.
-// The callback here returns a builder or nil, which is the same rule with the
-// type written down.
+// Pipe hands the query to callback, and returns what callback returned, or
+// the query itself if callback returned nil.
 func (b *Builder) Pipe(callback func(*Builder) *Builder) *Builder {
 	if callback == nil {
 		return b
@@ -957,9 +927,9 @@ func (b *Builder) Pipe(callback func(*Builder) *Builder) *Builder {
 	return b
 }
 
-// truthy reads the driver's answer to a yes-or-no column. The engines disagree:
-// a bool, a 0 or 1, a "t", a "true" and the bytes of any of those all mean the
-// same thing, and PHP's (bool) cast flattens them in one place.
+// truthy reads the driver's answer to a yes-or-no column. The engines
+// disagree: a bool, a 0 or 1, a "t", a "true" and the bytes of any of those
+// all mean the same thing, and this is the one place that gets flattened.
 func truthy(value any) bool {
 	switch v := value.(type) {
 	case nil:
@@ -1033,13 +1003,13 @@ func parseNumber(value string) (float64, bool) {
 	return number, true
 }
 
-// sortedKeys is the ksort every insert and update goes through.
+// sortedKeys returns the keys of values, sorted, so that every row of a
+// batch lists its columns in the same order as the first.
 //
-// PHP sorts the keys of each row so that every row of a batch lists its columns
-// in the same order as the first. A Go map has no order at all, so the sort is
-// not a normalisation here but the only thing that makes the statement
-// reproducible -- and the contract the grammar compiles against: the columns are
-// the sorted keys, and the bindings arrive in that same order.
+// A Go map has no order at all, so the sort is not a normalisation here but
+// the only thing that makes the statement reproducible -- and the contract
+// the grammar compiles against: the columns are the sorted keys, and the
+// bindings arrive in that same order.
 func sortedKeys(values map[string]any) []string {
 	return slices.Sorted(maps.Keys(values))
 }

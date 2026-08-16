@@ -4,17 +4,15 @@ import (
 	"github.com/arandu-io/hesape/support/arr"
 )
 
-// Sequence answers Illuminate\Database\Eloquent\Factories\Sequence.
-//
-// It is the state that changes on every model the factory makes: the first
+// Sequence is the state that changes on every model the factory makes: the first
 // gets the first element, the second the second, and the run wraps round when
 // the elements are exhausted. That wrap is the whole behaviour -- a sequence of
 // two applied to a count of five gives 1, 2, 1, 2, 1 -- and it is what a test
 // that seeds "one admin and the rest members" relies on.
 //
 // An element is either a map of attributes or a func(*Sequence, map[string]any,
-// Model) any that returns one, which is PHP's value() helper applied to the
-// element with the sequence, the attributes so far and the parent.
+// Model) any that returns one, called with the sequence, the attributes so far
+// and the parent.
 type Sequence struct {
 	// sequence is Sequence::$sequence. Unexported because PHP declares both a
 	// $count property and a count() method, and Go has one namespace for the
@@ -61,8 +59,7 @@ func (s *Sequence) Invoke(attributes map[string]any, parent Model) any {
 	return value
 }
 
-// CrossJoinSequence answers
-// Illuminate\Database\Eloquent\Factories\CrossJoinSequence.
+// CrossJoinSequence is the cross join of several sequences.
 //
 // It adds a constructor to Sequence and nothing else: the cross join of two
 // sequences of two is a sequence of four, each element the two merged. Three

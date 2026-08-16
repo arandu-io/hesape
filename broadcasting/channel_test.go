@@ -36,8 +36,8 @@ func grantWithoutTenant(t *testing.T) auth.Grant {
 	return g
 }
 
-// RULE 14. The tenant in a published channel name comes off the Grant, and two
-// tenants asking for the same channel are on two channels.
+// The tenant in a published channel name comes off the Grant, and two tenants
+// asking for the same channel are on two channels.
 func TestTheTenantInAChannelNameComesFromTheGrant(t *testing.T) {
 	channel := broadcasting.NewPrivateChannel("orders.17")
 
@@ -104,7 +104,7 @@ func TestAChannelNameMayNotCarryATenant(t *testing.T) {
 
 // RequestedChannel is where the one untrusted string in this package arrives. A
 // client that names a tenant is refused: naming the tenant is choosing whose
-// events you hear (RULE 14).
+// events you hear.
 func TestAClientMayNotNameATenant(t *testing.T) {
 	requested, err := broadcasting.RequestedChannel("private-orders.17")
 	if err != nil {

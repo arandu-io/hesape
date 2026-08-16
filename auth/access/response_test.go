@@ -169,7 +169,7 @@ func TestHandlesAuthorizationDeniesFromAPolicyThatEmbedsIt(t *testing.T) {
 		t.Fatalf("DenyWithStatus = %v, status %v", teapot.ToArray(), teapot.Status())
 	}
 
-	// Gate uses the trait too, exactly as the PHP class does.
+	// Gate embeds HandlesAuthorization too.
 	if !access.NewGate().DenyAsNotFound("", nil).Denied() {
 		t.Fatal("the Gate does not carry the trait")
 	}

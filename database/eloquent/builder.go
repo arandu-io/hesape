@@ -11,11 +11,10 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// Builder answers Illuminate\Database\Eloquent\Builder: the query builder that
-// hands back models instead of rows.
+// Builder is the query builder that hands back models instead of rows.
 //
 // Everything that runs takes an auth.Grant and filters by auth.Tenant(g) --
-// reads exactly like writes (RULE 17). Everything that only builds does not: a
+// reads exactly like writes. Everything that only builds does not: a
 // Where or an OrderBy is a fragment of SQL, and a fragment authorizes nothing.
 type Builder[T any] struct {
 	query *query.Builder
@@ -42,11 +41,10 @@ type Builder[T any] struct {
 
 	// err is what a builder method could not report.
 	//
-	// PHP throws RelationNotFoundException while the query is being built. A Go
-	// method that returned an error could not be chained, and a chain that has to
-	// be broken every second call is a chain nobody writes -- so the error is
-	// held and returned by the first method that runs. Nothing is ever executed
-	// with an error waiting.
+	// A method that returned an error could not be chained, and a chain that
+	// has to be broken every second call is a chain nobody writes -- so the
+	// error is held and returned by the first method that runs. Nothing is
+	// ever executed with an error waiting.
 	err error
 }
 
@@ -59,63 +57,63 @@ func (b *Builder[T]) fail(err error) *Builder[T] {
 	return b
 }
 
-// NewBuilder answers Builder::__construct. The model comes after, through
-// SetModel, exactly as it does there.
+// NewBuilder creates a Builder for q. The model is attached afterward,
+// through SetModel.
 func NewBuilder[T any](q *query.Builder) *Builder[T] {
 	return &Builder[T]{query: q, eagerLoad: map[string]func(*query.Builder){}}
 }
 
-// NewEloquentBuilder answers Model::newEloquentBuilder.
+// NewEloquentBuilder returns the Builder used for m's queries.
 //
-// The PHP body picks the builder class: the one named by a #[UseEloquentBuilder]
-// attribute on the model, or static::$builder. Go resolves no type from a name
-// in an attribute, and a model that wants a wider query writes a type that
-// embeds Builder[T] and overrides this. It does not set the model, because
-// newModelQuery does that after, as there.
+// A model that wants a wider query writes a type that embeds Builder[T] and
+// overrides this method. It does not set the model, because NewModelQuery
+// does that afterward.
 func (m *Model[T]) NewEloquentBuilder(q *query.Builder) *Builder[T] {
 	return NewBuilder[T](q)
 }
 
-// NewBaseQueryBuilder answers Model::newBaseQueryBuilder.
+// NewBaseQueryBuilder returns a plain query.Builder scoped to m's table, with
+// no model-level behavior attached.
 func (m *Model[T]) NewBaseQueryBuilder() *query.Builder {
 	q := query.NewBuilder(m.Connection, m.Grammar, m.Processor)
 	q.From(m.GetTable())
 	return q
 }
 
-// NewModelQuery answers Model::newModelQuery: a builder with no global scopes
-// and no eager loads.
+// NewModelQuery returns a builder with no global scopes and no eager loads.
 func (m *Model[T]) NewModelQuery() *Builder[T] {
 	return m.NewEloquentBuilder(m.NewBaseQueryBuilder()).SetModel(m)
 }
 
-// NewQuery answers Model::newQuery: the model's query with its global scopes on.
+// NewQuery returns the model's query with its global scopes on.
 func (m *Model[T]) NewQuery() *Builder[T] {
 	return m.RegisterGlobalScopes(m.NewQueryWithoutScopes())
 }
 
-// Query answers Model::query. In PHP it is the static form of newQuery; a Go
-// generic type has no statics, so the two are the same call on the model the
-// application built.
+// Query returns the model's query with its global scopes on -- the same as
+// NewQuery. Go has no static form of a generic method, so there is only one
+// way to ask a model for its query.
 func (m *Model[T]) Query() *Builder[T] { return m.NewQuery() }
 
-// NewQueryWithoutScopes answers Model::newQueryWithoutScopes.
+// NewQueryWithoutScopes returns a builder for m with no global scopes
+// applied.
 func (m *Model[T]) NewQueryWithoutScopes() *Builder[T] { return m.NewModelQuery() }
 
-// NewQueryWithoutRelationships answers Model::newQueryWithoutRelationships.
+// NewQueryWithoutRelationships returns the model's query with its global
+// scopes on.
 func (m *Model[T]) NewQueryWithoutRelationships() *Builder[T] {
 	return m.RegisterGlobalScopes(m.NewModelQuery())
 }
 
-// NewQueryWithoutScope answers Model::newQueryWithoutScope.
+// NewQueryWithoutScope returns the model's query with its global scopes on,
+// except the one named by identifier.
 func (m *Model[T]) NewQueryWithoutScope(identifier string) *Builder[T] {
 	return m.NewQuery().WithoutGlobalScope(identifier)
 }
 
-// On answers Model::on: the same query, on another connection.
+// On returns the model's query, run against another connection.
 //
-// The PHP takes the connection's name and resolves it; with no resolver
-// (ADR 0001) the connection comes with the name.
+// The connection comes with the name: there is no resolver to look one up in.
 func (m *Model[T]) On(name string, connection query.Connection) *Builder[T] {
 	instance, err := m.NewInstance(nil, false)
 	if err != nil {
@@ -126,11 +124,12 @@ func (m *Model[T]) On(name string, connection query.Connection) *Builder[T] {
 	return instance.SetConnection(name, connection).NewQuery()
 }
 
-// RegisterGlobalScopes answers Model::registerGlobalScopes.
+// RegisterGlobalScopes copies the model's global scopes onto b, and returns
+// b.
 //
-// It also registers the SoftDeletingScope when the model soft deletes, which in
-// PHP is what the trait's bootSoftDeletes does at class boot. A Go value has no
-// boot, so the registration happens where the scopes are collected.
+// It also registers the SoftDeletingScope when the model soft deletes. A
+// model has no construction-time hook to do this once up front, so the
+// registration happens here, every time the scopes are collected.
 func (m *Model[T]) RegisterGlobalScopes(b *Builder[T]) *Builder[T] {
 	if m.SoftDeletes && !m.HasGlobalScope(SoftDeletingScopeName) {
 		m.AddGlobalScope(SoftDeletingScopeName, &SoftDeletingScope[T]{})
@@ -141,35 +140,35 @@ func (m *Model[T]) RegisterGlobalScopes(b *Builder[T]) *Builder[T] {
 	return b
 }
 
-// All answers Model::all.
+// All returns every row of the model's table, subject to its global scopes.
 func (m *Model[T]) All(g auth.Grant, columns ...any) (Collection[T], error) {
 	return m.NewQuery().Get(g, columns...)
 }
 
-// SetModel answers Builder::setModel.
+// SetModel attaches model to b, and points the query at its table.
 func (b *Builder[T]) SetModel(model *Model[T]) *Builder[T] {
 	b.model = model
 	b.query.From(model.GetTable())
 	return b
 }
 
-// GetModel answers Builder::getModel.
+// GetModel returns the model this builder queries.
 func (b *Builder[T]) GetModel() *Model[T] { return b.model }
 
-// GetQuery answers Builder::getQuery: the underlying query builder.
+// GetQuery returns the underlying query.Builder.
 func (b *Builder[T]) GetQuery() *query.Builder { return b.query }
 
-// SetQuery answers Builder::setQuery.
+// SetQuery replaces the underlying query.Builder.
 func (b *Builder[T]) SetQuery(q *query.Builder) *Builder[T] {
 	b.query = q
 	return b
 }
 
-// ToBase answers Builder::toBase: the query builder with the scopes applied.
+// ToBase returns the underlying query.Builder with the scopes applied.
 //
-// It takes the Grant because applying the scopes is also where the tenant filter
-// goes on, and a base builder handed out without it is a query somebody will run
-// (RULE 17).
+// It takes the Grant because applying the scopes is also where the tenant
+// filter goes on, and a base builder handed out without it is a query
+// somebody will run.
 func (b *Builder[T]) ToBase(g auth.Grant) (*query.Builder, error) {
 	prepared, err := b.prepare(g)
 	if err != nil {
@@ -178,10 +177,11 @@ func (b *Builder[T]) ToBase(g auth.Grant) (*query.Builder, error) {
 	return prepared.query, nil
 }
 
-// Qualify answers Builder::qualifyColumn.
+// Qualify returns column qualified with the model's table.
 func (b *Builder[T]) Qualify(column string) string { return b.model.QualifyColumn(column) }
 
-// NewModelInstance answers Builder::newModelInstance.
+// NewModelInstance returns a new, unsaved model of the builder's type, with
+// attributes merged over any pending attributes from WithAttributes.
 func (b *Builder[T]) NewModelInstance(attributes map[string]any) (*Model[T], error) {
 	merged := copyMap(b.pendingAttributes)
 	for key, value := range attributes {
@@ -190,17 +190,15 @@ func (b *Builder[T]) NewModelInstance(attributes map[string]any) (*Model[T], err
 	return b.model.NewInstance(merged, false)
 }
 
-// WithAttributes answers Builder::withAttributes: values that filter the query
-// and then fill whatever the query creates.
+// WithAttributes records values that filter the query and then fill whatever
+// the query creates.
 //
-// asConditions is the PHP's third argument, defaulting to true, which Go spells
-// as a variadic nobody passes. Passing false keeps the values for
-// NewModelInstance without adding the where clauses -- which is what a relation
-// does with the foreign key it already constrained by another route.
+// asConditions defaults to true; passing false keeps the values for
+// NewModelInstance without adding the where clauses -- which is what a
+// relation does with a foreign key it already constrained another way.
 //
-// The single-column form of the PHP -- withAttributes('type', 'post') -- is not
-// a second method here: a map with one entry is that call, and PHP only needs
-// the pair because its arrays are its maps.
+// There is no separate single-column form: a map with one entry is that
+// call.
 func (b *Builder[T]) WithAttributes(attributes map[string]any, asConditions ...bool) *Builder[T] {
 	if optionalBool(asConditions) {
 		for _, column := range sortedKeys(attributes) {
@@ -216,15 +214,13 @@ func (b *Builder[T]) WithAttributes(attributes map[string]any, asConditions ...b
 	return b
 }
 
-// WithSavepointIfNeeded answers Builder::withSavepointIfNeeded: the callback
-// runs inside a savepoint when a transaction is already open, and plainly when
-// none is.
+// WithSavepointIfNeeded runs scope inside a savepoint when a transaction is
+// already open, and plainly when none is.
 //
-// The PHP asks the connection for its transaction level. query.Connection does
-// not declare one -- see Transactor for why this component does not widen it --
-// so the capability is asked for by assertion, and a connection that cannot
-// answer runs the callback as if no transaction were open, which is what a
-// level of zero means.
+// query.Connection does not declare a transaction level -- see Transactor
+// for why this component does not widen it -- so the capability is asked for
+// by a type assertion, and a connection that does not implement it runs the
+// callback as if no transaction were open, the same as a level of zero.
 func (b *Builder[T]) WithSavepointIfNeeded(scope func() error) error {
 	nested, ok := b.query.GetConnection().(Savepointer)
 	if !ok || nested.TransactionLevel() <= 0 {
@@ -233,7 +229,8 @@ func (b *Builder[T]) WithSavepointIfNeeded(scope func() error) error {
 	return nested.Transaction(scope)
 }
 
-// clone answers Builder::__clone.
+// clone returns a copy of b with its own query, scopes and callback slices,
+// so that mutating the copy never touches b.
 func (b *Builder[T]) clone() *Builder[T] {
 	out := &Builder[T]{
 		query:               b.query.Clone(),
@@ -257,11 +254,11 @@ func (b *Builder[T]) clone() *Builder[T] {
 	return out
 }
 
-// Clone answers Builder::clone.
+// Clone returns a copy of b, safe to mutate independently.
 func (b *Builder[T]) Clone() *Builder[T] { return b.clone() }
 
 // prepare is where a query becomes runnable: the global scopes go on, and then
-// the tenant filter (RULE 14, RULE 17).
+// the tenant filter.
 //
 // The tenant is read off the Grant and never from anywhere else. A Grant with no
 // tenant -- the zero Grant, which is the only one constructible outside the auth
@@ -354,7 +351,8 @@ func isolateWheres(q *query.Builder) {
 	q.Wheres = []query.Where{{Type: "Nested", Query: group, Boolean: boolean}}
 }
 
-// WithGlobalScope answers Builder::withGlobalScope.
+// WithGlobalScope registers scope under identifier, and extends b
+// immediately if scope implements ScopeExtender.
 func (b *Builder[T]) WithGlobalScope(identifier string, scope Scope[T]) *Builder[T] {
 	if b.scopes == nil {
 		b.scopes = map[string]Scope[T]{}
@@ -366,15 +364,16 @@ func (b *Builder[T]) WithGlobalScope(identifier string, scope Scope[T]) *Builder
 	return b
 }
 
-// WithoutGlobalScope answers Builder::withoutGlobalScope.
+// WithoutGlobalScope removes the scope registered under identifier, and
+// records it as removed.
 func (b *Builder[T]) WithoutGlobalScope(identifier string) *Builder[T] {
 	delete(b.scopes, identifier)
 	b.removedScopes = append(b.removedScopes, identifier)
 	return b
 }
 
-// WithoutGlobalScopes answers Builder::withoutGlobalScopes. With no argument it
-// removes them all.
+// WithoutGlobalScopes removes the named scopes. With no argument it removes
+// them all.
 func (b *Builder[T]) WithoutGlobalScopes(identifiers ...string) *Builder[T] {
 	if len(identifiers) == 0 {
 		for identifier := range b.scopes {
@@ -387,15 +386,15 @@ func (b *Builder[T]) WithoutGlobalScopes(identifiers ...string) *Builder[T] {
 	return b
 }
 
-// RemovedScopes answers Builder::removedScopes.
+// RemovedScopes returns the identifiers of the scopes removed from this
+// builder.
 func (b *Builder[T]) RemovedScopes() []string { return slices.Clone(b.removedScopes) }
 
-// ApplyScopes answers Builder::applyScopes: a copy of the builder with every
-// registered scope applied.
+// ApplyScopes returns a copy of the builder with every registered scope
+// applied.
 //
-// The wheres a scope adds are wrapped in a group when either side carries an or,
-// which is addNewWheresWithinGroup: without it a scope's filter joins an or
-// chain and stops filtering.
+// The wheres a scope adds are wrapped in a group when either side carries an
+// or: without that, a scope's filter joins an or chain and stops filtering.
 func (b *Builder[T]) ApplyScopes() *Builder[T] {
 	if len(b.scopes) == 0 {
 		return b.clone()
@@ -410,9 +409,9 @@ func (b *Builder[T]) ApplyScopes() *Builder[T] {
 	return out
 }
 
-// sortedScopeNames keeps the order scopes are applied in stable. PHP iterates an
-// ordered array; a Go map has no order, and two scopes that disagree about the
-// order they run in are a bug that only shows up sometimes.
+// sortedScopeNames keeps the order scopes are applied in stable. A Go map
+// has no order, and two scopes that disagree about the order they run in are
+// a bug that only shows up sometimes.
 func sortedScopeNames[T any](scopes map[string]Scope[T]) []string {
 	out := make([]string, 0, len(scopes))
 	for identifier := range scopes {
@@ -422,7 +421,9 @@ func sortedScopeNames[T any](scopes map[string]Scope[T]) []string {
 	return out
 }
 
-// groupNewWheres answers Builder::addNewWheresWithinGroup.
+// groupNewWheres wraps the wheres added since originalCount in their own
+// group when needed, so a scope's filter cannot be absorbed by a
+// surrounding or.
 func groupNewWheres(q *query.Builder, originalCount int) {
 	if len(q.Wheres) == originalCount {
 		return
@@ -433,7 +434,8 @@ func groupNewWheres(q *query.Builder, originalCount int) {
 	groupWhereSliceForScope(q, all[originalCount:])
 }
 
-// groupWhereSliceForScope answers Builder::groupWhereSliceForScope.
+// groupWhereSliceForScope appends slice to q's wheres, wrapped in one nested
+// group when any entry in it uses "or".
 func groupWhereSliceForScope(q *query.Builder, slice []query.Where) {
 	if len(slice) == 0 {
 		return
@@ -458,7 +460,8 @@ func groupWhereSliceForScope(q *query.Builder, slice []query.Where) {
 	})
 }
 
-// Where answers Builder::where.
+// Where adds a where clause. Passing a func(*Builder[T]) instead of a column
+// name adds a group built by calling that function with a fresh builder.
 func (b *Builder[T]) Where(column any, args ...any) *Builder[T] {
 	if nested, ok := column.(func(*Builder[T])); ok {
 		return b.whereNested(nested, "and")
@@ -467,7 +470,9 @@ func (b *Builder[T]) Where(column any, args ...any) *Builder[T] {
 	return b
 }
 
-// OrWhere answers Builder::orWhere.
+// OrWhere adds an or-where clause. Passing a func(*Builder[T]) instead of a
+// column name adds a group built by calling that function with a fresh
+// builder.
 func (b *Builder[T]) OrWhere(column any, args ...any) *Builder[T] {
 	if nested, ok := column.(func(*Builder[T])); ok {
 		return b.whereNested(nested, "or")
@@ -476,8 +481,8 @@ func (b *Builder[T]) OrWhere(column any, args ...any) *Builder[T] {
 	return b
 }
 
-// whereNested answers the Closure branch of Builder::where: the callback gets a
-// builder of this model, and what it adds becomes one group.
+// whereNested runs callback against a fresh builder for the same model, and
+// adds what it builds as one group joined with boolean.
 func (b *Builder[T]) whereNested(callback func(*Builder[T]), boolean string) *Builder[T] {
 	nested := b.model.NewQueryWithoutRelationships()
 	callback(nested)
@@ -494,7 +499,8 @@ func (b *Builder[T]) whereNested(callback func(*Builder[T]), boolean string) *Bu
 	return b
 }
 
-// WhereNot answers Builder::whereNot.
+// WhereNot adds a where clause wrapped in a negated group: NOT (column
+// args...).
 func (b *Builder[T]) WhereNot(column any, args ...any) *Builder[T] {
 	before := len(b.query.Wheres)
 	b.Where(func(nested *Builder[T]) {
@@ -503,12 +509,12 @@ func (b *Builder[T]) WhereNot(column any, args ...any) *Builder[T] {
 	return b.negateLastWhere(before)
 }
 
-// negateLastWhere flips the group WhereNot just added, which PHP spells by
-// passing "and not" as the boolean.
+// negateLastWhere flips the boolean of the group at index before to "...
+// not", negating it.
 //
-// It negates nothing when the group turned out empty -- an empty nested where is
-// dropped rather than compiled, and negating whatever came before it would
-// change a clause the caller did not write.
+// It negates nothing when the group turned out empty -- an empty nested
+// where is dropped rather than compiled, and negating whatever came before
+// it would change a clause the caller did not write.
 func (b *Builder[T]) negateLastWhere(before int) *Builder[T] {
 	if len(b.query.Wheres) == before {
 		return b
@@ -520,7 +526,7 @@ func (b *Builder[T]) negateLastWhere(before int) *Builder[T] {
 	return b
 }
 
-// OrWhereNot answers Builder::orWhereNot.
+// OrWhereNot adds an or-joined, negated group: OR NOT (column args...).
 func (b *Builder[T]) OrWhereNot(column any, args ...any) *Builder[T] {
 	before := len(b.query.Wheres)
 	b.OrWhere(func(nested *Builder[T]) {
@@ -529,7 +535,8 @@ func (b *Builder[T]) OrWhereNot(column any, args ...any) *Builder[T] {
 	return b.negateLastWhere(before)
 }
 
-// WhereKey answers Builder::whereKey.
+// WhereKey filters by the model's primary key. A slice of ids adds a WHERE
+// IN instead of an equality.
 func (b *Builder[T]) WhereKey(id any) *Builder[T] {
 	if ids, ok := id.([]any); ok {
 		b.query.WhereIn(b.model.GetQualifiedKeyName(), ids)
@@ -538,7 +545,8 @@ func (b *Builder[T]) WhereKey(id any) *Builder[T] {
 	return b.Where(b.model.GetQualifiedKeyName(), "=", id)
 }
 
-// WhereKeyNot answers Builder::whereKeyNot.
+// WhereKeyNot excludes the model's primary key. A slice of ids adds a WHERE
+// NOT IN instead of an inequality.
 func (b *Builder[T]) WhereKeyNot(id any) *Builder[T] {
 	if ids, ok := id.([]any); ok {
 		b.query.WhereNotIn(b.model.GetQualifiedKeyName(), ids)
@@ -547,13 +555,15 @@ func (b *Builder[T]) WhereKeyNot(id any) *Builder[T] {
 	return b.Where(b.model.GetQualifiedKeyName(), "!=", id)
 }
 
-// Latest answers Builder::latest.
+// Latest orders the query by column, or the model's created-at column when
+// none is given, newest first.
 func (b *Builder[T]) Latest(column ...string) *Builder[T] {
 	b.query.Latest(timestampColumn(b.model.GetCreatedAtColumn(), column))
 	return b
 }
 
-// Oldest answers Builder::oldest.
+// Oldest orders the query by column, or the model's created-at column when
+// none is given, oldest first.
 func (b *Builder[T]) Oldest(column ...string) *Builder[T] {
 	b.query.Oldest(timestampColumn(b.model.GetCreatedAtColumn(), column))
 	return b
@@ -569,7 +579,7 @@ func timestampColumn(fallback string, column []string) any {
 	return fallback
 }
 
-// Hydrate answers Builder::hydrate: rows in, models out.
+// Hydrate turns rows into models: rows in, models out.
 func (b *Builder[T]) Hydrate(items []query.Record) (Collection[T], error) {
 	out := make(Collection[T], 0, len(items))
 	for _, item := range items {
@@ -582,12 +592,12 @@ func (b *Builder[T]) Hydrate(items []query.Record) (Collection[T], error) {
 	return out, nil
 }
 
-// FromQuery answers Builder::fromQuery: models from SQL somebody wrote by hand.
+// FromQuery returns models from SQL somebody wrote by hand.
 //
 // It takes the Grant like every other read. The SQL is the caller's, so the
 // tenant cannot be added to it -- which is exactly why the Grant is still
 // required: a query nobody authorized does not run, and the where clause that
-// scopes it is the caller's to write (RULE 17).
+// scopes it is the caller's to write.
 func (b *Builder[T]) FromQuery(g auth.Grant, sql string, bindings []any) (Collection[T], error) {
 	if tenant := auth.Tenant(g); tenant == "" || !auth.ValidTenant(tenant) {
 		return nil, ErrNoTenant
@@ -599,7 +609,8 @@ func (b *Builder[T]) FromQuery(g auth.Grant, sql string, bindings []any) (Collec
 	return b.Hydrate(rows)
 }
 
-// Get answers Builder::get.
+// Get runs the query and returns the matching models, with their eager
+// loads applied.
 func (b *Builder[T]) Get(g auth.Grant, columns ...any) (Collection[T], error) {
 	prepared, err := b.prepare(g)
 	if err != nil {
@@ -617,8 +628,7 @@ func (b *Builder[T]) Get(g auth.Grant, columns ...any) (Collection[T], error) {
 	return prepared.ApplyAfterQueryCallbacks(models), nil
 }
 
-// GetModels answers Builder::getModels: the rows, hydrated, with nothing eager
-// loaded.
+// GetModels returns the rows, hydrated, with nothing eager loaded.
 //
 // It is already prepared when Get calls it; called on its own it prepares
 // itself, so there is no way to reach the rows without the Grant.
@@ -637,13 +647,15 @@ func (b *Builder[T]) GetModels(g auth.Grant, columns ...any) (Collection[T], err
 	return prepared.Hydrate(rows)
 }
 
-// AfterQuery answers Builder::afterQuery.
+// AfterQuery registers a callback run on the result of Get, allowed to
+// replace it.
 func (b *Builder[T]) AfterQuery(callback func(Collection[T]) Collection[T]) *Builder[T] {
 	b.afterQueryCallbacks = append(b.afterQueryCallbacks, callback)
 	return b
 }
 
-// ApplyAfterQueryCallbacks answers Builder::applyAfterQueryCallbacks.
+// ApplyAfterQueryCallbacks runs the registered AfterQuery callbacks over
+// result in order, threading each callback's replacement into the next.
 func (b *Builder[T]) ApplyAfterQueryCallbacks(result Collection[T]) Collection[T] {
 	for _, callback := range b.afterQueryCallbacks {
 		if next := callback(result); next != nil {
@@ -653,10 +665,9 @@ func (b *Builder[T]) ApplyAfterQueryCallbacks(result Collection[T]) Collection[T
 	return result
 }
 
-// First answers BuildsQueries::first.
-//
-// It answers (nil, nil) where the PHP answers null: no row is not a failure, and
-// FirstOrFail is the spelling for when it is.
+// First returns the first row matching the query, or (nil, nil) when there
+// is none: no row is not a failure, and FirstOrFail is the spelling for when
+// it is.
 func (b *Builder[T]) First(g auth.Grant, columns ...any) (*Model[T], error) {
 	models, err := b.Limit(1).Get(g, columns...)
 	if err != nil {
@@ -668,7 +679,8 @@ func (b *Builder[T]) First(g auth.Grant, columns ...any) (*Model[T], error) {
 	return models[0], nil
 }
 
-// FirstOrFail answers Builder::firstOrFail.
+// FirstOrFail returns the first row matching the query, or an error when
+// there is none.
 func (b *Builder[T]) FirstOrFail(g auth.Grant, columns ...any) (*Model[T], error) {
 	model, err := b.First(g, columns...)
 	if err != nil {
@@ -680,7 +692,8 @@ func (b *Builder[T]) FirstOrFail(g auth.Grant, columns ...any) (*Model[T], error
 	return model, nil
 }
 
-// FirstOr answers Builder::firstOr: the first row, or what the callback makes.
+// FirstOr returns the first row matching the query, or what callback makes
+// when there is none.
 func (b *Builder[T]) FirstOr(g auth.Grant, callback func() (*Model[T], error), columns ...any) (*Model[T], error) {
 	model, err := b.First(g, columns...)
 	if err != nil {
@@ -692,12 +705,13 @@ func (b *Builder[T]) FirstOr(g auth.Grant, callback func() (*Model[T], error), c
 	return callback()
 }
 
-// FirstWhere answers Builder::firstWhere.
+// FirstWhere adds a where clause and returns the first matching row.
 func (b *Builder[T]) FirstWhere(g auth.Grant, column any, args ...any) (*Model[T], error) {
 	return b.Where(column, args...).First(g)
 }
 
-// Sole answers Builder::sole: the row, when it is the only one.
+// Sole returns the row matching the query, and fails unless it is the only
+// one.
 func (b *Builder[T]) Sole(g auth.Grant, columns ...any) (*Model[T], error) {
 	models, err := b.Limit(2).Get(g, columns...)
 	if err != nil {
@@ -713,7 +727,8 @@ func (b *Builder[T]) Sole(g auth.Grant, columns ...any) (*Model[T], error) {
 	}
 }
 
-// Find answers Builder::find.
+// Find returns the row with the given primary key, or the rows for a slice
+// of keys.
 func (b *Builder[T]) Find(g auth.Grant, id any, columns ...any) (*Model[T], error) {
 	if ids, ok := id.([]any); ok {
 		models, err := b.FindMany(g, ids, columns...)
@@ -725,7 +740,7 @@ func (b *Builder[T]) Find(g auth.Grant, id any, columns ...any) (*Model[T], erro
 	return b.WhereKey(id).First(g, columns...)
 }
 
-// FindMany answers Builder::findMany.
+// FindMany returns the rows matching any of ids.
 func (b *Builder[T]) FindMany(g auth.Grant, ids []any, columns ...any) (Collection[T], error) {
 	if len(ids) == 0 {
 		return Collection[T]{}, nil
@@ -733,10 +748,11 @@ func (b *Builder[T]) FindMany(g auth.Grant, ids []any, columns ...any) (Collecti
 	return b.WhereKey(ids).Get(g, columns...)
 }
 
-// FindOrFail answers Builder::findOrFail.
+// FindOrFail returns the row with the given primary key, or an error when
+// there is none.
 //
-// Given a list it also fails when one id is missing, as the PHP does: asking for
-// three rows and getting two is not a shorter answer, it is a wrong one.
+// Given a list it also fails when one id is missing: asking for three rows
+// and getting two is not a shorter result, it is a wrong one.
 func (b *Builder[T]) FindOrFail(g auth.Grant, id any, columns ...any) (*Model[T], error) {
 	if ids, ok := id.([]any); ok {
 		models, err := b.FindMany(g, ids, columns...)
@@ -758,7 +774,8 @@ func (b *Builder[T]) FindOrFail(g auth.Grant, id any, columns ...any) (*Model[T]
 	return model, nil
 }
 
-// FindOrNew answers Builder::findOrNew.
+// FindOrNew returns the row with the given primary key, or a new unsaved
+// model when there is none.
 func (b *Builder[T]) FindOrNew(g auth.Grant, id any, columns ...any) (*Model[T], error) {
 	model, err := b.Find(g, id, columns...)
 	if err != nil {
@@ -770,7 +787,8 @@ func (b *Builder[T]) FindOrNew(g auth.Grant, id any, columns ...any) (*Model[T],
 	return b.NewModelInstance(nil)
 }
 
-// FirstOrNew answers Builder::firstOrNew.
+// FirstOrNew returns the first row matching attributes, or a new unsaved
+// model built from attributes and values when there is none.
 func (b *Builder[T]) FirstOrNew(g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
 	model, err := b.clone().whereAll(attributes).First(g)
 	if err != nil {
@@ -782,7 +800,8 @@ func (b *Builder[T]) FirstOrNew(g auth.Grant, attributes, values map[string]any)
 	return b.NewModelInstance(mergeMaps(attributes, values))
 }
 
-// FirstOrCreate answers Builder::firstOrCreate.
+// FirstOrCreate returns the first row matching attributes, or creates and
+// returns one from attributes and values when there is none.
 func (b *Builder[T]) FirstOrCreate(g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
 	model, err := b.clone().whereAll(attributes).First(g)
 	if err != nil {
@@ -794,13 +813,12 @@ func (b *Builder[T]) FirstOrCreate(g auth.Grant, attributes, values map[string]a
 	return b.CreateOrFirst(g, attributes, values)
 }
 
-// CreateOrFirst answers Builder::createOrFirst: insert, and if the unique index
-// says somebody got there first, read theirs.
+// CreateOrFirst inserts a row from attributes and values, and if a unique
+// index says somebody got there first, reads theirs instead.
 //
-// The PHP catches UniqueConstraintViolationException. Nothing here classifies a
-// driver error yet, so any insert failure sends it looking for the row, and the
-// insert error is returned when there is none -- which keeps the race safe and
-// never swallows a real failure.
+// Nothing here classifies a driver error yet, so any insert failure sends it
+// looking for the row, and the insert error is returned when there is none
+// -- which keeps the race safe and never swallows a real failure.
 func (b *Builder[T]) CreateOrFirst(g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
 	model, err := b.Create(g, mergeMaps(attributes, values))
 	if err == nil {
@@ -813,7 +831,8 @@ func (b *Builder[T]) CreateOrFirst(g auth.Grant, attributes, values map[string]a
 	return existing, nil
 }
 
-// UpdateOrCreate answers Builder::updateOrCreate.
+// UpdateOrCreate finds or creates a row matching attributes, then fills it
+// with values and saves it.
 func (b *Builder[T]) UpdateOrCreate(g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
 	model, err := b.FirstOrCreate(g, attributes, values)
 	if err != nil {
@@ -831,8 +850,7 @@ func (b *Builder[T]) UpdateOrCreate(g auth.Grant, attributes, values map[string]
 	return model, nil
 }
 
-// whereAll adds one equality per entry, which is what passing an array to
-// where() does in PHP.
+// whereAll adds one equality where clause per entry in attributes.
 func (b *Builder[T]) whereAll(attributes map[string]any) *Builder[T] {
 	for _, column := range sortedKeys(attributes) {
 		b.Where(b.model.QualifyColumn(column), "=", attributes[column])
@@ -840,7 +858,7 @@ func (b *Builder[T]) whereAll(attributes map[string]any) *Builder[T] {
 	return b
 }
 
-// Value answers Builder::value: one column of the first row.
+// Value returns one column of the first row matching the query.
 func (b *Builder[T]) Value(g auth.Grant, column string) (any, error) {
 	model, err := b.First(g, column)
 	if err != nil || model == nil {
@@ -849,7 +867,8 @@ func (b *Builder[T]) Value(g auth.Grant, column string) (any, error) {
 	return model.GetAttribute(afterLastDot(column)), nil
 }
 
-// ValueOrFail answers Builder::valueOrFail.
+// ValueOrFail returns one column of the first row matching the query, or an
+// error when there is none.
 func (b *Builder[T]) ValueOrFail(g auth.Grant, column string) (any, error) {
 	model, err := b.FirstOrFail(g, column)
 	if err != nil {
@@ -858,7 +877,8 @@ func (b *Builder[T]) ValueOrFail(g auth.Grant, column string) (any, error) {
 	return model.GetAttribute(afterLastDot(column)), nil
 }
 
-// SoleValue answers Builder::soleValue.
+// SoleValue returns one column of the row matching the query, and fails
+// unless it is the only one.
 func (b *Builder[T]) SoleValue(g auth.Grant, column string) (any, error) {
 	model, err := b.Sole(g, column)
 	if err != nil {
@@ -867,7 +887,7 @@ func (b *Builder[T]) SoleValue(g auth.Grant, column string) (any, error) {
 	return model.GetAttribute(afterLastDot(column)), nil
 }
 
-// Pluck answers Builder::pluck: one column of every row.
+// Pluck returns one column of every row matching the query.
 func (b *Builder[T]) Pluck(g auth.Grant, column string) ([]any, error) {
 	models, err := b.Get(g, column)
 	if err != nil {
@@ -876,8 +896,8 @@ func (b *Builder[T]) Pluck(g auth.Grant, column string) ([]any, error) {
 	return models.Pluck(afterLastDot(column)), nil
 }
 
-// Count answers the aggregate Illuminate reaches through __call: count(*) over
-// the query as it stands.
+// Count returns the row count of the query, or the count of columns when
+// given.
 func (b *Builder[T]) Count(g auth.Grant, columns ...any) (int64, error) {
 	if len(columns) == 0 {
 		columns = []any{"*"}
@@ -889,7 +909,8 @@ func (b *Builder[T]) Count(g auth.Grant, columns ...any) (int64, error) {
 	return toInt64(value), nil
 }
 
-// Aggregate answers Builder::aggregate.
+// Aggregate runs function (count, sum, min, max, avg) over columns and
+// returns the result.
 func (b *Builder[T]) Aggregate(g auth.Grant, function string, columns ...any) (any, error) {
 	prepared, err := b.prepare(g)
 	if err != nil {
@@ -901,13 +922,13 @@ func (b *Builder[T]) Aggregate(g auth.Grant, function string, columns ...any) (a
 	return prepared.runAggregate(function, columns)
 }
 
-// Exists answers Builder::exists.
+// Exists reports whether the query matches any row.
 func (b *Builder[T]) Exists(g auth.Grant) (bool, error) {
 	count, err := b.Count(g)
 	return count > 0, err
 }
 
-// Create answers Builder::create: a new model, filled and saved.
+// Create returns a new model, filled with attributes and saved.
 func (b *Builder[T]) Create(g auth.Grant, attributes map[string]any) (*Model[T], error) {
 	instance, err := b.NewModelInstance(attributes)
 	if err != nil {
@@ -919,11 +940,13 @@ func (b *Builder[T]) Create(g auth.Grant, attributes map[string]any) (*Model[T],
 	return instance, nil
 }
 
-// ForceCreate answers Builder::forceCreate.
+// ForceCreate returns a new model, filled with attributes via ForceFill and
+// saved.
 //
-// In PHP it is create() with the guard off. There is no guard (see the package
-// comment), so the difference it keeps is Fill's: an attribute the entity does
-// not declare is carried through instead of dropped.
+// There is no mass-assignment guard to turn off (see the package comment);
+// what ForceCreate keeps from Create is ForceFill's behavior: an attribute
+// the entity does not declare is carried through as a raw attribute instead
+// of dropped.
 func (b *Builder[T]) ForceCreate(g auth.Grant, attributes map[string]any) (*Model[T], error) {
 	instance, err := b.model.NewInstance(nil, false)
 	if err != nil {
@@ -938,11 +961,11 @@ func (b *Builder[T]) ForceCreate(g auth.Grant, attributes map[string]any) (*Mode
 	return instance, nil
 }
 
-// Insert answers the base builder's insert, reached through the Eloquent one.
+// Insert writes values as new rows.
 //
-// The tenant column is written from the Grant on every row, overwriting whatever
-// the caller put there: the tenant comes from the Grant and from nowhere else
-// (RULE 14).
+// The tenant column is written from the Grant on every row, overwriting
+// whatever the caller put there: the tenant comes from the Grant and from
+// nowhere else.
 func (b *Builder[T]) Insert(g auth.Grant, values ...map[string]any) (bool, error) {
 	prepared, rows, err := b.prepareWrite(g, values)
 	if err != nil {
@@ -951,7 +974,8 @@ func (b *Builder[T]) Insert(g auth.Grant, values ...map[string]any) (bool, error
 	return prepared.runInsert(rows)
 }
 
-// InsertGetID answers Builder::insertGetId. The PHP spells the last word Id.
+// InsertGetID inserts values as one new row and returns the value generated
+// for sequence.
 func (b *Builder[T]) InsertGetID(g auth.Grant, values map[string]any, sequence string) (int64, error) {
 	prepared, rows, err := b.prepareWrite(g, []map[string]any{values})
 	if err != nil {
@@ -978,7 +1002,8 @@ func (b *Builder[T]) prepareWrite(g auth.Grant, values []map[string]any) (*Build
 	return prepared, rows, nil
 }
 
-// Update answers Builder::update.
+// Update runs an UPDATE with values over the query as it stands, and
+// returns the number of rows affected.
 func (b *Builder[T]) Update(g auth.Grant, values map[string]any) (int64, error) {
 	prepared, err := b.prepare(g)
 	if err != nil {
@@ -987,12 +1012,13 @@ func (b *Builder[T]) Update(g auth.Grant, values map[string]any) (int64, error) 
 	return prepared.runUpdate(prepared.addUpdatedAtColumn(values))
 }
 
-// addUpdatedAtColumn answers Builder::addUpdatedAtColumn.
+// addUpdatedAtColumn adds the updated-at timestamp to values when the model
+// uses timestamps and the caller did not already set it.
 //
-// The column is re-keyed to <table>.<column>, as the PHP does, so that an update
-// with a join names the table it means. The grammars that cannot take a
-// qualified name on the left of a SET -- Postgres and SQLite -- strip it, which
-// is what their compileUpdateColumns overrides are for.
+// The column is re-keyed to <table>.<column>, so that an update with a join
+// names the table it means. The grammars that cannot take a qualified name
+// on the left of a SET -- Postgres and SQLite -- strip it again before
+// compiling.
 func (b *Builder[T]) addUpdatedAtColumn(values map[string]any) map[string]any {
 	column := b.model.GetUpdatedAtColumn()
 	if !b.model.UsesTimestamps() || column == "" {
@@ -1013,7 +1039,8 @@ func (b *Builder[T]) addUpdatedAtColumn(values map[string]any) map[string]any {
 	return out
 }
 
-// tableOf answers `last(preg_split('/\s+as\s+/i', $this->query->from))`.
+// tableOf returns the table name from a FROM value, dropping any " as
+// alias" suffix.
 func tableOf(from any) string {
 	name := fmt.Sprint(from)
 	if i := strings.Index(strings.ToLower(name), " as "); i >= 0 {
@@ -1022,7 +1049,9 @@ func tableOf(from any) string {
 	return strings.TrimSpace(name)
 }
 
-// Upsert answers Builder::upsert.
+// Upsert inserts values, updating the columns in update on any row that
+// conflicts on uniqueBy. With no update columns given, every column is
+// updated.
 func (b *Builder[T]) Upsert(g auth.Grant, values []map[string]any, uniqueBy, update []string) (int64, error) {
 	if len(values) == 0 {
 		return 0, nil
@@ -1051,24 +1080,24 @@ func (b *Builder[T]) Upsert(g auth.Grant, values []map[string]any, uniqueBy, upd
 	return prepared.runUpsert(rows, uniqueBy, update)
 }
 
-// Increment answers Builder::increment.
+// Increment adds amount to column, plus any extra columns to set, and
+// returns the number of rows affected.
 func (b *Builder[T]) Increment(g auth.Grant, column string, amount any, extra map[string]any) (int64, error) {
 	return b.incrementOrDecrement(g, column, amount, extra, "+")
 }
 
-// Decrement answers Builder::decrement.
+// Decrement subtracts amount from column, plus any extra columns to set, and
+// returns the number of rows affected.
 func (b *Builder[T]) Decrement(g auth.Grant, column string, amount any, extra map[string]any) (int64, error) {
 	return b.incrementOrDecrement(g, column, amount, extra, "-")
 }
 
-// incrementOrDecrement answers the shared body of Builder::increment and
-// Builder::decrement.
+// incrementOrDecrement is the shared body of Increment and Decrement.
 //
-// The amount goes into the SQL rather than into a binding, because it is on the
-// right of an assignment to the column itself. That is why the PHP refuses a
-// non-numeric one -- `is_numeric($amount)` guards an InvalidArgumentException --
-// and why this does too: an amount that came from a request would otherwise be
-// SQL.
+// The amount goes into the SQL rather than into a binding, because it is on
+// the right of an assignment to the column itself. That is why a
+// non-numeric amount is refused: one that came from a request would
+// otherwise be SQL.
 func (b *Builder[T]) incrementOrDecrement(g auth.Grant, column string, amount any, extra map[string]any, sign string) (int64, error) {
 	if amount == nil {
 		amount = 1
@@ -1083,11 +1112,11 @@ func (b *Builder[T]) incrementOrDecrement(g auth.Grant, column string, amount an
 	return b.Update(g, values)
 }
 
-// Delete answers Builder::delete.
+// Delete removes the rows matching the query, or runs the registered
+// onDelete callback instead.
 //
 // A model that soft deletes has an onDelete callback on its builder, so this
-// runs the update the SoftDeletingScope registered instead of a delete -- the
-// same indirection the PHP uses.
+// runs the update the SoftDeletingScope registered instead of a delete.
 func (b *Builder[T]) Delete(g auth.Grant) (int64, error) {
 	if b.onDelete != nil {
 		return b.onDelete(b, g)
@@ -1099,11 +1128,10 @@ func (b *Builder[T]) Delete(g auth.Grant) (int64, error) {
 	return prepared.runDelete()
 }
 
-// ForceDelete answers Builder::forceDelete: the row goes, whatever the scope
-// would have done.
+// ForceDelete removes the row, whatever the scope would have done.
 //
 // It still applies the tenant filter. "Force" is about the soft delete, never
-// about the tenant (RULE 14).
+// about the tenant.
 func (b *Builder[T]) ForceDelete(g auth.Grant) (int64, error) {
 	tenant := auth.Tenant(g)
 	if tenant == "" || !auth.ValidTenant(tenant) {
@@ -1116,13 +1144,15 @@ func (b *Builder[T]) ForceDelete(g auth.Grant) (int64, error) {
 	return forced.runDelete()
 }
 
-// OnDelete answers Builder::onDelete.
+// OnDelete registers callback as the override Delete runs instead of a
+// plain delete.
 func (b *Builder[T]) OnDelete(callback func(*Builder[T], auth.Grant) (int64, error)) *Builder[T] {
 	b.onDelete = callback
 	return b
 }
 
-// Touch answers Builder::touch.
+// Touch sets column, or the model's updated-at column when none is given, to
+// the current time on every row matching the query.
 func (b *Builder[T]) Touch(g auth.Grant, column ...string) (int64, error) {
 	name := b.model.GetUpdatedAtColumn()
 	if len(column) > 0 && column[0] != "" {
@@ -1133,7 +1163,7 @@ func (b *Builder[T]) Touch(g auth.Grant, column ...string) (int64, error) {
 	return b.Update(g, map[string]any{name: b.model.FreshTimestamp()})
 }
 
-// With answers Builder::with: relations to eager load.
+// With marks relations to eager load.
 func (b *Builder[T]) With(relations ...string) *Builder[T] {
 	for _, relation := range relations {
 		if relation == "" {
@@ -1144,24 +1174,23 @@ func (b *Builder[T]) With(relations ...string) *Builder[T] {
 	return b
 }
 
-// WithConstraints answers the array form of Builder::with, where the value is a
-// callback that constrains the relation's own query.
+// WithConstraints marks relation to eager load, constrained by callback.
 //
-// The callback takes a query builder and not an eloquent one, because the
-// relation it constrains belongs to another model type and Go cannot spell "a
-// builder of some other model" in this signature.
+// The callback takes a query.Builder rather than a Builder[T], because the
+// relation it constrains belongs to another model type and this signature
+// has no type parameter to spell that other model's builder with.
 func (b *Builder[T]) WithConstraints(relation string, constraints func(*query.Builder)) *Builder[T] {
 	b.eagerLoad[relation] = constraints
 	return b
 }
 
-// WithOnly answers Builder::withOnly.
+// WithOnly replaces the eager load list with relations.
 func (b *Builder[T]) WithOnly(relations ...string) *Builder[T] {
 	b.eagerLoad = map[string]func(*query.Builder){}
 	return b.With(relations...)
 }
 
-// Without answers Builder::without.
+// Without removes relations from the eager load list.
 func (b *Builder[T]) Without(relations ...string) *Builder[T] {
 	for _, relation := range relations {
 		delete(b.eagerLoad, relation)
@@ -1169,7 +1198,7 @@ func (b *Builder[T]) Without(relations ...string) *Builder[T] {
 	return b
 }
 
-// GetEagerLoads answers Builder::getEagerLoads.
+// GetEagerLoads returns the names marked to eager load, sorted.
 func (b *Builder[T]) GetEagerLoads() []string {
 	out := make([]string, 0, len(b.eagerLoad))
 	for name := range b.eagerLoad {
@@ -1179,14 +1208,14 @@ func (b *Builder[T]) GetEagerLoads() []string {
 	return out
 }
 
-// WithoutEagerLoads answers Builder::withoutEagerLoads.
+// WithoutEagerLoads clears the eager load list.
 func (b *Builder[T]) WithoutEagerLoads() *Builder[T] {
 	b.eagerLoad = map[string]func(*query.Builder){}
 	return b
 }
 
-// WithoutEagerLoad answers Builder::withoutEagerLoad: these relations, and the
-// ones nested under them, come off the list.
+// WithoutEagerLoad removes these relations, and the ones nested under them,
+// from the eager load list.
 func (b *Builder[T]) WithoutEagerLoad(relations ...string) *Builder[T] {
 	for name := range b.eagerLoad {
 		for _, relation := range relations {
@@ -1198,13 +1227,14 @@ func (b *Builder[T]) WithoutEagerLoad(relations ...string) *Builder[T] {
 	return b
 }
 
-// SetEagerLoads answers Builder::setEagerLoads.
+// SetEagerLoads replaces the eager load list with relations.
 func (b *Builder[T]) SetEagerLoads(relations ...string) *Builder[T] {
 	b.eagerLoad = map[string]func(*query.Builder){}
 	return b.With(relations...)
 }
 
-// WithoutGlobalScopesExcept answers Builder::withoutGlobalScopesExcept.
+// WithoutGlobalScopesExcept removes every registered scope except the named
+// ones.
 func (b *Builder[T]) WithoutGlobalScopesExcept(identifiers ...string) *Builder[T] {
 	for identifier := range b.scopes {
 		if !slices.Contains(identifiers, identifier) {
@@ -1214,13 +1244,13 @@ func (b *Builder[T]) WithoutGlobalScopesExcept(identifiers ...string) *Builder[T
 	return b
 }
 
-// FindSole answers Builder::findSole: the row with this key, when it is the only
-// one -- which it is, unless the key is not one.
+// FindSole returns the row with the given primary key, and fails unless it
+// is the only one.
 func (b *Builder[T]) FindSole(g auth.Grant, id any, columns ...any) (*Model[T], error) {
 	return b.WhereKey(id).Sole(g, columns...)
 }
 
-// TouchQuietly answers Builder::touchQuietly.
+// TouchQuietly touches the query's rows without firing model events.
 func (b *Builder[T]) TouchQuietly(g auth.Grant, column ...string) (touched int64, err error) {
 	return touched, b.model.WithoutEvents(func() error {
 		touched, err = b.Touch(g, column...)
@@ -1228,7 +1258,8 @@ func (b *Builder[T]) TouchQuietly(g auth.Grant, column ...string) (touched int64
 	})
 }
 
-// EagerLoadRelations answers Builder::eagerLoadRelations.
+// EagerLoadRelations loads every top-level relation marked with With, and
+// attaches the matches to models.
 func (b *Builder[T]) EagerLoadRelations(g auth.Grant, models Collection[T]) error {
 	if len(models) == 0 {
 		return nil
@@ -1254,75 +1285,77 @@ func (b *Builder[T]) EagerLoadRelations(g auth.Grant, models Collection[T]) erro
 	return nil
 }
 
-// Limit answers Builder::limit, forwarded to the query builder.
+// Limit sets the row limit, forwarded to the underlying query.
 func (b *Builder[T]) Limit(value int) *Builder[T] {
 	b.query.Limit(value)
 	return b
 }
 
-// Offset answers Builder::offset.
+// Offset sets the row offset, forwarded to the underlying query.
 func (b *Builder[T]) Offset(value int) *Builder[T] {
 	b.query.Offset(value)
 	return b
 }
 
-// ForPage answers Builder::forPage.
+// ForPage sets the limit and offset for page, perPage rows at a time.
 func (b *Builder[T]) ForPage(page, perPage int) *Builder[T] {
 	b.query.ForPage(page, perPage)
 	return b
 }
 
-// GetLimit answers Builder::getLimit.
+// GetLimit returns the row limit, or nil when none is set.
 func (b *Builder[T]) GetLimit() *int { return b.query.GetLimit() }
 
-// GetOffset answers Builder::getOffset.
+// GetOffset returns the row offset, or nil when none is set.
 func (b *Builder[T]) GetOffset() *int { return b.query.GetOffset() }
 
-// OrderBy answers Builder::orderBy.
+// OrderBy adds an ordering, forwarded to the underlying query.
 func (b *Builder[T]) OrderBy(column any, direction ...string) *Builder[T] {
 	b.query.OrderBy(column, direction...)
 	return b
 }
 
-// OrderByDesc answers Builder::orderByDesc.
+// OrderByDesc adds a descending ordering, forwarded to the underlying query.
 func (b *Builder[T]) OrderByDesc(column any) *Builder[T] {
 	b.query.OrderByDesc(column)
 	return b
 }
 
-// Select answers Builder::select.
+// Select sets the columns to return, forwarded to the underlying query.
 func (b *Builder[T]) Select(columns ...any) *Builder[T] {
 	b.query.Select(columns...)
 	return b
 }
 
-// AddSelect answers Builder::addSelect.
+// AddSelect adds columns to the ones already selected.
 func (b *Builder[T]) AddSelect(columns ...any) *Builder[T] {
 	b.query.AddSelect(columns...)
 	return b
 }
 
-// SelectRaw answers Builder::selectRaw.
+// SelectRaw adds a raw select expression, forwarded to the underlying query.
 func (b *Builder[T]) SelectRaw(expression string, bindings ...any) *Builder[T] {
 	b.query.SelectRaw(expression, bindings...)
 	return b
 }
 
-// enforceOrderBy answers Builder::enforceOrderBy: chunking without an order is
-// chunking over a set the engine may return in a different order each time.
+// enforceOrderBy adds an ascending order by the model's key when the query
+// has none: chunking without an order is chunking over a set the engine may
+// return in a different order each time.
 func (b *Builder[T]) enforceOrderBy() {
 	if len(b.query.Orders) == 0 && len(b.query.UnionOrders) == 0 {
 		b.OrderBy(b.model.GetQualifiedKeyName(), "asc")
 	}
 }
 
-// DefaultKeyName answers Builder::defaultKeyName.
+// DefaultKeyName returns the model's primary key name.
 func (b *Builder[T]) DefaultKeyName() string { return b.model.GetKeyName() }
 
-// Chunk answers BuildsQueries::chunk.
+// Chunk walks the query count rows at a time, calling callback for each
+// chunk.
 //
-// The callback stops the walk by returning false, as the PHP's does, and stops
-// it with a reason by returning an error.
+// The callback stops the walk by returning false, and stops it with a
+// reason by returning an error.
 func (b *Builder[T]) Chunk(g auth.Grant, count int, callback func(Collection[T], int) (bool, error)) error {
 	if count < 1 {
 		return fmt.Errorf("eloquent: the chunk size should be at least 1")
@@ -1367,7 +1400,8 @@ func (b *Builder[T]) Chunk(g auth.Grant, count int, callback func(Collection[T],
 	}
 }
 
-// Each answers BuildsQueries::each.
+// Each walks the query count rows at a time, calling callback for every row
+// with its overall index.
 func (b *Builder[T]) Each(g auth.Grant, count int, callback func(*Model[T], int) (bool, error)) error {
 	return b.Chunk(g, count, func(models Collection[T], page int) (bool, error) {
 		for i, model := range models {
@@ -1380,9 +1414,9 @@ func (b *Builder[T]) Each(g auth.Grant, count int, callback func(*Model[T], int)
 	})
 }
 
-// ChunkById answers BuildsQueries::chunkById: chunking by the key rather than by
-// the offset, so that a row inserted between two chunks cannot shift the window
-// and hide a row.
+// ChunkById walks the query count rows at a time, ordered and paged by the
+// key rather than by offset, so that a row inserted between two chunks
+// cannot shift the window and hide a row.
 func (b *Builder[T]) ChunkById(g auth.Grant, count int, callback func(Collection[T], int) (bool, error), column ...string) error {
 	if count < 1 {
 		return fmt.Errorf("eloquent: the chunk size should be at least 1")
@@ -1422,12 +1456,11 @@ func (b *Builder[T]) ChunkById(g auth.Grant, count int, callback func(Collection
 	}
 }
 
-// Lazy answers BuildsQueries::lazy: the rows one at a time, a chunk at a time.
+// Lazy returns an iterator over the rows, fetched a chunk at a time.
 //
-// The PHP returns a LazyCollection built on a generator; Go has range-over-func,
-// so it returns the iterator itself. The error the walk stopped on is reported
-// through the pointer the caller passes, because an iterator has nowhere to put
-// one.
+// It returns a range-over-func iterator directly. The error the walk
+// stopped on is reported through the pointer the caller passes, because an
+// iterator has nowhere else to put one.
 func (b *Builder[T]) Lazy(g auth.Grant, chunkSize int, err *error) func(func(*Model[T]) bool) {
 	return func(yield func(*Model[T]) bool) {
 		stopped := false
@@ -1447,7 +1480,8 @@ func (b *Builder[T]) Lazy(g auth.Grant, chunkSize int, err *error) func(func(*Mo
 	}
 }
 
-// LazyById answers BuildsQueries::lazyById.
+// LazyById returns an iterator over the rows, fetched a chunk at a time and
+// paged by the key rather than by offset.
 func (b *Builder[T]) LazyById(g auth.Grant, chunkSize int, err *error, column ...string) func(func(*Model[T]) bool) {
 	return func(yield func(*Model[T]) bool) {
 		chunkErr := b.ChunkById(g, chunkSize, func(models Collection[T], _ int) (bool, error) {
@@ -1464,12 +1498,11 @@ func (b *Builder[T]) LazyById(g auth.Grant, chunkSize int, err *error, column ..
 	}
 }
 
-// Cursor answers Builder::cursor.
+// Cursor walks the result one model at a time.
 //
-// Illuminate streams the rows off an unbuffered PDO cursor. query.Connection
-// hands back the rows it read, so this is the same walk over one result set
-// rather than a second way to run a query -- and it stays lazy from the caller's
-// side, which is what the method is for.
+// query.Connection hands back the rows it read, so this is a walk over one
+// result set rather than a second way to run a query -- and it stays lazy from
+// the caller's side, which is what the method is for.
 func (b *Builder[T]) Cursor(g auth.Grant, err *error) func(func(*Model[T]) bool) {
 	return func(yield func(*Model[T]) bool) {
 		models, getErr := b.Get(g)

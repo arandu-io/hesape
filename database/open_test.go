@@ -86,11 +86,9 @@ func TestAMissingDriverSaysWhichOneAndHow(t *testing.T) {
 		"pgsql",  // what is configured
 		"sqlite", // what is linked, so the gap is visible
 		"go get github.com/arandu-io/hesape/database/connectors/pgx", // the command that fixes it
-		// And where the import goes. It said cmd/app/main.go, a file the
-		// skeleton does not have -- ADR 0019 moved the entrypoint to main.go
-		// in the root. The message sent whoever hit it to look for a
-		// directory that is not there, and this test pinned the wrong string
-		// rather than catching it.
+		// And where the import goes. The entrypoint is main.go in the root,
+		// so a message naming any other file sends whoever hit it looking for
+		// a directory that is not there.
 		"blank-import it in main.go",
 	} {
 		if !strings.Contains(message, want) {

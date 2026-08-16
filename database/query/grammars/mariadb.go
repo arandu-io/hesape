@@ -6,8 +6,7 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// MariaDBGrammar answers Illuminate\Database\Query\Grammars\MariaDbGrammar. The
-// PHP spells it MariaDb; Go initialisms are upper case throughout.
+// MariaDBGrammar is the grammar for MariaDB.
 //
 // MariaDB is MySQL's grammar with four differences, and it is a separate
 // grammar rather than a flag on MySQL's for exactly that reason: it has no
@@ -21,34 +20,35 @@ type MariaDBGrammar struct {
 
 var _ query.Grammar = (*MariaDBGrammar)(nil)
 
-// NewMariaDBGrammar answers `new MariaDbGrammar`.
+// NewMariaDBGrammar creates a MariaDBGrammar.
 func NewMariaDBGrammar() *MariaDBGrammar {
 	g := &MariaDBGrammar{MySQLGrammar: NewMySQLGrammar()}
 	g.Grammar.self = g
 	return g
 }
 
-// CompileJoinLateral answers MariaDbGrammar::compileJoinLateral, carrying an
-// error where the PHP throws: MariaDB has no lateral join, and MySQL's grammar
-// would otherwise have said it does.
+// CompileJoinLateral returns an error: MariaDB has no lateral join, and
+// MySQL's grammar would otherwise have said it does.
 func (g *MariaDBGrammar) CompileJoinLateral(join *query.JoinClause, expression string) (string, error) {
 	return "", fmt.Errorf("query/grammars: this database engine does not support lateral joins")
 }
 
-// CompileJSONValueCast answers MariaDbGrammar::compileJsonValueCast.
+// CompileJSONValueCast casts a value expression to JSON, MariaDB's way.
 func (g *MariaDBGrammar) CompileJSONValueCast(value string) string {
 	return "json_query(" + value + ", '$')"
 }
 
-// CompileThreadCount answers MariaDbGrammar::compileThreadCount.
+// CompileThreadCount builds the SQL that counts open connections,
+// MariaDB's way.
 func (g *MariaDBGrammar) CompileThreadCount() string {
 	return "select variable_value as `Value` from information_schema.global_status where variable_name = 'THREADS_CONNECTED'"
 }
 
-// UseLegacyGroupLimit answers MariaDbGrammar::useLegacyGroupLimit: never.
+// UseLegacyGroupLimit reports false: MariaDB has had window functions
+// since 10.2, so the group limit never needs the legacy form.
 func (g *MariaDBGrammar) UseLegacyGroupLimit(q *query.Builder) bool { return false }
 
-// WrapJSONSelector answers MariaDbGrammar::wrapJsonSelector.
+// WrapJSONSelector quotes a JSON path selector, MariaDB's way.
 func (g *MariaDBGrammar) WrapJSONSelector(value string) string {
 	field, path := g.wrapJSONFieldAndPath(value)
 	return "json_value(" + field + path + ")"

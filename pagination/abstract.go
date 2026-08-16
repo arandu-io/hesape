@@ -6,19 +6,17 @@ import (
 	"net/url"
 )
 
-// This file holds what Illuminate keeps in AbstractPaginator and
-// AbstractCursorPaginator: the behaviour the three paginators share.
+// The behaviour the three paginators share.
 //
-// Go has no inheritance, so each paginator declares its own methods and each of
-// them is one line over a helper here. The methods are declared per type rather
-// than promoted from an embedded struct because every mutator in Illuminate
-// returns $this, and a promoted method would return the embedded value instead
-// of the paginator -- which breaks the chaining those methods exist for.
+// Each paginator declares its own methods and each of them is one line over a
+// helper here. They are declared per type rather than promoted from an embedded
+// struct because every mutator returns the receiver, and a promoted method would
+// return the embedded value instead of the paginator -- which breaks the
+// chaining those methods exist for.
 
-// addQuery is AbstractPaginator::addQuery. It records one query string
-// parameter, and drops the one holding the position: the paginator writes that
-// itself, and letting a caller append it would make two of them fight over the
-// same key.
+// addQuery records one query string parameter, and drops the one holding the
+// position: the paginator writes that itself, and letting a caller append it
+// would make two of them fight over the same key.
 func addQuery(o *Options, reserved, key, value string) {
 	if key == reserved {
 		return
@@ -29,11 +27,10 @@ func addQuery(o *Options, reserved, key, value string) {
 	o.Query.Set(key, value)
 }
 
-// appendQuery is AbstractPaginator::appends.
+// appendQuery records one or several query string values on the options.
 //
-// PHP declares the parameter as array|string|null, a union Go has no type for,
-// so it arrives as any and is opened here. A nil key is ignored, exactly as PHP
-// returns $this untouched for null.
+// The key arrives as any because it is either one parameter name or a map of
+// several, and it is opened here. A nil key is ignored.
 func appendQuery(o *Options, reserved string, key any, value []string) {
 	first := ""
 	if len(value) > 0 {
@@ -83,9 +80,9 @@ func seq2[T any](items []T) iter.Seq2[int, T] {
 	}
 }
 
-// nullable renders a zero value as JSON null, which is what Illuminate's
-// toArray() puts in "from", "to", "next_page_url" and "prev_page_url" when
-// there is no such item and no such page.
+// nullable renders a zero value as JSON null, which is what "from", "to",
+// "next_page_url" and "prev_page_url" carry when there is no such item and no
+// such page.
 func nullable[T comparable](value T) any {
 	var zero T
 	if value == zero {
@@ -94,8 +91,7 @@ func nullable[T comparable](value T) any {
 	return value
 }
 
-// prettyJSON is the JSON_PRETTY_PRINT half of toPrettyJson(). PHP's JSON_PRETTY_PRINT indents with four
-// spaces, so this does too: the two outputs diff cleanly against each other.
+// prettyJSON encodes a value indented with four spaces.
 func prettyJSON(value any) ([]byte, error) {
 	return json.MarshalIndent(value, "", "    ")
 }

@@ -8,7 +8,7 @@ import (
 )
 
 // connection is a query.Connection that records what it was asked to run and
-// answers with what the test put in it. It reports a last insert identifier,
+// returns what the test put in it. It reports a last insert identifier,
 // which is what MySQL and SQLite need and Postgres does not.
 type connection struct {
 	rows []query.Record

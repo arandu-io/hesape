@@ -8,19 +8,17 @@ import (
 )
 
 // ErrComponentNotFound is returned by ComponentClass when neither an alias, a
-// namespace, a guessed class nor a view answers for the tag. It is the
-// InvalidArgumentException PHP throws.
+// namespace, a guessed class nor a view answers for the tag.
 var ErrComponentNotFound = errors.New("view/compilers: unable to locate a class or view for component")
 
-// ComponentTagCompiler mirrors Illuminate\View\Compilers\ComponentTagCompiler.
+// ComponentTagCompiler is the precompile step that turns
+// <x-alert type="error"> into the directives the main compiler understands.
 //
-// It is the precompile step that turns <x-alert type="error"> into the
-// directives the main compiler understands. PHP resolves the class behind a
-// tag by asking the container and the autoloader whether a class exists; Go
-// links its types at build time and has no class_exists, so the two lookups
-// are hooks the caller fills: ClassExists and ViewExists. The kyse generator
-// fills them from the set of components it has actually seen, which is the
-// same question asked at the only time Go can answer it.
+// Go links its types at build time and has no way to ask at runtime whether
+// a class exists, so the two lookups are hooks the caller fills: ClassExists
+// and ViewExists. The component generator fills them from the set of
+// components it has actually seen, which is the same question asked at the
+// only time Go can answer it.
 type ComponentTagCompiler struct {
 	// aliases maps a tag name to a component class.
 	aliases map[string]string
@@ -32,24 +30,22 @@ type ComponentTagCompiler struct {
 	compiler *KyseCompiler
 
 	// ClassExists reports whether a component type is known to the build.
-	// It stands in for PHP's class_exists.
 	ClassExists func(class string) bool
 
-	// ViewExists reports whether a view of that name is registered. It stands
-	// in for $viewFactory->exists.
+	// ViewExists reports whether a view of that name is registered.
 	ViewExists func(name string) bool
 
 	// Namespace is the application namespace GuessClassName prefixes with.
-	// PHP reads it off the Application out of the container.
 	Namespace string
 
 	// ComponentParameters returns the constructor parameter names of a
-	// component class. PHP reflects the constructor; Go has no type by name at
-	// run time, so the generator hands the list over.
+	// component class. Go has no type by name at run time, so the generator
+	// hands the list over.
 	ComponentParameters func(class string) []string
 }
 
-// NewComponentTagCompiler is ComponentTagCompiler::__construct.
+// NewComponentTagCompiler returns a compiler with the given aliases and
+// namespaces, defaulting to an empty map for either when nil.
 func NewComponentTagCompiler(aliases, namespaces map[string]string, compiler *KyseCompiler) *ComponentTagCompiler {
 	if aliases == nil {
 		aliases = map[string]string{}
@@ -65,13 +61,14 @@ func NewComponentTagCompiler(aliases, namespaces map[string]string, compiler *Ky
 	}
 }
 
-// Compile is ComponentTagCompiler::compile.
+// Compile expands component tags and slot tags in value, in that order.
 func (c *ComponentTagCompiler) Compile(value string) string {
 	value = c.CompileSlots(value)
 	return c.CompileTags(value)
 }
 
-// CompileTags is ComponentTagCompiler::compileTags.
+// CompileTags expands self-closing, opening and closing component tags, in
+// that order.
 func (c *ComponentTagCompiler) CompileTags(value string) string {
 	value = c.compileSelfClosingTags(value)
 	value = c.compileOpeningTags(value)
@@ -87,7 +84,7 @@ var (
 	attributePattern      = regexp.MustCompile(`([\w\-:.@]+)(?:=("[^"]*"|'[^']*'|[^'"=<>\s]+))?`)
 )
 
-// compileSelfClosingTags is ComponentTagCompiler::compileSelfClosingTags.
+// compileSelfClosingTags expands every self-closing <x-... /> tag.
 func (c *ComponentTagCompiler) compileSelfClosingTags(value string) string {
 	return selfClosingTagPattern.ReplaceAllStringFunc(value, func(match string) string {
 		groups := selfClosingTagPattern.FindStringSubmatch(match)
@@ -95,7 +92,8 @@ func (c *ComponentTagCompiler) compileSelfClosingTags(value string) string {
 	})
 }
 
-// compileOpeningTags is ComponentTagCompiler::compileOpeningTags.
+// compileOpeningTags expands every opening <x-...> tag that is not a slot
+// tag.
 func (c *ComponentTagCompiler) compileOpeningTags(value string) string {
 	return openingTagPattern.ReplaceAllStringFunc(value, func(match string) string {
 		groups := openingTagPattern.FindStringSubmatch(match)
@@ -106,12 +104,13 @@ func (c *ComponentTagCompiler) compileOpeningTags(value string) string {
 	})
 }
 
-// compileClosingTags is ComponentTagCompiler::compileClosingTags.
+// compileClosingTags replaces every closing </x-...> tag with the marker
+// that ends a component block.
 func (c *ComponentTagCompiler) compileClosingTags(value string) string {
 	return closingTagPattern.ReplaceAllString(value, " @endComponentClass##END-COMPONENT-CLASS##")
 }
 
-// componentString is ComponentTagCompiler::componentString.
+// componentString returns the directive a component tag compiles to.
 func (c *ComponentTagCompiler) componentString(name, attributeString string) string {
 	class, err := c.ComponentClass(name)
 	if err != nil {
@@ -126,8 +125,8 @@ func (c *ComponentTagCompiler) componentString(name, attributeString string) str
 	)
 }
 
-// getAttributesFromAttributeString is
-// ComponentTagCompiler::getAttributesFromAttributeString.
+// getAttributesFromAttributeString parses a tag's raw attribute text into a
+// name-to-value map.
 func (c *ComponentTagCompiler) getAttributesFromAttributeString(attributeString string) map[string]string {
 	attributes := map[string]string{}
 	for _, groups := range attributePattern.FindAllStringSubmatch(attributeString, -1) {
@@ -141,9 +140,9 @@ func (c *ComponentTagCompiler) getAttributesFromAttributeString(attributeString 
 	return attributes
 }
 
-// ComponentClass is ComponentTagCompiler::componentClass.
-//
-// It returns (string, error) where PHP throws InvalidArgumentException.
+// ComponentClass resolves component to the class, alias or view that
+// answers for it, trying each in turn, and returns ErrComponentNotFound when
+// none does.
 func (c *ComponentTagCompiler) ComponentClass(component string) (string, error) {
 	if alias, ok := c.aliases[component]; ok {
 		if c.classExists(alias) || c.viewExists(alias) {
@@ -171,9 +170,8 @@ func (c *ComponentTagCompiler) ComponentClass(component string) (string, error) 
 	return "", fmt.Errorf("%w: %s", ErrComponentNotFound, component)
 }
 
-// FindClassByComponent is ComponentTagCompiler::findClassByComponent.
-//
-// It returns "" where PHP returns null.
+// FindClassByComponent resolves a namespaced tag (ns::name) to a class
+// through a registered namespace, or returns "" if none matches.
 func (c *ComponentTagCompiler) FindClassByComponent(component string) string {
 	segments := strings.SplitN(component, "::", 2)
 	if len(segments) < 2 {
@@ -190,12 +188,14 @@ func (c *ComponentTagCompiler) FindClassByComponent(component string) string {
 	return ""
 }
 
-// GuessClassName is ComponentTagCompiler::guessClassName.
+// GuessClassName returns the class a component tag would resolve to by
+// convention.
 func (c *ComponentTagCompiler) GuessClassName(component string) string {
 	return c.Namespace + "View\\Components\\" + c.FormatClassName(component)
 }
 
-// FormatClassName is ComponentTagCompiler::formatClassName.
+// FormatClassName converts a dotted, kebab-case component name into a
+// class-style path.
 func (c *ComponentTagCompiler) FormatClassName(component string) string {
 	pieces := strings.Split(component, ".")
 	for i, piece := range pieces {
@@ -204,9 +204,8 @@ func (c *ComponentTagCompiler) FormatClassName(component string) string {
 	return strings.Join(pieces, "\\")
 }
 
-// GuessViewName is ComponentTagCompiler::guessViewName.
-//
-// An empty prefix means the PHP default, "components.".
+// GuessViewName returns the view name a component tag would resolve to,
+// under prefix. An empty prefix defaults to "components.".
 func (c *ComponentTagCompiler) GuessViewName(name, prefix string) string {
 	if prefix == "" {
 		prefix = "components."
@@ -214,7 +213,7 @@ func (c *ComponentTagCompiler) GuessViewName(name, prefix string) string {
 	if !strings.HasSuffix(prefix, ".") {
 		prefix += "."
 	}
-	// ViewFinderInterface::HINT_PATH_DELIMITER.
+	// The delimiter between a namespace and its view, matching the finder's own.
 	const delimiter = "::"
 	if strings.Contains(name, delimiter) {
 		return strings.Replace(name, delimiter, delimiter+prefix, 1)
@@ -222,12 +221,10 @@ func (c *ComponentTagCompiler) GuessViewName(name, prefix string) string {
 	return prefix + name
 }
 
-// PartitionDataAndAttributes is
-// ComponentTagCompiler::partitionDataAndAttributes.
-//
-// It returns the two halves as separate values where PHP returns a two-element
-// array. A class the build does not know about yields both halves whole, which
-// is the class-less component case PHP documents.
+// PartitionDataAndAttributes splits attributes into the ones the
+// component's constructor declares (data) and the rest (attributes),
+// returned separately. A class the build does not know about yields both
+// halves whole, which is the class-less component case.
 func (c *ComponentTagCompiler) PartitionDataAndAttributes(class string, attributes map[string]string) (data, rest map[string]string) {
 	if c.ComponentParameters == nil || !c.classExists(class) {
 		return attributes, attributes
@@ -249,7 +246,7 @@ func (c *ComponentTagCompiler) PartitionDataAndAttributes(class string, attribut
 	return data, rest
 }
 
-// CompileSlots is ComponentTagCompiler::compileSlots.
+// CompileSlots expands <x-slot> tags into @slot / @endslot directives.
 func (c *ComponentTagCompiler) CompileSlots(value string) string {
 	value = slotOpenPattern.ReplaceAllStringFunc(value, func(match string) string {
 		groups := slotOpenPattern.FindStringSubmatch(match)
@@ -268,7 +265,7 @@ func (c *ComponentTagCompiler) CompileSlots(value string) string {
 	return slotClosePattern.ReplaceAllString(value, "@endslot")
 }
 
-// StripQuotes is ComponentTagCompiler::stripQuotes.
+// StripQuotes removes a single matching pair of leading and trailing quotes.
 func (c *ComponentTagCompiler) StripQuotes(value string) string {
 	if len(value) >= 2 && (strings.HasPrefix(value, `"`) || strings.HasPrefix(value, `'`)) {
 		return value[1 : len(value)-1]
@@ -317,7 +314,8 @@ func sortStrings(values []string) {
 	}
 }
 
-// camel is Str::camel.
+// camel converts a kebab-case, snake_case or space-separated name to
+// camelCase.
 func camel(value string) string {
 	var out strings.Builder
 	upper := false

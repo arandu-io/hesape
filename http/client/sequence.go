@@ -5,11 +5,10 @@ import (
 	"os"
 )
 
-// ResponseSequence mirrors Illuminate\Http\Client\ResponseSequence.
-//
-// It provides an ordered sequence of stub responses that are returned
-// one at a time as requests are made. When the sequence is exhausted,
-// the next request returns an error (or a default if one is configured).
+// ResponseSequence provides an ordered sequence of stub responses that are
+// returned one at a time as requests are made. When the sequence is
+// exhausted, the next request returns an error (or a default if one is
+// configured).
 type ResponseSequence struct {
 	responses     []sequenceEntry
 	index         int

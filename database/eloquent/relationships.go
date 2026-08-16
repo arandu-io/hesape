@@ -9,17 +9,19 @@ import (
 	"github.com/arandu-io/hesape/str"
 )
 
-// This file answers Illuminate\Database\Eloquent\Concerns\QueriesRelationships.
+// The methods that filter a query by what its relations contain.
 //
-// Every method here builds SQL and runs nothing, so none of them takes a Grant.
+// Every one of them builds SQL and runs nothing, so none takes a Grant.
 // A relation whose name is not registered on the model is an error the builder
 // holds until something runs -- see Builder.err.
 
-// Has answers QueriesRelationships::has.
+// Has adds a filter on the count of relation matching operator and count:
+// relation exists (">=" 1), does not exist ("<" 1), or any other
+// comparison.
 //
-// Go has no default arguments, so the full form is spelled out and the short
-// ones -- WhereHas, DoesntHave, OrHas, which the PHP has too -- are the ones to
-// reach for. callback may be nil.
+// Go has no default arguments, so the full form is spelled out here and the
+// short ones -- WhereHas, DoesntHave, OrHas -- are the ones to reach for.
+// callback may be nil.
 func (b *Builder[T]) Has(relation, operator string, count int, boolean string, callback func(*query.Builder)) *Builder[T] {
 	if strings.Contains(relation, ".") {
 		return b.hasNested(relation, operator, count, boolean, callback)
@@ -32,11 +34,11 @@ func (b *Builder[T]) Has(relation, operator string, count int, boolean string, c
 	return b.addHasWhere(rel, operator, count, boolean, callback)
 }
 
-// addHasWhere answers QueriesRelationships::addHasWhere.
+// addHasWhere adds the where clause for a Has-style filter on rel.
 //
-// A "> = 1" or a "< 1" is an exists rather than a count, which is the
-// optimisation canUseExistsForExistenceCheck exists for: the engine can stop at
-// the first matching row instead of counting every one.
+// A ">= 1" or a "< 1" is an exists rather than a count, which is the
+// optimisation canUseExistsForExistenceCheck exists for: the engine can stop
+// at the first matching row instead of counting every one.
 func (b *Builder[T]) addHasWhere(rel Relation, operator string, count int, boolean string, callback func(*query.Builder)) *Builder[T] {
 	if boolean == "" {
 		boolean = "and"
@@ -57,41 +59,39 @@ func (b *Builder[T]) addHasWhere(rel Relation, operator string, count int, boole
 	return b.addWhereCountQuery(sub, operator, count, boolean)
 }
 
-// addWhereCountQuery answers QueriesRelationships::addWhereCountQuery: the
-// subquery compared against a number, as an expression on the left of the
-// operator.
+// addWhereCountQuery adds the subquery compared against a number, as an
+// expression on the left of the operator.
 //
-// It used to assemble that clause here, freezing sub.ToSQL() into the column of
-// a Basic where. The subquery was gone by the time anything could scope it, and
-// nothing did: Users.Has("posts", ">", 3).Get(auth.SystemGrant("user.list",
-// "acme")) ran `(select count(*) from "posts" where "users"."id" =
-// "posts"."user_id") > 3` with no posts.tenant_id in it, so one tenant's users
-// were selected by counting every tenant's posts.
+// It used to assemble that clause here, freezing sub.ToSQL() into the
+// column of a Basic where. The subquery was gone by the time anything could
+// scope it, and nothing did: Users.Has("posts", ">", 3).Get(auth.SystemGrant(
+// "user.list", "acme")) ran `(select count(*) from "posts" where
+// "users"."id" = "posts"."user_id") > 3` with no posts.tenant_id in it, so
+// one tenant's users were selected by counting every tenant's posts.
 //
 // query.WhereSubCount keeps the builder on the clause, and prepare scopes it
-// through query.Builder.ScopeNested. That is the same door the query builder's
-// own statements go through, and it is the only one.
+// through query.Builder.ScopeNested. That is the same door the query
+// builder's own statements go through, and it is the only one.
 func (b *Builder[T]) addWhereCountQuery(sub *query.Builder, operator string, count int, boolean string) *Builder[T] {
 	b.query.WhereSubCount(sub, operator, count, boolean)
 	return b
 }
 
-// canUseExistsForExistenceCheck answers
-// QueriesRelationships::canUseExistsForExistenceCheck.
+// canUseExistsForExistenceCheck reports whether operator and count can use
+// an exists check instead of a count.
 func canUseExistsForExistenceCheck(operator string, count int) bool {
 	return (operator == ">=" || operator == "<") && count == 1
 }
 
-// hasNested answers QueriesRelationships::hasNested.
+// hasNested adds a Has-style filter across a dotted relation path, such as
+// "comments.author".
 //
-// PHP recurses by calling whereHas on the related model's builder, which it
-// reaches because a relation there hands back a builder of another model class.
-// Go cannot hold "a builder of some other model" in a variable, so the recursion
-// happens on the relation instead: each segment asks the one before it for the
-// next, and the existence queries nest the same way the closures did.
+// Go cannot hold "a builder of some other model" in a variable, so the
+// recursion happens on the relation chain instead: each segment asks the
+// one before it for the next, and the existence queries nest the same way.
 //
-// A relation that cannot answer for the next segment is an error, never a query
-// with the filter silently missing.
+// A relation that cannot resolve the next segment is an error, never a
+// query with the filter silently missing.
 func (b *Builder[T]) hasNested(relations, operator string, count int, boolean string, callback func(*query.Builder)) *Builder[T] {
 	segments := strings.Split(relations, ".")
 
@@ -137,83 +137,86 @@ func nest(parent *query.Builder, chain []Relation, callback func(*query.Builder)
 type NestedRelation interface {
 	Relation
 
-	// Nested answers the relation the next segment of a dotted path names, on
-	// the related model.
+	// Nested returns the relation the next segment of a dotted path names,
+	// on the related model.
 	Nested(name string) (Relation, error)
 }
 
-// OrHas answers QueriesRelationships::orHas.
+// OrHas is Has joined with or.
 func (b *Builder[T]) OrHas(relation, operator string, count int) *Builder[T] {
 	return b.Has(relation, operator, count, "or", nil)
 }
 
-// DoesntHave answers QueriesRelationships::doesntHave.
+// DoesntHave adds a filter requiring relation to not exist.
 func (b *Builder[T]) DoesntHave(relation, boolean string, callback func(*query.Builder)) *Builder[T] {
 	return b.Has(relation, "<", 1, boolean, callback)
 }
 
-// OrDoesntHave answers QueriesRelationships::orDoesntHave.
+// OrDoesntHave is DoesntHave joined with or.
 func (b *Builder[T]) OrDoesntHave(relation string) *Builder[T] {
 	return b.DoesntHave(relation, "or", nil)
 }
 
-// WhereHas answers QueriesRelationships::whereHas.
+// WhereHas adds a filter requiring relation to exist, constrained by
+// callback.
 func (b *Builder[T]) WhereHas(relation string, callback func(*query.Builder)) *Builder[T] {
 	return b.Has(relation, ">=", 1, "and", callback)
 }
 
-// WhereHasCount answers whereHas with the operator and count PHP defaults.
+// WhereHasCount is WhereHas with an explicit operator and count instead of
+// ">=" and 1.
 func (b *Builder[T]) WhereHasCount(relation string, callback func(*query.Builder), operator string, count int) *Builder[T] {
 	return b.Has(relation, operator, count, "and", callback)
 }
 
-// OrWhereHas answers QueriesRelationships::orWhereHas.
+// OrWhereHas is WhereHas joined with or.
 func (b *Builder[T]) OrWhereHas(relation string, callback func(*query.Builder)) *Builder[T] {
 	return b.Has(relation, ">=", 1, "or", callback)
 }
 
-// WhereDoesntHave answers QueriesRelationships::whereDoesntHave.
+// WhereDoesntHave adds a filter requiring relation to not exist, constrained
+// by callback.
 func (b *Builder[T]) WhereDoesntHave(relation string, callback func(*query.Builder)) *Builder[T] {
 	return b.DoesntHave(relation, "and", callback)
 }
 
-// OrWhereDoesntHave answers QueriesRelationships::orWhereDoesntHave.
+// OrWhereDoesntHave is WhereDoesntHave joined with or.
 func (b *Builder[T]) OrWhereDoesntHave(relation string, callback func(*query.Builder)) *Builder[T] {
 	return b.DoesntHave(relation, "or", callback)
 }
 
-// WhereRelation answers QueriesRelationships::whereRelation.
+// WhereRelation adds a filter requiring relation to have a row matching
+// column args.
 func (b *Builder[T]) WhereRelation(relation string, column any, args ...any) *Builder[T] {
 	return b.WhereHas(relation, func(sub *query.Builder) {
 		sub.Where(column, args...)
 	})
 }
 
-// OrWhereRelation answers QueriesRelationships::orWhereRelation.
+// OrWhereRelation is WhereRelation joined with or.
 func (b *Builder[T]) OrWhereRelation(relation string, column any, args ...any) *Builder[T] {
 	return b.OrWhereHas(relation, func(sub *query.Builder) {
 		sub.Where(column, args...)
 	})
 }
 
-// WhereDoesntHaveRelation answers
-// QueriesRelationships::whereDoesntHaveRelation.
+// WhereDoesntHaveRelation adds a filter requiring relation to have no row
+// matching column args.
 func (b *Builder[T]) WhereDoesntHaveRelation(relation string, column any, args ...any) *Builder[T] {
 	return b.WhereDoesntHave(relation, func(sub *query.Builder) {
 		sub.Where(column, args...)
 	})
 }
 
-// WhereMorphRelation answers QueriesRelationships::whereMorphRelation.
+// WhereMorphRelation adds a filter requiring relation, constrained to any of
+// types, to have a row matching column args.
 //
-// The PHP walks the types, builds the concrete relation for each by
-// instantiating the class named in the morph column, and ors the branches
-// together. Go cannot make a type from a string, so the relation answers for its
-// own types through RelationForMorphType; everything else is the same shape.
+// Go cannot make a type from a string, so the relation resolves its own
+// types through RelationForMorphType, one branch per type, ored together.
 //
-// types of {"*"} is not carried over: PHP resolves it by selecting the distinct
-// morph column first, which is a query, and this method builds SQL and runs
-// nothing.
+// A single type of "*" is refused rather than resolved: resolving it means
+// selecting the distinct morph column first, which is a query, and this
+// method builds SQL and runs nothing.
 func (b *Builder[T]) WhereMorphRelation(relation string, types []string, column any, args ...any) *Builder[T] {
 	rel, err := b.GetRelationWithoutConstraints(relation)
 	if err != nil {
@@ -247,11 +250,11 @@ func (b *Builder[T]) WhereMorphRelation(relation string, types []string, column 
 	})
 }
 
-// WhereBelongsTo answers QueriesRelationships::whereBelongsTo.
+// WhereBelongsTo adds a filter requiring the named belongs-to relation to
+// point at one of related.
 //
-// It is a function and not a method because the related models are of another
-// type and a Go method cannot introduce a type parameter. The relation is named,
-// as it is in PHP whenever the guess from the class name would be wrong.
+// It is a function and not a method because the related models are of
+// another type and a Go method cannot introduce a type parameter.
 func WhereBelongsTo[T, R any](b *Builder[T], relationshipName string, related ...*Model[R]) *Builder[T] {
 	if len(related) == 0 {
 		return b.fail(fmt.Errorf("eloquent: WhereBelongsTo was given no models to belong to"))
@@ -273,19 +276,19 @@ func WhereBelongsTo[T, R any](b *Builder[T], relationshipName string, related ..
 	return b
 }
 
-// WithAggregate answers QueriesRelationships::withAggregate: a subselect per
-// relation, aliased onto the row.
+// WithAggregate adds a subselect per relation, aliased onto the row.
 //
-// A name may carry an alias -- "posts as recent_posts" -- exactly as there.
+// A name may carry an alias -- "posts as recent_posts".
 //
-// The subselect goes in through query.SelectSub, and the exists form through
-// query.SelectExistsSub, which are the methods that record a subquery so the
-// tenant can be put on it when the Grant arrives. This used to write the column
-// itself, with AddSelect and SelectRaw over sub.ToSQL(), and a subquery compiled
-// into a raw column is a subquery nothing can scope: Users.WithCount("posts").
-// Get(auth.SystemGrant("user.list", "acme")) answered every row with the number
-// of posts EVERY tenant had, and WithSum("orders", "total") handed one tenant
-// another tenant's revenue as a scalar.
+// The subselect goes in through query.SelectSub, and the exists form
+// through query.SelectExistsSub, which are the methods that record a
+// subquery so the tenant can be put on it when the Grant arrives. This used
+// to write the column itself, with AddSelect and SelectRaw over
+// sub.ToSQL(), and a subquery compiled into a raw column is a subquery
+// nothing can scope: Users.WithCount("posts").Get(auth.SystemGrant(
+// "user.list", "acme")) gave every row the number of posts EVERY tenant
+// had, and WithSum("orders", "total") handed one tenant another tenant's
+// revenue as a scalar.
 func (b *Builder[T]) WithAggregate(relations []string, column, function string) *Builder[T] {
 	if len(relations) == 0 {
 		return b
@@ -337,7 +340,7 @@ func (b *Builder[T]) WithAggregate(relations []string, column, function string) 
 }
 
 // aggregateColumn wraps the column an aggregate is taken over, leaving "*"
-// alone, which is what the PHP's `$column === '*' ? $column : wrap(...)` does.
+// alone.
 func (b *Builder[T]) aggregateColumn(column string) string {
 	if column == "*" {
 		return column
@@ -354,9 +357,9 @@ func splitAggregateAlias(entry string) (name, alias string) {
 	return entry, ""
 }
 
-// aggregateAlias answers the alias withAggregate builds when none was given:
-// the relation, the function and the column, snake cased, with the punctuation
-// dropped. "posts", "count", "*" is posts_count.
+// aggregateAlias returns the alias WithAggregate builds when none was
+// given: the relation, the function and the column, snake cased, with the
+// punctuation dropped. "posts", "count", "*" is posts_count.
 func aggregateAlias(name, function, column string) string {
 	raw := fmt.Sprintf("%s %s %s", name, function, strings.ToLower(column))
 	var kept strings.Builder
@@ -369,38 +372,38 @@ func aggregateAlias(name, function, column string) string {
 	return str.Snake(strings.TrimSpace(kept.String()), "_")
 }
 
-// WithCount answers QueriesRelationships::withCount.
+// WithCount adds the row count of each relation, aliased onto the row.
 func (b *Builder[T]) WithCount(relations ...string) *Builder[T] {
 	return b.WithAggregate(relations, "*", "count")
 }
 
-// WithMax answers QueriesRelationships::withMax.
+// WithMax adds the max of column over relation, aliased onto the row.
 func (b *Builder[T]) WithMax(relation, column string) *Builder[T] {
 	return b.WithAggregate([]string{relation}, column, "max")
 }
 
-// WithMin answers QueriesRelationships::withMin.
+// WithMin adds the min of column over relation, aliased onto the row.
 func (b *Builder[T]) WithMin(relation, column string) *Builder[T] {
 	return b.WithAggregate([]string{relation}, column, "min")
 }
 
-// WithSum answers QueriesRelationships::withSum.
+// WithSum adds the sum of column over relation, aliased onto the row.
 func (b *Builder[T]) WithSum(relation, column string) *Builder[T] {
 	return b.WithAggregate([]string{relation}, column, "sum")
 }
 
-// WithAvg answers QueriesRelationships::withAvg.
+// WithAvg adds the average of column over relation, aliased onto the row.
 func (b *Builder[T]) WithAvg(relation, column string) *Builder[T] {
 	return b.WithAggregate([]string{relation}, column, "avg")
 }
 
-// WithExists answers QueriesRelationships::withExists.
+// WithExists adds whether relation exists, aliased onto the row.
 func (b *Builder[T]) WithExists(relation string) *Builder[T] {
 	return b.WithAggregate([]string{relation}, "*", "exists")
 }
 
-// loadAggregateModels is the query Collection::loadAggregate runs: the keys of
-// the collection, with the aggregate columns beside them.
+// loadAggregateModels is the query Collection.LoadAggregate runs: the keys
+// of the collection, with the aggregate columns beside them.
 func (b *Builder[T]) loadAggregateModels(g auth.Grant, keys []any, relations []string, column, function string) (Collection[T], error) {
 	return b.WhereKey(keys).
 		Select(b.model.GetQualifiedKeyName()).

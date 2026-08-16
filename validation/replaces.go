@@ -4,22 +4,17 @@ import (
 	"strings"
 )
 
-// This file answers to Illuminate\Validation\Concerns\ReplacesAttributes: the
-// :min, :max, :other, :values and :date of each message, filled in with what the
-// rule was actually written with.
+// This file fills the :min, :max, :other, :values and :date of each message with
+// what the rule was actually written with.
 //
-// The PHP dispatches on a method name -- replace{$rule} -- which Go has no
-// spelling for, so the same set is a table keyed by the same rule names. A rule
-// with no entry keeps its message unchanged, which is what a missing method
-// means there. The keys are snake_case because that is how a rule is spelled
-// everywhere in this package; the PHP studlies first and snakes back.
+// It is a table keyed by rule name, snake_case as a rule is spelled everywhere
+// in this package. A rule with no entry keeps its message unchanged.
 
 // replacerFunc is one entry of that table.
 type replacerFunc func(v *Validator, message, attribute, rule string, parameters []string) string
 
-// ReplacerFunc is a replacer an application registers with AddReplacer, in the
-// argument order of the Closure the PHP calls: message, attribute, rule,
-// parameters, validator.
+// ReplacerFunc is a replacer an application registers with AddReplacer: message,
+// attribute, rule, parameters, validator.
 type ReplacerFunc func(message, attribute, rule string, parameters []string, validator *Validator) string
 
 var replacers = map[string]replacerFunc{
@@ -87,10 +82,8 @@ var replacers = map[string]replacerFunc{
 	"dimensions": replaceDimensions,
 }
 
-// replaceOtherAndValue answers to replaceAcceptedIf, replaceDeclinedIf,
-// replaceMissingIf, replacePresentIf, replaceProhibitedIf and replaceRequiredIf,
-// which are one body in the PHP too: :other is the field that decided, and
-// :value is what it actually holds.
+// replaceOtherAndValue is the body every _if rule shares: :other is the field
+// that decided, and :value is what it actually holds.
 func replaceOtherAndValue(v *Validator, message, attribute, rule string, parameters []string) string {
 	other := param(parameters, 0)
 	value := v.GetDisplayableValue(other, v.data.Get(other))
@@ -99,9 +92,9 @@ func replaceOtherAndValue(v *Validator, message, attribute, rule string, paramet
 	return strings.ReplaceAll(message, ":value", value)
 }
 
-// replaceOtherAndFirstValue answers to replaceMissingUnless and
-// replacePresentUnless: :value is the value written into the rule, not the one
-// the other field holds.
+// replaceOtherAndFirstValue is the body missing_unless and present_unless share:
+// :value is the value written into the rule, not the one the other field
+// holds.
 func replaceOtherAndFirstValue(v *Validator, message, attribute, rule string, parameters []string) string {
 	other := param(parameters, 0)
 
@@ -109,8 +102,8 @@ func replaceOtherAndFirstValue(v *Validator, message, attribute, rule string, pa
 	return strings.ReplaceAll(message, ":value", v.GetDisplayableValue(other, param(parameters, 1)))
 }
 
-// replaceOtherAndValues answers to replaceRequiredUnless and
-// replaceProhibitedUnless.
+// replaceOtherAndValues is the body required_unless and prohibited_unless share:
+// :values is every value written into the rule.
 func replaceOtherAndValues(v *Validator, message, attribute, rule string, parameters []string) string {
 	other := param(parameters, 0)
 
@@ -124,35 +117,35 @@ func replaceOtherAndValues(v *Validator, message, attribute, rule string, parame
 	return strings.ReplaceAll(message, ":values", strings.Join(values, ", "))
 }
 
-// replaceOther answers to replaceRequiredIfAccepted, replaceRequiredIfDeclined,
-// replaceProhibitedIfAccepted and replaceProhibitedIfDeclined.
+// replaceOther fills :other for the four rules whose only parameter is another
+// field: required_if_accepted, required_if_declined, prohibited_if_accepted and
+// prohibited_if_declined.
 func replaceOther(v *Validator, message, attribute, rule string, parameters []string) string {
 	return strings.ReplaceAll(message, ":other", v.GetDisplayableAttribute(param(parameters, 0)))
 }
 
-// replaceSame answers to replaceSame and replaceDifferent, which the PHP defines
-// as a call to the first.
+// replaceSame fills :other for `same` and `different`.
 func replaceSame(v *Validator, message, attribute, rule string, parameters []string) string {
 	return strings.ReplaceAll(message, ":other", v.GetDisplayableAttribute(param(parameters, 0)))
 }
 
-// replaceInArray answers to replaceInArray.
+// replaceInArray fills :other with the field `in_array` reads its values from.
 func replaceInArray(v *Validator, message, attribute, rule string, parameters []string) string {
 	return strings.ReplaceAll(message, ":other", v.GetDisplayableAttribute(param(parameters, 0)))
 }
 
-// replaceBetween answers to replaceBetween and replaceDigitsBetween.
+// replaceBetween fills :min and :max for `between` and `digits_between`.
 func replaceBetween(v *Validator, message, attribute, rule string, parameters []string) string {
 	message = strings.ReplaceAll(message, ":min", param(parameters, 0))
 	return strings.ReplaceAll(message, ":max", param(parameters, 1))
 }
 
-// replaceDateFormat answers to replaceDateFormat.
+// replaceDateFormat fills :format with the layout the rule was written with.
 func replaceDateFormat(v *Validator, message, attribute, rule string, parameters []string) string {
 	return strings.ReplaceAll(message, ":format", param(parameters, 0))
 }
 
-// replaceDecimal answers to replaceDecimal: one bound, or both joined by a dash.
+// replaceDecimal fills :decimal with one bound, or both joined by a dash.
 func replaceDecimal(v *Validator, message, attribute, rule string, parameters []string) string {
 	places := param(parameters, 0)
 	if len(parameters) > 1 {
@@ -161,41 +154,39 @@ func replaceDecimal(v *Validator, message, attribute, rule string, parameters []
 	return strings.ReplaceAll(message, ":decimal", places)
 }
 
-// replaceDigits answers to replaceDigits.
+// replaceDigits fills :digits with how many the rule asked for.
 func replaceDigits(v *Validator, message, attribute, rule string, parameters []string) string {
 	return strings.ReplaceAll(message, ":digits", param(parameters, 0))
 }
 
-// replaceSize answers to replaceSize.
+// replaceSize fills :size with the size the rule asked for.
 func replaceSize(v *Validator, message, attribute, rule string, parameters []string) string {
 	return strings.ReplaceAll(message, ":size", param(parameters, 0))
 }
 
-// replaceMin answers to replaceMin and replaceMinDigits.
+// replaceMin fills :min for `min` and `min_digits`.
 func replaceMin(v *Validator, message, attribute, rule string, parameters []string) string {
 	return strings.ReplaceAll(message, ":min", param(parameters, 0))
 }
 
-// replaceMax answers to replaceMax and replaceMaxDigits.
+// replaceMax fills :max for `max` and `max_digits`.
 func replaceMax(v *Validator, message, attribute, rule string, parameters []string) string {
 	return strings.ReplaceAll(message, ":max", param(parameters, 0))
 }
 
-// replaceMultipleOf answers to replaceMultipleOf.
+// replaceMultipleOf fills :value with the divisor.
 func replaceMultipleOf(v *Validator, message, attribute, rule string, parameters []string) string {
 	return strings.ReplaceAll(message, ":value", param(parameters, 0))
 }
 
-// replaceValueList answers to replaceExtensions, replaceMimes and
-// replaceMimetypes: the parameters as written, comma separated.
+// replaceValueList fills :values with the parameters as written, comma
+// separated. It is what `extensions`, `mimes` and `mimetypes` use.
 func replaceValueList(v *Validator, message, attribute, rule string, parameters []string) string {
 	return strings.ReplaceAll(message, ":values", strings.Join(parameters, ", "))
 }
 
-// replaceDisplayableValueList answers to replaceIn, replaceNotIn,
-// replaceRequiredArrayKeys, replaceStartsWith, replaceEndsWith,
-// replaceDoesntStartWith and replaceDoesntEndWith: each parameter is a VALUE, so
-// it goes through the values lines first.
+// replaceDisplayableValueList fills :values for the rules whose parameters are
+// VALUES, so each goes through the values lines first.
 func replaceDisplayableValueList(v *Validator, message, attribute, rule string, parameters []string) string {
 	values := make([]string, len(parameters))
 	for i, parameter := range parameters {
@@ -204,22 +195,21 @@ func replaceDisplayableValueList(v *Validator, message, attribute, rule string, 
 	return strings.ReplaceAll(message, ":values", strings.Join(values, ", "))
 }
 
-// replaceAttributeList answers to replaceRequiredWith and the seven rules the
-// PHP routes into it: each parameter is a FIELD NAME, so it goes through the
-// attribute names, and the separator is " / " rather than ", ".
+// replaceAttributeList fills :values for the rules whose parameters are FIELD
+// NAMES, so each goes through the attribute names, and the separator is " / "
+// rather than ", ".
 func replaceAttributeList(v *Validator, message, attribute, rule string, parameters []string) string {
 	return strings.ReplaceAll(message, ":values", strings.Join(v.getAttributeList(parameters), " / "))
 }
 
-// replaceProhibits answers to replaceProhibits, which spells the same list into
-// :other rather than :values.
+// replaceProhibits spells the same list of field names into :other rather than
+// :values.
 func replaceProhibits(v *Validator, message, attribute, rule string, parameters []string) string {
 	return strings.ReplaceAll(message, ":other", strings.Join(v.getAttributeList(parameters), " / "))
 }
 
-// replaceComparison answers to replaceGt, replaceGte, replaceLt and replaceLte:
-// :value is the SIZE of the other field when it has one, and its NAME when the
-// field was not sent at all.
+// replaceComparison fills :value for the four comparisons: the SIZE of the other
+// field when it has one, and its NAME when the field was not sent at all.
 func replaceComparison(v *Validator, message, attribute, rule string, parameters []string) string {
 	other := param(parameters, 0)
 
@@ -231,12 +221,11 @@ func replaceComparison(v *Validator, message, attribute, rule string, parameters
 	return strings.ReplaceAll(message, ":value", sizeText(size))
 }
 
-// replaceDate answers to replaceBefore and the four rules the PHP routes into
-// it: :date is the moment when the argument reads as one, and the name of the
-// other field when it does not.
+// replaceDate fills :date for the five date comparisons: the moment when the
+// argument reads as one, and the name of the other field when it does not.
 //
-// The PHP asks strtotime, which accepts "next thursday"; this asks parseDate,
-// which is the same set of spellings the date rules themselves read.
+// It reads the argument with parseDate, which is the same set of spellings the
+// date rules themselves read.
 func replaceDate(v *Validator, message, attribute, rule string, parameters []string) string {
 	moment := param(parameters, 0)
 
@@ -246,8 +235,8 @@ func replaceDate(v *Validator, message, attribute, rule string, parameters []str
 	return strings.ReplaceAll(message, ":date", v.GetDisplayableValue(attribute, moment))
 }
 
-// replaceDimensions answers to replaceDimensions: every named parameter fills
-// the placeholder its own name spells, so "min_width=100" fills :min_width.
+// replaceDimensions fills one placeholder per named parameter, each spelled by
+// its own name: "min_width=100" fills :min_width.
 func replaceDimensions(v *Validator, message, attribute, rule string, parameters []string) string {
 	for name, value := range v.ParseNamedParameters(parameters) {
 		message = strings.ReplaceAll(message, ":"+name, value)
@@ -255,16 +244,14 @@ func replaceDimensions(v *Validator, message, attribute, rule string, parameters
 	return message
 }
 
-// ReplaceRequiredIfDeclined answers to
-// ReplacesAttributes::replaceRequiredIfDeclined, which the PHP declares public
-// rather than protected -- it is called from outside the trait.
+// ReplaceRequiredIfDeclined fills :other for `required_if_declined`. It is
+// exported because it is called from outside this package.
 func (v *Validator) ReplaceRequiredIfDeclined(message, attribute, rule string, parameters []string) string {
 	return replaceOther(v, message, attribute, rule, parameters)
 }
 
-// ReplaceProhibitedIfDeclined answers to
-// ReplacesAttributes::replaceProhibitedIfDeclined, public for the reason
-// ReplaceRequiredIfDeclined is.
+// ReplaceProhibitedIfDeclined fills :other for `prohibited_if_declined`,
+// exported for the reason ReplaceRequiredIfDeclined is.
 func (v *Validator) ReplaceProhibitedIfDeclined(message, attribute, rule string, parameters []string) string {
 	return replaceOther(v, message, attribute, rule, parameters)
 }

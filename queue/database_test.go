@@ -160,7 +160,7 @@ func TestPopClaimsWithACompareAndSet(t *testing.T) {
 	}
 	// The delivery is counted when the job is handed over, so a job being
 	// handled for the first time has Attempts == 1. A driver that returns the
-	// count from before the delivery makes MaxAttempts of 2 park on the first
+	// count from before the delivery makes a try limit of 2 park on the first
 	// failure.
 	if popped[0].Attempts != 1 {
 		t.Errorf("attempts = %d on the first delivery", popped[0].Attempts)
@@ -203,13 +203,12 @@ func TestPopOnlyLooksAtJobsThatAreDueAndNotRunning(t *testing.T) {
 	}
 }
 
-// TestPopTakesTheJobThatWasQueuedFirst is the audit's input: A is pushed with a
-// delay of ten seconds, B is pushed straight after with none. Ten seconds later
-// both are eligible, and DatabaseQueue.php:298 hands over A -- orderBy('id',
-// 'asc') is insertion order, and a delayed job that has come due is older than
-// everything queued after it.
+// TestPopTakesTheJobThatWasQueuedFirst: A is pushed with a delay of ten
+// seconds, B is pushed straight after with none. Ten seconds later both are
+// eligible, and A goes first -- insertion order, because a delayed job that has
+// come due is older than everything queued after it.
 //
-// Ordering by run_at handed over B, and it does that to every delayed job: the
+// Ordering by run_at hands over B, and it does that to every delayed job: the
 // job waits out its delay and then goes to the back of a queue that filled up
 // while it waited. On a busy queue that is not a reordering, it is a job that
 // never runs.
@@ -256,11 +255,9 @@ func TestPopTakesTheJobThatWasQueuedFirst(t *testing.T) {
 	}
 }
 
-// TestReleasingAJobWritesItsExceptionCount: Laravel keeps this count in the
-// cache under "job-exceptions:{uuid}" for a day, so it crosses deliveries. Here
-// the column exists and the release did not write it, so every delivery read
-// zero: a job with MaxExceptions 2 and MaxTries 5 was delivered five times
-// where Laravel delivers it twice.
+// TestReleasingAJobWritesItsExceptionCount: the count has to cross deliveries.
+// With the column unwritten by the release, every delivery reads zero and a job
+// with MaxExceptions 2 and MaxTries 5 is delivered all five times.
 func TestReleasingAJobWritesItsExceptionCount(t *testing.T) {
 	ctx := context.Background()
 	q, state := databaseQueue(t)
@@ -337,8 +334,8 @@ func TestFailParksTheJob(t *testing.T) {
 	if got := args[1].Value; got != "the payload is malformed" {
 		t.Errorf("last_error = %v", got)
 	}
-	// fail() calls delete() in Laravel, and here too: a parked job is settled,
-	// and the worker must not settle it a second time.
+	// Parking a job settles it, and the worker must not settle it a second
+	// time.
 	if !popped[0].HasFailed() || !popped[0].IsDeletedOrReleased() {
 		t.Error("a parked job does not report itself settled")
 	}

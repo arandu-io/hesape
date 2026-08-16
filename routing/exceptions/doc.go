@@ -1,14 +1,6 @@
-// Package exceptions mirrors Illuminate\Routing\Exceptions.
-//
-// The files it answers to, in the clone at
-// laravel_illuminate/routing/Exceptions:
-//
-//	BackedEnumCaseNotFoundException.php
-//	InvalidSignatureException.php
-//	MissingRateLimiterException.php
-//	StreamedResponseException.php
-//	UrlGenerationException.php
-//
-// Nothing is implemented here yet. 20-components/DOC-hesape-reorganization.md says what
-// moves in, from where, and in which phase.
+// Package exceptions holds the error types a route, a signed URL or a
+// streamed response can fail with: an invalid signature, a missing rate
+// limiter, a route URL that is missing required parameters, a backed-enum
+// parameter that matched no case, and a streamed response that failed after
+// the headers were already sent.
 package exceptions

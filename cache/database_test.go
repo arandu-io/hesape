@@ -104,8 +104,8 @@ func TestDatabaseStoreRefusesATtlThatIsNotOne(t *testing.T) {
 	}
 }
 
-// TestDatabaseStoreFlushOnlyRemovesThePrefix is RULE 14 in SQL: one tenant's
-// cache:clear must not be a DELETE FROM cache.
+// TestDatabaseStoreFlushOnlyRemovesThePrefix pins tenant isolation in SQL: one
+// tenant's cache:clear must not be a DELETE FROM cache.
 func TestDatabaseStoreFlushOnlyRemovesThePrefix(t *testing.T) {
 	ctx := context.Background()
 	store, _ := newDatabaseStore(t)
@@ -304,8 +304,7 @@ func TestDatabaseStoreConnectionNameIsEmptyWhenNobodySaid(t *testing.T) {
 	}
 }
 
-// namedConnection is a connection that knows what it is called, which is what
-// Illuminate\Database\ConnectionInterface::getName() answers.
+// namedConnection is a connection that knows what it is called.
 type namedConnection struct {
 	*sql.DB
 	name string

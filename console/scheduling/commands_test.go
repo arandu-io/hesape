@@ -21,9 +21,8 @@ func (c *fakeClock) Now() time.Time { return c.now }
 func (c *fakeClock) Sleep(d time.Duration) { c.now = c.now.Add(d) }
 
 // TestASubMinuteEventRepeatsWithinTheMinute: EveryFifteenSeconds recorded
-// repeatSeconds and nothing ever read it -- ShouldRepeatNow had no caller at all
-// -- so an event declared to run four times a minute ran once. The PHP runs it
-// four times, in ScheduleRunCommand::repeatEvents.
+// repeatSeconds and nothing ever read it -- ShouldRepeatNow had no caller at
+// all -- so an event declared to run four times a minute ran once.
 func TestASubMinuteEventRepeatsWithinTheMinute(t *testing.T) {
 	s := scheduling.NewSchedule(nil, nil, nil)
 
@@ -129,11 +128,10 @@ func run(t *testing.T, commands scheduling.Commands, args ...string) (string, er
 	return out.String() + errOut.String(), err
 }
 
-// TestScheduleTestRunsTheEventInTheForeground: the command ran the event as it
-// was declared, so an event that says RunInBackground was started and walked
-// away from -- and Event.Run returns before Finish for a background event, which
-// left the overlap mutex held until it expired a day later. The PHP sets
-// $event->runInBackground = false before it runs it.
+// TestScheduleTestRunsTheEventInTheForeground: the command ran the event as
+// it was declared, so an event that says RunInBackground was started and
+// walked away from -- and Event.Run returns before Finish for a background
+// event, which left the overlap mutex held until it expired a day later.
 func TestScheduleTestRunsTheEventInTheForeground(t *testing.T) {
 	mutex := &fakeEventMutex{}
 	s := scheduling.NewSchedule(mutex, nil, nil)
@@ -170,9 +168,9 @@ func (i *fakeInterrupter) Interrupted(context.Context) (bool, error) {
 }
 
 // TestScheduleInterruptLastsUntilTheEndOfTheMinute: the mark was left for an
-// hour, so a worker restarted at any point in the next hour was stopped by an
-// interrupt meant for the process before it -- which is the opposite of what the
-// command's own comment claimed. The PHP puts it until Date::now()->endOfMinute().
+// hour, so a worker restarted at any point in the next hour was stopped by
+// an interrupt meant for the process before it -- which is the opposite of
+// what the command's own comment claimed.
 func TestScheduleInterruptLastsUntilTheEndOfTheMinute(t *testing.T) {
 	interrupter := &fakeInterrupter{}
 	commands := scheduling.Commands{
@@ -190,10 +188,9 @@ func TestScheduleInterruptLastsUntilTheEndOfTheMinute(t *testing.T) {
 	}
 }
 
-// TestScheduleFinishFinishesEveryEventWithThatName: the command returned at the
-// first match, so a schedule that declares the same command twice left the
-// second one holding its mutex and never ran its after callbacks. The PHP
-// filters the collection and each()es over all of them.
+// TestScheduleFinishFinishesEveryEventWithThatName: the command returned at
+// the first match, so a schedule that declares the same command twice left
+// the second one holding its mutex and never ran its after callbacks.
 func TestScheduleFinishFinishesEveryEventWithThatName(t *testing.T) {
 	s := scheduling.NewSchedule(nil, nil, nil)
 
@@ -221,8 +218,8 @@ func TestScheduleFinishFinishesEveryEventWithThatName(t *testing.T) {
 
 // TestScheduleFinishWithAnUnknownIdSucceeds: it is appended to a backgrounded
 // command line, so it runs in a process that has already lost the run it is
-// reporting on. Exiting 1 for an id the schedule no longer has turns a deploy
-// that changed the schedule into a failed background job. The PHP exits 0.
+// reporting on. Exiting 1 for an id the schedule no longer has turns a
+// deploy that changed the schedule into a failed background job.
 func TestScheduleFinishWithAnUnknownIdSucceeds(t *testing.T) {
 	s := scheduling.NewSchedule(nil, nil, nil)
 	s.Exec("app:work").Daily()

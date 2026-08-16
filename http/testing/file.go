@@ -15,28 +15,28 @@ import (
 	hhttp "github.com/arandu-io/hesape/http"
 )
 
-// File mirrors Illuminate\Http\Testing\File: an UploadedFile a test made, with
-// a size and a type it reports rather than ones a browser sent.
+// File is an UploadedFile a test made, with a size and a type it reports
+// rather than ones a browser sent.
 //
-// It embeds *hesape/http.UploadedFile because the PHP `extends UploadedFile`,
-// so everything an upload answers -- HashName, Extension, Get, StoreAs -- is
-// the same method on the same file.
+// It embeds *hesape/http.UploadedFile, so everything an upload answers --
+// HashName, Extension, Get, StoreAs -- is the same method on the same
+// file.
 type File struct {
 	*hhttp.UploadedFile
 
-	// Name is File::$name: the name the fake announces.
+	// Name is the name the fake announces.
 	Name string
-	// TempFile is File::$tempFile: the file on disk holding the bytes. It is
-	// removed by [File.Close].
+	// TempFile is the file on disk holding the bytes. It is removed by
+	// [File.Close].
 	TempFile *os.File
-	// SizeToReport is File::$sizeToReport.
+	// SizeToReport is the size [File.Size] set, in bytes.
 	SizeToReport int64
-	// MimeTypeToReport is File::$mimeTypeToReport.
+	// MimeTypeToReport is the type [File.MimeType] set.
 	MimeTypeToReport string
 }
 
-// NewFile answers to File::__construct: a fake around a name and a temporary
-// file already holding the bytes.
+// NewFile builds a fake around a name and a temporary file already holding
+// the bytes.
 func NewFile(name string, tempFile *os.File) *File {
 	f := &File{Name: name, TempFile: tempFile}
 	f.MimeTypeToReport = ""
@@ -46,7 +46,8 @@ func NewFile(name string, tempFile *os.File) *File {
 	return f
 }
 
-// tempFilePath answers to File::tempFilePath.
+// tempFilePath is the path of the temporary file, or empty when there is
+// none.
 func (f *File) tempFilePath() string {
 	if f.TempFile == nil {
 		return ""
@@ -54,34 +55,31 @@ func (f *File) tempFilePath() string {
 	return f.TempFile.Name()
 }
 
-// Create answers to File::create: a fake file of the given size in kilobytes.
-//
-// The PHP takes string|int for $kilobytes and treats a string as content; Go
-// has no union, so the content form is [CreateWithContent], which is the method
-// the PHP delegates to anyway. The variadic argument is the PHP's default of 0.
+// Create is a fake file of the given size in kilobytes. For content
+// instead of a size, use [CreateWithContent]. The variadic argument
+// defaults to 0.
 func Create(name string, kilobytes ...int) (*File, error) {
 	return NewFileFactory().Create(name, kilobytes...)
 }
 
-// CreateWithContent answers to File::createWithContent.
+// CreateWithContent is a fake file holding the given content.
 func CreateWithContent(name, content string) (*File, error) {
 	return NewFileFactory().CreateWithContent(name, content)
 }
 
-// Image answers to File::image: a fake image of the given size. The variadic
-// arguments are the PHP's defaults of 10 and 10.
+// Image is a fake image of the given size. The variadic arguments default
+// to 10 and 10.
 func Image(name string, size ...int) (*File, error) {
 	return NewFileFactory().Image(name, size...)
 }
 
-// Size answers to File::size: set the size the fake reports, in kilobytes.
+// Size sets the size the fake reports, in kilobytes.
 func (f *File) Size(kilobytes int) *File {
 	f.SizeToReport = int64(kilobytes) * 1024
 	return f
 }
 
-// GetSize answers to File::getSize: the size the fake reports, falling back to
-// the size on disk.
+// GetSize is the size the fake reports, falling back to the size on disk.
 func (f *File) GetSize() int64 {
 	if f.SizeToReport > 0 {
 		return f.SizeToReport
@@ -92,14 +90,14 @@ func (f *File) GetSize() int64 {
 	return f.UploadedFile.GetSize()
 }
 
-// MimeType answers to File::mimeType: set the type the fake reports.
+// MimeType sets the type the fake reports.
 func (f *File) MimeType(contentType string) *File {
 	f.MimeTypeToReport = contentType
 	return f
 }
 
-// GetMimeType answers to File::getMimeType: the type the fake reports, falling
-// back to the one the name implies.
+// GetMimeType is the type the fake reports, falling back to the one the
+// name implies.
 func (f *File) GetMimeType() string {
 	if f.MimeTypeToReport != "" {
 		return f.MimeTypeToReport
@@ -107,8 +105,8 @@ func (f *File) GetMimeType() string {
 	return From(f.Name)
 }
 
-// Close removes the temporary file. The PHP leaves it to the request ending; a
-// Go test has to say when, so this is what a test defers.
+// Close removes the temporary file. It is what a test defers, since
+// nothing removes it automatically.
 func (f *File) Close() error {
 	if f.TempFile == nil {
 		return nil
@@ -118,29 +116,24 @@ func (f *File) Close() error {
 	return os.Remove(name)
 }
 
-// FileFactory mirrors Illuminate\Http\Testing\FileFactory: the three ways to
-// make a fake upload.
+// FileFactory is the three ways to make a fake upload.
 type FileFactory struct{}
 
-// NewFileFactory builds a FileFactory. It answers to `new FileFactory`, which
-// is what UploadedFile::fake returns in the PHP -- see the package doc for why
-// the entry point is here and not on hesape/http.UploadedFile.
+// NewFileFactory builds a FileFactory. See the package doc for why the
+// entry point ([Fake]) is here and not on hesape/http.UploadedFile.
 func NewFileFactory() *FileFactory { return &FileFactory{} }
 
-// Fake answers to UploadedFile::fake: begin creating a new file fake.
+// Fake begins creating a new file fake.
 //
-// It is in this package and not on hesape/http.UploadedFile because
-// Illuminate\Http\Testing\File extends UploadedFile: the sub-package imports
-// the parent, so a Fake on the parent would import the sub-package back and
-// close a cycle.
+// It is in this package and not on hesape/http.UploadedFile because File
+// embeds UploadedFile: this sub-package imports the parent, so a Fake on
+// the parent would import the sub-package back and close a cycle.
 func Fake() *FileFactory { return NewFileFactory() }
 
-// Create answers to FileFactory::create: a fake file of the given size in
-// kilobytes. The variadic arguments are the PHP's $kilobytes (0) and $mimeType
-// (none).
+// Create is a fake file of the given size in kilobytes. The variadic
+// argument defaults to 0.
 //
-// The PHP returns a File and throws nothing; making a temporary file can fail
-// in Go, so this returns (*File, error).
+// Returns (*File, error): making a temporary file can fail.
 func (f *FileFactory) Create(name string, args ...int) (*File, error) {
 	kilobytes := 0
 	if len(args) > 0 {
@@ -155,9 +148,9 @@ func (f *FileFactory) Create(name string, args ...int) (*File, error) {
 	return file, nil
 }
 
-// CreateWithMimeType answers to the third argument of FileFactory::create,
-// which names the type the fake reports. It is a separate method because Go has
-// no optional argument that can be skipped over.
+// CreateWithMimeType is Create with the type the fake reports also set. It
+// is a separate method because Go has no optional argument that can be
+// skipped over.
 func (f *FileFactory) CreateWithMimeType(name string, kilobytes int, contentType string) (*File, error) {
 	file, err := f.Create(name, kilobytes)
 	if err != nil {
@@ -166,8 +159,8 @@ func (f *FileFactory) CreateWithMimeType(name string, kilobytes int, contentType
 	return file.MimeType(contentType), nil
 }
 
-// CreateWithContent answers to FileFactory::createWithContent: a fake file
-// holding the given bytes, reporting their length as its size.
+// CreateWithContent is a fake file holding the given bytes, reporting
+// their length as its size.
 func (f *FileFactory) CreateWithContent(name, content string) (*File, error) {
 	temp, err := tempFile(name)
 	if err != nil {
@@ -184,15 +177,13 @@ func (f *FileFactory) CreateWithContent(name, content string) (*File, error) {
 	return file, nil
 }
 
-// Image answers to FileFactory::image: a fake image of the given size, encoded
-// in the format the name's extension names.
+// Image is a fake image of the given size, encoded in the format the
+// name's extension names.
 //
-// The PHP throws LogicException when GD is missing or the format has no
-// encoder; Go's image encoders are in the standard library, so the error here
-// is a write failing. PNG, JPEG and GIF are what image/png, image/jpeg and
-// image/gif encode; anything else falls back to JPEG, as the PHP does.
+// PNG, JPEG and GIF are what image/png, image/jpeg and image/gif encode;
+// anything else falls back to JPEG.
 //
-// The variadic arguments are the PHP's $width (10) and $height (10).
+// The variadic arguments are width and height, defaulting to 10 and 10.
 func (f *FileFactory) Image(name string, size ...int) (*File, error) {
 	width, height := 10, 10
 	if len(size) > 0 {
@@ -221,7 +212,8 @@ func (f *FileFactory) Image(name string, size ...int) (*File, error) {
 	return file, nil
 }
 
-// generateImage answers to FileFactory::generateImage.
+// generateImage draws a solid black image of the given size and encodes it
+// in the given format.
 func generateImage(width, height int, extension string) ([]byte, error) {
 	if width <= 0 {
 		width = 1
@@ -252,9 +244,9 @@ func generateImage(width, height int, extension string) ([]byte, error) {
 	return buffer.Bytes(), nil
 }
 
-// tempFile answers to PHP's tmpfile(): a file in the temporary directory
-// keeping the name's extension, so that the type the fake reports and the
-// bytes on disk agree.
+// tempFile is a file in the temporary directory keeping the name's
+// extension, so that the type the fake reports and the bytes on disk
+// agree.
 func tempFile(name string) (*os.File, error) {
 	pattern := "hesape-fake-*" + path.Ext(name)
 	handle, err := os.CreateTemp("", pattern)

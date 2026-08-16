@@ -7,25 +7,22 @@ import (
 	"strings"
 )
 
-// AccessToken answers Illuminate\Socialite\OAuthTwo\AccessToken: what the
-// provider answered when the code was exchanged.
+// AccessToken is what the provider answered when the code was exchanged.
 //
-// In PHP it extends ParameterBag and carries whatever came back --
-// access_token, refresh_token, expires_in, scope, token_type. It is a map here
-// for the same reason, and a map of strings because the two encodings a
-// provider replies in disagree about types: an old Facebook returns
-// "expires=100" in a form-encoded body, and Google returns {"expires_in":100}
-// in JSON. Both arrive here as "100", so a caller reads one thing.
+// It carries whatever came back -- access_token, refresh_token, expires_in,
+// scope, token_type -- as a map of strings, because the two encodings a
+// provider replies in disagree about types: a form-encoded body returns
+// "expires=100" and JSON returns {"expires_in":100}. Both arrive here as "100",
+// so a caller reads one thing.
 type AccessToken map[string]string
 
-// GetValue answers AccessToken::getValue(): the access token itself.
-//
-// fallback is Illuminate's optional $default.
+// GetValue is the access token itself. fallback is used when the provider sent
+// none.
 func (t AccessToken) GetValue(fallback ...string) string {
 	return t.Get("access_token", fallback...)
 }
 
-// Get answers ParameterBag::get() for any other parameter the provider sent --
+// Get reads any other parameter the provider sent --
 // refresh_token, expires_in, scope.
 func (t AccessToken) Get(key string, fallback ...string) string {
 	if v, ok := t[key]; ok {
@@ -37,20 +34,17 @@ func (t AccessToken) Get(key string, fallback ...string) string {
 	return ""
 }
 
-// Has answers ParameterBag::has().
+// Has reports whether the provider sent this parameter.
 func (t AccessToken) Has(key string) bool {
 	_, ok := t[key]
 	return ok
 }
 
-// parseAccessResponse answers Provider::parseAccessResponse() and the
-// two overrides of it.
+// parseAccessResponse reads the body of a token exchange.
 //
-// Illuminate needs three versions of this method -- parse_str for the base,
-// json_decode for Google and for Stripe -- because each subclass knows what its
-// provider replies with. One version reads both: a body that opens with a brace
-// is JSON and anything else is form-encoded, and no provider has to be
-// configured for something that is written in the reply.
+// One implementation reads both encodings: a body that opens with a brace is
+// JSON and anything else is form-encoded, so no provider has to be configured
+// for something that is already written in the reply.
 func parseAccessResponse(body []byte) (AccessToken, error) {
 	trimmed := strings.TrimSpace(string(body))
 	if strings.HasPrefix(trimmed, "{") {

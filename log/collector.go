@@ -36,10 +36,6 @@ func (s *collectorSlot) get() *Collector {
 	return s.c
 }
 
-// WithCollectorSlot has no Illuminate counterpart: it exists because the
-// Collector travels in a context.Context that is copied as it goes down the
-// middleware chain, and PHP passes the container by reference.
-//
 // WithCollectorSlot reserves a place in the context for a Collector that a
 // middleware further in will create. Recover installs it in development; outside
 // development it is not installed at all, so production pays nothing for it.
@@ -63,10 +59,8 @@ type Collector struct {
 	RequestID string
 
 	// The slices are unexported and reachable only through the accessors below,
-	// which copy under the lock. They used to be exported and read directly by
-	// the console, the recorder, the worker and the scheduler -- every one of
-	// those reads raced against a goroutine the handler had started and not
-	// waited for, and the race detector says so. Found by audit.
+	// which copy under the lock. Read directly, every one of them races against
+	// a goroutine the handler started and did not wait for.
 	queries  []QueryRecord
 	dumps    []DumpRecord
 	events   []EventRecord
@@ -125,18 +119,11 @@ type Frame struct {
 	Func string
 }
 
-// NewCollector has no Illuminate counterpart: it is what answers per-request
-// debug capture here, and the nearest thing Illuminate has is the error page's
-// Listener, which is a process-wide singleton that collects queries only.
-//
 // NewCollector returns a collector for a request id.
 func NewCollector(requestID string) *Collector {
 	return &Collector{Start: time.Now(), RequestID: requestID}
 }
 
-// WithCollector has no Illuminate counterpart: Illuminate binds its Listener in
-// the container once, at boot, and never per request.
-//
 // WithCollector installs the collector in the context, and fills the slot when
 // one was reserved upstream, so a middleware outside this one can still reach it.
 func WithCollector(ctx context.Context, c *Collector) context.Context {
@@ -146,8 +133,7 @@ func WithCollector(ctx context.Context, c *Collector) context.Context {
 	return context.WithValue(ctx, ctxCollectorKey{}, c)
 }
 
-// FromContext has no Illuminate counterpart: it is the read side of
-// WithCollector, where Illuminate resolves the Listener out of the container.
+// FromContext is the read side of WithCollector.
 //
 // FromContext returns the request collector, or nil in production. Every method
 // below is safe on a nil receiver, so callers never need to check.
@@ -161,11 +147,6 @@ func FromContext(ctx context.Context) *Collector {
 	return nil
 }
 
-// RecordQuery has no Illuminate counterpart: Listener::onQueryExecuted is the
-// nearest thing, and it is a QueryExecuted listener that keeps the connection
-// name, the sql and the time -- no caller frame, no row count, no error -- caps
-// the list at a hundred and truncates the statement at two thousand bytes.
-//
 // RecordQuery stores one database call. The skip value walks past this method
 // and the database.DB wrapper, so Caller points at the repository, not at the
 // framework.
@@ -180,9 +161,6 @@ func (c *Collector) RecordQuery(sql string, args []any, d time.Duration, rows in
 	})
 }
 
-// RecordEvent has no Illuminate counterpart: what an application dispatched is
-// something Illuminate shows in Telescope, which is a separate package.
-//
 // RecordEvent stores one application event.
 //
 // Guard the call when the payload is a struct value:
@@ -205,9 +183,6 @@ func (c *Collector) RecordEvent(name string, payload any) {
 	c.events = append(c.events, EventRecord{Name: name, Payload: payload, At: time.Since(c.Start)})
 }
 
-// RecordExternal has no Illuminate counterpart: the error page there knows
-// nothing about outbound calls.
-//
 // RecordExternal stores one outbound HTTP call.
 func (c *Collector) RecordExternal(method, url string, status int, d time.Duration) {
 	if c == nil {
@@ -218,9 +193,6 @@ func (c *Collector) RecordExternal(method, url string, status int, d time.Durati
 	c.external = append(c.external, ExternalRecord{Method: method, URL: url, Status: status, Duration: d})
 }
 
-// RecordRender has no Illuminate counterpart: Blade reports no render timing to
-// the error page.
-//
 // RecordRender stores one template render.
 //
 // The view runtime calls it around every render; anything producing HTML can
@@ -235,10 +207,6 @@ func (c *Collector) RecordRender(name string, d time.Duration) {
 	c.renders = append(c.renders, RenderRecord{Name: name, Duration: d, At: time.Since(c.Start)})
 }
 
-// SlowQueries has no Illuminate counterpart: Illuminate has
-// Connection::whenQueryingForLongerThan, which is a threshold over the whole
-// connection rather than a question asked of one finished request.
-//
 // SlowQueries returns the queries at or above the limit. It feeds the "slow
 // query" badge on the debug page.
 func (c *Collector) SlowQueries(limit time.Duration) []QueryRecord {
@@ -256,10 +224,6 @@ func (c *Collector) SlowQueries(limit time.Duration) []QueryRecord {
 	return out
 }
 
-// SuspectedNPlusOne has no Illuminate counterpart: the N+1 is caught there by
-// Model::preventLazyLoading, which throws at the lazy load rather than counting
-// statements afterwards.
-//
 // SuspectedNPlusOne counts identical statements repeated within the request and
 // returns those at or above the threshold. It is the diagnosis that saves the
 // most time on generated CRUD.
@@ -281,9 +245,6 @@ func (c *Collector) SuspectedNPlusOne(threshold int) map[string]int {
 	return count
 }
 
-// QueryTime has no Illuminate counterpart: the error page there lists the
-// queries and never adds their time up.
-//
 // QueryTime is the total time spent in the database during the request.
 func (c *Collector) QueryTime() time.Duration {
 	if c == nil {
@@ -298,9 +259,6 @@ func (c *Collector) QueryTime() time.Duration {
 	return total
 }
 
-// Queries has no Illuminate counterpart: Listener::queries is the nearest thing,
-// and it hands out its own array because PHP has no second goroutine to race it.
-//
 // Queries returns a copy of the recorded database calls.
 //
 // A copy, and under the lock: the caller is usually the console rendering a
@@ -316,9 +274,6 @@ func (c *Collector) Queries() []QueryRecord {
 	return append([]QueryRecord(nil), c.queries...)
 }
 
-// Dumps has no Illuminate counterpart: a PHP dump is written straight into the
-// output and never stored, so nothing there has a list of them to hand back.
-//
 // Dumps returns a copy of the recorded dumps.
 func (c *Collector) Dumps() []DumpRecord {
 	if c == nil {
@@ -329,9 +284,6 @@ func (c *Collector) Dumps() []DumpRecord {
 	return append([]DumpRecord(nil), c.dumps...)
 }
 
-// Events has no Illuminate counterpart, for the same reason RecordEvent has
-// none.
-//
 // Events returns a copy of the recorded application events.
 func (c *Collector) Events() []EventRecord {
 	if c == nil {
@@ -342,9 +294,6 @@ func (c *Collector) Events() []EventRecord {
 	return append([]EventRecord(nil), c.events...)
 }
 
-// External has no Illuminate counterpart, for the same reason RecordExternal has
-// none.
-//
 // External returns a copy of the recorded outbound HTTP calls.
 func (c *Collector) External() []ExternalRecord {
 	if c == nil {
@@ -355,9 +304,6 @@ func (c *Collector) External() []ExternalRecord {
 	return append([]ExternalRecord(nil), c.external...)
 }
 
-// Renders has no Illuminate counterpart, for the same reason RecordRender has
-// none.
-//
 // Renders returns a copy of the recorded template renders.
 func (c *Collector) Renders() []RenderRecord {
 	if c == nil {
@@ -368,9 +314,6 @@ func (c *Collector) Renders() []RenderRecord {
 	return append([]RenderRecord(nil), c.renders...)
 }
 
-// QueryCount has no Illuminate counterpart: PHP counts Listener::queries with
-// count(), which costs nothing there because the array is not copied to be read.
-//
 // QueryCount is how many database calls the request made.
 //
 // It exists so the common case -- a log line saying how many -- does not copy

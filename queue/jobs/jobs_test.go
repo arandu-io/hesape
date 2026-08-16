@@ -64,8 +64,9 @@ func TestPrepareDefaultsTheRunTimeToNow(t *testing.T) {
 	}
 }
 
-// TestFailSettlesTheJob: fail() calls delete() in Laravel, and the worker reads
-// DeletedOrReleased to find out whether it still has a decision to make.
+// TestFailSettlesTheJob: parking a job marks it deleted too, and the worker
+// reads DeletedOrReleased to find out whether it still has a decision to
+// make.
 func TestFailSettlesTheJob(t *testing.T) {
 	driver := &settled{}
 	j := jobs.Popped(driver, "test", jobs.Job{UUID: "j-1", Name: "invoice.send"})

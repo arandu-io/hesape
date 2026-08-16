@@ -12,13 +12,11 @@ import (
 	"github.com/arandu-io/hesape/view/engines"
 )
 
-// Factory mirrors Illuminate\View\Factory.
-//
-// It produces View instances from the compiled view registry and manages
-// shared data, composers, creators, sections, stacks, loops, components,
-// fragments and translations. The compiler that turns .kyse.go into the Go
-// functions this Factory runs lives in aru/internal/kyse (ADR 0044), and
-// this is the API that wraps it.
+// Factory produces View instances from the compiled view registry and
+// manages shared data, composers, creators, sections, stacks, loops,
+// components, fragments and translations. The compiler that turns .kyse.go
+// into the Go functions this Factory runs is a separate concern; this is the
+// API that wraps it.
 //
 // A Factory is created once per application and shared across requests.
 // Its methods are goroutine-safe.
@@ -381,18 +379,13 @@ func (f *Factory) MarkAsRenderedOnce(id string) {
 }
 
 // Flush clears caches and shared state. Use between requests in tests.
-//
-// It answers no single PHP method: there it is flushState plus the finder's
-// own flush, and the two are always called together.
 func (f *Factory) Flush() {
 	f.FlushState()
 	f.FlushFinderCache()
 }
 
-// FlushState is Factory::flushState.
-//
-// It resets per-request state: sections, stacks, components, fragments and the
-// render count.
+// FlushState resets per-request state: sections, stacks, components,
+// fragments and the render count.
 //
 // It used to take the lock and then call the four Flush methods, each of which
 // takes the same lock. A sync.RWMutex is not reentrant, so the first call after
@@ -409,14 +402,15 @@ func (f *Factory) FlushState() {
 	f.renderedOnce = map[string]bool{}
 }
 
-// FlushStateIfDoneRendering is Factory::flushStateIfDoneRendering.
+// FlushStateIfDoneRendering calls FlushState only when DoneRendering reports
+// true.
 func (f *Factory) FlushStateIfDoneRendering() {
 	if f.DoneRendering() {
 		f.FlushState()
 	}
 }
 
-// FlushFinderCache is Factory::flushFinderCache.
+// FlushFinderCache clears the finder's cache, if a finder is set.
 func (f *Factory) FlushFinderCache() {
 	f.mu.RLock()
 	finder := f.finder
@@ -426,22 +420,22 @@ func (f *Factory) FlushFinderCache() {
 	}
 }
 
-// GetDispatcher is Factory::getDispatcher.
+// GetDispatcher returns the registered event dispatcher, or nil.
 func (f *Factory) GetDispatcher() Dispatcher {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.events
 }
 
-// SetDispatcher is Factory::setDispatcher.
+// SetDispatcher registers the event dispatcher composers and creators are
+// announced through.
 func (f *Factory) SetDispatcher(events Dispatcher) {
 	f.mu.Lock()
 	f.events = events
 	f.mu.Unlock()
 }
 
-// Dispatcher is the half of Illuminate\Contracts\Events\Dispatcher the view
-// layer uses.
+// Dispatcher is the event-dispatch contract the view layer uses.
 //
 // The contract lives in the package that consumes it, which is why it is
 // declared here and not imported: a Factory that has one announces

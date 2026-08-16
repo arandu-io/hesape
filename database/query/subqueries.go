@@ -8,15 +8,14 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// The subquery half of Illuminate\Database\Query\Builder: the methods that take
-// a whole query and compile it into a clause of this one -- selectSub, fromSub,
-// joinSub and their kin.
+// The subquery half of the query builder: the methods that take a whole query
+// and compile it into a clause of this one -- SelectSub, FromSub, JoinSub and
+// their kin.
 //
 // # Why a subquery is not compiled where it is written
 //
-// The PHP compiles it on the spot: fromSub calls createSub, which turns the
-// argument into SQL and bindings and hands them to fromRaw. That cannot happen
-// here, because a compiled subquery is a query nobody scoped.
+// Compiling it on the spot cannot happen here, because a compiled subquery is a
+// query nobody scoped.
 //
 // `from (select * from invoices) as i` reads the invoices table whole. A tenant
 // filter on the outer query says which rows of that result survive, not which
@@ -50,9 +49,10 @@ type pendingSub struct {
 	prefix  string   // the operator the subquery is written under, e.g. "exists"
 }
 
-// resolveSub unwraps the Closure|Builder|string a subquery argument may be.
+// resolveSub unwraps the various shapes a subquery argument may take: a
+// callback, a *Builder, a *JoinClause, a string of SQL or an Expression.
 //
-// It answers the builder to scope later, or nil for an argument that is already
+// It returns the builder to scope later, or nil for an argument that is already
 // SQL: nothing here can add a tenant filter to a string, which is the reason to
 // hand these methods a builder instead.
 func (b *Builder) resolveSub(query any) (*Builder, string, []any, error) {
@@ -142,8 +142,7 @@ func (b *Builder) forgetSubqueriesOfSegment(segment string) {
 	b.forgetSubqueries(func(sub pendingSub) bool { return sub.segment == segment })
 }
 
-// SelectSub answers Builder::selectSub: a subquery as one column of the select
-// list.
+// SelectSub adds a subquery as one column of the select list.
 func (b *Builder) SelectSub(query any, as string) *Builder {
 	return b.selectSub(query, as, "")
 }
@@ -151,9 +150,8 @@ func (b *Builder) SelectSub(query any, as string) *Builder {
 // SelectExistsSub is SelectSub for a subquery asked as a yes or no: it compiles
 // to `exists (select ...) as alias`.
 //
-// The PHP has no such method -- withExists writes the whole column with
-// selectRaw, and the eloquent builder here copied that. A subquery written as
-// raw SQL is a subquery nothing can scope afterwards, which is what
+// The eloquent builder's WithExists used to write the whole column as raw SQL,
+// which is a subquery nothing can scope afterwards -- and that is what
 // Users.WithExists("posts").Get(g) proved: the column asked whether ANY tenant
 // had a post for that user. This is selectSub with the one operator that column
 // needs, so the exists form goes through the same bookkeeping every other
@@ -176,9 +174,9 @@ func (b *Builder) selectSub(query any, as, prefix string) *Builder {
 	return b
 }
 
-// WhereSubCount is the clause Eloquent's addWhereCountQuery compiles: a subquery
-// on the LEFT of a comparison, `(select count(*) from posts where posts.user_id
-// = users.id) > 3`.
+// WhereSubCount adds a where clause with a subquery on the LEFT of a
+// comparison: a subquery like `(select count(*) from posts where
+// posts.user_id = users.id) > 3`.
 //
 // The builder had no method for that shape, so both copies of the eloquent
 // has-query wrote the clause by hand, as a Basic where whose column was
@@ -214,14 +212,13 @@ func (b *Builder) WhereSubCount(sub *Builder, operator string, count int, boolea
 	return b
 }
 
-// SelectExpression answers Builder::selectExpression: an expression as one
-// column, under an alias. It binds nothing, because an expression is SQL.
+// SelectExpression adds an expression as one column, under an alias. It binds
+// nothing, because an expression is SQL.
 func (b *Builder) SelectExpression(expression any, as string) *Builder {
 	return b.AddSelect(b.aliased("", stringify(expression), as, false))
 }
 
-// FromSub answers Builder::fromSub: the query reads from a subquery rather than
-// from a table.
+// FromSub makes the query read from a subquery rather than from a table.
 func (b *Builder) FromSub(query any, as string) *Builder {
 	sub, sql, bindings, err := b.resolveSub(query)
 	if err != nil {
@@ -235,11 +232,11 @@ func (b *Builder) FromSub(query any, as string) *Builder {
 	return b
 }
 
-// JoinSub answers Builder::joinSub: a join against a subquery.
+// JoinSub joins against a subquery.
 //
 // typ is the join type -- inner, left, right, cross or straight_join -- and
-// isWhere says whether the condition compares a column with a value rather than
-// with another column, which is what the PHP's $where flag does.
+// isWhere says whether the condition compares a column with a value rather
+// than with another column.
 func (b *Builder) JoinSub(query any, as string, first any, operator, second any, typ string, isWhere bool) *Builder {
 	sub, sql, bindings, err := b.resolveSub(query)
 	if err != nil {
@@ -258,23 +255,23 @@ func (b *Builder) JoinSub(query any, as string, first any, operator, second any,
 	return b
 }
 
-// LeftJoinSub answers Builder::leftJoinSub.
+// LeftJoinSub is JoinSub with typ set to "left".
 func (b *Builder) LeftJoinSub(query any, as string, first any, operator, second any) *Builder {
 	return b.JoinSub(query, as, first, operator, second, "left", false)
 }
 
-// RightJoinSub answers Builder::rightJoinSub.
+// RightJoinSub is JoinSub with typ set to "right".
 func (b *Builder) RightJoinSub(query any, as string, first any, operator, second any) *Builder {
 	return b.JoinSub(query, as, first, operator, second, "right", false)
 }
 
-// StraightJoinSub answers Builder::straightJoinSub.
+// StraightJoinSub is JoinSub with typ set to "straight_join".
 func (b *Builder) StraightJoinSub(query any, as string, first any, operator, second any) *Builder {
 	return b.JoinSub(query, as, first, operator, second, "straight_join", false)
 }
 
-// CrossJoinSub answers Builder::crossJoinSub: a cross join against a subquery,
-// which has no condition at all.
+// CrossJoinSub is a cross join against a subquery, which has no condition at
+// all.
 //
 // A cross join multiplies the rows of both sides, so the subquery is the whole
 // of what the join contributes: without a tenant filter of its own it would
@@ -294,8 +291,8 @@ func (b *Builder) CrossJoinSub(query any, as string) *Builder {
 	return b
 }
 
-// JoinLateral answers Builder::joinLateral: a join against a subquery that may
-// name the columns of the rows already joined.
+// JoinLateral joins against a subquery that may name the columns of the rows
+// already joined.
 func (b *Builder) JoinLateral(query any, as string, typ string) *Builder {
 	sub, sql, bindings, err := b.resolveSub(query)
 	if err != nil {
@@ -313,7 +310,7 @@ func (b *Builder) JoinLateral(query any, as string, typ string) *Builder {
 	return b
 }
 
-// LeftJoinLateral answers Builder::leftJoinLateral.
+// LeftJoinLateral is JoinLateral with typ set to "left".
 func (b *Builder) LeftJoinLateral(query any, as string) *Builder {
 	return b.JoinLateral(query, as, "left")
 }

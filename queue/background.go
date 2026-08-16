@@ -10,14 +10,9 @@ import (
 
 // BackgroundQueue runs each job in a separate operating system process.
 //
-// It answers Illuminate\Queue\BackgroundQueue, which pushes onto the sync
-// connection through Concurrency::driver('process')->defer(). In PHP that is a
-// forked worker, and the reason it exists is that PHP has no threads: work that
-// must not block the request has nowhere else to go.
-//
-// Go has goroutines, so the same work belongs on [DeferredQueue] -- which is
-// this without the process. What is left for this driver is the case a
-// goroutine cannot serve: a job that must survive the request's process
+// Work that must not block the request usually belongs on [DeferredQueue] --
+// which is this without the process. What is left for this driver is the case
+// a goroutine cannot serve: a job that must survive the request's process
 // crashing, or one that has to be isolated from it.
 //
 // It is a wrapper over a command rather than a fork, because Go cannot fork:
@@ -59,7 +54,7 @@ func (errNoBackgroundRunner) Error() string {
 // Push starts the job in another process.
 //
 // The job is authorized first, for the reason [DeferredQueue.Push] gives: a
-// refusal has to reach the caller (RULE 17).
+// refusal has to reach the caller.
 func (q *BackgroundQueue) Push(ctx context.Context, g auth.Grant, j jobs.Job) error {
 	if err := jobs.Authorized(g, j); err != nil {
 		return err

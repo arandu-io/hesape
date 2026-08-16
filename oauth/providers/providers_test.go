@@ -13,7 +13,7 @@ import (
 	"github.com/arandu-io/hesape/oauth/providers"
 )
 
-// fakeStore is the state store the PHP test mocks.
+// fakeStore is a state store that counts what was asked of it.
 type fakeStore struct {
 	state string
 	sets  int
@@ -71,8 +71,7 @@ func provider(store providers.StateStoreInterface) *providers.Provider {
 		"https://auth.test/authorize", "https://auth.test/token", "https://auth.test/me")
 }
 
-// TestGettingAuthUrlSetsStateInStorage is the PHP's
-// testGettingAuthUrlSetsStateInStorage: the redirect is what writes the state
+// TestGettingAuthUrlSetsStateInStorage: the redirect is what writes the state
 // down, and everything the callback checks depends on it having happened.
 func TestGettingAuthUrlSetsStateInStorage(t *testing.T) {
 	store := &fakeStore{}
@@ -87,8 +86,7 @@ func TestGettingAuthUrlSetsStateInStorage(t *testing.T) {
 	}
 }
 
-// TestAuthUrlQueryStringConstruction is the PHP's
-// testAuthUrlQueryStringConstruction.
+// TestAuthUrlQueryStringConstruction pins the query the browser is sent with.
 func TestAuthUrlQueryStringConstruction(t *testing.T) {
 	store := &fakeStore{}
 	p := provider(store).SetScope("read", "write")
@@ -138,8 +136,7 @@ func TestGoogleSeparatesScopesWithASpace(t *testing.T) {
 	}
 }
 
-// TestStateMismatchThrowsException is the PHP's
-// testStateMismatchThrowsException, and the reason this package exists in the
+// TestStateMismatchThrowsException is the reason this package exists in the
 // shape it does: a callback carrying a state this browser never asked for is
 // refused before anything is exchanged.
 func TestStateMismatchThrowsException(t *testing.T) {
@@ -174,9 +171,8 @@ func TestAnEmptyStateIsAMismatch(t *testing.T) {
 	}
 }
 
-// TestTheStateIsCheckedForEveryProvider is the divergence from the clone,
-// stated as a test: Illuminate's GithubProvider overrides stateMismatch() to
-// return false, and this does not.
+// TestTheStateIsCheckedForEveryProvider: no provider here opts out of the
+// state check, GitHub included.
 func TestTheStateIsCheckedForEveryProvider(t *testing.T) {
 	for name, build := range map[string]func(providers.StateStoreInterface) *providers.Provider{
 		"github": func(s providers.StateStoreInterface) *providers.Provider {
@@ -201,9 +197,8 @@ func TestTheStateIsCheckedForEveryProvider(t *testing.T) {
 	}
 }
 
-// TestAccessRequestCalledWithProperOptions is the PHP's
-// testAccessRequestCalledWithProperOptions, with the one difference the package
-// comment explains: the fields go in a form body rather than a query string.
+// TestAccessRequestCalledWithProperOptions pins the token exchange: the fields
+// go in a form body rather than a query string.
 func TestAccessRequestCalledWithProperOptions(t *testing.T) {
 	store := &fakeStore{state: "bar"}
 	client := answering(http.StatusOK, "access_token=token&expires=100")
@@ -444,8 +439,8 @@ func TestScopesMergeAndSetScopesReplace(t *testing.T) {
 	}
 }
 
-// TestSetScopeDelimiterSetsTheDelimiter: the PHP assigns from a variable its
-// own signature never declares, so the call silently nulls the delimiter.
+// TestSetScopeDelimiterSetsTheDelimiter pins that the delimiter the call was
+// given is the delimiter the scopes are joined by.
 func TestSetScopeDelimiterSetsTheDelimiter(t *testing.T) {
 	p := provider(&fakeStore{}).SetScope("a", "b").SetScopeDelimiter("|")
 	if got := p.GetScopeDelimiter(); got != "|" {

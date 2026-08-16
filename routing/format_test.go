@@ -7,9 +7,9 @@ import (
 	"github.com/arandu-io/hesape/routing"
 )
 
-// TestFormatRoutesGroupsByModuleAndSortsByPattern is what `aru routes` prints.
-// The order is the whole value of the command: a list nobody can scan is a list
-// nobody reads.
+// TestFormatRoutesGroupsByModuleAndSortsByPattern is what the CLI's route
+// list prints. The order is the whole value of the command: a list nobody can
+// scan is a list nobody reads.
 func TestFormatRoutesGroupsByModuleAndSortsByPattern(t *testing.T) {
 	r := routing.NewRouter()
 	billing := r.ForModule("billing")

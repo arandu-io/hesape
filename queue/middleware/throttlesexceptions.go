@@ -10,8 +10,8 @@ import (
 
 // ThrottlesExceptions stops hammering a dependency that is already failing.
 //
-// It answers Illuminate\Queue\Middleware\ThrottlesExceptions. It counts
-// failures rather than attempts: once a job has failed more than the limit
+// It counts failures rather than attempts: once a job has failed more than the
+// limit
 // allows inside the window, the ones that follow are released without being
 // run at all, so a third-party API that is down gets a pause instead of the
 // whole queue retrying against it.
@@ -121,10 +121,10 @@ func (m *ThrottlesExceptions) FailWhen(f func(error) bool) *ThrottlesExceptions 
 
 // Report narrows which failures are worth reporting.
 //
-// It answers report(). A dependency that is down produces one failure per job,
-// and reporting every one of them is how the report becomes noise: the
-// predicate is what says "only the first", or "only the ones that are not
-// timeouts". A nil predicate reports everything, which is the PHP's default.
+// A dependency that is down produces one failure per job, and reporting every
+// one of them is how the report becomes noise: the predicate is what says "only
+// the first", or "only the ones that are not timeouts". A nil predicate reports
+// everything.
 //
 // It does not report anything itself. What it decides is what
 // [ThrottlesExceptions.ShouldReport] answers, and the caller's error reporter
@@ -137,8 +137,8 @@ func (m *ThrottlesExceptions) Report(f func(error) bool) *ThrottlesExceptions {
 
 // ShouldReport reports whether a failure is worth reporting.
 //
-// It is the read half of [ThrottlesExceptions.Report], and it has no PHP name
-// because in PHP the middleware calls report() itself through a global helper.
+// It is the read half of [ThrottlesExceptions.Report]. This package does not
+// report anything itself, so the caller asks and acts.
 func (m *ThrottlesExceptions) ShouldReport(err error) bool {
 	return m.report == nil || m.report(err)
 }
@@ -158,10 +158,9 @@ func (m *ThrottlesExceptions) Handle(ctx context.Context, j *jobs.Job, next func
 	limit := m.limit.By(key(j, name))
 
 	// Reading the counter without spending it: Attempt counts and answers, and
-	// Release gives the count straight back. It answers Laravel's
-	// tooManyAttempts(), which cache.RateLimiter has no method for -- and
-	// adding one there for a caller in this package would be a second way to
-	// ask a counter a question (RULE 9).
+	// Release gives the count straight back. cache.RateLimiter has no method
+	// for asking without spending, and adding one for a caller in this package
+	// would be a second way to ask a counter a question.
 	//
 	// The window this counter measures is failures, not deliveries, which is
 	// why nothing is spent here and Hit is called below only when something
@@ -185,8 +184,8 @@ func (m *ThrottlesExceptions) Handle(ctx context.Context, j *jobs.Job, next func
 	if runErr == nil {
 		return nil
 	}
-	// Delete and fail are checked before the counter, exactly as the PHP checks
-	// them first: a failure that means the work is pointless is not evidence
+	// Delete and fail are checked before the counter: a failure that means the
+	// work is pointless is not evidence
 	// that the dependency is down, and counting it would throttle jobs that
 	// would have succeeded.
 	if m.deleteWhen != nil && m.deleteWhen(runErr) {

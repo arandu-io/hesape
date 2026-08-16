@@ -15,8 +15,7 @@ import (
 // On the context rather than in every repository signature, for one reason: the
 // Repository contract already takes a Grant, and adding a second required
 // argument to five methods would make every generated repository exist in two
-// shapes -- one for transactions and one for outside them. That is the second
-// way to do one thing that RULE 9 forbids.
+// shapes -- one for transactions and one for outside them.
 //
 // It is also how the outbox works at all: events.Outbox.Store writes through the
 // same DB handle the repository just wrote through, and lands in the same

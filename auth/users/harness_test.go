@@ -17,8 +17,7 @@ import (
 //
 // It compiles real SQL through the SQLite grammar rather than stubbing the
 // builder, because half of what a provider is judged on is the statement it
-// issued -- that the tenant is on it (RULE 14 and RULE 17), and that the
-// password never is.
+// issued -- that the tenant is on it, and that the password never is.
 
 // statement is one call the connection took.
 type statement struct {
@@ -114,8 +113,7 @@ func (c *fakeConnection) only(t *testing.T) statement {
 }
 
 // assertScopedBy fails unless the statement filters by the tenant column and
-// binds the given tenant. It is RULE 17 written as an assertion: a read is
-// scoped exactly as a write is.
+// binds the given tenant: a read is scoped exactly as a write is.
 func (s statement) assertScopedBy(t *testing.T, tenant string) {
 	t.Helper()
 	if !strings.Contains(s.sql, `"tenant_id"`) {
@@ -157,8 +155,7 @@ var (
 	_ auth.Authenticatable = (*testUser)(nil)
 )
 
-// newTestUser is the model constructor EloquentUserProvider is built with, in
-// place of the PHP's class-string.
+// newTestUser is the model constructor EloquentUserProvider is built with.
 func newTestUser() auth.Authenticatable { return &testUser{attributes: map[string]any{}} }
 
 func (u *testUser) GetAuthIdentifierName() string { return "id" }

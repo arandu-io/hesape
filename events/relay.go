@@ -23,8 +23,7 @@ type Publisher interface {
 // PublisherFunc adapts a function to Publisher.
 type PublisherFunc func(ctx context.Context, e Stored) error
 
-// Publish has no Illuminate counterpart: it calls f, which is the adapter half
-// of PublisherFunc.
+// Publish calls f, which is the adapter half of PublisherFunc.
 func (f PublisherFunc) Publish(ctx context.Context, e Stored) error { return f(ctx, e) }
 
 // RelayOptions configures the relay.
@@ -85,13 +84,13 @@ type Relay struct {
 	opts      RelayOptions
 }
 
-// NewRelay has no Illuminate counterpart: it returns what answers at-least-once
-// delivery here, and Laravel has nothing that reads a table and republishes it.
+// NewRelay returns the relay that reads the outbox and republishes it, which is
+// what makes delivery at-least-once.
 func NewRelay(o *Outbox, p Publisher, opts RelayOptions) *Relay {
 	return &Relay{outbox: o, publisher: p, opts: opts.withDefaults()}
 }
 
-// Run has no Illuminate counterpart: it polls until the context is cancelled.
+// Run polls until the context is cancelled.
 //
 // It is started by the module at boot and stopped at shutdown, in the same
 // process as the application -- like the scheduler, and for the same reason: a
@@ -121,12 +120,9 @@ func (r *Relay) Run(ctx context.Context) error {
 
 // pass publishes one batch, under the lock when there is one.
 //
-// It is Cache::lock('outbox-relay', $ttl)->get($callback): the lock runs the
-// batch when it took it, and answers false when another replica holds it --
-// which is the lock working, not a failure, and logging it every second would
-// bury everything else. This used to read the refusal out of the error message
-// with strings.Contains, because the lock came from an adapter the core could
-// not import.
+// The lock runs the batch when it took it, and answers false when another
+// replica holds it -- which is the lock working, not a failure, and logging it
+// every second would bury everything else.
 func (r *Relay) pass(ctx context.Context) error {
 	if r.opts.Locks == nil {
 		return r.publishBatch(ctx)
@@ -186,9 +182,8 @@ func (r *Relay) publishBatch(ctx context.Context) error {
 		// stopping the process would be the thing that caused the duplicate.
 		// The wait Close performs would have been waiting for the damage.
 		//
-		// Found by TestWithRelayPublishesAndStops, which was flaky rather than
-		// failing: the window is the width of one database write, so it opened
-		// only when the machine was busy enough -- the whole suite under -race.
+		// The window is the width of one database write, so it opens only when
+		// the machine is busy enough for the two to interleave.
 		//
 		// The timeout is what keeps Close from hanging: an unreachable database
 		// stops the shutdown after this long, and the event is delivered again
@@ -206,8 +201,7 @@ func (r *Relay) publishBatch(ctx context.Context) error {
 	return nil
 }
 
-// Drain has no Illuminate counterpart: it publishes everything pending, once,
-// and returns.
+// Drain publishes everything pending, once, and returns.
 //
 // This is what a test uses. There is no synchronous mode -- the test runs the
 // same code path as production, with the relay executed inline instead of on a
@@ -217,14 +211,13 @@ func (r *Relay) Drain(ctx context.Context) error {
 	return r.publishBatch(ctx)
 }
 
-// Parked has no Illuminate counterpart: it returns the events that gave up, for
-// the diagnosis and for whoever is deciding whether to retry them.
+// Parked returns the events that gave up, for the diagnosis and for whoever is
+// deciding whether to retry them.
 func (r *Relay) Parked(ctx context.Context, limit int) ([]Stored, error) {
 	return r.outbox.Parked(ctx, limit)
 }
 
-// Lag has no Illuminate counterpart: it is how long the oldest unpublished event
-// has been waiting.
+// Lag is how long the oldest unpublished event has been waiting.
 //
 // This is the number that matters: a relay that stopped looks exactly like a
 // relay with nothing to do, and only the age of the oldest pending event tells

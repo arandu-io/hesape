@@ -11,7 +11,7 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// The writing half of Illuminate\Database\Query\Builder.
+// The writing half of the query builder.
 //
 // A write is filtered by tenant the way a read is, and the filter takes two
 // shapes because the statements do. An update and a delete carry the tenant in
@@ -20,38 +20,38 @@ import (
 // written from the Grant, and a value the caller passed for it does not survive
 // -- a row cannot be inserted into a tenant nobody authorized.
 
-// InsertUsingGrammar is the part of
-// Illuminate\Database\Query\Grammars\Grammar that compiles an insert reading
+// InsertUsingGrammar is the part of a grammar that compiles an insert reading
 // from a select. It is asked for rather than declared on Grammar because the
 // Grammar interface is closed and this is not on it.
 type InsertUsingGrammar interface {
-	// CompileInsertUsing answers Grammar::compileInsertUsing.
+	// CompileInsertUsing compiles an insert that reads its rows from a select
+	// query.
 	CompileInsertUsing(query *Builder, columns []any, sql string) string
 
-	// CompileInsertOrIgnoreUsing answers Grammar::compileInsertOrIgnoreUsing.
+	// CompileInsertOrIgnoreUsing compiles CompileInsertUsing's insert-or-ignore
+	// variant.
 	CompileInsertOrIgnoreUsing(query *Builder, columns []any, sql string) string
 }
 
 // UpdateFromGrammar is the part of the grammar that compiles Postgres's
 // "update ... from" syntax.
 //
-// The PHP asks method_exists($this->grammar, 'compileUpdateFrom') and throws a
-// LogicException when the answer is no, which is this type assertion with the
-// question written by hand.
+// Not every grammar implements it, so callers use a type assertion against
+// this interface and return an error when it fails, rather than calling a
+// method that might not exist.
 type UpdateFromGrammar interface {
-	// CompileUpdateFrom answers PostgresGrammar::compileUpdateFrom.
+	// CompileUpdateFrom compiles an "update ... from" statement.
 	CompileUpdateFrom(query *Builder, values map[string]any) string
 
-	// PrepareBindingsForUpdateFrom answers
-	// PostgresGrammar::prepareBindingsForUpdateFrom.
+	// PrepareBindingsForUpdateFrom orders the bindings for an "update ... from"
+	// statement to match the placeholders CompileUpdateFrom produces.
 	PrepareBindingsForUpdateFrom(bindings map[string][]any, values map[string]any) []any
 }
 
-// Insert answers Builder::insert.
+// Insert inserts one row or many.
 //
-// One row or many: the PHP takes either an associative array or a list of them
-// and normalises to a list, which variadic arguments do here without the
-// inspection.
+// Variadic arguments accept either shape directly, without needing to inspect
+// whether the caller passed one row or a list.
 //
 // The rows are copied before the tenant is stamped into them, so a caller's map
 // does not gain a column it never asked for.
@@ -76,9 +76,8 @@ func (b *Builder) Insert(ctx context.Context, g auth.Grant, values ...map[string
 		query.CleanBindings(flattenRows(rows)))
 }
 
-// InsertOrIgnore answers Builder::insertOrIgnore: the insert that lets the
-// engine drop the rows that would violate a unique constraint, and answers with
-// how many it kept.
+// InsertOrIgnore inserts rows, letting the engine drop the ones that would
+// violate a unique constraint, and returns how many it kept.
 func (b *Builder) InsertOrIgnore(ctx context.Context, g auth.Grant, values ...map[string]any) (int64, error) {
 	if len(values) == 0 {
 		return 0, nil
@@ -97,7 +96,7 @@ func (b *Builder) InsertOrIgnore(ctx context.Context, g auth.Grant, values ...ma
 		query.CleanBindings(flattenRows(rows)))
 }
 
-// InsertGetID answers Builder::insertGetId. The PHP spells the last word Id.
+// InsertGetID inserts a row and returns the id the engine assigned it.
 //
 // sequence is the name of the sequence the id comes from, which Postgres needs
 // and the other engines ignore. Empty means the engine's default.
@@ -118,14 +117,13 @@ func (b *Builder) InsertGetID(ctx context.Context, g auth.Grant, values map[stri
 	return query.Processor.ProcessInsertGetID(query, sql, query.CleanBindings(flattenRow(row)), sequence)
 }
 
-// InsertUsing answers Builder::insertUsing: an insert whose rows come from a
-// select rather than from values.
+// InsertUsing is an insert whose rows come from a select rather than from
+// values.
 //
-// query may be a *Builder, a func(*Builder) or a string of SQL, which is the
-// PHP's Closure|Builder|string. A *Builder or a callback is scoped by the same
-// Grant before it is compiled -- an insert reading from a select is a read, and
-// a read that skipped the tenant would copy another customer's rows into this
-// one's table (RULE 17).
+// query may be a *Builder, a func(*Builder) or a string of SQL. A *Builder or a
+// callback is scoped by the same Grant before it is compiled -- an insert
+// reading from a select is a read, and a read that skipped the tenant would copy
+// another customer's rows into this one's table.
 //
 // A string is taken as written. Nothing here can add a tenant filter to SQL it
 // did not build, which is the reason to hand it a builder instead.
@@ -133,8 +131,8 @@ func (b *Builder) InsertUsing(ctx context.Context, g auth.Grant, columns []any, 
 	return b.insertUsing(ctx, g, columns, query, false)
 }
 
-// InsertOrIgnoreUsing answers Builder::insertOrIgnoreUsing: InsertUsing letting
-// the engine drop the rows that would collide.
+// InsertOrIgnoreUsing is InsertUsing letting the engine drop the rows that
+// would collide.
 func (b *Builder) InsertOrIgnoreUsing(ctx context.Context, g auth.Grant, columns []any, query any) (int64, error) {
 	return b.insertUsing(ctx, g, columns, query, true)
 }
@@ -164,7 +162,7 @@ func (b *Builder) insertUsing(ctx context.Context, g auth.Grant, columns []any, 
 	return statement.affectingStatement(compiled, statement.CleanBindings(bindings))
 }
 
-// Update answers Builder::update.
+// Update updates the rows matching the query with the given column values.
 //
 // A value may be a *Builder, which becomes the subquery it compiles to, with
 // its bindings landing where its placeholders are. Such a subquery is scoped by
@@ -176,8 +174,7 @@ func (b *Builder) insertUsing(ctx context.Context, g auth.Grant, columns []any, 
 //
 // Two maps go to the grammar -- the values to compile and the bindings to send
 // -- and both are keyed by column, so the grammar has to walk them in sorted key
-// order for the placeholders and the values to line up. That is the same
-// contract the PHP's ksort establishes for inserts.
+// order for the placeholders and the values to line up.
 func (b *Builder) Update(ctx context.Context, g auth.Grant, values map[string]any) (int64, error) {
 	query, err := b.scoped(ctx, g)
 	if err != nil {
@@ -198,7 +195,8 @@ func (b *Builder) Update(ctx context.Context, g auth.Grant, values map[string]an
 		query.CleanBindings(query.Grammar.PrepareBindingsForUpdate(query.Bindings, bindings)))
 }
 
-// UpdateFrom answers Builder::updateFrom, which only Postgres compiles.
+// UpdateFrom runs an "update ... from" statement, which only Postgres
+// compiles.
 func (b *Builder) UpdateFrom(ctx context.Context, g auth.Grant, values map[string]any) (int64, error) {
 	query, err := b.scoped(ctx, g)
 	if err != nil {
@@ -224,8 +222,8 @@ func (b *Builder) UpdateFrom(ctx context.Context, g auth.Grant, values map[strin
 		query.CleanBindings(grammar.PrepareBindingsForUpdateFrom(query.Bindings, bindings)))
 }
 
-// prepareUpdateValues answers the Collection::map that opens Builder::update:
-// it splits each value into what the statement says and what it binds.
+// prepareUpdateValues splits each value into what the statement says and what
+// it binds.
 func (b *Builder) prepareUpdateValues(ctx context.Context, g auth.Grant, values map[string]any) (compiled map[string]any, bindings map[string]any, err error) {
 	tenant, err := b.tenantFor(ctx, g)
 	if err != nil {
@@ -255,12 +253,12 @@ func (b *Builder) prepareUpdateValues(ctx context.Context, g auth.Grant, values 
 	return compiled, bindings, nil
 }
 
-// UpdateOrInsert answers Builder::updateOrInsert.
+// UpdateOrInsert updates the first row matching attributes, or inserts one
+// combining attributes and values if none matches.
 //
-// The PHP passes the attributes to where() as an array, which expands into one
-// clause per pair. Where here takes one column, so the expansion is written out
-// -- in sorted key order, so that two calls with the same attributes compile to
-// the same statement.
+// attributes expands into one where clause per pair, added in sorted key
+// order, so that two calls with the same attributes compile to the same
+// statement.
 //
 // values may be nil, which updates nothing and reports that the row is there.
 func (b *Builder) UpdateOrInsert(ctx context.Context, g auth.Grant, attributes, values map[string]any) (bool, error) {
@@ -295,13 +293,12 @@ func (b *Builder) UpdateOrInsert(ctx context.Context, g auth.Grant, attributes, 
 	return affected > 0, nil
 }
 
-// Upsert answers Builder::upsert: insert these rows, and update the ones that
-// collide on uniqueBy.
+// Upsert inserts these rows, and updates the ones that collide on uniqueBy.
 //
-// update names the columns an existing row takes from the new one. Nil means all
-// of them, which is the PHP's null; an empty non-nil slice means none, which is
-// the PHP's [] and turns the whole statement into a plain insert. Go tells the
-// two apart, so the distinction the PHP makes survives.
+// update names the columns an existing row takes from the new one. Nil means
+// all of them; an empty non-nil slice means none, and turns the whole
+// statement into a plain insert. Go's nil/empty-slice distinction is what
+// keeps the two cases apart.
 //
 // uniqueBy should name the tenant column too. The rows carry the tenant, but the
 // conflict target is a unique index, and an index that does not include the
@@ -337,46 +334,46 @@ func (b *Builder) Upsert(ctx context.Context, g auth.Grant, values []map[string]
 	query := b.Clone()
 	query.ApplyBeforeQueryCallbacks()
 
-	// The PHP also collects bindings out of $update, because there it may be a
-	// column => expression map. The Grammar interface here takes update as a
-	// list of column names, so there is nothing in it to bind.
+	// The Grammar interface here takes update as a list of column names, so
+	// there is nothing in it to bind.
 	return query.affectingStatement(
 		query.Grammar.CompileUpsert(query, rows, uniqueBy, update),
 		query.CleanBindings(flattenRows(rows)))
 }
 
-// Increment answers Builder::increment.
+// Increment adds amount to column, along with any extra columns to set.
 //
-// The PHP throws InvalidArgumentException on a non-numeric amount. Here a
-// non-numeric amount does not compile, which is the same guarantee taken one
-// step earlier.
+// A non-numeric amount does not compile: Go's float64 parameter type enforces
+// that guarantee at the call site, before the query ever runs.
 //
 // extra is the columns to set alongside, and may be nil.
 func (b *Builder) Increment(ctx context.Context, g auth.Grant, column string, amount float64, extra map[string]any) (int64, error) {
 	return b.IncrementEach(ctx, g, map[string]float64{column: amount}, extra)
 }
 
-// IncrementEach answers Builder::incrementEach.
+// IncrementEach adds separate amounts to multiple columns, along with any
+// extra columns to set.
 func (b *Builder) IncrementEach(ctx context.Context, g auth.Grant, columns map[string]float64, extra map[string]any) (int64, error) {
 	return b.stepEach(ctx, g, columns, extra, "+")
 }
 
-// Decrement answers Builder::decrement. See Increment.
+// Decrement subtracts amount from column. See Increment.
 func (b *Builder) Decrement(ctx context.Context, g auth.Grant, column string, amount float64, extra map[string]any) (int64, error) {
 	return b.DecrementEach(ctx, g, map[string]float64{column: amount}, extra)
 }
 
-// DecrementEach answers Builder::decrementEach.
+// DecrementEach subtracts separate amounts from multiple columns, along with
+// any extra columns to set.
 func (b *Builder) DecrementEach(ctx context.Context, g auth.Grant, columns map[string]float64, extra map[string]any) (int64, error) {
 	return b.stepEach(ctx, g, columns, extra, "-")
 }
 
-// stepEach is the shared body of incrementEach and decrementEach, which differ
-// in the PHP by one character.
+// stepEach is the shared body of IncrementEach and DecrementEach, which differ
+// only in the operator.
 //
-// The step is written into the statement rather than bound, as the PHP writes
-// it: it is a number this function produced, not a value that came from
-// outside, so there is nothing for a placeholder to protect.
+// The step is written into the statement rather than bound: it is a number
+// this function produced, not a value that came from outside, so there is
+// nothing for a placeholder to protect.
 func (b *Builder) stepEach(ctx context.Context, g auth.Grant, columns map[string]float64, extra map[string]any, operator string) (int64, error) {
 	values := make(map[string]any, len(columns)+len(extra))
 	for column, amount := range columns {
@@ -389,10 +386,10 @@ func (b *Builder) stepEach(ctx context.Context, g auth.Grant, columns map[string
 	return b.Update(ctx, g, values)
 }
 
-// Delete answers Builder::delete.
+// Delete deletes the rows matching the query.
 //
-// The optional id is the PHP's argument of the same name: it adds the where so
-// that a single row can be removed without writing one.
+// The optional id, when given, adds a where on the primary key, so that a
+// single row can be removed without writing one.
 func (b *Builder) Delete(ctx context.Context, g auth.Grant, id ...any) (int64, error) {
 	if len(id) > 0 && id[0] != nil {
 		b.Where(b.qualify("id"), "=", id[0])
@@ -412,7 +409,7 @@ func (b *Builder) Delete(ctx context.Context, g auth.Grant, id ...any) (int64, e
 		query.CleanBindings(query.Grammar.PrepareBindingsForDelete(query.Bindings)))
 }
 
-// Truncate answers Builder::truncate.
+// Truncate empties the entire table, all tenants at once.
 //
 // Read this before calling it. A truncate takes no where clause on any engine,
 // so this is the one statement in the package that cannot carry the tenant: it
@@ -421,7 +418,7 @@ func (b *Builder) Delete(ctx context.Context, g auth.Grant, id ...any) (int64, e
 // Delete, which is filtered.
 //
 // It is more than one statement on some engines -- Postgres and SQL Server reset
-// the sequence separately -- which is why the grammar answers with a map of
+// the sequence separately -- which is why the grammar returns a map of
 // statements to bindings.
 func (b *Builder) Truncate(ctx context.Context, g auth.Grant) error {
 	if _, err := b.tenantFor(ctx, g); err != nil {
@@ -434,10 +431,10 @@ func (b *Builder) Truncate(ctx context.Context, g auth.Grant) error {
 	if query.Connection == nil {
 		return errors.New("query: the builder has no connection to run against")
 	}
-	// The grammar answers with a map, and a Go map has no order where the PHP
-	// array it mirrors does. The statements are run in sorted order so that two
-	// runs issue them the same way; a grammar whose truncate depends on the
-	// order of its statements has to say so some other way than by an array.
+	// The grammar returns a map, and a Go map has no guaranteed iteration
+	// order. The statements are run in sorted order so that two runs issue them
+	// the same way; a grammar whose truncate depends on a specific order of its
+	// statements has to say so some other way than through map order.
 	statements := query.Grammar.CompileTruncate(query)
 	for _, sql := range slices.Sorted(maps.Keys(statements)) {
 		if _, err := query.Connection.Statement(sql, statements[sql]); err != nil {
@@ -447,8 +444,7 @@ func (b *Builder) Truncate(ctx context.Context, g auth.Grant) error {
 	return nil
 }
 
-// createSub answers Builder::createSub: it turns a builder, a callback or a
-// string into SQL and bindings.
+// createSub turns a builder, a callback or a string into SQL and bindings.
 func (b *Builder) createSub(ctx context.Context, g auth.Grant, query any) (string, []any, error) {
 	if callback, ok := query.(func(*Builder)); ok {
 		sub := b.NewQuery()
@@ -458,13 +454,11 @@ func (b *Builder) createSub(ctx context.Context, g auth.Grant, query any) (strin
 	return b.parseSub(ctx, g, query)
 }
 
-// parseSub answers Builder::parseSub.
+// parseSub turns a subquery argument into SQL and bindings.
 //
-// The PHP's prependDatabaseNameIfCrossDatabaseQuery is not here: it qualifies
-// the table with the database name when the subquery runs on another connection,
-// and reaching a second connection means asking the DatabaseManager for it,
-// which is the container (ADR 0001). A subquery on another database is written
-// with the name in the table.
+// It never qualifies the table with a second database's name: reaching another
+// connection from here would mean looking one up by name. A subquery on another
+// database is written with the name in the table.
 func (b *Builder) parseSub(ctx context.Context, g auth.Grant, query any) (string, []any, error) {
 	switch sub := query.(type) {
 	case *Builder:
@@ -502,7 +496,7 @@ func (b *Builder) tenantFor(ctx context.Context, g auth.Grant) (string, error) {
 //
 // The copy is what keeps the caller's map free of a column it did not write,
 // and the overwrite is what makes the Grant the only source of a tenant: a value
-// the caller passed under TenantColumn does not survive this (RULE 14).
+// the caller passed under TenantColumn does not survive this.
 func stampTenant(values []map[string]any, tenant string) []map[string]any {
 	out := make([]map[string]any, len(values))
 	for i, row := range values {
@@ -516,12 +510,13 @@ func stampTenant(values []map[string]any, tenant string) []map[string]any {
 	return out
 }
 
-// flattenRows answers Arr::flatten($values, 1) over the rows of an insert.
+// flattenRows flattens the rows of an insert into a single list of values, one
+// level deep.
 //
-// The order is the sorted column order of each row, which is what the PHP's
-// ksort produces and what the grammar compiles the column list from. Iterating
-// a Go map instead would put the bindings in a different order on every run,
-// and the statement would insert each value into a different column.
+// The order is the sorted column order of each row, which is what the grammar
+// compiles the column list from. Iterating a Go map instead would put the
+// bindings in a different order on every run, and the statement would insert
+// each value into a different column.
 func flattenRows(values []map[string]any) []any {
 	out := make([]any, 0, len(values)*4)
 	for _, row := range values {

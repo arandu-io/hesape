@@ -13,19 +13,20 @@ import (
 
 // dialect is the set of methods the compile pipeline calls on itself.
 //
-// PHP resolves `$this->compileLock(...)` at run time, so a subclass that
-// redefines compileLock changes what compileSelect emits without compileSelect
-// knowing. Go resolves an embedded method at compile time against the type that
-// declared it, so the same code would always reach the base version and every
-// driver difference would silently disappear -- backticks would never appear,
-// "for update" would never appear, and nothing would fail.
+// Go resolves a call through an embedded type at compile time, against the
+// type that declared it. Without indirection, a driver that overrides
+// compileLock would never be seen by compileSelect: the base version would
+// always run, every driver difference would silently disappear -- backticks
+// would never appear, "for update" would never appear, and nothing would
+// fail.
 //
-// The self reference restores late binding: Grammar holds the outermost
-// grammar, and every internal call goes through it. It is unexported because
-// the four grammars that satisfy it live in this package, and nothing outside
-// implements a dialect without also being one of them.
+// The self reference restores the dynamic dispatch that indirection removes:
+// Grammar holds the outermost grammar, and every internal call goes through
+// it. It is unexported because the four grammars that satisfy it live in
+// this package, and nothing outside implements a dialect without also being
+// one of them.
 type dialect interface {
-	// Identifier and value wrapping, from Illuminate\Database\Grammar.
+	// Identifier and value wrapping.
 	Wrap(value any) string
 	WrapTable(table any) string
 	WrapValue(value string) string
@@ -62,9 +63,10 @@ type dialect interface {
 	SupportsStraightJoins() (bool, error)
 	CompileJoinLateral(join *query.JoinClause, expression string) (string, error)
 
-	// The where compilers. The PHP reaches them by name --
-	// $this->{"where{$where['type']}"} -- so every one of them is an override
-	// point whether or not a driver in this package takes it.
+	// The where compilers. Each one is an override point on the interface,
+	// whether or not a driver in this package actually redefines it, because
+	// the dispatch in compileWhere has to reach whichever version the active
+	// driver provides.
 	WhereRaw(q *query.Builder, where query.Where) string
 	WhereBasic(q *query.Builder, where query.Where) string
 	WhereBitwise(q *query.Builder, where query.Where) string
@@ -122,66 +124,63 @@ type dialect interface {
 	SubstituteBindingsIntoRawSQL(sql string, bindings []any) (string, error)
 }
 
-// Grammar answers Illuminate\Database\Query\Grammars\Grammar: the standard SQL
-// a driver grammar starts from.
+// Grammar is the standard SQL a driver grammar starts from.
 //
-// It embeds query.BaseGrammar, which already carries the half of
-// Illuminate\Database\Grammar that no dialect disagrees about -- the operator
-// lists, the table prefix, the savepoint statements, the date format, literal
-// quoting and escaping. What it adds is the compile pipeline, which
-// query.BaseGrammar does not have.
+// It embeds query.BaseGrammar, which already carries what no dialect disagrees
+// about -- the operator lists, the table prefix, the savepoint statements, the
+// date format, literal quoting and escaping. What it adds is the compile
+// pipeline.
 //
-// # It is the abstract class, and the compiler knows it
+// # It is incomplete, and the compiler knows it
 //
-// The PHP declares compileInsertOrIgnore and compileUpsert by throwing
-// RuntimeException: every engine spells them differently and none of them can
-// use the standard form. Here they are simply absent, so *Grammar does not
-// satisfy query.Grammar and cannot be handed to a builder at all. The PHP finds
-// out when the statement runs; this finds out when the package compiles.
+// CompileInsertOrIgnore and CompileUpsert are absent: every engine spells them
+// differently and none can use the standard form. So *Grammar does not satisfy
+// query.Grammar and cannot be handed to a builder at all -- the gap is found
+// when the package compiles rather than when the statement runs.
 type Grammar struct {
 	query.BaseGrammar
 
 	self dialect
 }
 
-// NewGrammar answers `new Grammar`, wiring the self reference the compile
-// pipeline dispatches through.
+// NewGrammar creates a Grammar with its self reference wired to itself, the
+// value the compile pipeline dispatches through.
 //
-// A driver grammar embeds the result and points self at itself, which is what
-// `extends Grammar` does in PHP for the part that is late binding.
+// A driver grammar embeds the result and then points self at itself instead,
+// which is what lets the driver's own overrides take part in the dispatch.
 func NewGrammar() *Grammar {
 	g := &Grammar{}
 	g.self = g
 	return g
 }
 
-// selectComponents is Grammar::$selectComponents: the clauses of a select, in
-// the order they are concatenated.
+// selectComponents lists the clauses of a select, in the order they are
+// concatenated.
 var selectComponents = []string{
 	"aggregate", "columns", "from", "indexHint", "joins",
 	"wheres", "groups", "havings", "orders", "limit", "offset", "lock",
 }
 
-// bindingOrder repeats Builder::$bindings' key order.
+// bindingOrder is the binding key order query.Builder uses internally.
 //
-// The list also lives in query, unexported, and PrepareBindingsForUpdate has to
-// walk it to flatten the map the way the PHP flattens the array: a binding read
-// out of order lands in the wrong placeholder, which is a wrong answer rather
-// than an error.
+// The list also lives in query, unexported, and PrepareBindingsForUpdate has
+// to walk it to flatten the bindings map in the same order: a binding read
+// out of order lands in the wrong placeholder, which is a wrong answer
+// rather than an error.
 var bindingOrder = []string{"select", "from", "join", "where", "groupBy", "having", "order", "union", "unionOrder"}
 
-// component is one entry of Grammar::compileComponents' return.
+// component is one entry of compileComponents' return.
 //
-// The PHP returns an array keyed by component name and relies on PHP arrays
-// being ordered; a Go map is not, and the order is the statement, so the pieces
-// are carried in a slice and looked up by name where compileGroupLimit needs
-// them.
+// A Go map has no defined order, and the order here is the statement, so the
+// pieces are carried in a slice and looked up by name where compileGroupLimit
+// needs them.
 type component struct {
 	name string
 	sql  string
 }
 
-// CompileSelect answers Grammar::compileSelect.
+// CompileSelect builds the SQL for a select statement, or delegates to the
+// group-limit or union-aggregate path when the query needs one.
 func (g *Grammar) CompileSelect(q *query.Builder) string {
 	if (len(q.Unions) > 0 || len(q.Havings) > 0) && q.GetAggregate() != nil {
 		return g.compileUnionAggregate(q)
@@ -199,13 +198,13 @@ func (g *Grammar) CompileSelect(q *query.Builder) string {
 	return g.compileSelectWithoutGroupLimit(q)
 }
 
-// compileSelectWithoutGroupLimit is compileSelect's ordinary path.
+// compileSelectWithoutGroupLimit is compileSelect's ordinary path: every
+// select that does not need a group limit's window function.
 //
-// The PHP reaches it from a grammar with no window functions by nulling
-// $query->groupLimit and calling compileSelect again. The group limit is not
-// settable to nothing from outside query -- Builder keeps it unexported and
-// CloneWithout does not name it -- so the path it leads to is named instead,
-// which is the same statement without a round trip through a mutation.
+// The group limit cannot be cleared from outside query -- Builder keeps it
+// unexported and CloneWithout does not name it -- so this path is named
+// directly instead of reached by mutating a cleared clone, which is the same
+// statement without a round trip through a mutation.
 func (g *Grammar) compileSelectWithoutGroupLimit(q *query.Builder) string {
 	d := g.self
 
@@ -225,11 +224,12 @@ func (g *Grammar) compileSelectWithoutGroupLimit(q *query.Builder) string {
 	return sql
 }
 
-// compileComponents answers Grammar::compileComponents.
+// compileComponents compiles each present component of the select and
+// returns them in order.
 //
-// The PHP tests isset($query->$component), which is false for null and true for
-// an empty array; the empty cases compile to the empty string and concatenate
-// drops them, so the emptiness test here reaches the same statement.
+// A component is included when its field is non-nil, even if it is an empty
+// slice: the empty cases compile to the empty string and concatenate drops
+// them, so testing for nil rather than length reaches the same statement.
 func (g *Grammar) compileComponents(q *query.Builder) []component {
 	d := g.self
 	out := make([]component, 0, len(selectComponents))
@@ -272,7 +272,8 @@ func (g *Grammar) compileComponents(q *query.Builder) []component {
 	return out
 }
 
-// CompileAggregate answers Grammar::compileAggregate.
+// CompileAggregate builds the SQL for an aggregate function over the given
+// columns.
 func (g *Grammar) CompileAggregate(q *query.Builder, aggregate *query.Aggregate) string {
 	d := g.self
 	column := d.Columnize(aggregate.Columns)
@@ -291,7 +292,8 @@ func (g *Grammar) CompileAggregate(q *query.Builder, aggregate *query.Aggregate)
 	return "select " + aggregate.Function + "(" + column + ") as aggregate"
 }
 
-// CompileColumns answers Grammar::compileColumns.
+// CompileColumns builds the select list, honouring the query's distinct
+// setting.
 func (g *Grammar) CompileColumns(q *query.Builder, columns []any) string {
 	if q.GetAggregate() != nil {
 		return ""
@@ -305,22 +307,20 @@ func (g *Grammar) CompileColumns(q *query.Builder, columns []any) string {
 	return "select " + g.self.Columnize(columns)
 }
 
-// CompileFrom answers Grammar::compileFrom.
+// CompileFrom builds the SQL from clause for the given table.
 func (g *Grammar) CompileFrom(q *query.Builder, table any) string {
 	return "from " + g.self.WrapTable(table)
 }
 
-// CompileIndexHint answers the index hint component.
-//
-// The PHP has no compileIndexHint on the base class at all, so a grammar that
-// does not declare one fatals when a query carries a hint. Returning the empty
-// string is what an engine without index hints does with the request anyway --
-// a hint changes the plan, never the rows.
+// CompileIndexHint builds the index hint component, returning the empty
+// string here because the base grammar targets no particular engine's hint
+// syntax. That matches what an engine without index hints does with the
+// request anyway -- a hint changes the plan, never the rows.
 func (g *Grammar) CompileIndexHint(q *query.Builder, indexHint *query.IndexHint) string {
 	return ""
 }
 
-// CompileJoins answers Grammar::compileJoins.
+// CompileJoins builds the SQL for the query's join clauses.
 func (g *Grammar) CompileJoins(q *query.Builder, joins []*query.JoinClause) string {
 	d := g.self
 	parts := make([]string, 0, len(joins))
@@ -335,8 +335,8 @@ func (g *Grammar) CompileJoins(q *query.Builder, joins []*query.JoinClause) stri
 
 		// A lateral join has a shape of its own -- it takes no on clause, and
 		// the engines that have one spell it differently -- so the whole of it
-		// comes from the dialect. The PHP asks `$join instanceof
-		// JoinLateralClause`; query.JoinClause carries the flag instead.
+		// comes from the dialect. query.JoinClause carries a Lateral flag to
+		// mark it.
 		if join.Lateral {
 			sql, err := d.CompileJoinLateral(join, tableAndNestedJoins)
 			if err != nil {
@@ -347,9 +347,9 @@ func (g *Grammar) CompileJoins(q *query.Builder, joins []*query.JoinClause) stri
 			continue
 		}
 
-		// A straight join is MySQL's; every other engine compiles the type
-		// straight through and lets the engine reject it, where the PHP throws
-		// from supportsStraightJoins.
+		// A straight join is MySQL's; every other engine's SupportsStraightJoins
+		// reports it unsupported, so the type is compiled straight through and
+		// left for the engine itself to reject.
 		joinWord := " join"
 		if join.Type == "straight_join" {
 			if supported, err := d.SupportsStraightJoins(); err == nil && supported {
@@ -365,22 +365,25 @@ func (g *Grammar) CompileJoins(q *query.Builder, joins []*query.JoinClause) stri
 	return strings.Join(parts, " ")
 }
 
-// CompileJoinLateral answers Grammar::compileJoinLateral.
+// CompileJoinLateral builds the SQL for a lateral join. The base
+// implementation returns an error: only a driver that supports lateral joins
+// overrides it.
 //
-// It carries an error where the PHP throws, and takes a *query.JoinClause
-// because query has no JoinLateralClause yet; in PHP the lateral clause extends
-// the ordinary one, so the parameter is its parent type.
+// It takes a *query.JoinClause because query has no separate lateral join
+// type; the Lateral flag on the ordinary clause marks it instead.
 func (g *Grammar) CompileJoinLateral(join *query.JoinClause, expression string) (string, error) {
 	return "", fmt.Errorf("query/grammars: this database engine does not support lateral joins")
 }
 
-// SupportsStraightJoins answers Grammar::supportsStraightJoins, carrying an
-// error where the PHP throws.
+// SupportsStraightJoins reports whether the dialect supports MySQL's
+// straight_join. The base implementation returns an error: only MySQL
+// overrides it.
 func (g *Grammar) SupportsStraightJoins() (bool, error) {
 	return false, fmt.Errorf("query/grammars: this database engine does not support straight joins")
 }
 
-// CompileWheres answers Grammar::compileWheres.
+// CompileWheres builds the SQL where clause for the query, or the empty
+// string if it has no where clauses.
 func (g *Grammar) CompileWheres(q *query.Builder) string {
 	clauses := g.whereClauses(q)
 	if clauses == "" {
@@ -392,9 +395,8 @@ func (g *Grammar) CompileWheres(q *query.Builder) string {
 // compileJoinConstraints is compileWheres for a join clause, where the
 // conjunction is "on" rather than "where".
 //
-// The PHP tells the two apart with `$query instanceof JoinClause`. Here the
-// grammar is handed the JoinClause itself, because query.JoinClause embeds
-// *Builder and the embedded value has forgotten what wraps it.
+// The grammar is handed the JoinClause itself, rather than its embedded
+// *Builder, because the embedded value has forgotten what wraps it.
 func (g *Grammar) compileJoinConstraints(join *query.JoinClause) string {
 	clauses := g.whereClauses(join.Builder)
 	if clauses == "" {
@@ -403,13 +405,12 @@ func (g *Grammar) compileJoinConstraints(join *query.JoinClause) string {
 	return "on " + clauses
 }
 
-// whereClauses is compileWheresToArray followed by concatenateWhereClauses,
-// minus the conjunction.
+// whereClauses compiles a query's where clauses into a single string, joined
+// by their booleans, with the leading conjunction removed.
 //
-// Keeping the conjunction out until the caller adds it is what lets whereNested
-// and compileJoinConstraints reuse this. The PHP compiles the full clause and
-// then cuts the first six characters back off with substr, which is the same
-// string by a route that breaks if the conjunction ever changes length.
+// Keeping the conjunction out until the caller adds it is what lets
+// whereNested and compileJoinConstraints reuse this, without depending on
+// the conjunction's length the way trimming a fixed prefix would.
 func (g *Grammar) whereClauses(q *query.Builder) string {
 	if len(q.Wheres) == 0 {
 		return ""
@@ -427,11 +428,12 @@ func (g *Grammar) whereClauses(q *query.Builder) string {
 	return removeLeadingBoolean(strings.Join(parts, " "))
 }
 
-// compileWhere answers the PHP's `$this->{"where{$where['type']}"}` dispatch.
+// compileWhere dispatches a where clause to the method that compiles its
+// type.
 //
-// The Go builder spells negation with a Not flag where the PHP spells it in the
-// type name -- "In" plus not, against "NotIn" -- so both forms arrive at the
-// same compiler.
+// The builder spells negation with a Not flag rather than a distinct type
+// name -- "In" plus Not, rather than "NotIn" -- so whereType folds both
+// spellings into the same case before this switch runs.
 func (g *Grammar) compileWhere(q *query.Builder, where query.Where) string {
 	d := g.self
 	typ, not := whereType(where)
@@ -509,16 +511,15 @@ func (g *Grammar) compileWhere(q *query.Builder, where query.Where) string {
 	case "expression":
 		return d.WhereExpression(q, where)
 	default:
-		// The PHP fatals on an undefined method. A clause the grammar cannot
-		// spell must not be dropped: a filter that quietly disappears is a
-		// tenant reading another tenant's rows, so the query is made false
-		// instead and carries the reason.
+		// A clause the grammar cannot spell must not be dropped: a filter that
+		// quietly disappears is a tenant reading another tenant's rows, so the
+		// query is made false instead and carries the reason.
 		return unsupportedClause(fmt.Errorf("query/grammars: no compiler for where clause type %q", where.Type))
 	}
 }
 
-// whereType normalises a clause type to the switch's spelling and folds the
-// PHP's "Not..." names into the Not flag.
+// whereType normalises a clause type to the switch's spelling and folds
+// "Not..." type names into the Not flag.
 func whereType(where query.Where) (typ string, not bool) {
 	typ = strings.ToLower(where.Type)
 	not = where.Not
@@ -539,18 +540,18 @@ func whereType(where query.Where) (typ string, not bool) {
 	return typ, not
 }
 
-// WhereRaw answers Grammar::whereRaw.
+// WhereRaw compiles a raw where clause, writing its SQL expression as-is.
 func (g *Grammar) WhereRaw(q *query.Builder, where query.Where) string {
 	return text(g.self.GetValue(where.SQL))
 }
 
-// WhereBasic answers Grammar::whereBasic.
+// WhereBasic compiles a simple "column operator value" where clause.
 //
-// The operator has its question marks doubled, as the PHP does: Postgres spells
-// several of its operators with one -- ?, ?| and ?& all test for a JSON key --
-// and a bare one would be read as a placeholder. PostgresGrammar's
-// SubstituteBindingsIntoRawSQL undoes the doubling, which is the other half of
-// the same convention.
+// The operator has its question marks doubled: Postgres spells several of
+// its operators with one -- ?, ?| and ?& all test for a JSON key -- and a
+// bare one would be read as a placeholder. PostgresGrammar's
+// SubstituteBindingsIntoRawSQL undoes the doubling, which is the other half
+// of the same convention.
 func (g *Grammar) WhereBasic(q *query.Builder, where query.Where) string {
 	d := g.self
 	value := d.Parameter(where.Value)
@@ -559,15 +560,15 @@ func (g *Grammar) WhereBasic(q *query.Builder, where query.Where) string {
 	return d.Wrap(where.Column) + " " + operator + " " + value
 }
 
-// WhereBitwise answers Grammar::whereBitwise.
+// WhereBitwise compiles a bitwise where clause the same way as a basic one.
 func (g *Grammar) WhereBitwise(q *query.Builder, where query.Where) string {
 	return g.self.WhereBasic(q, where)
 }
 
-// WhereLike answers Grammar::whereLike, carrying the refusal the PHP throws as
-// a false clause: an engine without a case sensitive like cannot answer the
-// question that was asked, and answering the case insensitive one instead would
-// return rows nobody filtered for.
+// WhereLike compiles a like where clause, refusing as a false clause when
+// case sensitivity was asked for and the engine cannot provide it: answering
+// with the case insensitive form instead would return rows nobody filtered
+// for.
 func (g *Grammar) WhereLike(q *query.Builder, where query.Where) string {
 	if where.CaseSensitive {
 		return unsupportedClause(fmt.Errorf("query/grammars: this database engine does not support case sensitive like operations"))
@@ -581,10 +582,10 @@ func (g *Grammar) WhereLike(q *query.Builder, where query.Where) string {
 	return g.self.WhereBasic(q, where)
 }
 
-// WhereIn answers Grammar::whereIn.
+// WhereIn compiles an "in" where clause.
 //
-// An empty list compiles to "0 = 1" rather than being dropped: a filter over an
-// empty set matches nothing, and dropping it would match everything.
+// An empty list compiles to "0 = 1" rather than being dropped: a filter over
+// an empty set matches nothing, and dropping it would match everything.
 func (g *Grammar) WhereIn(q *query.Builder, where query.Where) string {
 	if len(where.Values) == 0 {
 		return "0 = 1"
@@ -593,7 +594,7 @@ func (g *Grammar) WhereIn(q *query.Builder, where query.Where) string {
 	return d.Wrap(where.Column) + " in (" + d.Parameterize(where.Values) + ")"
 }
 
-// WhereNotIn answers Grammar::whereNotIn.
+// WhereNotIn compiles a "not in" where clause.
 func (g *Grammar) WhereNotIn(q *query.Builder, where query.Where) string {
 	if len(where.Values) == 0 {
 		return "1 = 1"
@@ -602,9 +603,10 @@ func (g *Grammar) WhereNotIn(q *query.Builder, where query.Where) string {
 	return d.Wrap(where.Column) + " not in (" + d.Parameterize(where.Values) + ")"
 }
 
-// WhereInRaw answers Grammar::whereInRaw. The values are written into the
-// statement rather than bound, which is only safe because whereIntegerInRaw is
-// the one caller and it has already cast every value to an integer.
+// WhereInRaw compiles an "in" where clause with its values written
+// directly into the statement rather than bound, which is only safe because
+// whereIntegerInRaw is the one caller and it has already cast every value to
+// an integer.
 func (g *Grammar) WhereInRaw(q *query.Builder, where query.Where) string {
 	if len(where.Values) == 0 {
 		return "0 = 1"
@@ -612,7 +614,8 @@ func (g *Grammar) WhereInRaw(q *query.Builder, where query.Where) string {
 	return g.self.Wrap(where.Column) + " in (" + joinValues(where.Values) + ")"
 }
 
-// WhereNotInRaw answers Grammar::whereNotInRaw.
+// WhereNotInRaw compiles a "not in" where clause the same way as
+// WhereInRaw: values written directly into the statement.
 func (g *Grammar) WhereNotInRaw(q *query.Builder, where query.Where) string {
 	if len(where.Values) == 0 {
 		return "1 = 1"
@@ -620,17 +623,17 @@ func (g *Grammar) WhereNotInRaw(q *query.Builder, where query.Where) string {
 	return g.self.Wrap(where.Column) + " not in (" + joinValues(where.Values) + ")"
 }
 
-// WhereNull answers Grammar::whereNull.
+// WhereNull compiles an "is null" where clause.
 func (g *Grammar) WhereNull(q *query.Builder, where query.Where) string {
 	return g.self.Wrap(where.Column) + " is null"
 }
 
-// WhereNotNull answers Grammar::whereNotNull.
+// WhereNotNull compiles an "is not null" where clause.
 func (g *Grammar) WhereNotNull(q *query.Builder, where query.Where) string {
 	return g.self.Wrap(where.Column) + " is not null"
 }
 
-// WhereBetween answers Grammar::whereBetween.
+// WhereBetween compiles a "between" where clause.
 func (g *Grammar) WhereBetween(q *query.Builder, where query.Where) string {
 	d := g.self
 	between := "between"
@@ -641,7 +644,8 @@ func (g *Grammar) WhereBetween(q *query.Builder, where query.Where) string {
 	return d.Wrap(where.Column) + " " + between + " " + d.Parameter(first) + " and " + d.Parameter(last)
 }
 
-// WhereBetweenColumns answers Grammar::whereBetweenColumns.
+// WhereBetweenColumns compiles a "between" where clause whose bounds are
+// columns rather than bound values.
 func (g *Grammar) WhereBetweenColumns(q *query.Builder, where query.Where) string {
 	d := g.self
 	between := "between"
@@ -652,9 +656,9 @@ func (g *Grammar) WhereBetweenColumns(q *query.Builder, where query.Where) strin
 	return d.Wrap(where.Column) + " " + between + " " + d.Wrap(first) + " and " + d.Wrap(last)
 }
 
-// WhereValueBetween answers Grammar::whereValueBetween: the value is the
-// literal and the two columns are the bounds, which is the comparison the other
-// way round.
+// WhereValueBetween compiles a "between" where clause with the comparison
+// the other way round: the value is the literal being tested, and the two
+// columns are the bounds.
 func (g *Grammar) WhereValueBetween(q *query.Builder, where query.Where) string {
 	d := g.self
 	between := "between"
@@ -665,45 +669,46 @@ func (g *Grammar) WhereValueBetween(q *query.Builder, where query.Where) string 
 	return d.Parameter(where.Value) + " " + between + " " + d.Wrap(first) + " and " + d.Wrap(last)
 }
 
-// WhereDate answers Grammar::whereDate.
+// WhereDate compiles a where clause that compares a column's date part.
 func (g *Grammar) WhereDate(q *query.Builder, where query.Where) string {
 	return g.self.DateBasedWhere("date", q, where)
 }
 
-// WhereTime answers Grammar::whereTime.
+// WhereTime compiles a where clause that compares a column's time part.
 func (g *Grammar) WhereTime(q *query.Builder, where query.Where) string {
 	return g.self.DateBasedWhere("time", q, where)
 }
 
-// WhereDay answers Grammar::whereDay.
+// WhereDay compiles a where clause that compares a column's day part.
 func (g *Grammar) WhereDay(q *query.Builder, where query.Where) string {
 	return g.self.DateBasedWhere("day", q, where)
 }
 
-// WhereMonth answers Grammar::whereMonth.
+// WhereMonth compiles a where clause that compares a column's month part.
 func (g *Grammar) WhereMonth(q *query.Builder, where query.Where) string {
 	return g.self.DateBasedWhere("month", q, where)
 }
 
-// WhereYear answers Grammar::whereYear.
+// WhereYear compiles a where clause that compares a column's year part.
 func (g *Grammar) WhereYear(q *query.Builder, where query.Where) string {
 	return g.self.DateBasedWhere("year", q, where)
 }
 
-// DateBasedWhere answers Grammar::dateBasedWhere.
+// DateBasedWhere compiles the shared form the date, time, day, month and
+// year where clauses all use.
 func (g *Grammar) DateBasedWhere(typ string, q *query.Builder, where query.Where) string {
 	d := g.self
 	return typ + "(" + d.Wrap(where.Column) + ") " + where.Operator + " " + d.Parameter(where.Value)
 }
 
-// WhereColumn answers Grammar::whereColumn: both sides are names, so neither
-// becomes a binding.
+// WhereColumn compiles a where clause comparing two columns: both sides are
+// names, so neither becomes a binding.
 func (g *Grammar) WhereColumn(q *query.Builder, where query.Where) string {
 	d := g.self
 	return d.Wrap(where.First) + " " + where.Operator + " " + d.Wrap(where.Second)
 }
 
-// WhereNested answers Grammar::whereNested.
+// WhereNested compiles a parenthesised group of where clauses.
 func (g *Grammar) WhereNested(q *query.Builder, where query.Where) string {
 	if where.Query == nil {
 		return ""
@@ -711,12 +716,12 @@ func (g *Grammar) WhereNested(q *query.Builder, where query.Where) string {
 	return "(" + g.whereClauses(where.Query) + ")"
 }
 
-// WhereSub answers Grammar::whereSub.
+// WhereSub compiles a where clause comparing a column against a subquery.
 //
-// A clause of this type with no subquery is a builder bug, and the PHP would
-// fatal on it. It compiles false here instead: a filter that cannot be built is
-// still a filter, and a panic inside a grammar takes down the request that was
-// about to be told no.
+// A clause of this type with no subquery is a builder bug. It compiles
+// false here instead of panicking: a filter that cannot be built is still a
+// filter, and a panic inside a grammar takes down the request that was about
+// to be told no.
 func (g *Grammar) WhereSub(q *query.Builder, where query.Where) string {
 	if where.Query == nil {
 		return unsupportedClause(errMissingSubquery)
@@ -725,7 +730,7 @@ func (g *Grammar) WhereSub(q *query.Builder, where query.Where) string {
 	return d.Wrap(where.Column) + " " + where.Operator + " (" + d.CompileSelect(where.Query) + ")"
 }
 
-// WhereExists answers Grammar::whereExists.
+// WhereExists compiles an "exists" where clause over a subquery.
 func (g *Grammar) WhereExists(q *query.Builder, where query.Where) string {
 	if where.Query == nil {
 		return unsupportedClause(errMissingSubquery)
@@ -733,7 +738,7 @@ func (g *Grammar) WhereExists(q *query.Builder, where query.Where) string {
 	return "exists (" + g.self.CompileSelect(where.Query) + ")"
 }
 
-// WhereNotExists answers Grammar::whereNotExists.
+// WhereNotExists compiles a "not exists" where clause over a subquery.
 func (g *Grammar) WhereNotExists(q *query.Builder, where query.Where) string {
 	if where.Query == nil {
 		return unsupportedClause(errMissingSubquery)
@@ -744,13 +749,14 @@ func (g *Grammar) WhereNotExists(q *query.Builder, where query.Where) string {
 // errMissingSubquery is the clause that names a subquery and does not carry one.
 var errMissingSubquery = errors.New("query/grammars: the where clause has no subquery to compile")
 
-// WhereRowValues answers Grammar::whereRowValues.
+// WhereRowValues compiles a row-value comparison: a tuple of columns
+// against a tuple of values.
 func (g *Grammar) WhereRowValues(q *query.Builder, where query.Where) string {
 	d := g.self
 	return "(" + d.Columnize(where.Columns) + ") " + where.Operator + " (" + d.Parameterize(where.Values) + ")"
 }
 
-// WhereJSONBoolean answers Grammar::whereJsonBoolean.
+// WhereJSONBoolean compiles a where clause comparing a JSON boolean value.
 func (g *Grammar) WhereJSONBoolean(q *query.Builder, where query.Where) string {
 	d := g.self
 	column := d.WrapJSONBooleanSelector(text(where.Column))
@@ -758,7 +764,8 @@ func (g *Grammar) WhereJSONBoolean(q *query.Builder, where query.Where) string {
 	return column + " " + where.Operator + " " + value
 }
 
-// WhereJSONContains answers Grammar::whereJsonContains.
+// WhereJSONContains compiles a where clause testing whether a JSON column
+// contains a value.
 func (g *Grammar) WhereJSONContains(q *query.Builder, where query.Where) string {
 	d := g.self
 	sql, err := d.CompileJSONContains(where.Column, d.Parameter(where.Value))
@@ -771,7 +778,8 @@ func (g *Grammar) WhereJSONContains(q *query.Builder, where query.Where) string 
 	return sql
 }
 
-// WhereJSONOverlaps answers Grammar::whereJsonOverlaps.
+// WhereJSONOverlaps compiles a where clause testing whether a JSON column
+// overlaps a value.
 func (g *Grammar) WhereJSONOverlaps(q *query.Builder, where query.Where) string {
 	d := g.self
 	sql, err := d.CompileJSONOverlaps(where.Column, d.Parameter(where.Value))
@@ -784,7 +792,8 @@ func (g *Grammar) WhereJSONOverlaps(q *query.Builder, where query.Where) string 
 	return sql
 }
 
-// WhereJSONContainsKey answers Grammar::whereJsonContainsKey.
+// WhereJSONContainsKey compiles a where clause testing whether a JSON
+// column contains a key.
 func (g *Grammar) WhereJSONContainsKey(q *query.Builder, where query.Where) string {
 	sql, err := g.self.CompileJSONContainsKey(where.Column)
 	if err != nil {
@@ -796,7 +805,8 @@ func (g *Grammar) WhereJSONContainsKey(q *query.Builder, where query.Where) stri
 	return sql
 }
 
-// WhereJSONLength answers Grammar::whereJsonLength.
+// WhereJSONLength compiles a where clause comparing a JSON column's
+// length.
 func (g *Grammar) WhereJSONLength(q *query.Builder, where query.Where) string {
 	d := g.self
 	sql, err := d.CompileJSONLength(where.Column, where.Operator, d.Parameter(where.Value))
@@ -806,52 +816,64 @@ func (g *Grammar) WhereJSONLength(q *query.Builder, where query.Where) string {
 	return sql
 }
 
-// WhereFullText answers Grammar::whereFullText, carrying an error where the PHP
-// throws.
+// WhereFullText compiles a full-text search where clause. The base
+// implementation returns an error: only a driver that supports full-text
+// search overrides it.
 func (g *Grammar) WhereFullText(q *query.Builder, where query.Where) (string, error) {
 	return "", fmt.Errorf("query/grammars: this database engine does not support fulltext search operations")
 }
 
-// WhereExpression answers Grammar::whereExpression.
+// WhereExpression compiles a where clause that is itself a raw expression.
 func (g *Grammar) WhereExpression(q *query.Builder, where query.Where) string {
 	return text(g.self.GetValue(where.Column))
 }
 
-// CompileJSONContains answers Grammar::compileJsonContains. The PHP spells the
-// middle word Json; Go initialisms are upper case throughout.
+// CompileJSONContains builds the SQL fragment testing whether a JSON column
+// contains a value. Go initialisms are upper case throughout, hence JSON
+// rather than Json. The base implementation returns an error: only a driver
+// that supports it overrides it.
 func (g *Grammar) CompileJSONContains(column any, value string) (string, error) {
 	return "", fmt.Errorf("query/grammars: this database engine does not support JSON contains operations")
 }
 
-// CompileJSONOverlaps answers Grammar::compileJsonOverlaps.
+// CompileJSONOverlaps builds the SQL fragment testing whether a JSON column
+// overlaps a value. The base implementation returns an error: only a driver
+// that supports it overrides it.
 func (g *Grammar) CompileJSONOverlaps(column any, value string) (string, error) {
 	return "", fmt.Errorf("query/grammars: this database engine does not support JSON overlaps operations")
 }
 
-// CompileJSONContainsKey answers Grammar::compileJsonContainsKey.
+// CompileJSONContainsKey builds the SQL fragment testing whether a JSON
+// column contains a key. The base implementation returns an error: only a
+// driver that supports it overrides it.
 func (g *Grammar) CompileJSONContainsKey(column any) (string, error) {
 	return "", fmt.Errorf("query/grammars: this database engine does not support JSON contains key operations")
 }
 
-// CompileJSONLength answers Grammar::compileJsonLength.
+// CompileJSONLength builds the SQL fragment comparing a JSON column's
+// length. The base implementation returns an error: only a driver that
+// supports it overrides it.
 func (g *Grammar) CompileJSONLength(column any, operator, value string) (string, error) {
 	return "", fmt.Errorf("query/grammars: this database engine does not support JSON length operations")
 }
 
-// CompileJSONValueCast answers Grammar::compileJsonValueCast.
+// CompileJSONValueCast wraps a value expression for a JSON comparison. The
+// base implementation returns the value unchanged.
 func (g *Grammar) CompileJSONValueCast(value string) string { return value }
 
-// PrepareBindingForJSONContains answers Grammar::prepareBindingForJsonContains.
+// PrepareBindingForJSONContains encodes a binding for a JSON contains
+// comparison.
 func (g *Grammar) PrepareBindingForJSONContains(binding any) (any, error) {
 	return encodeJSON(binding)
 }
 
-// CompileGroups answers Grammar::compileGroups.
+// CompileGroups builds the SQL group by clause.
 func (g *Grammar) CompileGroups(q *query.Builder, groups []any) string {
 	return "group by " + g.self.Columnize(groups)
 }
 
-// CompileHavings answers Grammar::compileHavings.
+// CompileHavings builds the SQL having clause, or the empty string if the
+// query has no having clauses.
 func (g *Grammar) CompileHavings(q *query.Builder) string {
 	clauses := g.havingClauses(q)
 	if clauses == "" {
@@ -860,8 +882,8 @@ func (g *Grammar) CompileHavings(q *query.Builder) string {
 	return "having " + clauses
 }
 
-// havingClauses is compileHavings without the keyword, so that a nested having
-// can reuse it. The PHP cuts the keyword back off with substr.
+// havingClauses is CompileHavings without the leading keyword, so that a
+// nested having can reuse it.
 func (g *Grammar) havingClauses(q *query.Builder) string {
 	if q == nil || len(q.Havings) == 0 {
 		return ""
@@ -879,7 +901,8 @@ func (g *Grammar) havingClauses(q *query.Builder) string {
 	return removeLeadingBoolean(strings.Join(parts, " "))
 }
 
-// CompileHaving answers Grammar::compileHaving.
+// CompileHaving dispatches a having clause to the method that compiles its
+// type.
 func (g *Grammar) CompileHaving(having query.Having) string {
 	switch strings.ToLower(having.Type) {
 	case "raw":
@@ -901,13 +924,14 @@ func (g *Grammar) CompileHaving(having query.Having) string {
 	}
 }
 
-// CompileBasicHaving answers Grammar::compileBasicHaving.
+// CompileBasicHaving compiles a simple "column operator value" having
+// clause.
 func (g *Grammar) CompileBasicHaving(having query.Having) string {
 	d := g.self
 	return d.Wrap(having.Column) + " " + having.Operator + " " + d.Parameter(having.Value)
 }
 
-// CompileHavingBetween answers Grammar::compileHavingBetween.
+// CompileHavingBetween compiles a "between" having clause.
 func (g *Grammar) CompileHavingBetween(having query.Having) string {
 	d := g.self
 	between := "between"
@@ -918,33 +942,36 @@ func (g *Grammar) CompileHavingBetween(having query.Having) string {
 	return d.Wrap(having.Column) + " " + between + " " + d.Parameter(first) + " and " + d.Parameter(last)
 }
 
-// CompileHavingNull answers Grammar::compileHavingNull.
+// CompileHavingNull compiles an "is null" having clause.
 func (g *Grammar) CompileHavingNull(having query.Having) string {
 	return g.self.Wrap(having.Column) + " is null"
 }
 
-// CompileHavingNotNull answers Grammar::compileHavingNotNull.
+// CompileHavingNotNull compiles an "is not null" having clause.
 func (g *Grammar) CompileHavingNotNull(having query.Having) string {
 	return g.self.Wrap(having.Column) + " is not null"
 }
 
-// CompileHavingBit answers Grammar::compileHavingBit.
+// CompileHavingBit compiles a having clause that tests a bitwise
+// comparison against zero.
 func (g *Grammar) CompileHavingBit(having query.Having) string {
 	d := g.self
 	return "(" + d.Wrap(having.Column) + " " + having.Operator + " " + d.Parameter(having.Value) + ") != 0"
 }
 
-// CompileHavingExpression answers Grammar::compileHavingExpression.
+// CompileHavingExpression compiles a having clause that is itself a raw
+// expression.
 func (g *Grammar) CompileHavingExpression(having query.Having) string {
 	return text(g.self.GetValue(having.Column))
 }
 
-// CompileNestedHavings answers Grammar::compileNestedHavings.
+// CompileNestedHavings compiles a parenthesised group of having clauses.
 func (g *Grammar) CompileNestedHavings(having query.Having) string {
 	return "(" + g.havingClauses(having.Query) + ")"
 }
 
-// CompileOrders answers Grammar::compileOrders.
+// CompileOrders builds the SQL order by clause, or the empty string if the
+// query has no orders.
 func (g *Grammar) CompileOrders(q *query.Builder, orders []query.Order) string {
 	if len(orders) == 0 {
 		return ""
@@ -952,7 +979,7 @@ func (g *Grammar) CompileOrders(q *query.Builder, orders []query.Order) string {
 	return "order by " + strings.Join(g.compileOrdersToArray(q, orders), ", ")
 }
 
-// compileOrdersToArray answers Grammar::compileOrdersToArray.
+// compileOrdersToArray compiles each order into its own SQL fragment.
 func (g *Grammar) compileOrdersToArray(q *query.Builder, orders []query.Order) []string {
 	d := g.self
 	out := make([]string, 0, len(orders))
@@ -966,25 +993,24 @@ func (g *Grammar) compileOrdersToArray(q *query.Builder, orders []query.Order) [
 	return out
 }
 
-// CompileLimit answers Grammar::compileLimit.
+// CompileLimit builds the SQL limit clause.
 func (g *Grammar) CompileLimit(q *query.Builder, limit int) string {
 	return "limit " + strconv.Itoa(limit)
 }
 
-// CompileOffset answers Grammar::compileOffset.
+// CompileOffset builds the SQL offset clause.
 func (g *Grammar) CompileOffset(q *query.Builder, offset int) string {
 	return "offset " + strconv.Itoa(offset)
 }
 
-// CompileGroupLimit answers Grammar::compileGroupLimit: a window function that
-// numbers the rows of each group so the outer query can cut each group at the
-// same depth.
+// CompileGroupLimit builds a select using a window function that numbers the
+// rows of each group, so the outer query can cut each group at the same
+// depth.
 //
-// The binding move is the PHP's, and it has to happen on the query the caller
-// holds, because the caller reads GetBindings after the SQL is compiled. The
-// offset is dropped on a clone instead of on the caller's query, which reaches
-// the same statement without leaving the builder changed behind the caller's
-// back.
+// The binding move has to happen on the query the caller holds, because the
+// caller reads GetBindings after the SQL is compiled. The offset is dropped
+// on a clone instead of on the caller's query, which reaches the same
+// statement without leaving the builder changed behind the caller's back.
 func (g *Grammar) CompileGroupLimit(q *query.Builder) string {
 	d := g.self
 
@@ -1020,17 +1046,17 @@ func (g *Grammar) CompileGroupLimit(q *query.Builder) string {
 	return sql + " order by " + row
 }
 
-// compileRowNumber answers Grammar::compileRowNumber.
+// compileRowNumber writes the row-number window a group limit is built on.
 //
-// The aliases are Illuminate's, spelled the way it spells them. They never
-// leave the compiled statement, and a developer reading the SQL of a limited
-// eager load recognises it from Laravel.
+// The aliases never leave the compiled statement: Get strips them out of every
+// row.
 func (g *Grammar) compileRowNumber(partition string, orders string) string {
 	over := strings.TrimSpace("partition by " + g.self.Wrap(partition) + " " + orders)
 	return ", row_number() over (" + over + ") as " + g.self.Wrap("laravel_row")
 }
 
-// compileUnions answers Grammar::compileUnions.
+// compileUnions builds the SQL for the query's union clauses, including
+// their orders, limit and offset.
 func (g *Grammar) compileUnions(q *query.Builder) string {
 	d := g.self
 	var sql strings.Builder
@@ -1051,7 +1077,7 @@ func (g *Grammar) compileUnions(q *query.Builder) string {
 	return strings.TrimLeft(sql.String(), " ")
 }
 
-// compileUnion answers Grammar::compileUnion.
+// compileUnion builds the SQL for a single union clause.
 func (g *Grammar) compileUnion(union query.Union) string {
 	conjunction := " union "
 	if union.All {
@@ -1060,34 +1086,36 @@ func (g *Grammar) compileUnion(union query.Union) string {
 	return conjunction + g.self.WrapUnion(union.Query.ToSQL())
 }
 
-// WrapUnion answers Grammar::wrapUnion.
+// WrapUnion parenthesises a compiled union member's SQL.
 func (g *Grammar) WrapUnion(sql string) string { return "(" + sql + ")" }
 
-// compileUnionAggregate answers Grammar::compileUnionAggregate.
+// compileUnionAggregate builds the SQL for an aggregate computed over a
+// union of selects.
 //
-// The PHP nulls the aggregate on the query so the inner select does not compile
-// it a second time; here the inner select runs against a clone without it,
-// which is the same statement without mutating the caller's builder.
+// The inner select runs against a clone with its aggregate cleared, so it
+// does not compile the aggregate a second time -- reaching the same
+// statement without mutating the caller's builder.
 func (g *Grammar) compileUnionAggregate(q *query.Builder) string {
 	d := g.self
 	sql := d.CompileAggregate(q, q.GetAggregate())
 	return sql + " from (" + d.CompileSelect(q.CloneWithout("aggregate")) + ") as " + d.WrapTable("temp_table")
 }
 
-// CompileExists answers Grammar::compileExists.
+// CompileExists builds a select that reports whether the query would
+// return any rows.
 func (g *Grammar) CompileExists(q *query.Builder) string {
 	return "select exists(" + g.self.CompileSelect(q) + ") as " + g.self.Wrap("exists")
 }
 
-// CompileInsert answers Grammar::compileInsert.
+// CompileInsert builds the SQL for an insert statement.
 //
 // # Column order
 //
-// The PHP takes the column list from the first record's keys, and a PHP array
-// remembers the order they were written in. A Go map does not, so the columns
-// are sorted by name: the statement has to be the same on every run, and the
-// bindings the builder flattens have to line up with it. Every method here that
-// walks a values map sorts it the same way.
+// The column list comes from the first record's keys. A Go map has no
+// defined order, so the columns are sorted by name: the statement has to be
+// the same on every run, and the bindings the builder flattens have to line
+// up with it. Every method here that walks a values map sorts it the same
+// way.
 func (g *Grammar) CompileInsert(q *query.Builder, values []map[string]any) string {
 	d := g.self
 	table := d.WrapTable(q.GetFrom())
@@ -1110,12 +1138,14 @@ func (g *Grammar) CompileInsert(q *query.Builder, values []map[string]any) strin
 	return "insert into " + table + " (" + d.Columnize(toAny(columns)) + ") values " + strings.Join(parameters, ", ")
 }
 
-// CompileInsertGetID answers Grammar::compileInsertGetId.
+// CompileInsertGetID builds the SQL for an insert whose generated id the
+// caller wants back.
 func (g *Grammar) CompileInsertGetID(q *query.Builder, values map[string]any, sequence string) string {
 	return g.self.CompileInsert(q, []map[string]any{values})
 }
 
-// CompileInsertUsing answers Grammar::compileInsertUsing.
+// CompileInsertUsing builds the SQL for an insert whose values come from a
+// select statement rather than literal rows.
 func (g *Grammar) CompileInsertUsing(q *query.Builder, columns []any, sql string) string {
 	d := g.self
 	table := d.WrapTable(q.GetFrom())
@@ -1127,20 +1157,22 @@ func (g *Grammar) CompileInsertUsing(q *query.Builder, columns []any, sql string
 	return "insert into " + table + " (" + d.Columnize(columns) + ") " + sql
 }
 
-// CompileInsertOrIgnoreReturning answers
-// Grammar::compileInsertOrIgnoreReturning, carrying an error where the PHP
-// throws.
+// CompileInsertOrIgnoreReturning builds the SQL for an insert that ignores
+// conflicting rows and returns the given columns for the rows it did
+// insert. The base implementation returns an error: only a driver that
+// supports it overrides it.
 func (g *Grammar) CompileInsertOrIgnoreReturning(q *query.Builder, values []map[string]any, uniqueBy, returning []string) (string, error) {
 	return "", fmt.Errorf("query/grammars: this database engine does not support insert or ignore with returning")
 }
 
-// CompileInsertOrIgnoreUsing answers Grammar::compileInsertOrIgnoreUsing,
-// carrying an error where the PHP throws.
+// CompileInsertOrIgnoreUsing builds the SQL for an insert from a select
+// statement that ignores conflicting rows. The base implementation returns
+// an error: only a driver that supports it overrides it.
 func (g *Grammar) CompileInsertOrIgnoreUsing(q *query.Builder, columns []any, sql string) (string, error) {
 	return "", fmt.Errorf("query/grammars: this database engine does not support inserting while ignoring errors")
 }
 
-// CompileUpdate answers Grammar::compileUpdate.
+// CompileUpdate builds the SQL for an update statement.
 func (g *Grammar) CompileUpdate(q *query.Builder, values map[string]any) string {
 	d := g.self
 	table := d.WrapTable(q.GetFrom())
@@ -1153,7 +1185,7 @@ func (g *Grammar) CompileUpdate(q *query.Builder, values map[string]any) string 
 	return strings.TrimSpace(d.CompileUpdateWithoutJoins(q, table, columns, where))
 }
 
-// CompileUpdateColumns answers Grammar::compileUpdateColumns.
+// CompileUpdateColumns builds the SQL set list for an update statement.
 func (g *Grammar) CompileUpdateColumns(q *query.Builder, values map[string]any) string {
 	d := g.self
 	parts := make([]string, 0, len(values))
@@ -1163,29 +1195,30 @@ func (g *Grammar) CompileUpdateColumns(q *query.Builder, values map[string]any) 
 	return strings.Join(parts, ", ")
 }
 
-// CompileUpdateWithoutJoins answers Grammar::compileUpdateWithoutJoins.
+// CompileUpdateWithoutJoins builds the SQL for an update with no joins.
 func (g *Grammar) CompileUpdateWithoutJoins(q *query.Builder, table, columns, where string) string {
 	return "update " + table + " set " + columns + " " + where
 }
 
-// CompileUpdateWithJoins answers Grammar::compileUpdateWithJoins.
+// CompileUpdateWithJoins builds the SQL for an update that joins other
+// tables.
 func (g *Grammar) CompileUpdateWithJoins(q *query.Builder, table, columns, where string) string {
 	joins := g.self.CompileJoins(q, q.Joins)
 	return "update " + table + " " + joins + " set " + columns + " " + where
 }
 
-// PrepareBindingsForUpdate answers Grammar::prepareBindingsForUpdate.
+// PrepareBindingsForUpdate orders the bindings for an update statement to
+// match the SQL CompileUpdate produced.
 //
 // The join bindings come first because the joins are compiled before the set
-// list, then the values, then everything else in the order Builder::$bindings
-// declares. Select bindings are dropped: an update has no select clause to bind
-// them to.
+// list, then the values, then everything else in bindingOrder. Select
+// bindings are dropped: an update has no select clause to bind them to.
 //
-// An Expression stays in the list as itself. CompileUpdateColumns wrote it into
-// the statement rather than leaving a placeholder for it, so it must not be
-// bound -- and Builder::cleanBindings is what drops it, by recognising the type.
-// Unwrapping it here would hide it from that check and shift every binding
-// after it by one.
+// An Expression stays in the list as itself. CompileUpdateColumns wrote it
+// into the statement rather than leaving a placeholder for it, so it must
+// not be bound -- and query.Builder's CleanBindings is what drops it later,
+// by recognising the type. Unwrapping it here would hide it from that check
+// and shift every binding after it by one.
 func (g *Grammar) PrepareBindingsForUpdate(bindings map[string][]any, values map[string]any) []any {
 	out := make([]any, 0, len(values)+8)
 	out = append(out, bindings["join"]...)
@@ -1204,7 +1237,7 @@ func (g *Grammar) PrepareBindingsForUpdate(bindings map[string][]any, values map
 	return out
 }
 
-// CompileDelete answers Grammar::compileDelete.
+// CompileDelete builds the SQL for a delete statement.
 func (g *Grammar) CompileDelete(q *query.Builder) string {
 	d := g.self
 	table := d.WrapTable(q.GetFrom())
@@ -1216,19 +1249,21 @@ func (g *Grammar) CompileDelete(q *query.Builder) string {
 	return strings.TrimSpace(d.CompileDeleteWithoutJoins(q, table, where))
 }
 
-// CompileDeleteWithoutJoins answers Grammar::compileDeleteWithoutJoins.
+// CompileDeleteWithoutJoins builds the SQL for a delete with no joins.
 func (g *Grammar) CompileDeleteWithoutJoins(q *query.Builder, table, where string) string {
 	return "delete from " + table + " " + where
 }
 
-// CompileDeleteWithJoins answers Grammar::compileDeleteWithJoins.
+// CompileDeleteWithJoins builds the SQL for a delete that joins other
+// tables.
 func (g *Grammar) CompileDeleteWithJoins(q *query.Builder, table, where string) string {
 	alias := lastSegment(table, " as ")
 	joins := g.self.CompileJoins(q, q.Joins)
 	return "delete " + alias + " from " + table + " " + joins + " " + where
 }
 
-// PrepareBindingsForDelete answers Grammar::prepareBindingsForDelete.
+// PrepareBindingsForDelete orders the bindings for a delete statement,
+// dropping the select bindings a delete has no clause to bind.
 func (g *Grammar) PrepareBindingsForDelete(bindings map[string][]any) []any {
 	out := make([]any, 0, 8)
 	for _, key := range bindingOrder {
@@ -1240,12 +1275,13 @@ func (g *Grammar) PrepareBindingsForDelete(bindings map[string][]any) []any {
 	return out
 }
 
-// CompileTruncate answers Grammar::compileTruncate.
+// CompileTruncate builds the SQL that empties a table.
 func (g *Grammar) CompileTruncate(q *query.Builder) map[string][]any {
 	return map[string][]any{"truncate table " + g.self.WrapTable(q.GetFrom()): {}}
 }
 
-// CompileLock answers Grammar::compileLock.
+// CompileLock builds the SQL locking clause, if the given value is a
+// string.
 func (g *Grammar) CompileLock(q *query.Builder, value any) string {
 	if lock, ok := value.(string); ok {
 		return lock
@@ -1253,17 +1289,19 @@ func (g *Grammar) CompileLock(q *query.Builder, value any) string {
 	return ""
 }
 
-// CompileThreadCount answers Grammar::compileThreadCount. The PHP returns null
-// for an engine that cannot be asked; the empty string is that here.
+// CompileThreadCount builds the SQL that asks the engine how many threads
+// or connections are active. The empty string means the engine cannot be
+// asked.
 func (g *Grammar) CompileThreadCount() string { return "" }
 
-// SubstituteBindingsIntoRawSQL answers Grammar::substituteBindingsIntoRawSql.
+// SubstituteBindingsIntoRawSQL writes a statement's bindings directly into
+// its placeholders, for display.
 //
-// It is for showing a statement, never for running one: the result is a string
-// with the values written into it, which is exactly what a placeholder exists
-// to avoid. It carries an error because escaping needs a connection, and a
-// grammar without one refuses rather than emitting something that looks escaped
-// and is not.
+// It is for showing a statement, never for running one: the result is a
+// string with the values written into it, which is exactly what a
+// placeholder exists to avoid. It returns an error because escaping needs a
+// connection, and a grammar without one refuses rather than emitting
+// something that looks escaped and is not.
 func (g *Grammar) SubstituteBindingsIntoRawSQL(sql string, bindings []any) (string, error) {
 	d := g.self
 
@@ -1312,7 +1350,7 @@ func (g *Grammar) SubstituteBindingsIntoRawSQL(sql string, bindings []any) (stri
 	return out.String(), nil
 }
 
-// Wrap answers Illuminate\Database\Grammar::wrap.
+// Wrap quotes an identifier, leaving an Expression alone.
 //
 // query.BaseGrammar has a Wrap of its own, and it cannot be the one that runs:
 // it quotes through an unexported wrapValue that Go binds at compile time, so
@@ -1339,11 +1377,11 @@ func (g *Grammar) Wrap(value any) string {
 	return g.wrapSegments(strings.Split(name, "."))
 }
 
-// WrapTable answers Grammar::wrapTable.
+// WrapTable quotes a table name, applying the table prefix.
 //
-// The table prefix is applied here and nowhere else, which is why a bare table
-// name written into a where clause is a bug that only appears on a prefixed
-// connection.
+// The table prefix is applied here and nowhere else, which is why a bare
+// table name written into a where clause is a bug that only appears on a
+// prefixed connection.
 func (g *Grammar) WrapTable(table any) string {
 	return g.wrapTableWithPrefix(table, g.self.GetTablePrefix())
 }
@@ -1377,8 +1415,8 @@ func (g *Grammar) wrapTableWithPrefix(table any, prefix string) string {
 	return d.WrapValue(prefix + name)
 }
 
-// wrapSegments answers Grammar::wrapSegments: the first of several segments is
-// a table, so it takes the prefix.
+// wrapSegments quotes each dot-separated segment of a name. The first of
+// several segments is a table, so it takes the prefix.
 func (g *Grammar) wrapSegments(segments []string) string {
 	d := g.self
 	out := make([]string, 0, len(segments))
@@ -1392,8 +1430,8 @@ func (g *Grammar) wrapSegments(segments []string) string {
 	return strings.Join(out, ".")
 }
 
-// WrapValue answers Grammar::wrapValue: one identifier segment, quoted the way
-// the standard says. MySQL overrides it with a backtick.
+// WrapValue quotes one identifier segment in standard double quotes. MySQL
+// overrides it with a backtick.
 //
 // A quote inside the identifier is doubled rather than dropped, because
 // dropping it would silently rename the column.
@@ -1404,7 +1442,7 @@ func (g *Grammar) WrapValue(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }
 
-// WrapArray answers Grammar::wrapArray.
+// WrapArray quotes every value in the given slice.
 func (g *Grammar) WrapArray(values []any) []string {
 	out := make([]string, 0, len(values))
 	for _, value := range values {
@@ -1413,12 +1451,13 @@ func (g *Grammar) WrapArray(values []any) []string {
 	return out
 }
 
-// Columnize answers Grammar::columnize.
+// Columnize quotes and joins a list of columns with commas.
 func (g *Grammar) Columnize(columns []any) string {
 	return strings.Join(g.self.WrapArray(columns), ", ")
 }
 
-// Parameterize answers Grammar::parameterize.
+// Parameterize builds a comma-separated list of placeholders, one per
+// value.
 func (g *Grammar) Parameterize(values []any) string {
 	out := make([]string, 0, len(values))
 	for _, value := range values {
@@ -1427,7 +1466,8 @@ func (g *Grammar) Parameterize(values []any) string {
 	return strings.Join(out, ", ")
 }
 
-// Parameter answers Grammar::parameter.
+// Parameter returns a placeholder for the given value, or its literal SQL
+// if it is an Expression.
 //
 // # Why every dialect writes "?", Postgres included
 //
@@ -1446,8 +1486,8 @@ func (g *Grammar) Parameter(value any) string {
 	return "?"
 }
 
-// GetValue answers Grammar::getValue: an expression collapses to what it
-// carries, anything else is itself.
+// GetValue unwraps an expression to the value it carries; anything else is
+// returned unchanged.
 func (g *Grammar) GetValue(expression any) any {
 	switch e := expression.(type) {
 	case query.Expression:
@@ -1461,14 +1501,14 @@ func (g *Grammar) GetValue(expression any) any {
 	return expression
 }
 
-// IsExpression answers Grammar::isExpression.
+// IsExpression reports whether value is a query.Expression.
 func (g *Grammar) IsExpression(value any) bool { return query.IsExpression(value) }
 
-// SetTablePrefix answers Grammar::setTablePrefix.
+// SetTablePrefix sets the table prefix and returns the outermost grammar.
 //
-// query.BaseGrammar returns nil from it, because it cannot name the grammar
-// that embedded it; this returns the outermost grammar, which is what `$this`
-// is in PHP.
+// query.BaseGrammar's own version returns nil, because it cannot name the
+// grammar that embedded it; this returns g.self instead, the outermost
+// grammar wired in by NewGrammar.
 func (g *Grammar) SetTablePrefix(prefix string) query.Grammar {
 	g.BaseGrammar.SetTablePrefix(prefix)
 	if grammar, ok := g.self.(query.Grammar); ok {
@@ -1477,8 +1517,8 @@ func (g *Grammar) SetTablePrefix(prefix string) query.Grammar {
 	return nil
 }
 
-// concatenate answers Grammar::concatenate: the pieces of a statement, with the
-// empty ones dropped.
+// concatenate joins the pieces of a statement with spaces, dropping the
+// empty ones.
 func concatenate(components []component) string {
 	parts := make([]string, 0, len(components))
 	for _, c := range components {
@@ -1523,17 +1563,18 @@ func take(components *[]component, name string) string {
 // every clause for the compilers' convenience.
 var leadingBoolean = regexp.MustCompile(`(?i)^(and |or )`)
 
-// removeLeadingBoolean answers Grammar::removeLeadingBoolean.
+// removeLeadingBoolean strips the leading "and " or "or " a compiled clause
+// list starts with.
 //
-// The PHP's regular expression is unanchored and replaces the first match
-// anywhere in the string; anchoring it here reaches the same result for every
-// clause list -- they all start with the boolean -- without being able to eat a
-// conjunction out of the middle of a raw clause.
+// The pattern is anchored to the start of the string: every clause list
+// starts with the boolean, and anchoring it rules out eating a conjunction
+// out of the middle of a raw clause.
 func removeLeadingBoolean(value string) string {
 	return leadingBoolean.ReplaceAllString(value, "")
 }
 
-// aliasPattern is the PHP's /\s+as\s+/i.
+// aliasPattern matches the " as " separator between a column or table and
+// its alias, case-insensitively.
 var aliasPattern = regexp.MustCompile(`(?i)\s+as\s+`)
 
 // aliasSplit splits "column as alias" the way preg_split does.
@@ -1541,7 +1582,8 @@ func aliasSplit(value string) []string {
 	return aliasPattern.Split(value, 2)
 }
 
-// lastSegment answers `last(explode($separator, $value))`.
+// lastSegment returns the part of value after the last occurrence of
+// separator, or value unchanged if separator does not appear.
 func lastSegment(value, separator string) string {
 	if i := strings.LastIndex(strings.ToLower(value), separator); i >= 0 {
 		return value[i+len(separator):]
@@ -1549,15 +1591,14 @@ func lastSegment(value, separator string) string {
 	return value
 }
 
-// unsupportedClause answers the RuntimeException the PHP throws from inside a
-// where compiler.
+// unsupportedClause turns a where-compiler's refusal into a false clause.
 //
-// CompileSelect returns a string, because that is what query.Grammar declares
-// and what a builder can use, so the refusal cannot travel as an error from
-// here. It travels as a clause that is false: the query returns nothing rather
-// than returning rows nobody filtered for, and the reason rides along in a
-// comment so the log says what happened. Every entry point that can return an
-// error does.
+// CompileSelect returns a string, because that is what query.Grammar
+// declares and what a builder can use, so the refusal cannot travel as an
+// error from here. It travels as a clause that is false instead: the query
+// returns nothing rather than returning rows nobody filtered for, and the
+// reason rides along in a comment so the log says what happened. Every entry
+// point that can return an error does.
 func unsupportedClause(err error) string {
 	return "1 = 0 /* " + strings.ReplaceAll(err.Error(), "*/", "* /") + " */"
 }
@@ -1592,7 +1633,7 @@ func toAny(values []string) []any {
 	return out
 }
 
-// ends answers `array_first` and `array_last` of a between clause's bounds.
+// ends returns the first and last values of a between clause's bounds.
 func ends(values []any) (first, last any) {
 	if len(values) == 0 {
 		return nil, nil

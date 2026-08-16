@@ -17,14 +17,12 @@ import (
 	"github.com/arandu-io/hesape/str"
 )
 
-// PendingRequest mirrors Illuminate\Http\Client\PendingRequest.
+// PendingRequest is the fluent builder for an outgoing HTTP request. Every
+// method returns the PendingRequest itself so that callers chain: WithToken,
+// WithHeader, Timeout, Retry, and finally Get, Post, Put, Patch, Delete,
+// Head, or Send.
 //
-// It is the fluent builder for an outgoing HTTP request. Every method returns
-// the PendingRequest itself so that callers chain: WithToken, WithHeader,
-// Timeout, Retry, and finally Get, Post, Put, Patch, Delete, Head, or Send.
-//
-// The zero value is not usable; create one with NewPendingRequest or
-// Factory.CreatePendingRequest.
+// The zero value is not usable; create one with [Factory.CreatePendingRequest].
 type PendingRequest struct {
 	factory *Factory
 
@@ -90,8 +88,8 @@ type PendingRequest struct {
 	// Async mode: when true, Get/Post/etc. return immediately.
 	async bool
 
-	// promise is PendingRequest::$promise: what an asynchronous send left
-	// behind for the caller to wait on.
+	// promise is what an asynchronous send left behind for the caller to
+	// wait on.
 	promise *promises.LazyPromise
 
 	// beforeSending callbacks run just before the request is sent.
@@ -104,9 +102,10 @@ type PendingRequest struct {
 	// DumpAndDie enables request/response dumping then exits.
 	dumpAndDie bool
 
-	// truncateExceptions is PendingRequest::$truncateExceptionsAt, the PHP
-	// int|false|null: nil defers to the RequestException static, a pointer to
-	// zero is the PHP false, and a positive length cuts the body summary.
+	// truncateExceptions is the per-request override of the truncation
+	// length: nil defers to the package-level default, a pointer to zero
+	// lets the whole body through, and a positive length cuts the body
+	// summary.
 	truncateExceptions *int
 }
 
@@ -283,8 +282,8 @@ func (p *PendingRequest) WithCookies(cookies []*http.Cookie, domain string) *Pen
 	return p
 }
 
-// MaxRedirects is PendingRequest::maxRedirects: how many redirects the request
-// follows before it gives up.
+// MaxRedirects sets how many redirects the request follows before it gives
+// up.
 func (p *PendingRequest) MaxRedirects(max int) *PendingRequest {
 	p.maxRedirects = max
 	return p
@@ -321,21 +320,19 @@ func (p *PendingRequest) ConnectTimeout(d time.Duration) *PendingRequest {
 	return p
 }
 
-// Retry is PendingRequest::retry: how many times the request may be attempted.
+// Retry sets how many times the request may be attempted.
 //
-// times is a total and includes the first send, as the PHP's is: Retry(3)
-// makes at most three requests, not four. delay is what is waited between
-// them.
+// times is a total and includes the first send: Retry(3) makes at most
+// three requests, not four. delay is what is waited between them.
 //
 // when decides whether a failure is worth repeating and is handed the raw
 // response, if one arrived, and the failure itself -- a *RequestException when
 // the response failed, or the transport's error when the connection did. A nil
-// when repeats every failure, which is what Http::retry(3) means in the PHP
-// and is the ordinary way to call this.
+// when repeats every failure, which is the ordinary way to call this.
 //
-// throw is the PHP's $throw: when more than one attempt was asked for and the
-// last one still failed, the failure comes back as an error rather than as a
-// response. It is on by default.
+// throw: when more than one attempt was asked for and the last one still
+// failed, the failure comes back as an error rather than as a response. It
+// is on by default.
 func (p *PendingRequest) Retry(times int, delay time.Duration, when func(*http.Response, error) bool, throw bool) *PendingRequest {
 	p.retryTimes = times
 	p.retryDelay = delay
@@ -390,12 +387,11 @@ func (p *PendingRequest) AfterResponse(callback func(*Response) error) *PendingR
 	return p
 }
 
-// Throw is PendingRequest::throw: turn a failed response into an error.
+// Throw turns a failed response into an error.
 //
-// The callback is the side effect [Response.Throw] describes and never a
-// substitute -- the PHP reaches the same $response->throw($this->throwCallback)
-// and the same tap(). This ran the callback in place of building the
-// exception, so a callback that only logged made the failure vanish.
+// The callback is a side effect only, never a substitute for building the
+// exception: it used to run in place of returning it, so a callback that
+// only logged made the failure vanish instead of surfacing as an error.
 func (p *PendingRequest) Throw(callback func(*Response, *RequestException)) *PendingRequest {
 	p.afterResponse = append(p.afterResponse, func(r *Response) error {
 		if !r.Failed() {
@@ -410,15 +406,15 @@ func (p *PendingRequest) Throw(callback func(*Response, *RequestException)) *Pen
 	return p
 }
 
-// TruncateExceptionsAt is PendingRequest::truncateExceptionsAt: cut the body
-// summary of this request's exceptions at the given length.
+// TruncateExceptionsAt cuts the body summary of this request's exceptions
+// at the given length.
 func (p *PendingRequest) TruncateExceptionsAt(length int) *PendingRequest {
 	p.truncateExceptions = &length
 	return p
 }
 
-// DontTruncateExceptions is PendingRequest::dontTruncateExceptions: let the
-// whole body into this request's exception messages.
+// DontTruncateExceptions lets the whole body into this request's exception
+// messages.
 func (p *PendingRequest) DontTruncateExceptions() *PendingRequest {
 	zero := 0
 	p.truncateExceptions = &zero
@@ -450,7 +446,7 @@ func (p *PendingRequest) Dd() *PendingRequest {
 	return p
 }
 
-// Async is PendingRequest::async: send without waiting.
+// Async sets whether to send without waiting.
 //
 // A verb called on an asynchronous request returns (nil, nil) and leaves a
 // promise on [PendingRequest.GetPromise]; waiting on that promise is what makes
@@ -460,8 +456,8 @@ func (p *PendingRequest) Async(async bool) *PendingRequest {
 	return p
 }
 
-// GetPromise is PendingRequest::getPromise: the promise this request left
-// behind, or nil when it was not sent asynchronously.
+// GetPromise is the promise this request left behind, or nil when it was
+// not sent asynchronously.
 //
 // Wait on it for a (*Response, error): the value is the *Response.
 func (p *PendingRequest) GetPromise() promises.Promise {
@@ -509,12 +505,10 @@ func (p *PendingRequest) GetOptions() map[string]any {
 	}
 }
 
-// MergeOptions is PendingRequest::mergeOptions: this request's options with the
-// given ones laid over them, later maps winning.
+// MergeOptions is this request's options with the given ones laid over
+// them, later maps winning.
 //
-// The PHP merges recursively because a Guzzle option can be an array of
-// headers; nothing in [PendingRequest.GetOptions] nests, so this is a flat
-// merge and says so.
+// Nothing in [PendingRequest.GetOptions] nests, so this is a flat merge.
 func (p *PendingRequest) MergeOptions(options ...map[string]any) map[string]any {
 	merged := p.GetOptions()
 	for _, option := range options {
@@ -525,20 +519,16 @@ func (p *PendingRequest) MergeOptions(options ...map[string]any) map[string]any 
 	return merged
 }
 
-// SetHandler is PendingRequest::setHandler: the transport the request goes out
-// on.
-//
-// The PHP takes a Guzzle handler, the bottom of its middleware stack. Go's
-// counterpart is the http.RoundTripper on the client, which is where a caller
-// puts a recording or an offline transport.
+// SetHandler sets the transport the request goes out on: the
+// http.RoundTripper on the client, which is where a caller puts a
+// recording or an offline transport.
 func (p *PendingRequest) SetHandler(handler http.RoundTripper) *PendingRequest {
 	client := p.BuildClient()
 	client.Transport = handler
 	return p.SetClient(client)
 }
 
-// BuildClient is PendingRequest::buildClient: the client this request will go
-// out on.
+// BuildClient is the client this request will go out on.
 func (p *PendingRequest) BuildClient() *http.Client {
 	if p.factory != nil && p.factory.client != nil {
 		return p.factory.client
@@ -546,12 +536,11 @@ func (p *PendingRequest) BuildClient() *http.Client {
 	return http.DefaultClient
 }
 
-// CreateClient is PendingRequest::createClient: a client configured the way
-// this request needs it, without touching the shared one.
+// CreateClient is a client configured the way this request needs it,
+// without touching the shared one.
 //
-// The PHP takes the Guzzle handler; this takes the transport, for the reason
-// [PendingRequest.SetHandler] gives. A nil transport keeps whatever the client
-// already had.
+// It takes the transport for the reason [PendingRequest.SetHandler] gives.
+// A nil transport keeps whatever the client already had.
 func (p *PendingRequest) CreateClient(handler http.RoundTripper) *http.Client {
 	client := *p.BuildClient()
 	if handler != nil {
@@ -574,12 +563,9 @@ func (p *PendingRequest) CreateClient(handler http.RoundTripper) *http.Client {
 	return &client
 }
 
-// RunBeforeSendingCallbacks is PendingRequest::runBeforeSendingCallbacks: run
-// what [PendingRequest.BeforeSending] registered, in the order it was
-// registered.
-//
-// The PHP returns the request the callbacks handed back; a Go callback mutates
-// the *http.Request in place and returns only what went wrong.
+// RunBeforeSendingCallbacks runs what [PendingRequest.BeforeSending]
+// registered, in the order it was registered, mutating req in place. It
+// returns only what went wrong.
 func (p *PendingRequest) RunBeforeSendingCallbacks(req *http.Request) error {
 	for _, callback := range p.beforeSending {
 		if err := callback(req); err != nil {
@@ -589,13 +575,13 @@ func (p *PendingRequest) RunBeforeSendingCallbacks(req *http.Request) error {
 	return nil
 }
 
-// IsAllowedRequestUrl is PendingRequest::isAllowedRequestUrl: whether a request
-// to this URL may leave the process when no stub matched it.
+// IsAllowedRequestUrl reports whether a request to this URL may leave the
+// process when no stub matched it.
 //
 // Every URL is allowed until stray request prevention is on. After that only
 // the patterns given to [PendingRequest.AllowStrayRequests] or
-// [Factory.AllowStrayRequests] are, matched the way Str::is matches: a literal
-// string, or one with * standing for any run of characters.
+// [Factory.AllowStrayRequests] are, matched the way [str.Is] matches: a
+// literal string, or one with * standing for any run of characters.
 func (p *PendingRequest) IsAllowedRequestUrl(url string) bool {
 	preventing := p.preventStray || (p.factory != nil && p.factory.preventStray)
 	if !preventing {
@@ -644,19 +630,16 @@ func (p *PendingRequest) Send(method, urlStr string, query map[string]string, da
 	// Inside a pool, a verb records the call instead of making it, and the
 	// pool makes them all at once when Send is called on it.
 	//
-	// PHP gets this from the promise its verbs return -- $pool->as('a')->get()
-	// hands back something unresolved, and Http::pool resolves the lot. Go has
-	// no promise, so the pending request knows which pool it belongs to and
-	// answers nil until that pool runs. A caller outside a pool never sees it,
-	// because a pending request only has a pool if the pool built it.
+	// The pending request knows which pool it belongs to and answers nil
+	// until that pool runs. A caller outside a pool never sees it, because a
+	// pending request only has a pool if the pool built it.
 	if p.pool != nil {
 		p.pool.record(p, method, urlStr, query, data)
 		return nil, nil
 	}
 
 	// An asynchronous request leaves a promise behind instead of a response.
-	// Nothing goes out until somebody waits on it, which is what the PHP's
-	// LazyPromise does inside a pool.
+	// Nothing goes out until somebody waits on it -- see [promises.LazyPromise].
 	if p.async {
 		p.async = false
 		p.promise = promises.NewLazyPromise(func() promises.Promise {
@@ -704,8 +687,8 @@ func (p *PendingRequest) Send(method, urlStr string, query map[string]string, da
 	cc := p.CreateClient(nil)
 
 	// The number of attempts, which is a total and not a number of extras:
-	// PHP's retry($times, ...) counts the first send. Retry was configured
-	// with zero until somebody asked for it, and zero still means one send.
+	// Retry's times counts the first send. Retry was configured with zero
+	// until somebody asked for it, and zero still means one send.
 	attempts := p.retryTimes
 	if attempts < 1 {
 		attempts = 1
@@ -761,9 +744,10 @@ func (p *PendingRequest) Send(method, urlStr string, query map[string]string, da
 		}
 
 		// What went wrong on this attempt, which is either the transport
-		// failing or the response having failed. The PHP hands the retry
-		// callback a ConnectionException in the first case and the response's
-		// own RequestException in the second; this passed nil for both.
+		// failing or the response having failed. The retry callback is handed
+		// the transport's error in the first case and the response's own
+		// RequestException in the second; it used to be handed nil for both,
+		// so a when callback could never actually see why an attempt failed.
 		failure := attemptErr
 		if failure == nil && resp != nil && resp.Failed() {
 			failure = NewRequestException(resp, p.truncateExceptions)
@@ -772,10 +756,10 @@ func (p *PendingRequest) Send(method, urlStr string, query map[string]string, da
 			return resp, nil
 		}
 
-		// Whether to try again. A nil callback is the PHP's ternary falling
-		// through to true, not the retry being switched off -- Http::retry(3)
-		// with no callback is the ordinary way to call it, and it used to make
-		// exactly one request.
+		// Whether to try again. A nil callback means true -- retry every
+		// failure -- not the retry being switched off: Retry(3, ...) with no
+		// callback is the ordinary way to call it, and it used to make exactly
+		// one request.
 		shouldRetry := true
 		if p.retryWhen != nil {
 			shouldRetry = p.retryWhen(httpResp, failure)
@@ -790,8 +774,7 @@ func (p *PendingRequest) Send(method, urlStr string, query map[string]string, da
 
 		// Out of attempts. A transport failure is returned as it is; a failed
 		// response is turned into an exception only when more than one attempt
-		// was asked for and throwing was left on, which is the PHP's
-		// "if ($potentialTries > 1 && $this->retryThrow)".
+		// was asked for and throwing was left on.
 		if attemptErr != nil {
 			return nil, attemptErr
 		}
@@ -804,12 +787,12 @@ func (p *PendingRequest) Send(method, urlStr string, query map[string]string, da
 
 // attempt sends one request and builds its Response.
 //
-// It answers to the body of the closure the PHP hands to retry(): the stub
-// stands in for the handler Guzzle would have called, the response is
-// recorded, and the after-response callbacks run. The error it returns is the
-// attempt's failure -- a transport error, a stubbed connection failure, or
-// whatever an after-response callback objected to -- and the caller decides
-// whether that failure is worth repeating.
+// A stub stands in for the transport when one matches; otherwise the
+// request goes out for real. The response is recorded and the
+// after-response callbacks run. The error it returns is the attempt's
+// failure -- a transport error, a stubbed connection failure, or whatever an
+// after-response callback objected to -- and the caller decides whether that
+// failure is worth repeating.
 func (p *PendingRequest) attempt(cc *http.Client, req *http.Request) (*Response, *http.Response, error) {
 	httpResp, err := p.findStub(req)
 	if httpResp == nil && err == nil {

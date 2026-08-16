@@ -1,11 +1,8 @@
 package view
 
-// ManagesComponents mirrors Illuminate\View\Concerns\ManagesComponents.
-//
-// These are methods on Factory. Component rendering is handled by the kyse
-// compiler at build time, so the runtime methods here are for state tracking
-// and the component stack — they support the kyse-generated code, not a
-// runtime component discovery mechanism.
+// These are methods on Factory for component state tracking and the
+// component stack. Component rendering itself is handled by generated code
+// at build time, not by runtime component discovery.
 
 // StartComponent pushes a component onto the rendering stack.
 func (f *Factory) StartComponent(name string, data map[string]any) {
@@ -51,7 +48,7 @@ func (f *Factory) RenderComponent() string {
 	return f.componentBuffer
 }
 
-// Slot is ManagesComponents::slot.
+// Slot registers a named slot for the component being rendered.
 //
 // Content given up front stores the slot directly; content left empty opens a
 // capture that EndSlot closes.
@@ -68,8 +65,8 @@ func (f *Factory) Slot(name string, content string, attributes map[string]any) {
 
 // GetSlots returns the slots captured for the component being rendered.
 //
-// It answers no PHP method: in Blade the slots are ordinary variables the
-// compiled template closes over, and generated Go has to ask for them.
+// Generated code cannot close over them as ordinary variables, so it asks
+// for them explicitly through this method.
 func (f *Factory) GetSlots() map[string]*ComponentSlot {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -118,7 +115,7 @@ func (f *Factory) GetConsumableComponentData(key string, fallback any) any {
 	return fallback
 }
 
-// FlushComponents is ManagesComponents::flushComponents.
+// FlushComponents resets every piece of per-render component state.
 func (f *Factory) FlushComponents() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -152,7 +149,7 @@ func (f *Factory) SetSlotBuffer(content string) {
 
 // NewComponentHash generates a hash for the component stack.
 func (f *Factory) NewComponentHash(name string) string {
-	// Simple deterministic hash — the kyse compiler generates these.
+	// Simple deterministic hash — generated code depends on these being stable.
 	return name + "-" + itoa(len(f.componentStack))
 }
 

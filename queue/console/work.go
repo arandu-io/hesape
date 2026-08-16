@@ -15,13 +15,13 @@ import (
 
 // WorkCommand drains a queue.
 //
-// It answers Illuminate\Queue\Console\WorkCommand: `queue:work`, with the
-// connection as an argument and the worker's options as flags. It is the
-// process a deployment runs beside the web one, from the same image.
+// It is `queue:work`, with the connection as an argument and the worker's
+// options as flags: the process a deployment runs beside the web one, from the
+// same image.
 //
 // The worker it runs is the one the application built, with its handlers
-// already registered -- there is no container to resolve a job class out of, so
-// the registry is the thing that has to be passed in (ADR 0001).
+// already registered -- nothing resolves a job name to code on its own, so the
+// registry is the thing that has to be passed in.
 type WorkCommand struct {
 	worker  *queue.Worker
 	manager *queue.QueueManager
@@ -44,7 +44,7 @@ func (c *WorkCommand) Command() console.Command {
 	}
 }
 
-// Handle runs the command. It answers WorkCommand::handle().
+// Handle runs the command.
 //
 // The exit status is the worker's, and it is what a supervisor reads: see
 // queue.WorkerStopReason.
@@ -57,9 +57,8 @@ func (c *WorkCommand) Handle(ctx context.Context, o *console.IO) error {
 		return err
 	}
 
-	// The flags override what the worker was built with, which is what
-	// daemon($connection, $queue, $options) does in PHP by taking them as
-	// arguments. Here the worker holds them, so the command replaces them.
+	// The flags override what the worker was built with: the worker holds its
+	// options, so the command replaces them.
 	c.worker.FlushState()
 	options := c.worker.Options()
 	if *queueName != "" {
@@ -84,10 +83,9 @@ func (c *WorkCommand) Handle(ctx context.Context, o *console.IO) error {
 
 // ListenCommand runs a worker in a child process and restarts it when it exits.
 //
-// It answers Illuminate\Queue\Console\ListenCommand: `queue:listen`. It is for
-// development, where the point is that a rebuilt binary is picked up without
-// anybody restarting anything -- see queue.Listener for why it is not the way
-// to run a queue in production.
+// It is `queue:listen`, and it is for development, where the point is that a
+// rebuilt binary is picked up without anybody restarting anything -- see
+// queue.Listener for why it is not the way to run a queue in production.
 type ListenCommand struct {
 	listener *queue.Listener
 	options  queue.ListenerOptions
@@ -107,7 +105,7 @@ func (c *ListenCommand) Command() console.Command {
 	}
 }
 
-// Handle runs the command. It answers ListenCommand::handle().
+// Handle runs the command.
 func (c *ListenCommand) Handle(ctx context.Context, o *console.IO) error {
 	flags := o.Flags()
 	queueName := flags.String("queue", jobs.DefaultQueue, "the queue to drain")
@@ -126,9 +124,9 @@ func (c *ListenCommand) Handle(ctx context.Context, o *console.IO) error {
 
 // RestartCommand asks every running worker to stop after its current job.
 //
-// It answers Illuminate\Queue\Console\RestartCommand: `queue:restart`. It is
-// how a deploy replaces the workers -- the new binary starts, the old processes
-// notice and exit cleanly, and whatever supervises them starts the new image.
+// It is `queue:restart`, and it is how a deploy replaces the workers -- the new
+// binary starts, the old processes notice and exit cleanly, and whatever
+// supervises them starts the new image.
 type RestartCommand struct {
 	manager *queue.QueueManager
 }
@@ -145,7 +143,7 @@ func (c *RestartCommand) Command() console.Command {
 	}
 }
 
-// Handle runs the command. It answers RestartCommand::handle().
+// Handle runs the command.
 func (c *RestartCommand) Handle(ctx context.Context, o *console.IO) error {
 	if err := c.manager.Restart(ctx); err != nil {
 		return err
@@ -156,9 +154,8 @@ func (c *RestartCommand) Handle(ctx context.Context, o *console.IO) error {
 
 // PauseCommand stops workers taking new jobs off a queue.
 //
-// It answers Illuminate\Queue\Console\PauseCommand: `queue:pause`. It is the
-// switch to reach for when a downstream system is failing and retrying into it
-// is making things worse.
+// It is `queue:pause`, the switch to reach for when a downstream system is
+// failing and retrying into it is making things worse.
 type PauseCommand struct {
 	manager *queue.QueueManager
 }
@@ -175,7 +172,7 @@ func (c *PauseCommand) Command() console.Command {
 	}
 }
 
-// Handle runs the command. It answers PauseCommand::handle().
+// Handle runs the command.
 func (c *PauseCommand) Handle(ctx context.Context, o *console.IO) error {
 	flags := o.Flags()
 	forDuration := flags.Duration("for", 0, "resume on its own after this long")
@@ -203,9 +200,8 @@ func (c *PauseCommand) Handle(ctx context.Context, o *console.IO) error {
 	return nil
 }
 
-// ResumeCommand lets workers take jobs off a paused queue again.
-//
-// It answers Illuminate\Queue\Console\ResumeCommand: `queue:resume`.
+// ResumeCommand lets workers take jobs off a paused queue again. It is
+// `queue:resume`.
 type ResumeCommand struct {
 	manager *queue.QueueManager
 }
@@ -222,7 +218,7 @@ func (c *ResumeCommand) Command() console.Command {
 	}
 }
 
-// Handle runs the command. It answers ResumeCommand::handle().
+// Handle runs the command.
 func (c *ResumeCommand) Handle(ctx context.Context, o *console.IO) error {
 	flags := o.Flags()
 	if err := flags.Parse(o.Args()); err != nil {
@@ -244,9 +240,9 @@ func (c *ResumeCommand) Handle(ctx context.Context, o *console.IO) error {
 
 // ClearCommand deletes every job waiting on a queue.
 //
-// It answers Illuminate\Queue\Console\ClearCommand: `queue:clear`. Parked jobs
-// are not cleared -- a job that gave up is in the dead letter list, not on a
-// queue, and `aru queue:flush` is what empties that.
+// It is `queue:clear`. Parked jobs are not cleared -- a job that gave up is in
+// the dead letter list, not on a queue, and `aru queue:flush` is what empties
+// that.
 type ClearCommand struct {
 	manager *queue.QueueManager
 }
@@ -263,11 +259,10 @@ func (c *ClearCommand) Command() console.Command {
 	}
 }
 
-// Handle runs the command. It answers ClearCommand::handle().
+// Handle runs the command.
 //
-// It asks first, unless --force. Laravel's confirmToProceed() only asks in
-// production; this asks everywhere, because a queue with jobs on it is
-// somebody's work whichever environment it is in.
+// It asks first, unless --force, and it asks in every environment: a queue with
+// jobs on it is somebody's work whichever one it is.
 func (c *ClearCommand) Handle(ctx context.Context, o *console.IO) error {
 	flags := o.Flags()
 	queueName := flags.String("queue", jobs.DefaultQueue, "the queue to empty")
@@ -307,9 +302,8 @@ func (c *ClearCommand) Handle(ctx context.Context, o *console.IO) error {
 // MonitorCommand reports how much work is waiting, and says so loudly when it
 // is too much.
 //
-// It answers Illuminate\Queue\Console\MonitorCommand: `queue:monitor`. It is
-// meant to run on a schedule: the table is for a person, and the QueueBusy
-// event is for whatever pages one.
+// It is `queue:monitor`, meant to run on a schedule: the table is for a person,
+// and the QueueBusy event is for whatever pages one.
 type MonitorCommand struct {
 	manager *queue.QueueManager
 	events  queue.Dispatcher
@@ -332,7 +326,7 @@ func (c *MonitorCommand) Command() console.Command {
 	}
 }
 
-// Handle runs the command. It answers MonitorCommand::handle().
+// Handle runs the command.
 func (c *MonitorCommand) Handle(ctx context.Context, o *console.IO) error {
 	flags := o.Flags()
 	max := flags.Int("max", 1000, "how many waiting jobs count as busy")

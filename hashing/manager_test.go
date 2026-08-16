@@ -11,7 +11,7 @@ import (
 )
 
 // fakeConfig is the smallest thing that satisfies hashing.Config: a map read by
-// dotted key. The manager reads three keys, so this is the whole of the PHP
+// dotted key. The manager reads three keys, so this is the whole of the
 // contract it uses.
 type fakeConfig map[string]any
 
@@ -58,10 +58,9 @@ func TestHashManagerDefaultsToBcrypt(t *testing.T) {
 	}
 }
 
-// TestHashManagerSelectsTheConfiguredDriver walks the three names the PHP
-// create*Driver methods answer to, and checks that what comes back writes that
-// algorithm -- a manager that returns the right type but hashes with another is
-// the failure worth catching.
+// TestHashManagerSelectsTheConfiguredDriver walks the three driver names and
+// checks that what comes back writes that algorithm -- a manager that returns
+// the right type but hashes with another is the failure worth catching.
 func TestHashManagerSelectsTheConfiguredDriver(t *testing.T) {
 	cases := []struct {
 		driver string
@@ -102,9 +101,9 @@ func TestHashManagerSelectsTheConfiguredDriver(t *testing.T) {
 	}
 }
 
-// TestHashManagerRefusesAnUnknownDriver is the InvalidArgumentException
-// Manager::createDriver throws. The manager refuses to exist at all, which is
-// the one place this package fails earlier than the PHP does.
+// TestHashManagerRefusesAnUnknownDriver pins where an unknown driver name
+// fails. The manager refuses to exist at all, rather than failing on the first
+// hash.
 func TestHashManagerRefusesAnUnknownDriver(t *testing.T) {
 	_, err := hashing.NewHashManager(fakeConfig{"hashing.driver": "scrypt"})
 	if !errors.Is(err, hashing.ErrDriverNotSupported) {
@@ -120,8 +119,8 @@ func TestHashManagerRefusesAnUnknownDriver(t *testing.T) {
 	}
 }
 
-// TestHashManagerCachesDrivers is Manager keeping $this->drivers: asking twice
-// gives the same instance, so a SetRounds on one is visible through the other.
+// TestHashManagerCachesDrivers pins the driver cache: asking twice gives the
+// same instance, so a SetRounds on one is visible through the other.
 func TestHashManagerCachesDrivers(t *testing.T) {
 	m, err := hashing.NewHashManager(fakeConfig{"hashing.bcrypt": cheapBcrypt()})
 	if err != nil {
@@ -140,7 +139,7 @@ func TestHashManagerCachesDrivers(t *testing.T) {
 		t.Error("Driver built a second instance for the same name")
 	}
 
-	// An empty name is PHP's falsy $driver: it means the default.
+	// An empty name means the default.
 	def, err := m.Driver("")
 	if err != nil {
 		t.Fatalf("Driver(\"\"): %v", err)
@@ -150,9 +149,9 @@ func TestHashManagerCachesDrivers(t *testing.T) {
 	}
 }
 
-// TestHashManagerReadsTheOptionsSection is the "?? []" on each config read:
+// TestHashManagerReadsTheOptionsSection pins how each options section is read:
 // what the section holds reaches the hasher, and what it does not hold leaves
-// the PHP class default in place.
+// the hasher's own default in place.
 func TestHashManagerReadsTheOptionsSection(t *testing.T) {
 	m, err := hashing.NewHashManager(fakeConfig{
 		"hashing.bcrypt": map[string]any{"rounds": bcrypt.MinCost, "limit": 8},
@@ -178,8 +177,7 @@ func TestHashManagerReadsTheOptionsSection(t *testing.T) {
 		t.Errorf("cost = %d, want the configured %d", info.Cost, bcrypt.MinCost)
 	}
 
-	// A section of the wrong shape is the empty array, not an error: the PHP
-	// ends every one of those reads with "?? []".
+	// A section of the wrong shape reads as absent, not as an error.
 	broken, err := hashing.NewHashManager(fakeConfig{"hashing.bcrypt": "twelve"})
 	if err != nil {
 		t.Fatalf("NewHashManager with an unreadable section: %v", err)
@@ -229,7 +227,7 @@ func TestHashManagerIsHashed(t *testing.T) {
 
 // TestHashManagerNeedsRehashAndVerifyConfiguration forwards both to the driver.
 // A hash written by another driver needs a rehash and fails verification, which
-// is how a table imported from a PHP application is walked forward.
+// is how an imported table is walked forward.
 func TestHashManagerNeedsRehashAndVerifyConfiguration(t *testing.T) {
 	m, err := hashing.NewHashManager(fakeConfig{
 		"hashing.driver": hashing.DriverArgon2id,
@@ -260,8 +258,7 @@ func TestHashManagerNeedsRehashAndVerifyConfiguration(t *testing.T) {
 	if m.VerifyConfiguration(foreign) {
 		t.Error("VerifyConfiguration accepted a bcrypt hash under an argon2id manager")
 	}
-	// An empty stored hash is false and not an error, as the PHP guard on
-	// is_null and strlen makes it.
+	// An empty stored hash is false and not an error.
 	ok, err := m.Check(validPassword, "")
 	if ok || err != nil {
 		t.Errorf("Check against an empty hash = %v, %v; want false, nil", ok, err)

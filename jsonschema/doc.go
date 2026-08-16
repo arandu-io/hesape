@@ -1,12 +1,10 @@
 // Package jsonschema builds and checks JSON Schema documents.
 //
-// It is Arandu's answer to Illuminate\JsonSchema -- Serializer.php,
-// JsonSchema.php, JsonSchemaTypeFactory.php and the Types directory in the
-// clone at laravel_illuminate/json-schema -- and it exists for one reason: a
-// schema written as JSON in a string is a schema nothing checks, and the first
-// time it is wrong the caller sends a value the program ignores. Here a schema
-// is a value the compiler knows the shape of, and the same value both renders
-// the document and validates against it, so the two cannot disagree.
+// It exists for one reason: a schema written as JSON in a string is a schema
+// nothing checks, and the first time it is wrong the caller sends a value the
+// program ignores. Here a schema is a value the compiler knows the shape of,
+// and the same value both renders the document and validates against it, so the
+// two cannot disagree.
 //
 // The whole surface is a builder and one function:
 //
@@ -46,10 +44,10 @@
 //
 // # Reading a schema this package did not write
 //
-// [Deserialize] is the other direction -- Deserializer.php, reached in PHP
-// through JsonSchema::fromArray, which is [FromArray] here. It reads a decoded
-// document into the same values the builder produces, so a schema that arrived
-// as JSON is checked by the same [Validate] as one written in Go.
+// [Deserialize] is the other direction, and [FromArray] is the same thing from
+// an already-decoded map. It reads a document into the same values the builder
+// produces, so a schema that arrived as JSON is checked by the same [Validate]
+// as one written in Go.
 //
 // It reads the subset this package can represent, and every keyword outside it
 // is an error naming the keyword rather than a silent drop. There is no Parse
@@ -59,11 +57,9 @@
 //
 // # Where the types live
 //
-// Illuminate keeps its eight type classes in a Types sub-namespace and reaches
-// them through the JsonSchema facade -- JsonSchema::string(). Here they are the
-// package itself, so the call reads jsonschema.String(). The sub-package
-// hesape/jsonschema/types holds no types and exists only to say so: splitting
-// them out would put half a schema behind a second import path for no gain, and
-// [Validate] switches over a closed set that has to be declared where it is
-// checked.
+// The types are the package itself, so the call reads jsonschema.String(). The
+// sub-package hesape/jsonschema/types holds no types and exists only to say so:
+// splitting them out would put half a schema behind a second import path for no
+// gain, and [Validate] switches over a closed set that has to be declared where
+// it is checked.
 package jsonschema

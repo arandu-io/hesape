@@ -1,21 +1,18 @@
 package schema
 
-// ColumnDefinition answers Illuminate\Database\Schema\ColumnDefinition.
+// ColumnDefinition is what every column method on the Blueprint returns, and it
+// is what the migration reads like:
+// String("email", 255).Nullable().Default("").Comment("").
 //
-// It is what every column method on the Blueprint returns, and it is what the
-// migration reads like: String("email", 255).Nullable().Default("").Comment("").
-//
-// PHP declares it as an empty Fluent subclass and lists its methods in a
-// docblock, so the attribute and the setter share a name -- $column->nullable
-// is the value, nullable() is the setter. Go has one namespace for both, so
-// every attribute is an unexported field with a Get prefixed getter, the same
-// rule query.Builder follows for GetFrom and GetLimit.
+// The attribute and the fluent setter would share a name, and Go has one
+// namespace for both, so every attribute is an unexported field with a Get
+// prefixed getter -- the same rule query.Builder follows for GetFrom and
+// GetLimit.
 //
 // The index markers (Index, Unique, Primary, FullText, SpatialIndex,
-// VectorIndex) are any because the PHP takes bool|string|null and each of the
-// three means something different: nothing means "index it, name it by
-// convention", a string names it, and false on a changed column drops the
-// index it would otherwise have had.
+// VectorIndex) are any because each of three values means something different:
+// nothing means "index it, name it by convention", a string names it, and false
+// on a changed column drops the index it would otherwise have had.
 type ColumnDefinition struct {
 	name string
 	typ  string
@@ -77,68 +74,69 @@ type ColumnDefinition struct {
 	referencesModelColumn string
 }
 
-// GetName answers $column->name.
+// GetName returns the column's name.
 func (c *ColumnDefinition) GetName() string { return c.name }
 
-// Type answers ColumnDefinition::type: it overrides the column's type.
+// Type overrides the column's type.
 func (c *ColumnDefinition) Type(typ string) *ColumnDefinition { c.typ = typ; return c }
 
-// GetType answers $column->type.
+// GetType returns the column's type.
 func (c *ColumnDefinition) GetType() string { return c.typ }
 
-// GetLength answers $column->length.
+// GetLength returns the column's length, or nil if none was set.
 func (c *ColumnDefinition) GetLength() *int { return c.length }
 
-// GetFixed answers $column->fixed, the binary column's fixed width flag.
+// GetFixed reports whether the binary column has a fixed width.
 func (c *ColumnDefinition) GetFixed() bool { return c.fixed }
 
-// GetPrecision answers $column->precision.
+// GetPrecision returns the column's precision, or nil if none was set.
 func (c *ColumnDefinition) GetPrecision() *int { return c.precision }
 
-// GetTotal answers $column->total, the decimal column's total digits.
+// GetTotal returns the decimal column's total digits.
 func (c *ColumnDefinition) GetTotal() int { return c.total }
 
-// GetPlaces answers $column->places, the decimal column's decimal places.
+// GetPlaces returns the decimal column's decimal places.
 func (c *ColumnDefinition) GetPlaces() int { return c.places }
 
-// GetAllowed answers $column->allowed, the values an enum or set accepts.
+// GetAllowed returns the values an enum or set column accepts.
 func (c *ColumnDefinition) GetAllowed() []string { return c.allowed }
 
-// GetSubtype answers $column->subtype of a geometry or geography column.
+// GetSubtype returns the subtype of a geometry or geography column.
 func (c *ColumnDefinition) GetSubtype() string { return c.subtype }
 
-// GetSRID answers $column->srid. The PHP spells it srid; an initialism is
-// upper case here.
+// GetSRID returns the geometry or geography column's spatial reference
+// identifier (SRID).
 func (c *ColumnDefinition) GetSRID() int { return c.srid }
 
-// GetDimensions answers $column->dimensions of a vector column.
+// GetDimensions returns the dimensions of a vector column, or nil if none
+// was set.
 func (c *ColumnDefinition) GetDimensions() *int { return c.dimensions }
 
-// GetDefinition answers $column->definition of a raw column.
+// GetDefinition returns the definition of a raw column.
 func (c *ColumnDefinition) GetDefinition() string { return c.definition }
 
-// GetExpression answers $column->expression of a computed column.
+// GetExpression returns the expression of a computed column.
 func (c *ColumnDefinition) GetExpression() string { return c.expression }
 
-// GetFullTypeDefinition answers $column->full_type_definition, which
-// BlueprintState fills from the server so a SQLite table rebuild can repeat a
-// column it did not write.
+// GetFullTypeDefinition returns the full type definition BlueprintState
+// fills in from the server, so a SQLite table rebuild can repeat a column
+// it did not write.
 func (c *ColumnDefinition) GetFullTypeDefinition() string { return c.fullTypeDefinition }
 
-// AutoIncrement answers ColumnDefinition::autoIncrement.
+// AutoIncrement marks the column as auto-incrementing.
 func (c *ColumnDefinition) AutoIncrement() *ColumnDefinition { c.autoIncrement = true; return c }
 
-// GetAutoIncrement answers $column->autoIncrement.
+// GetAutoIncrement reports whether the column auto-increments.
 func (c *ColumnDefinition) GetAutoIncrement() bool { return c.autoIncrement }
 
-// Unsigned answers ColumnDefinition::unsigned.
+// Unsigned marks the column as unsigned.
 func (c *ColumnDefinition) Unsigned() *ColumnDefinition { c.unsigned = true; return c }
 
-// GetUnsigned answers $column->unsigned.
+// GetUnsigned reports whether the column is unsigned.
 func (c *ColumnDefinition) GetUnsigned() bool { return c.unsigned }
 
-// Nullable answers ColumnDefinition::nullable. The PHP default argument is
-// true, so Nullable() allows null and Nullable(false) forbids it.
+// Nullable allows the column to be null. With no argument it allows null;
+// Nullable(false) forbids it.
 func (c *ColumnDefinition) Nullable(value ...bool) *ColumnDefinition {
 	v := true
 	if len(value) > 0 {
@@ -148,52 +146,54 @@ func (c *ColumnDefinition) Nullable(value ...bool) *ColumnDefinition {
 	return c
 }
 
-// GetNullable answers $column->nullable. It is a pointer because the PHP
-// distinguishes an unset nullable from a false one: Postgres emits nothing for
-// the first and "not null" for the second.
+// GetNullable returns whether the column is nullable, or nil if Nullable was
+// never called. The pointer distinguishes the two: Postgres emits nothing
+// for an unset nullable and "not null" for one explicitly set to false.
 func (c *ColumnDefinition) GetNullable() *bool { return c.nullable }
 
-// Default answers ColumnDefinition::default. A query Expression passes through
-// to the SQL untouched; anything else is quoted.
+// Default sets the column's default value. A query Expression passes
+// through to the SQL untouched; anything else is quoted.
 func (c *ColumnDefinition) Default(value any) *ColumnDefinition { c.def = value; return c }
 
-// GetDefault answers $column->default.
+// GetDefault returns the column's default value.
 func (c *ColumnDefinition) GetDefault() any { return c.def }
 
-// OnUpdate answers the MySQL "on update" column modifier, which typeTimestamp
+// OnUpdate sets the MySQL "on update" column modifier, which typeTimestamp
 // sets from UseCurrentOnUpdate.
 func (c *ColumnDefinition) OnUpdate(value any) *ColumnDefinition { c.onUpdate = value; return c }
 
-// GetOnUpdate answers $column->onUpdate.
+// GetOnUpdate returns the column's "on update" modifier.
 func (c *ColumnDefinition) GetOnUpdate() any { return c.onUpdate }
 
-// UseCurrent answers ColumnDefinition::useCurrent.
+// UseCurrent sets the column's default to the current timestamp.
 func (c *ColumnDefinition) UseCurrent() *ColumnDefinition { c.useCurrent = true; return c }
 
-// GetUseCurrent answers $column->useCurrent.
+// GetUseCurrent reports whether the column defaults to the current
+// timestamp.
 func (c *ColumnDefinition) GetUseCurrent() bool { return c.useCurrent }
 
-// UseCurrentOnUpdate answers ColumnDefinition::useCurrentOnUpdate.
+// UseCurrentOnUpdate sets the column to update to the current timestamp on
+// row update.
 func (c *ColumnDefinition) UseCurrentOnUpdate() *ColumnDefinition {
 	c.useCurrentOnUpdate = true
 	return c
 }
 
-// GetUseCurrentOnUpdate answers $column->useCurrentOnUpdate.
+// GetUseCurrentOnUpdate reports whether the column updates to the current
+// timestamp on row update.
 func (c *ColumnDefinition) GetUseCurrentOnUpdate() bool { return c.useCurrentOnUpdate }
 
-// Change answers ColumnDefinition::change: the column already exists and this
-// definition replaces it.
+// Change marks the column as replacing one that already exists.
 func (c *ColumnDefinition) Change() *ColumnDefinition { c.change = true; return c }
 
-// GetChange answers $column->change.
+// GetChange reports whether this definition replaces an existing column.
 func (c *ColumnDefinition) GetChange() bool { return c.change }
 
-// GetRenameTo answers $column->renameTo, which a change command carries when
-// the column is renamed in the same statement.
+// GetRenameTo returns the new name a change command carries when the column
+// is renamed in the same statement.
 func (c *ColumnDefinition) GetRenameTo() string { return c.renameTo }
 
-// After answers ColumnDefinition::after. An empty column is the PHP null and
+// After places the column after column in the table. An empty column
 // clears the modifier, which is what Blueprint's morphs family relies on.
 func (c *ColumnDefinition) After(column string) *ColumnDefinition {
 	if column == "" {
@@ -204,10 +204,11 @@ func (c *ColumnDefinition) After(column string) *ColumnDefinition {
 	return c
 }
 
-// GetAfter answers $column->after.
+// GetAfter returns the name of the column this one is placed after, or nil
+// if none was set.
 func (c *ColumnDefinition) GetAfter() *string { return c.after }
 
-// First answers ColumnDefinition::first.
+// First places the column first in the table.
 func (c *ColumnDefinition) First(value ...bool) *ColumnDefinition {
 	v := true
 	if len(value) > 0 {
@@ -217,11 +218,11 @@ func (c *ColumnDefinition) First(value ...bool) *ColumnDefinition {
 	return c
 }
 
-// GetFirst answers $column->first.
+// GetFirst returns whether the column is placed first in the table, or nil
+// if that was never set.
 func (c *ColumnDefinition) GetFirst() *bool { return c.first }
 
-// Invisible answers ColumnDefinition::invisible: the column is left out of
-// "select *" on MySQL.
+// Invisible marks the column as left out of "select *" on MySQL.
 func (c *ColumnDefinition) Invisible(value ...bool) *ColumnDefinition {
 	v := true
 	if len(value) > 0 {
@@ -231,79 +232,81 @@ func (c *ColumnDefinition) Invisible(value ...bool) *ColumnDefinition {
 	return c
 }
 
-// GetInvisible answers $column->invisible.
+// GetInvisible returns whether the column is invisible, or nil if that was
+// never set.
 func (c *ColumnDefinition) GetInvisible() *bool { return c.invisible }
 
-// Comment answers ColumnDefinition::comment.
+// Comment sets the column's comment.
 func (c *ColumnDefinition) Comment(comment string) *ColumnDefinition {
 	c.comment = &comment
 	return c
 }
 
-// GetComment answers $column->comment. It is a pointer because Postgres writes
-// "comment on column ... is NULL" to clear one, which is a different statement
-// from writing no comment at all.
+// GetComment returns the column's comment, or nil if none was set. It is a
+// pointer because Postgres writes "comment on column ... is NULL" to clear
+// one, which is a different statement from writing no comment at all.
 func (c *ColumnDefinition) GetComment() *string { return c.comment }
 
-// Charset answers ColumnDefinition::charset.
+// Charset sets the column's character set.
 func (c *ColumnDefinition) Charset(charset string) *ColumnDefinition { c.charset = charset; return c }
 
-// GetCharset answers $column->charset.
+// GetCharset returns the column's character set.
 func (c *ColumnDefinition) GetCharset() string { return c.charset }
 
-// Collation answers ColumnDefinition::collation.
+// Collation sets the column's collation.
 func (c *ColumnDefinition) Collation(collation string) *ColumnDefinition {
 	c.collation = collation
 	return c
 }
 
-// GetCollation answers $column->collation.
+// GetCollation returns the column's collation.
 func (c *ColumnDefinition) GetCollation() string { return c.collation }
 
-// VirtualAs answers ColumnDefinition::virtualAs: a generated column computed on
-// read. The expression may be a string or a query Expression.
+// VirtualAs makes the column a generated column computed on read from
+// expression. The expression may be a string or a query Expression.
 func (c *ColumnDefinition) VirtualAs(expression any) *ColumnDefinition {
 	c.virtualAs = expression
 	c.virtualAsSet = true
 	return c
 }
 
-// HasVirtualAs answers array_key_exists('virtualAs', $column->getAttributes()).
+// HasVirtualAs reports whether VirtualAs was called on this definition.
 //
-// PHP can tell an attribute that was never mentioned from one set to null, and
-// on a changed column the difference decides between leaving the generation
-// expression alone and dropping it. A Go nil field cannot say which, so the
-// setter records that it ran.
+// On a changed column, that distinction decides between leaving the
+// generation expression alone and dropping it. A nil virtualAs field alone
+// cannot say whether it was never set or set to nil, so the setter records
+// that it ran.
 func (c *ColumnDefinition) HasVirtualAs() bool { return c.virtualAsSet }
 
-// GetVirtualAs answers $column->virtualAs.
+// GetVirtualAs returns the column's virtual generation expression.
 func (c *ColumnDefinition) GetVirtualAs() any { return c.virtualAs }
 
-// GetVirtualAsJSON answers $column->virtualAsJson, the JSON selector form the
-// MySQL and SQLite grammars unwrap before generating the column.
+// GetVirtualAsJSON returns the JSON selector form the MySQL and SQLite
+// grammars unwrap before generating the column.
 func (c *ColumnDefinition) GetVirtualAsJSON() string { return c.virtualAsJSON }
 
-// StoredAs answers ColumnDefinition::storedAs: a generated column computed on
-// write and stored.
+// StoredAs makes the column a generated column computed on write from
+// expression, and stored.
 func (c *ColumnDefinition) StoredAs(expression any) *ColumnDefinition {
 	c.storedAs = expression
 	c.storedAsSet = true
 	return c
 }
 
-// HasStoredAs answers array_key_exists('storedAs', $column->getAttributes()).
-// See HasVirtualAs for why the setter has to record that it ran.
+// HasStoredAs reports whether StoredAs was called on this definition. See
+// HasVirtualAs for why the setter has to record that it ran.
 func (c *ColumnDefinition) HasStoredAs() bool { return c.storedAsSet }
 
-// GetStoredAs answers $column->storedAs.
+// GetStoredAs returns the column's stored generation expression.
 func (c *ColumnDefinition) GetStoredAs() any { return c.storedAs }
 
-// GetStoredAsJSON answers $column->storedAsJson.
+// GetStoredAsJSON returns the JSON selector form of the column's stored
+// generation expression.
 func (c *ColumnDefinition) GetStoredAsJSON() string { return c.storedAsJSON }
 
-// GeneratedAs answers ColumnDefinition::generatedAs: a Postgres identity
-// column. With no argument it is the bare "generated by default as identity";
-// with one it carries the sequence options.
+// GeneratedAs makes the column a Postgres identity column. With no argument
+// it is the bare "generated by default as identity"; with one it carries
+// the sequence options.
 func (c *ColumnDefinition) GeneratedAs(expression ...any) *ColumnDefinition {
 	if len(expression) == 0 {
 		c.generatedAs = true
@@ -313,11 +316,11 @@ func (c *ColumnDefinition) GeneratedAs(expression ...any) *ColumnDefinition {
 	return c
 }
 
-// GetGeneratedAs answers $column->generatedAs.
+// GetGeneratedAs returns the column's identity generation expression.
 func (c *ColumnDefinition) GetGeneratedAs() any { return c.generatedAs }
 
-// Always answers ColumnDefinition::always: the identity column is "generated
-// always" rather than "generated by default".
+// Always marks the identity column as "generated always" rather than
+// "generated by default".
 func (c *ColumnDefinition) Always(value ...bool) *ColumnDefinition {
 	v := true
 	if len(value) > 0 {
@@ -327,42 +330,44 @@ func (c *ColumnDefinition) Always(value ...bool) *ColumnDefinition {
 	return c
 }
 
-// GetAlways answers $column->always.
+// GetAlways reports whether the identity column is "generated always"
+// rather than "generated by default".
 func (c *ColumnDefinition) GetAlways() bool { return c.always }
 
-// StartingValue answers ColumnDefinition::startingValue.
+// StartingValue sets the identity column's starting value.
 func (c *ColumnDefinition) StartingValue(value int) *ColumnDefinition {
 	c.startingValue = &value
 	return c
 }
 
-// GetStartingValue answers $column->startingValue.
+// GetStartingValue returns the identity column's starting value, or nil if
+// none was set.
 func (c *ColumnDefinition) GetStartingValue() *int { return c.startingValue }
 
-// From answers ColumnDefinition::from, the other spelling of StartingValue.
+// From sets the identity column's starting value. It is the other spelling
+// of StartingValue.
 func (c *ColumnDefinition) From(startingValue int) *ColumnDefinition {
 	c.from = &startingValue
 	return c
 }
 
-// GetFrom answers $column->from.
+// GetFrom returns the starting value set via From, or nil if none was set.
 func (c *ColumnDefinition) GetFrom() *int { return c.from }
 
-// Instant answers ColumnDefinition::instant: MySQL should use algorithm=instant
-// for the operation.
+// Instant marks the operation to use MySQL's algorithm=instant.
 func (c *ColumnDefinition) Instant() *ColumnDefinition { c.instant = true; return c }
 
-// GetInstant answers $column->instant.
+// GetInstant reports whether the operation uses MySQL's algorithm=instant.
 func (c *ColumnDefinition) GetInstant() bool { return c.instant }
 
-// Lock answers ColumnDefinition::lock: the MySQL DDL lock mode, one of none,
-// shared, default or exclusive.
+// Lock sets the MySQL DDL lock mode, one of none, shared, default or
+// exclusive.
 func (c *ColumnDefinition) Lock(mode string) *ColumnDefinition { c.lock = mode; return c }
 
-// GetLock answers $column->lock.
+// GetLock returns the column's MySQL DDL lock mode.
 func (c *ColumnDefinition) GetLock() string { return c.lock }
 
-// Index answers ColumnDefinition::index. With no argument the index is named by
+// Index adds an index on the column. With no argument the index is named by
 // convention; with a string it is named; with false on a changed column the
 // conventional index is dropped.
 func (c *ColumnDefinition) Index(name ...any) *ColumnDefinition {
@@ -370,80 +375,83 @@ func (c *ColumnDefinition) Index(name ...any) *ColumnDefinition {
 	return c
 }
 
-// GetIndex answers $column->index.
+// GetIndex returns the value Index set: true, a name, or false.
 func (c *ColumnDefinition) GetIndex() any { return c.index }
 
-// Unique answers ColumnDefinition::unique, on the same three argument rule as
-// Index.
+// Unique adds a unique index on the column, on the same three argument rule
+// as Index.
 func (c *ColumnDefinition) Unique(name ...any) *ColumnDefinition {
 	c.unique = indexMarker(name)
 	return c
 }
 
-// GetUnique answers $column->unique.
+// GetUnique returns the value Unique set: true, a name, or false.
 func (c *ColumnDefinition) GetUnique() any { return c.unique }
 
-// Primary answers ColumnDefinition::primary, on the same three argument rule as
-// Index.
+// Primary adds a primary key on the column, on the same three argument rule
+// as Index.
 func (c *ColumnDefinition) Primary(name ...any) *ColumnDefinition {
 	c.primary = indexMarker(name)
 	return c
 }
 
-// GetPrimary answers $column->primary.
+// GetPrimary returns the value Primary set: true, a name, or false.
 func (c *ColumnDefinition) GetPrimary() any { return c.primary }
 
-// FullText answers ColumnDefinition::fulltext, on the same three argument rule
-// as Index.
+// FullText adds a full-text index on the column, on the same three argument
+// rule as Index.
 func (c *ColumnDefinition) FullText(name ...any) *ColumnDefinition {
 	c.fullText = indexMarker(name)
 	return c
 }
 
-// GetFullText answers $column->fulltext.
+// GetFullText returns the value FullText set: true, a name, or false.
 func (c *ColumnDefinition) GetFullText() any { return c.fullText }
 
-// SpatialIndex answers ColumnDefinition::spatialIndex, on the same three
+// SpatialIndex adds a spatial index on the column, on the same three
 // argument rule as Index.
 func (c *ColumnDefinition) SpatialIndex(name ...any) *ColumnDefinition {
 	c.spatialIndex = indexMarker(name)
 	return c
 }
 
-// GetSpatialIndex answers $column->spatialIndex.
+// GetSpatialIndex returns the value SpatialIndex set: true, a name, or
+// false.
 func (c *ColumnDefinition) GetSpatialIndex() any { return c.spatialIndex }
 
-// VectorIndex answers ColumnDefinition::vectorIndex, on the same three argument
+// VectorIndex adds a vector index on the column, on the same three argument
 // rule as Index.
 func (c *ColumnDefinition) VectorIndex(name ...any) *ColumnDefinition {
 	c.vectorIndex = indexMarker(name)
 	return c
 }
 
-// GetVectorIndex answers $column->vectorIndex.
+// GetVectorIndex returns the value VectorIndex set: true, a name, or false.
 func (c *ColumnDefinition) GetVectorIndex() any { return c.vectorIndex }
 
-// Table answers ColumnDefinition::table, which foreignIdFor sets so that
-// Constrained knows the table without guessing it from the column name.
+// Table sets the table a foreign ID column references. ForeignIDFor sets it
+// so that Constrained knows the table without guessing it from the column
+// name.
 func (c *ColumnDefinition) Table(table string) *ColumnDefinition { c.table = table; return c }
 
-// GetTable answers $column->table.
+// GetTable returns the table a foreign ID column references.
 func (c *ColumnDefinition) GetTable() string { return c.table }
 
-// ReferencesModelColumn answers ColumnDefinition::referencesModelColumn, the
-// key name Constrained references when the model does not key on id.
+// ReferencesModelColumn sets the key name Constrained references when the
+// model does not key on id.
 func (c *ColumnDefinition) ReferencesModelColumn(column string) *ColumnDefinition {
 	c.referencesModelColumn = column
 	return c
 }
 
-// GetReferencesModelColumn answers $column->referencesModelColumn.
+// GetReferencesModelColumn returns the key name Constrained references when
+// the model does not key on id.
 func (c *ColumnDefinition) GetReferencesModelColumn() string { return c.referencesModelColumn }
 
-// indexMarker turns the variadic argument of the fluent index setters into the
-// bool|string|null the PHP carries. More than one argument would be a fatal
-// call error in PHP; here the first wins, because a silent panic in a migration
-// helps nobody.
+// indexMarker turns the variadic argument of the fluent index setters into
+// the value stored on the column: no argument becomes true, and the first
+// argument given is used otherwise. Extra arguments are ignored rather than
+// causing a panic, because a panic in a migration helps nobody.
 func indexMarker(name []any) any {
 	if len(name) == 0 {
 		return true

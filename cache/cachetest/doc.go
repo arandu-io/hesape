@@ -1,16 +1,7 @@
-// Package cachetest is Arandu's Cache.
+// Package cachetest is the contract suite every Store passes.
 //
-// It holds: the contract suite every Store passes.
-//
-// # Nothing is here yet, and that is deliberate
-//
-// This tree was written from 20-components/DOC-hesape-reorganization.md before a line of
-// code moved. The attempt before it fixed things one at a time, and one at a
-// time does not reorganize a structure.
-//
-// That document names, for every package here, which Illuminate component it
-// answers to, what moves into it and from where, and which existing Arandu
-// package splits to make it. The move happens in phases, each ending with the
-// whole tree compiling and the tests passing; until this package's phase, its
-// code lives where the document's change table says it lives today.
+// It is what makes one behaviour test serve every backend: a Store built over
+// memory, over the filesystem, over a table or over RESP is handed to the same
+// suite, and a store that passes it can be dropped into a Repository without
+// the Repository knowing which one it got.
 package cachetest

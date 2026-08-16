@@ -89,8 +89,8 @@ func TestWhatFollowsTheNameReachesTheSeeder(t *testing.T) {
 }
 
 // TestFlagFormIsRefusedWithTheWordToUse: a name that is sometimes a flag and
-// sometimes a word is two spellings of one thing (RULE 9), and refusing it
-// quietly would run the wrong seeder.
+// sometimes a word is two spellings of one thing, and refusing it quietly would
+// run the wrong seeder.
 func TestFlagFormIsRefusedWithTheWordToUse(t *testing.T) {
 	var ran deps
 

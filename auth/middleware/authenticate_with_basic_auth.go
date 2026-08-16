@@ -6,19 +6,18 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// AuthenticateWithBasicAuth is
-// Illuminate\Auth\Middleware\AuthenticateWithBasicAuth.
+// AuthenticateWithBasicAuth signs the request in from the Authorization: Basic
+// header, matching the user by one column -- the e-mail address by default.
 //
-// It signs the request in from the Authorization: Basic header, matching the
-// user by one column -- the e-mail address by default. It is for a machine
-// calling an endpoint, and for the internal tool nobody wants to build a
-// sign-in screen for; a browser-facing application uses [Authenticate].
+// It is for a machine calling an endpoint, and for the internal tool nobody
+// wants to build a sign-in screen for; a browser-facing application uses
+// [Authenticate].
 type AuthenticateWithBasicAuth struct {
 	// auth is the guard factory instance.
 	auth Factory
 
-	// guard and field are the two parameters PHP reads off the route string.
-	// The empty field means "email", which is PHP's `$field ?: 'email'`.
+	// guard and field are what Using bound this copy to. An empty field means
+	// "email".
 	guard string
 	field string
 
@@ -33,11 +32,8 @@ func NewAuthenticateWithBasicAuth(a Factory, subjectFor SubjectResolver) *Authen
 	return &AuthenticateWithBasicAuth{auth: a, subjectFor: subjectFor}
 }
 
-// Using specifies the guard and field for the middleware.
-//
-// It is AuthenticateWithBasicAuth::using. PHP returns the route string; this
-// returns a copy of the middleware bound to the two parameters, for the reason
-// [Authenticate.Using] gives.
+// Using returns a copy of the middleware bound to that guard and field, for the
+// reason [Authenticate.Using] gives.
 func (m *AuthenticateWithBasicAuth) Using(guard, field string) *AuthenticateWithBasicAuth {
 	copied := *m
 	copied.guard, copied.field = guard, field
@@ -46,14 +42,9 @@ func (m *AuthenticateWithBasicAuth) Using(guard, field string) *AuthenticateWith
 
 // Handle handles an incoming request.
 //
-// It is AuthenticateWithBasicAuth::handle, whose whole body is
-// `$this->auth->guard($guard)->basic($field ?: 'email')`.
-//
-// PHP lets the guard throw UnauthorizedHttpException, which the handler renders
-// as 401 with the WWW-Authenticate header that makes a browser show its own
-// password box. There are no exceptions here, so the error the guard returns is
-// answered the same way -- and the header is what turns a 401 into a prompt
-// rather than a blank page.
+// A guard that refuses the credentials is answered 401 with the
+// WWW-Authenticate header, which is what turns the status into the browser's
+// own password box rather than a blank page.
 func (m *AuthenticateWithBasicAuth) Handle(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		guard := m.auth.Guard(m.guard)
@@ -80,10 +71,8 @@ func (m *AuthenticateWithBasicAuth) Handle(next http.Handler) http.Handler {
 	})
 }
 
-// unauthorized answers the 401 PHP's UnauthorizedHttpException renders.
-//
-// The realm is "Restricted", which is what Illuminate's SessionGuard passes to
-// the exception it throws.
+// unauthorized answers 401 with the Basic challenge, under the realm
+// "Restricted".
 func (m *AuthenticateWithBasicAuth) unauthorized(w http.ResponseWriter) {
 	w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
 	writeJSON(w, http.StatusUnauthorized, "Invalid credentials.")

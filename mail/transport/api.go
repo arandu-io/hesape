@@ -37,8 +37,6 @@ type Resend struct {
 func (Resend) Name() string { return "resend" }
 
 // Send posts the message.
-//
-// Send is ResendTransport::send.
 func (t Resend) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error) {
 	body := map[string]any{
 		"from":    m.From.String(),
@@ -104,10 +102,6 @@ type SendGrid struct {
 func (SendGrid) Name() string { return "sendgrid" }
 
 // Send posts the message.
-//
-// Send has no Illuminate class behind it: MailManager::createMailgunTransport
-// and its siblings build a Symfony transport, and Symfony's is what send()
-// lives on.
 func (t SendGrid) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error) {
 	// One personalization holding every recipient. SendGrid's other reading of
 	// this field -- one personalization per recipient -- is a different feature
@@ -196,9 +190,6 @@ type Postmark struct {
 func (Postmark) Name() string { return "postmark" }
 
 // Send posts the message.
-//
-// Send has no Illuminate class behind it and no PHP counterpart, for the reason
-// [SendGrid.Send] gives.
 func (t Postmark) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error) {
 	body := map[string]any{
 		"From":    m.From.String(),

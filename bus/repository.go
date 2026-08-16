@@ -14,16 +14,12 @@ import (
 
 // BatchRepository is where batch counters live.
 //
-// It is Illuminate's BatchRepository, with two implementations in this package:
-// DatabaseBatchRepository, which is the one an application runs, and Memory,
-// which is the one a test runs. Every method takes a Grant and every statement
-// filters by the tenant it carries, reads included -- a batch is a row about a
-// customer's work, and RULE 17 does not have a "but it is only a counter"
-// clause.
+// There are two implementations in this package: DatabaseBatchRepository, which
+// is the one an application runs, and Memory, which is the one a test runs.
 //
-// Illuminate's methods take no Grant because the container hands the repository
-// a connection that is already whichever tenant's it is. Here the tenant comes
-// off the Grant at every call (RULE 14), which is the one shape difference.
+// Every method takes a Grant and every statement filters by the tenant it
+// carries, reads included -- a batch is a row about a customer's work, and
+// there is no "but it is only a counter" exemption.
 type BatchRepository interface {
 	// Get returns batches newest first, at most limit of them, starting after
 	// the id in before. An empty before starts at the newest.
@@ -67,18 +63,17 @@ type BatchRepository interface {
 	// Transaction runs fn inside whatever a transaction means to this store.
 	Transaction(ctx context.Context, fn func(ctx context.Context) error) error
 
-	// RollBack abandons the transaction in flight. Illuminate needs it because
-	// a failing batch callback runs inside the worker's transaction; it is here
-	// for the same reason and does nothing outside one.
+	// RollBack abandons the transaction in flight, for the failing batch
+	// callback that runs inside the worker's transaction. It does nothing
+	// outside one.
 	RollBack(ctx context.Context) error
 }
 
 // PrunableBatchRepository is a BatchRepository that can be swept.
 //
-// It is Illuminate's interface of the same name, with the two extra sweeps
-// DatabaseBatchRepository grew: a table nobody prunes is a table that only
-// grows, and the batches worth keeping are not the same as the batches worth
-// counting.
+// A table nobody prunes is a table that only grows, and the batches worth
+// keeping are not the same as the batches worth counting -- which is why there
+// are three sweeps rather than one.
 type PrunableBatchRepository interface {
 	BatchRepository
 
@@ -96,10 +91,8 @@ type PrunableBatchRepository interface {
 
 // BatchFactory builds a Batch from the columns a repository read.
 //
-// It is Illuminate's BatchFactory. There it exists to inject the queue factory
-// into every Batch; here a Batch holds no collaborators, so what is left is the
-// one place that knows the order of the fields -- which is worth having exactly
-// once, with two repositories reading the same rows.
+// It is the one place that knows the order of the fields, which is worth having
+// exactly once with two repositories reading the same rows.
 type BatchFactory struct{}
 
 // Make assembles a Batch.

@@ -144,7 +144,7 @@ type fakeResult struct{ id int64 }
 func (r fakeResult) LastInsertId() (int64, error) { return r.id, nil }
 func (fakeResult) RowsAffected() (int64, error)   { return 1, nil }
 
-// fakeRows answers the shape of the migrations table: id, batch, applied_at.
+// fakeRows mimics the shape of the migrations table: id, batch, applied_at.
 // One shape is enough because it is the only query the data package issues on
 // its own -- repository queries belong to the modules that own them.
 type fakeRows struct {

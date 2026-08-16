@@ -15,8 +15,8 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// Dispatcher answers Illuminate\Contracts\Events\Dispatcher, narrowed to the
-// one method a connection calls on it.
+// Dispatcher is what a connection needs of an event dispatcher, narrowed to the
+// one method it calls.
 //
 // It is declared here rather than imported from hesape/events so that the SQL
 // package keeps its own dependency list, which is the same reason every other
@@ -26,9 +26,7 @@ type Dispatcher interface {
 	Dispatch(event any)
 }
 
-// QueryLogEntry is one row of Connection::$queryLog.
-//
-// PHP's is an untyped array with four keys; this is those keys.
+// QueryLogEntry is one row of the query log a Connection keeps.
 type QueryLogEntry struct {
 	// Query is the SQL as it was issued.
 	Query string
@@ -36,21 +34,21 @@ type QueryLogEntry struct {
 	// Bindings are the values that went with it.
 	Bindings []any
 
-	// Time is how long it took, in milliseconds, which is the unit the PHP
-	// records and the one every listener compares against.
+	// Time is how long it took, in milliseconds, the unit every listener
+	// compares against.
 	Time float64
 
 	// ReadWriteType is "read", "write", or empty.
 	ReadWriteType string
 }
 
-// Connection answers Illuminate\Database\Connection: one open connection, and
-// everything that runs statements through it.
+// Connection is one open connection, and everything that runs statements
+// through it.
 //
 // # Where the Grant is, and why it is not on these methods
 //
-// RULE 17 is absolute: no path to application rows skips a Policy, on the way
-// out as much as on the way in. That path is Repository, one file over, whose
+// No path to application rows skips a Policy, on the way out as much as on the
+// way in. That path is Repository, one file over, whose
 // every method takes an auth.Grant and filters by auth.Tenant(g) -- and it is
 // the only door application code goes through.
 //
@@ -60,22 +58,21 @@ type QueryLogEntry struct {
 // like enforcement and enforces nothing is worse than no parameter, because the
 // next reader stops checking -- the same reasoning that removed Query.Filter.
 // The other half of the argument is that `aru migrate` runs here, in a process
-// with no request and no subject, where a Grant cannot be constructed at all
-// (RULE 14 leaves no system grant to fall back to).
+// with no request and no subject, where a Grant cannot be constructed at all.
 //
 // So: reach rows through a Repository. Reaching them through a Connection is
 // how a module gets rejected in review.
 //
-// # PDO is *sql.DB
+// # A connection is a pool
 //
-// The PHP holds a PDO and a second one for reads. Here both are *sql.DB, which
-// is a pool rather than a socket -- so "reconnect" means replacing the pool,
-// and the read/write split is two pools rather than two connections.
+// The write handle and the read handle are both *sql.DB, which is a pool rather
+// than a socket -- so "reconnect" means replacing the pool, and the read/write
+// split is two pools rather than two connections.
 type Connection struct {
-	// ManagesTransactions is the `use Concerns\ManagesTransactions` of the PHP
-	// class: Transaction, BeginTransaction, Commit, RollBack,
+	// ManagesTransactions embeds the concerns.ManagesTransactions
+	// implementation: Transaction, BeginTransaction, Commit, RollBack,
 	// TransactionLevel, AfterCommit and AfterRollBack are all reached through
-	// it, spelled the way the PHP spells them.
+	// it.
 	concerns.ManagesTransactions
 
 	mu sync.RWMutex
@@ -85,10 +82,9 @@ type Connection struct {
 
 	// txConn is the single pooled connection an open transaction is pinned to.
 	//
-	// PDO has no such field because a PDO is one connection; a *sql.DB is a
-	// pool, and a BEGIN issued on the pool would be followed by statements on
-	// whichever other connection happened to be free. Pinning is what makes
-	// "the transaction" mean anything here.
+	// A *sql.DB is a pool, and a BEGIN issued on the pool would be followed by
+	// statements on whichever other connection happened to be free. Pinning is
+	// what makes "the transaction" mean anything here.
 	txConn *sql.Conn
 
 	readPDOConfig map[string]any
@@ -122,18 +118,19 @@ type Connection struct {
 	latestPDOTypeRetrieved string
 }
 
-// queryDurationHandler is one entry of Connection::$queryDurationHandlers.
+// queryDurationHandler is one handler registered through
+// WhenQueryingForLongerThan, with the threshold it fires at and whether it
+// already has run.
 type queryDurationHandler struct {
 	hasRun    bool
 	threshold float64
 	handler   func(*Connection, *dbevents.QueryExecuted)
 }
 
-// NewConnection answers Connection::__construct.
+// NewConnection creates a Connection over an already-open pool.
 //
-// The PHP's first argument is a PDO or a closure returning one; here it is the
-// pool, and a nil pool is the closure that was never called -- Reconnect is
-// what fills it in.
+// A nil pool is valid: it stands for a connection that has not been opened
+// yet, and Reconnect is what fills it in.
 func NewConnection(pdo *sql.DB, database, tablePrefix string, config map[string]any) *Connection {
 	if config == nil {
 		config = map[string]any{}
@@ -152,17 +149,17 @@ func NewConnection(pdo *sql.DB, database, tablePrefix string, config map[string]
 
 // DefaultQueryGrammar is where UseDefaultQueryGrammar gets its grammar.
 //
-// The PHP has one getDefaultQueryGrammar per connection subclass --
-// MySqlConnection returns a MySqlGrammar and so on. Here the concrete grammars
-// live in database/query/grammars, which imports query, so a connection that
-// constructed one directly would tie this package to all of them. A connector
-// sets this once, from its init, next to the driver it registers.
+// The concrete grammars live in database/query/grammars, which imports query,
+// so a connection that constructed one directly would tie this package to all
+// of them. A connector sets this once, from its init, next to the driver it
+// registers.
 //
 // Nil leaves the grammar unset, which is what a connection built for a test
 // that never compiles SQL wants.
 var DefaultQueryGrammar func(dialect Dialect) query.Grammar
 
-// UseDefaultQueryGrammar answers Connection::useDefaultQueryGrammar.
+// UseDefaultQueryGrammar sets the connection's query grammar from
+// DefaultQueryGrammar, if one was registered.
 func (c *Connection) UseDefaultQueryGrammar() {
 	if DefaultQueryGrammar == nil {
 		return
@@ -170,17 +167,15 @@ func (c *Connection) UseDefaultQueryGrammar() {
 	c.SetQueryGrammar(DefaultQueryGrammar(c.dialect()))
 }
 
-// UseDefaultSchemaGrammar answers Connection::useDefaultSchemaGrammar.
-//
-// The base class's getDefaultSchemaGrammar returns null, and so does this: a
-// connection with no driver subclass has no schema grammar, which is exactly
-// what the PHP means by an empty method body.
+// UseDefaultSchemaGrammar does nothing: a connection with no driver-specific
+// override has no default schema grammar to set.
 func (c *Connection) UseDefaultSchemaGrammar() {}
 
-// UseDefaultPostProcessor answers Connection::useDefaultPostProcessor.
+// DefaultPostProcessor is where UseDefaultPostProcessor gets its processor.
 var DefaultPostProcessor func() query.Processor
 
-// UseDefaultPostProcessor answers Connection::useDefaultPostProcessor.
+// UseDefaultPostProcessor sets the connection's post-processor from
+// DefaultPostProcessor, if one was registered.
 func (c *Connection) UseDefaultPostProcessor() {
 	if DefaultPostProcessor == nil {
 		return
@@ -188,8 +183,8 @@ func (c *Connection) UseDefaultPostProcessor() {
 	c.SetPostProcessor(DefaultPostProcessor())
 }
 
-// dialect reads the driver name off the configuration and answers the Dialect
-// for it, which is what DefaultQueryGrammar is keyed by.
+// dialect reads the driver name off the configuration and returns the Dialect
+// it maps to, which is what DefaultQueryGrammar is keyed by.
 func (c *Connection) dialect() Dialect {
 	if d, err := ParseDialect(c.GetDriverName()); err == nil {
 		return d
@@ -197,25 +192,25 @@ func (c *Connection) dialect() Dialect {
 	return DialectSQLite
 }
 
-// Table answers Connection::table: a query builder against one table.
+// Table returns a query builder against one table, with an optional alias.
 //
-// It takes a context, which the PHP's does not: a builder that cannot be
-// cancelled holds a connection open for as long as the server feels like, and
-// there is nowhere else to put the context once the builder exists.
+// It takes a context because a builder that cannot be cancelled holds a
+// connection open for as long as the server feels like, and there is nowhere
+// else to put the context once the builder exists.
 func (c *Connection) Table(ctx context.Context, table any, as ...string) *query.Builder {
 	return c.Query(ctx).From(table, as...)
 }
 
-// Query answers Connection::query: a fresh query builder on this connection.
+// Query returns a fresh query builder on this connection.
 func (c *Connection) Query(ctx context.Context) *query.Builder {
 	return query.NewBuilder(&boundConnection{connection: c, ctx: ctx}, c.GetQueryGrammar(), c.GetPostProcessor())
 }
 
 // boundConnection is what makes a Connection usable as a query.Connection.
 //
-// query.Connection takes no context, because in PHP there is none to take. The
-// builder gets one bound at the moment it is created, which is the only place a
-// context can enter without changing an interface this package does not own.
+// query.Connection takes no context. The builder gets one bound at the moment
+// it is created, which is the only place a context can enter without changing
+// an interface this package does not own.
 type boundConnection struct {
 	connection *Connection
 	ctx        context.Context
@@ -247,8 +242,9 @@ func (b *boundConnection) Insert(q string, bindings []any) (bool, error) {
 	return err == nil, err
 }
 
-// GetLastInsertID answers processors.LastInsertIDConnection, and through it
-// Connection::getLastInsertId.
+// GetLastInsertID satisfies processors.LastInsertIDConnection: it returns the
+// identifier the most recent insert through this binding was told the engine
+// assigned.
 //
 // The sequence argument names the generator to ask, for an engine with more
 // than one. It is unused here because the engines that travel this path --
@@ -276,11 +272,11 @@ func (b *boundConnection) Statement(q string, bindings []any) (bool, error) {
 	return b.connection.Statement(b.ctx, q, bindings)
 }
 
-// SelectOne answers Connection::selectOne: the first row, or false for none.
+// SelectOne runs a query and returns the first row, or false when there was
+// none.
 //
-// The PHP answers null for an empty result. A Go map is nil in that case, which
-// is indistinguishable from a row of no columns, so the second value says which
-// it was.
+// A nil record is indistinguishable from a row of no columns, so the second
+// value says which it was.
 func (c *Connection) SelectOne(ctx context.Context, q string, bindings []any, useReadPDO bool) (query.Record, bool, error) {
 	records, err := c.Select(ctx, q, bindings, useReadPDO)
 	if err != nil {
@@ -292,11 +288,10 @@ func (c *Connection) SelectOne(ctx context.Context, q string, bindings []any, us
 	return records[0], true, nil
 }
 
-// Scalar answers Connection::scalar: the first column of the first row.
+// Scalar runs a query and returns the first column of the first row.
 //
-// More than one column selected is an error, as it is there: a query that
-// answers two columns and is read as one is a query somebody edited without
-// reading its caller.
+// More than one column selected is an error: a query that returns two columns
+// and is read as one is a query somebody edited without reading its caller.
 func (c *Connection) Scalar(ctx context.Context, q string, bindings []any, useReadPDO bool) (any, error) {
 	record, found, err := c.SelectOne(ctx, q, bindings, useReadPDO)
 	if err != nil || !found {
@@ -311,14 +306,13 @@ func (c *Connection) Scalar(ctx context.Context, q string, bindings []any, useRe
 	return nil, nil
 }
 
-// SelectFromWriteConnection answers
-// Connection::selectFromWriteConnection: a read that must see writes this
-// request already made.
+// SelectFromWriteConnection runs a read against the write pool, for a read
+// that must see writes this request already made.
 func (c *Connection) SelectFromWriteConnection(ctx context.Context, q string, bindings []any) ([]query.Record, error) {
 	return c.Select(ctx, q, bindings, false)
 }
 
-// Select answers Connection::select.
+// Select runs a query and returns every matching row.
 func (c *Connection) Select(ctx context.Context, q string, bindings []any, useReadPDO bool) ([]query.Record, error) {
 	var records []query.Record
 
@@ -345,12 +339,11 @@ func (c *Connection) Select(ctx context.Context, q string, bindings []any, useRe
 	return records, err
 }
 
-// SelectResultSets answers Connection::selectResultSets: every result set a
-// statement produced, not only the first.
+// SelectResultSets runs a statement and returns every result set it
+// produced, not only the first.
 //
-// database/sql exposes the second set through Rows.NextResultSet, which is what
-// PDOStatement::nextRowset is. A driver that does not support it answers one
-// set, which is also what PDO does.
+// database/sql exposes the extra sets through Rows.NextResultSet. A driver
+// that does not support it returns exactly one set.
 func (c *Connection) SelectResultSets(ctx context.Context, q string, bindings []any, useReadPDO bool) ([][]query.Record, error) {
 	var sets [][]query.Record
 
@@ -386,12 +379,12 @@ func (c *Connection) SelectResultSets(ctx context.Context, q string, bindings []
 	return sets, err
 }
 
-// Cursor answers Connection::cursor: the rows one at a time, without holding
-// the whole result set.
+// Cursor runs a query and returns the rows one at a time, without holding the
+// whole result set in memory.
 //
-// The PHP returns a Generator. Go 1.23 has range-over-func, so this returns an
-// iterator with the same shape as concerns.Lazy: the error is yielded once and
-// ends the iteration, so a caller that forgets to check it still stops.
+// It returns a range-over-func iterator with the same shape as concerns.Lazy:
+// an error is yielded once and ends the iteration, so a caller that forgets
+// to check it still stops.
 func (c *Connection) Cursor(ctx context.Context, q string, bindings []any, useReadPDO bool) func(yield func(query.Record, error) bool) {
 	return func(yield func(query.Record, error) bool) {
 		if c.Pretending() {
@@ -435,23 +428,23 @@ func (c *Connection) Cursor(ctx context.Context, q string, bindings []any, useRe
 	}
 }
 
-// Insert answers Connection::insert.
+// Insert runs an insert statement, reporting whether it succeeded.
 func (c *Connection) Insert(ctx context.Context, q string, bindings []any) (bool, error) {
 	return c.Statement(ctx, q, bindings)
 }
 
-// Update answers Connection::update: the number of rows it changed.
+// Update runs an update statement and returns the number of rows it changed.
 func (c *Connection) Update(ctx context.Context, q string, bindings []any) (int64, error) {
 	return c.AffectingStatement(ctx, q, bindings)
 }
 
-// Delete answers Connection::delete: the number of rows it removed.
+// Delete runs a delete statement and returns the number of rows it removed.
 func (c *Connection) Delete(ctx context.Context, q string, bindings []any) (int64, error) {
 	return c.AffectingStatement(ctx, q, bindings)
 }
 
-// Statement answers Connection::statement: run something that answers neither
-// rows nor a count.
+// Statement runs a statement that returns neither rows nor an affected-row
+// count, reporting whether it succeeded.
 func (c *Connection) Statement(ctx context.Context, q string, bindings []any) (bool, error) {
 	ok := false
 
@@ -476,14 +469,13 @@ func (c *Connection) Statement(ctx context.Context, q string, bindings []any) (b
 	return ok, err
 }
 
-// InsertReturningID runs an insert and answers the identifier the engine
+// InsertReturningID runs an insert and returns the identifier the engine
 // assigned to the row.
 //
-// It is what Connection::getLastInsertId is for, with the round trip removed:
-// the PHP inserts and then asks the handle for lastInsertId, while here the
-// statement that caused the identifier already reports it, through
-// sql.Result.LastInsertId. Asking a second time would be a second way and, on
-// a pooled connection, a second way that can answer about somebody else's row.
+// The statement that caused the identifier already reports it, through
+// sql.Result.LastInsertId, with no round trip needed to ask for it separately.
+// Asking a second time would be a second way and, on a pooled connection, a
+// way that can report somebody else's row.
 //
 // Postgres does not travel this path at all: its processor compiles the insert
 // with a RETURNING clause and reads the identifier out of the result set, which
@@ -522,7 +514,8 @@ func (c *Connection) InsertReturningID(ctx context.Context, q string, bindings [
 	return id, err
 }
 
-// AffectingStatement answers Connection::affectingStatement.
+// AffectingStatement runs a statement and returns the number of rows it
+// affected.
 func (c *Connection) AffectingStatement(ctx context.Context, q string, bindings []any) (int64, error) {
 	var count int64
 
@@ -543,8 +536,8 @@ func (c *Connection) AffectingStatement(ctx context.Context, q string, bindings 
 
 		count, err = result.RowsAffected()
 		if err != nil {
-			// A driver that cannot count is not a failed statement. The PHP
-			// never meets this because PDO always answers rowCount.
+			// A driver that cannot count is not a failed statement, so the
+			// count is simply zero rather than an error.
 			count = 0
 		}
 		c.RecordsHaveBeenModified(count > 0)
@@ -554,8 +547,8 @@ func (c *Connection) AffectingStatement(ctx context.Context, q string, bindings 
 	return count, err
 }
 
-// Unprepared answers Connection::unprepared: run the statement as it is, with
-// no prepare and no bindings.
+// Unprepared runs the statement as it is, with no prepare and no bindings,
+// reporting whether it succeeded.
 //
 // It is what a schema dump is loaded with, and nothing else should use it: a
 // value that reaches a database through this has not been through a
@@ -583,8 +576,8 @@ func (c *Connection) Unprepared(ctx context.Context, q string) (bool, error) {
 	return changed, err
 }
 
-// ThreadCount answers Connection::threadCount: how many connections the server
-// has open, or zero when the grammar cannot ask.
+// ThreadCount returns how many connections the server has open, or zero when
+// the grammar cannot ask.
 func (c *Connection) ThreadCount(ctx context.Context) (int64, error) {
 	grammar, ok := c.GetQueryGrammar().(interface{ CompileThreadCount() string })
 	if !ok {
@@ -602,8 +595,8 @@ func (c *Connection) ThreadCount(ctx context.Context) (int64, error) {
 	return toInt64(value), nil
 }
 
-// Pretend answers Connection::pretend: run the callback with nothing reaching
-// the server, and answer the statements it would have run.
+// Pretend runs callback with nothing reaching the server, and returns the
+// statements it would have run.
 func (c *Connection) Pretend(ctx context.Context, callback func(*Connection) error) ([]QueryLogEntry, error) {
 	var log []QueryLogEntry
 
@@ -627,8 +620,7 @@ func (c *Connection) Pretend(ctx context.Context, callback func(*Connection) err
 	return log, err
 }
 
-// WithoutPretending answers Connection::withoutPretending: run the callback for
-// real even inside a Pretend.
+// WithoutPretending runs callback for real, even inside a Pretend.
 func (c *Connection) WithoutPretending(callback func() error) error {
 	c.mu.RLock()
 	pretending := c.pretending
@@ -651,7 +643,8 @@ func (c *Connection) WithoutPretending(callback func() error) error {
 	return callback()
 }
 
-// withFreshQueryLog answers the protected Connection::withFreshQueryLog.
+// withFreshQueryLog runs callback with query logging turned on and the log
+// cleared first, restoring the previous logging state afterward.
 func (c *Connection) withFreshQueryLog(callback func() error) error {
 	c.mu.Lock()
 	logging := c.loggingQueries
@@ -668,15 +661,13 @@ func (c *Connection) withFreshQueryLog(callback func() error) error {
 	return err
 }
 
-// BindValues answers Connection::bindValues.
-//
-// PDO needs each value bound with a type; database/sql infers it from the Go
-// type, so this is the type conversion PrepareBindings does not do -- and it is
-// the same list: an int is an int, a byte slice is a blob, everything else is a
-// string as far as the driver is concerned.
+// BindValues is PrepareBindings under another name: database/sql infers each
+// value's wire type from its Go type, so there is no separate type-binding
+// step to do -- an int is an int, a byte slice is a blob, and everything else
+// is a string as far as the driver is concerned.
 func (c *Connection) BindValues(bindings []any) []any { return c.PrepareBindings(bindings) }
 
-// PrepareBindings answers Connection::prepareBindings.
+// PrepareBindings converts each binding into the value a driver accepts.
 //
 // A time becomes the string the grammar's date format spells, and a bool
 // becomes 0 or 1 -- both because the engines disagree about the wire form and
@@ -709,8 +700,8 @@ func (c *Connection) PrepareBindings(bindings []any) []any {
 	return out
 }
 
-// run answers the protected Connection::run: the before-hooks, the reconnect,
-// the timing, the retry on a lost connection, and the log.
+// run wraps callback with the before-hooks, the reconnect, the timing, the
+// retry on a lost connection, and the log.
 func (c *Connection) run(ctx context.Context, q string, bindings []any, callback func(string, []any) error) error {
 	c.mu.RLock()
 	before := slices.Clone(c.beforeExecutingCallbacks)
@@ -736,8 +727,8 @@ func (c *Connection) run(ctx context.Context, q string, bindings []any, callback
 	return err
 }
 
-// runQueryCallback answers the protected Connection::runQueryCallback: it turns
-// a driver error into a QueryException carrying the statement and its values.
+// runQueryCallback runs callback and turns a driver error into a
+// QueryException carrying the statement and its values.
 func (c *Connection) runQueryCallback(q string, bindings []any, callback func(string, []any) error) error {
 	if err := callback(q, bindings); err != nil {
 		return c.wrapQueryError(err, q, bindings)
@@ -758,13 +749,13 @@ func (c *Connection) wrapQueryError(err error, q string, bindings []any) error {
 		c.GetConnectionDetails(), c.latestReadWriteTypeUsed())
 }
 
-// IsUniqueConstraintError answers the protected
-// Connection::isUniqueConstraintError, which is false on the base class and
-// overridden per driver.
+// IsUniqueConstraintError reports whether err came from a unique constraint
+// violation, using the UniqueConstraintDetector a connector registered; it is
+// false when none was.
 //
-// It is exported because Go has no protected and a driver connection lives in
-// another package -- a connector sets UniqueConstraintDetector rather than
-// subclassing, which is the same decision as DefaultQueryGrammar.
+// It is exported so a driver connection living in another package can call it
+// -- a connector sets UniqueConstraintDetector rather than overriding a
+// method, which is the same decision as DefaultQueryGrammar.
 func (c *Connection) IsUniqueConstraintError(err error) bool {
 	if UniqueConstraintDetector == nil {
 		return false
@@ -777,7 +768,9 @@ func (c *Connection) IsUniqueConstraintError(err error) bool {
 // answer is the driver's SQLSTATE and nothing this package can read.
 var UniqueConstraintDetector func(driver string, err error) bool
 
-// LogQuery answers Connection::logQuery.
+// LogQuery records a query's execution: it dispatches the QueryExecuted
+// event, runs the query listeners and duration handlers, and appends to the
+// query log when logging is enabled.
 func (c *Connection) LogQuery(q string, bindings []any, timeMS float64) {
 	c.mu.Lock()
 	c.totalQueryDuration += timeMS
@@ -818,20 +811,18 @@ func (c *Connection) LogQuery(q string, bindings []any, timeMS float64) {
 	}
 }
 
-// elapsed answers the protected Connection::getElapsedTime: milliseconds,
-// rounded to two decimals.
+// elapsed returns the time since start, in milliseconds, rounded to two
+// decimals.
 func elapsed(start time.Time) float64 {
 	ms := float64(time.Since(start).Microseconds()) / 1000
 	return float64(int64(ms*100+0.5)) / 100
 }
 
-// WhenQueryingForLongerThan answers
-// Connection::whenQueryingForLongerThan: run the handler once the connection
-// has spent more than the threshold on queries.
+// WhenQueryingForLongerThan runs the handler once the connection has spent more
+// than the threshold on queries.
 //
-// The threshold is a time.Duration rather than the PHP's float-of-milliseconds
-// or DateTimeInterface or CarbonInterval: three spellings of one number is
-// exactly what RULE 9 exists to remove, and Go has one type for a duration.
+// The threshold is a time.Duration, which is the one type Go has for a
+// duration.
 func (c *Connection) WhenQueryingForLongerThan(threshold time.Duration, handler func(*Connection, *dbevents.QueryExecuted)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -841,8 +832,8 @@ func (c *Connection) WhenQueryingForLongerThan(threshold time.Duration, handler 
 	})
 }
 
-// AllowQueryDurationHandlersToRunAgain answers
-// Connection::allowQueryDurationHandlersToRunAgain.
+// AllowQueryDurationHandlersToRunAgain resets every WhenQueryingForLongerThan
+// handler so it can fire again.
 func (c *Connection) AllowQueryDurationHandlersToRunAgain() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -851,23 +842,25 @@ func (c *Connection) AllowQueryDurationHandlersToRunAgain() {
 	}
 }
 
-// TotalQueryDuration answers Connection::totalQueryDuration, in milliseconds.
+// TotalQueryDuration returns the total time spent on queries so far, in
+// milliseconds.
 func (c *Connection) TotalQueryDuration() float64 {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.totalQueryDuration
 }
 
-// ResetTotalQueryDuration answers Connection::resetTotalQueryDuration.
+// ResetTotalQueryDuration sets the total query duration back to zero.
 func (c *Connection) ResetTotalQueryDuration() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.totalQueryDuration = 0
 }
 
-// handleQueryException answers the protected
-// Connection::handleQueryException: inside a transaction the error goes
-// straight out, because retrying half a transaction is not retrying anything.
+// handleQueryException decides what to do with a query error. Inside a
+// transaction it goes straight out, because retrying half a transaction is
+// not retrying anything; otherwise it is retried once if it was caused by a
+// lost connection.
 func (c *Connection) handleQueryException(err error, q string, bindings []any, callback func(string, []any) error) error {
 	if c.TransactionLevel() >= 1 {
 		return err
@@ -875,8 +868,8 @@ func (c *Connection) handleQueryException(err error, q string, bindings []any, c
 	return c.tryAgainIfCausedByLostConnection(err, q, bindings, callback)
 }
 
-// tryAgainIfCausedByLostConnection answers the protected method of the same
-// name.
+// tryAgainIfCausedByLostConnection reconnects and retries callback once when
+// err was caused by a lost connection, otherwise it returns err unchanged.
 func (c *Connection) tryAgainIfCausedByLostConnection(err error, q string, bindings []any, callback func(string, []any) error) error {
 	var previous error = err
 	if queryErr, ok := err.(*QueryException); ok {
@@ -892,7 +885,8 @@ func (c *Connection) tryAgainIfCausedByLostConnection(err error, q string, bindi
 	return err
 }
 
-// Reconnect answers Connection::reconnect.
+// Reconnect replaces the pool by calling the registered reconnector, or fails
+// when none was set.
 func (c *Connection) Reconnect() error {
 	c.mu.RLock()
 	reconnector := c.reconnector
@@ -904,8 +898,8 @@ func (c *Connection) Reconnect() error {
 	return NewLostConnectionException("Lost connection and no reconnector available.")
 }
 
-// ReconnectIfMissingConnection answers
-// Connection::reconnectIfMissingConnection.
+// ReconnectIfMissingConnection reconnects when the connection has no pool
+// yet, and does nothing otherwise.
 func (c *Connection) ReconnectIfMissingConnection() error {
 	c.mu.RLock()
 	missing := c.pdo == nil
@@ -917,13 +911,13 @@ func (c *Connection) ReconnectIfMissingConnection() error {
 	return nil
 }
 
-// Disconnect answers Connection::disconnect.
+// Disconnect clears both the write and the read pool.
 func (c *Connection) Disconnect() {
 	c.SetPDO(nil)
 	c.SetReadPDO(nil)
 }
 
-// BeforeExecuting answers Connection::beforeExecuting.
+// BeforeExecuting registers a callback that runs before every statement.
 func (c *Connection) BeforeExecuting(callback func(query string, bindings []any, connection *Connection)) *Connection {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -931,24 +925,22 @@ func (c *Connection) BeforeExecuting(callback func(query string, bindings []any,
 	return c
 }
 
-// Listen answers Connection::listen: run the callback for every query.
+// Listen registers callback to run for every query.
 //
-// The PHP registers the closure on the event dispatcher, keyed by the
-// QueryExecuted class name. There is no class-name-keyed dispatcher here (a
-// string key for a type is what generics removed), so the connection keeps its
-// own list and calls it alongside dispatching the event -- which is what a
-// listener registered there would have got anyway.
+// The connection keeps its own list of listeners and calls each one alongside
+// dispatching the QueryExecuted event, which is what a listener registered on
+// the event dispatcher directly would receive anyway.
 func (c *Connection) Listen(callback func(*dbevents.QueryExecuted)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.queryListeners = append(c.queryListeners, callback)
 }
 
-// FireConnectionEvent answers the protected
-// Connection::fireConnectionEvent, with the PHP's own four names.
+// FireConnectionEvent dispatches the transaction event named by event: one
+// of "beganTransaction", "committed", "committing" or "rollingBack".
 //
 // It is exported because ManagesTransactions calls it from the concerns
-// package, and Go has no protected.
+// package.
 func (c *Connection) FireConnectionEvent(event string) {
 	switch event {
 	case "beganTransaction":
@@ -962,7 +954,7 @@ func (c *Connection) FireConnectionEvent(event string) {
 	}
 }
 
-// event answers the protected Connection::event.
+// event dispatches e on the connection's event dispatcher, if one is set.
 func (c *Connection) event(e any) {
 	c.mu.RLock()
 	dispatcher := c.events
@@ -973,15 +965,15 @@ func (c *Connection) event(e any) {
 	}
 }
 
-// Raw answers Connection::raw: a fragment of SQL the grammar leaves alone.
+// Raw wraps value as a fragment of SQL that the grammar leaves untouched.
 func (c *Connection) Raw(value any) query.Expression { return query.Raw(value) }
 
-// Escape answers Connection::escape.
+// Escape renders value as a SQL literal.
 //
-// It is here because the PHP has it, and it is the one method in this file that
-// should almost never be called: a value that goes through here is a value that
-// did not go through a placeholder. The grammar uses it to write a literal into
-// a schema dump, which is the case it exists for.
+// It is the one method in this file that should almost never be called: a
+// value that goes through here did not go through a placeholder. The grammar
+// uses it to write a literal into a schema dump, which is the case it exists
+// for.
 func (c *Connection) Escape(value any, binary bool) (string, error) {
 	switch v := value.(type) {
 	case nil:
@@ -1011,15 +1003,17 @@ func (c *Connection) Escape(value any, binary bool) (string, error) {
 	}
 }
 
-// HasModifiedRecords answers Connection::hasModifiedRecords.
+// HasModifiedRecords reports whether a write has gone through this
+// connection.
 func (c *Connection) HasModifiedRecords() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.recordsModified
 }
 
-// RecordsHaveBeenModified answers Connection::recordsHaveBeenModified: it only
-// ever sets the flag, never clears it, which is the PHP's `if (! ...)` guard.
+// RecordsHaveBeenModified sets the modified flag, but only from false to
+// true: once a write has happened, nothing clears it but
+// ForgetRecordModificationState.
 func (c *Connection) RecordsHaveBeenModified(value bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1028,8 +1022,8 @@ func (c *Connection) RecordsHaveBeenModified(value bool) {
 	}
 }
 
-// SetRecordModificationState answers
-// Connection::setRecordModificationState.
+// SetRecordModificationState sets the modified flag directly, unlike
+// RecordsHaveBeenModified, which only ever sets it to true.
 func (c *Connection) SetRecordModificationState(value bool) *Connection {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1037,16 +1031,15 @@ func (c *Connection) SetRecordModificationState(value bool) *Connection {
 	return c
 }
 
-// ForgetRecordModificationState answers
-// Connection::forgetRecordModificationState.
+// ForgetRecordModificationState clears the modified flag.
 func (c *Connection) ForgetRecordModificationState() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.recordsModified = false
 }
 
-// UseWriteConnectionWhenReading answers
-// Connection::useWriteConnectionWhenReading.
+// UseWriteConnectionWhenReading sets whether a read should go to the write
+// pool instead of the read pool.
 func (c *Connection) UseWriteConnectionWhenReading(value bool) *Connection {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1054,7 +1047,8 @@ func (c *Connection) UseWriteConnectionWhenReading(value bool) *Connection {
 	return c
 }
 
-// getPDOForSelect answers the protected Connection::getPdoForSelect.
+// getPDOForSelect returns the read pool when useReadPDO is true, and the
+// write pool otherwise.
 func (c *Connection) getPDOForSelect(useReadPDO bool) (*sql.DB, error) {
 	if useReadPDO {
 		return c.GetReadPDO()
@@ -1062,8 +1056,7 @@ func (c *Connection) getPDOForSelect(useReadPDO bool) (*sql.DB, error) {
 	return c.GetPDO()
 }
 
-// GetPDO answers Connection::getPdo. The PHP spells it getPdo; PDO is an
-// initialism.
+// GetPDO returns the write pool, or an error when the connection has none.
 func (c *Connection) GetPDO() (*sql.DB, error) {
 	c.mu.Lock()
 	c.latestPDOTypeRetrieved = "write"
@@ -1076,7 +1069,7 @@ func (c *Connection) GetPDO() (*sql.DB, error) {
 	return pool, nil
 }
 
-// GetRawPDO answers Connection::getRawPdo: the pool as it is, with no
+// GetRawPDO returns the write pool as it is, nil included, with no attempt to
 // reconnect.
 func (c *Connection) GetRawPDO() *sql.DB {
 	c.mu.RLock()
@@ -1084,12 +1077,14 @@ func (c *Connection) GetRawPDO() *sql.DB {
 	return c.pdo
 }
 
-// GetReadPDO answers Connection::getReadPdo.
+// GetReadPDO returns the read pool, or the write pool when it is more
+// appropriate.
 //
-// The three conditions that send a read to the write pool are the PHP's: an
-// open transaction, an explicit useWriteConnectionWhenReading, and a sticky
-// connection that has already written. The last is what keeps a read-after-write
-// in one request from landing on a replica that has not caught up.
+// Three conditions send a read to the write pool instead: an open
+// transaction, an explicit UseWriteConnectionWhenReading, and a sticky
+// connection that has already written. The last is what keeps a
+// read-after-write in one request from landing on a replica that has not
+// caught up.
 func (c *Connection) GetReadPDO() (*sql.DB, error) {
 	if c.TransactionLevel() > 0 {
 		return c.GetPDO()
@@ -1117,14 +1112,14 @@ func (c *Connection) GetReadPDO() (*sql.DB, error) {
 	return readPool, nil
 }
 
-// GetRawReadPDO answers Connection::getRawReadPdo.
+// GetRawReadPDO returns the read pool as it is, nil included.
 func (c *Connection) GetRawReadPDO() *sql.DB {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.readPDO
 }
 
-// SetPDO answers Connection::setPdo. It resets the transaction level, because
+// SetPDO replaces the write pool. It resets the transaction level, because
 // whatever transaction was open belonged to the pool being replaced.
 func (c *Connection) SetPDO(pdo *sql.DB) *Connection {
 	c.ResetTransactionLevel()
@@ -1135,7 +1130,7 @@ func (c *Connection) SetPDO(pdo *sql.DB) *Connection {
 	return c
 }
 
-// SetReadPDO answers Connection::setReadPdo.
+// SetReadPDO replaces the read pool.
 func (c *Connection) SetReadPDO(pdo *sql.DB) *Connection {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1143,7 +1138,7 @@ func (c *Connection) SetReadPDO(pdo *sql.DB) *Connection {
 	return c
 }
 
-// SetReadPDOConfig answers Connection::setReadPdoConfig.
+// SetReadPDOConfig replaces the configuration reported for the read pool.
 func (c *Connection) SetReadPDOConfig(config map[string]any) *Connection {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1151,7 +1146,7 @@ func (c *Connection) SetReadPDOConfig(config map[string]any) *Connection {
 	return c
 }
 
-// SetReconnector answers Connection::setReconnector.
+// SetReconnector sets the callback Reconnect calls to replace the pool.
 func (c *Connection) SetReconnector(reconnector func(*Connection) error) *Connection {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1159,14 +1154,14 @@ func (c *Connection) SetReconnector(reconnector func(*Connection) error) *Connec
 	return c
 }
 
-// GetName answers Connection::getName.
+// GetName returns the connection's configured name.
 func (c *Connection) GetName() string {
 	name, _ := c.GetConfig("name").(string)
 	return name
 }
 
-// GetNameWithReadWriteType answers
-// Connection::getNameWithReadWriteType.
+// GetNameWithReadWriteType returns the connection's name, suffixed with
+// "::read" or "::write" when a read/write type is set.
 func (c *Connection) GetNameWithReadWriteType() string {
 	c.mu.RLock()
 	readWriteType := c.readWriteType
@@ -1179,18 +1174,18 @@ func (c *Connection) GetNameWithReadWriteType() string {
 	return name
 }
 
-// GetConfig answers Connection::getConfig. An empty option answers nothing
-// rather than the whole array, because a caller that wants the array can ask
-// for the keys it needs.
+// GetConfig returns one configuration value by key. An empty key returns
+// nothing rather than the whole configuration, because a caller that wants
+// all of it can ask for the keys it needs.
 func (c *Connection) GetConfig(option string) any {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.config[option]
 }
 
-// GetConnectionDetails answers the protected
-// Connection::getConnectionDetails, exported because QueryException carries it
-// and Go has no protected.
+// GetConnectionDetails returns the driver, name, host, port, database and
+// socket this connection reports, reading from the read configuration when a
+// read pool was last used. It is exported because QueryException carries it.
 func (c *Connection) GetConnectionDetails() map[string]any {
 	c.mu.RLock()
 	config := c.config
@@ -1209,24 +1204,24 @@ func (c *Connection) GetConnectionDetails() map[string]any {
 	}
 }
 
-// GetDriverName answers Connection::getDriverName.
+// GetDriverName returns the configured driver name.
 func (c *Connection) GetDriverName() string {
 	driver, _ := c.GetConfig("driver").(string)
 	return driver
 }
 
-// GetDriverTitle answers Connection::getDriverTitle, which on the base class is
-// the driver name.
+// GetDriverTitle returns the human-facing name of the driver, which by
+// default is just the driver name.
 func (c *Connection) GetDriverTitle() string { return c.GetDriverName() }
 
-// GetQueryGrammar answers Connection::getQueryGrammar.
+// GetQueryGrammar returns the grammar this connection compiles queries with.
 func (c *Connection) GetQueryGrammar() query.Grammar {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.queryGrammar
 }
 
-// SetQueryGrammar answers Connection::setQueryGrammar.
+// SetQueryGrammar replaces the grammar this connection compiles queries with.
 func (c *Connection) SetQueryGrammar(grammar query.Grammar) *Connection {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1234,18 +1229,18 @@ func (c *Connection) SetQueryGrammar(grammar query.Grammar) *Connection {
 	return c
 }
 
-// GetSchemaGrammar answers Connection::getSchemaGrammar.
+// GetSchemaGrammar returns the schema grammar this connection holds.
 //
-// It is any because the schema grammars live in database/schema/grammars, which
-// nothing here should import: a connection needs to hold one and never to call
-// it, and the schema builder that does call it knows the type.
+// It is any because the schema grammars live in database/schema/grammars,
+// which nothing here should import: a connection needs to hold one and never
+// to call it, and the schema builder that does call it knows the type.
 func (c *Connection) GetSchemaGrammar() any {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.schemaGrammar
 }
 
-// SetSchemaGrammar answers Connection::setSchemaGrammar.
+// SetSchemaGrammar replaces the schema grammar this connection holds.
 func (c *Connection) SetSchemaGrammar(grammar any) *Connection {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1253,14 +1248,16 @@ func (c *Connection) SetSchemaGrammar(grammar any) *Connection {
 	return c
 }
 
-// GetPostProcessor answers Connection::getPostProcessor.
+// GetPostProcessor returns the processor this connection post-processes
+// query results with.
 func (c *Connection) GetPostProcessor() query.Processor {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.postProcessor
 }
 
-// SetPostProcessor answers Connection::setPostProcessor.
+// SetPostProcessor replaces the processor this connection post-processes
+// query results with.
 func (c *Connection) SetPostProcessor(processor query.Processor) *Connection {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1268,14 +1265,14 @@ func (c *Connection) SetPostProcessor(processor query.Processor) *Connection {
 	return c
 }
 
-// GetEventDispatcher answers Connection::getEventDispatcher.
+// GetEventDispatcher returns the dispatcher this connection fires events on.
 func (c *Connection) GetEventDispatcher() Dispatcher {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.events
 }
 
-// SetEventDispatcher answers Connection::setEventDispatcher.
+// SetEventDispatcher replaces the dispatcher this connection fires events on.
 func (c *Connection) SetEventDispatcher(dispatcher Dispatcher) *Connection {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1283,29 +1280,29 @@ func (c *Connection) SetEventDispatcher(dispatcher Dispatcher) *Connection {
 	return c
 }
 
-// UnsetEventDispatcher answers Connection::unsetEventDispatcher.
+// UnsetEventDispatcher clears the event dispatcher, so events stop firing.
 func (c *Connection) UnsetEventDispatcher() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.events = nil
 }
 
-// Pretending answers Connection::pretending.
+// Pretending reports whether the connection is inside a Pretend call.
 func (c *Connection) Pretending() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.pretending
 }
 
-// GetQueryLog answers Connection::getQueryLog.
+// GetQueryLog returns a copy of the queries logged so far.
 func (c *Connection) GetQueryLog() []QueryLogEntry {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return slices.Clone(c.queryLog)
 }
 
-// GetRawQueryLog answers Connection::getRawQueryLog: the log with the bindings
-// written into each statement.
+// GetRawQueryLog returns the query log with each statement's bindings
+// written directly into it.
 func (c *Connection) GetRawQueryLog() []QueryLogEntry {
 	entries := c.GetQueryLog()
 	out := make([]QueryLogEntry, 0, len(entries))
@@ -1319,42 +1316,44 @@ func (c *Connection) GetRawQueryLog() []QueryLogEntry {
 	return out
 }
 
-// FlushQueryLog answers Connection::flushQueryLog.
+// FlushQueryLog clears the query log.
 func (c *Connection) FlushQueryLog() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.queryLog = nil
 }
 
-// EnableQueryLog answers Connection::enableQueryLog.
+// EnableQueryLog turns query logging on.
 func (c *Connection) EnableQueryLog() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.loggingQueries = true
 }
 
-// DisableQueryLog answers Connection::disableQueryLog.
+// DisableQueryLog turns query logging off.
 func (c *Connection) DisableQueryLog() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.loggingQueries = false
 }
 
-// Logging answers Connection::logging.
+// Logging reports whether query logging is on.
 func (c *Connection) Logging() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.loggingQueries
 }
 
-// GetDatabaseName answers Connection::getDatabaseName.
+// GetDatabaseName returns the name of the database this connection is open
+// on.
 func (c *Connection) GetDatabaseName() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.database
 }
 
-// SetDatabaseName answers Connection::setDatabaseName.
+// SetDatabaseName replaces the name of the database this connection is open
+// on.
 func (c *Connection) SetDatabaseName(database string) *Connection {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1362,7 +1361,8 @@ func (c *Connection) SetDatabaseName(database string) *Connection {
 	return c
 }
 
-// SetReadWriteType answers Connection::setReadWriteType.
+// SetReadWriteType sets the read/write suffix GetNameWithReadWriteType
+// reports.
 func (c *Connection) SetReadWriteType(readWriteType string) *Connection {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1370,7 +1370,8 @@ func (c *Connection) SetReadWriteType(readWriteType string) *Connection {
 	return c
 }
 
-// latestReadWriteTypeUsed answers the protected method of the same name.
+// latestReadWriteTypeUsed returns the configured read/write type, or which
+// pool was last retrieved when none was configured.
 func (c *Connection) latestReadWriteTypeUsed() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -1384,14 +1385,14 @@ func (c *Connection) latestReadWriteTypeUsedLocked() string {
 	return c.latestPDOTypeRetrieved
 }
 
-// GetTablePrefix answers Connection::getTablePrefix.
+// GetTablePrefix returns the prefix prepended to every table name.
 func (c *Connection) GetTablePrefix() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.tablePrefix
 }
 
-// SetTablePrefix answers Connection::setTablePrefix.
+// SetTablePrefix replaces the prefix prepended to every table name.
 func (c *Connection) SetTablePrefix(prefix string) *Connection {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1399,7 +1400,8 @@ func (c *Connection) SetTablePrefix(prefix string) *Connection {
 	return c
 }
 
-// WithoutTablePrefix answers Connection::withoutTablePrefix.
+// WithoutTablePrefix runs callback with the table prefix cleared, restoring
+// it afterward.
 func (c *Connection) WithoutTablePrefix(callback func(*Connection) error) error {
 	prefix := c.GetTablePrefix()
 
@@ -1409,11 +1411,11 @@ func (c *Connection) WithoutTablePrefix(callback func(*Connection) error) error 
 	return callback(c)
 }
 
-// GetServerVersion answers Connection::getServerVersion.
+// GetServerVersion asks the server for its version string.
 //
-// The PHP reads PDO::ATTR_SERVER_VERSION, which database/sql has no equivalent
-// of, so it asks the server: version() is spelled the same by PostgreSQL,
-// MySQL and SQLite (sqlite_version() there, which the grammar overrides).
+// database/sql has no driver-level way to read it, so it is read with a
+// query: version() is spelled the same by PostgreSQL and MySQL, and SQLite's
+// sqlite_version() is substituted for it.
 func (c *Connection) GetServerVersion(ctx context.Context) (string, error) {
 	q := "SELECT version()"
 	if c.GetDriverName() == string(DialectSQLite) {
@@ -1426,25 +1428,25 @@ func (c *Connection) GetServerVersion(ctx context.Context) (string, error) {
 	return asText(value), nil
 }
 
-// resolvers answers Connection::$resolvers.
+// resolvers holds the per-driver constructors registered with ResolverFor.
 var (
 	resolversMu sync.RWMutex
 	resolvers   = map[string]func(pdo *sql.DB, database, prefix string, config map[string]any) *Connection{}
 )
 
-// ResolverFor answers Connection::resolverFor: register how a driver builds
-// its connection.
+// ResolverFor registers how a driver builds its connection.
 //
 // It is what lets a connector supply a driver-specific Connection without this
-// package importing it, and it is the same hook the PHP has for the same reason
-// -- there, so a package can add a driver Laravel does not ship.
+// package importing it, and what lets a project add a driver this framework
+// does not ship.
 func ResolverFor(driver string, callback func(pdo *sql.DB, database, prefix string, config map[string]any) *Connection) {
 	resolversMu.Lock()
 	defer resolversMu.Unlock()
 	resolvers[driver] = callback
 }
 
-// GetResolver answers Connection::getResolver.
+// GetResolver returns the constructor ResolverFor registered for driver, or
+// nil when none was.
 func GetResolver(driver string) func(pdo *sql.DB, database, prefix string, config map[string]any) *Connection {
 	resolversMu.RLock()
 	defer resolversMu.RUnlock()
@@ -1454,13 +1456,13 @@ func GetResolver(driver string) func(pdo *sql.DB, database, prefix string, confi
 // The rest of concerns.TransactionDriver, which Connection satisfies so
 // ManagesTransactions can drive it.
 
-// ExecuteBeginTransactionStatement answers the protected
-// Connection::executeBeginTransactionStatement.
+// ExecuteBeginTransactionStatement issues a BEGIN on a dedicated connection
+// taken from the pool, and holds that connection for the life of the
+// transaction.
 //
-// database/sql has no BEGIN outside sql.Tx, so this issues one on a dedicated
-// connection taken from the pool, and holds it for the life of the transaction.
-// It is what BeginTx does internally, spelled out, because the trait's
-// bookkeeping is what decides when the matching COMMIT runs.
+// database/sql has no BEGIN outside sql.Tx, so this spells out what BeginTx
+// does internally: ManagesTransactions' bookkeeping is what decides when the
+// matching COMMIT runs.
 func (c *Connection) ExecuteBeginTransactionStatement() error {
 	pool, err := c.GetPDO()
 	if err != nil {
@@ -1482,7 +1484,8 @@ func (c *Connection) ExecuteBeginTransactionStatement() error {
 	return nil
 }
 
-// CommitTransactionStatement is $this->getPdo()->commit().
+// CommitTransactionStatement issues a COMMIT on the pinned transaction
+// connection, and releases it back to the pool.
 func (c *Connection) CommitTransactionStatement() error {
 	c.mu.Lock()
 	conn := c.txConn
@@ -1497,7 +1500,9 @@ func (c *Connection) CommitTransactionStatement() error {
 	return err
 }
 
-// RollBackTransactionStatement is the PDO rollBack, guarded by inTransaction.
+// RollBackTransactionStatement issues a ROLLBACK on the pinned transaction
+// connection and releases it, reporting false when there was no transaction
+// connection to roll back.
 func (c *Connection) RollBackTransactionStatement() (bool, error) {
 	c.mu.Lock()
 	conn := c.txConn
@@ -1530,8 +1535,8 @@ func (c *Connection) ExecuteSavepointStatement(statement string) error {
 	return err
 }
 
-// SupportsSavepoints answers $this->queryGrammar->supportsSavepoints(), with
-// the base grammar's answer when no grammar is set.
+// SupportsSavepoints reports whether the query grammar supports savepoints,
+// falling back to the base grammar when none is set.
 func (c *Connection) SupportsSavepoints() bool {
 	if grammar := c.GetQueryGrammar(); grammar != nil {
 		return grammar.SupportsSavepoints()
@@ -1539,7 +1544,8 @@ func (c *Connection) SupportsSavepoints() bool {
 	return baseGrammar.SupportsSavepoints()
 }
 
-// CompileSavepoint answers $this->queryGrammar->compileSavepoint().
+// CompileSavepoint returns the statement that creates savepoint name, using
+// the query grammar, or the base grammar when none is set.
 func (c *Connection) CompileSavepoint(name string) string {
 	if grammar := c.GetQueryGrammar(); grammar != nil {
 		return grammar.CompileSavepoint(name)
@@ -1547,8 +1553,9 @@ func (c *Connection) CompileSavepoint(name string) string {
 	return baseGrammar.CompileSavepoint(name)
 }
 
-// CompileSavepointRollBack answers
-// $this->queryGrammar->compileSavepointRollBack().
+// CompileSavepointRollBack returns the statement that rolls back to
+// savepoint name, using the query grammar, or the base grammar when none is
+// set.
 func (c *Connection) CompileSavepointRollBack(name string) string {
 	if grammar := c.GetQueryGrammar(); grammar != nil {
 		return grammar.CompileSavepointRollBack(name)
@@ -1556,20 +1563,22 @@ func (c *Connection) CompileSavepointRollBack(name string) string {
 	return baseGrammar.CompileSavepointRollBack(name)
 }
 
-// CausedByLostConnection answers the DetectsLostConnections trait.
+// CausedByLostConnection reports whether err means the connection is gone,
+// using the package-level detector.
 func (c *Connection) CausedByLostConnection(err error) bool { return CausedByLostConnection(err) }
 
-// CausedByConcurrencyError answers the DetectsConcurrencyErrors trait.
+// CausedByConcurrencyError reports whether err means a deadlock or a
+// serialization failure, using the package-level detector.
 func (c *Connection) CausedByConcurrencyError(err error) bool { return CausedByConcurrencyError(err) }
 
-// SubstituteBindingsIntoRawSQL answers the grammar method QueryExecuted reaches
-// for, so a Connection satisfies events.RawSQLConnection.
+// SubstituteBindingsIntoRawSQL writes bindings directly into sql, so a
+// Connection satisfies events.RawSQLConnection.
 func (c *Connection) SubstituteBindingsIntoRawSQL(sql string, bindings []any) string {
 	return substituteBindings(sql, bindings)
 }
 
-// baseGrammar is the fallback for the three savepoint questions, which the
-// abstract Illuminate\Database\Query\Grammars\Grammar answers on its own.
+// baseGrammar is the fallback for the three savepoint questions, for a
+// connection with no query grammar of its own set.
 var baseGrammar = &query.BaseGrammar{}
 
 // scanRecords reads a whole result set into records.
@@ -1592,10 +1601,10 @@ func scanRecords(rows *sql.Rows) ([]query.Record, error) {
 
 // scanRecord reads one row into a record.
 //
-// Every column is scanned into an any, which is what PDO::FETCH_OBJ produces:
-// the driver decides the Go type, and the caller reads it. A []byte is turned
-// into a string, because MySQL's text protocol answers every column that way
-// and a caller comparing against a string would otherwise never match.
+// Every column is scanned into an any: the driver decides the Go type, and
+// the caller reads it. A []byte is turned into a string, because MySQL's text
+// protocol returns every column that way and a caller comparing against a
+// string would otherwise never match.
 func scanRecord(rows *sql.Rows, columns []string) (query.Record, error) {
 	values := make([]any, len(columns))
 	pointers := make([]any, len(columns))
@@ -1670,17 +1679,17 @@ func sortedNames(names []string) []string {
 // SchemaBuilderFactory is where the schema package registers how to build a
 // schema builder for a connection.
 //
-// The PHP's getSchemaBuilder does `new SchemaBuilder($this)`, which would make
-// this package import database/schema while that package imports this one for
-// the connection it builds against. The registration goes the other way and
-// closes nothing.
+// Constructing one directly here would make this package import
+// database/schema, while that package imports this one for the connection it
+// builds against. The registration goes the other way and closes the cycle.
 var SchemaBuilderFactory func(*Connection) any
 
-// GetSchemaBuilder answers Connection::getSchemaBuilder.
+// GetSchemaBuilder returns the schema builder for this connection, built
+// through SchemaBuilderFactory.
 //
-// It answers any rather than a schema builder type for the reason above. Nil
-// means the binary never imported the schema package, which is a truthful
-// answer to "give me the schema builder I did not link".
+// It returns any rather than a schema builder type for the reason above. Nil
+// means the binary never imported the schema package, which is the truthful
+// response to "give me the schema builder I did not link".
 func (c *Connection) GetSchemaBuilder() any {
 	if c.GetSchemaGrammar() == nil {
 		c.UseDefaultSchemaGrammar()

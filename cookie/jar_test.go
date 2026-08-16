@@ -15,8 +15,8 @@ import (
 // Secure rather than leave it to the jar.
 func ptr(b bool) *bool { return &b }
 
-// make9 is CookieJar::make with the arguments PHP defaults, so a test that only
-// cares about one of them says only that one.
+// make9 calls Make with every optional-style argument left unset, so a test
+// that only cares about one of them says only that one.
 func make9(j *cookie.CookieJar, name, value string, minutes int) *http.Cookie {
 	return j.Make(name, value, minutes, "", "", nil, true, false, http.SameSiteDefaultMode)
 }
@@ -76,8 +76,8 @@ func TestMakeTurnsMinutesIntoBothExpiresAndMaxAge(t *testing.T) {
 }
 
 func TestMakeWithNegativeMinutesRendersMaxAgeZero(t *testing.T) {
-	// Symfony clamps a past expiry to Max-Age=0, and net/http renders any
-	// negative MaxAge the same way. Both tell the browser to drop the cookie.
+	// A negative MaxAge is invalid, and net/http renders it as Max-Age=0,
+	// which tells the browser to drop the cookie.
 	c := make9(cookie.NewCookieJar(), "name", "", -2628000)
 
 	rendered := c.String()
@@ -216,7 +216,7 @@ func TestQueuedWithoutAPathReturnsTheOneQueuedLast(t *testing.T) {
 	}
 
 	// Re-queueing an existing path replaces the cookie without moving the path
-	// to the end, because assigning into a PHP array does not move a key.
+	// to the end.
 	replaced := j.Make("name", "replaced", 0, "/a", "", nil, true, false, http.SameSiteDefaultMode)
 	j.Queue(replaced)
 	if got := j.Queued("name", nil, "/a"); got != replaced {
@@ -359,7 +359,7 @@ func TestSetDefaultPathAndDomainAssignsWhatItIsGiven(t *testing.T) {
 		t.Error("SetDefaultPathAndDomain returned another jar, and the PHP returns $this")
 	}
 
-	// Direct assignment, as in the PHP: the "/" and the lax are gone, not kept.
+	// Direct assignment: the "/" and the lax are gone, not kept.
 	c := make9(j, "name", "value", 0)
 	if c.Path != "" {
 		t.Errorf("Path = %q, want empty: the default was cleared", c.Path)

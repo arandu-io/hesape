@@ -8,18 +8,16 @@ import (
 	"sync"
 )
 
-// Configuration is where DatabaseManager reads its connections.
+// Configuration is where DatabaseManager reads its connections: the two keys
+// 'database.default' and 'database.connections'.
 //
-// It answers the $app['config'] the PHP indexes with 'database.default' and
-// 'database.connections' -- the same two keys, so a configuration file written
-// for Laravel is read the same way. It is an interface rather than
-// hesape/config directly because the manager has to be constructible in a test
-// with three lines and no file.
+// It is an interface rather than hesape/config directly because the manager has
+// to be constructible in a test with three lines and no file.
 type Configuration interface {
-	// Get answers Repository::get.
+	// Get returns the configuration value for key.
 	Get(key string) any
 
-	// Set answers Repository::set.
+	// Set replaces the configuration value for key.
 	Set(key string, value any)
 }
 
@@ -33,53 +31,47 @@ func (m MapConfiguration) Get(key string) any { return m[key] }
 // Set answers Configuration.Set.
 func (m MapConfiguration) Set(key string, value any) { m[key] = value }
 
-// DatabaseManager answers Illuminate\Database\DatabaseManager: the resolver
-// that makes connections on demand from configuration, keeps them, and hands
-// the same one back next time.
+// DatabaseManager is the resolver that makes connections on demand from
+// configuration, keeps them, and hands the same one back next time.
 //
-// The PHP's __call forwards every unknown method to the default connection, so
-// DB::table(...) reads as though the manager were a connection. Go has no
-// __call and this has no forwarding: Connection(name) answers the connection,
-// and the call goes on that. It is one more word and one fewer indirection, and
-// it is the only shape a compiler can check.
+// Nothing is forwarded to the default connection: Connection(name) answers the
+// connection, and the call goes on that. It is one more word and one fewer
+// indirection, and it is the only shape a compiler can check.
 type DatabaseManager struct {
 	mu sync.RWMutex
 
-	// config is DatabaseManager::$app['config'].
+	// config is where the manager reads and writes the default connection
+	// name.
 	config Configuration
 
-	// factory is DatabaseManager::$factory.
+	// factory builds a *Connection from a driver configuration.
 	factory *ConnectionFactory
 
-	// connections is DatabaseManager::$connections.
+	// connections is every connection the manager has made, keyed by name.
 	connections map[string]*Connection
 
-	// dynamicConnectionConfigurations is
-	// DatabaseManager::$dynamicConnectionConfigurations, what Build leaves
-	// behind so a reconnect can rebuild an on-demand connection.
+	// dynamicConnectionConfigurations is what Build leaves behind so a
+	// reconnect can rebuild an on-demand connection.
 	dynamicConnectionConfigurations map[string]map[string]any
 
-	// extensions is DatabaseManager::$extensions.
+	// extensions is the per-name and per-driver connection constructors
+	// registered with Extend.
 	extensions map[string]func(config map[string]any, name string) (*Connection, error)
 
-	// reconnector is DatabaseManager::$reconnector.
+	// reconnector is set on every connection the manager makes.
 	reconnector func(*Connection) error
 
-	// events is the dispatcher the manager puts on every connection it makes,
-	// which the PHP takes from $this->app['events'].
+	// events is the dispatcher the manager puts on every connection it
+	// makes.
 	events Dispatcher
 
-	// transactions is the manager the PHP takes from
-	// $this->app['db.transactions'].
+	// transactions is the manager put on every connection the manager makes.
 	transactions *DatabaseTransactionsManager
 }
 
-// NewDatabaseManager answers DatabaseManager::__construct.
-//
-// The PHP's first argument is the application, which it uses for exactly three
-// things: the configuration, the event dispatcher and the transactions manager.
-// Those three are the arguments here, because a manager that took the whole
-// application would be a manager nothing but the application could build.
+// NewDatabaseManager creates a DatabaseManager over config, building
+// connections with factory, or with a default ConnectionFactory when
+// factory is nil.
 func NewDatabaseManager(config Configuration, factory *ConnectionFactory) *DatabaseManager {
 	if factory == nil {
 		factory = NewConnectionFactory()
@@ -105,10 +97,11 @@ func NewDatabaseManager(config Configuration, factory *ConnectionFactory) *Datab
 	return m
 }
 
-// Connection answers DatabaseManager::connection.
+// Connection returns the named connection, creating it if this is the first
+// request for it.
 //
-// The name may carry a read/write suffix -- "primary::read" -- which is what
-// makes a replica addressable by name.
+// The name may carry a read/write suffix, `::read` or `::write`, which is
+// what makes a replica addressable by name.
 func (m *DatabaseManager) Connection(name string) (ConnectionInterface, error) {
 	return m.connection(name)
 }
@@ -137,9 +130,8 @@ func (m *DatabaseManager) connection(name string) (*Connection, error) {
 
 	m.mu.Lock()
 	// Another goroutine may have made the same connection while this one was
-	// opening a socket. The PHP cannot meet this and has no guard; here the
-	// first one to arrive wins, and the second's pool is closed rather than
-	// leaked.
+	// opening a socket. There is no lock across that gap, so the first one to
+	// arrive wins here, and the second's pool is closed rather than leaked.
 	if raced, taken := m.connections[name]; taken {
 		m.mu.Unlock()
 		if pool := made.GetRawPDO(); pool != nil {
@@ -155,8 +147,7 @@ func (m *DatabaseManager) connection(name string) (*Connection, error) {
 	return made, nil
 }
 
-// Build answers DatabaseManager::build: a connection from a configuration
-// nobody wrote in a file.
+// Build opens a connection from a configuration nobody wrote in a file.
 func (m *DatabaseManager) Build(config map[string]any) (*Connection, error) {
 	name, _ := config["name"].(string)
 	if name == "" {
@@ -171,13 +162,12 @@ func (m *DatabaseManager) Build(config map[string]any) (*Connection, error) {
 	return m.ConnectUsing(name, config, true)
 }
 
-// CalculateDynamicConnectionName answers
-// DatabaseManager::calculateDynamicConnectionName.
+// CalculateDynamicConnectionName derives a stable name for an on-demand
+// connection by hashing its configuration.
 //
-// The PHP concatenates key and value for every entry and hashes the result;
-// map order is not stable in either language, so the keys are sorted first --
-// which the PHP gets away with because its arrays keep insertion order, and
-// which Go must do explicitly or the same configuration would get two names.
+// It concatenates key and value for every entry and hashes the result; map
+// order is not stable, so the keys are sorted first, or the same
+// configuration would get two different names on different runs.
 func CalculateDynamicConnectionName(config map[string]any) string {
 	keys := make([]string, 0, len(config))
 	for key := range config {
@@ -199,7 +189,8 @@ func CalculateDynamicConnectionName(config map[string]any) string {
 	return fmt.Sprintf("dynamic_%x", md5.Sum([]byte(b.String())))
 }
 
-// ConnectUsing answers DatabaseManager::connectUsing.
+// ConnectUsing opens a connection under name from config, failing if one
+// already exists under that name unless force purges it first.
 func (m *DatabaseManager) ConnectUsing(name string, config map[string]any, force bool) (*Connection, error) {
 	if force {
 		m.Purge(name)
@@ -227,8 +218,8 @@ func (m *DatabaseManager) ConnectUsing(name string, config map[string]any, force
 	return made, nil
 }
 
-// parseConnectionName answers the protected
-// DatabaseManager::parseConnectionName.
+// parseConnectionName splits name into the base connection name and its
+// read/write type, stripping a trailing `::read` or `::write`.
 func parseConnectionName(name string) (string, string) {
 	for _, suffix := range []string{"::read", "::write"} {
 		if strings.HasSuffix(name, suffix) {
@@ -238,7 +229,8 @@ func parseConnectionName(name string) (string, string) {
 	return name, ""
 }
 
-// makeConnection answers the protected DatabaseManager::makeConnection.
+// makeConnection builds a *Connection for name, using a constructor
+// registered for that name or its driver, or the factory otherwise.
 func (m *DatabaseManager) makeConnection(name string) (*Connection, error) {
 	config, err := m.configuration(name)
 	if err != nil {
@@ -260,7 +252,8 @@ func (m *DatabaseManager) makeConnection(name string) (*Connection, error) {
 	return m.factory.Make(config, name)
 }
 
-// configuration answers the protected DatabaseManager::configuration.
+// configuration returns the driver configuration for name: a dynamic one
+// Build registered, or one read from the configured connections.
 func (m *DatabaseManager) configuration(name string) (map[string]any, error) {
 	m.mu.RLock()
 	dynamic := m.dynamicConnectionConfigurations[name]
@@ -278,7 +271,8 @@ func (m *DatabaseManager) configuration(name string) (map[string]any, error) {
 	return config, nil
 }
 
-// configure answers the protected DatabaseManager::configure.
+// configure finishes a freshly made connection: the read/write pool split,
+// the event dispatcher, the transactions manager and the reconnector.
 func (m *DatabaseManager) configure(connection *Connection, typ string) *Connection {
 	connection = m.setPDOForType(connection, typ).SetReadWriteType(typ)
 
@@ -299,7 +293,8 @@ func (m *DatabaseManager) configure(connection *Connection, typ string) *Connect
 	return connection
 }
 
-// setPDOForType answers the protected DatabaseManager::setPdoForType.
+// setPDOForType points the write pool at the read pool for a "read"
+// connection, or the read pool at the write pool for a "write" connection.
 func (m *DatabaseManager) setPDOForType(connection *Connection, typ string) *Connection {
 	switch typ {
 	case "read":
@@ -327,7 +322,7 @@ func (m *DatabaseManager) dispatchConnectionEstablishedEvent(connection *Connect
 	events.Dispatch(newConnectionEstablished(connection))
 }
 
-// Purge answers DatabaseManager::purge.
+// Purge disconnects and forgets the named connection.
 func (m *DatabaseManager) Purge(name string) {
 	if name == "" {
 		name = m.GetDefaultConnection()
@@ -339,7 +334,7 @@ func (m *DatabaseManager) Purge(name string) {
 	delete(m.connections, name)
 }
 
-// Disconnect answers DatabaseManager::disconnect.
+// Disconnect closes the named connection's pools, if it is open.
 func (m *DatabaseManager) Disconnect(name string) {
 	if name == "" {
 		name = m.GetDefaultConnection()
@@ -354,7 +349,8 @@ func (m *DatabaseManager) Disconnect(name string) {
 	}
 }
 
-// Reconnect answers DatabaseManager::reconnect.
+// Reconnect closes and reopens the named connection, or opens it fresh if it
+// was not already open.
 func (m *DatabaseManager) Reconnect(name string) (*Connection, error) {
 	if name == "" {
 		name = m.GetDefaultConnection()
@@ -377,7 +373,8 @@ func (m *DatabaseManager) Reconnect(name string) (*Connection, error) {
 	return refreshed, nil
 }
 
-// UsingConnection answers DatabaseManager::usingConnection.
+// UsingConnection runs callback with a different default connection, and
+// puts the old one back afterward.
 func (m *DatabaseManager) UsingConnection(name string, callback func() error) error {
 	previous := m.GetDefaultConnection()
 
@@ -387,8 +384,9 @@ func (m *DatabaseManager) UsingConnection(name string, callback func() error) er
 	return callback()
 }
 
-// refreshPDOConnections answers the protected
-// DatabaseManager::refreshPdoConnections.
+// refreshPDOConnections rebuilds the named connection's pools and copies
+// them onto the existing *Connection, so a reference a caller is holding
+// keeps working after a reconnect.
 func (m *DatabaseManager) refreshPDOConnections(name string) (*Connection, error) {
 	database, typ := parseConnectionName(name)
 
@@ -408,40 +406,41 @@ func (m *DatabaseManager) refreshPDOConnections(name string) (*Connection, error
 	return existing.SetPDO(fresh.GetRawPDO()).SetReadPDO(fresh.GetRawReadPDO()), nil
 }
 
-// GetDefaultConnection answers
-// DatabaseManager::getDefaultConnection.
+// GetDefaultConnection returns the configured default connection name.
 func (m *DatabaseManager) GetDefaultConnection() string {
 	name, _ := m.config.Get("database.default").(string)
 	return name
 }
 
-// SetDefaultConnection answers
-// DatabaseManager::setDefaultConnection.
+// SetDefaultConnection replaces the configured default connection name.
 func (m *DatabaseManager) SetDefaultConnection(name string) {
 	m.config.Set("database.default", name)
 }
 
-// SupportedDrivers answers DatabaseManager::supportedDrivers.
+// SupportedDrivers returns the dialects this package can open.
 func (m *DatabaseManager) SupportedDrivers() []string { return SupportedDrivers() }
 
-// AvailableDrivers answers DatabaseManager::availableDrivers.
+// AvailableDrivers returns the supported drivers that are also linked into
+// the binary.
 func (m *DatabaseManager) AvailableDrivers() []string { return AvailableDrivers() }
 
-// Extend answers DatabaseManager::extend.
+// Extend registers resolver as the connection constructor for name, either a
+// connection name or a driver name.
 func (m *DatabaseManager) Extend(name string, resolver func(config map[string]any, name string) (*Connection, error)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.extensions[name] = resolver
 }
 
-// ForgetExtension answers DatabaseManager::forgetExtension.
+// ForgetExtension removes the connection constructor registered for name.
 func (m *DatabaseManager) ForgetExtension(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.extensions, name)
 }
 
-// GetConnections answers DatabaseManager::getConnections.
+// GetConnections returns a copy of every connection the manager has made,
+// keyed by name.
 func (m *DatabaseManager) GetConnections() map[string]*Connection {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -453,11 +452,11 @@ func (m *DatabaseManager) GetConnections() map[string]*Connection {
 	return out
 }
 
-// ConnectionNames answers the sorted names of the open connections.
+// ConnectionNames returns the sorted names of the open connections.
 //
-// The PHP reads getConnections() and relies on its arrays keeping insertion
-// order; Go's maps do not, so a console table built from GetConnections would
-// print its rows in a different order on every run.
+// Go's maps have no stable order, so a console table built from
+// GetConnections would print its rows in a different order on every run
+// without the sort.
 func (m *DatabaseManager) ConnectionNames() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -469,15 +468,16 @@ func (m *DatabaseManager) ConnectionNames() []string {
 	return sortedNames(names)
 }
 
-// SetReconnector answers DatabaseManager::setReconnector.
+// SetReconnector replaces the reconnector set on every connection the
+// manager makes.
 func (m *DatabaseManager) SetReconnector(reconnector func(*Connection) error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.reconnector = reconnector
 }
 
-// SetApplication answers DatabaseManager::setApplication, narrowed to the
-// configuration it is only ever asked for.
+// SetApplication replaces the configuration the manager reads and writes the
+// default connection name through.
 func (m *DatabaseManager) SetApplication(config Configuration) *DatabaseManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -487,8 +487,7 @@ func (m *DatabaseManager) SetApplication(config Configuration) *DatabaseManager 
 
 // SetEventDispatcher puts a dispatcher on every connection the manager makes.
 //
-// The PHP reads $this->app['events'] inside configure(); there is no container
-// to read from (ADR 0001), so it is set here once.
+// It is set here once rather than looked up per connection.
 func (m *DatabaseManager) SetEventDispatcher(events Dispatcher) *DatabaseManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -497,7 +496,7 @@ func (m *DatabaseManager) SetEventDispatcher(events Dispatcher) *DatabaseManager
 }
 
 // SetTransactionManager puts a transactions manager on every connection the
-// manager makes, which the PHP takes from $this->app['db.transactions'].
+// manager makes.
 func (m *DatabaseManager) SetTransactionManager(manager *DatabaseTransactionsManager) *DatabaseManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()

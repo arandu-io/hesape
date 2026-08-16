@@ -2,18 +2,15 @@ package mail
 
 import "net/mail"
 
-// Address is Illuminate\Mail\Mailables\Address: one mailbox, with the display
-// name that goes in front of it.
+// Address is one mailbox, with the display name that goes in front of it.
 type Address struct {
-	// Address is the address itself, and the only required half. It carries
-	// Illuminate's property name, which is why the field repeats the type.
+	// Address is the address itself, and the only required half.
 	Address string
 	// Name is what a client shows instead of the address. Empty is fine.
 	Name string
 }
 
-// NewAddress is Illuminate's Address::__construct, whose second argument is
-// optional and arrives here as a variadic tail.
+// NewAddress builds an address. The display name is optional.
 func NewAddress(address string, name ...string) Address {
 	a := Address{Address: address}
 	if len(name) > 0 {
@@ -22,11 +19,9 @@ func NewAddress(address string, name ...string) Address {
 	return a
 }
 
-// String renders the address the way a header carries it.
-//
-// String has no PHP counterpart: Mailables\Address declares a constructor and
-// two public properties, and the RFC 5322 form is built by whatever writes the
-// header.
+// String renders the address in the RFC 5322 form a header carries: the
+// address alone when there is no display name, and the name in front of it when
+// there is.
 func (a Address) String() string {
 	if a.Name == "" {
 		return a.Address
@@ -37,9 +32,6 @@ func (a Address) String() string {
 // Valid reports whether the address parses. It is checked before a transport is
 // asked to do anything, so a typo fails at the call rather than as a bounce
 // three minutes later.
-//
-// Valid has no PHP counterpart: Mailables\Address accepts whatever string it
-// is given, and the transport is what refuses it.
 func (a Address) Valid() bool {
 	if a.Address == "" {
 		return false
@@ -48,10 +40,9 @@ func (a Address) Valid() bool {
 	return err == nil
 }
 
-// addresses turns whatever Illuminate accepts for a recipient into the list it
-// stores. PHP's setAddress takes string, array, Collection, Symfony Address or
-// Mailables\Address; the Go equivalent of that "mixed" is any, and the shapes
-// below are the ones that arrive.
+// addressesOf turns whatever a caller may pass for a recipient into the list
+// that is stored. The parameter is an any because the accepted shapes have no
+// type in common; they are the cases below, and anything else is nothing.
 func addressesOf(address any, name ...string) []Address {
 	only := ""
 	if len(name) > 0 {
@@ -90,9 +81,8 @@ func addressesOf(address any, name ...string) []Address {
 		}
 		return out
 	case map[string]string:
-		// Illuminate's ['taylor@laravel.com' => 'Taylor'] shape. A Go map has no
-		// order, so the result is sorted by address to stay reproducible --
-		// PHP's array is ordered and this is the one place the two differ.
+		// A map of address to display name. A Go map has no order, so the
+		// result is sorted by address to stay reproducible.
 		out := make([]Address, 0, len(v))
 		for addr, n := range v {
 			out = append(out, Address{Address: addr, Name: n})
@@ -112,13 +102,10 @@ func sortAddresses(list []Address) {
 	}
 }
 
-// uniqueAddresses is Illuminate's
-// (new Collection($this->{$property}))->reverse()->unique('address')->reverse().
-//
-// The reverse-unique-reverse keeps the *last* spelling of a repeated address,
-// which is what makes to('a@b') then to('a@b', 'Ada') end with the name
-// attached. Getting this backwards is invisible until somebody complains that
-// the display name went missing.
+// uniqueAddresses drops repeated addresses, keeping the *last* spelling of each
+// where its last spelling was. That is what makes To("a@b") then To("a@b",
+// "Ada") end with the name attached. Getting it backwards is invisible until
+// somebody complains that the display name went missing.
 func uniqueAddresses(list []Address) []Address {
 	seen := make(map[string]int, len(list))
 	for i, a := range list {
@@ -133,7 +120,7 @@ func uniqueAddresses(list []Address) []Address {
 	return out
 }
 
-// hasAddress is Illuminate's hasRecipient: a name of nil matches on the address
+// hasAddress looks an address up in a list: no name matches on the address
 // alone, and a name given matches on both.
 func hasAddress(list []Address, address string, name ...string) bool {
 	for _, a := range list {

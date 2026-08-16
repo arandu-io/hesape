@@ -271,14 +271,14 @@ func TestSkipWhenTakesTheRequestOutOfTheCorsHandling(t *testing.T) {
 }
 
 // TestTheWholeForwardedChainReachesTheRequest pins the other half of the
-// audit's Request::ips finding: the middleware knew the chain and threw it
-// away, keeping only the one address it wrote onto RemoteAddr, so
-// hhttp.Request.IPs had nothing to answer with but a list of one.
+// IPs regression: the middleware knew the chain and threw it away, keeping
+// only the one address it wrote onto RemoteAddr, so hhttp.Request.IPs had
+// nothing to answer with but a list of one.
 //
-// The chain it leaves is Symfony's getClientIps: the forwarded entries plus
-// the peer, with our own proxies removed, nearest hop first. Only the first is
-// verified -- everything to the left of it was written by whoever that is --
-// which is why IP is the first and not the last.
+// The chain it leaves is the forwarded entries plus the peer, with our own
+// proxies removed, nearest hop first. Only the first is verified --
+// everything to the left of it was written by whoever that is -- which is
+// why IP is the first and not the last.
 func TestTheWholeForwardedChainReachesTheRequest(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.RemoteAddr = "10.0.0.3:8080"
@@ -300,7 +300,7 @@ func TestTheWholeForwardedChainReachesTheRequest(t *testing.T) {
 }
 
 // TestOurOwnProxiesAreNotInTheChain pins the filtering: a hop inside the
-// trusted prefixes is infrastructure, not a visitor, and Symfony drops it.
+// trusted prefixes is infrastructure, not a visitor, and it is dropped.
 func TestOurOwnProxiesAreNotInTheChain(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.RemoteAddr = "10.0.0.3:8080"

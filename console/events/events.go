@@ -1,19 +1,6 @@
-// Package events mirrors Illuminate\Console\Events.
+// Package events holds the events the console and scheduler dispatch.
 //
-// The files it answers to, in the clone at
-// laravel_illuminate/console/Events:
-//
-//	ArtisanStarting.php
-//	CommandFinished.php
-//	CommandStarting.php
-//	ScheduledBackgroundTaskFinished.php
-//	ScheduledTaskFailed.php
-//	ScheduledTaskFinished.php
-//	ScheduledTaskSkipped.php
-//	ScheduledTaskStarting.php
-//
-// Every one of them is a value with public fields and nothing else, which is
-// what the PHP constructor-promotion classes are.
+// Every one of them is a value with public fields and nothing else.
 //
 // The five scheduling events carry a ScheduledTask rather than the scheduling
 // package's Event: the scheduler reports through these, so importing it here
@@ -38,23 +25,21 @@ type Application interface {
 // ArtisanStarting is fired when the console application has been built and
 // before it has run anything.
 //
-// It answers Events\ArtisanStarting. It is where a package adds its commands.
+// It is where a package adds its commands.
 type ArtisanStarting struct {
 	// Artisan is the application that is starting.
 	Artisan Application
 }
 
 // CommandStarting is fired before a command runs.
-//
-// It answers Events\CommandStarting.
 type CommandStarting struct {
 	// Command is the command name.
 	Command string
 
-	// Arguments is what followed the name on the command line, unparsed. PHP
-	// carries the InputInterface; this carries what it was built from, because
-	// a listener that reaches into a half-parsed input is a listener that breaks
-	// when the signature changes.
+	// Arguments is what followed the name on the command line, unparsed. It
+	// carries what the command line was built from, because a listener that
+	// reaches into a half-parsed input is a listener that breaks when the
+	// signature changes.
 	Arguments []string
 
 	// Output is the stream the command writes to.
@@ -62,8 +47,6 @@ type CommandStarting struct {
 }
 
 // CommandFinished is fired after a command has run, whatever it returned.
-//
-// It answers Events\CommandFinished.
 type CommandFinished struct {
 	// Command is the command name.
 	Command string
@@ -97,41 +80,35 @@ type ScheduledTask interface {
 }
 
 // ScheduledTaskStarting is fired before a scheduled task runs.
-//
-// It answers Events\ScheduledTaskStarting.
 type ScheduledTaskStarting struct {
 	// Task is the scheduled event being run.
 	Task ScheduledTask
 }
 
 // ScheduledTaskFinished is fired after a scheduled task has run.
-//
-// It answers Events\ScheduledTaskFinished.
 type ScheduledTaskFinished struct {
 	// Task is the scheduled event that ran.
 	Task ScheduledTask
 
-	// Runtime is how long it took. PHP carries a float of seconds; this carries
-	// a duration, which is the same number with its unit attached.
+	// Runtime is how long it took, as a duration rather than a bare number of
+	// seconds.
 	Runtime time.Duration
 }
 
 // ScheduledTaskFailed is fired when a scheduled task ended badly.
-//
-// It answers Events\ScheduledTaskFailed.
 type ScheduledTaskFailed struct {
 	// Task is the scheduled event that failed.
 	Task ScheduledTask
 
-	// Exception is what went wrong. PHP carries a Throwable.
+	// Exception is what went wrong.
 	Exception error
 }
 
 // ScheduledTaskSkipped is fired when a task was due and a filter turned it away.
 //
-// It answers Events\ScheduledTaskSkipped. It is fired for a task that was
-// skipped by a when, a skip or an overlap lock -- not for one that was simply
-// not due, which is every task in most minutes.
+// It is fired for a task that was skipped by a when, a skip or an overlap
+// lock -- not for one that was simply not due, which is every task in most
+// minutes.
 type ScheduledTaskSkipped struct {
 	// Task is the scheduled event that did not run.
 	Task ScheduledTask
@@ -139,8 +116,6 @@ type ScheduledTaskSkipped struct {
 
 // ScheduledBackgroundTaskFinished is fired when a task that was sent to the
 // background reports back.
-//
-// It answers Events\ScheduledBackgroundTaskFinished.
 type ScheduledBackgroundTaskFinished struct {
 	// Task is the scheduled event that ran.
 	Task ScheduledTask

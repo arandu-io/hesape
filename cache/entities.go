@@ -2,19 +2,16 @@ package cache
 
 import "strings"
 
-// htmlEntity is the HTML 4.01 named entity for a character, as PHP's
-// htmlentities() writes it.
+// htmlEntity is the HTML 4.01 named entity for a character.
 //
 // It exists for one caller, CleanRateLimiterKey, and it is a table rather than a
-// call into a library because this collection carries no third-party dependency
-// (RULE: golang.org/x/crypto and nothing else). It is the Latin-1 block, the
-// Latin Extended-A characters HTML 4.01 names, the Greek letters, and the
-// punctuation and symbols -- which is the whole of the table PHP uses with its
-// default flags.
+// call into a library because this collection carries no third-party
+// dependency. It is the Latin-1 block, the Latin Extended-A characters HTML
+// 4.01 names, the Greek letters, and the punctuation and symbols.
 //
-// The quote is deliberately absent: htmlentities with ENT_QUOTES writes it as
-// the numeric &#039;, which is not a named entity, and the difference is
-// visible in the answer. See CleanRateLimiterKey.
+// The apostrophe is deliberately absent: it has no named entity, only the
+// numeric &#039;, and the difference is visible in the answer. See
+// CleanRateLimiterKey.
 var htmlEntity = map[rune]string{
 	'&': "amp", '<': "lt", '>': "gt", '"': "quot",
 
@@ -99,11 +96,11 @@ var htmlEntity = map[rune]string{
 //
 // The details are worth stating, because they are the kind that get lost:
 //
-//   - "&" folds to "a", because htmlentities writes it "&amp;". So do "<", ">"
-//     and the double quote, to "l", "g" and "q". They are not escaped, they are
+//   - "&" folds to "a", because its entity is "&amp;". So do "<", ">" and the
+//     double quote, to "l", "g" and "q". They are not escaped, they are
 //     replaced by a letter.
-//   - The apostrophe does not fold. htmlentities writes it "&#039;", which is
-//     numeric, and the pattern only matches letters -- so it survives as
+//   - The apostrophe does not fold. It has no named entity, only the numeric
+//     "&#039;", and the pattern only matches letters -- so it survives as
 //     "&#039;", six characters where there was one.
 //   - Neither do "&sup2;", "&frac12;" and the other entities with a digit in the
 //     name, for the same reason.
@@ -118,9 +115,9 @@ func (rl *RateLimiter) CleanRateLimiterKey(key string) string {
 
 	for _, r := range key {
 		if r == '\'' {
-			// htmlentities with ENT_QUOTES -- the default since PHP 8.1 -- writes
-			// the apostrophe as the numeric &#039;, and the pattern matches only
-			// letters, so it comes out the far side as six characters.
+			// The apostrophe has no named entity, only the numeric &#039;, and
+			// the pattern matches only letters, so it comes out the far side as
+			// six characters.
 			out.WriteString("&#039;")
 			continue
 		}

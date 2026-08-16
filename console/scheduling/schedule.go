@@ -23,17 +23,16 @@ type Dispatcher interface {
 
 // Tenants returns the tenants a per-tenant event expands to.
 //
-// It is not in the PHP. RULE 14 says the tenant comes from the Grant, and the
-// core does not know where the application keeps its tenants -- a table, a
-// config file, a control plane -- so the list is injected. Returning an empty
-// list is valid and means those events simply do not run.
+// The tenant comes from the Grant, and the core does not know where the
+// application keeps its tenants -- a table, a config file, a control plane
+// -- so the list is injected. Returning an empty list is valid and means
+// those events simply do not run.
 type Tenants func(ctx context.Context) ([]string, error)
 
 // Schedule is every event an application runs on a clock.
 //
-// It answers Illuminate\Console\Scheduling\Schedule. It is built at wiring time
-// and read afterwards: it is not safe to declare an event on one goroutine while
-// another is running the schedule.
+// It is built at wiring time and read afterwards: it is not safe to declare
+// an event on one goroutine while another is running the schedule.
 type Schedule struct {
 	events []*Event
 
@@ -64,9 +63,9 @@ type Schedule struct {
 
 // NewSchedule returns an empty schedule.
 //
-// It answers Schedule::__construct. The two mutexes are passed rather than
-// resolved from the container (ADR 0001); nil for either means the events that
-// need it are refused rather than run unprotected.
+// The two mutexes are passed explicitly rather than resolved implicitly;
+// nil for either means the events that need it are refused rather than run
+// unprotected.
 func NewSchedule(eventMutex EventMutex, schedulingMutex SchedulingMutex, timezone *time.Location) *Schedule {
 	return &Schedule{
 		eventMutex:      eventMutex,
@@ -78,8 +77,8 @@ func NewSchedule(eventMutex EventMutex, schedulingMutex SchedulingMutex, timezon
 
 // UseCache points both mutexes at another lock issuer.
 //
-// It answers Schedule::useCache, which names a cache store; the issuer is passed
-// here, and a mutex that is not CacheAware is left alone exactly as in the PHP.
+// The issuer is passed here, and a mutex that is not CacheAware is left
+// alone.
 func (s *Schedule) UseCache(locks *cache.Locks) *Schedule {
 	if aware, ok := s.eventMutex.(CacheAware); ok {
 		aware.UseStore(locks)
@@ -91,8 +90,6 @@ func (s *Schedule) UseCache(locks *cache.Locks) *Schedule {
 }
 
 // UseDispatcher gives the schedule the queue Job pushes onto.
-//
-// It answers Schedule::getDispatcher, which resolves one from the container.
 func (s *Schedule) UseDispatcher(dispatcher Dispatcher) *Schedule {
 	s.dispatcher = dispatcher
 	return s
@@ -100,9 +97,8 @@ func (s *Schedule) UseDispatcher(dispatcher Dispatcher) *Schedule {
 
 // Call schedules a closure.
 //
-// It answers Schedule::call. The closure receives the Grant the event was
-// declared with, which is what RULE 17 requires of a path that can reach a
-// repository.
+// The closure receives the Grant the event was declared with, which is
+// required of any path that can reach a repository.
 func (s *Schedule) Call(callback Callback) *CallbackEvent {
 	event := NewCallbackEvent(s.eventMutex, callback, s.timezone)
 	s.events = append(s.events, event.Event)
@@ -111,19 +107,15 @@ func (s *Schedule) Call(callback Callback) *CallbackEvent {
 }
 
 // Command schedules one of the application's own console commands.
-//
-// It answers Schedule::command for the string form. The class form has no
-// equivalent: it exists to make a command out of the container and read its name
-// back off it, and here the name is what is passed.
 func (s *Schedule) Command(command string, parameters ...string) *Event {
 	return s.Exec(console.FormatCommandString(command), parameters...)
 }
 
 // Job schedules a queued job.
 //
-// It answers Schedule::job. A job that reaches the queue with no dispatcher
-// wired fails the run rather than being dropped, because a scheduled job that
-// silently never enqueues is the failure nobody notices for a month.
+// A job that reaches the queue with no dispatcher wired fails the run rather
+// than being dropped, because a scheduled job that silently never enqueues
+// is the failure nobody notices for a month.
 func (s *Schedule) Job(job any, queue, connection string) *CallbackEvent {
 	event := s.Call(func(ctx context.Context, _ auth.Grant) error {
 		if s.dispatcher == nil {
@@ -137,10 +129,9 @@ func (s *Schedule) Job(job any, queue, connection string) *CallbackEvent {
 
 // Exec schedules a command line.
 //
-// It answers Schedule::exec. An expression that does not parse is not possible
-// here -- the event starts on every minute -- but a parameter list that would
-// change the meaning of the line is escaped, which is what compileParameters is
-// for.
+// An expression that does not parse is not possible here -- the event
+// starts on every minute -- but a parameter list that would change the
+// meaning of the line is escaped, which is what compileParameters is for.
 func (s *Schedule) Exec(command string, parameters ...string) *Event {
 	if len(parameters) > 0 {
 		command += " " + s.compileParameters(parameters)
@@ -154,10 +145,9 @@ func (s *Schedule) Exec(command string, parameters ...string) *Event {
 // Attributes returns the attributes waiting to be merged into the next event,
 // creating them if there are none.
 //
-// It answers what Schedule::__call does before it forwards a frequency method:
-// PHP makes a PendingEventAttributes when a method it does not have is called,
-// and here the caller asks for it. Chaining a frequency onto the result is what
-// Group then reads.
+// Go has no fallthrough for a missing method, so the caller asks for the
+// attributes explicitly instead of one being created implicitly. Chaining a
+// frequency onto the result is what Group then reads.
 func (s *Schedule) Attributes() *PendingEventAttributes {
 	if s.attributes == nil {
 		if len(s.groupStack) > 0 {
@@ -174,10 +164,9 @@ func (s *Schedule) Attributes() *PendingEventAttributes {
 
 // Group declares several events that share the attributes named before it.
 //
-// It answers Schedule::group. Calling it without having named an attribute
-// first panics, where PHP throws RuntimeException: a group with nothing to
-// merge is a group that does nothing, and it is a mistake in the schedule
-// rather than a condition to handle.
+// Calling it without having named an attribute first panics: a group with
+// nothing to merge is a group that does nothing, and it is a mistake in the
+// schedule rather than a condition to handle.
 func (s *Schedule) Group(events func(*Schedule)) {
 	if s.attributes == nil {
 		panic("scheduling: call an attribute method such as Schedule.Attributes().Daily() before defining a schedule group")
@@ -191,8 +180,8 @@ func (s *Schedule) Group(events func(*Schedule)) {
 	s.groupStack = s.groupStack[:len(s.groupStack)-1]
 }
 
-// mergePendingAttributes is Schedule::mergePendingAttributes: the enclosing
-// group first, then whatever was named for this one event.
+// mergePendingAttributes merges the enclosing group first, then whatever was
+// named for this one event.
 func (s *Schedule) mergePendingAttributes(event *Event) {
 	if len(s.groupStack) > 0 {
 		s.groupStack[len(s.groupStack)-1].MergeAttributes(event)
@@ -203,8 +192,8 @@ func (s *Schedule) mergePendingAttributes(event *Event) {
 	}
 }
 
-// compileParameters is Schedule::compileParameters: every value that is not a
-// number and not a flag is escaped, and a key=value pair keeps its key.
+// compileParameters escapes every value that is not a number and not a
+// flag, and a key=value pair keeps its key.
 func (s *Schedule) compileParameters(parameters []string) string {
 	compiled := make([]string, 0, len(parameters))
 	for _, parameter := range parameters {
@@ -223,8 +212,8 @@ func (s *Schedule) compileParameters(parameters []string) string {
 
 // CompileArrayInput renders a repeated parameter as a command line fragment.
 //
-// It answers Schedule::compileArrayInput: a long flag repeats as --key=value,
-// a short one as -k value, and a positional list is just the values.
+// A long flag repeats as --key=value, a short one as -k value, and a
+// positional list is just the values.
 func (s *Schedule) CompileArrayInput(key string, values []string) string {
 	rendered := make([]string, 0, len(values))
 	for _, value := range values {
@@ -243,9 +232,9 @@ func (s *Schedule) CompileArrayInput(key string, values []string) string {
 
 // ServerShouldRun reports whether this replica is the one that runs the event.
 //
-// It answers Schedule::serverShouldRun, cache included: an event asked about
-// twice in one tick gets the same answer, because the second ask would otherwise
-// find the window already claimed by the first and say no.
+// An event asked about twice in one tick gets the same answer, because the
+// second ask would otherwise find the window already claimed by the first
+// and say no.
 func (s *Schedule) ServerShouldRun(ctx context.Context, event *Event, at time.Time) (bool, error) {
 	name := event.MutexName()
 	if answer, asked := s.mutexCache[name]; asked {
@@ -265,17 +254,13 @@ func (s *Schedule) ServerShouldRun(ctx context.Context, event *Event, at time.Ti
 	return answer, nil
 }
 
-// ForgetMutexCache has no Illuminate counterpart: it drops what ServerShouldRun
-// remembered. PHP never clears Schedule::$mutexCache, because there the process
-// is one schedule:run and it exits at the end of the tick.
+// ForgetMutexCache drops what ServerShouldRun remembered.
 //
 // The cache is scoped to one tick: the runner calls this between them, and
 // without it a replica that lost one window would lose every window afterwards.
 func (s *Schedule) ForgetMutexCache() { clear(s.mutexCache) }
 
 // DueEvents returns the events that should run at the given time.
-//
-// It answers Schedule::dueEvents.
 func (s *Schedule) DueEvents(at time.Time) []*Event {
 	down := s.downForMaintenance()
 
@@ -295,8 +280,6 @@ func (s *Schedule) downForMaintenance() bool {
 }
 
 // Events returns every declared event.
-//
-// It answers Schedule::events.
 func (s *Schedule) Events() []*Event { return s.events }
 
 // isNumeric reports whether every rune is a digit, which is the test

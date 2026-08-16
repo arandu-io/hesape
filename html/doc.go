@@ -1,9 +1,5 @@
-// Package html builds escaped HTML fragments as values.
-//
-// It answers to Illuminate\Html -- [HtmlBuilder] and [FormBuilder], method for
-// method, measured against laravel_illuminate/html, which is the archived
-// illuminate/html at v5.0.0, the last tag before Laravel deleted the component
-// in 5.1.
+// Package html builds escaped HTML fragments as values: [HtmlBuilder] and
+// [FormBuilder].
 //
 //	builder := html.NewHtmlBuilder(urls)
 //	form := html.NewFormBuilder(builder, urls, token)
@@ -12,18 +8,17 @@
 //	// <form accept-charset="UTF-8" action="/invoices" method="POST"><input name="_token" ...>
 //
 // Import it aliased if the file also imports the standard library's, which the
-// directory name collides with by design (ADR 0047):
+// directory name collides with by design:
 //
 //	import hhtml "github.com/arandu-io/hesape/html"
 //
 // # This is not a template layer, and here is the line
 //
-// kyse is the view layer, and RULE 9 says there is one of those. Nothing here
-// competes with it: every function returns template.HTML, a value, and none of
-// them parses a template, resolves a layout or writes a response. They exist for
-// the controls kyse has no component for, and for the string work -- escaping,
-// obfuscating, building an attribute list -- that a kyse component does inside
-// itself.
+// kyse is the view layer. Nothing here competes with it: every function
+// returns template.HTML, a value, and none of them parses a template,
+// resolves a layout or writes a response. They exist for the controls kyse
+// has no component for, and for the string work -- escaping, obfuscating,
+// building an attribute list -- that a kyse component does inside itself.
 //
 // # Use the kyse component, not the helper
 //
@@ -57,18 +52,17 @@
 //
 // # Escaping: what this package fixes, and what it does not
 //
-// PHP concatenates unescaped values into markup in five places, and none of
-// them is reproduced here. Each symbol's own comment names its own hole; the
-// list is HtmlBuilder::image (the src), HtmlBuilder::link (the href),
-// HtmlBuilder::nestedListing (the heading of a nested list),
-// FormBuilder::label (the for attribute) and FormBuilder::button (the label).
-// [HtmlBuilder.Obfuscate] has a sixth, which is also a data-corrupting bug, and
-// its comment has both.
+// Five places where a value could end up concatenated into markup unescaped
+// are closed here. Each symbol's own comment names its own hole; the list
+// is [HtmlBuilder.Image] (the src), [HtmlBuilder.Link] (the href),
+// [nestedListing] (the heading of a nested list), [FormBuilder.Label] (the
+// for attribute) and [FormBuilder.Button] (the label). [HtmlBuilder.Obfuscate]
+// has a sixth, which is also a data-corrupting bug, and its comment has both.
 //
 // Escaping closes the syntax hole: a value cannot end an attribute or open a
 // tag. It does not close the scheme hole. `Link("javascript:alert(1)", ...)`
-// produces a link that runs script when clicked, in PHP and here, because the
-// URL is well-formed and the danger is in what it means rather than in how it
+// produces a link that runs script when clicked, because the URL is
+// well-formed and the danger is in what it means rather than in how it
 // is written. 20-components/DOC-hesape-reorganization.md records that this is open
 // across the whole view layer, kyse included, and that it is a decision to take
 // knowingly rather than by omission. Until it is taken, do not pass a URL that
@@ -83,32 +77,22 @@
 // is markup that has been un-escaped, and calling that safe would invert the
 // point of the package.
 //
-// # What is not here
+// # A few signature choices, and why
 //
-// Four global helpers -- link_to, link_to_asset, link_to_route and
-// link_to_action -- are one line each and every one of them is
-// `app('html')->...`. They are the facade ADR 0002 removed; the method is on the
-// builder, and the builder is a value somebody constructed.
-// HtmlServiceProvider::register and ::provides are the container ADR 0001
-// removed.
-//
-// # Where the surface differs from PHP, in one list
-//
-//   - [Attrs] is a map, so attributes come out sorted rather than in the order
-//     they were written. Its own comment has the three PHP array shapes and how
-//     each is spelled here.
+//   - [Attrs] is a map, so attributes come out sorted rather than in the
+//     order they were written. Its own comment has the three shapes it
+//     holds and how each is spelled here.
 //   - [HtmlBuilder.Ol], [HtmlBuilder.Ul] take []ListItem and
-//     [FormBuilder.Select] takes []Option, because PHP encodes the structure in
-//     array keys and Go has no ordered map.
+//     [FormBuilder.Select] takes []Option, because Go has no ordered map.
 //   - [HtmlBuilder.LinkRoute], [HtmlBuilder.LinkAction], [FormBuilder.Open],
-//     [FormBuilder.Model] and [FormBuilder.Token] return (T, error) where PHP
-//     throws or fatals.
-//   - [FormBuilder.OpenOptions] is a struct where PHP has one array holding
-//     five reserved keys and the attributes together.
+//     [FormBuilder.Model] and [FormBuilder.Token] return (T, error) rather
+//     than panicking.
+//   - [FormBuilder.OpenOptions] is a struct: five named fields for the
+//     reserved options, and a separate field for arbitrary HTML attributes.
 //   - [Store], [Model] and [UrlGenerator] are declared here rather than
 //     imported. hesape has no UrlGenerator, and reaching a model attribute by a
 //     name held in a string is reflection, which this framework rejects.
-//   - [FormBuilder.SelectMonth] writes English month names. strftime reads the
-//     process locale; Go's time package has none, and x/text is refused by
-//     ADR 0004.
+//   - [FormBuilder.SelectMonth] writes English month names: Go's time
+//     package has no locale support, and this framework does not pull in
+//     x/text for one.
 package html

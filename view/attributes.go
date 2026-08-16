@@ -11,30 +11,27 @@ import (
 	"github.com/arandu-io/hesape/support/arr"
 )
 
-// ComponentAttributeBag is Illuminate\View\ComponentAttributeBag.
+// ComponentAttributeBag is the bag a component receives every attribute it
+// was not declared to take: the HTML that the caller wrote on the tag and the
+// component did not name. Merge is what makes a component's own class list
+// and the caller's coexist instead of one overwriting the other.
 //
-// It is the bag a component receives every attribute it was not declared to
-// take: the HTML that the caller wrote on the tag and the component did not
-// name. Merge is what makes a component's own class list and the caller's
-// coexist instead of one overwriting the other.
-//
-// One divergence, and it is forced: a PHP array remembers insertion order and a
-// Go map does not, so the bag iterates its keys sorted. Every method that
-// returns a string -- String, ToHTML -- is therefore deterministic, which is
-// what a test can assert against. It is the same choice hesape/html made for
-// its attribute writer.
+// Keys are iterated sorted, since a Go map remembers no order of its own, so
+// every method that returns a string -- String, ToHTML -- is deterministic,
+// which is what a test can assert against. It is the same choice hesape/html
+// made for its attribute writer.
 type ComponentAttributeBag struct {
 	attributes map[string]any
 }
 
-// NewComponentAttributeBag is ComponentAttributeBag::__construct.
+// NewComponentAttributeBag returns a new bag populated with attributes.
 func NewComponentAttributeBag(attributes map[string]any) *ComponentAttributeBag {
 	bag := &ComponentAttributeBag{attributes: map[string]any{}}
 	bag.SetAttributes(attributes)
 	return bag
 }
 
-// All is ComponentAttributeBag::all.
+// All returns a copy of every attribute in the bag.
 func (b *ComponentAttributeBag) All() map[string]any {
 	out := make(map[string]any, len(b.attributes))
 	for k, v := range b.attributes {
@@ -53,10 +50,11 @@ func (b *ComponentAttributeBag) keys() []string {
 	return out
 }
 
-// First is ComponentAttributeBag::first.
+// First returns the first attribute in the bag's iteration order, or the
+// given fallback when the bag is empty.
 //
-// The default is variadic where PHP takes a nullable argument, which is the
-// mechanical form of an optional parameter in Go.
+// fallback is variadic so it can be omitted entirely, which is how an
+// optional parameter is written in Go.
 func (b *ComponentAttributeBag) First(fallback ...any) any {
 	for _, k := range b.keys() {
 		return b.attributes[k]
@@ -67,7 +65,8 @@ func (b *ComponentAttributeBag) First(fallback ...any) any {
 	return nil
 }
 
-// Get is ComponentAttributeBag::get.
+// Get returns the value stored under key, or the given fallback when key is
+// absent.
 func (b *ComponentAttributeBag) Get(key string, fallback ...any) any {
 	if v, ok := b.attributes[key]; ok {
 		return v
@@ -78,7 +77,7 @@ func (b *ComponentAttributeBag) Get(key string, fallback ...any) any {
 	return nil
 }
 
-// Has is ComponentAttributeBag::has. Every key has to be present.
+// Has reports whether the bag has every one of the given keys.
 func (b *ComponentAttributeBag) Has(keys ...string) bool {
 	for _, key := range keys {
 		if _, ok := b.attributes[key]; !ok {
@@ -88,7 +87,7 @@ func (b *ComponentAttributeBag) Has(keys ...string) bool {
 	return true
 }
 
-// HasAny is ComponentAttributeBag::hasAny. One key present is enough.
+// HasAny reports whether the bag has at least one of the given keys.
 func (b *ComponentAttributeBag) HasAny(keys ...string) bool {
 	if len(b.attributes) == 0 {
 		return false
@@ -101,10 +100,10 @@ func (b *ComponentAttributeBag) HasAny(keys ...string) bool {
 	return false
 }
 
-// Missing is ComponentAttributeBag::missing.
+// Missing reports whether key is absent from the bag.
 func (b *ComponentAttributeBag) Missing(key string) bool { return !b.Has(key) }
 
-// Only is ComponentAttributeBag::only.
+// Only returns a new bag containing just the given keys.
 func (b *ComponentAttributeBag) Only(keys ...string) *ComponentAttributeBag {
 	if keys == nil {
 		return NewComponentAttributeBag(b.All())
@@ -122,7 +121,7 @@ func (b *ComponentAttributeBag) Only(keys ...string) *ComponentAttributeBag {
 	return NewComponentAttributeBag(values)
 }
 
-// Except is ComponentAttributeBag::except.
+// Except returns a new bag with the given keys removed.
 func (b *ComponentAttributeBag) Except(keys ...string) *ComponentAttributeBag {
 	if keys == nil {
 		return NewComponentAttributeBag(b.All())
@@ -140,10 +139,10 @@ func (b *ComponentAttributeBag) Except(keys ...string) *ComponentAttributeBag {
 	return NewComponentAttributeBag(values)
 }
 
-// Filter is ComponentAttributeBag::filter.
+// Filter returns a new bag containing only the attributes for which callback
+// returns true.
 //
-// The callback takes the value and the key, in that order, the way the PHP
-// closure does.
+// callback takes the value and the key, in that order.
 func (b *ComponentAttributeBag) Filter(callback func(value any, key string) bool) *ComponentAttributeBag {
 	values := map[string]any{}
 	for k, v := range b.attributes {
@@ -154,52 +153,55 @@ func (b *ComponentAttributeBag) Filter(callback func(value any, key string) bool
 	return NewComponentAttributeBag(values)
 }
 
-// WhereStartsWith is ComponentAttributeBag::whereStartsWith.
+// WhereStartsWith returns a new bag containing only the attributes whose key
+// starts with one of needles.
 func (b *ComponentAttributeBag) WhereStartsWith(needles ...string) *ComponentAttributeBag {
 	return b.Filter(func(_ any, key string) bool { return str.StartsWith(key, needles...) })
 }
 
-// WhereDoesntStartWith is ComponentAttributeBag::whereDoesntStartWith.
+// WhereDoesntStartWith returns a new bag excluding the attributes whose key
+// starts with one of needles.
 func (b *ComponentAttributeBag) WhereDoesntStartWith(needles ...string) *ComponentAttributeBag {
 	return b.Filter(func(_ any, key string) bool { return !str.StartsWith(key, needles...) })
 }
 
-// ThatStartWith is ComponentAttributeBag::thatStartWith.
+// ThatStartWith is an alias for WhereStartsWith.
 func (b *ComponentAttributeBag) ThatStartWith(needles ...string) *ComponentAttributeBag {
 	return b.WhereStartsWith(needles...)
 }
 
-// OnlyProps is ComponentAttributeBag::onlyProps.
+// OnlyProps returns a new bag containing the given prop keys, matched in
+// both their written and kebab-case form.
 func (b *ComponentAttributeBag) OnlyProps(keys ...string) *ComponentAttributeBag {
 	return b.Only(ExtractPropNames(keys)...)
 }
 
-// ExceptProps is ComponentAttributeBag::exceptProps.
+// ExceptProps returns a new bag with the given prop keys removed, matched in
+// both their written and kebab-case form.
 func (b *ComponentAttributeBag) ExceptProps(keys ...string) *ComponentAttributeBag {
 	return b.Except(ExtractPropNames(keys)...)
 }
 
-// Class is ComponentAttributeBag::class.
-//
-// The name carries the Go suffix that a reserved word forces: class is not
-// reserved in Go, but the method has to answer the PHP name, and it does.
+// Class merges classList into the bag's "class" attribute, after converting
+// it to a CSS class string.
 func (b *ComponentAttributeBag) Class(classList any) *ComponentAttributeBag {
 	return b.Merge(map[string]any{"class": arr.ToCssClasses(classList)})
 }
 
-// Style is ComponentAttributeBag::style.
+// Style merges styleList into the bag's "style" attribute, after converting
+// it to a CSS style string.
 func (b *ComponentAttributeBag) Style(styleList any) *ComponentAttributeBag {
 	return b.Merge(map[string]any{"style": arr.ToCssStyles(styleList)})
 }
 
-// Merge is ComponentAttributeBag::merge.
+// Merge combines attributeDefaults into the bag.
 //
-// The component's defaults lose to what the caller wrote, except for class and
-// style and for anything the component marked with Prepends: those two are
-// appended rather than replaced, which is why a button can carry its own
+// The component's defaults lose to what the caller wrote, except for class
+// and style and for anything the component marked with Prepends: those two
+// are appended rather than replaced, which is why a button can carry its own
 // padding and still take a colour from the call site.
 //
-// escape is variadic where PHP has a defaulted parameter; it defaults to true.
+// escape is variadic so it can be omitted entirely; it defaults to true.
 func (b *ComponentAttributeBag) Merge(attributeDefaults map[string]any, escape ...bool) *ComponentAttributeBag {
 	shouldEscape := true
 	if len(escape) > 0 {
@@ -256,8 +258,8 @@ func (b *ComponentAttributeBag) Merge(attributeDefaults map[string]any, escape .
 	return NewComponentAttributeBag(merged)
 }
 
-// joinUnique is the array_unique(array_filter([...])) of the PHP merge: empty
-// pieces drop out and a piece repeated twice is written once.
+// joinUnique joins values with a space, dropping empty pieces and any repeat
+// of a piece already seen.
 func joinUnique(values ...string) string {
 	seen := map[string]bool{}
 	kept := make([]string, 0, len(values))
@@ -271,11 +273,10 @@ func joinUnique(values ...string) string {
 	return strings.Join(kept, " ")
 }
 
-// shouldEscapeAttributeValue is ComponentAttributeBag::shouldEscapeAttributeValue.
-//
-// PHP escapes anything that is not an object, not null and not a boolean. The
-// Go reading of "not an object" is "a scalar": a string or a number. Anything
-// with a String method is the Stringable object PHP leaves alone.
+// shouldEscapeAttributeValue reports whether value should be HTML-escaped:
+// escape false disables it outright, and otherwise only scalar values --
+// strings and numbers -- are escaped. Anything with a String method is left
+// alone.
 func shouldEscapeAttributeValue(escape bool, value any) bool {
 	if !escape {
 		return false
@@ -289,8 +290,8 @@ func shouldEscapeAttributeValue(escape bool, value any) bool {
 	}
 }
 
-// resolveAppendableAttributeDefault is
-// ComponentAttributeBag::resolveAppendableAttributeDefault.
+// resolveAppendableAttributeDefault returns the underlying value of an
+// appendable default, escaping it first when required.
 func resolveAppendableAttributeDefault(value AppendableAttributeValue, escape bool) any {
 	if shouldEscapeAttributeValue(escape, value.Value) {
 		return html.EscapeString(attributeToString(value.Value))
@@ -298,27 +299,28 @@ func resolveAppendableAttributeDefault(value AppendableAttributeValue, escape bo
 	return value.Value
 }
 
-// Prepends is ComponentAttributeBag::prepends.
+// Prepends marks value as a default to be appended to, rather than replaced
+// by, what the caller wrote.
 func (b *ComponentAttributeBag) Prepends(value any) AppendableAttributeValue {
 	return NewAppendableAttributeValue(value)
 }
 
-// IsEmpty is ComponentAttributeBag::isEmpty.
+// IsEmpty reports whether the bag renders to an empty string.
 func (b *ComponentAttributeBag) IsEmpty() bool {
 	return strings.TrimSpace(b.String()) == ""
 }
 
-// IsNotEmpty is ComponentAttributeBag::isNotEmpty.
+// IsNotEmpty reports the opposite of IsEmpty.
 func (b *ComponentAttributeBag) IsNotEmpty() bool { return !b.IsEmpty() }
 
-// GetAttributes is ComponentAttributeBag::getAttributes.
+// GetAttributes is an alias for All.
 func (b *ComponentAttributeBag) GetAttributes() map[string]any { return b.All() }
 
-// SetAttributes is ComponentAttributeBag::setAttributes.
+// SetAttributes replaces the bag's contents with attributes.
 //
-// A bag handed in under the "attributes" key is the parent's bag: it is merged
-// away rather than stored, so a component that forwards its attributes to a
-// child does not nest one bag inside another.
+// A bag handed in under the "attributes" key is the parent's bag: it is
+// merged away rather than stored, so a component that forwards its
+// attributes to a child does not nest one bag inside another.
 func (b *ComponentAttributeBag) SetAttributes(attributes map[string]any) {
 	copied := make(map[string]any, len(attributes))
 	for k, v := range attributes {
@@ -333,10 +335,8 @@ func (b *ComponentAttributeBag) SetAttributes(attributes map[string]any) {
 	b.attributes = copied
 }
 
-// ExtractPropNames is ComponentAttributeBag::extractPropNames.
-//
-// Each name is kept as written and again in kebab case, because a prop declared
-// as userName is written on the tag as user-name.
+// ExtractPropNames returns each key both as written and again in kebab case,
+// because a prop declared as userName is written on the tag as user-name.
 func ExtractPropNames(keys []string) []string {
 	props := make([]string, 0, len(keys)*2)
 	for _, key := range keys {
@@ -345,19 +345,20 @@ func ExtractPropNames(keys []string) []string {
 	return props
 }
 
-// ToHTML is ComponentAttributeBag::toHtml.
+// ToHTML is an alias for String.
 func (b *ComponentAttributeBag) ToHTML() string { return b.String() }
 
-// OffsetExists is ComponentAttributeBag::offsetExists.
+// OffsetExists reports whether offset is present in the bag with a non-nil
+// value.
 func (b *ComponentAttributeBag) OffsetExists(offset string) bool {
 	v, ok := b.attributes[offset]
 	return ok && v != nil
 }
 
-// OffsetGet is ComponentAttributeBag::offsetGet.
+// OffsetGet is an alias for Get, without a fallback.
 func (b *ComponentAttributeBag) OffsetGet(offset string) any { return b.Get(offset) }
 
-// OffsetSet is ComponentAttributeBag::offsetSet.
+// OffsetSet stores value under offset, initializing the bag if necessary.
 func (b *ComponentAttributeBag) OffsetSet(offset string, value any) {
 	if b.attributes == nil {
 		b.attributes = map[string]any{}
@@ -365,13 +366,11 @@ func (b *ComponentAttributeBag) OffsetSet(offset string, value any) {
 	b.attributes[offset] = value
 }
 
-// OffsetUnset is ComponentAttributeBag::offsetUnset.
+// OffsetUnset removes offset from the bag.
 func (b *ComponentAttributeBag) OffsetUnset(offset string) { delete(b.attributes, offset) }
 
-// GetIterator is ComponentAttributeBag::getIterator.
-//
-// PHP returns an ArrayIterator; Go returns a range-over-func sequence, which is
-// what a for range takes.
+// GetIterator returns the bag's attributes as a range-over-func sequence, in
+// the bag's sorted key order.
 func (b *ComponentAttributeBag) GetIterator() iter.Seq2[string, any] {
 	return func(yield func(string, any) bool) {
 		for _, k := range b.keys() {
@@ -382,13 +381,14 @@ func (b *ComponentAttributeBag) GetIterator() iter.Seq2[string, any] {
 	}
 }
 
-// JSONSerialize is ComponentAttributeBag::jsonSerialize.
+// JSONSerialize returns a copy of every attribute in the bag, for JSON
+// encoding.
 func (b *ComponentAttributeBag) JSONSerialize() map[string]any { return b.All() }
 
-// ToArray is ComponentAttributeBag::toArray.
+// ToArray is an alias for All.
 func (b *ComponentAttributeBag) ToArray() map[string]any { return b.All() }
 
-// String is ComponentAttributeBag::__toString.
+// String renders every attribute as name="value", space-separated.
 //
 // false and nil drop the attribute entirely; true writes the bare name, which
 // is what checked and disabled need -- except for x-data and the wire: family,
@@ -418,7 +418,7 @@ func (b *ComponentAttributeBag) String() string {
 	return strings.TrimSpace(out.String())
 }
 
-// attributeToString is the string cast PHP applies to an attribute value.
+// attributeToString converts an attribute value to the string it renders as.
 func attributeToString(value any) string {
 	switch v := value.(type) {
 	case nil:
@@ -439,19 +439,18 @@ func attributeToString(value any) string {
 	}
 }
 
-// AppendableAttributeValue is Illuminate\View\AppendableAttributeValue.
-//
-// It marks a default that is appended to what the caller wrote rather than
-// replaced by it. Merge is the only thing that reads the marker.
+// AppendableAttributeValue marks a default that is appended to what the
+// caller wrote rather than replaced by it. Merge is the only thing that
+// reads the marker.
 type AppendableAttributeValue struct {
 	// Value is the attribute value being prepended.
 	Value any
 }
 
-// NewAppendableAttributeValue is AppendableAttributeValue::__construct.
+// NewAppendableAttributeValue returns value wrapped as an appendable default.
 func NewAppendableAttributeValue(value any) AppendableAttributeValue {
 	return AppendableAttributeValue{Value: value}
 }
 
-// String is AppendableAttributeValue::__toString.
+// String returns the string form of the wrapped value.
 func (v AppendableAttributeValue) String() string { return attributeToString(v.Value) }

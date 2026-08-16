@@ -7,9 +7,9 @@ import (
 	"strconv"
 )
 
-// The functions here are what generated views call. They are the runtime of
-// kyse, and it is deliberately small: everything that can be decided at build
-// time was, and what is left is the handful of things that cannot.
+// The functions here are what generated views call. This runtime is
+// deliberately small: everything that can be decided at build time was, and
+// what is left is the handful of things that cannot.
 
 // Text renders a value as a string, for interpolation.
 //

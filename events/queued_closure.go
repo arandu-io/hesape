@@ -8,16 +8,14 @@ import "time"
 //		// ...
 //	}).OnQueue("billing").Delay(10*time.Second))
 //
-// Every setter returns the receiver, which is the PHP's `return $this`.
+// Every setter returns the receiver, so the calls chain.
 type QueuedClosure struct {
-	// Closure is the underlying function. It is public because the dispatcher
-	// reads it to work out which event the closure listens for, which is what
-	// the PHP does with $events->closure.
+	// Closure is the underlying function. It is exported because the dispatcher
+	// reads it to work out which event the closure listens for.
 	Closure any
 
-	// The rest are public properties in the PHP and unexported here, because Go
-	// cannot have both a field and a method of the same name and the methods
-	// are the names ADR 0044 keeps.
+	// The rest are unexported because Go cannot have both a field and a method
+	// of the same name, and the methods are the surface.
 	connection   string
 	queue        string
 	messageGroup string
@@ -27,78 +25,54 @@ type QueuedClosure struct {
 	catchCallbacks []any
 }
 
-// Queueable is QueuedClosure::__construct under the name the PHP gives it: it
-// creates a new queued closure event listener.
-//
-// It answers the queueable() function in the PHP's functions.php, which is the
-// only thing that file holds and which does nothing but construct one of these.
+// Queueable creates a queued closure event listener.
 func Queueable(closure any) *QueuedClosure {
 	return &QueuedClosure{Closure: closure}
 }
 
-// OnConnection is QueuedClosure::onConnection: it sets the desired connection
-// for the job.
-//
-// The PHP passes the argument through enum_value(), because a connection may be
-// named by a backed enum there. Go has no enum, so a name is a string.
+// OnConnection sets the desired connection for the job.
 func (q *QueuedClosure) OnConnection(connection string) *QueuedClosure {
 	q.connection = connection
 	return q
 }
 
-// OnQueue is QueuedClosure::onQueue: it sets the desired queue for the job.
+// OnQueue sets the desired queue for the job.
 func (q *QueuedClosure) OnQueue(queue string) *QueuedClosure {
 	q.queue = queue
 	return q
 }
 
-// OnGroup is QueuedClosure::onGroup: it sets the desired job "group".
-//
-// Only some queues support it, which is what the PHP says as well.
+// OnGroup sets the desired job "group". Only some queues support it.
 func (q *QueuedClosure) OnGroup(group string) *QueuedClosure {
 	q.messageGroup = group
 	return q
 }
 
-// WithDeduplicator is QueuedClosure::withDeduplicator: it sets the callback that
-// generates the deduplication ID.
+// WithDeduplicator sets the callback that generates the deduplication ID.
 //
-// The PHP wraps a Closure in a SerializableClosure so it survives the trip
-// through the queue. Nothing here is serialized -- a Go job is a value the
-// worker already has the type of -- so the callback is kept as it was given.
+// The callback is kept as it was given: a job here is a value the worker
+// already has the type of, so nothing about it is serialized.
 func (q *QueuedClosure) WithDeduplicator(deduplicator func() string) *QueuedClosure {
 	q.deduplicator = deduplicator
 	return q
 }
 
-// Delay is QueuedClosure::delay: it sets the delay before the job becomes
-// available.
-//
-// The PHP takes DateTimeInterface|DateInterval|int; a Go duration is the one of
-// the three that means the same thing everywhere.
+// Delay sets how long the job waits before it becomes available.
 func (q *QueuedClosure) Delay(delay time.Duration) *QueuedClosure {
 	q.delay = delay
 	return q
 }
 
-// Catch is QueuedClosure::catch: it registers a callback invoked if the queued
-// listener job fails.
-//
-// The name is unchanged because catch is not a keyword in Go, and a method named
-// for what it does is worth more than a method renamed to avoid a keyword that
-// is not there.
+// Catch registers a callback invoked if the queued listener job fails.
 func (q *QueuedClosure) Catch(closure any) *QueuedClosure {
 	q.catchCallbacks = append(q.catchCallbacks, closure)
 	return q
 }
 
-// Resolve is QueuedClosure::resolve: it returns the listener that puts the
-// closure on the queue.
+// Resolve returns the listener that puts the closure on the queue.
 //
-// The PHP calls the global dispatch() helper here. There are no global helpers
-// in this collection (ADR 0002), so the queue comes from the dispatcher the
-// listener was registered on, and Resolve is handed it. That is the whole
-// difference.
+// The queue comes from the dispatcher the listener was registered on, which is
+// why Resolve is handed it: there is no global helper to reach one through.
 func (q *QueuedClosure) Resolve(d *Dispatcher) Listener {
 	return func(_ string, payload []any) any {
 		job := NewCallQueuedListener(InvokeQueuedClosure{}, "Handle", []any{

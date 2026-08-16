@@ -1,13 +1,4 @@
-// Package events mirrors Illuminate\Routing\Events.
-//
-// The files it answers to, in the clone at
-// laravel_illuminate/routing/Events:
-//
-//	PreparingResponse.php
-//	ResponsePrepared.php
-//	RouteMatched.php
-//	Routing.php
-//
-// Nothing is implemented here yet. 20-components/DOC-hesape-reorganization.md says what
-// moves in, from where, and in which phase.
+// Package events holds the event types the router emits around dispatching a
+// request: Routing before it begins, RouteMatched when a route answers,
+// PreparingResponse before the response is sent, and ResponsePrepared after.
 package events

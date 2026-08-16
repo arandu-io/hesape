@@ -18,21 +18,20 @@ import (
 //	DATABASE_URL=mysql://arandu:arandu@127.0.0.1:3306/arandu
 //	DATABASE_URL=sqlite://database/database.sqlite
 //
-// It used to come from seven -- DB_CONNECTION, DB_HOST, DB_PORT, DB_USERNAME,
-// DB_PASSWORD, DB_DATABASE -- with DATABASE_URL winning over all of them when
-// set. That is two ways to say where the database is, which RULE 9 refuses, and
-// the failure it produces is the worst kind: half the parts overridden and half
-// not, an application pointing at a host from one variable and a database from
-// another, with every value individually correct.
+// There is no second set of variables -- no DB_HOST, no DB_PORT, no
+// DB_DATABASE -- because two ways to say where the database is produces the
+// worst kind of failure: half the parts overridden and half not, an application
+// pointing at a host from one variable and a database from another, with every
+// value individually correct.
 //
 // One string also travels. Every managed platform hands out exactly this, a
 // compose file passes it as one line, and a person moving between them copies
 // one thing instead of six.
 //
-// It lives here rather than in hesape/config because in Illuminate this is
-// Database\Connectors, not Config: the reader of DATABASE_URL and the opener of
-// the connection are one decision, and splitting them put an import from the
-// configuration package into the SQL package, pointing the wrong way.
+// It lives here rather than in hesape/config because the reader of DATABASE_URL
+// and the opener of the connection are one decision, and splitting them puts an
+// import from the configuration package into the SQL package, pointing the wrong
+// way.
 //
 // The fields below are what the URL parsed into. They are read, never written:
 // what wrote them is ParseURL, in one place, with one set of rules.

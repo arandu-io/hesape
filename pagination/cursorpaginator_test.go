@@ -301,8 +301,8 @@ func TestCursorPaginatorCarriesTheQueryStringOntoItsURLs(t *testing.T) {
 	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey,
 		pagination.Options{Path: "/posts"})
 
-	// appends() drops the cursor parameter, because the paginator writes that
-	// one itself -- the `if ($key !== $this->cursorName)` in addQuery().
+	// Appends drops the cursor parameter, because the paginator writes that
+	// one itself.
 	p.Appends(map[string]string{"sort": "newest", "cursor": "hijacked"}).
 		Appends("tag", "go").
 		Fragment("results")
@@ -396,8 +396,8 @@ func TestCursorPaginatorToArrayCarriesBothCursors(t *testing.T) {
 		pagination.Options{Path: "/posts"})
 
 	got := first.ToArray()
-	// The keys are Illuminate's, and prev_cursor is null on the first page --
-	// PHP's `$this->previousCursor()?->encode()`.
+	// prev_cursor is null on the first page, because there is no previous
+	// cursor to encode.
 	if got["prev_cursor"] != nil {
 		t.Fatalf("prev_cursor = %v on the first page", got["prev_cursor"])
 	}

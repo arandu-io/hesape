@@ -1,50 +1,48 @@
 package engines
 
-// Engine mirrors Illuminate\View\Engines\Engine.
+// Engine turns a view path and data into rendered content.
 //
-// An Engine turns a view path and data into rendered content. In Arandu, views
-// are compiled into Go functions by kyse at build time, so the engine
-// delegates to the compiled function registry — there is no runtime
-// compilation. The Engine interface exists to match the Illuminate surface.
+// Views are compiled into Go functions at build time, so the engine
+// delegates to the compiled function registry -- there is no runtime
+// compilation.
 type Engine interface {
 	Get(path string, data map[string]any) (string, error)
 }
 
-// Base is the abstract Illuminate\View\Engines\Engine.
-//
-// PHP's abstract class holds one field and one method: the view drawn last,
-// which the exception message names. An engine embeds this to answer for it.
+// Base holds one field: the view drawn last, which an error message can
+// name. An engine embeds this to answer for it.
 type Base struct {
 	lastRendered string
 }
 
-// GetLastRendered is Engine::getLastRendered.
+// GetLastRendered returns the path of the view drawn last.
 func (e *Base) GetLastRendered() string { return e.lastRendered }
 
 // setLastRendered records the path being drawn.
 func (e *Base) setLastRendered(path string) { e.lastRendered = path }
 
-// CompilerInterface is Illuminate\View\Compilers\CompilerInterface.
+// CompilerInterface is the contract an engine needs from a compiler.
 //
-// The contract is declared where it is consumed rather than beside the
-// implementation, which is what keeps view -> engines -> compilers -> view from
-// closing into a cycle.
+// It is declared where it is consumed rather than beside the implementation,
+// which is what keeps view -> engines -> compilers -> view from closing into
+// a cycle.
 type CompilerInterface interface {
-	// GetCompiledPath is Compiler::getCompiledPath.
+	// GetCompiledPath returns the path the compiled output for path is
+	// written to.
 	GetCompiledPath(path string) string
 
-	// IsExpired is Compiler::isExpired.
+	// IsExpired reports whether the compiled output for path is stale.
 	IsExpired(path string) (bool, error)
 
-	// Compile is CompilerInterface::compile.
+	// Compile compiles path, writing fresh output for it.
 	Compile(path string) error
 }
 
-// Resolver mirrors Illuminate\View\Engines\EngineResolver.
+// Resolver maps engine names to constructors, building and caching each
+// engine on first use.
 //
-// It maps engine names to constructors. In Arandu, the only engine is the
-// compiled kyse engine; this type preserves the Illuminate API surface for
-// compatibility and future extension.
+// The only engine registered today is the compiled-view engine; this type
+// exists for future extension.
 type Resolver struct {
 	resolvers map[string]func() Engine
 	resolved  map[string]Engine
@@ -89,12 +87,12 @@ func (e *engineNotFoundError) Error() string {
 	return "view: engine " + e.name + " is not registered"
 }
 
-// Compiler is Illuminate\View\Engines\CompilerEngine.
+// Compiler wraps a compiled view with the bookkeeping an engine needs:
+// whether a path was already found current in this process, and which path
+// is being drawn when something fails.
 //
-// In Arandu there is no runtime compilation on the hot path: the kyse compiler
-// runs at build time and produces Go functions. What survives from PHP is the
-// bookkeeping around it -- whether a path was already found current in this
-// process, and which path is being drawn when something fails.
+// There is no runtime compilation on the hot path: compilation runs at
+// build time and produces Go functions directly.
 type Compiler struct {
 	Base
 
@@ -103,11 +101,11 @@ type Compiler struct {
 	compiledOrNotExpired map[string]bool
 }
 
-// NewCompiler is CompilerEngine::__construct.
+// NewCompiler returns an engine that calls compiler around evaluate.
 //
-// evaluate stands in for PhpEngine::evaluatePath, which has no counterpart: it
-// exists because PHP includes the compiled file at request time, and a compiled
-// view here is a Go function that was linked into the binary.
+// evaluate is how the engine actually runs a compiled view: a compiled view
+// here is a Go function already linked into the binary, not a file to read
+// and include at request time.
 func NewCompiler(compiler CompilerInterface, evaluate func(path string, data map[string]any) (string, error)) *Compiler {
 	return &Compiler{
 		compiler:             compiler,
@@ -116,7 +114,7 @@ func NewCompiler(compiler CompilerInterface, evaluate func(path string, data map
 	}
 }
 
-// Get is CompilerEngine::get.
+// Get compiles path if its output is stale, then evaluates it.
 func (c *Compiler) Get(path string, data map[string]any) (string, error) {
 	c.setLastRendered(path)
 
@@ -153,17 +151,16 @@ func (c *Compiler) Get(path string, data map[string]any) (string, error) {
 	return result, nil
 }
 
-// GetCompiler is CompilerEngine::getCompiler.
+// GetCompiler returns the compiler this engine drives.
 func (c *Compiler) GetCompiler() CompilerInterface { return c.compiler }
 
-// ForgetCompiledOrNotExpired is CompilerEngine::forgetCompiledOrNotExpired.
+// ForgetCompiledOrNotExpired clears the cache of paths known to be compiled
+// and not expired.
 func (c *Compiler) ForgetCompiledOrNotExpired() {
 	c.compiledOrNotExpired = map[string]bool{}
 }
 
-// File is Illuminate\View\Engines\FileEngine.
-//
-// It reads a raw file from disk. In Arandu that is `aru view:build` reading a
+// File reads a raw file from disk. That is the view build reading a
 // .kyse.go source before compiling it, never a request.
 type File struct {
 	Base
@@ -171,12 +168,12 @@ type File struct {
 	read func(path string) (string, error)
 }
 
-// NewFile is FileEngine::__construct.
+// NewFile returns an engine that reads a file with read.
 func NewFile(read func(path string) (string, error)) *File {
 	return &File{read: read}
 }
 
-// Get is FileEngine::get.
+// Get reads path from disk, ignoring data.
 func (e *File) Get(path string, _ map[string]any) (string, error) {
 	e.setLastRendered(path)
 	return e.read(path)

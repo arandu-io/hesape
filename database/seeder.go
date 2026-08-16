@@ -8,11 +8,10 @@ import (
 
 // Seeder is one unit of seeding.
 //
-// The shape is Illuminate's -- a DatabaseSeeder that calls the others, and
-// `aru db:seed <Name>` to run one -- with the difference that a seeder here is a
-// type satisfying an interface rather than a class discovered by reflection. A
-// seeder that does not compile is caught at build time, not when somebody runs
-// it against production.
+// The shape is a DatabaseSeeder that calls the others, and `aru db:seed <Name>`
+// to run one. A seeder is a type satisfying an interface rather than something
+// discovered, so one that does not compile is caught at build time and not when
+// somebody runs it against production.
 //
 // D is whatever the project decided a seeder is allowed to touch. It stays in
 // the project (arandu/database/seeders) rather than being declared here, because
@@ -34,10 +33,9 @@ type Seeder[D any] interface {
 //	aru db:seed PostSeeder                         one of them
 //	aru db:seed UserSeeder -e a@b.com -p secret    one of them, with arguments
 //
-// The name is positional. Laravel spells it `--class=`, and this used to as
-// well; a name that is sometimes a flag and sometimes a word is two spellings of
-// one thing (RULE 9), so the flag form is refused with the word to use instead
-// rather than accepted quietly.
+// The name is positional. A name that is sometimes a flag and sometimes a word
+// is two spellings of one thing, so the `--class=` form is refused with the word
+// to use instead rather than accepted quietly.
 //
 // Everything after the name reaches deps, unparsed, which is why deps is a
 // function rather than a value: the project's Deps carries an Args field and

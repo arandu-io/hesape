@@ -12,21 +12,21 @@ import (
 
 // Route is one registered route.
 //
-// It is metadata and the handler the mux dispatches to: what `aru routes`
-// prints, what the error page shows for the pattern that matched, what a URL
-// is generated from, and the http.Handler that answers. The handler is stored
-// here rather than handed to the mux wrapped and frozen at registration, so a
-// where constraint, a middleware added after registration and a route model
-// binding can all take effect on a route that is already registered -- which is
-// the shape every fluent call returns.
+// It is metadata and the handler the mux dispatches to: what route
+// introspection prints, what the error page shows for the pattern that
+// matched, what a URL is generated from, and the http.Handler that answers.
+// The handler is stored here rather than handed to the mux wrapped and frozen
+// at registration, so a where constraint, a middleware added after
+// registration and a route model binding can all take effect on a route that
+// is already registered -- which is the shape every fluent call returns.
 type Route struct {
 	// Method is the HTTP method the route answers, or ANY for a route
 	// registered without one.
 	Method string
 	// Pattern is the full path, prefixes of every enclosing group included.
 	Pattern string
-	// Module is the module that registered the route, so `aru routes` can
-	// group them. It is empty for a route registered outside a module.
+	// Module is the module that registered the route, for grouping in route
+	// introspection. It is empty for a route registered outside a module.
 	Module string
 
 	name       string
@@ -87,8 +87,8 @@ type Route struct {
 	// as the last resort.
 	fallback bool
 	// lockSeconds and waitSeconds are what Block set: how long the route holds
-	// the session lock, and how long it waits to take it. nil is Laravel's
-	// null -- no lock at all.
+	// the session lock, and how long it waits to take it. nil means no lock at
+	// all.
 	lockSeconds *int
 	waitSeconds *int
 }
@@ -118,10 +118,10 @@ func (r *Route) RouteName() string {
 // line.
 //
 // The name of every enclosing group is prepended, joined with a dot:
-// Group{Name: "admin"} around .Name("users") gives "admin.users". Laravel
-// concatenates the two literally and the dot is the caller's to remember; it is
-// joined here instead, because a forgotten dot produces "adminusers", which is
-// a name that works everywhere until somebody reads it.
+// Group{Name: "admin"} around .Name("users") gives "admin.users". The dot is
+// joined here rather than left for the caller to remember, because a
+// forgotten dot produces "adminusers", which is a name that works everywhere
+// until somebody reads it.
 func (r *Route) Name(name string) *Route {
 	if r == nil {
 		return nil
@@ -163,11 +163,6 @@ func NewRoutes() *Routes { return &Routes{byName: map[string]*Route{}} }
 // It returns an error rather than panicking, because a URL is often built from
 // data -- and a panic in a template renderer takes the whole page down to
 // report something a broken link would have said better.
-//
-// It was called URL. The method is on a table of routes, in a package called
-// routing, and it answers the question "where is the route called this": Route
-// is the word for that, and it is the word the vocabulary already uses --
-// route("invoices.show", 42) is what a Laravel view writes.
 func (t *Routes) Route(name string, params ...string) (string, error) {
 	t.mu.RLock()
 	route, known := t.byName[name]
@@ -220,7 +215,7 @@ func (t *Routes) Must(name string, params ...string) string {
 	return out
 }
 
-// All returns the routes in registration order, for `aru routes`.
+// All returns the routes in registration order, for route introspection.
 func (t *Routes) All() []*Route {
 	t.mu.RLock()
 	defer t.mu.RUnlock()

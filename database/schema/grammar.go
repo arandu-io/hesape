@@ -1,186 +1,207 @@
 package schema
 
-// Grammar answers Illuminate\Database\Schema\Grammars\Grammar together with the
-// base it extends, Illuminate\Database\Grammar.
+// Grammar is what a Blueprint needs of the thing that spells its DDL.
 //
-// In PHP the schema grammar is an abstract class the driver grammars extend,
-// and the blueprint holds one. Here it is an interface, declared in the package
-// that consumes it, because the concrete grammars live in schema/grammars and a
-// class in Go would close an import cycle: grammars imports schema for
-// *Blueprint, so schema cannot import grammars for the type. It is the same
-// arrangement query makes for its own grammar.
+// It is an interface, declared in the package that consumes it, because the
+// concrete grammars live in schema/grammars and naming them here would close an
+// import cycle: grammars imports schema for *Blueprint, so schema cannot import
+// grammars for the type. It is the same arrangement query makes for its own
+// grammar.
 //
-// Every command compiler has one signature, ([]string, error), where the PHP
-// returns string|array|null and throws. A nil slice is the PHP null -- the
-// command produced no statement, which is how SQLite says "handled on table
-// creation". An error is what the PHP throws, and a grammar that does not
-// support a command returns one rather than being absent, because a missing
-// method that silently skips the command is how a migration ends up half
-// applied with nothing said.
+// Every command compiler has one signature, ([]string, error). A nil slice means
+// the command produced no statement, which is how SQLite says "handled on table
+// creation". A grammar that does not support a command returns an error rather
+// than being absent, because a missing method that silently skips the command is
+// how a migration ends up half applied with nothing said.
 type Grammar interface {
-	// CompileCreateDatabase answers Grammar::compileCreateDatabase.
+	// CompileCreateDatabase compiles the statement that creates a database
+	// named name.
 	CompileCreateDatabase(name string) (string, error)
 
-	// CompileDropDatabaseIfExists answers Grammar::compileDropDatabaseIfExists.
+	// CompileDropDatabaseIfExists compiles the statement that drops the
+	// database named name, if it exists.
 	CompileDropDatabaseIfExists(name string) (string, error)
 
-	// CompileSchemas answers Grammar::compileSchemas.
+	// CompileSchemas compiles the query that lists the connection's
+	// schemas.
 	CompileSchemas() (string, error)
 
-	// CompileTableExists answers Grammar::compileTableExists. An empty result is
-	// the PHP null: the driver has no cheap existence query and Builder falls
-	// back to listing the tables.
+	// CompileTableExists compiles a query that reports whether table
+	// exists, scoped to schema. An empty result means the driver has no
+	// cheap existence query, and Builder falls back to listing the tables.
 	CompileTableExists(schema, table string) string
 
-	// CompileTables answers Grammar::compileTables. The optional withSize is
-	// the second parameter SQLiteGrammar widens the base method with: table
-	// sizes cost a join against dbstat there, so they are asked for rather than
-	// always computed. The other two drivers report the size either way and
-	// ignore it.
+	// CompileTables compiles the query that lists tables in the given
+	// schemas. The optional withSize opts into reporting each table's
+	// size: on SQLite, sizes cost a join against dbstat, so they are
+	// computed only when asked for. The other drivers report the size
+	// either way and ignore this argument.
 	CompileTables(schemas []string, withSize ...bool) (string, error)
 
-	// CompileViews answers Grammar::compileViews.
+	// CompileViews compiles the query that lists views in the given
+	// schemas.
 	CompileViews(schemas []string) (string, error)
 
-	// CompileTypes answers Grammar::compileTypes.
+	// CompileTypes compiles the query that lists user-defined types in the
+	// given schemas.
 	CompileTypes(schemas []string) (string, error)
 
-	// CompileColumns answers Grammar::compileColumns.
+	// CompileColumns compiles the query that lists table's columns, scoped
+	// to schema.
 	CompileColumns(schema, table string) (string, error)
 
-	// CompileIndexes answers Grammar::compileIndexes.
+	// CompileIndexes compiles the query that lists table's indexes, scoped
+	// to schema.
 	CompileIndexes(schema, table string) (string, error)
 
-	// CompileForeignKeys answers Grammar::compileForeignKeys.
+	// CompileForeignKeys compiles the query that lists table's foreign
+	// keys, scoped to schema.
 	CompileForeignKeys(schema, table string) (string, error)
 
-	// CompileCreate answers Grammar::compileCreate.
+	// CompileCreate compiles the statements that create the blueprint's
+	// table.
 	CompileCreate(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileAdd answers Grammar::compileAdd.
+	// CompileAdd compiles the statements that add the blueprint's new
+	// columns to an existing table.
 	CompileAdd(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileChange answers Grammar::compileChange.
+	// CompileChange compiles the statements that alter the blueprint's
+	// changed columns.
 	CompileChange(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileAlter answers SQLiteGrammar::compileAlter, the table rebuild the
-	// other two drivers never need. It is on the interface rather than on the
-	// SQLite grammar alone because the blueprint dispatches by command name and
-	// has no way to ask a Go interface whether a method exists.
+	// CompileAlter compiles the table rebuild the SQLite grammar needs
+	// when the other drivers can alter the table directly. It is on the
+	// interface rather than restricted to the SQLite implementation
+	// because the blueprint dispatches by command name and has no way to
+	// ask a Go interface whether a method exists.
 	CompileAlter(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileRenameColumn answers Grammar::compileRenameColumn.
+	// CompileRenameColumn compiles the statements that rename one of the
+	// blueprint's columns.
 	CompileRenameColumn(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompilePrimary answers Grammar::compilePrimary.
+	// CompilePrimary compiles the statements that add a primary key.
 	CompilePrimary(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileUnique answers Grammar::compileUnique.
+	// CompileUnique compiles the statements that add a unique index.
 	CompileUnique(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileIndex answers Grammar::compileIndex.
+	// CompileIndex compiles the statements that add an index.
 	CompileIndex(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileFullText answers Grammar::compileFulltext.
+	// CompileFullText compiles the statements that add a full-text index.
 	CompileFullText(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileSpatialIndex answers Grammar::compileSpatialIndex.
+	// CompileSpatialIndex compiles the statements that add a spatial
+	// index.
 	CompileSpatialIndex(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileVectorIndex answers Grammar::compileVectorIndex.
+	// CompileVectorIndex compiles the statements that add a vector index.
 	CompileVectorIndex(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileForeign answers Grammar::compileForeign.
+	// CompileForeign compiles the statements that add a foreign key
+	// constraint.
 	CompileForeign(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileDrop answers Grammar::compileDrop.
+	// CompileDrop compiles the statements that drop the table.
 	CompileDrop(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileDropIfExists answers Grammar::compileDropIfExists.
+	// CompileDropIfExists compiles the statements that drop the table if
+	// it exists.
 	CompileDropIfExists(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileDropColumn answers Grammar::compileDropColumn.
+	// CompileDropColumn compiles the statements that drop the blueprint's
+	// columns.
 	CompileDropColumn(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileDropPrimary answers Grammar::compileDropPrimary.
+	// CompileDropPrimary compiles the statements that drop the primary
+	// key.
 	CompileDropPrimary(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileDropUnique answers Grammar::compileDropUnique.
+	// CompileDropUnique compiles the statements that drop a unique index.
 	CompileDropUnique(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileDropIndex answers Grammar::compileDropIndex.
+	// CompileDropIndex compiles the statements that drop an index.
 	CompileDropIndex(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileDropFullText answers Grammar::compileDropFullText.
+	// CompileDropFullText compiles the statements that drop a full-text
+	// index.
 	CompileDropFullText(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileDropSpatialIndex answers Grammar::compileDropSpatialIndex.
+	// CompileDropSpatialIndex compiles the statements that drop a spatial
+	// index.
 	CompileDropSpatialIndex(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileDropForeign answers Grammar::compileDropForeign.
+	// CompileDropForeign compiles the statements that drop a foreign key
+	// constraint.
 	CompileDropForeign(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileRename answers Grammar::compileRename.
+	// CompileRename compiles the statements that rename the table.
 	CompileRename(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileRenameIndex answers Grammar::compileRenameIndex.
+	// CompileRenameIndex compiles the statements that rename an index.
 	CompileRenameIndex(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileTableComment answers Grammar::compileTableComment.
+	// CompileTableComment compiles the statements that set the table's
+	// comment.
 	CompileTableComment(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileComment answers PostgresGrammar::compileComment, the fluent command
-	// that puts a column comment in a statement of its own.
+	// CompileComment compiles the fluent command that puts a column
+	// comment in a statement of its own.
 	CompileComment(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileAutoIncrementStartingValues answers
-	// Grammar::compileAutoIncrementStartingValues.
+	// CompileAutoIncrementStartingValues compiles the statements that set
+	// a column's auto-increment starting value.
 	CompileAutoIncrementStartingValues(blueprint *Blueprint, command *Command) ([]string, error)
 
-	// CompileDropAllTables answers Grammar::compileDropAllTables.
+	// CompileDropAllTables compiles the statement that drops every table
+	// named in tables.
 	CompileDropAllTables(tables []string) (string, error)
 
-	// CompileDropAllViews answers Grammar::compileDropAllViews.
+	// CompileDropAllViews compiles the statement that drops every view
+	// named in views.
 	CompileDropAllViews(views []string) (string, error)
 
-	// CompileDropAllTypes answers Grammar::compileDropAllTypes.
+	// CompileDropAllTypes compiles the statement that drops every type
+	// named in types.
 	CompileDropAllTypes(types []string) (string, error)
 
-	// CompileEnableForeignKeyConstraints answers
-	// Grammar::compileEnableForeignKeyConstraints.
+	// CompileEnableForeignKeyConstraints compiles the statement that turns
+	// foreign key enforcement on.
 	CompileEnableForeignKeyConstraints() (string, error)
 
-	// CompileDisableForeignKeyConstraints answers
-	// Grammar::compileDisableForeignKeyConstraints.
+	// CompileDisableForeignKeyConstraints compiles the statement that
+	// turns foreign key enforcement off.
 	CompileDisableForeignKeyConstraints() (string, error)
 
-	// GetFluentCommands answers Grammar::getFluentCommands: the commands a
-	// driver runs outside the create or alter statement, one per column.
+	// GetFluentCommands returns the names of the commands a driver runs
+	// outside the create or alter statement, one per column.
 	GetFluentCommands() []string
 
-	// GetAlterCommands answers SQLiteGrammar::getAlterCommands: the commands
-	// that force a table rebuild. Every other driver answers with none.
+	// GetAlterCommands returns the names of the commands that force a
+	// table rebuild. Every other driver returns none.
 	GetAlterCommands() []string
 
-	// SupportsSchemaTransactions answers Grammar::supportsSchemaTransactions.
+	// SupportsSchemaTransactions reports whether the driver can run schema
+	// changes inside a transaction.
 	SupportsSchemaTransactions() bool
 
-	// Wrap answers Grammar::wrap.
+	// Wrap quotes value as an identifier, using this driver's quoting
+	// rules.
 	Wrap(value any) string
 
-	// WrapTable answers Grammar::wrapTable. The optional prefix replaces the
-	// connection's table prefix, which is how the SQLite rebuild names its
-	// temporary table.
+	// WrapTable quotes table as an identifier. The optional prefix
+	// replaces the connection's table prefix, which is how the SQLite
+	// rebuild names its temporary table.
 	WrapTable(table any, prefix ...string) string
 }
 
 // compileCommand hands one command to the grammar.
 //
-// PHP builds the method name from the command ('compile'.ucfirst($name)) and
-// asks method_exists, so a command no grammar declares is dropped in silence.
-// Go cannot look a method up by name, so the dispatch is written out. An
-// unknown command is an error rather than a silent skip: the PHP's silence is
-// only safe because every command name in the file is also a method there.
+// The dispatch is written out as a switch on the command name, since Go has
+// no way to call a method by that name at runtime. An unknown command
+// returns an UnknownCommandError rather than being skipped in silence.
 func compileCommand(g Grammar, blueprint *Blueprint, command *Command) ([]string, error) {
 	switch command.Name {
 	case "create":

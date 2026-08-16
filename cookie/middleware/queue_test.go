@@ -55,9 +55,8 @@ func TestAHandlerQueuesAndTheMiddlewareWritesIt(t *testing.T) {
 }
 
 func TestTheQueueIsPerRequestAndNotShared(t *testing.T) {
-	// In PHP the jar is a singleton and the queue is per request only because
-	// the process dies with the response. Here the process outlives it, so a
-	// cookie queued by one visitor must not appear in the next one's response.
+	// The process outlives a single request, so a cookie queued by one
+	// visitor must not appear in the next one's response.
 	jar := cookie.NewCookieJar()
 	queue := middleware.NewAddQueuedCookiesToResponse(jar)
 
@@ -98,10 +97,9 @@ func TestACookieQueuedOnTheSharedJarGoesOutOnEveryRequest(t *testing.T) {
 }
 
 func TestAQueuedCookieReplacesOneTheHandlerAlreadySet(t *testing.T) {
-	// Symfony's ResponseHeaderBag::setCookie keys by domain, path and name, so
-	// the queued one wins rather than joining. Two Set-Cookie lines for the
-	// same cookie leave the browser to pick, and which it picks is not
-	// something to build on.
+	// setCookie keys by domain, path and name, so the queued one wins rather
+	// than joining. Two Set-Cookie lines for the same cookie leave the
+	// browser to pick, and which it picks is not something to build on.
 	jar := cookie.NewCookieJar()
 	queue := middleware.NewAddQueuedCookiesToResponse(jar)
 

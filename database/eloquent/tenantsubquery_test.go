@@ -50,14 +50,16 @@ func (db *evalDB) seed(table string, row map[string]any) {
 	db.tables[table] = append(db.tables[table], row)
 }
 
-// register records a compiled query and answers the handle that stands for it.
+// register records a compiled query and returns the handle that stands for
+// it.
 func (db *evalDB) register(q *query.Builder) string {
 	db.registered = append(db.registered, q)
 	return fmt.Sprintf("{{q%d}}", len(db.registered)-1)
 }
 
-// resolve answers the query a handle stands for. The text may carry more than
-// the handle -- "(  {{q3}} ) as \"posts_count\"" -- so it is searched for.
+// resolve returns the query a handle stands for. The text may carry more
+// than the handle -- "(  {{q3}} ) as \"posts_count\"" -- so it is searched
+// for.
 func (db *evalDB) resolve(text string) (*query.Builder, bool) {
 	start := strings.Index(text, "{{q")
 	if start < 0 {
@@ -74,7 +76,7 @@ func (db *evalDB) resolve(text string) (*query.Builder, bool) {
 	return db.registered[index], true
 }
 
-// Select answers query.Connection.Select: the statement is a handle, and the
+// Select implements query.Connection: the statement is a handle, and the
 // query it names is evaluated against the seeded rows.
 func (db *evalDB) Select(statement string, bindings []any, useReadPDO bool) ([]query.Record, error) {
 	q, ok := db.resolve(statement)
@@ -207,8 +209,9 @@ func (db *evalDB) project(q *query.Builder, row map[string]any, scopes []scope) 
 	return record, nil
 }
 
-// aggregateSelect reads a select list that is one aggregate call and nothing
-// else: count(*), sum("total"). It answers the function and the column.
+// aggregateSelect reads a select list that is one aggregate call and
+// nothing else: count(*), sum("total"). It returns the function and the
+// column.
 func aggregateSelect(q *query.Builder) (function, column string, ok bool) {
 	if len(q.Columns) != 1 {
 		return "", "", false
@@ -227,9 +230,9 @@ func aggregateSelect(q *query.Builder) (function, column string, ok bool) {
 	return function, strings.Trim(text[open+1:len(text)-1], `"`), true
 }
 
-// scalar answers what a subquery in a select list contributes to one row: the
-// aggregate it selects, or -- when the column was written with the exists
-// operator -- whether it matched anything at all.
+// scalar returns what a subquery in a select list contributes to one row:
+// the aggregate it selects, or -- when the column was written with the
+// exists operator -- whether it matched anything at all.
 func (db *evalDB) scalar(sub *query.Builder, text string, scopes []scope) (any, error) {
 	rows, err := db.evaluate(sub, scopes)
 	if err != nil {
@@ -247,7 +250,7 @@ func (db *evalDB) scalar(sub *query.Builder, text string, scopes []scope) (any, 
 	return nil, nil
 }
 
-// matches answers whether one row satisfies a list of where clauses.
+// matches reports whether one row satisfies a list of where clauses.
 //
 // Only the clause types these tests build are understood, and anything else is
 // an error rather than a row that quietly passes: a filter this cannot read is a
@@ -343,8 +346,8 @@ func (db *evalDB) valueOperand(value any, scopes []scope) (any, error) {
 	return value, nil
 }
 
-// subqueryOperand answers the value of an operand that is a compiled subquery,
-// and says whether it was one.
+// subqueryOperand returns the value of an operand that is a compiled
+// subquery, and reports whether it was one.
 func (db *evalDB) subqueryOperand(operand any, scopes []scope) (any, bool, error) {
 	if !query.IsExpression(operand) {
 		return nil, false, nil
@@ -358,7 +361,7 @@ func (db *evalDB) subqueryOperand(operand any, scopes []scope) (any, bool, error
 	return value, true, err
 }
 
-// aggregate answers count, sum, min, max and avg over the matched rows.
+// aggregate returns count, sum, min, max and avg over the matched rows.
 func (db *evalDB) aggregate(function, column string, rows []map[string]any) (any, error) {
 	switch strings.ToLower(function) {
 	case "count":

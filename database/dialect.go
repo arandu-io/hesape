@@ -26,7 +26,7 @@ const (
 	// transactional DDL and the outbox relay are least surprising.
 	//
 	// The conformance suite runs the generated queries against a real server on
-	// all three (ADR 0018), MySQL included.
+	// all three, MySQL included.
 	DialectMySQL Dialect = "mysql"
 )
 

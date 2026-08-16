@@ -64,7 +64,7 @@ func TestCreateWritesTheSevenFiles(t *testing.T) {
 	}
 }
 
-// Plain is PHP's default, and it must not write the resource directories.
+// A plain package must not write the resource directories.
 func TestCreatePlainWritesNoResourceDirectories(t *testing.T) {
 	directory := createInto(t, t.TempDir(), true)
 
@@ -153,8 +153,8 @@ func TestGeneratedFilesCarryTheIdentity(t *testing.T) {
 	}
 }
 
-// The custom blocks of RULE 15 are what survives regeneration. A generator that
-// does not emit them gives the author nowhere to write that is safe.
+// The custom blocks are what survives regeneration. A generator that does not
+// emit them gives the author nowhere to write that is safe.
 func TestModuleCarriesTheCustomBlocks(t *testing.T) {
 	directory := createInto(t, t.TempDir(), true)
 

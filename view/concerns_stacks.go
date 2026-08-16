@@ -2,11 +2,9 @@ package view
 
 import "strings"
 
-// ManagesStacks mirrors Illuminate\View\Concerns\ManagesStacks.
-//
-// These are methods on Factory, replicating the PHP trait. Stacks let a child
-// view push content into a named pile that the layout drains at render time.
-// @push adds to the end; @prepend adds to the beginning.
+// These are methods on Factory. Stacks let a child view push content into a
+// named pile that the layout drains at render time. @push adds to the end;
+// @prepend adds to the beginning.
 
 // StartPush begins capturing output for a named stack. If content is given,
 // it extends the stack directly.
@@ -98,7 +96,7 @@ func (f *Factory) YieldPushContent(name string, fallback ...string) string {
 	return result
 }
 
-// FlushStacks is ManagesStacks::flushStacks.
+// FlushStacks resets every piece of per-render stack state.
 func (f *Factory) FlushStacks() {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -16,11 +16,10 @@ const ChainedBatchJob = "bus.chained-batch"
 
 // ChainedBatch is a batch that is one link of a chain.
 //
-// It is Illuminate's ChainedBatch, and it exists because the two shapes compose
-// in only one direction on their own: a chain of jobs is easy, and a job that
-// is a whole batch is not, because the link after it must not start until the
-// last job of the batch reports. What makes it work is the same trick in both
-// languages -- the rest of the chain is moved into the batch's Finally
+// It exists because the two shapes compose in only one direction on their own:
+// a chain of jobs is easy, and a job that is a whole batch is not, because the
+// link after it must not start until the last job of the batch reports. What
+// makes it work is that the rest of the chain is moved into the batch's Finally
 // callback, so "the batch finished" and "the next link starts" are the same
 // event.
 //
@@ -74,11 +73,9 @@ func (c *ChainedBatch) ToPendingBatch() *PendingBatch {
 // Handle dispatches the batch, with the remainder of the chain attached to the
 // end of it.
 //
-// It is Illuminate's ChainedBatch::handle: convert to a pending batch, move the
-// rest of the chain into the Finally callback, dispatch. The one difference is
-// that Illuminate's Finally is a closure that dispatches the next link and this
-// one is the next link itself, which is the same thing without the closure a Go
-// queue could not carry.
+// It converts to a pending batch, moves the rest of the chain into the Finally
+// callback and dispatches. Finally is the next link itself rather than a
+// function that dispatches it, because a queue cannot carry a closure.
 func (c *ChainedBatch) Handle(ctx context.Context, g auth.Grant, r BatchRepository, q Queue) (Batch, error) {
 	p, err := c.attachRemainderOfChainToEndOfBatch(c.ToPendingBatch())
 	if err != nil {
@@ -110,9 +107,8 @@ func (c *ChainedBatch) attachRemainderOfChainToEndOfBatch(p *PendingBatch) (*Pen
 // PrepareNestedBatches turns any batch found among a list of chain links into a
 // ChainedBatch job.
 //
-// It is Illuminate's static ChainedBatch::prepareNestedBatches, and it is what
-// lets `Bus::chain([$job, Bus::batch([...]), $job])` be written at all: the
-// batch in the middle is not a job, and this is where it becomes one.
+// It is what lets a batch stand in the middle of a chain at all: a batch is not
+// a job, and this is where it becomes one.
 func PrepareNestedBatches(links []any) ([]Step, error) {
 	out := make([]Step, 0, len(links))
 	for _, link := range links {

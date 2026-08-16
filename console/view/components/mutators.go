@@ -6,30 +6,23 @@ import (
 )
 
 // Mutator rewrites the text of a component before it is rendered.
-//
-// It answers the classes in View/Components/Mutators, which PHP invokes with
-// __invoke and passes as a class-string list. A func is the same thing with the
-// language's own spelling.
 type Mutator func(string) string
 
 // dynamicContent is the [something] a message highlights.
 var dynamicContent = regexp.MustCompile(`\[([^\]]+)\]`)
 
-// EnsureDynamicContentIsHighlighted is
-// EnsureDynamicContentIsHighlighted::__invoke: it emboldens every [bracketed] run.
+// EnsureDynamicContentIsHighlighted emboldens every [bracketed] run.
 //
-// The escape sequence is
-// written here rather than a markup tag, because there is no formatter between
-// this and the terminal.
+// The escape sequence is written here rather than a markup tag, because
+// there is no formatter between this and the terminal.
 func EnsureDynamicContentIsHighlighted(s string) string {
 	return dynamicContent.ReplaceAllString(s, ansiBold+"[$1]"+ansiReset)
 }
 
-// EnsureNoPunctuation is EnsureNoPunctuation::__invoke: it drops a trailing . ? !
-// or : .
+// EnsureNoPunctuation drops a trailing . ? ! or : .
 //
-// It is what keeps a task
-// description from reading "migrating the database. ....... DONE".
+// It is what keeps a task description from reading "migrating the database.
+// ....... DONE".
 func EnsureNoPunctuation(s string) string {
 	if endsWithPunctuation(s) {
 		return s[:len(s)-1]
@@ -37,11 +30,10 @@ func EnsureNoPunctuation(s string) string {
 	return s
 }
 
-// EnsurePunctuation is EnsurePunctuation::__invoke: it adds a full stop when
-// there is none.
+// EnsurePunctuation adds a full stop when there is none.
 //
-// A line component is a sentence, and a sentence ends. The empty string is where
-// the two part: PHP returns "." for it, this returns "".
+// A line component is a sentence, and a sentence ends. The empty string is
+// the exception: it returns empty rather than a bare full stop.
 func EnsurePunctuation(s string) string {
 	if s == "" || endsWithPunctuation(s) {
 		return s
@@ -49,12 +41,12 @@ func EnsurePunctuation(s string) string {
 	return s + "."
 }
 
-// EnsureRelativePaths is EnsureRelativePaths::__invoke, curried over the root: it
-// strips the application root from every path in the text.
+// EnsureRelativePaths strips the application root from every path in the
+// text, curried over the root.
 //
-// PHP reads the root from the
-// container; here it is given, because a component that reaches for a global to
-// shorten a path is a component no test can pin. Base is set by the Factory.
+// The root is given here rather than read from a global, because a
+// component that reaches for a global to shorten a path is a component no
+// test can pin. Base is set by the Factory.
 func EnsureRelativePaths(base string) Mutator {
 	return func(s string) string {
 		if base == "" {
@@ -78,8 +70,7 @@ func endsWithPunctuation(s string) bool {
 
 // mutate applies every mutator to the text, in order.
 //
-// It answers Component::mutate for the scalar half of its argument; the
-// iterable half is mutateAll.
+// mutateAll is the same thing over every element of a slice.
 func mutate(s string, mutators ...Mutator) string {
 	for _, m := range mutators {
 		s = m(s)

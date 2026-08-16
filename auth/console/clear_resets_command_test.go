@@ -129,7 +129,8 @@ func TestACommandWithNoFactoryFails(t *testing.T) {
 	}
 }
 
-// TestTheCommandValueCarriesIlluminatesSignature pins what the registry gets.
+// TestTheCommandValueCarriesIlluminatesSignature pins what the console registry
+// is handed.
 func TestTheCommandValueCarriesIlluminatesSignature(t *testing.T) {
 	c := authconsole.NewClearResetsCommand(&brokers{repository: &repository{}}).Command()
 

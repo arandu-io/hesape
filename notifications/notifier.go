@@ -14,10 +14,8 @@ import (
 
 // Channel delivers a notification one way.
 //
-// It is the shape of the classes in Illuminate\Notifications\Channels, which
-// share no interface there -- ChannelManager type-hints nothing and calls
-// send() on whatever the driver factory returned. Naming the two methods is
-// what turns "the driver had no send()" into a compile error.
+// Naming the two methods is what turns "this channel cannot deliver" into a
+// compile error rather than something the Notifier discovers at the send.
 //
 // Writing one is small on purpose: everything above it -- authorization, the
 // choice of channels, suppression, the events -- has already happened, so a
@@ -39,9 +37,6 @@ type Channel interface {
 
 // EventRecorder is where the Notifier reports what it did.
 //
-// It has no PHP counterpart: NotificationSender takes the whole
-// Illuminate\Contracts\Events\Dispatcher and fires three event classes on it.
-//
 // It names the one method it needs rather than taking *events.Recorder, so a
 // test can watch the three events without an outbox and a database behind it.
 type EventRecorder interface {
@@ -50,10 +45,9 @@ type EventRecorder interface {
 
 // Notifier sends a Notification to a Notifiable over the channels it was given.
 //
-// It is Illuminate's ChannelManager and NotificationSender in one type, minus
-// the manager half: there is no driver to resolve from configuration, because
-// the channels an application has are the slice passed to New. A channel that
-// is not in the slice is a channel a notification cannot name by accident.
+// There is no driver to resolve from configuration: the channels an application
+// has are the slice passed to [New], and a channel that is not in the slice is
+// a channel a notification cannot name by accident.
 type Notifier struct {
 	byName map[ChannelName]Channel
 	events EventRecorder
@@ -65,17 +59,10 @@ type Notifier struct {
 }
 
 // Option configures a Notifier at construction.
-//
-// It has no PHP counterpart: ChannelManager is assembled by the service
-// provider, which ADR 0002 removed.
 type Option func(*Notifier)
 
 // WithEvents records notification.sending, notification.sent and
 // notification.failed into r.
-//
-// It is the $events argument of NotificationSender::__construct, passed as an
-// option because a Notifier that records nothing is the useful default for a
-// command-line tool.
 //
 // Without it the Notifier records nothing, which is the right default for a
 // command-line tool and the wrong one for an application: "the customer says
@@ -84,11 +71,8 @@ func WithEvents(r EventRecorder) Option {
 	return func(n *Notifier) { n.events = r }
 }
 
-// New returns a Notifier that can reach the given channels.
-//
-// It is ChannelManager::__construct and NotificationSender::__construct at
-// once. The channels are the argument rather than driver names resolved from
-// configuration, which is what ChannelManager::createDriver did.
+// New returns a Notifier that can reach the given channels. A nil channel in
+// the slice is skipped.
 //
 // Two channels answering to the same name is a configuration mistake that would
 // otherwise show up as "half the notifications went to the wrong place": the
@@ -110,11 +94,11 @@ func New(channels []Channel, opts ...Option) *Notifier {
 	return n
 }
 
-// Channel is ChannelManager::channel.
+// Channel is the channel wired under a name.
 //
-// An empty name returns the default one, which is Illuminate's `channel(null)`
-// resolving to the default driver. A name nothing answers to is ErrNoChannel
-// rather than a nil Channel, because a nil Channel is a panic two frames later.
+// An empty name returns the default one. A name nothing answers to is
+// ErrNoChannel rather than a nil Channel, because a nil Channel is a panic two
+// frames later.
 func (n *Notifier) Channel(name ChannelName) (Channel, error) {
 	if name == "" {
 		name = n.GetDefaultDriver()
@@ -126,35 +110,31 @@ func (n *Notifier) Channel(name ChannelName) (Channel, error) {
 	return c, nil
 }
 
-// GetDefaultDriver is ChannelManager::getDefaultDriver. It is "mail", which is
-// Illuminate's default too.
+// GetDefaultDriver is the channel used when nothing names one. It is "mail"
+// until [Notifier.DeliverVia] says otherwise.
 func (n *Notifier) GetDefaultDriver() ChannelName {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.defaultChannel
 }
 
-// DeliversVia is ChannelManager::deliversVia, which is GetDefaultDriver.
-//
-// Illuminate declares both on ChannelManager and so does this: `deliversVia` is
-// the one that reads well next to `deliverVia`, and `getDefaultDriver` is the
-// one the manager contract requires.
+// DeliversVia is [Notifier.GetDefaultDriver] under the name that reads well
+// next to [Notifier.DeliverVia].
 func (n *Notifier) DeliversVia() ChannelName { return n.GetDefaultDriver() }
 
-// DeliverVia is ChannelManager::deliverVia: the channel used when nothing names
-// one.
+// DeliverVia sets the channel used when nothing names one.
 func (n *Notifier) DeliverVia(name ChannelName) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.defaultChannel = name
 }
 
-// Locale is ChannelManager::locale: the language every notification this
-// Notifier sends is rendered in, whatever the recipient's own preference.
+// Locale sets the language every notification this Notifier sends is rendered
+// in, whatever the recipient's own preference.
 //
 // It is for the process that has one answer for all of them: a report generated
 // for an operator, a batch of invoices for one market. A notification that sets
-// its own locale still wins, which is Illuminate's order.
+// its own locale still wins.
 func (n *Notifier) Locale(locale string) *Notifier {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -162,10 +142,8 @@ func (n *Notifier) Locale(locale string) *Notifier {
 	return n
 }
 
-// Channels is which channel names are wired, for a diagnostic.
-//
-// It has no PHP counterpart: a Manager resolves a driver by name on demand and
-// cannot say which names would work.
+// Channels is which channel names are wired, sorted, for a diagnostic: it is
+// the list of names [Notifier.Channel] will answer to.
 func (n *Notifier) Channels() []ChannelName {
 	out := make([]ChannelName, 0, len(n.byName))
 	for name := range n.byName {
@@ -177,13 +155,10 @@ func (n *Notifier) Channels() []ChannelName {
 
 // Suppress silences a kind of notification for the life of this Notifier.
 //
-// It has no PHP counterpart. Laravel's answer is Notification::fake(), a
-// facade swap in the container, and there is no container (ADR 0001).
-//
 // It is for the process that must not send: an import that touches ten thousand
-// rows, a seeder, a replay of yesterday's queue. Laravel's answer is a fake
-// wired in the container; here it is a list of keys on the object that would do
-// the sending, so the suppression is visible where the sending is.
+// rows, a seeder, a replay of yesterday's queue. It is a list of keys on the
+// object that would do the sending, so the suppression is visible where the
+// sending is.
 //
 // There is no Unsuppress. A process that suppresses does so because sending
 // would be wrong for the whole of it, and a switch that goes both ways is a
@@ -199,39 +174,33 @@ func (n *Notifier) Suppress(keys ...Key) {
 	}
 }
 
-// Suppressed reports whether a key is silenced. It has no PHP counterpart, for
-// the reason Suppress gives.
+// Suppressed reports whether a key is silenced by [Notifier.Suppress].
 func (n *Notifier) Suppressed(k Key) bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.suppressed[k]
 }
 
-// Send is ChannelManager::send and NotificationSender::send: deliver one
-// notification to one recipient, over every channel the notification names for
-// them.
-//
-// PHP takes one notifiable or a collection of them; the two arities are Send
-// and SendMany here, because a signature that accepts either is a signature
-// that tells you nothing.
+// Send delivers one notification to one recipient, over every channel the
+// notification names for them. A list of recipients is [Notifier.SendMany],
+// because a signature that accepts either is a signature that tells you
+// nothing.
 //
 // A channel that fails does not stop the others: the errors are joined and
 // returned together, so "the mail provider was down" does not also mean "and
-// the row was never written". Laravel throws on the first one, which is how a
-// transient SMTP failure loses the copy the user would have seen in the
-// morning.
+// the row was never written". Failing on the first one is how a transient SMTP
+// failure loses the copy the user would have seen in the morning.
 func (n *Notifier) Send(ctx context.Context, g auth.Grant, to Notifiable, note Notification) error {
 	return n.SendNow(ctx, g, to, note)
 }
 
-// SendNow is ChannelManager::sendNow and NotificationSender::sendNow: deliver
-// one notification immediately, over the channels given rather than the ones
-// the notification names.
+// SendNow delivers one notification over the channels given rather than the
+// ones the notification names.
 //
-// With no channels it is Send. With them it is the escape hatch Illuminate's
-// sendNow has: "this one, over these, whatever the notification usually does" --
-// the resend button on a support screen, and the retry of one channel that was
-// down when the rest went out.
+// With no channels it is [Notifier.Send]. With them it is the escape hatch:
+// "this one, over these, whatever the notification usually does" -- the resend
+// button on a support screen, and the retry of one channel that was down when
+// the rest went out.
 func (n *Notifier) SendNow(ctx context.Context, g auth.Grant, to Notifiable, note Notification, channels ...ChannelName) error {
 	if err := g.Check(ActionSend); err != nil {
 		return err
@@ -289,9 +258,7 @@ func (n *Notifier) SendNow(ctx context.Context, g auth.Grant, to Notifiable, not
 	return errors.Join(errs...)
 }
 
-// SendMany is Send for a list of recipients, which is
-// NotificationSender::send handed a collection -- NotificationSender::
-// formatNotifiables is what normalises the two in PHP.
+// SendMany is [Notifier.Send] for a list of recipients.
 //
 // It keeps going after a recipient fails, for the reason a bulk send exists at
 // all: stopping at the first bad address means the other nine hundred people
@@ -315,10 +282,9 @@ func (n *Notifier) record(e events.Event) {
 // localized settles which language the channels render in, and hands the
 // channels a recipient that answers with it.
 //
-// The order is Illuminate's, in NotificationSender::preferredLocale: the
-// notification's own locale first, then the one set on the manager, then the
-// recipient's preference. A channel asks the recipient, so the first two are
-// applied by wrapping it.
+// The order is the notification's own locale first, then the one set on the
+// Notifier, then the recipient's preference. A channel asks the recipient, so
+// the first two are applied by wrapping it.
 func (n *Notifier) localized(to Notifiable, note Notification) Notifiable {
 	if l, ok := note.(Localized); ok && l.PreferredLocale() != "" {
 		return inLocale{Notifiable: to, locale: l.PreferredLocale()}

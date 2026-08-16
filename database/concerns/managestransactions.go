@@ -8,92 +8,91 @@ import (
 
 // TransactionDriver is what ManagesTransactions drives.
 //
-// In PHP the trait is used by Connection and reaches straight for
-// $this->getPdo(), $this->queryGrammar and $this->causedByLostConnection().
-// Those calls are written out here as an interface, which is the Go spelling of
-// "this trait may only be used by a class that has these".
+// Connection reaches straight for its pool, its query grammar and its own
+// lost-connection detection. Those calls are written out here as an
+// interface, which is the Go spelling of "this embedded type may only be
+// used by a type that has these".
 //
 // A Connection satisfies it; nothing else is meant to.
 type TransactionDriver interface {
-	// GetName answers Connection::getName. The transactions manager keys its
-	// bookkeeping by it.
+	// GetName returns the connection's name. The transactions manager keys
+	// its bookkeeping by it.
 	GetName() string
 
-	// ExecuteBeginTransactionStatement answers the protected
-	// Connection::executeBeginTransactionStatement.
+	// ExecuteBeginTransactionStatement issues a BEGIN, pinning a connection
+	// for the life of the transaction.
 	ExecuteBeginTransactionStatement() error
 
-	// CommitTransactionStatement is $this->getPdo()->commit().
+	// CommitTransactionStatement issues a COMMIT.
 	CommitTransactionStatement() error
 
-	// RollBackTransactionStatement is $this->getPdo()->rollBack(), and answers
-	// false when there was no transaction open -- the PDO::inTransaction() the
-	// PHP checks before rolling back.
+	// RollBackTransactionStatement issues a ROLLBACK, and reports false when
+	// there was no transaction open to roll back.
 	RollBackTransactionStatement() (bool, error)
 
-	// ExecuteSavepointStatement is the $this->getPdo()->exec() the savepoint
-	// paths run.
+	// ExecuteSavepointStatement runs the statement the savepoint paths build.
 	ExecuteSavepointStatement(sql string) error
 
-	// SupportsSavepoints answers $this->queryGrammar->supportsSavepoints().
+	// SupportsSavepoints reports whether the query grammar supports
+	// savepoints.
 	SupportsSavepoints() bool
 
-	// CompileSavepoint answers $this->queryGrammar->compileSavepoint().
+	// CompileSavepoint returns the statement that creates a savepoint.
 	CompileSavepoint(name string) string
 
-	// CompileSavepointRollBack answers
-	// $this->queryGrammar->compileSavepointRollBack().
+	// CompileSavepointRollBack returns the statement that rolls back to a
+	// savepoint.
 	CompileSavepointRollBack(name string) string
 
-	// FireConnectionEvent answers the protected
-	// Connection::fireConnectionEvent, with the PHP's own four names:
-	// "beganTransaction", "committing", "committed", "rollingBack".
+	// FireConnectionEvent dispatches the transaction event named by event:
+	// one of "beganTransaction", "committing", "committed" or "rollingBack".
 	FireConnectionEvent(event string)
 
-	// CausedByConcurrencyError answers the DetectsConcurrencyErrors trait.
+	// CausedByConcurrencyError reports whether err means a deadlock or a
+	// serialization failure.
 	CausedByConcurrencyError(err error) bool
 
-	// CausedByLostConnection answers the DetectsLostConnections trait.
+	// CausedByLostConnection reports whether err means the connection is
+	// gone.
 	CausedByLostConnection(err error) bool
 
-	// Reconnect answers Connection::reconnect.
+	// Reconnect replaces the pool.
 	Reconnect() error
 
-	// ReconnectIfMissingConnection answers
-	// Connection::reconnectIfMissingConnection.
+	// ReconnectIfMissingConnection reconnects when the connection has no
+	// pool yet.
 	ReconnectIfMissingConnection() error
 }
 
 // TransactionsManager is what ManagesTransactions reports to.
 //
-// It answers Illuminate\Database\DatabaseTransactionsManager, narrowed to the
-// five methods the trait calls. It is an interface here and a class in the
-// database package for the usual reason: that package imports this one.
+// It is narrowed to the five methods this file calls. It is an interface here
+// and a concrete type in the database package for the usual reason: that package
+// imports this one.
 type TransactionsManager interface {
-	// Begin answers DatabaseTransactionsManager::begin.
+	// Begin records that a new transaction level opened on connection.
 	Begin(connection string, level int)
 
-	// Commit answers DatabaseTransactionsManager::commit.
+	// Commit records that a transaction level committed on connection.
 	Commit(connection string, levelBeingCommitted, newTransactionLevel int)
 
-	// Rollback answers DatabaseTransactionsManager::rollback.
+	// Rollback records that connection rolled back to newTransactionLevel.
 	Rollback(connection string, newTransactionLevel int)
 
-	// AddCallback answers DatabaseTransactionsManager::addCallback.
+	// AddCallback registers a callback to run after the outermost commit.
 	AddCallback(callback func())
 
-	// AddCallbackForRollback answers
-	// DatabaseTransactionsManager::addCallbackForRollback.
+	// AddCallbackForRollback registers a callback to run after a rollback.
 	AddCallbackForRollback(callback func())
 }
 
-// DeadlockError answers Illuminate\Database\DeadlockException: a nested
-// transaction hit a concurrency error, and the whole transaction is gone.
+// DeadlockError reports that a nested transaction hit a concurrency error, and
+// the whole transaction is gone.
 //
 // It is declared here because ManagesTransactions is what raises it and the
 // database package imports this one, so declaring it there would close the
-// cycle. database.DeadlockException is an alias of this type -- one type, the
-// two names the two languages give it.
+// cycle. database.DeadlockException is an alias of this type -- one type under
+// two names.
 //
 // It is not retried, and that is the point of having its own type: on a
 // deadlock the engine has already rolled the whole transaction back, so
@@ -104,11 +103,10 @@ type DeadlockError struct {
 	Err error
 }
 
-// NewDeadlockError answers `new DeadlockException($e->getMessage(), ...)`.
+// NewDeadlockError wraps the driver error that reported a deadlock.
 func NewDeadlockError(err error) *DeadlockError { return &DeadlockError{Err: err} }
 
-// Error carries the driver's own message, as the PHP passes $e->getMessage()
-// through.
+// Error carries the driver's own message through unchanged.
 func (e *DeadlockError) Error() string {
 	if e.Err == nil {
 		return "deadlock"
@@ -116,64 +114,59 @@ func (e *DeadlockError) Error() string {
 	return e.Err.Error()
 }
 
-// Unwrap makes errors.Is and errors.As reach the driver error, which is what
-// the PHP's $previous is for.
+// Unwrap makes errors.Is and errors.As reach the driver error.
 func (e *DeadlockError) Unwrap() error { return e.Err }
 
-// ErrNoTransactionsManager answers the RuntimeException AfterCommit and
+// ErrNoTransactionsManager is the error AfterCommit and
 // AfterRollBack raise when no manager was set.
 var ErrNoTransactionsManager = errors.New("Transactions Manager has not been set.")
 
-// ManagesTransactions answers Illuminate\Database\Concerns\ManagesTransactions.
+// ManagesTransactions is the transaction half of a connection: the nesting
+// level, the transactions manager, and the hooks that run before one starts.
 //
-// In PHP it is a trait Connection uses; here it is a struct Connection embeds,
-// which is what "extends, for the part that is code" means in Go. The state it
-// owns -- the nesting level, the manager, the before-start hooks -- is the
-// state the trait's properties declare on Connection.
+// It is a struct Connection embeds, so the state it owns is the connection's
+// state.
 //
 // # Savepoints exist here and are not the framework's transaction story
 //
-// The nested transaction below opens a savepoint, because that is what the
-// Illuminate connection does and this package is that connection. It is not the
-// path an Arandu application takes: database.Transaction joins the outer
-// transaction rather than nesting, on the grounds that partial rollback is a
-// second failure mode for one operation. Both spellings exist because both
-// exist in Laravel; the generated repository uses the first.
+// The nested transaction below opens a savepoint. That is not the path an
+// Arandu application takes: database.Transaction joins the outer transaction
+// rather than nesting, on the grounds that partial rollback is a second failure
+// mode for one operation. The generated repository uses database.Transaction.
 type ManagesTransactions struct {
 	// driver is the connection this trait was used by.
 	driver TransactionDriver
 
-	// transactions is Connection::$transactions: the nesting level.
+	// transactions is the nesting level.
 	transactions int
 
-	// transactionsManager is Connection::$transactionsManager.
+	// transactionsManager records transaction lifecycle events.
 	transactionsManager TransactionsManager
 
-	// beforeStartingTransaction is Connection::$beforeStartingTransaction.
+	// beforeStartingTransaction is the hooks that run just before a
+	// transaction opens.
 	beforeStartingTransaction []func()
 }
 
-// UseTransactions wires the trait to the connection that used it.
+// UseTransactions wires ManagesTransactions to the connection that embeds it.
 //
-// PHP needs no such call: `use ManagesTransactions` inside the class body makes
-// $this the receiver. A Go struct has to be told, so the connection calls this
-// once from its constructor.
+// A Go struct has to be told which driver it belongs to, so the connection
+// calls this once from its constructor.
 func (m *ManagesTransactions) UseTransactions(driver TransactionDriver) {
 	m.driver = driver
 }
 
-// Transaction answers ManagesTransactions::transaction: it runs the callback
-// inside a transaction, committing when it returns nil and rolling back when it
-// returns an error.
+// Transaction runs callback inside a transaction, committing when it returns
+// nil and rolling back when it returns an error.
 //
-// attempts is the PHP's retry count, and it retries only what is worth
+// attempts bounds the retry count, and it retries only what is worth
 // retrying: a concurrency error at the outermost level. Anything else is
 // returned on the first try, because re-running a statement that failed on a
 // constraint just fails again, slower.
 //
-// The PHP returns whatever the callback returned. A Go method cannot be
-// generic, so the callback returns only an error and carries its result out
-// through the closure -- which is the shape database.Transaction already has.
+// A Go method cannot be generic, so the callback returns only an error and
+// carries its result out through the closure -- which is the shape
+// database.Transaction already has.
 func (m *ManagesTransactions) Transaction(callback func() error, attempts int) error {
 	if attempts < 1 {
 		attempts = 1
@@ -184,8 +177,8 @@ func (m *ManagesTransactions) Transaction(callback func() error, attempts int) e
 			return err
 		}
 
-		// The callback runs inside what amounts to the PHP's try; an error is
-		// its catch, and a retryable one continues the loop.
+		// An error from the callback is handled below, and a retryable one
+		// continues the loop.
 		if err := callback(); err != nil {
 			if retry, handled := m.handleTransactionException(err, currentAttempt, attempts); !retry {
 				return handled
@@ -211,15 +204,14 @@ func (m *ManagesTransactions) Transaction(callback func() error, attempts int) e
 		return nil
 	}
 
-	// Every attempt asked for a retry and the loop ran out. The PHP falls off
-	// the end of the method here and returns null, which is a bug it has never
-	// been bitten by because the last attempt always rethrows. Saying so is
-	// cheaper than a nil nobody can explain.
+	// Every attempt asked for a retry and the loop ran out. Falling off the
+	// end here and returning nil would be a bug nobody could explain, so this
+	// says what happened instead.
 	return fmt.Errorf("the transaction was retried %d times and every attempt hit a concurrency error", attempts)
 }
 
-// commitCurrent is the commit half of the transaction loop: the PDO commit at
-// level one, and the level decrement at every level.
+// commitCurrent is the commit half of the transaction loop: the COMMIT
+// statement at level one, and the level decrement at every level.
 func (m *ManagesTransactions) commitCurrent() error {
 	if m.transactions == 1 {
 		m.driver.FireConnectionEvent("committing")
@@ -231,10 +223,9 @@ func (m *ManagesTransactions) commitCurrent() error {
 	return nil
 }
 
-// handleTransactionException answers the protected
-// ManagesTransactions::handleTransactionException.
+// handleTransactionException decides what to do after callback returned err.
 //
-// It answers (retry, err): retry true means the loop tries again, and err is
+// It returns (retry, err): retry true means the loop tries again, and err is
 // what to return when it does not.
 func (m *ManagesTransactions) handleTransactionException(err error, currentAttempt, maxAttempts int) (bool, error) {
 	// On a deadlock the engine has rolled the entire transaction back, so a
@@ -260,8 +251,8 @@ func (m *ManagesTransactions) handleTransactionException(err error, currentAttem
 	return false, err
 }
 
-// handleCommitTransactionException answers the protected
-// ManagesTransactions::handleCommitTransactionException.
+// handleCommitTransactionException decides what to do after a commit failed
+// with err, the same way handleTransactionException does for the callback.
 func (m *ManagesTransactions) handleCommitTransactionException(err error, currentAttempt, maxAttempts int) (bool, error) {
 	m.transactions = max(0, m.transactions-1)
 
@@ -277,7 +268,8 @@ func (m *ManagesTransactions) handleCommitTransactionException(err error, curren
 	return false, err
 }
 
-// BeginTransaction answers ManagesTransactions::beginTransaction.
+// BeginTransaction opens a new transaction, or a nested savepoint if one is
+// already open.
 func (m *ManagesTransactions) BeginTransaction() error {
 	for _, callback := range m.beforeStartingTransaction {
 		callback()
@@ -298,8 +290,8 @@ func (m *ManagesTransactions) BeginTransaction() error {
 	return nil
 }
 
-// createTransaction answers the protected ManagesTransactions::createTransaction:
-// a real transaction at level zero, a savepoint above it.
+// createTransaction opens a real transaction at level zero, and a savepoint
+// above it.
 func (m *ManagesTransactions) createTransaction() error {
 	if m.transactions == 0 {
 		if err := m.driver.ReconnectIfMissingConnection(); err != nil {
@@ -317,19 +309,18 @@ func (m *ManagesTransactions) createTransaction() error {
 	return nil
 }
 
-// createSavepoint answers the protected ManagesTransactions::createSavepoint.
+// createSavepoint issues a savepoint for the level about to be entered.
 //
-// The name is "trans" plus the level about to be entered, which is what makes
-// performRollBack able to name the one it wants.
+// The name is "trans" plus that level, which is what makes performRollBack
+// able to name the one it wants.
 func (m *ManagesTransactions) createSavepoint() error {
 	return m.driver.ExecuteSavepointStatement(
 		m.driver.CompileSavepoint("trans" + strconv.Itoa(m.transactions+1)),
 	)
 }
 
-// handleBeginTransactionException answers the protected
-// ManagesTransactions::handleBeginTransactionException: a lost connection is
-// reconnected and the BEGIN reissued once, anything else is returned.
+// handleBeginTransactionException reconnects and reissues the BEGIN once
+// when err was caused by a lost connection; anything else is returned.
 func (m *ManagesTransactions) handleBeginTransactionException(err error) error {
 	if m.driver.CausedByLostConnection(err) {
 		if reconnectErr := m.driver.Reconnect(); reconnectErr != nil {
@@ -340,8 +331,8 @@ func (m *ManagesTransactions) handleBeginTransactionException(err error) error {
 	return err
 }
 
-// Commit answers ManagesTransactions::commit: the standalone commit, for a
-// transaction somebody began by hand.
+// Commit commits the current transaction level, for a transaction somebody
+// began by hand rather than through Transaction.
 func (m *ManagesTransactions) Commit() error {
 	if m.TransactionLevel() == 1 {
 		m.driver.FireConnectionEvent("committing")
@@ -362,14 +353,10 @@ func (m *ManagesTransactions) Commit() error {
 	return nil
 }
 
-// RollBack answers ManagesTransactions::rollBack.
-//
-// toLevel nil is the PHP's null default: roll back one level. A level outside
-// the open range is ignored rather than refused, which is the PHP's own early
-// return -- rolling back to a level that does not exist is a no-op, not a
+// RollBack rolls the transaction back to toLevel, or back one level when
+// toLevel is nil. A level outside the open range is ignored rather than
+// refused: rolling back to a level that does not exist is a no-op, not a
 // failure.
-//
-// The PHP spells it rollBack, with the capital B, and so does this.
 func (m *ManagesTransactions) RollBack(toLevel *int) error {
 	level := m.transactions - 1
 	if toLevel != nil {
@@ -395,7 +382,8 @@ func (m *ManagesTransactions) RollBack(toLevel *int) error {
 	return nil
 }
 
-// performRollBack answers the protected ManagesTransactions::performRollBack.
+// performRollBack issues the ROLLBACK or the savepoint rollback that reaches
+// toLevel.
 func (m *ManagesTransactions) performRollBack(toLevel int) error {
 	if toLevel == 0 {
 		_, err := m.driver.RollBackTransactionStatement()
@@ -409,9 +397,9 @@ func (m *ManagesTransactions) performRollBack(toLevel int) error {
 	return nil
 }
 
-// handleRollBackException answers the protected
-// ManagesTransactions::handleRollBackException: a rollback that failed because
-// the connection went away leaves nothing to roll back to.
+// handleRollBackException resets the transaction level to zero when err was
+// caused by a lost connection: a rollback that failed because the connection
+// went away leaves nothing to roll back to.
 func (m *ManagesTransactions) handleRollBackException(err error) error {
 	if m.driver.CausedByLostConnection(err) {
 		m.transactions = 0
@@ -423,12 +411,12 @@ func (m *ManagesTransactions) handleRollBackException(err error) error {
 	return err
 }
 
-// TransactionLevel answers ManagesTransactions::transactionLevel: how many
-// transactions are open, counting savepoints.
+// TransactionLevel reports how many transactions are open, counting
+// savepoints.
 func (m *ManagesTransactions) TransactionLevel() int { return m.transactions }
 
-// AfterCommit answers ManagesTransactions::afterCommit: run the callback once
-// the outermost transaction commits, or now when there is none open.
+// AfterCommit runs callback once the outermost transaction commits, or now
+// when there is none open.
 func (m *ManagesTransactions) AfterCommit(callback func()) error {
 	if m.transactionsManager != nil {
 		m.transactionsManager.AddCallback(callback)
@@ -437,7 +425,7 @@ func (m *ManagesTransactions) AfterCommit(callback func()) error {
 	return ErrNoTransactionsManager
 }
 
-// AfterRollBack answers ManagesTransactions::afterRollBack.
+// AfterRollBack runs callback when the current transaction rolls back.
 func (m *ManagesTransactions) AfterRollBack(callback func()) error {
 	if m.transactionsManager != nil {
 		m.transactionsManager.AddCallbackForRollback(callback)
@@ -446,24 +434,25 @@ func (m *ManagesTransactions) AfterRollBack(callback func()) error {
 	return ErrNoTransactionsManager
 }
 
-// BeforeStartingTransaction answers Connection::beforeStartingTransaction: a
-// hook to run just before a transaction opens.
+// BeforeStartingTransaction registers a hook to run just before a
+// transaction opens.
 //
-// It lives on the trait rather than on the connection because the slice it
-// appends to is read by BeginTransaction, which is here.
+// It lives here rather than on the connection because the slice it appends
+// to is read by BeginTransaction, which is here too.
 func (m *ManagesTransactions) BeforeStartingTransaction(callback func()) {
 	m.beforeStartingTransaction = append(m.beforeStartingTransaction, callback)
 }
 
-// SetTransactionManager answers Connection::setTransactionManager.
+// SetTransactionManager sets the manager that records transaction lifecycle
+// events.
 func (m *ManagesTransactions) SetTransactionManager(manager TransactionsManager) {
 	m.transactionsManager = manager
 }
 
-// UnsetTransactionManager answers Connection::unsetTransactionManager.
+// UnsetTransactionManager clears the transactions manager.
 func (m *ManagesTransactions) UnsetTransactionManager() { m.transactionsManager = nil }
 
-// ResetTransactionLevel is Connection::setPdo's `$this->transactions = 0`.
+// ResetTransactionLevel sets the nesting level back to zero.
 //
 // Replacing the handle throws away whatever transaction was open on the old
 // one, and a level that outlived its connection is a rollback aimed at nothing.

@@ -23,13 +23,9 @@ import (
 
 // MySqlConnector names the driver the blank import above linked in.
 //
-// It is Illuminate\Database\Connectors\MySqlConnector, spelling included: the
-// Illuminate class is MySql and not MySQL, and ADR 0044 takes the Illuminate
-// name as it is written.
-//
-// MariaDbConnector has no counterpart. MariaDB speaks the MySQL wire protocol
-// through this same driver, so mariadb:// is a DATABASE_URL scheme rather than
-// a second connector to link.
+// There is no MariaDB connector: MariaDB speaks the MySQL wire protocol through
+// this same driver, so mariadb:// is a DATABASE_URL scheme rather than a second
+// connector to link.
 type MySqlConnector struct{}
 
 // Dialect reports the connection this connector answers for.

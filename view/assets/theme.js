@@ -1,9 +1,9 @@
 // The theme: dark or light, and which accent colour.
 //
 // It is client state and nothing else. The server is never told, no cookie
-// carries it, and no request depends on it -- which is what RULE 13 allows
-// Alpine for, and what keeps a cached page correct for two people who chose
-// differently on the same device.
+// carries it, and no request depends on it -- which is the only kind of
+// state Alpine is for here, and what keeps a cached page correct for two
+// people who chose differently on the same device.
 //
 // The first block runs before the body is parsed, on purpose. Waiting for Alpine
 // would paint the page in the default theme and repaint it a frame later, and

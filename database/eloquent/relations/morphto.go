@@ -8,8 +8,8 @@ import (
 	"github.com/arandu-io/hesape/database/eloquent/relations/concerns"
 )
 
-// MorphTo answers Illuminate\Database\Eloquent\Relations\MorphTo: the inverse
-// of a polymorphic relation, where the row says both which table and which row.
+// MorphTo is the inverse of a polymorphic relation, where the row says both
+// which table and which row.
 //
 // It is the one relation whose eager load is not two queries, and it cannot be:
 // the parents point at several tables, and no dialect selects from a table

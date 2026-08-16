@@ -17,22 +17,22 @@ import (
 // is the schema introspection: pg_type stores a kind as "e" and a category as
 // "n", and ProcessTypes, ProcessColumns, ProcessIndexes and ProcessForeignKeys
 // spell those out so `aru db:show` reads the same whatever the engine.
-//
-// Answers Illuminate\Database\Query\Processors\PostgresProcessor.
 type PostgresProcessor struct {
 	Processor
 }
 
 var _ query.Processor = (*PostgresProcessor)(nil)
 
-// NewPostgresProcessor answers `new PostgresProcessor`.
+// NewPostgresProcessor creates a PostgresProcessor.
 func NewPostgresProcessor() *PostgresProcessor { return &PostgresProcessor{} }
 
-// ProcessInsertGetID answers PostgresProcessor::processInsertGetId.
+// ProcessInsertGetID runs an insert and returns the identifier the engine
+// assigned to the new row.
 //
 // PostgresGrammar compiles the insert with a returning clause, so the
-// identifier comes back as a row and the statement runs as a select. It runs
-// against the write connection, because a replica has not seen the row yet.
+// identifier comes back as a row and the statement runs as a select. It
+// runs against the write connection, because a replica has not seen the
+// row yet.
 func (p *PostgresProcessor) ProcessInsertGetID(q *query.Builder, sql string, values []any, sequence string) (int64, error) {
 	connection := q.GetConnection()
 	if connection == nil {
@@ -54,8 +54,8 @@ func (p *PostgresProcessor) ProcessInsertGetID(q *query.Builder, sql string, val
 	return numericID(results[0][sequence])
 }
 
-// ProcessTypes answers PostgresProcessor::processTypes: the one letter codes
-// pg_type stores, spelled out.
+// ProcessTypes spells out the one letter codes pg_type stores for a
+// type's kind and category.
 func (p *PostgresProcessor) ProcessTypes(results []query.Record) []query.Record {
 	kinds := map[string]any{
 		"b": "base", "c": "composite", "d": "domain", "e": "enum",
@@ -86,7 +86,8 @@ func (p *PostgresProcessor) ProcessTypes(results []query.Record) []query.Record 
 	return out
 }
 
-// ProcessColumns answers PostgresProcessor::processColumns.
+// ProcessColumns normalises the columns of a column listing, splitting a
+// generated column's expression out of its default.
 func (p *PostgresProcessor) ProcessColumns(results []query.Record, sql ...string) []query.Record {
 	out := make([]query.Record, 0, len(results))
 
@@ -129,7 +130,7 @@ func (p *PostgresProcessor) ProcessColumns(results []query.Record, sql ...string
 	return out
 }
 
-// ProcessIndexes answers PostgresProcessor::processIndexes.
+// ProcessIndexes normalises the columns of an index listing.
 func (p *PostgresProcessor) ProcessIndexes(results []query.Record) []query.Record {
 	out := make([]query.Record, 0, len(results))
 
@@ -146,8 +147,8 @@ func (p *PostgresProcessor) ProcessIndexes(results []query.Record) []query.Recor
 	return out
 }
 
-// ProcessForeignKeys answers PostgresProcessor::processForeignKeys: the one
-// letter referential actions, spelled out.
+// ProcessForeignKeys spells out the one letter referential actions for a
+// foreign key's on-update and on-delete behavior.
 func (p *PostgresProcessor) ProcessForeignKeys(results []query.Record) []query.Record {
 	actions := map[string]any{
 		"a": "no action", "r": "restrict", "c": "cascade",

@@ -11,11 +11,9 @@ import (
 	"github.com/arandu-io/hesape/validation"
 )
 
-// View mirrors Illuminate\View\View.
-//
-// It wraps a render operation: a compiled Func, a name, a path, and the data
-// merged from shared globals and per-render additions. A View is produced by
-// Factory.Make and drawn by Render.
+// View wraps a render operation: a compiled Func, a name, a path, and the
+// data merged from shared globals and per-render additions. A View is
+// produced by Factory.Make and drawn by Render.
 type View struct {
 	factory *Factory
 	engine  *Renderer
@@ -45,8 +43,7 @@ func (v *View) WithName(name string) *View {
 
 // WithErrors shares the validation error bag with the view.
 //
-// It answers Illuminate\View\View::withErrors. The bag is reachable as
-// the "errors" key in the data.
+// The bag is reachable as the "errors" key in the data.
 func (v *View) WithErrors(errs validation.Errors) *View {
 	if v.data == nil {
 		v.data = map[string]any{}
@@ -87,18 +84,15 @@ func (v *View) GetPath() string { return v.path }
 // SetPath changes the path.
 func (v *View) SetPath(path string) { v.path = path }
 
-// Render is View::render.
-//
-// It increments the render counter, calls composers, gathers data, runs the
-// compiled function and then flushes the per-request state if nothing else is
-// still drawing. A failed render flushes unconditionally, so a half-filled set
-// of sections does not leak into the next page.
+// Render increments the render counter, calls composers, gathers data, runs
+// the compiled function and then flushes the per-request state if nothing
+// else is still drawing. A failed render flushes unconditionally, so a
+// half-filled set of sections does not leak into the next page.
 func (v *View) Render() (string, error) { return v.render(nil) }
 
-// render is View::render with the callback the PHP signature carries.
-//
-// The callback runs after the contents exist and before the state is flushed,
-// which is the window Fragment and RenderSections read their answer in.
+// render is Render, taking an optional callback that runs after the contents
+// exist and before the state is flushed -- which is the window Fragment and
+// RenderSections read their answer in.
 func (v *View) render(after func()) (string, error) {
 	contents, err := v.renderContents()
 	if err != nil {
@@ -117,7 +111,8 @@ func (v *View) render(after func()) (string, error) {
 	return contents, nil
 }
 
-// renderContents is View::renderContents.
+// renderContents gathers data, runs composers and calls the compiled
+// function, returning the rendered HTML.
 func (v *View) renderContents() (string, error) {
 	if v.factory != nil {
 		v.factory.IncrementRender()
@@ -184,21 +179,21 @@ func (v *View) String() string {
 	return s
 }
 
-// ToHTML answers Illuminate\Contracts\Support\Htmlable.
+// ToHTML is an alias for String.
 func (v *View) ToHTML() string { return v.String() }
 
 // Gather returns the merged data without rendering.
 //
-// It answers no PHP method; GatherData below is View::gatherData, and this is
-// the shorter spelling the rest of this package already used when GatherData
-// was missing. Both return the same map.
+// It is the shorter spelling the rest of this package already used when
+// GatherData was missing. Both return the same map.
 func (v *View) Gather() map[string]any { return v.GetData() }
 
-// GatherData is View::gatherData.
+// GatherData returns the merged data without rendering, resolving any
+// nested *View into its rendered string first.
 //
 // The shared globals come first and the view's own data overrides them. A
 // nested *View in the data is drawn to a string before the parent runs, which
-// is what View::nest relies on.
+// is what [View.Nest] relies on.
 func (v *View) GatherData() map[string]any {
 	data := map[string]any{}
 	if v.factory != nil {
@@ -226,20 +221,18 @@ func (v *View) GatherData() map[string]any {
 	return data
 }
 
-// Name is View::name.
+// Name is an alias for GetName.
 func (v *View) Name() string { return v.GetName() }
 
-// GetFactory is View::getFactory.
+// GetFactory returns the factory the view was made from, or nil.
 func (v *View) GetFactory() *Factory { return v.factory }
 
-// GetEngine is View::getEngine.
+// GetEngine returns the renderer engine the view uses.
 func (v *View) GetEngine() *Renderer { return v.engine }
 
-// Fragment is View::fragment.
-//
-// It draws the whole view and hands back only the named region, which is what
-// an HTMX swap needs: the page is one template and the response is one piece
-// of it.
+// Fragment draws the whole view and hands back only the named region, which
+// is what an HTMX swap needs: the page is one template and the response is
+// one piece of it.
 func (v *View) Fragment(fragment string) (string, error) {
 	if v.factory == nil {
 		return "", fmt.Errorf("view: %q has no factory, so it has no fragments", v.name)
@@ -251,10 +244,9 @@ func (v *View) Fragment(fragment string) (string, error) {
 	return part, nil
 }
 
-// Fragments is View::fragments.
-//
-// With no names it returns every fragment, in the order the view declared
-// them; with names it returns those, in the order asked for.
+// Fragments draws the whole view. With no names it returns every fragment,
+// in the order the view declared them; with names it returns those, in the
+// order asked for.
 func (v *View) Fragments(fragments ...string) (string, error) {
 	if fragments == nil {
 		return v.allFragments()
@@ -271,7 +263,8 @@ func (v *View) Fragments(fragments ...string) (string, error) {
 	return out.String(), nil
 }
 
-// FragmentIf is View::fragmentIf.
+// FragmentIf renders fragment if condition is true, or the whole view
+// otherwise.
 func (v *View) FragmentIf(condition bool, fragment string) (string, error) {
 	if condition {
 		return v.Fragment(fragment)
@@ -279,7 +272,8 @@ func (v *View) FragmentIf(condition bool, fragment string) (string, error) {
 	return v.Render()
 }
 
-// FragmentsIf is View::fragmentsIf.
+// FragmentsIf renders fragments if condition is true, or the whole view
+// otherwise.
 func (v *View) FragmentsIf(condition bool, fragments ...string) (string, error) {
 	if condition {
 		return v.Fragments(fragments...)
@@ -287,7 +281,8 @@ func (v *View) FragmentsIf(condition bool, fragments ...string) (string, error) 
 	return v.Render()
 }
 
-// allFragments is View::allFragments.
+// allFragments renders the view and returns every captured fragment,
+// concatenated in sorted name order.
 func (v *View) allFragments() (string, error) {
 	if v.factory == nil {
 		return "", nil
@@ -311,12 +306,12 @@ func (v *View) allFragments() (string, error) {
 	return out.String(), nil
 }
 
-// RenderSections is View::renderSections.
+// RenderSections renders the view and returns its sections instead of the
+// contents.
 //
-// PHP passes a callback to render whose return value replaces the contents;
-// the callback there returns an array, so render's return type is whatever the
-// callback gives it. Go splits the two: Render keeps the string and this
-// returns the sections.
+// This is split from Render because Go cannot make one method return either
+// a string or a map depending on whether a callback was given: Render keeps
+// the string, and this returns the sections.
 func (v *View) RenderSections() (map[string]string, error) {
 	if v.factory == nil {
 		return map[string]string{}, nil
@@ -328,19 +323,19 @@ func (v *View) RenderSections() (map[string]string, error) {
 	return sections, nil
 }
 
-// OffsetExists is View::offsetExists.
+// OffsetExists reports whether key is present in the view's data.
 func (v *View) OffsetExists(key string) bool {
 	_, ok := v.GetData()[key]
 	return ok
 }
 
-// OffsetGet is View::offsetGet.
+// OffsetGet returns the value of key in the view's data.
 func (v *View) OffsetGet(key string) any { return v.GetData()[key] }
 
-// OffsetSet is View::offsetSet.
+// OffsetSet is an alias for With, without chaining.
 func (v *View) OffsetSet(key string, value any) { v.With(key, value) }
 
-// OffsetUnset is View::offsetUnset.
+// OffsetUnset removes key from the view's data.
 func (v *View) OffsetUnset(key string) { delete(v.data, key) }
 
 // RenderView renders a View to an io.Writer directly.

@@ -8,44 +8,40 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// instance answers Illuminate\Support\Traits\CapsuleManagerTrait::$instance,
-// which Manager sets in setupContainer and the static methods read.
+// instance is the capsule the package-level functions reach.
 //
-// It is a package variable for the same reason it is static there: the point of
-// a capsule is that a script can reach the database without carrying a handle
-// through every function. A mutex is what static costs in a language that has
-// goroutines.
+// It is a package variable because the point of a capsule is that a script can
+// reach the database without carrying a handle through every function. The mutex
+// is what that costs in a language with goroutines.
 var (
 	instanceMu sync.RWMutex
 	instance   *Manager
 )
 
-// Manager answers Illuminate\Database\Capsule\Manager: the database, usable
-// from a script that has no application around it.
+// Manager is the database, usable from a script that has no application around
+// it.
 //
-// It exists for exactly the case Laravel built it for -- a standalone script, a
-// migration tool, a test harness -- and it is not how an Arandu application
-// reaches its data. An application holds a Repository, which holds a Grant. The
-// static methods below hold neither, which is why the doc on every one of them
-// says so and why nothing in a request path should be calling them.
+// It exists for a standalone script, a migration tool or a test harness, and it
+// is not how an Arandu application reaches its data. An application holds a
+// Repository, which holds a Grant. The package-level functions below hold
+// neither, which is why the doc on every one of them says so and why nothing in
+// a request path should be calling them.
 type Manager struct {
 	mu sync.RWMutex
 
-	// config is what the PHP keeps in $this->container['config'].
+	// config is where the capsule reads and writes the default connection
+	// name and the configured connections.
 	config database.Configuration
 
-	// manager is Manager::$manager.
+	// manager is the DatabaseManager the capsule wraps.
 	manager *database.DatabaseManager
 
-	// events is what the PHP keeps in the container under 'events'.
+	// events is the dispatcher put on every connection the capsule makes.
 	events database.Dispatcher
 }
 
-// NewManager answers Manager::__construct.
-//
-// The PHP's argument is a container; there is none (ADR 0001), so what it
-// actually needed -- somewhere to keep the configuration -- is the argument
-// instead. Nil takes a fresh map, which is what `new Container` was doing.
+// NewManager builds a Manager over the configuration it is given. Nil takes a
+// fresh map.
 func NewManager(config database.Configuration) *Manager {
 	if config == nil {
 		config = database.MapConfiguration{}
@@ -60,12 +56,11 @@ func NewManager(config database.Configuration) *Manager {
 	return m
 }
 
-// setupDefaultConfiguration answers the protected
-// Manager::setupDefaultConfiguration.
+// setupDefaultConfiguration fills in a default connection name and an empty
+// connections map when neither is set.
 //
-// The PHP sets database.fetch as well, which selects between a stdClass and an
-// array per row. A row here is a query.Record and there is one shape, so there
-// is nothing to choose.
+// A row here is always a query.Record, so there is no separate fetch-mode
+// setting to default: there is only one shape to choose.
 func (m *Manager) setupDefaultConfiguration() {
 	if m.config.Get("database.default") == nil {
 		m.config.Set("database.default", "default")
@@ -75,17 +70,14 @@ func (m *Manager) setupDefaultConfiguration() {
 	}
 }
 
-// setupManager answers the protected Manager::setupManager.
+// setupManager builds the DatabaseManager the capsule wraps.
 func (m *Manager) setupManager() {
 	m.manager = database.NewDatabaseManager(m.config, database.NewConnectionFactory())
 }
 
-// SetAsGlobal answers CapsuleManagerTrait::setAsGlobal: make this the capsule
-// the static methods reach.
+// SetAsGlobal makes this the capsule the package-level functions reach.
 //
-// NewManager calls it, which the PHP's constructor also effectively does
-// through setupContainer -- Laravel's Manager is unusable statically until
-// something sets the instance, and every example sets it immediately.
+// NewManager calls it, so a manager is usable that way as soon as it is built.
 func SetAsGlobal(m *Manager) {
 	instanceMu.Lock()
 	defer instanceMu.Unlock()
@@ -101,11 +93,11 @@ func Instance() *Manager {
 	return instance
 }
 
-// Connection answers Manager::connection, the static one.
+// Connection returns the named connection from the global capsule.
 //
-// The PHP throws nothing and lets a null instance fail four frames later; this
-// answers the error, because "call to a member function on null" names nothing
-// a person can act on.
+// It fails with errNoCapsule rather than letting a nil instance panic four
+// frames later, because a nil-pointer panic names nothing a person can act
+// on.
 func Connection(name string) (database.ConnectionInterface, error) {
 	m := Instance()
 	if m == nil {
@@ -114,12 +106,12 @@ func Connection(name string) (database.ConnectionInterface, error) {
 	return m.GetConnection(name)
 }
 
-// Table answers Manager::table, the static one: a query builder against a
-// table on a named connection.
+// Table returns a query builder against a table on a named connection, from
+// the global capsule.
 //
-// It takes a context, which the PHP's does not, for the reason Connection.Table
-// gives: a builder that cannot be cancelled holds a server connection for as
-// long as the server likes.
+// It takes a context for the reason Connection.Table gives: a builder that
+// cannot be cancelled holds a server connection for as long as the server
+// likes.
 func Table(ctx context.Context, table any, as, connection string) (*query.Builder, error) {
 	conn, err := Connection(connection)
 	if err != nil {
@@ -131,11 +123,12 @@ func Table(ctx context.Context, table any, as, connection string) (*query.Builde
 	return conn.Table(ctx, table, as), nil
 }
 
-// Schema answers Manager::schema, the static one.
+// Schema returns the schema builder for a named connection, from the global
+// capsule.
 //
-// It answers any because the schema builder lives in database/schema, which
-// nothing here imports: a capsule needs to hand one over and never to call it.
-// A nil answer means no schema builder was registered, which is what a binary
+// It returns any because the schema builder lives in database/schema, which
+// nothing here imports: a capsule needs to hand one over and never to call
+// it. Nil means no schema builder was registered, which is what a binary
 // that never imported the schema package has.
 func Schema(connection string) (any, error) {
 	conn, err := Connection(connection)
@@ -149,7 +142,8 @@ func Schema(connection string) (any, error) {
 	return concrete.GetSchemaBuilder(), nil
 }
 
-// GetConnection answers Manager::getConnection.
+// GetConnection returns the named connection from this manager's
+// DatabaseManager.
 func (m *Manager) GetConnection(name string) (database.ConnectionInterface, error) {
 	m.mu.RLock()
 	manager := m.manager
@@ -157,9 +151,8 @@ func (m *Manager) GetConnection(name string) (database.ConnectionInterface, erro
 	return manager.Connection(name)
 }
 
-// AddConnection answers Manager::addConnection.
-//
-// name empty is the PHP's 'default' default.
+// AddConnection registers a connection configuration under name, or under
+// "default" when name is empty.
 func (m *Manager) AddConnection(config map[string]any, name string) {
 	if name == "" {
 		name = "default"
@@ -178,15 +171,16 @@ func (m *Manager) AddConnection(config map[string]any, name string) {
 
 // BootEloquentUsing is where an ORM registers the wiring BootEloquent does.
 //
-// The PHP calls Eloquent::setConnectionResolver and Eloquent::setEventDispatcher
-// directly. Doing that here would make the capsule import the ORM, and the
-// capsule is the piece a script uses precisely because it wants the small half.
-// So the ORM registers instead, from its own init, and a binary that never
+// Calling into an ORM's connection resolver and event dispatcher setters
+// directly here would make the capsule import the ORM, and the capsule is
+// the piece a script uses precisely because it wants the small half. So the
+// ORM registers instead, from its own init, and a binary that never
 // imported it has a BootEloquent that does nothing -- which is the correct
-// answer to "boot the ORM I did not link".
+// response to "boot the ORM I did not link".
 var BootEloquentUsing func(resolver database.ConnectionResolverInterface, events database.Dispatcher)
 
-// BootEloquent answers Manager::bootEloquent.
+// BootEloquent wires an ORM's connection resolver and event dispatcher to
+// the capsule's manager, if BootEloquentUsing was set.
 func (m *Manager) BootEloquent() {
 	if BootEloquentUsing == nil {
 		return
@@ -200,22 +194,23 @@ func (m *Manager) BootEloquent() {
 	BootEloquentUsing(manager, events)
 }
 
-// GetDatabaseManager answers Manager::getDatabaseManager.
+// GetDatabaseManager returns the DatabaseManager the capsule wraps.
 func (m *Manager) GetDatabaseManager() *database.DatabaseManager {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.manager
 }
 
-// GetEventDispatcher answers Manager::getEventDispatcher.
+// GetEventDispatcher returns the dispatcher put on every connection the
+// capsule makes.
 func (m *Manager) GetEventDispatcher() database.Dispatcher {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.events
 }
 
-// SetEventDispatcher answers Manager::setEventDispatcher: every connection the
-// capsule makes from here on carries it.
+// SetEventDispatcher replaces the dispatcher put on every connection the
+// capsule makes; every connection made from here on carries it.
 func (m *Manager) SetEventDispatcher(dispatcher database.Dispatcher) {
 	m.mu.Lock()
 	m.events = dispatcher
@@ -225,11 +220,10 @@ func (m *Manager) SetEventDispatcher(dispatcher database.Dispatcher) {
 	manager.SetEventDispatcher(dispatcher)
 }
 
-// SetTransactionManager gives the capsule's connections a transactions manager,
-// which is what makes AfterCommit work.
+// SetTransactionManager gives the capsule's connections a transactions
+// manager, which is what makes AfterCommit work.
 //
-// The PHP reads it out of the container under 'db.transactions'; there is no
-// container, so it is set.
+// There is no container to read one from, so it is set directly.
 func (m *Manager) SetTransactionManager(manager *database.DatabaseTransactionsManager) {
 	m.mu.RLock()
 	dbManager := m.manager
@@ -238,7 +232,8 @@ func (m *Manager) SetTransactionManager(manager *database.DatabaseTransactionsMa
 	dbManager.SetTransactionManager(manager)
 }
 
-// GetConfiguration answers what the PHP reads as $this->container['config'].
+// GetConfiguration returns the configuration the capsule reads and writes
+// connection settings through.
 func (m *Manager) GetConfiguration() database.Configuration {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

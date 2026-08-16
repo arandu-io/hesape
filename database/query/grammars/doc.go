@@ -1,24 +1,14 @@
-// Package grammars mirrors Illuminate\Database\Query\Grammars: one grammar per
-// engine, each one compiling a *query.Builder into the SQL that engine speaks.
-//
-// The source is the clone at laravel_illuminate/database/Query/Grammars, at
-// v12.52.0-54-gd59e7abde. The files it answers to:
-//
-//	Grammar.php         -> Grammar, in grammar.go
-//	MySqlGrammar.php    -> MySQLGrammar, in mysql.go
-//	MariaDbGrammar.php  -> MariaDBGrammar, in mariadb.go
-//	PostgresGrammar.php -> PostgresGrammar, in postgres.go
-//	SQLiteGrammar.php   -> SQLiteGrammar, in sqlite.go
-//
-// Illuminate\Database\Concerns\CompilesJsonPaths, the trait the grammars mix
-// in, is in jsonpath.go.
+// Package grammars holds one grammar per engine, each one compiling a
+// *query.Builder into the SQL that engine speaks: MySQLGrammar, MariaDBGrammar,
+// PostgresGrammar and SQLiteGrammar, over the shared Grammar in grammar.go. The
+// JSON path handling they all use is in jsonpath.go.
 //
 // # Where authorization is, and where it is not
 //
 // Not here. A grammar turns a builder into a string; it decides how a question
 // is spelled, never who may ask it. Authorization lives one layer up, in the
-// repository that holds an auth.Grant and filters by auth.Tenant(g) -- on
-// reads exactly as on writes, because a read path without a policy is a tenant
+// repository that holds an auth.Grant and filters by auth.Tenant(g) -- on reads
+// exactly as on writes, because a read path without a policy is a tenant
 // reading another tenant's rows. Nothing in this package takes a Grant, and
 // nothing in this package should be reachable except through something that
 // does.
@@ -39,59 +29,44 @@
 // $1 -- and it would give the project two placeholder conventions where one
 // does. See Grammar.Parameter.
 //
-// # Late binding, which Go does not have
+// # Dialect differences go through a self reference
 //
-// PHP resolves $this->compileLock() at run time, so redefining it in a subclass
-// changes what compileSelect emits. Go resolves an embedded method at compile
-// time, so the base version would always run and every dialect difference would
-// vanish without a single failure. Grammar therefore holds a self reference,
-// typed as the unexported dialect interface, and the pipeline calls through it.
-// A driver grammar embeds *Grammar and points self at itself, which is what
-// `extends Grammar` does for the part that is late binding.
+// Go resolves an embedded method at compile time, so a base method calling
+// another base method would always run the base version and every dialect
+// difference would vanish without a single failure. Grammar therefore holds a
+// self reference, typed as the unexported dialect interface, and the pipeline
+// calls through it. A driver grammar embeds *Grammar and points self at itself.
 //
 // The visibility mapping follows from that: a method a driver grammar overrides
-// is exported, because it is the extension point, and PHP marks it protected
-// only because protected is as open as PHP gets for a subclass. A helper
-// nothing overrides stays unexported.
+// is exported, because it is the extension point. A helper nothing overrides
+// stays unexported.
 //
-// # The base class is abstract, and the compiler enforces it
+// # The base grammar is incomplete, and the compiler enforces it
 //
 // Grammar deliberately does not implement CompileInsertOrIgnore or
-// CompileUpsert -- the two methods Illuminate declares by throwing, because no
-// engine spells them the standard way. Without them *Grammar does not satisfy
-// query.Grammar and cannot be handed to a builder at all. The PHP finds that
-// out when the statement runs.
+// CompileUpsert, because no engine spells them the standard way. Without them
+// *Grammar does not satisfy query.Grammar and cannot be handed to a builder at
+// all, so the gap is a compile error rather than a failure when the statement
+// runs.
 //
-// # Names
+// # Signatures
 //
-// ADR 0044: the name is Illuminate's, with the initial raised and initialisms
-// in upper case. MySqlGrammar is MySQLGrammar, MariaDbGrammar is
-// MariaDBGrammar, compileInsertGetId is CompileInsertGetID, compileJsonLength
-// is CompileJSONLength, toSql is ToSQL. Nothing here is named by invention.
+// An initialism is upper case: CompileInsertGetID, CompileJSONLength, ToSQL.
+// The rest of the shape is:
 //
-// The mechanical changes, each one said again at the method that carries it:
-//
-//   - (T, error) where the PHP throws and the signature is free to say so:
-//     CompileJoinLateral, CompileJSONContains, CompileJSONLength, WhereFullText,
+//   - (T, error) wherever the signature is free to say so: CompileJoinLateral,
+//     CompileJSONContains, CompileJSONLength, WhereFullText,
 //     SupportsStraightJoins, CompileInsertOrIgnoreUsing,
 //     CompileInsertOrIgnoreReturning, SubstituteBindingsIntoRawSQL.
-//   - A false clause where the PHP throws inside the compile path, whose
+//   - A false clause where the failure happens inside the compile path, whose
 //     signature query.Grammar fixes as returning a string.
-//   - The empty string where the PHP returns null, since concatenate drops both.
+//   - The empty string for an absent fragment, since concatenate drops it.
 //   - A values map is walked in sorted key order, because a Go map has none and
 //     the statement has to be the same on every run for the bindings to line up.
 //     See Grammar.CompileInsert.
 //   - CompileUpsert takes the update list as column names only, which is the
-//     shape query.Grammar declares; the PHP also accepts a column-to-value map.
+//     shape query.Grammar declares.
 //
-// # Skipped, and why
-//
-//   - SqlServerGrammar.php: a driver this ecosystem does not carry. The three
-//     connectors are pgx, mysql and sqlite.
-//   - Macroable, on Illuminate\Database\Grammar: a PHP language interface --
-//     __call adding methods at run time, which Go has no form of.
-//   - The compileJoins branch that emits a lateral join: it tests
-//     `$join instanceof JoinLateralClause`, and query has no JoinLateralClause
-//     yet. CompileJoinLateral itself is here on all four grammars, spelling the
-//     clause correctly, and the branch that reaches it belongs with the type.
+// There is no SQL Server grammar: the three connectors are pgx, mysql and
+// sqlite.
 package grammars

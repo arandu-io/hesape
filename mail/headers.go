@@ -2,15 +2,12 @@ package mail
 
 import "strings"
 
-// Headers is Illuminate\Mail\Mailables\Headers: the three header fields a
-// mailable is allowed to set by hand.
+// Headers is the three header fields a mailable is allowed to set by hand.
 //
-// The fluent setters messageId(), references() and text() have no Go twin for
-// the reason given on [Content]: PHP lets a property and a method share a name.
-// ReferencesString has no property to collide with and is a method.
+// There are no fluent setters here, for the reason given on [Content].
+// [Headers.ReferencesString] has no field to collide with and is a method.
 type Headers struct {
-	// MessageID is the Message-Id this message goes out with. Illuminate spells
-	// the property messageId; Go spells the initialism in capitals (ADR 0044).
+	// MessageID is the Message-Id this message goes out with.
 	MessageID string
 
 	// References are the message IDs this message answers, which is what makes
@@ -23,8 +20,6 @@ type Headers struct {
 
 // ReferencesString is the References header as one field value: each id wrapped
 // in angle brackets, separated by spaces.
-//
-// ReferencesString is Headers::referencesString.
 func (h Headers) ReferencesString() string {
 	out := make([]string, 0, len(h.References))
 	for _, id := range h.References {

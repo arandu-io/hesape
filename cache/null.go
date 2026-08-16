@@ -7,18 +7,15 @@ import (
 
 // NullStore is the store that keeps nothing.
 //
-// It answers Illuminate\Cache\NullStore. It is what CACHE_STORE=null wires, and
-// it is the honest way to turn caching off: every read is a miss and every
+// It is what CACHE_STORE=null wires, and it is the honest way to turn caching off: every read is a miss and every
 // write goes nowhere, so the application takes exactly the path it takes on a
 // cold cache, every time. That is worth more in a test than a mock, because it
 // is the same code the production wiring runs.
 //
-// Laravel's returns false from put, forever, increment and touch to say
-// "nothing was stored". Here they return no error. A Go caller checks the error
+// Put, Forever, Increment and Touch return no error. A caller checks the error
 // of every write, and a null store that reported a failure on each of them
-// would take the application down rather than turning the cache off -- and the
-// Store contract has no bool to carry "stored, or not" in anyway. What is
-// unchanged is what a reader sees: ErrNotFound, always.
+// would take the application down rather than turning the cache off. What a
+// reader sees is unchanged: ErrNotFound, always.
 //
 // It holds a lock as NoLock does: it says yes to everybody. See NoLock for why
 // that is the right answer here and the wrong one anywhere else.
@@ -38,9 +35,6 @@ var (
 func (s *NullStore) Get(context.Context, string) ([]byte, error) { return nil, ErrNotFound }
 
 // Many is a miss for every key.
-//
-// It answers the many() of the RetrievesMultipleKeys trait, which NullStore
-// uses: every key asked for is in the result, carrying nil.
 func (s *NullStore) Many(_ context.Context, keys []string) (map[string][]byte, error) {
 	out := make(map[string][]byte, len(keys))
 	for _, key := range keys {
@@ -111,20 +105,17 @@ func (s *NullStore) CurrentOwner(context.Context, string) (string, error) { retu
 
 // Lock returns a handle that will take the lock, because NullStore gives it to
 // everybody.
-//
-// It answers NullStore::lock(), which returns a NoLock.
 func (s *NullStore) Lock(name string, ttl time.Duration, owner string) *Lock {
 	return &Lock{store: s, name: name, ttl: ttl, owner: owner, held: owner != ""}
 }
 
-// RestoreLock returns a handle on a lock owner already holds. It answers
-// NullStore::restoreLock().
+// RestoreLock returns a handle on a lock owner already holds.
 func (s *NullStore) RestoreLock(name, owner string) *Lock { return s.Lock(name, 0, owner) }
 
 // NoLock is the lock that is always free.
 //
-// It answers Illuminate\Cache\NoLock: acquire says yes, release says yes, and
-// nothing is written anywhere. It is what the null store hands out, and it is
+// Acquire says yes, release says yes, and nothing is written anywhere. It is
+// what the null store hands out, and it is
 // correct there for the same reason the null store is correct -- caching is off,
 // so there is nothing to serialize access to.
 //

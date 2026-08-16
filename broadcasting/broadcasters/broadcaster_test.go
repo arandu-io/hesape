@@ -222,7 +222,7 @@ func TestAGuardedChannelWithNobodyOnTheContextIsRefused(t *testing.T) {
 }
 
 // A Grant with no tenant authorizes no channel. The Policy allowed; what
-// refuses is that there is no tenant to name the channel with (RULE 14).
+// refuses is that there is no tenant to name the channel with.
 func TestAGrantWithNoTenantAuthorizesNoChannel(t *testing.T) {
 	broadcaster, connection := newRedisBroadcaster(t, "", "orders.{orderId}")
 	ctx := auth.WithSubject(context.Background(), auth.Subject{ID: "u-1"})

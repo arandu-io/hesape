@@ -108,8 +108,8 @@ func TestWithoutOverlappingRunsOneAtATime(t *testing.T) {
 	}
 }
 
-// TestWithoutOverlappingIsScopedByTenant is RULE 14 at a lock. Without the
-// tenant in the key, one customer's slow import blocks every other customer's.
+// TestWithoutOverlappingIsScopedByTenant checks the tenant in the lock key.
+// Without it, one customer's slow import blocks every other customer's.
 func TestWithoutOverlappingIsScopedByTenant(t *testing.T) {
 	locks := cache.NewLocks(cache.NewArrayStore())
 	mine, _ := job(t, tenant, "invoice.send")
@@ -202,8 +202,8 @@ func TestRateLimitedReleasesTheJobOverBudget(t *testing.T) {
 	}
 }
 
-// TestRateLimitedIsScopedByTenant is RULE 14 at a counter: one customer must
-// not be able to spend another customer's budget.
+// TestRateLimitedIsScopedByTenant checks the tenant in the counter key: one
+// customer must not be able to spend another customer's budget.
 func TestRateLimitedIsScopedByTenant(t *testing.T) {
 	limiter := cache.NewRateLimiter(cache.NewArrayStore())
 	m := middleware.NewRateLimited(limiter, cache.PerMinute(1))
@@ -453,7 +453,7 @@ func TestThrottlesExceptionsReportIsAskedBeforeAnythingIsReported(t *testing.T) 
 	if !m.ShouldReport(errors.New("something else")) {
 		t.Error("a failure the predicate said yes to is not reportable")
 	}
-	// No predicate reports everything, which is the PHP's default.
+	// No predicate reports everything.
 	if !middleware.NewThrottlesExceptions(limiter, cache.PerMinute(5)).ShouldReport(timeout) {
 		t.Error("a middleware with no predicate refused to report")
 	}

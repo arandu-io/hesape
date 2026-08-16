@@ -9,8 +9,8 @@ import (
 // FormatRoutes renders the route table for the terminal, grouped by module and
 // sorted by pattern.
 //
-// It is here, and not in the CLI, so that every project prints the same table:
-// `aru routes` in an application and the route list on the error page are the
+// It is here, and not in the CLI, so that every consumer prints the same
+// table: the CLI's route list and the route list on the error page are the
 // same rows in the same order, and a developer comparing the two is comparing
 // like with like.
 //

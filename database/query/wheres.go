@@ -9,27 +9,30 @@ import (
 	"github.com/arandu-io/hesape/str"
 )
 
-// The rest of the where vocabulary of Illuminate\Database\Query\Builder: the
-// clause types the grammar knows how to compile and the "or" twin of each one.
+// The rest of the where vocabulary: the clause types the grammar knows how to
+// compile and the "or" twin of each one.
 //
-// PHP writes the conjunction and the negation as trailing arguments -- where(...,
-// $boolean = 'and', $not = false) -- and Go has no default argument, so each of
-// them is a method here, which is the pair of names the PHP also declares.
-// Nothing in this file reaches the connection: a where clause is state, and the
-// tenant is put on the statement at execution, in scoped.
+// The conjunction and the negation are in the method name rather than in a
+// trailing argument, because Go has no default argument. Nothing in this file
+// reaches the connection: a where clause is state, and the tenant is put on the
+// statement at execution, in scoped.
 
-// PrepareValueAndOperator answers Builder::prepareValueAndOperator.
+// PrepareValueAndOperator resolves the value and operator for a where clause
+// that may have been built from two arguments or three.
 //
-// It carries an error where the PHP throws InvalidArgumentException, for the
-// combination it refuses: an operator with no value, such as where('votes',
-// '>'), which would otherwise compile to a comparison against NULL and quietly
-// match nothing.
+// When useDefault is true, operator is treated as the value and the
+// comparison operator defaults to "="; otherwise value and operator are
+// returned as given, after checking the combination.
 //
-// The fluent methods do not call it, because the question it answers -- "were
-// two arguments passed, or three?" -- is func_num_args in PHP and is the length
-// of a variadic slice here. It is exported because it is public there, and
+// It returns an error for the combination it refuses: an operator with no
+// value, such as where('votes', '>'), which would otherwise compile to a
+// comparison against NULL and quietly match nothing.
+//
+// The fluent methods do not call it; they use the unexported
+// prepareValueAndOperator, which reads the same two-or-three-argument
+// distinction off the length of a variadic slice. This one is exported
 // because a caller assembling an operator and a value from user input has the
-// same question to ask.
+// same combination to validate.
 func (b *Builder) PrepareValueAndOperator(value, operator any, useDefault bool) (any, string, error) {
 	if useDefault {
 		return operator, "=", nil
@@ -40,8 +43,8 @@ func (b *Builder) PrepareValueAndOperator(value, operator any, useDefault bool) 
 	return value, stringify(operator), nil
 }
 
-// invalidOperatorAndValue answers Builder::invalidOperatorAndValue: an operator
-// that needs a value, with no value given.
+// invalidOperatorAndValue reports whether operator is one that needs a value,
+// with no value given.
 func invalidOperatorAndValue(operator string, value any) bool {
 	if value != nil {
 		return false
@@ -53,9 +56,10 @@ func invalidOperatorAndValue(operator string, value any) bool {
 	return containsFold(operators, operator)
 }
 
-// invalidOperator answers Builder::invalidOperator: an operator no grammar in
-// the list accepts, which is how the PHP tells where('votes', 100) from
-// where('votes', '>', 100) after the arguments have been shuffled.
+// invalidOperator reports whether operator is not one any grammar in the
+// list accepts. shortcutOperator uses this to tell a two-argument call, where
+// the second argument is a value, from a three-argument one where it is a
+// real operator.
 func (b *Builder) invalidOperator(operator any) bool {
 	name, ok := operator.(string)
 	if !ok {
@@ -79,9 +83,9 @@ func containsFold(list []string, value string) bool {
 	return false
 }
 
-// shortcutOperator answers the three lines every date and JSON length clause
-// repeats: an operator that is not an operator was meant as the value, with "="
-// understood.
+// shortcutOperator centralises the three lines every date and JSON length
+// clause repeats: an operator that is not an operator was meant as the value,
+// with "=" understood.
 func (b *Builder) shortcutOperator(operator string, value any) (string, any) {
 	if b.invalidOperator(operator) {
 		return "=", operator
@@ -89,8 +93,7 @@ func (b *Builder) shortcutOperator(operator string, value any) (string, any) {
 	return operator, value
 }
 
-// flattenValue answers Builder::flattenValue: the first leaf of a value that
-// arrived as a list.
+// flattenValue returns the first leaf of a value that arrived as a list.
 func flattenValue(value any) any {
 	values, ok := value.([]any)
 	if !ok || len(values) == 0 {
@@ -102,10 +105,10 @@ func flattenValue(value any) any {
 // refuse records a clause that could not be built as a false one carrying the
 // reason, which is what the grammars do with a clause they cannot compile.
 //
-// The PHP throws instead. A fluent method has no error to return, and the two
-// alternatives are worse: dropping the clause widens the query to rows nobody
-// filtered for, and panicking takes down a request over a query that was about
-// to be refused anyway.
+// A fluent method has no error to return, and the two alternatives are worse:
+// dropping the clause widens the query to rows nobody filtered for, and
+// panicking takes down a request over a query that was about to be refused
+// anyway.
 func (b *Builder) refuse(boolean string, err error) *Builder {
 	b.Wheres = append(b.Wheres, Where{
 		Type:    "Raw",
@@ -115,18 +118,19 @@ func (b *Builder) refuse(boolean string, err error) *Builder {
 	return b
 }
 
-// MergeWheres answers Builder::mergeWheres.
+// MergeWheres appends another query's where clauses and bindings onto this
+// one.
 //
-// The bindings are appended to the where segment as the PHP does. They are the
-// caller's to line up with the clauses: the two arguments are the two halves of
-// somebody else's query, and nothing here can check that they match.
+// The bindings are appended to the where segment as given. They are the
+// caller's to line up with the clauses: the two arguments are the two halves
+// of somebody else's query, and nothing here can check that they match.
 func (b *Builder) MergeWheres(wheres []Where, bindings []any) *Builder {
 	b.Wheres = append(b.Wheres, wheres...)
 	b.Bindings["where"] = append(b.Bindings["where"], bindings...)
 	return b
 }
 
-// OrWhereColumn answers Builder::orWhereColumn.
+// OrWhereColumn adds an "or" clause comparing two columns.
 func (b *Builder) OrWhereColumn(first any, args ...any) *Builder {
 	operator, second := prepareValueAndOperator(args...)
 	b.Wheres = append(b.Wheres, Where{
@@ -139,17 +143,20 @@ func (b *Builder) OrWhereColumn(first any, args ...any) *Builder {
 	return b
 }
 
-// OrWhereExists answers Builder::orWhereExists.
+// OrWhereExists adds an "or exists" clause for the subquery the callback
+// builds, optionally negated.
 func (b *Builder) OrWhereExists(callback func(*Builder), not ...bool) *Builder {
 	return b.WhereExists(callback, "or", len(not) > 0 && not[0])
 }
 
-// OrWhereNotExists answers Builder::orWhereNotExists.
+// OrWhereNotExists adds an "or not exists" clause for the subquery the
+// callback builds.
 func (b *Builder) OrWhereNotExists(callback func(*Builder)) *Builder {
 	return b.OrWhereExists(callback, true)
 }
 
-// WhereLike answers Builder::whereLike.
+// WhereLike adds a LIKE clause comparing column against a pattern, optionally
+// case sensitive.
 //
 // The clause carries the value that is bound rather than the pattern that was
 // written, because a grammar may rewrite it -- SQLite spells a case sensitive
@@ -175,36 +182,35 @@ func (b *Builder) WhereLike(column any, value any, caseSensitive bool, boolean s
 	return b
 }
 
-// LikeBindingGrammar is the part of Illuminate\Database\Query\Grammars\Grammar
-// that rewrites a like pattern for the engine. The PHP asks
-// method_exists($this->grammar, 'prepareWhereLikeBinding'); this is the same
-// question with a type.
+// LikeBindingGrammar is the part of a grammar that rewrites a like pattern for
+// the engine. A grammar that does not implement it leaves the pattern alone.
 type LikeBindingGrammar interface {
-	// PrepareWhereLikeBinding answers SQLiteGrammar::prepareWhereLikeBinding.
+	// PrepareWhereLikeBinding rewrites a like pattern into the binding the
+	// grammar's engine expects.
 	PrepareWhereLikeBinding(value string, caseSensitive bool) string
 }
 
-// OrWhereLike answers Builder::orWhereLike.
+// OrWhereLike adds an "or" LIKE clause.
 func (b *Builder) OrWhereLike(column any, value any, caseSensitive bool) *Builder {
 	return b.WhereLike(column, value, caseSensitive, "or", false)
 }
 
-// WhereNotLike answers Builder::whereNotLike.
+// WhereNotLike adds a NOT LIKE clause.
 func (b *Builder) WhereNotLike(column any, value any, caseSensitive bool, boolean string) *Builder {
 	return b.WhereLike(column, value, caseSensitive, boolean, true)
 }
 
-// OrWhereNotLike answers Builder::orWhereNotLike.
+// OrWhereNotLike adds an "or" NOT LIKE clause.
 func (b *Builder) OrWhereNotLike(column any, value any, caseSensitive bool) *Builder {
 	return b.WhereNotLike(column, value, caseSensitive, "or")
 }
 
-// WhereIntegerInRaw answers Builder::whereIntegerInRaw.
+// WhereIntegerInRaw adds a where-in clause whose values are written directly
+// into the statement as integers rather than bound.
 //
-// The values are written into the statement rather than bound, which is why
-// every one of them is cast to an integer first: an integer has no quoting to
-// escape. A value that is not a number at all becomes zero rather than reaching
-// the statement as itself.
+// Every value is cast to an integer first: an integer has no quoting to
+// escape. A value that is not a number at all becomes zero rather than
+// reaching the statement as itself.
 func (b *Builder) WhereIntegerInRaw(column any, values []any, boolean string, not bool) *Builder {
 	if boolean == "" {
 		boolean = "and"
@@ -220,23 +226,24 @@ func (b *Builder) WhereIntegerInRaw(column any, values []any, boolean string, no
 	return b
 }
 
-// OrWhereIntegerInRaw answers Builder::orWhereIntegerInRaw.
+// OrWhereIntegerInRaw adds an "or" where-in clause with raw integer values.
 func (b *Builder) OrWhereIntegerInRaw(column any, values []any) *Builder {
 	return b.WhereIntegerInRaw(column, values, "or", false)
 }
 
-// WhereIntegerNotInRaw answers Builder::whereIntegerNotInRaw.
+// WhereIntegerNotInRaw adds a where-not-in clause with raw integer values.
 func (b *Builder) WhereIntegerNotInRaw(column any, values []any, boolean string) *Builder {
 	return b.WhereIntegerInRaw(column, values, boolean, true)
 }
 
-// OrWhereIntegerNotInRaw answers Builder::orWhereIntegerNotInRaw.
+// OrWhereIntegerNotInRaw adds an "or" where-not-in clause with raw integer
+// values.
 func (b *Builder) OrWhereIntegerNotInRaw(column any, values []any) *Builder {
 	return b.WhereIntegerNotInRaw(column, values, "or")
 }
 
-// WhereBetweenColumns answers Builder::whereBetweenColumns: a column between
-// two other columns, so nothing here is bound.
+// WhereBetweenColumns adds a clause requiring column to be between two other
+// columns, so nothing here is bound.
 func (b *Builder) WhereBetweenColumns(column any, values []any, boolean string, not bool) *Builder {
 	if boolean == "" {
 		boolean = "and"
@@ -247,22 +254,22 @@ func (b *Builder) WhereBetweenColumns(column any, values []any, boolean string, 
 	return b
 }
 
-// OrWhereBetweenColumns answers Builder::orWhereBetweenColumns.
+// OrWhereBetweenColumns adds an "or" between-columns clause.
 func (b *Builder) OrWhereBetweenColumns(column any, values []any) *Builder {
 	return b.WhereBetweenColumns(column, values, "or", false)
 }
 
-// WhereNotBetweenColumns answers Builder::whereNotBetweenColumns.
+// WhereNotBetweenColumns adds a not-between-columns clause.
 func (b *Builder) WhereNotBetweenColumns(column any, values []any, boolean string) *Builder {
 	return b.WhereBetweenColumns(column, values, boolean, true)
 }
 
-// OrWhereNotBetweenColumns answers Builder::orWhereNotBetweenColumns.
+// OrWhereNotBetweenColumns adds an "or" not-between-columns clause.
 func (b *Builder) OrWhereNotBetweenColumns(column any, values []any) *Builder {
 	return b.WhereNotBetweenColumns(column, values, "or")
 }
 
-// WhereValueBetween answers Builder::whereValueBetween: a value between two
+// WhereValueBetween adds a clause requiring value to fall between two
 // columns, which is the between comparison the other way round.
 func (b *Builder) WhereValueBetween(value any, columns []any, boolean string, not bool) *Builder {
 	if boolean == "" {
@@ -275,79 +282,79 @@ func (b *Builder) WhereValueBetween(value any, columns []any, boolean string, no
 	return b
 }
 
-// OrWhereValueBetween answers Builder::orWhereValueBetween.
+// OrWhereValueBetween adds an "or" value-between-columns clause.
 func (b *Builder) OrWhereValueBetween(value any, columns []any) *Builder {
 	return b.WhereValueBetween(value, columns, "or", false)
 }
 
-// WhereValueNotBetween answers Builder::whereValueNotBetween.
+// WhereValueNotBetween adds a value-not-between-columns clause.
 func (b *Builder) WhereValueNotBetween(value any, columns []any, boolean string) *Builder {
 	return b.WhereValueBetween(value, columns, boolean, true)
 }
 
-// OrWhereValueNotBetween answers Builder::orWhereValueNotBetween.
+// OrWhereValueNotBetween adds an "or" value-not-between-columns clause.
 func (b *Builder) OrWhereValueNotBetween(value any, columns []any) *Builder {
 	return b.WhereValueNotBetween(value, columns, "or")
 }
 
-// WhereDate answers Builder::whereDate: the date part of a timestamp column
-// compared with a date.
+// WhereDate adds a clause comparing the date part of a timestamp column with
+// a date.
 //
-// The operator is optional, as it is on Where: two arguments are a column and a
-// value compared with "=". A time.Time is formatted to the day, which is what
-// the PHP's format('Y-m-d') does.
+// The operator is optional, as it is on Where: two arguments are a column and
+// a value compared with "=". A time.Time value is formatted down to the day.
 func (b *Builder) WhereDate(column any, args ...any) *Builder {
 	return b.addDateBasedWhere("Date", column, "and", args...)
 }
 
-// OrWhereDate answers Builder::orWhereDate.
+// OrWhereDate adds an "or" date clause.
 func (b *Builder) OrWhereDate(column any, args ...any) *Builder {
 	return b.addDateBasedWhere("Date", column, "or", args...)
 }
 
-// WhereTime answers Builder::whereTime.
+// WhereTime adds a clause comparing the time part of a timestamp column with
+// a time.
 func (b *Builder) WhereTime(column any, args ...any) *Builder {
 	return b.addDateBasedWhere("Time", column, "and", args...)
 }
 
-// OrWhereTime answers Builder::orWhereTime.
+// OrWhereTime adds an "or" time clause.
 func (b *Builder) OrWhereTime(column any, args ...any) *Builder {
 	return b.addDateBasedWhere("Time", column, "or", args...)
 }
 
-// WhereDay answers Builder::whereDay.
+// WhereDay adds a clause comparing the day part of a timestamp column.
 func (b *Builder) WhereDay(column any, args ...any) *Builder {
 	return b.addDateBasedWhere("Day", column, "and", args...)
 }
 
-// OrWhereDay answers Builder::orWhereDay.
+// OrWhereDay adds an "or" day clause.
 func (b *Builder) OrWhereDay(column any, args ...any) *Builder {
 	return b.addDateBasedWhere("Day", column, "or", args...)
 }
 
-// WhereMonth answers Builder::whereMonth.
+// WhereMonth adds a clause comparing the month part of a timestamp column.
 func (b *Builder) WhereMonth(column any, args ...any) *Builder {
 	return b.addDateBasedWhere("Month", column, "and", args...)
 }
 
-// OrWhereMonth answers Builder::orWhereMonth.
+// OrWhereMonth adds an "or" month clause.
 func (b *Builder) OrWhereMonth(column any, args ...any) *Builder {
 	return b.addDateBasedWhere("Month", column, "or", args...)
 }
 
-// WhereYear answers Builder::whereYear.
+// WhereYear adds a clause comparing the year part of a timestamp column.
 func (b *Builder) WhereYear(column any, args ...any) *Builder {
 	return b.addDateBasedWhere("Year", column, "and", args...)
 }
 
-// OrWhereYear answers Builder::orWhereYear.
+// OrWhereYear adds an "or" year clause.
 func (b *Builder) OrWhereYear(column any, args ...any) *Builder {
 	return b.addDateBasedWhere("Year", column, "or", args...)
 }
 
-// addDateBasedWhere answers Builder::addDateBasedWhere, with the five methods'
-// shared preamble folded in: the operator shortcut and the formatting of the
-// value, which is the one line that differs between them.
+// addDateBasedWhere is the shared body of the five date-part clauses: the
+// operator shortcut and the formatting of the value, which is the one line
+// that differs between them.
 func (b *Builder) addDateBasedWhere(typ string, column any, boolean string, args ...any) *Builder {
 	operator, value := prepareValueAndOperator(args...)
 	if len(args) > 1 {
@@ -364,9 +371,9 @@ func (b *Builder) addDateBasedWhere(typ string, column any, boolean string, args
 	return b
 }
 
-// formatDatePart is the PHP's format('Y-m-d'), format('H:i:s'), format('d'),
-// format('m') and format('Y'), plus the sprintf('%02d') the day and the month
-// apply to a value that arrived as a number.
+// formatDatePart formats value to the part of a timestamp that typ names --
+// the date, the time, the day, the month or the year. A day or month that
+// arrived as a plain number is zero-padded to two digits.
 func formatDatePart(typ string, value any) any {
 	if IsExpression(value) {
 		return value
@@ -395,8 +402,8 @@ func formatDatePart(typ string, value any) any {
 	return value
 }
 
-// WhereRowValues answers Builder::whereRowValues: a tuple of columns compared
-// with a tuple of values.
+// WhereRowValues adds a clause comparing a tuple of columns with a tuple of
+// values.
 func (b *Builder) WhereRowValues(columns []any, operator string, values []any, boolean string) *Builder {
 	if boolean == "" {
 		boolean = "and"
@@ -413,48 +420,49 @@ func (b *Builder) WhereRowValues(columns []any, operator string, values []any, b
 	return b
 }
 
-// OrWhereRowValues answers Builder::orWhereRowValues.
+// OrWhereRowValues adds an "or" row-values clause.
 func (b *Builder) OrWhereRowValues(columns []any, operator string, values []any) *Builder {
 	return b.WhereRowValues(columns, operator, values, "or")
 }
 
-// WhereJSONContains answers Builder::whereJsonContains. The PHP spells the
-// middle word Json; Go initialisms are upper case throughout.
+// WhereJSONContains adds a clause requiring the JSON column to contain value.
 func (b *Builder) WhereJSONContains(column any, value any, boolean string, not bool) *Builder {
 	return b.addWhereJSON("JsonContains", column, value, boolean, not)
 }
 
-// OrWhereJSONContains answers Builder::orWhereJsonContains.
+// OrWhereJSONContains adds an "or" JSON-contains clause.
 func (b *Builder) OrWhereJSONContains(column any, value any) *Builder {
 	return b.WhereJSONContains(column, value, "or", false)
 }
 
-// WhereJSONDoesntContain answers Builder::whereJsonDoesntContain.
+// WhereJSONDoesntContain adds a clause requiring the JSON column not to
+// contain value.
 func (b *Builder) WhereJSONDoesntContain(column any, value any, boolean string) *Builder {
 	return b.WhereJSONContains(column, value, boolean, true)
 }
 
-// OrWhereJSONDoesntContain answers Builder::orWhereJsonDoesntContain.
+// OrWhereJSONDoesntContain adds an "or" JSON-does-not-contain clause.
 func (b *Builder) OrWhereJSONDoesntContain(column any, value any) *Builder {
 	return b.WhereJSONDoesntContain(column, value, "or")
 }
 
-// WhereJSONOverlaps answers Builder::whereJsonOverlaps.
+// WhereJSONOverlaps adds a clause requiring the JSON column to overlap value.
 func (b *Builder) WhereJSONOverlaps(column any, value any, boolean string, not bool) *Builder {
 	return b.addWhereJSON("JsonOverlaps", column, value, boolean, not)
 }
 
-// OrWhereJSONOverlaps answers Builder::orWhereJsonOverlaps.
+// OrWhereJSONOverlaps adds an "or" JSON-overlaps clause.
 func (b *Builder) OrWhereJSONOverlaps(column any, value any) *Builder {
 	return b.WhereJSONOverlaps(column, value, "or", false)
 }
 
-// WhereJSONDoesntOverlap answers Builder::whereJsonDoesntOverlap.
+// WhereJSONDoesntOverlap adds a clause requiring the JSON column not to
+// overlap value.
 func (b *Builder) WhereJSONDoesntOverlap(column any, value any, boolean string) *Builder {
 	return b.WhereJSONOverlaps(column, value, boolean, true)
 }
 
-// OrWhereJSONDoesntOverlap answers Builder::orWhereJsonDoesntOverlap.
+// OrWhereJSONDoesntOverlap adds an "or" JSON-does-not-overlap clause.
 func (b *Builder) OrWhereJSONDoesntOverlap(column any, value any) *Builder {
 	return b.WhereJSONDoesntOverlap(column, value, "or")
 }
@@ -483,12 +491,12 @@ func (b *Builder) addWhereJSON(typ string, column any, value any, boolean string
 	return b
 }
 
-// JSONContainsGrammar is the part of Illuminate\Database\Query\Grammars\Grammar
-// that turns a value into the JSON binding its engine expects. It is asked for
+// JSONContainsGrammar is the part of a grammar that turns a value into the JSON
+// binding its engine expects. It is asked for
 // rather than declared on Grammar, for the reason InsertUsingGrammar is.
 type JSONContainsGrammar interface {
-	// PrepareBindingForJSONContains answers
-	// Grammar::prepareBindingForJsonContains.
+	// PrepareBindingForJSONContains turns a value into the JSON binding the
+	// grammar's engine expects.
 	PrepareBindingForJSONContains(binding any) (any, error)
 }
 
@@ -505,8 +513,8 @@ func prepareBindingForJSONContains(grammar Grammar, value any) (any, error) {
 	return string(encoded), nil
 }
 
-// WhereJSONContainsKey answers Builder::whereJsonContainsKey: the key is in the
-// column's path, so there is nothing to bind.
+// WhereJSONContainsKey adds a clause requiring the JSON column to contain the
+// given key path. The key is part of the path, so there is nothing to bind.
 func (b *Builder) WhereJSONContainsKey(column any, boolean string, not bool) *Builder {
 	if boolean == "" {
 		boolean = "and"
@@ -517,28 +525,29 @@ func (b *Builder) WhereJSONContainsKey(column any, boolean string, not bool) *Bu
 	return b
 }
 
-// OrWhereJSONContainsKey answers Builder::orWhereJsonContainsKey.
+// OrWhereJSONContainsKey adds an "or" JSON-contains-key clause.
 func (b *Builder) OrWhereJSONContainsKey(column any) *Builder {
 	return b.WhereJSONContainsKey(column, "or", false)
 }
 
-// WhereJSONDoesntContainKey answers Builder::whereJsonDoesntContainKey.
+// WhereJSONDoesntContainKey adds a clause requiring the JSON column not to
+// contain the given key path.
 func (b *Builder) WhereJSONDoesntContainKey(column any, boolean string) *Builder {
 	return b.WhereJSONContainsKey(column, boolean, true)
 }
 
-// OrWhereJSONDoesntContainKey answers Builder::orWhereJsonDoesntContainKey.
+// OrWhereJSONDoesntContainKey adds an "or" JSON-does-not-contain-key clause.
 func (b *Builder) OrWhereJSONDoesntContainKey(column any) *Builder {
 	return b.WhereJSONDoesntContainKey(column, "or")
 }
 
-// WhereJSONLength answers Builder::whereJsonLength. The bound value is an
-// integer: it is compared with a length.
+// WhereJSONLength adds a clause comparing the length of a JSON column. The
+// bound value is an integer: it is compared with a length.
 func (b *Builder) WhereJSONLength(column any, args ...any) *Builder {
 	return b.addWhereJSONLength(column, "and", args...)
 }
 
-// OrWhereJSONLength answers Builder::orWhereJsonLength.
+// OrWhereJSONLength adds an "or" JSON-length clause.
 func (b *Builder) OrWhereJSONLength(column any, args ...any) *Builder {
 	return b.addWhereJSONLength(column, "or", args...)
 }
@@ -561,11 +570,11 @@ func (b *Builder) addWhereJSONLength(column any, boolean string, args ...any) *B
 	return b
 }
 
-// WhereFullText answers Builder::whereFullText.
+// WhereFullText adds a full-text search clause over the given columns.
 //
 // options carries the engine's search modes -- MySQL reads "mode" and
-// "expanded", Postgres reads "language" -- and a grammar that has none ignores
-// it, as the PHP does.
+// "expanded", Postgres reads "language" -- and a grammar that has none
+// ignores it.
 func (b *Builder) WhereFullText(columns []any, value any, options map[string]any, boolean string) *Builder {
 	if boolean == "" {
 		boolean = "and"
@@ -577,49 +586,49 @@ func (b *Builder) WhereFullText(columns []any, value any, options map[string]any
 	return b
 }
 
-// OrWhereFullText answers Builder::orWhereFullText.
+// OrWhereFullText adds an "or" full-text search clause.
 func (b *Builder) OrWhereFullText(columns []any, value any, options map[string]any) *Builder {
 	return b.WhereFullText(columns, value, options, "or")
 }
 
-// WhereAll answers Builder::whereAll: every one of the columns compared with
+// WhereAll adds a clause requiring every one of the columns to compare with
 // the same value, joined by "and" inside one group.
 func (b *Builder) WhereAll(columns []any, args ...any) *Builder {
 	return b.addWhereAcross(columns, "and", "and", args...)
 }
 
-// OrWhereAll answers Builder::orWhereAll.
+// OrWhereAll adds an "or" version of WhereAll.
 func (b *Builder) OrWhereAll(columns []any, args ...any) *Builder {
 	return b.addWhereAcross(columns, "or", "and", args...)
 }
 
-// WhereAny answers Builder::whereAny: any one of the columns, joined by "or".
+// WhereAny adds a clause requiring any one of the columns to compare with the
+// same value, joined by "or" inside one group.
 func (b *Builder) WhereAny(columns []any, args ...any) *Builder {
 	return b.addWhereAcross(columns, "and", "or", args...)
 }
 
-// OrWhereAny answers Builder::orWhereAny.
+// OrWhereAny adds an "or" version of WhereAny.
 func (b *Builder) OrWhereAny(columns []any, args ...any) *Builder {
 	return b.addWhereAcross(columns, "or", "or", args...)
 }
 
-// WhereNone answers Builder::whereNone: none of the columns, which the PHP
-// spells as whereAny negated -- the group is joined by "and not".
+// WhereNone adds a clause requiring none of the columns to compare with the
+// same value: WhereAny negated, with the group joined by "and not".
 func (b *Builder) WhereNone(columns []any, args ...any) *Builder {
 	return b.addWhereAcross(columns, "and not", "or", args...)
 }
 
-// OrWhereNone answers Builder::orWhereNone.
+// OrWhereNone adds an "or" version of WhereNone.
 func (b *Builder) OrWhereNone(columns []any, args ...any) *Builder {
 	return b.addWhereAcross(columns, "or not", "or", args...)
 }
 
-// addWhereAcross is the shared body of whereAll, whereAny and whereNone: one
+// addWhereAcross is the shared body of WhereAll, WhereAny and WhereNone: one
 // nested group holding the same comparison over each column.
 //
 // The group is what makes the three of them safe next to a tenant filter --
-// `tenant_id = ? and (name like ? or email like ?)` -- and it is the shape the
-// PHP produces too, through whereNested.
+// `tenant_id = ? and (name like ? or email like ?)`.
 func (b *Builder) addWhereAcross(columns []any, boolean, inner string, args ...any) *Builder {
 	operator, value := prepareValueAndOperator(args...)
 	return b.WhereNested(func(query *Builder) {
@@ -629,13 +638,11 @@ func (b *Builder) addWhereAcross(columns []any, boolean, inner string, args ...a
 	}, boolean)
 }
 
-// DynamicWhere answers Builder::dynamicWhere: the where clause spelled in a
-// method name, as in whereNameAndEmail('taylor', 'taylor@laravel.com').
+// DynamicWhere reads a where clause out of a method name, as in
+// "whereNameAndEmail", and binds the values positionally.
 //
-// PHP routes there from __call, which Go has no equivalent of, so the method is
-// called by name and given the name it would have been called with. It is here
-// because it is public there, and because a caller with a column list coming
-// from configuration has the same string to turn into clauses.
+// The name is an argument rather than something dispatched to, so a caller with
+// a column list coming from configuration has one string to turn into clauses.
 func (b *Builder) DynamicWhere(method string, parameters []any) *Builder {
 	finder := strings.TrimPrefix(method, "where")
 	connector := "and"
@@ -654,8 +661,9 @@ func (b *Builder) DynamicWhere(method string, parameters []any) *Builder {
 	return b
 }
 
-// splitDynamicSegments answers the PHP's preg_split on /(And|Or)(?=[A-Z])/ with
-// PREG_SPLIT_DELIM_CAPTURE: the column names and the connectors between them,
+// splitDynamicSegments splits a dynamic-where method name on "And" and "Or"
+// connectors that are followed by an uppercase letter, keeping the
+// connectors themselves: the column names and the connectors between them,
 // in order.
 func splitDynamicSegments(finder string) []string {
 	segments := make([]string, 0, 4)
@@ -684,18 +692,18 @@ func splitDynamicSegments(finder string) []string {
 	return segments
 }
 
-// WhereVectorDistanceLessThan answers Builder::whereVectorDistanceLessThan: the
-// rows whose embedding is nearer than a distance to the vector given.
+// WhereVectorDistanceLessThan adds a clause matching rows whose embedding is
+// nearer than maxDistance to the given vector.
 //
-// The PHP also accepts a string there and turns it into an embedding through
-// Str::of($text)->toEmbeddings(), which calls out to a model provider. That
-// argument shape is not here: an embedding is fetched by the caller and passed
-// in, because a query builder that makes a network call is a query builder that
-// can time out.
+// It takes the vector directly rather than accepting text and computing an
+// embedding from it, because a query builder that makes a network call to an
+// embedding provider is a query builder that can time out. The caller fetches
+// the embedding and passes it in.
 //
-// The PHP refuses on a connection that is not Postgres. Here the engine
-// refuses, because the operator is Postgres's and a fluent method has nothing to
-// report an error through.
+// Nothing here checks that the connection is Postgres: the operator is
+// Postgres's, and a fluent method has nothing to report an error through, so
+// an unsupported connection fails when the engine refuses the SQL rather than
+// before.
 func (b *Builder) WhereVectorDistanceLessThan(column any, vector []float64, maxDistance float64, boolean string) *Builder {
 	if boolean == "" {
 		boolean = "and"
@@ -712,14 +720,13 @@ func (b *Builder) WhereVectorDistanceLessThan(column any, vector []float64, maxD
 	return b
 }
 
-// OrWhereVectorDistanceLessThan answers
-// Builder::orWhereVectorDistanceLessThan.
+// OrWhereVectorDistanceLessThan adds an "or" vector-distance clause.
 func (b *Builder) OrWhereVectorDistanceLessThan(column any, vector []float64, maxDistance float64) *Builder {
 	return b.WhereVectorDistanceLessThan(column, vector, maxDistance, "or")
 }
 
-// WhereVectorSimilarTo answers Builder::whereVectorSimilarTo: the distance
-// filter and the ordering that goes with it, given a similarity between 0 and 1.
+// WhereVectorSimilarTo adds the distance filter and, optionally, the ordering
+// that goes with it, given a similarity between 0 and 1.
 func (b *Builder) WhereVectorSimilarTo(column any, vector []float64, minSimilarity float64, order bool) *Builder {
 	b.WhereVectorDistanceLessThan(column, vector, 1-minSimilarity, "and")
 	if order {

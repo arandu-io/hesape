@@ -7,13 +7,9 @@ import (
 	"github.com/arandu-io/hesape/routing/matching"
 )
 
-// Scheme declares the scheme the route answers on, "http" or "https". PHP
-// carries the same fact as a bare string in the action array, put there by the
-// group attributes; here it is one key of the same map.
-//
-// It is not in Illuminate under this name -- PHP writes ['https'] into the
-// action and reads it back with in_array. HttpOnly, HttpsOnly and Secure are
-// the readers, and this is what writes what they read.
+// Scheme declares the scheme the route answers on, "http" or "https". It is
+// stored as one key of the route's action map. HttpOnly, HttpsOnly and Secure
+// are the readers, and this is what writes what they read.
 func (rt *Route) Scheme(scheme string) *Route {
 	if rt == nil {
 		return nil
@@ -22,8 +18,8 @@ func (rt *Route) Scheme(scheme string) *Route {
 	return rt
 }
 
-// HttpOnly is Route::httpOnly. It reports whether the route answers only plain
-// http, which a route generating a URL for a local development host declares.
+// HttpOnly reports whether the route answers only plain http, which a route
+// generating a URL for a local development host declares.
 func (rt *Route) HttpOnly() bool {
 	if rt == nil {
 		return false
@@ -32,12 +28,11 @@ func (rt *Route) HttpOnly() bool {
 	return scheme == "http"
 }
 
-// HttpsOnly is Route::httpsOnly.
+// HttpsOnly is an alias for Secure.
 func (rt *Route) HttpsOnly() bool { return rt.Secure() }
 
-// Secure is Route::secure. It reports whether the route answers only https,
-// which is what makes its generated URL https regardless of how the current
-// request arrived.
+// Secure reports whether the route answers only https, which is what makes
+// its generated URL https regardless of how the current request arrived.
 func (rt *Route) Secure() bool {
 	if rt == nil {
 		return false
@@ -46,9 +41,9 @@ func (rt *Route) Secure() bool {
 	return scheme == "https"
 }
 
-// GetOptionalParameterNames is Route::getOptionalParameterNames. The values
-// are nil, as PHP's array_fill_keys leaves them: the map is a set, and the
-// question asked of it is only whether a name is in it.
+// GetOptionalParameterNames returns the names of the route's optional path
+// parameters. The values are nil: the map is a set, and the question asked
+// of it is only whether a name is in it.
 func (rt *Route) GetOptionalParameterNames() map[string]any {
 	out := map[string]any{}
 	if rt == nil {
@@ -77,13 +72,12 @@ func (rt *Route) GetOptionalParameterNames() map[string]any {
 	}
 }
 
-// OriginalParameters is Route::originalParameters. It returns every path
-// parameter as it arrived, before any binding replaced an id with the record
-// it names -- which is what a binder compares against to know it changed
-// something.
+// OriginalParameters returns every path parameter as it arrived, before any
+// binding replaced an id with the record it names -- which is what a binder
+// compares against to know it changed something.
 //
-// PHP throws when the route is not bound to a request; here the request is the
-// argument, so an unbound call is not expressible.
+// The request is the argument, so a call against an unbound route is not
+// expressible.
 func (rt *Route) OriginalParameters(req *http.Request) map[string]string {
 	out := map[string]string{}
 	if rt == nil || req == nil {
@@ -97,8 +91,8 @@ func (rt *Route) OriginalParameters(req *http.Request) map[string]string {
 	return out
 }
 
-// SetRouter is Route::setRouter. It attaches the router whose matched
-// listeners the route fires and whose binders it resolves through.
+// SetRouter attaches the router whose matched listeners the route fires and
+// whose binders it resolves through.
 func (rt *Route) SetRouter(router *Router) *Route {
 	if rt == nil {
 		return nil
@@ -111,15 +105,13 @@ func (rt *Route) SetRouter(router *Router) *Route {
 	return rt
 }
 
-// Can is Route::can. It records the ability a request must be granted before
-// the route answers, and the resources that ability is asked about.
+// Can records the ability a request must be granted before the route
+// answers, and the resources that ability is asked about.
 //
-// PHP appends the string "can:ability,model" to the route's middleware, and
-// the container resolves that string into the Authorize middleware. Middleware
-// here is a typed function and there is no container to resolve a name
-// through, so the ability is recorded on the route: `aru routes` prints it,
-// and the handler asks auth.Authorize for the Grant, which is the only thing
-// that opens a repository (RULE 17).
+// Middleware here is a typed function and there is no container to resolve a
+// name through, so the ability is recorded on the route instead: route
+// introspection prints it, and the handler asks auth.Authorize for the
+// Grant, which is the only thing that opens a repository.
 func (rt *Route) Can(ability string, models ...string) *Route {
 	if rt == nil {
 		return nil
@@ -132,9 +124,9 @@ func (rt *Route) Can(ability string, models ...string) *Route {
 	return rt
 }
 
-// Block is Route::block. It stops two requests of the same session from
-// running this route at once -- a double-submitted form, mostly -- by holding
-// a lock for lockSeconds and waiting up to waitSeconds to take it.
+// Block stops two requests of the same session from running this route at
+// once -- a double-submitted form, mostly -- by holding a lock for
+// lockSeconds and waiting up to waitSeconds to take it.
 func (rt *Route) Block(lockSeconds, waitSeconds *int) *Route {
 	if rt == nil {
 		return nil
@@ -144,10 +136,11 @@ func (rt *Route) Block(lockSeconds, waitSeconds *int) *Route {
 	return rt
 }
 
-// WithoutBlocking is Route::withoutBlocking.
+// WithoutBlocking clears any lock Block set.
 func (rt *Route) WithoutBlocking() *Route { return rt.Block(nil, nil) }
 
-// LocksFor is Route::locksFor. nil means the route takes no lock.
+// LocksFor returns the lock duration Block set. nil means the route takes no
+// lock.
 func (rt *Route) LocksFor() *int {
 	if rt == nil {
 		return nil
@@ -155,7 +148,8 @@ func (rt *Route) LocksFor() *int {
 	return rt.lockSeconds
 }
 
-// WaitsFor is Route::waitsFor. nil means the route takes no lock.
+// WaitsFor returns the wait duration Block set. nil means the route takes no
+// lock.
 func (rt *Route) WaitsFor() *int {
 	if rt == nil {
 		return nil
@@ -163,8 +157,8 @@ func (rt *Route) WaitsFor() *int {
 	return rt.waitSeconds
 }
 
-// routeValidators are the four checks, in the order PHP lists them. They hold
-// no state, so one set serves every route.
+// routeValidators are the four checks. They hold no state, so one set serves
+// every route.
 var routeValidators = []matching.ValidatorInterface{
 	matching.UriValidator{},
 	matching.MethodValidator{},
@@ -172,8 +166,8 @@ var routeValidators = []matching.ValidatorInterface{
 	matching.HostValidator{},
 }
 
-// GetValidators is Route::getValidators. It returns the four checks that
-// decide whether the route answers a request: path, method, scheme and host.
+// GetValidators returns the four checks that decide whether the route
+// answers a request: path, method, scheme and host.
 func (rt *Route) GetValidators() []matching.ValidatorInterface {
 	return append([]matching.ValidatorInterface(nil), routeValidators...)
 }

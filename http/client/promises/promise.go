@@ -5,58 +5,56 @@ import (
 	"sync"
 )
 
-// State is the three states of GuzzleHttp\Promise\PromiseInterface.
+// State is the state a [Promise] can be in.
 type State string
 
 const (
-	// StatePending is PromiseInterface::PENDING.
+	// StatePending is the state before a promise settles.
 	StatePending State = "pending"
-	// StateFulfilled is PromiseInterface::FULFILLED.
+	// StateFulfilled is the state after Resolve settles a promise.
 	StateFulfilled State = "fulfilled"
-	// StateRejected is PromiseInterface::REJECTED.
+	// StateRejected is the state after Reject settles a promise.
 	StateRejected State = "rejected"
 )
 
 // ErrCancelled is what a cancelled promise rejects with.
 var ErrCancelled = errors.New("http/client/promises: promise cancelled")
 
-// ErrAlreadyBuilt is LazyPromise::buildPromise's RuntimeException.
+// ErrAlreadyBuilt is what [LazyPromise.BuildPromise] returns when the
+// promise was already built.
 var ErrAlreadyBuilt = errors.New("http/client/promises: promise already built")
 
-// ErrLazy is the LogicException LazyPromise throws from resolve, reject and
-// cancel: a promise nobody has built yet has nothing to settle.
+// ErrLazy is what LazyPromise returns from Resolve, Reject and Cancel: a
+// promise nobody has built yet has nothing to settle.
 var ErrLazy = errors.New("http/client/promises: cannot settle a lazy promise")
 
-// Promise is the slice of GuzzleHttp\Promise\PromiseInterface that
-// Illuminate\Http\Client uses.
-//
-// The Guzzle interface exists because PHP has no way to wait on work that has
-// not finished; Go has goroutines and channels, and this is the shape that
-// wraps them for a caller who came from Laravel and expects then, otherwise
-// and wait.
+// Promise is a value that is not there yet, with Then, Otherwise, Resolve,
+// Reject, Cancel, Wait and GetState to observe or settle it. It is a
+// promise-style API over the goroutines and channels doing the actual work.
 type Promise interface {
-	// Then is PromiseInterface::then.
+	// Then registers callbacks for fulfillment and rejection, and returns a
+	// Promise for chaining.
 	Then(onFulfilled func(any) any, onRejected func(error) any) Promise
-	// Otherwise is PromiseInterface::otherwise.
+	// Otherwise is Then with only the rejection callback.
 	Otherwise(onRejected func(error) any) Promise
-	// Resolve is PromiseInterface::resolve.
+	// Resolve settles the promise with a value.
 	Resolve(value any) error
-	// Reject is PromiseInterface::reject.
+	// Reject settles the promise with an error.
 	Reject(reason error) error
-	// Cancel is PromiseInterface::cancel.
+	// Cancel rejects a pending promise; a settled one is unaffected.
 	Cancel() error
-	// Wait is PromiseInterface::wait.
+	// Wait blocks until the promise settles and returns what it settled
+	// with.
 	Wait(unwrap bool) (any, error)
-	// GetState is PromiseInterface::getState.
+	// GetState is the promise's current State.
 	GetState() State
 }
 
-// Deferred is the GuzzleHttp\Promise\Promise the two decorators in this package
+// Deferred is the concrete [Promise] the two decorators in this package
 // wrap: a value that is not there yet, and the callbacks waiting on it.
 //
-// Guzzle needs a task queue because PHP cannot wait on anything; a Deferred is
-// settled from whichever goroutine is doing the work, and Wait blocks on a
-// channel until it is.
+// It is settled from whichever goroutine is doing the work, and Wait
+// blocks on a channel until it is.
 type Deferred struct {
 	mu sync.Mutex
 
@@ -65,8 +63,8 @@ type Deferred struct {
 	reason error
 	done   chan struct{}
 
-	// wait is what Wait runs when nothing has settled the promise yet. It is
-	// the Guzzle wait function: the work whose result the promise stands for.
+	// wait is what Wait runs when nothing has settled the promise yet: the
+	// work whose result the promise stands for.
 	wait func()
 	// waitOnce keeps that work from running twice when two goroutines wait.
 	waitOnce sync.Once
@@ -88,29 +86,28 @@ func NewDeferred(waitFn func()) *Deferred {
 	}
 }
 
-// GetState is PromiseInterface::getState.
+// GetState is the promise's current State.
 func (d *Deferred) GetState() State {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.state
 }
 
-// Resolve is PromiseInterface::resolve: settle the promise with a value.
+// Resolve settles the promise with a value.
 //
-// The PHP throws when the promise is already settled with a different value;
-// this returns that as an error, because a settled promise is a race the caller
-// wants told about rather than swallowed.
+// Returns an error when the promise is already settled, because a settled
+// promise is a race the caller wants told about rather than swallowed.
 func (d *Deferred) Resolve(value any) error {
 	return d.settle(StateFulfilled, value, nil)
 }
 
-// Reject is PromiseInterface::reject: settle the promise with a reason.
+// Reject settles the promise with a reason.
 func (d *Deferred) Reject(reason error) error {
 	return d.settle(StateRejected, nil, reason)
 }
 
-// Cancel is PromiseInterface::cancel: reject a pending promise with
-// [ErrCancelled], and do nothing to one that has already settled.
+// Cancel rejects a pending promise with [ErrCancelled], and does nothing to
+// one that has already settled.
 func (d *Deferred) Cancel() error {
 	d.mu.Lock()
 	settled := d.state != StatePending
@@ -146,12 +143,11 @@ func (d *Deferred) settle(state State, value any, reason error) error {
 	return nil
 }
 
-// Then is PromiseInterface::then.
+// Then registers callbacks for fulfillment and rejection.
 //
-// Guzzle hands back a new promise for the callback's return value; this hands
-// back the same promise, because a Go callback that wants to chain has the
-// value in hand and does not need a second object to carry it. Either callback
-// may be nil, as in the PHP.
+// It hands back the same promise rather than a new one, because a Go
+// callback that wants to chain has the value in hand and does not need a
+// second object to carry it. Either callback may be nil.
 func (d *Deferred) Then(onFulfilled func(any) any, onRejected func(error) any) Promise {
 	d.mu.Lock()
 	switch d.state {
@@ -181,17 +177,17 @@ func (d *Deferred) Then(onFulfilled func(any) any, onRejected func(error) any) P
 	}
 }
 
-// Otherwise is PromiseInterface::otherwise: Then with only the rejection half.
+// Otherwise is Then with only the rejection half.
 func (d *Deferred) Otherwise(onRejected func(error) any) Promise {
 	return d.Then(nil, onRejected)
 }
 
-// Wait is PromiseInterface::wait: block until the promise settles, and hand
-// back what it settled with.
+// Wait blocks until the promise settles, and hands back what it settled
+// with.
 //
-// unwrap is the PHP's $unwrap: false asks for the state rather than the value,
-// so a rejected promise comes back with a nil error and the caller reads
-// [Deferred.GetState].
+// unwrap: false asks for the value without the error, so a rejected
+// promise comes back with a nil error and the caller reads
+// [Deferred.GetState] to learn it was rejected.
 func (d *Deferred) Wait(unwrap bool) (any, error) {
 	d.mu.Lock()
 	waitFn := d.wait

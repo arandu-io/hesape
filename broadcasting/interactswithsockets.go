@@ -1,39 +1,35 @@
 package broadcasting
 
-// InteractsWithSockets is Illuminate\Broadcasting\InteractsWithSockets.
-//
-// The PHP is a trait an event uses. Go has no traits, so it is a struct an
-// event embeds, and the two methods are promoted exactly as the trait's are:
+// InteractsWithSockets is embedded by an event that can exclude the connection
+// that raised it, and promotes the two methods below onto it:
 //
 //	type OrderShipped struct {
 //		broadcasting.InteractsWithSockets
 //		OrderID string
 //	}
 //
-// The one difference is the argument. The trait's dontBroadcastToCurrentUser
-// reads the socket id off the Broadcast facade, which reads it off the ambient
-// current request. There is no facade (ADR 0001) and there is no ambient
-// request in Go -- a request is a value a handler holds -- so the socket id is
-// passed in. [BroadcastManager.Socket] is where it comes from, and it reads
-// the same X-Socket-ID header the facade does.
+// The socket id is passed in rather than read off an ambient request, because a
+// request in Go is a value a handler holds. [BroadcastManager.Socket] is where
+// it comes from, off the X-Socket-ID header.
 type InteractsWithSockets struct {
-	// Socket is the socket id of the connection that raised the event, and the
-	// public $socket of the trait. Empty means the event goes to everyone.
+	// Socket is the socket id of the connection that raised the event. Empty
+	// means the event goes to everyone.
 	//
-	// It is tagged so that it lands in a broadcast payload under the key the PHP
-	// reflection produces -- "socket", not "Socket".
+	// It is tagged so that it lands in a broadcast payload under "socket"
+	// rather than "Socket".
 	Socket string `json:"socket"`
 }
 
-// DontBroadcastToCurrentUser is InteractsWithSockets::dontBroadcastToCurrentUser:
-// it excludes the connection that raised the event from receiving it.
+// DontBroadcastToCurrentUser excludes the connection that raised the event from
+// receiving it.
 func (i *InteractsWithSockets) DontBroadcastToCurrentUser(socket string) *InteractsWithSockets {
 	i.Socket = socket
 
 	return i
 }
 
-// BroadcastToEveryone is InteractsWithSockets::broadcastToEveryone.
+// BroadcastToEveryone clears the exclusion, so the event reaches every
+// connection.
 func (i *InteractsWithSockets) BroadcastToEveryone() *InteractsWithSockets {
 	i.Socket = ""
 

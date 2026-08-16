@@ -11,19 +11,21 @@ import (
 // and MySQL's upsert spells the excluded row differently depending on a
 // connection option.
 //
-// The PHP asks the connection -- getServerVersion(), getConfig(). The connection
-// a builder holds here is query.Connection, which is narrowed to running
-// statements, so the questions are asked through these optional interfaces: a
-// connection that can answer implements one, and a connection that cannot gets
-// the modern answer, which is the one every supported server gives.
+// The connection a builder holds here is query.Connection, which is
+// narrowed to running statements, so these questions are asked through
+// optional interfaces instead: a connection that can answer implements one,
+// and a connection that cannot gets the modern answer, which is the one
+// every supported server gives.
 
-// ServerVersionConnection answers Connection::getServerVersion.
+// ServerVersionConnection is implemented by a connection that can report
+// its server version string.
 type ServerVersionConnection interface {
 	// GetServerVersion returns the version string the server reports.
 	GetServerVersion() string
 }
 
-// ConfigConnection answers Connection::getConfig.
+// ConfigConnection is implemented by a connection that can report one
+// option of its configuration.
 type ConfigConnection interface {
 	// GetConfig returns one option of the connection's configuration.
 	GetConfig(option string) any
@@ -48,7 +50,8 @@ func config(connection any, option string) any {
 	return nil
 }
 
-// configBool reads an option as a flag, the way PHP reads a truthy value.
+// configBool reads an option as a flag: a boolean, a non-empty and
+// non-"0"/"false" string, or a non-zero int.
 func configBool(connection any, option string) bool {
 	switch value := config(connection, option).(type) {
 	case bool:
@@ -62,12 +65,13 @@ func configBool(connection any, option string) bool {
 	}
 }
 
-// versionLess answers version_compare($version, $other, '<').
+// versionLess reports whether version sorts before other, comparing only
+// their leading numeric parts.
 //
-// Only the leading numeric parts are compared, so "8.0.11-log" and "3.45.0" are
-// read the way the servers mean them. A version that cannot be read at all
-// compares as not less, which keeps an unrecognisable server on the modern
-// statement rather than on the compatibility one.
+// Only the leading numeric parts are compared, so "8.0.11-log" and
+// "3.45.0" are read the way the servers mean them. A version that cannot be
+// read at all compares as not less, which keeps an unrecognisable server on
+// the modern statement rather than on the compatibility one.
 func versionLess(version, other string) bool {
 	left, right := versionParts(version), versionParts(other)
 

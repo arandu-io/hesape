@@ -9,14 +9,14 @@ import (
 	"github.com/arandu-io/hesape/database/schema"
 )
 
-// MySQLGrammar answers Illuminate\Database\Schema\Grammars\MySqlGrammar.
+// MySQLGrammar turns a Blueprint into MySQL DDL.
 //
-// It serves MariaDB too, which is what Illuminate's MariaDbGrammar subclass is
-// for: that subclass overrides two type methods and nothing else, and both
-// overrides are reachable here from Connection.IsMaria.
+// It serves MariaDB too: the two types MariaDB spells differently are reachable
+// from Connection.IsMaria, so there is no second grammar.
 type MySQLGrammar struct{ *BaseGrammar }
 
-// NewMySQLGrammar answers `new MySqlGrammar($connection)`.
+// NewMySQLGrammar constructs a MySQLGrammar bound to connection, wiring up
+// the column modifiers, serial types, and fluent commands MySQL needs.
 func NewMySQLGrammar(connection schema.Connection) *MySQLGrammar {
 	g := &MySQLGrammar{&BaseGrammar{
 		conn: connection,
@@ -31,7 +31,8 @@ func NewMySQLGrammar(connection schema.Connection) *MySQLGrammar {
 	return g
 }
 
-// CompileCreateDatabase answers MySqlGrammar::compileCreateDatabase.
+// CompileCreateDatabase builds the CREATE DATABASE statement for name,
+// appending the connection's configured charset and collation when set.
 func (g *MySQLGrammar) CompileCreateDatabase(name string) (string, error) {
 	sql, err := g.BaseGrammar.CompileCreateDatabase(name)
 	if err != nil {
@@ -46,14 +47,17 @@ func (g *MySQLGrammar) CompileCreateDatabase(name string) (string, error) {
 	return sql, nil
 }
 
-// CompileSchemas answers MySqlGrammar::compileSchemas.
+// CompileSchemas builds the query that lists schema names from
+// information_schema.schemata, flagging which one is the current default.
 func (g *MySQLGrammar) CompileSchemas() (string, error) {
 	return "select schema_name as name, schema_name = schema() as `default` from information_schema.schemata where " +
 		g.compileSchemaWhereClause(nil, "schema_name") +
 		" order by schema_name", nil
 }
 
-// CompileTableExists answers MySqlGrammar::compileTableExists.
+// CompileTableExists builds the query that reports whether table exists in
+// schemaName, or in the connection's current schema when schemaName is
+// empty.
 func (g *MySQLGrammar) CompileTableExists(schemaName, table string) string {
 	from := "schema()"
 	if schemaName != "" {
@@ -65,7 +69,8 @@ func (g *MySQLGrammar) CompileTableExists(schemaName, table string) string {
 		from, g.QuoteString(table))
 }
 
-// CompileTables answers MySqlGrammar::compileTables.
+// CompileTables builds the query that lists tables -- name, schema, size,
+// comment, engine, and collation -- across the given schemas.
 func (g *MySQLGrammar) CompileTables(schemas []string, withSize ...bool) (string, error) {
 	return "select table_name as `name`, table_schema as `schema`, (data_length + index_length) as `size`, " +
 		"table_comment as `comment`, engine as `engine`, table_collation as `collation` " +
@@ -74,7 +79,8 @@ func (g *MySQLGrammar) CompileTables(schemas []string, withSize ...bool) (string
 		" order by table_schema, table_name", nil
 }
 
-// CompileViews answers MySqlGrammar::compileViews.
+// CompileViews builds the query that lists views -- name, schema, and
+// definition -- across the given schemas.
 func (g *MySQLGrammar) CompileViews(schemas []string) (string, error) {
 	return "select table_name as `name`, table_schema as `schema`, view_definition as `definition` " +
 		"from information_schema.views where " +
@@ -82,7 +88,8 @@ func (g *MySQLGrammar) CompileViews(schemas []string) (string, error) {
 		" order by table_schema, table_name", nil
 }
 
-// compileSchemaWhereClause answers MySqlGrammar::compileSchemaWhereClause.
+// compileSchemaWhereClause builds the WHERE clause that scopes a query to
+// schemas, or excludes MySQL's own system schemas when none are given.
 func (g *MySQLGrammar) compileSchemaWhereClause(schemas []string, column string) string {
 	if len(schemas) > 0 {
 		return column + " in (" + g.QuoteString(schemas) + ")"
@@ -90,7 +97,8 @@ func (g *MySQLGrammar) compileSchemaWhereClause(schemas []string, column string)
 	return column + " not in ('information_schema', 'mysql', 'performance_schema', 'sys')"
 }
 
-// CompileColumns answers MySqlGrammar::compileColumns.
+// CompileColumns builds the query that lists table's columns, in ordinal
+// position, from information_schema.columns.
 func (g *MySQLGrammar) CompileColumns(schemaName, table string) (string, error) {
 	from := "schema()"
 	if schemaName != "" {
@@ -106,7 +114,8 @@ func (g *MySQLGrammar) CompileColumns(schemaName, table string) (string, error) 
 		from, g.QuoteString(table)), nil
 }
 
-// CompileIndexes answers MySqlGrammar::compileIndexes.
+// CompileIndexes builds the query that lists table's indexes, grouping
+// each index's columns, from information_schema.statistics.
 func (g *MySQLGrammar) CompileIndexes(schemaName, table string) (string, error) {
 	from := "schema()"
 	if schemaName != "" {
@@ -120,7 +129,9 @@ func (g *MySQLGrammar) CompileIndexes(schemaName, table string) (string, error) 
 		from, g.QuoteString(table)), nil
 }
 
-// CompileForeignKeys answers MySqlGrammar::compileForeignKeys.
+// CompileForeignKeys builds the query that lists table's foreign keys,
+// joining key_column_usage against referential_constraints for the update
+// and delete rules.
 func (g *MySQLGrammar) CompileForeignKeys(schemaName, table string) (string, error) {
 	from := "schema()"
 	if schemaName != "" {
@@ -141,7 +152,8 @@ func (g *MySQLGrammar) CompileForeignKeys(schemaName, table string) (string, err
 		from, g.QuoteString(table)), nil
 }
 
-// CompileCreate answers MySqlGrammar::compileCreate.
+// CompileCreate builds the CREATE TABLE statement for blueprint, with its
+// character set, collation, and storage engine appended.
 func (g *MySQLGrammar) CompileCreate(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	sql, err := g.compileCreateTable(blueprint)
 	if err != nil {
@@ -150,7 +162,8 @@ func (g *MySQLGrammar) CompileCreate(blueprint *schema.Blueprint, command *schem
 	return one(g.compileCreateEngine(g.compileCreateEncoding(sql, blueprint), blueprint)), nil
 }
 
-// compileCreateTable answers MySqlGrammar::compileCreateTable.
+// compileCreateTable builds the column list and primary key clause of the
+// CREATE TABLE statement for blueprint.
 func (g *MySQLGrammar) compileCreateTable(blueprint *schema.Blueprint) (string, error) {
 	structure, err := g.getColumns(blueprint)
 	if err != nil {
@@ -173,7 +186,9 @@ func (g *MySQLGrammar) compileCreateTable(blueprint *schema.Blueprint) (string, 
 	return fmt.Sprintf("%s table %s (%s)", create, g.WrapTable(blueprint), strings.Join(structure, ", ")), nil
 }
 
-// compileCreateEncoding answers MySqlGrammar::compileCreateEncoding.
+// compileCreateEncoding appends the default character set and collation to
+// sql, preferring the blueprint's own over the connection's configured
+// ones.
 func (g *MySQLGrammar) compileCreateEncoding(sql string, blueprint *schema.Blueprint) string {
 	if charset := blueprint.GetCharset(); charset != "" {
 		sql += " default character set " + charset
@@ -188,7 +203,8 @@ func (g *MySQLGrammar) compileCreateEncoding(sql string, blueprint *schema.Bluep
 	return sql
 }
 
-// compileCreateEngine answers MySqlGrammar::compileCreateEngine.
+// compileCreateEngine appends the storage engine clause to sql, preferring
+// the blueprint's own engine over the connection's configured one.
 func (g *MySQLGrammar) compileCreateEngine(sql string, blueprint *schema.Blueprint) string {
 	if engine := blueprint.GetEngine(); engine != "" {
 		return sql + " engine = " + engine
@@ -199,7 +215,8 @@ func (g *MySQLGrammar) compileCreateEngine(sql string, blueprint *schema.Bluepri
 	return sql
 }
 
-// CompileAdd answers MySqlGrammar::compileAdd.
+// CompileAdd builds the ALTER TABLE ADD statement for command.Column,
+// appending the algorithm and lock clauses when the column requested them.
 func (g *MySQLGrammar) CompileAdd(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	definition, err := g.getColumn(blueprint, command.Column)
 	if err != nil {
@@ -215,8 +232,9 @@ func (g *MySQLGrammar) CompileAdd(blueprint *schema.Blueprint, command *schema.C
 	return one(sql), nil
 }
 
-// CompileAutoIncrementStartingValues answers
-// MySqlGrammar::compileAutoIncrementStartingValues.
+// CompileAutoIncrementStartingValues builds the ALTER TABLE statement that
+// sets AUTO_INCREMENT to the column's starting value, or nothing if the
+// column is not auto-incrementing or has no starting value.
 func (g *MySQLGrammar) CompileAutoIncrementStartingValues(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	value := startingValue(command.Column)
 	if !command.Column.GetAutoIncrement() || value == 0 {
@@ -225,14 +243,14 @@ func (g *MySQLGrammar) CompileAutoIncrementStartingValues(blueprint *schema.Blue
 	return one("alter table " + g.WrapTable(blueprint) + " auto_increment = " + strconv.Itoa(value)), nil
 }
 
-// CompileRenameColumn answers MySqlGrammar::compileRenameColumn.
+// CompileRenameColumn builds the ALTER TABLE RENAME COLUMN statement, or
+// refuses when the server predates native support.
 //
-// The PHP falls back to compileLegacyRenameColumn on MySQL before 8.0.3 and
-// MariaDB before 10.5.2, where "rename column" does not exist and the whole
-// column definition has to be repeated -- which means reading it back off the
-// server in the middle of compiling. Compilation here does not talk to a
-// database, so those servers are refused with the reason rather than served a
-// statement they will reject.
+// MySQL before 8.0.3 and MariaDB before 10.5.2 have no "rename column": the
+// whole column definition has to be repeated, which means reading it back
+// off the server in the middle of compiling. Compilation here does not talk
+// to a database, so those servers are refused with the reason rather than
+// served a statement they will reject.
 func (g *MySQLGrammar) CompileRenameColumn(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	version := g.conn.GetServerVersion()
 	if g.conn.IsMaria() {
@@ -245,7 +263,9 @@ func (g *MySQLGrammar) CompileRenameColumn(blueprint *schema.Blueprint, command 
 	return g.BaseGrammar.CompileRenameColumn(blueprint, command)
 }
 
-// CompileChange answers MySqlGrammar::compileChange.
+// CompileChange builds the ALTER TABLE statement that changes an existing
+// column, using MODIFY when the column keeps its name and CHANGE when it is
+// being renamed, since MySQL requires both names for the latter.
 func (g *MySQLGrammar) CompileChange(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	column := command.Column
 
@@ -275,7 +295,8 @@ func (g *MySQLGrammar) CompileChange(blueprint *schema.Blueprint, command *schem
 	return one(sql), nil
 }
 
-// CompilePrimary answers MySqlGrammar::compilePrimary.
+// CompilePrimary builds the ALTER TABLE ADD PRIMARY KEY statement for
+// command's columns, honoring its index algorithm and lock clause.
 func (g *MySQLGrammar) CompilePrimary(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	using := ""
 	if command.Algorithm != "" {
@@ -289,27 +310,32 @@ func (g *MySQLGrammar) CompilePrimary(blueprint *schema.Blueprint, command *sche
 	return one(sql), nil
 }
 
-// CompileUnique answers MySqlGrammar::compileUnique.
+// CompileUnique builds the ALTER TABLE statement that adds a unique key
+// for command's columns.
 func (g *MySQLGrammar) CompileUnique(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return one(g.compileKey(blueprint, command, "unique")), nil
 }
 
-// CompileIndex answers MySqlGrammar::compileIndex.
+// CompileIndex builds the ALTER TABLE statement that adds a plain index
+// for command's columns.
 func (g *MySQLGrammar) CompileIndex(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return one(g.compileKey(blueprint, command, "index")), nil
 }
 
-// CompileFullText answers MySqlGrammar::compileFullText.
+// CompileFullText builds the ALTER TABLE statement that adds a fulltext
+// index for command's columns.
 func (g *MySQLGrammar) CompileFullText(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return one(g.compileKey(blueprint, command, "fulltext")), nil
 }
 
-// CompileSpatialIndex answers MySqlGrammar::compileSpatialIndex.
+// CompileSpatialIndex builds the ALTER TABLE statement that adds a
+// spatial index for command's columns.
 func (g *MySQLGrammar) CompileSpatialIndex(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return one(g.compileKey(blueprint, command, "spatial index")), nil
 }
 
-// compileKey answers MySqlGrammar::compileKey.
+// compileKey builds the ALTER TABLE ADD statement shared by the unique,
+// index, fulltext, and spatial-index compilers, keyed by typ.
 func (g *MySQLGrammar) compileKey(blueprint *schema.Blueprint, command *schema.Command, typ string) string {
 	using := ""
 	if command.Algorithm != "" {
@@ -323,17 +349,20 @@ func (g *MySQLGrammar) compileKey(blueprint *schema.Blueprint, command *schema.C
 	return sql
 }
 
-// CompileDrop answers MySqlGrammar::compileDrop.
+// CompileDrop builds the DROP TABLE statement for blueprint.
 func (g *MySQLGrammar) CompileDrop(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return one("drop table " + g.WrapTable(blueprint)), nil
 }
 
-// CompileDropIfExists answers MySqlGrammar::compileDropIfExists.
+// CompileDropIfExists builds the DROP TABLE IF EXISTS statement for
+// blueprint.
 func (g *MySQLGrammar) CompileDropIfExists(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return one("drop table if exists " + g.WrapTable(blueprint)), nil
 }
 
-// CompileDropColumn answers MySqlGrammar::compileDropColumn.
+// CompileDropColumn builds the ALTER TABLE statement that drops
+// command's columns, appending the algorithm and lock clauses when
+// requested.
 func (g *MySQLGrammar) CompileDropColumn(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	columns := g.PrefixArray("drop", g.WrapArray(command.Columns))
 	sql := "alter table " + g.WrapTable(blueprint) + " " + strings.Join(columns, ", ")
@@ -346,32 +375,38 @@ func (g *MySQLGrammar) CompileDropColumn(blueprint *schema.Blueprint, command *s
 	return one(sql), nil
 }
 
-// CompileDropPrimary answers MySqlGrammar::compileDropPrimary.
+// CompileDropPrimary builds the ALTER TABLE DROP PRIMARY KEY statement
+// for blueprint.
 func (g *MySQLGrammar) CompileDropPrimary(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return one("alter table " + g.WrapTable(blueprint) + " drop primary key"), nil
 }
 
-// CompileDropUnique answers MySqlGrammar::compileDropUnique.
+// CompileDropUnique builds the ALTER TABLE statement that drops a unique
+// key, which on MySQL is the same as dropping any other index.
 func (g *MySQLGrammar) CompileDropUnique(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return g.CompileDropIndex(blueprint, command)
 }
 
-// CompileDropIndex answers MySqlGrammar::compileDropIndex.
+// CompileDropIndex builds the ALTER TABLE DROP INDEX statement for
+// command.Index.
 func (g *MySQLGrammar) CompileDropIndex(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return one("alter table " + g.WrapTable(blueprint) + " drop index " + g.Wrap(command.Index)), nil
 }
 
-// CompileDropFullText answers MySqlGrammar::compileDropFullText.
+// CompileDropFullText builds the ALTER TABLE statement that drops a
+// fulltext index, which on MySQL is the same as dropping any other index.
 func (g *MySQLGrammar) CompileDropFullText(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return g.CompileDropIndex(blueprint, command)
 }
 
-// CompileDropSpatialIndex answers MySqlGrammar::compileDropSpatialIndex.
+// CompileDropSpatialIndex builds the ALTER TABLE statement that drops a
+// spatial index, which on MySQL is the same as dropping any other index.
 func (g *MySQLGrammar) CompileDropSpatialIndex(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return g.CompileDropIndex(blueprint, command)
 }
 
-// CompileForeign answers MySqlGrammar::compileForeign.
+// CompileForeign builds the ALTER TABLE ADD CONSTRAINT statement for a
+// foreign key, appending MySQL's lock clause when command requested one.
 func (g *MySQLGrammar) CompileForeign(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	statements, err := g.BaseGrammar.CompileForeign(blueprint, command)
 	if err != nil {
@@ -383,52 +418,58 @@ func (g *MySQLGrammar) CompileForeign(blueprint *schema.Blueprint, command *sche
 	return statements, nil
 }
 
-// CompileDropForeign answers MySqlGrammar::compileDropForeign.
+// CompileDropForeign builds the ALTER TABLE DROP FOREIGN KEY statement
+// for command.Index.
 func (g *MySQLGrammar) CompileDropForeign(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return one("alter table " + g.WrapTable(blueprint) + " drop foreign key " + g.Wrap(command.Index)), nil
 }
 
-// CompileRename answers MySqlGrammar::compileRename.
+// CompileRename builds the RENAME TABLE statement from blueprint to
+// command.To.
 func (g *MySQLGrammar) CompileRename(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return one("rename table " + g.WrapTable(blueprint) + " to " + g.WrapTable(command.To)), nil
 }
 
-// CompileRenameIndex answers MySqlGrammar::compileRenameIndex.
+// CompileRenameIndex builds the ALTER TABLE RENAME INDEX statement from
+// command.From to command.To.
 func (g *MySQLGrammar) CompileRenameIndex(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return one(fmt.Sprintf("alter table %s rename index %s to %s",
 		g.WrapTable(blueprint), g.Wrap(command.From), g.Wrap(command.To))), nil
 }
 
-// CompileDropAllTables answers MySqlGrammar::compileDropAllTables.
+// CompileDropAllTables builds the DROP TABLE statement that drops every
+// name in tables in one statement.
 func (g *MySQLGrammar) CompileDropAllTables(tables []string) (string, error) {
 	return "drop table " + strings.Join(g.EscapeNames(tables), ", "), nil
 }
 
-// CompileDropAllViews answers MySqlGrammar::compileDropAllViews.
+// CompileDropAllViews builds the DROP VIEW statement that drops every
+// name in views in one statement.
 func (g *MySQLGrammar) CompileDropAllViews(views []string) (string, error) {
 	return "drop view " + strings.Join(g.EscapeNames(views), ", "), nil
 }
 
-// CompileEnableForeignKeyConstraints answers
-// MySqlGrammar::compileEnableForeignKeyConstraints.
+// CompileEnableForeignKeyConstraints builds the statement that turns
+// foreign key checks back on for the session.
 func (g *MySQLGrammar) CompileEnableForeignKeyConstraints() (string, error) {
 	return "SET FOREIGN_KEY_CHECKS=1;", nil
 }
 
-// CompileDisableForeignKeyConstraints answers
-// MySqlGrammar::compileDisableForeignKeyConstraints.
+// CompileDisableForeignKeyConstraints builds the statement that turns
+// foreign key checks off for the session.
 func (g *MySQLGrammar) CompileDisableForeignKeyConstraints() (string, error) {
 	return "SET FOREIGN_KEY_CHECKS=0;", nil
 }
 
-// CompileTableComment answers MySqlGrammar::compileTableComment.
+// CompileTableComment builds the ALTER TABLE COMMENT statement that sets
+// blueprint's table comment.
 func (g *MySQLGrammar) CompileTableComment(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return one(fmt.Sprintf("alter table %s comment = %s",
 		g.WrapTable(blueprint), quote(command.Comment))), nil
 }
 
-// EscapeNames answers MySqlGrammar::escapeNames: each dotted segment of a name
-// quoted on its own.
+// EscapeNames quotes each dotted segment of every name in names on its
+// own, so a schema-qualified table or view name comes out fully escaped.
 func (g *MySQLGrammar) EscapeNames(names []string) []string {
 	out := make([]string, len(names))
 	for i, name := range names {
@@ -441,7 +482,8 @@ func (g *MySQLGrammar) EscapeNames(names []string) []string {
 	return out
 }
 
-// wrapValue answers MySqlGrammar::wrapValue: MySQL quotes with a backtick.
+// wrapValue quotes value with a backtick, MySQL's identifier delimiter,
+// leaving the wildcard "*" untouched.
 func (g *MySQLGrammar) wrapValue(value string) string {
 	if value == "*" {
 		return value
@@ -449,7 +491,8 @@ func (g *MySQLGrammar) wrapValue(value string) string {
 	return "`" + strings.ReplaceAll(value, "`", "``") + "`"
 }
 
-// typeOf answers MySqlGrammar's type methods.
+// typeOf renders the MySQL type keyword for column, dispatching across
+// every column type the schema package defines.
 func (g *MySQLGrammar) typeOf(column *schema.ColumnDefinition) (string, error) {
 	switch column.GetType() {
 	case "char":
@@ -541,8 +584,10 @@ func (g *MySQLGrammar) typeOf(column *schema.ColumnDefinition) (string, error) {
 	}
 }
 
-// typeDateTime answers MySqlGrammar::typeDateTime and typeTimestamp, which are
-// the same body over a different keyword.
+// typeDateTime renders keyword with its optional precision, and applies
+// CURRENT_TIMESTAMP as the column's default and on-update value when
+// requested. It backs both the "dateTime" and "timestamp" column types,
+// which differ only in the keyword.
 func (g *MySQLGrammar) typeDateTime(column *schema.ColumnDefinition, keyword string) string {
 	precision := intOr(column.GetPrecision(), 0)
 
@@ -563,7 +608,9 @@ func (g *MySQLGrammar) typeDateTime(column *schema.ColumnDefinition, keyword str
 	return keyword
 }
 
-// typeGeometry answers MySqlGrammar::typeGeometry.
+// typeGeometry renders column's spatial subtype, falling back to plain
+// "geometry" for an unrecognized one, and appends the SRID clause --
+// "ref_system_id" on MariaDB, "srid" on MySQL -- when one was set.
 func (g *MySQLGrammar) typeGeometry(column *schema.ColumnDefinition) string {
 	subtype := strings.ToLower(column.GetSubtype())
 	switch subtype {
@@ -589,7 +636,8 @@ func (g *MySQLGrammar) supportsFunctionalDefaults() bool {
 	return g.conn.IsMaria() || atLeast(g.conn.GetServerVersion(), "8.0.13")
 }
 
-// modify answers MySqlGrammar's modifier methods.
+// modify renders the SQL fragment for one column modifier, dispatching on
+// modifier's name across MySQL's column-level clauses.
 func (g *MySQLGrammar) modify(modifier string, blueprint *schema.Blueprint, column *schema.ColumnDefinition) ([]string, error) {
 	switch modifier {
 	case "Unsigned":
@@ -663,7 +711,9 @@ func (g *MySQLGrammar) modify(modifier string, blueprint *schema.Blueprint, colu
 	return nil, nil
 }
 
-// wrapJSONSelector answers MySqlGrammar::wrapJsonSelector.
+// wrapJSONSelector renders value's field->path JSON accessor as
+// json_unquote(json_extract(...)), MySQL's way of pulling a scalar out of
+// a JSON column.
 func (g *MySQLGrammar) wrapJSONSelector(value string) string {
 	field, path := wrapJSONFieldAndPath(value, g.wrapValue)
 	return "json_unquote(json_extract(" + field + path + "))"

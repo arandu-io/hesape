@@ -130,12 +130,11 @@ func TestDumpDiePanicsWithTheRecognizedSentinel(t *testing.T) {
 	log.DumpDie(ctx, "last thing I saw", "value")
 }
 
-// TestDumpDieAbortsWithoutACollector is the half that used to be missing. A
-// forgotten dd() ends the request in Laravel whatever the environment is; here
-// the nil Collector made DumpDie return, so the handler carried on, the response
-// went out with a 200, and the dump landed in the middle of it. Recover already
-// knows what to do with the sentinel outside development -- it logs it and
-// answers the error page -- and it never got the chance.
+// TestDumpDieAbortsWithoutACollector: DumpDie panics whatever the environment
+// is. Returning instead would let the handler carry on, the response go out with
+// a 200, and the dump land in the middle of it -- while Recover already knows
+// what to do with the sentinel outside development, which is to log it and
+// answer the error page.
 func TestDumpDieAbortsWithoutACollector(t *testing.T) {
 	defer func() {
 		v := recover()

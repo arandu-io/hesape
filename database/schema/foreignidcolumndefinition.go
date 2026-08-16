@@ -2,10 +2,8 @@ package schema
 
 import "strings"
 
-// ForeignIDColumnDefinition answers
-// Illuminate\Database\Schema\ForeignIdColumnDefinition.
-//
-// It is the column ForeignID, ForeignUUID and ForeignULID return: an ordinary
+// ForeignIDColumnDefinition is the column ForeignID, ForeignUUID and
+// ForeignULID return: an ordinary
 // ColumnDefinition that also knows its blueprint, so Constrained can add the
 // foreign key command without the caller naming the column twice.
 type ForeignIDColumnDefinition struct {
@@ -13,13 +11,14 @@ type ForeignIDColumnDefinition struct {
 	blueprint *Blueprint
 }
 
-// Constrained answers ForeignIdColumnDefinition::constrained.
+// Constrained adds the foreign key command for this column and returns its
+// ForeignKeyDefinition.
 //
 // The optional arguments are, in order, the referenced table, the referenced
-// column and the index name; an omitted or empty one takes the PHP default.
-// With none of them, the table is guessed from the column name the way PHP
-// does: user_id references id on users, dropping the "_id" suffix and
-// pluralising what is left.
+// column and the index name; an omitted or empty one takes the default. With
+// none of them, the table is guessed from the column name: user_id
+// references id on users, dropping the "_id" suffix and pluralising what is
+// left.
 func (d *ForeignIDColumnDefinition) Constrained(args ...string) *ForeignKeyDefinition {
 	table, column, indexName := arg(args, 0), arg(args, 1), arg(args, 2)
 
@@ -42,8 +41,8 @@ func (d *ForeignIDColumnDefinition) Constrained(args ...string) *ForeignKeyDefin
 	return key.On(table)
 }
 
-// References answers ForeignIdColumnDefinition::references: it adds the foreign
-// key command for this column and points it at a column of another table.
+// References adds the foreign key command for this column and points it at
+// column on another table.
 func (d *ForeignIDColumnDefinition) References(column string, indexName ...string) *ForeignKeyDefinition {
 	name := ""
 	if len(indexName) > 0 {
@@ -52,8 +51,8 @@ func (d *ForeignIDColumnDefinition) References(column string, indexName ...strin
 	return d.blueprint.Foreign(d.name, name).References(column)
 }
 
-// arg reads the nth optional argument of a variadic that stands in for a PHP
-// default argument list.
+// arg reads the nth optional argument from a variadic parameter list,
+// returning the empty string when it was not given.
 func arg(args []string, n int) string {
 	if n < len(args) {
 		return args[n]
@@ -61,7 +60,8 @@ func arg(args []string, n int) string {
 	return ""
 }
 
-// beforeLast answers Illuminate\Support\Stringable::beforeLast.
+// beforeLast returns what precedes the last occurrence of search in subject,
+// or subject unchanged if search is empty or not found.
 func beforeLast(subject, search string) string {
 	if search == "" {
 		return subject
@@ -72,15 +72,13 @@ func beforeLast(subject, search string) string {
 	return subject
 }
 
-// plural answers Str::plural for the shapes a table name takes.
+// plural pluralises the shapes a table name takes.
 //
-// Laravel routes this through Doctrine's inflector, which carries an
-// irregular-word table this component has no use for: it is applied to the
-// stem of a foreign key column, so the input is a singular table name a
-// developer chose. The rules below are the regular English ones -- s, x, z, ch
-// and sh take -es, a consonant before y turns into -ies, everything else takes
-// -s -- and a name they get wrong is a name Constrained's table argument is
-// for.
+// There is no irregular-word table: this is applied to the stem of a foreign key
+// column, so the input is a singular table name a developer chose. The rules
+// below are the regular English ones -- s, x, z, ch and sh take -es, a consonant
+// before y turns into -ies, everything else takes -s -- and a name they get
+// wrong is a name Constrained's table argument is for.
 func plural(word string) string {
 	if word == "" {
 		return word

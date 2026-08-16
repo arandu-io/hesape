@@ -365,13 +365,12 @@ func TestPutManyAndMany(t *testing.T) {
 		t.Fatalf("Many = %v, want a=1, b=2 and an entry for every key asked for", got)
 	}
 
-	// Repository::many maps over the store's answer, which carries one entry per
-	// requested key with null for the misses, so every key asked for comes back.
-	// The miss is the zero value of T here, which is as close as a typed map
-	// gets to null -- and the reason a caller who must tell a miss from a cached
-	// zero reaches for Get instead.
+	// Many carries one entry per requested key, so every key asked for comes
+	// back. A miss is the zero value of T, which is as close as a typed map
+	// gets to nothing -- and the reason a caller who must tell a miss from a
+	// cached zero reaches for Get instead.
 	if _, ok := got["c"]; !ok {
-		t.Fatal("Many dropped the key that was not cached; Illuminate returns it as null")
+		t.Fatal("Many dropped the key that was not cached; it must come back")
 	}
 	if got["c"] != 0 {
 		t.Fatalf("Many[%q] = %v, want the zero value that stands in for null", "c", got["c"])
@@ -433,16 +432,15 @@ func TestRememberComputesOnceAndThenReadsTheCache(t *testing.T) {
 	}
 }
 
-// TestRememberCachesAComputationThatCameBackWithNothing pins the one place
-// this Remember answers differently from Repository::remember(), so that the
-// difference is a decision somebody can read rather than an accident.
+// TestRememberCachesAComputationThatCameBackWithNothing pins the treatment of
+// a computation that produced nothing, so that it is a decision somebody can
+// read rather than an accident.
 //
-// The PHP asks "! is_null($value)", so a stored null is a miss and the callback
-// runs again on every request. Here a miss is ErrNotFound and a stored null is
-// a value, so a callback that comes back with nothing runs once. The whole
-// reason ErrNotFound exists in this package is to keep "not cached" and "cached
-// as nothing" apart -- see Repository.Has -- and Remember reading them as one
-// thing again would be the second meaning of null this package removed.
+// A miss is ErrNotFound and a stored nothing is a value, so a callback that
+// comes back with nothing runs once and not on every request. The whole reason
+// ErrNotFound exists in this package is to keep "not cached" and "cached as
+// nothing" apart -- see Repository.Has -- and a Remember that read them as one
+// thing would put the ambiguity back.
 //
 // The consequence is negative caching, which is what a caller usually wants:
 // "this customer has no plan" is exactly the answer that costs a query to
@@ -468,7 +466,7 @@ func TestRememberCachesAComputationThatCameBackWithNothing(t *testing.T) {
 		}
 	}
 	if calls != 1 {
-		t.Fatalf("compute ran %d times, want 1: a cached nothing is a hit here, and the PHP would have run it twice", calls)
+		t.Fatalf("compute ran %d times, want 1: a cached nothing is a hit here", calls)
 	}
 }
 

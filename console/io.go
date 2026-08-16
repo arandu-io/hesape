@@ -71,8 +71,7 @@ type IO struct {
 
 	// newLinesWritten is how many line endings the last write left behind. It
 	// starts at 1 to account for the one the shell wrote after the command was
-	// typed, exactly as OutputStyle does, and it is the whole of what
-	// Illuminate\Console\Contracts\NewLineAware exists for.
+	// typed, and it is the whole of what NewLineAware exists for.
 	newLinesWritten int
 
 	// tty is whether out is a terminal, and colour is whether it is a terminal
@@ -82,9 +81,6 @@ type IO struct {
 	colour bool
 }
 
-// NewIO is OutputStyle::__construct, over three streams and the command name
-// rather than an InputInterface and an OutputInterface.
-//
 // NewIO returns the terminal for one command.
 //
 // The registry builds one per run, and a test builds one directly: that is the
@@ -121,9 +117,6 @@ func NewIO(name string, args []string, out, errOut io.Writer, in io.Reader) *IO 
 	return o
 }
 
-// Flags has no Illuminate counterpart: it is Go's flag package, and the
-// Illuminate path is the signature Parser::parse reads.
-//
 // Flags returns the flag set of this command, created on first use.
 //
 // The command declares its options on it and parses the arguments:
@@ -144,9 +137,6 @@ func (o *IO) Flags() *flag.FlagSet {
 	return o.flags
 }
 
-// Args has no Illuminate counterpart: it is the unparsed tail of the command
-// line, where InteractsWithIO::arguments goes through a definition first.
-//
 // Args are the arguments that followed the command name.
 //
 // Before the flag set is parsed they are all of them; after, they are what is
@@ -158,9 +148,6 @@ func (o *IO) Args() []string {
 	return o.args
 }
 
-// Line is InteractsWithIO::line, with a format string where PHP takes a style
-// name and a verbosity.
-//
 // Line writes one line to the output, verbatim.
 //
 // It is the default, and it is what carries the answer the command was run
@@ -169,18 +156,13 @@ func (o *IO) Args() []string {
 // are the same bytes.
 func (o *IO) Line(format string, a ...any) { o.write(o.out, "", format, a...) }
 
-// Info is InteractsWithIO::info: a line that reports progress or a fact worth
-// reading.
+// Info is a line that reports progress or a fact worth reading.
 func (o *IO) Info(format string, a ...any) { o.write(o.out, ansiGreen, format, a...) }
 
-// Comment is InteractsWithIO::comment: an aside, the detail that helps but is
-// not the answer. PHP paints it with Symfony's yellow "comment" style and this
-// dims it.
+// Comment is an aside, the detail that helps but is not the answer. It is
+// dimmed rather than coloured.
 func (o *IO) Comment(format string, a ...any) { o.write(o.out, ansiDim, format, a...) }
 
-// Warn is InteractsWithIO::warn, on the error stream and prefixed: PHP writes it
-// to the output stream in yellow, with nothing in front of it.
-//
 // Warn writes to the error stream, prefixed, for something that is off but did
 // not stop the command.
 //
@@ -190,9 +172,6 @@ func (o *IO) Warn(format string, a ...any) {
 	o.write(o.err, ansiYellow, "warning: "+format, a...)
 }
 
-// Error is InteractsWithIO::error, on the error stream and prefixed: PHP writes
-// it to the output stream, in the "error" style and with nothing in front of it.
-//
 // Error writes to the error stream, prefixed, for what went wrong.
 //
 // Returning the error is still what ends the command: this only says it out
@@ -203,9 +182,6 @@ func (o *IO) Error(format string, a ...any) {
 
 // NewLine writes count blank lines to the output, and one when count is left
 // out.
-//
-// It answers InteractsWithIO::newLine. The mechanical difference is the
-// variadic, which is how a PHP default argument is spelt in Go.
 func (o *IO) NewLine(count ...int) {
 	n := 1
 	if len(count) > 0 {
@@ -238,11 +214,8 @@ func (o *IO) paint(colour, text string) string {
 	return colour + text + ansiReset
 }
 
-// Table is InteractsWithIO::table, without the style arguments: PHP hands the
-// rows to Symfony's Table helper, which draws a border, and this lines the
-// columns up with spaces and draws none.
-//
-// Table writes rows under headers, in columns that line up.
+// Table writes rows under headers, in columns that line up, with no border
+// drawn.
 //
 // The columns are sized to the content, which is what makes the output usable
 // in a terminal and greppable out of one. A row shorter than the headers is
@@ -266,9 +239,6 @@ func (o *IO) Table(headers []string, rows [][]string) {
 	_ = w.Flush()
 }
 
-// TwoColumnDetail is TwoColumnDetail::render, at a fixed width: PHP counts the
-// dots from the terminal width, capped at 150.
-//
 // TwoColumnDetail writes a label on the left and its value on the right, joined
 // by dots.
 //
@@ -290,10 +260,8 @@ func (o *IO) detail(left, right, colour string) {
 	fmt.Fprintf(o.out, "%s %s %s\n", left, o.paint(ansiDim, strings.Repeat(".", dots)), o.paint(colour, right))
 }
 
-// Task is Task::render, minus the run time: PHP prints how long the work took
-// between the dots and the outcome, and this prints the outcome alone.
-//
-// Task runs fn and reports whether it worked, on one line.
+// Task runs fn and reports whether it worked, on one line, with no run time
+// printed.
 //
 // The line is written when fn returns, so the outcome is on the same line as
 // the description. The error is returned unchanged: this reports it, it does
@@ -308,10 +276,6 @@ func (o *IO) Task(description string, fn func() error) error {
 	return nil
 }
 
-// Progress has no Illuminate counterpart: the bar is Symfony's ProgressBar,
-// which InteractsWithIO::withProgressBar creates and drives rather than hands
-// back.
-//
 // Progress starts a bar over total steps.
 //
 // On a terminal it redraws one line as the work advances. Everywhere else it
@@ -331,7 +295,7 @@ type Progress struct {
 	done    bool
 }
 
-// Advance is Symfony's ProgressBar::advance. It never passes the total.
+// Advance moves the bar forward by n, and never passes the total.
 func (p *Progress) Advance(n int) {
 	if p == nil || p.done {
 		return
@@ -343,7 +307,7 @@ func (p *Progress) Advance(n int) {
 	p.render()
 }
 
-// Finish is Symfony's ProgressBar::finish, and it ends the line.
+// Finish ends the bar's line.
 //
 // Calling it twice does nothing the second time, so a deferred Finish beside an
 // explicit one is not two bars.
@@ -384,15 +348,10 @@ func (p *Progress) bar() string {
 
 // Ask puts a question and returns the answer, or def when the answer is empty.
 //
-// It answers InteractsWithIO::ask, which is one call to askQuestion in the PHP
-// too: the prompt is written and the answer read in one place, so a command
+// The prompt is written and the answer read in one place, so a command
 // cannot ask in a shape the rest of the output does not use.
 func (o *IO) Ask(question, def string) (string, error) { return o.AskQuestion(question, def) }
 
-// Secret is InteractsWithIO::secret without its $fallback: PHP falls back to
-// reading the value in the clear when the echo cannot be turned off, and this
-// returns an error instead.
-//
 // Secret asks for a value the terminal must not show: a password, a token.
 //
 // When the input is a terminal the echo is turned off for the duration and put
@@ -423,9 +382,6 @@ func (o *IO) Secret(question string) (string, error) {
 	return answer, err
 }
 
-// Confirm is InteractsWithIO::confirm, asked again rather than assumed: PHP's
-// ConfirmationQuestion reads anything that does not start with y as no.
-//
 // Confirm asks a yes or no question, and keeps asking until it gets one.
 //
 // An answer that is neither is a typo, not a no: acting on it would be acting
@@ -453,10 +409,10 @@ func (o *IO) Confirm(question string, def bool) (bool, error) {
 	}
 }
 
-// Choice is InteractsWithIO::choice without its $attempts and $multiple: one
-// option comes back, and a wrong answer is asked again however many times.
-//
 // Choice offers a numbered list and returns the option that was picked.
+//
+// A wrong answer is asked again, however many times it takes; only one
+// option ever comes back.
 //
 // It accepts the number or the option itself, because the number is what is
 // quick to type and the option is what is in the person's head.

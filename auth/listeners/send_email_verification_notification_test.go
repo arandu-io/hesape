@@ -60,9 +60,8 @@ func TestAnAlreadyConfirmedAccountIsNotAskedAgain(t *testing.T) {
 	}
 }
 
-// TestAnAccountWithNothingToVerifyIsLeftAlone is PHP's `instanceof
-// MustVerifyEmail`, and is what lets an application register this listener
-// unconditionally.
+// TestAnAccountWithNothingToVerifyIsLeftAlone pins the type assertion, which is
+// what lets an application register this listener unconditionally.
 func TestAnAccountWithNothingToVerifyIsLeftAlone(t *testing.T) {
 	var plain auth.Authenticatable = &account{id: "7"}
 
@@ -71,10 +70,9 @@ func TestAnAccountWithNothingToVerifyIsLeftAlone(t *testing.T) {
 	}
 }
 
-// TestAFailedSendIsReturned is the one deliberate difference from PHP, which
-// returns void: the dispatcher is what decides whether a link that did not go
-// out fails the registration or is retried, and it cannot decide what it is not
-// told.
+// TestAFailedSendIsReturned pins that a failure is not swallowed: the
+// dispatcher is what decides whether a link that did not go out fails the
+// registration or is retried, and it cannot decide what it is not told.
 func TestAFailedSendIsReturned(t *testing.T) {
 	wanted := errors.New("the mail transport is down")
 	user := &verifying{account: &account{id: "7"}, sendErr: wanted}

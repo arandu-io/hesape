@@ -1,15 +1,9 @@
-// Package image is Illuminate\Image: an image described by what should be done
-// to it, and done to it once, when somebody asks for the result.
+// Package image describes an image by what should be done to it, done to it
+// once, when somebody asks for the result.
 //
-// It was written against the clone in laravel_illuminate/image, tag v13.25.0 --
-// Image.php, ImageManager.php, ImagePipeline.php, ImageOutputOptions.php and
-// ImageException.php, plus Contracts\Image\Driver from
-// reference_laravel/framework, which the clone of contracts does not carry.
-// Nothing came from anywhere else.
-//
-// The shape is Illuminate's, unchanged. [ImageManager] is where images come
-// from, [Image] is one image and every fluent call on it returns a new one, and
-// the pixels are touched exactly once, by a [Driver], at [Image.ToBytes]:
+// [ImageManager] is where images come from, [Image] is one image and every
+// fluent call on it returns a new one, and the pixels are touched exactly
+// once, by a [Driver], at [Image.ToBytes]:
 //
 //	images := image.NewImageManager()
 //
@@ -17,36 +11,31 @@
 //	thumb, err := img.Orient().Cover(400, 300).ToJpg().Quality(80).
 //		Store(ctx, grant, disk, "avatars")
 //
-// # No GD, no Imagick, no Intervention
+// # No third-party dependency
 //
-// Illuminate ships two drivers, GdDriver and ImagickDriver, and both are twenty
-// lines over InterventionDriver, which is a cover over the intervention/image
-// Composer package, which is a cover over a PHP extension. Four layers exist
-// because PHP cannot resize an image without one.
-//
-// Go can. The driver here is this package, on image/jpeg, image/png and
-// image/gif from the standard library -- which are not a dependency, so the
-// module root still declares one (ADR 0048). The [Driver] interface stays,
-// because transformUsing() and [ImageManager.Extend] both need something to be
-// an implementation of, and because a driver for a format this one cannot write
-// is a real thing to add later.
+// The driver here is this package, built on image/jpeg, image/png and
+// image/gif from the standard library, which add no third-party dependency.
+// The [Driver] interface stays: registering a custom transformation handler
+// and [ImageManager.Extend] both need something to be an implementation of,
+// and a driver for a format this one cannot write is a real thing to add
+// later.
 //
 // # Which formats
 //
 // Read: JPEG, PNG, GIF. Written: JPEG, PNG, GIF.
 //
-// [Image.ToFormat] accepts every name Illuminate accepts -- webp, jpg, jpeg,
-// png, gif, avif, heic, heif, bmp -- and the four with no encoder in the
-// standard library fail at the encode, with the format named. That is the
-// honest arrangement: the alternative is [Image.ToWebp] handing back a JPEG,
-// which is a lie that leaves the building as a wrong Content-Type. The same
-// goes for reading: a WebP arriving at [Image.ToBytes] is refused by name
-// rather than half-decoded.
+// [Image.ToFormat] accepts nine names -- webp, jpg, jpeg, png, gif, avif,
+// heic, heif, bmp -- and the four with no encoder in the standard library
+// fail at the encode, with the format named. That is the honest arrangement:
+// the alternative is [Image.ToWebp] handing back a JPEG, which is a lie that
+// leaves the building as a wrong Content-Type. The same goes for reading: a
+// WebP arriving at [Image.ToBytes] is refused by name rather than
+// half-decoded.
 //
-// [Image.MimeType] and [Image.Extension] know the wider list, because they read
-// what a file is rather than what this package can do with it -- an image that
-// only needs storing never goes near the driver, and its type and extension are
-// still right.
+// [Image.MimeType] and [Image.Extension] know the wider list, because they
+// read what a file is rather than what this package can do with it -- an
+// image that only needs storing never goes near the driver, and its type and
+// extension are still right.
 //
 // # Resizing, and why it looks the way it does
 //
@@ -83,52 +72,12 @@
 //
 // # Storing is authorized, like everything else
 //
-// [Image.Store] and [ImageManager.FromStorage] take an auth.Grant and a [Disk].
-// Illuminate resolves the disk from the container and needs no grant; there is
-// no container here (ADR 0001) and there is no path to customer data without a
-// policy (RULE 17), including the read. The tenant the image lands under comes
-// off the Grant and from nowhere else (RULE 14).
+// [Image.Store] and [ImageManager.FromStorage] take an auth.Grant and a
+// [Disk]. There is no path to customer data without a policy, including the
+// read, and the tenant the image lands under comes off the Grant and from
+// nowhere else.
 //
-// [Disk] and [DiskReader] are interfaces rather than imports of the filesystem
-// package, so that this package sits underneath it. A *filesystem.Disk is a
-// [Disk] with no adapter.
-//
-// # What is not ported, and why
-//
-// With the numbered reason from ADR 0056: (1) a PHP language feature Go does not
-// have, (2) a method that only serves the container, a facade or a service
-// provider, (3) a driver this ecosystem does not carry.
-//
-// Reason 2, the container and the service provider. ADR 0001 removed the
-// container and ADR 0002 the facade, and an application builds an
-// [ImageManager] and keeps it:
-//
-//   - ImageServiceProvider::register scopes an [ImageManager] under the name
-//     'image', built with the application so that its getDefaultDriver can read
-//     `images.default` off the configuration. [NewImageManager] takes no
-//     application and defaults to [StdDriverName];
-//     [ImageManager.SetDefaultDriver] is the same choice made in a line the
-//     application wrote.
-//   - ImageServiceProvider::provides lists that one binding, which is what makes
-//     the provider deferrable. Nothing is deferred when nothing is resolved by
-//     name.
-//
-// Reason 3, a driver this ecosystem does not carry. GD and Imagick are PHP
-// extensions, reached through the intervention/image Composer package; the
-// driver here is this package, on image/jpeg, image/png and image/gif:
-//
-//   - Image::usingGd and Image::usingImagick each name one of those two
-//     extensions and hand it to Image::using. [Image.Using] is here and takes
-//     the name a driver was registered under; the one registered is
-//     [StdDriverName], and another goes in with [ImageManager.Extend].
-//   - InterventionDriver::ensureRequirementsAreMet asks whether the
-//     intervention/image package is installed and throws with the composer
-//     command to run. There is nothing to install: a driver here is a [Driver]
-//     the caller already built, so a missing one is a compile error and a
-//     format with no encoder is named at the encode -- see "Which formats"
-//     above.
-//
-// Reason 1, the PHP language. Image::__serialize throws to stop an image being
-// serialized. Go has no serializer that would reach into an unexported field, so
-// there is nothing to refuse.
+// [Disk] and [DiskReader] are interfaces rather than imports of the
+// filesystem package, so that this package sits underneath it. A
+// *filesystem.Disk is a [Disk] with no adapter.
 package image

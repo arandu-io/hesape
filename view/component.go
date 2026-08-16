@@ -6,20 +6,18 @@ import (
 	"sync"
 )
 
-// Component is Illuminate\View\Component.
+// Component is the contract a view component satisfies.
 //
-// In PHP it is an abstract class whose one abstract method is render. Go has no
-// abstract class, so the contract is an interface and the shared state is
-// BaseComponent, which a component embeds. The split is mechanical: everything
-// PHP declared abstract is here, everything PHP implemented is there.
+// Go has no abstract class, so the contract is this interface, and the
+// shared state lives in BaseComponent, which a component embeds.
 type Component interface {
-	// Render is Component::render. It returns the view the component draws:
-	// a *View, something with a ToHTML method, a func(map[string]any) any, or
-	// the name of a registered view.
+	// Render returns the view the component draws: a *View, something with a
+	// ToHTML method, a func(map[string]any) any, or the name of a registered
+	// view.
 	Render() any
 }
 
-// BaseComponent is the implemented half of Illuminate\View\Component.
+// BaseComponent holds the state a component needs.
 //
 // A component embeds it to get the attribute bag, the alias name and the
 // methods the compiler-generated code calls around a render.
@@ -32,12 +30,12 @@ type BaseComponent struct {
 	Attributes *ComponentAttributeBag
 
 	// Props are the names the component declares. They are what
-	// IgnoredParameterNames answers with, and they stand in for the PHP
-	// constructor parameters that reflection reads there.
+	// IgnoredParameterNames answers with.
 	Props []string
 }
 
-// componentState holds what PHP keeps in Component's static properties.
+// componentState holds the package-level state a component needs: the
+// shared factory, the registered resolver and the inline-view cache.
 var componentState struct {
 	mu        sync.RWMutex
 	factory   *Factory
@@ -45,14 +43,9 @@ var componentState struct {
 	viewCache map[string]string
 }
 
-// Data is Component::data.
-//
-// PHP reflects over the component's public properties and methods to build the
-// data. Go rejects that mechanism (it is the one the framework exists to
-// replace), so a component states its data instead: the attribute bag, plus
-// whatever the embedding type passes in. The two extraction helpers PHP needs
-// for the reflection -- extractPublicProperties and extractPublicMethods -- are
-// protected there and have no counterpart here.
+// Data returns the values available to the component's view: the attribute
+// bag, plus whatever the embedding type passes in. A component states its
+// data explicitly rather than exposing it through reflection.
 func (c *BaseComponent) Data() map[string]any {
 	if c.Attributes == nil {
 		c.Attributes = c.newAttributeBag(nil)
@@ -62,13 +55,15 @@ func (c *BaseComponent) Data() map[string]any {
 	return data
 }
 
-// WithName is Component::withName.
+// WithName sets the alias the component was written as, and returns c for
+// chaining.
 func (c *BaseComponent) WithName(name string) *BaseComponent {
 	c.ComponentName = name
 	return c
 }
 
-// WithAttributes is Component::withAttributes.
+// WithAttributes replaces the component's attribute bag, and returns c for
+// chaining.
 func (c *BaseComponent) WithAttributes(attributes map[string]any) *BaseComponent {
 	if c.Attributes == nil {
 		c.Attributes = c.newAttributeBag(nil)
@@ -77,46 +72,36 @@ func (c *BaseComponent) WithAttributes(attributes map[string]any) *BaseComponent
 	return c
 }
 
-// newAttributeBag is Component::newAttributeBag.
+// newAttributeBag returns a new attribute bag populated with attributes.
 func (c *BaseComponent) newAttributeBag(attributes map[string]any) *ComponentAttributeBag {
 	return NewComponentAttributeBag(attributes)
 }
 
-// ShouldRender is Component::shouldRender.
-//
-// A component that embeds BaseComponent and wants to disappear under some
-// condition shadows this method, the way a PHP subclass overrides it.
+// ShouldRender reports whether the component draws at all. The default is
+// true; a component that embeds BaseComponent and wants to disappear under
+// some condition shadows this method.
 func (c *BaseComponent) ShouldRender() bool { return true }
 
-// IgnoredParameterNames is Component::ignoredParameterNames.
-//
-// PHP reads the constructor parameter names off the class with reflection. The
-// Go counterpart is Props, which the component states.
+// IgnoredParameterNames returns a copy of Props, the parameter names the
+// component declares.
 func (c *BaseComponent) IgnoredParameterNames() []string {
 	out := make([]string, len(c.Props))
 	copy(out, c.Props)
 	return out
 }
 
-// View is Component::view.
-//
-// It draws a view through the factory the component is attached to, the same
-// one ForgetFactory drops.
+// View draws view with data, through the factory the component is attached
+// to -- the same one ForgetFactory drops.
 func (c *BaseComponent) View(view string, data map[string]any) *View {
 	return componentFactory().Make(view, data)
 }
 
-// ResolveView is Component::resolveView.
+// ResolveView calls c.Render and normalizes the result: a *View or anything
+// with a ToHTML method is returned as it is; a func is wrapped so it
+// resolves when the data arrives; a string is the name of a registered view.
 //
-// PHP calls $this->render() on itself; Go has no abstract-class self-dispatch,
-// so the component is the argument. A *View or anything with a ToHTML method is
-// returned as it is; a func is wrapped so it resolves when the data arrives;
-// a string is the name of a registered view.
-//
-// The PHP pair that writes an inline template to disk and registers it under
-// the __components namespace -- extractBladeViewFromString and
-// createBladeViewFromString -- is protected and has no counterpart: a view here
-// is compiled into the binary, never written at request time.
+// A view here is compiled into the binary, never written to disk at request
+// time.
 func ResolveView(c Component) any {
 	rendered := c.Render()
 
@@ -138,12 +123,9 @@ func ResolveView(c Component) any {
 	}
 }
 
-// Resolve is Component::resolve.
-//
-// The resolver registered by ResolveComponentsUsing gets first refusal. PHP
-// falls back to the container when the data does not cover every constructor
-// parameter; there is no container here (ADR 0001), so the fallback is an error
-// naming the component.
+// Resolve builds the named component with data, through the resolver
+// registered by ResolveComponentsUsing. There is no container to fall back
+// to, so a resolver that cannot build the component is an error naming it.
 func Resolve(name string, data map[string]any) (Component, error) {
 	componentState.mu.RLock()
 	resolver := componentState.resolver
@@ -160,39 +142,38 @@ func Resolve(name string, data map[string]any) (Component, error) {
 	return component, nil
 }
 
-// ResolveComponentsUsing is Component::resolveComponentsUsing.
+// ResolveComponentsUsing registers the function Resolve calls to build a
+// component by name.
 func ResolveComponentsUsing(resolver func(name string, data map[string]any) Component) {
 	componentState.mu.Lock()
 	componentState.resolver = resolver
 	componentState.mu.Unlock()
 }
 
-// ForgetComponentsResolver is Component::forgetComponentsResolver.
+// ForgetComponentsResolver clears the resolver registered by
+// ResolveComponentsUsing.
 func ForgetComponentsResolver() {
 	componentState.mu.Lock()
 	componentState.resolver = nil
 	componentState.mu.Unlock()
 }
 
-// ForgetFactory is Component::forgetFactory.
+// ForgetFactory clears the factory componentFactory built, so the next call
+// builds a new one.
 func ForgetFactory() {
 	componentState.mu.Lock()
 	componentState.factory = nil
 	componentState.mu.Unlock()
 }
 
-// FlushCache is Component::flushCache.
-//
-// PHP clears four static caches; three of them hold reflection results that do
-// not exist here, so what is left is the inline-view cache.
+// FlushCache clears the inline-view cache.
 func FlushCache() {
 	componentState.mu.Lock()
 	componentState.viewCache = map[string]string{}
 	componentState.mu.Unlock()
 }
 
-// componentFactory is Component::factory. It builds one on first use, because
-// there is no container to resolve it from.
+// componentFactory returns the shared factory, building one on first use.
 func componentFactory() *Factory {
 	componentState.mu.Lock()
 	defer componentState.mu.Unlock()
@@ -202,10 +183,9 @@ func componentFactory() *Factory {
 	return componentState.factory
 }
 
-// AnonymousComponent is Illuminate\View\AnonymousComponent.
-//
-// It is a component with no behaviour: a view name and the data to draw it
-// with, which is what a component written as markup alone compiles to.
+// AnonymousComponent is a component with no behaviour: a view name and the
+// data to draw it with, which is what a component written as markup alone
+// compiles to.
 type AnonymousComponent struct {
 	BaseComponent
 
@@ -213,7 +193,8 @@ type AnonymousComponent struct {
 	data map[string]any
 }
 
-// NewAnonymousComponent is AnonymousComponent::__construct.
+// NewAnonymousComponent returns a component that draws view with a copy of
+// data.
 func NewAnonymousComponent(view string, data map[string]any) *AnonymousComponent {
 	copied := make(map[string]any, len(data))
 	for k, v := range data {
@@ -222,10 +203,10 @@ func NewAnonymousComponent(view string, data map[string]any) *AnonymousComponent
 	return &AnonymousComponent{view: view, data: copied}
 }
 
-// Render is AnonymousComponent::render.
+// Render returns the component's view name.
 func (c *AnonymousComponent) Render() any { return c.view }
 
-// Data is AnonymousComponent::data.
+// Data returns the values available to the component's view.
 //
 // The parent bag comes first, then this component's own attributes, then the
 // data it was built with, and the bag itself last under "attributes" -- the
@@ -251,15 +232,9 @@ func (c *AnonymousComponent) Data() map[string]any {
 	return data
 }
 
-// DynamicComponent is Illuminate\View\DynamicComponent.
-//
-// It draws the component whose name is only known at render time.
-//
-// PHP builds a Blade template that writes an <x-...> tag and compiles it again;
-// there are no component tags here (RULE 13), so what it resolves to is the
-// name of a registered view, which is the same answer without the second pass.
-// The four protected helpers that exist only to write that tag -- compileProps,
-// compileBindings, compileSlots and classForComponent -- have no counterpart.
+// DynamicComponent draws the component whose name is only known at render
+// time. It resolves directly to the name of a registered view, with no
+// second compile pass.
 type DynamicComponent struct {
 	BaseComponent
 
@@ -267,31 +242,32 @@ type DynamicComponent struct {
 	Component string
 }
 
-// NewDynamicComponent is DynamicComponent::__construct.
+// NewDynamicComponent returns a component that draws the named component.
 func NewDynamicComponent(component string) *DynamicComponent {
 	return &DynamicComponent{Component: component}
 }
 
-// Render is DynamicComponent::render.
+// Render returns the name of the component to draw.
 func (c *DynamicComponent) Render() any { return c.Component }
 
-// InvokableComponentVariable is Illuminate\View\InvokableComponentVariable.
-//
-// It is a component method exposed to the view as a value: the view writes the
-// name and the call happens when the value is drawn, not before.
+// InvokableComponentVariable is a component method exposed to the view as a
+// value: the view writes the name and the call happens when the value is
+// drawn, not before.
 type InvokableComponentVariable struct {
 	callable func() any
 }
 
-// NewInvokableComponentVariable is InvokableComponentVariable::__construct.
+// NewInvokableComponentVariable wraps callable so its result is resolved
+// lazily.
 func NewInvokableComponentVariable(callable func() any) *InvokableComponentVariable {
 	return &InvokableComponentVariable{callable: callable}
 }
 
-// ResolveDisplayableValue is InvokableComponentVariable::resolveDisplayableValue.
+// ResolveDisplayableValue is an alias for Invoke.
 func (v *InvokableComponentVariable) ResolveDisplayableValue() any { return v.Invoke() }
 
-// Invoke is InvokableComponentVariable::__invoke.
+// Invoke calls the wrapped callable and returns its result, or nil if none
+// was given.
 func (v *InvokableComponentVariable) Invoke() any {
 	if v.callable == nil {
 		return nil
@@ -299,10 +275,9 @@ func (v *InvokableComponentVariable) Invoke() any {
 	return v.callable()
 }
 
-// GetIterator is InvokableComponentVariable::getIterator.
-//
-// PHP returns an ArrayIterator over the resolved value; Go returns a
-// range-over-func sequence, and a value that is not a slice yields once.
+// GetIterator invokes the callable and returns its result as a
+// range-over-func sequence: a []any yields each element, and any other value
+// yields once.
 func (v *InvokableComponentVariable) GetIterator() iter.Seq2[int, any] {
 	return func(yield func(int, any) bool) {
 		switch resolved := v.Invoke().(type) {
@@ -320,5 +295,5 @@ func (v *InvokableComponentVariable) GetIterator() iter.Seq2[int, any] {
 	}
 }
 
-// String is InvokableComponentVariable::__toString.
+// String invokes the callable and renders its result as text.
 func (v *InvokableComponentVariable) String() string { return Text(v.Invoke()) }

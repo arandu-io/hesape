@@ -147,10 +147,9 @@ func TestTheOriginLinkOpensTheEditor(t *testing.T) {
 	}
 }
 
-// TestEveryEditorHasAScheme: the table knew four names and answered vscode://
-// for everything else, so a person who configured emacs, phpstorm, sublime or
-// idea got a link into an editor they do not have -- the configuration read,
-// echoed back, and ignored.
+// TestEveryEditorHasAScheme: every name in the table gets its own scheme, so a
+// person who configured one is never handed a link into an editor they do not
+// have.
 func TestEveryEditorHasAScheme(t *testing.T) {
 	for editor, want := range map[string]string{
 		"vscode":   "vscode://file",
@@ -202,10 +201,10 @@ func TestTheConsolePageDoesNotRenderAnEmptyHref(t *testing.T) {
 	}
 }
 
-// TestNoEditorIsNoLink: PHP returns nothing when app.editor is unset and the
-// frame renders without a link. Answering vscode:// there was a link that opens
-// nothing, and opens nothing in a way that reads as a broken debug page rather
-// than as an editor nobody configured.
+// TestNoEditorIsNoLink: an unset or unknown editor renders the frame without a
+// link. Guessing a scheme there is a link that opens nothing, and opens nothing
+// in a way that reads as a broken debug page rather than as an editor nobody
+// configured.
 func TestNoEditorIsNoLink(t *testing.T) {
 	for _, editor := range []string{"", "notepad", "VSCode"} {
 		if got := log.EditorLink(editor, "/src/app/main.go", 42); got != "" {

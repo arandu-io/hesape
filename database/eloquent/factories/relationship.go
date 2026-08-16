@@ -7,12 +7,11 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// hasOneOrMany is the part of Illuminate\Database\Eloquent\Relations\HasOneOrMany
-// that Relationship::createFor reaches.
+// hasOneOrMany is the part of a has-one-or-many relation that
+// Relationship.CreateFor reaches.
 //
-// PHP tests the relation with instanceof and then calls two methods on it. Go
-// has no instanceof over a class hierarchy, so the two methods are the test:
-// the type switch in CreateFor asks for this set rather than for a class.
+// The two methods are the test: the type switch in CreateFor asks for this set
+// rather than for a concrete type.
 type hasOneOrMany interface {
 	GetForeignKeyName() string
 	GetParentKey() any
@@ -32,9 +31,8 @@ type belongsToMany interface {
 	Attach(ctx context.Context, g auth.Grant, ids any, attributes map[string]any, touch ...bool) error
 }
 
-// Relationship answers
-// Illuminate\Database\Eloquent\Factories\Relationship: a child relationship a
-// factory creates once the parent has been saved.
+// Relationship is a child relationship a factory creates once the parent has
+// been saved.
 type Relationship struct {
 	factory      *Factory
 	relationship string

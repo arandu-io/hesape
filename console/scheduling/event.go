@@ -17,35 +17,27 @@ import (
 )
 
 // defaultExpiresAt is how many minutes an overlap mutex lives when the event
-// does not say. It is ManagesAttributes::$expiresAt: one day.
+// does not say: one day.
 const defaultExpiresAt = 1440
 
 // Filter is a callback that decides whether an event may run.
-//
-// It answers the closures ManagesAttributes keeps in $filters and $rejects.
 type Filter func(ctx context.Context) bool
 
 // Hook is a callback run before or after an event.
-//
-// It answers the closures Event keeps in $beforeCallbacks and $afterCallbacks.
-// It returns an error where PHP returns nothing and throws.
 type Hook func(ctx context.Context) error
 
 // Event is one scheduled command.
 //
-// It answers Illuminate\Console\Scheduling\Event, and it carries what
-// ManagesAttributes and ManagesFrequencies mix into it: the fields are
-// unexported and the setters keep the Laravel names, because Go cannot have a
-// field and a method that are both called withoutOverlapping.
+// Its fields are unexported, with setters and getters standing in for them,
+// because Go cannot have a field and a method that share a name -- such as
+// WithoutOverlapping.
 //
-// Two attributes are not in the PHP, and they are the ones RULE 14 and RULE 17
-// require: Action, which the event's Grant is issued for, and PerTenant, which
-// says the event is expanded to one run per tenant with a Grant each. Without
-// them a scheduled task would be the one path into the database with no
-// authorization on it.
+// Two fields carry the event's authorization: Action, which the event's
+// Grant is issued for, and PerTenant, which says the event is expanded to
+// one run per tenant with a Grant each. Without them a scheduled task would
+// be the one path into the database with no authorization on it.
 type Event struct {
-	// Command is the command line the event runs. It is public in the PHP and
-	// CommandBuilder reads it.
+	// Command is the command line the event runs. CommandBuilder reads it.
 	Command string
 
 	// Output is where the command's output is sent. It is a path, and the
@@ -98,7 +90,7 @@ type Event struct {
 	// The runner sets it to its own, so the loop that repeats an event within
 	// the minute and the event deciding whether it is time agree on what time it
 	// is. Nothing else sets it: an event asked in isolation reads the wall
-	// clock, which is what the PHP's Date::now() is.
+	// clock.
 	now func() time.Time
 
 	// callback is set when the event is a closure rather than a command line,
@@ -110,14 +102,14 @@ type Event struct {
 	callback Callback
 
 	// exception is what the callback failed with, kept so the after callbacks
-	// run before it is returned -- which is the order CallbackEvent::run has.
+	// run before it is returned -- which is the order Event.Run has.
 	exception error
 }
 
 // NewEvent returns an event for a command line.
 //
-// It answers Event::__construct: the mutex, the command and the timezone, and
-// the default output for the system.
+// It sets the mutex, the command and the timezone, and defaults the output
+// for the system.
 func NewEvent(mutex EventMutex, command string, timezone *time.Location) *Event {
 	e := &Event{
 		Mutex:      mutex,
@@ -131,8 +123,6 @@ func NewEvent(mutex EventMutex, command string, timezone *time.Location) *Event 
 }
 
 // GetDefaultOutput is where output goes when nobody said.
-//
-// It answers Event::getDefaultOutput.
 func (e *Event) GetDefaultOutput() string {
 	if os.PathSeparator == '\\' {
 		return "NUL"
@@ -142,9 +132,9 @@ func (e *Event) GetDefaultOutput() string {
 
 // Run runs the event.
 //
-// It answers Event::run: an overlapping event returns without doing anything,
-// and an event that was not sent to the background is finished -- callbacks
-// and mutex release -- as soon as it returns.
+// An overlapping event returns without doing anything, and an event that was
+// not sent to the background is finished -- callbacks and mutex release --
+// as soon as it returns.
 func (e *Event) Run(ctx context.Context) error {
 	skip, err := e.ShouldSkipDueToOverlapping(ctx)
 	if err != nil {
@@ -163,8 +153,8 @@ func (e *Event) Run(ctx context.Context) error {
 	}
 
 	finished := e.Finish(ctx, exitCode)
-	// The callback's own error wins: it is what the work failed with, and the
-	// after callbacks having run is what PHP's rethrow-after-parent::run does.
+	// The callback's own error wins: it is what the work failed with, and
+	// Finish already ran the after callbacks before this returns it.
 	if e.exception != nil {
 		return e.exception
 	}
@@ -173,8 +163,6 @@ func (e *Event) Run(ctx context.Context) error {
 
 // ShouldSkipDueToOverlapping reports whether another copy of the event holds
 // the mutex.
-//
-// It answers Event::shouldSkipDueToOverlapping.
 func (e *Event) ShouldSkipDueToOverlapping(ctx context.Context) (bool, error) {
 	if !e.withoutOverlapping || e.Mutex == nil {
 		return false, nil
@@ -187,16 +175,13 @@ func (e *Event) ShouldSkipDueToOverlapping(ctx context.Context) (bool, error) {
 }
 
 // IsRepeatable reports whether the event was asked to repeat within the minute.
-//
-// It answers Event::isRepeatable.
 func (e *Event) IsRepeatable() bool { return e.repeatSeconds > 0 }
 
-// ShouldRepeatNow reports whether enough of the minute has passed for the next
-// repeat.
+// ShouldRepeatNow reports whether enough of the minute has passed for the
+// next repeat.
 //
-// It answers Event::shouldRepeatNow. Runner.repeatEvents is what calls it; it
-// had no caller at all, which is what made EveryFifteenSeconds a schedule that
-// ran once a minute.
+// Runner.repeatEvents is what calls it: without a caller, EveryFifteenSeconds
+// would be a schedule that ran once a minute instead of four times.
 func (e *Event) ShouldRepeatNow() bool {
 	if !e.IsRepeatable() || e.lastChecked.IsZero() {
 		return false
@@ -220,16 +205,15 @@ func (e *Event) useClock(now func() time.Time) {
 	}
 }
 
-// RepeatSeconds is ManagesAttributes::$repeatSeconds: how often the event
-// repeats within a minute, or zero. PHP reads the public property, and null
-// there is zero here.
+// RepeatSeconds reports how often the event repeats within a minute, or
+// zero.
 func (e *Event) RepeatSeconds() int { return e.repeatSeconds }
 
 // start runs the before callbacks and then the command.
 //
-// It answers Event::start, mutex removal on failure included: an event that
-// threw on the way in must not leave its overlap lock behind, or it never runs
-// again until the lock expires.
+// The mutex is removed on failure: an event that threw on the way in must
+// not leave its overlap lock behind, or it never runs again until the lock
+// expires.
 func (e *Event) start(ctx context.Context) (int, error) {
 	if err := e.CallBeforeCallbacks(ctx); err != nil {
 		e.removeMutex(ctx)
@@ -243,16 +227,15 @@ func (e *Event) start(ctx context.Context) (int, error) {
 	return exitCode, nil
 }
 
-// execute runs the work: the closure when there is one, the process otherwise.
+// execute runs the work: the closure when there is one, the process
+// otherwise.
 //
-// It answers Event::execute and CallbackEvent::execute at once, for the reason
-// the callback field gives. PHP shells out through Symfony Process; this runs
-// the built command line through the system shell for the same reason -- the
-// command string carries redirections, and a redirection is the shell's.
+// It runs the built command line through the system shell: the command
+// string carries redirections, and a redirection is the shell's.
 //
-// The returned error is a failure to run at all. A command that ran and exited
-// non-zero is its status and no error, which is what the onFailure callbacks
-// are for.
+// The returned error is a failure to run at all. A command that ran and
+// exited non-zero is its status and no error, which is what the onFailure
+// callbacks are for.
 func (e *Event) execute(ctx context.Context) (int, error) {
 	if e.callback != nil {
 		e.exception = e.callback(ctx, e.Grant())
@@ -285,10 +268,10 @@ func (e *Event) execute(ctx context.Context) (int, error) {
 	return 1, err
 }
 
-// Finish records the exit code, runs the after callbacks and releases the mutex.
+// Finish records the exit code, runs the after callbacks and releases the
+// mutex.
 //
-// It answers Event::finish, including that the mutex is released whatever the
-// callbacks did.
+// The mutex is released whatever the callbacks did.
 func (e *Event) Finish(ctx context.Context, exitCode int) error {
 	e.ExitCode = exitCode
 	err := e.CallAfterCallbacks(ctx)
@@ -297,8 +280,6 @@ func (e *Event) Finish(ctx context.Context, exitCode int) error {
 }
 
 // CallBeforeCallbacks runs every callback registered with Before.
-//
-// It answers Event::callBeforeCallbacks.
 func (e *Event) CallBeforeCallbacks(ctx context.Context) error {
 	for _, callback := range e.beforeCallbacks {
 		if err := callback(ctx); err != nil {
@@ -310,9 +291,9 @@ func (e *Event) CallBeforeCallbacks(ctx context.Context) error {
 
 // CallAfterCallbacks runs every callback registered with Then.
 //
-// It answers Event::callAfterCallbacks. Every one of them runs even when an
-// earlier one failed, and the first error is what comes back: a ping that could
-// not be sent must not stop the mail that reports the output.
+// Every one of them runs even when an earlier one failed, and the first
+// error is what comes back: a ping that could not be sent must not stop the
+// mail that reports the output.
 func (e *Event) CallAfterCallbacks(ctx context.Context) error {
 	var first error
 	for _, callback := range e.afterCallbacks {
@@ -324,14 +305,12 @@ func (e *Event) CallAfterCallbacks(ctx context.Context) error {
 }
 
 // BuildCommand renders the command line the event runs.
-//
-// It answers Event::buildCommand.
 func (e *Event) BuildCommand() string { return (CommandBuilder{}).BuildCommand(e) }
 
 // IsDue reports whether the event should run now.
 //
-// It answers Event::isDue: maintenance mode first, then the expression, then
-// the environment.
+// It checks maintenance mode first, then the expression, then the
+// environment.
 func (e *Event) IsDue(now time.Time, environment string, downForMaintenance bool) bool {
 	if !e.RunsInMaintenanceMode() && downForMaintenance {
 		return false
@@ -339,19 +318,16 @@ func (e *Event) IsDue(now time.Time, environment string, downForMaintenance bool
 	return e.expressionPasses(now) && e.RunsInEnvironment(environment)
 }
 
-// RunsInMaintenanceMode reports whether the event runs while the application is
-// down.
-//
-// It answers Event::runsInMaintenanceMode.
+// RunsInMaintenanceMode reports whether the event runs while the application
+// is down.
 func (e *Event) RunsInMaintenanceMode() bool { return e.evenInMaintenanceMode }
 
-// expressionPasses is Event::expressionPasses: the cron expression, evaluated in
-// the event's timezone.
+// expressionPasses evaluates the cron expression in the event's timezone.
 func (e *Event) expressionPasses(now time.Time) bool {
 	expression, err := ParseCronExpression(e.expression)
 	if err != nil {
 		// An expression that does not parse fires never rather than always.
-		// Schedule::Exec refuses one at registration, so reaching this means
+		// Schedule.Exec refuses one at registration, so reaching this means
 		// somebody set the expression by hand afterwards.
 		return false
 	}
@@ -363,15 +339,14 @@ func (e *Event) expressionPasses(now time.Time) bool {
 
 // RunsInEnvironment reports whether the event runs in the given environment.
 //
-// It answers Event::runsInEnvironment: an event that named none runs in all.
+// An event that named none runs in all.
 func (e *Event) RunsInEnvironment(environment string) bool {
 	return len(e.environments) == 0 || slices.Contains(e.environments, environment)
 }
 
 // FiltersPass reports whether every when passed and no skip matched.
 //
-// It answers Event::filtersPass, including that it records the time: a
-// sub-minute repeat counts from the last check.
+// It records the time: a sub-minute repeat counts from the last check.
 func (e *Event) FiltersPass(ctx context.Context) bool {
 	e.lastChecked = e.clock()
 
@@ -388,17 +363,14 @@ func (e *Event) FiltersPass(ctx context.Context) bool {
 	return true
 }
 
-// StoreOutput makes sure the output is written to a file rather than discarded.
-//
-// It answers Event::storeOutput.
+// StoreOutput makes sure the output is written to a file rather than
+// discarded.
 func (e *Event) StoreOutput() *Event {
 	e.ensureOutputIsBeingCaptured()
 	return e
 }
 
 // SendOutputTo sends the command's output to a path.
-//
-// It answers Event::sendOutputTo.
 func (e *Event) SendOutputTo(location string, append ...bool) *Event {
 	e.Output = location
 	e.ShouldAppendOutput = len(append) > 0 && append[0]
@@ -406,13 +378,11 @@ func (e *Event) SendOutputTo(location string, append ...bool) *Event {
 }
 
 // AppendOutputTo adds the command's output to what is already at a path.
-//
-// It answers Event::appendOutputTo.
 func (e *Event) AppendOutputTo(location string) *Event { return e.SendOutputTo(location, true) }
 
-// ensureOutputIsBeingCaptured is Event::ensureOutputIsBeingCaptured: an event
-// whose output goes to the null device is pointed at a log file first, because
-// there is nothing to mail or read otherwise.
+// ensureOutputIsBeingCaptured points an event whose output goes to the null
+// device at a log file first, because there is nothing to mail or read
+// otherwise.
 func (e *Event) ensureOutputIsBeingCaptured() {
 	if e.Output == "" || e.Output == e.GetDefaultOutput() {
 		e.SendOutputTo(filepathJoin("storage", "logs", "schedule-"+sha1Hex(e.MutexName())+".log"))
@@ -439,11 +409,8 @@ type Pinger interface {
 
 // EmailOutputTo mails the output of the event.
 //
-// It answers Event::emailOutputTo. onlyIfOutputExists defaults to true, which is
-// the PHP default: a task that printed nothing sends no mail.
-//
-// The mechanical difference is the mailer, which is passed rather than resolved
-// from the container.
+// onlyIfOutputExists defaults to true: a task that printed nothing sends no
+// mail.
 func (e *Event) EmailOutputTo(mailer Mailer, addresses []string, onlyIfOutputExists ...bool) *Event {
 	e.ensureOutputIsBeingCaptured()
 	only := true
@@ -456,16 +423,14 @@ func (e *Event) EmailOutputTo(mailer Mailer, addresses []string, onlyIfOutputExi
 }
 
 // EmailWrittenOutputTo mails the output only when there was some.
-//
-// It answers Event::emailWrittenOutputTo.
 func (e *Event) EmailWrittenOutputTo(mailer Mailer, addresses []string) *Event {
 	return e.EmailOutputTo(mailer, addresses, true)
 }
 
 // EmailOutputOnFailure mails the output when the command failed.
 //
-// It answers Event::emailOutputOnFailure, including that it mails even when
-// there was no output: a task that failed silently is the one worth reading.
+// It mails even when there was no output: a task that failed silently is the
+// one worth reading.
 func (e *Event) EmailOutputOnFailure(mailer Mailer, addresses []string) *Event {
 	e.ensureOutputIsBeingCaptured()
 	return e.OnFailure(func(ctx context.Context) error {
@@ -473,7 +438,8 @@ func (e *Event) EmailOutputOnFailure(mailer Mailer, addresses []string) *Event {
 	})
 }
 
-// emailOutput is Event::emailOutput.
+// emailOutput reads the event's output and mails it through mailer, unless
+// onlyIfOutputExists is true and there was none.
 func (e *Event) emailOutput(ctx context.Context, mailer Mailer, addresses []string, onlyIfOutputExists bool) error {
 	if mailer == nil {
 		return errors.New("scheduling: the event was asked to mail its output and no mailer was given")
@@ -488,7 +454,8 @@ func (e *Event) emailOutput(ctx context.Context, mailer Mailer, addresses []stri
 	return mailer.Raw(ctx, addresses, e.getEmailSubject(), text)
 }
 
-// getEmailSubject is Event::getEmailSubject.
+// getEmailSubject is the event's description, or a default naming the
+// command.
 func (e *Event) getEmailSubject() string {
 	if e.description != "" {
 		return e.description
@@ -497,15 +464,11 @@ func (e *Event) getEmailSubject() string {
 }
 
 // PingBefore makes a GET to the URL before the event runs.
-//
-// It answers Event::pingBefore.
 func (e *Event) PingBefore(pinger Pinger, url string) *Event {
 	return e.Before(pingCallback(pinger, url))
 }
 
 // PingBeforeIf makes the ping before, when the condition holds.
-//
-// It answers Event::pingBeforeIf.
 func (e *Event) PingBeforeIf(condition bool, pinger Pinger, url string) *Event {
 	if condition {
 		return e.PingBefore(pinger, url)
@@ -514,15 +477,11 @@ func (e *Event) PingBeforeIf(condition bool, pinger Pinger, url string) *Event {
 }
 
 // ThenPing makes a GET to the URL after the event runs.
-//
-// It answers Event::thenPing.
 func (e *Event) ThenPing(pinger Pinger, url string) *Event {
 	return e.Then(pingCallback(pinger, url))
 }
 
 // ThenPingIf makes the ping after, when the condition holds.
-//
-// It answers Event::thenPingIf.
 func (e *Event) ThenPingIf(condition bool, pinger Pinger, url string) *Event {
 	if condition {
 		return e.ThenPing(pinger, url)
@@ -531,15 +490,11 @@ func (e *Event) ThenPingIf(condition bool, pinger Pinger, url string) *Event {
 }
 
 // PingOnSuccess makes a GET to the URL when the event succeeded.
-//
-// It answers Event::pingOnSuccess.
 func (e *Event) PingOnSuccess(pinger Pinger, url string) *Event {
 	return e.OnSuccess(pingCallback(pinger, url))
 }
 
 // PingOnSuccessIf makes the ping on success, when the condition holds.
-//
-// It answers Event::pingOnSuccessIf.
 func (e *Event) PingOnSuccessIf(condition bool, pinger Pinger, url string) *Event {
 	if condition {
 		return e.PingOnSuccess(pinger, url)
@@ -548,15 +503,11 @@ func (e *Event) PingOnSuccessIf(condition bool, pinger Pinger, url string) *Even
 }
 
 // PingOnFailure makes a GET to the URL when the event failed.
-//
-// It answers Event::pingOnFailure.
 func (e *Event) PingOnFailure(pinger Pinger, url string) *Event {
 	return e.OnFailure(pingCallback(pinger, url))
 }
 
 // PingOnFailureIf makes the ping on failure, when the condition holds.
-//
-// It answers Event::pingOnFailureIf.
 func (e *Event) PingOnFailureIf(condition bool, pinger Pinger, url string) *Event {
 	if condition {
 		return e.PingOnFailure(pinger, url)
@@ -564,7 +515,7 @@ func (e *Event) PingOnFailureIf(condition bool, pinger Pinger, url string) *Even
 	return e
 }
 
-// pingCallback is Event::pingCallback.
+// pingCallback returns a hook that makes a GET request to url through pinger.
 func pingCallback(pinger Pinger, url string) Hook {
 	return func(ctx context.Context) error {
 		if pinger == nil {
@@ -575,8 +526,6 @@ func pingCallback(pinger Pinger, url string) Hook {
 }
 
 // Before registers a callback run before the event.
-//
-// It answers Event::before.
 func (e *Event) Before(callback Hook) *Event {
 	if callback != nil {
 		e.beforeCallbacks = append(e.beforeCallbacks, callback)
@@ -586,12 +535,10 @@ func (e *Event) Before(callback Hook) *Event {
 
 // After registers a callback run after the event.
 //
-// It answers Event::after, which is one call to then in the PHP too.
+// It is one call to Then.
 func (e *Event) After(callback Hook) *Event { return e.Then(callback) }
 
 // Then registers a callback run after the event.
-//
-// It answers Event::then.
 func (e *Event) Then(callback Hook) *Event {
 	if callback != nil {
 		e.afterCallbacks = append(e.afterCallbacks, callback)
@@ -600,18 +547,12 @@ func (e *Event) Then(callback Hook) *Event {
 }
 
 // ThenWithOutput registers a callback that is handed what the event printed.
-//
-// It answers Event::thenWithOutput. PHP finds the output parameter by
-// reflecting on the closure; here the callback takes it, which is the same
-// intent said out loud.
 func (e *Event) ThenWithOutput(callback func(ctx context.Context, output string) error, onlyIfOutputExists ...bool) *Event {
 	e.ensureOutputIsBeingCaptured()
 	return e.Then(e.withOutputCallback(callback, onlyIfOutputExists...))
 }
 
 // OnSuccess registers a callback run when the event ended with status zero.
-//
-// It answers Event::onSuccess.
 func (e *Event) OnSuccess(callback Hook) *Event {
 	return e.Then(func(ctx context.Context) error {
 		if e.ExitCode == 0 {
@@ -622,16 +563,12 @@ func (e *Event) OnSuccess(callback Hook) *Event {
 }
 
 // OnSuccessWithOutput is OnSuccess with the output handed to the callback.
-//
-// It answers Event::onSuccessWithOutput.
 func (e *Event) OnSuccessWithOutput(callback func(ctx context.Context, output string) error, onlyIfOutputExists ...bool) *Event {
 	e.ensureOutputIsBeingCaptured()
 	return e.OnSuccess(e.withOutputCallback(callback, onlyIfOutputExists...))
 }
 
 // OnFailure registers a callback run when the event ended badly.
-//
-// It answers Event::onFailure.
 func (e *Event) OnFailure(callback Hook) *Event {
 	return e.Then(func(ctx context.Context) error {
 		if e.ExitCode != 0 {
@@ -642,14 +579,14 @@ func (e *Event) OnFailure(callback Hook) *Event {
 }
 
 // OnFailureWithOutput is OnFailure with the output handed to the callback.
-//
-// It answers Event::onFailureWithOutput.
 func (e *Event) OnFailureWithOutput(callback func(ctx context.Context, output string) error, onlyIfOutputExists ...bool) *Event {
 	e.ensureOutputIsBeingCaptured()
 	return e.OnFailure(e.withOutputCallback(callback, onlyIfOutputExists...))
 }
 
-// withOutputCallback is Event::withOutputCallback.
+// withOutputCallback returns a hook that reads the event's output and hands
+// it to callback, skipping the call when onlyIfOutputExists is true and
+// there was none.
 func (e *Event) withOutputCallback(callback func(ctx context.Context, output string) error, onlyIfOutputExists ...bool) Hook {
 	only := len(onlyIfOutputExists) > 0 && onlyIfOutputExists[0]
 	return func(ctx context.Context) error {
@@ -666,8 +603,7 @@ func (e *Event) withOutputCallback(callback func(ctx context.Context, output str
 
 // GetSummaryForDisplay is the event as a listing prints it.
 //
-// It answers Event::getSummaryForDisplay and CallbackEvent::getSummaryForDisplay
-// at once: the description when it has one, the command line when it is a
+// It is the description when it has one, the command line when it is a
 // command, and "Callback" when it is a closure that was never named.
 func (e *Event) GetSummaryForDisplay() string {
 	if e.description != "" {
@@ -681,10 +617,8 @@ func (e *Event) GetSummaryForDisplay() string {
 
 // NextRunDate is when the event runs next, after the given time.
 //
-// It answers Event::nextRunDate. The $nth and $allowCurrentDate arguments have
-// no equivalent: both are cron-expression library options for walking further
-// down the list, and a caller that wants the second occurrence asks for the next
-// one after the first.
+// To find the nth occurrence, call it again with each result: there is no
+// argument for walking further down the list in one call.
 func (e *Event) NextRunDate(after time.Time) time.Time {
 	expression, err := ParseCronExpression(e.expression)
 	if err != nil {
@@ -697,13 +631,9 @@ func (e *Event) NextRunDate(after time.Time) time.Time {
 }
 
 // GetExpression is the cron expression the event fires on.
-//
-// It answers Event::getExpression.
 func (e *Event) GetExpression() string { return e.expression }
 
 // PreventOverlapsUsing points the event at another mutex.
-//
-// It answers Event::preventOverlapsUsing.
 func (e *Event) PreventOverlapsUsing(mutex EventMutex) *Event {
 	e.Mutex = mutex
 	return e
@@ -711,9 +641,9 @@ func (e *Event) PreventOverlapsUsing(mutex EventMutex) *Event {
 
 // MutexName is the key the event's overlap lock is stored under.
 //
-// It answers Event::mutexName, digest included: the name is derived from the
-// expression and the command, so the same event on two replicas resolves to the
-// same key and one of them loses the race.
+// The name is derived from the expression and the command, so the same
+// event on two replicas resolves to the same key and one of them loses the
+// race.
 func (e *Event) MutexName() string {
 	if e.MutexNameResolver != nil {
 		return e.MutexNameResolver(e)
@@ -722,16 +652,13 @@ func (e *Event) MutexName() string {
 }
 
 // CreateMutexNameUsing overrides how the mutex is named.
-//
-// It answers Event::createMutexNameUsing. PHP takes a string or a closure; the
-// string form is a closure that returns it, which is what the PHP builds too.
 func (e *Event) CreateMutexNameUsing(resolver func(*Event) string) *Event {
 	e.MutexNameResolver = resolver
 	return e
 }
 
-// removeMutex is Event::removeMutex: released only when the event asked for the
-// lock in the first place.
+// removeMutex releases the mutex, and only when the event asked for the lock
+// in the first place.
 func (e *Event) removeMutex(ctx context.Context) {
 	if e.withoutOverlapping && e.Mutex != nil {
 		_ = e.Mutex.Forget(ctx, e)
@@ -740,10 +667,9 @@ func (e *Event) removeMutex(ctx context.Context) {
 
 // NormalizeCommand rewrites the running binary's path out of a command line.
 //
-// It answers Event::normalizeCommand, which does the same with the PHP and
-// artisan binaries. It exists so the mutex name of an event does not change when
-// the binary moves: two replicas installed under different paths must resolve to
-// the same lock, or neither ever loses the race.
+// It exists so the mutex name of an event does not change when the binary
+// moves: two replicas installed under different paths must resolve to the
+// same lock, or neither ever loses the race.
 func NormalizeCommand(command string) string {
 	binary := console.PhpBinary()
 	if binary == "" {
@@ -753,8 +679,7 @@ func NormalizeCommand(command string) string {
 }
 
 // sha1Hex is the digest the mutex names use. It names a lock, it does not
-// protect anything: SHA-1 is what the PHP uses and what makes the two keys
-// comparable.
+// protect anything, so the digest only needs to be deterministic and short.
 func sha1Hex(s string) string {
 	sum := sha1.Sum([]byte(s))
 	return hex.EncodeToString(sum[:])

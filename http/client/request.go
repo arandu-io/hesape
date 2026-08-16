@@ -6,12 +6,9 @@ import (
 	"strings"
 )
 
-// Request mirrors Illuminate\Http\Client\Request.
-//
-// It wraps *http.Request and adds inspection methods for method, URL,
-// headers, body, and content-type detection — the same surface that
-// Illuminate's Request provides for inspecting outgoing HTTP client
-// requests in stubs and assertions.
+// Request wraps *http.Request and adds inspection methods for method, URL,
+// headers, body, and content-type detection, for inspecting outgoing HTTP
+// client requests in stubs and assertions.
 type Request struct {
 	req        *http.Request
 	bodyBytes  []byte

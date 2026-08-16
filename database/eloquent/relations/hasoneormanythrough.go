@@ -11,16 +11,13 @@ import (
 
 // ThroughKey is the alias the intermediate key is selected under.
 //
-// The PHP calls it laravel_through_key. The name is the framework's, not the
-// user's, so it is this framework's here -- and it is a column name that comes
-// back on every row of a has-many-through, which makes it the one string in
-// this package a reader is guaranteed to meet in a result set.
+// The name is the framework's rather than the user's, and it is a column name
+// that comes back on every row of a has-many-through, which makes it the one
+// string in this package a reader is guaranteed to meet in a result set.
 const ThroughKey = "arandu_through_key"
 
-// HasOneOrManyThrough answers the abstract
-// Illuminate\Database\Eloquent\Relations\HasOneOrManyThrough: a relation that
-// reaches its rows through a third table -- a country's posts, through its
-// users.
+// HasOneOrManyThrough is a relation that reaches its rows through a third table
+// -- a country's posts, through its users.
 //
 // The intermediate table is joined rather than queried, so it is still two
 // queries for an eager load and not three. What makes the eager load work is
@@ -397,8 +394,6 @@ func (r *HasOneOrManyThrough) GetParentKey() any { return r.farParent.GetAttribu
 // filters on the country's key. GetResults answers the matching rows, or an
 // empty slice when the far parent has no key yet -- an unsaved parent has no
 // children, and the join would otherwise match every row.
-//
-// Answers Illuminate\Database\Eloquent\Relations\HasManyThrough.
 type HasManyThrough struct {
 	HasOneOrManyThrough
 }
@@ -473,8 +468,6 @@ func (r *HasManyThrough) One() *HasOneThrough {
 //
 // It also compares related models, which is what makes Is and IsNot work
 // against a relation that has to be resolved before it can be compared.
-//
-// Answers Illuminate\Database\Eloquent\Relations\HasOneThrough.
 type HasOneThrough struct {
 	HasOneOrManyThrough
 	concerns.SupportsDefaultModels

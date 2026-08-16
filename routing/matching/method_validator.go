@@ -5,13 +5,11 @@ import (
 	"strings"
 )
 
-// MethodValidator mirrors Illuminate\Routing\Matching\MethodValidator.
-//
-// It validates that the incoming request's method is one of the route's
-// accepted methods.
+// MethodValidator validates that the incoming request's method is one of the
+// route's accepted methods.
 type MethodValidator struct{}
 
-// Matches is MethodValidator::matches.
+// Matches reports whether req's method is one route accepts.
 func (v MethodValidator) Matches(route Route, req *http.Request) bool {
 	if req == nil {
 		return false

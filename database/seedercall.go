@@ -7,30 +7,28 @@ import (
 	"sync"
 )
 
-// called answers Illuminate\Database\Seeder::$called.
+// called is the list of seeders already run, one per process.
 //
-// It is static in PHP, which means one list per process, which is what a
-// package-level variable is here. The mutex is what static gives away for free
-// in a language with no goroutines.
+// It is a package-level variable, and the mutex is what makes it safe to read
+// and write from more than one goroutine.
 var (
 	calledMu sync.Mutex
 	called   []string
 )
 
-// Call answers Seeder::call: run the named seeders, in the order they are
-// named, and remember that they ran.
+// Call runs the named seeders, in the order they are named, and remembers
+// that they ran.
 //
-// The PHP is a method on the Seeder base class, so a seeder calls
-// $this->call(PostSeeder::class). Here it is a function, because Seeder is
-// already the interface a seeder implements and a Go type cannot be both the
-// interface and the base class. What a seeder writes is:
+// It is a function rather than a method on a base type, because Seeder is
+// already the interface a seeder implements and a Go type cannot be both an
+// interface and a base type. What a seeder writes is:
 //
 //	func (DatabaseSeeder) Run(ctx context.Context, d Deps) error {
 //	    _, err := database.Call(ctx, registry, d, "UserSeeder", "PostSeeder")
 //	    return err
 //	}
 //
-// It answers the names that ran, which is what the console prints.
+// It returns the names that ran, which is what the console prints.
 func Call[D any](ctx context.Context, registry []Seeder[D], deps D, names ...string) ([]string, error) {
 	var ran []string
 
@@ -54,28 +52,26 @@ func Call[D any](ctx context.Context, registry []Seeder[D], deps D, names ...str
 	return ran, nil
 }
 
-// CallWith answers Seeder::callWith: Call, with arguments for the seeders.
+// CallWith is Call, with arguments for the seeders.
 //
-// The PHP's $parameters are the arguments its container passes to run(). Here
-// the arguments are whatever the project's Deps carries, so CallWith takes a
-// function that builds them -- the same shape Seed takes, and for the same
-// reason: this package does not know what a project's Deps has on it.
+// The arguments are whatever the project's Deps carries, so CallWith takes
+// a function that builds them -- the same shape Seed takes, and for the
+// same reason: this package does not know what a project's Deps has on it.
 func CallWith[D any](ctx context.Context, registry []Seeder[D], deps func(args []string) D, args []string, names ...string) ([]string, error) {
 	return Call(ctx, registry, deps(args), names...)
 }
 
-// CallSilent answers Seeder::callSilent.
+// CallSilent is Call.
 //
-// The PHP's $silent suppresses the console output the base class writes.
 // Nothing here writes to a console -- a library that prints is a library a test
-// cannot read, which is why Seed prints nothing either -- so this is Call, and
-// it exists so a seeder ported from Laravel keeps compiling.
+// cannot read, which is why Seed prints nothing either -- so there is no output
+// to suppress and the two names do the same thing.
 func CallSilent[D any](ctx context.Context, registry []Seeder[D], deps D, names ...string) ([]string, error) {
 	return Call(ctx, registry, deps, names...)
 }
 
-// CallOnce answers Seeder::callOnce: run the named seeders unless they have
-// already run in this process.
+// CallOnce runs the named seeders unless they have already run in this
+// process.
 //
 // It is what keeps a shared seeder -- the one that inserts the currencies --
 // from running four times because four other seeders each depend on it.
@@ -100,9 +96,9 @@ func CallOnce[D any](ctx context.Context, registry []Seeder[D], deps D, names ..
 	return Call(ctx, registry, deps, pending...)
 }
 
-// CalledSeeders answers Seeder::$called, which the PHP reads directly because
-// its property is protected-static and its subclasses are in the same class
-// hierarchy. Go has neither, so the list is read through a function.
+// CalledSeeders returns the names of every seeder Call has run in this
+// process. There is no shared field to read directly, so the list is read
+// through a function.
 func CalledSeeders() []string {
 	calledMu.Lock()
 	defer calledMu.Unlock()
@@ -111,9 +107,8 @@ func CalledSeeders() []string {
 
 // ForgetCalledSeeders empties that list.
 //
-// It has no PHP counterpart because a PHP process handles one command and then
-// exits. A Go test binary runs every test in one process, so a static list that
-// nothing clears makes the second test's CallOnce do nothing.
+// A Go test binary runs every test in one process, so a package-level list
+// that nothing clears makes the second test's CallOnce do nothing.
 func ForgetCalledSeeders() {
 	calledMu.Lock()
 	defer calledMu.Unlock()

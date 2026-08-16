@@ -9,10 +9,9 @@ import (
 // ErrMorphNotMapped is what a polymorphic read returns when the value in the
 // type column names nothing.
 //
-// It answers Illuminate\Database\ClassMorphViolationException, which the PHP
-// throws when requireMorphMap is on and a model has no alias. Here it is also
-// what an unknown alias produces on the way back, because there is no class
-// name in the column to fall back to.
+// It is what an unregistered type produces in both directions: writing a model
+// with no alias, and reading an alias nothing was registered under. There is no
+// type name in the column to fall back to.
 var ErrMorphNotMapped = fmt.Errorf("relations: morph type is not in the morph map")
 
 var morphMap = struct {
@@ -21,23 +20,16 @@ var morphMap = struct {
 	required bool
 }{entries: map[string]func() Model{}, required: true}
 
-// MorphMap answers Relation::morphMap: it registers aliases and returns the map.
+// MorphMap registers the aliases a polymorphic type column holds, and returns
+// the map.
 //
 // # The map is mandatory here, and that is the better half of the trade
 //
-// In PHP the alias is optional: with no map, `commentable_type` holds
-// "App\Models\Post" and Eloquent instantiates the class by name. That works
-// until somebody moves the class, and then every row written before the move
-// points at a namespace that no longer exists -- a rename that has to be
-// followed by an UPDATE over the table, which is why the Laravel documentation
-// recommends the map anyway.
-//
-// Go has no class name at run time to write into the column, so the map is not
-// a recommendation here, it is the mechanism. What the column holds is an alias
-// the application chose -- "post", "video" -- and the type it points at can be
-// renamed, moved between packages, or split in two, without a single row of
-// data becoming unreadable. The constraint buys the thing the PHP has to
-// remember to ask for.
+// Go has no type name at run time to write into the column, so the map is the
+// mechanism rather than a recommendation. What the column holds is an alias the
+// application chose -- "post", "video" -- and the type it points at can be
+// renamed, moved between packages, or split in two, without a single row of data
+// becoming unreadable.
 //
 // The values are factories rather than instances, because every read needs a
 // fresh model and a shared one would be a data race the first time two requests
@@ -48,7 +40,7 @@ var morphMap = struct {
 //	    "video": func() relations.Model { return &Video{} },
 //	})
 //
-// merge defaults to true, as it does in the PHP.
+// merge defaults to true.
 func MorphMap(entries map[string]func() Model, merge ...bool) map[string]func() Model {
 	morphMap.Lock()
 	defer morphMap.Unlock()

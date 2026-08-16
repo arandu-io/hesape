@@ -10,9 +10,7 @@ import (
 
 // Module reports the connection on the health check and closes it on shutdown.
 //
-// It answers Illuminate\Redis\RedisServiceProvider, which is the one thing a
-// provider does here that constructing a value does not (ADR 0001, ADR 0045):
-// it registers the component with the lifecycle. It owns no tables and
+// It is what registers the component with the lifecycle. It owns no tables and
 // registers no routes.
 //
 // It exists so that "the key-value store is down" shows up on

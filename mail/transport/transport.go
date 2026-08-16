@@ -38,12 +38,9 @@ func (SMTP) Name() string { return "smtp" }
 
 // Send delivers the message.
 //
-// The [mail.SentMessage] it returns carries no identifier: SMTP has no field for one,
-// and the id the receiving server assigns is in a reply line no client is
-// obliged to be given.
-//
-// Send has no Illuminate class behind it: MailManager::createSmtpTransport
-// builds Symfony's EsmtpTransport.
+// The [mail.SentMessage] it returns carries no identifier: SMTP has no field
+// for one, and the id the receiving server assigns is in a reply line no client
+// is obliged to be given.
 func (t SMTP) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error) {
 	sent := mail.SentMessage{Transport: t.Name()}
 
@@ -109,21 +106,19 @@ func (t SMTP) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error
 	return sent, nil
 }
 
-// Log writes the message to the log instead of sending it, and is
-// Illuminate\Mail\Transport\LogTransport.
+// Log writes the message to the log instead of sending it.
 //
-// It is the development default, and what makes `aru dev` work with nothing
-// installed. The whole body is logged, because the reason to read it is to
-// follow the link inside.
+// It is the development default, and what makes a project run with no mail
+// server installed. The whole body is logged, because the reason to read it is
+// to follow the link inside.
 type Log struct {
-	// logger is Illuminate's $logger. It is unexported because Illuminate has
-	// both the property and a logger() method of the same name, which PHP
-	// allows and Go does not; the method is what a Laravel developer calls, so
-	// the method wins and [NewLog] sets the field.
+	// logger is where the message is written. It is unexported because
+	// [Log.Logger] reads it and a Go type cannot carry a method and a field of
+	// the same name; [NewLog] is what sets it.
 	logger *slog.Logger
 }
 
-// NewLog is Illuminate's LogTransport::__construct.
+// NewLog builds a log transport.
 //
 // A nil logger means the one the context carries, which is what makes the zero
 // value useful: transport.Log{} logs wherever the request is logging.
@@ -132,13 +127,11 @@ func NewLog(logger *slog.Logger) Log { return Log{logger: logger} }
 // Name identifies the transport in a log line.
 func (Log) Name() string { return "log" }
 
-// Logger is where this transport writes, and is Illuminate's
-// LogTransport::logger(). It is nil when the transport follows the context.
+// Logger is where this transport writes, and is nil when the transport follows
+// the context.
 func (t Log) Logger() *slog.Logger { return t.logger }
 
 // Send logs the message.
-//
-// Send is LogTransport::send.
 func (t Log) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error) {
 	to := make([]string, 0, len(m.To))
 	for _, a := range m.To {
@@ -156,8 +149,7 @@ func (t Log) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error)
 	return mail.SentMessage{Transport: t.Name()}, nil
 }
 
-// Array keeps what was sent, for a test to read, and is
-// Illuminate\Mail\Transport\ArrayTransport.
+// Array keeps what was sent, for a test to read.
 //
 // It is safe for concurrent use, because a test that sends from two goroutines
 // and reads from a third is a test that would otherwise fail under -race for a
@@ -171,8 +163,6 @@ type Array struct {
 func (*Array) Name() string { return "array" }
 
 // Send records the message.
-//
-// Send is ArrayTransport::send.
 func (a *Array) Send(_ context.Context, m mail.Message) (mail.SentMessage, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -180,9 +170,8 @@ func (a *Array) Send(_ context.Context, m mail.Message) (mail.SentMessage, error
 	return mail.SentMessage{Transport: a.Name()}, nil
 }
 
-// Messages is everything sent so far, oldest first, and is Illuminate's
-// ArrayTransport::messages(). It used to be called Sent, which is a name
-// Illuminate does not have; the callers inside this collection were moved.
+// Messages is everything sent so far, oldest first, as a copy: a test can read
+// it while another goroutine is still sending.
 func (a *Array) Messages() []mail.Message {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -190,9 +179,6 @@ func (a *Array) Messages() []mail.Message {
 }
 
 // Last is the most recent message, and whether there was one.
-//
-// Last has no PHP counterpart: ArrayTransport::messages returns the whole
-// collection and the caller takes its last element.
 func (a *Array) Last() (mail.Message, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -202,9 +188,9 @@ func (a *Array) Last() (mail.Message, bool) {
 	return a.sent[len(a.sent)-1], true
 }
 
-// Flush forgets everything and answers what it forgot, which is Illuminate's
-// ArrayTransport::flush(). A test that shares a transport between cases calls
-// it, and one that does not share it does not need to.
+// Flush forgets everything and answers what it forgot. A test that shares a
+// transport between cases calls it, and one that does not share it does not
+// need to.
 func (a *Array) Flush() []mail.Message {
 	a.mu.Lock()
 	defer a.mu.Unlock()

@@ -85,7 +85,7 @@ func TestEagerLoadingMatchesEveryChildToItsParent(t *testing.T) {
 	}
 }
 
-// TestTheEagerQueryFiltersByTenant is RULE 17 on the path where breaking it is
+// TestTheEagerQueryFiltersByTenant covers the path where breaking it is
 // invisible.
 //
 // The parent query in this test is correct: three users of one tenant. If the

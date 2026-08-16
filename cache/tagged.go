@@ -17,14 +17,14 @@ import (
 
 // TagSet is the set of tags a TaggedCache writes under.
 //
-// It answers Illuminate\Cache\TagSet. Each tag is one ordinary cache entry
-// holding a generation id, and the set's namespace is those ids joined. Every
+// Each tag is one ordinary cache entry holding a generation id, and the set's
+// namespace is those ids joined. Every
 // key a tagged repository builds carries a digest of that namespace, so
 // changing one id orphans every entry carrying that tag at once -- one write,
 // however many millions of entries. Nothing is scanned and nothing is deleted;
 // the orphans expire on their own ttl.
 //
-// The generations are tenant-scoped like everything else (RULE 14): two tenants
+// The generations are tenant-scoped like everything else: two tenants
 // tagging with "invoices" have separate generations, so one flushing its tag
 // cannot orphan the other's entries.
 type TagSet struct {
@@ -73,9 +73,8 @@ func (t *TagSet) TagKey(g auth.Grant, name string) (string, error) {
 
 // TagID returns a tag's current generation, minting one if there is none.
 //
-// It answers TagSet::tagId(). A tag nobody has used yet is not an error: the
-// first read creates the generation, exactly as the PHP does, so tagging works
-// on a cold cache.
+// A tag nobody has used yet is not an error: the first read creates the
+// generation, so tagging works on a cold cache.
 func (t *TagSet) TagID(ctx context.Context, g auth.Grant, name string) (string, error) {
 	key, err := t.TagKey(g, name)
 	if err != nil {
@@ -93,13 +92,12 @@ func (t *TagSet) TagID(ctx context.Context, g auth.Grant, name string) (string, 
 
 // ResetTag gives a tag a new generation and returns it.
 //
-// It answers TagSet::resetTag(). Everything cached under the old generation is
-// now unreachable, which is what flushing a tag is.
+// Everything cached under the old generation is now unreachable, which is what
+// flushing a tag is.
 //
-// The generation is time plus randomness, like the uniqid() Laravel uses, and
-// for the same reason: two processes resetting the same tag in the same
-// instant must not agree on the new id, or one of them keeps serving what the
-// other flushed.
+// The generation is time plus randomness: two processes resetting the same tag
+// in the same instant must not agree on the new id, or one of them keeps
+// serving what the other flushed.
 func (t *TagSet) ResetTag(ctx context.Context, g auth.Grant, name string) (string, error) {
 	key, err := t.TagKey(g, name)
 	if err != nil {
@@ -152,8 +150,6 @@ func (t *TagSet) Flush(ctx context.Context, g auth.Grant) error {
 
 // GetNamespace is the set's generations joined, and it changes whenever any tag
 // in the set is reset or flushed.
-//
-// It answers TagSet::getNamespace().
 func (t *TagSet) GetNamespace(ctx context.Context, g auth.Grant) (string, error) {
 	ids := make([]string, 0, len(t.names))
 	for _, name := range t.names {
@@ -176,9 +172,9 @@ func (t *TagSet) taggedItemKey(ctx context.Context, g auth.Grant, key string) (s
 	return digest(namespace) + ":" + key, nil
 }
 
-// digest is the sha1 Laravel takes of the namespace, and it is here for the
-// same reason: the namespace grows with the number of tags and with every
-// reset, and a key of unbounded length is a key some backend will refuse.
+// digest is the sha1 of the namespace. The namespace grows with the number of
+// tags and with every reset, and a key of unbounded length is a key some
+// backend will refuse.
 //
 // It is not a security boundary. Nothing is hidden by it and nothing is
 // authenticated with it -- the tenant, which is the boundary, is in the clear
@@ -199,34 +195,33 @@ func newTagID() (string, error) {
 
 // TaggedCache is a Repository whose every key carries a tag generation.
 //
-// It answers Illuminate\Cache\TaggedCache, and like the PHP it is the whole
-// Repository surface again -- Put, Get, Remember, Forget and the rest are the
-// methods of the embedded Repository, and they behave identically. What changes
-// is where the entries land and what Flush does.
+// It is the whole Repository surface again -- Put, Get, Remember, Forget and
+// the rest are the methods of the embedded Repository, and they behave
+// identically. What changes is where the entries land and what Flush does.
 //
 // The one thing to know before reaching for it: a tagged entry can only be
 // reached through the same tags. Cache.Tags("a").Put and Cache.Put write two
 // different entries, and so do Tags("a", "b") and Tags("b", "a") -- order is
-// part of the namespace, in this and in Laravel.
+// part of the namespace.
 type TaggedCache struct {
 	*Repository
 }
 
 // Flush orphans every entry carrying these tags.
 //
-// It answers TaggedCache::flush(). It resets the generations rather than
-// deleting entries: one write per tag, whatever the entry count, and the
-// orphaned entries go when their own ttl does.
+// It resets the generations rather than deleting entries: one write per tag,
+// whatever the entry count, and the orphaned entries go when their own ttl
+// does.
 //
 // That is the trade the tag mechanism is: flushing is O(tags) instead of
 // O(entries), and the price is that flushed entries occupy the store until they
 // expire. Forever entries under a flushed tag occupy it for a century, which is
 // the strongest argument this package has against Forever.
-// It fires CacheFlushing and then CacheFlushed, as TaggedCache::flush() does.
-// Both carry the tags. Laravel's leave them out -- it builds the events with the
-// store name alone -- and a listener told that a cache was flushed without being
-// told which tags were flushed has been told something false, because the rest
-// of the store is untouched.
+//
+// It fires CacheFlushing and then CacheFlushed, and both carry the tags: a
+// listener told that a cache was flushed without being told which tags were
+// flushed has been told something false, because the rest of the store is
+// untouched.
 func (t *TaggedCache) Flush(ctx context.Context, g auth.Grant) error {
 	if t.events != nil {
 		t.event(events.NewCacheFlushing(t.GetName(), t.tagNames()))
@@ -242,20 +237,18 @@ func (t *TaggedCache) Flush(ctx context.Context, g auth.Grant) error {
 	return err
 }
 
-// Clear is Flush, as it is on Repository. It answers the clear() TaggedCache
-// inherits, resolved against the tagged flush().
+// Clear is Flush, as it is on Repository.
 func (t *TaggedCache) Clear(ctx context.Context, g auth.Grant) error {
 	return t.Flush(ctx, g)
 }
 
 // TaggedItemKey is the key an item is really stored under.
 //
-// It answers TaggedCache::taggedItemKey(). It is exported for the same reason
-// it is public in Laravel: something eventually has to look in the store and
-// find out where the entry went.
+// It is exported because something eventually has to look in the store and find
+// out where the entry went.
 func (t *TaggedCache) TaggedItemKey(ctx context.Context, g auth.Grant, key string) (string, error) {
 	return t.key(ctx, g, key)
 }
 
-// GetTags returns the tag set. It answers TaggedCache::getTags().
+// GetTags returns the tag set.
 func (t *TaggedCache) GetTags() *TagSet { return t.tags }

@@ -2,9 +2,9 @@ package events
 
 // Name is the event name listeners register for.
 //
-// PHP dispatches the class and listens for the class name; Go has no class
-// name to pass around, so the dispatcher takes a string and this constant is
-// it. Spelling it out here means the listener and the emitter cannot drift.
+// The dispatcher takes a string rather than a type, and this constant is that
+// string. Spelling it out here means the listener and the emitter cannot
+// drift.
 const Name = "redis.command.executed"
 
 // Named is the part of a connection this event reads.
@@ -16,7 +16,7 @@ type Named interface {
 	GetName() string
 }
 
-// CommandExecuted answers Illuminate\Redis\Events\CommandExecuted.
+// CommandExecuted reports one command and what it cost.
 //
 // It is dispatched after every command run through connections.Connection, and
 // it is how "which Redis calls did this page make, and how slow were they"
@@ -33,9 +33,8 @@ type CommandExecuted struct {
 
 	// Time is the number of milliseconds it took to execute the command.
 	//
-	// It is a float because Laravel's is: sub-millisecond commands are the
-	// common case, and rounding them to zero would make the sum of a page's
-	// Redis time zero.
+	// It is a float because sub-millisecond commands are the common case, and
+	// rounding them to zero would make the sum of a page's Redis time zero.
 	Time float64
 
 	// Connection is the Redis connection instance.
@@ -50,8 +49,8 @@ type CommandExecuted struct {
 
 // NewCommandExecuted builds the event.
 //
-// It reads the name off the connection the way the PHP constructor does, so a
-// listener never has to ask the connection for it.
+// It reads the name off the connection, so a listener never has to ask the
+// connection for it.
 func NewCommandExecuted(command string, parameters []any, milliseconds float64, connection Named) CommandExecuted {
 	name := ""
 	if connection != nil {

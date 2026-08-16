@@ -13,8 +13,8 @@ import (
 // guarded by its own type clause. That structure is what keeps `whereHasMorph`
 // from matching a video's comments against a post's id.
 
-// WhereMorphedTo answers QueriesRelationships::whereMorphedTo: rows whose
-// polymorphic relation is this exact model.
+// WhereMorphedTo adds a filter matching rows whose polymorphic relation is
+// this exact model.
 //
 // Two columns, always. Matching the id alone is the polymorphic bug: id 7
 // exists on every table in the schema.
@@ -37,12 +37,13 @@ func WhereMorphedTo(q relations.Builder, relation *relations.MorphTo, model rela
 	return q
 }
 
-// OrWhereMorphedTo answers QueriesRelationships::orWhereMorphedTo.
+// OrWhereMorphedTo is WhereMorphedTo joined with or.
 func OrWhereMorphedTo(q relations.Builder, relation *relations.MorphTo, model relations.Model) relations.Builder {
 	return WhereMorphedTo(q, relation, model, "or")
 }
 
-// WhereNotMorphedTo answers QueriesRelationships::whereNotMorphedTo.
+// WhereNotMorphedTo adds a filter excluding rows whose polymorphic relation
+// is this exact model.
 func WhereNotMorphedTo(q relations.Builder, relation *relations.MorphTo, model relations.Model, boolean string) relations.Builder {
 	alias, err := relations.GetMorphAlias(model)
 	if err != nil {
@@ -62,13 +63,13 @@ func WhereNotMorphedTo(q relations.Builder, relation *relations.MorphTo, model r
 	return q
 }
 
-// OrWhereNotMorphedTo answers QueriesRelationships::orWhereNotMorphedTo.
+// OrWhereNotMorphedTo is WhereNotMorphedTo joined with or.
 func OrWhereNotMorphedTo(q relations.Builder, relation *relations.MorphTo, model relations.Model) relations.Builder {
 	return WhereNotMorphedTo(q, relation, model, "or")
 }
 
-// WhereBelongsTo answers QueriesRelationships::whereBelongsTo: the child rows
-// of this parent, without naming the foreign key at the call site.
+// WhereBelongsTo adds a filter matching the child rows of this parent,
+// without naming the foreign key at the call site.
 func WhereBelongsTo(q relations.Builder, relation *relations.BelongsTo, model relations.Model, boolean string) relations.Builder {
 	column := relation.GetQualifiedForeignKeyName()
 	value := model.GetAttribute(relation.GetOwnerKeyName())
@@ -80,20 +81,21 @@ func WhereBelongsTo(q relations.Builder, relation *relations.BelongsTo, model re
 	return q.Where(column, "=", value)
 }
 
-// OrWhereBelongsTo answers QueriesRelationships::orWhereBelongsTo.
+// OrWhereBelongsTo is WhereBelongsTo joined with or.
 func OrWhereBelongsTo(q relations.Builder, relation *relations.BelongsTo, model relations.Model) relations.Builder {
 	return WhereBelongsTo(q, relation, model, "or")
 }
 
-// WhereAttachedTo answers QueriesRelationships::whereAttachedTo: the rows a
-// many-to-many attaches to this model.
+// WhereAttachedTo adds a filter matching the rows a many-to-many attaches
+// to this model.
 func WhereAttachedTo(q relations.Builder, relation relations.Relation, model relations.Model, boolean string) relations.Builder {
 	return WhereHas(q, relation, func(sub relations.Builder) {
 		sub.WhereKey(model.GetKey())
 	}, ">=", 1)
 }
 
-// OrWhereAttachedTo answers QueriesRelationships::orWhereAttachedTo.
+// OrWhereAttachedTo adds an or-joined filter matching the rows a
+// many-to-many attaches to this model.
 func OrWhereAttachedTo(q relations.Builder, relation relations.Relation, model relations.Model) relations.Builder {
 	return OrWhereHas(q, relation, func(sub relations.Builder) {
 		sub.WhereKey(model.GetKey())
@@ -105,11 +107,11 @@ func OrWhereAttachedTo(q relations.Builder, relation relations.Relation, model r
 // rarely a constraint on a post.
 type MorphConstraint func(sub relations.Builder, morphType string)
 
-// HasMorph answers QueriesRelationships::hasMorph.
+// HasMorph adds a filter on the count of relation matching operator and
+// count, checked separately per morph type.
 //
-// One existence check per type, OR-ed together and each guarded by its type
-// clause. types may be empty, which the PHP spells "*" and means every alias in
-// the morph map.
+// One existence check per type, OR-ed together and each guarded by its
+// type clause. types may be empty, meaning every alias in the morph map.
 func HasMorph(q relations.Builder, relation *relations.MorphTo, types []string, operator string, count int, boolean string, callback MorphConstraint) relations.Builder {
 	if len(types) == 0 {
 		for alias := range relations.GetMorphMap() {
@@ -151,22 +153,24 @@ func HasMorph(q relations.Builder, relation *relations.MorphTo, types []string, 
 	return q
 }
 
-// OrHasMorph answers QueriesRelationships::orHasMorph.
+// OrHasMorph is HasMorph joined with or.
 func OrHasMorph(q relations.Builder, relation *relations.MorphTo, types []string, operator string, count int) relations.Builder {
 	return HasMorph(q, relation, types, operator, count, "or", nil)
 }
 
-// DoesntHaveMorph answers QueriesRelationships::doesntHaveMorph.
+// DoesntHaveMorph adds a filter requiring relation to not exist for any of
+// types.
 func DoesntHaveMorph(q relations.Builder, relation *relations.MorphTo, types []string, boolean string, callback MorphConstraint) relations.Builder {
 	return HasMorph(q, relation, types, "<", 1, boolean, callback)
 }
 
-// OrDoesntHaveMorph answers QueriesRelationships::orDoesntHaveMorph.
+// OrDoesntHaveMorph is DoesntHaveMorph joined with or.
 func OrDoesntHaveMorph(q relations.Builder, relation *relations.MorphTo, types []string) relations.Builder {
 	return DoesntHaveMorph(q, relation, types, "or", nil)
 }
 
-// WhereHasMorph answers QueriesRelationships::whereHasMorph.
+// WhereHasMorph adds a filter requiring relation to exist for any of types,
+// constrained by callback.
 func WhereHasMorph(q relations.Builder, relation *relations.MorphTo, types []string, callback MorphConstraint, operator string, count int) relations.Builder {
 	if operator == "" {
 		operator = ">="
@@ -177,80 +181,81 @@ func WhereHasMorph(q relations.Builder, relation *relations.MorphTo, types []str
 	return HasMorph(q, relation, types, operator, count, "and", callback)
 }
 
-// OrWhereHasMorph answers QueriesRelationships::orWhereHasMorph.
+// OrWhereHasMorph is WhereHasMorph joined with or.
 func OrWhereHasMorph(q relations.Builder, relation *relations.MorphTo, types []string, callback MorphConstraint, operator string, count int) relations.Builder {
 	return HasMorph(q, relation, types, operator, count, "or", callback)
 }
 
-// WhereDoesntHaveMorph answers QueriesRelationships::whereDoesntHaveMorph.
+// WhereDoesntHaveMorph adds a filter requiring relation to not exist for
+// any of types, constrained by callback.
 func WhereDoesntHaveMorph(q relations.Builder, relation *relations.MorphTo, types []string, callback MorphConstraint) relations.Builder {
 	return HasMorph(q, relation, types, "<", 1, "and", callback)
 }
 
-// OrWhereDoesntHaveMorph answers
-// QueriesRelationships::orWhereDoesntHaveMorph.
+// OrWhereDoesntHaveMorph is WhereDoesntHaveMorph joined with or.
 func OrWhereDoesntHaveMorph(q relations.Builder, relation *relations.MorphTo, types []string, callback MorphConstraint) relations.Builder {
 	return HasMorph(q, relation, types, "<", 1, "or", callback)
 }
 
-// WhereMorphRelation answers QueriesRelationships::whereMorphRelation.
+// WhereMorphRelation adds a filter requiring relation, constrained to any
+// of types, to have a row matching column args.
 func WhereMorphRelation(q relations.Builder, relation *relations.MorphTo, types []string, column string, args ...any) relations.Builder {
 	return WhereHasMorph(q, relation, types, func(sub relations.Builder, _ string) {
 		sub.Where(column, args...)
 	}, ">=", 1)
 }
 
-// OrWhereMorphRelation answers QueriesRelationships::orWhereMorphRelation.
+// OrWhereMorphRelation is WhereMorphRelation joined with or.
 func OrWhereMorphRelation(q relations.Builder, relation *relations.MorphTo, types []string, column string, args ...any) relations.Builder {
 	return OrWhereHasMorph(q, relation, types, func(sub relations.Builder, _ string) {
 		sub.Where(column, args...)
 	}, ">=", 1)
 }
 
-// WhereMorphDoesntHaveRelation answers
-// QueriesRelationships::whereMorphDoesntHaveRelation.
+// WhereMorphDoesntHaveRelation adds a filter requiring relation,
+// constrained to any of types, to have no row matching column args.
 func WhereMorphDoesntHaveRelation(q relations.Builder, relation *relations.MorphTo, types []string, column string, args ...any) relations.Builder {
 	return WhereDoesntHaveMorph(q, relation, types, func(sub relations.Builder, _ string) {
 		sub.Where(column, args...)
 	})
 }
 
-// OrWhereMorphDoesntHaveRelation answers
-// QueriesRelationships::orWhereMorphDoesntHaveRelation.
+// OrWhereMorphDoesntHaveRelation is WhereMorphDoesntHaveRelation joined
+// with or.
 func OrWhereMorphDoesntHaveRelation(q relations.Builder, relation *relations.MorphTo, types []string, column string, args ...any) relations.Builder {
 	return OrWhereDoesntHaveMorph(q, relation, types, func(sub relations.Builder, _ string) {
 		sub.Where(column, args...)
 	})
 }
 
-// OrWhereDoesntHaveRelation answers
-// QueriesRelationships::orWhereDoesntHaveRelation.
+// OrWhereDoesntHaveRelation adds an or-joined filter requiring relation to
+// have no row matching column args.
 func OrWhereDoesntHaveRelation(q relations.Builder, relation relations.Relation, column string, args ...any) relations.Builder {
 	return OrWhereDoesntHave(q, relation, func(sub relations.Builder) {
 		sub.Where(column, args...)
 	})
 }
 
-// WithWhereHas answers QueriesRelationships::withWhereHas: filter by the
-// relation and load it with the same constraint, which is the pair people write
-// by hand and get subtly different.
+// WithWhereHas filters by the relation and loads it with the same
+// constraint, which is the pair people write by hand and get subtly
+// different.
 //
-// It returns the constraint alongside the query so that the caller's eager load
-// applies the same one -- the PHP passes it to with() inside, and there is no
-// with() on the builder contract here.
+// It returns the constraint alongside the query, so that the caller's own
+// eager load can apply the same one: the relations.Builder contract this
+// operates over has no eager-load method of its own to apply it directly.
 func WithWhereHas(q relations.Builder, relation relations.Relation, callback func(relations.Builder)) (relations.Builder, func(relations.Builder)) {
 	return WhereHas(q, relation, callback, ">=", 1), callback
 }
 
-// WithWhereRelation answers QueriesRelationships::withWhereRelation.
+// WithWhereRelation is WithWhereHas constrained by an equality on column.
 func WithWhereRelation(q relations.Builder, relation relations.Relation, column string, args ...any) (relations.Builder, func(relations.Builder)) {
 	constraint := func(sub relations.Builder) { sub.Where(column, args...) }
 	return WhereHas(q, relation, constraint, ">=", 1), constraint
 }
 
-// MergeConstraintsFrom answers QueriesRelationships::mergeConstraintsFrom: the
-// where clauses of one query copied onto another, which is how MorphTo carries
-// the relation's constraints onto the per-type query.
+// MergeConstraintsFrom copies the where clauses of one query onto another,
+// which is how MorphTo carries the relation's constraints onto the
+// per-type query.
 func MergeConstraintsFrom(target relations.Builder, from relations.Builder) relations.Builder {
 	source := from.GetQuery()
 	destination := target.GetQuery()
@@ -260,7 +265,8 @@ func MergeConstraintsFrom(target relations.Builder, from relations.Builder) rela
 	return target
 }
 
-// belongsToForMorph answers QueriesRelationships::getBelongsToRelation.
+// belongsToForMorph returns the belongs-to relation morphType resolves to,
+// for building its existence query.
 func belongsToForMorph(parent, related relations.Model, relation *relations.MorphTo) relations.Relation {
 	var belongsTo *relations.BelongsTo
 	relations.NoConstraints(func() {

@@ -2,13 +2,13 @@ package promises
 
 import "sync"
 
-// FluentPromise is Illuminate\Http\Client\Promises\FluentPromise: a promise
-// that hands itself back from every call, so that a caller can chain.
+// FluentPromise is a promise that hands itself back from every call, so
+// that a caller can chain.
 //
-// The PHP decorates a Guzzle promise and swaps the one it holds for whatever
-// then() returned, because Guzzle's then() makes a new promise every time.
-// [Deferred.Then] hands back the same promise, so there is nothing to swap --
-// but the decorator stays, because the type is what a Laravel caller names.
+// It wraps any [Promise] and swaps the one it holds for whatever Then
+// returns, so the caller always chains through this same wrapper even if
+// the wrapped implementation's own Then would have handed back something
+// else.
 type FluentPromise struct {
 	mu      sync.Mutex
 	promise Promise
@@ -19,7 +19,8 @@ func NewFluentPromise(promise Promise) *FluentPromise {
 	return &FluentPromise{promise: promise}
 }
 
-// Then is FluentPromise::then.
+// Then registers callbacks on the wrapped promise, swaps in whatever it
+// returns, and hands back f.
 func (f *FluentPromise) Then(onFulfilled func(any) any, onRejected func(error) any) Promise {
 	f.mu.Lock()
 	inner := f.promise
@@ -33,32 +34,27 @@ func (f *FluentPromise) Then(onFulfilled func(any) any, onRejected func(error) a
 	return f
 }
 
-// Otherwise is FluentPromise::otherwise.
+// Otherwise is Then with only the rejection callback.
 func (f *FluentPromise) Otherwise(onRejected func(error) any) Promise {
 	return f.Then(nil, onRejected)
 }
 
-// Resolve is FluentPromise::resolve.
+// Resolve settles the wrapped promise with a value.
 func (f *FluentPromise) Resolve(value any) error { return f.inner().Resolve(value) }
 
-// Reject is FluentPromise::reject.
+// Reject settles the wrapped promise with a reason.
 func (f *FluentPromise) Reject(reason error) error { return f.inner().Reject(reason) }
 
-// Cancel is FluentPromise::cancel.
+// Cancel cancels the wrapped promise.
 func (f *FluentPromise) Cancel() error { return f.inner().Cancel() }
 
-// Wait is FluentPromise::wait.
+// Wait waits on the wrapped promise.
 func (f *FluentPromise) Wait(unwrap bool) (any, error) { return f.inner().Wait(unwrap) }
 
-// GetState is FluentPromise::getState.
+// GetState is the wrapped promise's current State.
 func (f *FluentPromise) GetState() State { return f.inner().GetState() }
 
-// GetUnderlyingPromise is FluentPromise::getGuzzlePromise: the promise this one
-// decorates.
-//
-// It is not GetGuzzlePromise because there is no Guzzle here; the name in the
-// PHP says which library the decorated object came from, and saying Guzzle in
-// a package that has never heard of it would name a thing that is not there.
+// GetUnderlyingPromise is the promise this one decorates.
 func (f *FluentPromise) GetUnderlyingPromise() Promise { return f.inner() }
 
 func (f *FluentPromise) inner() Promise {

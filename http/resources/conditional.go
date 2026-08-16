@@ -5,15 +5,12 @@ import "encoding/json"
 // PotentiallyMissing is the interface that wraps the IsMissing method.
 //
 // Values that implement PotentiallyMissing are filtered out of JSON
-// responses when IsMissing returns true. This is the Go equivalent of
-// Illuminate's PotentiallyMissing interface.
+// responses when IsMissing returns true.
 type PotentiallyMissing interface {
 	IsMissing() bool
 }
 
-// MergeValue mirrors Illuminate\Http\Resources\MergeValue.
-//
-// It wraps a value that should be merged into the parent array rather
+// MergeValue wraps a value that should be merged into the parent map rather
 // than nested as a separate key.
 type MergeValue struct {
 	Data any
@@ -24,9 +21,7 @@ func NewMergeValue(data any) *MergeValue {
 	return &MergeValue{Data: data}
 }
 
-// MissingValue mirrors Illuminate\Http\Resources\MissingValue.
-//
-// It represents a value that should be omitted from the response.
+// MissingValue represents a value that should be omitted from the response.
 type MissingValue struct{}
 
 // IsMissing always returns true for MissingValue.
@@ -41,9 +36,7 @@ func MergeWhen(condition bool, value any) any {
 	return MissingValue{}
 }
 
-// When mirrors Illuminate's ConditionallyLoadsAttributes::when.
-//
-// It returns value if condition is true, otherwise returns a MissingValue
+// When returns value if condition is true, otherwise returns a MissingValue
 // (which is filtered out during response serialization).
 func When(condition bool, value any) any {
 	if condition {

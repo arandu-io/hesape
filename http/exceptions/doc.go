@@ -1,21 +1,15 @@
-// Package exceptions mirrors Illuminate\Http\Exceptions.
+// Package exceptions holds the exception types an HTTP response can carry:
+// HttpResponseException, MalformedUrlException, OriginMismatchException,
+// PostTooLargeException and ThrottleRequestsException.
 //
-// The files it answers to, in the clone at
-// laravel_illuminate/http/Exceptions:
+// # Constructors, and the shared struct that stands in for a hierarchy
 //
-//	HttpResponseException.php   -> exceptions.go
-//	MalformedUrlException.php   -> exceptions.go
-//	OriginMismatchException.php -> exceptions.go
-//	PostTooLargeException.php   -> exceptions.go
-//	ThrottleRequestsException.php -> exceptions.go
-//
-// # Constructors, and the class hierarchy Go does not have
-//
-// Every PHP __construct is a NewX function: Go has no constructors, and the
-// zero value of these types would be a 0 status, which is not an answer.
+// Each type has a NewX function rather than a constructor: Go has no
+// constructors, and the zero value of these types would be a 0 status,
+// which is not an answer.
 //
 // PostTooLargeException, ThrottleRequestsException and MalformedUrlException
-// all extend Symfony's HttpException in the PHP. Go has no class inheritance,
-// so [HTTPError] is a struct they embed, and errors.As reaches it through any
-// of them.
+// all carry an HTTP status the way a common base class would. Go has no
+// class inheritance, so [HTTPError] is a struct they embed instead, and
+// errors.As reaches it through any of them.
 package exceptions

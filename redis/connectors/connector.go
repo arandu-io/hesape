@@ -6,29 +6,24 @@ import (
 
 // Connector turns a configuration into an open connection.
 //
-// It answers Illuminate\Contracts\Redis\Connector, and it is ONE type where
-// Laravel has two: PhpRedisConnector and PredisConnector exist because PHP has
-// two Redis client libraries -- a C extension and a pure-PHP one -- and an
-// application picks between them in config. Go has one driver that speaks RESP,
-// so there is one connector, and RedisManager.SetDriver changes nothing about
-// how the socket is opened.
+// There is one driver and it speaks RESP, so there is one connector, and
+// RedisManager.SetDriver changes nothing about how the socket is opened.
 //
 // It holds no state and has no constructor: Connector{} is a Connector.
 type Connector struct{}
 
 // Connect creates a connection to a Redis server.
 //
-// It answers Connector::connect(). It does not talk to the server; the first
-// command does, and connections.Connection.Ping is how the health check asks
-// on purpose.
+// It does not talk to the server; the first command does, and
+// connections.Connection.Ping is how the health check asks on purpose.
 func (Connector) Connect(config connections.Config) *connections.Connection {
 	return connections.Connect(config)
 }
 
 // ConnectToCluster creates a connection to a Redis cluster.
 //
-// It answers Connector::connectToCluster(). The first configuration carries
-// everything but the addresses -- password, database, prefix, timeouts -- and
+// The first configuration carries everything but the addresses -- password,
+// database, prefix, timeouts -- and
 // the addresses of every node in the cluster are collected from all of them,
 // because a cluster is one credential and many endpoints.
 //

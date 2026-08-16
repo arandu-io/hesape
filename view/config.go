@@ -1,17 +1,13 @@
 package view
 
-// Config is config/view.php.
+// Config holds what genuinely varies between deployments for this package,
+// and it is two things.
 //
-// It is short, and it is short for a reason worth stating: Laravel's version
-// carries `paths` and `compiled` because Blade finds templates on disk at run
-// time and compiles them into PHP that it caches. Neither happens here. kyse
-// compiles every view into a Go function at build time, and the binary carries
-// the functions -- there is no directory to search and no cache to place.
+// It stays short on purpose: every view compiles into a Go function at build
+// time, and the binary carries the functions -- there is no directory to
+// search and no cache to place, so there is nothing to configure for either.
 //
-// So what is left is what genuinely varies between deployments, and it is two
-// things.
-//
-// Declared here, in the package that reads it, per ADR 0051.
+// Declared here, in the package that reads it.
 type Config struct {
 	// Reload injects the development reload script into any full HTML document
 	// that leaves the application.

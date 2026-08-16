@@ -6,20 +6,19 @@ import (
 )
 
 // exifOrientation reads the EXIF orientation tag out of the bytes as they
-// arrived, and answers 1 -- "already the right way up" -- for anything with no
+// arrived, and returns 1 -- "already the right way up" -- for anything with no
 // tag to read.
 //
-// This is the whole point of Illuminate's orient(). A phone does not turn the
-// sensor when the person turns the phone: it stores the frame the way the
-// sensor read it and writes down which way was up. Software that ignores the
-// note shows every portrait photograph on its side, which is the single most
-// reported bug of any upload form ever built.
+// A phone does not turn the sensor when the person turns the phone: it stores
+// the frame the way the sensor read it and writes down which way was up.
+// Software that ignores the note shows every portrait photograph on its side,
+// which is the single most reported bug of any upload form ever built.
 //
-// The tag lives in the APP1 segment of a JPEG, in a TIFF header, and this walks
-// there by hand: the alternative is a dependency, and the module root carries
-// one (ADR 0048). Every read is bounds-checked, because the bytes came from
-// somebody's upload and a parser that trusts a length field in an upload is a
-// crash waiting for a stranger to schedule it.
+// The tag lives in the APP1 segment of a JPEG, in a TIFF header, and this
+// walks there by hand rather than taking on a dependency for it. Every read
+// is bounds-checked, because the bytes came from somebody's upload and a
+// parser that trusts a length field in an upload is a crash waiting for a
+// stranger to schedule it.
 func exifOrientation(b []byte) int {
 	const upright = 1
 

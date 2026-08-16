@@ -90,10 +90,9 @@ func TestTheErrorNamesTheCommandThatFixesIt(t *testing.T) {
 	}
 }
 
-// TestAnEmptyKeyIsTheMissingKeyError, not the wrong-length one. It answers
-// MissingAppKeyException, which the PHP throws for the empty key and only for
-// it, and a caller that wants to print "run the installer" instead of "check
-// your .env" has to be able to tell the two apart.
+// TestAnEmptyKeyIsTheMissingKeyError, not the wrong-length one. The empty key
+// is its own error, because a caller that wants to print "run the installer"
+// instead of "check your .env" has to be able to tell the two apart.
 func TestAnEmptyKeyIsTheMissingKeyError(t *testing.T) {
 	_, err := encryption.ParseKey("")
 	if !errors.Is(err, encryption.ErrMissingAppKey) {

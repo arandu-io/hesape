@@ -35,7 +35,7 @@ type Application struct {
 	observers []Observer
 
 	// lastOutput is what the command Call ran most recently printed, kept so
-	// Output can hand it back. It answers Application::$lastOutput.
+	// Output can hand it back.
 	lastOutput *BufferedConsoleOutput
 }
 
@@ -61,9 +61,6 @@ type Run struct {
 	Err error
 }
 
-// NewApplication is Application::__construct, over three streams rather than a
-// container, an event dispatcher and a version string.
-//
 // NewApplication returns an empty application over three streams.
 //
 // The streams are given rather than taken from the process, because a application
@@ -78,9 +75,6 @@ func NewApplication(out, errOut io.Writer, in io.Reader) *Application {
 	}
 }
 
-// Add is Application::addCommand, variadic, which is the pair PHP spells as
-// add() for one and a loop for many.
-//
 // Add registers commands and returns the application, so wiring reads as one
 // expression.
 //
@@ -89,10 +83,9 @@ func NewApplication(out, errOut io.Writer, in io.Reader) *Application {
 // the alternative is a binary that starts and silently answers the wrong thing.
 func (r *Application) Add(commands ...Command) *Application {
 	for _, c := range commands {
-		// A command that declared a signature takes its name from it, which is
-		// what Command::configureUsingFluentDefinition does. An unparseable one
-		// panics here rather than on the run: a binary must not start with a
-		// command nobody can call.
+		// A command that declared a signature takes its name from it. An
+		// unparseable one panics here rather than on the run: a binary must not
+		// start with a command nobody can call.
 		if strings.TrimSpace(c.Signature) != "" {
 			name, _, _, err := Parse(c.Signature)
 			if err != nil {
@@ -117,9 +110,6 @@ func (r *Application) Add(commands ...Command) *Application {
 	return r
 }
 
-// WithLocks has no Illuminate counterpart: PHP resolves the mutex from the
-// container, in Command::commandIsolationMutex, and here it is passed in.
-//
 // WithLocks gives the application the issuer that isolated commands take a lock
 // from, and the time to live of that lock.
 //
@@ -136,10 +126,6 @@ func (r *Application) WithLocks(locks *cache.Locks, ttl time.Duration) *Applicat
 	return r
 }
 
-// Observe has no Illuminate counterpart: Laravel dispatches
-// Events\CommandFinished and a listener is registered with Dispatcher::listen,
-// where an observer is held by the application itself.
-//
 // Observe adds an observer. They run in the order they were added.
 func (r *Application) Observe(o Observer) *Application {
 	if o != nil {
@@ -148,8 +134,6 @@ func (r *Application) Observe(o Observer) *Application {
 	return r
 }
 
-// Names is Kernel::all reduced to the names, with the hidden commands left out.
-//
 // Names lists the commands a person can be told about, sorted.
 //
 // Hidden commands are not in it: it is what an error message offers instead of
@@ -166,10 +150,6 @@ func (r *Application) Names() []string {
 	return names
 }
 
-// Help has no Illuminate counterpart: the listing is Symfony's ListCommand,
-// rendered through a descriptor, and here it is a method on the application
-// that returns the text.
-//
 // Help renders the listing.
 //
 // It is sorted by name and not by registration order, so the group prefix does
@@ -191,8 +171,6 @@ func (r *Application) Help() string {
 	return b.String()
 }
 
-// Handle is Kernel::handle, the entry point one command line goes through.
-//
 // Handle dispatches one command line: the name, then its arguments.
 //
 // No arguments, or help, prints the listing. A name that is not registered is
@@ -220,13 +198,12 @@ func (r *Application) Handle(ctx context.Context, args []string) error {
 
 // Call runs a registered command from inside another one.
 //
-// It answers Application::call and Concerns\CallsCommands::call at once. It is
-// how a composite command is written -- `migrate:fresh` calling `migrate` --
-// without either of them being a function that the listing does not know about.
+// It is how a composite command is written -- `migrate:fresh` calling
+// `migrate` -- without either of them being a function that the listing does
+// not know about.
 //
 // The output goes where the caller's does and is buffered on the way past, so
-// Output can hand it back: PHP buffers instead of writing, which is why a
-// command called from another one is silent there and is not here.
+// Output can hand it back.
 func (r *Application) Call(ctx context.Context, name string, args ...string) error {
 	command, found := r.commands[name]
 	if !found {
@@ -239,8 +216,8 @@ func (r *Application) Call(ctx context.Context, name string, args ...string) err
 
 // Output is what the last command Call ran printed.
 //
-// It answers Application::output. It empties the buffer, so a second read with
-// nothing run between them is empty rather than the same text twice.
+// It empties the buffer, so a second read with nothing run between them is
+// empty rather than the same text twice.
 func (r *Application) Output() string {
 	if r.lastOutput == nil {
 		return ""
@@ -248,7 +225,7 @@ func (r *Application) Output() string {
 	return r.lastOutput.Fetch()
 }
 
-// CallSilent is CallsCommands::callSilent: Call with the output thrown away.
+// CallSilent is Call with the output thrown away.
 //
 // The error is not: what it silences is the chatter of a command being used as
 // a step, never the reason it failed.
@@ -260,11 +237,7 @@ func (r *Application) CallSilent(ctx context.Context, name string, args ...strin
 	return r.run(ctx, command, args, io.Discard, io.Discard, strings.NewReader(""))
 }
 
-// CallSilently is Call with the output thrown away.
-//
-// It answers Concerns\CallsCommands::callSilently, which is one call to
-// callSilent in the PHP too. Both names are here because both are in the trait,
-// and a Laravel developer reaches for whichever one is in their fingers.
+// CallSilently is an alias of CallSilent.
 func (r *Application) CallSilently(ctx context.Context, name string, args ...string) error {
 	return r.CallSilent(ctx, name, args...)
 }

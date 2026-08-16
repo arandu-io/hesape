@@ -36,8 +36,8 @@ func SubjectFrom(ctx context.Context) (Subject, bool) {
 
 // Check reports whether ctx carries somebody who signed in.
 //
-// It is Laravel's Auth::check, and it answers only that question: a declared
-// guest is not signed in, and neither is a request that never loaded a session.
+// It answers only that question: a declared guest is not signed in, and neither
+// is a request that never loaded a session.
 // It decides nothing -- a view uses it to choose between the sign-in link and
 // the account menu, and a handler that needs a decision calls Authorize or
 // Allows, which ask a policy.

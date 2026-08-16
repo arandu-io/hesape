@@ -30,7 +30,7 @@ func TestAbstractHasherCheck(t *testing.T) {
 	if base.Check(validPassword+"x", hash) {
 		t.Fatal("AbstractHasher.Check accepted the wrong password")
 	}
-	// The PHP guards on is_null and strlen before password_verify.
+	// An empty hashed value is refused before it is verified.
 	if base.Check(validPassword, "") {
 		t.Fatal("AbstractHasher.Check accepted an empty hash")
 	}
@@ -61,8 +61,8 @@ func TestAbstractHasherInfo(t *testing.T) {
 	}
 }
 
-// TestArgonHasherDefaults pins the PHP class properties: memory 1024, time 2,
-// threads 2. They are read back off the hash the hasher writes.
+// TestArgonHasherDefaults pins the defaults: memory 1024, time 2, threads 2.
+// They are read back off the hash the hasher writes.
 func TestArgonHasherDefaults(t *testing.T) {
 	h := hashing.NewArgonHasher()
 	hash, err := h.Make(validPassword)
@@ -122,7 +122,7 @@ func TestArgonHasherMakeAndCheck(t *testing.T) {
 			t.Fatal("Check accepted the wrong password")
 		}
 
-		// PHP returns false for an empty hashed value before it verifies.
+		// An empty hashed value is false before anything is verified.
 		ok, err = h.Check(validPassword, "")
 		if ok || err != nil {
 			t.Fatalf("Check with an empty hash = %v, %v; want false, nil", ok, err)
@@ -130,9 +130,9 @@ func TestArgonHasherMakeAndCheck(t *testing.T) {
 	}
 }
 
-// TestArgonHasherMakeEmptyValue covers the zero-length password: PHP hashes it,
-// and so must this, because refusing it here would hide a caller that lost the
-// field on the way in.
+// TestArgonHasherMakeEmptyValue covers the zero-length password. It is hashed
+// rather than refused, because refusing it here would hide a caller that lost
+// the field on the way in.
 func TestArgonHasherMakeEmptyValue(t *testing.T) {
 	h := hashing.NewArgon2IdHasher()
 	hash, err := h.Make("")
@@ -185,8 +185,8 @@ func TestArgonHasherMakeRejectsImpossibleParameters(t *testing.T) {
 	}
 }
 
-// TestArgonHasherCheckVerifiesAlgorithm covers the 'verify' option: the PHP
-// throws when the stored hash was written by another algorithm.
+// TestArgonHasherCheckVerifiesAlgorithm covers the Verify option: Check fails
+// when the stored hash was written by another algorithm.
 func TestArgonHasherCheckVerifiesAlgorithm(t *testing.T) {
 	argon2i, err := hashing.NewArgonHasher().Make(validPassword)
 	if err != nil {
@@ -202,8 +202,8 @@ func TestArgonHasherCheckVerifiesAlgorithm(t *testing.T) {
 		t.Fatal("Check accepted a hash written by another algorithm")
 	}
 
-	// Without 'verify' password_verify reads the algorithm off the hash and
-	// does not care which hasher was asked.
+	// Without Verify, the algorithm is read off the hash itself and it does
+	// not matter which hasher was asked.
 	ok, err = hashing.NewArgon2IdHasher().Check(validPassword, argon2i)
 	if err != nil || !ok {
 		t.Fatalf("Check without verify = %v, %v; want true, nil", ok, err)
@@ -273,7 +273,7 @@ func TestArgonHasherVerifyConfiguration(t *testing.T) {
 		t.Fatal("VerifyConfiguration rejected the hasher's own hash")
 	}
 
-	// Weaker than configured is still valid: the PHP compares with >.
+	// Weaker than configured is still valid: the comparison is not an equality.
 	weaker, err := h.Make(validPassword, hashing.Options{Memory: 512, Time: 1, Threads: 1})
 	if err != nil {
 		t.Fatalf("Make: %v", err)
@@ -306,7 +306,7 @@ func TestArgonHasherVerifyConfiguration(t *testing.T) {
 func TestArgonHasherSetters(t *testing.T) {
 	h := hashing.NewArgonHasher()
 	if got := h.SetMemory(4096).SetTime(3).SetThreads(1); got != h {
-		t.Fatal("the setters must return the hasher, as PHP returns $this")
+		t.Fatal("the setters must return the hasher so calls chain")
 	}
 	hash, err := h.Make(validPassword)
 	if err != nil {
@@ -360,7 +360,7 @@ func TestBcryptHasherMakeAndCheck(t *testing.T) {
 	}
 }
 
-// TestBcryptHasherDefaultRounds pins the PHP class property: 12.
+// TestBcryptHasherDefaultRounds pins the default cost factor: 12.
 func TestBcryptHasherDefaultRounds(t *testing.T) {
 	h := hashing.NewBcryptHasher()
 	cheap, err := fastBcrypt().Make(validPassword)
@@ -375,9 +375,9 @@ func TestBcryptHasherDefaultRounds(t *testing.T) {
 	}
 }
 
-// TestBcryptHasherLimit covers the 'limit' option. The PHP compares with >, so
-// a value of exactly the limit is accepted even though the message reads "less
-// than": the behaviour is in the body, not in the message.
+// TestBcryptHasherLimit covers the Limit option. The comparison is not an
+// equality, so a value of exactly the limit is accepted even though the message
+// reads "less than": the behaviour is in the body, not in the message.
 func TestBcryptHasherLimit(t *testing.T) {
 	h := hashing.NewBcryptHasher(hashing.Options{Rounds: bcrypt.MinCost, Limit: 8})
 
@@ -389,7 +389,7 @@ func TestBcryptHasherLimit(t *testing.T) {
 		t.Fatalf("error = %v, want ErrValueTooLong", err)
 	}
 
-	// Zero is PHP's null limit: nothing is refused for its length.
+	// A zero limit is no limit: nothing is refused for its length.
 	long := strings.Repeat("a", 64)
 	if _, err := fastBcrypt().Make(long); err != nil {
 		t.Fatalf("Make with no limit: %v", err)
@@ -482,7 +482,7 @@ func TestBcryptHasherCheckVerifiesAlgorithm(t *testing.T) {
 func TestBcryptHasherSetRounds(t *testing.T) {
 	h := fastBcrypt()
 	if got := h.SetRounds(bcrypt.MinCost + 1); got != h {
-		t.Fatal("SetRounds must return the hasher, as PHP returns $this")
+		t.Fatal("SetRounds must return the hasher so calls chain")
 	}
 	hash, err := h.Make(validPassword)
 	if err != nil {

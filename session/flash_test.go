@@ -91,8 +91,9 @@ func TestFlashNeverCarriesAPasswordValueButAlwaysItsMessage(t *testing.T) {
 			"password":              {"hunter2"},
 			"password_confirmation": {"hunter2"},
 			"current_password":      {"letmein"},
-			// Not on Laravel's list, and the reason the suffix rule exists: an
-			// exact-name list lets this through while looking complete.
+			// Not on the exact-name list, and the reason the suffix rule
+			// exists: an exact-name list lets this through while looking
+			// complete.
 			"owner_password": {"s3cret"},
 			"_token":         {"a-stale-csrf-token"},
 		})

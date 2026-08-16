@@ -9,28 +9,22 @@ import (
 )
 
 // ChannelNameField is the field the socket client sends the channel it wants to
-// listen on under. It is the $request->channel_name RedisBroadcaster reads.
+// listen on under.
 const ChannelNameField = "channel_name"
 
-// BroadcastController is Illuminate\Broadcasting\BroadcastController: the two
-// endpoints a socket client calls before it is allowed to listen.
-//
-// The PHP reaches the manager through the Broadcast facade. There are no
-// facades (ADR 0001), so the manager is a field -- which is the only difference
-// between the two classes.
+// BroadcastController is the two endpoints a socket client calls before it is
+// allowed to listen.
 type BroadcastController struct {
-	// broadcast is what the PHP calls through the Broadcast facade.
+	// broadcast is the manager the driver is resolved through.
 	broadcast *BroadcastManager
 }
 
-// NewBroadcastController builds the controller over a manager. The PHP has no
-// constructor because the facade needs none.
+// NewBroadcastController builds the controller over a manager.
 func NewBroadcastController(broadcast *BroadcastManager) *BroadcastController {
 	return &BroadcastController{broadcast: broadcast}
 }
 
-// Authenticate is BroadcastController::authenticate: it authorizes the request
-// for channel access.
+// Authenticate authorizes the request for channel access.
 //
 // This is where a private channel becomes an authorization decision. The
 // channel name arrives from the client, the subject arrives from the context
@@ -39,21 +33,13 @@ func NewBroadcastController(broadcast *BroadcastManager) *BroadcastController {
 // success is a Grant, exactly as it is on the way into a repository. The client
 // never names the tenant: it comes off the Grant.
 //
-// The PHP's `$request->session()->reflash()` has no twin. It keeps flash data
-// alive across an XHR that the user never sees a page for, and flash data is
-// the session package's to manage; this endpoint touches none of it.
+// The refusal is 403, and the body is deliberately the same sentence for every
+// refusal: the reason a channel was denied is a fact about somebody else's data.
 //
-// The refusal is 403, which is what AccessDeniedHttpException renders to. The
-// body is deliberately the same sentence for every refusal: the reason a
-// channel was denied is a fact about somebody else's data.
-//
-// What was wrong here: this handler read the driver's answer as
-// `_, response, err := driver.Auth(...)` and threw the Grant away, so the only
-// thing standing between the request and a 200 was a non-nil error -- and
-// LogBroadcaster.Auth and NullBroadcaster.Auth both answer (auth.Grant{}, nil,
-// nil), which is no error at all. Every subscription against either driver was
-// answered with a success body by a driver that had authorized nobody. The
-// Grant is now checked for [ChannelJoin], which those two zero Grants fail.
+// The Grant is checked for [ChannelJoin] before anything is written. A driver
+// that decides nothing answers the zero Grant with no error at all -- which is
+// what the log and null drivers do -- and the check is what keeps that from
+// reading as a success.
 func (c *BroadcastController) Authenticate(w http.ResponseWriter, r *http.Request) {
 	driver, err := c.broadcast.Driver("")
 	if err != nil {
@@ -81,16 +67,15 @@ func (c *BroadcastController) Authenticate(w http.ResponseWriter, r *http.Reques
 	writeAuthResponse(w, response)
 }
 
-// AuthenticateUser is BroadcastController::authenticateUser: it authenticates
-// the current user for the connection itself, rather than for one channel.
+// AuthenticateUser authenticates the current user for the connection itself,
+// rather than for one channel.
 //
-// See https://pusher.com/docs/channels/server_api/authenticating-users, which
-// is the link the PHP carries.
+// See https://pusher.com/docs/channels/server_api/authenticating-users for the
+// document the client expects.
 //
-// A driver that resolves no user is a 403, which is the PHP's
-// `?? throw new AccessDeniedHttpException`. So is a driver that has no
-// resolver at all: the endpoint exists to answer who somebody is, and a
-// deployment that never registered a way to say cannot answer.
+// A driver that resolves no user is a 403. So is a driver that has no resolver
+// at all: the endpoint exists to answer who somebody is, and a deployment that
+// never registered a way to say cannot answer.
 func (c *BroadcastController) AuthenticateUser(w http.ResponseWriter, r *http.Request) {
 	driver, err := c.broadcast.Driver("")
 	if err != nil {
@@ -122,10 +107,8 @@ func (c *BroadcastController) AuthenticateUser(w http.ResponseWriter, r *http.Re
 
 // writeAuthResponse sends what a broadcaster answered.
 //
-// A driver that already produced a JSON document -- which is what
-// RedisBroadcaster::validAuthenticationResponse does with json_encode -- is
-// written through untouched, because encoding it again would ship the client a
-// quoted string.
+// A driver that already produced a JSON document is written through untouched,
+// because encoding it again would ship the client a quoted string.
 func writeAuthResponse(w http.ResponseWriter, response any) {
 	w.Header().Set("Content-Type", "application/json")
 

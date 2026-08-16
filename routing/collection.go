@@ -20,9 +20,8 @@ func (t *Routes) Add(route *Route) *Route {
 // it, but Current, a middleware that runs before the handler, and a custom
 // dispatcher all need to find the route from the request, and they do it here.
 //
-// Non-fallback routes are tried first, in registration order; a fallback route
-// is returned only if nothing else matched, which is the precedence Laravel
-// gives a fallback.
+// Non-fallback routes are tried first, in registration order; a fallback
+// route is returned only if nothing else matched.
 func (t *Routes) Match(req *http.Request) *Route {
 	if req == nil || t == nil {
 		return nil
@@ -44,7 +43,7 @@ func (t *Routes) Match(req *http.Request) *Route {
 }
 
 // GetByName returns the route registered with name, or nil. It is the
-// exported form the URL generator and `aru routes` read.
+// exported form the URL generator reads.
 func (t *Routes) GetByName(name string) *Route {
 	if t == nil {
 		return nil
@@ -70,9 +69,7 @@ func (t *Routes) GetByAction(action string) *Route {
 	return nil
 }
 
-// GetRoutes returns the routes in registration order. It is the name Laravel's
-// getRoutes gives the same thing All does; both are here because the clone
-// calls the one and a reader from Laravel looks for the other.
+// GetRoutes returns the routes in registration order. It is an alias for All.
 func (t *Routes) GetRoutes() []*Route {
 	if t == nil {
 		return nil
@@ -148,11 +145,9 @@ func (t *Routes) Refresh() {
 	}
 }
 
-// RefreshNameLookups is the name Laravel gives Refresh for the compiled
-// collection; it is an alias here so the surface matches.
+// RefreshNameLookups is an alias for Refresh.
 func (t *Routes) RefreshNameLookups() { t.Refresh() }
 
-// RefreshActionLookups is a no-op here, because the action index is a scan.
-// It exists so the surface matches Laravel's compiled collection, which
-// rebuilds an action index that this collection does not keep.
+// RefreshActionLookups is a no-op: the action index is a scan, not a
+// maintained index, so there is nothing to rebuild.
 func (t *Routes) RefreshActionLookups() {}

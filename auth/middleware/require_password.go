@@ -12,17 +12,18 @@ import (
 
 // PasswordConfirmURI is where somebody is sent to type their password again.
 //
-// PHP resolves the named route "password.confirm"; there is no router in this
-// package, so the default is the URI that route has in a Laravel application.
-// [RequirePassword.Using] is how a project that mounts it elsewhere says so.
+// There is no router in this package to resolve a route name against, so this
+// is the path the middleware sends them to unless told otherwise.
+// [RequirePassword.Using] is how a project that mounts the screen elsewhere
+// says so.
 const PasswordConfirmURI = "/confirm-password"
 
-// RequirePassword is Illuminate\Auth\Middleware\RequirePassword.
+// RequirePassword guards the part of an application that a stolen open session
+// must not reach: changing the e-mail address, adding a payout account,
+// deleting everything.
 //
-// It guards the part of an application that a stolen open session must not
-// reach: changing the e-mail address, adding a payout account, deleting
-// everything. Being signed in is not enough there -- the password has to have
-// been typed recently, on this session.
+// Being signed in is not enough there -- the password has to have been typed
+// recently, on this session.
 //
 // The window is the only thing it decides. session.Store.PasswordConfirmed is
 // what stamps the session, and the screen that asks for the password is the
@@ -30,40 +31,35 @@ const PasswordConfirmURI = "/confirm-password"
 type RequirePassword struct {
 	guestRedirect
 
-	// redirectToRoute is the parameter PHP reads off the route string. Empty
-	// means [PasswordConfirmURI].
+	// redirectToRoute is where somebody is sent to confirm. Empty means
+	// [PasswordConfirmURI].
 	redirectToRoute string
 
-	// passwordTimeout is the password timeout. Zero means
+	// passwordTimeout is how recent the confirmation has to be. Zero means
 	// session.PasswordConfirmationWindow.
 	//
-	// PHP holds an int of seconds, defaulting to 10800. It is a time.Duration
-	// here because Go has a type for a span of time and a bare int of seconds is
-	// how a caller passes milliseconds by accident.
+	// It is a time.Duration because Go has a type for a span of time, and a bare
+	// int of seconds is how a caller passes milliseconds by accident.
 	passwordTimeout time.Duration
 }
 
 // NewRequirePassword returns the middleware.
 //
 // A passwordTimeout of zero or less means session.PasswordConfirmationWindow,
-// which is three hours -- the same number as PHP's default of 10800 seconds,
-// and stated once in hesape/session so the middleware and anything else asking
-// "recently" agree.
+// which is three hours, stated once in hesape/session so that the middleware
+// and anything else asking "recently" agree.
 //
-// PHP's constructor also takes a ResponseFactory and a UrlGenerator. The
-// response factory is hesape/http's Redirect, which decides HX-Redirect against
-// 303 in one place for the whole framework; the URL generator resolves a route
-// name, which needs the router this package must not import, so the redirect
-// target is a path.
+// The redirect target is a path rather than a route name: resolving a name
+// needs the router this package must not import.
 func NewRequirePassword(passwordTimeout time.Duration) *RequirePassword {
 	return &RequirePassword{passwordTimeout: passwordTimeout}
 }
 
-// Using specifies the redirect route and timeout for the middleware.
+// Using specifies the redirect path and timeout for the middleware.
 //
-// It is RequirePassword::using. See [Authenticate.Using] for why it returns a
-// copy of the middleware rather than a route string. Either parameter may be
-// zero-valued, which means "leave what the constructor set".
+// It returns a copy of the middleware, for the reason [Authenticate.Using]
+// gives. Either parameter may be zero-valued, which means "leave what the
+// constructor set".
 func (m *RequirePassword) Using(redirectToRoute string, passwordTimeoutSeconds time.Duration) *RequirePassword {
 	copied := *m
 	if redirectToRoute != "" {
@@ -77,9 +73,9 @@ func (m *RequirePassword) Using(redirectToRoute string, passwordTimeoutSeconds t
 
 // Handle handles an incoming request.
 //
-// It is RequirePassword::handle. A request that wants JSON is answered 423
-// Locked, which is the status PHP uses and which says something a 401 does not:
-// the credentials are fine, the resource is closed until one more step happens.
+// A request that wants JSON is answered 423 Locked, which says something a 401
+// does not: the credentials are fine, the resource is closed until one more
+// step happens.
 func (m *RequirePassword) Handle(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !m.shouldConfirmPassword(r) {
@@ -102,14 +98,8 @@ func (m *RequirePassword) Handle(next http.Handler) http.Handler {
 
 // shouldConfirmPassword determines if the confirmation timeout has expired.
 //
-// It is RequirePassword::shouldConfirmPassword, which is protected. PHP:
-//
-//	$confirmedAt = Date::now()->unix() - $request->session()->get('auth.password_confirmed_at', 0);
-//	return $confirmedAt > ($passwordTimeoutSeconds ?? $this->passwordTimeout);
-//
 // The stamp is read from the session under session.PasswordConfirmedKey, which
-// is Illuminate's key character for character, and which session.Store's own
-// PasswordConfirmed writes.
+// session.Store's own PasswordConfirmed writes.
 //
 // A request with no session at all is asked to confirm. That is the direction
 // this has to fail in: treating a missing session as recently confirmed would

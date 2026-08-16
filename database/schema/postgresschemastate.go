@@ -10,19 +10,20 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// PostgresSchemaState answers
-// Illuminate\Database\Schema\PostgresSchemaState: the SchemaState that shells
-// out to pg_dump, pg_restore and psql.
+// PostgresSchemaState is the SchemaState that shells out to pg_dump, pg_restore
+// and psql.
 type PostgresSchemaState struct {
 	*BaseSchemaState
 }
 
-// NewPostgresSchemaState answers PostgresSchemaState's inherited constructor.
+// NewPostgresSchemaState builds a PostgresSchemaState for connection, using
+// processFactory to build the pg_dump, pg_restore and psql commands it runs.
 func NewPostgresSchemaState(connection Connection, processFactory ProcessFactory) *PostgresSchemaState {
 	return &PostgresSchemaState{BaseSchemaState: NewBaseSchemaState(connection, processFactory)}
 }
 
-// Dump answers PostgresSchemaState::dump.
+// Dump writes the connection's schema, plus the rows of the migration table,
+// to path.
 //
 // Two pg_dump runs into one file: the schema, then the rows of the migration
 // table appended to it. The second is what stops a restored database from
@@ -51,7 +52,7 @@ func (s *PostgresSchemaState) Dump(ctx context.Context, g auth.Grant, connection
 }
 
 // dumpInto runs one pg_dump and sends its standard output to path, truncating
-// or appending as the PHP's `>` and `>>` do.
+// or appending depending on appending.
 func (s *PostgresSchemaState) dumpInto(ctx context.Context, path string, appending bool, args []string) error {
 	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 	if appending {
@@ -77,13 +78,13 @@ func (s *PostgresSchemaState) dumpInto(ctx context.Context, path string, appendi
 	return nil
 }
 
-// Load answers PostgresSchemaState::load.
+// Load runs the schema file at path against the connection.
 //
-// The tool is chosen by the file's extension, as the PHP chooses it: a .sql file
-// is plain text and goes through psql, anything else is pg_dump's own archive
-// format and goes through pg_restore. Handing one to the other fails with a
-// message about the file being corrupt, which is a misleading thing to read
-// when the file is fine and only the reader is wrong.
+// The tool is chosen by the file's extension: a .sql file is plain text and
+// goes through psql, anything else is pg_dump's own archive format and goes
+// through pg_restore. Handing one to the other fails with a message about the
+// file being corrupt, which is a misleading thing to read when the file is
+// fine and only the reader is wrong.
 func (s *PostgresSchemaState) Load(ctx context.Context, g auth.Grant, path string) error {
 	var args []string
 
@@ -103,8 +104,8 @@ func (s *PostgresSchemaState) Load(ctx context.Context, g auth.Grant, path strin
 	return nil
 }
 
-// GetMigrationTable answers PostgresSchemaState::getMigrationTable, which
-// qualifies the table with its schema.
+// GetMigrationTable returns the migration table's name qualified with its
+// schema.
 //
 // Postgres needs the qualification because pg_dump's -t matches against the
 // search path, and a migrations table in a schema that is not first on that
@@ -118,14 +119,14 @@ func (s *PostgresSchemaState) GetMigrationTable() string {
 	return schema + "." + s.GetConnection().GetTablePrefix() + table
 }
 
-// baseDumpCommand answers PostgresSchemaState::baseDumpCommand.
+// baseDumpCommand builds the pg_dump invocation and flags shared by both dump
+// passes.
 func (s *PostgresSchemaState) baseDumpCommand() []string {
 	return append([]string{"pg_dump", "--no-owner", "--no-acl"}, s.connectionFlags()...)
 }
 
 // connectionFlags is the host, port, user and database every one of these
-// commands takes. The PHP writes them into the shell string with ${:VAR}
-// placeholders; they are plain arguments here, because no shell parses them.
+// commands takes, passed as plain arguments because no shell parses them.
 func (s *PostgresSchemaState) connectionFlags() []string {
 	connection := s.GetConnection()
 	return []string{
@@ -136,12 +137,11 @@ func (s *PostgresSchemaState) connectionFlags() []string {
 	}
 }
 
-// baseVariables answers PostgresSchemaState::baseVariables, reduced to the one
-// value that has to travel in the environment rather than on the command line.
+// baseVariables returns the one value that has to travel in the environment
+// rather than on the command line: the password.
 //
 // PGPASSWORD is read by every libpq client. A password passed as an argument
-// would be readable by every process on the machine through `ps`, which is the
-// reason the PHP keeps it out of the command line too.
+// would be readable by every process on the machine through `ps`.
 func (s *PostgresSchemaState) baseVariables() map[string]string {
 	return map[string]string{"PGPASSWORD": s.GetConnection().GetConfig("password")}
 }

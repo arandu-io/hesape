@@ -1,38 +1,32 @@
 package query
 
-// JoinClause answers Illuminate\Database\Query\JoinClause.
+// JoinClause is one join, and the condition it is joined on.
 //
-// In PHP it extends Builder, so a join condition is written with the same where
+// It embeds *Builder, so a join condition is written with the same where
 // vocabulary as the query itself -- On is where for two columns, and Where
-// inside a join is a where. Here it embeds *Builder, which is what Go offers
-// for the same thing: every Builder method is reachable on a JoinClause, and
-// the two that behave differently are declared below and shadow the embedded
-// ones.
+// inside a join is a where. Every Builder method is reachable on a JoinClause,
+// and the two that behave differently are declared below and shadow the
+// embedded ones.
 type JoinClause struct {
 	*Builder
 
-	// Type is JoinClause::$type: inner, left, right or cross.
+	// Type is the join type: inner, left, right or cross.
 	Type string
 
-	// Table is JoinClause::$table.
+	// Table is the table or subquery expression being joined.
 	Table any
 
-	// Lateral answers Illuminate\Database\Query\JoinLateralClause, which in PHP
-	// is a subclass with no body at all: the grammar tells the two apart with
-	// `$join instanceof JoinLateralClause`. Go has no subclassing, and a second
-	// type here would be a second thing for the grammar and for Joins to hold,
-	// so the class becomes the flag its only use asks for.
+	// Lateral marks the join as lateral. It is a flag rather than a second
+	// type, so the grammar and Joins have one type to hold.
 	Lateral bool
 
 	parentQuery *Builder
 }
 
-// NewJoinClause answers JoinClause::__construct.
+// NewJoinClause builds a JoinClause for a join against table.
 //
 // The clause carries the parent's connection, grammar and processor so that a
-// nested query built inside the join compiles against the same dialect. The PHP
-// keeps them in $parentConnection, $parentGrammar and $parentProcessor for the
-// same reason.
+// nested query built inside the join compiles against the same dialect.
 func NewJoinClause(parentQuery *Builder, typ string, table any) *JoinClause {
 	return &JoinClause{
 		Builder:     NewBuilder(parentQuery.Connection, parentQuery.Grammar, parentQuery.Processor),
@@ -42,22 +36,22 @@ func NewJoinClause(parentQuery *Builder, typ string, table any) *JoinClause {
 	}
 }
 
-// NewJoinLateralClause answers Builder::newJoinLateralClause, and stands in for
-// Illuminate\Database\Query\JoinLateralClause::__construct. See Lateral.
+// NewJoinLateralClause builds a JoinClause with Lateral already set. See
+// Lateral.
 func NewJoinLateralClause(parentQuery *Builder, typ string, table any) *JoinClause {
 	join := NewJoinClause(parentQuery, typ, table)
 	join.Lateral = true
 	return join
 }
 
-// On answers JoinClause::on.
+// On adds a join condition.
 //
 // It compares two columns, so neither side becomes a binding: `on('users.id',
 // '=', 'posts.user_id')` names a column on the right, not the string
 // "posts.user_id". This is the one difference that catches people moving a
 // condition from where to on -- in a where, the right side is a value.
 //
-// Passing a func opens a nested group, as passing a Closure does in PHP.
+// Passing a func opens a nested group.
 func (j *JoinClause) On(first any, args ...any) *JoinClause {
 	if nested, ok := first.(func(*JoinClause)); ok {
 		return j.onNested(nested, "and")
@@ -73,7 +67,7 @@ func (j *JoinClause) On(first any, args ...any) *JoinClause {
 	return j
 }
 
-// OrOn answers JoinClause::orOn.
+// OrOn is On joined with "or" instead of "and".
 func (j *JoinClause) OrOn(first any, args ...any) *JoinClause {
 	if nested, ok := first.(func(*JoinClause)); ok {
 		return j.onNested(nested, "or")
@@ -102,20 +96,18 @@ func (j *JoinClause) onNested(callback func(*JoinClause), boolean string) *JoinC
 	return j
 }
 
-// NewJoinClause answers JoinClause::newQuery, which returns another JoinClause
-// rather than a Builder.
+// NewJoinClause returns another JoinClause rather than a Builder.
 //
-// The PHP overrides newQuery() itself. Go resolves an embedded method by name,
-// and a method on JoinClause called NewQuery could not return *JoinClause while
-// the embedded one returns *Builder, so the two are separate names: NewQuery
-// still returns a plain builder, for a subquery inside the join, and this
-// returns the clause.
+// Go resolves an embedded method by name, and a method on JoinClause called
+// NewQuery could not return *JoinClause while the embedded one returns
+// *Builder, so the two are separate names: NewQuery still returns a plain
+// builder, for a subquery inside the join, and this returns the clause.
 func (j *JoinClause) NewJoinClause() *JoinClause {
 	return NewJoinClause(j.parentQuery, j.Type, j.Table)
 }
 
-// NewParentQuery answers JoinClause::newParentQuery: a fresh builder on the
-// table the join was declared against.
+// NewParentQuery returns a fresh builder on the table the join was declared
+// against.
 func (j *JoinClause) NewParentQuery() *Builder {
 	return j.parentQuery.NewQuery()
 }

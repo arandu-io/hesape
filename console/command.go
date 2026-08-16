@@ -16,26 +16,24 @@ type Command struct {
 	// Name is what the person types. Lowercase, with a colon for the group:
 	// "invoice:close". It is the key of the registry, so it is unique.
 	//
-	// A command that sets Signature may leave this empty: the name is the first
-	// word of the signature, exactly as Command::configureUsingFluentDefinition
-	// reads it.
+	// A command that sets Signature may leave this empty: the name is taken to
+	// be the first word of the signature.
 	Name string
 
 	// Signature is the name, the arguments and the options in one string:
 	//
 	//	mail:send {user : The user ID} {--queue= : The queue to push onto}
 	//
-	// It answers Command::$signature, and Parse is what reads it. A command
-	// that declares one gets an Input on its IO, so Argument and Option have
-	// something to read; a command that does not gets the raw arguments and
-	// nothing else.
+	// Parse is what reads it. A command that declares one gets an Input on its
+	// IO, so Argument and Option have something to read; a command that does
+	// not gets the raw arguments and nothing else.
 	//
 	// A signature that does not parse panics at wiring time rather than failing
 	// on the run: a binary must not start with a command nobody can call.
 	Signature string
 
 	// Help is the long explanation, printed when the command is asked about
-	// rather than run. It answers Command::$help.
+	// rather than run.
 	Help string
 
 	// Aliases are other names the same command answers to. They are listed

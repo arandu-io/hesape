@@ -9,9 +9,7 @@ import (
 	"github.com/arandu-io/hesape/support"
 )
 
-// DatabaseTokenRepository answers
-// Illuminate\Auth\Passwords\DatabaseTokenRepository: reset tokens kept in a
-// table, one row per address.
+// DatabaseTokenRepository keeps reset tokens in a table, one row per address.
 //
 // The row holds a hash of the token, never the token. The plain token exists
 // once, in the return of Create, on its way into the mail -- so a copy of this
@@ -19,43 +17,42 @@ import (
 //
 // Every statement is taken under auth.SystemGrant, because a reset runs for
 // somebody who cannot sign in and there is no subject to authorize. The tenant
-// comes from configuration and never from the form (RULE 14), and it filters the
-// reads as much as the writes (RULE 17).
+// comes from configuration and never from the form, and it filters the reads as
+// much as the writes.
 type DatabaseTokenRepository struct {
-	// connection answers $connection.
+	// connection is where the table is opened.
 	connection Connection
 
-	// hasher answers $hasher. It hashes the token before it is stored and
-	// compares it on the way back.
+	// hasher hashes the token before it is stored and compares it on the way
+	// back.
 	hasher auth.Hasher
 
-	// table answers $table.
+	// table is the name of the table the rows live in.
 	table string
 
-	// hashKey answers $hashKey: the application key the token is HMACed with.
+	// hashKey is the application key the token is HMACed with.
 	hashKey string
 
-	// expires answers $expires. The PHP counts seconds; a Duration says which
-	// unit it is at every call site, which is the point of the type.
+	// expires is how long a token is good for. It is a Duration so that the
+	// unit is written at every call site.
 	expires time.Duration
 
-	// throttle answers $throttle. Zero or less turns the throttle off, which is
-	// what the PHP's body does with it.
+	// throttle is how long after minting one another may be minted. Zero or
+	// less turns the throttle off.
 	throttle time.Duration
 
-	// tenant is the tenant every statement this repository issues is scoped by.
+	// tenant is what every statement this repository issues is scoped by.
 	tenant string
 }
 
 // Verify at compile time that the repository is the contract the broker holds.
 var _ TokenRepository = (*DatabaseTokenRepository)(nil)
 
-// NewDatabaseTokenRepository answers DatabaseTokenRepository::__construct.
+// NewDatabaseTokenRepository returns a repository over the named table.
 //
-// expires of zero or less is the PHP's default argument, one hour, which Go has
-// no syntax for. throttle of zero or less turns throttling off, which is what
-// the PHP's tokenRecentlyCreated does with it. tenant has no counterpart in the
-// PHP, which has no tenants; see the type's doc for where it must come from.
+// An expires of zero or less becomes [DefaultExpires]. A throttle of zero or
+// less turns throttling off. See the type's doc for where tenant must come
+// from.
 func NewDatabaseTokenRepository(
 	connection Connection,
 	hasher auth.Hasher,
@@ -74,7 +71,7 @@ func NewDatabaseTokenRepository(
 	}
 }
 
-// Create answers DatabaseTokenRepository::create.
+// Create mints a token for this address and stores a hash of it.
 //
 // The existing record is deleted first, so one address has at most one live
 // token: a second reset request invalidates the link from the first. The plain
@@ -98,12 +95,11 @@ func (r *DatabaseTokenRepository) Create(ctx context.Context, user auth.CanReset
 	return token, nil
 }
 
-// Exists answers DatabaseTokenRepository::exists: a record for this address is
-// present, has not expired, and hashes to the token that was offered.
+// Exists reports that a record for this address is present, has not expired,
+// and hashes to the token that was offered.
 //
-// All three have to hold. The order is the PHP's, and the expiry is checked
-// before the hash rather than after: an expired record is refused whatever it
-// holds.
+// All three have to hold, and the expiry is checked before the hash: an expired
+// record is refused whatever it holds.
 func (r *DatabaseTokenRepository) Exists(ctx context.Context, user auth.CanResetPassword, token string) (bool, error) {
 	record, err := r.recordFor(ctx, user)
 	if err != nil || record == nil {
@@ -116,8 +112,8 @@ func (r *DatabaseTokenRepository) Exists(ctx context.Context, user auth.CanReset
 	return r.hasher.Check(token, stringOf(record["token"])), nil
 }
 
-// RecentlyCreatedToken answers
-// DatabaseTokenRepository::recentlyCreatedToken.
+// RecentlyCreatedToken reports that this address had a token too recently to be
+// given another.
 //
 // It is what makes the reset form safe to leave open: without it, every submit
 // mints a token and sends a mail, and the form is a way to have somebody else's
@@ -134,14 +130,13 @@ func (r *DatabaseTokenRepository) RecentlyCreatedToken(ctx context.Context, user
 	return tokenRecentlyCreated(createdAt, r.throttle), nil
 }
 
-// Delete answers DatabaseTokenRepository::delete.
+// Delete removes this address's record.
 func (r *DatabaseTokenRepository) Delete(ctx context.Context, user auth.CanResetPassword) error {
 	return r.deleteExisting(ctx, user)
 }
 
-// DeleteExpired answers DatabaseTokenRepository::deleteExpired: the sweep a
-// scheduled task runs, which is housekeeping rather than enforcement -- Exists
-// already refuses an expired record.
+// DeleteExpired is the sweep a scheduled task runs, which is housekeeping
+// rather than enforcement -- Exists already refuses an expired record.
 func (r *DatabaseTokenRepository) DeleteExpired(ctx context.Context) error {
 	expiredAt := support.Now().Add(-r.expires)
 
@@ -151,20 +146,17 @@ func (r *DatabaseTokenRepository) DeleteExpired(ctx context.Context) error {
 	return err
 }
 
-// CreateNewToken answers DatabaseTokenRepository::createNewToken.
+// CreateNewToken mints a plain token, without storing anything.
 func (r *DatabaseTokenRepository) CreateNewToken() string { return newToken(r.hashKey) }
 
-// GetConnection answers DatabaseTokenRepository::getConnection.
+// GetConnection is the connection the table is opened on.
 func (r *DatabaseTokenRepository) GetConnection() Connection { return r.connection }
 
-// GetHasher answers DatabaseTokenRepository::getHasher.
+// GetHasher is the hasher the token is hashed and compared with.
 func (r *DatabaseTokenRepository) GetHasher() auth.Hasher { return r.hasher }
 
-// deleteExisting answers the protected
-// DatabaseTokenRepository::deleteExisting.
-//
-// The PHP answers with the number of rows removed and no caller reads it; the
-// count is dropped here and the error is not.
+// deleteExisting removes whatever record this address already had. The number
+// of rows removed is dropped; the error is not.
 func (r *DatabaseTokenRepository) deleteExisting(ctx context.Context, user auth.CanResetPassword) error {
 	_, err := r.getTable(ctx).
 		Where("email", "=", user.GetEmailForPasswordReset()).
@@ -172,12 +164,11 @@ func (r *DatabaseTokenRepository) deleteExisting(ctx context.Context, user auth.
 	return err
 }
 
-// getPayload answers the protected DatabaseTokenRepository::getPayload: the row
-// as it is written.
+// getPayload is the row as it is written.
 //
 // The token column holds the hash and not the token, which is the whole
 // arrangement. There is no tenant column in it: the statement stamps it from the
-// Grant, and a value passed here for it would not survive anyway (RULE 14).
+// Grant, and a value passed here for it would not survive anyway.
 func (r *DatabaseTokenRepository) getPayload(email, token string) (map[string]any, error) {
 	hashed, err := r.hasher.Make(token)
 	if err != nil {
@@ -186,15 +177,14 @@ func (r *DatabaseTokenRepository) getPayload(email, token string) (map[string]an
 	return map[string]any{"email": email, "token": hashed, "created_at": support.Now()}, nil
 }
 
-// recordFor is the read that opens exists and recentlyCreatedToken, which the
-// PHP writes out twice.
+// recordFor is the read that opens both Exists and RecentlyCreatedToken.
 func (r *DatabaseTokenRepository) recordFor(ctx context.Context, user auth.CanResetPassword) (query.Record, error) {
 	return r.getTable(ctx).
 		Where("email", "=", user.GetEmailForPasswordReset()).
 		First(ctx, r.grant(ReadToken))
 }
 
-// getTable answers the protected DatabaseTokenRepository::getTable.
+// getTable opens a builder against the token table.
 func (r *DatabaseTokenRepository) getTable(ctx context.Context) *query.Builder {
 	return r.connection.Table(ctx, r.table)
 }

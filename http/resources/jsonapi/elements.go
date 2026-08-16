@@ -4,26 +4,26 @@ import (
 	"sync"
 )
 
-// DefaultMaxRelationshipDepth is ResolvesJsonApiElements::$maxRelationshipDepth
-// in its initial state: how far the resolver walks into relationships before it
-// stops.
+// DefaultMaxRelationshipDepth is how far the resolver walks into
+// relationships before it stops, by default.
 const DefaultMaxRelationshipDepth = 3
 
-// The class statics of JsonApiResource and the trait it composes:
-// $jsonApiInformation and $maxRelationshipDepth. A mutex guards them because
-// Go runs tests with -race and PHP has no concurrency to speak of.
+// jsonApiState holds the "jsonapi" member information and the
+// relationship-walk depth every resource in the process shares. A mutex
+// guards them since Go runs tests -- and requests -- with a race detector
+// watching.
 var jsonApiState = struct {
 	sync.RWMutex
 	information         map[string]any
 	maxRelationshipDept int
 }{maxRelationshipDept: DefaultMaxRelationshipDepth}
 
-// Configure is JsonApiResource::configure: the "jsonapi" member every response
-// from this process carries -- the specification version the API implements,
-// and the extensions, profiles and meta that go with it.
+// Configure sets the "jsonapi" member every response from this process
+// carries -- the specification version the API implements, and the
+// extensions, profiles and meta that go with it.
 //
-// The PHP drops the empty entries with array_filter; so does this, so that an
-// unconfigured member does not appear as an empty object in the body.
+// Empty entries are dropped, so that an unconfigured member does not
+// appear as an empty object in the body.
 func Configure(version string, ext []string, profile []string, meta map[string]any) {
 	information := map[string]any{}
 	if version != "" {
@@ -44,8 +44,8 @@ func Configure(version string, ext []string, profile []string, meta map[string]a
 	jsonApiState.Unlock()
 }
 
-// JsonApiInformation is JsonApiResource::$jsonApiInformation: what [Configure]
-// was told, empty until it is called.
+// JsonApiInformation is what [Configure] was told, empty until it is
+// called.
 func JsonApiInformation() map[string]any {
 	jsonApiState.RLock()
 	defer jsonApiState.RUnlock()
@@ -56,11 +56,11 @@ func JsonApiInformation() map[string]any {
 	return out
 }
 
-// MaxRelationshipDepth is ResolvesJsonApiElements::maxRelationshipDepth: how
-// far into nested relationships the resolver walks.
+// MaxRelationshipDepth sets how far into nested relationships the resolver
+// walks.
 //
-// The PHP clamps a negative depth to zero, and so does this: a negative depth
-// is a caller asking for nothing, not a caller asking for everything.
+// A negative depth is clamped to zero: it is a caller asking for nothing,
+// not a caller asking for everything.
 func MaxRelationshipDepth(depth int) {
 	if depth < 0 {
 		depth = 0
@@ -70,19 +70,16 @@ func MaxRelationshipDepth(depth int) {
 	jsonApiState.Unlock()
 }
 
-// CurrentMaxRelationshipDepth reports the depth in force.
-//
-// The PHP reads the static property directly, which Go cannot do across
-// packages without exporting a variable that anything could write. This is the
-// read half of [MaxRelationshipDepth].
+// CurrentMaxRelationshipDepth reports the depth in force. It is the read
+// half of [MaxRelationshipDepth].
 func CurrentMaxRelationshipDepth() int {
 	jsonApiState.RLock()
 	defer jsonApiState.RUnlock()
 	return jsonApiState.maxRelationshipDept
 }
 
-// FlushState is JsonApiResource::flushState: forget the configuration and put
-// the relationship depth back to its default.
+// FlushState forgets the configuration and puts the relationship depth back
+// to its default.
 func FlushState() {
 	jsonApiState.Lock()
 	jsonApiState.information = nil
@@ -90,33 +87,29 @@ func FlushState() {
 	jsonApiState.Unlock()
 }
 
-// ToId is JsonApiResource::toId: the resource object's id.
-//
-// The PHP returns null and expects the subclass to override; Go has no
-// override, so a resource built with [NewJsonApiResource] carries the id it was
-// given and this reads it.
+// ToId is the resource object's id: whatever [NewJsonApiResource] was
+// given.
 func (r *JsonApiResource) ToId() string { return r.ID }
 
-// ToType is JsonApiResource::toType: the resource object's type.
+// ToType is the resource object's type: whatever [NewJsonApiResource] was
+// given.
 func (r *JsonApiResource) ToType() string { return r.Type }
 
-// ToAttributes is JsonApiResource::toAttributes.
+// ToAttributes is the resource object's attributes member.
 func (r *JsonApiResource) ToAttributes() map[string]any { return r.Attributes }
 
-// ToRelationships is JsonApiResource::toRelationships.
+// ToRelationships is the resource object's relationships member.
 func (r *JsonApiResource) ToRelationships() map[string]any { return r.Relationships }
 
-// ToLinks is JsonApiResource::toLinks.
+// ToLinks is the resource object's links member.
 func (r *JsonApiResource) ToLinks() map[string]any { return r.Links }
 
-// ToMeta is JsonApiResource::toMeta.
+// ToMeta is the resource object's meta member.
 func (r *JsonApiResource) ToMeta() map[string]any { return r.Meta }
 
-// ResolveResourceIdentifier is ResolvesJsonApiElements::resolveResourceIdentifier:
-// the id the resource object goes out with.
+// ResolveResourceIdentifier is the id the resource object goes out with.
 //
-// The PHP falls back to the model's key when toId returns null and throws when
-// there is no key either; there is no model here, so an empty id is the
+// An empty id -- ToId returned nothing to fall back on -- is the
 // [AttemptingToDetermineIdFor] error.
 func (r *JsonApiResource) ResolveResourceIdentifier(request *JsonApiRequest) (string, error) {
 	if id := r.ToId(); id != "" {
@@ -125,12 +118,10 @@ func (r *JsonApiResource) ResolveResourceIdentifier(request *JsonApiRequest) (st
 	return "", AttemptingToDetermineIdFor(r)
 }
 
-// ResolveResourceType is ResolvesJsonApiElements::resolveResourceType: the type
-// the resource object goes out with.
+// ResolveResourceType is the type the resource object goes out with.
 //
-// The PHP falls back to the class basename, then to the model's morph alias,
-// and throws when neither is there. Go has no class name to read at runtime
-// that would mean anything to an API consumer, so an empty type is the
+// There is no class name to fall back on that would mean anything to an
+// API consumer, so an empty type -- ToType returned nothing -- is the
 // [AttemptingToDetermineTypeFor] error.
 func (r *JsonApiResource) ResolveResourceType(request *JsonApiRequest) (string, error) {
 	if resourceType := r.ToType(); resourceType != "" {
@@ -139,15 +130,12 @@ func (r *JsonApiResource) ResolveResourceType(request *JsonApiRequest) (string, 
 	return "", AttemptingToDetermineTypeFor(r)
 }
 
-// ResolveIncludedResourceObjects is
-// ResolvesJsonApiElements::resolveIncludedResourceObjects: the resource objects
-// that go in the "included" member, one per unique type and id.
+// ResolveIncludedResourceObjects is the resource objects that go in the
+// "included" member, one per unique type and id.
 //
-// The PHP walks the loaded Eloquent relations, tracking visited objects in a
-// WeakMap so that a circular chaperone does not loop forever, and stops at
-// [CurrentMaxRelationshipDepth]. There are no Eloquent relations here, so this
-// walks the relationship identifiers already on the resource and deduplicates
-// them the same way.
+// It walks the relationship identifiers already on the resource and
+// deduplicates them by type and id, so a circular or repeated reference
+// does not appear twice.
 func (r *JsonApiResource) ResolveIncludedResourceObjects(request *JsonApiRequest) []map[string]any {
 	included := make([]map[string]any, 0)
 	seen := map[string]bool{}
@@ -180,9 +168,9 @@ func (r *JsonApiResource) ResolveIncludedResourceObjects(request *JsonApiRequest
 	return included
 }
 
-// appendUniqueResourceObject is the uniqueStrict('_uniqueKey') step of the PHP:
-// a type and an id name a resource object once, however many relationships
-// point at it.
+// appendUniqueResourceObject appends object unless its type and id
+// combination has already been seen: a type and an id name a resource
+// object once, however many relationships point at it.
 func appendUniqueResourceObject(included []map[string]any, seen map[string]bool, object map[string]any) []map[string]any {
 	key, _ := object["type"].(string)
 	if id, ok := object["id"].(string); ok {
@@ -195,20 +183,16 @@ func appendUniqueResourceObject(included []map[string]any, seen map[string]bool,
 	return append(included, object)
 }
 
-// RespectFieldsAndIncludesInQueryString is
-// ResolvesJsonApiElements::respectFieldsAndIncludesInQueryString: read the
-// sparse fieldsets and the includes off the request's query string.
-//
-// It is on by default, as it is in the PHP.
+// RespectFieldsAndIncludesInQueryString sets whether to read the sparse
+// fieldsets and the includes off the request's query string. It is on by
+// default.
 func (r *JsonApiResource) RespectFieldsAndIncludesInQueryString(value bool) *JsonApiResource {
 	r.usesRequestQueryString = value
 	return r
 }
 
-// IgnoreFieldsAndIncludesInQueryString is
-// ResolvesJsonApiElements::ignoreFieldsAndIncludesInQueryString: build the
-// resource object from what the resource declares, whatever the query string
-// asked for.
+// IgnoreFieldsAndIncludesInQueryString builds the resource object from what
+// the resource declares, whatever the query string asked for.
 func (r *JsonApiResource) IgnoreFieldsAndIncludesInQueryString() *JsonApiResource {
 	return r.RespectFieldsAndIncludesInQueryString(false)
 }
@@ -218,10 +202,8 @@ func (r *JsonApiResource) UsesRequestQueryString() bool {
 	return r.usesRequestQueryString
 }
 
-// IncludePreviouslyLoadedRelationships is
-// ResolvesJsonApiElements::includePreviouslyLoadedRelationships: put the
-// relationships that were already loaded into "included", not only the ones the
-// request asked for.
+// IncludePreviouslyLoadedRelationships puts the relationships that were
+// already loaded into "included", not only the ones the request asked for.
 func (r *JsonApiResource) IncludePreviouslyLoadedRelationships() *JsonApiResource {
 	r.includesPreviouslyLoadedRelationships = true
 	return r

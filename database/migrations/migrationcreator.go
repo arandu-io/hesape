@@ -10,42 +10,36 @@ import (
 	"github.com/arandu-io/hesape/str"
 )
 
-// MigrationCreator answers
-// Illuminate\Database\Migrations\MigrationCreator: what `aru make:migration`
-// writes the file with.
+// MigrationCreator is what `aru make:migration` writes the file with.
 //
-// The stub it fills is Go rather than PHP, and everything else is the PHP's:
-// the date prefix, the three stubs chosen by whether a table was named and
-// whether it is being created, the custom stub directory that wins over the
-// built-in one, and the post-create hooks.
+// It fills a stub: the name takes a date prefix, the stub is chosen by whether a
+// table was named and whether it is being created, a custom stub directory wins
+// over the built-in one, and the post-create hooks run afterwards.
 type MigrationCreator struct {
-	// customStubPath is MigrationCreator::$customStubPath: a project directory
-	// whose stubs win over the built-in ones.
+	// customStubPath is a project directory whose stubs win over the
+	// built-in ones.
 	customStubPath string
 
-	// postCreate is MigrationCreator::$postCreate.
+	// postCreate is the hooks AfterCreate registered.
 	postCreate []func(table, path string)
 
-	// now is where the date prefix comes from. PHP calls date() directly; a
-	// variable is what makes the prefix testable without freezing the process
-	// clock.
+	// now is where the date prefix comes from. A variable is what makes the
+	// prefix testable without freezing the process clock.
 	now func() time.Time
 }
 
-// NewMigrationCreator answers MigrationCreator::__construct.
+// NewMigrationCreator builds a MigrationCreator.
 //
-// The PHP's first argument is a Filesystem, which this does without: the file
-// operations involved are two calls to the standard library, and an injected
-// filesystem exists in Laravel so the container can swap it.
+// It holds no filesystem: the file operations involved are two calls to the
+// standard library.
 func NewMigrationCreator(customStubPath string) *MigrationCreator {
 	return &MigrationCreator{customStubPath: customStubPath, now: time.Now}
 }
 
-// Create answers MigrationCreator::create: write the migration and answer the
-// path it was written to.
+// Create writes the migration and returns the path it was written to.
 //
-// table empty is the PHP's null: a migration with no table in mind. create says
-// whether the named table is being created or altered, which is the difference
+// table empty means a migration with no table in mind. create says whether
+// the named table is being created or altered, which is the difference
 // between the two table-shaped stubs.
 func (c *MigrationCreator) Create(name, path, table string, create bool) (string, error) {
 	if err := c.ensureMigrationDoesntAlreadyExist(name, path); err != nil {
@@ -72,14 +66,13 @@ func (c *MigrationCreator) Create(name, path, table string, create bool) (string
 	return fullPath, nil
 }
 
-// ensureMigrationDoesntAlreadyExist answers the protected method of the same
-// name.
+// ensureMigrationDoesntAlreadyExist fails when a file for name already
+// exists in migrationPath.
 //
-// The PHP requires every file in the directory and then asks class_exists,
-// because two migrations declaring the same class is a fatal error at load. Go
-// finds that at compile time, so the check that is left is the one the compiler
-// cannot make: a second file whose name differs only by its date prefix, which
-// compiles and then applies twice under two names.
+// Two migrations declaring the same type is a build failure Go catches on
+// its own, so the check that is left is the one the compiler cannot make: a
+// second file whose name differs only by its date prefix, which compiles
+// and then applies twice under two names.
 func (c *MigrationCreator) ensureMigrationDoesntAlreadyExist(name, migrationPath string) error {
 	if migrationPath == "" {
 		return nil
@@ -100,8 +93,8 @@ func (c *MigrationCreator) ensureMigrationDoesntAlreadyExist(name, migrationPath
 	return nil
 }
 
-// getStub answers the protected MigrationCreator::getStub: the custom stub when
-// the project has one, the built-in otherwise.
+// getStub returns the custom stub when the project has one, the built-in
+// otherwise.
 func (c *MigrationCreator) getStub(table string, create bool) (string, error) {
 	var name, builtin string
 	switch {
@@ -122,12 +115,12 @@ func (c *MigrationCreator) getStub(table string, create bool) (string, error) {
 	return builtin, nil
 }
 
-// populateStub answers the protected MigrationCreator::populateStub.
+// populateStub fills in the placeholders a stub carries.
 //
-// The PHP replaces DummyTable, {{ table }} and {{table}}. This replaces the
-// same three plus the two a Go stub needs and a PHP one does not: the type name
-// and the migration's own name, which is its identity here because there is no
-// file path to read it back off.
+// It replaces DummyTable, {{ table }} and {{table}} when a table is given,
+// plus two a Go stub needs: the type name and the migration's own name,
+// which is its identity here because there is no file path to read it back
+// off.
 func (c *MigrationCreator) populateStub(stub, name, table string) string {
 	replacements := []string{
 		"{{ class }}", c.GetClassName(name),
@@ -151,37 +144,37 @@ func (c *MigrationCreator) migrationName(name string) string {
 	return c.GetDatePrefix() + "_" + name
 }
 
-// GetClassName answers the protected MigrationCreator::getClassName.
+// GetClassName returns the Go type name a migration file for name would
+// declare.
 //
-// It is exported here because a caller with no filesystem access -- a test, a
-// generator that prints rather than writes -- has no other way to ask, and Go
-// has no protected.
+// It is exported here because a caller with no filesystem access -- a test,
+// a generator that prints rather than writes -- has no other way to ask.
 func (c *MigrationCreator) GetClassName(name string) string { return str.Studly(name) }
 
-// GetPath answers the protected MigrationCreator::getPath.
+// GetPath returns the file path a migration for name would be written to,
+// under path.
 func (c *MigrationCreator) GetPath(name, path string) string {
 	return filepath.Join(path, c.migrationName(name)+".go")
 }
 
-// firePostCreateHooks answers the protected
-// MigrationCreator::firePostCreateHooks.
+// firePostCreateHooks runs every hook registered with AfterCreate.
 func (c *MigrationCreator) firePostCreateHooks(table, path string) {
 	for _, callback := range c.postCreate {
 		callback(table, path)
 	}
 }
 
-// AfterCreate answers MigrationCreator::afterCreate.
+// AfterCreate registers a hook to run after a migration file is written.
 func (c *MigrationCreator) AfterCreate(callback func(table, path string)) {
 	c.postCreate = append(c.postCreate, callback)
 }
 
-// GetDatePrefix answers the protected MigrationCreator::getDatePrefix.
+// GetDatePrefix returns the current time formatted as the migration file's
+// date prefix: "2006_01_02_150405" in Go's reference-time layout.
 //
-// The PHP's date('Y_m_d_His') is "2006_01_02_150405" in Go's reference-time
-// layout. It is UTC rather than local, which the PHP's is not: a team spread
-// over two time zones otherwise generates prefixes that sort against the order
-// the migrations were actually written in.
+// It is UTC rather than local: a team spread over two time zones otherwise
+// generates prefixes that sort against the order the migrations were
+// actually written in.
 func (c *MigrationCreator) GetDatePrefix() string {
 	now := time.Now
 	if c.now != nil {
@@ -190,18 +183,16 @@ func (c *MigrationCreator) GetDatePrefix() string {
 	return now().UTC().Format("2006_01_02_150405")
 }
 
-// StubPath answers MigrationCreator::stubPath.
-//
-// The PHP answers __DIR__.'/stubs', a directory it reads at run time. The
-// built-in stubs here are string constants compiled into the binary, so this
-// answers the custom directory -- the only one there is a path to.
+// StubPath returns the custom stub directory, the only one there is a path
+// to: the built-in stubs are string constants compiled into the binary,
+// with no directory of their own to name.
 func (c *MigrationCreator) StubPath() string { return c.customStubPath }
 
 // The three built-in stubs, in the Go a migration is written in.
 //
-// They are constants rather than files because a binary that had to find its
-// own source directory to generate a file is a binary that works from one
-// working directory. The PHP reads them off disk because PHP is already there.
+// They are constants rather than files because a binary that had to find
+// its own source directory to generate a file is a binary that works from
+// one working directory.
 const (
 	blankStub = `package migrations
 
@@ -216,8 +207,8 @@ func init() { migrations.Register({{ class }}{}) }
 // {{ class }} is a schema change.
 //
 // It is compatible with the binary that is still running while a rollout
-// finishes (RULE 16): a new column is nullable or has a default, and removing
-// one takes two releases.
+// finishes: a new column is nullable or has a default, and removing one takes
+// two releases.
 type {{ class }} struct{ migrations.BaseMigration }
 
 // GetName is this migration's identity. The date prefix carries the order.
@@ -283,7 +274,7 @@ func init() { migrations.Register({{ class }}{}) }
 // {{ class }} alters the {{ table }} table.
 //
 // A column added here is nullable or has a default, so the binary of the
-// previous release keeps working while the rollout finishes (RULE 16).
+// previous release keeps working while the rollout finishes.
 type {{ class }} struct{ migrations.BaseMigration }
 
 // GetName is this migration's identity. The date prefix carries the order.

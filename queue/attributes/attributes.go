@@ -4,45 +4,19 @@ import "time"
 
 // Attributes are the per-job settings that travel with the job.
 //
-// It answers the whole of Illuminate\Queue\Attributes: in PHP each one is a
-// class used as a PHP attribute on the job class, read back by reflection
+// One setting per field, and the decision is made once here so nobody has to
+// make it again: Go has no runtime metadata on a type, and the two candidates
+// were struct tags read by reflection or a struct of options passed by value.
+// Struct tags lose the compiler -- a typo in `queue:"tires=5"` is a silent zero
+// -- and they only attach to a struct, while a job here is a name and a
+// payload. A struct of options is checked at the call site, and it is the same
+// value the driver stores and the worker reads back.
 //
-//	#[Tries(5)]
-//	#[Backoff([10, 60, 300])]
-//	class SendInvoice implements ShouldQueue { ... }
-//
-// and in Go they are fields of this struct. That is the decision, and it is
-// made once here so nobody has to make it again: Go has no attribute syntax and
-// no runtime metadata on a type, and the two candidates were struct tags read
-// by reflection or a struct of options passed by value. Struct tags lose the
-// compiler -- a typo in `queue:"tires=5"` is a silent zero -- and they only
-// attach to a struct, while a job here is a name and a payload. A struct of
-// options is checked at the call site, and it is the same value the driver
-// stores and the worker reads back.
-//
-// One field per PHP attribute class, under that class's name:
-//
-//	Backoff.php                 -> Backoff
-//	Connection.php              -> Connection
-//	DeleteWhenMissingModels.php -> DeleteWhenMissingModels
-//	FailOnTimeout.php           -> FailOnTimeout
-//	MaxExceptions.php           -> MaxExceptions
-//	Queue.php                   -> Queue
-//	Timeout.php                 -> Timeout
-//	Tries.php                   -> Tries
-//	UniqueFor.php               -> UniqueFor
-//	WithoutRelations.php        -> WithoutRelations
-//
-// The zero value means "the worker decides", exactly as a missing attribute
-// does in Laravel: Tries of 0 falls back to WorkerOptions.MaxAttempts, Timeout
-// of 0 to WorkerOptions.Lease.
-//
-// The JSON names are the payload keys Laravel writes, so a person reading a row
-// of the jobs table sees maxTries and retryUntil where they expect them.
+// The zero value means "the worker decides": Tries of 0 falls back to
+// WorkerOptions.MaxTries, Timeout of 0 to WorkerOptions.Lease.
 type Attributes struct {
-	// Backoff is how long to wait before each retry. One duration per attempt;
-	// the last one repeats once the list runs out, which is what Laravel's
-	// comma-separated backoff does with `last($backoff)`.
+	// Backoff is how long to wait before each retry. One duration per attempt,
+	// and the last one repeats once the list runs out.
 	//
 	// Empty means WorkerOptions.Backoff decides.
 	Backoff []time.Duration `json:"backoff,omitempty"`
@@ -66,10 +40,10 @@ type Attributes struct {
 	// MaxExceptions is how many failures the job gets before it is parked, when
 	// that number is smaller than Tries.
 	//
-	// The difference is Laravel's: a job may be released many times by a
-	// middleware -- rate limited, overlapping -- without ever having thrown,
-	// and those releases spend Tries. MaxExceptions counts only the deliveries
-	// that ended in an error.
+	// A job may be released many times by a middleware -- rate limited,
+	// overlapping -- without ever having thrown, and those releases spend
+	// Tries. MaxExceptions counts only the deliveries that ended in an
+	// error.
 	MaxExceptions int `json:"maxExceptions,omitempty"`
 
 	// Queue is the queue this job goes on. Empty means jobs.DefaultQueue.
@@ -78,8 +52,7 @@ type Attributes struct {
 	// RetryUntil is the deadline after which the job stops being retried,
 	// whatever Tries says. Zero means no deadline.
 	//
-	// It is a method on the job in Laravel rather than an attribute class, and
-	// it is here because it is the fourth thing the worker reads before
+	// It is here because it is the fourth thing the worker reads before
 	// deciding to release a job, and it belongs next to the other three.
 	RetryUntil time.Time `json:"retryUntil,omitzero"`
 
@@ -87,7 +60,7 @@ type Attributes struct {
 	Timeout time.Duration `json:"timeout,omitempty"`
 
 	// Tries is how many deliveries the job gets before it is parked. Zero means
-	// WorkerOptions.MaxAttempts, and a negative number means forever.
+	// WorkerOptions.MaxTries, and a negative number means forever.
 	Tries int `json:"maxTries,omitempty"`
 
 	// UniqueFor is how long the uniqueness lock on this job is held, for a job
@@ -97,20 +70,18 @@ type Attributes struct {
 	// WithoutRelations strips the loaded relations from the models in the
 	// payload before it is written.
 	//
-	// It answers the attribute of that name. Here it is advice to whatever
-	// builds the payload rather than something the queue can enforce, because
-	// the payload is JSON the caller marshalled: a job that serializes an
-	// object graph it did not mean to send is a job with a large payload and a
-	// stale read, and this is where that intent is recorded.
+	// It is advice to whatever builds the payload rather than something the
+	// queue can enforce, because the payload is JSON the caller marshalled: a
+	// job that serializes an object graph it did not mean to send is a job with
+	// a large payload and a stale read, and this is where that intent is
+	// recorded.
 	WithoutRelations bool `json:"withoutRelations,omitempty"`
 }
 
 // ReadsQueueAttributes is what a job type implements to carry its own settings.
 //
-// It answers Illuminate\Queue\Attributes\ReadsQueueAttributes, the trait that
-// reads the attributes off a job class by reflection. The trait's own accessor
-// is protected and takes a reflection class, so there is no PHP name to copy
-// for this one method: it is new, and it is named for what it returns.
+// A type that declares its settings implements it, and [Of] is what reads them
+// back.
 //
 //	type SendInvoice struct{ InvoiceID string }
 //
@@ -124,10 +95,8 @@ type ReadsQueueAttributes interface {
 // Of returns the attributes a value declares, or the zero value when it
 // declares none.
 //
-// It is the Go form of the trait's lookup: in PHP the attribute may be on a
-// parent class, so the trait walks up the hierarchy; here a type either
-// implements [ReadsQueueAttributes] or it does not, and an embedded struct that
-// implements it answers for the type that embeds it.
+// A type either implements [ReadsQueueAttributes] or it does not, and an
+// embedded struct that implements it answers for the type that embeds it.
 func Of(v any) Attributes {
 	if reader, declares := v.(ReadsQueueAttributes); declares {
 		return reader.QueueAttributes()
@@ -137,9 +106,8 @@ func Of(v any) Attributes {
 
 // BackoffFor is how long to wait before attempt n, counting from one.
 //
-// The last entry repeats, which is Laravel's `$backoff[$attempts - 1] ??
-// last($backoff)`. An empty list returns zero, and the worker's own schedule
-// takes over.
+// The last entry repeats once the list runs out. An empty list returns zero,
+// and the worker's own schedule takes over.
 func (a Attributes) BackoffFor(attempt int) time.Duration {
 	if len(a.Backoff) == 0 {
 		return 0

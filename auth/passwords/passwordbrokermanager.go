@@ -7,42 +7,25 @@ import (
 	"strings"
 )
 
-// PasswordBrokerManager answers
-// Illuminate\Auth\Passwords\PasswordBrokerManager: the brokers an application
-// has, by name, and which one is meant when nobody says.
+// PasswordBrokerManager is the brokers an application has, by name, and which
+// one is meant when nobody says.
 //
 // More than one is unusual and real: an application with a customer table and a
 // staff table resets them through different providers, different tables of
 // tokens and different mail.
 //
-// # What is left of the PHP class
-//
-// Most of it was the container. resolve() reads auth.passwords.{name} out of the
-// config, createTokenRepository() picks a driver and news up the repository,
-// getConfig() reads the config again, and getDefaultDriver() reads
-// auth.defaults.passwords. All four are the container reaching for services by
-// string key, which ADR 0001 and ADR 0002 removed: there is nothing to resolve
-// from, because the brokers are built by the wiring and handed over already
-// made.
-//
-// So this holds them instead of building them, which is reason (2) of ADR 0056.
-// The three methods that are not the container are here, spelled as they are
-// there.
+// It holds brokers rather than building them: the wiring builds each one and
+// hands it over already made, so there is nothing here to resolve from.
 type PasswordBrokerManager struct {
-	// brokers answers $brokers, which in the PHP is the cache of what resolve()
-	// built and here is what the wiring passed in.
+	// brokers is what the wiring passed in, by name.
 	brokers map[string]*PasswordBroker
 
-	// defaultDriver answers what getDefaultDriver reads out of
-	// auth.defaults.passwords.
+	// defaultDriver is the broker an empty name means.
 	defaultDriver string
 }
 
-// NewPasswordBrokerManager answers PasswordBrokerManager::__construct.
-//
-// The PHP takes the application, which is the container it resolves brokers
-// from. This takes the brokers, because they are built by the wiring; see the
-// type's doc.
+// NewPasswordBrokerManager returns a manager over brokers the wiring already
+// built.
 //
 // The map is copied, so a caller that keeps the one it passed cannot add a
 // broker to a running application by writing to it.
@@ -50,13 +33,11 @@ func NewPasswordBrokerManager(defaultDriver string, brokers map[string]*Password
 	return &PasswordBrokerManager{brokers: maps.Clone(brokers), defaultDriver: defaultDriver}
 }
 
-// Broker answers PasswordBrokerManager::broker.
+// Broker is the broker of that name.
 //
-// An empty name is the PHP's null argument: the default driver. A name nothing
-// was registered under is an error carrying the names that were, which is the
-// InvalidArgumentException the PHP throws with the message written out -- a
-// misspelled broker name is a typo in the wiring, and the list is what makes it
-// one glance to see.
+// An empty name means the default driver. A name nothing was registered under
+// is an error carrying the names that were: a misspelled broker name is a typo
+// in the wiring, and the list is what makes it one glance to see.
 func (m *PasswordBrokerManager) Broker(name string) (*PasswordBroker, error) {
 	if name == "" {
 		name = m.GetDefaultDriver()
@@ -71,11 +52,8 @@ func (m *PasswordBrokerManager) Broker(name string) (*PasswordBroker, error) {
 		name, strings.Join(slices.Sorted(maps.Keys(m.brokers)), ", "))
 }
 
-// GetDefaultDriver answers PasswordBrokerManager::getDefaultDriver.
+// GetDefaultDriver is the broker an empty name means.
 func (m *PasswordBrokerManager) GetDefaultDriver() string { return m.defaultDriver }
 
-// SetDefaultDriver answers PasswordBrokerManager::setDefaultDriver.
-//
-// The PHP writes it back into the config, which every later read goes through;
-// here it is the field, which is the same thing without a config to mutate.
+// SetDefaultDriver sets it, and every later lookup by empty name goes there.
 func (m *PasswordBrokerManager) SetDefaultDriver(name string) { m.defaultDriver = name }

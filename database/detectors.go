@@ -2,23 +2,21 @@ package database
 
 import "strings"
 
-// LostConnectionDetector answers
-// Illuminate\Database\LostConnectionDetector: it reads a driver error and says
-// whether the connection is gone.
+// LostConnectionDetector reads a driver error and says whether the connection is
+// gone.
 //
-// It is a list of substrings and nothing cleverer, in PHP and here, because
-// every driver reports this differently and several report it more than one
-// way. The list below is the PHP's, unchanged: entries that only a PDO driver
-// would ever produce are kept, because a project may reach this through a
-// driver that speaks a wire protocol PHP also speaks, and an entry that never
-// matches costs one string comparison.
+// It is a list of substrings and nothing cleverer, because every driver reports
+// this differently and several report it more than one way. The list is
+// deliberately wide: an entry that never matches costs one string comparison,
+// and a missed one costs a request.
 type LostConnectionDetector struct{}
 
-// NewLostConnectionDetector is the `new LostConnectionDetector` the PHP writes.
+// NewLostConnectionDetector creates a LostConnectionDetector.
 func NewLostConnectionDetector() *LostConnectionDetector { return &LostConnectionDetector{} }
 
-// CausedByLostConnection answers
-// LostConnectionDetector::causedByLostConnection.
+// CausedByLostConnection reports whether err indicates that the connection is
+// gone, checking both this detector's message list and the messages the Go
+// drivers use.
 func (d *LostConnectionDetector) CausedByLostConnection(err error) bool {
 	if err == nil {
 		return false
@@ -28,14 +26,12 @@ func (d *LostConnectionDetector) CausedByLostConnection(err error) bool {
 		containsAny(message, goLostConnectionMessages)
 }
 
-// goLostConnectionMessages is what the Go drivers say, which the PHP list does
-// not contain and could not.
-//
-// Every entry in LostConnectionDetector's own list is a PDO message: PDO wraps
-// the C client library, and the sentence comes from there. pgx, go-sql-driver
-// and modernc/sqlite write their own, in Go's house style -- lower case, no
-// SQLSTATE prefix -- so "Broken pipe" is in the PHP list and "broken pipe" is
-// what a Go program actually reads.
+// goLostConnectionMessages is what the Go drivers say when the connection is
+// gone. lostConnectionMessages holds messages in the SQLSTATE-prefixed,
+// capitalized style a wrapped C client library reports -- for example "Broken
+// pipe" -- while pgx, go-sql-driver and modernc/sqlite write their own, in
+// Go's house style: lower case, no SQLSTATE prefix, so "broken pipe" is what a
+// Go program actually reads.
 //
 // The consequence of getting this wrong is not cosmetic: a lost connection that
 // goes unrecognised is a query that is not retried and a transaction level that
@@ -65,31 +61,27 @@ var goLostConnectionMessages = []string{
 	"terminating connection due to administrator command",
 }
 
-// CausedByLostConnection answers the DetectsLostConnections trait.
+// CausedByLostConnection reports whether an error means the connection is gone.
 //
-// The trait asks the container for a bound detector and falls back to a new
-// one. There is no container (ADR 0001), so this is the fallback, which is what
-// every application that never bound one gets anyway.
+// It reads the package's own LostConnectionDetector; there is no detector to
+// register and none to swap.
 func CausedByLostConnection(err error) bool {
 	return (&LostConnectionDetector{}).CausedByLostConnection(err)
 }
 
-// ConcurrencyErrorDetector answers
-// Illuminate\Database\ConcurrencyErrorDetector: it reads a driver error and
-// says whether it was a deadlock or a serialization failure.
+// ConcurrencyErrorDetector reads a driver error and says whether it was a
+// deadlock or a serialization failure.
 type ConcurrencyErrorDetector struct{}
 
-// NewConcurrencyErrorDetector is the `new ConcurrencyErrorDetector` the PHP
-// writes.
+// NewConcurrencyErrorDetector creates a ConcurrencyErrorDetector.
 func NewConcurrencyErrorDetector() *ConcurrencyErrorDetector { return &ConcurrencyErrorDetector{} }
 
-// CausedByConcurrencyError answers
-// ConcurrencyErrorDetector::causedByConcurrencyError.
+// CausedByConcurrencyError reports whether err indicates a deadlock or a
+// serialization failure.
 //
-// The PHP checks PDOException's code for 40001 before it looks at the message.
-// database/sql carries no such code, and 40001 is the SQLSTATE for a
-// serialization failure, so the string is looked for in the message -- which is
-// where pgx and go-sql-driver both put it.
+// database/sql carries no error code, and 40001 is the SQLSTATE for a
+// serialization failure, so the check looks for that string in the message
+// text -- which is where pgx and go-sql-driver both put it.
 func (d *ConcurrencyErrorDetector) CausedByConcurrencyError(err error) bool {
 	if err == nil {
 		return false
@@ -101,7 +93,11 @@ func (d *ConcurrencyErrorDetector) CausedByConcurrencyError(err error) bool {
 	return containsAny(message, concurrencyErrorMessages)
 }
 
-// CausedByConcurrencyError answers the DetectsConcurrencyErrors trait.
+// CausedByConcurrencyError reports whether an error means a deadlock or a
+// serialization failure.
+//
+// It reads the package's own ConcurrencyErrorDetector; there is no detector to
+// register and none to swap.
 func CausedByConcurrencyError(err error) bool {
 	return (&ConcurrencyErrorDetector{}).CausedByConcurrencyError(err)
 }

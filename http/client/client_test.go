@@ -813,13 +813,12 @@ func TestMergeOptionsLaysTheGivenOptionsOverTheRequestsOwn(t *testing.T) {
 	}
 }
 
-// --- Audit regressions: Response::throw, Response::throwIfStatus ---
+// --- Audit regressions: Response.Throw, Response.ThrowIfStatus ---
 
 // TestResponseThrowRunsTheCallbackAndStillReturnsTheException pins
-// Response::throw down to the PHP, where the callback is wrapped in tap() and
-// so is a side effect: the exception is thrown whatever the callback does.
-// This returned the callback's own nil and made the 500 disappear, which is
-// what the documented ->throw(fn ($r, $e) => Log::error(...)) idiom does.
+// Response.Throw: the callback is a side effect, and the exception is
+// returned whatever the callback does. This used to return the callback's
+// own nil instead, making a 500 disappear when the callback only logged.
 func TestResponseThrowRunsTheCallbackAndStillReturnsTheException(t *testing.T) {
 	r := NewResponseFromBytes(500, []byte(`server error`), nil)
 
@@ -842,8 +841,8 @@ func TestResponseThrowRunsTheCallbackAndStillReturnsTheException(t *testing.T) {
 }
 
 // TestResponseThrowIfStatusThrowsOnASuccessfulStatus pins
-// Response::throwIfStatus, which throws whenever the status matches and does
-// not consult failed(). A 201 matched by ThrowIfStatus(201) returned nil.
+// Response.ThrowIfStatus, which throws whenever the status matches and does
+// not consult Failed. A 201 matched by ThrowIfStatus(201) used to return nil.
 func TestResponseThrowIfStatusThrowsOnASuccessfulStatus(t *testing.T) {
 	r := NewResponseFromBytes(201, []byte(`created`), nil)
 
@@ -851,7 +850,7 @@ func TestResponseThrowIfStatusThrowsOnASuccessfulStatus(t *testing.T) {
 	assertNoErr(t, r.ThrowIfStatus(202), "throwIfStatus(202) on a 201 must not throw")
 }
 
-// --- Audit regressions: PendingRequest::retry ---
+// --- Audit regressions: PendingRequest.Retry ---
 
 // countingTransport counts the requests that reach it and fails every one of
 // them, which is the connection error the retry loop never repeated.
@@ -864,9 +863,10 @@ func (c *countingTransport) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, fmt.Errorf("dial tcp: connection refused")
 }
 
-// TestRetryWithoutAWhenCallbackStillRetries pins Http::retry(3) with no
-// callback, which is the common form: the PHP's ternary falls through to true
-// and three attempts are made. A nil callback turned the retry off entirely.
+// TestRetryWithoutAWhenCallbackStillRetries pins Retry(3, ...) with no
+// callback, which is the common form: a nil callback means retry every
+// failure, and three attempts are made. A nil callback used to turn the
+// retry off entirely.
 func TestRetryWithoutAWhenCallbackStillRetries(t *testing.T) {
 	var attempts atomic.Int32
 
@@ -888,8 +888,8 @@ func TestRetryWithoutAWhenCallbackStillRetries(t *testing.T) {
 	assertEqual(t, int(attempts.Load()), 3, "attempts")
 }
 
-// TestRetryMakesAtMostTheNumberOfAttemptsAskedFor pins the count: the PHP's
-// retry($times) is a total, not a number of extra tries. Retry(3) made four
+// TestRetryMakesAtMostTheNumberOfAttemptsAskedFor pins the count: Retry's
+// times is a total, not a number of extra tries. Retry(3) used to make four
 // requests.
 func TestRetryMakesAtMostTheNumberOfAttemptsAskedFor(t *testing.T) {
 	var attempts atomic.Int32

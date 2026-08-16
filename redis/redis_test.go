@@ -140,8 +140,8 @@ func TestOneTenantCannotReadAnother(t *testing.T) {
 	}
 }
 
-// TestAGrantWithNoTenantIsRefused is RULE 14 with teeth: without it, the key
-// would simply be missing a segment and every tenant would share one entry.
+// TestAGrantWithNoTenantIsRefused pins the refusal: without it, the key would
+// simply be missing a segment and every tenant would share one entry.
 func TestAGrantWithNoTenantIsRefused(t *testing.T) {
 	repo := cache.New(store(t)).Namespace("invoice")
 
@@ -291,7 +291,7 @@ func TestManyAndPutMany(t *testing.T) {
 // traffic continues, which is a window that never closes and a rate limit that
 // never lets anybody back in. The obvious spelling is EXPIRE NX, and it is a
 // Redis 7 option KeyDB does not have -- so the deadline is read back in the
-// same transaction instead (RULE 11).
+// same transaction instead.
 func TestIncrementKeepsTheWindowItStartedWith(t *testing.T) {
 	conn := connect(t)
 	backing := redis.NewRedisStore(conn)
@@ -331,10 +331,9 @@ func TestIncrementRefusesAKeyThatIsNotACounter(t *testing.T) {
 	}
 }
 
-// TestFlushStopsAtTheTenant: Laravel's RedisStore::flush() is FLUSHDB, and
-// FLUSHDB here would empty every other tenant -- and every other application
-// sharing the server -- on the way past. In a SaaS that is an outage caused by
-// a support request.
+// TestFlushStopsAtTheTenant pins the prefix: a FLUSHDB here would empty every
+// other tenant -- and every other application sharing the server -- on the way
+// past. In a SaaS that is an outage caused by a support request.
 func TestFlushStopsAtTheTenant(t *testing.T) {
 	backing := store(t)
 	repo := cache.New(backing).Namespace("invoice")
@@ -795,7 +794,7 @@ func TestSigningOutASubjectSpansReplicasAndStopsAtTheTenant(t *testing.T) {
 	if _, err := handler.Read(ctx, "colleague"); err != nil {
 		t.Errorf("a colleague in the same tenant was signed out by somebody else's password reset: %v", err)
 	}
-	// RULE 14: two customers may both call an account "u-1".
+	// Two customers may both call an account "u-1".
 	if _, err := handler.Read(ctx, "namesake"); err != nil {
 		t.Errorf("the same account id in another tenant was signed out: %v", err)
 	}
@@ -951,7 +950,7 @@ func TestBothHandlersAgreeOnAnUnknownSession(t *testing.T) {
 	}
 }
 
-// TestNothingUsesLuaOrModules is RULE 11 written as a test.
+// TestNothingUsesLuaOrModules keeps the four products interchangeable.
 //
 // RESP is one protocol and four products, and that is only true while nothing
 // here needs a script or a module: Dragonfly, Valkey and KeyDB answer SET NX,
@@ -962,18 +961,17 @@ func TestBothHandlersAgreeOnAnUnknownSession(t *testing.T) {
 //
 // It is why the lock releases through WATCH/MULTI/EXEC instead of the canonical
 // one-line script, why the session index is a sorted set rather than a JSON
-// document, and why both limiters are transactions where Laravel's are EVAL.
-// Each of those is a few lines longer, and a reviewer with a deadline will
+// document, and why both limiters are transactions rather than EVAL. Each of
+// those is a few lines longer, and a reviewer with a deadline will
 // reach for the script that is shorter -- which is what this test is here to
 // catch, because a script passes every other test in this file.
 //
 // The queue connector has the same test over its own source. Two modules speak
 // RESP and both have to keep the promise.
 func TestNothingUsesLuaOrModules(t *testing.T) {
-	// The exempt file is Connection.eval and Connection.evalsha, which are part
-	// of the Illuminate Connection surface and are the application's hatch once
-	// it has picked a server. Nothing in this module calls them, which is what
-	// every other file being checked proves.
+	// The exempt file is Connection.Eval and Connection.EvalSha, which are the
+	// application's hatch once it has picked a server. Nothing in this module
+	// calls them, which is what every other file being checked proves.
 	const exempt = "connections/commands.go"
 	exemptHere := []string{".Eval(", ".EvalSha("}
 

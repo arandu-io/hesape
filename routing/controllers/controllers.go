@@ -1,8 +1,6 @@
 package controllers
 
-// HasMiddleware mirrors Illuminate\Routing\Controllers\HasMiddleware.
-//
-// It declares that a controller carries middleware. In Go, this is an
+// HasMiddleware declares that a controller carries middleware. It is an
 // interface the controller implements; the framework introspects it when
 // the controller is registered.
 type HasMiddleware interface {
@@ -10,8 +8,6 @@ type HasMiddleware interface {
 }
 
 // MiddlewareDef pairs a middleware with the controller methods it applies to.
-//
-// It mirrors Illuminate\Routing\Controllers\Middleware.
 type MiddlewareDef struct {
 	// Name is the middleware to apply (e.g. "auth", "can:edit-post").
 	Name string

@@ -8,11 +8,10 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// HasOne answers Illuminate\Database\Eloquent\Relations\HasOne.
+// HasOne is one row on the other table, found by a foreign key pointing here.
 //
-// One row on the other table, found by a foreign key pointing here. It is
-// HasMany with matchOne instead of matchMany, plus the three traits that make
-// it comparable, defaultable and reducible to one of many.
+// It is HasMany matching one row instead of many, plus the three shared halves
+// that make it comparable, defaultable and reducible to one of many.
 type HasOne struct {
 	HasOneOrMany
 	concerns.SupportsDefaultModels
@@ -20,7 +19,10 @@ type HasOne struct {
 	concerns.CanBeOneOfMany
 }
 
-// NewHasOne answers HasOne::__construct, by way of HasOneOrMany's.
+// NewHasOne builds a HasOne over query for parent, joining on foreignKey and
+// localKey, wires its embedded concerns.SupportsDefaultModels,
+// concerns.ComparesRelatedModels and concerns.CanBeOneOfMany to call back
+// into the relation itself, applies its constraints, and returns it.
 func NewHasOne(query Builder, parent Model, foreignKey, localKey string) *HasOne {
 	relation := &HasOne{HasOneOrMany: NewHasOneOrMany(query, parent, foreignKey, localKey)}
 
@@ -45,14 +47,16 @@ func NewHasOne(query Builder, parent Model, foreignKey, localKey string) *HasOne
 	return relation
 }
 
-// GetRelationQuery answers CanBeOneOfMany::getRelationQuery, which shadows
-// Relation's: on a one-of-many relation the constraints belong on the subquery.
+// GetRelationQuery builds the relation's query through the embedded
+// CanBeOneOfMany, using r.Query as its base builder. It overrides the method
+// promoted from Relation because on a one-of-many relation, the constraints
+// belong on the subquery.
 func (r *HasOne) GetRelationQuery() Builder {
 	return r.CanBeOneOfMany.GetRelationQuery(r.Query)
 }
 
-// AddConstraints answers HasOneOrMany::addConstraints, redeclared so that the
-// constraints reach the one-of-many subquery when there is one. Go promotes the
+// AddConstraints redeclares HasOneOrMany's constraint logic so that it
+// reaches the one-of-many subquery when there is one. Go promotes the
 // embedded method but not the overridden GetRelationQuery it calls, which is
 // the whole of what "no virtual dispatch" costs.
 func (r *HasOne) AddConstraints() {
@@ -64,7 +68,8 @@ func (r *HasOne) AddConstraints() {
 	q.WhereNotNull(r.GetQualifiedForeignKeyName())
 }
 
-// GetResults answers HasOne::getResults.
+// GetResults returns the first related model, or the relation's default
+// model if the parent has no key yet or no related row exists.
 func (r *HasOne) GetResults(ctx context.Context, g auth.Grant) (any, error) {
 	if r.GetParentKey() == nil {
 		return r.GetDefaultFor(r.Parent), nil
@@ -80,7 +85,8 @@ func (r *HasOne) GetResults(ctx context.Context, g auth.Grant) (any, error) {
 	return result, nil
 }
 
-// InitRelation answers HasOne::initRelation.
+// InitRelation seeds relation on every model in models with that model's
+// default related instance.
 func (r *HasOne) InitRelation(models []Model, relation string) []Model {
 	for _, model := range models {
 		model.SetRelation(relation, r.GetDefaultFor(model))
@@ -88,12 +94,14 @@ func (r *HasOne) InitRelation(models []Model, relation string) []Model {
 	return models
 }
 
-// Match answers HasOne::match.
+// Match assigns each model in models the one result from results that
+// belongs to it, via MatchOne, and stores it under relation.
 func (r *HasOne) Match(models []Model, results []Model, relation string) ([]Model, error) {
 	return r.MatchOne(models, results, relation)
 }
 
-// GetRelationExistenceQuery answers HasOne::getRelationExistenceQuery.
+// GetRelationExistenceQuery merges the one-of-many joins into q when the
+// relation is one-of-many, then delegates to HasOneOrMany's existence query.
 func (r *HasOne) GetRelationExistenceQuery(q Builder, parentQuery Builder, columns ...any) Builder {
 	if r.IsOneOfMany() {
 		r.MergeOneOfManyJoinsTo(q)
@@ -101,17 +109,20 @@ func (r *HasOne) GetRelationExistenceQuery(q Builder, parentQuery Builder, colum
 	return r.HasOneOrMany.GetRelationExistenceQuery(q, parentQuery, columns...)
 }
 
-// AddOneOfManySubQueryConstraints answers the method of the same name.
+// AddOneOfManySubQueryConstraints adds the relation's qualified foreign key
+// to q's select list.
 func (r *HasOne) AddOneOfManySubQueryConstraints(q Builder, column, aggregate string) {
 	q.AddSelect(r.GetQualifiedForeignKeyName())
 }
 
-// GetOneOfManySubQuerySelectColumns answers the method of the same name.
+// GetOneOfManySubQuerySelectColumns returns the relation's qualified foreign
+// key as the sole column to select in the one-of-many subquery.
 func (r *HasOne) GetOneOfManySubQuerySelectColumns() []any {
 	return []any{r.GetQualifiedForeignKeyName()}
 }
 
-// AddOneOfManyJoinSubQueryConstraints answers the method of the same name.
+// AddOneOfManyJoinSubQueryConstraints joins the subquery to the related table
+// by equating their foreign key columns.
 func (r *HasOne) AddOneOfManyJoinSubQueryConstraints(join *query.JoinClause) {
 	join.On(
 		r.QualifySubSelectColumn(r.GetForeignKeyName()),
@@ -120,8 +131,9 @@ func (r *HasOne) AddOneOfManyJoinSubQueryConstraints(join *query.JoinClause) {
 	)
 }
 
-// NewRelatedInstanceFor answers HasOne::newRelatedInstanceFor: the default
-// model, already pointing back at its parent.
+// NewRelatedInstanceFor returns a new related model instance with its
+// foreign key already set to parent's local key, and the inverse relation
+// applied.
 func (r *HasOne) NewRelatedInstanceFor(parent Model) Model {
 	instance := r.Related.NewInstance(nil)
 	instance.SetAttribute(r.GetForeignKeyName(), parent.GetAttribute(r.GetLocalKeyName()))
@@ -129,7 +141,7 @@ func (r *HasOne) NewRelatedInstanceFor(parent Model) Model {
 	return instance
 }
 
-// getRelatedKeyFrom answers HasOne::getRelatedKeyFrom.
+// getRelatedKeyFrom returns model's value for the relation's foreign key.
 func (r *HasOne) getRelatedKeyFrom(model Model) any {
 	return model.GetAttribute(r.GetForeignKeyName())
 }

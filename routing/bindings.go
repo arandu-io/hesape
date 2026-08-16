@@ -9,11 +9,9 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// UrlRoutable is Illuminate\Contracts\Routing\UrlRoutable.
-//
-// It is what a record implements to be reachable from a URL: it knows the
-// value that stands for it in a path, the column that value lives in, and how
-// to find itself again from that value.
+// UrlRoutable is what a record implements to be reachable from a URL: it
+// knows the value that stands for it in a path, the column that value lives
+// in, and how to find itself again from that value.
 //
 // # The tenant comes from the Grant, never from the URL
 //
@@ -21,8 +19,7 @@ import (
 // auth.Tenant(g). This is the exact place a multi-tenant application leaks:
 // /invoices/9 arrives, the id is read off the path, a row is loaded by that id
 // alone, and the reader is handed another customer's invoice. No policy was
-// violated -- none was consulted. RULE 14 and RULE 17 both land here, and the
-// implementation is one WHERE clause:
+// violated -- none was consulted. The implementation is one WHERE clause:
 //
 //	func (Invoice) ResolveRouteBinding(ctx context.Context, g auth.Grant, value, field string) (routing.UrlRoutable, error) {
 //		if field == "" {
@@ -35,35 +32,33 @@ import (
 // a parameter cannot be forgotten: a resolver written without it does not
 // compile.
 type UrlRoutable interface {
-	// GetRouteKey is UrlRoutable::getRouteKey: the value that stands for this
-	// record in a URL.
+	// GetRouteKey returns the value that stands for this record in a URL.
 	GetRouteKey() string
-	// GetRouteKeyName is UrlRoutable::getRouteKeyName: the column that value
-	// lives in, "id" unless the route binds by another.
+	// GetRouteKeyName returns the column that value lives in, "id" unless
+	// the route binds by another.
 	GetRouteKeyName() string
-	// ResolveRouteBinding is UrlRoutable::resolveRouteBinding. An empty field
-	// means GetRouteKeyName. It returns nil when nothing matched, which is a
-	// 404 and not an error.
+	// ResolveRouteBinding resolves value into a record. An empty field means
+	// GetRouteKeyName. It returns nil when nothing matched, which is a 404
+	// and not an error.
 	ResolveRouteBinding(ctx context.Context, g auth.Grant, value, field string) (UrlRoutable, error)
-	// ResolveChildRouteBinding is UrlRoutable::resolveChildRouteBinding: the
-	// same lookup, restricted to the children of this record, which is what a
-	// scoped nested resource resolves through.
+	// ResolveChildRouteBinding is the same lookup, restricted to the children
+	// of this record, which is what a scoped nested resource resolves
+	// through.
 	ResolveChildRouteBinding(ctx context.Context, g auth.Grant, childType, value, field string) (UrlRoutable, error)
 }
 
 // BindingFunc resolves one route parameter into the value a handler receives.
 //
 // It is the shape of the closure Router.Bind takes, and of the one
-// RouteBinding.ForModel returns. PHP's binder is function ($value, $route);
-// this adds the context every query needs and the Grant every query is scoped
-// by.
+// RouteBinding.ForModel returns. It takes the context every query needs and
+// the Grant every query is scoped by.
 //
 // A binder that looks a record up by value alone returns another tenant's row
 // for the same id. Filter by auth.Tenant(g).
 type BindingFunc func(ctx context.Context, g auth.Grant, value string, route *Route) (any, error)
 
 // MissingModelFunc decides what a model binding that matched nothing means. It
-// is the third argument of Router::model, and returning a nil value with a nil
+// is the third argument of Router.Model, and returning a nil value with a nil
 // error means "answer 404".
 type MissingModelFunc func(ctx context.Context, value string) (any, error)
 
@@ -74,16 +69,13 @@ type MissingModelFunc func(ctx context.Context, value string) (any, error)
 // every customer, so the binding fails rather than running unscoped.
 var ErrTenantlessBinding = errors.New("routing: route binding without a tenant")
 
-// RouteBindings holds the parameter binders registered for a router.
-//
-// It is the pair of registries Illuminate\Routing\Router keeps in $binders,
-// filled by Route::bind and Route::model.
+// RouteBindings holds the parameter binders registered for a router, filled
+// by Router.Bind and Router.Model.
 type RouteBindings struct {
 	m map[string]BindingFunc
 	// models are the record types registered with Model, kept next to their
 	// binder because the implicit binding calls them directly with the field
-	// the route declared -- which is what PHP reaches through reflection and
-	// this reaches through the registry.
+	// the route declared, through the registry.
 	models map[string]UrlRoutable
 }
 
@@ -95,7 +87,7 @@ func NewRouteBindings() *RouteBindings {
 	}
 }
 
-// Bind is Router::bind. It registers a binder for a parameter key.
+// Bind registers a binder for a parameter key.
 //
 // When a route carries a parameter named key, the binder resolves the raw path
 // value and the handler receives what it returned rather than the string.
@@ -103,13 +95,12 @@ func (b *RouteBindings) Bind(key string, binder BindingFunc) {
 	b.m[normalizeBindingKey(key)] = ForCallback(binder)
 }
 
-// Model is Router::model. It registers a model binding for a parameter key:
-// the parameter resolves through the record's own ResolveRouteBinding, which
-// is where the tenant filter lives.
+// Model registers a model binding for a parameter key: the parameter resolves
+// through the record's own ResolveRouteBinding, which is where the tenant
+// filter lives.
 //
-// The optional callback is PHP's third argument -- what a value that matched
-// nothing means. Without one, nothing found is nothing bound, which the caller
-// answers 404.
+// The optional callback says what a value that matched nothing means. Without
+// one, nothing found is nothing bound, which the caller answers 404.
 func (b *RouteBindings) Model(key string, class UrlRoutable, callback ...MissingModelFunc) {
 	name := normalizeBindingKey(key)
 	b.m[name] = ForModel(class, callback...)
@@ -127,8 +118,7 @@ func (b *RouteBindings) modelFor(key string) UrlRoutable {
 	return b.models[normalizeBindingKey(key)]
 }
 
-// GetBindingCallback is Router::getBindingCallback. It returns the binder for
-// a key, or nil.
+// GetBindingCallback returns the binder for a key, or nil.
 func (b *RouteBindings) GetBindingCallback(key string) BindingFunc {
 	if b == nil || b.m == nil {
 		return nil
@@ -136,16 +126,13 @@ func (b *RouteBindings) GetBindingCallback(key string) BindingFunc {
 	return b.m[normalizeBindingKey(key)]
 }
 
-// ForCallback is RouteBinding::forCallback.
-//
-// PHP also accepts a "Class@method" string and resolves it through the
-// container; there is no container here, so a binder is the closure itself and
-// this hands it back.
+// ForCallback returns binder unchanged: there is no container here to resolve
+// a name through, so a binder is the closure itself.
 func ForCallback(binder BindingFunc) BindingFunc { return binder }
 
-// ForModel is RouteBinding::forModel. It turns a record type into a binder:
-// the value from the path is handed to that type's ResolveRouteBinding, under
-// the Grant, and what comes back is what the handler receives.
+// ForModel turns a record type into a binder: the value from the path is
+// handed to that type's ResolveRouteBinding, under the Grant, and what comes
+// back is what the handler receives.
 func ForModel(class UrlRoutable, callback ...MissingModelFunc) BindingFunc {
 	return func(ctx context.Context, g auth.Grant, value string, route *Route) (any, error) {
 		if value == "" {
@@ -159,9 +146,8 @@ func ForModel(class UrlRoutable, callback ...MissingModelFunc) BindingFunc {
 		}
 		_ = route
 
-		// PHP resolves without a field here; the field a route declared is
-		// applied by ImplicitRouteBinding, which knows which parameter it is
-		// looking at.
+		// The field a route declared is applied by ImplicitRouteBinding,
+		// which knows which parameter it is looking at.
 		model, err := class.ResolveRouteBinding(ctx, g, value, "")
 		if err != nil {
 			return nil, err
@@ -181,10 +167,9 @@ func ForModel(class UrlRoutable, callback ...MissingModelFunc) BindingFunc {
 
 // ImplicitRouteBinding resolves a route's parameters into records.
 //
-// It mirrors Illuminate\Routing\ImplicitRouteBinding. PHP finds which
-// parameters to resolve by reflecting on the controller's type hints; Go has
-// no such hints to read, so the registry is explicit -- Router.Bind and
-// Router.Model -- and this walks the route's parameters against it.
+// There are no type hints to reflect on here, so the registry is explicit --
+// Router.Bind and Router.Model -- and this walks the route's parameters
+// against it.
 type ImplicitRouteBinding struct {
 	bindings *RouteBindings
 }
@@ -194,15 +179,13 @@ func NewImplicitRouteBinding(b *RouteBindings) *ImplicitRouteBinding {
 	return &ImplicitRouteBinding{bindings: b}
 }
 
-// ResolveForRoute is ImplicitRouteBinding::resolveForRoute. It resolves every
-// parameter of the route that has a binder registered, and installs what came
-// back as the value the handler reads.
+// ResolveForRoute resolves every parameter of the route that has a binder
+// registered, and installs what came back as the value the handler reads.
 //
 // # Two things it refuses
 //
 // A Grant with no tenant, before it looks anything up: a lookup with nothing
-// to scope by reads every customer, and RULE 14 does not bend for a route
-// parameter.
+// to scope by reads every customer.
 //
 // A child whose parent is a record and whose route is scoped: the child is
 // resolved through the parent -- /clients/{client}/invoices/{invoice} finds
@@ -267,9 +250,9 @@ func (b *ImplicitRouteBinding) ResolveForRoute(ctx context.Context, g auth.Grant
 }
 
 // scopedParent reports whether name should be resolved through the parameter
-// before it, and returns that parent. It is the condition PHP spells out in
-// resolveForRoute: the parent is a record, the route does not forbid scoping,
-// and the route either asked for it or bound the child by a field.
+// before it, and returns that parent: the parent is a record, the route does
+// not forbid scoping, and the route either asked for it or bound the child by
+// a field.
 func (b *ImplicitRouteBinding) scopedParent(route *Route, req *http.Request, name string) (UrlRoutable, bool) {
 	parent, ok := route.ParentOfParameter(req, name).(UrlRoutable)
 	if !ok {
@@ -292,7 +275,7 @@ func requireTenant(g auth.Grant) error {
 	return nil
 }
 
-// normalizeBindingKey is what Router::bind does to a key: a parameter written
+// normalizeBindingKey is what Bind and Model do to a key: a parameter written
 // with dashes is registered under underscores, because that is how it reaches
 // the route.
 func normalizeBindingKey(key string) string {

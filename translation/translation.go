@@ -16,17 +16,14 @@ import (
 //
 // Values are rendered with fmt.Sprint, so a count may be given as an int and a
 // duration as a time.Duration without the caller formatting it first. A value
-// of type func(string) string is what PHP's Closure is here: it replaces the
-// text between <name> and </name> rather than a placeholder.
+// of type func(string) string is applied differently: it replaces the text
+// between <name> and </name> rather than a placeholder.
 type Replace map[string]any
 
-// Translator is Illuminate's Translation\Translator: it resolves a key into a
-// sentence.
+// Translator resolves a key into a sentence.
 //
-// One instance answers every request. Illuminate's is not safe for concurrent
-// use and does not have to be -- a PHP process serves one request -- but this
-// one caches the groups it has loaded, and the setters below are callable at
-// any time, so every field is behind a lock.
+// One instance answers every request. It caches the groups it has loaded, and
+// the setters below are callable at any time, so every field is behind a lock.
 type Translator struct {
 	mu sync.RWMutex
 
@@ -39,9 +36,9 @@ type Translator struct {
 	locale   string
 	fallback string
 
-	// loaded is namespace -> group -> locale -> lines, the array PHP calls
-	// $loaded: the groups this translator has already asked the loader for,
-	// plus whatever AddLines wrote straight into it.
+	// loaded is namespace -> group -> locale -> lines: the groups this
+	// translator has already asked the loader for, plus whatever AddLines
+	// wrote straight into it.
 	loaded map[string]map[string]map[string]Lines
 
 	selector              Selector
@@ -52,16 +49,14 @@ type Translator struct {
 	handleMissingTranslationKeys  bool
 }
 
-// New answers Translator::__construct(), with the fallback locale the PHP
-// service provider sets straight after it.
+// New returns a translator over a loader.
 //
 // locale is the locale used when a caller passes none, and fallback the one
 // consulted when a key is missing from the locale asked for. The English lines
 // that ship with this package are answered after both, so auth, validation,
 // passwords and pagination resolve with no catalogue at all -- l may be nil.
 //
-// Illuminate registers the framework's own lang directory as a second path on
-// the FileLoader to the same end. Here it is a second loader, so that a
+// They are answered by a second loader rather than a second path, so that a
 // translator built over an [ArrayLoader] still answers them.
 func New(l Loader, locale, fallback string) *Translator {
 	t := &Translator{
@@ -78,9 +73,9 @@ func New(l Loader, locale, fallback string) *Translator {
 	} else {
 		t.lookup = chain{l, bundled}
 	}
-	// PHP's constructor goes through setLocale, which rejects a locale holding
-	// a path separator. There is no exception to raise from a constructor that
-	// returns one value, so a rejected locale is the empty one, which every
+	// A locale holding a path separator is rejected here as it is in
+	// SetLocale. There is no error to return from a constructor that yields
+	// one value, so a rejected locale becomes the empty one, which every
 	// method below reads as "no locale given".
 	if err := t.SetLocale(locale); err != nil {
 		t.locale = ""
@@ -88,21 +83,18 @@ func New(l Loader, locale, fallback string) *Translator {
 	return t
 }
 
-// Get answers Translator::get(): the line stored under key, with its
-// placeholders replaced.
+// Get is the line stored under key, with its placeholders replaced.
 //
-// The locale comes first here and the replacements last, because PHP's
-// signature -- get($key, $replace = [], $locale = null) -- is ordered by which
-// argument may be left out, and Go has no optional arguments to order for. An
-// empty locale still means the translator's own.
+// The locale comes first and the replacements last. An empty locale means the
+// translator's own.
 //
 // A key no catalogue carries is returned unchanged, after the callback
 // registered by [Translator.HandleMissingKeysUsing] has seen it, so a wrong key
 // shows as itself on the page instead of as a blank.
 //
-// PHP returns string|array: a key naming a group and no item -- "messages"
-// rather than "messages.welcome" -- yields the whole group. This returns the
-// key in that case, because the return type is a sentence.
+// A key naming a group and no item -- "messages" rather than
+// "messages.welcome" -- returns the key, because the result is a sentence and
+// a group is not one.
 func (t *Translator) Get(locale, key string, replace Replace) string {
 	return t.get(locale, key, replace, true)
 }
@@ -137,8 +129,8 @@ func (t *Translator) get(locale, key string, replace Replace, fallback bool) str
 		key = t.handleMissingTranslationKey(key, replace, locale, fallback)
 	}
 
-	// PHP's `$line ?: $key`: a line that is there but empty reads as missing,
-	// because an empty sentence on the page is indistinguishable from a bug.
+	// A line that is there but empty reads as missing, because an empty
+	// sentence on the page is indistinguishable from a bug.
 	if line == "" {
 		line = key
 	}
@@ -153,9 +145,8 @@ func (t *Translator) get(locale, key string, replace Replace, fallback bool) str
 // first condition that matches wins; with no condition, the plural rule of the
 // locale chooses. See [MessageSelector.Choose].
 //
-// ":count" is filled with count unless replace already carries it. PHP takes
-// Countable|int|float|array and counts what it is given; Go has len for that,
-// so this takes the number.
+// ":count" is filled with count unless replace already carries it. The count
+// is the number itself; use len at the call site for a collection.
 func (t *Translator) Choice(locale, key string, number int, replace Replace) string {
 	locale = t.localeForChoice(key, locale)
 
@@ -225,12 +216,10 @@ func (t *Translator) has(locale, key string, fallback bool) bool {
 	return line != key
 }
 
-// getLine answers Translator::getLine(): one line out of the loaded array, with
-// its replacements made.
+// getLine is one line out of the loaded catalogue, with its replacements made.
 //
-// PHP also walks a nested array and replaces inside every one of its strings,
-// because a group may be asked for whole. A group is not a sentence here (see
-// [Translator.Get]), so this answers one line.
+// A group is not a sentence (see [Translator.Get]), so this answers one line
+// and never a whole group.
 func (t *Translator) getLine(namespace, group, locale, item string, replace Replace) (string, bool) {
 	t.Load(namespace, group, locale)
 
@@ -243,23 +232,21 @@ func (t *Translator) getLine(namespace, group, locale, item string, replace Repl
 	return t.makeReplacements(line, replace), true
 }
 
-// makeReplacements answers Translator::makeReplacements(): the placeholders of
-// a line, filled.
+// makeReplacements fills the placeholders of a line.
 //
-// Three spellings of every name are replaced, as PHP builds three entries per
-// argument: ":name" with the value, ":Name" with the value's first letter
-// uppercased, and ":NAME" with the value uppercased. A form is offered so that
+// Three spellings of every name are replaced: ":name" with the value, ":Name"
+// with the value's first letter uppercased, and ":NAME" with the value
+// uppercased. A form is offered so that
 // "The :attribute field is required." and ":Attribute is required." can share
 // one argument.
 //
-// A placeholder no argument names is left as it stands. PHP's strtr leaves it
-// too, and the longest name that does match wins at each position, so ":value"
-// does not eat the front of ":values" when both are given, and does eat it when
-// only ":value" is.
+// A placeholder no argument names is left as it stands, and the longest name
+// that does match wins at each position, so ":value" does not eat the front of
+// ":values" when both are given, and does eat it when only ":value" is.
 //
-// An argument whose value is a func(string) string is PHP's Closure: it
-// replaces the text between <name> and </name>, which is how a sentence hands
-// part of itself to the caller to wrap.
+// An argument whose value is a func(string) string replaces the text between
+// <name> and </name>, which is how a sentence hands part of itself to the
+// caller to wrap.
 func (t *Translator) makeReplacements(line string, replace Replace) string {
 	if len(replace) == 0 {
 		return line
@@ -305,14 +292,13 @@ func (t *Translator) makeReplacements(line string, replace Replace) string {
 }
 
 // replacement finds the argument one spelling of a placeholder names, and the
-// case that spelling asks for. ":attribute" is the value, ":Attribute" is
-// Str::ucfirst of it and ":ATTRIBUTE" is Str::upper of it.
+// case that spelling asks for. ":attribute" is the value, ":Attribute" is it
+// with the first rune uppercased, and ":ATTRIBUTE" is it uppercased.
 func (t *Translator) replacement(replace Replace, name string) (string, func(string) string, bool) {
 	if value, ok := replace[name]; ok {
 		if _, wrap := value.(func(string) string); wrap {
-			// A closure argument names a pair of tags, not a placeholder. PHP
-			// skips it before building the replacement table and so does this,
-			// rather than printing the function.
+			// A function argument names a pair of tags, not a placeholder, so
+			// it is skipped here rather than printed.
 			return "", nil, false
 		}
 		return t.stringify(value), func(s string) string { return s }, true
@@ -339,7 +325,7 @@ func (t *Translator) replacement(replace Replace, name string) (string, func(str
 
 // stringify renders one argument. A type a handler was registered for through
 // [Translator.Stringable] goes through it; anything else goes through
-// fmt.Sprint, which is where PHP's string cast went.
+// fmt.Sprint.
 func (t *Translator) stringify(value any) string {
 	if value == nil {
 		return ""
@@ -353,11 +339,10 @@ func (t *Translator) stringify(value any) string {
 	return fmt.Sprint(value)
 }
 
-// replaceWrapped answers the Closure branch of makeReplacements: every
+// replaceWrapped is the function branch of makeReplacements: every
 // <name>text</name> in the line, with text passed through the function.
 //
-// PHP matches /<name>(.*?)<\/name>/ without the s flag, so the text does not
-// cross a newline; neither does this.
+// The text does not cross a newline.
 func replaceWrapped(line, name string, wrap func(string) string) string {
 	opening, closing := "<"+name+">", "</"+name+">"
 	var b strings.Builder
@@ -373,8 +358,8 @@ func replaceWrapped(line, name string, wrap func(string) string) string {
 		}
 		inner := rest[:end]
 		if strings.ContainsRune(inner, '\n') {
-			// A newline between the tags puts the match beyond what PHP's `.`
-			// spans, so the tags stay on the page as written.
+			// A newline between the tags is beyond what a match spans, so the
+			// tags stay on the page as written.
 			b.WriteString(line[:start+len(opening)])
 			line = rest
 			continue
@@ -518,11 +503,8 @@ func (t *Translator) AddNamespace(namespace, hint string) {
 	t.lookup.AddNamespace(namespace, hint)
 }
 
-// AddPath answers Translator::addPath(): another directory of locale
-// directories for the loader to read.
-//
-// PHP calls addPath on the loader, which only the file loader has; a loader
-// with no paths ignores it, as it does in PHP for every loader but that one.
+// AddPath registers another directory of locale directories for the loader to
+// read. A loader with no notion of a path ignores it.
 func (t *Translator) AddPath(path string) {
 	if adder, ok := t.lookup.(interface{ AddPath(string) }); ok {
 		adder.AddPath(path)
@@ -544,8 +526,7 @@ func (t *Translator) AddJSONPath(path string) {
 // the first dot is the item. A key with no dot names a group and no item, and
 // the item comes back empty.
 //
-// PHP returns a three element array and replaces a null namespace with "*";
-// this returns three strings and does the same.
+// A key with no namespace resolves in [AppNamespace].
 func (t *Translator) ParseKey(key string) (namespace, group, item string) {
 	if i := strings.Index(key, "::"); i >= 0 {
 		namespace, key = key[:i], key[i+2:]
@@ -619,9 +600,8 @@ func (t *Translator) GetLoader() Loader {
 	return t.loader
 }
 
-// Locale answers Translator::locale(): the locale used when a caller passes
-// none. It is [Translator.GetLocale] under the name that reads better in a
-// sentence, and PHP carries both.
+// Locale is the locale used when a caller passes none. It is
+// [Translator.GetLocale] under the name that reads better in a sentence.
 func (t *Translator) Locale() string { return t.GetLocale() }
 
 // GetLocale answers Translator::getLocale(): the locale used when a caller
@@ -637,8 +617,7 @@ func (t *Translator) GetLocale() string {
 //
 // A locale holding "/" or "\" is refused, because a locale reaches the
 // filesystem as a directory name and one carrying a separator reads a catalogue
-// somewhere else. PHP throws InvalidArgumentException; this returns the error,
-// which is the alteration the package doc records.
+// somewhere else.
 func (t *Translator) SetLocale(locale string) error {
 	if strings.ContainsAny(locale, `/\`) {
 		return fmt.Errorf("translation: invalid characters present in locale %q", locale)
@@ -685,13 +664,12 @@ func (t *Translator) SetLoaded(loaded map[string]map[string]map[string]Lines) {
 	t.loaded = copied
 }
 
-// Stringable answers Translator::stringable(): it registers how one type is
-// rendered when it is passed as a replacement.
+// Stringable registers how one type is rendered when it is passed as a
+// replacement.
 //
-// PHP names the type with a class name string, or reads it off the closure's
-// parameter. Go has neither, so the type comes as a zero value of it: pass
-// money.Amount{} to say how a money.Amount renders. The handler receives the
-// value that was passed to [Translator.Get] and must assert it back.
+// The type is named by a zero value of it: pass money.Amount{} to say how a
+// money.Amount renders. The handler receives the value that was passed to
+// [Translator.Get] and must assert it back.
 //
 // A nil handler removes the one registered for the type.
 func (t *Translator) Stringable(class any, handler func(any) string) {
@@ -727,7 +705,7 @@ func placeholder(s string) string {
 	return s
 }
 
-// ucfirst is Str::ucfirst: the first rune uppercased, and the rest left alone.
+// ucfirst uppercases the first rune, and leaves the rest alone.
 func ucfirst(s string) string {
 	if s == "" {
 		return s

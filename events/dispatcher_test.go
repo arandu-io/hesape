@@ -164,9 +164,9 @@ func TestUntilStopsAtTheFirstAnswer(t *testing.T) {
 	}
 }
 
-// TestFalseStopsThePropagation is the PHP's `if ($response === false) break`,
-// and it is not the same thing as halting: the responses already collected are
-// still returned.
+// TestFalseStopsThePropagation: a listener that returns false stops the ones
+// behind it, which is not the same thing as halting -- the responses already
+// collected are still returned.
 func TestFalseStopsThePropagation(t *testing.T) {
 	var ran int
 	d := events.NewDispatcher()
@@ -428,9 +428,8 @@ func (recordAmount) Handle(*mutableInvoice) {}
 //	d.Dispatch(e)
 //	e.Amount = 0
 //
-// left the worker looking at 0. The PHP's createQueuedHandlerCallable() clones
-// every object argument before queueing, and 100 is what the event was at the
-// instant it was dispatched.
+// left the worker looking at 0. Every pointer argument is copied before the job
+// is queued, and 100 is what the event was at the instant it was dispatched.
 func TestAQueuedListenerSeesTheEventAsItWasDispatched(t *testing.T) {
 	queue := &fakeQueue{}
 	d := events.NewDispatcher().SetQueueResolver(func() events.Queue { return queue })
@@ -455,8 +454,7 @@ func TestAQueuedListenerSeesTheEventAsItWasDispatched(t *testing.T) {
 	}
 }
 
-// routedListener chooses where its job goes from the event it was handed, which
-// is viaConnection($event) in the PHP.
+// routedListener chooses where its job goes from the event it was handed.
 type routedListener struct{}
 
 func (routedListener) ShouldQueue(any) bool { return true }
@@ -486,8 +484,7 @@ func (routedListener) WithDelay(event any) time.Duration {
 // TestAQueuedListenerRoutesOnTheEvent: the three routing methods took no
 // argument, so a listener that picks its connection from the event value did not
 // satisfy the interface at all -- the job kept the empty connection and went to
-// the default one, with nothing said. The PHP passes the event:
-// $listener->viaConnection($arguments[0]).
+// the default one, with nothing said. Every routing method now takes the event.
 func TestAQueuedListenerRoutesOnTheEvent(t *testing.T) {
 	queue := &fakeQueue{}
 	d := events.NewDispatcher().SetQueueResolver(func() events.Queue { return queue })
@@ -504,11 +501,11 @@ func TestAQueuedListenerRoutesOnTheEvent(t *testing.T) {
 	}
 }
 
-// TestListeningWithAClassNameIsRefused: d.Listen(event, "App\\Listeners\\Notifier")
-// used to return as if it had registered something, and then no listener ever
-// ran. There is no container to resolve a name with (ADR 0001), so the only
-// honest answers are to resolve it or to refuse it, and refusing at Listen is
-// the one that names the line that was wrong.
+// TestListeningWithAClassNameIsRefused: d.Listen(event, "Notifier") used to
+// return as if it had registered something, and then no listener ever ran. A
+// name cannot be resolved to a type at run time, so the only honest answers are
+// to resolve it or to refuse it, and refusing at Listen is the one that names
+// the line that was wrong.
 func TestListeningWithAClassNameIsRefused(t *testing.T) {
 	defer func() {
 		reason, ok := recover().(string)

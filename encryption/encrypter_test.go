@@ -11,19 +11,18 @@ import (
 )
 
 // The key the fixtures below were written under. It is 32 bytes of 'a' and it
-// is not a secret: it exists so that payloads produced by the real
-// Illuminate\Encryption\Encrypter can be checked into this file.
+// is not a secret: it exists so that payloads produced by an independent
+// implementation of this format can be checked into this file.
 const goldenKey = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 // previousGoldenKey is the key the rotation fixture was written under.
 const previousGoldenKey = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
-// The fixtures. Each was produced by running the actual Encrypter.php from
-// laravel_illuminate under PHP 8.5 with encryptString and the aes-256-gcm
-// cipher. They are here because a port that agrees with my reading of the PHP
-// but not with the PHP is a port that fails the first time somebody puts an
-// Arandu service beside a Laravel one on the same key -- and that failure is
-// silent until a real payload will not open.
+// The fixtures. Each was produced by an independent implementation of this
+// payload format, encrypting a string under the aes-256-gcm cipher. They are
+// here because an implementation that agrees with a reading of the format but
+// not with the format itself fails the first time two services share a key --
+// and that failure is silent until a real payload will not open.
 const (
 	goldenHello = "eyJpdiI6IkY2eUlzOHJmMHFnNDl2OXEiLCJ2YWx1ZSI6IkpLUUVJTlhyT1NpaktPST0iLCJtYWMiOiIiLCJ0YWciOiJLTkZtLzhPczh5bXBKUnVqbHN0bEJRPT0ifQ=="
 	goldenEmpty = "eyJpdiI6IituUWhlUlR2S2dWUTJwd0YiLCJ2YWx1ZSI6IiIsIm1hYyI6IiIsInRhZyI6IjZRZStXRC9oaTYyYjZHeHJzNzJudmc9PSJ9"
@@ -42,9 +41,9 @@ func newGolden(t *testing.T) *encryption.Encrypter {
 	return e
 }
 
-// TestAPayloadFromLaravelDecrypts is the test the whole port hangs on. Every
-// other test here checks this package against itself; this one checks it
-// against the thing it claims to mirror.
+// TestAPayloadFromLaravelDecrypts is the test the format guarantee hangs on.
+// Every other test here checks this package against itself; this one checks it
+// against a payload it did not write.
 func TestAPayloadFromLaravelDecrypts(t *testing.T) {
 	e := newGolden(t)
 
@@ -56,7 +55,7 @@ func TestAPayloadFromLaravelDecrypts(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := e.DecryptString(tt.payload)
 			if err != nil {
-				t.Fatalf("a payload written by Illuminate would not open: %v", err)
+				t.Fatalf("a payload this package did not write would not open: %v", err)
 			}
 			if got != tt.want {
 				t.Errorf("DecryptString = %q, want %q", got, tt.want)
@@ -65,10 +64,10 @@ func TestAPayloadFromLaravelDecrypts(t *testing.T) {
 	}
 }
 
-// TestTheEnvelopeIsTheOneLaravelWrites checks the other direction: not that we
-// can read their payload, but that they could read ours. The field order is
-// part of it -- compact('iv', 'value', 'mac', 'tag') fixes it, and a reader
-// comparing payloads as strings would see a difference that is not one.
+// TestTheEnvelopeIsTheOneLaravelWrites checks the other direction: not that
+// this package can read a foreign payload, but that a foreign reader could read
+// this one. The field order is part of it -- iv, value, mac, tag -- because a
+// reader comparing payloads as strings would see a difference that is not one.
 func TestTheEnvelopeIsTheOneLaravelWrites(t *testing.T) {
 	e := newGolden(t)
 
@@ -81,7 +80,7 @@ func TestTheEnvelopeIsTheOneLaravelWrites(t *testing.T) {
 		t.Fatalf("the payload is not base64: %v", err)
 	}
 
-	// Key order, verbatim from what Encrypter.php emitted for the same input.
+	// Key order, verbatim: iv, then value, then mac, then tag.
 	if got := string(body); !strings.HasPrefix(got, `{"iv":"`) ||
 		!strings.Contains(got, `","value":"`) ||
 		!strings.Contains(got, `","mac":"","tag":"`) {
@@ -98,14 +97,14 @@ func TestTheEnvelopeIsTheOneLaravelWrites(t *testing.T) {
 		t.Fatalf("the envelope is not the expected JSON: %v", err)
 	}
 	if fields.MAC == nil {
-		t.Error("the mac field is absent; Illuminate always writes it, and appearsEncrypted looks for it")
+		t.Error("the mac field is absent; the format always carries it, and AppearsEncrypted looks for it")
 	} else if *fields.MAC != "" {
 		t.Errorf("mac = %q, want empty: with an AEAD cipher the tag is the MAC", *fields.MAC)
 	}
 
 	iv, err := base64.StdEncoding.DecodeString(*fields.IV)
 	if err != nil || len(iv) != 12 {
-		t.Errorf("the iv decodes to %d bytes (err %v), want 12 -- openssl_cipher_iv_length('aes-256-gcm')", len(iv), err)
+		t.Errorf("the iv decodes to %d bytes (err %v), want 12 -- the aes-256-gcm nonce size", len(iv), err)
 	}
 	tag, err := base64.StdEncoding.DecodeString(*fields.Tag)
 	if err != nil || len(tag) != 16 {
@@ -154,8 +153,8 @@ func TestEncryptingTwiceGivesDifferentPayloads(t *testing.T) {
 }
 
 // TestDecryptFallsBackToAPreviousKey is key rotation, which is the reason
-// PreviousKeys exists. The payload here was written by Illuminate under a key
-// that is no longer current.
+// PreviousKeys exists. The payload here was written under a key that is no
+// longer current.
 func TestDecryptFallsBackToAPreviousKey(t *testing.T) {
 	e := newGolden(t)
 
@@ -199,9 +198,8 @@ func TestNothingIsEncryptedWithAPreviousKey(t *testing.T) {
 	}
 }
 
-// TestPreviousKeysRefusesABadKeyAndChangesNothing. Encrypter::previousKeys
-// throws mid-loop, before assigning, so a rejected call leaves the encrypter
-// exactly as it was.
+// TestPreviousKeysRefusesABadKeyAndChangesNothing: the keys are checked before
+// any is assigned, so a rejected call leaves the encrypter exactly as it was.
 func TestPreviousKeysRefusesABadKeyAndChangesNothing(t *testing.T) {
 	e := newGolden(t)
 	if _, err := e.PreviousKeys([][]byte{[]byte(previousGoldenKey)}); err != nil {
@@ -325,8 +323,8 @@ func TestDecryptRefusesTheWrongKey(t *testing.T) {
 	}
 }
 
-// TestAppearsEncrypted checks each answer against what Encrypter::appearsEncrypted
-// returned for the same input under PHP.
+// TestAppearsEncrypted walks the shapes a value can arrive in and pins which
+// of them are recognised as payloads.
 func TestAppearsEncrypted(t *testing.T) {
 	for _, tt := range []struct {
 		name  string
@@ -361,9 +359,8 @@ func TestAppearsEncryptedDoesNotPromiseDecryption(t *testing.T) {
 	}
 }
 
-// TestSupported checks each answer against what Encrypter::supported returned
-// for the same input under PHP -- including the uppercase cipher, which passes
-// there because every read of the name goes through strtolower.
+// TestSupported walks the key and cipher combinations, including the uppercase
+// cipher name, which passes because the name is compared case-insensitively.
 func TestSupported(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
@@ -378,7 +375,8 @@ func TestSupported(t *testing.T) {
 		{"an empty key", "", encryption.AES256GCM, false},
 		{"an unknown cipher", strings.Repeat("a", 32), "rot-13", false},
 		{"an empty cipher", strings.Repeat("a", 32), "", false},
-		// The ciphers Illuminate has and this package deliberately does not.
+		// Ciphers of the same family that this package deliberately does not
+		// carry.
 		{"aes-128-cbc", strings.Repeat("a", 16), "aes-128-cbc", false},
 		{"aes-256-cbc", strings.Repeat("a", 32), "aes-256-cbc", false},
 	} {
@@ -390,8 +388,8 @@ func TestSupported(t *testing.T) {
 	}
 }
 
-// TestCipherGenerateKey. The fallback to 32 for an unknown cipher is the `?? 32`
-// in the PHP, and it is worth pinning: it means the call never returns nothing.
+// TestCipherGenerateKey. The fallback to 32 bytes for an unknown cipher is
+// worth pinning: it means the call never returns nothing.
 func TestCipherGenerateKey(t *testing.T) {
 	if got := len(encryption.AES256GCM.GenerateKey()); got != 32 {
 		t.Errorf("AES256GCM.GenerateKey() is %d bytes, want 32", got)
@@ -409,9 +407,8 @@ func TestCipherGenerateKey(t *testing.T) {
 	}
 }
 
-// TestNewEncrypterRefusesAnUnusableKey, which is the RuntimeException the PHP
-// constructor throws. Failing here is the point: a wrong key length is not
-// visible from any request that would go wrong.
+// TestNewEncrypterRefusesAnUnusableKey. Failing at construction is the point:
+// a wrong key length is not visible from any request that would go wrong.
 func TestNewEncrypterRefusesAnUnusableKey(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
@@ -422,7 +419,7 @@ func TestNewEncrypterRefusesAnUnusableKey(t *testing.T) {
 		{"a short key", strings.Repeat("a", 31), encryption.AES256GCM},
 		{"a long key", strings.Repeat("a", 33), encryption.AES256GCM},
 		{"an unknown cipher", strings.Repeat("a", 32), "rot-13"},
-		{"a cipher Illuminate has and we do not", strings.Repeat("a", 32), "aes-256-cbc"},
+		{"a cipher of the same family this package does not carry", strings.Repeat("a", 32), "aes-256-cbc"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			e, err := encryption.NewEncrypter([]byte(tt.key), tt.cipher)
@@ -436,9 +433,9 @@ func TestNewEncrypterRefusesAnUnusableKey(t *testing.T) {
 	}
 }
 
-// TestTheKeyAccessorsHandBackCopies. PHP returns strings, which are values; a
-// []byte is a window onto the encrypter's memory, and handing one out would let
-// a caller rewrite the application key from outside.
+// TestTheKeyAccessorsHandBackCopies. A []byte is a window onto the encrypter's
+// memory, and handing one out would let a caller rewrite the application key
+// from outside.
 func TestTheKeyAccessorsHandBackCopies(t *testing.T) {
 	e := newGolden(t)
 	if _, err := e.PreviousKeys([][]byte{[]byte(previousGoldenKey)}); err != nil {
@@ -502,8 +499,8 @@ func TestGetAllKeysOrder(t *testing.T) {
 	}
 }
 
-// TestPreviousKeysChains, because the PHP returns $this and the service
-// provider's registration is written as one expression.
+// TestPreviousKeysChains, so that construction and key rotation can be written
+// as one expression.
 func TestPreviousKeysChains(t *testing.T) {
 	e := newGolden(t)
 	chained, err := e.PreviousKeys([][]byte{[]byte(previousGoldenKey)})
@@ -511,7 +508,7 @@ func TestPreviousKeysChains(t *testing.T) {
 		t.Fatal(err)
 	}
 	if chained != e {
-		t.Error("PreviousKeys returned a different encrypter; the PHP returns $this")
+		t.Error("PreviousKeys returned a different encrypter; it must return the receiver")
 	}
 }
 
@@ -611,8 +608,8 @@ func TestEncryptHandlesTheZeroValues(t *testing.T) {
 	})
 }
 
-// TestEncryptRefusesAValueItCannotSerialize, which is the EncryptException the
-// PHP throws when serialization fails.
+// TestEncryptRefusesAValueItCannotSerialize pins that a value JSON cannot hold
+// is ErrEncrypt rather than a panic.
 func TestEncryptRefusesAValueItCannotSerialize(t *testing.T) {
 	e := newGolden(t)
 	if _, err := encryption.Encrypt(e, make(chan int)); !errors.Is(err, encryption.ErrEncrypt) {

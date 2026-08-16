@@ -17,10 +17,9 @@ const batchAction auth.Action = "queue:batches"
 
 // RetryBatchCommand puts the failed jobs of a batch back in line.
 //
-// It answers Illuminate\Queue\Console\RetryBatchCommand: `queue:retry-batch`.
-// It is `queue:retry` narrowed to one batch, which is the shape the question
-// usually arrives in: the nightly import half-failed, and what has to be retried
-// is the half that belongs to it.
+// It is `queue:retry-batch`: `queue:retry` narrowed to one batch, which is the
+// shape the question usually arrives in. The nightly import half-failed, and
+// what has to be retried is the half that belongs to it.
 type RetryBatchCommand struct {
 	batches bus.BatchRepository
 	failed  failed.FailedJobProvider
@@ -43,15 +42,15 @@ func (c *RetryBatchCommand) Command() console.Command {
 
 // IsolatableID is the lock this command takes, which is per batch.
 //
-// It answers isolatableId(), which in PHP is what makes `--isolated` mean "one
-// at a time per batch" rather than "one at a time". Two people retrying two
-// different batches must not block each other; two people retrying the same one
-// must, or the jobs are pushed twice.
+// It is what makes `--isolated` mean "one at a time per batch" rather than
+// "one at a time". Two people retrying two different batches must not block
+// each other; two people retrying the same one must, or the jobs are pushed
+// twice.
 func (c *RetryBatchCommand) IsolatableID(batchID string) string {
 	return "queue:retry-batch:" + batchID
 }
 
-// Handle runs the command. It answers RetryBatchCommand::handle().
+// Handle runs the command.
 func (c *RetryBatchCommand) Handle(ctx context.Context, o *console.IO) error {
 	tenant := tenantFlag(o)
 	if err := o.Flags().Parse(o.Args()); err != nil {
@@ -110,21 +109,19 @@ func (c *RetryBatchCommand) Handle(ctx context.Context, o *console.IO) error {
 
 // PruneBatchesCommand deletes the batch rows that are old enough not to matter.
 //
-// It answers Illuminate\Queue\Console\PruneBatchesCommand:
-// `queue:prune-batches`, with the three retentions Laravel has -- finished,
-// unfinished and cancelled -- because they are three different decisions. A
-// finished batch is history; an unfinished one that is a week old is a bug
-// somebody should have seen.
+// It is `queue:prune-batches`, with three retentions -- finished, unfinished
+// and cancelled -- because they are three different decisions. A finished batch
+// is history; an unfinished one that is a week old is a bug somebody should
+// have seen.
 type PruneBatchesCommand struct {
 	batches bus.PrunableBatchRepository
 }
 
 // NewPruneBatchesCommand returns the command.
 //
-// It takes the prunable repository rather than the plain one, which is the Go
-// form of the `instanceof PrunableBatchRepository` check the PHP does at the top
-// of handle(): a store that cannot prune cannot be wired here, instead of being
-// wired and then refusing at three in the morning.
+// It takes the prunable repository rather than the plain one, so a store that
+// cannot prune cannot be wired here at all, instead of being wired and then
+// refusing at three in the morning.
 func NewPruneBatchesCommand(b bus.PrunableBatchRepository) *PruneBatchesCommand {
 	return &PruneBatchesCommand{batches: b}
 }
@@ -141,7 +138,7 @@ func (c *PruneBatchesCommand) Command() console.Command {
 	}
 }
 
-// Handle runs the command. It answers PruneBatchesCommand::handle().
+// Handle runs the command.
 func (c *PruneBatchesCommand) Handle(ctx context.Context, o *console.IO) error {
 	flags := o.Flags()
 	tenant := tenantFlag(o)

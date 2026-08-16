@@ -24,9 +24,8 @@ import (
 // process's heap are lost with the process and invisible to the replica next to
 // it, so a batch dispatched here is a batch only this binary can finish.
 //
-// Illuminate's equivalent is BatchRepositoryFake, which lives in
-// support/Testing/Fakes and answers most calls with a zero
-// UpdatedBatchJobCounts. This one counts.
+// It is a real implementation and not a stub: the counters move, so a test
+// against it exercises the same rules a database does.
 type Memory struct {
 	mu      sync.Mutex
 	batches map[string]Batch // keyed by tenant and id
@@ -169,9 +168,9 @@ func (m *Memory) IncrementTotalJobs(_ context.Context, g auth.Grant, batchID str
 // DecrementPendingJobs records one job that succeeded.
 func (m *Memory) DecrementPendingJobs(_ context.Context, g auth.Grant, batchID, jobID string) (UpdatedBatchJobCounts, error) {
 	return m.update(g, batchID, func(b Batch) Batch {
-		// Unconditionally, as Illuminate does: a duplicate delivery of the
-		// last job takes the counter to -1 rather than leaving it at 0, and
-		// that is exactly what stops Then from firing a second time.
+		// Unconditionally: a duplicate delivery of the last job takes the
+		// counter to -1 rather than leaving it at 0, and that is exactly what
+		// stops Then from firing a second time.
 		b.PendingJobs--
 		b.FailedJobIDs = withoutFailure(b.FailedJobIDs, jobID)
 		b.FailedJobs = len(b.FailedJobIDs)

@@ -8,21 +8,17 @@ import (
 
 // Value is one argument or option as it was given.
 //
-// PHP returns mixed from argument() and option(): a string, a bool for a flag,
-// or an array for a repeated one. This is that, made checkable -- the caller
-// says which shape it wants and gets the zero value of it rather than a panic,
-// which is the whole of what the mixed return buys and none of what it costs.
+// It can be read as a string, a slice or a bool without the caller needing to
+// know in advance which shape it holds: asking for the wrong shape returns
+// the zero value of it rather than a panic.
 type Value struct {
 	values  []string
 	present bool
 	flag    bool
 }
 
-// String has no Illuminate counterpart: it is the string case of the mixed that
-// InteractsWithIO::argument returns.
-//
-// String is the value as one string. An array value is its first element, and a
-// value that was never given is empty.
+// String is the value as one string. An array value is its first element, and
+// a value that was never given is empty.
 func (v Value) String() string {
 	if len(v.values) == 0 {
 		return ""
@@ -30,15 +26,9 @@ func (v Value) String() string {
 	return v.values[0]
 }
 
-// Slice has no Illuminate counterpart: it is the array case of the same mixed,
-// which InteractsWithIO::option returns for a repeated flag.
-//
 // Slice is every value that was given, in order.
 func (v Value) Slice() []string { return append([]string(nil), v.values...) }
 
-// Bool has no Illuminate counterpart: it is the bool case of the mixed that
-// InteractsWithIO::option returns, made a decision rather than a truthiness test.
-//
 // Bool is whether a flag was given.
 //
 // A flag that takes no value is true when it is present. One that takes a value
@@ -55,9 +45,6 @@ func (v Value) Bool() bool {
 	return true
 }
 
-// Int has no Illuminate counterpart: PHP juggles the string where it is used,
-// and InteractsWithIO::option hands back whatever was typed.
-//
 // Int is the value as a number.
 func (v Value) Int() (int, error) {
 	n, err := strconv.Atoi(strings.TrimSpace(v.String()))
@@ -67,20 +54,14 @@ func (v Value) Int() (int, error) {
 	return n, nil
 }
 
-// Present has no Illuminate counterpart:
-// PromptsForMissingInput::promptForMissingArguments asks whether the value is
-// empty instead, which cannot tell a default apart from an answer.
-//
 // Present reports whether the value was given on the command line, as opposed
 // to standing in from a default.
 func (v Value) Present() bool { return v.present }
 
 // Input is the command line, bound to what a command declared it accepts.
 //
-// It answers Symfony's InputInterface, which is what InteractsWithIO reaches
-// through for argument(), option() and their has* companions. It is here and
-// not in a package of its own because a definition with nothing to bind it to
-// is a definition nobody can read back.
+// It is here and not in a package of its own because a definition with
+// nothing to bind it to is a definition nobody can read back.
 type Input struct {
 	arguments []Argument
 	options   []Option
@@ -93,9 +74,6 @@ type Input struct {
 	interactive bool
 }
 
-// NewInput is Symfony's Input::__construct over the definition Parser::parse
-// returned.
-//
 // NewInput returns the input for a definition, before anything is parsed.
 //
 // Every declared argument and option starts on its default, so a command that
@@ -121,29 +99,22 @@ func NewInput(arguments []Argument, options []Option) *Input {
 	return in
 }
 
-// Definition is Symfony's InputDefinition::getArguments and
-// InputDefinition::getOptions at once, returning what Parser::parse produced.
-//
-// Definition returns the arguments and options the input was built from, so the
-// help can render them without a second copy of the signature.
+// Definition returns the arguments and options the input was built from, so
+// the help can render them without a second copy of the signature.
 func (in *Input) Definition() ([]Argument, []Option) { return in.arguments, in.options }
 
-// Interactive is Symfony's InputInterface::isInteractive: whether the command
-// may prompt.
+// Interactive reports whether the command may prompt.
 func (in *Input) Interactive() bool { return in.interactive }
 
-// SetInteractive is Symfony's InputInterface::setInteractive.
-//
-// SetInteractive turns prompting on or off, which is what --no-interaction does
-// and what a command calling another passes on.
+// SetInteractive turns prompting on or off, which is what --no-interaction
+// does and what a command calling another passes on.
 func (in *Input) SetInteractive(interactive bool) { in.interactive = interactive }
 
-// Parse is Symfony's ArgvInput::parse, the token loop that binds a command line
-// to the definition.
+// Parse is the token loop that binds a command line to the definition.
 //
 // argv is what followed the command name. Everything after a bare "--" is an
-// operand, however many dashes it starts with, which is how a value that looks
-// like a flag reaches the command that wants it.
+// operand, however many dashes it starts with, which is how a value that
+// looks like a flag reaches the command that wants it.
 func (in *Input) Parse(argv []string) error {
 	operands := []string{}
 	onlyOperands := false
@@ -307,15 +278,14 @@ func (in *Input) findOption(name, shortcut string) (Option, bool) {
 
 // HasArgument reports whether the argument is declared.
 //
-// It answers InteractsWithIO::hasArgument, and it says declared and not given:
-// PHP asks the definition too.
+// It reports declared, not given.
 func (in *Input) HasArgument(name string) bool {
 	_, found := in.argumentValues[name]
 	return found
 }
 
-// Argument is Symfony's InputInterface::getArgument, which
-// InteractsWithIO::argument delegates to.
+// Argument returns the value of a declared argument by name, or a zero Value
+// if none was declared with that name.
 func (in *Input) Argument(name string) Value {
 	if v, found := in.argumentValues[name]; found {
 		return *v
@@ -323,8 +293,7 @@ func (in *Input) Argument(name string) Value {
 	return Value{}
 }
 
-// Arguments is Symfony's InputInterface::getArguments: every argument, keyed by
-// name.
+// Arguments returns every argument, keyed by name.
 func (in *Input) Arguments() map[string]Value {
 	out := make(map[string]Value, len(in.argumentValues))
 	for name, v := range in.argumentValues {
@@ -333,15 +302,14 @@ func (in *Input) Arguments() map[string]Value {
 	return out
 }
 
-// HasOption is Symfony's InputInterface::hasOption: whether the option is
-// declared in the command signature.
+// HasOption reports whether the option is declared in the command signature.
 func (in *Input) HasOption(name string) bool {
 	_, found := in.optionValues[name]
 	return found
 }
 
-// Option is Symfony's InputInterface::getOption, which InteractsWithIO::option
-// delegates to.
+// Option returns the value of a declared option by name, or a zero Value if
+// none was declared with that name.
 func (in *Input) Option(name string) Value {
 	if v, found := in.optionValues[name]; found {
 		return *v
@@ -349,7 +317,7 @@ func (in *Input) Option(name string) Value {
 	return Value{}
 }
 
-// Options is Symfony's InputInterface::getOptions: every option, keyed by name.
+// Options returns every option, keyed by name.
 func (in *Input) Options() map[string]Value {
 	out := make(map[string]Value, len(in.optionValues))
 	for name, v := range in.optionValues {
@@ -360,10 +328,9 @@ func (in *Input) Options() map[string]Value {
 
 // setArgument records an answer a prompt supplied for a missing argument.
 //
-// It answers InputInterface::setArgument, which PromptsForMissingInput calls
-// after it has asked. It is unexported because the only caller is the prompt: a
-// command that could rewrite its own arguments is a command whose arguments do
-// not mean what the command line says.
+// It is unexported because the only caller is the prompt: a command that
+// could rewrite its own arguments is a command whose arguments do not mean
+// what the command line says.
 func (in *Input) setArgument(name, value string) {
 	if current, found := in.argumentValues[name]; found {
 		current.values = []string{value}

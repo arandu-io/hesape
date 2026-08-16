@@ -29,53 +29,49 @@ type Guard interface {
 	LogoutCurrentDevice(r *http.Request) error
 }
 
-// AuthenticateSession ends a session whose password has changed underneath it.
-//
-// It is Illuminate\Session\Middleware\AuthenticateSession, and it is the reason
-// "change my password" signs out the other browsers. The mechanism is small: the
-// session records the password hash it started with, and every request compares
-// it with the one in the database. A password change rewrites the hash, so every
-// session that recorded the old one stops on its next request -- including the
-// one belonging to whoever forced the change, which is the whole point.
+// AuthenticateSession ends a session whose password has changed underneath
+// it. It is the reason "change my password" signs out the other browsers.
+// The mechanism is small: the session records the password hash it started
+// with, and every request compares it with the one in the database. A
+// password change rewrites the hash, so every session that recorded the old
+// one stops on its next request -- including the one belonging to whoever
+// forced the change, which is the whole point.
 //
 // It runs after [StartSession] and after whatever authenticates the request.
 type AuthenticateSession struct {
 	auth Guard
-	// redirectTo is what Illuminate keeps in a static. It is an instance field
-	// here: a package-level one is process-global mutable state, which under
-	// -race is a data race the moment two tests set it, and which nothing can
+	// redirectTo is an instance field rather than a package-level one: a
+	// package-level one is process-global mutable state, which under -race
+	// is a data race the moment two tests set it, and which nothing can
 	// unset afterwards.
 	redirectTo func(r *http.Request) string
 }
 
-// NewAuthenticateSession is AuthenticateSession::__construct.
+// NewAuthenticateSession returns a middleware over an authentication guard.
 func NewAuthenticateSession(auth Guard) *AuthenticateSession {
 	return &AuthenticateSession{auth: auth}
 }
 
-// RedirectUsing is AuthenticateSession::redirectUsing.
-//
-// It sets what the middleware sends somebody to when their session is ended.
-// Returning "" answers 401 instead of redirecting. Illuminate's is a static
-// method; see the field it sets for why this one is not.
+// RedirectUsing sets what the middleware sends somebody to when their
+// session is ended. Returning "" answers 401 instead of redirecting. See
+// the field it sets for why this is an instance method and not a
+// package-level function.
 func (m *AuthenticateSession) RedirectUsing(callback func(r *http.Request) string) *AuthenticateSession {
 	m.redirectTo = callback
 	return m
 }
 
-// passwordHashKey is where the hash is recorded. Suffixed with the guard, which
-// is Illuminate's "password_hash_"+driver.
+// passwordHashKey is where the hash is recorded: "password_hash_" plus the
+// guard name, so two guards on one application do not collide.
 func passwordHashKey(driver string) string { return "password_hash_" + driver }
 
-// Handle is AuthenticateSession::handle, with
-// AuthenticateSession::storePasswordHashInSession and
-// AuthenticateSession::logout behind it.
+// Handle compares the session's recorded password hash against the guard's
+// current one on every request, ending the session on a mismatch.
 //
-// One branch of the PHP is absent: the SessionGuard::viaRemember arm, which
-// compares the hash carried inside Laravel's recaller cookie. There is no
-// recaller cookie here -- remember-me lengthens the session itself, see
-// session.Remember -- so a remembered session is checked by the same session
-// key as any other, and there is no second copy of the hash to disagree with it.
+// There is no separate check for a remembered session: remember-me
+// lengthens the session itself, see session.Remember, so a remembered
+// session is checked by the same session key as any other, and there is no
+// second copy of the hash to disagree with it.
 func (m *AuthenticateSession) Handle(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		store, ok := Session(r.Context())

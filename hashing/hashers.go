@@ -10,12 +10,10 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// The hasher defaults, taken from the PHP class properties. ArgonHasher starts
-// at memory 1024, time 2 and threads 2; BcryptHasher starts at 12 rounds. They
-// are the defaults of Illuminate\Hashing, not the parameters the package-level
-// Make writes: Make is the framework's own path and is deliberately not
-// configurable, while a hasher is the mirror of the PHP class and takes its
-// numbers from the caller.
+// The hasher defaults. [ArgonHasher] starts at memory 1024, time 2 and threads
+// 2; [BcryptHasher] starts at 12 rounds. They are not the parameters the
+// package-level [Make] writes: [Make] is deliberately not configurable, while a
+// hasher takes its numbers from the caller.
 const (
 	defaultArgonMemory  = 1024
 	defaultArgonTime    = 2
@@ -23,42 +21,38 @@ const (
 	defaultBcryptRounds = 12
 )
 
-// ErrValueTooLong answers the InvalidArgumentException BcryptHasher::make
-// throws when the value is longer than the configured 'limit'.
+// ErrValueTooLong is returned by [BcryptHasher.Make] when the value is longer
+// than the configured Limit.
 var ErrValueTooLong = errors.New("hashing: value is too long to hash")
 
-// ErrWrongAlgorithm answers the RuntimeException ArgonHasher::check,
-// Argon2IdHasher::check and BcryptHasher::check throw when the hasher was built
-// with 'verify' and the stored hash was written by another algorithm.
+// ErrWrongAlgorithm is returned by Check when the hasher was built with Verify
+// and the stored hash was written by another algorithm.
 var ErrWrongAlgorithm = errors.New("hashing: this password does not use the expected algorithm")
 
-// Options answers the $options array that Illuminate\Hashing passes to the
-// hasher constructors and to make, check and needsRehash. PHP has one array
-// shape shared by every hasher, so this is one struct: each hasher reads the
-// keys it knows and ignores the rest.
+// Options are the per-call and constructor settings the hashers take. It is one
+// struct shared by every hasher: each reads the fields it knows and ignores the
+// rest.
 //
-// A zero field means the key is absent from the PHP array, so the hasher's own
-// value is used — the Go spelling of $options['memory'] ?? $this->memory.
+// A zero field means the setting was not given, so the hasher's own value is
+// used.
 type Options struct {
-	// Rounds answers 'rounds', the bcrypt cost factor.
+	// Rounds is the bcrypt cost factor.
 	Rounds int
-	// Memory answers 'memory', the argon2 memory cost in KiB.
+	// Memory is the argon2 memory cost in KiB.
 	Memory int
-	// Time answers 'time', the number of argon2 passes.
+	// Time is the number of argon2 passes.
 	Time int
-	// Threads answers 'threads', the argon2 degree of parallelism.
+	// Threads is the argon2 degree of parallelism.
 	Threads int
-	// Verify answers 'verify', which makes Check refuse a hash written by
-	// another algorithm instead of verifying it. Constructor only, as in PHP.
+	// Verify makes Check refuse a hash written by another algorithm instead
+	// of verifying it. It is read at construction only.
 	Verify bool
-	// Limit answers 'limit', the longest value in bytes BcryptHasher::make
-	// accepts. Zero is PHP's null: no limit.
+	// Limit is the longest value in bytes [BcryptHasher.Make] accepts. Zero
+	// is no limit.
 	Limit int
 }
 
-// firstOption reads the single optional $options array. PHP declares it as
-// "array $options = []"; Go spells the same thing as a variadic parameter, and
-// only the first is read.
+// firstOption reads the single optional Options. Only the first is read.
 func firstOption(options []Options) Options {
 	if len(options) == 0 {
 		return Options{}
@@ -66,23 +60,20 @@ func firstOption(options []Options) Options {
 	return options[0]
 }
 
-// AbstractHasher answers Illuminate\Hashing\AbstractHasher. It holds the two
-// methods every hasher shares, and the concrete hashers embed it.
+// AbstractHasher holds the two methods every hasher shares, and the concrete
+// hashers embed it.
 type AbstractHasher struct{}
 
-// Info answers AbstractHasher::info, which is password_get_info. PHP returns an
-// array whose 'algoName' is "unknown" for a value that is not a hash; here the
-// second result reports that instead, so a caller cannot read parameters off a
-// value that has none.
+// Info reports the parameters hashedValue was written with. The second result
+// is false for a value that is not a hash at all, so a caller cannot read
+// parameters off a value that has none.
 func (AbstractHasher) Info(hashedValue string) (Params, bool) {
 	return Info(hashedValue)
 }
 
-// Check answers AbstractHasher::check, which is password_verify. An empty
-// hashed value is false rather than an error, exactly as the PHP guard on
-// is_null and strlen. The base implementation performs no algorithm check, so
-// it never fails: the $options argument PHP declares here is unused in its
-// body and has no counterpart.
+// Check reports whether value hashes to hashedValue. An empty hashed value is
+// false rather than an error. This implementation performs no algorithm check,
+// so it never refuses on the algorithm alone.
 func (AbstractHasher) Check(value, hashedValue string) bool {
 	if hashedValue == "" {
 		return false
@@ -90,8 +81,7 @@ func (AbstractHasher) Check(value, hashedValue string) bool {
 	return Check(value, hashedValue) == nil
 }
 
-// ArgonHasher answers Illuminate\Hashing\ArgonHasher. It writes argon2i, which
-// is what PASSWORD_ARGON2I selects; Argon2IdHasher is the same hasher over
+// ArgonHasher writes argon2i. [Argon2IdHasher] is the same hasher over
 // argon2id.
 type ArgonHasher struct {
 	AbstractHasher
@@ -103,8 +93,8 @@ type ArgonHasher struct {
 	algorithm       Algorithm
 }
 
-// NewArgonHasher answers ArgonHasher::__construct. An absent option keeps the
-// PHP default: memory 1024, time 2, threads 2, verify off.
+// NewArgonHasher returns an argon2i hasher. An absent option keeps the default:
+// memory 1024, time 2, threads 2, verify off.
 func NewArgonHasher(options ...Options) *ArgonHasher {
 	o := firstOption(options)
 	h := &ArgonHasher{
@@ -126,16 +116,15 @@ func NewArgonHasher(options ...Options) *ArgonHasher {
 	return h
 }
 
-// Algorithm reports which argon2 variant this hasher writes. It answers the
-// protected ArgonHasher::algorithm, which returns PASSWORD_ARGON2I here and
-// PASSWORD_ARGON2ID in Argon2IdHasher.
+// Algorithm reports which argon2 variant this hasher writes: argon2i here, and
+// argon2id when the hasher came from [NewArgon2IdHasher].
 func (h *ArgonHasher) Algorithm() Algorithm {
 	return h.algorithm
 }
 
-// Make answers ArgonHasher::make. The PHP throws a RuntimeException when the
-// build cannot hash with argon2; the error here reports parameters argon2
-// cannot be run with, which is the only way this can fail in Go.
+// Make hashes value with this hasher's parameters, or the ones given. The error
+// reports parameters argon2 cannot be run with, which is the only way this
+// fails.
 func (h *ArgonHasher) Make(value string, options ...Options) (string, error) {
 	o := firstOption(options)
 	memory, time, threads := h.memoryOf(o), h.timeOf(o), h.threadsOf(o)
@@ -164,14 +153,12 @@ func (h *ArgonHasher) Make(value string, options ...Options) (string, error) {
 	), nil
 }
 
-// Check answers ArgonHasher::check, and Argon2IdHasher::check when the hasher
-// was built by NewArgon2IdHasher. An empty hashed value is false. With 'verify'
-// set, a hash written by another algorithm is ErrWrongAlgorithm, which is the
-// RuntimeException the PHP throws.
+// Check reports whether value hashes to hashedValue. An empty hashed value is
+// false. With Verify set, a hash written by another algorithm is
+// [ErrWrongAlgorithm].
 //
-// password_verify returns false for a value it cannot read at all; the bool is
-// false here too, and the error names the corrupt column, which a wrong
-// password never produces.
+// A value that cannot be read at all is false with an error naming the corrupt
+// column, which a merely wrong password never produces.
 func (h *ArgonHasher) Check(value, hashedValue string, options ...Options) (bool, error) {
 	if hashedValue == "" {
 		return false, nil
@@ -189,9 +176,8 @@ func (h *ArgonHasher) Check(value, hashedValue string, options ...Options) (bool
 	}
 }
 
-// NeedsRehash answers ArgonHasher::needsRehash, which is password_needs_rehash:
-// true when the hash was not written by this algorithm with these parameters. A
-// value it cannot read needs a rehash too, as in PHP.
+// NeedsRehash is true when the hash was not written by this algorithm with
+// these parameters. A value that cannot be read needs a rehash too.
 func (h *ArgonHasher) NeedsRehash(hashedValue string, options ...Options) bool {
 	p, ok := Info(hashedValue)
 	if !ok {
@@ -204,43 +190,40 @@ func (h *ArgonHasher) NeedsRehash(hashedValue string, options ...Options) bool {
 		int(p.Threads) != h.threadsOf(o)
 }
 
-// VerifyConfiguration answers ArgonHasher::verifyConfiguration: the hash uses
-// this algorithm and was written with parameters no stronger than the ones
-// configured.
+// VerifyConfiguration reports whether the hash uses this algorithm and was
+// written with parameters no stronger than the configured ones.
 func (h *ArgonHasher) VerifyConfiguration(value string) bool {
 	return h.isUsingCorrectAlgorithm(value) && h.isUsingValidOptions(value)
 }
 
-// SetMemory answers ArgonHasher::setMemory and returns the hasher, which is the
-// Go reading of PHP's "return $this".
+// SetMemory sets the argon2 memory cost and returns the hasher, so calls chain.
 func (h *ArgonHasher) SetMemory(memory int) *ArgonHasher {
 	h.memory = memory
 	return h
 }
 
-// SetTime answers ArgonHasher::setTime and returns the hasher.
+// SetTime sets the number of argon2 passes and returns the hasher.
 func (h *ArgonHasher) SetTime(time int) *ArgonHasher {
 	h.time = time
 	return h
 }
 
-// SetThreads answers ArgonHasher::setThreads and returns the hasher.
+// SetThreads sets the argon2 degree of parallelism and returns the hasher.
 func (h *ArgonHasher) SetThreads(threads int) *ArgonHasher {
 	h.threads = threads
 	return h
 }
 
-// isUsingCorrectAlgorithm answers the protected
-// ArgonHasher::isUsingCorrectAlgorithm.
+// isUsingCorrectAlgorithm reports whether hashedValue was written by this
+// hasher's algorithm.
 func (h *ArgonHasher) isUsingCorrectAlgorithm(hashedValue string) bool {
 	p, ok := Info(hashedValue)
 	return ok && p.Algorithm == h.algorithm
 }
 
-// isUsingValidOptions answers the protected ArgonHasher::isUsingValidOptions.
-// PHP first refuses an info array whose costs are not integers; the parser here
-// refuses the same values before they reach Params, so an unreadable hash is
-// false.
+// isUsingValidOptions reports whether hashedValue was written with costs no
+// higher than this hasher's. A hash whose costs cannot be parsed is refused
+// before it reaches [Params], so an unreadable hash is false.
 func (h *ArgonHasher) isUsingValidOptions(hashedValue string) bool {
 	p, ok := Info(hashedValue)
 	if !ok || p.Memory == 0 || p.Time == 0 || p.Threads == 0 {
@@ -249,7 +232,8 @@ func (h *ArgonHasher) isUsingValidOptions(hashedValue string) bool {
 	return int(p.Memory) <= h.memory && int(p.Time) <= h.time && int(p.Threads) <= h.threads
 }
 
-// memoryOf answers the protected ArgonHasher::memory.
+// memoryOf is the memory cost for this call: the option when given, otherwise
+// the hasher's own.
 func (h *ArgonHasher) memoryOf(o Options) int {
 	if o.Memory > 0 {
 		return o.Memory
@@ -257,7 +241,8 @@ func (h *ArgonHasher) memoryOf(o Options) int {
 	return h.memory
 }
 
-// timeOf answers the protected ArgonHasher::time.
+// timeOf is the number of passes for this call: the option when given,
+// otherwise the hasher's own.
 func (h *ArgonHasher) timeOf(o Options) int {
 	if o.Time > 0 {
 		return o.Time
@@ -265,9 +250,8 @@ func (h *ArgonHasher) timeOf(o Options) int {
 	return h.time
 }
 
-// threadsOf answers the protected ArgonHasher::threads. PHP forces one thread
-// when the argon2 provider is libsodium; Go has one provider, so there is
-// nothing to force.
+// threadsOf is the degree of parallelism for this call: the option when given,
+// otherwise the hasher's own.
 func (h *ArgonHasher) threadsOf(o Options) int {
 	if o.Threads > 0 {
 		return o.Threads
@@ -275,44 +259,42 @@ func (h *ArgonHasher) threadsOf(o Options) int {
 	return h.threads
 }
 
-// Argon2IdHasher answers Illuminate\Hashing\Argon2IdHasher: the argon2 hasher
-// over argon2id rather than argon2i. In PHP it overrides only the algorithm and
-// the message of the failed algorithm check; here the algorithm is a field, so
-// the inherited methods already read it.
+// Argon2IdHasher is [ArgonHasher] over argon2id rather than argon2i. The
+// algorithm is a field, so the embedded methods already read it.
 type Argon2IdHasher struct {
 	ArgonHasher
 }
 
-// NewArgon2IdHasher answers Argon2IdHasher::__construct, which is the inherited
-// ArgonHasher::__construct over PASSWORD_ARGON2ID.
+// NewArgon2IdHasher returns an argon2id hasher. It takes the same options as
+// [NewArgonHasher].
 func NewArgon2IdHasher(options ...Options) *Argon2IdHasher {
 	h := &Argon2IdHasher{ArgonHasher: *NewArgonHasher(options...)}
 	h.algorithm = Argon2id
 	return h
 }
 
-// SetMemory answers ArgonHasher::setMemory, returning this hasher so a chain
-// stays on the argon2id type as PHP's "return $this" does.
+// SetMemory sets the argon2 memory cost and returns this hasher, so a chain
+// stays on the argon2id type.
 func (h *Argon2IdHasher) SetMemory(memory int) *Argon2IdHasher {
 	h.ArgonHasher.SetMemory(memory)
 	return h
 }
 
-// SetTime answers ArgonHasher::setTime, returning this hasher.
+// SetTime sets the number of passes and returns this hasher.
 func (h *Argon2IdHasher) SetTime(time int) *Argon2IdHasher {
 	h.ArgonHasher.SetTime(time)
 	return h
 }
 
-// SetThreads answers ArgonHasher::setThreads, returning this hasher.
+// SetThreads sets the degree of parallelism and returns this hasher.
 func (h *Argon2IdHasher) SetThreads(threads int) *Argon2IdHasher {
 	h.ArgonHasher.SetThreads(threads)
 	return h
 }
 
-// BcryptHasher answers Illuminate\Hashing\BcryptHasher. It is the hasher a
-// users table imported from a PHP application was written with, so it exists to
-// read those rows; the framework's own Make writes argon2id.
+// BcryptHasher is the hasher a users table imported from an existing
+// application was written with, so it exists to read those rows; the
+// package-level [Make] writes argon2id.
 type BcryptHasher struct {
 	AbstractHasher
 
@@ -321,8 +303,8 @@ type BcryptHasher struct {
 	limit           int
 }
 
-// NewBcryptHasher answers BcryptHasher::__construct. An absent option keeps the
-// PHP default: 12 rounds, verify off, no length limit.
+// NewBcryptHasher returns a bcrypt hasher. An absent option keeps the default:
+// 12 rounds, verify off, no length limit.
 func NewBcryptHasher(options ...Options) *BcryptHasher {
 	o := firstOption(options)
 	h := &BcryptHasher{
@@ -336,17 +318,14 @@ func NewBcryptHasher(options ...Options) *BcryptHasher {
 	return h
 }
 
-// Algorithm reports which algorithm this hasher writes. BcryptHasher has no
-// protected algorithm() in PHP because it names PASSWORD_BCRYPT inline; this
-// reports the same constant.
+// Algorithm reports which algorithm this hasher writes, which is always bcrypt.
 func (h *BcryptHasher) Algorithm() Algorithm {
 	return Bcrypt
 }
 
-// Make answers BcryptHasher::make. A value longer than the configured 'limit'
-// is ErrValueTooLong, which is the InvalidArgumentException the PHP throws, and
-// the length is counted in bytes as strlen counts it. bcrypt itself refuses a
-// value over 72 bytes, which is the RuntimeException case.
+// Make hashes value. A value longer than the configured Limit is
+// [ErrValueTooLong], and the length is counted in bytes. bcrypt itself refuses
+// a value over 72 bytes.
 func (h *BcryptHasher) Make(value string, options ...Options) (string, error) {
 	if h.limit > 0 && len(value) > h.limit {
 		return "", fmt.Errorf("%w: value must be less than %d bytes", ErrValueTooLong, h.limit)
@@ -358,9 +337,9 @@ func (h *BcryptHasher) Make(value string, options ...Options) (string, error) {
 	return string(hashed), nil
 }
 
-// Check answers BcryptHasher::check. An empty hashed value is false. With
-// 'verify' set, a hash written by another algorithm is ErrWrongAlgorithm, which
-// is the RuntimeException the PHP throws.
+// Check reports whether value hashes to hashedValue. An empty hashed value is
+// false. With Verify set, a hash written by another algorithm is
+// [ErrWrongAlgorithm].
 func (h *BcryptHasher) Check(value, hashedValue string, options ...Options) (bool, error) {
 	if hashedValue == "" {
 		return false, nil
@@ -378,8 +357,8 @@ func (h *BcryptHasher) Check(value, hashedValue string, options ...Options) (boo
 	}
 }
 
-// NeedsRehash answers BcryptHasher::needsRehash, which is password_needs_rehash
-// against PASSWORD_BCRYPT and the effective cost.
+// NeedsRehash is true when the hash is not bcrypt, or was written at a cost
+// other than the effective one.
 func (h *BcryptHasher) NeedsRehash(hashedValue string, options ...Options) bool {
 	p, ok := Info(hashedValue)
 	if !ok {
@@ -388,27 +367,26 @@ func (h *BcryptHasher) NeedsRehash(hashedValue string, options ...Options) bool 
 	return p.Algorithm != Bcrypt || p.Cost != h.cost(firstOption(options))
 }
 
-// VerifyConfiguration answers BcryptHasher::verifyConfiguration: the hash is
-// bcrypt and its cost is no higher than the configured rounds.
+// VerifyConfiguration reports whether the hash is bcrypt and its cost is no
+// higher than the configured rounds.
 func (h *BcryptHasher) VerifyConfiguration(value string) bool {
 	return h.isUsingCorrectAlgorithm(value) && h.isUsingValidOptions(value)
 }
 
-// SetRounds answers BcryptHasher::setRounds and returns the hasher, which is
-// the Go reading of PHP's "return $this".
+// SetRounds sets the bcrypt cost factor and returns the hasher, so calls chain.
 func (h *BcryptHasher) SetRounds(rounds int) *BcryptHasher {
 	h.rounds = rounds
 	return h
 }
 
-// isUsingCorrectAlgorithm answers the protected
-// BcryptHasher::isUsingCorrectAlgorithm.
+// isUsingCorrectAlgorithm reports whether hashedValue was written by bcrypt.
 func (h *BcryptHasher) isUsingCorrectAlgorithm(hashedValue string) bool {
 	p, ok := Info(hashedValue)
 	return ok && p.Algorithm == Bcrypt
 }
 
-// isUsingValidOptions answers the protected BcryptHasher::isUsingValidOptions.
+// isUsingValidOptions reports whether hashedValue was written at a cost no
+// higher than this hasher's rounds.
 func (h *BcryptHasher) isUsingValidOptions(hashedValue string) bool {
 	p, ok := Info(hashedValue)
 	if !ok || p.Cost == 0 {
@@ -417,8 +395,8 @@ func (h *BcryptHasher) isUsingValidOptions(hashedValue string) bool {
 	return p.Cost <= h.rounds
 }
 
-// cost answers the protected BcryptHasher::cost, which reads 'rounds' from the
-// options array and falls back to the configured rounds.
+// cost is the bcrypt cost for this call: the option when given, otherwise the
+// configured rounds.
 func (h *BcryptHasher) cost(o Options) int {
 	if o.Rounds > 0 {
 		return o.Rounds

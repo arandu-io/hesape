@@ -10,9 +10,8 @@ import (
 
 // PendingBatch is a batch being described, before anything is written.
 //
-// It is Illuminate's PendingBatch: the same builder, the same callback names,
-// the same `dispatch` at the end. It collects the first error it makes rather
-// than returning one per call -- Add cannot both chain and return an error, and
+// It collects the first error it makes rather than returning one per call --
+// Add cannot both chain and return an error, and
 // a builder whose every step has to be checked is a builder nobody uses.
 // Dispatch is where the error surfaces, and Dispatch is the call that could act
 // on it anyway.
@@ -26,11 +25,10 @@ type PendingBatch struct {
 
 // NewBatch starts describing a batch.
 //
-// Illuminate spells this `Bus::batch($jobs)->name('...')`; both halves exist
-// here -- Dispatcher.Batch takes the jobs and Name sets the name -- and this is
-// the constructor for the common case of naming it first. The name is for
-// people: it is what the batch is called on a dashboard, and nothing looks a
-// batch up by it.
+// Dispatcher.Batch takes the jobs and Name sets the name; this is the
+// constructor for the common case of naming it first. The name is for people:
+// it is what the batch is called on a dashboard, and nothing looks a batch up
+// by it.
 func NewBatch(name string) *PendingBatch {
 	return &PendingBatch{name: name}
 }
@@ -83,9 +81,7 @@ func (p *PendingBatch) Before(name string, payload any) *PendingBatch {
 
 // BeforeCallbacks is the job Before named.
 //
-// Illuminate returns an array because it takes any number of closures. Here a
-// moment names one job, and the slice is empty or has one in it -- the shape is
-// kept so that code ported from PHP reads the same.
+// A moment names one job, so the slice is empty or has one in it.
 func (p *PendingBatch) BeforeCallbacks() []Step { return declaredSteps(p.options.Before) }
 
 // Progress names the job dispatched after every job in the batch reports.
@@ -119,8 +115,8 @@ func (p *PendingBatch) CatchCallbacks() []Step { return declaredSteps(p.options.
 // them.
 //
 // Catch is the first failure; Failure is each of them. A batch that does not
-// allow failures never reaches a second one, which is why Illuminate only runs
-// this one when AllowFailures is on.
+// allow failures never reaches a second one, which is why this one runs only
+// when AllowFailures is on.
 func (p *PendingBatch) Failure(name string, payload any) *PendingBatch {
 	return p.callback(&p.options.Failure, name, payload)
 }
@@ -145,9 +141,8 @@ func (p *PendingBatch) FinallyCallbacks() []Step { return declaredSteps(p.option
 // operation is worse than finishing none of it. An import that is genuinely
 // row-by-row independent is the case this exists for.
 //
-// Illuminate takes an optional argument that is either a bool or a failure
-// callback; the callback half is Failure here, because one method that means
-// two things is the thing RULE 9 refuses.
+// It takes no argument: naming the failure callback is [PendingBatch.Failure],
+// because one method that means two things is one method too many.
 func (p *PendingBatch) AllowFailures() *PendingBatch {
 	p.options.AllowFailures = true
 	return p
@@ -181,9 +176,9 @@ func (p *PendingBatch) Connection() string { return p.options.Connection }
 // WithOption hangs an application's own bookkeeping off the batch: the id of
 // the upload the import came from, the user who pressed the button.
 //
-// The value is a string rather than Illuminate's `mixed`, because the options
-// are written to one column and read back by every replica: a value that only
-// this binary can decode is a value the next release cannot read.
+// The value is a string because the options are written to one column and read
+// back by every replica: a value that only this binary can decode is a value
+// the next release cannot read.
 func (p *PendingBatch) WithOption(key, value string) *PendingBatch {
 	if p.options.Extra == nil {
 		p.options.Extra = make(map[string]string)
@@ -268,8 +263,8 @@ func (p *PendingBatch) Dispatch(ctx context.Context, g auth.Grant, r BatchReposi
 // DispatchIf dispatches the batch when the condition holds, and reports the
 // zero Batch and no error when it does not.
 //
-// The condition is the last argument rather than Illuminate's only one, because
-// the context comes first in Go and a Batch has to be dispatched somewhere.
+// The condition is the last argument because the context comes first and a
+// Batch has to be dispatched somewhere.
 func (p *PendingBatch) DispatchIf(ctx context.Context, g auth.Grant, r BatchRepository, q Queue, ok bool) (Batch, error) {
 	if !ok {
 		return Batch{}, nil
@@ -285,11 +280,9 @@ func (p *PendingBatch) DispatchUnless(ctx context.Context, g auth.Grant, r Batch
 // DispatchAfterResponse stores the batch now and pushes its jobs when the
 // Dispatcher is told the response has gone out.
 //
-// It is Illuminate's PendingBatch::dispatchAfterResponse: the row exists as
-// soon as the request is handled, so the id can be returned to the browser,
-// and the work starts once nobody is waiting on it. Dispatcher.Terminating is
-// what runs it -- there is no container to hang a terminating callback on
-// (ADR 0001).
+// The row exists as soon as the request is handled, so the id can be returned
+// to the browser, and the work starts once nobody is waiting on it.
+// Dispatcher.Terminating is what runs it.
 func (p *PendingBatch) DispatchAfterResponse(ctx context.Context, g auth.Grant, d *Dispatcher) (Batch, error) {
 	if d == nil || d.repository == nil || d.queue == nil {
 		return Batch{}, fmt.Errorf("bus: dispatching the batch %q after the response needs a dispatcher with a repository and a queue", p.name)
@@ -348,7 +341,7 @@ func (p *PendingBatch) fail(err error) {
 	}
 }
 
-// declaredSteps is a callback slot as the slice Illuminate returns.
+// declaredSteps is a callback slot as a slice: empty, or the one job it names.
 func declaredSteps(s Step) []Step {
 	if !s.declared() {
 		return nil

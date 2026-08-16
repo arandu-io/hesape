@@ -26,10 +26,10 @@ type field struct {
 	name  string
 	rules []*rule
 
-	// primary is the wildcard name this field was expanded from -- "items.*.price"
-	// for "items.0.price" -- and empty for a field written without one. It is
-	// Laravel's $implicitAttributes read backwards, and it is what lets a
-	// message override still be keyed on the name somebody wrote.
+	// primary is the wildcard name this field was expanded from --
+	// "items.*.price" for "items.0.price" -- and empty for a field written
+	// without one. It is what lets a message override still be keyed on the
+	// name somebody wrote.
 	primary string
 
 	// bail stops the field at its first failure.
@@ -39,15 +39,13 @@ type field struct {
 	// that is the difference a PATCH is made of.
 	sometimes bool
 	// nullable stops the field when the value is NULL rather than when it is
-	// empty. Laravel's isNotNullIfMarkedAsNullable.
+	// empty.
 	nullable bool
 	// numeric is set by numeric, integer or decimal, and makes every size rule
-	// on this field measure the value rather than the characters. Laravel's
-	// $numericRules.
+	// on this field measure the value rather than the characters.
 	numeric bool
 	// file is set by file, image, mimes, mimetypes, extensions or dimensions,
-	// and makes a size limit on this field mean KILOBYTES. Laravel's
-	// $fileRules.
+	// and makes a size limit on this field mean KILOBYTES.
 	file bool
 	// hasImplicit records that the field declares at least one implicit rule,
 	// which is what shouldStopValidating asks before it stops.
@@ -110,8 +108,8 @@ func (s *Set) Source() (file string, line int) { return s.file, s.line }
 // It is Make plus Passes for the common case: an HTML form, no upload, no rule
 // that leaves the process. A set with `unique`, `exists`, `current_password` or
 // `active_url` in it goes through Make instead, which is where the Grant, the
-// verifier and the context are given -- those four fail closed here, on
-// purpose: RULE 17 has no exception for a read, and a rule set has no Grant.
+// verifier and the context are given -- those four fail closed here, on purpose:
+// a read is authorized like any other, and a rule set carries no Grant.
 //
 // The input is url.Values rather than Data because that is what a form arrives
 // as; DataFrom is the conversion, and a name sent twice becomes a list.

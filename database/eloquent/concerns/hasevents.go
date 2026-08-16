@@ -11,9 +11,6 @@ import "sync"
 // by an application is spelled as, and what shows up in a log line. Anything
 // declared as an Event is fireable, including a name this package does not
 // define.
-//
-// Answers the model events Illuminate\Database\Eloquent\Concerns\HasEvents
-// declares in $observables.
 type Event string
 
 // The observable events, spelled as the PHP spells them.
@@ -38,12 +35,10 @@ const (
 // which is the PHP's `if ($this->fireModelEvent('saving') === false)`.
 type Listener func(model any) bool
 
-// HasEvents answers Illuminate\Database\Eloquent\Concerns\HasEvents.
+// HasEvents is a model's listener registry, and what fires them.
 //
-// The PHP dispatches through the container's event dispatcher and resolves
-// listeners by class name. There is no container (ADR 0001) and no class name,
-// so listeners are functions registered on the model's own registry -- which is
-// what an observer is, once the resolution is taken out.
+// Listeners are functions registered on the model's own registry; there is no
+// dispatcher to look one up in and no name to resolve.
 //
 // A listener that returns false stops the operation. That is the whole reason
 // the return value is a bool rather than nothing: creating and deleting are

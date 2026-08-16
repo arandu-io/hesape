@@ -11,16 +11,13 @@ const CreatedAt = "created_at"
 // UpdatedAt is the default updated_at column name.
 const UpdatedAt = "updated_at"
 
-// HasTimestamps answers
-// Illuminate\Database\Eloquent\Concerns\HasTimestamps.
+// HasTimestamps stamps created_at on an insert and updated_at on both.
 //
-// It stamps created_at on an insert and updated_at on both. The interesting
-// part is what it does not do: the values are taken from the process clock,
-// which means two application servers with a drifting clock write rows whose
-// order does not match the order they happened in. That is the PHP's behaviour
-// and it is kept, because the alternative -- the database's clock, through a
-// function in the statement -- makes the value unreadable before the write and
-// unavailable to the model that just saved.
+// The interesting part is what it does not do: the values are taken from the
+// process clock, which means two application servers with a drifting clock write
+// rows whose order does not match the order they happened in. The alternative --
+// the database's clock, through a function in the statement -- makes the value
+// unreadable before the write and unavailable to the model that just saved.
 type HasTimestamps struct {
 	timestamps    bool
 	initialized   bool

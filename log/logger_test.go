@@ -178,11 +178,10 @@ func TestParseLevelKnowsTheEightNames(t *testing.T) {
 	}
 }
 
-// TestTheEightNamesAreTheOnlyEight: it lowercased and trimmed first and took
-// "warn" as a fifth name for warning, so "WARNING", " info " and "warn" all
-// parsed where PHP's isset($levels[$level]) misses every one of them. Two
-// spellings of one level is two spellings of one configuration value, and
-// LOG_LEVEL=warn named a level the handler never prints under that name.
+// TestTheEightNamesAreTheOnlyEight: no case folding, no trimming, and no "warn"
+// beside "warning". Two spellings of one level is two spellings of one
+// configuration value, and LOG_LEVEL=warn would name a level the handler never
+// prints under that name.
 func TestTheEightNamesAreTheOnlyEight(t *testing.T) {
 	for _, name := range []string{"warn", "WARNING", " info ", "Debug", "INFO", ""} {
 		if _, err := log.ParseLevel(name); err == nil {

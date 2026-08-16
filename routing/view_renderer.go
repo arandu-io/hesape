@@ -11,10 +11,9 @@ import (
 // layer depends on routing for URL generation, which is a cycle. The concrete
 // is hesape/view's Factory, wired by the kernel through SetViewRenderer.
 //
-// The contract is the subset of Illuminate\Contracts\View\Factory that a
-// redirect-to-view route touches: make a view by name, hand it data, and let
-// it write the response. How the view renders -- kyse plus HTMX, never Node
-// (REGRA 13) -- is the view layer's concern.
+// The contract is what a redirect-to-view route touches: make a view by name,
+// hand it data, and let it write the response. How the view renders is the
+// view layer's concern.
 type ViewRenderer interface {
 	// Render writes the rendered view to w. The status is the one a View
 	// route answers with, 200 by default, and headers are the caller's to

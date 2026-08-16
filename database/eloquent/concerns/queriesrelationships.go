@@ -8,9 +8,8 @@ import (
 	"github.com/arandu-io/hesape/str"
 )
 
-// QueriesRelationships answers
-// Illuminate\Database\Eloquent\Concerns\QueriesRelationships: filtering a query
-// by what a relation contains, without loading it.
+// QueriesRelationships filters a query by what a relation contains, without
+// loading it.
 //
 // Every function here compiles to a subquery correlated by column, never by
 // value -- `where exists (select * from posts where posts.user_id = users.id)`.
@@ -20,11 +19,12 @@ import (
 //
 // They are functions rather than builder methods because the Eloquent builder
 // lives in the eloquent package, which imports this one. The signature carries
-// what the PHP reads off $this: the query being filtered, and the relation.
+// what a method would read off the receiver: the query being filtered, and the
+// relation.
 //
-// The relation must be built with relations.NoConstraints -- the PHP's
-// getRelationWithoutConstraints -- or the subquery arrives already narrowed to
-// one parent, which is the mistake that makes whereHas return everything.
+// The relation must be built with relations.NoConstraints, or the subquery
+// arrives already narrowed to one parent, which is the mistake that makes
+// WhereHas return everything.
 
 // Has answers QueriesRelationships::has.
 //

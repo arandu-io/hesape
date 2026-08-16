@@ -20,9 +20,7 @@ type TB interface {
 
 // AssertExists fails the test when the key is not there for this tenant.
 //
-// content is optional: pass one value to also assert what the file holds. It is
-// Illuminate's assertExists($path, $content = null), and the variadic is that
-// optional argument.
+// content is optional: pass one value to also assert what the file holds.
 func (d *Disk) AssertExists(ctx context.Context, t TB, g auth.Grant, key string, content ...[]byte) {
 	t.Helper()
 

@@ -9,18 +9,16 @@ import (
 
 // CronExpression is a parsed five-field cron expression.
 //
-// It answers dragonmantank/cron-expression's CronExpression, which is what
-// Event::expressionPasses and Event::nextRunDate go through. It is written here
-// rather than pulled in because the module declares one dependency (ADR 0048)
-// and this is eighty lines.
+// It is written here rather than pulled in as a dependency, because the
+// module declares only one and this is eighty lines.
 //
-// Five fields, not six: no seconds. Sub-minute repetition is Event.RepeatSeconds,
-// exactly as it is in Laravel -- the expression stays every-minute and
+// Five fields, not six: no seconds. Sub-minute repetition is
+// Event.RepeatSeconds -- the expression stays every-minute and
 // Runner.repeatEvents loops within the minute.
 //
 // What it supports is the syntax people write: `*`, `5`, `1-5`, `*/15`,
-// `1,15,30`, and the shorthands `@hourly`, `@daily`, `@midnight`, `@weekly` and
-// `@monthly`.
+// `1,15,30`, and the shorthands `@hourly`, `@daily`, `@midnight`, `@weekly`
+// and `@monthly`.
 type CronExpression struct {
 	minute  fieldSet
 	hour    fieldSet
@@ -30,9 +28,7 @@ type CronExpression struct {
 	spec    string
 }
 
-// String has no Illuminate counterpart: it is what answers
-// dragonmantank/cron-expression's CronExpression::getExpression here, and it
-// returns the expression it was parsed from, for schedule:list.
+// String returns the expression it was parsed from, for schedule:list.
 func (c CronExpression) String() string { return c.spec }
 
 // fieldSet is which values of one field match. Fixed size because every cron
@@ -40,10 +36,7 @@ func (c CronExpression) String() string { return c.spec }
 // versus none.
 type fieldSet [60]bool
 
-// ParseCronExpression has no Illuminate counterpart: it reads a cron expression.
-//
-// It answers `new CronExpression($spec)` in dragonmantank/cron-expression, which
-// throws where this returns an error.
+// ParseCronExpression reads a cron expression.
 func ParseCronExpression(spec string) (CronExpression, error) {
 	trimmed := strings.TrimSpace(spec)
 
@@ -85,8 +78,7 @@ func ParseCronExpression(spec string) (CronExpression, error) {
 	return c, nil
 }
 
-// MustParseCronExpression has no Illuminate counterpart: it is
-// ParseCronExpression for a constant.
+// MustParseCronExpression is ParseCronExpression for a constant.
 //
 // It panics, which is right for an expression written in source: a schedule
 // nobody can parse must not reach the runner.
@@ -153,11 +145,11 @@ func value(text string, min, max int) (int, error) {
 
 // IsDue reports whether the expression fires in the minute of t.
 //
-// It answers CronExpression::isDue. Day-of-month and day-of-week are OR when
-// both are restricted, which is the behaviour of every cron since Vixie:
-// "0 0 1 * 1" means the first of the month AND every Monday, not their
-// intersection. It surprises people, and matching the surprise is better than
-// being the one implementation that differs.
+// Day-of-month and day-of-week are OR when both are restricted, which is the
+// behaviour of every cron since Vixie: "0 0 1 * 1" means the first of the
+// month AND every Monday, not their intersection. It surprises people, and
+// matching the surprise is better than being the one implementation that
+// differs.
 func (c CronExpression) IsDue(t time.Time) bool {
 	if !c.minute[t.Minute()] || !c.hour[t.Hour()] || !c.month[int(t.Month())] {
 		return false
@@ -180,10 +172,10 @@ func (c CronExpression) IsDue(t time.Time) bool {
 
 // GetNextRunDate returns the first minute after t that matches.
 //
-// It answers CronExpression::getNextRunDate. It walks minute by minute, bounded
-// to a year: an expression that matches nothing in a year matches nothing at all
-// -- February 30th, for instance -- and returning the zero time is what lets
-// schedule:list say so instead of hanging.
+// It walks minute by minute, bounded to a year: an expression that matches
+// nothing in a year matches nothing at all -- February 30th, for instance --
+// and returning the zero time is what lets schedule:list say so instead of
+// hanging.
 func (c CronExpression) GetNextRunDate(t time.Time) time.Time {
 	at := t.Truncate(time.Minute)
 	for range 366 * 24 * 60 {

@@ -1,28 +1,17 @@
-// Package encryption mirrors Illuminate\Encryption.
+// Package encryption encrypts, decrypts and signs values with the application
+// key.
 //
-// The files it answers to, in the clone at
-// laravel_illuminate/encryption:
+// [Encrypter] is the type that holds the key. [Encrypt] and [Decrypt] carry an
+// arbitrary Go value through JSON; [Encrypter.EncryptString] and
+// [Encrypter.DecryptString] carry a string as it is. [Supported] reports
+// whether a key and cipher pair can be used at all, and [AppearsEncrypted]
+// recognises a payload written by this package without needing the key.
 //
-//	Encrypter.php                  -- [Encrypter], and the package functions
-//	                                  [Encrypt], [Decrypt], [Supported],
-//	                                  [AppearsEncrypted]
-//	EncryptionServiceProvider.php  -- parseKey and key are [ParseKey], which
-//	                                  config.Load calls
-//	MissingAppKeyException.php     -- [ErrMissingAppKey], returned by [ParseKey]
-//	                                  for the empty key
+// [ParseKey] reads the "base64:" form a configuration file holds and returns
+// [ErrMissingAppKey] for the empty key, so an unkeyed application stops at boot
+// rather than at the first request that needed the key.
 //
-// # What is not ported, and why
-//
-// EncryptionServiceProvider::register is the only public method of the
-// component that is absent. Its body is two container bindings -- singleton
-// 'encrypter' and the SerializableClosure secret -- and it is reason 2 of the
-// porting rule: a method that exists only to serve the container, the facade
-// and the service provider, all three of which ADR 0001 and ADR 0002 rejected.
-// Everything register does that is not wiring is [ParseKey], and config.Load
-// calls it at boot. There is nothing here for a caller to reach for.
-//
-// [Signer] has no counterpart in Illuminate\Encryption. It is the signing half
-// of Illuminate\Routing\UrlGenerator::signedRoute and of the password reset
-// token, kept here because it signs with the same application key and a second
-// place holding that key is a second place to get it wrong.
+// [Signer] signs and verifies URLs and tokens. It lives here because it signs
+// with the same application key, and a second place holding that key is a
+// second place to get it wrong.
 package encryption

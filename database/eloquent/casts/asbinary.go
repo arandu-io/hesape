@@ -6,35 +6,35 @@ import (
 	"strings"
 )
 
-// AsBinary answers Illuminate\Database\Eloquent\Casts\AsBinary: an identifier
-// stored as its sixteen raw bytes rather than as text.
+// AsBinary casts an identifier stored as its sixteen raw bytes rather than as
+// text.
 //
 // It is worth the trouble on a key column: a UUID as char(36) is 36 bytes and
 // compares character by character, and the same value as binary(16) is 16 and
 // compares as two words.
 //
-// The PHP delegates the two directions to Illuminate\Support\BinaryCodec. There
-// is no such helper here, and one that only this cast used would be a package
-// with a single caller, so the two formats are decoded below.
+// The two formats are decoded below rather than in a helper package with a
+// single caller.
 type AsBinary struct {
-	// Format answers the single cast argument: "uuid" or "ulid".
+	// Format selects the codec to use: "uuid" or "ulid".
 	Format string
 }
 
-// Formats answers BinaryCodec::formats: the formats the cast accepts.
+// Formats returns the formats the cast accepts: "uuid" and "ulid".
 func (AsBinary) Formats() []string { return []string{"uuid", "ulid"} }
 
-// UUID answers AsBinary::uuid. The PHP spells the static uuid.
+// UUID returns the cast configured for the uuid format.
 func (a AsBinary) UUID() AsBinary { return AsBinary{Format: "uuid"} }
 
-// ULID answers AsBinary::ulid. The PHP spells the static ulid.
+// ULID returns the cast configured for the ulid format.
 func (a AsBinary) ULID() AsBinary { return AsBinary{Format: "ulid"} }
 
-// Of answers AsBinary::of: the cast configured for one format.
+// Of returns the cast configured for format.
 func (a AsBinary) Of(format string) AsBinary { return AsBinary{Format: format} }
 
-// CastUsing answers AsBinary::castUsing. The PHP throws
-// InvalidArgumentException for a missing or unknown format; this returns it.
+// CastUsing returns the caster for Format, falling back to the first
+// argument when Format is unset. It returns an error when no format is given
+// or the format is not one Formats accepts.
 func (a AsBinary) CastUsing(arguments []string) (CastsAttributes, error) {
 	format := a.Format
 	if format == "" && len(arguments) > 0 {
@@ -56,7 +56,8 @@ type binaryCast struct {
 	format string
 }
 
-// Get answers the anonymous caster's get: the raw bytes back as text.
+// Get decodes the stored sixteen raw bytes and returns them formatted as
+// text, or an error if the stored value is not sixteen bytes long.
 func (b binaryCast) Get(model any, key string, value any, attributes map[string]any) (any, error) {
 	stored, ok := attributes[key]
 	if !ok || stored == nil {
@@ -81,7 +82,9 @@ func (b binaryCast) Get(model any, key string, value any, attributes map[string]
 	return encodeULID(raw), nil
 }
 
-// Set answers the anonymous caster's set: the text as its raw bytes.
+// Set parses value's text form and returns the column holding its sixteen
+// raw bytes, or an error if the text does not parse as the configured
+// format.
 func (b binaryCast) Set(model any, key string, value any, attributes map[string]any) (map[string]any, error) {
 	text, ok := asText(value)
 	if !ok {

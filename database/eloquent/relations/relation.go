@@ -15,7 +15,7 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// Model is Illuminate\Database\Eloquent\Model, as a relation uses it.
+// Model is what a relation asks of a model.
 //
 // It is an alias rather than a declaration: the type is defined in
 // relations/concerns, because Go forbids a subpackage from importing its
@@ -33,8 +33,6 @@ type Model = concerns.Model
 // same one and Go forbids a subpackage from importing its parent. Aliasing it
 // back means relations.Builder is that interface, not a second one shaped like
 // it.
-//
-// Answers Illuminate\Database\Eloquent\Builder, as a relation uses it.
 type Builder = concerns.Builder
 
 // ErrMultipleRecordsFound is returned by the singular reads on a relation --
@@ -44,8 +42,6 @@ type Builder = concerns.Builder
 // It means the relation is not as unique as the caller assumed: a has-one
 // pointing at a column with duplicates, or a pivot row that exists twice. The
 // wrapping message carries the count and the table.
-//
-// Answers Illuminate\Database\MultipleRecordsFoundException.
 var ErrMultipleRecordsFound = errors.New("relations: more than one record matched a query that expected one")
 
 // ErrModelNotFound is returned by the failing reads on a relation -- the ones
@@ -55,16 +51,12 @@ var ErrMultipleRecordsFound = errors.New("relations: more than one record matche
 // answer nil instead, so seeing this error means the caller asked for a row
 // that has to exist. The wrapping message carries the table, and the key when
 // the lookup had one.
-//
-// Answers Illuminate\Database\Eloquent\ModelNotFoundException.
 var ErrModelNotFound = errors.New("relations: no query results for the model")
 
-// Relation answers the abstract Illuminate\Database\Eloquent\Relations\Relation.
+// Relation is the contract every relation type implements.
 //
-// The abstract class is two things at once -- a contract of five methods every
-// relation implements, and a body of thirty every relation inherits. Go splits
-// them: this interface is the contract, and BaseRelation is the body, the same
-// division the query package makes between Grammar and BaseGrammar.
+// The contract is here and the shared body is BaseRelation, the same division
+// the query package makes between Grammar and BaseGrammar.
 //
 // The four methods that matter are AddEagerConstraints, InitRelation, Match and
 // GetEager. They are what turns N+1 queries into two, and they are worth

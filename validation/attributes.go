@@ -15,24 +15,22 @@ import (
 	"github.com/arandu-io/hesape/str"
 )
 
-// This file answers to Illuminate\Validation\Concerns\ValidatesAttributes: one
-// method per rule, at the PHP's spelling, reading the PHP's body.
+// This file is one method per rule.
 //
-// Every one takes (attribute, value, parameters) even where the PHP declares
-// two arguments. The PHP calls them all through one line --
-// `$this->$method($attribute, $value, $parameters, $this)` -- and tolerates the
-// extra argument; a single Go signature is what lets the rule table hold the
-// method itself rather than a closure around it, and so what keeps the table
-// from being a second place where a rule's behaviour is written.
+// Every one takes (attribute, value, parameters), including the rules that read
+// only two of the three: one signature for all of them is what lets the rule
+// table hold the method itself rather than a closure around it, and so what
+// keeps the table from being a second place where a rule's behaviour is
+// written.
 //
-// `value` is `any` where the PHP says `mixed`, and `parameters` is []string
-// where the PHP says array<int, int|string>: a rule string carries text.
+// value is any, because a decoded body carries anything; parameters is []string,
+// because a rule string carries text.
 
-// numericRules answers to Validator::$numericRules: the three rules that make
+// numericRules are the three rules that make
 // every size rule on the field measure the value rather than the characters.
 var numericRules = []string{"numeric", "integer", "decimal"}
 
-// implicitRules answers to Validator::$implicitRules: the rules that run even
+// implicitRules are the rules that run even
 // when the value is blank, and whose failure stops the field.
 var implicitRules = []string{
 	"accepted", "accepted_if", "declined", "declined_if", "filled", "missing",
@@ -43,33 +41,33 @@ var implicitRules = []string{
 	"required_with_all", "required_without", "required_without_all",
 }
 
-// excludeRules answers to Validator::$excludeRules: the five whose failure
+// excludeRules are the five whose failure
 // removes the field from the validated data instead of putting a message on it.
 var excludeRules = []string{"exclude", "exclude_if", "exclude_unless", "exclude_with", "exclude_without"}
 
-// acceptable and declinable answer to the arrays validateAccepted and
-// validateDeclined compare against. The comparison is PHP's strict in_array, so
-// the bool and the int are separate cases in accepted rather than extra strings.
+// acceptable and declinable are the strings `accepted` and `declined` compare
+// against. The comparison is by type as well as by value, so the boolean and the
+// integer are separate cases in isAccepted rather than extra strings here.
 var (
 	acceptable = []string{"yes", "on", "1", "true"}
 	declinable = []string{"no", "off", "0", "false"}
 )
 
-// phpExtensions answers to the list shouldBlockPhpUpload refuses.
+// phpExtensions are the upload extensions ShouldBlockPhpUpload refuses.
 var phpExtensions = []string{"php", "php3", "php4", "php5", "php7", "php8", "phtml", "phar"}
 
 // ---------------------------------------------------------------------------
 // Accepted and declined.
 // ---------------------------------------------------------------------------
 
-// ValidateAccepted answers to validateAccepted. It implies the attribute is
-// required.
+// ValidateAccepted is `accepted`: the value is one of yes, on, 1 or true. It
+// implies the attribute is required.
 func (v *Validator) ValidateAccepted(attribute string, value any, parameters []string) bool {
 	return v.ValidateRequired(attribute, value, nil) && isAccepted(value)
 }
 
-// ValidateAcceptedIf answers to validateAcceptedIf: accepted when the other
-// attribute holds one of the given values.
+// ValidateAcceptedIf is `accepted_if`: accepted when the other attribute holds
+// one of the given values.
 func (v *Validator) ValidateAcceptedIf(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(2, parameters, "accepted_if") {
 		return false
@@ -81,13 +79,14 @@ func (v *Validator) ValidateAcceptedIf(attribute string, value any, parameters [
 	return true
 }
 
-// ValidateDeclined answers to validateDeclined. It implies the attribute is
-// required.
+// ValidateDeclined is `declined`: the value is one of no, off, 0 or false. It
+// implies the attribute is required.
 func (v *Validator) ValidateDeclined(attribute string, value any, parameters []string) bool {
 	return v.ValidateRequired(attribute, value, nil) && isDeclined(value)
 }
 
-// ValidateDeclinedIf answers to validateDeclinedIf.
+// ValidateDeclinedIf is `declined_if`: declined when the other attribute holds
+// one of the given values.
 func (v *Validator) ValidateDeclinedIf(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(2, parameters, "declined_if") {
 		return false
@@ -99,8 +98,8 @@ func (v *Validator) ValidateDeclinedIf(attribute string, value any, parameters [
 	return true
 }
 
-// isAccepted is the strict in_array of validateAccepted: the four strings, the
-// integer 1 and the boolean true, and nothing that merely looks like them.
+// isAccepted is what `accepted` accepts: the four strings, the integer 1 and the
+// boolean true, and nothing that merely looks like them.
 func isAccepted(value any) bool {
 	switch n := value.(type) {
 	case string:
@@ -115,7 +114,8 @@ func isAccepted(value any) bool {
 	return false
 }
 
-// isDeclined is the strict in_array of validateDeclined.
+// isDeclined is what `declined` accepts: the four strings, the integer 0 and the
+// boolean false.
 func isDeclined(value any) bool {
 	switch n := value.(type) {
 	case string:
@@ -134,17 +134,14 @@ func isDeclined(value any) bool {
 // The network.
 // ---------------------------------------------------------------------------
 
-// ValidateActiveUrl answers to validateActiveUrl: the host of the value has an
-// A or an AAAA record.
+// ValidateActiveUrl is `active_url`: the host of the value has an A or an AAAA
+// record.
 //
-// The name keeps the PHP's spelling of Url rather than the Go initialism (ADR
-// 0044 allows the initialism, and it is not taken here because `url` is the
-// rule somebody types and ValidateUrl would then read differently from its
-// neighbour ValidateActiveUrl).
+// The name spells Url rather than URL because `url` is the rule somebody types,
+// and ValidateUrl would then read differently from its neighbour here.
 //
-// This puts a DNS lookup on the request path. It is Laravel's rule and it does
-// what Laravel's does; the deadline comes from the Validator's context, which
-// is the request's.
+// This puts a DNS lookup on the request path. The deadline comes from the
+// Validator's context, which is the request's.
 func (v *Validator) ValidateActiveUrl(attribute string, value any, parameters []string) bool {
 	s, ok := asString(value)
 	if !ok {
@@ -158,8 +155,7 @@ func (v *Validator) ValidateActiveUrl(attribute string, value any, parameters []
 	return err == nil && len(records) > 0
 }
 
-// GetDNSRecords answers to getDnsRecords, with the initialism the Go spelling
-// asks for (ADR 0044).
+// GetDNSRecords returns the addresses the hostname resolves to.
 func (v *Validator) GetDNSRecords(hostname string) ([]string, error) {
 	addrs, err := v.resolver().LookupIPAddr(v.Context(), hostname)
 	if err != nil {
@@ -176,7 +172,7 @@ func (v *Validator) GetDNSRecords(hostname string) ([]string, error) {
 // Shape of the text.
 // ---------------------------------------------------------------------------
 
-// ValidateAscii answers to validateAscii.
+// ValidateAscii is `ascii`: every character is a 7-bit ASCII one.
 func (v *Validator) ValidateAscii(attribute string, value any, parameters []string) bool {
 	s, ok := asString(value)
 	if !ok {
@@ -185,22 +181,24 @@ func (v *Validator) ValidateAscii(attribute string, value any, parameters []stri
 	return str.IsASCII(s)
 }
 
-// ValidateBail answers to validateBail. It is a marker: Set.Validate reads it
-// and stops the field at its first failure.
+// ValidateBail is `bail`. It is a marker: Set.Validate reads it and stops the
+// field at its first failure.
 func (v *Validator) ValidateBail(attribute string, value any, parameters []string) bool { return true }
 
-// ValidateAlpha answers to validateAlpha. With the parameter "ascii" it is the
-// ASCII letters only, as the PHP's is.
+// ValidateAlpha is `alpha`: letters only. With the parameter "ascii" it is the
+// ASCII letters only.
 func (v *Validator) ValidateAlpha(attribute string, value any, parameters []string) bool {
 	return v.matchesAlphabet(value, parameters, alphaUnicode, alphaASCII)
 }
 
-// ValidateAlphaDash answers to validateAlphaDash.
+// ValidateAlphaDash is `alpha_dash`: letters, digits, dashes and underscores.
+// With the parameter "ascii" it is the ASCII ones only.
 func (v *Validator) ValidateAlphaDash(attribute string, value any, parameters []string) bool {
 	return v.matchesAlphabet(value, parameters, dashUnicode, dashASCII)
 }
 
-// ValidateAlphaNum answers to validateAlphaNum.
+// ValidateAlphaNum is `alpha_num`: letters and digits. With the parameter
+// "ascii" it is the ASCII ones only.
 func (v *Validator) ValidateAlphaNum(attribute string, value any, parameters []string) bool {
 	return v.matchesAlphabet(value, parameters, numUnicode, numASCII)
 }
@@ -215,39 +213,43 @@ func (v *Validator) matchesAlphabet(value any, parameters []string, unicoded, as
 	return unicoded.MatchString(stringOf(value))
 }
 
-// ValidateLowercase answers to validateLowercase.
+// ValidateLowercase is `lowercase`: the value is already all lower case.
 func (v *Validator) ValidateLowercase(attribute string, value any, parameters []string) bool {
 	s := stringOf(value)
 	return strings.ToLower(s) == s
 }
 
-// ValidateUppercase answers to validateUppercase.
+// ValidateUppercase is `uppercase`: the value is already all upper case.
 func (v *Validator) ValidateUppercase(attribute string, value any, parameters []string) bool {
 	s := stringOf(value)
 	return strings.ToUpper(s) == s
 }
 
-// ValidateStartsWith answers to validateStartsWith.
+// ValidateStartsWith is `starts_with`: the value begins with one of the given
+// prefixes.
 func (v *Validator) ValidateStartsWith(attribute string, value any, parameters []string) bool {
 	return anyAffix(parameters, strings.HasPrefix, stringOf(value))
 }
 
-// ValidateDoesntStartWith answers to validateDoesntStartWith.
+// ValidateDoesntStartWith is `doesnt_start_with`: the value begins with none of
+// the given prefixes.
 func (v *Validator) ValidateDoesntStartWith(attribute string, value any, parameters []string) bool {
 	return !anyAffix(parameters, strings.HasPrefix, stringOf(value))
 }
 
-// ValidateEndsWith answers to validateEndsWith.
+// ValidateEndsWith is `ends_with`: the value ends with one of the given
+// suffixes.
 func (v *Validator) ValidateEndsWith(attribute string, value any, parameters []string) bool {
 	return anyAffix(parameters, strings.HasSuffix, stringOf(value))
 }
 
-// ValidateDoesntEndWith answers to validateDoesntEndWith.
+// ValidateDoesntEndWith is `doesnt_end_with`: the value ends with none of the
+// given suffixes.
 func (v *Validator) ValidateDoesntEndWith(attribute string, value any, parameters []string) bool {
 	return !anyAffix(parameters, strings.HasSuffix, stringOf(value))
 }
 
-// ValidateString answers to validateString: is_string.
+// ValidateString is `string`: the value is text.
 //
 // It is not the tautology it looks like. A JSON body carries numbers, booleans
 // and lists, and this is the rule that refuses them where text was asked for.
@@ -260,8 +262,8 @@ func (v *Validator) ValidateString(attribute string, value any, parameters []str
 // Arrays.
 // ---------------------------------------------------------------------------
 
-// ValidateArray answers to validateArray: the value is an array, and with
-// parameters, an array with no key outside them.
+// ValidateArray is `array`: the value is an array, and with parameters, an array
+// with no key outside them.
 func (v *Validator) ValidateArray(attribute string, value any, parameters []string) bool {
 	if !isArray(value) {
 		return false
@@ -292,14 +294,15 @@ func (v *Validator) ValidateArray(attribute string, value any, parameters []stri
 	return true
 }
 
-// ValidateList answers to validateList: is_array && array_is_list. A Data is an
-// array with keys, so it is not a list; a []any is.
+// ValidateList is `list`: the value is an array with consecutive integer keys. A
+// Data is an array with names, so it is not a list; a []any is.
 func (v *Validator) ValidateList(attribute string, value any, parameters []string) bool {
 	_, ok := asList(value)
 	return ok
 }
 
-// ValidateRequiredArrayKeys answers to validateRequiredArrayKeys.
+// ValidateRequiredArrayKeys is `required_array_keys`: the value is a keyed array
+// holding every one of the named keys.
 func (v *Validator) ValidateRequiredArrayKeys(attribute string, value any, parameters []string) bool {
 	keyed, ok := value.(Data)
 	if !ok {
@@ -317,8 +320,8 @@ func (v *Validator) ValidateRequiredArrayKeys(attribute string, value any, param
 	return true
 }
 
-// ValidateContains answers to validateContains: the array holds every one of
-// the given values.
+// ValidateContains is `contains`: the array holds every one of the given
+// values.
 func (v *Validator) ValidateContains(attribute string, value any, parameters []string) bool {
 	list, ok := asList(value)
 	if !ok {
@@ -339,14 +342,12 @@ func (v *Validator) ValidateContains(attribute string, value any, parameters []s
 	return true
 }
 
-// ValidateDistinct answers to validateDistinct: no value repeats.
+// ValidateDistinct is `distinct`: no value repeats.
 //
-// Laravel expands `foo.*` into one rule per member and calls this once per
-// member, comparing each against its siblings. There are no wildcards here --
-// RULE 15 keeps the rule string a closed set -- so the rule is written against
-// the list itself and asked of it once, which is the same question. The
-// parameters are the PHP's: `ignore_case` compares case-insensitively and
-// `strict` compares types as well as values.
+// There are no wildcards in a rule string, so the rule is asked of the whole
+// list at once rather than once per member. The parameters are `ignore_case`,
+// which compares case-insensitively, and `strict`, which compares types as well
+// as values.
 func (v *Validator) ValidateDistinct(attribute string, value any, parameters []string) bool {
 	list, ok := asList(value)
 	if !ok {
@@ -376,21 +377,21 @@ func (v *Validator) ValidateDistinct(attribute string, value any, parameters []s
 	return true
 }
 
-// GetDistinctValues answers to getDistinctValues: the values `distinct`
-// compares. It is the list held at the attribute, for the reason
-// ValidateDistinct gives.
+// GetDistinctValues returns the values `distinct` compares: the list held at the
+// attribute, for the reason ValidateDistinct gives.
 func (v *Validator) GetDistinctValues(attribute string) []any {
 	return v.ExtractDistinctValues(attribute)
 }
 
-// ExtractDistinctValues answers to extractDistinctValues.
+// ExtractDistinctValues reads the attribute and returns it as a list, or nothing
+// when it holds no list.
 func (v *Validator) ExtractDistinctValues(attribute string) []any {
 	list, _ := asList(v.GetValue(attribute))
 	return list
 }
 
-// ValidateInArray answers to validateInArray: the value is one of the values
-// held by the other attribute.
+// ValidateInArray is `in_array`: the value is one of the values held by the
+// other attribute.
 func (v *Validator) ValidateInArray(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "in_array") {
 		return false
@@ -412,7 +413,8 @@ func (v *Validator) ValidateInArray(attribute string, value any, parameters []st
 // Size, and the four comparisons.
 // ---------------------------------------------------------------------------
 
-// ValidateBetween answers to validateBetween. Both bounds are inclusive.
+// ValidateBetween is `between`: the size is within the two bounds, both of them
+// inclusive.
 func (v *Validator) ValidateBetween(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(2, parameters, "between") {
 		return false
@@ -426,7 +428,7 @@ func (v *Validator) ValidateBetween(attribute string, value any, parameters []st
 	return size.Cmp(low) >= 0 && size.Cmp(high) <= 0
 }
 
-// ValidateMin answers to validateMin.
+// ValidateMin is `min`: the size is at or above the bound.
 func (v *Validator) ValidateMin(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "min") {
 		return false
@@ -436,8 +438,8 @@ func (v *Validator) ValidateMin(attribute string, value any, parameters []string
 	return okLow && okSize && size.Cmp(low) >= 0
 }
 
-// ValidateMax answers to validateMax. An upload that did not finish fails
-// before its size is asked for, as the PHP's does.
+// ValidateMax is `max`: the size is at or below the bound. An upload that did
+// not finish fails before its size is asked for.
 func (v *Validator) ValidateMax(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "max") {
 		return false
@@ -450,11 +452,11 @@ func (v *Validator) ValidateMax(attribute string, value any, parameters []string
 	return okHigh && okSize && size.Cmp(high) <= 0
 }
 
-// ValidateSize answers to validateSize.
+// ValidateSize is `size`: the size is exactly the given one.
 //
-// The size is four things under one name, exactly as getSize is: the characters
-// of a string, the value of a number when the field declares numeric, integer
-// or decimal, the members of an array, and the KILOBYTES of a file.
+// The size is four things under one name, as GetSize measures it: the characters
+// of a string, the value of a number when the field declares numeric, integer or
+// decimal, the members of an array, and the KILOBYTES of a file.
 func (v *Validator) ValidateSize(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "size") {
 		return false
@@ -464,30 +466,32 @@ func (v *Validator) ValidateSize(attribute string, value any, parameters []strin
 	return okWant && okSize && size.Cmp(want) == 0
 }
 
-// ValidateGt answers to validateGt.
+// ValidateGt is `gt`: greater than a literal bound, or than another attribute.
 func (v *Validator) ValidateGt(attribute string, value any, parameters []string) bool {
 	return v.compareToAnother(attribute, value, parameters, "gt", func(c int) bool { return c > 0 })
 }
 
-// ValidateGte answers to validateGte.
+// ValidateGte is `gte`: greater than or equal to a literal bound, or to another
+// attribute.
 func (v *Validator) ValidateGte(attribute string, value any, parameters []string) bool {
 	return v.compareToAnother(attribute, value, parameters, "gte", func(c int) bool { return c >= 0 })
 }
 
-// ValidateLt answers to validateLt.
+// ValidateLt is `lt`: less than a literal bound, or than another attribute.
 func (v *Validator) ValidateLt(attribute string, value any, parameters []string) bool {
 	return v.compareToAnother(attribute, value, parameters, "lt", func(c int) bool { return c < 0 })
 }
 
-// ValidateLte answers to validateLte.
+// ValidateLte is `lte`: less than or equal to a literal bound, or to another
+// attribute.
 func (v *Validator) ValidateLte(attribute string, value any, parameters []string) bool {
 	return v.compareToAnother(attribute, value, parameters, "lte", func(c int) bool { return c <= 0 })
 }
 
-// compareToAnother is the body the four comparisons share, in the PHP's order:
-// a literal bound when the parameter names no field, a numeric comparison when
-// the field declares numeric, a refusal when the two values are not the same
-// kind of thing, and a comparison of sizes otherwise.
+// compareToAnother is the body the four comparisons share, in this order: a
+// literal bound when the parameter names no field, a numeric comparison when the
+// field declares numeric, a refusal when the two values are not the same kind of
+// thing, and a comparison of sizes otherwise.
 func (v *Validator) compareToAnother(attribute string, value any, parameters []string, name string, ok func(int) bool) bool {
 	if !v.RequireParameterCount(1, parameters, name) {
 		return false
@@ -502,8 +506,8 @@ func (v *Validator) compareToAnother(attribute string, value any, parameters []s
 		}
 	}
 	if isBound {
-		// The parameter is a number and a field of that name does hold a value:
-		// Laravel refuses rather than guessing which was meant.
+		// The parameter is a number and a field of that name does hold a value.
+		// Refuse rather than guess which of the two was meant.
 		return false
 	}
 	if v.HasRule(attribute, numericRules) {
@@ -521,25 +525,22 @@ func (v *Validator) compareToAnother(attribute string, value any, parameters []s
 	return mineOK && theirsOK && ok(mine.Cmp(theirs))
 }
 
-// GetSize answers to getSize: what min, max, size, between and the four
-// comparisons measure.
+// GetSize is what min, max, size, between and the four comparisons measure.
 //
 // A number is its own size when the field declares numeric, integer or decimal;
-// an array is how many members it has; a file is its KILOBYTES; anything else
-// is how many characters it has. Characters, never bytes: a limit in bytes
-// rejects valid input in every language that needs more than one byte for a
-// letter.
+// an array is how many members it has; a file is its KILOBYTES; anything else is
+// how many characters it has. Characters, never bytes: a limit in bytes rejects
+// valid input in every language that needs more than one byte for a letter.
 //
-// The size is a *big.Rat and not a float64, which is what an audit proved
-// wrong: the PHP hands getSize's answer to BigNumber, which compares at
-// arbitrary precision, and 9007199254740993 and 9007199254740992 are the SAME
-// float64. So "numeric|max:9007199254740992" passed on the value
-// 9007199254740993, and a monetary limit or a quota was over-runnable by one
-// unit of rounding. math/big is stdlib and the comparison is now exact.
+// The size is a *big.Rat and not a float64, because 9007199254740993 and
+// 9007199254740992 are the SAME float64: "numeric|max:9007199254740992" would
+// pass on the value 9007199254740993, and a monetary limit or a quota would be
+// over-runnable by one unit of rounding. math/big is stdlib and the comparison
+// is exact.
 //
-// The bool is the MathException ensureExponentWithinAllowedRange throws: an
-// exponent outside the allowed range gives a value no size at all, and Go has
-// no throw. Every caller fails the rule on it, which is the closed answer.
+// The bool is false for an exponent outside the allowed range, which gives a
+// value no size at all. Every caller fails the rule on it, which is the closed
+// answer.
 func (v *Validator) GetSize(attribute string, value any) (*big.Rat, bool) {
 	if text, isNumber := numericText(value); isNumber && v.HasRule(attribute, numericRules) {
 		if !v.exponentWithinAllowedRange(attribute, text, value) {
@@ -556,10 +557,9 @@ func (v *Validator) GetSize(attribute string, value any) (*big.Rat, bool) {
 	return new(big.Rat).SetInt64(int64(len([]rune(stringOf(value))))), true
 }
 
-// exponentWithinAllowedRange answers to
-// ValidatesAttributes::ensureExponentWithinAllowedRange, which returns the value
-// or throws a MathException. There is no throw here, so the answer is the
-// question itself and the size has none.
+// exponentWithinAllowedRange reports whether the value's exponent is one the
+// package will size. Outside the range the value has no size at all, and the
+// rule asking for it fails.
 func (v *Validator) exponentWithinAllowedRange(attribute, text string, value any) bool {
 	_, exponent, written := strings.Cut(strings.ToLower(text), "e")
 	if !written {
@@ -567,13 +567,15 @@ func (v *Validator) exponentWithinAllowedRange(attribute, text string, value any
 	}
 	scale, err := strconv.Atoi(strings.TrimPrefix(exponent, "+"))
 	if err != nil {
-		// PHP's (int) cast of text it cannot read is zero, which is in range.
+		// Text that reads as no number at all is a zero exponent, which is in
+		// range.
 		scale = 0
 	}
 	return v.EnsureExponentWithinAllowedRange(scale, attribute, value)
 }
 
-// ValidateDigits answers to validateDigits.
+// ValidateDigits is `digits`: the value is digits only, and exactly the given
+// number of them.
 func (v *Validator) ValidateDigits(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "digits") {
 		return false
@@ -583,7 +585,8 @@ func (v *Validator) ValidateDigits(attribute string, value any, parameters []str
 	return ok && digitsOnly(s) && int64(len(s)) == want
 }
 
-// ValidateDigitsBetween answers to validateDigitsBetween.
+// ValidateDigitsBetween is `digits_between`: the value is digits only, and how
+// many of them is within the two bounds.
 func (v *Validator) ValidateDigitsBetween(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(2, parameters, "digits_between") {
 		return false
@@ -595,7 +598,8 @@ func (v *Validator) ValidateDigitsBetween(attribute string, value any, parameter
 	return okLow && okHigh && digitsOnly(s) && n >= low && n <= high
 }
 
-// ValidateMaxDigits answers to validateMaxDigits.
+// ValidateMaxDigits is `max_digits`: the value is digits only, and at most the
+// given number of them.
 func (v *Validator) ValidateMaxDigits(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "max_digits") {
 		return false
@@ -605,7 +609,8 @@ func (v *Validator) ValidateMaxDigits(attribute string, value any, parameters []
 	return ok && digitsOnly(s) && int64(len(s)) <= high
 }
 
-// ValidateMinDigits answers to validateMinDigits.
+// ValidateMinDigits is `min_digits`: the value is digits only, and at least the
+// given number of them.
 func (v *Validator) ValidateMinDigits(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "min_digits") {
 		return false
@@ -615,11 +620,12 @@ func (v *Validator) ValidateMinDigits(attribute string, value any, parameters []
 	return ok && digitsOnly(s) && int64(len(s)) >= low
 }
 
-// ValidateMultipleOf answers to validateMultipleOf.
+// ValidateMultipleOf is `multiple_of`: the value divides by the parameter with
+// no remainder.
 //
-// Zero on both sides fails, a zero numerator over a non-zero denominator
-// passes, and a zero denominator fails -- the three cases the PHP writes out,
-// because "is 0 a multiple of 0" has no answer worth guessing.
+// Zero on both sides fails, a zero numerator over a non-zero denominator passes,
+// and a zero denominator fails -- three cases written out, because "is 0 a
+// multiple of 0" has no answer worth guessing.
 func (v *Validator) ValidateMultipleOf(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "multiple_of") {
 		return false
@@ -654,13 +660,13 @@ func decimalsOf(s string) int {
 // Types.
 // ---------------------------------------------------------------------------
 
-// ValidateNumeric answers to validateNumeric: is_numeric.
+// ValidateNumeric is `numeric`: the value reads as a number.
 func (v *Validator) ValidateNumeric(attribute string, value any, parameters []string) bool {
 	_, ok := numberOf(value)
 	return ok
 }
 
-// ValidateInteger answers to validateInteger: FILTER_VALIDATE_INT.
+// ValidateInteger is `integer`: the value reads as a whole number.
 func (v *Validator) ValidateInteger(attribute string, value any, parameters []string) bool {
 	switch value.(type) {
 	case int, int64:
@@ -670,8 +676,8 @@ func (v *Validator) ValidateInteger(attribute string, value any, parameters []st
 	return ok
 }
 
-// ValidateDecimal answers to validateDecimal: the count of digits after the
-// point is the given number, or between the two given numbers.
+// ValidateDecimal is `decimal`: the count of digits after the point is the given
+// number, or between the two given numbers.
 func (v *Validator) ValidateDecimal(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "decimal") {
 		return false
@@ -694,9 +700,9 @@ func (v *Validator) ValidateDecimal(attribute string, value any, parameters []st
 	return okHigh && int64(places) >= want && int64(places) <= high
 }
 
-// ValidateBoolean answers to validateBoolean. The comparison is strict, so only
-// the six values the PHP lists pass: true, false, 0, 1, "0" and "1". A ticked
-// checkbox sends "on", which is what `accepted` is for.
+// ValidateBoolean is `boolean`. The comparison is by type as well as by value,
+// so exactly six pass: true, false, 0, 1, "0" and "1". A ticked checkbox sends
+// "on", which is what `accepted` is for.
 func (v *Validator) ValidateBoolean(attribute string, value any, parameters []string) bool {
 	switch n := value.(type) {
 	case bool:
@@ -711,21 +717,21 @@ func (v *Validator) ValidateBoolean(attribute string, value any, parameters []st
 	return false
 }
 
-// ValidateJson answers to validateJson.
+// ValidateJson is `json`: the value is text that parses as JSON.
 func (v *Validator) ValidateJson(attribute string, value any, parameters []string) bool {
 	s, ok := asString(value)
 	return ok && str.IsJSON(s)
 }
 
-// ValidateNullable answers to validateNullable. It is a marker: Set.Validate
-// reads it and stops the field when the value is null -- null, not empty, which
-// is the whole of the difference from leaving `required` off.
+// ValidateNullable is `nullable`. It is a marker: Set.Validate reads it and stops
+// the field when the value is null -- null, not empty, which is the whole of the
+// difference from leaving `required` off.
 func (v *Validator) ValidateNullable(attribute string, value any, parameters []string) bool {
 	return true
 }
 
-// ValidateSometimes answers to validateSometimes. It is a marker: Set.Validate
-// skips the field when its key was not sent at all.
+// ValidateSometimes is `sometimes`. It is a marker: Set.Validate skips the field
+// when its key was not sent at all.
 func (v *Validator) ValidateSometimes(attribute string, value any, parameters []string) bool {
 	return true
 }
@@ -734,35 +740,30 @@ func (v *Validator) ValidateSometimes(attribute string, value any, parameters []
 // Dates.
 // ---------------------------------------------------------------------------
 
-// ValidateDate answers to validateDate.
+// ValidateDate is `date`: the value reads as a date.
 func (v *Validator) ValidateDate(attribute string, value any, parameters []string) bool {
 	_, ok := parseDate("", stringOf(value))
 	return ok
 }
 
-// ValidateDateFormat answers to validateDateFormat.
+// ValidateDateFormat is `date_format`: the value is a date written in one of the
+// given layouts.
 //
-// The format is a GO layout -- date_format:2006-01-02, never date_format:Y-m-d.
-// It is the one Laravel string that cannot be copied across, because the string
-// means something else in the host language; compile.go refuses a PHP format at
-// boot rather than accepting one that then rejects every date. Said here as ADR
-// 0044 asks, because it is a change a reader has to know about.
+// The layout is a GO layout -- date_format:2006-01-02, never date_format:Y-m-d.
+// compile.go refuses a layout it cannot read at boot, rather than accepting one
+// that then rejects every date.
 //
-// What is NOT a change, and was one until an audit ran it: the PHP walks every
-// parameter and passes when ANY of them matches, and it takes a numeric value
-// because is_numeric does. This took one layout -- date_format:2006-01-02,2006-01-02
-// 15:04:05 was a boot failure, "takes at most 1 argument" -- and asked
-// is_string, so a JSON body that sent 20240301 unquoted was refused by a rule
-// that Laravel passes. Both are back.
+// More than one layout may be given, and the value passes when ANY of them
+// matches. A numeric value is read as the text it prints as, so a JSON body that
+// sent 20240301 unquoted is not refused for having no quotes.
 func (v *Validator) ValidateDateFormat(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "date_format") {
 		return false
 	}
 	s, isString := asString(value)
 	if !isString {
-		// PHP: `! is_string($value) && ! is_numeric($value)` refuses; a number
-		// is read as the text it prints as, which is what the cast in
-		// DateTime::createFromFormat does with it.
+		// Neither text nor a number is refused; a number is read as the text it
+		// prints as.
 		if _, isNumber := numberOf(value); !isNumber {
 			return false
 		}
@@ -770,9 +771,9 @@ func (v *Validator) ValidateDateFormat(attribute string, value any, parameters [
 	}
 	for _, layout := range parameters {
 		t, err := time.Parse(layout, s)
-		// The round trip is the PHP's `$date->format($format) == $value`:
-		// time.Parse accepts "2006-1-2" for the layout "2006-01-02", and a
-		// format that accepts two spellings of one day is not a format.
+		// The round trip is what makes the layout exact: time.Parse accepts
+		// "2006-1-2" for the layout "2006-01-02", and a format that accepts two
+		// spellings of one day is not a format.
 		if err == nil && t.Format(layout) == s {
 			return true
 		}
@@ -780,27 +781,29 @@ func (v *Validator) ValidateDateFormat(attribute string, value any, parameters [
 	return false
 }
 
-// ValidateBefore answers to validateBefore.
+// ValidateBefore is `before`: the date is earlier than the other moment.
 func (v *Validator) ValidateBefore(attribute string, value any, parameters []string) bool {
 	return v.CompareDates(attribute, value, parameters, "<")
 }
 
-// ValidateBeforeOrEqual answers to validateBeforeOrEqual.
+// ValidateBeforeOrEqual is `before_or_equal`: the date is not later than the
+// other moment.
 func (v *Validator) ValidateBeforeOrEqual(attribute string, value any, parameters []string) bool {
 	return v.CompareDates(attribute, value, parameters, "<=")
 }
 
-// ValidateAfter answers to validateAfter.
+// ValidateAfter is `after`: the date is later than the other moment.
 func (v *Validator) ValidateAfter(attribute string, value any, parameters []string) bool {
 	return v.CompareDates(attribute, value, parameters, ">")
 }
 
-// ValidateAfterOrEqual answers to validateAfterOrEqual.
+// ValidateAfterOrEqual is `after_or_equal`: the date is not earlier than the
+// other moment.
 func (v *Validator) ValidateAfterOrEqual(attribute string, value any, parameters []string) bool {
 	return v.CompareDates(attribute, value, parameters, ">=")
 }
 
-// ValidateDateEquals answers to validateDateEquals.
+// ValidateDateEquals is `date_equals`: the date is the other moment.
 func (v *Validator) ValidateDateEquals(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "date_equals") {
 		return false
@@ -808,15 +811,14 @@ func (v *Validator) ValidateDateEquals(attribute string, value any, parameters [
 	return v.CompareDates(attribute, value, parameters, "=")
 }
 
-// CompareDates answers to compareDates: read both moments and answer what the
-// operator says. A moment that cannot be read fails on either side -- a date
-// rule that cannot read the date has not been passed.
+// CompareDates reads both moments and answers what the operator says. A moment
+// that cannot be read fails on either side -- a date rule that cannot read the
+// date has not been passed.
 //
 // The other moment is a field this rule set declares, one of the three keywords
-// today, tomorrow and yesterday, or a literal date. Laravel accepts anything
-// strtotime does, which includes "next thursday" and "1 fortnight ago"; a rule
-// whose accepted set nobody can enumerate cannot be reasoned about, so the
-// keywords are the three and the rest is a date.
+// today, tomorrow and yesterday, or a literal date. The keywords are those three
+// and nothing else: a rule whose accepted set nobody can enumerate cannot be
+// reasoned about.
 func (v *Validator) CompareDates(attribute string, value any, parameters []string, operator string) bool {
 	if len(parameters) == 0 {
 		return false
@@ -835,8 +837,8 @@ func (v *Validator) CompareDates(attribute string, value any, parameters []strin
 	return v.Compare(mine.Compare(theirs), 0, operator)
 }
 
-// GetDateFormat answers to getDateFormat: the layout the field's date_format
-// declares, and empty when it declares none.
+// GetDateFormat returns the layout the field's date_format declares, and empty
+// when it declares none.
 func (v *Validator) GetDateFormat(attribute string) string {
 	if f, ok := v.set.byName[attribute]; ok {
 		return f.layout
@@ -854,9 +856,9 @@ func (v *Validator) moment(attribute, argument string) (time.Time, bool) {
 	return parseDate(v.GetDateFormat(attribute), argument)
 }
 
-// Compare answers to compare: the operator applied to the result of a
-// comparison. The PHP takes the two values; Go has no operator on `mixed`, so
-// it takes what comparing them said.
+// Compare applies the operator to the result of a comparison. It takes what
+// comparing the two values said rather than the values themselves, because there
+// is no operator to apply to an any.
 func (v *Validator) Compare(result, against int, operator string) bool {
 	switch operator {
 	case "<":
@@ -873,7 +875,7 @@ func (v *Validator) Compare(result, against int, operator string) bool {
 	return false
 }
 
-// ValidateTimezone answers to validateTimezone.
+// ValidateTimezone is `timezone`: the value names a zone the system knows.
 func (v *Validator) ValidateTimezone(attribute string, value any, parameters []string) bool {
 	s, ok := asString(value)
 	if !ok {
@@ -893,11 +895,11 @@ func (v *Validator) ValidateTimezone(attribute string, value any, parameters []s
 // Identity and shape.
 // ---------------------------------------------------------------------------
 
-// ValidateEmail answers to validateEmail.
+// ValidateEmail is `email`: the value has the shape of an address.
 //
-// The default is the PHP's RFC validation, done here as a shape check.
-// Deliverability is proven by sending mail: `dns` asks whether the domain has a
-// mail exchanger, which is as far as a lookup can go.
+// Shape is all it checks by default. Deliverability is proven by sending mail;
+// the parameter `dns` asks whether the domain resolves at all, which is as far
+// as a lookup can go.
 func (v *Validator) ValidateEmail(attribute string, value any, parameters []string) bool {
 	s, ok := asString(value)
 	if !ok {
@@ -922,59 +924,59 @@ func (v *Validator) ValidateEmail(attribute string, value any, parameters []stri
 	return true
 }
 
-// ValidateUrl answers to validateUrl. The parameters are the schemes allowed,
-// and http and https are the default.
+// ValidateUrl is `url`. The parameters are the schemes allowed, and http and
+// https are the default.
 func (v *Validator) ValidateUrl(attribute string, value any, parameters []string) bool {
 	s, ok := asString(value)
 	return ok && str.IsURL(s, parameters...)
 }
 
-// ValidateUuid answers to validateUuid.
+// ValidateUuid is `uuid`: the value is a UUID.
 func (v *Validator) ValidateUuid(attribute string, value any, parameters []string) bool {
 	s, ok := asString(value)
 	return ok && str.IsUUID(s)
 }
 
-// ValidateUlid answers to validateUlid.
+// ValidateUlid is `ulid`: the value is a ULID.
 func (v *Validator) ValidateUlid(attribute string, value any, parameters []string) bool {
 	s, ok := asString(value)
 	return ok && str.IsULID(s)
 }
 
-// ValidateIp answers to validateIp.
+// ValidateIp is `ip`: the value is an IP address of either version.
 func (v *Validator) ValidateIp(attribute string, value any, parameters []string) bool {
 	_, ok := address(stringOf(value))
 	return ok
 }
 
-// ValidateIpv4 answers to validateIpv4.
+// ValidateIpv4 is `ipv4`: the value is an IPv4 address.
 func (v *Validator) ValidateIpv4(attribute string, value any, parameters []string) bool {
 	a, ok := address(stringOf(value))
 	return ok && a.Is4()
 }
 
-// ValidateIpv6 answers to validateIpv6.
+// ValidateIpv6 is `ipv6`: the value is an IPv6 address.
 func (v *Validator) ValidateIpv6(attribute string, value any, parameters []string) bool {
 	a, ok := address(stringOf(value))
 	return ok && a.Is6()
 }
 
-// ValidateMacAddress answers to validateMacAddress.
+// ValidateMacAddress is `mac_address`: the value is a MAC address.
 func (v *Validator) ValidateMacAddress(attribute string, value any, parameters []string) bool {
 	return macShape.MatchString(stringOf(value))
 }
 
-// ValidateHexColor answers to validateHexColor.
+// ValidateHexColor is `hex_color`: the value is a hexadecimal colour.
 func (v *Validator) ValidateHexColor(attribute string, value any, parameters []string) bool {
 	return hexColorShape.MatchString(stringOf(value))
 }
 
-// ValidateRegex answers to validateRegex.
+// ValidateRegex is `regex`: the value matches the pattern.
 //
-// The pattern is a GO pattern: RE2, with no backreference and no lookaround,
-// and without the delimiters PHP's preg_ functions need. compile.go compiles it
-// at boot, so an unclosed group is a boot failure naming the field rather than
-// a 500 on the first form somebody submits.
+// The pattern is a GO pattern: RE2, with no backreference and no lookaround, and
+// with no delimiters around it. compile.go compiles it at boot, so an unclosed
+// group is a boot failure naming the field rather than a 500 on the first form
+// somebody submits.
 func (v *Validator) ValidateRegex(attribute string, value any, parameters []string) bool {
 	if !isStringOrNumber(value) {
 		return false
@@ -986,7 +988,8 @@ func (v *Validator) ValidateRegex(attribute string, value any, parameters []stri
 	return re != nil && re.MatchString(stringOf(value))
 }
 
-// ValidateNotRegex answers to validateNotRegex.
+// ValidateNotRegex is `not_regex`: the value does not match the pattern, which
+// is a GO pattern for the reason ValidateRegex gives.
 func (v *Validator) ValidateNotRegex(attribute string, value any, parameters []string) bool {
 	if !isStringOrNumber(value) {
 		return false
@@ -1011,11 +1014,11 @@ func (v *Validator) pattern(source string) *regexp.Regexp {
 	return re
 }
 
-// ValidateIn answers to validateIn.
+// ValidateIn is `in`: the value is one of the parameters.
 //
 // A value that is an array on a field that also declares `array` passes when
-// every member is one of the parameters, which is how Laravel validates a
-// multi-select in one rule.
+// every member is one of the parameters, which is how a multi-select is
+// validated in one rule.
 func (v *Validator) ValidateIn(attribute string, value any, parameters []string) bool {
 	if list, ok := asList(value); ok && v.HasRule(attribute, []string{"array"}) {
 		for _, member := range list {
@@ -1034,17 +1037,16 @@ func (v *Validator) ValidateIn(attribute string, value any, parameters []string)
 	return slices.Contains(parameters, stringOf(value))
 }
 
-// ValidateNotIn answers to validateNotIn.
+// ValidateNotIn is `not_in`: the value is none of the parameters.
 func (v *Validator) ValidateNotIn(attribute string, value any, parameters []string) bool {
 	return !v.ValidateIn(attribute, value, parameters)
 }
 
-// ValidateEnum answers to Illuminate\Validation\Rules\Enum.
+// ValidateEnum is `enum`: the value is one of the cases.
 //
-// PHP names a backed enum class and asks it tryFrom; Go has no enum type to
-// ask, so the cases are the parameters -- enum:draft,published,archived -- and
-// the Enum rule object builds that string from a typed list. The name is the
-// one written in the rule string, which is what ADR 0044 asks of it.
+// Go has no enum type to ask, so the cases are the parameters --
+// enum:draft,published,archived -- and the Enum rule builder writes that string
+// from a typed list.
 func (v *Validator) ValidateEnum(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "enum") {
 		return false
@@ -1059,7 +1061,7 @@ func (v *Validator) ValidateEnum(attribute string, value any, parameters []strin
 // Presence.
 // ---------------------------------------------------------------------------
 
-// ValidateRequired answers to validateRequired.
+// ValidateRequired is `required`: the attribute holds an answer.
 //
 // Absent is one of four things, and the four are the whole rule: null, a string
 // that is nothing but whitespace, an array with no members, and a file that was
@@ -1080,15 +1082,13 @@ func (v *Validator) ValidateRequired(attribute string, value any, parameters []s
 	return true
 }
 
-// ValidatePresent answers to validatePresent: the key was sent, whatever it
-// holds.
+// ValidatePresent is `present`: the key was sent, whatever it holds.
 func (v *Validator) ValidatePresent(attribute string, value any, parameters []string) bool {
 	return v.data.Has(attribute)
 }
 
-// ValidateFilled answers to validateFilled: a key that was sent holds an
-// answer. A key that was not sent passes, which is the whole difference from
-// required.
+// ValidateFilled is `filled`: a key that was sent holds an answer. A key that was
+// not sent passes, which is the whole difference from required.
 func (v *Validator) ValidateFilled(attribute string, value any, parameters []string) bool {
 	if v.data.Has(attribute) {
 		return v.ValidateRequired(attribute, value, nil)
@@ -1096,17 +1096,18 @@ func (v *Validator) ValidateFilled(attribute string, value any, parameters []str
 	return true
 }
 
-// ValidateMissing answers to validateMissing.
+// ValidateMissing is `missing`: the key was not sent at all.
 func (v *Validator) ValidateMissing(attribute string, value any, parameters []string) bool {
 	return !v.data.Has(attribute)
 }
 
-// ValidateProhibited answers to validateProhibited.
+// ValidateProhibited is `prohibited`: the attribute holds no answer.
 func (v *Validator) ValidateProhibited(attribute string, value any, parameters []string) bool {
 	return !v.ValidateRequired(attribute, value, nil)
 }
 
-// ValidateRequiredIf answers to validateRequiredIf.
+// ValidateRequiredIf is `required_if`: required when the other attribute holds
+// one of the given values.
 //
 // A key the form did not send at all passes: a form that does not carry the
 // other field cannot be answering it.
@@ -1124,7 +1125,8 @@ func (v *Validator) ValidateRequiredIf(attribute string, value any, parameters [
 	return true
 }
 
-// ValidateRequiredUnless answers to validateRequiredUnless.
+// ValidateRequiredUnless is `required_unless`: required unless the other
+// attribute holds one of the given values.
 func (v *Validator) ValidateRequiredUnless(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(2, parameters, "required_unless") {
 		return false
@@ -1136,7 +1138,8 @@ func (v *Validator) ValidateRequiredUnless(attribute string, value any, paramete
 	return true
 }
 
-// ValidateRequiredIfAccepted answers to validateRequiredIfAccepted.
+// ValidateRequiredIfAccepted is `required_if_accepted`: required when the other
+// attribute is accepted.
 func (v *Validator) ValidateRequiredIfAccepted(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "required_if_accepted") {
 		return false
@@ -1147,7 +1150,8 @@ func (v *Validator) ValidateRequiredIfAccepted(attribute string, value any, para
 	return true
 }
 
-// ValidateRequiredIfDeclined answers to validateRequiredIfDeclined.
+// ValidateRequiredIfDeclined is `required_if_declined`: required when the other
+// attribute is declined.
 func (v *Validator) ValidateRequiredIfDeclined(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "required_if_declined") {
 		return false
@@ -1158,8 +1162,8 @@ func (v *Validator) ValidateRequiredIfDeclined(attribute string, value any, para
 	return true
 }
 
-// ValidateRequiredWith answers to validateRequiredWith: required when ANY of
-// the named attributes is present.
+// ValidateRequiredWith is `required_with`: required when ANY of the named
+// attributes is present.
 func (v *Validator) ValidateRequiredWith(attribute string, value any, parameters []string) bool {
 	if !v.AllFailingRequired(parameters) {
 		return v.ValidateRequired(attribute, value, nil)
@@ -1167,8 +1171,8 @@ func (v *Validator) ValidateRequiredWith(attribute string, value any, parameters
 	return true
 }
 
-// ValidateRequiredWithAll answers to validateRequiredWithAll: required when
-// ALL of the named attributes are present.
+// ValidateRequiredWithAll is `required_with_all`: required when ALL of the named
+// attributes are present.
 func (v *Validator) ValidateRequiredWithAll(attribute string, value any, parameters []string) bool {
 	if !v.AnyFailingRequired(parameters) {
 		return v.ValidateRequired(attribute, value, nil)
@@ -1176,8 +1180,8 @@ func (v *Validator) ValidateRequiredWithAll(attribute string, value any, paramet
 	return true
 }
 
-// ValidateRequiredWithout answers to validateRequiredWithout: required when ANY
-// of the named attributes is missing.
+// ValidateRequiredWithout is `required_without`: required when ANY of the named
+// attributes is missing.
 func (v *Validator) ValidateRequiredWithout(attribute string, value any, parameters []string) bool {
 	if v.AnyFailingRequired(parameters) {
 		return v.ValidateRequired(attribute, value, nil)
@@ -1185,8 +1189,8 @@ func (v *Validator) ValidateRequiredWithout(attribute string, value any, paramet
 	return true
 }
 
-// ValidateRequiredWithoutAll answers to validateRequiredWithoutAll: required
-// when ALL of the named attributes are missing.
+// ValidateRequiredWithoutAll is `required_without_all`: required when ALL of the
+// named attributes are missing.
 func (v *Validator) ValidateRequiredWithoutAll(attribute string, value any, parameters []string) bool {
 	if v.AllFailingRequired(parameters) {
 		return v.ValidateRequired(attribute, value, nil)
@@ -1194,7 +1198,7 @@ func (v *Validator) ValidateRequiredWithoutAll(attribute string, value any, para
 	return true
 }
 
-// AnyFailingRequired answers to anyFailingRequired.
+// AnyFailingRequired reports whether ANY of the attributes holds no answer.
 func (v *Validator) AnyFailingRequired(attributes []string) bool {
 	for _, key := range attributes {
 		if !v.ValidateRequired(key, v.GetValue(key), nil) {
@@ -1204,7 +1208,7 @@ func (v *Validator) AnyFailingRequired(attributes []string) bool {
 	return false
 }
 
-// AllFailingRequired answers to allFailingRequired.
+// AllFailingRequired reports whether ALL of the attributes hold no answer.
 func (v *Validator) AllFailingRequired(attributes []string) bool {
 	for _, key := range attributes {
 		if v.ValidateRequired(key, v.GetValue(key), nil) {
@@ -1214,7 +1218,8 @@ func (v *Validator) AllFailingRequired(attributes []string) bool {
 	return true
 }
 
-// ValidatePresentIf answers to validatePresentIf.
+// ValidatePresentIf is `present_if`: the key was sent when the other attribute
+// holds one of the given values.
 func (v *Validator) ValidatePresentIf(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(2, parameters, "present_if") {
 		return false
@@ -1226,7 +1231,8 @@ func (v *Validator) ValidatePresentIf(attribute string, value any, parameters []
 	return true
 }
 
-// ValidatePresentUnless answers to validatePresentUnless.
+// ValidatePresentUnless is `present_unless`: the key was sent unless the other
+// attribute holds one of the given values.
 func (v *Validator) ValidatePresentUnless(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(2, parameters, "present_unless") {
 		return false
@@ -1238,7 +1244,8 @@ func (v *Validator) ValidatePresentUnless(attribute string, value any, parameter
 	return true
 }
 
-// ValidatePresentWith answers to validatePresentWith.
+// ValidatePresentWith is `present_with`: the key was sent when ANY of the named
+// attributes was.
 func (v *Validator) ValidatePresentWith(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "present_with") {
 		return false
@@ -1249,7 +1256,8 @@ func (v *Validator) ValidatePresentWith(attribute string, value any, parameters 
 	return true
 }
 
-// ValidatePresentWithAll answers to validatePresentWithAll.
+// ValidatePresentWithAll is `present_with_all`: the key was sent when ALL of the
+// named attributes were.
 func (v *Validator) ValidatePresentWithAll(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "present_with_all") {
 		return false
@@ -1260,7 +1268,8 @@ func (v *Validator) ValidatePresentWithAll(attribute string, value any, paramete
 	return true
 }
 
-// ValidateMissingIf answers to validateMissingIf.
+// ValidateMissingIf is `missing_if`: the key was not sent when the other
+// attribute holds one of the given values.
 func (v *Validator) ValidateMissingIf(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(2, parameters, "missing_if") {
 		return false
@@ -1272,7 +1281,8 @@ func (v *Validator) ValidateMissingIf(attribute string, value any, parameters []
 	return true
 }
 
-// ValidateMissingUnless answers to validateMissingUnless.
+// ValidateMissingUnless is `missing_unless`: the key was not sent unless the
+// other attribute holds one of the given values.
 func (v *Validator) ValidateMissingUnless(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(2, parameters, "missing_unless") {
 		return false
@@ -1284,7 +1294,8 @@ func (v *Validator) ValidateMissingUnless(attribute string, value any, parameter
 	return true
 }
 
-// ValidateMissingWith answers to validateMissingWith.
+// ValidateMissingWith is `missing_with`: the key was not sent when ANY of the
+// named attributes was.
 func (v *Validator) ValidateMissingWith(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "missing_with") {
 		return false
@@ -1295,7 +1306,8 @@ func (v *Validator) ValidateMissingWith(attribute string, value any, parameters 
 	return true
 }
 
-// ValidateMissingWithAll answers to validateMissingWithAll.
+// ValidateMissingWithAll is `missing_with_all`: the key was not sent when ALL of
+// the named attributes were.
 func (v *Validator) ValidateMissingWithAll(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "missing_with_all") {
 		return false
@@ -1306,7 +1318,8 @@ func (v *Validator) ValidateMissingWithAll(attribute string, value any, paramete
 	return true
 }
 
-// ValidateProhibitedIf answers to validateProhibitedIf.
+// ValidateProhibitedIf is `prohibited_if`: prohibited when the other attribute
+// holds one of the given values.
 func (v *Validator) ValidateProhibitedIf(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(2, parameters, "prohibited_if") {
 		return false
@@ -1318,7 +1331,8 @@ func (v *Validator) ValidateProhibitedIf(attribute string, value any, parameters
 	return true
 }
 
-// ValidateProhibitedIfAccepted answers to validateProhibitedIfAccepted.
+// ValidateProhibitedIfAccepted is `prohibited_if_accepted`: prohibited when the
+// other attribute is accepted.
 func (v *Validator) ValidateProhibitedIfAccepted(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "prohibited_if_accepted") {
 		return false
@@ -1329,7 +1343,8 @@ func (v *Validator) ValidateProhibitedIfAccepted(attribute string, value any, pa
 	return true
 }
 
-// ValidateProhibitedIfDeclined answers to validateProhibitedIfDeclined.
+// ValidateProhibitedIfDeclined is `prohibited_if_declined`: prohibited when the
+// other attribute is declined.
 func (v *Validator) ValidateProhibitedIfDeclined(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "prohibited_if_declined") {
 		return false
@@ -1340,7 +1355,8 @@ func (v *Validator) ValidateProhibitedIfDeclined(attribute string, value any, pa
 	return true
 }
 
-// ValidateProhibitedUnless answers to validateProhibitedUnless.
+// ValidateProhibitedUnless is `prohibited_unless`: prohibited unless the other
+// attribute holds one of the given values.
 func (v *Validator) ValidateProhibitedUnless(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(2, parameters, "prohibited_unless") {
 		return false
@@ -1352,8 +1368,8 @@ func (v *Validator) ValidateProhibitedUnless(attribute string, value any, parame
 	return true
 }
 
-// ValidateProhibits answers to validateProhibits: this attribute being present
-// forbids the named ones.
+// ValidateProhibits is `prohibits`: this attribute being present forbids the
+// named ones.
 func (v *Validator) ValidateProhibits(attribute string, value any, parameters []string) bool {
 	if v.ValidateRequired(attribute, value, nil) {
 		for _, parameter := range parameters {
@@ -1370,12 +1386,13 @@ func (v *Validator) ValidateProhibits(attribute string, value any, parameters []
 // the field from the validated data instead. See Validator.AddFailure.
 // ---------------------------------------------------------------------------
 
-// ValidateExclude answers to validateExclude: always excluded.
+// ValidateExclude is `exclude`: always excluded.
 func (v *Validator) ValidateExclude(attribute string, value any, parameters []string) bool {
 	return false
 }
 
-// ValidateExcludeIf answers to validateExcludeIf.
+// ValidateExcludeIf is `exclude_if`: excluded when the other attribute holds one
+// of the given values.
 func (v *Validator) ValidateExcludeIf(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(2, parameters, "exclude_if") {
 		return false
@@ -1387,7 +1404,8 @@ func (v *Validator) ValidateExcludeIf(attribute string, value any, parameters []
 	return !looseContains(values, other)
 }
 
-// ValidateExcludeUnless answers to validateExcludeUnless.
+// ValidateExcludeUnless is `exclude_unless`: excluded unless the other attribute
+// holds one of the given values.
 func (v *Validator) ValidateExcludeUnless(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(2, parameters, "exclude_unless") {
 		return false
@@ -1396,7 +1414,8 @@ func (v *Validator) ValidateExcludeUnless(attribute string, value any, parameter
 	return looseContains(values, other)
 }
 
-// ValidateExcludeWith answers to validateExcludeWith.
+// ValidateExcludeWith is `exclude_with`: excluded when the named attribute was
+// sent.
 func (v *Validator) ValidateExcludeWith(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "exclude_with") {
 		return false
@@ -1404,7 +1423,8 @@ func (v *Validator) ValidateExcludeWith(attribute string, value any, parameters 
 	return !v.data.Has(parameters[0])
 }
 
-// ValidateExcludeWithout answers to validateExcludeWithout.
+// ValidateExcludeWithout is `exclude_without`: excluded when the named attributes
+// hold no answer.
 func (v *Validator) ValidateExcludeWithout(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "exclude_without") {
 		return false
@@ -1416,7 +1436,7 @@ func (v *Validator) ValidateExcludeWithout(attribute string, value any, paramete
 // Cross-field.
 // ---------------------------------------------------------------------------
 
-// ValidateSame answers to validateSame.
+// ValidateSame is `same`: this attribute and the named one hold the same value.
 func (v *Validator) ValidateSame(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "same") {
 		return false
@@ -1424,9 +1444,9 @@ func (v *Validator) ValidateSame(attribute string, value any, parameters []strin
 	return sameValue(value, v.GetValue(parameters[0]))
 }
 
-// ValidateDifferent answers to validateDifferent. An attribute the form did not
-// send is not compared: a field that is not in the form is not the same as this
-// one.
+// ValidateDifferent is `different`: this attribute holds none of the values the
+// named ones hold. An attribute the form did not send is not compared: a field
+// that is not in the form is not the same as this one.
 func (v *Validator) ValidateDifferent(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "different") {
 		return false
@@ -1439,7 +1459,7 @@ func (v *Validator) ValidateDifferent(attribute string, value any, parameters []
 	return true
 }
 
-// ValidateConfirmed answers to validateConfirmed: the value is repeated by
+// ValidateConfirmed is `confirmed`: the value is repeated by
 // <attribute>_confirmation, or by the attribute the parameter names.
 func (v *Validator) ValidateConfirmed(attribute string, value any, parameters []string) bool {
 	other := attribute + "_confirmation"
@@ -1449,13 +1469,13 @@ func (v *Validator) ValidateConfirmed(attribute string, value any, parameters []
 	return v.ValidateSame(attribute, value, []string{other})
 }
 
-// ValidateCurrentPassword answers to validateCurrentPassword.
+// ValidateCurrentPassword is `current_password`: the value is the password of
+// whoever is signed in.
 //
-// Laravel resolves the guard and the hasher out of the container, which ADR
-// 0002 refuses. The same question without one is CurrentPasswordChecker, given
-// to the Validator with WithCurrentPassword; without one the rule fails
-// closed, because a password check that passes for want of a checker is the
-// worst outcome available.
+// The question is asked of the CurrentPasswordChecker given to the Validator
+// with WithCurrentPassword. Without one the rule fails closed, because a
+// password check that passes for want of a checker is the worst outcome
+// available. The parameter, when given, names the guard.
 func (v *Validator) ValidateCurrentPassword(attribute string, value any, parameters []string) bool {
 	if v.passwords == nil {
 		return false
@@ -1471,13 +1491,13 @@ func (v *Validator) ValidateCurrentPassword(attribute string, value any, paramet
 // Uploads.
 // ---------------------------------------------------------------------------
 
-// ValidateFile answers to validateFile.
+// ValidateFile is `file`: the value is an upload that finished.
 func (v *Validator) ValidateFile(attribute string, value any, parameters []string) bool {
 	return v.IsValidFileInstance(value)
 }
 
-// IsValidFileInstance answers to isValidFileInstance: a File, and an upload
-// that finished.
+// IsValidFileInstance reports whether the value is a File, and an upload that
+// finished.
 func (v *Validator) IsValidFileInstance(value any) bool {
 	if up, ok := value.(UploadedFile); ok && !up.IsValid() {
 		return false
@@ -1486,9 +1506,9 @@ func (v *Validator) IsValidFileInstance(value any) bool {
 	return ok
 }
 
-// ValidateMimes answers to validateMimes: the extension GUESSED FROM THE
-// CONTENT is one of the given ones, which is why a .png renamed to .jpg does
-// not pass. jpg and jpeg are each other, as the PHP makes them.
+// ValidateMimes is `mimes`: the extension GUESSED FROM THE CONTENT is one of the
+// given ones, which is why a .png renamed to .jpg does not pass. jpg and jpeg
+// each stand for the other.
 func (v *Validator) ValidateMimes(attribute string, value any, parameters []string) bool {
 	if !v.IsValidFileInstance(value) {
 		return false
@@ -1504,8 +1524,9 @@ func (v *Validator) ValidateMimes(attribute string, value any, parameters []stri
 	return f.GetPath() != "" && slices.Contains(allowed, f.GuessExtension())
 }
 
-// ValidateMimetypes answers to validateMimetypes. A parameter of the form
-// "image/*" matches every type in the group, as the PHP's does.
+// ValidateMimetypes is `mimetypes`: the media type of the content is one of the
+// given ones. A parameter of the form "image/*" matches every type in the
+// group.
 func (v *Validator) ValidateMimetypes(attribute string, value any, parameters []string) bool {
 	if !v.IsValidFileInstance(value) {
 		return false
@@ -1520,9 +1541,8 @@ func (v *Validator) ValidateMimetypes(attribute string, value any, parameters []
 		(slices.Contains(parameters, mime) || slices.Contains(parameters, group+"/*"))
 }
 
-// ValidateExtensions answers to validateExtensions: the extension THE CLIENT
-// SENT is one of the given ones. It is the counterpart of mimes, which asks the
-// content instead.
+// ValidateExtensions is `extensions`: the extension THE CLIENT SENT is one of the
+// given ones. It is the counterpart of mimes, which asks the content instead.
 func (v *Validator) ValidateExtensions(attribute string, value any, parameters []string) bool {
 	if !v.IsValidFileInstance(value) {
 		return false
@@ -1533,8 +1553,8 @@ func (v *Validator) ValidateExtensions(attribute string, value any, parameters [
 	return slices.Contains(parameters, strings.ToLower(clientExtension(value)))
 }
 
-// ValidateImage answers to validateImage: mimes over the six image types, plus
-// svg when the parameters allow it.
+// ValidateImage is `image`: mimes over the six image types, plus svg when the
+// parameters carry allow_svg.
 func (v *Validator) ValidateImage(attribute string, value any, parameters []string) bool {
 	mimes := []string{"jpg", "jpeg", "png", "gif", "bmp", "webp"}
 	if slices.Contains(parameters, "allow_svg") {
@@ -1543,8 +1563,8 @@ func (v *Validator) ValidateImage(attribute string, value any, parameters []stri
 	return v.ValidateMimes(attribute, value, mimes)
 }
 
-// ShouldBlockPhpUpload answers to shouldBlockPhpUpload: an upload whose name
-// ends in a PHP extension is refused unless the rule asked for php by name.
+// ShouldBlockPhpUpload reports whether an upload is refused for the extension it
+// came in with: one of phpExtensions is, unless the rule asked for php by name.
 func (v *Validator) ShouldBlockPhpUpload(value any, parameters []string) bool {
 	if slices.Contains(parameters, "php") {
 		return false
@@ -1552,9 +1572,8 @@ func (v *Validator) ShouldBlockPhpUpload(value any, parameters []string) bool {
 	return slices.Contains(phpExtensions, strings.TrimSpace(strings.ToLower(clientExtension(value))))
 }
 
-// clientExtension is the name the upload came in with for an UploadedFile, and
-// the file's own extension for anything else -- the fork shouldBlockPhpUpload
-// makes.
+// clientExtension is the extension the upload came in with for an UploadedFile,
+// and the file's own extension for anything else.
 func clientExtension(value any) string {
 	if up, ok := value.(UploadedFile); ok {
 		return up.GetClientOriginalExtension()
@@ -1565,11 +1584,12 @@ func clientExtension(value any) string {
 	return ""
 }
 
-// ValidateDimensions answers to validateDimensions.
+// ValidateDimensions is `dimensions`: the image measures what the named
+// parameters ask for.
 //
-// An SVG passes without being measured, as the PHP's does: it has no pixels to
-// count. Everything else has its bytes read, which is a decode of input a
-// stranger chose -- only the header is read, never the pixels.
+// An SVG passes without being measured: it has no pixels to count. Everything
+// else has its bytes read, which is a decode of input a stranger chose -- only
+// the header is read, never the pixels.
 func (v *Validator) ValidateDimensions(attribute string, value any, parameters []string) bool {
 	if v.IsValidFileInstance(value) {
 		if f, _ := asFile(value); f.GetMimeType() == "image/svg+xml" || f.GetMimeType() == "image/svg" {
@@ -1594,7 +1614,8 @@ func (v *Validator) ValidateDimensions(attribute string, value any, parameters [
 		v.FailsMaxRatioCheck(named, width, height))
 }
 
-// FailsBasicDimensionChecks answers to failsBasicDimensionChecks.
+// FailsBasicDimensionChecks reports whether the image misses any of width,
+// min_width, max_width, height, min_height and max_height.
 func (v *Validator) FailsBasicDimensionChecks(parameters map[string]string, width, height int) bool {
 	fails := func(key string, against int, worse func(a, b int) bool) bool {
 		raw, given := parameters[key]
@@ -1619,7 +1640,7 @@ func (v *Validator) FailsBasicDimensionChecks(parameters map[string]string, widt
 		fails("max_height", height, below)
 }
 
-// FailsRatioCheck answers to failsRatioCheck, precision included: the tolerance
+// FailsRatioCheck reports whether the image misses the ratio. The tolerance
 // widens with the image, so that a 3/2 photograph of 1201 by 800 is still 3/2.
 func (v *Validator) FailsRatioCheck(parameters map[string]string, width, height int) bool {
 	raw, given := parameters["ratio"]
@@ -1634,7 +1655,7 @@ func (v *Validator) FailsRatioCheck(parameters map[string]string, width, height 
 	return math.Abs(want-float64(width)/float64(height)) > precision
 }
 
-// FailsMinRatioCheck answers to failsMinRatioCheck.
+// FailsMinRatioCheck reports whether the image is wider than min_ratio allows.
 func (v *Validator) FailsMinRatioCheck(parameters map[string]string, width, height int) bool {
 	raw, given := parameters["min_ratio"]
 	if !given {
@@ -1647,7 +1668,7 @@ func (v *Validator) FailsMinRatioCheck(parameters map[string]string, width, heig
 	return float64(width)/float64(height) > want
 }
 
-// FailsMaxRatioCheck answers to failsMaxRatioCheck.
+// FailsMaxRatioCheck reports whether the image is taller than max_ratio allows.
 func (v *Validator) FailsMaxRatioCheck(parameters map[string]string, width, height int) bool {
 	raw, given := parameters["max_ratio"]
 	if !given {
@@ -1660,8 +1681,7 @@ func (v *Validator) FailsMaxRatioCheck(parameters map[string]string, width, heig
 	return float64(width)/float64(height) < want
 }
 
-// parseRatio reads "3/2" and "1.5", which are the two spellings the PHP's
-// sscanf('%f/%d') accepts.
+// parseRatio reads the two spellings of a ratio, "3/2" and "1.5".
 func parseRatio(raw string) (float64, bool) {
 	numerator, denominator, divided := strings.Cut(raw, "/")
 	n, err := strconv.ParseFloat(strings.TrimSpace(numerator), 64)
@@ -1678,8 +1698,8 @@ func parseRatio(raw string) (float64, bool) {
 	return n / d, true
 }
 
-// ParseNamedParameters answers to parseNamedParameters: "min_width=100" becomes
-// one entry of a map.
+// ParseNamedParameters reads parameters of the form "min_width=100" into a
+// map.
 func (v *Validator) ParseNamedParameters(parameters []string) map[string]string {
 	named := make(map[string]string, len(parameters))
 	for _, item := range parameters {
@@ -1690,22 +1710,21 @@ func (v *Validator) ParseNamedParameters(parameters []string) map[string]string 
 }
 
 // ---------------------------------------------------------------------------
-// The database. RULE 17 holds on a read: both rules take the Grant and the
-// query is filtered by its tenant.
+// The database. Both rules take the Grant, and the query is filtered by its
+// tenant.
 //
-// The Grant is auth.Grant, which is a struct and cannot be compared to nil, so
-// what both rules check is the tenant on it. That is the stronger check and the
-// one that was meant: a Grant carrying no tenant cannot scope the count, and a
-// count that is not scoped answers whether SOMEBODY holds the value.
+// auth.Grant is a struct and cannot be compared to nil, so what both rules check
+// is the tenant on it. That is the stronger check and the one that was meant: a
+// Grant carrying no tenant cannot scope the count, and a count that is not
+// scoped answers whether SOMEBODY holds the value.
 // ---------------------------------------------------------------------------
 
-// ValidateExists answers to validateExists.
+// ValidateExists is `exists`: the table holds a row with this value.
 //
-// Laravel resolves the presence verifier out of the container and queries with
-// no notion of who is asking. Here the verifier arrives with the request,
-// through WithPresence, together with the Grant -- because a rule that reads a
-// table to answer "does this exist" is a read, and RULE 17 does not except
-// reads. Without a verifier the rule fails closed and says so.
+// The verifier arrives with the request, through WithPresence, together with the
+// Grant -- because a rule that reads a table to answer "does this exist" is a
+// read, and a read is authorized like any other. Without a verifier the rule
+// fails closed.
 func (v *Validator) ValidateExists(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "exists") {
 		return false
@@ -1729,9 +1748,9 @@ func (v *Validator) ValidateExists(attribute string, value any, parameters []str
 	return err == nil && count >= 1
 }
 
-// ValidateUnique answers to validateUnique.
+// ValidateUnique is `unique`: the table holds no row with this value.
 //
-// The parameters are the PHP's, in the PHP's order:
+// The parameters, in order:
 // unique:table,column,exceptID,idColumn,extraColumn,extraValue...
 func (v *Validator) ValidateUnique(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "unique") {
@@ -1751,8 +1770,8 @@ func (v *Validator) ValidateUnique(attribute string, value any, parameters []str
 	return err == nil && count == 0
 }
 
-// GetUniqueIds answers to getUniqueIds: the column and the value of the row the
-// rule must ignore, which is the row being edited.
+// GetUniqueIds returns the column and the value of the row the rule must ignore,
+// which is the row being edited.
 func (v *Validator) GetUniqueIds(idColumn string, parameters []string) (string, any) {
 	if idColumn == "" {
 		idColumn = "id"
@@ -1763,7 +1782,7 @@ func (v *Validator) GetUniqueIds(idColumn string, parameters []string) (string, 
 	return idColumn, v.PrepareUniqueId(parameters[2])
 }
 
-// PrepareUniqueId answers to prepareUniqueId. "[field]" reads the id out of the
+// PrepareUniqueId reads the ignored row's id: "[field]" takes it out of the
 // submitted data, "null" is null, and a whole number is a number.
 func (v *Validator) PrepareUniqueId(id string) any {
 	if match := bracketed.FindStringSubmatch(id); match != nil {
@@ -1780,7 +1799,8 @@ func (v *Validator) PrepareUniqueId(id string) any {
 
 var bracketed = regexp.MustCompile(`\[(.*)\]`)
 
-// GetUniqueExtra answers to getUniqueExtra.
+// GetUniqueExtra returns the extra conditions of a `unique` rule, which are its
+// parameters past the fourth.
 func (v *Validator) GetUniqueExtra(parameters []string) map[string]string {
 	if len(parameters) > 4 {
 		return v.GetExtraConditions(parameters[4:])
@@ -1788,8 +1808,8 @@ func (v *Validator) GetUniqueExtra(parameters []string) map[string]string {
 	return nil
 }
 
-// GetExtraConditions answers to getExtraConditions: the trailing parameters
-// read in pairs, column then value.
+// GetExtraConditions reads the trailing parameters in pairs, column then
+// value.
 func (v *Validator) GetExtraConditions(segments []string) map[string]string {
 	extra := make(map[string]string, len(segments)/2)
 	for i := 0; i+1 < len(segments); i += 2 {
@@ -1801,9 +1821,8 @@ func (v *Validator) GetExtraConditions(segments []string) map[string]string {
 	return extra
 }
 
-// ParseTable answers to parseTable: "connection.table" splits, and a bare name
-// is the table. The model branch of the PHP is not here -- there are no models
-// (ADR: no Active Record), so a rule names the table.
+// ParseTable splits "connection.table", and reads a bare name as the table. A
+// rule names a table, never a model: there are no models.
 func (v *Validator) ParseTable(table string) (connection, name, idColumn string) {
 	if before, after, found := strings.Cut(table, "."); found {
 		return before, after, ""
@@ -1811,7 +1830,8 @@ func (v *Validator) ParseTable(table string) (connection, name, idColumn string)
 	return "", table, ""
 }
 
-// GetQueryColumn answers to getQueryColumn.
+// GetQueryColumn returns the column the rule queries: the second parameter when
+// it names one, and the guess otherwise.
 func (v *Validator) GetQueryColumn(parameters []string, attribute string) string {
 	if len(parameters) > 1 && parameters[1] != "" && parameters[1] != "NULL" {
 		return parameters[1]
@@ -1819,8 +1839,8 @@ func (v *Validator) GetQueryColumn(parameters []string, attribute string) string
 	return v.GuessColumnForQuery(attribute)
 }
 
-// GuessColumnForQuery answers to guessColumnForQuery: the last segment of a
-// dotted attribute, and the attribute itself otherwise.
+// GuessColumnForQuery returns the last segment of a dotted attribute, and the
+// attribute itself otherwise.
 func (v *Validator) GuessColumnForQuery(attribute string) string {
 	if i := strings.LastIndexByte(attribute, '.'); i >= 0 {
 		last := attribute[i+1:]
@@ -1856,12 +1876,12 @@ func uniqueValues(list []any) []any {
 // The shared helpers of the trait.
 // ---------------------------------------------------------------------------
 
-// ParseDependentRuleParameters answers to parseDependentRuleParameters: the
-// values a dependent rule compares against, and the other attribute's value.
+// ParseDependentRuleParameters returns the values a dependent rule compares
+// against, and the other attribute's value.
 //
-// The PHP converts "true"/"false" to booleans and "null" to null here, before
-// comparing; the conversion lives in the comparison instead, so that one place
-// decides what "the other field says yes" means.
+// Nothing is converted here. Reading "true", "false" and "null" as what they
+// name is the comparison's job, so that one place decides what "the other field
+// says yes" means.
 func (v *Validator) ParseDependentRuleParameters(parameters []string) ([]string, any) {
 	if len(parameters) == 0 {
 		return nil, nil
@@ -1869,18 +1889,18 @@ func (v *Validator) ParseDependentRuleParameters(parameters []string) ([]string,
 	return parameters[1:], v.GetValue(parameters[0])
 }
 
-// RequireParameterCount answers to requireParameterCount.
+// RequireParameterCount reports whether the rule was given the parameters it
+// needs, and the rule that asked returns false when it was not.
 //
-// The PHP throws; here it reports, and the rule that asked returns false. The
-// count is already proven at boot by compile.go, so this is the second lock on
-// a door the first one closed -- and a rule invoked directly, outside a
+// The count is already proven at boot by compile.go, so this is the second lock
+// on a door the first one closed -- and a rule invoked directly, outside a
 // compiled set, still cannot read past the end of its parameters.
 func (v *Validator) RequireParameterCount(count int, parameters []string, rule string) bool {
 	return len(parameters) >= count
 }
 
-// isStringOrNumber is the guard several PHP bodies open with:
-// `! is_string($value) && ! is_numeric($value)`.
+// isStringOrNumber is the guard the rules that read text open with: a value that
+// is neither text nor a number has nothing for them to read.
 func isStringOrNumber(value any) bool {
 	if _, ok := asString(value); ok {
 		return true
@@ -1894,7 +1914,7 @@ func isString(value any) bool {
 	return ok
 }
 
-// sameType answers to isSameType: gettype of one equals gettype of the other.
+// sameType reports whether the two values are the same kind of thing.
 func sameType(first, second any) bool { return phpType(first) == phpType(second) }
 
 func phpType(value any) string {

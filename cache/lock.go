@@ -10,9 +10,6 @@ import (
 
 // defaultSleepBetweenBlockedAttempts is how long Block waits before trying the
 // lock again.
-//
-// It answers the $sleepMilliseconds = 250 of Illuminate\Cache\Lock, quarter
-// second for quarter second.
 const defaultSleepBetweenBlockedAttempts = 250 * time.Millisecond
 
 // Locks issues distributed locks over a store.
@@ -44,9 +41,6 @@ func NewLocks(s Locking) *Locks { return &Locks{store: s} }
 
 // Lock names a lock. It does not touch the store: Acquire does.
 //
-// It answers the lock() of Illuminate\Cache\HasCacheLock and of every store
-// implementing LockProvider.
-//
 // The ttl is required and it is the deadlock protection: a process that dies
 // holding the lock releases it when the ttl expires, and there is no other way
 // out. Size it above the longest run of the work it guards, or a second worker
@@ -69,19 +63,17 @@ func (l *Locks) RestoreLock(name, owner string) *Lock {
 
 // Lock is one named lock, held or not.
 //
-// It answers Illuminate\Cache\Lock. A Lock is not safe for concurrent use, and
-// it does not need to be: it is the handle one goroutine holds while it does
-// the work the lock protects.
+// A Lock is not safe for concurrent use, and it does not need to be: it is the
+// handle one goroutine holds while it does the work the lock protects.
 type Lock struct {
 	store Locking
 	name  string
 	ttl   time.Duration
 
-	// owner proves this holder still owns the lock. It answers $owner: Laravel
-	// mints one in the constructor, this one mints it at Acquire, so a handle
-	// that was never acquired has nothing to release. It is minted fresh on
-	// every Acquire -- reusing one would let a holder whose lock expired
-	// release the lock its successor now owns.
+	// owner proves this holder still owns the lock. It is minted at Acquire,
+	// so a handle that was never acquired has nothing to release, and it is
+	// minted fresh on every Acquire -- reusing one would let a holder whose
+	// lock expired release the lock its successor now owns.
 	owner string
 
 	// held is what Held reports: this handle took the lock and has not given it
@@ -189,14 +181,13 @@ func (lk *Lock) Get(ctx context.Context, fn func(context.Context) error) (bool, 
 
 // Block waits up to wait for the lock, then runs fn and releases it.
 //
-// It answers Lock::block(). A wait that runs out is ErrLockTimeout, which is
-// the LockTimeoutException; a cancelled context is the context's error. Pass a
-// nil fn to wait for the lock and keep it.
+// A wait that runs out is ErrLockTimeout; a cancelled context is the context's
+// error. Pass a nil fn to wait for the lock and keep it.
 //
-// It polls, and Laravel polls too. The interval is a quarter second unless
+// It polls. The interval is a quarter second unless
 // BetweenBlockedAttemptsSleepFor says otherwise, and it is a poll rather than a
 // subscription because a lock that can be waited on properly is a feature of
-// one backend and this has to work on all of them (RULE 11).
+// one backend and this has to work on all of them.
 func (lk *Lock) Block(ctx context.Context, wait time.Duration, fn func(context.Context) error) error {
 	sleep := lk.sleep
 	if sleep <= 0 {
@@ -213,9 +204,9 @@ func (lk *Lock) Block(ctx context.Context, wait time.Duration, fn func(context.C
 			defer func() { _ = lk.Release(context.WithoutCancel(ctx)) }()
 			return fn(ctx)
 		case isLocked(err):
-			// Held. Wait, unless waiting would take us past the deadline --
-			// Laravel checks the same thing the same way, before sleeping
-			// rather than after, so a wait of zero never sleeps at all.
+			// Held. Wait, unless waiting would take us past the deadline.
+			// The check is before the sleep rather than after, so a wait of
+			// zero never sleeps at all.
 			if time.Now().Add(sleep).After(deadline) {
 				return fmt.Errorf("%w: %q was still held after %s", ErrLockTimeout, lk.name, wait)
 			}
@@ -245,9 +236,8 @@ func (lk *Lock) Block(ctx context.Context, wait time.Duration, fn func(context.C
 // request that is abandoned while fn is finishing still gives the lock back
 // instead of leaving it to expire.
 //
-// It has no counterpart in Laravel: it is Get with the refusal surfaced as
-// ErrLocked instead of a false, which is what a caller that has nothing else to
-// do wants.
+// It is Get with the refusal surfaced as ErrLocked instead of a false, which is
+// what a caller that has nothing else to do wants.
 func (lk *Lock) Run(ctx context.Context, fn func(context.Context) error) error {
 	if err := lk.Acquire(ctx); err != nil {
 		return err
@@ -296,8 +286,7 @@ func (lk *Lock) IsOwnedBy(ctx context.Context, owner string) (bool, error) {
 
 // BetweenBlockedAttemptsSleepFor sets how long Block waits between attempts.
 //
-// It answers Lock::betweenBlockedAttemptsSleepFor(), and like the PHP it
-// returns the lock so it can be written in one line:
+// It returns the lock, so it can be written in one line:
 //
 //	lock.BetweenBlockedAttemptsSleepFor(50 * time.Millisecond).Block(ctx, time.Second, fn)
 func (lk *Lock) BetweenBlockedAttemptsSleepFor(d time.Duration) *Lock {

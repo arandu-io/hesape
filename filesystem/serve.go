@@ -15,9 +15,8 @@ import (
 type ServeOptions struct {
 	// Download asks the browser to save the file instead of rendering it.
 	//
-	// It is the whole difference between Illuminate's download() and its
-	// response(): one field rather than two functions, because two functions
-	// that differ by a header is two places to fix the header (RULE 9).
+	// It is one field rather than two functions, because two functions that
+	// differ by a header is two places to fix the header.
 	Download bool
 	// Filename is what to call it on the way out. Empty means the last segment
 	// of the key.
@@ -31,9 +30,8 @@ type ServeOptions struct {
 
 // Serve writes a stored file to an HTTP response.
 //
-// It answers for Illuminate's serve(), download() and response() at once --
-// the range-aware one, the attachment one and the inline one are the same
-// function here, and which of the three it is comes from [ServeOptions].
+// The range-aware read, the attachment and the inline render are one function,
+// and which of the three it is comes from [ServeOptions].
 //
 // This is the half that makes "no symlink into a document root" a real answer
 // rather than a refusal. A file is served by a route, the route runs a Policy

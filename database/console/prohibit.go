@@ -20,7 +20,7 @@ var DestructiveCommands = []string{
 	"migrate:rollback",
 }
 
-// ProhibitDestructiveCommands answers DB::prohibitDestructiveCommands.
+// ProhibitDestructiveCommands turns DestructiveCommands on or off.
 //
 // It is the one line an application puts in its bootstrap so that the commands
 // which throw data away cannot run in production:
@@ -29,13 +29,12 @@ var DestructiveCommands = []string{
 //	    dbconsole.ProhibitDestructiveCommands(true)
 //	}
 //
-// The PHP calls Prohibitable::prohibit on the five command classes; this calls
-// [github.com/arandu-io/hesape/console.Prohibit] on the five names, which is
-// where that state already lives.
+// It calls [github.com/arandu-io/hesape/console.Prohibit] on the five
+// names, which is where that state already lives.
 //
-// The argument has no default in Go, so it is written out. The PHP defaults it
-// to true, and true is what a caller almost always means -- passing false is
-// how a test that needs to exercise one of them turns the guard back off.
+// Go has no default arguments, so the argument is always given. Passing
+// true is what a caller almost always means; passing false is how a test
+// that needs to exercise one of the five turns the guard back off.
 //
 // # Why a list and not a flag on the command
 //

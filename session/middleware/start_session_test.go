@@ -42,9 +42,9 @@ func sessionCookie(t *testing.T, w *httptest.ResponseRecorder, name string) *htt
 	return nil
 }
 
-// TestTheSessionCookieIsOnTheResponseEvenWhenTheHandlerWroteFirst is the
-// difference from the PHP: a header set after the first byte never reaches the
-// browser, so the middleware has to finish the session on the first write.
+// TestTheSessionCookieIsOnTheResponseEvenWhenTheHandlerWroteFirst: a header
+// set after the first byte never reaches the browser, so the middleware has
+// to finish the session on the first write.
 func TestTheSessionCookieIsOnTheResponseEvenWhenTheHandlerWroteFirst(t *testing.T) {
 	m := middleware.NewStartSession(manager(session.Config{HTTPOnly: true}), nil)
 
@@ -143,9 +143,9 @@ func TestThePreviousURLIsOnlyRememberedForAPageSomebodyNavigatedTo(t *testing.T)
 	}
 
 	// The whole address, scheme and host included. It used to be
-	// r.URL.RequestURI(), where PHP stores $request->fullUrl(): a "back" built
-	// from a path alone loses the host, so a redirect after signing in on one
-	// host lands on whichever host answers the redirect.
+	// r.URL.RequestURI(): a "back" built from a path alone loses the host,
+	// so a redirect after signing in on one host lands on whichever host
+	// answers the redirect.
 	if got := remembered(pageRequest(http.MethodGet, "/invoices?page=2")); got != "http://example.com/invoices?page=2" {
 		t.Fatalf("a page navigation was not remembered whole: %q", got)
 	}

@@ -18,7 +18,7 @@ import (
 
 // The tenant every repository in this file is configured with. A reset runs for
 // somebody who cannot sign in, so it comes from the wiring and never from the
-// address that arrived in the form (RULE 14).
+// address that arrived in the form.
 const tenant = "acme"
 
 // cheapHasher is the production hasher these tests hash tokens with: bcrypt
@@ -301,7 +301,7 @@ func TestSendResetLinkIsThrottled(t *testing.T) {
 }
 
 // The callback takes delivery over, and an empty status from it means the link
-// was sent -- the PHP's `?:`.
+// was sent.
 func TestSendResetLinkHandsTheTokenToTheCallback(t *testing.T) {
 	user := &resettableUser{id: int64(7), email: "ana@example.com"}
 	tokens := &fakeTokens{token: "a-reset-token"}
@@ -756,8 +756,8 @@ func TestCacheTokenRepositoryThrottle(t *testing.T) {
 	}
 }
 
-// An address with no entry is "no token", not a failure: a cache miss is the
-// PHP's null and neither caller treats it as one.
+// An address with no entry is "no token", not a failure: neither caller treats
+// a cache miss as one.
 func TestCacheTokenRepositoryOnAMiss(t *testing.T) {
 	repository := newCacheTokens(time.Minute)
 	user := &resettableUser{email: "nobody@example.com"}

@@ -6,26 +6,24 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// MySQLProcessor answers Illuminate\Database\Query\Processors\MySqlProcessor.
-// The PHP spells it MySql; Go initialisms are upper case throughout.
+// MySQLProcessor is the Processor for MySQL.
 //
-// The PHP also overrides processInsertGetId, to ask the connection for the last
-// identifier instead of reaching through it to the PDO handle. There is one
-// route to that value here -- LastInsertIDConnection -- so the inherited method
-// already is the override.
+// There is one route to an inserted identifier here --
+// LastInsertIDConnection -- so the shared ProcessInsertGetID is already the
+// right one and nothing is overridden.
 type MySQLProcessor struct {
 	Processor
 }
 
 var _ query.Processor = (*MySQLProcessor)(nil)
 
-// NewMySQLProcessor answers `new MySqlProcessor`.
+// NewMySQLProcessor creates a MySQLProcessor.
 func NewMySQLProcessor() *MySQLProcessor { return &MySQLProcessor{} }
 
-// ProcessColumnListing answers MySqlProcessor::processColumnListing.
+// ProcessColumnListing reduces a column listing to the column names.
 //
-// Deprecated: Illuminate marks it for removal. ProcessColumns answers the same
-// question with the type, the default and the rest of it.
+// Deprecated: use ProcessColumns, which reports the same columns along
+// with their type, default and the rest of it.
 func (p *MySQLProcessor) ProcessColumnListing(results []query.Record) []string {
 	out := make([]string, 0, len(results))
 	for _, result := range results {
@@ -34,7 +32,7 @@ func (p *MySQLProcessor) ProcessColumnListing(results []query.Record) []string {
 	return out
 }
 
-// ProcessColumns answers MySqlProcessor::processColumns.
+// ProcessColumns normalises the columns of a column listing.
 func (p *MySQLProcessor) ProcessColumns(results []query.Record, sql ...string) []query.Record {
 	out := make([]query.Record, 0, len(results))
 
@@ -74,7 +72,7 @@ func (p *MySQLProcessor) ProcessColumns(results []query.Record, sql ...string) [
 	return out
 }
 
-// ProcessIndexes answers MySqlProcessor::processIndexes.
+// ProcessIndexes normalises the columns of an index listing.
 func (p *MySQLProcessor) ProcessIndexes(results []query.Record) []query.Record {
 	out := make([]query.Record, 0, len(results))
 
@@ -93,7 +91,7 @@ func (p *MySQLProcessor) ProcessIndexes(results []query.Record) []query.Record {
 	return out
 }
 
-// ProcessForeignKeys answers MySqlProcessor::processForeignKeys.
+// ProcessForeignKeys normalises the columns of a foreign key listing.
 func (p *MySQLProcessor) ProcessForeignKeys(results []query.Record) []query.Record {
 	out := make([]query.Record, 0, len(results))
 
@@ -112,9 +110,8 @@ func (p *MySQLProcessor) ProcessForeignKeys(results []query.Record) []query.Reco
 	return out
 }
 
-// splitList answers `$value ? explode(',', $value) : []`: a comma separated
-// column list, with the empty one staying empty rather than becoming a list of
-// one empty name.
+// splitList splits a comma separated column list, with the empty string
+// staying an empty list rather than becoming a list of one empty name.
 func splitList(value string) []string {
 	if value == "" {
 		return []string{}

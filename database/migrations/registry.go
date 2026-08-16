@@ -9,9 +9,8 @@ import (
 // DefaultPath is the group a migration lands in when it registers without
 // naming one.
 //
-// It is spelled like a path because that is what Illuminate registers --
-// database_path('migrations') -- and because `aru migrate --path=...` should
-// take something a person recognises. Nothing opens it: it is a key.
+// It is spelled like a path so that `aru migrate --path=...` takes something a
+// person recognises. Nothing opens it: it is a key.
 const DefaultPath = "database/migrations"
 
 // registry is where Register puts them, keyed by group and then by name.
@@ -28,25 +27,22 @@ var (
 //
 // # Why discovery is a registry and not a directory scan
 //
-// Illuminate globs `*_*.php` out of database/migrations and require_once's each
-// file, because in PHP a file on disk becomes a class by being read. Go has no
-// such step: a package that nothing imports is not in the binary at all, so a
-// directory scan at run time would find files the compiler never saw -- and,
-// worse, would find nothing at all in a deployed binary, where the source
-// directory does not exist. `aru migrate` running against a scratch container
-// with no repository checked out is the normal case, not the exotic one.
+// A package that nothing imports is not in the binary at all, so a directory
+// scan at run time would find files the compiler never saw -- and, worse, would
+// find nothing at all in a deployed binary, where the source directory does not
+// exist. `aru migrate` running against a scratch container with no repository
+// checked out is the normal case, not the exotic one.
 //
 // The two candidates were an embed of the directory and a registry filled from
 // init(). Embedding would mean the migration is data -- SQL text -- which reads
 // well until the first migration that has to backfill a column by reading rows,
-// and then there are two kinds of migration and RULE 9 says there is one. So:
+// and then there are two kinds of migration. So:
 //
 //	func init() { migrations.Register(CreateUsersTable{}) }
 //
 // and main.go blank-imports the package the migrations live in. That import is
-// the exact analogue of Illuminate's require_once, moved from run time to link
-// time -- with the compiler checking, before anything runs, that every
-// registered migration actually implements Migration.
+// the loading step, moved to link time -- with the compiler checking, before
+// anything runs, that every registered migration actually implements Migration.
 //
 // Registering the same name twice panics rather than picking one. Two
 // migrations under one name is a copied file somebody forgot to rename, and it
@@ -74,12 +70,10 @@ func Register(migration Migration, path ...string) {
 	registry[group][name] = migration
 }
 
-// Registered answers the migrations of the given groups, sorted by name.
+// Registered returns the migrations of the given groups, sorted by name.
 //
-// It is Migrator::getMigrationFiles with the glob replaced by a map read: the
-// PHP keys by the migration name and sorts by that key, and so does this. No
-// group named means every group, which is what an empty $paths does there once
-// the Migrator has merged its own.
+// It reads the registry rather than a directory, keyed by migration name and
+// sorted by that key. No group named means every group.
 func Registered(paths ...string) []Migration {
 	registryMu.RLock()
 	defer registryMu.RUnlock()

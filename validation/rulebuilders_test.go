@@ -60,7 +60,7 @@ func TestEachBuilderRendersTheRuleStringLaravelRenders(t *testing.T) {
 		{"EmailRule strict", NewEmailRule().RfcCompliant(true).String(), "email:strict"},
 		{"EmailRule dns", NewEmailRule().ValidateMxRecord().String(), "email:dns"},
 
-		// The PHP always writes the five positions and rtrims the trailing
+		// The builder always writes the five positions and trims the trailing
 		// commas, so the id column stays even when nothing is ignored.
 		{"Unique", NewUnique("users", "email").String(), "unique:users,email,NULL,id"},
 		{"Unique ignoring a row", NewUnique("users", "email").Ignore("7").String(),

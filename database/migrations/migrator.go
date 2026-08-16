@@ -20,9 +20,6 @@ import (
 // registration it does not use, and would make this package depend on a
 // dispatcher rather than on the idea of one. A Migrator with none dispatches
 // nothing and migrates the same.
-//
-// Answers Illuminate\Contracts\Events\Dispatcher, narrowed to the one method
-// the Migrator calls on it.
 type Dispatcher interface {
 	// Dispatch fires an event.
 	Dispatch(event any)
@@ -31,51 +28,48 @@ type Dispatcher interface {
 // TransactionalConnection is a Connection that can wrap a migration in a
 // transaction.
 //
-// The PHP tests two things before wrapping: the schema grammar's
-// supportsSchemaTransactions, and the migration's own $withinTransaction. The
-// first belongs to the connection and is asked for here; the second is on the
-// Migration. A connection that does not satisfy this interface runs its
-// migrations unwrapped, which is what the PHP does for MySQL -- it has no
-// transactional DDL, so a failed migration there leaves half a schema whatever
-// anybody wants.
+// Two things decide whether a migration is wrapped: the schema grammar's
+// support for transactional DDL, asked for here, and the migration's own
+// WithinTransaction flag. A connection that does not satisfy this interface
+// runs its migrations unwrapped -- MySQL has no transactional DDL, so a
+// failed migration there leaves half a schema whatever anybody wants.
 type TransactionalConnection interface {
 	Connection
 
-	// SupportsSchemaTransactions answers the schema grammar method of the same
-	// name.
+	// SupportsSchemaTransactions reports whether the schema grammar supports
+	// rolling DDL back.
 	SupportsSchemaTransactions() bool
 
-	// Transaction answers Connection::transaction.
+	// Transaction runs callback inside a transaction.
 	Transaction(ctx context.Context, callback func() error) error
 }
 
-// Options answers the $options array the Migrator's methods take.
+// Options is the set of flags the Migrator's methods take.
 //
-// PHP reads 'pretend', 'step' and 'batch' out of one untyped array, where
-// 'step' means two different things: a bool on the way up (one batch per
-// migration) and an int on the way down (how many to undo). Two fields is the
-// same information with the ambiguity removed, and the ambiguity is worth
-// removing -- `--step` on migrate and `--step=3` on rollback are not the same
-// flag.
+// Step serves two different purposes depending on direction: a bool on the
+// way up (one batch per migration) and an int on the way down (how many to
+// undo). Two fields is the same information with the ambiguity removed, and
+// the ambiguity is worth removing -- `--step` on migrate and `--step=3` on
+// rollback are not the same flag.
 type Options struct {
-	// Pretend answers $options['pretend']: print the statements, run none.
+	// Pretend prints the statements a run would execute, and runs none of
+	// them.
 	Pretend bool
 
-	// Step answers $options['step'] on the way up: give every migration its
-	// own batch, so each can be rolled back on its own.
+	// Step gives every migration its own batch on the way up, so each can be
+	// rolled back on its own.
 	Step bool
 
-	// Steps answers $options['step'] on the way down: how many migrations to
-	// roll back.
+	// Steps is how many migrations to roll back on the way down.
 	Steps int
 
-	// Batch answers $options['batch']: roll back one named batch.
+	// Batch rolls back one named batch.
 	Batch int
 }
 
-// connectionResolverCallback answers Migrator::$connectionResolverCallback, and
-// is static there for the same reason it is package-level here: Laravel sets it
-// once, from a service provider, for the whole process.
+// connectionResolverCallback is how a migration reaches a connection by name.
+//
+// It is package-level because it is set once, for the whole process.
 var (
 	connectionResolverMu       sync.RWMutex
 	connectionResolverCallback func(resolver Resolver, name string) (Connection, error)
@@ -84,13 +78,13 @@ var (
 	withoutMigrations   []string
 )
 
-// Migrator answers Illuminate\Database\Migrations\Migrator: the thing that runs
-// migrations up and down and keeps the repository in step with the schema.
+// Migrator runs migrations up and down and keeps the repository in step with the
+// schema.
 //
 // # It does not run at boot, and this is where that is enforced
 //
-// RULE 16: `aru migrate` is a step of the deployment pipeline, never a call in
-// the start-up path of the process. With N replicas rolling, calling Run from
+// `aru migrate` is a step of the deployment pipeline, never a call in the
+// start-up path of the process. With N replicas rolling, calling Run from
 // main means N migrators racing each other over the same table, and the one
 // that loses reports a duplicate key on a table it was creating. There is no
 // Migrate-on-boot helper here to make that easy, and there will not be one.
@@ -100,37 +94,35 @@ var (
 // A new column is nullable or has a default; removing one takes two releases,
 // the first stopping the writes and the second dropping the column.
 type Migrator struct {
-	// events is Migrator::$events.
+	// events is where the Migrator dispatches its events.
 	events Dispatcher
 
-	// repository is Migrator::$repository.
+	// repository is where the Migrator records which migrations have run.
 	repository MigrationRepositoryInterface
 
-	// resolver is Migrator::$resolver.
+	// resolver is how the Migrator reaches a connection by name.
 	resolver Resolver
 
-	// connection is Migrator::$connection: the default connection name.
+	// connection is the default connection name.
 	connection string
 
-	// paths is Migrator::$paths.
+	// paths is the migration groups the Migrator looks in.
 	paths []string
 
-	// output is Migrator::$output, an io.Writer rather than a Symfony
-	// OutputInterface. Nil writes nothing, which is what a null output does
-	// there.
+	// output is where progress is written. Nil writes nothing.
 	output io.Writer
 }
 
-// NewMigrator answers Migrator::__construct.
+// NewMigrator creates a Migrator.
 //
-// The PHP takes a Filesystem, and there is none here: a migration is code, and
-// the registry replaced the glob. See Register for the whole of that decision.
+// There is no filesystem argument: a migration is code, and the registry
+// replaced the glob. See Register for the whole of that decision.
 func NewMigrator(repository MigrationRepositoryInterface, resolver Resolver, dispatcher Dispatcher) *Migrator {
 	return &Migrator{repository: repository, resolver: resolver, events: dispatcher}
 }
 
-// Run answers Migrator::run: apply everything that has not been applied, and
-// answer the names of what it applied.
+// Run applies everything that has not been applied yet, and returns the
+// names of what it applied.
 func (m *Migrator) Run(ctx context.Context, paths []string, options Options) ([]string, error) {
 	files := m.GetMigrationFiles(paths)
 
@@ -152,7 +144,8 @@ func (m *Migrator) Run(ctx context.Context, paths []string, options Options) ([]
 	return names, nil
 }
 
-// pendingMigrations answers the protected Migrator::pendingMigrations.
+// pendingMigrations returns every registered migration that has not run yet
+// and is not in the skip list, sorted by name.
 func (m *Migrator) pendingMigrations(files map[string]Migration, ran []string) []Migration {
 	done := make(map[string]bool, len(ran))
 	for _, name := range ran {
@@ -177,7 +170,8 @@ func (m *Migrator) pendingMigrations(files map[string]Migration, ran []string) [
 	return out
 }
 
-// migrationsToSkip answers the protected Migrator::migrationsToSkip.
+// migrationsToSkip returns the names WithoutMigrations registered, resolved
+// to their migration names.
 func (m *Migrator) migrationsToSkip() []string {
 	withoutMigrationsMu.RLock()
 	defer withoutMigrationsMu.RUnlock()
@@ -189,8 +183,7 @@ func (m *Migrator) migrationsToSkip() []string {
 	return out
 }
 
-// RunPending answers Migrator::runPending: apply the given migrations, in the
-// order they arrive.
+// RunPending applies the given migrations, in the order they arrive.
 //
 // It stops at the first failure. Applying later migrations over a schema that a
 // failed one left half-changed turns one clear error into a database nobody can
@@ -225,7 +218,8 @@ func (m *Migrator) RunPending(ctx context.Context, migrations []Migration, optio
 	return nil
 }
 
-// runUp answers the protected Migrator::runUp.
+// runUp runs one migration's Up, records it in the given batch, and reports
+// its result.
 func (m *Migrator) runUp(ctx context.Context, migration Migration, batch int, pretend bool) error {
 	name := migration.GetName()
 
@@ -254,8 +248,7 @@ func (m *Migrator) runUp(ctx context.Context, migration Migration, batch int, pr
 	return nil
 }
 
-// Rollback answers Migrator::rollback: undo the last batch, or the batch or
-// step count the options name.
+// Rollback undoes the last batch, or the batch or step count options names.
 func (m *Migrator) Rollback(ctx context.Context, paths []string, options Options) ([]string, error) {
 	records, err := m.getMigrationsForRollback(ctx, options)
 	if err != nil {
@@ -273,8 +266,9 @@ func (m *Migrator) Rollback(ctx context.Context, paths []string, options Options
 	return rolledBack, err
 }
 
-// getMigrationsForRollback answers the protected
-// Migrator::getMigrationsForRollback.
+// getMigrationsForRollback returns the migration records a rollback should
+// undo, chosen by options.Steps, options.Batch, or the last batch when
+// neither is set.
 func (m *Migrator) getMigrationsForRollback(ctx context.Context, options Options) ([]MigrationRecord, error) {
 	if options.Steps > 0 {
 		return m.repository.GetMigrations(ctx, options.Steps)
@@ -285,12 +279,12 @@ func (m *Migrator) getMigrationsForRollback(ctx context.Context, options Options
 	return m.repository.GetLast(ctx)
 }
 
-// rollbackMigrations answers the protected Migrator::rollbackMigrations.
+// rollbackMigrations runs Down for each recorded migration, newest first.
 //
 // A recorded migration whose code is no longer registered is reported and
-// skipped, exactly as the PHP prints "Migration not found" and continues: the
-// alternative is a rollback that refuses to start because of one file somebody
-// deleted six releases ago.
+// skipped rather than stopping the rollback: the alternative is a rollback
+// that refuses to start because of one file somebody deleted six releases
+// ago.
 func (m *Migrator) rollbackMigrations(ctx context.Context, records []MigrationRecord, paths []string, options Options) ([]string, error) {
 	var rolledBack []string
 
@@ -318,8 +312,7 @@ func (m *Migrator) rollbackMigrations(ctx context.Context, records []MigrationRe
 	return rolledBack, nil
 }
 
-// Reset answers Migrator::reset: roll every applied migration back, newest
-// first.
+// Reset rolls every applied migration back, newest first.
 func (m *Migrator) Reset(ctx context.Context, paths []string, pretend bool) ([]string, error) {
 	ran, err := m.repository.GetRan(ctx)
 	if err != nil {
@@ -342,7 +335,7 @@ func (m *Migrator) Reset(ctx context.Context, paths []string, pretend bool) ([]s
 	return rolledBack, err
 }
 
-// runDown answers the protected Migrator::runDown.
+// runDown runs one migration's Down and removes its record.
 func (m *Migrator) runDown(ctx context.Context, migration Migration, record MigrationRecord, pretend bool) error {
 	name := migration.GetName()
 
@@ -363,9 +356,8 @@ func (m *Migrator) runDown(ctx context.Context, migration Migration, record Migr
 	return nil
 }
 
-// runMigration answers the protected Migrator::runMigration: run one direction
-// of one migration, inside a transaction when the engine and the migration both
-// allow it.
+// runMigration runs one direction of one migration, inside a transaction
+// when the engine and the migration both allow it.
 func (m *Migrator) runMigration(ctx context.Context, migration Migration, method string) error {
 	conn, err := m.ResolveConnection(migration.GetConnection())
 	if err != nil {
@@ -375,8 +367,8 @@ func (m *Migrator) runMigration(ctx context.Context, migration Migration, method
 	callback := func() error {
 		reversible, isReversible := migration.(ReversibleMigration)
 		if method == "down" && !isReversible {
-			// The PHP's method_exists check: a migration with no down is not
-			// reversed, and that is not an error there either.
+			// A migration with no Down is not reversed, and that is not an
+			// error.
 			return nil
 		}
 
@@ -403,13 +395,12 @@ func (m *Migrator) runMigration(ctx context.Context, migration Migration, method
 	return callback()
 }
 
-// pretendToRun answers the protected Migrator::pretendToRun.
+// pretendToRun runs the migration against the connection in a mode that
+// collects its statements without executing them, and prints them.
 //
-// The PHP collects the statements by running the migration against a connection
-// in "dry run" mode and reading its query log. That needs a Connection, so the
-// same trick is used here: a connection that implements PretendingConnection
-// answers the statements without executing them, and one that does not says so
-// rather than pretending to pretend.
+// A connection that implements PretendingConnection returns the statements
+// without executing them, and one that does not says so rather than
+// pretending to pretend.
 func (m *Migrator) pretendToRun(ctx context.Context, migration Migration, method string) error {
 	name := migration.GetName()
 	m.write(name)
@@ -447,22 +438,20 @@ func (m *Migrator) pretendToRun(ctx context.Context, migration Migration, method
 // PretendingConnection is a Connection that can run a callback without letting
 // any of its statements reach the server.
 //
-// It answers Connection::pretend, which returns the query log rather than the
-// callback's result.
+// Pretend returns the query log rather than the callback's result.
 type PretendingConnection interface {
 	Connection
 
-	// Pretend answers Connection::pretend: the statements the callback would
-	// have run.
+	// Pretend runs callback and returns the statements it would have run,
+	// without executing them.
 	Pretend(ctx context.Context, callback func() error) ([]string, error)
 }
 
-// Resolve answers Migrator::resolve: the migration registered under a name.
+// Resolve returns the migration registered under name.
 //
-// The PHP builds a class name out of the file name and news it up. Here the
-// registry already holds the instance, because a Go migration is registered
-// rather than discovered -- so this is a lookup, and an unknown name is an
-// error rather than a fatal on `new`.
+// The registry already holds the instance, because a Go migration is
+// registered rather than discovered -- so this is a lookup, and an unknown
+// name is an error rather than a construction failure.
 func (m *Migrator) Resolve(name string) (Migration, error) {
 	for _, migration := range Registered(m.paths...) {
 		if migration.GetName() == name {
@@ -472,12 +461,10 @@ func (m *Migrator) Resolve(name string) (Migration, error) {
 	return nil, fmt.Errorf("no migration is registered under %q", name)
 }
 
-// GetMigrationFiles answers Migrator::getMigrationFiles: every migration of the
-// given paths, keyed by name.
+// GetMigrationFiles answers every migration of the given paths, keyed by name.
 //
-// The PHP globs `*_*.php` and keys by the file name minus the extension. There
-// is no glob here -- see Register -- so this reads the registry and keys by
-// GetName, which is the same string the PHP's key is.
+// There is nothing on disk to glob -- see Register -- so this reads the registry
+// and keys by GetName.
 func (m *Migrator) GetMigrationFiles(paths []string) map[string]Migration {
 	groups := append(append([]string(nil), m.paths...), paths...)
 
@@ -490,12 +477,12 @@ func (m *Migrator) GetMigrationFiles(paths []string) map[string]Migration {
 
 // RequireFiles has no counterpart, and its absence is the point.
 //
-// It exists in PHP to require_once each migration file, because a file on disk
-// is not a class until something reads it. Go has no such step: the import in
-// main.go put every registered migration in the binary before it started.
+// A migration file needs a separate load step only when something has to
+// read it off disk to make it exist as code. Go has no such step: the import
+// in main.go put every registered migration in the binary before it started.
 
-// GetMigrationName answers Migrator::getMigrationName: the name of a migration,
-// given either the name itself or a path that ends in it.
+// GetMigrationName returns the name of a migration, given either the name
+// itself or a path that ends in it.
 //
 // It still takes a path-shaped string because `aru migrate --without=` and the
 // squashed-schema paths hand it one, and because a person copying a file name
@@ -509,7 +496,7 @@ func (m *Migrator) GetMigrationName(path string) string {
 	return strings.TrimSuffix(name, ".php")
 }
 
-// Path answers Migrator::path: add a group the Migrator should look in.
+// Path adds a group the Migrator should look in.
 func (m *Migrator) Path(path string) {
 	for _, existing := range m.paths {
 		if existing == path {
@@ -519,25 +506,25 @@ func (m *Migrator) Path(path string) {
 	m.paths = append(m.paths, path)
 }
 
-// Paths answers Migrator::paths.
+// Paths returns the groups the Migrator looks in.
 func (m *Migrator) Paths() []string { return m.paths }
 
-// WithoutMigrations answers Migrator::withoutMigrations: names to leave pending
-// however many times migrate runs.
+// WithoutMigrations sets names to leave pending however many times migrate
+// runs.
 //
-// It is static in PHP and package-level here for the same reason: the test
-// suite sets it once for a process.
+// It is package-level rather than a method because the test suite sets it
+// once for a process.
 func WithoutMigrations(names []string) {
 	withoutMigrationsMu.Lock()
 	defer withoutMigrationsMu.Unlock()
 	withoutMigrations = names
 }
 
-// GetConnection answers Migrator::getConnection: the default connection name.
+// GetConnection returns the default connection name.
 func (m *Migrator) GetConnection() string { return m.connection }
 
-// UsingConnection answers Migrator::usingConnection: run the callback with a
-// different default connection, and put the old one back afterwards.
+// UsingConnection runs callback with a different default connection, and
+// puts the old one back afterward.
 func (m *Migrator) UsingConnection(name string, callback func() error) error {
 	previous := m.resolver.GetDefaultConnection()
 
@@ -547,7 +534,7 @@ func (m *Migrator) UsingConnection(name string, callback func() error) error {
 	return callback()
 }
 
-// SetConnection answers Migrator::setConnection.
+// SetConnection replaces the default connection name.
 func (m *Migrator) SetConnection(name string) {
 	if name != "" {
 		m.resolver.SetDefaultConnection(name)
@@ -556,7 +543,9 @@ func (m *Migrator) SetConnection(name string) {
 	m.connection = name
 }
 
-// ResolveConnection answers Migrator::resolveConnection.
+// ResolveConnection returns the named connection, or the default connection
+// when connection is empty, through the registered resolver callback when
+// one was set.
 func (m *Migrator) ResolveConnection(connection string) (Connection, error) {
 	connectionResolverMu.RLock()
 	callback := connectionResolverCallback
@@ -573,22 +562,24 @@ func (m *Migrator) ResolveConnection(connection string) (Connection, error) {
 	return m.resolver.Connection(name)
 }
 
-// ResolveConnectionsUsing answers Migrator::resolveConnectionsUsing.
+// ResolveConnectionsUsing registers the callback ResolveConnection uses to
+// resolve a connection.
 func ResolveConnectionsUsing(callback func(resolver Resolver, name string) (Connection, error)) {
 	connectionResolverMu.Lock()
 	defer connectionResolverMu.Unlock()
 	connectionResolverCallback = callback
 }
 
-// GetRepository answers Migrator::getRepository.
+// GetRepository returns the repository migrations are recorded in.
 func (m *Migrator) GetRepository() MigrationRepositoryInterface { return m.repository }
 
-// RepositoryExists answers Migrator::repositoryExists.
+// RepositoryExists reports whether the migration repository's table exists.
 func (m *Migrator) RepositoryExists(ctx context.Context) bool {
 	return m.repository.RepositoryExists(ctx)
 }
 
-// HasRunAnyMigrations answers Migrator::hasRunAnyMigrations.
+// HasRunAnyMigrations reports whether the repository exists and has at least
+// one migration recorded.
 func (m *Migrator) HasRunAnyMigrations(ctx context.Context) bool {
 	if !m.RepositoryExists(ctx) {
 		return false
@@ -597,30 +588,29 @@ func (m *Migrator) HasRunAnyMigrations(ctx context.Context) bool {
 	return err == nil && len(ran) > 0
 }
 
-// DeleteRepository answers Migrator::deleteRepository.
+// DeleteRepository drops the migration repository's table.
 func (m *Migrator) DeleteRepository(ctx context.Context) error {
 	return m.repository.DeleteRepository(ctx)
 }
 
-// SetOutput answers Migrator::setOutput.
+// SetOutput sets where progress is written.
 //
-// The PHP takes a Symfony OutputInterface and renders console components
-// through it. An io.Writer is what that is once the components are gone, and
-// they are gone because a library that draws a table is a library a test cannot
-// read.
+// It is a plain io.Writer rather than something that renders console
+// components, because a library that draws a table is a library a test
+// cannot read.
 func (m *Migrator) SetOutput(output io.Writer) *Migrator {
 	m.output = output
 	return m
 }
 
-// FireMigrationEvent answers Migrator::fireMigrationEvent.
+// FireMigrationEvent dispatches event, if a dispatcher was given.
 func (m *Migrator) FireMigrationEvent(event any) {
 	if m.events != nil {
 		m.events.Dispatch(event)
 	}
 }
 
-// write answers the protected Migrator::write.
+// write appends line to the output, if one was set.
 func (m *Migrator) write(line string) {
 	if m.output == nil {
 		return
@@ -628,8 +618,7 @@ func (m *Migrator) write(line string) {
 	_, _ = io.WriteString(m.output, line+"\n")
 }
 
-// optionsMap shapes Options back into the array the events carry, so a listener
-// written against Laravel reads the keys it expects.
+// optionsMap shapes Options back into the map the events carry.
 func optionsMap(options Options) map[string]any {
 	return map[string]any{
 		"pretend": options.Pretend,

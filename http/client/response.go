@@ -10,21 +10,19 @@ import (
 	"github.com/arandu-io/hesape/support"
 )
 
-// Response mirrors Illuminate\Http\Client\Response.
-//
-// It wraps *http.Response and adds the inspection, JSON decoding, and
-// error-throwing methods that Illuminate provides. The body is read eagerly
-// so that the caller can call Body, JSON, and Collect repeatedly without
-// draining the stream.
+// Response wraps *http.Response and adds inspection, JSON decoding, and
+// error-throwing methods. The body is read eagerly so that the caller can
+// call Body, JSON, and Collect repeatedly without draining the stream.
 type Response struct {
 	resp    *http.Response
 	body    []byte
 	readErr error
 	closed  bool
 
-	// truncateExceptionsAt is Response::$truncateExceptionsAt, the PHP
-	// int|false|null: nil defers to the RequestException static, a pointer to
-	// zero is the PHP false, and a positive length cuts the body summary.
+	// truncateExceptionsAt is the per-response override of the truncation
+	// length: nil defers to the package-level default, a pointer to zero
+	// lets the whole body through, and a positive length cuts the body
+	// summary.
 	truncateExceptionsAt *int
 }
 
@@ -221,16 +219,14 @@ func (r *Response) Close() error {
 	return nil
 }
 
-// Throw is Response::throw: the RequestException a failed response carries,
-// or nil when it did not fail.
+// Throw is the RequestException a failed response carries, or nil when it
+// did not fail.
 //
-// The callback is a side effect and never a substitute. The PHP wraps it in
-// tap() -- throw tap($this->toException(), fn ($e) => $callback($this, $e)) --
-// so the exception goes up whatever the callback returns, and the documented
-// idiom ->throw(fn ($r, $e) => Log::error(...)) logs *and* throws. This
-// returned the callback's own error instead, so the idiom's nil made a 500
-// disappear; it also handed the callback one argument where the PHP hands it
-// two, the response and the exception.
+// The callback is a side effect and never a substitute for the exception:
+// it used to return the callback's own error instead, so a callback that
+// only logged and returned nil made a 500 disappear. It also used to hand
+// the callback one argument instead of two -- the response and the
+// exception.
 func (r *Response) Throw(callback func(*Response, *RequestException)) error {
 	if !r.Failed() {
 		return nil
@@ -242,10 +238,9 @@ func (r *Response) Throw(callback func(*Response, *RequestException)) error {
 	return exception
 }
 
-// ToException is Response::toException: the RequestException this response
-// would throw, or nil when it did not fail.
+// ToException is the RequestException this response would throw, or nil
+// when it did not fail.
 //
-// The PHP returns RequestException|null; a nil *RequestException is the null.
 // Callers that assign it to an error must check for nil before returning it,
 // because a nil pointer in a non-nil interface is not a nil error.
 func (r *Response) ToException() *RequestException {
@@ -255,23 +250,23 @@ func (r *Response) ToException() *RequestException {
 	return NewRequestException(r, r.truncateExceptionsAt)
 }
 
-// TruncateExceptionsAt is Response::truncateExceptionsAt: cut the body summary
-// of this response's exception at the given length.
+// TruncateExceptionsAt cuts the body summary of this response's exception
+// at the given length.
 func (r *Response) TruncateExceptionsAt(length int) *Response {
 	r.truncateExceptionsAt = &length
 	return r
 }
 
-// DontTruncateExceptions is Response::dontTruncateExceptions: let the whole
-// body into this response's exception message.
+// DontTruncateExceptions lets the whole body into this response's
+// exception message.
 func (r *Response) DontTruncateExceptions() *Response {
 	zero := 0
 	r.truncateExceptionsAt = &zero
 	return r
 }
 
-// ThrowIf is Response::throwIf: throw when the condition holds and the
-// response failed. The callback is the side effect [Response.Throw] describes.
+// ThrowIf throws when the condition holds and the response failed. The
+// callback is the side effect [Response.Throw] describes.
 func (r *Response) ThrowIf(condition bool, callback func(*Response, *RequestException)) error {
 	if condition {
 		return r.Throw(callback)
@@ -284,15 +279,14 @@ func (r *Response) ThrowUnless(condition bool) error {
 	return r.ThrowIf(!condition, nil)
 }
 
-// ThrowIfStatus is Response::throwIfStatus: throw when the response carries
-// the given status code.
+// ThrowIfStatus throws when the response carries the given status code.
 //
-// It does not consult failed(). The PHP throws a RequestException the moment
+// It does not consult Failed: a RequestException is returned the moment
 // the status matches, whatever the status is, which is what makes
-// throwIfStatus(201) a usable assertion. This went through Throw, which
-// returns nil for anything below 400, so every status a caller could name
-// under 400 was silently accepted -- the mirror image of throwUnlessStatus,
-// which was already right.
+// ThrowIfStatus(201) a usable assertion. This used to go through Throw,
+// which returns nil for anything below 400, so every status a caller could
+// name under 400 was silently accepted -- the mirror image of
+// ThrowUnlessStatus, which was already right.
 func (r *Response) ThrowIfStatus(statusCode int) error {
 	if r.Status() == statusCode {
 		return NewRequestException(r, r.truncateExceptionsAt)
@@ -300,8 +294,8 @@ func (r *Response) ThrowIfStatus(statusCode int) error {
 	return nil
 }
 
-// ThrowUnlessStatus is Response::throwUnlessStatus: throw unless the response
-// carries the given status code.
+// ThrowUnlessStatus throws unless the response carries the given status
+// code.
 func (r *Response) ThrowUnlessStatus(statusCode int) error {
 	if r.Status() == statusCode {
 		return nil
@@ -309,7 +303,7 @@ func (r *Response) ThrowUnlessStatus(statusCode int) error {
 	return NewRequestException(r, r.truncateExceptionsAt)
 }
 
-// ThrowIfClientError is Response::throwIfClientError.
+// ThrowIfClientError throws when the response is a 4xx.
 func (r *Response) ThrowIfClientError() error {
 	if r.ClientError() {
 		return r.Throw(nil)
@@ -317,7 +311,7 @@ func (r *Response) ThrowIfClientError() error {
 	return nil
 }
 
-// ThrowIfServerError is Response::throwIfServerError.
+// ThrowIfServerError throws when the response is a 5xx.
 func (r *Response) ThrowIfServerError() error {
 	if r.ServerError() {
 		return r.Throw(nil)
@@ -375,21 +369,20 @@ func (r *Response) UnprocessableEntity() bool { return r.Status() == http.Status
 // TooManyRequests reports whether the status is 429.
 func (r *Response) TooManyRequests() bool { return r.Status() == http.StatusTooManyRequests }
 
-// UnprocessableContent is DeterminesStatusCode::unprocessableContent: the 422
-// check under the name the RFC gave it. [Response.UnprocessableEntity] is the
-// same check under the name the older RFC gave it, and the PHP keeps both for
-// the same reason.
+// UnprocessableContent is the 422 check under the name the current RFC
+// gives it. [Response.UnprocessableEntity] is the same check under the name
+// the older RFC gave it; both are kept for callers who know the status by
+// either name.
 func (r *Response) UnprocessableContent() bool {
 	return r.Status() == http.StatusUnprocessableEntity
 }
 
-// Reason is Response::reason: the reason phrase the server sent.
+// Reason is the reason phrase the server sent.
 //
-// The PHP reads it off the PSR-7 response, which keeps whatever the server
-// wrote; net/http keeps the whole status line, so the code is trimmed off the
+// net/http keeps the whole status line, so the code is trimmed off the
 // front of it. When there is no status line -- a stubbed response -- the
-// registered text for the code stands in, which is what the server would have
-// sent.
+// registered text for the code stands in, which is what the server would
+// have sent.
 func (r *Response) Reason() string {
 	if r == nil || r.resp == nil {
 		return ""
@@ -405,14 +398,14 @@ func (r *Response) Reason() string {
 	return http.StatusText(r.resp.StatusCode)
 }
 
-// DumpHeaders is Response::dumpHeaders: write the response headers out where
-// the process can see them.
+// DumpHeaders writes the response headers out where the process can see
+// them.
 func (r *Response) DumpHeaders() *Response {
 	support.Dump(r.Headers())
 	return r
 }
 
-// DdHeaders is Response::ddHeaders: dump the headers and end the process.
+// DdHeaders dumps the headers and ends the process.
 func (r *Response) DdHeaders() {
 	support.Dd(r.Headers())
 }

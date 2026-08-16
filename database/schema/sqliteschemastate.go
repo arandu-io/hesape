@@ -11,25 +11,19 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// SqliteSchemaState answers Illuminate\Database\Schema\SqliteSchemaState: the
-// SchemaState that shells out to the sqlite3 command.
-//
-// It is spelled the PHP's way. Illuminate writes SQLiteBuilder and
-// SQLiteGrammar with three capitals and SqliteSchemaState with one, and ADR 0044
-// says the name is the Illuminate name -- so the inconsistency is carried across
-// rather than tidied up, because a reader who greps for the PHP class has to
-// find it.
+// SqliteSchemaState is the SchemaState that shells out to the sqlite3 command.
 type SqliteSchemaState struct {
 	*BaseSchemaState
 }
 
-// NewSqliteSchemaState answers SqliteSchemaState's inherited constructor.
+// NewSqliteSchemaState builds a SqliteSchemaState for connection, using
+// processFactory to build the sqlite3 commands it runs.
 func NewSqliteSchemaState(connection Connection, processFactory ProcessFactory) *SqliteSchemaState {
 	return &SqliteSchemaState{BaseSchemaState: NewBaseSchemaState(connection, processFactory)}
 }
 
-// sqliteInternalTables answers the PHP's
-// /CREATE TABLE sqlite_.+?\);[\r\n]+/is.
+// sqliteInternalTables matches the CREATE TABLE statement for one of SQLite's
+// own bookkeeping tables in a .schema dump.
 //
 // SQLite's own bookkeeping tables come back from .schema and must not go into
 // the dump: sqlite_sequence is recreated by the engine the first time an
@@ -37,23 +31,22 @@ func NewSqliteSchemaState(connection Connection, processFactory ProcessFactory) 
 // load.
 var sqliteInternalTables = regexp.MustCompile(`(?is)CREATE TABLE sqlite_.+?\);[\r\n]+`)
 
-// sqliteMigrationRow answers the PHP's /^\s*(--|INSERT\s)/iu: the lines of a
-// .dump worth keeping, which are the inserts and the comments around them.
+// sqliteMigrationRow matches the lines of a .dump worth keeping: the inserts
+// and the comments around them.
 var sqliteMigrationRow = regexp.MustCompile(`(?i)^\s*(--|INSERT\s)`)
 
-// Dump answers SqliteSchemaState::dump.
+// Dump writes the connection's schema, plus the rows of the migration table,
+// to path.
 //
-// Two commands, as in the PHP. The first writes the schema; the second appends
-// the rows of the migration table, so that a database restored from the dump
-// knows which migrations it already has and `aru migrate` does not try to run
-// them again. Without the second half the squashed schema is correct and the
-// migrator immediately replays every migration on top of it.
+// Two commands: the first writes the schema; the second appends the rows of
+// the migration table, so that a database restored from the dump knows which
+// migrations it already has and does not try to run them again. Without the
+// second half the squashed schema is correct and the migrator immediately
+// replays every migration on top of it.
 //
-// The PHP redirects with a shell (`> $path`); this opens the file and wires the
-// process's standard output to it. The dump has to be written by a program whose
-// arguments came out of a database configuration, and assembling a shell line
-// from that configuration is the injection the doc comment on MakeProcess is
-// about.
+// The dump has to be written by a program whose arguments came out of a
+// database configuration, and assembling a shell line from that
+// configuration is the injection the doc comment on MakeProcess is about.
 func (s *SqliteSchemaState) Dump(ctx context.Context, g auth.Grant, connection Connection, path string) error {
 	schema, err := s.runSqlite(ctx, ".schema --indent")
 	if err != nil {
@@ -75,7 +68,8 @@ func (s *SqliteSchemaState) Dump(ctx context.Context, g auth.Grant, connection C
 	return s.appendMigrationData(ctx, path)
 }
 
-// appendMigrationData answers SqliteSchemaState::appendMigrationData.
+// appendMigrationData dumps the migration table with sqlite3 and appends its
+// insert statements to the schema file at path.
 func (s *SqliteSchemaState) appendMigrationData(ctx context.Context, path string) error {
 	dumped, err := s.runSqlite(ctx, fmt.Sprintf(".dump '%s'", s.GetMigrationTable()))
 	if err != nil {
@@ -102,12 +96,12 @@ func (s *SqliteSchemaState) appendMigrationData(ctx context.Context, path string
 	return nil
 }
 
-// Load answers SqliteSchemaState::load.
+// Load runs the schema file at path against the connection.
 //
 // An in-memory database has no file for sqlite3 to open, and a second process
 // opening ":memory:" would get its own empty database and load the schema into
 // something nobody can see. So the statements are run through the connection
-// that already holds the database, which is what the PHP's getPdo()->exec does.
+// that already holds the database.
 func (s *SqliteSchemaState) Load(ctx context.Context, g auth.Grant, path string) error {
 	database := s.GetConnection().GetConfig("database")
 
@@ -136,7 +130,7 @@ func (s *SqliteSchemaState) Load(ctx context.Context, g auth.Grant, path string)
 }
 
 // runSqlite runs one sqlite3 dot-command against the configured database and
-// answers what it wrote to standard output.
+// returns what it wrote to standard output.
 func (s *SqliteSchemaState) runSqlite(ctx context.Context, dotCommand string) ([]byte, error) {
 	command := s.MakeProcess(ctx, "sqlite3", s.GetConnection().GetConfig("database"), dotCommand)
 	command.Env = s.processEnvironment(nil)
@@ -152,14 +146,15 @@ func (s *SqliteSchemaState) runSqlite(ctx context.Context, dotCommand string) ([
 	return stdout.Bytes(), nil
 }
 
-// isSqliteMemory answers the PHP's three-way check for an in-memory database.
+// isSqliteMemory reports whether database names an in-memory SQLite database:
+// the literal ":memory:" or a mode=memory query parameter.
 func isSqliteMemory(database string) bool {
 	return database == ":memory:" ||
 		strings.Contains(database, "?mode=memory") ||
 		strings.Contains(database, "&mode=memory")
 }
 
-// splitLines answers the PHP's preg_split("/\r\n|\n|\r/", ...).
+// splitLines splits text on any of \r\n, \n or \r.
 func splitLines(text string) []string {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")

@@ -9,12 +9,10 @@ import (
 // BroadcastNotificationCreated is a notification on its way to a browser that
 // is connected right now.
 //
-// It is Illuminate\Notifications\Events\BroadcastNotificationCreated: the value
-// the broadcast channel builds and hands to the broadcaster. In PHP it is an
-// event that implements ShouldBroadcast, so dispatching it *is* the broadcast;
-// here the channel calls the four methods below and pushes the result, because
-// an event on the outbox is a record of something that happened and not the
-// mechanism that makes it happen (RULE 9).
+// It is the value the broadcast channel builds and hands to the broadcaster:
+// the channel calls the four methods below and pushes the result. Recording it
+// on the outbox is not what makes the push happen -- an event there is a record
+// of something that happened, never the mechanism.
 type BroadcastNotificationCreated struct {
 	// NotifiableType and NotifiableID say who received it.
 	NotifiableType string
@@ -30,19 +28,17 @@ type BroadcastNotificationCreated struct {
 	// channel, which ChannelName derives.
 	Channels []string
 	// Event is the name the client listens for. Empty means BroadcastAs falls
-	// back to the class name Illuminate would use, spelled here as the event
-	// name this package publishes.
+	// back to the Key.
 	Event string
 	// Type is what the payload calls the notification. Empty means the Key.
 	Type string
 }
 
-// BroadcastOn is BroadcastNotificationCreated::broadcastOn.
+// BroadcastOn is the channels this goes to: the ones named on the value, or the
+// recipient's own channel when none were.
 //
-// Illuminate wraps each one in a PrivateChannel; there is no channel type here
-// yet -- hesape/broadcasting is a later layer -- so what travels is the name,
-// and "private" is what the broadcaster makes of a name that belongs to one
-// recipient.
+// What travels is the name and not a channel value: whether a name that belongs
+// to one recipient is private is what the broadcaster makes of it.
 func (b BroadcastNotificationCreated) BroadcastOn() []string {
 	if len(b.Channels) > 0 {
 		return append([]string(nil), b.Channels...)
@@ -53,15 +49,11 @@ func (b BroadcastNotificationCreated) BroadcastOn() []string {
 	return nil
 }
 
-// ChannelName is BroadcastNotificationCreated::channelName: the recipient's own
-// channel, the type and the key dotted.
+// ChannelName is the recipient's own channel: the type and the id dotted,
+// "user.42". It is the empty string when either half is missing.
 //
-// It is protected there and exported here, because a channel derived from a
-// notifiable is the one thing a caller has to be able to check.
-//
-// Illuminate builds it from the class name with the backslashes turned into
-// dots, plus the model's key. Here the type is already a name that was chosen
-// -- "user", "team" -- so there is nothing to translate.
+// It is exported because a channel derived from a notifiable is the one thing a
+// caller has to be able to check.
 func (b BroadcastNotificationCreated) ChannelName() string {
 	if b.NotifiableType == "" || b.NotifiableID == "" {
 		return ""
@@ -69,11 +61,10 @@ func (b BroadcastNotificationCreated) ChannelName() string {
 	return b.NotifiableType + "." + b.NotifiableID
 }
 
-// BroadcastWith is BroadcastNotificationCreated::broadcastWith.
-//
-// It is the notification's own data with the id and the type added, which is
-// what Illuminate merges in: a client that receives two notifications in one
-// second has to be able to tell them apart and to know which is which kind.
+// BroadcastWith is the payload that goes over the wire: the notification's own
+// data with the id and the type added, because a client that receives two
+// notifications in one second has to be able to tell them apart and to know
+// which is which kind.
 func (b BroadcastNotificationCreated) BroadcastWith() (json.RawMessage, error) {
 	out := map[string]any{}
 	if len(b.Data) > 0 {
@@ -95,11 +86,12 @@ func (b BroadcastNotificationCreated) BroadcastWith() (json.RawMessage, error) {
 	return raw, nil
 }
 
-// BroadcastType is BroadcastNotificationCreated::broadcastType.
+// BroadcastType is what the payload calls the notification: the Type when one
+// was set, and otherwise the Key.
 //
-// Illuminate answers with the class name. Here it is the Key, which is the name
-// that was chosen to be stable -- a class name changes when somebody moves a
-// type between packages, and every client that switched on it stops matching.
+// It is a name that was chosen to be stable rather than a type name, which
+// changes when somebody moves a type between packages and leaves every client
+// that switched on it matching nothing.
 func (b BroadcastNotificationCreated) BroadcastType() string {
 	if b.Type != "" {
 		return b.Type
@@ -107,11 +99,11 @@ func (b BroadcastNotificationCreated) BroadcastType() string {
 	return b.Key
 }
 
-// BroadcastAs is BroadcastNotificationCreated::broadcastAs.
+// BroadcastAs is the event name the client listens for.
 //
-// Empty falls back to the notification's Key, which is what a client subscribes
-// to when it cares about one kind, and to "notification" when there is not even
-// a key -- the name Illuminate's own class name reduces to.
+// An empty Event falls back to the notification's Key, which is what a client
+// subscribes to when it cares about one kind, and to "notification" when there
+// is not even a key.
 func (b BroadcastNotificationCreated) BroadcastAs() string {
 	switch {
 	case b.Event != "":

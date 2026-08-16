@@ -26,9 +26,8 @@ import (
 
 // PostgresConnector names the driver the blank import above linked in.
 //
-// It is Illuminate\Database\Connectors\PostgresConnector. What it does not have
-// is a connect method: opening the connection, tuning the pool and pinging it at
-// boot is database.Open, in one place, for all three engines.
+// It has no connect method: opening the connection, tuning the pool and pinging
+// it at boot is database.Open, in one place, for all three engines.
 type PostgresConnector struct{}
 
 // Dialect reports the connection this connector answers for.

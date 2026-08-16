@@ -10,10 +10,9 @@ import (
 
 // The terminal, asked directly rather than through a library.
 //
-// RULE 2 allows the core one third-party dependency, golang.org/x/crypto, and
-// this is the whole reason golang.org/x/term is not in go.mod: reading the
-// terminal state is two ioctls, and the ioctl numbers are the only part that
-// differs between the systems that have a termios at all.
+// Reading the terminal state is two ioctls, and the ioctl numbers are the
+// only part that differs between the systems that have a termios at all --
+// too little to justify a dependency.
 
 // isTerminal reports whether f is a terminal.
 //

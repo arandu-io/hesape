@@ -72,8 +72,7 @@ func TestResetPasswordCarriesTheLinkAndTheExpiry(t *testing.T) {
 }
 
 // TestResetPasswordDefaultsToTheLaravelWindow pins that a notification built
-// without an expiry says sixty minutes, which is what config
-// auth.passwords.users.expire ships as.
+// without an expiry says sixty minutes.
 func TestResetPasswordDefaultsToTheLaravelWindow(t *testing.T) {
 	restore(t)
 	authnotifications.ResetPassword{}.CreateUrlUsing(func(notifications.Notifiable, string) string {
@@ -81,8 +80,8 @@ func TestResetPasswordDefaultsToTheLaravelWindow(t *testing.T) {
 	})
 
 	mail := authnotifications.NewResetPassword("tok").ToMail(recipient{id: "7", address: "ada@example.com"})
-	// The expiry line is written after the button, so it lands in OutroLines --
-	// which is Illuminate's order and where a closing sentence belongs.
+	// The expiry line is written after the button, so it lands in OutroLines,
+	// which is where a closing sentence belongs.
 	body := strings.Join(append(mail.IntroLines, mail.OutroLines...), " ")
 	if !strings.Contains(body, "60 minutes") {
 		t.Fatalf("body = %q, want the sixty-minute default", body)
@@ -146,9 +145,8 @@ func TestVerifyEmailCarriesTheConfirmationLink(t *testing.T) {
 	}
 }
 
-// TestTheBuiltInVerificationURLIsIlluminatesShape pins the id-and-hash path,
-// which is what makes a link minted by a Laravel application and one minted
-// here the same string. It is unsigned, and the package comment says why that
+// TestTheBuiltInVerificationURLIsIlluminatesShape pins the id-and-hash path the
+// built-in URL takes. It is unsigned, and the package comment says why that
 // must not reach production.
 func TestTheBuiltInVerificationURLIsIlluminatesShape(t *testing.T) {
 	restore(t)
@@ -168,9 +166,9 @@ func TestTheBuiltInVerificationURLIsIlluminatesShape(t *testing.T) {
 	}
 }
 
-// TestVerifyEmailHandsTheURLToTheMessageCallback is Illuminate's order: the URL
-// is built before toMailUsing is consulted, so a project that rewrites the
-// message still gets the link this notification would have used.
+// TestVerifyEmailHandsTheURLToTheMessageCallback pins the order: the URL is
+// built before ToMailUsing is consulted, so a project that rewrites the message
+// still gets the link this notification would have used.
 func TestVerifyEmailHandsTheURLToTheMessageCallback(t *testing.T) {
 	restore(t)
 	authnotifications.VerifyEmail{}.CreateUrlUsing(func(notifications.Notifiable) string {

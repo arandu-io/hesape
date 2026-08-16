@@ -9,11 +9,11 @@ import (
 // validation, auth, passwords and pagination, which a framework produces before
 // an application has written a line of its own.
 //
-// Illuminate publishes these into the project and Arandu does not: a copy in
-// every project is a copy that drifts from the rule that produces it, and a
-// rule that gains an argument leaves the published sentence saying the old
-// thing. An application overrides one of them by defining the same key in its
-// own catalogue, which is one file rather than all four.
+// They are embedded rather than published into the project: a copy in every
+// project is a copy that drifts from the rule that produces it, and a rule that
+// gains an argument leaves the published sentence saying the old thing. An
+// application overrides one of them by defining the same key in its own
+// catalogue, which is one file rather than all four.
 //
 //go:embed lang
 var langFS embed.FS

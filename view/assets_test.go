@@ -15,24 +15,19 @@ import (
 	"github.com/arandu-io/hesape/view"
 )
 
-// These three guards moved here from the porang repository when it dissolved
-// (ADR 0021). They protect the embedded assets, and the assets now live in this
-// package -- a guard in an archived repository guards nothing.
-
-// TestNoNodeAnywhere is RULE 13, checked rather than promised.
+// TestNoNodeAnywhere checks, rather than assumes, that nothing here needs
+// Node.
 //
-// A project runs with `git clone && aru dev`. No node_modules, no package.json,
-// no JS lockfile, and no Node installed. In Laravel, Node entered through the
-// error page -- Illuminate/Foundation/resources/exceptions/renderer/ carries a
-// package.json and a vite.config.js. Ours is html/template, inline.
+// A project runs with a single command: no node_modules, no package.json, no
+// JS lockfile, and no Node installed anywhere in the tree.
 func TestNoNodeAnywhere(t *testing.T) {
 	forbidden := []string{"package.json", "package-lock.json", "yarn.lock",
 		"pnpm-lock.yaml", "bun.lockb", "node_modules", "vite.config.js", "vite.config.ts"}
 
 	// ".." and not ".": the whole repository, because the promise is about the
 	// repository. The reference projects cloned next to it are full of
-	// package.json and are read-only material rather than code that ships
-	// (RULE 7), which is why the walk starts here and not one level higher.
+	// package.json and are read-only material rather than code that ships,
+	// which is why the walk starts here and not one level higher.
 	root := ".."
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -103,7 +98,7 @@ func TestTheCSSIsCompiled(t *testing.T) {
 // TestEveryAssetIsServed is the check whose absence let the assets 404 for
 // weeks: every embedded file has to come back over HTTP, with its bytes.
 //
-// porang.Mount existed and had zero call sites. Every test called the renderer
+// The previous wiring had zero call sites: every test called the renderer
 // directly and none went through the module, so nothing noticed.
 func TestEveryAssetIsServed(t *testing.T) {
 	// Through the router, with the module registered, exactly as an application
@@ -161,10 +156,10 @@ func TestTheStylesheetDoesNotReadItsOwnOutput(t *testing.T) {
 		t.Error("app.src.css lets Tailwind detect sources by itself: it will read assets/app.css, its own output")
 	}
 	// And every source it does declare has to exist. The @source lines used to
-	// name `.templ` files under layout/ and components/ -- an engine replaced by
-	// kyse (ADR 0020) and two directories moved to the skeleton (ADR 0021). A
-	// glob that matches nothing does not fail, it just contributes nothing, so
-	// the whole stylesheet came from the automatic scan those lines looked like
+	// name `.templ` files under layout/ and components/ -- an engine that was
+	// replaced, and two directories that moved to the project skeleton. A glob
+	// that matches nothing does not fail, it just contributes nothing, so the
+	// whole stylesheet came from the automatic scan those lines looked like
 	// they were controlling.
 	for _, line := range strings.Split(string(source), "\n") {
 		if !strings.HasPrefix(strings.TrimSpace(line), "@source ") {
@@ -184,15 +179,16 @@ func TestTheStylesheetDoesNotReadItsOwnOutput(t *testing.T) {
 
 // TestAssetHashIsTheContractTheCLIReimplements.
 //
-// `aru font:add` writes an absolute URL into the stylesheet it generates and has
-// to name the font's own hash. It is a separate module and cannot import this
-// one, so it computes the same twelve characters itself.
+// The font-registration step of the CLI writes an absolute URL into the
+// stylesheet it generates and has to name the font's own hash. It is a
+// separate module and cannot import this one, so it computes the same twelve
+// characters itself.
 //
-// This pins the algorithm against a known input. If it changes, this fails here
-// -- and the CLI has the mirror of it, so the two cannot drift silently. What
-// silent drift looks like: every vendored font served with Cache-Control:
-// no-cache, re-downloaded on every page view, with nothing broken enough to
-// notice.
+// This pins the algorithm against a known input. If it changes, this fails
+// here -- and the CLI has the mirror of it, so the two cannot drift silently.
+// What silent drift looks like: every vendored font served with
+// Cache-Control: no-cache, re-downloaded on every page view, with nothing
+// broken enough to notice.
 func TestAssetHashIsTheContractTheCLIReimplements(t *testing.T) {
 	// The first twelve hex characters of sha256("arandu").
 	const want = "06c6c3fc524a"

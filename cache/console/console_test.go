@@ -66,8 +66,9 @@ func TestClearEmptiesOneTenant(t *testing.T) {
 	}
 }
 
-// TestClearRefusesWithoutATenant is RULE 14 at the command line: a cache:clear
-// that emptied the store would clear every other customer on the way past.
+// TestClearRefusesWithoutATenant pins tenant isolation at the command line: a
+// cache:clear that emptied the store would clear every other customer on the
+// way past.
 func TestClearRefusesWithoutATenant(t *testing.T) {
 	m := newManager()
 

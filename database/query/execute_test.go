@@ -13,8 +13,8 @@ import (
 
 func grant() auth.Grant { return auth.SystemGrant("invoice.read", "acme") }
 
-// TestNoStatementReachesTheDatabaseWithoutATenant is the RULE 17 test, and it
-// covers every door rather than one of them.
+// TestNoStatementReachesTheDatabaseWithoutATenant covers every door rather than
+// one of them.
 //
 // A Grant nobody issued is the zero value, and the zero value carries no
 // tenant. Every method that executes has to refuse it, and refuse it BEFORE the
@@ -181,8 +181,8 @@ func TestNoStatementReachesTheDatabaseWithoutATenant(t *testing.T) {
 	}
 }
 
-// TestTheStatementCarriesTheTenantOfTheGrant is the other half of RULE 17: the
-// filter has to be in the SQL, not in the intention.
+// TestTheStatementCarriesTheTenantOfTheGrant: the filter has to be in the SQL,
+// not in the intention.
 func TestTheStatementCarriesTheTenantOfTheGrant(t *testing.T) {
 	connection := &fakeConnection{}
 	if _, err := newTestBuilder(connection).Get(context.Background(), grant()); err != nil {

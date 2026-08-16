@@ -28,7 +28,7 @@ var ErrNotFound = errors.New("database: no such row")
 // Look at the signature: auth.Grant is mandatory and comes before the id.
 // Because a Grant cannot be constructed outside the auth package, there is no
 // path from a handler to the database that skips a Policy -- on the way out as
-// much as on the way in (RULE 17).
+// much as on the way in.
 type Repository[T any, ID comparable] interface {
 	Find(ctx context.Context, g auth.Grant, id ID) (T, error)
 	List(ctx context.Context, g auth.Grant, q Query) (Page[T], error)
@@ -50,9 +50,8 @@ type Repository[T any, ID comparable] interface {
 // application where rows belong to tenants that assumption is how a leak starts.
 //
 // Filling it in would mean a generic predicate language over columns, which is a
-// query builder, which is the second way to reach data that RULE 9 rules out
-// (docs/09 lists "ORM, query builder fluente, segunda camada" as what does not
-// enter). A module that needs to read by something other than the id declares
+// query builder, which is a second way to reach data. A module that needs to
+// read by something other than the id declares
 // the method it needs on its own repository, with the SQL written out and the
 // values in placeholders.
 type Query struct {
@@ -61,7 +60,7 @@ type Query struct {
 	Sort   string
 }
 
-// Page is what List answers: the rows, and the cursor that reaches the next
+// Page is what List returns: the rows, and the cursor that reaches the next
 // page.
 //
 // It replaced a bare []T, which could not say whether there was more. The

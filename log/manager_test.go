@@ -71,7 +71,7 @@ func TestChannelResolvesFromTheConfigurationAndIsCached(t *testing.T) {
 		t.Fatal("Channel resolved the same name twice instead of caching it")
 	}
 
-	// An empty name is PHP's null default, which is logging.default.
+	// An empty name means the default channel.
 	byDefault, err := manager.Channel("")
 	if err != nil {
 		t.Fatalf("the default channel: %v", err)
@@ -141,8 +141,8 @@ func TestTheChannelNameFallsBackToTheEnvironment(t *testing.T) {
 	}
 }
 
-// TestAnUndefinedChannelFallsBackToTheEmergencyLogger is the whole reason
-// Illuminate builds one: a broken logging configuration does not take the
+// TestAnUndefinedChannelFallsBackToTheEmergencyLogger is the whole reason the
+// emergency logger exists: a broken logging configuration does not take the
 // request down with it.
 func TestAnUndefinedChannelFallsBackToTheEmergencyLogger(t *testing.T) {
 	out := &buffer{}
@@ -330,8 +330,7 @@ func TestTheSingleAndRotatingDriversNeedAPath(t *testing.T) {
 	}
 }
 
-// TestTheDailyDriverNamesTheFileAfterTheDay is Monolog's RotatingFileHandler
-// filename: base-YYYY-MM-DD.ext.
+// TestTheDailyDriverNamesTheFileAfterTheDay: base-YYYY-MM-DD.ext.
 func TestTheDailyDriverNamesTheFileAfterTheDay(t *testing.T) {
 	dir := t.TempDir()
 	manager := log.NewLogManager(log.Config{
@@ -351,8 +350,8 @@ func TestTheDailyDriverNamesTheFileAfterTheDay(t *testing.T) {
 	}
 }
 
-// TestTheMonthlyDriverNamesTheFileAfterTheMonth is the driver that has no
-// counterpart in the clone: it comes from the current Laravel.
+// TestTheMonthlyDriverNamesTheFileAfterTheMonth: base-YYYY-MM.ext, which is the
+// whole difference between it and the daily driver.
 func TestTheMonthlyDriverNamesTheFileAfterTheMonth(t *testing.T) {
 	dir := t.TempDir()
 	manager := log.NewLogManager(log.Config{
@@ -372,9 +371,8 @@ func TestTheMonthlyDriverNamesTheFileAfterTheMonth(t *testing.T) {
 	}
 }
 
-// TestTheRotatingDriverPrunesTheOldFiles is what RotatingFileHandler does when
-// it rotates, and max_files is the count -- the key the current Laravel reads
-// before days.
+// TestTheRotatingDriverPrunesTheOldFiles: everything past the newest MaxFiles
+// goes on the rotation.
 func TestTheRotatingDriverPrunesTheOldFiles(t *testing.T) {
 	dir := t.TempDir()
 	// Two files from days that are over, plus today's, is three -- one more
@@ -531,8 +529,8 @@ func TestStackWritesIntoEveryChannel(t *testing.T) {
 	}
 }
 
-// TestAStackIsNotCached is Illuminate's own behaviour: stack() builds a new
-// aggregate every time and never puts it in the channel cache.
+// TestAStackIsNotCached: Stack builds a new aggregate every time and never puts
+// it in the channel cache.
 func TestAStackIsNotCached(t *testing.T) {
 	out := &buffer{}
 	manager := log.NewLogManager(log.Config{
@@ -573,13 +571,12 @@ func TestAStackOfAnUndefinedChannelIsAnError(t *testing.T) {
 	}
 }
 
-// TestABrokenHandlerDoesNotStopTheRestOfTheStack is Monolog's
-// WhatFailureGroupHandler, which is what ignore_exceptions wraps a stack in: a
-// handler that fails does not stop the ones after it and does not surface.
+// TestABrokenHandlerDoesNotStopTheRestOfTheStack is what IgnoreExceptions buys:
+// a handler that fails does not stop the ones after it and does not surface.
 //
-// The failure is asserted on the handler rather than through the Logger,
-// because slog's Logger discards what a handler returns -- so the difference
-// ignore_exceptions makes is only visible one level down.
+// The failure is asserted on the handler rather than through the Logger, because
+// slog's Logger discards what a handler returns -- so the difference
+// IgnoreExceptions makes is only visible one level down.
 func TestABrokenHandlerDoesNotStopTheRestOfTheStack(t *testing.T) {
 	good := &buffer{}
 	manager := log.NewLogManager(log.Config{
@@ -673,8 +670,8 @@ func TestSharedContextIsACopy(t *testing.T) {
 	}
 }
 
-// TestWithoutContextLeavesTheSharedHalfAlone is Illuminate's split: the two are
-// separate, and FlushSharedContext is the one that clears the shared half.
+// TestWithoutContextLeavesTheSharedHalfAlone: the two are separate, and
+// FlushSharedContext is the one that clears the shared half.
 func TestWithoutContextLeavesTheSharedHalfAlone(t *testing.T) {
 	out := &buffer{}
 	manager := log.NewLogManager(log.Config{
@@ -771,8 +768,8 @@ func TestTheDefaultDriverIsReadableAndWritable(t *testing.T) {
 	}
 }
 
-// TestTheManagerIsItselfALogger is Illuminate's __call forwarding to driver():
-// the eight levels and Log on the manager write to the default channel.
+// TestTheManagerIsItselfALogger: the eight levels and Log on the manager write
+// to the default channel.
 func TestTheManagerIsItselfALogger(t *testing.T) {
 	out := &buffer{}
 	manager := log.NewLogManager(log.Config{

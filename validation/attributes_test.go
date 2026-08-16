@@ -27,7 +27,7 @@ func grantFor(tenant string) auth.Grant {
 }
 
 // verifier is a PresenceVerifier over a table of rows already scoped by tenant,
-// and it records the tenant it was asked for -- RULE 17 is only kept if the
+// and it records the tenant it was asked for -- the scoping is only kept if the
 // Grant actually reaches the query.
 type verifier struct {
 	rows    map[string][]string // tenant -> values held in the column
@@ -125,7 +125,7 @@ func data(t *testing.T, rules validation.Rules, d validation.Data, opts ...valid
 }
 
 // ---------------------------------------------------------------------------
-// The four shapes `required` calls absent, which only the PHP body says.
+// The four shapes `required` calls absent.
 // ---------------------------------------------------------------------------
 
 func TestRequiredCallsFourDifferentThingsAbsent(t *testing.T) {
@@ -472,7 +472,7 @@ func TestTheFileRules(t *testing.T) {
 		{"mimetypes by group", validation.Rules{"f": "mimetypes:image/*"}, png, false},
 		{"mimetypes refuses another group", validation.Rules{"f": "mimetypes:text/*"}, png, true},
 
-		// A PHP upload is blocked whatever the rule asked for, unless it asked
+		// A .php upload is blocked whatever the rule asked for, unless it asked
 		// for php by name.
 		{"a php upload is blocked", validation.Rules{"f": "mimes:php"}, script, false},
 		{"a php upload is blocked by another rule", validation.Rules{"f": "extensions:jpg,php"}, script, false},
@@ -495,7 +495,7 @@ func TestTheFileRules(t *testing.T) {
 // The rules that leave the process.
 // ---------------------------------------------------------------------------
 
-// TestUniqueAndExistsAskTheStoreWithTheGrant. RULE 17: a read is authorized
+// TestUniqueAndExistsAskTheStoreWithTheGrant: a read is authorized
 // too, and a count of rows is a read -- without the tenant it answers whether
 // SOMEBODY has that address.
 func TestUniqueAndExistsAskTheStoreWithTheGrant(t *testing.T) {
@@ -603,7 +603,7 @@ func TestActiveUrlAsksTheResolver(t *testing.T) {
 	}
 }
 
-// TestAMultiValueInputIsAList, which is what PHP does with tags[] and what
+// TestAMultiValueInputIsAList, which is what `tags[]` sends and what
 // `array` needs in order ever to pass.
 func TestAMultiValueInputIsAList(t *testing.T) {
 	set := mustCompile(t, validation.Rules{"tags": "array|between:1,3|in:go,web,db"})

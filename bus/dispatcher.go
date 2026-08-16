@@ -13,29 +13,26 @@ import (
 
 // Handler runs one job.
 //
-// It is what Illuminate finds by class name in its `$handlers` map, with the
-// arguments still encoded: a handler decodes them itself, because the type it
-// decodes into is the one thing this package cannot know.
+// The arguments arrive still encoded: a handler decodes them itself, because
+// the type it decodes into is the one thing this package cannot know.
 type Handler func(ctx context.Context, g auth.Grant, payload []byte) error
 
 // Pipe wraps a Handler.
 //
-// It is Illuminate's bus pipeline, which sends every command through a list of
-// pipes before the handler sees it -- the place a transaction, a log line or a
-// tenant check goes when it must apply to every job and not to one.
+// Every job is sent through the registered pipes before its handler sees it,
+// which is where a transaction, a log line or a tenant check goes when it must
+// apply to every job and not to one.
 type Pipe func(next Handler) Handler
 
 // Dispatcher sends a job to its handler: now, or through the queue.
 //
-// It is Illuminate's Bus\Dispatcher. The difference is what a job is: there a
-// command is an object and the handler is found by its class name, here a job
-// is a name and a JSON payload and the handler is found by that name. The
-// mapping is explicit either way -- Illuminate's `map()` is this one's Map --
-// and explicit is the only option without a container (ADR 0001).
+// A job is a name and a JSON payload, and the handler is found by that name.
+// The mapping is explicit and registered with Map: there is nothing that
+// resolves a handler by itself.
 //
 // A Dispatcher with no queue runs everything in the current process, which is
 // what a command-line tool and a test want. With one, Dispatch queues and
-// DispatchNow does not, which is the same pair of words Illuminate uses.
+// DispatchNow does not.
 type Dispatcher struct {
 	repository BatchRepository
 	queue      Queue
@@ -43,9 +40,8 @@ type Dispatcher struct {
 	mu       sync.RWMutex
 	handlers map[string]Handler
 	pipes    []Pipe
-	// allowsDispatchingAfterResponses is Illuminate's flag of the same name:
-	// with it off, DispatchAfterResponse runs the job at once instead of
-	// holding it, which is what a test wants.
+	// allowsDispatchingAfterResponses off makes DispatchAfterResponse run the
+	// job at once instead of holding it, which is what a test wants.
 	allowsDispatchingAfterResponses bool
 	terminating                     []func(ctx context.Context) error
 }
@@ -66,9 +62,8 @@ func NewDispatcher(q Queue, r BatchRepository) *Dispatcher {
 
 // Map registers handlers by job name, adding to whatever is already there.
 //
-// It is Illuminate's `map()`, which merges rather than replaces for the same
-// reason: a module registers its own jobs and must not silence another
-// module's.
+// It merges rather than replaces, because a module registers its own jobs and
+// must not silence another module's.
 func (d *Dispatcher) Map(m map[string]Handler) *Dispatcher {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -86,8 +81,7 @@ func (d *Dispatcher) HasCommandHandler(name string) bool {
 
 // GetCommandHandler returns the handler for a job name.
 //
-// The second result is false when there is none, where Illuminate returns the
-// literal `false` from a method documented as returning `mixed`.
+// The second result is false when there is none.
 func (d *Dispatcher) GetCommandHandler(name string) (Handler, bool) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -97,7 +91,7 @@ func (d *Dispatcher) GetCommandHandler(name string) (Handler, bool) {
 
 // PipeThrough sets the pipes every job is sent through before its handler runs.
 //
-// It replaces the list, as Illuminate's does.
+// It replaces the list.
 func (d *Dispatcher) PipeThrough(pipes []Pipe) *Dispatcher {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -109,11 +103,10 @@ func (d *Dispatcher) PipeThrough(pipes []Pipe) *Dispatcher {
 // there is not.
 //
 // It is the call an application makes and the one place the answer to "does
-// this block" is decided. Illuminate decides it by whether the command
-// implements ShouldQueue; here it is whether the Dispatcher was given a queue,
-// because a job that sometimes blocks for two seconds and sometimes does not,
-// with nothing at the call site to say which, is the thing that makes a request
-// mysteriously slow.
+// this block" is decided, and what decides it is whether the Dispatcher was
+// given a queue -- not something the job says about itself. A job that
+// sometimes blocks for two seconds and sometimes does not, with nothing at the
+// call site to say which, is the thing that makes a request mysteriously slow.
 func (d *Dispatcher) Dispatch(ctx context.Context, g auth.Grant, job Step) error {
 	if d.queue != nil {
 		return d.DispatchToQueue(ctx, g, job)
@@ -147,9 +140,8 @@ func (d *Dispatcher) DispatchNow(ctx context.Context, g auth.Grant, job Step) er
 
 // DispatchSync runs the job in this process even when a queue is wired.
 //
-// Illuminate sends it to the "sync" connection, which is the same thing with a
-// driver in between. It is what a test uses and what a command uses when the
-// answer is needed before it returns.
+// It is what a test uses, and what a command uses when the answer is needed
+// before it returns.
 func (d *Dispatcher) DispatchSync(ctx context.Context, g auth.Grant, job Step) error {
 	return d.DispatchNow(ctx, g, job)
 }
@@ -169,12 +161,11 @@ func (d *Dispatcher) DispatchToQueue(ctx context.Context, g auth.Grant, job Step
 //
 // It is for the work that must happen but that the person waiting on the
 // response should not pay for: a thumbnail, a webhook, a search index update on
-// a system with no queue. Illuminate hangs it on the container's terminating
-// callback; there is no container here (ADR 0001), so the HTTP layer calls
-// Terminating once the response has gone out.
+// a system with no queue. The HTTP layer calls Terminating once the response
+// has gone out, and that is what runs it.
 //
 // With WithoutDispatchingAfterResponses the job runs at once instead, which is
-// what Illuminate does too and what a test wants.
+// what a test wants.
 func (d *Dispatcher) DispatchAfterResponse(ctx context.Context, g auth.Grant, job Step) error {
 	d.mu.RLock()
 	allowed := d.allowsDispatchingAfterResponses
@@ -189,7 +180,6 @@ func (d *Dispatcher) DispatchAfterResponse(ctx context.Context, g auth.Grant, jo
 // Terminating runs everything DispatchAfterResponse held, in the order it was
 // held, and empties the list.
 //
-// It is the container's terminating hook, spelled where the callbacks live.
 // Errors are joined rather than returned one at a time: the response has
 // already gone out, and stopping at the first one silently drops the rest.
 func (d *Dispatcher) Terminating(ctx context.Context) error {
@@ -243,10 +233,9 @@ func (d *Dispatcher) Chain(jobs ...Step) *Chain {
 
 // DispatchChain pushes a chain of the given jobs, first link first.
 //
-// It is Bus::dispatchChain, which PHP writes on the facade: it builds a pending
-// chain out of the jobs it was handed and dispatches it in the same expression.
-// Chain is the same chain left undispatched, and it is what a caller who still
-// has a queue or a Catch job to name reaches for.
+// It builds a chain out of the jobs it was handed and dispatches it in the same
+// expression. [Dispatcher.Chain] is the same chain left undispatched, and it is
+// what a caller who still has a queue or a Catch job to name reaches for.
 //
 // The chain goes to this dispatcher's queue. A dispatcher built without one
 // refuses the chain instead of running the first link in process: the rest of a

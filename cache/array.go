@@ -11,16 +11,13 @@ import (
 
 // ArrayStore is the in-process cache: a map, a mutex, and expiry.
 //
-// It is the default store, and until now it was the default store that did not
-// exist -- CACHE_STORE=memory named it and nothing implemented it, so the
-// documented default was a nil interface waiting for the first Get.
-//
-// It is the right store for development, for tests, and for a single instance
-// that only caches what it can recompute. It is the wrong one for anything
-// else, and the reason is not performance: with N replicas there are N caches,
-// so a Forget on one replica leaves the other N-1 serving the old value until
-// the ttl runs out. When that matters, the store is the RESP one in
-// arandu-io/kv and nothing else in the application changes.
+// It is the default store, and it is the right one for development, for tests,
+// and for a single instance that only caches what it can recompute. It is the
+// wrong one for anything else, and the reason is not performance: with N
+// replicas there are N caches, so a Forget on one replica leaves the other N-1
+// serving the old value until the ttl runs out. When that matters, the store is
+// the RESP one in hesape/redis -- a separate module, registered through
+// CacheManager.Extend -- and nothing else in the application changes.
 //
 // It is safe for concurrent use, and it holds a copy of every value it is
 // given: a caller that reuses a buffer after a Put cannot rewrite what is
@@ -65,9 +62,8 @@ var (
 
 // Entry is one stored value and when it stops being one.
 //
-// It answers the array{value: mixed, expiresAt: float} that
-// ArrayStore::all() hands back in Laravel, and it exists only for All: nothing
-// in the ordinary path of the cache needs to see an expiry.
+// It exists only for All: nothing in the ordinary path of the cache needs to
+// see an expiry.
 type Entry struct {
 	// Value is the stored bytes. It is a copy; mutating it changes nothing.
 	Value []byte
@@ -78,9 +74,8 @@ type Entry struct {
 
 // All returns every live entry and its expiry.
 //
-// It answers ArrayStore::all(). Expired entries are dropped on the way out
-// rather than returned with a past deadline, so what All shows is what Get
-// would find.
+// Expired entries are dropped on the way out rather than returned with a past
+// deadline, so what All shows is what Get would find.
 //
 // It is a snapshot: the map and every value in it are copies, so a caller that
 // ranges over the result while another goroutine writes cannot see a torn read
@@ -104,17 +99,14 @@ func (s *ArrayStore) All() map[string]Entry {
 
 // GetPrefix returns the prefix this store puts in front of every key.
 //
-// It answers ArrayStore::getPrefix(), and the answer is the empty string for
-// the reason it is in Laravel: the store is a map in this process, nothing else
-// is sharing it, and the prefixing that matters -- tenant and namespace --
-// happens in Repository, where it can be got right once (RULE 14).
+// It is the empty string: the store is a map in this process, nothing else is
+// sharing it, and the prefixing that matters -- tenant and namespace -- happens
+// in Repository, where it can be got right once.
 func (s *ArrayStore) GetPrefix() string { return "" }
 
 // Many returns the stored bytes for several keys at once.
 //
-// It answers the many() of the RetrievesMultipleKeys trait. Keys that are
-// absent or expired are present in the result with a nil value, which is the
-// trait's documented "items not found in the cache will have a null value" --
+// Keys that are absent or expired are present in the result with a nil value,
 // so the caller can tell "I asked for six and got six" without holding the
 // slice it asked with.
 func (s *ArrayStore) Many(_ context.Context, keys []string) (map[string][]byte, error) {
@@ -137,9 +129,8 @@ func (s *ArrayStore) Many(_ context.Context, keys []string) (map[string][]byte, 
 
 // PutMany stores several values under one ttl.
 //
-// It answers the putMany() of the RetrievesMultipleKeys trait, and like the
-// trait it is a loop rather than a transaction: a store that is a map has
-// nothing to roll back to.
+// It is a loop rather than a transaction: a store that is a map has nothing to
+// roll back to.
 func (s *ArrayStore) PutMany(_ context.Context, values map[string][]byte, ttl time.Duration) error {
 	if ttl <= 0 {
 		return ErrNoTTL
@@ -232,29 +223,24 @@ func (s *ArrayStore) Increment(_ context.Context, key string, delta int64, ttl t
 }
 
 // Decrement subtracts delta from the counter under key and returns the new
-// value.
-//
-// It answers ArrayStore::decrement(), and it is Increment with the sign turned
-// round, which is exactly what the PHP is: increment($key, $value * -1).
+// value. It is Increment with the sign turned round.
 func (s *ArrayStore) Decrement(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error) {
 	return s.Increment(ctx, key, -delta, ttl)
 }
 
 // Forever stores a value with no expiry the caller has to think about.
 //
-// It answers ArrayStore::forever(). Laravel writes an expiresAt of 0 and means
-// "never"; a Store here is promised a positive ttl, so "never" is the longest
-// deadline the package is willing to write down -- see Repository.Forever for
-// what that is and why it is a number and not a special case.
+// A Store here is promised a positive ttl, so "never" is the longest deadline
+// the package is willing to write down -- see Repository.Forever for what that
+// is and why it is a number and not a special case.
 func (s *ArrayStore) Forever(ctx context.Context, key string, value []byte) error {
 	return s.Put(ctx, key, value, foreverTTL)
 }
 
 // Touch gives a live entry a new expiry and reports whether there was one.
 //
-// It answers ArrayStore::touch(). An absent or expired key is false and is not
-// created: touching what is not there would turn a cache miss into a cache
-// entry holding nothing.
+// An absent or expired key is false and is not created: touching what is not
+// there would turn a cache miss into a cache entry holding nothing.
 func (s *ArrayStore) Touch(_ context.Context, key string, ttl time.Duration) (bool, error) {
 	if ttl <= 0 {
 		return false, ErrNoTTL
@@ -273,11 +259,9 @@ func (s *ArrayStore) Touch(_ context.Context, key string, ttl time.Duration) (bo
 
 // FlushLocks releases every lock this store holds.
 //
-// It answers ArrayStore::flushLocks(). Laravel refuses unless the lock store is
-// separate from the cache store; here it always is -- locks live in their own
-// map, precisely so that a Repository.Flush emptying one tenant's namespace
-// cannot release the lock the scheduler is holding -- so the refusal has
-// nothing to refuse.
+// It never refuses: locks live in their own map, precisely so that a
+// Repository.Flush emptying one tenant's namespace cannot release the lock the
+// scheduler is holding.
 func (s *ArrayStore) FlushLocks(_ context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -286,17 +270,15 @@ func (s *ArrayStore) FlushLocks(_ context.Context) error {
 	return nil
 }
 
-// HasSeparateLockStore reports whether locks live apart from entries.
-//
-// It answers ArrayStore::hasSeparateLockStore(), and the answer is always yes:
-// see FlushLocks.
+// HasSeparateLockStore reports whether locks live apart from entries, and the
+// answer is always yes: see FlushLocks.
 func (s *ArrayStore) HasSeparateLockStore() bool { return true }
 
 // CurrentOwner returns the token holding the lock, or the empty string.
 //
-// It answers the getCurrentOwner() of ArrayLock. A lock that expired is free,
-// and free is the empty string rather than the token of whoever held it last --
-// otherwise IsOwnedBy would keep saying yes to a holder that lost the lock.
+// A lock that expired is free, and free is the empty string rather than the
+// token of whoever held it last -- otherwise IsOwnedBy would keep saying yes to
+// a holder that lost the lock.
 func (s *ArrayStore) CurrentOwner(_ context.Context, key string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -310,9 +292,8 @@ func (s *ArrayStore) CurrentOwner(_ context.Context, key string) (string, error)
 
 // ForceReleaseLock releases a lock whoever holds it.
 //
-// It answers the forceRelease() of ArrayLock. It is the recovery hatch, not a
-// tool: a caller that uses it routinely has two holders running at once and
-// does not know it.
+// It is the recovery hatch, not a tool: a caller that uses it routinely has two
+// holders running at once and does not know it.
 func (s *ArrayStore) ForceReleaseLock(_ context.Context, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -323,18 +304,16 @@ func (s *ArrayStore) ForceReleaseLock(_ context.Context, key string) error {
 
 // Lock returns a handle on a named lock. It does not touch the store.
 //
-// It answers ArrayStore::lock(). Pass an empty owner to have one minted at
-// Acquire; pass one to restore a handle on a lock this process already took,
-// which is what RestoreLock does.
+// Pass an empty owner to have one minted at Acquire; pass one to restore a
+// handle on a lock this process already took, which is what RestoreLock does.
 func (s *ArrayStore) Lock(name string, ttl time.Duration, owner string) *Lock {
 	return &Lock{store: s, name: name, ttl: ttl, owner: owner, held: owner != ""}
 }
 
 // RestoreLock returns a handle on a lock owner already holds.
 //
-// It answers ArrayStore::restoreLock(), and it is what lets one process take a
-// lock and another part of it release the same lock: the owner string is the
-// whole handle.
+// It is what lets one process take a lock and another part of it release the
+// same lock: the owner string is the whole handle.
 func (s *ArrayStore) RestoreLock(name, owner string) *Lock {
 	return s.Lock(name, 0, owner)
 }

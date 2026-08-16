@@ -13,8 +13,8 @@ import (
 
 // DatabaseFailedJobProvider keeps the failed jobs in a table.
 //
-// It answers Illuminate\Queue\Failed\DatabaseFailedJobProvider. It is what an
-// application wires when it wants the dead letter list to survive the queue --
+// It is what an application wires when it wants the dead letter list to
+// survive the queue --
 // a job that failed on a Redis queue that was then flushed is still a job
 // somebody has to answer for.
 //
@@ -27,7 +27,7 @@ type DatabaseFailedJobProvider struct {
 
 // NewDatabaseFailedJobProvider returns the provider over db.
 //
-// The table defaults to failed_jobs, which is Laravel's name.
+// The table defaults to failed_jobs.
 func NewDatabaseFailedJobProvider(db *database.DB, table string) *DatabaseFailedJobProvider {
 	if table == "" {
 		table = "failed_jobs"
@@ -42,28 +42,25 @@ var (
 )
 
 // DatabaseUUIDFailedJobProvider is [DatabaseFailedJobProvider] under the name
-// Laravel gives the version keyed by the job's uuid.
+// for the provider keyed by the job's uuid.
 //
-// It answers Illuminate\Queue\Failed\DatabaseUuidFailedJobProvider, and it is an
-// alias because there is nothing left to distinguish: Laravel has two providers
-// because its ids are auto-increment integers and the uuid is a second column,
-// so retrying by uuid needs a second index and a second class. Here the id is
-// the uuid (see database.NewID), so the two providers would run the same query
-// (RULE 9).
+// It is an alias because there is nothing left to distinguish: the id is the
+// uuid (see database.NewID), so a provider that looked up by uuid would run the
+// same query.
 type DatabaseUUIDFailedJobProvider = DatabaseFailedJobProvider
 
 // GetTable is the name of the table this provider reads.
 //
-// It answers getTable(), which in PHP returns a query builder over it. Here it
-// returns the name: a builder handed out is a caller writing its own SQL against
-// a table it does not own, and the tenant filter is not optional (RULE 17).
+// It returns the name rather than a query over it: a query handed out is a
+// caller writing its own SQL against a table it does not own, and the tenant
+// filter is not optional.
 func (p *DatabaseFailedJobProvider) GetTable() string { return p.table }
 
 // Migrations returns the failed jobs table.
 //
-// It answers Laravel's `queue:failed-table`. It is on the provider rather than
-// on the queue module because it belongs to whoever wired this provider: an
-// application that keeps its failures in the jobs table declares nothing here.
+// The schema is on the provider rather than on the queue module because it
+// belongs to whoever wired this provider: an application that keeps its
+// failures in the jobs table declares nothing here.
 func (p *DatabaseFailedJobProvider) Migrations() []database.Migration {
 	return []database.Migration{{
 		ID: "2026_08_11_000020_create_failed_jobs_table",
@@ -90,7 +87,7 @@ CREATE INDEX idx_failed_jobs_tenant ON ` + p.table + ` (tenant_id, queue, failed
 	}}
 }
 
-// Log records a job that gave up. It answers log().
+// Log records a job that gave up.
 func (p *DatabaseFailedJobProvider) Log(ctx context.Context, g auth.Grant, job FailedJob) (string, error) {
 	tenant, err := tenantOf(g)
 	if err != nil {
@@ -120,8 +117,7 @@ func (p *DatabaseFailedJobProvider) Log(ctx context.Context, g auth.Grant, job F
 	return id, nil
 }
 
-// IDs is the identifiers of this tenant's failed jobs, newest first. It answers
-// ids().
+// IDs is the identifiers of this tenant's failed jobs, newest first.
 func (p *DatabaseFailedJobProvider) IDs(ctx context.Context, g auth.Grant, queue string) ([]string, error) {
 	tenant, err := tenantOf(g)
 	if err != nil {
@@ -153,7 +149,7 @@ func (p *DatabaseFailedJobProvider) IDs(ctx context.Context, g auth.Grant, queue
 	return out, rows.Err()
 }
 
-// All is this tenant's failed jobs, newest first. It answers all().
+// All is this tenant's failed jobs, newest first.
 func (p *DatabaseFailedJobProvider) All(ctx context.Context, g auth.Grant) ([]FailedJob, error) {
 	tenant, err := tenantOf(g)
 	if err != nil {
@@ -162,7 +158,7 @@ func (p *DatabaseFailedJobProvider) All(ctx context.Context, g auth.Grant) ([]Fa
 	return p.query(ctx, `WHERE tenant_id = ? ORDER BY failed_at DESC`, tenant)
 }
 
-// Find is one of this tenant's failed jobs. It answers find().
+// Find is one of this tenant's failed jobs.
 func (p *DatabaseFailedJobProvider) Find(ctx context.Context, g auth.Grant, id string) (FailedJob, error) {
 	tenant, err := tenantOf(g)
 	if err != nil {
@@ -170,7 +166,7 @@ func (p *DatabaseFailedJobProvider) Find(ctx context.Context, g auth.Grant, id s
 	}
 	// The tenant is in the WHERE and not checked afterwards: a query that finds
 	// the row and then refuses it has already read another customer's payload
-	// into this process (RULE 17).
+	// into this process.
 	found, err := p.query(ctx, `WHERE tenant_id = ? AND id = ?`, tenant, id)
 	if err != nil {
 		return FailedJob{}, err
@@ -181,7 +177,7 @@ func (p *DatabaseFailedJobProvider) Find(ctx context.Context, g auth.Grant, id s
 	return found[0], nil
 }
 
-// Forget removes one of this tenant's failed jobs. It answers forget().
+// Forget removes one of this tenant's failed jobs.
 func (p *DatabaseFailedJobProvider) Forget(ctx context.Context, g auth.Grant, id string) (bool, error) {
 	tenant, err := tenantOf(g)
 	if err != nil {
@@ -200,7 +196,7 @@ func (p *DatabaseFailedJobProvider) Forget(ctx context.Context, g auth.Grant, id
 }
 
 // Flush removes this tenant's failed jobs older than age, or all of them when
-// age is zero. It answers flush().
+// age is zero.
 func (p *DatabaseFailedJobProvider) Flush(ctx context.Context, g auth.Grant, age time.Duration) error {
 	tenant, err := tenantOf(g)
 	if err != nil {
@@ -220,7 +216,7 @@ func (p *DatabaseFailedJobProvider) Flush(ctx context.Context, g auth.Grant, age
 }
 
 // Prune removes this tenant's failed jobs that failed before an instant, and
-// returns how many went. It answers prune().
+// returns how many went.
 func (p *DatabaseFailedJobProvider) Prune(ctx context.Context, g auth.Grant, before time.Time) (int, error) {
 	tenant, err := tenantOf(g)
 	if err != nil {
@@ -238,7 +234,7 @@ func (p *DatabaseFailedJobProvider) Prune(ctx context.Context, g auth.Grant, bef
 	return int(removed), nil
 }
 
-// Count is how many of this tenant's jobs have failed. It answers count().
+// Count is how many of this tenant's jobs have failed.
 func (p *DatabaseFailedJobProvider) Count(ctx context.Context, g auth.Grant, connectionName, queue string) (int, error) {
 	tenant, err := tenantOf(g)
 	if err != nil {

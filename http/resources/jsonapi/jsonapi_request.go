@@ -5,10 +5,9 @@ import (
 	"strings"
 )
 
-// JsonApiRequest mirrors Illuminate\Http\Resources\JsonApi\JsonApiRequest.
-//
-// It parses JSON:API-specific query parameters: sparse fieldsets
-// (fields[type]=field1,field2) and included resources (include=relation).
+// JsonApiRequest parses JSON:API-specific query parameters: sparse
+// fieldsets (fields[type]=field1,field2) and included resources
+// (include=relation).
 type JsonApiRequest struct {
 	Request  *http.Request
 	fields   map[string][]string

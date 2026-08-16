@@ -1,13 +1,10 @@
-// Package compilers mirrors Illuminate\View\Compilers.
+// Package compilers turns view source into the Go a compiled view runs.
 //
-// The files it answers to, in the clone at
-// laravel_illuminate/view/Compilers:
-//
-//	BladeCompiler.php
-//	Compiler.php
-//	CompilerInterface.php
-//	ComponentTagCompiler.php
-//
-// Nothing is implemented here yet. 20-components/DOC-hesape-reorganization.md says what
-// moves in, from where, and in which phase.
+// Compiler is the shared machinery every concrete compiler embeds: the cache
+// path, the compiled extension and the hash that names a compiled file.
+// KyseCompiler is the concrete compiler: it holds the custom directive
+// registry, the condition registry, the component aliases and namespaces,
+// the echo format and the raw-block store. ComponentTagCompiler is the
+// precompile step that expands <x-...> component tags into the directives
+// KyseCompiler understands.
 package compilers

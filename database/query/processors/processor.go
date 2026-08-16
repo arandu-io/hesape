@@ -8,13 +8,13 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// Processor answers Illuminate\Database\Query\Processors\Processor: the hook a
-// driver takes to adjust results on the way out of the connection.
+// Processor is the hook a driver takes to adjust results on the way out of the
+// connection.
 //
 // Almost every method is the identity, and that is the point: the processor is
-// where an engine that answers a question differently is made to answer it the
-// same. Postgres hands back an inserted identifier as a row; MySQL reports it
-// out of band. Both arrive at the caller as an int64.
+// where an engine that resolves a question differently is made to resolve it
+// the same. Postgres hands back an inserted identifier as a row; MySQL reports
+// it out of band. Both arrive at the caller as an int64.
 //
 // # Where authorization is
 //
@@ -28,35 +28,36 @@ type Processor struct{}
 
 var _ query.Processor = (*Processor)(nil)
 
-// NewProcessor answers `new Processor`.
+// NewProcessor creates a Processor.
 func NewProcessor() *Processor { return &Processor{} }
 
 // LastInsertIDConnection is the part of the connection ProcessInsertGetID needs
 // beyond query.Connection: the identifier the engine assigned to the row it
 // just inserted.
 //
-// The PHP reaches through the connection to the PDO handle and calls
-// lastInsertId(). query.Connection is narrowed to running statements and has no
-// such method, so a connection that can answer implements this and one that
-// cannot says so rather than returning a zero that reads like an identifier.
+// query.Connection is narrowed to running statements and has no such
+// method, so a connection that can answer implements this and one that
+// cannot says so rather than returning a zero that reads like an
+// identifier.
 type LastInsertIDConnection interface {
-	// GetLastInsertID answers Connection::getLastInsertId. The sequence names
-	// the generator to ask, for an engine that has more than one.
+	// GetLastInsertID returns the identifier the engine assigned to the last
+	// inserted row. The sequence names the generator to ask, for an engine
+	// that has more than one.
 	GetLastInsertID(sequence string) (int64, error)
 }
 
-// ProcessSelect answers Processor::processSelect.
+// ProcessSelect is the identity: select results need no adjustment.
 func (p *Processor) ProcessSelect(q *query.Builder, results []query.Record) []query.Record {
 	return results
 }
 
-// ProcessInsertGetID answers Processor::processInsertGetId. The PHP spells the
-// last word Id; Go initialisms are upper case throughout.
+// ProcessInsertGetID runs an insert and returns the identifier the engine
+// assigned to the new row. Go initialisms are upper case throughout, hence
+// ID rather than Id.
 //
-// It carries an error where the PHP lets the connection throw, and returns an
-// int64 where the PHP returns int|string: query.Processor declares the
-// signature, and an engine whose identifier is not a number is a repository's
-// problem before it is a processor's.
+// It returns an int64: query.Processor declares the signature, and an
+// engine whose identifier is not a number is a repository's problem before
+// it is a processor's.
 func (p *Processor) ProcessInsertGetID(q *query.Builder, sql string, values []any, sequence string) (int64, error) {
 	connection := q.GetConnection()
 	if connection == nil {
@@ -75,7 +76,7 @@ func (p *Processor) ProcessInsertGetID(q *query.Builder, sql string, values []an
 	return last.GetLastInsertID(sequence)
 }
 
-// ProcessSchemas answers Processor::processSchemas.
+// ProcessSchemas normalises the columns of a schema listing.
 func (p *Processor) ProcessSchemas(results []query.Record) []query.Record {
 	out := make([]query.Record, 0, len(results))
 	for _, result := range results {
@@ -88,7 +89,7 @@ func (p *Processor) ProcessSchemas(results []query.Record) []query.Record {
 	return out
 }
 
-// ProcessTables answers Processor::processTables.
+// ProcessTables normalises the columns of a table listing.
 func (p *Processor) ProcessTables(results []query.Record) []query.Record {
 	out := make([]query.Record, 0, len(results))
 	for _, result := range results {
@@ -105,7 +106,7 @@ func (p *Processor) ProcessTables(results []query.Record) []query.Record {
 	return out
 }
 
-// ProcessViews answers Processor::processViews.
+// ProcessViews normalises the columns of a view listing.
 func (p *Processor) ProcessViews(results []query.Record) []query.Record {
 	out := make([]query.Record, 0, len(results))
 	for _, result := range results {
@@ -119,26 +120,29 @@ func (p *Processor) ProcessViews(results []query.Record) []query.Record {
 	return out
 }
 
-// ProcessTypes answers Processor::processTypes.
+// ProcessTypes is the identity: only Postgres has types to spell out.
 func (p *Processor) ProcessTypes(results []query.Record) []query.Record { return results }
 
-// ProcessColumns answers Processor::processColumns.
+// ProcessColumns is the identity here; a driver processor normalises the
+// columns of a column listing.
 //
-// The variadic argument is SQLiteProcessor's second parameter, which is the
-// CREATE TABLE statement it has to read a collation out of. Go has no default
+// The variadic argument is SQLiteProcessor's second parameter, the CREATE
+// TABLE statement it has to read a collation out of. Go has no default
 // argument, so every processor accepts it and only that one reads it.
 func (p *Processor) ProcessColumns(results []query.Record, sql ...string) []query.Record {
 	return results
 }
 
-// ProcessIndexes answers Processor::processIndexes.
+// ProcessIndexes is the identity: only a driver processor normalises the
+// columns of an index listing.
 func (p *Processor) ProcessIndexes(results []query.Record) []query.Record { return results }
 
-// ProcessForeignKeys answers Processor::processForeignKeys.
+// ProcessForeignKeys is the identity: only a driver processor normalises
+// the columns of a foreign key listing.
 func (p *Processor) ProcessForeignKeys(results []query.Record) []query.Record { return results }
 
-// qualify answers the PHP's schema.name concatenation, which is the name a
-// statement can use from another schema.
+// qualify joins a schema and a name as "schema.name", the form a statement
+// can use from another schema.
 func qualify(result query.Record, key string) string {
 	name := stringOf(result, key)
 	if schema := stringOf(result, "schema"); schema != "" {
@@ -147,10 +151,9 @@ func qualify(result query.Record, key string) string {
 	return name
 }
 
-// The coercions below stand in for PHP's casts. A driver hands a column back as
-// whatever its wire format is -- a MySQL count arrives as []byte, a SQLite flag
-// as int64 -- so the shape a caller reads has to be settled here rather than at
-// every call site.
+// A driver hands a column back as whatever its wire format is -- a MySQL
+// count arrives as []byte, a SQLite flag as int64 -- so the coercions below
+// settle the shape a caller reads here rather than at every call site.
 
 func stringOf(result query.Record, key string) string {
 	switch value := result[key].(type) {
@@ -211,8 +214,9 @@ func intOf(result query.Record, key string) int64 {
 	}
 }
 
-// optional answers `$result->key ?? null`: absent stays absent, which is what
-// tells a caller the engine does not report it at all.
+// optional returns the value at key, or nil if it is absent: absent stays
+// absent, which is what tells a caller the engine does not report it at
+// all.
 func optional(result query.Record, key string) any {
 	value, ok := result[key]
 	if !ok || value == nil {
@@ -231,8 +235,8 @@ func optionalInt(result query.Record, key string) any {
 	return intOf(result, key)
 }
 
-// numericID answers `is_numeric($id) ? (int) $id : $id`, narrowed to the int64
-// query.Processor declares.
+// numericID parses value as the int64 query.Processor declares, refusing
+// anything that is not a number.
 func numericID(value any) (int64, error) {
 	switch id := value.(type) {
 	case nil:

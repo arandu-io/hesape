@@ -163,7 +163,8 @@ func TestIsHashedRejectsPlaintext(t *testing.T) {
 }
 
 // TestCheckReadsBcrypt is the imported-database case: a users table written by
-// a PHP application holds "$2y$" and must authenticate before it is rehashed.
+// an existing application holds "$2y$" and must authenticate before it is
+// rehashed.
 // The minor version letter does not change the digest for an ASCII password, so
 // rewriting it produces a hash the other dialects would have written.
 func TestCheckReadsBcrypt(t *testing.T) {
@@ -200,7 +201,8 @@ func TestCheckReadsBcrypt(t *testing.T) {
 	}
 }
 
-// TestCheckReadsArgon2i covers the other algorithm PHP's password_hash emits.
+// TestCheckReadsArgon2i covers the other argon2 variant an imported table may
+// hold.
 func TestCheckReadsArgon2i(t *testing.T) {
 	const (
 		memory  = 65536

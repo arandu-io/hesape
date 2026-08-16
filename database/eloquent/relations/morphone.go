@@ -8,8 +8,7 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// MorphOne answers Illuminate\Database\Eloquent\Relations\MorphOne: one row on
-// a polymorphic table, the image of a post or of a user.
+// MorphOne is one row on a polymorphic table: the image of a post or of a user.
 type MorphOne struct {
 	MorphOneOrMany
 	concerns.SupportsDefaultModels

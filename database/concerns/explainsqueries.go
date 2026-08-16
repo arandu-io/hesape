@@ -8,18 +8,18 @@ import (
 
 // Explainable is what ExplainsQueries asks of the query it explains.
 //
-// The PHP trait reaches for $this->toSql(), $this->getBindings() and
-// $this->getConnection(); those three are written out here, because a trait
-// mixed into two different builders is an interface in Go.
+// A query builder reaches for its own compiled SQL, its bindings and its
+// connection; those three are written out here as an interface, because
+// what is a mixin in a dynamic language is an interface in Go.
 type Explainable interface {
-	// ToSQL answers Builder::toSql. The PHP spells it toSql.
+	// ToSQL returns the query compiled to SQL.
 	ToSQL() string
 
-	// GetBindings answers Builder::getBindings.
+	// GetBindings returns the values that go with it.
 	GetBindings() []any
 
-	// GetConnection answers Builder::getConnection, narrowed to the one call
-	// Explain makes on it.
+	// GetConnection returns the connection to run EXPLAIN on, narrowed to
+	// the one call Explain makes on it.
 	GetConnection() ExplainConnection
 }
 
@@ -29,19 +29,18 @@ type Explainable interface {
 // Postgres one text column, MySQL twelve -- and a struct for it would be a
 // struct for one of the three.
 type ExplainConnection interface {
-	// Select answers Connection::select. The Grant is required because this
-	// executes: RULE 17 makes no exception for a query plan, and an EXPLAIN
-	// that skipped the Policy would be a way to learn about rows the caller
-	// may not read.
+	// Select runs a select. The Grant is required because this executes:
+	// there is no exception for a query plan, and an EXPLAIN that skipped
+	// the Policy would be a way to learn about rows the caller may not read.
 	Select(ctx context.Context, g auth.Grant, query string, bindings []any) ([]map[string]any, error)
 }
 
-// Explain answers Concerns\ExplainsQueries::explain: it asks the engine what it
-// would do with this query, without running it.
+// Explain asks the engine what it would do with this query, without
+// running it.
 //
-// The PHP returns a Collection; this returns the rows and the error the select
-// can fail with. The statement is the PHP's, verbatim: 'EXPLAIN '.$sql, with
-// the query's own bindings.
+// It returns the rows and the error the select can fail with. The
+// statement is 'EXPLAIN ' concatenated with the compiled SQL, with the
+// query's own bindings.
 func Explain(ctx context.Context, g auth.Grant, query Explainable) ([]map[string]any, error) {
 	sql := query.ToSQL()
 

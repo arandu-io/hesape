@@ -13,13 +13,13 @@ import (
 
 // ResetLinkLifetime is how long a reset link is said to last.
 //
-// PHP reads it from config, `auth.passwords.<broker>.expire`, in minutes, whose
-// shipped value is 60. It is only the sentence in the message -- the broker's
-// token repository is what actually refuses an old token -- so a broker
-// configured differently sets [ResetPassword.Expire] rather than changing this.
+// It is only the sentence in the message -- the broker's token repository is
+// what actually refuses an old token -- so a broker configured differently sets
+// [ResetPassword.Expire] rather than changing this.
 const ResetLinkLifetime = 60 * time.Minute
 
-// resetPasswordCallbacks holds what PHP keeps in two static properties.
+// resetPasswordCallbacks is the package state behind this notification's two
+// setters.
 //
 // A mutex rather than a bare variable: these are written once at boot and read
 // on every send, which is exactly the shape -race flags the moment a test writes
@@ -33,28 +33,27 @@ var resetPasswordCallbacks struct {
 	toMail func(notifiable hnotifications.Notifiable, token string) messages.Mail
 }
 
-// ResetPassword is Illuminate\Auth\Notifications\ResetPassword.
+// ResetPassword carries the reset token and turns into the e-mail with the link
+// in it.
 //
-// It carries the reset token and turns into the e-mail with the link in it. The
-// token is minted and stored by the password broker; this is only the message.
+// The token is minted and stored by the password broker; this is only the
+// message.
 type ResetPassword struct {
 	hnotifications.NotificationBase
 
 	// Token is the password reset token.
 	//
-	// PHP marks the constructor parameter #[\SensitiveParameter], because
-	// whoever holds this string can set the account's password. Go has no such
-	// attribute, so the rule lives here: it must not be logged, and it must not
-	// be put anywhere a link is not.
+	// Whoever holds this string can set the account's password, and nothing
+	// redacts it on the way past: it must not be logged, and it must not be put
+	// anywhere a link is not.
 	Token string
 
 	// Expire is how long the link is said to last, for the sentence in the
 	// message. Zero means [ResetLinkLifetime].
 	//
-	// PHP reaches config() for it. There is no global configuration to reach
-	// (ADR 0001), so the broker that builds the notification passes its own
-	// expiry -- which is the one that will actually be enforced, and the reason
-	// the two can never disagree here.
+	// The broker that builds the notification passes its own expiry -- which is
+	// the one that will actually be enforced, and the reason the two can never
+	// disagree here.
 	Expire time.Duration
 }
 
@@ -65,29 +64,22 @@ type ResetPassword struct {
 // notifications.Key.
 const KeyResetPassword hnotifications.Key = "auth.password-reset"
 
-// NewResetPassword creates a notification instance.
-//
-// It is ResetPassword::__construct.
+// NewResetPassword returns the notification carrying that token.
 func NewResetPassword(token string) ResetPassword { return ResetPassword{Token: token} }
 
-// Key is [KeyResetPassword].
-//
-// It has no counterpart in PHP, where the stored type is the class name. See
-// notifications.Key for why this collection names its notifications instead.
+// Key is [KeyResetPassword]. See notifications.Key for why this collection
+// names its notifications rather than keying them by type.
 func (ResetPassword) Key() hnotifications.Key { return KeyResetPassword }
 
 // Via gets the notification's channels.
 //
-// It is ResetPassword::via, which answers ['mail'] and nothing else: a password
-// reset that arrived as a row in a bell menu is a password reset for somebody
-// who is already signed in.
+// It is mail and nothing else: a password reset that arrived as a row in a bell
+// menu is a password reset for somebody who is already signed in.
 func (ResetPassword) Via(hnotifications.Notifiable) []hnotifications.ChannelName {
 	return []hnotifications.ChannelName{hnotifications.ChannelMail}
 }
 
 // ToMail builds the mail representation of the notification.
-//
-// It is ResetPassword::toMail.
 func (n ResetPassword) ToMail(notifiable hnotifications.Notifiable) messages.Mail {
 	resetPasswordCallbacks.mu.RLock()
 	build := resetPasswordCallbacks.toMail
@@ -100,11 +92,7 @@ func (n ResetPassword) ToMail(notifiable hnotifications.Notifiable) messages.Mai
 }
 
 // buildMailMessage gets the reset password notification mail message for the
-// given URL.
-//
-// It is ResetPassword::buildMailMessage, which is protected. The four lines are
-// Illuminate's, in Illuminate's order, minus the Lang::get around each of them
-// -- see the package comment.
+// given URL, when nothing was set with ToMailUsing.
 func (n ResetPassword) buildMailMessage(link string) messages.Mail {
 	expire := n.Expire
 	if expire <= 0 {
@@ -121,10 +109,9 @@ func (n ResetPassword) buildMailMessage(link string) messages.Mail {
 
 // resetURL gets the reset URL for the given notifiable.
 //
-// It is ResetPassword::resetUrl, which is protected. Without a callback it
-// answers the PATH of Laravel's password.reset route, which is not absolute and
-// which messages.Mail.Validate refuses -- see the package comment for why that
-// is the right failure.
+// Without a callback it answers a PATH, which is not absolute and which
+// messages.Mail.Validate refuses -- see the package comment for why that is the
+// right failure.
 func (n ResetPassword) resetURL(notifiable hnotifications.Notifiable) string {
 	resetPasswordCallbacks.mu.RLock()
 	create := resetPasswordCallbacks.createURL
@@ -144,9 +131,9 @@ func (n ResetPassword) resetURL(notifiable hnotifications.Notifiable) string {
 // CreateUrlUsing sets a callback that should be used when creating the reset
 // password button URL.
 //
-// It is ResetPassword::createUrlUsing, which is static -- see the package
-// comment for why a static became a method on the zero value. Passing nil
-// restores the built-in URL, which is what a test does when it is finished.
+// It is a method on the zero value that sets package state -- see the package
+// comment for why. Passing nil restores the built-in URL, which is what a test
+// does when it is finished.
 //
 //	notifications.ResetPassword{}.CreateUrlUsing(func(to hnotifications.Notifiable, token string) string {
 //		return "https://app.example.com/reset-password/" + token
@@ -160,17 +147,17 @@ func (ResetPassword) CreateUrlUsing(callback func(notifiable hnotifications.Noti
 // ToMailUsing sets a callback that should be used when building the
 // notification mail message.
 //
-// It is ResetPassword::toMailUsing, which is static. It replaces the whole
-// message, link included, so a project that only wants a different address uses
-// [ResetPassword.CreateUrlUsing] instead.
+// It is a method on the zero value that sets package state. It replaces the
+// whole message, link included, so a project that only wants a different
+// address uses [ResetPassword.CreateUrlUsing] instead.
 func (ResetPassword) ToMailUsing(callback func(notifiable hnotifications.Notifiable, token string) messages.Mail) {
 	resetPasswordCallbacks.mu.Lock()
 	resetPasswordCallbacks.toMail = callback
 	resetPasswordCallbacks.mu.Unlock()
 }
 
-// minutes renders a duration the way PHP's :count placeholder receives it: a
-// whole number of minutes.
+// minutes renders a duration as a whole number of minutes, for the sentence
+// that says when the link dies.
 //
 // It rounds up, so a link that lasts ninety seconds is announced as two minutes
 // rather than as one -- a sentence that promises less time than the link has is
@@ -183,8 +170,8 @@ func minutes(d time.Duration) string {
 	return strconv.FormatInt(count, 10)
 }
 
-// emailForPasswordReset is $notifiable->getEmailForPasswordReset(), falling back
-// to the address the recipient is routed at on the mail channel.
+// emailForPasswordReset is the address the recipient asked to reset at, falling
+// back to the one it is routed at on the mail channel.
 //
 // The fallback is what makes an on-demand recipient work: an Anonymous carries
 // an address and no account, and a reset link mailed to an address somebody

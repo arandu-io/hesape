@@ -9,13 +9,8 @@ import (
 
 // MaxAttemptsExceeded is why a job was parked: it ran out of deliveries.
 //
-// It answers Illuminate\Queue\MaxAttemptsExceededException, with the "Exception"
-// suffix dropped because in Go this is an error and not a throwable, and
-// nothing else in the collection carries it.
-//
-// It keeps the job, exactly as the PHP class keeps $job, so a listener on the
-// failed-job event can say which one and on which queue without decoding
-// anything.
+// It keeps the job, so a listener on the failed-job event can say which one and
+// on which queue without decoding anything.
 type MaxAttemptsExceeded struct {
 	// Job is the job that ran out. It is never nil on an error built by
 	// [MaxAttemptsExceeded.ForJob].
@@ -29,10 +24,9 @@ type MaxAttemptsExceeded struct {
 
 // ForJob returns the error for a job that ran out of deliveries.
 //
-// It answers MaxAttemptsExceededException::forJob(). It is a method on the zero
-// value rather than a package function, because the PHP name is a static on the
-// class and `queue.MaxAttemptsExceeded{}.ForJob(j, 5)` keeps both halves of
-// `MaxAttemptsExceededException::forJob($job)` where a reader expects them.
+// It is a method on the zero value rather than a package function, so
+// `queue.MaxAttemptsExceeded{}.ForJob(j, 5)` names the error and the reason for
+// it in one phrase.
 func (MaxAttemptsExceeded) ForJob(j *jobs.Job, max int) *MaxAttemptsExceeded {
 	e := &MaxAttemptsExceeded{Job: j, Max: max}
 	if j != nil {
@@ -53,19 +47,15 @@ func (e *MaxAttemptsExceeded) Error() string {
 
 // TimeoutExceeded is why a job was parked: the handler ran past its timeout.
 //
-// It answers Illuminate\Queue\TimeoutExceededException, which extends
-// MaxAttemptsExceededException in PHP. Here it wraps one, so errors.Is against
-// [ErrMaxAttemptsExceeded] still matches -- a timed-out job is one that used up
-// a delivery without finishing, and code that treats the two the same continues
-// to.
+// It wraps [ErrMaxAttemptsExceeded], so errors.Is against that still matches: a
+// timed-out job is one that used up a delivery without finishing, and code that
+// treats the two the same can.
 type TimeoutExceeded struct {
 	// Job is the job that ran too long.
 	Job *jobs.Job
 }
 
 // ForJob returns the error for a job whose handler ran too long.
-//
-// It answers TimeoutExceededException::forJob().
 func (TimeoutExceeded) ForJob(j *jobs.Job) *TimeoutExceeded { return &TimeoutExceeded{Job: j} }
 
 // Error is the message.
@@ -90,17 +80,15 @@ func (e *MaxAttemptsExceeded) Is(target error) bool { return target == ErrMaxAtt
 
 // ErrManuallyFailed is what a handler returns to park its own job.
 //
-// It answers Illuminate\Queue\ManuallyFailedException. A handler that knows the
-// work can never succeed -- the customer is gone, the file is malformed -- wraps
-// it, and the worker parks the job on the first delivery instead of retrying
-// four more times on the way to the same place.
+// A handler that knows the work can never succeed -- the customer is gone, the
+// file is malformed -- wraps it, and the worker parks the job on the first
+// delivery instead of retrying four more times on the way to the same place.
 //
 //	return fmt.Errorf("%w: the invoice was voided", queue.ErrManuallyFailed)
 var ErrManuallyFailed = errors.New("queue: the job failed and will not be retried")
 
 // ErrInvalidPayload is returned when a job's arguments cannot be encoded.
 //
-// It answers Illuminate\Queue\InvalidPayloadException. The value that failed to
-// encode is not carried on it: in PHP it is there so the message can be built
-// lazily, and here the wrapped json error already names the type and the field.
+// The value that failed to encode is not carried on it: the wrapped json error
+// already names the type and the field.
 var ErrInvalidPayload = errors.New("queue: the job payload cannot be encoded")

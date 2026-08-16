@@ -26,8 +26,8 @@ func (f Func) Handle(ctx context.Context, j *jobs.Job, next func(context.Context
 
 // key names a per-job resource -- a lock, a counter -- inside its tenant.
 //
-// The tenant is first and it is not optional (RULE 14): a lock named after the
-// job alone would let one customer's import block every other customer's, and a
+// The tenant is first and it is not optional: a lock named after the job alone
+// would let one customer's import block every other customer's, and a
 // counter named after the job alone would let one customer spend everybody's
 // budget.
 func key(j *jobs.Job, name string) string {

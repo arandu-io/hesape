@@ -5,11 +5,9 @@ import (
 	"strconv"
 )
 
-// FrameGuard mirrors Illuminate\Http\Middleware\FrameGuard.
-//
-// It adds the X-Frame-Options header to prevent clickjacking. The default
-// value is SAMEORIGIN, which allows the page to be framed only by pages
-// on the same origin.
+// FrameGuard adds the X-Frame-Options header to prevent clickjacking. The
+// default value is SAMEORIGIN, which allows the page to be framed only by
+// pages on the same origin.
 //
 //	handler := FrameGuard("SAMEORIGIN")(next)
 func FrameGuard(option string) func(http.Handler) http.Handler {
@@ -24,10 +22,8 @@ func FrameGuard(option string) func(http.Handler) http.Handler {
 	}
 }
 
-// ValidatePostSize mirrors Illuminate\Http\Middleware\ValidatePostSize.
-//
-// It checks the Content-Length header against maxSize and returns
-// 413 Request Entity Too Large if the body exceeds the limit.
+// ValidatePostSize checks the Content-Length header against maxSize and
+// returns 413 Request Entity Too Large if the body exceeds the limit.
 func ValidatePostSize(maxSize int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -40,10 +36,8 @@ func ValidatePostSize(maxSize int64) func(http.Handler) http.Handler {
 	}
 }
 
-// ValidatePathEncoding mirrors Illuminate\Http\Middleware\ValidatePathEncoding.
-//
-// It validates that the request path is valid UTF-8. An invalid path
-// returns a 400 Bad Request.
+// ValidatePathEncoding validates that the request path is valid UTF-8. An
+// invalid path returns a 400 Bad Request.
 func ValidatePathEncoding() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -61,10 +55,8 @@ func ValidatePathEncoding() func(http.Handler) http.Handler {
 	}
 }
 
-// SetCacheHeaders mirrors Illuminate\Http\Middleware\SetCacheHeaders.
-//
-// It sets cache headers (ETag, Last-Modified, Cache-Control) on the
-// response. The options map can contain "etag", "last_modified",
+// SetCacheHeaders sets cache headers (ETag, Last-Modified, Cache-Control) on
+// the response. The options map can contain "etag", "last_modified",
 // "max_age", "s_maxage", "private", and "public" keys.
 func SetCacheHeaders(options map[string]string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -114,11 +106,8 @@ func SetCacheHeaders(options map[string]string) func(http.Handler) http.Handler 
 	}
 }
 
-// CheckResponseForModifications mirrors
-// Illuminate\Http\Middleware\CheckResponseForModifications.
-//
-// It checks If-None-Match and If-Modified-Since headers and returns
-// 304 Not Modified if the response has not changed.
+// CheckResponseForModifications checks If-None-Match and If-Modified-Since
+// headers and returns 304 Not Modified if the response has not changed.
 func CheckResponseForModifications(etag string, lastModified string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -139,13 +128,12 @@ func CheckResponseForModifications(etag string, lastModified string) func(http.H
 	}
 }
 
-// TrustHosts mirrors Illuminate\Http\Middleware\TrustHosts.
+// TrustHosts validates that the request Host header matches the list of
+// trusted host patterns. A request with a non-matching host is rejected
+// with a 400 Bad Request.
 //
-// It validates that the request Host header matches the list of
-// trusted host patterns. A request with a non-matching host is
-// rejected with a 400 Bad Request.
 // Hosts named through [At] are trusted as well, and [At] can turn subdomain
-// matching on for them, which is what TrustHosts::hosts does in the PHP.
+// matching on for them.
 func TrustHosts(hosts []string, subdomains bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -178,12 +166,9 @@ func TrustHosts(hosts []string, subdomains bool) func(http.Handler) http.Handler
 	}
 }
 
-// HandleCors mirrors Illuminate\Http\Middleware\HandleCors.
-//
-// It handles CORS preflight requests and adds CORS headers to
+// HandleCors handles CORS preflight requests and adds CORS headers to
 // responses. The allowedOrigins, allowedMethods, and allowedHeaders
-// parameters configure which origins, methods, and headers are
-// permitted.
+// parameters configure which origins, methods, and headers are permitted.
 func HandleCors(allowedOrigins []string, allowedMethods []string, allowedHeaders []string, maxAge int, allowCredentials bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

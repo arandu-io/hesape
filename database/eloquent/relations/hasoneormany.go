@@ -12,9 +12,7 @@ import (
 	"github.com/arandu-io/hesape/str"
 )
 
-// HasOneOrMany answers the abstract
-// Illuminate\Database\Eloquent\Relations\HasOneOrMany: the shared body of
-// HasOne and HasMany.
+// HasOneOrMany is the shared body of HasOne and HasMany.
 //
 // The relation is a foreign key on the other table pointing back at this one.
 // Everything below follows from that: the constraint is `where posts.user_id =

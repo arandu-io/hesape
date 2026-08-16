@@ -5,108 +5,100 @@ import (
 	"sync"
 )
 
-// ManagerConfig is what the PHP AuthManager reads out of the container: the
-// auth.php arrays, and the six services createSessionDriver and
-// createTokenDriver pull from `$this->app[...]`.
+// ManagerConfig is everything [NewAuthManager] needs to build a guard: the two
+// configuration maps, and the six services the built-in drivers are wired from.
 //
-// There is no container here (ADR 0001), so the manager is handed what it needs
-// instead of resolving it. That is the one shape change in this file, and it is
-// the reason AuthManager::setApplication has no counterpart.
+// The manager is handed what it needs rather than resolving it, which is why
+// there is nothing here to set an application on afterwards.
 //
 // Guards and Providers are maps rather than structs because a custom driver
 // registered with [AuthManager.Extend] reads keys this package has never heard
-// of, exactly as a Laravel package does.
+// of.
 type ManagerConfig struct {
-	// DefaultGuard is auth.defaults.guard.
+	// DefaultGuard is the guard an empty name means.
 	DefaultGuard string
 
-	// DefaultProvider is auth.defaults.provider.
+	// DefaultProvider is the provider an empty name means.
 	DefaultProvider string
 
-	// Guards is auth.guards: the guard's name to its settings. The settings a
-	// built-in driver reads are "driver" ("session" or "token"), "provider",
-	// "remember", "input_key", "storage_key" and "hash".
+	// Guards maps a guard's name to its settings. The settings a built-in
+	// driver reads are "driver" ("session" or "token"), "provider", "remember",
+	// "input_key", "storage_key" and "hash".
 	Guards map[string]map[string]any
 
-	// Providers is auth.providers: the provider's name to its settings, of
-	// which only "driver" is read here.
+	// Providers maps a provider's name to its settings, of which only "driver"
+	// is read here.
 	Providers map[string]map[string]any
 
-	// Session is app['session.store'], which the session driver needs.
+	// Session is the session store the session driver needs.
 	Session Session
 
-	// Cookies is app['cookie'].
+	// Cookies is the jar the "remember me" cookie is queued on.
 	Cookies CookieJar
 
-	// Events is app['events'].
+	// Events is the dispatcher the guards fire on.
 	Events Dispatcher
 
-	// Request is app['request'].
+	// Request is what the guards read cookies and tokens from.
 	//
-	// The PHP re-injects it on every request with $app->refresh('request', ...),
-	// because its manager outlives the request and its guards do not. Here a
-	// guard is built per request, or its request is replaced with SetRequest;
-	// there is nothing to refresh, and refresh() has no counterpart.
+	// There is nothing to refresh between requests: a guard is built per
+	// request, or its request is replaced with SetRequest.
 	Request Request
 
-	// Hasher is app['hash'], which SessionGuard needs for LogoutOtherDevices.
+	// Hasher is what SessionGuard needs for LogoutOtherDevices.
 	Hasher Hasher
 
-	// RehashOnLogin is hashing.rehash_on_login. The PHP defaults it to true;
-	// this is a bool, so say so.
+	// RehashOnLogin asks the provider to upgrade a weakly hashed password on a
+	// sign-in that proved the plain one.
 	RehashOnLogin bool
 
-	// TimeboxDuration is auth.timebox_duration, in microseconds. Zero is the
-	// PHP's default of 200000.
+	// TimeboxDuration is how long an attempt is held open for, in microseconds.
+	// Zero means 200000.
 	TimeboxDuration int
 
-	// HashKey is app.key, which SessionGuard hashes the recaller's password
+	// HashKey is the application key SessionGuard signs the recaller's password
 	// segment with.
 	HashKey string
 }
 
-// AuthManager is Illuminate\Auth\AuthManager: the factory that turns a guard's
-// name into a guard, and Illuminate\Auth\CreatesUserProviders, which is a trait
-// in the PHP and is folded in here.
+// AuthManager is the factory that turns a guard's name into a guard, and the
+// registry of the user providers those guards read from.
 //
-// It caches what it resolves, as the PHP does. Read that twice before sharing
-// one across requests: a guard carries the user it resolved and the request it
-// read cookies from, so a cached SessionGuard is per-request state. Build the
-// manager per request, or call [AuthManager.ForgetGuards] between them.
+// It caches what it resolves. Read that twice before sharing one across
+// requests: a guard carries the user it resolved and the request it read
+// cookies from, so a cached SessionGuard is per-request state. Build the manager
+// per request, or call [AuthManager.ForgetGuards] between them.
 //
-// Two of the PHP's methods are not here. AuthManager::setApplication is the
-// container (ADR 0001), and __call is PHP's dynamic dispatch, which forwards
-// every unknown method to the default guard -- Auth::user() reaching
-// SessionGuard::user(). Go has no such hook and would not want one: call
+// There is no forwarding of unknown calls to the default guard: call
 // [AuthManager.Guard] and then the method.
 type AuthManager struct {
-	// mu guards everything below it. The PHP needs no lock because a process
-	// serves one request; a Go server does not have that luxury.
+	// mu guards everything below it, because a Go server answers requests
+	// concurrently.
 	mu sync.Mutex
 
-	// defaultGuard is auth.defaults.guard, which the PHP writes back into the
-	// config repository from setDefaultDriver.
+	// defaultGuard is the guard an empty name means, which SetDefaultDriver
+	// rewrites.
 	defaultGuard string
 
-	// defaultProvider is auth.defaults.provider.
+	// defaultProvider is the provider an empty name means.
 	defaultProvider string
 
-	// guardConfig is auth.guards.
+	// guardConfig is the guard settings, by guard name.
 	guardConfig map[string]map[string]any
 
-	// providerConfig is auth.providers.
+	// providerConfig is the provider settings, by provider name.
 	providerConfig map[string]map[string]any
 
-	// guards is $guards: the resolved drivers.
+	// guards is the drivers already resolved, by name.
 	guards map[string]Guard
 
-	// customCreators is $customCreators.
+	// customCreators is the guard driver registry Extend writes.
 	customCreators map[string]func(manager *AuthManager, name string, config map[string]any) (Guard, error)
 
-	// customProviderCreators is the trait's $customProviderCreators.
+	// customProviderCreators is the provider driver registry Provider writes.
 	customProviderCreators map[string]func(config map[string]any) (UserProvider, error)
 
-	// userResolver is $userResolver.
+	// userResolver answers who is acting on a given guard.
 	userResolver func(guard string) Authenticatable
 
 	// The services the drivers are built from. See [ManagerConfig].
@@ -120,11 +112,10 @@ type AuthManager struct {
 	hashKey         string
 }
 
-// NewAuthManager is AuthManager::__construct.
+// NewAuthManager returns a manager over the given configuration.
 //
-// The PHP takes the application and reads everything else out of it; this takes
-// what it would have read. The user resolver it sets is the PHP's:
-// `fn ($guard = null) => $this->guard($guard)->user()`.
+// The user resolver it starts with answers with the user of the named guard, or
+// of the default one; [AuthManager.ResolveUsersUsing] replaces it.
 func NewAuthManager(config ManagerConfig) *AuthManager {
 	manager := &AuthManager{
 		defaultGuard:           config.DefaultGuard,
@@ -148,11 +139,9 @@ func NewAuthManager(config ManagerConfig) *AuthManager {
 	return manager
 }
 
-// Guard is AuthManager::guard: the guard of that name, from the cache or newly
-// resolved.
+// Guard is the guard of that name, from the cache or newly resolved.
 //
-// An empty name is the PHP's null: the default guard. The PHP throws
-// InvalidArgumentException for a guard that is not configured; this returns the
+// An empty name means the default guard. A guard that is not configured is an
 // error.
 func (m *AuthManager) Guard(name string) (Guard, error) {
 	if name == "" {
@@ -185,12 +174,10 @@ func (m *AuthManager) Guard(name string) (Guard, error) {
 	return guard, nil
 }
 
-// resolve is AuthManager::resolve.
+// resolve builds the guard of that name from its configured driver.
 //
-// The PHP finds the driver method by name, with method_exists('create'.
-// ucfirst($driver).'Driver'). Go has no such lookup, so the two built-in
-// drivers are a switch: a driver that is neither is registered with
-// [AuthManager.Extend].
+// The two built-in drivers are a switch, not a method found by name: a driver
+// that is neither is registered with [AuthManager.Extend].
 func (m *AuthManager) resolve(name string) (Guard, error) {
 	config, ok := m.guardConfigFor(name)
 	if !ok {
@@ -213,9 +200,8 @@ func (m *AuthManager) resolve(name string) (Guard, error) {
 	return nil, fmt.Errorf("auth: driver [%s] for guard [%s] is not defined", driver, name)
 }
 
-// callCustomCreator is AuthManager::callCustomCreator. The PHP passes the
-// application; this passes the manager, which is what the PHP's closure reaches
-// through the $this it was bound to.
+// callCustomCreator runs a registered driver creator, handing it the manager so
+// that it can build what it needs from the same configuration.
 func (m *AuthManager) callCustomCreator(
 	creator func(manager *AuthManager, name string, config map[string]any) (Guard, error),
 	name string,
@@ -224,7 +210,7 @@ func (m *AuthManager) callCustomCreator(
 	return creator(m, name, config)
 }
 
-// CreateSessionDriver is AuthManager::createSessionDriver.
+// CreateSessionDriver builds a [SessionGuard] from the guard's settings.
 func (m *AuthManager) CreateSessionDriver(name string, config map[string]any) (*SessionGuard, error) {
 	provider, err := m.CreateUserProvider(configString(config, "provider"))
 	if err != nil {
@@ -257,7 +243,7 @@ func (m *AuthManager) CreateSessionDriver(name string, config map[string]any) (*
 	return guard, nil
 }
 
-// CreateTokenDriver is AuthManager::createTokenDriver.
+// CreateTokenDriver builds a [TokenGuard] from the guard's settings.
 func (m *AuthManager) CreateTokenDriver(name string, config map[string]any) (*TokenGuard, error) {
 	provider, err := m.CreateUserProvider(configString(config, "provider"))
 	if err != nil {
@@ -265,10 +251,8 @@ func (m *AuthManager) CreateTokenDriver(name string, config map[string]any) (*To
 	}
 
 	// The token guard is the basic API token guard: it takes a token field off
-	// the request and matches it against the users wherever they are kept.
-	//
-	// The PHP ignores $name here, and so does this: the argument stays because
-	// the PHP's signature has it.
+	// the request and matches it against the users wherever they are kept. It
+	// keeps no name of its own, so the argument goes unread.
 	_ = name
 
 	return NewTokenGuard(
@@ -280,7 +264,7 @@ func (m *AuthManager) CreateTokenDriver(name string, config map[string]any) (*To
 	), nil
 }
 
-// GetDefaultDriver is AuthManager::getDefaultDriver: auth.defaults.guard.
+// GetDefaultDriver is the guard an empty name means.
 func (m *AuthManager) GetDefaultDriver() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -288,8 +272,8 @@ func (m *AuthManager) GetDefaultDriver() string {
 	return m.defaultGuard
 }
 
-// ShouldUse is AuthManager::shouldUse: make this the default guard, and point
-// the user resolver back at whatever the default is.
+// ShouldUse makes this the default guard, and points the user resolver back at
+// whatever the default is.
 func (m *AuthManager) ShouldUse(name string) {
 	if name == "" {
 		name = m.GetDefaultDriver()
@@ -303,7 +287,7 @@ func (m *AuthManager) ShouldUse(name string) {
 	m.userResolver = m.resolveUserThroughGuard
 }
 
-// SetDefaultDriver is AuthManager::setDefaultDriver.
+// SetDefaultDriver sets the guard an empty name means.
 func (m *AuthManager) SetDefaultDriver(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -311,8 +295,8 @@ func (m *AuthManager) SetDefaultDriver(name string) {
 	m.defaultGuard = name
 }
 
-// ViaRequest is AuthManager::viaRequest: register a driver that is one
-// callback, built as a [RequestGuard].
+// ViaRequest registers a driver that is one callback, built as a
+// [RequestGuard].
 func (m *AuthManager) ViaRequest(driver string, callback func(request Request, provider UserProvider) Authenticatable) *AuthManager {
 	return m.Extend(driver, func(manager *AuthManager, name string, config map[string]any) (Guard, error) {
 		_ = name
@@ -327,8 +311,8 @@ func (m *AuthManager) ViaRequest(driver string, callback func(request Request, p
 	})
 }
 
-// UserResolver is AuthManager::userResolver: the callback that answers who is
-// acting, which the Gate and the request both use.
+// UserResolver is the callback that answers who is acting, which the Gate and
+// the request both use.
 func (m *AuthManager) UserResolver() func(guard string) Authenticatable {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -336,7 +320,7 @@ func (m *AuthManager) UserResolver() func(guard string) Authenticatable {
 	return m.userResolver
 }
 
-// ResolveUsersUsing is AuthManager::resolveUsersUsing.
+// ResolveUsersUsing replaces that callback, and returns the manager.
 func (m *AuthManager) ResolveUsersUsing(userResolver func(guard string) Authenticatable) *AuthManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -346,10 +330,10 @@ func (m *AuthManager) ResolveUsersUsing(userResolver func(guard string) Authenti
 	return m
 }
 
-// Extend is AuthManager::extend: register a custom guard driver.
+// Extend registers a custom guard driver.
 //
-// The PHP binds the closure to the manager so that it can call $this->...;
-// Go has no bound closures, so the manager is the callback's first argument.
+// The manager is the callback's first argument, so that the driver can build
+// what it needs from the same configuration.
 func (m *AuthManager) Extend(driver string, callback func(manager *AuthManager, name string, config map[string]any) (Guard, error)) *AuthManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -359,7 +343,7 @@ func (m *AuthManager) Extend(driver string, callback func(manager *AuthManager, 
 	return m
 }
 
-// Provider is AuthManager::provider: register a custom user provider creator.
+// Provider registers a custom user provider creator.
 func (m *AuthManager) Provider(name string, callback func(config map[string]any) (UserProvider, error)) *AuthManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -369,7 +353,7 @@ func (m *AuthManager) Provider(name string, callback func(config map[string]any)
 	return m
 }
 
-// HasResolvedGuards is AuthManager::hasResolvedGuards.
+// HasResolvedGuards reports that at least one guard has been resolved.
 func (m *AuthManager) HasResolvedGuards() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -377,7 +361,7 @@ func (m *AuthManager) HasResolvedGuards() bool {
 	return len(m.guards) > 0
 }
 
-// ForgetGuards is AuthManager::forgetGuards: drop every resolved guard.
+// ForgetGuards drops every resolved guard.
 //
 // It is what a long-running process calls between requests, because a guard
 // remembers the user it resolved.
@@ -390,17 +374,15 @@ func (m *AuthManager) ForgetGuards() *AuthManager {
 	return m
 }
 
-// CreateUserProvider is CreatesUserProviders::createUserProvider: the provider
-// of that name, or the default one when the name is empty.
+// CreateUserProvider is the provider of that name, or the default one when the
+// name is empty.
 //
-// The PHP's match has two arms of its own, 'database' and 'eloquent'. Neither
-// is here: DatabaseUserProvider and EloquentUserProvider are hesape/auth/users,
-// and the root of auth imports nothing outside the standard library (see
-// doc.go). Register them with [AuthManager.Provider], which is the same
-// registry the PHP's customProviderCreators is.
+// There are no built-in drivers: DatabaseUserProvider and EloquentUserProvider
+// are hesape/auth/users, and the root of auth imports nothing outside the
+// standard library (see doc.go). Register them with [AuthManager.Provider].
 //
-// A provider that is not configured at all is nil and no error, as the PHP's
-// early return is: a guard may have no provider.
+// A provider that is not configured at all is nil and no error: a guard may
+// have no provider.
 func (m *AuthManager) CreateUserProvider(provider string) (UserProvider, error) {
 	config, ok := m.providerConfiguration(provider)
 	if !ok {
@@ -416,8 +398,7 @@ func (m *AuthManager) CreateUserProvider(provider string) (UserProvider, error) 
 	return nil, fmt.Errorf("auth: user provider [%s] is not defined", driver)
 }
 
-// GetDefaultUserProvider is CreatesUserProviders::getDefaultUserProvider:
-// auth.defaults.provider.
+// GetDefaultUserProvider is the provider an empty name means.
 func (m *AuthManager) GetDefaultUserProvider() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -425,7 +406,8 @@ func (m *AuthManager) GetDefaultUserProvider() string {
 	return m.defaultProvider
 }
 
-// providerConfiguration is CreatesUserProviders::getProviderConfiguration.
+// providerConfiguration is the settings of the named provider, or of the
+// default one, and whether there are any.
 func (m *AuthManager) providerConfiguration(provider string) (map[string]any, bool) {
 	if provider == "" {
 		provider = m.GetDefaultUserProvider()
@@ -442,7 +424,7 @@ func (m *AuthManager) providerConfiguration(provider string) (map[string]any, bo
 	return config, ok && config != nil
 }
 
-// guardConfigFor is AuthManager::getConfig.
+// guardConfigFor is the settings of the named guard, and whether there are any.
 func (m *AuthManager) guardConfigFor(name string) (map[string]any, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -472,8 +454,8 @@ func (m *AuthManager) customProviderCreator(driver string) (func(config map[stri
 	return creator, ok
 }
 
-// resolveUserThroughGuard is the closure the PHP constructor and shouldUse both
-// install: the user of the named guard, or of the default one.
+// resolveUserThroughGuard is the user resolver [NewAuthManager] and ShouldUse
+// both install: the user of the named guard, or of the default one.
 func (m *AuthManager) resolveUserThroughGuard(guard string) Authenticatable {
 	resolved, err := m.Guard(guard)
 	if err != nil {
@@ -482,21 +464,21 @@ func (m *AuthManager) resolveUserThroughGuard(guard string) Authenticatable {
 	return resolved.User()
 }
 
-// configString reads a string out of a config array, and answers "" where the
-// PHP's ?? null lands.
+// configString reads a string out of a settings map, and answers "" when the
+// key is missing or holds something else.
 func configString(config map[string]any, key string) string {
 	value, _ := config[key].(string)
 	return value
 }
 
-// configBool reads a bool out of a config array.
+// configBool reads a bool out of a settings map.
 func configBool(config map[string]any, key string) bool {
 	value, _ := config[key].(bool)
 	return value
 }
 
-// configInt reads an int out of a config array, and says whether it was there.
-// A config read from JSON or YAML holds numbers as float64, so both are taken.
+// configInt reads an int out of a settings map, and says whether it was there.
+// Settings read from JSON or YAML hold numbers as float64, so both are taken.
 func configInt(config map[string]any, key string) (int, bool) {
 	switch value := config[key].(type) {
 	case int:

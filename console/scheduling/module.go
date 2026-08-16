@@ -9,9 +9,9 @@ import (
 // Module runs the schedule in the application process.
 //
 // It is what `schedule:work` is, wired as a module rather than typed as a
-// command: Laravel needs a system cron to call `schedule:run` every minute
-// because PHP has no resident process, and this binary has one. That is one
-// artifact instead of two, and nothing to forget when a machine is replaced.
+// command: this binary has a resident process, so nothing external has to
+// call `schedule:run` on a timer. That is one artifact instead of two, and
+// nothing to forget when a machine is replaced.
 //
 // It registers no routes. A scheduled event is not reachable over HTTP, and
 // making it reachable would be a way to trigger billing by URL.
@@ -28,28 +28,22 @@ type Module struct {
 }
 
 // NewModule returns the module for a schedule.
-//
-// It has no Illuminate counterpart: Module is Arandu machinery, and Laravel has
-// nothing that owns the schedule loop inside the serving process.
 func NewModule(schedule *Schedule) *Module {
 	return &Module{schedule: schedule, runner: NewRunner(schedule)}
 }
 
 // Name is the module identifier.
 //
-// It has no Illuminate counterpart: it belongs to the Arandu module contract.
+// It belongs to the Arandu module contract.
 func (*Module) Name() string { return "scheduling" }
 
 // Runner returns the runner, so a listener can be installed before Start.
-//
-// It has no Illuminate counterpart: PHP dispatches the four scheduler events
-// through the container's dispatcher, and here the listener is handed over.
 func (m *Module) Runner() *Runner { return m.runner }
 
 // Boot checks that every declared expression parses.
 //
-// It has no Illuminate counterpart: PHP parses the expression only when
-// Event::isDue asks, so a schedule nobody can read is found at the first tick.
+// Waiting for Event.IsDue to parse it would mean a schedule nobody can read
+// is found only at the first tick.
 //
 // The application does not start with an event that would silently never run,
 // and it fails for every command and not only the one that serves -- so
@@ -63,8 +57,7 @@ func (m *Module) Boot(context.Context) error {
 	return nil
 }
 
-// Start is ScheduleWorkCommand::handle as a module lifecycle: it begins the
-// loop, and only the process that serves calls it.
+// Start begins the loop, and only the process that serves calls it.
 //
 // It ticks at the top of each minute rather than every sixty seconds from boot,
 // because an event specified as "0 3 * * *" has to fire at 3:00 and not at 3:00
@@ -97,9 +90,6 @@ func (m *Module) Start(ctx context.Context) error {
 }
 
 // Close stops the loop and waits for the run in flight.
-//
-// It has no Illuminate counterpart: ScheduleWorkCommand::handle is declared
-// `@return never` and the process is killed where it stands.
 //
 // Waiting matters: an event killed halfway is an event whose lock is still held
 // and whose work is half done, and the next window will not know either.

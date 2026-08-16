@@ -106,8 +106,8 @@ func TestErrorsSatisfiesError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// The three defects an audit ran against the PHP body, each with the input that
-// proved it. Every test below failed before the fix and passes after it.
+// Three defects, each with the input that proved it. Every test below failed
+// before the fix and passes after it.
 // ---------------------------------------------------------------------------
 
 // TestWildcardDependentRuleReplacesAsterisksInItsParameters is the input the
@@ -179,10 +179,9 @@ func TestWildcardFieldsAreExpandedAgainstTheData(t *testing.T) {
 // TestSizeComparesExactlyRatherThanInFloat64 is the audit's second input: two
 // whole numbers a float64 cannot tell apart, one of them over the limit.
 //
-// Illuminate's getSize hands a string to BigNumber, which compares at arbitrary
-// precision. This package compared in float64, and 9007199254740993 and
-// 9007199254740992 are the same float64 -- so a monetary or quota limit was
-// passable by one unit of rounding.
+// GetSize compares at arbitrary precision. Comparing in float64 instead makes
+// 9007199254740993 and 9007199254740992 the same number -- so a monetary or
+// quota limit is passable by one unit of rounding.
 func TestSizeComparesExactlyRatherThanInFloat64(t *testing.T) {
 	set := validation.MustCompile(validation.Rules{"amount": "numeric|max:9007199254740992"})
 
@@ -203,13 +202,12 @@ func TestSizeComparesExactlyRatherThanInFloat64(t *testing.T) {
 	}
 }
 
-// TestDateFormatTakesSeveralLayoutsAndReadsANumericValue is the audit's third
-// input. Illuminate's validateDateFormat walks every parameter and passes when
-// any of them matches, and it accepts a numeric value because is_numeric does.
+// TestDateFormatTakesSeveralLayoutsAndReadsANumericValue is the third input. The
+// rule walks every layout it was given and passes when any of them matches, and
+// it reads a numeric value as the text it prints as.
 //
-// Here the rule took at most one layout -- the second was a boot failure -- and
-// asked is_string, so a JSON body that sent 20240301 without quotes was
-// rejected by a rule that Laravel passes.
+// Taking at most one layout made the second one a boot failure, and asking only
+// for text rejected a JSON body that sent 20240301 without quotes.
 func TestDateFormatTakesSeveralLayoutsAndReadsANumericValue(t *testing.T) {
 	set := validation.MustCompile(validation.Rules{"d": "date_format:2006-01-02,2006-01-02 15:04:05"})
 
@@ -229,12 +227,11 @@ func TestDateFormatTakesSeveralLayoutsAndReadsANumericValue(t *testing.T) {
 	}
 }
 
-// TestAnUploadThatDidNotFinishFailsAsUploaded is the same method's other
-// missing branch. Illuminate reports `uploaded` on a file rule or an implicit
-// rule when the upload itself did not complete -- the file was too large for
-// the server, and nothing was written. The English line for it was in lang.go
-// and no code path could reach it, so a truncated upload was reported as
-// whatever the next rule happened to think of the empty file.
+// TestAnUploadThatDidNotFinishFailsAsUploaded is the same method's other missing
+// branch. A file rule or an implicit rule reports `uploaded` when the upload
+// itself did not complete -- the file was too large for the server, and nothing
+// was written. Without that branch a truncated upload is reported as whatever
+// the next rule happens to think of the empty file.
 func TestAnUploadThatDidNotFinishFailsAsUploaded(t *testing.T) {
 	set := validation.MustCompile(validation.Rules{"avatar": "required|image|max:100"})
 

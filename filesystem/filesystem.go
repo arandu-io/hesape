@@ -19,12 +19,11 @@ import (
 	"time"
 )
 
-// Filesystem is Illuminate\Filesystem\Filesystem: the local file API the
-// framework itself runs on.
+// Filesystem is the local file API the framework itself runs on.
 //
 // It is NOT a [Disk], and the difference is the whole reason both exist. A Disk
 // holds customer data, so every one of its methods takes an [auth.Grant] and
-// every path it builds starts with a tenant (RULE 17, RULE 14). A Filesystem
+// every path it builds starts with a tenant. A Filesystem
 // holds the application's own files -- a stub, a compiled view, a session file,
 // a cache entry -- which belong to the process and to nobody else, and it takes
 // absolute or working-directory-relative paths exactly as os.ReadFile does.
@@ -35,12 +34,6 @@ import (
 //
 // The zero value is usable, and so is the pointer [NewFilesystem] returns; this
 // type holds no state.
-//
-// # Two of Illuminate's methods are missing, and only these two
-//
-// getRequire() and requireOnce() evaluate a PHP file and return what it
-// produced. There is no equivalent: Go has no runtime `require`, and the thing
-// they load -- a config file that is really a script -- is a typed struct here.
 type Filesystem struct{}
 
 // NewFilesystem returns a Filesystem. It exists so wiring reads the same as the
@@ -60,11 +53,10 @@ func (f *Filesystem) Missing(path string) bool { return !f.Exists(path) }
 //
 // lock takes a shared lock for the read, which is what makes it safe to read a
 // file another process is replacing with [Filesystem.Put] under an exclusive
-// lock. Illuminate's default is false and there is no default here: Go has none,
-// and a bool at the call site says which of the two this read is.
+// lock. There is no default: Go has none, and a bool at the call site says
+// which of the two this read is.
 //
-// It returns [ErrNotFound] for a file that is not there -- Illuminate throws
-// FileNotFoundException, and this is the (T, error) that stands in for it.
+// It returns [ErrNotFound] for a file that is not there.
 func (f *Filesystem) Get(path string, lock bool) ([]byte, error) {
 	if lock {
 		return f.SharedGet(path)
@@ -81,10 +73,10 @@ func (f *Filesystem) Get(path string, lock bool) ([]byte, error) {
 
 // Json returns the decoded contents of a JSON file.
 //
-// It answers with map[string]any because Illuminate's json() answers with an
-// array and the callers of both are configuration and manifest files, which are
-// objects. A caller that has a struct should read with [Filesystem.Get] and
-// unmarshal into it, which is one call more and type-checked.
+// It answers with map[string]any because the files this is for -- configuration
+// and manifest files -- are objects. A caller that has a struct should read with
+// [Filesystem.Get] and unmarshal into it, which is one call more and
+// type-checked.
 func (f *Filesystem) Json(path string, lock bool) (map[string]any, error) {
 	body, err := f.Get(path, lock)
 	if err != nil {
@@ -120,11 +112,9 @@ func (f *Filesystem) SharedGet(path string) ([]byte, error) {
 // Lines returns the file split on newlines, with the trailing newline of the
 // last line dropped.
 //
-// Illuminate's lines() is a LazyCollection over a file handle, read one line at
-// a time so a large file does not have to fit in memory. This reads the file and
-// splits it, because a Go caller that needs the lazy shape has bufio.Scanner --
-// and a second, lazier Lines beside this one would be a second way to read a
-// file (RULE 9).
+// It reads the whole file and splits it rather than streaming one line at a
+// time: a caller that needs the lazy shape has bufio.Scanner, and a second,
+// lazier Lines beside this one would be a second way to read a file.
 func (f *Filesystem) Lines(path string) ([]string, error) {
 	body, err := f.Get(path, false)
 	if err != nil {
@@ -140,8 +130,8 @@ func (f *Filesystem) Lines(path string) ([]string, error) {
 
 // Hash returns the hash of a file's contents, in lowercase hex.
 //
-// The empty algorithm is "md5", which is Illuminate's default and is what
-// [Filesystem.HasSameHash] compares with. It is a change-detection hash and not
+// The empty algorithm is "md5", which is what [Filesystem.HasSameHash] compares
+// with. It is a change-detection hash and not
 // a security one: two files that hash the same here were not proven to be the
 // same file by an attacker who wanted them to collide. The security answer is
 // [Disk.Checksum], which is SHA-256 and has no algorithm option.
@@ -209,8 +199,7 @@ func (f *Filesystem) Put(path string, contents []byte, lock bool) error {
 //
 // It writes a temporary file beside the target and renames it into place, which
 // is what makes the swap atomic on a POSIX filesystem. A mode of 0 keeps the
-// mode of the file that was already there, or 0644 when there was none --
-// Illuminate reads the same fact off the existing file for the same reason: a
+// mode of the file that was already there, or 0644 when there was none: a
 // rename would otherwise hand the file the temporary's private permissions.
 func (f *Filesystem) Replace(path string, content []byte, mode fs.FileMode) error {
 	if mode == 0 {
@@ -291,9 +280,8 @@ func (f *Filesystem) Append(path string, data []byte, lock bool) error {
 
 // Chmod reads or sets the permissions of a path.
 //
-// A mode of 0 reads and does not write, which is how Illuminate's null default
-// behaves; anything else is set. The returned mode is the one in force after
-// the call.
+// A mode of 0 reads and does not write; anything else is set. The returned mode
+// is the one in force after the call.
 func (f *Filesystem) Chmod(path string, mode fs.FileMode) (fs.FileMode, error) {
 	if mode != 0 {
 		if err := os.Chmod(path, mode); err != nil {
@@ -313,8 +301,7 @@ func (f *Filesystem) Chmod(path string, mode fs.FileMode) (fs.FileMode, error) {
 
 // Delete removes the given files. Removing what is not there is not an error.
 //
-// Illuminate takes one path or an array of them; this is variadic, which is the
-// same two call shapes without the type switch.
+// It is variadic, so one path and a list of them are the same call.
 func (f *Filesystem) Delete(paths ...string) error {
 	var failed []string
 	for _, path := range paths {
@@ -367,10 +354,10 @@ func (f *Filesystem) Copy(path, target string) error {
 
 // Link creates a symbolic link to the target.
 //
-// Illuminate makes a hard link on Windows because symlinks need a privilege
-// there. This makes a symbolic link everywhere: a hard link is a different
-// object with different semantics -- deleting the target leaves the link
-// working, which is the opposite of what a link into a build directory is for.
+// It is a symbolic link on every platform, including the ones where that needs
+// a privilege. A hard link is a different object with different semantics --
+// deleting the target leaves the link working, which is the opposite of what a
+// link into a build directory is for.
 func (f *Filesystem) Link(target, link string) error {
 	if err := os.Symlink(target, link); err != nil {
 		return fmt.Errorf("filesystem: linking %s to %s: %w", link, target, err)
@@ -382,7 +369,7 @@ func (f *Filesystem) Link(target, link string) error {
 // directory holding the link.
 //
 // That is what survives the tree being moved or mounted somewhere else, which is
-// the whole reason Illuminate has it beside Link.
+// the whole reason it exists beside Link.
 func (f *Filesystem) RelativeLink(target, link string) error {
 	relative, err := filepath.Rel(filepath.Dir(link), target)
 	if err != nil {
@@ -405,9 +392,8 @@ func (f *Filesystem) Dirname(path string) string { return filepath.Dir(path) }
 
 // Extension returns the extension of a path, without the dot.
 //
-// Illuminate returns "pdf" and not ".pdf"; filepath.Ext returns ".pdf", and this
-// returns Illuminate's answer so a caller comparing against a configured list
-// gets the comparison it wrote.
+// filepath.Ext returns ".pdf" and this returns "pdf", so a caller comparing
+// against a configured list of extensions gets the comparison it wrote.
 func (f *Filesystem) Extension(path string) string {
 	return strings.TrimPrefix(filepath.Ext(path), ".")
 }
@@ -429,8 +415,7 @@ func (f *Filesystem) GuessExtension(path string) (string, error) {
 	return strings.TrimPrefix(extensions[0], "."), nil
 }
 
-// Type returns "dir" for a directory and "file" for anything else, which are
-// the strings PHP's filetype() answers with.
+// Type returns "dir" for a directory and "file" for anything else.
 func (f *Filesystem) Type(path string) (string, error) {
 	info, err := os.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -605,8 +590,7 @@ func (f *Filesystem) AllDirectories(directory string) ([]string, error) {
 // walk is the one traversal the four listing methods share, so a rule about dot
 // files or about depth cannot hold in one of them and not the others.
 //
-// A negative depth means no limit. Depth 0 is the directory's own entries,
-// which is what Illuminate's Finder->depth(0) selects.
+// A negative depth means no limit. Depth 0 is the directory's own entries.
 func (f *Filesystem) walk(directory string, hidden bool, depth int, wantDirs bool) ([]string, error) {
 	root := filepath.Clean(directory)
 	var out []string
@@ -652,7 +636,7 @@ func (f *Filesystem) walk(directory string, hidden bool, depth int, wantDirs boo
 
 // EnsureDirectoryExists creates a directory when it is not already there.
 //
-// A mode of 0 means 0755, which is Illuminate's default.
+// A mode of 0 means 0755.
 func (f *Filesystem) EnsureDirectoryExists(path string, mode fs.FileMode, recursive bool) error {
 	if f.IsDirectory(path) {
 		return nil
@@ -682,7 +666,7 @@ func (f *Filesystem) MakeDirectory(path string, mode fs.FileMode, recursive, for
 	}
 	// Mkdir subtracts the process umask from the mode, so a directory asked for
 	// as 0755 under a 0027 umask arrives as 0750 and the next process cannot
-	// read it. Illuminate has the same hole and the same fix is cheap here.
+	// read it, so the mode is set again once the directory exists.
 	if err := os.Chmod(path, mode); err != nil {
 		return fmt.Errorf("filesystem: creating %s: %w", path, err)
 	}
@@ -796,10 +780,9 @@ func (f *Filesystem) CleanDirectory(directory string) error {
 
 // JoinPaths joins path segments with a separator, dropping the empty ones.
 //
-// It is Illuminate\Filesystem\join_paths(), the free function in functions.php,
-// and it is a method on nothing there either. The empty segments are dropped so
-// join_paths(base, "", "views") is base/views and not base//views -- which is a
-// different string that names the same file, and therefore two cache keys.
+// The empty segments are dropped, so JoinPaths(base, "", "views") is base/views
+// and not base//views -- which is a different string that names the same file,
+// and therefore two cache keys.
 func JoinPaths(base string, paths ...string) string {
 	out := make([]string, 0, len(paths)+1)
 	if base != "" {

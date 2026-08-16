@@ -8,13 +8,6 @@ import (
 	"strings"
 )
 
-// This file answers Illuminate\View\Compilers\Concerns.
-//
-// PHP composes twenty-one traits into BladeCompiler. Go has no traits, so the
-// trait methods are methods on the compiler, which is where the trait put them
-// anyway: `$this` inside CompilesEchos is the BladeCompiler. The names are
-// unchanged.
-
 // escapedEchoPattern answers the {{{ }}} tags: the legacy escaped echo.
 var escapedEchoPattern = regexp.MustCompile(`(?s)\{\{\{\s*(.+?)\s*\}\}\}`)
 
@@ -24,32 +17,30 @@ var rawEchoPattern = regexp.MustCompile(`(?s)\{!!\s*(.+?)\s*!!\}`)
 // regularEchoPattern answers the {{ }} tags.
 var regularEchoPattern = regexp.MustCompile(`(?s)\{\{\s*(.+?)\s*\}\}`)
 
-// CompileEchos is Concerns\CompilesEchos::compileEchos.
-//
-// The order is PHP's -- raw, then escaped, then regular -- because {{{ }}} and
-// {!! !!} both contain a {{ }} and matching the regular tag first would eat
-// them.
+// CompileEchos expands {!! !!}, {{{ }}} and {{ }} echo tags, in that order:
+// raw first, then escaped, then regular, because {{{ }}} and {!! !!} both
+// contain a {{ }} and matching the regular tag first would eat them.
 func (c *KyseCompiler) CompileEchos(value string) string {
 	value = c.compileRawEchos(value)
 	value = c.compileEscapedEchos(value)
 	return c.compileRegularEchos(value)
 }
 
-// compileRawEchos is Concerns\CompilesEchos::compileRawEchos.
+// compileRawEchos expands {!! !!} tags into Raw(...) calls.
 func (c *KyseCompiler) compileRawEchos(value string) string {
 	return rawEchoPattern.ReplaceAllStringFunc(value, func(match string) string {
 		return "Raw(" + rawEchoPattern.FindStringSubmatch(match)[1] + ")"
 	})
 }
 
-// compileEscapedEchos is Concerns\CompilesEchos::compileEscapedEchos.
+// compileEscapedEchos expands {{{ }}} tags into Text(...) calls.
 func (c *KyseCompiler) compileEscapedEchos(value string) string {
 	return escapedEchoPattern.ReplaceAllStringFunc(value, func(match string) string {
 		return "Text(" + escapedEchoPattern.FindStringSubmatch(match)[1] + ")"
 	})
 }
 
-// compileRegularEchos is Concerns\CompilesEchos::compileRegularEchos.
+// compileRegularEchos expands {{ }} tags using the configured echo format.
 func (c *KyseCompiler) compileRegularEchos(value string) string {
 	return regularEchoPattern.ReplaceAllStringFunc(value, func(match string) string {
 		expression := regularEchoPattern.FindStringSubmatch(match)[1]
@@ -60,18 +51,19 @@ func (c *KyseCompiler) compileRegularEchos(value string) string {
 	})
 }
 
-// Stringable is Concerns\CompilesEchos::stringable.
+// Stringable registers a handler for values of the given type name.
 //
-// PHP reads the handled type off the closure's first parameter when only a
-// closure is given; Go has no closure reflection worth the trouble, so the
-// type name is the argument it always was in the two-argument form. The name
-// is what reflect reports for the value, or "iterable" for the catch-all PHP
-// spells the same way.
+// Go has no closure reflection worth the trouble, so the type name is always
+// an explicit argument rather than inferred from a callback's signature. The
+// name is what reflect reports for the value, or "iterable" for the
+// catch-all case.
 func (c *KyseCompiler) Stringable(class string, handler func(any) any) {
 	c.echoHandlers[class] = handler
 }
 
-// ApplyEchoHandler is Concerns\CompilesEchos::applyEchoHandler.
+// ApplyEchoHandler runs the handler registered for value's type, or the
+// "iterable" handler if value is a slice, array or map, or returns value
+// unchanged.
 func (c *KyseCompiler) ApplyEchoHandler(value any) any {
 	if value == nil {
 		return value
@@ -94,13 +86,10 @@ func isIterable(value any) bool {
 	}
 }
 
-// CompileClassComponentOpening is
-// Concerns\CompilesComponents::compileClassComponentOpening.
-//
-// PHP emits eight lines of PHP that save $component and $attributes, resolve
-// the class and start the component. The Go it emits saves and restores the
-// same two, because a nested component that clobbers the outer one is the bug
-// those lines exist to prevent.
+// CompileClassComponentOpening returns the Go that opens a component block:
+// it saves and restores __component and __attributes, because a nested
+// component that clobbers the outer one is the bug those lines exist to
+// prevent.
 func CompileClassComponentOpening(component, alias, data, hash string) string {
 	if data == "" {
 		data = "nil"
@@ -115,11 +104,11 @@ func CompileClassComponentOpening(component, alias, data, hash string) string {
 	}, "\n")
 }
 
-// CompileEndComponentClass is
-// Concerns\CompilesComponents::compileEndComponentClass.
+// CompileEndComponentClass returns the Go that closes a component block
+// opened by CompileClassComponentOpening.
 //
-// PHP pops the hash off a static stack; the hash is an argument here, because
-// a package-level stack shared by every compiler in the process is state that
+// hash is an argument rather than popped off a shared stack, because a
+// package-level stack shared by every compiler in the process is state that
 // two concurrent builds would corrupt.
 func CompileEndComponentClass(hash string) string {
 	return strings.Join([]string{
@@ -130,15 +119,13 @@ func CompileEndComponentClass(hash string) string {
 	}, "\n")
 }
 
-// CompileEndOnce is Concerns\CompilesConditionals::compileEndOnce.
+// CompileEndOnce returns the Go that closes an @once block.
 func CompileEndOnce() string { return "}" }
 
-// SanitizeComponentAttribute is
-// Concerns\CompilesComponents::sanitizeComponentAttribute.
-//
-// A string is escaped; a value that renders its own HTML -- the attribute bag,
-// anything with ToHTML -- is left alone, because escaping it twice is how the
-// markup ends up on the page as text.
+// SanitizeComponentAttribute escapes value if it is a string, and leaves it
+// alone if it already renders its own HTML -- the attribute bag, anything
+// with ToHTML -- because escaping it twice is how the markup ends up on the
+// page as text.
 func SanitizeComponentAttribute(value any) any {
 	if value == nil {
 		return value

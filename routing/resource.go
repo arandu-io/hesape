@@ -86,7 +86,7 @@ type (
 // keeps the intent readable even where the mux would sort it out anyway.
 //
 // A controller implementing none of the seven registers nothing and returns
-// zero routes, which is a wiring mistake worth seeing in `aru routes`.
+// zero routes, which is a wiring mistake worth seeing in the route table.
 //
 // It is a function and not a method on Router because a method cannot take a
 // type parameter in Go, and C has to come from somewhere. The router is the

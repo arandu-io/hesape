@@ -94,7 +94,7 @@ func weights(dstSize, srcSize int) []contribution {
 // resample scales the canvas to exactly w by h.
 //
 // Two separable passes, horizontal then vertical, because a separable filter
-// over w*h*(kx+ky) samples answers the same as the square kernel over
+// over w*h*(kx+ky) samples produces the same result as the square kernel over
 // w*h*kx*ky and is the reason a resize of a large photograph finishes.
 func resample(src *stdimage.RGBA, w, h int) *stdimage.RGBA {
 	sw, sh := src.Rect.Dx(), src.Rect.Dy()
@@ -171,10 +171,10 @@ func resampleVertical(src *stdimage.RGBA, h int) *stdimage.RGBA {
 
 // crop cuts a w by h rectangle whose top left corner is at (x, y).
 //
-// A rectangle that reaches past the edge is not an error: the part that exists
-// is copied and the rest is left transparent, which is what Intervention does
-// and what a caller cropping a thumbnail out of a picture that turned out to be
-// smaller than expected wants.
+// A rectangle that reaches past the edge is not an error: the part that
+// exists is copied and the rest is left transparent, which is what a caller
+// cropping a thumbnail out of a picture that turned out to be smaller than
+// expected wants.
 func crop(src *stdimage.RGBA, x, y, w, h int) *stdimage.RGBA {
 	if w < 1 {
 		w = 1
@@ -334,8 +334,9 @@ func flatten(src *stdimage.RGBA, bg color.RGBA) *stdimage.RGBA {
 	return dst
 }
 
-// averageColor is the mean of every pixel, unpremultiplied, which is what
-// Illuminate gets by resizing the image to a single pixel and reading it.
+// averageColor is the mean of every pixel, unpremultiplied -- equivalent to
+// resizing the image down to a single pixel and reading it, without the
+// intermediate canvas.
 func averageColor(src *stdimage.RGBA) color.RGBA {
 	w, h := src.Rect.Dx(), src.Rect.Dy()
 	if w == 0 || h == 0 {
@@ -357,8 +358,8 @@ func averageColor(src *stdimage.RGBA) color.RGBA {
 	return color.RGBA{R: clamp8(r/n, al), G: clamp8(g/n, al), B: clamp8(b/n, al), A: al}
 }
 
-// hex renders a colour the way Illuminate's dominantColor() answers: seven
-// characters, "#rrggbb", with the alpha dropped.
+// hex renders a colour as seven characters, "#rrggbb", with the alpha
+// dropped.
 func hex(c color.RGBA) string {
 	r, g, b := unpremultiply(c)
 	return fmt.Sprintf("#%02x%02x%02x", r, g, b)
@@ -374,9 +375,9 @@ func unpremultiply(c color.RGBA) (uint8, uint8, uint8) {
 	return round8(float64(c.R) * f), round8(float64(c.G) * f), round8(float64(c.B) * f)
 }
 
-// parseHexColor reads the colour spellings Illuminate accepts for a background:
-// "#rgb", "#rgba", "#rrggbb", "#rrggbbaa", with or without the hash. The
-// result is premultiplied, because that is what the canvas holds.
+// parseHexColor reads a background colour spelled as "#rgb", "#rgba",
+// "#rrggbb", or "#rrggbbaa", with or without the hash. The result is
+// premultiplied, because that is what the canvas holds.
 func parseHexColor(s string) (color.RGBA, error) {
 	v := strings.TrimPrefix(strings.TrimSpace(s), "#")
 	var r, g, b, a uint64 = 0, 0, 0, 255

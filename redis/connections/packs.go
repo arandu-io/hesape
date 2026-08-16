@@ -1,13 +1,11 @@
 package connections
 
-// PacksPhpRedisValues answers
-// Illuminate\Redis\Connections\PacksPhpRedisValues.
+// PacksPhpRedisValues reports what the driver does to a value on its way to the
+// server, and prepares values for the eval command.
 //
-// The trait exists in Laravel because phpredis can be configured to serialize
-// and compress values on its way to the server -- Redis::OPT_SERIALIZER,
-// Redis::OPT_COMPRESSION -- and a value handed to EVAL bypasses that, so the
-// caller has to apply the same treatment by hand or the script sees bytes the
-// rest of the application cannot read back.
+// A driver that serialized or compressed on the way out would need every value
+// handed to a script treated the same way by hand, or the script would see
+// bytes the rest of the application cannot read back.
 //
 // # Here it is the "none" case, permanently
 //
@@ -18,26 +16,22 @@ package connections
 // That is not a stub. It is the honest reading of the same questions against a
 // driver that made a different choice, and it is why the answers are constants
 // rather than configuration: there is no setting that would change them, and a
-// type that pretended otherwise would be a second way to encode a value
-// (RULE 9). Encoding belongs to the caller -- cache.Repository serializes, and
-// it is the only thing in this collection that does.
+// type that pretended otherwise would be a second way to encode a value.
+// Encoding belongs to the caller -- cache.Repository serializes, and it is the
+// only thing in this collection that does.
 //
-// It is embedded by Connection, so the methods are reachable exactly where the
-// PHP has them.
+// It is embedded by Connection, so the methods are reachable on a connection.
 type PacksPhpRedisValues struct{}
 
 // Pack prepares the given values to be used with the eval command.
-//
-// It answers PacksPhpRedisValues::pack(), and returns the values it was given:
-// nothing serializes and nothing compresses here, so there is nothing to undo.
 func (PacksPhpRedisValues) Pack(values []string) []string { return values }
 
 // WithoutSerializationOrCompression executes callback with serialization and
 // compression turned off.
 //
-// It answers PacksPhpRedisValues::withoutSerializationOrCompression(). Both are
-// always off, so it calls the callback and returns what it returned -- and it
-// exists rather than being dropped because a caller who wraps a read in it is
+// Both are always off, so it calls the callback and returns what it returned --
+// and it exists rather than being dropped because a caller who wraps a read in
+// it is
 // stating something true about the read, and the statement should keep
 // compiling if this adapter ever gains an encoder.
 func (PacksPhpRedisValues) WithoutSerializationOrCompression(callback func() error) error {

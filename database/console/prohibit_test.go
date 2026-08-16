@@ -40,9 +40,9 @@ func TestProhibitDestructiveCommandsLetsThemBackOn(t *testing.T) {
 	}
 }
 
-// TestTheProhibitedListNamesCommandsThatExist keeps the list honest: a name that
-// no command answers to is a guard that protects nothing, and it would look
-// exactly like a guard that works.
+// TestTheProhibitedListNamesCommandsThatExist keeps the list honest: a name
+// with no matching command is a guard that protects nothing, and it would
+// look exactly like a guard that works.
 func TestTheProhibitedListNamesCommandsThatExist(t *testing.T) {
 	registered := map[string]bool{}
 	for _, c := range dbconsole.Commands(dbconsole.Deps{}) {

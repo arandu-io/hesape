@@ -9,12 +9,11 @@ import (
 	"github.com/arandu-io/hesape/pagination"
 )
 
-// Paginate answers Builder::paginate.
+// Paginate runs the query for one page and returns a length-aware
+// paginator.
 //
-// The page number is an argument where the PHP resolves it off the request
-// through Paginator::resolveCurrentPage, which is a static reaching for the
-// container (ADR 0001, ADR 0002). The caller has the request and reads it with
-// pagination.ResolveCurrentPage.
+// The page number is an argument: no request is reachable from here, and the
+// caller reads it with pagination.ResolveCurrentPage.
 //
 // perPage of zero means the model's own.
 func (b *Builder[T]) Paginate(g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.LengthAwarePaginator[*Model[T]], error) {
@@ -40,8 +39,8 @@ func (b *Builder[T]) Paginate(g auth.Grant, perPage, page int, opts pagination.O
 	return pagination.Paginate(items.All(), int(total), perPage, page, opts), nil
 }
 
-// SimplePaginate answers Builder::simplePaginate: one page and the answer to "is
-// there another", without the count.
+// SimplePaginate returns one page and whether there is another, without the
+// count.
 func (b *Builder[T]) SimplePaginate(g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[*Model[T]], error) {
 	if perPage <= 0 {
 		perPage = b.model.GetPerPage()
@@ -60,7 +59,8 @@ func (b *Builder[T]) SimplePaginate(g auth.Grant, perPage, page int, opts pagina
 	return pagination.SimplePaginate(items.All(), perPage, page, opts), nil
 }
 
-// GetCountForPagination answers Builder::getCountForPagination.
+// GetCountForPagination returns the row count of the query, ignoring its
+// order, limit and offset.
 //
 // The orders, the limit and the offset come off before the count, because a
 // count with a limit on it counts the page rather than the result set.
@@ -70,8 +70,8 @@ func (b *Builder[T]) GetCountForPagination(g auth.Grant) (int64, error) {
 	return counted.Count(g)
 }
 
-// CursorPaginate answers Builder::cursorPaginate: the page after (or before) a
-// boundary named by value rather than by offset.
+// CursorPaginate returns the page after (or before) a boundary named by
+// cursor rather than by offset.
 //
 // It is the paginator to reach for past the first few pages: ForPage makes the
 // engine count and discard every row it skips, and a row inserted between two
@@ -127,8 +127,8 @@ type cursorOrder struct {
 	direction string
 }
 
-// ensureOrderForCursorPagination answers
-// Builder::ensureOrderForCursorPagination.
+// ensureOrderForCursorPagination returns the columns to compare the cursor
+// against, reversing their direction first when walking backward.
 func (b *Builder[T]) ensureOrderForCursorPagination(shouldReverse bool) []cursorOrder {
 	b.enforceOrderBy()
 
@@ -149,8 +149,8 @@ func (b *Builder[T]) ensureOrderForCursorPagination(shouldReverse bool) []cursor
 	out := make([]cursorOrder, 0, len(orders))
 	for _, order := range orders {
 		if order.Direction == "" || order.Column == nil {
-			// An orderByRaw has no direction to compare against, which is what
-			// the PHP filters on before it builds the conditions.
+			// An orderByRaw has no direction to compare against, so it is
+			// filtered out before the conditions are built.
 			continue
 		}
 		out = append(out, cursorOrder{column: fmt.Sprint(order.Column), direction: order.Direction})
@@ -165,13 +165,14 @@ func flipDirection(direction string) string {
 	return "asc"
 }
 
-// addCursorConditions answers the closure of the same name inside
-// BuildsQueries::paginateUsingCursor.
+// addCursorConditions adds the where clauses that skip every row up to and
+// including the cursor's position.
 //
-// It reads: past the first ordering column, every earlier one has to be equal,
-// and this one has to be past the boundary -- or, if there is another column
-// after it, equal here and past the boundary there. That nesting is what makes a
-// compound cursor skip exactly the rows already seen.
+// It reads: past the first ordering column, every earlier one has to be
+// equal, and this one has to be past the boundary -- or, if there is
+// another column after it, equal here and past the boundary there. That
+// nesting is what makes a compound cursor skip exactly the rows already
+// seen.
 func addCursorConditions(q *query.Builder, cursor pagination.Cursor, orders []cursorOrder, i int) error {
 	if i > 0 {
 		previous := orders[i-1].column
@@ -205,9 +206,9 @@ func addCursorConditions(q *query.Builder, cursor pagination.Cursor, orders []cu
 	return inner
 }
 
-// cursorColumn answers getOriginalColumnNameForCursorPagination's last step: a
-// column that is an expression stays one, so that ordering by a function still
-// compares against the same function.
+// cursorColumn returns column unchanged when it is a plain name, or wrapped
+// as a raw expression when it looks like one, so that ordering by a
+// function still compares against the same function.
 func cursorColumn(column string) any {
 	if strings.ContainsAny(column, "()") {
 		return query.Raw(column)

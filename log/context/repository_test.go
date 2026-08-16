@@ -13,9 +13,8 @@ import (
 )
 
 // dispatcher is the smallest thing that satisfies logcontext.Dispatcher: it
-// keeps the listeners and hands every dispatched event to all of them, which is
-// what Illuminate's dispatcher does once the class filtering is a type
-// assertion.
+// keeps the listeners and hands every dispatched event to all of them, leaving
+// the selection to the type assertion each listener makes.
 type dispatcher struct {
 	mu        sync.Mutex
 	listeners []func(any)
@@ -65,8 +64,8 @@ func TestIntoAndForCarryTheRepository(t *testing.T) {
 	}
 }
 
-// TestHasSeesAKeyThatGetDoesNot is the split PHP has between array_key_exists
-// and ??: add('key', null) is present for has and absent for get.
+// TestHasSeesAKeyThatGetDoesNot: Add("key", nil) is present for Has and absent
+// for Get, because presence and value are two different questions.
 func TestHasSeesAKeyThatGetDoesNot(t *testing.T) {
 	repository := newRepository().Add("key", nil)
 
@@ -169,8 +168,8 @@ func TestAddIfDoesNotOverwrite(t *testing.T) {
 	}
 }
 
-// TestAddIfCountsANilValueAsPresent follows has(), which is array_key_exists:
-// PHP's addIf asks has(), not get(), so a nil value blocks the write.
+// TestAddIfCountsANilValueAsPresent: AddIf asks the same question Has does, not
+// the one Get does, so a nil value blocks the write.
 func TestAddIfCountsANilValueAsPresent(t *testing.T) {
 	repository := newRepository().Add("key", nil).AddIf("key", "value")
 
@@ -258,7 +257,7 @@ func TestForgetTakesSeveralKeysAndIgnoresTheMissing(t *testing.T) {
 	if got := repository.AllHidden(); len(got) != 0 {
 		t.Fatalf("ForgetHidden left %v", got)
 	}
-	// No key at all is PHP's (array) null, which forgets nothing.
+	// No key at all forgets nothing.
 	repository.Forget()
 	if got := repository.All(); !reflect.DeepEqual(got, map[string]any{"c": 3}) {
 		t.Fatalf("Forget with no key changed the context to %v", got)
@@ -278,7 +277,7 @@ func TestPushCreatesTheStack(t *testing.T) {
 	if got := repository.Get("breadcrumbs"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("the stack is %v, want %v", got, want)
 	}
-	// Nothing to push is not an error: PHP's ...$values accepts none.
+	// Nothing to push is not an error: the variadic accepts none.
 	if _, err := repository.Push("breadcrumbs"); err != nil {
 		t.Fatalf("Push with no value: %v", err)
 	}
@@ -378,8 +377,8 @@ func TestIncrementStartsAtZero(t *testing.T) {
 	}
 }
 
-// TestIncrementCastsWhatItFinds is PHP's (int) cast: a numeric string counts,
-// anything else restarts from zero rather than failing.
+// TestIncrementCastsWhatItFinds: a numeric string counts, and anything else
+// restarts from zero rather than failing.
 func TestIncrementCastsWhatItFinds(t *testing.T) {
 	repository := newRepository().Add("numeric", "7").Add("words", "seven")
 
@@ -472,8 +471,8 @@ func TestScopeRestoresTheContext(t *testing.T) {
 	}
 }
 
-// TestScopeRestoresAfterAFailure is PHP's finally: the restore is not
-// conditional on the callback returning normally.
+// TestScopeRestoresAfterAFailure: the restore is not conditional on the callback
+// returning normally.
 func TestScopeRestoresAfterAFailure(t *testing.T) {
 	repository := newRepository().Add("kept", "before")
 	failure := errors.New("the callback failed")
@@ -562,8 +561,8 @@ func TestDehydrateAndHydrateRoundTrip(t *testing.T) {
 	}
 }
 
-// TestHydrateOfNothingIsNotAFailure is PHP's `$context['data'] ?? []`: the
-// queue calls hydrate with null when the payload carried no context.
+// TestHydrateOfNothingIsNotAFailure: a queue calls Hydrate with nil when the
+// payload carried no context.
 func TestHydrateOfNothingIsNotAFailure(t *testing.T) {
 	repository := newRepository().Add("stale", 1)
 

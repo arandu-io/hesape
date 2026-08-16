@@ -4,30 +4,27 @@ import "net/http"
 
 // RouteParameterBinder reads a route's parameters off a request.
 //
-// It mirrors Illuminate\Routing\RouteParameterBinder. PHP runs the compiled
-// path regex against the path and the compiled host regex against the host,
-// then fills in whatever the route declared a default for. Go's mux has
-// already matched, so the path values are read back through PathValue; the
-// host half and the defaults are this type's work.
+// The mux has already matched the path, so the path values are read back
+// through PathValue; the host half and the defaults are this type's work.
 //
 // # It reads, it does not resolve
 //
 // What comes back here is what arrived in the URL: strings. Turning a string
-// into a record is ImplicitRouteBinding's job, and that is where the Grant and
-// the tenant filter are (RULE 14, RULE 17). Nothing in this file reaches a
-// database, and nothing in it should: an id read off a path is untrusted input
-// until a policy has been consulted about it.
+// into a record is ImplicitRouteBinding's job, and that is where the Grant
+// and the tenant filter are. Nothing in this file reaches a database, and
+// nothing in it should: an id read off a path is untrusted input until a
+// policy has been consulted about it.
 type RouteParameterBinder struct {
 	route *Route
 }
 
-// NewRouteParameterBinder is RouteParameterBinder::__construct.
+// NewRouteParameterBinder builds a binder for route.
 func NewRouteParameterBinder(route *Route) *RouteParameterBinder {
 	return &RouteParameterBinder{route: route}
 }
 
-// Parameters is RouteParameterBinder::parameters. It returns every parameter
-// of the route for this request, host parameters and defaults included.
+// Parameters returns every parameter of the route for this request, host
+// parameters and defaults included.
 func (b *RouteParameterBinder) Parameters(request *http.Request) map[string]any {
 	parameters := b.bindPathParameters(request)
 
@@ -38,7 +35,7 @@ func (b *RouteParameterBinder) Parameters(request *http.Request) map[string]any 
 	return b.replaceDefaults(parameters)
 }
 
-// bindPathParameters is RouteParameterBinder::bindPathParameters.
+// bindPathParameters reads the route's path parameters off the request.
 func (b *RouteParameterBinder) bindPathParameters(request *http.Request) map[string]any {
 	out := map[string]any{}
 	if b.route == nil || request == nil {
@@ -52,10 +49,9 @@ func (b *RouteParameterBinder) bindPathParameters(request *http.Request) map[str
 	return out
 }
 
-// bindHostParameters is RouteParameterBinder::bindHostParameters. A route
-// declared for "{tenant}.example.com" takes its first segment from the host,
-// and a path parameter of the same name wins -- which is the order PHP merges
-// them in.
+// bindHostParameters reads the route's host parameters off the request. A
+// route declared for "{tenant}.example.com" takes its first segment from the
+// host, and a path parameter of the same name wins.
 func (b *RouteParameterBinder) bindHostParameters(request *http.Request, parameters map[string]any) map[string]any {
 	if request == nil {
 		return parameters
@@ -77,9 +73,9 @@ func (b *RouteParameterBinder) bindHostParameters(request *http.Request, paramet
 	return out
 }
 
-// replaceDefaults is RouteParameterBinder::replaceDefaults. A parameter with
-// no value takes the route's default, and a default with no parameter is added
-// -- which is how a redirect route carries its destination in the same place a
+// replaceDefaults fills in the route's defaults. A parameter with no value
+// takes the route's default, and a default with no parameter is added --
+// which is how a redirect route carries its destination in the same place a
 // bound value would live.
 func (b *RouteParameterBinder) replaceDefaults(parameters map[string]any) map[string]any {
 	if b.route == nil {

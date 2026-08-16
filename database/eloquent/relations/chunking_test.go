@@ -79,7 +79,7 @@ func TestBelongsToManyChunkWalksEveryRowOnce(t *testing.T) {
 	}
 }
 
-// TestBelongsToManyChunkNeverCrossesTheTenant is RULE 17 on the paged read.
+// TestBelongsToManyChunkNeverCrossesTheTenant covers the paged read.
 //
 // The parent is the same user in both tenants and the join is the same join, so
 // nothing about the shape of the query says which rows should come back. Only

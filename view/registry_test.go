@@ -14,20 +14,20 @@ import (
 // true once, which is exactly why they survive in comments.
 //
 //   - sqlc never entered: the SQL is written by hand in the generator's
-//     templates (ADR 0024). Two doc comments here promised queries generated
-//     from .sql files, and both are published on pkg.go.dev, where a reader has
-//     no way to check.
-//   - porang was a repository, dissolved into this one (ADR 0021).
+//     templates. Two doc comments here promised queries generated from .sql
+//     files, and both are published on pkg.go.dev, where a reader has no way
+//     to check.
+//   - porang was a repository, dissolved into this one.
 //   - marandu was going to be the inspector UI; the console shipped as core.
-//   - templ was the template engine, replaced by kyse (ADR 0020).
+//   - templ was the template engine, replaced by the current one.
 var retired = []string{"sqlc", "porang", "marandu", "templ"}
 
 // retiredWords is the same list, matched as whole words.
 //
-// A substring match reads "sqlc" inside MySqlConnector.php, which the database
-// package names in the list of Illuminate sources it answers to, and "templ"
-// inside every "template" -- two reports about comments that make no claim
-// about either. The trailing space that used to stand in for a word boundary
+// A substring match reads "sqlc" inside any longer identifier that happens to
+// contain it, and "templ" inside every "template" -- two reports about
+// comments that make no claim about either. The trailing space that used to
+// stand in for a word boundary
 // held only while the name happened to be followed by one, and a name at the
 // end of a sentence is not.
 var retiredWords = func() []*regexp.Regexp {

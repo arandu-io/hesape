@@ -4,8 +4,8 @@ import (
 	"strings"
 )
 
-// IsJSON answers to Request::isJson: whether the Content-Type header indicates
-// JSON. The check is for "/json" or "+json" anywhere in the content type, so
+// IsJSON reports whether the Content-Type header indicates JSON. The check
+// is for "/json" or "+json" anywhere in the content type, so
 // "application/json", "application/vnd.api+json" and "application/problem+json"
 // all match.
 func (r *Request) IsJSON() bool {
@@ -13,15 +13,14 @@ func (r *Request) IsJSON() bool {
 	return strings.Contains(contentType, "/json") || strings.Contains(contentType, "+json")
 }
 
-// ExpectsJSON answers to Request::expectsJson: whether the request probably
-// expects a JSON response. True when the request is AJAX (not PJAX) and
-// accepts any content type, or when it explicitly wants JSON.
+// ExpectsJSON reports whether the request probably expects a JSON response.
+// True when the request is AJAX (not PJAX) and accepts any content type, or
+// when it explicitly wants JSON.
 func (r *Request) ExpectsJSON() bool {
 	return (r.Ajax() && !r.PJAX() && r.AcceptsAnyContentType()) || r.WantsJSON()
 }
 
-// WantsJSON answers to Request::wantsJson: whether the first acceptable content
-// type is JSON.
+// WantsJSON reports whether the first acceptable content type is JSON.
 func (r *Request) WantsJSON() bool {
 	acceptable := r.GetAcceptableContentTypes()
 	if len(acceptable) == 0 {
@@ -31,8 +30,8 @@ func (r *Request) WantsJSON() bool {
 	return strings.Contains(first, "/json") || strings.Contains(first, "+json")
 }
 
-// Accepts answers to Request::accepts: whether the request accepts any of the
-// given content types. An empty Accept header accepts everything.
+// Accepts reports whether the request accepts any of the given content
+// types. An empty Accept header accepts everything.
 func (r *Request) Accepts(contentTypes ...string) bool {
 	accepts := r.GetAcceptableContentTypes()
 	if len(accepts) == 0 {
@@ -57,8 +56,8 @@ func (r *Request) Accepts(contentTypes ...string) bool {
 	return false
 }
 
-// AcceptsAnyContentType answers to Request::acceptsAnyContentType: whether the
-// request accepts any content type (empty Accept or */* or *).
+// AcceptsAnyContentType reports whether the request accepts any content type
+// (empty Accept, "*/*" or "*").
 func (r *Request) AcceptsAnyContentType() bool {
 	acceptable := r.GetAcceptableContentTypes()
 	if len(acceptable) == 0 {
@@ -68,15 +67,14 @@ func (r *Request) AcceptsAnyContentType() bool {
 	return first == "*/*" || first == "*"
 }
 
-// AcceptsJSON answers to Request::acceptsJson.
+// AcceptsJSON reports whether the request accepts "application/json".
 func (r *Request) AcceptsJSON() bool { return r.Accepts("application/json") }
 
-// AcceptsHTML answers to Request::acceptsHtml.
+// AcceptsHTML reports whether the request accepts "text/html".
 func (r *Request) AcceptsHTML() bool { return r.Accepts("text/html") }
 
-// Format answers to Request::format: the response format the request prefers,
-// derived from the Accept header. Returns the default ("html") when nothing
-// matches.
+// Format is the response format the request prefers, derived from the
+// Accept header. Returns the default ("html") when nothing matches.
 func (r *Request) Format(def ...string) string {
 	defaultFormat := "html"
 	if len(def) > 0 {
@@ -94,8 +92,8 @@ func (r *Request) Format(def ...string) string {
 	return defaultFormat
 }
 
-// Prefers answers to Request::prefers: the most suitable content type from the
-// given array, based on content negotiation. Returns empty when none match.
+// Prefers is the most suitable content type among the given ones, based on
+// content negotiation. Returns empty when none match.
 func (r *Request) Prefers(contentTypes ...string) string {
 	accepts := r.GetAcceptableContentTypes()
 	for _, accept := range accepts {
@@ -111,11 +109,9 @@ func (r *Request) Prefers(contentTypes ...string) string {
 		for _, contentType := range contentTypes {
 			typeLower := strings.ToLower(contentType)
 			acceptLower := strings.ToLower(accept)
-			// The arguments are the other way round from Accepts, as they are
-			// in the PHP: here the caller's type is the plain one and the
-			// Accept header is where the vendor suffix may be. They were both
-			// written the same way here, which only stopped mattering when
-			// matchesType itself was fixed.
+			// The arguments are the other way round from Accepts: here the
+			// caller's type is the plain one and the Accept header is where
+			// the vendor suffix may be.
 			if matchesType(typeLower, acceptLower) || acceptLower == strings.SplitN(typeLower, "/", 2)[0]+"/*" {
 				return contentType
 			}
@@ -124,9 +120,8 @@ func (r *Request) Prefers(contentTypes ...string) string {
 	return ""
 }
 
-// GetAcceptableContentTypes answers to Request::getAcceptableContentTypes:
-// the content types the Accept header lists, in priority order, without
-// quality parameters.
+// GetAcceptableContentTypes is the content types the Accept header lists, in
+// priority order, without quality parameters.
 func (r *Request) GetAcceptableContentTypes() []string {
 	accept := r.request.Header.Get("Accept")
 	if accept == r.cachedAccept && r.acceptableContentTypes != nil {
@@ -137,26 +132,23 @@ func (r *Request) GetAcceptableContentTypes() []string {
 	return r.acceptableContentTypes
 }
 
-// MatchesType answers to Request::matchesType: whether two content types
-// match, accounting for the "+suffix" vendor syntax. It is the static method
-// the PHP's accepts and prefers both use.
+// MatchesType reports whether two content types match, accounting for the
+// "+suffix" vendor syntax. Accepts and Prefers both rely on it.
 func MatchesType(actual, typ string) bool { return matchesType(actual, typ) }
 
 // matchesType checks whether two content types match.
 //
-// The direction is not symmetric and the PHP's is the one that matters:
-// actual is the plain type and typ is where the vendor suffix may be, so
-// matchesType("application/json", "application/vnd.api+json") is true and the
-// same pair the other way round is false. The PHP splits actual on the slash
-// and looks for its subtype as a "+suffix" inside typ:
+// The direction is not symmetric: actual is the plain type and typ is where
+// the vendor suffix may be, so matchesType("application/json",
+// "application/vnd.api+json") is true and the same pair the other way round
+// is false.
 //
-//	preg_match('#'.$split[0].'/.+\+'.$split[1].'#', $type)
-//
-// This was written inside out -- the suffix was taken off typ and looked for
-// on the end of actual's subtype -- and since actual's subtype is a bare
-// "json" at that point, strings.HasSuffix("json", "+json") is false for every
-// input there is. Every vendor type negotiated as if it did not match, so an
-// API answering application/vnd.api+json saw Accepts and Prefers refuse it.
+// This was previously implemented backwards -- the suffix was taken off typ
+// and looked for on the end of actual's subtype -- and since actual's
+// subtype is a bare "json" at that point, strings.HasSuffix("json", "+json")
+// is false for every input there is. Every vendor type failed to match, so
+// an API answering application/vnd.api+json saw Accepts and Prefers refuse
+// it.
 func matchesType(actual, typ string) bool {
 	if actual == typ {
 		return true
@@ -166,9 +158,10 @@ func matchesType(actual, typ string) bool {
 		return false
 	}
 
-	// The PHP's pattern is unanchored, so this is a search rather than a
-	// comparison: "application/" then at least one character (the ".+", which
-	// is why "application/+json" does not match) then "+json".
+	// The match is a search rather than a plain prefix comparison:
+	// "application/" then at least one character (which is why
+	// "application/+json" does not match) then "+json", found anywhere in
+	// typ.
 	prefix, suffix := actual[:slash+1], "+"+actual[slash+1:]
 	for i := 0; i+len(prefix) < len(typ); i++ {
 		if strings.HasPrefix(typ[i:], prefix) &&
@@ -181,7 +174,7 @@ func matchesType(actual, typ string) bool {
 
 // parseAcceptHeader splits the Accept header into ordered content types,
 // stripping quality parameters and sorting by quality (q=) value descending.
-// The result is the list Request::getAcceptableContentTypes returns.
+// The result is the list GetAcceptableContentTypes returns.
 func parseAcceptHeader(header string) []string {
 	if header == "" {
 		return nil
@@ -233,8 +226,8 @@ func parseFloatDefault(s string, def float64) float64 {
 	return n
 }
 
-// mimeToFormat maps a content type to a Symfony format name (html, json, xml,
-// txt, css, js, etc.).
+// mimeToFormat maps a content type to a format name (html, json, xml, txt,
+// css, js, etc.).
 func mimeToFormat(contentType string) string {
 	contentType = strings.ToLower(strings.TrimSpace(contentType))
 	if i := strings.Index(contentType, ";"); i >= 0 {

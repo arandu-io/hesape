@@ -20,8 +20,8 @@ func TestUniqueAddressesKeepsTheLastSpelling(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("kept %d addresses, want 2: %+v", len(got), got)
 	}
-	// Illuminate's reverse()->unique()->reverse() also moves the survivor to
-	// where the last spelling was, which is why b comes first here.
+	// The survivor also moves to where its last spelling was, which is why b
+	// comes first here.
 	if got[0].Address != "b@example.test" {
 		t.Errorf("order is %+v, want the survivor where its last spelling was", got)
 	}

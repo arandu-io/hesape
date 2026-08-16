@@ -8,8 +8,8 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// managerFor builds a manager configured the way config/auth.php configures
-// one: a session guard called web, a token guard called api, and one provider.
+// managerFor builds a manager configured the usual way: a session guard called
+// web, a token guard called api, and one provider.
 func managerFor(t *testing.T) (*auth.AuthManager, *fakeProvider, *fakeCookieJar, *fakeRequest, *fakeDispatcher) {
 	t.Helper()
 
@@ -278,13 +278,13 @@ func TestTheProviderRegistryIsWhereTheUserProvidersComeFrom(t *testing.T) {
 		t.Fatalf("CreateUserProvider(users) answered (%v, %v)", built, err)
 	}
 
-	// A provider whose driver nobody registered is the PHP's default match arm.
+	// A provider whose driver nobody registered is an error naming the driver.
 	if _, err := manager.CreateUserProvider("nowhere"); err == nil || !strings.Contains(err.Error(), "carrier-pigeon") {
 		t.Fatalf("CreateUserProvider answered %v, and it should name the driver", err)
 	}
 
-	// A provider that is not configured at all is nil and no error, which is
-	// the PHP's early return: a guard may have none.
+	// A provider that is not configured at all is nil and no error: a guard may
+	// have none.
 	if built, err := manager.CreateUserProvider("not-configured"); built != nil || err != nil {
 		t.Fatalf("CreateUserProvider answered (%v, %v), want (nil, nil)", built, err)
 	}

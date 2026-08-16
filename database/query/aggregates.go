@@ -8,13 +8,14 @@ import (
 	"github.com/arandu-io/hesape/pagination"
 )
 
-// The aggregate and pagination half of Illuminate\Database\Query\Builder.
+// The aggregate and pagination half of the query builder.
 //
 // Every function here goes through Get, so every one of them carries the tenant
 // of the Grant: a count that counted rows the caller may not read is the same
 // leak as a select that returned them, one integer at a time.
 
-// Aggregate answers Builder::aggregate.
+// Aggregate runs an aggregate function over columns and returns the engine's
+// raw result.
 //
 // The result is whatever the engine returned for the aggregate column -- an
 // int64, a float64, a string or a []byte, depending on the driver and the
@@ -43,13 +44,10 @@ func (b *Builder) Aggregate(ctx context.Context, g auth.Grant, function string, 
 	return aggregateValue(rows[0]), nil
 }
 
-// setAggregate answers Builder::setAggregate, which is protected there.
-//
-// The PHP does two things: it records the aggregate, and -- unless the query
-// groups -- it drops the ordering, because ordering a single computed row is
-// work the engine does for nobody and is a syntax error on engines that check.
-// Builder.SetAggregate in builder.go publishes only the first half, so the
-// second is here.
+// setAggregate records the aggregate function and, unless the query groups,
+// drops the ordering: ordering a single computed row is work the engine does
+// for nobody, and a syntax error on engines that check. Builder.SetAggregate
+// in builder.go only records the aggregate; the order-clearing lives here.
 func (b *Builder) setAggregate(function string, columns []any) *Builder {
 	b.SetAggregate(function, columns)
 	if len(b.Groups) == 0 {
@@ -61,10 +59,9 @@ func (b *Builder) setAggregate(function string, columns []any) *Builder {
 
 // aggregateValue reads the column the grammar named "aggregate".
 //
-// The PHP runs array_change_key_case over the row first, because engines
-// disagree about the case they hand a column name back in -- Oracle and some
-// ODBC drivers upper-case it. The lookup here is the same tolerance, without
-// rewriting the row.
+// The lookup is case-insensitive because engines disagree about the case they
+// hand a column name back in -- Oracle and some ODBC drivers upper-case it --
+// and this tolerates that without rewriting the row.
 func aggregateValue(row Record) any {
 	if value, ok := row["aggregate"]; ok {
 		return value
@@ -77,12 +74,13 @@ func aggregateValue(row Record) any {
 	return nil
 }
 
-// NumericAggregate answers Builder::numericAggregate.
+// NumericAggregate runs an aggregate function and casts the result to a
+// number.
 //
-// The PHP returns int or float depending on whether the string the driver gave
-// it has a decimal point. Go has one number type that holds both, so it returns
-// a float64, and nothing is lost: an int64 that survives a float64 round trip is
-// every count a database will produce short of 2^53 rows.
+// It returns a float64 rather than committing to int or float depending on
+// the driver's answer: Go has one number type that holds both, and nothing is
+// lost -- an int64 that survives a float64 round trip is every count a
+// database will produce short of 2^53 rows.
 func (b *Builder) NumericAggregate(ctx context.Context, g auth.Grant, function string, columns ...any) (float64, error) {
 	result, err := b.Aggregate(ctx, g, function, columns...)
 	if err != nil {
@@ -95,7 +93,7 @@ func (b *Builder) NumericAggregate(ctx context.Context, g auth.Grant, function s
 	return number, nil
 }
 
-// Count answers Builder::count.
+// Count returns the number of rows matching the query.
 func (b *Builder) Count(ctx context.Context, g auth.Grant, columns ...any) (int, error) {
 	if len(columns) == 0 {
 		columns = []any{"*"}
@@ -108,18 +106,17 @@ func (b *Builder) Count(ctx context.Context, g auth.Grant, columns ...any) (int,
 	return int(number), nil
 }
 
-// Min answers Builder::min.
+// Min returns the minimum value of column.
 func (b *Builder) Min(ctx context.Context, g auth.Grant, column any) (any, error) {
 	return b.Aggregate(ctx, g, "min", column)
 }
 
-// Max answers Builder::max.
+// Max returns the maximum value of column.
 func (b *Builder) Max(ctx context.Context, g auth.Grant, column any) (any, error) {
 	return b.Aggregate(ctx, g, "max", column)
 }
 
-// Sum answers Builder::sum. A sum over no rows is zero rather than null, which
-// is the PHP's `$result ?: 0`.
+// Sum returns the sum of column. A sum over no rows is zero rather than nil.
 func (b *Builder) Sum(ctx context.Context, g auth.Grant, column any) (any, error) {
 	result, err := b.Aggregate(ctx, g, "sum", column)
 	if err != nil {
@@ -131,17 +128,18 @@ func (b *Builder) Sum(ctx context.Context, g auth.Grant, column any) (any, error
 	return result, nil
 }
 
-// Avg answers Builder::avg.
+// Avg returns the average value of column.
 func (b *Builder) Avg(ctx context.Context, g auth.Grant, column any) (any, error) {
 	return b.Aggregate(ctx, g, "avg", column)
 }
 
-// Average answers Builder::average, the alias of avg.
+// Average is an alias of Avg.
 func (b *Builder) Average(ctx context.Context, g auth.Grant, column any) (any, error) {
 	return b.Avg(ctx, g, column)
 }
 
-// GetCountForPagination answers Builder::getCountForPagination.
+// GetCountForPagination returns the total number of rows the query matches,
+// ignoring any limit or offset.
 func (b *Builder) GetCountForPagination(ctx context.Context, g auth.Grant, columns ...any) (int, error) {
 	rows, err := b.runPaginationCountQuery(ctx, g, wrapColumns(columns))
 	if err != nil {
@@ -154,7 +152,8 @@ func (b *Builder) GetCountForPagination(ctx context.Context, g auth.Grant, colum
 	return int(number), nil
 }
 
-// runPaginationCountQuery answers Builder::runPaginationCountQuery.
+// runPaginationCountQuery counts the rows a query would return, replacing
+// its select list with a count aggregate.
 //
 // A grouped or having query cannot be counted by replacing its select list:
 // count(*) over a group by counts the groups' rows, not the groups. So the whole
@@ -194,10 +193,10 @@ func (b *Builder) runPaginationCountQuery(ctx context.Context, g auth.Grant, col
 
 	clone := b.CloneWithout(without...).CloneWithoutBindings(except...)
 	if len(b.Unions) > 0 {
-		// CloneWithout in builder.go answers to the nine properties the PHP's
-		// cloneWithout is called with elsewhere, and the three union ones are
-		// not among them, so they are cleared here rather than left on a query
-		// whose page they no longer describe.
+		// CloneWithout in builder.go only clears the properties named in its
+		// arguments; the three union ones are not among them, so they are
+		// cleared here rather than left on a query whose page they no longer
+		// describe.
 		clone.UnionOrders = nil
 		clone.UnionLimit = nil
 		clone.UnionOffset = nil
@@ -206,13 +205,14 @@ func (b *Builder) runPaginationCountQuery(ctx context.Context, g auth.Grant, col
 	return clone.Get(ctx, g)
 }
 
-// cloneForPaginationCount answers Builder::cloneForPaginationCount.
+// cloneForPaginationCount clones the query with its ordering, limit and
+// offset removed, for counting the rows behind one page.
 func (b *Builder) cloneForPaginationCount() *Builder {
 	return b.CloneWithout("orders", "limit", "offset").CloneWithoutBindings("order")
 }
 
-// withoutSelectAliases answers Builder::withoutSelectAliases: "total as t"
-// counted as "total", because the alias of a column that is about to be
+// withoutSelectAliases strips a column's alias for counting: "total as t"
+// counts as "total", because the alias of a column that is about to be
 // replaced by count(*) is a syntax error waiting in the select list.
 func withoutSelectAliases(columns []any) []any {
 	out := make([]any, len(columns))
@@ -231,17 +231,15 @@ func withoutSelectAliases(columns []any) []any {
 	return out
 }
 
-// Paginate answers Builder::paginate.
+// Paginate runs the query for one page and returns a length-aware paginator.
 //
-// Two arguments of the PHP are not arguments there: it asks Paginator to resolve
-// the current page out of the request and the current path out of the router,
-// both through the container. There is no container (ADR 0001) and no request
-// reachable from here, so the page number is an argument and the path is a field
-// of pagination.Options, along with the name of the page parameter.
+// No request is reachable from here, so the page number is an argument and the
+// path is a field of pagination.Options, along with the name of the page
+// parameter.
 //
-// total is the PHP's fifth argument: a count the caller already has. Leaving it
-// out runs GetCountForPagination, which is one extra statement -- the one
-// simplePaginate exists to avoid.
+// total is a count the caller already has. Leaving it out runs
+// GetCountForPagination, which is one extra statement -- the one SimplePaginate
+// exists to avoid.
 func (b *Builder) Paginate(ctx context.Context, g auth.Grant, perPage, page int, columns []any, opts pagination.Options, total ...int) (*pagination.LengthAwarePaginator[Record], error) {
 	if page < 1 {
 		page = 1
@@ -269,10 +267,10 @@ func (b *Builder) Paginate(ctx context.Context, g auth.Grant, perPage, page int,
 	return pagination.Paginate(rows, count, perPage, page, opts), nil
 }
 
-// SimplePaginate answers Builder::simplePaginate.
+// SimplePaginate runs the query for one page without counting the total.
 //
 // It reads one row more than the page holds, and that extra row is the whole of
-// how it answers "is there a next page" without a count. pagination.SimplePaginate
+// how it resolves "is there a next page" without a count. pagination.SimplePaginate
 // drops it before anybody sees it.
 func (b *Builder) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, columns []any, opts pagination.Options) (*pagination.Paginator[Record], error) {
 	if page < 1 {
@@ -285,17 +283,18 @@ func (b *Builder) SimplePaginate(ctx context.Context, g auth.Grant, perPage, pag
 	return pagination.SimplePaginate(rows, perPage, page, opts), nil
 }
 
-// CursorPaginate answers Builder::cursorPaginate.
+// CursorPaginate pages through the query using a keyset cursor instead of an
+// offset.
 //
 // The cursor is resolved by the caller -- pagination.ResolveCurrentCursor reads
-// it off a URL -- because the PHP resolves it from the request through the
-// container. A nil cursor is the first page.
+// it off a URL -- because no request is reachable from here. A nil cursor is
+// the first page.
 func (b *Builder) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, columns []any, opts pagination.Options) (*pagination.CursorPaginator[Record], error) {
 	return b.paginateUsingCursor(ctx, g, perPage, cursor, columns, opts)
 }
 
-// paginateUsingCursor answers Concerns\BuildsQueries::paginateUsingCursor,
-// which is protected there.
+// paginateUsingCursor builds the where clause that bounds the page at the
+// cursor and runs the query.
 //
 // This is the where clause that makes keyset paging exact. For an ordering of
 // (a, b, c) and a cursor naming one row, the boundary is
@@ -341,8 +340,9 @@ func (b *Builder) paginateUsingCursor(ctx context.Context, g auth.Grant, perPage
 	return pagination.CursorPaginate(rows, perPage, cursor, key, opts), nil
 }
 
-// addCursorConditions is the closure the PHP declares inside
-// paginateUsingCursor and calls recursively.
+// addCursorConditions recursively builds the nested where/orWhere clauses
+// that bound a page at the cursor, one ordering column at a time, applying
+// the same clauses to any union builders.
 func (b *Builder) addCursorConditions(builder *Builder, cursor pagination.Cursor, orders []Order, previousColumn any, originalColumn string, i int) error {
 	unionBuilders := builder.unionBuilders()
 
@@ -410,8 +410,8 @@ func (b *Builder) addCursorConditions(builder *Builder, cursor pagination.Cursor
 	return nestedErr
 }
 
-// cursorColumn wraps a computed column in an Expression, as the PHP does when
-// the name contains a parenthesis: "lower(email)" is SQL and quoting it as an
+// cursorColumn wraps a computed column in an Expression when the name
+// contains a parenthesis: "lower(email)" is SQL, and quoting it as an
 // identifier produces a column nobody has.
 func cursorColumn(column string) any {
 	if strings.ContainsAny(column, "()") {
@@ -420,7 +420,7 @@ func cursorColumn(column string) any {
 	return column
 }
 
-// unionBuilders answers Builder::getUnionBuilders, which is protected there.
+// unionBuilders returns the Builder behind each union query.
 func (b *Builder) unionBuilders() []*Builder {
 	out := make([]*Builder, 0, len(b.Unions))
 	for _, union := range b.Unions {
@@ -429,8 +429,8 @@ func (b *Builder) unionBuilders() []*Builder {
 	return out
 }
 
-// ensureOrderForCursorPagination answers
-// Builder::ensureOrderForCursorPagination.
+// ensureOrderForCursorPagination validates that the query is ordered and
+// returns the orders to walk, reversing them if the cursor points backwards.
 //
 // A keyset walk with no ordering is a walk with no boundary, so an unordered
 // query is refused here rather than answered with rows in whatever order the
@@ -479,11 +479,9 @@ func reverseDirections(orders []Order) []Order {
 	return out
 }
 
-// getOriginalColumnNameForCursorPagination answers
-// Builder::getOriginalColumnNameForCursorPagination: given the name a column is
-// selected under, it finds the expression that was aliased to it, so the cursor
-// compares against the expression rather than an alias no engine allows in a
-// where clause.
+// getOriginalColumnNameForCursorPagination finds the expression that was
+// aliased to a given column name, so the cursor compares against the
+// expression rather than an alias no engine allows in a where clause.
 func getOriginalColumnNameForCursorPagination(builder *Builder, parameter string) string {
 	for _, column := range builder.GetColumns() {
 		name, ok := column.(string)

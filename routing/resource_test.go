@@ -46,12 +46,12 @@ func (c invoices) Edit(*request) error    { return c.note("edit") }
 func (c invoices) Update(*request) error  { return c.note("update") }
 func (c invoices) Destroy(*request) error { return c.note("destroy") }
 
-// TestResourceRegistersTheSevenOfLaravel is the whole point of the command: a
-// developer arriving from Laravel writes Resource and gets the same seven
-// routes, at the same paths, with the same names.
+// TestResourceRegistersTheSevenOfLaravel is the whole point of the command:
+// Resource produces the same seven routes, at the same paths, with the same
+// names, every time.
 //
-// If any row of this table drifts, the promise in RULE 10 -- "he should
-// recognize the vocabulary immediately" -- stops being true.
+// If any row of this table drifts, the promise that a developer recognizes
+// the vocabulary immediately stops being true.
 func TestResourceRegistersTheSevenOfLaravel(t *testing.T) {
 	r := routing.NewRouter()
 	var seen []string
@@ -94,9 +94,8 @@ func TestResourceRegistersTheSevenOfLaravel(t *testing.T) {
 	}
 }
 
-// listOnly implements two of the seven. Laravel registers all seven regardless
-// and 500s on the missing ones; here a route that exists is a route that
-// answers.
+// listOnly implements two of the seven. Only the routes a controller
+// implements are registered: a route that exists is a route that answers.
 type listOnly struct{}
 
 func (listOnly) Index(*request) error { return nil }
@@ -120,7 +119,7 @@ func TestResourceRegistersOnlyWhatTheControllerImplements(t *testing.T) {
 }
 
 // nothing implements none of the seven. Zero routes is a wiring mistake worth
-// seeing in `aru routes`, and it must not be a panic.
+// seeing in the route table, and it must not be a panic.
 type nothing struct{}
 
 func TestResourceOnAControllerThatImplementsNothingRegistersNothing(t *testing.T) {

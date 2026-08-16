@@ -2,9 +2,6 @@ package components
 
 // Verbosity is how much a command is allowed to say.
 //
-// It answers Symfony's OutputInterface::VERBOSITY_* constants, values included,
-// so the ordering comparison every component makes is the same one PHP makes.
-//
 // It is declared here, in the leaf, rather than in console: a component may not
 // import the package that builds it, and one set of constants in the package
 // that cannot import is better than two sets that agree by hand. console aliases
@@ -27,10 +24,9 @@ const (
 
 // Output is the terminal a component renders into.
 //
-// It answers what Component holds in $output -- an OutputStyle -- reduced to
-// what the fifteen components actually call on it. It is an interface so this
-// package does not import console, which imports this one: a component is the
-// leaf, and the IO is what satisfies it.
+// It is the minimal set of methods a component actually calls, kept as an
+// interface so this package does not import console, which imports this
+// one: a component is the leaf, and the IO is what satisfies it.
 type Output interface {
 	// Write puts text out without a line ending.
 	Write(message string, verbosity ...Verbosity)
@@ -42,8 +38,7 @@ type Output interface {
 	NewLine(count ...int)
 
 	// NewLinesWritten is how many line endings the last write left behind. The
-	// Line component reads it to decide its top margin, which is the whole of
-	// what Illuminate\Console\Contracts\NewLineAware exists for.
+	// Line component reads it to decide its top margin.
 	NewLinesWritten() int
 
 	// GetTerminalWidth is how many columns there are to fill.
@@ -81,9 +76,6 @@ const (
 )
 
 // verbosityOf reads the optional trailing verbosity of a Render call.
-//
-// PHP writes it as a default argument; Go writes it as a variadic, and that is
-// the whole of the difference.
 func verbosityOf(verbosity []Verbosity) Verbosity {
 	if len(verbosity) == 0 {
 		return VerbosityNormal

@@ -10,115 +10,101 @@ import (
 
 // ChannelJoin is the auth.Action every channel authorization is issued for.
 //
-// It has no counterpart in Illuminate, because Illuminate's channel callback is
-// the decision. Here a decision is made by a Policy and produces an auth.Grant,
-// and a Grant is issued for an action -- so listening on a channel is an action
-// with a name, and auth.Grant.Check refuses a Grant issued for anything else.
+// A decision is made by a Policy and produces an auth.Grant, and a Grant is
+// issued for an action -- so listening on a channel is an action with a name,
+// and auth.Grant.Check refuses a Grant issued for anything else.
 //
 // It lives here rather than beside the abstract broadcaster because
 // [BroadcastController.Authenticate] has to check the Grant a driver answered,
-// and this package cannot import the drivers -- they import it. It used to be
-// declared only in broadcasters, and the controller could not name it, which is
-// how `_, response, err := driver.Auth(...)` came to throw the Grant away.
+// and this package cannot import the drivers -- they import it.
 const ChannelJoin auth.Action = "broadcasting.join"
 
 // TenantSeparator is the ':' between the tenant and the channel in a published
 // channel name, and the only character a channel name may not contain.
 //
 // It is named because both halves of [TenantChannel] and [CutTenant] spell it,
-// and a separator spelled twice is a separator that drifts (RULE 9).
+// and a separator spelled twice is a separator that drifts.
 const TenantSeparator = ":"
 
-// The prefixes Illuminate's three Channel subclasses put in front of a name.
+// The prefixes the three kinds of guarded channel carry in front of a name.
 //
-// They are literals in PrivateChannel.php, PresenceChannel.php and
-// EncryptedPrivateChannel.php, and again in UsePusherChannelConventions, which
-// reads them back off an incoming channel name. They are named here so the
-// writing side and the reading side cannot drift apart (RULE 9).
+// They are written by the constructors below and read back off an incoming
+// channel name by UsePusherChannelConventions. They are named here so the
+// writing side and the reading side cannot drift apart.
 const (
-	// PrivateChannelPrefix is the 'private-' of PrivateChannel::__construct.
+	// PrivateChannelPrefix marks a channel that has to be authorized.
 	PrivateChannelPrefix = "private-"
-	// PresenceChannelPrefix is the 'presence-' of PresenceChannel::__construct.
+	// PresenceChannelPrefix marks a channel that has to be authorized and
+	// reports who is listening.
 	PresenceChannelPrefix = "presence-"
-	// EncryptedPrivateChannelPrefix is the 'private-encrypted-' of
-	// EncryptedPrivateChannel::__construct.
+	// EncryptedPrivateChannelPrefix marks a private channel whose payloads are
+	// encrypted end to end.
 	EncryptedPrivateChannelPrefix = "private-encrypted-"
 )
 
 // ErrNoTenant is returned when the Grant carries no tenant, or carries one that
 // cannot be part of a channel name.
 //
-// It has no counterpart in Illuminate. It is RULE 14: a channel published
-// without a tenant in its name is a channel every customer of the system can
-// subscribe to.
+// A channel published without a tenant in its name is a channel every customer
+// of the system can subscribe to.
 var ErrNoTenant = errors.New("broadcasting: the Grant carries no tenant, and a channel without one belongs to every customer")
 
 // ErrTenantInChannelName is returned when a channel name carries
 // [TenantSeparator], which means somebody is naming a tenant.
 //
-// It has no counterpart in Illuminate either, and it is the other half of
-// RULE 14. A tenant is added once, by [TenantChannel], out of the Grant. A name
-// that already contains ':' either came from a client choosing whose events it
+// A tenant is added once, by [TenantChannel], out of the Grant. A name that
+// already contains ':' either came from a client choosing whose events it
 // hears, or from a publisher prefixing a second time; both are refused here
 // rather than concatenated.
 //
-// Found by audit: with the tenant absent from the name the authentication
-// endpoint examined, an application had to register the pattern
-// "{tenant}:private-orders.{orderId}" for its channels to match at all -- and
-// then Broadcaster.ExtractAuthParameters handed the handler a tenant taken out
-// of the request, never compared to auth.Tenant on the Grant.
+// Without the refusal, an application has to register the pattern
+// "{tenant}:private-orders.{orderId}" for its channels to match at all, and
+// Broadcaster.ExtractAuthParameters then hands the handler a tenant taken out
+// of the request rather than off the Grant.
 var ErrTenantInChannelName = errors.New("broadcasting: a channel name may not contain '" + TenantSeparator + "', which is where the tenant goes")
 
-// HasBroadcastChannel is Illuminate\Contracts\Broadcasting\HasBroadcastChannel.
+// HasBroadcastChannel is a model that knows the channel it is broadcast on, and
+// the pattern that channel is authorized under.
 //
-// It is the contract Channel::__construct accepts instead of a string: a model
-// that knows the channel it is broadcast on, and the route pattern that channel
-// is authorized under.
+// [NewChannelFor] and the other For constructors accept one in place of a name.
 type HasBroadcastChannel interface {
-	// BroadcastChannel is broadcastChannel(): the channel name for this
-	// instance, e.g. "orders.17".
+	// BroadcastChannel is the channel name for this instance, e.g. "orders.17".
 	BroadcastChannel() string
-	// BroadcastChannelRoute is broadcastChannelRoute(): the pattern the channel
-	// is registered under, e.g. "orders.{orderId}".
+	// BroadcastChannelRoute is the pattern the channel is registered under,
+	// e.g. "orders.{orderId}".
 	BroadcastChannelRoute() string
 }
 
-// Channel is Illuminate\Broadcasting\Channel: the name an event goes out on.
+// Channel is the name an event goes out on.
 //
-// Illuminate's PrivateChannel, PresenceChannel and EncryptedPrivateChannel are
-// subclasses whose entire body is a prefix handed to parent::__construct. A
-// subclass that adds no behaviour is a constructor in Go, so they are
-// [NewPrivateChannel], [NewPresenceChannel] and [NewEncryptedPrivateChannel],
-// and all four produce this one type. Nothing in the broadcasters this
-// ecosystem carries asks which subclass a channel came from -- they ask about
-// the prefix, which is what UsePusherChannelConventions does in the PHP too.
+// A private, presence or encrypted channel is this same type with a prefix in
+// front of the name, put there by [NewPrivateChannel], [NewPresenceChannel] or
+// [NewEncryptedPrivateChannel]. Nothing asks which constructor built a channel;
+// the drivers ask about the prefix.
 type Channel struct {
-	// Name is the channel's $name, the public property of Channel.php.
+	// Name is the channel name, prefix included.
 	Name string `json:"name"`
 }
 
-// NewChannel is Channel::__construct given a string.
+// NewChannel names a channel.
 func NewChannel(name string) Channel { return Channel{Name: name} }
 
-// NewChannelFor is Channel::__construct given a HasBroadcastChannel, which is
-// the `$name instanceof HasBroadcastChannel ? $name->broadcastChannel() : $name`
-// half of the PHP constructor.
+// NewChannelFor names the channel a model is broadcast on.
 //
-// It is a second constructor rather than a union parameter because Go has no
-// union types; this is the third mechanical change of ADR 0044 read the only
-// way it can be read here.
+// It is a second constructor rather than one parameter accepting either shape,
+// because Go has no union types.
 func NewChannelFor(h HasBroadcastChannel) Channel { return Channel{Name: h.BroadcastChannel()} }
 
-// NewPrivateChannel is Illuminate\Broadcasting\PrivateChannel::__construct.
+// NewPrivateChannel names a channel that has to be authorized.
 func NewPrivateChannel(name string) Channel { return Channel{Name: PrivateChannelPrefix + name} }
 
-// NewPrivateChannelFor is PrivateChannel::__construct given a
-// HasBroadcastChannel.
+// NewPrivateChannelFor names the private channel a model is broadcast on.
 func NewPrivateChannelFor(h HasBroadcastChannel) Channel {
 	return NewPrivateChannel(h.BroadcastChannel())
 }
 
-// NewPresenceChannel is Illuminate\Broadcasting\PresenceChannel::__construct.
+// NewPresenceChannel names a channel that has to be authorized and reports who
+// is listening.
 func NewPresenceChannel(name string) Channel { return Channel{Name: PresenceChannelPrefix + name} }
 
 // NewEncryptedPrivateChannel names a private channel whose payloads are
@@ -127,62 +113,37 @@ func NewPresenceChannel(name string) Channel { return Channel{Name: PresenceChan
 // The prefix is not decoration: it is how the client knows to decrypt, and how
 // the broadcaster knows to encrypt. A channel that carries the prefix and is not
 // encrypted, or the reverse, fails at the far end with nothing useful said.
-//
-// Answers Illuminate\Broadcasting\EncryptedPrivateChannel::__construct.
 func NewEncryptedPrivateChannel(name string) Channel {
 	return Channel{Name: EncryptedPrivateChannelPrefix + name}
 }
 
-// String is Channel::__toString.
-//
-// It is what Broadcaster::formatChannels calls when it casts a channel to a
-// string on the way into a driver, and it makes a Channel a fmt.Stringer, which
-// is the Go shape of PHP's Stringable.
+// String is the channel name, and it makes a Channel a fmt.Stringer.
 func (c Channel) String() string { return c.Name }
 
-// ToArray is Illuminate\Contracts\Support\Arrayable::toArray.
+// ToArray is the channel as it travels inside a broadcast payload: one key,
+// "name".
 //
-// Channel.php in this clone implements Stringable only, so this method answers
-// no PHP method of the same name. It is here because a channel travels inside a
-// broadcast payload, and json_encode of a PHP object emits its public
-// properties -- one key, "name". Stating that is better than leaving the
-// encoding to whichever driver serializes first.
+// It is stated here rather than left to whichever driver serializes first.
 func (c Channel) ToArray() map[string]any { return map[string]any{"name": c.Name} }
 
-// JSONSerialize is JsonSerializable::jsonSerialize, and it answers ToArray, so
-// the two encodings of a channel cannot disagree (RULE 9).
+// JSONSerialize answers ToArray, so the two encodings of a channel cannot
+// disagree.
 func (c Channel) JSONSerialize() any { return c.ToArray() }
 
 // TenantChannel is the name a channel is actually published under:
 // "<tenant>:<name>".
 //
-// It has no counterpart in Illuminate, and it is not optional here. RULE 14:
-// the tenant comes from the Grant, never from the path, the body, the query or
+// The tenant comes from the Grant, never from the path, the body, the query or
 // a header, and every key an application writes -- a cache key, a storage path,
 // a scheduler lock -- is prefixed by it. A channel is the same kind of key with
 // a subscriber on the other end: without the prefix, "private-orders.17" is one
 // channel shared by every customer who has an order 17, and the first one to
 // subscribe reads the others' events.
 //
-// Both sides of the wire go through this function. The publisher builds the
+// Both sides of the wire go through this function: the publisher builds the
 // name it publishes on, and the authentication endpoint answers about the same
 // name, so a client that asks for "private-orders.17" is authorized for
 // "acme:private-orders.17" and never gets to choose the "acme".
-//
-// That sentence was false when it was written, and this is what was wrong. The
-// only callers of this function were RedisBroadcaster.Broadcast and
-// LogBroadcaster.Broadcast -- the publishing side, both of them. The
-// authenticating side was RedisBroadcaster.Auth, and the call that proved it is
-// the one that used to stand at redisbroadcaster.go:85:
-//
-//	name := r.NormalizeChannelName(strings.Replace(channel, r.prefix, "", 1))
-//
-// It authorized the string the client sent, with no tenant anywhere in it. The
-// publisher wrote "acme:private-orders.17" and the endpoint answered about
-// "private-orders.17", so the two names never had to agree about whose channel
-// it was. Now RedisBroadcaster.Auth reaches this function too, through
-// [RedisBroadcaster.ValidAuthenticationResponse], and the name it answers is
-// the name Broadcast writes (RULE 9).
 //
 // The zero Grant reaches no channel, which is the answer auth.Grant.Check gives
 // for the same reason: a caller who authorized nothing has no tenant to build a
@@ -236,8 +197,7 @@ func CutTenant(name string) (tenant, channel string, found bool) {
 // It is a constructor and not a bare string so that the refusal happens once,
 // at the edge, rather than in each driver's Auth. A client that names a tenant
 // is refused rather than trusted or silently re-prefixed: a client that can put
-// "acme:" in front of a channel is a client choosing whose events it hears,
-// which is RULE 14 inverted.
+// "acme:" in front of a channel is a client choosing whose events it hears.
 //
 // The tenant is added afterwards, by [TenantChannel], out of the Grant the
 // Policy issued.

@@ -2,14 +2,12 @@ package concerns
 
 import "sync"
 
-// PreventsCircularRecursion answers
-// Illuminate\Database\Eloquent\Concerns\PreventsCircularRecursion.
+// PreventsCircularRecursion stops a walk of the object graph from recursing
+// forever.
 //
 // Two models that hold each other -- a post whose author holds their posts --
-// turn any walk of the object graph into an infinite one. The PHP keeps a
-// WeakMap of the calls already on the stack and returns a default instead of
-// recursing; this keeps a set of call names per instance, which is the same
-// guard without the weak reference Go does not need: the set is cleared when
+// turn any walk into an infinite one. This keeps a set of call names per
+// instance and returns a default instead of recursing; the set is cleared when
 // the outermost call returns.
 type PreventsCircularRecursion struct {
 	stack map[string]struct{}

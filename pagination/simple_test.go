@@ -8,7 +8,7 @@ import (
 	"github.com/arandu-io/hesape/pagination"
 )
 
-// The probe row is the whole mechanism: it answers "is there a next page"
+// The probe row is the whole mechanism: it settles "is there a next page"
 // without counting, and the reader must never see it.
 func TestSimplePaginateDropsTheProbeRow(t *testing.T) {
 	p := pagination.SimplePaginate(rows(11), 10, 1, pagination.Options{Path: "/users"})

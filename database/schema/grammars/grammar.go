@@ -10,34 +10,32 @@ import (
 
 // dialect is what BaseGrammar needs back from the driver grammar embedding it.
 //
-// PHP gets this for free: getColumn calls $this->getType(), and late static
-// binding sends it to the subclass. Go embedding has no such dispatch, so the
-// driver grammar hands itself to the base at construction and the base calls
-// back through this interface. It is unexported because it is the mechanism,
-// not the contract -- schema.Grammar is the contract.
+// Go embedding does not dispatch back to the outer type, so each driver
+// grammar hands itself to the base at construction and the base calls back
+// through this interface. It is unexported because it is the mechanism, not
+// the contract -- schema.Grammar is the contract.
 type dialect interface {
-	// wrapValue answers Grammar::wrapValue: it quotes one identifier segment.
+	// wrapValue quotes one identifier segment in the driver's own style.
 	wrapValue(value string) string
 
-	// typeOf answers Grammar::getType: it dispatches to the driver's type
-	// method for the column's type.
+	// typeOf dispatches to the driver's type method for the column's type,
+	// returning the SQL type or an error when the type has no mapping.
 	typeOf(column *schema.ColumnDefinition) (string, error)
 
-	// modify answers Grammar::modify{$modifier}. It returns a list because
-	// Postgres' generatedAs modifier produces more than one fragment when a
-	// column is being changed; every other modifier returns none or one. The
-	// error is what Postgres throws for a generated column it cannot modify.
+	// modify applies one named column modifier for the driver. It returns a
+	// list because Postgres' generatedAs modifier can produce more than one
+	// fragment when a column is being changed; every other modifier returns
+	// none or one. The error reports a generated column that cannot be
+	// modified in place.
 	modify(modifier string, blueprint *schema.Blueprint, column *schema.ColumnDefinition) ([]string, error)
 }
 
-// BaseGrammar answers the shared body of
-// Illuminate\Database\Schema\Grammars\Grammar and the part of
-// Illuminate\Database\Grammar the schema component uses.
+// BaseGrammar is everything a schema grammar can spell without knowing its
+// dialect.
 //
-// A driver grammar embeds it and overrides what its dialect spells differently,
-// which is what extending the abstract class does in PHP. Every method the
-// abstract class implements by throwing is implemented here by returning an
-// error, so a driver that does not override it reports the same refusal.
+// A driver grammar embeds it and overrides what its dialect spells differently.
+// Everything the base cannot spell on its own returns an error, so a driver that
+// does not override it reports the same refusal.
 type BaseGrammar struct {
 	conn schema.Connection
 	self dialect
@@ -51,18 +49,21 @@ type BaseGrammar struct {
 // GetConnection returns the connection the grammar was built with.
 func (g *BaseGrammar) GetConnection() schema.Connection { return g.conn }
 
-// GetFluentCommands answers Grammar::getFluentCommands.
+// GetFluentCommands returns the commands a driver runs outside the create
+// or alter statement, one per column.
 func (g *BaseGrammar) GetFluentCommands() []string { return g.fluentCommands }
 
-// GetAlterCommands answers the SQLite grammar's list of commands that force a
-// table rebuild. Every other driver has none.
+// GetAlterCommands returns the command names whose presence forces a table
+// rebuild. The base implementation returns nil; only the SQLite grammar
+// names any.
 func (g *BaseGrammar) GetAlterCommands() []string { return nil }
 
-// SupportsSchemaTransactions answers Grammar::supportsSchemaTransactions.
+// SupportsSchemaTransactions reports whether this dialect can run DDL
+// statements inside a transaction.
 func (g *BaseGrammar) SupportsSchemaTransactions() bool { return g.transactions }
 
-// Wrap answers Grammar::wrap. A column definition is unwrapped to its name, as
-// the PHP unwraps a Fluent, and an expression passes through untouched.
+// Wrap quotes value as a SQL identifier. A column definition is unwrapped to
+// its name before quoting, and an expression passes through untouched.
 func (g *BaseGrammar) Wrap(value any) string {
 	if column, ok := value.(*schema.ColumnDefinition); ok {
 		value = column.GetName()
@@ -78,7 +79,8 @@ func (g *BaseGrammar) Wrap(value any) string {
 	return g.wrapSegments(name)
 }
 
-// WrapTable answers Grammar::wrapTable. A blueprint is unwrapped to its table.
+// WrapTable quotes table as a SQL table identifier. A blueprint is unwrapped
+// to its table name before quoting.
 //
 // The optional prefix replaces the connection's table prefix, which is how the
 // SQLite rebuild names the temporary table it copies rows into. Note that only
@@ -108,7 +110,8 @@ func (g *BaseGrammar) WrapTable(table any, prefix ...string) string {
 	return g.self.wrapValue(tablePrefix + name)
 }
 
-// WrapArray answers Grammar::wrapArray.
+// WrapArray quotes every value in values as a SQL identifier, preserving
+// order.
 func (g *BaseGrammar) WrapArray(values []any) []string {
 	out := make([]string, len(values))
 	for i, value := range values {
@@ -117,12 +120,14 @@ func (g *BaseGrammar) WrapArray(values []any) []string {
 	return out
 }
 
-// Columnize answers Grammar::columnize.
+// Columnize wraps each column as a SQL identifier and joins them with ", ".
 func (g *BaseGrammar) Columnize(columns []any) string {
 	return strings.Join(g.WrapArray(columns), ", ")
 }
 
-// QuoteString answers Grammar::quoteString.
+// QuoteString quotes value as one or more SQL string literals. A []string or
+// []any is quoted element by element and joined with ", "; any other value
+// is quoted as a single literal.
 func (g *BaseGrammar) QuoteString(value any) string {
 	switch v := value.(type) {
 	case []string:
@@ -142,7 +147,8 @@ func (g *BaseGrammar) QuoteString(value any) string {
 	}
 }
 
-// PrefixArray answers Grammar::prefixArray.
+// PrefixArray prepends prefix and a space to every value, returning the
+// results in the same order.
 func (g *BaseGrammar) PrefixArray(prefix string, values []string) []string {
 	out := make([]string, len(values))
 	for i, value := range values {
@@ -151,8 +157,9 @@ func (g *BaseGrammar) PrefixArray(prefix string, values []string) []string {
 	return out
 }
 
-// GetDefaultValue answers Grammar::getDefaultValue: a value formatted so it can
-// stand in a "default" clause.
+// GetDefaultValue formats value so it can stand in a "default" clause: an
+// expression passes through untouched, a bool becomes the string '1' or
+// '0', and anything else is quoted as a string literal.
 func (g *BaseGrammar) GetDefaultValue(value any) string {
 	if query.IsExpression(value) {
 		return stringOf(value)
@@ -166,8 +173,9 @@ func (g *BaseGrammar) GetDefaultValue(value any) string {
 	return quote(stringOf(value))
 }
 
-// getColumns answers Grammar::getColumns: the blueprint's added columns, each
-// compiled to its definition.
+// getColumns compiles the blueprint's added columns into their column
+// definition SQL, in order, stopping at the first column that fails to
+// compile.
 func (g *BaseGrammar) getColumns(blueprint *schema.Blueprint) ([]string, error) {
 	added := blueprint.GetAddedColumns()
 	columns := make([]string, 0, len(added))
@@ -181,7 +189,8 @@ func (g *BaseGrammar) getColumns(blueprint *schema.Blueprint) ([]string, error) 
 	return columns, nil
 }
 
-// getColumn answers Grammar::getColumn.
+// getColumn compiles one column to its definition SQL: the quoted column
+// name, the dialect's SQL type, and every modifier the grammar declares.
 func (g *BaseGrammar) getColumn(blueprint *schema.Blueprint, column *schema.ColumnDefinition) (string, error) {
 	typ, err := g.self.typeOf(column)
 	if err != nil {
@@ -190,7 +199,8 @@ func (g *BaseGrammar) getColumn(blueprint *schema.Blueprint, column *schema.Colu
 	return g.addModifiers(g.Wrap(column)+" "+typ, blueprint, column)
 }
 
-// addModifiers answers Grammar::addModifiers.
+// addModifiers appends every modifier fragment the driver produces for
+// column, in the grammar's declared modifier order, to sql.
 func (g *BaseGrammar) addModifiers(sql string, blueprint *schema.Blueprint, column *schema.ColumnDefinition) (string, error) {
 	for _, modifier := range g.modifiers {
 		fragments, err := g.self.modify(modifier, blueprint, column)
@@ -204,7 +214,8 @@ func (g *BaseGrammar) addModifiers(sql string, blueprint *schema.Blueprint, colu
 	return sql, nil
 }
 
-// getCommandByName answers Grammar::getCommandByName.
+// getCommandByName returns the first command in blueprint named name, or
+// nil if there is none.
 func (g *BaseGrammar) getCommandByName(blueprint *schema.Blueprint, name string) *schema.Command {
 	for _, command := range blueprint.GetCommands() {
 		if command.Name == name {
@@ -214,7 +225,8 @@ func (g *BaseGrammar) getCommandByName(blueprint *schema.Blueprint, name string)
 	return nil
 }
 
-// getCommandsByName answers Grammar::getCommandsByName.
+// getCommandsByName returns every command in blueprint named name, in the
+// order they were added.
 func (g *BaseGrammar) getCommandsByName(blueprint *schema.Blueprint, name string) []*schema.Command {
 	var commands []*schema.Command
 	for _, command := range blueprint.GetCommands() {
@@ -225,13 +237,13 @@ func (g *BaseGrammar) getCommandsByName(blueprint *schema.Blueprint, name string
 	return commands
 }
 
-// hasCommand answers Grammar::hasCommand.
+// hasCommand reports whether blueprint has a command named name.
 func (g *BaseGrammar) hasCommand(blueprint *schema.Blueprint, name string) bool {
 	return g.getCommandByName(blueprint, name) != nil
 }
 
-// isSerial reports whether the column's type is one the driver can make
-// auto-incrementing, which is Grammar::$serials.
+// isSerial reports whether column's type is one the driver can make
+// auto-incrementing, per the grammar's declared serials list.
 func (g *BaseGrammar) isSerial(column *schema.ColumnDefinition) bool {
 	for _, serial := range g.serials {
 		if serial == column.GetType() {
@@ -241,88 +253,108 @@ func (g *BaseGrammar) isSerial(column *schema.ColumnDefinition) bool {
 	return false
 }
 
-// CompileCreateDatabase answers Grammar::compileCreateDatabase.
+// CompileCreateDatabase builds the SQL to create a database named name.
 func (g *BaseGrammar) CompileCreateDatabase(name string) (string, error) {
 	return "create database " + g.self.wrapValue(name), nil
 }
 
-// CompileDropDatabaseIfExists answers Grammar::compileDropDatabaseIfExists.
+// CompileDropDatabaseIfExists builds the SQL to drop a database named name
+// if it exists.
 func (g *BaseGrammar) CompileDropDatabaseIfExists(name string) (string, error) {
 	return "drop database if exists " + g.self.wrapValue(name), nil
 }
 
-// CompileSchemas answers Grammar::compileSchemas.
+// CompileSchemas builds the query that lists the server's schemas. The base
+// grammar has no catalogue to query, so it refuses.
 func (g *BaseGrammar) CompileSchemas() (string, error) {
 	return "", unsupported("retrieving schemas")
 }
 
-// CompileTableExists answers Grammar::compileTableExists. The base answers with
-// nothing, which is the PHP's null.
+// CompileTableExists builds the query that reports whether table exists in
+// schemaName. An empty result means the driver has no cheap existence
+// check, and Builder falls back to listing the tables instead.
 func (g *BaseGrammar) CompileTableExists(schemaName, table string) string { return "" }
 
-// CompileTables answers Grammar::compileTables.
+// CompileTables builds the query that lists the tables in schemas. The base
+// grammar has no catalogue to query, so it refuses.
 func (g *BaseGrammar) CompileTables(schemas []string, withSize ...bool) (string, error) {
 	return "", unsupported("retrieving tables")
 }
 
-// CompileViews answers Grammar::compileViews.
+// CompileViews builds the query that lists the views in schemas. The base
+// grammar has no catalogue to query, so it refuses.
 func (g *BaseGrammar) CompileViews(schemas []string) (string, error) {
 	return "", unsupported("retrieving views")
 }
 
-// CompileTypes answers Grammar::compileTypes.
+// CompileTypes builds the query that lists the user-defined types in
+// schemas. The base grammar has no catalogue to query, so it refuses.
 func (g *BaseGrammar) CompileTypes(schemas []string) (string, error) {
 	return "", unsupported("retrieving user-defined types")
 }
 
-// CompileColumns answers Grammar::compileColumns.
+// CompileColumns builds the query that describes the columns of table in
+// schemaName. The base grammar has no catalogue to query, so it refuses.
 func (g *BaseGrammar) CompileColumns(schemaName, table string) (string, error) {
 	return "", unsupported("retrieving columns")
 }
 
-// CompileIndexes answers Grammar::compileIndexes.
+// CompileIndexes builds the query that describes the indexes of table in
+// schemaName. The base grammar has no catalogue to query, so it refuses.
 func (g *BaseGrammar) CompileIndexes(schemaName, table string) (string, error) {
 	return "", unsupported("retrieving indexes")
 }
 
-// CompileForeignKeys answers Grammar::compileForeignKeys.
+// CompileForeignKeys builds the query that describes the foreign keys of
+// table in schemaName. The base grammar has no catalogue to query, so it
+// refuses.
 func (g *BaseGrammar) CompileForeignKeys(schemaName, table string) (string, error) {
 	return "", unsupported("retrieving foreign keys")
 }
 
-// CompileRenameColumn answers Grammar::compileRenameColumn.
+// CompileRenameColumn builds the SQL that renames command.From to
+// command.To on blueprint's table.
 func (g *BaseGrammar) CompileRenameColumn(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return one(fmt.Sprintf("alter table %s rename column %s to %s",
 		g.WrapTable(blueprint), g.Wrap(command.From), g.Wrap(command.To))), nil
 }
 
-// CompileChange answers Grammar::compileChange.
+// CompileChange builds the SQL that alters an existing column's type or
+// modifiers. The base grammar refuses; every driver that supports the
+// operation overrides it.
 func (g *BaseGrammar) CompileChange(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return nil, unsupported("modifying columns")
 }
 
-// CompileAlter answers the SQLite table rebuild. No other driver emits an alter
-// command, so the base compiles nothing rather than refusing.
+// CompileAlter builds the statements a table rebuild needs. The base
+// implementation compiles nothing: no driver but SQLite emits an alter
+// command, so there is nothing to refuse either.
 func (g *BaseGrammar) CompileAlter(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return nil, nil
 }
 
-// CompileFullText answers Grammar::compileFulltext.
+// CompileFullText builds the SQL that creates a full-text index. The base
+// grammar refuses; a driver that supports full-text indexing overrides it.
 func (g *BaseGrammar) CompileFullText(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return nil, unsupported("fulltext index creation")
 }
 
-// CompileDropFullText answers Grammar::compileDropFullText.
+// CompileDropFullText builds the SQL that drops a full-text index. The base
+// grammar refuses; a driver that supports full-text indexing overrides it.
 func (g *BaseGrammar) CompileDropFullText(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return nil, unsupported("fulltext index removal")
 }
 
-// CompileVectorIndex answers Grammar::compileVectorIndex.
+// CompileVectorIndex builds the SQL that creates a vector similarity index.
+// The base grammar refuses; a driver that supports vector indexing
+// overrides it.
 func (g *BaseGrammar) CompileVectorIndex(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return nil, unsupported("vector indexes")
 }
 
-// CompileForeign answers Grammar::compileForeign.
+// CompileForeign builds the SQL that adds a foreign key constraint named
+// command.Index, referencing command.References on command.On, with
+// on-delete and on-update clauses when the command sets them.
 func (g *BaseGrammar) CompileForeign(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	sql := fmt.Sprintf("alter table %s add constraint %s ",
 		g.WrapTable(blueprint), g.Wrap(command.Index))
@@ -342,57 +374,68 @@ func (g *BaseGrammar) CompileForeign(blueprint *schema.Blueprint, command *schem
 	return one(sql), nil
 }
 
-// CompileDropForeign answers Grammar::compileDropForeign.
+// CompileDropForeign builds the SQL that drops a foreign key constraint
+// named command.Index. The base grammar refuses because the drop syntax is
+// dialect-specific; every driver overrides it.
 func (g *BaseGrammar) CompileDropForeign(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return nil, unsupported("dropping foreign keys")
 }
 
-// CompileComment answers the fluent column comment command. Only Postgres
-// declares it, so the base compiles nothing.
+// CompileComment builds the SQL for a standalone column comment command.
+// Only Postgres declares one; the base compiles nothing.
 func (g *BaseGrammar) CompileComment(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return nil, nil
 }
 
-// CompileAutoIncrementStartingValues answers
-// Grammar::compileAutoIncrementStartingValues. Only MySQL and Postgres declare
-// it as a fluent command, so the base compiles nothing.
+// CompileAutoIncrementStartingValues builds the SQL that sets an
+// auto-increment column's starting value. Only MySQL and Postgres declare
+// it as a fluent command, so the base grammar compiles nothing.
 func (g *BaseGrammar) CompileAutoIncrementStartingValues(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return nil, nil
 }
 
-// CompileDropAllTables answers Grammar::compileDropAllTables.
+// CompileDropAllTables builds the SQL that drops every table in tables in
+// one statement. The base grammar refuses; every driver overrides it.
 func (g *BaseGrammar) CompileDropAllTables(tables []string) (string, error) {
 	return "", unsupported("dropping all tables")
 }
 
-// CompileDropAllViews answers Grammar::compileDropAllViews.
+// CompileDropAllViews builds the SQL that drops every view in views in one
+// statement. The base grammar refuses; every driver overrides it.
 func (g *BaseGrammar) CompileDropAllViews(views []string) (string, error) {
 	return "", unsupported("dropping all views")
 }
 
-// CompileDropAllTypes answers Grammar::compileDropAllTypes.
+// CompileDropAllTypes builds the SQL that drops every type in types in one
+// statement. The base grammar refuses; only a driver with user-defined
+// types overrides it.
 func (g *BaseGrammar) CompileDropAllTypes(types []string) (string, error) {
 	return "", unsupported("dropping all types")
 }
 
-// CompileSpatialIndex answers Grammar::compileSpatialIndex.
+// CompileSpatialIndex builds the SQL that creates a spatial index. The base
+// grammar refuses; a driver that supports spatial indexing overrides it.
 func (g *BaseGrammar) CompileSpatialIndex(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return nil, unsupported("spatial indexes")
 }
 
-// CompileDropSpatialIndex answers Grammar::compileDropSpatialIndex.
+// CompileDropSpatialIndex builds the SQL that drops a spatial index. The
+// base grammar refuses; a driver that supports spatial indexing overrides
+// it.
 func (g *BaseGrammar) CompileDropSpatialIndex(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return nil, unsupported("spatial indexes")
 }
 
-// CompileTableComment answers Grammar::compileTableComment.
+// CompileTableComment builds the SQL that sets a table's comment. The base
+// grammar refuses; a driver that supports table comments overrides it.
 func (g *BaseGrammar) CompileTableComment(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return nil, unsupported("table comments")
 }
 
-// wrapValue answers Grammar::wrapValue with the SQL standard double quote. A
-// quote inside the identifier is doubled rather than stripped, because
-// stripping it would silently rename the column.
+// wrapValue quotes value with the SQL standard double quote, or returns it
+// unchanged if it is the wildcard "*". A quote inside the identifier is
+// doubled rather than stripped, because stripping it would silently rename
+// the column.
 func (g *BaseGrammar) wrapValue(value string) string {
 	if value == "*" {
 		return value
@@ -409,13 +452,14 @@ func (g *BaseGrammar) wrapSegments(name string) string {
 	return strings.Join(out, ".")
 }
 
-// typeRaw answers Grammar::typeRaw.
+// typeRaw returns column's raw SQL type definition unchanged.
 func typeRaw(column *schema.ColumnDefinition) string { return column.GetDefinition() }
 
 // one wraps a single statement in the list every compiler returns.
 func one(sql string) []string { return []string{sql} }
 
-// unsupported is the error a driver answers where PHP throws RuntimeException.
+// unsupported builds the error a driver returns for a DDL operation it does
+// not implement, wrapping schema.ErrUnsupported with what.
 func unsupported(what string) error {
 	return fmt.Errorf("%w: %s", schema.ErrUnsupported, what)
 }
@@ -424,9 +468,10 @@ func quote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }
 
-// addSlashes answers PHP's addslashes, which MySQL's comment modifier uses in
-// place of doubling the quote. It escapes the backslash first, so that an
-// escape it added is not escaped again.
+// addSlashes escapes a value for a MySQL column comment: backslash, single
+// quote, double quote and NUL are each escaped, in place of doubling the
+// quote as other identifiers do. The backslash is escaped first, so that an
+// escape it adds is not escaped again.
 func addSlashes(value string) string {
 	value = strings.ReplaceAll(value, `\`, `\\`)
 	value = strings.ReplaceAll(value, "'", `\'`)
@@ -457,8 +502,7 @@ func aliasIndex(name string) int {
 }
 
 // atLeast reports whether the connection's server version is at or past want,
-// comparing the way PHP's version_compare does for the dotted forms these
-// servers report.
+// comparing the dotted, numeric segments of each from left to right.
 func atLeast(version, want string) bool {
 	return compareVersions(version, want) >= 0
 }
@@ -494,8 +538,7 @@ func numericPrefix(version string) string {
 	return version
 }
 
-// intOr reads an optional int attribute, answering fallback where PHP would see
-// null.
+// intOr dereferences value, or returns fallback if value is nil.
 func intOr(value *int, fallback int) int {
 	if value == nil {
 		return fallback
@@ -503,7 +546,8 @@ func intOr(value *int, fallback int) int {
 	return *value
 }
 
-// isNullable reads $column->nullable as PHP's truth test does: unset is false.
+// isNullable reports column's nullable attribute, treating an unset
+// attribute as false.
 func isNullable(column *schema.ColumnDefinition) bool {
 	nullable := column.GetNullable()
 	return nullable != nil && *nullable
@@ -516,7 +560,8 @@ func isGenerated(column *schema.ColumnDefinition) bool {
 		column.GetStoredAs() != nil || column.GetStoredAsJSON() != ""
 }
 
-// startingValue answers $column->get('startingValue', $column->get('from')).
+// startingValue returns column's starting value: GetStartingValue if set,
+// otherwise GetFrom, otherwise zero.
 func startingValue(column *schema.ColumnDefinition) int {
 	if value := column.GetStartingValue(); value != nil {
 		return *value
@@ -527,7 +572,9 @@ func startingValue(column *schema.ColumnDefinition) int {
 	return 0
 }
 
-// wrapJSONFieldAndPath answers CompilesJsonPaths::wrapJsonFieldAndPath.
+// wrapJSONFieldAndPath splits column on the first "->" into a field and a
+// JSON path. It wraps the field with wrap and renders the path, if any, as
+// a ", " followed by the quoted JSON path expression.
 func wrapJSONFieldAndPath(column string, wrap func(string) string) (field, path string) {
 	parts := strings.SplitN(column, "->", 2)
 	field = wrap(parts[0])
@@ -537,7 +584,11 @@ func wrapJSONFieldAndPath(column string, wrap func(string) string) (field, path 
 	return field, path
 }
 
-// wrapJSONPath answers CompilesJsonPaths::wrapJsonPath.
+// wrapJSONPath renders value as a quoted JSON path expression: an escaped
+// or literal single quote becomes a doubled quote, and each "->"-separated
+// segment is wrapped by wrapJSONPathSegment and joined with ".". The result
+// is quoted as '$path' when path starts with an array index, or '$.path'
+// otherwise.
 func wrapJSONPath(value string) string {
 	value = strings.ReplaceAll(value, `\'`, "''")
 	value = strings.ReplaceAll(value, "'", "''")
@@ -554,7 +605,8 @@ func wrapJSONPath(value string) string {
 	return "'$." + jsonPath + "'"
 }
 
-// wrapJSONPathSegment answers CompilesJsonPaths::wrapJsonPathSegment.
+// wrapJSONPathSegment double-quotes a JSON path segment's key, leaving a
+// trailing array-index bracket like "[0]" outside the quotes.
 func wrapJSONPathSegment(segment string) string {
 	if i := strings.Index(segment, "["); i >= 0 && strings.HasSuffix(segment, "]") {
 		key, brackets := segment[:i], segment[i:]

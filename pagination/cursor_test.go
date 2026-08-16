@@ -10,10 +10,8 @@ import (
 
 // parametersOf reads the ordering values back out of a cursor.
 //
-// Cursor::toArray() merges the direction in under _pointsToNextItems, so the
-// flag is dropped here to leave the columns the caller passed in. The fields
-// themselves are unexported, as they are read through parameter() and
-// pointsToNextItems() in Illuminate.
+// The encoded form merges the direction in under _pointsToNextItems, so the flag
+// is dropped here to leave the columns the caller passed in.
 func parametersOf(t *testing.T, c pagination.Cursor) map[string]string {
 	t.Helper()
 	out := make(map[string]string)
@@ -32,9 +30,8 @@ func parametersOf(t *testing.T, c pagination.Cursor) map[string]string {
 
 // cursorPtr builds a cursor a paginator can be handed.
 //
-// NewCursor answers Cursor::__construct and returns a value, because a cursor
-// is one; the constructors take a pointer so that "no cursor" is expressible,
-// which is what PHP's null argument means.
+// NewCursor returns a value, because a cursor is one; the constructors take a
+// pointer so that "no cursor" is expressible.
 func cursorPtr(parameters map[string]string, pointsToNextItems bool) *pagination.Cursor {
 	c := pagination.NewCursor(parameters, pointsToNextItems)
 	return &c
@@ -87,7 +84,7 @@ func TestCursorRoundTripBackwards(t *testing.T) {
 // A parameter the caller does not carry is an error rather than an empty
 // string, because an empty string is a legitimate value for a nullable column:
 // telling the two apart is the difference between reading the next page and
-// reading the first one again. Illuminate throws UnexpectedValueException here.
+// reading the first one again.
 func TestCursorParameterThatIsNotThere(t *testing.T) {
 	c := pagination.NewCursor(map[string]string{"id": "7"}, true)
 	if _, err := c.Parameter("created_at"); err == nil {
@@ -200,7 +197,7 @@ func TestResolveCurrentCursor(t *testing.T) {
 }
 
 // A mangled cursor is a truncated link in an e-mail client, not an attack worth
-// a 400, so it reads as "start from the beginning". Illuminate returns null.
+// a 400, so it reads as "start from the beginning".
 func TestResolveCurrentCursorAbsentOrBroken(t *testing.T) {
 	for _, raw := range []string{"/users", "/users?cursor=", "/users?cursor=%21%21%21"} {
 		if got := pagination.ResolveCurrentCursor(mustParse(t, raw), ""); got != nil {

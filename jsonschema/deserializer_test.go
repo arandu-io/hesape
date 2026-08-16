@@ -159,8 +159,8 @@ func TestDeserializeInfersTypeFromShape(t *testing.T) {
 		`{"enum":["a","b"]}`:                     "string",
 		`{"enum":[true,false]}`:                  "boolean",
 		`{"enum":[1,2]}`:                         "integer",
-		// Whole and fractional together are numeric, which is the one widening
-		// the PHP allows.
+		// Whole and fractional together are numeric, which is the one
+		// widening allowed.
 		`{"enum":[1,2.5]}`: "number",
 		`{"enum":[1.5]}`:   "number",
 	}
@@ -218,7 +218,7 @@ func TestDeserializeUnionRefusesTypeSpecificKeywords(t *testing.T) {
 	if err == nil {
 		t.Fatal("a union carrying minLength deserialized")
 	}
-	// The keywords are named in the order the PHP lists them, not in map order.
+	// The keywords are named in list order, not in map order.
 	if !strings.Contains(err.Error(), "[minLength, minimum]") {
 		t.Errorf("got %q, want both keywords in list order", err)
 	}
@@ -362,7 +362,7 @@ func TestDeserializeRefusesUnreachableRefs(t *testing.T) {
 }
 
 func TestDeserializeIndexesListsAndUnescapesPointerSegments(t *testing.T) {
-	// A pointer may walk into a list, because a PHP array is both shapes.
+	// A pointer may walk into a list, indexing it by position.
 	schema := mustDeserialize(t, `{"$defs":{"all":[{"type":"boolean"},{"type":"integer"}]},"$ref":"#/$defs/all/1"}`)
 	if got := render(t, schema); got != `{"type":"integer"}` {
 		t.Errorf("list pointer got %s", got)
@@ -451,8 +451,8 @@ func TestDeserializeRefusesTupleAndBooleanItems(t *testing.T) {
 }
 
 func TestDeserializeSkipsEmptyItems(t *testing.T) {
-	// json_decode gives PHP the same empty array for [] and {}, and the guard
-	// compares against it before deciding the value is a tuple.
+	// Both [] and {} decode to an empty container, and "items" is compared
+	// against it before the value is read as a tuple.
 	for _, document := range []string{
 		`{"type":"array","items":[]}`,
 		`{"type":"array","items":{}}`,
@@ -559,8 +559,9 @@ func TestDeserializeRefusesAPatternItCannotCompile(t *testing.T) {
 }
 
 func TestDeserializeCastsLabelsAndBounds(t *testing.T) {
-	// PHP casts these rather than requiring a string or an int, and a schema
-	// written by hand quotes numbers and numbers strings often enough.
+	// These are coerced rather than required to be a string or an int: a
+	// schema written by hand quotes numbers, and numbers strings, often
+	// enough.
 	schema := mustDeserialize(t, `{"type":"string","title":2,"description":true,"minLength":"4","maxLength":9.7}`)
 	if got := render(t, schema); got != `{"type":"string","title":"2","description":"1","minLength":4,"maxLength":9}` {
 		t.Errorf("got %s", got)

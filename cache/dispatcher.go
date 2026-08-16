@@ -8,9 +8,8 @@ import (
 
 // Dispatcher is the one method the cache needs of an event dispatcher.
 //
-// It answers Illuminate\Contracts\Events\Dispatcher as far as this package uses
-// it, which is dispatch() and nothing else. It is declared here rather than
-// imported because a cache that had to import the event bus to fire a CacheHit
+// It is one method, and it is declared here rather than imported because a
+// cache that had to import the event bus to fire a CacheHit
 // would drag the bus into every binary that caches anything -- and because
 // hesape/events is the transactional outbox, which is a different thing with a
 // different guarantee.
@@ -28,16 +27,13 @@ type Dispatcher interface {
 }
 
 // GetEventDispatcher returns the dispatcher this repository fires into, or nil.
-//
-// It answers Repository::getEventDispatcher().
 func (r *Repository) GetEventDispatcher() Dispatcher { return r.events }
 
 // SetEventDispatcher returns a repository that fires its events into d.
 //
-// It answers Repository::setEventDispatcher(). Laravel mutates and returns
-// void; this derives and returns the new repository, for the reason SetStore
-// and SetDefaultCacheTime derive: a repository handed to two modules must not
-// change underneath one of them.
+// It derives and returns a new repository rather than mutating this one, for
+// the reason SetStore and SetDefaultCacheTime derive: a repository handed to
+// two modules must not change underneath one of them.
 func (r *Repository) SetEventDispatcher(d Dispatcher) *Repository {
 	out := *r
 	out.events = d
@@ -45,9 +41,6 @@ func (r *Repository) SetEventDispatcher(d Dispatcher) *Repository {
 }
 
 // event fires one event, if anybody is listening.
-//
-// It answers Repository::event(), including the null check that makes every
-// call site free of one.
 func (r *Repository) event(e any) {
 	if r.events == nil {
 		return
@@ -58,8 +51,8 @@ func (r *Repository) event(e any) {
 // tagNames is the tag set carried into every event, and nil on an untagged
 // repository.
 //
-// Laravel passes $this->tags->getNames() from TaggedCache and an empty array
-// from Repository; here one repository does both, so the nil is the difference.
+// One repository serves both the tagged and the untagged case, so the nil is
+// what tells them apart.
 func (r *Repository) tagNames() []string {
 	if r.tags == nil {
 		return nil
@@ -69,9 +62,9 @@ func (r *Repository) tagNames() []string {
 
 // seconds is a ttl as the events carry it.
 //
-// The events hold an int because that is what Laravel puts in them and a
-// listener that formats one should not have to convert; everything else in this
-// package holds a time.Duration, because that is what a caller writes.
+// The events hold an int, because a listener that formats one should not have
+// to convert; everything else in this package holds a time.Duration, because
+// that is what a caller writes.
 func seconds(ttl time.Duration) int { return int(ttl / time.Second) }
 
 // eventRetrieving fires RetrievingKey.
@@ -106,8 +99,7 @@ func (r *Repository) eventWriting(key string, value any, ttl time.Duration) {
 	r.event(events.NewWritingKey(r.GetName(), key, value, seconds(ttl), r.tagNames()))
 }
 
-// eventWritten fires KeyWritten on success and KeyWriteFailed on failure, which
-// is the pair Laravel fires from put().
+// eventWritten fires KeyWritten on success and KeyWriteFailed on failure.
 func (r *Repository) eventWritten(key string, value any, ttl time.Duration, err error) {
 	if r.events == nil {
 		return

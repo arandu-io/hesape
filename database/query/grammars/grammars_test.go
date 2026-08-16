@@ -578,9 +578,9 @@ func TestQuoteInsideAnIdentifierIsDoubled(t *testing.T) {
 	})
 }
 
-// TestUnsupportedClauseIsFalseRatherThanDropped is REGRA 17 written as a test.
-// A filter the grammar cannot spell must not disappear: SQLite has no fulltext
-// search, and the query has to come back empty rather than unfiltered.
+// TestUnsupportedClauseIsFalseRatherThanDropped: a filter the grammar cannot
+// spell must not disappear. SQLite has no fulltext search, and the query has to
+// come back empty rather than unfiltered.
 func TestUnsupportedClauseIsFalseRatherThanDropped(t *testing.T) {
 	g := grammars.NewSQLiteGrammar()
 

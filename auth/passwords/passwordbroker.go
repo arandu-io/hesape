@@ -9,43 +9,38 @@ import (
 	"github.com/arandu-io/hesape/support"
 )
 
-// The statuses a broker answers with. They answer the five constants of
-// Illuminate\Contracts\Auth\PasswordBroker, values unchanged, because they are
-// translation keys: the application looks each one up to put a sentence on the
-// screen, and changing the string here would silently un-translate every one of
-// them.
-//
-// They are declared with the broker rather than in a contracts package, which is
-// ADR 0045.
+// The statuses a broker answers with. Their values are translation keys: the
+// application looks each one up to put a sentence on the screen, so changing a
+// string here would silently un-translate every message behind it.
 const (
-	// ResetLinkSent answers PasswordBroker::RESET_LINK_SENT.
+	// ResetLinkSent means the link went out.
 	ResetLinkSent = "passwords.sent"
 
-	// PasswordReset answers PasswordBroker::PASSWORD_RESET.
+	// PasswordReset means the new password was stored and the token destroyed.
 	PasswordReset = "passwords.reset"
 
-	// InvalidUser answers PasswordBroker::INVALID_USER: no account matched the
-	// credentials. It is a status and not an error, and the sign-in form is
-	// expected to render it identically to ResetLinkSent -- an anonymous caller
-	// must not learn from this form which addresses have accounts.
+	// InvalidUser means no account matched the credentials. It is a status and
+	// not an error, and the form is expected to render it identically to
+	// ResetLinkSent -- an anonymous caller must not learn from this form which
+	// addresses have accounts.
 	InvalidUser = "passwords.user"
 
-	// InvalidToken answers PasswordBroker::INVALID_TOKEN: no live token for this
-	// account matches the one offered. Expired and wrong are the same answer, on
-	// purpose.
+	// InvalidToken means no live token for this account matches the one offered.
+	// Expired and wrong are the same answer, on purpose.
 	InvalidToken = "passwords.token"
 
-	// ResetThrottled answers PasswordBroker::RESET_THROTTLED: a token was minted
-	// for this account too recently to mint another.
+	// ResetThrottled means a token was minted for this account too recently to
+	// mint another.
 	ResetThrottled = "passwords.throttled"
 )
 
-// DefaultTimeboxDuration answers the PHP's default $timeboxDuration: 200
-// milliseconds, in microseconds, which is what support.Timebox counts.
+// DefaultTimeboxDuration is how long a broker method is held open for when no
+// duration is given: 200 milliseconds, in the microseconds support.Timebox
+// counts.
 const DefaultTimeboxDuration = 200000
 
-// ErrCannotResetPassword answers the UnexpectedValueException that
-// PasswordBroker::getUser throws.
+// ErrCannotResetPassword is what [PasswordBroker.GetUser] answers for a user
+// type that cannot take part in a reset.
 //
 // It fires when the user provider is configured to return a user type that
 // cannot be sent a reset link. That is a wiring mistake and not a failed reset,
@@ -54,8 +49,8 @@ const DefaultTimeboxDuration = 200000
 // it.
 var ErrCannotResetPassword = errors.New("passwords: the user must implement auth.CanResetPassword")
 
-// PasswordBroker answers Illuminate\Auth\Passwords\PasswordBroker: the two
-// halves of a password reset, and the only thing a controller talks to.
+// PasswordBroker is the two halves of a password reset, and the only thing a
+// controller talks to.
 //
 // # Why every method runs inside a timebox
 //
@@ -66,9 +61,9 @@ var ErrCannotResetPassword = errors.New("passwords: the user must implement auth
 // address, no rate limit hit, no log line that looks wrong.
 //
 // So the work happens inside support.Timebox, which does not return before
-// DefaultTimeboxDuration has passed. Reset calls returnEarly once it has
-// committed the new password, as the PHP does: by then the answer is already
-// public knowledge to whoever holds the token.
+// DefaultTimeboxDuration has passed. Reset asks to return early once it has
+// committed the new password: by then the answer is already public knowledge to
+// whoever holds the token.
 //
 // # What a status is, and what an error is
 //
@@ -78,27 +73,26 @@ var ErrCannotResetPassword = errors.New("passwords: the user must implement auth
 // not answer, or a broker that was wired wrong: nobody types their way into one,
 // and none of them should reach the screen.
 type PasswordBroker struct {
-	// tokens answers $tokens.
+	// tokens is where a minted token is hashed into and looked up again.
 	tokens TokenRepository
 
-	// users answers $users.
+	// users is where the account behind an address is found.
 	users auth.UserProvider
 
-	// timebox answers $timebox.
+	// timebox is the one every call copies its flag from.
 	timebox *support.Timebox
 
-	// timeboxDuration answers $timeboxDuration, in microseconds.
+	// timeboxDuration is how long each call is held open for, in microseconds.
 	timeboxDuration int
 }
 
-// NewPasswordBroker answers PasswordBroker::__construct.
+// NewPasswordBroker returns a broker over tokens and users.
 //
-// A nil timebox is the PHP's `$timebox ?: new Timebox`, and a timeboxDuration of
-// zero or less is its default argument of 200000 -- neither of which Go has
-// syntax for.
+// A nil timebox becomes support.NewTimebox, and a timeboxDuration of zero or
+// less becomes [DefaultTimeboxDuration].
 //
-// The PHP's third parameter, the event dispatcher, is not here. See the package
-// doc: the event it dispatches belongs to a package this one does not own.
+// There is no event dispatcher argument: nothing here announces that a link was
+// sent.
 func NewPasswordBroker(tokens TokenRepository, users auth.UserProvider, timebox *support.Timebox, timeboxDuration int) *PasswordBroker {
 	if timebox == nil {
 		timebox = support.NewTimebox()
@@ -109,16 +103,15 @@ func NewPasswordBroker(tokens TokenRepository, users auth.UserProvider, timebox 
 	return &PasswordBroker{tokens: tokens, users: users, timebox: timebox, timeboxDuration: timeboxDuration}
 }
 
-// SendResetLink answers PasswordBroker::sendResetLink.
+// SendResetLink finds the account, asks the throttle, mints the token and
+// delivers it. Each step can only refuse.
 //
-// The order is the PHP's, and each step can only refuse: find the account, ask
-// the throttle, mint the token, deliver it. The callback is the PHP's optional
-// $callback -- it receives the user and the plain token and takes delivery over,
-// which is what an application that sends its own mail passes. A callback that
-// answers with an empty status means ResetLinkSent, which is the PHP's `??`.
+// The callback is optional: it receives the user and the plain token and takes
+// delivery over, which is what an application that sends its own mail passes. A
+// callback that answers with an empty status means [ResetLinkSent].
 //
-// Without a callback the notification is the user's own
-// sendPasswordResetNotification, which is where the token becomes a link.
+// Without a callback, delivery is the user's own
+// SendPasswordResetNotification, which is where the token becomes a link.
 func (b *PasswordBroker) SendResetLink(
 	ctx context.Context,
 	credentials map[string]any,
@@ -169,11 +162,11 @@ func (b *PasswordBroker) SendResetLink(
 	})
 }
 
-// Reset answers PasswordBroker::reset.
+// Reset redeems a token and hands the new password to the callback.
 //
-// The order of operations is the whole method and it is the PHP's exactly:
-// validate the credentials and the token, then call the callback with the new
-// password, then delete the token, then return early from the timebox.
+// The order of operations is the whole method: validate the credentials and the
+// token, then call the callback with the new password, then delete the token,
+// then return early from the timebox.
 //
 // Deleting after the callback is what makes a failed store leave the token
 // alive: if the callback cannot write the new password, the person still holds a
@@ -215,11 +208,10 @@ func (b *PasswordBroker) Reset(
 	})
 }
 
-// validateReset answers the protected PasswordBroker::validateReset.
+// validateReset finds the account the credentials name and checks the token.
 //
-// The PHP returns either a user or a status string, which one return value can
-// hold there and cannot here. The status is empty when the user is good, which
-// is the shape every caller of it checks anyway.
+// It answers with either a user or the status saying why there is none: the
+// status is empty when the user is good, which is the shape the caller checks.
 func (b *PasswordBroker) validateReset(ctx context.Context, credentials map[string]any) (auth.CanResetPassword, string, error) {
 	user, err := b.GetUser(ctx, credentials)
 	if err != nil {
@@ -241,15 +233,14 @@ func (b *PasswordBroker) validateReset(ctx context.Context, credentials map[stri
 	return user, "", nil
 }
 
-// GetUser answers PasswordBroker::getUser.
+// GetUser is the account these credentials name, as a resettable one.
 //
 // The token is taken out of the credentials before they are handed to the user
 // provider -- it is not a column and would become a where clause that matches
 // nobody. The provider drops the password keys itself, which is why they are
 // still in here.
 //
-// A user type that cannot be sent a reset link is ErrCannotResetPassword, which
-// is the PHP's UnexpectedValueException.
+// A user type that cannot be sent a reset link is [ErrCannotResetPassword].
 func (b *PasswordBroker) GetUser(ctx context.Context, credentials map[string]any) (auth.CanResetPassword, error) {
 	except := make(map[string]any, len(credentials))
 	for key, value := range credentials {
@@ -274,29 +265,30 @@ func (b *PasswordBroker) GetUser(ctx context.Context, credentials map[string]any
 	return resettable, nil
 }
 
-// CreateToken answers PasswordBroker::createToken.
+// CreateToken mints a token for this account and stores a hash of it.
 func (b *PasswordBroker) CreateToken(ctx context.Context, user auth.CanResetPassword) (string, error) {
 	return b.tokens.Create(ctx, user)
 }
 
-// DeleteToken answers PasswordBroker::deleteToken.
+// DeleteToken destroys this account's token.
 func (b *PasswordBroker) DeleteToken(ctx context.Context, user auth.CanResetPassword) error {
 	return b.tokens.Delete(ctx, user)
 }
 
-// TokenExists answers PasswordBroker::tokenExists.
+// TokenExists reports that a live token for this account matches the one
+// offered.
 func (b *PasswordBroker) TokenExists(ctx context.Context, user auth.CanResetPassword, token string) (bool, error) {
 	return b.tokens.Exists(ctx, user, token)
 }
 
-// GetRepository answers PasswordBroker::getRepository.
+// GetRepository is the token repository this broker was built with.
 func (b *PasswordBroker) GetRepository() TokenRepository { return b.tokens }
 
-// GetTimebox answers PasswordBroker::getTimebox.
+// GetTimebox is the broker's own timebox, which every call copies its flag
+// from.
 func (b *PasswordBroker) GetTimebox() *support.Timebox { return b.timebox }
 
-// timeboxed is the $this->timebox->call(..., $this->timeboxDuration) that wraps
-// both public methods.
+// timeboxed runs fn inside a timebox and puts its status back.
 //
 // support.Timebox.Call carries its result as an any, because a method cannot
 // take a type parameter in Go; this puts the string back and keeps the two
@@ -306,19 +298,14 @@ func (b *PasswordBroker) GetTimebox() *support.Timebox { return b.timebox }
 //
 // # Why the call gets a timebox of its own
 //
-// The PHP calls $this->timebox, one instance for the life of the broker, and
-// gets away with it because a PHP process serves one request: the container
-// builds a broker, reset() sets earlyReturn on its timebox, and the process
-// forgets both.
+// The broker outlives the request and is shared by every goroutine serving one.
+// A return-early flag held on it is a flag one request sets and the next reads
+// -- the reset link request that followed a successful reset would answer
+// without waiting, which is exactly the timing signal this type exists to
+// remove -- and two resets at once would be a data race on it.
 //
-// Here the broker outlives the request and is shared by every goroutine serving
-// one. A flag held on it is a flag one request sets and the next reads -- the
-// reset link request that followed a successful reset would answer without
-// waiting, which is exactly the timing signal this class exists to remove -- and
-// two resets at once would be a data race on it.
-//
-// So the flag is per call, copied from the broker's timebox. GetTimebox still
-// answers with the broker's, as the PHP's getTimebox does.
+// So the flag is per call, copied from the broker's timebox. [PasswordBroker.GetTimebox]
+// still answers with the broker's.
 func (b *PasswordBroker) timeboxed(fn func(*support.Timebox) (string, error)) (string, error) {
 	timebox := *b.timebox
 	timebox.DontReturnEarly()

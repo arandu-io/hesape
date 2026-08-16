@@ -13,7 +13,7 @@ import (
 )
 
 // welcome is the shape a person writes: an envelope, a content, and nothing
-// else. Content.Text is a view name, as it is in Illuminate.
+// else. Content.Text is a view name, not a body.
 type welcome struct {
 	Name string
 	Body string
@@ -134,9 +134,9 @@ func TestABadAddressIsRefusedBeforeTheTransport(t *testing.T) {
 
 // TestASubjectIsDerivedFromTheMailableWhenNobodyNamedOne.
 //
-// Illuminate's buildSubject falls back to Str::title(Str::snake(class_basename)),
-// so OrderShipped goes out as "Order Shipped". This package used to refuse the
-// message instead, which is a different behaviour under the same call.
+// The subject falls back to the mailable's type name, humanised, so an
+// OrderShipped goes out as "Order Shipped" rather than being refused for having
+// no subject.
 func TestASubjectIsDerivedFromTheMailableWhenNobodyNamedOne(t *testing.T) {
 	m, box := mailer(t)
 
@@ -149,8 +149,8 @@ func TestASubjectIsDerivedFromTheMailableWhenNobodyNamedOne(t *testing.T) {
 	}
 }
 
-// TestAPreRenderedBodyBeatsAView, which is the order Illuminate's buildView
-// checks in: isset($this->html) comes before the view and before the markdown.
+// TestAPreRenderedBodyBeatsAView: a literal body is checked before the view and
+// before the markdown.
 func TestAPreRenderedBodyBeatsAView(t *testing.T) {
 	m, box := mailer(t)
 
@@ -172,9 +172,8 @@ func (literalAndView) Content() mail.Content {
 
 // TestARepeatedAddressKeepsItsLastSpelling.
 //
-// Illuminate dedupes with reverse()->unique('address')->reverse(), which keeps
-// the last spelling. Getting it backwards is invisible until somebody asks why
-// the display name went missing.
+// The dedupe keeps the last spelling of a repeated address. Getting it
+// backwards is invisible until somebody asks why the display name went missing.
 func TestARepeatedAddressKeepsItsLastSpelling(t *testing.T) {
 	m, box := mailer(t)
 
@@ -287,8 +286,7 @@ func (r *recorder) Dispatch(_ context.Context, event any) {
 	}
 }
 
-// TestTheAssertionsReadTheMessageAsItWillGoOut. Illuminate renders before it
-// asserts, and Build is what that render is here.
+// TestTheAssertionsReadTheMessageAsItWillGoOut, which is what Build produces.
 func TestTheAssertionsReadTheMessageAsItWillGoOut(t *testing.T) {
 	m, _ := mailer(t)
 
@@ -340,8 +338,7 @@ func (escapedBody) Content() mail.Content {
 	return mail.Content{HTMLString: "<p><strong>Ada &amp; Co</strong> invoice</p>"}
 }
 
-// TestAnAttachmentBuiltFromDataReachesTheMessage, and can be asserted on the
-// way Illuminate asserts on it.
+// TestAnAttachmentBuiltFromDataReachesTheMessage, and can be asserted on.
 func TestAnAttachmentBuiltFromDataReachesTheMessage(t *testing.T) {
 	m, _ := mailer(t)
 
@@ -362,9 +359,8 @@ func TestAnAttachmentBuiltFromDataReachesTheMessage(t *testing.T) {
 
 // TestAnAttachmentFromDataWithNoNameIsRefused.
 //
-// Illuminate throws 'Attachment requires a filename to be specified.' here.
 // A part with no filename arrives as "noname" in every client, which is what
-// the throw exists to prevent.
+// the refusal exists to prevent.
 func TestAnAttachmentFromDataWithNoNameIsRefused(t *testing.T) {
 	unnamed := mail.FromData(func() ([]byte, error) { return []byte("x"), nil })
 
@@ -405,9 +401,8 @@ func TestTwoDescriptionsOfTheSameFileAreTheSameAttachment(t *testing.T) {
 
 // TestAMailableDeclaringItsOwnAttachmentsAndHeadersIsRead.
 //
-// Illuminate reads attachments() and headers() off the mailable class. Go has
-// no inheritance, so a mailable that declares the methods is asked and one that
-// does not is not.
+// Both methods are optional: a mailable that declares them is asked, and one
+// that does not is not.
 func TestAMailableDeclaringItsOwnAttachmentsAndHeadersIsRead(t *testing.T) {
 	m, _ := mailer(t)
 
@@ -455,9 +450,8 @@ func TestQueueingWithNoQueueWiredIsAnError(t *testing.T) {
 
 // TestAQueuedMailableCarriesTheAddressingTheCallSiteGave.
 //
-// Illuminate does not need this: its addresses are on the mailable itself. Here
-// the mailable is somebody else's struct, so the job has to carry the pending
-// message or a queued send goes to nobody.
+// The mailable is somebody else's struct and carries no addresses of its own,
+// so the job has to carry the pending message or a queued send goes to nobody.
 func TestAQueuedMailableCarriesTheAddressingTheCallSiteGave(t *testing.T) {
 	box := &transport.Array{}
 	m := mail.New("array", echoView{}, box, nil)

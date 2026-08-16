@@ -11,16 +11,15 @@ import (
 
 // ErrNil is what a command returns when the key does not exist.
 //
-// PHP answers null and the caller checks for it; Go answers an error and the
-// caller checks for that, which is the mechanical change ADR 0044 allows where
-// the PHP returns "or false". It is the driver's own sentinel, so
-// errors.Is(err, redis.Nil) from a caller that holds the driver still matches.
+// An absent key is an error rather than a nil value, so a caller checks the
+// error it already has to check. It is the driver's own sentinel, so
+// errors.Is(err, redis.Nil) from a caller that holds the driver still
+// matches.
 var ErrNil = goredis.Nil
 
 // Get returns the value of the given key.
 //
-// It answers Connection::get(). A key that is not there returns ErrNil, which
-// is the "or null" of the PHP signature.
+// A key that is not there returns ErrNil.
 func (c *Connection) Get(ctx context.Context, key string) (string, error) {
 	full := c.Key(key)
 	return timed(c, "get", []any{full}, func() (string, error) {
@@ -30,12 +29,9 @@ func (c *Connection) Get(ctx context.Context, key string) (string, error) {
 
 // Set sets the string value in the argument as the value of the key.
 //
-// It answers Connection::set($key, $value, $expireResolution, $expireTTL,
-// $flag). expireResolution is "EX" or "PX" (empty for no expiry), expireTTL is
-// its value in that unit, and flag is "NX" or "XX" (empty for neither).
-//
-// Passing "" and 0 and "" is a plain SET, which is what the PHP does with its
-// defaults.
+// expireResolution is "EX" or "PX" (empty for no expiry), expireTTL is its
+// value in that unit, and flag is "NX" or "XX" (empty for neither). Passing "",
+// 0 and "" is a plain SET.
 func (c *Connection) Set(ctx context.Context, key string, value any, expireResolution string, expireTTL int64, flag string) (string, error) {
 	full := c.Key(key)
 
@@ -57,9 +53,8 @@ func (c *Connection) Set(ctx context.Context, key string, value any, expireResol
 
 // SetEx sets the key with a lifetime in seconds.
 //
-// It is the SETEX command, which Laravel reaches through Connection::__call.
-// It is spelled out here for the same reason the others are: a method that
-// exists is a method the compiler can check.
+// It is the SETEX command, spelled out here for the reason the others are: a
+// method that exists is a method the compiler can check.
 func (c *Connection) SetEx(ctx context.Context, key string, seconds int64, value any) (string, error) {
 	full := c.Key(key)
 	return timed(c, "setex", []any{full, seconds, value}, func() (string, error) {
@@ -78,8 +73,7 @@ func (c *Connection) PSetEx(ctx context.Context, key string, milliseconds int64,
 
 // SetNx sets the given key if it does not exist, and reports whether it did.
 //
-// It answers Connection::setnx(). The PHP returns 1 or 0; Go returns the bool
-// those two stand for.
+// The server answers 1 or 0; this returns the bool those two stand for.
 func (c *Connection) SetNx(ctx context.Context, key string, value any) (bool, error) {
 	full := c.Key(key)
 	return timed(c, "setnx", []any{full, value}, func() (bool, error) {
@@ -106,9 +100,8 @@ func (c *Connection) MSetNx(ctx context.Context, values map[string]any) (bool, e
 
 // MGet gets the values of all the given keys.
 //
-// It answers Connection::mget(). A key that is not there is nil in the result,
-// in the position it was asked for -- which is the array_map over false the PHP
-// does.
+// A key that is not there is nil in the result, in the position it was asked
+// for.
 func (c *Connection) MGet(ctx context.Context, keys []string) ([]any, error) {
 	full := c.keys(keys)
 	return timed(c, "mget", toAny(full), func() ([]any, error) {
@@ -129,9 +122,8 @@ func (c *Connection) HMGet(ctx context.Context, key string, fields ...string) ([
 
 // HMSet sets the given hash fields to their respective values.
 //
-// It answers Connection::hmset(). The PHP takes either a dictionary or a flat
-// list of alternating field and value; a map is the only one of the two that
-// Go can state, and the one every call site used.
+// It takes a map rather than a flat list of alternating field and value: a map
+// is the shape the compiler can check, and the one every call site used.
 func (c *Connection) HMSet(ctx context.Context, key string, dictionary map[string]any) (bool, error) {
 	full := c.Key(key)
 	pairs := make([]any, 0, len(dictionary)*2)
@@ -145,8 +137,6 @@ func (c *Connection) HMSet(ctx context.Context, key string, dictionary map[strin
 
 // HSetNx sets the given hash field if it does not exist, and reports whether it
 // did.
-//
-// It answers Connection::hsetnx().
 func (c *Connection) HSetNx(ctx context.Context, hash, key string, value any) (bool, error) {
 	full := c.Key(hash)
 	return timed(c, "hsetnx", []any{full, key, value}, func() (bool, error) {
@@ -156,9 +146,8 @@ func (c *Connection) HSetNx(ctx context.Context, hash, key string, value any) (b
 
 // LRem removes the first count occurrences of value from the list.
 //
-// It answers Connection::lrem(). Note the argument order: the PHP method takes
-// (key, count, value) and passes (key, value, count) to phpredis, and this one
-// keeps the method's order, which is the one a Laravel call site is written in.
+// Note the argument order: (key, count, value), which is not the order the
+// wire protocol puts them in.
 func (c *Connection) LRem(ctx context.Context, key string, count int64, value any) (int64, error) {
 	full := c.Key(key)
 	return timed(c, "lrem", []any{full, count, value}, func() (int64, error) {
@@ -169,9 +158,9 @@ func (c *Connection) LRem(ctx context.Context, key string, count int64, value an
 // Blpop removes and returns the first element of the first non-empty list,
 // waiting up to timeout.
 //
-// It answers Connection::blpop(). The result is the two-element slice Redis
-// returns -- the list the element came from, and the element. A timeout that
-// expires empty-handed returns ErrNil, which is the PHP's null.
+// The result is the two-element slice the server returns -- the list the
+// element came from, and the element. A timeout that expires empty-handed
+// returns ErrNil.
 func (c *Connection) Blpop(ctx context.Context, timeout time.Duration, keys ...string) ([]string, error) {
 	full := c.keys(keys)
 	return timed(c, "blpop", append(toAny(full), timeout), func() ([]string, error) {
@@ -190,8 +179,7 @@ func (c *Connection) Brpop(ctx context.Context, timeout time.Duration, keys ...s
 
 // Spop removes and returns count random elements from the set at key.
 //
-// It answers Connection::spop(). A count of zero is read as one, which is the
-// PHP default.
+// A count of zero is read as one.
 func (c *Connection) Spop(ctx context.Context, key string, count int64) ([]string, error) {
 	if count <= 0 {
 		count = 1
@@ -204,8 +192,7 @@ func (c *Connection) Spop(ctx context.Context, key string, count int64) ([]strin
 
 // ZAdd adds members to a sorted set, or updates their score.
 //
-// It answers Connection::zadd(). options are the flags the PHP picks out of the
-// front of its dictionary -- "NX", "XX", "CH", "GT", "LT" -- and they are
+// options are the flags "NX", "XX", "CH", "GT" and "LT", and they are
 // case-insensitive.
 //
 // "INCR" is refused rather than accepted and ignored: it changes what the
@@ -243,19 +230,18 @@ func (c *Connection) ZAdd(ctx context.Context, key string, members map[string]fl
 
 // RangeOptions is the options array of zrangebyscore and zrevrangebyscore.
 //
-// It is a struct because the PHP array has exactly two shapes and a map of
-// strings hides which -- ['limit' => ['offset' => 0, 'count' => 10]] and
-// ['limit' => [0, 10]] are the same request written two ways.
+// It is a struct rather than a map of strings, so the two fields a caller can
+// set are the two fields the compiler shows.
 type RangeOptions struct {
-	// Offset and Count answer the "limit" option. A Count of zero means no
-	// LIMIT clause at all, which is the PHP's absent key.
+	// Offset and Count are the LIMIT clause. A Count of zero means no LIMIT
+	// clause at all.
 	Offset, Count int64
 }
 
 // ZRangeByScore returns the members with a score between min and max.
 //
-// It answers Connection::zrangebyscore(). min and max are the strings Redis
-// takes, so "-inf", "+inf" and the exclusive "(5" all work.
+// min and max are the strings the server takes, so "-inf", "+inf" and the
+// exclusive "(5" all work.
 func (c *Connection) ZRangeByScore(ctx context.Context, key, min, max string, options RangeOptions) ([]string, error) {
 	full := c.Key(key)
 	by := &goredis.ZRangeBy{Min: min, Max: max, Offset: options.Offset, Count: options.Count}
@@ -279,15 +265,12 @@ type StoreOptions struct {
 	// Weights multiplies each input set's scores, in the order the keys were
 	// given. Empty means every set weighs one.
 	Weights []float64
-	// Aggregate is "sum", "min" or "max". Empty means "sum", which is the PHP
-	// default.
+	// Aggregate is "sum", "min" or "max". Empty means "sum".
 	Aggregate string
 }
 
 // ZInterStore stores the intersection of the given sorted sets in output, and
 // returns how many members it holds.
-//
-// It answers Connection::zinterstore().
 func (c *Connection) ZInterStore(ctx context.Context, output string, keys []string, options StoreOptions) (int64, error) {
 	dest, store := c.zstore(output, keys, options)
 	return timed(c, "zinterstore", []any{dest, store}, func() (int64, error) {
@@ -297,8 +280,6 @@ func (c *Connection) ZInterStore(ctx context.Context, output string, keys []stri
 
 // ZUnionStore stores the union of the given sorted sets in output, and returns
 // how many members it holds.
-//
-// It answers Connection::zunionstore().
 func (c *Connection) ZUnionStore(ctx context.Context, output string, keys []string, options StoreOptions) (int64, error) {
 	dest, store := c.zstore(output, keys, options)
 	return timed(c, "zunionstore", []any{dest, store}, func() (int64, error) {
@@ -306,8 +287,8 @@ func (c *Connection) ZUnionStore(ctx context.Context, output string, keys []stri
 	})
 }
 
-// zstore prefixes the destination and the inputs and fills in the "sum" the PHP
-// defaults to.
+// zstore prefixes the destination and the inputs and fills in the default
+// "sum".
 func (c *Connection) zstore(output string, keys []string, options StoreOptions) (string, *goredis.ZStore) {
 	aggregate := options.Aggregate
 	if aggregate == "" {
@@ -322,21 +303,18 @@ func (c *Connection) zstore(output string, keys []string, options StoreOptions) 
 
 // ScanOptions is the options array of the four scan commands.
 type ScanOptions struct {
-	// Match is the glob the server filters by. Empty means "*", which is the
-	// PHP default. It is prefixed like a key, so a scan of one application does
-	// not walk another's.
+	// Match is the glob the server filters by. Empty means "*". It is prefixed
+	// like a key, so a scan of one application does not walk another's.
 	Match string
 	// Count is the hint for how much work the server does per round trip. Zero
-	// means ten, which is the PHP default.
+	// means ten.
 	Count int64
 }
 
 // Scan walks the keyspace from cursor, and returns the keys it found and the
 // cursor to continue from.
 //
-// It answers Connection::scan(). A returned cursor of zero means the walk is
-// over -- which is what the PHP's `false` said, in the one place its return
-// type changes from array to bool.
+// A returned cursor of zero means the walk is over.
 //
 // The keys come back WITH the application prefix, because that is the name they
 // have on the server and the name any follow-up command needs.
@@ -350,8 +328,6 @@ func (c *Connection) Scan(ctx context.Context, cursor uint64, options ScanOption
 }
 
 // ZScan walks the sorted set at key, returning member and score alternating.
-//
-// It answers Connection::zscan().
 func (c *Connection) ZScan(ctx context.Context, key string, cursor uint64, options ScanOptions) ([]string, uint64, error) {
 	full := c.Key(key)
 	match, count := c.scanArgs(options)
@@ -363,8 +339,6 @@ func (c *Connection) ZScan(ctx context.Context, key string, cursor uint64, optio
 }
 
 // HScan walks the hash at key, returning field and value alternating.
-//
-// It answers Connection::hscan().
 func (c *Connection) HScan(ctx context.Context, key string, cursor uint64, options ScanOptions) ([]string, uint64, error) {
 	full := c.Key(key)
 	match, count := c.scanArgs(options)
@@ -376,8 +350,6 @@ func (c *Connection) HScan(ctx context.Context, key string, cursor uint64, optio
 }
 
 // SScan walks the set at key.
-//
-// It answers Connection::sscan().
 func (c *Connection) SScan(ctx context.Context, key string, cursor uint64, options ScanOptions) ([]string, uint64, error) {
 	full := c.Key(key)
 	match, count := c.scanArgs(options)
@@ -388,7 +360,7 @@ func (c *Connection) SScan(ctx context.Context, key string, cursor uint64, optio
 	return values, next, err
 }
 
-// scanArgs fills in the two defaults the PHP spells inline at every call site.
+// scanArgs fills in the glob and the count defaults.
 func (c *Connection) scanArgs(options ScanOptions) (string, int64) {
 	match := options.Match
 	if match == "" {
@@ -403,10 +375,9 @@ func (c *Connection) scanArgs(options ScanOptions) (string, int64) {
 
 // Pipeline executes the commands queued by callback in one round trip.
 //
-// It answers Connection::pipeline(). The PHP also accepts no callback and hands
-// the pipeline back for the caller to execute; that second shape is a pipeline
-// nobody executed when the caller forgets, so this one takes the callback and
-// executes it.
+// It takes the callback and executes it, rather than handing the pipeline back
+// for the caller to run: a pipeline handed back is a pipeline nobody executed
+// when the caller forgets.
 //
 // The commands are handed to the callback unprefixed, because they are the
 // driver's: build keys with Key.
@@ -417,10 +388,6 @@ func (c *Connection) Pipeline(ctx context.Context, callback func(goredis.Pipelin
 }
 
 // Transaction executes the commands queued by callback inside MULTI/EXEC.
-//
-// It answers Connection::transaction(), and differs from Pipeline in exactly
-// what MULTI adds: the server runs the batch without interleaving anything
-// else.
 func (c *Connection) Transaction(ctx context.Context, callback func(goredis.Pipeliner) error) ([]goredis.Cmder, error) {
 	return timed(c, "transaction", nil, func() ([]goredis.Cmder, error) {
 		return c.client.TxPipelined(ctx, callback)
@@ -429,17 +396,16 @@ func (c *Connection) Transaction(ctx context.Context, callback func(goredis.Pipe
 
 // Eval evaluates a script server-side and returns its result.
 //
-// It answers Connection::eval(). The first numberOfKeys arguments are keys and
-// are prefixed; the rest are passed through.
+// The first numberOfKeys arguments are keys and are prefixed; the rest are
+// passed through.
 //
 // # Nothing in this collection may call it
 //
-// It is here because it is part of the Connection surface a Laravel developer
-// knows, and because an application that has already chosen its server may want
-// it. Nothing inside this adapter uses it, and nothing may: RULE 11 keeps
-// Dragonfly, Redis, Valkey and KeyDB interchangeable, and a script is the first
-// thing that stops being true of all four. The lock, the session index and both
-// limiters are written without one for that reason.
+// It is here because an application that has already chosen its server may want
+// it. Nothing inside this adapter uses it, and nothing may: Dragonfly, Redis,
+// Valkey and KeyDB stay interchangeable only while no script is required, and a
+// script is the first thing that stops being true of all four. The lock, the
+// session index and both limiters are written without one for that reason.
 func (c *Connection) Eval(ctx context.Context, script string, numberOfKeys int, arguments ...any) (any, error) {
 	keys, args := c.splitEvalArguments(numberOfKeys, arguments)
 	return timed(c, "eval", arguments, func() (any, error) {
@@ -448,8 +414,6 @@ func (c *Connection) Eval(ctx context.Context, script string, numberOfKeys int, 
 }
 
 // EvalSha evaluates a script server-side from its SHA1 hash.
-//
-// It answers Connection::evalsha(), and carries the same warning Eval does.
 func (c *Connection) EvalSha(ctx context.Context, sha string, numberOfKeys int, arguments ...any) (any, error) {
 	keys, args := c.splitEvalArguments(numberOfKeys, arguments)
 	return timed(c, "evalsha", arguments, func() (any, error) {
@@ -475,9 +439,6 @@ func (c *Connection) splitEvalArguments(numberOfKeys int, arguments []any) ([]st
 }
 
 // FlushDB flushes the selected Redis database.
-//
-// It answers Connection::flushdb(), including its 'ASYNC' argument: async true
-// hands the work to a background thread and returns at once.
 func (c *Connection) FlushDB(ctx context.Context, async bool) (string, error) {
 	return timed(c, "flushdb", []any{async}, func() (string, error) {
 		if async {
@@ -500,9 +461,9 @@ func (c *Connection) ExecuteRaw(ctx context.Context, parameters ...any) (any, er
 
 // Publish sends a message to a channel and returns how many subscribers got it.
 //
-// It is the PUBLISH command, which Laravel reaches through Connection::__call
-// and which the broadcaster needs by name. The channel is prefixed like a key,
-// so two applications on one server do not hear each other.
+// It is the PUBLISH command, spelled out because the broadcaster needs it by
+// name. The channel is prefixed like a key, so two applications on one server
+// do not hear each other.
 func (c *Connection) Publish(ctx context.Context, channel string, message any) (int64, error) {
 	full := c.Key(channel)
 	return timed(c, "publish", []any{full, message}, func() (int64, error) {

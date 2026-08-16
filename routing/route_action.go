@@ -1,6 +1,6 @@
 package routing
 
-// --- Route fields added by the URL+bindings fatia ---
+// --- Route fields added by the URL and bindings code ---
 
 // action is the controller action string ("Controller@method").
 // It is set by the controller-based route registration and read by

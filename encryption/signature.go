@@ -30,8 +30,8 @@ import (
 //
 // What it deliberately does NOT do is make the link single-use. That needs
 // state, and where single use matters -- a password reset -- the state is the
-// password itself: the token carries the current hash, so using the link changes
-// what it was signed against. See ADR 0032.
+// password itself: the token carries the current hash, so using the link
+// changes what it was signed against.
 type Signer struct {
 	key []byte
 }

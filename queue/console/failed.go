@@ -23,8 +23,8 @@ const failedAction auth.Action = "queue:failed"
 // tenantFlag is the flag every failed job command takes.
 //
 // It is not optional and it has no default. A failed job carries a customer's
-// payload, so listing them is a read like any other and it is scoped by tenant
-// (RULE 17); a command that defaulted the tenant would be a command that prints
+// payload, so listing them is a read like any other and it is scoped by
+// tenant; a command that defaulted the tenant would be a command that prints
 // whichever customer happened to sort first.
 func tenantFlag(o *console.IO) *string {
 	return o.Flags().String("tenant", "", "the tenant whose failed jobs to work with")
@@ -37,9 +37,7 @@ func grantFor(tenant string) (auth.Grant, error) {
 	return auth.SystemGrant(failedAction, tenant), nil
 }
 
-// ListFailedCommand prints the jobs that gave up.
-//
-// It answers Illuminate\Queue\Console\ListFailedCommand: `queue:failed`.
+// ListFailedCommand prints the jobs that gave up. It is `queue:failed`.
 type ListFailedCommand struct {
 	failed failed.FailedJobProvider
 }
@@ -58,7 +56,7 @@ func (c *ListFailedCommand) Command() console.Command {
 	}
 }
 
-// Handle runs the command. It answers ListFailedCommand::handle().
+// Handle runs the command.
 func (c *ListFailedCommand) Handle(ctx context.Context, o *console.IO) error {
 	tenant := tenantFlag(o)
 	if err := o.Flags().Parse(o.Args()); err != nil {
@@ -94,10 +92,9 @@ func (c *ListFailedCommand) Handle(ctx context.Context, o *console.IO) error {
 
 // RetryCommand puts a failed job back in line.
 //
-// It answers Illuminate\Queue\Console\RetryCommand: `queue:retry`, with the ids
-// as arguments and --queue to take every failure off one queue. Without it the
-// only way out of a dead letter list is SQL by hand, which is how it becomes a
-// table nobody touches.
+// It is `queue:retry`, with the ids as arguments and --queue to take every
+// failure off one queue. Without it the only way out of a dead letter list is
+// SQL by hand, which is how it becomes a table nobody touches.
 type RetryCommand struct {
 	failed  failed.FailedJobProvider
 	manager *queue.QueueManager
@@ -118,11 +115,11 @@ func (c *RetryCommand) Command() console.Command {
 	}
 }
 
-// Handle runs the command. It answers RetryCommand::handle().
+// Handle runs the command.
 //
-// The order is the PHP's, and it matters: the job is pushed back before it is
-// forgotten, so a push that fails leaves the failure where it was. Forgetting
-// first and then failing to push loses the job.
+// The order matters: the job is pushed back before it is forgotten, so a push
+// that fails leaves the failure where it was. Forgetting first and then failing
+// to push loses the job.
 func (c *RetryCommand) Handle(ctx context.Context, o *console.IO) error {
 	flags := o.Flags()
 	tenant := tenantFlag(o)
@@ -180,9 +177,7 @@ func (c *RetryCommand) Handle(ctx context.Context, o *console.IO) error {
 	return nil
 }
 
-// ForgetFailedCommand deletes one failed job.
-//
-// It answers Illuminate\Queue\Console\ForgetFailedCommand: `queue:forget`.
+// ForgetFailedCommand deletes one failed job. It is `queue:forget`.
 type ForgetFailedCommand struct {
 	failed failed.FailedJobProvider
 }
@@ -201,7 +196,7 @@ func (c *ForgetFailedCommand) Command() console.Command {
 	}
 }
 
-// Handle runs the command. It answers ForgetFailedCommand::handle().
+// Handle runs the command.
 func (c *ForgetFailedCommand) Handle(ctx context.Context, o *console.IO) error {
 	tenant := tenantFlag(o)
 	if err := o.Flags().Parse(o.Args()); err != nil {
@@ -231,8 +226,7 @@ func (c *ForgetFailedCommand) Handle(ctx context.Context, o *console.IO) error {
 
 // FlushFailedCommand deletes the failed jobs.
 //
-// It answers Illuminate\Queue\Console\FlushFailedCommand: `queue:flush`, with
-// --hours to keep the recent ones.
+// It is `queue:flush`, with --hours to keep the recent ones.
 type FlushFailedCommand struct {
 	failed failed.FailedJobProvider
 }
@@ -251,7 +245,7 @@ func (c *FlushFailedCommand) Command() console.Command {
 	}
 }
 
-// Handle runs the command. It answers FlushFailedCommand::handle().
+// Handle runs the command.
 func (c *FlushFailedCommand) Handle(ctx context.Context, o *console.IO) error {
 	flags := o.Flags()
 	tenant := tenantFlag(o)
@@ -274,8 +268,7 @@ func (c *FlushFailedCommand) Handle(ctx context.Context, o *console.IO) error {
 // PruneFailedJobsCommand deletes the failed jobs that are old enough not to
 // matter.
 //
-// It answers Illuminate\Queue\Console\PruneFailedJobsCommand:
-// `queue:prune-failed`. It is meant to run on a schedule, which is the
+// It is `queue:prune-failed`, meant to run on a schedule, which is the
 // difference from `queue:flush`: that one is a person deciding, this one is the
 // retention policy.
 type PruneFailedJobsCommand struct {
@@ -299,7 +292,7 @@ func (c *PruneFailedJobsCommand) Command() console.Command {
 	}
 }
 
-// Handle runs the command. It answers PruneFailedJobsCommand::handle().
+// Handle runs the command.
 func (c *PruneFailedJobsCommand) Handle(ctx context.Context, o *console.IO) error {
 	flags := o.Flags()
 	tenant := tenantFlag(o)

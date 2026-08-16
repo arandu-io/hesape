@@ -10,17 +10,15 @@ import (
 
 // retryPadding is added to the wait a released job is given.
 //
-// It answers the `+ 3` of RateLimited::getTimeUntilNextRetry, and it is there
-// so a job does not come back at the exact instant the window rolls and spend
-// the first attempt of the next one racing every other job that was released
-// with it.
+// It is there so a job does not come back at the exact instant the window rolls
+// and spend the first attempt of the next one racing every other job that was
+// released with it.
 const retryPadding = 3 * time.Second
 
 // RateLimited runs a job only while the budget for it lasts.
 //
-// It answers Illuminate\Queue\Middleware\RateLimited. The job over budget is
-// released and comes back when the window rolls, so the work is delayed rather
-// than dropped.
+// The job over budget is released and comes back when the window rolls, so the
+// work is delayed rather than dropped.
 //
 //	m := middleware.NewRateLimited(limiter, cache.PerMinute(30))
 //
@@ -28,8 +26,8 @@ const retryPadding = 3 * time.Second
 // budget. An empty key means the job's name, which is the "thirty of these a
 // minute, per customer" case.
 //
-// There is no RateLimitedWithRedis: the limiter counts in whatever cache.Store
-// it was built over, and Redis is one of them.
+// There is no RESP-specific variant: the limiter counts in whatever cache.Store
+// it was built over.
 type RateLimited struct {
 	limiter      *cache.RateLimiter
 	limit        cache.Limit

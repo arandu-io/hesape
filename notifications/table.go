@@ -17,16 +17,14 @@ import (
 // The SQL is written out and the values go in placeholders. There is no query
 // builder and no ORM behind it: five statements, each of them readable, each of
 // them carrying the tenant in the WHERE clause because that is the clause the
-// whole design rests on (RULE 14).
+// whole design rests on.
 type TableStore struct {
 	db  *database.DB
 	now func() time.Time
 }
 
-// NewTableStore returns a Store over an open connection.
-//
-// It has no PHP counterpart: an Eloquent model finds its connection through the
-// container.
+// NewTableStore returns a Store over an open connection. The connection is an
+// argument, so a store is never holding one nobody named.
 func NewTableStore(db *database.DB) *TableStore {
 	return &TableStore{db: db, now: func() time.Time { return time.Now().UTC() }}
 }

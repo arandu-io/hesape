@@ -80,7 +80,7 @@ func TestAMisspelledRuleSuggestsTheNearMiss(t *testing.T) {
 
 // TestARuleReferencingAnUndeclaredFieldFailsAtCompile is the check that pays
 // for itself: `confirmed:passwrod` compares against the empty string for ever,
-// and Laravel says nothing about it.
+// and nothing anywhere says so.
 func TestARuleReferencingAnUndeclaredFieldFailsAtCompile(t *testing.T) {
 	for _, chain := range []string{
 		"confirmed:passwrod",
@@ -126,10 +126,9 @@ func TestAComparisonTakesEitherALiteralBoundOrAFieldName(t *testing.T) {
 	refuse(t, validation.Rules{"high": "integer|gt:nowhere"})
 }
 
-// TestRegexTakesTheRestOfTheChainIncludingPipes. Laravel's answer to this is
-// that the string form cannot be used at all and the rules must be an array; an
-// array form here would be a second spelling of a rule set, so the answer is
-// position.
+// TestRegexTakesTheRestOfTheChainIncludingPipes. A second way of writing a rule
+// set would be a second spelling of one, so a pipe inside a pattern is settled
+// by position instead: regex: runs to the end of the chain.
 func TestRegexTakesTheRestOfTheChainIncludingPipes(t *testing.T) {
 	set, err := validation.Compile(validation.Rules{"slug": `required|max:255|regex:^[a-z0-9|_-]+$`})
 	if err != nil {
@@ -165,9 +164,9 @@ func TestRegexAnywhereButLastFailsAtCompile(t *testing.T) {
 	}
 }
 
-// TestAnUncompilableRegexFailsAtCompileNotOnFirstRequest. Laravel never
-// compiles a pattern until a request touches it, so an unclosed group is a 500
-// on the first form somebody submits.
+// TestAnUncompilableRegexFailsAtCompileNotOnFirstRequest. A pattern compiled
+// only when a request touches it makes an unclosed group a 500 on the first form
+// somebody submits.
 func TestAnUncompilableRegexFailsAtCompileNotOnFirstRequest(t *testing.T) {
 	failures := refuse(t, validation.Rules{"slug": `regex:^(a$`})
 	if failures[0].Field != "slug" || !strings.Contains(failures[0].Msg, "does not compile") {
@@ -175,8 +174,8 @@ func TestAnUncompilableRegexFailsAtCompileNotOnFirstRequest(t *testing.T) {
 	}
 }
 
-// TestInSplitsOnCommaAndHonoursQuoting, which is Laravel's str_getcsv: a value
-// containing a comma is quoted, and it stays one value.
+// TestInSplitsOnCommaAndHonoursQuoting: the arguments are one RFC 4180 record,
+// so a value containing a comma is quoted and stays one value.
 func TestInSplitsOnCommaAndHonoursQuoting(t *testing.T) {
 	set, err := validation.Compile(validation.Rules{"f": `in:"a,b",c`})
 	if err != nil {
@@ -198,10 +197,9 @@ func TestInSplitsOnCommaAndHonoursQuoting(t *testing.T) {
 	}
 }
 
-// TestDateFormatRejectsAPHPStyleLayout. It is the one Laravel string that
-// cannot be copied, because the string means something else in the host
-// language -- and it cannot be caught by a round trip alone: Format("Y-m-d")
-// returns "Y-m-d" and Parse reads it straight back.
+// TestDateFormatRejectsAPHPStyleLayout. It is the one rule argument that is a
+// layout in the host language, and it cannot be caught by a round trip alone:
+// Format("Y-m-d") returns "Y-m-d" and Parse reads it straight back.
 func TestDateFormatRejectsAPHPStyleLayout(t *testing.T) {
 	failures := refuse(t, validation.Rules{"published_at": "date_format:Y-m-d"})
 	if !strings.Contains(failures[0].Msg, "2006-01-02") {
@@ -214,8 +212,8 @@ func TestDateFormatRejectsAPHPStyleLayout(t *testing.T) {
 
 // TestUniqueAndExistsFailClosedWithoutAGrantAndAVerifier. They reach a
 // repository, and a rule set compiled at boot carries no security.Grant: the
-// Grant and the verifier arrive with the request, through WithPresence. RULE 17
-// has no exception for a read, so without them the rule does not pass quietly
+// Grant and the verifier arrive with the request, through WithPresence. A read
+// is authorized like any other, so without them the rule does not pass quietly
 // -- it fails.
 func TestUniqueAndExistsFailClosedWithoutAGrantAndAVerifier(t *testing.T) {
 	for _, rule := range []string{"unique:users", "exists:users,id"} {

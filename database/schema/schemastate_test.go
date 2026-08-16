@@ -151,8 +151,9 @@ func TestPostgresDumpCommandCarriesNoOwnerAndNoACL(t *testing.T) {
 	}
 }
 
-// TestPostgresLoadPicksTheToolByExtension is the PHP's own branch, and getting
-// it wrong reports a corrupt file when the file is fine.
+// TestPostgresLoadPicksTheToolByExtension pins the branch that chooses psql or
+// pg_restore by file extension: getting it wrong reports a corrupt file when
+// the file is fine.
 func TestPostgresLoadPicksTheToolByExtension(t *testing.T) {
 	connection := newConfiguredConn("pgsql", map[string]string{"database": "acme", "username": "app"})
 
@@ -234,9 +235,10 @@ func TestMySqlDumpPrefersTheSocket(t *testing.T) {
 	}
 }
 
-// TestRefreshDatabaseFileRefusesOtherDrivers is the guard the PHP gets for free
-// by putting the method on SQLiteBuilder. Truncating a file is not a statement
-// the database can refuse, so nothing downstream would catch it.
+// TestRefreshDatabaseFileRefusesOtherDrivers checks the guard RefreshDatabaseFile
+// must make explicitly, because it lives on the one Builder rather than on a
+// SQLite-only type: truncating a file is not a statement the database can
+// refuse, so nothing downstream would catch it.
 func TestRefreshDatabaseFileRefusesOtherDrivers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "app.sqlite")
 	if err := os.WriteFile(path, []byte("not empty"), 0o600); err != nil {

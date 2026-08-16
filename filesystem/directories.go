@@ -28,8 +28,7 @@ type DirectoryAware interface {
 
 // FileExists reports whether the key is there for this tenant.
 //
-// It is [Disk.Exists] under Illuminate's other name for it. Both are here
-// because Illuminate has both, and because the pair with
+// It is [Disk.Exists] under a second name. Both are here because the pair with
 // [Disk.DirectoryExists] is what makes the question unambiguous at a call site
 // that deals in both.
 func (d *Disk) FileExists(ctx context.Context, g auth.Grant, key string) (bool, error) {

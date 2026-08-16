@@ -298,14 +298,13 @@ func TestAllowFailuresKeepsTheBatchGoing(t *testing.T) {
 	}
 }
 
-// TestCancelStopsTheWorkNotTheBookkeeping is Illuminate's behaviour, and it is
-// worth a test of its own because it surprises people: cancelling tells the
-// jobs still queued to skip, and skipping is *succeeding*, so the counter still
-// reaches zero and Then still fires.
+// TestCancelStopsTheWorkNotTheBookkeeping is worth a test of its own because it
+// surprises people: cancelling tells the jobs still queued to skip, and skipping
+// is *succeeding*, so the counter still reaches zero and Then still fires.
 //
-// Batch::recordSuccessfulJob has no cancelled check -- see the clone. A batch
-// that must not report success when it is cancelled says so in the job that
-// Then names, which is a job like any other and can ask.
+// Batch.RecordSuccessfulJob has no cancelled check. A batch that must not report
+// success when it is cancelled says so in the job that Then names, which is a
+// job like any other and can ask.
 func TestCancelStopsTheWorkNotTheBookkeeping(t *testing.T) {
 	t.Parallel()
 
@@ -532,8 +531,7 @@ func TestPruneTakesFinishedBatchesOnly(t *testing.T) {
 func TestProgressRoundsToTheNearestPercent(t *testing.T) {
 	t.Parallel()
 
-	// Two of three succeeded: 66.67, which Illuminate's (int) round() reports
-	// as 67.
+	// Two of three succeeded: 66.67, which rounds to 67.
 	b := bus.Batch{TotalJobs: 3, PendingJobs: 1}
 	if got := b.Progress(); got != 67 {
 		t.Errorf("Progress = %d, want 67", got)

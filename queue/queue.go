@@ -15,10 +15,9 @@ import (
 // repositories the same way a service does. There is no unauthorized path into
 // the database from a worker, which is the whole point of the Grant existing.
 //
-// It answers Illuminate\Queue\CallQueuedHandler: the payload names the work and
-// something has to turn that name into code. Here the name is a string and the
-// registry is the [Worker], because resolving a class out of a serialized
-// payload is what ADR 0001 refused a container for.
+// The record names the work and something has to turn that name into code: the
+// name is a string and the registry is the [Worker], because Go cannot reach a
+// type from a name in a string.
 type Handler interface {
 	Handle(ctx context.Context, g auth.Grant, j *jobs.Job) error
 }
@@ -33,11 +32,10 @@ func (f HandlerFunc) Handle(ctx context.Context, g auth.Grant, j *jobs.Job) erro
 
 // Queue is what a driver implements.
 //
-// It is Illuminate\Contracts\Queue\Queue plus ClearableQueue, with the two
-// differences a compiler makes worth having: every push takes an auth.Grant, so
-// the tenant comes from the Grant and not from an argument somebody can get
-// wrong (RULE 14), and Pop takes a count and a lease rather than returning one
-// job at a time -- a worker with a concurrency of four asks for four.
+// Every push takes an auth.Grant, so the tenant comes from the Grant and not
+// from an argument somebody can get wrong, and Pop takes a count and a lease
+// rather than returning one job at a time -- a worker with a concurrency of
+// four asks for four.
 //
 // Pop rather than a channel of jobs: the job has to stay in the store,
 // invisible to other workers, until it is settled. A worker that dies mid-job
@@ -70,7 +68,7 @@ type Queue interface {
 	// The returned jobs carry Attempts INCLUDING this delivery: a job handed
 	// over for the first time has Attempts == 1. A driver that returns the
 	// count from before the delivery makes the worker park a job one attempt
-	// early, and with MaxAttempts of 2 it parks on the first failure and never
+	// early, and with a try limit of 2 it parks on the first failure and never
 	// retries at all.
 	//
 	// Each job carries the queue it came off, so the worker settles it by
@@ -96,8 +94,6 @@ type Queue interface {
 	CreationTimeOfOldestPendingJob(ctx context.Context, queue string) (time.Time, error)
 
 	// Clear removes every job on a queue and returns how many went.
-	//
-	// It answers Illuminate\Contracts\Queue\ClearableQueue.
 	Clear(ctx context.Context, queue string) (int, error)
 
 	// Failed lists the jobs that gave up, most recent failure first.

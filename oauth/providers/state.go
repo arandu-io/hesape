@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// ErrStateMismatch answers
-// Illuminate\Socialite\OAuthTwo\StateMismatchException.
+// ErrStateMismatch is returned when the callback's state does not match the
+// stored one.
 //
 // It is the whole security of the authorization code flow in one value. The
 // provider sends the browser back to the application with a code in the query
@@ -23,13 +23,12 @@ import (
 // to match.
 var ErrStateMismatch = errors.New("oauth: the state in the callback does not match the one that was stored")
 
-// StateStoreInterface answers
-// Illuminate\Socialite\OAuthTwo\StateStoreInterface: where the state waits
-// between the redirect out and the callback back.
+// StateStoreInterface is where the state waits between the redirect out and
+// the callback back.
 //
-// Illuminate's two methods return string and void. Both return an error here,
-// because both do input and output -- a cookie is written to a response and a
-// session to a store, and either can fail. A store that swallowed the failure
+// Both methods return an error, because both do input and output -- a cookie is
+// written to a response and a session to a store, and either can fail. A store
+// that swallowed the failure
 // would answer with an empty state, and an empty state compares equal to an
 // empty query parameter, which is the check passing by accident. [Verify]
 // refuses the empty state for exactly that reason.
@@ -44,8 +43,8 @@ type StateStoreInterface interface {
 // Verify compares the state that came back with the state that was stored, and
 // is where [ErrStateMismatch] comes from.
 //
-// The comparison is constant-time, which is what hash_equals does in the
-// current Laravel, and the empty state is refused before the comparison: a
+// The comparison is constant-time, and the empty state is refused before the
+// comparison: a
 // missing cookie and a missing query parameter are both empty, and equal is the
 // wrong answer for two things that are not there.
 func Verify(stored, returned string) error {
@@ -69,12 +68,9 @@ const stateLifetime = 10 * time.Minute
 // CookieStateStore is a [StateStoreInterface] that keeps the state in a
 // short-lived cookie of its own.
 //
-// The clone has no concrete store -- it is an interface and an expectation that
-// the framework supplies one -- and the current Laravel puts the state in the
-// session. This package cannot: hesape's session.Store holds one typed record
-// per session and not a bag of keys, so a state would either bend that record
-// into a key-value store or introduce a second session, and a second way to
-// keep session state is exactly what RULE 9 exists to refuse.
+// The state is not kept in the session: hesape's session.Store holds one typed
+// record per session and not a bag of keys, so putting a state there would
+// either bend that record into a key-value store or introduce a second session.
 //
 // A cookie is the remaining answer and it is a sound one. The state is not a
 // secret and it does not authenticate anybody: it only has to be something the
@@ -115,7 +111,7 @@ func (s *CookieStateStore) path() string {
 	return "/"
 }
 
-// SetState answers StateStoreInterface::setState().
+// SetState writes the state to a cookie on the response.
 func (s *CookieStateStore) SetState(state string) error {
 	if s.w == nil {
 		return errors.New("oauth: this state store has no response to write the cookie to")
@@ -135,13 +131,12 @@ func (s *CookieStateStore) SetState(state string) error {
 	return nil
 }
 
-// GetState answers StateStoreInterface::getState(), and clears the cookie as it
-// reads it.
+// GetState reads the state off the request, and clears the cookie as it reads
+// it.
 //
 // Clearing is the part worth stating: a state that stays in the browser can be
 // presented again, and the second presentation is a replay of the first
-// callback. It is read once and then it is gone, which is what the current
-// Laravel's session pull() does.
+// callback. It is read once and then it is gone.
 func (s *CookieStateStore) GetState() (string, error) {
 	if s.r == nil {
 		return "", errors.New("oauth: this state store has no request to read the cookie from")

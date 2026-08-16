@@ -15,17 +15,15 @@ import (
 
 // DatabaseQueue is the queue backed by the application's own database.
 //
-// It answers Illuminate\Queue\DatabaseQueue, and it is the default driver for
-// the reason Laravel's is: it needs nothing installed. The jobs table sits in
-// the database the application already has.
+// It is the default driver because it needs nothing installed: the jobs table
+// sits in the database the application already has.
 //
 // What it offers that no other driver can is the outbox guarantee. A job pushed
-// inside database.Transaction is committed by the same transaction as the row it
-// is about, so it exists if and only if the write did -- the mechanism the
-// events package uses for events, applied to work. That is the mechanism and
-// not the name: this is DatabaseQueue because that is what Laravel calls the
-// queue that lives in the application's database (ADR 0044), and naming it
-// after the guarantee would hide it from everyone looking for the driver.
+// inside database.Transaction is committed by the same transaction as the row
+// it is about, so it exists if and only if the write did -- the mechanism the
+// events package uses for events, applied to work. The name is the driver and
+// not the guarantee: naming it after the guarantee would hide it from everyone
+// looking for the queue that lives in the application's database.
 type DatabaseQueue struct {
 	connection
 	db *database.DB
@@ -40,14 +38,14 @@ func NewDatabaseQueue(db *database.DB) *DatabaseQueue {
 
 // GetDatabase is the connection this queue writes to.
 //
-// It answers getDatabase(). The queue and the application share it, which is
-// what makes a job pushed inside database.Transaction part of that transaction.
+// The queue and the application share it, which is what makes a job pushed
+// inside database.Transaction part of that transaction.
 func (q *DatabaseQueue) GetDatabase() *database.DB { return q.db }
 
 // GetQueue resolves a queue name, turning empty into the default.
 //
-// It answers getQueue(). It is exported because every method here starts with
-// it and a driver in another module has the same first line.
+// It is exported because every method here starts with it and a driver in
+// another module has the same first line.
 func (q *DatabaseQueue) GetQueue(name string) string {
 	if name == "" {
 		return jobs.DefaultQueue
@@ -65,9 +63,9 @@ const databaseConnection = "database"
 
 // Migrations returns the jobs table.
 //
-// It answers Laravel's `queue:table`, which generates the migration for this
-// driver and only this one. [Module] collects it, so an application wired to
-// another driver declares no schema for a table it will never read.
+// The schema is this driver's and only this one's. [Module] collects it, so an
+// application wired to another driver declares no schema for a table it will
+// never read.
 func (q *DatabaseQueue) Migrations() []database.Migration {
 	return []database.Migration{{
 		ID: "2026_07_31_000010_create_jobs_table",
@@ -107,7 +105,7 @@ CREATE INDEX idx_jobs_parked ON jobs (failed_at);
 		// that are neither its arguments nor a setting.
 		//
 		// Nullable with a default, so the previous release's binary keeps
-		// inserting without them during a rollout (RULE 16).
+		// inserting without them during a rollout.
 		ID: "2026_08_11_000010_add_job_attributes_to_jobs_table",
 		Up: `
 ALTER TABLE jobs ADD COLUMN display_name TEXT;
@@ -122,12 +120,11 @@ ALTER TABLE jobs DROP COLUMN exceptions;
 	}, {
 		// created_at is the order Pop takes jobs in, which used to be run_at.
 		//
-		// Laravel orders the candidates by id (DatabaseQueue.php:298), and its
-		// id is an auto-incrementing integer, so the queue is first in, first
-		// out over whatever is eligible. Ordering by run_at is not: a job
-		// pushed with a ten second delay waits out the delay and then goes
-		// behind everything queued while it waited, again on every pass, and on
-		// a queue that is never empty it is a job that never runs.
+		// The queue is first in, first out over whatever is eligible.
+		// Ordering by run_at is not: a job pushed with a ten second delay
+		// waits out the delay and then goes behind everything queued while it
+		// waited, again on every pass, and on a queue that is never empty it
+		// is a job that never runs.
 		//
 		// The id cannot do the job here because it is a random uuid and sorts
 		// by nothing (see database.NewID), so the column that carries the order
@@ -136,8 +133,7 @@ ALTER TABLE jobs DROP COLUMN exceptions;
 		// Nullable, and with no default, because SQLite refuses a non-constant
 		// default on ADD COLUMN: the rows already in the table are backfilled
 		// here, and the ones the previous release's binary writes during the
-		// rollout arrive NULL, which is what the COALESCE in Pop is for (RULE
-		// 16).
+		// rollout arrive NULL, which is what the COALESCE in Pop is for.
 		//
 		// No index of its own. The filter is still served by idx_jobs_ready,
 		// and what is left is a top-N sort under a LIMIT; an index on
@@ -177,9 +173,8 @@ func (q *DatabaseQueue) Push(ctx context.Context, g auth.Grant, j jobs.Job) erro
 	}
 
 	// created_at is when the job entered the queue, and it is what Pop orders
-	// by: it is this table's answer to Laravel's auto-incrementing id. It is
-	// not RunAt -- a delayed job entered the queue when it was pushed, and is
-	// older than everything queued while it waited.
+	// by. It is not RunAt -- a delayed job entered the queue when it was
+	// pushed, and is older than everything queued while it waited.
 	_, err = q.db.ExecContext(ctx, `
 		INSERT INTO jobs (
 			id, queue, name, display_name, tenant_id, payload, authorized_by, action,
@@ -196,15 +191,12 @@ func (q *DatabaseQueue) Push(ctx context.Context, g auth.Grant, j jobs.Job) erro
 
 // PushRaw adds a job whose arguments are already encoded.
 //
-// It answers pushRaw(). In Laravel the raw payload is the whole envelope --
-// uuid, maxTries, the serialized command -- and this is the seam a bridge uses
-// to put a job on a queue some other system will read. Here the envelope is the
-// record's columns, so what is raw is the arguments: bytes the caller already
-// has, that would only be unmarshalled and marshalled again on the way through
-// jobs.New.
+// The envelope is the record's columns, so what is raw is the arguments: bytes
+// the caller already has, that would only be unmarshalled and marshalled again
+// on the way through jobs.New.
 //
 // It goes through jobs.Authorized like every other push. Raw is about the
-// encoding, never about the authorization (RULE 17).
+// encoding, never about the authorization.
 func (q *DatabaseQueue) PushRaw(ctx context.Context, g auth.Grant, name string, payload []byte, queue string) error {
 	j, err := jobs.New(g, queue, name, nil)
 	if err != nil {
@@ -252,12 +244,10 @@ func (q *DatabaseQueue) Bulk(ctx context.Context, g auth.Grant, js []jobs.Job) e
 // The cost is that two workers can pick the same candidate and one of them
 // loses the claim. It gets nothing back, which is exactly right.
 //
-// The candidates come back in the order they were queued, which is what
-// getNextAvailableJob's orderBy('id', 'asc') is. It used to be ORDER BY run_at:
-// push A with a ten second delay and B with none, and ten seconds later both
-// are eligible and Laravel hands over A while this handed over B. Delaying a
-// job put it behind everything queued during its delay -- forever, on a queue
-// that is never empty. Found by audit. See the created_at migration.
+// The candidates come back in the order they were queued. It used to be ORDER
+// BY run_at, which put a job pushed with a delay behind everything queued while
+// it waited -- forever, on a queue that is never empty. See the created_at
+// migration.
 //
 // COALESCE, because a row written by the previous release's binary during a
 // rollout has no created_at and its run_at is the closest thing to one.
@@ -321,17 +311,13 @@ func (q *DatabaseQueue) DeleteJob(ctx context.Context, j *jobs.Job) error {
 // ReleaseJob puts the job back on its queue, eligible again after delay.
 //
 // It writes the exception count, and that is the whole reason a released job
-// can ever be parked by MaxExceptions: Laravel keeps the count in the cache
-// under "job-exceptions:{uuid}" for a day, so it crosses deliveries, and here
-// the column existed and nothing wrote it. Every delivery read zero, so a job
-// with MaxExceptions 2 and MaxTries 5 was delivered five times where Laravel
-// delivers it twice. Found by audit.
+// can ever be parked by MaxExceptions: the count has to cross deliveries. While
+// the column went unwritten every delivery read zero, so a job with
+// MaxExceptions 2 and MaxTries 5 was delivered all five times.
 //
 // created_at moves to now, because a released job goes to the back of the
-// queue. That is what Laravel does by construction -- deleteAndRelease removes
-// the row and inserts a new one, which gets a new id -- and leaving the
-// original there would put a job that has failed twice in front of work nobody
-// has looked at yet.
+// queue: leaving the original there would put a job that has failed twice in
+// front of work nobody has looked at yet.
 func (q *DatabaseQueue) ReleaseJob(ctx context.Context, j *jobs.Job, delay time.Duration) error {
 	if delay < 0 {
 		delay = 0
@@ -373,11 +359,10 @@ func (q *DatabaseQueue) Failed(ctx context.Context, limit int) ([]jobs.Job, erro
 
 // Retry puts a failed job back in line with its attempts reset.
 //
-// The exception count is reset with them, for the reason Laravel forgets its
-// "job-exceptions:{uuid}" key when it parks a job: a retry that kept the count
-// would be parked again by the failure that parked it the first time, without
-// the handler ever having run. created_at moves to now for the reason it moves
-// on a release -- Laravel's retry writes a new row, with a new id, at the back.
+// The exception count is reset with them: a retry that kept the count would be
+// parked again by the failure that parked it the first time, without the
+// handler ever having run. created_at moves to now for the reason it moves on a
+// release -- the job goes to the back of the queue.
 func (q *DatabaseQueue) Retry(ctx context.Context, uuid string) error {
 	now := time.Now().UTC()
 	_, err := q.db.ExecContext(ctx, `
@@ -413,7 +398,7 @@ func (q *DatabaseQueue) PendingSize(ctx context.Context, queue string) (int, err
 	// WHERE says so -- and these two did not, so a worker doing exactly what it
 	// should looked like a backlog: a two-minute handler with a one-minute
 	// threshold made /_arandu/health answer 503 while the job ran, and a load
-	// balancer took the instance out of rotation for it. Found by audit.
+	// balancer took the instance out of rotation for it.
 	//
 	// An expired lease is waiting again, which is why the comparison is against
 	// now rather than a plain IS NULL.
@@ -522,8 +507,8 @@ func (q *DatabaseQueue) query(ctx context.Context, tail string, args ...any) ([]
 
 // Release puts a job back on its queue, eligible again after delay.
 //
-// It answers release(), which is the driver-side half of jobs.Job.Release: a
-// handler and a middleware call the job, and the job calls this.
+// It is the driver-side half of jobs.Job.Release: a handler and a middleware
+// call the job, and the job calls this.
 func (q *DatabaseQueue) Release(ctx context.Context, queue string, j *jobs.Job, delay time.Duration) error {
 	j.Queue = q.GetQueue(queue)
 	return q.ReleaseJob(ctx, j, delay)
@@ -531,18 +516,16 @@ func (q *DatabaseQueue) Release(ctx context.Context, queue string, j *jobs.Job, 
 
 // DeleteAndRelease removes a reserved job and queues it again.
 //
-// It answers deleteAndRelease(). In Laravel the two statements are what a
-// release is, because the row is claimed by deletion and a retry is a new row.
-// Here a release is one UPDATE -- the row never left -- so this is that update,
-// and the name is kept because it is what a Laravel developer looks for.
+// A release here is one UPDATE -- the row never left -- so this is that
+// update, under the name a driver that claims by deletion would need.
 func (q *DatabaseQueue) DeleteAndRelease(ctx context.Context, queue string, j *jobs.Job, delay time.Duration) error {
 	return q.Release(ctx, queue, j, delay)
 }
 
 // DeleteReserved removes a reserved job by its id.
 //
-// It answers deleteReserved(). It is what a command reaches for when a job is
-// stuck: the row is gone and no worker will pick it up when the lease expires.
+// It is what a command reaches for when a job is stuck: the row is gone and no
+// worker will pick it up when the lease expires.
 func (q *DatabaseQueue) DeleteReserved(ctx context.Context, queue, id string) error {
 	if _, err := q.db.ExecContext(ctx, `DELETE FROM jobs WHERE id = ? AND queue = ?`,
 		id, q.GetQueue(queue)); err != nil {
@@ -553,10 +536,9 @@ func (q *DatabaseQueue) DeleteReserved(ctx context.Context, queue, id string) er
 
 // DelayedSize is how many jobs are waiting for a time that has not come.
 //
-// It answers delayedSize(). It is the number [DatabaseQueue.PendingSize] leaves
-// out: a job scheduled for tomorrow is not a backlog, and counting it as one is
-// how a health check pages somebody at three in the morning about a report due
-// at nine.
+// It is the number [DatabaseQueue.PendingSize] leaves out: a job scheduled for
+// tomorrow is not a backlog, and counting it as one is how a health check pages
+// somebody at three in the morning about a report due at nine.
 func (q *DatabaseQueue) DelayedSize(ctx context.Context, queue string) (int, error) {
 	var count int
 	err := q.db.QueryRowContext(ctx, `
@@ -571,9 +553,9 @@ func (q *DatabaseQueue) DelayedSize(ctx context.Context, queue string) (int, err
 
 // ReservedSize is how many jobs a worker is holding right now.
 //
-// It answers reservedSize(). A number that stays high while PendingSize stays
-// high is a worker that took work and stopped: the leases have not expired yet,
-// so nothing is visibly wrong, and this is what shows it.
+// A number that stays high while PendingSize stays high is a worker that took
+// work and stopped: the leases have not expired yet, so nothing is visibly
+// wrong, and this is what shows it.
 func (q *DatabaseQueue) ReservedSize(ctx context.Context, queue string) (int, error) {
 	var count int
 	err := q.db.QueryRowContext(ctx, `

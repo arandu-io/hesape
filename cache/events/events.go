@@ -3,33 +3,28 @@ package events
 // CacheEvent is what every keyed cache event carries: which store, which key,
 // and under which tags.
 //
-// It answers Illuminate\Cache\Events\CacheEvent. In PHP it is an abstract class
-// the others extend; here it is a struct the others embed, which is the same
-// arrangement with the same fields under the same names -- a listener written
-// against CacheHit reads e.Key and e.StoreName exactly as it does in Laravel.
+// It is a struct the other events embed, so a listener written against CacheHit
+// reads e.Key and e.StoreName directly.
 //
 // It is not an interface. A listener that wants "any cache event" switches on
 // the concrete type, and a listener that wants the common part reads the
 // embedded CacheEvent.
 type CacheEvent struct {
-	// StoreName is the name of the cache store the event came from. It answers
-	// $storeName, and it is empty when the repository was built without one --
-	// the null Laravel puts there.
+	// StoreName is the name of the cache store the event came from. It is empty
+	// when the repository was built without one.
 	StoreName string
 
-	// Key is the key the event is about. It answers $key.
+	// Key is the key the event is about.
 	Key string
 
-	// Tags are the tags assigned to the key. It answers $tags, and it is nil on
-	// an untagged repository.
+	// Tags are the tags assigned to the key, and nil on an untagged repository.
 	Tags []string
 }
 
 // SetTags sets the tags for the cache event.
 //
-// It answers CacheEvent::setTags(). It is on a pointer receiver and returns the
-// event so it reads in one line, which is what the PHP's "return $this" is
-// there for.
+// It is on a pointer receiver and returns the event, so assigning tags and
+// dispatching read as one line.
 func (e *CacheEvent) SetTags(tags []string) *CacheEvent {
 	e.Tags = tags
 	return e
@@ -37,9 +32,8 @@ func (e *CacheEvent) SetTags(tags []string) *CacheEvent {
 
 // RetrievingKey is fired before a key is read.
 //
-// It answers Illuminate\Cache\Events\RetrievingKey. It is the "about to look"
-// event, and it fires whether or not anything is there -- CacheHit or
-// CacheMissed follows it.
+// It is the "about to look" event, and it fires whether or not anything is
+// there -- CacheHit or CacheMissed follows it.
 type RetrievingKey struct{ CacheEvent }
 
 // NewRetrievingKey returns the event.
@@ -48,19 +42,16 @@ func NewRetrievingKey(storeName, key string, tags []string) *RetrievingKey {
 }
 
 // RetrievingManyKeys is fired before several keys are read at once.
-//
-// It answers Illuminate\Cache\Events\RetrievingManyKeys.
 type RetrievingManyKeys struct {
 	CacheEvent
 
-	// Keys are the keys being retrieved. It answers $keys.
+	// Keys are the keys being retrieved.
 	Keys []string
 }
 
 // NewRetrievingManyKeys returns the event.
 //
-// Key is the first of keys, and the empty string when there are none, which is
-// what the PHP's null-coalesced $keys[0] does.
+// Key is the first of keys, and the empty string when there are none.
 func NewRetrievingManyKeys(storeName string, keys []string, tags []string) *RetrievingManyKeys {
 	first := ""
 	if len(keys) > 0 {
@@ -73,12 +64,10 @@ func NewRetrievingManyKeys(storeName string, keys []string, tags []string) *Retr
 }
 
 // CacheHit is fired when a key was found.
-//
-// It answers Illuminate\Cache\Events\CacheHit.
 type CacheHit struct {
 	CacheEvent
 
-	// Value is the value that was retrieved. It answers $value.
+	// Value is the value that was retrieved.
 	Value any
 }
 
@@ -92,8 +81,7 @@ func NewCacheHit(storeName, key string, value any, tags []string) *CacheHit {
 
 // CacheMissed is fired when a key was not found.
 //
-// It answers Illuminate\Cache\Events\CacheMissed. It is the event a cache hit
-// rate is computed from, together with CacheHit.
+// It is the event a cache hit rate is computed from, together with CacheHit.
 type CacheMissed struct{ CacheEvent }
 
 // NewCacheMissed returns the event.
@@ -101,20 +89,17 @@ func NewCacheMissed(storeName, key string, tags []string) *CacheMissed {
 	return &CacheMissed{CacheEvent{StoreName: storeName, Key: key, Tags: tags}}
 }
 
-// WritingKey is fired before a key is written.
-//
-// It answers Illuminate\Cache\Events\WritingKey. KeyWritten or KeyWriteFailed
+// WritingKey is fired before a key is written. KeyWritten or KeyWriteFailed
 // follows it.
 type WritingKey struct {
 	CacheEvent
 
-	// Value is the value that will be written. It answers $value.
+	// Value is the value that will be written.
 	Value any
 
-	// Seconds is how long the key should be valid for. It answers $seconds, and
-	// it is seconds and not a time.Duration because that is the unit the event
-	// carries in Laravel and a listener that formats it should not have to
-	// convert.
+	// Seconds is how long the key should be valid for. It is a whole number of
+	// seconds rather than a time.Duration, so a listener that formats or logs
+	// it does not have to convert.
 	Seconds int
 }
 
@@ -128,15 +113,13 @@ func NewWritingKey(storeName, key string, value any, seconds int, tags []string)
 }
 
 // KeyWritten is fired after a key was written.
-//
-// It answers Illuminate\Cache\Events\KeyWritten.
 type KeyWritten struct {
 	CacheEvent
 
-	// Value is the value that was written. It answers $value.
+	// Value is the value that was written.
 	Value any
 
-	// Seconds is how long the key is valid for. It answers $seconds.
+	// Seconds is how long the key is valid for.
 	Seconds int
 }
 
@@ -151,17 +134,16 @@ func NewKeyWritten(storeName, key string, value any, seconds int, tags []string)
 
 // KeyWriteFailed is fired when a write did not happen.
 //
-// It answers Illuminate\Cache\Events\KeyWriteFailed. This is the event worth
-// listening to: a cache that has quietly stopped accepting writes looks exactly
-// like a cache with a very low hit rate, and only this tells the two apart.
+// This is the event worth listening to: a cache that has quietly stopped
+// accepting writes looks exactly like a cache with a very low hit rate, and
+// only this tells the two apart.
 type KeyWriteFailed struct {
 	CacheEvent
 
-	// Value is the value that would have been written. It answers $value.
+	// Value is the value that would have been written.
 	Value any
 
-	// Seconds is how long the key should have been valid for. It answers
-	// $seconds.
+	// Seconds is how long the key should have been valid for.
 	Seconds int
 }
 
@@ -175,26 +157,22 @@ func NewKeyWriteFailed(storeName, key string, value any, seconds int, tags []str
 }
 
 // WritingManyKeys is fired before several keys are written at once.
-//
-// It answers Illuminate\Cache\Events\WritingManyKeys.
 type WritingManyKeys struct {
 	CacheEvent
 
-	// Keys are the keys being written. It answers $keys.
+	// Keys are the keys being written.
 	Keys []string
 
-	// Values are the values being written, in the order of Keys. It answers
-	// $values.
+	// Values are the values being written, in the order of Keys.
 	Values []any
 
-	// Seconds is how long the keys should be valid for. It answers $seconds.
+	// Seconds is how long the keys should be valid for.
 	Seconds int
 }
 
 // NewWritingManyKeys returns the event.
 //
-// Key is the first of keys, which is what the PHP's "$keys[0]" does -- except
-// that an empty set is the empty string here rather than an undefined index.
+// Key is the first of keys, and the empty string when there are none.
 func NewWritingManyKeys(storeName string, keys []string, values []any, seconds int, tags []string) *WritingManyKeys {
 	first := ""
 	if len(keys) > 0 {
@@ -208,9 +186,7 @@ func NewWritingManyKeys(storeName string, keys []string, values []any, seconds i
 	}
 }
 
-// ForgettingKey is fired before a key is removed.
-//
-// It answers Illuminate\Cache\Events\ForgettingKey. KeyForgotten or
+// ForgettingKey is fired before a key is removed. KeyForgotten or
 // KeyForgetFailed follows it.
 type ForgettingKey struct{ CacheEvent }
 
@@ -220,8 +196,6 @@ func NewForgettingKey(storeName, key string, tags []string) *ForgettingKey {
 }
 
 // KeyForgotten is fired after a key was removed.
-//
-// It answers Illuminate\Cache\Events\KeyForgotten.
 type KeyForgotten struct{ CacheEvent }
 
 // NewKeyForgotten returns the event.
@@ -231,9 +205,8 @@ func NewKeyForgotten(storeName, key string, tags []string) *KeyForgotten {
 
 // KeyForgetFailed is fired when a key could not be removed.
 //
-// It answers Illuminate\Cache\Events\KeyForgetFailed. It is the one that
-// matters after a deploy: an invalidation that failed leaves the old value
-// being served, and nothing else says so.
+// It is the one that matters after a deploy: an invalidation that failed leaves
+// the old value being served, and nothing else says so.
 type KeyForgetFailed struct{ CacheEvent }
 
 // NewKeyForgetFailed returns the event.
@@ -243,14 +216,12 @@ func NewKeyForgetFailed(storeName, key string, tags []string) *KeyForgetFailed {
 
 // CacheFlushing is fired before a store is flushed.
 //
-// It answers Illuminate\Cache\Events\CacheFlushing. It carries no key, because
-// a flush is about all of them.
+// It carries no key, because a flush is about all of them.
 type CacheFlushing struct {
-	// StoreName is the name of the cache store. It answers $storeName.
+	// StoreName is the name of the cache store.
 	StoreName string
 
-	// Tags are the tags being flushed, and nil when the whole namespace is. It
-	// answers $tags.
+	// Tags are the tags being flushed, and nil when the whole namespace is.
 	Tags []string
 }
 
@@ -259,21 +230,18 @@ func NewCacheFlushing(storeName string, tags []string) *CacheFlushing {
 	return &CacheFlushing{StoreName: storeName, Tags: tags}
 }
 
-// SetTags sets the tags for the cache event. It answers
-// CacheFlushing::setTags().
+// SetTags sets the tags for the event and returns it.
 func (e *CacheFlushing) SetTags(tags []string) *CacheFlushing {
 	e.Tags = tags
 	return e
 }
 
 // CacheFlushed is fired after a store was flushed.
-//
-// It answers Illuminate\Cache\Events\CacheFlushed.
 type CacheFlushed struct {
-	// StoreName is the name of the cache store. It answers $storeName.
+	// StoreName is the name of the cache store.
 	StoreName string
 
-	// Tags are the tags that were flushed. It answers $tags.
+	// Tags are the tags that were flushed.
 	Tags []string
 }
 
@@ -282,21 +250,18 @@ func NewCacheFlushed(storeName string, tags []string) *CacheFlushed {
 	return &CacheFlushed{StoreName: storeName, Tags: tags}
 }
 
-// SetTags sets the tags for the cache event. It answers
-// CacheFlushed::setTags().
+// SetTags sets the tags for the event and returns it.
 func (e *CacheFlushed) SetTags(tags []string) *CacheFlushed {
 	e.Tags = tags
 	return e
 }
 
 // CacheFlushFailed is fired when a flush did not happen.
-//
-// It answers Illuminate\Cache\Events\CacheFlushFailed.
 type CacheFlushFailed struct {
-	// StoreName is the name of the cache store. It answers $storeName.
+	// StoreName is the name of the cache store.
 	StoreName string
 
-	// Tags are the tags that were being flushed. It answers $tags.
+	// Tags are the tags that were being flushed.
 	Tags []string
 }
 
@@ -305,18 +270,15 @@ func NewCacheFlushFailed(storeName string, tags []string) *CacheFlushFailed {
 	return &CacheFlushFailed{StoreName: storeName, Tags: tags}
 }
 
-// SetTags sets the tags for the cache event. It answers
-// CacheFlushFailed::setTags().
+// SetTags sets the tags for the event and returns it.
 func (e *CacheFlushFailed) SetTags(tags []string) *CacheFlushFailed {
 	e.Tags = tags
 	return e
 }
 
 // CacheLocksFlushing is fired before every lock in a store is released.
-//
-// It answers Illuminate\Cache\Events\CacheLocksFlushing.
 type CacheLocksFlushing struct {
-	// StoreName is the name of the cache store. It answers $storeName.
+	// StoreName is the name of the cache store.
 	StoreName string
 }
 
@@ -326,10 +288,8 @@ func NewCacheLocksFlushing(storeName string) *CacheLocksFlushing {
 }
 
 // CacheLocksFlushed is fired after every lock in a store was released.
-//
-// It answers Illuminate\Cache\Events\CacheLocksFlushed.
 type CacheLocksFlushed struct {
-	// StoreName is the name of the cache store. It answers $storeName.
+	// StoreName is the name of the cache store.
 	StoreName string
 }
 
@@ -339,10 +299,8 @@ func NewCacheLocksFlushed(storeName string) *CacheLocksFlushed {
 }
 
 // CacheLocksFlushFailed is fired when the locks could not be released.
-//
-// It answers Illuminate\Cache\Events\CacheLocksFlushFailed.
 type CacheLocksFlushFailed struct {
-	// StoreName is the name of the cache store. It answers $storeName.
+	// StoreName is the name of the cache store.
 	StoreName string
 }
 
@@ -354,15 +312,14 @@ func NewCacheLocksFlushFailed(storeName string) *CacheLocksFlushFailed {
 // CacheFailedOver is fired when one store of a failover set refused an
 // operation and the next one was tried.
 //
-// It answers Illuminate\Cache\Events\CacheFailedOver. It fires once per store
-// per failure, and only when that store was not already failing -- so a cache
-// that has been down for an hour produces one event, not one per request.
+// It fires once per store per failure, and only when that store was not already
+// failing -- so a cache that has been down for an hour produces one event, not
+// one per request.
 type CacheFailedOver struct {
-	// StoreName is the name of the cache store that failed. It answers
-	// $storeName.
+	// StoreName is the name of the cache store that failed.
 	StoreName string
 
-	// Err is what it failed with. It answers $exception.
+	// Err is what it failed with.
 	Err error
 }
 

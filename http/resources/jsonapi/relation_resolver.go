@@ -1,19 +1,15 @@
 package jsonapi
 
-// RelationResolver mirrors Illuminate\Http\Resources\JsonApi\RelationResolver.
-//
-// It resolves a named relation on a resource. In the PHP version, the
-// default resolver calls $resource->getRelation($name); in Go, callers
-// supply a resolver function.
+// RelationResolver resolves a named relation on a resource. Callers supply
+// a resolver function.
 type RelationResolver struct {
 	RelationName          string
 	Resolver              func(resource any) any
 	RelationResourceClass string
 }
 
-// NewRelationResolver creates a RelationResolver. If resolver is nil,
-// the default resolver attempts to call GetRelation on the resource
-// if it implements the RelationGetter interface.
+// NewRelationResolver creates a RelationResolver from a name and a resolver
+// function.
 func NewRelationResolver(relationName string, resolver func(any) any) *RelationResolver {
 	return &RelationResolver{
 		RelationName: relationName,
@@ -21,7 +17,8 @@ func NewRelationResolver(relationName string, resolver func(any) any) *RelationR
 	}
 }
 
-// Handle resolves the relation on the given resource.
+// Handle resolves the relation on the given resource. Returns nil when no
+// resolver function was given.
 func (r *RelationResolver) Handle(resource any) any {
 	if r.Resolver == nil {
 		return nil
@@ -35,8 +32,8 @@ func (r *RelationResolver) ResourceClass() string {
 	return r.RelationResourceClass
 }
 
-// RelationGetter is an interface that resources can implement to
-// provide relation access.
+// RelationGetter is an interface a resource can implement to expose a named
+// relation. It is not yet consulted by [RelationResolver.Handle].
 type RelationGetter interface {
 	GetRelation(name string) any
 }

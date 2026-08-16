@@ -75,8 +75,8 @@ func testMailer(tr mail.Transport, views mail.Renderer, from string) *mail.Maile
 }
 
 // echoView is a Renderer that answers with the name of the view it was asked
-// for, so a test can put the body it wants straight into Content.Text --
-// which, as in Illuminate, is a view name and not a body.
+// for, so a test can put the body it wants straight into Content.Text -- which
+// is a view name and not a body.
 type echoView struct{}
 
 func (echoView) RenderToString(name string, _ any) (string, error) { return name, nil }

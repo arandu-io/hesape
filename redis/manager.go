@@ -9,11 +9,10 @@ import (
 	"github.com/arandu-io/hesape/redis/connectors"
 )
 
-// DefaultConnection is the name a caller gets when it asks for none. It is
-// Laravel's 'default', spelled once.
+// DefaultConnection is the name a caller gets when it asks for none.
 const DefaultConnection = "default"
 
-// RedisManager answers Illuminate\Redis\RedisManager.
+// RedisManager hands out connections by name.
 //
 // It holds the configured connections by name, opens them on first use and
 // hands out the same one afterwards -- which is the point of it: a connection
@@ -21,15 +20,14 @@ const DefaultConnection = "default"
 //
 // # What it is not
 //
-// Laravel's manager resolves the event dispatcher out of the container and
-// parses connection configuration out of an array of arrays. Neither happens
-// here (ADR 0001, ADR 0002): the application builds connections.Config values
-// in bootstrap/app.go and passes them in, and the dispatcher arrives through
-// SetEventDispatcher. What is left is what anyone actually calls -- turn a
-// name into a connection, and turn command events on.
+// It does not read configuration and it does not resolve its own dispatcher:
+// the application builds connections.Config values in bootstrap/app.go and
+// passes them in, and the dispatcher arrives through SetEventDispatcher. What
+// is left is what anyone actually calls -- turn a name into a connection, and
+// turn command events on.
 //
-// It is safe for concurrent use, which Laravel's is not and does not need to
-// be: one manager serves every request in the process.
+// It is safe for concurrent use: one manager serves every request in the
+// process.
 type RedisManager struct {
 	mu sync.RWMutex
 
@@ -43,10 +41,9 @@ type RedisManager struct {
 
 // NewRedisManager builds the manager from the configured connections.
 //
-// driver is the client name -- "phpredis" in a Laravel configuration file --
-// and it selects a custom creator registered with Extend. There is one built-in
-// client, so an unknown driver with no creator behind it is the built-in one;
-// see the package documentation for why there is no second.
+// driver is the client name, and it selects a custom creator registered with
+// Extend. There is one built-in client, so an unknown driver with no creator
+// behind it is the built-in one.
 func NewRedisManager(driver string, config map[string]connections.Config) *RedisManager {
 	return &RedisManager{
 		driver:         driver,
@@ -59,8 +56,7 @@ func NewRedisManager(driver string, config map[string]connections.Config) *Redis
 // Connection returns the connection with the given name, opening it the first
 // time it is asked for.
 //
-// It answers RedisManager::connection(). An empty name is "default", which is
-// the `$name ?: 'default'` of the PHP.
+// An empty name is DefaultConnection.
 func (m *RedisManager) Connection(name string) (*connections.Connection, error) {
 	if name == "" {
 		name = DefaultConnection
@@ -93,13 +89,11 @@ func (m *RedisManager) Connection(name string) (*connections.Connection, error) 
 
 // Resolve opens the given connection by name, without remembering it.
 //
-// It answers RedisManager::resolve(), and it is the half of Connection that
-// does the work: a caller that wants a second, separate connection to the same
-// server -- a subscriber, which blocks its socket for as long as it listens --
-// calls this one.
+// It is the half of Connection that does the work: a caller that wants a
+// second, separate connection to the same server -- a subscriber, which blocks
+// its socket for as long as it listens -- calls this one.
 //
-// A name nobody configured is an error, which is the PHP's
-// InvalidArgumentException.
+// A name nobody configured is an error.
 func (m *RedisManager) Resolve(name string) (*connections.Connection, error) {
 	if name == "" {
 		name = DefaultConnection
@@ -187,10 +181,8 @@ func (m *RedisManager) DisableEvents() {
 
 // SetEventDispatcher gives the manager the dispatcher command events go to.
 //
-// Laravel resolves it from the container inside configure(); there is no
-// container here (ADR 0001), so the application hands it over. Without it
-// EnableEvents turns on something with nowhere to go, and says so by doing
-// nothing.
+// The application hands it over. Without it, EnableEvents turns on something
+// with nowhere to go, and says so by doing nothing.
 func (m *RedisManager) SetEventDispatcher(dispatcher connections.Dispatcher) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -205,8 +197,6 @@ func (m *RedisManager) SetEventDispatcher(dispatcher connections.Dispatcher) {
 
 // SetDriver sets the default driver, which is the name Extend registered a
 // custom creator under.
-//
-// It answers RedisManager::setDriver().
 func (m *RedisManager) SetDriver(driver string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -216,10 +206,9 @@ func (m *RedisManager) SetDriver(driver string) {
 // Purge disconnects the given connection and forgets it, so the next
 // Connection opens a fresh one.
 //
-// It answers RedisManager::purge(). The PHP only drops its reference and lets
-// the object be collected; Go has no finalizer to close the socket, so this
-// closes it -- a purge that leaked the pool would be a purge that runs out of
-// file descriptors under a reconnect loop.
+// It closes the socket rather than only dropping the reference: a purge that
+// leaked the pool would be a purge that runs out of file descriptors under a
+// reconnect loop.
 func (m *RedisManager) Purge(name string) error {
 	if name == "" {
 		name = DefaultConnection
@@ -238,10 +227,9 @@ func (m *RedisManager) Purge(name string) error {
 
 // Extend registers a custom connection creator for a driver name.
 //
-// It answers RedisManager::extend(). It is how an application opens its
-// connection its own way -- a TLS configuration this package does not name, a
-// socket path, a proxy -- without a second constructor existing for everybody
-// else (RULE 9).
+// It is how an application opens its connection its own way -- a TLS
+// configuration this package does not name, a socket path, a proxy -- without a
+// second constructor existing for everybody else.
 func (m *RedisManager) Extend(driver string, callback func(connections.Config) (*connections.Connection, error)) *RedisManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -251,9 +239,8 @@ func (m *RedisManager) Extend(driver string, callback func(connections.Config) (
 
 // Close disconnects every open connection.
 //
-// Laravel has no equivalent, because PHP tears the process down after each
-// request. A long-lived process has to give the sockets back on shutdown, and
-// the module lifecycle calls this.
+// A long-lived process has to give the sockets back on shutdown, and the module
+// lifecycle calls this.
 func (m *RedisManager) Close() error {
 	m.mu.Lock()
 	open := m.connections

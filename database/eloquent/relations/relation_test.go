@@ -172,8 +172,8 @@ func TestHasManyThroughReachesTheFarParentThroughTheJoin(t *testing.T) {
 	}
 }
 
-// TestHasManyThroughDoesNotReachThroughAnotherTenantsRow is RULE 17 on the
-// intermediate table.
+// TestHasManyThroughDoesNotReachThroughAnotherTenantsRow covers the intermediate
+// table.
 //
 // The country is this customer's and so is the post. What is not is the user
 // row that links them: this customer's user 1 lives in another country
@@ -219,8 +219,8 @@ func TestHasManyThroughDoesNotReachThroughAnotherTenantsRow(t *testing.T) {
 	}
 }
 
-// TestLatestOfManyAggregatesOnlyTheGrantsTenant is RULE 17 inside the subquery
-// a one-of-many relation joins.
+// TestLatestOfManyAggregatesOnlyTheGrantsTenant covers inside the subquery a
+// one-of-many relation joins.
 //
 // latestOfMany picks a row with `max(posts.id)`, taken in a grouped subquery and
 // joined back. The subquery used to be compiled to raw SQL and joined by hand

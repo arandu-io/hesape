@@ -7,18 +7,19 @@ import (
 	"github.com/arandu-io/hesape/support"
 )
 
-// AsStringable answers Illuminate\Database\Eloquent\Casts\AsStringable: a text
-// column read as a str.Stringable.
+// AsStringable casts a text column into a str.Stringable.
 type AsStringable struct{}
 
-// CastUsing answers AsStringable::castUsing.
+// CastUsing returns the caster that reads and writes the column as a
+// str.Stringable.
 func (AsStringable) CastUsing(arguments []string) (CastsAttributes, error) {
 	return stringableCast{}, nil
 }
 
 type stringableCast struct{}
 
-// Get answers the anonymous caster's get.
+// Get returns value's text form wrapped as a str.Stringable, or nil if value
+// has no text form.
 func (stringableCast) Get(model any, key string, value any, attributes map[string]any) (any, error) {
 	text, ok := asText(value)
 	if !ok {
@@ -27,7 +28,8 @@ func (stringableCast) Get(model any, key string, value any, attributes map[strin
 	return str.Of(text), nil
 }
 
-// Set answers the anonymous caster's set: the string back, or null.
+// Set returns the column holding value's text form, or nil if value has no
+// text form.
 func (stringableCast) Set(model any, key string, value any, attributes map[string]any) (map[string]any, error) {
 	text, ok := asText(value)
 	if !ok {
@@ -45,19 +47,18 @@ func (stringableCast) Set(model any, key string, value any, attributes map[strin
 // input becomes stored cross-site scripting the moment it is rendered.
 //
 // Writing stores the string unchanged, and a null column reads as nil.
-//
-// Answers Illuminate\Database\Eloquent\Casts\AsHtmlString. The PHP spells the
-// class AsHtmlString, so the type does too.
 type AsHtmlString struct{}
 
-// CastUsing answers AsHtmlString::castUsing.
+// CastUsing returns the caster that reads and writes the column as a
+// support.HtmlString.
 func (AsHtmlString) CastUsing(arguments []string) (CastsAttributes, error) {
 	return htmlStringCast{}, nil
 }
 
 type htmlStringCast struct{}
 
-// Get answers the anonymous caster's get.
+// Get returns value's text form wrapped as a support.HtmlString, or nil if
+// value has no text form.
 func (htmlStringCast) Get(model any, key string, value any, attributes map[string]any) (any, error) {
 	text, ok := asText(value)
 	if !ok {
@@ -66,7 +67,8 @@ func (htmlStringCast) Get(model any, key string, value any, attributes map[strin
 	return support.NewHtmlString(text), nil
 }
 
-// Set answers the anonymous caster's set.
+// Set returns the column holding value's text form, or nil if value has no
+// text form.
 func (htmlStringCast) Set(model any, key string, value any, attributes map[string]any) (map[string]any, error) {
 	text, ok := asText(value)
 	if !ok {
@@ -82,20 +84,18 @@ func (htmlStringCast) Set(model any, key string, value any, attributes map[strin
 // Writing stores the URI's string form, and a null column reads as nil. A
 // column the parser rejects returns an error rather than a half-built value:
 // the malformed row is reported where it is read, not where it is later used.
-//
-// Answers Illuminate\Database\Eloquent\Casts\AsUri. The PHP spells the class
-// AsUri, so the type does too, rather than AsURI.
 type AsUri struct{}
 
-// CastUsing answers AsUri::castUsing.
+// CastUsing returns the caster that reads and writes the column as a
+// *support.Uri.
 func (AsUri) CastUsing(arguments []string) (CastsAttributes, error) {
 	return uriCast{}, nil
 }
 
 type uriCast struct{}
 
-// Get answers the anonymous caster's get. The PHP's Uri constructor throws on
-// a malformed string, and support.NewUri returns the error instead.
+// Get parses value's text form as a *support.Uri, and returns an error if
+// the text is malformed.
 func (uriCast) Get(model any, key string, value any, attributes map[string]any) (any, error) {
 	text, ok := asText(value)
 	if !ok {
@@ -108,7 +108,8 @@ func (uriCast) Get(model any, key string, value any, attributes map[string]any) 
 	return uri, nil
 }
 
-// Set answers the anonymous caster's set: the URI back as its string.
+// Set returns the column holding a *support.Uri's string form, or value's
+// text form for anything else, or nil if it has none.
 func (uriCast) Set(model any, key string, value any, attributes map[string]any) (map[string]any, error) {
 	if uri, ok := value.(*support.Uri); ok && uri != nil {
 		return map[string]any{key: uri.String()}, nil
@@ -120,18 +121,19 @@ func (uriCast) Set(model any, key string, value any, attributes map[string]any) 
 	return map[string]any{key: text}, nil
 }
 
-// AsFluent answers Illuminate\Database\Eloquent\Casts\AsFluent: a JSON object
-// column read as a support.Fluent.
+// AsFluent casts a JSON object column into a support.Fluent.
 type AsFluent struct{}
 
-// CastUsing answers AsFluent::castUsing.
+// CastUsing returns the caster that reads and writes the column as a
+// support.Fluent.
 func (AsFluent) CastUsing(arguments []string) (CastsAttributes, error) {
 	return fluentCast{}, nil
 }
 
 type fluentCast struct{}
 
-// Get answers the anonymous caster's get.
+// Get decodes the column and returns it as a support.Fluent, or nil if value
+// is nil or does not decode to a JSON object.
 func (fluentCast) Get(model any, key string, value any, attributes map[string]any) (any, error) {
 	if value == nil {
 		return nil, nil
@@ -147,7 +149,8 @@ func (fluentCast) Get(model any, key string, value any, attributes map[string]an
 	return support.NewFluent(bag), nil
 }
 
-// Set answers the anonymous caster's set.
+// Set encodes value as JSON and returns the column holding it, or nil for a
+// nil value.
 func (fluentCast) Set(model any, key string, value any, attributes map[string]any) (map[string]any, error) {
 	if value == nil {
 		return nil, nil
@@ -159,9 +162,9 @@ func (fluentCast) Set(model any, key string, value any, attributes map[string]an
 	return map[string]any{key: encoded}, nil
 }
 
-// asText answers the PHP's isset($value) followed by (string) $value: a stored
-// column reaches a cast as a string from one driver and as []byte from another,
-// and null from either.
+// asText normalizes a stored column to text and reports whether it had one.
+// nil has none; a string or []byte is returned as is; a fmt.Stringer is
+// rendered through String; anything else is formatted with fmt.Sprint.
 func asText(value any) (string, bool) {
 	switch stored := value.(type) {
 	case nil:

@@ -8,8 +8,7 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// MySQLGrammar answers Illuminate\Database\Query\Grammars\MySqlGrammar. The PHP
-// spells it MySql; Go initialisms are upper case throughout.
+// MySQLGrammar is the grammar for MySQL.
 //
 // What it changes about standard SQL, and nothing else: identifiers are quoted
 // with a backtick, a random order is RAND(), a shared lock is "lock in share
@@ -21,23 +20,22 @@ type MySQLGrammar struct {
 
 var _ query.Grammar = (*MySQLGrammar)(nil)
 
-// NewMySQLGrammar answers `new MySqlGrammar`.
+// NewMySQLGrammar creates a MySQLGrammar.
 func NewMySQLGrammar() *MySQLGrammar {
 	g := &MySQLGrammar{Grammar: NewGrammar()}
 	g.Grammar.self = g
 	return g
 }
 
-// GetOperators answers MySqlGrammar::$operators.
+// GetOperators returns the standard operators plus the ones MySQL adds.
 //
-// The PHP keeps the driver's operators in their own list and Builder checks
-// both; query.BaseGrammar already answers with the shared list, so the driver's
-// are appended to it.
+// query.BaseGrammar already provides the shared list, so the driver's own
+// operators are appended to it.
 func (g *MySQLGrammar) GetOperators() []string {
 	return append(g.Grammar.GetOperators(), "sounds like")
 }
 
-// CompileSelect answers MySqlGrammar::compileSelect: the statement, plus the
+// CompileSelect builds the SQL for a select statement, adding the
 // execution time hint when the query asked for a timeout.
 func (g *MySQLGrammar) CompileSelect(q *query.Builder) string {
 	sql := g.Grammar.CompileSelect(q)
@@ -56,8 +54,8 @@ func (g *MySQLGrammar) CompileSelect(q *query.Builder) string {
 	return sql
 }
 
-// WhereLike answers MySqlGrammar::whereLike. MySQL spells a case sensitive like
-// "like binary".
+// WhereLike compiles a like where clause. MySQL spells a case sensitive
+// like "like binary".
 func (g *MySQLGrammar) WhereLike(q *query.Builder, where query.Where) string {
 	operator := ""
 	if where.Not {
@@ -74,11 +72,11 @@ func (g *MySQLGrammar) WhereLike(q *query.Builder, where query.Where) string {
 	return g.self.WhereBasic(q, where)
 }
 
-// WhereNull answers MySqlGrammar::whereNull.
+// WhereNull compiles an "is null" where clause.
 //
-// A JSON path that is absent and a JSON path holding the literal null are two
-// different things to MySQL and one thing to everybody asking the question, so
-// both are tested.
+// A JSON path that is absent and a JSON path holding the literal null are
+// two different things to MySQL and one thing to everybody asking the
+// question, so both are tested.
 func (g *MySQLGrammar) WhereNull(q *query.Builder, where query.Where) string {
 	column := text(g.self.GetValue(where.Column))
 
@@ -90,7 +88,9 @@ func (g *MySQLGrammar) WhereNull(q *query.Builder, where query.Where) string {
 	return g.Grammar.WhereNull(q, where)
 }
 
-// WhereNotNull answers MySqlGrammar::whereNotNull.
+// WhereNotNull compiles an "is not null" where clause, testing both the
+// absent and the literal-null case for a JSON path the same way WhereNull
+// does.
 func (g *MySQLGrammar) WhereNotNull(q *query.Builder, where query.Where) string {
 	column := text(g.self.GetValue(where.Column))
 
@@ -102,7 +102,7 @@ func (g *MySQLGrammar) WhereNotNull(q *query.Builder, where query.Where) string 
 	return g.Grammar.WhereNotNull(q, where)
 }
 
-// WhereFullText answers MySqlGrammar::whereFullText.
+// WhereFullText compiles a full-text search where clause.
 func (g *MySQLGrammar) WhereFullText(q *query.Builder, where query.Where) (string, error) {
 	d := g.self
 	columns := d.Columnize(where.Columns)
@@ -121,16 +121,17 @@ func (g *MySQLGrammar) WhereFullText(q *query.Builder, where query.Where) (strin
 	return "match (" + columns + ") against (" + value + mode + expanded + ")", nil
 }
 
-// indexName is the PHP's /^[a-zA-Z0-9_$]+$/.
+// indexName matches a bare identifier: letters, digits, underscore and
+// dollar sign.
 var indexName = regexp.MustCompile(`^[a-zA-Z0-9_$]+$`)
 
-// CompileIndexHint answers MySqlGrammar::compileIndexHint.
+// CompileIndexHint builds the index hint component.
 //
-// The index name is written into the statement rather than bound, because no
-// engine binds an identifier, so a name that is not a bare identifier is
-// dropped. The PHP throws InvalidArgumentException; the hint compiles inside
-// CompileSelect, which returns a string, and dropping a hint changes the plan
-// and never the rows -- while interpolating it would be an injection.
+// The index name is written into the statement rather than bound, because
+// no engine binds an identifier, so a name that is not a bare identifier is
+// dropped rather than returned as an error: the hint compiles inside
+// CompileSelect, which returns a string, and dropping a hint changes the
+// plan and never the rows -- while interpolating it would be an injection.
 func (g *MySQLGrammar) CompileIndexHint(q *query.Builder, indexHint *query.IndexHint) string {
 	index := indexHint.Index
 
@@ -150,13 +151,14 @@ func (g *MySQLGrammar) CompileIndexHint(q *query.Builder, indexHint *query.Index
 	}
 }
 
-// legacyGroupLimiter is the one question MySqlGrammar asks itself that
-// MariaDbGrammar answers differently.
+// legacyGroupLimiter is the one question MySQLGrammar asks itself that
+// MariaDBGrammar resolves differently.
 type legacyGroupLimiter interface {
 	UseLegacyGroupLimit(q *query.Builder) bool
 }
 
-// CompileGroupLimit answers MySqlGrammar::compileGroupLimit.
+// CompileGroupLimit builds a select with a group limit's window function,
+// or the legacy session-variable form on a server old enough to need it.
 func (g *MySQLGrammar) CompileGroupLimit(q *query.Builder) string {
 	if limiter, ok := g.self.(legacyGroupLimiter); ok && limiter.UseLegacyGroupLimit(q) {
 		return g.compileLegacyGroupLimit(q)
@@ -164,13 +166,12 @@ func (g *MySQLGrammar) CompileGroupLimit(q *query.Builder) string {
 	return g.Grammar.CompileGroupLimit(q)
 }
 
-// UseLegacyGroupLimit answers MySqlGrammar::useLegacyGroupLimit: window
-// functions arrived in MySQL 8.0.11.
+// UseLegacyGroupLimit reports whether the session-variable form of a group
+// limit is needed: window functions arrived in MySQL 8.0.11.
 //
-// The PHP also asks the connection whether it is really MariaDB, because
-// Laravel once compiled MariaDB with this grammar. MariaDB has a grammar of its
-// own here, and it answers false, so the question does not need asking twice.
-// A connection that cannot report a version is taken to be current.
+// MariaDB has a grammar of its own, which always returns false here, so
+// nothing here has to ask whether the connection is really MariaDB. A
+// connection that cannot report a version is taken to be current.
 func (g *MySQLGrammar) UseLegacyGroupLimit(q *query.Builder) bool {
 	version, ok := serverVersion(q.GetConnection())
 	if !ok {
@@ -179,9 +180,8 @@ func (g *MySQLGrammar) UseLegacyGroupLimit(q *query.Builder) bool {
 	return versionLess(version, "8.0.11")
 }
 
-// compileLegacyGroupLimit answers MySqlGrammar::compileLegacyGroupLimit: the
-// row numbering done with session variables, for a server without window
-// functions.
+// compileLegacyGroupLimit builds the row numbering done with session
+// variables, for a server without window functions.
 func (g *MySQLGrammar) compileLegacyGroupLimit(q *query.Builder) string {
 	d := g.self
 	groupLimit := q.GetGroupLimit()
@@ -214,9 +214,9 @@ func (g *MySQLGrammar) compileLegacyGroupLimit(q *query.Builder) string {
 	return sql + " order by `laravel_row`"
 }
 
-// CompileInsert answers MySqlGrammar::compileInsert: MySQL writes a row of
-// defaults as an empty column list rather than with the "default values"
-// keyword.
+// CompileInsert builds the SQL for an insert statement. MySQL writes a row
+// of defaults as an empty column list rather than with the "default
+// values" keyword.
 func (g *MySQLGrammar) CompileInsert(q *query.Builder, values []map[string]any) string {
 	if len(values) == 0 {
 		values = []map[string]any{{}}
@@ -224,52 +224,58 @@ func (g *MySQLGrammar) CompileInsert(q *query.Builder, values []map[string]any) 
 	return g.Grammar.CompileInsert(q, values)
 }
 
-// CompileInsertOrIgnore answers MySqlGrammar::compileInsertOrIgnore.
+// CompileInsertOrIgnore builds an insert statement that ignores
+// conflicting rows.
 func (g *MySQLGrammar) CompileInsertOrIgnore(q *query.Builder, values []map[string]any) string {
 	return strings.Replace(g.self.CompileInsert(q, values), "insert", "insert ignore", 1)
 }
 
-// CompileInsertOrIgnoreUsing answers MySqlGrammar::compileInsertOrIgnoreUsing.
+// CompileInsertOrIgnoreUsing builds an insert-from-select statement that
+// ignores conflicting rows.
 func (g *MySQLGrammar) CompileInsertOrIgnoreUsing(q *query.Builder, columns []any, sql string) (string, error) {
 	return strings.Replace(g.self.CompileInsertUsing(q, columns, sql), "insert", "insert ignore", 1), nil
 }
 
-// CompileJSONContains answers MySqlGrammar::compileJsonContains.
+// CompileJSONContains builds the SQL fragment testing whether a JSON
+// column contains a value.
 func (g *MySQLGrammar) CompileJSONContains(column any, value string) (string, error) {
 	field, path := g.wrapJSONFieldAndPath(column)
 	return "json_contains(" + field + ", " + value + path + ")", nil
 }
 
-// CompileJSONOverlaps answers MySqlGrammar::compileJsonOverlaps.
+// CompileJSONOverlaps builds the SQL fragment testing whether a JSON
+// column overlaps a value.
 func (g *MySQLGrammar) CompileJSONOverlaps(column any, value string) (string, error) {
 	field, path := g.wrapJSONFieldAndPath(column)
 	return "json_overlaps(" + field + ", " + value + path + ")", nil
 }
 
-// CompileJSONContainsKey answers MySqlGrammar::compileJsonContainsKey.
+// CompileJSONContainsKey builds the SQL fragment testing whether a JSON
+// column contains a key.
 func (g *MySQLGrammar) CompileJSONContainsKey(column any) (string, error) {
 	field, path := g.wrapJSONFieldAndPath(column)
 	return "ifnull(json_contains_path(" + field + ", 'one'" + path + "), 0)", nil
 }
 
-// CompileJSONLength answers MySqlGrammar::compileJsonLength.
+// CompileJSONLength builds the SQL fragment comparing a JSON column's
+// length.
 func (g *MySQLGrammar) CompileJSONLength(column any, operator, value string) (string, error) {
 	field, path := g.wrapJSONFieldAndPath(column)
 	return "json_length(" + field + path + ") " + operator + " " + value, nil
 }
 
-// CompileJSONValueCast answers MySqlGrammar::compileJsonValueCast.
+// CompileJSONValueCast casts a value expression to JSON.
 func (g *MySQLGrammar) CompileJSONValueCast(value string) string {
 	return "cast(" + value + " as json)"
 }
 
-// CompileRandom answers MySqlGrammar::compileRandom.
+// CompileRandom builds a random ordering, seeded when the seed parses as a
+// number.
 //
 // The seed is written into the statement, so a seed that is not a number is
-// dropped and the unseeded form is emitted. The PHP throws
-// InvalidArgumentException; CompileRandom returns a string, and a random order
-// that is not reproducible is a smaller thing than interpolating a caller's
-// string into SQL.
+// dropped and the unseeded form is emitted instead: a random order that is
+// not reproducible is a smaller thing than interpolating a caller's string
+// into SQL.
 func (g *MySQLGrammar) CompileRandom(seed string) string {
 	if seed == "" {
 		return "RAND()"
@@ -281,7 +287,7 @@ func (g *MySQLGrammar) CompileRandom(seed string) string {
 	return "RAND(" + strconv.Itoa(number) + ")"
 }
 
-// CompileLock answers MySqlGrammar::compileLock.
+// CompileLock builds the SQL locking clause.
 func (g *MySQLGrammar) CompileLock(q *query.Builder, value any) string {
 	if lock, ok := value.(string); ok {
 		return lock
@@ -292,8 +298,9 @@ func (g *MySQLGrammar) CompileLock(q *query.Builder, value any) string {
 	return "lock in share mode"
 }
 
-// CompileUpdateColumns answers MySqlGrammar::compileUpdateColumns: a JSON path
-// is updated in place with json_set rather than by replacing the document.
+// CompileUpdateColumns builds the SQL set list for an update statement. A
+// JSON path is updated in place with json_set rather than by replacing the
+// document.
 func (g *MySQLGrammar) CompileUpdateColumns(q *query.Builder, values map[string]any) string {
 	d := g.self
 	parts := make([]string, 0, len(values))
@@ -309,7 +316,8 @@ func (g *MySQLGrammar) CompileUpdateColumns(q *query.Builder, values map[string]
 	return strings.Join(parts, ", ")
 }
 
-// compileJSONUpdateColumn answers MySqlGrammar::compileJsonUpdateColumn.
+// compileJSONUpdateColumn builds the json_set expression that updates one
+// JSON path in place.
 func (g *MySQLGrammar) compileJSONUpdateColumn(key string, value any) string {
 	var parameter string
 
@@ -330,14 +338,15 @@ func (g *MySQLGrammar) compileJSONUpdateColumn(key string, value any) string {
 	return field + " = json_set(" + field + path + ", " + parameter + ")"
 }
 
-// CompileUpsert answers MySqlGrammar::compileUpsert.
+// CompileUpsert builds an insert statement that updates the given columns
+// on a conflicting row.
 //
 // # One shape, not two
 //
-// The PHP accepts the update list either as a list of column names or as a map
-// of column to value. query.Grammar declares it as a list of names, so the
-// column keeps the value the insert would have given it -- which is the form
-// every caller of upsert uses.
+// query.Grammar declares the update list as a list of column names, so each
+// column keeps the value the insert would have given it -- which is the
+// form every caller of upsert uses, rather than also accepting a map of
+// column to a different value.
 func (g *MySQLGrammar) CompileUpsert(q *query.Builder, values []map[string]any, uniqueBy []string, update []string) string {
 	d := g.self
 	useUpsertAlias := configBool(q.GetConnection(), "use_upsert_alias")
@@ -362,32 +371,34 @@ func (g *MySQLGrammar) CompileUpsert(q *query.Builder, values []map[string]any, 
 	return sql + strings.Join(columns, ", ")
 }
 
-// CompileJoinLateral answers MySqlGrammar::compileJoinLateral.
+// CompileJoinLateral builds the SQL for a lateral join.
 func (g *MySQLGrammar) CompileJoinLateral(join *query.JoinClause, expression string) (string, error) {
 	return strings.TrimSpace(join.Type + " join lateral " + expression + " on true"), nil
 }
 
-// SupportsStraightJoins answers MySqlGrammar::supportsStraightJoins.
+// SupportsStraightJoins reports true: MySQL supports a straight_join.
 func (g *MySQLGrammar) SupportsStraightJoins() (bool, error) { return true, nil }
 
-// CompileUpdateWithoutJoins answers MySqlGrammar::compileUpdateWithoutJoins:
+// CompileUpdateWithoutJoins builds the SQL for an update with no joins.
 // MySQL takes an order and a limit on an update.
 func (g *MySQLGrammar) CompileUpdateWithoutJoins(q *query.Builder, table, columns, where string) string {
 	sql := g.Grammar.CompileUpdateWithoutJoins(q, table, columns, where)
 	return sql + g.orderAndLimit(q)
 }
 
-// CompileDeleteWithoutJoins answers MySqlGrammar::compileDeleteWithoutJoins.
+// CompileDeleteWithoutJoins builds the SQL for a delete with no joins,
+// adding an order and a limit when the query has them.
 func (g *MySQLGrammar) CompileDeleteWithoutJoins(q *query.Builder, table, where string) string {
 	sql := g.Grammar.CompileDeleteWithoutJoins(q, table, where)
 	return sql + g.orderAndLimit(q)
 }
 
-// CompileDeleteWithJoins answers MySqlGrammar::compileDeleteWithJoins.
+// CompileDeleteWithJoins builds the SQL for a delete that joins other
+// tables.
 //
 // Standard MySQL rejects an order or a limit on a joined delete and some
-// compatible servers accept them, so they are emitted when they were asked for
-// and the server is left to say what it supports.
+// compatible servers accept them, so they are emitted when they were asked
+// for and the server is left to say what it supports.
 func (g *MySQLGrammar) CompileDeleteWithJoins(q *query.Builder, table, where string) string {
 	sql := g.Grammar.CompileDeleteWithJoins(q, table, where)
 	return sql + g.orderAndLimit(q)
@@ -405,11 +416,11 @@ func (g *MySQLGrammar) orderAndLimit(q *query.Builder) string {
 	return sql
 }
 
-// PrepareBindingsForUpdate answers MySqlGrammar::prepareBindingsForUpdate.
+// PrepareBindingsForUpdate orders the bindings for an update statement.
 //
-// A boolean written into a JSON path is compiled into the statement rather than
-// bound, so its binding is dropped here; an array or an object becomes its JSON
-// text.
+// A boolean written into a JSON path is compiled into the statement rather
+// than bound, so its binding is dropped here; an array or an object becomes
+// its JSON text.
 func (g *MySQLGrammar) PrepareBindingsForUpdate(bindings map[string][]any, values map[string]any) []any {
 	prepared := make(map[string]any, len(values))
 
@@ -429,13 +440,13 @@ func (g *MySQLGrammar) PrepareBindingsForUpdate(bindings map[string][]any, value
 	return g.Grammar.PrepareBindingsForUpdate(bindings, prepared)
 }
 
-// CompileThreadCount answers MySqlGrammar::compileThreadCount.
+// CompileThreadCount builds the SQL that counts open connections.
 func (g *MySQLGrammar) CompileThreadCount() string {
 	return "select variable_value as `Value` from performance_schema.session_status where variable_name = 'threads_connected'"
 }
 
-// WrapValue answers MySqlGrammar::wrapValue: MySQL quotes an identifier with a
-// backtick, and doubles a backtick inside one.
+// WrapValue quotes one identifier segment. MySQL quotes an identifier with
+// a backtick, and doubles a backtick inside one.
 func (g *MySQLGrammar) WrapValue(value string) string {
 	if value == "*" {
 		return value
@@ -443,14 +454,16 @@ func (g *MySQLGrammar) WrapValue(value string) string {
 	return "`" + strings.ReplaceAll(value, "`", "``") + "`"
 }
 
-// WrapJSONSelector answers MySqlGrammar::wrapJsonSelector.
+// WrapJSONSelector quotes a JSON path selector, unquoting the extracted
+// value.
 func (g *MySQLGrammar) WrapJSONSelector(value string) string {
 	field, path := g.wrapJSONFieldAndPath(value)
 	return "json_unquote(json_extract(" + field + path + "))"
 }
 
-// WrapJSONBooleanSelector answers MySqlGrammar::wrapJsonBooleanSelector: a
-// boolean is compared unquoted, so the extract is not unwrapped.
+// WrapJSONBooleanSelector quotes a JSON path selector for a boolean
+// comparison. The value is compared unquoted, so the extract is not
+// unwrapped.
 func (g *MySQLGrammar) WrapJSONBooleanSelector(value string) string {
 	field, path := g.wrapJSONFieldAndPath(value)
 	return "json_extract(" + field + path + ")"

@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-// resetStrict puts the process-wide switches back however the test ends. They
-// are static properties in PHP and package state here, so a test that left one
-// on would decide the next one.
+// resetStrict puts the process-wide switches back however the test ends.
+// They are package state, so a test that left one on would decide the next
+// one.
 func resetStrict(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {

@@ -10,7 +10,7 @@ import (
 
 // fakeConnection is the schema.Connection the grammar tests compile against.
 //
-// It answers what a real connection would answer and remembers what it was
+// It responds the way a real connection would and remembers what it was
 // asked to run, so a test can look at the DDL without a server. Reaching for a
 // real database here would only prove that the driver works; what is under test
 // is the SQL, and the SQL is the same whether or not anything executes it.

@@ -9,12 +9,11 @@ import (
 // Register wires the transports this package carries into a manager, under the
 // names a configuration file asks for.
 //
-// It exists because Illuminate's MailManager::createSymfonyTransport is a
-// switch that constructs transport classes directly, and the Go equivalent
-// would be a cycle: mail/transport imports mail, so mail cannot import
-// mail/transport. Registering inverts it, and has a second effect worth having
-// -- a transport somebody else writes arrives through exactly the same door as
-// the seven here, so there is one way to add one.
+// It exists because constructing these types inside mail would be a cycle:
+// mail/transport imports mail, so mail cannot import mail/transport.
+// Registering inverts it, and has a second effect worth having -- a transport
+// somebody else writes arrives through exactly the same door as the seven here,
+// so there is one way to add one.
 //
 //	manager := mail.NewMailManager(config, views, events)
 //	transport.Register(manager)

@@ -1005,9 +1005,8 @@ func TestWithFlashesToTheSessionThePageAfterTheRedirectReads(t *testing.T) {
 }
 
 func TestWithOnARedirectWithNoSessionIsQuietRatherThanFatal(t *testing.T) {
-	// A redirect built outside a request has nowhere to flash to. The PHP
-	// would fatal on a null session; a handler that redirects from a place
-	// with no session should not take the process down.
+	// A redirect built outside a request has nowhere to flash to. A nil
+	// session must not turn a chainable call into a panic.
 	redirect := NewRedirectResponse("/orders")
 	if redirect.With("status", "Order placed.") != redirect {
 		t.Fatal("With should chain even with no session behind it")
@@ -1038,12 +1037,12 @@ func TestAnUploadThatLiesAboutItsTypeKeepsBothAnswersApart(t *testing.T) {
 
 // --- Audit regressions: vendor content type negotiation ---
 
-// TestMatchesTypeMatchesAVendorSuffix pins Request::matchesType, which strips
-// the subtype off the first argument and looks for it as a "+suffix" in the
+// TestMatchesTypeMatchesAVendorSuffix pins MatchesType, which strips the
+// subtype off the first argument and looks for it as a "+suffix" in the
 // second. It was written the other way round -- the suffix was taken off the
 // second argument and looked for in the first -- and the "+json" it then
 // searched for could never appear in a bare "json", so every case answered
-// false. Verified against the PHP with php -r for each row below.
+// false.
 func TestMatchesTypeMatchesAVendorSuffix(t *testing.T) {
 	cases := []struct {
 		actual string
@@ -1085,8 +1084,7 @@ func TestAcceptsAVendorContentType(t *testing.T) {
 	}
 	// Prefers reads the pair the other way round -- the caller's type is the
 	// plain one and the Accept header is where the suffix sits -- so it is the
-	// mirror of the case above, and both were false before. Verified against
-	// the PHP with php -r, including that the reverse pair is NULL there.
+	// mirror of the case above, and both were false before.
 	vendor := newRequest(t, "GET", "/things", nil)
 	vendor.request.Header.Set("Accept", "application/vnd.api+json")
 	if got := vendor.Prefers("text/html", "application/json"); got != "application/json" {
@@ -1099,11 +1097,10 @@ func TestAcceptsAVendorContentType(t *testing.T) {
 
 // --- Audit regression: the forwarded chain ---
 
-// TestIPsReturnsTheWholeForwardedChain pins Request::ips, which is
-// Symfony's getClientIps: the X-Forwarded-For entries plus the peer, with the
-// trusted proxies removed, nearest hop first. It returned a list of one on
-// every request, so the doc comment's "chain of client addresses" was never a
-// chain.
+// TestIPsReturnsTheWholeForwardedChain pins IPs, which returns the
+// X-Forwarded-For entries plus the peer, with the trusted proxies removed,
+// nearest hop first. It returned a list of one on every request, so the doc
+// comment's "chain of client addresses" was never a chain.
 func TestIPsReturnsTheWholeForwardedChain(t *testing.T) {
 	r := newRequest(t, "GET", "/", nil)
 	r.request.RemoteAddr = "2.2.2.2:1234"

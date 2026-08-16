@@ -8,7 +8,7 @@ import (
 )
 
 // The harness the execution tests run against: a connection that records what
-// it was asked to run and answers with rows the test queued, and a grammar that
+// it was asked to run and returns rows the test queued, and a grammar that
 // compiles enough SQL for the statement to be read back and checked.
 //
 // The grammar is here rather than a stub returning a fixed string because the

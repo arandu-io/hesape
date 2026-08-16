@@ -13,7 +13,7 @@ import (
 )
 
 // The tenant every provider in this file is configured with. It comes from here
-// -- the wiring -- and from nowhere else, which is the whole of RULE 14 as far
+// -- the wiring -- and from nowhere else, which is the whole of the rule as far
 // as a user provider is concerned.
 const tenant = "acme"
 
@@ -36,8 +36,7 @@ func newEloquentProvider(connection *fakeConnection, hasher auth.Hasher) *users.
 // and the account could never be signed in to -- with the guard reporting the
 // same refusal a wrong password gets.
 //
-// The PHP coerces: password_verify is declared string and Illuminate does not
-// declare strict_types, so 12345 arrives as "12345" and the sign-in works.
+// The value is coerced instead: 12345 becomes "12345" and the sign-in works.
 func TestValidateCredentialsAcceptsAPasswordThatIsNotAString(t *testing.T) {
 	hasher := cheapHasher()
 	user := &testUser{attributes: map[string]any{
@@ -62,9 +61,9 @@ func TestValidateCredentialsAcceptsAPasswordThatIsNotAString(t *testing.T) {
 	}
 }
 
-// The other shapes PHP renders on the way into password_verify. A number is the
-// one that happens; the rest are here so that the coercion is a rule and not a
-// patch for float64.
+// The other shapes a credential may arrive in. A number is the one that
+// happens; the rest are here so that the coercion is a rule and not a patch for
+// float64.
 func TestValidateCredentialsCoercesEveryShapePHPWouldHaveCoerced(t *testing.T) {
 	hasher := cheapHasher()
 
@@ -94,8 +93,8 @@ func TestValidateCredentialsCoercesEveryShapePHPWouldHaveCoerced(t *testing.T) {
 	}
 }
 
-// A value PHP cannot render is a TypeError there and a refusal here. It must
-// never authenticate, and it must never panic.
+// A value that cannot be rendered as text is a refusal. It must never
+// authenticate, and it must never panic.
 func TestValidateCredentialsRefusesAPasswordThatIsNotAValue(t *testing.T) {
 	hasher := cheapHasher()
 	user := &testUser{attributes: map[string]any{"password": mustHash(t, hasher, "correct horse")}}
@@ -121,11 +120,11 @@ func TestValidateCredentialsRefusesAPasswordThatIsNotAValue(t *testing.T) {
 // TestValidateCredentialsHandsAnEmptyPasswordToTheHasher is the regression for
 // the early return on plain == "".
 //
-// The PHP has no such return: "" goes into password_verify like any other value
-// and is refused there, in the time a bcrypt comparison takes. Returning early
-// made the empty password the one refusal that costs nothing, which is a
-// difference that can be timed. The claim is not "false" -- it was false before
-// too -- it is that the hasher was reached.
+// An empty string goes to the hasher like any other value and is refused there,
+// in the time a bcrypt comparison takes. Returning early made the empty
+// password the one refusal that costs nothing, which is a difference that can
+// be timed. The claim is not "false" -- it was false before too -- it is that
+// the hasher was reached.
 func TestValidateCredentialsHandsAnEmptyPasswordToTheHasher(t *testing.T) {
 	hasher := newCountingHasher()
 	user := &testUser{attributes: map[string]any{"password": mustHash(t, hasher, "correct horse")}}
@@ -141,9 +140,9 @@ func TestValidateCredentialsHandsAnEmptyPasswordToTheHasher(t *testing.T) {
 	}
 }
 
-// The one guard the PHP really has on the stored side: an account whose password
-// column is empty -- an invite that was never completed -- cannot be signed in
-// to by offering an empty password.
+// The guard on the stored side: an account whose password column is empty -- an
+// invite that was never completed -- cannot be signed in to by offering an
+// empty password.
 func TestValidateCredentialsRefusesAnAccountWithNoPassword(t *testing.T) {
 	hasher := newCountingHasher()
 	provider := newEloquentProvider(&fakeConnection{}, hasher)
@@ -165,12 +164,9 @@ func TestValidateCredentialsRefusesAnAccountWithNoPassword(t *testing.T) {
 // The whole retrieve-and-validate path, on a real hasher
 // ---------------------------------------------------------------------------
 
-// TestEloquentUserProviderAuthenticatesWithARealBcryptHasher is the proof asked
-// for by the first defect: a hashing.BcryptHasher -- not a double -- reaches
+// TestEloquentUserProviderAuthenticatesWithARealBcryptHasher pins the whole
+// path on a real hasher: a hashing.BcryptHasher -- not a double -- reaches
 // auth.UserProvider.ValidateCredentials and authenticates through it.
-//
-// Before hashing.AuthHasher existed this test did not compile: *BcryptHasher was
-// not an auth.Hasher, so there was nothing to pass to the constructor.
 func TestEloquentUserProviderAuthenticatesWithARealBcryptHasher(t *testing.T) {
 	hasher := cheapHasher()
 	hashed := mustHash(t, hasher, "correct horse battery staple")
@@ -250,8 +246,8 @@ func TestRetrieveByCredentialsWithOnlyPasswordKeysIssuesNoStatement(t *testing.T
 	}
 }
 
-// A credential holding a slice is a whereIn, and a callback is handed the query,
-// which is the PHP's three shapes.
+// A credential holding a slice is a WhereIn, a callback is handed the query, and
+// anything else is an equality.
 func TestRetrieveByCredentialsAppliesTheThreeCredentialShapes(t *testing.T) {
 	connection := (&fakeConnection{}).queue(query.Record{"id": int64(7)})
 	provider := newEloquentProvider(connection, cheapHasher())
@@ -465,7 +461,7 @@ func TestRehashPasswordIfRequiredCoercesThePassword(t *testing.T) {
 // A provider wired with no tenant reaches no row at all. auth.SystemGrant
 // answers the zero Grant for an empty tenant, and the zero Grant passes no
 // Check -- so the failure is a refusal at the statement, not a query that reads
-// every customer's users (RULE 14).
+// every customer's users.
 func TestAProviderWithNoTenantCannotReadAnything(t *testing.T) {
 	connection := (&fakeConnection{}).queue(query.Record{"id": int64(7)})
 	provider := users.NewEloquentUserProvider(cheapHasher(), newTestUser, connection.users, "")
@@ -522,7 +518,7 @@ func TestTheProviderActionsAreTheTwoConstants(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // The provider with no model: the same behaviour over a GenericUser, including
-// the coercion, which is the PHP's shared validateCredentials.
+// the coercion, because both providers share one ValidateCredentials body.
 func TestDatabaseUserProviderAuthenticatesWithARealBcryptHasher(t *testing.T) {
 	hasher := cheapHasher()
 	connection := (&fakeConnection{}).queue(query.Record{

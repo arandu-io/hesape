@@ -12,8 +12,7 @@ import (
 
 // Config is what it takes to open a connection.
 //
-// It answers the array a connector is handed in Laravel -- host, port, password,
-// database, prefix -- as a typed struct, because a map of strings is a set of
+// It is a typed struct rather than a map of strings, because a map is a set of
 // keys nobody can list and a typo in one of them is a default nobody chose.
 type Config struct {
 	// Address is host:port. It is the single-node case, and it is the one
@@ -23,11 +22,10 @@ type Config struct {
 
 	// Addresses is the cluster, when the deployment shards.
 	//
-	// It answers the `clusters` block of Laravel's database.php, and it is a
-	// field rather than a second connection type because that is all the
-	// difference amounts to here: go-redis routes by slot when it is given more
-	// than one address, and every command in this package is written the same
-	// either way.
+	// It is a field rather than a second connection type because that is all
+	// the difference amounts to here: the driver routes by slot when it is
+	// given more than one address, and every command in this package is written
+	// the same either way.
 	//
 	// When it is set, Address is ignored. Nothing in this adapter uses a
 	// multi-key command across slots, which is what makes that safe -- see the
@@ -47,7 +45,7 @@ type Config struct {
 	//
 	// It is the application's prefix and nothing else. The tenant is NOT here:
 	// it is a key segment that cache.Repository builds from the Grant, and a
-	// prefix chosen at boot could not carry it (RULE 14).
+	// prefix chosen at boot could not carry it.
 	Prefix string
 
 	// DialTimeout bounds the connect. Unbounded, a key-value store that is down
@@ -66,16 +64,16 @@ type Config struct {
 // hatch for the commands this type does not name.
 type Connection struct {
 	// PacksPhpRedisValues is embedded so that Pack and the questions about
-	// serialization are where the PHP has them. Every answer is a constant --
-	// see the type.
+	// serialization are reachable on a connection. Every answer is a constant
+	// -- see the type.
 	PacksPhpRedisValues
 
 	client goredis.UniversalClient
 	prefix string
 
-	// mu guards the two fields the manager writes after construction. Laravel's
-	// Connection is a per-request object and needs no lock; this one is shared
-	// by every goroutine serving a request, and `go test -race` says so.
+	// mu guards the two fields the manager writes after construction. One
+	// Connection is shared by every goroutine serving a request, and
+	// `go test -race` says so.
 	mu     sync.RWMutex
 	name   string
 	events Dispatcher
@@ -114,8 +112,8 @@ func Connect(cfg Config) *Connection {
 
 	return &Connection{
 		// NewUniversalClient returns the single-node client for one address and
-		// the cluster client for several, which is the whole of what
-		// PhpRedisConnector::connect and connectToCluster differ by.
+		// the cluster client for several, which is the whole of what the
+		// single-node and cluster cases differ by.
 		client: goredis.NewUniversalClient(&goredis.UniversalOptions{
 			Addrs:        addrs,
 			Password:     cfg.Password,
@@ -140,8 +138,6 @@ func Connect(cfg Config) *Connection {
 func (c *Connection) Client() goredis.UniversalClient { return c.client }
 
 // Prefix is what Key puts in front of every key, without its separator.
-//
-// It answers the getPrefix() every store and connection in Laravel has.
 func (c *Connection) Prefix() string { return c.prefix }
 
 // Key puts the application prefix in front of a key that is already built.
@@ -158,8 +154,6 @@ func (c *Connection) Key(key string) string {
 }
 
 // Ping verifies the connection. It feeds the module health check.
-//
-// It answers Connection::ping().
 func (c *Connection) Ping(ctx context.Context) error {
 	if err := c.client.Ping(ctx).Err(); err != nil {
 		return fmt.Errorf("redis: %w", err)

@@ -35,9 +35,6 @@ func (r *Records) add(rec Record) {
 	r.records = append(r.records, rec)
 }
 
-// All has no Illuminate counterpart: there is no log fake in Illuminate, so
-// nothing there reads back what was written.
-//
 // All returns a copy of the captured lines, oldest first.
 func (r *Records) All() []Record {
 	r.mu.Lock()
@@ -45,8 +42,6 @@ func (r *Records) All() []Record {
 	return append([]Record(nil), r.records...)
 }
 
-// Len has no Illuminate counterpart, for the same reason All has none.
-//
 // Len is how many lines were captured.
 func (r *Records) Len() int {
 	r.mu.Lock()
@@ -54,11 +49,6 @@ func (r *Records) Len() int {
 	return len(r.records)
 }
 
-// Capture has no Illuminate counterpart: Illuminate\Support\Testing\Fakes has a
-// fake for the bus, the queue, mail, notifications and events, and none for the
-// log. A Laravel test that asserts on a log line reaches for Monolog's
-// TestHandler, and there is no Monolog here.
-//
 // Capture returns a logger that writes into memory, and the memory.
 //
 // It is what a test installs with Into when the assertion is about a log line:

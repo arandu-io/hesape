@@ -9,70 +9,76 @@ import (
 	"github.com/arandu-io/hesape/support"
 )
 
-// The encoding flags answer to the PHP JSON_* constants JsonResponse takes as
-// its $options argument and HasEncodingOption tests against. The values are
-// PHP's, because the whole point of HasEncodingOption is that a caller reads a
-// flag it set, and a renumbered set would answer a different question.
+// The encoding flags are bit values JsonResponse takes as its options
+// argument, and HasEncodingOption tests a caller's payload against. The
+// numbers are fixed: a caller reads back a flag it set through
+// HasEncodingOption, and renumbering the constants would answer a different
+// question for anyone who already depends on the current values.
 //
 // encoding/json has no flag word, so only the flags that change what Go can
 // emit are honoured: JSONPrettyPrint indents, JSONUnescapedSlashes and
 // JSONUnescapedUnicode turn off Go's HTML escaping, and
-// JSONPartialOutputOnError is read by SetData when deciding whether an encoding
-// failure is fatal. The rest are accepted, stored and reported by
-// HasEncodingOption, and change nothing -- as they would in PHP for a payload
-// that does not contain what they are about.
+// JSONPartialOutputOnError is read by SetData when deciding whether an
+// encoding failure is fatal. The rest are accepted, stored and reported by
+// HasEncodingOption, and otherwise change nothing.
 const (
-	// JSONHexTag answers to PHP's JSON_HEX_TAG.
+	// JSONHexTag is the "hex tag" encoding flag: escape "<" and ">".
 	JSONHexTag = 1
-	// JSONHexAmp answers to PHP's JSON_HEX_AMP.
+	// JSONHexAmp is the "hex amp" encoding flag: escape "&".
 	JSONHexAmp = 2
-	// JSONHexApos answers to PHP's JSON_HEX_APOS.
+	// JSONHexApos is the "hex apos" encoding flag: escape "'".
 	JSONHexApos = 4
-	// JSONHexQuot answers to PHP's JSON_HEX_QUOT.
+	// JSONHexQuot is the "hex quot" encoding flag: escape the double quote.
 	JSONHexQuot = 8
-	// JSONForceObject answers to PHP's JSON_FORCE_OBJECT.
+	// JSONForceObject forces an empty value or a map to encode as a JSON
+	// object rather than an array.
 	JSONForceObject = 16
-	// JSONNumericCheck answers to PHP's JSON_NUMERIC_CHECK.
+	// JSONNumericCheck encodes a numeric string as a number.
 	JSONNumericCheck = 32
-	// JSONUnescapedSlashes answers to PHP's JSON_UNESCAPED_SLASHES.
+	// JSONUnescapedSlashes and JSONUnescapedUnicode both mean "stop
+	// rewriting characters that were already valid", which in encoding/json
+	// is the one switch SetEscapeHTML: setting either flag turns it off.
 	JSONUnescapedSlashes = 64
-	// JSONPrettyPrint answers to PHP's JSON_PRETTY_PRINT.
+	// JSONPrettyPrint indents the encoded output.
 	JSONPrettyPrint = 128
-	// JSONUnescapedUnicode answers to PHP's JSON_UNESCAPED_UNICODE.
+	// JSONUnescapedUnicode is documented on JSONUnescapedSlashes.
 	JSONUnescapedUnicode = 256
-	// JSONPartialOutputOnError answers to PHP's JSON_PARTIAL_OUTPUT_ON_ERROR.
+	// JSONPartialOutputOnError falls back to an empty object instead of
+	// failing when the value cannot be encoded. SetData reads it.
 	JSONPartialOutputOnError = 512
-	// JSONPreserveZeroFraction answers to PHP's JSON_PRESERVE_ZERO_FRACTION.
+	// JSONPreserveZeroFraction keeps a trailing ".0" on a float that has no
+	// fractional part.
 	JSONPreserveZeroFraction = 1024
-	// JSONThrowOnError answers to PHP's JSON_THROW_ON_ERROR.
+	// JSONThrowOnError is accepted for compatibility; an encoding failure is
+	// always reported through the returned error here.
 	JSONThrowOnError = 4194304
 )
 
-// JsonResponse mirrors Illuminate\Http\JsonResponse: a Response whose body is
-// the JSON encoding of a value, with the encoding flags kept so that
-// SetEncodingOptions can re-encode what is already there.
+// JsonResponse is a Response whose body is the JSON encoding of a value,
+// with the encoding flags kept so that SetEncodingOptions can re-encode what
+// is already there.
 //
-// It embeds Response, which is how the PHP `extends BaseJsonResponse` plus
-// `use ResponseTrait` arrives in Go: Status, Header, WithCookie, ThrowResponse
-// and the rest are the same methods on the same fields.
+// It embeds Response, so Status, Header, WithCookie, ThrowResponse and the
+// rest are the same methods on the same fields.
 type JsonResponse struct {
 	Response
 
-	// data is the encoded payload. Symfony keeps it separate from the content
-	// because the JSONP callback wraps it.
+	// data is the encoded payload, kept separate from the embedded
+	// Response's content because the JSONP callback wraps it.
 	data string
-	// encodingOptions is the $options word.
+	// encodingOptions is the encoding flags this response was built or last
+	// re-encoded with.
 	encodingOptions int
 }
 
-// NewJsonResponse answers to JsonResponse::__construct.
+// NewJsonResponse builds a JsonResponse.
 //
-// The variadic arguments are the PHP's defaults, in order: status (200),
-// headers (none), options (0) and json (false -- whether data is already an
-// encoded JSON string).
+// The variadic arguments are, in order: status (200), headers (none),
+// options (0) and json (false -- whether data is already an encoded JSON
+// string).
 //
-// The PHP throws InvalidArgumentException when encoding fails, so this returns
-// (*JsonResponse, error).
+// Returns (*JsonResponse, error): the error is set when data cannot be
+// encoded.
 func NewJsonResponse(data any, args ...any) (*JsonResponse, error) {
 	status := stdhttp.StatusOK
 	var headers stdhttp.Header
@@ -127,11 +133,10 @@ func NewJsonResponse(data any, args ...any) (*JsonResponse, error) {
 	return r, nil
 }
 
-// FromJsonString answers to JsonResponse::fromJsonString: build a response
-// around a string that is already encoded JSON.
+// FromJsonString builds a response around a string that is already encoded
+// JSON.
 //
-// It is a package function and not a method because the PHP is static. The
-// variadic arguments are the PHP's status (200) and headers (none).
+// The variadic arguments are status (200) and headers (none).
 func FromJsonString(data string, args ...any) (*JsonResponse, error) {
 	rest := make([]any, 0, 4)
 	if len(args) > 0 {
@@ -148,14 +153,12 @@ func FromJsonString(data string, args ...any) (*JsonResponse, error) {
 	return NewJsonResponse(data, rest...)
 }
 
-// GetData answers to JsonResponse::getData: the payload decoded back out of the
-// encoded body.
+// GetData is the payload decoded back out of the encoded body.
 //
-// The PHP takes $assoc and $depth, which choose between an object and an
-// associative array and cap the nesting; encoding/json has neither -- it
-// decodes into map[string]any either way and has no depth limit -- so the two
-// arguments are accepted and ignored, and this returns (any, error) where the
-// PHP returns null on a decode failure.
+// The variadic args are accepted and ignored: they exist for a caller
+// passing a decoding mode and a depth limit, neither of which encoding/json
+// needs -- it always decodes into map[string]any and has no depth limit. An
+// empty body decodes as (nil, nil).
 func (r *JsonResponse) GetData(args ...any) (any, error) {
 	var decoded any
 	if r.data == "" {
@@ -167,13 +170,11 @@ func (r *JsonResponse) GetData(args ...any) (any, error) {
 	return decoded, nil
 }
 
-// SetData answers to JsonResponse::setData: encode the value and make it the
-// body. It keeps the value on $original, which is what GetOriginalContent
-// returns.
+// SetData encodes the value and makes it the body. It keeps the value on
+// original, which is what GetOriginalContent returns.
 //
-// The PHP throws InvalidArgumentException when encoding fails, unless
-// JSONPartialOutputOnError is set; this returns the error, and honours the same
-// flag by falling back to an empty object.
+// Returns an error when encoding fails, unless JSONPartialOutputOnError is
+// set, in which case it falls back to an empty object instead.
 func (r *JsonResponse) SetData(data any) (*JsonResponse, error) {
 	r.original = data
 
@@ -202,9 +203,9 @@ func (r *JsonResponse) encode(data any) (string, error) {
 
 	var buffer bytes.Buffer
 	encoder := json.NewEncoder(&buffer)
-	// JSON_UNESCAPED_SLASHES and JSON_UNESCAPED_UNICODE both mean "stop
-	// rewriting characters that were already valid", which in encoding/json is
-	// the one switch SetEscapeHTML.
+	// JSONUnescapedSlashes and JSONUnescapedUnicode both mean "stop
+	// rewriting characters that were already valid", which in encoding/json
+	// is the one switch SetEscapeHTML.
 	if r.encodingOptions&(JSONUnescapedSlashes|JSONUnescapedUnicode) != 0 {
 		encoder.SetEscapeHTML(false)
 	}
@@ -214,12 +215,13 @@ func (r *JsonResponse) encode(data any) (string, error) {
 	if err := encoder.Encode(data); err != nil {
 		return "", err
 	}
-	// Encode appends a newline that the PHP json_encode does not.
+	// Encoder.Encode appends a trailing newline; it is trimmed so the body
+	// has none.
 	return string(bytes.TrimRight(buffer.Bytes(), "\n")), nil
 }
 
 // setJSONString writes the payload and rebuilds the body, wrapping it in the
-// JSONP callback when there is one. It answers to Symfony's update().
+// JSONP callback when there is one.
 func (r *JsonResponse) setJSONString(data string) {
 	r.data = data
 	if r.callback != "" {
@@ -231,81 +233,79 @@ func (r *JsonResponse) setJSONString(data string) {
 	r.content = data
 }
 
-// SetEncodingOptions answers to JsonResponse::setEncodingOptions: change the
-// flags and re-encode what is already there.
+// SetEncodingOptions changes the flags and re-encodes what is already there.
 func (r *JsonResponse) SetEncodingOptions(options int) (*JsonResponse, error) {
 	r.encodingOptions = options
 	return r.SetData(r.original)
 }
 
-// GetEncodingOptions answers to Symfony's JsonResponse::getEncodingOptions.
+// GetEncodingOptions is the encoding flags currently set.
 func (r *JsonResponse) GetEncodingOptions() int { return r.encodingOptions }
 
-// HasEncodingOption answers to JsonResponse::hasEncodingOption: whether a flag
-// is set in the options word.
+// HasEncodingOption reports whether a flag is set in the encoding options.
 func (r *JsonResponse) HasEncodingOption(option int) bool {
 	return r.encodingOptions&option != 0
 }
 
-// WithCallback answers to JsonResponse::withCallback: set the JSONP callback.
+// WithCallback sets the JSONP callback.
 func (r *JsonResponse) WithCallback(callback string) *JsonResponse {
 	return r.SetCallback(callback)
 }
 
-// SetCallback answers to Symfony's JsonResponse::setCallback, which
-// withCallback calls.
+// SetCallback sets the JSONP callback and rebuilds the body. WithCallback
+// calls it.
 func (r *JsonResponse) SetCallback(callback string) *JsonResponse {
 	r.callback = callback
 	r.setJSONString(r.data)
 	return r
 }
 
-// The next block redeclares the ResponseTrait methods that return $this. Go has
-// no covariant return type, so the promoted method from the embedded Response
-// would hand back a *Response and end the chain; PHP's $this keeps its class.
+// The next block redeclares the Response methods that return the receiver.
+// Go has no covariant return type, so the promoted method from the embedded
+// Response would hand back a *Response and end the chain.
 
-// Header is ResponseTrait::header, typed for the chain.
+// Header is [Response.Header], typed for the chain.
 func (r *JsonResponse) Header(key string, values ...any) *JsonResponse {
 	r.Response.Header(key, values...)
 	return r
 }
 
-// WithHeaders is ResponseTrait::withHeaders, typed for the chain.
+// WithHeaders is [Response.WithHeaders], typed for the chain.
 func (r *JsonResponse) WithHeaders(headers stdhttp.Header) *JsonResponse {
 	r.Response.WithHeaders(headers)
 	return r
 }
 
-// WithoutHeader is ResponseTrait::withoutHeader, typed for the chain.
+// WithoutHeader is [Response.WithoutHeader], typed for the chain.
 func (r *JsonResponse) WithoutHeader(keys ...string) *JsonResponse {
 	r.Response.WithoutHeader(keys...)
 	return r
 }
 
-// Cookie is ResponseTrait::cookie, typed for the chain.
+// Cookie is [Response.Cookie], typed for the chain.
 func (r *JsonResponse) Cookie(cookie *stdhttp.Cookie) *JsonResponse {
 	return r.WithCookie(cookie)
 }
 
-// WithCookie is ResponseTrait::withCookie, typed for the chain.
+// WithCookie is [Response.WithCookie], typed for the chain.
 func (r *JsonResponse) WithCookie(cookie *stdhttp.Cookie) *JsonResponse {
 	r.Response.WithCookie(cookie)
 	return r
 }
 
-// WithoutCookie is ResponseTrait::withoutCookie, typed for the chain.
+// WithoutCookie is [Response.WithoutCookie], typed for the chain.
 func (r *JsonResponse) WithoutCookie(name string, args ...string) *JsonResponse {
 	r.Response.WithoutCookie(name, args...)
 	return r
 }
 
-// WithException is ResponseTrait::withException, typed for the chain.
+// WithException is [Response.WithException], typed for the chain.
 func (r *JsonResponse) WithException(err error) *JsonResponse {
 	r.Response.WithException(err)
 	return r
 }
 
-// SetStatusCode is Symfony's Response::setStatusCode, typed for the chain.
+// SetStatusCode is [Response.SetStatusCode], typed for the chain.
 func (r *JsonResponse) SetStatusCode(code int) *JsonResponse {
 	r.Response.SetStatusCode(code)
 	return r

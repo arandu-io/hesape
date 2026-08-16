@@ -8,9 +8,8 @@ import (
 
 // ArgumentMode is what a positional argument accepts.
 //
-// It mirrors the InputArgument constants Parser.php builds with, and the values
-// are theirs: they are a bit field, and an array argument that is also required
-// is ArgumentIsArray|ArgumentRequired.
+// It is a bit field: an array argument that is also required is
+// ArgumentIsArray|ArgumentRequired.
 type ArgumentMode int
 
 const (
@@ -24,10 +23,8 @@ const (
 
 // OptionMode is what a --flag accepts.
 //
-// It mirrors the InputOption constants. Parser.php only ever produces
-// OptionValueNone and OptionValueOptional -- a signature has no syntax for a
-// value that is required -- but the constant is here because the definition a
-// command builds by hand can use it, exactly as in Symfony.
+// A signature has no syntax for a value that is required, but the constant
+// is here because a definition a command builds by hand can use it.
 type OptionMode int
 
 const (
@@ -43,8 +40,7 @@ const (
 
 // Argument is one positional operand of a command.
 //
-// It answers Symfony's InputArgument, which is what Parser.php returns: the
-// signature "{user}" is one of these, and so is "{ids?*}".
+// The signature "{user}" is one of these, and so is "{ids?*}".
 type Argument struct {
 	// Name is what argument() is called with.
 	Name string
@@ -60,23 +56,18 @@ type Argument struct {
 	//
 	// It is a slice and not a string because "{ids=1,2}" has two of them and
 	// "{name=guest}" has one: a scalar argument reads Default[0] and an array
-	// argument reads all of it. PHP has one mixed field and does the same test
-	// at every use.
+	// argument reads all of it.
 	Default []string
 }
 
-// IsRequired is Symfony's InputArgument::isRequired: whether the command refuses
-// to run without the argument.
+// IsRequired reports whether the command refuses to run without the
+// argument.
 func (a Argument) IsRequired() bool { return a.Mode&ArgumentRequired != 0 }
 
-// IsArray is Symfony's InputArgument::isArray: whether the argument swallows
-// every remaining operand.
+// IsArray reports whether the argument swallows every remaining operand.
 func (a Argument) IsArray() bool { return a.Mode&ArgumentIsArray != 0 }
 
 // Option is one --flag of a command.
-//
-// It answers Symfony's InputOption, which is the other half of what Parser.php
-// returns.
 type Option struct {
 	// Name is what option() is called with, without the leading dashes.
 	Name string
@@ -96,21 +87,18 @@ type Option struct {
 	Default []string
 }
 
-// AcceptValue is Symfony's InputOption::acceptValue: whether the option takes a
-// value at all.
+// AcceptValue reports whether the option takes a value at all.
 func (o Option) AcceptValue() bool {
 	return o.Mode&(OptionValueRequired|OptionValueOptional) != 0
 }
 
-// IsValueRequired is Symfony's InputOption::isValueRequired: whether --name must
-// be followed by a value.
+// IsValueRequired reports whether --name must be followed by a value.
 func (o Option) IsValueRequired() bool { return o.Mode&OptionValueRequired != 0 }
 
-// IsArray is Symfony's InputOption::isArray: whether the flag may be repeated
-// and collects every value.
+// IsArray reports whether the flag may be repeated and collects every value.
 func (o Option) IsArray() bool { return o.Mode&OptionValueIsArray != 0 }
 
-// tokenPattern finds every {...} in a signature. It is Parser.php's regex.
+// tokenPattern finds every {...} in a signature.
 var tokenPattern = regexp.MustCompile(`\{\s*(.*?)\s*\}`)
 
 // namePattern is the first run of non-space characters: the command name.
@@ -138,7 +126,7 @@ var defaultSplitPattern = regexp.MustCompile(`,\s?`)
 
 // Parse reads a command signature into a name, its arguments and its options.
 //
-// It answers Parser::parse, and the syntax is Laravel's, unchanged:
+// The syntax is:
 //
 //	mail:send {user}                  a required argument
 //	mail:send {user?}                 an optional one
@@ -152,10 +140,6 @@ var defaultSplitPattern = regexp.MustCompile(`,\s?`)
 //	mail:send {--queue=*}             a flag that may be repeated
 //	mail:send {--Q|queue=}            the same, with a shortcut
 //	mail:send {user : The user ID}    a description, after a spaced colon
-//
-// The mechanical differences from the PHP: it returns an error where PHP throws
-// InvalidArgumentException, and the three-element array PHP returns is three
-// return values.
 func Parse(expression string) (name string, arguments []Argument, options []Option, err error) {
 	name, err = parseName(expression)
 	if err != nil {
@@ -181,10 +165,6 @@ func Parse(expression string) (name string, arguments []Argument, options []Opti
 	return name, arguments, options, nil
 }
 
-// MustParse has no Illuminate counterpart: it is Parser::parse for a signature
-// written in source, where the InvalidArgumentException PHP throws has nobody to
-// catch it.
-//
 // MustParse is Parse for a signature written in source.
 //
 // It panics, which is right for a constant: a command whose signature does not
@@ -214,8 +194,8 @@ func parseName(expression string) (string, error) {
 
 // parseArgument reads one argument token.
 //
-// The order of the cases is Parser.php's, and it matters: "{ids?*}" ends with
-// "*" as well as with "?*", and the first test has to be the longer one.
+// The order of the cases matters: "{ids?*}" ends with "*" as well as with
+// "?*", and the first test has to be the longer one.
 func parseArgument(token string) (Argument, error) {
 	token, description := extractDescription(token)
 
@@ -311,6 +291,6 @@ func extractDescription(token string) (string, string) {
 	return token, ""
 }
 
-// trimAny is PHP's trim($token, $chars): it strips any of the characters from
-// both ends, which is why "{--queue=*}" and "{ids?*}" lose their whole suffix.
+// trimAny strips any of the characters from both ends, which is why
+// "{--queue=*}" and "{ids?*}" lose their whole suffix.
 func trimAny(token, chars string) string { return strings.Trim(token, chars) }

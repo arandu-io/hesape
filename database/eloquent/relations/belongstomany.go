@@ -20,9 +20,8 @@ var errNoPivotQuery = errors.New("relations: this pivot was built without a quer
 // takes one.
 type PivotFactory func(parent Model, attributes map[string]any, table string, exists bool) Model
 
-// BelongsToMany answers
-// Illuminate\Database\Eloquent\Relations\BelongsToMany: many rows on the other
-// table, reached through an intermediate table that holds the pairs.
+// BelongsToMany is many rows on the other table, reached through an intermediate
+// table that holds the pairs.
 //
 // The intermediate table is what makes this relation different from every other
 // one: it is joined for reads, written directly for attach and detach, and its
@@ -583,18 +582,18 @@ func (r *BelongsToMany) CreateOrFirst(ctx context.Context, g auth.Grant, attribu
 	return nil, attachErr
 }
 
-// firstWhere answers the PHP's `$this->related->where($attributes)->first()`.
+// firstWhere reads the first related row matching the attributes.
 //
-// The attributes are applied in sorted order, for the reason HasOneOrMany's
-// namesake gives: a Go map has no order, and a where clause whose columns
-// reorder between runs is a different SQL string every time.
+// The attributes are applied in sorted order: a Go map has no order, and a where
+// clause whose columns reorder between runs is a different SQL string every
+// time.
 //
 // It reads through the related model's own query rather than the relation's.
 // The relation's query is joined to the pivot, and the row being looked for is
 // the one that exists but is not attached yet -- so a lookup through the join
 // would answer nothing and the method would loop back to the error it just
-// caught. The tenant filter is applied all the same, because RULE 17 does not
-// care which query object the read went out on.
+// caught. The tenant filter is applied all the same: which query object the read
+// went out on changes nothing.
 func (r *BelongsToMany) firstWhere(ctx context.Context, g auth.Grant, attributes map[string]any) (Model, error) {
 	q := r.Related.NewQuery()
 	if q == nil {

@@ -26,18 +26,17 @@ func (d *Disk) ReadStream(ctx context.Context, g auth.Grant, key string) (io.Rea
 
 // WriteStream writes a stream to a key.
 //
-// It is [Disk.Put] under Illuminate's name for the streaming half. There is one
-// implementation underneath, because Put has always taken an io.Reader: PHP
-// needs two methods because its put() takes a string, and Go does not.
+// It is [Disk.Put] under a second name. There is one implementation underneath,
+// because Put already takes an io.Reader.
 func (d *Disk) WriteStream(ctx context.Context, g auth.Grant, key string, body io.Reader, contentType string) error {
 	return d.Put(ctx, g, key, body, contentType)
 }
 
 // Json reads a file and decodes it as JSON.
 //
-// It answers with map[string]any because Illuminate's json() answers with an
-// array, and because the files this is for -- a manifest, an export, a stored
-// payload -- are objects. A caller holding a struct should [Disk.Get] and
+// It answers with map[string]any because the files this is for -- a manifest,
+// an export, a stored payload -- are objects. A caller holding a struct should
+// [Disk.Get] and
 // unmarshal into it, which is one line more and type-checked.
 func (d *Disk) Json(ctx context.Context, g auth.Grant, key string) (map[string]any, error) {
 	f, err := d.Get(ctx, g, key)

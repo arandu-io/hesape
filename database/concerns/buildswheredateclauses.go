@@ -8,58 +8,56 @@ import (
 
 // Now is where BuildsWhereDateClauses reads the clock.
 //
-// The PHP calls Carbon::now(), which Laravel's test suite freezes with
-// Carbon::setTestNow(). Go has no such global, so the clock is a variable a
-// test replaces and restores. Everything below reads it, so freezing it freezes
-// all eighteen clauses at once.
+// The clock is a variable a test replaces and restores. Everything below reads
+// it, so freezing it freezes all eighteen clauses at once.
 var Now = time.Now
 
-// WherePast answers BuildsWhereDateClauses::wherePast: the column is before now.
-//
-// The PHP takes a string or an array of them; a Go variadic is the same thing
-// without the array wrapper Arr::wrap exists to undo.
+// WherePast adds a where clause requiring each column to be before now,
+// combined with and.
 func WherePast(b *query.Builder, columns ...any) *query.Builder {
 	return wherePastOrFuture(b, columns, "<", "and")
 }
 
-// WhereNowOrPast answers BuildsWhereDateClauses::whereNowOrPast.
+// WhereNowOrPast adds a where clause requiring each column to be at or
+// before now, combined with and.
 func WhereNowOrPast(b *query.Builder, columns ...any) *query.Builder {
 	return wherePastOrFuture(b, columns, "<=", "and")
 }
 
-// OrWherePast answers BuildsWhereDateClauses::orWherePast.
+// OrWherePast is WherePast, combined with or.
 func OrWherePast(b *query.Builder, columns ...any) *query.Builder {
 	return wherePastOrFuture(b, columns, "<", "or")
 }
 
-// OrWhereNowOrPast answers BuildsWhereDateClauses::orWhereNowOrPast.
+// OrWhereNowOrPast is WhereNowOrPast, combined with or.
 func OrWhereNowOrPast(b *query.Builder, columns ...any) *query.Builder {
 	return wherePastOrFuture(b, columns, "<=", "or")
 }
 
-// WhereFuture answers BuildsWhereDateClauses::whereFuture.
+// WhereFuture adds a where clause requiring each column to be after now,
+// combined with and.
 func WhereFuture(b *query.Builder, columns ...any) *query.Builder {
 	return wherePastOrFuture(b, columns, ">", "and")
 }
 
-// WhereNowOrFuture answers BuildsWhereDateClauses::whereNowOrFuture.
+// WhereNowOrFuture adds a where clause requiring each column to be at or
+// after now, combined with and.
 func WhereNowOrFuture(b *query.Builder, columns ...any) *query.Builder {
 	return wherePastOrFuture(b, columns, ">=", "and")
 }
 
-// OrWhereFuture answers BuildsWhereDateClauses::orWhereFuture.
+// OrWhereFuture is WhereFuture, combined with or.
 func OrWhereFuture(b *query.Builder, columns ...any) *query.Builder {
 	return wherePastOrFuture(b, columns, ">", "or")
 }
 
-// OrWhereNowOrFuture answers BuildsWhereDateClauses::orWhereNowOrFuture.
+// OrWhereNowOrFuture is WhereNowOrFuture, combined with or.
 func OrWhereNowOrFuture(b *query.Builder, columns ...any) *query.Builder {
 	return wherePastOrFuture(b, columns, ">=", "or")
 }
 
-// wherePastOrFuture answers the protected
-// BuildsWhereDateClauses::wherePastOrFuture: a Basic where against the clock,
-// with one binding per column.
+// wherePastOrFuture adds one Basic where per column against the clock, with
+// one binding per column.
 func wherePastOrFuture(b *query.Builder, columns []any, operator, boolean string) *query.Builder {
 	value := Now()
 
@@ -76,10 +74,8 @@ func wherePastOrFuture(b *query.Builder, columns []any, operator, boolean string
 	return b
 }
 
-// WhereToday answers BuildsWhereDateClauses::whereToday.
-//
-// boolean is the PHP's optional second argument; empty means "and", which is
-// its default.
+// WhereToday adds a where clause requiring each column to fall on today's
+// date. boolean empty defaults to "and".
 func WhereToday(b *query.Builder, boolean string, columns ...any) *query.Builder {
 	if boolean == "" {
 		boolean = "and"
@@ -87,60 +83,62 @@ func WhereToday(b *query.Builder, boolean string, columns ...any) *query.Builder
 	return whereTodayBeforeOrAfter(b, columns, "=", boolean)
 }
 
-// WhereBeforeToday answers BuildsWhereDateClauses::whereBeforeToday.
+// WhereBeforeToday adds a where clause requiring each column to fall before
+// today's date, combined with and.
 func WhereBeforeToday(b *query.Builder, columns ...any) *query.Builder {
 	return whereTodayBeforeOrAfter(b, columns, "<", "and")
 }
 
-// WhereTodayOrBefore answers BuildsWhereDateClauses::whereTodayOrBefore.
+// WhereTodayOrBefore adds a where clause requiring each column to fall on or
+// before today's date, combined with and.
 func WhereTodayOrBefore(b *query.Builder, columns ...any) *query.Builder {
 	return whereTodayBeforeOrAfter(b, columns, "<=", "and")
 }
 
-// WhereAfterToday answers BuildsWhereDateClauses::whereAfterToday.
+// WhereAfterToday adds a where clause requiring each column to fall after
+// today's date, combined with and.
 func WhereAfterToday(b *query.Builder, columns ...any) *query.Builder {
 	return whereTodayBeforeOrAfter(b, columns, ">", "and")
 }
 
-// WhereTodayOrAfter answers BuildsWhereDateClauses::whereTodayOrAfter.
+// WhereTodayOrAfter adds a where clause requiring each column to fall on or
+// after today's date, combined with and.
 func WhereTodayOrAfter(b *query.Builder, columns ...any) *query.Builder {
 	return whereTodayBeforeOrAfter(b, columns, ">=", "and")
 }
 
-// OrWhereToday answers BuildsWhereDateClauses::orWhereToday.
+// OrWhereToday is WhereToday, combined with or.
 func OrWhereToday(b *query.Builder, columns ...any) *query.Builder {
 	return WhereToday(b, "or", columns...)
 }
 
-// OrWhereBeforeToday answers BuildsWhereDateClauses::orWhereBeforeToday.
+// OrWhereBeforeToday is WhereBeforeToday, combined with or.
 func OrWhereBeforeToday(b *query.Builder, columns ...any) *query.Builder {
 	return whereTodayBeforeOrAfter(b, columns, "<", "or")
 }
 
-// OrWhereTodayOrBefore answers BuildsWhereDateClauses::orWhereTodayOrBefore.
+// OrWhereTodayOrBefore is WhereTodayOrBefore, combined with or.
 func OrWhereTodayOrBefore(b *query.Builder, columns ...any) *query.Builder {
 	return whereTodayBeforeOrAfter(b, columns, "<=", "or")
 }
 
-// OrWhereAfterToday answers BuildsWhereDateClauses::orWhereAfterToday.
+// OrWhereAfterToday is WhereAfterToday, combined with or.
 func OrWhereAfterToday(b *query.Builder, columns ...any) *query.Builder {
 	return whereTodayBeforeOrAfter(b, columns, ">", "or")
 }
 
-// OrWhereTodayOrAfter answers BuildsWhereDateClauses::orWhereTodayOrAfter.
+// OrWhereTodayOrAfter is WhereTodayOrAfter, combined with or.
 func OrWhereTodayOrAfter(b *query.Builder, columns ...any) *query.Builder {
 	return whereTodayBeforeOrAfter(b, columns, ">=", "or")
 }
 
-// whereTodayBeforeOrAfter answers the protected
-// BuildsWhereDateClauses::whereTodayBeforeOrAfter: a Date where against
-// today's date, formatted the way the column stores it.
+// whereTodayBeforeOrAfter adds one Date where per column against today's
+// date, formatted the way the column stores it.
 //
-// The PHP formats with 'Y-m-d'; the Go layout for the same shape is
-// "2006-01-02". The value is a string on purpose -- a Date where compares the
-// date part, and handing the driver a time.Time here would let the engine
-// decide whether the time part counts, which is exactly the disagreement
-// database.Day exists to settle.
+// The date is formatted with the "2006-01-02" layout, as a string on
+// purpose: a Date where compares the date part, and handing the driver a
+// time.Time here would let the engine decide whether the time part counts,
+// which is exactly the disagreement database.Day exists to settle.
 func whereTodayBeforeOrAfter(b *query.Builder, columns []any, operator, boolean string) *query.Builder {
 	value := Now().Format("2006-01-02")
 

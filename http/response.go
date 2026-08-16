@@ -11,75 +11,68 @@ import (
 	"github.com/arandu-io/hesape/support"
 )
 
-// Arrayable answers to Illuminate\Contracts\Support\Arrayable: a value that
-// knows how to present itself as an array. Response::setContent turns one into
-// JSON, which is the whole reason it is named here.
+// Arrayable is a value that knows how to present itself as a map.
+// SetContent turns one into JSON, which is the whole reason it is named
+// here.
 type Arrayable interface {
-	// ToArray answers to Arrayable::toArray.
+	// ToArray is the map representation.
 	ToArray() map[string]any
 }
 
-// Renderable answers to Illuminate\Contracts\Support\Renderable: a value that
-// draws itself, a view being the one that matters. Response::setContent calls
-// it rather than casting to string, so a failure inside a template is a failure
-// and not an empty page.
+// Renderable is a value that draws itself, a view being the one that
+// matters. SetContent calls it rather than casting to string, so a failure
+// inside a template is a failure and not an empty page.
 //
-// The PHP returns a string and throws; this returns (string, error).
+// Render returns (string, error): a rendering failure is reported through
+// the error rather than by panicking.
 type Renderable interface {
-	// Render answers to Renderable::render.
+	// Render draws the value and returns the result.
 	Render() (string, error)
 }
 
-// JsonSerializable answers to PHP's JsonSerializable: a value that names what
-// of itself is encoded. Go's encoding/json reaches the same end through
-// json.Marshaler, which is checked too.
+// JsonSerializable is a value that names what of itself is encoded. Go's
+// encoding/json reaches the same end through json.Marshaler, which is
+// checked too.
 type JsonSerializable interface {
-	// JsonSerialize answers to JsonSerializable::jsonSerialize.
+	// JsonSerialize is the value that gets encoded in this one's place.
 	JsonSerialize() any
 }
 
-// Response mirrors Illuminate\Http\Response: a status, a set of headers, a set
-// of cookies and a body, built before anything is written to the wire.
+// Response is a status, a set of headers, a set of cookies and a body,
+// built before anything is written to the wire.
 //
-// It is a value and not a stdhttp.ResponseWriter because that is what the
-// Illuminate one is: an object a controller returns, that middleware may still
-// add a header to, and that is sent last. [Response.Send] is the one place it
-// meets the standard library.
-//
-// The methods of ResponseTrait are on this type, because that is where PHP puts
-// them: Status, StatusText, Content, GetOriginalContent, Header, WithHeaders,
-// WithoutHeader, Cookie, WithCookie, WithoutCookie, GetCallback, WithException
-// and ThrowResponse.
+// It is a value and not a stdhttp.ResponseWriter: a controller returns it,
+// middleware may still add a header to it, and [Response.Send] is the one
+// place it meets the standard library.
 type Response struct {
-	// status is the status code. Symfony's $statusCode.
+	// status is the status code.
 	status int
-	// headers is the ResponseHeaderBag.
+	// headers holds the response headers.
 	headers stdhttp.Header
-	// cookies are the cookies the header bag carries. They are a slice and not
-	// a map because two cookies may share a name on different paths, which is
-	// how WithoutCookie expires one.
+	// cookies are the cookies this response carries. They are a slice and
+	// not a map because two cookies may share a name on different paths,
+	// which is how WithoutCookie expires one.
 	cookies []*stdhttp.Cookie
 	// content is the encoded body.
 	content string
-	// original is ResponseTrait::$original: what SetContent was handed, before
-	// it became JSON or rendered HTML. It is what a test asserts on.
+	// original is what SetContent was handed, before it became JSON or
+	// rendered HTML. It is what a test asserts on.
 	original any
-	// exception is ResponseTrait::$exception: the error that produced this
-	// answer, when one did.
+	// exception is the error that produced this answer, when one did.
 	exception error
 	// callback is the JSONP callback. It lives here and not on JsonResponse
-	// because ResponseTrait::getCallback reads it off $this, and only
+	// because GetCallback reads it off the embedded Response, and only
 	// JsonResponse ever sets it.
 	callback string
-	// protocolVersion is Symfony's $version. The PHP constructor sets "1.0".
+	// protocolVersion is the response's HTTP protocol version string.
+	// NewResponse sets "1.0".
 	protocolVersion string
 }
 
-// NewResponse answers to Response::__construct.
+// NewResponse builds a Response.
 //
-// The PHP throws InvalidArgumentException when the content cannot be encoded,
-// so this returns (*Response, error). The variadic arguments are the PHP's
-// defaults: status 200 and no headers.
+// Returns (*Response, error): the error is set when the content cannot be
+// encoded. The variadic arguments are status 200 and no headers.
 func NewResponse(content any, args ...any) (*Response, error) {
 	r := &Response{
 		status:          stdhttp.StatusOK,
@@ -109,20 +102,17 @@ func NewResponse(content any, args ...any) (*Response, error) {
 	return r, nil
 }
 
-// GetContent answers to Response::getContent: the encoded body, empty when
-// there is none. The PHP returns string|false and transforms the false into
-// "", which is what this returns.
+// GetContent is the encoded body, empty when there is none.
 func (r *Response) GetContent() string { return r.content }
 
-// SetContent answers to Response::setContent.
+// SetContent sets the body, encoding as needed.
 //
-// It keeps what it was handed on $original, and encodes as the PHP does: a
-// value that is "JSONable" -- Arrayable, Jsonable, JsonSerializable,
-// json.Marshaler, a map or a slice -- becomes JSON and sets the Content-Type;
-// a Renderable is rendered; anything else is cast to a string.
+// It keeps what it was handed on original: a value that is "JSONable" --
+// Arrayable, Jsonable, JsonSerializable, json.Marshaler, a map or a slice --
+// becomes JSON and sets the Content-Type; a Renderable is rendered;
+// anything else is cast to a string.
 //
-// The PHP throws InvalidArgumentException when json_encode fails, so this
-// returns (*Response, error).
+// Returns (*Response, error): the error is set when JSON encoding fails.
 func (r *Response) SetContent(content any) (*Response, error) {
 	r.original = content
 
@@ -161,22 +151,22 @@ func (r *Response) SetContent(content any) (*Response, error) {
 	return r, nil
 }
 
-// shouldBeJson answers to Response::shouldBeJson: whether the content is a
-// value the PHP turns into JSON rather than casting to a string.
+// shouldBeJson reports whether the content is a value that becomes JSON
+// rather than being cast to a string.
 func shouldBeJson(content any) bool {
 	switch content.(type) {
 	case Arrayable, support.Jsonable, JsonSerializable, json.Marshaler:
 		return true
 	}
-	// is_array($content) is the last arm of the PHP check. A map, a slice and
-	// an array are what it means here; a struct is deliberately NOT included,
-	// because the PHP does not encode a plain object either -- and a Renderable
-	// is a struct, checked after this one.
+	// A map, a slice and an array are what turns into JSON here. A struct is
+	// deliberately NOT included: a Renderable is usually a struct, and it is
+	// checked separately, after this one.
 	kind := reflect.ValueOf(content).Kind()
 	return kind == reflect.Map || kind == reflect.Slice || kind == reflect.Array
 }
 
-// morphToJson answers to Response::morphToJson.
+// morphToJson encodes a JSONable value (see shouldBeJson) to its JSON
+// string.
 func morphToJson(content any) (string, error) {
 	switch typed := content.(type) {
 	case support.Jsonable:
@@ -192,30 +182,26 @@ func morphToJson(content any) (string, error) {
 	return string(encoded), err
 }
 
-// Status answers to ResponseTrait::status: the status code.
+// Status is the status code.
 func (r *Response) Status() int { return r.status }
 
-// GetStatusCode answers to Symfony's Response::getStatusCode, which
-// ResponseTrait::status calls. It is Status under the name the parent class
-// declares.
+// GetStatusCode is an alias for Status.
 func (r *Response) GetStatusCode() int { return r.status }
 
-// SetStatusCode answers to Symfony's Response::setStatusCode, which
-// Response::__construct calls.
+// SetStatusCode sets the status code.
 func (r *Response) SetStatusCode(code int) *Response {
 	r.status = code
 	return r
 }
 
-// StatusText answers to ResponseTrait::statusText: the reason phrase.
+// StatusText is the reason phrase.
 func (r *Response) StatusText() string { return stdhttp.StatusText(r.status) }
 
-// Content answers to ResponseTrait::content: the encoded body.
+// Content is an alias for GetContent.
 func (r *Response) Content() string { return r.GetContent() }
 
-// GetOriginalContent answers to ResponseTrait::getOriginalContent: what
-// SetContent was handed, before it became JSON or HTML. A Response wrapping a
-// Response unwraps, as the PHP recurses on itself.
+// GetOriginalContent is what SetContent was handed, before it became JSON
+// or HTML. A Response wrapping a Response unwraps.
 func (r *Response) GetOriginalContent() any {
 	if nested, ok := r.original.(*Response); ok {
 		return nested.GetOriginalContent()
@@ -223,10 +209,7 @@ func (r *Response) GetOriginalContent() any {
 	return r.original
 }
 
-// Header answers to ResponseTrait::header: set a header, replacing what is
-// there unless replace is false.
-//
-// The PHP takes array|string for the value; the variadic values are that array.
+// Header sets a header, replacing what is there unless replace is false.
 func (r *Response) Header(key string, values ...any) *Response {
 	if r.headers == nil {
 		r.headers = stdhttp.Header{}
@@ -234,8 +217,8 @@ func (r *Response) Header(key string, values ...any) *Response {
 	replace := true
 	list := make([]string, 0, len(values))
 	for i, value := range values {
-		// The PHP signature is header($key, $values, $replace = true), so a
-		// trailing bool is the replace flag and never a header value.
+		// A trailing bool is the replace flag and never a header value, so
+		// values ends with one only when the caller means to set it.
 		if flag, ok := value.(bool); ok && i == len(values)-1 && i > 0 {
 			replace = flag
 			continue
@@ -256,8 +239,7 @@ func (r *Response) Header(key string, values ...any) *Response {
 	return r
 }
 
-// WithHeaders answers to ResponseTrait::withHeaders: add several headers at
-// once. The PHP takes a HeaderBag or an array; stdhttp.Header is the HeaderBag.
+// WithHeaders adds several headers at once.
 func (r *Response) WithHeaders(headers stdhttp.Header) *Response {
 	if r.headers == nil {
 		r.headers = stdhttp.Header{}
@@ -271,8 +253,7 @@ func (r *Response) WithHeaders(headers stdhttp.Header) *Response {
 	return r
 }
 
-// WithoutHeader answers to ResponseTrait::withoutHeader: remove headers. The
-// PHP takes array|string; the variadic is that array.
+// WithoutHeader removes headers.
 func (r *Response) WithoutHeader(keys ...string) *Response {
 	for _, key := range keys {
 		r.headers.Del(key)
@@ -280,9 +261,8 @@ func (r *Response) WithoutHeader(keys ...string) *Response {
 	return r
 }
 
-// Headers answers to Symfony's $response->headers, the ResponseHeaderBag the
-// trait writes into. It is a getter because a Go field would let a caller swap
-// the whole bag.
+// Headers is the response's headers. It is a getter because a Go field
+// would let a caller swap the whole map.
 func (r *Response) Headers() stdhttp.Header {
 	if r.headers == nil {
 		r.headers = stdhttp.Header{}
@@ -290,11 +270,10 @@ func (r *Response) Headers() stdhttp.Header {
 	return r.headers
 }
 
-// Cookie answers to ResponseTrait::cookie: add a cookie to the response. It is
-// WithCookie under the shorter name the PHP also offers.
+// Cookie is an alias for WithCookie.
 func (r *Response) Cookie(cookie *stdhttp.Cookie) *Response { return r.WithCookie(cookie) }
 
-// WithCookie answers to ResponseTrait::withCookie: add a cookie.
+// WithCookie adds a cookie.
 func (r *Response) WithCookie(cookie *stdhttp.Cookie) *Response {
 	if cookie != nil {
 		r.cookies = append(r.cookies, cookie)
@@ -302,11 +281,10 @@ func (r *Response) WithCookie(cookie *stdhttp.Cookie) *Response {
 	return r
 }
 
-// WithoutCookie answers to ResponseTrait::withoutCookie: expire a cookie when
-// the response is sent. The PHP writes a cookie with a lifetime of -2628000
-// seconds; MaxAge -1 is what tells a browser the same thing here.
+// WithoutCookie expires a cookie when the response is sent. MaxAge -1 is
+// what tells a browser to delete it immediately.
 //
-// The variadic arguments are the PHP's optional $path and $domain.
+// The variadic arguments are an optional path and domain.
 func (r *Response) WithoutCookie(name string, args ...string) *Response {
 	expired := &stdhttp.Cookie{Name: name, Value: "", MaxAge: -1}
 	if len(args) > 0 {
@@ -318,45 +296,43 @@ func (r *Response) WithoutCookie(name string, args ...string) *Response {
 	return r.WithCookie(expired)
 }
 
-// Cookies returns the cookies this response carries, which Symfony reads off
-// the ResponseHeaderBag. [Response.Send] writes them.
+// Cookies returns the cookies this response carries. [Response.Send] writes
+// them.
 func (r *Response) Cookies() []*stdhttp.Cookie { return r.cookies }
 
-// GetCallback answers to ResponseTrait::getCallback: the JSONP callback, empty
-// when there is none. Only a JsonResponse ever sets one.
+// GetCallback is the JSONP callback, empty when there is none. Only a
+// JsonResponse ever sets one.
 func (r *Response) GetCallback() string { return r.callback }
 
-// WithException answers to ResponseTrait::withException: record the error that
-// produced this answer.
+// WithException records the error that produced this answer.
 func (r *Response) WithException(err error) *Response {
 	r.exception = err
 	return r
 }
 
-// Exception returns the error WithException recorded, which is
-// ResponseTrait::$exception, a public property in the PHP.
+// Exception returns the error WithException recorded.
 func (r *Response) Exception() error { return r.exception }
 
-// ThrowResponse answers to ResponseTrait::throwResponse: wrap this response in
-// an HttpResponseException so the layer above sends it instead of rendering.
+// ThrowResponse wraps this response in an HttpResponseException so the
+// layer above sends it instead of rendering.
 //
-// The PHP throws; Go returns the error, and the caller returns it.
+// The error is returned rather than thrown; the caller returns it in turn.
 func (r *Response) ThrowResponse() error {
 	return exceptions.NewHttpResponseException(r)
 }
 
-// SetProtocolVersion answers to Symfony's Response::setProtocolVersion, which
-// Response::__construct calls with "1.0".
+// SetProtocolVersion sets the HTTP protocol version string. NewResponse
+// calls it with "1.0".
 func (r *Response) SetProtocolVersion(version string) *Response {
 	r.protocolVersion = version
 	return r
 }
 
-// GetProtocolVersion answers to Symfony's Response::getProtocolVersion.
+// GetProtocolVersion is the HTTP protocol version string.
 func (r *Response) GetProtocolVersion() string { return r.protocolVersion }
 
-// Send answers to Symfony's Response::send: write the status, the headers, the
-// cookies and the body to the wire.
+// Send writes the status, the headers, the cookies and the body to the
+// wire.
 //
 // It is the one place this type meets stdhttp.ResponseWriter, which is the
 // point of building a Response at all: everything before this is a value that
@@ -388,8 +364,7 @@ func (r *Response) Send(w stdhttp.ResponseWriter) error {
 // directly. It is Send with the arguments a handler is given.
 func (r *Response) ServeHTTP(w stdhttp.ResponseWriter, _ *stdhttp.Request) { _ = r.Send(w) }
 
-// StreamedEvent mirrors Illuminate\Http\StreamedEvent: one named event on a
-// server-sent event stream.
+// StreamedEvent is one named event on a server-sent event stream.
 type StreamedEvent struct {
 	// Event is the name of the event.
 	Event string
@@ -397,7 +372,7 @@ type StreamedEvent struct {
 	Data any
 }
 
-// NewStreamedEvent answers to StreamedEvent::__construct.
+// NewStreamedEvent builds a StreamedEvent.
 func NewStreamedEvent(event string, data any) *StreamedEvent {
 	return &StreamedEvent{Event: event, Data: data}
 }
@@ -405,8 +380,8 @@ func NewStreamedEvent(event string, data any) *StreamedEvent {
 // String formats the event the way the server-sent event wire format wants it:
 // an "event:" line, one "data:" line per line of payload, and a blank line.
 //
-// It is here and not in a writer of its own because the PHP class is two
-// properties and nothing else, and the framework that reads it needs the bytes.
+// It is here and not in a writer of its own because StreamedEvent is two
+// fields and nothing else, and the framework that reads it needs the bytes.
 func (e *StreamedEvent) String() string {
 	var out strings.Builder
 	if e.Event != "" {

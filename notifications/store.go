@@ -81,7 +81,7 @@ func prepare(r Record, tenant string, now time.Time) (Record, error) {
 //
 // It is the store a test uses and the store a single-process tool uses, in one
 // type: a second "fake" implementation next to a real one is two things to keep
-// in step, and the one the tests use is the one that drifts (RULE 9).
+// in step, and the one the tests use is the one that drifts.
 //
 // It enforces the same Grant and the same tenant scoping as the table, which is
 // the point -- a test that passes against a store with no authorization proves
@@ -92,10 +92,8 @@ type MemoryStore struct {
 	now  func() time.Time
 }
 
-// NewMemoryStore returns an empty store.
-//
-// It has no PHP counterpart: an Eloquent model is bound to a connection, and
-// the in-memory equivalent there is SQLite.
+// NewMemoryStore returns an empty store that keeps its rows for the life of the
+// process.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{now: func() time.Time { return time.Now().UTC() }}
 }

@@ -4,9 +4,9 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// FillForInsert answers Builder::fillForInsert: the rows, enriched with whatever
-// the model would have put on them -- its defaults and its timestamps -- without
-// making a model per row on the way to the database.
+// FillForInsert returns the rows, enriched with whatever the model would
+// have put on them -- its defaults and its timestamps -- without making a
+// model per row on the way to the database.
 //
 // It is the path a seeder and an importer take: one statement for a thousand
 // rows, with the columns a save would have written.
@@ -28,7 +28,7 @@ func (b *Builder[T]) FillForInsert(values []map[string]any) ([]map[string]any, e
 	return out, nil
 }
 
-// FillAndInsert answers Builder::fillAndInsert.
+// FillAndInsert runs FillForInsert and inserts the result.
 func (b *Builder[T]) FillAndInsert(g auth.Grant, values []map[string]any) (bool, error) {
 	rows, err := b.FillForInsert(values)
 	if err != nil {
@@ -37,7 +37,8 @@ func (b *Builder[T]) FillAndInsert(g auth.Grant, values []map[string]any) (bool,
 	return b.Insert(g, rows...)
 }
 
-// FillAndInsertOrIgnore answers Builder::fillAndInsertOrIgnore.
+// FillAndInsertOrIgnore runs FillForInsert and inserts the result, dropping
+// rows that violate a unique index.
 func (b *Builder[T]) FillAndInsertOrIgnore(g auth.Grant, values []map[string]any) (bool, error) {
 	rows, err := b.FillForInsert(values)
 	if err != nil {
@@ -46,8 +47,8 @@ func (b *Builder[T]) FillAndInsertOrIgnore(g auth.Grant, values []map[string]any
 	return b.InsertOrIgnore(g, rows...)
 }
 
-// FillAndInsertGetID answers Builder::fillAndInsertGetId. The PHP spells the
-// last word Id.
+// FillAndInsertGetID runs FillForInsert for one row, inserts it, and
+// returns the value generated for the primary key.
 func (b *Builder[T]) FillAndInsertGetID(g auth.Grant, values map[string]any) (int64, error) {
 	rows, err := b.FillForInsert([]map[string]any{values})
 	if err != nil {
@@ -56,9 +57,8 @@ func (b *Builder[T]) FillAndInsertGetID(g auth.Grant, values map[string]any) (in
 	return b.InsertGetID(g, rows[0], b.model.GetKeyName())
 }
 
-// InsertOrIgnore answers the base builder's insertOrIgnore, reached through the
-// Eloquent one: the rows that violate a unique index are dropped rather than
-// failing the statement.
+// InsertOrIgnore writes values as new rows, dropping the ones that violate a
+// unique index rather than failing the statement.
 func (b *Builder[T]) InsertOrIgnore(g auth.Grant, values ...map[string]any) (bool, error) {
 	prepared, rows, err := b.prepareWrite(g, values)
 	if err != nil {
@@ -80,8 +80,8 @@ func (b *Builder[T]) InsertOrIgnore(g auth.Grant, values ...map[string]any) (boo
 	return b.model.Connection.Insert(sql, cleanBindings(bindings))
 }
 
-// IncrementOrCreate answers Builder::incrementOrCreate: the row, or one more on
-// the counter of the row that was already there.
+// IncrementOrCreate returns the row matching attributes with column set to
+// def, or increments column by step on the row that was already there.
 func (b *Builder[T]) IncrementOrCreate(g auth.Grant, attributes map[string]any, column string, def, step any) (*Model[T], error) {
 	if column == "" {
 		column = "count"
@@ -109,28 +109,27 @@ func (b *Builder[T]) IncrementOrCreate(g auth.Grant, attributes map[string]any, 
 	return instance, instance.Refresh(g)
 }
 
-// UseWritePDO answers Builder::useWritePdo: the statement goes to the writer,
-// even though it reads. The PHP spells it useWritePdo.
+// UseWritePDO points this builder's statement at the write connection, even
+// though it reads.
 //
-// It is how a read that has to see what was just written avoids the replica lag
-// that would otherwise make a fresh row look missing.
+// It is how a read that has to see what was just written avoids the
+// replica lag that would otherwise make a fresh row look missing.
 func (b *Builder[T]) UseWritePDO() *Builder[T] {
 	b.query.UseWritePDO()
 	return b
 }
 
-// OnWriteConnection answers Model::onWriteConnection.
+// OnWriteConnection returns a query pointed at the write connection.
 func (m *Model[T]) OnWriteConnection() *Builder[T] { return m.NewQuery().UseWritePDO() }
 
-// OnClone answers Builder::onClone: a callback that runs on every copy this
-// builder makes.
+// OnClone registers a callback that runs on every copy this builder makes.
 func (b *Builder[T]) OnClone(callback func(*Builder[T])) *Builder[T] {
 	b.onCloneCallbacks = append(b.onCloneCallbacks, callback)
 	return b
 }
 
-// NewQueryForRestoration answers Model::newQueryForRestoration: the query a
-// route model binding uses to find a soft deleted row.
+// NewQueryForRestoration returns the query a route model binding uses to
+// find a soft deleted row.
 func (m *Model[T]) NewQueryForRestoration(ids ...any) *Builder[T] {
 	q := m.NewQueryWithoutScopes()
 	if len(ids) == 1 {
@@ -139,34 +138,33 @@ func (m *Model[T]) NewQueryForRestoration(ids ...any) *Builder[T] {
 	return q.WhereKey(ids)
 }
 
-// IsSoftDeletable answers Model::isSoftDeletable.
-//
-// PHP asks whether the class uses the SoftDeletes trait; here the model says so
-// itself, which is the same answer without the reflection.
+// IsSoftDeletable reports whether the model soft deletes.
 func (m *Model[T]) IsSoftDeletable() bool { return m.SoftDeletes }
 
-// SoftDeleted answers SoftDeletes::softDeleted: a callback for the moment a row
-// is marked deleted.
+// SoftDeleted registers a callback for the moment a row is marked deleted.
 func (m *Model[T]) SoftDeleted(callback func(*Model[T]) error) *Model[T] {
 	return m.RegisterModelEvent(Trashed, callback)
 }
 
-// Restoring answers SoftDeletes::restoring.
+// Restoring registers a callback for the moment a row is about to be
+// restored.
 func (m *Model[T]) Restoring(callback func(*Model[T]) error) *Model[T] {
 	return m.RegisterModelEvent(Restoring, callback)
 }
 
-// Restored answers SoftDeletes::restored.
+// Restored registers a callback for the moment a row has been restored.
 func (m *Model[T]) Restored(callback func(*Model[T]) error) *Model[T] {
 	return m.RegisterModelEvent(Restored, callback)
 }
 
-// ForceDeleting answers SoftDeletes::forceDeleting.
+// ForceDeleting registers a callback for the moment a row is about to be
+// force deleted.
 func (m *Model[T]) ForceDeleting(callback func(*Model[T]) error) *Model[T] {
 	return m.RegisterModelEvent(ForceDeleting, callback)
 }
 
-// ForceDeleted answers SoftDeletes::forceDeleted.
+// ForceDeleted registers a callback for the moment a row has been force
+// deleted.
 func (m *Model[T]) ForceDeleted(callback func(*Model[T]) error) *Model[T] {
 	return m.RegisterModelEvent(ForceDeleted, callback)
 }

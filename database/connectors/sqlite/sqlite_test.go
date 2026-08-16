@@ -127,9 +127,8 @@ func TestTheMigrationPathWorks(t *testing.T) {
 // TestTenantScopingStillComesFromTheGrant: the connector changes how the
 // connection is opened and nothing about who may read what.
 //
-// The tenant reader moved from data.Tenant to auth.Tenant when the collection
-// took the Illuminate names, and this is the assertion that would have caught a
-// connector still reading it off the old package.
+// The tenant is read through auth.Tenant, and this is the assertion that catches
+// a connector reading it from anywhere else.
 func TestTenantScopingStillComesFromTheGrant(t *testing.T) {
 	g := auth.SystemGrant("customer.view", "tenant-1")
 	if auth.Tenant(g) != "tenant-1" {

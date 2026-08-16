@@ -99,24 +99,20 @@ type ObjectType struct {
 
 	properties []Property
 
-	// additionalProperties answers ObjectType::$additionalProperties. A nil
-	// pointer is PHP's null: the keyword is absent from the document, which
-	// JSON Schema reads as "anything else is allowed".
+	// additionalProperties is nil when the keyword is absent from the
+	// document, which JSON Schema reads as "anything else is allowed".
 	//
 	// [Object] sets it to false, because this package closes objects by
 	// default -- see the package comment for why. [Deserialize] sets it from
 	// the document it is reading, and is the only way an object here ends up
-	// open: there is no builder that opens one, because there is no method in
-	// Illuminate that does and this package does not invent names.
+	// open: no builder opens one.
 	additionalProperties *bool
 }
 
 // Object builds an object from its properties, in the order given.
 //
-// It answers JsonSchemaTypeFactory::object($properties). PHP takes a map of
-// name to type, or a closure handed the factory; Go takes the properties in
-// order, because a Go map has no order and a schema whose properties render
-// differently on two runs is a schema nobody can diff.
+// The properties are taken in order, because a Go map has none and a schema
+// whose properties render differently on two runs is a schema nobody can diff.
 //
 // The object is closed: additionalProperties renders as false. That is this
 // package's default and not JSON Schema's -- see the package comment.
@@ -128,12 +124,12 @@ func Object(properties ...Property) *ObjectType {
 }
 
 // WithoutAdditionalProperties disallows properties the object did not declare.
-// It answers ObjectType::withoutAdditionalProperties.
+// It closes the object: additionalProperties renders as false.
 //
 // It is already true of every object [Object] builds, so calling it changes
-// nothing and is not required. It exists because a schema written in the
-// Illuminate idiom says it, and reads the same here; and because an object that
-// came back from [Deserialize] open is closed by exactly this call.
+// nothing and is not required. It exists so a schema can say it explicitly, and
+// because an object that came back from [Deserialize] open is closed by exactly
+// this call.
 func (t *ObjectType) WithoutAdditionalProperties() *ObjectType {
 	t.additionalProperties = new(bool)
 	return t
@@ -307,8 +303,8 @@ func (t *NumberType) Max(v float64) *NumberType {
 	return t
 }
 
-// MultipleOf requires the value to be a multiple of v. It answers
-// NumberType::multipleOf.
+// MultipleOf requires the value to be a multiple of v, and renders as the
+// multipleOf keyword.
 //
 // The check is exact arithmetic on a binary float, and 0.1 is not representable
 // in one: a rule written as MultipleOf(0.01) for money will refuse amounts that
@@ -402,8 +398,7 @@ func (t *ArrayType) Default(v []any) *ArrayType {
 	return t
 }
 
-// unionSupported answers UnionType::SUPPORTED, the set of primitive names a
-// union may be composed of.
+// unionSupported is the set of primitive names a union may be composed of.
 var unionSupported = []string{"string", "integer", "number", "boolean", "object", "array"}
 
 // UnionType is a value that may be any of several primitive kinds. It renders
@@ -419,12 +414,11 @@ type UnionType struct {
 }
 
 // Union builds a union of the named primitive kinds: string, integer, number,
-// boolean, object or array. It answers JsonSchemaTypeFactory::union($types) and
-// the UnionType constructor it calls. The name "null" is accepted and marks the
-// union nullable, as the PHP constructor does.
+// boolean, object or array. The name "null" is accepted and marks the union
+// nullable.
 //
-// An unsupported name panics where the PHP throws an InvalidArgumentException.
-// A schema is written once, at start-up, and a typo there is a mistake in the
+// An unsupported name panics. A schema is written once, at start-up, and a typo
+// there is a mistake in the
 // program, not in the data. [Deserialize] reads names out of a document rather
 // than out of a program and gets an error for the same input.
 func Union(types ...string) *UnionType {
@@ -460,8 +454,7 @@ func newUnion(names []string) (*UnionType, error) {
 	return t, nil
 }
 
-// Types returns the union's member type names, in the order given. It answers
-// UnionType::types.
+// Types returns the union's member type names, in the order given.
 func (t *UnionType) Types() []string {
 	out := make([]string, len(t.types))
 	copy(out, t.types)

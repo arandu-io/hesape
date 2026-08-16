@@ -9,8 +9,7 @@ import (
 	"github.com/arandu-io/hesape/str"
 )
 
-// MorphOneOrMany answers the abstract
-// Illuminate\Database\Eloquent\Relations\MorphOneOrMany.
+// MorphOneOrMany is the shared body of MorphOne and MorphMany.
 //
 // A has-many with a second column: the foreign key says which row, the morph
 // type says which table it was on. The type column is what makes one comments

@@ -123,9 +123,9 @@ func TestHasRole(t *testing.T) {
 	}
 }
 
-// TestSystemGrantRequiresATenant is RULE 14 in the type system: a system grant
-// with no tenant would read across every customer of the system, so it is not
-// expressible -- the empty tenant yields the zero Grant, which fails Check.
+// TestSystemGrantRequiresATenant pins the tenant in the type system: a system
+// grant with no tenant would read across every customer of the system, so it is
+// not expressible -- the empty tenant yields the zero Grant, which fails Check.
 func TestSystemGrantRequiresATenant(t *testing.T) {
 	g := auth.SystemGrant(actionView, "")
 
@@ -201,9 +201,9 @@ func TestValidTenantRefusesEverySeparator(t *testing.T) {
 	}
 }
 
-// TestTenantComesOffTheGrant is RULE 14 at its narrowest: the tenant a statement
-// scopes by is the one the policy decided about, and there is no other way to
-// ask for it.
+// TestTenantComesOffTheGrant pins the narrowest form of it: the tenant a
+// statement scopes by is the one the policy decided about, and there is no
+// other way to ask for it.
 func TestTenantComesOffTheGrant(t *testing.T) {
 	g, err := auth.Authorize(context.Background(), allowOwner{}, auth.Subject{ID: "u1", Tenant: "acme"}, actionView, resource{owner: "u1"})
 	if err != nil {
@@ -357,7 +357,7 @@ func TestAPolicyCanOpenAnActionToGuests(t *testing.T) {
 	if err := g.Check("post.view"); err != nil {
 		t.Errorf("the grant a guest received does not work: %v", err)
 	}
-	// The tenant is the application's, not the visitor's: RULE 14 is not
+	// The tenant is the application's, not the visitor's: nothing about that is
 	// suspended because nobody signed in.
 	if got := auth.Tenant(g); got != "t1" {
 		t.Errorf("a guest's grant carries the tenant %q, want the application's t1", got)

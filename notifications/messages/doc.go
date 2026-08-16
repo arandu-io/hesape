@@ -1,18 +1,6 @@
-// Package messages is what a notification looks like on a channel.
-//
-// It mirrors Illuminate\Notifications\Messages. The files it answers to, in the
-// clone at laravel_illuminate/notifications (Laravel 13,
-// illuminate/notifications ^13.0):
-//
-//	Messages/SimpleMessage.php     -> Mail
-//	Messages/MailMessage.php       -> Mail
-//	Messages/DatabaseMessage.php   -> Database
-//	Messages/BroadcastMessage.php  -> Broadcast
-//	Action.php                     -> Action
-//
-// SimpleMessage and MailMessage are one type here. The split exists in PHP so
-// that a channel with no view layer can reuse the lines, and there is one mail
-// channel in this collection.
+// Package messages is what a notification looks like on a channel: [Mail] for
+// an e-mail, [Database] for a stored row, [Broadcast] for a live push, and
+// [Action] for the one button a mail message may carry.
 //
 // A message is data. It does not know how to reach anybody and holds no
 // transport, which is what lets a test build one and read it, and what lets the
@@ -21,13 +9,12 @@
 //
 // # Why Mail is structured rather than a body
 //
-// Laravel builds the HTML from a markdown template and a theme. RULE 13 rules
-// the theme out -- it is a second asset pipeline -- and RULE 9 rules out having
-// both a markdown path and a view path to draw the same message. So a mail
-// notification carries a greeting, some lines, at most one action and a
-// salutation: Render draws the HTML from those fields, PlainText renders the
-// text part from the same fields, and the two cannot disagree about what the
-// message said.
+// A mail notification carries a greeting, some lines, at most one action and a
+// salutation rather than a body. Render draws the HTML from those fields,
+// PlainText renders the text part from the same fields, and the two cannot
+// disagree about what the message said. A theme to render a body under would be
+// a second asset pipeline, and a markdown path beside a view path would be a
+// second way to draw the same message.
 //
 // View, Text, Markdown, Template and Theme are here and are carried: they name
 // a template for the view layer to render, which is a name and not an asset

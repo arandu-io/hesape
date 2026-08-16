@@ -6,9 +6,7 @@ import (
 	"github.com/arandu-io/hesape/events"
 )
 
-// The event names. They are the vocabulary a listener subscribes to, and they
-// are what NotificationSending, NotificationSent and NotificationFailed are as
-// classes in PHP.
+// The event names. They are the vocabulary a listener subscribes to.
 const (
 	// Sending is recorded before a channel is asked to deliver.
 	Sending = "notification.sending"
@@ -19,9 +17,8 @@ const (
 	Failed = "notification.failed"
 )
 
-// Aggregate is what these events happen to, for the outbox. It has no PHP
-// counterpart: there an event is a class and the dispatcher matches on its
-// name.
+// Aggregate is what these events happen to, and it is the name the outbox
+// groups them under.
 const Aggregate = "notification"
 
 // Payload is what a consumer of the three events receives.

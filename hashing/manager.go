@@ -6,84 +6,73 @@ import (
 	"sync"
 )
 
-// The driver names HashManager answers to. They are the strings after "create"
-// and before "Driver" in the PHP method names, which is how Manager::createDriver
-// turns a configured name into a factory call: "bcrypt" reaches
-// createBcryptDriver, "argon" reaches createArgonDriver, "argon2id" reaches
-// createArgon2idDriver.
+// The driver names [HashManager] answers to. A configured name selects the
+// factory that builds the hasher.
 const (
-	// DriverBcrypt is the name HashManager::createBcryptDriver answers to, and
-	// the default HashManager::getDefaultDriver falls back to.
+	// DriverBcrypt selects [HashManager.CreateBcryptDriver], and is what
+	// [HashManager.GetDefaultDriver] falls back to.
 	DriverBcrypt = "bcrypt"
-	// DriverArgon is the name HashManager::createArgonDriver answers to. It is
-	// argon2i, which is what PASSWORD_ARGON2I selects.
+	// DriverArgon selects [HashManager.CreateArgonDriver], which is argon2i.
 	DriverArgon = "argon"
-	// DriverArgon2id is the name HashManager::createArgon2idDriver answers to.
+	// DriverArgon2id selects [HashManager.CreateArgon2idDriver].
 	DriverArgon2id = "argon2id"
 )
 
-// ErrDriverNotSupported answers the InvalidArgumentException
-// Manager::createDriver throws for a driver name it has no factory for. The
-// message is the PHP's, with the name it was given.
+// ErrDriverNotSupported is returned for a driver name this package has no
+// factory for. It is wrapped with the name it was given.
 var ErrDriverNotSupported = errors.New("hashing: driver not supported")
 
-// Config is the part of Illuminate\Contracts\Config\Repository that HashManager
-// reads: three keys, one method.
+// Config is the part of a configuration repository that [HashManager] reads:
+// three keys, one method.
 //
 // It is an interface and not a concrete type so that this package does not
 // import the configuration package to read three keys out of it. The signature
 // is the one config.Repository.Get already has, so *config.Repository satisfies
-// this without knowing it exists -- which is what a Go interface is for, and
-// what PHP spells with a contract in a separate package.
+// this without knowing it exists.
 //
-// PHP reads $this->config from the container, and ADR 0002 rejected the
-// container. The manager takes the repository directly instead, which is the
-// same dependency written down rather than resolved.
+// The manager takes the repository directly rather than resolving it, which is
+// the same dependency written down instead of looked up.
 type Config interface {
-	// Get answers Illuminate\Contracts\Config\Repository::get: the value at a
-	// dotted key, or the single optional default when the key is absent.
+	// Get is the value at a dotted key, or the single optional default when
+	// the key is absent.
 	Get(key string, def ...any) any
 }
 
-// Hasher answers Illuminate\Contracts\Hashing\Hasher, the interface ArgonHasher
-// and BcryptHasher declare and HashManager both implements and returns.
+// Hasher is the interface [ArgonHasher] and [BcryptHasher] declare, and that
+// [HashManager] both implements and returns.
 //
-// It is the four methods of the PHP contract. Info reports whether the value is
-// a hash at all in its second result, where password_get_info returns an array
-// whose 'algo' is null; that second result is what IsHashed reads.
+// Info reports whether the value is a hash at all in its second result, and
+// that second result is what [HashManager.IsHashed] reads.
 type Hasher interface {
-	// Info answers Hasher::info.
+	// Info reports the parameters hashedValue was written with, and whether
+	// it is a hash at all.
 	Info(hashedValue string) (Params, bool)
-	// Make answers Hasher::make.
+	// Make hashes value.
 	Make(value string, options ...Options) (string, error)
-	// Check answers Hasher::check.
+	// Check reports whether value hashes to hashedValue.
 	Check(value, hashedValue string, options ...Options) (bool, error)
-	// NeedsRehash answers Hasher::needsRehash.
+	// NeedsRehash reports whether hashedValue was written with parameters
+	// other than the ones in force now.
 	NeedsRehash(hashedValue string, options ...Options) bool
 }
 
-// configurationVerifier is the "method_exists($driver, 'verifyConfiguration')"
-// test HashManager::verifyConfiguration performs, written as the interface Go
-// asks a value about instead. Every hasher in this package satisfies it; the
-// PHP check exists because a custom driver registered through Manager::extend
-// need not.
+// configurationVerifier is what [HashManager.VerifyConfiguration] asks a driver
+// about. Every hasher in this package satisfies it; a driver registered from
+// outside need not.
 type configurationVerifier interface {
 	VerifyConfiguration(value string) bool
 }
 
-// HashManager answers Illuminate\Hashing\HashManager: it picks a hasher by name
-// from configuration and forwards to it.
+// HashManager picks a hasher by name from configuration and forwards to it.
 //
-// It reads three keys, and they are the keys the PHP reads: hashing.driver for
-// the name, hashing.bcrypt and hashing.argon for the options each hasher is
-// built with. Both option keys may hold either the map a PHP config file writes
-// -- {"rounds": 12, "verify": true} -- or an [Options] value, which is what a Go
-// configuration would put there. They are the same three settings in two
-// spellings, not two ways to configure hashing.
+// It reads three keys: hashing.driver for the name, hashing.bcrypt and
+// hashing.argon for the options each hasher is built with. Both option keys may
+// hold either a map -- {"rounds": 12, "verify": true} -- or an [Options] value.
+// They are the same three settings in two spellings, not two ways to configure
+// hashing.
 //
-// It is safe for concurrent use. PHP has no lock because a process serves one
-// request; a long-lived Go binary hashes on every request at once, and the
-// driver cache is shared between them.
+// It is safe for concurrent use: a long-lived binary hashes on every request at
+// once, and the driver cache is shared between them.
 type HashManager struct {
 	config Config
 
@@ -92,15 +81,13 @@ type HashManager struct {
 	def     Hasher
 }
 
-// NewHashManager answers "new HashManager($app)", with the configuration
-// repository in place of the container ADR 0002 rejected. A nil Config is the
-// empty one: every key is absent, so the manager is bcrypt with the PHP class
-// defaults.
+// NewHashManager returns a manager reading from config. A nil Config is the
+// empty one: every key is absent, so the manager is bcrypt with the default
+// parameters.
 //
 // The default driver is resolved here rather than on the first hash, so an
 // unsupported hashing.driver stops the process at boot instead of failing the
-// first sign-in of the day. PHP has no such moment -- its manager resolves on
-// first use, inside a request -- and this is the only place the two differ.
+// first sign-in of the day.
 func NewHashManager(config Config) (*HashManager, error) {
 	m := &HashManager{config: config, drivers: map[string]Hasher{}}
 
@@ -112,11 +99,10 @@ func NewHashManager(config Config) (*HashManager, error) {
 	return m, nil
 }
 
-// GetDefaultDriver answers HashManager::getDefaultDriver: the value of
-// hashing.driver, falling back to "bcrypt".
+// GetDefaultDriver is the value of hashing.driver, falling back to "bcrypt".
 //
-// It reads the configuration on every call, as the PHP does. Changing the key
-// after [NewHashManager] has run moves what this reports and not what the
+// It reads the configuration on every call. Changing the key after
+// [NewHashManager] has run moves what this reports and not what the
 // manager hashes with: the driver behind [HashManager.Driver] with no argument
 // is the one resolved at boot, because a hasher swapped underneath a running
 // binary is a password column written by two algorithms nobody chose.
@@ -131,13 +117,11 @@ func (m *HashManager) GetDefaultDriver() string {
 	return name
 }
 
-// Driver answers Manager::driver($driver = null): the hasher registered under
-// the given name, or the default one when no name is given.
+// Driver is the hasher registered under the given name, or the default one
+// when no name is given.
 //
-// At most one name may be given, which is PHP's optional argument. An unknown
-// name is [ErrDriverNotSupported], which is the InvalidArgumentException the PHP
-// throws. Instances are created once and reused, as Manager caches them in
-// $this->drivers.
+// At most one name may be given. An unknown name is [ErrDriverNotSupported].
+// Instances are created once and reused.
 func (m *HashManager) Driver(driver ...string) (Hasher, error) {
 	name := DriverBcrypt
 	switch {
@@ -175,62 +159,56 @@ func (m *HashManager) Driver(driver ...string) (Hasher, error) {
 	return hasher, nil
 }
 
-// CreateBcryptDriver answers HashManager::createBcryptDriver: a BcryptHasher
-// built from hashing.bcrypt.
+// CreateBcryptDriver is a [BcryptHasher] built from hashing.bcrypt.
 func (m *HashManager) CreateBcryptDriver() *BcryptHasher {
 	return NewBcryptHasher(m.options("hashing.bcrypt"))
 }
 
-// CreateArgonDriver answers HashManager::createArgonDriver: an ArgonHasher --
-// argon2i -- built from hashing.argon.
+// CreateArgonDriver is an [ArgonHasher] -- argon2i -- built from hashing.argon.
 func (m *HashManager) CreateArgonDriver() *ArgonHasher {
 	return NewArgonHasher(m.options("hashing.argon"))
 }
 
-// CreateArgon2idDriver answers HashManager::createArgon2idDriver: an
-// Argon2IdHasher built from hashing.argon, which is the same key
-// [HashManager.CreateArgonDriver] reads. The PHP shares it too: the two
-// variants take the same three cost factors.
+// CreateArgon2idDriver is an [Argon2IdHasher] built from hashing.argon, which
+// is the same key [HashManager.CreateArgonDriver] reads: the two variants take
+// the same three cost factors.
 func (m *HashManager) CreateArgon2idDriver() *Argon2IdHasher {
 	return NewArgon2IdHasher(m.options("hashing.argon"))
 }
 
-// Info answers HashManager::info, forwarding to the default driver.
+// Info forwards to the default driver.
 func (m *HashManager) Info(hashedValue string) (Params, bool) {
 	return m.driver().Info(hashedValue)
 }
 
-// Make answers HashManager::make, forwarding to the default driver.
+// Make forwards to the default driver.
 func (m *HashManager) Make(value string, options ...Options) (string, error) {
 	return m.driver().Make(value, options...)
 }
 
-// Check answers HashManager::check, forwarding to the default driver.
+// Check forwards to the default driver.
 func (m *HashManager) Check(value, hashedValue string, options ...Options) (bool, error) {
 	return m.driver().Check(value, hashedValue, options...)
 }
 
-// NeedsRehash answers HashManager::needsRehash, forwarding to the default
-// driver.
+// NeedsRehash forwards to the default driver.
 func (m *HashManager) NeedsRehash(hashedValue string, options ...Options) bool {
 	return m.driver().NeedsRehash(hashedValue, options...)
 }
 
-// IsHashed answers HashManager::isHashed, which asks the driver for the value's
-// info and reports whether it named an algorithm. A plaintext password on its
-// way into a password column answers false here, which is the one question
-// worth asking before writing that column.
+// IsHashed asks the driver for the value's info and reports whether it named an
+// algorithm. A plaintext password on its way into a password column answers
+// false here, which is the one question worth asking before writing that
+// column.
 func (m *HashManager) IsHashed(value string) bool {
 	_, ok := m.driver().Info(value)
 	return ok
 }
 
-// VerifyConfiguration answers HashManager::verifyConfiguration: whether the
-// given hash was written by the configured algorithm with cost factors no
-// higher than the configured ones.
+// VerifyConfiguration reports whether the given hash was written by the
+// configured algorithm with cost factors no higher than the configured ones.
 //
-// A driver with no such method is true in PHP, and so it is here -- see
-// configurationVerifier for why the test exists at all.
+// A driver that does not implement the check is true.
 func (m *HashManager) VerifyConfiguration(value string) bool {
 	verifier, ok := m.driver().(configurationVerifier)
 	if !ok {
@@ -239,9 +217,9 @@ func (m *HashManager) VerifyConfiguration(value string) bool {
 	return verifier.VerifyConfiguration(value)
 }
 
-// driver is "$this->driver()" for the forwarding methods above, which in PHP
-// can throw and here cannot: [NewHashManager] already resolved the default and
-// refused to return a manager without one.
+// driver is the default hasher the forwarding methods above use. It cannot
+// fail: [NewHashManager] already resolved the default and refused to return a
+// manager without one.
 func (m *HashManager) driver() Hasher {
 	if m.def != nil {
 		return m.def
@@ -252,8 +230,8 @@ func (m *HashManager) driver() Hasher {
 }
 
 // options reads a hasher's settings out of the configuration at the given key.
-// It answers the "$this->config->get('hashing.bcrypt') ?? []" in each of the
-// three create*Driver methods.
+// An absent key is the empty [Options], which leaves the hasher on its own
+// defaults.
 func (m *HashManager) options(key string) Options {
 	if m.config == nil {
 		return Options{}
@@ -261,10 +239,10 @@ func (m *HashManager) options(key string) Options {
 	return optionsFrom(m.config.Get(key))
 }
 
-// optionsFrom reads the $options array a PHP configuration file writes. An
-// absent key, a null and a value of the wrong shape are all the empty array,
-// which is the "?? []" the PHP ends every one of those reads with -- a hasher
-// built from nothing is a hasher on its class defaults, not an error.
+// optionsFrom reads a hasher's settings out of whatever the configuration held.
+// An absent key, a nil and a value of the wrong shape are all the empty
+// [Options]: a hasher built from nothing is a hasher on its own defaults, not
+// an error.
 func optionsFrom(v any) Options {
 	switch t := v.(type) {
 	case Options:
@@ -288,9 +266,9 @@ func optionsFrom(v any) Options {
 	}
 }
 
-// configInt reads one cost factor. PHP has one integer type and a config file
-// decoded from JSON hands Go a float64, so every whole-number shape answers
-// here; anything else is the absent key, which is the hasher's own default.
+// configInt reads one cost factor. Configuration decoded from JSON hands back a
+// float64, so every whole-number shape is accepted here; anything else is read
+// as the absent key, which leaves the hasher on its own default.
 func configInt(v any) int {
 	switch n := v.(type) {
 	case int:

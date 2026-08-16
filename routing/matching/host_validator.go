@@ -5,14 +5,12 @@ import (
 	"strings"
 )
 
-// HostValidator mirrors Illuminate\Routing\Matching\HostValidator.
-//
-// It validates that the incoming request's host matches the route's domain
-// constraint. When the route declares no domain, every host matches -- which
-// is the answer PHP gives for a compiled route with no host regex.
+// HostValidator validates that the incoming request's host matches the
+// route's domain constraint. When the route declares no domain, every host
+// matches.
 type HostValidator struct{}
 
-// Matches is HostValidator::matches.
+// Matches reports whether route's domain constraint accepts req's host.
 func (v HostValidator) Matches(route Route, req *http.Request) bool {
 	domain := route.GetDomain()
 	if domain == "" {
@@ -24,8 +22,7 @@ func (v HostValidator) Matches(route Route, req *http.Request) bool {
 	return strings.EqualFold(domain, hostOf(req))
 }
 
-// hostOf returns the request host without its port, which is what PHP's
-// Request::getHost returns.
+// hostOf returns the request host without its port.
 func hostOf(req *http.Request) string {
 	host := req.Host
 	if host == "" && req.URL != nil {

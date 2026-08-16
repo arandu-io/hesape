@@ -19,8 +19,8 @@ const defaultLockExpiry = 5 * time.Minute
 
 // WithoutOverlapping runs at most one job with a given key at a time.
 //
-// It answers Illuminate\Queue\Middleware\WithoutOverlapping. The usual key is
-// the id of the thing being worked on -- an account, an invoice, a report --
+// The usual key is the id of the thing being worked on -- an account, an
+// invoice, a report --
 // so two jobs about the same row never run at once while two jobs about
 // different rows run in parallel.
 //
@@ -88,9 +88,6 @@ func (m *WithoutOverlapping) Shared() *WithoutOverlapping {
 }
 
 // GetLockKey is the name of the lock this job takes.
-//
-// It answers getLockKey(). It was called LockKey, a name that exists in no
-// Laravel application (ADR 0044).
 func (m *WithoutOverlapping) GetLockKey(j *jobs.Job) string {
 	if m.shared {
 		return m.prefix + j.TenantID + ":" + m.key

@@ -10,26 +10,23 @@ import (
 	"strings"
 )
 
-// The formats Illuminate\Image\Image.ToFormat accepts, which is the list in the
-// PHP's in_array() call, in its order. Accepting a name here is not a promise
-// that this driver can write it -- see [encodeCanvas], which says so at the
-// point where it would have to.
+// outputFormats are the names [Image.ToFormat] accepts, in order. Accepting a
+// name here is not a promise that this driver can write it -- see
+// [encodeCanvas], which says so at the point where it would have to.
 var outputFormats = []string{"webp", "jpg", "jpeg", "png", "gif", "avif", "heic", "heif", "bmp"}
 
-// inputTypes is the media types Illuminate's driver agrees to open, from
-// InterventionDriver::process().
+// inputTypes are the media types this driver agrees to open.
 var inputTypes = []string{
 	"image/jpeg", "image/png", "image/bmp", "image/gif", "image/webp",
 	"image/avif", "image/x-avif", "image/heic", "image/x-heic", "image/heif",
 }
 
-// sniffMimeType answers what finfo answers in Illuminate: the media type read
-// out of the bytes themselves, never out of a filename or a header somebody
-// sent.
+// sniffMimeType returns the media type read out of the bytes themselves,
+// never out of a filename or a header somebody sent.
 //
-// It knows the types [Image.Extension] can name, and answers
-// "application/octet-stream" for anything else, which is what makes Extension's
-// last case, "bin", reachable.
+// It knows the types [Image.Extension] can name, and returns
+// "application/octet-stream" for anything else, which is what makes
+// Extension's last case, "bin", reachable.
 func sniffMimeType(b []byte) string {
 	switch {
 	case len(b) >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF:
@@ -65,8 +62,8 @@ func firstBytes(b []byte, n int) []byte {
 	return b[:n]
 }
 
-// supportedInput reports whether Illuminate's driver would agree to open this
-// media type at all.
+// supportedInput reports whether this driver will open this media type at
+// all.
 func supportedInput(mediaType string) bool {
 	for _, t := range inputTypes {
 		if t == mediaType {
@@ -89,13 +86,13 @@ func decodeCanvas(b []byte) (*stdimage.RGBA, string, error) {
 
 // encodeCanvas writes the canvas back out.
 //
-// Three formats can be written, and the other five names Illuminate accepts
-// fail here with a message that says so. That is deliberate: WebP, AVIF, HEIC
-// and BMP have no encoder in the standard library, and the packages that do
-// have one are dependencies the module root does not carry (ADR 0048). Failing
-// at the encode with the format named is the honest version of that -- the
-// alternative is [Image.ToWebp] quietly handing back a JPEG, which is a lie
-// that reaches production as a broken Content-Type.
+// Three formats can be written, and the other five accepted names fail here
+// with a message that says so. That is deliberate: WebP, AVIF, HEIC and BMP
+// have no encoder in the standard library, and the packages that do have one
+// are dependencies this module does not carry. Failing at the encode with the
+// format named is the honest version of that -- the alternative is
+// [Image.ToWebp] quietly handing back a JPEG, which is a lie that reaches
+// production as a broken Content-Type.
 func encodeCanvas(canvas *stdimage.RGBA, format string, quality int) ([]byte, error) {
 	var buf bytes.Buffer
 	switch format {
@@ -108,8 +105,8 @@ func encodeCanvas(canvas *stdimage.RGBA, format string, quality int) ([]byte, er
 			return nil, failWith(err, "encoding jpeg")
 		}
 	case "png":
-		// Illuminate passes no quality to its PNG encoder either: the format is
-		// lossless and the number would mean compression effort, not fidelity.
+		// No quality is passed to the PNG encoder: the format is lossless and
+		// the number would mean compression effort, not fidelity.
 		enc := png.Encoder{CompressionLevel: png.DefaultCompression}
 		if err := enc.Encode(&buf, canvas); err != nil {
 			return nil, failWith(err, "encoding png")
@@ -126,8 +123,8 @@ func encodeCanvas(canvas *stdimage.RGBA, format string, quality int) ([]byte, er
 	return buf.Bytes(), nil
 }
 
-// extensionFor is Illuminate\Image\Image::extension()'s match expression, kept
-// in one place because [Image.HashName] and [Image.Extension] both need it.
+// extensionFor maps a media type to a file extension, kept in one place
+// because [Image.HashName] and [Image.Extension] both need it.
 func extensionFor(mediaType string) string {
 	switch mediaType {
 	case "image/jpeg":

@@ -4,27 +4,26 @@ import (
 	stdhttp "net/http"
 )
 
-// Response is the slice of Illuminate\Http\Response that HttpResponseException
-// carries.
+// Response is the minimal interface HttpResponseException needs to carry a
+// response: enough to send it, and no more.
 //
-// It is an interface and not the concrete hesape/http.Response for one reason:
-// hesape/http throws these, so naming its type here would be a cycle. The two
-// methods are what a handler that catches one reaches for -- the status to send
-// and the body to write.
+// It is an interface and not the concrete hesape/http.Response for one
+// reason: hesape/http returns these, so naming its type here would be a
+// cycle. The two methods are what a handler that catches one reaches for --
+// the status to send and the body to write.
 type Response interface {
-	// Status is ResponseTrait::status.
+	// Status is the status code to send.
 	Status() int
-	// Content is ResponseTrait::content.
+	// Content is the body to send.
 	Content() string
 }
 
-// HTTPError is Symfony's HttpKernel HttpException, the base the exceptions in
-// this package extend.
+// HTTPError carries a status code, a message and headers common to several
+// of this package's exceptions.
 //
-// The PHP hierarchy is HttpException -> MalformedUrlException,
-// PostTooLargeException, ThrottleRequestsException. Go has no class
-// inheritance, so it is a struct the three embed, and errors.As finds it in
-// any of them.
+// Go has no class inheritance, so it is a struct that MalformedUrlException,
+// PostTooLargeException and ThrottleRequestsException each embed, and
+// errors.As finds it in any of them.
 type HTTPError struct {
 	// StatusCode is the status the exception answers with.
 	StatusCode int
@@ -32,9 +31,9 @@ type HTTPError struct {
 	Message string
 	// Headers are the response headers the exception carries.
 	Headers stdhttp.Header
-	// Code is the exception code the PHP constructor takes.
+	// Code is an application-defined error code, independent of StatusCode.
 	Code int
-	// Previous is the error this one wraps, PHP's $previous.
+	// Previous is the error this one wraps.
 	Previous error
 }
 
@@ -46,27 +45,26 @@ func (e *HTTPError) Error() string {
 	return e.Message
 }
 
-// Unwrap returns the wrapped error, so errors.Is and errors.As reach PHP's
-// $previous.
+// Unwrap returns the wrapped error, so errors.Is and errors.As reach
+// Previous.
 func (e *HTTPError) Unwrap() error { return e.Previous }
 
-// GetStatusCode is HttpException::getStatusCode.
+// GetStatusCode returns StatusCode.
 func (e *HTTPError) GetStatusCode() int { return e.StatusCode }
 
-// GetHeaders is HttpException::getHeaders.
+// GetHeaders returns Headers.
 func (e *HTTPError) GetHeaders() stdhttp.Header { return e.Headers }
 
-// HttpResponseException mirrors
-// Illuminate\Http\Exceptions\HttpResponseException: an error carrying a
-// response that was built already, so the layer that catches it sends that
-// response instead of rendering one.
+// HttpResponseException is an error carrying a response that was built
+// already, so the layer that catches it sends that response instead of
+// rendering one.
 type HttpResponseException struct {
 	response Response
 	previous error
 }
 
-// NewHttpResponseException is HttpResponseException::__construct. The PHP takes
-// an optional $previous; the variadic is that optional argument.
+// NewHttpResponseException builds an HttpResponseException. The variadic
+// argument is an optional wrapped error.
 func NewHttpResponseException(response Response, previous ...error) *HttpResponseException {
 	e := &HttpResponseException{response: response}
 	if len(previous) > 0 {
@@ -75,8 +73,8 @@ func NewHttpResponseException(response Response, previous ...error) *HttpRespons
 	return e
 }
 
-// Error implements error. The PHP takes its message from $previous, and has
-// none of its own when there is no previous.
+// Error implements error, taking its message from the wrapped error when
+// there is one, and a generic message when there is not.
 func (e *HttpResponseException) Error() string {
 	if e.previous != nil {
 		return e.previous.Error()
@@ -84,10 +82,10 @@ func (e *HttpResponseException) Error() string {
 	return "http: a response was thrown"
 }
 
-// Unwrap returns PHP's $previous.
+// Unwrap returns the wrapped error.
 func (e *HttpResponseException) Unwrap() error { return e.previous }
 
-// GetResponse is HttpResponseException::getResponse: the response to send.
+// GetResponse is the response to send.
 func (e *HttpResponseException) GetResponse() Response { return e.response }
 
 // MalformedUrlException is the 400 for a request whose path cannot be decoded:
@@ -98,12 +96,10 @@ func (e *HttpResponseException) GetResponse() Response { return e.response }
 // It takes no arguments and carries no detail: the message is always
 // "Malformed URL.", and the path that caused it is not repeated back to the
 // caller.
-//
-// Answers Illuminate\Http\Exceptions\MalformedUrlException.
 type MalformedUrlException struct{ HTTPError }
 
-// NewMalformedUrlException is MalformedUrlException::__construct. It takes no
-// arguments, as the PHP does not.
+// NewMalformedUrlException builds a MalformedUrlException. It takes no
+// arguments: there is nothing to configure.
 func NewMalformedUrlException() *MalformedUrlException {
 	return &MalformedUrlException{HTTPError{
 		StatusCode: stdhttp.StatusBadRequest,
@@ -115,11 +111,9 @@ func NewMalformedUrlException() *MalformedUrlException {
 // agreed to accept. It is raised from the declared content length, before the
 // body is read, so the caller is told the size was refused instead of being
 // handed a parse failure on a body that was cut short.
-//
-// Answers Illuminate\Http\Exceptions\PostTooLargeException.
 type PostTooLargeException struct{ HTTPError }
 
-// NewPostTooLargeException is PostTooLargeException::__construct.
+// NewPostTooLargeException builds a PostTooLargeException.
 func NewPostTooLargeException(message string, previous error, headers stdhttp.Header, code int) *PostTooLargeException {
 	return &PostTooLargeException{HTTPError{
 		StatusCode: stdhttp.StatusRequestEntityTooLarge,
@@ -138,11 +132,9 @@ func NewPostTooLargeException(message string, previous error, headers stdhttp.He
 // Those headers are the useful part: [HTTPError.GetHeaders] is where the layer
 // that turns this into a response reads them, and a client that reads them in
 // turn can wait rather than keep asking.
-//
-// Answers Illuminate\Http\Exceptions\ThrottleRequestsException.
 type ThrottleRequestsException struct{ HTTPError }
 
-// NewThrottleRequestsException is ThrottleRequestsException::__construct.
+// NewThrottleRequestsException builds a ThrottleRequestsException.
 func NewThrottleRequestsException(message string, previous error, headers stdhttp.Header, code int) *ThrottleRequestsException {
 	return &ThrottleRequestsException{HTTPError{
 		StatusCode: stdhttp.StatusTooManyRequests,
@@ -153,11 +145,10 @@ func NewThrottleRequestsException(message string, previous error, headers stdhtt
 	}}
 }
 
-// OriginMismatchException mirrors
-// Illuminate\Http\Exceptions\OriginMismatchException: the redirect target was
-// not on the origin the request arrived on. The PHP class has no body.
+// OriginMismatchException is returned when a redirect target was not on the
+// origin the request arrived on.
 type OriginMismatchException struct {
-	// Message is the sentence, empty in the PHP.
+	// Message is the sentence. Empty uses the default in Error.
 	Message string
 }
 

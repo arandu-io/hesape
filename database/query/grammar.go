@@ -5,130 +5,130 @@ import (
 	"strings"
 )
 
-// Grammar answers Illuminate\Database\Query\Grammars\Grammar together with its
-// base, Illuminate\Database\Grammar.
+// Grammar is what a Builder needs of the thing that spells its SQL.
 //
-// In PHP the grammar is an abstract class the driver grammars extend, and the
-// builder holds one. Here it is an interface, declared in the package that
-// consumes it, because the concrete grammars live in query/grammars and a class
-// in Go would close an import cycle: grammars imports query for *Builder, so
-// query cannot import grammars for the type.
+// It is an interface, declared in the package that consumes it, because the
+// concrete grammars live in query/grammars and naming them here would close an
+// import cycle: grammars imports query for *Builder, so query cannot import
+// grammars for the type.
 //
-// The method set is the public surface of the two PHP classes, minus the
-// members that only exist to let a subclass reach a protected helper. A driver
-// grammar embeds BaseGrammar and overrides what its dialect spells differently,
-// which is what extending the abstract class does there.
+// A driver grammar embeds BaseGrammar and overrides what its dialect spells
+// differently.
 type Grammar interface {
-	// CompileSelect answers Grammar::compileSelect.
+	// CompileSelect compiles a select statement for the query.
 	CompileSelect(query *Builder) string
 
-	// CompileInsert answers Grammar::compileInsert.
+	// CompileInsert compiles an insert statement for the given rows.
 	CompileInsert(query *Builder, values []map[string]any) string
 
-	// CompileInsertOrIgnore answers Grammar::compileInsertOrIgnore.
+	// CompileInsertOrIgnore compiles an insert that silently skips rows that
+	// would violate a constraint.
 	CompileInsertOrIgnore(query *Builder, values []map[string]any) string
 
-	// CompileInsertGetID answers Grammar::compileInsertGetId. The PHP spells the
-	// last word Id; Go initialisms are upper case throughout.
+	// CompileInsertGetID compiles an insert and reports the SQL that reads
+	// back the inserted row's ID from the given sequence.
 	CompileInsertGetID(query *Builder, values map[string]any, sequence string) string
 
-	// CompileUpdate answers Grammar::compileUpdate.
+	// CompileUpdate compiles an update statement for the given values.
 	CompileUpdate(query *Builder, values map[string]any) string
 
-	// CompileUpsert answers Grammar::compileUpsert.
+	// CompileUpsert compiles an insert that updates the named columns when a
+	// row conflicts on uniqueBy.
 	CompileUpsert(query *Builder, values []map[string]any, uniqueBy []string, update []string) string
 
-	// CompileDelete answers Grammar::compileDelete.
+	// CompileDelete compiles a delete statement for the query.
 	CompileDelete(query *Builder) string
 
-	// CompileTruncate answers Grammar::compileTruncate. A truncate is more than
-	// one statement on some engines, so the result is a statement to bindings
-	// map, as the PHP returns an array keyed by SQL.
+	// CompileTruncate compiles a truncate. A truncate is more than one
+	// statement on some engines, so the result is a map from each statement
+	// to its bindings.
 	CompileTruncate(query *Builder) map[string][]any
 
-	// CompileExists answers Grammar::compileExists.
+	// CompileExists compiles a select wrapped so the engine can report only
+	// whether a row matches.
 	CompileExists(query *Builder) string
 
-	// CompileRandom answers Grammar::compileRandom.
+	// CompileRandom compiles a random ordering expression, optionally seeded.
 	CompileRandom(seed string) string
 
-	// PrepareBindingsForUpdate answers Grammar::prepareBindingsForUpdate.
+	// PrepareBindingsForUpdate arranges the where bindings after the update
+	// values, in the order the compiled statement consumes them.
 	PrepareBindingsForUpdate(bindings map[string][]any, values map[string]any) []any
 
-	// PrepareBindingsForDelete answers Grammar::prepareBindingsForDelete.
+	// PrepareBindingsForDelete returns the where bindings for a delete
+	// statement.
 	PrepareBindingsForDelete(bindings map[string][]any) []any
 
-	// SupportsSavepoints answers Grammar::supportsSavepoints.
+	// SupportsSavepoints reports whether the engine can savepoint within a
+	// transaction.
 	SupportsSavepoints() bool
 
-	// CompileSavepoint answers Grammar::compileSavepoint.
+	// CompileSavepoint compiles a statement that creates the named savepoint.
 	CompileSavepoint(name string) string
 
-	// CompileSavepointRollBack answers Grammar::compileSavepointRollBack.
+	// CompileSavepointRollBack compiles a statement that rolls back to the
+	// named savepoint.
 	CompileSavepointRollBack(name string) string
 
-	// GetOperators answers Grammar::getOperators.
+	// GetOperators returns the comparison operators the grammar accepts.
 	GetOperators() []string
 
-	// GetBitwiseOperators answers Grammar::getBitwiseOperators.
+	// GetBitwiseOperators returns the operators treated as bitwise rather
+	// than comparison.
 	GetBitwiseOperators() []string
 
-	// Wrap answers Illuminate\Database\Grammar::wrap: it quotes an identifier,
-	// leaving an Expression alone.
+	// Wrap quotes an identifier, leaving an Expression alone.
 	Wrap(value any) string
 
-	// WrapTable answers Grammar::wrapTable.
+	// WrapTable quotes a table name, applying the table prefix and any alias.
 	WrapTable(table any) string
 
-	// WrapArray answers Grammar::wrapArray.
+	// WrapArray quotes each value in a list of identifiers.
 	WrapArray(values []any) []string
 
-	// Columnize answers Grammar::columnize.
+	// Columnize quotes a list of columns and joins them with commas.
 	Columnize(columns []any) string
 
-	// Parameterize answers Grammar::parameterize.
+	// Parameterize returns the comma-separated placeholders for a list of
+	// values.
 	Parameterize(values []any) string
 
-	// Parameter answers Grammar::parameter: the placeholder for a value, or the
-	// value itself when it is an Expression.
+	// Parameter returns the placeholder for a value, or the value itself when
+	// it is an Expression.
 	Parameter(value any) string
 
-	// QuoteString answers Grammar::quoteString.
+	// QuoteString quotes a string literal, or each one in a list.
 	QuoteString(value any) string
 
-	// Escape answers Grammar::escape.
+	// Escape returns a value escaped for inclusion directly in SQL, for a
+	// caller building a statement by hand rather than through a placeholder.
 	//
-	// It carries an error where the PHP throws RuntimeException for a grammar
-	// with no connection: escaping without one cannot be done safely, and a
-	// grammar that silently returned the unescaped value would be an injection
-	// with a reassuring name.
+	// It returns an error rather than panicking: a grammar with no connection
+	// cannot escape safely, and returning the unescaped value in that case
+	// would be an injection with a reassuring name.
 	Escape(value any, binary bool) (string, error)
 
-	// GetDateFormat answers Grammar::getDateFormat, in Go reference-time layout
-	// rather than PHP's date() letters.
+	// GetDateFormat returns the layout the engine's date columns are
+	// formatted with, in Go's reference-time syntax.
 	GetDateFormat() string
 
-	// GetTablePrefix answers Grammar::getTablePrefix.
+	// GetTablePrefix returns the prefix applied to every table name.
 	GetTablePrefix() string
 
-	// SetTablePrefix answers Grammar::setTablePrefix.
+	// SetTablePrefix sets the prefix applied to every table name.
 	SetTablePrefix(prefix string) Grammar
 }
 
-// BaseGrammar answers the shared body of Illuminate\Database\Grammar and
-// Illuminate\Database\Query\Grammars\Grammar: everything the abstract classes
-// implement rather than declare.
+// BaseGrammar is everything a grammar can spell without knowing its dialect.
 //
-// A driver grammar embeds it and overrides what its dialect spells differently,
-// which is what extending the abstract class does in PHP. It is exported
-// because query/grammars has to embed it, and embedding is how Go says
-// "extends" for the part that is code rather than contract.
+// A driver grammar embeds it and overrides what its dialect spells differently.
+// It is exported because query/grammars has to embed it.
 type BaseGrammar struct {
 	tablePrefix string
 }
 
-// operators is Builder::$operators, the list every grammar accepts. A driver
-// grammar that accepts more overrides GetOperators and appends.
+// operators is the list of comparison operators every grammar accepts. A
+// driver grammar that accepts more overrides GetOperators and appends.
 var operators = []string{
 	"=", "<", ">", "<=", ">=", "<>", "!=", "<=>",
 	"like", "like binary", "not like", "ilike",
@@ -138,33 +138,36 @@ var operators = []string{
 	"not similar to", "not ilike", "~~*", "!~~*",
 }
 
-// bitwiseOperators is Builder::$bitwiseOperators.
+// bitwiseOperators is the list of operators treated as bitwise rather than
+// comparison.
 var bitwiseOperators = []string{"&", "|", "^", "<<", ">>", "&~"}
 
-// GetOperators answers Grammar::getOperators.
+// GetOperators returns the comparison operators the grammar accepts.
 func (g *BaseGrammar) GetOperators() []string {
 	out := make([]string, len(operators))
 	copy(out, operators)
 	return out
 }
 
-// GetBitwiseOperators answers Grammar::getBitwiseOperators.
+// GetBitwiseOperators returns the operators treated as bitwise rather than
+// comparison.
 func (g *BaseGrammar) GetBitwiseOperators() []string {
 	out := make([]string, len(bitwiseOperators))
 	copy(out, bitwiseOperators)
 	return out
 }
 
-// GetTablePrefix answers Grammar::getTablePrefix.
+// GetTablePrefix returns the prefix applied to every table name.
 func (g *BaseGrammar) GetTablePrefix() string { return g.tablePrefix }
 
-// SetTablePrefix answers Grammar::setTablePrefix.
+// SetTablePrefix sets the prefix applied to every table name.
 func (g *BaseGrammar) SetTablePrefix(prefix string) Grammar {
 	g.tablePrefix = prefix
 	return nil // a driver grammar overrides this to return itself
 }
 
-// Wrap answers Grammar::wrap.
+// Wrap quotes an identifier, splitting an aliased name into its two quoted
+// halves.
 //
 // An Expression passes through untouched, which is the whole reason Expression
 // exists: it is how a caller says "this is SQL, not a name".
@@ -173,7 +176,7 @@ func (g *BaseGrammar) Wrap(value any) string {
 		return stringify(value)
 	}
 	name := stringify(value)
-	// "column as alias" is split before quoting, as wrapAliasedValue does.
+	// "column as alias" is split into its two halves before quoting each one.
 	if i := aliasIndex(name); i >= 0 {
 		return g.Wrap(strings.TrimSpace(name[:i])) + " as " +
 			g.wrapValue(strings.TrimSpace(name[i+4:]))
@@ -181,9 +184,9 @@ func (g *BaseGrammar) Wrap(value any) string {
 	return g.wrapSegments(name)
 }
 
-// WrapTable answers Grammar::wrapTable. The table prefix is applied here and
-// nowhere else, which is why a raw table name in a where clause is a bug that
-// only shows up on a prefixed connection.
+// WrapTable quotes a table name. The table prefix is applied here and nowhere
+// else, which is why a raw table name in a where clause is a bug that only
+// shows up on a prefixed connection.
 func (g *BaseGrammar) WrapTable(table any) string {
 	if IsExpression(table) {
 		return stringify(table)
@@ -196,7 +199,7 @@ func (g *BaseGrammar) WrapTable(table any) string {
 	return g.wrapSegments(g.tablePrefix + name)
 }
 
-// WrapArray answers Grammar::wrapArray.
+// WrapArray quotes each value in a list of identifiers.
 func (g *BaseGrammar) WrapArray(values []any) []string {
 	out := make([]string, len(values))
 	for i, v := range values {
@@ -205,12 +208,12 @@ func (g *BaseGrammar) WrapArray(values []any) []string {
 	return out
 }
 
-// Columnize answers Grammar::columnize.
+// Columnize quotes a list of columns and joins them with commas.
 func (g *BaseGrammar) Columnize(columns []any) string {
 	return strings.Join(g.WrapArray(columns), ", ")
 }
 
-// Parameterize answers Grammar::parameterize.
+// Parameterize returns the comma-separated placeholders for a list of values.
 func (g *BaseGrammar) Parameterize(values []any) string {
 	out := make([]string, len(values))
 	for i, v := range values {
@@ -219,9 +222,10 @@ func (g *BaseGrammar) Parameterize(values []any) string {
 	return strings.Join(out, ", ")
 }
 
-// Parameter answers Grammar::parameter.
+// Parameter returns the placeholder for a value, or the value itself when it
+// is an Expression.
 //
-// The placeholder is "?" as in PHP. A grammar for an engine that numbers its
+// The placeholder is "?". A grammar for an engine that numbers its
 // placeholders overrides this, and overrides it knowing the number comes from
 // the position in the binding list rather than from the value.
 func (g *BaseGrammar) Parameter(value any) string {
@@ -231,7 +235,7 @@ func (g *BaseGrammar) Parameter(value any) string {
 	return "?"
 }
 
-// QuoteString answers Grammar::quoteString.
+// QuoteString quotes a string literal, or each one in a list.
 func (g *BaseGrammar) QuoteString(value any) string {
 	if values, ok := value.([]any); ok {
 		out := make([]string, len(values))
@@ -243,33 +247,34 @@ func (g *BaseGrammar) QuoteString(value any) string {
 	return "'" + strings.ReplaceAll(stringify(value), "'", "''") + "'"
 }
 
-// Escape answers Grammar::escape.
+// Escape returns a value escaped for inclusion directly in SQL.
 //
-// The base grammar has no connection to escape through, so it reports the same
-// refusal the PHP throws. A driver grammar that can escape overrides it. This
-// is deliberately not a best-effort quote: a caller reaching for Escape is
-// building SQL by hand, and a value that looks escaped but is not is worse than
-// one that refuses.
+// The base grammar has no connection to escape through, so it refuses. A
+// driver grammar that can escape overrides it. This is deliberately not a
+// best-effort quote: a caller reaching for Escape is building SQL by hand, and
+// a value that looks escaped but is not is worse than one that refuses.
 func (g *BaseGrammar) Escape(value any, binary bool) (string, error) {
 	return "", fmt.Errorf("query: the base grammar has no connection to escape through; use a parameter placeholder")
 }
 
-// GetDateFormat answers Grammar::getDateFormat, translated to Go's reference
-// time. The PHP returns 'Y-m-d H:i:s'.
+// GetDateFormat returns the layout the engine's date columns are formatted
+// with, in Go's reference-time syntax.
 func (g *BaseGrammar) GetDateFormat() string { return "2006-01-02 15:04:05" }
 
-// SupportsSavepoints answers Grammar::supportsSavepoints.
+// SupportsSavepoints reports whether the engine can savepoint within a
+// transaction.
 func (g *BaseGrammar) SupportsSavepoints() bool { return true }
 
-// CompileSavepoint answers Grammar::compileSavepoint.
+// CompileSavepoint compiles a statement that creates the named savepoint.
 func (g *BaseGrammar) CompileSavepoint(name string) string { return "SAVEPOINT " + name }
 
-// CompileSavepointRollBack answers Grammar::compileSavepointRollBack.
+// CompileSavepointRollBack compiles a statement that rolls back to the named
+// savepoint.
 func (g *BaseGrammar) CompileSavepointRollBack(name string) string {
 	return "ROLLBACK TO SAVEPOINT " + name
 }
 
-// CompileRandom answers Grammar::compileRandom.
+// CompileRandom compiles a random ordering expression, optionally seeded.
 func (g *BaseGrammar) CompileRandom(seed string) string { return "RANDOM()" }
 
 // wrapValue quotes one identifier segment. The base grammar uses the SQL
@@ -295,7 +300,7 @@ func (g *BaseGrammar) wrapSegments(name string) string {
 }
 
 // aliasIndex reports where the " as " of an aliased name starts, or -1. The
-// search is case-insensitive, as the PHP's stripos is.
+// search is case-insensitive.
 func aliasIndex(name string) int {
 	return strings.Index(lower(name), " as ")
 }

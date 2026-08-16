@@ -1,13 +1,7 @@
-// Package listeners mirrors Illuminate\Auth\Listeners.
+// Package listeners holds the listener authentication ships with.
 //
-// The files it answers to, in the clone at
-// laravel_illuminate/auth/Listeners:
-//
-//	SendEmailVerificationNotification.php -> [SendEmailVerificationNotification]
-//
-// One listener, for one event: a fresh registration whose account has an address
-// to confirm gets the link sent to it. It is the only thing in Illuminate\Auth
-// that listens rather than being listened to, and it is registered by the
-// application, not by this package -- there is no service provider to register it
-// from (ADR 0001).
+// There is one: [SendEmailVerificationNotification] sends the confirmation link
+// to a fresh registration whose account has an address to confirm. It is
+// registered by the application rather than by this package -- nothing here
+// registers itself.
 package listeners

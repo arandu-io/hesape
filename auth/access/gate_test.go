@@ -23,8 +23,7 @@ func (p post) Owner() string { return p.AuthorID }
 
 type ownable interface{ Owner() string }
 
-// postPolicy decides for a post the way a Laravel policy does: one method per
-// ability, named after it.
+// postPolicy decides for a post: one method per ability, named after it.
 type postPolicy struct {
 	access.HandlesAuthorization
 }
@@ -378,8 +377,8 @@ func TestPolicyMethodDecidesForItsModel(t *testing.T) {
 func TestADashedAbilityNamesTheCamelCasedMethod(t *testing.T) {
 	gate := access.NewGate().Policy(post{}, postPolicy{})
 
-	// The type stands where the PHP passes a class name, and it is dropped
-	// before the policy is called: the policy already knows what it decides for.
+	// A reflect.Type stands for the collection case, and it is dropped before
+	// the policy is called: the policy already knows what it decides for.
 	if !gate.Allows(context.Background(), ada, "view-any", reflect.TypeOf(post{})) {
 		t.Fatal("view-any did not reach ViewAny, or the type was passed on to it")
 	}

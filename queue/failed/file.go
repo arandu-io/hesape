@@ -16,15 +16,13 @@ import (
 
 // FileFailedJobProvider keeps the failed jobs in a JSON file.
 //
-// It answers Illuminate\Queue\Failed\FileFailedJobProvider. It exists for the
-// deployment that has a queue and no database: a single process on one machine,
-// draining a RESP queue, that still wants a dead letter list to survive a
-// restart.
+// It exists for the deployment that has a queue and no database: a single
+// process on one machine, draining a RESP queue, that still wants a dead letter
+// list to survive a restart.
 //
-// It holds the newest Limit failures and drops the rest, which is Laravel's
-// behaviour and the right one for a file: a dead letter list that grows without
-// bound on a disk nobody is watching is an outage waiting to be filed as a
-// disk-full alert.
+// It holds the newest Limit failures and drops the rest, which is the right
+// behaviour for a file: a dead letter list that grows without bound on a disk
+// nobody is watching is an outage waiting to be filed as a disk-full alert.
 //
 // It is not for more than one process. The file is rewritten whole under a
 // mutex this process holds, and two of them would lose each other's writes --
@@ -42,7 +40,7 @@ type FileFailedJobProvider struct {
 
 // NewFileFailedJobProvider returns the provider over path.
 //
-// A limit of zero or less means a hundred, which is Laravel's default.
+// A limit of zero or less means a hundred.
 func NewFileFailedJobProvider(path string, limit int) *FileFailedJobProvider {
 	if limit <= 0 {
 		limit = 100

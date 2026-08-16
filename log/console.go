@@ -22,10 +22,10 @@ const TracingHeader = "X-Arandu-Trace"
 
 // Console serves the request inspector at /_arandu/debug.
 //
-// This is the Telescope equivalent, and it is core rather than a package you
-// install. The reason is the thesis of the product: a framework whose selling
-// point is "the debugger names the probable cause" cannot ship the debugger as
-// an optional dependency that half the projects never add.
+// It is core rather than a package you install. The reason is the thesis of the
+// product: a framework whose selling point is "the debugger names the probable
+// cause" cannot ship the debugger as an optional dependency that half the
+// projects never add.
 //
 // It renders with html/template and no assets, like the error page and for the
 // same reason: it has to work when the rest is broken, including when the view
@@ -40,10 +40,6 @@ type Console struct {
 	nPlusOne int
 }
 
-// NewConsole has no Illuminate counterpart: the request inspector is Telescope,
-// which is a package a project installs, and this is core (see the package
-// comment for why).
-//
 // NewConsole returns the console over a recorder.
 func NewConsole(r *Recorder, editor string) *Console {
 	return &Console{
@@ -54,10 +50,6 @@ func NewConsole(r *Recorder, editor string) *Console {
 	}
 }
 
-// Handler has no Illuminate counterpart, for the same reason NewConsole has
-// none: what it serves is Telescope's two screens, and Telescope is not
-// Illuminate.
-//
 // Handler serves the list and the detail.
 //
 // One handler for both, because the router matches the prefix and the id under

@@ -11,8 +11,7 @@ import (
 // anyMethod is what the table shows for a route registered without a method.
 //
 // http.ServeMux treats a pattern with no method as matching every method, and
-// the table has to print something; ANY is the word Laravel uses for the same
-// registration.
+// the table has to print something; ANY is that word.
 const anyMethod = "ANY"
 
 // Router is a thin shell over http.ServeMux.
@@ -46,34 +45,32 @@ type Router struct {
 	// patterns are the global where constraints, applied to every route at
 	// registration. Pattern and Patterns set them.
 	patterns map[string]string
-	// matchedCallbacks fire after a route matches and before its middleware,
-	// which is where RouteMatched lives in Laravel. Matched registers them.
+	// matchedCallbacks fire after a route matches and before its middleware.
+	// Matched registers them.
 	matchedCallbacks []func(*Route, *http.Request)
-	// middlewareAliases name a middleware for `aru routes` and for resolution
-	// by the kernel; AliasMiddleware sets them.
+	// middlewareAliases name a middleware for route introspection and for
+	// resolution by the kernel; AliasMiddleware sets them.
 	middlewareAliases map[string]pipeline.Middleware[http.Handler]
 	// middlewareGroups are named bundles of middleware the kernel composes;
 	// MiddlewareGroup sets them.
 	middlewareGroups map[string][]pipeline.Middleware[http.Handler]
 	// binders are the explicit route parameter resolvers; Bind and Model set
 	// them, SubstituteBindings applies them. Uses RouteBindings from
-	// bindings.go (shared with the URL+bindings fatia).
+	// bindings.go, shared with URL generation.
 	binders *RouteBindings
 	// viewRenderer renders the view a View route answers with; SetViewRenderer
 	// wires it and View uses it. The concrete is hesape/view.
 	viewRenderer ViewRenderer
 	// controllerDispatcher turns a controller name and an action into the
-	// handler a resource route calls. In Laravel the container resolves it;
-	// SetControllerDispatcher is the wiring here.
+	// handler a resource route calls. SetControllerDispatcher wires it.
 	controllerDispatcher ControllerDispatcher
 	// implicitBindingCallback runs instead of the built-in implicit binding
 	// when SubstituteImplicitBindingsUsing set one.
 	implicitBindingCallback func(rt *Route, req *http.Request) error
 
 	// groupStack is the attributes of every enclosing group, outermost first.
-	// PHP pushes and pops one stack on a single router; a sub-router is created
-	// per Group here, so each carries the stack it was created under and
-	// nothing has to be popped.
+	// A sub-router is created per Group call, so each carries the stack it
+	// was created under and nothing has to be popped.
 	groupStack []map[string]any
 }
 
@@ -132,8 +129,8 @@ func (r *Router) Group(g Group) *Router {
 	}
 }
 
-// ForModule returns a sub-router that tags its routes with the module name, so
-// `aru routes` can group them. The kernel calls it for each module.
+// ForModule returns a sub-router that tags its routes with the module name,
+// for grouping in route introspection. The kernel calls it for each module.
 func (r *Router) ForModule(name string) *Router {
 	g := r.Group(Group{})
 	g.module = name
@@ -176,8 +173,8 @@ func (r *Router) Delete(pattern string, h http.Handler, mws ...pipeline.Middlewa
 // between.
 //
 // An empty list of methods panics. It would otherwise register a route that
-// answers nothing, at boot, silently -- and the symptom is a 404 on a path that
-// `aru routes` says exists.
+// answers nothing, at boot, silently -- and the symptom is a 404 on a path
+// that the route table says exists.
 func (r *Router) Match(methods []string, pattern string, h http.Handler, mws ...pipeline.Middleware[http.Handler]) *Route {
 	if len(methods) == 0 {
 		panic("routing: Match was given no methods. Name at least one, or use Any")
@@ -226,7 +223,7 @@ func (r *Router) Fallback(h http.Handler, mws ...pipeline.Middleware[http.Handle
 	return route
 }
 
-// Table returns the route table, for URL generation and for `aru routes`.
+// Table returns the route table, for URL generation and route introspection.
 func (r *Router) Table() *Routes { return r.table }
 
 // Routes returns the registered routes, in registration order.
@@ -271,8 +268,8 @@ func (r *Router) register(method, full string, h http.Handler, mws ...pipeline.M
 		defaults:   map[string]any{},
 		action:     map[string]any{"uses": "Closure", "controller": "Closure"},
 	}
-	// Global where patterns apply to every route, as Laravel's addWhereClauses
-	// does. They are compiled once, at registration.
+	// Global where patterns apply to every route. They are compiled once, at
+	// registration.
 	for name, expr := range r.root.patterns {
 		if re, err := regexp.Compile(expr); err == nil {
 			route.wheres[name] = re

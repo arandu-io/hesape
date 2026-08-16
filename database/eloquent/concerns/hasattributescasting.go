@@ -14,57 +14,52 @@ import (
 	"github.com/arandu-io/hesape/support/arr"
 )
 
-// The other half of Illuminate\Database\Eloquent\Concerns\HasAttributes: what a
-// column is declared to be, the accessor and mutator registry, and the four
-// encoders a cast reaches on the way in and on the way out.
+// The other half of HasAttributes: what a column is declared to be, the accessor
+// and mutator registry, and the four encoders a cast reaches on the way in and
+// on the way out.
 //
 // The cast implementations are not here -- they are eloquent/casts, one place a
-// column's meaning is written (RULE 9). What is here is the declaration and the
-// lookups the PHP resolves by reflection.
+// column's meaning is written. What is here is the declaration and the lookups
+// over it.
 
-// DefaultDateFormat is the format GetDateFormat falls back to.
+// DefaultDateFormat is the format GetDateFormat falls back to: "Y-m-d H:i:s"
+// in spelling, for every engine this framework carries.
 //
-// The PHP asks the connection's query grammar, which answers "Y-m-d H:i:s" for
-// every engine this framework carries. Go writes a layout by example rather
-// than by letter, so the same format is spelled with the reference time.
+// Go writes a layout by example rather than by letter, so the same format
+// is spelled with the reference time.
 const DefaultDateFormat = "2006-01-02 15:04:05"
 
-// modelEncrypter answers the PHP's static $encrypter property. A static is a
-// package variable here, and it is behind a mutex because a model is read from
-// more than one goroutine and the PHP's single request is not that.
+// modelEncrypter holds the process-wide encrypter, behind a mutex because a
+// model is read from more than one goroutine.
 var modelEncrypter struct {
 	sync.RWMutex
 	encrypter *encryption.Encrypter
 }
 
-// EncryptUsing answers HasAttributes::encryptUsing.
+// EncryptUsing sets the encrypter the encrypted casts reach for.
 //
-// It is a package function because the PHP declares it static and resolves it
-// through late static binding, which Go does not have (ADR 0044, mechanical
-// change). A nil encrypter clears it, which is the PHP's null.
+// It is a package function because there is one encrypter per process rather
+// than one per model. A nil encrypter clears it.
 func EncryptUsing(encrypter *encryption.Encrypter) {
 	modelEncrypter.Lock()
 	defer modelEncrypter.Unlock()
 	modelEncrypter.encrypter = encrypter
 }
 
-// CurrentEncrypter answers HasAttributes::currentEncrypter.
+// CurrentEncrypter returns the encrypter EncryptUsing set.
 //
-// The PHP falls back to Crypt::getFacadeRoot(). There is no facade and no
-// container here (ADR 0001, ADR 0002), so the fallback is nil and the caller
-// gets an error rather than an encrypter conjured from a global registry.
+// There is no fallback: with none set it returns nil, and the caller gets
+// an error rather than an encrypter conjured from a global registry.
 func CurrentEncrypter() *encryption.Encrypter {
 	modelEncrypter.RLock()
 	defer modelEncrypter.RUnlock()
 	return modelEncrypter.encrypter
 }
 
-// MergeCasts answers HasAttributes::mergeCasts.
+// MergeCasts adds cast declarations to the ones already there.
 //
-// It is also how a model declares its casts in the first place: the PHP
-// declares them in a $casts property or a casts() method, and Go has neither a
-// property a subclass redeclares nor a method it overrides. Merging onto an
-// empty map is that declaration, and there is one way to do it (RULE 9).
+// It is also how a model declares its casts in the first place: merging onto an
+// empty map is that declaration, and there is one way to do it.
 func (h *HasAttributes) MergeCasts(declared map[string]any) {
 	if h.casts == nil {
 		h.casts = map[string]any{}
@@ -74,12 +69,11 @@ func (h *HasAttributes) MergeCasts(declared map[string]any) {
 	}
 }
 
-// GetCasts answers HasAttributes::getCasts.
+// GetCasts returns the declared casts.
 //
-// The PHP prepends the primary key's own cast when the model is incrementing,
-// which it reads from getKeyName and getKeyType. HasAttributes has neither
-// here -- the key is a field on the entity, with a Go type of its own -- so
-// what comes back is what was declared.
+// The primary key is not prepended with a cast of its own: the key is a
+// field on the entity, with a Go type of its own, so what comes back is
+// exactly what was declared.
 func (h *HasAttributes) GetCasts() map[string]any {
 	if h.casts == nil {
 		h.casts = map[string]any{}
@@ -87,14 +81,14 @@ func (h *HasAttributes) GetCasts() map[string]any {
 	return h.casts
 }
 
-// Casts answers HasAttributes::casts, the method a model overrides to declare
-// its casts. It reads the same map GetCasts does.
+// Casts is the method a model overrides to declare its casts. It reads the
+// same map GetCasts does.
 func (h *HasAttributes) Casts() map[string]any { return h.GetCasts() }
 
-// HasCast answers HasAttributes::hasCast.
+// HasCast reports whether key is cast.
 //
-// With no types it asks whether the column is cast at all; with types it asks
-// whether the cast is one of them, which is the PHP's second argument.
+// With no types it asks whether the column is cast at all; with types it
+// asks whether the cast is one of them.
 func (h *HasAttributes) HasCast(key string, types ...string) bool {
 	if _, ok := h.GetCasts()[key]; !ok {
 		return false
@@ -112,11 +106,11 @@ func (h *HasAttributes) HasCast(key string, types ...string) bool {
 	return false
 }
 
-// GetCastType answers HasAttributes::getCastType: the cast's name, with the
-// three parameterised forms folded into one word as the PHP folds them.
+// GetCastType returns the cast's name, with the three parameterised forms
+// folded into one word: "date:Y" is "custom_datetime", and so on.
 //
-// For a cast held as a value rather than a name -- the PHP's class-string
-// branch -- it answers the Go type, which is what class_exists returns there.
+// For a cast held as a value rather than a name, it returns the Go type's
+// name instead.
 func (h *HasAttributes) GetCastType(key string) string {
 	cast, ok := h.GetCasts()[key]
 	if !ok {
@@ -140,13 +134,12 @@ func (h *HasAttributes) GetCastType(key string) string {
 	}
 }
 
-// IsDateCastable answers HasAttributes::isDateCastable.
+// IsDateCastable reports whether key is cast to a date or datetime.
 func (h *HasAttributes) IsDateCastable(key string) bool {
 	return h.HasCast(key, "date", "datetime", "immutable_date", "immutable_datetime")
 }
 
-// IsJsonCastable answers HasAttributes::isJsonCastable. The PHP spells the
-// middle word Json.
+// IsJsonCastable reports whether key is cast to a JSON-backed type.
 func (h *HasAttributes) IsJsonCastable(key string) bool {
 	return h.HasCast(key,
 		"array", "json", "json:unicode", "object", "collection",
@@ -154,7 +147,7 @@ func (h *HasAttributes) IsJsonCastable(key string) bool {
 	)
 }
 
-// IsEncryptedCastable answers HasAttributes::isEncryptedCastable.
+// IsEncryptedCastable reports whether key is cast to an encrypted type.
 func (h *HasAttributes) IsEncryptedCastable(key string) bool {
 	return h.HasCast(key,
 		"encrypted", "encrypted:array", "encrypted:collection",
@@ -174,12 +167,9 @@ func isDecimalCast(cast string) bool { return strings.HasPrefix(cast, "decimal:"
 
 // SetAttributeMutator registers the Attribute for a key.
 //
-// It is the half of the PHP that is discovery rather than behaviour: there, a
-// method whose return type is Attribute is that attribute's accessor and
-// mutator, found with ReflectionMethod. Go cannot read a method's return type
-// by name, so the model writes the same fact down (ADR 0056, motive 1), and
-// every has*Mutator lookup below reads this registry. A nil attribute removes
-// the registration.
+// Go cannot read a method's return type by name, so the model writes down which
+// key an Attribute belongs to, and every has*Mutator lookup below reads this
+// registry. A nil attribute removes the registration.
 func (h *HasAttributes) SetAttributeMutator(key string, attribute *casts.Attribute) {
 	if attribute == nil {
 		delete(h.mutators, key)
@@ -193,51 +183,44 @@ func (h *HasAttributes) SetAttributeMutator(key string, attribute *casts.Attribu
 	h.mutatedCached = false
 }
 
-// GetAttributeMutator answers the Attribute registered for a key, or nil. It is
-// what the PHP reaches by calling the method it found by reflection.
+// GetAttributeMutator returns the Attribute registered for a key, or nil.
 func (h *HasAttributes) GetAttributeMutator(key string) *casts.Attribute {
 	return h.mutators[key]
 }
 
-// HasAttributeMutator answers HasAttributes::hasAttributeMutator.
+// HasAttributeMutator reports whether key has an Attribute registered.
 func (h *HasAttributes) HasAttributeMutator(key string) bool {
 	return h.mutators[key] != nil
 }
 
-// HasAttributeGetMutator answers HasAttributes::hasAttributeGetMutator.
+// HasAttributeGetMutator reports whether key's Attribute has a getter.
 func (h *HasAttributes) HasAttributeGetMutator(key string) bool {
 	return h.mutators[key].HasGet()
 }
 
-// HasAttributeSetMutator answers HasAttributes::hasAttributeSetMutator.
+// HasAttributeSetMutator reports whether key's Attribute has a setter.
 func (h *HasAttributes) HasAttributeSetMutator(key string) bool {
 	return h.mutators[key].HasSet()
 }
 
-// HasGetMutator answers HasAttributes::hasGetMutator.
+// HasGetMutator reports whether the key has an accessor registered.
 //
-// The PHP has two ways to declare an accessor -- a getFooAttribute method and
-// an Attribute return type -- and one method for each. Go has one registry, so
-// both names read it: the question a Laravel developer asks under either name
-// has the same answer here, and there is still only one way to declare the
-// accessor (RULE 9).
+// There is one registry, so this and HasAttributeGetMutator read the same thing
+// and there is still only one way to declare the accessor.
 func (h *HasAttributes) HasGetMutator(key string) bool { return h.HasAttributeGetMutator(key) }
 
-// HasSetMutator answers HasAttributes::hasSetMutator, reading the same registry
-// as HasAttributeSetMutator and for the same reason.
+// HasSetMutator reports whether the key has a mutator registered, reading
+// the same registry as HasAttributeSetMutator and for the same reason.
 func (h *HasAttributes) HasSetMutator(key string) bool { return h.HasAttributeSetMutator(key) }
 
-// HasAnyGetMutator answers HasAttributes::hasAnyGetMutator.
+// HasAnyGetMutator reports whether key has a getter under either name.
 func (h *HasAttributes) HasAnyGetMutator(key string) bool {
 	return h.HasGetMutator(key) || h.HasAttributeGetMutator(key)
 }
 
-// MutateAttribute answers HasAttributes::mutateAttribute: the stored value read
-// through its accessor.
+// MutateAttribute returns the stored value read through its accessor.
 //
-// It returns an error where the PHP lets the accessor throw, and it returns the
-// value untouched when there is no accessor -- which is what the PHP's callers
-// arrange by asking hasAnyGetMutator first.
+// It returns the value untouched when there is no accessor.
 func (h *HasAttributes) MutateAttribute(key string, value any) (any, error) {
 	mutator := h.mutators[key]
 	if !mutator.HasGet() {
@@ -246,8 +229,9 @@ func (h *HasAttributes) MutateAttribute(key string, value any) (any, error) {
 	return mutator.Get(value, h.GetAttributes())
 }
 
-// SetMutatedAttributeValue answers HasAttributes::setMutatedAttributeValue: the
-// columns the mutator writes, applied to the attribute bag.
+// SetMutatedAttributeValue writes value through key's setter, applying the
+// columns it returns to the attribute bag. With no setter it sets key
+// directly.
 func (h *HasAttributes) SetMutatedAttributeValue(key string, value any) error {
 	mutator := h.mutators[key]
 	if !mutator.HasSet() {
@@ -265,8 +249,8 @@ func (h *HasAttributes) SetMutatedAttributeValue(key string, value any) error {
 	return nil
 }
 
-// GetMutatedAttributes answers HasAttributes::getMutatedAttributes: the keys
-// that have an accessor, computed once and kept.
+// GetMutatedAttributes returns the keys that have an accessor, computed
+// once and kept.
 func (h *HasAttributes) GetMutatedAttributes() []string {
 	if !h.mutatedCached {
 		h.CacheMutatedAttributes()
@@ -274,16 +258,11 @@ func (h *HasAttributes) GetMutatedAttributes() []string {
 	return h.mutated
 }
 
-// CacheMutatedAttributes answers HasAttributes::cacheMutatedAttributes.
+// CacheMutatedAttributes recomputes the list of keys that have a mutator.
 //
-// The PHP is static and takes a class or an instance, because what it caches is
-// the result of reflecting over that class's methods, shared by every instance
-// of it. Here the registry is per model and there is nothing to reflect over,
-// so it is a method and it recomputes this model's list -- which is the same
-// job with the reflection taken out (ADR 0056, motive 1).
-//
-// The list comes back sorted. The PHP's order is the order PHP happened to
-// report the methods in, which is not an order anybody can rely on.
+// The registry is per model, so this is a method rather than something shared by
+// every model of a type. The list comes back sorted, so it is the same on every
+// run.
 func (h *HasAttributes) CacheMutatedAttributes() []string {
 	mutated := make([]string, 0, len(h.mutators))
 	for key, attribute := range h.mutators {
@@ -298,7 +277,8 @@ func (h *HasAttributes) CacheMutatedAttributes() []string {
 	return h.mutated
 }
 
-// GetDateFormat answers HasAttributes::getDateFormat.
+// GetDateFormat returns the layout dates are read and written in, defaulting
+// to DefaultDateFormat.
 func (h *HasAttributes) GetDateFormat() string {
 	if h.dateFormat == "" {
 		return DefaultDateFormat
@@ -306,19 +286,17 @@ func (h *HasAttributes) GetDateFormat() string {
 	return h.dateFormat
 }
 
-// SetDateFormat answers HasAttributes::setDateFormat.
+// SetDateFormat replaces the layout dates are read and written in.
 //
-// The format is a Go layout -- the reference time, "2006-01-02" -- and not the
-// PHP's letters. The framework speaks one date format language and it is the
-// standard library's.
+// The format is a Go layout -- the reference time, "2006-01-02" -- rather
+// than letter codes. The framework speaks one date format language, and it
+// is the standard library's.
 func (h *HasAttributes) SetDateFormat(format string) { h.dateFormat = format }
 
-// FromDateTime answers HasAttributes::fromDateTime: a value as the string the
-// column stores.
+// FromDateTime returns value as the string the column stores.
 //
-// An empty value comes back empty, as the PHP's `empty($value) ? $value` does.
-// It returns an error where the PHP lets Carbon throw on a value it cannot
-// read (ADR 0044, mechanical change).
+// An empty value comes back empty, and a value that cannot be read as a time is
+// an error.
 func (h *HasAttributes) FromDateTime(value any) (string, error) {
 	if value == nil || value == "" {
 		return "", nil
@@ -331,13 +309,10 @@ func (h *HasAttributes) FromDateTime(value any) (string, error) {
 	return moment.Format(h.GetDateFormat()), nil
 }
 
-// asDateTime answers HasAttributes::asDateTime: whatever a column or a caller
-// carries, as a time.
+// asDateTime returns whatever a column or a caller carries, as a time.
 //
-// The PHP accepts a Carbon, a DateTimeInterface, a unix timestamp, a Y-m-d
-// string and its own storage format. The same list is read here, in the same
-// order, minus the two Carbon branches -- there is no Carbon, and time.Time
-// covers what they add.
+// It accepts a time.Time, a unix timestamp, or a string in one of the
+// layouts parseDateTime tries.
 func asDateTime(value any) (time.Time, error) {
 	switch moment := value.(type) {
 	case nil:
@@ -364,9 +339,9 @@ func asDateTime(value any) (time.Time, error) {
 	}
 }
 
-// parseDateTime reads the formats a column comes back in. The order is the
-// PHP's: the storage format first, then a bare date, then RFC 3339 -- which is
-// what a JSON column holds and what serializeDate writes.
+// parseDateTime reads the formats a column comes back in: the storage
+// format first, then a bare date, then RFC 3339, which is what a JSON
+// column holds.
 func parseDateTime(value string) (time.Time, error) {
 	if value == "" {
 		return time.Time{}, fmt.Errorf("concerns: cannot read a date from an empty string")
@@ -388,12 +363,8 @@ func parseDateTime(value string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("concerns: %q is not a date this model can read", value)
 }
 
-// FromJson answers HasAttributes::fromJson.
-//
-// The PHP's $asObject argument chooses between an array and a stdClass. Go has
-// neither: a JSON object decodes to map[string]any either way, so the argument
-// has nothing to select and is gone. A null or empty column decodes to nil,
-// which is the PHP's early return.
+// FromJson decodes value: a JSON object decodes to map[string]any. A nil or
+// empty column decodes to nil.
 func (h *HasAttributes) FromJson(value any) (any, error) {
 	switch stored := value.(type) {
 	case nil:
@@ -413,12 +384,7 @@ func (h *HasAttributes) FromJson(value any) (any, error) {
 	}
 }
 
-// AsJson answers HasAttributes::asJson: a value as the string a JSON column
-// stores.
-//
-// The PHP's $flags argument passes json_encode's flags through. encoding/json
-// has no counterpart worth passing, and pretty printing a column would change
-// what is stored, so there is nothing to select.
+// AsJson returns value as the string a JSON column stores.
 func (h *HasAttributes) AsJson(value any) (string, error) {
 	encoded, err := casts.Encode(value)
 	if err != nil {
@@ -427,11 +393,11 @@ func (h *HasAttributes) AsJson(value any) (string, error) {
 	return string(encoded), nil
 }
 
-// FromFloat answers HasAttributes::fromFloat.
+// FromFloat returns value as a float64.
 //
-// The three names the PHP matches on are the three a float column can come
-// back as text for, and they are matched here in the same order before the
-// value is parsed as a number.
+// "Infinity", "-Infinity" and "NaN" are matched as text before the value is
+// parsed as a number: the three ways a float column can come back
+// unparseable by strconv.ParseFloat alone.
 func (h *HasAttributes) FromFloat(value any) (float64, error) {
 	switch number := value.(type) {
 	case nil:
@@ -463,11 +429,11 @@ func (h *HasAttributes) FromFloat(value any) (float64, error) {
 	return number, nil
 }
 
-// FromEncryptedString answers HasAttributes::fromEncryptedString.
+// FromEncryptedString decrypts value with the current encrypter.
 //
-// It returns an error where the PHP throws DecryptException, and where the PHP
-// falls back to the Crypt facade it reports that no encrypter was set: a value
-// that cannot be decrypted must not come back looking like plaintext.
+// It reports an error when no encrypter is set, rather than falling back to
+// one conjured from a global registry: a value that cannot be decrypted
+// must not come back looking like plaintext.
 func (h *HasAttributes) FromEncryptedString(value string) (string, error) {
 	encrypter := CurrentEncrypter()
 	if encrypter == nil {
@@ -476,8 +442,7 @@ func (h *HasAttributes) FromEncryptedString(value string) (string, error) {
 	return encrypter.DecryptString(value)
 }
 
-// CastAttributeAsEncryptedString answers
-// HasAttributes::castAttributeAsEncryptedString.
+// CastAttributeAsEncryptedString encrypts value with the current encrypter.
 func (h *HasAttributes) CastAttributeAsEncryptedString(key string, value string) (string, error) {
 	encrypter := CurrentEncrypter()
 	if encrypter == nil {
@@ -486,13 +451,12 @@ func (h *HasAttributes) CastAttributeAsEncryptedString(key string, value string)
 	return encrypter.EncryptString(value)
 }
 
-// FillJsonAttribute answers HasAttributes::fillJsonAttribute: a write into one
-// path of a JSON column, "options->notifications->email".
+// FillJsonAttribute writes into one path of a JSON column, such as
+// "options->notifications->email".
 //
 // The column is read, the path is written, and the whole column is encoded
-// back -- which is the PHP's order and the reason this is not an update of one
-// key in the database. An encrypted JSON column is re-encrypted on the way out,
-// as the PHP does.
+// back, which is why this is not an update of one key in the database. An
+// encrypted JSON column is re-encrypted on the way out.
 func (h *HasAttributes) FillJsonAttribute(key string, value any) error {
 	column, path, found := strings.Cut(key, "->")
 	if !found {
@@ -523,8 +487,8 @@ func (h *HasAttributes) FillJsonAttribute(key string, value any) error {
 	return nil
 }
 
-// getArrayAttributeByKey answers HasAttributes::getArrayAttributeByKey: the
-// stored JSON column as a map, or an empty one when the column is empty.
+// getArrayAttributeByKey returns the stored JSON column as a map, or an
+// empty one when the column is empty.
 func (h *HasAttributes) getArrayAttributeByKey(key string) (map[string]any, error) {
 	stored := h.GetAttribute(key)
 	if stored == nil {

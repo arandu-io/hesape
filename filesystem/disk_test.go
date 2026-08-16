@@ -193,8 +193,8 @@ func TestListReturnsKeysSortedAndScoped(t *testing.T) {
 	}
 }
 
-// TestListCannotBeAskedForAnotherTenant: RULE 17 at its sharpest -- a listing
-// is the one read that hands over every name at once.
+// TestListCannotBeAskedForAnotherTenant: authorization on a read at its
+// sharpest -- a listing is the one read that hands over every name at once.
 func TestListCannotBeAskedForAnotherTenant(t *testing.T) {
 	const other = "22222222-2222-4222-8222-222222222222"
 	d := filesystem.NewDisk("local", newMem())

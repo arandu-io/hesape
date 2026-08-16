@@ -7,10 +7,9 @@ import (
 	"path"
 )
 
-// AttachOptions is Illuminate's ['as' => ..., 'mime' => ...] options array,
-// which is the one place this component uses an untyped PHP array as a record.
-// A struct is what that array is, and it arrives as a variadic tail because
-// Illuminate's parameter has a default.
+// AttachOptions is what an attachment goes under: its name in the message and
+// its content type. It arrives as a variadic tail everywhere it is taken,
+// because both halves have a sensible default.
 type AttachOptions struct {
 	// As is what the file is called in the message.
 	As string
@@ -25,10 +24,9 @@ func firstOption(options []AttachOptions) AttachOptions {
 	return AttachOptions{}
 }
 
-// UploadedFile is the slice of Illuminate\Http\UploadedFile that
-// Attachment.FromUploadedFile needs. It is an interface rather than an import
-// because an uploaded file belongs to the HTTP layer and this package is
-// underneath it.
+// UploadedFile is the part of an uploaded file that [FromUploadedFile] needs.
+// It is an interface rather than an import because an uploaded file belongs to
+// the HTTP layer and this package is underneath it.
 type UploadedFile interface {
 	GetClientOriginalName() string
 	GetMimeType() string
@@ -36,29 +34,29 @@ type UploadedFile interface {
 	Get() ([]byte, error)
 }
 
-// Attachment is Illuminate\Mail\Attachment: a file on its way into a message,
-// described once and resolved when somebody actually attaches it.
+// Attachment is a file on its way into a message, described once and resolved
+// when somebody actually attaches it.
 //
-// The indirection is Illuminate's and it earns its keep: FromStorageDisk names
-// a disk and a path without reading anything, so a mailable can be built,
-// queued, serialised and only then touch the filesystem -- on the worker, where
-// the disk is configured, rather than in the request that built it.
+// The indirection earns its keep: [FromStorageDisk] names a disk and a path
+// without reading anything, so a mailable can be built, queued, serialised and
+// only then touch the filesystem -- on the worker, where the disk is
+// configured, rather than in the request that built it.
 //
-// Illuminate's $as and $mime are public properties with fluent setters of the
-// same name, which PHP allows and Go does not. Here the setters win, because
-// As() and WithMime() are how Illuminate's own examples read.
+// The name and the content type are unexported, and [Attachment.As] and
+// [Attachment.WithMime] are how they are set: a Go type cannot carry a method
+// and a field of the same name, and the fluent form is what the constructors
+// chain into.
 type Attachment struct {
 	as   string
 	mime string
 
-	// resolver is Illuminate's $resolver closure. It hands itself back to one
-	// of the two strategies, which is how the same attachment can be turned
-	// into a path for one caller and into bytes for another.
+	// resolver hands the attachment back to one of the two strategies, which is
+	// how the same attachment can be turned into a path for one caller and into
+	// bytes for another.
 	resolver func(a *Attachment, pathStrategy func(string) any, dataStrategy func(func() ([]byte, error)) any) any
 }
 
-// FromPath is Illuminate's Attachment::fromPath(). Static constructors have no
-// Go twin, so they are package-level functions carrying the same name.
+// FromPath is an attachment read from a path when it is resolved.
 func FromPath(p string) *Attachment {
 	return &Attachment{
 		resolver: func(a *Attachment, pathStrategy func(string) any, _ func(func() ([]byte, error)) any) any {
@@ -67,13 +65,13 @@ func FromPath(p string) *Attachment {
 	}
 }
 
-// FromURL is Illuminate's Attachment::fromUrl(). Go spells the initialism in
-// capitals (ADR 0044); the behaviour is fromPath's, because a URL is a path as
-// far as the resolver is concerned.
+// FromURL is an attachment named by URL. It is [FromPath], because a URL is a
+// path as far as the resolver is concerned.
 func FromURL(url string) *Attachment { return FromPath(url) }
 
-// FromData is Illuminate's Attachment::fromData(): bytes produced on demand,
-// under a name. The name is optional in PHP and arrives as a variadic tail.
+// FromData is an attachment made of bytes produced on demand, under a name. The
+// name is optional here and required by the time it is attached: see
+// [ErrAttachmentNeedsName].
 func FromData(data func() ([]byte, error), name ...string) *Attachment {
 	a := &Attachment{
 		resolver: func(a *Attachment, _ func(string) any, dataStrategy func(func() ([]byte, error)) any) any {
@@ -86,8 +84,8 @@ func FromData(data func() ([]byte, error), name ...string) *Attachment {
 	return a
 }
 
-// FromUploadedFile is Illuminate's Attachment::fromUploadedFile(). The name and
-// the content type come off the upload, which is what stops a browser-supplied
+// FromUploadedFile is an attachment made from an upload. The name and the
+// content type come off the upload, which is what stops a browser-supplied
 // filename from being the only thing describing the part.
 func FromUploadedFile(file UploadedFile) *Attachment {
 	return &Attachment{
@@ -102,11 +100,10 @@ func FromUploadedFile(file UploadedFile) *Attachment {
 	}
 }
 
-// FromStorage is Illuminate's Attachment::fromStorage(): a path on the default
-// disk.
+// FromStorage is an attachment at a path on the default disk.
 func FromStorage(p string) *Attachment { return FromStorageDisk("", p) }
 
-// FromStorageDisk is Illuminate's Attachment::fromStorageDisk().
+// FromStorageDisk is an attachment at a path on the named disk.
 //
 // Nothing is read here. The disk is asked for the bytes and the content type at
 // the moment the attachment is resolved, which is why a queued mailable can
@@ -132,27 +129,24 @@ func FromStorageDisk(disk, p string) *Attachment {
 	}
 }
 
-// FromCloudStorage is Illuminate's Attachment::fromCloudStorage(): a path on
-// whatever disk [CloudDisk] names.
+// FromCloudStorage is an attachment at a path on whatever disk [CloudDisk]
+// names.
 func FromCloudStorage(p string) *Attachment { return FromStorageDisk(CloudDisk, p) }
 
-// As sets what the file is called in the message, and is Illuminate's
-// Attachment::as().
+// As sets what the file is called in the message.
 func (a *Attachment) As(name string) *Attachment {
 	a.as = name
 	return a
 }
 
 // WithMime sets the content type.
-//
-// WithMime is Attachment::withMime.
 func (a *Attachment) WithMime(mime string) *Attachment {
 	a.mime = mime
 	return a
 }
 
 // AttachWith runs the attachment through whichever of the two strategies it was
-// built for, and is Illuminate's Attachment::attachWith().
+// built for.
 //
 // It is the one method every other one on this type is written in terms of: a
 // path attachment reaches pathStrategy, a data attachment reaches dataStrategy,
@@ -167,9 +161,8 @@ func (a *Attachment) AttachWith(
 	return a.resolver(a, pathStrategy, dataStrategy)
 }
 
-// attachTarget is what AttachTo can attach to. Illuminate type-hints
-// Mailable|Message|MailMessage there; the two shapes those three share are
-// attach-a-path and attach-bytes, so that is the interface.
+// attachTarget is what AttachTo can attach to: anything that takes a path or
+// takes bytes, which is [Message] and [PendingMail].
 type attachTarget interface {
 	attachPath(path string, o AttachOptions)
 	attachBytes(data []byte, name string, o AttachOptions)
@@ -184,16 +177,12 @@ type attachTarget interface {
 //
 // The caller fixes it at the point of building: As on the attachment, or the
 // As field of the [AttachOptions] passed to AttachTo.
-//
-// Answers Illuminate\Mail\Attachment's
-// RuntimeException('Attachment requires a filename to be specified.').
 var ErrAttachmentNeedsName = errors.New("mail: an attachment built from data needs a filename")
 
-// AttachTo attaches this attachment to a message, and is Illuminate's
-// Attachment::attachTo().
+// AttachTo attaches this attachment to a message.
 //
-// PHP throws when data has no name to go under; ADR 0044 turns a throw into an
-// error, so the caller finds out at the call rather than at the panic.
+// It returns an error rather than panicking when data has no name to go under,
+// so the caller finds out at the call.
 func (a *Attachment) AttachTo(target any, options ...AttachOptions) error {
 	to, ok := target.(attachTarget)
 	if !ok {
@@ -253,7 +242,7 @@ func (a *Attachment) resolve(o AttachOptions) resolved {
 				out.Data = b
 			}
 			// The name and type may have been set by the resolver itself --
-			// fromStorageDisk and fromUploadedFile both do that -- so they are
+			// FromStorageDisk and FromUploadedFile both do that -- so they are
 			// read back after it ran, not before.
 			out.As = firstNonEmpty(o.As, a.as)
 			out.Mime = firstNonEmpty(o.Mime, a.mime)
@@ -263,13 +252,11 @@ func (a *Attachment) resolve(o AttachOptions) resolved {
 	return out
 }
 
-// IsEquivalent reports whether the two attachments would produce the same part,
-// and is Illuminate's Attachment::isEquivalent().
+// IsEquivalent reports whether the two attachments would produce the same part.
 //
-// It is what makes assertHasAttachment work against an attachment declared in
-// the mailable's attachments() rather than added by hand: two descriptions of
-// the same file are the same attachment even though they are not the same
-// value.
+// It is what makes [Message.AssertHasAttachment] work against an attachment the
+// mailable declared rather than one added by hand: two descriptions of the same
+// file are the same attachment even though they are not the same value.
 func (a *Attachment) IsEquivalent(other *Attachment, options ...AttachOptions) bool {
 	if a == nil || other == nil {
 		return a == other

@@ -16,8 +16,8 @@ import (
 )
 
 // user is an account with nothing to confirm. It does NOT implement
-// auth.MustVerifyEmail, which is what makes it the other half of PHP's
-// `instanceof` test -- see [verifiable].
+// auth.MustVerifyEmail, which is what makes it the other half of the type
+// assertion the middleware does -- see [verifiable].
 type user struct {
 	id       string
 	email    string
@@ -101,7 +101,7 @@ func (f *factory) ShouldUse(name string) { f.used = name }
 
 // subjectFor is the resolver every test wires. It is what a real application
 // must NOT write this way: the tenant here is a constant, and in production it
-// comes off the session (RULE 14).
+// comes off the session.
 func subjectFor(_ *http.Request, u auth.Authenticatable) (auth.Subject, bool) {
 	return auth.Subject{ID: u.GetAuthIdentifier().(string), Tenant: "acme"}, true
 }
@@ -151,9 +151,9 @@ func TestAuthenticateRedirectsABrowserWhenThereIsSomewhereToSendIt(t *testing.T)
 	}
 }
 
-// TestAuthenticateAnswers401ToAClientThatAskedForJSON pins Illuminate's
-// expectsJson branch: a redirect to a sign-in page is meaningless to an API
-// client, which needs the status.
+// TestAuthenticateAnswers401ToAClientThatAskedForJSON pins the JSON branch: a
+// redirect to a sign-in page is meaningless to an API client, which needs the
+// status.
 func TestAuthenticateAnswers401ToAClientThatAskedForJSON(t *testing.T) {
 	var ran bool
 	m := middleware.NewAuthenticate(newFactory(map[string]*guard{"": {}}), subjectFor).
@@ -195,8 +195,8 @@ func TestAuthenticatePassesARequestWithASessionAndPutsTheSubjectOnIt(t *testing.
 	}
 }
 
-// TestAuthenticateTriesEveryGuardItWasGiven is Illuminate's foreach: the first
-// guard that answers wins, and it is the one shouldUse is told about.
+// TestAuthenticateTriesEveryGuardItWasGiven pins the order: the first guard
+// that answers wins, and it is the one ShouldUse is told about.
 func TestAuthenticateTriesEveryGuardItWasGiven(t *testing.T) {
 	f := newFactory(map[string]*guard{
 		"web": {},
@@ -329,9 +329,9 @@ func TestAuthorizeRefusesARequestWithNoSubjectBeforeAskingTheGate(t *testing.T) 
 	}
 }
 
-// TestAuthorizeResolvesTheRouteParametersItWasNamed is Illuminate's getModel:
-// the middleware parameters are the names of route parameters, and what reaches
-// the gate is their values.
+// TestAuthorizeResolvesTheRouteParametersItWasNamed pins the lookup: the
+// middleware parameters are the names of route parameters, and what reaches the
+// gate is their values.
 func TestAuthorizeResolvesTheRouteParametersItWasNamed(t *testing.T) {
 	g := &gate{}
 	m := middleware.NewAuthorize(g).Using("invoice.view", "invoice", `'draft'`, "models.Invoice")
@@ -412,9 +412,9 @@ func TestEnsureEmailIsVerifiedLetsThroughAConfirmedAccount(t *testing.T) {
 	}
 }
 
-// TestEnsureEmailIsVerifiedLetsThroughAnAccountWithNothingToVerify is PHP's
-// `instanceof MustVerifyEmail`: a user type that does not have to confirm an
-// address is not asked to.
+// TestEnsureEmailIsVerifiedLetsThroughAnAccountWithNothingToVerify pins the
+// type assertion: a user type that does not have to confirm an address is not
+// asked to.
 func TestEnsureEmailIsVerifiedLetsThroughAnAccountWithNothingToVerify(t *testing.T) {
 	var ran bool
 	f := newFactory(map[string]*guard{"": {signedIn: true, current: &user{id: "7"}}})
@@ -571,7 +571,7 @@ func TestRequirePasswordAnswers423ToAClientThatAskedForJSON(t *testing.T) {
 }
 
 // TestRequirePasswordDefaultsToTheFrameworkWindow pins that a zero timeout is
-// session.PasswordConfirmationWindow, which is Illuminate's 10800 seconds.
+// session.PasswordConfirmationWindow.
 func TestRequirePasswordDefaultsToTheFrameworkWindow(t *testing.T) {
 	var justInside, justOutside bool
 

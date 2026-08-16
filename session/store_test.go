@@ -76,7 +76,7 @@ func TestExistsAndHasAskDifferentQuestions(t *testing.T) {
 	if s.HasAny("absent", "present") {
 		t.Fatal("HasAny counted a nil")
 	}
-	// The empty case: false, and Illuminate's is true. See the doc comment.
+	// The empty case is false. See the doc comment.
 	if s.Has() || s.Exists() {
 		t.Fatal("asking about no keys answered yes")
 	}
@@ -1030,11 +1030,11 @@ func TestTheFileDriverIsBuiltFromConfiguration(t *testing.T) {
 	}
 }
 
-// TestOnlyTakesTopLevelKeys: Store::only is Arr::only, which is
-// array_intersect_key over the top level and reaches into nothing. This read
-// each key in dot notation, so Only(["user.name"]) returned a key the PHP has no
-// way of returning and the two disagreed on what a whitelist is. Except stays in
-// dot notation, because Arr::except is Arr::forget and that one does walk.
+// TestOnlyTakesTopLevelKeys: Only matches only top-level keys and never
+// walks dot notation. This used to walk it, so Only(["user.name"]) reached
+// inside a nested map and disagreed with Except about what a whitelist is.
+// Except stays in dot notation, because it is implemented through
+// arrForget, which does walk.
 func TestOnlyTakesTopLevelKeys(t *testing.T) {
 	s := startedStore(t, session.NewArraySessionHandler(time.Hour))
 	s.Put("user", map[string]any{"name": "Ana", "email": "ana@example.test"})
@@ -1053,10 +1053,10 @@ func TestOnlyTakesTopLevelKeys(t *testing.T) {
 	}
 }
 
-// TestIncrementCountsANumberWrittenAsText: PHP's + coerces first, so a key
-// holding the string "5" counts as five and increment returns 6. This read it as
-// zero and returned 1, which silently restarts a counter that has been through
-// anything that stringifies -- a form value, a header, an older release.
+// TestIncrementCountsANumberWrittenAsText: a key holding the string "5"
+// counts as five, so Increment returns 6. This used to read it as zero and
+// return 1, which silently restarts a counter that has been through
+// anything that stringifies it -- a form value, a header, an older release.
 func TestIncrementCountsANumberWrittenAsText(t *testing.T) {
 	s := startedStore(t, session.NewArraySessionHandler(time.Hour))
 
@@ -1068,18 +1068,17 @@ func TestIncrementCountsANumberWrittenAsText(t *testing.T) {
 	if got := s.Increment("ratio", 1); got != 6 {
 		t.Errorf(`Increment over "5.7" = %d, want 6`, got)
 	}
-	// Text that is not a number is still zero: PHP warns and takes 0, and an
-	// error on a path whose whole purpose is not to have one is worse.
+	// Text that is not a number is still zero: an error on a path whose
+	// whole purpose is not to have one would be worse.
 	s.Put("name", "Ana")
 	if got := s.Increment("name", 1); got != 1 {
 		t.Errorf(`Increment over "Ana" = %d, want 1`, got)
 	}
 }
 
-// TestPushKeepsWhatWasAlreadyThere: PHP raises an Error for `$array[] =` over a
-// scalar, so nothing is lost there. This started a fresh list and dropped the
-// value that was in the key -- silent data loss, on the one call whose name says
-// it only adds.
+// TestPushKeepsWhatWasAlreadyThere: this used to start a fresh list and
+// drop the value that was in the key -- silent data loss, on the one call
+// whose name says it only adds.
 func TestPushKeepsWhatWasAlreadyThere(t *testing.T) {
 	s := startedStore(t, session.NewArraySessionHandler(time.Hour))
 
@@ -1095,12 +1094,11 @@ func TestPushKeepsWhatWasAlreadyThere(t *testing.T) {
 	}
 }
 
-// TestTheFileHandlerCollectsTheWayTheFinderDoes: PHP builds the sweep with
-// Finder::create()->in($path)->files()->ignoreDotFiles(true), which walks
-// subdirectories and skips dot files. This did the opposite of both: it read one
-// level and deleted anything it found, so a storage directory holding a
-// .gitignore -- which is how the directory survives a clone at all -- lost it on
-// the first sweep.
+// TestTheFileHandlerCollectsTheWayTheFinderDoes: the sweep is a recursive
+// walk that skips dot files and dot directories. This used to do the
+// opposite: it read one level and deleted anything it found, so a storage
+// directory holding a .gitignore -- which is how the directory survives a
+// clone at all -- lost it on the first sweep.
 func TestTheFileHandlerCollectsTheWayTheFinderDoes(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "sessions")
 	handler, err := session.NewFileSessionHandler(nil, dir, time.Hour)
@@ -1135,13 +1133,12 @@ func TestTheFileHandlerCollectsTheWayTheFinderDoes(t *testing.T) {
 	}
 }
 
-// TestTheCookieHandlerWritesTheJSONLaravelWrites: the wire shape was base64 of
-// the JSON, so a cookie written by a Laravel application read back here as an
-// empty session and a cookie written here read back empty there -- an
-// interoperability break that only shows in production, on the day somebody puts
-// the two behind one domain. json_encode is what the PHP queues, and
-// rawurlencode is what Symfony's Cookie does to it on the way out; net/http
-// sanitises instead of encoding, so the encoding is done here.
+// TestTheCookieHandlerWritesTheJSONLaravelWrites: the wire shape used to be
+// base64 of the JSON, which [CookieSessionHandler.Read] cannot
+// percent-decode, so a cookie written that way read back as an empty
+// session -- silently, the kind of break that only shows in production.
+// net/http sanitises a cookie value instead of encoding it, so the percent
+// encoding has to happen here.
 func TestTheCookieHandlerWritesTheJSONLaravelWrites(t *testing.T) {
 	jar := &fakeJar{}
 	handler := session.NewCookieSessionHandler(jar, time.Hour, false)
@@ -1167,9 +1164,10 @@ func TestTheCookieHandlerWritesTheJSONLaravelWrites(t *testing.T) {
 	}
 }
 
-// TestTheCookieHandlerReadsWhatLaravelWrote is the other direction, and it is
-// the one that matters: the cookie below was produced by PHP, and it used to
-// read back as an empty session.
+// TestTheCookieHandlerReadsWhatLaravelWrote is the other direction, and it
+// is the one that matters: it used to read back as an empty session. The
+// payload inside "data" is not JSON -- Read never parses it, only the
+// envelope around it -- so whatever is inside comes back unchanged.
 func TestTheCookieHandlerReadsWhatLaravelWrote(t *testing.T) {
 	handler := session.NewCookieSessionHandler(&fakeJar{}, time.Hour, false)
 	id := strings.Repeat("k", 40)

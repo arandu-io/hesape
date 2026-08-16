@@ -10,9 +10,8 @@ import (
 
 // NullQueue accepts every job and keeps none of them.
 //
-// It answers Illuminate\Queue\NullQueue. It is what a test that does not care
-// about the queue wires, and what the sync connection's registry-only worker is
-// built over -- see [SyncQueue].
+// It is what a test that does not care about the queue wires, and what the sync
+// connection's registry-only worker is built over -- see [SyncQueue].
 //
 // It is a value and not a pointer, because it has no state and a nil pointer
 // that silently swallows every job is a worse mistake than the one this type

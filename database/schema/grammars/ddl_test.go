@@ -290,10 +290,10 @@ func TestChangeColumn(t *testing.T) {
 	})
 }
 
-// TestChangeGeneratedColumn covers the distinction PHP draws with
-// array_key_exists and a Go nil field cannot: a changed column that never
-// mentioned its generation expression leaves it alone, one that set it to
-// nothing drops it, and one that set a new expression is refused, because
+// TestChangeGeneratedColumn covers the three states a changed column's
+// generation expression can be in, which a single nil field cannot tell
+// apart on its own: never mentioning it leaves it alone, setting it to
+// nothing drops it, and setting a new expression is refused, because
 // Postgres cannot rewrite a generated column.
 func TestChangeGeneratedColumn(t *testing.T) {
 	dropped := compile(t, newFake("pgsql"), "users", func(table *schema.Blueprint) {
@@ -398,9 +398,8 @@ func TestUnsupportedIsReportedNotSwallowed(t *testing.T) {
 	}
 }
 
-// TestGrantIsRequired is RULE 17 at the one door this component opens. A
-// blueprint nobody authorized compiles nothing, and the refusal names the
-// missing call rather than the SQL.
+// TestGrantIsRequired: a blueprint nobody authorized compiles nothing, and the
+// refusal names the missing call rather than the SQL.
 func TestGrantIsRequired(t *testing.T) {
 	blueprint := schema.NewBlueprint(newFake("mysql"), "users", func(table *schema.Blueprint) {
 		table.Create()

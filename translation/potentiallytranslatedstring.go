@@ -1,8 +1,7 @@
 package translation
 
-// PotentiallyTranslatedString is Illuminate's
-// Translation\PotentiallyTranslatedString: a message that is a key if the
-// catalogue carries it and the message itself if it does not.
+// PotentiallyTranslatedString is a message that is a key if the catalogue
+// carries it and the message itself if it does not.
 //
 // It is what a validation rule hands back when it fails. The rule writes
 // "The :attribute must be a working URL." or "validation.custom.url", calls
@@ -21,11 +20,10 @@ func NewPotentiallyTranslatedString(s string, translator *Translator) *Potential
 	return &PotentiallyTranslatedString{string: s, translator: translator}
 }
 
-// Translate answers PotentiallyTranslatedString::translate(): it resolves the
-// string through the translator and keeps the result.
+// Translate resolves the string through the translator and keeps the result.
 //
 // An empty locale means the translator's own. It returns the same value so that
-// calls chain, as PHP's $this does.
+// calls chain.
 func (s *PotentiallyTranslatedString) Translate(replace Replace, locale string) *PotentiallyTranslatedString {
 	if s.translator == nil {
 		return s
@@ -57,6 +55,6 @@ func (s *PotentiallyTranslatedString) ToString() string {
 	return s.string
 }
 
-// String answers __toString(), which is PHP's Stringable; Go's name for the
-// same contract is fmt.Stringer. It is [PotentiallyTranslatedString.ToString].
+// String satisfies fmt.Stringer. It is
+// [PotentiallyTranslatedString.ToString].
 func (s *PotentiallyTranslatedString) String() string { return s.ToString() }

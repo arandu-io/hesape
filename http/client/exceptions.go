@@ -24,8 +24,6 @@ func (e *HttpClientException) Error() string {
 // this error when the transport failed and the other one when the server
 // answered badly, so a caller that treats them alike is retrying two different
 // problems with one policy.
-//
-// Answers Illuminate\Http\Client\ConnectionException.
 type ConnectionException struct {
 	HttpClientException
 }
@@ -35,15 +33,15 @@ func NewConnectionException(message string) *ConnectionException {
 	return &ConnectionException{HttpClientException{Message: message}}
 }
 
-// DefaultRequestExceptionTruncateAt is RequestException::$truncateAt in its
-// initial state: 120 characters of body summary in the message.
+// DefaultRequestExceptionTruncateAt is how many characters of body summary
+// go in the message, by default.
 const DefaultRequestExceptionTruncateAt = 120
 
-// requestExceptionTruncateAt is RequestException::$truncateAt, the static the
-// three class methods below write. Zero is the PHP false -- "do not truncate"
-// -- because the PHP type is int<1, max>|false and zero is not a length any
-// caller can ask for. A mutex guards it because a Go test suite runs with
-// -race and PHP statics have no concurrency to speak of.
+// requestExceptionTruncateAt is the package-level truncation length the
+// three functions below write. Zero means "do not truncate": it is not a
+// length any caller can otherwise ask for, so it doubles as the off
+// switch. A mutex guards it since Go runs tests -- and requests -- with a
+// race detector watching.
 var requestExceptionTruncateAt = struct {
 	sync.RWMutex
 	length int
@@ -59,42 +57,41 @@ var requestExceptionTruncateAt = struct {
 // truncation length so that one log line does not swallow a whole HTML error
 // page. TruncateExceptionsAt decides that length when it is set on the
 // instance; otherwise the package-level [TruncateAt] does.
-//
-// Answers Illuminate\Http\Client\RequestException.
 type RequestException struct {
 	HttpClientException
 	Response *Response
 
-	// TruncateExceptionsAt is RequestException::$truncateExceptionsAt: the
-	// per-instance override of the static. Nil is the PHP null, meaning the
-	// static decides; a pointer to zero is the PHP false.
+	// TruncateExceptionsAt is the per-instance override of the
+	// package-level truncation length. Nil means the package-level
+	// [TruncateAt] decides; a pointer to zero lets the whole body through.
 	TruncateExceptionsAt *int
 
-	// HasBeenSummarized is RequestException::$hasBeenSummarized.
+	// HasBeenSummarized is whether Report has already rebuilt the message
+	// once.
 	HasBeenSummarized bool
 }
 
-// Truncate is RequestException::truncate: restore the default truncation
-// length for every request exception built from here on.
+// Truncate restores the default truncation length for every request
+// exception built from here on.
 func Truncate() {
 	TruncateAt(DefaultRequestExceptionTruncateAt)
 }
 
-// TruncateAt is RequestException::truncateAt: set the truncation length for
-// every request exception built from here on.
+// TruncateAt sets the truncation length for every request exception built
+// from here on.
 func TruncateAt(length int) {
 	requestExceptionTruncateAt.Lock()
 	requestExceptionTruncateAt.length = length
 	requestExceptionTruncateAt.Unlock()
 }
 
-// DontTruncate is RequestException::dontTruncate: let the whole body into the
-// message of every request exception built from here on.
+// DontTruncate lets the whole body into the message of every request
+// exception built from here on.
 func DontTruncate() {
 	TruncateAt(0)
 }
 
-// globalTruncateAt reads the static.
+// globalTruncateAt reads the package-level truncation length.
 func globalTruncateAt() int {
 	requestExceptionTruncateAt.RLock()
 	defer requestExceptionTruncateAt.RUnlock()
@@ -103,10 +100,9 @@ func globalTruncateAt() int {
 
 // NewRequestException creates a RequestException from a failed Response.
 //
-// It answers to RequestException::__construct. truncateExceptionsAt is the
-// PHP int|false|null: nil defers to [TruncateAt], a pointer to zero is the
-// PHP false and lets the whole body through, and a pointer to a positive
-// length cuts the body summary there.
+// truncateExceptionsAt: nil defers to [TruncateAt], a pointer to zero lets
+// the whole body through, and a pointer to a positive length cuts the body
+// summary there.
 func NewRequestException(resp *Response, truncateExceptionsAt *int) *RequestException {
 	e := &RequestException{
 		Response:             resp,
@@ -116,7 +112,8 @@ func NewRequestException(resp *Response, truncateExceptionsAt *int) *RequestExce
 	return e
 }
 
-// prepareMessage is RequestException::prepareMessage.
+// prepareMessage builds the exception message: the status code, and a
+// summary of the body cut at the truncation length.
 func (e *RequestException) prepareMessage(resp *Response) string {
 	message := formatAssertion("HTTP request returned status code %d", resp.Status())
 
@@ -135,11 +132,8 @@ func (e *RequestException) prepareMessage(resp *Response) string {
 	return message + ":\n" + summary + "\n"
 }
 
-// Report is RequestException::report: rebuild the message from the response
-// once, and tell the handler it is not done reporting.
-//
-// The PHP returns false so that the framework's exception handler carries on
-// with its own reporting; the Go returns the same bool for the same reason.
+// Report rebuilds the message from the response once, and returns false so
+// that a caller's own exception handler carries on with its own reporting.
 func (e *RequestException) Report() bool {
 	if !e.HasBeenSummarized {
 		e.Message = e.prepareMessage(e.Response)
@@ -148,9 +142,8 @@ func (e *RequestException) Report() bool {
 	return false
 }
 
-// StrayRequestError mirrors Illuminate\Http\Client\StrayRequestException.
-// It is returned when a request is made that does not match any stub and
-// stray request prevention is enabled.
+// StrayRequestError is returned when a request is made that does not match
+// any stub and stray request prevention is enabled.
 type StrayRequestError struct {
 	URI string
 }
@@ -169,8 +162,6 @@ func (e *StrayRequestError) Error() string {
 // the second call is a mistake in the calling code rather than a transient
 // failure -- going ahead with it would put every request in the batch on the
 // wire a second time.
-//
-// Answers Illuminate\Http\Client\BatchInProgressException.
 type BatchInProgressError struct {
 	HttpClientException
 }

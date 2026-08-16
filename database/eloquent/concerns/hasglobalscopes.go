@@ -7,16 +7,13 @@ import (
 	"github.com/arandu-io/hesape/database/eloquent/relations"
 )
 
-// Scope answers Illuminate\Database\Eloquent\Scope: a constraint applied to
-// every query for a model.
+// Scope is a constraint applied to every query for a model.
 //
-// The PHP contract is an object with apply(Builder, Model); here it is the
-// function, because an interface with one method and no state is a function
-// with extra steps.
+// It is a function rather than a one-method interface, because an interface with
+// one method and no state is a function with extra steps.
 type Scope func(query relations.Builder)
 
-// HasGlobalScopes answers
-// Illuminate\Database\Eloquent\Concerns\HasGlobalScopes.
+// HasGlobalScopes is the set of scopes every query for a model carries.
 //
 // A global scope is a where clause every query for a model gets whether the
 // caller asked or not -- soft deletes are one. It is the sharpest tool in the
@@ -24,7 +21,7 @@ type Scope func(query relations.Builder)
 // call site, and removing it is a one-word method call.
 //
 // It is NOT where tenant scoping goes. A tenant filter that can be lifted with
-// withoutGlobalScope is a tenant filter, and RULE 14 says the tenant comes from
+// WithoutGlobalScope is a tenant filter somebody can lift: the tenant comes from
 // the Grant on the way to the repository, where nothing can remove it.
 type HasGlobalScopes struct {
 	scopes map[string]Scope

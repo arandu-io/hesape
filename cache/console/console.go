@@ -24,13 +24,10 @@ const clearAction auth.Action = "cache:clear"
 
 // ClearCommand flushes one tenant's cache.
 //
-// It answers Illuminate\Cache\Console\ClearCommand: `cache:clear`, with the
-// store as an argument and --tags and --locks as options.
-//
-// It takes a tenant that Laravel's does not, and it is not optional: Flush
-// empties one tenant's slice of one namespace, and a cache:clear that emptied
-// the store would clear every other customer on the way past (RULE 14). In a
-// SaaS that is an outage caused by a support request.
+// The tenant is not optional: Flush empties one tenant's slice of one
+// namespace, and a cache:clear that emptied the store would clear every other
+// customer on the way past. In a SaaS that is an outage caused by a support
+// request.
 type ClearCommand struct {
 	cache *cache.CacheManager
 }
@@ -108,8 +105,6 @@ func (c *ClearCommand) Handle(ctx context.Context, o *console.IO) error {
 }
 
 // tags are the tags passed to the command.
-//
-// It answers ClearCommand::tags(): split on the comma, drop the empties.
 func (c *ClearCommand) tags(option string) []string {
 	out := make([]string, 0, 2)
 	for _, name := range strings.Split(option, ",") {
@@ -121,9 +116,6 @@ func (c *ClearCommand) tags(option string) []string {
 }
 
 // ForgetCommand removes one key from the cache.
-//
-// It answers Illuminate\Cache\Console\ForgetCommand: `cache:forget {key}
-// {store?}`, with the tenant added for the reason ClearCommand adds it.
 type ForgetCommand struct {
 	cache *cache.CacheManager
 }
@@ -177,14 +169,11 @@ func (c *ForgetCommand) Handle(ctx context.Context, o *console.IO) error {
 
 // PruneStaleTagsCommand removes the tag entries nothing points at any more.
 //
-// It answers Illuminate\Cache\Console\PruneStaleTagsCommand:
-// `cache:prune-stale-tags {store?}`.
-//
 // It is a no-op on every store this package ships, and says so rather than
 // pretending it did something. A tag generation here is an ordinary entry with a
 // ttl, so it prunes itself; the store that keeps a set beside them, and
-// therefore has something to prune, is the RESP one in arandu-io/kv -- which is
-// exactly what Laravel's "(Redis only)" in the description means.
+// therefore has something to prune, is the RESP one in hesape/redis, a separate
+// module registered through CacheManager.Extend.
 type PruneStaleTagsCommand struct {
 	cache *cache.CacheManager
 }
@@ -234,9 +223,6 @@ func (c *PruneStaleTagsCommand) Handle(ctx context.Context, o *console.IO) error
 }
 
 // CacheTableCommand writes the migration for the cache tables.
-//
-// It answers Illuminate\Cache\Console\CacheTableCommand: `make:cache-table`,
-// which Laravel also answers to as `cache:table`.
 //
 // It writes SQL and not a migration type, because there is no migration type to
 // write against yet: hesape/database is being built in parallel and this command
@@ -303,12 +289,10 @@ func (c *CacheTableCommand) Handle(_ context.Context, o *console.IO) error {
 
 // cacheTableMigration is the two tables DatabaseStore reads and writes.
 //
-// It is Laravel's stub, column for column: key is the primary key, value holds
-// the payload, and expiration is a unix timestamp with an index on it -- the
-// index being what makes pruning the expired rows a scan of the ones that are.
-//
-// The one difference is that expiration is unix milliseconds in a BIGINT rather
-// than unix seconds in an INTEGER. See cache.DatabaseStore for why.
+// key is the primary key, value holds the payload, and expiration is a unix
+// timestamp in milliseconds with an index on it -- the index being what makes
+// pruning the expired rows a scan of the ones that are. See cache.DatabaseStore
+// for why the unit is milliseconds.
 const cacheTableMigration = `-- The cache tables.
 --
 -- cache holds the entries and cache_locks holds the locks. They are two tables

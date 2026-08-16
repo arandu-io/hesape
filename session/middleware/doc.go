@@ -1,10 +1,4 @@
-// Package middleware mirrors Illuminate\Session\Middleware.
-//
-// The files it answers to, in the clone at
-// laravel_illuminate/Session/Middleware:
-//
-//	AuthenticateSession.php
-//	StartSession.php
+// Package middleware provides two session middlewares.
 //
 // [StartSession] loads the session at the start of a request, puts it on the
 // context where [Session] reads it back out, and writes it -- and its cookie --

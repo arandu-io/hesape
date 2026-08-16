@@ -26,19 +26,16 @@ var ErrNoRecipient = errors.New("mail: no recipient")
 // to import a transport it does not name.
 type ErrRetryable struct{ err error }
 
-// Error has no PHP counterpart: the retryable half of a delivery failure is
-// Symfony's TransportException hierarchy, which NotificationSender catches by
-// class rather than by a marker on the error.
+// Error is the wrapped failure's message: the marker adds no text of its own.
 func (e ErrRetryable) Error() string { return e.err.Error() }
 
-// Unwrap has no PHP counterpart, for the reason [ErrRetryable.Error] gives.
+// Unwrap is the failure underneath the marker, so errors.Is and errors.As reach
+// whatever the transport returned.
 func (e ErrRetryable) Unwrap() error { return e.err }
 
 // Retryable marks err as worth trying again, and is how a transport outside
 // this package builds an [ErrRetryable]. It returns nil for a nil error, so it
 // can wrap a result without a check around it.
-//
-// Retryable has no PHP counterpart, for the reason ErrRetryable.Error gives.
 func Retryable(err error) error {
 	if err == nil {
 		return nil
@@ -48,36 +45,30 @@ func Retryable(err error) error {
 
 // Mailable is anything that knows how to describe itself as a message.
 //
-// It stands where Illuminate\Contracts\Mail\Mailable stands. The class
-// Illuminate\Mail\Mailable has no Go twin, because its whole design is
-// inheritance: a user class extends it and overrides envelope(), content(),
-// attachments(), headers() and build(), and the parent calls back into the
-// child. Go has no virtual dispatch through an embedded struct, so the two
-// methods a mailable must answer are an interface, and the fluent surface the
-// PHP base class carries lives on [PendingMail], which is the value that is
-// doing the sending. Every one of those method names is Illuminate's.
+// It is two methods rather than a base type to embed, because Go has no virtual
+// dispatch through an embedded struct: there would be no way for the parent to
+// call back into the child. The fluent surface lives on [PendingMail] instead,
+// which is the value that is doing the sending.
 //
 // Attachments and Headers are optional: a type that declares
 //
 //	Attachments() []*Attachment
 //	Headers() Headers
 //
-// has them read the way Illuminate reads the methods of the same names, and a
-// type that does not declare them is not asked.
+// has them read when the message is built, and a type that does not declare
+// them is not asked.
 type Mailable interface {
 	Envelope() Envelope
 	Content() Content
 }
 
-// Attachable is Illuminate\Contracts\Mail\Attachable: a domain type that knows
-// how to turn itself into an attachment, so that Attach can be handed an
-// invoice rather than a path.
+// Attachable is a domain type that knows how to turn itself into an attachment,
+// so that Attach can be handed an invoice rather than a path.
 type Attachable interface {
 	ToMailAttachment() *Attachment
 }
 
-// SentMessage is Illuminate\Mail\SentMessage: what a Transport reports back
-// about a message it accepted.
+// SentMessage is what a Transport reports back about a message it accepted.
 //
 // It exists because the provider's identifier was being discarded. That
 // identifier is the only thing joining a line in the application log to a row in
@@ -96,18 +87,13 @@ type SentMessage struct {
 	// transport delivers through whichever of its own accepted the message.
 	Transport string
 
-	// Message is what was sent, which is what Illuminate's
-	// SentMessage::getOriginalMessage() answers. It is nil when a transport
-	// built the receipt without one.
+	// Message is what was sent. It is nil when a transport built the receipt
+	// without one.
 	Message *Message
 }
 
-// GetSymfonySentMessage is Illuminate's SentMessage::getSymfonySentMessage().
-//
-// Symfony in the name is Laravel's mailer library; hesape has none, so what it
-// returns is this value itself -- the receipt is not a wrapper here, it is the
-// thing. The name is kept because it is the name a Laravel developer reaches
-// for (ADR 0044).
+// GetSymfonySentMessage is the receipt the mail library produced, which is this
+// value: it is not a wrapper around one, so the method returns the receiver.
 func (s SentMessage) GetSymfonySentMessage() SentMessage { return s }
 
 // Transport delivers a rendered message.
@@ -123,11 +109,9 @@ type Transport interface {
 
 // Renderer draws the view a Content names.
 //
-// It stands where Illuminate\Contracts\View\Factory stands in the Mailer's
-// constructor. An interface here rather than the view package directly, because
-// mail is imported by the modules that send and importing the view package from
-// all of them would put the whole view registry behind every one. The
-// collection's view package satisfies it.
+// It is an interface here rather than the view package directly, because mail
+// is imported by the modules that send and importing the view package from all
+// of them would put the whole view registry behind every one.
 type Renderer interface {
 	RenderToString(name string, data any) (string, error)
 }
@@ -141,62 +125,54 @@ type Renderer interface {
 // It is the whole of the event system this package needs. A Mailer with no
 // dispatcher sends every message and announces nothing, so wiring one is
 // optional.
-//
-// Answers the part of Illuminate\Contracts\Events\Dispatcher the Mailer uses.
 type Dispatcher interface {
-	// Until reports whether the send should go ahead. It is Illuminate's
-	// $events->until($event) !== false: a listener that refuses stops the
-	// message, and no listener at all lets it through.
+	// Until reports whether the send should go ahead: a listener that refuses
+	// stops the message, and no listener at all lets it through.
 	Until(ctx context.Context, event any) bool
 	// Dispatch announces an event nobody can refuse.
 	Dispatch(ctx context.Context, event any)
 }
 
-// FilesystemFactory is the slice of Illuminate\Contracts\Filesystem\Factory
-// that attachments need.
+// FilesystemFactory is the part of a filesystem that attachments need: one call
+// for a named disk.
 //
-// It is declared here rather than imported because hesape/filesystem is being
-// written by another workflow; when it lands, its factory satisfies this and
-// this declaration goes away.
+// It is declared here rather than imported so that a module which only sends
+// mail does not pull a storage registry in behind it.
 type FilesystemFactory interface {
 	// Disk is the named disk, or the default one when name is empty.
 	Disk(name string) Disk
 }
 
 // Disk is one place files are stored, as an attachment sees it: the two
-// questions [FromStorageDisk] and attachFromStorage ask of a stored file, which
-// are its bytes and its content type. Nothing about writing, listing or
-// deleting appears here, because building a message never does any of that.
+// questions [FromStorageDisk] and [Message.AttachFromStorage] ask of a stored
+// file, which are its bytes and its content type. Nothing about writing,
+// listing or deleting appears here, because building a message never does any
+// of that.
 //
 // Both are asked late -- when the attachment is resolved, not when it is
 // declared -- so a mailable that names a path can be built in a request and
 // read on a worker.
-//
-// Answers the part of Illuminate\Contracts\Filesystem\Filesystem that
-// attachments need.
 type Disk interface {
 	Get(path string) ([]byte, error)
 	MimeType(path string) (string, error)
 }
 
-// Filesystem is where fromStorage, fromStorageDisk and attachFromStorage find
-// their disks.
+// Filesystem is where [FromStorage], [FromStorageDisk] and
+// [Message.AttachFromStorage] find their disks.
 //
-// Illuminate resolves the factory out of the container. ADR 0001 has no
-// container, so an application wires this once at boot and the attachment
-// constructors read it. Nil means an attachment from storage fails with an
-// error that says so rather than panicking three layers down.
+// An application sets it once at boot and the attachment constructors read it.
+// Nil means an attachment from storage fails with [ErrNoFilesystem] rather than
+// panicking three layers down.
 var Filesystem FilesystemFactory
 
-// CloudDisk is the name Illuminate's Storage::getDefaultCloudDriver() answers,
-// and is what Attachment.FromCloudStorage asks Filesystem for.
+// CloudDisk is the disk name [FromCloudStorage] asks [Filesystem] for.
 var CloudDisk = "s3"
 
-// QueueFactory is the slice of Illuminate\Contracts\Queue\Factory that queueing
-// a mailable needs.
+// QueueFactory is the part of a queue that sending a mailable in the background
+// needs: one call for a named connection.
 //
-// It is declared here rather than imported because hesape/queue is being
-// written by another workflow.
+// It is declared here rather than imported so that a module which only sends
+// mail does not pull a queue registry in behind it.
 type QueueFactory interface {
 	// Connection is the named connection, or the default one when name is empty.
 	Connection(name string) Queue
@@ -210,17 +186,12 @@ type QueueFactory interface {
 // The queue name is a parameter rather than part of the connection because a
 // single connection carries many, and which one a mailable goes on is decided
 // at the call.
-//
-// Answers the part of Illuminate\Contracts\Queue\Queue that queueing a mailable
-// needs.
 type Queue interface {
 	PushOn(ctx context.Context, queue string, job any) (string, error)
 	LaterOn(ctx context.Context, queue string, delay time.Duration, job any) (string, error)
 }
 
-// ErrNoQueue is what Queue and Later return when no queue was wired. Illuminate
-// would have resolved one from the container and thrown if it could not; the
-// error carries the same fact without the container.
+// ErrNoQueue is what Queue and Later return when no queue was wired.
 var ErrNoQueue = errors.New("mail: no queue connection is wired")
 
 // ErrNoFilesystem is what an attachment from storage returns when [Filesystem]

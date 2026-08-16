@@ -13,34 +13,36 @@ import (
 // ActionMigrate is the auth.Action every schema change is authorized for.
 //
 // One action for the whole component, not one per method: a migration run is a
-// single decision taken once, by the pipeline that runs it, and RULE 16 already
-// says a migration is a pipeline step rather than something a request triggers.
-// A runner gets its Grant from auth.SystemGrant, which refuses to issue one
+// single decision taken once, by the pipeline that runs it, rather than
+// something a request triggers. A runner gets its Grant from auth.SystemGrant,
+// which refuses to issue one
 // without a tenant.
 const ActionMigrate auth.Action = "schema.migrate"
 
-// defaultStringLength answers Builder::$defaultStringLength.
+// defaultStringLength is the length a string column takes when none is given.
 //
-// PHP keeps the three defaults as static properties with same-named setters.
-// Go has one namespace, so the value is an unexported package variable and the
-// setter keeps the Illuminate name.
+// The value is an unexported package variable because the exported name belongs
+// to the setter.
 var defaultStringLength = 255
 
-// defaultTimePrecisionValue answers Builder::$defaultTimePrecision.
+// defaultTimePrecisionValue is the time column precision used when none is
+// given explicitly.
 var defaultTimePrecisionValue = intPointer(0)
 
-// defaultMorphKeyType answers Builder::$defaultMorphKeyType.
+// defaultMorphKeyType is the key type used for new morph columns when none
+// is given explicitly.
 var defaultMorphKeyType = "int"
 
-// DefaultStringLength answers Builder::defaultStringLength.
+// DefaultStringLength sets the default length new string columns take when
+// none is given explicitly.
 func DefaultStringLength(length int) { defaultStringLength = length }
 
-// DefaultTimePrecision answers Builder::defaultTimePrecision. A nil precision
-// is the PHP null: the column is declared without one.
+// DefaultTimePrecision sets the default time column precision. A nil
+// precision declares the column without one.
 func DefaultTimePrecision(precision *int) { defaultTimePrecisionValue = precision }
 
-// DefaultMorphKeyType answers Builder::defaultMorphKeyType. It returns an error
-// where the PHP throws InvalidArgumentException.
+// DefaultMorphKeyType sets the key type used for new morph columns. It
+// returns an error if typ is not "int", "uuid", or "ulid".
 func DefaultMorphKeyType(typ string) error {
 	switch typ {
 	case "int", "uuid", "ulid":
@@ -51,10 +53,10 @@ func DefaultMorphKeyType(typ string) error {
 	}
 }
 
-// MorphUsingUUIDs answers Builder::morphUsingUuids.
+// MorphUsingUUIDs sets new morph columns to key on UUIDs.
 func MorphUsingUUIDs() { defaultMorphKeyType = "uuid" }
 
-// MorphUsingULIDs answers Builder::morphUsingUlids.
+// MorphUsingULIDs sets new morph columns to key on ULIDs.
 func MorphUsingULIDs() { defaultMorphKeyType = "ulid" }
 
 func defaultTimePrecision() *int {
@@ -67,13 +69,12 @@ func defaultTimePrecision() *int {
 
 func intPointer(value int) *int { return &value }
 
-// ErrUnsupported is what a driver answers for a schema operation it does not
-// have, where the PHP throws LogicException or RuntimeException.
+// ErrUnsupported is returned for a schema operation the current driver does
+// not support.
 var ErrUnsupported = errors.New("schema: this database driver does not support the operation")
 
-// Builder answers Illuminate\Database\Schema\Builder.
-//
-// It is the half of this component that executes: Blueprint and Grammar build
+// Builder is the half of this component that executes: Blueprint and Grammar
+// build
 // strings, and everything that reaches the connection is here. Every method
 // that does so takes an auth.Grant and checks it against ActionMigrate before a
 // statement leaves. DDL names tables rather than rows, so there is no
@@ -85,20 +86,21 @@ type Builder struct {
 	resolver   func(Connection, string, func(*Blueprint)) *Blueprint
 }
 
-// NewBuilder answers Builder::__construct.
+// NewBuilder returns a Builder for the given connection.
 func NewBuilder(connection Connection) *Builder {
 	return &Builder{connection: connection, grammar: connection.GetSchemaGrammar()}
 }
 
-// GetConnection answers Builder::getConnection.
+// GetConnection returns the connection the builder runs statements against.
 func (b *Builder) GetConnection() Connection { return b.connection }
 
-// BlueprintResolver answers Builder::blueprintResolver.
+// BlueprintResolver sets the function CreateBlueprint uses to construct a
+// Blueprint, in place of NewBlueprint.
 func (b *Builder) BlueprintResolver(resolver func(Connection, string, func(*Blueprint)) *Blueprint) {
 	b.resolver = resolver
 }
 
-// CreateDatabase answers Builder::createDatabase.
+// CreateDatabase creates a database named name.
 func (b *Builder) CreateDatabase(ctx context.Context, g auth.Grant, name string) error {
 	if err := g.Check(ActionMigrate); err != nil {
 		return err
@@ -110,7 +112,7 @@ func (b *Builder) CreateDatabase(ctx context.Context, g auth.Grant, name string)
 	return b.connection.Statement(ctx, sql)
 }
 
-// DropDatabaseIfExists answers Builder::dropDatabaseIfExists.
+// DropDatabaseIfExists drops the database named name, if it exists.
 func (b *Builder) DropDatabaseIfExists(ctx context.Context, g auth.Grant, name string) error {
 	if err := g.Check(ActionMigrate); err != nil {
 		return err
@@ -122,7 +124,7 @@ func (b *Builder) DropDatabaseIfExists(ctx context.Context, g auth.Grant, name s
 	return b.connection.Statement(ctx, sql)
 }
 
-// GetSchemas answers Builder::getSchemas.
+// GetSchemas returns the schemas visible on this connection.
 func (b *Builder) GetSchemas(ctx context.Context, g auth.Grant) ([]SchemaInfo, error) {
 	if err := g.Check(ActionMigrate); err != nil {
 		return nil, err
@@ -138,7 +140,7 @@ func (b *Builder) GetSchemas(ctx context.Context, g auth.Grant) ([]SchemaInfo, e
 	return b.connection.ProcessSchemas(rows), nil
 }
 
-// HasTable answers Builder::hasTable.
+// HasTable reports whether table exists.
 func (b *Builder) HasTable(ctx context.Context, g auth.Grant, table string) (bool, error) {
 	if err := g.Check(ActionMigrate); err != nil {
 		return false, err
@@ -173,7 +175,7 @@ func (b *Builder) HasTable(ctx context.Context, g auth.Grant, table string) (boo
 	return false, nil
 }
 
-// HasView answers Builder::hasView.
+// HasView reports whether view exists.
 func (b *Builder) HasView(ctx context.Context, g auth.Grant, view string) (bool, error) {
 	if err := g.Check(ActionMigrate); err != nil {
 		return false, err
@@ -200,8 +202,8 @@ func (b *Builder) HasView(ctx context.Context, g auth.Grant, view string) (bool,
 	return false, nil
 }
 
-// GetTables answers Builder::getTables. An empty schema list is the PHP null:
-// every schema the connection can see.
+// GetTables returns the tables in the given schemas. With no schemas given,
+// it returns tables from every schema the connection can see.
 func (b *Builder) GetTables(ctx context.Context, g auth.Grant, schemas ...string) ([]TableInfo, error) {
 	if err := g.Check(ActionMigrate); err != nil {
 		return nil, err
@@ -217,8 +219,8 @@ func (b *Builder) GetTables(ctx context.Context, g auth.Grant, schemas ...string
 	return b.connection.ProcessTables(rows), nil
 }
 
-// GetTableListing answers Builder::getTableListing. The first optional argument
-// is the schema; schemaQualified defaults to true, as it does in PHP.
+// GetTableListing returns the names of tables in the given schemas.
+// schemaQualified defaults to true, which returns schema-qualified names.
 func (b *Builder) GetTableListing(ctx context.Context, g auth.Grant, schemas []string, schemaQualified ...bool) ([]string, error) {
 	tables, err := b.GetTables(ctx, g, schemas...)
 	if err != nil {
@@ -239,7 +241,7 @@ func (b *Builder) GetTableListing(ctx context.Context, g auth.Grant, schemas []s
 	return names, nil
 }
 
-// GetViews answers Builder::getViews.
+// GetViews returns the views in the given schemas.
 func (b *Builder) GetViews(ctx context.Context, g auth.Grant, schemas ...string) ([]ViewInfo, error) {
 	if err := g.Check(ActionMigrate); err != nil {
 		return nil, err
@@ -255,7 +257,7 @@ func (b *Builder) GetViews(ctx context.Context, g auth.Grant, schemas ...string)
 	return b.connection.ProcessViews(rows), nil
 }
 
-// GetTypes answers Builder::getTypes: the user-defined types in the schema.
+// GetTypes returns the user-defined types in the given schemas.
 func (b *Builder) GetTypes(ctx context.Context, g auth.Grant, schemas ...string) ([]Record, error) {
 	if err := g.Check(ActionMigrate); err != nil {
 		return nil, err
@@ -267,11 +269,11 @@ func (b *Builder) GetTypes(ctx context.Context, g auth.Grant, schemas ...string)
 	return b.connection.Select(ctx, sql)
 }
 
-// DropAllTypes answers Builder::dropAllTypes.
+// DropAllTypes drops every type named in types.
 //
-// The base class throws LogicException; here the refusal comes from the
-// grammar, which is the only thing that knows whether the driver has types to
-// drop at all.
+// The refusal for a driver with no types to drop comes from the grammar,
+// which is the only thing that knows whether the driver supports dropping
+// types at all.
 func (b *Builder) DropAllTypes(ctx context.Context, g auth.Grant, types []string) error {
 	if err := g.Check(ActionMigrate); err != nil {
 		return err
@@ -286,7 +288,7 @@ func (b *Builder) DropAllTypes(ctx context.Context, g auth.Grant, types []string
 	return b.connection.Statement(ctx, sql)
 }
 
-// HasColumn answers Builder::hasColumn.
+// HasColumn reports whether table has a column named column.
 func (b *Builder) HasColumn(ctx context.Context, g auth.Grant, table, column string) (bool, error) {
 	columns, err := b.GetColumnListing(ctx, g, table)
 	if err != nil {
@@ -300,7 +302,7 @@ func (b *Builder) HasColumn(ctx context.Context, g auth.Grant, table, column str
 	return false, nil
 }
 
-// HasColumns answers Builder::hasColumns.
+// HasColumns reports whether table has every column named in columns.
 func (b *Builder) HasColumns(ctx context.Context, g auth.Grant, table string, columns []string) (bool, error) {
 	existing, err := b.GetColumnListing(ctx, g, table)
 	if err != nil {
@@ -321,7 +323,8 @@ func (b *Builder) HasColumns(ctx context.Context, g auth.Grant, table string, co
 	return true, nil
 }
 
-// WhenTableHasColumn answers Builder::whenTableHasColumn.
+// WhenTableHasColumn runs callback against table if it has a column named
+// column.
 func (b *Builder) WhenTableHasColumn(ctx context.Context, g auth.Grant, table, column string, callback func(*Blueprint)) error {
 	has, err := b.HasColumn(ctx, g, table, column)
 	if err != nil || !has {
@@ -330,7 +333,8 @@ func (b *Builder) WhenTableHasColumn(ctx context.Context, g auth.Grant, table, c
 	return b.Table(ctx, g, table, callback)
 }
 
-// WhenTableDoesntHaveColumn answers Builder::whenTableDoesntHaveColumn.
+// WhenTableDoesntHaveColumn runs callback against table if it does not have
+// a column named column.
 func (b *Builder) WhenTableDoesntHaveColumn(ctx context.Context, g auth.Grant, table, column string, callback func(*Blueprint)) error {
 	has, err := b.HasColumn(ctx, g, table, column)
 	if err != nil || has {
@@ -339,7 +343,7 @@ func (b *Builder) WhenTableDoesntHaveColumn(ctx context.Context, g auth.Grant, t
 	return b.Table(ctx, g, table, callback)
 }
 
-// WhenTableHasIndex answers Builder::whenTableHasIndex.
+// WhenTableHasIndex runs callback against table if it has the given index.
 func (b *Builder) WhenTableHasIndex(ctx context.Context, g auth.Grant, table string, index any, callback func(*Blueprint), typ ...string) error {
 	has, err := b.HasIndex(ctx, g, table, index, typ...)
 	if err != nil || !has {
@@ -348,7 +352,8 @@ func (b *Builder) WhenTableHasIndex(ctx context.Context, g auth.Grant, table str
 	return b.Table(ctx, g, table, callback)
 }
 
-// WhenTableDoesntHaveIndex answers Builder::whenTableDoesntHaveIndex.
+// WhenTableDoesntHaveIndex runs callback against table if it does not have
+// the given index.
 func (b *Builder) WhenTableDoesntHaveIndex(ctx context.Context, g auth.Grant, table string, index any, callback func(*Blueprint), typ ...string) error {
 	has, err := b.HasIndex(ctx, g, table, index, typ...)
 	if err != nil || has {
@@ -357,8 +362,9 @@ func (b *Builder) WhenTableDoesntHaveIndex(ctx context.Context, g auth.Grant, ta
 	return b.Table(ctx, g, table, callback)
 }
 
-// GetColumnType answers Builder::getColumnType. It returns an error where the
-// PHP throws InvalidArgumentException for a column the table does not have.
+// GetColumnType returns the type of column on table. It returns an error if
+// table has no such column. The optional fullDefinition returns the full
+// type definition instead of the bare type name.
 func (b *Builder) GetColumnType(ctx context.Context, g auth.Grant, table, column string, fullDefinition ...bool) (string, error) {
 	columns, err := b.GetColumns(ctx, g, table)
 	if err != nil {
@@ -376,7 +382,7 @@ func (b *Builder) GetColumnType(ctx context.Context, g auth.Grant, table, column
 	return "", fmt.Errorf("schema: there is no column with name %q on table %q", column, table)
 }
 
-// GetColumnListing answers Builder::getColumnListing.
+// GetColumnListing returns the names of table's columns.
 func (b *Builder) GetColumnListing(ctx context.Context, g auth.Grant, table string) ([]string, error) {
 	columns, err := b.GetColumns(ctx, g, table)
 	if err != nil {
@@ -389,7 +395,7 @@ func (b *Builder) GetColumnListing(ctx context.Context, g auth.Grant, table stri
 	return names, nil
 }
 
-// GetColumns answers Builder::getColumns.
+// GetColumns returns the columns of table.
 func (b *Builder) GetColumns(ctx context.Context, g auth.Grant, table string) ([]ColumnInfo, error) {
 	if err := g.Check(ActionMigrate); err != nil {
 		return nil, err
@@ -409,7 +415,7 @@ func (b *Builder) GetColumns(ctx context.Context, g auth.Grant, table string) ([
 	return b.connection.ProcessColumns(rows), nil
 }
 
-// GetIndexes answers Builder::getIndexes.
+// GetIndexes returns the indexes of table.
 func (b *Builder) GetIndexes(ctx context.Context, g auth.Grant, table string) ([]IndexInfo, error) {
 	if err := g.Check(ActionMigrate); err != nil {
 		return nil, err
@@ -429,7 +435,7 @@ func (b *Builder) GetIndexes(ctx context.Context, g auth.Grant, table string) ([
 	return b.connection.ProcessIndexes(rows), nil
 }
 
-// GetIndexListing answers Builder::getIndexListing.
+// GetIndexListing returns the names of table's indexes.
 func (b *Builder) GetIndexListing(ctx context.Context, g auth.Grant, table string) ([]string, error) {
 	indexes, err := b.GetIndexes(ctx, g, table)
 	if err != nil {
@@ -442,9 +448,9 @@ func (b *Builder) GetIndexListing(ctx context.Context, g auth.Grant, table strin
 	return names, nil
 }
 
-// HasIndex answers Builder::hasIndex. The index is a name or the list of
-// columns it covers; the optional type narrows the match to primary, unique or
-// a driver's own index type.
+// HasIndex reports whether table has the given index. The index is a name
+// or the list of columns it covers; the optional type narrows the match to
+// primary, unique or a driver's own index type.
 func (b *Builder) HasIndex(ctx context.Context, g auth.Grant, table string, index any, typ ...string) (bool, error) {
 	indexes, err := b.GetIndexes(ctx, g, table)
 	if err != nil {
@@ -478,7 +484,7 @@ func (b *Builder) HasIndex(ctx context.Context, g auth.Grant, table string, inde
 	return false, nil
 }
 
-// GetForeignKeys answers Builder::getForeignKeys.
+// GetForeignKeys returns the foreign keys of table.
 func (b *Builder) GetForeignKeys(ctx context.Context, g auth.Grant, table string) ([]ForeignKeyInfo, error) {
 	if err := g.Check(ActionMigrate); err != nil {
 		return nil, err
@@ -498,12 +504,12 @@ func (b *Builder) GetForeignKeys(ctx context.Context, g auth.Grant, table string
 	return b.connection.ProcessForeignKeys(rows), nil
 }
 
-// Table answers Builder::table: it modifies a table that already exists.
+// Table runs callback against a Blueprint for a table that already exists.
 func (b *Builder) Table(ctx context.Context, g auth.Grant, table string, callback func(*Blueprint)) error {
 	return b.build(ctx, g, b.CreateBlueprint(table, callback))
 }
 
-// Create answers Builder::create.
+// Create creates table, configured by callback.
 func (b *Builder) Create(ctx context.Context, g auth.Grant, table string, callback func(*Blueprint)) error {
 	blueprint := b.CreateBlueprint(table, nil)
 	blueprint.Create()
@@ -511,31 +517,31 @@ func (b *Builder) Create(ctx context.Context, g auth.Grant, table string, callba
 	return b.build(ctx, g, blueprint)
 }
 
-// Drop answers Builder::drop.
+// Drop drops table.
 func (b *Builder) Drop(ctx context.Context, g auth.Grant, table string) error {
 	blueprint := b.CreateBlueprint(table, nil)
 	blueprint.Drop()
 	return b.build(ctx, g, blueprint)
 }
 
-// DropIfExists answers Builder::dropIfExists.
+// DropIfExists drops table if it exists.
 func (b *Builder) DropIfExists(ctx context.Context, g auth.Grant, table string) error {
 	blueprint := b.CreateBlueprint(table, nil)
 	blueprint.DropIfExists()
 	return b.build(ctx, g, blueprint)
 }
 
-// DropColumns answers Builder::dropColumns.
+// DropColumns drops the given columns from table.
 func (b *Builder) DropColumns(ctx context.Context, g auth.Grant, table string, columns []string) error {
 	return b.Table(ctx, g, table, func(blueprint *Blueprint) {
 		blueprint.DropColumn(columns...)
 	})
 }
 
-// DropAllTables answers Builder::dropAllTables.
+// DropAllTables drops every table the connection can see.
 //
-// The base class throws LogicException; here it is ErrUnsupported, and a driver
-// whose grammar can compile the statement answers with the statement instead.
+// A driver whose grammar cannot compile the statement returns ErrUnsupported
+// instead.
 func (b *Builder) DropAllTables(ctx context.Context, g auth.Grant) error {
 	if err := g.Check(ActionMigrate); err != nil {
 		return err
@@ -558,20 +564,19 @@ func (b *Builder) DropAllTables(ctx context.Context, g auth.Grant) error {
 	return b.connection.Statement(ctx, sql)
 }
 
-// RefreshDatabaseFile answers SQLiteBuilder::refreshDatabaseFile: it empties the
-// database by truncating the file it lives in.
+// RefreshDatabaseFile empties a SQLite database by truncating the file it
+// lives in. Passing the empty path takes the file the connection is
+// configured with.
 //
-// It is the fastest way to drop everything in SQLite, and DropAllTables is the
-// slow way -- writable_schema, a delete, and a rebuild, which the PHP falls back
-// to only for a database that has no file. Passing the empty path takes the one
-// the connection is configured with, which is the PHP's null default.
+// This is the fastest way to empty a SQLite database; DropAllTables is the
+// slower alternative that works even when SQLite has no file to truncate.
 //
-// It refuses on any other driver and on an in-memory database, rather than
-// truncating a path that turns out to be something else. The PHP is guarded by
-// being on SQLiteBuilder, a class only the SQLite connection instantiates; this
-// package has one Builder for every driver, so the guard is a check. Truncating
-// a file is not a statement the database can refuse, so nothing downstream would
-// have caught it.
+// RefreshDatabaseFile refuses on any other driver and on an in-memory
+// database, rather than truncating a path that turns out to be something
+// else. This package has one Builder for every driver, so the refusal has
+// to be an explicit check rather than something the type system rules out.
+// Truncating a file is not a statement the database can refuse, so nothing
+// downstream would have caught a mistake here.
 func (b *Builder) RefreshDatabaseFile(ctx context.Context, g auth.Grant, path string) error {
 	if err := g.Check(ActionMigrate); err != nil {
 		return err
@@ -594,7 +599,7 @@ func (b *Builder) RefreshDatabaseFile(ctx context.Context, g auth.Grant, path st
 	return nil
 }
 
-// DropAllViews answers Builder::dropAllViews.
+// DropAllViews drops every view the connection can see.
 func (b *Builder) DropAllViews(ctx context.Context, g auth.Grant) error {
 	if err := g.Check(ActionMigrate); err != nil {
 		return err
@@ -617,14 +622,15 @@ func (b *Builder) DropAllViews(ctx context.Context, g auth.Grant) error {
 	return b.connection.Statement(ctx, sql)
 }
 
-// Rename answers Builder::rename.
+// Rename renames table from to to.
 func (b *Builder) Rename(ctx context.Context, g auth.Grant, from, to string) error {
 	blueprint := b.CreateBlueprint(from, nil)
 	blueprint.Rename(to)
 	return b.build(ctx, g, blueprint)
 }
 
-// EnableForeignKeyConstraints answers Builder::enableForeignKeyConstraints.
+// EnableForeignKeyConstraints turns foreign key enforcement on for the
+// connection.
 func (b *Builder) EnableForeignKeyConstraints(ctx context.Context, g auth.Grant) error {
 	if err := g.Check(ActionMigrate); err != nil {
 		return err
@@ -636,7 +642,8 @@ func (b *Builder) EnableForeignKeyConstraints(ctx context.Context, g auth.Grant)
 	return b.connection.Statement(ctx, sql)
 }
 
-// DisableForeignKeyConstraints answers Builder::disableForeignKeyConstraints.
+// DisableForeignKeyConstraints turns foreign key enforcement off for the
+// connection.
 func (b *Builder) DisableForeignKeyConstraints(ctx context.Context, g auth.Grant) error {
 	if err := g.Check(ActionMigrate); err != nil {
 		return err
@@ -648,12 +655,13 @@ func (b *Builder) DisableForeignKeyConstraints(ctx context.Context, g auth.Grant
 	return b.connection.Statement(ctx, sql)
 }
 
-// WithoutForeignKeyConstraints answers Builder::withoutForeignKeyConstraints.
+// WithoutForeignKeyConstraints disables foreign key constraints, runs
+// callback, and re-enables them.
 //
-// The constraints are put back whether the callback succeeded or not, which is
-// what the PHP's finally does. A failure to put them back is reported even when
-// the callback already failed, joined to it, because a connection left with its
-// foreign keys off is the more dangerous of the two.
+// The constraints are put back whether callback succeeded or not. A failure
+// to put them back is reported even when callback already failed, joined to
+// it with errors.Join, because a connection left with its foreign keys off
+// is the more dangerous of the two.
 func (b *Builder) WithoutForeignKeyConstraints(ctx context.Context, g auth.Grant, callback func() error) error {
 	if err := b.DisableForeignKeyConstraints(ctx, g); err != nil {
 		return err
@@ -662,13 +670,15 @@ func (b *Builder) WithoutForeignKeyConstraints(ctx context.Context, g auth.Grant
 	return errors.Join(err, b.EnableForeignKeyConstraints(ctx, g))
 }
 
-// EnsureVectorExtensionExists answers Builder::ensureVectorExtensionExists.
+// EnsureVectorExtensionExists creates the Postgres "vector" extension if it
+// does not already exist, in the given schema or the default schema if none
+// is given.
 func (b *Builder) EnsureVectorExtensionExists(ctx context.Context, g auth.Grant, schema ...string) error {
 	return b.EnsureExtensionExists(ctx, g, "vector", schema...)
 }
 
-// EnsureExtensionExists answers Builder::ensureExtensionExists. It returns an
-// error where the PHP throws RuntimeException on a driver that is not Postgres.
+// EnsureExtensionExists creates the Postgres extension named name if it does
+// not already exist. It returns ErrUnsupported on any other driver.
 func (b *Builder) EnsureExtensionExists(ctx context.Context, g auth.Grant, name string, schema ...string) error {
 	if err := g.Check(ActionMigrate); err != nil {
 		return err
@@ -683,12 +693,13 @@ func (b *Builder) EnsureExtensionExists(ctx context.Context, g auth.Grant, name 
 	return b.connection.Statement(ctx, sql)
 }
 
-// build answers Builder::build.
+// build runs blueprint against the connection.
 func (b *Builder) build(ctx context.Context, g auth.Grant, blueprint *Blueprint) error {
 	return blueprint.Build(ctx, g)
 }
 
-// CreateBlueprint answers Builder::createBlueprint.
+// CreateBlueprint returns a new Blueprint for table, using the resolver set
+// by BlueprintResolver if one was set, or NewBlueprint otherwise.
 func (b *Builder) CreateBlueprint(table string, callback func(*Blueprint)) *Blueprint {
 	if b.resolver != nil {
 		return b.resolver(b.connection, table, callback)
@@ -696,10 +707,12 @@ func (b *Builder) CreateBlueprint(table string, callback func(*Blueprint)) *Blue
 	return NewBlueprint(b.connection, table, callback)
 }
 
-// GetCurrentSchemaListing answers Builder::getCurrentSchemaListing.
+// GetCurrentSchemaListing returns the schemas the connection searches, in
+// priority order.
 func (b *Builder) GetCurrentSchemaListing() []string { return nil }
 
-// GetCurrentSchemaName answers Builder::getCurrentSchemaName.
+// GetCurrentSchemaName returns the first schema from GetCurrentSchemaListing,
+// or the empty string if it returns none.
 func (b *Builder) GetCurrentSchemaName() string {
 	listing := b.GetCurrentSchemaListing()
 	if len(listing) == 0 {
@@ -708,13 +721,11 @@ func (b *Builder) GetCurrentSchemaName() string {
 	return listing[0]
 }
 
-// ParseSchemaAndTable answers Builder::parseSchemaAndTable.
+// ParseSchemaAndTable splits a qualified name into its schema and its table.
 //
 // It is a package function rather than only a method because the SQLite and
 // Postgres grammars call it while compiling, where they have a blueprint but no
-// builder. The PHP reaches it through the connection's schema builder for the
-// same use; one implementation is one behaviour, and the method below is the
-// Illuminate name for it.
+// builder. The method below calls it, so there is one implementation.
 func ParseSchemaAndTable(reference string) (schema, table string, err error) {
 	segments := strings.Split(reference, ".")
 	if len(segments) > 2 {
@@ -726,9 +737,10 @@ func ParseSchemaAndTable(reference string) (schema, table string, err error) {
 	return "", segments[0], nil
 }
 
-// ParseSchemaAndTable answers Builder::parseSchemaAndTable. The optional
-// argument is the PHP's $withDefaultSchema: a schema name to fall back on, or
-// the empty string to fall back on the connection's current schema.
+// ParseSchemaAndTable splits reference into its schema and table, like the
+// package-level ParseSchemaAndTable. The optional withDefaultSchema is a
+// schema name to fall back on, or, if empty, the connection's current
+// schema.
 func (b *Builder) ParseSchemaAndTable(reference string, withDefaultSchema ...string) (schema, table string, err error) {
 	schema, table, err = ParseSchemaAndTable(reference)
 	if err != nil || schema != "" || len(withDefaultSchema) == 0 {

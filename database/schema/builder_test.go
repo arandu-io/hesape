@@ -13,7 +13,7 @@ import (
 
 func grant() auth.Grant { return auth.SystemGrant(schema.ActionMigrate, "acme") }
 
-// conn is a schema.Connection that answers from canned data and remembers what
+// conn is a schema.Connection that responds from canned data and remembers what
 // it was asked to run.
 type conn struct {
 	grammar     schema.Grammar
@@ -60,9 +60,8 @@ func (c *conn) Select(ctx context.Context, query string) ([]schema.Record, error
 
 func (c *conn) Scalar(ctx context.Context, query string) (any, error) { return c.scalar, nil }
 
-// TestBuilderRequiresAGrant is RULE 17 on the executing half. Every method that
-// reaches the connection refuses the zero Grant, and refuses one issued for
-// another action.
+// TestBuilderRequiresAGrant: every method that reaches the connection refuses
+// the zero Grant, and refuses one issued for another action.
 func TestBuilderRequiresAGrant(t *testing.T) {
 	builder := schema.NewBuilder(newConn())
 	ctx := context.Background()
@@ -232,8 +231,7 @@ func TestParseSchemaAndTable(t *testing.T) {
 	}
 }
 
-// TestDefaults covers the three package level settings that stand in for
-// Illuminate's static properties on the Builder.
+// TestDefaults covers the three package level settings the Builder reads.
 func TestDefaults(t *testing.T) {
 	c := newConn()
 

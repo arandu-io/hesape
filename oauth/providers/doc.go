@@ -36,42 +36,25 @@
 // can read. Nothing about the request looks wrong; there is simply no evidence
 // that the application asked for it.
 //
-// Illuminate's GithubProvider overrides stateMismatch() to return false, which
-// turns that check off for GitHub. It is not reproduced here. The rule about
-// bodies over signatures is what settles it: a method named for a check that
-// does not check is worse than one that is missing, because nobody looks at it
-// again -- and the current Laravel checks the state for every provider,
-// GitHub included. The divergence is one method, and it is this one.
+// Every provider here checks it, GitHub included. A method named for a check
+// that does not check is worse than one that is missing, because nobody looks
+// at it again.
 //
-// [Provider.Stateless] turns the check off deliberately, for a caller
-// with no cookie to keep a state in. That is a decision somebody makes and can
-// be found by searching for; a provider that quietly skipped it is not.
+// [Provider.Stateless] turns the check off deliberately, for a caller with no
+// cookie to keep a state in. That is a decision somebody makes and can be found
+// by searching for; a provider that quietly skipped it is not.
 //
-// # What each provider needs, and why there are no subclasses
+// # There are no subclasses
 //
-// Illuminate's four providers are four subclasses. What they override is three
-// endpoint strings, a scope delimiter, a list of default scopes, and -- for
-// Google and Stripe -- how the token request is sent and read. All of that is
-// data, so it is data: [NewGithubProvider] and its three companions build one
-// [Provider] each, and [NewProvider] builds one for a service
-// this package does not carry.
+// What separates one provider from another is three endpoint strings, a scope
+// delimiter, a list of default scopes, and how the token request is sent and
+// read. All of that is data, so it is data: [NewGithubProvider] and its three
+// companions build one [Provider] each, and [NewProvider] builds one for a
+// service this package does not carry.
 //
-// Two of those overrides are gone because one implementation covers both cases.
-// The token request is always a POST with a form body, which is what the
-// current Laravel does for every provider and what all four accept -- the
-// clone's default GET puts client_secret in a query string, where access logs
+// One implementation covers the request and the response for all of them. The
+// token request is always a POST with a form body, which every provider here
+// accepts -- a GET would put client_secret in a query string, where access logs
 // and Referer headers keep it. The token response is read as JSON or as a
-// form-encoded body depending on what arrived, which is what the base class and
-// its two overrides do between them.
-//
-// # What is not here
-//
-// The clone's getCurrentUrl(), getClientId(), getClientSecret(),
-// getRedirectUri(), getResponseType(), buildDefaultAuthQuery(),
-// buildAuthQuery(), getAccessOptions(), buildDefaultAccessOptions(),
-// buildAccessOptions(), getGrantOptions() and snakeToCamel() are protected: in
-// PHP they exist to be overridden, and here the thing they varied is a field.
-// snakeToCamel() is the one worth naming, because it exists only to turn
-// 'client_id' into a call to getClientId() by string -- a method call assembled
-// out of a string is what Go does not do, and does not need to.
+// form-encoded body depending on what arrived.
 package providers

@@ -134,7 +134,7 @@ func newLogin(hasher auth.Hasher, connection *fakeConnection) *login {
 		l.session,
 		l.request,
 		nil,
-		true, // rehashOnLogin, which is the PHP's default
+		true, // rehashOnLogin
 		1,
 		"an-application-key",
 	)

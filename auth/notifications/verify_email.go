@@ -11,8 +11,8 @@ import (
 	"github.com/arandu-io/hesape/notifications/messages"
 )
 
-// verifyEmailCallbacks holds what PHP keeps in two static properties. See
-// [resetPasswordCallbacks] for why it carries a mutex.
+// verifyEmailCallbacks is the package state behind this notification's two
+// setters. See [resetPasswordCallbacks] for why it carries a mutex.
 var verifyEmailCallbacks struct {
 	mu sync.RWMutex
 	// createURL is the callback that should be used to create the verify email
@@ -22,14 +22,14 @@ var verifyEmailCallbacks struct {
 	toMail func(notifiable hnotifications.Notifiable, verificationURL string) messages.Mail
 }
 
-// VerifyEmail is Illuminate\Auth\Notifications\VerifyEmail.
+// VerifyEmail is the message with the confirmation link in it, sent when an
+// account is created.
 //
-// It is the message with the confirmation link in it, sent when an account is
-// created. auth/listeners.SendEmailVerificationNotification is what triggers it,
-// through the account's own SendEmailVerificationNotification.
+// auth/listeners.SendEmailVerificationNotification is what triggers it, through
+// the account's own SendEmailVerificationNotification.
 //
-// It carries nothing: PHP's has no constructor either, because everything it
-// needs -- the id and the address -- is on the recipient.
+// It carries nothing, because everything it needs -- the id and the address --
+// is on the recipient.
 type VerifyEmail struct {
 	hnotifications.NotificationBase
 }
@@ -40,8 +40,8 @@ const KeyVerifyEmail hnotifications.Key = "auth.verify-email"
 
 // NewVerifyEmail returns the notification.
 //
-// PHP has no constructor for it; this exists so that the two notifications in
-// this package are built the same way at a call site.
+// It takes nothing, and exists so that the two notifications in this package
+// are built the same way at a call site.
 func NewVerifyEmail() VerifyEmail { return VerifyEmail{} }
 
 // Key is [KeyVerifyEmail]. See [ResetPassword.Key].
@@ -49,18 +49,17 @@ func (VerifyEmail) Key() hnotifications.Key { return KeyVerifyEmail }
 
 // Via gets the notification's channels.
 //
-// It is VerifyEmail::via, which answers ['mail']: the whole purpose is to prove
-// that the address works, so it can only go to the address.
+// It is mail and nothing else: the whole purpose is to prove that the address
+// works, so it can only go to the address.
 func (VerifyEmail) Via(hnotifications.Notifiable) []hnotifications.ChannelName {
 	return []hnotifications.ChannelName{hnotifications.ChannelMail}
 }
 
 // ToMail builds the mail representation of the notification.
 //
-// It is VerifyEmail::toMail. Note the order, which is PHP's and matters: the URL
-// is built BEFORE the toMail callback is consulted, and handed to it -- so a
-// project that rewrites the message still gets the link this notification would
-// have used.
+// Note the order, which matters: the URL is built BEFORE the ToMailUsing
+// callback is consulted, and handed to it -- so a project that rewrites the
+// message still gets the link this notification would have used.
 func (n VerifyEmail) ToMail(notifiable hnotifications.Notifiable) messages.Mail {
 	link := n.verificationURL(notifiable)
 
@@ -75,10 +74,7 @@ func (n VerifyEmail) ToMail(notifiable hnotifications.Notifiable) messages.Mail 
 }
 
 // buildMailMessage gets the verify email notification mail message for the
-// given URL.
-//
-// It is VerifyEmail::buildMailMessage, which is protected. The lines are
-// Illuminate's, minus Lang::get -- see the package comment.
+// given URL, when nothing was set with ToMailUsing.
 func (n VerifyEmail) buildMailMessage(link string) messages.Mail {
 	return messages.NewMail().
 		Subject("Verify your email address").
@@ -89,10 +85,8 @@ func (n VerifyEmail) buildMailMessage(link string) messages.Mail {
 
 // verificationURL gets the verification URL for the given notifiable.
 //
-// It is VerifyEmail::verificationUrl, which is protected. PHP mints a temporary
-// signed route; there is no URL generator and no application key here, so
-// without a callback this answers the PATH of Laravel's verification.verify
-// route, unsigned.
+// There is no URL generator and no application key here, so without a callback
+// this answers a PATH -- no host, and no signature.
 //
 // That link is not safe to send. See the package comment: an unsigned
 // id-and-hash link can be replayed by anybody who knows the address, because the
@@ -114,12 +108,11 @@ func (n VerifyEmail) verificationURL(notifiable hnotifications.Notifiable) strin
 // CreateUrlUsing sets a callback that should be used when creating the email
 // verification URL.
 //
-// It is VerifyEmail::createUrlUsing, which is static -- see the package comment
-// for why a static became a method on the zero value. Passing nil restores the
-// built-in URL.
+// It is a method on the zero value that sets package state -- see the package
+// comment for why. Passing nil restores the built-in URL.
 //
-// The expiry PHP reads from auth.verification.expire belongs to whatever signs
-// the link, so it is the callback's, not this package's.
+// The expiry of a signed link belongs to whatever signs it, so it is the
+// callback's and not this package's.
 func (VerifyEmail) CreateUrlUsing(callback func(notifiable hnotifications.Notifiable) string) {
 	verifyEmailCallbacks.mu.Lock()
 	verifyEmailCallbacks.createURL = callback
@@ -129,16 +122,16 @@ func (VerifyEmail) CreateUrlUsing(callback func(notifiable hnotifications.Notifi
 // ToMailUsing sets a callback that should be used when building the
 // notification mail message.
 //
-// It is VerifyEmail::toMailUsing, which is static. The URL it receives is the
-// one [VerifyEmail.verificationURL] produced.
+// It is a method on the zero value that sets package state. The URL it receives
+// is the one [VerifyEmail.verificationURL] produced.
 func (VerifyEmail) ToMailUsing(callback func(notifiable hnotifications.Notifiable, verificationURL string) messages.Mail) {
 	verifyEmailCallbacks.mu.Lock()
 	verifyEmailCallbacks.toMail = callback
 	verifyEmailCallbacks.mu.Unlock()
 }
 
-// emailForVerification is $notifiable->getEmailForVerification(), falling back
-// to the address the recipient is routed at on the mail channel.
+// emailForVerification is the address the recipient asked to have confirmed,
+// falling back to the one it is routed at on the mail channel.
 func emailForVerification(notifiable hnotifications.Notifiable) string {
 	if verifiable, ok := notifiable.(auth.MustVerifyEmail); ok {
 		if address := verifiable.GetEmailForVerification(); address != "" {
@@ -148,14 +141,12 @@ func emailForVerification(notifiable hnotifications.Notifiable) string {
 	return notifiable.RouteFor(hnotifications.ChannelMail)
 }
 
-// emailHash is PHP's sha1($notifiable->getEmailForVerification()).
+// emailHash is the SHA-1 of the address being confirmed.
 //
 // SHA-1 and not something current, on purpose: the digest is not a security
 // primitive here and is not being asked to resist anything. It is an identifier
-// that changes when the address changes, so that a link mailed to an old address
-// stops confirming a new one -- and it is SHA-1 so that a link minted by a
-// Laravel application and a link minted by this one are the same string, which
-// is what lets a project move over without invalidating every unsent message.
+// that changes when the address changes, so that a link mailed to an old
+// address stops confirming a new one.
 //
 // What keeps a verification link from being forged is the SIGNATURE, which is
 // the caller's -- see [VerifyEmail.CreateUrlUsing].

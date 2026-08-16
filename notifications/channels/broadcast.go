@@ -12,17 +12,17 @@ import (
 )
 
 // Broadcaster is the little the broadcast channel needs to reach a browser that
-// is connected right now.
+// is connected right now: a channel name, an event name and a JSON payload,
+// which is what any hub can satisfy with no adaptation.
 //
-// It is the Illuminate\Contracts\Events\Dispatcher that
-// BroadcastChannel::__construct takes, narrowed: there the dispatch of a
-// ShouldBroadcast event is what makes the push happen, and here the push is a
-// call.
+// It is a seam to hesape/broadcasting, whose own broadcasting.Broadcaster also
+// authorizes subscriptions and resolves drivers by name -- neither of which a
+// notification needs in order to be pushed.
 //
-// It is a seam to hesape/broadcasting, which is layer 5 of
-// 20-components/DOC-hesape-reorganization.md and does not exist yet. The signature is the
-// one a hub can satisfy with no adaptation: a channel name, an event name and a
-// JSON payload.
+// It stays an interface rather than the broadcasting package itself. A
+// notification channel that imported the whole manager would drag the driver
+// registry and the channel authorization endpoint behind every package that
+// sends a notification, and could not be exercised without them.
 type Broadcaster interface {
 	// Push delivers a payload to everyone subscribed to a channel. Nobody
 	// listening is not an error: a live push is a courtesy on top of a stored
@@ -32,9 +32,8 @@ type Broadcaster interface {
 
 // BroadcastNotification is what a notification implements to be pushed live.
 //
-// It is the toBroadcast()/toArray() BroadcastChannel::getData looks for by name
-// on the notification. Only toBroadcast is here, for the reason
-// [DatabaseNotification] gives.
+// Building the payload is its own method rather than a shared one, for the
+// reason [DatabaseNotification] gives.
 type BroadcastNotification interface {
 	// ToBroadcast is the payload the browser receives.
 	ToBroadcast(to notifications.Notifiable) messages.Broadcast
@@ -50,29 +49,26 @@ type BroadcastNotification interface {
 // than a failure, which is the normal state of most recipients most of the
 // time: the push is a courtesy on top of a stored notification, never the only
 // copy.
-//
-// Answers Illuminate\Notifications\Channels\BroadcastChannel.
 type Broadcast struct {
 	hub Broadcaster
 }
 
-// NewBroadcast is BroadcastChannel::__construct.
+// NewBroadcast returns a broadcast channel that pushes through h.
 func NewBroadcast(h Broadcaster) *Broadcast { return &Broadcast{hub: h} }
 
 var _ notifications.Channel = (*Broadcast)(nil)
 
-// Name is "broadcast". It has no PHP counterpart, for the reason [Mail.Name]
-// gives.
+// Name is "broadcast", for the reason [Mail.Name] gives.
 func (*Broadcast) Name() notifications.ChannelName { return notifications.ChannelBroadcast }
 
-// Send is BroadcastChannel::send.
+// Send pushes n to every channel to is reachable on. It answers the empty
+// string: a push has no id to report.
 //
 // RouteFor answers with a channel name -- "user.42", "team.7" -- and an empty
 // answer is notifications.ErrNotAddressed: this recipient has no live
 // connection to push to, which is the normal state of most recipients most of
 // the time. A notification that names its own channels through Broadcastable
-// overrides the route, which is Illuminate's BroadcastNotificationCreated
-// preferring the notification's broadcastOn().
+// overrides the route.
 func (c *Broadcast) Send(ctx context.Context, _ auth.Grant, to notifications.Notifiable, n notifications.Notification) (string, error) {
 	buildable, ok := n.(BroadcastNotification)
 	if !ok {

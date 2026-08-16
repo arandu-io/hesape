@@ -9,13 +9,12 @@ import (
 	"sync"
 )
 
-// FileViewFinder mirrors Illuminate\View\FileViewFinder.
+// FileViewFinder locates view files on disk by name and path.
 //
-// It locates view files on disk by name and path. In Arandu, views are
-// compiled into the binary and registered by name at boot, so the finder is
-// used during development and by `aru view:build` — never at request time
-// in production. A view that is not compiled in is a boot-time error, not a
-// runtime one.
+// Views are compiled into the binary and registered by name at boot, so the
+// finder is used during development and by the view build step -- never at
+// request time in production. A view that is not compiled in is a boot-time
+// error, not a runtime one.
 type FileViewFinder struct {
 	mu         sync.RWMutex
 	files      fs.StatFS
@@ -25,11 +24,11 @@ type FileViewFinder struct {
 	views      map[string]string // name -> absolute path, cache
 }
 
-// NewFileViewFinder is FileViewFinder::__construct.
+// NewFileViewFinder returns a finder that reads from files; nil means the
+// real filesystem.
 //
-// files is the filesystem the finder reads; nil means the real one. It is the
-// first parameter because it is the first parameter in PHP, and it is what
-// makes the finder testable without writing a temporary tree.
+// files comes first because it is what makes the finder testable without
+// writing a temporary tree.
 func NewFileViewFinder(files fs.StatFS, paths, extensions []string) *FileViewFinder {
 	if extensions == nil {
 		extensions = []string{".kyse.go"}
@@ -51,7 +50,7 @@ func NewFileViewFinder(files fs.StatFS, paths, extensions []string) *FileViewFin
 	}
 }
 
-// GetFilesystem is FileViewFinder::getFilesystem.
+// GetFilesystem returns the filesystem the finder reads from.
 //
 // nil is the real filesystem: the finder reaches for os directly when nobody
 // handed it one, which is the case in every non-test caller.

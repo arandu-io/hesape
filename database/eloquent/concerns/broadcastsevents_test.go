@@ -177,10 +177,10 @@ func TestOnlyAHardDeleteBroadcastsNow(t *testing.T) {
 	}
 }
 
-// RULE 14. The channel a model names carries no tenant, and the name it is
-// published under does -- so two customers holding an order 17 are on two
-// channels, and neither can name the other's, because the tenant comes from the
-// Grant and never from what the client asked for.
+// The channel a model names carries no tenant, and the name it is published
+// under does -- so two customers holding an order 17 are on two channels, and
+// neither can name the other's, because the tenant comes from the Grant and
+// never from what the client asked for.
 func TestTheSameModelIsADifferentChannelInEachTenant(t *testing.T) {
 	o, _ := newOrder(t)
 

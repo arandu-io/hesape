@@ -5,11 +5,9 @@ import (
 	"net/http"
 )
 
-// JsonResource is the interface that resource types implement.
-//
-// It mirrors Illuminate\Http\Resources\Json\JsonResource. Types that
-// implement this interface can be serialized to JSON responses with
-// conditional field inclusion and wrapping.
+// JsonResource is the interface that resource types implement. Types that
+// implement it can be serialized to JSON responses with conditional field
+// inclusion and wrapping.
 type JsonResource interface {
 	// ToArray returns the resource attributes as a slice of key-value pairs
 	// or a map. MissingValue entries are filtered out during serialization.
@@ -34,9 +32,8 @@ func NewJsonResponse(resource JsonResource) *JsonResponseBuilder {
 		resource:   resource,
 		status:     http.StatusOK,
 		additional: make(map[string]any),
-		// The wrapper the class statics are on, so that [Wrap] and
-		// [WithoutWrapping] reach a response nobody passed them to -- which is
-		// the point of them being statics in the PHP.
+		// The wrapper package-level state is on, so that [Wrap] and
+		// [WithoutWrapping] reach a response nobody passed them to.
 		wrap: Wrapper(),
 	}
 }
@@ -111,9 +108,9 @@ type ResourceCollection struct {
 	PreserveKeys bool
 	collects     string
 
-	// preserveAllQueryParameters is ResourceCollection::$preserveAllQueryParameters.
+	// preserveAllQueryParameters is set by PreserveQuery.
 	preserveAllQueryParameters bool
-	// queryParameters is ResourceCollection::$queryParameters.
+	// queryParameters is set by WithQuery.
 	queryParameters map[string]string
 }
 
@@ -154,8 +151,6 @@ func (c *ResourceCollection) Count() int {
 // to carry the wrapping and the pagination metadata for the list. [Collection]
 // returns one of these, and a caller who wants the collection named declares
 // their own type instead.
-//
-// Answers Illuminate\Http\Resources\Json\AnonymousResourceCollection.
 type AnonymousResourceCollection struct {
 	ResourceCollection
 }

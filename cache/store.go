@@ -89,10 +89,9 @@ type Locking interface {
 // CanFlushLocks is the optional third half of a Store: emptying the lock space
 // wholesale.
 //
-// It answers Illuminate\Contracts\Cache\CanFlushLocks, and it is a separate
-// interface for the reason Laravel made it one -- a backend that keeps its
-// locks in the same key space as its entries cannot flush the first without
-// flushing the second, and must not pretend it can.
+// It is a separate interface because a backend that keeps its locks in the same
+// key space as its entries cannot flush the first without flushing the second,
+// and must not pretend it can.
 type CanFlushLocks interface {
 	// FlushLocks removes every lock the store holds, held or not.
 	FlushLocks(ctx context.Context) error
@@ -100,12 +99,11 @@ type CanFlushLocks interface {
 
 // CurrentOwner is the optional read half of Locking: who holds a lock now.
 //
-// It answers the getCurrentOwner() that every Illuminate\Cache\Lock subclass
-// implements, and it is what Lock.IsOwnedBy, Lock.IsOwnedByCurrentProcess and
-// Lock.ForceRelease are built on.
+// It is what Lock.IsOwnedBy, Lock.IsOwnedByCurrentProcess and Lock.ForceRelease
+// are built on.
 //
 // It is a third interface rather than a method on Locking, because Locking is
-// implemented outside this repository -- arandu-io/kv is one -- and widening an
+// implemented outside this module -- hesape/redis is one -- and widening an
 // interface an adapter already satisfies breaks it at the next build.
 type CurrentOwner interface {
 	// CurrentOwner returns the token written into the store for key, or the
@@ -115,10 +113,10 @@ type CurrentOwner interface {
 
 // Taggable is the optional tag half of a Store.
 //
-// It answers Illuminate\Cache\TaggableStore, and every Store in this package
-// satisfies it for free: a tag is an ordinary entry holding a generation id, so
-// tagging needs Get, Put and Forget and nothing a Store does not already have.
-// The interface exists so Repository.SupportsTags has something to ask.
+// Every Store in this package satisfies it for free: a tag is an ordinary entry
+// holding a generation id, so tagging needs Get, Put and Forget and nothing a
+// Store does not already have. The interface exists so Repository.SupportsTags
+// has something to ask.
 type Taggable interface {
 	Store
 }
@@ -133,9 +131,8 @@ var ErrNotFound = errors.New("cache: not found")
 // ErrNoTenant is returned when a Grant carries no tenant, or one that cannot be
 // part of a key.
 //
-// An error and not a fallback bucket, which is RULE 14 with teeth: a cache key
-// without a tenant is one request away from serving one customer's data to
-// another.
+// An error and not a fallback bucket: a cache key without a tenant is one
+// request away from serving one customer's data to another.
 var ErrNoTenant = errors.New("cache: the operation needs a tenant, and the Grant carries none")
 
 // ErrNoTTL is returned when something that must expire was given no expiry.
@@ -144,8 +141,8 @@ var ErrNoTTL = errors.New("cache: an entry needs a time to live, or it is a seco
 // ErrLocked is returned when the lock is held by somebody else.
 var ErrLocked = errors.New("cache: the lock is held")
 
-// ErrLockTimeout answers Illuminate\Contracts\Cache\LockTimeoutException: it is
-// returned by Lock.Block when the wait ran out before the lock came free.
+// ErrLockTimeout is returned by Lock.Block when the wait ran out before the
+// lock came free.
 //
 // It is distinct from ErrLocked, which says "not now"; this one says "not
 // within the time you were willing to wait", and a caller that retries on the
@@ -155,8 +152,6 @@ var ErrLockTimeout = errors.New("cache: waiting for the lock timed out")
 // ErrUnsupported is returned when a call needs something of the store that this
 // store does not implement: flushing locks, reading a lock's owner.
 //
-// It answers the BadMethodCallException Laravel throws from
-// Repository::flushLocks and Repository::tags, and it is an error rather than a
-// panic because the wiring that chose the store is usually not the code making
-// the call.
+// It is an error rather than a panic because the wiring that chose the store is
+// usually not the code making the call.
 var ErrUnsupported = errors.New("cache: this store does not support the operation")

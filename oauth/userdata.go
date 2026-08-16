@@ -5,13 +5,10 @@ import (
 	"sort"
 )
 
-// UserData answers Illuminate\Socialite\UserData: whatever the provider said
-// about the person who just signed in.
+// UserData is whatever the provider said about the person who just signed in.
 //
-// In PHP it extends Symfony's ParameterBag, which is a map with methods. This
-// is a map with methods, and the methods are the ones that survive the
-// translation -- offsetGet, getIterator and count are language interfaces Go
-// does not have, and All is what stands in for all three.
+// It is a map with methods. [UserData.All] is the whole of it, for a caller
+// that wants to range over the fields rather than ask for them by name.
 //
 // The contents are the provider's, not this package's. GitHub calls the handle
 // "login" and Google calls it "name"; neither is normalised here, because a
@@ -24,7 +21,7 @@ type UserData struct {
 	params map[string]any
 }
 
-// NewUserData answers UserData::__construct().
+// NewUserData wraps the provider's parameters.
 //
 // The map is kept, not copied: it comes straight off a decoded JSON body that
 // nothing else holds.
@@ -35,7 +32,7 @@ func NewUserData(params map[string]any) UserData {
 	return UserData{params: params}
 }
 
-// All answers ParameterBag::all(): every parameter the provider sent.
+// All is every parameter the provider sent.
 func (u UserData) All() map[string]any {
 	if u.params == nil {
 		return map[string]any{}
@@ -43,8 +40,8 @@ func (u UserData) All() map[string]any {
 	return u.params
 }
 
-// Keys answers ParameterBag::keys(), sorted, so that a log line or a test
-// listing them reads the same twice.
+// Keys is the parameter names, sorted, so that a log line or a test listing
+// them reads the same twice.
 func (u UserData) Keys() []string {
 	out := make([]string, 0, len(u.params))
 	for k := range u.params {
@@ -54,14 +51,13 @@ func (u UserData) Keys() []string {
 	return out
 }
 
-// Has answers ParameterBag::has().
+// Has reports whether the provider sent this key.
 func (u UserData) Has(key string) bool {
 	_, ok := u.params[key]
 	return ok
 }
 
-// Get answers ParameterBag::get(): the value, or the fallback when the provider
-// did not send that key.
+// Get is the value, or the fallback when the provider did not send that key.
 func (u UserData) Get(key string, fallback ...any) any {
 	if v, ok := u.params[key]; ok {
 		return v
@@ -74,10 +70,9 @@ func (u UserData) Get(key string, fallback ...any) any {
 
 // String is Get for the common case, where the answer goes into a column.
 //
-// PHP has no such method because PHP has no such problem: everything there is
-// already a string when it is printed. A JSON number arrives here as a float64
-// and an id printed with %v would come out as 1.234568e+06, so the conversion
-// happens once, in the place that knows it is a conversion.
+// A JSON number arrives as a float64, and an id printed with %v would come out
+// as 1.234568e+06, so the conversion happens once, in the place that knows it
+// is a conversion.
 func (u UserData) String(key string, fallback ...string) string {
 	v, ok := u.params[key]
 	if !ok || v == nil {

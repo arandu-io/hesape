@@ -105,7 +105,7 @@ func TestASubqueryInsideAGroupIsReached(t *testing.T) {
 // Scoping a subquery adds a binding to it, and every value declared after that
 // clause has to move along with it. If the flat list is left as it was, the
 // values slide onto the wrong placeholders -- which is not an error, it is a
-// query that runs and answers wrongly.
+// query that runs and gives the wrong result.
 func TestScopingASubqueryKeepsTheBindingsLinedUpWithTheirPlaceholders(t *testing.T) {
 	connection := &fakeConnection{}
 	b := newTestBuilder(connection)
@@ -176,10 +176,11 @@ func TestASubqueryIsNotAWayPastTheTenantCheck(t *testing.T) {
 }
 
 // A subquery on the LEFT of a comparison -- `(select count(*) from invoices
-// where invoices.user_id = users.id) > 3` -- is the shape Eloquent's has-query
-// takes when EXISTS cannot answer, and it was the shape with no builder method
-// behind it: both copies of that query assembled the clause by hand, freezing
-// the subquery into a raw column, and nothing could scope it afterwards.
+// where invoices.user_id = users.id) > 3` -- is the shape the eloquent
+// package's has-query takes when EXISTS cannot answer, and it was the shape
+// with no builder method behind it: both copies of that query assembled the
+// clause by hand, freezing the subquery into a raw column, and nothing could
+// scope it afterwards.
 //
 // WhereSubCount keeps the builder on the clause. This is the same leak as the
 // where-exists one above, counted the same way.

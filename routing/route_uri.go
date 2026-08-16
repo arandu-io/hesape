@@ -7,26 +7,20 @@ import (
 // RouteUri is the parsed URI of a route: the cleaned path and the binding
 // fields a {param:field} qualifier declared.
 //
-// It mirrors Illuminate\Routing\RouteUri. The parse is what pulls
-// {post:slug} out of the pattern and leaves {post} in its place, so the mux
-// sees a pattern it can match and the route model binding knows which column
-// to resolve by.
+// The parse is what pulls {post:slug} out of the pattern and leaves {post}
+// in its place, so the mux sees a pattern it can match and the route model
+// binding knows which column to resolve by.
 type RouteUri struct {
 	URI           string
 	BindingFields map[string]string
 }
 
-// Parse answers to RouteUri::parse: it extracts the {param:field} qualifiers
-// into BindingFields and leaves {param} (or {param?}) in the URI.
+// Parse extracts the {param:field} qualifiers into BindingFields and leaves
+// {param} (or {param?}) in the URI.
 //
-// It is a method on the zero RouteUri rather than a package function, so that
-// the call keeps the name the PHP gives it:
-//
-//	RouteUri::parse($uri)                  // PHP
-//	routing.RouteUri{}.Parse(uri)          // Go
-//
-// A package-level Parse would have said nothing about what it parses, and this
-// package has two static parses -- RouteUri::parse and RouteAction::parse.
+// It is a method on the zero RouteUri rather than a package function, so
+// that a package-level Parse is not left saying nothing about what it
+// parses.
 func (RouteUri) Parse(uri string) RouteUri {
 	fields := map[string]string{}
 	out := uri

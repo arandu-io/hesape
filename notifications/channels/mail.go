@@ -11,17 +11,14 @@ import (
 
 // Mailer is the little the mail channel needs to send a message.
 //
-// It is the Illuminate\Contracts\Mail\Factory that MailChannel::__construct
-// takes, narrowed to the one call MailChannel::send makes on it.
+// It is a seam to hesape/mail, whose own mail.Mailer sends through a configured
+// transport. The adapter between them is a dozen lines: turn a messages.Mail
+// into the envelope and the two rendered parts, and hand it over.
 //
-// It is a seam to hesape/mail, which is layer 4 of
-// 20-components/DOC-hesape-reorganization.md and does not exist yet. When it does, the
-// adapter is a dozen lines: turn a messages.Mail into the envelope and the two
-// rendered parts, and hand it to the Mailer there.
-//
-// It stays an interface after that. A notification channel that imported the
-// whole mailer would drag the view registry and every transport behind every
-// package that sends a notification, and could not be exercised without one.
+// It stays an interface rather than the mail package itself. A notification
+// channel that imported the whole mailer would drag the view registry and every
+// transport behind every package that sends a notification, and could not be
+// exercised without one.
 type Mailer interface {
 	// Send delivers one message to one address, and answers with whatever the
 	// provider called it -- a message id, for the log line that has to be
@@ -32,10 +29,9 @@ type Mailer interface {
 
 // MailNotification is what a notification implements to travel by e-mail.
 //
-// It is the toMail() MailChannel::send looks for by name on the notification.
-// Naming it as an interface is what turns "Call to undefined method toMail"
-// into an error the compiler can raise, and it is why a notification that never
-// goes by e-mail carries no empty toMail.
+// Naming it as an interface is what lets the compiler raise a notification that
+// named the mail channel without being able to build a message, and it is why a
+// notification that never goes by e-mail carries no empty method.
 type MailNotification interface {
 	// ToMail is the message, built for this recipient. The recipient is an
 	// argument because their name goes in the greeting and their id goes in
@@ -52,28 +48,23 @@ type MailNotification interface {
 // A recipient with no address is notifications.ErrNotAddressed, which the
 // Notifier treats as "not reachable this way" and not as a failure: somebody
 // who never confirmed an e-mail address still gets the row in their bell menu.
-//
-// Answers Illuminate\Notifications\Channels\MailChannel.
 type Mail struct {
 	mailer Mailer
 }
 
-// NewMail is MailChannel::__construct.
+// NewMail returns a mail channel that sends through m.
 //
-// PHP also takes a Markdown renderer, because MailChannel::buildMarkdownHtml
-// renders a template under a theme. There is no theme here (RULE 13) and
-// messages.Mail renders itself, so there is nothing to hand it.
+// There is no renderer to hand it: messages.Mail renders itself.
 func NewMail(m Mailer) *Mail { return &Mail{mailer: m} }
 
 var _ notifications.Channel = (*Mail)(nil)
 
-// Name is "mail".
-//
-// It has no PHP counterpart: there the name is the string the container
-// resolved the driver by, and the driver never learns it.
+// Name is "mail". A channel knows its own name, so a delivery record can say
+// which one wrote it without the caller passing the name back in.
 func (*Mail) Name() notifications.ChannelName { return notifications.ChannelMail }
 
-// Send is MailChannel::send.
+// Send delivers n to to as an e-mail, and answers the id the transport gave the
+// message.
 //
 // A recipient with no address is notifications.ErrNotAddressed, which the
 // Notifier treats as "not reachable this way" and not as a failure: somebody

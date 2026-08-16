@@ -6,24 +6,21 @@ import (
 	hhttp "github.com/arandu-io/hesape/http"
 )
 
-// RedirectIfAuthenticated is
-// Illuminate\Auth\Middleware\RedirectIfAuthenticated.
-//
-// It is the mirror of [Authenticate], and it guards the sign-in and register
-// screens: somebody who is already signed in and follows a bookmark to /login
-// is sent on rather than shown a form that would sign them in a second time.
+// RedirectIfAuthenticated is the mirror of [Authenticate], and it guards the
+// sign-in and register screens: somebody who is already signed in and follows a
+// bookmark to /login is sent on rather than shown a form that would sign them
+// in a second time.
 type RedirectIfAuthenticated struct {
-	// auth is the authentication factory instance. PHP reads the Auth facade;
-	// there are no facades (ADR 0002), so it is handed in.
+	// auth is the authentication factory instance.
 	auth Factory
 
 	// guards are the guards this copy was bound to by Using. Empty means the
-	// default guard, which is PHP's [null].
+	// default guard.
 	guards []string
 
 	// redirectToCallback is the callback that should be used to generate the
-	// authentication redirect path. PHP keeps it in a static; see
-	// [Authenticate.redirectToCallback] for why this one is a field.
+	// authentication redirect path. See [Authenticate.redirectToCallback] for
+	// why it is a field and not package-level state.
 	redirectToCallback func(r *http.Request) string
 }
 
@@ -33,10 +30,8 @@ func NewRedirectIfAuthenticated(a Factory) *RedirectIfAuthenticated {
 	return &RedirectIfAuthenticated{auth: a}
 }
 
-// Using specifies the guards for the middleware.
-//
-// It is RedirectIfAuthenticated::using. See [Authenticate.Using] for why it
-// returns a copy of the middleware rather than a route string.
+// Using returns a copy of the middleware bound to those guards, for the reason
+// [Authenticate.Using] gives.
 func (m *RedirectIfAuthenticated) Using(guard string, others ...string) *RedirectIfAuthenticated {
 	copied := *m
 	copied.guards = append([]string{guard}, others...)
@@ -44,8 +39,6 @@ func (m *RedirectIfAuthenticated) Using(guard string, others ...string) *Redirec
 }
 
 // Handle handles an incoming request.
-//
-// It is RedirectIfAuthenticated::handle.
 func (m *RedirectIfAuthenticated) Handle(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		guards := m.guards
@@ -72,8 +65,7 @@ func (m *RedirectIfAuthenticated) Handle(next http.Handler) http.Handler {
 // RedirectTo gets the path the user should be redirected to when they are
 // authenticated.
 //
-// It is RedirectIfAuthenticated::redirectTo, which is protected. Exported for
-// the reason [Authenticate.RedirectTo] is.
+// It is exported for the reason [Authenticate.RedirectTo] is.
 func (m *RedirectIfAuthenticated) RedirectTo(r *http.Request) string {
 	if m.redirectToCallback != nil {
 		return m.redirectToCallback(r)
@@ -84,22 +76,16 @@ func (m *RedirectIfAuthenticated) RedirectTo(r *http.Request) string {
 // defaultRedirectURI gets the default URI the user should be redirected to when
 // they are authenticated.
 //
-// It is RedirectIfAuthenticated::defaultRedirectUri, which is protected. PHP
-// probes the route registry for a route named "dashboard" and then one named
-// "home", then for the URIs of the same two names, and falls back to "/".
-//
-// The probe is skipped: it needs the router, and this package must not import
-// it. What is left is the fallback, and [RedirectIfAuthenticated.RedirectUsing]
-// is how an application names somewhere else -- which is what a Laravel project
-// with a dashboard ends up doing anyway, because the guessed route is right
-// only for the two names Laravel's own starter kits use.
+// It is "/", and nothing is guessed: probing the route registry for a likely
+// landing page would need the router, which this package must not import.
+// [RedirectIfAuthenticated.RedirectUsing] is how an application names somewhere
+// else, which any application with a dashboard has to do anyway.
 func (m *RedirectIfAuthenticated) defaultRedirectURI() string { return "/" }
 
 // RedirectUsing specifies the callback that should be used to generate the
 // redirect path.
 //
-// It is RedirectIfAuthenticated::redirectUsing, which is static. See
-// [Authenticate.RedirectUsing].
+// It returns a copy of the middleware. See [Authenticate.RedirectUsing].
 func (m *RedirectIfAuthenticated) RedirectUsing(redirectToCallback func(r *http.Request) string) *RedirectIfAuthenticated {
 	copied := *m
 	copied.redirectToCallback = redirectToCallback

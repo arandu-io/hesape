@@ -11,26 +11,23 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// Validator answers to Illuminate\Validation\Validator: one submitted request,
-// the rules written against it, and the answer.
+// Validator is one submitted request, the rules written against it, and the
+// answer.
 //
-// It is built by Make and it is not safe for concurrent use -- one belongs to
-// one request, as the PHP's does. The compiled Set behind it is read-only and
-// is shared by all of them.
+// It is built by Make and it is not safe for concurrent use: one belongs to one
+// request. The compiled Set behind it is read-only and is shared by all of them.
 //
-// What is deliberately not here is Laravel's container: the rules that leave
-// the process take what they need through an option instead of resolving it out
-// of a service locator (ADR 0001 and 0002). That is `unique`, `exists`,
-// `current_password` and `active_url`, and each of them fails closed when the
-// thing it needs was not given.
+// The four rules that leave the process -- `unique`, `exists`,
+// `current_password` and `active_url` -- take what they need through an option,
+// and each of them fails closed when the thing it needs was not given.
 type Validator struct {
-	// initialRules answers to $initialRules: the compiled set as it was
-	// written, wildcards and all. set answers to $rules: the same set with
-	// every wildcard expanded against the data this request carries.
+	// initialRules is the compiled set as it was written, wildcards and all.
+	// set is the same set with every wildcard expanded against the data this
+	// request carries.
 	//
-	// Two of them for the reason the PHP keeps two: the expansion depends on
-	// the data, so adding a rule or replacing the data has to expand again, and
-	// expanding an already-expanded set would find nothing to expand.
+	// Two of them, because the expansion depends on the data: adding a rule or
+	// replacing the data has to expand again, and expanding an
+	// already-expanded set would find nothing to expand.
 	initialRules *Set
 	set          *Set
 
@@ -42,9 +39,9 @@ type Validator struct {
 
 	stopOnFirstFailure bool
 
-	// currentRule answers to Validator::$currentRule: the rule being run, which
-	// is how ValidateRegex reads the pattern compiled at boot instead of
-	// compiling it again on every request.
+	// currentRule is the rule being run, which is how ValidateRegex reads the
+	// pattern compiled at boot instead of compiling it again on every
+	// request.
 	currentRule *rule
 
 	ctx       context.Context
@@ -54,14 +51,13 @@ type Validator struct {
 	dns       Resolver
 	now       func() time.Time
 
-	// What follows is the state of Concerns\FormatsMessages: everything that
-	// decides which sentence a failure carries, and how the field and the value
-	// are spelled inside it. The PHP declares most of it public because a rule
-	// object reaches for it; here the two a rule reads are CustomMessages and
-	// CustomAttributes, and the rest is set through the With options.
+	// What follows decides which sentence a failure carries, and how the field
+	// and the value are spelled inside it. The two a rule object reads back are
+	// CustomMessages and CustomAttributes; the rest is set through the With
+	// options.
 	//
-	// trans answers to $translator. A nil one is the whole difference between
-	// this package's short sentences and Laravel's: see getMessage.
+	// trans is the catalogue. A nil one leaves the short sentences the compiled
+	// rule set carries: see getMessage.
 	trans                       Translator
 	customMessages              map[string]any
 	fallbackMessages            map[string]any
@@ -71,15 +67,15 @@ type Validator struct {
 	implicitAttributes          map[string][]string
 	implicitAttributesFormatter func(string) string
 
-	// after answers to $after: the callbacks Validator::after registers.
+	// after is the callbacks After registers.
 	after []func()
 
-	// ensureExponentWithinAllowedRange answers to
-	// $ensureExponentWithinAllowedRangeUsing.
+	// ensureExponentWithinAllowedRange is the check
+	// EnsureExponentWithinAllowedRangeUsing registered.
 	ensureExponentWithinAllowedRange func(scale int, attribute string, value any) bool
 
-	// exception answers to $exception, which is a class name there and the
-	// thing that builds one here.
+	// exception is what SetException registered: the thing that builds the error
+	// a failure is turned into.
 	exception func(*Validator) error
 }
 
@@ -101,9 +97,9 @@ func WithContext(ctx context.Context) ValidatorOption {
 // need.
 //
 // The Grant is not optional and there is no way to pass a verifier without one:
-// RULE 17 says a read is authorized too, and "the validator only counts rows"
-// is how a count of rows becomes a way to ask whether another tenant has a
-// user with a given email.
+// a read is authorized like any other, and "the validator only counts rows" is
+// how a count of rows becomes a way to ask whether another tenant has a user
+// with a given email.
 func WithPresence(g auth.Grant, p PresenceVerifier) ValidatorOption {
 	return func(v *Validator) { v.grant, v.presence = g, p }
 }
@@ -126,8 +122,7 @@ func WithClock(now func() time.Time) ValidatorOption {
 	return func(v *Validator) { v.now = now }
 }
 
-// Make answers to Illuminate\Validation\Factory::make: a Validator over the
-// data and the rules.
+// Make returns a Validator over the data and the rules.
 //
 // The rules are a compiled Set rather than an array of strings, because the
 // strings are parsed and checked at boot -- see MustCompile. The data is
@@ -142,9 +137,8 @@ func Make(data Data, rules *Set, opts ...ValidatorOption) *Validator {
 	return v
 }
 
-// explodeRules answers to Validator::addRules, which is where the PHP's
-// constructor turns "items.*.price" into one rule per item the request actually
-// sent -- and where this package did nothing at all.
+// explodeRules turns "items.*.price" into one rule per item the request actually
+// sent.
 //
 // A set with no wildcard in it is kept as it is, pointer and all: it is shared
 // by every request, and a set nobody has to expand must not be copied per
@@ -186,9 +180,9 @@ func (v *Validator) explodeRules(rules *Set) {
 	v.set = expanded
 }
 
-// dependentRules answers to Validator::$dependentRules: the rules whose
-// parameters name OTHER FIELDS rather than values, and so the rules whose
-// asterisks have to be replaced with the keys the attribute expanded to.
+// dependentRules are the rules whose parameters name OTHER FIELDS rather than
+// values, and so the rules whose asterisks have to be replaced with the keys the
+// attribute expanded to.
 //
 // Getting this list wrong fails open, which is why it is written out rather
 // than inferred: every rule that decides whether a field is required is on it,
@@ -207,25 +201,23 @@ var dependentRules = []string{
 	"unique",
 }
 
-// uploadedFileRules answers to Validator::$fileRules, which is the six that
-// make a field an upload PLUS the four size rules. The list in compile.go is
-// the first six on their own, because that is what makes `max:100` mean a
-// hundred kilobytes; this one is what validateAttribute asks before it reports
-// a failed upload.
+// uploadedFileRules is the six rules that make a field an upload PLUS the four
+// size rules. The list in compile.go is the first six on their own, because that
+// is what makes `max:100` mean a hundred kilobytes; this one is what
+// validateAttribute asks before it reports a failed upload.
 var uploadedFileRules = []string{
 	"between", "dimensions", "extensions", "file", "image", "max", "mimes",
 	"mimetypes", "min", "size",
 }
 
-// StopOnFirstFailure answers to stopOnFirstFailure: leave after the first field
-// that fails, rather than reporting every field. It returns the Validator, as
-// the PHP returns $this.
+// StopOnFirstFailure leaves after the first field that fails, rather than
+// reporting every field. It returns the Validator, so calls chain.
 func (v *Validator) StopOnFirstFailure() *Validator {
 	v.stopOnFirstFailure = true
 	return v
 }
 
-// Passes answers to passes: run every rule and report whether nothing failed.
+// Passes runs every rule and reports whether nothing failed.
 func (v *Validator) Passes() bool {
 	v.messages = Errors{}
 	v.failed = map[string][]string{}
@@ -264,10 +256,10 @@ func (v *Validator) Passes() bool {
 	return v.messages.IsEmpty()
 }
 
-// Fails answers to fails.
+// Fails runs every rule and reports whether anything failed.
 func (v *Validator) Fails() bool { return !v.Passes() }
 
-// validateAttribute answers to validateAttribute.
+// validateAttribute runs one rule against one field.
 func (v *Validator) validateAttribute(f *field, r *rule) {
 	// First we will get the correct keys for the given attribute in case the
 	// field is nested in an array. Then we determine if the given rule accepts
@@ -313,16 +305,14 @@ func (v *Validator) validateAttribute(f *field, r *rule) {
 	}
 }
 
-// isUploadedAndInvalid is the first half of the PHP's `$value instanceof
-// UploadedFile && ! $value->isValid()`.
+// isUploadedAndInvalid reports an upload that did not finish.
 func isUploadedAndInvalid(value any) bool {
 	up, isUpload := value.(UploadedFile)
 	return isUpload && !up.IsValid()
 }
 
-// getExplicitKeys answers to Validator::getExplicitKeys: the keys an expanded
-// attribute filled its wildcards with. "foo.1.bar.spark.baz" gives [1, spark]
-// for "foo.*.bar.*.baz".
+// getExplicitKeys returns the keys an expanded attribute filled its wildcards
+// with: "foo.1.bar.spark.baz" gives [1, spark] for "foo.*.bar.*.baz".
 func (v *Validator) getExplicitKeys(attribute string) []string {
 	primary := v.getPrimaryAttribute(attribute)
 	if !strings.Contains(primary, "*") {
@@ -339,15 +329,13 @@ func (v *Validator) getExplicitKeys(attribute string) []string {
 	return nil
 }
 
-// replaceAsterisksInParameters answers to
-// Validator::replaceAsterisksInParameters: vsprintf over the parameter with
-// each asterisk turned into a key.
+// replaceAsterisksInParameters fills each asterisk of a parameter with the
+// matching key.
 //
-// The PHP throws when there are fewer keys than asterisks. There is nothing to
-// throw here and nothing sensible to guess, so the asterisks past the last key
-// are left as they were written -- the rule then finds no field, which is the
-// behaviour that was wrong everywhere and is now wrong only where the rule set
-// asks for a key the attribute does not have.
+// With fewer keys than asterisks there is nothing sensible to guess, so the
+// asterisks past the last key are left as they were written -- the rule then
+// finds no field, which is the answer for a rule set asking for a key the
+// attribute does not have.
 func replaceAsterisksInParameters(parameters, keys []string) []string {
 	out := make([]string, len(parameters))
 	for i, field := range parameters {
@@ -375,7 +363,7 @@ func fillAsterisks(field string, keys []string) string {
 	return b.String()
 }
 
-// isValidatable answers to isValidatable.
+// isValidatable reports whether this rule runs against this value at all.
 func (v *Validator) isValidatable(f *field, r *rule, value any) bool {
 	if slices.Contains(excludeRules, r.name) {
 		return true
@@ -386,7 +374,8 @@ func (v *Validator) isValidatable(f *field, r *rule, value any) bool {
 		v.hasNotFailedPreviousRuleIfPresenceRule(r, f.name)
 }
 
-// presentOrRuleIsImplicit answers to presentOrRuleIsImplicit.
+// presentOrRuleIsImplicit reports whether the value is there, or the rule runs
+// on a blank one.
 //
 // This is what keeps `min:12` on an optional box nobody typed in from saying
 // "must be at least 12 characters" about a box the person deliberately left
@@ -398,11 +387,11 @@ func (v *Validator) presentOrRuleIsImplicit(r *rule, attribute string, value any
 	return v.ValidatePresent(attribute, value, nil) || r.spec.implicit
 }
 
-// passesOptionalCheck answers to passesOptionalCheck: `sometimes` skips the
-// field entirely when its key was not sent at all.
+// passesOptionalCheck reports whether `sometimes` lets the field run: it skips
+// the field entirely when its key was not sent at all.
 //
-// It is why the data can tell absent from present-and-empty, and that
-// difference is what a PATCH is made of.
+// It is why the data can tell absent from present-and-empty, and that difference
+// is what a PATCH is made of.
 func (v *Validator) passesOptionalCheck(f *field) bool {
 	if !f.sometimes {
 		return true
@@ -410,7 +399,7 @@ func (v *Validator) passesOptionalCheck(f *field) bool {
 	return v.data.Has(f.name)
 }
 
-// isNotNullIfMarkedAsNullable answers to isNotNullIfMarkedAsNullable.
+// isNotNullIfMarkedAsNullable reports whether a nullable field holds something.
 //
 // `nullable` stops the chain when the value is NULL, not when it is empty:
 // those are two different answers, and only one of them is "the client said
@@ -422,9 +411,8 @@ func (v *Validator) isNotNullIfMarkedAsNullable(f *field, r *rule) bool {
 	return v.GetValue(f.name) != nil
 }
 
-// hasNotFailedPreviousRuleIfPresenceRule answers to
-// hasNotFailedPreviousRuleIfPresenceRule: a field that already failed does not
-// go to the database to fail again.
+// hasNotFailedPreviousRuleIfPresenceRule keeps a field that already failed from
+// going to the database to fail again.
 func (v *Validator) hasNotFailedPreviousRuleIfPresenceRule(r *rule, attribute string) bool {
 	if r.name == "unique" || r.name == "exists" {
 		return !v.messages.Has(attribute)
@@ -432,7 +420,8 @@ func (v *Validator) hasNotFailedPreviousRuleIfPresenceRule(r *rule, attribute st
 	return true
 }
 
-// ShouldStopValidating answers to shouldStopValidating.
+// ShouldStopValidating reports whether the field is finished, whatever rules it
+// has left.
 //
 // `bail` stops the field at its first failure. A failed implicit rule stops it
 // too, without being asked: `required` failing must not also produce "must be
@@ -456,7 +445,7 @@ func (v *Validator) ShouldStopValidating(attribute string) bool {
 	return false
 }
 
-// AddFailure answers to addFailure.
+// AddFailure records that one rule refused one attribute.
 //
 // An exclude rule never puts a message on the field: its failure removes the
 // field from the validated data instead, which is the whole of what the five
@@ -475,14 +464,15 @@ func (v *Validator) AddFailure(attribute, rule string, parameters []string) {
 	v.failed[attribute] = append(v.failed[attribute], rule)
 }
 
-// ExcludeAttribute answers to excludeAttribute.
+// ExcludeAttribute drops the attribute from the validated data.
 func (v *Validator) ExcludeAttribute(attribute string) {
 	if !slices.Contains(v.excluded, attribute) {
 		v.excluded = append(v.excluded, attribute)
 	}
 }
 
-// ShouldBeExcluded answers to shouldBeExcluded.
+// ShouldBeExcluded reports whether the attribute, or a parent of it, was
+// excluded.
 func (v *Validator) ShouldBeExcluded(attribute string) bool {
 	for _, excluded := range v.excluded {
 		if attribute == excluded || strings.HasPrefix(attribute, excluded+".") {
@@ -518,17 +508,17 @@ func (v *Validator) messageFor(attribute, ruleName string) string {
 	return "is not valid"
 }
 
-// GetValue answers to getValue.
+// GetValue returns what the request holds at the attribute.
 func (v *Validator) GetValue(attribute string) any { return v.data.Get(attribute) }
 
-// SetValue answers to setValue.
+// SetValue writes a value at the attribute.
 func (v *Validator) SetValue(attribute string, value any) { v.data[attribute] = value }
 
-// GetData answers to getData.
+// GetData returns the request the rules run against.
 func (v *Validator) GetData() Data { return v.data }
 
-// SetData answers to setData. The data is copied, for the reason Make copies
-// it.
+// SetData replaces the request the rules run against. The data is copied, for
+// the reason Make copies it.
 func (v *Validator) SetData(data Data) *Validator {
 	v.data = data.Clone()
 	// The wildcards were expanded against the OLD data, and "items.*.price"
@@ -537,10 +527,10 @@ func (v *Validator) SetData(data Data) *Validator {
 	return v
 }
 
-// Attributes answers to attributes: the data the rules run against.
+// Attributes returns the data the rules run against.
 func (v *Validator) Attributes() Data { return v.data }
 
-// GetRules answers to getRules: the rule names written against each field.
+// GetRules returns the rule names written against each field.
 func (v *Validator) GetRules() map[string][]string {
 	out := make(map[string][]string, len(v.set.fields))
 	for _, f := range v.set.fields {
@@ -549,13 +539,13 @@ func (v *Validator) GetRules() map[string][]string {
 	return out
 }
 
-// SetRules answers to setRules: run against another compiled set.
+// SetRules replaces the compiled set this runs.
 func (v *Validator) SetRules(rules *Set) *Validator {
 	v.explodeRules(rules)
 	return v
 }
 
-// HasRule answers to hasRule: the field declares any of the named rules.
+// HasRule reports whether the field declares any of the named rules.
 func (v *Validator) HasRule(attribute string, rules []string) bool {
 	f, declared := v.set.byName[attribute]
 	if !declared {
@@ -569,7 +559,8 @@ func (v *Validator) HasRule(attribute string, rules []string) bool {
 	return false
 }
 
-// Errors answers to errors: the message bag, run first if it has not been.
+// Errors returns the messages a run collected, running first if it has not
+// been.
 func (v *Validator) Errors() Errors {
 	if v.messages == nil {
 		v.Passes()
@@ -577,11 +568,10 @@ func (v *Validator) Errors() Errors {
 	return v.messages
 }
 
-// Messages answers to messages, which the PHP defines as the same bag errors
-// returns.
+// Messages returns the same messages Errors does.
 func (v *Validator) Messages() Errors { return v.Errors() }
 
-// Failed answers to failed: the rules that failed, per attribute.
+// Failed returns the rules that failed, per attribute.
 func (v *Validator) Failed() map[string][]string {
 	if v.messages == nil {
 		v.Passes()
@@ -589,8 +579,8 @@ func (v *Validator) Failed() map[string][]string {
 	return v.failed
 }
 
-// Validated answers to validated: the values that were declared, sent and not
-// rejected. It is the only way to read a submitted value out of a validated
+// Validated returns the values that were declared, sent and not rejected. It is
+// the only way to read a submitted value out of a validated
 // request, so a field nobody wrote a rule for cannot reach a repository through
 // here.
 func (v *Validator) Validated() Input {
@@ -609,7 +599,7 @@ func (v *Validator) Validated() Input {
 	return Input{data: out}
 }
 
-// Valid answers to valid: the data of every attribute that has no message.
+// Valid returns the data of every attribute that has no message.
 func (v *Validator) Valid() Data {
 	if v.messages == nil {
 		v.Passes()
@@ -623,7 +613,7 @@ func (v *Validator) Valid() Data {
 	return out
 }
 
-// Invalid answers to invalid: the data of every attribute that has one.
+// Invalid returns the data of every attribute that has a message.
 func (v *Validator) Invalid() Data {
 	if v.messages == nil {
 		v.Passes()

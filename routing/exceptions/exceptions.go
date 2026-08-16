@@ -8,8 +8,6 @@ import (
 
 // BackedEnumCaseNotFoundError is the error when a parameter value does not
 // match any case of the expected backed enum.
-//
-// It mirrors Illuminate\Routing\Exceptions\BackedEnumCaseNotFoundException.
 type BackedEnumCaseNotFoundError struct {
 	Class string
 	Value string
@@ -20,8 +18,6 @@ func (e *BackedEnumCaseNotFoundError) Error() string {
 }
 
 // InvalidSignatureError is returned when a signed URL fails verification.
-//
-// It mirrors Illuminate\Routing\Exceptions\InvalidSignatureException.
 type InvalidSignatureError struct {
 	Message string
 }
@@ -32,8 +28,6 @@ func (e *InvalidSignatureError) Error() string {
 
 // MissingRateLimiterError is returned when a named rate limiter has not
 // been registered.
-//
-// It mirrors Illuminate\Routing\Exceptions\MissingRateLimiterException.
 type MissingRateLimiterError struct {
 	Name string
 }
@@ -42,22 +36,20 @@ func (e *MissingRateLimiterError) Error() string {
 	return "routing: rate limiter " + e.Name + " has not been registered"
 }
 
-// ForLimiter is MissingRateLimiterException::forLimiter.
+// ForLimiter builds a MissingRateLimiterError naming limiter.
 func ForLimiter(limiter string) *MissingRateLimiterError {
 	return &MissingRateLimiterError{Name: limiter}
 }
 
-// ForLimiterAndUser is MissingRateLimiterException::forLimiterAndUser. The
-// model is the type whose property named the limiter, so the message says
-// which of the two halves is missing.
+// ForLimiterAndUser builds a MissingRateLimiterError naming both the limiter
+// and the model whose property named it, so the message says which of the two
+// halves is missing.
 func ForLimiterAndUser(limiter, model string) *MissingRateLimiterError {
 	return &MissingRateLimiterError{Name: model + "::" + limiter}
 }
 
 // StreamedResponseError wraps an error thrown during streamed response
 // generation.
-//
-// It mirrors Illuminate\Routing\Exceptions\StreamedResponseException.
 type StreamedResponseError struct {
 	Err error
 }
@@ -68,14 +60,13 @@ func (e *StreamedResponseError) Error() string {
 
 func (e *StreamedResponseError) Unwrap() error { return e.Err }
 
-// GetInnerException is StreamedResponseException::getInnerException. It
-// returns the error raised while the body was already being written, which is
-// the one that says what actually went wrong.
+// GetInnerException returns the error raised while the body was already being
+// written, which is the one that says what actually went wrong.
 func (e *StreamedResponseError) GetInnerException() error { return e.Err }
 
-// Render is StreamedResponseException::render. The response has already begun,
-// so there is nothing left to say: PHP answers an empty 200 body and so does
-// this. It writes nothing and reports whether the header could still be sent.
+// Render answers an empty 200 body: the response has already begun, so there
+// is nothing left to say. It writes nothing and reports whether the header
+// could still be sent.
 func (e *StreamedResponseError) Render(w http.ResponseWriter) error {
 	if w == nil {
 		return nil
@@ -86,8 +77,6 @@ func (e *StreamedResponseError) Render(w http.ResponseWriter) error {
 
 // URLGenerationError is returned when a route URL cannot be built because
 // one or more required parameters are missing.
-//
-// It mirrors Illuminate\Routing\Exceptions\UrlGenerationException.
 type URLGenerationError struct {
 	// Route is the name of the route the URL was being built for.
 	Route string
@@ -117,17 +106,16 @@ func (e *URLGenerationError) Error() string {
 // package to raise the error, and naming the route type here would be a cycle.
 // hesape/routing.Route satisfies it.
 type GeneratedRoute interface {
-	// GetName is Route::getName.
+	// GetName returns the route's name.
 	GetName() string
-	// URI is Route::uri.
+	// URI returns the route's pattern.
 	URI() string
 }
 
-// ForMissingParameters is UrlGenerationException::forMissingParameters.
-//
-// It is the error a named URL raises when the caller gave fewer parameters
-// than the pattern has placeholders -- which is the failure Routes.Route
-// exists to turn into a message instead of a 404 the reader sees.
+// ForMissingParameters builds the error a named URL raises when the caller
+// gave fewer parameters than the pattern has placeholders -- which is the
+// failure Routes.Route exists to turn into a message instead of a 404 the
+// reader sees.
 func ForMissingParameters(route GeneratedRoute, parameters ...string) *URLGenerationError {
 	e := &URLGenerationError{Parameters: parameters}
 	if route != nil {

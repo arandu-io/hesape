@@ -5,15 +5,12 @@ import (
 	"sync"
 )
 
-// Json answers Illuminate\Database\Eloquent\Casts\Json: the one place a cast
-// encodes and decodes a JSON column, and the seam an application uses to
-// replace that with its own encoder.
+// Json is the one place a cast encodes and decodes a JSON column, and the seam
+// an application uses to replace that with its own encoder.
 //
-// The PHP class holds two static properties and four static methods. Go has no
-// static, so the properties are package variables behind a mutex and the
-// methods are package functions -- which is what a static method is once the
-// class is not a namespace (ADR 0044, mechanical change). The type is kept so
-// the name Json still appears where a reader looks for it.
+// The encoders are package variables behind a mutex and the operations are
+// package functions, because none of them is per cast. The type is kept so the
+// name is where a reader looks for it.
 type Json struct{}
 
 var jsonCoder = struct {
@@ -22,12 +19,11 @@ var jsonCoder = struct {
 	decode func(data []byte, out *any) error
 }{}
 
-// Encode answers Json::encode.
+// Encode returns value marshaled to JSON, through the encoder EncodeUsing
+// last set, or through encoding/json if none was set.
 //
-// The PHP takes json_encode's flags as a second argument and returns false on
-// failure. Go returns bytes and an error, and the flags have no counterpart:
-// encoding/json has no JSON_PRETTY_PRINT to pass through, and pretty printing a
-// column would change what is stored.
+// Encode takes no formatting flags: encoding/json has nothing worth passing
+// through, and pretty printing a stored column would change what is stored.
 func Encode(value any) ([]byte, error) {
 	jsonCoder.RLock()
 	encode := jsonCoder.encode
@@ -39,13 +35,12 @@ func Encode(value any) ([]byte, error) {
 	return json.Marshal(value)
 }
 
-// Decode answers Json::decode.
+// Decode returns data decoded from JSON, through the decoder DecodeUsing
+// last set, or through encoding/json if none was set. A JSON object decodes
+// to map[string]any and a JSON array to []any.
 //
-// The PHP's $associative argument chooses between an array and a stdClass. Go
-// has neither: a JSON object decodes to map[string]any and an array to []any,
-// which is the associative branch, and the object branch has nothing to decode
-// into. An empty input decodes to nil rather than an error, because a null
-// column and an empty JSON column mean the same thing to a cast.
+// An empty input decodes to nil rather than an error, because a null column
+// and an empty JSON column mean the same thing to a cast.
 func Decode(data []byte) (any, error) {
 	if len(data) == 0 {
 		return nil, nil
@@ -68,15 +63,16 @@ func Decode(data []byte) (any, error) {
 	return out, nil
 }
 
-// EncodeUsing answers Json::encodeUsing. A nil encoder restores encoding/json,
-// which is the PHP's null.
+// EncodeUsing replaces the encoder Encode calls; a nil encoder restores
+// encoding/json.
 func EncodeUsing(encoder func(value any) ([]byte, error)) {
 	jsonCoder.Lock()
 	defer jsonCoder.Unlock()
 	jsonCoder.encode = encoder
 }
 
-// DecodeUsing answers Json::decodeUsing. A nil decoder restores encoding/json.
+// DecodeUsing replaces the decoder Decode calls; a nil decoder restores
+// encoding/json.
 func DecodeUsing(decoder func(data []byte, out *any) error) {
 	jsonCoder.Lock()
 	defer jsonCoder.Unlock()

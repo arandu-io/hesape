@@ -18,15 +18,14 @@ import (
 // "invoices.show", the asset at "/css/app.css", the absolute address of the
 // page being viewed.
 //
-// It mirrors Illuminate\Routing\UrlGenerator, and it is the single answer to
-// "where is this thing". A view that concatenates "/invoices/" with an id
-// compiles and keeps compiling after the route moves; a call through
-// UrlGenerator does not, and the developer finds out at build time rather than
-// from a broken link.
+// It is the single answer to "where is this thing". A view that concatenates
+// "/invoices/" with an id compiles and keeps compiling after the route moves;
+// a call through UrlGenerator does not, and the developer finds out at build
+// time rather than from a broken link.
 //
-// Parameters are a map here, where PHP takes mixed. The positional shape PHP
-// also accepts -- route('invoices.show', [42]), matched against the pattern in
-// order -- is Routes.Route, because a Go map has no order to match against.
+// Parameters are a map here. The positional shape -- route("invoices.show",
+// 42), matched against the pattern in order -- is Routes.Route, because a Go
+// map has no order to match against.
 type UrlGenerator struct {
 	routes    *Routes
 	request   *http.Request
@@ -60,9 +59,9 @@ type SessionStore interface {
 
 // NewUrlGenerator returns a generator backed by routes.
 //
-// It is UrlGenerator::__construct. The request may be nil for a generator that
-// only builds relative URLs: a CLI command that prints a list of links, or a
-// test that has no incoming request to read the scheme and host from.
+// The request may be nil for a generator that only builds relative URLs: a
+// CLI command that prints a list of links, or a test that has no incoming
+// request to read the scheme and host from.
 func NewUrlGenerator(routes *Routes, request *http.Request, assetRoot ...string) *UrlGenerator {
 	g := &UrlGenerator{routes: routes}
 	if len(assetRoot) > 0 {
@@ -72,8 +71,7 @@ func NewUrlGenerator(routes *Routes, request *http.Request, assetRoot ...string)
 	return g
 }
 
-// Full is UrlGenerator::full. It returns the full URL of the current request,
-// query string included.
+// Full returns the full URL of the current request, query string included.
 func (g *UrlGenerator) Full() string {
 	if g.request == nil {
 		return ""
@@ -85,8 +83,7 @@ func (g *UrlGenerator) Full() string {
 	return full
 }
 
-// Current is UrlGenerator::current. It returns the URL of the current request
-// without its query string.
+// Current returns the URL of the current request without its query string.
 func (g *UrlGenerator) Current() string {
 	if g.request == nil {
 		return ""
@@ -94,8 +91,8 @@ func (g *UrlGenerator) Current() string {
 	return g.To(g.request.URL.Path, nil, nil)
 }
 
-// Previous is UrlGenerator::previous. It reads the Referer header first, then
-// the session, then the fallback, then "/".
+// Previous reads the Referer header first, then the session, then the
+// fallback, then "/".
 func (g *UrlGenerator) Previous(fallback ...string) string {
 	referrer := ""
 	if g.request != nil {
@@ -118,8 +115,8 @@ func (g *UrlGenerator) Previous(fallback ...string) string {
 	return g.To("/", nil, nil)
 }
 
-// PreviousPath is UrlGenerator::previousPath. It returns the path part of
-// Previous, with the application root and any query string removed.
+// PreviousPath returns the path part of Previous, with the application root
+// and any query string removed.
 func (g *UrlGenerator) PreviousPath(fallback ...string) string {
 	previous := g.Previous(fallback...)
 	if i := strings.IndexByte(previous, '?'); i >= 0 {
@@ -133,7 +130,7 @@ func (g *UrlGenerator) PreviousPath(fallback ...string) string {
 	return previous
 }
 
-// getPreviousUrlFromSession is UrlGenerator::getPreviousUrlFromSession.
+// getPreviousUrlFromSession reads the previous URL from the session store.
 func (g *UrlGenerator) getPreviousUrlFromSession() string {
 	s := g.getSession()
 	if s == nil {
@@ -142,7 +139,7 @@ func (g *UrlGenerator) getPreviousUrlFromSession() string {
 	return s.PreviousURL()
 }
 
-// To is UrlGenerator::to. It returns the absolute URL for a path.
+// To returns the absolute URL for a path.
 //
 //	To("invoices/42", nil, nil)  // "https://example.com/invoices/42"
 //
@@ -168,8 +165,8 @@ func (g *UrlGenerator) To(path string, extra []any, secure *bool) string {
 	return g.Format(root, "/"+strings.Trim(p+"/"+tail, "/")) + query
 }
 
-// Query is UrlGenerator::query. It returns the absolute URL for a path with
-// the given query parameters merged onto any the path already carried.
+// Query returns the absolute URL for a path with the given query parameters
+// merged onto any the path already carried.
 func (g *UrlGenerator) Query(path string, query map[string]any, extra []any, secure *bool) string {
 	p, existing := extractQueryString(path)
 
@@ -188,13 +185,13 @@ func (g *UrlGenerator) Query(path string, query map[string]any, extra []any, sec
 	return strings.TrimRight(g.To(p+"?"+merged.Encode(), extra, secure), "?")
 }
 
-// Secure is UrlGenerator::secure. It returns the absolute https URL for a path.
+// Secure returns the absolute https URL for a path.
 func (g *UrlGenerator) Secure(path string, parameters ...any) string {
 	t := true
 	return g.To(path, parameters, &t)
 }
 
-// Asset is UrlGenerator::asset. It returns the URL of an application asset.
+// Asset returns the URL of an application asset.
 func (g *UrlGenerator) Asset(path string, secure *bool) string {
 	if g.IsValidUrl(path) {
 		return path
@@ -206,22 +203,21 @@ func (g *UrlGenerator) Asset(path string, secure *bool) string {
 	return strings.TrimSuffix(g.removeIndex(root), "/") + "/" + strings.Trim(path, "/")
 }
 
-// SecureAsset is UrlGenerator::secureAsset.
+// SecureAsset returns the https URL of an application asset.
 func (g *UrlGenerator) SecureAsset(path string) string {
 	t := true
 	return g.Asset(path, &t)
 }
 
-// AssetFrom is UrlGenerator::assetFrom. It returns the URL of an asset served
-// from a custom root, such as a CDN.
+// AssetFrom returns the URL of an asset served from a custom root, such as a
+// CDN.
 func (g *UrlGenerator) AssetFrom(root, path string, secure *bool) string {
 	r := g.FormatRoot(g.FormatScheme(secure), root)
 	return g.removeIndex(r) + "/" + strings.Trim(path, "/")
 }
 
-// removeIndex is UrlGenerator::removeIndex. PHP strips the front controller
-// from an asset root; there is no front controller here, and the method stays
-// because an asset root copied from a PHP deployment still carries one.
+// removeIndex strips a legacy front-controller filename from an asset root,
+// which a root copied from an old deployment might still carry.
 func (g *UrlGenerator) removeIndex(root string) string {
 	const i = "index.php"
 	if strings.Contains(root, i) {
@@ -230,8 +226,7 @@ func (g *UrlGenerator) removeIndex(root string) string {
 	return root
 }
 
-// FormatScheme is UrlGenerator::formatScheme. It returns the scheme with its
-// "://" suffix.
+// FormatScheme returns the scheme with its "://" suffix.
 func (g *UrlGenerator) FormatScheme(secure *bool) string {
 	if secure != nil {
 		if *secure {
@@ -252,16 +247,16 @@ func (g *UrlGenerator) FormatScheme(secure *bool) string {
 	return g.cachedScheme
 }
 
-// SignedRoute is UrlGenerator::signedRoute. It returns the URL of a named
-// route carrying an HMAC over the address it was issued for.
+// SignedRoute returns the URL of a named route carrying an HMAC over the
+// address it was issued for.
 //
 // The signature covers the whole address, expiry included, so appending
 // anything to a signed link invalidates it -- a route behind
 // middleware.ValidateSignature cannot be handed a value its author did not
 // sign. A zero expiration means the link does not run out.
 //
-// It returns an error where PHP throws: reserved parameter names, an unknown
-// route, or no signing key.
+// It returns an error for reserved parameter names, an unknown route, or no
+// signing key.
 func (g *UrlGenerator) SignedRoute(name string, parameters map[string]any, expiration time.Time, absolute bool) (string, error) {
 	if err := g.ensureSignedRouteParametersAreNotReserved(parameters); err != nil {
 		return "", err
@@ -292,8 +287,8 @@ func (g *UrlGenerator) SignedRoute(name string, parameters map[string]any, expir
 	return g.Route(name, params, absolute)
 }
 
-// ensureSignedRouteParametersAreNotReserved is
-// UrlGenerator::ensureSignedRouteParametersAreNotReserved.
+// ensureSignedRouteParametersAreNotReserved refuses "signature" and "expires"
+// as caller-supplied parameter names, since SignedRoute sets them itself.
 func (g *UrlGenerator) ensureSignedRouteParametersAreNotReserved(parameters map[string]any) error {
 	if _, taken := parameters["signature"]; taken {
 		return errors.New(`routing: "signature" is a reserved parameter when generating signed routes. Rename the route parameter`)
@@ -304,27 +299,29 @@ func (g *UrlGenerator) ensureSignedRouteParametersAreNotReserved(parameters map[
 	return nil
 }
 
-// TemporarySignedRoute is UrlGenerator::temporarySignedRoute.
+// TemporarySignedRoute is SignedRoute with the expiration and parameters
+// reordered.
 func (g *UrlGenerator) TemporarySignedRoute(name string, expiration time.Time, parameters map[string]any, absolute bool) (string, error) {
 	return g.SignedRoute(name, parameters, expiration, absolute)
 }
 
-// availableAt is InteractsWithTime::availableAt: the unix timestamp a moment
-// becomes due.
+// availableAt returns the unix timestamp a moment becomes due.
 func (g *UrlGenerator) availableAt(at time.Time) int64 { return at.Unix() }
 
-// HasValidSignature is UrlGenerator::hasValidSignature.
+// HasValidSignature reports whether the request carries a signature that is
+// both correct and unexpired.
 func (g *UrlGenerator) HasValidSignature(request *http.Request, absolute bool, ignoreQuery ...string) bool {
 	return g.HasCorrectSignature(request, absolute, ignoreQuery...) && g.SignatureHasNotExpired(request)
 }
 
-// HasValidRelativeSignature is UrlGenerator::hasValidRelativeSignature.
+// HasValidRelativeSignature is HasValidSignature checked against the
+// relative address.
 func (g *UrlGenerator) HasValidRelativeSignature(request *http.Request, ignoreQuery ...string) bool {
 	return g.HasValidSignature(request, false, ignoreQuery...)
 }
 
-// HasCorrectSignature is UrlGenerator::hasCorrectSignature. It reports whether
-// the signature on the request matches the address the request arrived on.
+// HasCorrectSignature reports whether the signature on the request matches
+// the address the request arrived on.
 //
 // Every key the resolver returns is tried, so a key being rotated out still
 // opens the links it signed.
@@ -373,8 +370,9 @@ func (g *UrlGenerator) HasCorrectSignature(request *http.Request, absolute bool,
 	return false
 }
 
-// SignatureHasNotExpired is UrlGenerator::signatureHasNotExpired. A link with
-// no expiry never runs out; one whose expiry is in the past has.
+// SignatureHasNotExpired reports whether the request's signature has not
+// expired. A link with no expiry never runs out; one whose expiry is in the
+// past has.
 func (g *UrlGenerator) SignatureHasNotExpired(request *http.Request) bool {
 	if request == nil || request.URL == nil {
 		return true
@@ -392,7 +390,7 @@ func (g *UrlGenerator) SignatureHasNotExpired(request *http.Request) bool {
 	return time.Now().Unix() <= at
 }
 
-// Route is UrlGenerator::route. It returns the URL of a named route.
+// Route returns the URL of a named route.
 func (g *UrlGenerator) Route(name string, parameters map[string]any, absolute bool) (string, error) {
 	if route := g.routes.GetByName(name); route != nil {
 		return g.ToRoute(route, parameters, absolute)
@@ -407,14 +405,13 @@ func (g *UrlGenerator) Route(name string, parameters map[string]any, absolute bo
 	return "", &RouteNotFoundError{Name: name}
 }
 
-// ToRoute is UrlGenerator::toRoute. It builds the URL of a route already in
-// hand.
+// ToRoute builds the URL of a route already in hand.
 func (g *UrlGenerator) ToRoute(route *Route, parameters map[string]any, absolute bool) (string, error) {
 	return g.routeUrl().To(route, parameters, absolute)
 }
 
-// Action is UrlGenerator::action. It returns the URL of a controller action,
-// written as "InvoiceController@show".
+// Action returns the URL of a controller action, written as
+// "InvoiceController@show".
 func (g *UrlGenerator) Action(action string, parameters map[string]any, absolute bool) (string, error) {
 	action = g.formatAction(action)
 	route := g.routes.GetByAction(action)
@@ -424,7 +421,8 @@ func (g *UrlGenerator) Action(action string, parameters map[string]any, absolute
 	return g.ToRoute(route, parameters, absolute)
 }
 
-// formatAction is UrlGenerator::formatAction.
+// formatAction qualifies action with the root controller namespace, unless
+// it is already absolute.
 func (g *UrlGenerator) formatAction(action string) string {
 	if g.rootNamespace != "" && !strings.HasPrefix(action, `\`) {
 		return g.rootNamespace + `\` + action
@@ -432,13 +430,11 @@ func (g *UrlGenerator) formatAction(action string) string {
 	return strings.Trim(action, `\`)
 }
 
-// FormatParameters is UrlGenerator::formatParameters. A value that knows its
-// own route key -- a record passed where an id was expected -- is replaced by
-// that key.
+// FormatParameters replaces every value that knows its own route key -- a
+// record passed where an id was expected -- with that key.
 //
-// PHP takes both a list and a map here; this takes the map, which is the shape
-// a route's parameters have. The list shape is applied inline by To, over the
-// same conversion.
+// This takes the map shape a route's parameters have. The list shape is
+// applied inline by To, over the same conversion.
 func (g *UrlGenerator) FormatParameters(parameters map[string]any) map[string]any {
 	out := make(map[string]any, len(parameters))
 	for key, parameter := range parameters {
@@ -451,7 +447,7 @@ func (g *UrlGenerator) FormatParameters(parameters map[string]any) map[string]an
 	return out
 }
 
-// extractQueryString is UrlGenerator::extractQueryString.
+// extractQueryString splits a path from its query string.
 func extractQueryString(path string) (string, string) {
 	if i := strings.IndexByte(path, '?'); i >= 0 {
 		return path[:i], path[i:]
@@ -459,8 +455,8 @@ func extractQueryString(path string) (string, string) {
 	return path, ""
 }
 
-// FormatRoot is UrlGenerator::formatRoot. It returns the base URL -- scheme
-// and host -- for the request, or for the root given.
+// FormatRoot returns the base URL -- scheme and host -- for the request, or
+// for the root given.
 func (g *UrlGenerator) FormatRoot(scheme string, root ...string) string {
 	r := ""
 	if len(root) > 0 && root[0] != "" {
@@ -486,8 +482,8 @@ func (g *UrlGenerator) FormatRoot(scheme string, root ...string) string {
 	}
 }
 
-// Format is UrlGenerator::format. It joins a root and a path into one URL,
-// through the host and path formatters when they are set.
+// Format joins a root and a path into one URL, through the host and path
+// formatters when they are set.
 func (g *UrlGenerator) Format(root, path string, route ...*Route) string {
 	path = "/" + strings.Trim(path, "/")
 
@@ -506,7 +502,8 @@ func (g *UrlGenerator) Format(root, path string, route ...*Route) string {
 	return strings.Trim(root+path, "/")
 }
 
-// IsValidUrl is UrlGenerator::isValidUrl.
+// IsValidUrl reports whether path is already a complete URL rather than one
+// this generator should build.
 func (g *UrlGenerator) IsValidUrl(path string) bool {
 	for _, prefix := range []string{"#", "//", "http://", "https://", "mailto:", "tel:", "sms:"} {
 		if strings.HasPrefix(path, prefix) {
@@ -517,7 +514,7 @@ func (g *UrlGenerator) IsValidUrl(path string) bool {
 	return err == nil && u.Scheme != "" && u.Host != ""
 }
 
-// routeUrl is UrlGenerator::routeUrl.
+// routeUrl returns the route URL generator, building it on first use.
 func (g *UrlGenerator) routeUrl() *RouteUrlGenerator {
 	if g.routeGenerator == nil {
 		g.routeGenerator = NewRouteUrlGenerator(g, g.request)
@@ -525,18 +522,19 @@ func (g *UrlGenerator) routeUrl() *RouteUrlGenerator {
 	return g.routeGenerator
 }
 
-// Defaults is UrlGenerator::defaults. It sets default values for named route
-// parameters -- the locale segment every URL carries, typically.
+// Defaults sets default values for named route parameters -- the locale
+// segment every URL carries, typically.
 func (g *UrlGenerator) Defaults(defaults map[string]any) {
 	g.routeUrl().Defaults(defaults)
 }
 
-// GetDefaultParameters is UrlGenerator::getDefaultParameters.
+// GetDefaultParameters returns the default route parameters Defaults set.
 func (g *UrlGenerator) GetDefaultParameters() map[string]any {
 	return g.routeUrl().DefaultParameters
 }
 
-// ForceScheme is UrlGenerator::forceScheme. An empty scheme clears the force.
+// ForceScheme forces every generated URL to a scheme. An empty scheme clears
+// the force.
 func (g *UrlGenerator) ForceScheme(scheme string) {
 	g.cachedScheme = ""
 	if scheme == "" {
@@ -546,22 +544,21 @@ func (g *UrlGenerator) ForceScheme(scheme string) {
 	g.forceScheme = scheme + "://"
 }
 
-// ForceHttps is UrlGenerator::forceHttps.
+// ForceHttps is ForceScheme("https").
 func (g *UrlGenerator) ForceHttps(force ...bool) {
 	if len(force) == 0 || force[0] {
 		g.ForceScheme("https")
 	}
 }
 
-// UseOrigin is UrlGenerator::useOrigin. It sets the origin every generated URL
-// is built from.
+// UseOrigin sets the origin every generated URL is built from.
 func (g *UrlGenerator) UseOrigin(root string) {
 	g.ForceRootUrl(root)
 }
 
-// ForceRootUrl is UrlGenerator::forceRootUrl.
+// ForceRootUrl sets the origin every generated URL is built from.
 //
-// Deprecated: use UseOrigin, as PHP's own annotation says.
+// Deprecated: use UseOrigin.
 func (g *UrlGenerator) ForceRootUrl(root string) {
 	if root == "" {
 		g.forcedRoot = ""
@@ -571,8 +568,8 @@ func (g *UrlGenerator) ForceRootUrl(root string) {
 	g.cachedRoot = ""
 }
 
-// UseAssetOrigin is UrlGenerator::useAssetOrigin. It sets the origin every
-// generated asset URL is built from -- a CDN host, typically.
+// UseAssetOrigin sets the origin every generated asset URL is built from --
+// a CDN host, typically.
 func (g *UrlGenerator) UseAssetOrigin(root string) {
 	if root == "" {
 		g.assetRoot = ""
@@ -581,20 +578,22 @@ func (g *UrlGenerator) UseAssetOrigin(root string) {
 	g.assetRoot = strings.TrimRight(root, "/")
 }
 
-// FormatHostUsing is UrlGenerator::formatHostUsing.
+// FormatHostUsing sets the callback Format uses to rewrite the host of a
+// generated URL.
 func (g *UrlGenerator) FormatHostUsing(callback func(root string, route *Route) string) *UrlGenerator {
 	g.formatHostUsing = callback
 	return g
 }
 
-// FormatPathUsing is UrlGenerator::formatPathUsing.
+// FormatPathUsing sets the callback Format uses to rewrite the path of a
+// generated URL.
 func (g *UrlGenerator) FormatPathUsing(callback func(path string, route *Route) string) *UrlGenerator {
 	g.formatPathUsing = callback
 	return g
 }
 
-// PathFormatter is UrlGenerator::pathFormatter. It returns the path formatter
-// in use, or one that changes nothing.
+// PathFormatter returns the path formatter in use, or one that changes
+// nothing.
 func (g *UrlGenerator) PathFormatter() func(path string, route *Route) string {
 	if g.formatPathUsing != nil {
 		return g.formatPathUsing
@@ -602,12 +601,11 @@ func (g *UrlGenerator) PathFormatter() func(path string, route *Route) string {
 	return func(path string, _ *Route) string { return path }
 }
 
-// GetRequest is UrlGenerator::getRequest.
+// GetRequest returns the current request, or nil.
 func (g *UrlGenerator) GetRequest() *http.Request { return g.request }
 
-// SetRequest is UrlGenerator::setRequest. It replaces the request, clears the
-// cached scheme and root, and carries the route defaults over to the new route
-// URL generator.
+// SetRequest replaces the request, clears the cached scheme and root, and
+// carries the route defaults over to the new route URL generator.
 func (g *UrlGenerator) SetRequest(request *http.Request) {
 	g.request = request
 	g.cachedRoot = ""
@@ -623,13 +621,13 @@ func (g *UrlGenerator) SetRequest(request *http.Request) {
 	}
 }
 
-// SetRoutes is UrlGenerator::setRoutes.
+// SetRoutes replaces the route table URLs are generated against.
 func (g *UrlGenerator) SetRoutes(routes *Routes) *UrlGenerator {
 	g.routes = routes
 	return g
 }
 
-// getSession is UrlGenerator::getSession.
+// getSession resolves the session store, or nil.
 func (g *UrlGenerator) getSession() SessionStore {
 	if g.sessionResolver == nil {
 		return nil
@@ -637,24 +635,24 @@ func (g *UrlGenerator) getSession() SessionStore {
 	return g.sessionResolver()
 }
 
-// SetSessionResolver is UrlGenerator::setSessionResolver.
+// SetSessionResolver sets the callback that resolves the session store.
 func (g *UrlGenerator) SetSessionResolver(sessionResolver func() SessionStore) *UrlGenerator {
 	g.sessionResolver = sessionResolver
 	return g
 }
 
-// SetKeyResolver is UrlGenerator::setKeyResolver. The resolver returns every
-// key a signature may have been made with, newest first: signing uses the
-// first, verifying tries them all, which is what makes a key rotation
-// something other than an outage.
+// SetKeyResolver sets the callback that resolves the signing keys. It
+// returns every key a signature may have been made with, newest first:
+// signing uses the first, verifying tries them all, which is what makes a
+// key rotation something other than an outage.
 func (g *UrlGenerator) SetKeyResolver(keyResolver func() []string) *UrlGenerator {
 	g.keyResolver = keyResolver
 	return g
 }
 
-// WithKeyResolver is UrlGenerator::withKeyResolver. It returns a copy of the
-// generator signing with a different key, which is how a link is issued for a
-// tenant whose key is not the application's.
+// WithKeyResolver returns a copy of the generator signing with a different
+// key, which is how a link is issued for a tenant whose key is not the
+// application's.
 func (g *UrlGenerator) WithKeyResolver(keyResolver func() []string) *UrlGenerator {
 	clone := *g
 	clone.routeGenerator = nil
@@ -675,25 +673,25 @@ func (g *UrlGenerator) resolveKeys() []string {
 	return keys
 }
 
-// ResolveMissingNamedRoutesUsing is
-// UrlGenerator::resolveMissingNamedRoutesUsing. It sets the callback that gets
-// a chance to answer a name this table does not know -- a route registered by
-// another service, in front of the same domain.
+// ResolveMissingNamedRoutesUsing sets the callback that gets a chance to
+// answer a name this table does not know -- a route registered by another
+// service, in front of the same domain.
 func (g *UrlGenerator) ResolveMissingNamedRoutesUsing(resolver func(name string, parameters map[string]any, absolute bool) (string, error)) *UrlGenerator {
 	g.missingNamedRouteResolver = resolver
 	return g
 }
 
-// GetRootControllerNamespace is UrlGenerator::getRootControllerNamespace.
+// GetRootControllerNamespace returns the root controller namespace.
 func (g *UrlGenerator) GetRootControllerNamespace() string { return g.rootNamespace }
 
-// SetRootControllerNamespace is UrlGenerator::setRootControllerNamespace.
+// SetRootControllerNamespace sets the root controller namespace formatAction
+// qualifies an action name with.
 func (g *UrlGenerator) SetRootControllerNamespace(rootNamespace string) *UrlGenerator {
 	g.rootNamespace = rootNamespace
 	return g
 }
 
-// requestURLRoot is PHP's Request::root: scheme and host, no path.
+// requestURLRoot returns the request's scheme and host, no path.
 func (g *UrlGenerator) requestURLRoot() string {
 	if g.request == nil {
 		return ""
@@ -701,7 +699,7 @@ func (g *UrlGenerator) requestURLRoot() string {
 	return g.FormatScheme(nil) + hostOf(g.request)
 }
 
-// requestURL is PHP's Request::url: scheme, host and path, no query.
+// requestURL returns the request's scheme, host and path, no query.
 func (g *UrlGenerator) requestURL() string { return g.requestURLOf(g.request) }
 
 func (g *UrlGenerator) requestURLOf(request *http.Request) string {
@@ -735,9 +733,8 @@ func hostOf(request *http.Request) string {
 
 // formatParameterValue turns one parameter into the string that goes in a URL.
 //
-// A value that knows its own route key answers with it. PHP also reads the
-// property named by a binding field -- $value->{$field} -- and Go has no
-// dynamic property access, so a bound record contributes its route key
+// A value that knows its own route key answers with it. There is no dynamic
+// property access here, so a bound record contributes its route key
 // whichever field the route declared.
 func formatParameterValue(value any, field string) string {
 	_ = field
@@ -783,7 +780,7 @@ func sortedKeys(m map[string]any) []string {
 }
 
 // RouteNotFoundError is returned when a named route or action is not in the
-// table. It answers Symfony's RouteNotFoundException, which is what PHP throws.
+// table.
 type RouteNotFoundError struct {
 	Name string
 }

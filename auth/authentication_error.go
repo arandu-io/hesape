@@ -2,38 +2,36 @@ package auth
 
 import "sync"
 
-// defaultAuthenticationMessage is the PHP constructor's $message default.
+// defaultAuthenticationMessage is what an error built with no message says.
 const defaultAuthenticationMessage = "Unauthenticated."
 
-// AuthenticationError is Illuminate\Auth\AuthenticationException: nobody is
-// signed in, on a path that requires somebody to be.
+// AuthenticationError reports that nobody is signed in, on a path that requires
+// somebody to be.
 //
-// The PHP is an exception and this is an error, which is ADR 0044's second
-// mechanical change. What it carries is the PHP's: the guards that were asked,
-// so a middleware can say which ones, and the path to send the browser to,
-// which is the whole reason the exception exists rather than a bare 401 -- a
-// person who followed a link gets the sign-in page, an API client gets the
-// status.
+// It carries the guards that were asked, so a middleware can say which ones,
+// and the path to send the browser to -- which is the whole reason it is a type
+// rather than a bare 401: a person who followed a link gets the sign-in page,
+// an API client gets the status.
 //
 // It is not the authorization failure. That one is [ErrForbidden], and the
 // difference is the difference between 401 and 403: this says the request had
 // no identity, ErrForbidden says the identity it had may not do that.
 type AuthenticationError struct {
-	// Message is the exception's $message.
+	// Message is the sentence the error answers with.
 	Message string
 
-	// guards is the exception's $guards.
+	// guards are the guards that were checked.
 	guards []string
 
-	// redirectTo is the exception's $redirectTo.
+	// redirectTo is where the browser should be sent, when the error names
+	// somewhere itself.
 	redirectTo string
 }
 
-// NewAuthenticationError is AuthenticationException::__construct.
+// NewAuthenticationError returns the error.
 //
-// Go has no default arguments: an empty message is the PHP's
-// "Unauthenticated.", a nil slice is its empty $guards array, and an empty
-// redirect is its null.
+// An empty message becomes "Unauthenticated.", a nil slice means no guard was
+// named, and an empty redirect falls back to [RedirectUsing].
 func NewAuthenticationError(message string, guards []string, redirectTo string) *AuthenticationError {
 	if message == "" {
 		message = defaultAuthenticationMessage
@@ -41,7 +39,7 @@ func NewAuthenticationError(message string, guards []string, redirectTo string) 
 	return &AuthenticationError{Message: message, guards: guards, redirectTo: redirectTo}
 }
 
-// Error is what makes this an error, and it answers Exception::getMessage.
+// Error is the sentence the error answers with.
 func (e *AuthenticationError) Error() string {
 	if e.Message == "" {
 		return defaultAuthenticationMessage
@@ -49,16 +47,15 @@ func (e *AuthenticationError) Error() string {
 	return e.Message
 }
 
-// Guards is AuthenticationException::guards: the guards that were checked.
+// Guards are the guards that were checked.
 func (e *AuthenticationError) Guards() []string {
 	return e.guards
 }
 
-// RedirectTo is AuthenticationException::redirectTo: where the browser should
-// be sent, or "" when the answer is the status code and not a page.
+// RedirectTo is where the browser should be sent, or "" when the answer is the
+// status code and not a page.
 //
-// The PHP falls back to a static callback registered with [RedirectUsing], and
-// so does this.
+// It falls back to the callback registered with [RedirectUsing].
 func (e *AuthenticationError) RedirectTo(request Request) string {
 	if e.redirectTo != "" {
 		return e.redirectTo
@@ -74,18 +71,17 @@ func (e *AuthenticationError) RedirectTo(request Request) string {
 	return ""
 }
 
-// redirectToCallback is the exception's static $redirectToCallback.
+// redirectToCallback is the application-wide fallback [RedirectUsing] sets.
 //
-// A process-wide variable is what a PHP static property is, and this one is
-// written once at boot and read on every failed request, so it is behind a lock
-// that the PHP does not need and a Go server does.
+// It is written once at boot and read on every failed request, so it is behind
+// a lock: a Go server answers requests concurrently.
 var (
 	redirectMu         sync.RWMutex
 	redirectToCallback func(request Request) string
 )
 
-// RedirectUsing is AuthenticationException::redirectUsing: the callback that
-// builds the redirect path when the error carries none.
+// RedirectUsing sets the callback that builds the redirect path when the error
+// carries none.
 //
 // Call it once, where the application boots. It is not a per-request setting.
 func RedirectUsing(callback func(request Request) string) {

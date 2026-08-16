@@ -10,12 +10,10 @@ import (
 	"time"
 )
 
-// TestTheSessionThatIsExactlyOneLifetimeOldIsKept: the three handlers read `>=`,
-// where PHP reads `>=` on the other side of the comparison and keeps the
-// session. Under a two-hour lifetime, a session last written exactly two hours
-// ago came back in Laravel and came back empty here -- one request of being
-// signed out early, on a tick nobody reproduces on purpose and nobody believes
-// the report of.
+// TestTheSessionThatIsExactlyOneLifetimeOldIsKept: under a two-hour
+// lifetime, a session last written exactly two hours ago used to come back
+// empty -- one request of being signed out early, on a tick nobody
+// reproduces on purpose and nobody believes the report of.
 func TestTheSessionThatIsExactlyOneLifetimeOldIsKept(t *testing.T) {
 	lifetime := 2 * time.Hour
 

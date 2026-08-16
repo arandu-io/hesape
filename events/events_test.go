@@ -77,9 +77,9 @@ func TestStoreWritesTheGrantIntoTheRow(t *testing.T) {
 	}
 }
 
-// TestStoreRefusesAGrantWithNoTenant is RULE 14 at the one place an event
-// becomes a row: a relay reading a row with no tenant would not know who to
-// deliver it to.
+// TestStoreRefusesAGrantWithNoTenant guards the one place an event becomes a
+// row: a relay reading a row with no tenant would not know who to deliver it
+// to.
 func TestStoreRefusesAGrantWithNoTenant(t *testing.T) {
 	db, _ := newFakeOutbox()
 	t.Cleanup(func() { _ = db.Close() })

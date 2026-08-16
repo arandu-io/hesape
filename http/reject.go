@@ -12,26 +12,24 @@ import (
 // Reject answers a request whose input failed the rules: back where it came
 // from, with the messages and with what was typed still in the boxes.
 //
-// It is Laravel's Handler::invalid, which is three calls --
-//
-//	redirect(url()->previous())
-//	  ->withInput(Arr::except($request->input(), $this->dontFlash))
-//	  ->withErrors($exception->errors())
-//
-// -- and the shape is deliberately the same one: the answer to a rejected form
-// is a redirect, not a body. The body was tried first and is the failure that
-// produced this file. A 422 carrying the messages in the markup is thrown away
-// by htmx unless the layout has reconfigured its response handling, so the
-// person saw the form they submitted, unchanged, with nothing on it; and even
-// where it was swapped in, a reload re-posted the form. A redirect is read by
-// every client there is, and the page that follows it is a page.
+// It composes what answering a rejected form needs: a redirect back to
+// where the request came from, carrying the input that was typed and the
+// validation messages, so the page that follows the redirect can show them.
+// The shape is deliberate: the answer to a rejected form is a redirect, not
+// a body. A body was tried first and is the failure that produced this
+// file. A 422 carrying the messages in the markup is thrown away by htmx
+// unless the layout has reconfigured its response handling, so the person
+// saw the form they submitted, unchanged, with nothing on it; and even
+// where it was swapped in, a reload re-posted the form. A redirect is read
+// by every client there is, and the page that follows it is a page.
 //
 // # Why it takes the flash rather than reaching for one
 //
-// withInput and withErrors are Http\RedirectResponse in the Illuminate tree, and
-// this package requires hesape/session for exactly that reason -- the dependency
+// RedirectResponse's WithInput and WithErrors need a session, and this
+// package requires hesape/session for exactly that reason -- the dependency
 // runs Http -> Session and never back. The Flash is a parameter and not a
-// package-level default because a process serving two applications has two keys.
+// package-level default because a process serving two applications has two
+// keys.
 //
 // # What "back" means, and why it is checked
 //
@@ -71,12 +69,13 @@ func Reject(w stdhttp.ResponseWriter, r *stdhttp.Request, f *session.Flash, errs
 	Redirect(w, r, Back(r))
 }
 
-// Back is the address a rejected request is sent to: where it came from, or "/".
+// Back is the address a rejected request is sent to: where it came from, or
+// "/".
 //
-// It is Laravel's url()->previous(). Exported because a handler that answers a
-// rejection itself -- one that has a domain reason rather than a rule failure --
-// needs the same address, and a second reading of the Referer header is a second
-// place for the open-redirect check to be missing.
+// Exported because a handler that answers a rejection itself -- one that has
+// a domain reason rather than a rule failure -- needs the same address, and
+// a second reading of the Referer header is a second place for the
+// open-redirect check to be missing.
 //
 // It answers "/" for everything it cannot prove is ours: no Referer, an
 // unparseable one, one on another host, or a path [LocalPath] refuses. Landing

@@ -8,8 +8,8 @@ import (
 
 // FailOnException parks a job on a failure that retrying cannot fix.
 //
-// It answers Illuminate\Queue\Middleware\FailOnException. The default schedule
-// retries everything the same number of times, which is right for a timeout and
+// The default schedule retries everything the same number of times, which is
+// right for a timeout and
 // wrong for a payload that will never parse: five deliveries of a job that
 // cannot succeed is five copies of the same error, an hour apart.
 //
@@ -17,9 +17,9 @@ import (
 //		return errors.Is(err, database.ErrNotFound)
 //	})
 //
-// The failure is still returned to the worker, exactly as Laravel rethrows it,
-// so the log line and the recorded job are the same as any other failure. The
-// job is already parked by then, and the worker does not park it twice.
+// The failure is still returned to the worker, so the log line and the recorded
+// job are the same as any other failure. The job is already parked by then, and
+// the worker does not park it twice.
 type FailOnException struct {
 	when func(error) bool
 }
@@ -28,9 +28,8 @@ var _ Middleware = (*FailOnException)(nil)
 
 // NewFailOnException returns the middleware.
 //
-// Laravel's second constructor form takes a list of exception classes; in Go
-// that list is errors.Is inside the predicate, which is the same sentence
-// written where the compiler can read it.
+// The set of failures it parks on is errors.Is inside the predicate, written
+// where the compiler can read it.
 func NewFailOnException(when func(error) bool) *FailOnException {
 	return &FailOnException{when: when}
 }

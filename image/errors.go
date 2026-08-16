@@ -5,12 +5,11 @@ import (
 	"fmt"
 )
 
-// ErrImage answers Illuminate\Image\ImageException.
+// ErrImage is the sentinel every error this package returns wraps.
 //
-// The PHP throws one class for every failure this component has -- an
-// unsupported format, an undecodable stream, a resize with no dimension -- and
-// callers write one catch. Every error this package returns wraps this
-// sentinel, so the one catch survives the translation:
+// This package can fail for many reasons -- an unsupported format, an
+// undecodable stream, a resize with no dimension -- and every error it
+// returns wraps this one sentinel, so a caller writes a single check:
 //
 //	if errors.Is(err, image.ErrImage) { ... }
 //
@@ -20,8 +19,7 @@ import (
 // make it name a type to do either.
 var ErrImage = errors.New("image")
 
-// fail builds a wrapped [ErrImage] with the message Illuminate would have put
-// in the exception.
+// fail builds a wrapped [ErrImage] with the given message.
 func fail(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrImage, fmt.Sprintf(format, args...))
 }

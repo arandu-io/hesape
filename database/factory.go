@@ -9,9 +9,8 @@ import (
 	"github.com/arandu-io/hesape/support"
 )
 
-// ConnectionFactory answers
-// Illuminate\Database\Connectors\ConnectionFactory: it turns a configuration
-// array into an open connection, picking the driver by name.
+// ConnectionFactory turns a configuration into an open connection, picking the
+// driver by name.
 //
 // It lives in the root package rather than in database/connectors, and that is
 // the whole point of it. The connectors are separate Go modules -- pgx, mysql
@@ -26,7 +25,7 @@ import (
 //	)
 //
 // The blank import runs the connector's init, which calls database.Register
-// with the dialect it answers for and the database/sql driver name it linked.
+// with the dialect it supports and the database/sql driver name it linked.
 // The factory reads that registry, and never names a driver package.
 //
 // # How a project registers its own
@@ -54,12 +53,12 @@ import (
 // through ResolverFor, which are the same inversion one layer down.
 type ConnectionFactory struct{}
 
-// NewConnectionFactory answers ConnectionFactory::__construct, whose only
-// argument is the container this framework does not have (ADR 0001).
+// NewConnectionFactory builds a ConnectionFactory. It takes nothing: what it
+// needs is the driver registry, which is package state.
 func NewConnectionFactory() *ConnectionFactory { return &ConnectionFactory{} }
 
-// Make answers ConnectionFactory::make: one connection, or a read/write pair
-// when the configuration has a "read" key.
+// Make opens one connection, or a read/write pair when the configuration
+// has a "read" key.
 func (f *ConnectionFactory) Make(config map[string]any, name string) (*Connection, error) {
 	parsed, err := f.parseConfig(config, name)
 	if err != nil {
@@ -72,10 +71,10 @@ func (f *ConnectionFactory) Make(config map[string]any, name string) (*Connectio
 	return f.createSingleConnection(parsed)
 }
 
-// parseConfig answers the protected ConnectionFactory::parseConfig, plus the
-// url expansion DatabaseManager does before calling it -- one place rather than
-// two, because a configuration that carries a url and is read by the factory
-// directly is the same configuration.
+// parseConfig expands a configuration's url, if it has one, and fills in
+// "prefix" and "name" when absent -- one place rather than two, because a
+// configuration that carries a url and is read by the factory directly is
+// the same configuration.
 func (f *ConnectionFactory) parseConfig(config map[string]any, name string) (map[string]any, error) {
 	parsed, err := support.NewConfigurationUrlParser().ParseConfiguration(config)
 	if err != nil {
@@ -90,8 +89,7 @@ func (f *ConnectionFactory) parseConfig(config map[string]any, name string) (map
 	return parsed, nil
 }
 
-// createSingleConnection answers the protected
-// ConnectionFactory::createSingleConnection.
+// createSingleConnection opens one connection from config.
 func (f *ConnectionFactory) createSingleConnection(config map[string]any) (*Connection, error) {
 	pool, err := f.connect(config)
 	if err != nil {
@@ -105,8 +103,8 @@ func (f *ConnectionFactory) createSingleConnection(config map[string]any) (*Conn
 	return f.CreateConnection(driver, pool, database, prefix, config)
 }
 
-// createReadWriteConnection answers the protected
-// ConnectionFactory::createReadWriteConnection.
+// createReadWriteConnection opens the write connection from config, then
+// opens a read pool from the read-side configuration and attaches it.
 func (f *ConnectionFactory) createReadWriteConnection(config map[string]any) (*Connection, error) {
 	connection, err := f.createSingleConnection(f.getWriteConfig(config))
 	if err != nil {
@@ -123,23 +121,23 @@ func (f *ConnectionFactory) createReadWriteConnection(config map[string]any) (*C
 	return connection.SetReadPDO(readPool).SetReadPDOConfig(readConfig), nil
 }
 
-// getReadConfig answers the protected ConnectionFactory::getReadConfig.
+// getReadConfig returns the merged configuration for the read side.
 func (f *ConnectionFactory) getReadConfig(config map[string]any) map[string]any {
 	return f.mergeReadWriteConfig(config, f.getReadWriteConfig(config, "read"))
 }
 
-// getWriteConfig answers the protected ConnectionFactory::getWriteConfig.
+// getWriteConfig returns the merged configuration for the write side.
 func (f *ConnectionFactory) getWriteConfig(config map[string]any) map[string]any {
 	return f.mergeReadWriteConfig(config, f.getReadWriteConfig(config, "write"))
 }
 
-// getReadWriteConfig answers the protected
-// ConnectionFactory::getReadWriteConfig.
+// getReadWriteConfig returns the first entry of config[typ], whether it is
+// given as a single map or a list of them.
 //
-// The PHP picks at random out of a list of replicas. This takes the first
-// instead, and the difference is deliberate: Arr::random spreads load, and it
-// also makes an error message name a different host every time somebody runs
-// the command. Load spreading belongs to whatever sits in front of the
+// A list of replicas picks the first rather than a random one, and the
+// difference is deliberate: picking at random spreads load, but it also
+// makes an error message name a different host every time somebody runs the
+// command. Load spreading belongs to whatever sits in front of the
 // replicas, and every managed platform has one.
 func (f *ConnectionFactory) getReadWriteConfig(config map[string]any, typ string) map[string]any {
 	switch value := config[typ].(type) {
@@ -159,8 +157,8 @@ func (f *ConnectionFactory) getReadWriteConfig(config map[string]any, typ string
 	return map[string]any{}
 }
 
-// mergeReadWriteConfig answers the protected
-// ConnectionFactory::mergeReadWriteConfig.
+// mergeReadWriteConfig merges merge over config, dropping the "read" and
+// "write" keys that named the source of merge in the first place.
 func (f *ConnectionFactory) mergeReadWriteConfig(config, merge map[string]any) map[string]any {
 	out := make(map[string]any, len(config)+len(merge))
 	for key, value := range config {
@@ -175,12 +173,12 @@ func (f *ConnectionFactory) mergeReadWriteConfig(config, merge map[string]any) m
 	return out
 }
 
-// CreateConnector answers ConnectionFactory::createConnector: the connector
-// registered for this configuration's driver.
+// CreateConnector returns the connector registered for this configuration's
+// driver.
 //
-// The PHP matches on the driver name against five `new` expressions. Here the
-// match is a registry lookup, because the alternative is importing three driver
-// packages to be able to name them.
+// The match is a registry lookup rather than a name comparison against
+// every known driver, because the alternative is importing every driver
+// package just to be able to name them.
 func (f *ConnectionFactory) CreateConnector(config map[string]any) (Connector, error) {
 	driver, _ := config["driver"].(string)
 	if driver == "" {
@@ -199,26 +197,25 @@ func (f *ConnectionFactory) CreateConnector(config map[string]any) (Connector, e
 	return registeredConnector{dialect: dialect, driverName: name}, nil
 }
 
-// registeredConnector is what CreateConnector answers: the pair the connector's
-// init put in the registry.
+// registeredConnector is the pair a connector's init put in the registry,
+// returned by CreateConnector.
 type registeredConnector struct {
 	dialect    Dialect
 	driverName string
 }
 
-// Dialect answers Connector.Dialect.
+// Dialect returns the dialect this connector was registered for.
 func (c registeredConnector) Dialect() Dialect { return c.dialect }
 
-// DriverName answers Connector.DriverName.
+// DriverName returns the database/sql driver name this connector linked.
 func (c registeredConnector) DriverName() string { return c.driverName }
 
-// connect answers the protected ConnectionFactory::createPdoResolver together
-// with the connector's connect().
+// connect opens the pool for config, eagerly.
 //
-// The PHP defers the connect into a closure so a connection that is never used
-// never opens. Here it is eager, for the reason Open gives at length: sql.Open
-// does not talk to the server either, so a lazy connect only moves the first
-// failure into the first request, which is inside somebody's page load.
+// It does not defer opening into a closure for an unused connection to skip:
+// sql.Open does not talk to the server either, so a lazy connect only moves
+// the first failure into the first request, which is inside somebody's page
+// load.
 func (f *ConnectionFactory) connect(config map[string]any) (*sql.DB, error) {
 	connector, err := f.CreateConnector(config)
 	if err != nil {
@@ -269,7 +266,8 @@ func (f *ConnectionFactory) dsn(config map[string]any) (string, error) {
 	return cfg.DSN(), nil
 }
 
-// hostOf reads the host, which the PHP allows to be a list of replicas.
+// hostOf reads the host, allowing it to be a list of replicas, and returns
+// the first one.
 func hostOf(value any) string {
 	switch host := value.(type) {
 	case string:
@@ -286,9 +284,8 @@ func hostOf(value any) string {
 	return ""
 }
 
-// CreateConnection answers the protected
-// ConnectionFactory::createConnection: the Connection for a driver, through the
-// resolver a connector registered or the plain one otherwise.
+// CreateConnection returns the Connection for a driver, through the
+// resolver a connector registered, or the plain constructor otherwise.
 //
 // It is exported because a connector in another module registers through
 // ResolverFor and a project building a connection by hand has no other door.
@@ -304,22 +301,18 @@ func (f *ConnectionFactory) CreateConnection(driver string, pool *sql.DB, databa
 	return NewConnection(pool, database, prefix, config), nil
 }
 
-// SupportedDrivers answers DatabaseManager::supportedDrivers.
+// SupportedDrivers answers the dialects this package can open.
 //
-// SQL Server is not on it and will not be: RULE 11 names Postgres, MySQL and
-// SQLite for the conventional profile, and mariadb is spoken by the MySQL
+// SQL Server is not on it and will not be, and mariadb is spoken by the MySQL
 // connector rather than a fourth one.
 func SupportedDrivers() []string {
 	return []string{"mysql", "mariadb", "pgsql", "sqlite"}
 }
 
-// AvailableDrivers answers DatabaseManager::availableDrivers: the supported
-// drivers that this binary can actually reach.
-//
-// The PHP intersects its list with PDO::getAvailableDrivers, which reports what
-// the PHP build was compiled with. The Go equivalent is the connector registry,
-// which reports what main.go imported -- the same question asked of the thing
-// that decides it here.
+// AvailableDrivers returns the supported drivers that this binary can
+// actually reach: the intersection of SupportedDrivers and the connector
+// registry, which reports what main.go imported -- the same question asked
+// of the thing that decides it here.
 func AvailableDrivers() []string {
 	linked := map[Dialect]bool{}
 	for _, dialect := range Registered() {

@@ -12,17 +12,13 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// This file answers Illuminate\Database\Concerns\CompilesJsonPaths, the trait
-// the query grammars and the schema grammars share, plus the small value
-// helpers PHP gets from the language.
+// The JSON path compilation the query grammars and the schema grammars share,
+// plus the small value helpers that go with it.
 //
-// A trait is a set of methods mixed into a class; embedding is Go's version of
-// that, and these are methods on Grammar for the same reason the trait is used
-// on Grammar there.
+// They are methods on Grammar, which every driver grammar embeds.
 
-// wrapJSONFieldAndPath answers CompilesJsonPaths::wrapJsonFieldAndPath: it
-// splits "options->language->code" into the column and the path into it, and
-// wraps each separately.
+// wrapJSONFieldAndPath splits "options->language->code" into the column
+// and the path into it, and wraps each separately.
 func (g *Grammar) wrapJSONFieldAndPath(column any) (field, path string) {
 	parts := strings.SplitN(text(column), "->", 2)
 
@@ -35,11 +31,12 @@ func (g *Grammar) wrapJSONFieldAndPath(column any) (field, path string) {
 	return field, path
 }
 
-// jsonPathQuote is the PHP's /([\\]+)?\'/ : a quote inside a path, with or
-// without the backslashes somebody escaped it with.
+// jsonPathQuote matches a quote inside a path, with or without the
+// backslashes somebody escaped it with.
 var jsonPathQuote = regexp.MustCompile(`(\\+)?'`)
 
-// wrapJSONPath answers CompilesJsonPaths::wrapJsonPath.
+// wrapJSONPath quotes a JSON path into the "$.a.b.c" form the JSON
+// functions expect.
 func (g *Grammar) wrapJSONPath(value, delimiter string) string {
 	value = jsonPathQuote.ReplaceAllString(value, "''")
 
@@ -59,11 +56,12 @@ func (g *Grammar) wrapJSONPath(value, delimiter string) string {
 	return "'$" + prefix + jsonPath + "'"
 }
 
-// jsonPathArrayKeys is the PHP's /(\[[^\]]+\])+$/ : the trailing [0][1] of a
-// path segment that indexes into an array.
+// jsonPathArrayKeys matches the trailing [0][1] of a path segment that
+// indexes into an array.
 var jsonPathArrayKeys = regexp.MustCompile(`(\[[^\]]+\])+$`)
 
-// wrapJSONPathSegment answers CompilesJsonPaths::wrapJsonPathSegment.
+// wrapJSONPathSegment quotes one segment of a JSON path, keeping any
+// trailing array index outside the quotes.
 func wrapJSONPathSegment(segment string) string {
 	if parts := jsonPathArrayKeys.FindString(segment); parts != "" {
 		key := strings.TrimSuffix(segment, parts)
@@ -75,33 +73,35 @@ func wrapJSONPathSegment(segment string) string {
 	return `"` + segment + `"`
 }
 
-// isJSONSelector answers Grammar::isJsonSelector. The PHP spells it Json; Go
-// initialisms are upper case throughout.
+// isJSONSelector reports whether value names a JSON path rather than a
+// plain column. Go initialisms are upper case throughout, hence JSON
+// rather than Json.
 func isJSONSelector(value any) bool {
 	return strings.Contains(text(value), "->")
 }
 
-// WrapJSONSelector answers Grammar::wrapJsonSelector.
+// WrapJSONSelector quotes a JSON path selector. The base implementation has
+// no JSON support to offer: every grammar in this package overrides it.
 //
-// The PHP throws for an engine with no JSON support. Wrap returns a string, so
-// the refusal here is a name the engine cannot resolve -- the arrow stays
-// inside the quoted identifier and the statement fails with "no such column",
-// which is true and is the same non-answer the exception gives. Every grammar
-// in this package overrides it.
+// Wrap returns a string, so an engine with no override cannot refuse with
+// an error -- the arrow stays inside the quoted identifier instead, and the
+// statement fails with "no such column", which is true.
 func (g *Grammar) WrapJSONSelector(value string) string {
 	return g.self.WrapValue(value)
 }
 
-// WrapJSONBooleanSelector answers Grammar::wrapJsonBooleanSelector.
+// WrapJSONBooleanSelector quotes a JSON path selector for a boolean
+// comparison.
 func (g *Grammar) WrapJSONBooleanSelector(value string) string {
 	return g.self.WrapJSONSelector(value)
 }
 
-// WrapJSONBooleanValue answers Grammar::wrapJsonBooleanValue.
+// WrapJSONBooleanValue wraps a compiled value for a JSON boolean
+// comparison. The base implementation returns it unchanged.
 func (g *Grammar) WrapJSONBooleanValue(value string) string { return value }
 
-// text renders a value the way PHP's string coercion does when the grammar
-// concatenates it into a statement.
+// text renders a value as the string the grammar concatenates into a
+// statement.
 //
 // It is not a substitute for a placeholder: nothing that reaches it is a bound
 // value. Columns, table names, operators and expressions pass through here;
@@ -139,13 +139,14 @@ func text(v any) string {
 	}
 }
 
-// isBool answers is_bool.
+// isBool reports whether value is a bool.
 func isBool(value any) bool {
 	_, ok := value.(bool)
 	return ok
 }
 
-// truthy answers PHP's truth test for an option a caller may not have set.
+// truthy reports whether an option a caller may not have set should be
+// treated as true.
 func truthy(value any) bool {
 	switch v := value.(type) {
 	case nil:
@@ -161,11 +162,12 @@ func truthy(value any) bool {
 	}
 }
 
-// isStructured answers is_array for the values a Go caller passes: a slice or a
-// map, which is what has to become JSON text before it can be bound.
+// isStructured reports whether value is a slice or a map, which is what
+// has to become JSON text before it can be bound.
 //
-// A byte slice is not one of them. It is a binary value on its way to a blob,
-// and encoding it as JSON would store the base64 of the bytes instead.
+// A byte slice is not one of them. It is a binary value on its way to a
+// blob, and encoding it as JSON would store the base64 of the bytes
+// instead.
 func isStructured(value any) bool {
 	if value == nil {
 		return false
@@ -182,10 +184,10 @@ func isStructured(value any) bool {
 	}
 }
 
-// encodeJSON answers json_encode($value, JSON_UNESCAPED_UNICODE).
+// encodeJSON encodes value as JSON text, without HTML-escaping <, > and &,
+// which Go's encoder does by default.
 //
-// Go escapes <, > and & by default and PHP does not, so HTML escaping is turned
-// off; a JSON path holding a "<" would otherwise stop matching the value stored
+// A JSON path holding a "<" would otherwise stop matching the value stored
 // in the column.
 func encodeJSON(value any) (any, error) {
 	var buffer bytes.Buffer

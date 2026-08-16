@@ -66,8 +66,9 @@ func TestFileStorePathShardsTheHash(t *testing.T) {
 	}
 }
 
-// TestFileStoreFlushOnlyRemovesThePrefix is RULE 14 with a disk under it: a
-// cache:clear for one customer must not touch another's entries, and the file
+// TestFileStoreFlushOnlyRemovesThePrefix pins tenant isolation with a disk
+// under it: a cache:clear for one customer must not touch another's entries,
+// and the file
 // store hashes the key into the path -- so the only way it can tell them apart
 // is the key it wrote into the file.
 func TestFileStoreFlushOnlyRemovesThePrefix(t *testing.T) {

@@ -15,30 +15,28 @@ import (
 	"github.com/arandu-io/hesape/str"
 )
 
-// HTTPClient is the slice of Guzzle's ClientInterface this package needs.
+// HTTPClient is the slice of an HTTP client this package needs.
 //
 // *http.Client is one. It is an interface so that a test can answer without a
-// network, which is what Illuminate's own test does with a mock.
+// network.
 type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// defaultClient stands in for Illuminate's `?: new Guzzle\Http\Client`.
+// defaultClient is the client a provider uses when none was given.
 //
-// The timeout is the difference between the two: a client with none will wait
-// for a provider that has stopped answering until the request that started it
-// is the last thing the process ever does.
+// The timeout is the point of it: a client with none will wait for a provider
+// that has stopped answering until the request that started it is the last
+// thing the process ever does.
 var defaultClient = &http.Client{Timeout: 30 * time.Second}
 
-// Provider answers Illuminate\Socialite\OAuthTwo\Provider: the
-// authorization code flow, from the redirect out to the user data back.
+// Provider is the authorization code flow, from the redirect out to the user
+// data back.
 //
-// Illuminate's is abstract, and its four subclasses override three endpoints
-// and, in two cases, how the token request is sent. In Go a subclass that
-// changes three strings is three strings, so the four are constructors --
-// [NewGithubProvider], [NewGoogleProvider], [NewFacebookProvider],
-// [NewStripeProvider] -- and [NewProvider] is the fifth, for a service
-// this package does not carry.
+// What separates one provider from another is three endpoint strings, so the
+// four this package carries are constructors -- [NewGithubProvider],
+// [NewGoogleProvider], [NewFacebookProvider], [NewStripeProvider] -- and
+// [NewProvider] is the fifth, for a service this package does not carry.
 //
 // The flow is two handlers:
 //
@@ -88,8 +86,7 @@ type Provider struct {
 	userDataQuery map[string]string
 }
 
-// NewProvider answers Provider::__construct(), with the three
-// endpoints Illuminate's subclasses supply by overriding a method each.
+// NewProvider builds a provider from the three endpoints of the flow.
 //
 // It is the way to reach a provider this package does not carry. The four it
 // does carry have constructors of their own, and those set the scope delimiter
@@ -109,15 +106,15 @@ func NewProvider(state StateStoreInterface, clientID, secret, authEndpoint, acce
 	}
 }
 
-// GetAuthURL answers Provider::getAuthUrl(): where to send the browser,
-// with the state stored on the way past.
+// GetAuthURL is where to send the browser, with the state stored on the way
+// past.
 //
 // Storing the state is the point of the method, not a detail of it. Everything
 // else here is assembling a query string; the one line that matters is the one
 // that writes down what will have to come back.
 //
-// options is Illuminate's optional array, and it is applied last, so a provider
-// asking for prompt=consent or a login_hint can say so.
+// options is applied last, so a provider asking for prompt=consent or a
+// login_hint can say so.
 func (p *Provider) GetAuthURL(callbackURL string, options ...map[string]string) (string, error) {
 	query := url.Values{}
 
@@ -151,8 +148,7 @@ func (p *Provider) GetAuthURL(callbackURL string, options ...map[string]string) 
 	return p.authEndpoint + separator + query.Encode(), nil
 }
 
-// Redirect answers the current Laravel's redirect(): [GetAuthURL] and the 302
-// that goes with it.
+// Redirect is [Provider.GetAuthURL] and the 302 that goes with it.
 //
 // It sends the browser to the URL set by [Provider.RedirectURL], which
 // is also the redirect_uri the provider is told to come back to -- they are one
@@ -170,16 +166,12 @@ func (p *Provider) Redirect(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// GetAccessToken answers Provider::getAccessToken(): the code in the
-// callback, exchanged for a token.
+// GetAccessToken exchanges the code in the callback for a token.
 //
 // The state is verified first, and a mismatch is [ErrStateMismatch] before any
-// request is made. Illuminate's GithubProvider overrides that check to always
-// pass; this does not, and the difference is deliberate -- see the package
-// comment.
+// request is made, for every provider.
 //
-// options is Illuminate's optional array and is applied last, so grant_type can
-// be replaced the way the PHP allows.
+// options is applied last, so grant_type can be replaced.
 func (p *Provider) GetAccessToken(r *http.Request, options ...map[string]string) (AccessToken, error) {
 	if p.usesState() {
 		if p.state == nil {
@@ -230,14 +222,11 @@ func (p *Provider) GetAccessToken(r *http.Request, options ...map[string]string)
 	return token, nil
 }
 
-// executeAccessRequest answers Provider::executeAccessRequest().
+// executeAccessRequest exchanges the code for a token.
 //
-// Illuminate's base sends a GET with every field in the query string, and two
-// of its four subclasses override it to POST instead. This posts for all of
-// them, which is what the current Laravel does and what all four providers
-// document: client_secret in a query string is client_secret in an access log,
-// in a proxy's history and in a Referer header, and no provider requires it
-// there.
+// It POSTs for every provider, which is what all four document:
+// client_secret in a query string is client_secret in an access log, in a
+// proxy's history and in a Referer header, and no provider requires it there.
 func (p *Provider) executeAccessRequest(ctx context.Context, form url.Values) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.accessEndpoint, strings.NewReader(form.Encode()))
 	if err != nil {
@@ -265,13 +254,11 @@ func (p *Provider) executeAccessRequest(ctx context.Context, form url.Values) ([
 	return body, nil
 }
 
-// GetUserData answers Provider::getUserData(): who the token belongs
-// to, as the provider describes them.
+// GetUserData is who the token belongs to, as the provider describes them.
 //
-// Illuminate puts the token in the query string. This puts it in the
-// Authorization header, because GitHub and Google both stopped accepting it in
-// the query string, and a token in a URL is logged everywhere a secret in a URL
-// is logged.
+// The token goes in the Authorization header, never the query string: GitHub
+// and Google both stopped accepting it there, and a token in a URL is logged
+// everywhere a secret in a URL is logged.
 func (p *Provider) GetUserData(ctx context.Context, token AccessToken) (oauth.UserData, error) {
 	if p.userDataEndpoint == "" {
 		return oauth.UserData{}, errors.New("oauth: this provider has no user data endpoint")
@@ -318,13 +305,12 @@ func (p *Provider) GetUserData(ctx context.Context, token AccessToken) (oauth.Us
 	return oauth.NewUserData(raw), nil
 }
 
-// User answers the current Laravel's user(): the callback, verified, exchanged
-// and resolved, in one call.
+// User is the callback, verified, exchanged and resolved, in one call.
 //
-// It answers the token as well as the person. Illuminate hangs the token on its
-// User object; a [oauth.UserData] is the provider's own map, and putting
-// this package's data among the provider's is how a caller ends up reading
-// "token" out of a bag where GitHub could have put one of its own.
+// It returns the token alongside the person rather than inside them. An
+// [oauth.UserData] is the provider's own map, and putting this package's data
+// among the provider's is how a caller ends up reading "token" out of a bag
+// where the provider could have put one of its own.
 func (p *Provider) User(r *http.Request) (oauth.UserData, AccessToken, error) {
 	token, err := p.GetAccessToken(r)
 	if err != nil {
@@ -337,17 +323,17 @@ func (p *Provider) User(r *http.Request) (oauth.UserData, AccessToken, error) {
 	return user, token, nil
 }
 
-// GetStateStore answers Provider::getStateStore().
+// GetStateStore is the store the state is kept in.
 func (p *Provider) GetStateStore() StateStoreInterface { return p.state }
 
-// SetStateStore answers Provider::setStateStore().
+// SetStateStore sets the store the state is kept in.
 func (p *Provider) SetStateStore(state StateStoreInterface) *Provider {
 	p.state = state
 	return p
 }
 
-// GetHTTPClient answers Provider::getHttpClient(), including its
-// fallback: a client nobody supplied is a default one.
+// GetHTTPClient is the client the provider makes its requests with. A client
+// nobody supplied is a default one, with a timeout.
 func (p *Provider) GetHTTPClient() HTTPClient {
 	if p.client != nil {
 		return p.client
@@ -355,14 +341,13 @@ func (p *Provider) GetHTTPClient() HTTPClient {
 	return defaultClient
 }
 
-// SetHTTPClient answers Provider::setHttpClient().
+// SetHTTPClient sets the client the provider makes its requests with.
 func (p *Provider) SetHTTPClient(client HTTPClient) *Provider {
 	p.client = client
 	return p
 }
 
-// GetScope answers Provider::getScope(): what was asked for, or the
-// provider's default when nothing was.
+// GetScope is what was asked for, or the provider's default when nothing was.
 func (p *Provider) GetScope() []string {
 	if len(p.scope) > 0 {
 		return p.scope
@@ -370,68 +355,54 @@ func (p *Provider) GetScope() []string {
 	return p.GetDefaultScope()
 }
 
-// GetDefaultScope answers Provider::getDefaultScope(), which each
-// subclass overrides and each constructor here sets.
+// GetDefaultScope is the scope the provider's constructor set.
 func (p *Provider) GetDefaultScope() []string { return p.defaultScope }
 
-// SetScope answers Provider::setScope(): the scopes, replacing whatever
-// was there.
-//
-// Illuminate takes a string or an array and casts; a variadic tail is that cast.
+// SetScope sets the scopes, replacing whatever was there.
 func (p *Provider) SetScope(scope ...string) *Provider {
 	return p.SetScopes(scope...)
 }
 
-// SetScopes answers the current Laravel's setScopes(), which is
-// [Provider.SetScope] under the name the newer Socialite gave it.
-// Duplicates are dropped, as they are there.
+// SetScopes sets the scopes, replacing whatever was there. Duplicates are
+// dropped. It is [Provider.SetScope] under the other name.
 func (p *Provider) SetScopes(scopes ...string) *Provider {
 	p.scope = unique(scopes)
 	return p
 }
 
-// Scopes answers the current Laravel's scopes(): the given scopes merged with
-// the ones already asked for.
+// Scopes merges the given scopes with the ones already asked for.
 func (p *Provider) Scopes(scopes ...string) *Provider {
 	p.scope = unique(append(append([]string{}, p.scope...), scopes...))
 	return p
 }
 
-// AddScope answers Provider::addScope(): one more scope.
+// AddScope asks for one more scope.
 //
-// Illuminate appends to a list that starts empty, so the first call to this
-// replaces the provider's default rather than adding to it. That is the PHP's
-// behaviour and it is kept: [Provider.Scopes] is the call that adds to
-// what is already there.
+// It appends to a list that starts empty, so the first call replaces the
+// provider's default rather than adding to it. [Provider.Scopes] is the call
+// that adds to what is already there.
 func (p *Provider) AddScope(scope string) *Provider {
 	p.scope = unique(append(p.scope, scope))
 	return p
 }
 
-// GetScopeDelimiter answers Provider::getScopeDelimiter().
+// GetScopeDelimiter is the string the scopes are joined by.
 func (p *Provider) GetScopeDelimiter() string { return p.scopeDelimiter }
 
-// SetScopeDelimiter answers Provider::setScopeDelimiter().
-//
-// The PHP assigns from $scopeDelimiter, a variable its own signature does not
-// declare, so the call silently sets the delimiter to null and every scope
-// after it is joined by nothing. This assigns the argument, which is what the
-// method is named for; mirroring the typo would be a method with the right name
-// and the wrong behaviour, and nobody checks those.
+// SetScopeDelimiter sets the string the scopes are joined by.
 func (p *Provider) SetScopeDelimiter(delimiter string) *Provider {
 	p.scopeDelimiter = delimiter
 	return p
 }
 
-// RedirectURL answers the current Laravel's redirectUrl(): where the provider
-// sends the browser back to.
+// RedirectURL sets where the provider sends the browser back to.
 func (p *Provider) RedirectURL(url string) *Provider {
 	p.redirectURL = url
 	return p
 }
 
-// With answers the current Laravel's with(): extra parameters on the
-// authorization request, such as prompt or login_hint.
+// With sets extra parameters on the authorization request, such as prompt or
+// login_hint.
 func (p *Provider) With(parameters map[string]string) *Provider {
 	p.parameters = map[string]string{}
 	for k, v := range parameters {
@@ -440,8 +411,7 @@ func (p *Provider) With(parameters map[string]string) *Provider {
 	return p
 }
 
-// Stateless answers the current Laravel's stateless(): no state stored and none
-// verified.
+// Stateless turns the state off: none is stored and none is verified.
 //
 // It is for an API client that has no cookie to keep a state in, and it is not
 // a convenience. Without the state there is nothing tying the callback to the
@@ -452,10 +422,10 @@ func (p *Provider) Stateless() *Provider {
 	return p
 }
 
-// usesState answers Provider::usesState().
+// usesState reports whether this provider stores and verifies a state.
 func (p *Provider) usesState() bool { return !p.stateless }
 
-// formattedScope answers Provider::getFormattedScope().
+// formattedScope is the scopes joined by the delimiter.
 func (p *Provider) formattedScope() string {
 	return strings.Join(p.GetScope(), p.scopeDelimiter)
 }
@@ -469,7 +439,7 @@ func (p *Provider) redirectTarget(fallback string) string {
 	return fallback
 }
 
-// currentURL answers Provider::getCurrentUrl().
+// currentURL reconstructs the address this request arrived at.
 //
 // It is a fallback and not the way this should work. The host comes off the
 // request, which is a header a client wrote, so behind a proxy it is whatever

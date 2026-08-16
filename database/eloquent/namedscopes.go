@@ -2,32 +2,29 @@ package eloquent
 
 import "fmt"
 
-// NamedScope is one entry of Model.NamedScopes: what PHP writes as a
-// scopeSomething method on the model.
+// NamedScope is one entry of Model.NamedScopes: a filter the caller applies
+// by name, through Scopes or CallNamedScope.
 //
-// The builder is the scope's first parameter there too -- Builder::callScope
-// prepends it -- and the rest is whatever the caller passed. It is a func and
-// not a method because Go cannot look a method up by name, which is the same
-// reason RelationResolvers is a map.
+// It is a func and not a method because Go cannot look a method up by name,
+// which is the same reason RelationResolvers is a map.
 type NamedScope[T any] func(builder *Builder[T], parameters ...any) *Builder[T]
 
-// HasNamedScope is Model::hasNamedScope.
+// HasNamedScope reports whether the model has a scope registered under this
+// name.
 //
-// The PHP asks method_exists for 'scope'.ucfirst($scope), and then for a method
-// carrying the #[Scope] attribute. Neither question exists in Go, so the scope is
-// registered under its bare name -- Active, not scopeActive -- and this is a
-// lookup in that map.
+// A scope is registered under its bare name -- Active, not scopeActive --
+// and this is a lookup in that map.
 func (m *Model[T]) HasNamedScope(scope string) bool {
 	_, ok := m.NamedScopes[scope]
 	return ok
 }
 
-// CallNamedScope is Model::callNamedScope.
+// CallNamedScope calls the named scope with b and parameters, and returns
+// what it returns. It fails the builder when scope is not registered.
 //
-// The PHP takes the parameters as one array with the builder already at the
-// front of it, because callScope put it there. Here the builder is its own
-// argument: an []any that must have a *Builder[T] in slot zero is a signature
-// that documents nothing and fails at run time.
+// The builder is its own argument rather than the first entry of
+// parameters: an []any that must have a *Builder[T] in slot zero is a
+// signature that documents nothing and fails at run time.
 func (m *Model[T]) CallNamedScope(scope string, b *Builder[T], parameters ...any) *Builder[T] {
 	apply, ok := m.NamedScopes[scope]
 	if !ok {
@@ -36,18 +33,17 @@ func (m *Model[T]) CallNamedScope(scope string, b *Builder[T], parameters ...any
 	return apply(b, parameters...)
 }
 
-// HasNamedScope is Builder::hasNamedScope.
+// HasNamedScope reports whether the builder's model has a scope registered
+// under this name.
 func (b *Builder[T]) HasNamedScope(scope string) bool {
 	return b.model != nil && b.model.HasNamedScope(scope)
 }
 
-// Scopes is Builder::scopes: the named scopes applied in order, each one's
-// wheres grouped so that an or inside a scope cannot escape it.
+// Scopes applies the named scopes in order, each one's wheres grouped so
+// that an or inside a scope cannot escape it.
 //
-// The PHP takes either a list of names or a map of name to parameters, because a
-// PHP array is both. Go has two types there, so this takes the names and
-// CallNamedScope takes the parameters -- a scope that needs arguments is called
-// by name rather than listed.
+// This takes only names; CallNamedScope takes the parameters -- a scope
+// that needs arguments is called directly rather than listed here.
 func (b *Builder[T]) Scopes(scopes ...string) *Builder[T] {
 	out := b
 	for _, scope := range scopes {

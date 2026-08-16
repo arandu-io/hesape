@@ -7,35 +7,34 @@ import (
 	hhttp "github.com/arandu-io/hesape/http"
 )
 
-// Factory is the part of Illuminate\Contracts\Auth\Factory this package uses.
+// Factory is the part of a guard factory this package uses.
 //
 // It is declared here rather than imported so that a middleware depends on the
 // question it asks -- "which guard, and is anybody signed in on it" -- and not
-// on the manager an application happens to wire. It answers to two of the
-// contract's methods; the rest of the PHP interface exists to register drivers,
-// which is a container concern and has no counterpart (ADR 0001).
+// on the manager an application happens to wire. Two methods are all a
+// middleware needs; registering drivers is the manager's business, not one a
+// middleware ever has.
 type Factory interface {
-	// Guard is Factory::guard. The empty name means the default guard, which is
-	// what PHP's null argument means.
+	// Guard is the guard of that name. The empty name means the default one.
 	Guard(name string) auth.Guard
 
-	// ShouldUse is Factory::shouldUse: the guard that answered is the one the
-	// rest of the request means when it says "the user".
+	// ShouldUse records that the guard that answered is the one the rest of the
+	// request means when it says "the user".
 	ShouldUse(name string)
 }
 
 // SubjectResolver turns the user a guard resolved into the auth.Subject that
 // travels on the context.
 //
-// It has no counterpart in Illuminate, and it is not optional decoration: a
-// Subject carries a tenant, roles and the verification stamp, and the seven
-// methods of auth.Authenticatable carry none of them. Something has to make the
-// mapping, and only the application knows how.
+// It is not optional decoration: a Subject carries a tenant, roles and the
+// verification stamp, and the seven methods of auth.Authenticatable carry none
+// of them. Something has to make the mapping, and only the application knows
+// how.
 //
 // It MUST read the tenant from the session or from the account row, never from
-// the path, the body, the query string or a header (RULE 14). A resolver that
-// takes a tenant off the request is a cross-tenant read with a policy in front
-// of it, and the policy will allow it.
+// the path, the body, the query string or a header. A resolver that takes a
+// tenant off the request is a cross-tenant read with a policy in front of it,
+// and the policy will allow it.
 //
 // Answering false means "this request carries no subject": the handler runs
 // without one, and anything downstream that needs a decision refuses, because
@@ -43,14 +42,12 @@ type Factory interface {
 // deliberately anonymous.
 type SubjectResolver func(r *http.Request, user auth.Authenticatable) (auth.Subject, bool)
 
-// guestRedirect is the state behind Illuminate's redirect()->guest(): a
-// redirect that first records where the person was going.
+// guestRedirect is a redirect that first records where the person was going.
 //
 // It is embedded by the three middlewares that turn somebody away, so that the
-// remembering is written once. Illuminate gets it from ResponseFactory, which
-// reaches into the session; hesape/http.Intended is the same thing over a signed
-// cookie, and it needs the application key -- so it is handed in rather than
-// constructed here.
+// remembering is written once. hesape/http.Intended does the remembering over a
+// signed cookie, and it needs the application key -- so it is handed in rather
+// than constructed here.
 type guestRedirect struct {
 	intended *hhttp.Intended
 }
@@ -58,7 +55,6 @@ type guestRedirect struct {
 // Intended sets where-they-were-going to be remembered before the redirect, so
 // that signing in finishes the journey instead of landing on the front page.
 //
-// It is the half of Illuminate's redirect()->guest() that is not the redirect.
 // Leaving it unset skips the remembering and changes nothing else.
 func (g *guestRedirect) Intended(i *hhttp.Intended) { g.intended = i }
 
@@ -73,7 +69,7 @@ func (g *guestRedirect) redirect(w http.ResponseWriter, r *http.Request, to stri
 	hhttp.Redirect(w, r, to)
 }
 
-// expectsJSON is Request::expectsJson.
+// expectsJSON reports that the client asked for JSON.
 //
 // It wraps rather than re-deciding, because content negotiation is one
 // definition in hesape/http and a second one here would be the copy that is
@@ -81,8 +77,7 @@ func (g *guestRedirect) redirect(w http.ResponseWriter, r *http.Request, to stri
 func expectsJSON(r *http.Request) bool { return hhttp.NewRequest(r).ExpectsJSON() }
 
 // writeJSON answers with a JSON object carrying one message, which is the body
-// Illuminate's exception handler renders for an unauthenticated or unauthorized
-// request.
+// an unauthenticated or unauthorized request gets when it asked for JSON.
 //
 // The message is a constant at every call site, so it is written directly rather
 // than encoded: there is nothing in it that needs escaping, and an encoder here

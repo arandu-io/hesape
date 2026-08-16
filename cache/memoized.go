@@ -10,8 +10,7 @@ import (
 // MemoizedStore remembers, for the life of one request, what the store
 // underneath already answered.
 //
-// It answers Illuminate\Cache\MemoizedStore. The problem it solves is the one
-// nobody notices until they count: a request that asks the cache for the same
+// The problem it solves is the one nobody notices until they count: a request that asks the cache for the same
 // feature flag in the controller, in the policy and twice in the view makes four
 // round trips for one value. This makes it one, and the other three are a map
 // lookup.
@@ -23,13 +22,12 @@ import (
 // wrong for anything longer.
 //
 // Every write forgets what it remembered about that key first, so a caller that
-// writes and then reads sees what it wrote. Laravel does the same, in the same
-// order, for the same reason.
+// writes and then reads sees what it wrote.
 //
-// Laravel's wraps a Repository; this wraps a Store. A Repository method here
-// takes an auth.Grant and a Store has none to give it (RULE 14), so a Store that
-// delegated to a Repository could not be written. What is memoized is the same
-// thing either way: the bytes under a fully built key.
+// It wraps a Store rather than a Repository: a Repository method takes an
+// auth.Grant and a Store has none to give it, so a Store that delegated to a
+// Repository could not be written. What is memoized is the bytes under a fully
+// built key.
 type MemoizedStore struct {
 	name  string
 	store Store
@@ -48,9 +46,8 @@ var (
 
 // NewMemoizedStore returns a store that remembers what it read.
 //
-// It answers MemoizedStore::__construct(). The name is the name of the store
-// underneath, which is what it is for in Laravel too: it goes into the events, so
-// a listener can tell which cache a hit came from.
+// The name is the name of the store underneath. It goes into the events, so a
+// listener can tell which cache a hit came from.
 func NewMemoizedStore(name string, store Store) *MemoizedStore {
 	return &MemoizedStore{name: name, store: store, memo: map[string][]byte{}}
 }
@@ -107,10 +104,6 @@ func (s *MemoizedStore) Get(ctx context.Context, key string) ([]byte, error) {
 
 // Many returns the stored bytes for several keys, asking the store underneath
 // only for the ones it has not seen.
-//
-// It answers MemoizedStore::many(), including the part that is the whole point:
-// the keys already known are answered from the map, and only the rest go into
-// one call.
 func (s *MemoizedStore) Many(ctx context.Context, keys []string) (map[string][]byte, error) {
 	out := make(map[string][]byte, len(keys))
 	var missing []string
@@ -164,16 +157,12 @@ func (s *MemoizedStore) many(ctx context.Context, keys []string) (map[string][]b
 }
 
 // Put forgets what it remembered about the key and writes it through.
-//
-// It answers MemoizedStore::put().
 func (s *MemoizedStore) Put(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	s.forget(key)
 	return s.store.Put(ctx, key, value, ttl)
 }
 
 // PutMany forgets them all and writes them through.
-//
-// It answers MemoizedStore::putMany().
 func (s *MemoizedStore) PutMany(ctx context.Context, values map[string][]byte, ttl time.Duration) error {
 	for key := range values {
 		s.forget(key)
@@ -215,15 +204,11 @@ func (s *MemoizedStore) Decrement(ctx context.Context, key string, delta int64, 
 }
 
 // Forever forgets what it remembered about the key and writes it through.
-//
-// It answers MemoizedStore::forever().
 func (s *MemoizedStore) Forever(ctx context.Context, key string, value []byte) error {
 	return s.Put(ctx, key, value, foreverTTL)
 }
 
 // Touch forgets what it remembered about the key and touches it through.
-//
-// It answers MemoizedStore::touch().
 func (s *MemoizedStore) Touch(ctx context.Context, key string, ttl time.Duration) (bool, error) {
 	s.forget(key)
 	if touchable, ok := s.store.(interface {
@@ -235,8 +220,6 @@ func (s *MemoizedStore) Touch(ctx context.Context, key string, ttl time.Duration
 }
 
 // Forget forgets what it remembered about the key and removes it.
-//
-// It answers MemoizedStore::forget().
 func (s *MemoizedStore) Forget(ctx context.Context, key string) error {
 	s.forget(key)
 	return s.store.Forget(ctx, key)
@@ -268,8 +251,6 @@ func (s *MemoizedStore) AcquireLock(ctx context.Context, key, token string, ttl 
 }
 
 // ReleaseLock releases the lock in the store underneath.
-//
-// It answers MemoizedStore::restoreLock()'s half of the same refusal.
 func (s *MemoizedStore) ReleaseLock(ctx context.Context, key, token string) error {
 	locking, ok := s.store.(Locking)
 	if !ok {

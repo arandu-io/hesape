@@ -12,16 +12,13 @@ import (
 	"github.com/arandu-io/hesape/database"
 )
 
-// BatchOptions is Illuminate's `$options` array on a batch, spelled out.
+// BatchOptions is the callbacks and the settings a batch carries: six moments
+// that name a job, and three settings that say where the work goes and what a
+// failure does to the rest of it.
 //
-// In PHP the options are an untyped array reached through `__get`, so
-// `$batch->allowFailures` and `$batch->then` are the same lookup with different
-// strings. Go has no `__get` (that is skip reason 1), and a typed struct is what
-// replaces it: the same six callbacks and the same three settings, named once.
-//
-// Extra is what `withOption` writes. It exists because an application may hang
+// Extra is what [PendingBatch.WithOption] writes, for an application that hangs
 // its own bookkeeping off a batch -- the id of the upload the import came from,
-// the user who pressed the button -- and Illuminate lets it.
+// the user who pressed the button.
 type BatchOptions struct {
 	// Connection and Queue are where the jobs and the callbacks go when a step
 	// does not name its own.
@@ -54,8 +51,8 @@ type BatchOptions struct {
 
 // Batch is a group of jobs dispatched together and counted as one.
 //
-// The counters are the whole point, and they count what Illuminate's count.
-// TotalJobs never moves except when Add puts more in. PendingJobs falls by one
+// The counters are the whole point. TotalJobs never moves except when Add puts
+// more in. PendingJobs falls by one
 // for every job that *succeeded*. FailedJobs rises for every job that failed,
 // and does not touch PendingJobs -- which is why "every job has reported" is
 // PendingJobs minus FailedJobs reaching zero (UpdatedBatchJobCounts) while
@@ -80,12 +77,12 @@ type Batch struct {
 	TotalJobs   int
 	PendingJobs int
 	FailedJobs  int
-	// FailedJobIDs is which jobs failed. Illuminate keeps the list so that a job
-	// which failed, was retried and then succeeded stops counting as a failure;
+	// FailedJobIDs is which jobs failed. The list is kept so that a job which
+	// failed, was retried and then succeeded stops counting as a failure;
 	// DecrementPendingJobs removes an id from it and IncrementFailedJobs adds
 	// one, both without duplicates.
 	FailedJobIDs []string
-	// Options is the callbacks and the settings. It is Illuminate's $options.
+	// Options is the callbacks and the settings.
 	Options BatchOptions
 	// CreatedAt is when it was dispatched. CancelledAt and FinishedAt are zero
 	// until they happen.
@@ -96,15 +93,15 @@ type Batch struct {
 
 // ProcessedJobs is how many jobs have succeeded.
 //
-// It is TotalJobs minus PendingJobs, which is Illuminate's definition and not
-// "how many reported": a batch of three with one failure and two successes has
-// processed two, and the third is still counted as owed.
+// It is TotalJobs minus PendingJobs, and not "how many reported": a batch of
+// three with one failure and two successes has processed two, and the third is
+// still counted as owed.
 func (b Batch) ProcessedJobs() int { return b.TotalJobs - b.PendingJobs }
 
 // Progress is ProcessedJobs as a percentage of TotalJobs, 0 when the batch is
 // empty.
 //
-// Rounded to the nearest whole percent, as Illuminate's `(int) round(...)` is.
+// Rounded to the nearest whole percent.
 func (b Batch) Progress() int {
 	if b.TotalJobs <= 0 {
 		return 0
@@ -124,9 +121,9 @@ func (b Batch) Cancelled() bool { return !b.CancelledAt.IsZero() }
 
 // Canceled is Cancelled.
 //
-// Illuminate declares both spellings on Batch and so does this. The collection
-// writes Cancelled with two Ls everywhere else; this one exists so that code
-// ported from PHP keeps compiling.
+// Both spellings are declared. The collection writes Cancelled with two Ls
+// everywhere else; this one is the American spelling, kept so that either
+// spelling compiles.
 func (b Batch) Canceled() bool { return b.Cancelled() }
 
 // HasFailures reports whether any job in the batch failed.
@@ -138,10 +135,7 @@ func (b Batch) AllowsFailures() bool { return b.Options.AllowFailures }
 
 // HasBeforeCallbacks, HasProgressCallbacks, HasThenCallbacks, HasCatchCallbacks,
 // HasFailureCallbacks and HasFinallyCallbacks report whether the batch names a
-// job for that moment.
-//
-// In Illuminate each is `isset($this->options[$type]) && ! empty(...)`; here a
-// Step with no Name is the absence of one.
+// job for that moment. A Step with no Name is the absence of one.
 func (b Batch) HasBeforeCallbacks() bool { return b.Options.Before.declared() }
 
 // HasProgressCallbacks reports whether a job runs after every report.
@@ -161,8 +155,7 @@ func (b Batch) HasFinallyCallbacks() bool { return b.Options.Finally.declared() 
 
 // Fresh re-reads the batch.
 //
-// A Batch in hand is a snapshot, and every callback in Illuminate is handed a
-// fresh one for the same reason: between the read and the decision, fifty
+// A Batch in hand is a snapshot: between the read and the decision, fifty
 // workers may have reported.
 func (b Batch) Fresh(ctx context.Context, g auth.Grant, r BatchRepository) (Batch, error) {
 	if r == nil {
@@ -249,9 +242,9 @@ func (b Batch) IncrementFailedJobs(ctx context.Context, g auth.Grant, r BatchRep
 // RecordSuccessfulJob registers that one job finished, and pushes whatever that
 // triggers.
 //
-// It is Illuminate's Batch::recordSuccessfulJob, and the order is the same:
-// decrement, run Progress, mark the batch finished and run Then when nothing is
-// pending, run Finally when every job has reported exactly once.
+// The order is decrement, run Progress, mark the batch finished and run Then
+// when nothing is pending, run Finally when every job has reported exactly
+// once.
 //
 // Each fires once because the repository decides, not this method: only one
 // caller can be the one that took PendingJobs to zero, and the repository is
@@ -284,10 +277,9 @@ func (b Batch) RecordSuccessfulJob(ctx context.Context, g auth.Grant, r BatchRep
 // RecordFailedJob registers that one job failed, and pushes whatever that
 // triggers.
 //
-// It is Illuminate's Batch::recordFailedJob. The first failure of a batch that
-// does not allow them cancels it, which is what stops the jobs still queued;
-// Catch fires on the first failure either way, and Failure fires on every
-// failure of a batch that allows them.
+// The first failure of a batch that does not allow them cancels it, which is
+// what stops the jobs still queued; Catch fires on the first failure either
+// way, and Failure fires on every failure of a batch that allows them.
 func (b Batch) RecordFailedJob(ctx context.Context, g auth.Grant, r BatchRepository, q Queue, jobID string, cause error) error {
 	counts, err := b.IncrementFailedJobs(ctx, g, r, jobID)
 	if err != nil {
@@ -320,8 +312,8 @@ func (b Batch) RecordFailedJob(ctx context.Context, g auth.Grant, r BatchReposit
 
 // ToArray is the batch as a map, for a dashboard or an API response.
 //
-// The keys are Illuminate's, in snake_case rather than camelCase because that
-// is the case the rest of the collection puts on the wire.
+// The keys are snake_case, which is the case the rest of the collection puts on
+// the wire.
 func (b Batch) ToArray() map[string]any {
 	out := map[string]any{
 		"id":             b.ID,
@@ -358,11 +350,9 @@ func (b Batch) queueFor(s Step) string {
 
 // UpdatedBatchJobCounts is what one report did to a batch's counters.
 //
-// It is Illuminate's UpdatedBatchJobCounts with the batch carried alongside.
-// Illuminate re-reads the batch with fresh() to decide what to fire; here the
-// repository hands back the state it just wrote, because it is the only thing
-// that saw the counters move and a second read would see fifty other workers'
-// reports as well.
+// The batch is carried alongside the two counters: the repository hands back
+// the state it just wrote, because it is the only thing that saw the counters
+// move and a second read would see fifty other workers' reports as well.
 type UpdatedBatchJobCounts struct {
 	// PendingJobs is how many jobs have not succeeded yet.
 	PendingJobs int
@@ -375,12 +365,9 @@ type UpdatedBatchJobCounts struct {
 // AllJobsHaveRanExactlyOnce reports whether every job in the batch has come
 // back, whichever way it went.
 //
-// It is PendingJobs minus FailedJobs reaching zero, which is Illuminate's test:
-// a success decrements PendingJobs and a failure does not, so the jobs still
-// owed are exactly the ones that neither succeeded nor failed.
-//
-// The verb is Illuminate's ("have ran"). The name is the contract, not the
-// grammar.
+// It is PendingJobs minus FailedJobs reaching zero: a success decrements
+// PendingJobs and a failure does not, so the jobs still owed are exactly the
+// ones that neither succeeded nor failed.
 func (c UpdatedBatchJobCounts) AllJobsHaveRanExactlyOnce() bool {
 	return c.PendingJobs-c.FailedJobs == 0
 }

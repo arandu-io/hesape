@@ -12,9 +12,8 @@ import (
 	"github.com/arandu-io/hesape/support"
 )
 
-// CacheTokenRepository answers
-// Illuminate\Auth\Passwords\CacheTokenRepository: the same contract over a
-// cache store instead of a table.
+// CacheTokenRepository is the same contract as [DatabaseTokenRepository], over
+// a cache store instead of a table.
 //
 // It exists because a reset token is short lived and self-expiring, which is
 // what a cache is: no migration, no sweep, and the entry is gone an hour later
@@ -28,39 +27,39 @@ import (
 // The Grant is the database repository's: a system grant, under an action, with
 // a tenant that came from configuration. It is what the cache builds the key
 // prefix from, so two tenants asking to reset the same address do not share an
-// entry (RULE 14).
+// entry.
 type CacheTokenRepository struct {
-	// cache answers $cache.
+	// cache is where the entries are written.
 	cache *cache.Repository
 
-	// hasher answers $hasher.
+	// hasher hashes the token before it is stored and compares it on the way
+	// back.
 	hasher auth.Hasher
 
-	// hashKey answers $hashKey.
+	// hashKey is the application key the token is HMACed with.
 	hashKey string
 
-	// expires answers $expires, as a Duration for the reason the database
-	// repository's is one.
+	// expires is how long a token is good for, and the ttl each entry is written
+	// with.
 	expires time.Duration
 
-	// throttle answers $throttle. Zero or less turns the throttle off.
+	// throttle is how long after minting one another may be minted. Zero or
+	// less turns the throttle off.
 	throttle time.Duration
 
-	// tenant is the tenant every entry this repository writes is keyed under.
+	// tenant is what every entry this repository writes is keyed under.
 	tenant string
 }
 
 // Verify at compile time that the repository is the contract the broker holds.
 var _ TokenRepository = (*CacheTokenRepository)(nil)
 
-// cachedToken is what the PHP puts in the cache as a two element array:
-// [$this->hasher->make($token), Carbon::now()->format($this->format)].
+// cachedToken is what goes into the cache: the hash, and when it was minted.
 //
-// It is a struct here because the cache codec is JSON, which reads a struct back
-// as the struct and a heterogeneous array as neither element. That is also what
-// removes CacheTokenRepository::$format: the property exists to flatten a Carbon
-// into a string and to parse it again, and a time.Time goes through JSON and
-// comes back a time.Time.
+// It is a struct because the cache codec is JSON, which reads a struct back as
+// the struct and a heterogeneous array as neither element. Nothing has to
+// format the timestamp either way: a time.Time goes through JSON and comes back
+// a time.Time.
 type cachedToken struct {
 	// Token is the hash of the token, never the token.
 	Token string `json:"token"`
@@ -70,11 +69,11 @@ type cachedToken struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// NewCacheTokenRepository answers CacheTokenRepository::__construct.
+// NewCacheTokenRepository returns a repository over a cache store.
 //
-// expires of zero or less is the PHP's default argument, one hour. throttle of
-// zero or less turns throttling off. tenant has no counterpart in the PHP; see
-// the type's doc.
+// An expires of zero or less becomes [DefaultExpires]. A throttle of zero or
+// less turns throttling off. See the type's doc for where tenant must come
+// from.
 func NewCacheTokenRepository(
 	store *cache.Repository,
 	hasher auth.Hasher,
@@ -92,11 +91,11 @@ func NewCacheTokenRepository(
 	}
 }
 
-// Create answers CacheTokenRepository::create.
+// Create mints a token for this address and stores a hash of it.
 //
-// The existing entry is deleted first, as in the table, so one address has at
-// most one live token. The entry is written with the expiry as its ttl, which is
-// what makes deleteExpired unnecessary here.
+// The existing entry is deleted first, so one address has at most one live
+// token. The entry is written with the expiry as its ttl, which is what makes
+// [CacheTokenRepository.DeleteExpired] unnecessary here.
 func (r *CacheTokenRepository) Create(ctx context.Context, user auth.CanResetPassword) (string, error) {
 	if err := r.Delete(ctx, user); err != nil {
 		return "", err
@@ -116,7 +115,8 @@ func (r *CacheTokenRepository) Create(ctx context.Context, user auth.CanResetPas
 	return token, nil
 }
 
-// Exists answers CacheTokenRepository::exists.
+// Exists reports that an entry for this address is present, has not expired,
+// and hashes to the token that was offered.
 //
 // The expiry is checked even though the entry carries a ttl that should have
 // removed it. A store whose clock ran slow, or one that keeps an entry past its
@@ -133,7 +133,8 @@ func (r *CacheTokenRepository) Exists(ctx context.Context, user auth.CanResetPas
 	return r.hasher.Check(token, record.Token), nil
 }
 
-// RecentlyCreatedToken answers CacheTokenRepository::recentlyCreatedToken.
+// RecentlyCreatedToken reports that this address had a token too recently to be
+// given another.
 func (r *CacheTokenRepository) RecentlyCreatedToken(ctx context.Context, user auth.CanResetPassword) (bool, error) {
 	record, found, err := r.recordFor(ctx, user)
 	if err != nil || !found {
@@ -145,33 +146,30 @@ func (r *CacheTokenRepository) RecentlyCreatedToken(ctx context.Context, user au
 	return tokenRecentlyCreated(record.CreatedAt, r.throttle), nil
 }
 
-// Delete answers CacheTokenRepository::delete.
+// Delete removes this address's entry.
 func (r *CacheTokenRepository) Delete(ctx context.Context, user auth.CanResetPassword) error {
 	return r.cache.Forget(ctx, r.grant(WriteToken), r.CacheKey(user))
 }
 
-// DeleteExpired answers CacheTokenRepository::deleteExpired, whose body in the
-// PHP is empty and whose body is empty here: the store expires the entries
-// itself, which is the reason to use this repository at all.
+// DeleteExpired does nothing: the store expires the entries itself, which is
+// the reason to use this repository at all.
 func (r *CacheTokenRepository) DeleteExpired(context.Context) error { return nil }
 
-// CacheKey answers CacheTokenRepository::cacheKey: the address, hashed.
+// CacheKey is the address, hashed with SHA-256.
 //
 // It is hashed and not used as it stands because a cache key travels further
 // than a row does -- into a shared store, into a slow-command log, into whatever
-// the operator has attached to it -- and an address is personal data. sha256 is
-// the PHP's hash('sha256', ...).
+// the operator has attached to it -- and an address is personal data.
 func (r *CacheTokenRepository) CacheKey(user auth.CanResetPassword) string {
 	sum := sha256.Sum256([]byte(user.GetEmailForPasswordReset()))
 	return hex.EncodeToString(sum[:])
 }
 
-// recordFor is the read that opens exists and recentlyCreatedToken.
+// recordFor is the read that opens both Exists and RecentlyCreatedToken.
 //
-// A miss is reported as found=false rather than as an error, because the PHP
-// reads null out of the cache for it and neither caller treats it as a failure.
-// Anything else is a store that did not answer, which is a failure and is not a
-// reason to say "no token".
+// A miss is reported as found=false rather than as an error, because neither
+// caller treats "no entry" as a failure. Anything else is a store that did not
+// answer, which is a failure and is not a reason to say "no token".
 func (r *CacheTokenRepository) recordFor(ctx context.Context, user auth.CanResetPassword) (cachedToken, bool, error) {
 	record, err := cache.Get[cachedToken](ctx, r.cache, r.grant(ReadToken), r.CacheKey(user))
 	switch {

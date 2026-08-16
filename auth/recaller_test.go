@@ -49,9 +49,9 @@ func TestARecallerIsTakenApartTheWayThePHPSplitsIt(t *testing.T) {
 }
 
 func TestARecallerWithAStrayPipeKeepsTheHashToItself(t *testing.T) {
-	// The PHP splits into three for id and token, and into four for the hash.
-	// So a token holding a pipe swallows the rest for Token, and Hash still
-	// answers with the third field alone.
+	// The split allows three fields for id and token, and four for the hash. So
+	// a token holding a pipe swallows the rest for Token, and Hash still answers
+	// with the third field alone.
 	recaller := auth.NewRecaller("7|the-token|the-mac|trailing")
 
 	if recaller.ID() != "7" {

@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// This file is lang/en/validation.php, and the smallest Translator that reads
-// it.
+// This file is the English validation lines, and the smallest Translator that
+// reads them.
 //
 // It lives here rather than in hesape/translation/lang/en/validation.json only
 // because that catalogue belongs to another package; the lines are the same
@@ -15,8 +15,9 @@ import (
 // the catalogue there grows the full set, this table is deleted and
 // englishTranslator with it.
 
-// englishLines is lang/en/validation.php, verbatim, minus the three groups it
-// ships empty -- custom, attributes and values -- which an application fills.
+// englishLines is the English sentence of every rule, minus the three groups
+// that ship empty -- custom, attributes and values -- which an application
+// fills.
 var englishLines = map[string]any{
 	"accepted":        "The :attribute field must be accepted.",
 	"accepted_if":     "The :attribute field must be accepted when :other is :value.",
@@ -180,9 +181,9 @@ var englishLines = map[string]any{
 // is what answers the group lookups either way.
 type englishTranslator struct{}
 
-// Get answers to Translator::get over englishLines. The key is dot notation
-// under "validation.", so "validation.min.string" reads the "string" line of the
-// "min" group.
+// Get reads a line out of englishLines. The key is dot notation under
+// "validation.", so "validation.min.string" reads the "string" line of the "min"
+// group.
 func (englishTranslator) Get(key string, replace map[string]any, locale string) any {
 	rest, under := strings.CutPrefix(key, "validation.")
 	if !under {
@@ -207,7 +208,7 @@ func (englishTranslator) Get(key string, replace map[string]any, locale string) 
 	return interpolate(sentence, replace)
 }
 
-// Choice answers to Translator::choice. englishLines holds no line with a plural
+// Choice reads a line for a count. englishLines holds no line with a plural
 // segment, so this is Get with :count filled in.
 func (t englishTranslator) Choice(key string, number int, replace map[string]any, locale string) string {
 	if replace == nil {
@@ -219,8 +220,7 @@ func (t englishTranslator) Choice(key string, number int, replace map[string]any
 	return line(t.Get(key, replace, locale), key)
 }
 
-// interpolate fills the :placeholders of a line, which is what
-// Illuminate\Translation\Translator::makeReplacements does before returning one.
+// interpolate fills the :placeholders of a line before it is returned.
 func interpolate(entry any, replace map[string]any) any {
 	sentence, isSentence := entry.(string)
 	if !isSentence || len(replace) == 0 {

@@ -13,9 +13,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	// The three decoders are imported for their side effect: image.DecodeConfig
-	// answers Dimensions, and it only knows the formats that registered
-	// themselves. PNG, JPEG and GIF are what getimagesize reads too.
+	// The three decoders are imported for their side effect:
+	// image.DecodeConfig backs Dimensions, and it only knows the formats
+	// that registered themselves. PNG, JPEG and GIF are the formats
+	// supported.
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
@@ -24,35 +25,30 @@ import (
 	"github.com/arandu-io/hesape/filesystem"
 )
 
-// ErrFileNotFound answers to
-// Illuminate\Contracts\Filesystem\FileNotFoundException, which
-// UploadedFile::get throws when the file behind the upload is gone.
+// ErrFileNotFound is returned when the file behind an upload is gone.
 var ErrFileNotFound = errors.New("http: the uploaded file is not readable")
 
-// BaseFile mirrors Illuminate\Http\File: a file on disk, carrying the
-// FileHelpers methods and nothing else.
+// BaseFile is a file on disk.
 //
-// It is BaseFile and not File because [File] is already the function that pulls
-// an upload off a Context, and a package cannot have both. The PHP name is on
-// the doc line, which is where ADR 0044 says to put a mechanical change: Go has
-// one namespace per package, and PHP has one per class.
+// It is BaseFile and not File because [File] is already the function that
+// pulls an upload off a Context, and a package cannot have both.
 type BaseFile struct {
 	// pathname is the location on disk.
 	pathname string
-	// hashName caches FileHelpers::$hashName, so two calls to HashName on one
-	// file answer the same name -- which is the whole reason the PHP caches it.
+	// hashName caches the name HashName drew, so two calls to HashName on
+	// one file return the same name.
 	hashName string
 }
 
-// NewBaseFile answers to File::__construct: a file at a path.
+// NewBaseFile builds a BaseFile at a path.
 func NewBaseFile(pathname string) *BaseFile { return &BaseFile{pathname: pathname} }
 
-// Path answers to FileHelpers::path: the fully-qualified path to the file.
+// Path is the fully-qualified path to the file.
 func (f *BaseFile) Path() string { return f.pathname }
 
-// GetRealPath answers to Symfony's File::getRealPath, which FileHelpers::path
-// calls. It resolves symlinks; a path that cannot be resolved is answered as it
-// stands, because the caller wanted a path and not an error about one.
+// GetRealPath resolves symlinks in the path; a path that cannot be resolved
+// is returned as it stands, because the caller wanted a path and not an
+// error about one.
 func (f *BaseFile) GetRealPath() string {
 	resolved, err := filepath.EvalSymlinks(f.pathname)
 	if err != nil {
@@ -61,26 +57,26 @@ func (f *BaseFile) GetRealPath() string {
 	return resolved
 }
 
-// GetPathname answers to Symfony's File::getPathname.
+// GetPathname is an alias for Path.
 func (f *BaseFile) GetPathname() string { return f.pathname }
 
-// Extension answers to FileHelpers::extension: the extension guessed from the
-// file's own type, without the dot, empty when nothing is known.
+// Extension is an alias for GuessExtension.
 func (f *BaseFile) Extension() string { return f.GuessExtension() }
 
-// GuessExtension answers to Symfony's File::guessExtension, which
-// FileHelpers::extension calls. It answers from the name, because Go has no
-// libmagic and the name is what a person sees.
+// GuessExtension is the extension guessed from the file's name, without the
+// dot, empty when nothing is known. It guesses from the name because Go has
+// no built-in content-sniffing equivalent to libmagic, and the name is what
+// a person sees.
 func (f *BaseFile) GuessExtension() string {
 	return strings.TrimPrefix(strings.ToLower(path.Ext(f.pathname)), ".")
 }
 
-// HashName answers to FileHelpers::hashName: a random 40-character name with
-// the file's extension, under an optional directory.
+// HashName is a random 40-character name with the file's extension, under
+// an optional directory.
 //
 // The name is drawn once per file and cached, so a caller that asks twice
-// stores and links the same thing. The variadic argument is the PHP's optional
-// $path.
+// stores and links the same thing. The variadic argument is an optional
+// directory prefix.
 func (f *BaseFile) HashName(dir ...string) string {
 	prefix := ""
 	if len(dir) > 0 && dir[0] != "" {
@@ -96,11 +92,10 @@ func (f *BaseFile) HashName(dir ...string) string {
 	return prefix + f.hashName + extension
 }
 
-// Dimensions answers to FileHelpers::dimensions: the width and height of the
-// image, and whether it is one.
+// Dimensions is the width and height of the image, and whether it is one.
 //
-// The PHP returns array|null from getimagesize; this returns (width, height,
-// ok), because a two-element array is a pair in Go and the null is the bool.
+// Returns (width, height, ok): ok is false when the file is not a
+// decodable image.
 func (f *BaseFile) Dimensions() (int, int, bool) {
 	handle, err := os.Open(f.GetRealPath())
 	if err != nil {
@@ -115,7 +110,7 @@ func (f *BaseFile) Dimensions() (int, int, bool) {
 	return config.Width, config.Height, true
 }
 
-// GetSize answers to Symfony's File::getSize.
+// GetSize is the file's size in bytes.
 func (f *BaseFile) GetSize() int64 {
 	info, err := os.Stat(f.pathname)
 	if err != nil {
@@ -124,52 +119,48 @@ func (f *BaseFile) GetSize() int64 {
 	return info.Size()
 }
 
-// GetMimeType answers to Symfony's File::getMimeType, guessed from the
-// extension.
+// GetMimeType is the MIME type guessed from the extension.
 func (f *BaseFile) GetMimeType() string {
 	return mime.TypeByExtension(strings.ToLower(path.Ext(f.pathname)))
 }
 
-// UploadedFile mirrors Illuminate\Http\UploadedFile: one file that arrived in a
-// form field, with the FileHelpers methods and the four store variants.
+// UploadedFile is one file that arrived in a form field, with the
+// file-info methods and the four store variants.
 //
-// It embeds BaseFile because the PHP UploadedFile and File both `use
-// FileHelpers`; the methods are the same methods on the same fields.
+// It embeds BaseFile, so the two share the same methods on the same fields.
 //
-// # Storing one needs a Grant (RULE 14)
+// # Storing one needs a Grant
 //
-// The PHP reaches into the container for a filesystem and writes. Here the
-// store methods take a context and an auth.Grant, because
+// The store methods take a context and an auth.Grant, because
 // [filesystem.Disk.PutFileAs] does: a file is written under a tenant, the
-// tenant comes off the Grant a policy minted, and there is no path from a form
-// field to a storage prefix.
+// tenant comes off the Grant a policy minted, and there is no path from a
+// form field to a storage prefix.
 type UploadedFile struct {
 	BaseFile
 
 	// header is the multipart part this was read from, which is what Open and
 	// the client-announced values come off.
 	header *multipart.FileHeader
-	// originalName is Symfony's $originalName: the name the client announced,
-	// with any directory stripped.
+	// originalName is the name the client announced, with any directory
+	// stripped.
 	originalName string
-	// mimeType is Symfony's $mimeType: the type the client announced. It is
-	// recorded and never trusted.
+	// mimeType is the type the client announced. It is recorded and never
+	// trusted.
 	mimeType string
-	// err is Symfony's $error: the upload error code, 0 when there is none.
+	// err is the upload error code, 0 when there is none.
 	err int
-	// test is Symfony's $test: whether this file was made by a factory rather
-	// than by a browser, which is what makes IsValid true without a real
-	// upload behind it.
+	// test is whether this file was made by a factory rather than by a
+	// browser, which is what makes IsValid true without a real upload
+	// behind it.
 	test bool
 }
 
-// NewUploadedFile answers to UploadedFile::__construct, and to
-// UploadedFile::createFromBase.
+// NewUploadedFile builds an UploadedFile from the multipart part a browser
+// sent.
 //
-// createFromBase promotes a Symfony UploadedFile into an Illuminate one. Go has
-// no class inheritance and therefore no base instance to promote, and a second
-// package-level CreateFromBase would collide with Request's -- PHP namespaces
-// by class, Go by package. This is the constructor both PHP entry points reach.
+// This is the one constructor: a second package-level CreateFromBase for
+// this type would collide with Request's, since Go namespaces by package
+// rather than by type.
 func NewUploadedFile(header *multipart.FileHeader, field string) *UploadedFile {
 	name := ""
 	announced := ""
@@ -185,9 +176,10 @@ func NewUploadedFile(header *multipart.FileHeader, field string) *UploadedFile {
 	}
 }
 
-// NewUploadedFileFromPath answers to UploadedFile::__construct in the shape the
-// testing factory uses: a file that is already on disk, standing in for one
-// that arrived. The test flag is Symfony's $test.
+// NewUploadedFileFromPath builds an UploadedFile standing in for one that
+// arrived, from a file that is already on disk -- the shape a testing
+// factory uses. The test flag is what IsValid checks instead of looking for
+// a real multipart part.
 func NewUploadedFileFromPath(pathname, originalName, mimeType string, test bool) *UploadedFile {
 	return &UploadedFile{
 		BaseFile:     BaseFile{pathname: pathname},
@@ -197,26 +189,24 @@ func NewUploadedFileFromPath(pathname, originalName, mimeType string, test bool)
 	}
 }
 
-// GetClientOriginalName answers to Symfony's
-// UploadedFile::getClientOriginalName: the name the client announced.
+// GetClientOriginalName is the name the client announced.
 func (f *UploadedFile) GetClientOriginalName() string { return f.originalName }
 
-// GetClientOriginalExtension answers to Symfony's
-// UploadedFile::getClientOriginalExtension.
+// GetClientOriginalExtension is the extension of the name the client
+// announced.
 func (f *UploadedFile) GetClientOriginalExtension() string {
 	return strings.TrimPrefix(strings.ToLower(path.Ext(f.originalName)), ".")
 }
 
-// GetClientMimeType answers to Symfony's UploadedFile::getClientMimeType: the
-// type the client announced, which is a header somebody wrote.
+// GetClientMimeType is the type the client announced, which is a header
+// somebody wrote.
 func (f *UploadedFile) GetClientMimeType() string { return f.mimeType }
 
-// ClientExtension answers to UploadedFile::clientExtension: the extension
-// guessed from the type the client announced.
+// ClientExtension is an alias for GuessClientExtension.
 func (f *UploadedFile) ClientExtension() string { return f.GuessClientExtension() }
 
-// GuessClientExtension answers to Symfony's
-// UploadedFile::guessClientExtension, which clientExtension calls.
+// GuessClientExtension is the extension guessed from the type the client
+// announced.
 func (f *UploadedFile) GuessClientExtension() string {
 	extensions, err := mime.ExtensionsByType(f.mimeType)
 	if err != nil || len(extensions) == 0 {
@@ -225,11 +215,11 @@ func (f *UploadedFile) GuessClientExtension() string {
 	return strings.TrimPrefix(extensions[0], ".")
 }
 
-// GetError answers to Symfony's UploadedFile::getError.
+// GetError is the upload error code, 0 when there is none.
 func (f *UploadedFile) GetError() int { return f.err }
 
-// IsValid answers to Symfony's UploadedFile::isValid: whether the upload
-// completed and there are bytes behind it.
+// IsValid reports whether the upload completed and there are bytes behind
+// it.
 func (f *UploadedFile) IsValid() bool {
 	if f.err != 0 {
 		return false
@@ -241,9 +231,8 @@ func (f *UploadedFile) IsValid() bool {
 	return f.header != nil && f.header.Size > 0
 }
 
-// GetSize answers to Symfony's File::getSize for an upload: the byte count the
-// server counted as the body arrived, which is the one value on an upload that
-// did not come from the client.
+// GetSize is the byte count the server counted as the body arrived, which
+// is the one value on an upload that did not come from the client.
 func (f *UploadedFile) GetSize() int64 {
 	if f.header != nil {
 		return f.header.Size
@@ -251,15 +240,14 @@ func (f *UploadedFile) GetSize() int64 {
 	return f.BaseFile.GetSize()
 }
 
-// GuessExtension answers to Symfony's File::guessExtension for an upload: from
-// the announced name, since the pathname of an upload is that name.
+// GuessExtension is the extension guessed from the announced name, since
+// the pathname of an upload is that name.
 func (f *UploadedFile) GuessExtension() string {
 	return strings.TrimPrefix(strings.ToLower(path.Ext(f.originalName)), ".")
 }
 
-// HashName answers to FileHelpers::hashName for an upload. It is redeclared so
-// that the extension comes from the upload's own GuessExtension rather than the
-// embedded BaseFile's.
+// HashName is redeclared here so that the extension comes from the
+// upload's own GuessExtension rather than the embedded BaseFile's.
 func (f *UploadedFile) HashName(dir ...string) string {
 	prefix := ""
 	if len(dir) > 0 && dir[0] != "" {
@@ -275,7 +263,7 @@ func (f *UploadedFile) HashName(dir ...string) string {
 	return prefix + f.hashName + extension
 }
 
-// Extension answers to FileHelpers::extension for an upload.
+// Extension is an alias for GuessExtension.
 func (f *UploadedFile) Extension() string { return f.GuessExtension() }
 
 // Open returns a reader over the bytes. It is what Get and the store methods
@@ -295,10 +283,10 @@ func (f *UploadedFile) Open() (io.ReadCloser, error) {
 	return handle, nil
 }
 
-// Get answers to UploadedFile::get: the contents of the uploaded file.
+// Get is the contents of the uploaded file.
 //
-// The PHP throws FileNotFoundException when the file is not valid, so this
-// returns ([]byte, error) and the error unwraps to [ErrFileNotFound].
+// Returns ([]byte, error): the error unwraps to [ErrFileNotFound] when the
+// file is not valid.
 func (f *UploadedFile) Get() ([]byte, error) {
 	if !f.IsValid() {
 		return nil, fmt.Errorf("%w: %s", ErrFileNotFound, f.pathname)
@@ -313,7 +301,7 @@ func (f *UploadedFile) Get() ([]byte, error) {
 
 // Upload converts this file into the [filesystem.Upload] the storage layer
 // takes. It is the one place the two vocabularies meet, so that the conversion
-// is written once (RULE 9).
+// is written once.
 func (f *UploadedFile) Upload(field string) filesystem.Upload {
 	if f.header != nil {
 		return filesystem.FromMultipart(field, f.header)
@@ -327,47 +315,43 @@ func (f *UploadedFile) Upload(field string) filesystem.Upload {
 	}
 }
 
-// StoreOptions answers to the $options array UploadedFile::store and its three
-// siblings take. The PHP accepts a string, which names the disk, or an array
-// carrying a disk and a visibility; a struct says the same thing without a
-// caller having to know the two key names.
+// StoreOptions is what Store and its three siblings take to say where and
+// how to store a file: a struct says this without a caller having to know a
+// set of map keys by name.
 type StoreOptions struct {
 	// Disk is the disk to write to. The zero value is the default disk.
 	Disk *filesystem.Disk
-	// Visibility answers to the "visibility" key. StorePublicly and
+	// Visibility sets the stored file's visibility. StorePublicly and
 	// StorePubliclyAs set it to "public".
 	Visibility string
 }
 
-// Store answers to UploadedFile::store: write the file under a directory with a
-// random name, and answer the key it landed on.
+// Store writes the file under a directory with a random name, and returns
+// the key it landed on.
 //
-// The PHP returns string|false; this returns (string, error). The context and
-// the Grant are what [filesystem.Disk.PutFileAs] requires, and requiring them
-// here is RULE 14: a file is stored under the tenant a policy authorised, never
-// under one read off the request.
+// Returns (string, error). The context and the Grant are what
+// [filesystem.Disk.PutFileAs] requires: a file is stored under the tenant a
+// policy authorised, never under one read off the request.
 func (f *UploadedFile) Store(ctx context.Context, g auth.Grant, directory string, options StoreOptions) (string, error) {
 	return f.StoreAs(ctx, g, directory, f.HashName(), options)
 }
 
-// StorePublicly answers to UploadedFile::storePublicly: Store with the
-// visibility set to public.
+// StorePublicly is Store with the visibility set to public.
 func (f *UploadedFile) StorePublicly(ctx context.Context, g auth.Grant, directory string, options StoreOptions) (string, error) {
 	options.Visibility = filesystem.VisibilityPublic
 	return f.StoreAs(ctx, g, directory, f.HashName(), options)
 }
 
-// StorePubliclyAs answers to UploadedFile::storePubliclyAs: StoreAs with the
-// visibility set to public.
+// StorePubliclyAs is StoreAs with the visibility set to public.
 func (f *UploadedFile) StorePubliclyAs(ctx context.Context, g auth.Grant, directory, name string, options StoreOptions) (string, error) {
 	options.Visibility = filesystem.VisibilityPublic
 	return f.StoreAs(ctx, g, directory, name, options)
 }
 
-// StoreAs answers to UploadedFile::storeAs: write the file under a directory
-// with the name given, and answer the key it landed on.
+// StoreAs writes the file under a directory with the name given, and
+// returns the key it landed on.
 //
-// The PHP returns string|false; this returns (string, error).
+// Returns (string, error).
 func (f *UploadedFile) StoreAs(ctx context.Context, g auth.Grant, directory, name string, options StoreOptions) (string, error) {
 	if options.Disk == nil {
 		return "", errors.New("http: storing an upload needs a disk: set StoreOptions.Disk to the filesystem.Disk it belongs on")

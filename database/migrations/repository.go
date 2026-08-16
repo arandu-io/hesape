@@ -6,31 +6,26 @@ import (
 	"sort"
 )
 
-// Resolver answers Illuminate\Database\ConnectionResolverInterface, narrowed to
-// what the repository and the Migrator ask of it.
+// Resolver answers a connection by name, narrowed to what the repository and the
+// Migrator ask of it.
 //
 // It is declared here rather than imported for the reason every interface in
 // this component is: the database package resolves migrations, so it imports
 // this one, and naming its concrete resolver here would close the cycle.
 type Resolver interface {
-	// Connection answers ConnectionResolverInterface::connection. The PHP
-	// throws for an unknown name; this returns the error.
+	// Connection returns the named connection, or an error for an unknown
+	// name.
 	Connection(name string) (Connection, error)
 
-	// GetDefaultConnection answers
-	// ConnectionResolverInterface::getDefaultConnection.
+	// GetDefaultConnection returns the default connection name.
 	GetDefaultConnection() string
 
-	// SetDefaultConnection answers
-	// ConnectionResolverInterface::setDefaultConnection.
+	// SetDefaultConnection replaces the default connection name.
 	SetDefaultConnection(name string)
 }
 
-// MigrationRecord is one row of the repository table.
-//
-// PHP has no name for it -- the interface's docblock calls it
-// `array{id: int, migration: string, batch: int}` -- so this is the shape it
-// describes, given the name it never got.
+// MigrationRecord is one row of the repository table: an id, a migration
+// name, and the batch it ran in.
 type MigrationRecord struct {
 	// ID is the row's ordinal.
 	ID int
@@ -43,14 +38,12 @@ type MigrationRecord struct {
 	Batch int
 }
 
-// MigrationRepositoryInterface answers
-// Illuminate\Database\Migrations\MigrationRepositoryInterface.
+// MigrationRepositoryInterface is the record of which migrations have run.
 //
-// Every method the PHP declares is here, with an error added wherever it talks
-// to the database -- which is all of them. The PHP lets a PDOException travel
-// out of these unannounced; a Go caller that cannot tell "no migrations have
-// run" from "the connection is gone" writes a migrate command that reports
-// success on a dead database.
+// Every method returns an error, because every one of them talks to the
+// database: a caller that cannot tell "no migrations have run" from "the
+// connection is gone" writes a migrate command that reports success on a dead
+// database.
 type MigrationRepositoryInterface interface {
 	// GetRan answers getRan: the names of every applied migration, ordered by
 	// batch and then by name.
@@ -94,28 +87,25 @@ type MigrationRepositoryInterface interface {
 	SetSource(name string)
 }
 
-// DatabaseMigrationRepository answers
-// Illuminate\Database\Migrations\DatabaseMigrationRepository: the table that
-// remembers which migrations have run.
+// DatabaseMigrationRepository is the table that remembers which migrations have
+// run.
 //
-// The PHP builds its queries through the fluent builder and its schema builder;
-// these are written out as SQL, because that is what this framework does
-// everywhere else and because the four statements involved are the same on all
-// three engines.
+// Its queries are written out as SQL rather than built, because that is what
+// this framework does everywhere else and because the four statements involved
+// are the same on all three engines.
 type DatabaseMigrationRepository struct {
-	// resolver is DatabaseMigrationRepository::$resolver.
+	// resolver is how the repository reaches a connection by name.
 	resolver Resolver
 
-	// table is DatabaseMigrationRepository::$table.
+	// table is the name of the table migrations are recorded in.
 	table string
 
-	// connection is DatabaseMigrationRepository::$connection: the name
-	// SetSource put there.
+	// connection is the name SetSource put there.
 	connection string
 }
 
-// DefaultTable is the table name Laravel uses, and the one to pass to
-// NewDatabaseMigrationRepository unless a project has a reason not to.
+// DefaultTable is the table name to pass to NewDatabaseMigrationRepository
+// unless a project has a reason not to.
 //
 // The database package's own MigrationsTable is arandu_migrations, and the two
 // are not the same table: that one tracks database.Migration, the SQL-pair
@@ -124,13 +114,13 @@ type DatabaseMigrationRepository struct {
 // the other's name.
 const DefaultTable = "migrations"
 
-// NewDatabaseMigrationRepository answers
-// DatabaseMigrationRepository::__construct.
+// NewDatabaseMigrationRepository creates a DatabaseMigrationRepository.
 func NewDatabaseMigrationRepository(resolver Resolver, table string) *DatabaseMigrationRepository {
 	return &DatabaseMigrationRepository{resolver: resolver, table: table}
 }
 
-// GetRan answers DatabaseMigrationRepository::getRan.
+// GetRan returns the names of every applied migration, ordered by batch and
+// then by name.
 func (r *DatabaseMigrationRepository) GetRan(ctx context.Context) ([]string, error) {
 	records, err := r.query(ctx, `SELECT id, migration, batch FROM `+r.table+` ORDER BY batch ASC, migration ASC`)
 	if err != nil {
@@ -143,12 +133,11 @@ func (r *DatabaseMigrationRepository) GetRan(ctx context.Context) ([]string, err
 	return out, nil
 }
 
-// GetMigrations answers DatabaseMigrationRepository::getMigrations: the last
-// `steps` applied, newest first.
+// GetMigrations returns the last steps applied, newest first.
 //
-// The PHP's `where('batch', '>=', '1')` is here too, and it is not redundant:
-// a batch of zero is what `migrate --pretend` and hand-written rows leave
-// behind, and neither should be rolled back.
+// The `batch >= 1` filter is not redundant: a batch of zero is what `migrate
+// --pretend` and hand-written rows leave behind, and neither should be
+// rolled back.
 func (r *DatabaseMigrationRepository) GetMigrations(ctx context.Context, steps int) ([]MigrationRecord, error) {
 	records, err := r.query(ctx,
 		`SELECT id, migration, batch FROM `+r.table+
@@ -159,15 +148,14 @@ func (r *DatabaseMigrationRepository) GetMigrations(ctx context.Context, steps i
 	return records, nil
 }
 
-// GetMigrationsByBatch answers
-// DatabaseMigrationRepository::getMigrationsByBatch.
+// GetMigrationsByBatch returns every migration recorded under batch, newest
+// first.
 func (r *DatabaseMigrationRepository) GetMigrationsByBatch(ctx context.Context, batch int) ([]MigrationRecord, error) {
 	return r.query(ctx,
 		`SELECT id, migration, batch FROM `+r.table+` WHERE batch = ? ORDER BY migration DESC`, batch)
 }
 
-// GetLast answers DatabaseMigrationRepository::getLast: the most recent batch,
-// in the order a rollback wants it.
+// GetLast returns the most recent batch, in the order a rollback wants it.
 func (r *DatabaseMigrationRepository) GetLast(ctx context.Context) ([]MigrationRecord, error) {
 	last, err := r.GetLastBatchNumber(ctx)
 	if err != nil {
@@ -177,9 +165,7 @@ func (r *DatabaseMigrationRepository) GetLast(ctx context.Context) ([]MigrationR
 		`SELECT id, migration, batch FROM `+r.table+` WHERE batch = ? ORDER BY migration DESC`, last)
 }
 
-// GetMigrationBatches answers
-// DatabaseMigrationRepository::getMigrationBatches: the name-to-batch map
-// `migrate:status` prints.
+// GetMigrationBatches returns the name-to-batch map `migrate:status` prints.
 func (r *DatabaseMigrationRepository) GetMigrationBatches(ctx context.Context) (map[string]int, error) {
 	records, err := r.query(ctx, `SELECT id, migration, batch FROM `+r.table+` ORDER BY batch ASC, migration ASC`)
 	if err != nil {
@@ -192,14 +178,13 @@ func (r *DatabaseMigrationRepository) GetMigrationBatches(ctx context.Context) (
 	return out, nil
 }
 
-// Log answers DatabaseMigrationRepository::log.
+// Log records that a migration ran, in a batch.
 //
-// The id is computed rather than left to the engine. The PHP's table declares
-// `$table->increments('id')`, and the three engines spell auto-increment three
-// different ways -- SERIAL, AUTO_INCREMENT, AUTOINCREMENT -- so a portable
-// CREATE TABLE cannot have one. Nothing reads the id for anything but order,
-// and migrations run one at a time in a pipeline step (RULE 16), so max + 1 is
-// the whole of it.
+// The id is computed rather than left to the engine: the three engines spell
+// auto-increment three different ways -- SERIAL, AUTO_INCREMENT, AUTOINCREMENT
+// -- so a portable CREATE TABLE cannot have one. Nothing reads the id for
+// anything but order, and migrations run one at a time in a pipeline step, so
+// max + 1 is the whole of it.
 func (r *DatabaseMigrationRepository) Log(ctx context.Context, file string, batch int) error {
 	conn, err := r.GetConnection()
 	if err != nil {
@@ -220,7 +205,7 @@ func (r *DatabaseMigrationRepository) Log(ctx context.Context, file string, batc
 	return nil
 }
 
-// Delete answers DatabaseMigrationRepository::delete.
+// Delete forgets that migration ran.
 func (r *DatabaseMigrationRepository) Delete(ctx context.Context, migration MigrationRecord) error {
 	conn, err := r.GetConnection()
 	if err != nil {
@@ -233,8 +218,7 @@ func (r *DatabaseMigrationRepository) Delete(ctx context.Context, migration Migr
 	return nil
 }
 
-// GetNextBatchNumber answers
-// DatabaseMigrationRepository::getNextBatchNumber.
+// GetNextBatchNumber returns one past the highest batch number recorded.
 func (r *DatabaseMigrationRepository) GetNextBatchNumber(ctx context.Context) (int, error) {
 	last, err := r.GetLastBatchNumber(ctx)
 	if err != nil {
@@ -243,13 +227,13 @@ func (r *DatabaseMigrationRepository) GetNextBatchNumber(ctx context.Context) (i
 	return last + 1, nil
 }
 
-// GetLastBatchNumber answers
-// DatabaseMigrationRepository::getLastBatchNumber.
+// GetLastBatchNumber returns the highest batch number recorded, or zero for
+// an empty table.
 //
-// The PHP asks the builder for max('batch'), which answers null on an empty
-// table and becomes zero on the way out. Reading the rows is the same answer on
-// a table that never holds more than a few hundred of them, and it avoids a
-// MAX() that returns NULL and a driver that scans NULL into an int.
+// It reads every row and takes the max in Go rather than asking the engine
+// for MAX(batch), which avoids a NULL on an empty table and a driver that
+// scans NULL into an int. The table never holds more than a few hundred
+// rows, so reading them is not a cost worth avoiding.
 func (r *DatabaseMigrationRepository) GetLastBatchNumber(ctx context.Context) (int, error) {
 	records, err := r.query(ctx, `SELECT id, migration, batch FROM `+r.table)
 	if err != nil {
@@ -264,7 +248,7 @@ func (r *DatabaseMigrationRepository) GetLastBatchNumber(ctx context.Context) (i
 	return last, nil
 }
 
-// CreateRepository answers DatabaseMigrationRepository::createRepository.
+// CreateRepository creates the migrations table.
 //
 // The column types are the portable spellings: INTEGER and VARCHAR(255).
 // VARCHAR rather than TEXT because migration is what every query here filters
@@ -287,12 +271,11 @@ func (r *DatabaseMigrationRepository) CreateRepository(ctx context.Context) erro
 	return nil
 }
 
-// RepositoryExists answers DatabaseMigrationRepository::repositoryExists.
+// RepositoryExists reports whether the migrations table exists.
 //
-// The PHP asks its schema builder, which asks the engine's catalogue with a
-// query written three different ways. Selecting from the table and reading the
-// answer is the same question asked in one way that works everywhere: a table
-// that is not there cannot be selected from.
+// It selects from the table rather than asking the engine's catalogue,
+// which would need three different queries for three engines: a table that
+// is not there cannot be selected from, and that works everywhere.
 func (r *DatabaseMigrationRepository) RepositoryExists(ctx context.Context) bool {
 	conn, err := r.GetConnection()
 	if err != nil {
@@ -302,7 +285,7 @@ func (r *DatabaseMigrationRepository) RepositoryExists(ctx context.Context) bool
 	return err == nil
 }
 
-// DeleteRepository answers DatabaseMigrationRepository::deleteRepository.
+// DeleteRepository drops the migrations table.
 func (r *DatabaseMigrationRepository) DeleteRepository(ctx context.Context) error {
 	conn, err := r.GetConnection()
 	if err != nil {
@@ -312,11 +295,12 @@ func (r *DatabaseMigrationRepository) DeleteRepository(ctx context.Context) erro
 	return err
 }
 
-// GetConnectionResolver answers
-// DatabaseMigrationRepository::getConnectionResolver.
+// GetConnectionResolver returns the resolver the repository reaches
+// connections through.
 func (r *DatabaseMigrationRepository) GetConnectionResolver() Resolver { return r.resolver }
 
-// GetConnection answers DatabaseMigrationRepository::getConnection.
+// GetConnection returns the connection the repository reads and writes the
+// table on.
 func (r *DatabaseMigrationRepository) GetConnection() (Connection, error) {
 	if r.resolver == nil {
 		return nil, fmt.Errorf("the migration repository has no connection resolver")
@@ -324,11 +308,12 @@ func (r *DatabaseMigrationRepository) GetConnection() (Connection, error) {
 	return r.resolver.Connection(r.connection)
 }
 
-// SetSource answers DatabaseMigrationRepository::setSource.
+// SetSource sets the connection the repository reads and writes the table
+// on.
 func (r *DatabaseMigrationRepository) SetSource(name string) { r.connection = name }
 
-// GetTable is the $table the repository was built with. The PHP reads the
-// property directly, which Go cannot do from another package.
+// GetTable is the table name the repository was built with, exported
+// because a caller in another package cannot reach the field directly.
 func (r *DatabaseMigrationRepository) GetTable() string { return r.table }
 
 // nextID is the ordinal Log writes. See there for why it is computed.

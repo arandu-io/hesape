@@ -29,12 +29,10 @@ type EncryptedStore struct {
 	encrypter Encrypter
 }
 
-// NewEncryptedStore is EncryptedStore::__construct.
+// NewEncryptedStore returns a session whose payload is encrypted with the
+// application key.
 //
-// It returns a session whose payload is encrypted with the application key.
-//
-// The arguments are [NewStore]'s with the encrypter added, which is where
-// Illuminate puts it too.
+// The arguments are [NewStore]'s with the encrypter added.
 func NewEncryptedStore(name string, handler SessionHandler, encrypter Encrypter, id string) *EncryptedStore {
 	store := NewStore(name, handler, id)
 	s := &EncryptedStore{Store: store, encrypter: encrypter}
@@ -46,6 +44,5 @@ func NewEncryptedStore(name string, handler SessionHandler, encrypter Encrypter,
 	return s
 }
 
-// GetEncrypter is EncryptedStore::getEncrypter. It returns the encrypter
-// underneath.
+// GetEncrypter returns the encrypter underneath.
 func (s *EncryptedStore) GetEncrypter() Encrypter { return s.encrypter }

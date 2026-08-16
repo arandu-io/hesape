@@ -5,29 +5,24 @@ import (
 	"sync"
 )
 
-// ConnectionResolverInterface answers
-// Illuminate\Database\ConnectionResolverInterface.
+// ConnectionResolverInterface answers a connection by name.
 //
-// Connection answers with an error where the PHP would let an undefined index
-// through: `$this->connections[$name]` on a name nobody registered is a PHP
-// notice and a null, and the null then fails four frames away with a message
-// about a method call on null.
+// Connection returns an error for a name nobody registered, rather than a nil
+// connection that fails four frames away.
 type ConnectionResolverInterface interface {
-	// Connection answers ConnectionResolverInterface::connection. An empty
-	// name is the PHP's null: the default connection.
+	// Connection returns the named connection. An empty name means the
+	// default connection.
 	Connection(name string) (ConnectionInterface, error)
 
-	// GetDefaultConnection answers
-	// ConnectionResolverInterface::getDefaultConnection.
+	// GetDefaultConnection returns the default connection name.
 	GetDefaultConnection() string
 
-	// SetDefaultConnection answers
-	// ConnectionResolverInterface::setDefaultConnection.
+	// SetDefaultConnection replaces the default connection name.
 	SetDefaultConnection(name string)
 }
 
-// ConnectionResolver answers Illuminate\Database\ConnectionResolver: a map of
-// name to connection, and the name of the default one.
+// ConnectionResolver is a map of name to connection, and the name of the default
+// one.
 //
 // It is the resolver for something that already has its connections -- a test,
 // a worker built by hand, the capsule. DatabaseManager is the resolver that
@@ -35,14 +30,15 @@ type ConnectionResolverInterface interface {
 type ConnectionResolver struct {
 	mu sync.RWMutex
 
-	// connections is ConnectionResolver::$connections.
+	// connections is every connection the resolver knows, keyed by name.
 	connections map[string]ConnectionInterface
 
-	// defaultConnection is ConnectionResolver::$default.
+	// defaultConnection is the name Connection resolves an empty name to.
 	defaultConnection string
 }
 
-// NewConnectionResolver answers ConnectionResolver::__construct.
+// NewConnectionResolver creates a ConnectionResolver over the given
+// connections.
 func NewConnectionResolver(connections map[string]ConnectionInterface) *ConnectionResolver {
 	r := &ConnectionResolver{connections: map[string]ConnectionInterface{}}
 	for name, connection := range connections {
@@ -51,7 +47,8 @@ func NewConnectionResolver(connections map[string]ConnectionInterface) *Connecti
 	return r
 }
 
-// Connection answers ConnectionResolver::connection.
+// Connection returns the named connection, or the default when name is
+// empty.
 func (r *ConnectionResolver) Connection(name string) (ConnectionInterface, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -67,7 +64,7 @@ func (r *ConnectionResolver) Connection(name string) (ConnectionInterface, error
 	return connection, nil
 }
 
-// AddConnection answers ConnectionResolver::addConnection.
+// AddConnection registers connection under name.
 func (r *ConnectionResolver) AddConnection(name string, connection ConnectionInterface) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -77,7 +74,7 @@ func (r *ConnectionResolver) AddConnection(name string, connection ConnectionInt
 	r.connections[name] = connection
 }
 
-// HasConnection answers ConnectionResolver::hasConnection.
+// HasConnection reports whether a connection is registered under name.
 func (r *ConnectionResolver) HasConnection(name string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -85,21 +82,19 @@ func (r *ConnectionResolver) HasConnection(name string) bool {
 	return found
 }
 
-// GetDefaultConnection answers
-// ConnectionResolver::getDefaultConnection.
+// GetDefaultConnection returns the default connection name.
 func (r *ConnectionResolver) GetDefaultConnection() string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.defaultConnection
 }
 
-// SetDefaultConnection answers
-// ConnectionResolver::setDefaultConnection.
+// SetDefaultConnection replaces the default connection name.
 func (r *ConnectionResolver) SetDefaultConnection(name string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.defaultConnection = name
 }
 
-// ConnectionResolver satisfies the interface it answers to.
+// ConnectionResolver satisfies ConnectionResolverInterface.
 var _ ConnectionResolverInterface = (*ConnectionResolver)(nil)

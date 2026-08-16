@@ -44,12 +44,11 @@ func wrap(e envelope) ([]byte, error) {
 	return raw, nil
 }
 
-// Queueable is the dispatch settings a job carries.
+// Queueable is the dispatch settings a job carries: where it goes, when a
+// worker may take it, and what runs after it.
 //
-// It is Illuminate's Queueable trait, which a job class uses to answer
-// `onQueue`, `delay`, `chain` and the rest. There the settings are properties
-// on the job object and travel with it through serialization; here they are a
-// struct a caller fills in, and what travels is the envelope.
+// It is a struct a caller fills in, and what travels to the worker is the
+// envelope.
 type Queueable struct {
 	// Connection and Queue are where the job goes. ChainConnection and
 	// ChainQueue are where the rest of its chain goes, which is not always the
@@ -66,15 +65,14 @@ type Queueable struct {
 	Deduplicator string `json:"deduplicator,omitempty"`
 	// DelaySeconds is how long the job waits before a worker may take it.
 	//
-	// Illuminate calls the property $delay and the setter delay(). Go has one
-	// namespace for the fields and the methods of a type, so one of the two had
-	// to move: the setter keeps the name, because delay() is what somebody
-	// types, and the field says what it holds.
+	// Go has one namespace for the fields and the methods of a type, so the
+	// field and its setter cannot both be called Delay: the setter keeps the
+	// short name, because Delay is what somebody types, and the field says what
+	// it holds.
 	DelaySeconds int `json:"delay,omitempty"`
 	// DispatchAfterCommit says whether the push waits for the surrounding
-	// database transaction. Nil is "whatever the driver is configured to do",
-	// which is Illuminate's null. It is Illuminate's $afterCommit, renamed for
-	// the reason DelaySeconds is.
+	// database transaction. Nil is "whatever the driver is configured to do".
+	// It is named apart from its setter for the reason DelaySeconds is.
 	DispatchAfterCommit *bool `json:"after_commit,omitempty"`
 	// Middleware is the names of the wrappers the handler runs inside.
 	Middleware []string `json:"middleware,omitempty"`
@@ -104,9 +102,9 @@ func (q Queueable) OnGroup(group string) Queueable {
 
 // WithDeduplicator sets the deduplication id, for the transports that have one.
 //
-// Illuminate takes a callable that computes the id; here it is the id, because
-// a closure cannot cross the gap between the process that dispatched the job
-// and the one that runs it (see the package doc).
+// It takes the id rather than a function that computes one, because a closure
+// cannot cross the gap between the process that dispatched the job and the one
+// that runs it (see the package doc).
 func (q Queueable) WithDeduplicator(id string) Queueable {
 	q.Deduplicator = id
 	return q
@@ -129,8 +127,8 @@ func (q Queueable) AllOnQueue(queue string) Queueable {
 
 // Delay sets how many seconds the job waits before a worker may take it.
 //
-// It writes DelaySeconds, which is the same field Illuminate calls $delay --
-// see there for why the two could not keep the same spelling.
+// It writes DelaySeconds -- see there for why the field and the setter could
+// not keep the same spelling.
 func (q Queueable) Delay(seconds int) Queueable {
 	q.DelaySeconds = seconds
 	return q
@@ -189,10 +187,8 @@ func (q Queueable) AppendToChain(jobs ...Step) Queueable {
 
 // Batchable is what a job belongs to: a batch, a chain, both, or neither.
 //
-// It is Illuminate's Batchable trait. There a job object carries `$batchId`
-// through serialization and reaches the batch through the container; here the
-// same two facts are read back out of the envelope by Batched, and the
-// repository is an argument.
+// The batch id and the job id are read back out of the envelope by Batched, and
+// the repository the batch is then loaded through is an argument.
 //
 // The zero value is a job that was pushed on its own, and Handled on it does
 // nothing. That is deliberate: a handler can call Batched and Handled
@@ -219,10 +215,8 @@ type Batchable struct {
 //	var row Invoice
 //	m, err := bus.Batched(j.Payload, &row)
 //
-// Illuminate has no equivalent, and could not: in PHP the job *is* the object,
-// so `$this->batchId` survives serialization on its own. In Go what arrives is
-// bytes, and the envelope has to be read back before anything in it can be
-// asked a question.
+// What arrives at a worker is bytes, so the envelope has to be read back before
+// anything in it can be asked a question.
 //
 // A payload this package did not write is returned as it is, with a zero
 // Batchable, so a handler written for batches still works on a job pushed
@@ -244,10 +238,9 @@ func Batched(payload []byte, v any) (Batchable, error) {
 
 // WithBatchId puts the job in a batch.
 //
-// The spelling is Illuminate's: `withBatchId`, with a lowercase d, and not
-// WithBatchID. ADR 0044 lets an initialism go to upper case where Go demands
-// it; nothing demands it in the middle of a method name, and changing it would
-// make the one method a Laravel developer greps for the one they cannot find.
+// The d is lowercase, unlike [Batchable.BatchID]: the field is a Go identifier
+// and takes the Go spelling of an initialism, and the method keeps the spelling
+// somebody greps for.
 func (m Batchable) WithBatchId(batchID string) Batchable {
 	m.BatchID = batchID
 	return m
@@ -255,10 +248,9 @@ func (m Batchable) WithBatchId(batchID string) Batchable {
 
 // WithFakeBatch attaches a batch that exists only in this value.
 //
-// It is Illuminate's Batchable::withFakeBatch, and it is for the handler test
-// that has to reach the batch branch without a repository, a table and a
-// dispatch behind it. The Batch is returned as well as attached, so the test
-// can assert on the same value the handler will see.
+// It is for the handler test that has to reach the batch branch without a
+// repository, a table and a dispatch behind it. The Batch is returned as well
+// as attached, so the test can assert on the same value the handler will see.
 func (m Batchable) WithFakeBatch(b Batch) (Batchable, Batch) {
 	if b.ID == "" {
 		b.ID = "fake-batch"
@@ -270,9 +262,9 @@ func (m Batchable) WithFakeBatch(b Batch) (Batchable, Batch) {
 
 // Batch is the batch the job belongs to.
 //
-// It reports database.ErrNotFound wrapped when the job belongs to no batch,
-// where Illuminate returns null: a caller that forgot to check gets an error
-// rather than a fatal on the next line.
+// It reports database.ErrNotFound wrapped when the job belongs to no batch, so
+// a caller that forgot to check gets an error rather than a nil dereference on
+// the next line.
 func (m Batchable) Batch(ctx context.Context, g auth.Grant, r BatchRepository) (Batch, error) {
 	if m.fake != nil {
 		return *m.fake, nil
@@ -310,9 +302,8 @@ func (m Batchable) Batching(ctx context.Context, g auth.Grant, r BatchRepository
 // DispatchNextJobInChain pushes the link that follows this one, if there is
 // one.
 //
-// It is Illuminate's Queueable::dispatchNextJobInChain, and it is what makes a
-// chain a chain: there is no moment at which two links are in the queue at
-// once, so the order is real rather than hoped for.
+// It is what makes a chain a chain: there is no moment at which two links are
+// in the queue at once, so the order is real rather than hoped for.
 func (m Batchable) DispatchNextJobInChain(ctx context.Context, g auth.Grant, q Queue) error {
 	if len(m.Chained) == 0 {
 		return nil
@@ -334,8 +325,7 @@ func (m Batchable) DispatchNextJobInChain(ctx context.Context, g auth.Grant, q Q
 
 // InvokeChainCatchCallbacks pushes the job that reports a chain that stopped.
 //
-// Illuminate calls the closures registered on the chain; a closure cannot cross
-// processes in Go, so what is registered is a job and what happens here is a
+// What is registered is a job rather than a function, so what happens here is a
 // push (see the package doc).
 func (m Batchable) InvokeChainCatchCallbacks(ctx context.Context, g auth.Grant, q Queue, _ error) error {
 	if !m.ChainCatch.declared() {
@@ -350,10 +340,9 @@ func (m Batchable) InvokeChainCatchCallbacks(ctx context.Context, g auth.Grant, 
 // AssertHasChain reports the error a test fails on when the remaining chain is
 // not the expected list of job names.
 //
-// Illuminate asserts through PHPUnit from inside the trait. A library that
-// imported testing to do that would put the test framework in every binary, so
-// this returns the failure and the test calls t.Fatal on it -- which is also
-// how it composes with a table-driven test.
+// A library that imported testing to fail the test itself would put the test
+// framework in every binary, so this returns the failure and the test calls
+// t.Fatal on it -- which is also how it composes with a table-driven test.
 func (m Batchable) AssertHasChain(expected ...string) error {
 	if len(expected) == 0 {
 		return errors.New("bus: the expected chain cannot be empty")
@@ -412,9 +401,8 @@ func decodeInto(raw []byte, v any) error {
 //
 // It is Batch.RecordSuccessfulJob or Batch.RecordFailedJob, plus
 // DispatchNextJobInChain or InvokeChainCatchCallbacks, in one call. Those four
-// are Illuminate's names and are where the behaviour lives; this is the one
-// line a Go handler writes instead of the four branches Illuminate's worker
-// writes for it.
+// are where the behaviour lives; this is the one line a handler writes instead
+// of the four branches.
 //
 // A job that belongs to neither a batch nor a chain does nothing and returns
 // nil.

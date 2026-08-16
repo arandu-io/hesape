@@ -1,16 +1,16 @@
 package query
 
-// The join vocabulary of Illuminate\Database\Query\Builder that Join, LeftJoin,
-// RightJoin and CrossJoin do not cover: the "join where" family, whose
+// The join vocabulary that Join, LeftJoin, RightJoin and CrossJoin do not
+// cover: the "join where" family, whose
 // condition compares a column with a value rather than with another column, and
 // MySQL's straight join.
 
-// addJoinClause is Builder::join's body, with the two flags the fluent methods
-// vary: the join type, and whether the condition is an "on" or a "where".
+// addJoinClause is the shared body of the exported join methods, with the two
+// flags the fluent methods vary: the join type, and whether the condition is
+// an "on" or a "where".
 //
-// The difference matters and is easy to miss: `on('users.id', '=', 'x')` names a
-// column called x, and `where('users.id', '=', 'x')` binds the string. The PHP
-// spells the choice as join(..., $where = false).
+// The difference matters and is easy to miss: `on('users.id', '=', 'x')` names
+// a column called x, and `where('users.id', '=', 'x')` binds the string.
 func (b *Builder) addJoinClause(typ string, isWhere bool, table any, first any, args ...any) *Builder {
 	join := NewJoinClause(b, typ, table)
 
@@ -31,8 +31,8 @@ func (b *Builder) addJoinClause(typ string, isWhere bool, table any, first any, 
 }
 
 // joinArguments drops the trailing nils of an operator and second column, so
-// that the PHP's join($table, $first, $operator = null, $second = null) reaches
-// the variadic form the rest of this package uses.
+// that a call passing neither reaches the variadic form the rest of this
+// package uses.
 func joinArguments(operator, second any) []any {
 	args := make([]any, 0, 2)
 	if operator != nil {
@@ -44,8 +44,7 @@ func joinArguments(operator, second any) []any {
 	return args
 }
 
-// JoinWhere answers Builder::joinWhere: a join whose condition compares a
-// column with a value.
+// JoinWhere adds a join whose condition compares a column with a value.
 func (b *Builder) JoinWhere(table any, first any, operator, second any, typ string) *Builder {
 	if typ == "" {
 		typ = "inner"
@@ -53,18 +52,18 @@ func (b *Builder) JoinWhere(table any, first any, operator, second any, typ stri
 	return b.addJoinClause(typ, true, table, first, joinArguments(operator, second)...)
 }
 
-// LeftJoinWhere answers Builder::leftJoinWhere.
+// LeftJoinWhere is JoinWhere with typ set to "left".
 func (b *Builder) LeftJoinWhere(table any, first any, operator, second any) *Builder {
 	return b.JoinWhere(table, first, operator, second, "left")
 }
 
-// RightJoinWhere answers Builder::rightJoinWhere.
+// RightJoinWhere is JoinWhere with typ set to "right".
 func (b *Builder) RightJoinWhere(table any, first any, operator, second any) *Builder {
 	return b.JoinWhere(table, first, operator, second, "right")
 }
 
-// StraightJoin answers Builder::straightJoin: MySQL's join that forbids the
-// planner from reordering the tables.
+// StraightJoin is MySQL's join that forbids the planner from reordering the
+// tables.
 //
 // Every other engine is handed the type as written and rejects it, which is
 // what the grammar's SupportsStraightJoins reports.
@@ -72,7 +71,7 @@ func (b *Builder) StraightJoin(table any, first any, operator, second any) *Buil
 	return b.addJoinClause("straight_join", false, table, first, joinArguments(operator, second)...)
 }
 
-// StraightJoinWhere answers Builder::straightJoinWhere.
+// StraightJoinWhere is JoinWhere with typ set to "straight_join".
 func (b *Builder) StraightJoinWhere(table any, first any, operator, second any) *Builder {
 	return b.JoinWhere(table, first, operator, second, "straight_join")
 }

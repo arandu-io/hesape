@@ -14,37 +14,29 @@ import (
 
 // ListenerOptions configures a [Listener].
 //
-// It answers Illuminate\Queue\ListenerOptions, which extends WorkerOptions with
-// one field. Go has no inheritance, so it embeds instead -- which is the same
-// arrangement with the same fields under the same names.
+// It is [WorkerOptions] with one field added: the child workers run with the
+// embedded options, and the listener turns them back into flags.
 type ListenerOptions struct {
 	// WorkerOptions is what each child worker runs with. The listener turns
 	// them back into the flags it starts the child with.
 	WorkerOptions
 
 	// Environment is the environment the child workers run in, and empty means
-	// they inherit this process's. It answers $environment.
+	// they inherit this process's.
 	Environment string
 }
 
 // Listener runs a worker in a child process and restarts it when it exits.
 //
-// It answers Illuminate\Queue\Listener, which is what `queue:listen` is. In PHP
-// it exists for one reason: a long-lived worker holds a copy of the application
-// in memory, so code deployed after it started is code it will never run, and
-// the only fix is to start a new process per job.
-//
-// Go has that problem in a much smaller way -- the binary is the binary -- so
-// this is not the way to run a queue in production. [Worker] is. What is left
-// for the listener is development: `aru queue:listen` picks up a rebuilt binary
-// without anybody remembering to restart anything.
+// It is what `aru queue:listen` runs, and it is not the way to run a queue in
+// production -- [Worker] is. What it is for is development: a rebuilt binary is
+// picked up without anybody remembering to restart anything.
 //
 // The child is started with Command, which is the path of the binary and the
 // arguments before the ones this adds. An application whose worker command is
 // not `aru work` says so there.
 type Listener struct {
-	// commandPath is the working directory the child is started in. It answers
-	// $commandPath.
+	// commandPath is the working directory the child is started in.
 	commandPath string
 	// command is the binary and the leading arguments.
 	command []string
@@ -57,9 +49,7 @@ type Listener struct {
 
 // NewListener returns a listener that starts command in dir.
 //
-// The PHP constructor takes the path and works the command out from the PHP
-// binary and the artisan script. Here the binary is the thing being run, so
-// there is nothing to work out and the caller says what it is:
+// The binary is the thing being run, so the caller says what it is:
 //
 //	queue.NewListener(".", os.Args[0], "work")
 func NewListener(dir string, command ...string) *Listener {
@@ -68,9 +58,8 @@ func NewListener(dir string, command ...string) *Listener {
 
 // SetOutputHandler sets what to do with each line the child writes.
 //
-// It answers setOutputHandler(). Without one the child's output goes nowhere,
-// which is what a test wants; `aru queue:listen` passes one that writes to the
-// terminal.
+// Without one the child's output goes nowhere, which is what a test wants; `aru
+// queue:listen` passes one that writes to the terminal.
 func (l *Listener) SetOutputHandler(handler func(line string)) {
 	l.outputHandler = handler
 }
@@ -82,9 +71,7 @@ var ErrNoListenerCommand = errors.New("queue: this listener has no command to ru
 // Listen starts a worker for connection and queue, and restarts it whenever it
 // exits.
 //
-// It answers listen(). It returns when the context is cancelled or
-// [Listener.Stop] is called -- the PHP loops forever and is stopped by a signal,
-// which is the same thing said by the language that has signals built in.
+// It returns when the context is cancelled or [Listener.Stop] is called.
 //
 // A child that exits with [ExitMemoryLimit] is started again, because that is
 // what it stopped for. A child that cannot be started at all is an error: a
@@ -171,9 +158,8 @@ func seconds(backoff func(int) time.Duration) string {
 
 // RunProcess runs one child worker to completion.
 //
-// It answers runProcess(). The memory check afterwards is the PHP's, and it
-// means the same thing: this process, the listener, has grown, and something
-// outside it should start it again with a clean heap.
+// The memory check afterwards is about this process, the listener: it has
+// grown, and something outside it should start it again with a clean heap.
 func (l *Listener) RunProcess(process *exec.Cmd, memory int) error {
 	if l.outputHandler != nil {
 		out, err := process.StdoutPipe()
@@ -215,8 +201,7 @@ func (l *Listener) handleWorkerOutput(out io.Reader) {
 // MemoryExceeded reports whether this process is holding more than limit
 // megabytes.
 //
-// It answers memoryExceeded(). It reads MemStats.Sys, for the reason
-// [Worker.MemoryExceeded] gives.
+// It reads MemStats.Sys, for the reason [Worker.MemoryExceeded] gives.
 func (l *Listener) MemoryExceeded(limitMB int) bool {
 	if limitMB <= 0 {
 		return false
@@ -228,9 +213,8 @@ func (l *Listener) MemoryExceeded(limitMB int) bool {
 
 // Stop ends the loop after the child that is running.
 //
-// It answers stop(), which calls exit() in PHP. It cancels instead: a listener
-// that killed the process would take the child with it, and the child is
-// holding a job.
+// It cancels rather than ending the process: a listener that killed the process
+// would take the child with it, and the child is holding a job.
 func (l *Listener) Stop() {
 	if l.stop != nil {
 		l.stop()

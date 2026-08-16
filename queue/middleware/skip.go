@@ -8,29 +8,27 @@ import (
 
 // Skip drops a job without running it.
 //
-// It answers Illuminate\Queue\Middleware\Skip. The job is not released and not
-// failed: the worker reads a middleware that returned without touching the job
-// as "handled", so the job is deleted. Skipping means the work is not wanted,
-// not that it should be tried later -- for later, release it.
+// The job is not released and not failed: the worker reads a middleware that
+// returned without touching the job as "handled", so the job is deleted.
+// Skipping means the work is not wanted, not that it should be tried later --
+// for later, release it.
 //
 //	w := queue.NewWorker(q, queue.WorkerOptions{
 //		Middleware: []middleware.Middleware{middleware.Skip{}.Unless(featureOn)},
 //	})
 //
-// [Skip.When] and [Skip.Unless] are methods on the zero value because they are
-// statics in PHP -- `Skip::when($cond)` -- and `middleware.Skip{}.When(cond)` is
-// the same sentence. They were SkipWhen and SkipUnless, names that exist in no
-// Laravel application (ADR 0044).
+// [Skip.When] and [Skip.Unless] are methods on the zero value, so
+// `middleware.Skip{}.When(cond)` reads as one phrase.
 type Skip struct {
 	skip bool
 }
 
 var _ Middleware = Skip{}
 
-// When skips the job when cond is true. It answers Skip::when().
+// When skips the job when cond is true.
 func (Skip) When(cond bool) Skip { return Skip{skip: cond} }
 
-// Unless skips the job unless cond is true. It answers Skip::unless().
+// Unless skips the job unless cond is true.
 func (Skip) Unless(cond bool) Skip { return Skip{skip: !cond} }
 
 // Handle drops the job, or hands it on.

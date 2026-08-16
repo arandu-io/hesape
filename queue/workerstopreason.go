@@ -4,9 +4,8 @@ import "github.com/arandu-io/hesape/queue/events"
 
 // WorkerStopReason is why a worker's loop ended.
 //
-// It answers Illuminate\Queue\WorkerStopReason, a backed enum in PHP and a
-// string type here, with the same six cases under the same names and the same
-// wire values -- a process supervisor that greps for "max_time" keeps working.
+// It is a string type, so its wire value is what a process supervisor greps
+// for.
 //
 // It exists so the thing that restarts the process can tell the two kinds of
 // exit apart: a worker that stopped because it hit its job limit is healthy and
@@ -15,7 +14,7 @@ import "github.com/arandu-io/hesape/queue/events"
 //
 // It is an alias for the type declared in [github.com/arandu-io/hesape/queue/events],
 // because events.WorkerStopping carries it and this package is the one that
-// dispatches that event. The name lives here, where its PHP original does.
+// dispatches that event.
 type WorkerStopReason = events.WorkerStopReason
 
 const (
@@ -46,9 +45,8 @@ const (
 
 // Exit statuses a worker returns, and what a supervisor reads.
 //
-// They answer Worker::EXIT_SUCCESS, EXIT_ERROR and EXIT_MEMORY_LIMIT. Twelve
-// for memory is Laravel's number, and it is not one of the shell's own so a
-// supervisor can tell "the worker decided to stop" from "something killed it".
+// Twelve for memory is not one of the shell's own statuses, so a supervisor can
+// tell "the worker decided to stop" from "something killed it".
 const (
 	// ExitSuccess is a worker that stopped because it was asked to.
 	ExitSuccess = 0

@@ -7,29 +7,27 @@ import (
 	"github.com/arandu-io/hesape/encryption"
 )
 
-// AsEncryptedCollection answers
-// Illuminate\Database\Eloquent\Casts\AsEncryptedCollection: a JSON array
-// column encrypted at rest.
+// AsEncryptedCollection casts a JSON array column encrypted at rest.
 //
-// The PHP reaches the encrypter through the Crypt facade. There is no facade
-// and no container here (ADR 0001, ADR 0002), so the encrypter is a field: the
-// application that built it hands it to the cast, which is the same wiring
-// written where a reader can see it.
+// The encrypter is a field: the application that built it hands it to the cast,
+// where a reader can see the wiring.
 type AsEncryptedCollection struct {
-	// Encrypter is what Crypt::encryptString and Crypt::decryptString reach in
-	// the PHP.
+	// Encrypter performs the encryption and decryption the cast does on the
+	// way in and out of the database.
 	Encrypter *encryption.Encrypter
 
-	// Mapper answers the second cast argument, as it does on AsCollection.
+	// Mapper is the function each decoded item is passed through before it
+	// joins the collection, the same role it plays on AsCollection.
 	Mapper func(item any) (any, error)
 }
 
-// Of answers AsEncryptedCollection::of.
+// Of returns the cast configured with mapper, keeping the same Encrypter.
 func (a AsEncryptedCollection) Of(mapper func(item any) (any, error)) AsEncryptedCollection {
 	return AsEncryptedCollection{Encrypter: a.Encrypter, Mapper: mapper}
 }
 
-// CastUsing answers AsEncryptedCollection::castUsing.
+// CastUsing returns the caster configured with Encrypter and Mapper, or an
+// error if Encrypter is nil.
 func (a AsEncryptedCollection) CastUsing(arguments []string) (CastsAttributes, error) {
 	if a.Encrypter == nil {
 		return nil, fmt.Errorf("casts: AsEncryptedCollection needs an encrypter")
@@ -42,7 +40,8 @@ type encryptedCollectionCast struct {
 	mapper    func(item any) (any, error)
 }
 
-// Get answers the anonymous caster's get: decrypt, then decode, then map.
+// Get decrypts the stored payload, decodes it as JSON, and maps each item
+// through mapper when one is set.
 func (c encryptedCollectionCast) Get(model any, key string, value any, attributes map[string]any) (any, error) {
 	stored, ok := attributes[key]
 	if !ok || stored == nil {
@@ -81,8 +80,8 @@ func (c encryptedCollectionCast) Get(model any, key string, value any, attribute
 	return collections.Collect(mapped), nil
 }
 
-// Set answers the anonymous caster's set: encode, then encrypt. A nil value
-// writes nothing, which is the PHP's `return null`.
+// Set encodes value as JSON, encrypts it, and returns the column holding the
+// ciphertext. A nil value writes no column at all.
 func (c encryptedCollectionCast) Set(model any, key string, value any, attributes map[string]any) (map[string]any, error) {
 	if value == nil {
 		return nil, nil
@@ -108,14 +107,14 @@ func (c encryptedCollectionCast) Set(model any, key string, value any, attribute
 //
 // The column is opaque to the database, so nothing can be queried, indexed or
 // sorted by what is inside it. That is the trade the cast exists to make.
-//
-// Answers Illuminate\Database\Eloquent\Casts\AsEncryptedArrayObject.
 type AsEncryptedArrayObject struct {
-	// Encrypter is what the Crypt facade is in the PHP.
+	// Encrypter performs the encryption and decryption the cast does on the
+	// way in and out of the database.
 	Encrypter *encryption.Encrypter
 }
 
-// CastUsing answers AsEncryptedArrayObject::castUsing.
+// CastUsing returns the caster configured with Encrypter, or an error if
+// Encrypter is nil.
 func (a AsEncryptedArrayObject) CastUsing(arguments []string) (CastsAttributes, error) {
 	if a.Encrypter == nil {
 		return nil, fmt.Errorf("casts: AsEncryptedArrayObject needs an encrypter")
@@ -127,7 +126,8 @@ type encryptedArrayObjectCast struct {
 	encrypter *encryption.Encrypter
 }
 
-// Get answers the anonymous caster's get.
+// Get decrypts the stored payload and returns it decoded as an *ArrayObject,
+// or nil if the column is absent or does not decode to a JSON object.
 func (c encryptedArrayObjectCast) Get(model any, key string, value any, attributes map[string]any) (any, error) {
 	stored, ok := attributes[key]
 	if !ok || stored == nil {
@@ -154,7 +154,8 @@ func (c encryptedArrayObjectCast) Get(model any, key string, value any, attribut
 	return NewArrayObject(bag), nil
 }
 
-// Set answers the anonymous caster's set.
+// Set encodes value as JSON, encrypts it, and returns the column holding the
+// ciphertext. A nil value writes no column at all.
 func (c encryptedArrayObjectCast) Set(model any, key string, value any, attributes map[string]any) (map[string]any, error) {
 	if value == nil {
 		return nil, nil
@@ -170,8 +171,8 @@ func (c encryptedArrayObjectCast) Set(model any, key string, value any, attribut
 	return map[string]any{key: payload}, nil
 }
 
-// Serialize answers the anonymous caster's serialize: the plain map, as
-// AsArrayObject's does.
+// Serialize returns value's plain map form when value is an *ArrayObject, so
+// the serialised row holds the map rather than the ArrayObject itself.
 func (encryptedArrayObjectCast) Serialize(model any, key string, value any, attributes map[string]any) (any, error) {
 	if bag, ok := value.(*ArrayObject[any]); ok {
 		return bag.GetArrayCopy(), nil

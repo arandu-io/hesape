@@ -23,8 +23,8 @@ import (
 // before the call.
 type LocalFilesystemAdapter struct {
 	root string
-	// diskName and serveSigned are what Illuminate's local adapter carries so a
-	// link can be turned back into a disk. See [LocalFilesystemAdapter.DiskName]
+	// diskName and serveSigned are what lets a link be turned back into a disk.
+	// See [LocalFilesystemAdapter.DiskName]
 	// and [LocalFilesystemAdapter.ShouldServeSignedUrls]; both are set at wiring
 	// time and read afterwards.
 	diskName    string

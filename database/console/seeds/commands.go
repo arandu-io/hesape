@@ -18,8 +18,8 @@ type Deps struct {
 	// is empty, and answers the name that ran.
 	Seed func(ctx context.Context, name string, args []string) (string, error)
 
-	// Environment is what `db:seed` checks before it runs. The PHP asks the
-	// application for it; here it is a string, so a test can set it.
+	// Environment is what `db:seed` checks before it runs. It is a string
+	// rather than a lookup, so a test can set it.
 	Environment string
 
 	// SeederPath is where make:seeder writes.
@@ -29,18 +29,15 @@ type Deps struct {
 // Commands builds the two seed commands against one Deps, so an application
 // registers both in a single call: db:seed, which runs a seeder, and
 // make:seeder, which writes a new one.
-//
-// Answers the commands of Illuminate\Database\Console\Seeds.
 func Commands(deps Deps) []console.Command {
 	return []console.Command{SeedCommand(deps), SeederMakeCommand(deps)}
 }
 
-// SeedCommand answers
-// Illuminate\Database\Console\Seeds\SeedCommand: `aru db:seed`.
+// SeedCommand builds `aru db:seed`.
 //
-// The confirmation in production is the PHP's, and it is not a formality: a
-// seeder is written against an empty database and run against a full one
-// exactly once before somebody learns why.
+// The confirmation in production is not a formality: a seeder is written
+// against an empty database and run against a full one exactly once before
+// somebody learns why.
 func SeedCommand(deps Deps) console.Command {
 	return console.Command{
 		Name:        "db:seed",
@@ -69,8 +66,8 @@ func SeedCommand(deps Deps) console.Command {
 
 			// The name is positional, and --class= is refused rather than
 			// accepted: a name that is sometimes a flag and sometimes a word is
-			// two spellings of one thing (RULE 9). database.Seed says the same
-			// with the same sentence.
+			// two spellings of one thing. database.Seed says the same with the
+			// same sentence.
 			args := flags.Args()
 			name := ""
 			if len(args) > 0 {
@@ -89,13 +86,10 @@ func SeedCommand(deps Deps) console.Command {
 	}
 }
 
-// SeederMakeCommand answers
-// Illuminate\Database\Console\Seeds\SeederMakeCommand: `aru make:seeder`.
+// SeederMakeCommand builds `aru make:seeder`.
 //
-// It prints the seeder rather than writing it, and that is the difference worth
-// knowing about: a Laravel seeder is discovered by class name, so the generator
-// has to put the file where the autoloader will find it. A seeder here is a
-// value in a registry the application declares, so the file's location is the
+// It prints the seeder rather than writing it: a seeder here is a value in a
+// registry the application declares, so the file's location is the
 // application's business and the only thing the generator can usefully supply
 // is the shape.
 func SeederMakeCommand(deps Deps) console.Command {

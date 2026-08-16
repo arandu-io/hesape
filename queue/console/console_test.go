@@ -134,8 +134,9 @@ func TestClearAsksBeforeItEmptiesAQueue(t *testing.T) {
 	}
 }
 
-// TestTheFailedJobCommandsRefuseWithoutATenant is RULE 17 at the console: a
-// listing that defaulted would print whichever customer sorted first.
+// TestTheFailedJobCommandsRefuseWithoutATenant checks the scoping at the
+// console: a listing that defaulted would print whichever customer sorted
+// first.
 func TestTheFailedJobCommandsRefuseWithoutATenant(t *testing.T) {
 	var provider nullProvider
 	for _, c := range []console.Command{

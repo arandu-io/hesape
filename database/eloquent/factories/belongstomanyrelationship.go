@@ -7,9 +7,8 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// BelongsToManyRelationship answers
-// Illuminate\Database\Eloquent\Factories\BelongsToManyRelationship: the models a
-// factory attaches to the one it made, with the pivot row's own columns.
+// BelongsToManyRelationship is the models a factory attaches to the one it made,
+// with the pivot row's own columns.
 type BelongsToManyRelationship struct {
 	// factory and models are PHP's Factory|Collection|Model|array union: either
 	// the related models are created here, or they were created already and are

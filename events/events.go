@@ -40,18 +40,16 @@ type Recorder struct {
 	pending []Event
 }
 
-// Record has no Illuminate counterpart: it is the entity collecting an event to
-// be stored with the next write.
+// Record collects an event on the entity, to be stored with the next write.
 //
-// Laravel has no recording step. An Eloquent model names its events and the
-// dispatcher fires them as the row is saved, which is the thing the outbox
-// exists not to do: firing at save time is firing before the commit.
+// Recording is not firing. An event fired as the row is saved is an event fired
+// before the commit, which is the thing the outbox exists not to do.
 func (r *Recorder) Record(e Event) {
 	r.pending = append(r.pending, e)
 }
 
-// PullEvents has no Illuminate counterpart: it returns the recorded events and
-// clears them, which is the other half of Record.
+// PullEvents returns the recorded events and clears them, which is the other
+// half of Record.
 //
 // Clearing is the point: an entity stored twice must not emit the same event
 // twice, and the caller that pulls is the one that is about to store.
@@ -86,8 +84,7 @@ type Outbox struct {
 	db DB
 }
 
-// NewOutbox has no Illuminate counterpart: it returns an outbox over the
-// application's database handle, and there is no outbox in Laravel.
+// NewOutbox returns an outbox over the application's database handle.
 func NewOutbox(db DB) *Outbox { return &Outbox{db: db} }
 
 // ErrNoTransaction is returned when Store is called outside a transaction.
@@ -97,12 +94,12 @@ func NewOutbox(db DB) *Outbox { return &Outbox{db: db} }
 // an event stored after the commit is one process crash away from being lost.
 var ErrNoTransaction = errors.New("events: Store must run inside a transaction")
 
-// Store has no Illuminate counterpart: it writes the events inside the caller's
-// transaction, which is the guarantee this package adds to the dispatcher.
+// Store writes the events inside the caller's transaction, which is the
+// guarantee this package adds to the dispatcher.
 //
-// The nearest thing in Laravel is ShouldDispatchAfterCommit, which delays the
-// dispatch until the commit and still loses the event if the process dies in
-// between. Storing the event in the transaction is what removes that window.
+// Delaying a dispatch until the commit is not the same thing: it still loses
+// the event if the process dies in between, and storing inside the transaction
+// is what removes that window.
 //
 // The Grant goes into the row: who authorized it, which action, which tenant.
 // That is a full audit trail without a second table, and it is why Store takes a
@@ -117,9 +114,9 @@ func (o *Outbox) Store(ctx context.Context, g auth.Grant, list []Event) error {
 
 	tenant := auth.Tenant(g)
 	if tenant == "" {
-		// RULE 14: the tenant comes from the Grant, and a Grant without one
-		// cannot scope anything. A relay reading this row would not know who to
-		// deliver it to.
+		// The tenant comes from the Grant, and a Grant without one cannot scope
+		// anything: a relay reading this row would not know who to deliver it
+		// to.
 		return fmt.Errorf("events: the Grant carries no tenant")
 	}
 
@@ -156,8 +153,7 @@ func (o *Outbox) Store(ctx context.Context, g auth.Grant, list []Event) error {
 	return nil
 }
 
-// Pending has no Illuminate counterpart: it returns one tenant's unpublished
-// events, oldest first.
+// Pending returns one tenant's unpublished events, oldest first.
 func (o *Outbox) Pending(ctx context.Context, tenant string, limit int) ([]Stored, error) {
 	return o.query(ctx, `
 		WHERE published_at IS NULL AND failed_at IS NULL AND tenant_id = ?
@@ -165,13 +161,13 @@ func (o *Outbox) Pending(ctx context.Context, tenant string, limit int) ([]Store
 		LIMIT ?`, tenant, sane(limit))
 }
 
-// PendingAll has no Illuminate counterpart: it returns unpublished events across
-// every tenant, oldest first, and it is what the relay reads.
+// PendingAll returns unpublished events across every tenant, oldest first, and
+// it is what the relay reads.
 //
-// It takes no Grant, and that is deliberate rather than an oversight of RULE 17.
-// The authorization already happened, at write time, and it is recorded in the
-// row -- authorized_by and action are right there. The relay decides nothing:
-// it delivers what was already permitted. This is the same shape as the migrator
+// It takes no Grant, and that is deliberate rather than an oversight. The
+// authorization already happened, at write time, and it is recorded in the row
+// -- authorized_by and action are right there. The relay decides nothing: it
+// delivers what was already permitted. This is the same shape as the migrator
 // reading its own table, and it is the only read in the framework that works
 // this way.
 //
@@ -184,9 +180,7 @@ func (o *Outbox) PendingAll(ctx context.Context, limit int) ([]Stored, error) {
 		LIMIT ?`, sane(limit))
 }
 
-// Parked has no Illuminate counterpart: it returns the events that gave up,
-// newest failure first. Laravel's nearest table is failed_jobs, which belongs to
-// the queue rather than to event delivery.
+// Parked returns the events that gave up, newest failure first.
 //
 // A dead letter queue nobody can list is a table that grows. `aru doctor`
 // reports the count, because an event that never left is a business process
@@ -231,8 +225,7 @@ func sane(limit int) int {
 	return limit
 }
 
-// Park has no Illuminate counterpart: it stops retrying an event and records
-// why.
+// Park stops retrying an event and records why.
 //
 // An event that failed ten times will not succeed on the eleventh, and a relay
 // stuck on it stops delivering everything behind it. Parking keeps the row --
@@ -251,9 +244,7 @@ func (o *Outbox) Park(ctx context.Context, id string, cause error) error {
 	return nil
 }
 
-// Retry has no Illuminate counterpart: it puts a parked event back in line, with
-// its attempt count reset. The nearest thing is `queue:retry`, which is a
-// command over failed jobs rather than a method on event delivery.
+// Retry puts a parked event back in line, with its attempt count reset.
 //
 // The operator fixed the broker, or the consumer, or the payload. Without this
 // the only way back is SQL by hand, which is how a dead letter queue becomes a
@@ -267,8 +258,7 @@ func (o *Outbox) Retry(ctx context.Context, id string) error {
 	return nil
 }
 
-// Lag has no Illuminate counterpart: it is how long the oldest unpublished event
-// has been waiting.
+// Lag is how long the oldest unpublished event has been waiting.
 //
 // A relay that stopped looks exactly like a relay with nothing to do. This is
 // the only number that tells them apart, which is why it feeds the health check
@@ -296,7 +286,7 @@ func (o *Outbox) Lag(ctx context.Context) (time.Duration, error) {
 	return time.Since(oldest), nil
 }
 
-// MarkPublished has no Illuminate counterpart: it records that an event left.
+// MarkPublished records that an event left.
 func (o *Outbox) MarkPublished(ctx context.Context, id string) error {
 	_, err := o.db.ExecContext(ctx,
 		`UPDATE outbox SET published_at = ?, last_error = NULL WHERE id = ?`,
@@ -307,8 +297,7 @@ func (o *Outbox) MarkPublished(ctx context.Context, id string) error {
 	return nil
 }
 
-// MarkFailed has no Illuminate counterpart: it records an attempt that did not
-// deliver.
+// MarkFailed records an attempt that did not deliver.
 //
 // The count and the message are stored rather than logged, because the thing
 // anyone needs at 3am is "this event failed 12 times with this message", and a
@@ -346,11 +335,10 @@ type Stored struct {
 	LastError string
 }
 
-// Decode has no Illuminate counterpart: it unmarshals the payload into v.
+// Decode unmarshals the payload into v.
 //
-// The PHP hands a listener the event object itself, because a queued job there
-// is serialized PHP and comes back as the same class. A stored event here is
-// JSON, and JSON is what lets a consumer in another process read it.
+// A stored event is JSON rather than a Go value, and JSON is what lets a
+// consumer in another process read it.
 func (s Stored) Decode(v any) error {
 	if err := json.Unmarshal([]byte(s.Payload), v); err != nil {
 		return fmt.Errorf("events: decoding %s: %w", s.Name, err)

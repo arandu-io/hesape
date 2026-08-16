@@ -4,10 +4,8 @@ import "strings"
 
 const hintPathDelimiter = "::"
 
-// ViewName mirrors Illuminate\View\ViewName.
-//
-// It normalizes a view name the way Laravel does: dots become directory
-// separators, and namespaced views (package::view) keep the delimiter.
+// ViewName normalizes a view name: dots become directory separators, and
+// namespaced views (package::view) keep the delimiter.
 type ViewName struct{}
 
 // Normalize returns a view name in dot notation.

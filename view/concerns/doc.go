@@ -1,22 +1,8 @@
-// Package concerns mirrors Illuminate\View\Concerns.
+// Package concerns is intentionally empty, and stays that way.
 //
-// The files it answers to, in the clone at
-// laravel_illuminate/view/Concerns:
-//
-//	ManagesComponents.php
-//	ManagesEvents.php
-//	ManagesFragments.php
-//	ManagesLayouts.php
-//	ManagesLoops.php
-//	ManagesStacks.php
-//	ManagesTranslations.php
-//
-// Nothing is implemented here, and nothing will be. A concern is a PHP trait:
-// a set of methods mixed into a class from outside it. Go has no such thing --
-// a method's receiver must be declared in the same package as the method -- so
-// what a trait carries lands directly on the type that had it, in the package
-// that declares that type.
-//
-// It is the same reason ADR 0046 gives for Macroable and Conditionable not
-// being packages, and it applies here without a second decision being needed.
+// Nothing is implemented here, and nothing will be. Go has no way to mix a
+// set of methods into a type from outside its package -- a method's
+// receiver must be declared alongside it -- so what such a set would have
+// carried lands directly on the type that has it, in the package that
+// declares that type.
 package concerns

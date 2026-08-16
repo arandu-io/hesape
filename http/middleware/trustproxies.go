@@ -96,11 +96,10 @@ func TrustProxies(trusted []netip.Prefix) hhttp.Middleware {
 // real is the hop to its right. Nothing is returned in that case, and the peer
 // stands.
 //
-// This is Symfony's normalizeAndFilterClientIps, which Request::ips is built
-// on: the peer completes the chain, our own proxies come out of it -- they are
-// infrastructure and not visitors -- and what is left is reversed. It used to
-// return the visitor alone, which is all the middleware needed and half of what
-// the request needed.
+// The peer completes the chain, our own proxies come out of it -- they are
+// infrastructure and not visitors -- and what is left is reversed, nearest
+// hop first. It used to return the visitor alone, which is all this
+// middleware needed and half of what hhttp.Request.IPs needed.
 func forwardedFor(values []string, peer netip.Addr, trusted []netip.Prefix) []netip.Addr {
 	var chain []netip.Addr
 	for _, value := range values {

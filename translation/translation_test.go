@@ -222,7 +222,7 @@ func TestReplacementLeavesAPlaceholderItHasNoArgumentFor(t *testing.T) {
 }
 
 // ":value" must not eat the beginning of ":values" when both are given: the
-// longest name that matches wins, which is what PHP's strtr does.
+// longest name that matches wins.
 func TestReplacementTakesTheLongestPlaceholderName(t *testing.T) {
 	l := translation.NewArrayLoader()
 	l.AddMessages("en", "messages", translation.Lines{
@@ -242,8 +242,8 @@ func TestReplacementTakesTheLongestPlaceholderName(t *testing.T) {
 	}
 }
 
-// The three spellings PHP builds for every argument: the value, the value with
-// its first letter uppercased, and the value uppercased.
+// The three spellings built for every argument: the value, the value with its
+// first letter uppercased, and the value uppercased.
 func TestReplacementOffersTheUpperCaseForms(t *testing.T) {
 	l := translation.NewArrayLoader()
 	l.AddMessages("en", "messages", translation.Lines{
@@ -286,8 +286,8 @@ func TestReplacementRendersWhatItIsGiven(t *testing.T) {
 
 type money struct{ cents int }
 
-// Stringable registers how one type renders when it is passed as an argument,
-// which PHP names with a class name string and Go with a zero value.
+// Stringable registers how one type renders when it is passed as an argument.
+// The type is named by a zero value of it.
 func TestStringableRendersOneType(t *testing.T) {
 	l := translation.NewArrayLoader()
 	l.AddMessages("en", "messages", translation.Lines{"total": "You owe :amount."}, "")

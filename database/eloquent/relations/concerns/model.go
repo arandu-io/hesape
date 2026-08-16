@@ -12,21 +12,18 @@ import (
 	"github.com/arandu-io/hesape/pagination"
 )
 
-// Model is what a relation asks of Illuminate\Database\Eloquent\Model.
+// Model is what a relation asks of a model.
 //
-// PHP passes the concrete Model class around and reaches whatever it needs
-// through late static binding. Go has no such thing, so the surface a relation
-// actually touches is written out as an interface -- and, following the rule
-// that an interface belongs with its consumer, it is declared here rather than
-// in the eloquent package that will implement it. The concrete model embeds the
+// The surface a relation actually touches is written out as an interface, and it
+// is declared here rather than in the eloquent package that implements it,
+// because an interface belongs with its consumer. The concrete model embeds the
 // concerns in database/eloquent/concerns and satisfies this by doing so.
 //
 // It lives in this package, and not in relations, because Go forbids a
 // subpackage from importing its parent: relations, relations/concerns and every
 // relation type have to agree on one Model, and the only place all three can
 // see is the leaf. relations aliases it back (type Model = concerns.Model), so
-// relations.Model and concerns.Model are the same type and a reader who expects
-// the PHP layout still finds the name where the PHP puts it.
+// relations.Model and concerns.Model are the same type.
 type Model interface {
 	// GetTable answers Model::getTable.
 	GetTable() string
@@ -144,16 +141,16 @@ type Model interface {
 	// FreshTimestamp answers Model::freshTimestamp.
 	FreshTimestamp() time.Time
 
-	// Save answers Model::save.
+	// Save writes the model.
 	//
 	// It carries the context and the Grant that every write in this collection
-	// carries: a relation that could save without one would be the hole RULE 17
-	// exists to close, and it would be on the write side, where it is easiest
-	// to spot and therefore least excusable to leave open.
+	// carries: a relation that could save without one would be a write nobody
+	// authorized, on the side where it is easiest to spot and therefore least
+	// excusable to leave open.
 	Save(ctx context.Context, g auth.Grant) error
 }
 
-// Builder is what a relation asks of Illuminate\Database\Eloquent\Builder.
+// Builder is what a relation asks of a model's query builder.
 //
 // Narrow on purpose: it is the set of methods the sixteen relation types call,
 // not the whole Eloquent builder. The concrete builder lives in the eloquent
@@ -162,9 +159,9 @@ type Model interface {
 //
 // Every method that reaches the database takes a context and an auth.Grant.
 // That is not decoration. A relation is a read path, List and Find and Get and
-// Paginate are read paths, and RULE 17 says a read path without a Policy is a
-// tenant leak with a technical name -- so the Grant is in the signature, where
-// forgetting it does not compile.
+// Paginate are read paths, and a read path without a Policy is a tenant leak
+// with a technical name -- so the Grant is in the signature, where forgetting it
+// does not compile.
 type Builder interface {
 	// GetModel answers Builder::getModel.
 	GetModel() Model
@@ -433,10 +430,9 @@ func hasFilterOn(q *query.Builder, column string) bool {
 
 // ScopeTenantQuery is ScopeTenant for a base query builder.
 //
-// The pivot table is reached with the base builder rather than an Eloquent one
-// -- newPivotStatement returns Illuminate\Database\Query\Builder -- so the
-// intermediate table needs its own scoping call. It needs it just as much: a
-// pivot row is what says this customer's user has that customer's role.
+// The pivot table is reached with the base builder rather than an Eloquent one,
+// so the intermediate table needs its own scoping call. It needs it just as
+// much: a pivot row is what says this customer's user has that customer's role.
 func ScopeTenantQuery(q *query.Builder, table string, g auth.Grant) (*query.Builder, error) {
 	tenant, err := RequireTenant(g)
 	if err != nil {

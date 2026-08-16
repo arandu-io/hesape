@@ -108,7 +108,7 @@ func TestPendingListsWhatMigrateWouldApply(t *testing.T) {
 }
 
 // TestMigrateGroupsACallIntoOneBatch is what makes rollback undo a deploy rather
-// than a single migration -- the same model Laravel uses.
+// than a single migration.
 func TestMigrateGroupsACallIntoOneBatch(t *testing.T) {
 	sqldb, state := newFakeDB()
 	defer sqldb.Close()

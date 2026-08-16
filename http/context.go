@@ -14,8 +14,7 @@ import (
 // the response, and helpers that answer. Nothing more -- and the "nothing more"
 // is the point. There is no database handle here, no repository, no Grant. A
 // controller that could reach the data layer would be a controller that skipped
-// the service, and therefore the policy, and `aru doctor` exists to catch
-// exactly that.
+// the service, and therefore the policy that guards it.
 //
 // It is a struct rather than an interface because it has no second
 // implementation and never will. One way to do one thing.
@@ -91,8 +90,8 @@ func (c *Context) Query(name string) string { return c.Request.URL.Query().Get(n
 
 // Input reads a form field, from the body or the query string.
 //
-// Named Input rather than Form because Input is the word the vocabulary already
-// uses for it, and the vocabulary is the point (RULE 10).
+// Named Input rather than Form because Input is the word the vocabulary
+// already uses for it, and the vocabulary is the point.
 func (c *Context) Input(name string) string { return c.Request.FormValue(name) }
 
 // URL is the path of a named route, with its parameters filled in order.
@@ -125,7 +124,7 @@ func (c *Context) URL(name string, params ...string) string {
 //	return ctx.View("invoices/index", IndexData{Invoices: list})
 //
 // A map would compile and render blank on a typo, which is the failure this
-// framework exists to make impossible. `aru doctor` refuses a map here.
+// framework exists to make impossible.
 func (c *Context) View(name string, data any) error {
 	return c.renderWith(stdhttp.StatusOK, name, data)
 }
@@ -163,8 +162,8 @@ func (c *Context) View(name string, data any) error {
 // 422 before the catch-all, because htmx takes the first entry that matches.
 // That line belongs in the application's layout, once -- it is the layout that
 // decides what a fragment answer means, and a per-page opt-in would be a second
-// way to answer a rejected form (RULE 9). A meta tag is not a script, so it
-// costs nothing against a `script-src 'self'` policy and nothing in Node.
+// way to answer a rejected form. A meta tag is not a script, so it costs
+// nothing against a `script-src 'self'` policy and nothing in Node.
 //
 // A refusal is a different thing and does not go through here: 403, 419 and 429
 // are not a form coming back with messages on it, and they answer through
@@ -213,7 +212,7 @@ func (c *Context) RedirectRoute(name string, params ...string) error {
 // the middle one had already been wrong once, answering HX-Redirect with 200 to
 // every client including the ones that do not read the header, which left a
 // browser with scripts off on a blank page after signing in. Three copies of a
-// six-line decision is three chances to be the copy that is wrong (RULE 9).
+// six-line decision is three chances to be the copy that is wrong.
 //
 // 303 and not 302: after a POST, 303 is what tells the browser to GET the next
 // address instead of posting the body to it again.

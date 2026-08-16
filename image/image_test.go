@@ -152,8 +152,8 @@ func (d *fakeDisk) Get(_ context.Context, _ auth.Grant, key string) (io.ReadClos
 	return io.NopCloser(bytes.NewReader(b)), nil
 }
 
-// TestFluentCallsLeaveTheOriginalAlone is Illuminate's withClone(), which is
-// what lets one source image produce a thumbnail and a full-size copy.
+// TestFluentCallsLeaveTheOriginalAlone verifies the clone-on-write behaviour
+// that lets one source image produce a thumbnail and a full-size copy.
 func TestFluentCallsLeaveTheOriginalAlone(t *testing.T) {
 	images := image.NewImageManager()
 	original := images.FromBytes(solidPNG(t, 40, 20, color.RGBA{R: 200, A: 255}))
@@ -305,7 +305,7 @@ func TestScaleKeepsTheAspectRatio(t *testing.T) {
 // a test. Eight alternating black and white columns reduced to two pixels must
 // come out grey: an implementation that samples two source pixels per output
 // pixel -- plain bilinear -- or one that takes the nearest -- what comes free --
-// answers black or white, having never looked at three quarters of the image.
+// produces black or white, having never looked at three quarters of the image.
 func TestDownscaleAveragesInsteadOfDroppingPixels(t *testing.T) {
 	images := image.NewImageManager()
 	img, err := images.FromBytes(stripedPNG(t, 8, 8)).Resize(2, 2)
@@ -389,8 +389,8 @@ func TestFlipsAndRotations(t *testing.T) {
 		t.Fatalf("rotated = %dx%d, want 2x4", w, h)
 	}
 
-	// Flop is Illuminate's other name for the horizontal flip, Flip for the
-	// vertical one.
+	// Flop is the other name for the horizontal flip, Flip for the vertical
+	// one.
 	if _, err := images.FromBytes(source).Flip().Flop().ToBytes(); err != nil {
 		t.Fatalf("Flip/Flop: %v", err)
 	}
@@ -463,9 +463,9 @@ func TestHeifIsFoldedToHeicAsIlluminateFoldsIt(t *testing.T) {
 	}
 }
 
-// TestAFormatWithNoEncoderFailsByName: ToWebp is accepted, because Illuminate
-// accepts it, and refused where the refusal can name the format rather than
-// quietly handing back a JPEG.
+// TestAFormatWithNoEncoderFailsByName: ToWebp is accepted as a format name,
+// and refused where the refusal can name the format rather than quietly
+// handing back a JPEG.
 func TestAFormatWithNoEncoderFailsByName(t *testing.T) {
 	images := image.NewImageManager()
 	_, err := images.FromBytes(solidPNG(t, 2, 2, color.RGBA{A: 255})).ToWebp().ToBytes()
@@ -521,7 +521,7 @@ func TestHashNameIsInventedOnceAndCarriesTheExtension(t *testing.T) {
 	}
 }
 
-// TestStoreGoesThroughTheGrant is RULE 14 and RULE 17 at this package's edge:
+// TestStoreGoesThroughTheGrant verifies authorization at this package's edge:
 // the Grant reaches the disk, which is what puts the tenant in the key.
 func TestStoreGoesThroughTheGrant(t *testing.T) {
 	images := image.NewImageManager()
@@ -601,9 +601,9 @@ func TestDominantColorAnswersTheAverage(t *testing.T) {
 	}
 }
 
-// TestDominantColorSamplesThePendingPipeline: Illuminate runs the pipeline over
-// a copy first, so the colour answers for the image as it will be, and leaves
-// the image itself unprocessed.
+// TestDominantColorSamplesThePendingPipeline: the pipeline runs over a copy
+// first, so the colour reports for the image as it will be, and leaves the
+// image itself unprocessed.
 func TestDominantColorSamplesThePendingPipeline(t *testing.T) {
 	images := image.NewImageManager()
 	img := images.FromBytes(solidPNG(t, 8, 8, color.RGBA{R: 255, A: 255})).Grayscale()
@@ -711,9 +711,9 @@ func (c fakeClient) Do(*http.Request) (*http.Response, error) {
 	}, nil
 }
 
-// TestTransformUsingReplacesWhatTheDriverWouldDo is Illuminate's
-// transformUsing(), keyed by the transformation's name instead of its
-// class-string.
+// TestTransformUsingReplacesWhatTheDriverWouldDo verifies that a registered
+// handler is keyed by the transformation's name and replaces what the driver
+// would otherwise do.
 func TestTransformUsingReplacesWhatTheDriverWouldDo(t *testing.T) {
 	images := image.NewImageManager()
 	called := false

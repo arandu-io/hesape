@@ -12,11 +12,11 @@
 //
 // # The tenant does not live here
 //
-// auth.Tenant(g) is the single source of a tenant for SQL. It used to be
-// data.Tenant, one field read off a Grant sitting in the package that owns the
-// SQL -- so the cache, the filesystem and the scheduler all had to import the
-// database to know which customer a key belonged to. RULE 14 still holds: the
-// tenant comes from the Grant, never from a path, a body, a query or a header.
+// auth.Tenant(g) is the single source of a tenant for SQL. It sits in the
+// package that owns the Grant rather than in this one, so that the cache, the
+// filesystem and the scheduler can scope a key by customer without importing
+// the database. The tenant comes from the Grant, never from a path, a body, a
+// query or a header.
 //
 // # Why the drivers are separate modules
 //
@@ -26,8 +26,7 @@
 // skeleton carried pgx and modernc/sqlite together, and govulncheck found a pgx
 // advisory in a project that could have been SQLite-only.
 //
-// So each connector is its own module with its own go.mod, under Connectors
-// where Illuminate keeps them:
+// So each connector is its own module with its own go.mod:
 //
 //	go get github.com/arandu-io/hesape/database/connectors/sqlite   // needs nothing installed
 //	go get github.com/arandu-io/hesape/database/connectors/pgx      // Postgres
@@ -43,11 +42,11 @@
 //
 //	db, closeDB, err := database.Open(cfg)
 //
-// Switching engines stays what ADR 0009 promised: a line in .env. The import
-// list is what decides which engines a build can speak at all.
+// Switching engines is a line in .env. The import list is what decides which
+// engines a build can speak at all.
 //
 // ConnectionFactory is the piece that reads that registry. It lives here rather
-// than under Connectors, and that is what makes the inversion work: a factory
+// than under the connectors, and that is what makes the inversion work: a factory
 // that imported the three connector modules to choose between them would put
 // all three back in every go.sum. It never names a driver package -- it looks
 // the dialect up in the registry the connector's init filled in. A project that
@@ -61,122 +60,50 @@
 // # Where the Grant is
 //
 // Repository is the door: every method on it takes an auth.Grant and filters by
-// auth.Tenant(g), on a read exactly as on a write (RULE 17). Connection, DB and
-// the migrator are the plumbing under that door and take none -- not as an
+// auth.Tenant(g), on a read exactly as on a write. Connection, DB and the
+// migrator are the plumbing under that door and take none -- not as an
 // exemption, but because a Grant they could not use to filter anything would be
-// a parameter that looks like enforcement and is not, which is the failure mode
-// Query.Filter was deleted for. `aru migrate` also runs down here, in a process
-// with no request and no subject, where a Grant cannot be constructed at all.
+// a parameter that looks like enforcement and is not. `aru migrate` also runs
+// down here, in a process with no request and no subject, where a Grant cannot
+// be constructed at all.
 //
 // So a module reaches rows through a Repository. A module that reaches them
 // through a Connection is a module that gets sent back in review.
 //
-// # The Illuminate files this package answers to
+// # There is one way to connect
 //
-// In the clone at laravel_illuminate/database:
+// A driver registers itself with database/sql and everything it takes arrives in
+// the DSN. [Connector] is deliberately the smaller thing -- it says which driver
+// it linked and never opens a connection -- and Open resolves the rest from
+// DATABASE_URL, so there is one way in. There is no fetch mode to set
+// beforehand either: database/sql scans into whatever the caller passed to Scan,
+// so the mode is the destination.
 //
-//	ClassMorphViolationException.php
-//	ConcurrencyErrorDetector.php
-//	ConfigurationUrlParser.php
-//	Connection.php
-//	ConnectionInterface.php
-//	ConnectionResolver.php
-//	ConnectionResolverInterface.php
-//	DatabaseManager.php
-//	DatabaseServiceProvider.php
-//	DatabaseTransactionRecord.php
-//	DatabaseTransactionsManager.php
-//	DeadlockException.php
-//	DetectsConcurrencyErrors.php
-//	DetectsLostConnections.php
-//	Grammar.php
-//	LazyLoadingViolationException.php
-//	LostConnectionDetector.php
-//	LostConnectionException.php
-//	MariaDbConnection.php
-//	MigrationServiceProvider.php
-//	MultipleColumnsSelectedException.php
-//	MultipleRecordsFoundException.php
-//	MySqlConnection.php
-//	PostgresConnection.php
-//	QueryException.php
-//	RecordNotFoundException.php
-//	RecordsNotFoundException.php
-//	SQLiteConnection.php
-//	SQLiteDatabaseDoesNotExistException.php
-//	Seeder.php
-//	SqlServerConnection.php
-//	UniqueConstraintViolationException.php
-//
-// Grammar.php is answered one package over, by query.BaseGrammar: it is the
-// abstract base Query\Grammars\Grammar extends, the grammars live in
-// query/grammars, and splitting the base from its subclasses across two
-// packages would have meant an import cycle for no gain. Its whole public
-// surface -- Wrap, WrapTable, WrapArray, Columnize, Parameterize, Parameter,
-// QuoteString, Escape, IsExpression, GetValue, GetDateFormat, GetTablePrefix,
-// SetTablePrefix -- is there.
-//
-// SqlServerConnection.php has no counterpart and will not get one: RULE 11
-// names Postgres, MySQL and SQLite for the conventional profile.
-// LazyLoadingViolationException and ClassMorphViolationException are Eloquent's
-// -- one is thrown by lazy loading and the other by the morph map, and there is
-// neither.
-//
-// Eloquent has no counterpart and never will: Post::find(1)->update() is
-// persistence that proves no authorization decision, and RULE 17 requires one on
-// the way in and on the way out. 20-components/DOC-hesape-reorganization.md says what else
-// moves in and from where.
-//
-// # The twelve names the measurement still asks about
-//
-// # PDO, which Go does not have
-//
-// Connector::connect, getOptions, getDefaultOptions and setDefaultOptions
-// assemble a PDO options array and hand it to `new PDO`. There is no PDO here:
-// a driver registers itself with database/sql and everything it takes arrives
-// in the DSN. [Connector] is deliberately the smaller thing -- it says which
-// driver it linked and never opens a connection -- and Open resolves the rest
-// from DATABASE_URL, so there is one way in.
-//
-// Builder::fetchUsing sets PDO's fetch mode for the next query. database/sql
-// scans into whatever the caller passed to Scan, so the mode is the destination
-// and there is nothing to set beforehand.
-//
-// MySqlConnection::getLastInsertId runs SELECT LAST_INSERT_ID() against the
-// handle after the insert. The name is not carried, but the answer is: the
-// identifier is read from the statement that caused it, through
+// An automatic identifier is read from the statement that caused it, through
 // sql.Result.LastInsertId, by [Connection.InsertReturningID]. It is one round
-// trip instead of two, and it cannot answer about somebody else's row -- on a
-// pool, "the last identifier" is whoever inserted most recently, which is the
-// classic way one request is handed another request's id.
-//
+// trip rather than a SELECT afterwards, and it cannot answer about somebody
+// else's row -- on a pool, "the last identifier" is whoever inserted most
+// recently, which is the classic way one request is handed another request's id.
 // The processor asks for it through processors.LastInsertIDConnection, and what
 // implements that is the binding Query builds per builder, not the pool.
 //
-// # dd, which ends the process
+// # Dumping a query does not end the process
 //
-// Builder::dd and ddRawSql dump and then call die(). A library that kills the
-// process is a library nobody can wrap, and the half that survives is the dump:
 // [github.com/arandu-io/hesape/database/query.Builder.Dump] and
-// [github.com/arandu-io/hesape/database/query.Builder.DumpRawSQL] write and hand
-// the builder back. Adding Dd next to them would be the same function with an
-// exit, which is a second way to do one thing and a way that cannot be tested.
+// [github.com/arandu-io/hesape/database/query.Builder.DumpRawSQL] write the
+// query and hand the builder back. There is no variant that exits afterwards: a
+// library that kills the process is a library nobody can wrap, and a dump that
+// exits is the same function with a way it cannot be tested.
 //
-// # getSchemaState, and the cycle it would close
+// # Why there is no schema-state getter
 //
-// Connection::getSchemaState builds the dump-and-load helper for its driver.
-// The helpers exist -- [github.com/arandu-io/hesape/database/schema.NewMySqlSchemaState]
-// and its two siblings -- but they live in the schema package, which declares
-// its own narrow Connection interface and is imported BY this package's callers
-// rather than by this package. A getter here would have to import schema, and
-// schema would go on needing a connection: Go refuses the cycle, and the
-// constructor is the call site instead. It takes the connection and the process
-// factory, which is what the PHP getter reads off $this anyway.
+// The dump-and-load helpers exist --
+// [github.com/arandu-io/hesape/database/schema.NewMySqlSchemaState] and its two
+// siblings -- but they live in the schema package, which declares its own narrow
+// Connection interface and is imported BY this package's callers rather than by
+// this package. A getter here would have to import schema, and schema would go
+// on needing a connection: Go refuses the cycle, so the constructor is the call
+// site instead. It takes the connection and the process factory.
 //
-// # The service provider and the seeder's container
-//
-// MigrationServiceProvider::provides, Seeder::setContainer and
-// Seeder::setCommand are the container and the console, wired by a provider.
-// ADR 0001 and ADR 0002 rejected both. A seeder here is handed what it needs;
-// see [Seeder].
+// A seeder is handed what it needs rather than reaching for it; see [Seeder].
 package database

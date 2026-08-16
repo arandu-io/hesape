@@ -8,10 +8,8 @@ import (
 	"strings"
 )
 
-// This file answers to Illuminate\Validation\ValidationRuleParser and
-// Illuminate\Validation\ValidationData: how a rule string becomes a name and its
-// parameters, and how "items.*.price" becomes one rule per item the request
-// actually sent.
+// This file is how a rule string becomes a name and its parameters, and how
+// "items.*.price" becomes one rule per item the request actually sent.
 //
 // Compile does the same walk at boot for a rule set written in a package-level
 // variable. These are the same steps as a value, for the caller that builds a
@@ -19,24 +17,21 @@ import (
 //
 // The wildcard half is NOT boot work and cannot be: "items.*.price" means the
 // items this request sent, so Validator.explodeRules calls
-// explodeWildcardRules once per request, over the compiled set. It called
-// nothing at all until an audit proved a wildcard rule set inert.
+// explodeWildcardRules once per request, over the compiled set.
 
-// ExplodedRules answers to the stdClass ValidationRuleParser::explode returns:
-// the rules with every wildcard expanded, and the wildcard keys that produced
-// them.
+// ExplodedRules is a rule set with every wildcard expanded, together with the
+// wildcard keys that produced it.
 type ExplodedRules struct {
-	// Rules answers to ->rules: one entry per attribute, holding the rules
-	// written against it in the order they were written.
+	// Rules is one entry per attribute, holding the rules written against it in
+	// the order they were written.
 	Rules map[string][]string
 
-	// Order is the order the attributes were written in. A PHP array remembers
-	// it and a Go map remembers none.
+	// Order is the order the attributes were written in, because a Go map
+	// remembers none.
 	Order []string
 
-	// ImplicitAttributes answers to ->implicitAttributes: the wildcard key that
-	// each expanded attribute came from, which is what getPrimaryAttribute reads
-	// to name a field in a message.
+	// ImplicitAttributes is the wildcard key each expanded attribute came from,
+	// which is what names a field in a message the way the caller wrote it.
 	ImplicitAttributes map[string][]string
 }
 
@@ -46,24 +41,23 @@ type ExplodedRules struct {
 // actually carries. It holds the request data because that expansion cannot be
 // decided without it, and it remembers which wildcard each expanded key came
 // from, so a message can name the field the way the caller wrote it.
-//
-// Answers Illuminate\Validation\ValidationRuleParser.
 type ValidationRuleParser struct {
-	// Data answers to the public $data: the request the wildcards are expanded
-	// against, because "items.*" means the items that were actually sent.
+	// Data is the request the wildcards are expanded against, because "items.*"
+	// means the items that were actually sent.
 	Data Data
 
-	// ImplicitAttributes answers to the public $implicitAttributes.
+	// ImplicitAttributes is the wildcard key each expanded attribute came from,
+	// filled in as the expansion runs.
 	ImplicitAttributes map[string][]string
 }
 
-// NewValidationRuleParser answers to the ValidationRuleParser constructor.
+// NewValidationRuleParser returns a parser that expands wildcards against data.
 func NewValidationRuleParser(data Data) *ValidationRuleParser {
 	return &ValidationRuleParser{Data: data, ImplicitAttributes: map[string][]string{}}
 }
 
-// Explode answers to ValidationRuleParser::explode: the human-friendly rules
-// turned into the full rules array the validator runs.
+// Explode turns the rules as they were written into the full rule set the
+// validator runs.
 //
 // The primary purpose of this parser is to expand any "*" rules to all of the
 // explicit rules needed for the given data. For example the rule names.* would
@@ -96,9 +90,8 @@ func (p *ValidationRuleParser) mergeInto(exploded *ExplodedRules, attribute stri
 	exploded.Rules[attribute] = append(exploded.Rules[attribute], rules...)
 }
 
-// explodeWildcardRules answers to
-// ValidationRuleParser::explodeWildcardRules: the keys of the data that one
-// wildcard attribute names, sorted so that two runs agree.
+// explodeWildcardRules returns the keys of the data that one wildcard attribute
+// names, sorted so that two runs agree.
 func (p *ValidationRuleParser) explodeWildcardRules(attribute string) []string {
 	pattern := strings.ReplaceAll(regexp.QuoteMeta(attribute), `\*`, `[^.]*`)
 
@@ -118,8 +111,7 @@ func (p *ValidationRuleParser) explodeWildcardRules(attribute string) []string {
 	return keys
 }
 
-// MergeRules answers to ValidationRuleParser::mergeRules: more rules on an
-// attribute that may already have some.
+// MergeRules adds more rules to an attribute that may already have some.
 func (p *ValidationRuleParser) MergeRules(results Rules, attribute, rules string) Rules {
 	if results == nil {
 		results = Rules{}
@@ -134,14 +126,12 @@ func (p *ValidationRuleParser) MergeRules(results Rules, attribute, rules string
 	return results
 }
 
-// Parse answers to the static ValidationRuleParser::parse: a rule string split
-// into its name and the parameters written after the colon.
+// Parse splits a rule string into its name and the parameters written after the
+// colon.
 //
-// The PHP studlies the name -- "date_format" becomes "DateFormat" -- so that it
-// can build a method name out of it. There is no method name to build here, so
-// the name stays as it was typed, which is how every table in this package keys
-// it. Its two aliases are normalized as the PHP normalizes them: "int" is
-// "integer" and "bool" is "boolean".
+// The name stays as it was typed, which is how every table in this package keys
+// it. Its two aliases are normalized: "int" is "integer" and "bool" is
+// "boolean".
 //
 // A malformed parameter list answers with no parameters rather than an error;
 // Compile is where a malformed list is reported, with the field and the file.
@@ -156,7 +146,7 @@ func Parse(rule string) (string, []string) {
 	return name, parameters
 }
 
-// normalizeRule answers to ValidationRuleParser::normalizeRule.
+// normalizeRule folds the two aliases into the names the catalogue keys.
 func normalizeRule(rule string) string {
 	switch rule {
 	case "int":
@@ -167,9 +157,8 @@ func normalizeRule(rule string) string {
 	return rule
 }
 
-// FilterConditionalRules answers to the static
-// ValidationRuleParser::filterConditionalRules: every ConditionalRules in the
-// set replaced by the rules its condition chose.
+// FilterConditionalRules replaces every ConditionalRules in the set with the
+// rules its condition chose.
 func FilterConditionalRules(rules map[string]any, data Data) Rules {
 	out := Rules{}
 
@@ -192,22 +181,22 @@ func FilterConditionalRules(rules map[string]any, data Data) Rules {
 }
 
 // ---------------------------------------------------------------------------
-// Illuminate\Validation\ConditionalRules.
+// Rules chosen by a condition.
 // ---------------------------------------------------------------------------
 
-// ConditionalRules answers to Illuminate\Validation\ConditionalRules: the rules
-// an attribute gets when a condition holds, and the ones it gets when it does
-// not.
+// ConditionalRules is the rules an attribute gets when a condition holds, and
+// the ones it gets when it does not.
 type ConditionalRules struct {
-	// condition answers to $condition. The PHP takes a bool or a callable; the
-	// callable is the general case and NewConditionalRules wraps a bool in one.
+	// condition is asked of the whole request. A caller holding a bool wraps it
+	// in a func that ignores its argument.
 	condition func(Data) bool
 
 	rules        []string
 	defaultRules []string
 }
 
-// NewConditionalRules answers to the ConditionalRules constructor.
+// NewConditionalRules returns rules chosen by the condition: rules when it
+// holds, and defaultRules when it does not.
 func NewConditionalRules(condition func(Data) bool, rules string, defaultRules ...string) *ConditionalRules {
 	c := &ConditionalRules{condition: condition, rules: splitChain(rules)}
 	if len(defaultRules) > 0 && defaultRules[0] != "" {
@@ -216,7 +205,8 @@ func NewConditionalRules(condition func(Data) bool, rules string, defaultRules .
 	return c
 }
 
-// Passes answers to ConditionalRules::passes.
+// Passes reports whether the condition holds for this request. A nil condition
+// does not hold.
 func (c *ConditionalRules) Passes(data Data) bool {
 	if c.condition == nil {
 		return false
@@ -224,28 +214,29 @@ func (c *ConditionalRules) Passes(data Data) bool {
 	return c.condition(data)
 }
 
-// Rules answers to ConditionalRules::rules.
+// Rules returns the rules used when the condition holds.
 func (c *ConditionalRules) Rules(data Data) []string { return c.rules }
 
-// DefaultRules answers to ConditionalRules::defaultRules.
+// DefaultRules returns the rules used when the condition does not hold.
 func (c *ConditionalRules) DefaultRules(data Data) []string { return c.defaultRules }
 
 // ---------------------------------------------------------------------------
-// Illuminate\Validation\NestedRules.
+// Rules decided per member of an array.
 // ---------------------------------------------------------------------------
 
-// NestedRules answers to Illuminate\Validation\NestedRules: the rules for one
-// member of an array, decided by looking at that member.
+// NestedRules is the rules for one member of an array, decided by looking at
+// that member. Build one with NewNestedRules.
 type NestedRules struct {
 	callback func(value any, attribute string, data Data) Rules
 }
 
-// NewNestedRules answers to the NestedRules constructor.
+// NewNestedRules returns rules the callback decides, member by member.
 func NewNestedRules(callback func(value any, attribute string, data Data) Rules) *NestedRules {
 	return &NestedRules{callback: callback}
 }
 
-// Compile answers to NestedRules::compile.
+// Compile asks the callback what this member's rules are, and expands them. A
+// nil callback compiles to nothing.
 func (n *NestedRules) Compile(attribute string, value any, data Data) *ExplodedRules {
 	if n.callback == nil {
 		return &ExplodedRules{Rules: map[string][]string{}, ImplicitAttributes: map[string][]string{}}
@@ -254,12 +245,11 @@ func (n *NestedRules) Compile(attribute string, value any, data Data) *ExplodedR
 }
 
 // ---------------------------------------------------------------------------
-// Illuminate\Validation\ValidationData.
+// Reading the slice of the request one attribute names.
 // ---------------------------------------------------------------------------
 
-// InitializeAndGatherData answers to
-// ValidationData::initializeAndGatherData: the slice of the request one
-// attribute names, flattened, plus the exact keys a wildcard matched.
+// InitializeAndGatherData returns the slice of the request one attribute names,
+// flattened, plus the exact keys a wildcard matched.
 func InitializeAndGatherData(attribute string, masterData Data) map[string]any {
 	initialized := initializeAttributeOnData(attribute, masterData)
 
@@ -270,20 +260,19 @@ func InitializeAndGatherData(attribute string, masterData Data) map[string]any {
 	return gathered
 }
 
-// initializeAttributeOnData answers to
-// ValidationData::initializeAttributeOnData.
+// initializeAttributeOnData fills in the keys a wildcard attribute names but the
+// request did not send.
 //
-// The data_set call is the whole point of the method, and it was missing: a
-// wildcard attribute NOBODY SENT A VALUE FOR still has to produce a key, or the
-// rules written against it never run. With "foo.*.bar" against
+// A wildcard attribute NOBODY SENT A VALUE FOR still has to produce a key, or
+// the rules written against it never run. With "foo.*.bar" against
 // {"foo": [{"baz": "x"}]} the flattened data holds only foo.0.baz, so
-// explodeWildcardRules found no key, the field expanded to nothing, and
-// "foo.*.bar": "required_with:foo.*.baz" passed on a request that PHP fails.
-// Filling foo.0.bar with null is what puts the key there.
+// explodeWildcardRules would find no key and the field would expand to nothing
+// -- which is how "foo.*.bar": "required_with:foo.*.baz" passes on a request
+// that should fail. Filling foo.0.bar with null is what puts the key there.
 //
-// The slice of the request is deep-copied first. A PHP array is a value and
-// copies itself on write; a Go map and a Go slice are references, so writing
-// the null through would write it into the request's own data.
+// The slice of the request is deep-copied first: a Go map and a Go slice are
+// references, so writing the null through would write it into the request's own
+// data.
 func initializeAttributeOnData(attribute string, masterData Data) Data {
 	explicitPath := GetLeadingExplicitAttributePath(attribute)
 
@@ -298,13 +287,12 @@ func initializeAttributeOnData(attribute string, masterData Data) Data {
 	return filled
 }
 
-// dataSet answers to the data_set helper as ValidationData calls it: write the
-// value at the dotted path, walking every member where the path says "*", and
-// making the levels it needs on the way.
+// dataSet writes the value at the dotted path, walking every member where the
+// path says "*", and making the levels it needs on the way.
 //
-// The PHP passes $overwrite = true, which is safe there and here for the same
-// reason: the target is the throwaway copy this gathers KEYS out of, and the
-// values are read back from the request by extractValuesForWildcards.
+// It overwrites what it finds, which is safe because the target is the throwaway
+// copy this gathers KEYS out of: the values are read back from the request by
+// extractValuesForWildcards.
 func dataSet(target any, segments []string, value any) any {
 	if len(segments) == 0 {
 		return value
@@ -326,8 +314,8 @@ func dataSet(target any, segments []string, value any) any {
 			}
 			return node
 		}
-		// PHP: a target the wildcard cannot walk becomes an empty array, and
-		// the loop over it writes nothing.
+		// A target the wildcard cannot walk becomes an empty array, and the
+		// loop over it writes nothing.
 		return Data{}
 	}
 
@@ -348,8 +336,8 @@ func dataSet(target any, segments []string, value any) any {
 	case []any:
 		i, err := strconv.Atoi(segment)
 		if err != nil || i < 0 || i >= len(node) {
-			// PHP grows the array here. A request cannot address past the end
-			// of what it sent, and inventing a member would invent a field.
+			// A request cannot address past the end of what it sent, and
+			// growing the list here would invent a field.
 			return node
 		}
 		if len(rest) == 0 {
@@ -360,7 +348,7 @@ func dataSet(target any, segments []string, value any) any {
 		return node
 	}
 
-	// Not accessible: PHP replaces it with an array and writes into that.
+	// Not walkable: replace it with an array and write into that.
 	made := Data{}
 	if len(rest) == 0 {
 		made[segment] = value
@@ -396,8 +384,8 @@ func deepClone(value any) any {
 	return value
 }
 
-// extractValuesForWildcards answers to
-// ValidationData::extractValuesForWildcards.
+// extractValuesForWildcards reads back, out of the request itself, the value at
+// every key the wildcard matched.
 func extractValuesForWildcards(masterData Data, gathered map[string]any, attribute string) map[string]any {
 	pattern := strings.ReplaceAll(regexp.QuoteMeta(attribute), `\*`, `[^.]+`)
 
@@ -415,9 +403,8 @@ func extractValuesForWildcards(masterData Data, gathered map[string]any, attribu
 	return out
 }
 
-// ExtractDataFromPath answers to ValidationData::extractDataFromPath: the
-// sub-section of the request one dotted path names, so that the rest of it is
-// not walked.
+// ExtractDataFromPath returns the sub-section of the request one dotted path
+// names, so that the rest of it is not walked.
 func ExtractDataFromPath(attribute string, masterData Data) Data {
 	results := Data{}
 
@@ -433,16 +420,16 @@ func ExtractDataFromPath(attribute string, masterData Data) Data {
 	return results
 }
 
-// GetLeadingExplicitAttributePath answers to
-// ValidationData::getLeadingExplicitAttributePath: "foo.bar.*.baz" gives
-// "foo.bar", which is all of the path that can be walked without guessing.
+// GetLeadingExplicitAttributePath returns the part of a path before its first
+// wildcard: "foo.bar.*.baz" gives "foo.bar", which is all of it that can be
+// walked without guessing.
 func GetLeadingExplicitAttributePath(attribute string) string {
 	head, _, _ := strings.Cut(attribute, "*")
 
 	return strings.TrimRight(head, ".")
 }
 
-// arrDot answers to Arr::dot over the shapes Data holds.
+// arrDot flattens the shapes Data holds into one map of dotted keys.
 func arrDot(data Data) map[string]any {
 	out := map[string]any{}
 	flattenInto(out, "", data)
@@ -483,8 +470,8 @@ func join(prefix, key string) string {
 	return prefix + "." + key
 }
 
-// setPath answers to Arr::set: write a value at a dotted path, making the levels
-// it needs on the way.
+// setPath writes a value at a dotted path, making the levels it needs on the
+// way.
 func setPath(data Data, key string, value any) {
 	segments := strings.Split(key, ".")
 

@@ -8,8 +8,8 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// TestInsertWritesTheTenantIntoTheRow is the write half of RULE 14. An insert
-// has no where clause to filter, so the tenant is the column it writes.
+// TestInsertWritesTheTenantIntoTheRow: an insert has no where clause to filter,
+// so the tenant is the column it writes.
 func TestInsertWritesTheTenantIntoTheRow(t *testing.T) {
 	connection := &fakeConnection{inserted: true}
 	values := map[string]any{"email": "ana@example.com"}
@@ -112,7 +112,7 @@ func TestInsertOrIgnoreAnswersHowManyRowsItKept(t *testing.T) {
 }
 
 // TestInsertUsingScopesTheSelectItReadsFrom: an insert reading from a select is
-// a read, and a read carries the tenant (RULE 17).
+// a read, and a read carries the tenant.
 func TestInsertUsingScopesTheSelectItReadsFrom(t *testing.T) {
 	connection := &fakeConnection{affected: 3}
 	source := query.NewBuilder(connection, &fakeGrammar{}, &fakeProcessor{}).From("staff").Select("email")

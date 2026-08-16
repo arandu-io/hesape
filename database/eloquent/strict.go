@@ -6,39 +6,33 @@ import (
 	"sync"
 )
 
-// ErrLazyLoadingViolation answers
-// Illuminate\Database\LazyLoadingViolationException.
-//
-// It is what reading a relation that was never loaded means once
+// ErrLazyLoadingViolation is what reading a relation that was never loaded means
+// once
 // PreventLazyLoading is on. See PreventLazyLoading for what "lazy loading" can
 // still mean in a framework that has none.
 var ErrLazyLoadingViolation = errors.New("eloquent: attempted to lazy load a relation that is not loaded")
 
-// ErrMassAssignment answers
-// Illuminate\Database\Eloquent\MassAssignmentException, which Fill returns once
-// PreventSilentlyDiscardingAttributes is on and a key has no column behind it.
+// ErrMassAssignment is what Fill returns once PreventSilentlyDiscardingAttributes
+// is on and a key has no column behind it.
 var ErrMassAssignment = errors.New("eloquent: attribute does not exist on the model")
 
 // ErrMissingAttribute names reading an attribute a persisted model does not
 // have -- a key that is neither a column nor a raw attribute -- once
 // PreventAccessingMissingAttributes is on.
 //
-// Nothing in this package returns it. GetAttribute answers one value and has no
-// error to return, so the violation is reported through the callback
-// HandleMissingAttributeViolationUsing registered, and this is the error that
-// callback has to report or wrap. Without a callback the read is simply nil,
-// which is why the switch alone changes nothing.
-//
-// Answers Illuminate\Database\Eloquent\MissingAttributeException.
+// Nothing in this package returns it. GetAttribute returns one value and
+// has no error to return, so the violation is reported through the callback
+// HandleMissingAttributeViolationUsing registered, and this is the error
+// that callback has to report or wrap. Without a callback the read is
+// simply nil, which is why the switch alone changes nothing.
 var ErrMissingAttribute = errors.New("eloquent: attribute does not exist on the model")
 
-// strict holds what PHP keeps in static properties on Model.
+// strict holds the three violation switches and their callbacks.
 //
-// PHP resolves Model::preventLazyLoading() through late static binding, which Go
-// does not have, so the switches are package functions and the state they guard
-// is a package variable behind a mutex -- the same shape Concerns uses for
-// Unguard and WithoutEvents. It is process-wide there too: every model of every
-// type reads the one flag.
+// The switches are package functions, and the state they guard is a package
+// variable behind a mutex -- the same shape concerns uses for Unguard and
+// WithoutEvents. It is process-wide: every model of every type reads the
+// one flag.
 var strict struct {
 	mu sync.RWMutex
 
@@ -51,142 +45,134 @@ var strict struct {
 	missingAttributeViolation   func(model any, key string)
 }
 
-// ShouldBeStrict is Model::shouldBeStrict: the three switches below at once.
+// ShouldBeStrict turns the three switches below on or off together.
 //
-// The PHP argument defaults to true; Go has no default argument, so it is
-// variadic and an empty call is the PHP's no-argument call.
+// value is variadic because Go has no default argument; an empty call turns
+// them all on.
 func ShouldBeStrict(shouldBeStrict ...bool) {
 	PreventLazyLoading(shouldBeStrict...)
 	PreventSilentlyDiscardingAttributes(shouldBeStrict...)
 	PreventAccessingMissingAttributes(shouldBeStrict...)
 }
 
-// PreventLazyLoading is Model::preventLazyLoading.
+// PreventLazyLoading turns reading an unloaded relation into a reported
+// violation.
 //
-// # What it means here, which is not what it means in Laravel
+// # What it does not do
 //
-// In Laravel the switch stops a query: reading $user->posts on a model that
-// never loaded posts runs a select behind the caller, and preventLazyLoading
-// turns that into an exception instead. This framework has no such query at all
-// -- eloquent/concerns refused automatic loading outright, because a query with
-// no auth.Grant on it breaks RULE 17 -- so there is no select for this switch
-// to stop.
+// It does not stop a query, because there is no query to stop: nothing here
+// loads a relation behind the caller, since such a query would carry no
+// auth.Grant.
 //
-// What is left is the half the exception was really about: reading a relation
-// that is not there. With the switch off, GetRelation answers false and a caller
-// that ignored the second value reads a nil it will blame on the database. With
-// it on, the read is reported as the violation it is, through the callback
-// HandleLazyLoadingViolationUsing registered.
+// What is left is reading a relation that is not there. With the switch
+// off, GetRelation returns false and a caller that ignored the second value
+// reads a nil it will blame on the database. With it on, the read is
+// reported through the callback HandleLazyLoadingViolationUsing registered.
 //
 // A model that does not exist yet, and one that was just created, are exempt --
-// they have nothing to have loaded -- which is the PHP's own carve-out in
-// handleLazyLoadingViolation.
+// they have nothing to have loaded.
 func PreventLazyLoading(value ...bool) {
 	strict.mu.Lock()
 	defer strict.mu.Unlock()
 	strict.preventLazyLoading = optionalBool(value)
 }
 
-// PreventsLazyLoading is Model::preventsLazyLoading.
+// PreventsLazyLoading reports whether PreventLazyLoading is on.
 func PreventsLazyLoading() bool {
 	strict.mu.RLock()
 	defer strict.mu.RUnlock()
 	return strict.preventLazyLoading
 }
 
-// HandleLazyLoadingViolationUsing is
-// Model::handleLazyLoadingViolationUsing.
+// HandleLazyLoadingViolationUsing registers what to do about a lazy loading
+// violation.
 //
-// The PHP throws LazyLoadingViolationException when no callback is registered.
-// GetRelation cannot throw and cannot return an error without becoming a second
-// way to read a relation (RULE 9), so the callback is where the violation goes,
-// and an application that wants the PHP's loudness registers one:
+// GetRelation cannot return an error without becoming a second way to read a
+// relation, so the callback is where the violation goes. An application that
+// wants it to be loud registers one:
 //
 //	eloquent.HandleLazyLoadingViolationUsing(func(model any, key string) {
 //		panic(fmt.Sprintf("%v: %s was not loaded", model, key))
 //	})
 //
-// A nil callback unregisters it, which is what passing null does there.
+// A nil callback unregisters it.
 func HandleLazyLoadingViolationUsing(callback func(model any, key string)) {
 	strict.mu.Lock()
 	defer strict.mu.Unlock()
 	strict.lazyLoadingViolation = callback
 }
 
-// PreventSilentlyDiscardingAttributes is
-// Model::preventSilentlyDiscardingAttributes.
-//
-// Fill drops a key with no column behind it, which is what fill() does with a
-// key outside $fillable. With this on, the key is refused instead: Fill returns
-// ErrMassAssignment, where the PHP throws MassAssignmentException.
+// PreventSilentlyDiscardingAttributes changes what Fill does with a key
+// that has no column behind it: dropped when this is off, refused with
+// ErrMassAssignment when it is on.
 func PreventSilentlyDiscardingAttributes(value ...bool) {
 	strict.mu.Lock()
 	defer strict.mu.Unlock()
 	strict.preventSilentlyDiscardingAttributes = optionalBool(value)
 }
 
-// PreventsSilentlyDiscardingAttributes is
-// Model::preventsSilentlyDiscardingAttributes.
+// PreventsSilentlyDiscardingAttributes reports whether
+// PreventSilentlyDiscardingAttributes is on.
 func PreventsSilentlyDiscardingAttributes() bool {
 	strict.mu.RLock()
 	defer strict.mu.RUnlock()
 	return strict.preventSilentlyDiscardingAttributes
 }
 
-// HandleDiscardedAttributeViolationUsing is
-// Model::handleDiscardedAttributeViolationUsing.
+// HandleDiscardedAttributeViolationUsing registers what to do about a
+// discarded-attribute violation.
 //
-// A registered callback replaces the error, exactly as it replaces the throw
-// there: Fill reports the keys and then succeeds.
+// A registered callback replaces the error: Fill reports the keys to it and
+// then succeeds.
 func HandleDiscardedAttributeViolationUsing(callback func(model any, keys []string)) {
 	strict.mu.Lock()
 	defer strict.mu.Unlock()
 	strict.discardedAttributeViolation = callback
 }
 
-// PreventAccessingMissingAttributes is
-// Model::preventAccessingMissingAttributes.
+// PreventAccessingMissingAttributes turns reading an absent attribute into a
+// reported violation.
 //
-// GetAttribute answers nil for a key that is neither a column nor a raw
+// GetAttribute returns nil for a key that is neither a column nor a raw
 // attribute. With this on, the read is reported through the callback
 // HandleMissingAttributeViolationUsing registered.
 //
-// Most of what this catches in Laravel the compiler catches here first: a row is
-// a struct, and found.Entity.Naem does not build. What is left is the read by
-// name -- GetAttribute takes a string -- which is where a typo still survives to
-// run time.
+// Most of what this would catch the compiler catches first: a row is a struct,
+// and found.Entity.Naem does not build. What is left is the read by name --
+// GetAttribute takes a string -- which is where a typo still survives to run
+// time.
 func PreventAccessingMissingAttributes(value ...bool) {
 	strict.mu.Lock()
 	defer strict.mu.Unlock()
 	strict.preventAccessingMissingAttributes = optionalBool(value)
 }
 
-// PreventsAccessingMissingAttributes is
-// Model::preventsAccessingMissingAttributes.
+// PreventsAccessingMissingAttributes reports whether
+// PreventAccessingMissingAttributes is on.
 func PreventsAccessingMissingAttributes() bool {
 	strict.mu.RLock()
 	defer strict.mu.RUnlock()
 	return strict.preventAccessingMissingAttributes
 }
 
-// HandleMissingAttributeViolationUsing is
-// Model::handleMissingAttributeViolationUsing.
+// HandleMissingAttributeViolationUsing registers what to do about a
+// missing-attribute violation.
 //
-// The PHP throws MissingAttributeException with no callback registered.
-// GetAttribute returns one value and cannot throw, so the callback is the whole
-// of the switch; see HandleLazyLoadingViolationUsing.
+// GetAttribute returns one value and has no error to return, so the
+// callback is the whole of the switch; see HandleLazyLoadingViolationUsing.
 func HandleMissingAttributeViolationUsing(callback func(model any, key string)) {
 	strict.mu.Lock()
 	defer strict.mu.Unlock()
 	strict.missingAttributeViolation = callback
 }
 
-// handleLazyLoadingViolation answers
-// HasAttributes::handleLazyLoadingViolation.
+// handleLazyLoadingViolation reports a lazy-loading violation to the
+// registered callback, when PreventLazyLoading is on. With no callback
+// registered, nothing happens.
 //
-// The PHP's exempt cases -- a model that does not exist, and one that was just
-// created -- guard the throw, and the callback runs before them. There is no
-// throw here, so they are the whole of what is left after the callback: nothing.
+// Unlike handleMissingAttributeViolation, it has no exempt case for a model
+// that does not exist yet or was just created: there is no fallback
+// behavior here left to exempt anything from, only the callback.
 func (m *Model[T]) handleLazyLoadingViolation(key string) {
 	if !PreventsLazyLoading() {
 		return
@@ -200,9 +186,9 @@ func (m *Model[T]) handleLazyLoadingViolation(key string) {
 	}
 }
 
-// handleMissingAttributeViolation answers
-// HasAttributes::handleMissingAttributeViolation, which the PHP spells inline in
-// getAttribute.
+// handleMissingAttributeViolation reports a missing-attribute violation to
+// the registered callback, when PreventAccessingMissingAttributes is on and
+// the model exists.
 func (m *Model[T]) handleMissingAttributeViolation(key string) {
 	if !PreventsAccessingMissingAttributes() || !m.Exists {
 		return
@@ -216,9 +202,8 @@ func (m *Model[T]) handleMissingAttributeViolation(key string) {
 	}
 }
 
-// handleDiscardedAttributeViolation answers
-// GuardsAttributes::handleDiscardedAttributeViolation. It returns the error Fill
-// reports, or nil when a callback took the violation instead.
+// handleDiscardedAttributeViolation returns the error Fill reports for the
+// discarded keys, or nil when a callback took the violation instead.
 func (m *Model[T]) handleDiscardedAttributeViolation(keys []string) error {
 	if len(keys) == 0 || !PreventsSilentlyDiscardingAttributes() {
 		return nil
@@ -234,8 +219,8 @@ func (m *Model[T]) handleDiscardedAttributeViolation(keys []string) error {
 	return fmt.Errorf("%w: %s on %s", ErrMassAssignment, keys, m.GetTable())
 }
 
-// optionalBool is the PHP's `$value = true` default argument, which Go spells as
-// a variadic nobody passes.
+// optionalBool reads a variadic bool as an optional argument defaulting to
+// true: no argument means true, and an argument is used as given.
 func optionalBool(value []bool) bool {
 	if len(value) == 0 {
 		return true

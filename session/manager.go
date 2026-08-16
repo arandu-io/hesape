@@ -8,8 +8,7 @@ import (
 	"time"
 )
 
-// Config is the session configuration: Illuminate's config/session.php, as a
-// struct.
+// Config is the session configuration, as a struct.
 //
 // Typed rather than a map, for the reason every build configuration here is:
 // a misspelled key in a map is an application that boots and then behaves like
@@ -65,17 +64,15 @@ type Config struct {
 	BlockLockSeconds time.Duration
 	BlockWaitSeconds time.Duration
 
-	// Lottery is the odds of a request collecting garbage: {2, 100} is two in a
-	// hundred, which is Illuminate's default. A zero denominator turns
-	// collection off, which is right for a handler whose store expires entries
-	// itself.
+	// Lottery is the odds of a request collecting garbage: {2, 100} is two in
+	// a hundred. A zero denominator turns collection off, which is right for
+	// a handler whose store expires entries itself.
 	Lottery [2]int
 }
 
-// The defaults Illuminate ships, for the fields a zero value cannot stand in
-// for.
+// The defaults for the fields a zero value cannot stand in for.
 const (
-	// DefaultLifetime is two hours, which is Illuminate's 120 minutes.
+	// DefaultLifetime is two hours.
 	DefaultLifetime = 2 * time.Hour
 	// DefaultBlockLockSeconds is how long a route holds the session lock.
 	DefaultBlockLockSeconds = 10 * time.Second
@@ -91,23 +88,21 @@ var ErrNoDriver = errors.New("session: no such session driver")
 // It is what [SessionManager.Extend] registers, and it is how the drivers that
 // need a collaborator get built: the cookie driver needs a jar, the cache driver
 // a cache and the database driver a connection, and there is no container here
-// to fetch them from (ADR 0001). The application that has them registers three
-// closures at boot, which is the same wiring Illuminate does inside the manager
-// and in one place a person can read.
+// to fetch them from. The application that has them registers three
+// closures at boot, in one place a person can read.
 type HandlerCreator func(cfg Config) (SessionHandler, error)
 
-// SessionManager builds sessions from configuration.
-//
-// It is Illuminate\Session\SessionManager: which driver, which cookie, how long,
-// and whether requests of one session wait for each other.
+// SessionManager builds sessions from configuration: which driver, which
+// cookie, how long, and whether requests of one session wait for each
+// other.
 //
 // # Driver returns a new Store every call
 //
-// Illuminate's manager caches the driver, because in PHP a process serves one
-// request. Here a process serves thousands at once, and a [Store] is a bag of
-// keys with no lock on it: handing the same one to two requests would interleave
-// their writes and save each other's session. The HANDLER is shared -- that is
-// the connection, the directory or the map, and it is built once.
+// A process here serves thousands of requests at once, and a [Store] is a
+// bag of keys with no lock on it: handing the same one to two requests
+// would interleave their writes and save each other's session. The HANDLER
+// is shared -- that is the connection, the directory or the map, and it is
+// built once.
 type SessionManager struct {
 	mu        sync.RWMutex
 	config    Config
@@ -116,9 +111,7 @@ type SessionManager struct {
 	handlers  map[string]SessionHandler
 }
 
-// NewSessionManager is Manager::__construct, which SessionManager inherits: the
-// configuration arrives as a typed [Config] here rather than through a
-// container (ADR 0001).
+// NewSessionManager returns a manager built from a typed [Config].
 //
 // encrypter may be nil when Config.Encrypt is false. When it is true and the
 // encrypter is nil, [SessionManager.Driver] refuses rather than quietly storing
@@ -141,11 +134,9 @@ func NewSessionManager(cfg Config, encrypter Encrypter) *SessionManager {
 	}
 }
 
-// Extend is Manager::extend, which SessionManager inherits.
-//
-// It registers a handler creator under a driver name. The PHP's creator returns
-// a Store and reaches SessionManager::callCustomCreator; this one returns the
-// handler, and the [Store] around it is built the same way for every driver.
+// Extend registers a handler creator under a driver name. It returns the
+// handler, and the [Store] around it is built the same way for every
+// driver.
 //
 // Registering a name that is already built in replaces it, which is what makes
 // "file" swappable in a test without a second configuration path.
@@ -157,14 +148,12 @@ func (m *SessionManager) Extend(driver string, creator HandlerCreator) *SessionM
 	return m
 }
 
-// Driver is Manager::driver, finished by SessionManager::buildSession.
-//
-// It returns a session for this request, on the named driver. The empty name is
-// the configured default.
+// Driver returns a session for this request, on the named driver. The empty
+// name is the configured default.
 //
 // The id it starts with is empty, so a fresh one is minted; [StartSession] sets
-// the one the browser sent immediately afterwards, which is the order Illuminate
-// uses and the reason a missing cookie is not a special case anywhere.
+// the one the browser sent immediately afterwards, which is why a missing
+// cookie is not a special case anywhere.
 func (m *SessionManager) Driver(name string) (*Store, error) {
 	if name == "" {
 		name = m.GetDefaultDriver()
@@ -237,9 +226,8 @@ func (m *SessionManager) buildSession(handler SessionHandler, id string) (*Store
 	return NewEncryptedStore(m.config.Cookie, handler, m.encrypter, id).Store, nil
 }
 
-// ShouldBlock is SessionManager::shouldBlock.
-//
-// It reports whether requests of one session should wait for each other.
+// ShouldBlock reports whether requests of one session should wait for each
+// other.
 //
 // Two tabs writing the same session at once is a lost write: both read, both
 // change one key, and the second save overwrites the first. Blocking costs a
@@ -251,18 +239,16 @@ func (m *SessionManager) ShouldBlock() bool {
 	return m.config.Block
 }
 
-// BlockDriver is SessionManager::blockDriver.
-//
-// It names the store the session lock is taken in, or "" for the default one.
+// BlockDriver names the store the session lock is taken in, or "" for the
+// default one.
 func (m *SessionManager) BlockDriver() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.config.BlockStore
 }
 
-// DefaultRouteBlockLockSeconds is SessionManager::defaultRouteBlockLockSeconds:
-// how long a route may hold the session lock before it is broken. Zero
-// configures [DefaultBlockLockSeconds].
+// DefaultRouteBlockLockSeconds is how long a route may hold the session
+// lock before it is broken. Zero configures [DefaultBlockLockSeconds].
 func (m *SessionManager) DefaultRouteBlockLockSeconds() time.Duration {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -272,9 +258,8 @@ func (m *SessionManager) DefaultRouteBlockLockSeconds() time.Duration {
 	return m.config.BlockLockSeconds
 }
 
-// DefaultRouteBlockWaitSeconds is SessionManager::defaultRouteBlockWaitSeconds:
-// how long a request waits to take the session lock before giving up. Zero
-// configures [DefaultBlockWaitSeconds].
+// DefaultRouteBlockWaitSeconds is how long a request waits to take the
+// session lock before giving up. Zero configures [DefaultBlockWaitSeconds].
 func (m *SessionManager) DefaultRouteBlockWaitSeconds() time.Duration {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -284,23 +269,21 @@ func (m *SessionManager) DefaultRouteBlockWaitSeconds() time.Duration {
 	return m.config.BlockWaitSeconds
 }
 
-// GetSessionConfig is SessionManager::getSessionConfig. It returns the
-// configuration.
+// GetSessionConfig returns the configuration.
 func (m *SessionManager) GetSessionConfig() Config {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.config
 }
 
-// GetDefaultDriver is SessionManager::getDefaultDriver. It returns the
-// configured driver name.
+// GetDefaultDriver returns the configured driver name.
 func (m *SessionManager) GetDefaultDriver() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.config.Driver
 }
 
-// SetDefaultDriver is SessionManager::setDefaultDriver. It changes it.
+// SetDefaultDriver changes the configured driver name.
 func (m *SessionManager) SetDefaultDriver(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

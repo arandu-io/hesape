@@ -95,8 +95,8 @@ func contains(haystack, needle string) bool {
 //
 // The rebinder toggled its "inside a literal" flag on every apostrophe, so one
 // in an English contraction opened a string that never closed -- and every
-// placeholder after it went to PostgreSQL as a literal ?, which answers with a
-// syntax error about a character position, lines away from the comment.
+// placeholder after it went to PostgreSQL as a literal ?, which comes back as
+// a syntax error about a character position, lines away from the comment.
 func TestAnApostropheInACommentDoesNotEatThePlaceholder(t *testing.T) {
 	cases := []struct {
 		what  string

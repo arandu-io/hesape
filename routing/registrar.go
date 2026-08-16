@@ -7,12 +7,12 @@ import (
 )
 
 // RouteRegistrar collects group attributes fluently and applies them to the
-// routes registered through it. It is the Go shape of Laravel's RouteRegistrar:
-// a builder that holds prefix, name, middleware, domain, namespace and where,
-// and that hands them to the router when a route is registered.
+// routes registered through it: a builder that holds prefix, name,
+// middleware, domain, namespace and where, and that hands them to the router
+// when a route is registered.
 //
-// The Router methods Prefix, Name, Middleware, Domain and Namespace return one,
-// so the call reads as it does in Laravel:
+// The Router methods Prefix, Name, Middleware, Domain and Namespace return
+// one, so the call chains:
 //
 //	r.Prefix("/api").Name("api.").Middleware(auth.RequireLogin).Get("/users", h)
 //
@@ -31,8 +31,7 @@ type RouteRegistrar struct {
 }
 
 // Prefix returns a registrar that prepends prefix to every route registered
-// through it. It is the Router method Laravel exposes through __call, here a
-// real method because Go has no __call.
+// through it.
 func (r *Router) Prefix(prefix string) *RouteRegistrar {
 	return &RouteRegistrar{router: r, prefix: prefix}
 }
@@ -62,8 +61,8 @@ func (r *Router) Namespace(ns string) *RouteRegistrar {
 	return &RouteRegistrar{router: r, namespace: ns}
 }
 
-// Attribute sets one attribute on the registrar, for the caller that builds it
-// piecemeal. It is Laravel's attribute method.
+// Attribute sets one attribute on the registrar, for the caller that builds
+// it piecemeal.
 func (reg *RouteRegistrar) Attribute(key string, value any) *RouteRegistrar {
 	switch key {
 	case "prefix":

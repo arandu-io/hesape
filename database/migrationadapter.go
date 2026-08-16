@@ -13,10 +13,10 @@ import (
 // signatures differ in exactly two places, and both differences are the reason
 // this adapter is four methods rather than a type assertion:
 //
-//   - Select there takes no useReadPdo flag, and reads through the write pool.
-//     A migration that read from a replica would be reading a schema the
-//     replica has not been told about yet.
-//   - Pretend there answers the statements as strings, because the migrator
+//   - Select there takes no read-replica flag, and always reads through the
+//     write pool. A migration that read from a replica would be reading a
+//     schema the replica has not been told about yet.
+//   - Pretend there returns the statements as strings, because the migrator
 //     prints them and has no use for the bindings.
 //
 // The result also satisfies migrations.TransactionalConnection and
@@ -26,16 +26,18 @@ func ForMigrations(connection *Connection) migrations.Connection {
 	return migrationConnection{connection}
 }
 
-// migrationConnection is what ForMigrations answers.
+// migrationConnection is the adapter type ForMigrations constructs.
 type migrationConnection struct{ *Connection }
 
-// Select answers migrations.Connection.Select, on the write pool.
+// Select satisfies migrations.Connection.Select: it runs the query on the
+// write pool.
 func (m migrationConnection) Select(ctx context.Context, query string, bindings []any) ([]map[string]any, error) {
 	return m.Connection.Select(ctx, query, bindings, false)
 }
 
-// SupportsSchemaTransactions answers
-// migrations.TransactionalConnection.SupportsSchemaTransactions.
+// SupportsSchemaTransactions satisfies
+// migrations.TransactionalConnection.SupportsSchemaTransactions: it reports
+// whether this driver can roll a schema change back.
 //
 // PostgreSQL and SQLite roll DDL back; MySQL commits it the moment it runs, so
 // a failed migration there leaves the half it finished behind whatever anybody
@@ -50,12 +52,14 @@ func (m migrationConnection) SupportsSchemaTransactions() bool {
 	}
 }
 
-// Transaction answers migrations.TransactionalConnection.Transaction.
+// Transaction satisfies migrations.TransactionalConnection.Transaction: it
+// runs callback inside a transaction, with a single attempt and no retry.
 func (m migrationConnection) Transaction(_ context.Context, callback func() error) error {
 	return m.Connection.Transaction(callback, 1)
 }
 
-// Pretend answers migrations.PretendingConnection.Pretend, as statements.
+// Pretend satisfies migrations.PretendingConnection.Pretend: it runs callback
+// without executing its statements and returns them as strings.
 func (m migrationConnection) Pretend(ctx context.Context, callback func() error) ([]string, error) {
 	entries, err := m.Connection.Pretend(ctx, func(*Connection) error { return callback() })
 	if err != nil {
@@ -77,7 +81,9 @@ type MigrationResolver struct {
 	Resolver ConnectionResolverInterface
 }
 
-// Connection answers migrations.Resolver.Connection.
+// Connection satisfies migrations.Resolver.Connection: it resolves the named
+// connection and adapts it with ForMigrations, or fails if it is not a
+// *Connection.
 func (r MigrationResolver) Connection(name string) (migrations.Connection, error) {
 	connection, err := r.Resolver.Connection(name)
 	if err != nil {
@@ -91,15 +97,18 @@ func (r MigrationResolver) Connection(name string) (migrations.Connection, error
 	return ForMigrations(concrete), nil
 }
 
-// GetDefaultConnection answers migrations.Resolver.GetDefaultConnection.
+// GetDefaultConnection satisfies migrations.Resolver.GetDefaultConnection,
+// forwarding to the wrapped resolver.
 func (r MigrationResolver) GetDefaultConnection() string { return r.Resolver.GetDefaultConnection() }
 
-// SetDefaultConnection answers migrations.Resolver.SetDefaultConnection.
+// SetDefaultConnection satisfies migrations.Resolver.SetDefaultConnection,
+// forwarding to the wrapped resolver.
 func (r MigrationResolver) SetDefaultConnection(name string) { r.Resolver.SetDefaultConnection(name) }
 
-// errNotAMigratableConnection is what a resolver answering something that is
-// not a *Connection gets. It is possible only in a test that substituted the
-// interface, and saying which one is not there beats a nil dereference.
+// errNotAMigratableConnection is what MigrationResolver.Connection returns
+// when the resolved connection is not a *Connection. It is possible only in a
+// test that substituted the interface, and saying which one is not there
+// beats a nil dereference.
 var errNotAMigratableConnection = errNotMigratable{}
 
 type errNotMigratable struct{}

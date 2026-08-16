@@ -4,24 +4,11 @@
 // in -- and the providers subpackage, which is the flow that gets it: Google,
 // GitHub, Facebook and Twitter today.
 //
-// # Why it is called oauth
-//
-// The name says the protocol, because that is what the package is: an OAuth 2
-// client with a provider catalogue on top. Every component in this collection is
-// named for what it does -- auth, cache, database, http, mail -- and this one
-// follows.
-//
-// It used to be called socialite. That is a product name from another
-// ecosystem, and a name borrowed from a product teaches nothing to somebody who
-// has not used that product. The providers subpackage was oauthtwo for the same
-// kind of reason, and is now providers, which is what it holds.
-//
 // # What it is not
 //
 // It is not an OAuth 2 authorization SERVER. This package is the client half:
-// it sends somebody to a provider and reads back who they are. Being the
-// provider -- issuing tokens for other applications to consume -- is a separate
-// thing and is deferred, see 00-meta/DOC-scope.md.
+// it sends somebody to a provider and reads back who they are. Issuing tokens
+// for other applications to consume is a separate thing and is not here.
 //
 // It is also not golang.org/x/oauth2. That library is the token exchange and
 // nothing above it. What this adds is the part every application writes by hand

@@ -9,13 +9,10 @@ type jarKey struct{}
 
 // WithCookieJar returns a copy of ctx carrying the jar for this request.
 //
-// It answers to nothing in the PHP, and it exists because of what PHP does not
-// have to do. There, the container hands the same CookieJar singleton to every
-// controller, and the queue on it is a per-request queue because the process
-// serves one request and dies. Here one process serves many at once, so the
-// AddQueuedCookiesToResponse middleware clones the application's jar per
-// request and calls this; a handler that queued on the shared jar instead would
-// be writing a cookie into somebody else's response.
+// One process serves many requests at once, so the AddQueuedCookiesToResponse
+// middleware clones the application's jar per request and calls this; a
+// handler that queued on the shared jar instead would be writing a cookie
+// into somebody else's response.
 func WithCookieJar(ctx context.Context, j *CookieJar) context.Context {
 	return context.WithValue(ctx, jarKey{}, j)
 }

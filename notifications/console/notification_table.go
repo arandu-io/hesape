@@ -16,14 +16,12 @@ import (
 // NotificationTableCommand writes the migration that creates the notifications
 // table.
 //
-// It is Illuminate\Notifications\Console\NotificationTableCommand, which answers
-// to `make:notifications-table` and, in Laravel, also to
-// `notifications:table`. Only the first name is here: two names for one command
-// is the second way RULE 9 refuses.
+// It answers to `make:notifications-table`, and to that name only: two names
+// for one command is two things to keep in step.
 //
 // It writes a file and runs nothing. A migration that ran itself would be N
-// replicas racing each other at boot (RULE 16), and emitting a file is what lets
-// somebody read it before it reaches production.
+// replicas racing each other at boot, and emitting a file is what lets somebody
+// read it before it reaches production.
 //
 // A project that keeps its migrations as Go values passes
 // [notifications.Migrations] to database.Migrate instead and never runs this.
@@ -38,19 +36,16 @@ type NotificationTableCommand struct {
 	Now func() time.Time
 }
 
-// NewNotificationTableCommand returns the command, writing into directory.
-//
-// It has no PHP counterpart: there the command is constructed by the container
-// and finds the migration path through the Application (ADR 0001).
+// NewNotificationTableCommand returns the command, writing into directory. An
+// empty directory means database/migrations under the working directory.
 func NewNotificationTableCommand(directory string) *NotificationTableCommand {
 	return &NotificationTableCommand{Directory: directory}
 }
 
 // Command is the registry entry for make:notifications-table.
 //
-// It has no PHP counterpart: a Laravel command declares its name in a $signature
-// property and is discovered by scanning. A command missing from the registry
-// here does not exist, and one in it with a broken Run does not build.
+// A command is registered rather than discovered by scanning: one missing from
+// the registry does not exist, and one in it with a broken Run does not build.
 func (c *NotificationTableCommand) Command() console.Command {
 	return console.Command{
 		Name:        "make:notifications-table",
@@ -59,19 +54,14 @@ func (c *NotificationTableCommand) Command() console.Command {
 	}
 }
 
-// MigrationTableName is the table the migration creates.
-//
-// It is NotificationTableCommand::migrationTableName, which is protected there
-// and exported here because the name is what a caller checks a generated file
-// against.
+// MigrationTableName is the table the migration creates. It is exported because
+// the name is what a caller checks a generated file against.
 func (c *NotificationTableCommand) MigrationTableName() string { return notifications.Table }
 
 // MigrationStub is the SQL the migration is written with.
 //
-// It is NotificationTableCommand::migrationStubFile, which names a stub file
-// shipped inside the PHP package. There is no stub file here: the SQL is
-// [notifications.Migrations], so the table this writes and the table a Go
-// migration creates cannot drift (RULE 9).
+// It is read off [notifications.Migrations] rather than a stub file of its own,
+// so the table this writes and the table a Go migration creates cannot drift.
 func (c *NotificationTableCommand) MigrationStub() string {
 	migrations := notifications.Migrations()
 	if len(migrations) == 0 {
@@ -81,18 +71,15 @@ func (c *NotificationTableCommand) MigrationStub() string {
 	b.WriteString("-- Notifications, for notifications.TableStore.\n")
 	b.WriteString("--\n")
 	b.WriteString("-- The key column is notification_key and not key: KEY is reserved in MySQL.\n")
-	b.WriteString("-- tenant is first in the index because every read is scoped by it (RULE 14).\n\n")
+	b.WriteString("-- tenant is first in the index because every read is scoped by it.\n\n")
 	b.WriteString(strings.TrimSpace(migrations[0].Up))
 	b.WriteString("\n")
 	return b.String()
 }
 
-// MigrationName is the file the migration is written as.
-//
-// It has no PHP counterpart of its own: MigrationGeneratorCommand::
-// createBaseMigration builds the same name inline. Stamped with the time so
-// migrations sort in the order they were created, which is the order they have
-// to run in.
+// MigrationName is the file the migration is written as. It is stamped with the
+// time so migrations sort in the order they were created, which is the order
+// they have to run in.
 func (c *NotificationTableCommand) MigrationName() string {
 	now := time.Now
 	if c.Now != nil {
@@ -103,9 +90,8 @@ func (c *NotificationTableCommand) MigrationName() string {
 
 // MigrationExists reports whether a migration for the table is already there.
 //
-// It is MigrationGeneratorCommand::migrationExists, which
-// NotificationTableCommand inherits. The glob is on the suffix, so a migration
-// written yesterday under a different timestamp still counts.
+// The glob is on the suffix, so a migration written yesterday under a different
+// timestamp still counts.
 func (c *NotificationTableCommand) MigrationExists() (bool, error) {
 	matches, err := filepath.Glob(filepath.Join(c.directory(), "*_create_"+c.MigrationTableName()+"_table.sql"))
 	if err != nil {
@@ -116,9 +102,8 @@ func (c *NotificationTableCommand) MigrationExists() (bool, error) {
 
 // Handle writes the migration.
 //
-// It is MigrationGeneratorCommand::handle, which NotificationTableCommand
-// inherits: an existing migration is an error rather than an overwrite, because
-// the one that is there may already have run somewhere.
+// An existing migration is an error rather than an overwrite, because the one
+// that is there may already have run somewhere.
 func (c *NotificationTableCommand) Handle(_ context.Context, o *console.IO) error {
 	flags := o.Flags()
 	if err := flags.Parse(o.Args()); err != nil {

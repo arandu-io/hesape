@@ -12,10 +12,9 @@ import (
 	"github.com/arandu-io/hesape/str"
 )
 
-// evaluator is what a rule answers with. It is the signature every
-// ValidatesAttributes method has, so an entry below holds the method itself
-// rather than a closure around it: there is one place a rule's behaviour is
-// written, and it is the method with the PHP's name.
+// evaluator is the signature every ValidateX method has, so an entry below holds
+// the method itself rather than a closure around it: there is one place a rule's
+// behaviour is written, and it is the method.
 type evaluator = func(v *Validator, attribute string, value any, parameters []string) bool
 
 // spec is one rule name: how many arguments it takes, whether it runs on a
@@ -33,14 +32,12 @@ type spec struct {
 	minArgs, maxArgs int
 
 	// implicit marks a rule that runs even when the value is blank, and whose
-	// failure stops every later rule on the field. It is Laravel's
-	// $implicitRules, and dropping it is a real bug.
+	// failure stops every later rule on the field.
 	implicit bool
 
 	// sizeIsValue marks numeric, integer and decimal: the three rules that make
 	// min, max, size, between and the four comparisons measure the VALUE rather
-	// than the number of characters. Laravel's $numericRules, and a developer
-	// arriving from it relies on the difference.
+	// than the number of characters.
 	sizeIsValue bool
 
 	// refs are the argument positions that name another field of the same set.
@@ -62,9 +59,8 @@ type spec struct {
 	message func(f *field, r *rule) string
 }
 
-// specs is the whole rule set: every rule Illuminate\Validation has, at the
-// spelling somebody types into a rule string, pointing at the method that
-// carries the PHP's name.
+// specs is the whole catalogue: every rule there is, at the spelling somebody
+// types into a rule string, pointing at the method that runs it.
 //
 // It is closed. A name that is not in here and not in refused is a boot
 // failure, which is what makes "a rule set that boots is a rule set whose names
@@ -346,8 +342,8 @@ var specs = map[string]*spec{
 	},
 
 	// ---------------------------------------------------------------------
-	// Size. Polymorphic exactly as Laravel's getSize is: characters in a
-	// string, the value in a number, members in an array, KILOBYTES in a file.
+	// Size. One name for four measurements: characters in a string, the value
+	// in a number, members in an array, KILOBYTES in a file.
 	// ---------------------------------------------------------------------
 	"min": {
 		minArgs: 1, maxArgs: 1, check: needSizes,
@@ -694,8 +690,8 @@ var specs = map[string]*spec{
 	},
 
 	// ---------------------------------------------------------------------
-	// The database. Both take the Grant and both fail closed without one --
-	// RULE 17 has no exception for a read. See WithPresence.
+	// The database. Both take the Grant and both fail closed without one: a
+	// read is authorized like any other. See WithPresence.
 	// ---------------------------------------------------------------------
 	"exists": {
 		minArgs: 1, maxArgs: -1,
@@ -710,21 +706,21 @@ var specs = map[string]*spec{
 }
 
 var (
-	// numericShape is PHP's is_numeric, minus the surrounding whitespace it
-	// tolerates. strconv.ParseFloat alone would accept "Inf", "NaN" and hex
-	// floats, none of which a person types into a form.
+	// numericShape is what `numeric` accepts. strconv.ParseFloat alone would
+	// take "Inf", "NaN" and hex floats, none of which a person types into a
+	// form.
 	numericShape = regexp.MustCompile(`^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?$`)
 
-	// integerShape refuses a leading zero, as PHP's FILTER_VALIDATE_INT does.
+	// integerShape refuses a leading zero.
 	integerShape = regexp.MustCompile(`^[+-]?(0|[1-9][0-9]*)$`)
 
 	digitShape = regexp.MustCompile(`^[0-9]+$`)
 
-	// decimalShape is Laravel's, and it refuses exponent notation on purpose:
-	// "1e2" has no decimal places to count.
+	// decimalShape refuses exponent notation on purpose: "1e2" has no decimal
+	// places to count.
 	decimalShape = regexp.MustCompile(`^[+-]?[0-9]*\.?([0-9]*)$`)
 
-	// macShape is the three spellings PHP's FILTER_VALIDATE_MAC accepts.
+	// macShape is the three spellings of a MAC address that are accepted.
 	macShape = regexp.MustCompile(`^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$|^([0-9a-fA-F]{4}\.){2}[0-9a-fA-F]{4}$`)
 
 	hexColorShape = regexp.MustCompile(`^#(([0-9a-fA-F]{3}){1,2}|([0-9a-fA-F]{4}){1,2})$`)
@@ -740,10 +736,9 @@ var (
 // dateLayouts are the layouts `date`, `after` and `before` read when the field
 // declares no date_format of its own.
 //
-// The list is short and stated rather than permissive: Laravel's `date` is
-// strtotime, which accepts "next thursday" and "1 fortnight ago", and a rule
-// whose accepted set nobody can enumerate cannot be reasoned about. A form that
-// needs another spelling declares date_format.
+// The list is short and stated rather than permissive: a rule whose accepted set
+// nobody can enumerate cannot be reasoned about. A form that needs another
+// spelling declares date_format.
 var dateLayouts = []string{
 	time.RFC3339,
 	"2006-01-02T15:04:05",
@@ -752,7 +747,7 @@ var dateLayouts = []string{
 	"2006-01-02",
 }
 
-// number is PHP's is_numeric for a form value.
+// number reads a form value as a number, and reports whether it was one.
 func number(v string) (float64, bool) {
 	if !numericShape.MatchString(v) {
 		return 0, false
@@ -764,10 +759,9 @@ func number(v string) (float64, bool) {
 	return n, true
 }
 
-// numericText is is_numeric plus the PHP's trim(): the TEXT of a value that is
-// a number, which is what getSize hands to BigNumber. A float64 read back out
-// of a form has already lost the digits this exists to keep, so the text is
-// what travels.
+// numericText returns the TEXT of a value that is a number, trimmed, which is
+// what GetSize measures. A float64 read back out of a form has already lost the
+// digits this exists to keep, so the text is what travels.
 func numericText(v any) (string, bool) {
 	if s, isString := asString(v); isString {
 		s = strings.TrimSpace(s)
@@ -802,9 +796,9 @@ func exactNumber(v any) (*big.Rat, bool) {
 	return exactText(text)
 }
 
-// exactParameter reads the bound a size rule was written with. PHP lets
-// BigNumber::of throw on text that is not a number; the rule fails here
-// instead, which is what every other malformed parameter already does.
+// exactParameter reads the bound a size rule was written with. Text that is not
+// a number fails the rule, which is what every other malformed parameter already
+// does.
 func exactParameter(p string) (*big.Rat, bool) {
 	p = strings.TrimSpace(p)
 	if _, isNumber := number(p); !isNumber {
@@ -814,8 +808,8 @@ func exactParameter(p string) (*big.Rat, bool) {
 }
 
 // sizeText renders a size into a message. An integer prints as one; anything
-// else prints as the decimal PHP would have printed, never as the "3/2" a
-// big.Rat spells by default -- that is not a number anybody typed into a form.
+// else prints as a decimal, never as the "3/2" a big.Rat spells by default --
+// that is not a number anybody typed into a form.
 func sizeText(size *big.Rat) string {
 	if size == nil {
 		return ""
@@ -868,8 +862,8 @@ func emailShape(value string) bool {
 	return at > 0 && at != len(value)-1 && strings.Contains(value[at:], ".")
 }
 
-// address parses an IP and refuses a zone, which PHP's FILTER_VALIDATE_IP also
-// refuses: "fe80::1%eth0" names an interface on one machine.
+// address parses an IP and refuses a zone: "fe80::1%eth0" names an interface on
+// one machine.
 func address(v string) (netip.Addr, bool) {
 	a, err := netip.ParseAddr(v)
 	if err != nil || a.Zone() != "" {

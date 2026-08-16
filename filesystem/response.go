@@ -27,8 +27,8 @@ func (d *Disk) ServeUsing(callback ServeCallback) {
 
 // Response writes a stored file into the response for the browser to render.
 //
-// It is Illuminate's response(): the inline one. name is what to call the file,
-// and empty means the last segment of the key; headers are added to the
+// name is what to call the file, and empty means the last segment of the key;
+// headers are added to the
 // response before the file's own are set, so the three headers [Serve] insists
 // on -- the stored content type, nosniff, and the escaped disposition -- cannot
 // be overridden by a caller passing them in. That is deliberate: they are what
@@ -63,9 +63,9 @@ func (d *Disk) respond(w http.ResponseWriter, r *http.Request, g auth.Grant, key
 
 // DiskName records the name this adapter's disk is registered under.
 //
-// It is the name [ServeFile] needs to find the disk again from a link, and
-// Illuminate's local adapter carries it for the same reason. [Disks.Build] sets
-// it; setting it by hand is for a disk built without the manager.
+// It is the name [ServeFile] needs to find the disk again from a link.
+// [Disks.Build] sets it; setting it by hand is for a disk built without the
+// manager.
 func (a *LocalFilesystemAdapter) DiskName(disk string) *LocalFilesystemAdapter {
 	a.diskName = disk
 	return a
@@ -74,10 +74,10 @@ func (a *LocalFilesystemAdapter) DiskName(disk string) *LocalFilesystemAdapter {
 // ShouldServeSignedUrls records that this disk's files reach a browser through
 // the signed route rather than a public address.
 //
-// It is the setting Illuminate's local adapter carries, and [ServeFile] reads
-// it. There is no "serve without a signature" here: a route that hands out a
-// stored file with no proof attached is a read with no authorization, which is
-// the one thing this collection does not have a way to write (RULE 17). Off
+// [ServeFile] reads it. There is no "serve without a signature" here: a route
+// that hands out a stored file with no proof attached is a read with no
+// authorization, which is the one thing this collection does not have a way to
+// write. Off
 // therefore means this disk is not served by that route at all, not that it is
 // served openly.
 func (a *LocalFilesystemAdapter) ShouldServeSignedUrls(serve bool) *LocalFilesystemAdapter {
@@ -92,8 +92,8 @@ func (a *LocalFilesystemAdapter) ServesSignedURLs() bool { return a.serveSigned 
 // ServeFile is the route that turns a link from [URLSigner.TemporaryURL] back
 // into the file it names.
 //
-// It is Illuminate's ServeFile invokable, and it is the half that makes "no
-// symlink into a document root" a real answer: the file is served by a route,
+// It is the half that makes "no symlink into a document root" a real answer:
+// the file is served by a route,
 // and the route's proof that a Policy said yes is the signature on the link.
 //
 // Mount it under the same base [NewURLSigner] was given, with the token as the
@@ -103,7 +103,7 @@ func (a *LocalFilesystemAdapter) ServesSignedURLs() bool { return a.serveSigned 
 type ServeFile struct {
 	disks  *Disks
 	signer *URLSigner
-	// shouldServeSignedUrls is Illuminate's flag of the same name. See
+	// shouldServeSignedUrls is what the disk was configured with. See
 	// [LocalFilesystemAdapter.ShouldServeSignedUrls] for why off means "not
 	// served here" rather than "served openly".
 	shouldServeSignedUrls bool

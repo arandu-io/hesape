@@ -1,45 +1,37 @@
 package validation
 
-// This file answers to Illuminate\Contracts\Validation -- the interfaces a rule
-// object implements -- and to the two wrappers that carry one:
-// Illuminate\Validation\ClosureValidationRule and
-// Illuminate\Validation\InvokableValidationRule.
+// This file is the interfaces a rule object implements, and the two wrappers
+// that carry one.
 //
 // A rule object is not a name in the catalogue and cannot be written into a rule
-// string, so it is run through After, which is the seam the PHP's
-// validateUsingCustomRule is on the other side of:
+// string, so it is run through After:
 //
 //	v.After(func(v *validation.Validator) {
 //		v.ValidateUsingCustomRule("password", v.GetValue("password"), rule)
 //	})
-//
-// PHP's __invoke, jsonSerialize and the rest of its language interfaces are not
-// here: Go has no spelling for them, and nothing else in the port does either.
 
-// Rule answers to Illuminate\Contracts\Validation\Rule.
+// Rule is a check written as a type: it reports whether a value passes, and says
+// what was wrong when it does not.
 //
-// Message returns a slice where the PHP returns string|array, because both
-// wrappers below return several: one per call to $fail.
+// Message returns a slice because both wrappers below return several: one per
+// call to their fail function.
 type Rule interface {
-	// Passes answers to Rule::passes.
+	// Passes reports whether the value satisfies the rule.
 	Passes(attribute string, value any) bool
-	// Message answers to Rule::message.
+	// Message returns what the last Passes refused, one sentence per failure.
 	Message() []string
 }
 
-// ValidationRule answers to Illuminate\Contracts\Validation\ValidationRule: the
-// shape a rule written today has, where failing is calling $fail rather than
-// returning false.
+// ValidationRule is a check that reports a problem by calling fail with the
+// sentence to show, rather than by returning false. NewInvokableValidationRule
+// wraps one so that it reads as a Rule.
 type ValidationRule interface {
-	// Validate answers to ValidationRule::validate. fail is $fail.
+	// Validate checks the value, calling fail once per problem it finds.
 	Validate(attribute string, value any, fail func(message string))
 }
 
-// ImplicitRule answers to Illuminate\Contracts\Validation\ImplicitRule: a rule
-// that runs even when the value is blank.
-//
-// The PHP marks it by implementing an empty interface, which Go cannot do
-// without a method, so the marker is the question itself.
+// ImplicitRule is a rule that runs even when the value is blank. The marker is
+// the question itself, because an interface here needs a method.
 type ImplicitRule interface {
 	// Implicit reports whether this rule runs on a blank value.
 	Implicit() bool
@@ -50,10 +42,8 @@ type ImplicitRule interface {
 // compares two fields, for instance. Before asking such a rule whether the value
 // passes, the validator hands it every value it is validating. A rule that looks
 // only at its own value does not implement it and is not given the data.
-//
-// Answers Illuminate\Contracts\Validation\DataAwareRule.
 type DataAwareRule interface {
-	// SetData answers to DataAwareRule::setData.
+	// SetData hands the rule every value being validated.
 	SetData(data Data)
 }
 
@@ -62,28 +52,23 @@ type DataAwareRule interface {
 // custom messages and attribute names in force, or to reach a value it was not
 // handed. The validator passes itself in before asking whether the value passes,
 // and the rule keeps it for the length of that run.
-//
-// Answers Illuminate\Contracts\Validation\ValidatorAwareRule.
 type ValidatorAwareRule interface {
-	// SetValidator answers to ValidatorAwareRule::setValidator.
+	// SetValidator hands the rule the validator running it.
 	SetValidator(validator *Validator)
 }
 
-// CompilableRules answers to
-// Illuminate\Contracts\Validation\CompilableRules: rules decided by looking at
-// the value, which is what NestedRules is.
+// CompilableRules is rules decided by looking at the value, which is what
+// NestedRules is.
 type CompilableRules interface {
-	// Compile answers to CompilableRules::compile.
+	// Compile returns the rules this attribute gets, given what it holds.
 	Compile(attribute string, value any, data Data) *ExplodedRules
 }
 
-// ValidateUsingCustomRule answers to Validator::validateUsingCustomRule: run one
-// rule object and put whatever it says on the attribute.
+// ValidateUsingCustomRule runs one rule object and puts whatever it says on the
+// attribute.
 //
-// The PHP is protected because its only caller is validateAttribute, which
-// reaches rule objects through the rules array. A compiled Set holds rule names
-// and not objects, so the only caller here is an After hook, and the method is
-// exported for it.
+// A compiled Set holds rule names and not objects, so the only caller is an After
+// hook -- which is why this is exported.
 func (v *Validator) ValidateUsingCustomRule(attribute string, value any, rule Rule) {
 	if aware, ok := rule.(ValidatorAwareRule); ok {
 		aware.SetValidator(v)
@@ -113,7 +98,7 @@ func (v *Validator) ValidateUsingCustomRule(attribute string, value any, rule Ru
 }
 
 // ---------------------------------------------------------------------------
-// Illuminate\Validation\ClosureValidationRule.
+// A rule written as a function.
 // ---------------------------------------------------------------------------
 
 // ClosureValidationRule is a rule written as a function rather than as a type,
@@ -121,28 +106,26 @@ func (v *Validator) ValidateUsingCustomRule(attribute string, value any, rule Ru
 // the attribute, its value, a fail function and the validator, and reports a
 // problem by calling fail with the sentence to show. Each call to fail adds one
 // message, and a callback that never calls it passes.
-//
-// Answers Illuminate\Validation\ClosureValidationRule.
 type ClosureValidationRule struct {
-	// Callback answers to the public $callback. It is handed the same four
-	// arguments the PHP hands its closure.
+	// Callback is the check itself.
 	Callback func(attribute string, value any, fail func(message string), validator *Validator)
 
-	// Failed answers to the public $failed.
+	// Failed reports whether the last Passes called fail at all.
 	Failed bool
 
-	// messages answers to the public $messages: one per call to fail.
+	// messages is what the last Passes collected: one per call to fail.
 	messages []string
 
 	validator *Validator
 }
 
-// NewClosureValidationRule answers to the ClosureValidationRule constructor.
+// NewClosureValidationRule returns a rule that runs the callback.
 func NewClosureValidationRule(callback func(attribute string, value any, fail func(message string), validator *Validator)) *ClosureValidationRule {
 	return &ClosureValidationRule{Callback: callback}
 }
 
-// Passes answers to ClosureValidationRule::passes.
+// Passes runs the callback, and reports whether it called fail. A nil callback
+// passes.
 func (r *ClosureValidationRule) Passes(attribute string, value any) bool {
 	r.Failed = false
 	r.messages = nil
@@ -159,19 +142,19 @@ func (r *ClosureValidationRule) Passes(attribute string, value any) bool {
 	return !r.Failed
 }
 
-// Message answers to ClosureValidationRule::message.
+// Message returns what the last Passes collected.
 func (r *ClosureValidationRule) Message() []string { return r.messages }
 
-// SetValidator answers to ClosureValidationRule::setValidator.
+// SetValidator hands the rule the validator running it, which the callback is
+// given as its fourth argument.
 func (r *ClosureValidationRule) SetValidator(validator *Validator) { r.validator = validator }
 
 // ---------------------------------------------------------------------------
-// Illuminate\Validation\InvokableValidationRule.
+// A ValidationRule read as a Rule.
 // ---------------------------------------------------------------------------
 
-// InvokableValidationRule answers to
-// Illuminate\Validation\InvokableValidationRule: a ValidationRule wrapped so
-// that it reads as a Rule.
+// InvokableValidationRule is a ValidationRule wrapped so that it reads as a Rule.
+// Build one with NewInvokableValidationRule.
 type InvokableValidationRule struct {
 	invokable ValidationRule
 	failed    bool
@@ -181,13 +164,11 @@ type InvokableValidationRule struct {
 	implicit  bool
 }
 
-// NewInvokableValidationRule answers to the static
-// InvokableValidationRule::make.
+// NewInvokableValidationRule wraps a ValidationRule as a Rule, carrying over
+// whether the wrapped one is implicit.
 //
-// The PHP's make returns an anonymous subclass that implements ImplicitRule when
-// the invokable declares $implicit; here the wrapper answers Implicit out of the
-// same question, so there is no subclass to make. The name is New rather than
-// Make because Make is already the Validator's constructor.
+// The name is New rather than Make because Make is already the Validator's
+// constructor.
 func NewInvokableValidationRule(invokable ValidationRule) *InvokableValidationRule {
 	rule := &InvokableValidationRule{invokable: invokable}
 	if marker, marked := invokable.(ImplicitRule); marked {
@@ -196,7 +177,8 @@ func NewInvokableValidationRule(invokable ValidationRule) *InvokableValidationRu
 	return rule
 }
 
-// Passes answers to InvokableValidationRule::passes.
+// Passes runs the wrapped rule, handing it the data and the validator first when
+// it asks for them, and reports whether it called fail. A nil rule passes.
 func (r *InvokableValidationRule) Passes(attribute string, value any) bool {
 	r.failed = false
 	r.messages = nil
@@ -221,18 +203,17 @@ func (r *InvokableValidationRule) Passes(attribute string, value any) bool {
 	return !r.failed
 }
 
-// Invokable answers to InvokableValidationRule::invokable.
+// Invokable returns the rule this wraps.
 func (r *InvokableValidationRule) Invokable() ValidationRule { return r.invokable }
 
-// Message answers to InvokableValidationRule::message.
+// Message returns what the last Passes collected.
 func (r *InvokableValidationRule) Message() []string { return r.messages }
 
-// Implicit answers to the ImplicitRule marker the PHP's make decides by
-// subclassing.
+// Implicit reports whether the wrapped rule runs on a blank value.
 func (r *InvokableValidationRule) Implicit() bool { return r.implicit }
 
-// SetData answers to InvokableValidationRule::setData.
+// SetData hands the wrapper every value being validated.
 func (r *InvokableValidationRule) SetData(data Data) { r.data = data }
 
-// SetValidator answers to InvokableValidationRule::setValidator.
+// SetValidator hands the wrapper the validator running it.
 func (r *InvokableValidationRule) SetValidator(validator *Validator) { r.validator = validator }

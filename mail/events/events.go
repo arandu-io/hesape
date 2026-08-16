@@ -1,21 +1,17 @@
-// Package events mirrors Illuminate\Mail\Events.
-//
-// The files it answers to, in the clone at laravel_illuminate/mail/Events:
-//
-//	MessageSending.php
-//	MessageSent.php
+// Package events is the two events a [github.com/arandu-io/hesape/mail.Mailer]
+// fires: one before it sends, one after.
 //
 // # Why both names here are aliases
 //
 // MessageSent carries the SentMessage it announces, and the Mailer that fires
 // both events is what builds them. That is a cycle -- events would import mail
 // for the type it carries, and mail would import events for the values it
-// dispatches -- and Go refuses it where PHP namespaces do not.
+// dispatches -- and the compiler refuses it.
 //
 // So the two events are declared in [github.com/arandu-io/hesape/mail], next to
-// the Mailer that fires them, and this package is the import path a Laravel
-// developer reaches for. They are the same types under a second name, so a
-// listener written against either one receives the other.
+// the Mailer that fires them, and this package names them again. They are the
+// same types under a second name, so a listener written against either one
+// receives the other.
 //
 //	func (l *Listener) Handle(ctx context.Context, e events.MessageSending) bool {
 //		return !l.suppressed(e.Message.To)

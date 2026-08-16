@@ -26,20 +26,16 @@ func errChunkKeyMissing(alias string) error {
 }
 
 // This file holds the walking half of BelongsToMany and HasOneOrManyThrough:
-// chunk, chunkById, chunkByIdDesc, orderedChunkById, each, eachById, lazy,
-// lazyById, lazyByIdDesc, cursor, paginate, simplePaginate and cursorPaginate.
+// Chunk, ChunkByID, ChunkByIDDesc, OrderedChunkByID, Each, EachByID, Lazy,
+// LazyByID, LazyByIDDesc, Cursor, Paginate, SimplePaginate and CursorPaginate.
 //
-// The two relations declare the same thirteen methods in PHP with the same
-// bodies, differing in one line: BelongsToMany hydrates the pivot on every page
-// and the through relation does not. So the bodies live here once, take the
-// prepared query and a per-page hook, and each relation's method is the two
-// lines that supply those -- which is what the PHP would look like if it had
-// somewhere to put a shared parent, and it does not, because the two sit on
-// opposite branches of the hierarchy.
+// The two relations want the same thirteen methods, differing in one line:
+// BelongsToMany hydrates the pivot on every page and the through relation does
+// not. So the bodies live here once, take the prepared query and a per-page
+// hook, and each relation's method is the two lines that supply those.
 //
 // Every one of them takes ctx and an auth.Grant and reaches the database
-// through the relation's scoped query. A chunked read is a read: RULE 17 does
-// not stop applying because the rows arrive a page at a time, and a walk that
+// through the relation's scoped query. A chunked read is a read, and a walk that
 // authorized the first page and not the rest would leak on page two, where
 // nobody is looking.
 

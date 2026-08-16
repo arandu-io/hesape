@@ -1,7 +1,5 @@
 package view
 
-// ManagesFragments mirrors Illuminate\View\Concerns\ManagesFragments.
-//
 // Fragments let HTMX partial renders deliver only the changed portion of a
 // page, without re-rendering the layout. @fragment name / @endfragment
 // capture a named region; the controller requests only those that changed.
@@ -49,7 +47,7 @@ func (f *Factory) GetFragments() map[string]string {
 	return out
 }
 
-// FlushFragments is ManagesFragments::flushFragments.
+// FlushFragments resets every piece of per-render fragment state.
 func (f *Factory) FlushFragments() {
 	f.mu.Lock()
 	defer f.mu.Unlock()

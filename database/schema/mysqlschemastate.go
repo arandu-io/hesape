@@ -11,35 +11,34 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// MySqlSchemaState answers Illuminate\Database\Schema\MySqlSchemaState: the
-// SchemaState that shells out to mysqldump and mysql.
+// MySqlSchemaState is the SchemaState that shells out to mysqldump and mysql.
 //
-// The name is the PHP's, capital S and lower q, rather than the MySQL spelling
-// the grammar uses. ADR 0044 asks for the Illuminate name; Illuminate is
-// inconsistent between MySqlSchemaState and MySqlGrammar on one side and
-// SQLiteGrammar on the other, and copying the inconsistency is what makes a
-// grep for the PHP class find this file.
+// It serves MariaDB as well: the one difference, omitting --set-gtid-purged, is
+// a branch taken on Connection.IsMaria.
 type MySqlSchemaState struct {
 	*BaseSchemaState
 }
 
-// NewMySqlSchemaState answers MySqlSchemaState's inherited constructor.
+// NewMySqlSchemaState builds a MySqlSchemaState for connection, using
+// processFactory to build the mysqldump and mysql commands it runs.
 func NewMySqlSchemaState(connection Connection, processFactory ProcessFactory) *MySqlSchemaState {
 	return &MySqlSchemaState{BaseSchemaState: NewBaseSchemaState(connection, processFactory)}
 }
 
-// autoIncrementState answers the PHP's /\s+AUTO_INCREMENT=[0-9]+/iu.
+// autoIncrementState matches the AUTO_INCREMENT=<n> clause mysqldump writes
+// into a table's definition.
 //
 // mysqldump records where each table's counter had got to. Keeping it makes the
 // dump differ on every run for reasons that are not schema changes, so the file
 // churns in review and two developers who ran no migrations still get a diff.
 var autoIncrementState = regexp.MustCompile(`(?i)\s+AUTO_INCREMENT=[0-9]+`)
 
-// Dump answers MySqlSchemaState::dump.
+// Dump writes the connection's schema, plus the rows of the migration table,
+// to path.
 //
-// Three steps, as in the PHP: dump the structure, strip the auto-increment
-// counters, then append the rows of the migration table so a restored database
-// does not replay the migrations it already has.
+// Three steps: dump the structure, strip the auto-increment counters, then
+// append the rows of the migration table so a restored database does not
+// replay the migrations it already has.
 func (s *MySqlSchemaState) Dump(ctx context.Context, g auth.Grant, connection Connection, path string) error {
 	args := append(s.baseDumpCommand(), "--routines", "--result-file="+path, "--no-data")
 	if err := s.executeDumpProcess(ctx, args, nil); err != nil {
@@ -60,8 +59,8 @@ func (s *MySqlSchemaState) Dump(ctx context.Context, g auth.Grant, connection Co
 	return s.appendMigrationData(ctx, path)
 }
 
-// removeAutoIncrementingState answers
-// MySqlSchemaState::removeAutoIncrementingState.
+// removeAutoIncrementingState strips the AUTO_INCREMENT=<n> clauses from the
+// dump file at path.
 func (s *MySqlSchemaState) removeAutoIncrementingState(path string) error {
 	contents, err := os.ReadFile(path)
 	if err != nil {
@@ -73,7 +72,8 @@ func (s *MySqlSchemaState) removeAutoIncrementingState(path string) error {
 	return nil
 }
 
-// appendMigrationData answers MySqlSchemaState::appendMigrationData.
+// appendMigrationData dumps the migration table's rows with mysqldump and
+// appends them to the schema file at path.
 func (s *MySqlSchemaState) appendMigrationData(ctx context.Context, path string) error {
 	args := append(s.baseDumpCommand(),
 		s.GetMigrationTable(),
@@ -96,7 +96,8 @@ func (s *MySqlSchemaState) appendMigrationData(ctx context.Context, path string)
 	return nil
 }
 
-// Load answers MySqlSchemaState::load.
+// Load runs the schema file at path against the connection with the mysql
+// client.
 func (s *MySqlSchemaState) Load(ctx context.Context, g auth.Grant, path string) error {
 	file, err := os.Open(path)
 	if err != nil {
@@ -117,11 +118,12 @@ func (s *MySqlSchemaState) Load(ctx context.Context, g auth.Grant, path string) 
 	return nil
 }
 
-// baseDumpCommand answers MySqlSchemaState::baseDumpCommand.
+// baseDumpCommand builds the mysqldump invocation and flags shared by Dump
+// and appendMigrationData.
 //
 // --set-gtid-purged=OFF is added only for MySQL. MariaDB's mysqldump has no such
-// option and refuses the whole command over it, which is why the PHP asks
-// isMaria before adding it rather than letting executeDumpProcess retry.
+// option and refuses the whole command over it, which is why IsMaria is
+// checked before adding it rather than letting executeDumpProcess retry.
 func (s *MySqlSchemaState) baseDumpCommand() []string {
 	args := append([]string{"mysqldump"}, s.connectionFlags()...)
 	args = append(args,
@@ -134,17 +136,17 @@ func (s *MySqlSchemaState) baseDumpCommand() []string {
 	return append(args, s.GetConnection().GetConfig("database"))
 }
 
-// connectionFlags answers MySqlSchemaState::connectionString.
+// connectionFlags builds the --user flag plus either --socket, or --host and
+// --port, taken from the connection's configuration.
 //
 // A configured Unix socket wins over host and port, because the two cannot both
 // be given: mysqldump takes whichever it sees and the other is silently ignored,
 // so passing both makes the connection depend on argument order.
 //
-// The SSL branches of the PHP are not here. They read PDO::MYSQL_ATTR_SSL_*
-// out of the driver's options array, which is a PDO constant this ecosystem has
-// no equivalent for -- the Go driver takes TLS through a registered config name
-// in the DSN instead. An operator who needs a dump over TLS sets it in the
-// environment the client already reads, which processEnvironment inherits.
+// connectionFlags carries no SSL flags: the Go driver takes TLS through a
+// registered config name in the DSN instead of discrete options. An operator
+// who needs a dump over TLS sets it in the environment the client already
+// reads, which processEnvironment inherits.
 func (s *MySqlSchemaState) connectionFlags() []string {
 	connection := s.GetConnection()
 
@@ -158,27 +160,23 @@ func (s *MySqlSchemaState) connectionFlags() []string {
 		"--port="+connection.GetConfig("port"))
 }
 
-// baseVariables answers MySqlSchemaState::baseVariables, reduced to the value
-// that must not appear on a command line.
+// baseVariables returns the one environment variable the dump and load
+// commands need: the password, which must not appear on a command line.
 //
 // MYSQL_PWD is how the client takes a password without it being visible in
-// `ps`. The PHP keeps it out of the command line for the same reason, by way of
-// Symfony's ${:VAR} interpolation.
+// `ps`.
 func (s *MySqlSchemaState) baseVariables() map[string]string {
 	return map[string]string{"MYSQL_PWD": s.GetConnection().GetConfig("password")}
 }
 
-// executeDumpProcess answers MySqlSchemaState::executeDumpProcess: run the
-// dump, and drop an option the installed client does not know rather than
-// failing over it.
+// executeDumpProcess runs the dump, and drops an option the installed client
+// does not know rather than failing over it.
 //
 // Both options it retries without are recent additions that older and
 // alternative clients reject outright. --column-statistics=0 is not understood
 // before mysqldump 8.0, and --set-gtid-purged is a MySQL option MariaDB does not
 // have; in each case the client exits without writing anything, and the message
-// names the option. The PHP recurses with a depth limit of thirty; this drops
-// each of the two at most once, which is the same thing with the recursion
-// written out, and cannot loop.
+// names the option. This drops each of the two at most once and cannot loop.
 func (s *MySqlSchemaState) executeDumpProcess(ctx context.Context, args []string, stdout *bytes.Buffer) error {
 	err := s.runDump(ctx, args, stdout)
 	if err == nil {
@@ -225,7 +223,7 @@ func (s *MySqlSchemaState) runDump(ctx context.Context, args []string, stdout *b
 	return nil
 }
 
-// mentionsAny answers Str::contains($message, $needles).
+// mentionsAny reports whether message contains any of needles.
 func mentionsAny(message string, needles []string) bool {
 	for _, needle := range needles {
 		if strings.Contains(message, needle) {
@@ -235,9 +233,9 @@ func mentionsAny(message string, needles []string) bool {
 	return false
 }
 
-// withoutArg answers the PHP's str_replace on the assembled command line, done
-// on the argument list instead -- which cannot accidentally match a substring
-// of a password or a table name the way a search over the whole line can.
+// withoutArg removes flag from args by exact match on the argument list,
+// which cannot accidentally match a substring of a password or a table name
+// the way a search over the whole command line can.
 func withoutArg(args []string, flag string) []string {
 	out := make([]string, 0, len(args))
 	for _, arg := range args {

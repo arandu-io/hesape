@@ -9,9 +9,8 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// Blueprint answers Illuminate\Database\Schema\Blueprint.
-//
-// It is the value a migration writes against: the table under construction, its
+// Blueprint is the value a migration writes against: the table under
+// construction, its
 // columns and the commands that will be run for it. It builds no SQL itself --
 // ToSQL hands each command to the Grammar -- and it takes no auth.Grant,
 // because deciding nothing is the point of it. Builder is the half that
@@ -33,7 +32,8 @@ type Blueprint struct {
 	state *BlueprintState
 }
 
-// NewBlueprint answers Blueprint::__construct.
+// NewBlueprint creates a Blueprint for the given table, invoking callback
+// with it before returning, if callback is not nil.
 func NewBlueprint(connection Connection, table string, callback func(*Blueprint)) *Blueprint {
 	b := &Blueprint{
 		connection: connection,
@@ -46,7 +46,7 @@ func NewBlueprint(connection Connection, table string, callback func(*Blueprint)
 	return b
 }
 
-// Build answers Blueprint::build: it runs the blueprint against the database.
+// Build runs the blueprint against the database.
 func (b *Blueprint) Build(ctx context.Context, g auth.Grant) error {
 	statements, err := b.ToSQL(ctx, g)
 	if err != nil {
@@ -60,15 +60,13 @@ func (b *Blueprint) Build(ctx context.Context, g auth.Grant) error {
 	return nil
 }
 
-// ToSQL answers Blueprint::toSql. The PHP spells it toSql; an initialism is
-// upper case here.
+// ToSQL compiles the blueprint's commands into statements.
 //
-// PHP takes no arguments. This takes a context and an auth.Grant because on
-// SQLite a blueprint that alters a table has to read the table's current shape
-// from the server before it can rewrite it, and a read is a read: RULE 17 does
-// not have a schema exception. Every other driver, and SQLite creating a table
-// rather than altering one, touches nothing -- but the signature cannot say
-// "sometimes", so it says what the worst case does.
+// It takes a context and an auth.Grant because on SQLite a blueprint that
+// alters a table has to read the table's current shape from the server before
+// it can rewrite it, and a read is a read. Every other driver, and SQLite
+// creating a table rather than altering one, touches nothing -- but the
+// signature cannot say "sometimes", so it says what the worst case does.
 func (b *Blueprint) ToSQL(ctx context.Context, g auth.Grant) ([]string, error) {
 	if err := g.Check(ActionMigrate); err != nil {
 		return nil, err
@@ -96,7 +94,9 @@ func (b *Blueprint) ToSQL(ctx context.Context, g auth.Grant) ([]string, error) {
 	return statements, nil
 }
 
-// addImpliedCommands answers Blueprint::addImpliedCommands.
+// addImpliedCommands expands each column's fluent index and command
+// shorthand and, when altering an existing table, turns pending column
+// definitions into add or change commands.
 func (b *Blueprint) addImpliedCommands(ctx context.Context, g auth.Grant) error {
 	b.addFluentIndexes()
 	b.AddFluentCommands()
@@ -120,7 +120,9 @@ func (b *Blueprint) addImpliedCommands(ctx context.Context, g auth.Grant) error 
 	return b.AddAlterCommands(ctx, g)
 }
 
-// addFluentIndexes answers Blueprint::addFluentIndexes.
+// addFluentIndexes turns each column's inline index markers (Primary,
+// Unique, Index, FullText, SpatialIndex, VectorIndex) into index commands,
+// clearing the marker once consumed.
 func (b *Blueprint) addFluentIndexes() {
 	isMySQL := b.connection.GetDriverName() == "mysql" || b.connection.GetDriverName() == "mariadb"
 
@@ -163,8 +165,8 @@ func (b *Blueprint) addFluentIndexes() {
 	}
 }
 
-// indexMethod answers the PHP's choice between index and vectorIndex for a
-// vector column that only said "index".
+// indexMethod resolves a plain "index" marker on a vector-typed column to
+// "vectorIndex", leaving every other marker unchanged.
 func (b *Blueprint) indexMethod(index string, column *ColumnDefinition) string {
 	if index == "index" && column.typ == "vector" {
 		return "vectorIndex"
@@ -204,7 +206,8 @@ func (b *Blueprint) dropFluentIndex(index, column string) {
 	}
 }
 
-// AddFluentCommands answers Blueprint::addFluentCommands.
+// AddFluentCommands queues one command per column for every fluent command
+// name the grammar declares.
 func (b *Blueprint) AddFluentCommands() {
 	for _, column := range b.columns {
 		for _, name := range b.grammar.GetFluentCommands() {
@@ -215,16 +218,17 @@ func (b *Blueprint) AddFluentCommands() {
 	}
 }
 
-// AddAlterCommands answers Blueprint::addAlterCommands.
+// AddAlterCommands inserts an "alter" command around every run of commands
+// the grammar marks as alterable, and builds the blueprint's BlueprintState
+// if any alter command is present.
 //
-// PHP returns early unless the grammar is the SQLite one. Here the test is
-// whether the grammar declares any alter command at all, which is the same
-// question: SQLite is the only driver whose GetAlterCommands answers with
-// anything, because it is the only one that rebuilds the table.
+// The test is whether the grammar declares any alter command at all: SQLite
+// is the only driver whose GetAlterCommands returns anything, because it is
+// the only one that rebuilds the table.
 //
-// It takes a context and a Grant where the PHP takes nothing, because a
-// blueprint that has an alter command reads the table's current shape from the
-// server to build its BlueprintState.
+// It takes a context and a Grant because a blueprint with an alter command
+// reads the table's current shape from the server to build its
+// BlueprintState.
 func (b *Blueprint) AddAlterCommands(ctx context.Context, g auth.Grant) error {
 	alterCommands := b.grammar.GetAlterCommands()
 	if len(alterCommands) == 0 {
@@ -261,7 +265,8 @@ func (b *Blueprint) AddAlterCommands(ctx context.Context, g auth.Grant) error {
 	return nil
 }
 
-// Creating answers Blueprint::creating.
+// Creating reports whether the blueprint has a create command, rather than
+// only alter commands.
 func (b *Blueprint) Creating() bool {
 	for _, command := range b.commands {
 		if !command.isColumnDefinition && command.Name == "create" {
@@ -271,95 +276,96 @@ func (b *Blueprint) Creating() bool {
 	return false
 }
 
-// Create answers Blueprint::create.
+// Create queues the command that creates the table.
 func (b *Blueprint) Create() *Command { return b.addCommand("create") }
 
-// Engine answers Blueprint::engine.
+// Engine sets the storage engine to use when creating the table.
 func (b *Blueprint) Engine(engine string) { b.engine = engine }
 
-// GetEngine answers $blueprint->engine.
+// GetEngine returns the storage engine set for the table.
 func (b *Blueprint) GetEngine() string { return b.engine }
 
-// InnoDb answers Blueprint::innoDb.
+// InnoDb sets the storage engine to InnoDB.
 func (b *Blueprint) InnoDb() { b.Engine("InnoDB") }
 
-// Charset answers Blueprint::charset.
+// Charset sets the character set to use when creating the table.
 func (b *Blueprint) Charset(charset string) { b.charset = charset }
 
-// GetCharset answers $blueprint->charset.
+// GetCharset returns the character set set for the table.
 func (b *Blueprint) GetCharset() string { return b.charset }
 
-// Collation answers Blueprint::collation.
+// Collation sets the collation to use when creating the table.
 func (b *Blueprint) Collation(collation string) { b.collation = collation }
 
-// GetCollation answers $blueprint->collation.
+// GetCollation returns the collation set for the table.
 func (b *Blueprint) GetCollation() string { return b.collation }
 
-// Temporary answers Blueprint::temporary.
+// Temporary marks the table as temporary.
 func (b *Blueprint) Temporary() { b.temporary = true }
 
-// GetTemporary answers $blueprint->temporary.
+// GetTemporary reports whether the table is marked temporary.
 func (b *Blueprint) GetTemporary() bool { return b.temporary }
 
-// Drop answers Blueprint::drop.
+// Drop queues the command that drops the table.
 func (b *Blueprint) Drop() *Command { return b.addCommand("drop") }
 
-// DropIfExists answers Blueprint::dropIfExists.
+// DropIfExists queues the command that drops the table if it exists.
 func (b *Blueprint) DropIfExists() *Command { return b.addCommand("dropIfExists") }
 
-// DropColumn answers Blueprint::dropColumn.
+// DropColumn queues the command that drops the given columns.
 func (b *Blueprint) DropColumn(columns ...string) *Command {
 	command := b.addCommand("dropColumn")
 	command.Columns = toAnyList(columns)
 	return command
 }
 
-// RenameColumn answers Blueprint::renameColumn.
+// RenameColumn queues the command that renames a column.
 func (b *Blueprint) RenameColumn(from, to string) *Command {
 	command := b.addCommand("renameColumn")
 	command.From, command.To = from, to
 	return command
 }
 
-// DropPrimary answers Blueprint::dropPrimary. The argument is the index name,
-// or the columns it was built from.
+// DropPrimary queues the command that drops a primary key. The argument is
+// the index name, or the columns it was built from.
 func (b *Blueprint) DropPrimary(index any) *Command {
 	return b.dropIndexCommand("dropPrimary", "primary", index)
 }
 
-// DropUnique answers Blueprint::dropUnique.
+// DropUnique queues the command that drops a unique index.
 func (b *Blueprint) DropUnique(index any) *Command {
 	return b.dropIndexCommand("dropUnique", "unique", index)
 }
 
-// DropIndex answers Blueprint::dropIndex.
+// DropIndex queues the command that drops an index.
 func (b *Blueprint) DropIndex(index any) *Command {
 	return b.dropIndexCommand("dropIndex", "index", index)
 }
 
-// DropFullText answers Blueprint::dropFullText.
+// DropFullText queues the command that drops a full-text index.
 func (b *Blueprint) DropFullText(index any) *Command {
 	return b.dropIndexCommand("dropFullText", "fulltext", index)
 }
 
-// DropSpatialIndex answers Blueprint::dropSpatialIndex.
+// DropSpatialIndex queues the command that drops a spatial index.
 func (b *Blueprint) DropSpatialIndex(index any) *Command {
 	return b.dropIndexCommand("dropSpatialIndex", "spatialIndex", index)
 }
 
-// DropForeign answers Blueprint::dropForeign.
+// DropForeign queues the command that drops a foreign key.
 func (b *Blueprint) DropForeign(index any) *Command {
 	return b.dropIndexCommand("dropForeign", "foreign", index)
 }
 
-// DropConstrainedForeignID answers Blueprint::dropConstrainedForeignId.
+// DropConstrainedForeignID drops both the foreign key and the column that
+// carried it.
 func (b *Blueprint) DropConstrainedForeignID(column string) *Command {
 	b.DropForeign([]string{column})
 	return b.DropColumn(column)
 }
 
-// DropForeignIDFor answers Blueprint::dropForeignIdFor. An empty column takes
-// the model's foreign key, which is the PHP null.
+// DropForeignIDFor drops the column holding a model's foreign key. An empty
+// column defaults to the model's own foreign key name.
 func (b *Blueprint) DropForeignIDFor(model Model, column string) *Command {
 	if column == "" {
 		column = model.GetForeignKey()
@@ -367,7 +373,8 @@ func (b *Blueprint) DropForeignIDFor(model Model, column string) *Command {
 	return b.DropColumn(column)
 }
 
-// DropConstrainedForeignIDFor answers Blueprint::dropConstrainedForeignIdFor.
+// DropConstrainedForeignIDFor drops both the foreign key and the column
+// holding a model's foreign key.
 func (b *Blueprint) DropConstrainedForeignIDFor(model Model, column string) *Command {
 	if column == "" {
 		column = model.GetForeignKey()
@@ -375,21 +382,21 @@ func (b *Blueprint) DropConstrainedForeignIDFor(model Model, column string) *Com
 	return b.DropConstrainedForeignID(column)
 }
 
-// RenameIndex answers Blueprint::renameIndex.
+// RenameIndex queues the command that renames an index.
 func (b *Blueprint) RenameIndex(from, to string) *Command {
 	command := b.addCommand("renameIndex")
 	command.From, command.To = from, to
 	return command
 }
 
-// DropTimestamps answers Blueprint::dropTimestamps.
+// DropTimestamps drops the created_at and updated_at columns.
 func (b *Blueprint) DropTimestamps() { b.DropColumn("created_at", "updated_at") }
 
-// DropTimestampsTz answers Blueprint::dropTimestampsTz.
+// DropTimestampsTz drops the created_at and updated_at columns.
 func (b *Blueprint) DropTimestampsTz() { b.DropTimestamps() }
 
-// DropSoftDeletes answers Blueprint::dropSoftDeletes. An empty column is the
-// PHP default, deleted_at.
+// DropSoftDeletes drops the soft-delete column. An empty column defaults to
+// deleted_at.
 func (b *Blueprint) DropSoftDeletes(column string) {
 	if column == "" {
 		column = "deleted_at"
@@ -397,13 +404,14 @@ func (b *Blueprint) DropSoftDeletes(column string) {
 	b.DropColumn(column)
 }
 
-// DropSoftDeletesTz answers Blueprint::dropSoftDeletesTz.
+// DropSoftDeletesTz drops the soft-delete column.
 func (b *Blueprint) DropSoftDeletesTz(column string) { b.DropSoftDeletes(column) }
 
-// DropRememberToken answers Blueprint::dropRememberToken.
+// DropRememberToken drops the remember_token column.
 func (b *Blueprint) DropRememberToken() { b.DropColumn("remember_token") }
 
-// DropMorphs answers Blueprint::dropMorphs.
+// DropMorphs drops the index over a polymorphic relation's type and id
+// columns, then drops both columns.
 func (b *Blueprint) DropMorphs(name string, indexName ...string) {
 	index := arg(indexName, 0)
 	if index == "" {
@@ -413,94 +421,97 @@ func (b *Blueprint) DropMorphs(name string, indexName ...string) {
 	b.DropColumn(name+"_type", name+"_id")
 }
 
-// Rename answers Blueprint::rename.
+// Rename queues the command that renames the table.
 func (b *Blueprint) Rename(to string) *Command {
 	command := b.addCommand("rename")
 	command.To = to
 	return command
 }
 
-// Primary answers Blueprint::primary. The optional arguments are the index name
-// and the algorithm.
+// Primary adds a primary key command over the given columns. The optional
+// arguments are the index name and the algorithm.
 func (b *Blueprint) Primary(columns any, args ...string) *IndexDefinition {
 	return b.indexCommand("primary", columns, arg(args, 0), arg(args, 1), "")
 }
 
-// Unique answers Blueprint::unique.
+// Unique adds a unique index command over the given columns.
 func (b *Blueprint) Unique(columns any, args ...string) *IndexDefinition {
 	return b.indexCommand("unique", columns, arg(args, 0), arg(args, 1), "")
 }
 
-// Index answers Blueprint::index.
+// Index adds an index command over the given columns.
 func (b *Blueprint) Index(columns any, args ...string) *IndexDefinition {
 	return b.indexCommand("index", columns, arg(args, 0), arg(args, 1), "")
 }
 
-// FullText answers Blueprint::fullText.
+// FullText adds a full-text index command over the given columns.
 func (b *Blueprint) FullText(columns any, args ...string) *IndexDefinition {
 	return b.indexCommand("fulltext", columns, arg(args, 0), arg(args, 1), "")
 }
 
-// SpatialIndex answers Blueprint::spatialIndex. The optional arguments are the
-// index name and the operator class.
+// SpatialIndex adds a spatial index command over the given columns. The
+// optional arguments are the index name and the operator class.
 func (b *Blueprint) SpatialIndex(columns any, args ...string) *IndexDefinition {
 	return b.indexCommand("spatialIndex", columns, arg(args, 0), "", arg(args, 1))
 }
 
-// VectorIndex answers Blueprint::vectorIndex.
+// VectorIndex adds a vector index command over the given column, defaulting
+// to the hnsw algorithm and the vector_cosine_ops operator class.
 func (b *Blueprint) VectorIndex(column any, name ...string) *IndexDefinition {
 	return b.indexCommand("vectorIndex", column, arg(name, 0), "hnsw", "vector_cosine_ops")
 }
 
-// RawIndex answers Blueprint::rawIndex: an index over an expression rather than
-// a column list.
+// RawIndex adds an index command over an expression rather than a column
+// list.
 func (b *Blueprint) RawIndex(expression, name string) *IndexDefinition {
 	return b.Index([]any{query.Raw(expression)}, name)
 }
 
-// Foreign answers Blueprint::foreign.
+// Foreign adds a foreign key command over the given columns.
 func (b *Blueprint) Foreign(columns any, name ...string) *ForeignKeyDefinition {
 	definition := b.indexCommand("foreign", columns, arg(name, 0), "", "")
 	return &ForeignKeyDefinition{c: definition.c}
 }
 
-// ID answers Blueprint::id. An empty column is the PHP default, id.
+// ID adds an auto-incrementing big integer primary key column. An empty
+// column name defaults to "id".
 func (b *Blueprint) ID(column ...string) *ColumnDefinition {
 	return b.BigIncrements(defaultTo(arg(column, 0), "id"))
 }
 
-// Increments answers Blueprint::increments.
+// Increments adds an auto-incrementing unsigned integer column.
 func (b *Blueprint) Increments(column string) *ColumnDefinition {
 	return b.UnsignedInteger(column, true)
 }
 
-// IntegerIncrements answers Blueprint::integerIncrements.
+// IntegerIncrements adds an auto-incrementing unsigned integer column.
 func (b *Blueprint) IntegerIncrements(column string) *ColumnDefinition {
 	return b.UnsignedInteger(column, true)
 }
 
-// TinyIncrements answers Blueprint::tinyIncrements.
+// TinyIncrements adds an auto-incrementing unsigned tiny integer column.
 func (b *Blueprint) TinyIncrements(column string) *ColumnDefinition {
 	return b.UnsignedTinyInteger(column, true)
 }
 
-// SmallIncrements answers Blueprint::smallIncrements.
+// SmallIncrements adds an auto-incrementing unsigned small integer column.
 func (b *Blueprint) SmallIncrements(column string) *ColumnDefinition {
 	return b.UnsignedSmallInteger(column, true)
 }
 
-// MediumIncrements answers Blueprint::mediumIncrements.
+// MediumIncrements adds an auto-incrementing unsigned medium integer
+// column.
 func (b *Blueprint) MediumIncrements(column string) *ColumnDefinition {
 	return b.UnsignedMediumInteger(column, true)
 }
 
-// BigIncrements answers Blueprint::bigIncrements.
+// BigIncrements adds an auto-incrementing unsigned big integer column.
 func (b *Blueprint) BigIncrements(column string) *ColumnDefinition {
 	return b.UnsignedBigInteger(column, true)
 }
 
-// Char answers Blueprint::char. An omitted length takes the package default,
-// which DefaultStringLength sets.
+// Char adds a fixed-length CHAR column. An omitted length takes the package
+// default, which DefaultStringLength sets.
 func (b *Blueprint) Char(column string, length ...int) *ColumnDefinition {
 	n := defaultStringLength
 	if len(length) > 0 {
@@ -511,7 +522,8 @@ func (b *Blueprint) Char(column string, length ...int) *ColumnDefinition {
 	return c
 }
 
-// String answers Blueprint::string.
+// String adds a VARCHAR column. An omitted or zero length takes the package
+// default, which DefaultStringLength sets.
 func (b *Blueprint) String(column string, length ...int) *ColumnDefinition {
 	n := defaultStringLength
 	if len(length) > 0 && length[0] != 0 {
@@ -522,46 +534,46 @@ func (b *Blueprint) String(column string, length ...int) *ColumnDefinition {
 	return c
 }
 
-// TinyText answers Blueprint::tinyText.
+// TinyText adds a TINYTEXT column.
 func (b *Blueprint) TinyText(column string) *ColumnDefinition {
 	return b.AddColumn("tinyText", column)
 }
 
-// Text answers Blueprint::text.
+// Text adds a TEXT column.
 func (b *Blueprint) Text(column string) *ColumnDefinition { return b.AddColumn("text", column) }
 
-// MediumText answers Blueprint::mediumText.
+// MediumText adds a MEDIUMTEXT column.
 func (b *Blueprint) MediumText(column string) *ColumnDefinition {
 	return b.AddColumn("mediumText", column)
 }
 
-// LongText answers Blueprint::longText.
+// LongText adds a LONGTEXT column.
 func (b *Blueprint) LongText(column string) *ColumnDefinition {
 	return b.AddColumn("longText", column)
 }
 
-// Integer answers Blueprint::integer. The optional arguments are autoIncrement
+// Integer adds an integer column. The optional arguments are autoIncrement
 // and unsigned.
 func (b *Blueprint) Integer(column string, args ...bool) *ColumnDefinition {
 	return b.intColumn("integer", column, args)
 }
 
-// TinyInteger answers Blueprint::tinyInteger.
+// TinyInteger adds a tiny integer column.
 func (b *Blueprint) TinyInteger(column string, args ...bool) *ColumnDefinition {
 	return b.intColumn("tinyInteger", column, args)
 }
 
-// SmallInteger answers Blueprint::smallInteger.
+// SmallInteger adds a small integer column.
 func (b *Blueprint) SmallInteger(column string, args ...bool) *ColumnDefinition {
 	return b.intColumn("smallInteger", column, args)
 }
 
-// MediumInteger answers Blueprint::mediumInteger.
+// MediumInteger adds a medium integer column.
 func (b *Blueprint) MediumInteger(column string, args ...bool) *ColumnDefinition {
 	return b.intColumn("mediumInteger", column, args)
 }
 
-// BigInteger answers Blueprint::bigInteger.
+// BigInteger adds a big integer column.
 func (b *Blueprint) BigInteger(column string, args ...bool) *ColumnDefinition {
 	return b.intColumn("bigInteger", column, args)
 }
@@ -577,33 +589,38 @@ func (b *Blueprint) intColumn(typ, column string, args []bool) *ColumnDefinition
 	return c
 }
 
-// UnsignedInteger answers Blueprint::unsignedInteger.
+// UnsignedInteger adds an unsigned integer column, optionally
+// auto-incrementing.
 func (b *Blueprint) UnsignedInteger(column string, autoIncrement ...bool) *ColumnDefinition {
 	return b.Integer(column, boolAt(autoIncrement, 0), true)
 }
 
-// UnsignedTinyInteger answers Blueprint::unsignedTinyInteger.
+// UnsignedTinyInteger adds an unsigned tiny integer column, optionally
+// auto-incrementing.
 func (b *Blueprint) UnsignedTinyInteger(column string, autoIncrement ...bool) *ColumnDefinition {
 	return b.TinyInteger(column, boolAt(autoIncrement, 0), true)
 }
 
-// UnsignedSmallInteger answers Blueprint::unsignedSmallInteger.
+// UnsignedSmallInteger adds an unsigned small integer column, optionally
+// auto-incrementing.
 func (b *Blueprint) UnsignedSmallInteger(column string, autoIncrement ...bool) *ColumnDefinition {
 	return b.SmallInteger(column, boolAt(autoIncrement, 0), true)
 }
 
-// UnsignedMediumInteger answers Blueprint::unsignedMediumInteger.
+// UnsignedMediumInteger adds an unsigned medium integer column, optionally
+// auto-incrementing.
 func (b *Blueprint) UnsignedMediumInteger(column string, autoIncrement ...bool) *ColumnDefinition {
 	return b.MediumInteger(column, boolAt(autoIncrement, 0), true)
 }
 
-// UnsignedBigInteger answers Blueprint::unsignedBigInteger.
+// UnsignedBigInteger adds an unsigned big integer column, optionally
+// auto-incrementing.
 func (b *Blueprint) UnsignedBigInteger(column string, autoIncrement ...bool) *ColumnDefinition {
 	return b.BigInteger(column, boolAt(autoIncrement, 0), true)
 }
 
-// ForeignID answers Blueprint::foreignId: an unsigned big integer meant to
-// carry another table's key, which Constrained turns into a foreign key.
+// ForeignID adds an unsigned big integer column meant to carry another
+// table's key, which Constrained turns into a foreign key.
 func (b *Blueprint) ForeignID(column string) *ForeignIDColumnDefinition {
 	definition := &ForeignIDColumnDefinition{
 		ColumnDefinition: &ColumnDefinition{typ: "bigInteger", name: column, unsigned: true},
@@ -613,8 +630,9 @@ func (b *Blueprint) ForeignID(column string) *ForeignIDColumnDefinition {
 	return definition
 }
 
-// ForeignIDFor answers Blueprint::foreignIdFor. An empty column takes the
-// model's foreign key.
+// ForeignIDFor adds a foreign key column sized to match the given model's
+// key type (integer, ULID, or UUID) and references that model's table and
+// key. An empty column defaults to the model's foreign key name.
 func (b *Blueprint) ForeignIDFor(model Model, column string) *ForeignIDColumnDefinition {
 	if column == "" {
 		column = model.GetForeignKey()
@@ -640,7 +658,7 @@ func (b *Blueprint) ForeignIDFor(model Model, column string) *ForeignIDColumnDef
 	return definition
 }
 
-// Float answers Blueprint::float. The PHP default precision is 53.
+// Float adds a floating point column. An omitted precision defaults to 53.
 func (b *Blueprint) Float(column string, precision ...int) *ColumnDefinition {
 	n := 53
 	if len(precision) > 0 {
@@ -651,11 +669,11 @@ func (b *Blueprint) Float(column string, precision ...int) *ColumnDefinition {
 	return c
 }
 
-// Double answers Blueprint::double.
+// Double adds a DOUBLE column.
 func (b *Blueprint) Double(column string) *ColumnDefinition { return b.AddColumn("double", column) }
 
-// Decimal answers Blueprint::decimal. The optional arguments are the total
-// digits and the decimal places; the PHP defaults are 8 and 2.
+// Decimal adds a DECIMAL column. The optional arguments are the total
+// digits and the decimal places, defaulting to 8 and 2.
 func (b *Blueprint) Decimal(column string, args ...int) *ColumnDefinition {
 	total, places := 8, 2
 	if len(args) > 0 {
@@ -669,62 +687,62 @@ func (b *Blueprint) Decimal(column string, args ...int) *ColumnDefinition {
 	return c
 }
 
-// Boolean answers Blueprint::boolean.
+// Boolean adds a boolean column.
 func (b *Blueprint) Boolean(column string) *ColumnDefinition {
 	return b.AddColumn("boolean", column)
 }
 
-// Enum answers Blueprint::enum.
+// Enum adds an ENUM column restricted to the given allowed values.
 func (b *Blueprint) Enum(column string, allowed []string) *ColumnDefinition {
 	c := b.AddColumn("enum", column)
 	c.allowed = allowed
 	return c
 }
 
-// Set answers Blueprint::set.
+// Set adds a SET column restricted to the given allowed values.
 func (b *Blueprint) Set(column string, allowed []string) *ColumnDefinition {
 	c := b.AddColumn("set", column)
 	c.allowed = allowed
 	return c
 }
 
-// JSON answers Blueprint::json. The PHP spells it json; an initialism is upper
-// case here.
+// JSON adds a JSON column. Go initialisms are upper case, hence JSON rather
+// than Json.
 func (b *Blueprint) JSON(column string) *ColumnDefinition { return b.AddColumn("json", column) }
 
-// JSONB answers Blueprint::jsonb.
+// JSONB adds a JSONB column.
 func (b *Blueprint) JSONB(column string) *ColumnDefinition { return b.AddColumn("jsonb", column) }
 
-// Date answers Blueprint::date.
+// Date adds a DATE column.
 func (b *Blueprint) Date(column string) *ColumnDefinition { return b.AddColumn("date", column) }
 
-// DateTime answers Blueprint::dateTime. An omitted precision takes the package
+// DateTime adds a DATETIME column. An omitted precision takes the package
 // default, which DefaultTimePrecision sets.
 func (b *Blueprint) DateTime(column string, precision ...int) *ColumnDefinition {
 	return b.timeColumn("dateTime", column, precision)
 }
 
-// DateTimeTz answers Blueprint::dateTimeTz.
+// DateTimeTz adds a timezone-aware DATETIME column.
 func (b *Blueprint) DateTimeTz(column string, precision ...int) *ColumnDefinition {
 	return b.timeColumn("dateTimeTz", column, precision)
 }
 
-// Time answers Blueprint::time.
+// Time adds a TIME column.
 func (b *Blueprint) Time(column string, precision ...int) *ColumnDefinition {
 	return b.timeColumn("time", column, precision)
 }
 
-// TimeTz answers Blueprint::timeTz.
+// TimeTz adds a timezone-aware TIME column.
 func (b *Blueprint) TimeTz(column string, precision ...int) *ColumnDefinition {
 	return b.timeColumn("timeTz", column, precision)
 }
 
-// Timestamp answers Blueprint::timestamp.
+// Timestamp adds a TIMESTAMP column.
 func (b *Blueprint) Timestamp(column string, precision ...int) *ColumnDefinition {
 	return b.timeColumn("timestamp", column, precision)
 }
 
-// TimestampTz answers Blueprint::timestampTz.
+// TimestampTz adds a timezone-aware TIMESTAMP column.
 func (b *Blueprint) TimestampTz(column string, precision ...int) *ColumnDefinition {
 	return b.timeColumn("timestampTz", column, precision)
 }
@@ -740,7 +758,7 @@ func (b *Blueprint) timeColumn(typ, column string, precision []int) *ColumnDefin
 	return c
 }
 
-// Timestamps answers Blueprint::timestamps: nullable created_at and updated_at.
+// Timestamps adds nullable created_at and updated_at columns.
 func (b *Blueprint) Timestamps(precision ...int) []*ColumnDefinition {
 	return []*ColumnDefinition{
 		b.Timestamp("created_at", precision...).Nullable(),
@@ -748,13 +766,13 @@ func (b *Blueprint) Timestamps(precision ...int) []*ColumnDefinition {
 	}
 }
 
-// NullableTimestamps answers Blueprint::nullableTimestamps, an alias of
-// Timestamps.
+// NullableTimestamps is an alias of Timestamps.
 func (b *Blueprint) NullableTimestamps(precision ...int) []*ColumnDefinition {
 	return b.Timestamps(precision...)
 }
 
-// TimestampsTz answers Blueprint::timestampsTz.
+// TimestampsTz adds nullable timezone-aware created_at and updated_at
+// columns.
 func (b *Blueprint) TimestampsTz(precision ...int) []*ColumnDefinition {
 	return []*ColumnDefinition{
 		b.TimestampTz("created_at", precision...).Nullable(),
@@ -762,12 +780,12 @@ func (b *Blueprint) TimestampsTz(precision ...int) []*ColumnDefinition {
 	}
 }
 
-// NullableTimestampsTz answers Blueprint::nullableTimestampsTz.
+// NullableTimestampsTz is an alias of TimestampsTz.
 func (b *Blueprint) NullableTimestampsTz(precision ...int) []*ColumnDefinition {
 	return b.TimestampsTz(precision...)
 }
 
-// Datetimes answers Blueprint::datetimes.
+// Datetimes adds nullable DATETIME created_at and updated_at columns.
 func (b *Blueprint) Datetimes(precision ...int) []*ColumnDefinition {
 	return []*ColumnDefinition{
 		b.DateTime("created_at", precision...).Nullable(),
@@ -775,30 +793,32 @@ func (b *Blueprint) Datetimes(precision ...int) []*ColumnDefinition {
 	}
 }
 
-// SoftDeletes answers Blueprint::softDeletes. An empty column is the PHP
-// default, deleted_at.
+// SoftDeletes adds a nullable TIMESTAMP column used to mark soft deletion.
+// An empty column defaults to deleted_at.
 func (b *Blueprint) SoftDeletes(column string, precision ...int) *ColumnDefinition {
 	return b.Timestamp(defaultTo(column, "deleted_at"), precision...).Nullable()
 }
 
-// SoftDeletesTz answers Blueprint::softDeletesTz.
+// SoftDeletesTz adds a nullable timezone-aware TIMESTAMP column used to mark
+// soft deletion.
 func (b *Blueprint) SoftDeletesTz(column string, precision ...int) *ColumnDefinition {
 	return b.TimestampTz(defaultTo(column, "deleted_at"), precision...).Nullable()
 }
 
-// SoftDeletesDatetime answers Blueprint::softDeletesDatetime.
+// SoftDeletesDatetime adds a nullable DATETIME column used to mark soft
+// deletion.
 func (b *Blueprint) SoftDeletesDatetime(column string, precision ...int) *ColumnDefinition {
 	return b.DateTime(defaultTo(column, "deleted_at"), precision...).Nullable()
 }
 
-// Year answers Blueprint::year.
+// Year adds a YEAR column.
 func (b *Blueprint) Year(column string) *ColumnDefinition { return b.AddColumn("year", column) }
 
-// Binary answers Blueprint::binary.
+// Binary adds a BINARY or VARBINARY column.
 //
-// The PHP defaults are a null length and false for fixed. Go has no default
-// arguments and the two are of different types, so both are required: pass 0
-// and false for the PHP defaults.
+// Go has no default arguments, and length and fixed are of different types,
+// so both are required: pass 0 and false for a plain, unbounded VARBINARY
+// column.
 func (b *Blueprint) Binary(column string, length int, fixed bool) *ColumnDefinition {
 	c := b.AddColumn("binary", column)
 	if length != 0 {
@@ -808,12 +828,12 @@ func (b *Blueprint) Binary(column string, length int, fixed bool) *ColumnDefinit
 	return c
 }
 
-// UUID answers Blueprint::uuid. An empty column is the PHP default, uuid.
+// UUID adds a UUID column. An empty column name defaults to "uuid".
 func (b *Blueprint) UUID(column ...string) *ColumnDefinition {
 	return b.AddColumn("uuid", defaultTo(arg(column, 0), "uuid"))
 }
 
-// ForeignUUID answers Blueprint::foreignUuid.
+// ForeignUUID adds a UUID column meant to carry another table's key.
 func (b *Blueprint) ForeignUUID(column string) *ForeignIDColumnDefinition {
 	definition := &ForeignIDColumnDefinition{
 		ColumnDefinition: &ColumnDefinition{typ: "uuid", name: column},
@@ -823,8 +843,8 @@ func (b *Blueprint) ForeignUUID(column string) *ForeignIDColumnDefinition {
 	return definition
 }
 
-// ULID answers Blueprint::ulid. An empty column is the PHP default, ulid, and
-// an omitted length is 26.
+// ULID adds a CHAR column sized for a ULID. An empty column name defaults
+// to "ulid", and an omitted length defaults to 26.
 func (b *Blueprint) ULID(column string, length ...int) *ColumnDefinition {
 	n := 26
 	if len(length) > 0 {
@@ -833,7 +853,8 @@ func (b *Blueprint) ULID(column string, length ...int) *ColumnDefinition {
 	return b.Char(defaultTo(column, "ulid"), n)
 }
 
-// ForeignULID answers Blueprint::foreignUlid.
+// ForeignULID adds a CHAR column sized for a ULID, meant to carry another
+// table's key.
 func (b *Blueprint) ForeignULID(column string, length ...int) *ForeignIDColumnDefinition {
 	n := 26
 	if len(length) > 0 {
@@ -847,20 +868,20 @@ func (b *Blueprint) ForeignULID(column string, length ...int) *ForeignIDColumnDe
 	return definition
 }
 
-// IPAddress answers Blueprint::ipAddress. An empty column is the PHP default,
-// ip_address.
+// IPAddress adds a column sized for an IP address. An empty column name
+// defaults to "ip_address".
 func (b *Blueprint) IPAddress(column ...string) *ColumnDefinition {
 	return b.AddColumn("ipAddress", defaultTo(arg(column, 0), "ip_address"))
 }
 
-// MacAddress answers Blueprint::macAddress. An empty column is the PHP default,
-// mac_address.
+// MacAddress adds a column sized for a MAC address. An empty column name
+// defaults to "mac_address".
 func (b *Blueprint) MacAddress(column ...string) *ColumnDefinition {
 	return b.AddColumn("macAddress", defaultTo(arg(column, 0), "mac_address"))
 }
 
-// Geometry answers Blueprint::geometry. An empty subtype is the PHP null, and
-// an omitted SRID is the PHP default of 0.
+// Geometry adds a spatial GEOMETRY column. An empty subtype leaves it
+// unconstrained, and an omitted SRID defaults to 0.
 func (b *Blueprint) Geometry(column string, subtype string, srid ...int) *ColumnDefinition {
 	c := b.AddColumn("geometry", column)
 	c.subtype = subtype
@@ -870,7 +891,7 @@ func (b *Blueprint) Geometry(column string, subtype string, srid ...int) *Column
 	return c
 }
 
-// Geography answers Blueprint::geography. An omitted SRID is the PHP default of
+// Geography adds a spatial GEOGRAPHY column. An omitted SRID defaults to
 // 4326, which is why it is variadic rather than a plain int.
 func (b *Blueprint) Geography(column string, subtype string, srid ...int) *ColumnDefinition {
 	c := b.AddColumn("geography", column)
@@ -882,14 +903,15 @@ func (b *Blueprint) Geography(column string, subtype string, srid ...int) *Colum
 	return c
 }
 
-// Computed answers Blueprint::computed.
+// Computed adds a generated column defined by the given expression.
 func (b *Blueprint) Computed(column, expression string) *ColumnDefinition {
 	c := b.AddColumn("computed", column)
 	c.expression = expression
 	return c
 }
 
-// Vector answers Blueprint::vector.
+// Vector adds a vector column, optionally sized to the given number of
+// dimensions.
 func (b *Blueprint) Vector(column string, dimensions ...int) *ColumnDefinition {
 	c := b.AddColumn("vector", column)
 	if len(dimensions) > 0 && dimensions[0] != 0 {
@@ -899,8 +921,9 @@ func (b *Blueprint) Vector(column string, dimensions ...int) *ColumnDefinition {
 	return c
 }
 
-// Morphs answers Blueprint::morphs. The optional arguments are the index name
-// and the column to place these after.
+// Morphs adds the type and id columns for a polymorphic relation, using the
+// key type configured by defaultMorphKeyType. The optional arguments are the
+// index name and the column to place these after.
 func (b *Blueprint) Morphs(name string, args ...string) {
 	switch defaultMorphKeyType {
 	case "uuid":
@@ -912,7 +935,8 @@ func (b *Blueprint) Morphs(name string, args ...string) {
 	}
 }
 
-// NullableMorphs answers Blueprint::nullableMorphs.
+// NullableMorphs adds nullable type and id columns for a polymorphic
+// relation, using the key type configured by defaultMorphKeyType.
 func (b *Blueprint) NullableMorphs(name string, args ...string) {
 	switch defaultMorphKeyType {
 	case "uuid":
@@ -924,42 +948,48 @@ func (b *Blueprint) NullableMorphs(name string, args ...string) {
 	}
 }
 
-// NumericMorphs answers Blueprint::numericMorphs.
+// NumericMorphs adds the type and id columns for a polymorphic relation,
+// with the id column as an unsigned big integer.
 func (b *Blueprint) NumericMorphs(name string, args ...string) {
 	b.morphs(name, args, false, func(column string) *ColumnDefinition {
 		return b.UnsignedBigInteger(column)
 	})
 }
 
-// NullableNumericMorphs answers Blueprint::nullableNumericMorphs.
+// NullableNumericMorphs adds nullable type and id columns for a polymorphic
+// relation, with the id column as an unsigned big integer.
 func (b *Blueprint) NullableNumericMorphs(name string, args ...string) {
 	b.morphs(name, args, true, func(column string) *ColumnDefinition {
 		return b.UnsignedBigInteger(column)
 	})
 }
 
-// UUIDMorphs answers Blueprint::uuidMorphs.
+// UUIDMorphs adds the type and id columns for a polymorphic relation, with
+// the id column as a UUID.
 func (b *Blueprint) UUIDMorphs(name string, args ...string) {
 	b.morphs(name, args, false, func(column string) *ColumnDefinition {
 		return b.UUID(column)
 	})
 }
 
-// NullableUUIDMorphs answers Blueprint::nullableUuidMorphs.
+// NullableUUIDMorphs adds nullable type and id columns for a polymorphic
+// relation, with the id column as a UUID.
 func (b *Blueprint) NullableUUIDMorphs(name string, args ...string) {
 	b.morphs(name, args, true, func(column string) *ColumnDefinition {
 		return b.UUID(column)
 	})
 }
 
-// ULIDMorphs answers Blueprint::ulidMorphs.
+// ULIDMorphs adds the type and id columns for a polymorphic relation, with
+// the id column as a ULID.
 func (b *Blueprint) ULIDMorphs(name string, args ...string) {
 	b.morphs(name, args, false, func(column string) *ColumnDefinition {
 		return b.ULID(column)
 	})
 }
 
-// NullableULIDMorphs answers Blueprint::nullableUlidMorphs.
+// NullableULIDMorphs adds nullable type and id columns for a polymorphic
+// relation, with the id column as a ULID.
 func (b *Blueprint) NullableULIDMorphs(name string, args ...string) {
 	b.morphs(name, args, true, func(column string) *ColumnDefinition {
 		return b.ULID(column)
@@ -988,27 +1018,27 @@ func (b *Blueprint) morphs(name string, args []string, nullable bool, key func(s
 	b.Index([]any{name + "_type", name + "_id"}, indexName)
 }
 
-// RememberToken answers Blueprint::rememberToken.
+// RememberToken adds a nullable, 100-character remember_token column.
 func (b *Blueprint) RememberToken() *ColumnDefinition {
 	return b.String("remember_token", 100).Nullable()
 }
 
-// RawColumn answers Blueprint::rawColumn: a column whose definition is written
-// out by hand.
+// RawColumn adds a column whose definition is written out by hand.
 func (b *Blueprint) RawColumn(column, definition string) *ColumnDefinition {
 	c := b.AddColumn("raw", column)
 	c.definition = definition
 	return c
 }
 
-// Comment answers Blueprint::comment: a comment on the table.
+// Comment queues a command that sets a comment on the table.
 func (b *Blueprint) Comment(comment string) *Command {
 	command := b.addCommand("tableComment")
 	command.Comment = comment
 	return command
 }
 
-// indexCommand answers Blueprint::indexCommand.
+// indexCommand queues an index command of the given type over the given
+// columns, generating a name by convention if none is given.
 func (b *Blueprint) indexCommand(typ string, columns any, index, algorithm, operatorClass string) *IndexDefinition {
 	list := toColumnList(columns)
 
@@ -1025,8 +1055,8 @@ func (b *Blueprint) indexCommand(typ string, columns any, index, algorithm, oper
 	return &IndexDefinition{c: command}
 }
 
-// dropIndexCommand answers Blueprint::dropIndexCommand. An index given as a
-// list of columns is named by the same convention that created it.
+// dropIndexCommand queues a command that drops an index. An index given as
+// a list of columns is named by the same convention that created it.
 func (b *Blueprint) dropIndexCommand(command, typ string, index any) *Command {
 	var columns []any
 	name, isName := index.(string)
@@ -1039,7 +1069,8 @@ func (b *Blueprint) dropIndexCommand(command, typ string, index any) *Command {
 	return b.indexCommand(command, columns, name, "", "").c
 }
 
-// createIndexName answers Blueprint::createIndexName.
+// createIndexName builds a conventional index name from the table, the
+// given columns and the index type.
 func (b *Blueprint) createIndexName(typ string, columns []any) string {
 	table := b.table
 
@@ -1063,14 +1094,16 @@ func (b *Blueprint) createIndexName(typ string, columns []any) string {
 	return strings.ReplaceAll(index, ".", "_")
 }
 
-// AddColumn answers Blueprint::addColumn.
+// AddColumn adds a column of the given type and name to the blueprint.
 func (b *Blueprint) AddColumn(typ, name string) *ColumnDefinition {
 	definition := &ColumnDefinition{typ: typ, name: name}
 	b.addColumnDefinition(definition)
 	return definition
 }
 
-// addColumnDefinition answers Blueprint::addColumnDefinition.
+// addColumnDefinition registers a column definition on the blueprint,
+// queuing an add command for it when the table is not being newly created,
+// and chaining After placement when set.
 func (b *Blueprint) addColumnDefinition(definition *ColumnDefinition) *ColumnDefinition {
 	b.columns = append(b.columns, definition)
 
@@ -1086,18 +1119,20 @@ func (b *Blueprint) addColumnDefinition(definition *ColumnDefinition) *ColumnDef
 	return definition
 }
 
-// After answers Blueprint::after: every column the callback adds is placed
-// after the given one, in the order they were added.
+// After runs callback with every column it adds placed after the given
+// column, in the order they were added.
 func (b *Blueprint) After(column string, callback func(*Blueprint)) {
 	b.after = column
 	callback(b)
 	b.after = ""
 }
 
-// GetAfter answers $blueprint->after.
+// GetAfter returns the column currently set as the placement anchor for
+// After.
 func (b *Blueprint) GetAfter() string { return b.after }
 
-// RemoveColumn answers Blueprint::removeColumn.
+// RemoveColumn removes a column and any pending command that adds it,
+// returning the blueprint for chaining.
 func (b *Blueprint) RemoveColumn(name string) *Blueprint {
 	columns := b.columns[:0]
 	for _, column := range b.columns {
@@ -1118,29 +1153,31 @@ func (b *Blueprint) RemoveColumn(name string) *Blueprint {
 	return b
 }
 
-// addCommand answers Blueprint::addCommand.
+// addCommand queues a new command of the given name.
 func (b *Blueprint) addCommand(name string) *Command {
 	command := NewCommand(name)
 	b.commands = append(b.commands, command)
 	return command
 }
 
-// GetTable answers Blueprint::getTable.
+// GetTable returns the table's name.
 func (b *Blueprint) GetTable() string { return b.table }
 
-// GetPrefix answers Blueprint::getPrefix.
+// GetPrefix returns the connection's table prefix.
 func (b *Blueprint) GetPrefix() string { return b.connection.GetTablePrefix() }
 
-// GetColumns answers Blueprint::getColumns.
+// GetColumns returns the blueprint's columns.
 func (b *Blueprint) GetColumns() []*ColumnDefinition { return b.columns }
 
-// GetCommands answers Blueprint::getCommands.
+// GetCommands returns the blueprint's queued commands.
 func (b *Blueprint) GetCommands() []*Command { return b.commands }
 
-// GetState answers Blueprint::getState.
+// GetState returns the blueprint's BlueprintState, which is nil unless an
+// alter command required reading the table's current shape.
 func (b *Blueprint) GetState() *BlueprintState { return b.state }
 
-// GetAddedColumns answers Blueprint::getAddedColumns.
+// GetAddedColumns returns the columns being added, excluding any marked as
+// changed.
 func (b *Blueprint) GetAddedColumns() []*ColumnDefinition {
 	var added []*ColumnDefinition
 	for _, column := range b.columns {
@@ -1151,7 +1188,7 @@ func (b *Blueprint) GetAddedColumns() []*ColumnDefinition {
 	return added
 }
 
-// GetChangedColumns answers Blueprint::getChangedColumns.
+// GetChangedColumns returns the columns marked as changed.
 func (b *Blueprint) GetChangedColumns() []*ColumnDefinition {
 	var changed []*ColumnDefinition
 	for _, column := range b.columns {
@@ -1162,8 +1199,8 @@ func (b *Blueprint) GetChangedColumns() []*ColumnDefinition {
 	return changed
 }
 
-// marker reads one of the fluent index attributes by the name the PHP loop
-// uses.
+// marker reads one of a column's fluent index attributes (primary, unique,
+// index, fulltext, spatialIndex, vectorIndex) by name.
 func (c *ColumnDefinition) marker(index string) any {
 	switch index {
 	case "primary":

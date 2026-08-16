@@ -22,17 +22,14 @@ const scanBatch = 500
 
 // RedisStore is the cache backend over RESP.
 //
-// It answers Illuminate\Cache\RedisStore, and Illuminate\Cache\RedisLock with
-// it: a lock is two atomic operations, and cache.Lock is what turns them into a
-// handle. The name stutters as redis.RedisStore, and it is the Illuminate name
-// anyway (ADR 0044) -- the developer arriving from Laravel is looking for
-// RedisStore.
+// It is the lock as well as the store: a lock is two atomic operations, and
+// cache.Lock is what turns them into a handle.
 //
 // It is deliberately below the application's vocabulary: it moves bytes under
 // keys that are already built, it has never heard of a Grant or a tenant, and
 // it does not know what a namespace is. cache.Repository decides which key a
 // value belongs under, in one place, where the tenant separator can be got
-// right once instead of once per backend (RULE 14).
+// right once instead of once per backend.
 //
 // What it adds to the key it is given is the application prefix from the
 // connection, and nothing else.
@@ -131,10 +128,9 @@ func (s *RedisStore) Put(ctx context.Context, key string, value []byte, ttl time
 
 // PutMany stores several values under one ttl.
 //
-// It answers the putMany() of the RetrievesMultipleKeys trait. One round trip,
-// and not atomic: MSET cannot carry an expiry, so this is a pipeline of SETs
-// and a failure part-way through leaves the entries it already wrote. That is
-// the right failure for a cache, and it is the same one the PHP has.
+// One round trip, and not atomic: MSET cannot carry an expiry, so this is a
+// pipeline of SETs, and a failure part-way through leaves the entries it
+// already wrote. That is the right failure for a cache.
 func (s *RedisStore) PutMany(ctx context.Context, values map[string][]byte, ttl time.Duration) error {
 	if ttl <= 0 {
 		return cache.ErrNoTTL
@@ -153,10 +149,9 @@ func (s *RedisStore) PutMany(ctx context.Context, values map[string][]byte, ttl 
 
 // Add stores value only if the key is absent, and reports whether it did.
 //
-// It answers RedisStore::add(). Laravel needs a Lua script for it because it
-// wants the ttl and the conditional write in one statement; SET NX EX is one
-// statement and is plain RESP, which is what keeps this package portable across
-// the four products (RULE 11).
+// SET NX EX carries the ttl and the conditional write in one statement, and it
+// is plain RESP rather than a script, which is what keeps this package portable
+// across the four products.
 func (s *RedisStore) Add(ctx context.Context, key string, value []byte, ttl time.Duration) (bool, error) {
 	if ttl <= 0 {
 		return false, cache.ErrNoTTL
@@ -187,7 +182,7 @@ func (s *RedisStore) Forget(ctx context.Context, key string) error {
 // It reads the ttl back in the same transaction rather than asking for EXPIRE
 // NX, which is a Redis 7 option that KeyDB does not have: a counter that keeps
 // its window on one product and loses it on another is exactly the divergence
-// RULE 11 exists to prevent.
+// this package is written to avoid.
 func (s *RedisStore) Increment(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error) {
 	if ttl <= 0 {
 		return 0, cache.ErrNoTTL
@@ -227,9 +222,6 @@ func (s *RedisStore) Increment(ctx context.Context, key string, delta int64, ttl
 
 // Decrement subtracts delta from the counter under key and returns the new
 // value.
-//
-// It answers RedisStore::decrement(), and it is Increment with the sign turned
-// round, which is what the PHP is.
 func (s *RedisStore) Decrement(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error) {
 	return s.Increment(ctx, key, -delta, ttl)
 }
@@ -251,12 +243,12 @@ func (s *RedisStore) Forever(ctx context.Context, key string, value []byte) erro
 //
 // It takes a prefix and not nothing, because the only caller is
 // cache.Repository.Flush and a repository owns one tenant's slice of one
-// namespace. Laravel's RedisStore::flush() is FLUSHDB, and FLUSHDB here would
-// empty every other tenant -- and every other application sharing the server --
-// on the way past. In a SaaS that is an outage caused by a support request.
+// namespace. FLUSHDB would empty every other tenant -- and every other
+// application sharing the server -- on the way past. In a SaaS that is an
+// outage caused by a support request.
 //
 // SCAN and DEL, in batches: no KEYS, which blocks the server for as long as it
-// takes to walk the whole space, and no Lua (RULE 11).
+// takes to walk the whole space, and no script.
 func (s *RedisStore) Flush(ctx context.Context, prefix string) error {
 	if prefix == "" {
 		// An empty prefix matches every key on the server. Nothing in the
@@ -361,8 +353,8 @@ func (s *RedisStore) CurrentOwner(ctx context.Context, key string) (string, erro
 
 // FlushLocks removes every lock this store holds, held or not.
 //
-// It answers Illuminate\Contracts\Cache\CanFlushLocks. It is safe to offer here
-// for the reason cache.ArrayStore offers it: locks live in their own key space
+// It is safe to offer here for the reason cache.ArrayStore offers it: locks
+// live in their own key space
 // -- cache.Lock names them "lock:..." and entries are "cache:..." -- so
 // emptying one cannot touch the other, and a Repository.Flush cannot release
 // the lock the scheduler is holding.
@@ -375,9 +367,7 @@ func (s *RedisStore) FlushLocks(ctx context.Context) error {
 
 // HasSeparateLockStore reports whether locks live apart from entries.
 //
-// It answers RedisStore::hasSeparateLockStore(), and the answer is always yes
-// here: see FlushLocks. Laravel's answer depends on whether a second connection
-// was configured, which is a piece of wiring this collection does not have.
+// The answer is always yes here: see FlushLocks.
 func (s *RedisStore) HasSeparateLockStore() bool { return true }
 
 // translate maps a driver error into this collection's vocabulary.

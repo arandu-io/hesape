@@ -12,11 +12,10 @@ import (
 )
 
 // StdDriverName is the name the driver this package carries is registered
-// under, and what [ImageManager.GetDefaultDriver] answers until somebody
+// under, and what [ImageManager.GetDefaultDriver] returns until somebody
 // changes it.
 //
-// Illuminate's two names are "gd" and "imagick", after the PHP extension each
-// one drives. This one drives the standard library, and it says so.
+// It drives the standard library, and it says so.
 const StdDriverName = "std"
 
 // HTTPClient is the slice of an HTTP client that [ImageManager.FromURL] needs.
@@ -28,13 +27,11 @@ type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// ImageManager answers Illuminate\Image\ImageManager: where images come from,
-// and which driver processes them.
+// ImageManager is where images come from, and which driver processes them.
 //
-// Illuminate reaches it through the container and the Image facade. Neither
-// exists here (ADR 0001, ADR 0002), so an application builds one and keeps it:
-// it is cheap, it holds no per-image state, and every method on it is safe to
-// call from several goroutines at once.
+// An application builds one and keeps it: it is cheap, it holds no per-image
+// state, and every method on it is safe to call from several goroutines at
+// once.
 //
 //	images := image.NewImageManager()
 //	img, err := images.FromPath("photo.jpg")
@@ -46,8 +43,8 @@ type ImageManager struct {
 	handlers      map[string]map[string]TransformationHandler
 }
 
-// NewImageManager answers ImageManager::__construct(), with the one driver this
-// package carries already registered under [StdDriverName].
+// NewImageManager returns a manager with the one driver this package carries
+// already registered under [StdDriverName].
 func NewImageManager() *ImageManager {
 	m := &ImageManager{
 		defaultDriver: StdDriverName,
@@ -59,19 +56,17 @@ func NewImageManager() *ImageManager {
 	return m
 }
 
-// GetDefaultDriver answers ImageManager::getDefaultDriver().
-//
-// Illuminate reads config('images.default', 'gd'). Configuration is a typed
-// struct here and not an array a manager reaches into, so what it answers is
-// what [ImageManager.SetDefaultDriver] was told, and [StdDriverName] until then.
+// GetDefaultDriver returns the name of the driver used when nobody names one:
+// whatever [ImageManager.SetDefaultDriver] was told, and [StdDriverName]
+// until then.
 func (m *ImageManager) GetDefaultDriver() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.defaultDriver
 }
 
-// SetDefaultDriver names the driver every image uses unless [Image.Using] says
-// otherwise. It stands in for the config key Illuminate reads.
+// SetDefaultDriver names the driver every image uses unless [Image.Using]
+// says otherwise.
 func (m *ImageManager) SetDefaultDriver(name string) *ImageManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -79,11 +74,11 @@ func (m *ImageManager) SetDefaultDriver(name string) *ImageManager {
 	return m
 }
 
-// Extend answers Manager::extend(): a driver registered under a name.
+// Extend registers a driver under a name.
 //
-// The creator runs at most once, the first time somebody asks for that driver,
-// which is Illuminate's createDriver() arriving lazily for the same reason it
-// does there -- a driver nobody uses should cost nothing.
+// The creator runs at most once, the first time somebody asks for that
+// driver, and lazily for the same reason it always should -- a driver nobody
+// uses should cost nothing.
 func (m *ImageManager) Extend(name string, creator func() (Driver, error)) *ImageManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -92,11 +87,8 @@ func (m *ImageManager) Extend(name string, creator func() (Driver, error)) *Imag
 	return m
 }
 
-// Driver answers Manager::driver(): the driver by name, or the default when no
-// name is given.
-//
-// Illuminate throws InvalidArgumentException for a name nobody registered, with
-// the message this returns.
+// Driver returns the driver by name, or the default when no name is given,
+// and an error naming it for a name nobody registered.
 func (m *ImageManager) Driver(name ...string) (Driver, error) {
 	want := optionalString(name)
 	if want == "" {
@@ -130,13 +122,10 @@ func (m *ImageManager) Driver(name ...string) (Driver, error) {
 	return d, nil
 }
 
-// TransformUsing answers ImageManager::transformUsing(): how one driver should
-// carry out one transformation.
+// TransformUsing registers how one driver should carry out one
+// transformation, keyed by the transformation's TransformationName.
 //
-// Illuminate keys the registry by class-string; the key here is the
-// transformation's TransformationName, which is that class's basename. A
-// handler registered for a driver already built reaches it immediately, as it
-// does in the PHP.
+// A handler registered for a driver already built reaches it immediately.
 func (m *ImageManager) TransformUsing(driver, transformation string, handler TransformationHandler) *ImageManager {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -156,18 +145,16 @@ func (m *ImageManager) newImage(contents []byte, file UploadedFile) *Image {
 	return &Image{manager: m, contents: contents, file: file, pipeline: NewImagePipeline()}
 }
 
-// FromBytes answers ImageManager::fromBytes().
+// FromBytes builds an [Image] from bytes already in memory.
 func (m *ImageManager) FromBytes(contents []byte) *Image {
 	return m.newImage(contents, nil)
 }
 
-// FromStream answers ImageManager::fromStream().
+// FromStream builds an [Image] by reading stream fully, now rather than
+// keeping it for later.
 //
-// Illuminate takes a PHP resource and reads it with stream_get_contents; this
-// takes the io.Reader that stands for one, and reads it now rather than
-// keeping it. A stream held for later is a file descriptor held for later, and
-// the deferred read Illuminate does with a Closure would put the read somewhere
-// the caller cannot see it fail.
+// A stream held for later is a file descriptor held for later, and a
+// deferred read would put the read somewhere the caller cannot see it fail.
 func (m *ImageManager) FromStream(stream io.Reader) (*Image, error) {
 	contents, err := io.ReadAll(stream)
 	if err != nil {
@@ -176,7 +163,7 @@ func (m *ImageManager) FromStream(stream io.Reader) (*Image, error) {
 	return m.newImage(contents, nil), nil
 }
 
-// FromBase64 answers ImageManager::fromBase64().
+// FromBase64 builds an [Image] by decoding a base64 string.
 func (m *ImageManager) FromBase64(encoded string) (*Image, error) {
 	contents, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
@@ -185,12 +172,12 @@ func (m *ImageManager) FromBase64(encoded string) (*Image, error) {
 	return m.newImage(contents, nil), nil
 }
 
-// FromPath answers ImageManager::fromPath(): a file of the application's own,
-// read from the local filesystem.
+// FromPath builds an [Image] from a file of the application's own, read from
+// the local filesystem.
 //
 // It is not the way in for something a customer sent. An upload has no path
 // until somebody stores it, and storing it goes through [Image.Store], which
-// takes an auth.Grant and a tenant with it (RULE 14).
+// takes an auth.Grant and a tenant with it.
 func (m *ImageManager) FromPath(path string) (*Image, error) {
 	contents, err := os.ReadFile(path)
 	if err != nil {
@@ -199,13 +186,11 @@ func (m *ImageManager) FromPath(path string) (*Image, error) {
 	return m.newImage(contents, nil), nil
 }
 
-// FromStorage answers ImageManager::fromStorage(): an image read back off a
-// storage disk.
+// FromStorage builds an [Image] read back off a storage disk.
 //
-// Illuminate names a disk and lets the container find it. Here the disk is an
-// argument, and the read takes an auth.Grant: a read is a path to somebody
-// else's data exactly as a write is, and there is no query path without a
-// policy (RULE 17). The key is resolved under the Grant's tenant by the disk
+// The disk is an argument, and the read takes an auth.Grant: a read is a path
+// to somebody else's data exactly as a write is, and there is no query path
+// without a policy. The key is resolved under the Grant's tenant by the disk
 // itself.
 func (m *ImageManager) FromStorage(ctx context.Context, g auth.Grant, disk DiskReader, path string) (*Image, error) {
 	body, err := disk.Get(ctx, g, path)
@@ -221,9 +206,9 @@ func (m *ImageManager) FromStorage(ctx context.Context, g auth.Grant, disk DiskR
 	return m.newImage(contents, nil), nil
 }
 
-// FromUpload answers ImageManager::fromUpload().
+// FromUpload builds an [Image] from an uploaded file.
 //
-// The upload is kept on the image, which is what makes [Image.File] answer with
+// The upload is kept on the image, which is what makes [Image.File] return
 // something, and is the only entry point where it does.
 func (m *ImageManager) FromUpload(file UploadedFile) (*Image, error) {
 	contents, err := file.GetContent()
@@ -233,12 +218,11 @@ func (m *ImageManager) FromUpload(file UploadedFile) (*Image, error) {
 	return m.newImage(contents, file), nil
 }
 
-// FromURL answers ImageManager::fromUrl().
+// FromURL builds an [Image] by downloading url with client.
 //
-// Illuminate resolves an HTTP client from the container; this takes one,
-// because the client carries the timeout and the transport, and both are
-// decisions this package must not make for a request to an address somebody
-// else supplied.
+// It takes a client because the client carries the timeout and the
+// transport, and both are decisions this package must not make for a request
+// to an address somebody else supplied.
 func (m *ImageManager) FromURL(ctx context.Context, client HTTPClient, url string) (*Image, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

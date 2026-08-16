@@ -13,12 +13,11 @@ import (
 
 // QueueManager holds the configured connections and hands them out by name.
 //
-// It answers Illuminate\Queue\QueueManager, minus the half of it that is the
-// container: there is no lazy resolution from a config array, because the
-// application constructs its queues in bootstrap/app.go and passes them here
-// (ADR 0001). What is left is the part anybody actually calls -- `aru work
-// --connection=redis` has to turn a string into a queue, the default connection
-// has to have a name, and a queue has to be pausable while an incident is open.
+// There is no resolution from a config array: the application constructs its
+// queues in bootstrap/app.go and passes them here. What is left is the part
+// anybody calls -- `aru work --connection=redis` has to turn a string into a
+// queue, the default connection has to have a name, and a queue has to be
+// pausable while an incident is open.
 //
 //	m := queue.NewQueueManager().
 //		Extend("database", queue.NewDatabaseQueue(db)).
@@ -66,12 +65,10 @@ func (m *QueueManager) SetEvents(d Dispatcher) *QueueManager {
 
 // Extend registers a connection under a name.
 //
-// It answers extend(), which in PHP registers a connector -- a closure that
-// builds the queue when it is first asked for. Here it takes the queue itself,
-// because there is no config array to build it from and lazily resolving
-// something the application already constructed is a delay with no payoff.
-// [QueueManager.AddConnector] is the lazy form, for a driver whose connection
-// is expensive to open.
+// It takes the queue itself, because there is no config array to build it from
+// and lazily resolving something the application already constructed is a delay
+// with no payoff. [QueueManager.AddConnector] is the lazy form, for a driver
+// whose connection is expensive to open.
 //
 // The first one registered becomes the default, so an application with one
 // queue never has to say which it means.
@@ -91,9 +88,9 @@ func (m *QueueManager) Extend(name string, q Queue) *QueueManager {
 // AddConnector registers how to build a connection the first time it is asked
 // for.
 //
-// It answers addConnector(). It is the one place lazy resolution earns its
-// keep: a RESP connection opens a socket, and a binary that runs `aru migrate`
-// should not open one on the way past.
+// It is the one place lazy resolution earns its keep: a RESP connection opens a
+// socket, and a binary that runs `aru migrate` should not open one on the way
+// past.
 //
 // The first one registered becomes the default, exactly as with
 // [QueueManager.Extend].
@@ -108,8 +105,6 @@ func (m *QueueManager) AddConnector(name string, connect func() (Queue, error)) 
 }
 
 // GetDefaultDriver is the name [QueueManager.Connection] uses when asked for "".
-//
-// It answers getDefaultDriver().
 func (m *QueueManager) GetDefaultDriver() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -117,7 +112,7 @@ func (m *QueueManager) GetDefaultDriver() string {
 }
 
 // SetDefaultDriver names the connection [QueueManager.Connection] uses when
-// asked for "". It answers setDefaultDriver().
+// asked for "".
 func (m *QueueManager) SetDefaultDriver(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -126,8 +121,8 @@ func (m *QueueManager) SetDefaultDriver(name string) {
 
 // GetName is the connection name to use, resolving "" to the default.
 //
-// It answers getName(). It is what a command prints, so a log line says
-// "database" rather than nothing.
+// It is what a command prints, so a log line says "database" rather than
+// nothing.
 func (m *QueueManager) GetName(name string) string {
 	if name != "" {
 		return name
@@ -137,8 +132,8 @@ func (m *QueueManager) GetName(name string) string {
 
 // Connected reports whether a connection has already been built.
 //
-// It answers connected(). It is false for a name registered with
-// [QueueManager.AddConnector] and never asked for, and true once it has been.
+// It is false for a name registered with [QueueManager.AddConnector] and never
+// asked for, and true once it has been.
 func (m *QueueManager) Connected(name string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -148,8 +143,7 @@ func (m *QueueManager) Connected(name string) bool {
 
 // Connection returns a registered queue. An empty name means the default.
 //
-// It answers connection(), including the caching: a connector runs once and its
-// queue is kept.
+// A connector runs once and its queue is kept.
 func (m *QueueManager) Connection(name string) (Queue, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -205,7 +199,7 @@ func (m *QueueManager) Connections() []string {
 
 // Route sends a job name to a connection and a queue.
 //
-// It answers route(). See [QueueRoutes] for what it buys.
+// See [QueueRoutes] for what it buys.
 func (m *QueueManager) Route(name, queue, connection string) {
 	m.mu.RLock()
 	routes := m.routes
@@ -213,18 +207,15 @@ func (m *QueueManager) Route(name, queue, connection string) {
 	routes.Set(name, queue, connection)
 }
 
-// GetRoutes is the routing table, for a dispatcher to consult.
-//
-// It has no PHP counterpart because in Laravel the table is reached through a
-// trait on half a dozen classes; here it is one object with one owner.
+// GetRoutes is the routing table, for a dispatcher to consult. It is one object
+// with one owner.
 func (m *QueueManager) GetRoutes() *QueueRoutes {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.routes
 }
 
-// pausedKey is where a pause is recorded. It answers Laravel's
-// illuminate:queue:paused:{connection}:{queue}.
+// pausedKey is where a pause is recorded, one key per connection and queue.
 func pausedKey(connection, queue string) string {
 	return "hesape:queue:paused:" + connection + ":" + queue
 }
@@ -321,14 +312,13 @@ func (m *QueueManager) IsPaused(ctx context.Context, connection, queue string) (
 
 // Restart asks every running worker to stop after the job it is holding.
 //
-// It answers `queue:restart`, which in Laravel is a command rather than a
-// method on the manager -- the command writes the timestamp the worker polls,
-// and it is written here so the command is three lines and the key is named
+// It writes the timestamp the workers poll, and it lives on the manager rather
+// than in `queue:restart` so the command is three lines and the key is named
 // once.
 //
 // It is how a deploy replaces the workers: the new binary starts, the old ones
 // notice the timestamp moved and exit cleanly, and whatever supervises them
-// starts the new image. RULE 16's sibling -- nothing about it runs at boot.
+// starts the new image. Nothing about it runs at boot.
 func (m *QueueManager) Restart(ctx context.Context) error {
 	m.mu.RLock()
 	store := m.cache
@@ -348,52 +338,48 @@ func (m *QueueManager) Restart(ctx context.Context) error {
 // WithoutInterruptionPolling stops workers reading the cache to find out
 // whether they should pause or restart.
 //
-// It answers withoutInterruptionPolling(). Every worker asking a shared cache
-// once a second is a load somebody eventually notices, and an application whose
-// deploy stops the processes itself does not need the signal.
+// Every worker asking a shared cache once a second is a load somebody
+// eventually notices, and an application whose deploy stops the processes
+// itself does not need the signal.
 //
-// It is process-wide, exactly as the PHP statics are: a worker built after this
-// is called does not poll either.
+// It is process-wide: a worker built after this is called does not poll
+// either.
 func (m *QueueManager) WithoutInterruptionPolling() {
 	interruptionPolling.Store(false)
 }
 
-// interruptionPolling is Worker::$restartable and Worker::$pausable, which are
-// two statics in PHP set by one method and never independently. One flag says
-// the same thing without letting them disagree.
+// interruptionPolling covers both the restart signal and the pause flag. They
+// are turned off together, and one flag says that without letting the two
+// disagree.
 var interruptionPolling atomic.Bool
 
 func init() { interruptionPolling.Store(true) }
 
-// Before registers a listener for the event before a job runs. It answers
-// before().
+// Before registers a listener for the event before a job runs.
 //
-// The seven registration methods on the PHP manager are sugar over
-// $events->listen(SomeEvent::class, $callback), and they are here for the same
-// reason they are there: `Queue::failing(...)` in bootstrap/app.go says what it
-// does, and the listen call with a class name does not.
+// This and the six methods under it are sugar over registering a listener for
+// one event type, and they exist because `manager.Failing(...)` in
+// bootstrap/app.go says what it does where the naked registration does not.
 func (m *QueueManager) Before(listener any) { m.listen(events.JobProcessing{}, listener) }
 
-// After registers a listener for the event after a job ran. It answers after().
+// After registers a listener for the event after a job ran.
 func (m *QueueManager) After(listener any) { m.listen(events.JobProcessed{}, listener) }
 
-// ExceptionOccurred registers a listener for a job that returned an error. It
-// answers exceptionOccurred().
+// ExceptionOccurred registers a listener for a job that returned an error.
 func (m *QueueManager) ExceptionOccurred(listener any) {
 	m.listen(events.JobExceptionOccurred{}, listener)
 }
 
-// Failing registers a listener for a job that gave up. It answers failing().
+// Failing registers a listener for a job that gave up.
 func (m *QueueManager) Failing(listener any) { m.listen(events.JobFailed{}, listener) }
 
-// Looping registers a listener for each pass of a worker's loop. It answers
-// looping().
+// Looping registers a listener for each pass of a worker's loop.
 func (m *QueueManager) Looping(listener any) { m.listen(events.Looping{}, listener) }
 
-// Starting registers a listener for a worker starting. It answers starting().
+// Starting registers a listener for a worker starting.
 func (m *QueueManager) Starting(listener any) { m.listen(events.WorkerStarting{}, listener) }
 
-// Stopping registers a listener for a worker stopping. It answers stopping().
+// Stopping registers a listener for a worker stopping.
 func (m *QueueManager) Stopping(listener any) { m.listen(events.WorkerStopping{}, listener) }
 
 // listen registers a listener, when there is a dispatcher to register it with.

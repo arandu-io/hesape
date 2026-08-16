@@ -11,11 +11,9 @@ import (
 // DeferredQueue runs each job after the response has been sent, in this
 // process.
 //
-// It answers Illuminate\Queue\DeferredQueue, which is a SyncQueue whose push is
-// wrapped in Illuminate\Support\defer(). It is the same trade with the same
-// shape: nothing is stored, so nothing is retried and a restart loses whatever
-// was in flight -- but the request does not wait for the work, which is the one
-// thing [SyncQueue] cannot offer.
+// It is [SyncQueue] with the work put off: nothing is stored, so nothing is
+// retried and a restart loses whatever was in flight -- but the request does
+// not wait for the work, which is the one thing SyncQueue cannot offer.
 //
 // What it is for is the work that is genuinely optional: a webhook nobody
 // waits for, a cache warm. Anything that must survive a deploy belongs on
@@ -24,7 +22,7 @@ import (
 //
 // It is a distinct type rather than an option on SyncQueue because the choice
 // is a wiring decision made once, and an option would be a second way to spell
-// a connection name (RULE 9).
+// a connection name.
 type DeferredQueue struct {
 	connection
 	sync *SyncQueue
@@ -36,9 +34,8 @@ type DeferredQueue struct {
 // NewDeferredQueue returns the queue over the same handler registry a worker
 // uses.
 //
-// The callback runs on its own goroutine. That is what "after the response" is
-// in Go: there is no request-scoped defer stack the way PHP has one, because
-// the handler that would push onto it has already returned by the time the
+// The callback runs on its own goroutine, which is what "after the response"
+// means here: the handler that pushed has already returned by the time the
 // response is written.
 func NewDeferredQueue(h Handlers) *DeferredQueue {
 	q := &DeferredQueue{sync: NewSyncQueue(h), deferrer: func(fn func()) { go fn() }}
@@ -66,7 +63,7 @@ var (
 //
 // The job is authorized before the deferral, not inside it: an unauthorized
 // push has to fail the caller, and a failure that happens on another goroutine
-// after the response is a failure nobody sees (RULE 17).
+// after the response is a failure nobody sees.
 func (q *DeferredQueue) Push(ctx context.Context, g auth.Grant, j jobs.Job) error {
 	if err := jobs.Authorized(g, j); err != nil {
 		return err

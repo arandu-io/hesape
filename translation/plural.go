@@ -2,25 +2,22 @@ package translation
 
 import "strings"
 
-// GetPluralIndex answers MessageSelector::getPluralIndex(). It reports which
-// segment of a line a count selects in a locale, counting from zero: English
+// GetPluralIndex reports which segment of a line a count selects in a locale,
+// counting from zero: English
 // answers 0 for one and 1 for anything else, Japanese always answers 0, Russian
 // has three forms and Arabic six.
 //
-// A locale whose rule is not carried answers 0, as PHP's default case does:
-// that is the right answer for a language with no plural distinction and the
-// safe one for a language nobody has written a rule for.
+// A locale whose rule is not carried answers 0: that is the right answer for a
+// language with no plural distinction and the safe one for a language nobody
+// has written a rule for.
 //
 // The plural rules are derived from code of the Zend Framework (2010-09-25),
-// which is subject to the new BSD license -- the same provenance the PHP method
-// records.
+// which is subject to the new BSD license.
 //
-// Two differences from the PHP switch, both in how the locale is read. It is
-// matched on the language subtag alone, so pt-BR and pt_BR and pt resolve the
-// same rule: no region in PHP's own table changes the plural forms of its
-// language, and PHP's list, which spells every locale with an underscore,
-// answers 0 for the hyphenated tag an Accept-Language header carries. And the
-// count is read by magnitude, so -2 selects the form 2 does.
+// The locale is matched on the language subtag alone, so pt-BR and pt_BR and pt
+// resolve the same rule: no region changes the plural forms of its language,
+// and an Accept-Language header carries a hyphenated tag. The count is read by
+// magnitude, so -2 selects the form 2 does.
 func (MessageSelector) GetPluralIndex(locale string, number int) int {
 	if number < 0 {
 		number = -number

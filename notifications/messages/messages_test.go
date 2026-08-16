@@ -39,9 +39,9 @@ func TestTheBuildersDoNotMutateTheMessageTheyWereCalledOn(t *testing.T) {
 	}
 }
 
-// TestWithCollapsesWhitespace is Illuminate's formatLine: a paragraph written
-// across several source lines arrives as one sentence, not as three with the
-// Go indentation in the middle of it.
+// TestWithCollapsesWhitespace checks that a paragraph written across several
+// source lines arrives as one sentence, not as three with the Go indentation in
+// the middle of it.
 func TestWithCollapsesWhitespace(t *testing.T) {
 	m := messages.NewMail().Line(`Somebody asked
 		to reset your password.`)

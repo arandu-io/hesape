@@ -7,16 +7,10 @@ import (
 )
 
 // PendingResourceRegistration holds a resource's registration open while the
-// caller configures it.
-//
-// It mirrors Illuminate\Routing\PendingResourceRegistration. PHP registers on
-// destruction, so a resource nobody configured still lands in the table; Go
-// has no destructor, so Register is the call that commits it:
+// caller configures it. Registration is explicit rather than implicit, so
+// Register is the call that commits it:
 //
 //	r.Resource("invoices", "InvoiceController").Only("index", "show").Register()
-//
-// See doc.go, which records __destruct as the one thing here that has no
-// counterpart and why.
 type PendingResourceRegistration struct {
 	registrar  *ResourceRegistrar
 	name       string
@@ -25,7 +19,8 @@ type PendingResourceRegistration struct {
 	registered bool
 }
 
-// NewPendingResourceRegistration is PendingResourceRegistration::__construct.
+// NewPendingResourceRegistration builds a pending registration for name and
+// controller.
 func NewPendingResourceRegistration(registrar *ResourceRegistrar, name, controller string, options ResourceOptions) *PendingResourceRegistration {
 	return &PendingResourceRegistration{
 		registrar:  registrar,
@@ -35,26 +30,26 @@ func NewPendingResourceRegistration(registrar *ResourceRegistrar, name, controll
 	}
 }
 
-// Only is PendingResourceRegistration::only.
+// Only limits registration to the named actions.
 func (p *PendingResourceRegistration) Only(methods ...string) *PendingResourceRegistration {
 	p.options.Only = methods
 	return p
 }
 
-// Except is PendingResourceRegistration::except.
+// Except excludes the named actions from registration.
 func (p *PendingResourceRegistration) Except(methods ...string) *PendingResourceRegistration {
 	p.options.Except = methods
 	return p
 }
 
-// Names is PendingResourceRegistration::names. The empty key renames every
-// action at once, which is PHP's string form of the same argument.
+// Names renames the routes by action. The empty key renames every action at
+// once.
 func (p *PendingResourceRegistration) Names(names map[string]string) *PendingResourceRegistration {
 	p.options.Names = names
 	return p
 }
 
-// Name is PendingResourceRegistration::name.
+// Name renames a single action's route.
 func (p *PendingResourceRegistration) Name(method, name string) *PendingResourceRegistration {
 	if p.options.Names == nil {
 		p.options.Names = map[string]string{}
@@ -63,13 +58,14 @@ func (p *PendingResourceRegistration) Name(method, name string) *PendingResource
 	return p
 }
 
-// Parameters is PendingResourceRegistration::parameters.
+// Parameters overrides the route's wildcard names, keyed by resource segment.
 func (p *PendingResourceRegistration) Parameters(parameters map[string]string) *PendingResourceRegistration {
 	p.options.Parameters = parameters
 	return p
 }
 
-// Parameter is PendingResourceRegistration::parameter.
+// Parameter overrides a single wildcard name, previous replaced by
+// replacement.
 func (p *PendingResourceRegistration) Parameter(previous, replacement string) *PendingResourceRegistration {
 	if p.options.Parameters == nil {
 		p.options.Parameters = map[string]string{}
@@ -78,7 +74,7 @@ func (p *PendingResourceRegistration) Parameter(previous, replacement string) *P
 	return p
 }
 
-// Middleware is PendingResourceRegistration::middleware.
+// Middleware wraps every route the resource registers.
 func (p *PendingResourceRegistration) Middleware(middleware ...pipeline.Middleware[http.Handler]) *PendingResourceRegistration {
 	p.options.Middleware = middleware
 	for method, existing := range p.options.MiddlewareFor {
@@ -87,9 +83,8 @@ func (p *PendingResourceRegistration) Middleware(middleware ...pipeline.Middlewa
 	return p
 }
 
-// MiddlewareFor is PendingResourceRegistration::middlewareFor. It wraps only
-// the named actions -- the write half of a resource behind a confirmation, the
-// read half open.
+// MiddlewareFor wraps only the named actions -- the write half of a resource
+// behind a confirmation, the read half open.
 func (p *PendingResourceRegistration) MiddlewareFor(methods []string, middleware ...pipeline.Middleware[http.Handler]) *PendingResourceRegistration {
 	if len(p.options.Middleware) > 0 {
 		middleware = UniqueMiddleware(append(append([]pipeline.Middleware[http.Handler]{}, p.options.Middleware...), middleware...))
@@ -103,13 +98,14 @@ func (p *PendingResourceRegistration) MiddlewareFor(methods []string, middleware
 	return p
 }
 
-// WithoutMiddleware is PendingResourceRegistration::withoutMiddleware.
+// WithoutMiddleware removes middleware from every route the resource
+// registers.
 func (p *PendingResourceRegistration) WithoutMiddleware(middleware ...pipeline.Middleware[http.Handler]) *PendingResourceRegistration {
 	p.options.ExcludedMiddleware = append(p.options.ExcludedMiddleware, middleware...)
 	return p
 }
 
-// WithoutMiddlewareFor is PendingResourceRegistration::withoutMiddlewareFor.
+// WithoutMiddlewareFor removes middleware from only the named actions.
 func (p *PendingResourceRegistration) WithoutMiddlewareFor(methods []string, middleware ...pipeline.Middleware[http.Handler]) *PendingResourceRegistration {
 	if p.options.ExcludedMiddlewareFor == nil {
 		p.options.ExcludedMiddlewareFor = map[string][]pipeline.Middleware[http.Handler]{}
@@ -120,28 +116,28 @@ func (p *PendingResourceRegistration) WithoutMiddlewareFor(methods []string, mid
 	return p
 }
 
-// Where is PendingResourceRegistration::where.
+// Where sets a regex constraint on the resource's route parameters.
 func (p *PendingResourceRegistration) Where(wheres map[string]string) *PendingResourceRegistration {
 	p.options.Wheres = wheres
 	return p
 }
 
-// Shallow is PendingResourceRegistration::shallow.
+// Shallow nests the resource one level shallower: the routes that act on one
+// record drop the parent prefix.
 func (p *PendingResourceRegistration) Shallow(shallow ...bool) *PendingResourceRegistration {
 	p.options.Shallow = len(shallow) == 0 || shallow[0]
 	return p
 }
 
-// Missing is PendingResourceRegistration::missing. It sets what answers when a
-// binding resolves nothing -- a redirect to the index, rather than a 404.
+// Missing sets what answers when a binding resolves nothing -- a redirect to
+// the index, rather than a 404.
 func (p *PendingResourceRegistration) Missing(callback http.Handler) *PendingResourceRegistration {
 	p.options.Missing = callback
 	return p
 }
 
-// Scoped is PendingResourceRegistration::scoped. It binds the child of a
-// nested resource through its parent, so an id belonging to somebody else's
-// parent is a 404 rather than a page.
+// Scoped binds the child of a nested resource through its parent, so an id
+// belonging to somebody else's parent is a 404 rather than a page.
 func (p *PendingResourceRegistration) Scoped(fields ...map[string]string) *PendingResourceRegistration {
 	p.options.Scoped = true
 	if len(fields) > 0 {
@@ -154,16 +150,15 @@ func (p *PendingResourceRegistration) Scoped(fields ...map[string]string) *Pendi
 	return p
 }
 
-// WithTrashed is PendingResourceRegistration::withTrashed. With no arguments
-// it covers show, edit and update.
+// WithTrashed allows soft-deleted records through implicit model binding.
+// With no arguments it covers show, edit and update.
 func (p *PendingResourceRegistration) WithTrashed(methods ...string) *PendingResourceRegistration {
 	p.options.WithTrashed = true
 	p.options.Trashed = methods
 	return p
 }
 
-// Register is PendingResourceRegistration::register. It commits the resource
-// and returns its routes.
+// Register commits the resource and returns its routes.
 func (p *PendingResourceRegistration) Register() *Routes {
 	p.registered = true
 	return p.registrar.Register(p.name, p.controller, p.options)
@@ -171,8 +166,6 @@ func (p *PendingResourceRegistration) Register() *Routes {
 
 // PendingSingletonResourceRegistration holds a singleton resource's
 // registration open while the caller configures it.
-//
-// It mirrors Illuminate\Routing\PendingSingletonResourceRegistration.
 type PendingSingletonResourceRegistration struct {
 	registrar  *ResourceRegistrar
 	name       string
@@ -181,8 +174,8 @@ type PendingSingletonResourceRegistration struct {
 	registered bool
 }
 
-// NewPendingSingletonResourceRegistration is
-// PendingSingletonResourceRegistration::__construct.
+// NewPendingSingletonResourceRegistration builds a pending registration for
+// name and controller.
 func NewPendingSingletonResourceRegistration(registrar *ResourceRegistrar, name, controller string, options ResourceOptions) *PendingSingletonResourceRegistration {
 	return &PendingSingletonResourceRegistration{
 		registrar:  registrar,
@@ -192,25 +185,26 @@ func NewPendingSingletonResourceRegistration(registrar *ResourceRegistrar, name,
 	}
 }
 
-// Only is PendingSingletonResourceRegistration::only.
+// Only limits registration to the named actions.
 func (p *PendingSingletonResourceRegistration) Only(methods ...string) *PendingSingletonResourceRegistration {
 	p.options.Only = methods
 	return p
 }
 
-// Except is PendingSingletonResourceRegistration::except.
+// Except excludes the named actions from registration.
 func (p *PendingSingletonResourceRegistration) Except(methods ...string) *PendingSingletonResourceRegistration {
 	p.options.Except = methods
 	return p
 }
 
-// Names is PendingSingletonResourceRegistration::names.
+// Names renames the routes by action. The empty key renames every action at
+// once.
 func (p *PendingSingletonResourceRegistration) Names(names map[string]string) *PendingSingletonResourceRegistration {
 	p.options.Names = names
 	return p
 }
 
-// Name is PendingSingletonResourceRegistration::name.
+// Name renames a single action's route.
 func (p *PendingSingletonResourceRegistration) Name(method, name string) *PendingSingletonResourceRegistration {
 	if p.options.Names == nil {
 		p.options.Names = map[string]string{}
@@ -219,13 +213,14 @@ func (p *PendingSingletonResourceRegistration) Name(method, name string) *Pendin
 	return p
 }
 
-// Parameters is PendingSingletonResourceRegistration::parameters.
+// Parameters overrides the route's wildcard names, keyed by resource segment.
 func (p *PendingSingletonResourceRegistration) Parameters(parameters map[string]string) *PendingSingletonResourceRegistration {
 	p.options.Parameters = parameters
 	return p
 }
 
-// Parameter is PendingSingletonResourceRegistration::parameter.
+// Parameter overrides a single wildcard name, previous replaced by
+// replacement.
 func (p *PendingSingletonResourceRegistration) Parameter(previous, replacement string) *PendingSingletonResourceRegistration {
 	if p.options.Parameters == nil {
 		p.options.Parameters = map[string]string{}
@@ -234,7 +229,7 @@ func (p *PendingSingletonResourceRegistration) Parameter(previous, replacement s
 	return p
 }
 
-// Middleware is PendingSingletonResourceRegistration::middleware.
+// Middleware wraps every route the resource registers.
 func (p *PendingSingletonResourceRegistration) Middleware(middleware ...pipeline.Middleware[http.Handler]) *PendingSingletonResourceRegistration {
 	p.options.Middleware = middleware
 	for method, existing := range p.options.MiddlewareFor {
@@ -243,7 +238,7 @@ func (p *PendingSingletonResourceRegistration) Middleware(middleware ...pipeline
 	return p
 }
 
-// MiddlewareFor is PendingSingletonResourceRegistration::middlewareFor.
+// MiddlewareFor wraps only the named actions.
 func (p *PendingSingletonResourceRegistration) MiddlewareFor(methods []string, middleware ...pipeline.Middleware[http.Handler]) *PendingSingletonResourceRegistration {
 	if len(p.options.Middleware) > 0 {
 		middleware = UniqueMiddleware(append(append([]pipeline.Middleware[http.Handler]{}, p.options.Middleware...), middleware...))
@@ -257,14 +252,14 @@ func (p *PendingSingletonResourceRegistration) MiddlewareFor(methods []string, m
 	return p
 }
 
-// WithoutMiddleware is PendingSingletonResourceRegistration::withoutMiddleware.
+// WithoutMiddleware removes middleware from every route the resource
+// registers.
 func (p *PendingSingletonResourceRegistration) WithoutMiddleware(middleware ...pipeline.Middleware[http.Handler]) *PendingSingletonResourceRegistration {
 	p.options.ExcludedMiddleware = append(p.options.ExcludedMiddleware, middleware...)
 	return p
 }
 
-// WithoutMiddlewareFor is
-// PendingSingletonResourceRegistration::withoutMiddlewareFor.
+// WithoutMiddlewareFor removes middleware from only the named actions.
 func (p *PendingSingletonResourceRegistration) WithoutMiddlewareFor(methods []string, middleware ...pipeline.Middleware[http.Handler]) *PendingSingletonResourceRegistration {
 	if p.options.ExcludedMiddlewareFor == nil {
 		p.options.ExcludedMiddlewareFor = map[string][]pipeline.Middleware[http.Handler]{}
@@ -275,39 +270,39 @@ func (p *PendingSingletonResourceRegistration) WithoutMiddlewareFor(methods []st
 	return p
 }
 
-// Where is PendingSingletonResourceRegistration::where.
+// Where sets a regex constraint on the resource's route parameters.
 func (p *PendingSingletonResourceRegistration) Where(wheres map[string]string) *PendingSingletonResourceRegistration {
 	p.options.Wheres = wheres
 	return p
 }
 
-// Creatable is PendingSingletonResourceRegistration::creatable. It adds
-// create, store and destroy: a singleton that can be brought into being.
+// Creatable adds create, store and destroy: a singleton that can be brought
+// into being.
 func (p *PendingSingletonResourceRegistration) Creatable() *PendingSingletonResourceRegistration {
 	p.options.Creatable = true
 	return p
 }
 
-// Destroyable is PendingSingletonResourceRegistration::destroyable.
+// Destroyable adds the destroy route.
 func (p *PendingSingletonResourceRegistration) Destroyable() *PendingSingletonResourceRegistration {
 	p.options.Destroyable = true
 	return p
 }
 
-// Missing is PendingSingletonResourceRegistration::missing.
+// Missing sets what answers when a binding resolves nothing.
 func (p *PendingSingletonResourceRegistration) Missing(callback http.Handler) *PendingSingletonResourceRegistration {
 	p.options.Missing = callback
 	return p
 }
 
-// WithTrashed is PendingSingletonResourceRegistration::withTrashed.
+// WithTrashed allows soft-deleted records through implicit model binding.
 func (p *PendingSingletonResourceRegistration) WithTrashed(methods ...string) *PendingSingletonResourceRegistration {
 	p.options.WithTrashed = true
 	p.options.Trashed = methods
 	return p
 }
 
-// Register is PendingSingletonResourceRegistration::register.
+// Register commits the singleton resource and returns its routes.
 func (p *PendingSingletonResourceRegistration) Register() *Routes {
 	p.registered = true
 	return p.registrar.Singleton(p.name, p.controller, p.options)

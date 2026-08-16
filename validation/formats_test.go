@@ -222,7 +222,7 @@ func TestTheReplacersFillEachRulesOwnPlaceholders(t *testing.T) {
 func TestAComparisonMeasuresTheOtherFieldTheWayThisOneIsMeasured(t *testing.T) {
 	// getSize is asked about THIS attribute, so a comparison on a numeric field
 	// reads the other field's value and one on a string field counts its
-	// characters. That is the PHP's replaceLte, argument for argument.
+	// characters.
 	set := MustCompile(Rules{"low": "numeric", "high": "numeric", "name": "required"})
 	v := Make(Data{"low": "1", "high": "9"}, set)
 
@@ -278,7 +278,7 @@ func TestTheWholeMessagePipelineEndToEnd(t *testing.T) {
 func TestEveryRuleThatSaysSomethingHasAnEnglishLine(t *testing.T) {
 	// The flow markers say nothing when they fail -- bail and sometimes cannot
 	// fail at all, nullable only changes what counts as absent, and the exclude
-	// family removes the field instead of putting a message on it. Laravel's
+	// family removes the field instead of putting a message on it. The
 	// lang file carries no line for any of them either.
 	silent := append([]string{"bail", "sometimes", "nullable"}, excludeRules...)
 

@@ -13,129 +13,106 @@ import (
 
 // Listener is one prepared listener: the closure MakeListener returns.
 //
-// The PHP has no name for this shape because a Closure is anonymous there --
-// makeListener() documents its return as "\Closure" and every prepared listener
-// is called as $listener($event, $payload). Go needs a name for the type, and
-// this is it. The two arguments are the same two: the event name, and the
-// payload the event was dispatched with.
+// The two arguments are the event name and the payload the event was dispatched
+// with.
 type Listener func(event string, payload []any) any
 
-// ClassListener is the [class, method] pair the PHP writes as an array literal.
+// ClassListener pairs a listener value with the name of the method to call on
+// it.
 //
-//	$events->listen('invoice.paid', [Notifier::class, 'whenPaid']);
 //	dispatcher.Listen("invoice.paid", events.ClassListener{Class: notifier, Method: "WhenPaid"})
 //
-// Go has no array literal that mixes a class and a method name, and it has no
-// class-string at all: a type is not addressable by name at run time. So the
-// first element is the listener value itself rather than the name of its class,
-// which is also what removes the container from CreateClassListener (ADR 0001).
+// Class is the listener value itself rather than the name of its type, because
+// a type is not addressable by name at run time -- which is also why
+// CreateClassListener has nothing to resolve one out of.
 type ClassListener struct {
 	// Class is the listener. An empty Method calls its Handle method.
 	Class any
-	// Method is the method to call. Empty means Handle, which is the default
-	// parseClassCallable() applies in the PHP.
+	// Method is the method to call. Empty means Handle.
 	Method string
 }
 
 // Subscriber is an object that registers its own listeners.
 //
-// It answers Illuminate\Contracts\Events\Dispatcher::subscribe. The map it
-// returns is the array the PHP subscriber returns -- event name to listeners --
-// and a nil map means the subscriber registered everything itself through the
-// dispatcher it was handed.
+// The map it returns is event name to listeners; a nil map means the subscriber
+// registered everything itself through the dispatcher it was handed.
 type Subscriber interface {
 	Subscribe(dispatcher *Dispatcher) map[string][]any
 }
 
 // ShouldQueue marks a listener that is handled on the queue.
 //
-// In the PHP this is an empty marker interface and the dispatcher asks
-// implementsInterface(ShouldQueue::class). An empty interface in Go is
-// satisfied by every value, so the marker needs a method -- and Laravel already
-// has the method, because handlerWantsToBeQueued() calls shouldQueue($event)
-// when the listener defines it. The two are folded into one here: returning
-// false is the listener declining the queue for this event.
+// An empty interface in Go is satisfied by every value, so the marker carries
+// the method that answers it: returning false is the listener declining the
+// queue for this event.
 type ShouldQueue interface {
 	ShouldQueue(event any) bool
 }
 
 // The interfaces below are the optional methods a queued listener may declare to
 // shape the job the dispatcher pushes for it. Every one of them is asked with
-// the event being dispatched, because the PHP asks with it: queueHandler() calls
-// $listener->viaConnection($arguments[0]) and propagateListenerOptions() spreads
-// $data into backoff(), tries(), retryUntil(), messageGroup(), uniqueId(),
-// uniqueFor() and deduplicator(). A listener that does not care about the event
-// ignores the parameter; the event is nil when the event was dispatched with no
-// payload, which is isset($arguments[0]) being false in the PHP.
+// the event being dispatched; a listener that does not care about the event
+// ignores the parameter, and the event is nil when the event was dispatched
+// with no payload.
 //
-// They were written inline at the type assertion, and without the parameter, so
-// a listener that chose its connection from the event value satisfied nothing:
-// the job kept the empty connection, went to the default one, and said nothing
-// about it. An anonymous interface cannot be asserted against at compile time,
-// which is why these are named -- a listener can now write
+// They are named rather than asserted against inline, so that a listener can
+// write
 //
 //	var _ events.ViaConnection = (*Notifier)(nil)
 //
 // and hear about the wrong signature from the compiler rather than from
-// production.
+// production: an anonymous interface cannot be asserted against at compile time,
+// and a listener that got the signature wrong would simply not match -- the job
+// would keep the empty connection, go to the default one, and say nothing about
+// it.
 type (
 	// ViaConnection names the queue connection the listener's job is pushed to.
-	// It is viaConnection() in the PHP.
 	ViaConnection interface {
 		ViaConnection(event any) string
 	}
 
-	// ViaQueue names the queue the listener's job is pushed onto. It is
-	// viaQueue() in the PHP.
+	// ViaQueue names the queue the listener's job is pushed onto.
 	ViaQueue interface {
 		ViaQueue(event any) string
 	}
 
-	// WithDelay is how long the job waits before it becomes available. It is
-	// withDelay() in the PHP, which returns a date, an interval or seconds; a
-	// duration is the one of the three that means the same thing everywhere.
+	// WithDelay is how long the job waits before it becomes available.
 	WithDelay interface {
 		WithDelay(event any) time.Duration
 	}
 
-	// Tries is how many times the job may be attempted. It is tries() in the PHP.
+	// Tries is how many times the job may be attempted.
 	Tries interface {
 		Tries(event any) int
 	}
 
-	// Backoff is how long to wait before retrying after an uncaught failure. It
-	// is backoff() in the PHP.
+	// Backoff is how long to wait before retrying after an uncaught failure.
 	Backoff interface {
 		Backoff(event any) time.Duration
 	}
 
-	// RetryUntil is when the job stops being retried. It is retryUntil() in the
-	// PHP.
+	// RetryUntil is when the job stops being retried.
 	RetryUntil interface {
 		RetryUntil(event any) time.Time
 	}
 
 	// MessageGroup is the group the job belongs to on the queues that have them.
-	// It is messageGroup() in the PHP.
 	MessageGroup interface {
 		MessageGroup(event any) string
 	}
 
-	// Deduplicator is the deduplication ID for the job. The PHP's deduplicator()
-	// returns the closure that generates it; here the method is that closure,
-	// asked with the event the job was built from.
+	// Deduplicator is the deduplication ID for the job, asked with the event the
+	// job was built from.
 	Deduplicator interface {
 		Deduplicator(event any) string
 	}
 
-	// UniqueID is the key a unique listener is unique by. It is uniqueId() in
-	// the PHP.
+	// UniqueID is the key a unique listener is unique by.
 	UniqueID interface {
 		UniqueID(event any) any
 	}
 
-	// UniqueFor is how long the unique lock is held. It is uniqueFor() in the
-	// PHP, which returns seconds.
+	// UniqueFor is how long the unique lock is held.
 	UniqueFor interface {
 		UniqueFor(event any) time.Duration
 	}
@@ -143,23 +120,20 @@ type (
 
 // ShouldDispatchAfterCommit marks an event that waits for the transaction.
 //
-// Illuminate\Contracts\Events\ShouldDispatchAfterCommit, with a method for the
-// same reason ShouldQueue has one.
+// It carries a method for the same reason ShouldQueue does.
 type ShouldDispatchAfterCommit interface {
 	ShouldDispatchAfterCommit() bool
 }
 
 // ShouldHandleEventsAfterCommit marks a listener that waits for the transaction.
 //
-// Illuminate\Contracts\Events\ShouldHandleEventsAfterCommit. It replaces both
-// that interface and the $afterCommit property the PHP also accepts, because a
-// property is not something Go can ask a value for.
+// It carries a method for the same reason ShouldQueue does.
 type ShouldHandleEventsAfterCommit interface {
 	ShouldHandleEventsAfterCommit() bool
 }
 
-// Queue is the little of Illuminate\Contracts\Queue\Factory the dispatcher
-// needs to put a listener on the queue.
+// Queue is the little of a queue factory the dispatcher needs to put a listener
+// on the queue.
 //
 // It is declared here rather than imported so this package does not depend on
 // the queue implementation, which is the same reason DB is declared here.
@@ -168,29 +142,28 @@ type Queue interface {
 	Connection(name string) Connection
 }
 
-// Connection is the two calls queueHandler() makes on a queue connection.
+// Connection is the two calls the dispatcher makes on a queue connection.
 type Connection interface {
 	PushOn(queue string, job any) error
 	LaterOn(queue string, delay time.Duration, job any) error
 }
 
-// TransactionManager is what the dispatcher needs from
-// Illuminate\Database\DatabaseTransactionsManager: somewhere to hang work that
-// only runs if the transaction commits.
+// TransactionManager is what the dispatcher needs from a database transaction
+// manager: somewhere to hang work that only runs if the transaction commits.
 type TransactionManager interface {
 	AddCallback(callback func())
 }
 
-// Dispatcher is Illuminate\Events\Dispatcher.
+// Dispatcher registers listeners by event name, fires them in registration
+// order, and stops early on request.
 //
-// It registers listeners by event name, fires them in registration order, and
-// stops early on request. The outbox in this package is a different thing and
-// they meet in one place: Publish hands a stored event to the listeners
-// registered for its name, so the relay delivers through this registry.
+// The outbox in this package is a different thing and they meet in one place:
+// Publish hands a stored event to the listeners registered for its name, so the
+// relay delivers through this registry.
 //
-// Unlike the PHP, it is safe for concurrent use: one process serves many
-// requests here, and a listener registered while another goroutine dispatches
-// is a data race rather than a curiosity. Defer is the exception and says so.
+// A Dispatcher is safe for concurrent use: one process serves many requests, and
+// a listener registered while another goroutine dispatches would otherwise be a
+// data race. Defer is the exception and says so.
 type Dispatcher struct {
 	mu sync.Mutex
 
@@ -209,20 +182,17 @@ type Dispatcher struct {
 	eventsToDefer   []string
 }
 
-// deferredEvent is one dispatch held back by Defer. The PHP keeps
-// func_get_args() and spreads it again; the three arguments are named here.
+// deferredEvent is one dispatch held back by Defer.
 type deferredEvent struct {
 	event   any
 	payload []any
 	halt    bool
 }
 
-// NewDispatcher is Dispatcher::__construct: it returns a dispatcher with nothing
-// registered.
+// NewDispatcher returns a dispatcher with nothing registered.
 //
-// The PHP constructor takes the container, which is what resolves a class
-// listener and a subscriber given by name. There is no container here (ADR
-// 0001), so there is nothing to take: a class listener is the value itself.
+// It takes no arguments: a class listener is the listener value itself, so
+// there is nothing to resolve one out of.
 func NewDispatcher() *Dispatcher {
 	return &Dispatcher{
 		listeners:      map[string][]any{},
@@ -231,23 +201,20 @@ func NewDispatcher() *Dispatcher {
 	}
 }
 
-// Listen is Dispatcher::listen: it registers an event listener with the
-// dispatcher.
+// Listen registers an event listener with the dispatcher.
 //
 //	d.Listen("invoice.paid", func(e Stored) error { ... })
 //	d.Listen([]string{"invoice.paid", "invoice.voided"}, listener)
 //	d.Listen("invoice.*", func(name string, payload []any) any { ... })
 //	d.Listen(func(e InvoicePaid) { ... })
 //
-// The last form is the PHP's one-argument call: a closure registers itself
-// against the type of its first parameter, which the PHP reads with
-// ReflectsClosures and this reads with reflect. When the first parameter is a
-// context.Context the second one names the event, because a listener in Go
-// takes the context it will need.
+// In the last form the closure registers itself against the type of its first
+// parameter, read with reflect. When the first parameter is a context.Context
+// the second one names the event, because a listener in Go takes the context it
+// will need.
 //
-// PHP declares this as listen($events, $listener = null); Go has no default
-// argument, so the second one is variadic and the one-argument call is the
-// closure form.
+// Go has no default argument, so listener is variadic and the one-argument call
+// is the closure form.
 func (d *Dispatcher) Listen(events any, listener ...any) {
 	var l any
 	if len(listener) > 0 {
@@ -296,8 +263,7 @@ func (d *Dispatcher) setupWildcardListen(event string, listener any) {
 	d.wildcardsCache = map[string][]Listener{}
 }
 
-// HasListeners is Dispatcher::hasListeners: it reports whether a given event has
-// listeners.
+// HasListeners reports whether a given event has listeners.
 func (d *Dispatcher) HasListeners(eventName string) bool {
 	d.mu.Lock()
 	_, direct := d.listeners[eventName]
@@ -306,8 +272,8 @@ func (d *Dispatcher) HasListeners(eventName string) bool {
 	return direct || pattern || d.HasWildcardListeners(eventName)
 }
 
-// HasWildcardListeners is Dispatcher::hasWildcardListeners: it reports whether
-// the given event has any wildcard listeners.
+// HasWildcardListeners reports whether the given event has any wildcard
+// listeners.
 func (d *Dispatcher) HasWildcardListeners(eventName string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -319,11 +285,10 @@ func (d *Dispatcher) HasWildcardListeners(eventName string) bool {
 	return false
 }
 
-// Push is Dispatcher::push: it registers an event and payload to be fired later.
+// Push registers an event and payload to be fired later.
 //
-// It is Flush that fires it, and the mechanism is the PHP's: a listener is
-// registered against the event name with "_pushed" appended, and dispatching
-// that name dispatches the real one.
+// It is Flush that fires it: a listener is registered against the event name
+// with "_pushed" appended, and dispatching that name dispatches the real one.
 func (d *Dispatcher) Push(event string, payload ...any) {
 	d.Listen(event+"_pushed", func(...any) any {
 		d.Dispatch(event, payload...)
@@ -331,20 +296,16 @@ func (d *Dispatcher) Push(event string, payload ...any) {
 	})
 }
 
-// Flush is Dispatcher::flush: it fires a set of pushed events.
+// Flush fires the events pushed under the given name.
 func (d *Dispatcher) Flush(event string) {
 	d.Dispatch(event + "_pushed")
 }
 
-// Subscribe is Dispatcher::subscribe: it registers an event subscriber with the
-// dispatcher.
+// Subscribe registers an event subscriber with the dispatcher.
 //
-// A string in the returned map is the name of a method on the subscriber, which
-// is the same shorthand the PHP accepts; anything else is a listener.
-//
-// The PHP begins with resolveSubscriber(), which makes an instance when the
-// subscriber was given by name. There is no container (ADR 0001), so a
-// subscriber is always the value itself and there is nothing to resolve.
+// A string in the returned map is the name of a method on the subscriber;
+// anything else is a listener. A subscriber is always the value itself, so
+// there is nothing to resolve.
 func (d *Dispatcher) Subscribe(subscriber Subscriber) {
 	for event, listeners := range subscriber.Subscribe(d) {
 		for _, listener := range listeners {
@@ -357,36 +318,32 @@ func (d *Dispatcher) Subscribe(subscriber Subscriber) {
 	}
 }
 
-// Until is Dispatcher::until: it fires an event until the first non-nil response
-// is returned.
+// Until fires an event and returns the first non-nil response, leaving the
+// listeners behind it uncalled.
 //
-// It is the PHP's dispatch($event, $payload, halt: true), which is the only
-// thing until() does there. Go has no default argument for $halt, so the two
-// calls are the two methods, which is how the PHP is written anyway.
+// It is Dispatch with halting turned on. Go has no default argument, so the two
+// modes are two methods.
 func (d *Dispatcher) Until(event any, payload ...any) any {
 	return d.dispatch(event, payload, true)
 }
 
-// Dispatch is Dispatcher::dispatch with $halt left false: it fires an event and
-// calls the listeners.
+// Dispatch fires an event and calls the listeners.
 //
 // It returns what each listener returned, in order. A listener that returns
-// false stops the ones after it, exactly as in the PHP -- and a listener that
-// returns nothing returns nil here, which is the PHP's null.
+// false stops the ones after it, and a listener that returns nothing
+// contributes nil.
 //
 // When event is not a string it is the event itself: the name is its type and
-// the payload is the value, which is get_class($event) with the only naming Go
-// offers.
+// the payload is the value.
 func (d *Dispatcher) Dispatch(event any, payload ...any) []any {
 	responses, _ := d.dispatch(event, payload, false).([]any)
 	return responses
 }
 
-// dispatch is the PHP's dispatch($event, $payload, $halt): one body, two public
-// names, because Go cannot default the third argument.
+// dispatch is the one body behind Dispatch and Until, because Go cannot default
+// the halt argument.
 func (d *Dispatcher) dispatch(event any, payload []any, halt bool) any {
-	// The PHP asks is_object($event); here the question is the same one the
-	// other way round, because a name is a string and an event is anything else.
+	// A name is a string and an event is anything else.
 	_, named := event.(string)
 	isEventObject := !named
 
@@ -418,10 +375,8 @@ func (d *Dispatcher) dispatch(event any, payload []any, halt bool) any {
 
 // invokeListeners calls every listener for the event, in order.
 //
-// The PHP broadcasts here as well, through the BroadcastFactory it pulls out of
-// the container. That is the container path (ADR 0001) and it is not here: an
-// event that has to leave the process goes through the outbox, which is the one
-// delivery this package owns.
+// It does not broadcast: an event that has to leave the process goes through
+// the outbox, which is the one delivery this package owns.
 func (d *Dispatcher) invokeListeners(event string, payload []any, halt bool) any {
 	var responses []any
 
@@ -457,13 +412,11 @@ func parseEventAndPayload(event any, payload []any) (string, []any) {
 	return typeName(event), []any{event}
 }
 
-// GetListeners is Dispatcher::getListeners: it returns all of the listeners for
-// a given event name, prepared.
+// GetListeners returns all of the listeners for a given event name, prepared.
 //
-// The PHP also merges the listeners registered against the interfaces the event
-// class implements. Go has no way to ask "which interfaces does this name
-// implement" -- an interface is structural and a name is not a type at run
-// time -- so addInterfaceListeners has no equivalent and there is none here.
+// Listeners registered against an interface the event implements are not merged
+// in: Go has no way to ask which interfaces a name implements, because an
+// interface is structural and a name is not a type at run time.
 func (d *Dispatcher) GetListeners(eventName string) []Listener {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -495,12 +448,10 @@ func (d *Dispatcher) getWildcardListeners(eventName string) []Listener {
 	return wildcards
 }
 
-// GetRawListeners is Dispatcher::getRawListeners: it returns the raw, unprepared
-// listeners.
+// GetRawListeners returns the raw, unprepared listeners.
 //
-// The PHP hands back its own array, which PHP then copies on write. Go would
-// hand back the live map, so this copies it: a caller that ranged over the
-// result while another goroutine registered a listener would race.
+// The map and its slices are copies: a caller that ranged over the live map
+// while another goroutine registered a listener would race.
 func (d *Dispatcher) GetRawListeners() map[string][]any {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -512,16 +463,13 @@ func (d *Dispatcher) GetRawListeners() map[string][]any {
 	return out
 }
 
-// MakeListener is Dispatcher::makeListener: it prepares a registered listener
-// for calling.
+// MakeListener prepares a registered listener for calling.
 //
-// PHP declares this as makeListener($listener, $wildcard = false); Go has no
-// default argument, so the flag is always written out.
+// Go has no default argument, so the wildcard flag is always written out.
 //
 // A wildcard listener is handed the event name and the whole payload, because
 // it answered a pattern and has to be told which event arrived. Every other
-// listener is handed the payload spread across its parameters, which is the
-// PHP's $listener(...array_values($payload)).
+// listener is handed the payload spread across its parameters.
 func (d *Dispatcher) MakeListener(listener any, wildcard bool) Listener {
 	switch l := listener.(type) {
 	case Listener:
@@ -538,8 +486,8 @@ func (d *Dispatcher) MakeListener(listener any, wildcard bool) Listener {
 		panic(refusedClassName(l))
 	}
 
-	// A value that is not a function is the PHP's class-string listener: the
-	// object whose handle() answers the event.
+	// A value that is not a function is a class listener: the object whose
+	// Handle method answers the event.
 	if listener != nil && reflect.TypeOf(listener).Kind() != reflect.Func {
 		return d.CreateClassListener(listener, wildcard)
 	}
@@ -552,14 +500,11 @@ func (d *Dispatcher) MakeListener(listener any, wildcard bool) Listener {
 	}
 }
 
-// CreateClassListener is Dispatcher::createClassListener: it creates a listener
-// out of an object and a method.
+// CreateClassListener creates a listener out of an object and a method.
 //
-// The PHP resolves the class out of the IoC container; here the value is
-// already the value, which is the whole of what dropping the container changes
-// (ADR 0001). The rest is the same: the default method is Handle, a listener
-// that wants the queue is pushed onto it instead of being called, and a
-// listener that waits for the transaction is hung on the transaction manager.
+// The default method is Handle, a listener that wants the queue is pushed onto
+// it instead of being called, and a listener that waits for the transaction is
+// hung on the transaction manager.
 func (d *Dispatcher) CreateClassListener(listener any, wildcard bool) Listener {
 	return func(event string, payload []any) any {
 		callable := d.createClassCallable(listener)
@@ -576,10 +521,10 @@ func (d *Dispatcher) createClassCallable(listener any) func(args []any) any {
 	if pair, ok := listener.(ClassListener); ok {
 		class, method = pair.Class, pair.Method
 	}
-	// resolveMethod falls back to Invoke, which is the PHP's __invoke under the
-	// only name Go can call it by: a value is not callable. It returns the empty
-	// string when the listener answers with nothing, which Listen and
-	// MakeListener have already refused.
+	// resolveMethod falls back to Invoke, which is the name a listener answers
+	// by when the value itself is not callable. It returns the empty string
+	// when the listener answers with nothing, which Listen and MakeListener
+	// have already refused.
 	method = resolveMethod(class, method)
 
 	if d.handlerShouldBeQueued(class) {
@@ -618,8 +563,8 @@ func (d *Dispatcher) handlerShouldBeDispatchedAfterDatabaseTransactions(class an
 
 // createQueuedHandlerCallable puts the listener on the queue.
 //
-// The arguments are copied first, which is the array_map(clone) the PHP opens
-// this method with. It matters because the job is run later: without the copy,
+// The arguments are copied first. It matters because the job is run later:
+// without the copy,
 //
 //	e := &InvoicePaid{Amount: 100}
 //	d.Dispatch(e)
@@ -642,14 +587,11 @@ func (d *Dispatcher) createQueuedHandlerCallable(class any, method string, args 
 	return d.queueHandler(class, method, args)
 }
 
-// cloneArguments copies the arguments a queued listener is called with, which is
-// the PHP's array_map(fn ($a) => is_object($a) ? clone $a : $a, ...).
+// cloneArguments copies the arguments a queued listener is called with.
 //
-// A pointer is the nearest thing Go has to a PHP object: it is what a later
-// mutation travels through. Everything else was already copied on its way into
-// the any, which is what PHP's non-object branch amounts to. The copy is
-// shallow, as clone is: a pointer field inside the event still points where it
-// did.
+// Only a pointer is copied: it is what a later mutation travels through, and
+// everything else was already copied on its way into the any. The copy is
+// shallow -- a pointer field inside the event still points where it did.
 //
 // A context.Context is left alone. It is not part of the event -- it is the
 // ambient deadline and cancellation of the pass that dispatched -- and copying
@@ -684,9 +626,9 @@ func cloneArgument(arg any) any {
 
 // queueHandler pushes the listener's job onto the queue.
 //
-// The PHP acquires a UniqueLock through the cache before pushing a unique job.
-// There is no cache here -- this package would have to depend on it -- so the
-// job carries what it knows about uniqueness and the queue is what enforces it.
+// It takes no unique lock: that would make this package depend on a cache, so
+// the job carries what it knows about uniqueness and the queue is what enforces
+// it.
 func (d *Dispatcher) queueHandler(class any, method string, args []any) any {
 	var event any
 	if len(args) > 0 {
@@ -697,9 +639,8 @@ func (d *Dispatcher) queueHandler(class any, method string, args []any) any {
 
 // push sends a job to the connection and queue it asked for.
 //
-// It is the tail of the PHP's queueHandler(), pulled out because QueuedClosure
-// needs the same three lines and reaches them there through the global
-// dispatch() helper, which does not exist here (ADR 0002).
+// It is separate from queueHandler because QueuedClosure needs the same three
+// lines, and there is no global helper for it to reach them through.
 func (d *Dispatcher) push(job *CallQueuedListener) any {
 	queue := d.resolveQueue()
 	if queue == nil {
@@ -719,11 +660,7 @@ func (d *Dispatcher) push(job *CallQueuedListener) any {
 
 // propagateListenerOptions copies what the listener declares onto the job.
 //
-// The PHP reads a dozen optional methods and properties off the listener. Go
-// has no properties, so each one that survives is an optional interface, and
-// the ones that only exist to carry a PHP attribute do not survive.
-//
-// Every one of those interfaces takes the event, because the PHP asks with it.
+// Each option is an optional interface, and every one of them takes the event.
 // The two marker interfaces below stay written inline: they take no argument, so
 // there is no signature for a listener to get wrong.
 func (d *Dispatcher) propagateListenerOptions(listener, event any, job *CallQueuedListener) *CallQueuedListener {
@@ -771,8 +708,7 @@ func (d *Dispatcher) propagateListenerOptions(listener, event any, job *CallQueu
 	return job
 }
 
-// Forget is Dispatcher::forget: it removes a set of listeners from the
-// dispatcher.
+// Forget removes a set of listeners from the dispatcher.
 func (d *Dispatcher) Forget(event string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -794,8 +730,7 @@ func (d *Dispatcher) forget(event string) {
 	}
 }
 
-// ForgetPushed is Dispatcher::forgetPushed: it forgets all of the pushed
-// listeners.
+// ForgetPushed forgets all of the pushed listeners.
 func (d *Dispatcher) ForgetPushed() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -817,8 +752,7 @@ func (d *Dispatcher) resolveQueue() Queue {
 	return resolver()
 }
 
-// SetQueueResolver is Dispatcher::setQueueResolver: it sets the queue
-// implementation the dispatcher pushes through.
+// SetQueueResolver sets the queue implementation the dispatcher pushes through.
 func (d *Dispatcher) SetQueueResolver(resolver func() Queue) *Dispatcher {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -837,14 +771,12 @@ func (d *Dispatcher) resolveTransactionManager() TransactionManager {
 	return resolver()
 }
 
-// SetTransactionManagerResolver is Dispatcher::setTransactionManagerResolver: it
-// sets the database transaction manager the dispatcher hangs after-commit work
-// on.
+// SetTransactionManagerResolver sets the database transaction manager the
+// dispatcher hangs after-commit work on.
 //
-// Unlike the PHP, leaving it unset is allowed: resolveTransactionManager()
-// there calls the resolver whatever it holds, and here a missing one reads as no
-// transaction manager. EventServiceProvider::register always sets it in Laravel,
-// and there is no service provider to do that here (ADR 0001).
+// Leaving it unset is allowed: a missing resolver reads as no transaction
+// manager, and an event or listener that asked to wait for a commit is then
+// handled at once.
 func (d *Dispatcher) SetTransactionManagerResolver(resolver func() TransactionManager) *Dispatcher {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -852,15 +784,11 @@ func (d *Dispatcher) SetTransactionManagerResolver(resolver func() TransactionMa
 	return d
 }
 
-// Defer is Dispatcher::defer: it runs callback while holding events back, then
-// dispatches them.
+// Defer runs callback while holding events back, then dispatches them.
 //
-// Passing event names defers only those; passing none defers every event, which
-// is the PHP's $events = null.
+// Passing event names defers only those; passing none defers every event.
 //
-// PHP is generic in the callback's result. A Go method cannot have a type
-// parameter, so the result is any -- the change ADR 0044 allows where the PHP
-// is generic, said here because it is the one place the signature differs.
+// A Go method cannot have a type parameter, so the callback's result is any.
 //
 // This is the one method on the dispatcher that is not safe to call from two
 // goroutines at once: deferring is a mode the whole dispatcher is in, and two
@@ -898,8 +826,8 @@ func (d *Dispatcher) Defer(callback func() any, events ...string) any {
 	return result
 }
 
-// Publish has no Illuminate counterpart: it is where the outbox meets the
-// registry, handing a stored event to the listeners registered for its name.
+// Publish is where the outbox meets the registry, handing a stored event to the
+// listeners registered for its name.
 //
 // This is where the mechanism and the surface meet: the outbox stores, the
 // relay reads, and the listeners were registered with Listen. A Dispatcher is
@@ -911,15 +839,13 @@ func (d *Dispatcher) Defer(callback func() any, events ...string) any {
 //
 // A listener that returns an error fails the delivery, which is what puts the
 // event back in the outbox for the next pass. Nothing else is treated as a
-// failure: the PHP has no error return and a listener that answers with a value
-// is answering, not failing.
+// failure: a listener that answers with a value is answering, not failing.
 //
 // Every listener runs, including the ones behind the one that failed, because
 // Dispatch is what runs them and Dispatch does not stop for a response. The
 // retry then runs all of them again, which is at-least-once arriving where it
 // always arrives: a listener is idempotent on Stored.ID. A listener that does
-// want to stop the ones behind it returns false, which is the PHP's own way of
-// saying it.
+// want to stop the ones behind it returns false.
 func (d *Dispatcher) Publish(ctx context.Context, e Stored) error {
 	for _, response := range d.Dispatch(e.Name, ctx, e) {
 		if err, ok := response.(error); ok && err != nil {
@@ -957,9 +883,8 @@ var contextType = reflect.TypeOf((*context.Context)(nil)).Elem()
 // firstParameterTypes names the event a closure listens for, from the type of
 // its first parameter.
 //
-// It answers ReflectsClosures::firstClosureParameterTypes. A leading
-// context.Context is skipped: the PHP has no context and a Go listener that
-// takes one still listens for what comes after it.
+// A leading context.Context is skipped: a listener that takes one still listens
+// for what comes after it.
 func firstParameterTypes(fn any) []string {
 	if fn == nil {
 		return nil
@@ -985,8 +910,8 @@ func firstParameterTypes(fn any) []string {
 	return []string{typeNameOf(in)}
 }
 
-// typeName is get_class($event) with the only naming Go offers: the import path
-// and the type name, which is as unique as a PHP fully qualified class name.
+// typeName names an event by its import path and type name, which is the only
+// globally unique naming Go offers.
 func typeName(v any) string {
 	if v == nil {
 		return ""
@@ -1011,10 +936,10 @@ func isFunc(v any) bool {
 
 // assertListenable panics when the listener could never be called.
 //
-// The PHP accepts a class name here and resolves it out of the container when
-// the event fires. There is no container (ADR 0001), so
+// A listener named by a string cannot be resolved, because a type is not
+// addressable by name at run time. So
 //
-//	d.Listen("invoice.paid", "App\\Listeners\\Notifier")
+//	d.Listen("invoice.paid", "Notifier")
 //
 // registered a listener that was then quietly never called: MakeListener took
 // the string for a class listener, looked for Handle and then Invoke on a
@@ -1056,10 +981,9 @@ func assertListenable(listener any) {
 
 // assertNamesAnEvent panics when a closure registered on its own names no event.
 //
-// The PHP reads the type of the closure's first parameter and registers it
-// against that; a closure with nothing to read registers against nothing, and
-// each() over an empty collection is silence. Here it is refused, for the reason
-// assertListenable is.
+// A closure registers itself against the type of its first parameter; one with
+// nothing to read would register against nothing and then go quietly uncalled,
+// so it is refused here for the reason assertListenable refuses.
 func assertNamesAnEvent(closure any, names []string) {
 	if len(names) == 0 {
 		panic(fmt.Sprintf(
@@ -1073,7 +997,7 @@ func assertNamesAnEvent(closure any, names []string) {
 // because Listen and MakeListener are two doors onto the same rule.
 func refusedClassName(listener string) string {
 	return fmt.Sprintf(
-		"events: the listener [%s] is a class name, and there is no container to resolve one (ADR 0001): register the listener value itself",
+		"events: the listener [%s] is a class name, and there is no container to resolve one: register the listener value itself",
 		listener,
 	)
 }
@@ -1090,9 +1014,8 @@ func quotedMethod(method string) string {
 // resolveMethod returns the method a class listener answers with, or the empty
 // string when it answers with none.
 //
-// It is the head of the PHP's createClassCallable(): the default is handle(),
-// and a class without the named method falls back to __invoke, which Go spells
-// Invoke because a value is not callable.
+// The default is Handle, and a listener without the named method falls back to
+// Invoke.
 func resolveMethod(class any, method string) string {
 	if method == "" {
 		method = "Handle"
@@ -1137,7 +1060,7 @@ func callMethod(v any, name string, args []any) any {
 }
 
 // callFunc calls a listener function with the payload spread across its
-// parameters, which is the PHP's $listener(...array_values($payload)).
+// parameters.
 func callFunc(fn any, args []any) any {
 	switch f := fn.(type) {
 	case nil:
@@ -1163,11 +1086,9 @@ func callFunc(fn any, args []any) any {
 
 // callValue spreads args across the function's parameters and calls it.
 //
-// PHP raises ArgumentCountError when the payload is short and ignores it when
-// the payload is long. Neither is available in Go: a reflect.Call with the
-// wrong arity panics. So a missing argument is the zero value of its parameter
-// and a surplus one is dropped, which keeps a mismatched listener quiet rather
-// than taking the process down with it.
+// A reflect.Call with the wrong arity panics, so a missing argument is the zero
+// value of its parameter and a surplus one is dropped: a mismatched listener
+// stays quiet rather than taking the process down with it.
 //
 // One binding rule is not positional: a leading context.Context argument is
 // dropped when the function does not take one. It is what lets the same

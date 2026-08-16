@@ -30,10 +30,9 @@ const Separator = "..."
 // PreviousLabel and NextLabel are the labels LinkCollection gives the two steps
 // either side of the numbered pages.
 //
-// Illuminate asks the translator for pagination.previous and pagination.next
-// and falls back to these two words when no translator is bound. There is
-// nothing to ask here, so the fallback is what is written; a rendered pager
-// translates them in the view, where the reader's locale is known.
+// There is no translator to ask here, so these two words are what is written; a
+// rendered pager translates them in the view, where the reader's locale is
+// known.
 const (
 	PreviousLabel = "Previous"
 	NextLabel     = "Next"
@@ -41,11 +40,8 @@ const (
 
 // Options is everything a paginator needs to write the URL of another page.
 //
-// It is the $options array the three constructors take, plus the four static
-// resolvers AbstractPaginator reads its defaults from. No PHP method answers to
-// it: there the array is unpacked onto properties by
-// AbstractPaginator::__construct and the resolvers are installed by
-// PaginationState::resolveUsing.
+// It is one value the three constructors take, rather than four things read out
+// of the request when they are needed.
 //
 // The zero value is usable: it paginates the path "/" with no extra query, the
 // parameter names "page" and "cursor", and three links either side. Every
@@ -142,19 +138,13 @@ func (o Options) url(name, value string) string {
 }
 
 // OptionsFrom reads the paginator options out of the URL of the request being
-// served, which is the closest thing here to Illuminate's path and query string
-// resolvers -- except that it is an argument rather than a static closure.
+// served.
 //
 // The path keeps whatever the URL had: for a *http.Request served by the
 // framework that is the path alone, and for a URL parsed from an absolute
 // address it is scheme, host and path. Query and fragment are stripped from the
 // path and the query is carried over, so a page link keeps every filter the
 // reader chose.
-//
-// It is PaginationState::resolveUsing without the container: that method
-// installs four closures that read the request out of the application, and this
-// reads the same four things out of the *url.URL and hands them back as a value
-// (ADR 0001).
 //
 // A nil URL yields the zero Options, normalised.
 func OptionsFrom(u *url.URL) Options {
@@ -169,16 +159,11 @@ func OptionsFrom(u *url.URL) Options {
 	return Options{Path: base.String(), Query: u.Query()}.normalize()
 }
 
-// ResolveCurrentPage is AbstractPaginator::resolveCurrentPage. It reads
-// the page number out of the URL of the request being served.
-//
-// Illuminate reads it through a static closure a service provider installs;
-// there is no container here (ADR 0001) and no facade (ADR 0002), so the URL is
-// passed in.
+// ResolveCurrentPage reads the page number out of the URL of the request being
+// served. The URL is passed in rather than reached for.
 //
 // Anything that is not a whole number of at least one -- absent, empty, "0",
-// "-3", "two", "1e3" -- is page one, which is the same rule PHP's
-// FILTER_VALIDATE_INT check applies. A bad page number is a reader following a
+// "-3", "two", "1e3" -- is page one. A bad page number is a reader following a
 // stale link, not an incident, and every one of those spellings means the same
 // thing to them.
 //
@@ -197,15 +182,11 @@ func ResolveCurrentPage(u *url.URL, pageName string) int {
 	return page
 }
 
-// ResolveCurrentPath is AbstractPaginator::resolveCurrentPath. It reads
-// the address of the request being served, without its query string or
-// fragment, which is the base every page link is built on.
+// ResolveCurrentPath reads the address of the request being served, without its
+// query string or fragment, which is the base every page link is built on.
 //
-// Illuminate reads it through a static closure a service provider installs;
-// there is no container here (ADR 0001) and no facade (ADR 0002), so the URL is
-// passed in. A nil URL yields the default, as PHP's unset resolver does; PHP's
-// default is "/" and this takes it as an argument because Go has no default
-// ones.
+// The URL is passed in rather than reached for. A nil URL yields the default,
+// which is an argument because Go has no default ones.
 func ResolveCurrentPath(u *url.URL, def string) string {
 	if u == nil {
 		return def
@@ -218,11 +199,10 @@ func ResolveCurrentPath(u *url.URL, def string) string {
 	return base.String()
 }
 
-// ResolveQueryString is AbstractPaginator::resolveQueryString. It reads
-// the query string of the request being served, which is what WithQueryString
-// carries onto every page link.
+// ResolveQueryString reads the query string of the request being served, which
+// is what WithQueryString carries onto every page link.
 //
-// A nil URL yields the default, as PHP's unset resolver does.
+// A nil URL yields the default.
 func ResolveQueryString(u *url.URL, def url.Values) url.Values {
 	if u == nil {
 		return def
@@ -233,10 +213,9 @@ func ResolveQueryString(u *url.URL, def url.Values) url.Values {
 // Link is one entry of a rendered pager: a numbered page, the previous or next
 // step, or the separator that stands for the pages a window left out.
 //
-// It is an entry of Illuminate's linkCollection(), and it carries the same four
-// keys. A separator, and a previous or next step with nowhere to go, has an
-// empty URL and a Page of zero. The component that renders it tests URL, and
-// prints the label without a link.
+// A separator, and a previous or next step with nowhere to go, has an empty URL
+// and a Page of zero. The component that renders it tests URL, and prints the
+// label without a link.
 type Link struct {
 	// URL is where the link points. Empty on a separator, and on a previous or
 	// next step that has nowhere to go.
@@ -254,12 +233,10 @@ type Link struct {
 	Active bool
 }
 
-// MarshalJSON has no PHP method to answer to: a link in PHP is an array inside
-// LengthAwarePaginator::linkCollection, and it is encoded by whatever encodes
-// the payload around it. It writes the link the way linkCollection does: the
-// keys url, label, page and active, with url and page null rather than zero
-// where there is no page to link to. A client that tests for null -- which is
-// what the PHP payload taught it to do -- would follow a link to "" otherwise.
+// MarshalJSON writes the link as the payload carries it: the keys url, label,
+// page and active, with url and page null rather than zero where there is no
+// page to link to. A client that tests for null would follow a link to the
+// empty string otherwise.
 func (l Link) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		URL    any    `json:"url"`

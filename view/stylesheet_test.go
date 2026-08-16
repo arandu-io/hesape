@@ -13,7 +13,7 @@ import (
 	"github.com/arandu-io/hesape/view"
 )
 
-// builtByViewBuild stands in for assets/app.css after `aru view:build`: the
+// builtByViewBuild stands in for assets/app.css after the view build: the
 // Tailwind banner the compiler preserves, plus classes that exist only because
 // a project's own views used them.
 //
@@ -38,7 +38,7 @@ func digest(b []byte) string {
 // TestTheApplicationStylesheetIsWhatTheBrowserGets is the defect, checked by
 // md5.
 //
-// `aru view:build` compiled resources/css/app.css into assets/app.css and
+// The view build compiled resources/css/app.css into assets/app.css and
 // nothing embedded or served it. The browser received the framework's
 // stylesheet -- byte for byte, md5 identical -- so every class written in a
 // project's own view did nothing, and no error said so anywhere.
@@ -87,7 +87,7 @@ func TestTheApplicationStylesheetIsWhatTheBrowserGets(t *testing.T) {
 		t.Errorf("Cache-Control = %q, want the immutable answer for a matching hash", cc)
 	}
 
-	// aru doctor and the debug page report what is served, not what is
+	// The doctor check and the debug page report what is served, not what is
 	// embedded: a project that thinks it built its stylesheet has to be able to
 	// see that it did.
 	if !strings.Contains(view.Version(), strings.TrimPrefix(url, view.AssetPath)[:12]) {

@@ -8,13 +8,14 @@ import (
 	"github.com/arandu-io/hesape/database/schema"
 )
 
-// SQLiteGrammar answers Illuminate\Database\Schema\Grammars\SQLiteGrammar.
+// SQLiteGrammar turns a Blueprint into SQLite DDL.
 //
 // SQLite cannot alter most of a table, so several commands compile to nothing
 // here and are carried out by the table rebuild CompileAlter emits instead.
 type SQLiteGrammar struct{ *BaseGrammar }
 
-// NewSQLiteGrammar answers `new SQLiteGrammar($connection)`.
+// NewSQLiteGrammar constructs a SQLiteGrammar bound to connection, with
+// the column modifiers and serial types SQLite needs.
 func NewSQLiteGrammar(connection schema.Connection) *SQLiteGrammar {
 	g := &SQLiteGrammar{&BaseGrammar{
 		conn:      connection,
@@ -25,9 +26,11 @@ func NewSQLiteGrammar(connection schema.Connection) *SQLiteGrammar {
 	return g
 }
 
-// GetAlterCommands answers SQLiteGrammar::getAlterCommands: the commands SQLite
-// cannot express as an alter statement, and which therefore force the table to
-// be rebuilt.
+// GetAlterCommands lists the commands SQLite cannot express as an alter
+// statement -- change, primary, dropPrimary, foreign, and dropForeign --
+// and which therefore force the table to be rebuilt. dropColumn joins the
+// list too on a server older than 3.35, before SQLite could drop a column
+// directly.
 func (g *SQLiteGrammar) GetAlterCommands() []string {
 	commands := []string{"change", "primary", "dropPrimary", "foreign", "dropForeign"}
 	if !atLeast(g.conn.GetServerVersion(), "3.35") {
@@ -36,7 +39,9 @@ func (g *SQLiteGrammar) GetAlterCommands() []string {
 	return commands
 }
 
-// CompileSQLCreateStatement answers SQLiteGrammar::compileSqlCreateStatement.
+// CompileSQLCreateStatement builds the query that reads the CREATE
+// statement SQLite stored in sqlite_master for name, matching typ's first
+// value as the object kind or "table" when typ is omitted.
 func (g *SQLiteGrammar) CompileSQLCreateStatement(schemaName, name string, typ ...string) string {
 	kind := "table"
 	if len(typ) > 0 && typ[0] != "" {
@@ -46,15 +51,17 @@ func (g *SQLiteGrammar) CompileSQLCreateStatement(schemaName, name string, typ .
 		g.wrapValue(defaultSchema(schemaName)), g.QuoteString(kind), g.QuoteString(name))
 }
 
-// CompileTableExists answers SQLiteGrammar::compileTableExists.
+// CompileTableExists builds the query that reports whether table exists
+// in schemaName's sqlite_master.
 func (g *SQLiteGrammar) CompileTableExists(schemaName, table string) string {
 	return fmt.Sprintf(`select exists (select 1 from %s.sqlite_master where name = %s and type = 'table') as "exists"`,
 		g.wrapValue(defaultSchema(schemaName)), g.QuoteString(table))
 }
 
-// CompileTables answers SQLiteGrammar::compileTables. Asking for the size joins
-// against dbstat, which is a virtual table not every build of SQLite carries --
-// CompileDbstatExists is how the caller finds out before asking.
+// CompileTables builds the query that lists tables across schemas. Asking
+// for the size joins against dbstat, a virtual table not every build of
+// SQLite carries -- CompileDbstatExists is how the caller finds out before
+// asking.
 func (g *SQLiteGrammar) CompileTables(schemas []string, withSize ...bool) (string, error) {
 	where := ""
 	switch {
@@ -77,14 +84,14 @@ func (g *SQLiteGrammar) CompileTables(schemas []string, withSize ...bool) (strin
 		"order by tl.schema, tl.name", nil
 }
 
-// CompileDbstatExists answers SQLiteGrammar::compileDbstatExists: whether this
-// build of SQLite has the dbstat virtual table that table sizes come from.
+// CompileDbstatExists builds the query that reports whether this build of
+// SQLite has the dbstat virtual table that table sizes come from.
 func (g *SQLiteGrammar) CompileDbstatExists() string {
 	return "select exists (select 1 from pragma_compile_options where compile_options = 'ENABLE_DBSTAT_VTAB') as enabled"
 }
 
-// CompileLegacyTables answers SQLiteGrammar::compileLegacyTables, for a server
-// old enough to lack pragma_table_list.
+// CompileLegacyTables builds the query that lists tables for a server old
+// enough to lack pragma_table_list.
 func (g *SQLiteGrammar) CompileLegacyTables(schemaName string, withSize ...bool) string {
 	name := defaultSchema(schemaName)
 	if len(withSize) > 0 && withSize[0] {
@@ -101,12 +108,14 @@ func (g *SQLiteGrammar) CompileLegacyTables(schemaName string, withSize ...bool)
 		g.QuoteString(name), g.wrapValue(name))
 }
 
-// CompileRebuild answers SQLiteGrammar::compileRebuild.
+// CompileRebuild builds the VACUUM statement that rebuilds the named
+// schema, defaulting to "main".
 func (g *SQLiteGrammar) CompileRebuild(schemaName ...string) string {
 	return "vacuum " + g.wrapValue(defaultSchema(firstOr(schemaName, "main")))
 }
 
-// CompileViews answers SQLiteGrammar::compileViews.
+// CompileViews builds the query that lists views across schemas, from
+// pragma_table_list.
 func (g *SQLiteGrammar) CompileViews(schemas []string) (string, error) {
 	where := ""
 	switch {
@@ -119,7 +128,8 @@ func (g *SQLiteGrammar) CompileViews(schemas []string) (string, error) {
 		"type = 'view' order by schema, name", nil
 }
 
-// CompileColumns answers SQLiteGrammar::compileColumns.
+// CompileColumns builds the query that lists table's columns, in column
+// order, from pragma_table_xinfo.
 func (g *SQLiteGrammar) CompileColumns(schemaName, table string) (string, error) {
 	return fmt.Sprintf(
 		`select name, type, not "notnull" as "nullable", dflt_value as "default", pk as "primary", hidden as "extra" `+
@@ -127,7 +137,9 @@ func (g *SQLiteGrammar) CompileColumns(schemaName, table string) (string, error)
 		g.QuoteString(table), g.QuoteString(defaultSchema(schemaName))), nil
 }
 
-// CompileIndexes answers SQLiteGrammar::compileIndexes.
+// CompileIndexes builds the query that lists table's indexes, unioning
+// the implicit primary-key index from pragma_table_xinfo with the named
+// indexes from pragma_index_list.
 func (g *SQLiteGrammar) CompileIndexes(schemaName, table string) (string, error) {
 	quotedTable := g.QuoteString(table)
 	quotedSchema := g.QuoteString(defaultSchema(schemaName))
@@ -140,7 +152,8 @@ func (g *SQLiteGrammar) CompileIndexes(schemaName, table string) (string, error)
 		quotedTable, quotedSchema, quotedTable, quotedSchema, quotedSchema), nil
 }
 
-// CompileForeignKeys answers SQLiteGrammar::compileForeignKeys.
+// CompileForeignKeys builds the query that lists table's foreign keys
+// from pragma_foreign_key_list, grouping each key's columns together.
 func (g *SQLiteGrammar) CompileForeignKeys(schemaName, table string) (string, error) {
 	quotedSchema := g.QuoteString(defaultSchema(schemaName))
 	return fmt.Sprintf(
@@ -151,9 +164,9 @@ func (g *SQLiteGrammar) CompileForeignKeys(schemaName, table string) (string, er
 		quotedSchema, g.QuoteString(table), quotedSchema), nil
 }
 
-// CompileCreate answers SQLiteGrammar::compileCreate. SQLite takes its foreign
-// keys and its primary key inside the create statement, because it cannot add
-// either afterwards.
+// CompileCreate builds the CREATE TABLE statement for blueprint. SQLite
+// takes its foreign keys and its primary key inside the create statement,
+// because it cannot add either afterwards.
 func (g *SQLiteGrammar) CompileCreate(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	columns, err := g.getColumns(blueprint)
 	if err != nil {
@@ -171,7 +184,8 @@ func (g *SQLiteGrammar) CompileCreate(blueprint *schema.Blueprint, command *sche
 		g.addPrimaryKeys(g.getCommandByName(blueprint, "primary")))), nil
 }
 
-// addForeignKeys answers SQLiteGrammar::addForeignKeys.
+// addForeignKeys renders the ", foreign key(...) references ..." clause
+// for each of foreignKeys, for inclusion in a create statement.
 func (g *SQLiteGrammar) addForeignKeys(foreignKeys []*schema.Command) string {
 	sql := ""
 	for _, foreign := range foreignKeys {
@@ -180,7 +194,8 @@ func (g *SQLiteGrammar) addForeignKeys(foreignKeys []*schema.Command) string {
 	return sql
 }
 
-// getForeignKey answers SQLiteGrammar::getForeignKey.
+// getForeignKey renders foreign's own foreign-key clause, including its
+// ON DELETE and ON UPDATE rules when set.
 func (g *SQLiteGrammar) getForeignKey(foreign *schema.Command) string {
 	sql := fmt.Sprintf(", foreign key(%s) references %s(%s)",
 		g.Columnize(foreign.Columns),
@@ -196,7 +211,8 @@ func (g *SQLiteGrammar) getForeignKey(foreign *schema.Command) string {
 	return sql
 }
 
-// addPrimaryKeys answers SQLiteGrammar::addPrimaryKeys.
+// addPrimaryKeys renders the ", primary key (...)" clause for primary, or
+// an empty string when there is no primary key to add.
 func (g *SQLiteGrammar) addPrimaryKeys(primary *schema.Command) string {
 	if primary == nil {
 		return ""
@@ -204,7 +220,8 @@ func (g *SQLiteGrammar) addPrimaryKeys(primary *schema.Command) string {
 	return ", primary key (" + g.Columnize(primary.Columns) + ")"
 }
 
-// CompileAdd answers SQLiteGrammar::compileAdd.
+// CompileAdd builds the ALTER TABLE ADD COLUMN statement for
+// command.Column.
 func (g *SQLiteGrammar) CompileAdd(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	definition, err := g.getColumn(blueprint, command.Column)
 	if err != nil {
@@ -213,25 +230,26 @@ func (g *SQLiteGrammar) CompileAdd(blueprint *schema.Blueprint, command *schema.
 	return one("alter table " + g.WrapTable(blueprint) + " add column " + definition), nil
 }
 
-// CompilePrimary answers SQLiteGrammar::compilePrimary: handled on table
-// creation or alteration.
+// CompilePrimary emits nothing: SQLite takes its primary key inside the
+// create statement or the table rebuild, never as a separate alter.
 func (g *SQLiteGrammar) CompilePrimary(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return nil, nil
 }
 
-// CompileChange answers SQLiteGrammar::compileChange: handled on table
-// alteration.
+// CompileChange emits nothing: a changed column is handled by the table
+// rebuild in CompileAlter, since SQLite cannot alter a column in place.
 func (g *SQLiteGrammar) CompileChange(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return nil, nil
 }
 
-// CompileForeign answers SQLiteGrammar::compileForeign: handled on table
-// creation or alteration.
+// CompileForeign emits nothing: SQLite takes its foreign keys inside the
+// create statement or the table rebuild, never as a separate alter.
 func (g *SQLiteGrammar) CompileForeign(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return nil, nil
 }
 
-// CompileUnique answers SQLiteGrammar::compileUnique.
+// CompileUnique builds the CREATE UNIQUE INDEX statement for command's
+// columns.
 func (g *SQLiteGrammar) CompileUnique(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	schemaName, table, err := schema.ParseSchemaAndTable(blueprint.GetTable())
 	if err != nil {
@@ -241,7 +259,7 @@ func (g *SQLiteGrammar) CompileUnique(blueprint *schema.Blueprint, command *sche
 		g.schemaPrefix(schemaName), g.Wrap(command.Index), g.WrapTable(table), g.Columnize(command.Columns))), nil
 }
 
-// CompileIndex answers SQLiteGrammar::compileIndex.
+// CompileIndex builds the CREATE INDEX statement for command's columns.
 func (g *SQLiteGrammar) CompileIndex(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	schemaName, table, err := schema.ParseSchemaAndTable(blueprint.GetTable())
 	if err != nil {
@@ -251,32 +269,38 @@ func (g *SQLiteGrammar) CompileIndex(blueprint *schema.Blueprint, command *schem
 		g.schemaPrefix(schemaName), g.Wrap(command.Index), g.WrapTable(table), g.Columnize(command.Columns))), nil
 }
 
-// CompileDrop answers SQLiteGrammar::compileDrop.
+// CompileDrop builds the DROP TABLE statement for blueprint.
 func (g *SQLiteGrammar) CompileDrop(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return one("drop table " + g.WrapTable(blueprint)), nil
 }
 
-// CompileDropIfExists answers SQLiteGrammar::compileDropIfExists.
+// CompileDropIfExists builds the DROP TABLE IF EXISTS statement for
+// blueprint.
 func (g *SQLiteGrammar) CompileDropIfExists(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return one("drop table if exists " + g.WrapTable(blueprint)), nil
 }
 
-// CompileDropAllTables answers SQLiteGrammar::compileDropAllTables. The PHP
-// takes a schema name where every other driver takes the tables, because SQLite
-// clears the catalogue rather than naming them.
+// CompileDropAllTables builds the statement that deletes every table,
+// index, and trigger from one schema's sqlite_master (the first of
+// schemas, or "main" if none is given). SQLite clears its catalogue this
+// way rather than naming tables individually, so this takes a schema name
+// where MySQLGrammar.CompileDropAllTables takes table names.
 func (g *SQLiteGrammar) CompileDropAllTables(schemas []string) (string, error) {
 	return fmt.Sprintf("delete from %s.sqlite_master where type in ('table', 'index', 'trigger')",
 		g.wrapValue(firstOr(schemas, "main"))), nil
 }
 
-// CompileDropAllViews answers SQLiteGrammar::compileDropAllViews.
+// CompileDropAllViews builds the statement that deletes every view from
+// one schema's sqlite_master (the first of schemas, or "main" if none is
+// given).
 func (g *SQLiteGrammar) CompileDropAllViews(schemas []string) (string, error) {
 	return fmt.Sprintf("delete from %s.sqlite_master where type in ('view')",
 		g.wrapValue(firstOr(schemas, "main"))), nil
 }
 
-// CompileDropColumn answers SQLiteGrammar::compileDropColumn. Before SQLite
-// 3.35 there is no "drop column", and the rebuild does it instead.
+// CompileDropColumn builds the ALTER TABLE DROP COLUMN statements for
+// command's columns. Before SQLite 3.35 there is no "drop column", and the
+// rebuild does it instead.
 func (g *SQLiteGrammar) CompileDropColumn(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	if !atLeast(g.conn.GetServerVersion(), "3.35") {
 		return nil, nil
@@ -289,18 +313,19 @@ func (g *SQLiteGrammar) CompileDropColumn(blueprint *schema.Blueprint, command *
 	return statements, nil
 }
 
-// CompileDropPrimary answers SQLiteGrammar::compileDropPrimary: handled on
-// table alteration.
+// CompileDropPrimary emits nothing: dropping a primary key is handled by
+// the table rebuild in CompileAlter, since SQLite cannot drop one in place.
 func (g *SQLiteGrammar) CompileDropPrimary(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return nil, nil
 }
 
-// CompileDropUnique answers SQLiteGrammar::compileDropUnique.
+// CompileDropUnique builds the DROP INDEX statement for a unique key,
+// which on SQLite is the same as dropping any other index.
 func (g *SQLiteGrammar) CompileDropUnique(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return g.CompileDropIndex(blueprint, command)
 }
 
-// CompileDropIndex answers SQLiteGrammar::compileDropIndex.
+// CompileDropIndex builds the DROP INDEX statement for command.Index.
 func (g *SQLiteGrammar) CompileDropIndex(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	schemaName, _, err := schema.ParseSchemaAndTable(blueprint.GetTable())
 	if err != nil {
@@ -309,9 +334,10 @@ func (g *SQLiteGrammar) CompileDropIndex(blueprint *schema.Blueprint, command *s
 	return one("drop index " + g.schemaPrefix(schemaName) + g.Wrap(command.Index)), nil
 }
 
-// CompileDropForeign answers SQLiteGrammar::compileDropForeign: handled on
-// table alteration, and refused when the caller named the key rather than its
-// columns, because SQLite's foreign keys have no names to drop by.
+// CompileDropForeign refuses to drop a foreign key by name, because
+// SQLite's foreign keys have no names to drop by; the caller must name the
+// columns instead. Dropping by columns is handled by the table rebuild in
+// CompileAlter.
 func (g *SQLiteGrammar) CompileDropForeign(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	if len(command.Columns) == 0 {
 		return nil, unsupported("dropping foreign keys by name")
@@ -319,36 +345,37 @@ func (g *SQLiteGrammar) CompileDropForeign(blueprint *schema.Blueprint, command 
 	return nil, nil
 }
 
-// CompileRename answers SQLiteGrammar::compileRename.
+// CompileRename builds the ALTER TABLE RENAME TO statement from
+// blueprint to command.To.
 func (g *SQLiteGrammar) CompileRename(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return one("alter table " + g.WrapTable(blueprint) + " rename to " + g.WrapTable(command.To)), nil
 }
 
-// CompileRenameIndex answers SQLiteGrammar::compileRenameIndex.
+// CompileRenameIndex refuses to rename an index.
 //
-// SQLite has no rename for an index: the PHP reads the index back off the
-// server, drops it and creates it again under the new name. That read happens
-// in the middle of compiling, which this grammar does without a connection, so
-// the operation is refused with the reason instead of emitting a statement
-// SQLite would reject.
+// SQLite has no rename for an index: doing it means reading the index back
+// off the server, dropping it, and creating it again under the new name.
+// That read happens in the middle of compiling, which this grammar does
+// without a connection, so the operation is refused with the reason instead
+// of emitting a statement SQLite would reject.
 func (g *SQLiteGrammar) CompileRenameIndex(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	return nil, fmt.Errorf("%w: renaming an index on SQLite means dropping and recreating it, which needs the index read back from the server; drop and create it in the migration instead", schema.ErrUnsupported)
 }
 
-// CompileEnableForeignKeyConstraints answers
-// SQLiteGrammar::compileEnableForeignKeyConstraints.
+// CompileEnableForeignKeyConstraints builds the pragma statement that turns
+// foreign key enforcement on.
 func (g *SQLiteGrammar) CompileEnableForeignKeyConstraints() (string, error) {
 	return g.Pragma("foreign_keys", "1"), nil
 }
 
-// CompileDisableForeignKeyConstraints answers
-// SQLiteGrammar::compileDisableForeignKeyConstraints.
+// CompileDisableForeignKeyConstraints builds the pragma statement that
+// turns foreign key enforcement off.
 func (g *SQLiteGrammar) CompileDisableForeignKeyConstraints() (string, error) {
 	return g.Pragma("foreign_keys", "0"), nil
 }
 
-// Pragma answers SQLiteGrammar::pragma. An empty value reads the pragma rather
-// than setting it, which is the PHP's null.
+// Pragma renders "pragma key" to read its value, or "pragma key = value" to
+// set it when value is not empty.
 func (g *SQLiteGrammar) Pragma(key, value string) string {
 	if value == "" {
 		return "pragma " + key
@@ -356,13 +383,14 @@ func (g *SQLiteGrammar) Pragma(key, value string) string {
 	return "pragma " + key + " = " + value
 }
 
-// CompileAlter answers SQLiteGrammar::compileAlter: the table rebuild.
+// CompileAlter builds the table rebuild: the sequence of statements SQLite
+// needs for anything an alter statement cannot express.
 //
 // SQLite can add a column and little else, so anything further is done by
 // building the table the blueprint describes under a temporary name, copying
-// the rows across, dropping the original and renaming. The shape being built
-// comes from the BlueprintState, which read the table before the first command
-// was compiled and has been kept current since.
+// the rows across, dropping the original, and renaming. The shape being
+// built comes from the BlueprintState, which read the table before the
+// first command was compiled and has been kept current since.
 func (g *SQLiteGrammar) CompileAlter(blueprint *schema.Blueprint, command *schema.Command) ([]string, error) {
 	state := blueprint.GetState()
 	if state == nil {
@@ -470,8 +498,8 @@ func (g *SQLiteGrammar) schemaPrefix(schemaName string) string {
 	return g.wrapValue(schemaName) + "."
 }
 
-// typeOf answers SQLiteGrammar's type methods. SQLite has five storage classes,
-// so most of the Illuminate types collapse onto varchar, integer or text.
+// typeOf spells a column type. SQLite has five storage classes, so most column
+// types collapse onto varchar, integer or text.
 func (g *SQLiteGrammar) typeOf(column *schema.ColumnDefinition) (string, error) {
 	switch column.GetType() {
 	case "char", "string", "uuid", "ipAddress", "macAddress":
@@ -531,7 +559,8 @@ func (g *SQLiteGrammar) typeOf(column *schema.ColumnDefinition) (string, error) 
 	}
 }
 
-// modify answers SQLiteGrammar's modifier methods.
+// modify renders the SQL fragment for one column modifier, dispatching on
+// modifier's name across SQLite's column-level clauses.
 func (g *SQLiteGrammar) modify(modifier string, blueprint *schema.Blueprint, column *schema.ColumnDefinition) ([]string, error) {
 	switch modifier {
 	case "Increment":
@@ -575,13 +604,14 @@ func (g *SQLiteGrammar) modify(modifier string, blueprint *schema.Blueprint, col
 	return nil, nil
 }
 
-// wrapJSONSelector answers SQLiteGrammar::wrapJsonSelector.
+// wrapJSONSelector renders value's field->path JSON accessor as
+// json_extract(...).
 func (g *SQLiteGrammar) wrapJSONSelector(value string) string {
 	field, path := wrapJSONFieldAndPath(value, g.wrapValue)
 	return "json_extract(" + field + path + ")"
 }
 
-// defaultSchema answers the PHP's `$schema ?? 'main'`.
+// defaultSchema returns schemaName, or "main" when schemaName is empty.
 func defaultSchema(schemaName string) string {
 	if schemaName == "" {
 		return "main"

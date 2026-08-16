@@ -99,9 +99,9 @@ func TestTableStoreScopesEveryStatementByTenant(t *testing.T) {
 		t.Fatalf("acme read %d of globex's notifications", len(rows))
 	}
 
-	// Every statement carries the tenant. A read path that forgets it is the
-	// leak RULE 17 exists to prevent, and it is invisible in a test that only
-	// looks at results.
+	// Every statement carries the tenant. A read path that forgets it leaks one
+	// tenant's rows to another, and that is invisible in a test that only looks
+	// at results.
 	for _, statement := range table.statements() {
 		if strings.HasPrefix(statement, "INSERT") {
 			if !strings.Contains(statement, "tenant,") {

@@ -1,16 +1,8 @@
-// Package access mirrors Illuminate\Auth\Access.
+// Package access is the ability-and-policy vocabulary for authorization: a
+// [Gate] holding abilities and policies, a [Response] carrying the sentence
+// behind an answer, and an [AuthorizationError] for the failure.
 //
-// The files it answers to, in the clone at
-// laravel_illuminate/auth/Access:
-//
-//	AuthorizationException.php
-//	Gate.php
-//	HandlesAuthorization.php
-//	Response.php
-//
-// It is the Laravel vocabulary for authorization: a [Gate] holding abilities and
-// policies, a [Response] carrying the sentence behind an answer, and an
-// [AuthorizationError] for the failure. Define an ability, then ask:
+// Define an ability, then ask:
 //
 //	gate := access.NewGate()
 //	gate.Define("posts.update", func(ctx context.Context, user auth.Subject, arguments ...any) any {
@@ -24,11 +16,11 @@
 //
 // # The Gate is not a second way to authorize
 //
-// A framework with an auth.Grant and a Gate has two authorization stories, and
-// the weaker one wins whenever somebody is in a hurry (RULE 9). So there is one:
-// the Gate does not decide, it delegates. [Gate.Authorize] wraps the ability as
-// an auth.Policy and hands it to auth.Authorize, which is the only function that
-// builds a Grant:
+// A framework with an auth.Grant and a Gate would have two authorization
+// stories, and the weaker one wins whenever somebody is in a hurry. So there is
+// one: the Gate does not decide, it delegates. [Gate.Authorize] wraps the
+// ability as an auth.Policy and hands it to auth.Authorize, which is the only
+// function that builds a Grant:
 //
 //	type abilityPolicy struct {
 //		fn func(ctx context.Context, s auth.Subject, args []any) error
@@ -55,50 +47,17 @@
 // know whether to draw a button and has no use for a Grant. A handler that acts
 // on one still has to call [Gate.Authorize] to reach a repository.
 //
-// # What is not ported, and why
+// # A guest is a subject
 //
-// Gate::setContainer sets the container the Gate resolves policies and the event
-// dispatcher out of. Reason 2 -- a method that exists only to serve the
-// container, which ADR 0001 rejected.
+// Nothing here is ever called with an absent user. auth.Guest is a subject like
+// any other, and an ability tells it apart by asking user.IsGuest, so the
+// callback decides rather than its signature. An ability that says nothing
+// about guests denies them.
 //
-// Gate::resolvePolicy is `$this->container->make($class)`, one line whose whole
-// content is the container. Reason 2. [Gate.Policy] takes the policy itself.
+// # Allow and Deny are functions
 //
-// Gate::guessPolicyNamesUsing replaces the convention that turns App\Models\Post
-// into App\Policies\PostPolicy, and Gate::guessPolicyName is the convention
-// itself. Both resolve a class by building its name as a string. Reasons 1 and 2:
-// Go has no class lookup by name and no container to build one from. Register the
-// policy with [Gate.Policy].
-//
-// Gate::getPolicyFromAttribute reads a #[UsePolicy] attribute off the model
-// class. Reason 1 -- Go has no attributes. Same replacement.
-//
-// The 'Class@method' and [Class, method] forms of Gate::define, and the
-// $stringCallbacks they are remembered in, name a class to resolve by string.
-// Reasons 1 and 2. [Gate.Resource] covers what they were for, taking the policy
-// as a value.
-//
-// Gate::canBeCalledWithUser, methodAllowsGuests, callbackAllowsGuests and
-// parameterAllowsGuests reflect over a callback's first parameter to decide
-// whether a guest may reach it: in PHP an unauthenticated user is null, and only
-// a callback whose parameter is nullable is called with one. Reason 1. Nothing
-// here is called with a null subject -- auth.Guest is a subject like any other,
-// and an ability tells it apart with user.IsGuest, so the callback decides
-// instead of its signature. A policy that says nothing about guests denies them.
-//
-// Gate::dispatchGateEvaluatedEvent fires GateEvaluated through the dispatcher it
-// resolves out of the container. Reason 2 for the resolution, and only for it:
-// the event is written, in auth/access/events, and [Gate.Observe] is where the
-// destination arrives -- as an argument, since there is no container to resolve
-// one from. A Gate given none does no work.
-//
-// HandlesAuthorization's allow() and deny() are protected trait methods. An
-// unexported method promoted from an embedded struct is not callable by the
-// package that embeds it, so they are [Allow] and [Deny], the package functions.
-// The two public ones are on [HandlesAuthorization].
-//
-// Illuminate\Contracts\Auth\Access\Gate, the interface, is not declared: Go
-// satisfies an interface structurally, which is ADR 0045.
-//
-// Everything in Response.php and AuthorizationException.php is here.
+// An unexported method promoted from an embedded struct is not callable by the
+// package that embeds it, so the two shorthands that build a [Response] are the
+// package functions [Allow] and [Deny] rather than methods. The two that are
+// exported are on [HandlesAuthorization].
 package access

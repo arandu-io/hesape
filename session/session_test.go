@@ -399,9 +399,9 @@ func TestSigningOutOneSubjectLeavesTheOthersAlone(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	// A different person in the same tenant, and the same subject id in another
-	// tenant -- the second is RULE 14: two customers may both call an account
-	// "u1", and signing one out must not touch the other.
+	// A different person in the same tenant, and the same subject id in
+	// another tenant -- two customers may both call an account "u1", and
+	// signing one out must not touch the other.
 	colleague := httptest.NewRecorder()
 	if _, err := store.Start(ctx, colleague, signedIn("u2", "t1")); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -458,8 +458,8 @@ func TestSigningOutTheOtherSessionsKeepsThisOne(t *testing.T) {
 }
 
 // TestSigningOutWithoutATenantIsRefused: without a tenant there is nothing to
-// scope by, and an unscoped "every session of subject 1" reaches every customer
-// (RULE 14).
+// scope by, and an unscoped "every session of subject 1" reaches every
+// customer.
 func TestSigningOutWithoutATenantIsRefused(t *testing.T) {
 	store := newStore(true)
 

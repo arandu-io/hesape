@@ -9,17 +9,14 @@ import (
 // SoftDeletingScopeName is the identifier the SoftDeletingScope is registered
 // under.
 //
-// PHP keys a global scope by the scope's class name; here the key is given, so
-// it is a constant -- and WithTrashed has to name the same thing the model
-// registered.
+// It is a constant rather than a computed name, so that WithTrashed can name
+// the same scope the model registered without holding a reference to it.
 const SoftDeletingScopeName = "SoftDeletingScope"
 
-// SoftDeletingScope answers Illuminate\Database\Eloquent\SoftDeletingScope.
+// SoftDeletingScope filters the deleted rows out of every query, and replaces
+// the delete with an update.
 //
-// It filters the deleted rows out of every query, and it replaces the delete
-// with an update, which is the whole of the feature. The model turns it on by
-// setting SoftDeletes, and NewQuery registers it -- what bootSoftDeletes does at
-// class boot there.
+// The model turns it on by setting SoftDeletes, and NewQuery registers it.
 //
 // The deleted_at field on the entity has to be able to hold a null: a
 // *time.Time, or another type that writes NULL when it is empty. A plain
@@ -27,17 +24,17 @@ const SoftDeletingScopeName = "SoftDeletingScope"
 // would read as deleted at the year one.
 type SoftDeletingScope[T any] struct{}
 
-// Apply answers SoftDeletingScope::apply.
+// Apply adds the not-deleted filter for model to builder's query.
 func (s *SoftDeletingScope[T]) Apply(builder *Builder[T], model *Model[T]) {
 	builder.query.WhereNull(model.GetQualifiedDeletedAtColumn())
 }
 
-// Extend answers SoftDeletingScope::extend.
+// Extend registers the delete override that turns a hard delete into a
+// timestamp update.
 //
-// The PHP adds withTrashed, onlyTrashed and restore to the builder as macros,
-// because a PHP Builder has no such methods. Go has methods, so those are
-// methods -- and what is left for extend to do is the part that is not a name:
-// pointing the builder's delete at an update.
+// WithTrashed, WithoutTrashed, OnlyTrashed and Restore already exist as
+// methods on Builder, so what Extend does is the part that is not a name: it
+// points the builder's delete at an update.
 func (s *SoftDeletingScope[T]) Extend(builder *Builder[T]) {
 	builder.OnDelete(func(b *Builder[T], g auth.Grant) (int64, error) {
 		column := s.deletedAtColumn(b)
@@ -45,9 +42,10 @@ func (s *SoftDeletingScope[T]) Extend(builder *Builder[T]) {
 	})
 }
 
-// deletedAtColumn answers SoftDeletingScope::getDeletedAtColumn: qualified when
-// the query joins, bare otherwise, because a bare name is ambiguous across a
-// join and a qualified one is refused on the left of a SET by some engines.
+// deletedAtColumn returns the deleted_at column name to filter or set:
+// qualified when the query joins, bare otherwise, because a bare name is
+// ambiguous across a join and a qualified one is refused on the left of a SET
+// by some engines.
 func (s *SoftDeletingScope[T]) deletedAtColumn(b *Builder[T]) string {
 	if len(b.query.Joins) > 0 {
 		return b.GetModel().GetQualifiedDeletedAtColumn()
@@ -55,7 +53,8 @@ func (s *SoftDeletingScope[T]) deletedAtColumn(b *Builder[T]) string {
 	return b.GetModel().GetDeletedAtColumn()
 }
 
-// GetDeletedAtColumn answers SoftDeletes::getDeletedAtColumn.
+// GetDeletedAtColumn returns the name of the column that marks a row
+// deleted, defaulting to "deleted_at".
 func (m *Model[T]) GetDeletedAtColumn() string {
 	if m.DeletedAtColumn == "" {
 		return "deleted_at"
@@ -63,25 +62,23 @@ func (m *Model[T]) GetDeletedAtColumn() string {
 	return m.DeletedAtColumn
 }
 
-// GetQualifiedDeletedAtColumn answers SoftDeletes::getQualifiedDeletedAtColumn.
+// GetQualifiedDeletedAtColumn returns the deleted_at column name qualified
+// with the model's table.
 func (m *Model[T]) GetQualifiedDeletedAtColumn() string {
 	return m.QualifyColumn(m.GetDeletedAtColumn())
 }
 
-// Trashed answers SoftDeletes::trashed.
+// Trashed reports whether the model has been soft deleted.
 func (m *Model[T]) Trashed() bool {
 	value := m.GetAttribute(m.GetDeletedAtColumn())
 	return value != nil && !isZero(value)
 }
 
-// IsForceDeleting answers SoftDeletes::isForceDeleting.
+// IsForceDeleting reports whether the current delete bypasses soft deletes.
 func (m *Model[T]) IsForceDeleting() bool { return m.forceDeleting }
 
-// performDeleteOnModel answers Model::performDeleteOnModel together with the
-// override SoftDeletes puts over it.
-//
-// Go has no method to override, so the branch the trait adds is written here:
-// a model that soft deletes and is not force deleting marks the row instead of
+// performDeleteOnModel deletes the model's row, or marks it deleted: a model
+// that soft deletes and is not force deleting marks the row instead of
 // removing it.
 func (m *Model[T]) performDeleteOnModel(g auth.Grant) error {
 	if m.SoftDeletes && !m.forceDeleting {
@@ -97,7 +94,8 @@ func (m *Model[T]) performDeleteOnModel(g auth.Grant) error {
 	return nil
 }
 
-// runSoftDelete answers SoftDeletes::runSoftDelete.
+// runSoftDelete sets the deleted_at column to the current time instead of
+// removing the row, and fires the Trashed event.
 func (m *Model[T]) runSoftDelete(g auth.Grant) error {
 	now := m.FreshTimestamp()
 	column := m.GetDeletedAtColumn()
@@ -124,9 +122,8 @@ func (m *Model[T]) runSoftDelete(g auth.Grant) error {
 	return m.fireModelEvent(Trashed)
 }
 
-// ForceDelete answers SoftDeletes::forceDelete, and Model::forceDelete on a
-// model that does not soft delete -- where it is a plain delete, which is what
-// the PHP's placeholder does.
+// ForceDelete removes the row even if the model soft deletes. On a model
+// that does not soft delete it is a plain delete.
 func (m *Model[T]) ForceDelete(g auth.Grant) (bool, error) {
 	if !m.SoftDeletes {
 		return m.Delete(g)
@@ -149,7 +146,8 @@ func (m *Model[T]) ForceDelete(g auth.Grant) (bool, error) {
 	return deleted, nil
 }
 
-// ForceDeleteQuietly answers SoftDeletes::forceDeleteQuietly.
+// ForceDeleteQuietly removes the row even if the model soft deletes, without
+// firing model events.
 func (m *Model[T]) ForceDeleteQuietly(g auth.Grant) (deleted bool, err error) {
 	return deleted, m.WithoutEvents(func() error {
 		deleted, err = m.ForceDelete(g)
@@ -157,7 +155,9 @@ func (m *Model[T]) ForceDeleteQuietly(g auth.Grant) (deleted bool, err error) {
 	})
 }
 
-// ForceDestroy answers SoftDeletes::forceDestroy.
+// ForceDestroy loads the models with the given keys, including trashed ones,
+// and removes each row even if the model soft deletes. It returns the number
+// removed.
 func (m *Model[T]) ForceDestroy(g auth.Grant, ids ...any) (int, error) {
 	if len(ids) == 0 {
 		return 0, nil
@@ -179,7 +179,8 @@ func (m *Model[T]) ForceDestroy(g auth.Grant, ids ...any) (int, error) {
 	return count, nil
 }
 
-// Restore answers SoftDeletes::restore: the row comes back.
+// Restore clears the deleted_at column and saves the model: the row comes
+// back.
 func (m *Model[T]) Restore(g auth.Grant) (bool, error) {
 	if !m.SoftDeletes {
 		return false, fmt.Errorf("eloquent: %s does not soft delete, so there is nothing to restore", m.GetTable())
@@ -202,7 +203,7 @@ func (m *Model[T]) Restore(g auth.Grant) (bool, error) {
 	return restored, nil
 }
 
-// RestoreQuietly answers SoftDeletes::restoreQuietly.
+// RestoreQuietly restores the model without firing model events.
 func (m *Model[T]) RestoreQuietly(g auth.Grant) (restored bool, err error) {
 	return restored, m.WithoutEvents(func() error {
 		restored, err = m.Restore(g)
@@ -210,12 +211,10 @@ func (m *Model[T]) RestoreQuietly(g auth.Grant) (restored bool, err error) {
 	})
 }
 
-// WithTrashed answers the withTrashed macro SoftDeletingScope adds: the deleted
-// rows come back into the query.
+// WithTrashed includes the soft-deleted rows in the query.
 //
-// It is a method rather than a macro for the reason Extend gives. On a model
-// that does not soft delete it is an error rather than a query that quietly
-// means something else.
+// On a model that does not soft delete it is an error rather than a query
+// that quietly means something else.
 func (b *Builder[T]) WithTrashed(withTrashed ...bool) *Builder[T] {
 	if len(withTrashed) > 0 && !withTrashed[0] {
 		return b.WithoutTrashed()
@@ -226,7 +225,9 @@ func (b *Builder[T]) WithTrashed(withTrashed ...bool) *Builder[T] {
 	return b.WithoutGlobalScope(SoftDeletingScopeName)
 }
 
-// WithoutTrashed answers the withoutTrashed macro.
+// WithoutTrashed removes the global soft-delete scope and re-adds an
+// explicit not-deleted filter, so trashed rows stay excluded even after the
+// scope is gone.
 func (b *Builder[T]) WithoutTrashed() *Builder[T] {
 	if err := b.requireSoftDeletes("withoutTrashed"); err != nil {
 		return b.fail(err)
@@ -236,7 +237,7 @@ func (b *Builder[T]) WithoutTrashed() *Builder[T] {
 	return b
 }
 
-// OnlyTrashed answers the onlyTrashed macro.
+// OnlyTrashed restricts the query to soft-deleted rows only.
 func (b *Builder[T]) OnlyTrashed() *Builder[T] {
 	if err := b.requireSoftDeletes("onlyTrashed"); err != nil {
 		return b.fail(err)
@@ -246,8 +247,7 @@ func (b *Builder[T]) OnlyTrashed() *Builder[T] {
 	return b
 }
 
-// Restore answers the restore macro: it un-deletes every row the query matches,
-// in one statement.
+// Restore un-deletes every row the query matches, in one statement.
 func (b *Builder[T]) Restore(g auth.Grant) (int64, error) {
 	if err := b.requireSoftDeletes("restore"); err != nil {
 		return 0, err
@@ -255,7 +255,8 @@ func (b *Builder[T]) Restore(g auth.Grant) (int64, error) {
 	return b.WithTrashed().Update(g, map[string]any{b.model.GetDeletedAtColumn(): nil})
 }
 
-// RestoreOrCreate answers the restoreOrCreate macro.
+// RestoreOrCreate finds the first trashed-or-not row matching attributes and
+// restores it, or creates one from attributes and values if none matches.
 func (b *Builder[T]) RestoreOrCreate(g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
 	if err := b.requireSoftDeletes("restoreOrCreate"); err != nil {
 		return nil, err
@@ -270,7 +271,9 @@ func (b *Builder[T]) RestoreOrCreate(g auth.Grant, attributes, values map[string
 	return model, nil
 }
 
-// CreateOrRestore answers the createOrRestore macro.
+// CreateOrRestore finds the first row matching attributes, including
+// trashed, and restores it if trashed; otherwise it creates one from
+// attributes and values.
 func (b *Builder[T]) CreateOrRestore(g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
 	if err := b.requireSoftDeletes("createOrRestore"); err != nil {
 		return nil, err

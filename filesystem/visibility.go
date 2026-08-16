@@ -10,7 +10,7 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// The two visibilities Illuminate names, as the strings it names them with.
+// The two visibilities, as the strings they are stored and compared as.
 const (
 	// VisibilityPublic is a file the store itself will hand to anybody who has
 	// its address.
@@ -38,7 +38,7 @@ var ErrNoVisibility = errors.New("filesystem: this driver has no visibility to r
 //
 // This is worth stating where somebody will read it before reaching for
 // SetVisibility. Making a file public does not remove the Policy: every read
-// still goes through [Disk], which still takes an [auth.Grant] (RULE 17). What
+// still goes through [Disk], which still takes an [auth.Grant]. What
 // it changes is whether the STORE will serve the same bytes to somebody who
 // never came through the application at all -- which is why the default here is
 // private and why a tenant's upload must stay that way.

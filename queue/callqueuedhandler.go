@@ -12,15 +12,9 @@ import (
 // CallQueuedHandler turns a job on the wire into a call to the code that runs
 // it.
 //
-// It answers Illuminate\Queue\CallQueuedHandler, which is what every
-// object-based job in Laravel is actually pushed as: the payload names this
-// class, and it unserializes the command, runs it through the command's own
-// middleware and then settles the job.
-//
-// Here the name on the wire is a string and the registry is the [Worker], so
-// this is the part of the PHP that is left once the container is gone: run the
-// handler through the job's middleware, and settle the job afterwards the same
-// way whoever called it would have.
+// The name on the wire is a string and the registry is the [Worker]. What this
+// does is run the handler through the job's middleware and settle the job
+// afterwards, the same way whoever called it would have.
 //
 //	h := queue.NewCallQueuedHandler(w).Through(middleware.Skip{}.When(readOnly))
 //	err := h.Call(ctx, j)
@@ -42,9 +36,8 @@ func NewCallQueuedHandler(h Handlers) *CallQueuedHandler {
 // Through wraps every call in middleware, outermost first, and returns the
 // handler so the call chains.
 //
-// It answers the `$command->middleware()` half of dispatchThroughMiddleware():
-// in PHP the list comes off the job object, and here a job is a name and a
-// payload so it comes off whoever is running it.
+// A job here is a name and a payload, with nowhere on it to hang a middleware
+// list, so the list comes off whoever is running it.
 func (h *CallQueuedHandler) Through(m ...middleware.Middleware) *CallQueuedHandler {
 	h.middleware = append(h.middleware, m...)
 	return h
@@ -52,8 +45,7 @@ func (h *CallQueuedHandler) Through(m ...middleware.Middleware) *CallQueuedHandl
 
 // Call runs the job and settles it.
 //
-// It answers call(). The settling is the part worth reading, and it is the
-// PHP's order:
+// The settling is the part worth reading, and the order is:
 //
 //   - a job the middleware already released or deleted is left alone, because
 //     settling it twice is how a job runs twice
@@ -85,10 +77,9 @@ func (h *CallQueuedHandler) Call(ctx context.Context, j *jobs.Job) error {
 
 // Failed runs whatever the job wants done when it gives up for good.
 //
-// It answers failed(). It is called after the job has been parked, not instead
-// of parking it: the dead letter row is what an operator sees, and this is the
-// compensating action -- refund the hold, mark the import abandoned, tell the
-// customer.
+// It is called after the job has been parked, not instead of parking it: the
+// dead letter row is what an operator sees, and this is the compensating action
+// -- refund the hold, mark the import abandoned, tell the customer.
 func (h *CallQueuedHandler) Failed(ctx context.Context, j *jobs.Job, cause error) {
 	handler, known := h.handlers.Handler(j.Name)
 	if !known {
@@ -101,9 +92,7 @@ func (h *CallQueuedHandler) Failed(ctx context.Context, j *jobs.Job, cause error
 
 // HandlesFailure is a handler that wants to know when its job gave up.
 //
-// It answers the `failed()` method Laravel looks for on a job class. A handler
-// that does not implement it is not called, which is the same as not having the
-// method.
+// A handler that does not implement it is not called.
 type HandlesFailure interface {
 	// Failed is called once, after the job has been parked.
 	Failed(ctx context.Context, g auth.Grant, j *jobs.Job, cause error)
@@ -112,11 +101,8 @@ type HandlesFailure interface {
 // CallQueuedClosure is a job whose work is a function rather than a registered
 // name.
 //
-// It answers Illuminate\Queue\CallQueuedClosure. In PHP the closure itself
-// travels on the wire, serialized by laravel/serializable-closure and signed so
-// it cannot be tampered with. Go cannot serialize a function, and this is the
-// shape that survives that: the closure stays in the binary and what travels is
-// the name it was registered under.
+// Go cannot serialize a function, so the closure stays in the binary and what
+// travels is the name it was registered under.
 //
 //	c := queue.NewCallQueuedClosure(func(ctx context.Context, g auth.Grant, j *jobs.Job) error {
 //		return warmTheCache(ctx, g)
@@ -127,8 +113,7 @@ type HandlesFailure interface {
 //
 // The registration is the price of not having serializable closures, and it is
 // the honest one: a closure that is not in the binary the worker is running
-// cannot be called by it, and PHP only gets away with it because the worker
-// loads the same file.
+// cannot be called by it.
 type CallQueuedClosure struct {
 	closure          HandlerFunc
 	name             string
@@ -136,10 +121,6 @@ type CallQueuedClosure struct {
 }
 
 // NewCallQueuedClosure returns a job for a function.
-//
-// It answers CallQueuedClosure::create(), whose PHP name is a static because
-// the constructor takes an already-wrapped SerializableClosure and this takes
-// the closure.
 func NewCallQueuedClosure(closure HandlerFunc) *CallQueuedClosure {
 	return &CallQueuedClosure{closure: closure}
 }
@@ -150,8 +131,7 @@ var (
 	_ HasDisplayName = (*CallQueuedClosure)(nil)
 )
 
-// Name assigns a name to the job, and returns it so the call chains. It answers
-// name().
+// Name assigns a name to the job, and returns it so the call chains.
 func (c *CallQueuedClosure) Name(name string) *CallQueuedClosure {
 	c.name = name
 	return c
@@ -159,9 +139,9 @@ func (c *CallQueuedClosure) Name(name string) *CallQueuedClosure {
 
 // JobName is the name this closure is registered and pushed under.
 //
-// It has no PHP counterpart: there the name is the class, and here a closure
-// has none, so an unnamed one gets a name that says so rather than an empty
-// string that would collide with every other unnamed closure.
+// A closure has no name of its own, so an unnamed one gets a name that says so
+// rather than an empty string that would collide with every other unnamed
+// closure.
 func (c *CallQueuedClosure) JobName() string {
 	if c.name == "" {
 		return "closure"
@@ -169,12 +149,10 @@ func (c *CallQueuedClosure) JobName() string {
 	return c.name
 }
 
-// DisplayName is what a console and the failed job list show. It answers
-// displayName().
+// DisplayName is what a console and the failed job list show.
 //
-// The PHP builds "Closure (SomeFile.php:42)" by reflection. Go can do the same
-// with runtime.FuncForPC, and does not: a closure's runtime name is
-// pkg.glob..func3, which tells a person less than the name they gave it.
+// It is the name the caller gave, not the one the runtime has:
+// runtime.FuncForPC would answer pkg.glob..func3, which tells a person less.
 func (c *CallQueuedClosure) DisplayName() string {
 	if c.name == "" {
 		return "Closure"
@@ -183,13 +161,13 @@ func (c *CallQueuedClosure) DisplayName() string {
 }
 
 // OnFailure adds a callback for when the job gives up, and returns the job so
-// the call chains. It answers onFailure().
+// the call chains.
 func (c *CallQueuedClosure) OnFailure(callback func(error)) *CallQueuedClosure {
 	c.failureCallbacks = append(c.failureCallbacks, callback)
 	return c
 }
 
-// Handle runs the closure. It answers handle().
+// Handle runs the closure.
 func (c *CallQueuedClosure) Handle(ctx context.Context, g auth.Grant, j *jobs.Job) error {
 	if c.closure == nil {
 		return fmt.Errorf("queue: the closure job %s has no function to run", c.JobName())
@@ -197,7 +175,7 @@ func (c *CallQueuedClosure) Handle(ctx context.Context, g auth.Grant, j *jobs.Jo
 	return c.closure(ctx, g, j)
 }
 
-// Failed calls every failure callback with the cause. It answers failed().
+// Failed calls every failure callback with the cause.
 func (c *CallQueuedClosure) Failed(_ context.Context, _ auth.Grant, _ *jobs.Job, cause error) {
 	for _, callback := range c.failureCallbacks {
 		callback(cause)
@@ -206,9 +184,8 @@ func (c *CallQueuedClosure) Failed(_ context.Context, _ auth.Grant, _ *jobs.Job,
 
 // Job is the record to push for this closure.
 //
-// It has no PHP counterpart, where the closure is the job. Here the two are
-// separate: the closure is registered with a worker once, and this is what goes
-// on the queue each time.
+// The closure and the record are separate: the closure is registered with a
+// worker once, and this is what goes on the queue each time.
 func (c *CallQueuedClosure) Job(g auth.Grant) (jobs.Job, error) {
 	j, err := jobs.New(g, "", c.JobName(), nil)
 	if err != nil {

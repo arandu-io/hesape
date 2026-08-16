@@ -2,52 +2,48 @@ package events
 
 // Connection is what an event needs of the connection it carries.
 //
-// It answers Illuminate\Database\Connection, narrowed to the one method every
-// event in this package calls on it: the constructors all do
-// `$this->connectionName = $connection->getName()`.
+// It is narrowed to the one method every event in this package calls on it:
+// the name of the connection.
 //
 // It is declared here rather than imported from the database package because
 // database dispatches these events, so naming the concrete type here would
 // close an import cycle -- the same reason query.Connection is declared in the
-// query package. PHP has no such constraint and needs no such interface.
+// query package.
 type Connection interface {
-	// GetName answers Connection::getName.
+	// GetName returns the connection's name.
 	GetName() string
 }
 
 // RawSQLConnection is what QueryExecuted.ToRawSQL asks of its connection.
 //
-// The PHP reaches through $this->connection->query()->getGrammar() to the
-// grammar's substituteBindingsIntoRawSql. Three hops through concrete classes
-// is a cycle here, so the destination is named directly.
+// Reaching the grammar's bindings-substitution method through the
+// connection, its query builder and the grammar would be three hops through
+// concrete types, which is a cycle here, so the destination is named
+// directly.
 type RawSQLConnection interface {
 	Connection
 
-	// PrepareBindings answers Connection::prepareBindings.
+	// PrepareBindings converts bindings into the values a driver accepts.
 	PrepareBindings(bindings []any) []any
 
-	// SubstituteBindingsIntoRawSQL answers the grammar method of the same name,
-	// reached in the PHP through query()->getGrammar(). The PHP spells the last
-	// word Sql.
+	// SubstituteBindingsIntoRawSQL writes bindings directly into sql.
 	SubstituteBindingsIntoRawSQL(sql string, bindings []any) string
 }
 
-// ConnectionEvent answers Illuminate\Database\Events\ConnectionEvent.
+// ConnectionEvent is the state the four connection events share.
 //
-// In PHP it is an abstract class the four connection events extend. Here it is
-// a struct they embed, which is what "extends, for the part that is state"
-// means in Go: the fields below are reachable on every one of them, spelled the
-// same way.
+// It is a struct they embed, so the fields below are reachable on every one of
+// them, spelled the same way.
 type ConnectionEvent struct {
-	// ConnectionName is ConnectionEvent::$connectionName.
+	// ConnectionName is the name of the connection the event fired on.
 	ConnectionName string
 
-	// Connection is ConnectionEvent::$connection.
+	// Connection is the connection the event fired on.
 	Connection Connection
 }
 
-// NewConnectionEvent answers ConnectionEvent::__construct: it reads the name
-// off the connection rather than taking it, exactly as the PHP does.
+// NewConnectionEvent creates a ConnectionEvent, reading the name off the
+// connection rather than taking it as a separate argument.
 func NewConnectionEvent(connection Connection) ConnectionEvent {
 	name := ""
 	if connection != nil {
@@ -63,11 +59,9 @@ func NewConnectionEvent(connection Connection) ConnectionEvent {
 // place to configure a connection the moment it exists: set a session variable,
 // register a query listener, record that the pool grew. A listener that runs
 // per query wants QueryExecuted instead.
-//
-// Answers Illuminate\Database\Events\ConnectionEstablished.
 type ConnectionEstablished struct{ ConnectionEvent }
 
-// NewConnectionEstablished answers `new ConnectionEstablished($connection)`.
+// NewConnectionEstablished creates a ConnectionEstablished event.
 func NewConnectionEstablished(connection Connection) *ConnectionEstablished {
 	return &ConnectionEstablished{NewConnectionEvent(connection)}
 }
@@ -80,22 +74,21 @@ func NewConnectionEstablished(connection Connection) *ConnectionEstablished {
 // transaction has to read the connection's level itself, because the event
 // carries nothing but the connection. It fires after the statement succeeded,
 // so a listener seeing it knows the transaction is open.
-//
-// Answers Illuminate\Database\Events\TransactionBeginning.
 type TransactionBeginning struct{ ConnectionEvent }
 
-// NewTransactionBeginning answers `new TransactionBeginning($connection)`.
+// NewTransactionBeginning creates a TransactionBeginning event.
 func NewTransactionBeginning(connection Connection) *TransactionBeginning {
 	return &TransactionBeginning{NewConnectionEvent(connection)}
 }
 
-// TransactionCommitting answers Illuminate\Database\Events\TransactionCommitting.
+// TransactionCommitting is dispatched as the outermost commit is about to be
+// sent.
 //
 // It fires before the commit reaches the server, which is the only moment a
 // listener can still refuse one.
 type TransactionCommitting struct{ ConnectionEvent }
 
-// NewTransactionCommitting answers `new TransactionCommitting($connection)`.
+// NewTransactionCommitting creates a TransactionCommitting event.
 func NewTransactionCommitting(connection Connection) *TransactionCommitting {
 	return &TransactionCommitting{NewConnectionEvent(connection)}
 }
@@ -109,11 +102,9 @@ func NewTransactionCommitting(connection Connection) *TransactionCommitting {
 // before it does. Work that must not happen unless the data is durable belongs
 // after the outermost commit, which means this event alone is not enough to
 // decide it.
-//
-// Answers Illuminate\Database\Events\TransactionCommitted.
 type TransactionCommitted struct{ ConnectionEvent }
 
-// NewTransactionCommitted answers `new TransactionCommitted($connection)`.
+// NewTransactionCommitted creates a TransactionCommitted event.
 func NewTransactionCommitted(connection Connection) *TransactionCommitted {
 	return &TransactionCommitted{NewConnectionEvent(connection)}
 }
@@ -126,44 +117,40 @@ func NewTransactionCommitted(connection Connection) *TransactionCommitted {
 // earlier level. It is the signal for undoing what was done outside the
 // database on the strength of a write that is now gone: a cache entry primed
 // early, a counter held in memory.
-//
-// Answers Illuminate\Database\Events\TransactionRolledBack.
 type TransactionRolledBack struct{ ConnectionEvent }
 
-// NewTransactionRolledBack answers `new TransactionRolledBack($connection)`.
+// NewTransactionRolledBack creates a TransactionRolledBack event.
 func NewTransactionRolledBack(connection Connection) *TransactionRolledBack {
 	return &TransactionRolledBack{NewConnectionEvent(connection)}
 }
 
-// QueryExecuted answers Illuminate\Database\Events\QueryExecuted.
+// QueryExecuted is dispatched after a statement has run on a connection.
 //
-// Time is the duration in milliseconds, which is what the PHP puts there
-// (Connection::getElapsedTime rounds to two decimals). It is a float rather
+// Time is the duration in milliseconds, rounded to two decimals. It is a float rather
 // than a time.Duration because the field is read by listeners that compare it
 // against a threshold in milliseconds, and changing the unit would make every
 // one of those comparisons silently wrong.
 type QueryExecuted struct {
-	// SQL is QueryExecuted::$sql. The PHP spells it $sql.
+	// SQL is the query as it was issued.
 	SQL string
 
-	// Bindings is QueryExecuted::$bindings.
+	// Bindings are the values that went with it.
 	Bindings []any
 
-	// Time is QueryExecuted::$time, in milliseconds.
+	// Time is how long it took, in milliseconds.
 	Time float64
 
-	// Connection is QueryExecuted::$connection.
+	// Connection is the connection the query ran on.
 	Connection RawSQLConnection
 
-	// ConnectionName is QueryExecuted::$connectionName.
+	// ConnectionName is the name of the connection the query ran on.
 	ConnectionName string
 
-	// ReadWriteType is QueryExecuted::$readWriteType: "read", "write", or
-	// empty where the PHP has null.
+	// ReadWriteType is "read", "write", or empty.
 	ReadWriteType string
 }
 
-// NewQueryExecuted answers QueryExecuted::__construct.
+// NewQueryExecuted creates a QueryExecuted event.
 func NewQueryExecuted(sql string, bindings []any, time float64, connection RawSQLConnection, readWriteType string) *QueryExecuted {
 	name := ""
 	if connection != nil {
@@ -179,12 +166,11 @@ func NewQueryExecuted(sql string, bindings []any, time float64, connection RawSQ
 	}
 }
 
-// ToRawSQL answers QueryExecuted::toRawSql: the query with its bindings written
-// into it, for a log a person reads rather than one a machine parses.
+// ToRawSQL returns the query with its bindings written directly into it, for
+// a log a person reads rather than one a machine parses.
 //
-// The PHP spells it toRawSql; SQL is an initialism and goes up. A nil
-// connection answers the query unchanged rather than panicking, because an
-// event constructed in a test has nowhere to ask.
+// A nil connection returns the query unchanged rather than panicking,
+// because an event constructed in a test has nowhere to ask.
 func (e *QueryExecuted) ToRawSQL() string {
 	if e.Connection == nil {
 		return e.SQL
@@ -192,62 +178,64 @@ func (e *QueryExecuted) ToRawSQL() string {
 	return e.Connection.SubstituteBindingsIntoRawSQL(e.SQL, e.Connection.PrepareBindings(e.Bindings))
 }
 
-// StatementPrepared answers Illuminate\Database\Events\StatementPrepared.
+// StatementPrepared is dispatched once the driver has prepared a statement.
 //
-// Statement is the prepared statement the driver handed back. In PHP it is a
-// PDOStatement; here it is any, because database/sql hands back a *sql.Stmt and
+// Statement is the prepared statement the driver handed back. It is typed any
+// because database/sql hands back a *sql.Stmt and
 // naming it would put the standard library's driver types into an event package
 // that has no other reason to know about them.
 type StatementPrepared struct {
-	// Connection is StatementPrepared::$connection.
+	// Connection is the connection the statement was prepared on.
 	Connection Connection
 
-	// Statement is StatementPrepared::$statement.
+	// Statement is the prepared statement the driver handed back.
 	Statement any
 }
 
-// NewStatementPrepared answers StatementPrepared::__construct.
+// NewStatementPrepared creates a StatementPrepared event.
 func NewStatementPrepared(connection Connection, statement any) *StatementPrepared {
 	return &StatementPrepared{Connection: connection, Statement: statement}
 }
 
-// DatabaseBusy answers Illuminate\Database\Events\DatabaseBusy: the event
-// `db:monitor` dispatches when a connection is over its threshold.
+// DatabaseBusy is what `db:monitor` dispatches when a connection is over its
+// threshold.
 type DatabaseBusy struct {
-	// ConnectionName is DatabaseBusy::$connectionName.
+	// ConnectionName is the name of the connection that is over its
+	// threshold.
 	ConnectionName string
 
-	// Connections is DatabaseBusy::$connections: how many are open.
+	// Connections is how many connections are open.
 	Connections int
 }
 
-// NewDatabaseBusy answers DatabaseBusy::__construct.
+// NewDatabaseBusy creates a DatabaseBusy event.
 func NewDatabaseBusy(connectionName string, connections int) *DatabaseBusy {
 	return &DatabaseBusy{ConnectionName: connectionName, Connections: connections}
 }
 
-// DatabaseRefreshed answers Illuminate\Database\Events\DatabaseRefreshed: what
-// `migrate:fresh` and `migrate:refresh` dispatch once the schema is back.
+// DatabaseRefreshed is what `migrate:fresh` and `migrate:refresh` dispatch once
+// the schema is back.
 type DatabaseRefreshed struct {
-	// Database is DatabaseRefreshed::$database, empty where the PHP has null.
+	// Database is the name of the database that was refreshed, empty when
+	// none was given.
 	Database string
 
-	// Seeding is DatabaseRefreshed::$seeding.
+	// Seeding is whether the refresh reseeded the database.
 	Seeding bool
 }
 
-// NewDatabaseRefreshed answers DatabaseRefreshed::__construct.
+// NewDatabaseRefreshed creates a DatabaseRefreshed event.
 func NewDatabaseRefreshed(database string, seeding bool) *DatabaseRefreshed {
 	return &DatabaseRefreshed{Database: database, Seeding: seeding}
 }
 
 // Migration is what a migration event carries.
 //
-// It answers Illuminate\Database\Migrations\Migration, narrowed to what the
-// events read. The migrations package cannot be imported here: the Migrator
+// It is narrowed to what the events read. The migrations package cannot be
+// imported here: the Migrator
 // dispatches these, so it imports this package.
 type Migration interface {
-	// GetConnection answers Migration::getConnection.
+	// GetConnection returns the name of the connection the migration runs on.
 	GetConnection() string
 }
 
@@ -257,18 +245,15 @@ type Migration interface {
 // It is embedded by MigrationStarted and MigrationEnded rather than inherited,
 // so both read the same two fields under the same names. Nothing dispatches
 // this on its own -- it is only ever the embedded half of one of those.
-//
-// Answers Illuminate\Database\Events\MigrationEvent, the abstract base
-// MigrationStarted and MigrationEnded extend.
 type MigrationEvent struct {
-	// Migration is MigrationEvent::$migration.
+	// Migration is the migration the event is about.
 	Migration Migration
 
-	// Method is MigrationEvent::$method: "up" or "down".
+	// Method is "up" or "down".
 	Method string
 }
 
-// NewMigrationEvent answers MigrationEvent::__construct.
+// NewMigrationEvent creates a MigrationEvent.
 func NewMigrationEvent(migration Migration, method string) MigrationEvent {
 	return MigrationEvent{Migration: migration, Method: method}
 }
@@ -280,11 +265,9 @@ func NewMigrationEvent(migration Migration, method string) MigrationEvent {
 // transactional DDL, so a listener writing to the same connection is writing
 // inside that transaction. A migration skipped by ShouldRun does not fire it;
 // MigrationSkipped does.
-//
-// Answers Illuminate\Database\Events\MigrationStarted.
 type MigrationStarted struct{ MigrationEvent }
 
-// NewMigrationStarted answers `new MigrationStarted($migration, $method)`.
+// NewMigrationStarted creates a MigrationStarted event.
 func NewMigrationStarted(migration Migration, method string) *MigrationStarted {
 	return &MigrationStarted{NewMigrationEvent(migration, method)}
 }
@@ -296,23 +279,21 @@ func NewMigrationStarted(migration Migration, method string) *MigrationStarted {
 // this point -- so seeing MigrationStarted with no MigrationEnded for the same
 // name is exactly the signature of a migration that broke. It fires before the
 // transaction commits, so the schema change is not durable yet.
-//
-// Answers Illuminate\Database\Events\MigrationEnded.
 type MigrationEnded struct{ MigrationEvent }
 
-// NewMigrationEnded answers `new MigrationEnded($migration, $method)`.
+// NewMigrationEnded creates a MigrationEnded event.
 func NewMigrationEnded(migration Migration, method string) *MigrationEnded {
 	return &MigrationEnded{NewMigrationEvent(migration, method)}
 }
 
-// MigrationSkipped answers Illuminate\Database\Events\MigrationSkipped: what
-// the Migrator dispatches when a migration's ShouldRun answers false.
+// MigrationSkipped is what the Migrator dispatches when a migration's ShouldRun
+// answers false.
 type MigrationSkipped struct {
-	// MigrationName is MigrationSkipped::$migrationName.
+	// MigrationName is the name of the migration that was skipped.
 	MigrationName string
 }
 
-// NewMigrationSkipped answers MigrationSkipped::__construct.
+// NewMigrationSkipped creates a MigrationSkipped event.
 func NewMigrationSkipped(migrationName string) *MigrationSkipped {
 	return &MigrationSkipped{MigrationName: migrationName}
 }
@@ -323,18 +304,15 @@ func NewMigrationSkipped(migrationName string) *MigrationSkipped {
 // It is embedded by MigrationsStarted and MigrationsEnded, which bracket a
 // whole `aru migrate` or `aru migrate:rollback` -- the plural to
 // MigrationEvent's singular. Nothing dispatches this on its own.
-//
-// Answers Illuminate\Database\Events\MigrationsEvent, the abstract base
-// MigrationsStarted and MigrationsEnded extend.
 type MigrationsEvent struct {
-	// Method is MigrationsEvent::$method: "up" or "down".
+	// Method is "up" or "down".
 	Method string
 
-	// Options is MigrationsEvent::$options, the options the run was given.
+	// Options is the options the run was given.
 	Options map[string]any
 }
 
-// NewMigrationsEvent answers MigrationsEvent::__construct.
+// NewMigrationsEvent creates a MigrationsEvent.
 func NewMigrationsEvent(method string, options map[string]any) MigrationsEvent {
 	return MigrationsEvent{Method: method, Options: options}
 }
@@ -346,11 +324,9 @@ func NewMigrationsEvent(method string, options map[string]any) MigrationsEvent {
 // this, so it means "the schema is about to change". It is the hook for the
 // things that bracket a whole deploy step: put the application into
 // maintenance, open a span, take a note of the time.
-//
-// Answers Illuminate\Database\Events\MigrationsStarted.
 type MigrationsStarted struct{ MigrationsEvent }
 
-// NewMigrationsStarted answers `new MigrationsStarted($method, $options)`.
+// NewMigrationsStarted creates a MigrationsStarted event.
 func NewMigrationsStarted(method string, options map[string]any) *MigrationsStarted {
 	return &MigrationsStarted{NewMigrationsEvent(method, options)}
 }
@@ -361,11 +337,9 @@ func NewMigrationsStarted(method string, options map[string]any) *MigrationsStar
 // The run stops at the first failure, so a failed run fires MigrationsStarted
 // and never this: the pair is the signal that the schema reached the state the
 // binary expects. It is where the bracket MigrationsStarted opened is closed.
-//
-// Answers Illuminate\Database\Events\MigrationsEnded.
 type MigrationsEnded struct{ MigrationsEvent }
 
-// NewMigrationsEnded answers `new MigrationsEnded($method, $options)`.
+// NewMigrationsEnded creates a MigrationsEnded event.
 func NewMigrationsEnded(method string, options map[string]any) *MigrationsEnded {
 	return &MigrationsEnded{NewMigrationsEvent(method, options)}
 }
@@ -377,32 +351,31 @@ func NewMigrationsEnded(method string, options map[string]any) *MigrationsEnded 
 // It takes the place of the Started/Ended pair rather than joining it, so a
 // listener that brackets a run has to treat this as the third possible shape.
 // It is not a failure -- a deploy that changes no schema is the normal case.
-//
-// Answers Illuminate\Database\Events\NoPendingMigrations.
 type NoPendingMigrations struct {
-	// Method is NoPendingMigrations::$method: "up" or "down".
+	// Method is "up" or "down".
 	Method string
 }
 
-// NewNoPendingMigrations answers NoPendingMigrations::__construct.
+// NewNoPendingMigrations creates a NoPendingMigrations event.
 func NewNoPendingMigrations(method string) *NoPendingMigrations {
 	return &NoPendingMigrations{Method: method}
 }
 
-// MigrationsPruned answers Illuminate\Database\Events\MigrationsPruned: the
-// squashed migration files were deleted after a schema dump.
+// MigrationsPruned reports that the squashed migration files were deleted after
+// a schema dump.
 type MigrationsPruned struct {
-	// Connection is MigrationsPruned::$connection.
+	// Connection is the connection the migrations were pruned on.
 	Connection Connection
 
-	// ConnectionName is MigrationsPruned::$connectionName.
+	// ConnectionName is the name of the connection the migrations were
+	// pruned on.
 	ConnectionName string
 
-	// Path is MigrationsPruned::$path.
+	// Path is the path the migration files were pruned from.
 	Path string
 }
 
-// NewMigrationsPruned answers MigrationsPruned::__construct.
+// NewMigrationsPruned creates a MigrationsPruned event.
 func NewMigrationsPruned(connection Connection, path string) *MigrationsPruned {
 	name := ""
 	if connection != nil {
@@ -418,23 +391,21 @@ func NewMigrationsPruned(connection Connection, path string) *MigrationsPruned {
 // engine's own tool produced, loaded in one step by a fresh database instead of
 // replayed migration by migration. Nothing in this package dispatches the
 // event -- SchemaState.Dump does the work and the command that drives it lives
-// in the application -- so it exists so that a project wiring `schema:dump`
-// fires the event a Laravel developer already listens for, and so that a
-// listener can add the file to a release artifact.
-//
-// Answers Illuminate\Database\Events\SchemaDumped.
+// in the application -- so it exists so that a project wiring `schema:dump` has
+// an event to fire, and so that a listener can add the file to a release
+// artifact.
 type SchemaDumped struct {
-	// Connection is SchemaDumped::$connection.
+	// Connection is the connection whose schema was dumped.
 	Connection Connection
 
-	// ConnectionName is SchemaDumped::$connectionName.
+	// ConnectionName is the name of the connection whose schema was dumped.
 	ConnectionName string
 
-	// Path is SchemaDumped::$path.
+	// Path is the path the schema was written to.
 	Path string
 }
 
-// NewSchemaDumped answers SchemaDumped::__construct.
+// NewSchemaDumped creates a SchemaDumped event.
 func NewSchemaDumped(connection Connection, path string) *SchemaDumped {
 	name := ""
 	if connection != nil {
@@ -451,20 +422,19 @@ func NewSchemaDumped(connection Connection, path string) *SchemaDumped {
 // here dispatches it, for the same reason -- SchemaState.Load does the work,
 // and the event is the vocabulary an application uses when it wires the
 // command.
-//
-// Answers Illuminate\Database\Events\SchemaLoaded.
 type SchemaLoaded struct {
-	// Connection is SchemaLoaded::$connection.
+	// Connection is the connection the schema file was loaded into.
 	Connection Connection
 
-	// ConnectionName is SchemaLoaded::$connectionName.
+	// ConnectionName is the name of the connection the schema file was
+	// loaded into.
 	ConnectionName string
 
-	// Path is SchemaLoaded::$path.
+	// Path is the path the schema file was loaded from.
 	Path string
 }
 
-// NewSchemaLoaded answers SchemaLoaded::__construct.
+// NewSchemaLoaded creates a SchemaLoaded event.
 func NewSchemaLoaded(connection Connection, path string) *SchemaLoaded {
 	name := ""
 	if connection != nil {
@@ -473,21 +443,19 @@ func NewSchemaLoaded(connection Connection, path string) *SchemaLoaded {
 	return &SchemaLoaded{Connection: connection, ConnectionName: name, Path: path}
 }
 
-// ModelsPruned answers Illuminate\Database\Events\ModelsPruned.
+// ModelsPruned reports how many rows one prunable removed.
 //
-// Eloquent has no counterpart in this framework and never will, so nothing here
-// dispatches this. It exists because `model:prune` is a command a project may
-// write against its own repositories, and the event it fires should be the one
-// a Laravel developer already listens for.
+// Nothing here dispatches it: `model:prune` is a command a project writes
+// against its own repositories, and this is the event it fires.
 type ModelsPruned struct {
-	// Model is ModelsPruned::$model: the type whose rows were pruned.
+	// Model is the type whose rows were pruned.
 	Model string
 
-	// Count is ModelsPruned::$count.
+	// Count is how many rows were removed.
 	Count int
 }
 
-// NewModelsPruned answers ModelsPruned::__construct.
+// NewModelsPruned creates a ModelsPruned event.
 func NewModelsPruned(model string, count int) *ModelsPruned {
 	return &ModelsPruned{Model: model, Count: count}
 }
@@ -500,14 +468,12 @@ func NewModelsPruned(model string, count int) *ModelsPruned {
 // first deletion, a listener can log or refuse on the whole set rather than
 // discovering it one ModelsPruned at a time. --pretend still fires it: the
 // names are what pretending is for.
-//
-// Answers Illuminate\Database\Events\ModelPruningStarting.
 type ModelPruningStarting struct {
-	// Models is ModelPruningStarting::$models.
+	// Models is the names of everything about to be pruned.
 	Models []string
 }
 
-// NewModelPruningStarting answers ModelPruningStarting::__construct.
+// NewModelPruningStarting creates a ModelPruningStarting event.
 func NewModelPruningStarting(models []string) *ModelPruningStarting {
 	return &ModelPruningStarting{Models: models}
 }
@@ -518,14 +484,12 @@ func NewModelPruningStarting(models []string) *ModelPruningStarting {
 // The command stops at the first prunable that errors, so this not arriving
 // after a ModelPruningStarting means one of them failed. How many rows each one
 // removed is in the ModelsPruned events between the two, not here.
-//
-// Answers Illuminate\Database\Events\ModelPruningFinished.
 type ModelPruningFinished struct {
-	// Models is ModelPruningFinished::$models.
+	// Models is the same list ModelPruningStarting carried.
 	Models []string
 }
 
-// NewModelPruningFinished answers ModelPruningFinished::__construct.
+// NewModelPruningFinished creates a ModelPruningFinished event.
 func NewModelPruningFinished(models []string) *ModelPruningFinished {
 	return &ModelPruningFinished{Models: models}
 }

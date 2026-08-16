@@ -11,9 +11,7 @@ import (
 	"github.com/arandu-io/hesape/str"
 )
 
-// Factory mirrors Illuminate\Http\Client\Factory.
-//
-// It is the entry point for the HTTP client layer. The Factory holds global
+// Factory is the entry point for the HTTP client layer. It holds global
 // configuration — middleware, base options, stub callbacks — and issues
 // PendingRequest instances through CreatePendingRequest. In a test, Fake
 // installs a stub that intercepts every outgoing request; AssertSent
@@ -52,12 +50,12 @@ type Factory struct {
 	// recording, when true, stores every request-response pair.
 	recording bool
 
-	// dispatcher is Factory::$dispatcher, the events the client fires into.
+	// dispatcher is the events the client fires into.
 	dispatcher Dispatcher
 }
 
-// Dispatcher is the Illuminate\Contracts\Events\Dispatcher slice the client
-// uses: it fires RequestSending, ResponseReceived and ConnectionFailed.
+// Dispatcher is the event sink the client uses: it fires RequestSending,
+// ResponseReceived and ConnectionFailed.
 //
 // It runs on the calling goroutine, so a listener that blocks blocks the
 // request. Anything slow belongs on a queue.
@@ -66,21 +64,21 @@ type Dispatcher interface {
 	Dispatch(event any)
 }
 
-// SetDispatcher sets the dispatcher the client fires its events into. The PHP
-// takes it through the constructor, which ADR 0001 rejected as a container
-// injection point, so it is a setter.
+// SetDispatcher sets the dispatcher the client fires its events into. It is
+// a setter rather than a constructor argument, since most callers never
+// need one.
 func (f *Factory) SetDispatcher(dispatcher Dispatcher) *Factory {
 	f.dispatcher = dispatcher
 	return f
 }
 
-// GetDispatcher is Factory::getDispatcher: the dispatcher the client fires
-// into, or nil when nobody is listening.
+// GetDispatcher is the dispatcher the client fires into, or nil when
+// nobody is listening.
 func (f *Factory) GetDispatcher() Dispatcher {
 	return f.dispatcher
 }
 
-// GetGlobalMiddleware is Factory::getGlobalMiddleware.
+// GetGlobalMiddleware is the middleware [Factory.GlobalMiddleware] added.
 func (f *Factory) GetGlobalMiddleware() []func(*http.Request, http.RoundTripper) http.RoundTripper {
 	return f.globalMiddleware
 }
@@ -284,17 +282,13 @@ func (f *Factory) AssertSequencesAreEmpty() error {
 	return nil
 }
 
-// Response is Factory::response: a stub response for a fake to hand back.
+// Response is a stub response for a fake to hand back.
 //
-// The PHP returns a promise wrapping a PSR-7 response, because Guzzle's stub
-// handler expects one; the fake handler here expects an *http.Response, so
-// that is what this returns. A nil body is the PHP null and produces an empty
-// body; anything that is not a string or a []byte is JSON-encoded and the
-// Content-Type header is set, which is what the PHP does for an array.
+// A nil body produces an empty body; anything that is not a string or a
+// []byte is JSON-encoded and the Content-Type header is set.
 //
-// It is a method and not a package function because the package already has a
-// type named Response -- Go has one namespace per package where PHP has one
-// per class, and Factory::response is called as Http::response().
+// It is a method and not a package function because the package already
+// has a type named Response.
 func (f *Factory) Response(body any, status int, headers http.Header) *http.Response {
 	if status == 0 {
 		status = http.StatusOK
@@ -331,17 +325,16 @@ func (f *Factory) Response(body any, status int, headers http.Header) *http.Resp
 	}
 }
 
-// FailedRequest is Factory::failedRequest: the RequestException a stub hands
-// back when it wants the caller to see a failure it can inspect.
+// FailedRequest is the RequestException a stub hands back when it wants
+// the caller to see a failure it can inspect.
 func (f *Factory) FailedRequest(body any, status int, headers http.Header) *RequestException {
 	return NewRequestException(NewResponse(f.Response(body, status, headers)), nil)
 }
 
-// FailedConnection is Factory::failedConnection: a stub that fails to connect.
+// FailedConnection is a stub that fails to connect.
 //
-// The PHP builds the cURL message when no message is given; there is no cURL
-// here, so the message names the host the same way, because a test that
-// asserts on the text is asserting on the host.
+// When no message is given, the error names the host instead, because a
+// test that asserts on the text is asserting on the host.
 func (f *Factory) FailedConnection(message string) StubCallback {
 	return func(req *http.Request) (*http.Response, error) {
 		if message != "" {
@@ -355,26 +348,26 @@ func (f *Factory) FailedConnection(message string) StubCallback {
 	}
 }
 
-// Sequence is Factory::sequence: a ResponseSequence the caller installs itself.
+// Sequence is a ResponseSequence the caller installs itself.
 //
 // [Factory.FakeSequence] is the same sequence already wired to a URL pattern.
-// This one is the PHP's: it is registered for AssertSequencesAreEmpty and
-// handed back bare, for a caller that builds its own stub around it.
+// This one is registered for AssertSequencesAreEmpty and handed back bare,
+// for a caller that builds its own stub around it.
 func (f *Factory) Sequence() *ResponseSequence {
 	seq := NewResponseSequence()
 	f.sequences = append(f.sequences, seq)
 	return seq
 }
 
-// StubUrl is Factory::stubUrl: fake one URL pattern with one canned response.
+// StubUrl fakes one URL pattern with one canned response.
 //
-// The PHP accepts an int status, a string body, a closure or a sequence; Go
-// has no such union, so it accepts the StubCallback that all four collapse
-// into, and [Factory.Response] builds the canned one.
+// It accepts the StubCallback that a status, a body, a closure or a
+// sequence would all collapse into, and [Factory.Response] builds the
+// canned one.
 func (f *Factory) StubUrl(urlPattern string, callback StubCallback) *Factory {
 	return f.Fake(func(req *http.Request) (*http.Response, error) {
-		// Str::start($url, '*') in the PHP: a pattern without a leading
-		// wildcard still matches a URL that carries a scheme and a host.
+		// A pattern without a leading wildcard still matches a URL that
+		// carries a scheme and a host.
 		pattern := urlPattern
 		if !strings.HasPrefix(pattern, "*") {
 			pattern = "*" + pattern

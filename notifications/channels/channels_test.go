@@ -216,11 +216,10 @@ func TestBroadcastChannelPushesToTheSubscribedChannel(t *testing.T) {
 	}
 }
 
-// TestBroadcastChannelFallsBackToThePrivateChannel is Illuminate's
-// BroadcastNotificationCreated::channelName: a recipient with no explicit
-// broadcast route is still reachable on the channel named after it, and nobody
-// listening is not an error -- a live push is a courtesy on top of a stored
-// notification, never the only copy.
+// TestBroadcastChannelFallsBackToThePrivateChannel checks that a recipient with
+// no explicit broadcast route is still reachable on the channel named after it,
+// and that nobody listening is not an error -- a live push is a courtesy on top
+// of a stored notification, never the only copy.
 func TestBroadcastChannelFallsBackToThePrivateChannel(t *testing.T) {
 	hub := &fakeHub{}
 	if _, err := channels.NewBroadcast(hub).Send(context.Background(), sendGrant(t), person{id: "u1"}, full{}); err != nil {

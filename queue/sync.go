@@ -20,10 +20,10 @@ type Handlers interface {
 
 // SyncQueue runs each job the moment it is pushed, in the caller's goroutine.
 //
-// It answers Illuminate\Queue\SyncQueue, and it exists for the same two
-// reasons: a test that pushes a job wants to assert on what the job did without
-// starting a worker, and a developer running the application locally wants the
-// email to be sent rather than to sit in a table.
+// It exists for two reasons: a test that pushes a job wants to assert on what
+// the job did without starting a worker, and a developer running the
+// application locally wants the email to be sent rather than to sit in a
+// table.
 //
 // Nothing is stored, so nothing is retried: a handler that fails fails the push.
 // That is the trade the sync connection makes, and it is why it is not a

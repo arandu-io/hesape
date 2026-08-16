@@ -41,8 +41,8 @@ var (
 // so the store and the handlers cannot drift apart on it.
 //
 // Without an id and a tenant there is no question to ask: "every session of
-// subject 1" with no tenant reaches every customer (RULE 14), and "every session
-// of the empty subject" of one tenant is every session nobody has signed in on
+// subject 1" with no tenant reaches every customer, and "every session of
+// the empty subject" of one tenant is every session nobody has signed in on
 // -- the guests. Found by audit: RecordStore.DestroyOthers refused both, and the
 // in-memory handler's DestroyIndex, which is exported and reachable without the
 // store, happily deleted every guest session of a tenant while the kv handler
@@ -54,11 +54,11 @@ var errNoSubjectScope = errors.New("session: signing out the other sessions need
 //
 // Longer than a working session, and deliberately not unlimited. The cookie is a
 // bearer credential sitting on a device that gets shared, lost, resold and
-// borrowed, so "stay signed in" has to end on its own: Laravel's remember cookie
-// lasts five years, which means a laptop sold in year two still opens the
-// account. A month is long enough for the box to be worth ticking -- that is the
-// whole point of it -- and short enough that a device which left the person's
-// hands stops working inside a billing cycle, where somebody notices.
+// borrowed, so "stay signed in" has to end on its own: an unlimited lifetime
+// means a laptop sold years later still opens the account. A month is long
+// enough for the box to be worth ticking -- that is the whole point of it --
+// and short enough that a device which left the person's hands stops working
+// inside a billing cycle, where somebody notices.
 //
 // A store configured with a longer ttl than this keeps its own: see
 // RecordStore.lifetime. Remember must never make a session shorter.
@@ -66,10 +66,10 @@ const RememberLifetime = 30 * 24 * time.Hour
 
 // PasswordConfirmationWindow is how long typing the password again counts for.
 //
-// Three hours, which is what Laravel's auth.password_timeout has been since 6.x,
-// and a constant for the reason the sign-in throttle's ceiling is one: a window
-// somebody can widen from the environment is a window somebody widens the
-// afternoon it is inconvenient, and nobody narrows it again.
+// Three hours, a constant for the same reason the sign-in throttle's ceiling
+// is one: a window somebody can widen from the environment is a window
+// somebody widens the afternoon it is inconvenient, and nobody narrows it
+// again.
 //
 // The number is chosen from both ends. Long enough that somebody spending an
 // afternoon in the sensitive part of an application types their password once
@@ -92,8 +92,7 @@ const PasswordConfirmationWindow = 3 * time.Hour
 //
 //   - Tenant and SubjectID are the index. They are what makes "sign this account
 //     out everywhere" answerable at all, and a handler cannot derive them from an
-//     opaque payload. Laravel's sessions table carries the same column for the
-//     same reason.
+//     opaque payload.
 //   - Remembered and PasswordConfirmedAt decide how long the record and its
 //     cookie live. Start writes both, over whatever the caller left there.
 type Record[T any] struct {
@@ -101,7 +100,7 @@ type Record[T any] struct {
 	Payload T
 
 	// Tenant is the customer this session belongs to. It comes from the Grant or
-	// from the session, never from the request (RULE 14).
+	// from the session, never from the request.
 	Tenant string
 
 	// SubjectID is the account signed in on this session, empty for a guest.
@@ -122,25 +121,21 @@ type Record[T any] struct {
 	//
 	// Only Start and Regenerate set it, from the Remember option, and they
 	// overwrite whatever the caller put here: a field set by hand on the way in
-	// would be a second way to ask for a longer session, and there is one (RULE 9).
+	// would be a second way to ask for a longer session, and there is one.
 	//
-	// A policy may also read it. Laravel exposes the same fact as viaRemember, and
-	// for the same use: a session nobody has authenticated for a month is the
-	// right moment to ask for the password again before a destructive action.
+	// A policy may also read it: a session nobody has authenticated for a month
+	// is the right moment to ask for the password again before a destructive
+	// action.
 	Remembered bool
 
 	// PasswordConfirmedAt is when the subject last typed their password again on
-	// an already open session -- Laravel's auth.password_confirmed_at. Zero means
-	// never, and reads as not confirmed. Only Confirm sets it.
+	// an already open session. Zero means never, and reads as not confirmed.
+	// Only Confirm sets it.
 	PasswordConfirmedAt time.Time
 }
 
-// PasswordConfirmedWithin is RequirePassword::shouldConfirmPassword, inverted:
-// the PHP asks whether to ask for the password, and this asks whether it has
-// already been given.
-//
-// It reports whether the password was typed again on this session less than
-// window ago.
+// PasswordConfirmedWithin reports whether the password was typed again on
+// this session less than window ago.
 //
 // It answers false whenever it cannot prove otherwise, which is the whole
 // argument for having it be a method rather than a comparison at the call site:
@@ -202,9 +197,9 @@ type Handler[T any] interface {
 	// person the reset is aimed at. Deleting by id one at a time was not an option
 	// -- nothing knew which ids belonged to the account.
 	//
-	// The tenant is part of the question, not a filter applied afterwards (RULE
-	// 14). Two tenants may both hold a subject called "1", and signing one of them
-	// out must not touch the other.
+	// The tenant is part of the question, not a filter applied afterwards. Two
+	// tenants may both hold a subject called "1", and signing one of them out
+	// must not touch the other.
 	//
 	// It is not an error for the subject to have no sessions. It IS an error for
 	// the tenant or the subject id to be empty: neither names a subject, and an
@@ -223,17 +218,16 @@ type Handler[T any] interface {
 //
 // # Why this is not called Store
 //
-// [Store] is Illuminate\Session\Store: one session, loaded for one request,
-// holding a bag of keys. This is the other half of what Illuminate spreads
-// across Store, SessionManager and the StartSession middleware -- the thing that
-// mints an id, signs the cookie, reads a [Record] back and ends the session --
-// and it is generic over the payload, which Illuminate's cannot be.
+// [Store] is one session, loaded for one request, holding a bag of keys.
+// This is the type that mints an id, signs the cookie, reads a [Record]
+// back and ends the session, and it is generic over the payload, which
+// [Store] is not.
 //
-// Both are here because both are used: [Store] is what a Laravel developer
-// reaches for and what the flash, the old input and the CSRF token live in;
-// this is what auth builds a session with when the payload is a struct and the
-// application would rather the compiler checked it. They share [Handler] and
-// [Record]; nothing else is duplicated between them.
+// Both are here because both are used: [Store] is what the flash, the old
+// input and the CSRF token live in; this is what auth builds a session with
+// when the payload is a struct and the application would rather the
+// compiler checked it. They share [Handler] and [Record]; nothing else is
+// duplicated between them.
 type RecordStore[T any] struct {
 	appKey  []byte
 	ttl     time.Duration
@@ -241,10 +235,8 @@ type RecordStore[T any] struct {
 	handler Handler[T]
 }
 
-// NewRecordStore has no Illuminate counterpart: [RecordStore] is the half of
-// Store, SessionManager and StartSession that mints and signs, made generic
-// over the payload, and Illuminate builds those three through the container
-// (ADR 0001) rather than through one constructor.
+// NewRecordStore returns a [RecordStore] that mints and signs session ids,
+// generic over the payload.
 //
 // Pass secure=false only in development: without the Secure attribute the
 // cookie travels over plain HTTP.
@@ -260,7 +252,7 @@ func NewRecordStore[T any](appKey []byte, ttl time.Duration, secure bool, h Hand
 // A variadic option and not a second constructor: StartFor beside Start would be
 // two functions that both start a session, and the next thing anybody needs -- a
 // session for a device, for an impersonation, for a longer window -- adds a
-// third. One function that takes options widens; a second name forks (RULE 9).
+// third. One function that takes options widens; a second name forks.
 // Every existing call to Start and Regenerate passes none and behaves as it did.
 type Option func(*settings)
 
@@ -270,12 +262,11 @@ type settings struct {
 	remember bool
 }
 
-// Remember is the $remember argument of SessionGuard::login, as an option.
+// Remember asks for a session that survives closing the browser, for
+// RememberLifetime instead of the store's ttl, as an option.
 //
-// It asks for a session that survives closing the browser, for RememberLifetime
-// instead of the store's ttl. Laravel answers it with a second, long-lived
-// recaller cookie; this lengthens the session itself, so there is one credential
-// rather than two.
+// It lengthens the session itself rather than adding a second, long-lived
+// credential, so there is one to protect and revoke instead of two.
 //
 // It takes the answer rather than being a flag, so the call site is the form
 // field and there is no branch around it:
@@ -308,11 +299,7 @@ func (s *RecordStore[T]) lifetime(remembered bool) time.Duration {
 	return RememberLifetime
 }
 
-// Start is Store::setId, Store::save and StartSession::addCookieToResponse
-// taken together -- it is not Store::start, which loads a session that already
-// has an id.
-//
-// It creates a session for the record and writes the cookie.
+// Start creates a session for the record and writes the cookie.
 //
 // With no options it is what it has always been: a session for the store's
 // configured ttl. See Remember for the only thing there is to ask for.
@@ -343,11 +330,10 @@ func (s *RecordStore[T]) Start(ctx context.Context, w http.ResponseWriter, rec R
 	return id, nil
 }
 
-// Regenerate is Store::regenerate.
-//
-// It issues a new session id for the same subject and destroys the old one.
-// There is no CSRF token to mint here -- [CSRF] keeps none -- so this is
-// Store::migrate's half of it, with the record written again under the new id.
+// Regenerate issues a new session id for the same subject and destroys the
+// old one. There is no CSRF token to mint here -- [CSRF] keeps none -- so
+// this is [Store.Migrate]'s half of it, with the record written again under
+// the new id.
 //
 // It MUST be called on login: keeping the pre-login id is session fixation, the
 // bug that lets an attacker plant a known id and inherit the session after the
@@ -369,10 +355,9 @@ func (s *RecordStore[T]) Regenerate(ctx context.Context, w http.ResponseWriter, 
 	return id, nil
 }
 
-// All returns the record bound to the request's session cookie.
-//
-// It is Laravel's Session::all(): the whole of what this session holds, in one
-// read, because there is nothing here to fetch by name.
+// All returns the record bound to the request's session cookie: the whole
+// of what this session holds, in one read, because there is nothing here to
+// fetch by name.
 func (s *RecordStore[T]) All(ctx context.Context, r *http.Request) (Record[T], error) {
 	id := s.ID(r)
 	if id == "" {
@@ -385,12 +370,9 @@ func (s *RecordStore[T]) All(ctx context.Context, r *http.Request) (Record[T], e
 	return rec, nil
 }
 
-// Confirm is Store::passwordConfirmed.
-//
-// It records on the request's session that the subject has just typed their
-// password again. The PHP puts a unix timestamp under a session key and answers
-// nothing; this writes the whole record, reads it back and rewrites the cookie,
-// for the reasons below.
+// Confirm records on the request's session that the subject has just typed
+// their password again. It writes the whole record, reads it back and
+// rewrites the cookie, for the reasons below.
 //
 // It is the write half of a step-up check: a sensitive action asks
 // Record.PasswordConfirmedWithin, sends the person to a password screen when the
@@ -448,12 +430,9 @@ func (s *RecordStore[T]) Confirm(ctx context.Context, w http.ResponseWriter, r *
 	return nil
 }
 
-// DestroyOthers is SessionGuard::logoutOtherDevices.
-//
-// It signs the subject out of every session except keepID. Laravel does it by
-// cycling the remember token, which ends the other sessions only when they next
-// try to recall; this deletes the records, so they end on their next request
-// whether or not they were remembered.
+// DestroyOthers signs the subject out of every session except keepID. It
+// deletes the records, so they end on their next request whether or not
+// they were remembered.
 //
 // Pass the id of the session doing the asking to keep the person signed in where
 // they are -- a password change from the account screen -- and pass an empty
@@ -466,9 +445,9 @@ func (s *RecordStore[T]) Confirm(ctx context.Context, w http.ResponseWriter, r *
 // session that stops at the next request -- there is no way to reach into those
 // browsers and no need to.
 //
-// The tenant comes from the record, which came from the Grant or the session,
-// never from the request (RULE 14). A record with no tenant is refused rather
-// than turned into a query that matches an id across every customer.
+// The tenant comes from the record, which came from the Grant or the
+// session, never from the request. A record with no tenant is refused
+// rather than turned into a query that matches an id across every customer.
 func (s *RecordStore[T]) DestroyOthers(ctx context.Context, rec Record[T], keepID string) error {
 	if rec.SubjectID == "" || rec.Tenant == "" {
 		return errNoSubjectScope
@@ -476,14 +455,13 @@ func (s *RecordStore[T]) DestroyOthers(ctx context.Context, rec Record[T], keepI
 	return s.handler.DestroyIndex(ctx, rec.Tenant, rec.SubjectID, keepID)
 }
 
-// Invalidate removes the session and clears the session cookie.
-//
-// It is Laravel's Session::invalidate(), and it is what a sign-out calls. What
-// it does NOT clear is the address a guard remembered before sending somebody to
-// the sign-in screen: that cookie belongs to the package that writes it, and
-// signing out has to clear it too -- a shared machine changes hands at exactly
-// that moment, and an address remembered before a sign-out is one nobody wants
-// afterwards. See http, and the report on this package's move.
+// Invalidate removes the session and clears the session cookie. It is what
+// a sign-out calls. What it does NOT clear is the address a guard
+// remembered before sending somebody to the sign-in screen: that cookie
+// belongs to the package that writes it, and signing out has to clear it
+// too -- a shared machine changes hands at exactly that moment, and an
+// address remembered before a sign-out is one nobody wants afterwards. See
+// http, and the report on this package's move.
 func (s *RecordStore[T]) Invalidate(ctx context.Context, w http.ResponseWriter, id string) error {
 	if id != "" {
 		if err := s.handler.Destroy(ctx, id); err != nil {
@@ -502,12 +480,10 @@ func (s *RecordStore[T]) Invalidate(ctx context.Context, w http.ResponseWriter, 
 	return nil
 }
 
-// ID is Store::getId, read off the request rather than off a loaded session.
-//
-// It returns the session id when the cookie signature is valid, and the empty
-// string otherwise -- the PHP has no signature on the session cookie and takes
-// the value as it arrives. It is the value to hand to [CSRF], which binds its
-// token to this id.
+// ID returns the session id when the cookie signature is valid, and the
+// empty string otherwise, read off the request rather than off a loaded
+// session. It is the value to hand to [CSRF], which binds its token to this
+// id.
 func (s *RecordStore[T]) ID(r *http.Request) string {
 	c, err := r.Cookie(CookieName)
 	if err != nil {
@@ -570,20 +546,18 @@ type arrayEntry[T any] struct {
 	expires time.Time
 }
 
-// NewArrayHandler is ArraySessionHandler::__construct, for [Record] instead of
-// bytes.
+// NewArrayHandler returns an empty in-memory session handler, for [Record]
+// instead of bytes.
 //
-// It returns an empty in-memory session handler. It takes no lifetime, because
-// here the ttl arrives with each write rather than with the handler.
+// It takes no lifetime, because the ttl arrives with each write rather than
+// with the handler.
 func NewArrayHandler[T any]() *ArrayHandler[T] {
 	return &ArrayHandler[T]{entries: map[string]arrayEntry[T]{}}
 }
 
-// Read is ArraySessionHandler::read.
-//
-// It returns the record, or ErrExpired when the id is unknown. The PHP answers
-// the empty string for a missing session and for an expired one alike, which
-// [SessionHandler] keeps; this one names the case instead, because a caller
+// Read returns the record, or ErrExpired when the id is unknown.
+// [SessionHandler] answers the empty string for a missing session and for
+// an expired one alike; this one names the case instead, because a caller
 // holding a typed record has no empty string to read as absence.
 func (h *ArrayHandler[T]) Read(ctx context.Context, id string) (Record[T], error) {
 	h.mu.RLock()
@@ -601,8 +575,7 @@ func (h *ArrayHandler[T]) Read(ctx context.Context, id string) (Record[T], error
 	return e.record, nil
 }
 
-// Write is ArraySessionHandler::write. It stores the record under id for the
-// given ttl, which the PHP takes from the handler instead.
+// Write stores the record under id for the given ttl.
 func (h *ArrayHandler[T]) Write(ctx context.Context, id string, rec Record[T], ttl time.Duration) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -610,7 +583,7 @@ func (h *ArrayHandler[T]) Write(ctx context.Context, id string, rec Record[T], t
 	return nil
 }
 
-// Destroy is ArraySessionHandler::destroy. It removes the session, if present.
+// Destroy removes the session, if present.
 func (h *ArrayHandler[T]) Destroy(ctx context.Context, id string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -618,12 +591,8 @@ func (h *ArrayHandler[T]) Destroy(ctx context.Context, id string) error {
 	return nil
 }
 
-// DestroyIndex has no Illuminate counterpart: no SessionHandlerInterface method
-// takes a subject, and Laravel ends the other sessions from the guard instead,
-// by cycling the remember token in SessionGuard::logoutOtherDevices. It is what
-// [RecordStore.DestroyOthers] needs from a handler.
-//
-// It removes every session of one subject of one tenant except keepID.
+// DestroyIndex is what [RecordStore.DestroyOthers] needs from a handler: it
+// removes every session of one subject of one tenant except keepID.
 //
 // It is a scan of the map, and it stays a scan: a second map keyed by subject
 // would have to be kept in step with expiry, with Destroy and with eviction, and

@@ -11,19 +11,17 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// Pivot answers Illuminate\Database\Eloquent\Relations\Pivot: the row of an
-// intermediate table, as a model.
+// Pivot is the row of an intermediate table, as a model.
 //
-// In PHP it is `class Pivot extends Model` with the AsPivot trait, so it
-// inherits the whole model. There is no model to inherit here without importing
-// the eloquent package, which imports this one -- so the model surface is
-// implemented on the type, and it is the small surface a pivot actually needs:
-// attributes, the two keys, a table and a save. What it is not is a second
-// model implementation for general use; nothing but a pivot should embed it.
+// There is no model to embed here without importing the eloquent package, which
+// imports this one -- so the model surface is implemented on the type, and it is
+// the small surface a pivot actually needs: attributes, the two keys, a table
+// and a save. What it is not is a second model implementation for general use;
+// nothing but a pivot should embed it.
 //
-// $incrementing is false and $guarded is empty, exactly as on the PHP class: a
-// pivot row has no id of its own to increment, and it is written by the
-// relation rather than by mass assignment from a request.
+// It does not increment and it guards nothing: a pivot row has no id of its own
+// to increment, and it is written by the relation rather than by mass assignment
+// from a request.
 type Pivot struct {
 	concerns.AsPivot
 
@@ -35,8 +33,8 @@ type Pivot struct {
 	timestamps bool
 
 	// NewQueryFor is how a pivot reaches the database. The relation that built
-	// it supplies the factory, because a pivot has no connection resolver of
-	// its own -- and no facade to ask for one (ADR 0002).
+	// it supplies the factory, because a pivot has no connection of its own to
+	// build a query from.
 	NewQueryFor func(table string) Builder
 }
 
@@ -268,8 +266,8 @@ func (p *Pivot) SetKeysForSaveQuery(q Builder, model Model) Builder {
 }
 
 // attributesForWrite is the row as it goes to the database, with the tenant on
-// it. RULE 14 is not only a where clause: a pivot row written without the
-// tenant is a row every scoped read will miss.
+// it. The tenant is not only a where clause: a pivot row written without it is a
+// row every scoped read will miss.
 func (p *Pivot) attributesForWrite(g auth.Grant) map[string]any {
 	attributes := make(map[string]any, len(p.attributes)+1)
 	for key, value := range p.attributes {
@@ -314,9 +312,8 @@ func (p *Pivot) NewQueryForRestoration(g auth.Grant, ids ...any) (Builder, error
 	return p.AsPivot.NewQueryForRestoration(p, g, ids...)
 }
 
-// MorphPivot answers Illuminate\Database\Eloquent\Relations\MorphPivot: a pivot
-// row on a table shared by several parent types, so every statement it writes
-// carries the type as well as the keys.
+// MorphPivot is a pivot row on a table shared by several parent types, so every
+// statement it writes carries the type as well as the keys.
 type MorphPivot struct {
 	Pivot
 

@@ -12,8 +12,7 @@ import (
 // interruptKey is where schedule:interrupt leaves its mark, and where the
 // worker looks for it.
 //
-// It is ScheduleInterruptCommand's 'illuminate:schedule:interrupt', renamed to
-// the prefix this framework uses everywhere else.
+// The prefix matches every other cache key this framework writes.
 const interruptKey = "framework/schedule-interrupt"
 
 // Interrupter is what schedule:interrupt writes to and the worker reads.
@@ -31,9 +30,9 @@ type Interrupter interface {
 
 // Commands is the set of scheduling commands, ready to register.
 //
-// It is the seven ScheduleCommand classes as values, built over one schedule.
-// interrupter and cleaner may be nil, and then the two commands that need them
-// say so rather than doing nothing.
+// It is seven commands as values, built over one schedule. interrupter and
+// cleaner may be nil, and then the two commands that need them say so rather
+// than doing nothing.
 type Commands struct {
 	// Schedule is what the commands read and run.
 	Schedule *Schedule
@@ -49,9 +48,6 @@ type Commands struct {
 }
 
 // All returns every scheduling command.
-//
-// It has no Illuminate counterpart: Laravel binds each Schedule*Command into the
-// container from a service provider, and here the set is one value.
 //
 // The order is the order they are listed in, which is alphabetical by name
 // because that is how the console help sorts them anyway.
@@ -83,11 +79,10 @@ func (c Commands) runner() *Runner {
 	return NewRunner(c.Schedule)
 }
 
-// ScheduleRunCommand is ScheduleRunCommand::handle: the command that runs the
-// events that are due now.
+// ScheduleRunCommand is the command that runs the events that are due now.
 //
-// It answers Illuminate\Console\Scheduling\ScheduleRunCommand: `schedule:run`,
-// with --whisper to keep quiet when there was nothing to do.
+// It is `schedule:run`, with --whisper to keep quiet when there was nothing
+// to do.
 func (c Commands) ScheduleRunCommand() console.Command {
 	return console.Command{
 		Signature:   "schedule:run {--whisper : Do not output message indicating that no jobs were ready to run}",
@@ -105,13 +100,12 @@ func (c Commands) ScheduleRunCommand() console.Command {
 	}
 }
 
-// ScheduleWorkCommand is ScheduleWorkCommand::handle: the command that runs the
-// schedule for as long as the process lives.
+// ScheduleWorkCommand is the command that runs the schedule for as long as
+// the process lives.
 //
-// It answers Illuminate\Console\Scheduling\ScheduleWorkCommand:
-// `schedule:work`. In Laravel it shells out to schedule:run once a minute
-// because PHP has no resident process; here it calls the same runner in the same
-// process, which is one artifact instead of two and no crontab to configure.
+// It is `schedule:work`. It calls the same runner schedule:run does, in the
+// same process, which is one artifact instead of two and no crontab to
+// configure.
 //
 // It ticks at the top of each minute rather than every sixty seconds from boot,
 // because an event specified as "0 3 * * *" has to fire at 3:00 and not at 3:00
@@ -153,28 +147,27 @@ func (c Commands) ScheduleWorkCommand() console.Command {
 	}
 }
 
-// ScheduleFinishCommand is ScheduleFinishCommand::handle: the command that
-// reports the exit code of an event that ran in the background.
+// ScheduleFinishCommand is the command that reports the exit code of an
+// event that ran in the background.
 //
-// It answers Illuminate\Console\Scheduling\ScheduleFinishCommand:
-// `schedule:finish {id} {code=0}`. It is hidden because nobody runs it by hand
-// -- CommandBuilder appends it to the backgrounded command line, and it is what
-// releases the mutex and runs the after callbacks in a process that stayed
-// around to do it.
+// It is `schedule:finish {id} {code=0}`. It is hidden because nobody runs it
+// by hand -- CommandBuilder appends it to the backgrounded command line, and
+// it is what releases the mutex and runs the after callbacks in a process
+// that stayed around to do it.
 //
-// Two things it used to get wrong, and both come from the same place: this runs
-// in a process that has already lost the run it is reporting on.
+// It runs in a process that has already lost the run it is reporting on,
+// which shapes two decisions.
 //
-// It stopped at the first event with that mutex name, and a mutex name is a
-// digest of the expression and the command line -- two declarations of the same
-// command share one. The second of them kept its lock and never ran its after
-// callbacks. The PHP filters the collection and each()es over every match.
+// A mutex name is a digest of the expression and the command line, so two
+// declarations of the same command share one: every event with that mutex
+// name is finished, not only the first, or the second would keep its lock
+// and never run its after callbacks.
 //
-// It exited 1 when the id matched nothing, which is a failed background job
-// every time a deploy changes the schedule while a backgrounded event is still
-// running. The PHP exits 0: an empty collection is an each() over nothing. It
-// says which id it could not find, because a silent success is how the same
-// deploy hides a mutex that will now be held until it expires.
+// An id that matches nothing succeeds rather than failing: a deploy that
+// changes the schedule while a backgrounded event is still running must not
+// turn into a failed background job. It says which id it could not find,
+// because a silent success is how the same deploy hides a mutex that will
+// now be held until it expires.
 func (c Commands) ScheduleFinishCommand() console.Command {
 	return console.Command{
 		Signature:   "schedule:finish {id : The mutex name of the event that finished} {code=0 : The exit status it ended with}",
@@ -214,11 +207,10 @@ func (c Commands) ScheduleFinishCommand() console.Command {
 	}
 }
 
-// ScheduleListCommand is ScheduleListCommand::handle: the command that lists the
-// scheduled events and when they run next.
+// ScheduleListCommand is the command that lists the scheduled events and
+// when they run next.
 //
-// It answers Illuminate\Console\Scheduling\ScheduleListCommand:
-// `schedule:list`, with --timezone to read the times somewhere else.
+// It is `schedule:list`, with --timezone to read the times somewhere else.
 func (c Commands) ScheduleListCommand() console.Command {
 	return console.Command{
 		Signature:   "schedule:list {--timezone= : The timezone that times should be displayed in}",
@@ -255,13 +247,11 @@ func (c Commands) ScheduleListCommand() console.Command {
 	}
 }
 
-// ScheduleTestCommand is ScheduleTestCommand::handle: the command that runs one
-// scheduled event by hand.
+// ScheduleTestCommand is the command that runs one scheduled event by hand.
 //
-// It answers Illuminate\Console\Scheduling\ScheduleTestCommand:
-// `schedule:test {--name=}`. It runs the event through the same path the runner
-// does -- same mutex, same Grant, same callbacks -- which is what makes the
-// manual run auditable rather than a back door.
+// It is `schedule:test {--name=}`. It runs the event through the same path
+// the runner does -- same mutex, same Grant, same callbacks -- which is what
+// makes the manual run auditable rather than a back door.
 func (c Commands) ScheduleTestCommand() console.Command {
 	return console.Command{
 		Signature:   "schedule:test {--name= : The name of the scheduled command to run}",
@@ -291,13 +281,12 @@ func (c Commands) ScheduleTestCommand() console.Command {
 					continue
 				}
 
-				// The PHP assigns $event->runInBackground = false before it
-				// runs, and this did not: a backgrounded event returns from Run
-				// before Finish, so the overlap mutex it took stayed held until
-				// it expired -- a day, by default -- and the event never ran
-				// again in between. The schedule is this process's own copy and
-				// the process is about to exit, which is why the PHP is happy to
-				// change the event rather than a copy of it.
+				// A backgrounded event returns from Run before Finish, so the
+				// overlap mutex it took would stay held until it expired -- a
+				// day, by default -- and the event would never run again in
+				// between. The schedule here is this process's own copy, and
+				// the process is about to exit, so changing the event rather
+				// than a copy of it is safe.
 				event.runInBackground = false
 
 				return o.OutputComponents().Task(
@@ -315,12 +304,11 @@ func (c Commands) ScheduleTestCommand() console.Command {
 	}
 }
 
-// ScheduleClearCacheCommand is ScheduleClearCacheCommand::handle: the command
-// that deletes the overlap mutexes left behind.
+// ScheduleClearCacheCommand is the command that deletes the overlap mutexes
+// left behind.
 //
-// It answers Illuminate\Console\Scheduling\ScheduleClearCacheCommand:
-// `schedule:clear-cache`. It is for the case a process died holding a lock and
-// the operator does not want to wait out the ttl.
+// It is `schedule:clear-cache`. It is for the case a process died holding a
+// lock and the operator does not want to wait out the ttl.
 func (c Commands) ScheduleClearCacheCommand() console.Command {
 	return console.Command{
 		Signature:   "schedule:clear-cache",
@@ -352,17 +340,12 @@ func (c Commands) ScheduleClearCacheCommand() console.Command {
 	}
 }
 
-// ScheduleInterruptCommand is ScheduleInterruptCommand::handle: the command that
-// stops the running schedule worker at its next tick.
+// ScheduleInterruptCommand is the command that stops the running schedule
+// worker at its next tick.
 //
-// It answers Illuminate\Console\Scheduling\ScheduleInterruptCommand:
-// `schedule:interrupt`. It leaves a mark that expires, so a worker started
-// afterwards is not stopped by an interrupt meant for the one before it.
-//
-// The mark lives until the end of the current minute, which is the PHP's
-// Date::now()->endOfMinute(). It used to live an hour, which is the opposite of
-// what the sentence above claims: every worker started in the next hour read a
-// mark meant for a process that had already stopped, and stopped too.
+// It is `schedule:interrupt`. It leaves a mark that expires, so a worker
+// started afterwards is not stopped by an interrupt meant for the one before
+// it. The mark lives until the end of the current minute.
 func (c Commands) ScheduleInterruptCommand() console.Command {
 	return console.Command{
 		Signature:   "schedule:interrupt",

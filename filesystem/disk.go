@@ -81,16 +81,15 @@ type Adapter interface {
 // tenant decides the prefix, and the prefix is not reachable from the key.
 //
 // Reads are not exempt. AllFiles, Get, Stat and Exists take a Grant for the same
-// reason Put does -- RULE 17 -- and a listing is the one call where forgetting
+// reason Put does, and a listing is the one call where forgetting
 // it hands over the names of every file in the system.
 type Disk struct {
 	name    string
 	adapter Adapter
 	config  Config
 
-	// mu guards the three callbacks below, which are set at wiring time and read
-	// on every request. They are the ones Illuminate's serveUsing(),
-	// buildTemporaryUrlsUsing() and buildTemporaryUploadUrlsUsing() install.
+	// mu guards the three callbacks below, which are set at wiring time and
+	// read on every request.
 	mu                 sync.RWMutex
 	serveUsing         ServeCallback
 	temporaryURL       TemporaryURLCallback
@@ -102,10 +101,10 @@ type Disk struct {
 // The name is what appears in an error and in `aru` output; it is not part of
 // any path, so renaming a disk does not move a file.
 //
-// The optional [Config] is Illuminate's disk configuration array: it is what
-// [Disk.URL] reads a public base address out of, and what [Disk.GetConfig]
-// answers with. Passing none leaves it zero, which is a disk that has no public
-// address -- and saying so is the correct answer for one.
+// The optional [Config] is what [Disk.URL] reads a public base address out of,
+// and what [Disk.GetConfig] answers with. Passing none leaves it zero, which is
+// a disk that has no public address -- and saying so is the correct answer for
+// one.
 func NewDisk(name string, a Adapter, cfg ...Config) *Disk {
 	d := &Disk{name: name, adapter: a}
 	if len(cfg) > 0 {
@@ -127,10 +126,8 @@ func (d *Disk) GetAdapter() Adapter { return d.adapter }
 
 // GetDriver returns the same driver [Disk.GetAdapter] does.
 //
-// In Illuminate the two answer with different objects: getDriver() hands back
-// the Flysystem FilesystemOperator and getAdapter() the Flysystem adapter
-// underneath it. There is no Flysystem here and therefore only one object, so
-// both names answer with it rather than one of them being missing for a reason
+// There is one object here rather than a driver wrapping an adapter, so both
+// names answer with it rather than one of them being missing for a reason
 // nobody could act on.
 func (d *Disk) GetDriver() Adapter { return d.adapter }
 
@@ -247,11 +244,10 @@ func (d *Disk) MimeType(ctx context.Context, g auth.Grant, key string) (string, 
 
 // Checksum returns the SHA-256 of the file's contents, in lowercase hex.
 //
-// Illuminate's default is MD5, and this is not: the reason to hash a stored file
-// is to answer "is this the same file", and answering it with a hash that can be
-// made to collide on purpose is answering a different question. There is no
-// algorithm option for the same reason there is no second anything here (RULE
-// 9).
+// It is SHA-256 and not MD5: the reason to hash a stored file is to answer "is
+// this the same file", and answering it with a hash that can be made to collide
+// on purpose is answering a different question. There is no algorithm option,
+// for the same reason there is no second anything here.
 //
 // It reads the whole file, because a checksum of part of one is not a checksum.
 func (d *Disk) Checksum(ctx context.Context, g auth.Grant, key string) (string, error) {
@@ -288,9 +284,9 @@ func (d *Disk) Delete(ctx context.Context, g auth.Grant, key string) error {
 // a bug report nobody can reproduce.
 //
 // The argument is matched as a prefix, so "invoices/" is the directory and
-// "invoices" also catches "invoices-2025.pdf". That is a superset of Illuminate's
-// argument rather than a different one, and only the caller knows which was
-// meant -- [Files] and [Directories] are the ones that read it as a directory.
+// "invoices" also catches "invoices-2025.pdf". Only the caller knows which was
+// meant -- [Disk.Files] and [Disk.Directories] are the ones that read it as a
+// directory.
 func (d *Disk) AllFiles(ctx context.Context, g auth.Grant, directory string) ([]string, error) {
 	full, err := prefixPath(g, directory)
 	if err != nil {
@@ -377,8 +373,8 @@ func (d *Disk) directories(ctx context.Context, g auth.Grant, directory string, 
 	return out, nil
 }
 
-// asDirectory is what turns Illuminate's directory argument into the prefix the
-// rest of the package speaks. The empty directory is the tenant's root, and
+// asDirectory turns a directory argument into the prefix the rest of the
+// package speaks. The empty directory is the tenant's root, and
 // anything else gets the trailing slash that makes "invoices" mean the folder
 // rather than every key starting with those eight letters.
 func asDirectory(directory string) string {
@@ -438,8 +434,8 @@ func (d *Disk) DeleteDirectory(ctx context.Context, g auth.Grant, directory stri
 //
 // It is read-modify-write and not an append syscall, because an object store has
 // no such thing: two concurrent Appends to the same key end with one of the two,
-// not both. Illuminate's is the same shape, and the answer to a file several
-// writers extend at once is the queue, not this.
+// not both. The answer to a file several writers extend at once is the queue,
+// not this.
 func (d *Disk) Append(ctx context.Context, g auth.Grant, key, data string) error {
 	return d.join(ctx, g, key, data, false)
 }
@@ -504,8 +500,8 @@ func TypeOf(key string) string {
 // Disks is the set of configured disks, and the one place a name becomes a
 // disk.
 //
-// It is Illuminate's FilesystemManager without the container: disks are
-// registered at boot from configuration, and a handler asks for one by name.
+// Disks are registered at boot from configuration, and a handler asks for one
+// by name.
 // The zero value is not usable; call [NewDisks].
 type Disks struct {
 	mu          sync.RWMutex
@@ -522,8 +518,7 @@ type Disks struct {
 // panic at boot.
 //
 // An optional second name is the cloud disk, which is what [Disks.Cloud]
-// answers with: Illuminate reads it from filesystems.cloud, and a project with
-// one disk does not have to name it.
+// answers with. A project with one disk does not have to name it.
 func NewDisks(defaultName string, cloud ...string) *Disks {
 	ds := &Disks{
 		byName:      map[string]*Disk{},

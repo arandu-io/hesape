@@ -1,49 +1,38 @@
 package broadcasting
 
-// AnonymousEvent is Illuminate\Broadcasting\AnonymousEvent: a broadcast with no
-// event class behind it.
+// AnonymousEvent is a broadcast with no event type behind it.
 //
-// It is what BroadcastManager::on, ::private and ::presence return, and it is
-// built by the same three here -- [BroadcastManager.On],
-// [BroadcastManager.Private] and [BroadcastManager.Presence] -- because the PHP
-// constructor is the only place the channels are set and the dispatcher it
-// sends through comes from the manager.
+// It is built by [BroadcastManager.On], [BroadcastManager.Private] and
+// [BroadcastManager.Presence], because the constructor is the only place the
+// channels are set and the dispatcher it sends through comes from the manager.
 //
 //	manager.Private("orders.17").As("OrderShipped").With(map[string]any{"total": 42}).Send()
-//
-// The PHP's Dispatchable trait is not here: dispatch() and dispatchIf() are
-// static methods that construct the event by forwarding their arguments to the
-// constructor, which is PHP's late static binding. Go has no static methods and
-// no late static binding, so the constructor is the constructor.
 type AnonymousEvent struct {
 	InteractsWithBroadcasting
 	InteractsWithSockets
 
-	// events is what send() reaches through the broadcast() helper in the PHP.
+	// events is the dispatcher Send hands the broadcast to.
 	events Dispatcher
-	// channels is the constructor's $channels, after Arr::wrap.
+	// channels is what the event goes out on.
 	channels []Channel
-	// connection is the protected ?string $connection.
+	// connection is the broadcast connection, empty for the default one.
 	connection string
-	// name is the protected ?string $name.
+	// name is what the event goes out as, empty for "AnonymousEvent".
 	name string
-	// payload is the protected array $payload.
+	// payload is what the event goes out with.
 	payload map[string]any
-	// includeCurrentUser is the protected bool $includeCurrentUser, and it
-	// starts true.
+	// includeCurrentUser starts true, and ToOthers is what clears it.
 	includeCurrentUser bool
-	// socket is the id toOthers will exclude. The PHP reads it off the facade
-	// inside send(); see [InteractsWithSockets] for why it is carried here.
+	// socket is the id ToOthers will exclude; see [InteractsWithSockets] for
+	// why it is carried here.
 	socket string
-	// shouldBroadcastNow is the protected bool $shouldBroadcastNow.
+	// shouldBroadcastNow is set by SendNow and read by
+	// [BroadcastManager.Queue].
 	shouldBroadcastNow bool
 }
 
-// NewAnonymousEvent is AnonymousEvent::__construct.
-//
-// The PHP takes Channel|array|string and runs Arr::wrap over it; the variadic
-// is that wrap. The dispatcher is the one the broadcast() helper would have
-// resolved out of the container (ADR 0001).
+// NewAnonymousEvent builds an anonymous broadcast over the channels it goes out
+// on. The dispatcher is the one [AnonymousEvent.Send] hands the broadcast to.
 func NewAnonymousEvent(events Dispatcher, channels ...Channel) *AnonymousEvent {
 	return &AnonymousEvent{
 		events:             events,
@@ -52,32 +41,29 @@ func NewAnonymousEvent(events Dispatcher, channels ...Channel) *AnonymousEvent {
 	}
 }
 
-// Via is AnonymousEvent::via: the connection the event should be broadcast on.
+// Via is the connection the event should be broadcast on.
 //
-// It is not [InteractsWithBroadcasting.BroadcastVia]. The PHP class declares
-// both -- via() sets its own $connection, which send() hands to
-// PendingBroadcast::via, which then calls broadcastVia. Keeping the two apart
-// is what makes toOthers() and via() composable in either order.
+// It is not [InteractsWithBroadcasting.BroadcastVia]: this one only records the
+// name, and Send is what hands it on. Keeping the two apart is what makes
+// ToOthers and Via composable in either order.
 func (e *AnonymousEvent) Via(connection string) *AnonymousEvent {
 	e.connection = connection
 
 	return e
 }
 
-// As is AnonymousEvent::as: the name the event should be broadcast as.
+// As is the name the event should be broadcast as.
 func (e *AnonymousEvent) As(name string) *AnonymousEvent {
 	e.name = name
 
 	return e
 }
 
-// With is AnonymousEvent::with: the payload the event should be broadcast with.
+// With is the payload the event should be broadcast with.
 //
-// The PHP takes Arrayable|array. Go has no union, so it takes any and answers
-// the same two shapes: an [Arrayable] is flattened with ToArray, and a
-// map[string]any has each of its values flattened the same way, which is the
-// Collection::map in the PHP. Anything else is ignored, as an array of the
-// wrong shape would be.
+// Go has no union type, so it takes any and reads two shapes: an [Arrayable] is
+// flattened with ToArray, and a map[string]any has each of its values flattened
+// the same way. Anything else is ignored.
 func (e *AnonymousEvent) With(payload any) *AnonymousEvent {
 	switch p := payload.(type) {
 	case Arrayable:
@@ -93,13 +79,10 @@ func (e *AnonymousEvent) With(payload any) *AnonymousEvent {
 	return e
 }
 
-// ToOthers is AnonymousEvent::toOthers: broadcast to everyone except the
-// current user.
+// ToOthers broadcasts to everyone except the current user.
 //
-// The PHP takes no argument and sets a flag; send() then calls
-// PendingBroadcast::toOthers, which reaches the facade for the socket id. There
-// is no facade here, so the id is the argument and is kept until send() -- see
-// [InteractsWithSockets].
+// The socket id is the argument and is kept until Send, because there is no
+// ambient request to read it off -- see [InteractsWithSockets].
 func (e *AnonymousEvent) ToOthers(socket string) *AnonymousEvent {
 	e.includeCurrentUser = false
 	e.socket = socket
@@ -107,7 +90,7 @@ func (e *AnonymousEvent) ToOthers(socket string) *AnonymousEvent {
 	return e
 }
 
-// SendNow is AnonymousEvent::sendNow: broadcast the event synchronously.
+// SendNow broadcasts the event synchronously.
 //
 // It sets the flag [AnonymousEvent.ShouldBroadcastNow] answers and sends;
 // [BroadcastManager.Queue] is what reads the flag and skips the queue.
@@ -117,11 +100,8 @@ func (e *AnonymousEvent) SendNow() []any {
 	return e.Send()
 }
 
-// Send is AnonymousEvent::send: broadcast the event.
-//
-// The PHP body is broadcast($this)->via($this->connection), then toOthers() if
-// the current user is excluded. The broadcast() helper is a container lookup
-// for the manager; here the dispatcher it would have found is already held.
+// Send broadcasts the event: it builds the [PendingBroadcast], applies the
+// connection and the socket exclusion, and hands it to the dispatcher.
 func (e *AnonymousEvent) Send() []any {
 	broadcast := NewPendingBroadcast(e.events, e).Via(e.connection)
 
@@ -132,11 +112,8 @@ func (e *AnonymousEvent) Send() []any {
 	return broadcast.Send()
 }
 
-// BroadcastAs is AnonymousEvent::broadcastAs.
-//
-// The fallback is class_basename($this), which for this class is the literal
-// below -- Go has no run-time class name to read, and reflection would answer
-// the same string.
+// BroadcastAs is the name given to [AnonymousEvent.As], or "AnonymousEvent"
+// when none was.
 func (e *AnonymousEvent) BroadcastAs() string {
 	if e.name != "" {
 		return e.name
@@ -145,7 +122,8 @@ func (e *AnonymousEvent) BroadcastAs() string {
 	return "AnonymousEvent"
 }
 
-// BroadcastWith is AnonymousEvent::broadcastWith.
+// BroadcastWith is the payload given to [AnonymousEvent.With], or an empty
+// map.
 func (e *AnonymousEvent) BroadcastWith() map[string]any {
 	if e.payload == nil {
 		return map[string]any{}
@@ -154,8 +132,9 @@ func (e *AnonymousEvent) BroadcastWith() map[string]any {
 	return e.payload
 }
 
-// BroadcastOn is AnonymousEvent::broadcastOn.
+// BroadcastOn is the channels the event goes out on.
 func (e *AnonymousEvent) BroadcastOn() []Channel { return e.channels }
 
-// ShouldBroadcastNow is AnonymousEvent::shouldBroadcastNow.
+// ShouldBroadcastNow is true when the event was sent with
+// [AnonymousEvent.SendNow].
 func (e *AnonymousEvent) ShouldBroadcastNow() bool { return e.shouldBroadcastNow }

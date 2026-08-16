@@ -10,9 +10,9 @@ import (
 	"github.com/arandu-io/hesape/validation"
 )
 
-// TestANonImplicitRuleDoesNotRunOnABlankValue is Laravel's
-// presentOrRuleIsImplicit. Dropping it means "must be at least 12 characters"
-// under an optional box nobody typed in.
+// TestANonImplicitRuleDoesNotRunOnABlankValue is the gate every non-implicit
+// rule passes through. Dropping it means "must be at least 12 characters" under
+// an optional box nobody typed in.
 func TestANonImplicitRuleDoesNotRunOnABlankValue(t *testing.T) {
 	set := mustCompile(t, validation.Rules{"nickname": "min:12|alpha|email"})
 
@@ -30,9 +30,9 @@ func TestANonImplicitRuleDoesNotRunOnABlankValue(t *testing.T) {
 	}
 }
 
-// TestAFailedRequiredStopsTheFieldsOtherMessages is Laravel's
-// shouldStopValidating. An empty password box told it is required and also too
-// short has been told the same thing twice.
+// TestAFailedRequiredStopsTheFieldsOtherMessages is what stops a field once an
+// implicit rule refused it. An empty password box told it is required and also
+// too short has been told the same thing twice.
 func TestAFailedRequiredStopsTheFieldsOtherMessages(t *testing.T) {
 	set := mustCompile(t, validation.Rules{"password": "required|min:12"})
 

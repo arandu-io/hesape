@@ -1,8 +1,6 @@
 package concerns
 
-// HidesAttributes answers
-// Illuminate\Database\Eloquent\Concerns\HidesAttributes: which attributes are
-// left out of the serialized model.
+// HidesAttributes decides which attributes are left out of the serialized model.
 //
 // It is not authorization. A hidden attribute is still loaded, still readable
 // with GetAttribute, and still on the row -- what it does not do is appear in a

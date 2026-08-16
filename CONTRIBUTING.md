@@ -20,7 +20,7 @@ before their first patch.
 ## Before you open a pull request
 
 ```
-gofmt -l .        # no output
+gofmt -l $(find . -name '*.go' -not -path '*/testdata/*' -not -name '*.kyse.go')   # no output
 go vet ./...
 go test -race ./...
 ```
@@ -40,7 +40,7 @@ done
 ```
 
 `gofmt` stays out of the loop and loses nothing by it: it walks paths rather than
-modules, so `gofmt -l .` at the root already reaches every file in all seven.
+modules, so the `find` above already reaches every file in all seven.
 
 The driver suites skip when they cannot reach a server, which is what keeps them
 runnable on a machine with nothing installed. CI gives them a real PostgreSQL, a

@@ -101,17 +101,13 @@ func (p *AsPivot) SetKeysForSelectQuery(query Builder, model Model) Builder {
 		Where(p.relatedKey, model.GetAttribute(p.relatedKey))
 }
 
-// GetQueueableID answers AsPivot::getQueueableId: what a queued job stores so
-// that it can find this row again.
+// GetQueueableID answers what a queued job stores so that it can find this row
+// again.
 //
 // A pivot row usually has no id column, so there is nothing to store; the pair
-// of foreign keys is written out instead, in the PHP's own
-// "foreign:value:related:value" shape. The row is passed in because the trait
-// reads $this->attributes in PHP and this struct holds no attributes -- the
+// of foreign keys is written out instead, in the "foreign:value:related:value"
+// shape. The row is passed in because this struct holds no attributes -- the
 // same reason SetKeysForSelectQuery takes it.
-//
-// The name carries the initialism in upper case, which is the one mechanical
-// change ADR 0044 allows without a note.
 func (p *AsPivot) GetQueueableID(model Model) any {
 	if _, ok := model.GetAttributes()[model.GetKeyName()]; ok {
 		return model.GetKey()
@@ -126,23 +122,21 @@ func (p *AsPivot) SetKeysForSaveQuery(query Builder, model Model) Builder {
 	return p.SetKeysForSelectQuery(query, model)
 }
 
-// NewQueryForRestoration answers AsPivot::newQueryForRestoration: the query that
-// finds again the rows GetQueueableID wrote down.
+// NewQueryForRestoration is the query that finds again the rows GetQueueableID
+// wrote down.
 //
 // It is the exact inverse of that method, and the two are worth reading
 // together. A pivot row with an id column serializes to the id and comes back
 // through WhereKey. One without serializes to "foreign:value:related:value", and
 // comes back by splitting that string into the pair of clauses it was made from.
 //
-// Several ids collapse into one query with a group per id, as the PHP's
-// newQueryForCollectionRestoration does -- protected there, folded in here,
-// because the branch is three lines and a separate unexported method would only
-// be reachable through this one anyway.
+// Several ids collapse into one query with a group per id; the branch is three
+// lines, so it is folded in here rather than given a method only this one could
+// reach.
 //
-// Two mechanical changes, both from ADR 0044: the PHP's single mixed parameter
-// is variadic, since Go has no int|string|array; and a malformed identifier
-// returns an error where PHP would emit an undefined-index notice and build a
-// query keyed on null -- which restores nothing, or worse, the wrong row.
+// The identifier parameter is variadic, and a malformed identifier returns an
+// error rather than building a query keyed on nothing -- which restores nothing,
+// or worse, the wrong row.
 //
 // The model is passed for the same reason SetKeysForSelectQuery takes it: this
 // concern holds no attributes and no query of its own.

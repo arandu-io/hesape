@@ -7,8 +7,8 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// member is a user model that embeds the trait, the way a Laravel model writes
-// `use MustVerifyEmail`.
+// member is a user model that embeds [auth.MustVerifyEmailTrait], which is how
+// a user type gains the four methods.
 type member struct {
 	auth.MustVerifyEmailTrait
 

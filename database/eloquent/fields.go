@@ -11,9 +11,8 @@ import (
 // field is one column of the entity struct: the name it has in the table and
 // where to find it in the struct.
 //
-// It stands in for what Illuminate reads out of $attributes. PHP needs no such
-// map because a row is an array there; here the row is a struct, and this is the
-// translation between the two.
+// A row is a struct here rather than a map, and this is the translation between
+// the two.
 type field struct {
 	column string
 	index  []int
@@ -27,18 +26,16 @@ var fieldCache sync.Map // reflect.Type -> []field
 //
 // Only exported fields are columns, and that is the design rather than a
 // limitation of reflection: an unexported field cannot be written from outside
-// its package, which is what $guarded tries to arrange at runtime (see the
-// package comment).
+// its package, which is the mass-assignment allowlist the compiler enforces
+// (see the package comment).
 //
 // The column name is the `db` tag up to its first comma; without a tag it is the
-// field name in snake case, which is Illuminate's own convention for a column.
-// A tag of "-" means the field is not a column at all.
+// field name in snake case. A tag of "-" means the field is not a column at all.
 //
 // An embedded exported struct is flattened, so the columns of an embedded type
-// are columns of the outer one -- what a trait does for attributes in PHP. An
-// embedded struct with a `db` tag is treated as a column of its own instead,
-// which is how a driver-level type (sql.NullString, a custom scanner) stays one
-// value.
+// are columns of the outer one. An embedded struct with a `db` tag is treated as
+// a column of its own instead, which is how a driver-level type
+// (sql.NullString, a custom scanner) stays one value.
 func fieldsOf(t reflect.Type) []field {
 	if cached, ok := fieldCache.Load(t); ok {
 		return cached.([]field)
@@ -82,11 +79,10 @@ func collectFields(t reflect.Type, prefix []int) []field {
 // columnName is the column a field with no tag gets: the field name in snake
 // case, with an initialism kept whole.
 //
-// It is not str.Snake, and the difference is Go rather than a preference.
-// Illuminate's algorithm puts a delimiter before every capital, because a PHP
-// property is $userId; the Go convention is UserID, and Snake("ID", "_") is
-// "i_d". So a run of capitals is one word here: ID is id, UserID is user_id,
-// HTTPServer is http_server. The `db` tag is always there for the rest.
+// It is not str.Snake: that puts a delimiter before every capital, and
+// Snake("ID", "_") is "i_d". A run of capitals is one word here -- ID is id,
+// UserID is user_id, HTTPServer is http_server. The `db` tag is always there for
+// the rest.
 func columnName(name string) string {
 	runes := []rune(name)
 	var out []rune
@@ -144,9 +140,8 @@ func valueAt(entity reflect.Value, f field) any {
 	return v.Interface()
 }
 
-// settableAt returns the addressable destination for a column, allocating the
-// nil pointers it walks through -- what PHP does for free by assigning into an
-// array.
+// settableAt returns the addressable destination for a column, allocating
+// the nil pointers it walks through.
 func settableAt(entity reflect.Value, f field) (reflect.Value, bool) {
 	v := entity
 	for _, i := range f.index {
@@ -170,9 +165,7 @@ func settableAt(entity reflect.Value, f field) (reflect.Value, bool) {
 // timeLayouts are what a driver may hand back for a timestamp column.
 //
 // SQLite has no date type and returns text; the drivers that do have one return
-// a time.Time and never reach this list. Illuminate parses with the grammar's
-// date format and Carbon's fallbacks; this is the same idea with the layouts Go
-// spells out.
+// a time.Time and never reach this list.
 var timeLayouts = []string{
 	time.RFC3339Nano,
 	time.RFC3339,
@@ -185,10 +178,8 @@ var timeLayouts = []string{
 
 // assign writes a value read from the database into a struct field.
 //
-// It is the half of Illuminate's cast system that Go still needs. The other half
-// -- 'int', 'bool', 'array', 'datetime' declared in $casts -- is the field's own
-// type here, which is why there is no $casts: the compiler already knows what
-// the column becomes.
+// It is the half of casting that Go still needs. The other half -- int, bool,
+// array, datetime -- is the field's own type, which the compiler already knows.
 //
 // A conversion that would silently produce the wrong value is refused rather
 // than performed. Go converts an int to a string as a rune, so a numeric column

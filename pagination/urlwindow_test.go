@@ -151,8 +151,8 @@ func TestResolveQueryString(t *testing.T) {
 	}
 }
 
-// The view names are global, as they are in Illuminate: set once where the
-// application is wired, read by whatever renders.
+// The view names are global: set once where the application is wired, read by
+// whatever renders.
 func TestTheDefaultViewIsTailwindAndTheSwitchesMoveIt(t *testing.T) {
 	t.Cleanup(pagination.UseTailwind)
 

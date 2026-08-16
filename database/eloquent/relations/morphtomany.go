@@ -6,9 +6,8 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// MorphToMany answers Illuminate\Database\Eloquent\Relations\MorphToMany: a
-// many-to-many whose intermediate table serves several parent types -- taggables
-// holding the tags of posts and of videos both.
+// MorphToMany is a many-to-many whose intermediate table serves several parent
+// types -- taggables holding the tags of posts and of videos both.
 //
 // Every statement it writes carries the type as well as the two keys, and every
 // read filters on it. Without that, a post and a video sharing an id share

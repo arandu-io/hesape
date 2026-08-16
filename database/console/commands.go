@@ -12,11 +12,12 @@ import (
 	dbevents "github.com/arandu-io/hesape/database/events"
 )
 
-// Deps is what the database commands need.
+// Deps is what the database commands need: a connection resolver and a
+// dispatcher.
 //
-// PHP hands each command a ConnectionResolverInterface and a Dispatcher through
-// the container. There is none (ADR 0001), so they are a value the application
-// builds where it wires everything else.
+// They are a value the application builds where it wires everything else, which
+// is also what makes every command below testable with a fake resolver and no
+// database.
 type Deps struct {
 	// Connections is the resolver the commands read through.
 	Connections database.ConnectionResolverInterface
@@ -42,10 +43,8 @@ type Deps struct {
 	Environment string
 }
 
-// TableInfo is one row of the db:show table listing.
-//
-// PHP builds it as an array out of the schema builder; this is that array with
-// the keys written down.
+// TableInfo is one row of the db:show table listing: schema, name, row
+// count and size, read off the schema builder.
 type TableInfo struct {
 	// Schema is the schema the table lives in, empty where the engine has none.
 	Schema string
@@ -68,8 +67,6 @@ type TableInfo struct {
 // migration and seed commands are not here: they need a Migrator and a seeder
 // registry this package does not have, and they are built by
 // database/console/migrations and database/console/seeds.
-//
-// Answers the commands of Illuminate\Database\Console.
 func Commands(deps Deps) []console.Command {
 	return []console.Command{
 		DbCommand(deps),
@@ -81,13 +78,13 @@ func Commands(deps Deps) []console.Command {
 	}
 }
 
-// DbCommand answers Illuminate\Database\Console\DbCommand: `aru db`.
+// DbCommand builds `aru db`, which prints the invocation of the engine's own
+// CLI -- mysql, psql, sqlite3 -- with the password left in an environment
+// variable so it does not reach the process list.
 //
-// The PHP starts the engine's own CLI -- mysql, psql, sqlite3 -- as a child
-// process, with the password in the environment so it does not reach the
-// process list. This prints the command instead of running it, and the
-// difference is deliberate: a framework that execs a binary it did not ship,
-// with credentials, from a directory it does not control, is a framework with a
+// It prints the command instead of running it, and the difference is
+// deliberate: a framework that execs a binary it did not ship, with
+// credentials, from a directory it does not control, is a framework with a
 // supply chain problem. Printing it means the person runs their own client,
 // with their own history and their own .psqlrc.
 func DbCommand(deps Deps) console.Command {
@@ -123,11 +120,10 @@ func DbCommand(deps Deps) console.Command {
 	}
 }
 
-// GetCommand answers DbCommand::getCommand together with
-// commandArguments: the client invocation for a connection.
+// GetCommand returns the client invocation for a connection.
 //
-// It never prints the password. The PHP passes it through the environment for
-// the same reason, and a printed command lands in a shell history file that
+// It never prints the password: that is passed through the environment
+// instead, because a printed command lands in a shell history file that
 // several people can read.
 func GetCommand(connection *database.Connection) string {
 	client := "sqlite3"
@@ -140,8 +136,8 @@ func GetCommand(connection *database.Connection) string {
 	return client + " " + strings.Join(CommandArguments(connection), " ")
 }
 
-// CommandArguments answers DbCommand::commandArguments: the argument list for
-// the engine's client, as a slice rather than one string.
+// CommandArguments returns the argument list for the engine's client, as a
+// slice rather than one string.
 //
 // GetCommand joins these for printing; this is what a caller that wants to run
 // the client itself passes to exec.Command, where a joined string would have to
@@ -158,18 +154,18 @@ func CommandArguments(connection *database.Connection) []string {
 		return []string{"--host=" + host, "--port=" + port, "--username=" + user, "--dbname=" + name}
 	case string(database.DialectMySQL):
 		// --password with no value makes the client prompt, so the password
-		// never reaches the process list. The PHP passes it through MYSQL_PWD
-		// for the same reason; see CommandEnvironment.
+		// never reaches the process list. See CommandEnvironment for the
+		// other half of that.
 		return []string{"--host=" + host, "--port=" + port, "--user=" + user, "--password", name}
 	default:
 		return []string{name}
 	}
 }
 
-// CommandEnvironment answers DbCommand::commandEnvironment: the variables the
-// client reads a password out of, so it never reaches the process list.
+// CommandEnvironment returns the variables the client reads a password out
+// of, so it never reaches the process list.
 //
-// It answers the names and not the values, because the caller has the
+// It returns the names and not the values, because the caller has the
 // connection and this package should not be copying secrets around to be
 // helpful.
 func CommandEnvironment(connection *database.Connection) []string {
@@ -183,7 +179,7 @@ func CommandEnvironment(connection *database.Connection) []string {
 	}
 }
 
-// ShowCommand answers Illuminate\Database\Console\ShowCommand: `aru db:show`.
+// ShowCommand builds `aru db:show`.
 func ShowCommand(deps Deps) console.Command {
 	return console.Command{
 		Name:        "db:show",
@@ -253,8 +249,6 @@ func ShowCommand(deps Deps) console.Command {
 // connection and asks which one, so the command is usable without knowing the
 // schema by heart. It reads through Deps.Tables and fails with a message
 // saying so when the application registered none.
-//
-// Answers Illuminate\Database\Console\TableCommand.
 func TableCommand(deps Deps) console.Command {
 	return console.Command{
 		Name:        "db:table",
@@ -310,14 +304,13 @@ func TableCommand(deps Deps) console.Command {
 	}
 }
 
-// MonitorCommand answers Illuminate\Database\Console\MonitorCommand:
-// `aru db:monitor`.
+// MonitorCommand builds `aru db:monitor`.
 //
 // It dispatches DatabaseBusy when a connection is over its threshold, which is
-// the event an alerting listener subscribes to. The threshold has no default in
-// the PHP either: a number that means "too many" is per database and per plan,
-// and a framework guessing it would page somebody at three in the morning about
-// a number it made up.
+// the event an alerting listener subscribes to. The threshold has no default: a
+// number that means "too many" is per database and per plan, and a framework
+// guessing it would page somebody at three in the morning about a number it
+// made up.
 func MonitorCommand(deps Deps) console.Command {
 	return console.Command{
 		Name:        "db:monitor",
@@ -356,7 +349,7 @@ func MonitorCommand(deps Deps) console.Command {
 	}
 }
 
-// WipeCommand answers Illuminate\Database\Console\WipeCommand: `aru db:wipe`.
+// WipeCommand builds `aru db:wipe`.
 func WipeCommand(deps Deps) console.Command {
 	return console.Command{
 		Name:        "db:wipe",
@@ -394,13 +387,12 @@ func WipeCommand(deps Deps) console.Command {
 	}
 }
 
-// PruneCommand answers Illuminate\Database\Console\PruneCommand:
-// `aru model:prune`.
+// PruneCommand builds `aru model:prune`.
 //
-// The PHP finds prunable models by scanning the app directory with reflection.
-// There is no such scan here -- a type nothing references is not in the binary
-// -- so an application registers what it wants pruned, which is also the list
-// somebody can read to find out what this command will delete.
+// There is no directory scan for prunable models -- a type nothing references
+// is not in the binary -- so an application registers what it wants pruned,
+// which is also the list somebody can read to find out what this command will
+// delete.
 func PruneCommand(deps Deps) console.Command {
 	return console.Command{
 		Name:        "model:prune",

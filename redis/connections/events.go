@@ -40,8 +40,7 @@ func (c *Connection) Command(ctx context.Context, name string, parameters ...any
 
 // fireCommandExecuted dispatches the event when somebody is listening.
 //
-// It rounds to two decimal places the way Laravel does, so the number in a log
-// line is the number in the PHP one.
+// It rounds to two decimal places, which is the resolution a log line needs.
 func (c *Connection) fireCommandExecuted(name string, parameters []any, elapsed time.Duration) {
 	c.mu.RLock()
 	dispatcher := c.events
@@ -107,8 +106,6 @@ func (c *Connection) SetName(name string) *Connection {
 }
 
 // GetEventDispatcher is the dispatcher used by the connection, or nil.
-//
-// It answers Connection::getEventDispatcher().
 func (c *Connection) GetEventDispatcher() Dispatcher {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -127,8 +124,6 @@ func (c *Connection) SetEventDispatcher(dispatcher Dispatcher) {
 }
 
 // UnsetEventDispatcher removes the event dispatcher from the connection.
-//
-// It answers Connection::unsetEventDispatcher().
 func (c *Connection) UnsetEventDispatcher() {
 	c.mu.Lock()
 	c.events = nil

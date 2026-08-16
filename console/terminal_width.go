@@ -16,8 +16,8 @@ const defaultTerminalWidth = 80
 // anything.
 var terminalWidthResolver func() int
 
-// ResolveTerminalWidthUsing is ScheduleListCommand::resolveTerminalWidthUsing,
-// once for the package rather than once per listing command.
+// ResolveTerminalWidthUsing sets the width for the whole package, rather than
+// once per listing command.
 //
 // It tells the package how wide the terminal is. It exists for the test that has to pin
 // the width: a two column line and a task line both size themselves to it, and
@@ -25,8 +25,8 @@ var terminalWidthResolver func() int
 // trusts. Passing nil puts the default back.
 func ResolveTerminalWidthUsing(resolver func() int) { terminalWidthResolver = resolver }
 
-// GetTerminalWidth is ScheduleListCommand::getTerminalWidth, once for the
-// package rather than copied into each listing command.
+// GetTerminalWidth is resolved once for the package rather than copied into
+// each listing command.
 //
 // It is how many columns there are to fill. The resolver wins when one is installed;
 // otherwise it is COLUMNS, which is what a shell exports and what a CI runner

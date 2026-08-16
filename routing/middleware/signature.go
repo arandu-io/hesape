@@ -35,7 +35,7 @@ import (
 // on the page.
 //
 // 403 and not 401: nothing about the account is wrong and signing in changes
-// nothing. Laravel answers the same status for the same reason.
+// nothing.
 func ValidateSignature(s *encryption.Signer, refuse Refuse) pipeline.Middleware[http.Handler] {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

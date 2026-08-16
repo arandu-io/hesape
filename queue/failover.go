@@ -15,13 +15,13 @@ import (
 // FailoverQueue writes to the first connection that accepts a job, and reads
 // from the first one only.
 //
-// It answers Illuminate\Queue\FailoverQueue. It is what stands between "the
-// broker is down" and "the checkout returned a 500": the push tries each
+// It is what stands between "the broker is down" and "the checkout returned a
+// 500": the push tries each
 // connection in order, and a job that could not go on Redis goes in the
 // database instead.
 //
-// The asymmetry is Laravel's and it is deliberate. Only the push fails over;
-// every read -- Pop, Size, the oldest pending job -- goes to the first
+// The asymmetry is deliberate. Only the push fails over; every read -- Pop,
+// Size, the oldest pending job -- goes to the first
 // connection. A worker that drained all of them would be a worker whose lease
 // and whose ordering mean different things per job, and two workers, one per
 // connection, is the arrangement that keeps both simple. The jobs that landed
@@ -78,8 +78,8 @@ func (q *FailoverQueue) primary() (Queue, error) {
 
 // attempt runs write on each connection in order, and returns when one accepts.
 //
-// It answers attemptOnAllConnections(). The event goes out once per connection
-// that newly went down, which is the bookkeeping $failingQueues does in PHP.
+// The event goes out once per connection that newly went down, not once per
+// job: q.failing is what remembers which ones were already down.
 func (q *FailoverQueue) attempt(j *jobs.Job, write func(Queue) error) error {
 	if len(q.connections) == 0 {
 		return ErrNoFailoverConnections
@@ -129,7 +129,7 @@ func (q *FailoverQueue) recordFailures(failed map[string]bool) {
 func (q *FailoverQueue) Push(ctx context.Context, g auth.Grant, j jobs.Job) error {
 	// Authorized once, here, rather than once per connection: the answer cannot
 	// differ between them, and a refusal must not look like a connection being
-	// down (RULE 17).
+	// down.
 	if err := jobs.Authorized(g, j); err != nil {
 		return err
 	}

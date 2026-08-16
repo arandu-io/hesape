@@ -7,14 +7,12 @@ import (
 )
 
 // Record is one row as the connection hands it back: column name to value.
-// Illuminate returns a stdClass per row; a Go map is the same thing without the
-// dynamic property access PHP needs.
 type Record = map[string]any
 
-// Where is one entry of Illuminate\Database\Query\Builder::$wheres.
+// Where is one where clause of a Builder.
 //
-// PHP builds an untyped array per clause, with a different key set per Type.
-// The union of those keys is spelled out here so the grammar can read them.
+// Each Type reads a different subset of the fields; the union of them is spelled
+// out here so the grammar can read them.
 type Where struct {
 	Type          string
 	Column        any
@@ -32,7 +30,7 @@ type Where struct {
 	Options       map[string]any
 }
 
-// Having is one entry of Illuminate\Database\Query\Builder::$havings.
+// Having is one having clause of a Builder.
 type Having struct {
 	Type     string
 	Column   any
@@ -45,21 +43,21 @@ type Having struct {
 	Query    *Builder
 }
 
-// Order is one entry of Illuminate\Database\Query\Builder::$orders.
+// Order is one order-by clause of a Builder.
 type Order struct {
 	Column    any
 	Direction string
 	SQL       any
 }
 
-// Union is one entry of Illuminate\Database\Query\Builder::$unions.
+// Union is one query unioned onto a Builder.
 type Union struct {
 	Query *Builder
 	All   bool
 }
 
-// Aggregate is Illuminate\Database\Query\Builder::$aggregate: the function name
-// and the columns it is applied to.
+// Aggregate is the aggregate a Builder is compiled as: the function name and
+// the columns it is applied to.
 type Aggregate struct {
 	Function string
 	Columns  []any
@@ -76,19 +74,17 @@ type Aggregate struct {
 // compile it to nothing: the base Grammar does, SQLite honours only "force",
 // and an index name that is not a bare identifier is dropped rather than
 // interpolated, because an identifier cannot be bound.
-//
-// Answers Illuminate\Database\Query\IndexHint.
 type IndexHint struct {
 	Type  string
 	Index string
 }
 
-// NewIndexHint answers IndexHint::__construct.
+// NewIndexHint builds an IndexHint of the given type and index name.
 func NewIndexHint(typ, index string) *IndexHint {
 	return &IndexHint{Type: typ, Index: index}
 }
 
-// GroupLimit is Illuminate\Database\Query\Builder::$groupLimit.
+// GroupLimit is the per-group row limit a Builder was given.
 type GroupLimit struct {
 	Value  int
 	Column string

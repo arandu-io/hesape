@@ -48,10 +48,9 @@ func ContextWithRoute(ctx context.Context, route *Route) context.Context {
 // so a fluent call after registration takes effect on a route already in the
 // mux.
 //
-// The order is the order Laravel keeps: where constraints are part of
-// matching, so they run first and answer 404 on failure before anything else;
-// then the route is installed in the context and the matched listeners fire;
-// then the middleware chain runs the handler.
+// Where constraints are part of matching, so they run first and answer 404 on
+// failure before anything else; then the route is installed in the context
+// and the matched listeners fire; then the middleware chain runs the handler.
 func (rt *Route) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if rt == nil || rt.handler == nil {
 		http.NotFound(w, req)
@@ -84,8 +83,7 @@ func (rt *Route) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	ctx = ContextWithRoute(ctx, rt)
 	ctx = context.WithValue(ctx, overridesKey{}, &paramOverrides{})
 
-	// Matched listeners fire after matching, before middleware -- the
-	// position RouteMatched holds in Laravel.
+	// Matched listeners fire after matching, before middleware.
 	if rt.router != nil {
 		for _, cb := range rt.router.matchedCallbacks {
 			cb(rt, req)
@@ -131,7 +129,7 @@ func (rt *Route) Methods() []string {
 }
 
 // URI returns the path pattern the route answers, prefixes of every enclosing
-// group included. It is the name Laravel's uri() gives the same thing.
+// group included.
 func (rt *Route) URI() string {
 	if rt == nil {
 		return ""
@@ -191,12 +189,12 @@ func (rt *Route) Prefix(prefix string) *Route {
 	return rt
 }
 
-// GetName returns the name given with Name, or empty. It is the name Laravel's
-// getName() gives; RouteName is the other name for it.
+// GetName returns the name given with Name, or empty. RouteName is the other
+// name for it.
 func (rt *Route) GetName() string { return rt.RouteName() }
 
-// Named reports whether the route's name matches any of the patterns, with the
-// same * wildcard Str::is uses. A route with no name matches nothing.
+// Named reports whether the route's name matches any of the patterns, using *
+// as a glob wildcard. A route with no name matches nothing.
 func (rt *Route) Named(patterns ...string) bool {
 	if rt == nil || rt.name == "" {
 		return false
@@ -218,9 +216,8 @@ func (rt *Route) ParameterNames() []string {
 	return compileParameterNames(rt.Pattern)
 }
 
-// HasParameters reports whether the route declares any path parameter. It is
-// the route-definition question Laravel's hasParameters answers, and it does
-// not need a request.
+// HasParameters reports whether the route declares any path parameter. Unlike
+// Parameter and its siblings, it does not need a request.
 func (rt *Route) HasParameters() bool {
 	return len(rt.ParameterNames()) > 0
 }
@@ -326,10 +323,10 @@ func (rt *Route) ForgetParameter(req *http.Request, name string) {
 }
 
 // Bind associates the route with a request: it installs the route in the
-// request context and returns the bound parameters. It is the Go shape of
-// Laravel's bind, which in PHP sets a property; here the binding state lives in
-// the request, and ServeHTTP already does this, so Bind is for a caller that
-// dispatches a route outside the mux (RespondWithRoute).
+// request context and returns the bound parameters. The binding state lives
+// in the request, and ServeHTTP already does this for every registered route,
+// so Bind is for a caller that dispatches a route outside the mux
+// (RespondWithRoute).
 func (rt *Route) Bind(req *http.Request) *http.Request {
 	if req == nil {
 		return nil
@@ -428,9 +425,9 @@ func hasWildcard(segs []string) bool {
 	return false
 }
 
-// Run runs the route's handler without re-running middleware, which is what
-// Laravel's run() does -- middleware is the router's job, run is the action's.
-// The route-in-context is installed so Parameter and the binding still work.
+// Run runs the route's handler without re-running middleware: middleware is
+// the router's job, run is the action's. The route-in-context is installed so
+// Parameter and the binding still work.
 func (rt *Route) Run(w http.ResponseWriter, req *http.Request) {
 	if rt == nil || rt.handler == nil {
 		http.NotFound(w, req)
@@ -446,11 +443,10 @@ func (rt *Route) ToResponse(w http.ResponseWriter, req *http.Request) {
 	rt.ServeHTTP(w, req)
 }
 
-// GetController returns the handler the route dispatches to. In Laravel a
-// controller is a class instance resolved from the container; here it is the
-// http.Handler the registration was given, which is already the thing the mux
-// calls. It returns nil for a route registered without one (which should not
-// happen, but the nil is the honest answer).
+// GetController returns the handler the route dispatches to: the http.Handler
+// the registration was given, which is already the thing the mux calls. It
+// returns nil for a route registered without one (which should not happen,
+// but the nil is the honest answer).
 func (rt *Route) GetController() http.Handler {
 	if rt == nil {
 		return nil
@@ -469,8 +465,7 @@ func (rt *Route) GetControllerClass() string {
 }
 
 // GetActionName returns the action string the route was registered with, or
-// "Closure". It is the row `aru routes` prints and what currentRouteAction
-// returns.
+// "Closure". It is what CurrentRouteAction returns for the route.
 func (rt *Route) GetActionName() string {
 	if rt == nil {
 		return "Closure"
@@ -491,9 +486,8 @@ func (rt *Route) GetActionMethod() string {
 	return uses
 }
 
-// GetAction returns the action descriptor, or one of its keys. It is the array
-// Laravel's getAction returns, as a map; the keys are uses, controller and
-// anything else set through Uses.
+// GetAction returns the action descriptor, or one of its keys, as a map whose
+// keys are uses, controller and anything else set through Uses.
 func (rt *Route) GetAction(key ...string) any {
 	if rt == nil || rt.action == nil {
 		return nil
@@ -505,7 +499,7 @@ func (rt *Route) GetAction(key ...string) any {
 }
 
 // SetAction sets the action descriptor and returns the route, for the group
-// merge that carries domain and middleware in the same array in Laravel.
+// merge that carries domain and middleware in the same map.
 func (rt *Route) SetAction(action map[string]any) *Route {
 	if rt != nil {
 		rt.action = action
@@ -528,8 +522,8 @@ func (rt *Route) Uses(action string) *Route {
 	return rt
 }
 
-// Action is an alias for Uses that takes the action string; it exists because
-// Laravel names both, and the call site that writes one reads better with it.
+// Action is an alias for Uses that takes the action string, for whichever
+// call site reads better with it.
 func (rt *Route) Action(action string) *Route { return rt.Uses(action) }
 
 // Middleware appends middleware to the route, to run after the group's
@@ -548,7 +542,7 @@ func (rt *Route) Middleware(mws ...pipeline.Middleware[http.Handler]) *Route {
 }
 
 // GatherMiddleware returns the full middleware list for the route, group
-// middleware first. It is what the dispatcher and `aru routes` read.
+// middleware first. It is what the dispatcher reads.
 func (rt *Route) GatherMiddleware() []pipeline.Middleware[http.Handler] {
 	if rt == nil {
 		return nil
@@ -720,10 +714,10 @@ func (rt *Route) BindingFieldFor(param string) string {
 // /users/abc.
 //
 // Go's ServeMux does not take a regex in a pattern, so the constraint is
-// enforced here, at dispatch, rather than in the mux's matcher. The observable
-// difference from Laravel is that a failing value does not fall through to a
-// sibling route -- ServeMux picks one route -- but the goal the constraint
-// exists for, keeping a bad value out of the database, holds.
+// enforced here, at dispatch, rather than in the mux's matcher. A failing
+// value does not fall through to a sibling route -- ServeMux already picked
+// this one -- but the goal the constraint exists for, keeping a bad value out
+// of the database, holds.
 func (rt *Route) Where(name, pattern string) *Route {
 	if rt == nil {
 		return nil
@@ -739,8 +733,7 @@ func (rt *Route) WhereMap(wheres map[string]string) *Route {
 	return rt.whereMap(wheres)
 }
 
-// SetWheres replaces the where constraints. It is the array form Laravel's
-// setWheres takes.
+// SetWheres replaces the where constraints, given as a map.
 func (rt *Route) SetWheres(wheres map[string]string) *Route {
 	if rt == nil {
 		return nil
@@ -859,9 +852,8 @@ func containsPointer(haystack []uintptr, needle uintptr) bool {
 }
 
 // wildcardMatch reports whether s matches a pattern with * as a glob. It is
-// the subset of Laravel's Str::is this package needs, and it is here rather
-// than in a support package because routing is the only place a route name is
-// compared to a pattern.
+// here rather than in a support package because routing is the only place a
+// route name is compared to a pattern.
 func wildcardMatch(pattern, s string) bool {
 	if pattern == s {
 		return true

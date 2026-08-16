@@ -5,10 +5,6 @@ import (
 	"time"
 )
 
-// Transport has no Illuminate counterpart: Illuminate's own outbound client,
-// Illuminate\Http\Client, reports nothing to the error page, and what watches it
-// is Telescope's HTTP client watcher.
-//
 // Transport records every outbound call on the request's Collector.
 //
 // Without it, "external" on the timeline is always zero and the console shows
@@ -31,10 +27,6 @@ func Transport(next http.RoundTripper) http.RoundTripper {
 	return roundTripper{next: next}
 }
 
-// Client has no Illuminate counterpart, for the same reason Transport has none.
-// Illuminate\Http\Client\Factory is the nearest thing, and it builds a request
-// rather than a client with a deadline.
-//
 // Client returns an http.Client that records what it calls.
 //
 // The timeout is required rather than optional: http.Client has none by

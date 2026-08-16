@@ -12,13 +12,12 @@ import (
 // ErrNoToken is what [FormBuilder.Token] answers when neither the constructor
 // nor the session has a CSRF token.
 //
-// PHP has no such error: FormBuilder::token calls getToken on a null session
-// and the request dies on a fatal. It is an error here because the alternative
-// -- writing the form without the field -- ships a form that fails validation
-// on submit, and the bug report that comes back is about the wrong thing.
+// It is an error, because the alternative -- writing the form without the
+// field -- ships a form that fails validation on submit, and the bug report
+// that comes back is about the wrong thing.
 var ErrNoToken = errors.New("html: no CSRF token: pass one to NewFormBuilder or SetSessionStore")
 
-// FormBuilder answers to Illuminate\Html\FormBuilder.
+// FormBuilder builds escaped HTML form elements as values.
 //
 // Nothing here competes with the kyse components: these return escaped markup
 // as a value, for the handful of controls kyse has no component for. The
@@ -30,61 +29,56 @@ type FormBuilder struct {
 	session   Store
 	model     Model
 
-	// labels answers to FormBuilder::$labels: the names a label has been drawn
-	// for, so [FormBuilder.GetIdAttribute] can give the input the id the label
+	// labels is the names a label has been drawn for, so
+	// [FormBuilder.GetIdAttribute] can give the input the id the label
 	// points at.
 	labels []string
 }
 
-// spoofedMethods answers to FormBuilder::$spoofedMethods.
+// spoofedMethods are the HTTP methods a form cannot send directly, spoofed
+// with a hidden _method field instead.
 var spoofedMethods = []string{"DELETE", "PATCH", "PUT"}
 
-// skipValueTypes answers to FormBuilder::$skipValueTypes: the input types that
-// are never filled from old input or from the model.
+// skipValueTypes are the input types that are never filled from old input
+// or from the model.
 var skipValueTypes = []string{"file", "password", "checkbox", "radio"}
 
-// NewFormBuilder answers to FormBuilder::__construct.
+// NewFormBuilder returns a builder over an [HtmlBuilder] and a [UrlGenerator].
 //
-// csrfToken may be empty, and then [FormBuilder.Token] asks the session for one
-// -- which is PHP's `! empty($this->csrfToken) ? ... : $this->session->getToken()`.
+// csrfToken may be empty, and then [FormBuilder.Token] asks the session for
+// one instead.
 func NewFormBuilder(html *HtmlBuilder, url UrlGenerator, csrfToken string) *FormBuilder {
 	return &FormBuilder{html: html, url: url, csrfToken: csrfToken}
 }
 
-// OpenOptions answers to the $options array FormBuilder::open takes.
-//
-// PHP mixes five reserved keys and any number of HTML attributes in one array
-// and pulls the five back out with array_except($options, $this->reserved).
-// Here the five are fields and the attributes are a map, so the reserved list
-// is the type rather than a slice somebody has to keep in step with it.
+// OpenOptions is what [FormBuilder.Open] takes: five reserved fields, and a
+// separate map for arbitrary HTML attributes, so the reserved set is the
+// type itself rather than a list somebody has to keep in step with it.
 type OpenOptions struct {
-	// Method is the HTTP method: "post" when empty, as in PHP. DELETE, PATCH
-	// and PUT are spoofed -- the form posts and carries a hidden _method.
+	// Method is the HTTP method: "post" when empty. DELETE, PATCH and PUT
+	// are spoofed -- the form posts and carries a hidden _method.
 	Method string
 
-	// URL is the "url" key: a path, then any extra segments. PHP accepts a
-	// string or an array and a slice covers both.
+	// URL is a path, then any extra segments, covered together by one
+	// slice.
 	URL []string
 
-	// Route is the "route" key: a route name, then its parameters.
+	// Route is a route name, then its parameters.
 	Route []string
 
-	// Action is the "action" key: a controller action, then its parameters.
+	// Action is a controller action, then its parameters.
 	Action []string
 
-	// Files is the "files" key: true sets enctype to multipart/form-data.
+	// Files, when true, sets enctype to multipart/form-data.
 	Files bool
 
-	// Attributes is everything else in PHP's array -- what array_except leaves.
+	// Attributes is any other HTML attribute to write on the form tag.
 	Attributes Attrs
 }
 
-// Open answers to FormBuilder::open.
-//
-// It returns the opening tag and the appendage: the hidden _method for a
-// spoofed method, and the CSRF token for anything that is not GET. PHP returns
-// a string and lets the route lookup throw; this returns
-// (template.HTML, error), because Route and Action can fail.
+// Open builds the opening tag and the appendage: the hidden _method for a
+// spoofed method, and the CSRF token for anything that is not GET. It
+// returns (template.HTML, error), because Route and Action can fail.
 func (f *FormBuilder) Open(options OpenOptions) (template.HTML, error) {
 	method := options.Method
 	if method == "" {
@@ -105,9 +99,7 @@ func (f *FormBuilder) Open(options OpenOptions) (template.HTML, error) {
 		attributes["enctype"] = "multipart/form-data"
 	}
 
-	// PHP does array_merge($attributes, array_except($options, $reserved)), and
-	// array_merge lets the second array win. So an attribute the caller passed
-	// overrides the computed one, and so it does here.
+	// An attribute the caller passed overrides the computed one.
 	for key, value := range options.Attributes {
 		attributes[key] = value
 	}
@@ -120,18 +112,18 @@ func (f *FormBuilder) Open(options OpenOptions) (template.HTML, error) {
 	return template.HTML("<form" + string(f.html.Attributes(attributes)) + ">" + string(appendage)), nil
 }
 
-// Model answers to FormBuilder::model: [FormBuilder.Open] with a model behind
-// it, so every input finds its own value.
+// Model is [FormBuilder.Open] with a model behind it, so every input finds
+// its own value.
 func (f *FormBuilder) Model(model Model, options OpenOptions) (template.HTML, error) {
 	f.model = model
 	return f.Open(options)
 }
 
-// SetModel answers to FormBuilder::setModel.
+// SetModel replaces the model.
 func (f *FormBuilder) SetModel(model Model) { f.model = model }
 
-// Close answers to FormBuilder::close. It forgets the model and the labels, so
-// the next form on the page starts clean.
+// Close forgets the model and the labels, so the next form on the page
+// starts clean.
 func (f *FormBuilder) Close() template.HTML {
 	f.labels = nil
 	f.model = nil
@@ -139,12 +131,11 @@ func (f *FormBuilder) Close() template.HTML {
 	return "</form>"
 }
 
-// Token answers to FormBuilder::token: the hidden _token field.
+// Token builds the hidden _token field.
 //
-// PHP reads $this->session->getToken() when no token was given to the
-// constructor and fatals when there is no session either. This returns an error
-// instead: a form that silently ships without a token is a form that fails CSRF
-// validation on submit, which is a bug report about the wrong thing.
+// It returns an error when there is no token to write: a form that
+// silently ships without one is a form that fails CSRF validation on
+// submit, which is a bug report about the wrong thing.
 func (f *FormBuilder) Token() (template.HTML, error) {
 	token := f.csrfToken
 	if token == "" {
@@ -160,15 +151,14 @@ func (f *FormBuilder) Token() (template.HTML, error) {
 	return f.Hidden("_token", token, nil), nil
 }
 
-// Label answers to FormBuilder::label.
+// Label builds a label tag.
 //
-// An empty value is PHP's null, and then the label reads the field name with
-// the underscores turned into spaces and each word capitalised.
+// An empty value falls back to the field name, with the underscores turned
+// into spaces and each word capitalised.
 //
-// PHP writes `'<label for="'.$name.'"'` -- the name is concatenated into a
-// quoted attribute unescaped, so a field name carrying a double quote closes it.
-// Here the name goes through the attribute writer like everything else, which
-// also means a name that is not a legal attribute value cannot escape the tag.
+// The name goes through the attribute writer like everything else, so a
+// name carrying a double quote cannot close the attribute, and a name that
+// is not a legal attribute value cannot escape the tag.
 func (f *FormBuilder) Label(name, value string, options Attrs) template.HTML {
 	f.labels = append(f.labels, name)
 
@@ -179,7 +169,8 @@ func (f *FormBuilder) Label(name, value string, options Attrs) template.HTML {
 		escape(f.formatLabel(name, value)) + "</label>")
 }
 
-// formatLabel answers to FormBuilder::formatLabel.
+// formatLabel turns a field name into a label: underscores become spaces,
+// and each word is capitalised.
 func (f *FormBuilder) formatLabel(name, value string) string {
 	if value != "" {
 		return value
@@ -194,20 +185,19 @@ func (f *FormBuilder) formatLabel(name, value string) string {
 	return strings.Join(words, " ")
 }
 
-// Input answers to FormBuilder::input.
+// Input builds an input tag of the given type.
 //
-// An empty value is PHP's null: the value attribute is left off entirely rather
-// than written empty. PHP distinguishes null from the empty string and only one
-// caller passes the empty string on purpose -- [FormBuilder.Password], which
-// still writes value="" here for the reason its own comment gives.
+// An empty value leaves the value attribute off entirely, rather than
+// writing it empty. Only one caller writes it empty on purpose --
+// [FormBuilder.Password], for the reason its own comment gives.
 func (f *FormBuilder) Input(inputType, name, value string, options Attrs) template.HTML {
 	attributes := cloneAttrs(options)
 	if _, ok := attributes["name"]; !ok && name != "" {
 		attributes["name"] = name
 	}
 
-	// The id is looked up before the value, exactly as in PHP: a label drawn
-	// earlier in the form is what gives this input its id.
+	// The id is looked up before the value: a label drawn earlier in the
+	// form is what gives this input its id.
 	if id := f.GetIdAttribute(name, options); id != "" {
 		attributes["id"] = id
 	}
@@ -224,17 +214,16 @@ func (f *FormBuilder) Input(inputType, name, value string, options Attrs) templa
 	return template.HTML("<input" + string(f.html.Attributes(attributes)) + ">")
 }
 
-// Text answers to FormBuilder::text.
+// Text is [FormBuilder.Input] of type text.
 func (f *FormBuilder) Text(name, value string, options Attrs) template.HTML {
 	return f.Input("text", name, value, options)
 }
 
-// Password answers to FormBuilder::password.
+// Password is [FormBuilder.Input] of type password.
 //
-// It writes value="" where the other inputs would write nothing. That is PHP's
-// behaviour -- input() is handed the empty string rather than null -- and it is
-// worth keeping: an explicit empty value is what stops a browser restoring a
-// password into the box on a back navigation.
+// It writes value="" where the other inputs would write nothing: an
+// explicit empty value is what stops a browser restoring a password into
+// the box on a back navigation.
 func (f *FormBuilder) Password(name string, options Attrs) template.HTML {
 	attributes := cloneAttrs(options)
 	attributes["value"] = ""
@@ -242,33 +231,33 @@ func (f *FormBuilder) Password(name string, options Attrs) template.HTML {
 	return f.Input("password", name, "", attributes)
 }
 
-// Hidden answers to FormBuilder::hidden.
+// Hidden is [FormBuilder.Input] of type hidden.
 func (f *FormBuilder) Hidden(name, value string, options Attrs) template.HTML {
 	return f.Input("hidden", name, value, options)
 }
 
-// Email answers to FormBuilder::email: an input of type email.
+// Email is [FormBuilder.Input] of type email.
 //
 // It is not [HtmlBuilder.Email], which obfuscates an address for display.
 func (f *FormBuilder) Email(name, value string, options Attrs) template.HTML {
 	return f.Input("email", name, value, options)
 }
 
-// URL answers to FormBuilder::url: an input of type url. The name is uppercase
-// because Go writes an initialism that way; PHP's is url().
+// URL is [FormBuilder.Input] of type url. The name is uppercase because Go
+// writes an initialism that way.
 func (f *FormBuilder) URL(name, value string, options Attrs) template.HTML {
 	return f.Input("url", name, value, options)
 }
 
-// File answers to FormBuilder::file.
+// File is [FormBuilder.Input] of type file.
 func (f *FormBuilder) File(name string, options Attrs) template.HTML {
 	return f.Input("file", name, "", options)
 }
 
-// Textarea answers to FormBuilder::textarea.
+// Textarea builds a textarea element.
 //
-// cols and rows default to 50 and 10, and a "size" attribute of "30x5" sets
-// both and is then dropped, which is PHP's shortcut.
+// cols and rows default to 50 and 10, and a "size" attribute of "30x5"
+// sets both and is then dropped.
 func (f *FormBuilder) Textarea(name, value string, options Attrs) template.HTML {
 	attributes := cloneAttrs(options)
 	if _, ok := attributes["name"]; !ok && name != "" {
@@ -288,9 +277,8 @@ func (f *FormBuilder) Textarea(name, value string, options Attrs) template.HTML 
 		escape(value) + "</textarea>")
 }
 
-// setTextAreaSize answers to FormBuilder::setTextAreaSize and
-// setQuickTextAreaSize, which are one step here because the map is written in
-// place.
+// setTextAreaSize resolves cols and rows, including the "size" shortcut,
+// writing the map in place.
 func (f *FormBuilder) setTextAreaSize(attributes Attrs) {
 	if size, ok := attributes["size"]; ok {
 		if cols, rows, found := strings.Cut(size, "x"); found {
@@ -308,17 +296,15 @@ func (f *FormBuilder) setTextAreaSize(attributes Attrs) {
 	}
 }
 
-// Option is one entry of the $list array [FormBuilder.Select] takes.
+// Option is one entry of the list [FormBuilder.Select] takes.
 //
-// PHP's list is an associative array from value to display text, and a display
-// that is itself an array becomes an optgroup whose label is the key. So:
+// There are two shapes:
 //
 //	Option{Value: "br", Display: "Brazil"}                <option value="br">Brazil</option>
 //	Option{Value: "South America", Options: [...]}        <optgroup label="South America">
 //
-// The label of a group comes from Value and not from Display, because that is
-// the key in PHP -- see FormBuilder::getSelectOption, which passes $value into
-// optionGroup as $label.
+// The label of a group comes from Value and not from Display -- see
+// [FormBuilder.GetSelectOption], which passes it through as the label.
 type Option struct {
 	// Value is the value attribute of an option, or the label of a group.
 	Value string
@@ -330,17 +316,15 @@ type Option struct {
 	Options []Option
 }
 
-// Select answers to FormBuilder::select.
+// Select builds a select element.
 //
-// selected is a slice where PHP takes a scalar or an array, which is the same
-// mechanical widening [Store.GetOldInput] does: a multiple select has more than
-// one selected value, and FormBuilder::getSelectedValue already branches on it.
-// Nil means nothing is selected unless old input or the model says otherwise.
+// selected is a slice, the same shape [Store.GetOldInput] returns: a
+// multiple select has more than one selected value. Nil means nothing is
+// selected unless old input or the model says otherwise.
 func (f *FormBuilder) Select(name string, list []Option, selected []string, options Attrs) template.HTML {
-	// PHP writes `$selected = $this->getValueAttribute($name, $selected)`: the
-	// value attribute of a select is really the selected option, so it is
-	// resolved the same way as for any other input, and in the same order --
-	// old input, then the argument, then the model.
+	// The value attribute of a select is really the selected option, so it
+	// is resolved the same way as for any other input, and in the same
+	// order -- old input, then the argument, then the model.
 	if old := f.Old(name); len(old) > 0 {
 		selected = old
 	} else if len(selected) == 0 {
@@ -366,11 +350,8 @@ func (f *FormBuilder) Select(name string, list []Option, selected []string, opti
 		items.String() + "</select>")
 }
 
-// SelectRange answers to FormBuilder::selectRange: a select over the integers
-// from begin to end, where each option is its own label.
-//
-// PHP documents $begin and $end as strings and hands them to range(), which
-// also walks letters. These are ints, which is what every caller of it passes.
+// SelectRange builds a select over the integers from begin to end, where
+// each option is its own label.
 func (f *FormBuilder) SelectRange(name string, begin, end int, selected []string, options Attrs) template.HTML {
 	step := 1
 	if end < begin {
@@ -389,26 +370,23 @@ func (f *FormBuilder) SelectRange(name string, begin, end int, selected []string
 	return f.Select(name, list, selected, options)
 }
 
-// SelectYear answers to FormBuilder::selectYear.
-//
-// PHP forwards every argument to selectRange with call_user_func_array, so the
-// two are the same function under two names. So are these.
+// SelectYear is [FormBuilder.SelectRange] under a second name, for a select
+// over years.
 func (f *FormBuilder) SelectYear(name string, begin, end int, selected []string, options Attrs) template.HTML {
 	return f.SelectRange(name, begin, end, selected, options)
 }
 
-// DefaultMonthFormat is the layout [FormBuilder.SelectMonth] uses when none is
-// given. It is PHP's '%B', the full month name.
+// DefaultMonthFormat is the layout [FormBuilder.SelectMonth] uses when none
+// is given: the full month name.
 const DefaultMonthFormat = "January"
 
-// SelectMonth answers to FormBuilder::selectMonth: a select over the twelve
-// months, valued one to twelve.
+// SelectMonth builds a select over the twelve months, valued one to twelve.
 //
-// format is a Go time layout where PHP takes a strftime format, and an empty
-// one is [DefaultMonthFormat]. The months come out in English: strftime reads
-// the process locale, Go's time package has no locale, and golang.org/x/text --
-// which does -- is refused by ADR 0004. A localised month belongs in the
-// translation layer, where the rest of the language lives.
+// format is a Go time layout, and an empty one is [DefaultMonthFormat]. The
+// months come out in English: Go's time package has no locale support, and
+// this framework does not pull in golang.org/x/text for one. A localised
+// month belongs in the translation layer, where the rest of the language
+// lives.
 func (f *FormBuilder) SelectMonth(name string, selected []string, options Attrs, format string) template.HTML {
 	if format == "" {
 		format = DefaultMonthFormat
@@ -423,11 +401,8 @@ func (f *FormBuilder) SelectMonth(name string, selected []string, options Attrs,
 	return f.Select(name, list, selected, options)
 }
 
-// GetSelectOption answers to FormBuilder::getSelectOption.
-//
-// PHP takes the display and the value as two arguments because they are the
-// value and the key of one array entry. Here they arrive as one [Option], and
-// the branch on is_array($display) is the branch on Options being non-nil.
+// GetSelectOption builds one <option> or <optgroup>, branching on whether
+// option.Options is non-nil.
 func (f *FormBuilder) GetSelectOption(option Option, selected []string) template.HTML {
 	if option.Options != nil {
 		return f.optionGroup(option.Options, option.Value, selected)
@@ -435,7 +410,7 @@ func (f *FormBuilder) GetSelectOption(option Option, selected []string) template
 	return f.option(option.Display, option.Value, selected)
 }
 
-// optionGroup answers to FormBuilder::optionGroup.
+// optionGroup builds an optgroup and its options.
 func (f *FormBuilder) optionGroup(list []Option, label string, selected []string) template.HTML {
 	var items strings.Builder
 	for _, option := range list {
@@ -445,11 +420,9 @@ func (f *FormBuilder) optionGroup(list []Option, label string, selected []string
 	return template.HTML(`<optgroup label="` + escape(label) + `">` + items.String() + "</optgroup>")
 }
 
-// option answers to FormBuilder::option.
+// option builds one <option> element.
 //
-// PHP escapes the value with e() and then hands it to attributes(), which
-// escapes it again -- harmlessly, because e() does not double-encode. This
-// escapes it once, in the attribute writer, and the output is the same.
+// The value is escaped once, in the attribute writer.
 func (f *FormBuilder) option(display, value string, selected []string) template.HTML {
 	attributes := Attrs{"value": value}
 	if f.getSelectedValue(value, selected) != "" {
@@ -460,7 +433,8 @@ func (f *FormBuilder) option(display, value string, selected []string) template.
 		escape(display) + "</option>")
 }
 
-// getSelectedValue answers to FormBuilder::getSelectedValue.
+// getSelectedValue returns "selected" when value is among the selected
+// ones.
 func (f *FormBuilder) getSelectedValue(value string, selected []string) string {
 	if slices.Contains(selected, value) {
 		return "selected"
@@ -468,11 +442,11 @@ func (f *FormBuilder) getSelectedValue(value string, selected []string) string {
 	return ""
 }
 
-// Checkbox answers to FormBuilder::checkbox.
+// Checkbox builds a checkbox input.
 //
-// An empty value is PHP's default of 1. checked is a pointer because PHP's
-// default is null and null is not false: null means "decide from the old input
-// and the model", and false means "not checked, whatever they say".
+// An empty value defaults to 1. checked is a pointer so that nil and false
+// are distinct: nil means "decide from the old input and the model", and
+// false means "not checked, whatever they say".
 func (f *FormBuilder) Checkbox(name, value string, checked *bool, options Attrs) template.HTML {
 	if value == "" {
 		value = "1"
@@ -480,8 +454,7 @@ func (f *FormBuilder) Checkbox(name, value string, checked *bool, options Attrs)
 	return f.checkable("checkbox", name, value, checked, options)
 }
 
-// Radio answers to FormBuilder::radio. An empty value is PHP's null, and then
-// the value is the field name.
+// Radio builds a radio input. An empty value falls back to the field name.
 func (f *FormBuilder) Radio(name, value string, checked *bool, options Attrs) template.HTML {
 	if value == "" {
 		value = name
@@ -489,7 +462,8 @@ func (f *FormBuilder) Radio(name, value string, checked *bool, options Attrs) te
 	return f.checkable("radio", name, value, checked, options)
 }
 
-// checkable answers to FormBuilder::checkable.
+// checkable builds a checkbox or radio input, deciding whether it starts
+// checked.
 func (f *FormBuilder) checkable(inputType, name, value string, checked *bool, options Attrs) template.HTML {
 	attributes := cloneAttrs(options)
 	if f.getCheckedState(inputType, name, value, checked) {
@@ -499,7 +473,8 @@ func (f *FormBuilder) checkable(inputType, name, value string, checked *bool, op
 	return f.Input(inputType, name, value, attributes)
 }
 
-// getCheckedState answers to FormBuilder::getCheckedState.
+// getCheckedState decides whether an input starts checked, branching on
+// its type.
 func (f *FormBuilder) getCheckedState(inputType, name, value string, checked *bool) bool {
 	switch inputType {
 	case "checkbox":
@@ -511,7 +486,7 @@ func (f *FormBuilder) getCheckedState(inputType, name, value string, checked *bo
 	}
 }
 
-// getCheckboxCheckedState answers to FormBuilder::getCheckboxCheckedState.
+// getCheckboxCheckedState decides whether a checkbox starts checked.
 //
 // The first branch is the one that matters and the one nobody expects: when a
 // submission came back rejected and this box is not in the old input, the box
@@ -530,13 +505,12 @@ func (f *FormBuilder) getCheckboxCheckedState(name, value string, checked *bool)
 		return slices.Contains(posted, value)
 	}
 
-	// PHP's (bool) cast on the model value: the empty string and "0" are false
-	// and everything else is true.
+	// The empty string and "0" are false; everything else is true.
 	modelValue, _ := f.getModelValueAttribute(name)
 	return modelValue != "" && modelValue != "0"
 }
 
-// getRadioCheckedState answers to FormBuilder::getRadioCheckedState.
+// getRadioCheckedState decides whether a radio input starts checked.
 func (f *FormBuilder) getRadioCheckedState(name, value string, checked *bool) bool {
 	if f.missingOldAndModel(name) {
 		return checked != nil && *checked
@@ -544,7 +518,8 @@ func (f *FormBuilder) getRadioCheckedState(name, value string, checked *bool) bo
 	return f.GetValueAttribute(name) == value
 }
 
-// missingOldAndModel answers to FormBuilder::missingOldAndModel.
+// missingOldAndModel reports whether there is neither old input nor a
+// model value for name.
 func (f *FormBuilder) missingOldAndModel(name string) bool {
 	if f.Old(name) != nil {
 		return false
@@ -553,16 +528,15 @@ func (f *FormBuilder) missingOldAndModel(name string) bool {
 	return !ok
 }
 
-// Reset answers to FormBuilder::reset.
+// Reset is [FormBuilder.Input] of type reset.
 func (f *FormBuilder) Reset(value string, attributes Attrs) template.HTML {
 	return f.Input("reset", "", value, attributes)
 }
 
-// Image answers to FormBuilder::image: an input of type image.
+// Image is [FormBuilder.Input] of type image.
 //
 // It is not [HtmlBuilder.Image], which writes an img element. The src goes
-// through the attribute writer here, so it is escaped; PHP's HtmlBuilder::image
-// is where the unescaped concatenation is.
+// through the attribute writer here, so it is escaped.
 func (f *FormBuilder) Image(url, name string, attributes Attrs) template.HTML {
 	merged := cloneAttrs(attributes)
 	merged["src"] = f.url.Asset(url)
@@ -570,18 +544,17 @@ func (f *FormBuilder) Image(url, name string, attributes Attrs) template.HTML {
 	return f.Input("image", name, "", merged)
 }
 
-// Submit answers to FormBuilder::submit.
+// Submit is [FormBuilder.Input] of type submit.
 func (f *FormBuilder) Submit(value string, options Attrs) template.HTML {
 	return f.Input("submit", "", value, options)
 }
 
-// Button answers to FormBuilder::button.
+// Button builds a button element.
 //
-// PHP writes `'<button'.attrs.'>'.$value.'</button>'` -- the label is
-// concatenated raw, so a button labelled from anything a person typed carries
-// their markup into the page. Here the label is escaped. A button that has to
-// contain markup -- an icon beside the text -- is a kyse component, and the
-// package comment names it.
+// The label is escaped, so a button labelled from anything a person typed
+// cannot carry markup into the page. A button that has to contain markup --
+// an icon beside the text -- is a kyse component, and the package comment
+// names it.
 func (f *FormBuilder) Button(value string, options Attrs) template.HTML {
 	attributes := cloneAttrs(options)
 	if _, ok := attributes["type"]; !ok {
@@ -592,7 +565,8 @@ func (f *FormBuilder) Button(value string, options Attrs) template.HTML {
 		escape(value) + "</button>")
 }
 
-// getMethod answers to FormBuilder::getMethod: anything that is not GET posts.
+// getMethod returns the HTTP method to send the form as: anything that is
+// not GET posts.
 func (f *FormBuilder) getMethod(method string) string {
 	method = strings.ToUpper(method)
 	if method != "GET" {
@@ -601,10 +575,8 @@ func (f *FormBuilder) getMethod(method string) string {
 	return method
 }
 
-// getAction answers to FormBuilder::getAction, and to the three small methods
-// under it -- getUrlAction, getRouteAction and getControllerAction -- which are
-// one switch here because the array-or-string branch each of them carries is
-// gone: a slice is both.
+// getAction resolves the form's action attribute, branching on which of
+// URL, Route or Action was given.
 func (f *FormBuilder) getAction(options OpenOptions) (string, error) {
 	switch {
 	case len(options.URL) > 0:
@@ -618,8 +590,7 @@ func (f *FormBuilder) getAction(options OpenOptions) (string, error) {
 	}
 }
 
-// getAppendage answers to FormBuilder::getAppendage: the hidden fields that
-// follow the opening tag.
+// getAppendage builds the hidden fields that follow the opening tag.
 func (f *FormBuilder) getAppendage(method string) (template.HTML, error) {
 	method = strings.ToUpper(method)
 
@@ -639,11 +610,8 @@ func (f *FormBuilder) getAppendage(method string) (template.HTML, error) {
 	return template.HTML(appendage.String()), nil
 }
 
-// GetIdAttribute answers to FormBuilder::getIdAttribute.
-//
-// PHP returns null when there is no id to give, and the caller drops the
-// attribute; the empty string is that null here, because an id="" is not an
-// attribute anybody wants written.
+// GetIdAttribute returns the id to give an input, or "" when there is
+// none: an id="" is not an attribute anybody wants written.
 func (f *FormBuilder) GetIdAttribute(name string, attributes Attrs) string {
 	if id, ok := attributes["id"]; ok {
 		return id
@@ -654,13 +622,12 @@ func (f *FormBuilder) GetIdAttribute(name string, attributes Attrs) string {
 	return ""
 }
 
-// GetValueAttribute answers to FormBuilder::getValueAttribute: what the input
-// should show, from the old input first, then the argument, then the model.
+// GetValueAttribute returns what the input should show, from the old
+// input first, then the argument, then the model.
 //
-// value is variadic because PHP's is optional, and the empty string is PHP's
-// null throughout. That the old input wins over the argument is what makes a
-// rejected form come back filled in with what was typed rather than with what
-// the handler passed.
+// value is variadic, so it can be left out entirely. That the old input
+// wins over the argument is what makes a rejected form come back filled in
+// with what was typed rather than with what the handler passed.
 func (f *FormBuilder) GetValueAttribute(name string, value ...string) string {
 	given := ""
 	if len(value) > 0 {
@@ -683,7 +650,8 @@ func (f *FormBuilder) GetValueAttribute(name string, value ...string) string {
 	return modelValue
 }
 
-// getModelValueAttribute answers to FormBuilder::getModelValueAttribute.
+// getModelValueAttribute reads a field off the model, transforming the
+// name first.
 func (f *FormBuilder) getModelValueAttribute(name string) (string, bool) {
 	if f.model == nil {
 		return "", false
@@ -691,11 +659,11 @@ func (f *FormBuilder) getModelValueAttribute(name string) (string, bool) {
 	return f.model.GetAttribute(f.transformKey(name))
 }
 
-// Old answers to FormBuilder::old.
+// Old returns what was typed into name on the rejected submission.
 //
-// Nil is PHP's null -- the field was not in the old input at all -- and that is
-// a different answer from an empty slice, which is a field that was submitted
-// empty. [FormBuilder.Checkbox] reads the difference.
+// Nil means the field was not in the old input at all, which is a
+// different answer from an empty slice, a field that was submitted empty.
+// [FormBuilder.Checkbox] reads the difference.
 func (f *FormBuilder) Old(name string) []string {
 	if f.session == nil {
 		return nil
@@ -703,28 +671,27 @@ func (f *FormBuilder) Old(name string) []string {
 	return f.session.GetOldInput(f.transformKey(name))
 }
 
-// OldInputIsEmpty answers to FormBuilder::oldInputIsEmpty.
+// OldInputIsEmpty reports whether there is old input at all.
 //
-// A builder with no session answers false, which reads backwards and is what
-// PHP answers: `isset($this->session) && count(...) == 0` is false when the
-// first half is. It is kept because the one caller,
-// [FormBuilder.Checkbox], tests for the session separately in the same
-// condition, so the surprising half is never reached alone.
+// A builder with no session answers false, which reads backwards: kept
+// because the one caller, [FormBuilder.Checkbox], tests for the session
+// separately in the same condition, so the surprising half is never
+// reached alone.
 func (f *FormBuilder) OldInputIsEmpty() bool {
 	return f.session != nil && f.session.OldInputIsEmpty()
 }
 
-// transformKey answers to FormBuilder::transformKey: the array syntax of a
-// field name turned into the dot syntax the session is keyed by.
+// transformKey turns the array syntax of a field name into the dot syntax
+// the session is keyed by.
 func (f *FormBuilder) transformKey(key string) string {
 	return strings.NewReplacer(".", "_", "[]", "", "[", ".", "]", "").Replace(key)
 }
 
-// GetSessionStore answers to FormBuilder::getSessionStore.
+// GetSessionStore returns the session store.
 func (f *FormBuilder) GetSessionStore() Store { return f.session }
 
-// SetSessionStore answers to FormBuilder::setSessionStore. It returns the
-// builder, as PHP returns $this.
+// SetSessionStore replaces the session store, and returns the builder, for
+// chaining.
 func (f *FormBuilder) SetSessionStore(session Store) *FormBuilder {
 	f.session = session
 	return f

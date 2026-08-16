@@ -64,8 +64,9 @@ func TestFileProviderKeepsWhatFailedAndFindsItAgain(t *testing.T) {
 	}
 }
 
-// TestFileProviderIsScopedByTenant is RULE 17 at a dead letter list: a failed
-// job carries a customer's payload, and listing them is a read like any other.
+// TestFileProviderIsScopedByTenant checks the scoping of a dead letter list: a
+// failed job carries a customer's payload, and listing them is a read like any
+// other.
 func TestFileProviderIsScopedByTenant(t *testing.T) {
 	ctx := context.Background()
 	p := provider(t)

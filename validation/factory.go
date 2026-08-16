@@ -6,47 +6,46 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// Factory answers to Illuminate\Validation\Factory: the thing that makes
-// Validators already wired to the translator, the presence verifier and the
-// message overrides an application registered once.
+// Factory makes Validators already wired to the translator, the presence
+// verifier and the message overrides an application registered once.
 //
-// The PHP's Factory is what the Validator facade calls. There is no facade here
-// (ADR 0002), so a Factory is a value an application builds at boot and hands
-// where it is needed -- which is the same object, without the global.
-//
-// What is not here is setContainer and getContainer: they exist to resolve a
-// class based extension or replacer out of the service locator, and ADR 0001
-// refuses one. An extension is a function, and Extend takes it directly.
+// It is a value an application builds at boot and hands where it is needed.
+// There is no global one, and nothing here resolves an extension by name: an
+// extension is a function, and Extend takes it directly.
 type Factory struct {
-	// translator answers to $translator.
+	// translator is the catalogue every Validator this makes reads its messages
+	// out of.
 	translator Translator
 
-	// grant and verifier answer to $verifier, plus the Grant RULE 17 adds: a
-	// read is authorized too, so there is no way to hand a verifier without one.
+	// grant and verifier are what `unique` and `exists` count through. There is
+	// no way to hand a verifier without a Grant: a read is authorized like any
+	// other.
 	grant    auth.Grant
 	verifier PresenceVerifier
 
-	// replacers answers to $replacers.
+	// replacers are the placeholder fillers registered for a rule of the
+	// application's own.
 	replacers map[string]ReplacerFunc
 
-	// fallbackMessages answers to $fallbackMessages.
+	// fallbackMessages are the sentences those rules say.
 	fallbackMessages map[string]any
 
 	// customMessages and customAttributes are the overrides every Validator this
-	// Factory makes starts with. The PHP passes them per call; keeping them here
-	// as well is what makes "the whole application spells this field this way"
-	// one line at boot.
+	// Factory makes starts with. Keeping them here is what makes "the whole
+	// application spells this field this way" one line at boot.
 	customMessages   map[string]any
 	customAttributes map[string]string
 
-	// excludeUnvalidatedArrayKeys answers to the property of the same name.
+	// excludeUnvalidatedArrayKeys drops the keys of an array that no rule
+	// declared.
 	excludeUnvalidatedArrayKeys bool
 
-	// resolver answers to $resolver.
+	// resolver is what Resolver registered: another way of building the
+	// Validator itself.
 	resolver func(data Data, rules *Set, opts []ValidatorOption) *Validator
 }
 
-// NewFactory answers to the Factory constructor. The translator may be nil, and
+// NewFactory returns a Factory over a translator. The translator may be nil, and
 // then every Validator it makes falls back to the compiled rule set's own
 // sentences -- see getMessage.
 func NewFactory(translator Translator) *Factory {
@@ -60,13 +59,12 @@ func NewFactory(translator Translator) *Factory {
 	}
 }
 
-// Make answers to Factory::make: a Validator over the data and the rules, with
-// everything this Factory carries already on it.
+// Make returns a Validator over the data and the rules, with everything this
+// Factory carries already on it.
 //
 // The rules are a compiled Set rather than an array of strings, because the
-// strings are parsed and checked at boot -- see MustCompile. The $messages and
-// $attributes arguments of the PHP are the WithCustomMessages and
-// WithCustomAttributes options.
+// strings are parsed and checked at boot -- see MustCompile. Per-call overrides
+// are the WithCustomMessages and WithCustomAttributes options.
 func (f *Factory) Make(data Data, rules *Set, opts ...ValidatorOption) *Validator {
 	v := f.resolve(data, rules, opts)
 
@@ -82,12 +80,12 @@ func (f *Factory) Make(data Data, rules *Set, opts ...ValidatorOption) *Validato
 	return v
 }
 
-// Validate answers to Factory::validate: Make and Validate in one call.
+// Validate is Make and Validate in one call.
 func (f *Factory) Validate(data Data, rules *Set, opts ...ValidatorOption) (Input, error) {
 	return f.Make(data, rules, opts...).Validate()
 }
 
-// resolve answers to Factory::resolve.
+// resolve builds the Validator, through whatever Resolver registered.
 func (f *Factory) resolve(data Data, rules *Set, opts []ValidatorOption) *Validator {
 	if f.resolver != nil {
 		return f.resolver(data, rules, opts)
@@ -104,38 +102,37 @@ func (f *Factory) resolve(data Data, rules *Set, opts []ValidatorOption) *Valida
 	return Make(data, rules, append(base, opts...)...)
 }
 
-// addExtensions answers to Factory::addExtensions: the per-validator half of
-// what this Factory registered. The rules themselves are in the one catalogue
-// every set is compiled against -- see Extend -- so what is left is the
-// replacers and the fallback sentences.
+// addExtensions puts the per-validator half of what this Factory registered onto
+// one Validator. The rules themselves are in the one catalogue every set is
+// compiled against -- see Extend -- so what is left is the replacers and the
+// fallback sentences.
 func (f *Factory) addExtensions(v *Validator) {
 	v.AddReplacers(f.replacers)
 
 	v.SetFallbackMessages(f.fallbackMessages)
 }
 
-// Extend answers to Factory::extend: a rule this application adds, and the
-// sentence it says when it fails.
+// Extend registers a rule this application adds, and the sentence it says when
+// it fails.
 //
 // It registers into the one catalogue MustCompile checks against, so the name is
-// real for every rule set compiled after this call -- which is why it belongs in
-// boot, before any set is compiled, exactly where a Laravel provider puts it.
+// real for every rule set compiled after this call -- which is why it belongs at
+// start-up, before any set is compiled.
 func (f *Factory) Extend(rule string, extension ExtensionFunc, message ...string) {
 	Extend(rule, extension, first(message))
 
 	f.rememberFallback(rule, message)
 }
 
-// ExtendImplicit answers to Factory::extendImplicit: an extension that runs even
-// when the attribute is blank, the way `required` does.
+// ExtendImplicit registers a rule that runs even when the attribute is blank, the
+// way `required` does.
 func (f *Factory) ExtendImplicit(rule string, extension ExtensionFunc, message ...string) {
 	ExtendImplicit(rule, extension, first(message))
 
 	f.rememberFallback(rule, message)
 }
 
-// ExtendDependent answers to Factory::extendDependent: an extension whose first
-// parameter names another field.
+// ExtendDependent registers a rule whose first parameter names another field.
 func (f *Factory) ExtendDependent(rule string, extension ExtensionFunc, message ...string) {
 	ExtendDependent(rule, extension, first(message))
 
@@ -148,40 +145,39 @@ func (f *Factory) rememberFallback(rule string, message []string) {
 	}
 }
 
-// Replacer answers to Factory::replacer: how one rule fills the placeholders of
-// its own message.
+// Replacer registers how one rule fills the placeholders of its own message.
 func (f *Factory) Replacer(rule string, replacer ReplacerFunc) {
 	f.replacers[str.Snake(rule, "_")] = replacer
 }
 
-// IncludeUnvalidatedArrayKeys answers to
-// Factory::includeUnvalidatedArrayKeys.
+// IncludeUnvalidatedArrayKeys keeps the keys of an array that no rule
+// declared.
 func (f *Factory) IncludeUnvalidatedArrayKeys() { f.excludeUnvalidatedArrayKeys = false }
 
-// ExcludeUnvalidatedArrayKeys answers to
-// Factory::excludeUnvalidatedArrayKeys.
+// ExcludeUnvalidatedArrayKeys drops the keys of an array that no rule
+// declared.
 func (f *Factory) ExcludeUnvalidatedArrayKeys() { f.excludeUnvalidatedArrayKeys = true }
 
-// Resolver answers to Factory::resolver: build the Validator some other way,
-// which is how an application ships its own subclass of it.
+// Resolver registers another way of building the Validator itself, which is how
+// an application ships one of its own.
 func (f *Factory) Resolver(resolver func(data Data, rules *Set, opts []ValidatorOption) *Validator) {
 	f.resolver = resolver
 }
 
-// GetTranslator answers to Factory::getTranslator.
+// GetTranslator returns the catalogue this Factory hands its Validators.
 func (f *Factory) GetTranslator() Translator { return f.translator }
 
-// GetPresenceVerifier answers to Factory::getPresenceVerifier.
+// GetPresenceVerifier returns the verifier this Factory hands its Validators.
 func (f *Factory) GetPresenceVerifier() PresenceVerifier { return f.verifier }
 
-// SetPresenceVerifier answers to Factory::setPresenceVerifier, with the Grant
-// RULE 17 adds.
+// SetPresenceVerifier sets the Grant and the verifier this Factory hands its
+// Validators.
 func (f *Factory) SetPresenceVerifier(g auth.Grant, presenceVerifier PresenceVerifier) {
 	f.grant, f.verifier = g, presenceVerifier
 }
 
-// SetCustomMessages sets the overrides every Validator this Factory makes starts
-// with. It answers to the $messages argument the PHP takes on every make.
+// SetCustomMessages sets the inline messages every Validator this Factory makes
+// starts with.
 func (f *Factory) SetCustomMessages(messages map[string]any) *Factory {
 	f.customMessages = messages
 
@@ -189,15 +185,15 @@ func (f *Factory) SetCustomMessages(messages map[string]any) *Factory {
 }
 
 // SetAttributeNames sets the field names every Validator this Factory makes
-// starts with. It answers to the $attributes argument the PHP takes on every
-// make, and to Validator::setAttributeNames.
+// starts with.
 func (f *Factory) SetAttributeNames(attributes map[string]string) *Factory {
 	f.customAttributes = attributes
 
 	return f
 }
 
-// first is how Go spells a PHP argument with a default of null.
+// first reads an optional argument, answering the empty string when none was
+// given.
 func first(values []string) string {
 	if len(values) == 0 {
 		return ""

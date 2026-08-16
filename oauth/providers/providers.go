@@ -1,21 +1,14 @@
 package providers
 
-// The four providers the clone carries, as four constructors.
+// The four providers this package carries, as four constructors.
 //
-// Illuminate makes each one a subclass that overrides getAuthEndpoint(),
-// getAccessEndpoint(), getUserDataEndpoint() and getDefaultScope(), and two of
-// them override executeAccessRequest() and parseAccessResponse() as well. Every
-// one of those overrides is data -- three URLs, a delimiter, a list of scopes,
-// a header -- so here they are data, and there is one implementation of the
-// flow instead of five.
+// What separates them is data -- three URLs, a scope delimiter, a list of
+// default scopes, a header -- so it is data, and there is one implementation of
+// the flow rather than one per provider.
 //
-// The endpoints are the current ones, from
-// reference_laravel/socialite/src/Two. The clone's are thirteen years old and
-// three of the four no longer answer: Facebook's Graph API requires a version
-// in the path, Google moved its token endpoint to googleapis.com, and the
-// userinfo endpoint the clone names was retired with OAuth 1. What came from
-// the clone is the shape -- the class names, the method names, the scope
-// delimiter of each provider, and the default scopes where they still exist.
+// The endpoints are the current published ones. Facebook's Graph API takes a
+// version in the path, which is why [NewFacebookProvider] pins one, and Google
+// serves its token endpoint from googleapis.com.
 
 // NewFacebookProvider builds a [Provider] wired to Facebook Login: the login
 // dialog, the Graph token endpoint and the Graph /me endpoint, all pinned to
@@ -23,8 +16,6 @@ package providers
 // default. Graph answers with an id and nothing else unless the fields are
 // named, so the user data request carries the field list that fills the
 // profile. The caller adds its callback URL and drives the flow from there.
-//
-// Answers Illuminate\Socialite\OAuthTwo\FacebookProvider.
 func NewFacebookProvider(state StateStoreInterface, clientID, secret string) *Provider {
 	const version = "v23.0"
 	p := NewProvider(state, clientID, secret,
@@ -42,11 +33,8 @@ func NewFacebookProvider(state StateStoreInterface, clientID, secret string) *Pr
 	return p
 }
 
-// NewGithubProvider answers Illuminate\Socialite\OAuthTwo\GithubProvider.
-//
-// Illuminate's overrides stateMismatch() to return false, which turns the state
-// check off for GitHub alone. That override is not here; the package comment
-// says why.
+// NewGithubProvider builds the GitHub provider. The state check is on for it,
+// as it is for every provider here.
 func NewGithubProvider(state StateStoreInterface, clientID, secret string) *Provider {
 	p := NewProvider(state, clientID, secret,
 		"https://github.com/login/oauth/authorize",
@@ -55,8 +43,7 @@ func NewGithubProvider(state StateStoreInterface, clientID, secret string) *Prov
 	)
 	p.scopeDelimiter = ","
 	p.defaultScope = []string{"user:email"}
-	// GitHub's own documentation spells the scheme "token", and the current
-	// Socialite sends it that way.
+	// GitHub's own documentation spells the scheme "token".
 	p.userDataAuthScheme = "token"
 	p.userDataAccept = "application/vnd.github.v3+json"
 	return p
@@ -67,8 +54,6 @@ func NewGithubProvider(state StateStoreInterface, clientID, secret string) *Prov
 // userinfo endpoints, scopes separated by spaces, and openid, profile and email
 // asked for by default. The caller adds its callback URL and drives the flow
 // from there.
-//
-// Answers Illuminate\Socialite\OAuthTwo\GoogleProvider.
 func NewGoogleProvider(state StateStoreInterface, clientID, secret string) *Provider {
 	p := NewProvider(state, clientID, secret,
 		"https://accounts.google.com/o/oauth2/auth",
@@ -82,12 +67,11 @@ func NewGoogleProvider(state StateStoreInterface, clientID, secret string) *Prov
 	return p
 }
 
-// NewStripeProvider answers Illuminate\Socialite\OAuthTwo\StripeProvider.
+// NewStripeProvider builds the Stripe Connect provider.
 //
-// Stripe Connect has no user data endpoint -- Illuminate's
-// getUserDataEndpoint() returns an empty string -- so [Provider.User]
-// and [Provider.GetUserData] fail on it, saying so. What comes back
-// from the exchange is the connected account's id, in the token.
+// Stripe Connect has no user data endpoint, so [Provider.User] and
+// [Provider.GetUserData] fail on it, saying so. What comes back from the
+// exchange is the connected account's id, in the token.
 func NewStripeProvider(state StateStoreInterface, clientID, secret string) *Provider {
 	p := NewProvider(state, clientID, secret,
 		"https://connect.stripe.com/oauth/authorize",

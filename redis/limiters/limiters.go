@@ -8,7 +8,7 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 )
 
-// ErrLimiterTimeout answers Illuminate\Contracts\Redis\LimiterTimeoutException.
+// ErrLimiterTimeout is returned when the wait for a slot ran out.
 //
 // It is the one error a limiter raises on its own: the caller waited as long as
 // it said it would and the slot never came free. Everything else that comes
@@ -31,8 +31,7 @@ type Connection interface {
 // sleep waits for d, or returns false when ctx is cancelled first.
 //
 // Every limiter that blocks goes through it, so a cancelled request stops
-// waiting for a slot instead of holding a goroutine until the timeout. Laravel
-// has no equivalent because PHP has no cancellation.
+// waiting for a slot instead of holding a goroutine until the timeout.
 func sleep(ctx context.Context, d time.Duration) bool {
 	t := time.NewTimer(d)
 	defer t.Stop()

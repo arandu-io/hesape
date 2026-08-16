@@ -5,10 +5,11 @@ import (
 	"fmt"
 )
 
-// ErrModelNotFound answers Illuminate\Database\Eloquent\ModelNotFoundException.
+// ErrModelNotFound is what FindOrFail and its neighbours return when no row
+// matched.
 //
-// The PHP throws; Go returns it, wrapped with the table and the ids that were
-// looked for, so errors.Is keeps working and the message still says which row:
+// It is returned wrapped with the table and the ids that were looked for, so
+// errors.Is keeps working and the message still says which row:
 //
 //	fmt.Errorf("%w: users [7]", ErrModelNotFound)
 //
@@ -17,27 +18,23 @@ import (
 // it should not have to name a struct.
 var ErrModelNotFound = errors.New("eloquent: no query results for model")
 
-// ErrMultipleRecordsFound answers
-// Illuminate\Database\MultipleRecordsFoundException, which Sole throws when the
-// query matched more than one row.
+// ErrMultipleRecordsFound is what Sole returns when the query matched more than
+// one row.
 var ErrMultipleRecordsFound = errors.New("eloquent: multiple records found")
 
 // ErrNoTenant is what every executing method returns when the Grant carries no
 // tenant.
 //
-// Illuminate has no equivalent, because Illuminate has no tenant. It is RULE 17
-// made into a value: the zero Grant is the only one constructible outside the
-// auth package, auth.Tenant reads the empty string off it, and a query with no
-// tenant in its where clause reads every customer of the system. So it does not
-// run.
+// The zero Grant is the only one constructible outside the auth package,
+// auth.Tenant reads the empty string off it, and a query with no tenant in its
+// where clause reads every customer of the system. So it does not run.
 var ErrNoTenant = errors.New("eloquent: the grant carries no tenant, and a query without one reads every tenant (call auth.Authorize, or auth.SystemGrant with the tenant this work belongs to)")
 
-// ErrNoKey answers the LogicException Model::delete throws when the model has no
-// primary key defined.
+// ErrNoKey is what Delete returns when the model has no primary key defined.
 var ErrNoKey = errors.New("eloquent: no primary key defined on model")
 
-// ErrEmptyCollection answers the LogicException Collection::toQuery throws for
-// an empty collection: there is no model to take the table from.
+// ErrEmptyCollection is what ToQuery returns for an empty collection: there
+// is no model to take the table from.
 var ErrEmptyCollection = errors.New("eloquent: unable to create query for empty collection")
 
 // ErrRelationNotFound is returned when a query names a relation the model never
@@ -50,16 +47,13 @@ var ErrEmptyCollection = errors.New("eloquent: unable to create query for empty 
 // programming mistake rather than a runtime condition -- the fix is the
 // declaration, not a retry -- so callers usually let it travel rather than
 // matching on it.
-//
-// Answers Illuminate\Database\Eloquent\RelationNotFoundException.
 var ErrRelationNotFound = errors.New("eloquent: call to undefined relationship")
 
 // ErrNamedScopeNotFound is what CallNamedScope reports for a scope the model
 // never registered.
 //
-// PHP raises BadMethodCallException from __call, because there a scope is a
-// method and the miss is a missing method. Here a scope is an entry in
-// Model.NamedScopes, so the miss is a missing key.
+// A scope is an entry in Model.NamedScopes, so the miss is a missing key
+// rather than a missing method.
 var ErrNamedScopeNotFound = errors.New("eloquent: call to undefined named scope")
 
 // ModelNotFoundError carries what ModelNotFoundException records beyond its
@@ -70,15 +64,16 @@ var ErrNamedScopeNotFound = errors.New("eloquent: call to undefined named scope"
 // a log line, a retry that drops the missing rows -- reaches them with
 // errors.As.
 type ModelNotFoundError struct {
-	// Model is the model the query was on. The PHP holds the class name; here it
-	// is the table, which is what identifies a row on this side.
+	// Model is the table the query was on: what identifies a row on this
+	// side.
 	Model string
 
-	// IDs is what ModelNotFoundException::$ids holds.
+	// IDs is the primary keys that were looked for.
 	IDs []any
 }
 
-// Error formats the message ModelNotFoundException::setModel builds.
+// Error formats the message naming the table and, when there are any, the
+// ids that were not found.
 func (e *ModelNotFoundError) Error() string {
 	if len(e.IDs) == 0 {
 		return fmt.Sprintf("%s: %s", ErrModelNotFound, e.Model)
@@ -90,21 +85,21 @@ func (e *ModelNotFoundError) Error() string {
 // why the sentinel is what callers compare against.
 func (e *ModelNotFoundError) Unwrap() error { return ErrModelNotFound }
 
-// SetModel answers ModelNotFoundException::setModel.
+// SetModel records the table and ids a not-found error is about, and
+// returns e.
 func (e *ModelNotFoundError) SetModel(model string, ids ...any) *ModelNotFoundError {
 	e.Model = model
 	e.IDs = ids
 	return e
 }
 
-// GetModel answers ModelNotFoundException::getModel.
+// GetModel returns the table the query was on.
 func (e *ModelNotFoundError) GetModel() string { return e.Model }
 
-// GetIDs answers ModelNotFoundException::getIds. The PHP spells it getIds.
+// GetIDs returns the ids that were looked for.
 func (e *ModelNotFoundError) GetIDs() []any { return e.IDs }
 
-// modelNotFound builds the wrapped ErrModelNotFound with the table and ids, the
-// way ModelNotFoundException::setModel formats its message.
+// modelNotFound builds the wrapped ErrModelNotFound with the table and ids.
 func modelNotFound(table string, ids ...any) error {
 	return &ModelNotFoundError{Model: table, IDs: ids}
 }
@@ -117,31 +112,30 @@ func modelNotFound(table string, ids ...any) error {
 // produced a value encoding/json refuses, an attribute holding something with
 // no JSON form. Callers match on this with errors.Is when they want to answer
 // one status for any encoding failure; the message says which row to look at.
-//
-// Answers Illuminate\Database\Eloquent\JsonEncodingException. The PHP spells it
-// JsonEncodingException.
 var ErrJSONEncoding = errors.New("eloquent: json encoding failed")
 
-// ForModel answers JsonEncodingException::forModel.
+// ForModel returns the ErrJSONEncoding wrapped with the model's table and
+// key, when it is the model itself that failed to encode.
 //
-// The PHP static is a package function, because Go has no static and an error
-// value has no class to hang one on. It names the model by its table and key,
-// where the PHP names it by class and key: the class of a Model[T] is its type
-// parameter, and the table is what a reader of the log can look in.
+// It is a package function because a Go error value has no type to hang a
+// constructor method on, and it names the model by its table rather than
+// its type: the table is what a reader of the log can look up.
 func ForModel(table string, key any, message string) error {
 	return fmt.Errorf("%w: model [%s] with id [%v]: %s", ErrJSONEncoding, table, key, message)
 }
 
-// ForAttribute answers JsonEncodingException::forAttribute.
+// ForAttribute returns the ErrJSONEncoding wrapped with the model's table
+// and the attribute's key, when it is an attribute that failed to encode.
 func ForAttribute(table, key, message string) error {
 	return fmt.Errorf("%w: attribute [%s] of model [%s]: %s", ErrJSONEncoding, key, table, message)
 }
 
-// ForResource answers JsonEncodingException::forResource.
+// ForResource returns the ErrJSONEncoding wrapped with the resource's name,
+// the model's table and key, when it is a resource that failed to encode.
 //
-// The PHP takes the JsonResource and reads the model off it. A resource here is
-// a value an http handler names, and http/resources does not reach into this
-// package, so the resource arrives as its own name.
+// A resource here is a value an http handler names, and http/resources does
+// not reach into this package, so the resource arrives as its own name
+// rather than a value this package reads it from.
 func ForResource(resource, table string, key any, message string) error {
 	return fmt.Errorf("%w: resource [%s] with model [%s] with id [%v]: %s", ErrJSONEncoding, resource, table, key, message)
 }

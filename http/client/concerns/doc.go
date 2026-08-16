@@ -1,9 +1,6 @@
-// Package concerns mirrors Illuminate\Http\Client\Concerns.
+// Package concerns is intentionally empty.
 //
-// It holds traits that are composed into the HTTP client classes.
-//
-//	DeterminesStatusCode.php — status-check methods (ok, created, notFound, etc.)
-//
-// In Go, these are methods on the Response struct rather than traits;
-// the package exists for parity with the Illuminate surface.
+// The status-check methods it might have held as a mixin -- Ok, Created,
+// NotFound and the rest -- are plain methods on Response instead: Go has no
+// mechanism for mixing a set of methods into a type from outside it.
 package concerns

@@ -7,40 +7,36 @@ import (
 	"github.com/arandu-io/hesape/str"
 )
 
-// ErrInvalidPackage is what NewPackage answers when the vendor or the name is
-// empty. PHP has no such check: Package::__construct takes whatever it is given
-// and the failure surfaces later, as a directory called "/" .
+// ErrInvalidPackage is what NewPackage returns when the vendor or the name is
+// empty. Without the check the failure surfaces later, as a directory called
+// "/".
 var ErrInvalidPackage = errors.New("workbench: vendor and name are both required")
 
-// Package answers to Illuminate\Workbench\Package: the identity of the package
-// being generated, and the source of every placeholder in the stubs.
+// Package is the identity of the package being generated, and the source of
+// every placeholder in the stubs.
 //
-// PHP has six public properties and derives two of them in the constructor.
-// This has those six with the same names, plus three that only Go needs --
 // [Package.Host], [Package.PackageName] and what [Package.ModulePath] builds
-// from them -- because a PHP package is identified by "vendor/name" and a Go
-// module is identified by a URL.
+// from them exist because a Go module is identified by a URL rather than by a
+// vendor and a name.
 type Package struct {
 	// Vendor is the vendor in StudlyCase: "Acme".
 	Vendor string
 
-	// LowerVendor is Vendor as a slug: "acme". PHP's snake_case($vendor, '-').
+	// LowerVendor is Vendor as a hyphenated slug: "acme".
 	LowerVendor string
 
 	// Name is the package name in StudlyCase: "InvoiceManager".
 	Name string
 
-	// LowerName is Name as a slug: "invoice-manager". PHP's
-	// snake_case($name, '-'). It is the last element of the module path, the
-	// directory the package is written to, and what Module.Name returns.
+	// LowerName is Name as a hyphenated slug: "invoice-manager". It is the last
+	// element of the module path, the directory the package is written to, and
+	// what Module.Name returns.
 	LowerName string
 
 	// PackageName is LowerName as a Go identifier: "invoicemanager".
 	//
-	// It has no PHP counterpart. There the namespace is StudlyCase and the
-	// directory is the slug, and the two never have to agree. In Go the package
-	// clause is an identifier, so a hyphen that is fine in a module path is a
-	// compile error one line down.
+	// It exists because the package clause is an identifier: a hyphen that is
+	// fine in a module path is a compile error one line down.
 	PackageName string
 
 	// Author is the copyright holder written into LICENSE.
@@ -51,24 +47,21 @@ type Package struct {
 
 	// Host is the module host: "github.com" unless said otherwise.
 	//
-	// PHP does not need it -- Packagist resolves "acme/invoice-manager" from a
-	// central index -- and Go has no central index, so the host is part of the
-	// identifier.
+	// Go has no central package index, so the host is part of the identifier.
 	Host string
 }
 
 // DefaultHost is the module host [NewPackage] uses when none is given.
 const DefaultHost = "github.com"
 
-// NewPackage answers to Package::__construct.
+// NewPackage builds the identity of a package to generate.
 //
-// It derives LowerVendor, LowerName and PackageName the way PHP derives the
-// first two, with str.Snake standing in for snake_case. host may be empty, and
-// then it is [DefaultHost].
+// It derives LowerVendor, LowerName and PackageName with str.Snake. host may be
+// empty, and then it is [DefaultHost].
 //
-// PHP returns void and cannot fail. This returns (*Package, error) because an
-// empty segment produces a module path that go(1) rejects with a message about
-// a path element, several steps after the mistake was made.
+// It returns an error because an empty segment produces a module path that go(1)
+// rejects with a message about a path element, several steps after the mistake
+// was made.
 func NewPackage(vendor, name, author, email, host string) (*Package, error) {
 	if strings.TrimSpace(vendor) == "" || strings.TrimSpace(name) == "" {
 		return nil, ErrInvalidPackage
@@ -90,19 +83,18 @@ func NewPackage(vendor, name, author, email, host string) (*Package, error) {
 	}, nil
 }
 
-// GetFullName answers to Package::getFullName: "acme/invoice-manager".
+// GetFullName is "acme/invoice-manager".
 //
-// It is what PHP writes as the composer name and what this uses as the
-// directory below the workbench path, so `workbench/acme/invoice-manager` holds
-// the same thing in both. The module path a Go tool needs is [Package.ModulePath].
+// It is the directory below the workbench path, so a package lands in
+// `workbench/acme/invoice-manager`. The module path a Go tool needs is
+// [Package.ModulePath].
 func (p *Package) GetFullName() string {
 	return p.LowerVendor + "/" + p.LowerName
 }
 
 // ModulePath is the module path the generated go.mod declares:
-// "github.com/acme/invoice-manager".
-//
-// It has no PHP counterpart, for the reason given on [Package.Host].
+// "github.com/acme/invoice-manager". See [Package.Host] for why it carries a
+// host.
 func (p *Package) ModulePath() string {
 	return p.Host + "/" + p.GetFullName()
 }

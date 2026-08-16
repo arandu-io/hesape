@@ -2,12 +2,11 @@ package pagination
 
 import "sync"
 
-// The nine views Illuminate ships under Pagination/resources/views, by the name
-// a paginator asks for one by. They are names, not templates: nothing in this
-// package renders (see the package doc), and the view layer is what turns a
-// name into markup.
+// The nine pager views, by the name a paginator asks for one by. They are names,
+// not templates: nothing in this package renders (see the package doc), and the
+// view layer is what turns a name into markup.
 //
-// The default is Tailwind, as it is in Illuminate.
+// The default is Tailwind.
 const (
 	TailwindView             = "pagination::tailwind"
 	SimpleTailwindView       = "pagination::simple-tailwind"
@@ -26,19 +25,15 @@ var (
 	defaultSimpleView = SimpleTailwindView
 )
 
-// DefaultView is AbstractPaginator::defaultView and reads back
-// AbstractPaginator::$defaultView, the static property
-// a view reads, and AbstractPaginator::defaultView(), the static method that
-// writes it. Called with a view it sets the default and returns it; called with
-// none it reads.
+// DefaultView reads and writes the view a numbered pager is rendered with.
+// Called with a view it sets the default and returns it; called with none it
+// reads.
 //
-// PHP has a property and a method of the same name for the two directions, and
-// Go has one namespace for both, so the argument is what tells them apart --
-// the same shape AbstractPaginator::fragment() has in PHP.
+// The argument is what tells the two directions apart, because both would
+// otherwise want the same name.
 //
-// It is the view a numbered pager is rendered with. Set it once where the
-// application is wired: it is global, as it is in Illuminate, and a request
-// that changes it changes it for every other request in flight.
+// Set it once where the application is wired: it is global, and a request that
+// changes it changes it for every other request in flight.
 func DefaultView(view ...string) string {
 	viewMu.Lock()
 	defer viewMu.Unlock()
@@ -48,10 +43,8 @@ func DefaultView(view ...string) string {
 	return defaultView
 }
 
-// DefaultSimpleView is AbstractPaginator::defaultSimpleView and reads back
-// AbstractPaginator::$defaultSimpleView, and
-// AbstractPaginator::defaultSimpleView(), for the pager that has only previous
-// and next. It reads and writes the same way [DefaultView] does.
+// DefaultSimpleView reads and writes the view for the pager that has only
+// previous and next, the same way [DefaultView] does.
 func DefaultSimpleView(view ...string) string {
 	viewMu.Lock()
 	defer viewMu.Unlock()
@@ -61,29 +54,29 @@ func DefaultSimpleView(view ...string) string {
 	return defaultSimpleView
 }
 
-// UseTailwind is AbstractPaginator::useTailwind. It is the default.
+// UseTailwind is the default.
 func UseTailwind() {
 	DefaultView(TailwindView)
 	DefaultSimpleView(SimpleTailwindView)
 }
 
-// UseBootstrap is AbstractPaginator::useBootstrap, which is
-// [UseBootstrapFour] under the name it had before there were four and five.
+// UseBootstrap is [UseBootstrapFour] under the name it had before there were
+// four and five.
 func UseBootstrap() { UseBootstrapFour() }
 
-// UseBootstrapThree is AbstractPaginator::useBootstrapThree.
+// UseBootstrapThree selects the Bootstrap 3 pager views.
 func UseBootstrapThree() {
 	DefaultView(BootstrapThreeView)
 	DefaultSimpleView(SimpleBootstrapThreeView)
 }
 
-// UseBootstrapFour is AbstractPaginator::useBootstrapFour.
+// UseBootstrapFour selects the Bootstrap 4 pager views.
 func UseBootstrapFour() {
 	DefaultView(BootstrapFourView)
 	DefaultSimpleView(SimpleBootstrapFourView)
 }
 
-// UseBootstrapFive is AbstractPaginator::useBootstrapFive.
+// UseBootstrapFive selects the Bootstrap 5 pager views.
 func UseBootstrapFive() {
 	DefaultView(BootstrapFiveView)
 	DefaultSimpleView(SimpleBootstrapFiveView)

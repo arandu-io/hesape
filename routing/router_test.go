@@ -162,10 +162,10 @@ func TestRootAndTrailingSlashJoin(t *testing.T) {
 
 // TestPutAndPatchRegisterTheirOwnMethod covers the two verbs nothing reached.
 //
-// Resource registers update through its own path and never calls Put or Patch,
-// so both were unexercised: a copy-paste that left Put registering POST would
-// have compiled, served, and shown the wrong verb in `aru routes` -- and the
-// symptom is a form that silently hits the wrong handler.
+// Resource registers update through its own path and never calls Put or
+// Patch, so both were unexercised: a copy-paste that left Put registering
+// POST would have compiled, served, and shown the wrong verb in the route
+// table -- and the symptom is a form that silently hits the wrong handler.
 func TestPutAndPatchRegisterTheirOwnMethod(t *testing.T) {
 	for _, method := range []string{http.MethodPut, http.MethodPatch} {
 		t.Run(method, func(t *testing.T) {
@@ -203,8 +203,9 @@ func TestPutAndPatchRegisterTheirOwnMethod(t *testing.T) {
 				}
 			}
 
-			// The table is what `aru routes` prints and what Routes.Route
-			// resolves against. A wrong verb there is a wrong verb in the form.
+			// The table is what route introspection prints and what
+			// Routes.Route resolves against. A wrong verb there is a wrong
+			// verb in the form.
 			routes := r.Routes()
 			if len(routes) != 1 {
 				t.Fatalf("registered %d routes, want 1", len(routes))
@@ -279,7 +280,7 @@ func TestMatchAnswersEveryMethodItNamesAndNoOther(t *testing.T) {
 }
 
 // TestMatchWithoutMethodsIsRefusedAtBoot: the alternative is a route that
-// answers nothing and appears in `aru routes` as though it did.
+// answers nothing and appears in the route table as though it did.
 func TestMatchWithoutMethodsIsRefusedAtBoot(t *testing.T) {
 	defer func() {
 		if recover() == nil {

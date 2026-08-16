@@ -7,11 +7,8 @@ import (
 	"github.com/arandu-io/hesape/str"
 )
 
-// HasUniqueIDs answers
-// Illuminate\Database\Eloquent\Concerns\HasUniqueIds. The PHP spells the last
-// word Ids.
-//
-// A model that generates its own key before the insert rather than reading one
+// HasUniqueIDs is a model that generates its own key before the insert rather
+// than reading one
 // back from the engine. That matters beyond tidiness: a key the application
 // chose can be written into the parent and the children in the same
 // transaction, and it does not need the round trip that `insert ... returning
@@ -74,8 +71,7 @@ func (h *HasUniqueIDs) SetUniqueIDs(attributes map[string]any, keyName string) {
 	}
 }
 
-// HasUUIDs answers Illuminate\Database\Eloquent\Concerns\HasUuids: keys that
-// are UUIDs.
+// HasUUIDs generates keys that are UUIDs.
 //
 // The generator is hesape/str, which the collection already has, rather than a
 // second implementation here -- and str is where the test seams live
@@ -84,8 +80,7 @@ func HasUUIDs() HasUniqueIDs {
 	return HasUniqueIDs{Generator: str.UUID}
 }
 
-// HasULIDs answers Illuminate\Database\Eloquent\Concerns\HasUlids: keys that
-// are ULIDs.
+// HasULIDs generates keys that are ULIDs.
 //
 // A ULID sorts by creation time as a string, which is what makes it the better
 // default for a primary key: a random UUID as a clustered index scatters every
@@ -95,21 +90,17 @@ func HasULIDs() HasUniqueIDs {
 	return HasUniqueIDs{Generator: str.ULID}
 }
 
-// ResolveRouteBindingQuery answers
-// HasUniqueStringIds::resolveRouteBindingQuery, which is the guard and nothing
-// else: the PHP's body refuses a value that cannot be a generated key and then
-// hands the query to parent::resolveRouteBindingQuery.
+// ResolveRouteBindingQuery refuses a route value that cannot be a generated key.
 //
-// So this returns the refusal rather than a query. The query is the builder's,
-// and every query in this framework is reached through an auth.Grant
-// (RULE 17) -- which a trait that cannot see the model cannot hold. field is
-// the column the route binds on, empty for the route key; routeKeyName and
-// keyName are what the model would answer, passed in for the same reason.
+// It returns the refusal rather than a query. The query is the builder's, and
+// every query in this framework is reached through an auth.Grant, which this
+// struct cannot hold because it cannot see the model. field is the column the
+// route binds on, empty for the route key; routeKeyName and keyName are what the
+// model would answer, passed in for the same reason.
 //
-// It returns an error where the PHP throws ModelNotFoundException (ADR 0044,
-// mechanical change), and the error is the same one a missing row gives: a
-// malformed key and an absent row are the same 404, and telling them apart in
-// the response tells a stranger which keys exist.
+// The error is the same one a missing row gives: a malformed key and an absent
+// row are the same 404, and telling them apart in the response tells a stranger
+// which keys exist.
 func (h *HasUniqueIDs) ResolveRouteBindingQuery(value, field, routeKeyName, keyName string) error {
 	if !h.UsesUniqueIDs() {
 		return nil

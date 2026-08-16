@@ -12,9 +12,8 @@ import (
 //	printf 'laravel_sessionv2' | openssl dgst -sha1 -hmac 'super-secret-key'
 //	printf 'otherv2'           | openssl dgst -sha1 -hmac 'super-secret-key'
 //
-// which is the same call PHP's hash_hmac('sha1', ...) makes. A prefix computed
-// here has to match a prefix computed there, or a cookie written by an
-// Illuminate application is unreadable by this one.
+// A prefix computed here has to match a digest computed this way, since both
+// are HMAC-SHA1 over the same message and key.
 const (
 	prefixKey     = "super-secret-key"
 	sessionDigest = "fccddc1e78db8b92ca4f48c1d74f56b6a06f939a"
@@ -61,9 +60,7 @@ func TestCookieValuePrefixRemoveCutsExactlyThePrefix(t *testing.T) {
 }
 
 func TestCookieValuePrefixRemoveOnSomethingShorterThanThePrefix(t *testing.T) {
-	// PHP 8 returns "" from substr() past the end of the string, where PHP 7
-	// returned false. Nothing here may panic on a short value: the value came
-	// off a request.
+	// Nothing here may panic on a short value: the value came off a request.
 	for _, value := range []string{"", "short", strings.Repeat("a", 40), strings.Repeat("a", 41)} {
 		if got := cookie.CookieValuePrefix.Remove(value); got != "" {
 			t.Errorf("CookieValuePrefix.Remove(%q) = %q, want the empty string", value, got)

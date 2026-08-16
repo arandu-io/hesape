@@ -15,11 +15,11 @@ import (
 	"time"
 )
 
-// The keys the store reserves for itself. They are Illuminate's, character for
-// character, because a session written by one and read by the other has to
-// agree on where the token and the flash live.
+// The keys the store reserves for itself. Their exact spelling matters: a
+// session written under one and read back under a different spelling would
+// silently look empty.
 const (
-	// TokenKey holds the CSRF token. Illuminate's Store::token() reads it.
+	// TokenKey holds the CSRF token. [Store.Token] reads it.
 	TokenKey = "_token"
 	// OldInputKey holds what was typed into the form that was rejected.
 	OldInputKey = "_old_input"
@@ -37,32 +37,29 @@ const (
 )
 
 // idLength is how many characters a session id has, and what [Store.IsValidID]
-// insists on. Forty alphanumerics is Illuminate's Str::random(40): 238 bits,
-// which is not a number anybody walks.
+// insists on. Forty alphanumerics is 238 bits, which is not a number anybody
+// walks.
 const idLength = 40
 
 // ErrNoPreviousURL is returned by [Store.PreviousURI] when nothing has been
-// stored. It is the RuntimeException Illuminate throws, as the error half of
-// the pair.
+// stored.
 var ErrNoPreviousURL = errors.New("session: no previous URL was stored")
 
 // SessionHandler is where a session's bytes live between requests.
 //
-// It is PHP's SessionHandlerInterface, which Illuminate's handlers implement,
-// with one mechanical change: every method takes a context.Context. PHP has no
-// cancellation to plumb and Go does, and without it the database and cache
-// handlers cannot honour a request that was abandoned or a deadline that has
-// passed -- which on a session read is a goroutine held open for every client
-// that walked away.
+// Every method takes a context.Context, so the database and cache handlers
+// can honour a request that was abandoned or a deadline that has passed --
+// which on a session read is a goroutine held open for every client that
+// walked away.
 //
-// Read answers with the empty string for a session that is not there. That is
-// PHP's contract and it is kept, because it is what makes a first request and an
-// expired one the same case: both start an empty session, and neither is an
-// error the application can do anything about.
+// Read answers with the empty string for a session that is not there,
+// because that is what makes a first request and an expired one the same
+// case: both start an empty session, and neither is an error the
+// application can do anything about.
 type SessionHandler interface {
-	// Open is called before the first read. Every handler here answers nil; it
-	// exists because the interface it mirrors has it, and because a handler that
-	// opens a connection has somewhere to do it.
+	// Open is called before the first read. Every handler here answers nil;
+	// the method exists so a handler that opens a connection has somewhere
+	// to do it.
 	Open(ctx context.Context, savePath, sessionName string) error
 	// Close is called when the session is finished with.
 	Close(ctx context.Context) error
@@ -91,35 +88,32 @@ type ExistenceAwareInterface interface {
 // RequestAware is implemented by a handler that stores the session in the
 // request itself.
 //
-// Only [CookieSessionHandler] does. Illuminate asks `instanceof
-// CookieSessionHandler` in Store::handlerNeedsRequest(); this asks for the
-// capability instead, which answers the same for that handler and does not have
-// to be edited when a second one needs the same thing.
+// Only [CookieSessionHandler] does. [Store.HandlerNeedsRequest] asks for this
+// capability rather than naming the concrete type, so it does not have to be
+// edited when a second handler needs the same thing.
 type RequestAware interface {
 	SetRequest(r *http.Request)
 }
 
-// Store is one session: Illuminate\Session\Store.
-//
-// It is a bag of keys with an id, loaded from a [SessionHandler] at the start of
-// a request and written back at the end of it. What lives in it is the flash,
-// the old input, the CSRF token and the previous URL -- which is to say
-// everything that makes old() and $errors work on the page a rejected form is
-// sent back to.
+// Store is one session: a bag of keys with an id, loaded from a
+// [SessionHandler] at the start of a request and written back at the end of
+// it. What lives in it is the flash, the old input, the CSRF token and the
+// previous URL -- which is to say everything a page needs to redisplay the
+// old input and validation errors of a rejected form.
 //
 // # One Store belongs to one request
 //
-// It holds no lock, exactly as Illuminate's does not. It is created for a
-// request by [SessionManager.Driver] or by [StartSession], read and written on
-// that request's goroutine, and saved at the end of it. Sharing one between
-// requests is the bug this paragraph exists to name: two requests would
-// interleave writes into one map and each would save the other's session.
+// It holds no lock. It is created for a request by [SessionManager.Driver]
+// or by [StartSession], read and written on that request's goroutine, and
+// saved at the end of it. Sharing one between requests is the bug this
+// paragraph exists to name: two requests would interleave writes into one
+// map and each would save the other's session.
 //
 // # This is not [RecordStore]
 //
-// [RecordStore] is the other half -- it signs the cookie, mints ids and stores
-// one typed [Record] per session. This one is the bag of keys a Laravel
-// developer reaches for. They share nothing but the package.
+// [RecordStore] is the other half -- it signs the cookie, mints ids and
+// stores one typed [Record] per session. This one is the bag of keys a
+// page's handler reaches for. They share nothing but the package.
 type Store struct {
 	id         string
 	name       string
@@ -137,19 +131,14 @@ type Store struct {
 	prepareForStorage     func(data string) (string, error)
 }
 
-// NewStore is Store::__construct.
+// NewStore returns a session over a handler.
 //
-// It returns a session over a handler.
+// name is the cookie the id travels in. id is the one the browser sent; an
+// empty or malformed one is replaced with a fresh one, which is why a
+// forged cookie starts an empty session rather than an error.
 //
-// name is the cookie the id travels in, which is Illuminate's session.cookie.
-// id is the one the browser sent; an empty or malformed one is replaced with a
-// fresh one, which is what Illuminate's setId() does and is why a forged cookie
-// starts an empty session rather than an error.
-//
-// Illuminate's constructor takes a fourth argument choosing between PHP's
-// serialize() and JSON. There is no serialize() in Go, so the payload is always
-// JSON -- which is also the only one of the two that a second language can read,
-// and the reason Illuminate added the option.
+// The payload is always encoded as JSON, which is portable to a second
+// language reading the same store.
 func NewStore(name string, handler SessionHandler, id string) *Store {
 	s := &Store{
 		name:                  name,
@@ -162,10 +151,8 @@ func NewStore(name string, handler SessionHandler, id string) *Store {
 	return s
 }
 
-// Start is Store::start.
-//
-// It loads the session from the handler and mints a CSRF token when there is
-// none.
+// Start loads the session from the handler and mints a CSRF token when
+// there is none.
 //
 // It is the first thing [StartSession] does, and it must run before anything
 // reads the session: an unstarted Store is an empty one, and a page drawn from
@@ -194,13 +181,10 @@ func (s *Store) loadSession(ctx context.Context) error {
 }
 
 // readFromHandler reads and decodes, and treats an unreadable payload as an
-// empty session.
-//
-// Illuminate does the same with a `@unserialize` whose failure it swallows, and
-// the reason is worth keeping: a payload this binary cannot read is one written
-// by an older release or corrupted in transit, and the person in front of it can
-// do nothing about either. Signing them out is survivable; a 500 on every page
-// until somebody clears their cookies is not.
+// empty session: a payload this binary cannot read is one written by an
+// older release or corrupted in transit, and the person in front of it can
+// do nothing about either. Signing them out is survivable; a 500 on every
+// page until somebody clears their cookies is not.
 func (s *Store) readFromHandler(ctx context.Context) (map[string]any, error) {
 	data, err := s.handler.Read(ctx, s.GetID())
 	if err != nil {
@@ -213,9 +197,8 @@ func (s *Store) readFromHandler(ctx context.Context) (map[string]any, error) {
 	if err != nil {
 		// An [EncryptedStore] that cannot decrypt what is stored is holding a
 		// session written under another key -- a rotation, or somebody else's
-		// cookie. Illuminate answers the same way, with an empty array: the
-		// person is signed out, which is survivable, and an error here would be
-		// a 500 on every page until they cleared their cookies.
+		// cookie. The person is signed out, which is survivable, and an error
+		// here would be a 500 on every page until they cleared their cookies.
 		return nil, nil
 	}
 	var out map[string]any
@@ -225,9 +208,7 @@ func (s *Store) readFromHandler(ctx context.Context) (map[string]any, error) {
 	return out, nil
 }
 
-// Save is Store::save.
-//
-// It writes the session back to the handler and ages the flash.
+// Save writes the session back to the handler and ages the flash.
 //
 // Ageing on the way out is what makes a flashed message survive exactly one
 // request: what this request flashed becomes what the next one reads, and what
@@ -250,10 +231,8 @@ func (s *Store) Save(ctx context.Context) error {
 	return nil
 }
 
-// AgeFlashData is Store::ageFlashData.
-//
-// It moves this request's flash into the next request's, and drops the previous
-// one.
+// AgeFlashData moves this request's flash into the next request's, and
+// drops the previous one.
 //
 // This is the whole of how a message survives a redirect and no longer:
 //
@@ -272,11 +251,8 @@ func (s *Store) AgeFlashData() {
 	s.Put(flashNewKey, []string{})
 }
 
-// All is Store::all.
-//
-// It returns everything the session holds, as a copy. The PHP hands back the
-// attributes array itself and PHP copies an array on assignment; a Go map
-// handed back the same way would be the session, writable from outside it.
+// All returns everything the session holds, as a copy: a Go map handed back
+// directly would be the session, writable from outside it.
 func (s *Store) All() map[string]any {
 	out := make(map[string]any, len(s.attributes))
 	for key, value := range s.attributes {
@@ -285,19 +261,17 @@ func (s *Store) All() map[string]any {
 	return out
 }
 
-// Only is Store::only, which the PHP implements with Arr::only.
+// Only returns the named keys, and the names are top-level keys, never
+// walked in dot notation: Only(["user.name"]) matches a key literally
+// spelled "user.name" and nothing else.
 //
-// It returns the named keys, and the names are top-level keys.
+// This used to read each key in the dot notation [Store.Get] uses, which
+// made the two disagree about what a whitelist is -- and in the direction
+// that matters, because a whitelist that reaches further than it was told
+// to is one that hands out a field somebody meant to leave behind.
 //
-// Arr::only is array_intersect_key over a flipped list, so it never walks: PHP's
-// Only(["user.name"]) matches a key literally spelled "user.name" and nothing
-// else. This used to read each key in the dot notation [Store.Get] uses, which
-// made the two disagree about what a whitelist is -- and in the direction that
-// matters, because a whitelist that reaches further than it was told to is one
-// that hands out a field somebody meant to leave behind.
-//
-// [Store.Except] is not the mirror of this and does walk, because Arr::except is
-// Arr::forget and that one is dot-notation aware.
+// [Store.Except] is not the mirror of this: it does walk dot notation,
+// because it removes keys through [arrForget], which is dot-notation aware.
 func (s *Store) Only(keys []string) map[string]any {
 	out := map[string]any{}
 	for _, key := range keys {
@@ -308,10 +282,9 @@ func (s *Store) Only(keys []string) map[string]any {
 	return out
 }
 
-// Except is Store::except, which the PHP implements with Arr::except.
-//
-// It returns everything but the named keys, in dot notation: Arr::except calls
-// Arr::forget, which walks. See [Store.Only] for the half that does not.
+// Except returns everything but the named keys, in dot notation: it removes
+// each one through [arrForget], which walks. See [Store.Only] for the half
+// that does not.
 func (s *Store) Except(keys []string) map[string]any {
 	out := s.All()
 	for _, key := range keys {
@@ -320,15 +293,12 @@ func (s *Store) Except(keys []string) map[string]any {
 	return out
 }
 
-// Exists is Store::exists.
+// Exists reports whether every key is present, whatever it holds --
+// including nil. [Store.Has] is the one that asks for a value as well.
 //
-// It reports whether every key is present, whatever it holds -- including nil.
-// [Store.Has] is the one that asks for a value as well.
-//
-// No keys is false, and Illuminate's is true: `!collect([])->contains(...)` is
-// what PHP makes of the empty case, and it is an artifact rather than a
-// decision. False is the answer that does not make `if !s.Exists(keys...)` pass
-// silently for a list something upstream forgot to fill.
+// No keys is false: that is the answer that does not make
+// `if !s.Exists(keys...)` pass silently for a list something upstream
+// forgot to fill.
 func (s *Store) Exists(keys ...string) bool {
 	for _, key := range keys {
 		if _, ok := arrGet(s.attributes, key); !ok {
@@ -338,14 +308,10 @@ func (s *Store) Exists(keys ...string) bool {
 	return len(keys) > 0
 }
 
-// Missing is Store::missing.
-//
-// It reports whether none of the keys is present.
+// Missing reports whether none of the keys is present.
 func (s *Store) Missing(keys ...string) bool { return !s.Exists(keys...) }
 
-// Has is Store::has.
-//
-// It reports whether every key is present and holds something. No keys is
+// Has reports whether every key is present and holds something. No keys is
 // false, for the reason [Store.Exists] gives.
 func (s *Store) Has(keys ...string) bool {
 	for _, key := range keys {
@@ -357,9 +323,8 @@ func (s *Store) Has(keys ...string) bool {
 	return len(keys) > 0
 }
 
-// HasAny is Store::hasAny.
-//
-// It reports whether at least one of the keys is present and holds something.
+// HasAny reports whether at least one of the keys is present and holds
+// something.
 func (s *Store) HasAny(keys ...string) bool {
 	for _, key := range keys {
 		if value, ok := arrGet(s.attributes, key); ok && value != nil {
@@ -371,14 +336,13 @@ func (s *Store) HasAny(keys ...string) bool {
 
 // Get returns a value, or the default when there is none.
 //
-// The key is read in dot notation, so "user.name" reaches inside a nested map,
-// which is what Illuminate's Arr::get does. The default is variadic because
-// PHP's is an optional argument; passing none means nil.
+// The key is read in dot notation, so "user.name" reaches inside a nested
+// map. The default is variadic, so passing none means nil.
 //
-// It answers `any`, because the session holds `mixed`. What comes back out of a
-// session that has been through a handler is what JSON decodes to: a number is
-// a float64, an array is a []any. Reach for [Store.Increment] rather than
-// asserting on the number type yourself.
+// It returns `any`, because the session holds values of any type. What
+// comes back out of a session that has been through a handler is what JSON
+// decodes to: a number is a float64, an array is a []any. Reach for
+// [Store.Increment] rather than asserting on the number type yourself.
 func (s *Store) Get(key string, def ...any) any {
 	if value, ok := arrGet(s.attributes, key); ok {
 		return value
@@ -389,19 +353,15 @@ func (s *Store) Get(key string, def ...any) any {
 	return nil
 }
 
-// Pull is Store::pull, which the PHP implements with Arr::pull.
-//
-// It returns a value and forgets it.
+// Pull returns a value and forgets it.
 func (s *Store) Pull(key string, def ...any) any {
 	value := s.Get(key, def...)
 	arrForget(s.attributes, key)
 	return value
 }
 
-// HasOldInput is Store::hasOldInput.
-//
-// It reports whether the rejected form left anything behind. An empty key asks
-// whether there is any old input at all, which is the PHP's null key.
+// HasOldInput reports whether the rejected form left anything behind. An
+// empty key asks whether there is any old input at all.
 func (s *Store) HasOldInput(key string) bool {
 	old := s.GetOldInput(key)
 	if key == "" {
@@ -411,11 +371,9 @@ func (s *Store) HasOldInput(key string) bool {
 	return old != nil
 }
 
-// GetOldInput is Store::getOldInput.
-//
-// It returns what was typed into the form that was rejected, so the page it was
-// sent back to can put it in the boxes again. An empty key returns all of it,
-// which is the PHP's null key.
+// GetOldInput returns what was typed into the form that was rejected, so
+// the page it was sent back to can put it in the boxes again. An empty key
+// returns all of it.
 func (s *Store) GetOldInput(key string, def ...any) any {
 	old, _ := s.Get(OldInputKey, map[string]any{}).(map[string]any)
 	if old == nil {
@@ -433,29 +391,24 @@ func (s *Store) GetOldInput(key string, def ...any) any {
 	return nil
 }
 
-// Replace is Store::replace, which the PHP implements with Store::put given an
-// array.
-//
-// It puts every pair of the map in the session, leaving the rest alone -- the
-// name says "replace" and the body replaces the named keys, not the session.
-// [Store.Flush] is the one that empties it.
+// Replace puts every pair of the map in the session, leaving the rest alone
+// -- the name says "replace" and the body replaces the named keys, not the
+// session. [Store.Flush] is the one that empties it.
 func (s *Store) Replace(attributes map[string]any) {
 	for key, value := range attributes {
 		s.Put(key, value)
 	}
 }
 
-// Put is Store::put, which the PHP implements with Arr::set.
-//
-// It writes a value. The key is dot notation, so "user.name" writes inside a
-// nested map, creating it when it is not there. The PHP takes an array as well
-// as a key; that half is [Store.Replace] here, because one function whose first
-// argument is either a key or a map is not a signature Go has.
+// Put writes a value. The key is dot notation, so "user.name" writes inside
+// a nested map, creating it when it is not there. Writing a whole map
+// instead of one key is [Store.Replace] here, kept as a separate function
+// because one function whose first argument is either a key or a map is not
+// a signature Go has.
 func (s *Store) Put(key string, value any) { arrSet(s.attributes, key, value) }
 
-// Remember is Store::remember.
-//
-// It returns a value, storing what the callback produces when there is none.
+// Remember returns a value, storing what the callback produces when there
+// is none.
 func (s *Store) Remember(key string, callback func() any) any {
 	if value := s.Get(key); value != nil {
 		return value
@@ -465,18 +418,15 @@ func (s *Store) Remember(key string, callback func() any) any {
 	return value
 }
 
-// Push is Store::push.
+// Push appends a value to a list in the session, starting one when there is
+// none.
 //
-// It appends a value to a list in the session, starting one when there is none.
-//
-// A key holding something that is not a list keeps what it held, as the first
-// element of the list that replaces it. It used to start a fresh list and drop
-// the old value on the floor: silent data loss, on the one call whose name
-// promises it only adds, and reachable from anything that wrote a single value
-// under a key a later release started pushing to. PHP does not lose it either --
-// `$array[] =` over a scalar is a fatal Error there, which is louder than this
-// and no more forgiving. Keeping the value is the answer that leaves nothing to
-// recover.
+// A key holding something that is not a list keeps what it held, as the
+// first element of the list that replaces it. It used to start a fresh list
+// and drop the old value on the floor: silent data loss, on the one call
+// whose name promises it only adds, and reachable from anything that wrote
+// a single value under a key a later release started pushing to. Keeping
+// the value is the answer that leaves nothing to recover.
 func (s *Store) Push(key string, value any) {
 	existing := s.Get(key)
 	list, ok := toSlice(existing)
@@ -486,33 +436,27 @@ func (s *Store) Push(key string, value any) {
 	s.Put(key, append(list, value))
 }
 
-// Increment is Store::increment.
+// Increment adds to a number in the session and returns what it became. A
+// key holding nothing counts as zero, which is what makes it usable as a
+// counter without a branch at the call site. A key holding something that
+// is not a number at all is treated as zero too: the alternative is an
+// error on a path whose whole purpose is not to have one.
 //
-// It adds to a number in the session and returns what it became. A key holding
-// nothing counts as zero, which is what makes it usable as a counter without a
-// branch at the call site. A key holding something that is not a number at all
-// is treated as zero too: the alternative is an error on a path whose whole
-// purpose is not to have one, and PHP's `+` warns and takes zero for the same
-// input.
-//
-// A number written as text counts. PHP's `+` coerces first, so a key holding
-// "5" is five there; this read it as zero and answered 1, which is a counter
-// that silently restarts the first time the value comes back through anything
-// that stringifies -- a form field, a header, a store an older release wrote.
+// A number written as text counts: reading it as zero instead would make a
+// counter silently restart the first time the value comes back through
+// anything that stringifies it -- a form field, a header, a store an older
+// release wrote.
 func (s *Store) Increment(key string, amount int) int {
 	value := toInt(s.Get(key, 0)) + amount
 	s.Put(key, value)
 	return value
 }
 
-// Decrement is Store::decrement.
-//
-// It subtracts from a number in the session and returns what it became.
+// Decrement subtracts from a number in the session and returns what it
+// became.
 func (s *Store) Decrement(key string, amount int) int { return s.Increment(key, -amount) }
 
-// Flash is Store::flash.
-//
-// It stores a value for the NEXT request and no longer.
+// Flash stores a value for the NEXT request and no longer.
 //
 // It is what a redirect after a rejected form carries: the controller flashes,
 // answers a redirect, and the page the browser lands on reads it. By the request
@@ -528,9 +472,7 @@ func (s *Store) Flash(key string, value any) {
 	s.removeFromOldFlashData(key)
 }
 
-// Now is Store::now.
-//
-// It stores a value for THIS request only.
+// Now stores a value for THIS request only.
 //
 // It goes straight into the previous request's list, so [Store.AgeFlashData]
 // drops it at the end of this one. It is for a message produced by the request
@@ -540,9 +482,7 @@ func (s *Store) Now(key string, value any) {
 	s.Push(flashOldKey, key)
 }
 
-// Reflash is Store::reflash.
-//
-// It keeps everything flashed for this request for one more.
+// Reflash keeps everything flashed for this request for one more.
 //
 // It is what a request that could not draw the page calls -- a redirect in the
 // middle of a flow, an HTMX fragment that turned out to need a full navigation
@@ -552,9 +492,7 @@ func (s *Store) Reflash() {
 	s.Put(flashOldKey, []string{})
 }
 
-// Keep is Store::keep.
-//
-// It reflashes only the named keys.
+// Keep reflashes only the named keys.
 func (s *Store) Keep(keys ...string) {
 	s.mergeNewFlashes(keys...)
 	s.removeFromOldFlashData(keys...)
@@ -592,38 +530,29 @@ func (s *Store) flashKeys(which string) []string {
 	return toStrings(s.Get(which, []string{}))
 }
 
-// FlashInput is Store::flashInput.
-//
-// It stores what was typed into a form, so the page it is sent back to can fill
-// the boxes in again. It is read with [Store.GetOldInput].
+// FlashInput stores what was typed into a form, so the page it is sent back
+// to can fill the boxes in again. It is read with [Store.GetOldInput].
 func (s *Store) FlashInput(value map[string]any) { s.Flash(OldInputKey, value) }
 
-// Remove is Store::remove, which the PHP implements with Arr::pull.
-//
-// It forgets a key and returns what it held.
+// Remove forgets a key and returns what it held.
 func (s *Store) Remove(key string) any {
 	value := s.Get(key)
 	arrForget(s.attributes, key)
 	return value
 }
 
-// Forget is Store::forget, which the PHP implements with Arr::forget.
-//
-// It removes keys from the session.
+// Forget removes keys from the session.
 func (s *Store) Forget(keys ...string) {
 	for _, key := range keys {
 		arrForget(s.attributes, key)
 	}
 }
 
-// Flush is Store::flush.
-//
-// It empties the session, keeping the id.
+// Flush empties the session, keeping the id.
 func (s *Store) Flush() { s.attributes = map[string]any{} }
 
-// Invalidate is Store::invalidate.
-//
-// It empties the session AND gives it a new id, destroying the old one.
+// Invalidate empties the session AND gives it a new id, destroying the old
+// one.
 //
 // It is what a sign-out calls. Both halves matter: flushing without a new id
 // leaves the browser holding an id somebody may already know, and a new id
@@ -633,9 +562,7 @@ func (s *Store) Invalidate(ctx context.Context) error {
 	return s.Migrate(ctx, true)
 }
 
-// Regenerate is Store::regenerate.
-//
-// It gives the session a new id and a new CSRF token.
+// Regenerate gives the session a new id and a new CSRF token.
 //
 // It MUST be called on sign-in. Keeping the id somebody arrived with is session
 // fixation: an attacker plants an id, waits for the victim to authenticate on
@@ -649,11 +576,10 @@ func (s *Store) Regenerate(ctx context.Context, destroy bool) error {
 	return nil
 }
 
-// Migrate is Store::migrate.
-//
-// It gives the session a new id, optionally destroying the old record. The new
-// id comes out of [Store.SetID] given the empty string rather than out of a
-// separate generator call, which mints the same forty alphanumerics.
+// Migrate gives the session a new id, optionally destroying the old record.
+// The new id comes out of [Store.SetID] given the empty string rather than
+// out of a separate generator call, which mints the same forty
+// alphanumerics.
 //
 // It is [Store.Regenerate] without the new token, which is what
 // [Store.Invalidate] wants: there is nobody left to hand a token to.
@@ -668,32 +594,23 @@ func (s *Store) Migrate(ctx context.Context, destroy bool) error {
 	return nil
 }
 
-// IsStarted is Store::isStarted.
-//
-// It reports whether [Store.Start] has run and [Store.Save] has not.
+// IsStarted reports whether [Store.Start] has run and [Store.Save] has not.
 func (s *Store) IsStarted() bool { return s.started }
 
-// GetName is Store::getName.
-//
-// It returns the cookie the session id travels in.
+// GetName returns the cookie the session id travels in.
 func (s *Store) GetName() string { return s.name }
 
-// SetName is Store::setName. It sets it.
+// SetName sets the cookie the session id travels in.
 func (s *Store) SetName(name string) { s.name = name }
 
-// ID is Store::id.
-//
-// It returns the session id. It is [Store.GetID] under Illuminate's other name
-// for it, and both are here because Illuminate has both.
+// ID returns the session id. It is the same as [Store.GetID].
 func (s *Store) ID() string { return s.GetID() }
 
-// GetID is Store::getId. It returns the session id.
+// GetID returns the session id.
 func (s *Store) GetID() string { return s.id }
 
-// SetID is Store::setId.
-//
-// It sets the session id, or mints one when what it is given is not a session
-// id.
+// SetID sets the session id, or mints one when what it is given is not a
+// session id.
 //
 // An empty or malformed id is replaced rather than refused, which is what makes
 // a first visit and a forged cookie the same case: both get a fresh, empty
@@ -707,10 +624,8 @@ func (s *Store) SetID(id string) {
 	s.id = generateSessionID()
 }
 
-// IsValidID is Store::isValidId.
-//
-// It reports whether a string is shaped like a session id: exactly [idLength]
-// characters, letters and digits only.
+// IsValidID reports whether a string is shaped like a session id: exactly
+// [idLength] characters, letters and digits only.
 //
 // The shape check is what keeps a cookie value out of the handler. A file
 // handler joins the id onto a path and a database handler puts it in a WHERE:
@@ -743,43 +658,34 @@ func generateSessionID() string {
 	return string(b)
 }
 
-// SetExists is Store::setExists.
-//
-// It tells a handler that has to know whether the row is already there. A
-// handler that does not implement [ExistenceAwareInterface] is not told, and
-// does not need to be.
+// SetExists tells a handler that has to know whether the row is already
+// there. A handler that does not implement [ExistenceAwareInterface] is not
+// told, and does not need to be.
 func (s *Store) SetExists(value bool) {
 	if aware, ok := s.handler.(ExistenceAwareInterface); ok {
 		aware.SetExists(value)
 	}
 }
 
-// Token is Store::token.
-//
-// It returns the CSRF token this session carries, and "" when there is none --
-// the PHP answers null, which is the same absence in the type PHP has for it.
+// Token returns the CSRF token this session carries, and "" when there is
+// none.
 func (s *Store) Token() string {
 	token, _ := s.Get(TokenKey, "").(string)
 	return token
 }
 
-// RegenerateToken is Store::regenerateToken. It mints a new CSRF token.
+// RegenerateToken mints a new CSRF token.
 func (s *Store) RegenerateToken() { s.Put(TokenKey, generateSessionID()) }
 
-// HasPreviousURI is Store::hasPreviousUri.
-//
-// It reports whether an address was stored to send somebody back to. The PHP
-// asks whether the key is non-null; this asks whether it is non-empty, so a
-// session that stored "" answers true there and false here.
+// HasPreviousURI reports whether a non-empty address was stored to send
+// somebody back to.
 func (s *Store) HasPreviousURI() bool { return s.PreviousURL() != "" }
 
-// PreviousURI is Store::previousUri.
+// PreviousURI returns the stored address, parsed.
 //
-// It returns the stored address, parsed.
-//
-// It is the (T, error) that stands in for the RuntimeException Illuminate
-// throws when there is none: a caller that redirects to the zero URL sends
-// somebody to the site root without meaning to.
+// It returns (*url.URL, error) rather than a bare *url.URL, because a
+// caller that redirects to the zero URL sends somebody to the site root
+// without meaning to.
 func (s *Store) PreviousURI() (*url.URL, error) {
 	previous := s.PreviousURL()
 	if previous == "" {
@@ -792,18 +698,14 @@ func (s *Store) PreviousURI() (*url.URL, error) {
 	return parsed, nil
 }
 
-// PreviousURL is Store::previousUrl.
-//
-// It returns the stored address, or "" when there is none.
+// PreviousURL returns the stored address, or "" when there is none.
 func (s *Store) PreviousURL() string {
 	previous, _ := s.Get(PreviousURLKey, "").(string)
 	return previous
 }
 
-// SetPreviousURL is Store::setPreviousUrl.
-//
-// It stores where somebody was, so a guard can send them back after they sign
-// in.
+// SetPreviousURL stores where somebody was, so a guard can send them back
+// after they sign in.
 //
 // It stores the address as it is given. Validating one is the caller's job and
 // deliberately not this package's: an address read off a request and redirected
@@ -811,39 +713,30 @@ func (s *Store) PreviousURL() string {
 // the request is understood -- see hesape/hhttp.
 func (s *Store) SetPreviousURL(u string) { s.Put(PreviousURLKey, u) }
 
-// PasswordConfirmed is Store::passwordConfirmed.
-//
-// It records that the subject has just typed their password again, as a unix
-// timestamp under Illuminate's key.
+// PasswordConfirmed records that the subject has just typed their password
+// again, as a unix timestamp under [PasswordConfirmedKey].
 func (s *Store) PasswordConfirmed() { s.Put(PasswordConfirmedKey, time.Now().Unix()) }
 
-// GetHandler is Store::getHandler. It returns the handler underneath.
+// GetHandler returns the handler underneath.
 func (s *Store) GetHandler() SessionHandler { return s.handler }
 
-// SetHandler is Store::setHandler.
-//
-// It replaces the handler and returns the one now in place.
+// SetHandler replaces the handler and returns the one now in place.
 func (s *Store) SetHandler(handler SessionHandler) SessionHandler {
 	s.handler = handler
 	return s.handler
 }
 
-// HandlerNeedsRequest is Store::handlerNeedsRequest.
-//
-// It reports whether the handler stores the session in the request itself,
-// which only [CookieSessionHandler] does. The PHP asks `instanceof
-// CookieSessionHandler`; this asks for the [RequestAware] capability, which
-// answers the same for that handler and does not have to be edited when a
-// second one needs the same thing.
+// HandlerNeedsRequest reports whether the handler stores the session in the
+// request itself, which only [CookieSessionHandler] does. It asks for the
+// [RequestAware] capability rather than naming the concrete type, so it
+// does not have to be edited when a second handler needs the same thing.
 func (s *Store) HandlerNeedsRequest() bool {
 	_, ok := s.handler.(RequestAware)
 	return ok
 }
 
-// SetRequestOnHandler is Store::setRequestOnHandler.
-//
-// It hands the request to a handler that needs one, and does nothing for one
-// that does not.
+// SetRequestOnHandler hands the request to a handler that needs one, and
+// does nothing for one that does not.
 func (s *Store) SetRequestOnHandler(r *http.Request) {
 	if aware, ok := s.handler.(RequestAware); ok {
 		aware.SetRequest(r)
@@ -875,9 +768,9 @@ func arrGet(attributes map[string]any, key string) (any, bool) {
 
 // arrSet writes a dot-notation key, creating the levels it needs.
 //
-// A level holding something that is not a map is replaced. Illuminate's Arr::set
-// does the same, and the alternative -- refusing -- would make a session that
-// once held a string at "user" permanently unable to hold "user.name".
+// A level holding something that is not a map is replaced: the alternative
+// -- refusing -- would make a session that once held a string at "user"
+// permanently unable to hold "user.name".
 func arrSet(attributes map[string]any, key string, value any) {
 	if key == "" {
 		return
@@ -964,11 +857,10 @@ func toInt(value any) int {
 	case json.Number:
 		return toInt(string(typed))
 	case string:
-		// PHP's `+` coerces a numeric string before it adds, and a session that
-		// has been through a form, a header or an older release is full of them.
-		// A leading number is what PHP's cast takes and the rest is warned about
-		// and dropped, but taking only a whole number keeps one rule instead of
-		// two; "5.7" truncates because the result is an int.
+		// A numeric string counts: a session that has been through a form, a
+		// header or an older release is full of them. Taking only a whole
+		// number keeps one rule instead of two; "5.7" truncates because the
+		// result is an int.
 		if n, err := strconv.ParseInt(strings.TrimSpace(typed), 10, 64); err == nil {
 			return int(n)
 		}

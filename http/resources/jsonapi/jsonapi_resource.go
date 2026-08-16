@@ -6,11 +6,8 @@ import (
 	"reflect"
 )
 
-// JsonApiResource mirrors Illuminate\Http\Resources\JsonApi\JsonApiResource.
-//
-// It extends the JsonResource concept for JSON:API compliance,
-// adding type, id, relationships, links, and meta to the response
-// structure.
+// JsonApiResource is a resource object as JSON:API defines it: type, id,
+// attributes, relationships, links, and meta.
 type JsonApiResource struct {
 	ID            string
 	Type          string
@@ -19,10 +16,10 @@ type JsonApiResource struct {
 	Links         map[string]any
 	Meta          map[string]any
 
-	// usesRequestQueryString is ResolvesJsonApiElements::$usesRequestQueryString.
+	// usesRequestQueryString is set by RespectFieldsAndIncludesInQueryString.
 	usesRequestQueryString bool
-	// includesPreviouslyLoadedRelationships is
-	// ResolvesJsonApiElements::$includesPreviouslyLoadedRelationships.
+	// includesPreviouslyLoadedRelationships is set by
+	// IncludePreviouslyLoadedRelationships.
 	includesPreviouslyLoadedRelationships bool
 }
 
@@ -36,8 +33,8 @@ func NewJsonApiResource(id, resourceType string) *JsonApiResource {
 		Links:         make(map[string]any),
 		Meta:          make(map[string]any),
 
-		// The PHP default: the query string drives the sparse fieldsets and
-		// the includes until ignoreFieldsAndIncludesInQueryString says
+		// The default: the query string drives the sparse fieldsets and the
+		// includes until IgnoreFieldsAndIncludesInQueryString says
 		// otherwise.
 		usesRequestQueryString: true,
 	}
@@ -66,7 +63,9 @@ func (r *JsonApiResource) ToArray() map[string]any {
 	return result
 }
 
-// ToResponse returns the data for a JSON:API response.
+// ToResponse returns the data for a JSON:API response, wrapped under
+// "data". JSON:API fixes the wrapper, so this always wraps regardless of
+// the parent resources package's Wrap state.
 func (r *JsonApiResource) ToResponse() map[string]any {
 	return map[string]any{"data": r.ToArray()}
 }
@@ -141,8 +140,6 @@ func (c *AnonymousJsonApiResourceCollection) ToResponse() map[string]any {
 // Build it through [AttemptingToDetermineIdFor] or
 // [AttemptingToDetermineTypeFor], which name which of the two is missing and
 // on what Go type -- the fix is on the resource, not at the call site.
-//
-// Answers Illuminate\Http\Resources\JsonApi\Exceptions\ResourceIdentificationException.
 type ResourceIdentificationError struct {
 	Message string
 }
@@ -151,25 +148,23 @@ func (e *ResourceIdentificationError) Error() string {
 	return "jsonapi resource identification error: " + e.Message
 }
 
-// AttemptingToDetermineIdFor is
-// ResourceIdentificationException::attemptingToDetermineIdFor: the resource
-// object has no id and nothing to derive one from.
+// AttemptingToDetermineIdFor builds a [ResourceIdentificationError]: the
+// resource object has no id and nothing to derive one from.
 func AttemptingToDetermineIdFor(resource any) *ResourceIdentificationError {
 	return &ResourceIdentificationError{
 		Message: "unable to resolve resource object ID for [" + typeName(resource) + "]",
 	}
 }
 
-// AttemptingToDetermineTypeFor is
-// ResourceIdentificationException::attemptingToDetermineTypeFor: the resource
-// object has no type and nothing to derive one from.
+// AttemptingToDetermineTypeFor builds a [ResourceIdentificationError]: the
+// resource object has no type and nothing to derive one from.
 func AttemptingToDetermineTypeFor(resource any) *ResourceIdentificationError {
 	return &ResourceIdentificationError{
 		Message: "unable to resolve resource object type for [" + typeName(resource) + "]",
 	}
 }
 
-// typeName is the PHP's is_object($resource) ? $resource::class : gettype(...).
+// typeName is the Go type name of v, or "nil".
 func typeName(v any) string {
 	if v == nil {
 		return "nil"

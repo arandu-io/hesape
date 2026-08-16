@@ -703,7 +703,7 @@ func TestBasicSignsInFromTheAuthorizationHeader(t *testing.T) {
 		t.Fatal("Basic did not sign the person in")
 	}
 
-	// Already signed in: the PHP returns without touching anything.
+	// Already signed in: Basic returns without touching anything.
 	if err := guard.Basic(context.Background(), "email", nil); err != nil {
 		t.Fatalf("Basic complained about somebody already signed in: %v", err)
 	}
@@ -908,8 +908,8 @@ func TestTheTokenGuardWithNoTokenResolvesNobodyAndSetRequestReplacesIt(t *testin
 		t.Fatal("SetRequest handed back a different guard")
 	}
 
-	// The PHP caches the user for the request, and a nil is not cached: the
-	// field is still empty, so the new request is read.
+	// The user is cached for the request, and a nil is not cached: the field is
+	// still empty, so the new request is read.
 	if guard.User() != provider.user {
 		t.Fatal("the replaced request was not read")
 	}

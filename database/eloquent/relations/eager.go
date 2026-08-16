@@ -6,9 +6,9 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// EagerLoadRelation answers Illuminate\Database\Eloquent\Builder::eagerLoadRelation.
+// EagerLoadRelation loads one relation for a batch of parents.
 //
-// It is four lines and it is the whole of what with() buys:
+// It is four lines and it is the whole of what eager loading buys:
 //
 //	relation.AddEagerConstraints(models)  // one `in (...)` for every parent
 //	constraints(relation)                 // the caller's extra filters

@@ -126,8 +126,8 @@ func TestFileLoaderReadsEveryPathInOrder(t *testing.T) {
 	}
 }
 
-// AddPath is read the first time a group under it is asked for, since PHP's
-// addPath returns void and cannot report a malformed file.
+// AddPath is read the first time a group under it is asked for, since it has
+// nowhere to report a malformed file from.
 func TestFileLoaderAddPathIsReadOnDemand(t *testing.T) {
 	l := fileLoader(t, fstest.MapFS{
 		"lang/en/auth.json":  {Data: []byte(`{"failed": "no"}`)},
@@ -192,7 +192,7 @@ func TestFileLoaderReadsTheJSONCatalogue(t *testing.T) {
 }
 
 // A sentence in the JSON catalogue is found by the sentence itself, before any
-// group is consulted, which is what __() does in PHP.
+// group is consulted.
 func TestTheJSONCatalogueAnswersASentenceKey(t *testing.T) {
 	l := fileLoader(t, fstest.MapFS{
 		"lang/pt-BR.json": {Data: []byte(`{"Save changes": "Salvar alterações"}`)},

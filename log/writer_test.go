@@ -74,8 +74,8 @@ func (h *levelFilter) WithGroup(name string) slog.Handler {
 	return &levelFilter{next: h.next.WithGroup(name), level: h.level}
 }
 
-// TestTheEightLevelsWriteUnderTheirOwnLevel is the PSR-3 surface: each name
-// writes at the level the name says, and nothing renames one.
+// TestTheEightLevelsWriteUnderTheirOwnLevel: each name writes at the level the
+// name says, and nothing renames one.
 func TestTheEightLevelsWriteUnderTheirOwnLevel(t *testing.T) {
 	captured, records := log.Capture()
 	logger := log.NewLogger(captured, nil)
@@ -112,8 +112,8 @@ func TestTheEightLevelsWriteUnderTheirOwnLevel(t *testing.T) {
 	}
 }
 
-// TestLogAndWriteTakeTheLevel: Write is the alias Illuminate has carried since
-// Laravel 4, and it has to behave identically.
+// TestLogAndWriteTakeTheLevel: Write is an alias of Log, and it has to behave
+// identically.
 func TestLogAndWriteTakeTheLevel(t *testing.T) {
 	captured, records := log.Capture()
 	logger := log.NewLogger(captured, nil)
@@ -146,8 +146,8 @@ func TestTheContextArrayReachesTheLine(t *testing.T) {
 	}
 }
 
-// TestSeveralContextMapsMergeLeftToRight is how the variadic stands in for
-// PHP's single `array $context = []`.
+// TestSeveralContextMapsMergeLeftToRight: the variadic takes more than one map,
+// and the last one wins a repeated key.
 func TestSeveralContextMapsMergeLeftToRight(t *testing.T) {
 	captured, records := log.Capture()
 	logger := log.NewLogger(captured, nil)
@@ -214,7 +214,7 @@ func TestWithoutContextDropsKeysOrAllOfThem(t *testing.T) {
 		t.Fatalf("the line carries %v", got)
 	}
 
-	// No key at all is PHP's null, which clears everything.
+	// No key at all clears everything.
 	logger.WithoutContext()
 	logger.Info(context.Background(), "second")
 	if got := records.All()[1].Attrs; len(got) != 0 {
@@ -287,8 +287,8 @@ func TestListenSelectsTheMessageLoggedEvent(t *testing.T) {
 	}
 }
 
-// TestListenWithoutADispatcher is the RuntimeException Illuminate throws, in
-// the shape this ecosystem gives a thrown exception.
+// TestListenWithoutADispatcher: there is nothing to register with, so Listen
+// reports ErrNoDispatcher rather than accepting a callback nothing would call.
 func TestListenWithoutADispatcher(t *testing.T) {
 	captured, _ := log.Capture()
 

@@ -13,8 +13,8 @@ import (
 //
 // It exists because query/grammars is empty while this is being written, and
 // because a test that asserts against a fake compiler is asserting against a
-// fake. What it compiles is the subset these tests use, in the shape the base
-// PHP grammar compiles it -- including the two things the eloquent side depends
+// fake. What it compiles is the subset these tests use, in the shape a real
+// grammar compiles it -- including the two things the eloquent side depends
 // on: the sorted column order of an insert, and a SET column stripped of its
 // table, which is what the Postgres and SQLite grammars do.
 type testGrammar struct {
@@ -224,8 +224,8 @@ type statement struct {
 	Bindings []any
 }
 
-// testConnection records what it was asked to run and answers with rows the test
-// queued.
+// testConnection records what it was asked to run and returns the rows the
+// test queued.
 type testConnection struct {
 	mu         sync.Mutex
 	statements []statement
@@ -299,7 +299,7 @@ func (c *testConnection) Statement(sql string, bindings []any) (bool, error) {
 	return true, nil
 }
 
-// testProcessor answers the two hooks a driver gets.
+// testProcessor implements the two hooks a driver gets.
 type testProcessor struct{ conn *testConnection }
 
 func (p *testProcessor) ProcessSelect(q *query.Builder, results []query.Record) []query.Record {

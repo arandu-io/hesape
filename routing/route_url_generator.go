@@ -12,11 +12,11 @@ import (
 // RouteUrlGenerator is the half of UrlGenerator that turns a route and a bag
 // of parameters into an address.
 //
-// It mirrors Illuminate\Routing\RouteUrlGenerator. The work it does that a
-// string concatenation does not: it fills named placeholders, falls back to
-// the defaults, drops optional segments nobody filled, puts what is left over
-// on the query string, and refuses -- rather than emitting a URL with a
-// literal "{invoice}" in it -- when a required placeholder has no value.
+// The work it does that a string concatenation does not: it fills named
+// placeholders, falls back to the defaults, drops optional segments nobody
+// filled, puts what is left over on the query string, and refuses -- rather
+// than emitting a URL with a literal "{invoice}" in it -- when a required
+// placeholder has no value.
 type RouteUrlGenerator struct {
 	url     *UrlGenerator
 	request *http.Request
@@ -26,7 +26,7 @@ type RouteUrlGenerator struct {
 	DefaultParameters map[string]any
 
 	// DontEncode are the characters restored after encoding, so a URL keeps
-	// its separators. It is PHP's $dontEncode, byte for byte.
+	// its separators.
 	DontEncode map[string]string
 }
 
@@ -48,7 +48,7 @@ var dontEncode = map[string]string{
 	"%25": "%",
 }
 
-// NewRouteUrlGenerator is RouteUrlGenerator::__construct.
+// NewRouteUrlGenerator returns a generator for u and request.
 func NewRouteUrlGenerator(u *UrlGenerator, request *http.Request) *RouteUrlGenerator {
 	table := make(map[string]string, len(dontEncode))
 	for k, v := range dontEncode {
@@ -62,11 +62,11 @@ func NewRouteUrlGenerator(u *UrlGenerator, request *http.Request) *RouteUrlGener
 	}
 }
 
-// To is RouteUrlGenerator::to. It builds the URL of a route.
+// To builds the URL of a route.
 //
-// It returns an error where PHP throws UrlGenerationException: a placeholder
-// the caller left unfilled is a link that would 404, and saying so at the call
-// site is the whole reason a named route beats a string.
+// It returns an error when a placeholder the caller left unfilled would 404
+// the reader; saying so at the call site is the whole reason a named route
+// beats a string.
 func (g *RouteUrlGenerator) To(route *Route, parameters map[string]any, absolute bool) (string, error) {
 	named, query := g.formatParameters(route, parameters)
 
@@ -92,7 +92,8 @@ func (g *RouteUrlGenerator) To(route *Route, parameters map[string]any, absolute
 	return uri, nil
 }
 
-// getRouteDomain is RouteUrlGenerator::getRouteDomain.
+// getRouteDomain returns the route's domain, formatted, or empty when the
+// route declares none.
 func (g *RouteUrlGenerator) getRouteDomain(route *Route, parameters map[string]string) string {
 	if route.GetDomain() == "" {
 		return ""
@@ -100,12 +101,13 @@ func (g *RouteUrlGenerator) getRouteDomain(route *Route, parameters map[string]s
 	return g.formatDomain(route, parameters)
 }
 
-// formatDomain is RouteUrlGenerator::formatDomain.
+// formatDomain prepends the route's scheme to its domain and adds the port.
 func (g *RouteUrlGenerator) formatDomain(route *Route, parameters map[string]string) string {
 	return g.addPortToDomain(g.getRouteScheme(route) + route.GetDomain())
 }
 
-// getRouteScheme is RouteUrlGenerator::getRouteScheme.
+// getRouteScheme returns the scheme the route is restricted to, or the
+// generator's own.
 func (g *RouteUrlGenerator) getRouteScheme(route *Route) string {
 	switch {
 	case route.HttpOnly():
@@ -117,8 +119,8 @@ func (g *RouteUrlGenerator) getRouteScheme(route *Route) string {
 	}
 }
 
-// addPortToDomain is RouteUrlGenerator::addPortToDomain. The default port for
-// the scheme is left off, and anything else is kept.
+// addPortToDomain appends the request's port to domain, unless it is the
+// scheme's default.
 func (g *RouteUrlGenerator) addPortToDomain(domain string) string {
 	if g.request == nil {
 		return domain
@@ -131,12 +133,10 @@ func (g *RouteUrlGenerator) addPortToDomain(domain string) string {
 	return domain + ":" + strconv.Itoa(port)
 }
 
-// formatParameters is RouteUrlGenerator::formatParameters.
-//
-// It returns the value for each of the route's own parameters, in the route's
-// order, and everything left over for the query string. PHP also matches
-// positional values against the placeholders that had none; a Go map has no
-// order to match with, and Routes.Route is where the positional shape lives.
+// formatParameters returns the value for each of the route's own parameters,
+// in the route's order, and everything left over for the query string. A Go
+// map has no order to match positional values against; Routes.Route is where
+// that shape lives.
 func (g *RouteUrlGenerator) formatParameters(route *Route, parameters map[string]any) (map[string]string, map[string]any) {
 	given := g.url.FormatParameters(parameters)
 
@@ -175,14 +175,15 @@ func (g *RouteUrlGenerator) formatParameters(route *Route, parameters map[string
 	return named, given
 }
 
-// replaceRootParameters is RouteUrlGenerator::replaceRootParameters.
+// replaceRootParameters fills the placeholders of the URL root -- scheme and
+// domain -- with the route's parameters.
 func (g *RouteUrlGenerator) replaceRootParameters(route *Route, domain string, parameters map[string]string) string {
 	scheme := g.getRouteScheme(route)
 	return g.replaceRouteParameters(g.url.FormatRoot(scheme, domain), parameters)
 }
 
-// replaceRouteParameters is RouteUrlGenerator::replaceRouteParameters. It
-// fills the named placeholders and drops the optional ones left empty.
+// replaceRouteParameters fills the named placeholders and drops the optional
+// ones left empty.
 func (g *RouteUrlGenerator) replaceRouteParameters(path string, parameters map[string]string) string {
 	var b strings.Builder
 	rest := path
@@ -232,8 +233,9 @@ func (g *RouteUrlGenerator) replaceRouteParameters(path string, parameters map[s
 	return strings.Trim(out, "/")
 }
 
-// addQueryString is RouteUrlGenerator::addQueryString. A fragment is moved to
-// the end, because a query string after it is a query string nobody reads.
+// addQueryString appends the query string built from parameters. A fragment
+// is moved to the end, because a query string after it is a query string
+// nobody reads.
 func (g *RouteUrlGenerator) addQueryString(uri string, parameters map[string]any) string {
 	fragment := ""
 	if i := strings.IndexByte(uri, '#'); i >= 0 {
@@ -249,7 +251,8 @@ func (g *RouteUrlGenerator) addQueryString(uri string, parameters map[string]any
 	return uri + "#" + fragment
 }
 
-// getRouteQueryString is RouteUrlGenerator::getRouteQueryString.
+// getRouteQueryString builds the query string from whatever parameters were
+// left over after the named placeholders were filled.
 func (g *RouteUrlGenerator) getRouteQueryString(parameters map[string]any) string {
 	if len(parameters) == 0 {
 		return ""
@@ -265,7 +268,7 @@ func (g *RouteUrlGenerator) getRouteQueryString(parameters map[string]any) strin
 	return "?" + query
 }
 
-// Defaults is RouteUrlGenerator::defaults.
+// Defaults merges defaults into DefaultParameters.
 func (g *RouteUrlGenerator) Defaults(defaults map[string]any) {
 	if g.DefaultParameters == nil {
 		g.DefaultParameters = map[string]any{}
@@ -275,8 +278,7 @@ func (g *RouteUrlGenerator) Defaults(defaults map[string]any) {
 	}
 }
 
-// unfilledParameters returns the placeholders still standing in a built URL,
-// which is what PHP's preg_match_all('/{(.*?)}/') finds.
+// unfilledParameters returns the placeholders still standing in a built URL.
 func unfilledParameters(uri string) []string {
 	var out []string
 	rest := uri
@@ -295,9 +297,8 @@ func unfilledParameters(uri string) []string {
 	}
 }
 
-// stripOrigin removes the scheme and host from a built URL, which is PHP's
-// preg_replace('#^(//|[^/?])+#', ”, $uri): everything up to the first slash
-// or question mark, plus a leading "//".
+// stripOrigin removes the scheme and host from a built URL: everything up to
+// the first slash or question mark, plus a leading "//".
 func stripOrigin(uri string) string {
 	if strings.HasPrefix(uri, "//") {
 		uri = uri[2:]
@@ -310,8 +311,8 @@ func stripOrigin(uri string) string {
 	return ""
 }
 
-// rawURLEncode is PHP's rawurlencode: every byte outside the unreserved set
-// becomes a percent escape. The separators are put back by DontEncode.
+// rawURLEncode percent-escapes every byte outside the unreserved set. The
+// separators are put back by DontEncode.
 func rawURLEncode(s string) string {
 	const upper = "0123456789ABCDEF"
 	var b strings.Builder

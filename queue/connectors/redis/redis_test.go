@@ -20,11 +20,10 @@ import (
 //
 // Without REDIS_ADDRESS these skip. CI sets it.
 //
-// The variable is the one hesape/redis reads, and it used to be KV_ADDRESS here
-// -- the name of the repository ADR 0048 folded in. Two modules speak RESP and
-// there is one protocol, so there is one variable (RULE 9): with two, whichever
-// name the runner exported ran one suite and skipped the other in silence, and
-// a skipped suite prints ok.
+// The variable is the one hesape/redis reads. Two modules speak RESP and there
+// is one protocol, so there is one variable: with two, whichever name the
+// runner exported would run one suite and skip the other in silence, and a
+// skipped suite prints ok.
 
 const tenant = "11111111-1111-4111-8111-111111111111"
 
@@ -273,8 +272,8 @@ func TestAJobWithoutATenantIsRefused(t *testing.T) {
 	}
 }
 
-// TestNothingUsesLuaOrModules: the moment it does, Dragonfly stops being a
-// drop-in replacement and four products become one (RULE 11).
+// TestNothingUsesLuaOrModules: the moment it does, every RESP server other than
+// the one it was written against stops being a drop-in replacement.
 func TestNothingUsesLuaOrModules(t *testing.T) {
 	source, err := os.ReadFile("redis.go")
 	if err != nil {

@@ -2,26 +2,22 @@ package events
 
 import "github.com/arandu-io/hesape/auth"
 
-// GateEvaluated is Illuminate\Auth\Access\Events\GateEvaluated: the record that
-// an authorization question was asked, and what it was answered.
+// GateEvaluated is the record that an authorization question was asked, and
+// what it was answered.
 //
-// Laravel fires it after every Gate::raw, through the dispatcher the Gate
-// resolves out of the container. There is no container here (ADR 0001), so the
-// Gate is given a place to send it -- see Gate.Observe -- and an application
-// that gives it none pays nothing.
+// It is fired after every Gate.Raw, to whatever the Gate was handed -- see
+// Gate.Observe -- and an application that hands it nothing pays nothing.
 //
 // # Why this one is worth carrying
 //
-// Most of Illuminate's events exist so a package can be extended without being
-// edited, which is a problem a container has and Go does not. This one is
-// different: it is the audit trail of the product's own thesis. Every
-// authorization decision the application ever makes passes through Gate.Raw,
-// and this is the only place that sees all of them with the answer attached.
+// It is the audit trail of the product's own thesis. Every authorization
+// decision the application ever makes passes through Gate.Raw, and this is the
+// only place that sees all of them with the answer attached.
 //
 // What it is NOT is a place to change the answer. It is fired after the decision
 // is made, receives a copy, and nothing reads what a handler does with it. An
-// event that could veto would be a second authorization path, and there is one
-// (RULE 17).
+// event that could veto would be a second authorization path, and there is only
+// ever one.
 type GateEvaluated struct {
 	// Subject is who asked. It is a value and not a pointer: a handler holding
 	// it cannot alter the subject the decision was made for.
@@ -41,6 +37,6 @@ type GateEvaluated struct {
 	Arguments []any
 }
 
-// Name has no Illuminate counterpart: it is the event's name on the wire, for
-// the outbox and for anything that routes by string.
+// Name is the event's name on the wire, for the outbox and for anything that
+// routes by string.
 func (GateEvaluated) Name() string { return "auth.gate.evaluated" }

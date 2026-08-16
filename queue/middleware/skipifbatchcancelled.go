@@ -9,8 +9,8 @@ import (
 
 // SkipIfBatchCancelled drops a job whose batch was cancelled.
 //
-// It answers Illuminate\Queue\Middleware\SkipIfBatchCancelled. Cancelling a
-// batch cannot recall the jobs already on the queue, so they are delivered,
+// Cancelling a batch cannot recall the jobs already on the queue, so they are
+// delivered,
 // they ask, and they skip -- which is what makes cancelling mean anything.
 //
 // A job that belongs to no batch is handed on and the store is never consulted,

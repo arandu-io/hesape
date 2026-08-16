@@ -98,9 +98,9 @@ func TestChooseFallsBackToTheFirstSegment(t *testing.T) {
 	}
 }
 
-// Only the segment a condition selected is trimmed. PHP applies trim() to that
-// one and to nothing else, so a line spaced out either side of the bar renders
-// the space it was written with once the plural rule is what chooses.
+// Only the segment a condition selected is trimmed, and nothing else is, so a
+// line spaced out either side of the bar renders the space it was written with
+// once the plural rule is what chooses.
 func TestChooseTrimsOnlyWhatAConditionSelected(t *testing.T) {
 	line := "{1} one | :count many"
 
@@ -123,8 +123,8 @@ func TestChooseOnALineWithNoSegments(t *testing.T) {
 // A line that opens with a bracket loses it, whatever is inside: stripConditions
 // removes anything matching ^[{[]...[}\]] before the plural rule indexes the
 // segments, and "draft" is not a number, so no condition claimed it first. It is
-// PHP's behaviour and it is why a sentence that begins with a bracket is written
-// with a leading space or not at all.
+// why a sentence that begins with a bracket is written with a leading space or
+// not at all.
 func TestChooseStripsABracketThatOpensASentence(t *testing.T) {
 	if got, want := choose("[draft] not published", 1, "en"), " not published"; got != want {
 		t.Errorf("Choose = %q, want %q", got, want)

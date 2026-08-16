@@ -10,8 +10,8 @@ import (
 	"github.com/arandu-io/hesape/image/transformations"
 )
 
-// TransformationHandler answers the callable Illuminate registers with
-// transformUsing(): it is handed the working canvas and the transformation that
+// TransformationHandler is the callable a driver registers to handle one
+// transformation: it is handed the working canvas and the transformation that
 // asked for it, and returns the canvas that replaces it.
 //
 // The canvas is the standard library's *image.RGBA, alpha premultiplied. A
@@ -19,37 +19,30 @@ import (
 // of a different size.
 type TransformationHandler func(canvas *stdimage.RGBA, t transformations.Transformation) (*stdimage.RGBA, error)
 
-// Driver answers Illuminate\Contracts\Image\Driver: the thing that actually
-// touches pixels.
+// Driver is the thing that actually touches pixels.
 //
-// Illuminate ships two, GD and Imagick, and both are thin covers over
-// Intervention Image, which is a Composer package covering a PHP extension.
-// Neither has an equivalent here and neither is missing: this package's own
-// driver does the work, in Go, out of image/jpeg, image/png and image/gif in
-// the standard library. The interface stays because transformUsing() and
-// [ImageManager.Extend] both need something to be an implementation of.
+// This package's own driver does the work, in Go, out of image/jpeg,
+// image/png and image/gif in the standard library. The interface stays
+// because registering a transformation handler and [ImageManager.Extend]
+// both need something to be an implementation of.
 type Driver interface {
 	// Process runs the pipeline over the bytes and returns the encoded result.
 	Process(contents []byte, pipeline *ImagePipeline) ([]byte, error)
-	// Dimensions answers the width and height of the image in the bytes.
-	// Illuminate returns array{0: int, 1: int}; two results is that array.
+	// Dimensions returns the width and height of the image in the bytes.
 	Dimensions(contents []byte) (int, int, error)
-	// DominantColor answers the average colour as "#rrggbb".
+	// DominantColor returns the average colour as "#rrggbb".
 	DominantColor(contents []byte) (string, error)
 	// TransformUsing registers a handler for one transformation, named by its
-	// TransformationName. Illuminate keys the same registry by class-string.
-	// It answers the driver, so registrations chain as they do in PHP.
+	// TransformationName. It returns the driver, so registrations chain.
 	TransformUsing(transformation string, handler TransformationHandler) Driver
 }
 
 // stdDriver is the one driver this package carries.
 //
-// It is unexported on purpose. Illuminate names its drivers after the PHP
-// extension underneath them -- "gd", "imagick" -- and there is no extension
-// here to name, so exporting a type would mean inventing a name for it against
-// ADR 0044. What a caller needs is reachable without one: [NewImageManager]
-// installs it, [ImageManager.Driver] hands it back, and [ImageManager.Extend]
-// is how a different one gets in.
+// It is unexported on purpose: there is no natural name to give it, and a
+// caller needs no name for it either. What a caller needs is reachable
+// without one: [NewImageManager] installs it, [ImageManager.Driver] hands it
+// back, and [ImageManager.Extend] is how a different one gets in.
 type stdDriver struct {
 	mu       sync.RWMutex
 	handlers map[string]TransformationHandler
@@ -59,7 +52,7 @@ func newStdDriver() *stdDriver {
 	return &stdDriver{handlers: map[string]TransformationHandler{}}
 }
 
-// TransformUsing answers InterventionDriver::transformUsing().
+// TransformUsing implements [Driver.TransformUsing].
 func (d *stdDriver) TransformUsing(transformation string, handler TransformationHandler) Driver {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -70,14 +63,14 @@ func (d *stdDriver) TransformUsing(transformation string, handler Transformation
 	return d
 }
 
-// handlerFor answers InterventionDriver::transformationHandlerFor().
+// handlerFor returns the handler registered for name, or nil when none was.
 func (d *stdDriver) handlerFor(name string) TransformationHandler {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.handlers[name]
 }
 
-// Process answers InterventionDriver::process().
+// Process implements [Driver.Process].
 func (d *stdDriver) Process(contents []byte, pipeline *ImagePipeline) ([]byte, error) {
 	mediaType := sniffMimeType(contents)
 	if !supportedInput(mediaType) {
@@ -115,8 +108,8 @@ func (d *stdDriver) Process(contents []byte, pipeline *ImagePipeline) ([]byte, e
 	return encodeCanvas(canvas, format, pipeline.Output.quality())
 }
 
-// apply is InterventionDriver::process()'s match expression: one transformation
-// onto the canvas, or an error naming the one nobody taught this driver.
+// apply runs one transformation onto the canvas, or returns an error naming
+// the one nobody taught this driver.
 func (d *stdDriver) apply(canvas *stdimage.RGBA, t transformations.Transformation, orientation int) (*stdimage.RGBA, error) {
 	switch v := t.(type) {
 	case transformations.Orient:
@@ -156,7 +149,7 @@ func (d *stdDriver) apply(canvas *stdimage.RGBA, t transformations.Transformatio
 	}
 }
 
-// Dimensions answers InterventionDriver::dimensions().
+// Dimensions implements [Driver.Dimensions].
 func (d *stdDriver) Dimensions(contents []byte) (int, int, error) {
 	cfg, _, err := stdimage.DecodeConfig(bytes.NewReader(contents))
 	if err != nil {
@@ -165,11 +158,11 @@ func (d *stdDriver) Dimensions(contents []byte) (int, int, error) {
 	return cfg.Width, cfg.Height, nil
 }
 
-// DominantColor answers InterventionDriver::dominantColor().
+// DominantColor implements [Driver.DominantColor].
 //
-// Illuminate samples it by resizing the image down to a single pixel and
-// reading that pixel. Averaging every pixel is the same answer without the
-// intermediate canvas, and without the rounding the resize would add.
+// Averaging every pixel directly reaches the same result as resizing the
+// image down to a single pixel and reading it, without the intermediate
+// canvas or the rounding the resize would add.
 func (d *stdDriver) DominantColor(contents []byte) (string, error) {
 	canvas, _, err := decodeCanvas(contents)
 	if err != nil {
@@ -178,13 +171,12 @@ func (d *stdDriver) DominantColor(contents []byte) (string, error) {
 	return hex(averageColor(canvas)), nil
 }
 
-// resolveBackground answers InterventionDriver::resolveBackground(), including
-// the "dominant" sentinel that stands for the image's own average colour.
+// resolveBackground resolves a background spelling to a colour, including the
+// "dominant" sentinel that stands for the image's own average colour.
 //
-// An empty background is Illuminate's null, which reaches Intervention as its
-// default of white -- not as transparency. A rotate that left the corners clear
-// would look right in a PNG and black in a JPEG, and Illuminate picked the
-// answer that is the same in both.
+// An empty background defaults to white rather than transparency: a rotate
+// that left the corners clear would look right in a PNG and black in a JPEG,
+// and white is the choice that looks the same in both.
 func resolveBackground(canvas *stdimage.RGBA, background string) (color.RGBA, error) {
 	switch background {
 	case "":
@@ -197,7 +189,7 @@ func resolveBackground(canvas *stdimage.RGBA, background string) (color.RGBA, er
 }
 
 // cover fills the box edge to edge, keeping the aspect ratio and cropping what
-// overflows from the centre. It is Intervention's cover().
+// overflows from the centre.
 func cover(src *stdimage.RGBA, w, h int) *stdimage.RGBA {
 	sw, sh := src.Rect.Dx(), src.Rect.Dy()
 	if sw == 0 || sh == 0 || w < 1 || h < 1 {
@@ -211,8 +203,7 @@ func cover(src *stdimage.RGBA, w, h int) *stdimage.RGBA {
 }
 
 // contain fits the whole image inside the box, keeping the aspect ratio, and
-// pads the rest with bg so the result is exactly w by h. It is Intervention's
-// contain().
+// pads the rest with bg so the result is exactly w by h.
 func contain(src *stdimage.RGBA, w, h int, bg color.RGBA) *stdimage.RGBA {
 	sw, sh := src.Rect.Dx(), src.Rect.Dy()
 	if sw == 0 || sh == 0 || w < 1 || h < 1 {
@@ -230,8 +221,8 @@ func contain(src *stdimage.RGBA, w, h int, bg color.RGBA) *stdimage.RGBA {
 	return dst
 }
 
-// resize is Intervention's resize(): exactly the dimensions given, aspect ratio
-// not kept, and an axis left at zero keeps the size it had.
+// resize sets the canvas to exactly the dimensions given, aspect ratio not
+// kept; an axis left at zero keeps the size it had.
 func resize(src *stdimage.RGBA, w, h int) *stdimage.RGBA {
 	sw, sh := src.Rect.Dx(), src.Rect.Dy()
 	if w < 1 {
@@ -243,9 +234,9 @@ func resize(src *stdimage.RGBA, w, h int) *stdimage.RGBA {
 	return resample(src, w, h)
 }
 
-// scaleDown is Intervention's scaleDown(), which Illuminate's Scale maps onto:
-// the aspect ratio is kept, the result fits inside the box, and an image
-// already smaller than the box is left alone.
+// scaleDown fits the canvas inside the box: the aspect ratio is kept, the
+// result fits inside the box, and an image already smaller than the box is
+// left alone.
 func scaleDown(src *stdimage.RGBA, w, h int) *stdimage.RGBA {
 	sw, sh := src.Rect.Dx(), src.Rect.Dy()
 	if sw == 0 || sh == 0 {

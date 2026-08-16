@@ -7,8 +7,8 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// belongsTo is the part of Illuminate\Database\Eloquent\Relations\BelongsTo that
-// BelongsToRelationship::attributesFor reaches.
+// belongsTo is the part of a belongs-to relation that
+// BelongsToRelationship.AttributesFor reaches.
 type belongsTo interface {
 	GetForeignKeyName() string
 	GetOwnerKeyName() string
@@ -21,13 +21,12 @@ type morphTo interface {
 	GetMorphType() string
 }
 
-// BelongsToRelationship answers
-// Illuminate\Database\Eloquent\Factories\BelongsToRelationship: a parent
-// relationship, whose key is a column on the model the factory makes.
+// BelongsToRelationship is a parent relationship, whose key is a column on the
+// model the factory makes.
 //
 // The parent is created once, lazily, and its key reused for every child of the
-// run. That is the point of the class: `User::factory()->count(3)->for(Team)`
-// makes one team and three users, not three teams.
+// run: a factory for three users with one team makes one team and three users,
+// not three teams.
 type BelongsToRelationship struct {
 	// factory is the parent's factory. PHP allows a Model here as well, and so
 	// does For: model holds it when the caller passed one already created.

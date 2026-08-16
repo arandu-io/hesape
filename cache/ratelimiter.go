@@ -13,15 +13,13 @@ import (
 
 // Limit is how many attempts are allowed, over what period, against what key.
 //
-// It answers Illuminate\Cache\RateLimiting\Limit. It is a value and it is built
-// by composition -- PerMinute(5).By(ip) -- so a route declares its limit once,
-// as data, and the same value is what the middleware counts against and what the
-// error message is written from.
+// It is a value and it is built by composition -- PerMinute(5).By(ip) -- so a
+// route declares its limit once, as data, and the same value is what the
+// middleware counts against and what the error message is written from.
 //
-// It lives here and not in a ratelimiting subpackage, next to the RateLimiter
-// that counts against it. In PHP a sub-namespace is free; in Go a subpackage is
-// a real boundary, and one struct on the far side of one is an import for no
-// gain.
+// It lives here, next to the RateLimiter that counts against it, and not in a
+// ratelimiting subpackage: a subpackage is a real boundary, and one struct on
+// the far side of one is an import for no gain.
 type Limit struct {
 	// Key identifies the caller being limited: an IP, a session id, an account.
 	// It is not a tenant: rate limiting happens before authentication on the
@@ -34,19 +32,17 @@ type Limit struct {
 	// Decay is the length of the window.
 	Decay time.Duration
 
-	// AfterCallback decides, once the work has run, whether it counted. It
-	// answers $afterCallback: a limit that only counts the failures -- five
-	// wrong passwords a minute, and as many right ones as you like -- is
-	// written with this and nothing else.
+	// AfterCallback decides, once the work has run, whether it counted. A
+	// limit that only counts the failures -- five wrong passwords a minute,
+	// and as many right ones as you like -- is written with this and nothing
+	// else.
 	//
-	// Laravel's receives the Response. This receives the status code the
-	// handler wrote, because that is what a Go handler leaves behind: there is
-	// no response object to hand over.
+	// It receives the status code the handler wrote, because that is what a Go
+	// handler leaves behind: there is no response object to hand over.
 	AfterCallback func(status int) bool
 
-	// ResponseCallback writes the answer to a caller that went over. It answers
-	// $responseCallback, and its absence is the default 429 the middleware
-	// writes.
+	// ResponseCallback writes the answer to a caller that went over. Its
+	// absence is the default 429 the middleware writes.
 	//
 	// headers carries what the middleware would have set -- Retry-After,
 	// X-RateLimit-Remaining -- so a callback that writes its own answer does not
@@ -59,42 +55,38 @@ type Limit struct {
 // They are four functions and not one with a unit argument, because the call
 // site reads as the sentence somebody says out loud: "five per minute".
 //
-// Laravel's take a second argument for how many of the unit the window is --
-// perMinute($max, $decayMinutes). Here that is PerMinutes, which is the method
-// Laravel gives it too, so the common call stays one argument long.
+// A window several units long is PerMinutes, so the common call stays one
+// argument long.
 func PerSecond(max int) Limit { return Limit{MaxAttempts: max, Decay: time.Second} }
 
-// PerMinute is a limit over one minute. It answers Limit::perMinute().
+// PerMinute is a limit over one minute.
 func PerMinute(max int) Limit { return Limit{MaxAttempts: max, Decay: time.Minute} }
 
 // PerMinutes is a limit over several minutes.
 //
-// It answers Limit::perMinutes(), including the argument order that catches
-// everybody out: the window comes first and the count second, which is the
-// opposite of every other constructor here. It is that way in Laravel, and
-// changing it would make the same call mean different things in the two.
+// Mind the argument order: the window comes first and the count second, which
+// is the opposite of every other constructor here.
 func PerMinutes(decayMinutes, max int) Limit {
 	return Limit{MaxAttempts: max, Decay: time.Duration(decayMinutes) * time.Minute}
 }
 
-// PerHour is a limit over one hour. It answers Limit::perHour().
+// PerHour is a limit over one hour.
 func PerHour(max int) Limit { return Limit{MaxAttempts: max, Decay: time.Hour} }
 
-// PerDay is a limit over one day. It answers Limit::perDay().
+// PerDay is a limit over one day.
 func PerDay(max int) Limit { return Limit{MaxAttempts: max, Decay: 24 * time.Hour} }
 
 // None is the limit that allows everything.
 //
-// It answers Limit::none(), which returns an Unlimited. There is no Unlimited
-// type here and no GlobalLimit either: they are one constructor's worth of
-// difference in PHP and two more ways to spell the same value in Go (RULE 9).
+// There is no separate Unlimited or GlobalLimit type: they would be two more
+// ways to spell the same value.
 //
 // It is for the branch that has to return a limit and has nothing to limit --
 // a named limiter that decides, per caller, that this one is exempt. A route
 // with no limit on it is written by not putting one there.
 func None() Limit { return Limit{MaxAttempts: math.MaxInt32, Decay: time.Minute} }
 
-// By returns the same limit against a key. It answers Limit::by().
+// By returns the same limit against a key.
 func (l Limit) By(key string) Limit {
 	l.Key = key
 	return l
@@ -161,12 +153,10 @@ type RateLimiter struct {
 
 // LimitResolver decides, per caller, what the limit is.
 //
-// It answers the Closure passed to RateLimiter::for(). Laravel's receives the
-// request; this receives the context, which is where the request is in Go.
-//
-// It returns a set and not one limit, because Laravel's may: "sixty a minute
-// and a thousand an hour" is two limits against the same caller, and both are
-// counted. A resolver with nothing to limit returns None, or nothing at all.
+// It receives the context, which is where the request is, and it returns a set
+// rather than one limit: "sixty a minute and a thousand an hour" is two limits
+// against the same caller, and both are counted. A resolver with nothing to
+// limit returns None, or nothing at all.
 type LimitResolver func(ctx context.Context) []Limit
 
 // NewRateLimiter returns the limiter.
@@ -330,9 +320,8 @@ func (rl *RateLimiter) Release(ctx context.Context, l Limit) error {
 
 // Attempts is how many have been counted in the current window.
 //
-// It answers RateLimiter::attempts(). A window nobody has attempted anything in
-// is zero and not an error: a counter that is not there is a counter at zero,
-// which is what Laravel's default of 0 says.
+// A window nobody has attempted anything in is zero and not an error: a
+// counter that is not there is a counter at zero.
 func (rl *RateLimiter) Attempts(ctx context.Context, l Limit) (int, error) {
 	key, err := rl.key(l)
 	if err != nil {
@@ -354,14 +343,12 @@ func (rl *RateLimiter) Attempts(ctx context.Context, l Limit) (int, error) {
 
 // TooManyAttempts reports whether the budget for this window is spent.
 //
-// It answers RateLimiter::tooManyAttempts(). It asks without counting, which is
-// the difference from Attempt: use this to decide whether to offer something,
-// and Attempt to actually spend one.
+// It asks without counting, which is the difference from Attempt: use this to
+// decide whether to offer something, and Attempt to actually spend one.
 //
-// Laravel resets the counter when the attempts are over the limit but the
-// lockout timer has expired. There is no separate timer here -- the window is in
-// the counter's key, so a counter that outlived its window is not the counter
-// being asked about -- and the reset it exists to do has already happened.
+// There is no separate lockout timer to expire: the window is in the counter's
+// key, so a counter that outlived its window is not the counter being asked
+// about.
 func (rl *RateLimiter) TooManyAttempts(ctx context.Context, l Limit) (bool, error) {
 	attempts, err := rl.Attempts(ctx, l)
 	if err != nil {
@@ -371,8 +358,6 @@ func (rl *RateLimiter) TooManyAttempts(ctx context.Context, l Limit) (bool, erro
 }
 
 // Remaining is how many attempts are left in this window, never below zero.
-//
-// It answers RateLimiter::remaining().
 func (rl *RateLimiter) Remaining(ctx context.Context, l Limit) (int, error) {
 	attempts, err := rl.Attempts(ctx, l)
 	if err != nil {
@@ -382,25 +367,19 @@ func (rl *RateLimiter) Remaining(ctx context.Context, l Limit) (int, error) {
 }
 
 // RetriesLeft is Remaining.
-//
-// It answers RateLimiter::retriesLeft(), which Laravel implements as "return
-// $this->remaining($key, $maxAttempts)".
 func (rl *RateLimiter) RetriesLeft(ctx context.Context, l Limit) (int, error) {
 	return rl.Remaining(ctx, l)
 }
 
 // ResetAttempts forgets the attempts in the current window.
 //
-// It answers RateLimiter::resetAttempts(). In Laravel it is half of clear() --
-// the counter, but not the lockout timer. Here it is all of it: the window is in
-// the counter's key, so there is no second thing to forget.
+// It forgets all of it: the window is in the counter's key, so there is no
+// second thing to forget.
 func (rl *RateLimiter) ResetAttempts(ctx context.Context, l Limit) error {
 	return rl.Clear(ctx, l)
 }
 
 // Clear forgets the attempts in the current window.
-//
-// It answers RateLimiter::clear().
 func (rl *RateLimiter) Clear(ctx context.Context, l Limit) error {
 	key, err := rl.key(l)
 	if err != nil {
@@ -426,10 +405,10 @@ func (rl *RateLimiter) AvailableIn(l Limit) time.Duration {
 // the only cleanup there is.
 //
 // The window is fixed rather than sliding: one increment, no script, no sorted
-// set. A sliding window would be more precise and would need either Lua -- which
-// RULE 11 refuses, because it is what makes Dragonfly a drop-in replacement --
-// or a set per key. Precision is not what a rate limit is for; stopping a flood
-// is, and a fixed window stops it.
+// set. A sliding window would be more precise and would need either a server
+// script -- which is what keeps every RESP backend interchangeable -- or a set
+// per key. Precision is not what a rate limit is for; stopping a flood is, and
+// a fixed window stops it.
 //
 // The known cost is the boundary: a caller can spend the whole budget at the end
 // of one window and the whole budget at the start of the next. For sign-in

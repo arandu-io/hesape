@@ -12,8 +12,8 @@ import (
 	"strings"
 )
 
-// maxNodes answers the protected Deserializer::MAX_NODES: the number of schema
-// fragments a single [Deserialize] may expand before it gives up.
+// maxNodes is the number of schema fragments a single [Deserialize] may expand
+// before it gives up.
 //
 // It is the only defence against a document that is small on disk and enormous
 // once its references are followed -- a hundred definitions, each referring to
@@ -23,21 +23,19 @@ import (
 const maxNodes = 20000
 
 // FromArray builds a type from a raw map of the supported JSON Schema subset.
-// It answers the static JsonSchema::fromArray(array $schema), which is one line
-// delegating to the deserializer, and so is this.
+// It delegates to [Deserialize].
 //
 // The map is what [encoding/json.Unmarshal] produces for an any: every number
 // is a float64 and every object is a map[string]any. [Serialize] produces the
 // same shape, so a document this package rendered reads back through here.
 //
-// The InvalidArgumentException the PHP throws for a schema it cannot represent
-// is the error.
+// A schema this package cannot represent is an error naming what it could not
+// read.
 func FromArray(schema map[string]any) (Type, error) {
 	return Deserialize(schema)
 }
 
-// Deserialize builds a type from the supported JSON Schema subset. It answers
-// the static Deserializer::deserialize(array $schema).
+// Deserialize builds a type from the supported JSON Schema subset.
 //
 // It reads what this package writes, and the part of JSON Schema that maps onto
 // it: the six kinds, the type-as-a-list union, local "$ref" pointers, and the
@@ -66,21 +64,18 @@ func Deserialize(schema map[string]any) (Type, error) {
 	return d.build(schema, nil)
 }
 
-// deserializer answers Illuminate\JsonSchema\Deserializer. It is unexported
-// because the PHP constructor is protected: one document, one instance, reached
-// only through [Deserialize].
+// deserializer reads one document. It is unexported because there is one
+// instance per document, reached only through [Deserialize].
 type deserializer struct {
-	// root answers Deserializer::$root, the document local "$ref" pointers
-	// resolve against.
+	// root is the document local "$ref" pointers resolve against.
 	root map[string]any
-	// nodes answers Deserializer::$nodes, the fragments expanded so far.
+	// nodes are the fragments expanded so far.
 	nodes int
-	// refCache answers Deserializer::$refCache, the resolved "$ref" targets.
+	// refCache holds the resolved "$ref" targets.
 	refCache map[string]map[string]any
 }
 
-// build makes a type out of one schema fragment. It answers the protected
-// Deserializer::build($schema, $refs).
+// build makes a type out of one schema fragment.
 func (d *deserializer) build(schema map[string]any, refs []string) (Type, error) {
 	d.nodes++
 	if d.nodes > maxNodes {
@@ -140,8 +135,7 @@ func (d *deserializer) build(schema map[string]any, refs []string) (Type, error)
 	return t, nil
 }
 
-// buildObject makes an object out of a schema fragment. It answers the
-// protected Deserializer::buildObject($schema, $refs).
+// buildObject makes an object out of a schema fragment.
 //
 // The properties are ordered by name -- see [Deserialize] for why there is no
 // other order to give them.
@@ -151,7 +145,7 @@ func (d *deserializer) buildObject(schema map[string]any, refs []string) (*Objec
 		required := requiredNames(schema["required"])
 		for _, member := range members {
 			// A boolean schema -- "properties": {"a": true} -- is legal JSON
-			// Schema and has no type to build, so the PHP refuses it by name.
+			// Schema and has no type to build, so it is refused by name.
 			definition, ok := member.value.(map[string]any)
 			if !ok {
 				return nil, fmt.Errorf("jsonschema: unable to represent the schema for property [%s]; boolean schemas are not supported", member.key)
@@ -168,23 +162,20 @@ func (d *deserializer) buildObject(schema map[string]any, refs []string) (*Objec
 	}
 
 	t := Object(properties...)
-	// PHP's ObjectType starts with the keyword absent and only
-	// withoutAdditionalProperties sets it; [Object] starts closed, because that
-	// is this package's default for a schema someone writes. A schema someone
-	// reads keeps what it said, so the keyword is cleared unless the document
-	// spelled out false.
+	// [Object] starts closed, because that is this package's default for a
+	// schema someone writes. A schema someone reads keeps what it said, so the
+	// keyword is cleared unless the document spelled out false.
 	if b, ok := schema["additionalProperties"].(bool); !ok || b {
 		t.additionalProperties = nil
 	}
 	return t, nil
 }
 
-// buildArray makes a list out of a schema fragment. It answers the protected
-// Deserializer::buildArray($schema, $refs).
+// buildArray makes a list out of a schema fragment.
 func (d *deserializer) buildArray(schema map[string]any, refs []string) (*ArrayType, error) {
 	t := Array()
 
-	// "items": {} and "items": [] are both the empty PHP array the guard skips.
+	// "items": {} and "items": [] are both empty and are skipped.
 	// A non-empty list is a tuple and a bool is a boolean schema; neither has a
 	// single element type, which is the only shape [ArrayType.Items] carries.
 	if raw, ok := schema["items"]; ok && raw != nil && !isEmptyContainer(raw) {
@@ -205,16 +196,15 @@ func (d *deserializer) buildArray(schema map[string]any, refs []string) (*ArrayT
 	if n, ok := intKeyword(schema, "maxItems"); ok {
 		t.Max(n)
 	}
-	// ArrayType::unique(false) is a no-op in PHP, so a document that says
-	// uniqueItems: false leaves the type alone rather than clearing anything.
+	// A document that says uniqueItems: false leaves the type alone rather
+	// than clearing anything.
 	if raw, ok := schema["uniqueItems"]; ok && raw != nil && truthy(raw) {
 		t.Unique()
 	}
 	return t, nil
 }
 
-// buildString makes a string out of a schema fragment. It answers the protected
-// Deserializer::buildString($schema).
+// buildString makes a string out of a schema fragment.
 func buildString(schema map[string]any) (*StringType, error) {
 	t := String()
 
@@ -228,9 +218,8 @@ func buildString(schema map[string]any) (*StringType, error) {
 		expr := phpString(raw)
 		// [StringType.Pattern] compiles with MustCompile, which is right for a
 		// schema written in Go -- a typo there is a mistake in the program. This
-		// expression came out of a file, so it is an error instead. PHP keeps
-		// the pattern as an uncompiled string and finds out at preg_match time;
-		// finding out here is the same answer, earlier.
+		// expression came out of a file, so it is an error instead: finding
+		// out at read time is the same answer, earlier.
 		re, err := regexp.Compile(expr)
 		if err != nil {
 			return nil, fmt.Errorf("jsonschema: the JSON Schema [pattern] constraint %q is not a regular expression this package can compile: %w", expr, err)
@@ -243,9 +232,8 @@ func buildString(schema map[string]any) (*StringType, error) {
 	return t, nil
 }
 
-// buildInteger makes a whole number out of a schema fragment. It answers the
-// protected Deserializer::buildInteger($schema), which is applyNumericBounds
-// with the integer cast.
+// buildInteger makes a whole number out of a schema fragment. It is
+// applyNumericBounds with the bounds narrowed to whole numbers.
 func buildInteger(schema map[string]any) (*IntegerType, error) {
 	t := Integer()
 	err := applyNumericBounds(schema, func(keyword string, v float64) error {
@@ -269,8 +257,8 @@ func buildInteger(schema map[string]any) (*IntegerType, error) {
 	return t, nil
 }
 
-// buildNumber makes a number out of a schema fragment. It answers the protected
-// Deserializer::buildNumber($schema), which is applyNumericBounds with no cast.
+// buildNumber makes a number out of a schema fragment. It is
+// applyNumericBounds with the bounds left as they are.
 func buildNumber(schema map[string]any) (*NumberType, error) {
 	t := Number()
 	err := applyNumericBounds(schema, func(keyword string, v float64) error {
@@ -290,13 +278,11 @@ func buildNumber(schema map[string]any) (*NumberType, error) {
 	return t, nil
 }
 
-// applyNumericBounds reads the three bound keywords in the order the PHP lists
-// them and hands each to the setter for the type being built. It answers the
-// protected Deserializer::applyNumericBounds($type, $schema, $cast).
+// applyNumericBounds reads the three bound keywords and hands each to the
+// setter for the type being built.
 //
-// The type is a callback rather than a parameter because IntegerType and
-// NumberType take different argument types; PHP writes one method over a union
-// and calls the setter by name.
+// The setter is a callback rather than a parameter because IntegerType and
+// NumberType take different argument types.
 func applyNumericBounds(schema map[string]any, set func(keyword string, v float64) error) error {
 	for _, keyword := range []string{"minimum", "maximum", "multipleOf"} {
 		raw, ok := schema[keyword]
@@ -314,8 +300,7 @@ func applyNumericBounds(schema map[string]any, set func(keyword string, v float6
 	return nil
 }
 
-// applyCommon reads the keywords every kind carries. It answers the protected
-// Deserializer::applyCommon($type, $schema).
+// applyCommon reads the keywords every kind carries.
 func applyCommon(t Type, schema map[string]any) error {
 	m := t.meta()
 
@@ -333,9 +318,9 @@ func applyCommon(t Type, schema map[string]any) error {
 			}
 		}
 	}
-	// array_key_exists, not isset: a "default": null is present and is the one
-	// case the PHP refuses, because null as a default is indistinguishable from
-	// having none and would render as a keyword the type never carried.
+	// Presence, not non-nil: a "default": null is present and is refused,
+	// because null as a default is indistinguishable from having none and
+	// would render as a keyword the type never carried.
 	if raw, ok := schema["default"]; ok {
 		if raw == nil {
 			return errors.New("jsonschema: a null JSON Schema [default] is not supported")
@@ -345,10 +330,9 @@ func applyCommon(t Type, schema map[string]any) error {
 	return nil
 }
 
-// resolveType reads the "type" keyword. It answers the protected
-// Deserializer::resolveType($schema), whose PHP return is a string or a list of
-// strings; Go has no union, so the list comes back first and is non-nil only
-// when more than one name survives.
+// resolveType reads the "type" keyword, which is a name or a list of names.
+// The list comes back first and is non-nil only when more than one name
+// survives.
 //
 // The bool is whether "null" was among the names, which is the type-as-a-list
 // spelling of nullable.
@@ -398,9 +382,9 @@ func (d *deserializer) resolveType(schema map[string]any) (names []string, name 
 	return nil, inferred, nullable, nil
 }
 
-// unionUnsupportedKeywords answers the $keywords list of the protected
-// Deserializer::ensureUnionConstraintsAreSupported, in its order: the message
-// names them as they are listed here, so it reads the same on every run.
+// unionUnsupportedKeywords are the single-kind keywords a union may not carry.
+// The message names them in the order they are listed here, so it reads the
+// same on every run.
 var unionUnsupportedKeywords = []string{
 	"minLength", "maxLength", "pattern", "format",
 	"minimum", "maximum", "multipleOf",
@@ -409,8 +393,7 @@ var unionUnsupportedKeywords = []string{
 }
 
 // ensureUnionConstraintsAreSupported refuses a multi-type union that also
-// carries a keyword belonging to one kind. It answers the protected
-// Deserializer::ensureUnionConstraintsAreSupported($schema).
+// carries a keyword belonging to one kind.
 //
 // A union renders as a list of names and nothing else, so a minLength beside it
 // would be dropped on the way in and absent on the way out -- a document that
@@ -431,9 +414,8 @@ func ensureUnionConstraintsAreSupported(schema map[string]any) error {
 }
 
 // inferType names the kind when "type" is absent but the shape says it anyway.
-// It answers the protected Deserializer::inferType($schema).
 //
-// The order is the PHP's, and it is load-bearing: properties before items
+// The order is load-bearing: properties before items
 // before enum before the string keywords before the numeric ones, so a fragment
 // carrying two families of keyword resolves the same way every time.
 func inferType(schema map[string]any) (string, bool) {
@@ -455,18 +437,16 @@ func inferType(schema map[string]any) (string, bool) {
 	return "", false
 }
 
-// inferEnumType names the kind an enum of scalars shares. It answers the
-// protected Deserializer::inferEnumType($enum).
+// inferEnumType names the kind an enum of scalars shares.
 //
 // A mixed enum has no single kind and is refused rather than widened, except
 // for whole and fractional numbers, which together are "number".
 //
-// PHP separates the two with is_int and is_float, which json_decode has already
-// decided; a Go decoder gives every JSON number as a float64, so the split is
-// made here by asking whether the value has a fractional part. The two agree on
-// every enum except one written with a trailing zero: [1.0, 2.0] is "number" in
-// PHP and "integer" here. Nothing validates differently for it, because the
-// enum already refuses every value the narrower kind would have.
+// A JSON decoder gives every number as a float64, so whole and fractional are
+// told apart here by asking whether the value has a fractional part. An enum
+// written with a trailing zero -- [1.0, 2.0] -- is therefore "integer". Nothing
+// validates differently for it, because the enum already refuses every value
+// the narrower kind would have.
 func inferEnumType(values []entry) (string, bool) {
 	resolved := ""
 	for _, v := range values {
@@ -515,13 +495,12 @@ func isNumeric(kind string) bool {
 }
 
 // normalizeUnions collapses a nullable "anyOf" or "oneOf" into the branch it
-// wraps. It answers the protected Deserializer::normalizeUnions($schema, $refs).
+// wraps.
 //
 // It is the one composition keyword this subset reads, and only in the shape a
 // generator emits for an optional value: exactly one real branch beside a
 // "null" one. Anything else is a genuine union of schemas, which [AnyOfType]
-// can hold but the Illuminate types cannot, so the PHP refuses it and so does
-// this.
+// can hold but the named types cannot, so it is refused.
 //
 // The bool is whether the "null" branch was there, which the caller turns into
 // nullable on the type it builds.
@@ -596,8 +575,7 @@ func (d *deserializer) normalizeUnions(schema map[string]any, refs []string) (ma
 	return schema, false, refs, nil
 }
 
-// isNullBranch reports whether a branch describes only the null type. It
-// answers the protected Deserializer::isNullBranch($branch).
+// isNullBranch reports whether a branch describes only the null type.
 func isNullBranch(branch map[string]any) bool {
 	switch t := branch["type"].(type) {
 	case string:
@@ -613,7 +591,7 @@ func isNullBranch(branch map[string]any) bool {
 }
 
 // resolveRef follows a local "$ref" and merges the sibling keys over its
-// target. It answers the protected Deserializer::resolveRef($schema, $refs).
+// target.
 //
 // The target is resolved first and the siblings are laid over it, so a fragment
 // that refers to a definition and adds a description keeps its own description.
@@ -634,8 +612,8 @@ func (d *deserializer) resolveRef(schema map[string]any, refs []string) (map[str
 			return nil, nil, fmt.Errorf("jsonschema: circular JSON Schema $ref [%s] detected", ref)
 		}
 	}
-	// A fresh list, because a PHP array is a value and every branch of an
-	// anyOf gets its own copy of the trail that led to it. Appending in place
+	// A fresh list, so every branch of an anyOf gets its own copy of the
+	// trail that led to it. Appending in place
 	// would make two sibling branches share a backing array and report a cycle
 	// that is not one.
 	refs = append(append(make([]string, 0, len(refs)+1), refs...), ref)
@@ -657,12 +635,11 @@ func (d *deserializer) resolveRef(schema map[string]any, refs []string) (map[str
 	return d.resolveRef(merged, refs)
 }
 
-// lookupRef reads a local JSON pointer out of the root document. It answers the
-// protected Deserializer::lookupRef($ref).
+// lookupRef reads a local JSON pointer out of the root document.
 //
 // Only local pointers resolve. Fetching a remote schema would make deserializing
 // a document a network call, which is a request an attacker chooses the target
-// of; the PHP refuses it too.
+// of.
 func (d *deserializer) lookupRef(ref string) (map[string]any, error) {
 	if cached, ok := d.refCache[ref]; ok {
 		return cached, nil
@@ -684,9 +661,9 @@ func (d *deserializer) lookupRef(ref string) (map[string]any, error) {
 		target = next
 	}
 
-	// PHP's is_array is true for a list as well, and a list reaching here would
-	// go on to fail with "unable to determine the JSON Schema type". The answer
-	// is the same and this message says which of the two happened.
+	// A list reaching here would go on to fail with "unable to determine the
+	// JSON Schema type". The answer is the same, and this message says which
+	// of the two happened.
 	object, ok := target.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("jsonschema: the JSON Schema $ref [%s] does not point to a schema", ref)
@@ -695,9 +672,8 @@ func (d *deserializer) lookupRef(ref string) (map[string]any, error) {
 	return object, nil
 }
 
-// unescapePointer decodes one JSON pointer segment: percent-escapes first, then
-// the two pointer escapes. It answers the rawurldecode and str_replace pair in
-// Deserializer::lookupRef.
+// unescapePointer decodes one JSON pointer segment: percent-escapes first,
+// then the two pointer escapes.
 //
 // The order matters and is the one RFC 6901 states: ~1 becomes a slash before
 // ~0 becomes a tilde, so "~01" reads as "~1" and not as a slash.
@@ -712,8 +688,7 @@ func unescapePointer(segment string) string {
 }
 
 // pointerIndex reads one pointer segment out of one level of the document. A
-// list is indexed by position, because a PHP array is both shapes and
-// array_key_exists("0", $list) is true.
+// list is indexed by position, so "0" reaches its first element.
 func pointerIndex(target any, segment string) (any, bool) {
 	switch t := target.(type) {
 	case map[string]any:
@@ -729,11 +704,11 @@ func pointerIndex(target any, segment string) (any, bool) {
 	return nil, false
 }
 
-// toNumber normalizes a keyword's value to a float64, or reports that it is not
-// a number. It answers the protected Deserializer::toNumber($value).
+// toNumber normalizes a keyword's value to a float64, or reports that it is
+// not a number.
 //
-// A numeric string counts, which is the `is_numeric($value)` branch: a schema
-// written by hand often quotes its bounds.
+// A numeric string counts, because a schema written by hand often quotes its
+// bounds.
 func toNumber(v any) (float64, bool) {
 	if n, ok := asNumber(v); ok {
 		return n, true
@@ -745,13 +720,11 @@ func toNumber(v any) (float64, bool) {
 	return 0, false
 }
 
-// toInteger narrows a bound to a whole number, refusing one that is not. It
-// answers the protected Deserializer::toInteger($value).
+// toInteger narrows a bound to a whole number, refusing one that is not.
 //
-// The range check has no counterpart in the PHP, which has one integer width
-// and casts whatever it is given. Converting an out-of-range float64 to an int
-// is undefined in Go, so a bound larger than an int is an error rather than
-// whichever number the conversion happens to produce.
+// Converting an out-of-range float64 to an int is undefined in Go, so a bound
+// larger than an int is an error rather than whichever number the conversion
+// happens to produce.
 func toInteger(v float64) (int, error) {
 	if math.Floor(v) != v {
 		return 0, fmt.Errorf("jsonschema: the JSON Schema integer constraint [%s] must be an integer", number(v))
@@ -763,21 +736,20 @@ func toInteger(v float64) (int, error) {
 }
 
 // entry is one member of a decoded JSON object, or one element of a decoded
-// list. PHP has a single array type that is both, and the deserializer walks
-// several keywords -- properties, enum, required, anyOf -- that a document may
-// legitimately write either way.
+// list. The deserializer walks several keywords -- properties, enum, required,
+// anyOf -- that a document may legitimately write either way.
 type entry struct {
 	key   string
 	value any
 }
 
 // objectEntries reads the members of a decoded JSON container, and reports
-// whether it was one. It stands in for PHP's is_array plus foreach.
+// whether it was one.
 //
 // The members of an object come back ordered by name: a Go map has no order,
 // and a schema whose properties land in a different order on every run is a
 // schema nobody can diff. A list keeps its own order, and its indices become
-// the keys, which is what (string) $key does in buildObject.
+// the keys.
 func objectEntries(v any) ([]entry, bool) {
 	switch t := v.(type) {
 	case map[string]any:
@@ -802,8 +774,7 @@ func objectEntries(v any) ([]entry, bool) {
 }
 
 // requiredNames reads an object's "required" list into the set buildObject
-// tests each property against. It answers the array_flip(array_map('strval'))
-// in Deserializer::buildObject.
+// tests each property against. The names are read as strings.
 func requiredNames(v any) map[string]bool {
 	listed, ok := objectEntries(v)
 	if !ok {
@@ -816,17 +787,17 @@ func requiredNames(v any) map[string]bool {
 	return out
 }
 
-// isset answers PHP's isset($schema[$key]): the key is there and its value is
-// not null. Several keywords are read with it and a couple with
-// array_key_exists instead, and the difference decides what a null does.
+// isset reports that the key is there and its value is not null. A couple of
+// keywords are read for presence alone instead, and the difference decides what
+// a null does.
 func isset(schema map[string]any, key string) bool {
 	v, ok := schema[key]
 	return ok && v != nil
 }
 
-// isEmptyContainer reports whether a decoded value is the empty PHP array,
-// which json_decode produces for both [] and {}. Deserializer::buildArray
-// compares "items" against it before deciding the value is a tuple.
+// isEmptyContainer reports whether a decoded value is an empty container, which
+// both [] and {} decode to. "items" is compared against it before the value is
+// read as a tuple.
 func isEmptyContainer(v any) bool {
 	switch t := v.(type) {
 	case []any:
@@ -837,9 +808,8 @@ func isEmptyContainer(v any) bool {
 	return false
 }
 
-// intKeyword reads a keyword PHP casts with (int), reporting whether it was
-// there at all. minItems, maxItems, minLength and maxLength are all read this
-// way.
+// intKeyword reads a keyword as a whole number, reporting whether it was there
+// at all. minItems, maxItems, minLength and maxLength are all read this way.
 func intKeyword(schema map[string]any, key string) (int, bool) {
 	raw, ok := schema[key]
 	if !ok || raw == nil {
@@ -848,10 +818,9 @@ func intKeyword(schema map[string]any, key string) (int, bool) {
 	return phpInt(raw), true
 }
 
-// phpInt is PHP's (int) cast over the values a JSON decoder produces: a number
+// phpInt coerces the values a JSON decoder produces to an int: a number
 // truncates toward zero, a numeric string parses, and a bool is one or nothing.
-// Anything else is zero, which is what casting a value that is not a number
-// gets in PHP too.
+// Anything else is zero.
 func phpInt(v any) int {
 	if n, ok := toNumber(v); ok {
 		switch {
@@ -868,9 +837,9 @@ func phpInt(v any) int {
 	return 0
 }
 
-// phpString is PHP's (string) cast over the values a JSON decoder produces. It
-// is what title, description, pattern, format and the "type" names are read
-// with, because the PHP casts each of them rather than requiring a string.
+// phpString coerces the values a JSON decoder produces to a string. It is what
+// title, description, pattern, format and the "type" names are read with, so a
+// document that wrote one of them as a number is still readable.
 func phpString(v any) string {
 	switch t := v.(type) {
 	case string:
@@ -889,8 +858,9 @@ func phpString(v any) string {
 	return fmt.Sprint(v)
 }
 
-// truthy is PHP's (bool) cast, which uniqueItems is read with. Zero, the empty
-// string, the string "0" and an empty container are all false.
+// truthy coerces a decoded value to a bool, and is what uniqueItems is read
+// with. Zero, the empty string, the string "0" and an empty container are all
+// false.
 func truthy(v any) bool {
 	switch t := v.(type) {
 	case bool:

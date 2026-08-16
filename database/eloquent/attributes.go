@@ -8,13 +8,12 @@ import (
 	"sort"
 )
 
-// GetAttributes answers Model::getAttributes: every column of the row, as the
-// database sees it.
+// GetAttributes returns every column of the row, as the database sees it.
 //
-// PHP returns the $attributes array itself. Here the row lives in the entity
-// struct, so the map is built from it -- plus the raw attributes a column with
-// no field behind it left behind (a withCount alias, a column a migration added
-// and the struct has not caught up with).
+// The row lives in the entity struct, so the map is built from it -- plus
+// the raw attributes a column with no field behind it left behind (a
+// withCount alias, a column a migration added and the struct has not caught
+// up with).
 func (m *Model[T]) GetAttributes() map[string]any {
 	entity := reflect.ValueOf(m.Entity)
 	out := make(map[string]any, len(fieldsOf(entity.Type()))+len(m.attributes))
@@ -27,8 +26,8 @@ func (m *Model[T]) GetAttributes() map[string]any {
 	return out
 }
 
-// SetRawAttributes answers Model::setRawAttributes: it replaces the row without
-// checking anything, and optionally syncs the original.
+// SetRawAttributes replaces the row without checking anything, and
+// optionally syncs the original.
 //
 // It is what Hydrate uses, and it is the only path that puts a value the caller
 // did not declare on the model: a key with no field behind it is kept as a raw
@@ -72,12 +71,9 @@ func (m *Model[T]) setAttributes(attributes map[string]any, keepUnknown bool) er
 	return m.handleDiscardedAttributeViolation(discarded)
 }
 
-// SetAttribute answers Model::setAttribute.
-//
-// The PHP runs mutators and casts on the way in; here the field's type is the
-// cast, so the value is converted to it or refused. A column the entity does not
-// declare is kept as a raw attribute, which is what assigning to an undeclared
-// $attributes key does there.
+// SetAttribute converts value to the field's type and assigns it, or reports
+// the conversion error. A column the entity does not declare is kept as a raw
+// attribute instead.
 func (m *Model[T]) SetAttribute(key string, value any) error {
 	known, err := m.setAttribute(key, value)
 	if err != nil {
@@ -108,12 +104,13 @@ func (m *Model[T]) setAttribute(key string, value any) (bool, error) {
 	return true, nil
 }
 
-// GetAttribute answers Model::getAttribute.
+// GetAttribute returns the value for key: a column value if key names a
+// field, else a raw attribute, else a loaded relation.
 //
-// A key that is neither a column nor a raw attribute reads as nil, which is what
-// PHP answers for a missing key. PreventAccessingMissingAttributes turns that
-// read into a reported violation, as it does there -- and it catches much less
-// here, because a row is a struct and found.Entity.Naem does not build.
+// A key that matches none of those reads as nil. PreventAccessingMissingAttributes
+// turns that into a reported violation, though it catches much less here than
+// it would need to elsewhere: a typo like found.Entity.Naem fails to
+// compile, so it never reaches this check at all.
 func (m *Model[T]) GetAttribute(key string) any {
 	entity := reflect.ValueOf(m.Entity)
 	if f, ok := fieldByColumn(entity.Type(), key); ok {
@@ -129,8 +126,8 @@ func (m *Model[T]) GetAttribute(key string) any {
 	return nil
 }
 
-// AttributesToArray answers Model::attributesToArray: the row as it is
-// serialised, with the hidden columns removed and the appended ones added.
+// AttributesToArray returns the row as it is serialised, with the hidden
+// columns removed and the appended ones added.
 func (m *Model[T]) AttributesToArray() map[string]any {
 	attributes := m.GetAttributes()
 	out := make(map[string]any, len(attributes))
@@ -149,8 +146,8 @@ func (m *Model[T]) AttributesToArray() map[string]any {
 	return out
 }
 
-// isVisible answers getArrayableItems: $visible wins when it is set, $hidden
-// removes otherwise.
+// isVisible reports whether key should be serialised: the visible list wins
+// when it is set, otherwise the hidden list removes.
 func (m *Model[T]) isVisible(key string) bool {
 	if len(m.visible) > 0 {
 		return slices.Contains(m.visible, key)
@@ -158,8 +155,7 @@ func (m *Model[T]) isVisible(key string) bool {
 	return !slices.Contains(m.hidden, key)
 }
 
-// ToArray answers Model::toArray: the serialised row together with the loaded
-// relations, which is what relationsToArray adds there.
+// ToArray returns the serialised row together with the loaded relations.
 func (m *Model[T]) ToArray() map[string]any {
 	out := m.AttributesToArray()
 	for name, related := range m.relations {
@@ -171,8 +167,8 @@ func (m *Model[T]) ToArray() map[string]any {
 	return out
 }
 
-// ToJSON answers Model::toJson. The PHP spells it toJson and returns a string;
-// Go initialisms are upper case and encoding/json returns bytes.
+// ToJSON encodes the serialised row as JSON. Go initialisms are upper case,
+// hence ToJSON rather than ToJson, and it returns bytes rather than a string.
 func (m *Model[T]) ToJSON() ([]byte, error) {
 	out, err := json.Marshal(m.ToArray())
 	if err != nil {
@@ -181,7 +177,7 @@ func (m *Model[T]) ToJSON() ([]byte, error) {
 	return out, nil
 }
 
-// ToPrettyJSON answers Model::toPrettyJson. The PHP spells it toPrettyJson.
+// ToPrettyJSON encodes the serialised row as indented JSON.
 func (m *Model[T]) ToPrettyJSON() ([]byte, error) {
 	out, err := json.MarshalIndent(m.ToArray(), "", "    ")
 	if err != nil {
@@ -190,33 +186,33 @@ func (m *Model[T]) ToPrettyJSON() ([]byte, error) {
 	return out, nil
 }
 
-// GetOriginal answers Model::getOriginal with no argument: the row as it was
-// when it was last synced.
+// GetOriginal returns the row as it was when it was last synced.
 func (m *Model[T]) GetOriginal() map[string]any {
 	return copyMap(m.original)
 }
 
-// GetRawOriginal answers Model::getRawOriginal for one key.
+// GetRawOriginal returns the original value for one key, uncast.
 //
-// The PHP distinguishes getOriginal from getRawOriginal by whether casts are
-// applied on the way out. Here they are the same value, because the cast is the
-// field's type and the original was cast when it was read; the two methods are
-// kept apart anyway, because a caller that asks for the raw one is saying
-// something about intent.
+// It is the same value GetOriginal would give for that key, because the cast
+// is the field's type and the original was already cast when it was read.
+// The two methods are kept apart anyway, because a caller that asks for the
+// raw one is saying something about intent.
 func (m *Model[T]) GetRawOriginal(key string) any { return m.original[key] }
 
-// SyncOriginal answers Model::syncOriginal.
+// SyncOriginal replaces the original snapshot with the row's current values.
 func (m *Model[T]) SyncOriginal() *Model[T] {
 	m.original = m.GetAttributes()
 	return m
 }
 
-// SyncOriginalAttribute answers Model::syncOriginalAttribute.
+// SyncOriginalAttribute replaces the original snapshot for one column with
+// its current value.
 func (m *Model[T]) SyncOriginalAttribute(attribute string) *Model[T] {
 	return m.SyncOriginalAttributes(attribute)
 }
 
-// SyncOriginalAttributes answers Model::syncOriginalAttributes.
+// SyncOriginalAttributes replaces the original snapshot for the named
+// columns with their current values.
 func (m *Model[T]) SyncOriginalAttributes(attributes ...string) *Model[T] {
 	current := m.GetAttributes()
 	if m.original == nil {
@@ -228,7 +224,8 @@ func (m *Model[T]) SyncOriginalAttributes(attributes ...string) *Model[T] {
 	return m
 }
 
-// SyncChanges answers Model::syncChanges.
+// SyncChanges records the current dirty columns as the last save's changes,
+// and captures what each one held before it.
 func (m *Model[T]) SyncChanges() *Model[T] {
 	m.changes = m.GetDirty()
 	m.previous = map[string]any{}
@@ -240,7 +237,7 @@ func (m *Model[T]) SyncChanges() *Model[T] {
 	return m
 }
 
-// GetDirty answers Model::getDirty: the columns that differ from the original.
+// GetDirty returns the columns that differ from the original.
 func (m *Model[T]) GetDirty() map[string]any {
 	dirty := map[string]any{}
 	for key, value := range m.GetAttributes() {
@@ -251,27 +248,28 @@ func (m *Model[T]) GetDirty() map[string]any {
 	return dirty
 }
 
-// GetChanges answers Model::getChanges: what changed on the last save.
+// GetChanges returns what changed on the last save.
 func (m *Model[T]) GetChanges() map[string]any { return copyMap(m.changes) }
 
-// GetPrevious answers Model::getPrevious: what those columns held before it.
+// GetPrevious returns what the changed columns held before the last save.
 func (m *Model[T]) GetPrevious() map[string]any { return copyMap(m.previous) }
 
-// IsDirty answers Model::isDirty. With no argument it asks about the whole row.
+// IsDirty reports whether the given columns differ from the original. With
+// no argument it asks about the whole row.
 func (m *Model[T]) IsDirty(attributes ...string) bool {
 	return hasChanges(m.GetDirty(), attributes)
 }
 
-// IsClean answers Model::isClean.
+// IsClean reports the opposite of IsDirty.
 func (m *Model[T]) IsClean(attributes ...string) bool { return !m.IsDirty(attributes...) }
 
-// WasChanged answers Model::wasChanged: whether the last save touched these
-// columns.
+// WasChanged reports whether the last save touched these columns.
 func (m *Model[T]) WasChanged(attributes ...string) bool {
 	return hasChanges(m.changes, attributes)
 }
 
-// DiscardChanges answers Model::discardChanges.
+// DiscardChanges resets the row to its original values and clears the
+// recorded changes.
 func (m *Model[T]) DiscardChanges() error {
 	original := copyMap(m.original)
 	if err := m.SetRawAttributes(original, false); err != nil {
@@ -283,7 +281,8 @@ func (m *Model[T]) DiscardChanges() error {
 	return nil
 }
 
-// hasChanges answers Model::hasChanges.
+// hasChanges reports whether changes contains any of attributes, or is
+// non-empty when attributes is empty.
 func hasChanges(changes map[string]any, attributes []string) bool {
 	if len(attributes) == 0 {
 		return len(changes) > 0
@@ -296,14 +295,14 @@ func hasChanges(changes map[string]any, attributes []string) bool {
 	return false
 }
 
-// OriginalIsEquivalent answers Model::originalIsEquivalent.
+// OriginalIsEquivalent reports whether key's current value equals its
+// original value.
 //
-// The PHP walks a ladder of cast types because a value read from PDO is a string
-// and the one the developer assigned is not: "1" and 1 have to compare equal. Go
-// has no such gap -- the field has one type, and both values went through assign
-// to reach it -- so the whole ladder collapses into a comparison, and the one
-// case Go adds is the uncomparable field (a slice, a map), which DeepEqual
-// answers.
+// The field has one static type, and both the current and the original value
+// went through assign to reach it, so this is a plain comparison rather than
+// a ladder of type coercions. The one case a plain comparison cannot handle
+// is an uncomparable field (a slice, a map), which reflect.DeepEqual handles
+// instead.
 func (m *Model[T]) OriginalIsEquivalent(key string) bool {
 	original, ok := m.original[key]
 	if !ok {
@@ -316,7 +315,7 @@ func (m *Model[T]) OriginalIsEquivalent(key string) bool {
 	return reflect.DeepEqual(current, original)
 }
 
-// Only answers Model::only: a subset of the row, by column.
+// Only returns a subset of the row, by column.
 func (m *Model[T]) Only(attributes ...string) map[string]any {
 	out := make(map[string]any, len(attributes))
 	for _, attribute := range attributes {
@@ -325,7 +324,7 @@ func (m *Model[T]) Only(attributes ...string) map[string]any {
 	return out
 }
 
-// Except answers Model::except: the row without the named columns.
+// Except returns the row without the named columns.
 func (m *Model[T]) Except(attributes ...string) map[string]any {
 	out := map[string]any{}
 	for key := range m.GetAttributes() {
@@ -337,26 +336,27 @@ func (m *Model[T]) Except(attributes ...string) map[string]any {
 	return out
 }
 
-// GetHidden answers Model::getHidden.
+// GetHidden returns the columns hidden from serialisation.
 func (m *Model[T]) GetHidden() []string { return slices.Clone(m.hidden) }
 
-// SetHidden answers Model::setHidden.
+// SetHidden replaces the columns hidden from serialisation.
 func (m *Model[T]) SetHidden(hidden ...string) *Model[T] {
 	m.hidden = slices.Clone(hidden)
 	return m
 }
 
-// GetVisible answers Model::getVisible.
+// GetVisible returns the columns allowed in serialisation, when the visible
+// list is in use.
 func (m *Model[T]) GetVisible() []string { return slices.Clone(m.visible) }
 
-// SetVisible answers Model::setVisible.
+// SetVisible replaces the columns allowed in serialisation.
 func (m *Model[T]) SetVisible(visible ...string) *Model[T] {
 	m.visible = slices.Clone(visible)
 	return m
 }
 
-// MakeVisible answers Model::makeVisible: it takes the named columns out of
-// $hidden, and adds them to $visible when that list is in use.
+// MakeVisible takes the named columns out of the hidden list, and adds them
+// to the visible list when that list is in use.
 func (m *Model[T]) MakeVisible(attributes ...string) *Model[T] {
 	m.hidden = slices.DeleteFunc(slices.Clone(m.hidden), func(key string) bool {
 		return slices.Contains(attributes, key)
@@ -367,33 +367,31 @@ func (m *Model[T]) MakeVisible(attributes ...string) *Model[T] {
 	return m
 }
 
-// MakeHidden answers Model::makeHidden.
+// MakeHidden adds the named columns to the hidden list.
 func (m *Model[T]) MakeHidden(attributes ...string) *Model[T] {
 	m.hidden = appendUnique(m.hidden, attributes...)
 	return m
 }
 
-// Append answers Model::append: a name that is serialised with the row without
-// being a column.
+// Append adds a name that is serialised with the row without being a column.
 //
-// In PHP the value comes from an accessor method. Here it comes from a raw
-// attribute or a loaded relation -- the two things a Go model can hold that the
-// struct does not declare.
+// The value comes from a raw attribute or a loaded relation -- the two
+// things a model can hold that the entity struct does not declare.
 func (m *Model[T]) Append(attributes ...string) *Model[T] {
 	m.appends = appendUnique(m.appends, attributes...)
 	return m
 }
 
-// GetAppends answers Model::getAppends.
+// GetAppends returns the names appended to serialisation.
 func (m *Model[T]) GetAppends() []string { return slices.Clone(m.appends) }
 
-// SetAppends answers Model::setAppends.
+// SetAppends replaces the names appended to serialisation.
 func (m *Model[T]) SetAppends(appends ...string) *Model[T] {
 	m.appends = slices.Clone(appends)
 	return m
 }
 
-// HasAppended answers Model::hasAppended.
+// HasAppended reports whether attribute is in the appended list.
 func (m *Model[T]) HasAppended(attribute string) bool {
 	return slices.Contains(m.appends, attribute)
 }
@@ -416,11 +414,10 @@ func copyMap(in map[string]any) map[string]any {
 	return out
 }
 
-// sortedKeys is the answer to a Go map having no order where a PHP array does.
+// sortedKeys is the answer to a Go map having no order.
 //
-// Illuminate ksorts the values of a batch insert for exactly this reason, so the
-// same order is used everywhere a map becomes a column list: what is compiled
-// and what is bound are then derived from the same sequence.
+// The same order is used everywhere a map becomes a column list, so what is
+// compiled and what is bound are derived from the same sequence.
 func sortedKeys(in map[string]any) []string {
 	out := make([]string, 0, len(in))
 	for key := range in {

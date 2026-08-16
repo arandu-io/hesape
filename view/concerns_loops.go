@@ -1,10 +1,7 @@
 package view
 
-// ManagesLoops mirrors Illuminate\View\Concerns\ManagesLoops.
-//
-// These are methods on Factory, replicating the PHP trait. A loop stack
-// tracks the state of nested loops so @foreach can expose $loop->index,
-// $loop->first, $loop->last, etc.
+// These are methods on Factory. A loop stack tracks the state of nested
+// loops so @foreach can expose $loop->index, $loop->first, $loop->last, etc.
 
 // Loop holds the state of one level of a @foreach loop.
 type Loop struct {

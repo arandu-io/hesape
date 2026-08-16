@@ -8,10 +8,8 @@ import (
 	"strings"
 )
 
-// dataGet answers to the global data_get() helper that Illuminate\Http leans on
-// in input(), json() and all of Illuminate\Support\Traits\InteractsWithData. It
-// walks a "dot.separated" key through maps and slices and returns def when any
-// segment is absent.
+// dataGet walks a "dot.separated" key through maps and slices, and returns
+// def when any segment is absent.
 func dataGet(target any, key string, def any) any {
 	if key == "" {
 		return target
@@ -72,8 +70,8 @@ func dataGetSegment(target any, segment string) (any, bool) {
 	return nil, false
 }
 
-// dataSet answers to data_set()/Arr::set(): it writes value at a "dot.separated"
-// key, creating the intermediate maps the path needs.
+// dataSet writes value at a "dot.separated" key, creating the intermediate
+// maps the path needs.
 func dataSet(target map[string]any, key string, value any) {
 	if key == "" {
 		return
@@ -99,8 +97,8 @@ func dataSet(target map[string]any, key string, value any) {
 	}
 }
 
-// arrHas answers to Arr::has(): true only when every segment of the dotted key
-// is present, including when the value found is nil.
+// arrHas reports whether every segment of the dotted key is present,
+// including when the value found is nil.
 func arrHas(target any, key string) bool {
 	if key == "" {
 		return false
@@ -120,7 +118,7 @@ func arrHas(target any, key string) bool {
 	return true
 }
 
-// arrHasAny answers to Arr::hasAny(): true when at least one key is present.
+// arrHasAny reports whether at least one key is present.
 func arrHasAny(target any, keys []string) bool {
 	for _, key := range keys {
 		if arrHas(target, key) {
@@ -131,7 +129,7 @@ func arrHasAny(target any, keys []string) bool {
 	return false
 }
 
-// arrForget answers to Arr::forget(): removes every dotted key from the map.
+// arrForget removes every dotted key from the map.
 func arrForget(target map[string]any, keys []string) {
 	for _, key := range keys {
 		if key == "" {
@@ -158,7 +156,8 @@ func arrForget(target map[string]any, keys []string) {
 	}
 }
 
-// strIs answers to Str::is(): "*" is the only wildcard and the match is anchored.
+// strIs reports whether value matches pattern. "*" is the only wildcard and
+// the match is anchored.
 func strIs(pattern, value string) bool {
 	if pattern == value {
 		return true
@@ -176,7 +175,7 @@ func strIs(pattern, value string) bool {
 	return err == nil && matched
 }
 
-// strContainsAny answers to Str::contains() with an array of needles.
+// strContainsAny reports whether haystack contains any of the needles.
 func strContainsAny(haystack string, needles []string) bool {
 	for _, needle := range needles {
 		if needle != "" && strings.Contains(haystack, needle) {
@@ -187,7 +186,8 @@ func strContainsAny(haystack string, needles []string) bool {
 	return false
 }
 
-// strAfter answers to Str::after().
+// strAfter returns the substring after the first occurrence of search, or
+// subject unchanged when search is empty or not found.
 func strAfter(subject, search string) string {
 	if search == "" {
 		return subject
@@ -201,7 +201,8 @@ func strAfter(subject, search string) string {
 	return subject[index+len(search):]
 }
 
-// strBefore answers to Str::before().
+// strBefore returns the substring before the first occurrence of search, or
+// subject unchanged when search is empty or not found.
 func strBefore(subject, search string) string {
 	if search == "" {
 		return subject
@@ -215,7 +216,7 @@ func strBefore(subject, search string) string {
 	return subject[:index]
 }
 
-// strSnake answers to Str::snake(), used by RedirectResponse's dynamic withX().
+// strSnake converts a CamelCase string to snake_case.
 func strSnake(value string) string {
 	var builder strings.Builder
 
@@ -238,7 +239,8 @@ func strSnake(value string) string {
 
 const randomAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
-// strRandom answers to Str::random(), used by FileHelpers::hashName().
+// strRandom returns a random alphanumeric string of the given length. It is
+// what UploadedFile.HashName draws a file's stored name from.
 func strRandom(length int) string {
 	if length <= 0 {
 		return ""
@@ -256,8 +258,8 @@ func strRandom(length int) string {
 	return string(buffer)
 }
 
-// stringify answers to PHP's (string) cast for the scalar values that reach
-// input(): it is how filled(), boolean() and integer() read a value.
+// stringify converts a scalar value to a string. It is what String and the
+// emptiness check behind Filled use to read a value.
 func stringify(value any) string {
 	switch typed := value.(type) {
 	case nil:

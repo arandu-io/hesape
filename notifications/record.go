@@ -11,10 +11,7 @@ import (
 	"github.com/arandu-io/hesape/database"
 )
 
-// The actions a Policy decides about. They have no PHP counterpart: Illuminate
-// reads the notifications relation straight off the model, which is the read
-// path RULE 17 refuses.
-// They are the "module.verb" form the rest
+// The actions a Policy decides about. They are the "module.verb" form the rest
 // of the collection uses, so `aru doctor` recognises them.
 const (
 	// ActionSend is asked before anything is delivered, and again before the
@@ -28,15 +25,14 @@ const (
 	ActionDelete auth.Action = "notification.delete"
 )
 
-// Table is where stored notifications live. It is DatabaseNotification::$table.
+// Table is the name of the table stored notifications live in.
 const Table = "notifications"
 
 // Record is one stored notification: the row behind the bell menu.
 //
-// It is Illuminate's DatabaseNotification with the morph columns spelled out
-// and a tenant added, because in a SaaS a notification belongs to a customer
-// before it belongs to a person, and a query that forgets that reads across
-// all of them (RULE 14).
+// It carries a tenant beside the recipient, because in a SaaS a notification
+// belongs to a customer before it belongs to a person, and a query that forgets
+// that reads across all of them.
 type Record struct {
 	// ID is the row's own identifier, a UUIDv7 so the table sorts by time
 	// without a second index to do it.
@@ -59,17 +55,17 @@ type Record struct {
 	CreatedAt time.Time
 }
 
-// Read is DatabaseNotification::read.
+// Read reports whether the recipient has read this notification.
 func (r Record) Read() bool { return !r.ReadAt.IsZero() }
 
-// Unread is DatabaseNotification::unread.
+// Unread reports whether it is still in the bell menu.
 func (r Record) Unread() bool { return r.ReadAt.IsZero() }
 
-// MarkAsRead is DatabaseNotification::markAsRead.
+// MarkAsRead stamps the notification read.
 //
-// The store is an argument because a Record is a row and not an Active Record
-// object with a connection inside it (00-meta/DOC-architecture.md), and the Grant is
-// one because stamping somebody's notification read is a write on their data.
+// The store is an argument because a Record is a row and not an object with a
+// connection inside it, and the Grant is one because stamping somebody's
+// notification read is a write on their data.
 //
 // Marking a notification that is already read changes nothing and does not move
 // the timestamp: the recipient wanted it read and it is.
@@ -80,11 +76,10 @@ func (r Record) MarkAsRead(ctx context.Context, g auth.Grant, s Store) error {
 	return s.MarkAsRead(ctx, g, r.ID)
 }
 
-// MarkAsUnread is DatabaseNotification::markAsUnread: the stamp is cleared, so
-// the notification is back in the bell menu.
+// MarkAsUnread clears the stamp, so the notification is back in the bell menu.
 //
-// It is the undo of MarkAsRead, and Illuminate has it for the same reason: a
-// menu that marks everything read on open needs a way to put one back.
+// It is the undo of [Record.MarkAsRead]: a menu that marks everything read on
+// open needs a way to put one back.
 func (r Record) MarkAsUnread(ctx context.Context, g auth.Grant, s Store) error {
 	if s == nil {
 		return errors.New("notifications: marking a notification unread needs a store")
@@ -92,12 +87,12 @@ func (r Record) MarkAsUnread(ctx context.Context, g auth.Grant, s Store) error {
 	return s.MarkAsUnread(ctx, g, r.ID)
 }
 
-// Notifiable is DatabaseNotification::notifiable.
+// Notifiable is who this notification was addressed to: the two columns that
+// name the row -- the type and the id -- as something a channel or a store can
+// be handed.
 //
-// In Illuminate it is a morphTo relation that loads the model. Here it is the
-// two columns that name the row -- the type and the id -- as something a
-// channel or a store can be handed. Loading the model is the application's job:
-// this package does not know what a "user" is and must not.
+// It does not load the model. That is the application's job: this package does
+// not know what a "user" is and must not.
 func (r Record) Notifiable() Notifiable {
 	return recipient{kind: r.NotifiableType, id: r.NotifiableID}
 }
@@ -110,13 +105,9 @@ func (r recipient) NotifiableType() string    { return r.kind }
 func (recipient) RouteFor(ChannelName) string { return "" }
 
 // Records is a page of stored notifications.
-//
-// It is Illuminate's DatabaseNotificationCollection, which is an Eloquent
-// collection with two methods on it. Here the collection is a slice, so what is
-// left is the two methods.
 type Records []Record
 
-// MarkAsRead is DatabaseNotificationCollection::markAsRead.
+// MarkAsRead stamps every notification in the page read.
 //
 // It stops at the first error rather than carrying on, because the errors a
 // store returns here are "no such row" and "the Grant does not allow it", and
@@ -130,7 +121,8 @@ func (rs Records) MarkAsRead(ctx context.Context, g auth.Grant, s Store) error {
 	return nil
 }
 
-// MarkAsUnread is DatabaseNotificationCollection::markAsUnread.
+// MarkAsUnread puts every notification in the page back in the bell menu. It
+// stops at the first error, for the reason [Records.MarkAsRead] gives.
 func (rs Records) MarkAsUnread(ctx context.Context, g auth.Grant, s Store) error {
 	for _, r := range rs {
 		if err := r.MarkAsUnread(ctx, g, s); err != nil {
@@ -140,15 +132,12 @@ func (rs Records) MarkAsUnread(ctx context.Context, g auth.Grant, s Store) error
 	return nil
 }
 
-// Read is the ones the recipient has read.
-//
-// It has no PHP counterpart of its own: there the collection is filtered with
-// Collection::filter and a closure calling read(). Here the two filters are
-// named, because the alternative is the same closure written in every caller.
+// Read is the ones the recipient has read. It is named rather than left to a
+// filter at every call site, because the alternative is the same closure
+// written in every caller.
 func (rs Records) Read() Records { return rs.filter(Record.Read) }
 
-// Unread is the ones they have not. It has no PHP counterpart of its own, for
-// the reason [Records.Read] gives.
+// Unread is the ones they have not, for the reason [Records.Read] gives.
 func (rs Records) Unread() Records { return rs.filter(Record.Unread) }
 
 func (rs Records) filter(keep func(Record) bool) Records {
@@ -161,33 +150,23 @@ func (rs Records) filter(keep func(Record) bool) Records {
 	return out
 }
 
-// ScopeRead is DatabaseNotification::scopeRead, and ScopeUnread is
-// DatabaseNotification::scopeUnread: the SQL conditions that keep only the read
-// or only the unread notifications.
+// ScopeRead is the SQL condition that keeps only the notifications the
+// recipient has read: a condition written once that a statement pastes in.
 //
-// In Illuminate they are query scopes on the model, which is what a `where`
-// looks like when the query builder is the model. There is no query builder
-// here (00-meta/DOC-architecture.md rejects Active Record), so a scope is what it
-// always was underneath: a condition, written once, that a statement pastes in.
-//
-// TableStore uses them, and so does an application writing its own read model
+// TableStore uses it, and so does an application writing its own read model
 // over the same table.
 func ScopeRead() string { return "read_at IS NOT NULL" }
 
-// ScopeUnread is DatabaseNotification::scopeUnread, the condition for the
-// notifications still in the bell menu.
+// ScopeUnread is the condition for the notifications still in the bell menu.
 func ScopeUnread() string { return "read_at IS NULL" }
 
 // Store is where the database channel puts a notification and where the bell
 // menu reads it back.
 //
-// It has no PHP counterpart: there DatabaseNotification is an Eloquent model
-// and the query builder is the model, which 00-meta/DOC-architecture.md rejects.
-//
 // Every method takes a Grant, reads included. A notification is somebody's
 // invoice, somebody's password reset, somebody's mention -- a list endpoint
 // without a policy is a list endpoint that hands one tenant another tenant's
-// bell menu (RULE 17).
+// bell menu.
 type Store interface {
 	// Save writes one and returns it with the id and timestamp filled in.
 	Save(ctx context.Context, g auth.Grant, r Record) (Record, error)
@@ -208,19 +187,16 @@ type Store interface {
 }
 
 // Policy is the default decision about stored notifications: a subject may read
-// and clear their own, and nobody else's. It has no PHP counterpart.
+// and clear their own, and nobody else's.
 //
 // It is here rather than in the skeleton because every application wants this
 // same answer and getting it wrong leaks a bell menu. An application with a
 // different rule -- a support agent who may read a customer's -- writes its own
 // Policy and passes that instead; the type is an argument to auth.Authorize,
 // not a registration.
-//
-// Illuminate has no equivalent: in Laravel the notifications relation is read
-// straight off the model, which is exactly the read path RULE 17 refuses.
 type Policy struct{}
 
-// Can decides. It has no PHP counterpart, for the reason Policy gives.
+// Can decides whether the subject may take an action on a stored notification.
 //
 // ActionSend is about the sender rather than about a stored row, so it asks
 // only that the subject carry a tenant: the row that gets written is scoped to
@@ -256,11 +232,9 @@ func (Policy) Can(_ context.Context, s auth.Subject, a auth.Action, r Record) er
 
 // Migrations is the notifications table.
 //
-// It has no PHP method to answer to: it is the stub
-// NotificationTableCommand::migrationStubFile names --
-// notifications.stub in the illuminate/notifications package -- returned as a
-// value. [notifications/console.NotificationTableCommand] is the command that
-// writes it to a file for a project that generates rather than imports.
+// It is returned as a value rather than kept in a file tree.
+// [notifications/console.NotificationTableCommand] is the command that writes
+// it to a file for a project that generates rather than imports.
 //
 // One migration, returned rather than embedded in a file tree, because the
 // table belongs to the package that reads it: an application that never uses

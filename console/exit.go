@@ -23,8 +23,8 @@ type ExitError struct {
 	Message string
 }
 
-// Error has no Illuminate counterpart: it is Go's error interface, and what it
-// returns is the message Command::fail threw the ManuallyFailedException with.
+// Error satisfies the error interface: it returns Message, or a generic exit
+// status line when Message is empty.
 func (e *ExitError) Error() string {
 	if e.Message == "" {
 		return fmt.Sprintf("exit status %d", e.Code)
@@ -32,8 +32,6 @@ func (e *ExitError) Error() string {
 	return e.Message
 }
 
-// Exit is Command::fail, with the status alongside the message.
-//
 // Exit returns an error that ends the command with a status of its own.
 //
 // The status is what a caller scripts against -- a pipeline that tells a
@@ -52,9 +50,6 @@ func Exit(code int, format string, a ...any) error {
 	return &ExitError{Code: code, Message: message}
 }
 
-// ExitCode is the status Kernel::handle returns, read off the error instead of
-// off the command.
-//
 // ExitCode is the status a binary should exit with, given what the command
 // returned.
 //
@@ -76,15 +71,11 @@ func ExitCode(err error) int {
 	return 1
 }
 
-// GuardEnv is ConfirmableTrait::confirmToProceed for the pipeline: it refuses
-// where the PHP asks.
-//
 // GuardEnv refuses an action outside the environment it belongs to.
 //
 // It is the check that stands between `migrate:fresh` and a production
-// database. Laravel asks for confirmation; this refuses, because a prompt is
-// answered by whoever is at the keyboard and a deploy pipeline has nobody
-// there.
+// database: it refuses outright, because a prompt is answered by whoever is
+// at the keyboard and a deploy pipeline has nobody there.
 //
 // action is what would have happened, in the imperative, so the message reads
 // as a sentence: GuardEnv(cfg.App.Env, config.EnvDev, "dropping every table").

@@ -7,73 +7,57 @@ import (
 	"github.com/arandu-io/hesape/str"
 )
 
-// BroadcastableModelEventOccurred is
-// Illuminate\Database\Eloquent\BroadcastableModelEventOccurred: the event
-// [BroadcastsEvents] hands the broadcaster.
+// BroadcastableModelEventOccurred is the event [BroadcastsEvents] hands the
+// broadcaster.
 //
-// It lives beside the trait rather than in database/eloquent because it is the
-// trait's event and nothing else builds one -- the PHP keeps them apart only
-// because a trait file holds a trait.
+// It lives beside [BroadcastsEvents] because nothing else builds one.
 //
-// The PHP implements ShouldBroadcast, which is a marker interface with no
-// methods; in Go an interface with no methods is satisfied by everything, so
-// there is nothing to declare. What the broadcasters actually ask for --
-// BroadcastOn, BroadcastAs, BroadcastWith and ShouldBroadcastNow -- is below,
-// and each one satisfies the interface of the same name in
-// github.com/arandu-io/hesape/broadcasting.
-//
-// SerializesModels has no twin: it exists so a PHP queue payload carries a model
-// identifier instead of a serialized object graph, and a Go job carries whatever
-// its fields hold.
+// What the broadcasters ask for -- BroadcastOn, BroadcastAs, BroadcastWith and
+// ShouldBroadcastNow -- is below, and each one satisfies the interface of the
+// same name in github.com/arandu-io/hesape/broadcasting.
 type BroadcastableModelEventOccurred struct {
-	// InteractsWithSockets is the PHP's `use InteractsWithSockets`, and it brings
-	// the public $socket with it.
+	// InteractsWithSockets is embedded for the Socket field it brings.
 	broadcasting.InteractsWithSockets
 
-	// Model is the public $model: the model the event is about.
+	// Model is the model the event is about.
 	Model any
 
-	// Connection is the public $connection: the queue connection the broadcast
-	// job is pushed on.
+	// Connection is the queue connection the broadcast job is pushed on.
 	Connection string
 
-	// Queue is the public $queue.
+	// Queue is the queue the broadcast job is pushed on.
 	Queue string
 
-	// AfterCommit is the public $afterCommit.
+	// AfterCommit says whether the broadcast waits for the surrounding
+	// transaction to commit.
 	AfterCommit bool
 
-	// SoftDeletes is what shouldBroadcastNow asks with
-	// `method_exists($this->model, 'bootSoftDeletes')`. Go cannot ask a value
-	// whether it has a method by name, so BroadcastsEvents states it.
+	// SoftDeletes says whether the model soft deletes. Go cannot ask a
+	// value whether it has a method by name, so BroadcastsEvents states it,
+	// and ShouldBroadcastNow reads it.
 	SoftDeletes bool
 
-	// event is the protected $event.
+	// event is the model event this is about.
 	event Event
 
-	// channels is the protected $channels: what onChannels was given.
+	// channels is what OnChannels was given.
 	channels []broadcasting.Channel
 }
 
-// NewBroadcastableModelEventOccurred is
-// BroadcastableModelEventOccurred::__construct.
+// NewBroadcastableModelEventOccurred returns the event for model and event,
+// with no channels named yet.
 func NewBroadcastableModelEventOccurred(model any, event Event) *BroadcastableModelEventOccurred {
 	return &BroadcastableModelEventOccurred{Model: model, event: event}
 }
 
-// BroadcastOn is BroadcastableModelEventOccurred::broadcastOn: the channels the
-// event goes out on.
+// BroadcastOn returns the channels the event goes out on: the channels
+// given to OnChannels, or the model's own BroadcastOn when it implements
+// BroadcastsModelEventOn, or the model's own private channel via
+// HasBroadcastChannel, in that order.
 //
-// The PHP takes the channels given to onChannels, falls back to
-// $this->model->broadcastOn($event), and maps every Model in the result to a
-// PrivateChannel. The map is why the default works at all: the trait's
-// broadcastOn returns [$this].
-//
-// A trait struct in Go cannot return the model it was embedded in, so
-// [BroadcastsEvents.BroadcastOn] answers nothing and that private channel is
-// built here, from the model this event already holds. It is the same channel
-// the PHP arrives at by the same rule -- a model on the list means its own
-// private channel -- decided where the model is in hand.
+// [BroadcastsEvents.BroadcastOn] returns nothing on its own -- it cannot
+// reach the model it is embedded in -- so the model's private channel is
+// built here instead, from the model this event already holds.
 func (b *BroadcastableModelEventOccurred) BroadcastOn() []broadcasting.Channel {
 	if len(b.channels) > 0 {
 		return b.channels
@@ -92,18 +76,16 @@ func (b *BroadcastableModelEventOccurred) BroadcastOn() []broadcasting.Channel {
 	return nil
 }
 
-// BroadcastAs is BroadcastableModelEventOccurred::broadcastAs: the name the
-// event goes out under, "OrderCreated".
+// BroadcastAs returns the name the event goes out under, "OrderCreated".
 //
-// The default is class_basename($this->model).ucfirst($this->event). There is no
-// class name in Go, so the model's own name for itself is used when it has one
-// -- BroadcastsEvents.Class, read through HasBroadcastChannel's sibling -- and
-// reflect.Type.Name otherwise, which is what BroadcastEvent::displayName does
-// for the same question.
+// The default is the model's base name plus the event name, capitalised.
+// There is no class name in Go, so the model's own name for itself is used
+// when it has one -- BroadcastsEvents.Class, read through
+// HasBroadcastChannel's sibling -- and reflect.Type.Name otherwise.
 //
-// A model with its own broadcastAs is taken at its word, unless it answers the
-// empty string: that is the PHP's `?: $default`, and it is what a model that
-// only names some of its events returns for the rest.
+// A model with its own BroadcastAs is taken at its word, unless it returns
+// the empty string: that is what a model that only names some of its
+// events returns for the rest, and it falls back to the default.
 func (b *BroadcastableModelEventOccurred) BroadcastAs() string {
 	if as, ok := b.Model.(BroadcastsModelEventAs); ok {
 		if name := as.BroadcastAs(b.event); name != "" {
@@ -114,14 +96,14 @@ func (b *BroadcastableModelEventOccurred) BroadcastAs() string {
 	return b.modelBasename() + str.Ucfirst(string(b.event))
 }
 
-// modelBasename is class_basename($this->model).
+// modelBasename returns the model's base name, for BroadcastAs's default.
 func (b *BroadcastableModelEventOccurred) modelBasename() string {
 	if has, ok := b.Model.(broadcasting.HasBroadcastChannel); ok {
 		if route := has.BroadcastChannelRoute(); route != "" {
 			// The route is "App.Models.Order.{order}", so the class name is
 			// everything before the placeholder and its basename is the last
 			// segment of that. Reading it here rather than adding a second field
-			// keeps one statement of the model's name (RULE 9).
+			// keeps one statement of the model's name.
 			if i := lastPlaceholder(route); i >= 0 {
 				return lastDotSegment(trimTrailingDot(route[:i]))
 			}
@@ -140,12 +122,10 @@ func (b *BroadcastableModelEventOccurred) modelBasename() string {
 	return t.Name()
 }
 
-// BroadcastWith is BroadcastableModelEventOccurred::broadcastWith: the payload
-// the event carries.
-//
-// A nil answer is the PHP's null, and the broadcaster reads the event's public
-// properties instead -- which is what
-// BroadcastEvent::getPayloadFromEvent does when method_exists says no.
+// BroadcastWith returns the payload the event carries, from the model when
+// it implements BroadcastsModelEventWith, or nil otherwise -- and a nil
+// result is the broadcaster's cue to read the event's own public fields
+// instead.
 func (b *BroadcastableModelEventOccurred) BroadcastWith() map[string]any {
 	if with, ok := b.Model.(BroadcastsModelEventWith); ok {
 		return with.BroadcastWith(b.event)
@@ -154,11 +134,9 @@ func (b *BroadcastableModelEventOccurred) BroadcastWith() map[string]any {
 	return nil
 }
 
-// OnChannels is BroadcastableModelEventOccurred::onChannels: name the channels
-// by hand, in place of the model's.
+// OnChannels names the channels by hand, in place of the model's.
 //
-// The PHP takes Arr::wrap($channels), so an empty list leaves the model's own
-// answer standing. A nil or empty slice does the same here.
+// A nil or empty slice leaves the model's own channels standing.
 func (b *BroadcastableModelEventOccurred) OnChannels(channels []broadcasting.Channel) *BroadcastableModelEventOccurred {
 	if len(channels) > 0 {
 		b.channels = channels
@@ -167,20 +145,20 @@ func (b *BroadcastableModelEventOccurred) OnChannels(channels []broadcasting.Cha
 	return b
 }
 
-// ShouldBroadcastNow is BroadcastableModelEventOccurred::shouldBroadcastNow.
+// ShouldBroadcastNow reports whether the event should broadcast
+// synchronously rather than through the queue.
 //
-// A delete on a model that does not soft delete goes out synchronously, because
-// by the time a worker picks the job up the row is gone and there is nothing
-// left to load.
+// A delete on a model that does not soft delete goes out synchronously,
+// because by the time a worker picks the job up the row is gone and there
+// is nothing left to load.
 func (b *BroadcastableModelEventOccurred) ShouldBroadcastNow() bool {
 	return b.event == Deleted && !b.SoftDeletes
 }
 
-// Event is BroadcastableModelEventOccurred::event: the model event this is
-// about.
+// Event returns the model event this is about.
 func (b *BroadcastableModelEventOccurred) Event() Event { return b.event }
 
-// lastPlaceholder answers the index of the '{' that opens the trailing
+// lastPlaceholder returns the index of the '{' that opens the trailing
 // placeholder of a channel route, or -1.
 func lastPlaceholder(route string) int {
 	for i := len(route) - 1; i >= 0; i-- {

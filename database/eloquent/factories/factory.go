@@ -13,7 +13,7 @@ import (
 	"github.com/arandu-io/hesape/str"
 )
 
-// Model is Illuminate\Database\Eloquent\Model, as a factory uses it.
+// Model is what a factory asks of a model.
 //
 // It is an alias rather than a second declaration: relations already writes out
 // the surface a model presents to everything that is not the model itself, and
@@ -32,20 +32,17 @@ type State func(attributes map[string]any, parent Model) map[string]any
 
 // Attribute is the deferred form of a value in a factory definition.
 //
-// PHP writes `fn () => User::factory()` and calls it with no arguments while
-// expanding. This carries a context and an auth.Grant because expanding is not
-// always pure: an attribute that resolves to another factory reaches the
-// database, and RULE 17 puts the Grant in the signature of everything that
-// does. An attribute that only computes ignores both.
+// It carries a context and an auth.Grant because expanding is not always pure:
+// an attribute that resolves to another factory reaches the database, and
+// everything that does takes a Grant. An attribute that only computes ignores
+// both.
 type Attribute func(ctx context.Context, g auth.Grant, attributes map[string]any) (any, error)
 
-// ChildRelationship is what Factory::$has holds.
+// ChildRelationship is what a factory's Has list holds.
 //
-// PHP stores two unrelated classes there -- Relationship and
-// BelongsToManyRelationship -- and duck-types the two calls it makes on them.
-// Go has no duck typing, so the pair of calls is written out as an interface.
-// It is the one name in this package that Illuminate does not have, and it
-// names a set PHP leaves unnamed rather than renaming anything.
+// Two unrelated types go in it -- Relationship and BelongsToManyRelationship --
+// and the pair of calls made on both is written out here as the interface they
+// share.
 type ChildRelationship interface {
 	// CreateFor answers createFor on both classes.
 	CreateFor(ctx context.Context, g auth.Grant, parent Model) error
@@ -54,19 +51,15 @@ type ChildRelationship interface {
 	Recycle(recycle map[string][]Model) ChildRelationship
 }
 
-// Factory answers the abstract Illuminate\Database\Eloquent\Factories\Factory.
+// Factory builds models for tests and seeds.
 //
-// PHP's factory is an abstract class the application subclasses: the subclass
-// declares $model and implements definition(), and `new static` reaches both.
-// Go has no subclass and no late static binding, so the two declarations are
-// constructor arguments and every static method of the PHP that needed `new
-// static` is a method here. NewFactory says which changes that costs.
+// The model it makes and the definition it fills are constructor arguments; see
+// NewFactory.
 //
-// Every method that in PHP returns `static` returns a new *Factory here, as it
-// does there: a factory is immutable, and `$factory->count(3)` leaves the
-// receiver alone. Sharing one and calling Count on it twice therefore gives two
-// factories and not one changed twice, which is the property the whole fluent
-// chain rests on.
+// A factory is immutable: every method that configures one returns a new
+// *Factory and leaves the receiver alone. Sharing one and calling Count on it
+// twice therefore gives two factories and not one changed twice, which is the
+// property the whole fluent chain rests on.
 type Factory struct {
 	// model is Factory::$model. PHP holds a class name and instantiates it;
 	// there is no class name at run time here, so it holds an instance and

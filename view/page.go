@@ -260,10 +260,7 @@ func (p Page) WithToken(token string) Page {
 	return p
 }
 
-// First answers to Illuminate\Support\MessageBag::first, promoted onto Page so
-// a template writes what a Blade template writes: the first message for a
-// field, or empty. It was called FieldError, which is the same method under a
-// name Illuminate does not use.
+// First returns the first message for name, or empty.
 //
 // One message and not all of them, because that is what a form draws: the box
 // has room for one line, and the first is the one that names what to change.
@@ -281,16 +278,13 @@ func (p Page) WithToken(token string) Page {
 //
 // Empty for a field that was accepted, and empty for every field on a page
 // nobody was rejected on -- so a screen asks unconditionally and draws nothing
-// when there is nothing. There is no @error directive and none is needed
-// (RULE 15).
+// when there is nothing. There is no @error directive and none is needed.
 func (p Page) First(name string) string { return p.Errors.First(name) }
 
-// Get answers to Illuminate\Support\MessageBag::get: every message for a field,
-// for the rare screen that lists them. It was called FieldErrors.
+// Get returns every message for name, for the rare screen that lists them.
 func (p Page) Get(name string) []string { return p.Errors.Get(name) }
 
-// Any answers to Illuminate\Support\MessageBag::any, and reports whether the
-// attempt that landed here was rejected. It was called HasErrors.
+// Any reports whether the attempt that landed here was rejected.
 //
 // It is what a layout asks before drawing the banner. A page with no errors must
 // not draw an empty one: a box that is always there and usually blank is a box
@@ -327,42 +321,35 @@ func (p Page) OldOr(name, fallback string) string {
 //
 //	Password must be at least 12 characters
 //
-// The field name is prepended HERE and not baked into the message, which is the
-// one deliberate divergence from Laravel: its messages are written ":attribute
-// must be at least :min characters" and carry the name everywhere, including
-// under the labelled box where the label has just said it. So a message reads
-// bare where it is drawn in context, and named where it is drawn out of context,
-// and there is one message either way.
+// The field name is prepended HERE and not baked into the message itself, so
+// a message reads bare where it is drawn in context, and named where it is
+// drawn out of context, and there is one message either way.
 //
 // Sorted rather than in map order, so the banner does not reshuffle between two
 // renders of the same failure.
-// displayableAttribute answers
-// Illuminate\Validation\Concerns\FormatsMessages::getDisplayableAttribute,
-// which is the last line of that method: str_replace('_', ' ', Str::snake($a)).
+// displayableAttribute turns a field name into the form a message names it
+// by: snake case with underscores opened into spaces.
 //
 // It is snake case with the underscores opened out, and nothing else: a field
 // named password_confirmation reads "password confirmation", not "Password
-// Confirmation". That is str.Headline, which is what titles are for -- the
-// Laravel message reads "The password confirmation field must match", with the
-// name inside the sentence and lowercase.
+// Confirmation". That is str.Headline, which is what titles are for -- a
+// message reads "the password confirmation field must match", with the name
+// inside the sentence and lowercase.
 //
 // The first letter is raised because the name opens the line here rather than
-// sitting inside a sentence. Illuminate raises nothing, because ":attribute"
-// never lands first in its own messages.
+// sitting inside a sentence.
 //
-// The custom names an application declares -- Laravel's attributes() and its
-// validation.attributes language lines -- are not read yet. When they are, they
-// are read here, so that the banner and the field label cannot disagree.
+// Custom display names for a field, when a project wants to declare them,
+// are not read yet. When they are, they are read here, so that the banner
+// and the field label cannot disagree.
 func displayableAttribute(field string) string {
 	return str.Ucfirst(strings.ReplaceAll(str.Snake(field, "_"), "_", " "))
 }
 
-// All answers to Illuminate\Support\MessageBag::all: every message, for the
-// banner. It was called ErrorSummary.
+// All returns every message, one line per failed field, for the banner.
 //
-// Each line is prefixed with the field's displayable name, which is the one
-// place this differs from the PHP -- there the validator has already baked
-// ":attribute" into the message, so the bag has nothing left to prepend.
+// Each line is prefixed with the field's displayable name, since the message
+// itself does not carry the field name.
 //
 // Nil rather than empty on a page with no errors, so a layout that ranges over
 // it draws no banner at all.

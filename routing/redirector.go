@@ -10,9 +10,9 @@ import (
 // browser: back to the previous page, to a named route, to a path, to the
 // address an unauthenticated visitor was trying to reach.
 //
-// It mirrors Illuminate\Routing\Redirector. It holds a UrlGenerator and
-// optionally a session store, and every method that answers a redirect does so
-// by building a URL through the generator and wrapping it.
+// It holds a UrlGenerator and optionally a session store, and every method
+// that answers a redirect does so by building a URL through the generator and
+// wrapping it.
 type Redirector struct {
 	generator *UrlGenerator
 	session   SessionStore
@@ -27,14 +27,13 @@ func NewRedirector(g *UrlGenerator) *Redirector {
 // the intended URL.
 func (r *Redirector) SetSession(s SessionStore) { r.session = s }
 
-// Back is Redirector::back. It sends the browser where it came from, and to
-// the fallback when it came from nowhere -- a bookmarked form, a link opened
-// in a new tab.
+// Back sends the browser where it came from, and to the fallback when it
+// came from nowhere -- a bookmarked form, a link opened in a new tab.
 func (r *Redirector) Back(status int, headers http.Header, fallback string) *Redirect {
 	return r.createRedirect(r.generator.Previous(fallback), status, headers)
 }
 
-// Refresh is Redirector::refresh. It sends the browser to the current URL.
+// Refresh sends the browser to the current URL.
 func (r *Redirector) Refresh(status int, headers http.Header) *Redirect {
 	path := "/"
 	if req := r.generator.GetRequest(); req != nil {
@@ -43,7 +42,7 @@ func (r *Redirector) Refresh(status int, headers http.Header) *Redirect {
 	return r.To(path, status, headers, nil)
 }
 
-// To is Redirector::to.
+// To sends the browser to path.
 //
 //	redirector.To("/invoices/42", 302, nil, nil)
 func (r *Redirector) To(path string, status int, headers http.Header, secure *bool) *Redirect {
@@ -51,20 +50,20 @@ func (r *Redirector) To(path string, status int, headers http.Header, secure *bo
 	return r.createRedirect(u, status, headers)
 }
 
-// Away is Redirector::away. It sends the browser to an external URL, without
-// validating the destination -- for a third-party integration, not for a path
-// within the application.
+// Away sends the browser to an external URL, without validating the
+// destination -- for a third-party integration, not for a path within the
+// application.
 func (r *Redirector) Away(path string, status int, headers http.Header) *Redirect {
 	return r.createRedirect(path, status, headers)
 }
 
-// Secure is Redirector::secure.
+// Secure sends the browser to path over https.
 func (r *Redirector) Secure(path string, status int, headers http.Header) *Redirect {
 	t := true
 	return r.To(path, status, headers, &t)
 }
 
-// Route is Redirector::route.
+// Route sends the browser to a named route.
 func (r *Redirector) Route(name string, parameters map[string]any, status int, headers http.Header) (*Redirect, error) {
 	u, err := r.generator.Route(name, parameters, true)
 	if err != nil {
@@ -73,7 +72,7 @@ func (r *Redirector) Route(name string, parameters map[string]any, status int, h
 	return r.createRedirect(u, status, headers), nil
 }
 
-// SignedRoute is Redirector::signedRoute.
+// SignedRoute sends the browser to a signed URL for a named route.
 func (r *Redirector) SignedRoute(name string, parameters map[string]any, expiration time.Time, status int, headers http.Header) (*Redirect, error) {
 	u, err := r.generator.SignedRoute(name, parameters, expiration, true)
 	if err != nil {
@@ -82,7 +81,8 @@ func (r *Redirector) SignedRoute(name string, parameters map[string]any, expirat
 	return r.createRedirect(u, status, headers), nil
 }
 
-// TemporarySignedRoute is Redirector::temporarySignedRoute.
+// TemporarySignedRoute sends the browser to a signed URL for a named route,
+// expiring at the given time.
 func (r *Redirector) TemporarySignedRoute(name string, expiration time.Time, parameters map[string]any, status int, headers http.Header) (*Redirect, error) {
 	u, err := r.generator.TemporarySignedRoute(name, expiration, parameters, true)
 	if err != nil {
@@ -91,7 +91,7 @@ func (r *Redirector) TemporarySignedRoute(name string, expiration time.Time, par
 	return r.createRedirect(u, status, headers), nil
 }
 
-// Action is Redirector::action.
+// Action sends the browser to a controller action.
 func (r *Redirector) Action(action string, parameters map[string]any, status int, headers http.Header) (*Redirect, error) {
 	u, err := r.generator.Action(action, parameters, true)
 	if err != nil {
@@ -100,8 +100,8 @@ func (r *Redirector) Action(action string, parameters map[string]any, status int
 	return r.createRedirect(u, status, headers), nil
 }
 
-// Home is Redirector::home. It sends the browser to the route named "home",
-// falling back to "/" when there is none.
+// Home sends the browser to the route named "home", falling back to "/" when
+// there is none.
 func (r *Redirector) Home(status int, headers http.Header) *Redirect {
 	if u, err := r.generator.Route("home", nil, true); err == nil {
 		return r.createRedirect(u, status, headers)
@@ -109,8 +109,8 @@ func (r *Redirector) Home(status int, headers http.Header) *Redirect {
 	return r.To("/", status, headers, nil)
 }
 
-// Guest is Redirector::guest. It sends the browser to a path, storing where it
-// was going so Intended can bring it back after a sign-in.
+// Guest sends the browser to a path, storing where it was going so Intended
+// can bring it back after a sign-in.
 func (r *Redirector) Guest(path string, status int, headers http.Header, secure *bool) *Redirect {
 	req := r.generator.GetRequest()
 	if req != nil && req.Method == http.MethodGet && !strings.Contains(req.Header.Get("Accept"), "application/json") {
@@ -140,8 +140,7 @@ func (r *Redirector) Intended(def string, status int, headers http.Header, secur
 	return r.To(path, status, headers, secure)
 }
 
-// SetIntendedUrl is Redirector::setIntendedUrl. It stores a URL for Intended
-// to read back.
+// SetIntendedUrl stores a URL for Intended to read back.
 func (r *Redirector) SetIntendedUrl(u string) *Redirector {
 	if r.session != nil {
 		r.session.Put("url.intended", u)
@@ -149,8 +148,7 @@ func (r *Redirector) SetIntendedUrl(u string) *Redirector {
 	return r
 }
 
-// GetIntendedUrl is Redirector::getIntendedUrl. It reads the stored URL
-// without removing it.
+// GetIntendedUrl reads the stored URL without removing it.
 func (r *Redirector) GetIntendedUrl() string {
 	if r.session == nil {
 		return ""
@@ -161,7 +159,7 @@ func (r *Redirector) GetIntendedUrl() string {
 	return ""
 }
 
-// GetUrlGenerator is Redirector::getUrlGenerator.
+// GetUrlGenerator returns the generator backing this redirector.
 func (r *Redirector) GetUrlGenerator() *UrlGenerator { return r.generator }
 
 func (r *Redirector) createRedirect(path string, status int, headers http.Header) *Redirect {

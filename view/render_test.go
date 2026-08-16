@@ -19,7 +19,7 @@ import (
 type homeData struct{ Name string }
 
 func init() {
-	// What `aru view:build` emits for resources/views/home.kyse.go.
+	// What the view build emits for resources/views/home.kyse.go.
 	view.Register("home", func(w io.Writer, data any) error {
 		d, ok := data.(homeData)
 		if !ok {
@@ -77,8 +77,8 @@ func TestAViewWithNoRendererSaysWhatToWire(t *testing.T) {
 		t.Fatal("rendering without a renderer succeeded")
 	}
 	// The file, and the call that goes in it. The wiring moved from
-	// cmd/app/main.go to bootstrap/app.go with the Laravel tree, and a message
-	// naming a file the project does not have is worse than no message.
+	// cmd/app/main.go to bootstrap/app.go, and a message naming a file the
+	// project does not have is worse than no message.
 	for _, want := range []string{"bootstrap/app.go", "view.NewModule()"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error does not mention %q: %v", want, err)
