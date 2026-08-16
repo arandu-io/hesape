@@ -425,7 +425,7 @@ func (m *BroadcastManager) ForgetDrivers() *BroadcastManager {
 //
 // The #[Queue] attribute and resolveQueueFromQueueRoute have no twin. An
 // attribute is a PHP language feature, and a queue route is the queue package's
-// to read -- reason (1) and reason (3) of ADR 0044.
+// to read -- reason (1) and reason (3) of ADR 0056.
 func queueOf(event any) string {
 	if q, ok := event.(HasBroadcastQueue); ok {
 		return q.BroadcastQueue()

@@ -230,7 +230,7 @@ func (b *BroadcastEvent) getPayloadFromEvent(event any) map[string]any {
 // BroadcastEvent::getConnectionChannels does the same for channels and has no
 // twin here: a PHP array is a list and a dictionary at once, so $channels can
 // be either, and a Go []Channel can only be the list. The connection-keyed
-// channel list is a PHP language feature, which is reason (1) of ADR 0044.
+// channel list is a PHP language feature, which is reason (1) of ADR 0056.
 func (b *BroadcastEvent) getConnectionPayload(payload map[string]any, connection string) map[string]any {
 	nested, ok := payload[connection].(map[string]any)
 	if !ok {

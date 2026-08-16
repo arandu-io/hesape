@@ -91,7 +91,7 @@
 // (ADR 0001), and so is CacheManager::setApplication.
 //
 // Method by method, so that the list can be checked rather than believed. Each
-// one with the ADR 0044 reason number:
+// one with the ADR 0056 reason number:
 //
 //	RedisStore::connection, ::lockConnection, ::getRedis, RedisTagSet::addEntry,
 //	    ::entries, ::flushStaleEntries and RedisTaggedCache::flushStale --

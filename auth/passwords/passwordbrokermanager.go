@@ -25,7 +25,7 @@ import (
 // from, because the brokers are built by the wiring and handed over already
 // made.
 //
-// So this holds them instead of building them, which is reason (2) of ADR 0044.
+// So this holds them instead of building them, which is reason (2) of ADR 0056.
 // The three methods that are not the container are here, spelled as they are
 // there.
 type PasswordBrokerManager struct {

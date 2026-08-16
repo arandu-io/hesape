@@ -29,7 +29,7 @@
 //	ReportableHandler.php  ReportableHandler, with Handles and Stop
 //
 // Two methods of the legacy Handler have no equivalent, and both are reason 1
-// of ADR 0044 -- a PHP language feature Go does not have. Handler::handleError
+// of ADR 0056 -- a PHP language feature Go does not have. Handler::handleError
 // is the callback set_error_handler installs, which promotes a warning or a
 // notice into an exception, and Go has neither. Handler::handleShutdown is what
 // register_shutdown_function installs to catch a fatal error on the way out;
@@ -100,7 +100,7 @@
 //
 // # Exceptions::fake, and what a test writes instead
 //
-// Exceptions::fake is reason 2 of ADR 0044 -- a method that only serves the
+// Exceptions::fake is reason 2 of ADR 0056 -- a method that only serves the
 // container, a facade or a service provider. It is Facade::swap putting an
 // ExceptionHandlerFake where the handler contract was bound, so that a failure
 // anywhere in the application is recorded instead of logged. There is no

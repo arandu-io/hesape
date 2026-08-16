@@ -33,7 +33,7 @@
 // they are package functions, and the two encoders they replace are package
 // variables behind a mutex rather than static properties.
 //
-// # What is skipped, and why (ADR 0044)
+// # What is skipped, and why (ADR 0056)
 //
 //   - AsEnumCollection and AsEnumArrayObject. Both take a class-string of a
 //     PHP backed enum and call tryFrom on it. Go has no enum type and no way

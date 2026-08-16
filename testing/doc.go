@@ -46,7 +46,7 @@
 // ParallelTesting itself is implemented, as [ParallelTesting]. What is skipped
 // around it is the machinery that drives ParaTest through the service
 // container and Symfony Console, since go test is the runner here. Each skip,
-// with the ADR 0044 reason number:
+// with the ADR 0056 reason number:
 //
 //	ParallelTesting::__construct's $container argument -- reason 2: PHP holds
 //	    the container only to call the registered callbacks through it and have

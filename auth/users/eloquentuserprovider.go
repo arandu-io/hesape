@@ -36,7 +36,7 @@ import (
 // The PHP holds $model, a class-string, and calls `new $class` on it. Go has no
 // class string and no way to construct a type named at run time, so the model is
 // a constructor function the wiring supplies -- func() auth.Authenticatable.
-// That is reason (1) of ADR 0044: a PHP language feature Go does not have.
+// That is reason (1) of ADR 0056: a PHP language feature Go does not have.
 //
 // The query the model would have opened comes in the same way. In PHP
 // $model->newQuery() reaches the model's connection, table and global scopes; an

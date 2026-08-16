@@ -22,7 +22,7 @@
 //	http/resources  -> Illuminate\Http\Resources
 //	http/testing    -> Illuminate\Http\Testing
 //
-// # Not mirrored, and why (ADR 0044)
+// # Not mirrored, and why (ADR 0056)
 //
 //	Request::offsetExists   are PHP's ArrayAccess, the interface behind
 //	Request::offsetGet      $request['email']. Go has no operator to

@@ -235,7 +235,7 @@ func (b *Broadcaster) VerifyUserCanAccessChannel(ctx context.Context, channel st
 // {placeholders} of the pattern, filled in from the channel that was asked for.
 //
 // Five of the PHP's helpers end here, and every one of them is reflection or
-// the container -- reason (1) and reason (2) of ADR 0044. extractParameters and
+// the container -- reason (1) and reason (2) of ADR 0056. extractParameters and
 // extractParametersFromClass read the callback's signature to know what to pass
 // and in which order; Go cannot inspect a func's parameter names, and does not
 // need to, because the parameters arrive as a map. resolveBinding,

@@ -78,7 +78,7 @@
 // # Method by method, so the list can be checked rather than believed
 //
 // Twenty-eight public methods of the component have no name here. Each one,
-// with the ADR 0044 reason number:
+// with the ADR 0056 reason number:
 //
 //	AbstractRouteCollection::compile, ::dumper, ::toSymfonyRouteCollection,
 //	    RouteCollection::toSymfonyRouteCollection, ::toCompiledRouteCollection,

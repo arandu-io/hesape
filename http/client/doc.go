@@ -33,7 +33,7 @@
 // Record, AssertSent — is the value this package adds. A Guzzle wrapper would
 // be a dependency for a dependency.
 //
-// # Not mirrored, and why (ADR 0044)
+// # Not mirrored, and why (ADR 0056)
 //
 //	Factory::psr7Response        PSR-7 is a PHP interface standard for
 //	Request::toPsrRequest        request and response objects, which exists

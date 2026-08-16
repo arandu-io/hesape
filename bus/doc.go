@@ -83,7 +83,7 @@
 //
 // # What is not ported, and why
 //
-// With the numbered reason from ADR 0044: (1) a PHP language feature Go does not
+// With the numbered reason from ADR 0056: (1) a PHP language feature Go does not
 // have, (2) a method that only serves the container, a facade or a service
 // provider, (3) a driver this ecosystem does not carry.
 //
@@ -131,7 +131,7 @@
 //
 // # Bus::fake, and what a test writes instead
 //
-// Bus::fake is reason 2 of ADR 0044 -- a method that only serves the container,
+// Bus::fake is reason 2 of ADR 0056 -- a method that only serves the container,
 // a facade or a service provider. It is Facade::swap putting a BusFake where
 // the dispatcher contract was bound, so that everything dispatched anywhere in
 // the application is recorded and nothing runs. There is neither container

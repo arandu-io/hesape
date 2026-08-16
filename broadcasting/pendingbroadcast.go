@@ -36,7 +36,7 @@ type ExcludesCurrentUser interface {
 //
 // The PHP dispatches in __destruct, so `broadcast($event)->toOthers();` sends
 // when the temporary goes out of scope at the end of the statement. Go has no
-// destructor -- this is the first of the three reasons ADR 0044 allows a method
+// destructor -- this is the first of the three reasons ADR 0056 allows a method
 // to be missing -- so the send is [PendingBroadcast.Send] and it is called by
 // hand. Nothing else about the type changes, and the chain reads the same:
 //

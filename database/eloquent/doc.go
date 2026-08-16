@@ -117,7 +117,7 @@
 // reason query.Connection is declared in query: in Go the interface belongs with
 // its consumer, and relations imports this package for Builder.
 //
-// # What is skipped, and why (ADR 0044)
+// # What is skipped, and why (ADR 0056)
 //
 // Every name below exists in the clone and does not exist here. Three motives
 // allow that -- a PHP language feature Go does not have, surface that only

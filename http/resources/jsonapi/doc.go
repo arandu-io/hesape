@@ -25,7 +25,7 @@
 // [AttemptingToDetermineIdFor] or [AttemptingToDetermineTypeFor] -- the same two
 // errors, raised at the same point.
 //
-// # Not mirrored, and why (ADR 0044)
+// # Not mirrored, and why (ADR 0056)
 //
 //	JsonApiResource::wrap                the PHP overrides both to throw,
 //	JsonApiResource::withoutWrapping     because JSON:API fixes the wrapper at

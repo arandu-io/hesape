@@ -12,7 +12,7 @@ import (
 //
 // The PHP is a trait; here it is an empty struct a driver embeds, and both
 // methods are promoted exactly as the trait's are. It stays in this package
-// even though Pusher itself does not (reason (3) of ADR 0044): the conventions
+// even though Pusher itself does not (reason (3) of ADR 0056): the conventions
 // are the wire format of the whole Laravel Echo client, and RedisBroadcaster
 // uses the trait in the PHP too.
 type UsePusherChannelConventions struct{}

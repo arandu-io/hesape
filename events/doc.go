@@ -65,7 +65,7 @@
 // # There is no Event::fake, because there is nothing global to swap
 //
 // Event::fake, Event::fakeExcept, Event::fakeFor and Event::fakeExceptFor are
-// reason 2, all four -- the ADR 0044 reason for a method that only serves the
+// reason 2, all four -- the ADR 0056 reason for a method that only serves the
 // container, a facade or a service provider. Each of them is Facade::swap: it
 // puts an EventFake where the 'events' binding was, so that every event() in
 // the application lands in the fake without anything else changing. There is

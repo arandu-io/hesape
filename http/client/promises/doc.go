@@ -10,7 +10,7 @@
 // [Deferred] stands in: a value that is not there yet, settled from whichever
 // goroutine is doing the work, with Wait blocking on a channel until it is.
 //
-// # Not mirrored, and why (ADR 0044)
+// # Not mirrored, and why (ADR 0056)
 //
 //	FluentPromise::getGuzzlePromise    is GetUnderlyingPromise. The PHP name
 //	                                   says which library the decorated object

@@ -24,7 +24,7 @@
 // responses with conditional fields — when a value is missing, it is omitted
 // from the output rather than appearing as null.
 //
-// # Not mirrored, and why (ADR 0044)
+// # Not mirrored, and why (ADR 0056)
 //
 //	JsonResource::jsonOptions        is a bitmask of json_encode flags --
 //	CollectsResources::jsonOptions   JSON_PRETTY_PRINT, JSON_UNESCAPED_SLASHES,

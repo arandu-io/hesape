@@ -25,7 +25,7 @@ const (
 // github.com/arandu-io/hesape/broadcasting, this package imports that one for
 // Channel and BroadcastError, and Go refuses the cycle that a method
 // constructing a LogBroadcaster would close. PHP namespaces allow it, which is
-// reason (1) of ADR 0044. Every name is Illuminate's; only the receiver moved.
+// reason (1) of ADR 0056. Every name is Illuminate's; only the receiver moved.
 //
 // The PHP resolves the logger out of the container. There is none (ADR 0001),
 // so it is the argument, and the returned creator is what

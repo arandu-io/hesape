@@ -33,7 +33,7 @@
 // type, checked by the compiler. What an attribute configures in Illuminate is a
 // field or an argument here.
 //
-// # Why the coverage count does not move here (ADR 0044)
+// # Why the coverage count does not move here (ADR 0056)
 //
 // None of the twenty declares a public method. Each is a PHP attribute -- a
 // constructor and a readonly property, written above a class as #[Table('x')]

@@ -24,7 +24,7 @@
 // # What is not ported, and why
 //
 // Twelve public methods of the component have no name here. Each one, with the
-// ADR 0044 reason number:
+// ADR 0056 reason number:
 //
 //	BroadcastManager::pusher, ::ably, PusherBroadcaster::getPusher, ::setPusher,
 //	    AblyBroadcaster::getAbly, ::setAbly and ::generateAblySignature --

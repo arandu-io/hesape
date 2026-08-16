@@ -59,7 +59,7 @@
 // # What is not ported, and why
 //
 // Nine public methods of the component have no name here. Each one, with the
-// ADR 0044 reason number:
+// ADR 0056 reason number:
 //
 //	Factory::getContainer, Factory::setContainer and Validator::setContainer --
 //	    reason 2: the container is held so that a custom rule extension can be

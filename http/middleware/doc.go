@@ -35,7 +35,7 @@
 // which the PHP's own doc comment mentions, is not the reason to build it:
 // Chrome removed push in 2022.
 //
-// # Not mirrored, and why (ADR 0044)
+// # Not mirrored, and why (ADR 0056)
 //
 //	SetCacheHeaders::using                     builds the router's middleware
 //	AddLinkHeadersForPreloadedAssets::using    alias string, "Class:params",

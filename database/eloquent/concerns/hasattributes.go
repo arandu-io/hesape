@@ -26,7 +26,7 @@ type HasAttributes struct {
 	// be. A value is either a string -- the built-in cast name, "datetime",
 	// "decimal:2" -- or a casts.CastsAttributes. The PHP holds a class-string
 	// there and resolves it with class_exists; Go cannot reach a type from a
-	// name in a string, so the value itself is held (ADR 0044, motive 1).
+	// name in a string, so the value itself is held (ADR 0056, motive 1).
 	casts map[string]any
 
 	// mutators is the registry the PHP builds by reflection: a method whose

@@ -95,7 +95,7 @@
 // # Method by method, so the list can be checked rather than believed
 //
 // Twenty-six public methods of the component have no name here. Each one, with
-// the ADR 0044 reason number:
+// the ADR 0056 reason number:
 //
 //	BeanstalkdQueue::deleteMessage, ::getPheanstalk, Jobs\BeanstalkdJob::bury,
 //	    ::getPheanstalk, ::getPheanstalkJob, SqsQueue::getSqs, Jobs\SqsJob::getSqs

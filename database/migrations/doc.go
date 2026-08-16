@@ -74,7 +74,7 @@
 //     stubs are string constants rather than files in a stubs/ directory, which
 //     is also why `aru make:migration` works from any working directory.
 //
-// All three are ADR 0044's first exemption -- a PHP language facility, run-time
+// All three are ADR 0056's first exemption -- a PHP language facility, run-time
 // source loading, that Go answers with the compiler -- rather than a decision
 // to rename or reshape anything.
 package migrations

@@ -53,7 +53,7 @@
 // mergeCasts and the four encoders fromJson, fromFloat, fromDateTime and
 // fromEncryptedString -- in hasattributescasting.go.
 //
-// # What is skipped, and why (ADR 0044)
+// # What is skipped, and why (ADR 0056)
 //
 //   - HasAttributes::getMutatorMethods and getAttributeMarkedMutatorMethods.
 //     Both read a class's method list with get_class_methods and match it

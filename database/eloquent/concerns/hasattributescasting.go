@@ -177,7 +177,7 @@ func isDecimalCast(cast string) bool { return strings.HasPrefix(cast, "decimal:"
 // It is the half of the PHP that is discovery rather than behaviour: there, a
 // method whose return type is Attribute is that attribute's accessor and
 // mutator, found with ReflectionMethod. Go cannot read a method's return type
-// by name, so the model writes the same fact down (ADR 0044, motive 1), and
+// by name, so the model writes the same fact down (ADR 0056, motive 1), and
 // every has*Mutator lookup below reads this registry. A nil attribute removes
 // the registration.
 func (h *HasAttributes) SetAttributeMutator(key string, attribute *casts.Attribute) {
@@ -280,7 +280,7 @@ func (h *HasAttributes) GetMutatedAttributes() []string {
 // the result of reflecting over that class's methods, shared by every instance
 // of it. Here the registry is per model and there is nothing to reflect over,
 // so it is a method and it recomputes this model's list -- which is the same
-// job with the reflection taken out (ADR 0044, motive 1).
+// job with the reflection taken out (ADR 0056, motive 1).
 //
 // The list comes back sorted. The PHP's order is the order PHP happened to
 // report the methods in, which is not an order anybody can rely on.

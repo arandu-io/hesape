@@ -23,7 +23,7 @@
 //
 // # What is not ported, and why
 //
-// WithoutModelEvents::withoutModelEvents -- reason 2 of ADR 0044, a method that
+// WithoutModelEvents::withoutModelEvents -- reason 2 of ADR 0056, a method that
 // only serves the container. This paragraph used to say the trait had no
 // counterpart because there is no Eloquent, and that was wrong twice over:
 // hesape/database/eloquent is here, and the reason the trait cannot be is a

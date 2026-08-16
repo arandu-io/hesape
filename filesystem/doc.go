@@ -62,7 +62,7 @@
 // # What is not ported, and why
 //
 // Twelve public methods of the component have no name here. Each one, with the
-// ADR 0044 reason number:
+// ADR 0056 reason number:
 //
 //	Filesystem::getRequire and Filesystem::requireOnce -- reason 1: their bodies
 //	    are `require $path` and `require_once $path`, which load and execute PHP

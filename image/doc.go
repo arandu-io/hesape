@@ -95,7 +95,7 @@
 //
 // # What is not ported, and why
 //
-// With the numbered reason from ADR 0044: (1) a PHP language feature Go does not
+// With the numbered reason from ADR 0056: (1) a PHP language feature Go does not
 // have, (2) a method that only serves the container, a facade or a service
 // provider, (3) a driver this ecosystem does not carry.
 //

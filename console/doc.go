@@ -65,7 +65,7 @@
 //     thing (RULE 9).
 //
 // ContainerCommandLoader.php has no equivalent, and its two public methods go
-// with it -- reason 2 of ADR 0044, a method that only serves the container. The
+// with it -- reason 2 of ADR 0056, a method that only serves the container. The
 // class is Symfony's lazy command loader over Laravel's container: it holds a
 // map of name to class name so that a command is built only when it is asked
 // for. A Command here is a value that was already built (ADR 0001), so there is

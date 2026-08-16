@@ -19,7 +19,7 @@ type GenericUser struct {
 	// and __unset. Those four exist because a property named at run time is not
 	// otherwise reachable in PHP; indexing a map is the same operation with no
 	// magic behind it, so the four methods have nothing left to do. That is
-	// reason (1) of ADR 0044.
+	// reason (1) of ADR 0056.
 	Attributes map[string]any
 }
 

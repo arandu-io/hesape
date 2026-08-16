@@ -143,7 +143,7 @@ type BroadcastsEvents struct {
 // The PHP is found and called by name from Model::bootIfNotBooted, which walks
 // the class's traits and looks for boot<TraitName>. Go has no such lookup and
 // this framework has no magic hook, so the model calls it where a reader can see
-// it, next to InitializeGuardsAttributes and the other initializers -- ADR 0044
+// it, next to InitializeGuardsAttributes and the other initializers -- ADR 0056
 // motive (1), a PHP language feature. The name is the PHP's, and so is the body:
 // the same five events in the same order, and the two soft-delete ones only when
 // the model soft deletes.

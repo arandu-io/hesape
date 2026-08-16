@@ -46,7 +46,7 @@
 // called did not (ADR 0044). Where the contents diverge from PHP, the method's
 // own comment says so and says why.
 //
-// Two methods of the thirteen are absent, both reason 2 of ADR 0044 -- a method
+// Two methods of the thirteen are absent, both reason 2 of ADR 0056 -- a method
 // that only serves the container, a facade or a service provider. ADR 0001
 // removed the container and ADR 0002 the facade:
 //
