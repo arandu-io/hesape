@@ -97,9 +97,20 @@ func convertJsonToJavaScriptExpression(encoded string) (string, error) {
 }
 
 // jsHexEscape walks the JSON and rewrites the contents of every string
-// literal, leaving the structural characters alone. A forward slash inside a
-// literal leaves as \/, and any other escape pair is carried through as it
-// stands.
+// literal, leaving the structural characters alone.
+//
+// Five bytes leave as their \uXXXX form, and each one closes something if it
+// travels intact. The expression is wrapped in JSON.parse('...') and dropped
+// into an HTML attribute, so an apostrophe would end the JavaScript string, a
+// less-than could open a tag, and an ampersand could start an entity the HTML
+// parser resolves before JavaScript ever sees it. A forward slash leaves as \/
+// so that a literal cannot spell a closing script tag.
+//
+// The encoder that feeds this has SetEscapeHTML(false), which means nothing
+// upstream escapes any of them: this function is the only thing between the
+// data and the page.
+//
+// An escape pair is carried through as it stands, both bytes together.
 func jsHexEscape(encoded string) string {
 	var b strings.Builder
 	b.Grow(len(encoded))
@@ -116,11 +127,8 @@ func jsHexEscape(encoded string) string {
 		}
 		switch c {
 		case '\\':
-			if i+1 < len(encoded) && encoded[i+1] == '"' {
-				b.WriteString(`"`)
-				i++
-				continue
-			}
+			// An escape pair is two bytes and travels together. Splitting it
+			// would leave a lone backslash escaping whatever followed.
 			b.WriteByte(c)
 			if i+1 < len(encoded) {
 				i++
@@ -130,13 +138,13 @@ func jsHexEscape(encoded string) string {
 			b.WriteByte(c)
 			inString = false
 		case '<':
-			b.WriteString(`<`)
+			b.WriteString(`\u003C`)
 		case '>':
-			b.WriteString(`>`)
+			b.WriteString(`\u003E`)
 		case '&':
-			b.WriteString(`&`)
+			b.WriteString(`\u0026`)
 		case '\'':
-			b.WriteString(`'`)
+			b.WriteString(`\u0027`)
 		case '/':
 			b.WriteString(`\/`)
 		default:
