@@ -16,9 +16,14 @@ jobs:
 
       # `gofmt -l .` skips nothing, and a view source is not valid Go: it
       # carries a build tag the compiler honours and gofmt does not.
+      # Two filters, and neither is taste. gofmt is the one tool in the chain
+      # that ignores a build tag, so a .kyse.go file reaches it and fails on the
+      # '@' its directives begin with. And testdata/ holds fixtures that are
+      # invalid on purpose -- two of them here are programs the database tests
+      # compile and expect to be refused.
       - name: gofmt
         run: |
-          out=$(gofmt -l $(find . -name '*.go' -not -name '*.kyse.go'))
+          out=$(gofmt -l $(find . -name '*.go' -not -path '*/testdata/*' -not -name '*.kyse.go'))
           test -z "$out" || { echo "$out"; exit 1; }
 
       - name: vet
