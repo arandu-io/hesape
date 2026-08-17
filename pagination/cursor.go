@@ -1,14 +1,15 @@
 package pagination
 
 import (
-	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/arandu-io/hesape/encryption"
 )
 
 // pointsToNextItemsKey is the key the direction travels under inside an encoded
@@ -16,7 +17,28 @@ import (
 // API payloads and has to read the same on both ends.
 const pointsToNextItemsKey = "_pointsToNextItems"
 
-// ErrCursor is what FromEncoded returns for a cursor it cannot read.
+// cursorPurpose is what a cursor token is signed for. A token issued to page a
+// list does not work as a password reset, and the reverse, because the purpose
+// is part of the signature.
+const cursorPurpose = "pagination.cursor"
+
+// DefaultCursorTTL is how long a token stays valid when [NewCursorSigner] is
+// given no lifetime of its own.
+//
+// It is a day and not forever because the token is a bearer of a position in a
+// result set: it lands in browser history, in proxy logs and in links people
+// share, and every one of those outlives the page it was made for. It is a day
+// and not an hour because a reader who leaves a list open over lunch should
+// still be able to press "next".
+const DefaultCursorTTL = 24 * time.Hour
+
+// ErrCursor is what [CursorSigner.FromEncoded] returns for a cursor it cannot
+// read: a string that is not a token, a token this application did not write,
+// one that has run out, or one whose payload is not a JSON object.
+//
+// A failed check wraps the error the signature returned, so a caller that wants
+// to tell "it has expired" from "it was forged" can still ask.
+//
 // Callers that page a public list should treat it as "start from the
 // beginning", the way ResolveCurrentCursor does: a mangled cursor is a
 // truncated link in an e-mail client, not an attack worth a 400.
@@ -108,7 +130,7 @@ func (c Cursor) PointsToNextItems() bool { return c.pointsToNextItems }
 func (c Cursor) PointsToPreviousItems() bool { return !c.pointsToNextItems }
 
 // ToArray is the parameters with the direction merged in under
-// _pointsToNextItems, which is the shape Encode writes.
+// _pointsToNextItems, which is the shape [CursorSigner.Encode] signs.
 //
 // An ordering column actually named _pointsToNextItems would collide with the
 // direction. It is not defended against here: doing so would change the
@@ -123,44 +145,86 @@ func (c Cursor) ToArray() map[string]any {
 	return out
 }
 
-// Encode renders the cursor as one URL-safe token: base64 of the JSON of
-// ToArray, with "+" and "/" replaced by "-" and "_" and the padding removed,
-// which is exactly base64url without padding.
+// CursorSigner turns a Cursor into the token it travels as, and reads one back.
 //
-// It is encoding rather than encryption: anybody can read it, and anybody can
-// write one. That is why a repository validates the parameter names it takes
-// from a cursor against the same allowlist it validates a sort field against --
-// a column name interpolated from a cursor is injection through the same door
-// as a column name interpolated from a query string.
-func (c Cursor) Encode() string {
+// It holds the application key because a cursor comes back from the client. The
+// token names the boundary row of a page -- the value of every column the query
+// orders by -- and a client that can rewrite it moves that boundary anywhere the
+// encoding allows: onto a row that was never shown, or onto a column name the
+// repository then has to defend against. Base64 of JSON stops neither, because
+// base64 is transport and not a signature.
+//
+// What the signature buys is that the token is unchanged, not that it is
+// secret. The parameters stay readable to anyone holding one, exactly as they
+// were; what changes is that only this application can write one.
+//
+// It is the only way a Cursor becomes a string, which is why Cursor itself has
+// no Encode: a second, keyless one would be the one that gets called.
+type CursorSigner struct {
+	signer *encryption.Signer
+	ttl    time.Duration
+}
+
+// NewCursorSigner returns a signer whose tokens are valid for ttl.
+//
+// A ttl of zero or less means DefaultCursorTTL.
+//
+// A nil signer panics rather than yielding something that writes unsigned
+// tokens: there is no cursor worth issuing that nobody checked.
+func NewCursorSigner(s *encryption.Signer, ttl time.Duration) *CursorSigner {
+	if s == nil {
+		panic("pagination: NewCursorSigner needs a signer over the application key")
+	}
+	if ttl <= 0 {
+		ttl = DefaultCursorTTL
+	}
+	return &CursorSigner{signer: s, ttl: ttl}
+}
+
+// Encode renders the cursor as one URL-safe token: the JSON of ToArray, signed
+// with the application key and stamped with the expiry the signer was built
+// with. Every character of the result is unreserved in a URL, so it needs no
+// escaping in a query string or in an e-mail.
+//
+// The token is not stable over time. The expiry is part of what is signed, so
+// the same page yields a different token as the clock moves; it is not a cache
+// key, and two of them are not worth comparing.
+func (cs *CursorSigner) Encode(c Cursor) string {
 	// A map of strings and a bool always marshal, so the error is unreachable
 	// rather than ignored.
-	encoded, err := json.Marshal(c.ToArray())
+	payload, err := json.Marshal(c.ToArray())
 	if err != nil {
 		return ""
 	}
-	return base64.RawURLEncoding.EncodeToString(encoded)
+	return cs.signer.Sign(cursorPurpose, string(payload), cs.ttl)
 }
 
-// FromEncoded reads a cursor back out of the token Encode wrote.
+// FromEncoded reads a cursor back out of the token Encode wrote, and refuses
+// one this application did not write.
 //
 // Padding is tolerated, so a cursor that travelled through something that pads
-// base64 still parses. Anything else -- empty, not base64, not a JSON object --
-// is ErrCursor.
+// base64 still parses. Anything else -- empty, not a token, signed with another
+// key, run out, not a JSON object -- is ErrCursor.
+//
+// A token carrying no signature is one of those, and there is no window in
+// which it is accepted: stripping the signature is exactly what forging one
+// produces, so accepting an unsigned token accepts every forged token with it.
+// Read through ResolveCurrentCursor it reads as the first page, which is what a
+// reader following a link older than the key sees.
 //
 // Numbers keep the digits they were written with rather than going through a
 // float, so a cursor over a 64-bit key survives the round trip. A missing
 // direction reads as backward.
-func FromEncoded(encodedString string) (Cursor, error) {
+func (cs *CursorSigner) FromEncoded(encodedString string) (Cursor, error) {
 	if encodedString == "" {
 		return Cursor{}, fmt.Errorf("%w: empty", ErrCursor)
 	}
-	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(encodedString, "="))
+	payload, err := cs.signer.Verify(cursorPurpose, strings.TrimRight(encodedString, "="))
 	if err != nil {
-		return Cursor{}, fmt.Errorf("%w: %v", ErrCursor, err)
+		return Cursor{}, fmt.Errorf("%w: %w", ErrCursor, err)
 	}
 
-	decoder := json.NewDecoder(bytes.NewReader(decoded))
+	decoder := json.NewDecoder(strings.NewReader(payload))
 	decoder.UseNumber()
 	var wire map[string]any
 	if err := decoder.Decode(&wire); err != nil {
@@ -204,13 +268,20 @@ func cursorParameterString(value any) (string, bool) {
 }
 
 // ResolveCurrentCursor reads the cursor out of the URL of the request being
-// served.
+// served, checking its signature before reading it.
 //
-// The URL is passed in rather than reached for. A cursor that is absent or does
-// not parse is nil, which every constructor reads as "the first page".
+// The URL is passed in rather than reached for. A cursor that is absent, does
+// not parse, or was not signed by this application is nil, which every
+// constructor reads as "the first page". A reader whose link has run out gets
+// the top of the list rather than an error page, and a client that rewrote one
+// gets the same thing it would have got by sending nothing.
 //
-// An empty cursorName means DefaultCursorName.
-func ResolveCurrentCursor(u *url.URL, cursorName string) *Cursor {
+// An empty cursorName means DefaultCursorName. A nil signer panics: there is no
+// reading of a cursor that skips the check.
+func ResolveCurrentCursor(cs *CursorSigner, u *url.URL, cursorName string) *Cursor {
+	if cs == nil {
+		panic("pagination: ResolveCurrentCursor needs the signer the cursor was written with")
+	}
 	if cursorName == "" {
 		cursorName = DefaultCursorName
 	}
@@ -221,7 +292,7 @@ func ResolveCurrentCursor(u *url.URL, cursorName string) *Cursor {
 	if raw == "" {
 		return nil
 	}
-	cursor, err := FromEncoded(raw)
+	cursor, err := cs.FromEncoded(raw)
 	if err != nil {
 		return nil
 	}

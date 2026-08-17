@@ -132,7 +132,7 @@ func TestEveryReadRefusesAGrantWithNoTenant(t *testing.T) {
 			return err
 		},
 		"CursorPaginate": func(m *Model[user]) error {
-			_, err := m.NewQuery().CursorPaginate(zero, 10, nil, pagination.Options{})
+			_, err := m.NewQuery().CursorPaginate(zero, 10, nil, signedOptions())
 			return err
 		},
 		"Chunk": func(m *Model[user]) error {
@@ -484,7 +484,7 @@ func TestCursorPaginateComparesAgainstTheBoundary(t *testing.T) {
 	conn.queue(query.Record{"id": int64(4)}, query.Record{"id": int64(5)})
 
 	cursor := pagination.NewCursor(map[string]string{"users.id": "3"}, true)
-	page, err := model.NewQuery().CursorPaginate(grant(), 1, &cursor, pagination.Options{})
+	page, err := model.NewQuery().CursorPaginate(grant(), 1, &cursor, signedOptions())
 	if err != nil {
 		t.Fatalf("CursorPaginate: %v", err)
 	}

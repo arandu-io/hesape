@@ -45,7 +45,7 @@ func ids(items []post) []int {
 }
 
 func TestCursorPaginateFirstPage(t *testing.T) {
-	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, pagination.Options{Path: "/posts"})
+	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, signedOptions("/posts"))
 
 	if got := ids(p.Items()); !slices.Equal(got, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}) {
 		t.Errorf("Items = %v, want 1..10 with the probe row dropped", got)
@@ -66,8 +66,8 @@ func TestCursorPaginateFirstPage(t *testing.T) {
 	if !p.HasMorePages() || p.OnLastPage() {
 		t.Error("a page with a probe row has more pages")
 	}
-	if got, want := p.NextPageURL(), "/posts?cursor="+next.Encode(); got != want {
-		t.Errorf("NextPageURL = %q, want %q", got, want)
+	if got := p.NextPageURL(); parameterOf(cursorIn(t, got), "id") != "10" {
+		t.Errorf("NextPageURL = %q, want a link to the cursor at id 10", got)
 	}
 	if got := p.PreviousPageURL(); got != "" {
 		t.Errorf("PreviousPageURL = %q, want empty", got)
@@ -75,7 +75,7 @@ func TestCursorPaginateFirstPage(t *testing.T) {
 }
 
 func TestCursorPaginateWholeResultSetFitsOnOnePage(t *testing.T) {
-	p := pagination.CursorPaginate(ascending(1, 4), 10, nil, postKey, pagination.Options{Path: "/posts"})
+	p := pagination.CursorPaginate(ascending(1, 4), 10, nil, postKey, signedOptions("/posts"))
 
 	if p.NextCursor() != nil || p.PreviousCursor() != nil {
 		t.Error("a result set that fits on one page has no cursors")
@@ -90,7 +90,7 @@ func TestCursorPaginateWholeResultSetFitsOnOnePage(t *testing.T) {
 
 func TestCursorPaginateForwardPage(t *testing.T) {
 	cursor := cursorPtr(map[string]string{"id": "10"}, true)
-	p := pagination.CursorPaginate(ascending(11, 11), 10, cursor, postKey, pagination.Options{Path: "/posts"})
+	p := pagination.CursorPaginate(ascending(11, 11), 10, cursor, postKey, signedOptions("/posts"))
 
 	if got := ids(p.Items()); !slices.Equal(got, []int{11, 12, 13, 14, 15, 16, 17, 18, 19, 20}) {
 		t.Errorf("Items = %v, want 11..20", got)
@@ -113,7 +113,7 @@ func TestCursorPaginateForwardPage(t *testing.T) {
 
 func TestCursorPaginateForwardLastPage(t *testing.T) {
 	cursor := cursorPtr(map[string]string{"id": "20"}, true)
-	p := pagination.CursorPaginate(ascending(21, 6), 10, cursor, postKey, pagination.Options{Path: "/posts"})
+	p := pagination.CursorPaginate(ascending(21, 6), 10, cursor, postKey, signedOptions("/posts"))
 
 	if p.NextCursor() != nil {
 		t.Error("NextCursor on the last page is not nil")
@@ -131,7 +131,7 @@ func TestCursorPaginateForwardLastPage(t *testing.T) {
 // reading order.
 func TestCursorPaginateBackwardPage(t *testing.T) {
 	cursor := cursorPtr(map[string]string{"id": "31"}, false)
-	p := pagination.CursorPaginate(descending(30, 11), 10, cursor, postKey, pagination.Options{Path: "/posts"})
+	p := pagination.CursorPaginate(descending(30, 11), 10, cursor, postKey, signedOptions("/posts"))
 
 	if got := ids(p.Items()); !slices.Equal(got, []int{21, 22, 23, 24, 25, 26, 27, 28, 29, 30}) {
 		t.Errorf("Items = %v, want 21..30 in reading order", got)
@@ -153,7 +153,7 @@ func TestCursorPaginateBackwardPage(t *testing.T) {
 // way forward has to stay open even though no probe row came back.
 func TestCursorPaginateBackwardToTheStart(t *testing.T) {
 	cursor := cursorPtr(map[string]string{"id": "6"}, false)
-	p := pagination.CursorPaginate(descending(5, 5), 10, cursor, postKey, pagination.Options{Path: "/posts"})
+	p := pagination.CursorPaginate(descending(5, 5), 10, cursor, postKey, signedOptions("/posts"))
 
 	if got := ids(p.Items()); !slices.Equal(got, []int{1, 2, 3, 4, 5}) {
 		t.Errorf("Items = %v, want 1..5 in reading order", got)
@@ -172,7 +172,7 @@ func TestCursorPaginateBackwardToTheStart(t *testing.T) {
 
 func TestCursorPaginateEmptyPage(t *testing.T) {
 	cursor := cursorPtr(map[string]string{"id": "99"}, true)
-	p := pagination.CursorPaginate(nil, 10, cursor, postKey, pagination.Options{Path: "/posts"})
+	p := pagination.CursorPaginate(nil, 10, cursor, postKey, signedOptions("/posts"))
 
 	if p.Count() != 0 {
 		t.Errorf("Count = %d, want 0", p.Count())
@@ -186,20 +186,33 @@ func TestCursorPaginateEmptyPage(t *testing.T) {
 }
 
 func TestCursorPaginateURLs(t *testing.T) {
-	opts := pagination.Options{Path: "/posts", Query: map[string][]string{"team": {"core"}}}
+	opts := signedOptions("/posts")
+	opts.Query = map[string][]string{"team": {"core"}}
 	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, opts)
 
 	if got, want := p.URL(nil), "/posts?team=core"; got != want {
 		t.Errorf("URL(nil) = %q, want %q", got, want)
 	}
-	encoded := p.NextCursor().Encode()
-	if got, want := p.NextPageURL(), "/posts?cursor="+encoded+"&team=core"; got != want {
-		t.Errorf("NextPageURL = %q, want %q", got, want)
+	next := p.NextPageURL()
+	if !strings.HasPrefix(next, "/posts?cursor=") || !strings.HasSuffix(next, "&team=core") {
+		t.Errorf("NextPageURL = %q, want the cursor and the query carried on", next)
+	}
+	if got := parameterOf(cursorIn(t, next), "id"); got != "10" {
+		t.Errorf("the cursor in %q is at id %q, want 10", next, got)
 	}
 }
 
+func TestCursorPaginateWithoutSignerPanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("CursorPaginate without a signer did not panic")
+		}
+	}()
+	pagination.CursorPaginate(ascending(1, 2), 10, nil, postKey, pagination.Options{Path: "/posts"})
+}
+
 func TestCursorPaginateGuardsAgainstNonsensePageSize(t *testing.T) {
-	p := pagination.CursorPaginate(ascending(1, 3), 0, nil, postKey, pagination.Options{})
+	p := pagination.CursorPaginate(ascending(1, 3), 0, nil, postKey, signedOptions(""))
 	if got := p.PerPage(); got != 1 {
 		t.Errorf("PerPage = %d, want 1", got)
 	}
@@ -214,11 +227,11 @@ func TestCursorPaginateWithoutKeyPanics(t *testing.T) {
 			t.Error("CursorPaginate with a nil key did not panic")
 		}
 	}()
-	pagination.CursorPaginate(ascending(1, 2), 10, nil, nil, pagination.Options{})
+	pagination.CursorPaginate(ascending(1, 2), 10, nil, nil, signedOptions(""))
 }
 
 func TestThroughCursor(t *testing.T) {
-	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, pagination.Options{Path: "/posts"})
+	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, signedOptions("/posts"))
 	mapped := pagination.ThroughCursor(p, func(v post) string { return strconv.Itoa(v.ID) })
 
 	if got := mapped.Items(); !slices.Equal(got, []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}) {
@@ -235,7 +248,7 @@ func TestThroughCursor(t *testing.T) {
 // getCursorForItem is how a repository asks for the cursor of a row it has in
 // hand, rather than of the row at the edge of the page.
 func TestGetCursorForItem(t *testing.T) {
-	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, pagination.Options{Path: "/posts"})
+	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, signedOptions("/posts"))
 
 	parameters, err := p.GetParametersForItem(post{ID: 7})
 	if err != nil {
@@ -269,7 +282,7 @@ func TestGetCursorForItem(t *testing.T) {
 // was written against the row type that has just been mapped away.
 func TestGetCursorForItemAfterThroughCursor(t *testing.T) {
 	p := pagination.ThroughCursor(
-		pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, pagination.Options{Path: "/posts"}),
+		pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, signedOptions("/posts")),
 		func(p post) int { return p.ID },
 	)
 
@@ -282,7 +295,7 @@ func TestGetCursorForItemAfterThroughCursor(t *testing.T) {
 }
 
 func TestCursorNameMovesTheQueryParameter(t *testing.T) {
-	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, pagination.Options{Path: "/posts"})
+	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, signedOptions("/posts"))
 
 	if got, want := p.GetCursorName(), pagination.DefaultCursorName; got != want {
 		t.Errorf("GetCursorName = %q, want %q", got, want)
@@ -299,7 +312,7 @@ func TestCursorNameMovesTheQueryParameter(t *testing.T) {
 
 func TestCursorPaginatorCarriesTheQueryStringOntoItsURLs(t *testing.T) {
 	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey,
-		pagination.Options{Path: "/posts"})
+		signedOptions("/posts"))
 
 	// Appends drops the cursor parameter, because the paginator writes that
 	// one itself.
@@ -320,7 +333,7 @@ func TestCursorPaginatorCarriesTheQueryStringOntoItsURLs(t *testing.T) {
 
 func TestCursorPaginatorWithQueryStringDropsTheCursor(t *testing.T) {
 	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey,
-		pagination.Options{Path: "/posts"})
+		signedOptions("/posts"))
 
 	p.WithQueryString(map[string][]string{
 		"sort":   {"newest"},
@@ -337,7 +350,7 @@ func TestCursorPaginatorWithQueryStringDropsTheCursor(t *testing.T) {
 }
 
 func TestCursorPaginatorPathIsFluent(t *testing.T) {
-	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, pagination.Options{})
+	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, signedOptions(""))
 
 	if got := p.WithPath("/archive").Path(); got != "/archive" {
 		t.Fatalf("Path = %q after WithPath", got)
@@ -354,7 +367,7 @@ func TestCursorPaginatorPathIsFluent(t *testing.T) {
 }
 
 func TestCursorPaginatorCollectionAccessors(t *testing.T) {
-	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, pagination.Options{Path: "/posts"})
+	p := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey, signedOptions("/posts"))
 
 	if p.IsEmpty() || !p.IsNotEmpty() {
 		t.Fatal("a page of ten rows reports itself empty")
@@ -376,16 +389,16 @@ func TestCursorPaginatorCollectionAccessors(t *testing.T) {
 
 	// setCollection replaces the rows and leaves the cursors alone: they were
 	// computed from the rows the database returned.
-	next := p.NextCursor().Encode()
+	next := parameterOf(p.NextCursor(), "id")
 	p.SetCollection(ascending(100, 2))
 	if got := ids(p.Items()); !slices.Equal(got, []int{100, 101}) {
 		t.Fatalf("Items = %v after SetCollection", got)
 	}
-	if p.NextCursor().Encode() != next {
-		t.Fatal("SetCollection moved the next cursor")
+	if got := parameterOf(p.NextCursor(), "id"); got != next {
+		t.Fatalf("SetCollection moved the next cursor from id %q to id %q", next, got)
 	}
 
-	empty := pagination.CursorPaginate([]post(nil), 10, nil, postKey, pagination.Options{})
+	empty := pagination.CursorPaginate([]post(nil), 10, nil, postKey, signedOptions(""))
 	if !empty.IsEmpty() || empty.IsNotEmpty() {
 		t.Fatal("a page of no rows does not report itself empty")
 	}
@@ -393,7 +406,7 @@ func TestCursorPaginatorCollectionAccessors(t *testing.T) {
 
 func TestCursorPaginatorToArrayCarriesBothCursors(t *testing.T) {
 	first := pagination.CursorPaginate(ascending(1, 11), 10, nil, postKey,
-		pagination.Options{Path: "/posts"})
+		signedOptions("/posts"))
 
 	got := first.ToArray()
 	// prev_cursor is null on the first page, because there is no previous
@@ -404,8 +417,16 @@ func TestCursorPaginatorToArrayCarriesBothCursors(t *testing.T) {
 	if got["prev_page_url"] != nil {
 		t.Fatalf("prev_page_url = %v on the first page", got["prev_page_url"])
 	}
-	if got["next_cursor"] != first.NextCursor().Encode() {
-		t.Fatalf("next_cursor = %v", got["next_cursor"])
+	token, ok := got["next_cursor"].(string)
+	if !ok {
+		t.Fatalf("next_cursor = %v, want the token the next page is read with", got["next_cursor"])
+	}
+	read, err := cursors.FromEncoded(token)
+	if err != nil {
+		t.Fatalf("next_cursor does not verify: %v", err)
+	}
+	if id := parameterOf(&read, "id"); id != "10" {
+		t.Fatalf("next_cursor is at id %q, want 10", id)
 	}
 	if got["per_page"] != 10 {
 		t.Fatalf("per_page = %v", got["per_page"])

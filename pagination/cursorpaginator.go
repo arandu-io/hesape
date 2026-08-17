@@ -46,9 +46,17 @@ type CursorPaginator[T any] struct {
 // shares it. It is required, and CursorPaginate panics on a nil key: a
 // paginator that quietly produced no cursors would render a pager with no way
 // forward and no error to explain it.
+//
+// opts.Signer is required for the same reason and panics for a harder one: the
+// cursor in a link is a boundary row the client sends back, so a page whose
+// links carry an unsigned one is a page whose reader chooses which rows the
+// next query starts at.
 func CursorPaginate[T any](items []T, perPage int, cursor *Cursor, key func(T) map[string]string, opts Options) *CursorPaginator[T] {
 	if key == nil {
 		panic("pagination: CursorPaginate needs a key function to build cursors from rows")
+	}
+	if opts.Signer == nil {
+		panic("pagination: CursorPaginate needs a signer to write its cursors with")
 	}
 	if perPage < 1 {
 		perPage = 1
@@ -180,7 +188,7 @@ func (p *CursorPaginator[T]) URL(cursor *Cursor) string {
 	if cursor == nil {
 		return p.options.url(p.options.CursorName, "")
 	}
-	return p.options.url(p.options.CursorName, cursor.Encode())
+	return p.options.url(p.options.CursorName, p.options.Signer.Encode(*cursor))
 }
 
 // PreviousPageURL returns the address of the page before this one, and the
@@ -310,7 +318,7 @@ func (p *CursorPaginator[T]) ToArray() map[string]any {
 		if c == nil {
 			return nil
 		}
-		return c.Encode()
+		return p.options.Signer.Encode(*c)
 	}
 	return map[string]any{
 		"data":          p.items,

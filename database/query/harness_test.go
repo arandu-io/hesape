@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/arandu-io/hesape/database/query"
+	"github.com/arandu-io/hesape/encryption"
+	"github.com/arandu-io/hesape/pagination"
 )
 
 // The harness the execution tests run against: a connection that records what
@@ -355,4 +357,12 @@ func sortedColumns(row map[string]any) []string {
 // connection, the grammar above and a pass-through processor.
 func newTestBuilder(connection *fakeConnection) *query.Builder {
 	return query.NewBuilder(connection, &fakeGrammar{}, &fakeProcessor{insertedID: 7}).From("users")
+}
+
+// signedOptions is what a cursor page is built with: a cursor names the
+// boundary row and comes back from the client, so writing one takes the
+// application key.
+func signedOptions() pagination.Options {
+	return pagination.Options{Signer: pagination.NewCursorSigner(
+		encryption.NewSigner([]byte("an application key long enough to be one")), 0)}
 }

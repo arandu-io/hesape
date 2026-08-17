@@ -8,7 +8,7 @@
 //     exists, so it can say "previous" and "next" and nothing else. It costs
 //     one extra row.
 //   - [CursorPaginator], from [CursorPaginate]: keyset paging, forward and
-//     backward, over an opaque [Cursor]. It has no total and no page number,
+//     backward, over a signed [Cursor]. It has no total and no page number,
 //     and it is the only one of the three that does not skip or repeat rows
 //     when the data changes underneath.
 //
@@ -20,16 +20,27 @@
 // like every other read -- and hands them here.
 //
 // That division is why this package is a leaf. It imports the standard library
-// and nothing else, and every dependency runs the other way: the repository
-// knows about pagination, pagination knows nothing about repositories.
+// and the application key, and every dependency runs the other way: the
+// repository knows about pagination, pagination knows nothing about
+// repositories.
+//
+// # The cursor is signed
+//
+// A page number is a number, and a reader who edits one reaches a page they
+// could have reached by typing it. A cursor is the boundary row of a page, sent
+// to the client and handed back, so a reader who edits one names the row the
+// next query starts at. [CursorSigner] is what closes that: it signs the token
+// on the way out and checks it on the way in, and it is the only way a [Cursor]
+// becomes a string.
 //
 // # No global resolvers
 //
 // The request is read explicitly. [OptionsFrom] takes the *url.URL and returns
 // the [Options] every constructor takes, and [ResolveCurrentPage],
 // [ResolveCurrentPath], [ResolveQueryString] and [ResolveCurrentCursor] read
-// the four pieces out of it. There is nothing to install and nothing to install
-// it from.
+// the four pieces out of it -- the last of them against the [CursorSigner], the
+// cursor being checked before it is read. There is nothing to install and
+// nothing to install it from.
 //
 // # The views are names here, and components in the view layer
 //

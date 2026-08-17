@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/database/query"
+	"github.com/arandu-io/hesape/encryption"
+	"github.com/arandu-io/hesape/pagination"
 )
 
 // testGrammar is a grammar good enough to read the compiled SQL back in a test.
@@ -333,4 +335,12 @@ func newUserModel() (*Model[user], *testConnection) {
 	conn := newTestConnection()
 	model := NewModel[user]("users", conn, newTestGrammar(), &testProcessor{conn: conn})
 	return model, conn
+}
+
+// signedOptions is what a cursor page is built with: a cursor names the
+// boundary row and comes back from the client, so writing one takes the
+// application key.
+func signedOptions() pagination.Options {
+	return pagination.Options{Signer: pagination.NewCursorSigner(
+		encryption.NewSigner([]byte("an application key long enough to be one")), 0)}
 }

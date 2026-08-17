@@ -1,12 +1,41 @@
 package pagination_test
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
+	"github.com/arandu-io/hesape/encryption"
 	"github.com/arandu-io/hesape/pagination"
 )
+
+// cursors is the signer these tests page with. A cursor carries the boundary
+// row of a page and comes back from the client, so writing one takes the
+// application key, here as everywhere.
+var cursors = pagination.NewCursorSigner(
+	encryption.NewSigner([]byte("an application key long enough to be one")), 0)
+
+// signedOptions is the Options a cursor paginator needs: a path, and the signer
+// without which CursorPaginate refuses to write a link.
+func signedOptions(path string) pagination.Options {
+	return pagination.Options{Path: path, Signer: cursors}
+}
+
+// cursorIn reads the cursor out of a generated URL.
+//
+// A link is compared this way and not against a second encoding of the same
+// cursor: the token carries an expiry, so two encodings of one cursor are two
+// different strings.
+func cursorIn(t *testing.T, rawURL string) *pagination.Cursor {
+	t.Helper()
+	got := pagination.ResolveCurrentCursor(cursors, mustParse(t, rawURL), "")
+	if got == nil {
+		t.Fatalf("no cursor in %q", rawURL)
+	}
+	return got
+}
 
 // parametersOf reads the ordering values back out of a cursor.
 //
@@ -49,7 +78,7 @@ func TestCursorRoundTrip(t *testing.T) {
 	parameters := map[string]string{"created_at": "2026-08-10T16:35:00.123456Z", "id": "9f1c"}
 	want := pagination.NewCursor(parameters, true)
 
-	got, err := pagination.FromEncoded(want.Encode())
+	got, err := cursors.FromEncoded(cursors.Encode(want))
 	if err != nil {
 		t.Fatalf("FromEncoded = %v", err)
 	}
@@ -69,7 +98,7 @@ func TestCursorRoundTrip(t *testing.T) {
 
 func TestCursorRoundTripBackwards(t *testing.T) {
 	want := pagination.NewCursor(map[string]string{"id": "7"}, false)
-	got, err := pagination.FromEncoded(want.Encode())
+	got, err := cursors.FromEncoded(cursors.Encode(want))
 	if err != nil {
 		t.Fatalf("FromEncoded = %v", err)
 	}
@@ -127,14 +156,14 @@ func TestCursorCopiesTheParametersItWasGiven(t *testing.T) {
 // escaping.
 func TestCursorEncodeIsURLSafe(t *testing.T) {
 	c := pagination.NewCursor(map[string]string{"name": "a?b&c=d/e+f"}, true)
-	encoded := c.Encode()
+	encoded := cursors.Encode(c)
 	if strings.ContainsAny(encoded, "+/=?&#") {
 		t.Errorf("Encode = %q, want only URL-safe characters", encoded)
 	}
 }
 
 func TestCursorEncodeEmptyParameters(t *testing.T) {
-	got, err := pagination.FromEncoded(pagination.NewCursor(nil, true).Encode())
+	got, err := cursors.FromEncoded(cursors.Encode(pagination.NewCursor(nil, true)))
 	if err != nil {
 		t.Fatalf("FromEncoded = %v", err)
 	}
@@ -147,15 +176,15 @@ func TestCursorEncodeEmptyParameters(t *testing.T) {
 }
 
 func TestFromEncodedToleratesPadding(t *testing.T) {
-	encoded := pagination.NewCursor(map[string]string{"id": "1"}, true).Encode()
-	if _, err := pagination.FromEncoded(encoded + "=="); err != nil {
+	encoded := cursors.Encode(pagination.NewCursor(map[string]string{"id": "1"}, true))
+	if _, err := cursors.FromEncoded(encoded + "=="); err != nil {
 		t.Fatalf("FromEncoded with padding = %v", err)
 	}
 }
 
 func TestFromEncodedRejectsRubbish(t *testing.T) {
 	for _, raw := range []string{"", "not base64 at all!!", "aGVsbG8"} {
-		if _, err := pagination.FromEncoded(raw); !errors.Is(err, pagination.ErrCursor) {
+		if _, err := cursors.FromEncoded(raw); !errors.Is(err, pagination.ErrCursor) {
 			t.Errorf("FromEncoded(%q) error = %v, want ErrCursor", raw, err)
 		}
 	}
@@ -166,9 +195,9 @@ func TestFromEncodedRejectsRubbish(t *testing.T) {
 // boundary walks past rows.
 func TestCursorKeepsTheDigitsOfALargeKey(t *testing.T) {
 	const key = "9007199254740993" // 2^53 + 1: the first integer a float64 cannot hold
-	encoded := pagination.NewCursor(map[string]string{"id": key}, true).Encode()
+	encoded := cursors.Encode(pagination.NewCursor(map[string]string{"id": key}, true))
 
-	got, err := pagination.FromEncoded(encoded)
+	got, err := cursors.FromEncoded(encoded)
 	if err != nil {
 		t.Fatalf("FromEncoded = %v", err)
 	}
@@ -182,8 +211,8 @@ func TestCursorKeepsTheDigitsOfALargeKey(t *testing.T) {
 }
 
 func TestResolveCurrentCursor(t *testing.T) {
-	encoded := pagination.NewCursor(map[string]string{"id": "42"}, true).Encode()
-	got := pagination.ResolveCurrentCursor(mustParse(t, "/users?cursor="+encoded), "")
+	encoded := cursors.Encode(pagination.NewCursor(map[string]string{"id": "42"}, true))
+	got := pagination.ResolveCurrentCursor(cursors, mustParse(t, "/users?cursor="+encoded), "")
 	if got == nil {
 		t.Fatal("ResolveCurrentCursor = nil, want a cursor")
 	}
@@ -200,22 +229,94 @@ func TestResolveCurrentCursor(t *testing.T) {
 // a 400, so it reads as "start from the beginning".
 func TestResolveCurrentCursorAbsentOrBroken(t *testing.T) {
 	for _, raw := range []string{"/users", "/users?cursor=", "/users?cursor=%21%21%21"} {
-		if got := pagination.ResolveCurrentCursor(mustParse(t, raw), ""); got != nil {
+		if got := pagination.ResolveCurrentCursor(cursors, mustParse(t, raw), ""); got != nil {
 			t.Errorf("ResolveCurrentCursor(%q) = %v, want nil", raw, got)
 		}
 	}
-	if got := pagination.ResolveCurrentCursor(nil, ""); got != nil {
+	if got := pagination.ResolveCurrentCursor(cursors, nil, ""); got != nil {
 		t.Errorf("ResolveCurrentCursor(nil) = %v, want nil", got)
 	}
 }
 
 func TestResolveCurrentCursorCustomName(t *testing.T) {
-	encoded := pagination.NewCursor(map[string]string{"id": "8"}, false).Encode()
-	got := pagination.ResolveCurrentCursor(mustParse(t, "/users?after="+encoded), "after")
+	encoded := cursors.Encode(pagination.NewCursor(map[string]string{"id": "8"}, false))
+	got := pagination.ResolveCurrentCursor(cursors, mustParse(t, "/users?after="+encoded), "after")
 	if got == nil {
 		t.Fatal("ResolveCurrentCursor = nil, want a cursor")
 	}
 	if got.PointsToNextItems() {
 		t.Error("PointsToNextItems = true, want false")
 	}
+}
+
+// The whole point of the signature: a client that reads its own cursor, moves
+// the boundary to a row it was never shown and sends it back gets nothing.
+func TestCursorRejectsATamperedToken(t *testing.T) {
+	token := cursors.Encode(pagination.NewCursor(map[string]string{"id": "7"}, true))
+	payload, _, _ := strings.Cut(token, ".")
+
+	raw, err := base64.RawURLEncoding.DecodeString(payload)
+	if err != nil {
+		t.Fatalf("the payload of a token is not base64: %v", err)
+	}
+	edited := strings.Replace(string(raw), `"7"`, `"9000"`, 1)
+	if edited == string(raw) {
+		t.Fatalf("the payload %s does not carry the value to edit", raw)
+	}
+	forged := base64.RawURLEncoding.EncodeToString([]byte(edited)) + token[len(payload):]
+
+	if _, err := cursors.FromEncoded(forged); !errors.Is(err, pagination.ErrCursor) {
+		t.Fatalf("FromEncoded of an edited cursor = %v, want ErrCursor", err)
+	}
+	if _, err := cursors.FromEncoded(forged); !errors.Is(err, encryption.ErrSignature) {
+		t.Errorf("the error does not unwrap to encryption.ErrSignature, so a caller cannot tell forged from expired")
+	}
+}
+
+// A token signed with another application's key does not read here, which is
+// what makes one key per application worth anything.
+func TestCursorRejectsAnotherApplicationsKey(t *testing.T) {
+	other := pagination.NewCursorSigner(
+		encryption.NewSigner([]byte("a different application key entirely")), 0)
+	token := other.Encode(pagination.NewCursor(map[string]string{"id": "7"}, true))
+
+	if _, err := cursors.FromEncoded(token); !errors.Is(err, pagination.ErrCursor) {
+		t.Fatalf("FromEncoded of another key's cursor = %v, want ErrCursor", err)
+	}
+}
+
+// A bare base64 payload is what an unsigned cursor looks like, and it is what a
+// forged one looks like once the signature is dropped. There is no reading that
+// accepts it.
+func TestCursorRejectsAnUnsignedToken(t *testing.T) {
+	payload, err := json.Marshal(pagination.NewCursor(map[string]string{"id": "7"}, true).ToArray())
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	unsigned := base64.RawURLEncoding.EncodeToString(payload)
+
+	if _, err := cursors.FromEncoded(unsigned); !errors.Is(err, pagination.ErrCursor) {
+		t.Fatalf("FromEncoded of an unsigned cursor = %v, want ErrCursor", err)
+	}
+	if got := pagination.ResolveCurrentCursor(cursors, mustParse(t, "/users?cursor="+unsigned), ""); got != nil {
+		t.Errorf("ResolveCurrentCursor of an unsigned cursor = %v, want the first page", got)
+	}
+}
+
+func TestNewCursorSignerWithoutAKeyPanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("NewCursorSigner with a nil signer did not panic")
+		}
+	}()
+	pagination.NewCursorSigner(nil, 0)
+}
+
+func TestResolveCurrentCursorWithoutASignerPanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("ResolveCurrentCursor with a nil signer did not panic")
+		}
+	}()
+	pagination.ResolveCurrentCursor(nil, mustParse(t, "/users?cursor=x"), "")
 }

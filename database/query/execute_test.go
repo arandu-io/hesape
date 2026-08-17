@@ -81,7 +81,7 @@ func TestNoStatementReachesTheDatabaseWithoutATenant(t *testing.T) {
 			return err
 		},
 		"CursorPaginate": func(b *query.Builder, g auth.Grant) error {
-			_, err := b.OrderBy("id").CursorPaginate(ctx, g, 15, nil, nil, pagination.Options{})
+			_, err := b.OrderBy("id").CursorPaginate(ctx, g, 15, nil, nil, signedOptions())
 			return err
 		},
 		"Chunk": func(b *query.Builder, g auth.Grant) error {
@@ -622,7 +622,7 @@ func TestCursorPaginateWalksFromTheBoundary(t *testing.T) {
 
 	page, err := newTestBuilder(connection).
 		OrderBy("id").
-		CursorPaginate(context.Background(), grant(), 1, &cursor, nil, pagination.Options{})
+		CursorPaginate(context.Background(), grant(), 1, &cursor, nil, signedOptions())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -648,7 +648,7 @@ func TestCursorPaginateWalksFromTheBoundary(t *testing.T) {
 
 func TestCursorPaginateRefusesAnUnorderedQuery(t *testing.T) {
 	connection := &fakeConnection{}
-	_, err := newTestBuilder(connection).CursorPaginate(context.Background(), grant(), 15, nil, nil, pagination.Options{})
+	_, err := newTestBuilder(connection).CursorPaginate(context.Background(), grant(), 15, nil, nil, signedOptions())
 	if err == nil {
 		t.Fatal("a keyset walk with no ordering was allowed")
 	}
