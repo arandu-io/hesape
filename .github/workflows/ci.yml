@@ -27,6 +27,16 @@ jobs:
       - name: test
         run: go test -race ./...
 
+      # A known vulnerability blocks the merge rather than showing up in a
+      # report nobody reads. Unpinned on purpose, unlike the linter: a new
+      # govulncheck release going red means a new vulnerability was published,
+      # which is the answer we want, and the database is read at run time so
+      # pinning the binary would not hold it still anyway.
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
       # The collection carries no third-party dependency beyond
       # golang.org/x/crypto. A require line that is not that is a review.
       - name: no third-party dependency
