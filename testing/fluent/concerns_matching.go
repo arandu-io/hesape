@@ -6,7 +6,7 @@ import (
 	"math"
 	"strings"
 
-	hesapetesting "github.com/arandu-io/hesape/testing"
+	htesting "github.com/arandu-io/hesape/testing"
 )
 
 // The value assertions on [AssertableJSON].
@@ -26,12 +26,12 @@ func (a *AssertableJSON) Where(key string, expected any) *AssertableJSON {
 	actual := a.prop(key)
 
 	if test, ok := expected.(func(any) bool); ok {
-		hesapetesting.AssertTrue(a.t, test(actual),
+		htesting.AssertTrue(a.t, test(actual),
 			fmt.Sprintf("Property [%s] was marked as invalid using a closure.", a.dotPath(key)))
 		return a
 	}
 
-	hesapetesting.AssertSame(a.t, expected, actual,
+	htesting.AssertSame(a.t, expected, actual,
 		fmt.Sprintf("Property [%s] does not match the expected value.", a.dotPath(key)))
 	return a
 }
@@ -45,12 +45,12 @@ func (a *AssertableJSON) WhereNot(key string, expected any) *AssertableJSON {
 	actual := a.prop(key)
 
 	if test, ok := expected.(func(any) bool); ok {
-		hesapetesting.AssertFalse(a.t, test(actual),
+		htesting.AssertFalse(a.t, test(actual),
 			fmt.Sprintf("Property [%s] was marked as invalid using a closure.", a.dotPath(key)))
 		return a
 	}
 
-	hesapetesting.AssertNotSame(a.t, expected, actual,
+	htesting.AssertNotSame(a.t, expected, actual,
 		fmt.Sprintf("Property [%s] contains a value that should be missing: [%s, %v]",
 			a.dotPath(key), key, expected))
 	return a
@@ -61,7 +61,7 @@ func (a *AssertableJSON) WhereNull(key string) *AssertableJSON {
 	a.t.Helper()
 
 	a.Has(key)
-	hesapetesting.AssertNull(a.t, a.prop(key),
+	htesting.AssertNull(a.t, a.prop(key),
 		fmt.Sprintf("Property [%s] should be null.", a.dotPath(key)))
 	return a
 }
@@ -71,7 +71,7 @@ func (a *AssertableJSON) WhereNotNull(key string) *AssertableJSON {
 	a.t.Helper()
 
 	a.Has(key)
-	hesapetesting.AssertNotNull(a.t, a.prop(key),
+	htesting.AssertNotNull(a.t, a.prop(key),
 		fmt.Sprintf("Property [%s] should not be null.", a.dotPath(key)))
 	return a
 }
@@ -106,7 +106,7 @@ func (a *AssertableJSON) WhereType(key string, expected any) *AssertableJSON {
 		names = []string{fmt.Sprint(value)}
 	}
 
-	hesapetesting.AssertContains(a.t, getType(actual), names,
+	htesting.AssertContains(a.t, getType(actual), names,
 		fmt.Sprintf("Property [%s] is not of expected type [%s].", a.dotPath(key), strings.Join(names, "|")))
 	return a
 }
@@ -149,13 +149,13 @@ func (a *AssertableJSON) WhereContains(key string, expected any) *AssertableJSON
 	// printing the function itself would say nothing.
 	for _, item := range missing {
 		if _, isClosure := item.(func(any) bool); isClosure {
-			hesapetesting.AssertEmpty(a.t, missing, fmt.Sprintf(
+			htesting.AssertEmpty(a.t, missing, fmt.Sprintf(
 				"Property [%s] does not contain a value that passes the truth test within the given closure.", key))
 			return a
 		}
 	}
 
-	hesapetesting.AssertEmpty(a.t, missing,
+	htesting.AssertEmpty(a.t, missing,
 		fmt.Sprintf("Property [%s] does not contain [%s].", key, joinValues(missing)))
 	return a
 }

@@ -3,7 +3,7 @@ package fluent
 import (
 	"strings"
 
-	hesapetesting "github.com/arandu-io/hesape/testing"
+	htesting "github.com/arandu-io/hesape/testing"
 )
 
 // The accounting on [AssertableJSON]: which properties the test named, and
@@ -56,7 +56,7 @@ func (a *AssertableJSON) Interacted() {
 		message = "Unexpected properties were found in scope [" + a.path + "]."
 	}
 
-	hesapetesting.AssertSame(a.t, []string{}, orEmptyStrings(unexpected), message)
+	htesting.AssertSame(a.t, []string{}, orEmptyStrings(unexpected), message)
 }
 
 // Etc stops accounting for this scope, so [AssertableJSON.Interacted] passes

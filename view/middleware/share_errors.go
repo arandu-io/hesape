@@ -3,7 +3,7 @@ package middleware
 import (
 	"net/http"
 
-	hesapehttp "github.com/arandu-io/hesape/http"
+	hhttp "github.com/arandu-io/hesape/http"
 	"github.com/arandu-io/hesape/validation"
 	"github.com/arandu-io/hesape/view"
 )
@@ -39,7 +39,7 @@ func NewShareErrorsFromSession(f *view.Factory) *ShareErrorsFromSession {
 // without asking first.
 func (m *ShareErrorsFromSession) Handle(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		errs := hesapehttp.StateFrom(r.Context()).Errors
+		errs := hhttp.StateFrom(r.Context()).Errors
 		if errs == nil {
 			errs = validation.Errors{}
 		}

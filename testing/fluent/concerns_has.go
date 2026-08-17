@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/arandu-io/hesape/support/arr"
-	hesapetesting "github.com/arandu-io/hesape/testing"
+	htesting "github.com/arandu-io/hesape/testing"
 )
 
 // The existence and size assertions on [AssertableJSON].
@@ -22,11 +22,11 @@ func (a *AssertableJSON) Count(key any, length ...int) *AssertableJSON {
 		if path != "" {
 			message = fmt.Sprintf("Property [%s] does not have the expected size.", path)
 		}
-		hesapetesting.AssertCount(a.t, asInt(key), a.prop(), message)
+		htesting.AssertCount(a.t, asInt(key), a.prop(), message)
 		return a
 	}
 
-	hesapetesting.AssertCount(a.t, length[0], a.prop(asString(key)),
+	htesting.AssertCount(a.t, length[0], a.prop(asString(key)),
 		fmt.Sprintf("Property [%s] does not have the expected size.", a.dotPath(asString(key))))
 	return a
 }
@@ -46,8 +46,8 @@ func (a *AssertableJSON) CountBetween(minimum, maximum int) *AssertableJSON {
 		upper = fmt.Sprintf("Property [%s] size is not less than or equal to [%d].", path, maximum)
 	}
 
-	hesapetesting.AssertGreaterThanOrEqual(a.t, minimum, size, lower)
-	hesapetesting.AssertLessThanOrEqual(a.t, maximum, size, upper)
+	htesting.AssertGreaterThanOrEqual(a.t, minimum, size, lower)
+	htesting.AssertLessThanOrEqual(a.t, maximum, size, upper)
 	return a
 }
 
@@ -69,7 +69,7 @@ func (a *AssertableJSON) Has(key any, args ...any) *AssertableJSON {
 
 	name := asString(key)
 
-	hesapetesting.AssertTrue(a.t, arr.Has(a.props, name),
+	htesting.AssertTrue(a.t, arr.Has(a.props, name),
 		fmt.Sprintf("Property [%s] does not exist.", a.dotPath(name)))
 
 	a.interactsWith(name)
@@ -125,7 +125,7 @@ func (a *AssertableJSON) HasAll(keys ...any) *AssertableJSON {
 func (a *AssertableJSON) HasAny(keys ...string) *AssertableJSON {
 	a.t.Helper()
 
-	hesapetesting.AssertTrue(a.t, arr.HasAny(a.props, keys...),
+	htesting.AssertTrue(a.t, arr.HasAny(a.props, keys...),
 		fmt.Sprintf("None of properties [%s] exist.", joinComma(keys)))
 
 	for _, key := range keys {
@@ -154,7 +154,7 @@ func (a *AssertableJSON) MissingAll(keys ...string) *AssertableJSON {
 func (a *AssertableJSON) Missing(key string) *AssertableJSON {
 	a.t.Helper()
 
-	hesapetesting.AssertNotTrue(a.t, arr.Has(a.props, key),
+	htesting.AssertNotTrue(a.t, arr.Has(a.props, key),
 		fmt.Sprintf("Property [%s] was found while it was expected to be missing.", a.dotPath(key)))
 	return a
 }

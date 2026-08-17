@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/arandu-io/hesape/support/arr"
-	hesapetesting "github.com/arandu-io/hesape/testing"
+	htesting "github.com/arandu-io/hesape/testing"
 )
 
 // AssertableJSON is a JSON payload asserted about one property at a time,
@@ -19,7 +19,7 @@ import (
 // publish it. [AssertableJSON.Etc] is how a scope opts out of it, and
 // [AssertableJSON.Interacted] is what enforces it.
 type AssertableJSON struct {
-	t hesapetesting.T
+	t htesting.T
 
 	// props are the properties in the current scope.
 	props map[string]any
@@ -40,7 +40,7 @@ type AssertableJSON struct {
 }
 
 // FromArray wraps an already decoded payload.
-func FromArray(t hesapetesting.T, data any) *AssertableJSON {
+func FromArray(t htesting.T, data any) *AssertableJSON {
 	props, keys := toProps(data)
 	return &AssertableJSON{t: t, props: props, keys: keys}
 }
@@ -56,7 +56,7 @@ func FromArray(t hesapetesting.T, data any) *AssertableJSON {
 //
 // Interacted is the call that must close the sequence. It is what fails when
 // the response carries a property the test never named.
-func FromAssertableJSONString(t hesapetesting.T, json *hesapetesting.AssertableJSONString) *AssertableJSON {
+func FromAssertableJSONString(t htesting.T, json *htesting.AssertableJSONString) *AssertableJSON {
 	return FromArray(t, json.JSON())
 }
 
@@ -93,7 +93,7 @@ func (a *AssertableJSON) scope(key string, callback func(*AssertableJSON)) *Asse
 	value := a.prop(key)
 	path := a.dotPath(key)
 
-	hesapetesting.AssertIsArray(a.t, value, fmt.Sprintf("Property [%s] is not scopeable.", path))
+	htesting.AssertIsArray(a.t, value, fmt.Sprintf("Property [%s] is not scopeable.", path))
 
 	props, keys := toProps(value)
 	scope := &AssertableJSON{t: a.t, props: props, keys: keys, path: path}
@@ -123,7 +123,7 @@ func (a *AssertableJSON) First(callback func(*AssertableJSON)) *AssertableJSON {
 	if path != "" {
 		message = fmt.Sprintf("Cannot scope directly onto the first element of property [%s] because it is empty.", path)
 	}
-	hesapetesting.AssertNotEmpty(a.t, a.props, message)
+	htesting.AssertNotEmpty(a.t, a.props, message)
 
 	if len(a.keys) == 0 {
 		return a
@@ -145,7 +145,7 @@ func (a *AssertableJSON) Each(callback func(*AssertableJSON)) *AssertableJSON {
 	if path != "" {
 		message = fmt.Sprintf("Cannot scope directly onto each element of property [%s] because it is empty.", path)
 	}
-	hesapetesting.AssertNotEmpty(a.t, a.props, message)
+	htesting.AssertNotEmpty(a.t, a.props, message)
 
 	for _, key := range a.keys {
 		a.interactsWith(key)
