@@ -9,6 +9,7 @@ import (
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database"
+	"github.com/arandu-io/hesape/database/migrations"
 )
 
 // DatabaseFailedJobProvider keeps the failed jobs in a table.
@@ -25,12 +26,15 @@ type DatabaseFailedJobProvider struct {
 	table string
 }
 
+// DefaultTable is where failures are logged when no table name is given.
+const DefaultTable = "failed_jobs"
+
 // NewDatabaseFailedJobProvider returns the provider over db.
 //
-// The table defaults to failed_jobs.
+// An empty table means DefaultTable.
 func NewDatabaseFailedJobProvider(db *database.DB, table string) *DatabaseFailedJobProvider {
 	if table == "" {
-		table = "failed_jobs"
+		table = DefaultTable
 	}
 	return &DatabaseFailedJobProvider{db: db, table: table}
 }
@@ -56,18 +60,30 @@ type DatabaseUUIDFailedJobProvider = DatabaseFailedJobProvider
 // filter is not optional.
 func (p *DatabaseFailedJobProvider) GetTable() string { return p.table }
 
-// Migrations returns the failed jobs table.
+// CreateFailedJobsTable creates the table a DatabaseFailedJobProvider logs to.
 //
-// The schema is on the provider rather than on the queue module because it
-// belongs to whoever wired this provider: an application that keeps its
-// failures in the jobs table declares nothing here.
-func (p *DatabaseFailedJobProvider) Migrations() []database.Migration {
-	return []database.Migration{{
-		ID: "2026_08_11_000020_create_failed_jobs_table",
-		// Portable types only: TEXT, INTEGER and TIMESTAMP mean the same thing
-		// on SQLite, Postgres and MySQL.
-		Up: `
-CREATE TABLE ` + p.table + ` (
+// The table name is a field because the provider's is: an application that
+// keeps its failures somewhere other than failed_jobs migrates the name it
+// wired.
+type CreateFailedJobsTable struct {
+	migrations.BaseMigration
+
+	// Table is the table to create. Empty means DefaultTable.
+	Table string
+}
+
+// GetName returns the migration's name.
+func (CreateFailedJobsTable) GetName() string {
+	return "2026_08_11_000020_create_failed_jobs_table"
+}
+
+// Up creates the failed jobs table and the index every read of it uses.
+//
+// Portable types only: TEXT, INTEGER and TIMESTAMP mean the same thing on
+// SQLite, Postgres and MySQL.
+func (m CreateFailedJobsTable) Up(ctx context.Context, conn migrations.Connection) error {
+	statements := []string{
+		`CREATE TABLE ` + m.table() + ` (
     id          VARCHAR(255) PRIMARY KEY,
     uuid        VARCHAR(255) NOT NULL,
     tenant_id   VARCHAR(255) NOT NULL,
@@ -77,14 +93,40 @@ CREATE TABLE ` + p.table + ` (
     payload     TEXT NOT NULL,
     exception   TEXT NOT NULL,
     failed_at   TIMESTAMP NOT NULL
-);
+)`,
+		// Every read filters by tenant and orders by failure time, and the
+		// monitor narrows by queue. This index is those queries.
+		`CREATE INDEX idx_failed_jobs_tenant ON ` + m.table() + ` (tenant_id, queue, failed_at)`,
+	}
+	for _, statement := range statements {
+		if _, err := conn.Statement(ctx, statement, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
--- Every read filters by tenant and orders by failure time, and the monitor
--- narrows by queue. This index is those queries.
-CREATE INDEX idx_failed_jobs_tenant ON ` + p.table + ` (tenant_id, queue, failed_at);
-`,
-		Down: `DROP TABLE ` + p.table + `;`,
-	}}
+// Down drops the failed jobs table, and the index with it.
+func (m CreateFailedJobsTable) Down(ctx context.Context, conn migrations.Connection) error {
+	_, err := conn.Statement(ctx, `DROP TABLE `+m.table(), nil)
+	return err
+}
+
+// table is m.Table with the default filled in.
+func (m CreateFailedJobsTable) table() string {
+	if m.Table == "" {
+		return DefaultTable
+	}
+	return m.Table
+}
+
+// Migrations returns the failed jobs table.
+//
+// The schema is on the provider rather than on the queue module because it
+// belongs to whoever wired this provider: an application that keeps its
+// failures in the jobs table declares nothing here.
+func (p *DatabaseFailedJobProvider) Migrations() []migrations.Migration {
+	return []migrations.Migration{CreateFailedJobsTable{Table: p.table}}
 }
 
 // Log records a job that gave up.

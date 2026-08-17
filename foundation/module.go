@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
-	"github.com/arandu-io/hesape/database"
+	"github.com/arandu-io/hesape/database/migrations"
 	"github.com/arandu-io/hesape/routing"
 )
 
@@ -155,7 +155,7 @@ type Migratable interface {
 //
 // It is an alias, not a copy: the migration runner lives in the database
 // package, and a module must be able to hand its migrations straight to it.
-type Migration = database.Migration
+type Migration = migrations.Migration
 
 // Health is optional and feeds `aru doctor` and the /_arandu/health endpoint.
 type Health interface {

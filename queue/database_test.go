@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/database"
+	"github.com/arandu-io/hesape/database/migrations"
 	"github.com/arandu-io/hesape/foundation"
 	"github.com/arandu-io/hesape/queue"
 	"github.com/arandu-io/hesape/queue/jobs"
@@ -483,15 +484,25 @@ func TestTheModuleDeclaresNoSchemaForADriverThatOwnsNone(t *testing.T) {
 
 // TestTheMigrationIsPortable: one migration, three engines.
 func TestTheMigrationIsPortable(t *testing.T) {
+	ctx := context.Background()
 	module := queue.NewModule(queue.NewDatabaseQueue(nil))
 	for _, m := range module.Migrations() {
+		up, err := migrations.UpStatements(ctx, m)
+		if err != nil {
+			t.Fatalf("UpStatements: %v", err)
+		}
+		joined := strings.Join(up, "\n")
 		for _, engineSpecific := range []string{"jsonb", "timestamptz", "SERIAL", "AUTO_INCREMENT", "SKIP LOCKED"} {
-			if strings.Contains(m.Up, engineSpecific) {
-				t.Errorf("%s uses %q, which is one engine's spelling", m.ID, engineSpecific)
+			if strings.Contains(joined, engineSpecific) {
+				t.Errorf("%s uses %q, which is one engine's spelling", m.GetName(), engineSpecific)
 			}
 		}
-		if m.Down == "" {
-			t.Errorf("%s cannot be rolled back", m.ID)
+		down, err := migrations.DownStatements(ctx, m)
+		if err != nil {
+			t.Fatalf("DownStatements: %v", err)
+		}
+		if len(down) == 0 {
+			t.Errorf("%s cannot be rolled back", m.GetName())
 		}
 	}
 	var _ foundation.Migratable = module

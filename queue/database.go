@@ -10,6 +10,7 @@ import (
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database"
+	"github.com/arandu-io/hesape/database/migrations"
 	"github.com/arandu-io/hesape/queue/jobs"
 )
 
@@ -61,18 +62,19 @@ var (
 // databaseConnection is what a popped job reports as its connection.
 const databaseConnection = "database"
 
-// Migrations returns the jobs table.
+// CreateJobsTable creates the table DatabaseQueue pushes to and pops from.
+type CreateJobsTable struct{ migrations.BaseMigration }
+
+// GetName returns the migration's name.
+func (CreateJobsTable) GetName() string { return "2026_07_31_000010_create_jobs_table" }
+
+// Up creates the jobs table and the two indexes its queries are.
 //
-// The schema is this driver's and only this one's. [Module] collects it, so an
-// application wired to another driver declares no schema for a table it will
-// never read.
-func (q *DatabaseQueue) Migrations() []database.Migration {
-	return []database.Migration{{
-		ID: "2026_07_31_000010_create_jobs_table",
-		// Portable types only: TEXT, INTEGER and TIMESTAMP mean the same thing
-		// on SQLite, Postgres and MySQL.
-		Up: `
-CREATE TABLE jobs (
+// Portable types only: TEXT, INTEGER and TIMESTAMP mean the same thing on
+// SQLite, Postgres and MySQL.
+func (CreateJobsTable) Up(ctx context.Context, conn migrations.Connection) error {
+	return run(ctx, conn,
+		`CREATE TABLE jobs (
     id             VARCHAR(255) PRIMARY KEY,
     -- queue is indexed, so VARCHAR rather than TEXT: see database.KeyText.
     queue          VARCHAR(255) NOT NULL,
@@ -86,71 +88,122 @@ CREATE TABLE jobs (
     attempts       INTEGER NOT NULL DEFAULT 0,
     failed_at      TIMESTAMP,
     last_error     TEXT
-);
+)`,
+		// The pop query filters on queue, failed_at and run_at and orders by
+		// run_at. This index is that query.
+		`CREATE INDEX idx_jobs_ready ON jobs (queue, failed_at, run_at)`,
+		// The dead letter queue is read by the diagnosis, newest failure first.
+		`CREATE INDEX idx_jobs_parked ON jobs (failed_at)`,
+	)
+}
 
--- The pop query filters on queue, failed_at and run_at and orders by run_at.
--- This index is that query.
-CREATE INDEX idx_jobs_ready ON jobs (queue, failed_at, run_at);
+// Down drops the jobs table, and both indexes with it.
+func (CreateJobsTable) Down(ctx context.Context, conn migrations.Connection) error {
+	return run(ctx, conn, `DROP TABLE jobs`)
+}
 
--- The dead letter queue is read by the diagnosis, newest failure first.
-CREATE INDEX idx_jobs_parked ON jobs (failed_at);
-`,
-		Down: `DROP TABLE jobs;`,
-	}, {
-		// The per-job settings, which used to live nowhere: a job pushed with
-		// five tries got the worker's five whatever it asked for, because the
-		// number never reached the table. They travel as one JSON column rather
-		// than one column each -- see attributes.Attributes for why they are one
-		// struct -- and the two names beside it are the two things about a job
-		// that are neither its arguments nor a setting.
-		//
-		// Nullable with a default, so the previous release's binary keeps
-		// inserting without them during a rollout.
-		ID: "2026_08_11_000010_add_job_attributes_to_jobs_table",
-		Up: `
-ALTER TABLE jobs ADD COLUMN display_name TEXT;
-ALTER TABLE jobs ADD COLUMN attributes TEXT;
-ALTER TABLE jobs ADD COLUMN exceptions INTEGER NOT NULL DEFAULT 0;
-`,
-		Down: `
-ALTER TABLE jobs DROP COLUMN display_name;
-ALTER TABLE jobs DROP COLUMN attributes;
-ALTER TABLE jobs DROP COLUMN exceptions;
-`,
-	}, {
-		// created_at is the order Pop takes jobs in, which used to be run_at.
-		//
-		// The queue is first in, first out over whatever is eligible.
-		// Ordering by run_at is not: a job pushed with a ten second delay
-		// waits out the delay and then goes behind everything queued while it
-		// waited, again on every pass, and on a queue that is never empty it
-		// is a job that never runs.
-		//
-		// The id cannot do the job here because it is a random uuid and sorts
-		// by nothing (see database.NewID), so the column that carries the order
-		// is the one that says when the row was written.
-		//
-		// Nullable, and with no default, because SQLite refuses a non-constant
-		// default on ADD COLUMN: the rows already in the table are backfilled
-		// here, and the ones the previous release's binary writes during the
-		// rollout arrive NULL, which is what the COALESCE in Pop is for.
-		//
-		// No index of its own. The filter is still served by idx_jobs_ready,
-		// and what is left is a top-N sort under a LIMIT; an index on
-		// (queue, failed_at, created_at) would remove that sort, and it would
-		// need a DROP INDEX in Down, which MySQL spells "DROP INDEX x ON jobs"
-		// and the other two spell "DROP INDEX x". One portable migration is
-		// worth more than the sort.
-		ID: "2026_08_13_000010_add_created_at_to_jobs_table",
-		Up: `
-ALTER TABLE jobs ADD COLUMN created_at TIMESTAMP;
+// AddJobAttributesToJobsTable adds the per-job settings, which used to live
+// nowhere: a job pushed with five tries got the worker's five whatever it asked
+// for, because the number never reached the table.
+//
+// They travel as one JSON column rather than one column each -- see
+// attributes.Attributes for why they are one struct -- and the two names beside
+// it are the two things about a job that are neither its arguments nor a
+// setting.
+type AddJobAttributesToJobsTable struct{ migrations.BaseMigration }
 
-UPDATE jobs SET created_at = run_at WHERE created_at IS NULL;
-`,
-		Down: `
-ALTER TABLE jobs DROP COLUMN created_at;
-`,
-	}}
+// GetName returns the migration's name.
+func (AddJobAttributesToJobsTable) GetName() string {
+	return "2026_08_11_000010_add_job_attributes_to_jobs_table"
+}
+
+// Up adds the three columns.
+//
+// Nullable with a default, so the previous release's binary keeps inserting
+// without them during a rollout.
+func (AddJobAttributesToJobsTable) Up(ctx context.Context, conn migrations.Connection) error {
+	return run(ctx, conn,
+		`ALTER TABLE jobs ADD COLUMN display_name TEXT`,
+		`ALTER TABLE jobs ADD COLUMN attributes TEXT`,
+		`ALTER TABLE jobs ADD COLUMN exceptions INTEGER NOT NULL DEFAULT 0`,
+	)
+}
+
+// Down drops the three columns.
+func (AddJobAttributesToJobsTable) Down(ctx context.Context, conn migrations.Connection) error {
+	return run(ctx, conn,
+		`ALTER TABLE jobs DROP COLUMN display_name`,
+		`ALTER TABLE jobs DROP COLUMN attributes`,
+		`ALTER TABLE jobs DROP COLUMN exceptions`,
+	)
+}
+
+// AddCreatedAtToJobsTable adds the column Pop takes jobs in the order of, which
+// used to be run_at.
+//
+// The queue is first in, first out over whatever is eligible. Ordering by
+// run_at is not: a job pushed with a ten second delay waits out the delay and
+// then goes behind everything queued while it waited, again on every pass, and
+// on a queue that is never empty it is a job that never runs.
+//
+// The id cannot do the job here because it is a random uuid and sorts by
+// nothing (see database.NewID), so the column that carries the order is the one
+// that says when the row was written.
+type AddCreatedAtToJobsTable struct{ migrations.BaseMigration }
+
+// GetName returns the migration's name.
+func (AddCreatedAtToJobsTable) GetName() string {
+	return "2026_08_13_000010_add_created_at_to_jobs_table"
+}
+
+// Up adds the column and backfills it.
+//
+// Nullable, and with no default, because SQLite refuses a non-constant default
+// on ADD COLUMN: the rows already in the table are backfilled here, and the
+// ones the previous release's binary writes during the rollout arrive NULL,
+// which is what the COALESCE in Pop is for.
+//
+// No index of its own. The filter is still served by idx_jobs_ready, and what
+// is left is a top-N sort under a LIMIT; an index on (queue, failed_at,
+// created_at) would remove that sort, and it would need a DROP INDEX in Down,
+// which MySQL spells "DROP INDEX x ON jobs" and the other two spell "DROP INDEX
+// x". One portable migration is worth more than the sort.
+func (AddCreatedAtToJobsTable) Up(ctx context.Context, conn migrations.Connection) error {
+	return run(ctx, conn,
+		`ALTER TABLE jobs ADD COLUMN created_at TIMESTAMP`,
+		`UPDATE jobs SET created_at = run_at WHERE created_at IS NULL`,
+	)
+}
+
+// Down drops the column.
+func (AddCreatedAtToJobsTable) Down(ctx context.Context, conn migrations.Connection) error {
+	return run(ctx, conn, `ALTER TABLE jobs DROP COLUMN created_at`)
+}
+
+// run sends statements in order and stops at the first one that fails.
+//
+// One call per statement, because the connection sends what it is given and
+// SQLite's driver refuses more than one statement in an Exec.
+func run(ctx context.Context, conn migrations.Connection, statements ...string) error {
+	for _, statement := range statements {
+		if _, err := conn.Statement(ctx, statement, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Migrations returns the jobs table.
+//
+// The schema is this driver's and only this one's. [Module] collects it, so an
+// application wired to another driver declares no schema for a table it will
+// never read.
+func (q *DatabaseQueue) Migrations() []migrations.Migration {
+	return []migrations.Migration{
+		CreateJobsTable{},
+		AddJobAttributesToJobsTable{},
+		AddCreatedAtToJobsTable{},
+	}
 }
 
 // Push adds a job.
