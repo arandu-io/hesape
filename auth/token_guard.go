@@ -12,9 +12,12 @@ import (
 // user whose stored token column matches. There is no session, no cookie and
 // nothing to log out of: every request proves itself again.
 //
-// It is the simplest thing that works and it is not a token system. There is no
-// expiry, no scope and no revocation list here -- those belong to whatever
-// issues the tokens.
+// It is the simplest thing that works and it is not a token system. A token it
+// accepts never expires, carries no scope, is never rotated and cannot be
+// revoked: either the stored column matches or it does not, for as long as the
+// row lives. All four belong to whatever issues the tokens, and until something
+// issues them, wiring this guard as an application's way in means handing out
+// credentials that cannot be taken back.
 type TokenGuard struct {
 	GuardHelpers
 
