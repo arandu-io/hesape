@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/database/migrations"
 	"github.com/arandu-io/hesape/notifications"
 	"github.com/arandu-io/hesape/notifications/messages"
 )
@@ -180,18 +181,36 @@ func TestMigrationsCreateTheTable(t *testing.T) {
 		t.Fatalf("migrations = %d, want 1", len(list))
 	}
 	m := list[0]
-	if m.ID == "" || m.Up == "" || m.Down == "" {
-		t.Fatalf("migration %+v is incomplete", m)
+	if m.GetName() == "" {
+		t.Fatal("the migration has no name, and the name carries the order")
+	}
+
+	ctx := context.Background()
+	statements, err := migrations.UpStatements(ctx, m)
+	if err != nil {
+		t.Fatalf("UpStatements: %v", err)
+	}
+	up := strings.Join(statements, "\n")
+	if up == "" {
+		t.Fatal("the migration sends nothing")
 	}
 	// KEY is reserved in MySQL, and the column that would have been called
 	// that is why this check exists.
-	if strings.Contains(m.Up, " key ") {
-		t.Fatalf("the key column has to be notification_key:\n%s", m.Up)
+	if strings.Contains(up, " key ") {
+		t.Fatalf("the key column has to be notification_key:\n%s", up)
 	}
 	for _, want := range []string{notifications.Table, "notification_key", "tenant", "read_at"} {
-		if !strings.Contains(m.Up, want) {
-			t.Fatalf("the migration does not mention %q:\n%s", want, m.Up)
+		if !strings.Contains(up, want) {
+			t.Fatalf("the migration does not mention %q:\n%s", want, up)
 		}
+	}
+
+	down, err := migrations.DownStatements(ctx, m)
+	if err != nil {
+		t.Fatalf("DownStatements: %v", err)
+	}
+	if len(down) == 0 {
+		t.Fatal("the migration cannot be rolled back")
 	}
 }
 

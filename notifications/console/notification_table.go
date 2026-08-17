@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/console"
+	"github.com/arandu-io/hesape/database/migrations"
 	"github.com/arandu-io/hesape/notifications"
 )
 
@@ -62,19 +63,33 @@ func (c *NotificationTableCommand) MigrationTableName() string { return notifica
 //
 // It is read off [notifications.Migrations] rather than a stub file of its own,
 // so the table this writes and the table a Go migration creates cannot drift.
-func (c *NotificationTableCommand) MigrationStub() string {
-	migrations := notifications.Migrations()
-	if len(migrations) == 0 {
-		return ""
+// The statements come back from migrations.UpStatements, which runs the
+// migration against a connection that records rather than executes, so nothing
+// here reaches a server.
+func (c *NotificationTableCommand) MigrationStub() (string, error) {
+	declared := notifications.Migrations()
+	if len(declared) == 0 {
+		return "", nil
 	}
+
+	statements, err := migrations.UpStatements(context.Background(), declared[0])
+	if err != nil {
+		return "", err
+	}
+
 	var b strings.Builder
 	b.WriteString("-- Notifications, for notifications.TableStore.\n")
 	b.WriteString("--\n")
 	b.WriteString("-- The key column is notification_key and not key: KEY is reserved in MySQL.\n")
 	b.WriteString("-- tenant is first in the index because every read is scoped by it.\n\n")
-	b.WriteString(strings.TrimSpace(migrations[0].Up))
-	b.WriteString("\n")
-	return b.String()
+	for _, statement := range statements {
+		b.WriteString(strings.TrimSpace(statement))
+		// The file is read by a person and replayed by whatever applies it, so
+		// every statement carries the terminator the migration itself does not
+		// need.
+		b.WriteString(";\n")
+	}
+	return b.String(), nil
 }
 
 // MigrationName is the file the migration is written as. It is stamped with the
@@ -118,6 +133,11 @@ func (c *NotificationTableCommand) Handle(_ context.Context, o *console.IO) erro
 		return fmt.Errorf("notifications: a migration for the %s table already exists in %s", c.MigrationTableName(), c.directory())
 	}
 
+	stub, err := c.MigrationStub()
+	if err != nil {
+		return err
+	}
+
 	if err := os.MkdirAll(c.directory(), 0o755); err != nil {
 		return err
 	}
@@ -132,7 +152,7 @@ func (c *NotificationTableCommand) Handle(_ context.Context, o *console.IO) erro
 	}
 	defer func() { _ = file.Close() }()
 
-	if _, err := file.WriteString(c.MigrationStub()); err != nil {
+	if _, err := file.WriteString(stub); err != nil {
 		return err
 	}
 

@@ -91,7 +91,10 @@ func TestNotificationTableStubIsTheGoMigration(t *testing.T) {
 	if c.MigrationTableName() != "notifications" {
 		t.Fatalf("the table is %q, want notifications", c.MigrationTableName())
 	}
-	stub := c.MigrationStub()
+	stub, err := c.MigrationStub()
+	if err != nil {
+		t.Fatalf("MigrationStub: %v", err)
+	}
 	// The SQL is read off notifications.Migrations rather than a stub of its
 	// own, so the two cannot describe different tables.
 	if !strings.Contains(stub, "CREATE TABLE notifications") {

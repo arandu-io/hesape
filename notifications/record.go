@@ -9,6 +9,7 @@ import (
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database"
+	"github.com/arandu-io/hesape/database/migrations"
 )
 
 // The actions a Policy decides about. They are the "module.verb" form the rest
@@ -230,24 +231,26 @@ func (Policy) Can(_ context.Context, s auth.Subject, a auth.Action, r Record) er
 	}
 }
 
-// Migrations is the notifications table.
+// CreateNotificationsTable creates the table TableStore reads and writes.
 //
-// It is returned as a value rather than kept in a file tree.
+// It is code rather than a file in a tree.
 // [notifications/console.NotificationTableCommand] is the command that writes
-// it to a file for a project that generates rather than imports.
-//
-// One migration, returned rather than embedded in a file tree, because the
-// table belongs to the package that reads it: an application that never uses
-// the database channel does not create it, and one that does adds this to the
-// list it passes to database.Migrate.
+// it out for a project that generates rather than imports.
+type CreateNotificationsTable struct{ migrations.BaseMigration }
+
+// GetName returns the migration's name.
+func (CreateNotificationsTable) GetName() string {
+	return "2026_08_10_000001_create_notifications_table"
+}
+
+// Up creates the notifications table and the index every read of it uses.
 //
 // The key column is notification_key and not key: KEY is reserved in MySQL, and
 // a table nobody can create on one of the three supported databases is a table
 // that fails on the day somebody switches.
-func Migrations() []database.Migration {
-	return []database.Migration{{
-		ID: "2026_08_10_000001_create_notifications_table",
-		Up: `CREATE TABLE ` + Table + ` (
+func (CreateNotificationsTable) Up(ctx context.Context, conn migrations.Connection) error {
+	statements := []string{
+		`CREATE TABLE ` + Table + ` (
 			id               ` + database.KeyText + ` PRIMARY KEY,
 			tenant           ` + database.KeyText + ` NOT NULL,
 			notifiable_type  ` + database.KeyText + ` NOT NULL,
@@ -256,9 +259,29 @@ func Migrations() []database.Migration {
 			data             TEXT NOT NULL,
 			read_at          TIMESTAMP NULL,
 			created_at       TIMESTAMP NOT NULL
-		);
-		CREATE INDEX notifications_recipient_idx
-			ON ` + Table + ` (tenant, notifiable_type, notifiable_id, created_at);`,
-		Down: `DROP TABLE ` + Table + `;`,
-	}}
+		)`,
+		`CREATE INDEX notifications_recipient_idx
+			ON ` + Table + ` (tenant, notifiable_type, notifiable_id, created_at)`,
+	}
+	for _, statement := range statements {
+		if _, err := conn.Statement(ctx, statement, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Down drops the notifications table, and the index with it.
+func (CreateNotificationsTable) Down(ctx context.Context, conn migrations.Connection) error {
+	_, err := conn.Statement(ctx, `DROP TABLE `+Table, nil)
+	return err
+}
+
+// Migrations is the notifications table.
+//
+// The table belongs to the package that reads it: an application that never
+// uses the database channel does not create it, and one that does adds this to
+// the list it hands the migrator.
+func Migrations() []migrations.Migration {
+	return []migrations.Migration{CreateNotificationsTable{}}
 }
