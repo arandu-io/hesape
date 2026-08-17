@@ -17,7 +17,7 @@ func SecurityHeaders(dev bool) hhttp.Middleware {
 		"script-src 'self'; " +
 		"style-src 'self'; " +
 		// Explicit, though default-src already covers it. A font is vendored and
-		// served from this origin like everything else (view.RegisterFont), and
+		// served from this origin like everything else (view.RegisterAsset), and
 		// spelling it out is what makes the line say so -- the next person
 		// wondering whether a Google Fonts URL would work reads the policy, not
 		// the fallback rules.
