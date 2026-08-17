@@ -11,6 +11,7 @@ import (
 	"github.com/arandu-io/hesape/auth"
 	busevents "github.com/arandu-io/hesape/bus/events"
 	"github.com/arandu-io/hesape/database"
+	"github.com/arandu-io/hesape/database/migrations"
 )
 
 // BatchesTable is where batches are stored.
@@ -56,23 +57,32 @@ func NewDatabaseBatchRepository(db *database.DB, opts ...DatabaseOption) *Databa
 
 var _ PrunableBatchRepository = (*DatabaseBatchRepository)(nil)
 
-// Migrations is the schema this repository needs.
+// CreateJobBatchesTable creates the table DatabaseBatchRepository reads and
+// writes.
 //
 // It lives here rather than in the application, because a table the framework
 // reads and writes is a table the framework has to be able to create -- the
 // events outbox sets the same precedent.
-func Migrations() []database.Migration {
-	return []database.Migration{{
-		ID: "2026_08_10_000001_create_job_batches_table",
-		// INTEGER and TIMESTAMP are spelled the same way by all three engines,
-		// and anything that takes part in a key is database.KeyText -- see
-		// there for why TEXT is not portable in one.
-		//
-		// options is one TEXT column of JSON rather than a column per setting:
-		// nothing queries a batch by the name of its Catch job and never will,
-		// they are read together and written once, and a column per field would
-		// be a migration the first time a callback grows an option.
-		Up: `CREATE TABLE ` + BatchesTable + ` (
+type CreateJobBatchesTable struct{ migrations.BaseMigration }
+
+// GetName returns the migration's name.
+func (CreateJobBatchesTable) GetName() string {
+	return "2026_08_10_000001_create_job_batches_table"
+}
+
+// Up creates the batches table and the index every read of it uses.
+//
+// INTEGER and TIMESTAMP are spelled the same way by all three engines, and
+// anything that takes part in a key is database.KeyText -- see there for why
+// TEXT is not portable in one.
+//
+// options is one TEXT column of JSON rather than a column per setting: nothing
+// queries a batch by the name of its Catch job and never will, they are read
+// together and written once, and a column per field would be a migration the
+// first time a callback grows an option.
+func (CreateJobBatchesTable) Up(ctx context.Context, conn migrations.Connection) error {
+	statements := []string{
+		`CREATE TABLE ` + BatchesTable + ` (
 			id             ` + database.KeyText + ` PRIMARY KEY,
 			tenant_id      ` + database.KeyText + ` NOT NULL,
 			name           TEXT NOT NULL,
@@ -84,10 +94,26 @@ func Migrations() []database.Migration {
 			created_at     TIMESTAMP NOT NULL,
 			cancelled_at   TIMESTAMP NULL,
 			finished_at    TIMESTAMP NULL
-		);
-		CREATE INDEX job_batches_tenant_created_idx ON ` + BatchesTable + ` (tenant_id, created_at)`,
-		Down: `DROP TABLE ` + BatchesTable,
-	}}
+		)`,
+		`CREATE INDEX job_batches_tenant_created_idx ON ` + BatchesTable + ` (tenant_id, created_at)`,
+	}
+	for _, statement := range statements {
+		if _, err := conn.Statement(ctx, statement, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Down drops the batches table, and the index with it.
+func (CreateJobBatchesTable) Down(ctx context.Context, conn migrations.Connection) error {
+	_, err := conn.Statement(ctx, `DROP TABLE `+BatchesTable, nil)
+	return err
+}
+
+// Migrations is the schema this repository needs.
+func Migrations() []migrations.Migration {
+	return []migrations.Migration{CreateJobBatchesTable{}}
 }
 
 // columns is the read shape, in the order scanBatch expects.

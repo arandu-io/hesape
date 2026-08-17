@@ -11,6 +11,7 @@ import (
 
 	"github.com/arandu-io/hesape/bus"
 	"github.com/arandu-io/hesape/database"
+	"github.com/arandu-io/hesape/database/migrations"
 )
 
 func TestDatabaseRepositoryRoundTripsEveryFieldOfABatch(t *testing.T) {
@@ -395,17 +396,29 @@ func TestMigrationsDeclareTheTable(t *testing.T) {
 		t.Fatalf("%d migrations, want 1", len(ms))
 	}
 	m := ms[0]
-	if !strings.HasPrefix(m.ID, "2026_") {
-		t.Errorf("id = %q, and a migration id carries its own order", m.ID)
+	if !strings.HasPrefix(m.GetName(), "2026_") {
+		t.Errorf("name = %q, and a migration name carries its own order", m.GetName())
 	}
-	if !strings.Contains(m.Up, "CREATE TABLE "+bus.BatchesTable) {
+
+	ctx := context.Background()
+	up, err := migrations.UpStatements(ctx, m)
+	if err != nil {
+		t.Fatalf("UpStatements: %v", err)
+	}
+	joined := strings.Join(up, "\n")
+	if !strings.Contains(joined, "CREATE TABLE "+bus.BatchesTable) {
 		t.Errorf("the migration does not create %s", bus.BatchesTable)
 	}
 	// TEXT in a key is not portable: MySQL refuses it without a prefix length.
-	if strings.Contains(m.Up, "id             TEXT") {
+	if strings.Contains(joined, "id             TEXT") {
 		t.Error("the key column is TEXT, which MySQL refuses in a key")
 	}
-	if !strings.Contains(m.Down, "DROP TABLE "+bus.BatchesTable) {
-		t.Errorf("the migration cannot be rolled back: %q", m.Down)
+
+	down, err := migrations.DownStatements(ctx, m)
+	if err != nil {
+		t.Fatalf("DownStatements: %v", err)
+	}
+	if !strings.Contains(strings.Join(down, "\n"), "DROP TABLE "+bus.BatchesTable) {
+		t.Errorf("the migration cannot be rolled back: %q", down)
 	}
 }
