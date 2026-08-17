@@ -105,8 +105,15 @@ func (c *fakeConnection) lastBindings() []any {
 }
 
 // fakeProcessor passes the rows through, which is what the base Processor does.
+//
+// It records the insert it is handed. InsertGetID is the one write that reaches
+// the database through the processor instead of the connection, so a processor
+// that only returned an id would leave that statement unreadable -- and a
+// statement no test can read is a statement no test can hold to carrying a
+// tenant.
 type fakeProcessor struct {
 	insertedID int64
+	connection *fakeConnection
 }
 
 func (p *fakeProcessor) ProcessSelect(_ *query.Builder, results []query.Record) []query.Record {
@@ -114,6 +121,9 @@ func (p *fakeProcessor) ProcessSelect(_ *query.Builder, results []query.Record) 
 }
 
 func (p *fakeProcessor) ProcessInsertGetID(_ *query.Builder, sql string, values []any, sequence string) (int64, error) {
+	if p.connection != nil {
+		p.connection.calls = append(p.connection.calls, call{kind: "insertGetID", sql: sql, bindings: values})
+	}
 	return p.insertedID, nil
 }
 
@@ -273,6 +283,29 @@ func (g *fakeGrammar) CompileUpdate(q *query.Builder, values map[string]any) str
 	return "update " + g.WrapTable(q.GetFrom()) + " set " + strings.Join(sets, ", ") + g.compileWheres(q)
 }
 
+// CompileUpdateFrom and PrepareBindingsForUpdateFrom are here so that
+// UpdateFrom compiles against this grammar rather than refusing. A grammar
+// without them makes the method return "this database engine does not support
+// the updateFrom method" before it emits anything, and a door that emits
+// nothing cannot be held to carrying a tenant.
+//
+// The statement it writes is the plain update, because the clause the tests read
+// is the where clause and CompileUpdate already writes that one.
+func (g *fakeGrammar) CompileUpdateFrom(q *query.Builder, values map[string]any) string {
+	return g.CompileUpdate(q, values)
+}
+
+func (g *fakeGrammar) PrepareBindingsForUpdateFrom(bindings map[string][]any, values map[string]any) []any {
+	return g.PrepareBindingsForUpdate(bindings, values)
+}
+
+// CompileInsertOrIgnoreReturning is here for the reason CompileUpdateFrom is.
+func (g *fakeGrammar) CompileInsertOrIgnoreReturning(q *query.Builder, values []map[string]any, uniqueBy, returning []string) (string, error) {
+	return g.CompileInsertOrIgnore(q, values) +
+		" on conflict (" + strings.Join(uniqueBy, ", ") + ") do nothing returning " +
+		strings.Join(returning, ", "), nil
+}
+
 func (g *fakeGrammar) CompileUpsert(q *query.Builder, values []map[string]any, uniqueBy []string, update []string) string {
 	return g.CompileInsert(q, values) + " on conflict (" + strings.Join(uniqueBy, ", ") + ") do update set " + strings.Join(update, ", ")
 }
@@ -356,7 +389,8 @@ func sortedColumns(row map[string]any) []string {
 // newTestBuilder is the builder every test starts from: a table, a recording
 // connection, the grammar above and a pass-through processor.
 func newTestBuilder(connection *fakeConnection) *query.Builder {
-	return query.NewBuilder(connection, &fakeGrammar{}, &fakeProcessor{insertedID: 7}).From("users")
+	processor := &fakeProcessor{insertedID: 7, connection: connection}
+	return query.NewBuilder(connection, &fakeGrammar{}, processor).From("users")
 }
 
 // signedOptions is what a cursor page is built with: a cursor names the

@@ -322,9 +322,20 @@ func TestTruncateStillNeedsAGrant(t *testing.T) {
 	}
 }
 
+// grammarWithoutOptionals answers everything Grammar declares and nothing an
+// optional capability asks for.
+//
+// It embeds the interface rather than the test grammar: the optional methods are
+// found by type assertion and are not on Grammar, so a struct that embeds only
+// the interface fails every one of those assertions. Embedding the test grammar
+// would inherit them and defeat the point.
+type grammarWithoutOptionals struct{ query.Grammar }
+
 func TestUpdateFromRefusesAGrammarThatCannotCompileIt(t *testing.T) {
 	connection := &fakeConnection{}
-	_, err := newTestBuilder(connection).UpdateFrom(context.Background(), grant(), map[string]any{"role": "admin"})
+	builder := query.NewBuilder(connection, &grammarWithoutOptionals{&fakeGrammar{}}, &fakeProcessor{}).From("users")
+
+	_, err := builder.UpdateFrom(context.Background(), grant(), map[string]any{"role": "admin"})
 	if err == nil {
 		t.Fatal("updateFrom ran on an engine that does not have it")
 	}
