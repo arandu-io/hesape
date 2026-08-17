@@ -53,6 +53,17 @@
 // errors/403 and so on, and wiring it through Config.Views. Nothing is required:
 // the built-in pages answer until somebody wants their own.
 //
+// # The JSON answer
+//
+// A client that asked for JSON gets a [Problem]: the problem details document
+// of RFC 9457, served as [ProblemContentType]. It is one shape, and
+// [WriteProblem] is the one function that writes it, so a refusal from a
+// middleware and a failure from a handler read the same to whoever parses them.
+//
+// htmx is not that client. It sends X-Requested-With and swaps HTML, so
+// wantsJSON excludes it: a problem document swapped into a div is a JSON
+// document on the page.
+//
 // # What a test writes instead of a global fake
 //
 // There is no registry to swap a handler in, and a package-level handler a test

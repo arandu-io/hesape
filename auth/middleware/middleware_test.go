@@ -2,6 +2,7 @@ package middleware_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/auth/middleware"
+	"github.com/arandu-io/hesape/exception"
 	"github.com/arandu-io/hesape/session"
 	sessionmw "github.com/arandu-io/hesape/session/middleware"
 )
@@ -129,6 +131,31 @@ func TestAuthenticateRefusesARequestWithNoSession(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "Unauthenticated.") {
 		t.Fatalf("body = %q, want Illuminate's message", rec.Body.String())
+	}
+}
+
+// A refusal from a middleware and a refusal from the handler are one failure to
+// the client, so they are one document. A second shape here would be a second
+// branch in every client that reads either.
+func TestARefusedRequestGetsTheProblemDocument(t *testing.T) {
+	var ran bool
+	m := middleware.NewAuthenticate(newFactory(map[string]*guard{"": {}}), subjectFor)
+
+	rec := httptest.NewRecorder()
+	m.Handle(ok(&ran)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/invoices", nil))
+
+	if got := rec.Header().Get("Content-Type"); got != exception.ProblemContentType {
+		t.Fatalf("Content-Type = %q, want %q", got, exception.ProblemContentType)
+	}
+	var body exception.Problem
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("the body is not JSON: %v", err)
+	}
+	if body.Status != http.StatusUnauthorized || body.Detail != "Unauthenticated." {
+		t.Fatalf("body = %+v", body)
+	}
+	if body.Title != "Unauthorized" || body.Instance != "/invoices" {
+		t.Fatalf("title = %q, instance = %q", body.Title, body.Instance)
 	}
 }
 

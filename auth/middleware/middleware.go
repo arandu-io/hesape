@@ -75,18 +75,3 @@ func (g *guestRedirect) redirect(w http.ResponseWriter, r *http.Request, to stri
 // definition in hesape/http and a second one here would be the copy that is
 // wrong about htmx.
 func expectsJSON(r *http.Request) bool { return hhttp.NewRequest(r).ExpectsJSON() }
-
-// writeJSON answers with a JSON object carrying one message, which is the body
-// an unauthenticated or unauthorized request gets when it asked for JSON.
-//
-// The message is a constant at every call site, so it is written directly rather
-// than encoded: there is nothing in it that needs escaping, and an encoder here
-// would be an error return nobody can act on.
-func writeJSON(w http.ResponseWriter, status int, message string) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	// A refusal is one person's, and must never be held by a cache shared
-	// between people.
-	w.Header().Set("Cache-Control", "no-store, private")
-	w.WriteHeader(status)
-	_, _ = w.Write([]byte(`{"message":"` + message + `"}`))
-}

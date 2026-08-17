@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/exception"
 )
 
 // Gate is the part of a gate that [Authorize] uses.
@@ -66,7 +67,7 @@ func (m *Authorize) Handle(next http.Handler) http.Handler {
 			// No subject at all is not a refusal, it is a request that never
 			// loaded a session -- which is the mistake auth.SubjectFrom's second
 			// result exists to tell apart from a declared guest.
-			writeJSON(w, http.StatusUnauthorized, "Unauthenticated.")
+			exception.WriteProblem(w, r, http.StatusUnauthorized, "Unauthenticated.")
 			return
 		}
 
@@ -75,7 +76,7 @@ func (m *Authorize) Handle(next http.Handler) http.Handler {
 			// why, and why is a description of data the refused caller was not
 			// allowed to see. It belongs in the log, which is where the error
 			// returned by the gate goes.
-			writeJSON(w, http.StatusForbidden, "This action is unauthorized.")
+			exception.WriteProblem(w, r, http.StatusForbidden, "This action is unauthorized.")
 			return
 		}
 

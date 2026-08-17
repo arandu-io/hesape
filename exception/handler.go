@@ -2,7 +2,6 @@ package exception
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -378,7 +377,7 @@ func (h *Handler) answer(w http.ResponseWriter, r *http.Request, value any, err 
 	applyErrorHeaders(w, err)
 
 	if h.shouldReturnJSON(r, err) {
-		h.renderJSON(w, r, statusOr500(status, known), messageFor(err, status))
+		WriteProblem(w, r, statusOr500(status, known), messageFor(err, status))
 		return
 	}
 
@@ -420,19 +419,6 @@ func (h *Handler) renderStatus(w http.ResponseWriter, r *http.Request, status in
 	}
 
 	statusPage(w, d)
-}
-
-func (h *Handler) renderJSON(w http.ResponseWriter, r *http.Request, status int, message string) {
-	body := struct {
-		Status    int    `json:"status"`
-		Message   string `json:"message"`
-		RequestID string `json:"request_id,omitempty"`
-	}{Status: status, Message: message, RequestID: requestID(w, r)}
-
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store, private")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
 }
 
 // shouldReturnJSON decides whether the failure is answered as JSON.

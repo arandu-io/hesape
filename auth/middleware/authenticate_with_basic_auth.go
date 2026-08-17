@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/exception"
 )
 
 // AuthenticateWithBasicAuth signs the request in from the Authorization: Basic
@@ -63,7 +64,7 @@ func (m *AuthenticateWithBasicAuth) Handle(next http.Handler) http.Handler {
 		}
 
 		if err := basic.Basic(r.Context(), field, nil); err != nil {
-			m.unauthorized(w)
+			m.unauthorized(w, r)
 			return
 		}
 
@@ -73,9 +74,9 @@ func (m *AuthenticateWithBasicAuth) Handle(next http.Handler) http.Handler {
 
 // unauthorized answers 401 with the Basic challenge, under the realm
 // "Restricted".
-func (m *AuthenticateWithBasicAuth) unauthorized(w http.ResponseWriter) {
+func (m *AuthenticateWithBasicAuth) unauthorized(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
-	writeJSON(w, http.StatusUnauthorized, "Invalid credentials.")
+	exception.WriteProblem(w, r, http.StatusUnauthorized, "Invalid credentials.")
 }
 
 // withSubject puts the Subject on the request's context, when there is a

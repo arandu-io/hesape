@@ -22,10 +22,14 @@
 //	guarded := pipeline.Chain(handler, authenticate.Using("web").Handle)
 //
 // Each one writes the refusal itself rather than raising it for somebody else
-// to render: 401 with a JSON body when the request asked for JSON, and a
+// to render: 401 as a problem document when the request asked for JSON, and a
 // redirect otherwise. hesape/session's own AuthenticateSession already answered
 // this way, and a second convention would be a second answer to the same
 // question.
+//
+// The document is exception.WriteProblem's, and not one written here. A refusal
+// from a middleware and a failure from a handler are one thing to the client,
+// so they are one shape.
 //
 // # The collaborators, and why they are interfaces
 //

@@ -86,22 +86,69 @@ func TestAJSONRequestGetsJSON(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
-	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
-		t.Fatalf("Content-Type = %q", ct)
+	if ct := rec.Header().Get("Content-Type"); ct != exception.ProblemContentType {
+		t.Fatalf("Content-Type = %q, want %q", ct, exception.ProblemContentType)
 	}
-	var body struct {
-		Status    int    `json:"status"`
-		Message   string `json:"message"`
-		RequestID string `json:"request_id"`
-	}
+	var body exception.Problem
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("the body is not JSON: %v", err)
 	}
-	if body.Status != http.StatusNotFound || body.Message != "no invoice with that number" {
+	if body.Status != http.StatusNotFound || body.Detail != "no invoice with that number" {
 		t.Fatalf("body = %+v", body)
+	}
+	if body.Type != "about:blank" || body.Title != "Not Found" {
+		t.Fatalf("type = %q, title = %q, and a problem document names both", body.Type, body.Title)
+	}
+	if body.Instance != "/api/invoices/inv-1" {
+		t.Fatalf("instance = %q, want the path the failure happened at", body.Instance)
 	}
 	if body.RequestID != "req-json" {
 		t.Fatalf("request_id = %q, and without it nothing connects this to the log", body.RequestID)
+	}
+}
+
+// The query string carries values the client wrote, and a body that echoes them
+// hands them to whoever reads the response.
+func TestTheProblemInstanceLeavesTheQueryStringOut(t *testing.T) {
+	h := exception.NewHandler(exception.Config{})
+	r := httptest.NewRequest(http.MethodGet, "/invoices?token=hunter2", nil)
+	r.Header.Set("Accept", "application/json")
+
+	rec := render(h, r, exception.Abort(http.StatusNotFound, ""))
+
+	var body exception.Problem
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("the body is not JSON: %v", err)
+	}
+	if body.Instance != "/invoices" {
+		t.Fatalf("instance = %q, want the path alone", body.Instance)
+	}
+	if strings.Contains(rec.Body.String(), "hunter2") {
+		t.Fatalf("the problem document echoed the query string: %s", rec.Body.String())
+	}
+}
+
+// The detail is what the developer wrote for the caller; everything else stays
+// in the log, and the request id is the thread between the two.
+func TestTheProblemDetailCarriesNothingTheCallerMayNotSee(t *testing.T) {
+	h := exception.NewHandler(exception.Config{})
+	r := httptest.NewRequest(http.MethodGet, "/invoices", nil)
+	r.Header.Set("Accept", "application/json")
+
+	rec := render(h, r, errors.New("dial tcp 10.0.0.4:5432: connection refused"))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "10.0.0.4") {
+		t.Fatalf("the problem document leaked the address of the database: %s", rec.Body.String())
+	}
+	var body exception.Problem
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("the body is not JSON: %v", err)
+	}
+	if body.Title != "Internal Server Error" || body.Detail == "" {
+		t.Fatalf("body = %+v, want the standard sentence for the status", body)
 	}
 }
 

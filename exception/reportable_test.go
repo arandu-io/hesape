@@ -225,8 +225,8 @@ func TestShouldRenderJSONWhenWinsOverTheDefault(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.Render(rec, httptest.NewRequest(http.MethodGet, "/", nil), exception.Abort(http.StatusNotFound, ""))
 
-	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
-		t.Fatalf("Content-Type = %q, want JSON", got)
+	if got := rec.Header().Get("Content-Type"); got != exception.ProblemContentType {
+		t.Fatalf("Content-Type = %q, want the problem document", got)
 	}
 }
 

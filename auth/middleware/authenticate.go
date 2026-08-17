@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/exception"
 )
 
 // Authenticate refuses a request that nobody is signed in on, and puts the
@@ -121,7 +122,7 @@ func (m *Authenticate) withSubject(r *http.Request, user auth.Authenticatable) *
 func (m *Authenticate) unauthenticated(w http.ResponseWriter, r *http.Request) {
 	to := m.RedirectTo(r)
 	if to == "" || expectsJSON(r) {
-		writeJSON(w, http.StatusUnauthorized, "Unauthenticated.")
+		exception.WriteProblem(w, r, http.StatusUnauthorized, "Unauthenticated.")
 		return
 	}
 	m.redirect(w, r, to)

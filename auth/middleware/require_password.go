@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/arandu-io/hesape/exception"
 	"github.com/arandu-io/hesape/session"
 	sessionmw "github.com/arandu-io/hesape/session/middleware"
 )
@@ -84,7 +85,7 @@ func (m *RequirePassword) Handle(next http.Handler) http.Handler {
 		}
 
 		if expectsJSON(r) {
-			writeJSON(w, http.StatusLocked, "Password confirmation required.")
+			exception.WriteProblem(w, r, http.StatusLocked, "Password confirmation required.")
 			return
 		}
 

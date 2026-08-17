@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/exception"
 )
 
 // VerificationNoticeURI is where somebody who has not verified their address is
@@ -61,7 +62,7 @@ func (m *EnsureEmailIsVerified) Handle(next http.Handler) http.Handler {
 		}
 
 		if expectsJSON(r) {
-			writeJSON(w, http.StatusForbidden, "Your email address is not verified.")
+			exception.WriteProblem(w, r, http.StatusForbidden, "Your email address is not verified.")
 			return
 		}
 
