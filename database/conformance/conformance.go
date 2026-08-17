@@ -45,6 +45,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/database"
+	"github.com/arandu-io/hesape/database/migrations"
 )
 
 // Run executes the suite against a live server.
@@ -72,7 +73,7 @@ func Run(t *testing.T, dialect database.Dialect, driverName, dsn string) {
 	db := database.Wrap(sqldb, dialect)
 
 	t.Run("the migrations table can be created", func(t *testing.T) {
-		testMigrationsTable(t, db)
+		testMigrationsTable(t, dialect, db)
 	})
 	t.Run("a generated schema applies", func(t *testing.T) {
 		testGeneratedSchema(t, db)
@@ -88,36 +89,101 @@ func Run(t *testing.T, dialect database.Dialect, driverName, dsn string) {
 	})
 }
 
-// testMigrationsTable is the statement MySQL rejected. database.Migrate creates
-// the tracking table before it does anything else, so a failure here means the
-// engine is unusable end to end -- not that one migration is wrong.
-func testMigrationsTable(t *testing.T, db *database.DB) {
-	ctx := context.Background()
-	drop(t, db, database.MigrationsTable)
+// conformanceMigrationPath is the group the suite's own migration registers
+// under, so a run picks up this one and nothing an application registered.
+const conformanceMigrationPath = "database/conformance"
 
-	applied, err := database.Migrate(ctx, db, []database.Migration{{
-		ID:   "conformance_0001",
-		Up:   `CREATE TABLE ` + table("noop") + ` (id ` + database.KeyText + ` PRIMARY KEY)`,
-		Down: `DROP TABLE ` + table("noop"),
-	}})
-	if err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+// conformanceMigration is the schema change the suite applies: one table, one
+// key column, nothing an engine could disagree about except the key type.
+type conformanceMigration struct{ migrations.BaseMigration }
+
+// GetName returns the migration's name.
+func (conformanceMigration) GetName() string { return "2026_01_01_000000_conformance" }
+
+// Up creates the table.
+func (conformanceMigration) Up(ctx context.Context, conn migrations.Connection) error {
+	_, err := conn.Statement(ctx,
+		`CREATE TABLE `+table("noop")+` (id `+database.KeyText+` PRIMARY KEY)`, nil)
+	return err
+}
+
+// Down drops it.
+func (conformanceMigration) Down(ctx context.Context, conn migrations.Connection) error {
+	_, err := conn.Statement(ctx, `DROP TABLE `+table("noop"), nil)
+	return err
+}
+
+func init() { migrations.Register(conformanceMigration{}, conformanceMigrationPath) }
+
+// testMigrationsTable is the statement MySQL rejected. The migrator creates its
+// tracking table before it does anything else, so a failure here means the
+// engine is unusable end to end -- not that one migration is wrong.
+func testMigrationsTable(t *testing.T, dialect database.Dialect, db *database.DB) {
+	ctx := context.Background()
+	drop(t, db, migrations.DefaultTable)
+	drop(t, db, table("noop"))
 	t.Cleanup(func() { drop(t, db, table("noop")) })
 
+	migrator := newMigrator(dialect, db)
+	if err := migrator.GetRepository().CreateRepository(ctx); err != nil {
+		t.Fatalf("creating the tracking table: %v", err)
+	}
+
+	applied, err := migrator.Run(ctx, []string{conformanceMigrationPath}, migrations.Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
 	if len(applied) != 1 {
 		t.Fatalf("applied %d migrations, want 1", len(applied))
 	}
+
 	// A second call is a no-op, which is what makes `aru migrate` safe to run
 	// on every deploy.
-	again, err := database.Migrate(ctx, db, []database.Migration{{ID: "conformance_0001", Up: "SELECT 1"}})
+	again, err := migrator.Run(ctx, []string{conformanceMigrationPath}, migrations.Options{})
 	if err != nil {
-		t.Fatalf("the second Migrate: %v", err)
+		t.Fatalf("the second Run: %v", err)
 	}
 	if len(again) != 0 {
 		t.Errorf("re-applied %v", again)
 	}
+
+	// The rollback is the other half: it reads the tracking table back and
+	// deletes the row, which is where a placeholder that was never rebound
+	// shows up.
+	rolledBack, err := migrator.Rollback(ctx, []string{conformanceMigrationPath}, migrations.Options{})
+	if err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if len(rolledBack) != 1 {
+		t.Errorf("rolled back %v, want the one migration", rolledBack)
+	}
 }
+
+// newMigrator wires a Migrator over the suite's connection.
+//
+// The migrations component reaches a connection through a resolver rather than
+// being handed one, because a migration may name the connection it runs on. The
+// suite has exactly one, so the resolver holds exactly one.
+func newMigrator(dialect database.Dialect, db *database.DB) *migrations.Migrator {
+	connection := database.NewConnection(db.Unwrap(), "", "", map[string]any{
+		"driver": string(dialect),
+		"name":   conformanceConnection,
+	})
+
+	inner := database.NewConnectionResolver(map[string]database.ConnectionInterface{
+		conformanceConnection: connection,
+	})
+	inner.SetDefaultConnection(conformanceConnection)
+
+	resolver := database.MigrationResolver{Resolver: inner}
+	repository := migrations.NewDatabaseMigrationRepository(resolver, migrations.DefaultTable)
+
+	return migrations.NewMigrator(repository, resolver, nil)
+}
+
+// conformanceConnection is the name the suite's single connection is registered
+// under.
+const conformanceConnection = "conformance"
 
 // testGeneratedSchema applies the shape `aru make:module` emits: a text primary
 // key, a tenant column, a composite UNIQUE over two text columns and an index
