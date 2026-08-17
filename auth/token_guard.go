@@ -8,9 +8,9 @@ import (
 
 // TokenGuard is the API token guard.
 //
-// It reads a token off the request and asks the provider for the user whose
-// stored token column matches. There is no session, no cookie and nothing to
-// log out of: every request proves itself again.
+// It reads a token off the Authorization header and asks the provider for the
+// user whose stored token column matches. There is no session, no cookie and
+// nothing to log out of: every request proves itself again.
 //
 // It is the simplest thing that works and it is not a token system. There is no
 // expiry, no scope and no revocation list here -- those belong to whatever
@@ -21,7 +21,7 @@ type TokenGuard struct {
 	// request is what the token is read from.
 	request Request
 
-	// inputKey is the query string or input field the token arrives in.
+	// inputKey is the credential key Validate reads the token under.
 	inputKey string
 
 	// storageKey is the column it is kept in.
@@ -33,7 +33,8 @@ type TokenGuard struct {
 
 var _ Guard = (*TokenGuard)(nil)
 
-// NewTokenGuard returns a guard that reads its token off the request.
+// NewTokenGuard returns a guard that reads its token off the request's
+// Authorization header.
 //
 // An empty inputKey or storageKey becomes "api_token".
 func NewTokenGuard(provider UserProvider, request Request, inputKey, storageKey string, hash bool) *TokenGuard {
@@ -86,29 +87,24 @@ func (g *TokenGuard) User() Authenticatable {
 	return g.user
 }
 
-// GetTokenForRequest is the token, from the four places it may arrive in.
+// GetTokenForRequest is the token on the Authorization header, or empty.
 //
-// Query string first, then the input, then the Authorization bearer, then the
-// HTTP Basic password. The last one is how a token is handed to a tool that
-// only knows how to do Basic auth.
+// The bearer token first, then the HTTP Basic password, which is how a token is
+// handed to a tool that only knows how to do Basic auth.
+//
+// The query string and the request body are not read, so a token sent in either
+// is not seen and the request stays a guest. A URL reaches the server log, the
+// proxy log, the browser history and the Referer header of every link followed
+// from the page, and none of those is a place a credential can be taken back
+// out of; a header reaches none of them. Reading the body instead would not
+// help: a request merges its query string into its input, so a body reader is a
+// second URL reader.
 func (g *TokenGuard) GetTokenForRequest() string {
 	if g.request == nil {
 		return ""
 	}
 
-	token := g.request.Query(g.inputKey)
-
-	if token == "" {
-		// Input answers with an any, and a token that is not a string is not a
-		// token.
-		if value, ok := g.request.Input(g.inputKey).(string); ok {
-			token = value
-		}
-	}
-
-	if token == "" {
-		token = g.request.BearerToken()
-	}
+	token := g.request.BearerToken()
 
 	if token == "" {
 		token = g.request.GetPassword()

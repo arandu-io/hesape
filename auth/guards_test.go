@@ -820,7 +820,7 @@ func TestSetUserUndoesALogout(t *testing.T) {
 	}
 }
 
-func TestTheTokenGuardReadsTheTokenFromEveryPlaceInOrder(t *testing.T) {
+func TestTheTokenGuardReadsTheAuthorizationHeaderAndNotTheURL(t *testing.T) {
 	provider := &fakeProvider{user: &fakeUser{id: 3, rememberToken: "the-token"}, email: "a@b.c"}
 
 	request := newFakeRequest()
@@ -828,6 +828,19 @@ func TestTheTokenGuardReadsTheTokenFromEveryPlaceInOrder(t *testing.T) {
 
 	if guard.GetTokenForRequest() != "" {
 		t.Fatal("a request with no token has one")
+	}
+
+	// A token in the URL or in the body is not read at all. The query covers the
+	// URL, and the input covers it a second time, because a request merges its
+	// query string into its input.
+	request.query["api_token"] = "the-token"
+	request.input["api_token"] = "the-token"
+
+	if got := guard.GetTokenForRequest(); got != "" {
+		t.Fatalf("the guard read %q off the query string or the body", got)
+	}
+	if guard.User() != nil || guard.Check() {
+		t.Fatal("a token in the URL signed somebody in")
 	}
 
 	request.passwrd = "from-basic"
@@ -839,23 +852,13 @@ func TestTheTokenGuardReadsTheTokenFromEveryPlaceInOrder(t *testing.T) {
 	if guard.GetTokenForRequest() != "from-bearer" {
 		t.Fatalf("the bearer token does not win over the Basic password: %q", guard.GetTokenForRequest())
 	}
-
-	request.input["api_token"] = "from-input"
-	if guard.GetTokenForRequest() != "from-input" {
-		t.Fatalf("the input does not win over the bearer token: %q", guard.GetTokenForRequest())
-	}
-
-	request.query["api_token"] = "from-query"
-	if guard.GetTokenForRequest() != "from-query" {
-		t.Fatalf("the query string does not win: %q", guard.GetTokenForRequest())
-	}
 }
 
 func TestTheTokenGuardResolvesTheUserAndValidates(t *testing.T) {
 	provider := &fakeProvider{user: &fakeUser{id: 3, rememberToken: "the-token"}, email: "a@b.c"}
 
 	request := newFakeRequest()
-	request.query["api_token"] = "the-token"
+	request.bearer = "the-token"
 
 	guard := auth.NewTokenGuard(provider, request, "api_token", "api_token", false)
 
@@ -883,7 +886,7 @@ func TestTheTokenGuardHashesTheTokenWhenItIsStoredHashed(t *testing.T) {
 	provider := &fakeProvider{user: &fakeUser{id: 3, rememberToken: stored}, email: "a@b.c"}
 
 	request := newFakeRequest()
-	request.query["api_token"] = "the-token"
+	request.bearer = "the-token"
 
 	guard := auth.NewTokenGuard(provider, request, "api_token", "api_token", true)
 
@@ -902,7 +905,7 @@ func TestTheTokenGuardWithNoTokenResolvesNobodyAndSetRequestReplacesIt(t *testin
 	}
 
 	replacement := newFakeRequest()
-	replacement.query["api_token"] = "the-token"
+	replacement.bearer = "the-token"
 
 	if guard.SetRequest(replacement) != guard {
 		t.Fatal("SetRequest handed back a different guard")

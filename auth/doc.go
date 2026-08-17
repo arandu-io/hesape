@@ -15,8 +15,8 @@
 //
 // Three guards live here, with the helpers they embed and the pieces they read.
 // SessionGuard is the browser session a login form starts; TokenGuard reads an
-// API token off the request; RequestGuard hands the request to a callback that
-// resolves the user itself. Alongside them are Recaller, which parses the
+// API token off the Authorization header; RequestGuard hands the request to a
+// callback that resolves the user itself. Alongside them are Recaller, which parses the
 // "remember me" cookie, GenericUser, MustVerifyEmailTrait, the authentication
 // error, and AuthManager, which builds a guard from configuration.
 //

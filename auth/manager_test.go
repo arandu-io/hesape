@@ -90,7 +90,7 @@ func TestTheManagerBuildsTheTokenGuardItIsConfiguredFor(t *testing.T) {
 	manager, provider, _, request, _ := managerFor(t)
 
 	provider.user.rememberToken = "the-token"
-	request.query["token"] = "the-token"
+	request.bearer = "the-token"
 
 	guard, err := manager.Guard("api")
 	if err != nil {
@@ -102,10 +102,19 @@ func TestTheManagerBuildsTheTokenGuardItIsConfiguredFor(t *testing.T) {
 		t.Fatalf("the api guard is a %T, want *auth.TokenGuard", guard)
 	}
 	if token.GetTokenForRequest() != "the-token" {
-		t.Fatalf("the guard read %q, so input_key was not used", token.GetTokenForRequest())
+		t.Fatalf("the guard read %q, so the Authorization header was not used", token.GetTokenForRequest())
 	}
 	if token.User() != provider.user {
 		t.Fatal("the token guard did not resolve the user")
+	}
+
+	// auth.guards.api.input_key is the credential key Validate reads the token
+	// under, and storage_key is the column the lookup runs against.
+	if !token.Validate(context.Background(), map[string]any{"token": "the-token"}) {
+		t.Fatal("Validate did not read the configured input_key")
+	}
+	if token.Validate(context.Background(), map[string]any{"api_token": "the-token"}) {
+		t.Fatal("Validate read a key that is not the configured input_key")
 	}
 }
 

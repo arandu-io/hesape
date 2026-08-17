@@ -93,10 +93,11 @@ type Dispatcher interface {
 // Request is the part of the HTTP request the guards read.
 //
 // SessionGuard reads the recaller cookie and the HTTP Basic pair; TokenGuard
-// reads the query string, the input, the bearer token and the Basic password;
-// RequestGuard hands the whole thing to the callback it was built with. Nothing
-// here reads a tenant, and nothing here may: the tenant is on the Grant a
-// policy minted, never on the request.
+// reads the bearer token and the Basic password; RequestGuard hands the whole
+// thing to the callback it was built with, and Query and Input are here for that
+// callback, because no guard reads either. Nothing here reads a tenant, and
+// nothing here may: the tenant is on the Grant a policy minted, never on the
+// request.
 //
 // Query, Input, BearerToken and Cookie are hesape/http.Request's signatures.
 // GetUser, GetPassword and Context are not on it yet:
