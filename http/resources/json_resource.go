@@ -3,20 +3,23 @@ package resources
 import (
 	"encoding/json"
 	"net/http"
+
+	hhttp "github.com/arandu-io/hesape/http"
 )
 
 // JsonResource is the interface that resource types implement. Types that
 // implement it can be serialized to JSON responses with conditional field
 // inclusion and wrapping.
-type JsonResource interface {
-	// ToArray returns the resource attributes as a slice of key-value pairs
-	// or a map. MissingValue entries are filtered out during serialization.
-	ToArray() map[string]any
-
-	// With returns additional data to include at the top level of the
-	// response alongside the data key.
-	With() map[string]any
-}
+//
+// ToArray returns the resource attributes by name; MissingValue entries are
+// filtered out during serialization. With returns additional data to include at
+// the top level of the response alongside the data key.
+//
+// It is an alias and not a second declaration. The contract is declared in the
+// package this one imports, because the handler-facing encoder there takes it
+// too and cannot import this package back; one name for it in each package and
+// two identical declarations would be one method away from being two contracts.
+type JsonResource = hhttp.JsonResource
 
 // JsonResponseBuilder builds a JSON response from a resource.
 type JsonResponseBuilder struct {

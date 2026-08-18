@@ -2,7 +2,6 @@ package http_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	stdhttp "net/http"
@@ -173,11 +172,36 @@ func TestARefusalKeepsItsStatusAndUnderHTMXAsksForAReload(t *testing.T) {
 	}
 }
 
+// invoice is the entity, with a field that must never leave.
+type invoice struct {
+	ID              int
+	InternalMargin  int
+	OwningAccountID int
+}
+
+// invoiceResource is the list of fields the invoice may answer with, and the
+// reason Context.JSON takes one: the entity above grew two fields after the
+// handler was written, and neither of them is here.
+type invoiceResource struct{ invoice invoice }
+
+func (r invoiceResource) ToArray() map[string]any {
+	return map[string]any{"id": r.invoice.ID, "note": missing{}}
+}
+
+func (r invoiceResource) With() map[string]any { return map[string]any{"version": 1} }
+
+// missing is a value that reports itself absent, which is what a conditional
+// field resolves to when the condition does not hold.
+type missing struct{}
+
+func (missing) IsMissing() bool { return true }
+
 func TestJSONAndStatusAnswerWithoutAViewLayer(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ctx := hhttp.NewContext(rec, request(stdhttp.MethodGet, "/api/invoices/42"), nil, nil)
 
-	if err := ctx.JSON(stdhttp.StatusCreated, map[string]int{"id": 42}); err != nil {
+	resource := invoiceResource{invoice{ID: 42, InternalMargin: 31, OwningAccountID: 7}}
+	if err := ctx.JSON(stdhttp.StatusCreated, resource); err != nil {
 		t.Fatalf("JSON: %v", err)
 	}
 	if rec.Code != stdhttp.StatusCreated {
@@ -186,9 +210,8 @@ func TestJSONAndStatusAnswerWithoutAViewLayer(t *testing.T) {
 	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
 		t.Errorf("Content-Type = %q", got)
 	}
-	var body struct{ ID int }
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.ID != 42 {
-		t.Errorf("body = %q (%v)", rec.Body.String(), err)
+	if got, want := rec.Body.String(), `{"data":{"id":42},"version":1}`; got != want {
+		t.Errorf("body = %s, want %s", got, want)
 	}
 
 	rec = httptest.NewRecorder()

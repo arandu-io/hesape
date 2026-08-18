@@ -269,12 +269,70 @@ func Refuse(w stdhttp.ResponseWriter, r *stdhttp.Request, status int, message st
 	stdhttp.Error(w, message, status)
 }
 
+// JsonResource is what [Context.JSON] takes: the fields a type is allowed to
+// answer with, declared once beside the type rather than remembered at each
+// place it is answered from.
+//
+// It is declared here rather than imported from the resource layer, which
+// declares the same contract: that layer builds a response and imports this
+// package to do it, so an import back would be a cycle. Go compares an
+// interface by its methods, so a resource satisfies this one by being what it
+// already is, and the two names are one contract rather than two.
+type JsonResource interface {
+	// ToArray returns the fields that may leave, by name.
+	ToArray() map[string]any
+
+	// With returns what goes beside them at the top level of the response:
+	// metadata about the answer rather than the thing being answered with.
+	With() map[string]any
+}
+
 // JSON answers with JSON. It exists for the endpoints that are genuinely an
 // API; a page answers with View.
-func (c *Context) JSON(status int, v any) error {
+//
+// It takes a resource and not a value, and the signature is the whole point of
+// it. An encoder handed an entity answers with whatever fields the entity
+// happens to have, including the ones somebody adds to it later without ever
+// reading this handler: a password hash, an internal note, the identifier of
+// the account a row belongs to. A resource cannot do that, because what leaves
+// is a list somebody wrote.
+//
+// The answer is the fields under a "data" key, and whatever With returns beside
+// it. The key is fixed here and does not follow the resource layer's
+// configurable wrapping: this is one answer with one shape, and an endpoint
+// that needs another builds its body with the resource layer and writes it to
+// [Context.Response] itself.
+//
+// A field carrying a value that reports itself missing is left out, which is
+// what a conditional field is for -- the field a person may not see is absent
+// rather than present and empty.
+//
+// The body is built before anything is written. An encoder writing straight
+// into the response has already sent the status and half an object by the time
+// it reports that it cannot marshal the rest, and neither can be taken back.
+func (c *Context) JSON(status int, resource JsonResource) error {
+	data := make(map[string]any)
+	for name, value := range resource.ToArray() {
+		if missing, ok := value.(interface{ IsMissing() bool }); ok && missing.IsMissing() {
+			continue
+		}
+		data[name] = value
+	}
+
+	body := map[string]any{"data": data}
+	for name, value := range resource.With() {
+		body[name] = value
+	}
+
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+
 	c.Response.Header().Set("Content-Type", "application/json; charset=utf-8")
 	c.Response.WriteHeader(status)
-	return json.NewEncoder(c.Response).Encode(v)
+	_, err = c.Response.Write(encoded)
+	return err
 }
 
 // Status answers with a status and no body.
