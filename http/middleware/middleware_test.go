@@ -40,10 +40,12 @@ func TestTheDefaultHeadersAreOnEveryAnswer(t *testing.T) {
 	rec, _ := run(middleware.SecurityHeaders(false), httptest.NewRequest(http.MethodGet, "/", nil))
 
 	for header, want := range map[string]string{
-		"X-Content-Type-Options":     "nosniff",
-		"X-Frame-Options":            "DENY",
-		"Referrer-Policy":            "strict-origin-when-cross-origin",
-		"Cross-Origin-Opener-Policy": "same-origin",
+		"X-Content-Type-Options":       "nosniff",
+		"X-Frame-Options":              "DENY",
+		"Referrer-Policy":              "strict-origin-when-cross-origin",
+		"Cross-Origin-Opener-Policy":   "same-origin",
+		"Cross-Origin-Resource-Policy": "same-origin",
+		"Origin-Agent-Cluster":         "?1",
 	} {
 		if got := rec.Header().Get(header); got != want {
 			t.Errorf("%s = %q, want %q", header, got, want)

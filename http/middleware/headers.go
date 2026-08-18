@@ -36,6 +36,8 @@ func SecurityHeaders(dev bool) hhttp.Middleware {
 			h.Set("Content-Security-Policy", csp)
 			h.Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
 			h.Set("Cross-Origin-Opener-Policy", "same-origin")
+			h.Set("Cross-Origin-Resource-Policy", "same-origin")
+			h.Set("Origin-Agent-Cluster", "?1")
 			if !dev {
 				// HSTS over plain HTTP would pin localhost to https and break
 				// every developer's machine, so it is production only.
