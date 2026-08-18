@@ -321,7 +321,7 @@ func (c *Connection) Select(ctx context.Context, q string, bindings []any, useRe
 			return nil
 		}
 
-		pool, err := c.getPDOForSelect(useReadPDO)
+		pool, err := c.runner(useReadPDO)
 		if err != nil {
 			return err
 		}
@@ -352,7 +352,7 @@ func (c *Connection) SelectResultSets(ctx context.Context, q string, bindings []
 			return nil
 		}
 
-		pool, err := c.getPDOForSelect(useReadPDO)
+		pool, err := c.runner(useReadPDO)
 		if err != nil {
 			return err
 		}
@@ -391,7 +391,7 @@ func (c *Connection) Cursor(ctx context.Context, q string, bindings []any, useRe
 			return
 		}
 
-		pool, err := c.getPDOForSelect(useReadPDO)
+		pool, err := c.runner(useReadPDO)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -454,7 +454,7 @@ func (c *Connection) Statement(ctx context.Context, q string, bindings []any) (b
 			return nil
 		}
 
-		pool, err := c.GetPDO()
+		pool, err := c.runner(false)
 		if err != nil {
 			return err
 		}
@@ -492,7 +492,7 @@ func (c *Connection) InsertReturningID(ctx context.Context, q string, bindings [
 			return nil
 		}
 
-		pool, err := c.GetPDO()
+		pool, err := c.runner(false)
 		if err != nil {
 			return err
 		}
@@ -524,7 +524,7 @@ func (c *Connection) AffectingStatement(ctx context.Context, q string, bindings 
 			return nil
 		}
 
-		pool, err := c.GetPDO()
+		pool, err := c.runner(false)
 		if err != nil {
 			return err
 		}
@@ -562,7 +562,7 @@ func (c *Connection) Unprepared(ctx context.Context, q string) (bool, error) {
 			return nil
 		}
 
-		pool, err := c.GetPDO()
+		pool, err := c.runner(false)
 		if err != nil {
 			return err
 		}
@@ -1054,6 +1054,41 @@ func (c *Connection) getPDOForSelect(useReadPDO bool) (*sql.DB, error) {
 		return c.GetReadPDO()
 	}
 	return c.GetPDO()
+}
+
+// sqlRunner is what a statement runs on: the part of *sql.DB and *sql.Conn a
+// query needs, so that one call site serves both.
+type sqlRunner interface {
+	// ExecContext runs a statement that returns no rows.
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+
+	// QueryContext runs a query and returns the rows.
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+// runner returns what a statement should run on.
+//
+// The connection an open transaction is pinned to wins over both pools, and
+// that is the whole of the rule. A BEGIN issued on one pooled connection and an
+// INSERT sent to another is not a transaction: the insert commits on its own,
+// and the rollback that was supposed to cover it undoes nothing. Where the pool
+// holds a single connection -- SQLite's does -- the same mistake is a deadlock
+// instead, because the insert waits for the connection the BEGIN is holding and
+// neither one ever gives it up.
+func (c *Connection) runner(useReadPDO bool) (sqlRunner, error) {
+	c.mu.RLock()
+	pinned := c.txConn
+	c.mu.RUnlock()
+
+	if pinned != nil {
+		return pinned, nil
+	}
+
+	pool, err := c.getPDOForSelect(useReadPDO)
+	if err != nil {
+		return nil, err
+	}
+	return pool, nil
 }
 
 // GetPDO returns the write pool, or an error when the connection has none.
