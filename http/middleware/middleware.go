@@ -5,23 +5,6 @@ import (
 	"strconv"
 )
 
-// FrameGuard adds the X-Frame-Options header to prevent clickjacking. The
-// default value is SAMEORIGIN, which allows the page to be framed only by
-// pages on the same origin.
-//
-//	handler := FrameGuard("SAMEORIGIN")(next)
-func FrameGuard(option string) func(http.Handler) http.Handler {
-	if option == "" {
-		option = "SAMEORIGIN"
-	}
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("X-Frame-Options", option)
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
 // ValidatePostSize checks the Content-Length header against maxSize and
 // returns 413 Request Entity Too Large if the body exceeds the limit.
 func ValidatePostSize(maxSize int64) func(http.Handler) http.Handler {
