@@ -89,6 +89,10 @@ var (
 // that loses reports a duplicate key on a table it was creating. There is no
 // Migrate-on-boot helper here to make that easy, and there will not be one.
 //
+// A pipeline that cannot promise it runs the step once uses RunIsolated, which
+// takes a lock named after the connection and lets the process that does not
+// get it finish successfully having migrated nothing.
+//
 // The other half of the same rule is the migration's own: every migration is
 // compatible with the binary that is still running while the rollout finishes.
 // A new column is nullable or has a default; removing one takes two releases,
@@ -111,6 +115,10 @@ type Migrator struct {
 
 	// output is where progress is written. Nil writes nothing.
 	output io.Writer
+
+	// issueLock is where RunIsolated gets its lock, and nil is what makes it
+	// refuse rather than migrate unprotected. IsolateWith sets it.
+	issueLock func(name string) IsolationLock
 }
 
 // NewMigrator creates a Migrator.
