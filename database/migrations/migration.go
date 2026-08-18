@@ -14,9 +14,8 @@ import "context"
 // by
 // auth.Tenant(g). A migration is not on that path -- it is DDL, run by `aru
 // migrate` as a pipeline step, in a process with no request, no subject and
-// therefore nothing a Grant could be built from. database.Migrate next door has
-// always taken none for the same reason, and giving one to a migration would
-// mean inventing a fake subject, which is worse than not having one.
+// therefore nothing a Grant could be built from. Giving one to a migration
+// would mean inventing a fake subject, which is worse than not having one.
 type Connection interface {
 	// GetName returns the connection's name.
 	GetName() string

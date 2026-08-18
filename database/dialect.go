@@ -89,8 +89,7 @@ func (d Dialect) Rebind(query string) string {
 			//
 			// left the ? unbound, and PostgreSQL answered with a syntax error
 			// about a character position, three lines from the comment that
-			// caused it. splitStatements had already learned this lesson for
-			// semicolons; this had not. Found by audit.
+			// caused it. Found by audit.
 			for i < len(query) && query[i] != '\n' {
 				b.WriteByte(query[i])
 				i++

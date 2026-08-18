@@ -10,6 +10,7 @@ import (
 	"github.com/arandu-io/hesape/database"
 	"github.com/arandu-io/hesape/database/conformance"
 	_ "github.com/arandu-io/hesape/database/connectors/sqlite"
+	"github.com/arandu-io/hesape/database/migrations"
 )
 
 // The connector end to end: importing it has to be enough for Open to work,
@@ -99,29 +100,71 @@ func TestTheMigrationPathWorks(t *testing.T) {
 	}
 	defer closeDB()
 
-	migrations := []database.Migration{{
-		ID:   "0001_create_customer",
-		Up:   `CREATE TABLE customer (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL)`,
-		Down: `DROP TABLE customer`,
-	}}
-
 	ctx := context.Background()
-	applied, err := database.Migrate(ctx, db, migrations)
+	migrator := newMigrator(db)
+	if err := migrator.GetRepository().CreateRepository(ctx); err != nil {
+		t.Fatalf("creating the tracking table: %v", err)
+	}
+
+	applied, err := migrator.Run(ctx, []string{customerPath}, migrations.Options{})
 	if err != nil {
-		t.Fatalf("Migrate: %v", err)
+		t.Fatalf("Run: %v", err)
 	}
 	if len(applied) != 1 {
 		t.Fatalf("applied %d migrations, want 1", len(applied))
 	}
 
 	// Twice, because a deploy pipeline runs it on every release.
-	if applied, err := database.Migrate(ctx, db, migrations); err != nil || len(applied) != 0 {
-		t.Fatalf("second Migrate: %v, applied %d", err, len(applied))
+	if applied, err := migrator.Run(ctx, []string{customerPath}, migrations.Options{}); err != nil || len(applied) != 0 {
+		t.Fatalf("second Run: %v, applied %d", err, len(applied))
 	}
 
-	if _, err := database.Rollback(ctx, db, migrations); err != nil {
+	reverted, err := migrator.Rollback(ctx, []string{customerPath}, migrations.Options{})
+	if err != nil {
 		t.Fatalf("Rollback: %v", err)
 	}
+	if len(reverted) != 1 {
+		t.Fatalf("rolled back %v, want the one migration", reverted)
+	}
+}
+
+// customerPath is the group createCustomerTable registers under, so this test
+// runs its own migration and nothing another package registered.
+const customerPath = "database/connectors/sqlite"
+
+// createCustomerTable is the migration this test applies.
+type createCustomerTable struct{ migrations.BaseMigration }
+
+func (createCustomerTable) GetName() string { return "2026_01_01_000000_create_customer_table" }
+
+func (createCustomerTable) Up(ctx context.Context, conn migrations.Connection) error {
+	_, err := conn.Statement(ctx,
+		`CREATE TABLE customer (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL)`, nil)
+	return err
+}
+
+func (createCustomerTable) Down(ctx context.Context, conn migrations.Connection) error {
+	_, err := conn.Statement(ctx, `DROP TABLE customer`, nil)
+	return err
+}
+
+func init() { migrations.Register(createCustomerTable{}, customerPath) }
+
+// newMigrator wires a Migrator over db, the way `aru migrate` does.
+func newMigrator(db *database.DB) *migrations.Migrator {
+	connection := database.NewConnection(db.Unwrap(), "", "", map[string]any{
+		"driver": string(database.DialectSQLite),
+		"name":   "sqlite",
+	})
+
+	inner := database.NewConnectionResolver(map[string]database.ConnectionInterface{
+		"sqlite": connection,
+	})
+	inner.SetDefaultConnection("sqlite")
+
+	resolver := database.MigrationResolver{Resolver: inner}
+	repository := migrations.NewDatabaseMigrationRepository(resolver, migrations.DefaultTable)
+	return migrations.NewMigrator(repository, resolver, nil)
 }
 
 // TestTenantScopingStillComesFromTheGrant: the connector changes how the

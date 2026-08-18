@@ -24,8 +24,8 @@ import (
 // replicas racing each other at boot, and emitting a file is what lets somebody
 // read it before it reaches production.
 //
-// A project that keeps its migrations as Go values passes
-// [notifications.Migrations] to database.Migrate instead and never runs this.
+// A project that keeps its migrations as Go values hands
+// [notifications.Migrations] to the migrator instead and never runs this.
 // The two do not diverge: the SQL this writes is read off that.
 type NotificationTableCommand struct {
 	// Directory is where the migration is written. Empty means the working

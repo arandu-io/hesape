@@ -89,9 +89,8 @@ func contains(haystack, needle string) bool {
 	return false
 }
 
-// TestAnApostropheInACommentDoesNotEatThePlaceholder is a bug an audit found,
-// and it is the same one splitStatements had already learned: prose inside SQL
-// is prose, not SQL.
+// TestAnApostropheInACommentDoesNotEatThePlaceholder is a bug an audit found:
+// prose inside SQL is prose, not SQL.
 //
 // The rebinder toggled its "inside a literal" flag on every apostrophe, so one
 // in an English contraction opened a string that never closed -- and every

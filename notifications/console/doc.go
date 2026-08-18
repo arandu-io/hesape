@@ -7,7 +7,7 @@
 //
 // The SQL it writes is [notifications.Migrations], not a stub file of its own,
 // so there is no file to locate and no install layout to depend on. A project
-// that keeps its migrations as Go values passes that to database.Migrate and
-// never runs this command; a project that keeps .sql files runs it. Either way
+// that keeps its migrations as Go values hands that to the migrator and never
+// runs this command; a project that keeps .sql files runs it. Either way
 // there is one definition of the table.
 package console

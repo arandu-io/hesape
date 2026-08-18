@@ -106,12 +106,6 @@ type DatabaseMigrationRepository struct {
 
 // DefaultTable is the table name to pass to NewDatabaseMigrationRepository
 // unless a project has a reason not to.
-//
-// The database package's own MigrationsTable is arandu_migrations, and the two
-// are not the same table: that one tracks database.Migration, the SQL-pair
-// shape this framework generates, and this one tracks a migrations.Migration.
-// A project uses one or the other, never both, which is why neither defaults to
-// the other's name.
 const DefaultTable = "migrations"
 
 // NewDatabaseMigrationRepository creates a DatabaseMigrationRepository.
