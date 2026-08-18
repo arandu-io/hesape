@@ -63,6 +63,22 @@ func TestTheDefaultHeadersAreOnEveryAnswer(t *testing.T) {
 	}
 }
 
+func TestTheCspIsTheFullExpectedPolicy(t *testing.T) {
+	rec, _ := run(middleware.SecurityHeaders(false), httptest.NewRequest(http.MethodGet, "/", nil))
+	want := "default-src 'self'; " +
+		"script-src 'self'; " +
+		"style-src 'self'; " +
+		"font-src 'self'; " +
+		"img-src 'self' data:; " +
+		"connect-src 'self'; " +
+		"frame-ancestors 'none'; " +
+		"base-uri 'self'; " +
+		"form-action 'self'"
+	if got := rec.Header().Get("Content-Security-Policy"); got != want {
+		t.Errorf("Content-Security-Policy = %q, want %q", got, want)
+	}
+}
+
 func TestHSTSIsProductionOnly(t *testing.T) {
 	// Over plain HTTP it pins localhost to https and breaks every developer's
 	// machine, and the pin outlives the mistake.
