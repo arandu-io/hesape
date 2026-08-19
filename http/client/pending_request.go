@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arandu-io/hesape/http/client/events"
 	"github.com/arandu-io/hesape/http/client/promises"
 	"github.com/arandu-io/hesape/str"
 )
@@ -794,6 +795,8 @@ func (p *PendingRequest) Send(method, urlStr string, query map[string]string, da
 // after-response callback objected to -- and the caller decides whether that
 // failure is worth repeating.
 func (p *PendingRequest) attempt(cc *http.Client, req *http.Request) (*Response, *http.Response, error) {
+	p.factory.event(events.RequestSending{Request: req})
+
 	httpResp, err := p.findStub(req)
 	if httpResp == nil && err == nil {
 		httpResp, err = cc.Do(req)
@@ -806,8 +809,17 @@ func (p *PendingRequest) attempt(cc *http.Client, req *http.Request) (*Response,
 		p.factory.RecordRequestResponsePair(req, httpResp, err)
 	}
 	if err != nil {
+		// A stray request is the test saying a stub is missing, not a
+		// connection that failed. Reporting it as one would put a listener
+		// that counts outages in the business of counting missing stubs.
+		var stray *StrayRequestError
+		if !errors.As(err, &stray) {
+			p.factory.event(events.ConnectionFailed{Request: req, Exception: err})
+		}
 		return nil, nil, err
 	}
+
+	p.factory.event(events.ResponseReceived{Request: req, Response: httpResp})
 
 	resp := NewResponse(httpResp)
 

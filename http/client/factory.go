@@ -54,19 +54,29 @@ type Factory struct {
 	dispatcher Dispatcher
 }
 
-// Dispatcher is the event sink the client uses: it fires RequestSending,
-// ResponseReceived and ConnectionFailed.
+// Dispatcher is the one method the HTTP client needs of an event dispatcher.
 //
-// It runs on the calling goroutine, so a listener that blocks blocks the
-// request. Anything slow belongs on a queue.
+// It is one method, and it is declared here rather than imported, so that a
+// binary that only sends requests does not drag an event bus in behind them.
+//
+// A dispatcher runs on the calling goroutine, so a listener that blocks blocks
+// the request. Anything slow belongs on a queue.
 type Dispatcher interface {
 	// Dispatch delivers one event to whoever is listening.
+	//
+	// It returns nothing: a listener that fails must not fail the request that
+	// fired it, and an attempt that had to decide what to do with a listener's
+	// error would have to decide it three times.
 	Dispatch(event any)
 }
 
 // SetDispatcher sets the dispatcher the client fires its events into. It is
 // a setter rather than a constructor argument, since most callers never
 // need one.
+//
+// Every attempt fires RequestSending before it goes out, and then exactly one
+// of ResponseReceived or ConnectionFailed. A retried request fires the three
+// once per attempt, because each attempt is a separate request on the wire.
 func (f *Factory) SetDispatcher(dispatcher Dispatcher) *Factory {
 	f.dispatcher = dispatcher
 	return f
@@ -76,6 +86,17 @@ func (f *Factory) SetDispatcher(dispatcher Dispatcher) *Factory {
 // nobody is listening.
 func (f *Factory) GetDispatcher() Dispatcher {
 	return f.dispatcher
+}
+
+// event fires one event, if anybody is listening.
+//
+// The receiver may be nil: a PendingRequest built without a Factory has
+// nowhere to fire, and that is not a reason for the send to stop.
+func (f *Factory) event(e any) {
+	if f == nil || f.dispatcher == nil {
+		return
+	}
+	f.dispatcher.Dispatch(e)
 }
 
 // GetGlobalMiddleware is the middleware [Factory.GlobalMiddleware] added.
