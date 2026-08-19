@@ -17,8 +17,10 @@ import (
 // installs a stub that intercepts every outgoing request; AssertSent
 // verifies what was sent.
 //
-// The zero value is usable: it creates a PendingRequest backed by
-// http.DefaultClient with no stubs and no middleware.
+// The zero value is usable: it creates a PendingRequest with no stubs and no
+// middleware, on a client that has a deadline and refuses a destination inside
+// the network. See AllowInternalHosts and MaxResponseBytes for what it refuses
+// and how to widen it.
 type Factory struct {
 	// Global middleware applied to every request-response cycle.
 	globalMiddleware []func(*http.Request, http.RoundTripper) http.RoundTripper
@@ -52,6 +54,14 @@ type Factory struct {
 
 	// dispatcher is the events the client fires into.
 	dispatcher Dispatcher
+
+	// allowedInternalHosts are the hosts allowed to resolve to an address
+	// inside the network. See AllowInternalHosts.
+	allowedInternalHosts []string
+
+	// maxResponseBytes caps the body read back. Zero means
+	// DefaultMaxResponseBytes. See MaxResponseBytes.
+	maxResponseBytes int64
 }
 
 // Dispatcher is the one method the HTTP client needs of an event dispatcher.
@@ -116,11 +126,15 @@ type RecordedPair struct {
 	Error    error
 }
 
-// NewFactory creates a Factory with the given HTTP client. If client is nil,
-// http.DefaultClient is used.
+// NewFactory creates a Factory with the given HTTP client.
+//
+// A nil client asks for the one this package builds: it has a deadline, and its
+// transport refuses to connect to an address inside the network. A client
+// passed in keeps its own transport and therefore its own answer to where a
+// request may connect; one with no transport set is given this package's.
 func NewFactory(client *http.Client) *Factory {
 	if client == nil {
-		client = http.DefaultClient
+		client = &http.Client{Transport: defaultTransport, Timeout: defaultTimeout}
 	}
 	return &Factory{client: client}
 }

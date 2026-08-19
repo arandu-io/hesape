@@ -123,7 +123,7 @@ func newPendingRequest(f *Factory) *PendingRequest {
 		query:          url.Values{},
 		urlParams:      make(map[string]string),
 		bodyFormat:     "json",
-		timeout:        30 * time.Second,
+		timeout:        defaultTimeout,
 		connectTimeout: 10 * time.Second,
 		maxRedirects:   5,
 		verifyTLS:      true,
@@ -523,18 +523,26 @@ func (p *PendingRequest) MergeOptions(options ...map[string]any) map[string]any 
 // SetHandler sets the transport the request goes out on: the
 // http.RoundTripper on the client, which is where a caller puts a
 // recording or an offline transport.
+//
+// It installs a copy rather than writing the transport into the client it was
+// handed, so that a client shared with anything else keeps the transport it
+// had.
 func (p *PendingRequest) SetHandler(handler http.RoundTripper) *PendingRequest {
-	client := p.BuildClient()
+	client := *p.BuildClient()
 	client.Transport = handler
-	return p.SetClient(client)
+	return p.SetClient(&client)
 }
 
 // BuildClient is the client this request will go out on.
+//
+// A request configured with none answers with the one this package shares,
+// which is not a client to change in place: copy it, the way
+// [PendingRequest.CreateClient] does.
 func (p *PendingRequest) BuildClient() *http.Client {
 	if p.factory != nil && p.factory.client != nil {
 		return p.factory.client
 	}
-	return http.DefaultClient
+	return defaultClient
 }
 
 // CreateClient is a client configured the way this request needs it,
@@ -542,11 +550,19 @@ func (p *PendingRequest) BuildClient() *http.Client {
 //
 // It takes the transport for the reason [PendingRequest.SetHandler] gives.
 // A nil transport keeps whatever the client already had.
+//
+// Whatever the transport turns out to be, it is wrapped in the factory's guard:
+// the scheme, the destination and the size of the answer are settled on every
+// hop, redirects included.
 func (p *PendingRequest) CreateClient(handler http.RoundTripper) *http.Client {
 	client := *p.BuildClient()
 	if handler != nil {
 		client.Transport = handler
 	}
+	if client.Transport == nil {
+		client.Transport = defaultTransport
+	}
+	client.Transport = &guardedTransport{next: client.Transport, guard: p.factory.guard()}
 	client.Timeout = p.timeout
 	if p.maxRedirects == 0 {
 		client.CheckRedirect = func(*http.Request, []*http.Request) error {
@@ -822,6 +838,14 @@ func (p *PendingRequest) attempt(cc *http.Client, req *http.Request) (*Response,
 	p.factory.event(events.ResponseReceived{Request: req, Response: httpResp})
 
 	resp := NewResponse(httpResp)
+
+	// A body that could not be read whole is not an answer. It is reported as
+	// the attempt's failure rather than left on the Response, where only a
+	// caller that decoded it would ever meet it -- and a body stopped at the
+	// size limit decodes as a shorter document rather than as an error.
+	if resp.readErr != nil {
+		return resp, httpResp, fmt.Errorf("http client: reading response body: %w", resp.readErr)
+	}
 
 	// Sink the body if configured.
 	if p.sink != nil {
