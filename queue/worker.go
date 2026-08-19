@@ -592,7 +592,11 @@ func (w *Worker) handleJobException(ctx context.Context, j *jobs.Job, cause erro
 			if failErr := j.Fail(ctx, cause); failErr != nil {
 				logger.Error("parking the job failed", "error", failErr)
 			}
-			logger.Error("job parked after repeated failures", "attempts", attempts, "error", cause)
+			// The line says what happened and the attempt count says how many
+			// deliveries it took. It used to say "after repeated failures",
+			// which is false for every job parked on its first one -- a handler
+			// that failed manually, and now a handler that panicked.
+			logger.Error("job parked", "attempts", attempts, "error", cause)
 			w.dispatch(events.JobFailed{ConnectionName: connectionName, Job: j, Exception: cause})
 		}
 	}
@@ -626,6 +630,13 @@ func (w *Worker) shouldFail(j *jobs.Job, attempts int, cause error) bool {
 	// delivery. Retrying it four more times is four more copies of the same
 	// error, an hour apart.
 	if errors.Is(cause, ErrManuallyFailed) {
+		return true
+	}
+	// A panic is believed on the first delivery for the same reason, without
+	// having been asked. It is a defect in the handler rather than a store that
+	// blinked, so it reproduces on every delivery: retrying it is running a
+	// deterministic failure MaxTries times waiting for a different answer.
+	if errors.Is(cause, ErrHandlerPanicked) {
 		return true
 	}
 	if until := j.RetryUntil(); !until.IsZero() {
@@ -901,18 +912,55 @@ func (w *Worker) dispatch(event any) {
 	}
 }
 
-// run wraps the handler in the worker's middleware, outermost first.
+// run wraps the handler in the worker's middleware, outermost first, and turns
+// a panic in either of them into the error the failure path already knows how
+// to settle.
 //
 // Built here rather than with pipeline.Chain because the chain is three lines
 // and the alternative is a generic instantiation whose type parameter is a
 // closure over the job -- longer to read than what it replaces.
-func (w *Worker) run(ctx context.Context, h Handler, j *jobs.Job) error {
+//
+// The recover is here because this is the goroutine the handler runs in, and a
+// panic does not cross a goroutine boundary: recovering anywhere else recovers
+// nothing. Without it a handler that panics takes the process down with the job
+// unconsumed, so the job comes back when its lease expires and takes the next
+// worker down too -- one payload stopping a queue forever, with nobody having
+// to send a second one.
+//
+// It is deliberately no wider than the handler and its middleware. A panic
+// raised by the worker's own bookkeeping is a defect here rather than in
+// somebody's job, and turning that one into a parked job would hide it.
+func (w *Worker) run(ctx context.Context, h Handler, j *jobs.Job) (err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			err = HandlerPanicked{}.ForJob(j, value, panicStack())
+		}
+	}()
+
 	next := func(ctx context.Context) error { return h.Handle(ctx, jobs.GrantFor(j), j) }
 	for i := len(w.opts.Middleware) - 1; i >= 0; i-- {
 		m, inner := w.opts.Middleware[i], next
 		next = func(ctx context.Context) error { return m.Handle(ctx, j, inner) }
 	}
 	return next(ctx)
+}
+
+// stackLimit is how much traceback a recovered panic carries.
+//
+// It is capped rather than taken whole because the traceback ends up in the
+// job's last_error column, which is TEXT -- 64 KB on MySQL, and a write past
+// that fails. A park that fails leaves the job reserved instead of parked, so
+// it comes back when its lease expires and panics again: the loop the recover
+// exists to cut, reopened by the size of the evidence for it.
+const stackLimit = 16 << 10
+
+// panicStack is the traceback of the goroutine calling it, up to stackLimit.
+//
+// runtime.Stack fills from the innermost frame outwards, so what the cap drops
+// is the oldest frames and what it keeps is where the panic happened.
+func panicStack() []byte {
+	buf := make([]byte, stackLimit)
+	return buf[:runtime.Stack(buf, false)]
 }
 
 // nowStamp is the value `aru queue:restart` writes: a Unix timestamp, as text,

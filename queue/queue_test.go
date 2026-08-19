@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -986,6 +987,75 @@ func TestAReleasedJobAnnouncesJobExceptionOccurredBeforeItIsReleased(t *testing.
 	}
 	if indexOfType(seen, "events.JobFailed") >= 0 {
 		t.Errorf("a released job announced JobFailed: %v", seen)
+	}
+}
+
+// TestAPanickingJobIsParkedAndTheWorkerKeepsDraining is the whole failure this
+// closes, in one test.
+//
+// A panic that is not recovered in the goroutine it was raised in takes the
+// process down, and the job that raised it was never consumed: it comes back
+// when its lease expires and takes the next worker down too. One payload stops
+// the queue forever, with nobody having to send a second one.
+//
+// This test dies with the binary if the recover is removed -- there is no
+// assertion that survives to report anything, which is the point. What it
+// asserts beyond that is the settling: parked on the first delivery rather than
+// released, the panic and its traceback in LastError, and the job behind it
+// drained.
+func TestAPanickingJobIsParkedAndTheWorkerKeepsDraining(t *testing.T) {
+	q := &fakeQueue{}
+	panicking, _ := jobs.New(grant(), "", "invoice.send", nil)
+	behind, _ := jobs.New(grant(), "", "report.monthly", nil)
+	_ = q.Push(context.Background(), grant(), panicking)
+	_ = q.Push(context.Background(), grant(), behind)
+
+	// Concurrency 1 so the two jobs are popped in order, and MaxTries 5 so a
+	// panic that counted as an ordinary failure would be released four times
+	// before it parked -- which is what makes "parked" here mean "on the first
+	// delivery".
+	w := queue.NewWorker(q, queue.WorkerOptions{Sleep: time.Millisecond, Concurrency: 1, MaxTries: 5})
+	drained := make(chan struct{})
+	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, *jobs.Job) error {
+		panic("the invoice has no address")
+	})
+	w.HandleFunc("report.monthly", func(context.Context, auth.Grant, *jobs.Job) error {
+		close(drained)
+		return nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { _ = mustDaemon(w, ctx) }()
+	defer cancel()
+
+	select {
+	case <-drained:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the job behind the panicking one never ran")
+	}
+
+	waitFor(t, func() bool {
+		_, _, failed := q.state()
+		return len(failed) == 1
+	}, "the panicking job was not parked")
+
+	_, released, failed := q.state()
+	if len(released) != 0 {
+		t.Errorf("the panicking job was retried %d times: a panic reproduces on every delivery", len(released))
+	}
+	if failed[0].job.UUID != panicking.UUID {
+		t.Fatalf("the parked job was %s, want the panicking one", failed[0].job.UUID)
+	}
+	if !errors.Is(failed[0].cause, queue.ErrHandlerPanicked) {
+		t.Errorf("the driver was told %v, and it has to be able to tell a panic from a returned error", failed[0].cause)
+	}
+	if last := failed[0].job.LastError; !strings.Contains(last, "the invoice has no address") {
+		t.Errorf("LastError does not name the panic: %q", last)
+	}
+	// The traceback is the only thing that says where, and a row read days
+	// later is all anybody has left.
+	if last := failed[0].job.LastError; !strings.Contains(last, "goroutine ") {
+		t.Errorf("LastError carries no stack trace: %q", last)
 	}
 }
 

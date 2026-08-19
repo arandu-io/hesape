@@ -92,3 +92,61 @@ var ErrManuallyFailed = errors.New("queue: the job failed and will not be retrie
 // The value that failed to encode is not carried on it: the wrapped json error
 // already names the type and the field.
 var ErrInvalidPayload = errors.New("queue: the job payload cannot be encoded")
+
+// HandlerPanicked is why a job was parked: its handler panicked instead of
+// returning an error.
+//
+// It carries the recovered value and the stack captured where the panic was
+// recovered, because the value alone says what went wrong and only the stack
+// says where. Both end up in the job's LastError, which is the row somebody
+// reads days later with no process left to attach a debugger to.
+type HandlerPanicked struct {
+	// Job is the job whose handler panicked.
+	Job *jobs.Job
+	// Value is what was passed to panic.
+	Value any
+	// Stack is the traceback of the goroutine that panicked.
+	Stack []byte
+}
+
+// ForJob returns the error for a job whose handler panicked, in the shape the
+// other two errors here are built in.
+func (HandlerPanicked) ForJob(j *jobs.Job, value any, stack []byte) *HandlerPanicked {
+	return &HandlerPanicked{Job: j, Value: value, Stack: stack}
+}
+
+// Error is the message, with the traceback after it.
+func (e *HandlerPanicked) Error() string {
+	name := "the job"
+	if e.Job != nil {
+		name = e.Job.ResolveName()
+	}
+	if len(e.Stack) == 0 {
+		return fmt.Sprintf("queue: %s panicked: %v", name, e.Value)
+	}
+	return fmt.Sprintf("queue: %s panicked: %v\n%s", name, e.Value, e.Stack)
+}
+
+// Unwrap returns the panicked value when it was an error, so errors.Is and
+// errors.As reach whatever the handler panicked with. A panic carrying anything
+// else has nothing underneath it to match.
+func (e *HandlerPanicked) Unwrap() error {
+	cause, isError := e.Value.(error)
+	if !isError {
+		return nil
+	}
+	return cause
+}
+
+// Is makes errors.Is(err, ErrHandlerPanicked) true for this error.
+func (e *HandlerPanicked) Is(target error) bool { return target == ErrHandlerPanicked }
+
+// ErrHandlerPanicked is what [HandlerPanicked] matches under errors.Is, for a
+// caller that wants to tell a panic from a returned error without reaching for
+// the type.
+//
+// A job that matches it was parked on its first delivery rather than retried.
+// A panic is a defect in the handler and it is deterministic: delivering it
+// again reproduces it, and the worker that takes it is the next one to lose the
+// process -- which is the loop this exists to cut.
+var ErrHandlerPanicked = errors.New("queue: the job's handler panicked")
