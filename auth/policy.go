@@ -258,9 +258,19 @@ func Tenant(g Grant) string { return g.subject.Tenant }
 // perfectly valid Grant of its own. No Policy was violated -- the path is built
 // after the Policy runs.
 //
-// UUIDs, slugs and numeric ids all pass. Anything that could be read as a
-// separator does not.
-var tenantName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+// One case only, and it is the same class. Measured: tenant "Acme" and tenant
+// "acme" are two identifiers here and one directory on a filesystem that folds
+// case, which is the default on macOS and on Windows -- so Exists for one of
+// them answered true about the other one's file. The separator arrives through
+// the key and the case arrives through the filesystem, and both end at two
+// tenants sharing a namespace nobody meant to share. Refused rather than folded
+// to lowercase, because a tenant that had to be rewritten to be safe is a
+// tenant whoever called did not mean.
+//
+// Lowercase UUIDs, slugs and numeric ids all pass. Anything that could be read
+// as a separator does not, and neither does anything a filesystem could read as
+// another spelling of the same name.
+var tenantName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 // ValidTenant reports whether a tenant identifier is safe to use as a namespace.
 //
@@ -289,7 +299,7 @@ func SystemGrant(a Action, tenant string) Grant {
 				"a system grant for %s was asked for with no tenant. Nothing can be scoped without one, and a query that is not scoped reads every customer. The tenant comes from the job, the task or the row that caused this work", a)}
 		}
 		return Grant{reason: fmt.Sprintf(
-			"a system grant for %s was asked for with the tenant %q, which cannot be one: a tenant is concatenated into a storage path, a cache key and a lock name, so it is limited to letters, digits, - and _, up to 64 characters", a, tenant)}
+			"a system grant for %s was asked for with the tenant %q, which cannot be one: a tenant is concatenated into a storage path, a cache key and a lock name, so it is limited to lowercase letters, digits, - and _, up to 64 characters", a, tenant)}
 	}
 	return Grant{
 		subject: Subject{ID: "system", Tenant: tenant, Roles: []string{"system"}},

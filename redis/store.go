@@ -388,8 +388,8 @@ func translate(err error) error {
 // escapeGlob makes a key prefix safe to hand to SCAN MATCH.
 //
 // MATCH takes a glob, and a prefix is not one: a tenant or a namespace is
-// limited to letters, digits, - and _ (auth.ValidTenant), but an application's
-// own key is not, and Flush is reachable with any prefix at all. Without this,
+// limited to lowercase letters, digits, - and _ (auth.ValidTenant), but an
+// application's own key is not, and Flush is reachable with any prefix at all. Without this,
 // flushing the namespace "report[a-z]" would delete the entries of every
 // namespace that pattern happens to name.
 func escapeGlob(s string) string {

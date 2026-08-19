@@ -201,6 +201,24 @@ func TestValidTenantRefusesEverySeparator(t *testing.T) {
 	}
 }
 
+// TestValidTenantRefusesUppercase pins the third instance of the class the test
+// above pins: two identifiers the application reads as different tenants and
+// the storage reads as one place. A filesystem that folds case -- the default
+// on macOS and on Windows -- puts "Acme" and "acme" in the same directory, so a
+// Grant for one reaches the other one's files.
+func TestValidTenantRefusesUppercase(t *testing.T) {
+	for _, ok := range []string{"acme", "acme-2", "a1b2c3", "9f1c8b52-0f4e-4d3a-9d5f-6c2b1a0e7d84"} {
+		if !auth.ValidTenant(ok) {
+			t.Errorf("ValidTenant(%q) = false, and a slug, a uuid and an alphanumeric id all have to pass", ok)
+		}
+	}
+	for _, bad := range []string{"Acme", "ACME"} {
+		if auth.ValidTenant(bad) {
+			t.Errorf("ValidTenant(%q) = true, and it names the same directory as its lowercase spelling on a filesystem that folds case", bad)
+		}
+	}
+}
+
 // TestTenantComesOffTheGrant pins the narrowest form of it: the tenant a
 // statement scopes by is the one the policy decided about, and there is no
 // other way to ask for it.

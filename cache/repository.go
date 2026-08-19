@@ -78,9 +78,9 @@ func New(s Store) *Repository {
 // It derives rather than mutates, so a repository handed to two modules cannot
 // have its namespace changed underneath one of them.
 //
-// The name is limited to what a tenant is limited to -- letters, digits, - and
-// _ -- for exactly the same reason: it is a segment of a key, and a segment
-// carrying a colon can name another namespace's entry. An invalid name is
+// The name is limited to what a tenant is limited to -- lowercase letters,
+// digits, - and _ -- for exactly the same reason: it is a segment of a key, and
+// a segment carrying a colon can name another namespace's entry. An invalid name is
 // reported by every call the repository makes, not by this constructor: this is
 // wiring, and wiring that panics takes the process down at boot for a typo.
 func (r *Repository) Namespace(name string) *Repository {
@@ -994,7 +994,7 @@ func (r *Repository) prefix(g auth.Grant) (string, error) {
 		return "", fmt.Errorf("%w: %q cannot be part of a key", ErrNoTenant, tenant)
 	}
 	if !auth.ValidTenant(r.namespace) {
-		return "", fmt.Errorf("cache: %q is not a namespace: it is a segment of a key, so it is limited to letters, digits, - and _, up to 64 characters", r.namespace)
+		return "", fmt.Errorf("cache: %q is not a namespace: it is a segment of a key, so it is limited to lowercase letters, digits, - and _, up to 64 characters", r.namespace)
 	}
 	return "cache:" + tenant + ":" + r.namespace + ":", nil
 }
