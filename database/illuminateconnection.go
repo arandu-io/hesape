@@ -149,13 +149,10 @@ func NewConnection(pdo *sql.DB, database, tablePrefix string, config map[string]
 
 // DefaultQueryGrammar is where UseDefaultQueryGrammar gets its grammar.
 //
-// The concrete grammars live in database/query/grammars, which imports query,
-// so a connection that constructed one directly would tie this package to all
-// of them. A connector sets this once, from its init, next to the driver it
-// registers.
-//
-// Nil leaves the grammar unset, which is what a connection built for a test
-// that never compiles SQL wants.
+// It holds the shipped grammar for the dialect, and a connector that speaks an
+// engine this framework does not ship replaces it from its own init, next to
+// the driver it registers. Assigning nil leaves the grammar unset, which a
+// connection built for a test that never compiles SQL can do.
 var DefaultQueryGrammar func(dialect Dialect) query.Grammar
 
 // UseDefaultQueryGrammar sets the connection's query grammar from
@@ -172,7 +169,11 @@ func (c *Connection) UseDefaultQueryGrammar() {
 func (c *Connection) UseDefaultSchemaGrammar() {}
 
 // DefaultPostProcessor is where UseDefaultPostProcessor gets its processor.
-var DefaultPostProcessor func() query.Processor
+//
+// It is keyed by dialect like DefaultQueryGrammar, because the processors
+// differ by dialect: reading back the identifier of an inserted row is a
+// returning clause on one engine and an out-of-band value on another.
+var DefaultPostProcessor func(dialect Dialect) query.Processor
 
 // UseDefaultPostProcessor sets the connection's post-processor from
 // DefaultPostProcessor, if one was registered.
@@ -180,7 +181,7 @@ func (c *Connection) UseDefaultPostProcessor() {
 	if DefaultPostProcessor == nil {
 		return
 	}
-	c.SetPostProcessor(DefaultPostProcessor())
+	c.SetPostProcessor(DefaultPostProcessor(c.dialect()))
 }
 
 // dialect reads the driver name off the configuration and returns the Dialect
