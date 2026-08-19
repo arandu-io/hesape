@@ -25,10 +25,35 @@ var ErrNotFound = errors.New("database: no such row")
 
 // Repository is the contract every module repository implements.
 //
-// Look at the signature: auth.Grant is mandatory and comes before the id.
-// Because a Grant cannot be constructed outside the auth package, there is no
-// path from a handler to the database that skips a Policy -- on the way out as
-// much as on the way in.
+// Look at the signature: auth.Grant is mandatory and comes before the id, on a
+// read exactly as on a write.
+//
+// # Three things hold this up, and they are not the same thing
+//
+// The compiler guarantees you hold a Grant. auth.Grant has only unexported
+// fields, so it cannot be written as a struct literal: a call to any method here
+// that omits it does not compile, and neither does one that tries to build a
+// valid one by hand.
+//
+// `aru doctor` guarantees it is the right Grant. auth.Authorize is the path
+// where a Policy answered, and it is not the only exported way to obtain one --
+// auth.SystemGrant issues a Grant for work that has no subject, and the queue's
+// GrantFor reissues one for a job. So a handler can hold a Grant no Policy was
+// ever asked about. What reports that is a lint, not the type system.
+//
+// Convention guarantees you came through here at all. DB.QueryContext,
+// DB.ExecContext and DB.QueryRowContext are exported, take no Grant, and reach
+// the same rows. They take none because they could not use one: they are handed
+// a finished string, and a parameter that looks like enforcement while filtering
+// nothing is worse than no parameter. So a module reads rows through a
+// Repository, and a module that reaches them through the connection is a module
+// that gets sent back in review.
+//
+// This comment used to say that a Grant cannot be constructed outside the auth
+// package, and therefore that no path from a handler to the database skips a
+// Policy. Neither half was true, and stating it wrong here costs more than
+// elsewhere: this is the interface every module implements, so it is the doc a
+// reader checks the claim against.
 type Repository[T any, ID comparable] interface {
 	Find(ctx context.Context, g auth.Grant, id ID) (T, error)
 	List(ctx context.Context, g auth.Grant, q Query) (Page[T], error)
