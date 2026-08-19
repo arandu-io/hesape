@@ -1,6 +1,8 @@
 package session_test
 
 import (
+	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -80,50 +82,93 @@ func TestFlashSurvivesExactlyOneRequest(t *testing.T) {
 	}
 }
 
-func TestFlashNeverCarriesAPasswordValueButAlwaysItsMessage(t *testing.T) {
-	f := testFlash()
+// flashPayload returns what the cookie actually carries to the browser.
+//
+// The signer base64s the payload, so a substring check on the cookie value
+// itself passes on a cookie that does hold the secret.
+func flashPayload(t *testing.T, c *http.Cookie) string {
+	t.Helper()
+	body, _, found := strings.Cut(c.Value, ".")
+	if !found {
+		t.Fatalf("the cookie is not a token: %q", c.Value)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(body)
+	if err != nil {
+		t.Fatalf("decoding the cookie payload: %v", err)
+	}
+	return string(raw)
+}
 
+func TestFlashNeverCarriesASecretValueButAlwaysItsMessage(t *testing.T) {
+	// One field per rule on the two lists, so dropping any single entry from
+	// either of them fails a row here instead of passing quietly. The rule is
+	// what the row is there to hold down.
+	secrets := []struct{ field, rule string }{
+		{"password", "the bare name"},
+		{"password_confirmation", "the bare name"},
+		{"token", "the bare name"},
+		{"otp", "the bare name"},
+		{"secret", "the bare name"},
+		{"Access_Token", "the comparison is case-insensitive"},
+		{"owner_password", "_password"},
+		{"new_password_confirmation", "_password_confirmation"},
+		{"_token", "_token, which is the CSRF field"},
+		{"access_token", "_token"},
+		{"api_token", "_token"},
+		{"refresh_token", "_token"},
+		{"csrf_token", "_token"},
+		{"login_otp", "_otp"},
+		{"client_secret", "_secret"},
+	}
+
+	// What has to come back. laptop is why every suffix is anchored on the
+	// underscore: an unanchored otp takes it.
+	kept := []string{"email", "name", "laptop"}
+
+	old := url.Values{}
+	for i, c := range secrets {
+		old.Set(c.field, fmt.Sprintf("leak%02d", i))
+	}
+	for i, field := range kept {
+		old.Set(field, fmt.Sprintf("typed%02d", i))
+	}
+
+	f := testFlash()
 	rec := httptest.NewRecorder()
-	f.Write(rec,
-		map[string][]string{"password": {"must be at least 12 characters"}},
-		url.Values{
-			"email":                 {"ada@example.test"},
-			"password":              {"hunter2"},
-			"password_confirmation": {"hunter2"},
-			"current_password":      {"letmein"},
-			// Not on the exact-name list, and the reason the suffix rule
-			// exists: an exact-name list lets this through while looking
-			// complete.
-			"owner_password": {"s3cret"},
-			"_token":         {"a-stale-csrf-token"},
-		})
+	f.Write(rec, map[string][]string{"password": {"must be at least 12 characters"}}, old)
 
 	cookie := written(rec)
 	if cookie == nil {
 		t.Fatal("Write set no cookie")
 	}
-	for _, secret := range []string{"hunter2", "letmein", "s3cret", "a-stale-csrf-token"} {
-		if strings.Contains(cookie.Value, secret) {
-			t.Errorf("%q is in the cookie value", secret)
-		}
-	}
+	payload := flashPayload(t, cookie)
 
-	errs, old, ok := f.Take(httptest.NewRecorder(), pageRead(cookie))
+	errs, back, ok := f.Take(httptest.NewRecorder(), pageRead(cookie))
 	if !ok {
 		t.Fatal("nothing came back")
 	}
+
+	for i, c := range secrets {
+		t.Run(c.field, func(t *testing.T) {
+			if value := fmt.Sprintf("leak%02d", i); strings.Contains(payload, value) {
+				t.Errorf("the cookie carries %s to the browser (%s)", c.field, c.rule)
+			}
+			if got := back.Get(c.field); got != "" {
+				t.Errorf("%s came back as %q, so the page redraws the box with it in (%s)", c.field, got, c.rule)
+			}
+		})
+	}
+
+	for i, field := range kept {
+		if got, want := back.Get(field), fmt.Sprintf("typed%02d", i); got != want {
+			t.Errorf("old %s = %q, want %q: what is not secret must come back", field, got, want)
+		}
+	}
+
 	// The message is the whole point: an empty password box that does not say
 	// why it was rejected is the failure being fixed, not the fix.
 	if got := errs["password"]; len(got) != 1 || got[0] != "must be at least 12 characters" {
 		t.Errorf("the password's message did not survive: %v", errs)
-	}
-	for _, field := range []string{"password", "password_confirmation", "current_password", "owner_password", "_token"} {
-		if got := old.Get(field); got != "" {
-			t.Errorf("old %s = %q, want empty", field, got)
-		}
-	}
-	if got := old.Get("email"); got != "ada@example.test" {
-		t.Errorf("old email = %q: what is not secret must come back", got)
 	}
 }
 

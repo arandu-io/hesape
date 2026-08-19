@@ -64,31 +64,55 @@ const (
 
 // neverFlashed are the field names whose VALUE never goes back in the browser.
 //
-// The exact names are here because an exact-name list is a list somebody has
-// to remember to extend: a form with new_password on it is not hypothetical,
-// and neither is the CSRF field, whose value is stale by the time the
-// redirect lands and must not be redisplayed into a form as if it were
-// current.
+// A name belongs on one of these two lists when putting its value back on the
+// page would redisplay a credential, a one-time code, or a request token that is
+// already stale by the time the redirect lands. The two ways of being wrong cost
+// different amounts, and that is what decides how wide the rules are: a name
+// caught by mistake comes back as an empty box somebody retypes, while a name
+// missed comes back as a secret written into the HTML and into the old input a
+// debug dump prints. So the rules are written to over-catch.
+//
+// This half holds the BARE names, and only those. An exact match is the one rule
+// that says "the whole field is called this", which is what a bare name needs:
+// matching the end of the name instead would take laptop for otp. A name with a
+// qualifier in front of it belongs in neverFlashedSuffix, which is why
+// current_password and new_password are not repeated here -- a name covered
+// twice is a name no test can prove either rule still catches.
+//
+// secret is here although it is an ordinary English word, and the cost is real:
+// a checkbox called is_secret comes back unticked. That is the cheap side of the
+// trade above, and it is written down so the next reader knows the name was
+// weighed rather than copied in.
 //
 // What is dropped is the value alone. The MESSAGES for these fields are flashed
 // like any other -- an empty password box that does not say why it was rejected
 // is the failure being fixed here, not the fix.
 var neverFlashed = map[string]bool{
-	"current_password":          true,
-	"password":                  true,
-	"password_confirmation":     true,
-	"new_password":              true,
-	"new_password_confirmation": true,
-	"token":                     true,
-	"_token":                    true,
+	"password":              true,
+	"password_confirmation": true,
+	"token":                 true,
+	"otp":                   true,
+	"secret":                true,
 }
 
-// neverFlashedSuffix catches the names an exact list does not.
+// neverFlashedSuffix catches the same secrets behind a qualifier, which is the
+// part of a field name whoever writes the form invents freely.
 //
-// A form field called owner_password or api_key_password_confirmation is the
-// same secret with a prefix on it, and a list of exact names lets it through
-// while looking complete.
-var neverFlashedSuffix = []string{"_password", "_password_confirmation"}
+// current_password, owner_password and admin_password are one secret with three
+// prefixes; access_token, api_token and refresh_token are one token with three.
+// An exact list that names two of any such group looks complete while letting
+// the third through, and it is a list somebody has to remember to extend. The
+// CSRF field is called _token, so this rule covers it as well as csrf_token.
+//
+// Every entry is anchored on the underscore, and that anchor is what keeps a
+// rule this wide off ordinary fields: otp without it matches laptop and desktop.
+var neverFlashedSuffix = []string{
+	"_password",
+	"_password_confirmation",
+	"_token",
+	"_otp",
+	"_secret",
+}
 
 // Flash carries the messages and the input of a rejected request across the one
 // redirect that follows it.
