@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/arandu-io/hesape/pipeline"
 )
@@ -91,6 +92,12 @@ type Route struct {
 	// all.
 	lockSeconds *int
 	waitSeconds *int
+	// deprecatedSince and sunset are what Deprecated set: the instant the
+	// route was deprecated, and the instant it stops answering. Both are zero
+	// on a route that is not deprecated, and Deprecated refuses to set one
+	// without the other.
+	deprecatedSince time.Time
+	sunset          time.Time
 }
 
 // triState returns a pointer to b, the shape scopedBindings stores so the

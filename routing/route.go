@@ -76,6 +76,11 @@ func (rt *Route) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
+	// A deprecated route says so on everything it answers. It goes before the
+	// middleware and the handler, both of which may write a status and freeze
+	// the header block.
+	rt.writeDeprecationHeaders(w)
+
 	// Install the route and a fresh override map in the context. The override
 	// map is what lets SubstituteBindings replace an id with a loaded record
 	// without replacing the request.
@@ -433,6 +438,9 @@ func (rt *Route) Run(w http.ResponseWriter, req *http.Request) {
 		http.NotFound(w, req)
 		return
 	}
+	// The deprecation headers are the route's, not the middleware's, so they
+	// go out on this path too.
+	rt.writeDeprecationHeaders(w)
 	req = rt.Bind(req)
 	rt.handler.ServeHTTP(w, req)
 }

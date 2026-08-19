@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // FormatRoutes renders the route table for the terminal, grouped by module and
@@ -16,7 +17,8 @@ import (
 //
 // The name column is what a developer copies into Routes.Route instead of
 // typing the path, so a route without one prints short rather than printing an
-// empty column that looks like a value.
+// empty column that looks like a value. A deprecated route prints its sunset
+// date last, which is the date a reader plans against.
 func FormatRoutes(routes []*Route) string {
 	sorted := append([]*Route{}, routes...)
 	sort.SliceStable(sorted, func(i, j int) bool {
@@ -36,14 +38,42 @@ func FormatRoutes(routes []*Route) string {
 			module = r.Module
 			fmt.Fprintf(&b, "\n%s\n", module)
 		}
-		if name := r.RouteName(); name != "" {
-			fmt.Fprintf(&b, "  %-7s %-34s %s\n", r.Method, r.Pattern, name)
-		} else {
-			fmt.Fprintf(&b, "  %-7s %s\n", r.Method, r.Pattern)
-		}
+		fmt.Fprintf(&b, "  %s\n", routeRow(r))
 	}
 	if b.Len() == 0 {
 		return "no routes registered\n"
 	}
 	return strings.TrimLeft(b.String(), "\n")
+}
+
+// routeColumnWidths are the widths of every column but the last one a row
+// prints.
+var routeColumnWidths = []int{7, 34, 24}
+
+// routeRow renders one route as the columns it has: the method and the pattern
+// always, the name when it has one, and the sunset date when it is deprecated.
+//
+// The last column of a row is never padded, so a row that stops early stops
+// clean instead of trailing spaces into a column that holds nothing.
+func routeRow(r *Route) string {
+	cells := []string{r.Method, r.Pattern}
+	if name := r.RouteName(); name != "" {
+		cells = append(cells, name)
+	}
+	if _, sunset := r.GetDeprecation(); !sunset.IsZero() {
+		cells = append(cells, "sunset "+sunset.UTC().Format(time.DateOnly))
+	}
+
+	var b strings.Builder
+	for i, cell := range cells {
+		if i > 0 {
+			b.WriteString(" ")
+		}
+		if i == len(cells)-1 || i >= len(routeColumnWidths) {
+			b.WriteString(cell)
+			continue
+		}
+		fmt.Fprintf(&b, "%-*s", routeColumnWidths[i], cell)
+	}
+	return b.String()
 }
