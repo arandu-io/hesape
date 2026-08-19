@@ -939,19 +939,29 @@ func (p *PendingRequest) findStub(req *http.Request) (*http.Response, error) {
 		return p.stubCallback(req)
 	}
 
-	// Check factory-level stubs.
-	if p.factory == nil || len(p.factory.stubs) == 0 {
-		return nil, nil
+	var stubs []StubCallback
+	if p.factory != nil {
+		stubs = p.factory.stubs
 	}
-
-	for _, stub := range p.factory.stubs {
+	for _, stub := range stubs {
 		resp, err := stub(req)
 		if resp != nil || err != nil {
-			return resp, nil
+			// The error is the stub's answer and not a fault in finding one: a
+			// stub exists to say what the call did, and refusing to connect is
+			// one of the things a call does.
+			return resp, err
 		}
 	}
 
-	// No stub matched. Check stray prevention.
+	// No stub matched, and that is where prevention belongs -- before the
+	// request can leave rather than after a stub declined it.
+	//
+	// It used to sit below a return that fired when no stub was registered at
+	// all, so a test that prevented stray requests and stubbed nothing let
+	// every request reach the network. That is the configuration a test reaches
+	// for first, and the one where failing open is worst: the check that exists
+	// to keep a suite off the network was skipped exactly when the suite had
+	// told it nothing else.
 	if !p.IsAllowedRequestUrl(req.URL.String()) {
 		return nil, NewStrayRequestError(req.URL.String())
 	}

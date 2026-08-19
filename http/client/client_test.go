@@ -1,6 +1,7 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -947,4 +948,26 @@ func TestRetryDoesNotRepeatWhenTheCallbackSaysNot(t *testing.T) {
 	assertEqual(t, resp.Status(), 429, "status")
 	assertEqual(t, int(attempts.Load()), 1, "attempts")
 	assertEqual(t, sawException, true, "the callback must be handed the exception")
+}
+
+// TestStrayPreventionHoldsWithNoStubsRegistered separates a refusal from a
+// request that left and failed.
+//
+// TestPreventStrayRequestsBlocksUnstubbedRequest above asserts that the error
+// names the URL, and a transport error names it too -- so it passed while the
+// request was reaching the network, because api.example.com refused it. The
+// discriminator is the error type, and this is the configuration where the
+// check used to be skipped: prevention on, nothing stubbed.
+func TestStrayPreventionHoldsWithNoStubsRegistered(t *testing.T) {
+	f := NewFactory(nil)
+	f.PreventStrayRequests(true)
+
+	pr := f.CreatePendingRequest()
+	_, err := pr.Get("https://api.example.com/forbidden", nil)
+	assertErr(t, err, "a request left with prevention on and no stub registered")
+
+	var stray *StrayRequestError
+	if !errors.As(err, &stray) {
+		t.Fatalf("the request was attempted rather than refused: %T: %v", err, err)
+	}
 }
