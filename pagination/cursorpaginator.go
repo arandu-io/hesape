@@ -184,11 +184,20 @@ func (p *CursorPaginator[T]) SetCursorName(name string) *CursorPaginator[T] {
 
 // URL returns the address that reads the given cursor. A nil cursor is the
 // first page, whose URL carries no cursor parameter at all.
+//
+// A cursor [CursorSigner.Encode] has no token for is the empty string, not the
+// first page: the two differ by one query parameter and by everything else. A
+// link back to the top of a list, offered as the next page, is a loop nobody
+// reading it can see.
 func (p *CursorPaginator[T]) URL(cursor *Cursor) string {
 	if cursor == nil {
 		return p.options.url(p.options.CursorName, "")
 	}
-	return p.options.url(p.options.CursorName, p.options.Signer.Encode(*cursor))
+	encoded := p.options.Signer.Encode(*cursor)
+	if encoded == "" {
+		return ""
+	}
+	return p.options.url(p.options.CursorName, encoded)
 }
 
 // PreviousPageURL returns the address of the page before this one, and the
@@ -312,13 +321,15 @@ func (p *CursorPaginator[T]) WithQueryString(query url.Values) *CursorPaginator[
 // ToArray is the payload a cursor page serialises to.
 //
 // next_cursor and prev_cursor are the encoded cursors, and are null when there
-// is none.
+// is none -- which includes a cursor [CursorSigner.Encode] has no token for.
+// Null and the empty string mean the same thing to whoever reads this, and only
+// one of them means it in every client.
 func (p *CursorPaginator[T]) ToArray() map[string]any {
 	encode := func(c *Cursor) any {
 		if c == nil {
 			return nil
 		}
-		return p.options.Signer.Encode(*c)
+		return nullable(p.options.Signer.Encode(*c))
 	}
 	return map[string]any{
 		"data":          p.items,

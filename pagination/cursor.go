@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/arandu-io/hesape/encryption"
 )
@@ -189,10 +190,27 @@ func NewCursorSigner(s *encryption.Signer, ttl time.Duration) *CursorSigner {
 // The token is not stable over time. The expiry is part of what is signed, so
 // the same page yields a different token as the clock moves; it is not a cache
 // key, and two of them are not worth comparing.
+//
+// A cursor holding a name or a value that is not valid UTF-8 has no token, and
+// the empty string is what says so. JSON strings are UTF-8, and encoding one
+// replaces every byte that is not with U+FFFD rather than failing -- so the
+// alternative to refusing is a token that decodes to a different boundary than
+// the one it was made from, and a query reading from it walks past rows and
+// repeats rows in silence. A page whose next link is missing is a bug someone
+// reports; a page of the wrong rows is not. A boundary value that is bytes
+// rather than text -- a binary key, a column read out as a blob -- is formatted
+// into text by the same key function that names it, the way a timestamp is.
 func (cs *CursorSigner) Encode(c Cursor) string {
+	fields := c.ToArray()
+	for name, value := range fields {
+		text, ok := value.(string)
+		if !utf8.ValidString(name) || (ok && !utf8.ValidString(text)) {
+			return ""
+		}
+	}
 	// A map of strings and a bool always marshal, so the error is unreachable
 	// rather than ignored.
-	payload, err := json.Marshal(c.ToArray())
+	payload, err := json.Marshal(fields)
 	if err != nil {
 		return ""
 	}

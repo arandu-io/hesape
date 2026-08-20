@@ -320,3 +320,49 @@ func TestResolveCurrentCursorWithoutASignerPanics(t *testing.T) {
 	}()
 	pagination.ResolveCurrentCursor(nil, mustParse(t, "/users?cursor=x"), "")
 }
+
+// TestACursorHoldingBytesThatAreNotTextHasNoToken: json.Marshal replaces every
+// byte that is not valid UTF-8 with U+FFFD rather than failing, so a cursor over
+// a boundary value carrying raw bytes used to encode, verify and decode back to
+// a different boundary than the one it was made from -- and a query reading from
+// that boundary walks past rows and repeats rows with no error anywhere. Found
+// by fuzzing the round trip.
+func TestACursorHoldingBytesThatAreNotTextHasNoToken(t *testing.T) {
+	for _, value := range []string{"\xff", "a\x80b", "\xed\xa0\x80"} {
+		if token := cursors.Encode(pagination.NewCursor(map[string]string{"id": value}, true)); token != "" {
+			back, err := cursors.FromEncoded(token)
+			if err != nil {
+				t.Fatalf("value %q encoded to a token that does not decode: %v", value, err)
+			}
+			got, _ := back.Parameter("id")
+			t.Errorf("value %q encoded and came back as %q", value, got)
+		}
+	}
+}
+
+// TestACursorHoldingTextEncodesEveryByteOfIt guards the other side of the check
+// above: a value is refused for not being UTF-8, never for being unusual.
+func TestACursorHoldingTextEncodesEveryByteOfIt(t *testing.T) {
+	for _, value := range []string{"", "\x00", "a\tb", "café", "日本語", "ÿ", `{"quoted": "="}`} {
+		back, err := cursors.FromEncoded(cursors.Encode(pagination.NewCursor(map[string]string{"id": value}, true)))
+		if err != nil {
+			t.Errorf("value %q: %v", value, err)
+			continue
+		}
+		if got, _ := back.Parameter("id"); got != value {
+			t.Errorf("value %q came back as %q", value, got)
+		}
+	}
+}
+
+// TestAPageWhoseCursorHasNoTokenHasNoLinkToIt: URL fell through to
+// Options.url, which drops an empty value and so answered with the address of
+// the first page -- offered as the next one, which is a loop.
+func TestAPageWhoseCursorHasNoTokenHasNoLinkToIt(t *testing.T) {
+	p := pagination.CursorPaginate(ascending(1, 3), 10, nil, postKey, signedOptions("/posts"))
+	unencodable := pagination.NewCursor(map[string]string{"id": "\xff"}, true)
+
+	if got := p.URL(&unencodable); got != "" {
+		t.Errorf("URL = %q, want the empty string rather than a link to the first page", got)
+	}
+}
