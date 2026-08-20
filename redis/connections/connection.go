@@ -2,6 +2,7 @@ package connections
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"strings"
 	"sync"
@@ -54,6 +55,33 @@ type Config struct {
 
 	// ReadTimeout bounds each command.
 	ReadTimeout time.Duration
+
+	// TLS encrypts the connection. Nil leaves it in the clear, which is the
+	// default because a client that demanded encryption would refuse every
+	// server that does not offer it. Turning it on is the operator's decision,
+	// and on any network the process does not own it is the only correct one:
+	// without it the password, the session ids and every cached value cross the
+	// wire as plain text, and so does the length the server declares for each
+	// reply.
+	//
+	// It is crypto/tls's own type rather than a handful of narrower fields,
+	// because the narrower fields do not reach the case that needs them. A
+	// managed endpoint presents a certificate a public authority signed, and for
+	// that a zero &tls.Config{} is the whole configuration -- an empty
+	// ServerName becomes the host half of the address being dialled, which is
+	// the name the certificate has to carry. A self-hosted server does neither:
+	// it presents a certificate signed by an authority of its own and, by
+	// default, demands one from the client in return. A private root and a
+	// client certificate are what tls.Config already says, and a second
+	// vocabulary for them here would say less of it.
+	//
+	// One configuration covers every entry in Addresses, for the same reason:
+	// leaving ServerName empty lets each node be verified under its own host.
+	// Naming one there names it for all of them.
+	//
+	// The value is used as given, not copied, so it must not be mutated after
+	// Connect returns.
+	TLS *tls.Config
 }
 
 // Connection is one open connection.
@@ -121,6 +149,7 @@ func Connect(cfg Config) *Connection {
 			DialTimeout:  cfg.DialTimeout,
 			ReadTimeout:  cfg.ReadTimeout,
 			WriteTimeout: cfg.ReadTimeout,
+			TLSConfig:    cfg.TLS,
 		}),
 		prefix: strings.TrimSuffix(cfg.Prefix, ":"),
 	}
