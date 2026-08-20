@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1185,5 +1186,106 @@ func TestTheCookieHandlerReadsWhatLaravelWrote(t *testing.T) {
 	}
 	if got != `a:1:{s:7:"subject";s:1:"1";}` {
 		t.Fatalf("got %q, want the payload the PHP wrote", got)
+	}
+}
+
+// TestFlashInputNeverStoresASecret is the assertion the redaction in
+// [session.Store.FlashInput] exists for.
+//
+// The flash cookie has dropped secrets since it was written. The session store
+// is the other half of the same path -- the one a redirect after a rejected
+// form actually takes -- and what it keeps goes wherever the handler writes: a
+// row, a cache entry, a file. So the check is on the bytes the handler was
+// given, and not only on what GetOldInput answers.
+func TestFlashInputNeverStoresASecret(t *testing.T) {
+	// One field per rule on the two lists, so dropping any single entry from
+	// either of them fails a row here instead of passing quietly.
+	secrets := []struct{ field, rule string }{
+		{"password", "the bare name"},
+		{"password_confirmation", "the bare name"},
+		{"token", "the bare name"},
+		{"otp", "the bare name"},
+		{"secret", "the bare name"},
+		{"Access_Token", "the comparison is case-insensitive"},
+		{"current_password", "_password"},
+		{"new_password", "_password"},
+		{"new_password_confirmation", "_password_confirmation"},
+		{"_token", "_token, which is the CSRF field"},
+		{"csrf_token", "_token"},
+		{"login_otp", "_otp"},
+		{"client_secret", "_secret"},
+	}
+
+	// What has to come back. laptop is why every suffix is anchored on the
+	// underscore: an unanchored otp takes it.
+	kept := []string{"email", "name", "laptop"}
+
+	input := map[string]any{}
+	for i, c := range secrets {
+		input[c.field] = fmt.Sprintf("leak%02d", i)
+	}
+	for i, field := range kept {
+		input[field] = fmt.Sprintf("typed%02d", i)
+	}
+	// A JSON body arrives nested and GetOldInput reads back by dot, so a value
+	// one level down is written and read exactly like one at the top.
+	input["user"] = map[string]any{"email": "nested@example.com", "password": "leak-nested"}
+
+	handler := session.NewArraySessionHandler(time.Hour)
+	ctx := context.Background()
+
+	// Request one: the form is rejected and flashes what was typed.
+	first := startedStore(t, handler)
+	id := first.GetID()
+	first.FlashInput(input)
+	if err := first.Save(ctx); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	stored, err := handler.Read(ctx, id)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	// Request two: the page the redirect landed on, refilling the boxes.
+	second := session.NewStore("arandu_session", handler, id)
+	if err := second.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	for i, c := range secrets {
+		t.Run(c.field, func(t *testing.T) {
+			if value := fmt.Sprintf("leak%02d", i); strings.Contains(stored, value) {
+				t.Errorf("the stored session carries %s (%s)", c.field, c.rule)
+			}
+			if got := second.GetOldInput(c.field); got != nil {
+				t.Errorf("%s came back as %v, so the page redraws the box with it in (%s)", c.field, got, c.rule)
+			}
+		})
+	}
+
+	if strings.Contains(stored, "leak-nested") {
+		t.Error("the stored session carries user.password: the rule stops at the top level")
+	}
+	if got := second.GetOldInput("user.password"); got != nil {
+		t.Errorf("user.password came back as %v", got)
+	}
+
+	for i, field := range kept {
+		if got, want := second.GetOldInput(field), fmt.Sprintf("typed%02d", i); got != want {
+			t.Errorf("old %s = %v, want %q: what is not secret must come back", field, got, want)
+		}
+	}
+	if got := second.GetOldInput("user.email"); got != "nested@example.com" {
+		t.Errorf("old user.email = %v: a nested field that is not secret must come back", got)
+	}
+
+	// The map handed in is the request's own input, which the handler goes on
+	// reading after the flash. Dropping the secrets must not empty it.
+	if got := input["password"]; got != "leak00" {
+		t.Errorf("FlashInput wrote through into the caller's map: password = %v", got)
+	}
+	if got, _ := input["user"].(map[string]any); got == nil || got["password"] != "leak-nested" {
+		t.Errorf("FlashInput wrote through into a nested map of the caller's: user = %v", input["user"])
 	}
 }

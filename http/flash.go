@@ -41,9 +41,12 @@ func (r *Request) FlashOnly(keys ...string) {
 	r.Session().FlashInput(r.Only(keys...))
 }
 
-// FlashExcept flashes the input except the given keys. The password and
-// password_confirmation fields are what this is for: they should never come
-// back pre-filled.
+// FlashExcept flashes the input except the given keys.
+//
+// The keys are the form's own reason to drop a field -- a long body already
+// saved elsewhere, a step the next page recomputes. A credential is not that
+// reason and does not need naming here: the session store drops the secret
+// fields whatever the caller passes.
 func (r *Request) FlashExcept(keys ...string) {
 	r.Session().FlashInput(r.Except(keys...))
 }

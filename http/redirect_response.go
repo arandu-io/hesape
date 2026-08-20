@@ -117,6 +117,10 @@ func (r *RedirectResponse) WithCookies(cookies []*stdhttp.Cookie) *RedirectRespo
 // If the two diverge, the form comes back blank, which is the bug the pair
 // exists to not have.
 //
+// Two things never reach the session: an uploaded file, which is not
+// something to put back in a text box, and a secret field, which the session
+// store drops whatever the caller passes.
+//
 // The variadic argument is the optional input to flash; with none, the
 // request's own input is used.
 func (r *RedirectResponse) WithInput(input ...map[string]any) *RedirectResponse {
@@ -179,8 +183,11 @@ func (r *RedirectResponse) OnlyInput(keys ...string) *RedirectResponse {
 	return r.WithInput(r.request.Only(keys...))
 }
 
-// ExceptInput flashes everything except the named keys. It is what keeps a
-// password out of the session.
+// ExceptInput flashes everything except the named keys.
+//
+// The keys are the form's own reason to drop a field. A password, a one-time
+// code or a request token does not need naming here: the session store drops
+// the secret fields whatever the caller passes.
 func (r *RedirectResponse) ExceptInput(keys ...string) *RedirectResponse {
 	if r.request == nil {
 		return r

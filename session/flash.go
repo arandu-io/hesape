@@ -282,6 +282,45 @@ func redactFlash(old url.Values) url.Values {
 	return kept
 }
 
+// redactInput returns the input with every secret's value removed, at any
+// depth.
+//
+// It answers for map[string]any what redactFlash answers for url.Values, and
+// both ask IsSecretField -- one list, two shapes. The shapes differ because the
+// two carriers do: a cookie is flat, and what a form hands the session is not.
+//
+// The depth is not caution. A JSON body arrives nested, Only builds a nested
+// map out of a dotted key, and GetOldInput reads back by dot -- so a value
+// under user.password is written and read exactly like one under password, and
+// a rule that only looked at the top level would hand it back.
+func redactInput(input map[string]any) map[string]any {
+	out := make(map[string]any, len(input))
+	for field, value := range input {
+		if IsSecretField(field) {
+			continue
+		}
+		out[field] = redactInputValue(value)
+	}
+	return out
+}
+
+// redactInputValue descends into the two shapes that hold further fields, and
+// returns everything else as it stands. A list is rebuilt rather than reused so
+// that redacting cannot write through into the caller's map.
+func redactInputValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return redactInput(typed)
+	case []any:
+		list := make([]any, len(typed))
+		for i, item := range typed {
+			list[i] = redactInputValue(item)
+		}
+		return list
+	}
+	return value
+}
+
 // IsSecretField reports whether a field's value never goes back in the browser:
 // the bare names matched whole, and the same secrets behind a qualifier matched
 // on the end of the name. The name is compared lowercased.

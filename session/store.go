@@ -532,7 +532,18 @@ func (s *Store) flashKeys(which string) []string {
 
 // FlashInput stores what was typed into a form, so the page it is sent back
 // to can fill the boxes in again. It is read with [Store.GetOldInput].
-func (s *Store) FlashInput(value map[string]any) { s.Flash(OldInputKey, value) }
+//
+// The secret fields are dropped first, at any depth, by the rule
+// [IsSecretField] holds. A password, a one-time code or a request token kept
+// here is a credential written wherever the session handler writes -- a row, a
+// cache entry, a file -- and put back into the form on the next page. The
+// message for such a field is not touched: a box that comes back empty without
+// saying why it was rejected is the failure being fixed, not the fix.
+//
+// The filter is here and not at the call sites because here it holds for every
+// caller, including the one nobody has written yet. A caller that must also
+// keep an uploaded file out strips it before calling.
+func (s *Store) FlashInput(value map[string]any) { s.Flash(OldInputKey, redactInput(value)) }
 
 // Remove forgets a key and returns what it held.
 func (s *Store) Remove(key string) any {

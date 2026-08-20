@@ -563,14 +563,19 @@ func TestOldReturnsDefaultWithoutSession(t *testing.T) {
 }
 
 func TestOldReadsWhatFlashWrote(t *testing.T) {
-	r := newRequest(t, "POST", "/login", strings.NewReader("email=a@b.com&password=secret"))
+	r := newRequest(t, "POST", "/login", strings.NewReader("email=a@b.com&name=Paulo&password=secret"))
 	r.SetSession(newSessionStore(t))
 	r.Flash()
 	if got := r.Old("email"); got != "a@b.com" {
 		t.Errorf("Old(\"email\") after Flash = %v, want a@b.com", got)
 	}
-	if got := r.Old("password"); got != "secret" {
-		t.Errorf("Old(\"password\") after Flash = %v, want secret", got)
+	if got := r.Old("name"); got != "Paulo" {
+		t.Errorf("Old(\"name\") after Flash = %v, want Paulo", got)
+	}
+	// Everything typed comes back except what is a credential. This line read
+	// the other way round and pinned the leak in place.
+	if got := r.Old("password"); got != nil {
+		t.Errorf("Old(\"password\") after Flash = %v, want nil", got)
 	}
 }
 
@@ -1124,5 +1129,50 @@ func TestIPsWithoutAProxyIsAListOfOne(t *testing.T) {
 	ips := r.IPs()
 	if len(ips) != 1 || ips[0] != "9.9.9.9" {
 		t.Fatalf("IPs = %v, want [9.9.9.9]", ips)
+	}
+}
+
+// TestWithInputNeverFlashesASecret walks the path an application takes: a
+// rejected sign-in redirects with WithInput, and the page it lands on refills
+// the boxes off the session.
+//
+// The filter that drops the secrets is in the session store, so what this
+// proves is that it holds for the caller a controller actually uses -- and it
+// keeps holding if WithInput grows another way in.
+func TestWithInputNeverFlashesASecret(t *testing.T) {
+	store := newSessionStore(t)
+	request := newRequest(t, "POST", "/login", strings.NewReader(
+		"email=paulo%40example.com&remember=1&password=hunter2"+
+			"&password_confirmation=hunter2&current_password=hunter1"+
+			"&_token=csrf&otp=123456&api_token=abcdef"))
+
+	NewRedirectResponse("/login").SetSession(store).SetRequest(request).WithInput()
+
+	for _, field := range []string{
+		"password", "password_confirmation", "current_password",
+		"_token", "otp", "api_token",
+	} {
+		if got := store.GetOldInput(field); got != nil {
+			t.Errorf("old %s = %v: the rejected form put a secret in the session", field, got)
+		}
+	}
+
+	// The other half. A form that comes back empty is the bug the old input
+	// exists to not have.
+	if got := store.GetOldInput("email"); got != "paulo@example.com" {
+		t.Errorf("old email = %v, want paulo@example.com", got)
+	}
+	if got := store.GetOldInput("remember"); got != "1" {
+		t.Errorf("old remember = %v, want 1", got)
+	}
+
+	// Read back the way a view reads it, which is the pair WithInput is one
+	// half of.
+	filled := NewRequest(httptest.NewRequest("GET", "/login", nil)).SetSession(store)
+	if got := filled.Old("password", nil); got != nil {
+		t.Errorf("Old(\"password\") = %v: the box comes back with the password in it", got)
+	}
+	if got := filled.Old("email", nil); got != "paulo@example.com" {
+		t.Errorf("Old(\"email\") = %v, want paulo@example.com", got)
 	}
 }
