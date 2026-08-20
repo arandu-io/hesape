@@ -259,6 +259,23 @@ func TestDontFlashNeverCarriesTheSecretsBack(t *testing.T) {
 	}
 }
 
+// TestDontFlashDropsTheSameSecretsTheFlashCookieDoes: this handler kept its own
+// list of three exact names, so a token, a one-time code and every qualified
+// name came back to the form the flash cookie had already refused to carry.
+func TestDontFlashDropsTheSameSecretsTheFlashCookieDoes(t *testing.T) {
+	h := exception.NewHandler(exception.Config{})
+
+	for _, field := range []string{"token", "otp", "secret", "_token", "csrf_token", "api_token", "current_password", "new_password_confirmation", "OTP"} {
+		kept := h.FlashableInput(map[string]any{"email": "a@b.c", field: "s3cr3t"})
+		if _, ok := kept[field]; ok {
+			t.Errorf("%s came back in the input", field)
+		}
+		if kept["email"] != "a@b.c" {
+			t.Errorf("%s took the email with it", field)
+		}
+	}
+}
+
 func TestThrottleUsingCapsHowOftenAnErrorIsReported(t *testing.T) {
 	h, ctx, lines := reporting(t, exception.Config{})
 

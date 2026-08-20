@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"reflect"
 	"time"
+
+	"github.com/arandu-io/hesape/session"
 )
 
 // ReportableHandler is one callback registered with Reportable.
@@ -215,26 +217,29 @@ func (h *Handler) DontFlash(attributes ...string) *Handler {
 	return h
 }
 
-// neverFlashed are the inputs that are never carried back, whatever DontFlash
-// was told.
-var neverFlashed = []string{"current_password", "password", "password_confirmation"}
-
-// FlashableInput is the input with the never-flashed attributes removed:
-// the input with everything DontFlash named removed.
+// FlashableInput is the input with every value that never goes back to a form
+// removed: the secrets session.IsSecretField names, and whatever DontFlash was
+// told on top of them.
+//
+// The secrets are not listed here. This package carried its own three exact
+// names -- current_password, password and password_confirmation -- which let
+// token, otp, secret and every qualified name through. One question is answered
+// in one place, and it is the place the flash cookie already asks.
 //
 // This package answers failures, it does not route, so the removal is a method
 // of its own and the redirect belongs to whoever builds it -- reading the
 // property from another package.
 func (h *Handler) FlashableInput(input map[string]any) map[string]any {
 	h.mu.Lock()
-	hidden := append(append([]string(nil), neverFlashed...), h.dontFlash...)
+	hidden := append([]string(nil), h.dontFlash...)
 	h.mu.Unlock()
 
 	out := make(map[string]any, len(input))
 	for key, value := range input {
-		if !containsString(hidden, key) {
-			out[key] = value
+		if session.IsSecretField(key) || containsString(hidden, key) {
+			continue
 		}
+		out[key] = value
 	}
 	return out
 }

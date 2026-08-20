@@ -271,7 +271,7 @@ func redactFlash(old url.Values) url.Values {
 	}
 	kept := make(url.Values, len(old))
 	for field, values := range old {
-		if isSecretField(field) {
+		if IsSecretField(field) {
 			continue
 		}
 		kept[field] = values
@@ -282,8 +282,16 @@ func redactFlash(old url.Values) url.Values {
 	return kept
 }
 
-// isSecretField reports a field whose value never goes back in the browser.
-func isSecretField(field string) bool {
+// IsSecretField reports whether a field's value never goes back in the browser:
+// the bare names matched whole, and the same secrets behind a qualifier matched
+// on the end of the name. The name is compared lowercased.
+//
+// It is exported because the flash cookie is not the only place a rejected
+// request's input is dropped, and the alternative is a second list answering
+// this same question. Two such lists diverge by being edited once: the one that
+// gained token, otp and the qualified names would have been the only one that
+// had them.
+func IsSecretField(field string) bool {
 	name := strings.ToLower(field)
 	if neverFlashed[name] {
 		return true
