@@ -3,6 +3,8 @@ package jobs_test
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -120,6 +122,47 @@ func TestADetachedJobSaysSo(t *testing.T) {
 		if err := settle(); !errors.Is(err, jobs.ErrDetached) {
 			t.Errorf("%s = %v, want ErrDetached", name, err)
 		}
+	}
+}
+
+// TestThePayloadCeilingIsTheBoundaryItAdvertises: exactly at the limit goes
+// through, one byte past it does not.
+//
+// The off-by-one is the whole risk of a size check. A limit that refuses the
+// last byte it advertises is a limit nobody can push right up against, and one
+// that takes a byte more is a payload the narrowest column shortens without
+// saying so.
+func TestThePayloadCeilingIsTheBoundaryItAdvertises(t *testing.T) {
+	atTheLimit := jobs.Job{Name: "invoice.send", Payload: make([]byte, jobs.MaxPayload)}
+	if err := jobs.Authorized(grant(), atTheLimit); err != nil {
+		t.Errorf("a payload of exactly %d bytes was refused: %v", jobs.MaxPayload, err)
+	}
+
+	oneOver := jobs.Job{Name: "invoice.send", Payload: make([]byte, jobs.MaxPayload+1)}
+	err := jobs.Authorized(grant(), oneOver)
+	if !errors.Is(err, jobs.ErrPayloadTooLarge) {
+		t.Fatalf("err = %v, want ErrPayloadTooLarge", err)
+	}
+	// Both numbers, because "too large" without them leaves the caller with no
+	// way to know how much of the payload to move to storage.
+	for _, want := range []string{strconv.Itoa(jobs.MaxPayload + 1), strconv.Itoa(jobs.MaxPayload)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %s: %q", want, err)
+		}
+	}
+}
+
+// TestAForgedJobIsForgedWhateverItsSize: the size check runs after the Grant,
+// so a job that is both is reported as the one that matters. The other order
+// would answer a privilege escalation with a note about bytes.
+func TestAForgedJobIsForgedWhateverItsSize(t *testing.T) {
+	both := jobs.Job{
+		Name:     "invoice.send",
+		TenantID: "22222222-2222-4222-8222-222222222222",
+		Payload:  make([]byte, jobs.MaxPayload+1),
+	}
+	if err := jobs.Authorized(grant(), both); !errors.Is(err, jobs.ErrForged) {
+		t.Errorf("err = %v, want ErrForged", err)
 	}
 }
 

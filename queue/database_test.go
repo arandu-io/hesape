@@ -91,6 +91,52 @@ func TestPushRefusesAForgedJobBeforeItReachesTheDatabase(t *testing.T) {
 	}
 }
 
+// TestPushRefusesAnOversizedPayloadBeforeItReachesTheDatabase is the half of
+// the ceiling that matters: the payload column is TEXT, and an engine that is
+// not in strict mode shortens what does not fit instead of refusing it -- which
+// is a handler decoding arguments the pusher never wrote. Refused at the push,
+// nothing is written and the caller still has the document.
+func TestPushRefusesAnOversizedPayloadBeforeItReachesTheDatabase(t *testing.T) {
+	q, state := databaseQueue(t)
+
+	oversized := jobs.Job{UUID: "j-1", Name: "invoice.send", Payload: make([]byte, jobs.MaxPayload+1)}
+	if err := q.Push(context.Background(), grant(), oversized); !errors.Is(err, jobs.ErrPayloadTooLarge) {
+		t.Fatalf("err = %v, want ErrPayloadTooLarge", err)
+	}
+	if len(state.statements()) != 0 {
+		t.Errorf("an oversized payload reached the database: %v", state.statements())
+	}
+}
+
+// TestPushWritesAPayloadThatIsExactlyAtTheCeiling is the other half. A ceiling
+// nothing can reach would be indistinguishable from one set a byte lower, and
+// the row has to carry every byte that was accepted.
+func TestPushWritesAPayloadThatIsExactlyAtTheCeiling(t *testing.T) {
+	q, state := databaseQueue(t)
+
+	payload := make([]byte, jobs.MaxPayload)
+	for i := range payload {
+		payload[i] = 'x'
+	}
+	j := jobs.Job{UUID: "j-1", Name: "invoice.send", Payload: payload}
+	if err := q.Push(context.Background(), grant(), j); err != nil {
+		t.Fatalf("a payload of exactly %d bytes was refused: %v", jobs.MaxPayload, err)
+	}
+
+	args := state.argsFor("INSERT INTO jobs")
+	if args == nil {
+		t.Fatalf("Push issued %v", state.statements())
+	}
+	stored, isText := args[5].Value.(string)
+	if !isText {
+		t.Fatalf("payload was bound as %T", args[5].Value)
+	}
+	if len(stored) != jobs.MaxPayload {
+		t.Errorf("the row carries %d bytes of payload, want the %d that were accepted",
+			len(stored), jobs.MaxPayload)
+	}
+}
+
 func TestLaterSchedulesTheJobForward(t *testing.T) {
 	q, state := databaseQueue(t)
 	j, _ := jobs.New(grant(), "", "invoice.send", nil)

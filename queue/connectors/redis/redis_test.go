@@ -272,6 +272,56 @@ func TestAJobWithoutATenantIsRefused(t *testing.T) {
 	}
 }
 
+// TestAnOversizedPayloadIsRefusedBeforeTheServerIsReached: RESP would hold half
+// a gigabyte in a string, so the ceiling this driver honours is not its own.
+// The queue is one queue across its connections, and a payload the table refuses
+// has to be refused here too, or moving an application from one connection to
+// the other is a migration instead of a line in its wiring.
+//
+// It runs against an address where nothing listens, on purpose and without the
+// skip the rest of this file takes. That is what makes it a proof: refused, the
+// error is the ceiling; not refused, the error is a connection that could not be
+// made, and nothing else in this file can tell those two apart.
+func TestAnOversizedPayloadIsRefusedBeforeTheServerIsReached(t *testing.T) {
+	q := redis.New(redis.Options{Address: "127.0.0.1:1"})
+	t.Cleanup(func() { _ = q.Close() })
+
+	oversized := jobs.Job{UUID: "j-1", Name: "invoice.send", Payload: make([]byte, jobs.MaxPayload+1)}
+	if err := q.Push(context.Background(), grant(), oversized); !errors.Is(err, jobs.ErrPayloadTooLarge) {
+		t.Fatalf("err = %v, want ErrPayloadTooLarge", err)
+	}
+}
+
+// TestAPayloadExactlyAtTheCeilingIsStored is the other half, and it needs a real
+// server: what it asserts is that the job came back whole, which is a claim
+// about what was written and read rather than about the refusal.
+func TestAPayloadExactlyAtTheCeilingIsStored(t *testing.T) {
+	q := queue(t)
+	ctx := context.Background()
+
+	payload := make([]byte, jobs.MaxPayload)
+	for i := range payload {
+		payload[i] = 'x'
+	}
+	j, err := jobs.New(grant(), "", "invoice.send", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.Payload = payload
+	if err := q.Push(ctx, grant(), j); err != nil {
+		t.Fatalf("a payload of exactly %d bytes was refused: %v", jobs.MaxPayload, err)
+	}
+
+	popped, err := q.Pop(ctx, "", 10, time.Minute)
+	if err != nil || len(popped) != 1 {
+		t.Fatalf("Pop: %v, %d", err, len(popped))
+	}
+	if len(popped[0].Payload) != jobs.MaxPayload {
+		t.Errorf("the job came back with %d bytes of payload, want the %d that were accepted",
+			len(popped[0].Payload), jobs.MaxPayload)
+	}
+}
+
 // TestNothingUsesLuaOrModules: the moment it does, every RESP server other than
 // the one it was written against stops being a drop-in replacement.
 func TestNothingUsesLuaOrModules(t *testing.T) {

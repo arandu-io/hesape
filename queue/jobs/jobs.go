@@ -15,6 +15,34 @@ import (
 // DefaultQueue is where a job goes when nobody said otherwise.
 const DefaultQueue = "default"
 
+// MaxPayload is the largest payload a job may carry, in bytes.
+//
+// One number for every driver rather than one per store. A queue whose drivers
+// accepted different jobs would be several queues: moving an application from
+// one connection to another would be a migration instead of a line in its
+// wiring, and the connection a developer runs locally would take work the
+// connection in production refuses.
+//
+// So it is the narrowest thing a payload has to fit through, and there are
+// three. The payload column is TEXT, and the narrowest engine with a connector
+// holds 65,535 bytes in one of those -- past that the insert is either refused
+// or, on a server that is not in strict mode, silently shortened, and a
+// shortened payload is a handler decoding arguments the pusher never wrote. The
+// dead letter table writes the payload a second time into a column of the same
+// kind, so a job that gave up has to still fit at the moment its record is the
+// only thing left of it. And a driver that runs the job in another process
+// hands it over on an argument list, where one entry is capped far below what
+// any store would take.
+//
+// Half the column rather than all of it, because the payload is counted in
+// bytes here and the column is counted in bytes there, and nothing should
+// depend on the two agreeing to the last one.
+//
+// It is also what a payload is for. 32 KiB of JSON is thousands of ids; more
+// than that is a document, and a document belongs in storage with the job
+// carrying its key.
+const MaxPayload = 32 << 10
+
 // Job is one unit of work.
 //
 // It is both the record a driver stores and the handle the worker settles. A
@@ -262,6 +290,15 @@ var ErrForged = errors.New("queue: the job does not match the Grant pushing it")
 // itself.
 var ErrDetached = errors.New("queue: this job was built to be pushed and never came off a queue, so there is nothing to release, delete or fail")
 
+// ErrPayloadTooLarge is returned when a job's payload is over [MaxPayload].
+//
+// A sentinel rather than a message, so a caller can tell a payload it can do
+// something about -- write the document to storage, push its key -- from a
+// store that is down. It is not the same refusal as arguments that cannot be
+// encoded at all: those are a defect in the value, and this is a value that is
+// merely too big to travel as one.
+var ErrPayloadTooLarge = errors.New("queue: the job's payload is larger than a queue stores")
+
 // New builds a job from a Grant and a payload.
 //
 // This is the only constructor, so every job in the system carries a tenant, an
@@ -308,7 +345,8 @@ func GrantFor(j *Job) auth.Grant {
 	return auth.SystemGrant(auth.Action(j.Action), j.TenantID)
 }
 
-// Authorized reports whether a job may be pushed under this Grant.
+// Authorized reports whether a job may be pushed under this Grant, and whether
+// it is small enough for a queue to store.
 //
 // Every driver calls it at the top of Push, and it closes an escalation the
 // contract otherwise allows. [New] builds a job from the Grant, so what it
@@ -326,6 +364,19 @@ func GrantFor(j *Job) auth.Grant {
 //
 // Checked here rather than in each driver, because a driver that forgets is a
 // driver that reopens it.
+//
+// [MaxPayload] is checked here as well, and last. It is not about the Grant,
+// and it is in this function for the reason the name is: this is the one call
+// every Push in every driver already makes and already returns the error of, so
+// a ceiling that lives here cannot be the ceiling one driver has and the next
+// one does not. Last, because a job that is both forged and oversized is a
+// forged job first, whatever its size.
+//
+// A job over the limit is refused before anything is written. The caller
+// holding the payload is the only one who can do something about it -- put the
+// document in storage and push its key -- and it is holding it now; refused at
+// the pop instead, the job has already been stored and the news arrives in a
+// worker's log with the code that built the payload long since returned.
 func Authorized(g auth.Grant, j Job) error {
 	tenant := auth.Tenant(g)
 	if tenant == "" {
@@ -341,6 +392,10 @@ func Authorized(g auth.Grant, j Job) error {
 	if j.Action != "" && j.Action != string(g.Action()) {
 		return fmt.Errorf("%w: the job says %q and the Grant authorizes %q. Build it with jobs.New, which takes both from the Grant",
 			ErrForged, j.Action, g.Action())
+	}
+	if len(j.Payload) > MaxPayload {
+		return fmt.Errorf("%w: %s carries %d bytes, and the limit is %d",
+			ErrPayloadTooLarge, j.Name, len(j.Payload), MaxPayload)
 	}
 	return nil
 }
