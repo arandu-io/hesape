@@ -10,6 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The api diff step below reads the tags and checks the last release
+          # out into a second worktree. The default checkout fetches one commit
+          # and no tags at all, which does not fail that step -- it makes it
+          # find no release, say so, and pass. A gate that reports nothing and
+          # exits 0 is not a gate.
+          fetch-depth: 0
+
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
@@ -31,6 +39,63 @@ jobs:
 
       - name: test
         run: go test -race ./...
+
+      # The exported surface, compared against the last release.
+      #
+      # It does not forbid breaking. While the version starts with v0. it is
+      # allowed to, and freezing a shape nobody has built on is worse. What it
+      # forbids is breaking QUIETLY: an incompatible change with no entry in
+      # UPGRADE.md fails here, in a diff somebody is reviewing, instead of in
+      # the build of one of the modules that require this one.
+      #
+      # The comparison is per MODULE and not package by package. A loop over
+      # the packages of the working tree cannot see a package that was deleted:
+      # it is not in `go list ./...` any more, so nothing ever asks about it.
+      # Two of the breaks already shipped here are exactly that -- socialite
+      # went in v0.3.0 and routing/events in v0.9.0 -- and both would pass a
+      # per-package gate without a word. Module mode reports a removed package
+      # as the removal it is.
+      #
+      # Only the root module, which is the one the other modules require. The
+      # connectors under database/, filesystem/, queue/ and redis/ carry their
+      # own go.mod and their own tags, and `git tag --list 'v*'` leaves those
+      # tags alone because they are prefixed with the path.
+      - name: api diff against the last release
+        run: |
+          set -euo pipefail
+          latest=$(git tag --list 'v*' --sort=-v:refname | head -1)
+          if [ -z "$latest" ]; then
+            echo "no release to compare against yet"
+            exit 0
+          fi
+          echo "comparing the working tree against $latest"
+
+          tmp=$(mktemp -d)
+          old="$tmp/last-release"
+          git worktree add -q --detach "$old" "$latest"
+          # Reading the old surface has to happen in the old tree: apidiff
+          # resolves an import path against the go.mod of the directory it runs
+          # in, and from anywhere else it would read the module cache -- which
+          # holds the published release, not the tag this checkout is at.
+          (cd "$old" && go run golang.org/x/exp/cmd/apidiff@latest -m -w "$tmp/api.out" github.com/arandu-io/hesape)
+          broke=$(go run golang.org/x/exp/cmd/apidiff@latest -m -incompatible "$tmp/api.out" github.com/arandu-io/hesape | grep '^- ' || true)
+          git worktree remove --force "$old"
+
+          if [ -z "$broke" ]; then
+            echo "no incompatible change since $latest"
+            exit 0
+          fi
+          echo "$broke" | sed 's/^/    /'
+
+          # Broken is allowed. Broken and unwritten is not.
+          if git diff --quiet "$latest" -- UPGRADE.md; then
+            echo
+            echo "there are incompatible changes and UPGRADE.md was not touched since $latest."
+            echo "Write what broke and what to write instead. That file is the whole mechanism."
+            exit 1
+          fi
+          echo
+          echo "incompatible changes, and UPGRADE.md was updated. Read the entry in review."
 
       # A known vulnerability blocks the merge rather than showing up in a
       # report nobody reads. Unpinned on purpose, unlike the linter: a new
