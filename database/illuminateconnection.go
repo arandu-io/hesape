@@ -47,10 +47,9 @@ type QueryLogEntry struct {
 //
 // # Where the Grant is, and why it is not on these methods
 //
-// No path to application rows skips a Policy, on the way out as much as on the
-// way in. That path is Repository, one file over, whose
-// every method takes an auth.Grant and filters by auth.Tenant(g) -- and it is
-// the only door application code goes through.
+// The door application code goes through is Repository, one file over, whose
+// every method takes an auth.Grant and filters by auth.Tenant(g) -- on the way
+// out as much as on the way in.
 //
 // A Connection is the plumbing underneath that door, and it takes no Grant on
 // purpose. It could not use one: a Grant is enforced by filtering a query by
@@ -60,8 +59,10 @@ type QueryLogEntry struct {
 // The other half of the argument is that `aru migrate` runs here, in a process
 // with no request and no subject, where a Grant cannot be constructed at all.
 //
-// So: reach rows through a Repository. Reaching them through a Connection is
-// how a module gets rejected in review.
+// So what keeps rows behind a Policy at this level is convention, not the type
+// system: Select, Statement, Insert and the rest are exported, take no Grant,
+// and reach the same rows a Repository does. Reach them through a Repository.
+// Reaching them through a Connection is how a module gets rejected in review.
 //
 // # A connection is a pool
 //

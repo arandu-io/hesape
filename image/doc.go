@@ -70,12 +70,17 @@
 // The output carries no EXIF, which is the point -- the turn is baked into the
 // pixels, so every viewer agrees.
 //
-// # Storing is authorized, like everything else
+// # Storing carries the Grant, and the read does too
 //
-// [Image.Store] and [ImageManager.FromStorage] take an auth.Grant and a
-// [Disk]. There is no path to customer data without a policy, including the
-// read, and the tenant the image lands under comes off the Grant and from
-// nowhere else.
+// [Image.Store], its neighbours and [ImageManager.FromStorage] take an
+// auth.Grant and a [Disk], and hand the Grant straight on. Nothing here builds a
+// key, so the tenant the image lands under is the one the disk reads off the
+// Grant, and no argument of these methods can name another.
+//
+// What the Grant proves is the tenant, not that a Policy ran: auth.Authorize is
+// one exported way to hold one and auth.SystemGrant is another. A caller holding
+// the second stores an image no Policy was asked about, and that is reported by
+// `aru doctor` rather than refused here.
 //
 // [Disk] and [DiskReader] are interfaces rather than imports of the
 // filesystem package, so that this package sits underneath it. A

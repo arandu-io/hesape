@@ -51,14 +51,20 @@
 //
 // All, Find, First, Get, Value, Pluck, Paginate, Chunk and Cursor take an
 // auth.Grant and filter by auth.Tenant(g), exactly as Insert, Update and Delete
-// do. There is no read path without authorization: a query builder reached
-// without a Grant compiles SQL and cannot run it.
+// do. A query builder reached without a Grant compiles SQL and cannot run it, on
+// a read as much as on a write.
+//
+// What the Grant settles here is the tenant, not the Policy. auth.Authorize is
+// the path a Policy answered on, and it is not the only exported way to obtain a
+// Grant: auth.SystemGrant issues one for work that has no subject. So these
+// methods can be reached holding a Grant nothing was ever asked about, and what
+// reports that is `aru doctor` -- a lint, not the type system.
 //
 // The tenant filter is on by default and comes off only by naming it: a model
 // whose table has no tenant column sets TenantColumn to the empty string, in
-// its constructor, where a reader sees it. A Grant carrying no tenant -- the
-// zero Grant, which is the only one constructible outside the auth package --
-// is refused with ErrNoTenant before any SQL is built.
+// its constructor, where a reader sees it. A Grant carrying no tenant is refused
+// with ErrNoTenant before any SQL is built, and ErrNoTenant names which Grants
+// those are.
 //
 // The tenant written on insert and matched on select is always auth.Tenant(g).
 // A value the caller put in the struct for that column is overwritten: the

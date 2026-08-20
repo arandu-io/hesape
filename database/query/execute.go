@@ -99,11 +99,16 @@ type PreparesBindings interface {
 // stop the statement from being issued. That is checked once per execution,
 // which means once per chunk of a chunked walk.
 //
-// The Grant is required to carry a tenant. auth.Tenant on the zero Grant, and on
-// a Grant that auth.SystemGrant refused, is the empty string -- and a Grant
-// carrying a tenant cannot be built outside the auth package, because its fields
-// are unexported. So an empty tenant here is a caller who never authorized
-// anything, and the statement does not reach the connection.
+// The Grant is required to carry a tenant. auth.Tenant is the empty string on
+// the zero Grant and on the Grant auth.SystemGrant returns when it refuses --
+// asked for no tenant, or for one that cannot be a tenant. So an empty tenant
+// here is a caller who never authorized anything or a caller whose system grant
+// was turned down, and neither statement reaches the connection.
+//
+// A tenant is all this establishes. auth.SystemGrant is exported and issues a
+// Grant carrying one for work no Policy answered about, so whether what arrives
+// here passed a Policy is settled by `aru doctor` and by the caller going
+// through a repository -- not by this check.
 //
 // The tenant clause is added to a COPY. The query the caller built is not
 // changed, for a reason worth the allocation: running the same builder twice

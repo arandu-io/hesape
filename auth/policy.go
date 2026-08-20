@@ -211,9 +211,9 @@ func Allows[T any](ctx context.Context, p Policy[T], s Subject, a Action, resour
 
 // Check is the guard every repository operation must call.
 //
-// It fails on the zero value -- the only Grant a caller outside this package
-// can build -- and when the grant was issued for a different action, which
-// catches copy-paste between repository methods.
+// It fails on every Grant that was never issued -- the zero value, and the one
+// SystemGrant returns when it refuses -- and when the grant was issued for a
+// different action, which catches copy-paste between repository methods.
 func (g Grant) Check(expected Action) error {
 	if !g.valid {
 		// A refused SystemGrant says why it was refused. It used to fall through

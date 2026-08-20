@@ -25,9 +25,16 @@ var ErrMultipleRecordsFound = errors.New("eloquent: multiple records found")
 // ErrNoTenant is what every executing method returns when the Grant carries no
 // tenant.
 //
-// The zero Grant is the only one constructible outside the auth package,
-// auth.Tenant reads the empty string off it, and a query with no tenant in its
-// where clause reads every customer of the system. So it does not run.
+// auth.Tenant reads the empty string off three different Grants: the zero one,
+// whose caller never authorized anything; the one auth.SystemGrant returns when
+// it is asked for no tenant; and the one it returns when the tenant it was asked
+// for cannot be one. They are three different mistakes, and this error does not
+// tell them apart -- auth.Grant.Check does, because a refused system grant
+// carries the reason it was refused.
+//
+// What they share is the consequence, which is why one error covers all three: a
+// query with no tenant in its where clause reads every customer of the system.
+// So it does not run.
 var ErrNoTenant = errors.New("eloquent: the grant carries no tenant, and a query without one reads every tenant (call auth.Authorize, or auth.SystemGrant with the tenant this work belongs to)")
 
 // ErrNoKey is what Delete returns when the model has no primary key defined.
