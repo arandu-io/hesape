@@ -29,7 +29,7 @@ func consoleWith(t *testing.T, fill func(*log.Collector)) (*log.Console, string)
 		At:        time.Now(),
 		Collector: col,
 	})
-	return log.NewConsole(recorder, "vscode"), "abc123"
+	return log.NewConsole(recorder, "vscode", nil), "abc123"
 }
 
 func get(t *testing.T, c *log.Console, path string) *httptest.ResponseRecorder {
@@ -60,11 +60,58 @@ func TestTheListShowsTheRequest(t *testing.T) {
 // TestAnEmptyConsoleSaysWhatToDo: "no data" with nothing else is the state a
 // person hits first, and it should not read like a broken page.
 func TestAnEmptyConsoleSaysWhatToDo(t *testing.T) {
-	console := log.NewConsole(log.NewRecorder(10), "vscode")
+	console := log.NewConsole(log.NewRecorder(10), "vscode", nil)
 
 	body := get(t, console, log.ConsolePath).Body.String()
 	if !strings.Contains(body, "Nothing recorded yet") {
 		t.Errorf("the empty console does not explain itself:\n%s", body)
+	}
+}
+
+// TestTheListDrawsTheGauges: the numbers a process keeps are only worth keeping
+// if somebody can look at them, and this page is where somebody looks.
+func TestTheListDrawsTheGauges(t *testing.T) {
+	gauges := log.NewGauges()
+	gauges.Set(log.GaugeName{Metric: "connections", Tenant: "acme"}, 12)
+	gauges.Set(log.GaugeName{Metric: "channels"}, 3)
+
+	console := log.NewConsole(log.NewRecorder(10), "vscode", gauges)
+
+	body := get(t, console, log.ConsolePath).Body.String()
+	for _, want := range []string{"Gauges", "connections", "acme", "12", "channels", "3"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the gauge section does not show %q:\n%s", want, body)
+		}
+	}
+	// An empty tenant is the process as a whole, and a blank cell reads as a
+	// value that failed to arrive rather than as the answer.
+	if !strings.Contains(body, "whole process") {
+		t.Errorf("a gauge with no tenant renders as a blank cell:\n%s", body)
+	}
+}
+
+// TestAnEmptyRegistryDrawsNoGaugeSection: a heading over an empty table on a
+// diagnostic page is noise, and noise on this page costs more than elsewhere.
+func TestAnEmptyRegistryDrawsNoGaugeSection(t *testing.T) {
+	console := log.NewConsole(log.NewRecorder(10), "vscode", log.NewGauges())
+
+	if body := get(t, console, log.ConsolePath).Body.String(); strings.Contains(body, "Gauges") {
+		t.Errorf("a registry holding nothing still drew a section:\n%s", body)
+	}
+}
+
+// TestNoGaugeRegistryIsNotAFailure covers the nil registry, which is what a
+// process that measures nothing hands over. The page still answers, and it
+// answers without the section.
+func TestNoGaugeRegistryIsNotAFailure(t *testing.T) {
+	console := log.NewConsole(log.NewRecorder(10), "vscode", nil)
+
+	rec := get(t, console, log.ConsolePath)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if body := rec.Body.String(); strings.Contains(body, "Gauges") {
+		t.Errorf("a console with no registry drew a gauge section:\n%s", body)
 	}
 }
 
@@ -195,7 +242,7 @@ func TestTheConsolePageDoesNotRenderAnEmptyHref(t *testing.T) {
 		Collector: col,
 	})
 
-	body := get(t, log.NewConsole(recorder, ""), log.ConsolePath+"/no-editor").Body.String()
+	body := get(t, log.NewConsole(recorder, "", nil), log.ConsolePath+"/no-editor").Body.String()
 	if strings.Contains(body, `href=""`) {
 		t.Errorf("the page carries an anchor with no href:\n%s", body)
 	}
@@ -354,7 +401,7 @@ func TestTheConsoleEscapesWhatItRenders(t *testing.T) {
 		At:        time.Now(),
 		Collector: col,
 	})
-	console := log.NewConsole(recorder, "vscode")
+	console := log.NewConsole(recorder, "vscode", nil)
 
 	for _, path := range []string{log.ConsolePath, log.ConsolePath + "/xss"} {
 		body := get(t, console, path).Body.String()

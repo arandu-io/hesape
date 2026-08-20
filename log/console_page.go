@@ -92,6 +92,20 @@ var consoleList = template.Must(template.New("list").Parse(`<!doctype html>
   {{end}}
 </table>
 {{end}}
+
+{{if .Gauges}}
+<h2>Gauges</h2>
+<table>
+  <tr><th>metric</th><th>tenant</th><th class="num">value</th></tr>
+  {{range .Gauges}}
+  <tr>
+    <td>{{.Metric}}</td>
+    <td>{{if .Tenant}}{{.Tenant}}{{else}}<span class="muted">whole process</span>{{end}}</td>
+    <td class="num">{{.Value}}</td>
+  </tr>
+  {{end}}
+</table>
+{{end}}
 </body></html>`))
 
 var consoleDetail = template.Must(template.New("detail").Parse(`<!doctype html>

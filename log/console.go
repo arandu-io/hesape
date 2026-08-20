@@ -32,6 +32,9 @@ const TracingHeader = "X-Arandu-Trace"
 // build failed.
 type Console struct {
 	recorder *Recorder
+	// gauges is the process-wide numbers drawn under the request list. Nil is
+	// allowed and means the page has no gauge section at all.
+	gauges *Gauges
 	// editor is the IDE the file links open, from the log configuration.
 	editor string
 	// slowQuery is the threshold above which a query gets a badge.
@@ -40,10 +43,19 @@ type Console struct {
 	nPlusOne int
 }
 
-// NewConsole returns the console over a recorder.
-func NewConsole(r *Recorder, editor string) *Console {
+// NewConsole returns the console over a recorder, drawing the numbers held in
+// gauges under the request list.
+//
+// One constructor rather than a constructor and a setter, so a console is
+// finished when it returns and there is no half-built one to hand to a router.
+//
+// gauges may be nil, which is what a process that measures nothing passes. The
+// section is then absent rather than present and empty, because an empty table
+// on a diagnostic page reads as a number that failed to arrive.
+func NewConsole(r *Recorder, editor string, gauges *Gauges) *Console {
 	return &Console{
 		recorder:  r,
+		gauges:    gauges,
 		editor:    editor,
 		slowQuery: 100 * time.Millisecond,
 		nPlusOne:  5,
@@ -107,7 +119,31 @@ func (c *Console) listData() map[string]any {
 			"Dumps":    len(e.Collector.Dumps()),
 		})
 	}
-	return map[string]any{"Rows": rows, "Empty": len(rows) == 0}
+	return map[string]any{"Rows": rows, "Empty": len(rows) == 0, "Gauges": c.gaugeRows()}
+}
+
+// gaugeRows is the current value of every name the registry holds, in the order
+// the registry gives them.
+//
+// The value goes out as the integer that was written. The page does not group
+// the digits, because a thousands separator is a local decision and a page that
+// takes it is wrong in half the places it renders.
+func (c *Console) gaugeRows() []map[string]any {
+	if c.gauges == nil {
+		return nil
+	}
+
+	names := c.gauges.Names()
+	rows := make([]map[string]any, 0, len(names))
+	for _, name := range names {
+		value, _ := c.gauges.Read(name)
+		rows = append(rows, map[string]any{
+			"Metric": name.Metric,
+			"Tenant": name.Tenant,
+			"Value":  value,
+		})
+	}
+	return rows
 }
 
 func (c *Console) detailData(e Recorded) map[string]any {
