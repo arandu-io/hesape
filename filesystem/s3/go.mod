@@ -11,4 +11,4 @@ go 1.26
 // AWS SDK that brings a hundred modules, its own credential chain, its own retry
 // policy and its own context rules -- and the algorithm has not changed since
 // 2012, while the SDK's surface changes every quarter.
-require github.com/arandu-io/hesape v0.11.0
+require github.com/arandu-io/hesape v0.12.0
