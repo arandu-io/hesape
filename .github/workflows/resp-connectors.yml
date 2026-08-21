@@ -78,11 +78,17 @@ jobs:
           out=$(gofmt -l .)
           test -z "$out" || { echo "$out"; exit 1; }
 
+      # GOWORK=off on purpose, and it is the guard that was missing. These
+      # submodules carried a `replace` pointing at the checkout, so the version
+      # their go.mod declared was never the one anything built against -- not
+      # here, and not on a developer's machine. Seven releases of drift went by
+      # under that. The replace is gone; this keeps a go.work from putting it
+      # back, and makes the job build what a consumer downloads.
       - name: vet
-        run: go vet ./...
+        run: GOWORK=off go vet ./...
 
       - name: test
-        run: go test -race ./...
+        run: GOWORK=off go test -race ./...
 
       # A suite that skipped is a suite that printed ok, and this repository has
       # been burned by exactly that: the queue connector ran ten tests against
