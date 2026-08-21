@@ -19,10 +19,11 @@ const defaultSleepBetweenBlockedAttempts = 250 * time.Millisecond
 // the outbox relay, which would otherwise publish every event N times, and for
 // a console command that must not run twice.
 //
-// This is the only kind of lock in the collection. There was a second interface
-// named Locker, declared once in the kernel and once in events, and a third
-// implementation in the kv adapter; they are gone, and this is what took their
-// place.
+// This is the only kind of lock in the collection: one issuer, one handle, one
+// key per name. Nothing here declares an interface for it, and that is not an
+// omission -- Go satisfies an interface by shape, so a caller that wants the
+// lock behind one declares it where it is used, and a declaration here would be
+// a second name for the same thing with nothing keeping the two in step.
 //
 // It is not a consensus lock. It is correct while the store is up and one node
 // answers, and it fails the way every such lock fails: a partition longer than

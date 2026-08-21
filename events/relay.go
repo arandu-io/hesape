@@ -47,10 +47,11 @@ type RelayOptions struct {
 	// a single replica, and with more than one it means each of them publishes
 	// every event.
 	//
-	// It is cache.Locks and not an interface of this package's own. There used
-	// to be a Locker interface declared here, a second one in the kernel and a
-	// third implementation in the kv adapter; one lock in the collection is
-	// what replaced all three, and it is the same field the scheduler takes.
+	// It is cache.Locks and not an interface of this package's own, and it is
+	// the same field the scheduler takes. An interface here would be a second
+	// name for the concrete type the field already has, with nothing keeping the
+	// two in step; a caller that needs the lock behind one declares it where it
+	// uses it, because Go satisfies an interface by shape.
 	//
 	// What a missing lock costs is duplicate delivery, which every consumer
 	// here has to tolerate anyway, because delivery is at-least-once by design.
