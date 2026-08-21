@@ -6,7 +6,7 @@ go 1.26
 // reverse, which is the case that mattered: the skeleton used to carry pgx into
 // every SQLite-only project, vulnerability surface included.
 require (
-	github.com/arandu-io/hesape v0.4.0
+	github.com/arandu-io/hesape v0.11.0
 	modernc.org/sqlite v1.55.0
 )
 
@@ -21,5 +21,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-replace github.com/arandu-io/hesape => ../../..
