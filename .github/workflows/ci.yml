@@ -9,7 +9,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The api diff step below reads the tags and checks the last release
           # out into a second worktree. The default checkout fetches one commit
@@ -18,7 +18,7 @@ jobs:
           # exits 0 is not a gate.
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.26'
 
