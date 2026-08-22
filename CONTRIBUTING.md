@@ -77,7 +77,7 @@ Which package the test declares is a real choice, and it answers one question:
 Prefer the first. Take the second only when you use it -- `plans/testpackages.go`
 in the arandu-io working tree checks exactly that, by intersecting the
 identifiers a test names with what its package declares unexported, and the
-checklist runs it across every repository.
+checklist runs it across every Go repository in the project.
 
 A `package main` has no external form: it cannot be imported, so its tests are
 internal and that is the end of it.
