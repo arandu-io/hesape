@@ -49,8 +49,11 @@ real MySQL and a real RESP server through `ARANDU_TEST_POSTGRES_DSN`,
 test` has no exit code for "everything skipped", and a suite that skipped is a
 suite that printed ok.
 
-CI runs all of that, plus a check that no new dependency entered the root module:
-it depends on the standard library and `golang.org/x/crypto`, and nothing else.
+CI runs all of that, and a handful of gates besides. They live in
+`.github/workflows/`, and that is deliberately the only place they are listed --
+a copy here would be right until the day somebody adds one. The gate to know
+before you write the change is the one on dependencies: the root module depends
+on the standard library and `golang.org/x/crypto`, and nothing else.
 The six driver modules exist for that reason -- Go has no optional dependency, so
 a project that wanted a directory on disk must not carry an S3 client, and a
 project on SQLite must not carry pgx. A pull request that adds a require line to
