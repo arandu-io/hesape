@@ -130,7 +130,7 @@ func TestAuthenticateRefusesARequestWithNoSession(t *testing.T) {
 		t.Fatalf("status = %d, want 401", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "Unauthenticated.") {
-		t.Fatalf("body = %q, want Illuminate's message", rec.Body.String())
+		t.Fatalf("body = %q, want the unauthenticated message", rec.Body.String())
 	}
 }
 
@@ -274,7 +274,7 @@ func TestAuthenticateWithBasicAuthMatchesOnEmailByDefault(t *testing.T) {
 		t.Fatal("the handler did not run, though the guard accepted the credentials")
 	}
 	if g.basicField != "email" {
-		t.Fatalf("field = %q, want email -- Illuminate's `$field ?: 'email'`", g.basicField)
+		t.Fatalf("field = %q, want email -- the default when the guard names no field", g.basicField)
 	}
 }
 
@@ -422,7 +422,7 @@ func TestEnsureEmailIsVerifiedAnswers403ToAClientThatAskedForJSON(t *testing.T) 
 		t.Fatalf("status = %d, want 403", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "not verified") {
-		t.Fatalf("body = %q, want Illuminate's sentence", rec.Body.String())
+		t.Fatalf("body = %q, want the unverified-email sentence", rec.Body.String())
 	}
 }
 
@@ -593,7 +593,7 @@ func TestRequirePasswordAnswers423ToAClientThatAskedForJSON(t *testing.T) {
 		t.Fatalf("status = %d, want 423 -- the credentials are fine, the resource is closed", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "Password confirmation required.") {
-		t.Fatalf("body = %q, want Illuminate's message", rec.Body.String())
+		t.Fatalf("body = %q, want the password-confirmation message", rec.Body.String())
 	}
 }
 

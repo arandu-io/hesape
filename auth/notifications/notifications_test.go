@@ -71,9 +71,9 @@ func TestResetPasswordCarriesTheLinkAndTheExpiry(t *testing.T) {
 	}
 }
 
-// TestResetPasswordDefaultsToTheLaravelWindow pins that a notification built
+// TestResetPasswordDefaultsToTheSixtyMinuteWindow pins that a notification built
 // without an expiry says sixty minutes.
-func TestResetPasswordDefaultsToTheLaravelWindow(t *testing.T) {
+func TestResetPasswordDefaultsToTheSixtyMinuteWindow(t *testing.T) {
 	restore(t)
 	authnotifications.ResetPassword{}.CreateUrlUsing(func(notifications.Notifiable, string) string {
 		return "https://app.example.com/reset"
@@ -98,7 +98,7 @@ func TestTheBuiltInResetURLIsARelativePathAndFailsValidation(t *testing.T) {
 		ToMail(recipient{id: "7", address: "ada@example.com"})
 
 	if !strings.HasPrefix(mail.ActionURL, "/reset-password/tok-114") {
-		t.Fatalf("url = %q, want the path of Laravel's password.reset route", mail.ActionURL)
+		t.Fatalf("url = %q, want the built-in reset path", mail.ActionURL)
 	}
 	if !strings.Contains(mail.ActionURL, "email=ada%40example.com") {
 		t.Fatalf("url = %q, want the address on the query string, escaped", mail.ActionURL)
@@ -145,10 +145,10 @@ func TestVerifyEmailCarriesTheConfirmationLink(t *testing.T) {
 	}
 }
 
-// TestTheBuiltInVerificationURLIsIlluminatesShape pins the id-and-hash path the
+// TestTheBuiltInVerificationURLIsTheIDAndHashShape pins the id-and-hash path the
 // built-in URL takes. It is unsigned, and the package comment says why that
 // must not reach production.
-func TestTheBuiltInVerificationURLIsIlluminatesShape(t *testing.T) {
+func TestTheBuiltInVerificationURLIsTheIDAndHashShape(t *testing.T) {
 	restore(t)
 
 	mail := authnotifications.NewVerifyEmail().ToMail(recipient{id: "7", address: "ada@example.com"})
@@ -156,7 +156,7 @@ func TestTheBuiltInVerificationURLIsIlluminatesShape(t *testing.T) {
 	// sha1("ada@example.com").
 	const hash = "b6b8fb1a4bfa8d5cb4a2c34f3a1a7f9bf5b0f6a9"
 	if !strings.HasPrefix(mail.ActionURL, "/verify-email/7/") {
-		t.Fatalf("url = %q, want the path of Laravel's verification.verify route", mail.ActionURL)
+		t.Fatalf("url = %q, want the built-in verification path", mail.ActionURL)
 	}
 	if got := strings.TrimPrefix(mail.ActionURL, "/verify-email/7/"); len(got) != len(hash) {
 		t.Fatalf("the hash is %q, want a sha1 of the address", got)

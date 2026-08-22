@@ -227,10 +227,10 @@ func TestUniqueAndExistsFailClosedWithoutAGrantAndAVerifier(t *testing.T) {
 	}
 }
 
-// TestEveryRuleLaravelHasIsShipped: a name that is not here reads as a gap and
+// TestEveryDocumentedRuleIsShipped: a name that is not here reads as a gap and
 // invites a pull request adding it. One per family, plus every name the old
 // refusal list carried.
-func TestEveryRuleLaravelHasIsShipped(t *testing.T) {
+func TestEveryDocumentedRuleIsShipped(t *testing.T) {
 	for _, chain := range []string{
 		"string", "nullable", "array", "list", "distinct", "in_array:other",
 		"file", "image", "mimes:jpg", "mimetypes:image/jpeg", "extensions:jpg",

@@ -139,10 +139,10 @@ func TestDeduplicate(t *testing.T) {
 }
 
 func TestBase64RoundTrip(t *testing.T) {
-	if got := str.ToBase64("laravel"); got != "bGFyYXZlbA==" {
+	if got := str.ToBase64("handler"); got != "aGFuZGxlcg==" {
 		t.Errorf("ToBase64 = %q", got)
 	}
-	if got, ok := str.FromBase64("bGFyYXZlbA==", true); !ok || got != "laravel" {
+	if got, ok := str.FromBase64("aGFuZGxlcg==", true); !ok || got != "handler" {
 		t.Errorf("FromBase64 = %q, %v", got, ok)
 	}
 	if got, ok := str.FromBase64("", true); !ok || got != "" {
@@ -151,7 +151,7 @@ func TestBase64RoundTrip(t *testing.T) {
 	if _, ok := str.FromBase64("!!!", true); ok {
 		t.Error("FromBase64 accepted a character outside the alphabet in strict mode")
 	}
-	if got, ok := str.FromBase64("bGFy YXZl bA==", false); !ok || got != "laravel" {
+	if got, ok := str.FromBase64("aGFu ZGxl cg==", false); !ok || got != "handler" {
 		t.Errorf("FromBase64 with whitespace = %q, %v", got, ok)
 	}
 }
@@ -163,7 +163,7 @@ func TestValidators(t *testing.T) {
 	if str.IsJSON("") || str.IsJSON("{") || str.IsJSON("not json") {
 		t.Error("IsJSON accepted something that is not JSON")
 	}
-	if !str.IsASCII("laravel") || str.IsASCII("café") {
+	if !str.IsASCII("handler") || str.IsASCII("café") {
 		t.Error("IsASCII is wrong")
 	}
 	if str.IsASCII("") != true {
@@ -202,16 +202,16 @@ func TestNumbersKeepsTheDigits(t *testing.T) {
 }
 
 func TestSubstrCountAndReplace(t *testing.T) {
-	if got := str.SubstrCount("laravel laravel", "la", 0); got != 2 {
+	if got := str.SubstrCount("handler handler", "ha", 0); got != 2 {
 		t.Errorf("SubstrCount = %d, want 2", got)
 	}
-	if got := str.SubstrCount("laravel laravel", "la", 8); got != 1 {
+	if got := str.SubstrCount("handler handler", "ha", 8); got != 1 {
 		t.Errorf("SubstrCount with an offset = %d, want 1", got)
 	}
-	if got := str.SubstrCount("laravel", "", 0); got != 0 {
+	if got := str.SubstrCount("handler", "", 0); got != 0 {
 		t.Errorf("SubstrCount with an empty needle = %d, want 0", got)
 	}
-	if got := str.SubstrCount("laravel", "la", 100); got != 0 {
+	if got := str.SubstrCount("handler", "ha", 100); got != 0 {
 		t.Errorf("SubstrCount with an offset past the end = %d, want 0", got)
 	}
 	if got := str.SubstrReplace("1300", ":", 2); got != "13:" {

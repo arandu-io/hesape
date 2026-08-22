@@ -54,12 +54,12 @@ func TestLimitWithALimitSmallerThanTheEnding(t *testing.T) {
 		end   string
 		want  string
 	}{
-		{"Laravel", 2, "...", "La..."},
-		{"Laravel", 0, "...", "..."},
-		{"Laravel", -1, "...", "..."},
-		{"Laravel", 7, "...", "Laravel"},
-		{"Laravel", 100, "...", "Laravel"},
-		{"Laravel", 3, "", "Lar"},
+		{"Handler", 2, "...", "Ha..."},
+		{"Handler", 0, "...", "..."},
+		{"Handler", -1, "...", "..."},
+		{"Handler", 7, "...", "Handler"},
+		{"Handler", 100, "...", "Handler"},
+		{"Handler", 3, "", "Han"},
 	}
 	for _, c := range cases {
 		if got := str.Limit(c.value, c.limit, c.end, false); got != c.want {
@@ -78,14 +78,14 @@ func TestSubstrWithANegativeStart(t *testing.T) {
 		length []int
 		want   string
 	}{
-		{"Laravel", -3, nil, "vel"},
-		{"Laravel", -3, []int{2}, "ve"},
-		{"Laravel", -100, nil, "Laravel"},
-		{"Laravel", 100, nil, ""},
-		{"Laravel", 0, []int{-3}, "Lara"},
-		{"Laravel", 5, []int{-5}, ""},
-		{"Laravel", 2, []int{0}, ""},
-		{"Laravel", 2, []int{100}, "ravel"},
+		{"Handler", -3, nil, "ler"},
+		{"Handler", -3, []int{2}, "le"},
+		{"Handler", -100, nil, "Handler"},
+		{"Handler", 100, nil, ""},
+		{"Handler", 0, []int{-3}, "Hand"},
+		{"Handler", 5, []int{-5}, ""},
+		{"Handler", 2, []int{0}, ""},
+		{"Handler", 2, []int{100}, "ndler"},
 		{"café", -1, nil, "é"},
 	}
 	for _, c := range cases {
@@ -99,14 +99,14 @@ func TestSubstrWithANegativeStart(t *testing.T) {
 // width at or below the length of the string returns it whole.
 func TestPadWithAWidthSmallerThanTheString(t *testing.T) {
 	for _, width := range []int{-5, 0, 3, 7} {
-		if got := str.PadLeft("Laravel", width, "_"); got != "Laravel" {
-			t.Errorf("PadLeft(%q, %d, %q) = %q, want %q", "Laravel", width, "_", got, "Laravel")
+		if got := str.PadLeft("Handler", width, "_"); got != "Handler" {
+			t.Errorf("PadLeft(%q, %d, %q) = %q, want %q", "Handler", width, "_", got, "Handler")
 		}
-		if got := str.PadRight("Laravel", width, "_"); got != "Laravel" {
-			t.Errorf("PadRight(%q, %d, %q) = %q, want %q", "Laravel", width, "_", got, "Laravel")
+		if got := str.PadRight("Handler", width, "_"); got != "Handler" {
+			t.Errorf("PadRight(%q, %d, %q) = %q, want %q", "Handler", width, "_", got, "Handler")
 		}
-		if got := str.PadBoth("Laravel", width, "_"); got != "Laravel" {
-			t.Errorf("PadBoth(%q, %d, %q) = %q, want %q", "Laravel", width, "_", got, "Laravel")
+		if got := str.PadBoth("Handler", width, "_"); got != "Handler" {
+			t.Errorf("PadBoth(%q, %d, %q) = %q, want %q", "Handler", width, "_", got, "Handler")
 		}
 	}
 	if got := str.PadLeft("7", 3, "0"); got != "007" {

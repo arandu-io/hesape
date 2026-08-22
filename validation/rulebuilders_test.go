@@ -2,7 +2,7 @@ package validation
 
 import "testing"
 
-func TestEachBuilderRendersTheRuleStringLaravelRenders(t *testing.T) {
+func TestEachBuilderRendersItsRuleString(t *testing.T) {
 	cases := []struct {
 		name string
 		got  string

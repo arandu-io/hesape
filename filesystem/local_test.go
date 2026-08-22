@@ -374,11 +374,11 @@ func TestLocalAnUploadInFlightIsNotListed(t *testing.T) {
 	}
 }
 
-// TestLocalTheWholeIlluminateSurfaceAnswers is the merge check: every method the
+// TestLocalTheWholeDiskSurfaceAnswers is the merge check: every method the
 // package grew is composed out of the six an Adapter has, so a driver that
 // implements the six answers all of them. Against a real directory, because a
 // map cannot tell whether a listing came back sorted by accident.
-func TestLocalTheWholeIlluminateSurfaceAnswers(t *testing.T) {
+func TestLocalTheWholeDiskSurfaceAnswers(t *testing.T) {
 	d := localDisk(t)
 	ctx := context.Background()
 	g := grant(tenant)

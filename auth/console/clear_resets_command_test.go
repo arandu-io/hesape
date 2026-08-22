@@ -76,7 +76,7 @@ func TestTheSweepRunsAndSaysSo(t *testing.T) {
 		t.Fatalf("deleteExpired ran %d times, want once", factory.repository.swept)
 	}
 	if !strings.Contains(out.String(), "Expired reset tokens cleared successfully.") {
-		t.Fatalf("output = %q, want Illuminate's sentence", out.String())
+		t.Fatalf("output = %q, want the cleared-tokens sentence", out.String())
 	}
 }
 
@@ -129,9 +129,9 @@ func TestACommandWithNoFactoryFails(t *testing.T) {
 	}
 }
 
-// TestTheCommandValueCarriesIlluminatesSignature pins what the console registry
+// TestTheCommandValueCarriesTheDeclaredSignature pins what the console registry
 // is handed.
-func TestTheCommandValueCarriesIlluminatesSignature(t *testing.T) {
+func TestTheCommandValueCarriesTheDeclaredSignature(t *testing.T) {
 	c := authconsole.NewClearResetsCommand(&brokers{repository: &repository{}}).Command()
 
 	if c.Signature != authconsole.Signature {

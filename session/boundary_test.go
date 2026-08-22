@@ -18,7 +18,7 @@ func TestTheSessionThatIsExactlyOneLifetimeOldIsKept(t *testing.T) {
 	lifetime := 2 * time.Hour
 
 	if sessionIsExpired(lifetime, lifetime) {
-		t.Error("a session exactly one lifetime old was dropped, and Laravel reads it back")
+		t.Error("a session exactly one lifetime old was dropped, and the boundary is inclusive")
 	}
 	if !sessionIsExpired(lifetime+time.Nanosecond, lifetime) {
 		t.Error("a session past the lifetime was kept")

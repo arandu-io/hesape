@@ -148,9 +148,9 @@ func TestWhereNoneNegatesTheGroup(t *testing.T) {
 }
 
 func TestDynamicWhereReadsTheColumnsOutOfTheMethodName(t *testing.T) {
-	b := mysqlBuilder().DynamicWhere("whereFirstNameAndLastNameOrEmail", []any{"taylor", "otwell", "taylor@laravel.com"})
+	b := mysqlBuilder().DynamicWhere("whereFirstNameAndLastNameOrEmail", []any{"ada", "lovelace", "ada@example.com"})
 	assertSQL(t, b, "select * from `users` where `first_name` = ? and `last_name` = ? or `email` = ?")
-	assertBindings(t, b, "taylor", "otwell", "taylor@laravel.com")
+	assertBindings(t, b, "ada", "lovelace", "ada@example.com")
 }
 
 func TestMergeWheresAppendsClausesAndBindings(t *testing.T) {

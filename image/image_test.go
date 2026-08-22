@@ -444,14 +444,14 @@ func TestBlurAndSharpenRun(t *testing.T) {
 	}
 }
 
-func TestToFormatRefusesANameIlluminateRefuses(t *testing.T) {
+func TestToFormatRefusesAnUnsupportedName(t *testing.T) {
 	images := himage.NewImageManager()
 	if _, err := images.FromBytes(solidPNG(t, 2, 2, color.RGBA{A: 255})).ToFormat("tiff"); !errors.Is(err, himage.ErrImage) {
 		t.Fatalf("err = %v, want ErrImage", err)
 	}
 }
 
-func TestHeifIsFoldedToHeicAsIlluminateFoldsIt(t *testing.T) {
+func TestHeifIsFoldedToHeic(t *testing.T) {
 	images := himage.NewImageManager()
 	img, err := images.FromBytes(solidPNG(t, 2, 2, color.RGBA{A: 255})).ToFormat("heif")
 	if err != nil {
@@ -822,7 +822,7 @@ func TestThePipelineKnowsWhetherAnythingWasAsked(t *testing.T) {
 	}
 }
 
-func TestQualityIsClampedTheWayIlluminateClampsIt(t *testing.T) {
+func TestQualityIsClampedToTheValidRange(t *testing.T) {
 	images := himage.NewImageManager()
 	source := solidPNG(t, 32, 32, color.RGBA{R: 90, G: 140, B: 210, A: 255})
 

@@ -9,19 +9,19 @@ import (
 
 // The two digests below were produced outside this package, by
 //
-//	printf 'laravel_sessionv2' | openssl dgst -sha1 -hmac 'super-secret-key'
-//	printf 'otherv2'           | openssl dgst -sha1 -hmac 'super-secret-key'
+//	printf 'app_sessionv2' | openssl dgst -sha1 -hmac 'super-secret-key'
+//	printf 'otherv2'       | openssl dgst -sha1 -hmac 'super-secret-key'
 //
 // A prefix computed here has to match a digest computed this way, since both
 // are HMAC-SHA1 over the same message and key.
 const (
 	prefixKey     = "super-secret-key"
-	sessionDigest = "fccddc1e78db8b92ca4f48c1d74f56b6a06f939a"
+	sessionDigest = "e7faf6e4a8c991c25a7db99c0c82e47f7c19758e"
 	otherDigest   = "cdc1efb6b5ca7d5c05ce3bf472a807a8389471b4"
 )
 
 func TestCookieValuePrefixCreateMatchesTheDigestPHPWrites(t *testing.T) {
-	got := cookie.CookieValuePrefix.Create("laravel_session", []byte(prefixKey))
+	got := cookie.CookieValuePrefix.Create("app_session", []byte(prefixKey))
 	if want := sessionDigest + "|"; got != want {
 		t.Fatalf("CookieValuePrefix.Create = %q, want %q", got, want)
 	}
@@ -31,7 +31,7 @@ func TestCookieValuePrefixCreateMatchesTheDigestPHPWrites(t *testing.T) {
 }
 
 func TestCookieValuePrefixCreateIsBoundToTheName(t *testing.T) {
-	session := cookie.CookieValuePrefix.Create("laravel_session", []byte(prefixKey))
+	session := cookie.CookieValuePrefix.Create("app_session", []byte(prefixKey))
 	other := cookie.CookieValuePrefix.Create("other", []byte(prefixKey))
 
 	if session == other {
@@ -70,9 +70,9 @@ func TestCookieValuePrefixRemoveOnSomethingShorterThanThePrefix(t *testing.T) {
 
 func TestCookieValuePrefixValidateReturnsTheValueWithoutThePrefix(t *testing.T) {
 	keys := [][]byte{[]byte(prefixKey)}
-	value := cookie.CookieValuePrefix.Create("laravel_session", []byte(prefixKey)) + "abc123"
+	value := cookie.CookieValuePrefix.Create("app_session", []byte(prefixKey)) + "abc123"
 
-	got, ok := cookie.CookieValuePrefix.Validate("laravel_session", value, keys)
+	got, ok := cookie.CookieValuePrefix.Validate("app_session", value, keys)
 	if !ok {
 		t.Fatal("a value written for this name did not validate")
 	}
@@ -89,8 +89,8 @@ func TestCookieValuePrefixValidateRefusesACookieMovedToAnotherName(t *testing.T)
 	keys := [][]byte{[]byte(prefixKey)}
 	stolen := cookie.CookieValuePrefix.Create("remember_me", []byte(prefixKey)) + "attacker-value"
 
-	if got, ok := cookie.CookieValuePrefix.Validate("laravel_session", stolen, keys); ok {
-		t.Fatalf("a value issued for remember_me validated as laravel_session and gave %q", got)
+	if got, ok := cookie.CookieValuePrefix.Validate("app_session", stolen, keys); ok {
+		t.Fatalf("a value issued for remember_me validated as app_session and gave %q", got)
 	}
 }
 

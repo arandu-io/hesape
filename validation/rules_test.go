@@ -22,10 +22,10 @@ func run(t *testing.T, chain, value string) validation.Errors {
 	return errs
 }
 
-// TestEachRuleAcceptsAndRejectsWhatLaravelDoes is one entry per shipped rule,
+// TestEachShippedRuleAcceptsAndRejectsItsEdgeCases is one entry per shipped rule,
 // with the edge cases that are worth more than the happy path: what `required`
 // does with "0", what `min` counts, what `boolean` refuses.
-func TestEachRuleAcceptsAndRejectsWhatLaravelDoes(t *testing.T) {
+func TestEachShippedRuleAcceptsAndRejectsItsEdgeCases(t *testing.T) {
 	cases := []struct {
 		chain string
 		good  []string
@@ -145,9 +145,9 @@ func TestSizeCountsRunesForAStringAndValueForANumber(t *testing.T) {
 	}
 }
 
-// TestConfirmedComparesTheFieldLaravelNames: the default other box is
+// TestConfirmedComparesTheConfirmationField: the default other box is
 // <field>_confirmation, and an explicit argument replaces it.
-func TestConfirmedComparesTheFieldLaravelNames(t *testing.T) {
+func TestConfirmedComparesTheConfirmationField(t *testing.T) {
 	set := mustCompile(t, validation.Rules{"password": "required|confirmed"})
 
 	_, errs := set.Validate(url.Values{"password": {"correct horse"}, "password_confirmation": {"correct horse"}})
@@ -167,10 +167,10 @@ func TestConfirmedComparesTheFieldLaravelNames(t *testing.T) {
 	}
 }
 
-// TestSameAndDifferentReadTheOtherFieldAsLaravelDoes: `same` compares against
+// TestSameAndDifferentReadAMissingOtherFieldDifferently: `same` compares against
 // the empty string when the other box was not sent, and `different` does not
 // compare at all. The asymmetry is deliberate.
-func TestSameAndDifferentReadTheOtherFieldAsLaravelDoes(t *testing.T) {
+func TestSameAndDifferentReadAMissingOtherFieldDifferently(t *testing.T) {
 	set := mustCompile(t, validation.Rules{"a": "same:b", "b": "sometimes"})
 	if _, errs := set.Validate(url.Values{"a": {"x"}}); !errs.Any() {
 		t.Error("same passed against a field that was not sent")

@@ -16,7 +16,7 @@ func TestAnEventStartsOnEveryMinute(t *testing.T) {
 	}
 }
 
-func TestTheFrequencyMethodsWriteTheExpressionLaravelWrites(t *testing.T) {
+func TestEachFrequencyMethodWritesItsCronExpression(t *testing.T) {
 	cases := []struct {
 		name  string
 		build func(*scheduling.Event) *scheduling.Event

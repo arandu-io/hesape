@@ -58,7 +58,7 @@ func TestAttributeNamesComeFromTheTranslatorWhenNothingInlineNamesThem(t *testin
 	}
 }
 
-func TestATranslatorTurnsTheShortSentenceIntoLaravels(t *testing.T) {
+func TestATranslatorTurnsTheShortSentenceIntoAFullOne(t *testing.T) {
 	v := Make(Data{"name": ""}, MustCompile(Rules{"name": "required"}), WithTranslator(english))
 
 	if got := v.Errors().First("name"); got != "The name field is required." {

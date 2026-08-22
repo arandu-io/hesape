@@ -46,13 +46,13 @@ func (c invoices) Edit(*request) error    { return c.note("edit") }
 func (c invoices) Update(*request) error  { return c.note("update") }
 func (c invoices) Destroy(*request) error { return c.note("destroy") }
 
-// TestResourceRegistersTheSevenOfLaravel is the whole point of the command:
+// TestResourceRegistersTheSevenRoutes is the whole point of the command:
 // Resource produces the same seven routes, at the same paths, with the same
 // names, every time.
 //
 // If any row of this table drifts, the promise that a developer recognizes
 // the vocabulary immediately stops being true.
-func TestResourceRegistersTheSevenOfLaravel(t *testing.T) {
+func TestResourceRegistersTheSevenRoutes(t *testing.T) {
 	r := routing.NewRouter()
 	var seen []string
 	routing.Resource(r, "invoices", invoices{seen: &seen}, adapt)

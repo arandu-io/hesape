@@ -89,18 +89,18 @@ func TestACookieRenamedIsNotReadAsTheOtherOne(t *testing.T) {
 	var err error
 	read := encrypt.Handle(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var c *http.Cookie
-		c, err = r.Cookie("laravel_session")
+		c, err = r.Cookie("app_session")
 		if err == nil {
 			got = c.Value
 		}
 	}))
 
 	replay := httptest.NewRequest(http.MethodGet, "/", nil)
-	replay.AddCookie(&http.Cookie{Name: "laravel_session", Value: stolen.Value})
+	replay.AddCookie(&http.Cookie{Name: "app_session", Value: stolen.Value})
 	serve(read, replay)
 
 	if !errors.Is(err, http.ErrNoCookie) {
-		t.Fatalf("a value issued for attacker_pref was accepted as laravel_session and read as %q", got)
+		t.Fatalf("a value issued for attacker_pref was accepted as app_session and read as %q", got)
 	}
 }
 

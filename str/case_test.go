@@ -11,7 +11,7 @@ import (
 // goes in before every upper-case letter without asking whether the previous
 // one was upper-case too. An existing hyphen is left alone, because the word
 // splitting does not break on it.
-func TestSnakeMatchesTheRegexIlluminateUses(t *testing.T) {
+func TestSnakeInsertsADelimiterBeforeEveryCapital(t *testing.T) {
 	for in, want := range map[string]string{
 		"PurchaseOrder":  "purchase_order",
 		"purchase_order": "purchase_order",

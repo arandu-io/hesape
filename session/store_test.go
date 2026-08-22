@@ -519,7 +519,7 @@ func TestPreviousURL(t *testing.T) {
 	}
 }
 
-func TestPasswordConfirmedStampsTheKeyIlluminateUses(t *testing.T) {
+func TestPasswordConfirmedStampsTheConfirmationKey(t *testing.T) {
 	s := startedStore(t, session.NewArraySessionHandler(time.Hour))
 
 	s.PasswordConfirmed()
@@ -1134,13 +1134,13 @@ func TestTheFileHandlerCollectsTheWayTheFinderDoes(t *testing.T) {
 	}
 }
 
-// TestTheCookieHandlerWritesTheJSONLaravelWrites: the wire shape used to be
+// TestTheCookieHandlerWritesPercentEncodedJSON: the wire shape used to be
 // base64 of the JSON, which [CookieSessionHandler.Read] cannot
 // percent-decode, so a cookie written that way read back as an empty
 // session -- silently, the kind of break that only shows in production.
 // net/http sanitises a cookie value instead of encoding it, so the percent
 // encoding has to happen here.
-func TestTheCookieHandlerWritesTheJSONLaravelWrites(t *testing.T) {
+func TestTheCookieHandlerWritesPercentEncodedJSON(t *testing.T) {
 	jar := &fakeJar{}
 	handler := session.NewCookieSessionHandler(jar, time.Hour, false)
 	ctx := context.Background()
@@ -1158,26 +1158,26 @@ func TestTheCookieHandlerWritesTheJSONLaravelWrites(t *testing.T) {
 		Expires int64  `json:"expires"`
 	}
 	if err := json.Unmarshal([]byte(decoded), &payload); err != nil {
-		t.Fatalf("the cookie does not hold the JSON Laravel writes: %v (%q)", err, decoded)
+		t.Fatalf("the cookie does not hold the JSON envelope: %v (%q)", err, decoded)
 	}
 	if payload.Data != `{"subject":"1"}` || payload.Expires == 0 {
 		t.Fatalf("payload = %+v", payload)
 	}
 }
 
-// TestTheCookieHandlerReadsWhatLaravelWrote is the other direction, and it
+// TestTheCookieHandlerReadsBackAnEncodedEnvelope is the other direction, and it
 // is the one that matters: it used to read back as an empty session. The
 // payload inside "data" is not JSON -- Read never parses it, only the
 // envelope around it -- so whatever is inside comes back unchanged.
-func TestTheCookieHandlerReadsWhatLaravelWrote(t *testing.T) {
+func TestTheCookieHandlerReadsBackAnEncodedEnvelope(t *testing.T) {
 	handler := session.NewCookieSessionHandler(&fakeJar{}, time.Hour, false)
 	id := strings.Repeat("k", 40)
 
-	laravel := `{"data":"a:1:{s:7:\"subject\";s:1:\"1\";}","expires":` +
+	envelope := `{"data":"a:1:{s:7:\"subject\";s:1:\"1\";}","expires":` +
 		strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10) + `}`
 
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	r.AddCookie(&http.Cookie{Name: id, Value: url.QueryEscape(laravel)})
+	r.AddCookie(&http.Cookie{Name: id, Value: url.QueryEscape(envelope)})
 	handler.SetRequest(r)
 
 	got, err := handler.Read(context.Background(), id)

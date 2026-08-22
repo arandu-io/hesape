@@ -30,7 +30,7 @@ func TestUniqueAddressesKeepsTheLastSpelling(t *testing.T) {
 	}
 }
 
-func TestAddressesOfTakesEveryShapeIlluminateTakes(t *testing.T) {
+func TestAddressesOfTakesEveryAcceptedShape(t *testing.T) {
 	for _, c := range []struct {
 		name  string
 		in    any
@@ -133,7 +133,7 @@ func TestReferencesStringWrapsEveryIdOnce(t *testing.T) {
 	}
 }
 
-func TestParseViewTakesEveryShapeIlluminateTakes(t *testing.T) {
+func TestParseViewTakesEveryAcceptedShape(t *testing.T) {
 	if got, _ := parseView("mail.note"); got.HTML != "mail.note" {
 		t.Errorf("a string view became %+v", got)
 	}

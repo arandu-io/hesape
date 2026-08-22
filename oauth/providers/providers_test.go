@@ -246,7 +246,7 @@ func TestAccessRequestCalledWithProperOptions(t *testing.T) {
 	}
 }
 
-func TestTheGrantTypeCanBeReplacedTheWayIlluminateAllows(t *testing.T) {
+func TestTheGrantTypeCanBeReplacedByTheCaller(t *testing.T) {
 	store := &fakeStore{state: "bar"}
 	client := answering(http.StatusOK, "access_token=token")
 	p := provider(store).SetHTTPClient(client)

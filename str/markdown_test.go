@@ -59,7 +59,7 @@ func TestMarkdownInlines(t *testing.T) {
 		{`\*not em\*`, "<p>*not em*</p>\n"},
 		{"snake_case_name", "<p>snake_case_name</p>\n"},
 		{"line  \nbreak", "<p>line<br />\nbreak</p>\n"},
-		{"see https://laravel.com", `<p>see <a href="https://laravel.com">https://laravel.com</a></p>` + "\n"},
+		{"see https://example.com", `<p>see <a href="https://example.com">https://example.com</a></p>` + "\n"},
 		{"* not emphasis", "<ul>\n<li>not emphasis</li>\n</ul>\n"},
 	}
 	for _, c := range cases {

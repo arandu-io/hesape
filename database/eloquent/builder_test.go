@@ -509,7 +509,7 @@ func TestUpsertSortsTheColumnsItCompilesAndBinds(t *testing.T) {
 
 	last := conn.last()
 	if !strings.Contains(last.SQL, `("email", "name", "tenant_id", "updated_at")`) {
-		t.Fatalf("SQL = %q, want the columns sorted -- which is the ksort Illuminate does for the same reason", last.SQL)
+		t.Fatalf("SQL = %q, want the columns sorted, so the bindings land in an order the caller's map cannot change", last.SQL)
 	}
 	if last.Bindings[0] != "ada@example.com" || last.Bindings[1] != "Ada" {
 		t.Errorf("bindings = %v, want them in the same order as the columns", last.Bindings)

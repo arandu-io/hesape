@@ -17,8 +17,8 @@ func TestOfChains(t *testing.T) {
 	if got := str.Of("welcome_email").Studly().Append("Job").String(); got != "WelcomeEmailJob" {
 		t.Errorf("chain = %q, want %q", got, "WelcomeEmailJob")
 	}
-	if got := str.Of("Laravel").Prepend("Hello ", "dear ").Value(); got != "Hello dear Laravel" {
-		t.Errorf("Prepend = %q, want %q", got, "Hello dear Laravel")
+	if got := str.Of("Handler").Prepend("Hello ", "dear ").Value(); got != "Hello dear Handler" {
+		t.Errorf("Prepend = %q, want %q", got, "Hello dear Handler")
 	}
 }
 
@@ -26,18 +26,18 @@ func TestOfChains(t *testing.T) {
 // Stringable a caller holds is the one it keeps, whatever anyone does with it
 // afterwards.
 func TestAStringableIsAValue(t *testing.T) {
-	original := str.Of("laravel")
+	original := str.Of("handler")
 	upper := original.Upper()
-	if original.ToString() != "laravel" {
+	if original.ToString() != "handler" {
 		t.Errorf("the original became %q", original.ToString())
 	}
-	if upper.ToString() != "LARAVEL" {
-		t.Errorf("the chain produced %q, want %q", upper.ToString(), "LARAVEL")
+	if upper.ToString() != "HANDLER" {
+		t.Errorf("the chain produced %q, want %q", upper.ToString(), "HANDLER")
 	}
 }
 
 func TestStringableTerminals(t *testing.T) {
-	s := str.Of("Laravel Framework")
+	s := str.Of("Handler Framework")
 
 	if got := s.Length(); got != 17 {
 		t.Errorf("Length() = %d, want 17", got)
@@ -45,19 +45,19 @@ func TestStringableTerminals(t *testing.T) {
 	if !s.Contains([]string{"Frame"}, false) {
 		t.Error("Contains(Frame) = false")
 	}
-	if !s.ContainsAll([]string{"Laravel", "Framework"}, false) {
+	if !s.ContainsAll([]string{"Handler", "Framework"}, false) {
 		t.Error("ContainsAll = false")
 	}
-	if s.DoesntContain([]string{"Laravel"}, false) {
-		t.Error("DoesntContain(Laravel) = true")
+	if s.DoesntContain([]string{"Handler"}, false) {
+		t.Error("DoesntContain(Handler) = true")
 	}
-	if !s.StartsWith("Laravel") || !s.EndsWith("Framework") {
+	if !s.StartsWith("Handler") || !s.EndsWith("Framework") {
 		t.Error("StartsWith or EndsWith = false")
 	}
-	if s.DoesntStartWith("Laravel") || s.DoesntEndWith("Framework") {
+	if s.DoesntStartWith("Handler") || s.DoesntEndWith("Framework") {
 		t.Error("DoesntStartWith or DoesntEndWith = true")
 	}
-	if !s.Exactly("Laravel Framework") {
+	if !s.Exactly("Handler Framework") {
 		t.Error("Exactly = false")
 	}
 	if s.IsEmpty() || !s.IsNotEmpty() {
@@ -69,8 +69,8 @@ func TestStringableTerminals(t *testing.T) {
 	if got := s.Position("Frame", 0); got != 8 {
 		t.Errorf("Position(Frame) = %d, want 8", got)
 	}
-	if c, ok := s.CharAt(0); !ok || c != "L" {
-		t.Errorf("CharAt(0) = %q, %v, want L, true", c, ok)
+	if c, ok := s.CharAt(0); !ok || c != "H" {
+		t.Errorf("CharAt(0) = %q, %v, want H, true", c, ok)
 	}
 	if _, ok := s.CharAt(100); ok {
 		t.Error("CharAt(100) reported an index that is not there")
@@ -153,8 +153,8 @@ func TestStringableConversions(t *testing.T) {
 			t.Errorf("ToBoolean(%q) = true", no)
 		}
 	}
-	if got := str.Of("laravel").ToBase64().FromBase64(true).ToString(); got != "laravel" {
-		t.Errorf("base64 round trip = %q, want %q", got, "laravel")
+	if got := str.Of("handler").ToBase64().FromBase64(true).ToString(); got != "handler" {
+		t.Errorf("base64 round trip = %q, want %q", got, "handler")
 	}
 }
 
@@ -219,47 +219,47 @@ func TestStringableConditionals(t *testing.T) {
 	upper := func(s str.Stringable) str.Stringable { return s.Upper() }
 	lower := func(s str.Stringable) str.Stringable { return s.Lower() }
 
-	if got := str.Of("laravel").When(true, upper).ToString(); got != "LARAVEL" {
-		t.Errorf("When(true) = %q, want %q", got, "LARAVEL")
+	if got := str.Of("handler").When(true, upper).ToString(); got != "HANDLER" {
+		t.Errorf("When(true) = %q, want %q", got, "HANDLER")
 	}
-	if got := str.Of("LARAVEL").When(false, upper, lower).ToString(); got != "laravel" {
-		t.Errorf("When(false) with a default = %q, want %q", got, "laravel")
+	if got := str.Of("HANDLER").When(false, upper, lower).ToString(); got != "handler" {
+		t.Errorf("When(false) with a default = %q, want %q", got, "handler")
 	}
-	if got := str.Of("laravel").When(false, upper).ToString(); got != "laravel" {
+	if got := str.Of("handler").When(false, upper).ToString(); got != "handler" {
 		t.Errorf("When(false) with no default = %q, want the subject", got)
 	}
-	if got := str.Of("laravel").Unless(false, upper).ToString(); got != "LARAVEL" {
-		t.Errorf("Unless(false) = %q, want %q", got, "LARAVEL")
+	if got := str.Of("handler").Unless(false, upper).ToString(); got != "HANDLER" {
+		t.Errorf("Unless(false) = %q, want %q", got, "HANDLER")
 	}
-	if got := str.Of("laravel").WhenContains([]string{"rav"}, upper).ToString(); got != "LARAVEL" {
-		t.Errorf("WhenContains = %q, want %q", got, "LARAVEL")
+	if got := str.Of("handler").WhenContains([]string{"ndl"}, upper).ToString(); got != "HANDLER" {
+		t.Errorf("WhenContains = %q, want %q", got, "HANDLER")
 	}
 	if got := str.Of("").WhenEmpty(func(s str.Stringable) str.Stringable { return str.Of("filled") }).ToString(); got != "filled" {
 		t.Errorf("WhenEmpty = %q, want %q", got, "filled")
 	}
-	if got := str.Of("laravel").WhenNotEmpty(upper).ToString(); got != "LARAVEL" {
-		t.Errorf("WhenNotEmpty = %q, want %q", got, "LARAVEL")
+	if got := str.Of("handler").WhenNotEmpty(upper).ToString(); got != "HANDLER" {
+		t.Errorf("WhenNotEmpty = %q, want %q", got, "HANDLER")
 	}
-	if got := str.Of("laravel").WhenStartsWith([]string{"lar"}, upper).ToString(); got != "LARAVEL" {
-		t.Errorf("WhenStartsWith = %q, want %q", got, "LARAVEL")
+	if got := str.Of("handler").WhenStartsWith([]string{"han"}, upper).ToString(); got != "HANDLER" {
+		t.Errorf("WhenStartsWith = %q, want %q", got, "HANDLER")
 	}
-	if got := str.Of("laravel").WhenEndsWith([]string{"vel"}, upper).ToString(); got != "LARAVEL" {
-		t.Errorf("WhenEndsWith = %q, want %q", got, "LARAVEL")
+	if got := str.Of("handler").WhenEndsWith([]string{"ler"}, upper).ToString(); got != "HANDLER" {
+		t.Errorf("WhenEndsWith = %q, want %q", got, "HANDLER")
 	}
-	if got := str.Of("laravel").WhenDoesntStartWith([]string{"sym"}, upper).ToString(); got != "LARAVEL" {
-		t.Errorf("WhenDoesntStartWith = %q, want %q", got, "LARAVEL")
+	if got := str.Of("handler").WhenDoesntStartWith([]string{"sym"}, upper).ToString(); got != "HANDLER" {
+		t.Errorf("WhenDoesntStartWith = %q, want %q", got, "HANDLER")
 	}
-	if got := str.Of("laravel").WhenExactly("laravel", upper).ToString(); got != "LARAVEL" {
-		t.Errorf("WhenExactly = %q, want %q", got, "LARAVEL")
+	if got := str.Of("handler").WhenExactly("handler", upper).ToString(); got != "HANDLER" {
+		t.Errorf("WhenExactly = %q, want %q", got, "HANDLER")
 	}
-	if got := str.Of("laravel").WhenNotExactly("symfony", upper).ToString(); got != "LARAVEL" {
-		t.Errorf("WhenNotExactly = %q, want %q", got, "LARAVEL")
+	if got := str.Of("handler").WhenNotExactly("symfony", upper).ToString(); got != "HANDLER" {
+		t.Errorf("WhenNotExactly = %q, want %q", got, "HANDLER")
 	}
-	if got := str.Of("laravel").WhenIs([]string{"lara*"}, upper).ToString(); got != "LARAVEL" {
-		t.Errorf("WhenIs = %q, want %q", got, "LARAVEL")
+	if got := str.Of("handler").WhenIs([]string{"hand*"}, upper).ToString(); got != "HANDLER" {
+		t.Errorf("WhenIs = %q, want %q", got, "HANDLER")
 	}
-	if got := str.Of("laravel").WhenIsASCII(upper).ToString(); got != "LARAVEL" {
-		t.Errorf("WhenIsASCII = %q, want %q", got, "LARAVEL")
+	if got := str.Of("handler").WhenIsASCII(upper).ToString(); got != "HANDLER" {
+		t.Errorf("WhenIsASCII = %q, want %q", got, "HANDLER")
 	}
 	if got := str.Of(str.UUID()).WhenIsUUID(func(s str.Stringable) str.Stringable { return str.Of("uuid") }).ToString(); got != "uuid" {
 		t.Errorf("WhenIsUUID did not fire")
@@ -272,12 +272,12 @@ func TestStringableConditionals(t *testing.T) {
 	}
 
 	tapped := ""
-	str.Of("laravel").Tap(func(s str.Stringable) { tapped = s.ToString() })
-	if tapped != "laravel" {
-		t.Errorf("Tap saw %q, want %q", tapped, "laravel")
+	str.Of("handler").Tap(func(s str.Stringable) { tapped = s.ToString() })
+	if tapped != "handler" {
+		t.Errorf("Tap saw %q, want %q", tapped, "handler")
 	}
-	if got := str.Of("laravel").Pipe(func(s str.Stringable) string { return s.ToString() + "!" }).ToString(); got != "laravel!" {
-		t.Errorf("Pipe = %q, want %q", got, "laravel!")
+	if got := str.Of("handler").Pipe(func(s str.Stringable) string { return s.ToString() + "!" }).ToString(); got != "handler!" {
+		t.Errorf("Pipe = %q, want %q", got, "handler!")
 	}
 }
 

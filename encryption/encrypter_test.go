@@ -41,10 +41,10 @@ func newGolden(t *testing.T) *encryption.Encrypter {
 	return e
 }
 
-// TestAPayloadFromLaravelDecrypts is the test the format guarantee hangs on.
+// TestAForeignPayloadDecrypts is the test the format guarantee hangs on.
 // Every other test here checks this package against itself; this one checks it
 // against a payload it did not write.
-func TestAPayloadFromLaravelDecrypts(t *testing.T) {
+func TestAForeignPayloadDecrypts(t *testing.T) {
 	e := newGolden(t)
 
 	for _, tt := range []struct{ name, payload, want string }{
@@ -64,11 +64,11 @@ func TestAPayloadFromLaravelDecrypts(t *testing.T) {
 	}
 }
 
-// TestTheEnvelopeIsTheOneLaravelWrites checks the other direction: not that
+// TestTheEnvelopeKeepsTheInteroperableFieldOrder checks the other direction: not that
 // this package can read a foreign payload, but that a foreign reader could read
 // this one. The field order is part of it -- iv, value, mac, tag -- because a
 // reader comparing payloads as strings would see a difference that is not one.
-func TestTheEnvelopeIsTheOneLaravelWrites(t *testing.T) {
+func TestTheEnvelopeKeepsTheInteroperableFieldOrder(t *testing.T) {
 	e := newGolden(t)
 
 	payload, err := e.EncryptString("hello world")

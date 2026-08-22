@@ -254,9 +254,9 @@ func TestParseSearchPath(t *testing.T) {
 		want string
 	}{
 		{"public", "public"},
-		{"public,laravel", "public,laravel"},
-		{`"public", 'laravel'`, "public,laravel"},
-		{[]string{"'public'", "laravel"}, "public,laravel"},
+		{"public,app", "public,app"},
+		{`"public", 'app'`, "public,app"},
+		{[]string{"'public'", "app"}, "public,app"},
 		{nil, ""},
 	} {
 		if got := strings.Join(concerns.ParseSearchPath(tc.in), ","); got != tc.want {
