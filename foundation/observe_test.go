@@ -1,4 +1,4 @@
-package foundation
+package foundation_test
 
 import (
 	"io"
@@ -11,6 +11,8 @@ import (
 
 	"github.com/arandu-io/hesape/log"
 	"github.com/arandu-io/hesape/pipeline"
+
+	"github.com/arandu-io/hesape/foundation"
 )
 
 // Exit criterion 2 of phase 3: the overhead of the Collector with tracing off
@@ -56,7 +58,7 @@ func work(w http.ResponseWriter, r *http.Request) {
 // BenchmarkObserveProduction: no dev, no tracing secret, no recorder. This is
 // what a deployed binary runs on every request.
 func BenchmarkObserveProduction(b *testing.B) {
-	h := pipeline.Chain[http.Handler](http.HandlerFunc(work), Observe(false, "", nil))
+	h := pipeline.Chain[http.Handler](http.HandlerFunc(work), foundation.Observe(false, "", nil))
 	benchmark(b, h)
 }
 
@@ -64,7 +66,7 @@ func BenchmarkObserveProduction(b *testing.B) {
 // comparison. It is expected to be much larger -- twenty query records with
 // their stack frames -- and that is fine, because it only happens on a laptop.
 func BenchmarkObserveDevelopment(b *testing.B) {
-	h := pipeline.Chain[http.Handler](http.HandlerFunc(work), Observe(true, "", log.NewRecorder(200)))
+	h := pipeline.Chain[http.Handler](http.HandlerFunc(work), foundation.Observe(true, "", log.NewRecorder(200)))
 	benchmark(b, h)
 }
 
@@ -81,7 +83,7 @@ func BenchmarkObserveDevelopment(b *testing.B) {
 // log, which every environment pays and which are not what this criterion is
 // about.
 func BenchmarkObserveProductionUninstrumented(b *testing.B) {
-	h := pipeline.Chain[http.Handler](http.HandlerFunc(bareWork), Observe(false, "", nil))
+	h := pipeline.Chain[http.Handler](http.HandlerFunc(bareWork), foundation.Observe(false, "", nil))
 	benchmark(b, h)
 }
 
@@ -122,7 +124,7 @@ func TestTheCollectorIsAbsentInProduction(t *testing.T) {
 	var installed bool
 	h := pipeline.Chain[http.Handler](http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		installed = log.FromContext(r.Context()) != nil
-	}), Observe(false, "", nil))
+	}), foundation.Observe(false, "", nil))
 
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
 	if installed {
@@ -133,7 +135,7 @@ func TestTheCollectorIsAbsentInProduction(t *testing.T) {
 // TestNothingIsRecordedWithoutARecorder: passing nil is what a production
 // pipeline does, and it must not be a special case anyone has to remember.
 func TestNothingIsRecordedWithoutARecorder(t *testing.T) {
-	h := pipeline.Chain[http.Handler](http.HandlerFunc(work), Observe(false, "", nil))
+	h := pipeline.Chain[http.Handler](http.HandlerFunc(work), foundation.Observe(false, "", nil))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
 }
 
@@ -142,7 +144,7 @@ func TestNothingIsRecordedWithoutARecorder(t *testing.T) {
 // nothing.
 func TestTheTracingHeaderTurnsItOnForOneRequest(t *testing.T) {
 	recorder := log.NewRecorder(10)
-	h := pipeline.Chain[http.Handler](http.HandlerFunc(work), Observe(false, "s3cret", recorder))
+	h := pipeline.Chain[http.Handler](http.HandlerFunc(work), foundation.Observe(false, "s3cret", recorder))
 
 	plain := httptest.NewRequest(http.MethodGet, "/customers", nil)
 	h.ServeHTTP(httptest.NewRecorder(), plain)
@@ -172,7 +174,7 @@ func TestTheTracingHeaderTurnsItOnForOneRequest(t *testing.T) {
 // empty header.
 func TestAnEmptySecretDoesNotEnableTracing(t *testing.T) {
 	recorder := log.NewRecorder(10)
-	h := pipeline.Chain[http.Handler](http.HandlerFunc(work), Observe(false, "", recorder))
+	h := pipeline.Chain[http.Handler](http.HandlerFunc(work), foundation.Observe(false, "", recorder))
 
 	r := httptest.NewRequest(http.MethodGet, "/customers", nil)
 	r.Header.Set(log.TracingHeader, "")
@@ -200,7 +202,7 @@ func TestRequestIDIsSanitized(t *testing.T) {
 		r.Header.Set("X-Request-ID", id)
 
 		pipeline.Chain[http.Handler](http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
-			Observe(true, "", nil)).ServeHTTP(rec, r)
+			foundation.Observe(true, "", nil)).ServeHTTP(rec, r)
 
 		got := rec.Header().Get("X-Request-ID")
 		if kept && got != id {
@@ -229,7 +231,7 @@ func TestStatusWriterSupportsFlush(t *testing.T) {
 		flushed = true
 	})
 
-	pipeline.Chain[http.Handler](handler, Observe(true, "", nil)).
+	pipeline.Chain[http.Handler](handler, foundation.Observe(true, "", nil)).
 		ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/stream", nil))
 
 	if !flushed {

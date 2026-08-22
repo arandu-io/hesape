@@ -1,10 +1,12 @@
-package html
+package html_test
 
 import (
 	stdhtml "html"
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/arandu-io/hesape/html"
 )
 
 // fakeUrls is a UrlGenerator that echoes what it is given, so a test can see
@@ -58,7 +60,7 @@ func join(path string, extra []string) string {
 	return path
 }
 
-func newBuilder() *HtmlBuilder { return NewHtmlBuilder(newFakeUrls()) }
+func newBuilder() *html.HtmlBuilder { return html.NewHtmlBuilder(newFakeUrls()) }
 
 func TestEntitiesConvertsTheFive(t *testing.T) {
 	got := string(newBuilder().Entities(`<b>Tom & "Jerry"'s</b>`))
@@ -103,7 +105,7 @@ func TestDecodeReversesEntities(t *testing.T) {
 }
 
 func TestAttributesAreSortedAndEscaped(t *testing.T) {
-	got := string(newBuilder().Attributes(Attrs{"id": "x", "class": `a"b`, "required": "required"}))
+	got := string(newBuilder().Attributes(html.Attrs{"id": "x", "class": `a"b`, "required": "required"}))
 	want := ` class="a&quot;b" id="x" required="required"`
 
 	if got != want {
@@ -120,7 +122,7 @@ func TestAttributesIsEmptyForAnEmptyMap(t *testing.T) {
 // PHP concatenates the key. A key that closes the tag is a script tag there.
 func TestAttributesDropsAnIllegalName(t *testing.T) {
 	for _, key := range []string{`x"><script>`, "has space", "a=b", "a/b", "", "a>b", "a'b"} {
-		if got := string(newBuilder().Attributes(Attrs{key: "1"})); got != "" {
+		if got := string(newBuilder().Attributes(html.Attrs{key: "1"})); got != "" {
 			t.Errorf("Attributes with key %q = %q, want it dropped", key, got)
 		}
 	}
@@ -129,7 +131,7 @@ func TestAttributesDropsAnIllegalName(t *testing.T) {
 // HTMX and Alpine write attribute names the framework depends on.
 func TestAttributesKeepsFrameworkNames(t *testing.T) {
 	for _, key := range []string{"hx-post", "x-data", "@click", ":class", "data-variant", "aria-label"} {
-		if got := string(newBuilder().Attributes(Attrs{key: "1"})); got != " "+key+`="1"` {
+		if got := string(newBuilder().Attributes(html.Attrs{key: "1"})); got != " "+key+`="1"` {
 			t.Errorf("Attributes with key %q = %q, want it kept", key, got)
 		}
 	}
@@ -138,7 +140,7 @@ func TestAttributesKeepsFrameworkNames(t *testing.T) {
 // A Go map is a reference. Writing src into the caller's map would leak into
 // the next call.
 func TestScriptDoesNotWriteIntoTheCallersMap(t *testing.T) {
-	attributes := Attrs{"defer": "defer"}
+	attributes := html.Attrs{"defer": "defer"}
 	newBuilder().Script("app.js", attributes, false)
 
 	if _, ok := attributes["src"]; ok {
@@ -156,7 +158,7 @@ func TestScript(t *testing.T) {
 }
 
 func TestStyleDefaultsAndLetsTheCallerWin(t *testing.T) {
-	got := string(newBuilder().Style("app.css", Attrs{"media": "print"}, true))
+	got := string(newBuilder().Style("app.css", html.Attrs{"media": "print"}, true))
 	want := `<link href="https://cdn.test/app.css" media="print" rel="stylesheet" type="text/css">` + "\n"
 
 	if got != want {
@@ -234,7 +236,7 @@ func TestLinkRouteAndLinkAction(t *testing.T) {
 func TestLinkRouteReportsAFailedLookup(t *testing.T) {
 	urls := newFakeUrls()
 	urls.err = errNoRoute
-	builder := NewHtmlBuilder(urls)
+	builder := html.NewHtmlBuilder(urls)
 
 	if _, err := builder.LinkRoute("absent", "x", nil, nil); err == nil {
 		t.Fatal("LinkRoute with an unknown name returned no error")
@@ -247,7 +249,7 @@ func TestLinkRouteReportsAFailedLookup(t *testing.T) {
 var errNoRoute = url.InvalidHostError("no such route")
 
 func TestOlAndUlEscapeTheLeaves(t *testing.T) {
-	got := string(newBuilder().Ul([]ListItem{{Label: "<b>one</b>"}}, Attrs{"class": "list"}))
+	got := string(newBuilder().Ul([]html.ListItem{{Label: "<b>one</b>"}}, html.Attrs{"class": "list"}))
 	want := `<ul class="list"><li>&lt;b&gt;one&lt;/b&gt;</li></ul>`
 
 	if got != want {
@@ -257,8 +259,8 @@ func TestOlAndUlEscapeTheLeaves(t *testing.T) {
 
 // HtmlBuilder.php:305 concatenates the heading of a nested list raw.
 func TestNestedListingEscapesTheHeading(t *testing.T) {
-	got := string(newBuilder().Ol([]ListItem{
-		{Label: `<img src=x onerror=alert(1)>`, Items: []ListItem{{Label: "a"}}},
+	got := string(newBuilder().Ol([]html.ListItem{
+		{Label: `<img src=x onerror=alert(1)>`, Items: []html.ListItem{{Label: "a"}}},
 	}, nil))
 
 	if strings.Contains(got, "<img") {
@@ -271,7 +273,7 @@ func TestNestedListingEscapesTheHeading(t *testing.T) {
 
 // An integer key in PHP nests without an <li> around it.
 func TestNestedListingWithNoHeadingHasNoListItem(t *testing.T) {
-	got := string(newBuilder().Ol([]ListItem{{Items: []ListItem{{Label: "a"}}}}, nil))
+	got := string(newBuilder().Ol([]html.ListItem{{Items: []html.ListItem{{Label: "a"}}}}, nil))
 	want := "<ol><ol><li>a</li></ol></ol>"
 
 	if got != want {
@@ -280,7 +282,7 @@ func TestNestedListingWithNoHeadingHasNoListItem(t *testing.T) {
 }
 
 func TestEmptyListWritesNothing(t *testing.T) {
-	if got := string(newBuilder().Ul(nil, Attrs{"class": "x"})); got != "" {
+	if got := string(newBuilder().Ul(nil, html.Attrs{"class": "x"})); got != "" {
 		t.Fatalf("Ul(nil) = %q, want empty", got)
 	}
 }

@@ -1,4 +1,4 @@
-package concerns
+package concerns_test
 
 import (
 	"context"
@@ -9,6 +9,8 @@ import (
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database/query"
+
+	"github.com/arandu-io/hesape/database/concerns"
 )
 
 // rows is a Chunkable over a slice, which is enough to test the arithmetic that
@@ -59,7 +61,7 @@ func (r *rows) Get(context.Context, auth.Grant) ([]int, error) {
 	return r.all[start:end], nil
 }
 
-func (r *rows) Clone() KeyChunkable[int] {
+func (r *rows) Clone() concerns.KeyChunkable[int] {
 	clone := *r
 	return &clone
 }
@@ -86,7 +88,7 @@ func (r *rows) ValueOf(row int, _ string) (any, bool) { return row, true }
 func TestChunkRefusesAnUnorderedQuery(t *testing.T) {
 	source := &rows{all: []int{1, 2, 3}}
 
-	_, err := Chunk(context.Background(), auth.Grant{}, source, 2, func([]int, int) bool { return true })
+	_, err := concerns.Chunk(context.Background(), auth.Grant{}, source, 2, func([]int, int) bool { return true })
 	if err == nil {
 		t.Fatal("Chunk walked an unordered query, which repeats rows and skips others")
 	}
@@ -96,7 +98,7 @@ func TestChunkWalksEveryRowOnce(t *testing.T) {
 	source := &rows{all: []int{1, 2, 3, 4, 5}, ordered: true}
 
 	var seen []int
-	ok, err := Chunk(context.Background(), auth.Grant{}, source, 2, func(page []int, _ int) bool {
+	ok, err := concerns.Chunk(context.Background(), auth.Grant{}, source, 2, func(page []int, _ int) bool {
 		seen = append(seen, page...)
 		return true
 	})
@@ -115,7 +117,7 @@ func TestChunkStopsWhenTheCallbackAnswersFalse(t *testing.T) {
 	source := &rows{all: []int{1, 2, 3, 4, 5, 6}, ordered: true}
 
 	pages := 0
-	ok, err := Chunk(context.Background(), auth.Grant{}, source, 2, func([]int, int) bool {
+	ok, err := concerns.Chunk(context.Background(), auth.Grant{}, source, 2, func([]int, int) bool {
 		pages++
 		return false
 	})
@@ -135,7 +137,7 @@ func TestChunkHonoursAnExistingLimit(t *testing.T) {
 	source.Limit(3)
 
 	var seen []int
-	if _, err := Chunk(context.Background(), auth.Grant{}, source, 2, func(page []int, _ int) bool {
+	if _, err := concerns.Chunk(context.Background(), auth.Grant{}, source, 2, func(page []int, _ int) bool {
 		seen = append(seen, page...)
 		return true
 	}); err != nil {
@@ -149,25 +151,25 @@ func TestChunkHonoursAnExistingLimit(t *testing.T) {
 func TestFirstAndSole(t *testing.T) {
 	ctx, g := context.Background(), auth.Grant{}
 
-	one, found, err := First(ctx, g, &rows{all: []int{7, 8}, ordered: true})
+	one, found, err := concerns.First(ctx, g, &rows{all: []int{7, 8}, ordered: true})
 	if err != nil || !found || one != 7 {
 		t.Fatalf("First = (%v, %v, %v), want (7, true, nil)", one, found, err)
 	}
 
-	if _, found, _ := First(ctx, g, &rows{ordered: true}); found {
+	if _, found, _ := concerns.First(ctx, g, &rows{ordered: true}); found {
 		t.Fatal("First found a row in an empty result")
 	}
 
-	if _, err := FirstOrFail(ctx, g, &rows{ordered: true}, ""); !errors.Is(err, ErrRecordNotFound) {
+	if _, err := concerns.FirstOrFail(ctx, g, &rows{ordered: true}, ""); !errors.Is(err, concerns.ErrRecordNotFound) {
 		t.Fatalf("FirstOrFail answered %v, want ErrRecordNotFound", err)
 	}
 
-	if _, err := Sole(ctx, g, &rows{ordered: true}); !errors.Is(err, ErrRecordsNotFound) {
+	if _, err := concerns.Sole(ctx, g, &rows{ordered: true}); !errors.Is(err, concerns.ErrRecordsNotFound) {
 		t.Fatalf("Sole on nothing answered %v, want ErrRecordsNotFound", err)
 	}
 
-	var many *MultipleRecordsFoundError
-	if _, err := Sole(ctx, g, &rows{all: []int{1, 2, 3}, ordered: true}); !errors.As(err, &many) {
+	var many *concerns.MultipleRecordsFoundError
+	if _, err := concerns.Sole(ctx, g, &rows{all: []int{1, 2, 3}, ordered: true}); !errors.As(err, &many) {
 		t.Fatalf("Sole on three rows answered %v, want MultipleRecordsFoundError", err)
 	} else if many.GetCount() != 2 {
 		t.Fatalf("Sole reported %d records; it reads two because that is all it fetched", many.GetCount())
@@ -178,7 +180,7 @@ func TestLazyYieldsEveryRowAndStops(t *testing.T) {
 	source := &rows{all: []int{1, 2, 3, 4, 5}, ordered: true}
 
 	var seen []int
-	for row, err := range Lazy(context.Background(), auth.Grant{}, source, 2) {
+	for row, err := range concerns.Lazy(context.Background(), auth.Grant{}, source, 2) {
 		if err != nil {
 			t.Fatalf("Lazy: %v", err)
 		}
@@ -191,7 +193,7 @@ func TestLazyYieldsEveryRowAndStops(t *testing.T) {
 
 func TestLazyRefusesAChunkSizeBelowOne(t *testing.T) {
 	got := false
-	for _, err := range Lazy(context.Background(), auth.Grant{}, &rows{ordered: true}, 0) {
+	for _, err := range concerns.Lazy(context.Background(), auth.Grant{}, &rows{ordered: true}, 0) {
 		if err == nil {
 			t.Fatal("Lazy yielded a row for a chunk size of zero")
 		}
@@ -205,13 +207,13 @@ func TestLazyRefusesAChunkSizeBelowOne(t *testing.T) {
 func TestTapAndPipe(t *testing.T) {
 	source := &rows{}
 
-	if Tap(source, func(r *rows) { r.ordered = true }) != source {
+	if concerns.Tap(source, func(r *rows) { r.ordered = true }) != source {
 		t.Fatal("Tap answered something other than what it was given")
 	}
 	if !source.ordered {
 		t.Fatal("Tap did not run the callback")
 	}
-	if Pipe(source, func(r *rows) int { return len(r.all) }) != 0 {
+	if concerns.Pipe(source, func(r *rows) int { return len(r.all) }) != 0 {
 		t.Fatal("Pipe did not answer what the callback returned")
 	}
 }
@@ -223,7 +225,7 @@ func TestWrapJSONPath(t *testing.T) {
 		"[0]->name":      `'$[0]."name"'`,
 		"tags[0]":        `'$."tags"[0]'`,
 	} {
-		if got := WrapJSONPath(value, "->"); got != want {
+		if got := concerns.WrapJSONPath(value, "->"); got != want {
 			t.Fatalf("WrapJSONPath(%q) = %q, want %q", value, got, want)
 		}
 	}
@@ -232,7 +234,7 @@ func TestWrapJSONPath(t *testing.T) {
 func TestWrapJSONFieldAndPath(t *testing.T) {
 	wrap := func(v any) string { return `"` + v.(string) + `"` }
 
-	field, path := WrapJSONFieldAndPath(wrap, "options->language")
+	field, path := concerns.WrapJSONFieldAndPath(wrap, "options->language")
 	if field != `"options"` {
 		t.Fatalf("field = %q", field)
 	}
@@ -240,7 +242,7 @@ func TestWrapJSONFieldAndPath(t *testing.T) {
 		t.Fatalf("path = %q", path)
 	}
 
-	field, path = WrapJSONFieldAndPath(wrap, "options")
+	field, path = concerns.WrapJSONFieldAndPath(wrap, "options")
 	if field != `"options"` || path != "" {
 		t.Fatalf("a column with no path gave (%q, %q)", field, path)
 	}
@@ -257,7 +259,7 @@ func TestParseSearchPath(t *testing.T) {
 		{[]string{"'public'", "laravel"}, "public,laravel"},
 		{nil, ""},
 	} {
-		if got := strings.Join(ParseSearchPath(tc.in), ","); got != tc.want {
+		if got := strings.Join(concerns.ParseSearchPath(tc.in), ","); got != tc.want {
 			t.Fatalf("ParseSearchPath(%v) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
@@ -265,11 +267,11 @@ func TestParseSearchPath(t *testing.T) {
 
 func TestWhereTodayUsesTheDatePartAndBinds(t *testing.T) {
 	frozen := time.Date(2026, 8, 11, 13, 45, 0, 0, time.UTC)
-	Now = func() time.Time { return frozen }
-	t.Cleanup(func() { Now = time.Now })
+	concerns.Now = func() time.Time { return frozen }
+	t.Cleanup(func() { concerns.Now = time.Now })
 
 	b := query.NewBuilder(nil, nil, nil)
-	WhereToday(b, "", "published_at")
+	concerns.WhereToday(b, "", "published_at")
 
 	if len(b.Wheres) != 1 {
 		t.Fatalf("WhereToday added %d clauses, want 1", len(b.Wheres))
@@ -288,11 +290,11 @@ func TestWhereTodayUsesTheDatePartAndBinds(t *testing.T) {
 
 func TestWherePastBindsOnePerColumn(t *testing.T) {
 	frozen := time.Date(2026, 8, 11, 13, 45, 0, 0, time.UTC)
-	Now = func() time.Time { return frozen }
-	t.Cleanup(func() { Now = time.Now })
+	concerns.Now = func() time.Time { return frozen }
+	t.Cleanup(func() { concerns.Now = time.Now })
 
 	b := query.NewBuilder(nil, nil, nil)
-	WherePast(b, "starts_at", "ends_at")
+	concerns.WherePast(b, "starts_at", "ends_at")
 
 	if len(b.Wheres) != 2 {
 		t.Fatalf("WherePast added %d clauses for two columns", len(b.Wheres))
@@ -310,7 +312,7 @@ func TestWherePastBindsOnePerColumn(t *testing.T) {
 
 func TestOrWhereTodayIsAnOrClause(t *testing.T) {
 	b := query.NewBuilder(nil, nil, nil)
-	OrWhereToday(b, "published_at")
+	concerns.OrWhereToday(b, "published_at")
 
 	if b.Wheres[0].Boolean != "or" {
 		t.Fatalf("OrWhereToday added a %q clause", b.Wheres[0].Boolean)

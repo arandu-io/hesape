@@ -1,21 +1,23 @@
-package html
+package html_test
 
 import (
 	"errors"
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/arandu-io/hesape/html"
 )
 
-func newForm() (*FormBuilder, *fakeUrls) {
+func newForm() (*html.FormBuilder, *fakeUrls) {
 	urls := newFakeUrls()
-	return NewFormBuilder(NewHtmlBuilder(urls), urls, "tok3n"), urls
+	return html.NewFormBuilder(html.NewHtmlBuilder(urls), urls, "tok3n"), urls
 }
 
 func TestOpenWritesTheMethodActionAndToken(t *testing.T) {
 	form, _ := newForm()
 
-	got, err := form.Open(OpenOptions{URL: []string{"/invoices"}})
+	got, err := form.Open(html.OpenOptions{URL: []string{"/invoices"}})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -31,7 +33,7 @@ func TestOpenFallsBackToTheCurrentUrl(t *testing.T) {
 	form, urls := newForm()
 	urls.current = "/here"
 
-	got, err := form.Open(OpenOptions{})
+	got, err := form.Open(html.OpenOptions{})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -43,7 +45,7 @@ func TestOpenFallsBackToTheCurrentUrl(t *testing.T) {
 func TestOpenSpoofsTheMethod(t *testing.T) {
 	form, _ := newForm()
 
-	got, err := form.Open(OpenOptions{Method: "put", URL: []string{"/invoices/7"}})
+	got, err := form.Open(html.OpenOptions{Method: "put", URL: []string{"/invoices/7"}})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -59,7 +61,7 @@ func TestOpenSpoofsTheMethod(t *testing.T) {
 func TestOpenGetHasNoAppendage(t *testing.T) {
 	form, _ := newForm()
 
-	got, err := form.Open(OpenOptions{Method: "get", URL: []string{"/search"}})
+	got, err := form.Open(html.OpenOptions{Method: "get", URL: []string{"/search"}})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -74,7 +76,7 @@ func TestOpenGetHasNoAppendage(t *testing.T) {
 func TestOpenWithFilesSetsTheEnctype(t *testing.T) {
 	form, _ := newForm()
 
-	got, _ := form.Open(OpenOptions{Files: true})
+	got, _ := form.Open(html.OpenOptions{Files: true})
 	if !strings.Contains(string(got), `enctype="multipart/form-data"`) {
 		t.Fatalf("Open = %q, want the enctype", got)
 	}
@@ -84,7 +86,7 @@ func TestOpenWithFilesSetsTheEnctype(t *testing.T) {
 func TestOpenLetsTheCallerOverrideAComputedAttribute(t *testing.T) {
 	form, _ := newForm()
 
-	got, _ := form.Open(OpenOptions{Attributes: Attrs{"action": "/elsewhere", "class": "stack"}})
+	got, _ := form.Open(html.OpenOptions{Attributes: html.Attrs{"action": "/elsewhere", "class": "stack"}})
 	if !strings.Contains(string(got), `action="/elsewhere"`) {
 		t.Fatalf("Open = %q, want the caller's action", got)
 	}
@@ -93,26 +95,26 @@ func TestOpenLetsTheCallerOverrideAComputedAttribute(t *testing.T) {
 func TestOpenReportsAFailedRouteLookup(t *testing.T) {
 	urls := newFakeUrls()
 	urls.err = url.InvalidHostError("no such route")
-	form := NewFormBuilder(NewHtmlBuilder(urls), urls, "tok3n")
+	form := html.NewFormBuilder(html.NewHtmlBuilder(urls), urls, "tok3n")
 
-	if _, err := form.Open(OpenOptions{Route: []string{"absent"}}); err == nil {
+	if _, err := form.Open(html.OpenOptions{Route: []string{"absent"}}); err == nil {
 		t.Fatal("Open with an unknown route returned no error")
 	}
 }
 
 func TestTokenWithoutOneIsAnError(t *testing.T) {
 	urls := newFakeUrls()
-	form := NewFormBuilder(NewHtmlBuilder(urls), urls, "")
+	form := html.NewFormBuilder(html.NewHtmlBuilder(urls), urls, "")
 
-	if _, err := form.Token(); !errors.Is(err, ErrNoToken) {
+	if _, err := form.Token(); !errors.Is(err, html.ErrNoToken) {
 		t.Fatalf("Token = %v, want ErrNoToken", err)
 	}
 }
 
 func TestTokenComesFromTheSessionWhenTheBuilderHasNone(t *testing.T) {
 	urls := newFakeUrls()
-	form := NewFormBuilder(NewHtmlBuilder(urls), urls, "")
-	form.SetSessionStore(OldInput{Token: "from-session"})
+	form := html.NewFormBuilder(html.NewHtmlBuilder(urls), urls, "")
+	form.SetSessionStore(html.OldInput{Token: "from-session"})
 
 	got, err := form.Token()
 	if err != nil {
@@ -126,7 +128,7 @@ func TestTokenComesFromTheSessionWhenTheBuilderHasNone(t *testing.T) {
 func TestCloseForgetsTheModelAndTheLabels(t *testing.T) {
 	form, _ := newForm()
 	form.Label("email", "", nil)
-	form.SetModel(ModelAttributes{"email": "ada@example.com"})
+	form.SetModel(html.ModelAttributes{"email": "ada@example.com"})
 
 	if got := string(form.Close()); got != "</form>" {
 		t.Fatalf("Close = %q", got)
@@ -196,7 +198,7 @@ func TestPasswordWritesAnEmptyValue(t *testing.T) {
 
 func TestPasswordIsNeverFilledFromOldInput(t *testing.T) {
 	form, _ := newForm()
-	form.SetSessionStore(OldInput{Values: url.Values{"secret": {"hunter2"}}})
+	form.SetSessionStore(html.OldInput{Values: url.Values{"secret": {"hunter2"}}})
 
 	if got := string(form.Password("secret", nil)); strings.Contains(got, "hunter2") {
 		t.Fatalf("Password = %q, want no old value", got)
@@ -205,7 +207,7 @@ func TestPasswordIsNeverFilledFromOldInput(t *testing.T) {
 
 func TestOldInputWinsOverTheGivenValue(t *testing.T) {
 	form, _ := newForm()
-	form.SetSessionStore(OldInput{Values: url.Values{"email": {"typed@example.com"}}})
+	form.SetSessionStore(html.OldInput{Values: url.Values{"email": {"typed@example.com"}}})
 
 	if got := string(form.Text("email", "stored@example.com", nil)); !strings.Contains(got, `value="typed@example.com"`) {
 		t.Fatalf("Text = %q, want the old input", got)
@@ -214,7 +216,7 @@ func TestOldInputWinsOverTheGivenValue(t *testing.T) {
 
 func TestTheModelFillsTheInput(t *testing.T) {
 	form, _ := newForm()
-	form.SetModel(ModelAttributes{"email": "ada@example.com"})
+	form.SetModel(html.ModelAttributes{"email": "ada@example.com"})
 
 	if got := string(form.Text("email", "", nil)); !strings.Contains(got, `value="ada@example.com"`) {
 		t.Fatalf("Text = %q, want the model value", got)
@@ -224,7 +226,7 @@ func TestTheModelFillsTheInput(t *testing.T) {
 // FormBuilder::transformKey turns the array syntax into the session's key.
 func TestTransformKeyReachesANestedName(t *testing.T) {
 	form, _ := newForm()
-	form.SetSessionStore(OldInput{Values: url.Values{"address.city": {"Recife"}}})
+	form.SetSessionStore(html.OldInput{Values: url.Values{"address.city": {"Recife"}}})
 
 	if got := string(form.Text("address[city]", "", nil)); !strings.Contains(got, `value="Recife"`) {
 		t.Fatalf("Text = %q, want the old input under the transformed key", got)
@@ -279,7 +281,7 @@ func TestTextareaDefaultsItsSize(t *testing.T) {
 func TestTextareaReadsTheSizeShortcut(t *testing.T) {
 	form, _ := newForm()
 
-	got := string(form.Textarea("body", "", Attrs{"size": "30x5"}))
+	got := string(form.Textarea("body", "", html.Attrs{"size": "30x5"}))
 	if !strings.Contains(got, `cols="30"`) || !strings.Contains(got, `rows="5"`) {
 		t.Fatalf("Textarea = %q, want cols 30 and rows 5", got)
 	}
@@ -299,7 +301,7 @@ func TestTextareaEscapesItsBody(t *testing.T) {
 func TestSelect(t *testing.T) {
 	form, _ := newForm()
 
-	got := string(form.Select("country", []Option{
+	got := string(form.Select("country", []html.Option{
 		{Value: "br", Display: "Brazil"},
 		{Value: "pt", Display: "Portugal"},
 	}, []string{"pt"}, nil))
@@ -317,7 +319,7 @@ func TestSelect(t *testing.T) {
 func TestSelectEscapesTheDisplayAndTheValue(t *testing.T) {
 	form, _ := newForm()
 
-	got := string(form.Select("x", []Option{{Value: `a"b`, Display: "<b>c</b>"}}, nil, nil))
+	got := string(form.Select("x", []html.Option{{Value: `a"b`, Display: "<b>c</b>"}}, nil, nil))
 	if strings.Contains(got, "<b>") {
 		t.Fatalf("Select did not escape the display: %s", got)
 	}
@@ -330,8 +332,8 @@ func TestSelectEscapesTheDisplayAndTheValue(t *testing.T) {
 func TestSelectWritesAnOptionGroup(t *testing.T) {
 	form, _ := newForm()
 
-	got := string(form.Select("city", []Option{
-		{Value: "Brazil", Options: []Option{{Value: "rec", Display: "Recife"}}},
+	got := string(form.Select("city", []html.Option{
+		{Value: "Brazil", Options: []html.Option{{Value: "rec", Display: "Recife"}}},
 	}, nil, nil))
 
 	want := `<select name="city"><optgroup label="Brazil"><option value="rec">Recife</option></optgroup></select>`
@@ -342,9 +344,9 @@ func TestSelectWritesAnOptionGroup(t *testing.T) {
 
 func TestSelectTakesTheSelectionFromOldInput(t *testing.T) {
 	form, _ := newForm()
-	form.SetSessionStore(OldInput{Values: url.Values{"country": {"pt"}}})
+	form.SetSessionStore(html.OldInput{Values: url.Values{"country": {"pt"}}})
 
-	got := string(form.Select("country", []Option{
+	got := string(form.Select("country", []html.Option{
 		{Value: "br", Display: "Brazil"},
 		{Value: "pt", Display: "Portugal"},
 	}, []string{"br"}, nil))
@@ -359,11 +361,11 @@ func TestSelectTakesTheSelectionFromOldInput(t *testing.T) {
 func TestSelectSelectsMoreThanOne(t *testing.T) {
 	form, _ := newForm()
 
-	got := string(form.Select("tags", []Option{
+	got := string(form.Select("tags", []html.Option{
 		{Value: "a", Display: "A"},
 		{Value: "b", Display: "B"},
 		{Value: "c", Display: "C"},
-	}, []string{"a", "c"}, Attrs{"multiple": "multiple"}))
+	}, []string{"a", "c"}, html.Attrs{"multiple": "multiple"}))
 
 	if strings.Count(got, `selected="selected"`) != 2 {
 		t.Fatalf("Select = %q, want two selected options", got)
@@ -429,7 +431,7 @@ func TestCheckboxDefaultsToOneAndTakesTheGivenState(t *testing.T) {
 // rejected submission it has to come back unchecked whatever its default says.
 func TestCheckboxIsUncheckedWhenTheSubmissionOmittedIt(t *testing.T) {
 	form, _ := newForm()
-	form.SetSessionStore(OldInput{Values: url.Values{"email": {"ada@example.com"}}})
+	form.SetSessionStore(html.OldInput{Values: url.Values{"email": {"ada@example.com"}}})
 	checked := true
 
 	if got := string(form.Checkbox("terms", "", &checked, nil)); strings.Contains(got, "checked") {
@@ -439,7 +441,7 @@ func TestCheckboxIsUncheckedWhenTheSubmissionOmittedIt(t *testing.T) {
 
 func TestCheckboxIsCheckedFromOldInput(t *testing.T) {
 	form, _ := newForm()
-	form.SetSessionStore(OldInput{Values: url.Values{"tags": {"a", "c"}}})
+	form.SetSessionStore(html.OldInput{Values: url.Values{"tags": {"a", "c"}}})
 
 	if got := string(form.Checkbox("tags", "c", nil, nil)); !strings.Contains(got, "checked") {
 		t.Fatalf("Checkbox = %q, want it checked", got)
@@ -451,7 +453,7 @@ func TestCheckboxIsCheckedFromOldInput(t *testing.T) {
 
 func TestCheckboxIsCheckedFromTheModel(t *testing.T) {
 	form, _ := newForm()
-	form.SetModel(ModelAttributes{"active": "1", "archived": "0"})
+	form.SetModel(html.ModelAttributes{"active": "1", "archived": "0"})
 
 	if got := string(form.Checkbox("active", "", nil, nil)); !strings.Contains(got, "checked") {
 		t.Fatalf("Checkbox = %q, want it checked", got)
@@ -472,7 +474,7 @@ func TestRadioDefaultsItsValueToTheName(t *testing.T) {
 
 func TestRadioIsCheckedFromOldInput(t *testing.T) {
 	form, _ := newForm()
-	form.SetSessionStore(OldInput{Values: url.Values{"plan": {"pro"}}})
+	form.SetSessionStore(html.OldInput{Values: url.Values{"plan": {"pro"}}})
 
 	if got := string(form.Radio("plan", "pro", nil, nil)); !strings.Contains(got, "checked") {
 		t.Fatalf("Radio = %q, want it checked", got)
@@ -510,7 +512,7 @@ func TestButtonEscapesItsLabel(t *testing.T) {
 func TestButtonKeepsAGivenType(t *testing.T) {
 	form, _ := newForm()
 
-	if got := string(form.Button("Save", Attrs{"type": "submit"})); !strings.Contains(got, `type="submit"`) {
+	if got := string(form.Button("Save", html.Attrs{"type": "submit"})); !strings.Contains(got, `type="submit"`) {
 		t.Fatalf("Button = %q", got)
 	}
 }
@@ -521,7 +523,7 @@ func TestGetSessionStoreAndSetSessionStore(t *testing.T) {
 	if form.GetSessionStore() != nil {
 		t.Fatal("GetSessionStore on a fresh builder is not nil")
 	}
-	if form.SetSessionStore(OldInput{}) != form {
+	if form.SetSessionStore(html.OldInput{}) != form {
 		t.Fatal("SetSessionStore did not return the builder")
 	}
 	if form.GetSessionStore() == nil {
@@ -541,7 +543,7 @@ func TestOldAndOldInputIsEmpty(t *testing.T) {
 		t.Fatal("OldInputIsEmpty with no session is true; PHP answers false")
 	}
 
-	form.SetSessionStore(OldInput{Values: url.Values{"email": {"ada@example.com"}}})
+	form.SetSessionStore(html.OldInput{Values: url.Values{"email": {"ada@example.com"}}})
 	if got := form.Old("email"); len(got) != 1 || got[0] != "ada@example.com" {
 		t.Fatalf("Old = %v", got)
 	}
@@ -553,7 +555,7 @@ func TestOldAndOldInputIsEmpty(t *testing.T) {
 func TestGetIdAttributeAndGetValueAttribute(t *testing.T) {
 	form, _ := newForm()
 
-	if got := form.GetIdAttribute("email", Attrs{"id": "given"}); got != "given" {
+	if got := form.GetIdAttribute("email", html.Attrs{"id": "given"}); got != "given" {
 		t.Errorf("GetIdAttribute = %q, want the given id", got)
 	}
 	if got := form.GetIdAttribute("email", nil); got != "" {
@@ -568,7 +570,7 @@ func TestGetIdAttributeAndGetValueAttribute(t *testing.T) {
 func TestModelOpensAndFills(t *testing.T) {
 	form, _ := newForm()
 
-	open, err := form.Model(ModelAttributes{"email": "ada@example.com"}, OpenOptions{URL: []string{"/profile"}})
+	open, err := form.Model(html.ModelAttributes{"email": "ada@example.com"}, html.OpenOptions{URL: []string{"/profile"}})
 	if err != nil {
 		t.Fatalf("Model: %v", err)
 	}

@@ -1,9 +1,11 @@
-package concerns
+package concerns_test
 
 import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/arandu-io/hesape/database/concerns"
 )
 
 // fakeDriver records everything ManagesTransactions asks of a connection.
@@ -79,8 +81,8 @@ func (d *fakeDriver) Reconnect() error { d.reconnects++; return nil }
 
 func (d *fakeDriver) ReconnectIfMissingConnection() error { return nil }
 
-func newTransactions(driver *fakeDriver) *ManagesTransactions {
-	m := &ManagesTransactions{}
+func newTransactions(driver *fakeDriver) *concerns.ManagesTransactions {
+	m := &concerns.ManagesTransactions{}
 	m.UseTransactions(driver)
 	return m
 }
@@ -189,7 +191,7 @@ func TestDeadlockInsideANestedTransactionIsNotRetried(t *testing.T) {
 		t.Fatalf("BeginTransaction: %v", err)
 	}
 
-	var deadlockErr *DeadlockError
+	var deadlockErr *concerns.DeadlockError
 	err := m.Transaction(func() error { return deadlock }, 3)
 	if !errors.As(err, &deadlockErr) {
 		t.Fatalf("Transaction answered %v, want a DeadlockError", err)
@@ -231,10 +233,10 @@ func TestBeginReconnectsOnALostConnection(t *testing.T) {
 func TestAfterCommitNeedsAManager(t *testing.T) {
 	m := newTransactions(&fakeDriver{})
 
-	if err := m.AfterCommit(func() {}); !errors.Is(err, ErrNoTransactionsManager) {
+	if err := m.AfterCommit(func() {}); !errors.Is(err, concerns.ErrNoTransactionsManager) {
 		t.Fatalf("AfterCommit answered %v with no manager set", err)
 	}
-	if err := m.AfterRollBack(func() {}); !errors.Is(err, ErrNoTransactionsManager) {
+	if err := m.AfterRollBack(func() {}); !errors.Is(err, concerns.ErrNoTransactionsManager) {
 		t.Fatalf("AfterRollBack answered %v with no manager set", err)
 	}
 }

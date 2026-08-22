@@ -1,21 +1,23 @@
-package migrations
+package migrations_test
 
 import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/arandu-io/hesape/database/migrations"
 )
 
 // sqlMigration is a migration whose Up and Down send statements, which is what
 // UpStatements and DownStatements are there to read back.
 type sqlMigration struct {
-	BaseMigration
+	migrations.BaseMigration
 	upErr error
 }
 
 func (sqlMigration) GetName() string { return "2026_01_01_000000_create_widgets_table" }
 
-func (m sqlMigration) Up(ctx context.Context, conn Connection) error {
+func (m sqlMigration) Up(ctx context.Context, conn migrations.Connection) error {
 	if m.upErr != nil {
 		return m.upErr
 	}
@@ -30,24 +32,24 @@ func (m sqlMigration) Up(ctx context.Context, conn Connection) error {
 	return nil
 }
 
-func (sqlMigration) Down(ctx context.Context, conn Connection) error {
+func (sqlMigration) Down(ctx context.Context, conn migrations.Connection) error {
 	_, err := conn.Statement(ctx, `DROP TABLE widgets`, nil)
 	return err
 }
 
 // irreversibleMigration has no Down, which is the case DownStatements answers
 // with nothing rather than an error.
-type irreversibleMigration struct{ BaseMigration }
+type irreversibleMigration struct{ migrations.BaseMigration }
 
 func (irreversibleMigration) GetName() string { return "2026_01_02_000000_backfill_widgets" }
 
-func (irreversibleMigration) Up(ctx context.Context, conn Connection) error {
+func (irreversibleMigration) Up(ctx context.Context, conn migrations.Connection) error {
 	_, err := conn.Statement(ctx, `UPDATE widgets SET id = id`, nil)
 	return err
 }
 
 func TestUpStatementsReturnsWhatTheMigrationWouldSend(t *testing.T) {
-	got, err := UpStatements(context.Background(), sqlMigration{})
+	got, err := migrations.UpStatements(context.Background(), sqlMigration{})
 	if err != nil {
 		t.Fatalf("UpStatements: %v", err)
 	}
@@ -65,20 +67,20 @@ func TestUpStatementsReturnsWhatTheMigrationWouldSend(t *testing.T) {
 func TestUpStatementsRunsNothing(t *testing.T) {
 	// The migration above would fail against any server, because no table
 	// named widgets exists. It cannot fail here, which is the whole point.
-	if _, err := UpStatements(context.Background(), irreversibleMigration{}); err != nil {
+	if _, err := migrations.UpStatements(context.Background(), irreversibleMigration{}); err != nil {
 		t.Fatalf("UpStatements: %v", err)
 	}
 }
 
 func TestUpStatementsReturnsTheMigrationsError(t *testing.T) {
 	boom := errors.New("boom")
-	if _, err := UpStatements(context.Background(), sqlMigration{upErr: boom}); !errors.Is(err, boom) {
+	if _, err := migrations.UpStatements(context.Background(), sqlMigration{upErr: boom}); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want boom", err)
 	}
 }
 
 func TestDownStatementsReturnsWhatTheRollbackWouldSend(t *testing.T) {
-	got, err := DownStatements(context.Background(), sqlMigration{})
+	got, err := migrations.DownStatements(context.Background(), sqlMigration{})
 	if err != nil {
 		t.Fatalf("DownStatements: %v", err)
 	}
@@ -88,7 +90,7 @@ func TestDownStatementsReturnsWhatTheRollbackWouldSend(t *testing.T) {
 }
 
 func TestDownStatementsOfAnIrreversibleMigrationIsEmpty(t *testing.T) {
-	got, err := DownStatements(context.Background(), irreversibleMigration{})
+	got, err := migrations.DownStatements(context.Background(), irreversibleMigration{})
 	if err != nil {
 		t.Fatalf("DownStatements: %v", err)
 	}

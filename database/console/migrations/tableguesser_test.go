@@ -1,6 +1,10 @@
-package migrations
+package migrations_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/arandu-io/hesape/database/console/migrations"
+)
 
 func TestGuessReadsTheTableOutOfTheMigrationName(t *testing.T) {
 	for name, want := range map[string]struct {
@@ -13,7 +17,7 @@ func TestGuessReadsTheTableOutOfTheMigrationName(t *testing.T) {
 		"drop_notes_from_accounts": {"accounts", false},
 		"change_type_in_orders":    {"orders", false},
 	} {
-		table, create, guessed := Guess(name)
+		table, create, guessed := migrations.Guess(name)
 		if !guessed {
 			t.Fatalf("Guess(%q) gave up", name)
 		}
@@ -24,7 +28,7 @@ func TestGuessReadsTheTableOutOfTheMigrationName(t *testing.T) {
 }
 
 func TestGuessSaysWhenItCannot(t *testing.T) {
-	if _, _, guessed := Guess("fix_the_thing"); guessed {
+	if _, _, guessed := migrations.Guess("fix_the_thing"); guessed {
 		t.Fatal("Guess claimed a table for a name that names none")
 	}
 }

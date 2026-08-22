@@ -1,8 +1,10 @@
-package number
+package number_test
 
 import (
 	"math"
 	"testing"
+
+	"github.com/arandu-io/hesape/number"
 )
 
 func TestFileSize(t *testing.T) {
@@ -22,7 +24,7 @@ func TestFileSize(t *testing.T) {
 		{math.MaxInt64, 2, "9.22 EB"},
 	}
 	for _, c := range cases {
-		if got := FileSize(c.bytes, c.precision, -1, false); got != c.want {
+		if got := number.FileSize(c.bytes, c.precision, -1, false); got != c.want {
 			t.Errorf("FileSize(%v, %d, -1, false) = %q, want %q", c.bytes, c.precision, got, c.want)
 		}
 	}
@@ -32,10 +34,10 @@ func TestFileSize(t *testing.T) {
 // when the count is more than nine tenths of the base, not when it reaches the
 // base, so 999 bytes read as a kilobyte.
 func TestFileSizeStepsUpAtNineTenthsOfTheBase(t *testing.T) {
-	if got := FileSize(999, 0, -1, false); got != "1 KB" {
+	if got := number.FileSize(999, 0, -1, false); got != "1 KB" {
 		t.Errorf("FileSize(999, 0, -1, false) = %q, want %q", got, "1 KB")
 	}
-	if got := FileSize(901, 3, -1, false); got != "0.901 KB" {
+	if got := number.FileSize(901, 3, -1, false); got != "0.901 KB" {
 		t.Errorf("FileSize(901, 3, -1, false) = %q, want %q", got, "0.901 KB")
 	}
 }
@@ -55,7 +57,7 @@ func TestFileSizeBinaryPrefix(t *testing.T) {
 		{math.MaxInt64, 2, "8.00 EiB"},
 	}
 	for _, c := range cases {
-		if got := FileSize(c.bytes, c.precision, -1, true); got != c.want {
+		if got := number.FileSize(c.bytes, c.precision, -1, true); got != c.want {
 			t.Errorf("FileSize(%v, %d, -1, true) = %q, want %q", c.bytes, c.precision, got, c.want)
 		}
 	}
@@ -65,7 +67,7 @@ func TestFileSizeBinaryPrefix(t *testing.T) {
 // bound is a plain greater-than, which no negative count passes, so the value
 // keeps the byte unit instead of being scaled.
 func TestFileSizeLeavesANegativeCountAlone(t *testing.T) {
-	if got := FileSize(-1000, 0, -1, false); got != "-1,000 B" {
+	if got := number.FileSize(-1000, 0, -1, false); got != "-1,000 B" {
 		t.Errorf("FileSize(-1000, 0, -1, false) = %q, want %q", got, "-1,000 B")
 	}
 }
@@ -73,10 +75,10 @@ func TestFileSizeLeavesANegativeCountAlone(t *testing.T) {
 // TestFileSizeMaxPrecisionDropsTrailingZeros separates the two digit counts:
 // a precision keeps the zeros it asked for and a maximum precision does not.
 func TestFileSizeMaxPrecisionDropsTrailingZeros(t *testing.T) {
-	if got := FileSize(1500, 0, 3, false); got != "1.5 KB" {
+	if got := number.FileSize(1500, 0, 3, false); got != "1.5 KB" {
 		t.Errorf("FileSize(1500, 0, 3, false) = %q, want %q", got, "1.5 KB")
 	}
-	if got := FileSize(1500, 3, -1, false); got != "1.500 KB" {
+	if got := number.FileSize(1500, 3, -1, false); got != "1.500 KB" {
 		t.Errorf("FileSize(1500, 3, -1, false) = %q, want %q", got, "1.500 KB")
 	}
 }

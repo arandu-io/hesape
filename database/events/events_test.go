@@ -1,6 +1,10 @@
-package events
+package events_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/arandu-io/hesape/database/events"
+)
 
 // fakeConnection answers the two interfaces the events take.
 type fakeConnection struct{ name string }
@@ -17,7 +21,7 @@ func (c fakeConnection) SubstituteBindingsIntoRawSQL(sql string, bindings []any)
 }
 
 func TestConnectionEventReadsTheNameOffTheConnection(t *testing.T) {
-	event := NewConnectionEstablished(fakeConnection{name: "primary"})
+	event := events.NewConnectionEstablished(fakeConnection{name: "primary"})
 
 	if event.ConnectionName != "primary" {
 		t.Fatalf("ConnectionName = %q; the PHP constructor reads it rather than taking it", event.ConnectionName)
@@ -30,7 +34,7 @@ func TestConnectionEventReadsTheNameOffTheConnection(t *testing.T) {
 func TestConnectionEventSurvivesANilConnection(t *testing.T) {
 	// A test constructs one of these by hand more often than the framework
 	// does, and a panic in an event constructor is a panic in a listener.
-	event := NewTransactionCommitted(nil)
+	event := events.NewTransactionCommitted(nil)
 
 	if event.ConnectionName != "" {
 		t.Fatalf("ConnectionName = %q for a nil connection", event.ConnectionName)
@@ -38,7 +42,7 @@ func TestConnectionEventSurvivesANilConnection(t *testing.T) {
 }
 
 func TestQueryExecutedToRawSQL(t *testing.T) {
-	event := NewQueryExecuted("select ?", []any{1}, 1.25, fakeConnection{name: "primary"}, "write")
+	event := events.NewQueryExecuted("select ?", []any{1}, 1.25, fakeConnection{name: "primary"}, "write")
 
 	if event.ConnectionName != "primary" {
 		t.Fatalf("ConnectionName = %q", event.ConnectionName)
@@ -50,36 +54,36 @@ func TestQueryExecutedToRawSQL(t *testing.T) {
 		t.Fatalf("ToRawSQL = %q", event.ToRawSQL())
 	}
 
-	bare := NewQueryExecuted("select 1", nil, 0, nil, "")
+	bare := events.NewQueryExecuted("select 1", nil, 0, nil, "")
 	if bare.ToRawSQL() != "select 1" {
 		t.Fatal("ToRawSQL on an event with no connection did not answer the query unchanged")
 	}
 }
 
 func TestMigrationEvents(t *testing.T) {
-	if got := NewMigrationsStarted("up", map[string]any{"pretend": true}); got.Method != "up" {
+	if got := events.NewMigrationsStarted("up", map[string]any{"pretend": true}); got.Method != "up" {
 		t.Fatalf("Method = %q", got.Method)
 	}
-	if got := NewNoPendingMigrations("down"); got.Method != "down" {
+	if got := events.NewNoPendingMigrations("down"); got.Method != "down" {
 		t.Fatalf("Method = %q", got.Method)
 	}
-	if got := NewMigrationSkipped("2026_01_01_000000_first"); got.MigrationName != "2026_01_01_000000_first" {
+	if got := events.NewMigrationSkipped("2026_01_01_000000_first"); got.MigrationName != "2026_01_01_000000_first" {
 		t.Fatalf("MigrationName = %q", got.MigrationName)
 	}
 }
 
 func TestSchemaAndPruneEvents(t *testing.T) {
-	dumped := NewSchemaDumped(fakeConnection{name: "primary"}, "database/schema/pgsql-schema.sql")
+	dumped := events.NewSchemaDumped(fakeConnection{name: "primary"}, "database/schema/pgsql-schema.sql")
 	if dumped.ConnectionName != "primary" || dumped.Path == "" {
 		t.Fatalf("SchemaDumped = %+v", dumped)
 	}
 
-	loaded := NewSchemaLoaded(fakeConnection{name: "primary"}, "database/schema/pgsql-schema.sql")
+	loaded := events.NewSchemaLoaded(fakeConnection{name: "primary"}, "database/schema/pgsql-schema.sql")
 	if loaded.ConnectionName != "primary" {
 		t.Fatalf("SchemaLoaded = %+v", loaded)
 	}
 
-	pruned := NewModelsPruned("Invoice", 12)
+	pruned := events.NewModelsPruned("Invoice", 12)
 	if pruned.Model != "Invoice" || pruned.Count != 12 {
 		t.Fatalf("ModelsPruned = %+v", pruned)
 	}

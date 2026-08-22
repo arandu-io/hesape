@@ -1,8 +1,10 @@
-package resources
+package resources_test
 
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/arandu-io/hesape/http/resources"
 )
 
 func assertHelper(t *testing.T) {
@@ -26,121 +28,121 @@ func assertNotNil(t *testing.T, v any, msg string) {
 // --- When / Conditional tests ---
 
 func TestWhenTrueIncludesField(t *testing.T) {
-	result := When(true, "present")
-	_, isMissing := result.(MissingValue)
+	result := resources.When(true, "present")
+	_, isMissing := result.(resources.MissingValue)
 	assertEqual(t, isMissing, false, "When(true) should not be MissingValue")
 	assertEqual(t, result, "present", "When(true) should return the value")
 }
 
 func TestWhenFalseOmitsField(t *testing.T) {
-	result := When(false, "absent")
-	_, isMissing := result.(MissingValue)
+	result := resources.When(false, "absent")
+	_, isMissing := result.(resources.MissingValue)
 	assertEqual(t, isMissing, true, "When(false) should be MissingValue")
 }
 
 func TestUnlessTrueOmitsField(t *testing.T) {
-	result := Unless(true, "absent")
-	_, isMissing := result.(MissingValue)
+	result := resources.Unless(true, "absent")
+	_, isMissing := result.(resources.MissingValue)
 	assertEqual(t, isMissing, true, "Unless(true) should be MissingValue")
 }
 
 func TestUnlessFalseIncludesField(t *testing.T) {
-	result := Unless(false, "present")
-	_, isMissing := result.(MissingValue)
+	result := resources.Unless(false, "present")
+	_, isMissing := result.(resources.MissingValue)
 	assertEqual(t, isMissing, false, "Unless(false) should not be MissingValue")
 }
 
 func TestWhenNotNullIncludesValue(t *testing.T) {
-	result := WhenNotNull("hello")
-	_, isMissing := result.(MissingValue)
+	result := resources.WhenNotNull("hello")
+	_, isMissing := result.(resources.MissingValue)
 	assertEqual(t, isMissing, false, "WhenNotNull(hello) should not be MissingValue")
 	assertEqual(t, result, "hello", "WhenNotNull should return value")
 }
 
 func TestWhenNotNullOmitsNil(t *testing.T) {
-	result := WhenNotNull(nil)
-	_, isMissing := result.(MissingValue)
+	result := resources.WhenNotNull(nil)
+	_, isMissing := result.(resources.MissingValue)
 	assertEqual(t, isMissing, true, "WhenNotNull(nil) should be MissingValue")
 }
 
 func TestWhenHasFound(t *testing.T) {
 	data := map[string]any{"name": "Alice"}
-	result := WhenHas(data, "name", nil)
-	_, isMissing := result.(MissingValue)
+	result := resources.WhenHas(data, "name", nil)
+	_, isMissing := result.(resources.MissingValue)
 	assertEqual(t, isMissing, false, "WhenHas found should not be MissingValue")
 }
 
 func TestWhenHasNotFound(t *testing.T) {
 	data := map[string]any{"name": "Alice"}
-	result := WhenHas(data, "email", nil)
-	_, isMissing := result.(MissingValue)
+	result := resources.WhenHas(data, "email", nil)
+	_, isMissing := result.(resources.MissingValue)
 	assertEqual(t, isMissing, true, "WhenHas not found should be MissingValue")
 }
 
 func TestWhenLoadedTrue(t *testing.T) {
-	result := WhenLoaded("posts", true, map[string]any{"count": 5})
-	_, isMissing := result.(MissingValue)
+	result := resources.WhenLoaded("posts", true, map[string]any{"count": 5})
+	_, isMissing := result.(resources.MissingValue)
 	assertEqual(t, isMissing, false, "WhenLoaded true should not be MissingValue")
 }
 
 func TestWhenLoadedFalse(t *testing.T) {
-	result := WhenLoaded("posts", false, map[string]any{"count": 5})
-	_, isMissing := result.(MissingValue)
+	result := resources.WhenLoaded("posts", false, map[string]any{"count": 5})
+	_, isMissing := result.(resources.MissingValue)
 	assertEqual(t, isMissing, true, "WhenLoaded false should be MissingValue")
 }
 
 func TestWhenCountedTrue(t *testing.T) {
-	result := WhenCounted("replies", true, 42)
-	_, isMissing := result.(MissingValue)
+	result := resources.WhenCounted("replies", true, 42)
+	_, isMissing := result.(resources.MissingValue)
 	assertEqual(t, isMissing, false, "WhenCounted true should not be MissingValue")
 }
 
 func TestWhenCountedFalse(t *testing.T) {
-	result := WhenCounted("replies", false, 42)
-	_, isMissing := result.(MissingValue)
+	result := resources.WhenCounted("replies", false, 42)
+	_, isMissing := result.(resources.MissingValue)
 	assertEqual(t, isMissing, true, "WhenCounted false should be MissingValue")
 }
 
 func TestWhenAggregatedLoaded(t *testing.T) {
-	result := WhenAggregated("orders", "amount", "sum", true, 150.0)
-	_, isMissing := result.(MissingValue)
+	result := resources.WhenAggregated("orders", "amount", "sum", true, 150.0)
+	_, isMissing := result.(resources.MissingValue)
 	assertEqual(t, isMissing, false, "WhenAggregated loaded should not be MissingValue")
 }
 
 func TestWhenAggregatedNotLoaded(t *testing.T) {
-	result := WhenAggregated("orders", "amount", "sum", false, 150.0)
-	_, isMissing := result.(MissingValue)
+	result := resources.WhenAggregated("orders", "amount", "sum", false, 150.0)
+	_, isMissing := result.(resources.MissingValue)
 	assertEqual(t, isMissing, true, "WhenAggregated not loaded should be MissingValue")
 }
 
 func TestWhenAppended(t *testing.T) {
-	result := WhenAppended("full_name", true, "Alice Smith")
-	_, isMissing := result.(MissingValue)
+	result := resources.WhenAppended("full_name", true, "Alice Smith")
+	_, isMissing := result.(resources.MissingValue)
 	assertEqual(t, isMissing, false, "WhenAppended true should not be MissingValue")
 
-	result2 := WhenAppended("full_name", false, "Alice Smith")
-	_, isMissing2 := result2.(MissingValue)
+	result2 := resources.WhenAppended("full_name", false, "Alice Smith")
+	_, isMissing2 := result2.(resources.MissingValue)
 	assertEqual(t, isMissing2, true, "WhenAppended false should be MissingValue")
 }
 
 // --- MergeValue tests ---
 
 func TestMergeValue(t *testing.T) {
-	mv := NewMergeValue(map[string]any{"extra": 1})
+	mv := resources.NewMergeValue(map[string]any{"extra": 1})
 	assertNotNil(t, mv, "MergeValue")
 	assertNotNil(t, mv.Data, "MergeValue data")
 }
 
 func TestMergeWhenTrue(t *testing.T) {
-	result := MergeWhen(true, map[string]any{"extra": 1})
-	mv, ok := result.(*MergeValue)
+	result := resources.MergeWhen(true, map[string]any{"extra": 1})
+	mv, ok := result.(*resources.MergeValue)
 	assertEqual(t, ok, true, "MergeWhen true should return MergeValue")
 	assertNotNil(t, mv, "MergeValue")
 }
 
 func TestMergeWhenFalse(t *testing.T) {
-	result := MergeWhen(false, map[string]any{"extra": 1})
-	_, ok := result.(MissingValue)
+	result := resources.MergeWhen(false, map[string]any{"extra": 1})
+	_, ok := result.(resources.MissingValue)
 	assertEqual(t, ok, true, "MergeWhen false should return MissingValue")
 }
 
@@ -149,10 +151,10 @@ func TestMergeWhenFalse(t *testing.T) {
 func TestFilterRemovesMissingValues(t *testing.T) {
 	data := map[string]any{
 		"name":  "Alice",
-		"email": MissingValue{},
-		"age":   When(false, 30),
+		"email": resources.MissingValue{},
+		"age":   resources.When(false, 30),
 	}
-	result := Filter(data)
+	result := resources.Filter(data)
 
 	_, hasName := result["name"]
 	assertEqual(t, hasName, true, "name should be present")
@@ -165,9 +167,9 @@ func TestFilterRemovesMissingValues(t *testing.T) {
 func TestFilterMergesMergeValues(t *testing.T) {
 	data := map[string]any{
 		"name":  "Bob",
-		"merge": NewMergeValue(map[string]any{"city": "NYC", "state": "NY"}),
+		"merge": resources.NewMergeValue(map[string]any{"city": "NYC", "state": "NY"}),
 	}
-	result := Filter(data)
+	result := resources.Filter(data)
 
 	assertEqual(t, result["name"], "Bob", "name")
 	assertEqual(t, result["city"], "NYC", "merged city")
@@ -186,7 +188,7 @@ func (r *testUserResource) ToArray() map[string]any {
 	return map[string]any{
 		"name":  r.Name,
 		"email": r.Email,
-		"age":   When(r.Age > 0, r.Age),
+		"age":   resources.When(r.Age > 0, r.Age),
 	}
 }
 
@@ -211,14 +213,14 @@ func TestJsonResourceConditionalFields(t *testing.T) {
 	// Filter removes it.
 	assertEqual(t, hasAge, true, "age key exists in raw ToArray")
 
-	filtered := Filter(data)
+	filtered := resources.Filter(data)
 	_, hasAgeFiltered := filtered["age"]
 	assertEqual(t, hasAgeFiltered, false, "age should be filtered out")
 }
 
 func TestJsonResponseBuilder(t *testing.T) {
 	user := &testUserResource{Name: "Alice", Email: "alice@example.com", Age: 30}
-	builder := NewJsonResponse(user)
+	builder := resources.NewJsonResponse(user)
 	builder.Additional(map[string]any{"version": "1.0"})
 
 	body, err := builder.Build()
@@ -237,7 +239,7 @@ func TestJsonResponseBuilder(t *testing.T) {
 
 func TestJsonResponseBuilderWithoutWrapping(t *testing.T) {
 	user := &testUserResource{Name: "Alice", Email: "alice@example.com", Age: 30}
-	builder := NewJsonResponse(user)
+	builder := resources.NewJsonResponse(user)
 	builder.WithoutWrapping()
 
 	body, err := builder.Build()
@@ -256,15 +258,15 @@ func TestJsonResponseBuilderWithoutWrapping(t *testing.T) {
 // --- ResourceCollection tests ---
 
 func TestResourceCollection(t *testing.T) {
-	users := []JsonResource{
+	users := []resources.JsonResource{
 		&testUserResource{Name: "Alice", Email: "a@example.com", Age: 30},
 		&testUserResource{Name: "Bob", Email: "b@example.com", Age: 25},
 	}
 
-	collection := NewResourceCollection(users)
+	collection := resources.NewResourceCollection(users)
 	assertEqual(t, collection.Count(), 2, "count")
 
-	builder := NewJsonResponse(collection)
+	builder := resources.NewJsonResponse(collection)
 	body, err := builder.Build()
 	assertNotNil(t, body, "build result")
 	assertEqual(t, err, nil, "build should not error")
@@ -282,12 +284,12 @@ func TestResourceCollection(t *testing.T) {
 // --- PaginatedResourceResponse tests ---
 
 func TestPaginatedResourceResponse(t *testing.T) {
-	users := []JsonResource{
+	users := []resources.JsonResource{
 		&testUserResource{Name: "Alice", Email: "a@example.com", Age: 30},
 		&testUserResource{Name: "Bob", Email: "b@example.com", Age: 25},
 	}
-	collection := NewResourceCollection(users)
-	paginated := NewPaginatedResourceResponse(collection, 1, 2, 10)
+	collection := resources.NewResourceCollection(users)
+	paginated := resources.NewPaginatedResourceResponse(collection, 1, 2, 10)
 
 	result := paginated.ToArray()
 
@@ -307,9 +309,9 @@ func TestPaginatedResourceResponse(t *testing.T) {
 }
 
 func TestPaginatedResourceResponseLastPage(t *testing.T) {
-	collection := NewResourceCollection(nil)
+	collection := resources.NewResourceCollection(nil)
 	// 11 items at 3 per page = 4 pages (3 full + 1 partial).
-	paginated := NewPaginatedResourceResponse(collection, 1, 3, 11)
+	paginated := resources.NewPaginatedResourceResponse(collection, 1, 3, 11)
 
 	result := paginated.ToArray()
 	meta := result["meta"].(map[string]any)
@@ -319,27 +321,27 @@ func TestPaginatedResourceResponseLastPage(t *testing.T) {
 // --- Transform tests ---
 
 func TestTransform(t *testing.T) {
-	result := Transform("hello", func(v any) any {
+	result := resources.Transform("hello", func(v any) any {
 		return v.(string) + " world"
 	})
 	assertEqual(t, result, "hello world", "transform should apply callback")
 }
 
 func TestTransformMissingValue(t *testing.T) {
-	result := Transform(MissingValue{}, func(v any) any {
+	result := resources.Transform(resources.MissingValue{}, func(v any) any {
 		return "transformed"
 	})
-	_, isMissing := result.(MissingValue)
+	_, isMissing := result.(resources.MissingValue)
 	assertEqual(t, isMissing, true, "transform MissingValue should stay MissingValue")
 }
 
 // --- Resource, the class, and the statics it carries ---
 
 func TestResourceResolvesThroughTheFilter(t *testing.T) {
-	resource := Make(map[string]any{
+	resource := resources.Make(map[string]any{
 		"id":     7,
 		"name":   "Ada",
-		"secret": MissingValue{},
+		"secret": resources.MissingValue{},
 	})
 
 	resolved := resource.Resolve()
@@ -351,7 +353,7 @@ func TestResourceResolvesThroughTheFilter(t *testing.T) {
 }
 
 func TestResourceToJsonAndToPrettyJson(t *testing.T) {
-	resource := Make(map[string]any{"name": "Ada"})
+	resource := resources.Make(map[string]any{"name": "Ada"})
 
 	compact, err := resource.ToJson()
 	if err != nil {
@@ -367,10 +369,10 @@ func TestResourceToJsonAndToPrettyJson(t *testing.T) {
 }
 
 func TestWrapChangesTheKeyEveryResponseIsNestedUnder(t *testing.T) {
-	t.Cleanup(FlushState)
+	t.Cleanup(resources.FlushState)
 
-	Wrap("record")
-	body, err := NewJsonResponse(Make(map[string]any{"name": "Ada"})).Build()
+	resources.Wrap("record")
+	body, err := resources.NewJsonResponse(resources.Make(map[string]any{"name": "Ada"})).Build()
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -382,29 +384,29 @@ func TestWrapChangesTheKeyEveryResponseIsNestedUnder(t *testing.T) {
 		t.Fatalf("expected the data under \"record\", got %s", body)
 	}
 
-	WithoutWrapping()
-	assertEqual(t, Wrapper(), "", "wrapper after WithoutWrapping")
+	resources.WithoutWrapping()
+	assertEqual(t, resources.Wrapper(), "", "wrapper after WithoutWrapping")
 
-	FlushState()
-	assertEqual(t, Wrapper(), DefaultWrap, "wrapper after FlushState")
+	resources.FlushState()
+	assertEqual(t, resources.Wrapper(), resources.DefaultWrap, "wrapper after FlushState")
 }
 
 func TestAResourceIsNotResolvedFromARouteBinding(t *testing.T) {
-	resource := Make(map[string]any{"id": 1})
+	resource := resources.Make(map[string]any{"id": 1})
 
-	if _, err := resource.ResolveRouteBinding(1, ""); err != ErrNotRouteBindable {
+	if _, err := resource.ResolveRouteBinding(1, ""); err != resources.ErrNotRouteBindable {
 		t.Fatalf("ResolveRouteBinding error = %v, want ErrNotRouteBindable", err)
 	}
-	if _, err := resource.ResolveChildRouteBinding("comment", 1, ""); err != ErrNotRouteBindable {
+	if _, err := resource.ResolveChildRouteBinding("comment", 1, ""); err != resources.ErrNotRouteBindable {
 		t.Fatalf("ResolveChildRouteBinding error = %v, want ErrNotRouteBindable", err)
 	}
 	assertEqual(t, resource.GetRouteKeyName(), "", "route key name of an unroutable resource")
 }
 
 func TestGetIteratorWalksTheCollectionInOrder(t *testing.T) {
-	collection := Collection([]JsonResource{
-		Make(map[string]any{"n": 1}),
-		Make(map[string]any{"n": 2}),
+	collection := resources.Collection([]resources.JsonResource{
+		resources.Make(map[string]any{"n": 1}),
+		resources.Make(map[string]any{"n": 2}),
 	})
 
 	var seen []any
@@ -417,7 +419,7 @@ func TestGetIteratorWalksTheCollectionInOrder(t *testing.T) {
 }
 
 func TestPreserveQueryAndWithQueryAreExclusive(t *testing.T) {
-	collection := NewResourceCollection(nil)
+	collection := resources.NewResourceCollection(nil)
 
 	collection.PreserveQuery()
 	query, all := collection.QueryParameters()
