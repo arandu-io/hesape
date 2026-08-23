@@ -107,12 +107,26 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
 
-      # The collection carries no third-party dependency beyond
+      # The collection carries no direct third-party dependency beyond
       # golang.org/x/crypto. A require line that is not that is a review.
+      #
+      # go.mod has two shapes -- a require block with indented lines, and one
+      # require line per dependency -- and the check that stood here read only
+      # the first. A dependency added in the second shape passed it, which was
+      # proven by adding one and watching it pass. This reads both.
+      #
+      # Indirect dependencies are not counted. golang.org/x/sys is one, through
+      # x/crypto, and a module graph recording what it always pulled is not a
+      # dependency somebody added.
       - name: no third-party dependency
         run: |
-          if grep -E '^\s+[a-z]' go.mod | grep -v 'golang.org/x/crypto' | grep -q .; then
-            echo "a dependency was added to the collection:"
-            grep -E '^\s+[a-z]' go.mod
+          direct=$(grep -E '^(require[[:space:]]+|[[:space:]]+)[a-z0-9.-]+\.[a-z]+/' go.mod \
+            | grep -v '// indirect' \
+            | sed -E 's/^require[[:space:]]+//; s/^[[:space:]]+//; s/[[:space:]].*//' \
+            | grep -v '^golang\.org/x/crypto$' \
+            | grep -v '^github\.com/arandu-io/' || true)
+          if [ -n "$direct" ]; then
+            echo "a direct dependency was added to the collection:"
+            echo "$direct"
             exit 1
           fi
