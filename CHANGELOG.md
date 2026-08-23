@@ -1,5 +1,9 @@
 # Release Notes
 
+## [v0.14.0](https://github.com/arandu-io/hesape/compare/database/connectors/mysql/v0.5.0...v0.14.0) - 2026-08-23
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/database/connectors/mysql/v0.5.0...v0.14.0
+
 ## [v0.13.0](https://github.com/arandu-io/hesape/compare/database/connectors/mysql/v0.5.0...v0.13.0) - 2026-08-23
 
 **Full Changelog**: https://github.com/arandu-io/hesape/compare/database/connectors/mysql/v0.5.0...v0.13.0
