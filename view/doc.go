@@ -1,6 +1,6 @@
-// Package view is the view layer: compiled markup, HTMX for interaction,
-// Alpine for ephemeral client state, Tailwind for style. It is a binary and it
-// is never Node.
+// Package view is the view layer: compiled markup, HTMX for interaction, one
+// embedded script for ephemeral client state, Tailwind for style. It is a
+// binary and it is never Node.
 //
 // A project that uses it still runs with a single command: no node_modules,
 // no package.json, no lockfile of JavaScript, nothing installed beyond Go and
@@ -25,8 +25,9 @@
 // code calls; everything decidable at build time already was, so what is left
 // is small on purpose. Page is the chrome every screen embeds, carrying
 // the messages and the typed input of a rejected attempt without any handler
-// having to remember them. The assets -- HTMX, Alpine, the stylesheet -- are
-// embedded and served content-addressed, because the CSP is script-src 'self'.
+// having to remember them. The assets -- HTMX, the client behaviours, the
+// stylesheet -- are embedded and served content-addressed, because the CSP is
+// script-src 'self'.
 //
 // There is no finder: a view is not looked up on disk at request time, it is
 // compiled into the binary and registered by name, which is why a missing

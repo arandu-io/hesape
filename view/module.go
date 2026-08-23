@@ -18,8 +18,8 @@ import (
 // proved it: Mount had zero call sites across every repository -- the kernel did
 // not call it, the generated main.go did not call it, and neither did the
 // generated sign-in screen. That screen emits three tags, and against a real
-// server all three answered 404: no stylesheet, no HTMX, no Alpine. Found by
-// audit, reproduced end to end.
+// server all three answered 404: no stylesheet, no HTMX, no client behaviour.
+// Found by audit, reproduced end to end.
 //
 // A function has to be remembered. A module appears in the Register call next to
 // events, jobs and the scheduler, which is where somebody reading main.go

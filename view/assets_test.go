@@ -110,7 +110,7 @@ func TestEveryAssetIsServed(t *testing.T) {
 	server := httptest.NewServer(r)
 	defer server.Close()
 
-	for _, name := range []string{"app.css", "htmx.min.js", "alpine.min.js"} {
+	for _, name := range []string{"app.css", "htmx.min.js", "ui.js"} {
 		url := view.URL(name)
 		if url == "" {
 			t.Errorf("%s has no URL", name)
