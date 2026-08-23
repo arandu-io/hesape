@@ -37,8 +37,8 @@ type Attrs map[string]string
 // concatenating one lets the caller close the tag, and
 // `Attrs{`x"><script>`: "1"}` would be a script tag.
 //
-// The legal set is HTML5's, stated as what it forbids, so hx-post, x-data,
-// @click and :class all pass.
+// The legal set is HTML5's, stated as what it forbids, so hx-post,
+// data-copy-text, @click and :class all pass.
 func (h *HtmlBuilder) Attributes(attributes Attrs) template.HTML {
 	if len(attributes) == 0 {
 		return ""
@@ -71,8 +71,10 @@ func (h *HtmlBuilder) attributeElement(key, value string) string {
 // HTML5 states this as a prohibition rather than an alphabet: anything except
 // a control character, a space, a quote, an apostrophe, a greater-than, a
 // slash, an equals sign, and the noncharacters. Reading it that way is what
-// keeps the framework's own attributes -- HTMX's hx-*, Alpine's @ and : --
-// working without an allow-list somebody has to remember to extend.
+// keeps the framework's own attributes -- HTMX's hx-*, the data-* hooks the
+// client behaviours dispatch on, and the punctuation-led names a library may
+// still ask for -- working without an allow-list somebody has to remember to
+// extend.
 func isAttributeName(key string) bool {
 	if key == "" {
 		return false

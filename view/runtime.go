@@ -98,10 +98,10 @@ func funcName(v any) string {
 //
 // Two positions this is not for, and both look like an attribute. An attribute
 // value without quotes ends at the first space, and a space is not one of the
-// six. An attribute whose value is code -- onclick, x-on:, @click -- is a
-// JavaScript position wearing an attribute's shape: the parser decodes the
-// entity back into a quote before the script engine sees it, so &#39; closes
-// the string it was meant to sit inside.
+// six. An attribute whose value is code -- onclick, or any attribute a library
+// compiles and runs -- is a JavaScript position wearing an attribute's shape:
+// the parser decodes the entity back into a quote before the script engine sees
+// it, so &#39; closes the string it was meant to sit inside.
 func TextAttr(v any) string {
 	return template.HTMLEscapeString(Text(v))
 }

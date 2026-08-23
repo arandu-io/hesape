@@ -128,9 +128,12 @@ func TestAttributesDropsAnIllegalName(t *testing.T) {
 	}
 }
 
-// HTMX and Alpine write attribute names the framework depends on.
+// The framework depends on attribute names an allow-list would not think to
+// permit: HTMX's hx-*, the data-* hooks the client behaviours dispatch on, and
+// the punctuation-led names a library may still ask for. isAttributeName reads
+// HTML5 as a prohibition rather than an alphabet, and these are the proof.
 func TestAttributesKeepsFrameworkNames(t *testing.T) {
-	for _, key := range []string{"hx-post", "x-data", "@click", ":class", "data-variant", "aria-label"} {
+	for _, key := range []string{"hx-post", "data-copy-text", "data-theme-accent", "@click", ":class", "data-variant", "aria-label"} {
 		if got := string(newBuilder().Attributes(html.Attrs{key: "1"})); got != " "+key+`="1"` {
 			t.Errorf("Attributes with key %q = %q, want it kept", key, got)
 		}

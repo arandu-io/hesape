@@ -37,7 +37,7 @@ nothing stops a project from importing a package here directly.
 |---|---|---|
 | authorization & session | `auth`, `session`, `cookie`, `hashing`, `encryption`, `oauth` | `Grant` — unexported fields, issued only by `Authorize` or the named `SystemGrant` escape hatch — plus the session store, CSRF token, password hashing and signed tokens |
 | data & storage | `database`, `cache`, `redis`, `filesystem`, `pagination` | one repository shape with no ORM, a cache with pluggable stores, a Redis/RESP adapter for both, tenant-scoped file storage, three paginators (offset, simple, keyset) |
-| HTTP & views | `http`, `routing`, `view`, `html` | request/response context over `net/http`, a router with named routes and URL generation, the kyse-to-Go view compiler with HTMX and Alpine wired in, an escaped HTML/form builder |
+| HTTP & views | `http`, `routing`, `view`, `html` | request/response context over `net/http`, a router with named routes and URL generation, the kyse-to-Go view compiler with HTMX and the delegated client behaviours wired in, an escaped HTML/form builder |
 | background work | `queue`, `bus`, `events`, `console/scheduling`, `broadcasting`, `notifications`, `mail` | a job queue where every push carries a `Grant`, batches and chains of jobs, domain events with an outbox, an in-process scheduler (a goroutine, not a system crontab), channel broadcasting over Redis, multi-channel notifications, mail |
 | diagnostics & quality | `log`, `exception`, `validation`, `console`, `testing`/`arandutest` | the request Collector this framework exists for, the handler a failed request stops at (and the development error page), a form validator with 108 rules, the vocabulary a project's own commands are written against, a test client with assertions and outbox helpers |
 | foundation & utilities | `foundation`, `config`, `collections`, `str`, `support`, `number`, `image`, `jsonschema`, `process`, `pipeline`, `translation` | process composition run once at boot, typed configuration, generic collections, the string transforms a generator, a router and a validator all need, number/currency formatting, declarative image transforms, typed JSON Schema, external process execution, a value piped through a chain of steps, translated strings |
@@ -60,11 +60,15 @@ import that goes looking for the concept finds the reason instead of a path that
 resolves to nothing.
 
 **Assets are embedded, not fetched** — one `go:embed` directive
-(`view/assets.go:21`) bundles HTMX 2.0.4, Alpine.js 3.14.8, Tailwind CSS
-4.3.3 and Basecoat 1.0.2, served from the application's own origin under
-`/_arandu/assets/`. Zero CDN: the Content-Security-Policy is `script-src
-'self'`, and a test scans the embedded assets for `cdn`, `unpkg`, `jsdelivr`,
-`googleapis` or `cloudflare` and fails the build if it finds one. Tailwind
+(`view/assets.go:21`) bundles HTMX 2.0.4, Tailwind CSS 4.3.3, Basecoat 1.0.2
+and Arandu's own `theme.js` and `ui.js`, served from the application's own
+origin under `/_arandu/assets/`. Zero CDN: the Content-Security-Policy is
+`script-src 'self'`, and a test scans the embedded assets for `cdn`, `unpkg`,
+`jsdelivr`, `googleapis` or `cloudflare` and fails the build if it finds one.
+There is no directive framework in there either, and that is the same
+constraint rather than a taste: compiling an attribute into a function needs
+`unsafe-eval`, so client behaviour is delegation on `data-*` attributes that
+are read as data and never evaluated. Tailwind
 itself is the standalone binary the CLI downloads, checks against a published
 SHA-256, and caches — not an npm package. Zero Node anywhere in the tree,
 checked in CI.

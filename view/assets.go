@@ -18,7 +18,7 @@ import (
 // -- paying in security for convenience. It also means the deploy stays one
 // binary: no asset publishing step, no CDN to invalidate, no storage:link.
 //
-//go:embed assets/htmx.min.js assets/alpine.min.js assets/basecoat.bundle.js assets/theme.js assets/app.css
+//go:embed assets/htmx.min.js assets/basecoat.bundle.js assets/theme.js assets/ui.js assets/app.css
 var files embed.FS
 
 // AssetPath is where assets are served from. The hash is in the path, so the
@@ -59,9 +59,9 @@ var (
 func init() {
 	for name, contentType := range map[string]string{
 		"htmx.min.js":        "application/javascript; charset=utf-8",
-		"alpine.min.js":      "application/javascript; charset=utf-8",
 		"basecoat.bundle.js": "application/javascript; charset=utf-8",
 		"theme.js":           "application/javascript; charset=utf-8",
+		"ui.js":              "application/javascript; charset=utf-8",
 		Stylesheet:           stylesheetType,
 	} {
 		body, err := files.ReadFile("assets/" + name)
@@ -271,7 +271,7 @@ func Version() string {
 	defer assetsMu.RUnlock()
 
 	var b strings.Builder
-	for _, name := range []string{Stylesheet, "alpine.min.js", "htmx.min.js"} {
+	for _, name := range []string{Stylesheet, "htmx.min.js", "ui.js"} {
 		fmt.Fprintf(&b, "%s %s (%d bytes)\n", name, assets[name].hash, len(assets[name].body))
 	}
 	return b.String()
