@@ -4,7 +4,13 @@
 
 **Full Changelog**: https://github.com/arandu-io/hesape/compare/database/connectors/mysql/v0.5.0...v0.14.0
 
-## [v0.13.0](https://github.com/arandu-io/hesape/compare/database/connectors/mysql/v0.5.0...v0.13.0) - 2026-08-23
+## [v0.14.2](https://github.com/arandu-io/hesape/compare/v0.14.1...v0.14.2) - 2026-08-24
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.14.1...v0.14.2
+
+## [v0.14.1](https://github.com/arandu-io/hesape/compare/v0.14.0...v0.14.1) - 2026-08-24
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.14.0...v0.14.1
 
 **Full Changelog**: https://github.com/arandu-io/hesape/compare/database/connectors/mysql/v0.5.0...v0.13.0
 
