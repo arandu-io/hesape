@@ -244,6 +244,31 @@ func (l *FileLoader) loadJSONPaths(locale string) Lines {
 		}
 		maps.Copy(out, lines)
 	}
+	// The catalogue of this project is one file per group under the locale
+	// directory -- lang/en/community.json -- as well as the single per-locale
+	// file above. The lookup a page makes through Translator.Get goes through
+	// this map, so each group must reach it flattened, or a line that exists in
+	// the catalogue reads as missing and the key prints where the sentence was.
+	for _, p := range append(l.snapshot(&l.jsonPaths), l.snapshot(&l.paths)...) {
+		entries, err := fs.ReadDir(l.files, path.Join(p, locale))
+		if err != nil {
+			continue
+		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+		for _, entry := range entries {
+			if entry.IsDir() || path.Ext(entry.Name()) != ".json" {
+				continue
+			}
+			lines := l.read(path.Join(p, locale, entry.Name()))
+			if len(lines) == 0 {
+				continue
+			}
+			if out == nil {
+				out = make(Lines, len(lines))
+			}
+			maps.Copy(out, lines)
+		}
+	}
 	return out
 }
 
