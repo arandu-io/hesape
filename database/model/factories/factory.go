@@ -964,9 +964,14 @@ func DontExpandRelationshipsByDefault() {
 
 // FlushState answers Factory::flushState.
 //
-// It clears the resolvers and the namespace, as the PHP does. The registry of
-// constructed factories is not part of it: there it is the set of classes that
-// exist, which no method could flush.
+// It clears the resolvers, the namespace and the registry.
+//
+// The registry used to be left alone, on the reasoning that in PHP it is the set
+// of classes that exist and no method could flush it. That reasoning does not
+// carry over: here the registry is filled by constructor calls, and in a test
+// binary those happen at test time. A factory built for one model in one test
+// stayed registered for every test after it, and a second factory for the same
+// model name replaced the first without a word.
 func FlushState() {
 	globalMutex.Lock()
 	defer globalMutex.Unlock()
@@ -974,6 +979,7 @@ func FlushState() {
 	factoryNameResolver = nil
 	namespace = "Database\\Factories\\"
 	expandRelationshipsByDefault = true
+	registry = map[string]*Factory{}
 }
 
 // first answers Collection::first over a slice of models.

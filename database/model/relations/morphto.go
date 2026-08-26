@@ -155,6 +155,67 @@ func (r *MorphTo) GetEager(ctx context.Context, g auth.Grant) ([]Model, error) {
 	return r.models, nil
 }
 
+// GetResults answers MorphTo::getResults.
+//
+// It exists because the inherited one is wrong here, and wrong in the way that
+// is hardest to see: BelongsTo::getResults reads the query this relation was
+// built with, and for a MorphTo that query is over a placeholder model handed
+// to the constructor -- one that only carries a connection to start from. So a
+// lazy read selected from whatever table the placeholder named, with no morph
+// type in the where clause. The eager path never had the problem, because it
+// resolves the type first; the lazy path had no test.
+//
+// The type comes off the child, like everything else about a morph, and a child
+// that names no type has no owner rather than an owner of the wrong kind.
+func (r *MorphTo) GetResults(ctx context.Context, g auth.Grant) (any, error) {
+	typ := r.child.GetAttribute(r.morphType)
+	if typ == nil {
+		return r.GetDefaultFor(r.Parent), nil
+	}
+	morphTypeKey, err := concerns.GetDictionaryKey(typ)
+	if err != nil {
+		return nil, err
+	}
+	if morphTypeKey == "" {
+		return r.GetDefaultFor(r.Parent), nil
+	}
+
+	key := r.getForeignKeyFrom(r.child)
+	if key == nil {
+		return r.GetDefaultFor(r.Parent), nil
+	}
+
+	instance, err := CreateModelByType(morphTypeKey)
+	if err != nil {
+		return nil, err
+	}
+
+	ownerKey := r.ownerKey
+	if ownerKey == "" {
+		ownerKey = instance.GetKeyName()
+	}
+
+	q := instance.NewQuery()
+	if constrain, ok := r.morphableConstraints[morphTypeKey]; ok && constrain != nil {
+		constrain(q)
+	}
+	r.applyTrashed(q, instance)
+
+	scoped, err := concerns.ScopeTenant(q, instance, g)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := scoped.Where(instance.QualifyColumn(ownerKey), "=", key).First(ctx, g)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return r.GetDefaultFor(r.Parent), nil
+	}
+	return result, nil
+}
+
 // getResultsByType answers MorphTo::getResultsByType.
 func (r *MorphTo) getResultsByType(ctx context.Context, g auth.Grant, typ string) ([]Model, error) {
 	instance, err := CreateModelByType(typ)

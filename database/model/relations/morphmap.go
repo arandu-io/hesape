@@ -20,6 +20,23 @@ var morphMap = struct {
 	required bool
 }{entries: map[string]func() Model{}, required: true}
 
+// FlushMorphMap empties the alias registry.
+//
+// It exists for the tests, and it exists because the registry is package state
+// with no other way out of it: a test that registers "post" leaves it there for
+// every test that runs after it in the same binary, and the failure that
+// eventually shows up names a type the failing test never mentioned.
+//
+// It is not a runtime facility. An application registers its aliases once, at
+// wiring, and calling this in one would unregister them for every goroutine at
+// the same time.
+func FlushMorphMap() {
+	morphMap.Lock()
+	defer morphMap.Unlock()
+	morphMap.entries = map[string]func() Model{}
+	morphMap.required = true
+}
+
 // MorphMap registers the aliases a polymorphic type column holds, and returns
 // the map.
 //
