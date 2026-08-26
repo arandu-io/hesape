@@ -95,7 +95,7 @@ var (
 // table is what keeps FlushLocks possible -- see HasSeparateLockStore.
 func NewDatabaseStore(connection Connection, table, prefix, lockTable string) *DatabaseStore {
 	if lockTable == "" {
-		lockTable = "cache_locks"
+		lockTable = LockTable
 	}
 	return &DatabaseStore{
 		connection:  connection,

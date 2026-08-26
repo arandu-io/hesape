@@ -248,6 +248,25 @@ func (r *DatabaseMigrationRepository) GetLastBatchNumber(ctx context.Context) (i
 // VARCHAR rather than TEXT because migration is what every query here filters
 // on and MySQL refuses a TEXT column in a key without a prefix length -- the
 // mistake that once stopped `aru migrate` on its own first statement.
+//
+// # Why this one is not written with the Blueprint
+//
+// Every other table in the collection is, and this is the exception rather than
+// the one that was missed. Two reasons, and both are about it being first:
+//
+// IF NOT EXISTS is the idempotency the migrator relies on -- CreateRepository
+// is called on a path that may already have run -- and the Blueprint has no
+// command for it. Asking HasTable first would answer the same question with an
+// extra round trip and a race between the two statements.
+//
+// And this is the table that records which migrations ran, so it exists before
+// there is anywhere to record that it was created. A table with no migration
+// behind it is not a migration, and running it through the builder that writes
+// migrations would say otherwise.
+//
+// The statement is portable as written: all three engines accept this exact
+// text. Statement is the declared escape for what the Blueprint does not
+// describe, and this is what it is for.
 func (r *DatabaseMigrationRepository) CreateRepository(ctx context.Context) error {
 	conn, err := r.GetConnection()
 	if err != nil {

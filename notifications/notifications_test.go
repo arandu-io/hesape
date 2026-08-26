@@ -194,9 +194,11 @@ func TestMigrationsCreateTheTable(t *testing.T) {
 	if up == "" {
 		t.Fatal("the migration sends nothing")
 	}
-	// KEY is reserved in MySQL, and the column that would have been called
-	// that is why this check exists.
-	if strings.Contains(up, " key ") {
+	// KEY is reserved in MySQL, and the column that would have been called that
+	// is why this check exists. It reads the quoted column name rather than the
+	// word: the Blueprint writes `primary key (...)` in its own DDL, and a check
+	// for a bare " key " matched that and reported a table with no such column.
+	if strings.Contains(up, `"key"`) || strings.Contains(up, " key ,") {
 		t.Fatalf("the key column has to be notification_key:\n%s", up)
 	}
 	for _, want := range []string{notifications.Table, "notification_key", "tenant", "read_at"} {

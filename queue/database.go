@@ -11,6 +11,7 @@ import (
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database"
 	"github.com/arandu-io/hesape/database/migrations"
+	"github.com/arandu-io/hesape/database/schema"
 	"github.com/arandu-io/hesape/queue/jobs"
 )
 
@@ -73,33 +74,34 @@ func (CreateJobsTable) GetName() string { return "2026_07_31_000010_create_jobs_
 // Portable types only: TEXT, INTEGER and TIMESTAMP mean the same thing on
 // SQLite, Postgres and MySQL.
 func (CreateJobsTable) Up(ctx context.Context, conn migrations.Connection) error {
-	return run(ctx, conn,
-		`CREATE TABLE jobs (
-    id             VARCHAR(255) PRIMARY KEY,
-    -- queue is indexed, so VARCHAR rather than TEXT: see database.KeyText.
-    queue          VARCHAR(255) NOT NULL,
-    name           TEXT NOT NULL,
-    tenant_id      VARCHAR(255) NOT NULL,
-    payload        TEXT NOT NULL,
-    authorized_by  TEXT NOT NULL,
-    action         TEXT NOT NULL,
-    run_at         TIMESTAMP NOT NULL,
-    reserved_until TIMESTAMP,
-    attempts       INTEGER NOT NULL DEFAULT 0,
-    failed_at      TIMESTAMP,
-    last_error     TEXT
-)`,
+	return conn.Schema().Create(ctx, "jobs", func(table *schema.Blueprint) {
+		table.String("id").Primary()
+		// queue is indexed, so String rather than Text -- and the Blueprint is
+		// what turns that from a rule to remember into the name of the column's
+		// kind: the grammar picks the type each engine wants.
+		table.String("queue")
+		table.Text("name")
+		table.String("tenant_id")
+		table.Text("payload")
+		table.Text("authorized_by")
+		table.Text("action")
+		table.Timestamp("run_at")
+		table.Timestamp("reserved_until").Nullable()
+		table.BigInteger("attempts").Default(0)
+		table.Timestamp("failed_at").Nullable()
+		table.Text("last_error").Nullable()
+
 		// The pop query filters on queue, failed_at and run_at and orders by
 		// run_at. This index is that query.
-		`CREATE INDEX idx_jobs_ready ON jobs (queue, failed_at, run_at)`,
+		table.Index([]string{"queue", "failed_at", "run_at"}, "idx_jobs_ready")
 		// The dead letter queue is read by the diagnosis, newest failure first.
-		`CREATE INDEX idx_jobs_parked ON jobs (failed_at)`,
-	)
+		table.Index([]string{"failed_at"}, "idx_jobs_parked")
+	})
 }
 
 // Down drops the jobs table, and both indexes with it.
 func (CreateJobsTable) Down(ctx context.Context, conn migrations.Connection) error {
-	return run(ctx, conn, `DROP TABLE jobs`)
+	return conn.Schema().DropIfExists(ctx, "jobs")
 }
 
 // AddJobAttributesToJobsTable adds the per-job settings, which used to live
@@ -122,20 +124,21 @@ func (AddJobAttributesToJobsTable) GetName() string {
 // Nullable with a default, so the previous release's binary keeps inserting
 // without them during a rollout.
 func (AddJobAttributesToJobsTable) Up(ctx context.Context, conn migrations.Connection) error {
-	return run(ctx, conn,
-		`ALTER TABLE jobs ADD COLUMN display_name TEXT`,
-		`ALTER TABLE jobs ADD COLUMN attributes TEXT`,
-		`ALTER TABLE jobs ADD COLUMN exceptions INTEGER NOT NULL DEFAULT 0`,
-	)
+	return conn.Schema().Table(ctx, "jobs", func(table *schema.Blueprint) {
+		// Nullable or defaulted, which is the rollout rule: a NOT NULL column
+		// with no default added to a table that has rows fails on every row
+		// already there.
+		table.Text("display_name").Nullable()
+		table.Text("attributes").Nullable()
+		table.BigInteger("exceptions").Default(0)
+	})
 }
 
 // Down drops the three columns.
 func (AddJobAttributesToJobsTable) Down(ctx context.Context, conn migrations.Connection) error {
-	return run(ctx, conn,
-		`ALTER TABLE jobs DROP COLUMN display_name`,
-		`ALTER TABLE jobs DROP COLUMN attributes`,
-		`ALTER TABLE jobs DROP COLUMN exceptions`,
-	)
+	return conn.Schema().Table(ctx, "jobs", func(table *schema.Blueprint) {
+		table.DropColumn("display_name", "attributes", "exceptions")
+	})
 }
 
 // AddCreatedAtToJobsTable adds the column Pop takes jobs in the order of, which
@@ -164,20 +167,34 @@ func (AddCreatedAtToJobsTable) GetName() string {
 // which is what the COALESCE in Pop is for.
 //
 // No index of its own. The filter is still served by idx_jobs_ready, and what
-// is left is a top-N sort under a LIMIT; an index on (queue, failed_at,
-// created_at) would remove that sort, and it would need a DROP INDEX in Down,
-// which MySQL spells "DROP INDEX x ON jobs" and the other two spell "DROP INDEX
-// x". One portable migration is worth more than the sort.
+// is left is a top-N sort under a LIMIT.
+//
+// That was once written here as a portability argument -- an index on (queue,
+// failed_at, created_at) would need a DROP INDEX in Down, which MySQL spells
+// "DROP INDEX x ON jobs" and the other two spell "DROP INDEX x" -- and the
+// argument no longer holds: DropIndex is a Blueprint command and each grammar
+// spells it for its own engine. The migration keeps the shape it ran with all
+// the same, because a published migration is not edited: the database that
+// applied it would not apply it again, and the two would be one name over two
+// schemas. An index here is a new migration, whenever the sort is measured to
+// cost something.
+//
+// The backfill is a plain statement rather than a Blueprint command, and that
+// is the line: UPDATE is data, and the Blueprint describes shape.
 func (AddCreatedAtToJobsTable) Up(ctx context.Context, conn migrations.Connection) error {
-	return run(ctx, conn,
-		`ALTER TABLE jobs ADD COLUMN created_at TIMESTAMP`,
-		`UPDATE jobs SET created_at = run_at WHERE created_at IS NULL`,
-	)
+	if err := conn.Schema().Table(ctx, "jobs", func(table *schema.Blueprint) {
+		table.Timestamp("created_at").Nullable()
+	}); err != nil {
+		return err
+	}
+	return run(ctx, conn, `UPDATE jobs SET created_at = run_at WHERE created_at IS NULL`)
 }
 
 // Down drops the column.
 func (AddCreatedAtToJobsTable) Down(ctx context.Context, conn migrations.Connection) error {
-	return run(ctx, conn, `ALTER TABLE jobs DROP COLUMN created_at`)
+	return conn.Schema().Table(ctx, "jobs", func(table *schema.Blueprint) {
+		table.DropColumn("created_at")
+	})
 }
 
 // run sends statements in order and stops at the first one that fails.
