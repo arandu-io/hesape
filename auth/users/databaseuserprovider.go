@@ -25,12 +25,12 @@ type Connection interface {
 // DatabaseUserProvider is the auth.UserProvider that reads a table directly and
 // wraps each row in a [GenericUser].
 //
-// It is [EloquentUserProvider] with the model taken out. There is no user type
+// It is [ModelUserProvider] with the model taken out. There is no user type
 // to construct and nothing to hydrate, which is what it is for: an application
 // that has not declared a user struct, or a second table of users that does not
 // deserve one.
 //
-// Everything [EloquentUserProvider] says about the Grant is true here. Every
+// Everything [ModelUserProvider] says about the Grant is true here. Every
 // statement is taken under auth.SystemGrant, because a provider runs before
 // there is a subject to authorize; the action is RetrieveUser or UpdateUser;
 // and the tenant comes from configuration, never from the request. Reads are
@@ -89,7 +89,7 @@ func (p *DatabaseUserProvider) RetrieveByToken(ctx context.Context, identifier a
 //
 // The instance the caller holds is updated as well as the row, which matters
 // the moment a guard sets a cookie from the user it just updated.
-// [EloquentUserProvider] does both too.
+// [ModelUserProvider] does both too.
 func (p *DatabaseUserProvider) UpdateRememberToken(ctx context.Context, user auth.Authenticatable, token string) error {
 	user.SetRememberToken(token)
 
@@ -121,7 +121,7 @@ func (p *DatabaseUserProvider) RetrieveByCredentials(ctx context.Context, creden
 }
 
 // ValidateCredentials reports whether these credentials belong to this account.
-// It is [EloquentUserProvider.ValidateCredentials], unchanged.
+// It is [ModelUserProvider.ValidateCredentials], unchanged.
 func (p *DatabaseUserProvider) ValidateCredentials(_ context.Context, user auth.Authenticatable, credentials map[string]any) bool {
 	plain, ok := passwordOf(credentials)
 	if !ok {

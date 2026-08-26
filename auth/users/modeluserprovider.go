@@ -7,7 +7,7 @@ import (
 	"github.com/arandu-io/hesape/database/query"
 )
 
-// EloquentUserProvider is the auth.UserProvider that finds users through the
+// ModelUserProvider is the auth.UserProvider that finds users through the
 // application's own user type.
 //
 // # Where the Grant comes from, which is the first question to ask of this file
@@ -40,7 +40,7 @@ import (
 // auth.Authenticatable is an interface value, and an interface value has no
 // connection, table or scopes behind it, so the wiring hands over the query
 // factory next to the constructor.
-type EloquentUserProvider struct {
+type ModelUserProvider struct {
 	// hasher checks and rewrites the stored password hash.
 	hasher auth.Hasher
 
@@ -62,20 +62,20 @@ type EloquentUserProvider struct {
 }
 
 // Verify at compile time that the provider is the contract a guard consumes.
-var _ auth.UserProvider = (*EloquentUserProvider)(nil)
+var _ auth.UserProvider = (*ModelUserProvider)(nil)
 
-// NewEloquentUserProvider returns a provider over the user type model builds.
+// NewModelUserProvider returns a provider over the user type model builds.
 //
 // model constructs one, newQuery opens a statement against the table it lives
 // in, and tenant is what every statement is filtered by. See the type's doc for
 // why the first two are separate arguments.
-func NewEloquentUserProvider(
+func NewModelUserProvider(
 	hasher auth.Hasher,
 	model func() auth.Authenticatable,
 	newQuery func(ctx context.Context) *query.Builder,
 	tenant string,
-) *EloquentUserProvider {
-	return &EloquentUserProvider{hasher: hasher, model: model, newQuery: newQuery, tenant: tenant}
+) *ModelUserProvider {
+	return &ModelUserProvider{hasher: hasher, model: model, newQuery: newQuery, tenant: tenant}
 }
 
 // RetrieveByID finds the account with this identifier.
@@ -83,7 +83,7 @@ func NewEloquentUserProvider(
 // A nil user and a nil error mean nobody has that identifier. An error means the
 // statement failed, which is a different outcome and reads differently at the
 // call site.
-func (p *EloquentUserProvider) RetrieveByID(ctx context.Context, identifier any) (auth.Authenticatable, error) {
+func (p *ModelUserProvider) RetrieveByID(ctx context.Context, identifier any) (auth.Authenticatable, error) {
 	model := p.CreateModel()
 
 	record, err := p.newModelQuery(ctx).
@@ -100,7 +100,7 @@ func (p *EloquentUserProvider) RetrieveByID(ctx context.Context, identifier any)
 // The row is found by identifier and only then is the token compared, in
 // constant time. A row whose remember token is empty never matches, so a user
 // who has never ticked the box cannot be signed in with an empty cookie.
-func (p *EloquentUserProvider) RetrieveByToken(ctx context.Context, identifier any, token string) (auth.Authenticatable, error) {
+func (p *ModelUserProvider) RetrieveByToken(ctx context.Context, identifier any, token string) (auth.Authenticatable, error) {
 	retrieved, err := p.RetrieveByID(ctx, identifier)
 	if err != nil || retrieved == nil {
 		return nil, err
@@ -117,7 +117,7 @@ func (p *EloquentUserProvider) RetrieveByToken(ctx context.Context, identifier a
 // remembered does not look like the account was edited.
 //
 // The instance the caller holds is updated too.
-func (p *EloquentUserProvider) UpdateRememberToken(ctx context.Context, user auth.Authenticatable, token string) error {
+func (p *ModelUserProvider) UpdateRememberToken(ctx context.Context, user auth.Authenticatable, token string) error {
 	user.SetRememberToken(token)
 
 	_, err := p.newQuery(ctx).
@@ -132,7 +132,7 @@ func (p *EloquentUserProvider) UpdateRememberToken(ctx context.Context, user aut
 // no statement this method issues ever compares a password. Credentials that are
 // nothing but password keys match nobody: the alternative is a query with no
 // where clause, which would answer with the first user in the table.
-func (p *EloquentUserProvider) RetrieveByCredentials(ctx context.Context, credentials map[string]any) (auth.Authenticatable, error) {
+func (p *ModelUserProvider) RetrieveByCredentials(ctx context.Context, credentials map[string]any) (auth.Authenticatable, error) {
 	filtered := filterCredentials(credentials)
 	if len(filtered) == 0 {
 		return nil, nil
@@ -160,7 +160,7 @@ func (p *EloquentUserProvider) RetrieveByCredentials(ctx context.Context, creden
 // The context is unused because nothing here touches storage; it is on the
 // signature because auth.UserProvider declares it, so that a provider which does
 // need one can be written without changing the contract.
-func (p *EloquentUserProvider) ValidateCredentials(_ context.Context, user auth.Authenticatable, credentials map[string]any) bool {
+func (p *ModelUserProvider) ValidateCredentials(_ context.Context, user auth.Authenticatable, credentials map[string]any) bool {
 	plain, ok := passwordOf(credentials)
 	if !ok {
 		return false
@@ -185,7 +185,7 @@ func (p *EloquentUserProvider) ValidateCredentials(_ context.Context, user auth.
 // when the user type can be filled -- see [Fillable]. A user type that cannot
 // keeps the old hash in memory for the rest of the request, and the row is
 // correct either way.
-func (p *EloquentUserProvider) RehashPasswordIfRequired(ctx context.Context, user auth.Authenticatable, credentials map[string]any, force bool) error {
+func (p *ModelUserProvider) RehashPasswordIfRequired(ctx context.Context, user auth.Authenticatable, credentials map[string]any, force bool) error {
 	if !p.hasher.NeedsRehash(user.GetAuthPassword()) && !force {
 		return nil
 	}
@@ -216,7 +216,7 @@ func (p *EloquentUserProvider) RehashPasswordIfRequired(ctx context.Context, use
 //
 // It takes no model to open the query on: the query comes from the factory
 // rather than from an instance, so there is nothing an instance would carry.
-func (p *EloquentUserProvider) newModelQuery(ctx context.Context) *query.Builder {
+func (p *ModelUserProvider) newModelQuery(ctx context.Context) *query.Builder {
 	q := p.newQuery(ctx)
 	if p.queryCallback != nil {
 		p.queryCallback(q)
@@ -226,7 +226,7 @@ func (p *EloquentUserProvider) newModelQuery(ctx context.Context) *query.Builder
 
 // grant is the authorization every statement in this file goes through. See the
 // type's doc for why it is a system grant and where its tenant comes from.
-func (p *EloquentUserProvider) grant(action auth.Action) auth.Grant {
+func (p *ModelUserProvider) grant(action auth.Action) auth.Grant {
 	return auth.SystemGrant(action, p.tenant)
 }
 
@@ -234,34 +234,34 @@ func (p *EloquentUserProvider) grant(action auth.Action) auth.Grant {
 //
 // It calls the constructor the provider was given, for the reason in the type's
 // doc.
-func (p *EloquentUserProvider) CreateModel() auth.Authenticatable { return p.model() }
+func (p *ModelUserProvider) CreateModel() auth.Authenticatable { return p.model() }
 
 // GetHasher is the hasher this provider checks passwords with.
-func (p *EloquentUserProvider) GetHasher() auth.Hasher { return p.hasher }
+func (p *ModelUserProvider) GetHasher() auth.Hasher { return p.hasher }
 
 // SetHasher replaces it, and returns the provider.
-func (p *EloquentUserProvider) SetHasher(hasher auth.Hasher) *EloquentUserProvider {
+func (p *ModelUserProvider) SetHasher(hasher auth.Hasher) *ModelUserProvider {
 	p.hasher = hasher
 	return p
 }
 
 // GetModel is the constructor this provider builds a user type with.
-func (p *EloquentUserProvider) GetModel() func() auth.Authenticatable { return p.model }
+func (p *ModelUserProvider) GetModel() func() auth.Authenticatable { return p.model }
 
 // SetModel replaces it, and returns the provider.
-func (p *EloquentUserProvider) SetModel(model func() auth.Authenticatable) *EloquentUserProvider {
+func (p *ModelUserProvider) SetModel(model func() auth.Authenticatable) *ModelUserProvider {
 	p.model = model
 	return p
 }
 
 // GetQueryCallback is the callback every retrieval query runs through, or nil.
-func (p *EloquentUserProvider) GetQueryCallback() func(*query.Builder) { return p.queryCallback }
+func (p *ModelUserProvider) GetQueryCallback() func(*query.Builder) { return p.queryCallback }
 
 // WithQuery sets the callback that modifies every retrieval query -- a
 // soft-delete filter, an "active only" clause -- and returns the provider.
 //
 // It does not reach the two writes. A nil callback clears it.
-func (p *EloquentUserProvider) WithQuery(queryCallback func(*query.Builder)) *EloquentUserProvider {
+func (p *ModelUserProvider) WithQuery(queryCallback func(*query.Builder)) *ModelUserProvider {
 	p.queryCallback = queryCallback
 	return p
 }

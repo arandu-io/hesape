@@ -81,7 +81,7 @@ func (c *fakeConnection) Table(ctx context.Context, table any, as ...string) *qu
 	return query.NewBuilder(c, grammars.NewSQLiteGrammar(), processors.NewSQLiteProcessor()).From(table, as...)
 }
 
-// users is the newQuery factory EloquentUserProvider is built with: a fresh
+// users is the newQuery factory ModelUserProvider is built with: a fresh
 // builder on the users table.
 func (c *fakeConnection) users(ctx context.Context) *query.Builder {
 	return c.Table(ctx, "users")
@@ -155,7 +155,7 @@ var (
 	_ auth.Authenticatable = (*testUser)(nil)
 )
 
-// newTestUser is the model constructor EloquentUserProvider is built with.
+// newTestUser is the model constructor ModelUserProvider is built with.
 func newTestUser() auth.Authenticatable { return &testUser{attributes: map[string]any{}} }
 
 func (u *testUser) GetAuthIdentifierName() string { return "id" }

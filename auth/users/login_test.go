@@ -130,7 +130,7 @@ func newLogin(hasher auth.Hasher, connection *fakeConnection) *login {
 	}
 	l.guard = auth.NewSessionGuard(
 		"web",
-		newEloquentProvider(connection, hasher),
+		newModelProvider(connection, hasher),
 		l.session,
 		l.request,
 		nil,

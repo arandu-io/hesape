@@ -36,7 +36,7 @@ type AuthHasher struct {
 
 // ForAuth returns h behind the interface hesape/auth consumes.
 //
-//	provider := users.NewEloquentUserProvider(
+//	provider := users.NewModelUserProvider(
 //		hashing.ForAuth(hashing.NewBcryptHasher()), model, newQuery, "acme")
 //
 // A nil hasher is bcrypt on its own defaults, which is the same reading
