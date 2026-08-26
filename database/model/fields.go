@@ -18,9 +18,23 @@ type field struct {
 	index  []int
 }
 
-// fieldCache holds the column list per entity type. Reflection over a struct is
+// entitySchema is what reflection over an entity type answers, kept so that it
+// is answered once per type rather than once per row.
+//
+// It holds the columns twice: ordered, because GetAttributes walks them and a
+// map has no order, and by name, because every read and every write of a single
+// attribute looks one up. The list alone used to serve both, and the lookup was
+// a linear scan of it -- so hydrating a row of C columns into a struct of F
+// fields cost C times F string comparisons, and GetDirty, which looks up every
+// key it just produced, cost F squared.
+type entitySchema struct {
+	fields []field
+	byName map[string]int
+}
+
+// fieldCache holds the schema per entity type. Reflection over a struct is
 // the same answer every time, and Hydrate asks for it once per row.
-var fieldCache sync.Map // reflect.Type -> []field
+var fieldCache sync.Map // reflect.Type -> *entitySchema
 
 // fieldsOf returns the columns of an entity type.
 //
@@ -36,13 +50,26 @@ var fieldCache sync.Map // reflect.Type -> []field
 // are columns of the outer one. An embedded struct with a `db` tag is treated as
 // a column of its own instead, which is how a driver-level type
 // (sql.NullString, a custom scanner) stays one value.
-func fieldsOf(t reflect.Type) []field {
+func fieldsOf(t reflect.Type) []field { return schemaOf(t).fields }
+
+// schemaOf returns the cached schema of an entity type, building it on first
+// sight.
+func schemaOf(t reflect.Type) *entitySchema {
 	if cached, ok := fieldCache.Load(t); ok {
-		return cached.([]field)
+		return cached.(*entitySchema)
 	}
-	out := collectFields(t, nil)
-	fieldCache.Store(t, out)
-	return out
+	fields := collectFields(t, nil)
+	byName := make(map[string]int, len(fields))
+	for i, f := range fields {
+		// First declaration wins, which is what the linear scan did: an
+		// embedded type's column does not shadow the outer type's.
+		if _, taken := byName[f.column]; !taken {
+			byName[f.column] = i
+		}
+	}
+	schema := &entitySchema{fields: fields, byName: byName}
+	fieldCache.Store(t, schema)
+	return schema
 }
 
 func collectFields(t reflect.Type, prefix []int) []field {
@@ -109,12 +136,12 @@ func toLowerRune(r rune) rune {
 
 // fieldByColumn finds the column in an entity type, reporting whether it exists.
 func fieldByColumn(t reflect.Type, column string) (field, bool) {
-	for _, f := range fieldsOf(t) {
-		if f.column == column {
-			return f, true
-		}
+	schema := schemaOf(t)
+	i, ok := schema.byName[column]
+	if !ok {
+		return field{}, false
 	}
-	return field{}, false
+	return schema.fields[i], true
 }
 
 // valueAt reads a column off an entity value.

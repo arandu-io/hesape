@@ -49,21 +49,51 @@ func (m *Model[T]) SetRawAttributes(attributes map[string]any, sync bool) error 
 // to a key with no field behind it: Fill drops it, ForceFill and
 // SetRawAttributes keep it.
 func (m *Model[T]) setAttributes(attributes map[string]any, keepUnknown bool) error {
+	if len(attributes) == 0 {
+		return nil
+	}
+
+	// The entity's reflect.Value is taken once rather than once per column, and
+	// the walk is over the schema rather than over a sorted copy of the map's
+	// keys. Sorting existed to make the first conversion error deterministic; so
+	// does declaration order, and it costs no allocation and no sort per row.
+	entity := reflect.ValueOf(m.Entity).Elem()
+	schema := schemaOf(entity.Type())
+
 	var discarded []string
-	for _, key := range sortedKeys(attributes) {
-		value := attributes[key]
-		known, err := m.setAttribute(key, value)
-		if err != nil {
-			return err
+	written := 0
+	for i := range schema.fields {
+		f := schema.fields[i]
+		value, present := attributes[f.column]
+		if !present {
+			continue
 		}
-		if known {
+		written++
+		dst, settable := settableAt(entity, f)
+		if !settable {
+			continue
+		}
+		if err := assign(dst, value); err != nil {
+			return fmt.Errorf("model: %s.%s: %w", m.GetTable(), f.column, err)
+		}
+	}
+
+	// Whatever the schema did not claim. A key with no field behind it is kept
+	// as a raw attribute or reported, and the order it is reported in is the
+	// sorted one, because a violation message that changes between runs is a
+	// message nobody can assert on.
+	if written == len(attributes) {
+		return nil
+	}
+	for _, key := range sortedKeys(attributes) {
+		if _, ok := schema.byName[key]; ok {
 			continue
 		}
 		if keepUnknown {
 			if m.attributes == nil {
 				m.attributes = map[string]any{}
 			}
-			m.attributes[key] = value
+			m.attributes[key] = attributes[key]
 			continue
 		}
 		discarded = append(discarded, key)
