@@ -17,7 +17,7 @@ type MorphOne struct {
 }
 
 // NewMorphOne answers MorphOne::__construct.
-func NewMorphOne(query Builder, parent Model, typ, id, localKey string) *MorphOne {
+func newMorphOne(query Builder, parent Model, typ, id, localKey string) *MorphOne {
 	relation := &MorphOne{MorphOneOrMany: NewMorphOneOrMany(query, parent, typ, id, localKey)}
 
 	relation.SupportsInverseRelations.PossibleInverseRelations = relation.PossibleInverseRelations
@@ -38,6 +38,12 @@ func NewMorphOne(query Builder, parent Model, typ, id, localKey string) *MorphOn
 		AddOneOfManyJoinSubQueryConstraints: relation.AddOneOfManyJoinSubQueryConstraints,
 	}
 
+	return relation
+}
+
+// NewMorphOne builds the relation and narrows it to its parent.
+func NewMorphOne(query Builder, parent Model, typ, id, localKey string) *MorphOne {
+	relation := newMorphOne(query, parent, typ, id, localKey)
 	relation.AddConstraints()
 	return relation
 }
@@ -50,9 +56,6 @@ func (r *MorphOne) GetRelationQuery() Builder {
 // AddConstraints answers MorphOneOrMany::addConstraints, redeclared so that it
 // reaches this type's GetRelationQuery.
 func (r *MorphOne) AddConstraints() {
-	if !ConstraintsEnabled() {
-		return
-	}
 	q := r.GetRelationQuery()
 	q.Where(r.GetQualifiedMorphType(), r.GetMorphClass())
 	q.Where(r.GetQualifiedForeignKeyName(), "=", r.GetParentKey())
@@ -127,4 +130,15 @@ func (r *MorphOne) newRelatedInstanceFor(parent Model) Model {
 // getRelatedKeyFrom answers MorphOne::getRelatedKeyFrom.
 func (r *MorphOne) getRelatedKeyFrom(model Model) any {
 	return model.GetAttribute(r.GetForeignKeyName())
+}
+
+// NewMorphOneUnconstrained builds the relation without narrowing it to one parent.
+//
+// It exists because the constraint used to be switched off through a
+// process-wide flag, which meant a relation built on another goroutine while
+// the flag was down came back unconstrained -- every parent's children, in a
+// well-formed query nobody could tell apart from the right one. The call site
+// says which it wants now, and there is no flag to leave down.
+func NewMorphOneUnconstrained(query Builder, parent Model, typ, id, localKey string) *MorphOne {
+	return newMorphOne(query, parent, typ, id, localKey)
 }

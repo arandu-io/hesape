@@ -23,7 +23,7 @@ type HasOne struct {
 // localKey, wires its embedded concerns.SupportsDefaultModels,
 // concerns.ComparesRelatedModels and concerns.CanBeOneOfMany to call back
 // into the relation itself, applies its constraints, and returns it.
-func NewHasOne(query Builder, parent Model, foreignKey, localKey string) *HasOne {
+func newHasOne(query Builder, parent Model, foreignKey, localKey string) *HasOne {
 	relation := &HasOne{HasOneOrMany: NewHasOneOrMany(query, parent, foreignKey, localKey)}
 
 	relation.SupportsDefaultModels = concerns.SupportsDefaultModels{
@@ -43,6 +43,12 @@ func NewHasOne(query Builder, parent Model, foreignKey, localKey string) *HasOne
 		AddOneOfManyJoinSubQueryConstraints: relation.AddOneOfManyJoinSubQueryConstraints,
 	}
 
+	return relation
+}
+
+// NewHasOne builds the relation and narrows it to its parent.
+func NewHasOne(query Builder, parent Model, foreignKey, localKey string) *HasOne {
+	relation := newHasOne(query, parent, foreignKey, localKey)
 	relation.AddConstraints()
 	return relation
 }
@@ -60,9 +66,6 @@ func (r *HasOne) GetRelationQuery() Builder {
 // embedded method but not the overridden GetRelationQuery it calls, which is
 // the whole of what "no virtual dispatch" costs.
 func (r *HasOne) AddConstraints() {
-	if !ConstraintsEnabled() {
-		return
-	}
 	q := r.GetRelationQuery()
 	q.Where(r.GetQualifiedForeignKeyName(), "=", r.GetParentKey())
 	q.WhereNotNull(r.GetQualifiedForeignKeyName())
@@ -144,4 +147,15 @@ func (r *HasOne) NewRelatedInstanceFor(parent Model) Model {
 // getRelatedKeyFrom returns model's value for the relation's foreign key.
 func (r *HasOne) getRelatedKeyFrom(model Model) any {
 	return model.GetAttribute(r.GetForeignKeyName())
+}
+
+// NewHasOneUnconstrained builds the relation without narrowing it to one parent.
+//
+// It exists because the constraint used to be switched off through a
+// process-wide flag, which meant a relation built on another goroutine while
+// the flag was down came back unconstrained -- every parent's children, in a
+// well-formed query nobody could tell apart from the right one. The call site
+// says which it wants now, and there is no flag to leave down.
+func NewHasOneUnconstrained(query Builder, parent Model, foreignKey, localKey string) *HasOne {
+	return newHasOne(query, parent, foreignKey, localKey)
 }

@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database/eloquent/relations/concerns"
@@ -98,46 +97,18 @@ type Relation interface {
 	GetRelated() Model
 }
 
-// constraintsEnabled answers Relation::$constraints, the static flag
-// NoConstraints turns off while a relation is being built for an existence
-// query or an eager load.
+// The relation constraints used to be a process-wide flag here, switched off
+// around a constructor by NoConstraints so that an eager load could build a
+// relation whose query was not already narrowed to one parent.
 //
-// It is two variables rather than one because the flag is read from inside the
-// callback that turned it off -- every AddConstraints asks -- and a mutex held
-// across the callback would deadlock on the first read. The atomic carries the
-// value, and the guard serializes one NoConstraints against another, which is
-// the only overlap that could interleave two settings.
+// It is gone, and what replaced it is a second constructor per relation --
+// NewHasManyUnconstrained beside NewHasMany. The flag was correct in PHP, where
+// one request is one process; here a relation built on another goroutine while
+// the flag was down came back unconstrained, which is every parent's children
+// in a statement nobody could tell from the right one. Being atomic, the race
+// detector could never see it.
 //
-// It is global state and it is global state in PHP too: a relation built on
-// another goroutine while this one is inside NoConstraints sees the flag off.
-// That is the PHP's behaviour reproduced, not a race introduced -- and it is
-// why the window is one constructor wide.
-var (
-	constraintsEnabled atomic.Bool
-	constraintsGuard   sync.Mutex
-)
-
-func init() { constraintsEnabled.Store(true) }
-
-// NoConstraints answers Relation::noConstraints.
-//
-// It runs callback with the relation constraints turned off, which is how an
-// eager load gets a relation whose query is not already narrowed to one parent.
-func NoConstraints(callback func()) {
-	constraintsGuard.Lock()
-	defer constraintsGuard.Unlock()
-
-	previous := constraintsEnabled.Load()
-	constraintsEnabled.Store(false)
-	defer constraintsEnabled.Store(previous)
-
-	callback()
-}
-
-// ConstraintsEnabled reports whether relation constraints are being applied.
-// Every AddConstraints asks it first, which is the PHP's `if
-// (static::$constraints)`.
-func ConstraintsEnabled() bool { return constraintsEnabled.Load() }
+// The call site says which it wants now, and there is no flag to leave down.
 
 // selfJoinCount answers Relation::$selfJoinCount.
 var selfJoinCount struct {

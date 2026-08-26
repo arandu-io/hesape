@@ -54,10 +54,6 @@ func NewHasOneOrMany(query Builder, parent Model, foreignKey, localKey string) H
 // engines where that comparison holds -- and produce a relation full of other
 // people's orphans.
 func (r *HasOneOrMany) AddConstraints() {
-	if !ConstraintsEnabled() {
-		return
-	}
-
 	q := r.GetRelationQuery()
 	q.Where(r.foreignKey, "=", r.GetParentKey())
 	q.WhereNotNull(r.foreignKey)

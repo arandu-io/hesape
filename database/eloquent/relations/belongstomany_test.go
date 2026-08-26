@@ -371,9 +371,16 @@ func rolesOf(database *db, parent relations.Model) *relations.BelongsToMany {
 }
 
 func eagerRolesOf(database *db, parent relations.Model) *relations.BelongsToMany {
-	var relation *relations.BelongsToMany
-	relations.NoConstraints(func() { relation = rolesOf(database, parent) })
-	return relation
+	return relations.NewBelongsToManyUnconstrained(
+		newModel(database, "roles", "role", nil).NewQuery(),
+		parent,
+		"role_user",
+		"user_id",
+		"role_id",
+		"id",
+		"id",
+		"roles",
+	)
 }
 
 func rolesFor(database *db, user string) []string {

@@ -69,8 +69,19 @@ const (
 // ownerKey may be empty, and empty means "the related model's own key name",
 // which is not known until the type column is read.
 func NewMorphTo(query Builder, parent Model, foreignKey, ownerKey, typ, relation string) *MorphTo {
+	return newMorphTo(NewBelongsTo(query, parent, foreignKey, ownerKey, relation), typ)
+}
+
+// NewMorphToUnconstrained builds the relation without narrowing it to one
+// parent, which is what an eager load needs: the batch resolves the type first
+// and then reads every owner of that type in one statement.
+func NewMorphToUnconstrained(query Builder, parent Model, foreignKey, ownerKey, typ, relation string) *MorphTo {
+	return newMorphTo(NewBelongsToUnconstrained(query, parent, foreignKey, ownerKey, relation), typ)
+}
+
+func newMorphTo(belongsTo *BelongsTo, typ string) *MorphTo {
 	relation2 := &MorphTo{
-		BelongsTo:                *NewBelongsTo(query, parent, foreignKey, ownerKey, relation),
+		BelongsTo:                *belongsTo,
 		morphType:                typ,
 		dictionary:               map[string]map[string][]Model{},
 		morphableConstraints:     map[string]func(Builder){},

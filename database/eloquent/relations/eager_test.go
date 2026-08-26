@@ -191,16 +191,13 @@ func TestBelongsToEagerLoadingSharesOneOwner(t *testing.T) {
 	database, _, posts := seedBlog()
 	ctx, g := context.Background(), auth.SystemGrant("user.view", "acme")
 
-	var relation *relations.BelongsTo
-	relations.NoConstraints(func() {
-		relation = relations.NewBelongsTo(
-			newModel(database, "users", "user", nil).NewQuery(),
-			posts[0],
-			"user_id",
-			"id",
-			"user",
-		)
-	})
+	relation := relations.NewBelongsToUnconstrained(
+		newModel(database, "users", "user", nil).NewQuery(),
+		posts[0],
+		"user_id",
+		"id",
+		"user",
+	)
 
 	before := database.count()
 	models := asModels(posts)
@@ -242,17 +239,14 @@ func TestMorphToEagerLoadingIsOneQueryPerType(t *testing.T) {
 
 	ctx, g := context.Background(), auth.SystemGrant("comment.view", "acme")
 
-	var relation *relations.MorphTo
-	relations.NoConstraints(func() {
-		relation = relations.NewMorphTo(
-			newModel(database, "posts", "post", nil).NewQuery(),
-			comments[0],
-			"commentable_id",
-			"",
-			"commentable_type",
-			"commentable",
-		)
-	})
+	relation := relations.NewMorphToUnconstrained(
+		newModel(database, "posts", "post", nil).NewQuery(),
+		comments[0],
+		"commentable_id",
+		"",
+		"commentable_type",
+		"commentable",
+	)
 
 	before := database.count()
 	models := asModels(comments)
@@ -287,13 +281,10 @@ func TestAnUnregisteredMorphTypeIsRefused(t *testing.T) {
 		"id": "1", "commentable_id": "1", "commentable_type": "podcast", "tenant_id": "acme",
 	})
 
-	var relation *relations.MorphTo
-	relations.NoConstraints(func() {
-		relation = relations.NewMorphTo(
-			newModel(database, "posts", "post", nil).NewQuery(),
-			comment, "commentable_id", "", "commentable_type", "commentable",
-		)
-	})
+	relation := relations.NewMorphToUnconstrained(
+		newModel(database, "posts", "post", nil).NewQuery(),
+		comment, "commentable_id", "", "commentable_type", "commentable",
+	)
 
 	_, err := relations.EagerLoadRelation(context.Background(), auth.SystemGrant("comment.view", "acme"),
 		[]relations.Model{comment}, "commentable", relation, nil)
@@ -343,12 +334,15 @@ func postsOf(database *db, parent relations.Model) *relations.HasMany {
 	)
 }
 
-// eagerPostsOf is the relation as an eager load builds it: with constraints
-// off, so the parent's own where is not on the query the batch will run.
+// eagerPostsOf is the relation as an eager load builds it: unconstrained, so
+// the parent's own where is not on the query the batch will run.
 func eagerPostsOf(database *db, parent relations.Model) *relations.HasMany {
-	var relation *relations.HasMany
-	relations.NoConstraints(func() { relation = postsOf(database, parent) })
-	return relation
+	return relations.NewHasManyUnconstrained(
+		newModel(database, "posts", "post", nil).NewQuery(),
+		parent,
+		"posts.user_id",
+		"id",
+	)
 }
 
 func asModels(models []*model) []relations.Model {

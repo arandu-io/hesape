@@ -48,9 +48,7 @@ func NewMorphToMany(q Builder, parent Model, name, table, foreignPivotKey, relat
 	// The type clause is this relation's own, and it is added here rather than
 	// in an overridden addWhereConstraints because Go dispatches statically:
 	// the embedded AddConstraints would never have reached an override.
-	if ConstraintsEnabled() {
-		relation.Query.Where(relation.QualifyPivotColumn(relation.morphType), relation.morphClass)
-	}
+	relation.Query.Where(relation.QualifyPivotColumn(relation.morphType), relation.morphClass)
 
 	return relation
 }

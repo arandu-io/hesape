@@ -26,7 +26,7 @@ type BelongsTo struct {
 }
 
 // NewBelongsTo answers BelongsTo::__construct.
-func NewBelongsTo(query Builder, child Model, foreignKey, ownerKey, relationName string) *BelongsTo {
+func newBelongsTo(query Builder, child Model, foreignKey, ownerKey, relationName string) *BelongsTo {
 	relation := &BelongsTo{
 		BaseRelation: NewBaseRelation(query, child),
 		child:        child,
@@ -44,15 +44,18 @@ func NewBelongsTo(query Builder, child Model, foreignKey, ownerKey, relationName
 		CompareRelatedKeyFrom: relation.getRelatedKeyFrom,
 	}
 
+	return relation
+}
+
+// NewBelongsTo builds the relation and narrows it to its parent.
+func NewBelongsTo(query Builder, child Model, foreignKey, ownerKey, relationName string) *BelongsTo {
+	relation := newBelongsTo(query, child, foreignKey, ownerKey, relationName)
 	relation.AddConstraints()
 	return relation
 }
 
 // AddConstraints answers BelongsTo::addConstraints.
 func (r *BelongsTo) AddConstraints() {
-	if !ConstraintsEnabled() {
-		return
-	}
 	r.Query.Where(r.GetQualifiedOwnerKeyName(), "=", r.getForeignKeyFrom(r.child))
 }
 
@@ -257,4 +260,15 @@ func sortByDictionaryKey(keys []any) {
 		right, _ := concerns.GetDictionaryKey(keys[j])
 		return left < right
 	})
+}
+
+// NewBelongsToUnconstrained builds the relation without narrowing it to one parent.
+//
+// It exists because the constraint used to be switched off through a
+// process-wide flag, which meant a relation built on another goroutine while
+// the flag was down came back unconstrained -- every parent's children, in a
+// well-formed query nobody could tell apart from the right one. The call site
+// says which it wants now, and there is no flag to leave down.
+func NewBelongsToUnconstrained(query Builder, child Model, foreignKey, ownerKey, relationName string) *BelongsTo {
+	return newBelongsTo(query, child, foreignKey, ownerKey, relationName)
 }

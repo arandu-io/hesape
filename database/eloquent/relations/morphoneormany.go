@@ -37,9 +37,6 @@ func NewMorphOneOrMany(query Builder, parent Model, typ, id, localKey string) Mo
 
 // AddConstraints answers MorphOneOrMany::addConstraints.
 func (r *MorphOneOrMany) AddConstraints() {
-	if !ConstraintsEnabled() {
-		return
-	}
 	r.GetRelationQuery().Where(r.morphType, r.morphClass)
 	r.HasOneOrMany.AddConstraints()
 }

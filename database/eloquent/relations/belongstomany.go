@@ -60,7 +60,7 @@ type BelongsToMany struct {
 }
 
 // NewBelongsToMany answers BelongsToMany::__construct.
-func NewBelongsToMany(query Builder, parent Model, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relationName string) *BelongsToMany {
+func newBelongsToMany(query Builder, parent Model, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relationName string) *BelongsToMany {
 	relation := &BelongsToMany{
 		BaseRelation:    NewBaseRelation(query, parent),
 		table:           table,
@@ -74,16 +74,25 @@ func NewBelongsToMany(query Builder, parent Model, table, foreignPivotKey, relat
 	relation.InteractsWithPivotTable = concerns.InteractsWithPivotTable{Host: relation}
 	relation.AliasedPivotColumns = relation.aliasedPivotColumns
 
-	relation.AddConstraints()
+	// The join is on both paths. Only the where clause that narrows the pivot to
+	// one parent is what "unconstrained" leaves off -- an eager load reads the
+	// pivot for every parent at once and still needs the join to reach it.
+	relation.performJoin(nil)
+
+	return relation
+}
+
+// NewBelongsToMany builds the relation and narrows it to its parent.
+func NewBelongsToMany(query Builder, parent Model, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relationName string) *BelongsToMany {
+	relation := newBelongsToMany(query, parent, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relationName)
+	relation.addWhereConstraints()
 	return relation
 }
 
 // AddConstraints answers BelongsToMany::addConstraints.
 func (r *BelongsToMany) AddConstraints() {
 	r.performJoin(nil)
-	if ConstraintsEnabled() {
-		r.addWhereConstraints()
-	}
+	r.addWhereConstraints()
 }
 
 // performJoin answers BelongsToMany::performJoin.
@@ -829,3 +838,14 @@ func (r *BelongsToMany) QualifyPivotColumn(column string) string {
 // ParentKeyValue answers the PHP's $this->parent->{$this->parentKey}, which the
 // pivot trait reads through the host contract.
 func (r *BelongsToMany) ParentKeyValue() any { return r.Parent.GetAttribute(r.parentKey) }
+
+// NewBelongsToManyUnconstrained builds the relation without narrowing it to one parent.
+//
+// It exists because the constraint used to be switched off through a
+// process-wide flag, which meant a relation built on another goroutine while
+// the flag was down came back unconstrained -- every parent's children, in a
+// well-formed query nobody could tell apart from the right one. The call site
+// says which it wants now, and there is no flag to leave down.
+func NewBelongsToManyUnconstrained(query Builder, parent Model, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relationName string) *BelongsToMany {
+	return newBelongsToMany(query, parent, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relationName)
+}

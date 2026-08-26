@@ -13,19 +13,22 @@ type MorphMany struct {
 }
 
 // NewMorphMany answers MorphMany::__construct.
-func NewMorphMany(query Builder, parent Model, typ, id, localKey string) *MorphMany {
+func newMorphMany(query Builder, parent Model, typ, id, localKey string) *MorphMany {
 	relation := &MorphMany{MorphOneOrMany: NewMorphOneOrMany(query, parent, typ, id, localKey)}
 	relation.SupportsInverseRelations.PossibleInverseRelations = relation.PossibleInverseRelations
+	return relation
+}
+
+// NewMorphMany builds the relation and narrows it to its parent.
+func NewMorphMany(query Builder, parent Model, typ, id, localKey string) *MorphMany {
+	relation := newMorphMany(query, parent, typ, id, localKey)
 	relation.AddConstraints()
 	return relation
 }
 
 // One answers MorphMany::one.
 func (r *MorphMany) One() *MorphOne {
-	var one *MorphOne
-	NoConstraints(func() {
-		one = NewMorphOne(r.Query, r.Parent, r.GetQualifiedMorphType(), r.GetQualifiedForeignKeyName(), r.GetLocalKeyName())
-	})
+	one := NewMorphOneUnconstrained(r.Query, r.Parent, r.GetQualifiedMorphType(), r.GetQualifiedForeignKeyName(), r.GetLocalKeyName())
 	if inverse := r.GetInverseRelationship(); inverse != "" {
 		_ = one.Inverse(inverse)
 	}
@@ -51,4 +54,15 @@ func (r *MorphMany) InitRelation(models []Model, relation string) []Model {
 // Match answers MorphMany::match.
 func (r *MorphMany) Match(models []Model, results []Model, relation string) ([]Model, error) {
 	return r.MatchMany(models, results, relation)
+}
+
+// NewMorphManyUnconstrained builds the relation without narrowing it to one parent.
+//
+// It exists because the constraint used to be switched off through a
+// process-wide flag, which meant a relation built on another goroutine while
+// the flag was down came back unconstrained -- every parent's children, in a
+// well-formed query nobody could tell apart from the right one. The call site
+// says which it wants now, and there is no flag to leave down.
+func NewMorphManyUnconstrained(query Builder, parent Model, typ, id, localKey string) *MorphMany {
+	return newMorphMany(query, parent, typ, id, localKey)
 }

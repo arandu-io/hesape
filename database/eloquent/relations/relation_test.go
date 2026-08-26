@@ -21,16 +21,13 @@ func TestAMorphEagerLoadFiltersOnTheTypeColumn(t *testing.T) {
 		map[string]any{"id": "2", "commentable_id": "1", "commentable_type": "video", "body": "on the video", "tenant_id": "acme"},
 	)
 
-	var relation *relations.MorphMany
-	relations.NoConstraints(func() {
-		relation = relations.NewMorphMany(
-			newModel(database, "comments", "comment", nil).NewQuery(),
-			post,
-			"comments.commentable_type",
-			"comments.commentable_id",
-			"id",
-		)
-	})
+	relation := relations.NewMorphManyUnconstrained(
+		newModel(database, "comments", "comment", nil).NewQuery(),
+		post,
+		"comments.commentable_type",
+		"comments.commentable_id",
+		"id",
+	)
 
 	ctx, g := context.Background(), auth.SystemGrant("comment.view", "acme")
 	models := []relations.Model{post}
@@ -141,14 +138,11 @@ func TestHasManyThroughReachesTheFarParentThroughTheJoin(t *testing.T) {
 		map[string]any{"id": "11", "user_id": "2", "title": "from portugal", "tenant_id": "acme"},
 	)
 
-	var relation *relations.HasManyThrough
-	relations.NoConstraints(func() {
-		relation = relations.NewHasManyThrough(
-			newModel(database, "posts", "post", nil).NewQuery(),
-			country, through,
-			"country_id", "user_id", "id", "id",
-		)
-	})
+	relation := relations.NewHasManyThroughUnconstrained(
+		newModel(database, "posts", "post", nil).NewQuery(),
+		country, through,
+		"country_id", "user_id", "id", "id",
+	)
 
 	ctx, g := context.Background(), auth.SystemGrant("post.view", "acme")
 
@@ -196,14 +190,11 @@ func TestHasManyThroughDoesNotReachThroughAnotherTenantsRow(t *testing.T) {
 		map[string]any{"id": "10", "user_id": "1", "title": "acme post", "tenant_id": "acme"},
 	)
 
-	var relation *relations.HasManyThrough
-	relations.NoConstraints(func() {
-		relation = relations.NewHasManyThrough(
-			newModel(database, "posts", "post", nil).NewQuery(),
-			country, through,
-			"country_id", "user_id", "id", "id",
-		)
-	})
+	relation := relations.NewHasManyThroughUnconstrained(
+		newModel(database, "posts", "post", nil).NewQuery(),
+		country, through,
+		"country_id", "user_id", "id", "id",
+	)
 
 	ctx, g := context.Background(), auth.SystemGrant("post.view", "acme")
 
@@ -364,9 +355,14 @@ func TestTheMorphAliasIsWhatTheColumnHolds(t *testing.T) {
 	}
 }
 
-// TestNoConstraintsLeavesTheParentWhereOffTheQuery: it is what makes the eager
-// query one statement for every parent rather than one narrowed to the first.
-func TestNoConstraintsLeavesTheParentWhereOffTheQuery(t *testing.T) {
+// TestTheUnconstrainedConstructorLeavesTheParentWhereOffTheQuery: it is what
+// makes the eager query one statement for every parent rather than one narrowed
+// to the first.
+//
+// The property used to belong to a process-wide flag. It belongs to the
+// constructor now, which is why this test reads two constructors instead of one
+// constructor and a switch.
+func TestTheUnconstrainedConstructorLeavesTheParentWhereOffTheQuery(t *testing.T) {
 	database, users, _ := seedBlog()
 
 	constrained := postsOf(database, users[0])
@@ -376,6 +372,6 @@ func TestNoConstraintsLeavesTheParentWhereOffTheQuery(t *testing.T) {
 
 	unconstrained := eagerPostsOf(database, users[0])
 	if len(unconstrained.GetQuery().GetQuery().Wheres) != 0 {
-		t.Fatalf("a relation built inside NoConstraints carried %+v", unconstrained.GetQuery().GetQuery().Wheres)
+		t.Fatalf("an unconstrained relation carried %+v", unconstrained.GetQuery().GetQuery().Wheres)
 	}
 }

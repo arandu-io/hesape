@@ -73,10 +73,14 @@ func NewHasOneOrManyThrough(query Builder, farParent, throughParent Model, first
 // AddConstraints answers HasOneOrManyThrough::addConstraints.
 func (r *HasOneOrManyThrough) AddConstraints() {
 	r.performJoin(nil)
+	r.addWhereConstraints()
+}
 
-	if ConstraintsEnabled() {
-		r.Query.Where(r.GetQualifiedFirstKeyName(), "=", r.farParent.GetAttribute(r.localKey))
-	}
+// addWhereConstraints is the half of AddConstraints that narrows the query to
+// one far parent. The join is the other half, and it is on both paths: an eager
+// load reads through the intermediate table for every parent at once.
+func (r *HasOneOrManyThrough) addWhereConstraints() {
+	r.Query.Where(r.GetQualifiedFirstKeyName(), "=", r.farParent.GetAttribute(r.localKey))
 }
 
 // performJoin answers HasOneOrManyThrough::performJoin.
@@ -399,11 +403,20 @@ type HasManyThrough struct {
 }
 
 // NewHasManyThrough answers HasManyThrough's constructor.
-func NewHasManyThrough(query Builder, farParent, throughParent Model, firstKey, secondKey, localKey, secondLocalKey string) *HasManyThrough {
+func newHasManyThrough(query Builder, farParent, throughParent Model, firstKey, secondKey, localKey, secondLocalKey string) *HasManyThrough {
 	relation := &HasManyThrough{
 		HasOneOrManyThrough: NewHasOneOrManyThrough(query, farParent, throughParent, firstKey, secondKey, localKey, secondLocalKey),
 	}
-	relation.AddConstraints()
+	// The join is on both paths; only the where that narrows to one far parent
+	// is what "unconstrained" leaves off.
+	relation.performJoin(nil)
+	return relation
+}
+
+// NewHasManyThrough builds the relation and narrows it to its parent.
+func NewHasManyThrough(query Builder, farParent, throughParent Model, firstKey, secondKey, localKey, secondLocalKey string) *HasManyThrough {
+	relation := newHasManyThrough(query, farParent, throughParent, firstKey, secondKey, localKey, secondLocalKey)
+	relation.addWhereConstraints()
 	return relation
 }
 
@@ -449,12 +462,9 @@ func (r *HasManyThrough) Match(models []Model, results []Model, relation string)
 
 // One answers HasManyThrough::one.
 func (r *HasManyThrough) One() *HasOneThrough {
-	var one *HasOneThrough
-	NoConstraints(func() {
-		q := r.Query
-		q.GetQuery().Joins = nil
-		one = NewHasOneThrough(q, r.farParent, r.throughParent, r.firstKey, r.secondKey, r.localKey, r.secondLocalKey)
-	})
+	q := r.Query
+	q.GetQuery().Joins = nil
+	one := NewHasOneThroughUnconstrained(q, r.farParent, r.throughParent, r.firstKey, r.secondKey, r.localKey, r.secondLocalKey)
 	return one
 }
 
@@ -475,10 +485,13 @@ type HasOneThrough struct {
 }
 
 // NewHasOneThrough answers HasOneThrough's constructor.
-func NewHasOneThrough(query Builder, farParent, throughParent Model, firstKey, secondKey, localKey, secondLocalKey string) *HasOneThrough {
+func newHasOneThrough(query Builder, farParent, throughParent Model, firstKey, secondKey, localKey, secondLocalKey string) *HasOneThrough {
 	relation := &HasOneThrough{
 		HasOneOrManyThrough: NewHasOneOrManyThrough(query, farParent, throughParent, firstKey, secondKey, localKey, secondLocalKey),
 	}
+	// The join is on both paths; only the where that narrows to one far parent
+	// is what "unconstrained" leaves off.
+	relation.performJoin(nil)
 	relation.SupportsDefaultModels = concerns.SupportsDefaultModels{
 		NewRelatedInstanceFor: relation.newRelatedInstanceFor,
 	}
@@ -488,7 +501,13 @@ func NewHasOneThrough(query Builder, farParent, throughParent Model, firstKey, s
 		CompareRelatedKeyFrom: relation.getRelatedKeyFrom,
 	}
 
-	relation.AddConstraints()
+	return relation
+}
+
+// NewHasOneThrough builds the relation and narrows it to its parent.
+func NewHasOneThrough(query Builder, farParent, throughParent Model, firstKey, secondKey, localKey, secondLocalKey string) *HasOneThrough {
+	relation := newHasOneThrough(query, farParent, throughParent, firstKey, secondKey, localKey, secondLocalKey)
+	relation.addWhereConstraints()
 	return relation
 }
 
@@ -548,4 +567,26 @@ func (r *HasOneThrough) newRelatedInstanceFor(parent Model) Model {
 // getRelatedKeyFrom answers HasOneThrough::getRelatedKeyFrom.
 func (r *HasOneThrough) getRelatedKeyFrom(model Model) any {
 	return model.GetAttribute(r.GetForeignKeyName())
+}
+
+// NewHasManyThroughUnconstrained builds the relation without narrowing it to one parent.
+//
+// It exists because the constraint used to be switched off through a
+// process-wide flag, which meant a relation built on another goroutine while
+// the flag was down came back unconstrained -- every parent's children, in a
+// well-formed query nobody could tell apart from the right one. The call site
+// says which it wants now, and there is no flag to leave down.
+func NewHasManyThroughUnconstrained(query Builder, farParent, throughParent Model, firstKey, secondKey, localKey, secondLocalKey string) *HasManyThrough {
+	return newHasManyThrough(query, farParent, throughParent, firstKey, secondKey, localKey, secondLocalKey)
+}
+
+// NewHasOneThroughUnconstrained builds the relation without narrowing it to one parent.
+//
+// It exists because the constraint used to be switched off through a
+// process-wide flag, which meant a relation built on another goroutine while
+// the flag was down came back unconstrained -- every parent's children, in a
+// well-formed query nobody could tell apart from the right one. The call site
+// says which it wants now, and there is no flag to leave down.
+func NewHasOneThroughUnconstrained(query Builder, farParent, throughParent Model, firstKey, secondKey, localKey, secondLocalKey string) *HasOneThrough {
+	return newHasOneThrough(query, farParent, throughParent, firstKey, secondKey, localKey, secondLocalKey)
 }
