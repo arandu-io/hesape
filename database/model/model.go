@@ -83,9 +83,16 @@ type Model[T any] struct {
 	// request.
 	WasRecentlyCreated bool
 
-	// Connection, Grammar and Processor are given to the constructor and copied
+	// connection, Grammar and Processor are given to the constructor and copied
 	// onto every instance. There is no resolver to look them up in.
-	Connection query.Connection
+	//
+	// The connection is unexported and GetConnection is the one way to it. That
+	// is not tidiness: a statement issued straight through the connection carries
+	// no Grant and no tenant filter, and an exported field made that the shortest
+	// path rather than a declared one. What is left is a method with a name, so
+	// that a module reaching for it can be found by a lint and sent back in
+	// review.
+	connection query.Connection
 	Grammar    query.Grammar
 	Processor  query.Processor
 
@@ -136,7 +143,7 @@ func NewModel[T any](table string, connection query.Connection, grammar query.Gr
 		CreatedAtColumn: "created_at",
 		UpdatedAtColumn: "updated_at",
 		DeletedAtColumn: "deleted_at",
-		Connection:      connection,
+		connection:      connection,
 		Grammar:         grammar,
 		Processor:       processor,
 	}
@@ -196,7 +203,7 @@ func (m *Model[T]) NewInstance(attributes map[string]any, exists bool) (*Model[T
 		CreatedAtColumn:   m.CreatedAtColumn,
 		UpdatedAtColumn:   m.UpdatedAtColumn,
 		DeletedAtColumn:   m.DeletedAtColumn,
-		Connection:        m.Connection,
+		connection:        m.connection,
 		Grammar:           m.Grammar,
 		Processor:         m.Processor,
 		RelationResolvers: m.RelationResolvers,
@@ -796,7 +803,7 @@ func (m *Model[T]) SetTable(table string) *Model[T] {
 
 // GetConnection returns the connection this model runs on: the one it was
 // given.
-func (m *Model[T]) GetConnection() query.Connection { return m.Connection }
+func (m *Model[T]) GetConnection() query.Connection { return m.connection }
 
 // GetConnectionName returns the name of the connection this model uses.
 func (m *Model[T]) GetConnectionName() string { return m.ConnectionName }
@@ -809,7 +816,7 @@ func (m *Model[T]) GetConnectionName() string { return m.ConnectionName }
 func (m *Model[T]) SetConnection(name string, connection query.Connection) *Model[T] {
 	m.ConnectionName = name
 	if connection != nil {
-		m.Connection = connection
+		m.connection = connection
 	}
 	return m
 }
@@ -899,7 +906,7 @@ func (m *Model[T]) hasColumn(column string) bool {
 // See SaveOrFail for why it is an assertion rather than a method on
 // query.Connection.
 func (m *Model[T]) transaction(fn func() error) error {
-	transactor, ok := m.Connection.(Transactor)
+	transactor, ok := m.connection.(Transactor)
 	if !ok {
 		return fmt.Errorf("model: %s: the connection cannot open a transaction, so this cannot be the atomic form", m.GetTable())
 	}

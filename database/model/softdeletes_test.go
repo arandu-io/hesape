@@ -186,7 +186,7 @@ func TestBuilderRestoreUpdatesEveryTrashedRowItMatches(t *testing.T) {
 
 func TestSoftDeleteMethodsRefuseAModelThatDoesNotSoftDelete(t *testing.T) {
 	model, _ := newUserModel()
-	conn := model.Connection.(*testConnection)
+	conn := model.connection.(*testConnection)
 	conn.queue()
 
 	if _, err := model.NewQuery().WithTrashed().Get(context.Background(), grant()); err == nil {

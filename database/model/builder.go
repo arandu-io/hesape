@@ -75,7 +75,7 @@ func (m *Model[T]) NewTypedBuilder(q *query.Builder) *Builder[T] {
 // NewBaseQueryBuilder returns a plain query.Builder scoped to m's table, with
 // no model-level behavior attached.
 func (m *Model[T]) NewBaseQueryBuilder() *query.Builder {
-	q := query.NewBuilder(m.Connection, m.Grammar, m.Processor)
+	q := query.NewBuilder(m.connection, m.Grammar, m.Processor)
 	q.From(m.GetTable())
 	return q
 }
@@ -607,7 +607,7 @@ func (b *Builder[T]) FromQuery(ctx context.Context, g auth.Grant, sql string, bi
 	if tenant := auth.Tenant(g); tenant == "" || !auth.ValidTenant(tenant) {
 		return nil, ErrNoTenant
 	}
-	rows, err := b.model.Connection.Select(ctx, sql, bindings, true)
+	rows, err := b.model.connection.Select(ctx, sql, bindings, true)
 	if err != nil {
 		return nil, fmt.Errorf("model: selecting from %s: %w", b.model.GetTable(), err)
 	}

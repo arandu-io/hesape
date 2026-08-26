@@ -33,10 +33,10 @@ var _ query.Processor = (*Processor)(nil)
 func NewProcessor() *Processor { return &Processor{} }
 
 // LastInsertIDConnection is the part of the connection ProcessInsertGetID needs
-// beyond query.Connection: the identifier the engine assigned to the row it
+// beyond query.connection: the identifier the engine assigned to the row it
 // just inserted.
 //
-// query.Connection is narrowed to running statements and has no such
+// query.connection is narrowed to running statements and has no such
 // method, so a connection that can answer implements this and one that
 // cannot says so rather than returning a zero that reads like an
 // identifier.

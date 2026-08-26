@@ -78,7 +78,7 @@ func (b *Builder[T]) InsertOrIgnore(ctx context.Context, g auth.Grant, values ..
 			bindings = append(bindings, row[column])
 		}
 	}
-	return b.model.Connection.Insert(ctx, sql, cleanBindings(bindings))
+	return b.model.connection.Insert(ctx, sql, cleanBindings(bindings))
 }
 
 // IncrementOrCreate returns the row matching attributes with column set to

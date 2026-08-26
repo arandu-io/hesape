@@ -13,10 +13,15 @@ import (
 // rather than a typed one, and the base builder compiles SQL without
 // executing it.
 //
-// They are unexported and they stay that way. When the query package grows its
-// own Insert, Update, Delete and Get, these become three-line calls to them --
-// that is the direction the dependency should run, and two public ways to run
-// an insert is one too many.
+// They are unexported and they stay that way. They reach the connection through
+// GetConnection, which is the one declared way past the builder's own terminals
+// -- the field behind it is not exported, so this is the only door and it is a
+// door with a name a lint can be written against.
+//
+// What they must not become is a second way to run a statement for anyone else.
+// The rows they run are already tenant-scoped, by ScopeTenantQuery at
+// NewPivotQuery, which is why they do not go through the builder's terminals:
+// those would scope again.
 
 // insert runs the insert the builder compiled.
 //
@@ -40,7 +45,7 @@ func insert(ctx context.Context, q *query.Builder, values []map[string]any) erro
 		}
 	}
 
-	_, err := q.Connection.Insert(ctx, q.Grammar.CompileInsert(q, values), bindings)
+	_, err := q.GetConnection().Insert(ctx, q.Grammar.CompileInsert(q, values), bindings)
 	return err
 }
 
@@ -49,7 +54,7 @@ func update(ctx context.Context, q *query.Builder, values map[string]any) (int64
 	q.ApplyBeforeQueryCallbacks()
 
 	sql := q.Grammar.CompileUpdate(q, values)
-	return q.Connection.Update(ctx, sql, q.Grammar.PrepareBindingsForUpdate(q.GetRawBindings(), values))
+	return q.GetConnection().Update(ctx, sql, q.Grammar.PrepareBindingsForUpdate(q.GetRawBindings(), values))
 }
 
 // deleteFrom runs the delete the builder compiled.
@@ -60,12 +65,12 @@ func deleteFrom(ctx context.Context, q *query.Builder) (int64, error) {
 	q.ApplyBeforeQueryCallbacks()
 
 	sql := q.Grammar.CompileDelete(q)
-	return q.Connection.Delete(ctx, sql, q.Grammar.PrepareBindingsForDelete(q.GetRawBindings()))
+	return q.GetConnection().Delete(ctx, sql, q.Grammar.PrepareBindingsForDelete(q.GetRawBindings()))
 }
 
 // selectRows runs the select the builder compiled: the rows, unhydrated.
 func selectRows(ctx context.Context, q *query.Builder) ([]query.Record, error) {
-	rows, err := q.Connection.Select(ctx, q.ToSQL(), q.GetBindings(), false)
+	rows, err := q.GetConnection().Select(ctx, q.ToSQL(), q.GetBindings(), false)
 	if err != nil {
 		return nil, err
 	}

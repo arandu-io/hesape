@@ -68,10 +68,10 @@ func (b *Builder) Insert(ctx context.Context, g auth.Grant, values ...map[string
 	query := b.Clone()
 	query.ApplyBeforeQueryCallbacks()
 
-	if query.Connection == nil {
+	if query.connection == nil {
 		return false, errors.New("query: the builder has no connection to run against")
 	}
-	return query.Connection.Insert(
+	return query.connection.Insert(
 		ctx,
 		query.Grammar.CompileInsert(query, rows),
 		query.CleanBindings(flattenRows(rows)))
@@ -188,10 +188,10 @@ func (b *Builder) Update(ctx context.Context, g auth.Grant, values map[string]an
 		return 0, err
 	}
 
-	if query.Connection == nil {
+	if query.connection == nil {
 		return 0, errors.New("query: the builder has no connection to run against")
 	}
-	return query.Connection.Update(
+	return query.connection.Update(
 		ctx,
 		query.Grammar.CompileUpdate(query, compiled),
 		query.CleanBindings(query.Grammar.PrepareBindingsForUpdate(query.Bindings, bindings)))
@@ -216,10 +216,10 @@ func (b *Builder) UpdateFrom(ctx context.Context, g auth.Grant, values map[strin
 		return 0, err
 	}
 
-	if query.Connection == nil {
+	if query.connection == nil {
 		return 0, errors.New("query: the builder has no connection to run against")
 	}
-	return query.Connection.Update(
+	return query.connection.Update(
 		ctx,
 		grammar.CompileUpdateFrom(query, compiled),
 		query.CleanBindings(grammar.PrepareBindingsForUpdateFrom(query.Bindings, bindings)))
@@ -404,10 +404,10 @@ func (b *Builder) Delete(ctx context.Context, g auth.Grant, id ...any) (int64, e
 	}
 	query.ApplyBeforeQueryCallbacks()
 
-	if query.Connection == nil {
+	if query.connection == nil {
 		return 0, errors.New("query: the builder has no connection to run against")
 	}
-	return query.Connection.Delete(
+	return query.connection.Delete(
 		ctx,
 		query.Grammar.CompileDelete(query),
 		query.CleanBindings(query.Grammar.PrepareBindingsForDelete(query.Bindings)))
@@ -432,7 +432,7 @@ func (b *Builder) Truncate(ctx context.Context, g auth.Grant) error {
 	query := b.Clone()
 	query.ApplyBeforeQueryCallbacks()
 
-	if query.Connection == nil {
+	if query.connection == nil {
 		return errors.New("query: the builder has no connection to run against")
 	}
 	// The grammar returns a map, and a Go map has no guaranteed iteration
@@ -441,7 +441,7 @@ func (b *Builder) Truncate(ctx context.Context, g auth.Grant) error {
 	// statements has to say so some other way than through map order.
 	statements := query.Grammar.CompileTruncate(query)
 	for _, sql := range slices.Sorted(maps.Keys(statements)) {
-		if _, err := query.Connection.Statement(ctx, sql, statements[sql]); err != nil {
+		if _, err := query.connection.Statement(ctx, sql, statements[sql]); err != nil {
 			return err
 		}
 	}

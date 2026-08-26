@@ -711,7 +711,7 @@ func sameValue(left, right any) bool {
 	return fmt.Sprint(left) == fmt.Sprint(right)
 }
 
-// connection is the query.Connection the base builder runs pivot statements
+// connection is the query.GetConnection() the base builder runs pivot statements
 // through. Only the pivot path uses it; everything else goes through builder.
 //
 // It sees the SQL and the bindings and not the clauses, which is what a real

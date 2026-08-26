@@ -395,7 +395,7 @@ func TestCursorReportsTheConnectionsError(t *testing.T) {
 	}
 }
 
-// bufferedConnection implements query.Connection and nothing else, which is
+// bufferedConnection implements query.connection and nothing else, which is
 // what a driver that cannot stream a result set looks like.
 type bufferedConnection struct{}
 

@@ -304,7 +304,7 @@ func TestListenSeesEveryQuery(t *testing.T) {
 //
 // It could not work before. The processor asks the connection through
 // LastInsertIDConnection, and the type that makes a Connection usable as a
-// query.Connection did not implement it -- so InsertGetID answered "this
+// query.GetConnection() did not implement it -- so InsertGetID answered "this
 // connection cannot report the identifier it assigned" against every engine,
 // while every test that exercised it used a fake that could.
 //

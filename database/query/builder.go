@@ -23,7 +23,7 @@ import (
 // GetTimeout, GetGroupLimit and GetIndexHint.
 type Builder struct {
 	// Connection is the thing the query runs its statements against.
-	Connection Connection
+	connection Connection
 
 	// Grammar is what compiles the query to SQL for a specific engine.
 	Grammar Grammar
@@ -142,7 +142,7 @@ var bindingOrder = []string{"select", "from", "join", "where", "groupBy", "havin
 // processor, with an empty binding slice for each of the seven segments.
 func NewBuilder(connection Connection, grammar Grammar, processor Processor) *Builder {
 	b := &Builder{
-		Connection: connection,
+		connection: connection,
 		Grammar:    grammar,
 		Processor:  processor,
 		Bindings:   make(map[string][]any, len(bindingOrder)),
@@ -783,7 +783,7 @@ func (b *Builder) ToSQL() string {
 // NewQuery returns a new Builder sharing this one's connection, grammar and
 // processor.
 func (b *Builder) NewQuery() *Builder {
-	return NewBuilder(b.Connection, b.Grammar, b.Processor)
+	return NewBuilder(b.connection, b.Grammar, b.Processor)
 }
 
 // AddBinding appends value to the named binding segment.
@@ -896,7 +896,7 @@ func (b *Builder) GetLimit() *int { return b.limit }
 func (b *Builder) GetOffset() *int { return b.offset }
 
 // GetConnection returns the connection the query runs against.
-func (b *Builder) GetConnection() Connection { return b.Connection }
+func (b *Builder) GetConnection() Connection { return b.connection }
 
 // GetGrammar returns the grammar the query compiles through.
 func (b *Builder) GetGrammar() Grammar { return b.Grammar }

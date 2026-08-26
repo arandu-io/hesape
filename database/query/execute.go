@@ -400,23 +400,23 @@ func describeTable(from any) string {
 //
 // There is no fetch mode to choose: a row arrives as a Record either way.
 func (b *Builder) runSelect(ctx context.Context) ([]Record, error) {
-	if b.Connection == nil {
+	if b.connection == nil {
 		return nil, errors.New("query: the builder has no connection to run against")
 	}
-	return b.Connection.Select(ctx, b.ToSQL(), b.GetBindings(), !b.UsingWritePDO())
+	return b.connection.Select(ctx, b.ToSQL(), b.GetBindings(), !b.UsingWritePDO())
 }
 
 // affectingStatement runs a statement that returns a row count, through
 // AffectingConnection when the connection has it and through Update when it
 // does not.
 func (b *Builder) affectingStatement(ctx context.Context, query string, bindings []any) (int64, error) {
-	if b.Connection == nil {
+	if b.connection == nil {
 		return 0, errors.New("query: the builder has no connection to run against")
 	}
-	if connection, ok := b.Connection.(AffectingConnection); ok {
+	if connection, ok := b.connection.(AffectingConnection); ok {
 		return connection.AffectingStatement(ctx, query, bindings)
 	}
-	return b.Connection.Update(ctx, query, bindings)
+	return b.connection.Update(ctx, query, bindings)
 }
 
 // Get runs the query and returns its rows.
@@ -734,12 +734,12 @@ func (b *Builder) Exists(ctx context.Context, g auth.Grant) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if query.Connection == nil {
+	if query.connection == nil {
 		return false, errors.New("query: the builder has no connection to run against")
 	}
 	query.ApplyBeforeQueryCallbacks()
 
-	rows, err := query.Connection.Select(
+	rows, err := query.connection.Select(
 		ctx,
 		query.Grammar.CompileExists(query), query.GetBindings(), !query.UsingWritePDO())
 	if err != nil {
@@ -813,7 +813,7 @@ func (b *Builder) ToRawSQL(ctx context.Context, g auth.Grant) (string, error) {
 	}
 	sql := query.ToSQL()
 	bindings := query.GetBindings()
-	if connection, ok := query.Connection.(PreparesBindings); ok {
+	if connection, ok := query.connection.(PreparesBindings); ok {
 		bindings = connection.PrepareBindings(bindings)
 	}
 	return substituteBindingsIntoRawSQL(query.Grammar, sql, bindings)

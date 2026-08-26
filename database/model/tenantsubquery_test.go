@@ -77,7 +77,7 @@ func (db *evalDB) resolve(text string) (*query.Builder, bool) {
 	return db.registered[index], true
 }
 
-// Select implements query.Connection: the statement is a handle, and the
+// Select implements query.GetConnection(): the statement is a handle, and the
 // query it names is evaluated against the seeded rows.
 func (db *evalDB) Select(_ context.Context, statement string, bindings []any, useReadPDO bool) ([]query.Record, error) {
 	q, ok := db.resolve(statement)

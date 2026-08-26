@@ -18,7 +18,7 @@ import (
 // runSelect runs the query's SELECT and returns the rows.
 func (b *Builder[T]) runSelect(ctx context.Context) ([]query.Record, error) {
 	sql := b.query.ToSQL()
-	rows, err := b.model.Connection.Select(ctx, sql, b.query.GetBindings(), !b.query.UsingWritePDO())
+	rows, err := b.model.connection.Select(ctx, sql, b.query.GetBindings(), !b.query.UsingWritePDO())
 	if err != nil {
 		return nil, fmt.Errorf("model: selecting from %s: %w", b.model.GetTable(), err)
 	}
@@ -45,7 +45,7 @@ func (b *Builder[T]) runInsert(ctx context.Context, values []map[string]any) (bo
 			bindings = append(bindings, row[column])
 		}
 	}
-	ok, err := b.model.Connection.Insert(ctx, sql, cleanBindings(bindings))
+	ok, err := b.model.connection.Insert(ctx, sql, cleanBindings(bindings))
 	if err != nil {
 		return false, fmt.Errorf("model: inserting into %s: %w", b.model.GetTable(), err)
 	}
@@ -79,7 +79,7 @@ func (b *Builder[T]) runUpdate(ctx context.Context, values map[string]any) (int6
 	sql := b.model.Grammar.CompileUpdate(b.query, values)
 	bindings := b.model.Grammar.PrepareBindingsForUpdate(b.query.GetRawBindings(), values)
 
-	affected, err := b.model.Connection.Update(ctx, sql, cleanBindings(bindings))
+	affected, err := b.model.connection.Update(ctx, sql, cleanBindings(bindings))
 	if err != nil {
 		return 0, fmt.Errorf("model: updating %s: %w", b.model.GetTable(), err)
 	}
@@ -101,7 +101,7 @@ func (b *Builder[T]) runUpsert(ctx context.Context, values []map[string]any, uni
 		}
 	}
 
-	affected, err := b.model.Connection.Update(ctx, sql, cleanBindings(bindings))
+	affected, err := b.model.connection.Update(ctx, sql, cleanBindings(bindings))
 	if err != nil {
 		return 0, fmt.Errorf("model: upserting into %s: %w", b.model.GetTable(), err)
 	}
@@ -115,7 +115,7 @@ func (b *Builder[T]) runDelete(ctx context.Context) (int64, error) {
 	sql := b.model.Grammar.CompileDelete(b.query)
 	bindings := b.model.Grammar.PrepareBindingsForDelete(b.query.GetRawBindings())
 
-	affected, err := b.model.Connection.Delete(ctx, sql, cleanBindings(bindings))
+	affected, err := b.model.connection.Delete(ctx, sql, cleanBindings(bindings))
 	if err != nil {
 		return 0, fmt.Errorf("model: deleting from %s: %w", b.model.GetTable(), err)
 	}

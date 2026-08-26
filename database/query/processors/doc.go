@@ -25,7 +25,7 @@
 //   - ProcessInsertGetID returns (int64, error); query.Processor declares the
 //     signature.
 //   - The connection is asked for the identifier through LastInsertIDConnection,
-//     because query.Connection is narrowed to running statements and holds no
+//     because query.connection is narrowed to running statements and holds no
 //     driver handle to reach through.
 //   - ProcessColumns takes the CREATE TABLE statement as a variadic argument,
 //     because Go has no default argument and SQLite's is the one that reads it.

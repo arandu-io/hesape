@@ -8,7 +8,7 @@ import (
 	"github.com/arandu-io/hesape/database/query/processors"
 )
 
-// connection is a query.Connection that records what it was asked to run and
+// connection is a query.connection that records what it was asked to run and
 // returns what the test put in it. It reports a last insert identifier,
 // which is what MySQL and SQLite need and Postgres does not.
 type connection struct {

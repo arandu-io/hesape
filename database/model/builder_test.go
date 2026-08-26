@@ -22,7 +22,7 @@ type fakeRelation struct {
 }
 
 func (r *fakeRelation) GetRelationExistenceQuery(parent *query.Builder, columns any) *query.Builder {
-	sub := query.NewBuilder(parent.Connection, parent.Grammar, parent.Processor)
+	sub := query.NewBuilder(parent.GetConnection(), parent.Grammar, parent.Processor)
 	sub.From(r.table).Select(columns).WhereColumn(r.foreign, "=", r.local)
 	return sub
 }

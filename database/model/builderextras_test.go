@@ -44,7 +44,7 @@ func TestWithAttributesCanSkipTheConditions(t *testing.T) {
 }
 
 // savepointConnection is a connection that can say how deep it already is, which
-// query.Connection does not declare. See Savepointer.
+// query.GetConnection() does not declare. See Savepointer.
 type savepointConnection struct {
 	*testConnection
 	level    int
