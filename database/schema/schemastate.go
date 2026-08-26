@@ -6,8 +6,6 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
-
-	"github.com/arandu-io/hesape/auth"
 )
 
 // SchemaState is the pair of operations behind `schema:dump` and the squashed
@@ -21,10 +19,10 @@ import (
 // a command that runs nothing.
 type SchemaState interface {
 	// Dump writes the connection's schema to path.
-	Dump(ctx context.Context, g auth.Grant, connection Connection, path string) error
+	Dump(ctx context.Context, connection Connection, path string) error
 
 	// Load runs the schema file at path against the connection.
-	Load(ctx context.Context, g auth.Grant, path string) error
+	Load(ctx context.Context, path string) error
 }
 
 // The three concrete states implement the contract, checked here rather than
@@ -80,8 +78,8 @@ func (s *BaseSchemaState) MakeProcess(ctx context.Context, name string, args ...
 }
 
 // HasMigrationTable reports whether the connection's migration table exists.
-func (s *BaseSchemaState) HasMigrationTable(ctx context.Context, g auth.Grant) (bool, error) {
-	return NewBuilder(s.connection).HasTable(ctx, g, s.migrationTable)
+func (s *BaseSchemaState) HasMigrationTable(ctx context.Context) (bool, error) {
+	return NewBuilder(s.connection).HasTable(ctx, s.migrationTable)
 }
 
 // GetMigrationTable returns the migration table's name, with the connection's

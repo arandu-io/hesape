@@ -1,6 +1,10 @@
 package migrations
 
-import "context"
+import (
+	"context"
+
+	"github.com/arandu-io/hesape/database/schema"
+)
 
 // Connection is what a migration runs against.
 //
@@ -19,6 +23,20 @@ import "context"
 type Connection interface {
 	// GetName returns the connection's name.
 	GetName() string
+
+	// Schema returns the schema builder this migration writes DDL with.
+	//
+	// It is the standard path, and Statement is the escape: a CREATE INDEX
+	// CONCURRENTLY, an extension, a backfill that reads before it writes.
+	// Neither is a second kind of migration -- Up has one signature, and it is
+	// the one above.
+	//
+	// It takes no auth.Grant, and neither does anything it returns. DDL names a
+	// table, not a row: there is no tenant to scope by and no subject to
+	// attribute to, so the only Grant this path could hold is one somebody
+	// invented. The path to application rows is the one that needs a Grant, and
+	// it still has one on every method.
+	Schema() *schema.Builder
 
 	// Statement runs a statement that returns neither rows nor a count,
 	// which is every DDL statement there is.

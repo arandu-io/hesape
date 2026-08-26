@@ -7,8 +7,6 @@ import (
 	"os"
 	"regexp"
 	"strings"
-
-	"github.com/arandu-io/hesape/auth"
 )
 
 // SqliteSchemaState is the SchemaState that shells out to the sqlite3 command.
@@ -47,7 +45,7 @@ var sqliteMigrationRow = regexp.MustCompile(`(?i)^\s*(--|INSERT\s)`)
 // The dump has to be written by a program whose arguments came out of a
 // database configuration, and assembling a shell line from that
 // configuration is the injection the doc comment on MakeProcess is about.
-func (s *SqliteSchemaState) Dump(ctx context.Context, g auth.Grant, connection Connection, path string) error {
+func (s *SqliteSchemaState) Dump(ctx context.Context, connection Connection, path string) error {
 	schema, err := s.runSqlite(ctx, ".schema --indent")
 	if err != nil {
 		return err
@@ -58,7 +56,7 @@ func (s *SqliteSchemaState) Dump(ctx context.Context, g auth.Grant, connection C
 		return fmt.Errorf("schema: writing the SQLite dump to %s: %w", path, err)
 	}
 
-	hasTable, err := s.HasMigrationTable(ctx, g)
+	hasTable, err := s.HasMigrationTable(ctx)
 	if err != nil {
 		return err
 	}
@@ -102,7 +100,7 @@ func (s *SqliteSchemaState) appendMigrationData(ctx context.Context, path string
 // opening ":memory:" would get its own empty database and load the schema into
 // something nobody can see. So the statements are run through the connection
 // that already holds the database.
-func (s *SqliteSchemaState) Load(ctx context.Context, g auth.Grant, path string) error {
+func (s *SqliteSchemaState) Load(ctx context.Context, path string) error {
 	database := s.GetConnection().GetConfig("database")
 
 	if isSqliteMemory(database) {

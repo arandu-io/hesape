@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/arandu-io/hesape/database/migrations"
+	"github.com/arandu-io/hesape/database/schema"
 )
 
 // ForMigrations adapts a Connection to migrations.Connection.
@@ -28,6 +29,17 @@ func ForMigrations(connection *Connection) migrations.Connection {
 
 // migrationConnection is the adapter type ForMigrations constructs.
 type migrationConnection struct{ *Connection }
+
+// Schema satisfies migrations.Connection.Schema: the Blueprint, over the same
+// connection that runs Statement.
+//
+// The same connection matters more than it reads. A builder over a second
+// handle would sit outside the transaction the Migrator opened for this
+// migration, so a DDL failure would roll back half of it -- and it would sit
+// outside --pretend, so a dry run would create tables.
+func (m migrationConnection) Schema() *schema.Builder {
+	return schema.NewBuilder(ForSchema(m.Connection))
+}
 
 // Statement satisfies migrations.Connection.Statement: it rebinds the
 // placeholders and runs the statement.

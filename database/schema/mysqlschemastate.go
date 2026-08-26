@@ -7,8 +7,6 @@ import (
 	"os"
 	"regexp"
 	"strings"
-
-	"github.com/arandu-io/hesape/auth"
 )
 
 // MySqlSchemaState is the SchemaState that shells out to mysqldump and mysql.
@@ -39,7 +37,7 @@ var autoIncrementState = regexp.MustCompile(`(?i)\s+AUTO_INCREMENT=[0-9]+`)
 // Three steps: dump the structure, strip the auto-increment counters, then
 // append the rows of the migration table so a restored database does not
 // replay the migrations it already has.
-func (s *MySqlSchemaState) Dump(ctx context.Context, g auth.Grant, connection Connection, path string) error {
+func (s *MySqlSchemaState) Dump(ctx context.Context, connection Connection, path string) error {
 	args := append(s.baseDumpCommand(), "--routines", "--result-file="+path, "--no-data")
 	if err := s.executeDumpProcess(ctx, args, nil); err != nil {
 		return err
@@ -49,7 +47,7 @@ func (s *MySqlSchemaState) Dump(ctx context.Context, g auth.Grant, connection Co
 		return err
 	}
 
-	hasTable, err := s.HasMigrationTable(ctx, g)
+	hasTable, err := s.HasMigrationTable(ctx)
 	if err != nil {
 		return err
 	}
@@ -98,7 +96,7 @@ func (s *MySqlSchemaState) appendMigrationData(ctx context.Context, path string)
 
 // Load runs the schema file at path against the connection with the mysql
 // client.
-func (s *MySqlSchemaState) Load(ctx context.Context, g auth.Grant, path string) error {
+func (s *MySqlSchemaState) Load(ctx context.Context, path string) error {
 	file, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("schema: reading the MySQL schema file %s: %w", path, err)

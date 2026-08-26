@@ -6,12 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database/schema"
 	"github.com/arandu-io/hesape/database/schema/grammars"
 )
-
-func grant() auth.Grant { return auth.SystemGrant(schema.ActionMigrate, "acme") }
 
 // conn is a schema.Connection that responds from canned data and remembers what
 // it was asked to run.
@@ -60,49 +57,40 @@ func (c *conn) Select(ctx context.Context, query string) ([]schema.Record, error
 
 func (c *conn) Scalar(ctx context.Context, query string) (any, error) { return c.scalar, nil }
 
-// TestBuilderRequiresAGrant: every method that reaches the connection refuses
-// the zero Grant, and refuses one issued for another action.
-func TestBuilderRequiresAGrant(t *testing.T) {
+// TestNoSchemaMethodTakesAGrant is what replaced TestBuilderRequiresAGrant.
+//
+// That test asserted the opposite: every method here refused the zero Grant and
+// one issued for another action. It was right about the mechanism and wrong
+// about the question. DDL names a table, not a row -- there is no tenant to
+// scope it by, no subject to attribute it to, and no request it came from -- so
+// the only Grant this package could ever have held was one somebody invented,
+// and auth.SystemGrant refuses one without a tenant, which means inventing a
+// tenant to throw away.
+//
+// A parameter that looks like enforcement and enforces nothing is worse than no
+// parameter, because a reader stops looking. So the assertion is now that the
+// parameter is gone, and it is made by the compiler: this file no longer
+// imports auth, and it would not build if any of these methods still asked for
+// one.
+//
+// The path to application rows is unaffected and still cannot be reached
+// without a Grant. That is proved next door, in database/model.
+func TestNoSchemaMethodTakesAGrant(t *testing.T) {
 	builder := schema.NewBuilder(newConn())
 	ctx := context.Background()
 
-	cases := map[string]func(auth.Grant) error{
-		"Create": func(g auth.Grant) error {
-			return builder.Create(ctx, g, "users", func(*schema.Blueprint) {})
-		},
-		"Drop":        func(g auth.Grant) error { return builder.Drop(ctx, g, "users") },
-		"Rename":      func(g auth.Grant) error { return builder.Rename(ctx, g, "users", "people") },
-		"DropColumns": func(g auth.Grant) error { return builder.DropColumns(ctx, g, "users", []string{"a"}) },
-		"HasTable": func(g auth.Grant) error {
-			_, err := builder.HasTable(ctx, g, "users")
-			return err
-		},
-		"GetColumnListing": func(g auth.Grant) error {
-			_, err := builder.GetColumnListing(ctx, g, "users")
-			return err
-		},
-		"GetIndexes": func(g auth.Grant) error {
-			_, err := builder.GetIndexes(ctx, g, "users")
-			return err
-		},
-		"GetForeignKeys": func(g auth.Grant) error {
-			_, err := builder.GetForeignKeys(ctx, g, "users")
-			return err
-		},
-		"EnableForeignKeyConstraints": func(g auth.Grant) error {
-			return builder.EnableForeignKeyConstraints(ctx, g)
-		},
+	// Each of these compiles only because the Grant is not in the signature.
+	if err := builder.Create(ctx, "users", func(*schema.Blueprint) {}); err != nil {
+		t.Fatalf("Create: %v", err)
 	}
-
-	for name, call := range cases {
-		t.Run(name, func(t *testing.T) {
-			if err := call(auth.Grant{}); !errors.Is(err, auth.ErrForbidden) {
-				t.Fatalf("the zero Grant was accepted: %v", err)
-			}
-			if err := call(auth.SystemGrant("customer.list", "acme")); !errors.Is(err, auth.ErrForbidden) {
-				t.Fatalf("a Grant for another action was accepted: %v", err)
-			}
-		})
+	if err := builder.Drop(ctx, "users"); err != nil {
+		t.Fatalf("Drop: %v", err)
+	}
+	if err := builder.Rename(ctx, "users", "people"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	if _, err := builder.HasTable(ctx, "users"); err != nil {
+		t.Fatalf("HasTable: %v", err)
 	}
 }
 
@@ -111,7 +99,7 @@ func TestHasTableUsesTheExistenceQuery(t *testing.T) {
 	c.scalar = true
 	builder := schema.NewBuilder(c)
 
-	has, err := builder.HasTable(context.Background(), grant(), "reporting.users")
+	has, err := builder.HasTable(context.Background(), "reporting.users")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,32 +117,32 @@ func TestHasColumnAndColumnType(t *testing.T) {
 	builder := schema.NewBuilder(c)
 	ctx := context.Background()
 
-	has, err := builder.HasColumn(ctx, grant(), "users", "EMAIL")
+	has, err := builder.HasColumn(ctx, "users", "EMAIL")
 	if err != nil || !has {
 		t.Fatalf("HasColumn is case sensitive: %v %v", has, err)
 	}
 
-	all, err := builder.HasColumns(ctx, grant(), "users", []string{"id", "email"})
+	all, err := builder.HasColumns(ctx, "users", []string{"id", "email"})
 	if err != nil || !all {
 		t.Fatalf("HasColumns: %v %v", all, err)
 	}
 
-	missing, err := builder.HasColumns(ctx, grant(), "users", []string{"id", "nope"})
+	missing, err := builder.HasColumns(ctx, "users", []string{"id", "nope"})
 	if err != nil || missing {
 		t.Fatalf("HasColumns reported a column the table does not have: %v %v", missing, err)
 	}
 
-	typ, err := builder.GetColumnType(ctx, grant(), "users", "email")
+	typ, err := builder.GetColumnType(ctx, "users", "email")
 	if err != nil || typ != "varchar" {
 		t.Fatalf("GetColumnType: %q %v", typ, err)
 	}
 
-	full, err := builder.GetColumnType(ctx, grant(), "users", "email", true)
+	full, err := builder.GetColumnType(ctx, "users", "email", true)
 	if err != nil || full != "character varying(255)" {
 		t.Fatalf("GetColumnType(full): %q %v", full, err)
 	}
 
-	if _, err := builder.GetColumnType(ctx, grant(), "users", "nope"); err == nil {
+	if _, err := builder.GetColumnType(ctx, "users", "nope"); err == nil {
 		t.Fatal("a column that does not exist reported a type")
 	}
 }
@@ -180,7 +168,7 @@ func TestHasIndex(t *testing.T) {
 		{[]string{"id"}, []string{"PRIMARY"}, true},
 		{"nope", nil, false},
 	} {
-		got, err := builder.HasIndex(ctx, grant(), "users", c.index, c.typ...)
+		got, err := builder.HasIndex(ctx, "users", c.index, c.typ...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -195,7 +183,7 @@ func TestWithoutForeignKeyConstraintsPutsThemBack(t *testing.T) {
 	builder := schema.NewBuilder(c)
 
 	want := errors.New("the callback failed")
-	err := builder.WithoutForeignKeyConstraints(context.Background(), grant(), func() error { return want })
+	err := builder.WithoutForeignKeyConstraints(context.Background(), func() error { return want })
 
 	if !errors.Is(err, want) {
 		t.Fatalf("the callback's error was swallowed: %v", err)
@@ -242,7 +230,7 @@ func TestDefaults(t *testing.T) {
 		table.Create()
 		table.String("email")
 	})
-	sql, err := blueprint.ToSQL(context.Background(), grant())
+	sql, err := blueprint.ToSQL(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +249,7 @@ func TestDefaults(t *testing.T) {
 		table.Create()
 		table.Morphs("taggable")
 	})
-	sql, err = morphs.ToSQL(context.Background(), grant())
+	sql, err = morphs.ToSQL(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

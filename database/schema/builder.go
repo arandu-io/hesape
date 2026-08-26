@@ -6,18 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
-
-	"github.com/arandu-io/hesape/auth"
 )
-
-// ActionMigrate is the auth.Action every schema change is authorized for.
-//
-// One action for the whole component, not one per method: a migration run is a
-// single decision taken once, by the pipeline that runs it, rather than
-// something a request triggers. A runner gets its Grant from auth.SystemGrant,
-// which refuses to issue one
-// without a tenant.
-const ActionMigrate auth.Action = "schema.migrate"
 
 // defaultStringLength is the length a string column takes when none is given.
 //
@@ -78,7 +67,7 @@ var ErrUnsupported = errors.New("schema: this database driver does not support t
 // strings, and everything that reaches the connection is here. Every method
 // that does so takes an auth.Grant and checks it against ActionMigrate before a
 // statement leaves. DDL names tables rather than rows, so there is no
-// auth.Tenant(g) in the SQL -- see the package documentation for why the Grant
+// auth.Tenant() in the SQL -- see the package documentation for why the Grant
 // is required anyway.
 type Builder struct {
 	connection Connection
@@ -101,10 +90,7 @@ func (b *Builder) BlueprintResolver(resolver func(Connection, string, func(*Blue
 }
 
 // CreateDatabase creates a database named name.
-func (b *Builder) CreateDatabase(ctx context.Context, g auth.Grant, name string) error {
-	if err := g.Check(ActionMigrate); err != nil {
-		return err
-	}
+func (b *Builder) CreateDatabase(ctx context.Context, name string) error {
 	sql, err := b.grammar.CompileCreateDatabase(name)
 	if err != nil {
 		return err
@@ -113,10 +99,7 @@ func (b *Builder) CreateDatabase(ctx context.Context, g auth.Grant, name string)
 }
 
 // DropDatabaseIfExists drops the database named name, if it exists.
-func (b *Builder) DropDatabaseIfExists(ctx context.Context, g auth.Grant, name string) error {
-	if err := g.Check(ActionMigrate); err != nil {
-		return err
-	}
+func (b *Builder) DropDatabaseIfExists(ctx context.Context, name string) error {
 	sql, err := b.grammar.CompileDropDatabaseIfExists(name)
 	if err != nil {
 		return err
@@ -125,10 +108,7 @@ func (b *Builder) DropDatabaseIfExists(ctx context.Context, g auth.Grant, name s
 }
 
 // GetSchemas returns the schemas visible on this connection.
-func (b *Builder) GetSchemas(ctx context.Context, g auth.Grant) ([]SchemaInfo, error) {
-	if err := g.Check(ActionMigrate); err != nil {
-		return nil, err
-	}
+func (b *Builder) GetSchemas(ctx context.Context) ([]SchemaInfo, error) {
 	sql, err := b.grammar.CompileSchemas()
 	if err != nil {
 		return nil, err
@@ -141,11 +121,7 @@ func (b *Builder) GetSchemas(ctx context.Context, g auth.Grant) ([]SchemaInfo, e
 }
 
 // HasTable reports whether table exists.
-func (b *Builder) HasTable(ctx context.Context, g auth.Grant, table string) (bool, error) {
-	if err := g.Check(ActionMigrate); err != nil {
-		return false, err
-	}
-
+func (b *Builder) HasTable(ctx context.Context, table string) (bool, error) {
 	schema, name, err := ParseSchemaAndTable(table)
 	if err != nil {
 		return false, err
@@ -163,7 +139,7 @@ func (b *Builder) HasTable(ctx context.Context, g auth.Grant, table string) (boo
 	if schema == "" {
 		schema = b.GetCurrentSchemaName()
 	}
-	tables, err := b.GetTables(ctx, g, schema)
+	tables, err := b.GetTables(ctx, schema)
 	if err != nil {
 		return false, err
 	}
@@ -176,11 +152,7 @@ func (b *Builder) HasTable(ctx context.Context, g auth.Grant, table string) (boo
 }
 
 // HasView reports whether view exists.
-func (b *Builder) HasView(ctx context.Context, g auth.Grant, view string) (bool, error) {
-	if err := g.Check(ActionMigrate); err != nil {
-		return false, err
-	}
-
+func (b *Builder) HasView(ctx context.Context, view string) (bool, error) {
 	schema, name, err := ParseSchemaAndTable(view)
 	if err != nil {
 		return false, err
@@ -190,7 +162,7 @@ func (b *Builder) HasView(ctx context.Context, g auth.Grant, view string) (bool,
 	if schema == "" {
 		schema = b.GetCurrentSchemaName()
 	}
-	views, err := b.GetViews(ctx, g, schema)
+	views, err := b.GetViews(ctx, schema)
 	if err != nil {
 		return false, err
 	}
@@ -204,10 +176,7 @@ func (b *Builder) HasView(ctx context.Context, g auth.Grant, view string) (bool,
 
 // GetTables returns the tables in the given schemas. With no schemas given,
 // it returns tables from every schema the connection can see.
-func (b *Builder) GetTables(ctx context.Context, g auth.Grant, schemas ...string) ([]TableInfo, error) {
-	if err := g.Check(ActionMigrate); err != nil {
-		return nil, err
-	}
+func (b *Builder) GetTables(ctx context.Context, schemas ...string) ([]TableInfo, error) {
 	sql, err := b.grammar.CompileTables(nonEmpty(schemas))
 	if err != nil {
 		return nil, err
@@ -221,8 +190,8 @@ func (b *Builder) GetTables(ctx context.Context, g auth.Grant, schemas ...string
 
 // GetTableListing returns the names of tables in the given schemas.
 // schemaQualified defaults to true, which returns schema-qualified names.
-func (b *Builder) GetTableListing(ctx context.Context, g auth.Grant, schemas []string, schemaQualified ...bool) ([]string, error) {
-	tables, err := b.GetTables(ctx, g, schemas...)
+func (b *Builder) GetTableListing(ctx context.Context, schemas []string, schemaQualified ...bool) ([]string, error) {
+	tables, err := b.GetTables(ctx, schemas...)
 	if err != nil {
 		return nil, err
 	}
@@ -242,10 +211,7 @@ func (b *Builder) GetTableListing(ctx context.Context, g auth.Grant, schemas []s
 }
 
 // GetViews returns the views in the given schemas.
-func (b *Builder) GetViews(ctx context.Context, g auth.Grant, schemas ...string) ([]ViewInfo, error) {
-	if err := g.Check(ActionMigrate); err != nil {
-		return nil, err
-	}
+func (b *Builder) GetViews(ctx context.Context, schemas ...string) ([]ViewInfo, error) {
 	sql, err := b.grammar.CompileViews(nonEmpty(schemas))
 	if err != nil {
 		return nil, err
@@ -258,10 +224,7 @@ func (b *Builder) GetViews(ctx context.Context, g auth.Grant, schemas ...string)
 }
 
 // GetTypes returns the user-defined types in the given schemas.
-func (b *Builder) GetTypes(ctx context.Context, g auth.Grant, schemas ...string) ([]Record, error) {
-	if err := g.Check(ActionMigrate); err != nil {
-		return nil, err
-	}
+func (b *Builder) GetTypes(ctx context.Context, schemas ...string) ([]Record, error) {
 	sql, err := b.grammar.CompileTypes(nonEmpty(schemas))
 	if err != nil {
 		return nil, err
@@ -274,10 +237,7 @@ func (b *Builder) GetTypes(ctx context.Context, g auth.Grant, schemas ...string)
 // The refusal for a driver with no types to drop comes from the grammar,
 // which is the only thing that knows whether the driver supports dropping
 // types at all.
-func (b *Builder) DropAllTypes(ctx context.Context, g auth.Grant, types []string) error {
-	if err := g.Check(ActionMigrate); err != nil {
-		return err
-	}
+func (b *Builder) DropAllTypes(ctx context.Context, types []string) error {
 	if len(types) == 0 {
 		return nil
 	}
@@ -289,8 +249,8 @@ func (b *Builder) DropAllTypes(ctx context.Context, g auth.Grant, types []string
 }
 
 // HasColumn reports whether table has a column named column.
-func (b *Builder) HasColumn(ctx context.Context, g auth.Grant, table, column string) (bool, error) {
-	columns, err := b.GetColumnListing(ctx, g, table)
+func (b *Builder) HasColumn(ctx context.Context, table, column string) (bool, error) {
+	columns, err := b.GetColumnListing(ctx, table)
 	if err != nil {
 		return false, err
 	}
@@ -303,8 +263,8 @@ func (b *Builder) HasColumn(ctx context.Context, g auth.Grant, table, column str
 }
 
 // HasColumns reports whether table has every column named in columns.
-func (b *Builder) HasColumns(ctx context.Context, g auth.Grant, table string, columns []string) (bool, error) {
-	existing, err := b.GetColumnListing(ctx, g, table)
+func (b *Builder) HasColumns(ctx context.Context, table string, columns []string) (bool, error) {
+	existing, err := b.GetColumnListing(ctx, table)
 	if err != nil {
 		return false, err
 	}
@@ -325,48 +285,48 @@ func (b *Builder) HasColumns(ctx context.Context, g auth.Grant, table string, co
 
 // WhenTableHasColumn runs callback against table if it has a column named
 // column.
-func (b *Builder) WhenTableHasColumn(ctx context.Context, g auth.Grant, table, column string, callback func(*Blueprint)) error {
-	has, err := b.HasColumn(ctx, g, table, column)
+func (b *Builder) WhenTableHasColumn(ctx context.Context, table, column string, callback func(*Blueprint)) error {
+	has, err := b.HasColumn(ctx, table, column)
 	if err != nil || !has {
 		return err
 	}
-	return b.Table(ctx, g, table, callback)
+	return b.Table(ctx, table, callback)
 }
 
 // WhenTableDoesntHaveColumn runs callback against table if it does not have
 // a column named column.
-func (b *Builder) WhenTableDoesntHaveColumn(ctx context.Context, g auth.Grant, table, column string, callback func(*Blueprint)) error {
-	has, err := b.HasColumn(ctx, g, table, column)
+func (b *Builder) WhenTableDoesntHaveColumn(ctx context.Context, table, column string, callback func(*Blueprint)) error {
+	has, err := b.HasColumn(ctx, table, column)
 	if err != nil || has {
 		return err
 	}
-	return b.Table(ctx, g, table, callback)
+	return b.Table(ctx, table, callback)
 }
 
 // WhenTableHasIndex runs callback against table if it has the given index.
-func (b *Builder) WhenTableHasIndex(ctx context.Context, g auth.Grant, table string, index any, callback func(*Blueprint), typ ...string) error {
-	has, err := b.HasIndex(ctx, g, table, index, typ...)
+func (b *Builder) WhenTableHasIndex(ctx context.Context, table string, index any, callback func(*Blueprint), typ ...string) error {
+	has, err := b.HasIndex(ctx, table, index, typ...)
 	if err != nil || !has {
 		return err
 	}
-	return b.Table(ctx, g, table, callback)
+	return b.Table(ctx, table, callback)
 }
 
 // WhenTableDoesntHaveIndex runs callback against table if it does not have
 // the given index.
-func (b *Builder) WhenTableDoesntHaveIndex(ctx context.Context, g auth.Grant, table string, index any, callback func(*Blueprint), typ ...string) error {
-	has, err := b.HasIndex(ctx, g, table, index, typ...)
+func (b *Builder) WhenTableDoesntHaveIndex(ctx context.Context, table string, index any, callback func(*Blueprint), typ ...string) error {
+	has, err := b.HasIndex(ctx, table, index, typ...)
 	if err != nil || has {
 		return err
 	}
-	return b.Table(ctx, g, table, callback)
+	return b.Table(ctx, table, callback)
 }
 
 // GetColumnType returns the type of column on table. It returns an error if
 // table has no such column. The optional fullDefinition returns the full
 // type definition instead of the bare type name.
-func (b *Builder) GetColumnType(ctx context.Context, g auth.Grant, table, column string, fullDefinition ...bool) (string, error) {
-	columns, err := b.GetColumns(ctx, g, table)
+func (b *Builder) GetColumnType(ctx context.Context, table, column string, fullDefinition ...bool) (string, error) {
+	columns, err := b.GetColumns(ctx, table)
 	if err != nil {
 		return "", err
 	}
@@ -383,8 +343,8 @@ func (b *Builder) GetColumnType(ctx context.Context, g auth.Grant, table, column
 }
 
 // GetColumnListing returns the names of table's columns.
-func (b *Builder) GetColumnListing(ctx context.Context, g auth.Grant, table string) ([]string, error) {
-	columns, err := b.GetColumns(ctx, g, table)
+func (b *Builder) GetColumnListing(ctx context.Context, table string) ([]string, error) {
+	columns, err := b.GetColumns(ctx, table)
 	if err != nil {
 		return nil, err
 	}
@@ -396,10 +356,7 @@ func (b *Builder) GetColumnListing(ctx context.Context, g auth.Grant, table stri
 }
 
 // GetColumns returns the columns of table.
-func (b *Builder) GetColumns(ctx context.Context, g auth.Grant, table string) ([]ColumnInfo, error) {
-	if err := g.Check(ActionMigrate); err != nil {
-		return nil, err
-	}
+func (b *Builder) GetColumns(ctx context.Context, table string) ([]ColumnInfo, error) {
 	schema, name, err := ParseSchemaAndTable(table)
 	if err != nil {
 		return nil, err
@@ -416,10 +373,7 @@ func (b *Builder) GetColumns(ctx context.Context, g auth.Grant, table string) ([
 }
 
 // GetIndexes returns the indexes of table.
-func (b *Builder) GetIndexes(ctx context.Context, g auth.Grant, table string) ([]IndexInfo, error) {
-	if err := g.Check(ActionMigrate); err != nil {
-		return nil, err
-	}
+func (b *Builder) GetIndexes(ctx context.Context, table string) ([]IndexInfo, error) {
 	schema, name, err := ParseSchemaAndTable(table)
 	if err != nil {
 		return nil, err
@@ -436,8 +390,8 @@ func (b *Builder) GetIndexes(ctx context.Context, g auth.Grant, table string) ([
 }
 
 // GetIndexListing returns the names of table's indexes.
-func (b *Builder) GetIndexListing(ctx context.Context, g auth.Grant, table string) ([]string, error) {
-	indexes, err := b.GetIndexes(ctx, g, table)
+func (b *Builder) GetIndexListing(ctx context.Context, table string) ([]string, error) {
+	indexes, err := b.GetIndexes(ctx, table)
 	if err != nil {
 		return nil, err
 	}
@@ -451,8 +405,8 @@ func (b *Builder) GetIndexListing(ctx context.Context, g auth.Grant, table strin
 // HasIndex reports whether table has the given index. The index is a name
 // or the list of columns it covers; the optional type narrows the match to
 // primary, unique or a driver's own index type.
-func (b *Builder) HasIndex(ctx context.Context, g auth.Grant, table string, index any, typ ...string) (bool, error) {
-	indexes, err := b.GetIndexes(ctx, g, table)
+func (b *Builder) HasIndex(ctx context.Context, table string, index any, typ ...string) (bool, error) {
+	indexes, err := b.GetIndexes(ctx, table)
 	if err != nil {
 		return false, err
 	}
@@ -485,10 +439,7 @@ func (b *Builder) HasIndex(ctx context.Context, g auth.Grant, table string, inde
 }
 
 // GetForeignKeys returns the foreign keys of table.
-func (b *Builder) GetForeignKeys(ctx context.Context, g auth.Grant, table string) ([]ForeignKeyInfo, error) {
-	if err := g.Check(ActionMigrate); err != nil {
-		return nil, err
-	}
+func (b *Builder) GetForeignKeys(ctx context.Context, table string) ([]ForeignKeyInfo, error) {
 	schema, name, err := ParseSchemaAndTable(table)
 	if err != nil {
 		return nil, err
@@ -505,35 +456,35 @@ func (b *Builder) GetForeignKeys(ctx context.Context, g auth.Grant, table string
 }
 
 // Table runs callback against a Blueprint for a table that already exists.
-func (b *Builder) Table(ctx context.Context, g auth.Grant, table string, callback func(*Blueprint)) error {
-	return b.build(ctx, g, b.CreateBlueprint(table, callback))
+func (b *Builder) Table(ctx context.Context, table string, callback func(*Blueprint)) error {
+	return b.build(ctx, b.CreateBlueprint(table, callback))
 }
 
 // Create creates table, configured by callback.
-func (b *Builder) Create(ctx context.Context, g auth.Grant, table string, callback func(*Blueprint)) error {
+func (b *Builder) Create(ctx context.Context, table string, callback func(*Blueprint)) error {
 	blueprint := b.CreateBlueprint(table, nil)
 	blueprint.Create()
 	callback(blueprint)
-	return b.build(ctx, g, blueprint)
+	return b.build(ctx, blueprint)
 }
 
 // Drop drops table.
-func (b *Builder) Drop(ctx context.Context, g auth.Grant, table string) error {
+func (b *Builder) Drop(ctx context.Context, table string) error {
 	blueprint := b.CreateBlueprint(table, nil)
 	blueprint.Drop()
-	return b.build(ctx, g, blueprint)
+	return b.build(ctx, blueprint)
 }
 
 // DropIfExists drops table if it exists.
-func (b *Builder) DropIfExists(ctx context.Context, g auth.Grant, table string) error {
+func (b *Builder) DropIfExists(ctx context.Context, table string) error {
 	blueprint := b.CreateBlueprint(table, nil)
 	blueprint.DropIfExists()
-	return b.build(ctx, g, blueprint)
+	return b.build(ctx, blueprint)
 }
 
 // DropColumns drops the given columns from table.
-func (b *Builder) DropColumns(ctx context.Context, g auth.Grant, table string, columns []string) error {
-	return b.Table(ctx, g, table, func(blueprint *Blueprint) {
+func (b *Builder) DropColumns(ctx context.Context, table string, columns []string) error {
+	return b.Table(ctx, table, func(blueprint *Blueprint) {
 		blueprint.DropColumn(columns...)
 	})
 }
@@ -542,11 +493,8 @@ func (b *Builder) DropColumns(ctx context.Context, g auth.Grant, table string, c
 //
 // A driver whose grammar cannot compile the statement returns ErrUnsupported
 // instead.
-func (b *Builder) DropAllTables(ctx context.Context, g auth.Grant) error {
-	if err := g.Check(ActionMigrate); err != nil {
-		return err
-	}
-	tables, err := b.GetTables(ctx, g)
+func (b *Builder) DropAllTables(ctx context.Context) error {
+	tables, err := b.GetTables(ctx)
 	if err != nil {
 		return err
 	}
@@ -577,11 +525,7 @@ func (b *Builder) DropAllTables(ctx context.Context, g auth.Grant) error {
 // to be an explicit check rather than something the type system rules out.
 // Truncating a file is not a statement the database can refuse, so nothing
 // downstream would have caught a mistake here.
-func (b *Builder) RefreshDatabaseFile(ctx context.Context, g auth.Grant, path string) error {
-	if err := g.Check(ActionMigrate); err != nil {
-		return err
-	}
-
+func (b *Builder) RefreshDatabaseFile(ctx context.Context, path string) error {
 	if driver := b.connection.GetDriverName(); driver != "sqlite" {
 		return fmt.Errorf("%w: refreshDatabaseFile empties the file a SQLite database lives in, and this connection is %s", ErrUnsupported, driver)
 	}
@@ -600,11 +544,8 @@ func (b *Builder) RefreshDatabaseFile(ctx context.Context, g auth.Grant, path st
 }
 
 // DropAllViews drops every view the connection can see.
-func (b *Builder) DropAllViews(ctx context.Context, g auth.Grant) error {
-	if err := g.Check(ActionMigrate); err != nil {
-		return err
-	}
-	views, err := b.GetViews(ctx, g)
+func (b *Builder) DropAllViews(ctx context.Context) error {
+	views, err := b.GetViews(ctx)
 	if err != nil {
 		return err
 	}
@@ -623,18 +564,15 @@ func (b *Builder) DropAllViews(ctx context.Context, g auth.Grant) error {
 }
 
 // Rename renames table from to to.
-func (b *Builder) Rename(ctx context.Context, g auth.Grant, from, to string) error {
+func (b *Builder) Rename(ctx context.Context, from, to string) error {
 	blueprint := b.CreateBlueprint(from, nil)
 	blueprint.Rename(to)
-	return b.build(ctx, g, blueprint)
+	return b.build(ctx, blueprint)
 }
 
 // EnableForeignKeyConstraints turns foreign key enforcement on for the
 // connection.
-func (b *Builder) EnableForeignKeyConstraints(ctx context.Context, g auth.Grant) error {
-	if err := g.Check(ActionMigrate); err != nil {
-		return err
-	}
+func (b *Builder) EnableForeignKeyConstraints(ctx context.Context) error {
 	sql, err := b.grammar.CompileEnableForeignKeyConstraints()
 	if err != nil {
 		return err
@@ -644,10 +582,7 @@ func (b *Builder) EnableForeignKeyConstraints(ctx context.Context, g auth.Grant)
 
 // DisableForeignKeyConstraints turns foreign key enforcement off for the
 // connection.
-func (b *Builder) DisableForeignKeyConstraints(ctx context.Context, g auth.Grant) error {
-	if err := g.Check(ActionMigrate); err != nil {
-		return err
-	}
+func (b *Builder) DisableForeignKeyConstraints(ctx context.Context) error {
 	sql, err := b.grammar.CompileDisableForeignKeyConstraints()
 	if err != nil {
 		return err
@@ -662,27 +597,24 @@ func (b *Builder) DisableForeignKeyConstraints(ctx context.Context, g auth.Grant
 // to put them back is reported even when callback already failed, joined to
 // it with errors.Join, because a connection left with its foreign keys off
 // is the more dangerous of the two.
-func (b *Builder) WithoutForeignKeyConstraints(ctx context.Context, g auth.Grant, callback func() error) error {
-	if err := b.DisableForeignKeyConstraints(ctx, g); err != nil {
+func (b *Builder) WithoutForeignKeyConstraints(ctx context.Context, callback func() error) error {
+	if err := b.DisableForeignKeyConstraints(ctx); err != nil {
 		return err
 	}
 	err := callback()
-	return errors.Join(err, b.EnableForeignKeyConstraints(ctx, g))
+	return errors.Join(err, b.EnableForeignKeyConstraints(ctx))
 }
 
 // EnsureVectorExtensionExists creates the Postgres "vector" extension if it
 // does not already exist, in the given schema or the default schema if none
 // is given.
-func (b *Builder) EnsureVectorExtensionExists(ctx context.Context, g auth.Grant, schema ...string) error {
-	return b.EnsureExtensionExists(ctx, g, "vector", schema...)
+func (b *Builder) EnsureVectorExtensionExists(ctx context.Context, schema ...string) error {
+	return b.EnsureExtensionExists(ctx, "vector", schema...)
 }
 
 // EnsureExtensionExists creates the Postgres extension named name if it does
 // not already exist. It returns ErrUnsupported on any other driver.
-func (b *Builder) EnsureExtensionExists(ctx context.Context, g auth.Grant, name string, schema ...string) error {
-	if err := g.Check(ActionMigrate); err != nil {
-		return err
-	}
+func (b *Builder) EnsureExtensionExists(ctx context.Context, name string, schema ...string) error {
 	if b.connection.GetDriverName() != "pgsql" {
 		return fmt.Errorf("%w: extensions are only supported by Postgres", ErrUnsupported)
 	}
@@ -694,8 +626,8 @@ func (b *Builder) EnsureExtensionExists(ctx context.Context, g auth.Grant, name 
 }
 
 // build runs blueprint against the connection.
-func (b *Builder) build(ctx context.Context, g auth.Grant, blueprint *Blueprint) error {
-	return blueprint.Build(ctx, g)
+func (b *Builder) build(ctx context.Context, blueprint *Blueprint) error {
+	return blueprint.Build(ctx)
 }
 
 // CreateBlueprint returns a new Blueprint for table, using the resolver set
