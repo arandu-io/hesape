@@ -22,9 +22,22 @@ type Deps struct {
 	// Creator is what MigrateMakeCommand writes files with.
 	Creator *migrations.MigrationCreator
 
-	// MigrationPath is where make:migration writes, and the group
-	// `aru migrate` reads when no --path is given.
+	// MigrationPath is the directory make:migration writes a new migration
+	// into. Empty writes into the working directory.
 	MigrationPath string
+
+	// MigrationGroups are the registry groups `aru migrate` and its siblings
+	// read when no --path is given. Nil is every group, which is what an
+	// application that registers everything in the default group wants.
+	//
+	// It is separate from MigrationPath, and the two were once one field. They
+	// cannot be: the path is a directory on disk and the group is a key in the
+	// registry, and an application whose migrations register under the default
+	// group has to answer "" for the group and "database/migrations" for the
+	// directory. One field answered both with one value, so setting it right
+	// for make:migration made every migrate command read a group that does not
+	// exist and find nothing to run.
+	MigrationGroups []string
 
 	// Seed runs the seeders after a migration, for --seed. Nil means the
 	// application wired no seeders, and --seed then says so rather than
@@ -88,7 +101,7 @@ func MigrateCommand(deps Deps) console.Command {
 				o.Info("Migration table created successfully.")
 			}
 
-			ran, err := migrator.Run(ctx, pathsOf(*path, deps.MigrationPath), migrations.Options{
+			ran, err := migrator.Run(ctx, pathsOf(*path, deps.MigrationGroups), migrations.Options{
 				Pretend: *pretend,
 				Step:    *step,
 			})
@@ -145,7 +158,7 @@ func RollbackCommand(deps Deps) console.Command {
 				return nil
 			}
 
-			reverted, err := migrator.Rollback(ctx, pathsOf(*path, deps.MigrationPath), migrations.Options{
+			reverted, err := migrator.Rollback(ctx, pathsOf(*path, deps.MigrationGroups), migrations.Options{
 				Pretend: *pretend,
 				Steps:   *step,
 				Batch:   *batch,
@@ -192,7 +205,7 @@ func ResetCommand(deps Deps) console.Command {
 				return nil
 			}
 
-			_, err := migrator.Reset(ctx, pathsOf(*path, deps.MigrationPath), *pretend)
+			_, err := migrator.Reset(ctx, pathsOf(*path, deps.MigrationGroups), *pretend)
 			return err
 		},
 	}
@@ -223,7 +236,7 @@ func RefreshCommand(deps Deps) console.Command {
 			migrator.SetOutput(flags.Output())
 			migrator.SetConnection(*database)
 
-			paths := pathsOf(*path, deps.MigrationPath)
+			paths := pathsOf(*path, deps.MigrationGroups)
 
 			if *step > 0 {
 				if _, err := migrator.Rollback(ctx, paths, migrations.Options{Steps: *step}); err != nil {
@@ -285,7 +298,7 @@ func FreshCommand(deps Deps) console.Command {
 				return err
 			}
 
-			if _, err := migrator.Run(ctx, pathsOf(*path, deps.MigrationPath), migrations.Options{Step: *step}); err != nil {
+			if _, err := migrator.Run(ctx, pathsOf(*path, deps.MigrationGroups), migrations.Options{Step: *step}); err != nil {
 				return err
 			}
 
@@ -333,7 +346,7 @@ func StatusCommand(deps Deps) console.Command {
 				return err
 			}
 
-			files := migrator.GetMigrationFiles(pathsOf(*path, deps.MigrationPath))
+			files := migrator.GetMigrationFiles(pathsOf(*path, deps.MigrationGroups))
 
 			names := make([]string, 0, len(files))
 			for name := range files {
@@ -445,14 +458,11 @@ func MigrateMakeCommand(deps Deps) console.Command {
 
 // pathsOf returns the --path when it was given, and the application's own
 // otherwise.
-func pathsOf(path, fallback string) []string {
+func pathsOf(path string, fallback []string) []string {
 	if path != "" {
 		return strings.Split(path, ",")
 	}
-	if fallback == "" {
-		return nil
-	}
-	return []string{fallback}
+	return fallback
 }
 
 // sortStrings keeps the status table in one order on every run, which a map
