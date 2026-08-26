@@ -599,6 +599,11 @@ func (b *Builder[T]) Hydrate(items []query.Record) (Collection[T], error) {
 // required: a query nobody authorized does not run, and the where clause that
 // scopes it is the caller's to write.
 func (b *Builder[T]) FromQuery(g auth.Grant, sql string, bindings []any) (Collection[T], error) {
+	// The other method that skips prepare, and so the other one that has to read
+	// the held error itself. See ForceDelete.
+	if b.err != nil {
+		return nil, b.err
+	}
 	if tenant := auth.Tenant(g); tenant == "" || !auth.ValidTenant(tenant) {
 		return nil, ErrNoTenant
 	}
@@ -1133,6 +1138,16 @@ func (b *Builder[T]) Delete(g auth.Grant) (int64, error) {
 // It still applies the tenant filter. "Force" is about the soft delete, never
 // about the tenant.
 func (b *Builder[T]) ForceDelete(g auth.Grant) (int64, error) {
+	// The held error is read here rather than in prepare, because this is one of
+	// the two methods that does not go through prepare. Without this line a
+	// builder invalidated by WithTrashed on a model that does not soft delete,
+	// or by a scope name nothing registered, still issues the DELETE -- against
+	// the contract this file states about itself, which is that nothing is ever
+	// executed with an error waiting.
+	if b.err != nil {
+		return 0, b.err
+	}
+
 	tenant := auth.Tenant(g)
 	if tenant == "" || !auth.ValidTenant(tenant) {
 		return 0, ErrNoTenant
