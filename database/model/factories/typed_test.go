@@ -138,3 +138,72 @@ func TestCreateRefusesAGrantWithNoTenant(t *testing.T) {
 		t.Fatal("Create ran under a grant with no tenant")
 	}
 }
+
+// The relation halves. They need a connection, because creating a parent and
+// then its children is two statements and the point is the order they run in.
+
+type post struct {
+	ID     int64  `db:"id"`
+	UserID int64  `db:"user_id"`
+	Title  string `db:"title"`
+}
+
+// TestHasCreatesChildrenForEveryParent, and creates them after, because the row
+// they name has no identifier until it has been inserted.
+func TestHasCreatesChildrenForEveryParent(t *testing.T) {
+	conn := newRecordingConnection()
+	users := factories.For(newModelOn[user](conn, "users"), definition)
+	posts := factories.For(newModelOn[post](conn, "posts"), func(f faker.Faker) post {
+		return post{Title: f.Sentence(3)}
+	})
+
+	linked := 0
+	created, err := factories.Has(users.Count(2), posts.Count(3), func(u *user, p *post) {
+		linked++
+		p.UserID = u.ID
+	}).Create(context.Background(), auth.SystemGrant("write", "acme"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if len(created) != 2 {
+		t.Fatalf("Create gave %d parents, want 2", len(created))
+	}
+	if linked != 6 {
+		t.Errorf("the link ran %d times, want 6 -- three children for each of two parents", linked)
+	}
+
+	// Two parents and six children, and the parent of a batch is inserted before
+	// its children are.
+	if got := conn.inserts(); got != 8 {
+		t.Errorf("it ran %d inserts, want 8", got)
+	}
+}
+
+// TestForParentCreatesOneParentBeforeAnyChild is the inverse, and the ordering
+// is the whole of it.
+func TestForParentCreatesOneParentBeforeAnyChild(t *testing.T) {
+	conn := newRecordingConnection()
+	users := factories.For(newModelOn[user](conn, "users"), definition)
+	posts := factories.For(newModelOn[post](conn, "posts"), func(f faker.Faker) post {
+		return post{Title: f.Sentence(3)}
+	})
+
+	created, err := factories.ForParent(posts.Count(3), users, func(p *post, u *user) {
+		p.UserID = u.ID
+	}).Create(context.Background(), auth.SystemGrant("write", "acme"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if len(created) != 3 {
+		t.Fatalf("Create gave %d children, want 3", len(created))
+	}
+	// One parent, three children.
+	if got := conn.inserts(); got != 4 {
+		t.Errorf("it ran %d inserts, want 4 -- one parent for all three", got)
+	}
+	if conn.first() != "users" {
+		t.Errorf("the first table written was %q, want users -- the parent has to exist first", conn.first())
+	}
+}

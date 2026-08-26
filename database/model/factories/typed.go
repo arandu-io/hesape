@@ -43,6 +43,13 @@ type Factory[T any] struct {
 	sequence      []func(*T)
 	afterMaking   []func(*T)
 	afterCreating []func(context.Context, auth.Grant, *model.Model[T]) error
+
+	// resolvers run before the rows are built, and each answers a state.
+	//
+	// It is what ForParent needs: the parent has to exist before a child can
+	// name it, so the row that names it cannot be built until the statement
+	// that creates the parent has run.
+	resolvers []func(context.Context, auth.Grant) (func(*T), error)
 }
 
 // DefaultSeed is the seed a factory uses when none is given.
@@ -68,6 +75,7 @@ func (f *Factory[T]) clone() *Factory[T] {
 	out.sequence = slices.Clone(f.sequence)
 	out.afterMaking = slices.Clone(f.afterMaking)
 	out.afterCreating = slices.Clone(f.afterCreating)
+	out.resolvers = slices.Clone(f.resolvers)
 	return &out
 }
 
@@ -168,7 +176,18 @@ func (f *Factory[T]) MakeOne() T {
 // It takes the Grant that every write in this collection takes, and the tenant
 // comes off it: a factory is not a way around the policy that guards the table.
 func (f *Factory[T]) Create(ctx context.Context, g auth.Grant) ([]*model.Model[T], error) {
-	rows := f.Make()
+	// Anything that has to exist before these rows do -- a parent a child names
+	// -- runs here, and each answers a state the rows are then built with.
+	resolved := f
+	for _, resolve := range f.resolvers {
+		state, err := resolve(ctx, g)
+		if err != nil {
+			return nil, err
+		}
+		resolved = resolved.State(state)
+	}
+
+	rows := resolved.Make()
 	out := make([]*model.Model[T], 0, len(rows))
 
 	for i := range rows {
@@ -181,7 +200,7 @@ func (f *Factory[T]) Create(ctx context.Context, g auth.Grant) ([]*model.Model[T
 		if _, err := instance.Save(ctx, g); err != nil {
 			return nil, err
 		}
-		for _, after := range f.afterCreating {
+		for _, after := range resolved.afterCreating {
 			if err := after(ctx, g, instance); err != nil {
 				return nil, err
 			}
@@ -198,4 +217,57 @@ func (f *Factory[T]) CreateOne(ctx context.Context, g auth.Grant) (*model.Model[
 		return nil, err
 	}
 	return created[0], nil
+}
+
+// Has returns a factory that creates children for every row it creates.
+//
+// It is a function rather than a method because Go has no generic method, and
+// the child is of another type:
+//
+//	users, err := factories.Has(
+//		userFactory.Count(50),
+//		postFactory.Count(5),
+//		func(u *User, p *Post) { p.UserID = u.ID },
+//	).Create(ctx, g)
+//
+// link is the caller's, and it is what keeps this typed. Inferring the foreign
+// key would mean naming it in a string and setting it by reflection, which is
+// the thing this factory exists not to do -- a field renamed in the struct would
+// still compile and quietly stop being set.
+//
+// The children are created after the parent, once per parent, because the row
+// they name does not have its identifier until the statement that inserts it
+// has run.
+func Has[T, C any](parent *Factory[T], child *Factory[C], link func(*T, *C)) *Factory[T] {
+	return parent.AfterCreating(func(ctx context.Context, g auth.Grant, created *model.Model[T]) error {
+		_, err := child.State(func(c *C) { link(created.Entity, c) }).Create(ctx, g)
+		return err
+	})
+}
+
+// ForParent returns a factory whose rows belong to a parent it creates first.
+//
+// It is the inverse of Has, and the inverse matters: a post needs a user before
+// it can name one, so the parent is created once, before any child row is built,
+// and every child names that one.
+//
+//	posts, err := factories.ForParent(
+//		postFactory.Count(3),
+//		userFactory,
+//		func(p *Post, u *User) { p.UserID = u.ID },
+//	).Create(ctx, g)
+//
+// It is not called For because that name is the constructor's, and one package
+// with two Fors that mean different things is the kind of thing a reader has to
+// look up every time.
+func ForParent[C, P any](child *Factory[C], parent *Factory[P], link func(*C, *P)) *Factory[C] {
+	out := child.clone()
+	out.resolvers = append(out.resolvers, func(ctx context.Context, g auth.Grant) (func(*C), error) {
+		created, err := parent.CreateOne(ctx, g)
+		if err != nil {
+			return nil, err
+		}
+		return func(c *C) { link(c, created.Entity) }, nil
+	})
+	return out
 }
