@@ -43,7 +43,7 @@ const (
 // constructor is declared as func() auth.Authenticatable because that is the
 // contract a guard consumes, and filling a value from a row is not part of that
 // contract, so it is asked for by assertion instead. Wire a user type that
-// embeds *eloquent.Model[T] -- or write the two methods -- and this never fires.
+// embeds *model.Model[T] -- or write the two methods -- and this never fires.
 var ErrNotHydratable = errors.New("users: the model cannot be filled from a row (it does not implement users.Hydratable)")
 
 // ErrNoPassword is what RehashPasswordIfRequired answers when the credentials
@@ -60,8 +60,8 @@ var ErrNoPassword = errors.New("users: the credentials carry no password")
 // The query builder answers with a query.Record, so the step from row to user
 // has to be somewhere, and this is it.
 //
-// The signature is hesape/database/eloquent's, unchanged, so a user type that
-// embeds *eloquent.Model[T] satisfies this by embedding it.
+// The signature is hesape/database/model's, unchanged, so a user type that
+// embeds *model.Model[T] satisfies this by embedding it.
 type Hydratable interface {
 	// SetRawAttributes writes the row onto the value. sync decides whether the
 	// original attributes are synced, and hydration passes true.

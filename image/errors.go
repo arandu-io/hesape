@@ -14,7 +14,7 @@ import (
 //	if errors.Is(err, image.ErrImage) { ... }
 //
 // It is a sentinel and not a struct type for the reason
-// eloquent.ErrModelNotFound is one: the caller wants to know which failure it
+// model.ErrModelNotFound is one: the caller wants to know which failure it
 // is from the message, and to classify it from the sentinel, and a struct would
 // make it name a type to do either.
 var ErrImage = errors.New("image")

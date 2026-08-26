@@ -150,7 +150,7 @@ func (b *Builder) SelectSub(query any, as string) *Builder {
 // SelectExistsSub is SelectSub for a subquery asked as a yes or no: it compiles
 // to `exists (select ...) as alias`.
 //
-// The eloquent builder's WithExists used to write the whole column as raw SQL,
+// The model builder's WithExists used to write the whole column as raw SQL,
 // which is a subquery nothing can scope afterwards -- and that is what
 // Users.WithExists("posts").Get(g) proved: the column asked whether ANY tenant
 // had a post for that user. This is selectSub with the one operator that column
@@ -178,7 +178,7 @@ func (b *Builder) selectSub(query any, as, prefix string) *Builder {
 // comparison: a subquery like `(select count(*) from posts where
 // posts.user_id = users.id) > 3`.
 //
-// The builder had no method for that shape, so both copies of the eloquent
+// The builder had no method for that shape, so both copies of the model
 // has-query wrote the clause by hand, as a Basic where whose column was
 // Raw("(" + sub.ToSQL() + ")"). A subquery frozen into a Raw is a subquery
 // nothing can scope afterwards, and this one was never scoped by anything:

@@ -145,7 +145,7 @@ func (s statement) assertNeverBinds(t *testing.T, value string) {
 // methods, plus the two a provider asks for by assertion -- SetRawAttributes to
 // be filled from a row, and ForceFill to take a rehashed password.
 //
-// A user type that embeds *eloquent.Model[T] gets all nine by embedding it; this
+// A user type that embeds *model.Model[T] gets all nine by embedding it; this
 // writes them out so the test depends on nothing but the contracts.
 type testUser struct {
 	attributes map[string]any

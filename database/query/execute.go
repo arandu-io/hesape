@@ -148,13 +148,13 @@ func (b *Builder) scoped(ctx context.Context, g auth.Grant) (*Builder, error) {
 // count comparison, and the subqueries compiled into a from, a select or a join.
 //
 // It is the second half of scoped, and it is exported because it is the half the
-// eloquent builder has to end in too. That builder cannot call scoped whole: it
+// model builder has to end in too. That builder cannot call scoped whole: it
 // filters by the model's own tenant column, which a model whose table has none
 // sets to the empty string, and TenantColumn here is a constant on purpose --
 // see its comment. The nested half has no such difference, and it is where every
 // leak found so far lived, so there is one of it and both builders run it.
 //
-// Until it was exported the eloquent builder reached none of it. GetModels sent
+// Until it was exported the model builder reached none of it. GetModels sent
 // b.query.ToSQL() straight to the connection, so scopeUnions, scopeSubqueries
 // and scopeSubqueryClauses were dead code on the path the application uses:
 // Users.WithCount("posts").Get(g) came back with every tenant's posts counted
@@ -162,7 +162,7 @@ func (b *Builder) scoped(ctx context.Context, g auth.Grant) (*Builder, error) {
 // another tenant's rows.
 //
 // It runs on the statement being built and never on the builder the caller
-// holds -- scoped calls it on a clone, and the eloquent builder on the clone
+// holds -- scoped calls it on a clone, and the model builder on the clone
 // ApplyScopes made.
 func (b *Builder) ScopeNested(ctx context.Context, g auth.Grant) error {
 	if err := b.scopeUnions(ctx, g); err != nil {
