@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"strings"
@@ -98,7 +99,7 @@ func TestModelNotFoundErrorCarriesTheIDs(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue()
 
-	_, err := model.NewQuery().FindOrFail(grant(), 7)
+	_, err := model.NewQuery().FindOrFail(context.Background(), grant(), 7)
 	if !errors.Is(err, ErrModelNotFound) {
 		t.Fatalf("error = %v, want ErrModelNotFound", err)
 	}

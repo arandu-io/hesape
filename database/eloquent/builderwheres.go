@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database/query"
 )
@@ -69,8 +70,8 @@ func (b *Builder[T]) WhereNotExists(callback func(*query.Builder)) *Builder[T] {
 // It is Exists read the other way round, and it exists as its own method for
 // the reason the base builder has one: `if !exists` after a call that also
 // returns an error reads as a mistake even when it is not.
-func (b *Builder[T]) DoesntExist(g auth.Grant) (bool, error) {
-	exists, err := b.Exists(g)
+func (b *Builder[T]) DoesntExist(ctx context.Context, g auth.Grant) (bool, error) {
+	exists, err := b.Exists(ctx, g)
 	if err != nil {
 		return false, err
 	}
@@ -78,21 +79,21 @@ func (b *Builder[T]) DoesntExist(g auth.Grant) (bool, error) {
 }
 
 // Sum returns the sum of column over the matching rows.
-func (b *Builder[T]) Sum(g auth.Grant, column any) (any, error) {
-	return b.Aggregate(g, "sum", column)
+func (b *Builder[T]) Sum(ctx context.Context, g auth.Grant, column any) (any, error) {
+	return b.Aggregate(ctx, g, "sum", column)
 }
 
 // Avg returns the average of column over the matching rows.
-func (b *Builder[T]) Avg(g auth.Grant, column any) (any, error) {
-	return b.Aggregate(g, "avg", column)
+func (b *Builder[T]) Avg(ctx context.Context, g auth.Grant, column any) (any, error) {
+	return b.Aggregate(ctx, g, "avg", column)
 }
 
 // Min returns the smallest value of column over the matching rows.
-func (b *Builder[T]) Min(g auth.Grant, column any) (any, error) {
-	return b.Aggregate(g, "min", column)
+func (b *Builder[T]) Min(ctx context.Context, g auth.Grant, column any) (any, error) {
+	return b.Aggregate(ctx, g, "min", column)
 }
 
 // Max returns the largest value of column over the matching rows.
-func (b *Builder[T]) Max(g auth.Grant, column any) (any, error) {
-	return b.Aggregate(g, "max", column)
+func (b *Builder[T]) Max(ctx context.Context, g auth.Grant, column any) (any, error) {
+	return b.Aggregate(ctx, g, "max", column)
 }

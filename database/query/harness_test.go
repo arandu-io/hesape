@@ -1,6 +1,7 @@
 package query_test
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -37,7 +38,7 @@ type fakeConnection struct {
 	cursorErr error
 }
 
-func (c *fakeConnection) Select(sql string, bindings []any, useReadPDO bool) ([]query.Record, error) {
+func (c *fakeConnection) Select(_ context.Context, sql string, bindings []any, useReadPDO bool) ([]query.Record, error) {
 	c.calls = append(c.calls, call{kind: "select", sql: sql, bindings: bindings})
 	if c.err != nil {
 		return nil, c.err
@@ -50,32 +51,32 @@ func (c *fakeConnection) Select(sql string, bindings []any, useReadPDO bool) ([]
 	return rows, nil
 }
 
-func (c *fakeConnection) Insert(sql string, bindings []any) (bool, error) {
+func (c *fakeConnection) Insert(_ context.Context, sql string, bindings []any) (bool, error) {
 	c.calls = append(c.calls, call{kind: "insert", sql: sql, bindings: bindings})
 	return c.inserted, c.err
 }
 
-func (c *fakeConnection) Update(sql string, bindings []any) (int64, error) {
+func (c *fakeConnection) Update(_ context.Context, sql string, bindings []any) (int64, error) {
 	c.calls = append(c.calls, call{kind: "update", sql: sql, bindings: bindings})
 	return c.affected, c.err
 }
 
-func (c *fakeConnection) Delete(sql string, bindings []any) (int64, error) {
+func (c *fakeConnection) Delete(_ context.Context, sql string, bindings []any) (int64, error) {
 	c.calls = append(c.calls, call{kind: "delete", sql: sql, bindings: bindings})
 	return c.affected, c.err
 }
 
-func (c *fakeConnection) Statement(sql string, bindings []any) (bool, error) {
+func (c *fakeConnection) Statement(_ context.Context, sql string, bindings []any) (bool, error) {
 	c.calls = append(c.calls, call{kind: "statement", sql: sql, bindings: bindings})
 	return true, c.err
 }
 
-func (c *fakeConnection) AffectingStatement(sql string, bindings []any) (int64, error) {
+func (c *fakeConnection) AffectingStatement(_ context.Context, sql string, bindings []any) (int64, error) {
 	c.calls = append(c.calls, call{kind: "affecting", sql: sql, bindings: bindings})
 	return c.affected, c.err
 }
 
-func (c *fakeConnection) Cursor(sql string, bindings []any, useReadPDO bool) (func(yield func(query.Record, error) bool), error) {
+func (c *fakeConnection) Cursor(_ context.Context, sql string, bindings []any, useReadPDO bool) (func(yield func(query.Record, error) bool), error) {
 	c.calls = append(c.calls, call{kind: "cursor", sql: sql, bindings: bindings})
 	if c.cursorErr != nil {
 		return nil, c.cursorErr
@@ -120,7 +121,7 @@ func (p *fakeProcessor) ProcessSelect(_ *query.Builder, results []query.Record) 
 	return results
 }
 
-func (p *fakeProcessor) ProcessInsertGetID(_ *query.Builder, sql string, values []any, sequence string) (int64, error) {
+func (p *fakeProcessor) ProcessInsertGetID(_ context.Context, _ *query.Builder, sql string, values []any, sequence string) (int64, error) {
 	if p.connection != nil {
 		p.connection.calls = append(p.connection.calls, call{kind: "insertGetID", sql: sql, bindings: values})
 	}

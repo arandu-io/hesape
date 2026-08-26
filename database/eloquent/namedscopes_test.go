@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -37,7 +38,7 @@ func TestScopesAppliesTheNamedScope(t *testing.T) {
 	model.NamedScopes = activeScope()
 	conn.queue()
 
-	if _, err := model.NewQuery().Scopes("active").Get(grant()); err != nil {
+	if _, err := model.NewQuery().Scopes("active").Get(context.Background(), grant()); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	if sql := conn.last().SQL; !strings.Contains(sql, `"state" = ?`) {
@@ -51,7 +52,7 @@ func TestCallNamedScopeTakesParameters(t *testing.T) {
 	conn.queue()
 
 	q := model.CallNamedScope("active", model.NewQuery(), "archived")
-	if _, err := q.Get(grant()); err != nil {
+	if _, err := q.Get(context.Background(), grant()); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	if got := conn.last().Bindings[0]; got != "archived" {
@@ -62,7 +63,7 @@ func TestCallNamedScopeTakesParameters(t *testing.T) {
 func TestCallNamedScopeReportsAnUnknownScope(t *testing.T) {
 	model, _ := newUserModel()
 
-	_, err := model.CallNamedScope("archived", model.NewQuery()).Get(grant())
+	_, err := model.CallNamedScope("archived", model.NewQuery()).Get(context.Background(), grant())
 	if !errors.Is(err, ErrNamedScopeNotFound) {
 		t.Fatalf("error = %v, want ErrNamedScopeNotFound", err)
 	}
@@ -78,7 +79,7 @@ func TestScopeWheresAreGroupedSoAnOrCannotEscape(t *testing.T) {
 	conn.queue()
 
 	q := model.NewQuery().Where("email", "=", "ada@example.com").Scopes("eitherName")
-	if _, err := q.Get(grant()); err != nil {
+	if _, err := q.Get(context.Background(), grant()); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 

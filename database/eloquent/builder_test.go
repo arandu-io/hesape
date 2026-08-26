@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strings"
@@ -41,7 +42,7 @@ func TestGetScopesEveryReadByTheTenant(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue(query.Record{"id": int64(1), "name": "Ada"})
 
-	models, err := model.NewQuery().Where("name", "=", "Ada").Get(grant())
+	models, err := model.NewQuery().Where("name", "=", "Ada").Get(context.Background(), grant())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -62,7 +63,7 @@ func TestTheTenantFilterIsNotSwallowedByAnOr(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue()
 
-	if _, err := model.NewQuery().Where("name", "=", "Ada").OrWhere("email", "=", "a@b").Get(grant()); err != nil {
+	if _, err := model.NewQuery().Where("name", "=", "Ada").OrWhere("email", "=", "a@b").Get(context.Background(), grant()); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 
@@ -78,7 +79,7 @@ func TestTheScopesAndTheTenantGoOnExactlyOnce(t *testing.T) {
 	model.SoftDeletes = true
 	conn.queue()
 
-	if _, err := model.NewQuery().Where("name", "=", "Ada").Get(grant()); err != nil {
+	if _, err := model.NewQuery().Where("name", "=", "Ada").Get(context.Background(), grant()); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 
@@ -96,66 +97,66 @@ func TestEveryReadRefusesAGrantWithNoTenant(t *testing.T) {
 
 	reads := map[string]func(*Model[user]) error{
 		"All": func(m *Model[user]) error {
-			_, err := m.All(zero)
+			_, err := m.All(context.Background(), zero)
 			return err
 		},
 		"Get": func(m *Model[user]) error {
-			_, err := m.NewQuery().Get(zero)
+			_, err := m.NewQuery().Get(context.Background(), zero)
 			return err
 		},
 		"First": func(m *Model[user]) error {
-			_, err := m.NewQuery().First(zero)
+			_, err := m.NewQuery().First(context.Background(), zero)
 			return err
 		},
 		"Find": func(m *Model[user]) error {
-			_, err := m.NewQuery().Find(zero, 1)
+			_, err := m.NewQuery().Find(context.Background(), zero, 1)
 			return err
 		},
 		"Count": func(m *Model[user]) error {
-			_, err := m.NewQuery().Count(zero)
+			_, err := m.NewQuery().Count(context.Background(), zero)
 			return err
 		},
 		"Pluck": func(m *Model[user]) error {
-			_, err := m.NewQuery().Pluck(zero, "name")
+			_, err := m.NewQuery().Pluck(context.Background(), zero, "name")
 			return err
 		},
 		"Value": func(m *Model[user]) error {
-			_, err := m.NewQuery().Value(zero, "name")
+			_, err := m.NewQuery().Value(context.Background(), zero, "name")
 			return err
 		},
 		"Paginate": func(m *Model[user]) error {
-			_, err := m.NewQuery().Paginate(zero, 10, 1, pagination.Options{})
+			_, err := m.NewQuery().Paginate(context.Background(), zero, 10, 1, pagination.Options{})
 			return err
 		},
 		"SimplePaginate": func(m *Model[user]) error {
-			_, err := m.NewQuery().SimplePaginate(zero, 10, 1, pagination.Options{})
+			_, err := m.NewQuery().SimplePaginate(context.Background(), zero, 10, 1, pagination.Options{})
 			return err
 		},
 		"CursorPaginate": func(m *Model[user]) error {
-			_, err := m.NewQuery().CursorPaginate(zero, 10, nil, signedOptions())
+			_, err := m.NewQuery().CursorPaginate(context.Background(), zero, 10, nil, signedOptions())
 			return err
 		},
 		"Chunk": func(m *Model[user]) error {
-			return m.NewQuery().Chunk(zero, 10, func(Collection[user], int) (bool, error) { return true, nil })
+			return m.NewQuery().Chunk(context.Background(), zero, 10, func(Collection[user], int) (bool, error) { return true, nil })
 		},
 		"FromQuery": func(m *Model[user]) error {
-			_, err := m.NewQuery().FromQuery(zero, "select 1", nil)
+			_, err := m.NewQuery().FromQuery(context.Background(), zero, "select 1", nil)
 			return err
 		},
 		"Insert": func(m *Model[user]) error {
-			_, err := m.NewQuery().Insert(zero, map[string]any{"name": "Ada"})
+			_, err := m.NewQuery().Insert(context.Background(), zero, map[string]any{"name": "Ada"})
 			return err
 		},
 		"Update": func(m *Model[user]) error {
-			_, err := m.NewQuery().Update(zero, map[string]any{"name": "Ada"})
+			_, err := m.NewQuery().Update(context.Background(), zero, map[string]any{"name": "Ada"})
 			return err
 		},
 		"Delete": func(m *Model[user]) error {
-			_, err := m.NewQuery().Delete(zero)
+			_, err := m.NewQuery().Delete(context.Background(), zero)
 			return err
 		},
 		"ForceDelete": func(m *Model[user]) error {
-			_, err := m.NewQuery().ForceDelete(zero)
+			_, err := m.NewQuery().ForceDelete(context.Background(), zero)
 			return err
 		},
 	}
@@ -179,7 +180,7 @@ func TestFirstReturnsNothingRatherThanAnError(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue()
 
-	found, err := model.NewQuery().First(grant())
+	found, err := model.NewQuery().First(context.Background(), grant())
 	if err != nil {
 		t.Fatalf("First: %v", err)
 	}
@@ -192,7 +193,7 @@ func TestFirstOrFailAnswersTheExceptionAsAnError(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue()
 
-	_, err := model.NewQuery().FirstOrFail(grant())
+	_, err := model.NewQuery().FirstOrFail(context.Background(), grant())
 	if !errors.Is(err, ErrModelNotFound) {
 		t.Fatalf("FirstOrFail error = %v, want ErrModelNotFound", err)
 	}
@@ -205,7 +206,7 @@ func TestFindOrFailNamesTheIdItLookedFor(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue()
 
-	_, err := model.NewQuery().FindOrFail(grant(), 7)
+	_, err := model.NewQuery().FindOrFail(context.Background(), grant(), 7)
 	if !errors.Is(err, ErrModelNotFound) {
 		t.Fatalf("FindOrFail error = %v, want ErrModelNotFound", err)
 	}
@@ -218,7 +219,7 @@ func TestSoleRefusesASecondRow(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue(query.Record{"id": int64(1)}, query.Record{"id": int64(2)})
 
-	if _, err := model.NewQuery().Sole(grant()); !errors.Is(err, ErrMultipleRecordsFound) {
+	if _, err := model.NewQuery().Sole(context.Background(), grant()); !errors.Is(err, ErrMultipleRecordsFound) {
 		t.Fatalf("Sole error = %v, want ErrMultipleRecordsFound", err)
 	}
 }
@@ -227,7 +228,7 @@ func TestFirstOrCreateReadsBeforeItWrites(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue(query.Record{"id": int64(3), "name": "Ada"})
 
-	found, err := model.NewQuery().FirstOrCreate(grant(), map[string]any{"name": "Ada"}, nil)
+	found, err := model.NewQuery().FirstOrCreate(context.Background(), grant(), map[string]any{"name": "Ada"}, nil)
 	if err != nil {
 		t.Fatalf("FirstOrCreate: %v", err)
 	}
@@ -245,7 +246,7 @@ func TestFirstOrCreateInsertsWhenThereIsNothing(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue()
 
-	created, err := model.NewQuery().FirstOrCreate(grant(), map[string]any{"name": "Ada"}, map[string]any{"email": "ada@example.com"})
+	created, err := model.NewQuery().FirstOrCreate(context.Background(), grant(), map[string]any{"name": "Ada"}, map[string]any{"email": "ada@example.com"})
 	if err != nil {
 		t.Fatalf("FirstOrCreate: %v", err)
 	}
@@ -261,7 +262,7 @@ func TestUpdateOrCreateUpdatesTheRowItFound(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue(query.Record{"id": int64(3), "name": "Ada", "email": "old@example.com"})
 
-	updated, err := model.NewQuery().UpdateOrCreate(grant(),
+	updated, err := model.NewQuery().UpdateOrCreate(context.Background(), grant(),
 		map[string]any{"name": "Ada"},
 		map[string]any{"email": "new@example.com"})
 	if err != nil {
@@ -282,7 +283,7 @@ func TestWhereHasCompilesAnExistsSubquery(t *testing.T) {
 
 	_, err := model.NewQuery().WhereHas("posts", func(sub *query.Builder) {
 		sub.Where("published", "=", true)
-	}).Get(grant())
+	}).Get(context.Background(), grant())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -307,7 +308,7 @@ func TestHasWithACountCompilesTheSubqueryAsAComparison(t *testing.T) {
 	withPosts(model, &fakeRelation{table: "posts", foreign: "posts.user_id", local: "users.id"})
 	conn.queue()
 
-	if _, err := model.NewQuery().Has("posts", ">=", 3, "and", nil).Get(grant()); err != nil {
+	if _, err := model.NewQuery().Has("posts", ">=", 3, "and", nil).Get(context.Background(), grant()); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 
@@ -331,7 +332,7 @@ func TestDoesntHaveCompilesANotExists(t *testing.T) {
 	withPosts(model, &fakeRelation{table: "posts", foreign: "posts.user_id", local: "users.id"})
 	conn.queue()
 
-	if _, err := model.NewQuery().WhereDoesntHave("posts", nil).Get(grant()); err != nil {
+	if _, err := model.NewQuery().WhereDoesntHave("posts", nil).Get(context.Background(), grant()); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	if !strings.Contains(conn.last().SQL, "not exists (") {
@@ -342,7 +343,7 @@ func TestDoesntHaveCompilesANotExists(t *testing.T) {
 func TestAnUnknownRelationIsReportedByTheFirstMethodThatRuns(t *testing.T) {
 	model, _ := newUserModel()
 
-	_, err := model.NewQuery().WhereHas("posts", nil).Get(grant())
+	_, err := model.NewQuery().WhereHas("posts", nil).Get(context.Background(), grant())
 	if !errors.Is(err, ErrRelationNotFound) {
 		t.Fatalf("Get error = %v, want ErrRelationNotFound held from the build and reported here", err)
 	}
@@ -353,7 +354,7 @@ func TestWithCountAddsTheAliasedSubselect(t *testing.T) {
 	withPosts(model, &fakeRelation{table: "posts", foreign: "posts.user_id", local: "users.id"})
 	conn.queue(query.Record{"id": int64(1), "posts_count": int64(4)})
 
-	models, err := model.NewQuery().WithCount("posts").Get(grant())
+	models, err := model.NewQuery().WithCount("posts").Get(context.Background(), grant())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -378,7 +379,7 @@ func TestWithLoadsTheRelationOntoEveryModel(t *testing.T) {
 	})
 	conn.queue(query.Record{"id": int64(1)}, query.Record{"id": int64(2)})
 
-	models, err := model.NewQuery().With("posts").Get(grant())
+	models, err := model.NewQuery().With("posts").Get(context.Background(), grant())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -397,7 +398,7 @@ func TestChunkWalksThePagesAndStops(t *testing.T) {
 	conn.queue(query.Record{"id": int64(3)})
 
 	var seen []int64
-	err := model.NewQuery().Chunk(grant(), 2, func(models Collection[user], page int) (bool, error) {
+	err := model.NewQuery().Chunk(context.Background(), grant(), 2, func(models Collection[user], page int) (bool, error) {
 		for _, m := range models {
 			seen = append(seen, m.Entity.ID)
 		}
@@ -420,7 +421,7 @@ func TestChunkStopsWhenTheCallbackSaysSo(t *testing.T) {
 	conn.queue(query.Record{"id": int64(3)}, query.Record{"id": int64(4)})
 
 	pages := 0
-	err := model.NewQuery().Chunk(grant(), 2, func(Collection[user], int) (bool, error) {
+	err := model.NewQuery().Chunk(context.Background(), grant(), 2, func(Collection[user], int) (bool, error) {
 		pages++
 		return false, nil
 	})
@@ -437,7 +438,7 @@ func TestPaginateCountsThenReadsThePage(t *testing.T) {
 	conn.queue(query.Record{"aggregate": int64(7)})
 	conn.queue(query.Record{"id": int64(1)}, query.Record{"id": int64(2)})
 
-	page, err := model.NewQuery().Paginate(grant(), 2, 2, pagination.Options{Path: "/users"})
+	page, err := model.NewQuery().Paginate(context.Background(), grant(), 2, 2, pagination.Options{Path: "/users"})
 	if err != nil {
 		t.Fatalf("Paginate: %v", err)
 	}
@@ -467,7 +468,7 @@ func TestSimplePaginateReadsOneMoreRowThanThePage(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue(query.Record{"id": int64(1)}, query.Record{"id": int64(2)}, query.Record{"id": int64(3)})
 
-	page, err := model.NewQuery().SimplePaginate(grant(), 2, 1, pagination.Options{})
+	page, err := model.NewQuery().SimplePaginate(context.Background(), grant(), 2, 1, pagination.Options{})
 	if err != nil {
 		t.Fatalf("SimplePaginate: %v", err)
 	}
@@ -484,7 +485,7 @@ func TestCursorPaginateComparesAgainstTheBoundary(t *testing.T) {
 	conn.queue(query.Record{"id": int64(4)}, query.Record{"id": int64(5)})
 
 	cursor := pagination.NewCursor(map[string]string{"users.id": "3"}, true)
-	page, err := model.NewQuery().CursorPaginate(grant(), 1, &cursor, signedOptions())
+	page, err := model.NewQuery().CursorPaginate(context.Background(), grant(), 1, &cursor, signedOptions())
 	if err != nil {
 		t.Fatalf("CursorPaginate: %v", err)
 	}
@@ -501,7 +502,7 @@ func TestCursorPaginateComparesAgainstTheBoundary(t *testing.T) {
 func TestUpsertSortsTheColumnsItCompilesAndBinds(t *testing.T) {
 	model, conn := newUserModel()
 
-	if _, err := model.NewQuery().Upsert(grant(),
+	if _, err := model.NewQuery().Upsert(context.Background(), grant(),
 		[]map[string]any{{"name": "Ada", "email": "ada@example.com"}},
 		[]string{"email"}, nil); err != nil {
 		t.Fatalf("Upsert: %v", err)
@@ -519,7 +520,7 @@ func TestUpsertSortsTheColumnsItCompilesAndBinds(t *testing.T) {
 func TestIncrementCompilesTheColumnAgainstItself(t *testing.T) {
 	model, conn := newUserModel()
 
-	if _, err := model.NewQuery().Increment(grant(), "logins", 2, nil); err != nil {
+	if _, err := model.NewQuery().Increment(context.Background(), grant(), "logins", 2, nil); err != nil {
 		t.Fatalf("Increment: %v", err)
 	}
 	if !strings.Contains(conn.last().SQL, `"logins" + 2`) {
@@ -530,7 +531,7 @@ func TestIncrementCompilesTheColumnAgainstItself(t *testing.T) {
 func TestIncrementRefusesAnAmountThatIsNotANumber(t *testing.T) {
 	model, conn := newUserModel()
 
-	_, err := model.NewQuery().Increment(grant(), "logins", "1; drop table users", nil)
+	_, err := model.NewQuery().Increment(context.Background(), grant(), "logins", "1; drop table users", nil)
 	if err == nil {
 		t.Fatal("Increment took a string amount, and the amount is compiled into the statement rather than bound")
 	}
@@ -547,7 +548,7 @@ func TestEagerLoadConstraintsNarrowTheSubqueryAndNotTheOuterOne(t *testing.T) {
 	_, err := model.NewQuery().
 		WithConstraints("posts", func(sub *query.Builder) { sub.Where("published", "=", true) }).
 		WithCount("posts").
-		Get(grant())
+		Get(context.Background(), grant())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -564,7 +565,7 @@ func TestEagerLoadConstraintsNarrowTheSubqueryAndNotTheOuterOne(t *testing.T) {
 func TestFillAndInsertWritesTheColumnsASaveWouldHave(t *testing.T) {
 	model, conn := newUserModel()
 
-	ok, err := model.NewQuery().FillAndInsert(grant(), []map[string]any{
+	ok, err := model.NewQuery().FillAndInsert(context.Background(), grant(), []map[string]any{
 		{"name": "Ada"},
 		{"name": "Grace"},
 	})
@@ -584,7 +585,7 @@ func TestFillAndInsertWritesTheColumnsASaveWouldHave(t *testing.T) {
 func TestToBaseHandsOutAQueryThatIsAlreadyScoped(t *testing.T) {
 	model, _ := newUserModel()
 
-	base, err := model.NewQuery().ToBase(grant())
+	base, err := model.NewQuery().ToBase(context.Background(), grant())
 	if err != nil {
 		t.Fatalf("ToBase: %v", err)
 	}

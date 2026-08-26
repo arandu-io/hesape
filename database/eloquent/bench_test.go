@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -194,7 +195,7 @@ func BenchmarkSaveExisting(b *testing.B) {
 		if err := instance.SetAttribute("name", fmt.Sprint("name ", i)); err != nil {
 			b.Fatal(err)
 		}
-		if _, err := instance.Save(g); err != nil {
+		if _, err := instance.Save(context.Background(), g); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -221,7 +222,7 @@ func BenchmarkSaveNew(b *testing.B) {
 		}); err != nil {
 			b.Fatal(err)
 		}
-		if _, err := instance.Save(g); err != nil {
+		if _, err := instance.Save(context.Background(), g); err != nil {
 			b.Fatal(err)
 		}
 	}

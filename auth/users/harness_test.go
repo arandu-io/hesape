@@ -42,7 +42,7 @@ type fakeConnection struct {
 	err      error
 }
 
-func (c *fakeConnection) Select(sql string, bindings []any, _ bool) ([]query.Record, error) {
+func (c *fakeConnection) Select(_ context.Context, sql string, bindings []any, _ bool) ([]query.Record, error) {
 	c.statements = append(c.statements, statement{kind: "select", sql: sql, bindings: bindings})
 	if c.err != nil {
 		return nil, c.err
@@ -55,36 +55,36 @@ func (c *fakeConnection) Select(sql string, bindings []any, _ bool) ([]query.Rec
 	return rows, nil
 }
 
-func (c *fakeConnection) Insert(sql string, bindings []any) (bool, error) {
+func (c *fakeConnection) Insert(_ context.Context, sql string, bindings []any) (bool, error) {
 	c.statements = append(c.statements, statement{kind: "insert", sql: sql, bindings: bindings})
 	return c.err == nil, c.err
 }
 
-func (c *fakeConnection) Update(sql string, bindings []any) (int64, error) {
+func (c *fakeConnection) Update(_ context.Context, sql string, bindings []any) (int64, error) {
 	c.statements = append(c.statements, statement{kind: "update", sql: sql, bindings: bindings})
 	return c.affected, c.err
 }
 
-func (c *fakeConnection) Delete(sql string, bindings []any) (int64, error) {
+func (c *fakeConnection) Delete(_ context.Context, sql string, bindings []any) (int64, error) {
 	c.statements = append(c.statements, statement{kind: "delete", sql: sql, bindings: bindings})
 	return c.affected, c.err
 }
 
-func (c *fakeConnection) Statement(sql string, bindings []any) (bool, error) {
+func (c *fakeConnection) Statement(_ context.Context, sql string, bindings []any) (bool, error) {
 	c.statements = append(c.statements, statement{kind: "statement", sql: sql, bindings: bindings})
 	return c.err == nil, c.err
 }
 
 // Table answers users.Connection: the one method DatabaseUserProvider asks a
 // connection for.
-func (c *fakeConnection) Table(ctx context.Context, table any, as ...string) *query.Builder {
+func (c *fakeConnection) Table(table any, as ...string) *query.Builder {
 	return query.NewBuilder(c, grammars.NewSQLiteGrammar(), processors.NewSQLiteProcessor()).From(table, as...)
 }
 
 // users is the newQuery factory ModelUserProvider is built with: a fresh
 // builder on the users table.
 func (c *fakeConnection) users(ctx context.Context) *query.Builder {
-	return c.Table(ctx, "users")
+	return c.Table("users")
 }
 
 // queue puts one result set at the end of the queue, so a test reads as the

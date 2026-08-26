@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ func TestASoftDeletingModelFiltersTheDeletedRowsOut(t *testing.T) {
 	model, conn := newSoftDeletingUserModel()
 	conn.queue()
 
-	if _, err := model.NewQuery().Get(grant()); err != nil {
+	if _, err := model.NewQuery().Get(context.Background(), grant()); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	if !strings.Contains(conn.last().SQL, `"users"."deleted_at" is null`) {
@@ -30,7 +31,7 @@ func TestWithTrashedTakesTheScopeOff(t *testing.T) {
 	model, conn := newSoftDeletingUserModel()
 	conn.queue()
 
-	if _, err := model.NewQuery().WithTrashed().Get(grant()); err != nil {
+	if _, err := model.NewQuery().WithTrashed().Get(context.Background(), grant()); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	if strings.Contains(conn.last().SQL, "deleted_at") {
@@ -45,7 +46,7 @@ func TestOnlyTrashedKeepsTheDeletedRows(t *testing.T) {
 	model, conn := newSoftDeletingUserModel()
 	conn.queue()
 
-	if _, err := model.NewQuery().OnlyTrashed().Get(grant()); err != nil {
+	if _, err := model.NewQuery().OnlyTrashed().Get(context.Background(), grant()); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	if !strings.Contains(conn.last().SQL, `"users"."deleted_at" is not null`) {
@@ -57,7 +58,7 @@ func TestWithoutTrashedPutsTheFilterBack(t *testing.T) {
 	model, conn := newSoftDeletingUserModel()
 	conn.queue()
 
-	if _, err := model.NewQuery().WithTrashed().WithoutTrashed().Get(grant()); err != nil {
+	if _, err := model.NewQuery().WithTrashed().WithoutTrashed().Get(context.Background(), grant()); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	if !strings.Contains(conn.last().SQL, `"users"."deleted_at" is null`) {
@@ -72,7 +73,7 @@ func TestDeleteMarksTheRowInsteadOfRemovingIt(t *testing.T) {
 	}
 	model.Exists = true
 
-	deleted, err := model.Delete(grant())
+	deleted, err := model.Delete(context.Background(), grant())
 	if err != nil || !deleted {
 		t.Fatalf("Delete = %v, %v", deleted, err)
 	}
@@ -99,7 +100,7 @@ func TestForceDeleteRemovesTheRow(t *testing.T) {
 	}
 	model.Exists = true
 
-	deleted, err := model.ForceDelete(grant())
+	deleted, err := model.ForceDelete(context.Background(), grant())
 	if err != nil || !deleted {
 		t.Fatalf("ForceDelete = %v, %v", deleted, err)
 	}
@@ -131,7 +132,7 @@ func TestForceDeleteFiresItsOwnEvents(t *testing.T) {
 		})
 	}
 
-	if _, err := model.ForceDelete(grant()); err != nil {
+	if _, err := model.ForceDelete(context.Background(), grant()); err != nil {
 		t.Fatalf("ForceDelete: %v", err)
 	}
 	want := []Event{ForceDeleting, Deleting, Deleted, ForceDeleted}
@@ -153,7 +154,7 @@ func TestRestoreClearsTheColumn(t *testing.T) {
 	}
 	model.Exists = true
 
-	restored, err := model.Restore(grant())
+	restored, err := model.Restore(context.Background(), grant())
 	if err != nil || !restored {
 		t.Fatalf("Restore = %v, %v", restored, err)
 	}
@@ -171,7 +172,7 @@ func TestRestoreClearsTheColumn(t *testing.T) {
 func TestBuilderRestoreUpdatesEveryTrashedRowItMatches(t *testing.T) {
 	model, conn := newSoftDeletingUserModel()
 
-	if _, err := model.NewQuery().Where("name", "=", "Ada").Restore(grant()); err != nil {
+	if _, err := model.NewQuery().Where("name", "=", "Ada").Restore(context.Background(), grant()); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 	sql := conn.last().SQL
@@ -188,10 +189,10 @@ func TestSoftDeleteMethodsRefuseAModelThatDoesNotSoftDelete(t *testing.T) {
 	conn := model.Connection.(*testConnection)
 	conn.queue()
 
-	if _, err := model.NewQuery().WithTrashed().Get(grant()); err == nil {
+	if _, err := model.NewQuery().WithTrashed().Get(context.Background(), grant()); err == nil {
 		t.Fatal("withTrashed on a model without soft deletes has to say so, not filter nothing quietly")
 	}
-	if _, err := model.NewQuery().Restore(grant()); err == nil {
+	if _, err := model.NewQuery().Restore(context.Background(), grant()); err == nil {
 		t.Fatal("restore on a model without soft deletes has to say so")
 	}
 }
@@ -199,7 +200,7 @@ func TestSoftDeleteMethodsRefuseAModelThatDoesNotSoftDelete(t *testing.T) {
 func TestDeletingThroughTheBuilderGoesThroughTheScope(t *testing.T) {
 	model, conn := newSoftDeletingUserModel()
 
-	if _, err := model.NewQuery().Where("name", "=", "Ada").Delete(grant()); err != nil {
+	if _, err := model.NewQuery().Where("name", "=", "Ada").Delete(context.Background(), grant()); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 	if !strings.HasPrefix(conn.last().SQL, `update "users" set`) {
@@ -210,7 +211,7 @@ func TestDeletingThroughTheBuilderGoesThroughTheScope(t *testing.T) {
 func TestBuilderForceDeleteIgnoresTheScope(t *testing.T) {
 	model, conn := newSoftDeletingUserModel()
 
-	if _, err := model.NewQuery().Where("name", "=", "Ada").ForceDelete(grant()); err != nil {
+	if _, err := model.NewQuery().Where("name", "=", "Ada").ForceDelete(context.Background(), grant()); err != nil {
 		t.Fatalf("ForceDelete: %v", err)
 	}
 	if !strings.HasPrefix(conn.last().SQL, `delete from "users"`) {
@@ -223,7 +224,7 @@ func TestSoftDeletedRowsAreStillReadableWithTrashed(t *testing.T) {
 	deletedAt := time.Now()
 	conn.queue(query.Record{"id": int64(7), "deleted_at": deletedAt})
 
-	models, err := model.NewQuery().WithTrashed().Get(grant())
+	models, err := model.NewQuery().WithTrashed().Get(context.Background(), grant())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}

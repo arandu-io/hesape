@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"slices"
@@ -234,7 +235,7 @@ func (m *Model[T]) NewFromBuilder(attributes map[string]any) (*Model[T], error) 
 //
 // A model that exists and is clean is a true with no statement: there is
 // nothing to write.
-func (m *Model[T]) Save(g auth.Grant) (bool, error) {
+func (m *Model[T]) Save(ctx context.Context, g auth.Grant) (bool, error) {
 	if err := m.fireModelEvent(Saving); err != nil {
 		return false, err
 	}
@@ -247,10 +248,10 @@ func (m *Model[T]) Save(g auth.Grant) (bool, error) {
 		if !m.IsDirty() {
 			saved = true
 		} else {
-			saved, err = m.performUpdate(g)
+			saved, err = m.performUpdate(ctx, g)
 		}
 	} else {
-		saved, err = m.performInsert(g)
+		saved, err = m.performInsert(ctx, g)
 	}
 	if err != nil {
 		return false, err
@@ -265,9 +266,9 @@ func (m *Model[T]) Save(g auth.Grant) (bool, error) {
 }
 
 // SaveQuietly saves the model without firing model events.
-func (m *Model[T]) SaveQuietly(g auth.Grant) (saved bool, err error) {
+func (m *Model[T]) SaveQuietly(ctx context.Context, g auth.Grant) (saved bool, err error) {
 	return saved, m.WithoutEvents(func() error {
-		saved, err = m.Save(g)
+		saved, err = m.Save(ctx, g)
 		return err
 	})
 }
@@ -277,11 +278,11 @@ func (m *Model[T]) SaveQuietly(g auth.Grant) (saved bool, err error) {
 // query.Connection has no transaction on it, so the connection is asked whether
 // it can open one, and a connection that cannot says so instead of writing
 // outside a transaction the caller believes it is in.
-func (m *Model[T]) SaveOrFail(g auth.Grant) (bool, error) {
+func (m *Model[T]) SaveOrFail(ctx context.Context, g auth.Grant) (bool, error) {
 	var saved bool
 	err := m.transaction(func() error {
 		var err error
-		saved, err = m.Save(g)
+		saved, err = m.Save(ctx, g)
 		return err
 	})
 	return saved, err
@@ -289,41 +290,41 @@ func (m *Model[T]) SaveOrFail(g auth.Grant) (bool, error) {
 
 // Update fills the model with attributes, then saves it. A model that does
 // not exist yet is false and no statement.
-func (m *Model[T]) Update(g auth.Grant, attributes map[string]any) (bool, error) {
+func (m *Model[T]) Update(ctx context.Context, g auth.Grant, attributes map[string]any) (bool, error) {
 	if !m.Exists {
 		return false, nil
 	}
 	if err := m.Fill(attributes); err != nil {
 		return false, err
 	}
-	return m.Save(g)
+	return m.Save(ctx, g)
 }
 
 // UpdateQuietly updates the model without firing model events.
-func (m *Model[T]) UpdateQuietly(g auth.Grant, attributes map[string]any) (saved bool, err error) {
+func (m *Model[T]) UpdateQuietly(ctx context.Context, g auth.Grant, attributes map[string]any) (saved bool, err error) {
 	return saved, m.WithoutEvents(func() error {
-		saved, err = m.Update(g, attributes)
+		saved, err = m.Update(ctx, g, attributes)
 		return err
 	})
 }
 
 // UpdateOrFail is Update, inside a transaction.
-func (m *Model[T]) UpdateOrFail(g auth.Grant, attributes map[string]any) (bool, error) {
+func (m *Model[T]) UpdateOrFail(ctx context.Context, g auth.Grant, attributes map[string]any) (bool, error) {
 	if !m.Exists {
 		return false, nil
 	}
 	if err := m.Fill(attributes); err != nil {
 		return false, err
 	}
-	return m.SaveOrFail(g)
+	return m.SaveOrFail(ctx, g)
 }
 
 // Push saves the model and everything loaded on it.
 //
 // A loaded relation is held as an any, so Push recurses into whatever
 // implements Pushable -- *Model[R] and Collection[R] both do.
-func (m *Model[T]) Push(g auth.Grant) (bool, error) {
-	saved, err := m.Save(g)
+func (m *Model[T]) Push(ctx context.Context, g auth.Grant) (bool, error) {
+	saved, err := m.Save(ctx, g)
 	if err != nil || !saved {
 		return saved, err
 	}
@@ -332,7 +333,7 @@ func (m *Model[T]) Push(g auth.Grant) (bool, error) {
 		if !ok {
 			continue
 		}
-		pushed, err := pushable.Push(g)
+		pushed, err := pushable.Push(ctx, g)
 		if err != nil || !pushed {
 			return false, err
 		}
@@ -341,16 +342,16 @@ func (m *Model[T]) Push(g auth.Grant) (bool, error) {
 }
 
 // PushQuietly pushes the model without firing model events.
-func (m *Model[T]) PushQuietly(g auth.Grant) (pushed bool, err error) {
+func (m *Model[T]) PushQuietly(ctx context.Context, g auth.Grant) (pushed bool, err error) {
 	return pushed, m.WithoutEvents(func() error {
-		pushed, err = m.Push(g)
+		pushed, err = m.Push(ctx, g)
 		return err
 	})
 }
 
 // Pushable is what Push recurses into. See Push.
 type Pushable interface {
-	Push(g auth.Grant) (bool, error)
+	Push(ctx context.Context, g auth.Grant) (bool, error)
 }
 
 // finishSave fires the Saved event and syncs the original snapshot.
@@ -367,7 +368,7 @@ func (m *Model[T]) finishSave() error {
 
 // performUpdate fires the Updating/Updated events and writes the dirty
 // columns for a model that already exists.
-func (m *Model[T]) performUpdate(g auth.Grant) (bool, error) {
+func (m *Model[T]) performUpdate(ctx context.Context, g auth.Grant) (bool, error) {
 	if err := m.fireModelEvent(Updating); err != nil {
 		return false, err
 	}
@@ -382,7 +383,7 @@ func (m *Model[T]) performUpdate(g auth.Grant) (bool, error) {
 
 	q := m.NewModelQuery()
 	m.setKeysForSaveQuery(q)
-	if _, err := q.Update(g, dirty); err != nil {
+	if _, err := q.Update(ctx, g, dirty); err != nil {
 		return false, err
 	}
 
@@ -395,7 +396,7 @@ func (m *Model[T]) performUpdate(g auth.Grant) (bool, error) {
 
 // performInsert fires the Creating/Created events and inserts the row for a
 // model that does not exist yet.
-func (m *Model[T]) performInsert(g auth.Grant) (bool, error) {
+func (m *Model[T]) performInsert(ctx context.Context, g auth.Grant) (bool, error) {
 	if err := m.fireModelEvent(Creating); err != nil {
 		return false, err
 	}
@@ -407,7 +408,7 @@ func (m *Model[T]) performInsert(g auth.Grant) (bool, error) {
 	q := m.NewModelQuery()
 
 	if m.Incrementing {
-		id, err := q.InsertGetID(g, attributes, m.GetKeyName())
+		id, err := q.InsertGetID(ctx, g, attributes, m.GetKeyName())
 		if err != nil {
 			return false, err
 		}
@@ -418,7 +419,7 @@ func (m *Model[T]) performInsert(g auth.Grant) (bool, error) {
 		if len(attributes) == 0 {
 			return true, nil
 		}
-		if _, err := q.Insert(g, attributes); err != nil {
+		if _, err := q.Insert(ctx, g, attributes); err != nil {
 			return false, err
 		}
 	}
@@ -467,7 +468,7 @@ func (m *Model[T]) getKeyForSaveQuery() any {
 //
 // A model that does not exist returns false with no error: a Go bool has no
 // third state, and "there was nothing to delete" is not a failure.
-func (m *Model[T]) Delete(g auth.Grant) (bool, error) {
+func (m *Model[T]) Delete(ctx context.Context, g auth.Grant) (bool, error) {
 	if m.GetKeyName() == "" {
 		return false, ErrNoKey
 	}
@@ -477,7 +478,7 @@ func (m *Model[T]) Delete(g auth.Grant) (bool, error) {
 	if err := m.fireModelEvent(Deleting); err != nil {
 		return false, err
 	}
-	if err := m.performDeleteOnModel(g); err != nil {
+	if err := m.performDeleteOnModel(ctx, g); err != nil {
 		return false, err
 	}
 	if err := m.fireModelEvent(Deleted); err != nil {
@@ -487,22 +488,22 @@ func (m *Model[T]) Delete(g auth.Grant) (bool, error) {
 }
 
 // DeleteQuietly deletes the model without firing model events.
-func (m *Model[T]) DeleteQuietly(g auth.Grant) (deleted bool, err error) {
+func (m *Model[T]) DeleteQuietly(ctx context.Context, g auth.Grant) (deleted bool, err error) {
 	return deleted, m.WithoutEvents(func() error {
-		deleted, err = m.Delete(g)
+		deleted, err = m.Delete(ctx, g)
 		return err
 	})
 }
 
 // DeleteOrFail is Delete, inside a transaction.
-func (m *Model[T]) DeleteOrFail(g auth.Grant) (bool, error) {
+func (m *Model[T]) DeleteOrFail(ctx context.Context, g auth.Grant) (bool, error) {
 	if !m.Exists {
 		return false, nil
 	}
 	var deleted bool
 	err := m.transaction(func() error {
 		var err error
-		deleted, err = m.Delete(g)
+		deleted, err = m.Delete(ctx, g)
 		return err
 	})
 	return deleted, err
@@ -513,17 +514,17 @@ func (m *Model[T]) DeleteOrFail(g auth.Grant) (bool, error) {
 //
 // It loads the rows and deletes them one at a time, so that a soft delete
 // stays a soft delete and every event fires with the row it is about.
-func (m *Model[T]) Destroy(g auth.Grant, ids ...any) (int, error) {
+func (m *Model[T]) Destroy(ctx context.Context, g auth.Grant, ids ...any) (int, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	models, err := m.NewQuery().WhereKey(ids).Get(g)
+	models, err := m.NewQuery().WhereKey(ids).Get(ctx, g)
 	if err != nil {
 		return 0, err
 	}
 	count := 0
 	for _, model := range models {
-		deleted, err := model.Delete(g)
+		deleted, err := model.Delete(ctx, g)
 		if err != nil {
 			return count, err
 		}
@@ -538,23 +539,23 @@ func (m *Model[T]) Destroy(g auth.Grant, ids ...any) (int, error) {
 //
 // It queries without the global scopes, which is what makes it able to find a
 // row that has since been soft deleted.
-func (m *Model[T]) Fresh(g auth.Grant, with ...string) (*Model[T], error) {
+func (m *Model[T]) Fresh(ctx context.Context, g auth.Grant, with ...string) (*Model[T], error) {
 	if !m.Exists {
 		return nil, nil
 	}
 	q := m.NewQueryWithoutScopes().With(with...)
 	m.setKeysForSelectQuery(q)
-	return q.First(g)
+	return q.First(ctx, g)
 }
 
 // Refresh reads the same row again, into this model.
-func (m *Model[T]) Refresh(g auth.Grant) error {
+func (m *Model[T]) Refresh(ctx context.Context, g auth.Grant) error {
 	if !m.Exists {
 		return nil
 	}
 	q := m.NewQueryWithoutScopes()
 	m.setKeysForSelectQuery(q)
-	fresh, err := q.FirstOrFail(g)
+	fresh, err := q.FirstOrFail(ctx, g)
 	if err != nil {
 		return err
 	}
@@ -566,7 +567,7 @@ func (m *Model[T]) Refresh(g auth.Grant) error {
 		loaded = append(loaded, name)
 	}
 	slices.Sort(loaded)
-	return m.Load(g, loaded...)
+	return m.Load(ctx, g, loaded...)
 }
 
 // setKeysForSelectQuery adds the primary key filter a select statement runs
@@ -624,27 +625,27 @@ func (m *Model[T]) Is(other *Model[T]) bool {
 func (m *Model[T]) IsNot(other *Model[T]) bool { return !m.Is(other) }
 
 // Load eager loads these relations onto this model.
-func (m *Model[T]) Load(g auth.Grant, relations ...string) error {
+func (m *Model[T]) Load(ctx context.Context, g auth.Grant, relations ...string) error {
 	if len(relations) == 0 {
 		return nil
 	}
-	return m.NewQueryWithoutRelationships().With(relations...).EagerLoadRelations(g, Collection[T]{m})
+	return m.NewQueryWithoutRelationships().With(relations...).EagerLoadRelations(ctx, g, Collection[T]{m})
 }
 
 // LoadMissing eager loads these relations onto this model, skipping the ones
 // already loaded.
-func (m *Model[T]) LoadMissing(g auth.Grant, relations ...string) error {
-	return Collection[T]{m}.LoadMissing(g, relations...)
+func (m *Model[T]) LoadMissing(ctx context.Context, g auth.Grant, relations ...string) error {
+	return Collection[T]{m}.LoadMissing(ctx, g, relations...)
 }
 
 // LoadCount loads the count of each relation onto this model.
-func (m *Model[T]) LoadCount(g auth.Grant, relations ...string) error {
-	return Collection[T]{m}.LoadCount(g, relations...)
+func (m *Model[T]) LoadCount(ctx context.Context, g auth.Grant, relations ...string) error {
+	return Collection[T]{m}.LoadCount(ctx, g, relations...)
 }
 
 // LoadAggregate loads function over column of each relation onto this model.
-func (m *Model[T]) LoadAggregate(g auth.Grant, relations []string, column, function string) error {
-	return Collection[T]{m}.LoadAggregate(g, relations, column, function)
+func (m *Model[T]) LoadAggregate(ctx context.Context, g auth.Grant, relations []string, column, function string) error {
+	return Collection[T]{m}.LoadAggregate(ctx, g, relations, column, function)
 }
 
 // GetRelation returns the value loaded for a relation, and whether it was

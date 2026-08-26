@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
@@ -46,7 +47,7 @@ func TestWhereForwardsReachTheStatementAndStayScoped(t *testing.T) {
 			model, conn := newUserModel()
 			conn.queue()
 
-			if _, err := c.build(model.NewQuery()).Get(g); err != nil {
+			if _, err := c.build(model.NewQuery()).Get(context.Background(), g); err != nil {
 				t.Fatalf("Get: %v", err)
 			}
 
@@ -70,7 +71,7 @@ func TestDoesntExistIsExistsReadTheOtherWay(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue()
 
-	missing, err := model.NewQuery().Where("email", "nobody@example.test").DoesntExist(g)
+	missing, err := model.NewQuery().Where("email", "nobody@example.test").DoesntExist(context.Background(), g)
 	if err != nil {
 		t.Fatalf("DoesntExist: %v", err)
 	}
@@ -91,10 +92,10 @@ func TestAggregateForwardsNameTheirFunction(t *testing.T) {
 		name string
 		call func(*Builder[user]) (any, error)
 	}{
-		{"sum", func(b *Builder[user]) (any, error) { return b.Sum(g, "id") }},
-		{"avg", func(b *Builder[user]) (any, error) { return b.Avg(g, "id") }},
-		{"min", func(b *Builder[user]) (any, error) { return b.Min(g, "id") }},
-		{"max", func(b *Builder[user]) (any, error) { return b.Max(g, "id") }},
+		{"sum", func(b *Builder[user]) (any, error) { return b.Sum(context.Background(), g, "id") }},
+		{"avg", func(b *Builder[user]) (any, error) { return b.Avg(context.Background(), g, "id") }},
+		{"min", func(b *Builder[user]) (any, error) { return b.Min(context.Background(), g, "id") }},
+		{"max", func(b *Builder[user]) (any, error) { return b.Max(context.Background(), g, "id") }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			model, conn := newUserModel()

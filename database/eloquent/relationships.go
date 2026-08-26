@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -404,9 +405,9 @@ func (b *Builder[T]) WithExists(relation string) *Builder[T] {
 
 // loadAggregateModels is the query Collection.LoadAggregate runs: the keys
 // of the collection, with the aggregate columns beside them.
-func (b *Builder[T]) loadAggregateModels(g auth.Grant, keys []any, relations []string, column, function string) (Collection[T], error) {
+func (b *Builder[T]) loadAggregateModels(ctx context.Context, g auth.Grant, keys []any, relations []string, column, function string) (Collection[T], error) {
 	return b.WhereKey(keys).
 		Select(b.model.GetQualifiedKeyName()).
 		WithAggregate(relations, column, function).
-		Get(g)
+		Get(ctx, g)
 }

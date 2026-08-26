@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -96,7 +97,7 @@ func TestToQueryReadsBackExactlyTheseRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToQuery: %v", err)
 	}
-	sql, err := q.ToBase(grant())
+	sql, err := q.ToBase(context.Background(), grant())
 	if err != nil {
 		t.Fatalf("ToBase: %v", err)
 	}
@@ -114,7 +115,7 @@ func TestCollectionFreshDropsWhatIsGone(t *testing.T) {
 	models := collectionOf(t, model, 1, 2)
 	conn.queue(query.Record{"id": int64(1), "name": "reloaded"})
 
-	fresh, err := models.Fresh(grant())
+	fresh, err := models.Fresh(context.Background(), grant())
 	if err != nil {
 		t.Fatalf("Fresh: %v", err)
 	}
@@ -134,7 +135,7 @@ func TestLoadMissingSkipsWhatIsLoaded(t *testing.T) {
 	models := collectionOf(t, model, 1, 2)
 	models[0].SetRelation("posts", []string{"already here"})
 
-	if err := models.LoadMissing(grant(), "posts"); err != nil {
+	if err := models.LoadMissing(context.Background(), grant(), "posts"); err != nil {
 		t.Fatalf("LoadMissing: %v", err)
 	}
 
@@ -158,7 +159,7 @@ func TestLoadCountFillsTheAggregateOntoEveryModel(t *testing.T) {
 		query.Record{"id": int64(2), "posts_count": int64(5)},
 	)
 
-	if err := models.LoadCount(grant(), "posts"); err != nil {
+	if err := models.LoadCount(context.Background(), grant(), "posts"); err != nil {
 		t.Fatalf("LoadCount: %v", err)
 	}
 	if got := models[0].GetAttribute("posts_count"); got != int64(2) {
@@ -195,7 +196,7 @@ func TestCollectionPushSavesEveryModel(t *testing.T) {
 	models := collectionOf(t, model, 1, 2)
 	models[0].Entity.Name = "changed"
 
-	pushed, err := models.Push(grant())
+	pushed, err := models.Push(context.Background(), grant())
 	if err != nil || !pushed {
 		t.Fatalf("Push = %v, %v", pushed, err)
 	}

@@ -72,7 +72,7 @@ type TokenRepository interface {
 type Connection interface {
 	// Table opens a builder against a table. It takes a context because a
 	// hesape builder binds its connection at the moment it is made.
-	Table(ctx context.Context, table any, as ...string) *query.Builder
+	Table(table any, as ...string) *query.Builder
 }
 
 // newToken mints the token both repositories hand out: an HMAC-SHA256 over

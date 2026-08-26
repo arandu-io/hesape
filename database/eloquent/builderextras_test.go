@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -13,7 +14,7 @@ func TestWithAttributesFiltersAndFills(t *testing.T) {
 	conn.queue()
 
 	q := model.NewQuery().WithAttributes(map[string]any{"name": "Ada"})
-	if _, err := q.Get(grant()); err != nil {
+	if _, err := q.Get(context.Background(), grant()); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	if sql := conn.last().SQL; !strings.Contains(sql, `"users"."name" = ?`) {
@@ -34,7 +35,7 @@ func TestWithAttributesCanSkipTheConditions(t *testing.T) {
 	conn.queue()
 
 	q := model.NewQuery().WithAttributes(map[string]any{"name": "Ada"}, false)
-	if _, err := q.Get(grant()); err != nil {
+	if _, err := q.Get(context.Background(), grant()); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	if sql := conn.last().SQL; strings.Contains(sql, `"name" = ?`) {

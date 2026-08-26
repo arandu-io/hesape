@@ -166,7 +166,7 @@ func (p *InteractsWithPivotTable) Attach(ctx context.Context, g auth.Grant, ids 
 			if err != nil {
 				return err
 			}
-			if err := insert(statement, p.stampTenant(records, g)); err != nil {
+			if err := insert(ctx, statement, p.stampTenant(records, g)); err != nil {
 				return err
 			}
 		}
@@ -198,7 +198,7 @@ func (p *InteractsWithPivotTable) Detach(ctx context.Context, g auth.Grant, ids 
 		statement = statement.WhereIn(p.Host.GetQualifiedRelatedPivotKeyName(), parsed)
 	}
 
-	affected, err := deleteFrom(statement)
+	affected, err := deleteFrom(ctx, statement)
 	if err != nil {
 		return 0, err
 	}
@@ -222,7 +222,7 @@ func (p *InteractsWithPivotTable) Sync(ctx context.Context, g auth.Grant, ids an
 		return changes, nil
 	}
 
-	current, err := p.currentlyAttachedKeys(g)
+	current, err := p.currentlyAttachedKeys(ctx, g)
 	if err != nil {
 		return changes, err
 	}
@@ -275,7 +275,7 @@ func (p *InteractsWithPivotTable) Toggle(ctx context.Context, g auth.Grant, ids 
 
 	records := p.FormatRecordsList(ids)
 
-	current, err := p.currentlyAttachedKeys(g)
+	current, err := p.currentlyAttachedKeys(ctx, g)
 	if err != nil {
 		return changes, err
 	}
@@ -331,7 +331,7 @@ func (p *InteractsWithPivotTable) UpdateExistingPivot(ctx context.Context, g aut
 		return 0, err
 	}
 
-	updated, err := update(statement, values)
+	updated, err := update(ctx, statement, values)
 	if err != nil {
 		return 0, err
 	}
@@ -360,8 +360,8 @@ func (p *InteractsWithPivotTable) NewExistingPivot(attributes map[string]any) Mo
 
 // AllRelatedIDs answers BelongsToMany::allRelatedIds. The PHP spells the last
 // word Ids.
-func (p *InteractsWithPivotTable) AllRelatedIDs(g auth.Grant) ([]any, error) {
-	return p.currentlyAttachedKeys(g)
+func (p *InteractsWithPivotTable) AllRelatedIDs(ctx context.Context, g auth.Grant) ([]any, error) {
+	return p.currentlyAttachedKeys(ctx, g)
 }
 
 // FormatRecordsList answers InteractsWithPivotTable::formatRecordsList.
@@ -613,13 +613,13 @@ func (p *InteractsWithPivotTable) stampTenant(records []map[string]any, g auth.G
 
 // currentlyAttachedKeys answers the pluck of
 // getCurrentlyAttachedPivots()->pluck($this->relatedPivotKey).
-func (p *InteractsWithPivotTable) currentlyAttachedKeys(g auth.Grant) ([]any, error) {
+func (p *InteractsWithPivotTable) currentlyAttachedKeys(ctx context.Context, g auth.Grant) ([]any, error) {
 	statement, err := p.Host.NewPivotQuery(g)
 	if err != nil {
 		return nil, err
 	}
 
-	rows, err := selectRows(statement.Select(p.Host.GetRelatedPivotKeyName()))
+	rows, err := selectRows(ctx, statement.Select(p.Host.GetRelatedPivotKeyName()))
 	if err != nil {
 		return nil, err
 	}
@@ -633,13 +633,13 @@ func (p *InteractsWithPivotTable) currentlyAttachedKeys(g auth.Grant) ([]any, er
 
 // GetCurrentlyAttachedPivots answers
 // InteractsWithPivotTable::getCurrentlyAttachedPivots.
-func (p *InteractsWithPivotTable) GetCurrentlyAttachedPivots(g auth.Grant) ([]Model, error) {
-	return p.GetCurrentlyAttachedPivotsForIDs(g, nil)
+func (p *InteractsWithPivotTable) GetCurrentlyAttachedPivots(ctx context.Context, g auth.Grant) ([]Model, error) {
+	return p.GetCurrentlyAttachedPivotsForIDs(ctx, g, nil)
 }
 
 // GetCurrentlyAttachedPivotsForIDs answers
 // InteractsWithPivotTable::getCurrentlyAttachedPivotsForIds.
-func (p *InteractsWithPivotTable) GetCurrentlyAttachedPivotsForIDs(g auth.Grant, ids any) ([]Model, error) {
+func (p *InteractsWithPivotTable) GetCurrentlyAttachedPivotsForIDs(ctx context.Context, g auth.Grant, ids any) ([]Model, error) {
 	statement, err := p.Host.NewPivotQuery(g)
 	if err != nil {
 		return nil, err
@@ -648,7 +648,7 @@ func (p *InteractsWithPivotTable) GetCurrentlyAttachedPivotsForIDs(g auth.Grant,
 		statement = statement.WhereIn(p.Host.GetQualifiedRelatedPivotKeyName(), p.ParseIDs(ids))
 	}
 
-	rows, err := selectRows(statement)
+	rows, err := selectRows(ctx, statement)
 	if err != nil {
 		return nil, err
 	}

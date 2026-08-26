@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"strings"
@@ -125,7 +126,7 @@ func TestSaveInsertsWithTheTenantFromTheGrantAndSetsTheKey(t *testing.T) {
 	model.Entity.Name = "Ada"
 	model.Entity.TenantID = "somebody-elses"
 
-	saved, err := model.Save(grant())
+	saved, err := model.Save(context.Background(), grant())
 	if err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -161,7 +162,7 @@ func TestInsertLeavesTheIncrementingKeyOut(t *testing.T) {
 	model, conn := newUserModel()
 	model.Entity.Name = "Ada"
 
-	if _, err := model.Save(grant()); err != nil {
+	if _, err := model.Save(context.Background(), grant()); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	if strings.Contains(conn.last().SQL, `"id"`) {
@@ -179,7 +180,7 @@ func TestSaveUpdatesOnlyTheDirtyColumns(t *testing.T) {
 	model.Exists = true
 	model.Entity.Name = "Grace"
 
-	if _, err := model.Save(grant()); err != nil {
+	if _, err := model.Save(context.Background(), grant()); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -208,7 +209,7 @@ func TestSaveOnACleanModelWritesNothing(t *testing.T) {
 	}
 	model.Exists = true
 
-	saved, err := model.Save(grant())
+	saved, err := model.Save(context.Background(), grant())
 	if err != nil || !saved {
 		t.Fatalf("Save = %v, %v; a clean model saves as true with no statement", saved, err)
 	}
@@ -224,7 +225,7 @@ func TestDeleteRemovesTheRowByKeyAndTenant(t *testing.T) {
 	}
 	model.Exists = true
 
-	deleted, err := model.Delete(grant())
+	deleted, err := model.Delete(context.Background(), grant())
 	if err != nil || !deleted {
 		t.Fatalf("Delete = %v, %v", deleted, err)
 	}
@@ -244,7 +245,7 @@ func TestDeleteRemovesTheRowByKeyAndTenant(t *testing.T) {
 func TestDeleteOnAModelThatWasNeverSavedIsNotAFailure(t *testing.T) {
 	model, conn := newUserModel()
 
-	deleted, err := model.Delete(grant())
+	deleted, err := model.Delete(context.Background(), grant())
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -261,7 +262,7 @@ func TestEventCallbackStopsTheSave(t *testing.T) {
 	refused := errors.New("no")
 	model.RegisterModelEvent(Saving, func(*Model[user]) error { return refused })
 
-	if _, err := model.Save(grant()); !errors.Is(err, refused) {
+	if _, err := model.Save(context.Background(), grant()); !errors.Is(err, refused) {
 		t.Fatalf("Save error = %v, want the callback's; returning false in PHP halts the save and says nothing", err)
 	}
 	if len(conn.sqls()) != 0 {
@@ -277,7 +278,7 @@ func TestWithoutEventsMutesTheCallback(t *testing.T) {
 		return nil
 	})
 
-	if _, err := model.SaveQuietly(grant()); err != nil {
+	if _, err := model.SaveQuietly(context.Background(), grant()); err != nil {
 		t.Fatalf("SaveQuietly: %v", err)
 	}
 	if fired {
@@ -403,7 +404,7 @@ func TestAssignParsesATimestampADriverWroteAsText(t *testing.T) {
 func TestTransactionalSaveSaysSoWhenTheConnectionCannot(t *testing.T) {
 	model, _ := newUserModel()
 
-	_, err := model.SaveOrFail(grant())
+	_, err := model.SaveOrFail(context.Background(), grant())
 	if err == nil || !strings.Contains(err.Error(), "transaction") {
 		t.Fatalf("SaveOrFail error = %v, want a refusal naming the transaction: writing outside one the caller believes in is worse", err)
 	}

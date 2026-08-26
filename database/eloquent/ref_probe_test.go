@@ -123,13 +123,13 @@ func (r *modelRef[T]) NewQuery() concerns.Builder {
 // Save discards the "was anything written" bool. It becomes state on the model
 // in the real ref, not a lost return.
 func (r *modelRef[T]) Save(_ context.Context, g auth.Grant) error {
-	_, err := r.m.Save(g)
+	_, err := r.m.Save(context.Background(), g)
 	return err
 }
 
 // Delete answers rows affected where the typed one answers a bool.
 func (r *modelRef[T]) Delete(_ context.Context, g auth.Grant) (int64, error) {
-	deleted, err := r.m.Delete(g)
+	deleted, err := r.m.Delete(context.Background(), g)
 	if err != nil || !deleted {
 		return 0, err
 	}

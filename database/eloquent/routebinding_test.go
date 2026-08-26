@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -24,7 +25,7 @@ func TestResolveRouteBindingFiltersByTenant(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue(map[string]any{"id": int64(9), "name": "Ada"})
 
-	found, err := model.ResolveRouteBinding(grant(), "9", "")
+	found, err := model.ResolveRouteBinding(context.Background(), grant(), "9", "")
 	if err != nil {
 		t.Fatalf("ResolveRouteBinding: %v", err)
 	}
@@ -44,7 +45,7 @@ func TestResolveRouteBindingFiltersByTenant(t *testing.T) {
 func TestResolveRouteBindingRefusesAGrantWithoutATenant(t *testing.T) {
 	model, _ := newUserModel()
 
-	if _, err := model.ResolveRouteBinding(auth.Grant{}, "9", ""); !errors.Is(err, ErrNoTenant) {
+	if _, err := model.ResolveRouteBinding(context.Background(), auth.Grant{}, "9", ""); !errors.Is(err, ErrNoTenant) {
 		t.Fatalf("error = %v, want ErrNoTenant: the id came off a URL and nothing else scopes it", err)
 	}
 }
@@ -53,7 +54,7 @@ func TestResolveRouteBindingUsesTheGivenField(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue()
 
-	if _, err := model.ResolveRouteBinding(grant(), "ada@example.com", "email"); err != nil {
+	if _, err := model.ResolveRouteBinding(context.Background(), grant(), "ada@example.com", "email"); err != nil {
 		t.Fatalf("ResolveRouteBinding: %v", err)
 	}
 	if sql := conn.last().SQL; !strings.Contains(sql, `"email" = ?`) {
@@ -66,7 +67,7 @@ func TestResolveSoftDeletableRouteBindingKeepsTrashedRows(t *testing.T) {
 	model.SoftDeletes = true
 	conn.queue()
 
-	if _, err := model.ResolveSoftDeletableRouteBinding(grant(), "9", ""); err != nil {
+	if _, err := model.ResolveSoftDeletableRouteBinding(context.Background(), grant(), "9", ""); err != nil {
 		t.Fatalf("ResolveSoftDeletableRouteBinding: %v", err)
 	}
 	if sql := conn.last().SQL; strings.Contains(sql, "deleted_at") {
@@ -84,7 +85,7 @@ func TestResolveChildRouteBindingRefusesAnUndeclaredRelation(t *testing.T) {
 	parent, _ := newUserModel()
 	children, _ := newUserModel()
 
-	_, err := ResolveChildRouteBinding(parent, children.NewQuery(), grant(), "post", "3", "")
+	_, err := ResolveChildRouteBinding(context.Background(), parent, children.NewQuery(), grant(), "post", "3", "")
 	if !errors.Is(err, ErrRelationNotFound) {
 		t.Fatalf("error = %v, want ErrRelationNotFound: the PHP calls $this->{$name}() and there is no such method", err)
 	}
@@ -98,7 +99,7 @@ func TestResolveChildRouteBindingQualifiesTheFieldAndCarriesTheTenant(t *testing
 	children.Table = "posts"
 	conn.queue()
 
-	if _, err := ResolveChildRouteBinding(parent, children.NewQuery(), grant(), "post", "3", "slug"); err != nil {
+	if _, err := ResolveChildRouteBinding(context.Background(), parent, children.NewQuery(), grant(), "post", "3", "slug"); err != nil {
 		t.Fatalf("ResolveChildRouteBinding: %v", err)
 	}
 

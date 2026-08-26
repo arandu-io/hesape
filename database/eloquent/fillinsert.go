@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"github.com/arandu-io/hesape/auth"
 )
 
@@ -29,37 +30,37 @@ func (b *Builder[T]) FillForInsert(values []map[string]any) ([]map[string]any, e
 }
 
 // FillAndInsert runs FillForInsert and inserts the result.
-func (b *Builder[T]) FillAndInsert(g auth.Grant, values []map[string]any) (bool, error) {
+func (b *Builder[T]) FillAndInsert(ctx context.Context, g auth.Grant, values []map[string]any) (bool, error) {
 	rows, err := b.FillForInsert(values)
 	if err != nil {
 		return false, err
 	}
-	return b.Insert(g, rows...)
+	return b.Insert(ctx, g, rows...)
 }
 
 // FillAndInsertOrIgnore runs FillForInsert and inserts the result, dropping
 // rows that violate a unique index.
-func (b *Builder[T]) FillAndInsertOrIgnore(g auth.Grant, values []map[string]any) (bool, error) {
+func (b *Builder[T]) FillAndInsertOrIgnore(ctx context.Context, g auth.Grant, values []map[string]any) (bool, error) {
 	rows, err := b.FillForInsert(values)
 	if err != nil {
 		return false, err
 	}
-	return b.InsertOrIgnore(g, rows...)
+	return b.InsertOrIgnore(ctx, g, rows...)
 }
 
 // FillAndInsertGetID runs FillForInsert for one row, inserts it, and
 // returns the value generated for the primary key.
-func (b *Builder[T]) FillAndInsertGetID(g auth.Grant, values map[string]any) (int64, error) {
+func (b *Builder[T]) FillAndInsertGetID(ctx context.Context, g auth.Grant, values map[string]any) (int64, error) {
 	rows, err := b.FillForInsert([]map[string]any{values})
 	if err != nil {
 		return 0, err
 	}
-	return b.InsertGetID(g, rows[0], b.model.GetKeyName())
+	return b.InsertGetID(ctx, g, rows[0], b.model.GetKeyName())
 }
 
 // InsertOrIgnore writes values as new rows, dropping the ones that violate a
 // unique index rather than failing the statement.
-func (b *Builder[T]) InsertOrIgnore(g auth.Grant, values ...map[string]any) (bool, error) {
+func (b *Builder[T]) InsertOrIgnore(ctx context.Context, g auth.Grant, values ...map[string]any) (bool, error) {
 	prepared, rows, err := b.prepareWrite(g, values)
 	if err != nil {
 		return false, err
@@ -77,12 +78,12 @@ func (b *Builder[T]) InsertOrIgnore(g auth.Grant, values ...map[string]any) (boo
 			bindings = append(bindings, row[column])
 		}
 	}
-	return b.model.Connection.Insert(sql, cleanBindings(bindings))
+	return b.model.Connection.Insert(ctx, sql, cleanBindings(bindings))
 }
 
 // IncrementOrCreate returns the row matching attributes with column set to
 // def, or increments column by step on the row that was already there.
-func (b *Builder[T]) IncrementOrCreate(g auth.Grant, attributes map[string]any, column string, def, step any) (*Model[T], error) {
+func (b *Builder[T]) IncrementOrCreate(ctx context.Context, g auth.Grant, attributes map[string]any, column string, def, step any) (*Model[T], error) {
 	if column == "" {
 		column = "count"
 	}
@@ -93,7 +94,7 @@ func (b *Builder[T]) IncrementOrCreate(g auth.Grant, attributes map[string]any, 
 		step = 1
 	}
 
-	instance, err := b.FirstOrCreate(g, attributes, map[string]any{column: def})
+	instance, err := b.FirstOrCreate(ctx, g, attributes, map[string]any{column: def})
 	if err != nil {
 		return nil, err
 	}
@@ -103,10 +104,10 @@ func (b *Builder[T]) IncrementOrCreate(g auth.Grant, attributes map[string]any, 
 
 	q := instance.NewModelQuery()
 	instance.setKeysForSaveQuery(q)
-	if _, err := q.Increment(g, column, step, nil); err != nil {
+	if _, err := q.Increment(ctx, g, column, step, nil); err != nil {
 		return nil, err
 	}
-	return instance, instance.Refresh(g)
+	return instance, instance.Refresh(ctx, g)
 }
 
 // UseWritePDO points this builder's statement at the write connection, even

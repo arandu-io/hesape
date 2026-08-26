@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"testing"
 
 	"github.com/arandu-io/hesape/auth"
@@ -29,7 +30,7 @@ func TestForceDeleteRefusesABuilderThatAlreadyFailed(t *testing.T) {
 	// returning an error, because it has to stay chainable.
 	builder := model.NewQuery().WithTrashed()
 
-	affected, err := builder.ForceDelete(auth.SystemGrant("users.write", "acme"))
+	affected, err := builder.ForceDelete(context.Background(), auth.SystemGrant("users.write", "acme"))
 	if err == nil {
 		t.Fatal("ForceDelete ran on a failed builder and reported no error")
 	}
@@ -49,7 +50,7 @@ func TestFromQueryRefusesABuilderThatAlreadyFailed(t *testing.T) {
 
 	builder := model.NewQuery().WithTrashed()
 
-	rows, err := builder.FromQuery(auth.SystemGrant("users.read", "acme"),
+	rows, err := builder.FromQuery(context.Background(), auth.SystemGrant("users.read", "acme"),
 		`SELECT * FROM users WHERE tenant_id = ?`, []any{"acme"})
 	if err == nil {
 		t.Fatal("FromQuery ran on a failed builder and reported no error")

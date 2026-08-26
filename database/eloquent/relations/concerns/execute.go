@@ -1,6 +1,7 @@
 package concerns
 
 import (
+	"context"
 	"sort"
 
 	"github.com/arandu-io/hesape/database/query"
@@ -23,7 +24,7 @@ import (
 // the grammar writes the column list from the same records, and bindings
 // flattened in a different order than the columns were written is every value
 // landing in the wrong column -- a corrupt row rather than an error.
-func insert(q *query.Builder, values []map[string]any) error {
+func insert(ctx context.Context, q *query.Builder, values []map[string]any) error {
 	if len(values) == 0 {
 		return nil
 	}
@@ -39,32 +40,32 @@ func insert(q *query.Builder, values []map[string]any) error {
 		}
 	}
 
-	_, err := q.Connection.Insert(q.Grammar.CompileInsert(q, values), bindings)
+	_, err := q.Connection.Insert(ctx, q.Grammar.CompileInsert(q, values), bindings)
 	return err
 }
 
 // update runs the update the builder compiled.
-func update(q *query.Builder, values map[string]any) (int64, error) {
+func update(ctx context.Context, q *query.Builder, values map[string]any) (int64, error) {
 	q.ApplyBeforeQueryCallbacks()
 
 	sql := q.Grammar.CompileUpdate(q, values)
-	return q.Connection.Update(sql, q.Grammar.PrepareBindingsForUpdate(q.GetRawBindings(), values))
+	return q.Connection.Update(ctx, sql, q.Grammar.PrepareBindingsForUpdate(q.GetRawBindings(), values))
 }
 
 // deleteFrom runs the delete the builder compiled.
 //
 // It is not called delete: that is the builtin removing a key from a map, and
 // shadowing it inside this package would be a trap for the next reader.
-func deleteFrom(q *query.Builder) (int64, error) {
+func deleteFrom(ctx context.Context, q *query.Builder) (int64, error) {
 	q.ApplyBeforeQueryCallbacks()
 
 	sql := q.Grammar.CompileDelete(q)
-	return q.Connection.Delete(sql, q.Grammar.PrepareBindingsForDelete(q.GetRawBindings()))
+	return q.Connection.Delete(ctx, sql, q.Grammar.PrepareBindingsForDelete(q.GetRawBindings()))
 }
 
 // selectRows runs the select the builder compiled: the rows, unhydrated.
-func selectRows(q *query.Builder) ([]query.Record, error) {
-	rows, err := q.Connection.Select(q.ToSQL(), q.GetBindings(), false)
+func selectRows(ctx context.Context, q *query.Builder) ([]query.Record, error) {
+	rows, err := q.Connection.Select(ctx, q.ToSQL(), q.GetBindings(), false)
 	if err != nil {
 		return nil, err
 	}

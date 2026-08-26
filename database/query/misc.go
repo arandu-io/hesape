@@ -105,7 +105,7 @@ func (b *Builder) InsertOrIgnoreReturning(ctx context.Context, g auth.Grant, val
 	if query.Connection == nil {
 		return nil, errors.New("query: the builder has no connection to run against")
 	}
-	return query.Connection.Select(sql, query.CleanBindings(flattenRows(rows)), false)
+	return query.Connection.Select(ctx, sql, query.CleanBindings(flattenRows(rows)), false)
 }
 
 // Dump writes the statement and its bindings, and hands the query back so the

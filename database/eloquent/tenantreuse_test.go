@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"slices"
 	"testing"
 
@@ -34,12 +35,12 @@ func TestOneBuilderUnderTwoGrantsScopesEachRunSeparately(t *testing.T) {
 	builder := model.NewQuery().Where("name", "Ada")
 
 	conn.queue()
-	if _, err := builder.Get(auth.SystemGrant("users.read", "acme")); err != nil {
+	if _, err := builder.Get(context.Background(), auth.SystemGrant("users.read", "acme")); err != nil {
 		t.Fatalf("Get for acme: %v", err)
 	}
 
 	conn.queue()
-	if _, err := builder.Get(auth.SystemGrant("users.read", "globex")); err != nil {
+	if _, err := builder.Get(context.Background(), auth.SystemGrant("users.read", "globex")); err != nil {
 		t.Fatalf("Get for globex: %v", err)
 	}
 
@@ -81,7 +82,7 @@ func TestRunningABuilderDoesNotScopeTheBuilderTheCallerKept(t *testing.T) {
 	builder := model.NewQuery().Where("name", "Ada")
 
 	conn.queue()
-	if _, err := builder.Get(auth.SystemGrant("users.read", "acme")); err != nil {
+	if _, err := builder.Get(context.Background(), auth.SystemGrant("users.read", "acme")); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 

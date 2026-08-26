@@ -1,6 +1,7 @@
 package processors
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -58,13 +59,13 @@ func (p *Processor) ProcessSelect(q *query.Builder, results []query.Record) []qu
 // It returns an int64: query.Processor declares the signature, and an
 // engine whose identifier is not a number is a repository's problem before
 // it is a processor's.
-func (p *Processor) ProcessInsertGetID(q *query.Builder, sql string, values []any, sequence string) (int64, error) {
+func (p *Processor) ProcessInsertGetID(ctx context.Context, q *query.Builder, sql string, values []any, sequence string) (int64, error) {
 	connection := q.GetConnection()
 	if connection == nil {
 		return 0, fmt.Errorf("query/processors: the builder has no connection to insert through")
 	}
 
-	if _, err := connection.Insert(sql, values); err != nil {
+	if _, err := connection.Insert(ctx, sql, values); err != nil {
 		return 0, err
 	}
 

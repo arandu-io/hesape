@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/arandu-io/hesape/auth"
@@ -36,9 +37,9 @@ func (s *SoftDeletingScope[T]) Apply(builder *Builder[T], model *Model[T]) {
 // methods on Builder, so what Extend does is the part that is not a name: it
 // points the builder's delete at an update.
 func (s *SoftDeletingScope[T]) Extend(builder *Builder[T]) {
-	builder.OnDelete(func(b *Builder[T], g auth.Grant) (int64, error) {
+	builder.OnDelete(func(ctx context.Context, b *Builder[T], g auth.Grant) (int64, error) {
 		column := s.deletedAtColumn(b)
-		return b.Update(g, map[string]any{column: b.GetModel().FreshTimestamp()})
+		return b.Update(ctx, g, map[string]any{column: b.GetModel().FreshTimestamp()})
 	})
 }
 
@@ -80,14 +81,14 @@ func (m *Model[T]) IsForceDeleting() bool { return m.forceDeleting }
 // performDeleteOnModel deletes the model's row, or marks it deleted: a model
 // that soft deletes and is not force deleting marks the row instead of
 // removing it.
-func (m *Model[T]) performDeleteOnModel(g auth.Grant) error {
+func (m *Model[T]) performDeleteOnModel(ctx context.Context, g auth.Grant) error {
 	if m.SoftDeletes && !m.forceDeleting {
-		return m.runSoftDelete(g)
+		return m.runSoftDelete(ctx, g)
 	}
 
 	q := m.NewModelQuery()
 	m.setKeysForSaveQuery(q)
-	if _, err := q.ForceDelete(g); err != nil {
+	if _, err := q.ForceDelete(ctx, g); err != nil {
 		return err
 	}
 	m.Exists = false
@@ -96,7 +97,7 @@ func (m *Model[T]) performDeleteOnModel(g auth.Grant) error {
 
 // runSoftDelete sets the deleted_at column to the current time instead of
 // removing the row, and fires the Trashed event.
-func (m *Model[T]) runSoftDelete(g auth.Grant) error {
+func (m *Model[T]) runSoftDelete(ctx context.Context, g auth.Grant) error {
 	now := m.FreshTimestamp()
 	column := m.GetDeletedAtColumn()
 
@@ -114,7 +115,7 @@ func (m *Model[T]) runSoftDelete(g auth.Grant) error {
 
 	q := m.NewModelQuery()
 	m.setKeysForSaveQuery(q)
-	if _, err := q.Update(g, columns); err != nil {
+	if _, err := q.Update(ctx, g, columns); err != nil {
 		return err
 	}
 
@@ -124,16 +125,16 @@ func (m *Model[T]) runSoftDelete(g auth.Grant) error {
 
 // ForceDelete removes the row even if the model soft deletes. On a model
 // that does not soft delete it is a plain delete.
-func (m *Model[T]) ForceDelete(g auth.Grant) (bool, error) {
+func (m *Model[T]) ForceDelete(ctx context.Context, g auth.Grant) (bool, error) {
 	if !m.SoftDeletes {
-		return m.Delete(g)
+		return m.Delete(ctx, g)
 	}
 	if err := m.fireModelEvent(ForceDeleting); err != nil {
 		return false, err
 	}
 
 	m.forceDeleting = true
-	deleted, err := m.Delete(g)
+	deleted, err := m.Delete(ctx, g)
 	m.forceDeleting = false
 	if err != nil {
 		return false, err
@@ -148,9 +149,9 @@ func (m *Model[T]) ForceDelete(g auth.Grant) (bool, error) {
 
 // ForceDeleteQuietly removes the row even if the model soft deletes, without
 // firing model events.
-func (m *Model[T]) ForceDeleteQuietly(g auth.Grant) (deleted bool, err error) {
+func (m *Model[T]) ForceDeleteQuietly(ctx context.Context, g auth.Grant) (deleted bool, err error) {
 	return deleted, m.WithoutEvents(func() error {
-		deleted, err = m.ForceDelete(g)
+		deleted, err = m.ForceDelete(ctx, g)
 		return err
 	})
 }
@@ -158,17 +159,17 @@ func (m *Model[T]) ForceDeleteQuietly(g auth.Grant) (deleted bool, err error) {
 // ForceDestroy loads the models with the given keys, including trashed ones,
 // and removes each row even if the model soft deletes. It returns the number
 // removed.
-func (m *Model[T]) ForceDestroy(g auth.Grant, ids ...any) (int, error) {
+func (m *Model[T]) ForceDestroy(ctx context.Context, g auth.Grant, ids ...any) (int, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	models, err := m.NewQuery().WithTrashed().WhereKey(ids).Get(g)
+	models, err := m.NewQuery().WithTrashed().WhereKey(ids).Get(ctx, g)
 	if err != nil {
 		return 0, err
 	}
 	count := 0
 	for _, model := range models {
-		deleted, err := model.ForceDelete(g)
+		deleted, err := model.ForceDelete(ctx, g)
 		if err != nil {
 			return count, err
 		}
@@ -181,7 +182,7 @@ func (m *Model[T]) ForceDestroy(g auth.Grant, ids ...any) (int, error) {
 
 // Restore clears the deleted_at column and saves the model: the row comes
 // back.
-func (m *Model[T]) Restore(g auth.Grant) (bool, error) {
+func (m *Model[T]) Restore(ctx context.Context, g auth.Grant) (bool, error) {
 	if !m.SoftDeletes {
 		return false, fmt.Errorf("eloquent: %s does not soft delete, so there is nothing to restore", m.GetTable())
 	}
@@ -193,7 +194,7 @@ func (m *Model[T]) Restore(g auth.Grant) (bool, error) {
 	}
 
 	m.Exists = true
-	restored, err := m.Save(g)
+	restored, err := m.Save(ctx, g)
 	if err != nil {
 		return false, err
 	}
@@ -204,9 +205,9 @@ func (m *Model[T]) Restore(g auth.Grant) (bool, error) {
 }
 
 // RestoreQuietly restores the model without firing model events.
-func (m *Model[T]) RestoreQuietly(g auth.Grant) (restored bool, err error) {
+func (m *Model[T]) RestoreQuietly(ctx context.Context, g auth.Grant) (restored bool, err error) {
 	return restored, m.WithoutEvents(func() error {
-		restored, err = m.Restore(g)
+		restored, err = m.Restore(ctx, g)
 		return err
 	})
 }
@@ -248,24 +249,24 @@ func (b *Builder[T]) OnlyTrashed() *Builder[T] {
 }
 
 // Restore un-deletes every row the query matches, in one statement.
-func (b *Builder[T]) Restore(g auth.Grant) (int64, error) {
+func (b *Builder[T]) Restore(ctx context.Context, g auth.Grant) (int64, error) {
 	if err := b.requireSoftDeletes("restore"); err != nil {
 		return 0, err
 	}
-	return b.WithTrashed().Update(g, map[string]any{b.model.GetDeletedAtColumn(): nil})
+	return b.WithTrashed().Update(ctx, g, map[string]any{b.model.GetDeletedAtColumn(): nil})
 }
 
 // RestoreOrCreate finds the first trashed-or-not row matching attributes and
 // restores it, or creates one from attributes and values if none matches.
-func (b *Builder[T]) RestoreOrCreate(g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+func (b *Builder[T]) RestoreOrCreate(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
 	if err := b.requireSoftDeletes("restoreOrCreate"); err != nil {
 		return nil, err
 	}
-	model, err := b.WithTrashed().FirstOrCreate(g, attributes, values)
+	model, err := b.WithTrashed().FirstOrCreate(ctx, g, attributes, values)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := model.Restore(g); err != nil {
+	if _, err := model.Restore(ctx, g); err != nil {
 		return nil, err
 	}
 	return model, nil
@@ -274,15 +275,15 @@ func (b *Builder[T]) RestoreOrCreate(g auth.Grant, attributes, values map[string
 // CreateOrRestore finds the first row matching attributes, including
 // trashed, and restores it if trashed; otherwise it creates one from
 // attributes and values.
-func (b *Builder[T]) CreateOrRestore(g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+func (b *Builder[T]) CreateOrRestore(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
 	if err := b.requireSoftDeletes("createOrRestore"); err != nil {
 		return nil, err
 	}
-	model, err := b.WithTrashed().CreateOrFirst(g, attributes, values)
+	model, err := b.WithTrashed().CreateOrFirst(ctx, g, attributes, values)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := model.Restore(g); err != nil {
+	if _, err := model.Restore(ctx, g); err != nil {
 		return nil, err
 	}
 	return model, nil

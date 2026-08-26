@@ -721,7 +721,7 @@ func sameValue(left, right any) bool {
 // the pivot tests are about.
 type connection struct{ database *db }
 
-func (c *connection) Select(sql string, bindings []any, useReadPDO bool) ([]query.Record, error) {
+func (c *connection) Select(_ context.Context, sql string, bindings []any, useReadPDO bool) ([]query.Record, error) {
 	c.database.log = append(c.database.log, sql)
 	c.database.bound = append(c.database.bound, bindings)
 
@@ -736,7 +736,7 @@ func (c *connection) Select(sql string, bindings []any, useReadPDO bool) ([]quer
 
 // Insert rebuilds the row from the column list the grammar wrote and the
 // bindings that follow it, which line up because both are key-sorted.
-func (c *connection) Insert(sql string, bindings []any) (bool, error) {
+func (c *connection) Insert(_ context.Context, sql string, bindings []any) (bool, error) {
 	c.database.log = append(c.database.log, sql)
 
 	table, columns := tableOfSQL(sql), columnsOfSQL(sql)
@@ -754,12 +754,12 @@ func (c *connection) Insert(sql string, bindings []any) (bool, error) {
 	return true, nil
 }
 
-func (c *connection) Update(sql string, bindings []any) (int64, error) {
+func (c *connection) Update(_ context.Context, sql string, bindings []any) (int64, error) {
 	c.database.log = append(c.database.log, sql)
 	return 1, nil
 }
 
-func (c *connection) Delete(sql string, bindings []any) (int64, error) {
+func (c *connection) Delete(_ context.Context, sql string, bindings []any) (int64, error) {
 	c.database.log = append(c.database.log, sql)
 
 	table := tableOfSQL(sql)
@@ -806,7 +806,7 @@ func columnsOfSQL(sql string) []string {
 	return columns
 }
 
-func (c *connection) Statement(sql string, bindings []any) (bool, error) {
+func (c *connection) Statement(_ context.Context, sql string, bindings []any) (bool, error) {
 	c.database.log = append(c.database.log, sql)
 	return true, nil
 }

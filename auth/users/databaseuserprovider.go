@@ -19,7 +19,7 @@ import (
 type Connection interface {
 	// Table opens a builder against a table. It takes a context because a
 	// hesape builder binds its connection at the moment it is made.
-	Table(ctx context.Context, table any, as ...string) *query.Builder
+	Table(table any, as ...string) *query.Builder
 }
 
 // DatabaseUserProvider is the auth.UserProvider that reads a table directly and
@@ -182,7 +182,7 @@ func (p *DatabaseUserProvider) getGenericUser(record query.Record) auth.Authenti
 // getTable opens a builder against the user table, which is how every method
 // here starts.
 func (p *DatabaseUserProvider) getTable(ctx context.Context) *query.Builder {
-	return p.connection.Table(ctx, p.table)
+	return p.connection.Table(p.table)
 }
 
 // grant is the authorization every statement in this file goes through. See the

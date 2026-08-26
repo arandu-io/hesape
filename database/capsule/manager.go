@@ -1,7 +1,6 @@
 package capsule
 
 import (
-	"context"
 	"sync"
 
 	"github.com/arandu-io/hesape/database"
@@ -112,15 +111,15 @@ func Connection(name string) (database.ConnectionInterface, error) {
 // It takes a context for the reason Connection.Table gives: a builder that
 // cannot be cancelled holds a server connection for as long as the server
 // likes.
-func Table(ctx context.Context, table any, as, connection string) (*query.Builder, error) {
+func Table(table any, as, connection string) (*query.Builder, error) {
 	conn, err := Connection(connection)
 	if err != nil {
 		return nil, err
 	}
 	if as == "" {
-		return conn.Table(ctx, table), nil
+		return conn.Table(table), nil
 	}
-	return conn.Table(ctx, table, as), nil
+	return conn.Table(table, as), nil
 }
 
 // Schema returns the schema builder for a named connection, from the global

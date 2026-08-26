@@ -196,26 +196,28 @@ func (c *Connection) dialect() Dialect {
 
 // Table returns a query builder against one table, with an optional alias.
 //
-// It takes a context because a builder that cannot be cancelled holds a
-// connection open for as long as the server feels like, and there is nowhere
-// else to put the context once the builder exists.
-func (c *Connection) Table(ctx context.Context, table any, as ...string) *query.Builder {
-	return c.Query(ctx).From(table, as...)
+// It takes no context, and it used to. The context belongs to the statement,
+// not to the builder: every terminal method takes one, and a builder is a value
+// a caller may hold across more than one of them.
+func (c *Connection) Table(table any, as ...string) *query.Builder {
+	return c.Query().From(table, as...)
 }
 
 // Query returns a fresh query builder on this connection.
-func (c *Connection) Query(ctx context.Context) *query.Builder {
-	return query.NewBuilder(&boundConnection{connection: c, ctx: ctx}, c.GetQueryGrammar(), c.GetPostProcessor())
+func (c *Connection) Query() *query.Builder {
+	return query.NewBuilder(&boundConnection{connection: c}, c.GetQueryGrammar(), c.GetPostProcessor())
 }
 
 // boundConnection is what makes a Connection usable as a query.Connection.
 //
-// query.Connection takes no context. The builder gets one bound at the moment
-// it is created, which is the only place a context can enter without changing
-// an interface this package does not own.
+// It used to carry the context too, bound at the moment the builder was
+// created. That was one of two doors for a context -- the other being the one
+// in every terminal method's signature, which reached only as far as a
+// ctx.Err() pre-flight -- and the door that worked was the one nobody could
+// see. query.Connection takes the context now, so a statement is cancelled by
+// the request that asked for it rather than by whoever built the builder.
 type boundConnection struct {
 	connection *Connection
-	ctx        context.Context
 
 	// lastInsertID is what the most recent Insert through this binding was
 	// told the engine assigned.
@@ -229,17 +231,17 @@ type boundConnection struct {
 	lastInsertID int64
 }
 
-func (b *boundConnection) Select(q string, bindings []any, useReadPDO bool) ([]query.Record, error) {
-	return b.connection.Select(b.ctx, q, bindings, useReadPDO)
+func (b *boundConnection) Select(ctx context.Context, q string, bindings []any, useReadPDO bool) ([]query.Record, error) {
+	return b.connection.Select(ctx, q, bindings, useReadPDO)
 }
 
-func (b *boundConnection) Insert(q string, bindings []any) (bool, error) {
+func (b *boundConnection) Insert(ctx context.Context, q string, bindings []any) (bool, error) {
 	// The identifier is read from the statement that caused it and kept for
 	// GetLastInsertID, so that InsertGetID costs one round trip rather than
 	// two. An error reporting it is not an error inserting: the row is in, and
 	// only a caller that asked for the identifier has a problem -- which is
 	// what GetLastInsertID reports, to that caller.
-	id, err := b.connection.InsertReturningID(b.ctx, q, bindings)
+	id, err := b.connection.InsertReturningID(ctx, q, bindings)
 	b.lastInsertID = id
 	return err == nil, err
 }
@@ -262,16 +264,16 @@ func (b *boundConnection) GetLastInsertID(sequence string) (int64, error) {
 	return b.lastInsertID, nil
 }
 
-func (b *boundConnection) Update(q string, bindings []any) (int64, error) {
-	return b.connection.Update(b.ctx, q, bindings)
+func (b *boundConnection) Update(ctx context.Context, q string, bindings []any) (int64, error) {
+	return b.connection.Update(ctx, q, bindings)
 }
 
-func (b *boundConnection) Delete(q string, bindings []any) (int64, error) {
-	return b.connection.Delete(b.ctx, q, bindings)
+func (b *boundConnection) Delete(ctx context.Context, q string, bindings []any) (int64, error) {
+	return b.connection.Delete(ctx, q, bindings)
 }
 
-func (b *boundConnection) Statement(q string, bindings []any) (bool, error) {
-	return b.connection.Statement(b.ctx, q, bindings)
+func (b *boundConnection) Statement(ctx context.Context, q string, bindings []any) (bool, error) {
+	return b.connection.Statement(ctx, q, bindings)
 }
 
 // SelectOne runs a query and returns the first row, or false when there was

@@ -24,7 +24,7 @@ type Builder[T any] struct {
 	scopes        map[string]Scope[T]
 	removedScopes []string
 
-	onDelete            func(*Builder[T], auth.Grant) (int64, error)
+	onDelete            func(context.Context, *Builder[T], auth.Grant) (int64, error)
 	afterQueryCallbacks []func(Collection[T]) Collection[T]
 	onCloneCallbacks    []func(*Builder[T])
 	pendingAttributes   map[string]any
@@ -141,8 +141,8 @@ func (m *Model[T]) RegisterGlobalScopes(b *Builder[T]) *Builder[T] {
 }
 
 // All returns every row of the model's table, subject to its global scopes.
-func (m *Model[T]) All(g auth.Grant, columns ...any) (Collection[T], error) {
-	return m.NewQuery().Get(g, columns...)
+func (m *Model[T]) All(ctx context.Context, g auth.Grant, columns ...any) (Collection[T], error) {
+	return m.NewQuery().Get(ctx, g, columns...)
 }
 
 // SetModel attaches model to b, and points the query at its table.
@@ -169,7 +169,7 @@ func (b *Builder[T]) SetQuery(q *query.Builder) *Builder[T] {
 // It takes the Grant because applying the scopes is also where the tenant
 // filter goes on, and a base builder handed out without it is a query
 // somebody will run.
-func (b *Builder[T]) ToBase(g auth.Grant) (*query.Builder, error) {
+func (b *Builder[T]) ToBase(ctx context.Context, g auth.Grant) (*query.Builder, error) {
 	prepared, err := b.prepare(g)
 	if err != nil {
 		return nil, err
@@ -598,7 +598,7 @@ func (b *Builder[T]) Hydrate(items []query.Record) (Collection[T], error) {
 // tenant cannot be added to it -- which is exactly why the Grant is still
 // required: a query nobody authorized does not run, and the where clause that
 // scopes it is the caller's to write.
-func (b *Builder[T]) FromQuery(g auth.Grant, sql string, bindings []any) (Collection[T], error) {
+func (b *Builder[T]) FromQuery(ctx context.Context, g auth.Grant, sql string, bindings []any) (Collection[T], error) {
 	// The other method that skips prepare, and so the other one that has to read
 	// the held error itself. See ForceDelete.
 	if b.err != nil {
@@ -607,7 +607,7 @@ func (b *Builder[T]) FromQuery(g auth.Grant, sql string, bindings []any) (Collec
 	if tenant := auth.Tenant(g); tenant == "" || !auth.ValidTenant(tenant) {
 		return nil, ErrNoTenant
 	}
-	rows, err := b.model.Connection.Select(sql, bindings, true)
+	rows, err := b.model.Connection.Select(ctx, sql, bindings, true)
 	if err != nil {
 		return nil, fmt.Errorf("eloquent: selecting from %s: %w", b.model.GetTable(), err)
 	}
@@ -616,17 +616,17 @@ func (b *Builder[T]) FromQuery(g auth.Grant, sql string, bindings []any) (Collec
 
 // Get runs the query and returns the matching models, with their eager
 // loads applied.
-func (b *Builder[T]) Get(g auth.Grant, columns ...any) (Collection[T], error) {
+func (b *Builder[T]) Get(ctx context.Context, g auth.Grant, columns ...any) (Collection[T], error) {
 	prepared, err := b.prepare(g)
 	if err != nil {
 		return nil, err
 	}
-	models, err := prepared.GetModels(g, columns...)
+	models, err := prepared.GetModels(ctx, g, columns...)
 	if err != nil {
 		return nil, err
 	}
 	if len(models) > 0 {
-		if err := prepared.EagerLoadRelations(g, models); err != nil {
+		if err := prepared.EagerLoadRelations(ctx, g, models); err != nil {
 			return nil, err
 		}
 	}
@@ -637,7 +637,7 @@ func (b *Builder[T]) Get(g auth.Grant, columns ...any) (Collection[T], error) {
 //
 // It is already prepared when Get calls it; called on its own it prepares
 // itself, so there is no way to reach the rows without the Grant.
-func (b *Builder[T]) GetModels(g auth.Grant, columns ...any) (Collection[T], error) {
+func (b *Builder[T]) GetModels(ctx context.Context, g auth.Grant, columns ...any) (Collection[T], error) {
 	prepared, err := b.prepare(g)
 	if err != nil {
 		return nil, err
@@ -645,7 +645,7 @@ func (b *Builder[T]) GetModels(g auth.Grant, columns ...any) (Collection[T], err
 	if len(columns) > 0 && prepared.query.Columns == nil {
 		prepared.query.Select(columns...)
 	}
-	rows, err := prepared.runSelect()
+	rows, err := prepared.runSelect(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -673,8 +673,8 @@ func (b *Builder[T]) ApplyAfterQueryCallbacks(result Collection[T]) Collection[T
 // First returns the first row matching the query, or (nil, nil) when there
 // is none: no row is not a failure, and FirstOrFail is the spelling for when
 // it is.
-func (b *Builder[T]) First(g auth.Grant, columns ...any) (*Model[T], error) {
-	models, err := b.Limit(1).Get(g, columns...)
+func (b *Builder[T]) First(ctx context.Context, g auth.Grant, columns ...any) (*Model[T], error) {
+	models, err := b.Limit(1).Get(ctx, g, columns...)
 	if err != nil {
 		return nil, err
 	}
@@ -686,8 +686,8 @@ func (b *Builder[T]) First(g auth.Grant, columns ...any) (*Model[T], error) {
 
 // FirstOrFail returns the first row matching the query, or an error when
 // there is none.
-func (b *Builder[T]) FirstOrFail(g auth.Grant, columns ...any) (*Model[T], error) {
-	model, err := b.First(g, columns...)
+func (b *Builder[T]) FirstOrFail(ctx context.Context, g auth.Grant, columns ...any) (*Model[T], error) {
+	model, err := b.First(ctx, g, columns...)
 	if err != nil {
 		return nil, err
 	}
@@ -699,8 +699,8 @@ func (b *Builder[T]) FirstOrFail(g auth.Grant, columns ...any) (*Model[T], error
 
 // FirstOr returns the first row matching the query, or what callback makes
 // when there is none.
-func (b *Builder[T]) FirstOr(g auth.Grant, callback func() (*Model[T], error), columns ...any) (*Model[T], error) {
-	model, err := b.First(g, columns...)
+func (b *Builder[T]) FirstOr(ctx context.Context, g auth.Grant, callback func() (*Model[T], error), columns ...any) (*Model[T], error) {
+	model, err := b.First(ctx, g, columns...)
 	if err != nil {
 		return nil, err
 	}
@@ -711,14 +711,14 @@ func (b *Builder[T]) FirstOr(g auth.Grant, callback func() (*Model[T], error), c
 }
 
 // FirstWhere adds a where clause and returns the first matching row.
-func (b *Builder[T]) FirstWhere(g auth.Grant, column any, args ...any) (*Model[T], error) {
-	return b.Where(column, args...).First(g)
+func (b *Builder[T]) FirstWhere(ctx context.Context, g auth.Grant, column any, args ...any) (*Model[T], error) {
+	return b.Where(column, args...).First(ctx, g)
 }
 
 // Sole returns the row matching the query, and fails unless it is the only
 // one.
-func (b *Builder[T]) Sole(g auth.Grant, columns ...any) (*Model[T], error) {
-	models, err := b.Limit(2).Get(g, columns...)
+func (b *Builder[T]) Sole(ctx context.Context, g auth.Grant, columns ...any) (*Model[T], error) {
+	models, err := b.Limit(2).Get(ctx, g, columns...)
 	if err != nil {
 		return nil, err
 	}
@@ -734,23 +734,23 @@ func (b *Builder[T]) Sole(g auth.Grant, columns ...any) (*Model[T], error) {
 
 // Find returns the row with the given primary key, or the rows for a slice
 // of keys.
-func (b *Builder[T]) Find(g auth.Grant, id any, columns ...any) (*Model[T], error) {
+func (b *Builder[T]) Find(ctx context.Context, g auth.Grant, id any, columns ...any) (*Model[T], error) {
 	if ids, ok := id.([]any); ok {
-		models, err := b.FindMany(g, ids, columns...)
+		models, err := b.FindMany(ctx, g, ids, columns...)
 		if err != nil || len(models) == 0 {
 			return nil, err
 		}
 		return models[0], nil
 	}
-	return b.WhereKey(id).First(g, columns...)
+	return b.WhereKey(id).First(ctx, g, columns...)
 }
 
 // FindMany returns the rows matching any of ids.
-func (b *Builder[T]) FindMany(g auth.Grant, ids []any, columns ...any) (Collection[T], error) {
+func (b *Builder[T]) FindMany(ctx context.Context, g auth.Grant, ids []any, columns ...any) (Collection[T], error) {
 	if len(ids) == 0 {
 		return Collection[T]{}, nil
 	}
-	return b.WhereKey(ids).Get(g, columns...)
+	return b.WhereKey(ids).Get(ctx, g, columns...)
 }
 
 // FindOrFail returns the row with the given primary key, or an error when
@@ -758,9 +758,9 @@ func (b *Builder[T]) FindMany(g auth.Grant, ids []any, columns ...any) (Collecti
 //
 // Given a list it also fails when one id is missing: asking for three rows
 // and getting two is not a shorter result, it is a wrong one.
-func (b *Builder[T]) FindOrFail(g auth.Grant, id any, columns ...any) (*Model[T], error) {
+func (b *Builder[T]) FindOrFail(ctx context.Context, g auth.Grant, id any, columns ...any) (*Model[T], error) {
 	if ids, ok := id.([]any); ok {
-		models, err := b.FindMany(g, ids, columns...)
+		models, err := b.FindMany(ctx, g, ids, columns...)
 		if err != nil {
 			return nil, err
 		}
@@ -769,7 +769,7 @@ func (b *Builder[T]) FindOrFail(g auth.Grant, id any, columns ...any) (*Model[T]
 		}
 		return models[0], nil
 	}
-	model, err := b.Find(g, id, columns...)
+	model, err := b.Find(ctx, g, id, columns...)
 	if err != nil {
 		return nil, err
 	}
@@ -781,8 +781,8 @@ func (b *Builder[T]) FindOrFail(g auth.Grant, id any, columns ...any) (*Model[T]
 
 // FindOrNew returns the row with the given primary key, or a new unsaved
 // model when there is none.
-func (b *Builder[T]) FindOrNew(g auth.Grant, id any, columns ...any) (*Model[T], error) {
-	model, err := b.Find(g, id, columns...)
+func (b *Builder[T]) FindOrNew(ctx context.Context, g auth.Grant, id any, columns ...any) (*Model[T], error) {
+	model, err := b.Find(ctx, g, id, columns...)
 	if err != nil {
 		return nil, err
 	}
@@ -794,8 +794,8 @@ func (b *Builder[T]) FindOrNew(g auth.Grant, id any, columns ...any) (*Model[T],
 
 // FirstOrNew returns the first row matching attributes, or a new unsaved
 // model built from attributes and values when there is none.
-func (b *Builder[T]) FirstOrNew(g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
-	model, err := b.clone().whereAll(attributes).First(g)
+func (b *Builder[T]) FirstOrNew(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+	model, err := b.clone().whereAll(attributes).First(ctx, g)
 	if err != nil {
 		return nil, err
 	}
@@ -807,15 +807,15 @@ func (b *Builder[T]) FirstOrNew(g auth.Grant, attributes, values map[string]any)
 
 // FirstOrCreate returns the first row matching attributes, or creates and
 // returns one from attributes and values when there is none.
-func (b *Builder[T]) FirstOrCreate(g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
-	model, err := b.clone().whereAll(attributes).First(g)
+func (b *Builder[T]) FirstOrCreate(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+	model, err := b.clone().whereAll(attributes).First(ctx, g)
 	if err != nil {
 		return nil, err
 	}
 	if model != nil {
 		return model, nil
 	}
-	return b.CreateOrFirst(g, attributes, values)
+	return b.CreateOrFirst(ctx, g, attributes, values)
 }
 
 // CreateOrFirst inserts a row from attributes and values, and if a unique
@@ -824,12 +824,12 @@ func (b *Builder[T]) FirstOrCreate(g auth.Grant, attributes, values map[string]a
 // Nothing here classifies a driver error yet, so any insert failure sends it
 // looking for the row, and the insert error is returned when there is none
 // -- which keeps the race safe and never swallows a real failure.
-func (b *Builder[T]) CreateOrFirst(g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
-	model, err := b.Create(g, mergeMaps(attributes, values))
+func (b *Builder[T]) CreateOrFirst(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+	model, err := b.Create(ctx, g, mergeMaps(attributes, values))
 	if err == nil {
 		return model, nil
 	}
-	existing, findErr := b.clone().whereAll(attributes).First(g)
+	existing, findErr := b.clone().whereAll(attributes).First(ctx, g)
 	if findErr != nil || existing == nil {
 		return nil, err
 	}
@@ -838,8 +838,8 @@ func (b *Builder[T]) CreateOrFirst(g auth.Grant, attributes, values map[string]a
 
 // UpdateOrCreate finds or creates a row matching attributes, then fills it
 // with values and saves it.
-func (b *Builder[T]) UpdateOrCreate(g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
-	model, err := b.FirstOrCreate(g, attributes, values)
+func (b *Builder[T]) UpdateOrCreate(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+	model, err := b.FirstOrCreate(ctx, g, attributes, values)
 	if err != nil {
 		return nil, err
 	}
@@ -849,7 +849,7 @@ func (b *Builder[T]) UpdateOrCreate(g auth.Grant, attributes, values map[string]
 	if err := model.Fill(values); err != nil {
 		return nil, err
 	}
-	if _, err := model.Save(g); err != nil {
+	if _, err := model.Save(ctx, g); err != nil {
 		return nil, err
 	}
 	return model, nil
@@ -864,8 +864,8 @@ func (b *Builder[T]) whereAll(attributes map[string]any) *Builder[T] {
 }
 
 // Value returns one column of the first row matching the query.
-func (b *Builder[T]) Value(g auth.Grant, column string) (any, error) {
-	model, err := b.First(g, column)
+func (b *Builder[T]) Value(ctx context.Context, g auth.Grant, column string) (any, error) {
+	model, err := b.First(ctx, g, column)
 	if err != nil || model == nil {
 		return nil, err
 	}
@@ -874,8 +874,8 @@ func (b *Builder[T]) Value(g auth.Grant, column string) (any, error) {
 
 // ValueOrFail returns one column of the first row matching the query, or an
 // error when there is none.
-func (b *Builder[T]) ValueOrFail(g auth.Grant, column string) (any, error) {
-	model, err := b.FirstOrFail(g, column)
+func (b *Builder[T]) ValueOrFail(ctx context.Context, g auth.Grant, column string) (any, error) {
+	model, err := b.FirstOrFail(ctx, g, column)
 	if err != nil {
 		return nil, err
 	}
@@ -884,8 +884,8 @@ func (b *Builder[T]) ValueOrFail(g auth.Grant, column string) (any, error) {
 
 // SoleValue returns one column of the row matching the query, and fails
 // unless it is the only one.
-func (b *Builder[T]) SoleValue(g auth.Grant, column string) (any, error) {
-	model, err := b.Sole(g, column)
+func (b *Builder[T]) SoleValue(ctx context.Context, g auth.Grant, column string) (any, error) {
+	model, err := b.Sole(ctx, g, column)
 	if err != nil {
 		return nil, err
 	}
@@ -893,8 +893,8 @@ func (b *Builder[T]) SoleValue(g auth.Grant, column string) (any, error) {
 }
 
 // Pluck returns one column of every row matching the query.
-func (b *Builder[T]) Pluck(g auth.Grant, column string) ([]any, error) {
-	models, err := b.Get(g, column)
+func (b *Builder[T]) Pluck(ctx context.Context, g auth.Grant, column string) ([]any, error) {
+	models, err := b.Get(ctx, g, column)
 	if err != nil {
 		return nil, err
 	}
@@ -903,11 +903,11 @@ func (b *Builder[T]) Pluck(g auth.Grant, column string) ([]any, error) {
 
 // Count returns the row count of the query, or the count of columns when
 // given.
-func (b *Builder[T]) Count(g auth.Grant, columns ...any) (int64, error) {
+func (b *Builder[T]) Count(ctx context.Context, g auth.Grant, columns ...any) (int64, error) {
 	if len(columns) == 0 {
 		columns = []any{"*"}
 	}
-	value, err := b.Aggregate(g, "count", columns...)
+	value, err := b.Aggregate(ctx, g, "count", columns...)
 	if err != nil {
 		return 0, err
 	}
@@ -916,7 +916,7 @@ func (b *Builder[T]) Count(g auth.Grant, columns ...any) (int64, error) {
 
 // Aggregate runs function (count, sum, min, max, avg) over columns and
 // returns the result.
-func (b *Builder[T]) Aggregate(g auth.Grant, function string, columns ...any) (any, error) {
+func (b *Builder[T]) Aggregate(ctx context.Context, g auth.Grant, function string, columns ...any) (any, error) {
 	prepared, err := b.prepare(g)
 	if err != nil {
 		return nil, err
@@ -924,22 +924,22 @@ func (b *Builder[T]) Aggregate(g auth.Grant, function string, columns ...any) (a
 	if len(columns) == 0 {
 		columns = []any{"*"}
 	}
-	return prepared.runAggregate(function, columns)
+	return prepared.runAggregate(ctx, function, columns)
 }
 
 // Exists reports whether the query matches any row.
-func (b *Builder[T]) Exists(g auth.Grant) (bool, error) {
-	count, err := b.Count(g)
+func (b *Builder[T]) Exists(ctx context.Context, g auth.Grant) (bool, error) {
+	count, err := b.Count(ctx, g)
 	return count > 0, err
 }
 
 // Create returns a new model, filled with attributes and saved.
-func (b *Builder[T]) Create(g auth.Grant, attributes map[string]any) (*Model[T], error) {
+func (b *Builder[T]) Create(ctx context.Context, g auth.Grant, attributes map[string]any) (*Model[T], error) {
 	instance, err := b.NewModelInstance(attributes)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := instance.Save(g); err != nil {
+	if _, err := instance.Save(ctx, g); err != nil {
 		return nil, err
 	}
 	return instance, nil
@@ -952,7 +952,7 @@ func (b *Builder[T]) Create(g auth.Grant, attributes map[string]any) (*Model[T],
 // what ForceCreate keeps from Create is ForceFill's behavior: an attribute
 // the entity does not declare is carried through as a raw attribute instead
 // of dropped.
-func (b *Builder[T]) ForceCreate(g auth.Grant, attributes map[string]any) (*Model[T], error) {
+func (b *Builder[T]) ForceCreate(ctx context.Context, g auth.Grant, attributes map[string]any) (*Model[T], error) {
 	instance, err := b.model.NewInstance(nil, false)
 	if err != nil {
 		return nil, err
@@ -960,7 +960,7 @@ func (b *Builder[T]) ForceCreate(g auth.Grant, attributes map[string]any) (*Mode
 	if err := instance.ForceFill(mergeMaps(b.pendingAttributes, attributes)); err != nil {
 		return nil, err
 	}
-	if _, err := instance.Save(g); err != nil {
+	if _, err := instance.Save(ctx, g); err != nil {
 		return nil, err
 	}
 	return instance, nil
@@ -971,22 +971,22 @@ func (b *Builder[T]) ForceCreate(g auth.Grant, attributes map[string]any) (*Mode
 // The tenant column is written from the Grant on every row, overwriting
 // whatever the caller put there: the tenant comes from the Grant and from
 // nowhere else.
-func (b *Builder[T]) Insert(g auth.Grant, values ...map[string]any) (bool, error) {
+func (b *Builder[T]) Insert(ctx context.Context, g auth.Grant, values ...map[string]any) (bool, error) {
 	prepared, rows, err := b.prepareWrite(g, values)
 	if err != nil {
 		return false, err
 	}
-	return prepared.runInsert(rows)
+	return prepared.runInsert(ctx, rows)
 }
 
 // InsertGetID inserts values as one new row and returns the value generated
 // for sequence.
-func (b *Builder[T]) InsertGetID(g auth.Grant, values map[string]any, sequence string) (int64, error) {
+func (b *Builder[T]) InsertGetID(ctx context.Context, g auth.Grant, values map[string]any, sequence string) (int64, error) {
 	prepared, rows, err := b.prepareWrite(g, []map[string]any{values})
 	if err != nil {
 		return 0, err
 	}
-	return prepared.runInsertGetID(rows[0], sequence)
+	return prepared.runInsertGetID(ctx, rows[0], sequence)
 }
 
 // prepareWrite is prepare() for a statement that carries values: the Grant is
@@ -1009,12 +1009,12 @@ func (b *Builder[T]) prepareWrite(g auth.Grant, values []map[string]any) (*Build
 
 // Update runs an UPDATE with values over the query as it stands, and
 // returns the number of rows affected.
-func (b *Builder[T]) Update(g auth.Grant, values map[string]any) (int64, error) {
+func (b *Builder[T]) Update(ctx context.Context, g auth.Grant, values map[string]any) (int64, error) {
 	prepared, err := b.prepare(g)
 	if err != nil {
 		return 0, err
 	}
-	return prepared.runUpdate(prepared.addUpdatedAtColumn(values))
+	return prepared.runUpdate(ctx, prepared.addUpdatedAtColumn(values))
 }
 
 // addUpdatedAtColumn adds the updated-at timestamp to values when the model
@@ -1057,7 +1057,7 @@ func tableOf(from any) string {
 // Upsert inserts values, updating the columns in update on any row that
 // conflicts on uniqueBy. With no update columns given, every column is
 // updated.
-func (b *Builder[T]) Upsert(g auth.Grant, values []map[string]any, uniqueBy, update []string) (int64, error) {
+func (b *Builder[T]) Upsert(ctx context.Context, g auth.Grant, values []map[string]any, uniqueBy, update []string) (int64, error) {
 	if len(values) == 0 {
 		return 0, nil
 	}
@@ -1082,19 +1082,19 @@ func (b *Builder[T]) Upsert(g auth.Grant, values []map[string]any, uniqueBy, upd
 			update = append(update, column)
 		}
 	}
-	return prepared.runUpsert(rows, uniqueBy, update)
+	return prepared.runUpsert(ctx, rows, uniqueBy, update)
 }
 
 // Increment adds amount to column, plus any extra columns to set, and
 // returns the number of rows affected.
-func (b *Builder[T]) Increment(g auth.Grant, column string, amount any, extra map[string]any) (int64, error) {
-	return b.incrementOrDecrement(g, column, amount, extra, "+")
+func (b *Builder[T]) Increment(ctx context.Context, g auth.Grant, column string, amount any, extra map[string]any) (int64, error) {
+	return b.incrementOrDecrement(ctx, g, column, amount, extra, "+")
 }
 
 // Decrement subtracts amount from column, plus any extra columns to set, and
 // returns the number of rows affected.
-func (b *Builder[T]) Decrement(g auth.Grant, column string, amount any, extra map[string]any) (int64, error) {
-	return b.incrementOrDecrement(g, column, amount, extra, "-")
+func (b *Builder[T]) Decrement(ctx context.Context, g auth.Grant, column string, amount any, extra map[string]any) (int64, error) {
+	return b.incrementOrDecrement(ctx, g, column, amount, extra, "-")
 }
 
 // incrementOrDecrement is the shared body of Increment and Decrement.
@@ -1103,7 +1103,7 @@ func (b *Builder[T]) Decrement(g auth.Grant, column string, amount any, extra ma
 // the right of an assignment to the column itself. That is why a
 // non-numeric amount is refused: one that came from a request would
 // otherwise be SQL.
-func (b *Builder[T]) incrementOrDecrement(g auth.Grant, column string, amount any, extra map[string]any, sign string) (int64, error) {
+func (b *Builder[T]) incrementOrDecrement(ctx context.Context, g auth.Grant, column string, amount any, extra map[string]any, sign string) (int64, error) {
 	if amount == nil {
 		amount = 1
 	}
@@ -1114,7 +1114,7 @@ func (b *Builder[T]) incrementOrDecrement(g auth.Grant, column string, amount an
 	values := copyMap(extra)
 	wrapped := b.model.Grammar.Wrap(column)
 	values[column] = query.Raw(fmt.Sprintf("%s %s %v", wrapped, sign, amount))
-	return b.Update(g, values)
+	return b.Update(ctx, g, values)
 }
 
 // Delete removes the rows matching the query, or runs the registered
@@ -1122,22 +1122,22 @@ func (b *Builder[T]) incrementOrDecrement(g auth.Grant, column string, amount an
 //
 // A model that soft deletes has an onDelete callback on its builder, so this
 // runs the update the SoftDeletingScope registered instead of a delete.
-func (b *Builder[T]) Delete(g auth.Grant) (int64, error) {
+func (b *Builder[T]) Delete(ctx context.Context, g auth.Grant) (int64, error) {
 	if b.onDelete != nil {
-		return b.onDelete(b, g)
+		return b.onDelete(ctx, b, g)
 	}
 	prepared, err := b.prepare(g)
 	if err != nil {
 		return 0, err
 	}
-	return prepared.runDelete()
+	return prepared.runDelete(ctx)
 }
 
 // ForceDelete removes the row, whatever the scope would have done.
 //
 // It still applies the tenant filter. "Force" is about the soft delete, never
 // about the tenant.
-func (b *Builder[T]) ForceDelete(g auth.Grant) (int64, error) {
+func (b *Builder[T]) ForceDelete(ctx context.Context, g auth.Grant) (int64, error) {
 	// The held error is read here rather than in prepare, because this is one of
 	// the two methods that does not go through prepare. Without this line a
 	// builder invalidated by WithTrashed on a model that does not soft delete,
@@ -1156,26 +1156,26 @@ func (b *Builder[T]) ForceDelete(g auth.Grant) (int64, error) {
 	if err := forced.scopeToTenant(g, tenant); err != nil {
 		return 0, err
 	}
-	return forced.runDelete()
+	return forced.runDelete(ctx)
 }
 
 // OnDelete registers callback as the override Delete runs instead of a
 // plain delete.
-func (b *Builder[T]) OnDelete(callback func(*Builder[T], auth.Grant) (int64, error)) *Builder[T] {
+func (b *Builder[T]) OnDelete(callback func(context.Context, *Builder[T], auth.Grant) (int64, error)) *Builder[T] {
 	b.onDelete = callback
 	return b
 }
 
 // Touch sets column, or the model's updated-at column when none is given, to
 // the current time on every row matching the query.
-func (b *Builder[T]) Touch(g auth.Grant, column ...string) (int64, error) {
+func (b *Builder[T]) Touch(ctx context.Context, g auth.Grant, column ...string) (int64, error) {
 	name := b.model.GetUpdatedAtColumn()
 	if len(column) > 0 && column[0] != "" {
 		name = column[0]
 	} else if !b.model.UsesTimestamps() || name == "" {
 		return 0, nil
 	}
-	return b.Update(g, map[string]any{name: b.model.FreshTimestamp()})
+	return b.Update(ctx, g, map[string]any{name: b.model.FreshTimestamp()})
 }
 
 // With marks relations to eager load.
@@ -1261,21 +1261,21 @@ func (b *Builder[T]) WithoutGlobalScopesExcept(identifiers ...string) *Builder[T
 
 // FindSole returns the row with the given primary key, and fails unless it
 // is the only one.
-func (b *Builder[T]) FindSole(g auth.Grant, id any, columns ...any) (*Model[T], error) {
-	return b.WhereKey(id).Sole(g, columns...)
+func (b *Builder[T]) FindSole(ctx context.Context, g auth.Grant, id any, columns ...any) (*Model[T], error) {
+	return b.WhereKey(id).Sole(ctx, g, columns...)
 }
 
 // TouchQuietly touches the query's rows without firing model events.
-func (b *Builder[T]) TouchQuietly(g auth.Grant, column ...string) (touched int64, err error) {
+func (b *Builder[T]) TouchQuietly(ctx context.Context, g auth.Grant, column ...string) (touched int64, err error) {
 	return touched, b.model.WithoutEvents(func() error {
-		touched, err = b.Touch(g, column...)
+		touched, err = b.Touch(ctx, g, column...)
 		return err
 	})
 }
 
 // EagerLoadRelations loads every top-level relation marked with With, and
 // attaches the matches to models.
-func (b *Builder[T]) EagerLoadRelations(g auth.Grant, models Collection[T]) error {
+func (b *Builder[T]) EagerLoadRelations(ctx context.Context, g auth.Grant, models Collection[T]) error {
 	if len(models) == 0 {
 		return nil
 	}
@@ -1371,7 +1371,7 @@ func (b *Builder[T]) DefaultKeyName() string { return b.model.GetKeyName() }
 //
 // The callback stops the walk by returning false, and stops it with a
 // reason by returning an error.
-func (b *Builder[T]) Chunk(g auth.Grant, count int, callback func(Collection[T], int) (bool, error)) error {
+func (b *Builder[T]) Chunk(ctx context.Context, g auth.Grant, count int, callback func(Collection[T], int) (bool, error)) error {
 	if count < 1 {
 		return fmt.Errorf("eloquent: the chunk size should be at least 1")
 	}
@@ -1395,7 +1395,7 @@ func (b *Builder[T]) Chunk(g auth.Grant, count int, callback func(Collection[T],
 			return nil
 		}
 
-		results, err := b.clone().Offset((page-1)*count + skip).Limit(size).Get(g)
+		results, err := b.clone().Offset((page-1)*count+skip).Limit(size).Get(ctx, g)
 		if err != nil {
 			return err
 		}
@@ -1417,8 +1417,8 @@ func (b *Builder[T]) Chunk(g auth.Grant, count int, callback func(Collection[T],
 
 // Each walks the query count rows at a time, calling callback for every row
 // with its overall index.
-func (b *Builder[T]) Each(g auth.Grant, count int, callback func(*Model[T], int) (bool, error)) error {
-	return b.Chunk(g, count, func(models Collection[T], page int) (bool, error) {
+func (b *Builder[T]) Each(ctx context.Context, g auth.Grant, count int, callback func(*Model[T], int) (bool, error)) error {
+	return b.Chunk(ctx, g, count, func(models Collection[T], page int) (bool, error) {
 		for i, model := range models {
 			keepGoing, err := callback(model, (page-1)*count+i)
 			if err != nil || !keepGoing {
@@ -1432,7 +1432,7 @@ func (b *Builder[T]) Each(g auth.Grant, count int, callback func(*Model[T], int)
 // ChunkById walks the query count rows at a time, ordered and paged by the
 // key rather than by offset, so that a row inserted between two chunks
 // cannot shift the window and hide a row.
-func (b *Builder[T]) ChunkById(g auth.Grant, count int, callback func(Collection[T], int) (bool, error), column ...string) error {
+func (b *Builder[T]) ChunkById(ctx context.Context, g auth.Grant, count int, callback func(Collection[T], int) (bool, error), column ...string) error {
 	if count < 1 {
 		return fmt.Errorf("eloquent: the chunk size should be at least 1")
 	}
@@ -1447,7 +1447,7 @@ func (b *Builder[T]) ChunkById(g auth.Grant, count int, callback func(Collection
 		if lastID != nil {
 			q.Where(b.model.QualifyColumn(name), ">", lastID)
 		}
-		results, err := q.OrderBy(b.model.QualifyColumn(name), "asc").Limit(count).Get(g)
+		results, err := q.OrderBy(b.model.QualifyColumn(name), "asc").Limit(count).Get(ctx, g)
 		if err != nil {
 			return err
 		}
@@ -1476,10 +1476,10 @@ func (b *Builder[T]) ChunkById(g auth.Grant, count int, callback func(Collection
 // It returns a range-over-func iterator directly. The error the walk
 // stopped on is reported through the pointer the caller passes, because an
 // iterator has nowhere else to put one.
-func (b *Builder[T]) Lazy(g auth.Grant, chunkSize int, err *error) func(func(*Model[T]) bool) {
+func (b *Builder[T]) Lazy(ctx context.Context, g auth.Grant, chunkSize int, err *error) func(func(*Model[T]) bool) {
 	return func(yield func(*Model[T]) bool) {
 		stopped := false
-		chunkErr := b.Chunk(g, chunkSize, func(models Collection[T], _ int) (bool, error) {
+		chunkErr := b.Chunk(ctx, g, chunkSize, func(models Collection[T], _ int) (bool, error) {
 			for _, model := range models {
 				if !yield(model) {
 					stopped = true
@@ -1497,9 +1497,9 @@ func (b *Builder[T]) Lazy(g auth.Grant, chunkSize int, err *error) func(func(*Mo
 
 // LazyById returns an iterator over the rows, fetched a chunk at a time and
 // paged by the key rather than by offset.
-func (b *Builder[T]) LazyById(g auth.Grant, chunkSize int, err *error, column ...string) func(func(*Model[T]) bool) {
+func (b *Builder[T]) LazyById(ctx context.Context, g auth.Grant, chunkSize int, err *error, column ...string) func(func(*Model[T]) bool) {
 	return func(yield func(*Model[T]) bool) {
-		chunkErr := b.ChunkById(g, chunkSize, func(models Collection[T], _ int) (bool, error) {
+		chunkErr := b.ChunkById(ctx, g, chunkSize, func(models Collection[T], _ int) (bool, error) {
 			for _, model := range models {
 				if !yield(model) {
 					return false, nil
@@ -1518,9 +1518,9 @@ func (b *Builder[T]) LazyById(g auth.Grant, chunkSize int, err *error, column ..
 // query.Connection hands back the rows it read, so this is a walk over one
 // result set rather than a second way to run a query -- and it stays lazy from
 // the caller's side, which is what the method is for.
-func (b *Builder[T]) Cursor(g auth.Grant, err *error) func(func(*Model[T]) bool) {
+func (b *Builder[T]) Cursor(ctx context.Context, g auth.Grant, err *error) func(func(*Model[T]) bool) {
 	return func(yield func(*Model[T]) bool) {
-		models, getErr := b.Get(g)
+		models, getErr := b.Get(ctx, g)
 		if getErr != nil {
 			if err != nil {
 				*err = getErr

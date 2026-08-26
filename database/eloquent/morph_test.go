@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -22,7 +23,7 @@ func TestLoadMorphLoadsWhatTheTargetsClassAsksFor(t *testing.T) {
 	targetConn.queue()
 	model.SetRelation("commentable", target)
 
-	err := model.LoadMorph(grant(), "commentable", map[string][]string{"user": {"comments"}})
+	err := model.LoadMorph(context.Background(), grant(), "commentable", map[string][]string{"user": {"comments"}})
 	if err == nil {
 		t.Fatal("the relation has no resolver behind it, so the eager load must report that rather than pass silently")
 	}
@@ -38,7 +39,7 @@ func TestLoadMorphIsAnEmptyLoadForAClassWithNoEntry(t *testing.T) {
 	target.Exists = true
 	model.SetRelation("commentable", target)
 
-	if err := model.LoadMorph(grant(), "commentable", map[string][]string{"post": {"comments"}}); err != nil {
+	if err := model.LoadMorph(context.Background(), grant(), "commentable", map[string][]string{"post": {"comments"}}); err != nil {
 		t.Fatalf("a morph class with no entry loads nothing, as $relations[$className] ?? [] does: %v", err)
 	}
 }
@@ -46,7 +47,7 @@ func TestLoadMorphIsAnEmptyLoadForAClassWithNoEntry(t *testing.T) {
 func TestLoadMorphSkipsARelationThatPointsAtNothing(t *testing.T) {
 	model, _ := newUserModel()
 
-	if err := model.LoadMorph(grant(), "commentable", map[string][]string{"user": {"comments"}}); err != nil {
+	if err := model.LoadMorph(context.Background(), grant(), "commentable", map[string][]string{"user": {"comments"}}); err != nil {
 		t.Fatalf("the PHP returns $this when the relation is falsy: %v", err)
 	}
 }
@@ -60,7 +61,7 @@ func TestCollectionLoadMorphWalksEveryModel(t *testing.T) {
 	first.SetRelation("commentable", target)
 	second.SetRelation("commentable", target)
 
-	if err := (Collection[user]{first, second}).LoadMorph(grant(), "commentable", nil); err != nil {
+	if err := (Collection[user]{first, second}).LoadMorph(context.Background(), grant(), "commentable", nil); err != nil {
 		t.Fatalf("LoadMorph: %v", err)
 	}
 }

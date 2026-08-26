@@ -661,7 +661,7 @@ func (r *BelongsToMany) Touch(ctx context.Context, g auth.Grant) error {
 		return nil
 	}
 
-	ids, err := r.AllRelatedIDs(g)
+	ids, err := r.AllRelatedIDs(ctx, g)
 	if err != nil {
 		return err
 	}

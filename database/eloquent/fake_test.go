@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -268,7 +269,7 @@ func (c *testConnection) sqls() []string {
 	return out
 }
 
-func (c *testConnection) Select(sql string, bindings []any, useReadPDO bool) ([]query.Record, error) {
+func (c *testConnection) Select(_ context.Context, sql string, bindings []any, useReadPDO bool) ([]query.Record, error) {
 	c.record(sql, bindings)
 	if len(c.rows) == 0 {
 		return nil, nil
@@ -278,7 +279,7 @@ func (c *testConnection) Select(sql string, bindings []any, useReadPDO bool) ([]
 	return rows, nil
 }
 
-func (c *testConnection) Insert(sql string, bindings []any) (bool, error) {
+func (c *testConnection) Insert(_ context.Context, sql string, bindings []any) (bool, error) {
 	c.record(sql, bindings)
 	if c.failInsert != nil {
 		return false, c.failInsert
@@ -286,17 +287,17 @@ func (c *testConnection) Insert(sql string, bindings []any) (bool, error) {
 	return true, nil
 }
 
-func (c *testConnection) Update(sql string, bindings []any) (int64, error) {
+func (c *testConnection) Update(_ context.Context, sql string, bindings []any) (int64, error) {
 	c.record(sql, bindings)
 	return c.affected, nil
 }
 
-func (c *testConnection) Delete(sql string, bindings []any) (int64, error) {
+func (c *testConnection) Delete(_ context.Context, sql string, bindings []any) (int64, error) {
 	c.record(sql, bindings)
 	return c.affected, nil
 }
 
-func (c *testConnection) Statement(sql string, bindings []any) (bool, error) {
+func (c *testConnection) Statement(_ context.Context, sql string, bindings []any) (bool, error) {
 	c.record(sql, bindings)
 	return true, nil
 }
@@ -308,8 +309,8 @@ func (p *testProcessor) ProcessSelect(q *query.Builder, results []query.Record) 
 	return results
 }
 
-func (p *testProcessor) ProcessInsertGetID(q *query.Builder, sql string, values []any, sequence string) (int64, error) {
-	if _, err := p.conn.Insert(sql, values); err != nil {
+func (p *testProcessor) ProcessInsertGetID(ctx context.Context, q *query.Builder, sql string, values []any, sequence string) (int64, error) {
+	if _, err := p.conn.Insert(context.Background(), sql, values); err != nil {
 		return 0, err
 	}
 	id := p.conn.lastID

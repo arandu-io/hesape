@@ -337,7 +337,7 @@ func TestInsertGetIDReadsTheIdentifierFromTheStatementThatCausedIt(t *testing.T)
 // TestTheBoundConnectionAnswersTheProcessor proves the seam the processor uses.
 func TestTheBoundConnectionAnswersTheProcessor(t *testing.T) {
 	connection := NewConnection(openCountingPool(t), "arandu", "", nil)
-	bound := &boundConnection{connection: connection, ctx: context.Background()}
+	bound := &boundConnection{connection: connection}
 
 	// Nothing inserted yet: it says so rather than answering zero, because a
 	// zero identifier reads like a row.
@@ -345,7 +345,7 @@ func TestTheBoundConnectionAnswersTheProcessor(t *testing.T) {
 		t.Fatal("GetLastInsertID answered before any insert; a zero would read like a row")
 	}
 
-	if _, err := bound.Insert("insert into invoices (total) values (?)", []any{100}); err != nil {
+	if _, err := bound.Insert(context.Background(), "insert into invoices (total) values (?)", []any{100}); err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
 

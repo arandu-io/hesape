@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"reflect"
 	"slices"
 
@@ -128,17 +129,17 @@ func (c Collection[T]) Merge(items Collection[T]) Collection[T] {
 }
 
 // Load eager loads these relations onto every model.
-func (c Collection[T]) Load(g auth.Grant, relations ...string) error {
+func (c Collection[T]) Load(ctx context.Context, g auth.Grant, relations ...string) error {
 	if len(c) == 0 || len(relations) == 0 {
 		return nil
 	}
 	q := c.First().NewQueryWithoutRelationships().With(relations...)
-	return q.EagerLoadRelations(g, c)
+	return q.EagerLoadRelations(ctx, g, c)
 }
 
 // LoadMissing eager loads these relations onto every model, skipping the
 // ones already loaded.
-func (c Collection[T]) LoadMissing(g auth.Grant, relations ...string) error {
+func (c Collection[T]) LoadMissing(ctx context.Context, g auth.Grant, relations ...string) error {
 	if len(c) == 0 {
 		return nil
 	}
@@ -152,7 +153,7 @@ func (c Collection[T]) LoadMissing(g auth.Grant, relations ...string) error {
 		if len(missing) == 0 {
 			continue
 		}
-		if err := missing.Load(g, relation); err != nil {
+		if err := missing.Load(ctx, g, relation); err != nil {
 			return err
 		}
 	}
@@ -165,12 +166,12 @@ func (c Collection[T]) LoadMissing(g auth.Grant, relations ...string) error {
 // It reads the aggregate columns for the keys already in hand and force
 // fills them onto the models. The columns are not declared on the entity,
 // so they land as raw attributes.
-func (c Collection[T]) LoadAggregate(g auth.Grant, relations []string, column, function string) error {
+func (c Collection[T]) LoadAggregate(ctx context.Context, g auth.Grant, relations []string, column, function string) error {
 	if len(c) == 0 || len(relations) == 0 {
 		return nil
 	}
 	first := c.First()
-	rows, err := first.NewModelQuery().loadAggregateModels(g, c.ModelKeys(), relations, column, function)
+	rows, err := first.NewModelQuery().loadAggregateModels(ctx, g, c.ModelKeys(), relations, column, function)
 	if err != nil {
 		return err
 	}
@@ -205,39 +206,39 @@ func (c Collection[T]) LoadAggregate(g auth.Grant, relations []string, column, f
 }
 
 // LoadCount loads the count of each relation onto every model.
-func (c Collection[T]) LoadCount(g auth.Grant, relations ...string) error {
-	return c.LoadAggregate(g, relations, "*", "count")
+func (c Collection[T]) LoadCount(ctx context.Context, g auth.Grant, relations ...string) error {
+	return c.LoadAggregate(ctx, g, relations, "*", "count")
 }
 
 // LoadMax loads the max of column over each relation onto every model.
-func (c Collection[T]) LoadMax(g auth.Grant, relations []string, column string) error {
-	return c.LoadAggregate(g, relations, column, "max")
+func (c Collection[T]) LoadMax(ctx context.Context, g auth.Grant, relations []string, column string) error {
+	return c.LoadAggregate(ctx, g, relations, column, "max")
 }
 
 // LoadMin loads the min of column over each relation onto every model.
-func (c Collection[T]) LoadMin(g auth.Grant, relations []string, column string) error {
-	return c.LoadAggregate(g, relations, column, "min")
+func (c Collection[T]) LoadMin(ctx context.Context, g auth.Grant, relations []string, column string) error {
+	return c.LoadAggregate(ctx, g, relations, column, "min")
 }
 
 // LoadSum loads the sum of column over each relation onto every model.
-func (c Collection[T]) LoadSum(g auth.Grant, relations []string, column string) error {
-	return c.LoadAggregate(g, relations, column, "sum")
+func (c Collection[T]) LoadSum(ctx context.Context, g auth.Grant, relations []string, column string) error {
+	return c.LoadAggregate(ctx, g, relations, column, "sum")
 }
 
 // LoadAvg loads the average of column over each relation onto every model.
-func (c Collection[T]) LoadAvg(g auth.Grant, relations []string, column string) error {
-	return c.LoadAggregate(g, relations, column, "avg")
+func (c Collection[T]) LoadAvg(ctx context.Context, g auth.Grant, relations []string, column string) error {
+	return c.LoadAggregate(ctx, g, relations, column, "avg")
 }
 
 // LoadExists loads whether each relation exists onto every model.
-func (c Collection[T]) LoadExists(g auth.Grant, relations ...string) error {
-	return c.LoadAggregate(g, relations, "*", "exists")
+func (c Collection[T]) LoadExists(ctx context.Context, g auth.Grant, relations ...string) error {
+	return c.LoadAggregate(ctx, g, relations, "*", "exists")
 }
 
 // Fresh returns the same rows, read again.
 //
 // A model that has since been deleted drops out of the result.
-func (c Collection[T]) Fresh(g auth.Grant, with ...string) (Collection[T], error) {
+func (c Collection[T]) Fresh(ctx context.Context, g auth.Grant, with ...string) (Collection[T], error) {
 	if len(c) == 0 {
 		return Collection[T]{}, nil
 	}
@@ -245,7 +246,7 @@ func (c Collection[T]) Fresh(g auth.Grant, with ...string) (Collection[T], error
 	fresh, err := first.NewQueryWithoutScopes().
 		With(with...).
 		WhereKey(c.ModelKeys()).
-		Get(g)
+		Get(ctx, g)
 	if err != nil {
 		return nil, err
 	}
@@ -393,9 +394,9 @@ func (c Collection[T]) ToArray() []map[string]any {
 
 // Push calls Model.Push on every model, which is what makes a loaded
 // relation pushable.
-func (c Collection[T]) Push(g auth.Grant) (bool, error) {
+func (c Collection[T]) Push(ctx context.Context, g auth.Grant) (bool, error) {
 	for _, model := range c {
-		pushed, err := model.Push(g)
+		pushed, err := model.Push(ctx, g)
 		if err != nil || !pushed {
 			return false, err
 		}

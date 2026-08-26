@@ -427,7 +427,7 @@ func (b *Builder) Cursor(ctx context.Context, g auth.Grant) iter.Seq2[Record, er
 			return
 		}
 
-		rows, err := connection.Cursor(query.ToSQL(), query.GetBindings(), !query.UsingWritePDO())
+		rows, err := connection.Cursor(ctx, query.ToSQL(), query.GetBindings(), !query.UsingWritePDO())
 		if err != nil {
 			yield(nil, err)
 			return

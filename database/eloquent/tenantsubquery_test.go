@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -78,7 +79,7 @@ func (db *evalDB) resolve(text string) (*query.Builder, bool) {
 
 // Select implements query.Connection: the statement is a handle, and the
 // query it names is evaluated against the seeded rows.
-func (db *evalDB) Select(statement string, bindings []any, useReadPDO bool) ([]query.Record, error) {
+func (db *evalDB) Select(_ context.Context, statement string, bindings []any, useReadPDO bool) ([]query.Record, error) {
 	q, ok := db.resolve(statement)
 	if !ok {
 		return nil, fmt.Errorf("evalDB: %q is not a query this grammar compiled", statement)
@@ -86,10 +87,10 @@ func (db *evalDB) Select(statement string, bindings []any, useReadPDO bool) ([]q
 	return db.evaluate(q, nil)
 }
 
-func (db *evalDB) Insert(string, []any) (bool, error)  { return true, nil }
-func (db *evalDB) Update(string, []any) (int64, error) { return 0, nil }
-func (db *evalDB) Delete(string, []any) (int64, error) { return 0, nil }
-func (db *evalDB) Statement(string, []any) (bool, error) {
+func (db *evalDB) Insert(context.Context, string, []any) (bool, error)  { return true, nil }
+func (db *evalDB) Update(context.Context, string, []any) (int64, error) { return 0, nil }
+func (db *evalDB) Delete(context.Context, string, []any) (int64, error) { return 0, nil }
+func (db *evalDB) Statement(context.Context, string, []any) (bool, error) {
 	return true, nil
 }
 
@@ -514,7 +515,7 @@ func (evalProcessor) ProcessSelect(q *query.Builder, results []query.Record) []q
 	return results
 }
 
-func (evalProcessor) ProcessInsertGetID(q *query.Builder, sql string, values []any, sequence string) (int64, error) {
+func (evalProcessor) ProcessInsertGetID(ctx context.Context, q *query.Builder, sql string, values []any, sequence string) (int64, error) {
 	return 0, nil
 }
 
@@ -575,7 +576,7 @@ func acme() auth.Grant { return auth.SystemGrant("user.list", "acme") }
 func TestWithCountCountsOnlyTheGrantsTenant(t *testing.T) {
 	model, _ := twoTenants(t)
 
-	models, err := model.NewQuery().WithCount("posts").Get(acme())
+	models, err := model.NewQuery().WithCount("posts").Get(context.Background(), acme())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -601,7 +602,7 @@ func TestWithCountCountsOnlyTheGrantsTenant(t *testing.T) {
 func TestWithSumSumsOnlyTheGrantsTenant(t *testing.T) {
 	model, _ := twoTenants(t)
 
-	models, err := model.NewQuery().WithSum("orders", "total").Get(acme())
+	models, err := model.NewQuery().WithSum("orders", "total").Get(context.Background(), acme())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -625,7 +626,7 @@ func TestWithAggregateScopesEveryFunction(t *testing.T) {
 		t.Run(tc.function, func(t *testing.T) {
 			model, _ := twoTenants(t)
 
-			models, err := model.NewQuery().WithAggregate([]string{"orders"}, "total", tc.function).Get(acme())
+			models, err := model.NewQuery().WithAggregate([]string{"orders"}, "total", tc.function).Get(context.Background(), acme())
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
@@ -647,7 +648,7 @@ func TestWithExistsAsksOnlyAboutTheGrantsTenant(t *testing.T) {
 	// posts for.
 	db.seed("posts", map[string]any{"id": int64(15), "user_id": int64(2), "tenant_id": "globex", "published": true})
 
-	models, err := model.NewQuery().WithExists("posts").Get(acme())
+	models, err := model.NewQuery().WithExists("posts").Get(context.Background(), acme())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -672,7 +673,7 @@ func TestWhereHasFiltersByTheGrantsTenantsRows(t *testing.T) {
 	model, db := twoTenants(t)
 	db.seed("posts", map[string]any{"id": int64(15), "user_id": int64(2), "tenant_id": "globex", "published": true})
 
-	models, err := model.NewQuery().WhereHas("posts", nil).Get(acme())
+	models, err := model.NewQuery().WhereHas("posts", nil).Get(context.Background(), acme())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -693,7 +694,7 @@ func TestWhereHasWithAConstraintScopesTheConstrainedSubquery(t *testing.T) {
 
 	models, err := model.NewQuery().WhereHasCount("posts", func(sub *query.Builder) {
 		sub.Where("published", "=", true)
-	}, ">=", 2).Get(acme())
+	}, ">=", 2).Get(context.Background(), acme())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -709,7 +710,7 @@ func TestWhereHasWithAConstraintScopesTheConstrainedSubquery(t *testing.T) {
 func TestHasWithACountComparesOnlyTheGrantsTenantsRows(t *testing.T) {
 	model, _ := twoTenants(t)
 
-	models, err := model.NewQuery().Has("posts", ">", 2, "and", nil).Get(acme())
+	models, err := model.NewQuery().Has("posts", ">", 2, "and", nil).Get(context.Background(), acme())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -717,7 +718,7 @@ func TestHasWithACountComparesOnlyTheGrantsTenantsRows(t *testing.T) {
 		t.Fatalf("has > 2 returned %d users, want none -- only globex has more than two posts on that user id", len(models))
 	}
 
-	models, err = model.NewQuery().Has("posts", ">", 1, "and", nil).Get(acme())
+	models, err = model.NewQuery().Has("posts", ">", 1, "and", nil).Get(context.Background(), acme())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -733,7 +734,7 @@ func TestWhereDoesntHaveAsksAboutTheGrantsTenantsRows(t *testing.T) {
 	model, db := twoTenants(t)
 	db.seed("posts", map[string]any{"id": int64(15), "user_id": int64(2), "tenant_id": "globex", "published": true})
 
-	models, err := model.NewQuery().WhereDoesntHave("posts", nil).Get(acme())
+	models, err := model.NewQuery().WhereDoesntHave("posts", nil).Get(context.Background(), acme())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -767,7 +768,7 @@ func TestEveryRelationSubqueryNamesTheTenantColumn(t *testing.T) {
 			withPostsAndOrders(model)
 			conn.queue()
 
-			if _, err := tc.build(model.NewQuery()).Get(acme()); err != nil {
+			if _, err := tc.build(model.NewQuery()).Get(context.Background(), acme()); err != nil {
 				t.Fatalf("Get: %v", err)
 			}
 
@@ -814,7 +815,7 @@ func TestAChunkedWalkScopesEachPageOnceAndAnswersTheSame(t *testing.T) {
 	err := model.NewQuery().
 		Where(func(group *Builder[user]) { group.Where("name", "!=", "") }).
 		WithCount("posts").
-		Chunk(acme(), 1, func(models Collection[user], page int) (bool, error) {
+		Chunk(context.Background(), acme(), 1, func(models Collection[user], page int) (bool, error) {
 			pages++
 			for _, m := range models {
 				seen[m.Entity.Name] = m.GetAttribute("posts_count")

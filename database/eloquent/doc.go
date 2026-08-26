@@ -18,7 +18,7 @@
 //	users := eloquent.NewModel[User]("users", conn, grammar, processor)
 //	users.SoftDeletes = true
 //
-//	found, err := users.NewQuery().Where("email", email).First(g)
+//	found, err := users.NewQuery().Where("email", email).First(ctx, g)
 //	if err != nil {
 //		return err
 //	}

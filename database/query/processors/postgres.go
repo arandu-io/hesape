@@ -1,6 +1,7 @@
 package processors
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -33,13 +34,13 @@ func NewPostgresProcessor() *PostgresProcessor { return &PostgresProcessor{} }
 // identifier comes back as a row and the statement runs as a select. It
 // runs against the write connection, because a replica has not seen the
 // row yet.
-func (p *PostgresProcessor) ProcessInsertGetID(q *query.Builder, sql string, values []any, sequence string) (int64, error) {
+func (p *PostgresProcessor) ProcessInsertGetID(ctx context.Context, q *query.Builder, sql string, values []any, sequence string) (int64, error) {
 	connection := q.GetConnection()
 	if connection == nil {
 		return 0, fmt.Errorf("query/processors: the builder has no connection to insert through")
 	}
 
-	results, err := connection.Select(sql, values, false)
+	results, err := connection.Select(ctx, sql, values, false)
 	if err != nil {
 		return 0, err
 	}

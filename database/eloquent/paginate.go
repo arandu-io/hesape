@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -16,7 +17,7 @@ import (
 // caller reads it with pagination.ResolveCurrentPage.
 //
 // perPage of zero means the model's own.
-func (b *Builder[T]) Paginate(g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.LengthAwarePaginator[*Model[T]], error) {
+func (b *Builder[T]) Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.LengthAwarePaginator[*Model[T]], error) {
 	if perPage <= 0 {
 		perPage = b.model.GetPerPage()
 	}
@@ -24,14 +25,14 @@ func (b *Builder[T]) Paginate(g auth.Grant, perPage, page int, opts pagination.O
 		page = 1
 	}
 
-	total, err := b.GetCountForPagination(g)
+	total, err := b.GetCountForPagination(ctx, g)
 	if err != nil {
 		return nil, err
 	}
 
 	items := Collection[T]{}
 	if total > 0 {
-		items, err = b.clone().ForPage(page, perPage).Get(g, columns...)
+		items, err = b.clone().ForPage(page, perPage).Get(ctx, g, columns...)
 		if err != nil {
 			return nil, err
 		}
@@ -41,7 +42,7 @@ func (b *Builder[T]) Paginate(g auth.Grant, perPage, page int, opts pagination.O
 
 // SimplePaginate returns one page and whether there is another, without the
 // count.
-func (b *Builder[T]) SimplePaginate(g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[*Model[T]], error) {
+func (b *Builder[T]) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[*Model[T]], error) {
 	if perPage <= 0 {
 		perPage = b.model.GetPerPage()
 	}
@@ -52,7 +53,7 @@ func (b *Builder[T]) SimplePaginate(g auth.Grant, perPage, page int, opts pagina
 	items, err := b.clone().
 		Offset((page-1)*perPage).
 		Limit(perPage+1).
-		Get(g, columns...)
+		Get(ctx, g, columns...)
 	if err != nil {
 		return nil, err
 	}
@@ -64,10 +65,10 @@ func (b *Builder[T]) SimplePaginate(g auth.Grant, perPage, page int, opts pagina
 //
 // The orders, the limit and the offset come off before the count, because a
 // count with a limit on it counts the page rather than the result set.
-func (b *Builder[T]) GetCountForPagination(g auth.Grant) (int64, error) {
+func (b *Builder[T]) GetCountForPagination(ctx context.Context, g auth.Grant) (int64, error) {
 	counted := b.clone()
 	counted.query = counted.query.CloneWithout("columns", "orders", "limit", "offset")
-	return counted.Count(g)
+	return counted.Count(ctx, g)
 }
 
 // CursorPaginate returns the page after (or before) a boundary named by
@@ -80,7 +81,7 @@ func (b *Builder[T]) GetCountForPagination(g auth.Grant) (int64, error) {
 // cursor is nil for the first page. The columns the query orders by are the
 // cursor's parameters, so every one of them has to be selected -- the cursor is
 // built out of the rows that come back.
-func (b *Builder[T]) CursorPaginate(g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (*pagination.CursorPaginator[*Model[T]], error) {
+func (b *Builder[T]) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (*pagination.CursorPaginator[*Model[T]], error) {
 	if perPage <= 0 {
 		perPage = b.model.GetPerPage()
 	}
@@ -100,7 +101,7 @@ func (b *Builder[T]) CursorPaginate(g auth.Grant, perPage int, cursor *paginatio
 		}
 	}
 
-	items, err := paginated.Limit(perPage+1).Get(g, columns...)
+	items, err := paginated.Limit(perPage+1).Get(ctx, g, columns...)
 	if err != nil {
 		return nil, err
 	}

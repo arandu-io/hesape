@@ -1,6 +1,10 @@
 package eloquent
 
-import "github.com/arandu-io/hesape/auth"
+import (
+	"context"
+
+	"github.com/arandu-io/hesape/auth"
+)
 
 // The reads and writes taken straight off a model -- Find, Create and their
 // neighbours -- forwarded to a fresh builder.
@@ -9,53 +13,53 @@ import "github.com/arandu-io/hesape/auth"
 // what makes Find skip a soft deleted row.
 
 // Find calls Find on a fresh query for the model.
-func (m *Model[T]) Find(g auth.Grant, id any, columns ...any) (*Model[T], error) {
-	return m.NewQuery().Find(g, id, columns...)
+func (m *Model[T]) Find(ctx context.Context, g auth.Grant, id any, columns ...any) (*Model[T], error) {
+	return m.NewQuery().Find(ctx, g, id, columns...)
 }
 
 // FindMany calls FindMany on a fresh query for the model.
-func (m *Model[T]) FindMany(g auth.Grant, ids []any, columns ...any) (Collection[T], error) {
-	return m.NewQuery().FindMany(g, ids, columns...)
+func (m *Model[T]) FindMany(ctx context.Context, g auth.Grant, ids []any, columns ...any) (Collection[T], error) {
+	return m.NewQuery().FindMany(ctx, g, ids, columns...)
 }
 
 // FindOrFail calls FindOrFail on a fresh query for the model.
-func (m *Model[T]) FindOrFail(g auth.Grant, id any, columns ...any) (*Model[T], error) {
-	return m.NewQuery().FindOrFail(g, id, columns...)
+func (m *Model[T]) FindOrFail(ctx context.Context, g auth.Grant, id any, columns ...any) (*Model[T], error) {
+	return m.NewQuery().FindOrFail(ctx, g, id, columns...)
 }
 
 // FindOrNew calls FindOrNew on a fresh query for the model.
-func (m *Model[T]) FindOrNew(g auth.Grant, id any, columns ...any) (*Model[T], error) {
-	return m.NewQuery().FindOrNew(g, id, columns...)
+func (m *Model[T]) FindOrNew(ctx context.Context, g auth.Grant, id any, columns ...any) (*Model[T], error) {
+	return m.NewQuery().FindOrNew(ctx, g, id, columns...)
 }
 
 // First calls First on a fresh query for the model.
-func (m *Model[T]) First(g auth.Grant, columns ...any) (*Model[T], error) {
-	return m.NewQuery().First(g, columns...)
+func (m *Model[T]) First(ctx context.Context, g auth.Grant, columns ...any) (*Model[T], error) {
+	return m.NewQuery().First(ctx, g, columns...)
 }
 
 // FirstOrNew calls FirstOrNew on a fresh query for the model.
-func (m *Model[T]) FirstOrNew(g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
-	return m.NewQuery().FirstOrNew(g, attributes, values)
+func (m *Model[T]) FirstOrNew(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+	return m.NewQuery().FirstOrNew(ctx, g, attributes, values)
 }
 
 // FirstOrCreate calls FirstOrCreate on a fresh query for the model.
-func (m *Model[T]) FirstOrCreate(g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
-	return m.NewQuery().FirstOrCreate(g, attributes, values)
+func (m *Model[T]) FirstOrCreate(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+	return m.NewQuery().FirstOrCreate(ctx, g, attributes, values)
 }
 
 // UpdateOrCreate calls UpdateOrCreate on a fresh query for the model.
-func (m *Model[T]) UpdateOrCreate(g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
-	return m.NewQuery().UpdateOrCreate(g, attributes, values)
+func (m *Model[T]) UpdateOrCreate(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+	return m.NewQuery().UpdateOrCreate(ctx, g, attributes, values)
 }
 
 // Create calls Create on a fresh query for the model.
-func (m *Model[T]) Create(g auth.Grant, attributes map[string]any) (*Model[T], error) {
-	return m.NewQuery().Create(g, attributes)
+func (m *Model[T]) Create(ctx context.Context, g auth.Grant, attributes map[string]any) (*Model[T], error) {
+	return m.NewQuery().Create(ctx, g, attributes)
 }
 
 // ForceCreate calls ForceCreate on a fresh query for the model.
-func (m *Model[T]) ForceCreate(g auth.Grant, attributes map[string]any) (*Model[T], error) {
-	return m.NewQuery().ForceCreate(g, attributes)
+func (m *Model[T]) ForceCreate(ctx context.Context, g auth.Grant, attributes map[string]any) (*Model[T], error) {
+	return m.NewQuery().ForceCreate(ctx, g, attributes)
 }
 
 // With calls With on a fresh query for the model.

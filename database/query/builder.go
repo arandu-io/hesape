@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"strings"
 )
 
@@ -99,21 +100,25 @@ type Builder struct {
 // It is declared here rather than imported from the database package because
 // the interface belongs with its consumer in Go, and because database imports
 // this package: naming it there would close the cycle.
+// Every method takes a context, and it is the request's -- not one the
+// connection was built with. A statement that cannot be cancelled outlives the
+// request that asked for it, and a deadline that stops at the handler is a
+// deadline the database never hears about.
 type Connection interface {
 	// Select runs a select and returns its rows.
-	Select(query string, bindings []any, useReadPDO bool) ([]Record, error)
+	Select(ctx context.Context, query string, bindings []any, useReadPDO bool) ([]Record, error)
 
 	// Insert runs an insert.
-	Insert(query string, bindings []any) (bool, error)
+	Insert(ctx context.Context, query string, bindings []any) (bool, error)
 
 	// Update runs an update and returns the number of rows affected.
-	Update(query string, bindings []any) (int64, error)
+	Update(ctx context.Context, query string, bindings []any) (int64, error)
 
 	// Delete runs a delete and returns the number of rows affected.
-	Delete(query string, bindings []any) (int64, error)
+	Delete(ctx context.Context, query string, bindings []any) (int64, error)
 
 	// Statement runs a statement that returns neither rows nor a count.
-	Statement(query string, bindings []any) (bool, error)
+	Statement(ctx context.Context, query string, bindings []any) (bool, error)
 }
 
 // Processor is the hook that lets a driver adjust results on the way out.
@@ -124,7 +129,7 @@ type Processor interface {
 
 	// ProcessInsertGetID runs an insert and reports the ID of the inserted
 	// row, read back from the named sequence.
-	ProcessInsertGetID(query *Builder, sql string, values []any, sequence string) (int64, error)
+	ProcessInsertGetID(ctx context.Context, query *Builder, sql string, values []any, sequence string) (int64, error)
 }
 
 // bindingOrder is the key order of Bindings. The list is the order the

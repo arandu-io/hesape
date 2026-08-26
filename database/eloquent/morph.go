@@ -1,6 +1,7 @@
 package eloquent
 
 import (
+	"context"
 	"reflect"
 
 	"github.com/arandu-io/hesape/auth"
@@ -25,10 +26,10 @@ type MorphLoadable interface {
 	// morph column.
 	GetMorphClass() string
 	// Load eager loads these relations onto the value.
-	Load(g auth.Grant, relations ...string) error
+	Load(ctx context.Context, g auth.Grant, relations ...string) error
 	// LoadAggregate loads function over column of each relation onto the
 	// value.
-	LoadAggregate(g auth.Grant, relations []string, column, function string) error
+	LoadAggregate(ctx context.Context, g auth.Grant, relations []string, column, function string) error
 }
 
 // LoadMorph eager loads, on the row a polymorphic relation points at, the
@@ -36,52 +37,52 @@ type MorphLoadable interface {
 //
 // relation is the morph relation on this model; relations maps a morph
 // class to what to load on it. A morph class with no entry loads nothing.
-func (m *Model[T]) LoadMorph(g auth.Grant, relation string, relations map[string][]string) error {
+func (m *Model[T]) LoadMorph(ctx context.Context, g auth.Grant, relation string, relations map[string][]string) error {
 	loadable, ok := m.morphTarget(relation)
 	if !ok {
 		return nil
 	}
-	return loadable.Load(g, relations[loadable.GetMorphClass()]...)
+	return loadable.Load(ctx, g, relations[loadable.GetMorphClass()]...)
 }
 
 // LoadMorphAggregate loads function over column of each relation named for
 // the target row's type, on the row a polymorphic relation points at.
-func (m *Model[T]) LoadMorphAggregate(g auth.Grant, relation string, relations map[string][]string, column, function string) error {
+func (m *Model[T]) LoadMorphAggregate(ctx context.Context, g auth.Grant, relation string, relations map[string][]string, column, function string) error {
 	loadable, ok := m.morphTarget(relation)
 	if !ok {
 		return nil
 	}
-	return loadable.LoadAggregate(g, relations[loadable.GetMorphClass()], column, function)
+	return loadable.LoadAggregate(ctx, g, relations[loadable.GetMorphClass()], column, function)
 }
 
 // LoadMorphCount loads the count of each relation named for the target
 // row's type, on the row a polymorphic relation points at.
-func (m *Model[T]) LoadMorphCount(g auth.Grant, relation string, relations map[string][]string) error {
-	return m.LoadMorphAggregate(g, relation, relations, "*", "count")
+func (m *Model[T]) LoadMorphCount(ctx context.Context, g auth.Grant, relation string, relations map[string][]string) error {
+	return m.LoadMorphAggregate(ctx, g, relation, relations, "*", "count")
 }
 
 // LoadMorphMax loads the max of column over each relation named for the
 // target row's type, on the row a polymorphic relation points at.
-func (m *Model[T]) LoadMorphMax(g auth.Grant, relation string, relations map[string][]string, column string) error {
-	return m.LoadMorphAggregate(g, relation, relations, column, "max")
+func (m *Model[T]) LoadMorphMax(ctx context.Context, g auth.Grant, relation string, relations map[string][]string, column string) error {
+	return m.LoadMorphAggregate(ctx, g, relation, relations, column, "max")
 }
 
 // LoadMorphMin loads the min of column over each relation named for the
 // target row's type, on the row a polymorphic relation points at.
-func (m *Model[T]) LoadMorphMin(g auth.Grant, relation string, relations map[string][]string, column string) error {
-	return m.LoadMorphAggregate(g, relation, relations, column, "min")
+func (m *Model[T]) LoadMorphMin(ctx context.Context, g auth.Grant, relation string, relations map[string][]string, column string) error {
+	return m.LoadMorphAggregate(ctx, g, relation, relations, column, "min")
 }
 
 // LoadMorphSum loads the sum of column over each relation named for the
 // target row's type, on the row a polymorphic relation points at.
-func (m *Model[T]) LoadMorphSum(g auth.Grant, relation string, relations map[string][]string, column string) error {
-	return m.LoadMorphAggregate(g, relation, relations, column, "sum")
+func (m *Model[T]) LoadMorphSum(ctx context.Context, g auth.Grant, relation string, relations map[string][]string, column string) error {
+	return m.LoadMorphAggregate(ctx, g, relation, relations, column, "sum")
 }
 
 // LoadMorphAvg loads the average of column over each relation named for the
 // target row's type, on the row a polymorphic relation points at.
-func (m *Model[T]) LoadMorphAvg(g auth.Grant, relation string, relations map[string][]string, column string) error {
-	return m.LoadMorphAggregate(g, relation, relations, column, "avg")
+func (m *Model[T]) LoadMorphAvg(ctx context.Context, g auth.Grant, relation string, relations map[string][]string, column string) error {
+	return m.LoadMorphAggregate(ctx, g, relation, relations, column, "avg")
 }
 
 // morphTarget returns the loaded row a morph relation points at, or nothing
@@ -102,9 +103,9 @@ func (m *Model[T]) morphTarget(relation string) (MorphLoadable, bool) {
 // time -- so the load runs per row instead: the same rows, more queries. A
 // caller on a hot path loads the concrete relation by its type instead,
 // where the grouping is the compiler's.
-func (c Collection[T]) LoadMorph(g auth.Grant, relation string, relations map[string][]string) error {
+func (c Collection[T]) LoadMorph(ctx context.Context, g auth.Grant, relation string, relations map[string][]string) error {
 	for _, model := range c {
-		if err := model.LoadMorph(g, relation, relations); err != nil {
+		if err := model.LoadMorph(ctx, g, relation, relations); err != nil {
 			return err
 		}
 	}
@@ -114,9 +115,9 @@ func (c Collection[T]) LoadMorph(g auth.Grant, relation string, relations map[st
 // LoadMorphCount loads the count of relation for every model in the
 // collection. See LoadMorph for why it is one query per row rather than one
 // per class.
-func (c Collection[T]) LoadMorphCount(g auth.Grant, relation string, relations map[string][]string) error {
+func (c Collection[T]) LoadMorphCount(ctx context.Context, g auth.Grant, relation string, relations map[string][]string) error {
 	for _, model := range c {
-		if err := model.LoadMorphCount(g, relation, relations); err != nil {
+		if err := model.LoadMorphCount(ctx, g, relation, relations); err != nil {
 			return err
 		}
 	}
