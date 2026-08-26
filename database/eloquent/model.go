@@ -20,7 +20,17 @@ import (
 // the package comment before setting TenantColumn to the empty string.
 type Model[T any] struct {
 	// Entity is the row: a struct the compiler checks, not a dynamic map.
-	Entity T
+	//
+	// It is a pointer rather than a value, and that is what lets the
+	// application's own struct embed the model instead of being wrapped by it.
+	// A Model[User] holding a User inside a User that holds a Model[User] is a
+	// type of infinite size, and Go refuses it by name: "invalid recursive
+	// type". A pointer makes the same shape finite.
+	//
+	// Reading through it costs nothing at the call site -- found.Entity.Name is
+	// the same expression it was -- and the model always has one: NewInstance
+	// allocates it, so it is never nil on a model this package built.
+	Entity *T
 
 	// Table is the table name. Empty means the snake-cased plural of the type
 	// name, which is what GetTable falls back to.
@@ -114,6 +124,7 @@ type Model[T any] struct {
 // is no default that leaves the scoping off.
 func NewModel[T any](table string, connection query.Connection, grammar query.Grammar, processor query.Processor) *Model[T] {
 	return &Model[T]{
+		Entity:          new(T),
 		Table:           table,
 		PrimaryKey:      "id",
 		KeyType:         "int",
@@ -189,6 +200,7 @@ func (m *Model[T]) NewInstance(attributes map[string]any, exists bool) (*Model[T
 		Processor:         m.Processor,
 		RelationResolvers: m.RelationResolvers,
 		NamedScopes:       m.NamedScopes,
+		Entity:            new(T),
 		Exists:            exists,
 		hidden:            slices.Clone(m.hidden),
 		visible:           slices.Clone(m.visible),

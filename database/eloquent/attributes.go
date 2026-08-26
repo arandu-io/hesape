@@ -15,7 +15,7 @@ import (
 // withCount alias, a column a migration added and the struct has not caught
 // up with).
 func (m *Model[T]) GetAttributes() map[string]any {
-	entity := reflect.ValueOf(m.Entity)
+	entity := reflect.ValueOf(m.Entity).Elem()
 	out := make(map[string]any, len(fieldsOf(entity.Type()))+len(m.attributes))
 	for _, f := range fieldsOf(entity.Type()) {
 		out[f.column] = valueAt(entity, f)
@@ -34,7 +34,7 @@ func (m *Model[T]) GetAttributes() map[string]any {
 // attribute rather than dropped, because a select the caller wrote has a reason
 // for every column in it.
 func (m *Model[T]) SetRawAttributes(attributes map[string]any, sync bool) error {
-	m.Entity = *new(T)
+	*m.Entity = *new(T)
 	m.attributes = nil
 	if err := m.setAttributes(attributes, true); err != nil {
 		return err
@@ -89,7 +89,7 @@ func (m *Model[T]) SetAttribute(key string, value any) error {
 }
 
 func (m *Model[T]) setAttribute(key string, value any) (bool, error) {
-	entity := reflect.ValueOf(&m.Entity).Elem()
+	entity := reflect.ValueOf(m.Entity).Elem()
 	f, ok := fieldByColumn(entity.Type(), key)
 	if !ok {
 		return false, nil
@@ -112,7 +112,7 @@ func (m *Model[T]) setAttribute(key string, value any) (bool, error) {
 // it would need to elsewhere: a typo like found.Entity.Naem fails to
 // compile, so it never reaches this check at all.
 func (m *Model[T]) GetAttribute(key string) any {
-	entity := reflect.ValueOf(m.Entity)
+	entity := reflect.ValueOf(m.Entity).Elem()
 	if f, ok := fieldByColumn(entity.Type(), key); ok {
 		return valueAt(entity, f)
 	}
