@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/database/model/relations/concerns"
 	"github.com/arandu-io/hesape/database/query"
 	"github.com/arandu-io/hesape/str"
 )
@@ -115,6 +116,10 @@ type Model[T any] struct {
 	hidden  []string
 	visible []string
 	appends []string
+
+	// ref is this model seen through the interface a relation asks for, kept so
+	// that two calls to Ref answer the same value.
+	ref *modelRef[T]
 
 	// touches names the relations whose owner is stamped when this model is
 	// saved. It is empty by default: a save that silently stamped a parent
@@ -746,6 +751,26 @@ func Related[T, R any](m *Model[T], name string) (Collection[R], bool) {
 		return typed, true
 	case *Model[R]:
 		return Collection[R]{typed}, true
+
+	// What a relation loads is erased -- the relations tree holds the narrow
+	// interface, not the typed model -- so the way back is through the adapter.
+	// A ref over another entity reads as not loaded rather than as a panic.
+	case []concerns.Model:
+		out := make(Collection[R], 0, len(typed))
+		for _, one := range typed {
+			model, ok := Unref[R](one)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, model)
+		}
+		return out, true
+	case concerns.Model:
+		model, ok := Unref[R](typed)
+		if !ok {
+			return nil, false
+		}
+		return Collection[R]{model}, true
 	}
 	return nil, false
 }

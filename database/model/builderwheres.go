@@ -97,3 +97,21 @@ func (b *Builder[T]) Min(ctx context.Context, g auth.Grant, column any) (any, er
 func (b *Builder[T]) Max(ctx context.Context, g auth.Grant, column any) (any, error) {
 	return b.Aggregate(ctx, g, "max", column)
 }
+
+// WhereColumn compares two columns.
+func (b *Builder[T]) WhereColumn(first any, args ...any) *Builder[T] {
+	b.query.WhereColumn(first, args...)
+	return b
+}
+
+// Join adds an inner join.
+func (b *Builder[T]) Join(table any, first any, args ...any) *Builder[T] {
+	b.query.Join(table, first, args...)
+	return b
+}
+
+// GroupBy groups the rows.
+func (b *Builder[T]) GroupBy(groups ...any) *Builder[T] {
+	b.query.GroupBy(groups...)
+	return b
+}
