@@ -116,6 +116,11 @@ type Model[T any] struct {
 	visible []string
 	appends []string
 
+	// touches names the relations whose owner is stamped when this model is
+	// saved. It is empty by default: a save that silently stamped a parent
+	// would be a write the caller did not ask for.
+	touches []string
+
 	globalScopes  map[string]Scope[T]
 	events        map[Event][]func(*Model[T]) error
 	muted         bool

@@ -40,8 +40,10 @@ import (
 // (bool, error) here and (int64, error) there; SetTable returns *Model[T] here
 // and nothing there. The adapter absorbs all of it.
 //
-// What it does NOT absorb is a method that does not exist. Four are missing and
-// are marked below.
+// What it does NOT absorb is a method that does not exist. Four were missing and
+// have since been written; the model side of this probe is delegation
+// throughout. What is left in stubs is the builder, whose fourteen chainables
+// are the covariant-return problem the adapter exists to answer.
 
 // modelRef is *Model[T] seen through the interface a relation asks for.
 type modelRef[T any] struct{ m *Model[T] }
@@ -136,19 +138,17 @@ func (r *modelRef[T]) Delete(_ context.Context, g auth.Grant) (int64, error) {
 	return 1, nil
 }
 
-// -- modelRef: the four that genuinely do not exist yet ---------------------
+// -- modelRef: the four that used to be missing -----------------------------
 //
-// These are the whole gap. Everything above is delegation; these four are
-// methods Model[T] does not have, and W0.4 writes them.
+// They were the whole gap on this side, and they are on the model now:
+// relationsurface.go. Every method of concerns.Model is delegation.
 
-func (r *modelRef[T]) UnsetAttribute(string) {
-	panic("W0.4: Model[T].UnsetAttribute does not exist yet")
-}
-func (r *modelRef[T]) IsRelation(string) bool { panic("W0.4: Model[T].IsRelation does not exist yet") }
-func (r *modelRef[T]) Touches(string) bool    { panic("W0.4: Model[T].Touches does not exist yet") }
+func (r *modelRef[T]) UnsetAttribute(key string)  { r.m.UnsetAttribute(key) }
+func (r *modelRef[T]) IsRelation(key string) bool { return r.m.IsRelation(key) }
+func (r *modelRef[T]) Touches(rel string) bool    { return r.m.Touches(rel) }
 
-func (r *modelRef[T]) Touch(context.Context, auth.Grant) error {
-	panic("W0.4: Model[T].Touch does not exist yet -- Builder[T].Touch does")
+func (r *modelRef[T]) Touch(ctx context.Context, g auth.Grant) error {
+	return r.m.Touch(ctx, g)
 }
 
 // -- builderRef -------------------------------------------------------------
