@@ -1,23 +1,35 @@
-// Package factories builds model instances for tests and seeds: Factory,
-// Sequence and the relationship factories.
+// Package factories builds rows of an entity for tests and for seeding.
 //
-// # A factory registers itself; it is not found by name
+// A factory has one job: to answer "a valid row of this kind, please" so that a
+// test can say only the part it cares about. The default state lives in the
+// definition; everything a caller wants different is a state on top of it.
 //
-// Go has no type reachable from a name at run time and no file that becomes a
-// type by being read, so a factory registers under its model's name when it is
-// constructed, and FactoryForModel reads that registry.
+//	users := factories.For(Users, func(f faker.Faker) User {
+//		return User{Name: f.Name(), Email: f.Unique().Email(), Active: true}
+//	})
 //
-// The consequence a caller sees is that the factory's package has to be
-// imported. That is the same import a migration needs, at link time rather than
-// run time, and the error from FactoryForModel says so by name. The count and
-// state to apply are Count and State on the factory it answers.
+//	suspended, err := users.Count(3).
+//		State(func(u *User) { u.Active = false }).
+//		Create(ctx, g)
 //
-// # Every create takes the Grant
+// # It is typed, and that is the difference worth naming
 //
-// A factory writes rows, and in tests it writes a great many of them. Create,
-// CreateMany, CreateOne and Insert all take a context and an auth.Grant, and the
-// rows land in auth.Tenant(g) like any other write. A seeded fixture that
-// belonged to no tenant would be invisible to every scoped read that came
-// looking for it, which is a failing test whose cause is three layers from the
-// assertion.
+// The definition returns a T. A state takes a *T. What comes back is a T. A
+// column the entity does not declare does not compile, where the same mistake
+// against a map of strings is a key that is silently dropped and a row that is
+// quietly wrong.
+//
+// This package used to hold the other shape -- a factory over map[string]any,
+// with relationships resolved by a runtime type switch over a caller-supplied
+// closure. It was a faithful port and it had no caller, no test, and a contract
+// the model could not satisfy. It is in the history, and what replaced it is
+// here.
+//
+// # Make does not take a Grant, and Create does
+//
+// Make touches nothing, so a Grant on it would authorize nothing -- a parameter
+// that looks like enforcement and enforces nothing teaches the opposite of what
+// the Grant means everywhere else. Create writes, so it takes one, and the
+// tenant comes off it like every other write. A factory is not a way around the
+// policy that guards the table.
 package factories
