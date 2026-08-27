@@ -288,6 +288,34 @@ h.Make(password, hashing.Options{Memory: 65536, Time: 4})
 hashing.Make(password)
 ```
 
+## Unreleased — the unsigned verification link is gone
+
+```
+- package github.com/arandu-io/hesape/auth/notifications: removed
+```
+
+Both halves described a flow this collection does not have.
+
+`ResetPassword` carried a `Token` "minted and stored by the password broker" and
+an `Expire` the broker was to fill in — a broker, a repository and a token table
+that were removed in the same release. Its own comment said the lifetime is only
+a sentence in the message because the token repository is what refuses an old
+token.
+
+`VerifyEmail` was the second token model, and it was the unsigned one:
+`/verify-email/{id}/{sha1(address)}`. The package's own doc said of it that a
+verification link **must** be signed, and that without one *"anybody who knows
+somebody's e-mail address can confirm it for them"* — a built-in behaviour
+documented as unusable, next to a signed flow that already works.
+
+**Nothing you have issued stops working.** The package had no importer outside its
+own test, so no link in anybody's inbox came from it. The live flow signs
+`len(id):id|address` and is unchanged; a link minted before this release was
+verified against the code after it, byte for byte.
+
+What stays, because none of it is a token model: the `MustVerifyEmail` column and
+its check, the listener that sends, and the middleware that gates.
+
 ## Unreleased — one password reset flow
 
 `hesape/auth/passwords` and `hesape/auth/console` are removed.
