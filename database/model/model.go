@@ -77,6 +77,10 @@ type Model[T any] struct {
 	UpdatedAtColumn string
 	DeletedAtColumn string
 
+	// embedded is where Model[T] sits inside T, plus two, so that the zero
+	// value means "not resolved yet". See entityIndex.
+	embedded int
+
 	// Exists says whether the row exists in the database.
 	Exists bool
 
@@ -200,7 +204,17 @@ func (m *Model[T]) QualifyColumns(columns []string) []string {
 // NewInstance returns a fresh model of the same shape, on the same table and
 // connection, filled with the given attributes.
 func (m *Model[T]) NewInstance(attributes map[string]any, exists bool) (*Model[T], error) {
-	instance := &Model[T]{
+	// The entity first, and the model from inside it when T embeds one: the
+	// model and the entity are then one allocation, which is what lets
+	// user.Save() see the fields the caller just set on user. See embed.go.
+	index := m.entityIndex()
+	entity := new(T)
+	instance := modelIn(entity, index)
+	if instance == nil {
+		instance = &Model[T]{}
+	}
+	*instance = Model[T]{
+		embedded:          m.embedded,
 		Table:             m.Table,
 		PrimaryKey:        m.PrimaryKey,
 		KeyType:           m.KeyType,
@@ -218,7 +232,7 @@ func (m *Model[T]) NewInstance(attributes map[string]any, exists bool) (*Model[T
 		Processor:         m.Processor,
 		RelationResolvers: m.RelationResolvers,
 		NamedScopes:       m.NamedScopes,
-		Entity:            new(T),
+		Entity:            entity,
 		Exists:            exists,
 		hidden:            slices.Clone(m.hidden),
 		visible:           slices.Clone(m.visible),
@@ -253,6 +267,14 @@ func (m *Model[T]) NewFromBuilder(attributes map[string]any) (*Model[T], error) 
 // A model that exists and is clean is a true with no statement: there is
 // nothing to write.
 func (m *Model[T]) Save(ctx context.Context, g auth.Grant) (bool, error) {
+	// A value the framework did not build has no connection to write through,
+	// and no back pointer to the entity it is inside. It is the literal case,
+	// and it says so rather than reporting a write that never happened -- see
+	// ErrUnwired.
+	if err := m.wired(); err != nil {
+		return false, err
+	}
+
 	if err := m.fireModelEvent(Saving); err != nil {
 		return false, err
 	}
@@ -308,6 +330,14 @@ func (m *Model[T]) SaveOrFail(ctx context.Context, g auth.Grant) (bool, error) {
 // Update fills the model with attributes, then saves it. A model that does
 // not exist yet is false and no statement.
 func (m *Model[T]) Update(ctx context.Context, g auth.Grant, attributes map[string]any) (bool, error) {
+	// A value the framework did not build has no connection to write through,
+	// and no back pointer to the entity it is inside. It is the literal case,
+	// and it says so rather than reporting a write that never happened -- see
+	// ErrUnwired.
+	if err := m.wired(); err != nil {
+		return false, err
+	}
+
 	if !m.Exists {
 		return false, nil
 	}
@@ -341,6 +371,14 @@ func (m *Model[T]) UpdateOrFail(ctx context.Context, g auth.Grant, attributes ma
 // A loaded relation is held as an any, so Push recurses into whatever
 // implements Pushable -- *Model[R] and Collection[R] both do.
 func (m *Model[T]) Push(ctx context.Context, g auth.Grant) (bool, error) {
+	// A value the framework did not build has no connection to write through,
+	// and no back pointer to the entity it is inside. It is the literal case,
+	// and it says so rather than reporting a write that never happened -- see
+	// ErrUnwired.
+	if err := m.wired(); err != nil {
+		return false, err
+	}
+
 	saved, err := m.Save(ctx, g)
 	if err != nil || !saved {
 		return saved, err
@@ -486,6 +524,14 @@ func (m *Model[T]) getKeyForSaveQuery() any {
 // A model that does not exist returns false with no error: a Go bool has no
 // third state, and "there was nothing to delete" is not a failure.
 func (m *Model[T]) Delete(ctx context.Context, g auth.Grant) (bool, error) {
+	// A value the framework did not build has no connection to write through,
+	// and no back pointer to the entity it is inside. It is the literal case,
+	// and it says so rather than reporting a write that never happened -- see
+	// ErrUnwired.
+	if err := m.wired(); err != nil {
+		return false, err
+	}
+
 	if m.GetKeyName() == "" {
 		return false, ErrNoKey
 	}
@@ -567,6 +613,14 @@ func (m *Model[T]) Fresh(ctx context.Context, g auth.Grant, with ...string) (*Mo
 
 // Refresh reads the same row again, into this model.
 func (m *Model[T]) Refresh(ctx context.Context, g auth.Grant) error {
+	// A value the framework did not build has no connection to write through,
+	// and no back pointer to the entity it is inside. It is the literal case,
+	// and it says so rather than reporting a write that never happened -- see
+	// ErrUnwired.
+	if err := m.wired(); err != nil {
+		return err
+	}
+
 	if !m.Exists {
 		return nil
 	}

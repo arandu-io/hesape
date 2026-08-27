@@ -183,6 +183,14 @@ func (m *Model[T]) ForceDestroy(ctx context.Context, g auth.Grant, ids ...any) (
 // Restore clears the deleted_at column and saves the model: the row comes
 // back.
 func (m *Model[T]) Restore(ctx context.Context, g auth.Grant) (bool, error) {
+	// A value the framework did not build has no connection to write through,
+	// and no back pointer to the entity it is inside. It is the literal case,
+	// and it says so rather than reporting a write that never happened -- see
+	// ErrUnwired.
+	if err := m.wired(); err != nil {
+		return false, err
+	}
+
 	if !m.SoftDeletes {
 		return false, fmt.Errorf("model: %s does not soft delete, so there is nothing to restore", m.GetTable())
 	}

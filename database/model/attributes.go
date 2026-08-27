@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"sort"
@@ -15,7 +16,13 @@ import (
 // withCount alias, a column a migration added and the struct has not caught
 // up with).
 func (m *Model[T]) GetAttributes() map[string]any {
-	entity := reflect.ValueOf(m.Entity).Elem()
+	entity, ok := m.entityValue()
+	if !ok {
+		// A literal has no entity to read columns off. The raw attributes are
+		// still whatever was put there, and an empty map is the honest answer
+		// rather than a panic.
+		return maps.Clone(m.attributes)
+	}
 	out := make(map[string]any, len(fieldsOf(entity.Type()))+len(m.attributes))
 	for _, f := range fieldsOf(entity.Type()) {
 		out[f.column] = valueAt(entity, f)
@@ -34,7 +41,7 @@ func (m *Model[T]) GetAttributes() map[string]any {
 // attribute rather than dropped, because a select the caller wrote has a reason
 // for every column in it.
 func (m *Model[T]) SetRawAttributes(attributes map[string]any, sync bool) error {
-	*m.Entity = *new(T)
+	m.resetEntity()
 	m.attributes = nil
 	if err := m.setAttributes(attributes, true); err != nil {
 		return err
@@ -57,7 +64,10 @@ func (m *Model[T]) setAttributes(attributes map[string]any, keepUnknown bool) er
 	// the walk is over the schema rather than over a sorted copy of the map's
 	// keys. Sorting existed to make the first conversion error deterministic; so
 	// does declaration order, and it costs no allocation and no sort per row.
-	entity := reflect.ValueOf(m.Entity).Elem()
+	entity, ok := m.entityValue()
+	if !ok {
+		return ErrUnwired
+	}
 	schema := schemaOf(entity.Type())
 
 	var discarded []string
@@ -119,7 +129,10 @@ func (m *Model[T]) SetAttribute(key string, value any) error {
 }
 
 func (m *Model[T]) setAttribute(key string, value any) (bool, error) {
-	entity := reflect.ValueOf(m.Entity).Elem()
+	entity, ok := m.entityValue()
+	if !ok {
+		return false, ErrUnwired
+	}
 	f, ok := fieldByColumn(entity.Type(), key)
 	if !ok {
 		return false, nil
@@ -142,7 +155,10 @@ func (m *Model[T]) setAttribute(key string, value any) (bool, error) {
 // it would need to elsewhere: a typo like found.Entity.Naem fails to
 // compile, so it never reaches this check at all.
 func (m *Model[T]) GetAttribute(key string) any {
-	entity := reflect.ValueOf(m.Entity).Elem()
+	entity, live := m.entityValue()
+	if !live {
+		return m.attributes[key]
+	}
 	if f, ok := fieldByColumn(entity.Type(), key); ok {
 		return valueAt(entity, f)
 	}
@@ -455,4 +471,34 @@ func sortedKeys(in map[string]any) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// resetEntity clears the entity's columns, and puts the model back afterwards
+// when the entity is the one it lives inside.
+//
+// This used to be `*m.Entity = *new(T)` written where SetRawAttributes calls it,
+// and that line zeroed the model along with the columns: an entity that embeds
+// Model[T] contains this very model, so the assignment set the receiver's own
+// Entity to nil in the middle of the call, and the next line reflected over a
+// nil pointer. The failure was a panic inside hydration -- the path every row of
+// every query takes.
+//
+// A T that does not embed Model[T] is the simple case, and takes the simple
+// path: nothing of the model lives in the entity, so zeroing it is just zeroing
+// it.
+func (m *Model[T]) resetEntity() {
+	if m.Entity == nil {
+		return
+	}
+	index := m.entityIndex()
+	if index < 0 {
+		*m.Entity = *new(T)
+		return
+	}
+
+	saved := *m
+	*m.Entity = *new(T)
+	// m is interior to the entity, so it has just been zeroed with it. Writing
+	// the copy back through it restores the same allocation the caller holds.
+	*m = saved
 }

@@ -84,6 +84,9 @@ func collectFields(t reflect.Type, prefix []int) []field {
 		if name == "-" {
 			continue
 		}
+		if isEmbeddedModel(f) {
+			continue
+		}
 		index := append(append([]int(nil), prefix...), i)
 		if f.Anonymous && !tagged {
 			inner := f.Type
@@ -102,6 +105,31 @@ func collectFields(t reflect.Type, prefix []int) []field {
 	}
 	return out
 }
+
+// isEmbeddedModel reports whether f is the Model[T] an entity embeds.
+//
+// Its fields are the model's configuration -- the table, the primary key, the
+// grammar, the back pointer to the entity itself -- and every one of them is
+// exported, because a Go value has no subtype to override them in. Walked as an
+// embedded struct they become columns: an insert on a User that embeds
+// Model[User] tried to write table, primary_key, entity and grammar, alongside
+// the two the developer declared.
+//
+// The test is the type's own identity rather than its name, so a field the
+// application happens to call Model is a column like any other, and an entity
+// that embeds a Model[T] of any T is skipped whatever T is. That is why the name
+// is matched with a prefix: Go spells the instantiated type Model[pkg.User], and
+// there is no T here to compare against.
+func isEmbeddedModel(f reflect.StructField) bool {
+	return f.Anonymous &&
+		f.Type.Kind() == reflect.Struct &&
+		f.Type.PkgPath() == modelPackage &&
+		strings.HasPrefix(f.Type.Name(), "Model[")
+}
+
+// modelPackage is this package's import path, read off a type rather than
+// written as a string: a package that moves takes the constant with it.
+var modelPackage = reflect.TypeFor[Model[struct{}]]().PkgPath()
 
 // columnName is the column a field with no tag gets: the field name in snake
 // case, with an initialism kept whole.
