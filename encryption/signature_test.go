@@ -13,6 +13,27 @@ func signer() *encryption.Signer {
 	return encryption.NewSigner([]byte("an application key long enough to be one"))
 }
 
+// TestTheSignerDoesNotHoldOntoTheCallersKey.
+//
+// The Encrypter copies the key it is given and says why; the Signer is the
+// other half of the same package holding the same secret, so it owes the same
+// promise. Without the copy, a caller that reuses its buffer changes what the
+// application signs, and nothing anywhere reports it -- the links simply stop
+// verifying.
+func TestTheSignerDoesNotHoldOntoTheCallersKey(t *testing.T) {
+	key := []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	s := encryption.NewSigner(key)
+
+	token := s.Sign("verify-email", "user-1", time.Hour)
+	for i := range key {
+		key[i] = 'z'
+	}
+
+	if _, err := s.Verify("verify-email", token); err != nil {
+		t.Fatalf("zeroing the caller's buffer changed what the signer signs with: %v", err)
+	}
+}
+
 // TestASignedPayloadComesBackUnchanged is the base case: without it, nothing
 // below is testing anything.
 func TestASignedPayloadComesBackUnchanged(t *testing.T) {

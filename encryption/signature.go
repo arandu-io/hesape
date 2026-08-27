@@ -44,7 +44,14 @@ var ErrSignature = errors.New("encryption: the signature is not valid")
 //
 // The same key as the session and the CSRF token, because they are the same
 // secret: an attacker who has it does not need three.
-func NewSigner(appKey []byte) *Signer { return &Signer{key: appKey} }
+//
+// The key is copied, for the reason [NewEncrypter] copies it: a []byte handed
+// in stays a window onto the caller's memory, and a caller that zeroes or
+// reuses that buffer would silently change what the application signs. One key,
+// one package, one rule about who owns the bytes.
+func NewSigner(appKey []byte) *Signer {
+	return &Signer{key: append([]byte(nil), appKey...)}
+}
 
 // Sign returns a token carrying payload, valid for ttl, usable only for purpose.
 //
