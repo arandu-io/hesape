@@ -1,8 +1,10 @@
 package middleware_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/cache"
+	"github.com/arandu-io/hesape/log"
 	"github.com/arandu-io/hesape/routing/middleware"
 )
 
@@ -50,6 +53,35 @@ func TestThrottleAllowsUpToTheLimitAndThenRefuses(t *testing.T) {
 	}
 	if !refused.called || refused.status != http.StatusTooManyRequests {
 		t.Fatalf("the refusal did not go through the Refuse given to the middleware: %+v", refused)
+	}
+}
+
+// TestTwoReplicasShareOneBudget is why the limit is counted in a store rather
+// than in a map on the middleware. Counted per process, N replicas allow N times
+// the limit, on exactly the endpoints somebody would bother to flood.
+func TestTwoReplicasShareOneBudget(t *testing.T) {
+	var refusedA, refusedB refusal
+	backing := cache.NewArrayStore()
+
+	replicaA := middleware.Throttle(cache.NewRateLimiter(backing),
+		cache.PerMinute(2), middleware.KeyByIP, refusedA.refuse)(reached)
+	replicaB := middleware.Throttle(cache.NewRateLimiter(backing),
+		cache.PerMinute(2), middleware.KeyByIP, refusedB.refuse)(reached)
+
+	// One attempt against each replica spends the budget of two.
+	for _, h := range []http.Handler{replicaA, replicaB} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, request())
+		if rec.Code != http.StatusOK {
+			t.Fatalf("code = %d, want 200: the budget is two", rec.Code)
+		}
+	}
+
+	// The third attempt is over, whichever replica it arrives at.
+	rec := httptest.NewRecorder()
+	replicaA.ServeHTTP(rec, request())
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("code = %d, want 429: the two replicas each kept their own count", rec.Code)
 	}
 }
 
@@ -155,6 +187,101 @@ func TestTheThrottleFailsOpen(t *testing.T) {
 	}
 	if refused.called {
 		t.Fatal("a request was refused because the store was unreachable")
+	}
+}
+
+// TestFailingOpenIsLoudAboutIt is the other half of failing open. A limiter that
+// stops limiting and says nothing has stopped existing exactly when the system
+// is under stress, and nobody finds out until the bill or the breach.
+func TestFailingOpenIsLoudAboutIt(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	var refused refusal
+	limiter := cache.NewRateLimiter(brokenStore{})
+	h := middleware.Throttle(limiter, cache.PerMinute(1), middleware.KeyByIP, refused.refuse)(reached)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, request().WithContext(log.Into(context.Background(), logger)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200", rec.Code)
+	}
+	line := buf.String()
+	if line == "" {
+		t.Fatal("the throttle let the request through and logged nothing")
+	}
+	if !strings.Contains(line, "level=ERROR") {
+		t.Fatalf("the request went unlimited and was not logged at ERROR: %s", line)
+	}
+	if !strings.Contains(line, "allowed through") || !strings.Contains(line, errStoreDown.Error()) {
+		t.Fatalf("the log says neither what happened nor why: %s", line)
+	}
+}
+
+// TestAThrottleThatCouldNeverLimitPanicsAtWiring.
+//
+// Each of these is a route declared as limited that would carry no limit at all:
+// the counter rejects the limit, so every request errors, so every request is
+// allowed through -- permanently, and with a line in the log blaming the store.
+// None of it is recoverable at request time and all of it is knowable before the
+// first request, so it stops the process instead.
+func TestAThrottleThatCouldNeverLimitPanicsAtWiring(t *testing.T) {
+	var refused refusal
+	ok := cache.NewRateLimiter(cache.NewArrayStore())
+
+	cases := []struct {
+		name string
+		wire func()
+	}{
+		{"no limiter", func() {
+			middleware.Throttle(nil, cache.PerMinute(1), middleware.KeyByIP, refused.refuse)
+		}},
+		{"no key function", func() {
+			middleware.Throttle(ok, cache.PerMinute(1), nil, refused.refuse)
+		}},
+		{"no Refuse", func() {
+			middleware.Throttle(ok, cache.PerMinute(1), middleware.KeyByIP, nil)
+		}},
+		{"a budget of zero", func() {
+			middleware.Throttle(ok, cache.PerMinute(0), middleware.KeyByIP, refused.refuse)
+		}},
+		{"a negative budget", func() {
+			middleware.Throttle(ok, cache.PerMinute(-1), middleware.KeyByIP, refused.refuse)
+		}},
+		{"no window", func() {
+			middleware.Throttle(ok, cache.Limit{MaxAttempts: 5}, middleware.KeyByIP, refused.refuse)
+		}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("wiring was accepted, and the route it guards would carry no limit at all")
+				}
+			}()
+			c.wire()
+		})
+	}
+}
+
+// TestNoneIsWiredAndLimitsNothing, because the panic above must not catch the
+// one limit that is allowed to allow everything.
+func TestNoneIsWiredAndLimitsNothing(t *testing.T) {
+	var refused refusal
+	limiter := cache.NewRateLimiter(cache.NewArrayStore())
+	h := middleware.Throttle(limiter, cache.None(), middleware.KeyByIP, refused.refuse)(reached)
+
+	for attempt := 1; attempt <= 50; attempt++ {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, request())
+		if rec.Code != http.StatusOK {
+			t.Fatalf("attempt %d = %d, want 200: None limits nothing", attempt, rec.Code)
+		}
+	}
+	if refused.called {
+		t.Fatal("None refused a request")
 	}
 }
 

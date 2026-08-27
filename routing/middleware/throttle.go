@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"net/netip"
@@ -44,15 +45,29 @@ type KeyFunc func(*http.Request) string
 // built with is replaced -- a middleware limits per caller by definition, and a
 // fixed key would be one budget shared by everybody.
 //
-// # It fails open
+// # It fails open, and it refuses to be wired in a way that always does
 //
-// When the store cannot be reached the request is allowed through and the
-// failure is logged at ERROR. A rate limiter is a guard against abuse, not a
-// dependency of serving a page, and a limiter that refuses everything while its
-// store is down converts a cache outage into a total one. Where the opposite is
-// right -- a sign-in, where the budget is the security control -- the check
-// belongs in the handler, against the same limiter, and it can choose to fail
-// closed.
+// These are two different failures and they used to be one branch, which is how
+// a route could end up with no limit on it at all while the log blamed the
+// store.
+//
+// A limit that cannot count is a wiring mistake, and this panics on it when the
+// middleware is built rather than when a request arrives. PerMinute(0) allows
+// nothing, so the counter rejects it, so every request through it errors, so
+// every request is let through -- a route declared as limited that is not
+// limited, permanently, with a line in the log that says the store is
+// unreachable. Nothing about that is recoverable at request time and all of it
+// is knowable before the first request, so it is a panic at wiring: it stops the
+// process that is about to serve an unprotected route.
+//
+// A store that cannot be reached is not a mistake and is not permanent. The
+// request is allowed through and the failure is logged at ERROR. A rate limiter
+// is a guard against abuse, not a dependency of serving a page, and one that
+// refuses everything while its store is down converts a cache outage into a
+// total one. This is a deliberate choice and not an inherited default: it is
+// wrong for a caller whose budget is the security control rather than a guard
+// against volume -- a sign-in -- and that caller checks in the handler, against
+// the same limiter, where it can fail closed on the same error.
 //
 // # The headers and the sentence agree
 //
@@ -60,12 +75,33 @@ type KeyFunc func(*http.Request) string
 // Retry-After goes on the refusal carrying the same number as the sentence,
 // computed once. A header and a sentence that disagree about how long to wait
 // are worse than one that says nothing.
+//
+// # There is no Grant here
+//
+// A throttle runs before authentication on the routes it matters most on, so
+// there is nobody to have a Grant yet and no tenant to take out of one. Adding
+// one would take the limit off the sign-in form to satisfy a signature. A limit
+// that really is per tenant is written by building the key with the tenant in
+// it.
 func Throttle(rl *cache.RateLimiter, limit cache.Limit, key KeyFunc, refuse Refuse) pipeline.Middleware[http.Handler] {
+	switch {
+	case rl == nil:
+		panic("routing/middleware: Throttle was given no rate limiter, and a throttle with nothing to count in limits nothing")
+	case key == nil:
+		panic("routing/middleware: Throttle was given no key function, and a throttle that cannot tell callers apart limits all of them together")
+	case refuse == nil:
+		panic("routing/middleware: Throttle was given no Refuse, and the first caller to go over would be answered with a panic instead of a 429")
+	case limit.MaxAttempts <= 0:
+		panic(fmt.Sprintf("routing/middleware: Throttle was given a limit of %d attempts, which no request can satisfy, so every request through it would be allowed and the route would carry no limit at all", limit.MaxAttempts))
+	case limit.Decay <= 0:
+		panic("routing/middleware: Throttle was given a limit with no window, which never resets, so every request through it would be allowed and the route would carry no limit at all")
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			result, err := rl.Attempt(r.Context(), limit.By(key(r)))
 			if err != nil {
-				log.For(r.Context()).Error("the rate limiter could not be reached; the request was allowed through",
+				log.For(r.Context()).Error("the rate limit could not be counted; the request was allowed through",
 					"path", r.URL.Path, "error", err)
 				next.ServeHTTP(w, r)
 				return
