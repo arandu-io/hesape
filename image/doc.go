@@ -25,17 +25,48 @@
 // Read: JPEG, PNG, GIF. Written: JPEG, PNG, GIF.
 //
 // [Image.ToFormat] accepts nine names -- webp, jpg, jpeg, png, gif, avif,
-// heic, heif, bmp -- and the four with no encoder in the standard library
-// fail at the encode, with the format named. That is the honest arrangement:
-// the alternative is [Image.ToWebp] handing back a JPEG, which is a lie that
-// leaves the building as a wrong Content-Type. The same goes for reading: a
-// WebP arriving at [Image.ToBytes] is refused by name rather than
-// half-decoded.
+// heic, heif, bmp. Four of them are written, and they are three formats, since
+// jpg and jpeg are one. The other five -- webp, avif, heic, heif, bmp -- have
+// no encoder in the standard library and fail at the encode, with the format
+// named. That is the honest arrangement: the alternative is [Image.ToWebp]
+// handing back a JPEG, which is a lie that leaves the building as a wrong
+// Content-Type. The same goes for reading: a WebP arriving at [Image.ToBytes]
+// is refused with its media type named rather than half-decoded.
 //
 // [Image.MimeType] and [Image.Extension] know the wider list, because they
 // read what a file is rather than what this package can do with it -- an
 // image that only needs storing never goes near the driver, and its type and
 // extension are still right.
+//
+// # A ceiling before the decode
+//
+// An image is decoded only after its header has been read and the dimensions it
+// declares have been found to be under [DefaultMaxPixels], or under whatever
+// [ImageManager.MaxPixels] was told instead. Past it the decode does not
+// happen and the failure is [ErrTooLarge], naming the dimensions and the limit.
+//
+// The order is the whole of it. The canvas is four bytes a pixel, so a file of
+// a few dozen bytes declaring 50000 by 50000 asks for ten gigabytes, and asks
+// for it inside the decoder, before anything this package wrote gets to look at
+// the result. Reading the header first costs the header.
+//
+// What the ceiling does not cover is stated as plainly: it bounds what is
+// decoded, not what a transformation is asked to produce. A resize to
+// dimensions the application chose allocates what the application asked for,
+// and an image nobody asked to transform is never decoded at all -- it can be
+// stored, and its header can be read, at any size.
+//
+// # Stopping work nobody is waiting for
+//
+// Every method that reaches the pixels takes a context, and the pixel loops
+// under it read that context as they go, once a line. A resize the caller
+// stopped waiting for returns the context's error rather than finishing, and
+// what it had built is dropped -- the Image is left exactly as it was, so the
+// same call can be made again.
+//
+// [Image.ToResponse] is the one that takes no context, because the request it
+// is handed already carries one: a browser that goes away mid-resize cancels
+// it.
 //
 // # Resizing, and why it looks the way it does
 //

@@ -30,6 +30,12 @@ import (
 // and the work happens once: the processed bytes replace the originals on the
 // instance.
 //
+// Every one of those methods takes a context, because that one call is where
+// all of the work is: resampling a photograph is seconds of arithmetic, and a
+// caller who has stopped waiting for the answer needs a way to say so. The
+// context is not held on the Image -- each call carries its own, and an Image
+// built during one request can be asked for bytes during another.
+//
 // An Image is not safe for use from several goroutines at once. Two
 // goroutines sharing one is two goroutines processing the same pipeline; give
 // each the clone that a fluent call already returns.
@@ -314,7 +320,7 @@ func (i *Image) ToFormat(format string) (*Image, error) {
 // everything a customer stores does. The returned path is the key the image
 // landed under, which a caller records in a row.
 func (i *Image) Store(ctx context.Context, g auth.Grant, disk Disk, path string) (string, error) {
-	name, err := i.HashName()
+	name, err := i.HashName(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -327,7 +333,7 @@ func (i *Image) Store(ctx context.Context, g auth.Grant, disk Disk, path string)
 // the object store will hand to anybody holding the URL, and the Policy that
 // decided this caller may write it still ran.
 func (i *Image) StorePublicly(ctx context.Context, g auth.Grant, disk Disk, path string) (string, error) {
-	name, err := i.HashName()
+	name, err := i.HashName(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -338,11 +344,11 @@ func (i *Image) StorePublicly(ctx context.Context, g auth.Grant, disk Disk, path
 //
 // An empty name means the path is used as the name.
 func (i *Image) StoreAs(ctx context.Context, g auth.Grant, disk Disk, path, name string) (string, error) {
-	body, err := i.ToBytes()
+	body, err := i.ToBytes(ctx)
 	if err != nil {
 		return "", err
 	}
-	mediaType, err := i.MimeType()
+	mediaType, err := i.MimeType(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -378,13 +384,13 @@ func joinKey(path, name string) string {
 // it, invented once and then remembered.
 //
 // path is an optional prefix. The extension comes from the processed bytes,
-// which is why this can fail: naming the file requires knowing what it turned
-// out to be.
-func (i *Image) HashName(path ...string) (string, error) {
+// which is why this can fail and why it takes a context: naming the file
+// requires knowing what it turned out to be, and that runs the pipeline.
+func (i *Image) HashName(ctx context.Context, path ...string) (string, error) {
 	if i.hashName == "" {
 		i.hashName = str.Random(40)
 	}
-	extension, err := i.Extension()
+	extension, err := i.Extension(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -399,9 +405,14 @@ func (i *Image) HashName(path ...string) (string, error) {
 //
 // A pipeline with nothing in it is not run at all -- the bytes that arrived are
 // the bytes that leave, undecoded and unre-encoded, which is what makes an
-// upload that needed no work cost nothing. A pipeline with something in it runs
+// upload that needed no work cost nothing, and why a picture too large to
+// decode can still be stored untouched. A pipeline with something in it runs
 // once, and what it produced replaces what arrived.
-func (i *Image) ToBytes() ([]byte, error) {
+//
+// The context bounds that run. A pipeline stopped part of the way through
+// leaves the image as it was: nothing is written back, so the same call can be
+// made again with a context that lasts.
+func (i *Image) ToBytes(ctx context.Context) ([]byte, error) {
 	if !i.pipeline.HasChanges() || i.processed {
 		return i.contents, nil
 	}
@@ -409,7 +420,7 @@ func (i *Image) ToBytes() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	out, err := driver.Process(i.contents, i.pipeline)
+	out, err := driver.Process(ctx, i.contents, i.pipeline)
 	if err != nil {
 		return nil, err
 	}
@@ -421,8 +432,8 @@ func (i *Image) ToBytes() ([]byte, error) {
 }
 
 // ToBase64 returns the processed image, base64-encoded.
-func (i *Image) ToBase64() (string, error) {
-	body, err := i.ToBytes()
+func (i *Image) ToBase64(ctx context.Context) (string, error) {
+	body, err := i.ToBytes(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -430,12 +441,12 @@ func (i *Image) ToBase64() (string, error) {
 }
 
 // ToDataURI returns the processed image as a data URI.
-func (i *Image) ToDataURI() (string, error) {
-	mediaType, err := i.MimeType()
+func (i *Image) ToDataURI(ctx context.Context) (string, error) {
+	mediaType, err := i.MimeType(ctx)
 	if err != nil {
 		return "", err
 	}
-	encoded, err := i.ToBase64()
+	encoded, err := i.ToBase64(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -448,12 +459,12 @@ func (i *Image) ToDataURI() (string, error) {
 // String() cannot return the error that processing the image can produce,
 // and an image that printed an empty string because the encode failed would
 // be worse than one that would not print.
-func (i *Image) ToString() (string, error) { return i.ToDataURI() }
+func (i *Image) ToString(ctx context.Context) (string, error) { return i.ToDataURI(ctx) }
 
 // Extension returns the file extension the processed image should carry,
 // from what it actually is rather than from what it was called.
-func (i *Image) Extension() (string, error) {
-	mediaType, err := i.MimeType()
+func (i *Image) Extension(ctx context.Context) (string, error) {
+	mediaType, err := i.MimeType(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -462,11 +473,11 @@ func (i *Image) Extension() (string, error) {
 
 // MimeType returns the media type of the processed image, read out of its
 // bytes.
-func (i *Image) MimeType() (string, error) {
+func (i *Image) MimeType(ctx context.Context) (string, error) {
 	if i.mimeType != "" {
 		return i.mimeType, nil
 	}
-	body, err := i.ToBytes()
+	body, err := i.ToBytes(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -475,11 +486,15 @@ func (i *Image) MimeType() (string, error) {
 }
 
 // Dimensions returns the width and height of the processed image.
-func (i *Image) Dimensions() (int, int, error) {
+//
+// It is read out of the header rather than out of the pixels, but the pipeline
+// runs first -- the answer is about the image as it will be, not as it arrived
+// -- which is what the context bounds.
+func (i *Image) Dimensions(ctx context.Context) (int, int, error) {
 	if i.width != 0 && i.height != 0 {
 		return i.width, i.height, nil
 	}
-	body, err := i.ToBytes()
+	body, err := i.ToBytes(ctx)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -496,14 +511,14 @@ func (i *Image) Dimensions() (int, int, error) {
 }
 
 // Width returns the width of the processed image.
-func (i *Image) Width() (int, error) {
-	w, _, err := i.Dimensions()
+func (i *Image) Width(ctx context.Context) (int, error) {
+	w, _, err := i.Dimensions(ctx)
 	return w, err
 }
 
 // Height returns the height of the processed image.
-func (i *Image) Height() (int, error) {
-	_, h, err := i.Dimensions()
+func (i *Image) Height(ctx context.Context) (int, error) {
+	_, h, err := i.Dimensions(ctx)
 	return h, err
 }
 
@@ -512,7 +527,7 @@ func (i *Image) Height() (int, error) {
 // The pipeline runs over a copy before sampling, so that the colour reports
 // for the image as it will be and not as it arrived, and leaves the image
 // itself unprocessed.
-func (i *Image) DominantColor() (string, error) {
+func (i *Image) DominantColor(ctx context.Context) (string, error) {
 	driver, err := i.resolveDriver()
 	if err != nil {
 		return "", err
@@ -520,11 +535,11 @@ func (i *Image) DominantColor() (string, error) {
 	body := i.contents
 	if i.pipeline.HasChanges() && !i.processed {
 		sample := i.newClone()
-		if body, err = sample.ToBytes(); err != nil {
+		if body, err = sample.ToBytes(ctx); err != nil {
 			return "", err
 		}
 	}
-	return driver.DominantColor(body)
+	return driver.DominantColor(ctx, body)
 }
 
 // Using sets the driver, by the name it was registered under, for this image
@@ -543,12 +558,21 @@ func (i *Image) File() UploadedFile { return i.file }
 // and its bytes. Nothing else is set -- caching and disposition are the
 // caller's to decide, and guessing them here would be a second place where
 // they are decided.
+//
+// This is the one place that takes no context of its own: the request carries
+// one already, and it is the right one -- a browser that goes away while the
+// thumbnail is being resampled cancels it, and the resize stops. A nil request
+// means there is nobody to go away, and the work runs unbounded.
 func (i *Image) ToResponse(w http.ResponseWriter, r *http.Request) error {
-	body, err := i.ToBytes()
+	ctx := context.Background()
+	if r != nil {
+		ctx = r.Context()
+	}
+	body, err := i.ToBytes(ctx)
 	if err != nil {
 		return err
 	}
-	mediaType, err := i.MimeType()
+	mediaType, err := i.MimeType(ctx)
 	if err != nil {
 		return err
 	}

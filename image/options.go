@@ -14,8 +14,9 @@ const DefaultQuality = 70
 // [Image] can skip entirely, handing back the original bytes untouched
 // instead of decoding and re-encoding them for nothing.
 type ImageOutputOptions struct {
-	// Format is one of the names [Image.ToFormat] accepts: webp, jpg, jpeg,
-	// png, gif, avif, heic, bmp. Empty keeps the source format.
+	// Format is one of the names [Image.ToFormat] settles on, which is the
+	// nine it accepts with heif already folded to heic: webp, jpg, jpeg, png,
+	// gif, avif, heic, bmp. Empty keeps the source format.
 	Format string
 	// Quality is 1 to 100. Zero means [DefaultQuality]. It reaches only the
 	// lossy encoders; PNG and GIF ignore it.
