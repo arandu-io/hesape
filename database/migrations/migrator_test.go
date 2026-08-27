@@ -35,6 +35,38 @@ func (m fakeMigration) Down(context.Context, Connection) error {
 	return nil
 }
 
+// oneWayMigration has an Up and no Down, and declares nothing about being
+// reversible. It is the shape a rollback refuses.
+type oneWayMigration struct {
+	BaseMigration
+	name string
+	ups  *[]string
+}
+
+func (m oneWayMigration) GetName() string { return m.name }
+
+func (m oneWayMigration) Up(context.Context, Connection) error {
+	*m.ups = append(*m.ups, m.name)
+	return nil
+}
+
+// backfillMigration has an Up, no Down, and says why there can never be one.
+type backfillMigration struct {
+	oneWayMigration
+}
+
+func (m backfillMigration) Irreversible() string {
+	return "the rows it filled in are no longer distinguishable from the rows it did not"
+}
+
+// contradictoryMigration declares both a Down and Irreversible, which are
+// opposite claims about the same migration.
+type contradictoryMigration struct {
+	fakeMigration
+}
+
+func (m contradictoryMigration) Irreversible() string { return "nothing undoes this" }
+
 // fakeRepository is a MigrationRepositoryInterface backed by a slice.
 type fakeRepository struct {
 	records []MigrationRecord
@@ -293,6 +325,87 @@ func TestRollbackUndoesTheLastBatchNewestFirst(t *testing.T) {
 	}
 	if len(repository.records) != 0 {
 		t.Fatalf("the repository still holds %v after a full rollback", repository.records)
+	}
+}
+
+func TestRollbackRefusesAMigrationThatDeclaresNoDown(t *testing.T) {
+	t.Cleanup(flushRegistry)
+	flushRegistry()
+
+	var ups []string
+	Register(oneWayMigration{name: "2026_01_01_000000_add_column", ups: &ups})
+
+	migrator, repository, _ := newTestMigrator()
+
+	if _, err := migrator.Run(context.Background(), nil, Options{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	_, err := migrator.Rollback(context.Background(), nil, Options{})
+	if err == nil {
+		t.Fatal("Rollback reported success for a migration it did not undo")
+	}
+	if !strings.Contains(err.Error(), "neither Down nor Irreversible") {
+		t.Fatalf("Rollback: %v, and the error has to name both ways out", err)
+	}
+
+	// The schema was not touched, so the row saying it is applied is still
+	// true. Deleting it would send the next Run through Up a second time.
+	if len(repository.records) != 1 {
+		t.Fatalf("the repository holds %v, and a change nobody undid keeps its record", repository.records)
+	}
+}
+
+func TestRollbackLeavesADeclaredIrreversibleMigrationApplied(t *testing.T) {
+	t.Cleanup(flushRegistry)
+	flushRegistry()
+
+	var ups, downs []string
+	Register(backfillMigration{oneWayMigration{name: "2026_01_01_000000_backfill_totals", ups: &ups}})
+	Register(fakeMigration{name: "2026_01_02_000000_add_index", ups: &ups, downs: &downs})
+
+	migrator, repository, _ := newTestMigrator()
+
+	if _, err := migrator.Run(context.Background(), nil, Options{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if _, err := migrator.Rollback(context.Background(), nil, Options{}); err != nil {
+		t.Fatalf("Rollback: %v, and a declared irreversible migration must not stop the batch", err)
+	}
+
+	// The reversible one in the same batch was undone, which is the point of
+	// declaring: the rollback carries on instead of refusing.
+	if strings.Join(downs, ",") != "2026_01_02_000000_add_index" {
+		t.Fatalf("the rollback ran Down for %v, want only the reversible migration", downs)
+	}
+	if len(repository.records) != 1 || repository.records[0].Migration != "2026_01_01_000000_backfill_totals" {
+		t.Fatalf("the repository holds %v, and the backfill is still applied", repository.records)
+	}
+}
+
+func TestRollbackRefusesAMigrationClaimingBothDirections(t *testing.T) {
+	t.Cleanup(flushRegistry)
+	flushRegistry()
+
+	var ups, downs []string
+	Register(contradictoryMigration{fakeMigration{name: "2026_01_01_000000_both", ups: &ups, downs: &downs}})
+
+	migrator, repository, _ := newTestMigrator()
+
+	if _, err := migrator.Run(context.Background(), nil, Options{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	_, err := migrator.Rollback(context.Background(), nil, Options{})
+	if err == nil {
+		t.Fatal("Rollback picked one of two opposite claims instead of refusing")
+	}
+	if len(downs) != 0 {
+		t.Fatalf("Down ran for %v, and a migration that also says it is irreversible must not be guessed at", downs)
+	}
+	if len(repository.records) != 1 {
+		t.Fatalf("the repository holds %v after a refused rollback", repository.records)
 	}
 }
 

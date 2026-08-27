@@ -325,6 +325,51 @@ h.Make(password, hashing.Options{Memory: 65536, Time: 4})
 hashing.Make(password)
 ```
 
+### A rollback refuses the migration it cannot undo
+
+No symbol changed, so apidiff reports nothing. The behaviour did.
+
+A migration with no `Down` used to be rolled back like this: nothing ran, the row
+recording it as applied was **deleted**, and the line printed said `Success`. The
+schema kept the change and the table stopped saying so. The next `aru migrate`
+ran the `Up` again and failed on what was already there — two commands away from
+the thing that caused it.
+
+Now the record is deleted only when the change was actually undone, and a
+migration that reverses nothing has to say which of two things it is:
+
+```go
+// The change that genuinely has no inverse. The rollback leaves it applied,
+// prints the reason, and carries on with the rest of the batch.
+func (BackfillPostViews) Irreversible() string {
+    return "the rows it filled in are no longer distinguishable from the rows it did not"
+}
+
+// Everything else: write the Down.
+func (CreatePostsTable) Down(ctx context.Context, conn migrations.Connection) error {
+    return conn.Schema().Drop(ctx, "posts")
+}
+```
+
+A migration that declares neither stops the rollback with an error naming it. The
+migrations already undone in that run stay undone; their records are already
+gone. `aru migrate` is unaffected — a migration with no `Down` still applies.
+
+`migrations.IrreversibleMigration` is the interface, tested for the same way
+`ReversibleMigration` is: a type assertion, so a wrong signature is a build
+failure rather than a rollback that quietly does nothing.
+
+Declaring both `Down` and `Irreversible` is refused rather than resolved. They
+are opposite claims about one migration and nothing outside it can tell which
+the author meant.
+
+`Reset` is no longer a guarantee of an empty schema: a declared-irreversible
+migration keeps its record and its change.
+
+`aru doctor`'s `rollback-does-nothing` still reports a migration that created a
+table and wrote no `Down`, and it still leaves a backfill alone. It warns earlier
+than this refuses; it does not replace it.
+
 ### The string-form resource registration is removed
 
 ```
