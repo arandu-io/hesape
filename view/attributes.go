@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/arandu-io/hesape/collections/arr"
 	"github.com/arandu-io/hesape/str"
-	"github.com/arandu-io/hesape/support/arr"
 )
 
 // ComponentAttributeBag is the bag a component receives every attribute it
@@ -184,14 +184,18 @@ func (b *ComponentAttributeBag) ExceptProps(keys ...string) *ComponentAttributeB
 
 // Class merges classList into the bag's "class" attribute, after converting
 // it to a CSS class string.
+//
+// The list is wrapped and spread so that each element is read on its own: a
+// slice handed over as a single argument would be rendered as one class.
 func (b *ComponentAttributeBag) Class(classList any) *ComponentAttributeBag {
-	return b.Merge(map[string]any{"class": arr.ToCssClasses(classList)})
+	return b.Merge(map[string]any{"class": arr.ToCssClasses(arr.Wrap(classList)...)})
 }
 
 // Style merges styleList into the bag's "style" attribute, after converting
-// it to a CSS style string.
+// it to a CSS style string. The list is spread for the reason given on
+// [ComponentAttributeBag.Class].
 func (b *ComponentAttributeBag) Style(styleList any) *ComponentAttributeBag {
-	return b.Merge(map[string]any{"style": arr.ToCssStyles(styleList)})
+	return b.Merge(map[string]any{"style": arr.ToCssStyles(arr.Wrap(styleList)...)})
 }
 
 // Merge combines attributeDefaults into the bag.

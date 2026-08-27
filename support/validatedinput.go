@@ -3,7 +3,7 @@ package support
 import (
 	"sort"
 
-	"github.com/arandu-io/hesape/support/arr"
+	"github.com/arandu-io/hesape/collections/arr"
 )
 
 // ValidatedInput carries the input that passed validation, and nothing else.
@@ -49,11 +49,7 @@ func (v *ValidatedInput) All(keys ...string) map[string]any {
 		}
 		return out
 	}
-	results := map[string]any{}
-	for _, key := range keys {
-		arr.Set(results, key, arr.Get(v.input, key, nil))
-	}
-	return results
+	return subsetByKeys(v.input, keys)
 }
 
 // Keys returns the top-level keys, sorted. A map has no order of its own, so
@@ -70,7 +66,14 @@ func (v *ValidatedInput) Keys() []string {
 // Input returns one item by dotted key, falling back to the optional default,
 // which is nil when not given. An empty key returns everything.
 func (v *ValidatedInput) Input(key string, def ...any) any {
-	return arr.Get(v.All(), key, firstOr(def, nil))
+	all := v.All()
+	if key == "" {
+		return all
+	}
+	if held, ok := arr.Get(all, key); ok {
+		return held
+	}
+	return firstOr(def, nil)
 }
 
 // ToArray returns a copy of the whole input.

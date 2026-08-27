@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/arandu-io/hesape/support/arr"
+	"github.com/arandu-io/hesape/collections/arr"
 )
 
 // ErrMalformedConfigurationURL is returned when the configuration URL cannot
@@ -64,7 +64,8 @@ func (p *ConfigurationUrlParser) ParseConfiguration(config any) (map[string]any,
 		return settings, nil
 	}
 
-	raw := toString(arr.Pull(settings, "url", nil))
+	pulled, _ := arr.Pull(settings, "url")
+	raw := toString(pulled)
 	if raw == "" {
 		return settings, nil
 	}
