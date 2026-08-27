@@ -3,6 +3,7 @@ package seeds
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/arandu-io/hesape/console"
 )
@@ -43,6 +44,15 @@ func SeedCommand(deps Deps) console.Command {
 		Name:        "db:seed",
 		Description: "seed the database with records",
 		Run: func(ctx context.Context, o *console.IO) error {
+			// Before the flags are parsed, because --class= is not a flag here
+			// and the parser refuses an undefined one with "flag provided but
+			// not defined: -class" -- which is true and useless. The sentence
+			// below names the word to type instead, and it was unreachable
+			// through this command until the check moved above the parse.
+			if err := refuseTheClassFlag(o.Args()); err != nil {
+				return err
+			}
+
 			flags := o.Flags()
 			force := flags.Bool("force", false, "force the operation to run when in production")
 			if err := flags.Parse(o.Args()); err != nil {
@@ -84,6 +94,24 @@ func SeedCommand(deps Deps) console.Command {
 			return nil
 		},
 	}
+}
+
+// refuseTheClassFlag answers the spelling Laravel uses with the one this does.
+//
+// A name that is sometimes a flag and sometimes a word is two spellings of one
+// thing, and the message is what somebody reads and retypes -- so it comes from
+// one place. database.Seed refuses it too, for the caller that reaches the
+// engine without going through this command.
+func refuseTheClassFlag(args []string) error {
+	for _, arg := range args {
+		if value, ok := strings.CutPrefix(arg, "--class="); ok {
+			return fmt.Errorf("--class= is not how a seeder is named any more.\n\n    aru db:seed %s", value)
+		}
+		if arg == "--class" || arg == "-class" {
+			return fmt.Errorf("--class= is not how a seeder is named any more.\n\n    aru db:seed <SeederName>")
+		}
+	}
+	return nil
 }
 
 // SeederMakeCommand builds `aru make:seeder`.
