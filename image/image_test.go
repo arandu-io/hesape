@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/arandu-io/hesape/auth"
@@ -114,7 +115,7 @@ func decode(t *testing.T, b []byte) *image.RGBA {
 
 func size(t *testing.T, img *himage.Image) (int, int) {
 	t.Helper()
-	w, h, err := img.Dimensions()
+	w, h, err := img.Dimensions(context.Background())
 	if err != nil {
 		t.Fatalf("Dimensions: %v", err)
 	}
@@ -186,14 +187,14 @@ func TestACloneDoesNotInheritTheAnswersOfTheImageItCameFrom(t *testing.T) {
 		t.Fatalf("thumbnail = %dx%d, want 10x10: the clone answered for its source", w, h)
 	}
 
-	mediaType, err := original.MimeType()
+	mediaType, err := original.MimeType(context.Background())
 	if err != nil {
 		t.Fatalf("MimeType: %v", err)
 	}
 	if mediaType != "image/png" {
 		t.Fatalf("mime = %s, want image/png", mediaType)
 	}
-	converted, err := original.ToJpg().MimeType()
+	converted, err := original.ToJpg().MimeType(context.Background())
 	if err != nil {
 		t.Fatalf("MimeType: %v", err)
 	}
@@ -207,7 +208,7 @@ func TestACloneDoesNotInheritTheAnswersOfTheImageItCameFrom(t *testing.T) {
 // nothing.
 func TestNothingIsDecodedWhenNothingWasAsked(t *testing.T) {
 	source := solidPNG(t, 4, 4, color.RGBA{G: 255, A: 255})
-	out, err := himage.NewImageManager().FromBytes(source).ToBytes()
+	out, err := himage.NewImageManager().FromBytes(source).ToBytes(context.Background())
 	if err != nil {
 		t.Fatalf("ToBytes: %v", err)
 	}
@@ -231,7 +232,7 @@ func TestContainFitsTheWholeImageAndPadsTheRest(t *testing.T) {
 	img := images.FromBytes(solidPNG(t, 40, 20, color.RGBA{R: 255, A: 255})).
 		Contain(20, 20, "#00ff00")
 
-	out, err := img.ToBytes()
+	out, err := img.ToBytes(context.Background())
 	if err != nil {
 		t.Fatalf("ToBytes: %v", err)
 	}
@@ -252,7 +253,7 @@ func TestContainUsesTheDominantColourWhenAsked(t *testing.T) {
 	img := images.FromBytes(solidPNG(t, 40, 20, color.RGBA{R: 12, G: 34, B: 56, A: 255})).
 		Contain(20, 20, "dominant")
 
-	out, err := img.ToBytes()
+	out, err := img.ToBytes(context.Background())
 	if err != nil {
 		t.Fatalf("ToBytes: %v", err)
 	}
@@ -317,7 +318,7 @@ func TestDownscaleAveragesInsteadOfDroppingPixels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resize: %v", err)
 	}
-	out, err := img.ToBytes()
+	out, err := img.ToBytes(context.Background())
 	if err != nil {
 		t.Fatalf("ToBytes: %v", err)
 	}
@@ -379,7 +380,7 @@ func TestFlipsAndRotations(t *testing.T) {
 
 	// The first column is black and the second white; mirrored, the last is
 	// black.
-	out, err := images.FromBytes(source).FlipHorizontally().ToBytes()
+	out, err := images.FromBytes(source).FlipHorizontally().ToBytes(context.Background())
 	if err != nil {
 		t.Fatalf("ToBytes: %v", err)
 	}
@@ -396,7 +397,7 @@ func TestFlipsAndRotations(t *testing.T) {
 
 	// Flop is the other name for the horizontal flip, Flip for the vertical
 	// one.
-	if _, err := images.FromBytes(source).Flip().Flop().ToBytes(); err != nil {
+	if _, err := images.FromBytes(source).Flip().Flop().ToBytes(context.Background()); err != nil {
 		t.Fatalf("Flip/Flop: %v", err)
 	}
 }
@@ -404,7 +405,7 @@ func TestFlipsAndRotations(t *testing.T) {
 func TestRotateFillsTheCornersWithTheBackground(t *testing.T) {
 	images := himage.NewImageManager()
 	out, err := images.FromBytes(solidPNG(t, 20, 20, color.RGBA{B: 255, A: 255})).
-		Rotate(45, "#ff0000").ToBytes()
+		Rotate(45, "#ff0000").ToBytes(context.Background())
 	if err != nil {
 		t.Fatalf("ToBytes: %v", err)
 	}
@@ -416,7 +417,7 @@ func TestRotateFillsTheCornersWithTheBackground(t *testing.T) {
 
 func TestGrayscaleUsesLuminance(t *testing.T) {
 	images := himage.NewImageManager()
-	out, err := images.FromBytes(solidPNG(t, 4, 4, color.RGBA{R: 255, A: 255})).Grayscale().ToBytes()
+	out, err := images.FromBytes(solidPNG(t, 4, 4, color.RGBA{R: 255, A: 255})).Grayscale().ToBytes(context.Background())
 	if err != nil {
 		t.Fatalf("ToBytes: %v", err)
 	}
@@ -435,7 +436,7 @@ func TestBlurAndSharpenRun(t *testing.T) {
 	images := himage.NewImageManager()
 	source := stripedPNG(t, 16, 16)
 
-	blurred, err := images.FromBytes(source).Blur().ToBytes()
+	blurred, err := images.FromBytes(source).Blur().ToBytes(context.Background())
 	if err != nil {
 		t.Fatalf("Blur: %v", err)
 	}
@@ -444,7 +445,7 @@ func TestBlurAndSharpenRun(t *testing.T) {
 		t.Fatalf("blurred pixel = %d, want the stripes mixed towards the middle", got)
 	}
 
-	if _, err := images.FromBytes(source).Sharpen().ToBytes(); err != nil {
+	if _, err := images.FromBytes(source).Sharpen().ToBytes(context.Background()); err != nil {
 		t.Fatalf("Sharpen: %v", err)
 	}
 }
@@ -462,7 +463,7 @@ func TestHeifIsFoldedToHeic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToFormat: %v", err)
 	}
-	_, err = img.ToBytes()
+	_, err = img.ToBytes(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "[heic]") {
 		t.Fatalf("err = %v, want the failure to name heic", err)
 	}
@@ -473,7 +474,7 @@ func TestHeifIsFoldedToHeic(t *testing.T) {
 // handing back a JPEG.
 func TestAFormatWithNoEncoderFailsByName(t *testing.T) {
 	images := himage.NewImageManager()
-	_, err := images.FromBytes(solidPNG(t, 2, 2, color.RGBA{A: 255})).ToWebp().ToBytes()
+	_, err := images.FromBytes(solidPNG(t, 2, 2, color.RGBA{A: 255})).ToWebp().ToBytes(context.Background())
 	if !errors.Is(err, himage.ErrImage) || !strings.Contains(err.Error(), "webp") {
 		t.Fatalf("err = %v, want a failure naming webp", err)
 	}
@@ -483,14 +484,14 @@ func TestConvertingToJpegChangesTheMimeTypeAndExtension(t *testing.T) {
 	images := himage.NewImageManager()
 	img := images.FromBytes(solidPNG(t, 8, 8, color.RGBA{R: 30, G: 60, B: 90, A: 255})).ToJpeg()
 
-	mediaType, err := img.MimeType()
+	mediaType, err := img.MimeType(context.Background())
 	if err != nil {
 		t.Fatalf("MimeType: %v", err)
 	}
 	if mediaType != "image/jpeg" {
 		t.Fatalf("mime = %s, want image/jpeg", mediaType)
 	}
-	extension, err := img.Extension()
+	extension, err := img.Extension(context.Background())
 	if err != nil {
 		t.Fatalf("Extension: %v", err)
 	}
@@ -503,11 +504,11 @@ func TestHashNameIsInventedOnceAndCarriesTheExtension(t *testing.T) {
 	images := himage.NewImageManager()
 	img := images.FromBytes(solidPNG(t, 2, 2, color.RGBA{A: 255}))
 
-	first, err := img.HashName()
+	first, err := img.HashName(context.Background())
 	if err != nil {
 		t.Fatalf("HashName: %v", err)
 	}
-	second, err := img.HashName()
+	second, err := img.HashName(context.Background())
 	if err != nil {
 		t.Fatalf("HashName: %v", err)
 	}
@@ -517,7 +518,7 @@ func TestHashNameIsInventedOnceAndCarriesTheExtension(t *testing.T) {
 	if !strings.HasSuffix(first, ".png") || len(first) != 44 {
 		t.Fatalf("HashName = %q, want forty random characters and .png", first)
 	}
-	withPath, err := img.HashName("avatars")
+	withPath, err := img.HashName(context.Background(), "avatars")
 	if err != nil {
 		t.Fatalf("HashName: %v", err)
 	}
@@ -597,7 +598,7 @@ func TestFromStorageReadsBackWhatWasStored(t *testing.T) {
 
 func TestDominantColorAnswersTheAverage(t *testing.T) {
 	images := himage.NewImageManager()
-	got, err := images.FromBytes(solidPNG(t, 8, 8, color.RGBA{R: 0x10, G: 0x20, B: 0x30, A: 255})).DominantColor()
+	got, err := images.FromBytes(solidPNG(t, 8, 8, color.RGBA{R: 0x10, G: 0x20, B: 0x30, A: 255})).DominantColor(context.Background())
 	if err != nil {
 		t.Fatalf("DominantColor: %v", err)
 	}
@@ -613,7 +614,7 @@ func TestDominantColorSamplesThePendingPipeline(t *testing.T) {
 	images := himage.NewImageManager()
 	img := images.FromBytes(solidPNG(t, 8, 8, color.RGBA{R: 255, A: 255})).Grayscale()
 
-	got, err := img.DominantColor()
+	got, err := img.DominantColor(context.Background())
 	if err != nil {
 		t.Fatalf("DominantColor: %v", err)
 	}
@@ -627,14 +628,14 @@ func TestDominantColorSamplesThePendingPipeline(t *testing.T) {
 
 func TestToDataURICarriesTheMediaType(t *testing.T) {
 	images := himage.NewImageManager()
-	uri, err := images.FromBytes(solidPNG(t, 2, 2, color.RGBA{A: 255})).ToDataURI()
+	uri, err := images.FromBytes(solidPNG(t, 2, 2, color.RGBA{A: 255})).ToDataURI(context.Background())
 	if err != nil {
 		t.Fatalf("ToDataURI: %v", err)
 	}
 	if !strings.HasPrefix(uri, "data:image/png;base64,") {
 		t.Fatalf("uri = %.40q, want a png data URI", uri)
 	}
-	text, err := images.FromBytes(solidPNG(t, 2, 2, color.RGBA{A: 255})).ToString()
+	text, err := images.FromBytes(solidPNG(t, 2, 2, color.RGBA{A: 255})).ToString(context.Background())
 	if err != nil {
 		t.Fatalf("ToString: %v", err)
 	}
@@ -653,7 +654,7 @@ func TestAnUnreadableFormatIsRefusedByName(t *testing.T) {
 	images := himage.NewImageManager()
 	// A WebP header with nothing behind it: recognised, refused, named.
 	webp := append([]byte("RIFF\x00\x00\x00\x00WEBP"), make([]byte, 16)...)
-	_, err := images.FromBytes(webp).Grayscale().ToBytes()
+	_, err := images.FromBytes(webp).Grayscale().ToBytes(context.Background())
 	if !errors.Is(err, himage.ErrImage) || !strings.Contains(err.Error(), "image/webp") {
 		t.Fatalf("err = %v, want a failure naming image/webp", err)
 	}
@@ -723,12 +724,12 @@ func TestTransformUsingReplacesWhatTheDriverWouldDo(t *testing.T) {
 	images := himage.NewImageManager()
 	called := false
 	images.TransformUsing(himage.StdDriverName, "Grayscale",
-		func(canvas *image.RGBA, _ transformations.Transformation) (*image.RGBA, error) {
+		func(_ context.Context, canvas *image.RGBA, _ transformations.Transformation) (*image.RGBA, error) {
 			called = true
 			return canvas, nil
 		})
 
-	out, err := images.FromBytes(solidPNG(t, 4, 4, color.RGBA{R: 255, A: 255})).Grayscale().ToBytes()
+	out, err := images.FromBytes(solidPNG(t, 4, 4, color.RGBA{R: 255, A: 255})).Grayscale().ToBytes(context.Background())
 	if err != nil {
 		t.Fatalf("ToBytes: %v", err)
 	}
@@ -755,7 +756,7 @@ func TestExtendRegistersADriver(t *testing.T) {
 	if images.GetDefaultDriver() != "fake" {
 		t.Fatalf("default driver = %s, want fake", images.GetDefaultDriver())
 	}
-	out, err := images.FromBytes(solidPNG(t, 2, 2, color.RGBA{A: 255})).Grayscale().ToBytes()
+	out, err := images.FromBytes(solidPNG(t, 2, 2, color.RGBA{A: 255})).Grayscale().ToBytes(context.Background())
 	if err != nil {
 		t.Fatalf("ToBytes: %v", err)
 	}
@@ -766,11 +767,13 @@ func TestExtendRegistersADriver(t *testing.T) {
 
 type fakeDriver struct{}
 
-func (fakeDriver) Process([]byte, *himage.ImagePipeline) ([]byte, error) {
+func (fakeDriver) Process(context.Context, []byte, *himage.ImagePipeline) ([]byte, error) {
 	return []byte("processed"), nil
 }
-func (fakeDriver) Dimensions([]byte) (int, int, error)  { return 1, 1, nil }
-func (fakeDriver) DominantColor([]byte) (string, error) { return "#000000", nil }
+func (fakeDriver) Dimensions([]byte) (int, int, error) { return 1, 1, nil }
+func (fakeDriver) DominantColor(context.Context, []byte) (string, error) {
+	return "#000000", nil
+}
 func (d fakeDriver) TransformUsing(string, himage.TransformationHandler) himage.Driver {
 	return d
 }
@@ -832,11 +835,11 @@ func TestQualityIsClampedToTheValidRange(t *testing.T) {
 	images := himage.NewImageManager()
 	source := solidPNG(t, 32, 32, color.RGBA{R: 90, G: 140, B: 210, A: 255})
 
-	low, err := images.FromBytes(source).ToJpg().Quality(-5).ToBytes()
+	low, err := images.FromBytes(source).ToJpg().Quality(-5).ToBytes(context.Background())
 	if err != nil {
 		t.Fatalf("ToBytes: %v", err)
 	}
-	high, err := images.FromBytes(source).ToJpg().Quality(500).ToBytes()
+	high, err := images.FromBytes(source).ToJpg().Quality(500).ToBytes(context.Background())
 	if err != nil {
 		t.Fatalf("ToBytes: %v", err)
 	}
@@ -851,7 +854,7 @@ func TestOptimizeSetsBothFormatAndQuality(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Optimize: %v", err)
 	}
-	mediaType, err := img.MimeType()
+	mediaType, err := img.MimeType(context.Background())
 	if err != nil {
 		t.Fatalf("MimeType: %v", err)
 	}
@@ -867,11 +870,11 @@ func TestWidthAndHeightAnswerFromTheProcessedImage(t *testing.T) {
 	images := himage.NewImageManager()
 	img := images.FromBytes(solidPNG(t, 40, 20, color.RGBA{A: 255})).Cover(12, 6)
 
-	w, err := img.Width()
+	w, err := img.Width(context.Background())
 	if err != nil {
 		t.Fatalf("Width: %v", err)
 	}
-	h, err := img.Height()
+	h, err := img.Height(context.Background())
 	if err != nil {
 		t.Fatalf("Height: %v", err)
 	}
@@ -885,14 +888,14 @@ func TestUsingNamesTheDriverForOneImageOnly(t *testing.T) {
 	images.Extend("fake", func() (himage.Driver, error) { return fakeDriver{}, nil })
 
 	img := images.FromBytes(solidPNG(t, 2, 2, color.RGBA{A: 255}))
-	out, err := img.Using("fake").Grayscale().ToBytes()
+	out, err := img.Using("fake").Grayscale().ToBytes(context.Background())
 	if err != nil {
 		t.Fatalf("ToBytes: %v", err)
 	}
 	if string(out) != "processed" {
 		t.Fatalf("out = %q, want the named driver's answer", out)
 	}
-	if _, err := img.Grayscale().ToBytes(); err != nil {
+	if _, err := img.Grayscale().ToBytes(context.Background()); err != nil {
 		t.Fatalf("the default driver stopped working: %v", err)
 	}
 }
@@ -965,7 +968,7 @@ func TestAnOversizedDeclarationIsRefusedBeforeThePixelsAreAllocated(t *testing.T
 
 	var err error
 	allocated := allocatedDuring(func() {
-		_, err = images.FromBytes(bomb).Grayscale().ToBytes()
+		_, err = images.FromBytes(bomb).Grayscale().ToBytes(context.Background())
 	})
 
 	if !errors.Is(err, himage.ErrTooLarge) {
@@ -991,13 +994,13 @@ func TestTheCeilingIsWhatTheManagerWasTold(t *testing.T) {
 	images := himage.NewImageManager().MaxPixels(100)
 	source := solidPNG(t, 20, 20, color.RGBA{A: 255}) // four hundred pixels
 
-	_, err := images.FromBytes(source).Grayscale().ToBytes()
+	_, err := images.FromBytes(source).Grayscale().ToBytes(context.Background())
 	if !errors.Is(err, himage.ErrTooLarge) {
 		t.Fatalf("err = %v, want ErrTooLarge under a ceiling of 100 pixels", err)
 	}
 
 	images.MaxPixels(0)
-	if _, err := images.FromBytes(source).Grayscale().ToBytes(); err != nil {
+	if _, err := images.FromBytes(source).Grayscale().ToBytes(context.Background()); err != nil {
 		t.Fatalf("ToBytes: %v; zero must put the default ceiling back", err)
 	}
 }
@@ -1010,7 +1013,7 @@ func TestTheCeilingCoversTheDominantColourToo(t *testing.T) {
 
 	var err error
 	allocated := allocatedDuring(func() {
-		_, err = images.FromBytes(craftedPNG(t, 12000, 12000)).DominantColor()
+		_, err = images.FromBytes(craftedPNG(t, 12000, 12000)).DominantColor(context.Background())
 	})
 
 	if !errors.Is(err, himage.ErrTooLarge) {
@@ -1038,11 +1041,154 @@ func TestAnImageTooLargeToDecodeIsStillStoredAndMeasured(t *testing.T) {
 		t.Fatalf("stored %q with %d bytes, want the file exactly as it arrived", key, len(disk.body))
 	}
 
-	w, h, err := images.FromBytes(bomb).Dimensions()
+	w, h, err := images.FromBytes(bomb).Dimensions(context.Background())
 	if err != nil {
 		t.Fatalf("Dimensions: %v", err)
 	}
 	if w != 12000 || h != 12000 {
 		t.Fatalf("dimensions = %dx%d, want the 12000x12000 the header declares", w, h)
+	}
+}
+
+// countingContext reports how many times the work asked whether it was still
+// wanted, and goes done at the count the test chose.
+//
+// It is what a test uses instead of a sleep racing a resize. Timing answers the
+// question about as well as a coin: this answers it exactly, because a pass
+// that reads the context once a row asks four hundred times where one that
+// reads it between transformations asks twice.
+type countingContext struct {
+	context.Context
+
+	mu     sync.Mutex
+	calls  int
+	doneAt int
+	closed bool
+	done   chan struct{}
+}
+
+func newCountingContext(doneAt int) *countingContext {
+	return &countingContext{Context: context.Background(), doneAt: doneAt, done: make(chan struct{})}
+}
+
+func (c *countingContext) Done() <-chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls++
+	if c.calls >= c.doneAt && !c.closed {
+		c.closed = true
+		close(c.done)
+	}
+	return c.done
+}
+
+func (c *countingContext) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return context.Canceled
+	}
+	return nil
+}
+
+func (c *countingContext) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
+}
+
+// TestALongResizeStopsPartWayThrough is the claim that a resize already running
+// can be stopped, which is a different claim from a resize refusing to start.
+//
+// The context goes done at its fiftieth reading. A resample that reads it once
+// a row reaches fifty at the forty-eighth row of four hundred and stops there;
+// one that read it only before each pass would reach three, never go done at
+// all, and hand back a finished image -- so the first assertion below is the
+// one that fails when the check leaves the loop. The allocation says the same
+// thing in bytes: the vertical pass allocates 19 MiB for its output and runs
+// after the horizontal one, which is where this stops.
+func TestALongResizeStopsPartWayThrough(t *testing.T) {
+	images := himage.NewImageManager()
+	img, err := images.FromBytes(solidPNG(t, 400, 400, color.RGBA{B: 200, A: 255})).Resize(1200, 4000)
+	if err != nil {
+		t.Fatalf("Resize: %v", err)
+	}
+
+	ctx := newCountingContext(50)
+	var out []byte
+	allocated := allocatedDuring(func() { out, err = img.ToBytes(ctx) })
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled: the resize ran to the end without reading the context again", err)
+	}
+	if out != nil {
+		t.Fatalf("%d bytes came back from a resize that was stopped", len(out))
+	}
+	if got := ctx.count(); got != 50 {
+		t.Fatalf("the work read the context %d times, want the 50 it was stopped at", got)
+	}
+	if allocated > 8<<20 {
+		t.Fatalf("the stopped resize allocated %d bytes, and the canvas it never reached is %d: the passes ran to the end",
+			allocated, 4*1200*4000)
+	}
+}
+
+// TestAHandlerIsHandedTheContextTheWorkIsRunningUnder: a registered handler is
+// part of the pipeline, so it is given the context the rest of the pipeline is
+// bounded by -- and cancelling it there stops the resize that comes after it
+// before that resize allocates its output canvas.
+func TestAHandlerIsHandedTheContextTheWorkIsRunningUnder(t *testing.T) {
+	images := himage.NewImageManager()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	images.TransformUsing(himage.StdDriverName, "Grayscale",
+		func(_ context.Context, canvas *image.RGBA, _ transformations.Transformation) (*image.RGBA, error) {
+			cancel()
+			return canvas, nil
+		})
+
+	img, err := images.FromBytes(solidPNG(t, 8, 8, color.RGBA{A: 255})).Grayscale().Resize(4000, 4000)
+	if err != nil {
+		t.Fatalf("Resize: %v", err)
+	}
+
+	var out []byte
+	allocated := allocatedDuring(func() { out, err = img.ToBytes(ctx) })
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if !errors.Is(err, himage.ErrImage) {
+		t.Fatalf("err = %v, want ErrImage too", err)
+	}
+	if out != nil {
+		t.Fatalf("%d bytes came back from a cancelled pipeline", len(out))
+	}
+	if allocated > 8<<20 {
+		t.Fatalf("the cancelled resize allocated %d bytes of the %d its output canvas needs: the loop ran to the end",
+			allocated, 4*4000*4000)
+	}
+}
+
+// TestACancelledContextIsRefusedBeforeTheDecode, and the image survives it: a
+// pipeline that was stopped wrote nothing back, so the same call made with a
+// context that lasts still produces the image.
+func TestACancelledContextIsRefusedBeforeTheDecode(t *testing.T) {
+	images := himage.NewImageManager()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	img := images.FromBytes(solidPNG(t, 8, 8, color.RGBA{R: 255, A: 255})).Grayscale()
+	if _, err := img.ToBytes(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+
+	out, err := img.ToBytes(context.Background())
+	if err != nil {
+		t.Fatalf("ToBytes: %v; a cancelled run must leave the image as it was", err)
+	}
+	if got := decode(t, out).RGBAAt(1, 1); got.R != got.G || got.G != got.B {
+		t.Fatalf("pixel = %v, want the grey the surviving pipeline still owed", got)
 	}
 }

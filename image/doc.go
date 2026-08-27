@@ -56,6 +56,18 @@
 // and an image nobody asked to transform is never decoded at all -- it can be
 // stored, and its header can be read, at any size.
 //
+// # Stopping work nobody is waiting for
+//
+// Every method that reaches the pixels takes a context, and the pixel loops
+// under it read that context as they go, once a line. A resize the caller
+// stopped waiting for returns the context's error rather than finishing, and
+// what it had built is dropped -- the Image is left exactly as it was, so the
+// same call can be made again.
+//
+// [Image.ToResponse] is the one that takes no context, because the request it
+// is handed already carries one: a browser that goes away mid-resize cancels
+// it.
+//
 // # Resizing, and why it looks the way it does
 //
 // [Image.Resize], [Image.Cover], [Image.Contain] and [Image.Scale] resample
