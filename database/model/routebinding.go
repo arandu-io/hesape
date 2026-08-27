@@ -45,13 +45,13 @@ func (m *Model[T]) ResolveRouteBindingQuery(b *Builder[T], value any, field stri
 // Nothing matched is a nil model with a nil error, which is a 404 and not a
 // failure.
 func (m *Model[T]) ResolveRouteBinding(ctx context.Context, g auth.Grant, value any, field string) (*Model[T], error) {
-	return m.ResolveRouteBindingQuery(m.NewQuery(), value, field).First(ctx, g)
+	return m.ResolveRouteBindingQuery(m.NewQuery(), value, field).first(ctx, g)
 }
 
 // ResolveSoftDeletableRouteBinding is the same lookup as
 // ResolveRouteBinding, trashed rows included.
 func (m *Model[T]) ResolveSoftDeletableRouteBinding(ctx context.Context, g auth.Grant, value any, field string) (*Model[T], error) {
-	return m.ResolveRouteBindingQuery(m.NewQuery().WithTrashed(), value, field).First(ctx, g)
+	return m.ResolveRouteBindingQuery(m.NewQuery().WithTrashed(), value, field).first(ctx, g)
 }
 
 // ChildRouteBindingRelationshipName returns the relation a scoped nested

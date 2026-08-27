@@ -581,12 +581,12 @@ func (m *Model[T]) Destroy(ctx context.Context, g auth.Grant, ids ...any) (int, 
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	models, err := m.NewQuery().WhereKey(ids).Get(ctx, g)
+	found, err := m.NewQuery().WhereKey(ids).get(ctx, g)
 	if err != nil {
 		return 0, err
 	}
 	count := 0
-	for _, model := range models {
+	for _, model := range found {
 		deleted, err := model.Delete(ctx, g)
 		if err != nil {
 			return count, err
@@ -608,7 +608,7 @@ func (m *Model[T]) Fresh(ctx context.Context, g auth.Grant, with ...string) (*Mo
 	}
 	q := m.NewQueryWithoutScopes().With(with...)
 	m.setKeysForSelectQuery(q)
-	return q.First(ctx, g)
+	return q.first(ctx, g)
 }
 
 // Refresh reads the same row again, into this model.
@@ -626,7 +626,7 @@ func (m *Model[T]) Refresh(ctx context.Context, g auth.Grant) error {
 	}
 	q := m.NewQueryWithoutScopes()
 	m.setKeysForSelectQuery(q)
-	fresh, err := q.FirstOrFail(ctx, g)
+	fresh, err := q.firstOrFail(ctx, g)
 	if err != nil {
 		return err
 	}
@@ -700,23 +700,23 @@ func (m *Model[T]) Load(ctx context.Context, g auth.Grant, relations ...string) 
 	if len(relations) == 0 {
 		return nil
 	}
-	return m.NewQueryWithoutRelationships().With(relations...).EagerLoadRelations(ctx, g, Collection[T]{m})
+	return m.NewQueryWithoutRelationships().With(relations...).eagerLoadRelations(ctx, g, models[T]{m})
 }
 
 // LoadMissing eager loads these relations onto this model, skipping the ones
 // already loaded.
 func (m *Model[T]) LoadMissing(ctx context.Context, g auth.Grant, relations ...string) error {
-	return Collection[T]{m}.LoadMissing(ctx, g, relations...)
+	return models[T]{m}.LoadMissing(ctx, g, relations...)
 }
 
 // LoadCount loads the count of each relation onto this model.
 func (m *Model[T]) LoadCount(ctx context.Context, g auth.Grant, relations ...string) error {
-	return Collection[T]{m}.LoadCount(ctx, g, relations...)
+	return models[T]{m}.LoadCount(ctx, g, relations...)
 }
 
 // LoadAggregate loads function over column of each relation onto this model.
 func (m *Model[T]) LoadAggregate(ctx context.Context, g auth.Grant, relations []string, column, function string) error {
-	return Collection[T]{m}.LoadAggregate(ctx, g, relations, column, function)
+	return models[T]{m}.LoadAggregate(ctx, g, relations, column, function)
 }
 
 // GetRelation returns the value loaded for a relation, and whether it was

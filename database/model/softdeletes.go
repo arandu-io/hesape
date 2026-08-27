@@ -163,12 +163,12 @@ func (m *Model[T]) ForceDestroy(ctx context.Context, g auth.Grant, ids ...any) (
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	models, err := m.NewQuery().WithTrashed().WhereKey(ids).Get(ctx, g)
+	found, err := m.NewQuery().WithTrashed().WhereKey(ids).get(ctx, g)
 	if err != nil {
 		return 0, err
 	}
 	count := 0
-	for _, model := range models {
+	for _, model := range found {
 		deleted, err := model.ForceDelete(ctx, g)
 		if err != nil {
 			return count, err
