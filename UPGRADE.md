@@ -127,6 +127,50 @@ Package functions: `CountBy`, `Map`, `MapWithKeys`, `Related`,
 `database/model/factories`, on `*Factory[T]`: `AfterCreating`, `Create`,
 `CreateOne`, `Make`, `MakeOne`.
 
+### A query built on a `Connection` is renumbered for Postgres
+
+No signature moved, so `apidiff` says nothing about this one. It is here because
+the statement your driver receives changed.
+
+Every grammar compiles a placeholder as `?`, Postgres included, and the
+translation to `$1, $2` was reached from the instrumented handle, from a
+transaction on it and from the migration adapter — and from nowhere on
+`database.Connection`, which is what a query builder runs on. So a query built
+with `connection.Table(...)` arrived at pgx still carrying `?`, which it does not
+accept, on the read and on all three writes.
+
+`Connection` renumbers now, once, for every statement that carries values.
+Nothing that worked before stops working: a statement written with `$1` holds no
+`?` and is left alone, and one written with `?` was failing at the server.
+
+Two consequences worth knowing:
+
+- A statement carrying **no** bindings is left alone, `Unprepared` included. It
+  has no placeholder to number, so a `?` in one is an operator — Postgres spells
+  jsonb containment that way — or a character in a literal.
+- The query log, `Pretend` and a `QueryException` now carry the statement as it
+  was sent rather than as it was written. On Postgres that means `$1` where it
+  used to read `?`. A test asserting the portable form against a Postgres
+  connection is the one thing here that can stop passing.
+
+`?` as an **operator** in a statement that also carries values is still
+renumbered, and that predates this: `where "data" ? 'k' and "tenant_id" = ?`
+becomes `where "data" $1 'k' and "tenant_id" = $2` on the instrumented handle as
+well. Write that comparison with `jsonb_exists` until it is fixed.
+
+### `*database.DB` gained seven methods
+
+An addition, and listed only for the one way an addition breaks a build: a type
+that embeds `*database.DB` — or `*data.DB`, which is an alias of it — alongside
+something else declaring `Select`, `Insert`, `Update`, `Delete`, `Statement`,
+`GetQueryGrammar` or `GetPostProcessor` now has an ambiguous selector. Name the
+one you meant, or declare the method on your own type, where it wins outright.
+
+What it buys is that the handle a module constructor receives satisfies
+`database/model.DB`, so `model.Query[Widget](r.db)` compiles with it and every
+statement keeps reaching the Collector, keeps being renumbered, and keeps
+joining an open `database.Transaction`.
+
 ---
 
 ## v0.11.0 — the console takes the gauge registry
