@@ -44,14 +44,14 @@ func (m *Model[T]) ResolveRouteBindingQuery(b *Builder[T], value any, field stri
 //
 // Nothing matched is a nil model with a nil error, which is a 404 and not a
 // failure.
-func (m *Model[T]) ResolveRouteBinding(ctx context.Context, g auth.Grant, value any, field string) (*Model[T], error) {
-	return m.ResolveRouteBindingQuery(m.NewQuery(), value, field).first(ctx, g)
+func (m *Model[T]) ResolveRouteBinding(ctx context.Context, g auth.Grant, value any, field string) (*T, error) {
+	return m.ResolveRouteBindingQuery(m.NewQuery(), value, field).First(ctx, g)
 }
 
 // ResolveSoftDeletableRouteBinding is the same lookup as
 // ResolveRouteBinding, trashed rows included.
-func (m *Model[T]) ResolveSoftDeletableRouteBinding(ctx context.Context, g auth.Grant, value any, field string) (*Model[T], error) {
-	return m.ResolveRouteBindingQuery(m.NewQuery().WithTrashed(), value, field).first(ctx, g)
+func (m *Model[T]) ResolveSoftDeletableRouteBinding(ctx context.Context, g auth.Grant, value any, field string) (*T, error) {
+	return m.ResolveRouteBindingQuery(m.NewQuery().WithTrashed(), value, field).First(ctx, g)
 }
 
 // ChildRouteBindingRelationshipName returns the relation a scoped nested
@@ -74,7 +74,7 @@ func ChildRouteBindingRelationshipName(childType string) string {
 // The Grant is filtered on by First, on the child's own table. A nested
 // resource scoped only by its parent is still a row somebody else owns when
 // the parent was reached without a tenant filter, so both ends carry it.
-func ResolveChildRouteBinding[T, R any](ctx context.Context, parent *Model[T], children *Builder[R], g auth.Grant, childType string, value any, field string) (*Model[R], error) {
+func ResolveChildRouteBinding[T, R any](ctx context.Context, parent *Model[T], children *Builder[R], g auth.Grant, childType string, value any, field string) (*R, error) {
 	q, err := childRouteBindingQuery(parent, children, childType, value, field)
 	if err != nil {
 		return nil, err
@@ -84,7 +84,7 @@ func ResolveChildRouteBinding[T, R any](ctx context.Context, parent *Model[T], c
 
 // ResolveSoftDeletableChildRouteBinding is the same lookup as
 // ResolveChildRouteBinding, trashed rows included.
-func ResolveSoftDeletableChildRouteBinding[T, R any](ctx context.Context, parent *Model[T], children *Builder[R], g auth.Grant, childType string, value any, field string) (*Model[R], error) {
+func ResolveSoftDeletableChildRouteBinding[T, R any](ctx context.Context, parent *Model[T], children *Builder[R], g auth.Grant, childType string, value any, field string) (*R, error) {
 	q, err := childRouteBindingQuery(parent, children, childType, value, field)
 	if err != nil {
 		return nil, err

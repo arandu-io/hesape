@@ -266,35 +266,35 @@ func (b *Builder[T]) Restore(ctx context.Context, g auth.Grant) (int64, error) {
 
 // RestoreOrCreate finds the first trashed-or-not row matching attributes and
 // restores it, or creates one from attributes and values if none matches.
-func (b *Builder[T]) RestoreOrCreate(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+func (b *Builder[T]) RestoreOrCreate(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*T, error) {
 	if err := b.requireSoftDeletes("restoreOrCreate"); err != nil {
 		return nil, err
 	}
-	model, err := b.WithTrashed().FirstOrCreate(ctx, g, attributes, values)
+	model, err := b.WithTrashed().firstOrCreate(ctx, g, attributes, values)
 	if err != nil {
 		return nil, err
 	}
 	if _, err := model.Restore(ctx, g); err != nil {
 		return nil, err
 	}
-	return model, nil
+	return b.result(model), nil
 }
 
 // CreateOrRestore finds the first row matching attributes, including
 // trashed, and restores it if trashed; otherwise it creates one from
 // attributes and values.
-func (b *Builder[T]) CreateOrRestore(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+func (b *Builder[T]) CreateOrRestore(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*T, error) {
 	if err := b.requireSoftDeletes("createOrRestore"); err != nil {
 		return nil, err
 	}
-	model, err := b.WithTrashed().CreateOrFirst(ctx, g, attributes, values)
+	model, err := b.WithTrashed().createOrFirst(ctx, g, attributes, values)
 	if err != nil {
 		return nil, err
 	}
 	if _, err := model.Restore(ctx, g); err != nil {
 		return nil, err
 	}
-	return model, nil
+	return b.result(model), nil
 }
 
 func (b *Builder[T]) requireSoftDeletes(method string) error {

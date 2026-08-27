@@ -53,15 +53,15 @@ func TestLoadMorphSkipsARelationThatPointsAtNothing(t *testing.T) {
 }
 
 func TestCollectionLoadMorphWalksEveryModel(t *testing.T) {
-	first, _ := newUserModel()
-	second, _ := newUserModel()
+	first, _ := newAccountModel()
+	second, _ := newAccountModel()
 
-	target, _ := newUserModel()
+	target, _ := newAccountModel()
 	target.Exists = true
 	first.SetRelation("commentable", target)
 	second.SetRelation("commentable", target)
 
-	if err := (Collection[user]{first, second}).LoadMorph(context.Background(), grant(), "commentable", nil); err != nil {
+	if err := (Collection[account]{first.Entity, second.Entity}).LoadMorph(context.Background(), grant(), "commentable", nil); err != nil {
 		t.Fatalf("LoadMorph: %v", err)
 	}
 }

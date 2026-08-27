@@ -89,7 +89,7 @@ func TestRelatedReadsBackWhatARelationLoaded(t *testing.T) {
 	if !ok {
 		t.Fatal("Related did not read back what the relation loaded")
 	}
-	if len(friends) != 2 || friends[0].Entity.Name != "Ada" || friends[1].Entity.Name != "Grace" {
+	if len(friends) != 2 || friends[0].Name != "Ada" || friends[1].Name != "Grace" {
 		t.Fatalf("friends = %v, want the two models in order", friends)
 	}
 

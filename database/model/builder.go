@@ -585,7 +585,7 @@ func (b *Builder[T]) Hydrate(items []query.Record) (Collection[T], error) {
 	if err != nil {
 		return nil, err
 	}
-	return Collection[T](found), nil
+	return found.entities(), nil
 }
 
 // hydrate is Hydrate with the models still in hand.
@@ -663,7 +663,7 @@ func (b *Builder[T]) get(ctx context.Context, g auth.Grant, columns ...any) (mod
 // results is what get's models become for a caller: the after-query callbacks,
 // over the rows.
 func (b *Builder[T]) results(found models[T]) Collection[T] {
-	return b.ApplyAfterQueryCallbacks(Collection[T](found))
+	return b.ApplyAfterQueryCallbacks(found.entities())
 }
 
 // result is results for a terminal that matched at most one row.
@@ -671,9 +671,12 @@ func (b *Builder[T]) results(found models[T]) Collection[T] {
 // A First is a Get with a limit of one, so its row is a one-row result and the
 // callbacks see it as one. Nothing matched stays nothing matched: a callback
 // that replaced an empty result would be answering a question nobody asked.
-func (b *Builder[T]) result(model *Model[T]) *Model[T] {
-	if model == nil || len(b.afterQueryCallbacks) == 0 {
-		return model
+func (b *Builder[T]) result(model *Model[T]) *T {
+	if model == nil {
+		return nil
+	}
+	if len(b.afterQueryCallbacks) == 0 {
+		return model.Entity
 	}
 	return b.results(models[T]{model}).First()
 }
@@ -687,7 +690,7 @@ func (b *Builder[T]) GetModels(ctx context.Context, g auth.Grant, columns ...any
 	if err != nil {
 		return nil, err
 	}
-	return Collection[T](found), nil
+	return found.entities(), nil
 }
 
 // getModels is GetModels with the models still in hand. See hydrate.
@@ -734,7 +737,7 @@ func (b *Builder[T]) ApplyAfterQueryCallbacks(result Collection[T]) Collection[T
 // First returns the first row matching the query, or (nil, nil) when there
 // is none: no row is not a failure, and FirstOrFail is the spelling for when
 // it is.
-func (b *Builder[T]) First(ctx context.Context, g auth.Grant, columns ...any) (*Model[T], error) {
+func (b *Builder[T]) First(ctx context.Context, g auth.Grant, columns ...any) (*T, error) {
 	model, err := b.first(ctx, g, columns...)
 	return b.result(model), err
 }
@@ -754,7 +757,7 @@ func (b *Builder[T]) first(ctx context.Context, g auth.Grant, columns ...any) (*
 
 // FirstOrFail returns the first row matching the query, or an error when
 // there is none.
-func (b *Builder[T]) FirstOrFail(ctx context.Context, g auth.Grant, columns ...any) (*Model[T], error) {
+func (b *Builder[T]) FirstOrFail(ctx context.Context, g auth.Grant, columns ...any) (*T, error) {
 	model, err := b.firstOrFail(ctx, g, columns...)
 	if err != nil {
 		return nil, err
@@ -777,7 +780,7 @@ func (b *Builder[T]) firstOrFail(ctx context.Context, g auth.Grant, columns ...a
 
 // FirstOr returns the first row matching the query, or what callback makes
 // when there is none.
-func (b *Builder[T]) FirstOr(ctx context.Context, g auth.Grant, callback func() (*Model[T], error), columns ...any) (*Model[T], error) {
+func (b *Builder[T]) FirstOr(ctx context.Context, g auth.Grant, callback func() (*T, error), columns ...any) (*T, error) {
 	model, err := b.first(ctx, g, columns...)
 	if err != nil {
 		return nil, err
@@ -789,13 +792,13 @@ func (b *Builder[T]) FirstOr(ctx context.Context, g auth.Grant, callback func() 
 }
 
 // FirstWhere adds a where clause and returns the first matching row.
-func (b *Builder[T]) FirstWhere(ctx context.Context, g auth.Grant, column any, args ...any) (*Model[T], error) {
+func (b *Builder[T]) FirstWhere(ctx context.Context, g auth.Grant, column any, args ...any) (*T, error) {
 	return b.Where(column, args...).First(ctx, g)
 }
 
 // Sole returns the row matching the query, and fails unless it is the only
 // one.
-func (b *Builder[T]) Sole(ctx context.Context, g auth.Grant, columns ...any) (*Model[T], error) {
+func (b *Builder[T]) Sole(ctx context.Context, g auth.Grant, columns ...any) (*T, error) {
 	model, err := b.sole(ctx, g, columns...)
 	if err != nil {
 		return nil, err
@@ -822,7 +825,7 @@ func (b *Builder[T]) sole(ctx context.Context, g auth.Grant, columns ...any) (*M
 
 // Find returns the row with the given primary key, or the rows for a slice
 // of keys.
-func (b *Builder[T]) Find(ctx context.Context, g auth.Grant, id any, columns ...any) (*Model[T], error) {
+func (b *Builder[T]) Find(ctx context.Context, g auth.Grant, id any, columns ...any) (*T, error) {
 	model, err := b.find(ctx, g, id, columns...)
 	if err != nil {
 		return nil, err
@@ -866,7 +869,7 @@ func (b *Builder[T]) findMany(ctx context.Context, g auth.Grant, ids []any, colu
 //
 // Given a list it also fails when one id is missing: asking for three rows
 // and getting two is not a shorter result, it is a wrong one.
-func (b *Builder[T]) FindOrFail(ctx context.Context, g auth.Grant, id any, columns ...any) (*Model[T], error) {
+func (b *Builder[T]) FindOrFail(ctx context.Context, g auth.Grant, id any, columns ...any) (*T, error) {
 	model, err := b.findOrFail(ctx, g, id, columns...)
 	if err != nil {
 		return nil, err
@@ -899,7 +902,7 @@ func (b *Builder[T]) findOrFail(ctx context.Context, g auth.Grant, id any, colum
 
 // FindOrNew returns the row with the given primary key, or a new unsaved
 // model when there is none.
-func (b *Builder[T]) FindOrNew(ctx context.Context, g auth.Grant, id any, columns ...any) (*Model[T], error) {
+func (b *Builder[T]) FindOrNew(ctx context.Context, g auth.Grant, id any, columns ...any) (*T, error) {
 	model, err := b.find(ctx, g, id, columns...)
 	if err != nil {
 		return nil, err
@@ -907,12 +910,16 @@ func (b *Builder[T]) FindOrNew(ctx context.Context, g auth.Grant, id any, column
 	if model != nil {
 		return b.result(model), nil
 	}
-	return b.NewModelInstance(nil)
+	instance, err := b.NewModelInstance(nil)
+	if err != nil {
+		return nil, err
+	}
+	return instance.Entity, nil
 }
 
 // FirstOrNew returns the first row matching attributes, or a new unsaved
 // model built from attributes and values when there is none.
-func (b *Builder[T]) FirstOrNew(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+func (b *Builder[T]) FirstOrNew(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*T, error) {
 	model, err := b.clone().whereAll(attributes).first(ctx, g)
 	if err != nil {
 		return nil, err
@@ -920,12 +927,16 @@ func (b *Builder[T]) FirstOrNew(ctx context.Context, g auth.Grant, attributes, v
 	if model != nil {
 		return b.result(model), nil
 	}
-	return b.NewModelInstance(mergeMaps(attributes, values))
+	instance, err := b.NewModelInstance(mergeMaps(attributes, values))
+	if err != nil {
+		return nil, err
+	}
+	return instance.Entity, nil
 }
 
 // FirstOrCreate returns the first row matching attributes, or creates and
 // returns one from attributes and values when there is none.
-func (b *Builder[T]) FirstOrCreate(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+func (b *Builder[T]) FirstOrCreate(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*T, error) {
 	model, err := b.firstOrCreate(ctx, g, attributes, values)
 	if err != nil {
 		return nil, err
@@ -952,7 +963,7 @@ func (b *Builder[T]) firstOrCreate(ctx context.Context, g auth.Grant, attributes
 // Nothing here classifies a driver error yet, so any insert failure sends it
 // looking for the row, and the insert error is returned when there is none
 // -- which keeps the race safe and never swallows a real failure.
-func (b *Builder[T]) CreateOrFirst(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+func (b *Builder[T]) CreateOrFirst(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*T, error) {
 	model, err := b.createOrFirst(ctx, g, attributes, values)
 	if err != nil {
 		return nil, err
@@ -976,13 +987,13 @@ func (b *Builder[T]) createOrFirst(ctx context.Context, g auth.Grant, attributes
 
 // UpdateOrCreate finds or creates a row matching attributes, then fills it
 // with values and saves it.
-func (b *Builder[T]) UpdateOrCreate(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+func (b *Builder[T]) UpdateOrCreate(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*T, error) {
 	model, err := b.firstOrCreate(ctx, g, attributes, values)
 	if err != nil {
 		return nil, err
 	}
 	if model.WasRecentlyCreated {
-		return model, nil
+		return b.result(model), nil
 	}
 	if err := model.Fill(values); err != nil {
 		return nil, err
@@ -990,7 +1001,7 @@ func (b *Builder[T]) UpdateOrCreate(ctx context.Context, g auth.Grant, attribute
 	if _, err := model.Save(ctx, g); err != nil {
 		return nil, err
 	}
-	return model, nil
+	return b.result(model), nil
 }
 
 // whereAll adds one equality where clause per entry in attributes.
@@ -1072,8 +1083,12 @@ func (b *Builder[T]) Exists(ctx context.Context, g auth.Grant) (bool, error) {
 }
 
 // Create returns a new model, filled with attributes and saved.
-func (b *Builder[T]) Create(ctx context.Context, g auth.Grant, attributes map[string]any) (*Model[T], error) {
-	return b.create(ctx, g, attributes)
+func (b *Builder[T]) Create(ctx context.Context, g auth.Grant, attributes map[string]any) (*T, error) {
+	instance, err := b.create(ctx, g, attributes)
+	if err != nil {
+		return nil, err
+	}
+	return instance.Entity, nil
 }
 
 // create is Create with the model still in hand. See get.
@@ -1095,7 +1110,7 @@ func (b *Builder[T]) create(ctx context.Context, g auth.Grant, attributes map[st
 // what ForceCreate keeps from Create is ForceFill's behavior: an attribute
 // the entity does not declare is carried through as a raw attribute instead
 // of dropped.
-func (b *Builder[T]) ForceCreate(ctx context.Context, g auth.Grant, attributes map[string]any) (*Model[T], error) {
+func (b *Builder[T]) ForceCreate(ctx context.Context, g auth.Grant, attributes map[string]any) (*T, error) {
 	instance, err := b.model.NewInstance(nil, false)
 	if err != nil {
 		return nil, err
@@ -1106,7 +1121,7 @@ func (b *Builder[T]) ForceCreate(ctx context.Context, g auth.Grant, attributes m
 	if _, err := instance.Save(ctx, g); err != nil {
 		return nil, err
 	}
-	return instance, nil
+	return instance.Entity, nil
 }
 
 // Insert writes values as new rows.
@@ -1404,7 +1419,7 @@ func (b *Builder[T]) WithoutGlobalScopesExcept(identifiers ...string) *Builder[T
 
 // FindSole returns the row with the given primary key, and fails unless it
 // is the only one.
-func (b *Builder[T]) FindSole(ctx context.Context, g auth.Grant, id any, columns ...any) (*Model[T], error) {
+func (b *Builder[T]) FindSole(ctx context.Context, g auth.Grant, id any, columns ...any) (*T, error) {
 	return b.WhereKey(id).Sole(ctx, g, columns...)
 }
 
@@ -1419,7 +1434,7 @@ func (b *Builder[T]) TouchQuietly(ctx context.Context, g auth.Grant, column ...s
 // EagerLoadRelations loads every top-level relation marked with With, and
 // attaches the matches to models.
 func (b *Builder[T]) EagerLoadRelations(ctx context.Context, g auth.Grant, rows Collection[T]) error {
-	return b.eagerLoadRelations(ctx, g, models[T](rows))
+	return b.eagerLoadRelations(ctx, g, rows.models())
 }
 
 // eagerLoadRelations is EagerLoadRelations over the models, which is what it
@@ -1567,7 +1582,7 @@ func (b *Builder[T]) Chunk(ctx context.Context, g auth.Grant, count int, callbac
 
 // Each walks the query count rows at a time, calling callback for every row
 // with its overall index.
-func (b *Builder[T]) Each(ctx context.Context, g auth.Grant, count int, callback func(*Model[T], int) (bool, error)) error {
+func (b *Builder[T]) Each(ctx context.Context, g auth.Grant, count int, callback func(*T, int) (bool, error)) error {
 	return b.Chunk(ctx, g, count, func(models Collection[T], page int) (bool, error) {
 		for i, model := range models {
 			keepGoing, err := callback(model, (page-1)*count+i)
@@ -1629,8 +1644,8 @@ func (b *Builder[T]) ChunkById(ctx context.Context, g auth.Grant, count int, cal
 // It returns a range-over-func iterator directly. The error the walk
 // stopped on is reported through the pointer the caller passes, because an
 // iterator has nowhere else to put one.
-func (b *Builder[T]) Lazy(ctx context.Context, g auth.Grant, chunkSize int, err *error) func(func(*Model[T]) bool) {
-	return func(yield func(*Model[T]) bool) {
+func (b *Builder[T]) Lazy(ctx context.Context, g auth.Grant, chunkSize int, err *error) func(func(*T) bool) {
+	return func(yield func(*T) bool) {
 		stopped := false
 		chunkErr := b.Chunk(ctx, g, chunkSize, func(models Collection[T], _ int) (bool, error) {
 			for _, model := range models {
@@ -1650,8 +1665,8 @@ func (b *Builder[T]) Lazy(ctx context.Context, g auth.Grant, chunkSize int, err 
 
 // LazyById returns an iterator over the rows, fetched a chunk at a time and
 // paged by the key rather than by offset.
-func (b *Builder[T]) LazyById(ctx context.Context, g auth.Grant, chunkSize int, err *error, column ...string) func(func(*Model[T]) bool) {
-	return func(yield func(*Model[T]) bool) {
+func (b *Builder[T]) LazyById(ctx context.Context, g auth.Grant, chunkSize int, err *error, column ...string) func(func(*T) bool) {
+	return func(yield func(*T) bool) {
 		chunkErr := b.ChunkById(ctx, g, chunkSize, func(models Collection[T], _ int) (bool, error) {
 			for _, model := range models {
 				if !yield(model) {
@@ -1671,16 +1686,35 @@ func (b *Builder[T]) LazyById(ctx context.Context, g auth.Grant, chunkSize int, 
 // query.Connection hands back the rows it read, so this is a walk over one
 // result set rather than a second way to run a query -- and it stays lazy from
 // the caller's side, which is what the method is for.
-func (b *Builder[T]) Cursor(ctx context.Context, g auth.Grant, err *error) func(func(*Model[T]) bool) {
-	return func(yield func(*Model[T]) bool) {
-		models, getErr := b.Get(ctx, g)
+func (b *Builder[T]) Cursor(ctx context.Context, g auth.Grant, err *error) func(func(*T) bool) {
+	return func(yield func(*T) bool) {
+		rows, getErr := b.Get(ctx, g)
 		if getErr != nil {
 			if err != nil {
 				*err = getErr
 			}
 			return
 		}
-		for _, model := range models {
+		for _, row := range rows {
+			if !yield(row) {
+				return
+			}
+		}
+	}
+}
+
+// cursor is Cursor with the models still in hand, and without the after-query
+// callbacks. See get.
+func (b *Builder[T]) cursor(ctx context.Context, g auth.Grant, err *error) func(func(*Model[T]) bool) {
+	return func(yield func(*Model[T]) bool) {
+		found, getErr := b.get(ctx, g)
+		if getErr != nil {
+			if err != nil {
+				*err = getErr
+			}
+			return
+		}
+		for _, model := range found {
 			if !yield(model) {
 				return
 			}

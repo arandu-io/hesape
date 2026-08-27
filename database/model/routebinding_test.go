@@ -29,7 +29,7 @@ func TestResolveRouteBindingFiltersByTenant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveRouteBinding: %v", err)
 	}
-	if found == nil || found.Entity.Name != "Ada" {
+	if found == nil || found.Name != "Ada" {
 		t.Fatalf("ResolveRouteBinding found %v, want the row", found)
 	}
 

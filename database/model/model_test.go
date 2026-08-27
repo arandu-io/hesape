@@ -299,16 +299,23 @@ func TestReplicateDropsTheKeyAndTheTimestamps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Replicate: %v", err)
 	}
-	if copied.Entity.ID != 0 {
-		t.Errorf("copy carries id %d, and a replica is a new row", copied.Entity.ID)
+	if copied.ID != 0 {
+		t.Errorf("copy carries id %d, and a replica is a new row", copied.ID)
 	}
-	if !copied.Entity.CreatedAt.IsZero() {
+	if !copied.CreatedAt.IsZero() {
 		t.Error("copy carries the original created_at")
 	}
-	if copied.Entity.Name != "Ada" {
-		t.Errorf("copy lost the columns it should keep: name = %q", copied.Entity.Name)
+	if copied.Name != "Ada" {
+		t.Errorf("copy lost the columns it should keep: name = %q", copied.Name)
 	}
-	if copied.Exists {
+
+	// Whether the replica exists is the model's answer, and this entity does not
+	// embed one, so the model-side form is what carries it.
+	replica, err := model.replicate()
+	if err != nil {
+		t.Fatalf("replicate: %v", err)
+	}
+	if replica.Exists {
 		t.Error("a replica does not exist yet")
 	}
 }

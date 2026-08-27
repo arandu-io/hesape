@@ -17,18 +17,14 @@ import (
 // caller reads it with pagination.ResolveCurrentPage.
 //
 // perPage of zero means the model's own.
-func (b *Builder[T]) Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.LengthAwarePaginator[*Model[T]], error) {
-	return paginateAs(b, ctx, g, perPage, page, opts, identity[T], columns...)
+func (b *Builder[T]) Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.LengthAwarePaginator[*T], error) {
+	return paginateAs(b, ctx, g, perPage, page, opts, entityOf[T], columns...)
 }
-
-// identity is the conversion Paginate uses: the page is already of the type the
-// caller asked for.
-func identity[T any](m *Model[T]) *Model[T] { return m }
 
 // paginateAs is Paginate with the item type left open.
 //
-// It exists because the same page has to be answered as *Model[T] to the caller
-// who typed the query and as a relation's Model to the relation seam, and a Go
+// It exists because the same page has to be answered as *T to the caller who
+// typed the query and as a relation's Model to the relation seam, and a Go
 // method cannot introduce a type parameter of its own. Duplicating the body was
 // the alternative, and a paginator that counts differently in two places is the
 // bug that would follow.
@@ -45,18 +41,18 @@ func paginateAs[T, R any](b *Builder[T], ctx context.Context, g auth.Grant, perP
 		return nil, err
 	}
 
-	items := Collection[T]{}
+	items := models[T]{}
 	if total > 0 {
-		items, err = b.clone().ForPage(page, perPage).Get(ctx, g, columns...)
+		items, err = b.clone().ForPage(page, perPage).get(ctx, g, columns...)
 		if err != nil {
 			return nil, err
 		}
 	}
-	return pagination.Paginate(convertAll(items.All(), convert), int(total), perPage, page, opts), nil
+	return pagination.Paginate(convertAll(items, convert), int(total), perPage, page, opts), nil
 }
 
 // convertAll maps a page of models through the conversion its caller asked for.
-func convertAll[T, R any](items []*Model[T], convert func(*Model[T]) R) []R {
+func convertAll[T, R any](items models[T], convert func(*Model[T]) R) []R {
 	out := make([]R, 0, len(items))
 	for _, item := range items {
 		out = append(out, convert(item))
@@ -66,8 +62,8 @@ func convertAll[T, R any](items []*Model[T], convert func(*Model[T]) R) []R {
 
 // SimplePaginate returns one page and whether there is another, without the
 // count.
-func (b *Builder[T]) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[*Model[T]], error) {
-	return simplePaginateAs(b, ctx, g, perPage, page, opts, identity[T], columns...)
+func (b *Builder[T]) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[*T], error) {
+	return simplePaginateAs(b, ctx, g, perPage, page, opts, entityOf[T], columns...)
 }
 
 // simplePaginateAs is SimplePaginate with the item type left open. See
@@ -83,11 +79,11 @@ func simplePaginateAs[T, R any](b *Builder[T], ctx context.Context, g auth.Grant
 	items, err := b.clone().
 		Offset((page-1)*perPage).
 		Limit(perPage+1).
-		Get(ctx, g, columns...)
+		get(ctx, g, columns...)
 	if err != nil {
 		return nil, err
 	}
-	return pagination.SimplePaginate(convertAll(items.All(), convert), perPage, page, opts), nil
+	return pagination.SimplePaginate(convertAll(items, convert), perPage, page, opts), nil
 }
 
 // GetCountForPagination returns the row count of the query, ignoring its
@@ -111,13 +107,13 @@ func (b *Builder[T]) GetCountForPagination(ctx context.Context, g auth.Grant) (i
 // cursor is nil for the first page. The columns the query orders by are the
 // cursor's parameters, so every one of them has to be selected -- the cursor is
 // built out of the rows that come back.
-func (b *Builder[T]) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (*pagination.CursorPaginator[*Model[T]], error) {
-	return cursorPaginateAs(b, ctx, g, perPage, cursor, opts, identity[T], columns...)
+func (b *Builder[T]) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (*pagination.CursorPaginator[*T], error) {
+	return cursorPaginateAs(b, ctx, g, perPage, cursor, opts, entityOf[T], columns...)
 }
 
 // cursorPaginateAs is CursorPaginate with the item type left open. See
 // paginateAs.
-func cursorPaginateAs[T any, R attributeReader](b *Builder[T], ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, convert func(*Model[T]) R, columns ...any) (*pagination.CursorPaginator[R], error) {
+func cursorPaginateAs[T any, R comparable](b *Builder[T], ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, convert func(*Model[T]) R, columns ...any) (*pagination.CursorPaginator[R], error) {
 	if perPage <= 0 {
 		perPage = b.model.GetPerPage()
 	}
@@ -137,7 +133,7 @@ func cursorPaginateAs[T any, R attributeReader](b *Builder[T], ctx context.Conte
 		}
 	}
 
-	items, err := paginated.Limit(perPage+1).Get(ctx, g, columns...)
+	items, err := paginated.Limit(perPage+1).get(ctx, g, columns...)
 	if err != nil {
 		return nil, err
 	}
@@ -147,24 +143,28 @@ func cursorPaginateAs[T any, R attributeReader](b *Builder[T], ctx context.Conte
 		parameters = append(parameters, order.column)
 	}
 
-	// The key reads the item the paginator holds, whatever shape it was
-	// converted to. That is the whole of the constraint on R: a cursor is the
-	// value of each ordered column, and reading a column is GetAttribute.
-	key := func(item R) map[string]string {
-		out := make(map[string]string, len(parameters))
-		for _, parameter := range parameters {
-			out[parameter] = fmt.Sprint(item.GetAttribute(afterLastDot(parameter)))
-		}
-		return out
-	}
-	return pagination.CursorPaginate(convertAll(items.All(), convert), perPage, cursor, key, opts), nil
-}
+	// The cursor is built here, off the models, and the paginator reads it back
+	// by the item it holds. It is not read off the item itself because the item
+	// is whatever R the caller converted to: a row of a T that does not embed
+	// Model[T] has fields and no GetAttribute, and there is no constraint to
+	// write that would say otherwise for a T the caller chooses.
+	//
+	// That is the whole of the constraint on R: the paginator asks this map a
+	// question about an item it was handed, so the item has to be a key.
+	converted := make([]R, 0, len(items))
+	cursors := make(map[R]map[string]string, len(items))
+	for _, item := range items {
+		row := convert(item)
+		converted = append(converted, row)
 
-// attributeReader is what cursor pagination needs of the item type: a cursor
-// names the ordered columns, and reading one is GetAttribute. Both *Model[T]
-// and the interface a relation holds answer it.
-type attributeReader interface {
-	GetAttribute(key string) any
+		values := make(map[string]string, len(parameters))
+		for _, parameter := range parameters {
+			values[parameter] = fmt.Sprint(item.GetAttribute(afterLastDot(parameter)))
+		}
+		cursors[row] = values
+	}
+	key := func(item R) map[string]string { return cursors[item] }
+	return pagination.CursorPaginate(converted, perPage, cursor, key, opts), nil
 }
 
 // cursorOrder is one entry of what ensureOrderForCursorPagination returns: a

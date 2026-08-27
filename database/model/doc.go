@@ -7,6 +7,8 @@
 // with a type parameter:
 //
 //	type User struct {
+//		model.Model[User]
+//
 //		ID        int64      `db:"id"`
 //		Name      string     `db:"name"`
 //		Email     string     `db:"email"`
@@ -16,13 +18,28 @@
 //	}
 //
 //	users := model.NewModel[User]("users", conn, grammar, processor)
-//	users.SoftDeletes = true
 //
-//	found, err := users.NewQuery().Where("email", email).First(ctx, g)
+//	user, err := users.Where("email", "=", email).First(ctx, g)
 //	if err != nil {
 //		return err
 //	}
-//	fmt.Println(found.Entity.Name) // a struct field, checked by the compiler
+//	user.Name = "Ada"        // a struct field, checked by the compiler
+//	_, err = user.Save(ctx, g)
+//
+// # The row is the model
+//
+// A terminal hands back *T -- the application's own struct -- and not a wrapper
+// over it. Reading a column is reading a field, and the methods a row is saved
+// and deleted through are the ones Go promotes out of the embedded Model[T].
+// Collection is the same thing for a set of rows: []*T.
+//
+// The embedding is what makes the second half work, and it is worth saying what
+// a T that does not embed Model[T] gets instead. Everything still runs: the
+// query, the hydration, the eager load, the write. What that row cannot do is
+// answer for itself -- there is no field in it pointing at the model that
+// hydrated it, so Save, GetAttribute and the loaded relations are not reachable
+// from the value a terminal returned. The columns are all there, and nothing
+// else is. See ModelOf.
 //
 // A column is a field. The tag `db:"..."` names it; without a tag the name is
 // the field name in snake case. A field tagged `db:"-"` is not a column.

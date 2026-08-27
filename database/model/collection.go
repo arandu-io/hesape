@@ -9,225 +9,303 @@ import (
 	"github.com/arandu-io/hesape/collections"
 )
 
-// Collection is the models a query came back with.
+// Collection is the rows a query came back with.
+//
+// The items are the application's own struct -- the same value a terminal hands
+// back one of -- so reading a column off one is reading a field, and there is
+// nothing to unwrap first.
 //
 // The general collection vocabulary lives in hesape/collections, and ToBase
-// converts to it. Only the methods that know the items are models are here:
-// keyed by their key, reloaded from their table, hidden and appended per model.
-type Collection[T any] []*Model[T]
+// converts to it. Only the methods that know the items are rows of a table are
+// here: keyed by their key, reloaded from their table, hidden and appended per
+// row. Those go through the model behind each row, so they need a T that embeds
+// Model[T] -- see models for what a T that does not gets instead.
+type Collection[T any] []*T
 
-// models is the same list, held as models rather than as what a caller reads.
+// models is the same list, held as the models rather than as the rows.
 //
 // It carries the implementation, and Collection is one line per method over it.
 // The split is not a duplication: this side is what the package hands itself --
-// eager loading, Fresh, the load of an aggregate -- and it keeps working for a T
-// that does not embed Model[T], where a row has no way back to the model that
-// hydrated it. See embed.go for the two shapes.
+// eager loading, Fresh, the key a chunk resumes from -- and it keeps working for
+// a T that does not embed Model[T], where a row has no way back to the model
+// that hydrated it. See embed.go for the two shapes.
 type models[T any] []*Model[T]
 
-// ToBase returns the models as a collections.Collection.
-func (c Collection[T]) ToBase() collections.Collection[*Model[T]] { return models[T](c).ToBase() }
+// entities returns the row of every model.
+//
+// Every model has one, whichever shape T is: NewInstance allocates it, so the
+// two sides are always the same length.
+func (ms models[T]) entities() Collection[T] {
+	out := make(Collection[T], len(ms))
+	for i, model := range ms {
+		out[i] = model.Entity
+	}
+	return out
+}
 
-// All returns the models as a plain slice.
-func (c Collection[T]) All() []*Model[T] { return models[T](c).All() }
+// models returns the model behind every row.
+//
+// This is where the shape of T shows. A T that embeds Model[T] carries its model
+// inside itself, so the row is the model and this finds it. A T that does not
+// has no field to point back with: the model that hydrated it is a value of its
+// own beside it, the row is the columns and nothing else, and this answers
+// nothing.
+//
+// So every method below that reaches a model is a method for the embedding
+// shape. Nothing in this package calls one -- it holds the models already, and
+// reads them through models[T]. See embed.go and ModelOf.
+func (c Collection[T]) models() models[T] {
+	out := make(models[T], 0, len(c))
+	for _, entity := range c {
+		if model := ModelOf(entity); model != nil {
+			out = append(out, model)
+		}
+	}
+	return out
+}
 
-// Count returns the number of models.
+// ToBase returns the rows as a collections.Collection.
+func (c Collection[T]) ToBase() collections.Collection[*T] { return collections.Collect([]*T(c)) }
+
+// All returns the rows as a plain slice.
+func (c Collection[T]) All() []*T { return []*T(c) }
+
+// Count returns the number of rows.
 func (c Collection[T]) Count() int { return len(c) }
 
-// IsEmpty reports whether there are no models.
+// IsEmpty reports whether there are no rows.
 func (c Collection[T]) IsEmpty() bool { return len(c) == 0 }
 
 // IsNotEmpty reports the opposite of IsEmpty.
 func (c Collection[T]) IsNotEmpty() bool { return len(c) > 0 }
 
-// First returns the first model, or nil when there is none.
-func (c Collection[T]) First() *Model[T] { return models[T](c).First() }
+// First returns the first row, or nil when there is none.
+func (c Collection[T]) First() *T {
+	if len(c) == 0 {
+		return nil
+	}
+	return c[0]
+}
 
-// ModelKeys returns the primary key of every model.
-func (c Collection[T]) ModelKeys() []any { return models[T](c).ModelKeys() }
+// ModelKeys returns the primary key of every row.
+func (c Collection[T]) ModelKeys() []any { return c.models().ModelKeys() }
 
-// Find returns the model with this key, out of the ones already in hand.
-func (c Collection[T]) Find(key any) *Model[T] { return models[T](c).Find(key) }
+// Find returns the row with this key, out of the ones already in hand.
+func (c Collection[T]) Find(key any) *T { return entityOf(c.models().Find(key)) }
 
-// FindOrFail returns the model with this key, or an error when none matches.
-func (c Collection[T]) FindOrFail(key any) (*Model[T], error) { return models[T](c).FindOrFail(key) }
+// FindOrFail returns the row with this key, or an error when none matches.
+func (c Collection[T]) FindOrFail(key any) (*T, error) {
+	model, err := c.models().FindOrFail(key)
+	return entityOf(model), err
+}
 
-// Contains reports whether key -- a key value, or a *Model[T] to compare by
-// key -- matches one of the models.
-func (c Collection[T]) Contains(key any) bool { return models[T](c).Contains(key) }
+// Contains reports whether key -- a key value, or a row to compare by key --
+// matches one of the rows.
+func (c Collection[T]) Contains(key any) bool {
+	if entity, ok := key.(*T); ok {
+		model := ModelOf(entity)
+		return model != nil && c.models().Contains(model)
+	}
+	return c.models().Contains(key)
+}
 
 // DoesntContain reports the opposite of Contains.
 func (c Collection[T]) DoesntContain(key any) bool { return !c.Contains(key) }
 
-// Pluck returns one attribute of every model, as a slice of any: the value
+// Pluck returns one attribute of every row, as a slice of any: the value
 // is whatever that column holds.
-func (c Collection[T]) Pluck(column string) []any { return models[T](c).Pluck(column) }
+func (c Collection[T]) Pluck(column string) []any { return c.models().Pluck(column) }
 
-// GetDictionary returns the models keyed by their key, which is how every
+// GetDictionary returns the rows keyed by their key, which is how every
 // set operation here compares them.
-func (c Collection[T]) GetDictionary() map[any]*Model[T] { return models[T](c).GetDictionary() }
+func (c Collection[T]) GetDictionary() map[any]*T {
+	found := c.models()
+	out := make(map[any]*T, len(found))
+	for _, model := range found {
+		out[model.GetKey()] = model.Entity
+	}
+	return out
+}
 
-// Merge returns the other models added, with a key that is already here
+// Merge returns the other rows added, with a key that is already here
 // replaced rather than repeated.
 func (c Collection[T]) Merge(items Collection[T]) Collection[T] {
-	return Collection[T](models[T](c).Merge(models[T](items)))
+	return c.models().Merge(items.models()).entities()
 }
 
-// Load eager loads these relations onto every model.
+// Load eager loads these relations onto every row.
 func (c Collection[T]) Load(ctx context.Context, g auth.Grant, relations ...string) error {
-	return models[T](c).Load(ctx, g, relations...)
+	return c.models().Load(ctx, g, relations...)
 }
 
-// LoadMissing eager loads these relations onto every model, skipping the
+// LoadMissing eager loads these relations onto every row, skipping the
 // ones already loaded.
 func (c Collection[T]) LoadMissing(ctx context.Context, g auth.Grant, relations ...string) error {
-	return models[T](c).LoadMissing(ctx, g, relations...)
+	return c.models().LoadMissing(ctx, g, relations...)
 }
 
 // LoadAggregate loads function over column of each relation onto every
-// model.
+// row.
 func (c Collection[T]) LoadAggregate(ctx context.Context, g auth.Grant, relations []string, column, function string) error {
-	return models[T](c).LoadAggregate(ctx, g, relations, column, function)
+	return c.models().LoadAggregate(ctx, g, relations, column, function)
 }
 
-// LoadCount loads the count of each relation onto every model.
+// LoadCount loads the count of each relation onto every row.
 func (c Collection[T]) LoadCount(ctx context.Context, g auth.Grant, relations ...string) error {
 	return c.LoadAggregate(ctx, g, relations, "*", "count")
 }
 
-// LoadMax loads the max of column over each relation onto every model.
+// LoadMax loads the max of column over each relation onto every row.
 func (c Collection[T]) LoadMax(ctx context.Context, g auth.Grant, relations []string, column string) error {
 	return c.LoadAggregate(ctx, g, relations, column, "max")
 }
 
-// LoadMin loads the min of column over each relation onto every model.
+// LoadMin loads the min of column over each relation onto every row.
 func (c Collection[T]) LoadMin(ctx context.Context, g auth.Grant, relations []string, column string) error {
 	return c.LoadAggregate(ctx, g, relations, column, "min")
 }
 
-// LoadSum loads the sum of column over each relation onto every model.
+// LoadSum loads the sum of column over each relation onto every row.
 func (c Collection[T]) LoadSum(ctx context.Context, g auth.Grant, relations []string, column string) error {
 	return c.LoadAggregate(ctx, g, relations, column, "sum")
 }
 
-// LoadAvg loads the average of column over each relation onto every model.
+// LoadAvg loads the average of column over each relation onto every row.
 func (c Collection[T]) LoadAvg(ctx context.Context, g auth.Grant, relations []string, column string) error {
 	return c.LoadAggregate(ctx, g, relations, column, "avg")
 }
 
-// LoadExists loads whether each relation exists onto every model.
+// LoadExists loads whether each relation exists onto every row.
 func (c Collection[T]) LoadExists(ctx context.Context, g auth.Grant, relations ...string) error {
 	return c.LoadAggregate(ctx, g, relations, "*", "exists")
 }
 
 // Fresh returns the same rows, read again.
 //
-// A model that has since been deleted drops out of the result.
+// A row that has since been deleted drops out of the result.
 func (c Collection[T]) Fresh(ctx context.Context, g auth.Grant, with ...string) (Collection[T], error) {
-	fresh, err := models[T](c).Fresh(ctx, g, with...)
-	return Collection[T](fresh), err
+	fresh, err := c.models().Fresh(ctx, g, with...)
+	if err != nil {
+		return nil, err
+	}
+	return fresh.entities(), nil
 }
 
-// Diff returns the models that are not in items.
+// Diff returns the rows that are not in items.
 func (c Collection[T]) Diff(items Collection[T]) Collection[T] {
-	return Collection[T](models[T](c).Diff(models[T](items)))
+	return c.models().Diff(items.models()).entities()
 }
 
-// Intersect returns the models that are also in items.
+// Intersect returns the rows that are also in items.
 func (c Collection[T]) Intersect(items Collection[T]) Collection[T] {
-	return Collection[T](models[T](c).Intersect(models[T](items)))
+	return c.models().Intersect(items.models()).entities()
 }
 
-// Unique returns one model per key, the first one seen.
-func (c Collection[T]) Unique() Collection[T] { return Collection[T](models[T](c).Unique()) }
+// Unique returns one row per key, the first one seen.
+func (c Collection[T]) Unique() Collection[T] { return c.models().Unique().entities() }
 
-// Only returns the models with these keys.
+// Only returns the rows with these keys.
 func (c Collection[T]) Only(keys ...any) Collection[T] {
-	return Collection[T](models[T](c).Only(keys...))
+	return c.models().Only(keys...).entities()
 }
 
-// Except returns the models without these keys.
+// Except returns the rows without these keys.
 func (c Collection[T]) Except(keys ...any) Collection[T] {
-	return Collection[T](models[T](c).Except(keys...))
+	return c.models().Except(keys...).entities()
 }
 
-// MakeVisible calls Model.MakeVisible on every model.
+// MakeVisible calls Model.MakeVisible on every row.
 func (c Collection[T]) MakeVisible(attributes ...string) Collection[T] {
-	models[T](c).MakeVisible(attributes...)
+	c.models().MakeVisible(attributes...)
 	return c
 }
 
-// MakeHidden calls Model.MakeHidden on every model.
+// MakeHidden calls Model.MakeHidden on every row.
 func (c Collection[T]) MakeHidden(attributes ...string) Collection[T] {
-	models[T](c).MakeHidden(attributes...)
+	c.models().MakeHidden(attributes...)
 	return c
 }
 
-// SetVisible calls Model.SetVisible on every model.
+// SetVisible calls Model.SetVisible on every row.
 func (c Collection[T]) SetVisible(visible ...string) Collection[T] {
-	models[T](c).SetVisible(visible...)
+	c.models().SetVisible(visible...)
 	return c
 }
 
-// SetHidden calls Model.SetHidden on every model.
+// SetHidden calls Model.SetHidden on every row.
 func (c Collection[T]) SetHidden(hidden ...string) Collection[T] {
-	models[T](c).SetHidden(hidden...)
+	c.models().SetHidden(hidden...)
 	return c
 }
 
-// Append calls Model.Append on every model.
+// Append calls Model.Append on every row.
 func (c Collection[T]) Append(attributes ...string) Collection[T] {
-	models[T](c).Append(attributes...)
+	c.models().Append(attributes...)
 	return c
 }
 
-// SetAppends calls Model.SetAppends on every model.
+// SetAppends calls Model.SetAppends on every row.
 func (c Collection[T]) SetAppends(appends ...string) Collection[T] {
-	models[T](c).SetAppends(appends...)
+	c.models().SetAppends(appends...)
 	return c
 }
 
 // ToQuery returns a query over exactly these rows.
 //
 // A Go collection cannot hold two model types, so the only refusal is the
-// empty one -- with no model there is no table to query.
-func (c Collection[T]) ToQuery() (*Builder[T], error) { return models[T](c).ToQuery() }
+// empty one -- with no row there is no table to query.
+func (c Collection[T]) ToQuery() (*Builder[T], error) { return c.models().ToQuery() }
 
-// ToArray returns every model, serialised.
-func (c Collection[T]) ToArray() []map[string]any { return models[T](c).ToArray() }
+// ToArray returns every row, serialised.
+func (c Collection[T]) ToArray() []map[string]any { return c.models().ToArray() }
 
-// Push calls Model.Push on every model, which is what makes a loaded
+// Push calls Model.Push on every row, which is what makes a loaded
 // relation pushable.
 func (c Collection[T]) Push(ctx context.Context, g auth.Grant) (bool, error) {
-	return models[T](c).Push(ctx, g)
+	return c.models().Push(ctx, g)
 }
 
-// Flatten returns the same models as a collection of any.
+// Flatten returns the same rows as a collection of any.
 //
-// The models are the leaves -- a model is not a list -- so flattening them
+// The rows are the leaves -- a row is not a list -- so flattening them
 // changes only the element type. The depth is optional and unlimited when
 // omitted.
 func (c Collection[T]) Flatten(depth ...int) collections.Collection[any] {
-	return models[T](c).Flatten(depth...)
+	items := make(collections.Collection[any], 0, len(c))
+	for _, entity := range c {
+		items = append(items, entity)
+	}
+	return collections.Flatten(items, depth...)
 }
 
-// Flip returns the models as keys and their positions as values.
+// Flip returns the rows as keys and their positions as values.
 //
-// The keys of a Collection[T] are positions, so flipping gives model to
-// position, and a model that repeats keeps the last position.
-func (c Collection[T]) Flip() map[*Model[T]]int { return models[T](c).Flip() }
+// The keys of a Collection[T] are positions, so flipping gives row to
+// position, and a row that repeats keeps the last position.
+func (c Collection[T]) Flip() map[*T]int { return collections.Flip(c.ToBase()) }
 
-// Pad returns the models padded with value to size elements.
+// Pad returns the rows padded with value to size elements.
 //
 // A positive size pads on the right, a negative size on the left, and a
-// size no larger than the count returns the models unchanged.
-func (c Collection[T]) Pad(size int, value *Model[T]) collections.Collection[*Model[T]] {
+// size no larger than the count returns the rows unchanged.
+func (c Collection[T]) Pad(size int, value *T) collections.Collection[*T] {
 	return c.ToBase().Pad(size, value)
 }
 
-// Partition returns the models passing callback, then the ones failing it.
-func (c Collection[T]) Partition(callback func(model *Model[T], key int) bool) (passed, failed collections.Collection[*Model[T]]) {
+// Partition returns the rows passing callback, then the ones failing it.
+func (c Collection[T]) Partition(callback func(row *T, key int) bool) (passed, failed collections.Collection[*T]) {
 	return c.ToBase().Partition(callback)
+}
+
+// entityOf returns the row a model holds, and nil for no model.
+//
+// It is the one place the nil check lives, because a terminal that matched
+// nothing answers nil and every one of them converts the same way.
+func entityOf[T any](m *Model[T]) *T {
+	if m == nil {
+		return nil
+	}
+	return m.Entity
 }
 
 // ToBase returns the models as a collections.Collection.
@@ -590,44 +668,43 @@ func (ms models[T]) Flatten(depth ...int) collections.Collection[any] {
 // Flip returns the models as keys and their positions as values.
 func (ms models[T]) Flip() map[*Model[T]]int { return collections.Flip(ms.ToBase()) }
 
-// NewCollection builds the Collection a query's models are handed back in.
+// NewCollection builds the Collection a query's rows are handed back in.
 //
 // There is one collection type and no automatic relation loading, so this is the
 // construction and nothing else.
-func (m *Model[T]) NewCollection(models ...*Model[T]) Collection[T] {
-	return Collection[T](models)
+func (m *Model[T]) NewCollection(rows ...*T) Collection[T] {
+	return Collection[T](rows)
 }
 
-// CountBy counts the models by the key countBy returns for each one.
+// CountBy counts the rows by the key countBy returns for each one.
 //
 // It is a function rather than a method because the result is a map keyed
 // by K, not a Collection[T]: the key type is the caller's, and Go names it
 // in the signature rather than discovering it at run time.
-func CountBy[T any, K comparable](c Collection[T], countBy func(model *Model[T], key int) K) map[K]int {
+func CountBy[T any, K comparable](c Collection[T], countBy func(row *T, key int) K) map[K]int {
 	return collections.CountBy(c.ToBase(), countBy)
 }
 
-// Map returns the result of calling callback on every model, as a
+// Map returns the result of calling callback on every row, as a
 // collections.Collection[R].
 //
-// The compiler decides the result type: a callback returning *Model[T]
-// gives back exactly what Collection[T] holds, and any other R gives a
-// collection of R.
-func Map[T, R any](c Collection[T], callback func(model *Model[T], key int) R) collections.Collection[R] {
+// The compiler decides the result type: a callback returning *T gives back
+// exactly what Collection[T] holds, and any other R gives a collection of R.
+func Map[T, R any](c Collection[T], callback func(row *T, key int) R) collections.Collection[R] {
 	return collections.Map(c.ToBase(), callback)
 }
 
-// MapWithKeys returns the key/value pairs callback returns for every model,
+// MapWithKeys returns the key/value pairs callback returns for every row,
 // as a map. See Map for how the value type is decided.
-func MapWithKeys[T any, K comparable, V any](c Collection[T], callback func(model *Model[T], key int) (K, V)) map[K]V {
+func MapWithKeys[T any, K comparable, V any](c Collection[T], callback func(row *T, key int) (K, V)) map[K]V {
 	return collections.MapWithKeys(c.ToBase(), callback)
 }
 
 // Zip pairs up c with each of items, position by position.
 //
 // It is a function and not a method for the reason collections.Zip is one:
-// the result no longer holds models, which the return type already says.
-func Zip[T any](c Collection[T], items ...[]*Model[T]) collections.Collection[collections.Collection[*Model[T]]] {
+// the result no longer holds rows, which the return type already says.
+func Zip[T any](c Collection[T], items ...[]*T) collections.Collection[collections.Collection[*T]] {
 	return collections.Zip(c.ToBase(), items...)
 }
 

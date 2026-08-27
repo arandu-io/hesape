@@ -525,17 +525,29 @@ func (evalProcessor) ProcessInsertGetID(ctx context.Context, q *query.Builder, s
 // The numbers are chosen so that an unscoped subquery cannot answer by accident:
 // globex has more posts than acme on the same user id, and its order totals are
 // an order of magnitude larger.
-func twoTenants(t *testing.T) (*Model[user], *evalDB) {
+// customer is the shape an application writes: the entity embeds its model, so
+// a row a terminal hands back is the model. These tests read the aggregate a
+// correlated subquery aliases onto a row, and an aliased column is a raw
+// attribute -- it lives on the model, because the entity never declared it.
+type customer struct {
+	Model[customer]
+
+	ID       int64  `db:"id"`
+	Name     string `db:"name"`
+	TenantID string `db:"tenant_id"`
+}
+
+func twoTenants(t *testing.T) (*Model[customer], *evalDB) {
 	t.Helper()
 
 	db := newEvalDB()
 	grammar := &evalGrammar{testGrammar: newTestGrammar(), db: db}
-	model := NewModel[user]("users", db, grammar, evalProcessor{})
-	model.RelationResolvers = map[string]func(*Model[user]) Relation{
-		"posts": func(*Model[user]) Relation {
+	model := NewModel[customer]("users", db, grammar, evalProcessor{})
+	model.RelationResolvers = map[string]func(*Model[customer]) Relation{
+		"posts": func(*Model[customer]) Relation {
 			return &fakeRelation{table: "posts", foreign: "posts.user_id", local: "users.id"}
 		},
-		"orders": func(*Model[user]) Relation {
+		"orders": func(*Model[customer]) Relation {
 			return &fakeRelation{table: "orders", foreign: "orders.user_id", local: "users.id"}
 		},
 	}
@@ -565,6 +577,11 @@ func twoTenants(t *testing.T) (*Model[user], *evalDB) {
 	return model, db
 }
 
+func newCustomerModel() (*Model[customer], *testConnection) {
+	conn := newTestConnection()
+	return NewModel[customer]("users", conn, newTestGrammar(), &testProcessor{conn: conn}), conn
+}
+
 func acme() auth.Grant { return auth.SystemGrant("user.list", "acme") }
 
 // TestWithCountCountsOnlyTheGrantsTenant is the audit's first finding.
@@ -586,7 +603,7 @@ func TestWithCountCountsOnlyTheGrantsTenant(t *testing.T) {
 
 	byName := map[string]any{}
 	for _, m := range models {
-		byName[m.Entity.Name] = m.GetAttribute("posts_count")
+		byName[m.Name] = m.GetAttribute("posts_count")
 	}
 	if got := byName["Ada"]; got != int64(2) {
 		t.Errorf("posts_count for acme's user 1 = %v, want 2 -- globex has three posts on the same user id", got)
@@ -656,7 +673,7 @@ func TestWithExistsAsksOnlyAboutTheGrantsTenant(t *testing.T) {
 	byName := map[string]bool{}
 	for _, m := range models {
 		value, _ := m.GetAttribute("posts_exists").(bool)
-		byName[m.Entity.Name] = value
+		byName[m.Name] = value
 	}
 	if !byName["Ada"] {
 		t.Errorf("posts_exists for acme's user 1 = false, want true -- it has two posts of its own")
@@ -677,10 +694,10 @@ func TestWhereHasFiltersByTheGrantsTenantsRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if len(models) != 1 || models[0].Entity.Name != "Ada" {
+	if len(models) != 1 || models[0].Name != "Ada" {
 		names := make([]string, 0, len(models))
 		for _, m := range models {
-			names = append(names, m.Entity.Name)
+			names = append(names, m.Name)
 		}
 		t.Fatalf("whereHas returned %v, want only Ada -- Alan's only post belongs to globex", names)
 	}
@@ -722,7 +739,7 @@ func TestHasWithACountComparesOnlyTheGrantsTenantsRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if len(models) != 1 || models[0].Entity.Name != "Ada" {
+	if len(models) != 1 || models[0].Name != "Ada" {
 		t.Fatalf("has > 1 returned %d users, want acme's user 1, which has exactly two posts of its own", len(models))
 	}
 }
@@ -738,10 +755,10 @@ func TestWhereDoesntHaveAsksAboutTheGrantsTenantsRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if len(models) != 1 || models[0].Entity.Name != "Alan" {
+	if len(models) != 1 || models[0].Name != "Alan" {
 		names := make([]string, 0, len(models))
 		for _, m := range models {
-			names = append(names, m.Entity.Name)
+			names = append(names, m.Name)
 		}
 		t.Fatalf("whereDoesntHave returned %v, want Alan -- the post on its id belongs to globex", names)
 	}
@@ -754,17 +771,17 @@ func TestWhereDoesntHaveAsksAboutTheGrantsTenantsRows(t *testing.T) {
 func TestEveryRelationSubqueryNamesTheTenantColumn(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		build func(*Builder[user]) *Builder[user]
+		build func(*Builder[customer]) *Builder[customer]
 	}{
-		{name: "WithCount", build: func(b *Builder[user]) *Builder[user] { return b.WithCount("posts") }},
-		{name: "WithSum", build: func(b *Builder[user]) *Builder[user] { return b.WithSum("orders", "total") }},
-		{name: "WithExists", build: func(b *Builder[user]) *Builder[user] { return b.WithExists("posts") }},
-		{name: "WhereHas", build: func(b *Builder[user]) *Builder[user] { return b.WhereHas("posts", nil) }},
-		{name: "Has", build: func(b *Builder[user]) *Builder[user] { return b.Has("posts", ">", 3, "and", nil) }},
-		{name: "WhereDoesntHave", build: func(b *Builder[user]) *Builder[user] { return b.WhereDoesntHave("posts", nil) }},
+		{name: "WithCount", build: func(b *Builder[customer]) *Builder[customer] { return b.WithCount("posts") }},
+		{name: "WithSum", build: func(b *Builder[customer]) *Builder[customer] { return b.WithSum("orders", "total") }},
+		{name: "WithExists", build: func(b *Builder[customer]) *Builder[customer] { return b.WithExists("posts") }},
+		{name: "WhereHas", build: func(b *Builder[customer]) *Builder[customer] { return b.WhereHas("posts", nil) }},
+		{name: "Has", build: func(b *Builder[customer]) *Builder[customer] { return b.Has("posts", ">", 3, "and", nil) }},
+		{name: "WhereDoesntHave", build: func(b *Builder[customer]) *Builder[customer] { return b.WhereDoesntHave("posts", nil) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			model, conn := newUserModel()
+			model, conn := newCustomerModel()
 			withPostsAndOrders(model)
 			conn.queue()
 
@@ -790,12 +807,12 @@ func TestEveryRelationSubqueryNamesTheTenantColumn(t *testing.T) {
 	}
 }
 
-func withPostsAndOrders(model *Model[user]) *Model[user] {
-	model.RelationResolvers = map[string]func(*Model[user]) Relation{
-		"posts": func(*Model[user]) Relation {
+func withPostsAndOrders[T any](model *Model[T]) *Model[T] {
+	model.RelationResolvers = map[string]func(*Model[T]) Relation{
+		"posts": func(*Model[T]) Relation {
 			return &fakeRelation{table: "posts", foreign: "posts.user_id", local: "users.id"}
 		},
-		"orders": func(*Model[user]) Relation {
+		"orders": func(*Model[T]) Relation {
 			return &fakeRelation{table: "orders", foreign: "orders.user_id", local: "users.id"}
 		},
 	}
@@ -813,12 +830,12 @@ func TestAChunkedWalkScopesEachPageOnceAndAnswersTheSame(t *testing.T) {
 	pages := 0
 	seen := map[string]any{}
 	err := model.NewQuery().
-		Where(func(group *Builder[user]) { group.Where("name", "!=", "") }).
+		Where(func(group *Builder[customer]) { group.Where("name", "!=", "") }).
 		WithCount("posts").
-		Chunk(context.Background(), acme(), 1, func(models Collection[user], page int) (bool, error) {
+		Chunk(context.Background(), acme(), 1, func(models Collection[customer], page int) (bool, error) {
 			pages++
 			for _, m := range models {
-				seen[m.Entity.Name] = m.GetAttribute("posts_count")
+				seen[m.Name] = m.GetAttribute("posts_count")
 			}
 			return true, nil
 		})

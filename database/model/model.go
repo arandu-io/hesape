@@ -29,9 +29,10 @@ type Model[T any] struct {
 	// type of infinite size, and Go refuses it by name: "invalid recursive
 	// type". A pointer makes the same shape finite.
 	//
-	// Reading through it costs nothing at the call site -- found.Entity.Name is
-	// the same expression it was -- and the model always has one: NewInstance
-	// allocates it, so it is never nil on a model this package built.
+	// It is what a terminal hands back, and for a T that embeds Model[T] it
+	// points at the value this model is inside of: the two are one allocation
+	// seen from two sides. The model always has one -- NewModel and NewInstance
+	// both allocate it -- so it is never nil on a model this package built.
 	Entity *T
 
 	// Table is the table name. Empty means the snake-cased plural of the type
@@ -145,8 +146,16 @@ type Model[T any] struct {
 // created_at / updated_at / deleted_at. TenantColumn starts at tenant_id: there
 // is no default that leaves the scoping off.
 func NewModel[T any](table string, connection query.Connection, grammar query.Grammar, processor query.Processor) *Model[T] {
-	return &Model[T]{
-		Entity:          new(T),
+	// Entity first, and the model from inside it when T embeds one, for the
+	// reason NewInstance does the same: a model whose Entity is a second
+	// allocation is a value where m.Entity.Save() and m.Save() write different
+	// rows. Allocating the T and then pointing at it is what makes them one.
+	entity, model := newEntity[T]()
+	if model == nil {
+		model = &Model[T]{}
+	}
+	*model = Model[T]{
+		Entity:          entity,
 		Table:           table,
 		PrimaryKey:      "id",
 		KeyType:         "int",
@@ -161,6 +170,7 @@ func NewModel[T any](table string, connection query.Connection, grammar query.Gr
 		Grammar:         grammar,
 		Processor:       processor,
 	}
+	return model
 }
 
 // Fill writes the columns the entity declares and drops the keys it does not
@@ -602,13 +612,13 @@ func (m *Model[T]) Destroy(ctx context.Context, g auth.Grant, ids ...any) (int, 
 //
 // It queries without the global scopes, which is what makes it able to find a
 // row that has since been soft deleted.
-func (m *Model[T]) Fresh(ctx context.Context, g auth.Grant, with ...string) (*Model[T], error) {
+func (m *Model[T]) Fresh(ctx context.Context, g auth.Grant, with ...string) (*T, error) {
 	if !m.Exists {
 		return nil, nil
 	}
 	q := m.NewQueryWithoutScopes().With(with...)
 	m.setKeysForSelectQuery(q)
-	return q.first(ctx, g)
+	return q.First(ctx, g)
 }
 
 // Refresh reads the same row again, into this model.
@@ -650,7 +660,16 @@ func (m *Model[T]) setKeysForSelectQuery(b *Builder[T]) *Builder[T] {
 // Replicate returns the same row as a new, unsaved model.
 //
 // The key, the timestamps and anything named in except are left out.
-func (m *Model[T]) Replicate(except ...string) (*Model[T], error) {
+func (m *Model[T]) Replicate(except ...string) (*T, error) {
+	instance, err := m.replicate(except...)
+	if err != nil {
+		return nil, err
+	}
+	return instance.Entity, nil
+}
+
+// replicate is Replicate with the model still in hand. See Builder.get.
+func (m *Model[T]) replicate(except ...string) (*Model[T], error) {
 	defaults := []string{m.GetKeyName(), m.GetCreatedAtColumn(), m.GetUpdatedAtColumn()}
 	drop := append(slices.Clone(except), defaults...)
 
@@ -676,7 +695,7 @@ func (m *Model[T]) Replicate(except ...string) (*Model[T], error) {
 }
 
 // ReplicateQuietly replicates the model without firing model events.
-func (m *Model[T]) ReplicateQuietly(except ...string) (copied *Model[T], err error) {
+func (m *Model[T]) ReplicateQuietly(except ...string) (copied *T, err error) {
 	return copied, m.WithoutEvents(func() error {
 		copied, err = m.Replicate(except...)
 		return err
@@ -777,7 +796,7 @@ func (m *Model[T]) UnsetRelations() *Model[T] {
 }
 
 // WithoutRelations returns the same row, with nothing loaded hanging off it.
-func (m *Model[T]) WithoutRelations() (*Model[T], error) {
+func (m *Model[T]) WithoutRelations() (*T, error) {
 	instance, err := m.NewInstance(nil, m.Exists)
 	if err != nil {
 		return nil, err
@@ -786,7 +805,7 @@ func (m *Model[T]) WithoutRelations() (*Model[T], error) {
 		return nil, err
 	}
 	instance.original = copyMap(m.original)
-	return instance, nil
+	return instance.Entity, nil
 }
 
 // Related reads a loaded relation as the type it was loaded as.
@@ -804,7 +823,7 @@ func Related[T, R any](m *Model[T], name string) (Collection[R], bool) {
 	case Collection[R]:
 		return typed, true
 	case *Model[R]:
-		return Collection[R]{typed}, true
+		return Collection[R]{typed.Entity}, true
 
 	// What a relation loads is erased -- the relations tree holds the narrow
 	// interface, not the typed model -- so the way back is through the adapter.
@@ -816,7 +835,7 @@ func Related[T, R any](m *Model[T], name string) (Collection[R], bool) {
 			if !ok {
 				return nil, false
 			}
-			out = append(out, model)
+			out = append(out, model.Entity)
 		}
 		return out, true
 	case concerns.Model:
@@ -824,7 +843,7 @@ func Related[T, R any](m *Model[T], name string) (Collection[R], bool) {
 		if !ok {
 			return nil, false
 		}
-		return Collection[R]{model}, true
+		return Collection[R]{model.Entity}, true
 	}
 	return nil, false
 }

@@ -32,8 +32,15 @@ func (r *fakeRelation) Match(g auth.Grant, keys []any, constraints func(*query.B
 }
 
 func withPosts(model *Model[user], relation *fakeRelation) *Model[user] {
-	model.RelationResolvers = map[string]func(*Model[user]) Relation{
-		"posts": func(*Model[user]) Relation { return relation },
+	return withPostsOn(model, relation)
+}
+
+// withPostsOn is withPosts over whatever entity the test uses, because the
+// collection tests write the shape an application writes and the builder tests
+// write the one that does not embed the model.
+func withPostsOn[T any](model *Model[T], relation *fakeRelation) *Model[T] {
+	model.RelationResolvers = map[string]func(*Model[T]) Relation{
+		"posts": func(*Model[T]) Relation { return relation },
 	}
 	return model
 }
@@ -46,7 +53,7 @@ func TestGetScopesEveryReadByTheTenant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if len(models) != 1 || models[0].Entity.Name != "Ada" {
+	if len(models) != 1 || models[0].Name != "Ada" {
 		t.Fatalf("Get returned %d models", len(models))
 	}
 
@@ -232,8 +239,8 @@ func TestFirstOrCreateReadsBeforeItWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FirstOrCreate: %v", err)
 	}
-	if found.Entity.ID != 3 {
-		t.Errorf("id = %d, want the row that was already there", found.Entity.ID)
+	if found.ID != 3 {
+		t.Errorf("id = %d, want the row that was already there", found.ID)
 	}
 	for _, sql := range conn.sqls() {
 		if strings.HasPrefix(sql, "insert") {
@@ -246,7 +253,9 @@ func TestFirstOrCreateInsertsWhenThereIsNothing(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue()
 
-	created, err := model.NewQuery().FirstOrCreate(context.Background(), grant(), map[string]any{"name": "Ada"}, map[string]any{"email": "ada@example.com"})
+	// The model-side read, because this asserts on the model rather than on the
+	// row: a T that does not embed Model[T] has no way back from one to the other.
+	created, err := model.NewQuery().firstOrCreate(context.Background(), grant(), map[string]any{"name": "Ada"}, map[string]any{"email": "ada@example.com"})
 	if err != nil {
 		t.Fatalf("FirstOrCreate: %v", err)
 	}
@@ -268,8 +277,8 @@ func TestUpdateOrCreateUpdatesTheRowItFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateOrCreate: %v", err)
 	}
-	if updated.Entity.Email != "new@example.com" {
-		t.Errorf("email = %q, want the new one", updated.Entity.Email)
+	if updated.Email != "new@example.com" {
+		t.Errorf("email = %q, want the new one", updated.Email)
 	}
 	if !strings.HasPrefix(conn.last().SQL, `update "users"`) {
 		t.Errorf("last statement = %q, want an update", conn.last().SQL)
@@ -354,7 +363,10 @@ func TestWithCountAddsTheAliasedSubselect(t *testing.T) {
 	withPosts(model, &fakeRelation{table: "posts", foreign: "posts.user_id", local: "users.id"})
 	conn.queue(query.Record{"id": int64(1), "posts_count": int64(4)})
 
-	models, err := model.NewQuery().WithCount("posts").Get(context.Background(), grant())
+	// The model-side read, because the aggregate lands as a raw attribute and a
+	// raw attribute lives on the model: the row has the columns the entity
+	// declares and nothing else.
+	models, err := model.NewQuery().WithCount("posts").get(context.Background(), grant())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -379,7 +391,9 @@ func TestWithLoadsTheRelationOntoEveryModel(t *testing.T) {
 	})
 	conn.queue(query.Record{"id": int64(1)}, query.Record{"id": int64(2)})
 
-	models, err := model.NewQuery().With("posts").Get(context.Background(), grant())
+	// The model-side read: a loaded relation hangs off the model, and this
+	// entity does not embed one.
+	models, err := model.NewQuery().With("posts").get(context.Background(), grant())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -400,7 +414,7 @@ func TestChunkWalksThePagesAndStops(t *testing.T) {
 	var seen []int64
 	err := model.NewQuery().Chunk(context.Background(), grant(), 2, func(models Collection[user], page int) (bool, error) {
 		for _, m := range models {
-			seen = append(seen, m.Entity.ID)
+			seen = append(seen, m.ID)
 		}
 		return true, nil
 	})

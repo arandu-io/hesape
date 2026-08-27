@@ -309,7 +309,7 @@ func (r *builderRef[T]) Cursor(ctx context.Context, g auth.Grant) iter.Seq2[conc
 		// then. A stream that fails halfway has already handed out rows, which
 		// is why the interface carries the error beside the value at all.
 		var failure error
-		for m := range r.b.Cursor(ctx, g, &failure) {
+		for m := range r.b.cursor(ctx, g, &failure) {
 			if !yield(m.Ref(), nil) {
 				return
 			}
