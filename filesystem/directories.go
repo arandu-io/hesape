@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
+	"path/filepath"
 
 	"github.com/arandu-io/hesape/auth"
 )
@@ -103,11 +103,11 @@ var _ DirectoryAware = (*LocalFilesystemAdapter)(nil)
 
 // MakeDirectory creates the directory and its parents under the root.
 func (a *LocalFilesystemAdapter) MakeDirectory(_ context.Context, storedPath string) error {
-	full, err := a.resolve(storedPath)
+	name, err := a.resolve(storedPath)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(full, 0o755); err != nil {
+	if err := a.dir.MkdirAll(name, 0o755); err != nil {
 		return fmt.Errorf("filesystem: creating %s: %w", storedPath, err)
 	}
 	return nil
@@ -115,11 +115,11 @@ func (a *LocalFilesystemAdapter) MakeDirectory(_ context.Context, storedPath str
 
 // DirectoryExists reports whether the path is a directory under the root.
 func (a *LocalFilesystemAdapter) DirectoryExists(_ context.Context, storedPath string) (bool, error) {
-	full, err := a.resolve(storedPath)
+	name, err := a.resolve(storedPath)
 	if err != nil {
 		return false, err
 	}
-	info, err := os.Stat(full)
+	info, err := a.dir.Stat(name)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
@@ -169,6 +169,28 @@ func (d *Disk) Path(g auth.Grant, key string) (string, error) {
 var _ Pather = (*LocalFilesystemAdapter)(nil)
 
 // Path returns the absolute path of a stored path under the root.
+//
+// The name is walked through the open root before it is joined, so a directory
+// component that is a symbolic link out of the root is refused rather than
+// handed to whatever program the caller was about to run. A link as the last
+// component is refused for the same reason: this adapter stores regular files
+// and nothing else, so a link is not a stored object, and what the caller would
+// open is whatever it points at.
+//
+// A name nothing is stored under yet is still answered. The string is the
+// answer to "where would this go", and the caller that creates it holds the
+// only moment at which the answer could be checked again.
 func (a *LocalFilesystemAdapter) Path(storedPath string) (string, error) {
-	return a.file(storedPath)
+	name, err := a.file(storedPath)
+	if err != nil {
+		return "", err
+	}
+	switch info, err := a.dir.Lstat(name); {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		return "", fmt.Errorf("filesystem: reading %s: %w", storedPath, err)
+	case info.Mode()&fs.ModeSymlink != 0:
+		return "", ErrBadKey
+	}
+	return filepath.Join(a.root, filepath.FromSlash(name)), nil
 }

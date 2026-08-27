@@ -3,7 +3,7 @@ module github.com/arandu-io/hesape/database/connectors/mysql
 go 1.26
 
 require (
-	github.com/arandu-io/hesape v0.15.2
+	github.com/arandu-io/hesape v0.16.0
 	github.com/go-sql-driver/mysql v1.9.3
 )
 

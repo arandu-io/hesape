@@ -2,11 +2,13 @@ package filesystem
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -23,6 +25,23 @@ import (
 // before the call.
 type LocalFilesystemAdapter struct {
 	root string
+	// dir is the root held open, and it is what every operation goes through.
+	//
+	// A path built by joining strings is confined only for as long as nothing
+	// on the way to it is a symbolic link: the join answers about the string,
+	// and the kernel answers about the links. This one is confined by the
+	// kernel, one component at a time, at the moment the syscall runs -- so
+	// there is no window between deciding a path is inside the root and using
+	// it.
+	//
+	// What it confines is the root, and not a directory inside it: a link from
+	// one tenant's directory to another's never leaves the root, so it is
+	// followed. That is the smaller exposure and it is stated rather than
+	// papered over -- whatever can plant that link can already read both
+	// directories. Leaving the root is the one worth refusing, because there
+	// the application's own credentials reach files no key names and write
+	// bytes where nothing asked them to.
+	dir *os.Root
 	// diskName and serveSigned are what lets a link be turned back into a disk.
 	// See [LocalFilesystemAdapter.DiskName]
 	// and [LocalFilesystemAdapter.ShouldServeSignedUrls]; both are set at wiring
@@ -46,7 +65,11 @@ func NewLocalFilesystemAdapter(root string) (*LocalFilesystemAdapter, error) {
 	if err := os.MkdirAll(absolute, 0o755); err != nil {
 		return nil, fmt.Errorf("filesystem: creating %s: %w", absolute, err)
 	}
-	return &LocalFilesystemAdapter{root: absolute}, nil
+	dir, err := os.OpenRoot(absolute)
+	if err != nil {
+		return nil, fmt.Errorf("filesystem: opening %s: %w", absolute, err)
+	}
+	return &LocalFilesystemAdapter{root: absolute, dir: dir}, nil
 }
 
 var _ Adapter = (*LocalFilesystemAdapter)(nil)
@@ -73,11 +96,11 @@ const partialPrefix = ".hesape-partial-"
 // sidecar file per object to hold one string is a second thing to keep in sync.
 // Get infers it, which is what a static file server does anyway.
 func (a *LocalFilesystemAdapter) Put(_ context.Context, storedPath string, body io.Reader, _ string) error {
-	full, err := a.file(storedPath)
+	name, err := a.file(storedPath)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+	if err := a.dir.MkdirAll(path.Dir(name), 0o755); err != nil {
 		return fmt.Errorf("filesystem: creating the directory for %s: %w", storedPath, err)
 	}
 
@@ -90,32 +113,59 @@ func (a *LocalFilesystemAdapter) Put(_ context.Context, storedPath string, body 
 	// renamed it into place. The stored object was neither upload. Two people
 	// replacing the same attachment is not a rare race -- it is a retry. Found
 	// by audit.
-	f, err := os.CreateTemp(filepath.Dir(full), partialPrefix+"*")
+	f, tmp, err := a.partial(path.Dir(name))
 	if err != nil {
 		return fmt.Errorf("filesystem: writing %s: %w", storedPath, err)
 	}
-	tmp := f.Name()
-	// Nobody reads a partial file, but CreateTemp makes it 0600 and the stored
-	// object is 0644 like every other.
+	// Nobody reads a partial file, but the mode a file is created with is
+	// masked by the umask and the stored object is 0644 like every other.
 	if err := f.Chmod(0o644); err != nil {
 		_ = f.Close()
-		_ = os.Remove(tmp)
+		_ = a.dir.Remove(tmp)
 		return fmt.Errorf("filesystem: writing %s: %w", storedPath, err)
 	}
 	if _, err := io.Copy(f, body); err != nil {
 		_ = f.Close()
-		_ = os.Remove(tmp)
+		_ = a.dir.Remove(tmp)
 		return fmt.Errorf("filesystem: writing %s: %w", storedPath, err)
 	}
 	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp)
+		_ = a.dir.Remove(tmp)
 		return fmt.Errorf("filesystem: writing %s: %w", storedPath, err)
 	}
-	if err := os.Rename(tmp, full); err != nil {
-		_ = os.Remove(tmp)
+	if err := a.dir.Rename(tmp, name); err != nil {
+		_ = a.dir.Remove(tmp)
 		return fmt.Errorf("filesystem: writing %s: %w", storedPath, err)
 	}
 	return nil
+}
+
+// partial creates the file an upload is written to before it is renamed into
+// place, beside its destination and inside the root. It returns the open file
+// and the name to rename or remove it by.
+//
+// os.CreateTemp is not usable here: it takes a directory name and opens it the
+// way any other path is opened, so a directory component that is a symbolic
+// link puts the partial file wherever the link points -- and the rename after
+// it carries the upload there. Everything this adapter opens goes through the
+// root, and this is no exception.
+//
+// The retry is what os.CreateTemp does. O_EXCL turns a name somebody else
+// already took into an error rather than into a truncated file, and the count
+// is a bound on a loop whose exit is a random draw.
+func (a *LocalFilesystemAdapter) partial(dir string) (*os.File, string, error) {
+	for range 10000 {
+		name := path.Join(dir, partialPrefix+rand.Text())
+		f, err := a.dir.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o644)
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return nil, "", err
+		}
+		return f, name, nil
+	}
+	return nil, "", errors.New("no unused name for a partial upload")
 }
 
 // Get reads a file back. The caller closes File.Body.
@@ -124,11 +174,11 @@ func (a *LocalFilesystemAdapter) Get(ctx context.Context, storedPath string) (Fi
 	if err != nil {
 		return File{}, err
 	}
-	full, err := a.file(storedPath)
+	name, err := a.file(storedPath)
 	if err != nil {
 		return File{}, err
 	}
-	f, err := os.Open(full)
+	f, err := a.dir.Open(name)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return File{}, ErrNotFound
@@ -140,11 +190,11 @@ func (a *LocalFilesystemAdapter) Get(ctx context.Context, storedPath string) (Fi
 
 // Stat answers what Get would carry, without opening the file.
 func (a *LocalFilesystemAdapter) Stat(_ context.Context, storedPath string) (Info, error) {
-	full, err := a.file(storedPath)
+	name, err := a.file(storedPath)
 	if err != nil {
 		return Info{}, err
 	}
-	info, err := os.Stat(full)
+	info, err := a.dir.Stat(name)
 	if errors.Is(err, fs.ErrNotExist) {
 		return Info{}, ErrNotFound
 	}
@@ -166,11 +216,11 @@ func (a *LocalFilesystemAdapter) Stat(_ context.Context, storedPath string) (Inf
 
 // Exists reports whether the path is a file that is there.
 func (a *LocalFilesystemAdapter) Exists(_ context.Context, storedPath string) (bool, error) {
-	full, err := a.file(storedPath)
+	name, err := a.file(storedPath)
 	if err != nil {
 		return false, err
 	}
-	info, err := os.Stat(full)
+	info, err := a.dir.Stat(name)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
@@ -183,11 +233,11 @@ func (a *LocalFilesystemAdapter) Exists(_ context.Context, storedPath string) (b
 // Delete removes a file. Removing what is not there is not an error: the caller
 // wanted it gone, and it is.
 func (a *LocalFilesystemAdapter) Delete(_ context.Context, storedPath string) error {
-	full, err := a.file(storedPath)
+	name, err := a.file(storedPath)
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(full); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := a.dir.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("filesystem: deleting %s: %w", storedPath, err)
 	}
 	return nil
@@ -218,13 +268,16 @@ func (a *LocalFilesystemAdapter) List(_ context.Context, prefix string) ([]strin
 		return nil, err
 	}
 
+	// The walk goes over the root's own file system rather than over the
+	// process's, so the directory it starts in is resolved through the root and
+	// no entry under it can be reached by leaving it.
 	var out []string
-	err = filepath.WalkDir(start, func(p string, entry fs.DirEntry, err error) error {
+	err = fs.WalkDir(a.dir.FS(), start, func(p string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
 				// A prefix nothing was ever written under has no directory, and
 				// an empty list is the right answer rather than an error.
-				return filepath.SkipAll
+				return fs.SkipAll
 			}
 			return err
 		}
@@ -234,13 +287,15 @@ func (a *LocalFilesystemAdapter) List(_ context.Context, prefix string) ([]strin
 		if entry.IsDir() || strings.HasPrefix(entry.Name(), partialPrefix) {
 			return nil
 		}
-		relative, err := filepath.Rel(a.root, p)
-		if err != nil {
-			return err
+		// Neither is anything that is not a plain file. Put stores regular
+		// files and nothing else, so a symbolic link in here was put on the
+		// disk by something other than this adapter, and answering with its
+		// name hands the caller a key for whatever it points at.
+		if !entry.Type().IsRegular() {
+			return nil
 		}
-		stored := filepath.ToSlash(relative)
-		if strings.HasPrefix(stored, prefix) {
-			out = append(out, stored)
+		if strings.HasPrefix(p, prefix) {
+			out = append(out, p)
 		}
 		return nil
 	})
@@ -250,7 +305,8 @@ func (a *LocalFilesystemAdapter) List(_ context.Context, prefix string) ([]strin
 	return out, nil
 }
 
-// file resolves a stored path to a file on disk, and refuses one that escapes.
+// file resolves a stored path to a file name under the root, and refuses one
+// that escapes.
 //
 // The escape check happens twice: [CleanKey] rejects "../" in the key, and this
 // rejects a resolved path outside the root. Two checks because the first is
@@ -258,20 +314,31 @@ func (a *LocalFilesystemAdapter) List(_ context.Context, prefix string) ([]strin
 // interface, so this one is also what stands between a hand-built path and the
 // rest of the disk.
 func (a *LocalFilesystemAdapter) file(storedPath string) (string, error) {
-	full, err := a.resolve(storedPath)
+	name, err := a.resolve(storedPath)
 	if err != nil {
 		return "", err
 	}
 	// The root itself is a directory, and every operation here is about a file.
-	if full == a.root {
+	if name == "." {
 		return "", ErrBadKey
 	}
-	return full, nil
+	return name, nil
 }
 
-// resolve joins a stored path onto the root and proves the result stayed under
-// it. The root itself is a legal answer, which is what makes an empty prefix
-// mean "everything".
+// resolve turns a stored path into a name to be opened against the root, and
+// refuses one that could not be under it. "." is the root itself, which is what
+// makes an empty prefix mean "everything".
+//
+// The name is relative and slash-separated because that is what the open root
+// takes, and what it takes is the point: a name resolved against the root is
+// checked component by component as the syscall walks it, so a symbolic link
+// pointing out of the root stops the operation instead of redirecting it.
+//
+// The string comparison below stays, and it is not the containment check any
+// more -- it is what turns a key carrying "../" into [ErrBadKey] rather than
+// into a syscall error. Comparing strings cannot be the containment check: it
+// answers about the key, and the kernel answers about the links, and between
+// the two answers is where a link planted after the check gets followed.
 func (a *LocalFilesystemAdapter) resolve(storedPath string) (string, error) {
 	// A NUL byte truncates a path in every syscall that takes one, so a path
 	// carrying it can name a different file than it appears to.
@@ -282,5 +349,9 @@ func (a *LocalFilesystemAdapter) resolve(storedPath string) (string, error) {
 	if full != a.root && !strings.HasPrefix(full, a.root+string(filepath.Separator)) {
 		return "", ErrBadKey
 	}
-	return full, nil
+	name, err := filepath.Rel(a.root, full)
+	if err != nil {
+		return "", ErrBadKey
+	}
+	return filepath.ToSlash(name), nil
 }
