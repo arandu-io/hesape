@@ -150,10 +150,12 @@ func (c Commands) ScheduleWorkCommand() console.Command {
 // ScheduleFinishCommand is the command that reports the exit code of an
 // event that ran in the background.
 //
-// It is `schedule:finish {id} {code=0}`. It is hidden because nobody runs it
-// by hand -- CommandBuilder appends it to the backgrounded command line, and
-// it is what releases the mutex and runs the after callbacks in a process
-// that stayed around to do it.
+// It is `schedule:finish {id} {code=0}`, and it is hidden.
+//
+// Nothing generates it any more: a backgrounded event is waited for and finished
+// by the process that started it, so this is what is left for the case that one
+// ended without finishing -- a replica killed mid-run leaves the mutex held and
+// the after callbacks unrun, and this releases and runs them by name.
 //
 // It runs in a process that has already lost the run it is reporting on,
 // which shapes two decisions.

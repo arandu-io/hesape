@@ -76,8 +76,11 @@ func (e *Event) RunsOnOneServer() bool { return e.onOneServer }
 
 // RunInBackground sends the command to the background.
 //
-// The runner does not wait for it, and schedule:finish is what reports the
-// exit code back.
+// Run returns as soon as the program has started, so the runner goes on to the
+// next event. The command is waited for beside it, and the exit code, the after
+// callbacks and the mutex release happen when it ends rather than when Run
+// returns -- which is why an event sent to the background wants
+// WithoutOverlapping.
 func (e *Event) RunInBackground() *Event {
 	e.runInBackground = true
 	return e

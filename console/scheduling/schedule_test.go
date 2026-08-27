@@ -3,6 +3,7 @@ package scheduling_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -294,29 +295,33 @@ func TestAPerTenantEventWithNoResolverIsReportedRatherThanSilent(t *testing.T) {
 	}
 }
 
-func TestTheCommandBuilderRedirectsTheOutput(t *testing.T) {
-	e := scheduling.NewEvent(nil, "app:work", nil).SendOutputTo("/tmp/out.log")
+// TestTheCommandBuilderCarriesNoRedirection is the change that took the shell
+// out: where the output goes is not part of the command any more, so there is
+// nothing in the argument list for a shell to have to read.
+func TestTheCommandBuilderCarriesNoRedirection(t *testing.T) {
+	e := scheduling.NewEvent(nil, "app:work --queue=mail", nil).SendOutputTo("/tmp/out.log")
 
-	got := e.BuildCommand()
-	want := "app:work > '/tmp/out.log' 2>&1"
-	if got != want {
+	got, err := e.BuildCommand()
+	if err != nil {
+		t.Fatalf("BuildCommand: %v", err)
+	}
+	if want := []string{"app:work", "--queue=mail"}; !slices.Equal(got, want) {
 		t.Errorf("BuildCommand = %q, want %q", got, want)
 	}
 }
 
-func TestTheCommandBuilderAppendsWhenAsked(t *testing.T) {
-	e := scheduling.NewEvent(nil, "app:work", nil).AppendOutputTo("/tmp/out.log")
-
-	if got := e.BuildCommand(); !strings.Contains(got, " >> ") {
-		t.Errorf("BuildCommand = %q, and an appending event redirects with >>", got)
-	}
-}
-
+// TestTheCommandBuilderRunsAsAnotherUserWhenAsked pins the one wrapper that
+// stayed, and the form it takes: sudo runs the program after --, so there is no
+// `sh -c` and no line for it to parse.
 func TestTheCommandBuilderRunsAsAnotherUserWhenAsked(t *testing.T) {
 	e := scheduling.NewEvent(nil, "app:work", nil).User("deploy")
 
-	if got := e.BuildCommand(); !strings.HasPrefix(got, "sudo -u deploy -- sh -c '") {
-		t.Errorf("BuildCommand = %q, want it to start with sudo -u deploy", got)
+	got, err := e.BuildCommand()
+	if err != nil {
+		t.Fatalf("BuildCommand: %v", err)
+	}
+	if want := []string{"sudo", "-u", "deploy", "--", "app:work"}; !slices.Equal(got, want) {
+		t.Errorf("BuildCommand = %q, want %q", got, want)
 	}
 }
 
