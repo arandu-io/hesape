@@ -1,10 +1,53 @@
 package translation_test
 
 import (
+	"maps"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/arandu-io/hesape/translation"
 )
+
+// bundledGroups are the four the framework produces sentences for. The list is
+// written out rather than read from the directory, so a group that stops being
+// embedded fails here instead of being quietly absent from what is checked.
+var bundledGroups = []string{"auth", "passwords", "pagination", "validation"}
+
+// Every line the catalogue carries has to come back through a Translator. What
+// makes this worth asserting over the whole catalogue rather than on a sample is
+// the failure it catches: a group that does not reach the lookup answers with
+// the key, so "validation.min.string" is what prints where the sentence was, and
+// a spot check of five keys says nothing about the other hundred and thirty.
+func TestEveryBundledLineResolvesThroughATranslator(t *testing.T) {
+	tr := translation.New(nil, "en", "en")
+
+	for _, group := range bundledGroups {
+		lines := translation.Bundled("en", group)
+		if len(lines) == 0 {
+			t.Errorf("the bundled catalogue carries no %q group", group)
+			continue
+		}
+		for _, item := range slices.Sorted(maps.Keys(lines)) {
+			key := group + "." + item
+			if got := tr.Get("en", key, nil); got == key {
+				t.Errorf("%s does not resolve: it would print as the key", key)
+			}
+		}
+	}
+}
+
+// An empty line resolves -- it is not the key -- and prints as nothing, which is
+// the one way a missing sentence gets past the test above.
+func TestNoBundledLineIsEmpty(t *testing.T) {
+	for _, group := range bundledGroups {
+		for item, line := range translation.Bundled("en", group) {
+			if strings.TrimSpace(line) == "" {
+				t.Errorf("%s.%s is empty", group, item)
+			}
+		}
+	}
+}
 
 // The four groups a framework produces sentences for before an application has
 // written a line. They resolve with no catalogue configured at all.

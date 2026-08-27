@@ -3,7 +3,8 @@
 // It holds [Translator], [MessageSelector], [Selector], [ArrayLoader],
 // [FileLoader], [Loader], [Lines], [Replace], [PotentiallyTranslatedString],
 // the four English groups the framework produces sentences from, and
-// [Negotiate], [Middleware] and [Locale] for the locale of a request.
+// [Negotiate], [Middleware], [InLocale] and [Locale] for the locale of a
+// request.
 //
 // # The translator is a value
 //
@@ -84,7 +85,10 @@
 // [Translator.Has] rather than something the caller sets on the translator,
 // because the locale belongs to the request and one shared translator serves
 // all of them. [Middleware] negotiates it once from Accept-Language and puts it
-// in the request context; [Locale] reads it back. [Translator.SetLocale] sets
+// in the request context, and [InLocale] puts there a locale the route already
+// decided; [Locale] reads back whichever of them ran. An application uses one or
+// the other, because a language decided twice is a page with two addresses.
+// [Translator.SetLocale] sets
 // the default for a caller that passes none -- a console command, or a queued
 // job -- and returns an error for a locale holding a path separator.
 //

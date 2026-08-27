@@ -29,18 +29,55 @@ func Locale(ctx context.Context) string {
 // Middleware negotiates the locale of every request from its Accept-Language
 // header and puts it in the context, where [Locale] reads it.
 //
-// The header is the only input. A locale in the path, in a query parameter or
-// in a cookie is a second way to say the same thing, and each of them is a
-// separate cache key for one page.
+// This is one of the two ways an application decides a language, and [InLocale]
+// is the other. Here the header decides and one address serves every language;
+// there the path decides and each language has its own address. An application
+// picks one of them: carrying both means one page has two addresses and a reader
+// can be handed either, which is the thing that goes wrong, not the path itself.
+//
+// The header is the only input on this side. A locale read from a query
+// parameter or a cookie on top of it is a third answer to a question already
+// answered, and each of them is another cache key for one page.
 //
 // It answers with Content-Language, and adds Accept-Language to Vary: a page
 // whose text depends on a request header and does not say so is a page a shared
-// cache will serve in the wrong language.
+// cache will serve in the wrong language. Vary is the truth about a negotiated
+// response and belongs on every response this wraps -- which is also why it must
+// not be reached for when nothing was negotiated, and why [InLocale] exists
+// rather than a flag here.
 func Middleware(supported []string, fallback string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			locale := Negotiate(r.Header.Get("Accept-Language"), supported, fallback)
 			w.Header().Add("Vary", "Accept-Language")
+			w.Header().Set("Content-Language", locale)
+			next.ServeHTTP(w, r.WithContext(WithLocale(r.Context(), locale)))
+		})
+	}
+}
+
+// InLocale puts a locale the route already decided on every request that reaches
+// it, and says so in the response.
+//
+// It goes on the route group of one language: the group under /es carries
+// InLocale("es"), and the group with no prefix carries whichever language the
+// unprefixed addresses are written in. The path is the whole input -- no header
+// is read here, and no cookie and no query parameter, because each of those
+// would be a second answer to a question the address already answered.
+//
+// It writes Content-Language and does not write Vary. What these pages say is a
+// function of the path and of nothing else: one address is in one language for
+// everybody who asks for it, so a shared cache in front of the application may
+// keep one copy of it. Vary here would be false, and it would be paid for on
+// every response rather than on the one that negotiated.
+//
+// [Locale] reads the locale back, spelled the way it was passed, so it indexes
+// the catalogue directly. An application that has more to say about a language
+// than its catalogue key -- a BCP 47 tag for hreflang, a label for a selector --
+// keeps that beside its own list of languages and passes the key here.
+func InLocale(locale string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Language", locale)
 			next.ServeHTTP(w, r.WithContext(WithLocale(r.Context(), locale)))
 		})
