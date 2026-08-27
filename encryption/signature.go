@@ -38,7 +38,7 @@ type Signer struct {
 
 // ErrSignature is what every failure below unwraps to, so a caller answers "this
 // link is not valid" once rather than switching on four reasons it is not.
-var ErrSignature = errors.New("security: the signature is not valid")
+var ErrSignature = errors.New("encryption: the signature is not valid")
 
 // NewSigner returns a Signer over the application key.
 //
