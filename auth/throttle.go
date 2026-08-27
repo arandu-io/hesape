@@ -83,14 +83,16 @@ const (
 //
 // # Why this is not a route limiter
 //
-// A route limiter counts requests and has nothing to say about either of the
-// other two calls, and those are the whole difference between a failure counter
-// and a rate limit: forgetting on success is what keeps the person who finally
-// remembers their password on the fifth try from being locked out by the four
-// before it, and giving a unit back is what keeps a database outage from
-// spending every account's budget. Widening the route limiter would push both
-// into every implementation of it, including the distributed one, which would
-// mean nothing by them.
+// Not for want of the other two calls: the route limiter can give an attempt
+// back, and it can forget a key. It is the shape of a sign-in attempt that does
+// not fit. The key is three values -- tenant, identity and client -- and one
+// attempt spends TWO budgets in the same instant: what this identity has left
+// from this address, and what this address has left across every identity it
+// names. Both have to be read and both written as one indivisible step, or a
+// burst sees room in both and gets through both. Against a limiter keyed by one
+// string that is two calls, which is two steps. And the tenant has nowhere to
+// go: that key is deliberately not one, because a route limit runs before
+// authentication on the routes where it matters most.
 //
 // So: a second interface, and deliberately not a second mechanism. The
 // in-memory implementation below is what the core ships; a kv-backed one has
