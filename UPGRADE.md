@@ -69,6 +69,32 @@ Add it only when the endpoint deduplicates. It takes no argument and does nothin
 on its own, because a fifth boolean on `Retry` would sit beside `throw`, where one
 positional slip buys duplicate writes.
 
+### A scheduled command no longer goes through a shell
+
+```
+- ./console/scheduling.(*CommandBuilder).BuildCommand: changed from func(...) string to func(...) ([]string, error)
+- ./database/schema.ProcessFactory: removed
+- ./queue.(*Listener).MakeProcess, .RunProcess: re-typed
+```
+
+Three packages built a command line and handed it to `exec.CommandContext`
+directly, and one of them handed it to a shell: `sh -c "<the line>"`. Any part of
+that line coming from data was interpreted, which is an injection surface — and
+the package written to prevent exactly that sat unused beside it.
+
+Measured on the old path, with a scheduled command containing `; touch <file>`:
+the file **was created**. On the new path it is not, and the argument is echoed
+verbatim.
+
+What the shell was carrying moved rather than disappearing: redirection is an
+output handler, `sudo -u` is the first four words of the argument list, and the
+backgrounded subshell that reported the finish is now a wait beside the run in
+the process that started it.
+
+If you were relying on `BuildCommand` to hand you a string, it now hands you the
+argument list, which is what a command actually is. A parameter containing a
+space, a semicolon or a quote is one argument and stays one argument.
+
 ### `hashing`: one way to hash, and it was already the only one running
 
 `HashManager` and everything under it are removed — 32 incompatible lines, all in
