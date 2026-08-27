@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"slices"
 
@@ -62,6 +63,22 @@ func (c Collection[T]) models() models[T] {
 		}
 	}
 	return out
+}
+
+// modelsOrFail returns the model behind every row, and refuses when a row has
+// none.
+//
+// models drops what it cannot resolve, which is the right answer for the reads
+// that return a value -- Find over a row with no model is a miss, and a miss is
+// nil. It is the wrong answer for a relation load, which would report success
+// having attached the relation to nothing. So the loads come through here and
+// the rest do not.
+func (c Collection[T]) modelsOrFail() (models[T], error) {
+	found := c.models()
+	if len(found) != len(c) {
+		return nil, fmt.Errorf("%w: %d of %d rows", ErrRowHasNoModel, len(c)-len(found), len(c))
+	}
+	return found, nil
 }
 
 // ToBase returns the rows as a collections.Collection.
@@ -134,20 +151,45 @@ func (c Collection[T]) Merge(items Collection[T]) Collection[T] {
 }
 
 // Load eager loads these relations onto every row.
+//
+// It reaches the model behind each row, so it needs a T that embeds Model[T];
+// rows that carry no model are ErrRowHasNoModel rather than a load that quietly
+// attaches nothing.
 func (c Collection[T]) Load(ctx context.Context, g auth.Grant, relations ...string) error {
-	return c.models().Load(ctx, g, relations...)
+	if len(relations) == 0 {
+		return nil
+	}
+	found, err := c.modelsOrFail()
+	if err != nil {
+		return err
+	}
+	return found.Load(ctx, g, relations...)
 }
 
 // LoadMissing eager loads these relations onto every row, skipping the
-// ones already loaded.
+// ones already loaded. See Load for the shape of T it needs.
 func (c Collection[T]) LoadMissing(ctx context.Context, g auth.Grant, relations ...string) error {
-	return c.models().LoadMissing(ctx, g, relations...)
+	if len(relations) == 0 {
+		return nil
+	}
+	found, err := c.modelsOrFail()
+	if err != nil {
+		return err
+	}
+	return found.LoadMissing(ctx, g, relations...)
 }
 
 // LoadAggregate loads function over column of each relation onto every
-// row.
+// row. See Load for the shape of T it needs.
 func (c Collection[T]) LoadAggregate(ctx context.Context, g auth.Grant, relations []string, column, function string) error {
-	return c.models().LoadAggregate(ctx, g, relations, column, function)
+	if len(relations) == 0 {
+		return nil
+	}
+	found, err := c.modelsOrFail()
+	if err != nil {
+		return err
+	}
+	return found.LoadAggregate(ctx, g, relations, column, function)
 }
 
 // LoadCount loads the count of each relation onto every row.

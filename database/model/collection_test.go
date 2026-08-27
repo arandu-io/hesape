@@ -153,6 +153,59 @@ func TestLoadMissingSkipsWhatIsLoaded(t *testing.T) {
 	}
 }
 
+// TestARelationLoadRefusesRowsThatCarryNoModel.
+//
+// A relation is attached to the model behind a row. Rows that reach no model --
+// a T that does not embed one, a struct written as a literal -- used to make the
+// load a query that ran and attached its result to nothing, reported as success.
+func TestARelationLoadRefusesRowsThatCarryNoModel(t *testing.T) {
+	plain, conn := newUserModel()
+	withPosts(plain, &fakeRelation{
+		table: "posts", foreign: "posts.user_id", local: "users.id",
+		matched: map[any]any{int64(1): []string{"first"}},
+	})
+	rows := Collection[user]{plain.Entity}
+
+	for name, load := range map[string]func() error{
+		"Load":          func() error { return rows.Load(context.Background(), grant(), "posts") },
+		"LoadMissing":   func() error { return rows.LoadMissing(context.Background(), grant(), "posts") },
+		"LoadCount":     func() error { return rows.LoadCount(context.Background(), grant(), "posts") },
+		"LoadAggregate": func() error { return rows.LoadAggregate(context.Background(), grant(), []string{"posts"}, "*", "sum") },
+		"EagerLoad": func() error {
+			return plain.NewQuery().With("posts").EagerLoadRelations(context.Background(), grant(), rows)
+		},
+	} {
+		if err := load(); !errors.Is(err, ErrRowHasNoModel) {
+			t.Errorf("%s on rows with no model = %v, want ErrRowHasNoModel", name, err)
+		}
+	}
+	if got := len(conn.sqls()); got != 0 {
+		t.Errorf("a refused load ran %d statements", got)
+	}
+
+	// Nothing to load is nothing to refuse: the shape of the rows is only a
+	// problem when a relation was named.
+	if err := rows.Load(context.Background(), grant()); err != nil {
+		t.Errorf("Load with no relations = %v, want nil", err)
+	}
+}
+
+// TestARelationLoadRefusesOneLiteralAmongHydratedRows: the count in the message
+// is what tells the two mistakes apart.
+func TestARelationLoadRefusesOneLiteralAmongHydratedRows(t *testing.T) {
+	model, _ := newAccountModel()
+	withPostsOn(model, &fakeRelation{table: "posts", foreign: "posts.account_id", local: "accounts.id"})
+
+	rows := append(collectionOf(t, model, 1, 2), &account{ID: 3})
+	err := rows.Load(context.Background(), grant(), "posts")
+	if !errors.Is(err, ErrRowHasNoModel) {
+		t.Fatalf("Load = %v, want ErrRowHasNoModel", err)
+	}
+	if !strings.Contains(err.Error(), "1 of 3 rows") {
+		t.Errorf("the message does not say how many rows were unreachable: %v", err)
+	}
+}
+
 func TestLoadCountFillsTheAggregateOntoEveryModel(t *testing.T) {
 	model, conn := newAccountModel()
 	withPostsOn(model, &fakeRelation{table: "posts", foreign: "posts.user_id", local: "users.id"})

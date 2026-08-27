@@ -1483,9 +1483,17 @@ func (b *Builder[T]) TouchQuietly(ctx context.Context, g auth.Grant, column ...s
 }
 
 // EagerLoadRelations loads every top-level relation marked with With, and
-// attaches the matches to models.
+// attaches the matches to the model behind each row.
+//
+// A row reaches its model only when T embeds Model[T], so rows that carry none
+// are ErrRowHasNoModel: attaching a relation to nothing and reporting success
+// would be a load the next line cannot read back.
 func (b *Builder[T]) EagerLoadRelations(ctx context.Context, g auth.Grant, rows Collection[T]) error {
-	return b.eagerLoadRelations(ctx, g, rows.models())
+	found, err := rows.modelsOrFail()
+	if err != nil {
+		return err
+	}
+	return b.eagerLoadRelations(ctx, g, found)
 }
 
 // eagerLoadRelations is EagerLoadRelations over the models, which is what it

@@ -44,6 +44,27 @@
 // A column is a field. The tag `db:"..."` names it; without a tag the name is
 // the field name in snake case. A field tagged `db:"-"` is not a column.
 //
+// # Reading a relation back, for each of the two shapes
+//
+// With marks a relation to eager load, and the terminal attaches what it matched
+// to the model behind each row. Reading it back takes the row:
+//
+//	users, err := model.Query[User](db).With("posts").Get(ctx, g)
+//	posts, ok := model.Related[User, Post](users[0], "posts")
+//
+// and loading one afterwards is Load, promoted out of the embedded model:
+//
+//	err := users[0].Load(ctx, g, "posts")
+//
+// Both of those reach the model through the row, so both need a T that embeds
+// Model[T]. A T that does not still eager loads -- the query runs, the rows are
+// matched, the relation is attached -- but it is attached to a model beside the
+// row rather than inside it, and no terminal hands that model back. Related
+// answers false there, and Collection.Load, Collection.LoadMissing,
+// Collection.LoadAggregate and Builder.EagerLoadRelations report
+// ErrRowHasNoModel rather than reporting success having loaded onto nothing.
+// The way to read a relation off a row is to give the entity the embedded model.
+//
 // Query is the entry point when the defaults are right: it works the table out
 // of the type and takes the grammar and the processor off the connection.
 // NewModel is the one to reach for when they are not -- another table, another
