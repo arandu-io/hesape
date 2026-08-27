@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arandu-io/hesape/support/arr"
+	"github.com/arandu-io/hesape/collections/arr"
 )
 
 // dataSource is the typed reader embedded in [Fluent], [UriQueryString] and
@@ -113,7 +113,8 @@ func (d dataSource) isEmptyString(key string) bool {
 // so there is no receiver to hand back for chaining.
 func (d dataSource) WhenHas(key string, callback func(value any), def ...func()) {
 	if d.Has(key) {
-		callback(arr.Get(d.allData(), key, nil))
+		held, _ := arr.Get(d.allData(), key)
+		callback(held)
 		return
 	}
 	if len(def) > 0 && def[0] != nil {
@@ -126,7 +127,8 @@ func (d dataSource) WhenHas(key string, callback func(value any), def ...func())
 // [dataSource.WhenHas].
 func (d dataSource) WhenFilled(key string, callback func(value any), def ...func()) {
 	if d.Filled(key) {
-		callback(arr.Get(d.allData(), key, nil))
+		held, _ := arr.Get(d.allData(), key)
+		callback(held)
 		return
 	}
 	if len(def) > 0 && def[0] != nil {
@@ -139,7 +141,8 @@ func (d dataSource) WhenFilled(key string, callback func(value any), def ...func
 // [dataSource.WhenHas].
 func (d dataSource) WhenMissing(key string, callback func(value any), def ...func()) {
 	if d.Missing(key) {
-		callback(arr.Get(d.allData(), key, nil))
+		held, _ := arr.Get(d.allData(), key)
+		callback(held)
 		return
 	}
 	if len(def) > 0 && def[0] != nil {
@@ -241,11 +244,9 @@ func (d dataSource) Collect(key string) []any { return d.Array(key) }
 func (d dataSource) Only(keys ...string) map[string]any {
 	results := map[string]any{}
 	data := d.allData()
-	missing := &struct{}{}
 	for _, key := range keys {
-		v := arr.Get(data, key, missing)
-		if v != any(missing) {
-			arr.Set(results, key, v)
+		if held, ok := arr.Get(data, key); ok {
+			arr.Set(results, key, held)
 		}
 	}
 	return results
@@ -439,4 +440,21 @@ func firstOr[T any](values []T, def T) T {
 		return values[0]
 	}
 	return def
+}
+
+// subsetByKeys returns a fresh map holding source's value under each of the
+// dotted keys, with a key the source does not hold coming back as nil.
+//
+// An empty key is skipped rather than written: a map cannot be replaced through
+// its own reference, so it names no destination to write to.
+func subsetByKeys(source map[string]any, keys []string) map[string]any {
+	results := map[string]any{}
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		held, _ := arr.Get(source, key)
+		arr.Set(results, key, held)
+	}
+	return results
 }

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/arandu-io/hesape/support/arr"
+	"github.com/arandu-io/hesape/collections/arr"
 )
 
 // Fluent is a bag of attributes read and written by dotted key, with the typed
@@ -31,9 +31,16 @@ func NewFluent(attributes map[string]any) *Fluent {
 func Make(attributes map[string]any) *Fluent { return NewFluent(attributes) }
 
 // Get returns the value under a dotted key, falling back to the optional
-// default, which is nil when not given.
+// default, which is nil when not given. An empty key returns every attribute,
+// and the default is not consulted.
 func (f *Fluent) Get(key string, def ...any) any {
-	return arr.Get(f.attributes, key, firstOr(def, nil))
+	if key == "" {
+		return f.attributes
+	}
+	if held, ok := arr.Get(f.attributes, key); ok {
+		return held
+	}
+	return firstOr(def, nil)
 }
 
 // Set writes a value under a dotted key, creating the levels that are missing,
@@ -94,11 +101,7 @@ func (f *Fluent) All(keys ...string) map[string]any {
 	if len(keys) == 0 {
 		return f.ToArray()
 	}
-	results := map[string]any{}
-	for _, key := range keys {
-		arr.Set(results, key, arr.Get(f.attributes, key, nil))
-	}
-	return results
+	return subsetByKeys(f.attributes, keys)
 }
 
 // GetAttributes returns a copy of every attribute.

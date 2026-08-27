@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/arandu-io/hesape/support/arr"
+	"github.com/arandu-io/hesape/collections/arr"
 )
 
 // Uri is a parsed URI whose every writer hands back a new instance and leaves
@@ -294,7 +294,7 @@ func (u *Uri) WithQueryIfMissing(query map[string]any) *Uri {
 // holding the value is left alone; a single value becomes a list of the two,
 // with no such check.
 func (u *Uri) PushOntoQuery(key string, v any) *Uri {
-	current := arr.Get(u.Query().ToArray(), key, nil)
+	current, _ := arr.Get(u.Query().ToArray(), key)
 	values := arr.Wrap(v)
 
 	switch existing := current.(type) {
@@ -417,17 +417,21 @@ func (q *UriQueryString) All(keys ...string) map[string]any {
 	if len(keys) == 0 {
 		return query
 	}
-	results := map[string]any{}
-	for _, key := range keys {
-		arr.Set(results, key, arr.Get(query, key, nil))
-	}
-	return results
+	return subsetByKeys(query, keys)
 }
 
 // Get returns one parameter by dotted key, falling back to the optional
-// default.
+// default. An empty key returns the whole query string, and the default is not
+// consulted.
 func (q *UriQueryString) Get(key string, def ...any) any {
-	return arr.Get(q.ToArray(), key, firstOr(def, nil))
+	query := q.ToArray()
+	if key == "" {
+		return query
+	}
+	if held, ok := arr.Get(query, key); ok {
+		return held
+	}
+	return firstOr(def, nil)
 }
 
 // Decode returns the whole query string percent-decoded, or as it stands when

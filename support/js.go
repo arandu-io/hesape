@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"strings"
-
-	"github.com/arandu-io/hesape/support/arr"
 )
 
 // Js is data turned into a JavaScript expression meant to be dropped inside an
@@ -34,8 +32,8 @@ func NewJs(data any) (*Js, error) {
 func From(data any) (*Js, error) { return NewJs(data) }
 
 // Encode returns the data as JSON, escaped the way [Js] needs it. A [Jsonable]
-// is asked for its own JSON first, and an [arr.Arrayer] that is not already a
-// json.Marshaler is asked for its map first.
+// is asked for its own JSON first, and a value carrying a ToArray method that
+// is not already a json.Marshaler is asked for its map first.
 func Encode(data any) (string, error) {
 	if jsonable, ok := data.(Jsonable); ok {
 		encoded, err := jsonable.ToJson()
@@ -44,7 +42,7 @@ func Encode(data any) (string, error) {
 		}
 		return jsHexEscape(encoded), nil
 	}
-	if arrayable, ok := data.(arr.Arrayer); ok {
+	if arrayable, ok := data.(interface{ ToArray() map[string]any }); ok {
 		if _, marshaler := data.(json.Marshaler); !marshaler {
 			data = arrayable.ToArray()
 		}
