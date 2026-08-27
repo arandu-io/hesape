@@ -202,6 +202,17 @@ func (r *modelRef[T]) taken() error {
 func (r *builderRef[T]) GetModel() concerns.Model { return r.b.GetModel().Ref() }
 func (r *builderRef[T]) GetQuery() *query.Builder { return r.b.GetQuery() }
 
+// ScopesOwnTableByTenant answers for every terminal on the typed builder at
+// once, because they share the one door: prepare puts the model's tenant column
+// on the statement, and nothing runs without going through it.
+//
+// The column it uses is the model's own, which is the reason this is answered
+// here rather than left to the relation. A model that declares a different
+// column, or declares none because its table is shared, is filtered on what it
+// declared -- where a second filter added from outside would only know the
+// default name, and would name a column a shared table does not have.
+func (r *builderRef[T]) ScopesOwnTableByTenant() bool { return true }
+
 // The chainables. Each returns this ref rather than a new one: the typed
 // builder mutates and returns itself, and a ref that allocated per call would
 // make a chain of ten allocate ten.
