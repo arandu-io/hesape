@@ -183,14 +183,14 @@ type SupportsBasicAuth interface {
 
 // CanResetPassword is what a user type must satisfy to take part in a password
 // reset. It answers with the address a reset link is sent to, and it knows how
-// to send one. A type without it can sign in and cannot recover an account: the
-// broker refuses it with passwords.ErrCannotResetPassword.
+// to send one. A type without it can sign in and cannot recover an account,
+// because there is nowhere to send the link.
 //
 // The address is asked for rather than read off a field because it is not
-// necessarily the sign-in identifier, and because it is what the stored record
-// is keyed by -- both token repositories hash it to find the token again.
-// Sending is asked of the user rather than done for them because what arrives
-// is an application's own message, on its own template, over its own transport.
+// necessarily the sign-in identifier: an application that signs people in by
+// username still has to know where to write to. Sending is asked of the user
+// rather than done for them because what arrives is an application's own
+// message, on its own template, over its own transport.
 type CanResetPassword interface {
 	// GetEmailForPasswordReset is the address a reset link is sent to.
 	GetEmailForPasswordReset() string
