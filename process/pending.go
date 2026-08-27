@@ -175,6 +175,7 @@ func (p *PendingProcess) Run(ctx context.Context, command []string, output Outpu
 		if err != nil {
 			return nil, err
 		}
+		emitToHandler(output, result)
 		p.factory.RecordIfRecording(p, result)
 		return result, nil
 	}
@@ -350,6 +351,25 @@ func (p *PendingProcess) stdin() (io.Reader, error) {
 		return input, nil
 	default:
 		return nil, fmt.Errorf("process: input of type %T is not a string, a []byte or an io.Reader", p.input)
+	}
+}
+
+// emitToHandler hands a faked result's two streams to the output handler.
+//
+// A real run reaches the handler while the program is writing; a fake has all of
+// it already, and gives each stream in one chunk. Without this a caller that
+// streams through the handler instead of reading the result -- which is what a
+// caller with unbounded output is told to do -- would see nothing under Fake,
+// and the fake would answer a question that caller never asks.
+func emitToHandler(output OutputHandler, result ProcessResult) {
+	if output == nil {
+		return
+	}
+	if out := result.Output(); out != "" {
+		output(Out, out)
+	}
+	if errorOutput := result.ErrorOutput(); errorOutput != "" {
+		output(Err, errorOutput)
 	}
 }
 
