@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/database/query"
 	"github.com/arandu-io/hesape/log"
 )
 
@@ -123,6 +124,16 @@ type Page[T any] struct {
 type DB struct {
 	inner   *sql.DB
 	dialect Dialect
+
+	// grammar and processor are what make this handle a model connection: the
+	// grammar its statements compile through and the processor their results
+	// are read back through. See dbmodel.go.
+	//
+	// They are resolved once, here, rather than per statement, because a
+	// grammar is a value with a self reference and building one per query
+	// would allocate on every read.
+	grammar   query.Grammar
+	processor query.Processor
 }
 
 // Wrap returns an instrumented handle over an open *sql.DB.
@@ -133,7 +144,15 @@ func Wrap(db *sql.DB, dialect Dialect) *DB {
 	if dialect == "" {
 		dialect = DialectSQLite
 	}
-	return &DB{inner: db, dialect: dialect}
+
+	wrapped := &DB{inner: db, dialect: dialect}
+	if DefaultQueryGrammar != nil {
+		wrapped.grammar = DefaultQueryGrammar(dialect)
+	}
+	if DefaultPostProcessor != nil {
+		wrapped.processor = DefaultPostProcessor(dialect)
+	}
+	return wrapped
 }
 
 // Dialect reports the flavour this handle speaks. Repositories use it only when

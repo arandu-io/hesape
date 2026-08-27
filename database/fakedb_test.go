@@ -36,10 +36,48 @@ type fakeDB struct {
 	mu      sync.Mutex
 	stmts   []string
 	args    [][]driver.NamedValue
+	onTx    []bool
 	rows    map[string][]string // sql substring -> single column rows
 	failOn  string
 	failErr error
 	lastID  int64
+
+	// answerColumns and answerRows are the result set every query gets when
+	// one was set, for a fixture whose shape is not the migrations table.
+	answerColumns []string
+	answerRows    [][]driver.Value
+}
+
+// answer sets the result set every query on this fake comes back with.
+func (f *fakeDB) answer(columns []string, rows ...[]driver.Value) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.answerColumns = columns
+	f.answerRows = rows
+}
+
+// statementsOnTransaction counts the statements that ran on an open
+// transaction and the ones that ran beside it, ignoring the commit and the
+// rollback themselves.
+//
+// It is what tells a statement that joined a transaction from one that merely
+// ran while a transaction was open: database/sql hands the transaction one
+// connection out of the pool and gives every other statement a different one,
+// so the two are indistinguishable from the SQL alone.
+func (f *fakeDB) statementsOnTransaction() (joined, beside int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, statement := range f.stmts {
+		if statement == "COMMIT" || statement == "ROLLBACK" {
+			continue
+		}
+		if f.onTx[i] {
+			joined++
+			continue
+		}
+		beside++
+	}
+	return joined, beside
 }
 
 // newFakeDB registers a fake and returns the handle plus its state.
@@ -64,11 +102,12 @@ func lookupFake(dsn string) *fakeDB {
 	return fakeDBs[dsn]
 }
 
-func (f *fakeDB) record(query string, args []driver.NamedValue) error {
+func (f *fakeDB) record(query string, args []driver.NamedValue, onTx bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.stmts = append(f.stmts, query)
 	f.args = append(f.args, args)
+	f.onTx = append(f.onTx, onTx)
 	if f.failOn != "" && strings.Contains(query, f.failOn) {
 		return f.failErr
 	}
@@ -96,6 +135,14 @@ func (f *fakeDB) sawStatement(substring string) bool {
 	return false
 }
 
+// answerFor returns the result set set with answer, or nil columns when none
+// was.
+func (f *fakeDB) answerFor() ([]string, [][]driver.Value) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.answerColumns, f.answerRows
+}
+
 func (f *fakeDB) rowsFor(query string) []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -107,18 +154,29 @@ func (f *fakeDB) rowsFor(query string) []string {
 	return nil
 }
 
-type fakeConn struct{ db *fakeDB }
+// fakeConn is one connection out of the pool. It knows whether a transaction
+// is open on itself, which is the only place that can be known: the pool hands
+// a transaction one connection and every other statement a different one.
+type fakeConn struct {
+	db   *fakeDB
+	inTx bool
+}
 
 func (c *fakeConn) Prepare(string) (driver.Stmt, error) { return nil, driver.ErrSkip }
 func (c *fakeConn) Close() error                        { return nil }
-func (c *fakeConn) Begin() (driver.Tx, error)           { return &fakeTx{db: c.db}, nil }
+
+func (c *fakeConn) Begin() (driver.Tx, error) {
+	c.inTx = true
+	return &fakeTx{conn: c}, nil
+}
 
 func (c *fakeConn) BeginTx(context.Context, driver.TxOptions) (driver.Tx, error) {
-	return &fakeTx{db: c.db}, nil
+	c.inTx = true
+	return &fakeTx{conn: c}, nil
 }
 
 func (c *fakeConn) ExecContext(_ context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	if err := c.db.record(query, args); err != nil {
+	if err := c.db.record(query, args, c.inTx); err != nil {
 		return nil, err
 	}
 	c.db.lastID++
@@ -126,16 +184,28 @@ func (c *fakeConn) ExecContext(_ context.Context, query string, args []driver.Na
 }
 
 func (c *fakeConn) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	if err := c.db.record(query, args); err != nil {
+	if err := c.db.record(query, args, c.inTx); err != nil {
 		return nil, err
+	}
+	if columns, rows := c.db.answerFor(); columns != nil {
+		return &fakeRows{columns: columns, rows: rows}, nil
 	}
 	return &fakeRows{values: c.db.rowsFor(query)}, nil
 }
 
-type fakeTx struct{ db *fakeDB }
+type fakeTx struct{ conn *fakeConn }
 
-func (t *fakeTx) Commit() error   { return t.db.record("COMMIT", nil) }
-func (t *fakeTx) Rollback() error { return t.db.record("ROLLBACK", nil) }
+func (t *fakeTx) Commit() error {
+	err := t.conn.db.record("COMMIT", nil, t.conn.inTx)
+	t.conn.inTx = false
+	return err
+}
+
+func (t *fakeTx) Rollback() error {
+	err := t.conn.db.record("ROLLBACK", nil, t.conn.inTx)
+	t.conn.inTx = false
+	return err
+}
 
 // fakeResult reports an identifier, because a driver that does is what
 // InsertGetID needs and a zero would be indistinguishable from "none".
@@ -144,18 +214,36 @@ type fakeResult struct{ id int64 }
 func (r fakeResult) LastInsertId() (int64, error) { return r.id, nil }
 func (fakeResult) RowsAffected() (int64, error)   { return 1, nil }
 
-// fakeRows mimics the shape of the migrations table: id, batch, applied_at.
-// One shape is enough because it is the only query the data package issues on
-// its own -- repository queries belong to the modules that own them.
+// fakeRows mimics the shape of the migrations table -- id, batch, applied_at --
+// unless the fixture set one of its own with answer, which a query whose shape
+// is a module's table needs.
 type fakeRows struct {
 	values []string
 	i      int
+
+	columns []string
+	rows    [][]driver.Value
 }
 
-func (r *fakeRows) Columns() []string { return []string{"id", "batch", "applied_at"} }
-func (r *fakeRows) Close() error      { return nil }
+func (r *fakeRows) Columns() []string {
+	if r.columns != nil {
+		return r.columns
+	}
+	return []string{"id", "batch", "applied_at"}
+}
+
+func (r *fakeRows) Close() error { return nil }
 
 func (r *fakeRows) Next(dest []driver.Value) error {
+	if r.columns != nil {
+		if r.i >= len(r.rows) {
+			return io.EOF
+		}
+		copy(dest, r.rows[r.i])
+		r.i++
+		return nil
+	}
+
 	if r.i >= len(r.values) {
 		return io.EOF
 	}

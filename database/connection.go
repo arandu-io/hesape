@@ -684,12 +684,24 @@ func (c *Connection) BindValues(bindings []any) []any { return c.PrepareBindings
 // becomes 0 or 1 -- both because the engines disagree about the wire form and
 // the grammar is the one that knows which.
 func (c *Connection) PrepareBindings(bindings []any) []any {
+	return prepareBindings(c.GetQueryGrammar(), bindings)
+}
+
+// prepareBindings is the conversion itself, shared with the instrumented
+// handle: a statement compiled by a grammar carries the same values whichever
+// of the two runs it, so it converts them the same way or the two disagree
+// about what a Tuesday is.
+//
+// A nil grammar falls back to the format every shipped grammar spells a
+// timestamp in, which is what a connection built for a test that never
+// compiles SQL has.
+func prepareBindings(grammar query.Grammar, bindings []any) []any {
 	if len(bindings) == 0 {
 		return bindings
 	}
 
 	layout := "2006-01-02 15:04:05"
-	if grammar := c.GetQueryGrammar(); grammar != nil {
+	if grammar != nil {
 		layout = grammar.GetDateFormat()
 	}
 
