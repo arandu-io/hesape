@@ -131,11 +131,9 @@ type OtherDeviceLogout struct {
 // moment an application signs the person in, ends their other sessions, or
 // writes the change down.
 //
-// Nothing in this collection dispatches it. Redeeming the token is
-// [github.com/arandu-io/hesape/auth/passwords.PasswordBroker.Reset], which
-// hands the new password to a callback the application supplied; whoever wrote
-// that callback is the only one who knows the password was really stored, so
-// the announcement is theirs to make.
+// Nothing in this collection dispatches it, and nothing here redeems a reset
+// token either. Whoever stores the new password is the only one that knows it
+// was really stored, so the announcement is theirs to make.
 type PasswordReset struct {
 	// User is the user.
 	User auth.Authenticatable
@@ -147,9 +145,8 @@ type PasswordReset struct {
 // form answers all three the same way, and an event that fired only for real
 // accounts would be that difference showing up somewhere else.
 //
-// Nothing in this collection dispatches it:
-// [github.com/arandu-io/hesape/auth/passwords.PasswordBroker] takes no
-// dispatcher, which its package documents among the things deliberately absent.
+// Nothing in this collection dispatches it. Sending the link is the
+// application's, and so is the moment it says so.
 type PasswordResetLinkSent struct {
 	// User is the user the link was sent to.
 	//
