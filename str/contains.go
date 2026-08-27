@@ -15,11 +15,11 @@ import (
 // follows them.
 func Contains(haystack string, needles []string, ignoreCase bool) bool {
 	if ignoreCase {
-		haystack = Lower(haystack)
+		haystack = strings.ToLower(haystack)
 	}
 	for _, needle := range needles {
 		if ignoreCase {
-			needle = Lower(needle)
+			needle = strings.ToLower(needle)
 		}
 		if needle != "" && strings.Contains(haystack, needle) {
 			return true

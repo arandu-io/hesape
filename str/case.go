@@ -67,7 +67,7 @@ func Snake(value, delimiter string) string {
 				b.WriteString(delimiter)
 			}
 		}
-		return Lower(b.String())
+		return strings.ToLower(b.String())
 	})
 }
 
@@ -145,12 +145,6 @@ func Ucsplit(value string) []string {
 	return out
 }
 
-// Lower lowercases the whole string.
-func Lower(value string) string { return strings.ToLower(value) }
-
-// Upper uppercases the whole string.
-func Upper(value string) string { return strings.ToUpper(value) }
-
 // Title uppercases the first letter of every word and lowercases the rest of
 // each one: Title("welcome EMAIL") is "Welcome Email".
 //
@@ -191,11 +185,11 @@ const (
 func ConvertCase(value string, mode int) string {
 	switch mode {
 	case CaseUpper:
-		return Upper(value)
+		return strings.ToUpper(value)
 	case CaseTitle:
 		return Title(value)
 	default:
-		return Lower(value)
+		return strings.ToLower(value)
 	}
 }
 
@@ -251,7 +245,7 @@ func Apa(value string) string {
 	words := strings.FieldsFunc(value, unicode.IsSpace)
 
 	for i := range words {
-		lowercaseWord := Lower(words[i])
+		lowercaseWord := strings.ToLower(words[i])
 
 		if strings.Contains(lowercaseWord, "-") {
 			hyphenated := strings.Split(lowercaseWord, "-")
