@@ -389,7 +389,14 @@ func (c *Connection) SelectResultSets(ctx context.Context, q string, bindings []
 // It returns a range-over-func iterator with the same shape as concerns.Lazy:
 // an error is yielded once and ends the iteration, so a caller that forgets
 // to check it still stops.
+//
+// It does not go through run, because run wraps a callback that has to finish
+// before it returns and this one hands rows back as they arrive. The
+// renumbering is therefore repeated here rather than inherited, and it is the
+// only place in this file where that is true.
 func (c *Connection) Cursor(ctx context.Context, q string, bindings []any, useReadPDO bool) func(yield func(query.Record, error) bool) {
+	q = c.rebind(q, bindings)
+
 	return func(yield func(query.Record, error) bool) {
 		if c.Pretending() {
 			return
@@ -704,9 +711,38 @@ func (c *Connection) PrepareBindings(bindings []any) []any {
 	return out
 }
 
+// rebind numbers the placeholders of a finished statement for the dialect this
+// connection speaks.
+//
+// Every grammar compiles a placeholder as "?", Postgres included, because a
+// grammar builds fragments and cannot know where a fragment will sit in a
+// statement it has not finished -- a subquery compiled on its own would start
+// its numbering over at $1. So the numbering is done once, here, on the
+// finished statement, at the last point every read and every write passes
+// through.
+//
+// A statement carrying no values is left alone. It has no placeholder to
+// number, so a "?" in one is an operator -- Postgres spells jsonb containment
+// that way -- or an ordinary character in a literal, and renumbering either
+// would rewrite SQL somebody wrote by hand. That is also what keeps
+// Unprepared, which is how a schema dump is loaded, running the statement as
+// it is.
+func (c *Connection) rebind(q string, bindings []any) string {
+	if len(bindings) == 0 {
+		return q
+	}
+	return c.dialect().Rebind(q)
+}
+
 // run wraps callback with the before-hooks, the reconnect, the timing, the
 // retry on a lost connection, and the log.
+//
+// The statement is renumbered before any of that, so the hooks, the query log
+// and a QueryException all carry the statement the server was actually sent
+// rather than the portable form it was written in.
 func (c *Connection) run(ctx context.Context, q string, bindings []any, callback func(string, []any) error) error {
+	q = c.rebind(q, bindings)
+
 	c.mu.RLock()
 	before := slices.Clone(c.beforeExecutingCallbacks)
 	c.mu.RUnlock()
