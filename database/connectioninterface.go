@@ -18,11 +18,11 @@ import (
 type ConnectionInterface interface {
 	// Table returns a query builder against one table, with an optional
 	// alias.
-	Table(ctx context.Context, table any, as ...string) *query.Builder
+	Table(table any, as ...string) *query.Builder
 
 	// Query returns a fresh query builder bound to this connection. Table is
 	// unusable without it, and there is no other route to a builder.
-	Query(ctx context.Context) *query.Builder
+	Query() *query.Builder
 
 	// Raw wraps value as a fragment of SQL that the grammar leaves
 	// untouched.

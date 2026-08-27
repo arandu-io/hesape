@@ -405,20 +405,26 @@ func TestMigrationsDeclareTheTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpStatements: %v", err)
 	}
-	joined := strings.Join(up, "\n")
-	if !strings.Contains(joined, "CREATE TABLE "+bus.BatchesTable) {
-		t.Errorf("the migration does not create %s", bus.BatchesTable)
+	// The migration is written with the Blueprint, so the case and the spacing
+	// are the grammar's. What has to be true is the shape, and it is read
+	// case-insensitively for that reason.
+	joined := strings.ToLower(strings.Join(up, "\n"))
+	if !strings.Contains(joined, "create table") || !strings.Contains(joined, bus.BatchesTable) {
+		t.Errorf("the migration does not create %s:\n%s", bus.BatchesTable, joined)
 	}
 	// TEXT in a key is not portable: MySQL refuses it without a prefix length.
-	if strings.Contains(joined, "id             TEXT") {
-		t.Error("the key column is TEXT, which MySQL refuses in a key")
+	// The Blueprint is what decides that now, per engine, and the assertion is
+	// that the id did not come out as the long kind.
+	if strings.Contains(joined, `"id" text`) {
+		t.Error("the key column is TEXT, which MySQL refuses in a key without a prefix length")
 	}
 
 	down, err := migrations.DownStatements(ctx, m)
 	if err != nil {
 		t.Fatalf("DownStatements: %v", err)
 	}
-	if !strings.Contains(strings.Join(down, "\n"), "DROP TABLE "+bus.BatchesTable) {
+	reversal := strings.ToLower(strings.Join(down, "\n"))
+	if !strings.Contains(reversal, "drop table") || !strings.Contains(reversal, bus.BatchesTable) {
 		t.Errorf("the migration cannot be rolled back: %q", down)
 	}
 }

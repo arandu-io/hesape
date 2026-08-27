@@ -1,6 +1,7 @@
 package processors
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -32,10 +33,10 @@ var _ query.Processor = (*Processor)(nil)
 func NewProcessor() *Processor { return &Processor{} }
 
 // LastInsertIDConnection is the part of the connection ProcessInsertGetID needs
-// beyond query.Connection: the identifier the engine assigned to the row it
+// beyond query.connection: the identifier the engine assigned to the row it
 // just inserted.
 //
-// query.Connection is narrowed to running statements and has no such
+// query.connection is narrowed to running statements and has no such
 // method, so a connection that can answer implements this and one that
 // cannot says so rather than returning a zero that reads like an
 // identifier.
@@ -58,13 +59,13 @@ func (p *Processor) ProcessSelect(q *query.Builder, results []query.Record) []qu
 // It returns an int64: query.Processor declares the signature, and an
 // engine whose identifier is not a number is a repository's problem before
 // it is a processor's.
-func (p *Processor) ProcessInsertGetID(q *query.Builder, sql string, values []any, sequence string) (int64, error) {
+func (p *Processor) ProcessInsertGetID(ctx context.Context, q *query.Builder, sql string, values []any, sequence string) (int64, error) {
 	connection := q.GetConnection()
 	if connection == nil {
 		return 0, fmt.Errorf("query/processors: the builder has no connection to insert through")
 	}
 
-	if _, err := connection.Insert(sql, values); err != nil {
+	if _, err := connection.Insert(ctx, sql, values); err != nil {
 		return 0, err
 	}
 

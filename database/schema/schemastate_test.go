@@ -70,7 +70,7 @@ func TestSqliteSchemaStateDumpStripsInternalTables(t *testing.T) {
 
 	state := schema.NewSqliteSchemaState(connection, factory.factory)
 
-	if err := state.Dump(context.Background(), grant(), connection, path); err != nil {
+	if err := state.Dump(context.Background(), connection, path); err != nil {
 		t.Fatalf("Dump: %v", err)
 	}
 
@@ -105,7 +105,7 @@ func TestSqliteSchemaStateLoadUsesTheConnectionInMemory(t *testing.T) {
 
 	state := schema.NewSqliteSchemaState(connection, factory.factory)
 
-	if err := state.Load(context.Background(), grant(), path); err != nil {
+	if err := state.Load(context.Background(), path); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
@@ -130,7 +130,7 @@ func TestPostgresDumpCommandCarriesNoOwnerAndNoACL(t *testing.T) {
 
 	state := schema.NewPostgresSchemaState(connection, factory.factory)
 
-	if err := state.Dump(context.Background(), grant(), connection, path); err != nil {
+	if err := state.Dump(context.Background(), connection, path); err != nil {
 		t.Fatalf("Dump: %v", err)
 	}
 
@@ -164,7 +164,7 @@ func TestPostgresLoadPicksTheToolByExtension(t *testing.T) {
 		factory := &recorder{}
 		state := schema.NewPostgresSchemaState(connection, factory.factory)
 
-		if err := state.Load(context.Background(), grant(), path); err != nil {
+		if err := state.Load(context.Background(), path); err != nil {
 			t.Fatalf("Load(%s): %v", path, err)
 		}
 		if got := factory.last()[0]; got != want {
@@ -191,7 +191,7 @@ func TestMySqlDumpOmitsGtidPurgedOnMaria(t *testing.T) {
 			t.Fatalf("seeding the dump file: %v", err)
 		}
 
-		if err := state.Dump(context.Background(), grant(), connection, path); err != nil {
+		if err := state.Dump(context.Background(), connection, path); err != nil {
 			t.Fatalf("Dump(maria=%v): %v", maria, err)
 		}
 
@@ -222,7 +222,7 @@ func TestMySqlDumpPrefersTheSocket(t *testing.T) {
 		t.Fatalf("seeding the dump file: %v", err)
 	}
 
-	if err := state.Dump(context.Background(), grant(), connection, path); err != nil {
+	if err := state.Dump(context.Background(), connection, path); err != nil {
 		t.Fatalf("Dump: %v", err)
 	}
 
@@ -246,7 +246,7 @@ func TestRefreshDatabaseFileRefusesOtherDrivers(t *testing.T) {
 	}
 
 	postgres := schema.NewBuilder(newConfiguredConn("pgsql", map[string]string{"database": path}))
-	if err := postgres.RefreshDatabaseFile(context.Background(), grant(), path); err == nil {
+	if err := postgres.RefreshDatabaseFile(context.Background(), path); err == nil {
 		t.Fatal("RefreshDatabaseFile emptied a file on a Postgres connection")
 	}
 
@@ -255,7 +255,7 @@ func TestRefreshDatabaseFileRefusesOtherDrivers(t *testing.T) {
 	}
 
 	sqlite := schema.NewBuilder(newConfiguredConn("sqlite", map[string]string{"database": path}))
-	if err := sqlite.RefreshDatabaseFile(context.Background(), grant(), ""); err != nil {
+	if err := sqlite.RefreshDatabaseFile(context.Background(), ""); err != nil {
 		t.Fatalf("RefreshDatabaseFile: %v", err)
 	}
 
@@ -274,7 +274,7 @@ func TestRefreshDatabaseFileRefusesOtherDrivers(t *testing.T) {
 func TestRefreshDatabaseFileRefusesInMemory(t *testing.T) {
 	builder := schema.NewBuilder(newConfiguredConn("sqlite", map[string]string{"database": ":memory:"}))
 
-	if err := builder.RefreshDatabaseFile(context.Background(), grant(), ""); err == nil {
+	if err := builder.RefreshDatabaseFile(context.Background(), ""); err == nil {
 		t.Fatal("RefreshDatabaseFile accepted an in-memory database")
 	}
 	if _, err := os.Stat(":memory:"); err == nil {

@@ -26,14 +26,18 @@ func TestTheMigrationIsWrittenOnceAndNotTwice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	for _, want := range []string{"CREATE TABLE", console.TableName, "last_activity", "payload", "user_id"} {
-		if !strings.Contains(string(body), want) {
+	// The SQL is the grammar's, so it is read case-insensitively: the migration
+	// is written with the Blueprint, and the case of the keywords belongs to
+	// whichever engine it was rendered for.
+	written := strings.ToLower(string(body))
+	for _, want := range []string{"create table", console.TableName, "last_activity", "payload", "user_id"} {
+		if !strings.Contains(written, want) {
 			t.Fatalf("the migration does not mention %q:\n%s", want, body)
 		}
 	}
 	// The sweep deletes on last_activity, and an unindexed sweep of the session
 	// table is a full scan on the busiest table in the schema.
-	if !strings.Contains(string(body), "sessions_last_activity_index") {
+	if !strings.Contains(written, "sessions_last_activity_index") {
 		t.Fatalf("the migration does not index last_activity:\n%s", body)
 	}
 

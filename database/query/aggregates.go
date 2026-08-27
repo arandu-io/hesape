@@ -181,7 +181,7 @@ func (b *Builder) runPaginationCountQuery(ctx context.Context, g auth.Grant, col
 		outer.MergeBindings(inner)
 		outer.setAggregate("count", withoutSelectAliases(columns))
 		outer.Columns = []any{"*"}
-		return outer.runSelect()
+		return outer.runSelect(ctx)
 	}
 
 	without := []string{"columns", "orders", "limit", "offset"}

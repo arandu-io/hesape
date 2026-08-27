@@ -12,6 +12,7 @@ import (
 	busevents "github.com/arandu-io/hesape/bus/events"
 	"github.com/arandu-io/hesape/database"
 	"github.com/arandu-io/hesape/database/migrations"
+	"github.com/arandu-io/hesape/database/schema"
 )
 
 // BatchesTable is where batches are stored.
@@ -81,34 +82,30 @@ func (CreateJobBatchesTable) GetName() string {
 // together and written once, and a column per field would be a migration the
 // first time a callback grows an option.
 func (CreateJobBatchesTable) Up(ctx context.Context, conn migrations.Connection) error {
-	statements := []string{
-		`CREATE TABLE ` + BatchesTable + ` (
-			id             ` + database.KeyText + ` PRIMARY KEY,
-			tenant_id      ` + database.KeyText + ` NOT NULL,
-			name           TEXT NOT NULL,
-			total_jobs     INTEGER NOT NULL,
-			pending_jobs   INTEGER NOT NULL,
-			failed_jobs    INTEGER NOT NULL,
-			failed_job_ids TEXT NOT NULL,
-			options        TEXT NOT NULL,
-			created_at     TIMESTAMP NOT NULL,
-			cancelled_at   TIMESTAMP NULL,
-			finished_at    TIMESTAMP NULL
-		)`,
-		`CREATE INDEX job_batches_tenant_created_idx ON ` + BatchesTable + ` (tenant_id, created_at)`,
-	}
-	for _, statement := range statements {
-		if _, err := conn.Statement(ctx, statement, nil); err != nil {
-			return err
-		}
-	}
-	return nil
+	return conn.Schema().Create(ctx, BatchesTable, func(table *schema.Blueprint) {
+		// String rather than Text for the keyed columns. That used to be spelled
+		// database.KeyText here, which is the same rule under another name: the
+		// Blueprint knows which type each engine wants for a column an index
+		// reaches.
+		table.String("id").Primary()
+		table.String("tenant_id")
+		table.Text("name")
+		table.BigInteger("total_jobs")
+		table.BigInteger("pending_jobs")
+		table.BigInteger("failed_jobs")
+		table.Text("failed_job_ids")
+		table.Text("options")
+		table.Timestamp("created_at")
+		table.Timestamp("cancelled_at").Nullable()
+		table.Timestamp("finished_at").Nullable()
+
+		table.Index([]string{"tenant_id", "created_at"}, "job_batches_tenant_created_idx")
+	})
 }
 
 // Down drops the batches table, and the index with it.
 func (CreateJobBatchesTable) Down(ctx context.Context, conn migrations.Connection) error {
-	_, err := conn.Statement(ctx, `DROP TABLE `+BatchesTable, nil)
-	return err
+	return conn.Schema().DropIfExists(ctx, BatchesTable)
 }
 
 // Migrations is the schema this repository needs.

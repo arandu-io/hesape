@@ -6,19 +6,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database/schema"
 )
 
 // grant is the Grant every test compiles under. A migration runner has no
 // request to authorize from, so it takes the named escape hatch, which refuses
 // to issue a Grant without a tenant.
-func grant() auth.Grant { return auth.SystemGrant(schema.ActionMigrate, "acme") }
-
 func compile(t *testing.T, conn *fakeConnection, table string, build func(*schema.Blueprint)) []string {
 	t.Helper()
 	blueprint := schema.NewBlueprint(conn, table, build)
-	sql, err := blueprint.ToSQL(context.Background(), grant())
+	sql, err := blueprint.ToSQL(context.Background())
 	if err != nil {
 		t.Fatalf("ToSQL: %v", err)
 	}
@@ -306,7 +303,7 @@ func TestChangeGeneratedColumn(t *testing.T) {
 	blueprint := schema.NewBlueprint(newFake("pgsql"), "users", func(table *schema.Blueprint) {
 		table.String("slug", 100).VirtualAs("lower(name)").Change()
 	})
-	if _, err := blueprint.ToSQL(context.Background(), grant()); !errors.Is(err, schema.ErrUnsupported) {
+	if _, err := blueprint.ToSQL(context.Background()); !errors.Is(err, schema.ErrUnsupported) {
 		t.Fatalf("rewriting a generated column was accepted: %v", err)
 	}
 }
@@ -393,26 +390,8 @@ func TestUnsupportedIsReportedNotSwallowed(t *testing.T) {
 		table.SpatialIndex("area")
 	})
 
-	if _, err := blueprint.ToSQL(context.Background(), grant()); !errors.Is(err, schema.ErrUnsupported) {
+	if _, err := blueprint.ToSQL(context.Background()); !errors.Is(err, schema.ErrUnsupported) {
 		t.Fatalf("got %v, want an error wrapping schema.ErrUnsupported", err)
-	}
-}
-
-// TestGrantIsRequired: a blueprint nobody authorized compiles nothing, and the
-// refusal names the missing call rather than the SQL.
-func TestGrantIsRequired(t *testing.T) {
-	blueprint := schema.NewBlueprint(newFake("mysql"), "users", func(table *schema.Blueprint) {
-		table.Create()
-		table.ID("")
-	})
-
-	_, err := blueprint.ToSQL(context.Background(), auth.Grant{})
-	if !errors.Is(err, auth.ErrForbidden) {
-		t.Fatalf("got %v, want auth.ErrForbidden", err)
-	}
-
-	if _, err := blueprint.ToSQL(context.Background(), auth.SystemGrant(schema.ActionMigrate, "")); !errors.Is(err, auth.ErrForbidden) {
-		t.Fatalf("a system grant with no tenant issued a usable Grant: %v", err)
 	}
 }
 
@@ -426,7 +405,7 @@ func TestBuildExecutesEveryStatement(t *testing.T) {
 		table.String("email", 255).Unique()
 	})
 
-	if err := blueprint.Build(context.Background(), grant()); err != nil {
+	if err := blueprint.Build(context.Background()); err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	if len(conn.statements) != 2 {

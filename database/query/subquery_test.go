@@ -176,7 +176,7 @@ func TestASubqueryIsNotAWayPastTheTenantCheck(t *testing.T) {
 }
 
 // A subquery on the LEFT of a comparison -- `(select count(*) from invoices
-// where invoices.user_id = users.id) > 3` -- is the shape the eloquent
+// where invoices.user_id = users.id) > 3` -- is the shape the model
 // package's has-query takes when EXISTS cannot answer, and it was the shape
 // with no builder method behind it: both copies of that query assembled the
 // clause by hand, freezing the subquery into a raw column, and nothing could

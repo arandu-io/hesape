@@ -1,7 +1,6 @@
 package capsule
 
 import (
-	"context"
 	"sync"
 
 	"github.com/arandu-io/hesape/database"
@@ -112,15 +111,15 @@ func Connection(name string) (database.ConnectionInterface, error) {
 // It takes a context for the reason Connection.Table gives: a builder that
 // cannot be cancelled holds a server connection for as long as the server
 // likes.
-func Table(ctx context.Context, table any, as, connection string) (*query.Builder, error) {
+func Table(table any, as, connection string) (*query.Builder, error) {
 	conn, err := Connection(connection)
 	if err != nil {
 		return nil, err
 	}
 	if as == "" {
-		return conn.Table(ctx, table), nil
+		return conn.Table(table), nil
 	}
-	return conn.Table(ctx, table, as), nil
+	return conn.Table(table, as), nil
 }
 
 // Schema returns the schema builder for a named connection, from the global
@@ -169,20 +168,20 @@ func (m *Manager) AddConnection(config map[string]any, name string) {
 	m.config.Set("database.connections", connections)
 }
 
-// BootEloquentUsing is where an ORM registers the wiring BootEloquent does.
+// BootModelLayerUsing is where an ORM registers the wiring BootModelLayer does.
 //
 // Calling into an ORM's connection resolver and event dispatcher setters
 // directly here would make the capsule import the ORM, and the capsule is
 // the piece a script uses precisely because it wants the small half. So the
 // ORM registers instead, from its own init, and a binary that never
-// imported it has a BootEloquent that does nothing -- which is the correct
+// imported it has a BootModelLayer that does nothing -- which is the correct
 // response to "boot the ORM I did not link".
-var BootEloquentUsing func(resolver database.ConnectionResolverInterface, events database.Dispatcher)
+var BootModelLayerUsing func(resolver database.ConnectionResolverInterface, events database.Dispatcher)
 
-// BootEloquent wires an ORM's connection resolver and event dispatcher to
-// the capsule's manager, if BootEloquentUsing was set.
-func (m *Manager) BootEloquent() {
-	if BootEloquentUsing == nil {
+// BootModelLayer wires an ORM's connection resolver and event dispatcher to
+// the capsule's manager, if BootModelLayerUsing was set.
+func (m *Manager) BootModelLayer() {
+	if BootModelLayerUsing == nil {
 		return
 	}
 
@@ -191,7 +190,7 @@ func (m *Manager) BootEloquent() {
 	events := m.events
 	m.mu.RUnlock()
 
-	BootEloquentUsing(manager, events)
+	BootModelLayerUsing(manager, events)
 }
 
 // GetDatabaseManager returns the DatabaseManager the capsule wraps.

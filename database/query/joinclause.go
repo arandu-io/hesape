@@ -29,7 +29,7 @@ type JoinClause struct {
 // nested query built inside the join compiles against the same dialect.
 func NewJoinClause(parentQuery *Builder, typ string, table any) *JoinClause {
 	return &JoinClause{
-		Builder:     NewBuilder(parentQuery.Connection, parentQuery.Grammar, parentQuery.Processor),
+		Builder:     NewBuilder(parentQuery.connection, parentQuery.Grammar, parentQuery.Processor),
 		Type:        typ,
 		Table:       table,
 		parentQuery: parentQuery,

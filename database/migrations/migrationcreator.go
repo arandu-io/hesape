@@ -215,6 +215,16 @@ type {{ class }} struct{ migrations.BaseMigration }
 func ({{ class }}) GetName() string { return "{{ name }}" }
 
 // Up applies the change.
+//
+// This is the stub for a migration that is not a table change -- a backfill, an
+// extension, a grant -- so it sends a statement. A migration that does change a
+// table goes through conn.Schema() instead: the Blueprint says what the table
+// should look like and each grammar writes the SQL its engine wants, which is
+// what makes one migration run on all three.
+//
+//	return conn.Schema().Table(ctx, "invoices", func(table *schema.Blueprint) {
+//	    table.String("reference").Nullable()
+//	})
 func ({{ class }}) Up(ctx context.Context, conn migrations.Connection) error {
 	_, err := conn.Statement(ctx, ` + "`" + `` + "`" + `, nil)
 	return err
@@ -233,6 +243,7 @@ import (
 	"context"
 
 	"github.com/arandu-io/hesape/database/migrations"
+	"github.com/arandu-io/hesape/database/schema"
 )
 
 func init() { migrations.Register({{ class }}{}) }
@@ -244,20 +255,28 @@ type {{ class }} struct{ migrations.BaseMigration }
 func ({{ class }}) GetName() string { return "{{ name }}" }
 
 // Up creates the table.
+//
+// The columns are String and not Text, and that is the one portability rule
+// worth knowing: a column in a key cannot be TEXT on MySQL without a prefix
+// length. String is what each grammar renders as the keyable kind.
+//
+// tenant_id is here because every query in this collection is scoped by it, and
+// the index leads with it for the same reason -- see data.Tenant.
 func ({{ class }}) Up(ctx context.Context, conn migrations.Connection) error {
-	_, err := conn.Statement(ctx, ` + "`" + `CREATE TABLE {{ table }} (
-	id         VARCHAR(255) NOT NULL PRIMARY KEY,
-	tenant_id  VARCHAR(255) NOT NULL,
-	created_at TIMESTAMP NOT NULL,
-	updated_at TIMESTAMP NOT NULL
-)` + "`" + `, nil)
-	return err
+	return conn.Schema().Create(ctx, "{{ table }}", func(table *schema.Blueprint) {
+		table.String("id").Primary()
+		table.String("tenant_id")
+
+		// Timestamps writes created_at and updated_at, which the model stamps.
+		table.Timestamps()
+
+		table.Index([]string{"tenant_id", "created_at", "id"})
+	})
 }
 
 // Down drops it.
 func ({{ class }}) Down(ctx context.Context, conn migrations.Connection) error {
-	_, err := conn.Statement(ctx, ` + "`" + `DROP TABLE {{ table }}` + "`" + `, nil)
-	return err
+	return conn.Schema().DropIfExists(ctx, "{{ table }}")
 }
 `
 
@@ -267,6 +286,7 @@ import (
 	"context"
 
 	"github.com/arandu-io/hesape/database/migrations"
+	"github.com/arandu-io/hesape/database/schema"
 )
 
 func init() { migrations.Register({{ class }}{}) }
@@ -281,15 +301,24 @@ type {{ class }} struct{ migrations.BaseMigration }
 func ({{ class }}) GetName() string { return "{{ name }}" }
 
 // Up applies the change.
+//
+// A column added to a table that already has rows is Nullable or has a Default.
+// The rule is not the Blueprint's: the previous release's binary is still
+// inserting without the column for as long as the rollout takes, and NOT NULL
+// with no default fails every one of those inserts.
 func ({{ class }}) Up(ctx context.Context, conn migrations.Connection) error {
-	_, err := conn.Statement(ctx, ` + "`" + `ALTER TABLE {{ table }} ` + "`" + `, nil)
-	return err
+	return conn.Schema().Table(ctx, "{{ table }}", func(table *schema.Blueprint) {
+	})
 }
 
 // Down reverses it.
+//
+// DropColumn takes the names Up added. SQLite refuses to drop a column an index
+// still names, so an index added above is dropped here first: the Blueprint
+// runs its commands in the order they were added.
 func ({{ class }}) Down(ctx context.Context, conn migrations.Connection) error {
-	_, err := conn.Statement(ctx, ` + "`" + `ALTER TABLE {{ table }} ` + "`" + `, nil)
-	return err
+	return conn.Schema().Table(ctx, "{{ table }}", func(table *schema.Blueprint) {
+	})
 }
 `
 )

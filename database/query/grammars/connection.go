@@ -11,7 +11,7 @@ import (
 // and MySQL's upsert spells the excluded row differently depending on a
 // connection option.
 //
-// The connection a builder holds here is query.Connection, which is
+// The connection a builder holds here is query.connection, which is
 // narrowed to running statements, so these questions are asked through
 // optional interfaces instead: a connection that can answer implements one,
 // and a connection that cannot gets the modern answer, which is the one

@@ -421,13 +421,13 @@ func (b *Builder) Cursor(ctx context.Context, g auth.Grant) iter.Seq2[Record, er
 			query.Columns = []any{"*"}
 		}
 
-		connection, ok := query.Connection.(CursorConnection)
+		connection, ok := query.connection.(CursorConnection)
 		if !ok {
 			yield(nil, errors.New("query: this connection cannot stream a result set; it does not implement query.CursorConnection"))
 			return
 		}
 
-		rows, err := connection.Cursor(query.ToSQL(), query.GetBindings(), !query.UsingWritePDO())
+		rows, err := connection.Cursor(ctx, query.ToSQL(), query.GetBindings(), !query.UsingWritePDO())
 		if err != nil {
 			yield(nil, err)
 			return

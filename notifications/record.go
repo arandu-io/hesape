@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
-	"github.com/arandu-io/hesape/database"
 	"github.com/arandu-io/hesape/database/migrations"
+	"github.com/arandu-io/hesape/database/schema"
 )
 
 // The actions a Policy decides about. They are the "module.verb" form the rest
@@ -249,32 +249,24 @@ func (CreateNotificationsTable) GetName() string {
 // a table nobody can create on one of the three supported databases is a table
 // that fails on the day somebody switches.
 func (CreateNotificationsTable) Up(ctx context.Context, conn migrations.Connection) error {
-	statements := []string{
-		`CREATE TABLE ` + Table + ` (
-			id               ` + database.KeyText + ` PRIMARY KEY,
-			tenant           ` + database.KeyText + ` NOT NULL,
-			notifiable_type  ` + database.KeyText + ` NOT NULL,
-			notifiable_id    ` + database.KeyText + ` NOT NULL,
-			notification_key ` + database.KeyText + ` NOT NULL,
-			data             TEXT NOT NULL,
-			read_at          TIMESTAMP NULL,
-			created_at       TIMESTAMP NOT NULL
-		)`,
-		`CREATE INDEX notifications_recipient_idx
-			ON ` + Table + ` (tenant, notifiable_type, notifiable_id, created_at)`,
-	}
-	for _, statement := range statements {
-		if _, err := conn.Statement(ctx, statement, nil); err != nil {
-			return err
-		}
-	}
-	return nil
+	return conn.Schema().Create(ctx, Table, func(table *schema.Blueprint) {
+		table.String("id").Primary()
+		table.String("tenant")
+		table.String("notifiable_type")
+		table.String("notifiable_id")
+		table.String("notification_key")
+		table.Text("data")
+		table.Timestamp("read_at").Nullable()
+		table.Timestamp("created_at")
+
+		table.Index([]string{"tenant", "notifiable_type", "notifiable_id", "created_at"},
+			"notifications_recipient_idx")
+	})
 }
 
 // Down drops the notifications table, and the index with it.
 func (CreateNotificationsTable) Down(ctx context.Context, conn migrations.Connection) error {
-	_, err := conn.Statement(ctx, `DROP TABLE `+Table, nil)
-	return err
+	return conn.Schema().DropIfExists(ctx, Table)
 }
 
 // Migrations is the notifications table.

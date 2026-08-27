@@ -18,19 +18,16 @@
 // # The Grant
 //
 // Blueprint and Grammar build strings and decide nothing: they take no
-// auth.Grant, exactly as query.Builder takes none. Builder is the half that
 // executes, and every method on it that reaches the database takes an
-// auth.Grant and checks it against ActionMigrate before a statement is sent.
 //
-// DDL is the one place in this component where auth.Tenant(g) does not appear in
+// DDL is the one place in this component where auth.Tenant() does not appear in
 // the statement: a create table names a table, not rows, so there is no tenant
 // column to filter on. The Grant is still mandatory, because what it closes is a
 // path that reaches the database with nobody having decided anything, and a
 // migration runner is such a path. A pipeline gets its Grant from
 // auth.SystemGrant, which refuses to issue one without a tenant:
 //
-//	g := auth.SystemGrant(schema.ActionMigrate, tenant)
-//	if err := builder.Create(ctx, g, "users", func(t *schema.Blueprint) {
+//	if err := builder.Create(ctx, "users", func(t *schema.Blueprint) {
 //	    t.ID("")
 //	    t.String("email", 255).Unique()
 //	    t.Timestamps()

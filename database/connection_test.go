@@ -1,204 +1,359 @@
-package database_test
+package database
 
 import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 
-	"github.com/arandu-io/hesape/database"
+	dbevents "github.com/arandu-io/hesape/database/events"
 )
 
-// TestDefaultConnectionIsSQLite is the promise of a fresh checkout: clone, set a
-// key, run. Nothing installed, no server, no Docker.
-func TestDefaultConnectionIsSQLite(t *testing.T) {
-	// Empty counts as absent, so this is "no DATABASE_URL" whatever the shell
-	// running the suite happens to export.
-	t.Setenv("DATABASE_URL", "")
+// countingDriver is the smallest driver that reports an identifier: each Exec
+// returns the next integer. It is here rather than in fakedb_test.go because
+// that file is package database_test and these tests reach boundConnection,
+// which is unexported.
+type countingDriver struct{ n atomic.Int64 }
 
-	cfg, err := database.Load()
+var counting = &countingDriver{}
+
+func init() { sql.Register("arandu-counting", counting) }
+
+func (d *countingDriver) Open(string) (driver.Conn, error) { return &countingConn{d: d}, nil }
+
+type countingConn struct{ d *countingDriver }
+
+func (c *countingConn) Prepare(string) (driver.Stmt, error) { return nil, driver.ErrSkip }
+func (c *countingConn) Close() error                        { return nil }
+func (c *countingConn) Begin() (driver.Tx, error)           { return nil, driver.ErrSkip }
+
+func (c *countingConn) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+	return countingResult{id: c.d.n.Add(1)}, nil
+}
+
+type countingResult struct{ id int64 }
+
+func (r countingResult) LastInsertId() (int64, error) { return r.id, nil }
+func (countingResult) RowsAffected() (int64, error)   { return 1, nil }
+
+// openCountingPool opens a pool over that driver.
+func openCountingPool(t *testing.T) *sql.DB {
+	t.Helper()
+	pool, err := sql.Open("arandu-counting", "counting")
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("opening the pool: %v", err)
 	}
-
-	if cfg.Connection != database.DialectSQLite {
-		t.Fatalf("default connection = %q, want sqlite", cfg.Connection)
-	}
-	if cfg.Database != database.DefaultSQLitePath {
-		t.Fatalf("default database = %q, want %q", cfg.Database, database.DefaultSQLitePath)
-	}
+	t.Cleanup(func() { _ = pool.Close() })
+	return pool
 }
 
-func TestLoadRejectsUnknownConnection(t *testing.T) {
-	t.Setenv("DATABASE_URL", "mongodb://127.0.0.1/db")
+func TestQueryExceptionMessageCarriesTheStatementAndValues(t *testing.T) {
+	err := NewQueryException(
+		"pgsql",
+		"select * from invoice where tenant_id = ? and id = ?",
+		[]any{"acme", 41},
+		errors.New(`ERROR: relation "invoice" does not exist`),
+		map[string]any{"driver": "pgsql", "host": "127.0.0.1", "port": "5432", "database": "arandu"},
+		"write",
+	)
 
-	_, err := database.Load()
-
-	if err == nil {
-		t.Fatal("an unsupported DB_CONNECTION was accepted")
-	}
-	if !strings.Contains(err.Error(), "sqlite, pgsql or mysql") {
-		t.Errorf("the message must list what works, got: %v", err)
-	}
-}
-
-func TestSQLiteDSNCarriesTheRequiredPragmas(t *testing.T) {
-	cfg := database.Config{Connection: database.DialectSQLite, Database: "database/database.sqlite"}
-
-	dsn := cfg.DSN()
-
-	if !strings.HasPrefix(dsn, "database/database.sqlite?") {
-		t.Fatalf("dsn = %q", dsn)
-	}
-	// Each of these is a bug that only shows up later: constraints silently
-	// ignored, and "database is locked" under two concurrent requests.
-	for _, pragma := range []string{"foreign_keys(1)", "journal_mode(WAL)", "busy_timeout"} {
-		if !strings.Contains(dsn, pragma) {
-			t.Errorf("dsn is missing %s: %s", pragma, dsn)
-		}
-	}
-}
-
-func TestPostgresDSN(t *testing.T) {
-	cfg := database.Config{
-		Connection: database.DialectPostgres,
-		Host:       "db.internal",
-		Port:       "5432",
-		Database:   "arandu",
-		Username:   "app",
-		Password:   "s3cr3t",
-	}
-
-	dsn := cfg.DSN()
-
-	for _, want := range []string{"postgres://", "app:", "db.internal:5432", "/arandu", "sslmode=disable"} {
-		if !strings.Contains(dsn, want) {
-			t.Errorf("dsn %q is missing %q", dsn, want)
-		}
-	}
-}
-
-// TestTheDSNIsBuiltForTheDriverAndNotPassedThrough.
-//
-// DATABASE_URL is the one source now, and the DSN used to be that string
-// verbatim whenever it was set. That is right for pgx and wrong for the other
-// two: go-sql-driver takes user:pass@tcp(host:port)/db, with no scheme, and
-// modernc/sqlite takes a path. Handing either of them the URL is a connection
-// that fails with a parse error naming neither the driver nor the variable.
-func TestTheDSNIsBuiltForTheDriverAndNotPassedThrough(t *testing.T) {
-	mysql, err := database.ParseURL("mysql://user:pass@db.example:3306/billing")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := mysql.DSN(); !strings.HasPrefix(got, "user:pass@tcp(db.example:3306)/billing") {
-		t.Errorf("the MySQL DSN is %q, which go-sql-driver does not read", got)
-	}
-	if strings.Contains(mysql.DSN(), "mysql://") {
-		t.Error("the scheme reached the driver")
-	}
-
-	sqlite, err := database.ParseURL("sqlite://database/blog.sqlite")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(sqlite.DSN(), "database/blog.sqlite?") {
-		t.Errorf("the SQLite DSN is %q, which is not a path", sqlite.DSN())
-	}
-
-	pg, err := database.ParseURL("postgres://user:pass@managed.example:5432/production")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"managed.example:5432", "/production", "user", "sslmode=disable"} {
-		if !strings.Contains(pg.DSN(), want) {
-			t.Errorf("the Postgres DSN is missing %s: %s", want, pg.DSN())
-		}
-	}
-}
-
-// TestRedactedHidesThePassword: the connection string shows up in logs and on the
-// error page, and a password there survives in a screenshot forever.
-func TestRedactedHidesThePassword(t *testing.T) {
-	cfg := database.Config{
-		Connection: database.DialectPostgres,
-		Host:       "db.internal",
-		Port:       "5432",
-		Database:   "arandu",
-		Username:   "app",
-		Password:   "s3cr3t",
-	}
-
-	if got := cfg.Redacted(); strings.Contains(got, "s3cr3t") {
-		t.Fatalf("Redacted leaks the password: %s", got)
-	}
-}
-
-func TestValidateRequiresCredentialsForAServer(t *testing.T) {
-	cfg := database.Config{
-		Connection: database.DialectPostgres,
-		Host:       "db.internal",
-		Database:   "arandu",
-	}
-
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("a server connection without a username was accepted")
-	}
-}
-
-// TestSQLitePathIsEmptyForMemoryAndServers tells the application when it has to
-// create a directory: SQLite creates the file, never the folder above it.
-func TestSQLitePathIsEmptyForMemoryAndServers(t *testing.T) {
-	file := database.Config{Connection: database.DialectSQLite, Database: "database/database.sqlite"}
-	if got := file.SQLitePath(); got != "database/database.sqlite" {
-		t.Errorf("file path = %q", got)
-	}
-
-	memory := database.Config{Connection: database.DialectSQLite, Database: ":memory:"}
-	if got := memory.SQLitePath(); got != "" {
-		t.Errorf("in-memory path = %q, want empty", got)
-	}
-
-	server := database.Config{Connection: database.DialectPostgres, Database: "arandu"}
-	if got := server.SQLitePath(); got != "" {
-		t.Errorf("server path = %q, want empty", got)
-	}
-}
-
-// TestSQLiteRefusesAServerDatabaseName.
-//
-// For SQLite, DB_DATABASE is a PATH. A value with neither a separator nor an
-// extension is a server database name pasted into a SQLite setting, and every
-// layer accepts it: SQLite creates the file, the application runs, the
-// migrations apply, and a database appears in the project root under a name no
-// ignore rule expects.
-//
-// This repository committed three of them -- a database, its -shm and its -wal
-// -- twice, because the file has no extension and every rule written for one
-// missed it.
-func TestSQLiteRefusesAServerDatabaseName(t *testing.T) {
-	for _, name := range []string{"arandu_blog", "blog", "myapp"} {
-		cfg := database.Config{Connection: database.DialectSQLite, Database: name}
-
-		err := cfg.Validate()
-		if err == nil {
-			t.Errorf("%q was accepted as a SQLite path", name)
-			continue
-		}
-		// The message has to carry the fix, not only the refusal.
-		if !strings.Contains(err.Error(), "database/"+name+".sqlite") {
-			t.Errorf("the error does not say what to write instead: %v", err)
-		}
-	}
-}
-
-// TestSQLiteAcceptsAPath: a separator or an extension is enough, and both of
-// these are things people legitimately write.
-func TestSQLiteAcceptsAPath(t *testing.T) {
-	for _, path := range []string{
-		"database/database.sqlite", "./blog.db", "/tmp/x/test.sqlite",
-		"blog.sqlite", "database/blog",
+	message := err.Error()
+	for _, want := range []string{
+		`relation "invoice" does not exist`,
+		"Connection: pgsql",
+		"Host: 127.0.0.1",
+		"Port: 5432",
+		"Database: arandu",
+		"'acme'",
+		"41",
 	} {
-		cfg := database.Config{Connection: database.DialectSQLite, Database: path}
-		if err := cfg.Validate(); err != nil {
-			t.Errorf("%q was refused: %v", path, err)
+		if !strings.Contains(message, want) {
+			t.Fatalf("the message does not name %q:\n%s", want, message)
 		}
+	}
+}
+
+func TestQueryExceptionLeavesHostAndPortOutForSQLite(t *testing.T) {
+	err := NewQueryException("sqlite", "select 1", nil, errors.New("boom"),
+		map[string]any{"driver": "sqlite", "database": "database/database.sqlite"}, "")
+
+	if strings.Contains(err.Error(), "Host:") {
+		t.Fatalf("a SQLite connection has no host, and the message names one:\n%s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "Database: database/database.sqlite") {
+		t.Fatalf("the message does not name the file:\n%s", err.Error())
+	}
+}
+
+func TestUniqueConstraintViolationUnwrapsToTheDriverError(t *testing.T) {
+	driverErr := errors.New("duplicate key value violates unique constraint")
+	err := NewUniqueConstraintViolationException("pgsql", "insert into x", nil, driverErr, nil, "")
+
+	if !errors.Is(err, driverErr) {
+		t.Fatal("errors.Is cannot reach the driver error through the unique-constraint exception")
+	}
+}
+
+func TestCausedByLostConnection(t *testing.T) {
+	if !CausedByLostConnection(errors.New("write tcp: broken pipe")) {
+		t.Fatal("a broken pipe is a lost connection")
+	}
+	if !CausedByLostConnection(errors.New("MySQL server has gone away")) {
+		t.Fatal("\"server has gone away\" is the canonical lost connection")
+	}
+	if CausedByLostConnection(errors.New("syntax error at or near \"slect\"")) {
+		t.Fatal("a syntax error was read as a lost connection, so the query would be retried")
+	}
+	if CausedByLostConnection(nil) {
+		t.Fatal("no error is not a lost connection")
+	}
+}
+
+func TestCausedByConcurrencyError(t *testing.T) {
+	for _, message := range []string{
+		"ERROR: deadlock detected (SQLSTATE 40P01)",
+		"Error 1213: Deadlock found when trying to get lock",
+		"database is locked",
+		"SQLSTATE 40001: could not serialize access",
+	} {
+		if !CausedByConcurrencyError(errors.New(message)) {
+			t.Fatalf("%q was not read as a concurrency error, so it would not be retried", message)
+		}
+	}
+	if CausedByConcurrencyError(errors.New("column \"total\" does not exist")) {
+		t.Fatal("a missing column was read as a concurrency error, so it would be retried forever")
+	}
+}
+
+func TestSubstituteBindingsQuotesAndEscapes(t *testing.T) {
+	got := substituteBindings("select * from x where a = ? and b = ? and c = ?",
+		[]any{"o'brien", 3, nil})
+
+	want := "select * from x where a = 'o''brien' and b = 3 and c = null"
+	if got != want {
+		t.Fatalf("substituteBindings answered\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestSubstituteBindingsLeavesExtraPlaceholdersAlone(t *testing.T) {
+	got := substituteBindings("select ?, ?", []any{1})
+	if got != "select 1, ?" {
+		t.Fatalf("substituteBindings answered %q", got)
+	}
+}
+
+func TestConnectionReadsItsConfiguration(t *testing.T) {
+	connection := NewConnection(nil, "arandu", "acme_", map[string]any{
+		"driver": "pgsql", "name": "primary", "host": "db.internal",
+	})
+
+	if connection.GetName() != "primary" {
+		t.Fatalf("GetName = %q", connection.GetName())
+	}
+	if connection.GetDriverName() != "pgsql" {
+		t.Fatalf("GetDriverName = %q", connection.GetDriverName())
+	}
+	if connection.GetDatabaseName() != "arandu" {
+		t.Fatalf("GetDatabaseName = %q", connection.GetDatabaseName())
+	}
+	if connection.GetTablePrefix() != "acme_" {
+		t.Fatalf("GetTablePrefix = %q", connection.GetTablePrefix())
+	}
+
+	connection.SetReadWriteType("read")
+	if connection.GetNameWithReadWriteType() != "primary::read" {
+		t.Fatalf("GetNameWithReadWriteType = %q", connection.GetNameWithReadWriteType())
+	}
+}
+
+func TestWithoutTablePrefixPutsItBack(t *testing.T) {
+	connection := NewConnection(nil, "arandu", "acme_", nil)
+
+	err := connection.WithoutTablePrefix(func(c *Connection) error {
+		if c.GetTablePrefix() != "" {
+			t.Fatalf("the prefix is still %q inside WithoutTablePrefix", c.GetTablePrefix())
+		}
+		return errors.New("the callback failed")
+	})
+	if err == nil {
+		t.Fatal("WithoutTablePrefix swallowed the callback's error")
+	}
+	if connection.GetTablePrefix() != "acme_" {
+		t.Fatalf("the prefix is %q after a failed callback, and it must be put back", connection.GetTablePrefix())
+	}
+}
+
+func TestRecordsHaveBeenModifiedOnlyEverSets(t *testing.T) {
+	connection := NewConnection(nil, "", "", nil)
+
+	connection.RecordsHaveBeenModified(true)
+	connection.RecordsHaveBeenModified(false)
+
+	if !connection.HasModifiedRecords() {
+		t.Fatal("RecordsHaveBeenModified(false) cleared the flag, and the PHP's guard says it never does")
+	}
+
+	connection.ForgetRecordModificationState()
+	if connection.HasModifiedRecords() {
+		t.Fatal("ForgetRecordModificationState did not clear it")
+	}
+}
+
+func TestPrepareBindingsConvertsBoolsAndTimes(t *testing.T) {
+	connection := NewConnection(nil, "", "", nil)
+
+	got := connection.PrepareBindings([]any{true, false, "x", 3})
+	if got[0] != 1 || got[1] != 0 {
+		t.Fatalf("PrepareBindings answered %v; a bool becomes 0 or 1 because the engines disagree about the wire form", got)
+	}
+	if got[2] != "x" || got[3] != 3 {
+		t.Fatalf("PrepareBindings changed a value it should not have: %v", got)
+	}
+}
+
+func TestEscape(t *testing.T) {
+	connection := NewConnection(nil, "", "", nil)
+
+	for _, tc := range []struct{ in, want any }{
+		{nil, "null"},
+		{true, "1"},
+		{false, "0"},
+		{7, "7"},
+		{"o'brien", "'o''brien'"},
+	} {
+		got, err := connection.Escape(tc.in, false)
+		if err != nil {
+			t.Fatalf("Escape(%v): %v", tc.in, err)
+		}
+		if got != tc.want {
+			t.Fatalf("Escape(%v) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+
+	if _, err := connection.Escape("a\x00b", false); err == nil {
+		t.Fatal("a string with a null byte was escaped, and it cannot be safely")
+	}
+}
+
+func TestConnectionWithNoReconnectorSaysSo(t *testing.T) {
+	connection := NewConnection(nil, "", "", nil)
+
+	err := connection.ReconnectIfMissingConnection()
+
+	var lost *LostConnectionException
+	if !errors.As(err, &lost) {
+		t.Fatalf("a connection with no pool and no reconnector answered %v", err)
+	}
+}
+
+func TestQueryLog(t *testing.T) {
+	connection := NewConnection(nil, "", "", map[string]any{"name": "primary"})
+
+	connection.LogQuery("select 1", nil, 1.5)
+	if len(connection.GetQueryLog()) != 0 {
+		t.Fatal("the log recorded a query while logging was off")
+	}
+
+	connection.EnableQueryLog()
+	connection.LogQuery("select ?", []any{2}, 1.5)
+
+	log := connection.GetQueryLog()
+	if len(log) != 1 || log[0].Query != "select ?" || log[0].Time != 1.5 {
+		t.Fatalf("the log holds %+v", log)
+	}
+	if connection.TotalQueryDuration() != 3.0 {
+		t.Fatalf("TotalQueryDuration = %v, and it counts every query whether or not it was logged", connection.TotalQueryDuration())
+	}
+
+	raw := connection.GetRawQueryLog()
+	if raw[0].Query != "select 2" {
+		t.Fatalf("GetRawQueryLog answered %q", raw[0].Query)
+	}
+
+	connection.FlushQueryLog()
+	if len(connection.GetQueryLog()) != 0 {
+		t.Fatal("FlushQueryLog left entries behind")
+	}
+
+	connection.ResetTotalQueryDuration()
+	if connection.TotalQueryDuration() != 0 {
+		t.Fatal("ResetTotalQueryDuration left the total behind")
+	}
+}
+
+func TestListenSeesEveryQuery(t *testing.T) {
+	connection := NewConnection(nil, "", "", map[string]any{"name": "primary"})
+
+	seen := 0
+	connection.Listen(func(*dbevents.QueryExecuted) { seen++ })
+
+	connection.LogQuery("select 1", nil, 0.1)
+	connection.LogQuery("select 2", nil, 0.1)
+
+	if seen != 2 {
+		t.Fatalf("the listener saw %d queries, want 2", seen)
+	}
+}
+
+// TestInsertGetIDReadsTheIdentifierFromTheStatementThatCausedIt covers the path
+// that was unreachable: a query builder over a real Connection asking for the
+// identifier of the row it just inserted.
+//
+// It could not work before. The processor asks the connection through
+// LastInsertIDConnection, and the type that makes a Connection usable as a
+// query.GetConnection() did not implement it -- so InsertGetID answered "this
+// connection cannot report the identifier it assigned" against every engine,
+// while every test that exercised it used a fake that could.
+//
+// The identifier is read from sql.Result rather than by asking the engine
+// afterwards. On a pooled connection the second question is answered by
+// whichever statement ran most recently, which is how one request comes to be
+// handed another request's row.
+func TestInsertGetIDReadsTheIdentifierFromTheStatementThatCausedIt(t *testing.T) {
+	connection := NewConnection(openCountingPool(t), "arandu", "", nil)
+
+	first, err := connection.InsertReturningID(context.Background(),
+		"insert into invoices (total) values (?)", []any{100})
+	if err != nil {
+		t.Fatalf("InsertReturningID: %v", err)
+	}
+	second, err := connection.InsertReturningID(context.Background(),
+		"insert into invoices (total) values (?)", []any{200})
+	if err != nil {
+		t.Fatalf("InsertReturningID: %v", err)
+	}
+
+	if first == 0 || second == 0 {
+		t.Fatalf("identifiers were %d and %d; a zero is indistinguishable from none", first, second)
+	}
+	if first == second {
+		t.Fatalf("both inserts reported %d, so the identifier is not the one the statement assigned", first)
+	}
+}
+
+// TestTheBoundConnectionAnswersTheProcessor proves the seam the processor uses.
+func TestTheBoundConnectionAnswersTheProcessor(t *testing.T) {
+	connection := NewConnection(openCountingPool(t), "arandu", "", nil)
+	bound := &boundConnection{connection: connection}
+
+	// Nothing inserted yet: it says so rather than answering zero, because a
+	// zero identifier reads like a row.
+	if _, err := bound.GetLastInsertID(""); err == nil {
+		t.Fatal("GetLastInsertID answered before any insert; a zero would read like a row")
+	}
+
+	if _, err := bound.Insert(context.Background(), "insert into invoices (total) values (?)", []any{100}); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	id, err := bound.GetLastInsertID("")
+	if err != nil {
+		t.Fatalf("GetLastInsertID: %v", err)
+	}
+	if id == 0 {
+		t.Fatal("GetLastInsertID answered 0 after an insert that reported one")
 	}
 }

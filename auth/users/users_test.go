@@ -17,9 +17,9 @@ import (
 // as a user provider is concerned.
 const tenant = "acme"
 
-// newEloquentProvider builds the provider under test over the fake connection.
-func newEloquentProvider(connection *fakeConnection, hasher auth.Hasher) *users.EloquentUserProvider {
-	return users.NewEloquentUserProvider(hasher, newTestUser, connection.users, tenant)
+// newModelProvider builds the provider under test over the fake connection.
+func newModelProvider(connection *fakeConnection, hasher auth.Hasher) *users.ModelUserProvider {
+	return users.NewModelUserProvider(hasher, newTestUser, connection.users, tenant)
 }
 
 // ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ func TestValidateCredentialsAcceptsAPasswordThatIsNotAString(t *testing.T) {
 		t.Fatalf("the login body decoded the password as %T, want float64", credentials["password"])
 	}
 
-	provider := newEloquentProvider(&fakeConnection{}, hasher)
+	provider := newModelProvider(&fakeConnection{}, hasher)
 
 	if !provider.ValidateCredentials(context.Background(), user, credentials) {
 		t.Fatal("the password 12345, sent unquoted, did not authenticate the account it hashed")
@@ -84,7 +84,7 @@ func TestValidateCredentialsCoercesEveryShapePHPWouldHaveCoerced(t *testing.T) {
 			user := &testUser{attributes: map[string]any{
 				"password": mustHash(t, hasher, credential.plain),
 			}}
-			provider := newEloquentProvider(&fakeConnection{}, hasher)
+			provider := newModelProvider(&fakeConnection{}, hasher)
 
 			if !provider.ValidateCredentials(context.Background(), user, map[string]any{"password": credential.value}) {
 				t.Fatalf("%#v did not authenticate against the hash of %q", credential.value, credential.plain)
@@ -98,7 +98,7 @@ func TestValidateCredentialsCoercesEveryShapePHPWouldHaveCoerced(t *testing.T) {
 func TestValidateCredentialsRefusesAPasswordThatIsNotAValue(t *testing.T) {
 	hasher := cheapHasher()
 	user := &testUser{attributes: map[string]any{"password": mustHash(t, hasher, "correct horse")}}
-	provider := newEloquentProvider(&fakeConnection{}, hasher)
+	provider := newModelProvider(&fakeConnection{}, hasher)
 
 	for name, value := range map[string]any{
 		"missing": nil,
@@ -129,7 +129,7 @@ func TestValidateCredentialsHandsAnEmptyPasswordToTheHasher(t *testing.T) {
 	hasher := newCountingHasher()
 	user := &testUser{attributes: map[string]any{"password": mustHash(t, hasher, "correct horse")}}
 
-	provider := newEloquentProvider(&fakeConnection{}, hasher)
+	provider := newModelProvider(&fakeConnection{}, hasher)
 
 	before := hasher.checks
 	if provider.ValidateCredentials(context.Background(), user, map[string]any{"password": ""}) {
@@ -145,7 +145,7 @@ func TestValidateCredentialsHandsAnEmptyPasswordToTheHasher(t *testing.T) {
 // empty password.
 func TestValidateCredentialsRefusesAnAccountWithNoPassword(t *testing.T) {
 	hasher := newCountingHasher()
-	provider := newEloquentProvider(&fakeConnection{}, hasher)
+	provider := newModelProvider(&fakeConnection{}, hasher)
 	user := &testUser{attributes: map[string]any{"id": int64(7)}}
 
 	for name, offered := range map[string]any{"empty": "", "something": "correct horse"} {
@@ -164,10 +164,10 @@ func TestValidateCredentialsRefusesAnAccountWithNoPassword(t *testing.T) {
 // The whole retrieve-and-validate path, on a real hasher
 // ---------------------------------------------------------------------------
 
-// TestEloquentUserProviderAuthenticatesWithARealBcryptHasher pins the whole
+// TestModelUserProviderAuthenticatesWithARealBcryptHasher pins the whole
 // path on a real hasher: a hashing.BcryptHasher -- not a double -- reaches
 // auth.UserProvider.ValidateCredentials and authenticates through it.
-func TestEloquentUserProviderAuthenticatesWithARealBcryptHasher(t *testing.T) {
+func TestModelUserProviderAuthenticatesWithARealBcryptHasher(t *testing.T) {
 	hasher := cheapHasher()
 	hashed := mustHash(t, hasher, "correct horse battery staple")
 
@@ -176,7 +176,7 @@ func TestEloquentUserProviderAuthenticatesWithARealBcryptHasher(t *testing.T) {
 		"email":    "ana@example.com",
 		"password": hashed,
 	})
-	provider := newEloquentProvider(connection, hasher)
+	provider := newModelProvider(connection, hasher)
 
 	credentials := map[string]any{"email": "ana@example.com", "password": "correct horse battery staple"}
 
@@ -207,7 +207,7 @@ func TestEloquentUserProviderAuthenticatesWithARealBcryptHasher(t *testing.T) {
 // constant time.
 func TestRetrieveByCredentialsNeverPutsThePasswordInTheStatement(t *testing.T) {
 	connection := (&fakeConnection{}).queue(query.Record{"id": int64(7)})
-	provider := newEloquentProvider(connection, cheapHasher())
+	provider := newModelProvider(connection, cheapHasher())
 
 	if _, err := provider.RetrieveByCredentials(context.Background(), map[string]any{
 		"email":                 "ana@example.com",
@@ -232,7 +232,7 @@ func TestRetrieveByCredentialsNeverPutsThePasswordInTheStatement(t *testing.T) {
 // the table.
 func TestRetrieveByCredentialsWithOnlyPasswordKeysIssuesNoStatement(t *testing.T) {
 	connection := (&fakeConnection{}).queue(query.Record{"id": int64(7)})
-	provider := newEloquentProvider(connection, cheapHasher())
+	provider := newModelProvider(connection, cheapHasher())
 
 	user, err := provider.RetrieveByCredentials(context.Background(), map[string]any{"password": "correct horse"})
 	if err != nil {
@@ -250,7 +250,7 @@ func TestRetrieveByCredentialsWithOnlyPasswordKeysIssuesNoStatement(t *testing.T
 // anything else is an equality.
 func TestRetrieveByCredentialsAppliesTheThreeCredentialShapes(t *testing.T) {
 	connection := (&fakeConnection{}).queue(query.Record{"id": int64(7)})
-	provider := newEloquentProvider(connection, cheapHasher())
+	provider := newModelProvider(connection, cheapHasher())
 
 	if _, err := provider.RetrieveByCredentials(context.Background(), map[string]any{
 		"email": "ana@example.com",
@@ -272,7 +272,7 @@ func TestRetrieveByCredentialsAppliesTheThreeCredentialShapes(t *testing.T) {
 // an interface holding a typed nil would have been.
 func TestRetrieveByIDFindsNobodyWithoutFailing(t *testing.T) {
 	connection := &fakeConnection{}
-	provider := newEloquentProvider(connection, cheapHasher())
+	provider := newModelProvider(connection, cheapHasher())
 
 	user, err := provider.RetrieveByID(context.Background(), 7)
 	if err != nil {
@@ -288,7 +288,7 @@ func TestRetrieveByIDFindsNobodyWithoutFailing(t *testing.T) {
 // check at compile time, so it is named rather than silently empty.
 func TestRetrieveByIDRefusesAModelThatCannotBeHydrated(t *testing.T) {
 	connection := (&fakeConnection{}).queue(query.Record{"id": int64(7)})
-	provider := users.NewEloquentUserProvider(cheapHasher(), newPlainUser, connection.users, tenant)
+	provider := users.NewModelUserProvider(cheapHasher(), newPlainUser, connection.users, tenant)
 
 	if _, err := provider.RetrieveByID(context.Background(), 7); !errors.Is(err, users.ErrNotHydratable) {
 		t.Fatalf("RetrieveByID answered %v, want ErrNotHydratable", err)
@@ -315,7 +315,7 @@ func TestRetrieveByTokenComparesTheStoredToken(t *testing.T) {
 				"id":             int64(7),
 				"remember_token": test.stored,
 			})
-			provider := newEloquentProvider(connection, cheapHasher())
+			provider := newModelProvider(connection, cheapHasher())
 
 			user, err := provider.RetrieveByToken(context.Background(), 7, test.given)
 			if err != nil {
@@ -332,7 +332,7 @@ func TestRetrieveByTokenComparesTheStoredToken(t *testing.T) {
 // guard queues a cookie from the user it just updated.
 func TestUpdateRememberTokenWritesTheColumnAndTheInstance(t *testing.T) {
 	connection := &fakeConnection{affected: 1}
-	provider := newEloquentProvider(connection, cheapHasher())
+	provider := newModelProvider(connection, cheapHasher())
 	user := &testUser{attributes: map[string]any{"id": int64(7)}}
 
 	if err := provider.UpdateRememberToken(context.Background(), user, "a-new-token"); err != nil {
@@ -364,7 +364,7 @@ func TestRehashPasswordIfRequiredUpgradesAWeakerHash(t *testing.T) {
 
 	connection := &fakeConnection{affected: 1}
 	stronger := hasherAt(6)
-	provider := newEloquentProvider(connection, stronger)
+	provider := newModelProvider(connection, stronger)
 
 	user := &testUser{attributes: map[string]any{"id": int64(7), "password": stored}}
 	credentials := map[string]any{"password": "correct horse battery staple"}
@@ -399,7 +399,7 @@ func TestRehashPasswordIfRequiredLeavesAMatchingHashAlone(t *testing.T) {
 	stored := mustHash(t, hasher, "correct horse battery staple")
 
 	connection := &fakeConnection{affected: 1}
-	provider := newEloquentProvider(connection, hasher)
+	provider := newModelProvider(connection, hasher)
 	user := &testUser{attributes: map[string]any{"id": int64(7), "password": stored}}
 
 	if err := provider.RehashPasswordIfRequired(context.Background(), user, map[string]any{"password": "correct horse battery staple"}, false); err != nil {
@@ -426,7 +426,7 @@ func TestRehashPasswordIfRequiredLeavesAMatchingHashAlone(t *testing.T) {
 // the rehash. It is named rather than a nil dereference.
 func TestRehashPasswordIfRequiredNeedsThePlainPassword(t *testing.T) {
 	connection := &fakeConnection{affected: 1}
-	provider := newEloquentProvider(connection, hasherAt(6))
+	provider := newModelProvider(connection, hasherAt(6))
 	user := &testUser{attributes: map[string]any{"id": int64(7), "password": mustHash(t, hasherAt(4), "correct horse")}}
 
 	err := provider.RehashPasswordIfRequired(context.Background(), user, map[string]any{"email": "ana@example.com"}, false)
@@ -443,7 +443,7 @@ func TestRehashPasswordIfRequiredNeedsThePlainPassword(t *testing.T) {
 func TestRehashPasswordIfRequiredCoercesThePassword(t *testing.T) {
 	connection := &fakeConnection{affected: 1}
 	stronger := hasherAt(6)
-	provider := newEloquentProvider(connection, stronger)
+	provider := newModelProvider(connection, stronger)
 	user := &testUser{attributes: map[string]any{"id": int64(7), "password": mustHash(t, hasherAt(4), "12345")}}
 
 	if err := provider.RehashPasswordIfRequired(context.Background(), user, map[string]any{"password": float64(12345)}, false); err != nil {
@@ -464,7 +464,7 @@ func TestRehashPasswordIfRequiredCoercesThePassword(t *testing.T) {
 // every customer's users.
 func TestAProviderWithNoTenantCannotReadAnything(t *testing.T) {
 	connection := (&fakeConnection{}).queue(query.Record{"id": int64(7)})
-	provider := users.NewEloquentUserProvider(cheapHasher(), newTestUser, connection.users, "")
+	provider := users.NewModelUserProvider(cheapHasher(), newTestUser, connection.users, "")
 
 	for name, call := range map[string]func() error{
 		"retrieveById": func() error {
@@ -495,7 +495,7 @@ func TestAProviderWithNoTenantCannotReadAnything(t *testing.T) {
 // empty one is: it is concatenated into a cache key and a storage path.
 func TestAProviderWithATenantThatIsNotOneCannotReadAnything(t *testing.T) {
 	connection := &fakeConnection{}
-	provider := users.NewEloquentUserProvider(cheapHasher(), newTestUser, connection.users, "acme/reports")
+	provider := users.NewModelUserProvider(cheapHasher(), newTestUser, connection.users, "acme/reports")
 
 	if _, err := provider.RetrieveByID(context.Background(), 7); !errors.Is(err, auth.ErrForbidden) {
 		t.Fatalf("RetrieveByID answered %v, want auth.ErrForbidden", err)

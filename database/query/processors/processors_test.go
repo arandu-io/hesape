@@ -1,13 +1,14 @@
 package processors_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/arandu-io/hesape/database/query"
 	"github.com/arandu-io/hesape/database/query/processors"
 )
 
-// connection is a query.Connection that records what it was asked to run and
+// connection is a query.connection that records what it was asked to run and
 // returns what the test put in it. It reports a last insert identifier,
 // which is what MySQL and SQLite need and Postgres does not.
 type connection struct {
@@ -20,21 +21,25 @@ type connection struct {
 	usedReadReplica  bool
 }
 
-func (c *connection) Select(sql string, bindings []any, useReadPDO bool) ([]query.Record, error) {
+func (c *connection) Select(_ context.Context, sql string, bindings []any, useReadPDO bool) ([]query.Record, error) {
 	c.selectedSQL = sql
 	c.usedReadReplica = useReadPDO
 	return c.rows, nil
 }
 
-func (c *connection) Insert(sql string, bindings []any) (bool, error) {
+func (c *connection) Insert(_ context.Context, sql string, bindings []any) (bool, error) {
 	c.insertedSQL = sql
 	c.insertedBindings = bindings
 	return true, nil
 }
 
-func (c *connection) Update(sql string, bindings []any) (int64, error) { return 0, nil }
-func (c *connection) Delete(sql string, bindings []any) (int64, error) { return 0, nil }
-func (c *connection) Statement(sql string, bindings []any) (bool, error) {
+func (c *connection) Update(_ context.Context, sql string, bindings []any) (int64, error) {
+	return 0, nil
+}
+func (c *connection) Delete(_ context.Context, sql string, bindings []any) (int64, error) {
+	return 0, nil
+}
+func (c *connection) Statement(_ context.Context, sql string, bindings []any) (bool, error) {
 	return true, nil
 }
 
@@ -56,7 +61,7 @@ func TestProcessInsertGetIDAsksTheConnection(t *testing.T) {
 	conn := &connection{last: 42}
 	q := query.NewBuilder(conn, nil, nil)
 
-	id, err := processors.NewProcessor().ProcessInsertGetID(q, "insert into `users` (`email`) values (?)", []any{"a@b.c"}, "")
+	id, err := processors.NewProcessor().ProcessInsertGetID(context.Background(), q, "insert into `users` (`email`) values (?)", []any{"a@b.c"}, "")
 	if err != nil {
 		t.Fatalf("ProcessInsertGetID: %v", err)
 	}
@@ -74,18 +79,20 @@ func TestProcessInsertGetIDAsksTheConnection(t *testing.T) {
 func TestProcessInsertGetIDWithoutAConnectionThatCanAnswer(t *testing.T) {
 	q := query.NewBuilder(nopConnection{}, nil, nil)
 
-	if _, err := processors.NewProcessor().ProcessInsertGetID(q, "insert into t (a) values (?)", []any{1}, ""); err == nil {
+	if _, err := processors.NewProcessor().ProcessInsertGetID(context.Background(), q, "insert into t (a) values (?)", []any{1}, ""); err == nil {
 		t.Fatal("a connection that cannot report an identifier returned one anyway")
 	}
 }
 
 type nopConnection struct{}
 
-func (nopConnection) Select(string, []any, bool) ([]query.Record, error) { return nil, nil }
-func (nopConnection) Insert(string, []any) (bool, error)                 { return true, nil }
-func (nopConnection) Update(string, []any) (int64, error)                { return 0, nil }
-func (nopConnection) Delete(string, []any) (int64, error)                { return 0, nil }
-func (nopConnection) Statement(string, []any) (bool, error)              { return true, nil }
+func (nopConnection) Select(context.Context, string, []any, bool) ([]query.Record, error) {
+	return nil, nil
+}
+func (nopConnection) Insert(context.Context, string, []any) (bool, error)    { return true, nil }
+func (nopConnection) Update(context.Context, string, []any) (int64, error)   { return 0, nil }
+func (nopConnection) Delete(context.Context, string, []any) (int64, error)   { return 0, nil }
+func (nopConnection) Statement(context.Context, string, []any) (bool, error) { return true, nil }
 
 // TestPostgresProcessInsertGetIDReadsTheReturnedRow is the other route: the
 // grammar compiled a returning clause, so the identifier arrives as a row --
@@ -95,7 +102,7 @@ func TestPostgresProcessInsertGetIDReadsTheReturnedRow(t *testing.T) {
 	conn := &connection{rows: []query.Record{{"id": int64(7)}}}
 	q := query.NewBuilder(conn, nil, nil)
 
-	id, err := processors.NewPostgresProcessor().ProcessInsertGetID(q, `insert into "users" ("email") values (?) returning "id"`, []any{"a@b.c"}, "")
+	id, err := processors.NewPostgresProcessor().ProcessInsertGetID(context.Background(), q, `insert into "users" ("email") values (?) returning "id"`, []any{"a@b.c"}, "")
 	if err != nil {
 		t.Fatalf("ProcessInsertGetID: %v", err)
 	}
@@ -114,7 +121,7 @@ func TestPostgresProcessInsertGetIDReadsANamedSequence(t *testing.T) {
 	conn := &connection{rows: []query.Record{{"user_id": []byte("9")}}}
 	q := query.NewBuilder(conn, nil, nil)
 
-	id, err := processors.NewPostgresProcessor().ProcessInsertGetID(q, "insert ...", nil, "user_id")
+	id, err := processors.NewPostgresProcessor().ProcessInsertGetID(context.Background(), q, "insert ...", nil, "user_id")
 	if err != nil {
 		t.Fatalf("ProcessInsertGetID: %v", err)
 	}
@@ -126,7 +133,7 @@ func TestPostgresProcessInsertGetIDReadsANamedSequence(t *testing.T) {
 func TestPostgresProcessInsertGetIDWithoutARow(t *testing.T) {
 	q := query.NewBuilder(&connection{}, nil, nil)
 
-	if _, err := processors.NewPostgresProcessor().ProcessInsertGetID(q, "insert ...", nil, ""); err == nil {
+	if _, err := processors.NewPostgresProcessor().ProcessInsertGetID(context.Background(), q, "insert ...", nil, ""); err == nil {
 		t.Fatal("an insert that returned nothing reported an identifier anyway")
 	}
 }

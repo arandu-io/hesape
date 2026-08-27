@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-
-	"github.com/arandu-io/hesape/auth"
 )
 
 // PostgresSchemaState is the SchemaState that shells out to pg_dump, pg_restore
@@ -33,13 +31,13 @@ func NewPostgresSchemaState(connection Connection, processFactory ProcessFactory
 // carries the roles of the machine it came from, and loading it on another
 // machine fails on a role that does not exist there -- which makes the squashed
 // schema unusable exactly where it is most wanted, on a fresh checkout.
-func (s *PostgresSchemaState) Dump(ctx context.Context, g auth.Grant, connection Connection, path string) error {
+func (s *PostgresSchemaState) Dump(ctx context.Context, connection Connection, path string) error {
 	schemaOnly := append(s.baseDumpCommand(), "--schema-only")
 	if err := s.dumpInto(ctx, path, false, schemaOnly); err != nil {
 		return err
 	}
 
-	hasTable, err := s.HasMigrationTable(ctx, g)
+	hasTable, err := s.HasMigrationTable(ctx)
 	if err != nil {
 		return err
 	}
@@ -85,7 +83,7 @@ func (s *PostgresSchemaState) dumpInto(ctx context.Context, path string, appendi
 // through pg_restore. Handing one to the other fails with a message about the
 // file being corrupt, which is a misleading thing to read when the file is
 // fine and only the reader is wrong.
-func (s *PostgresSchemaState) Load(ctx context.Context, g auth.Grant, path string) error {
+func (s *PostgresSchemaState) Load(ctx context.Context, path string) error {
 	var args []string
 
 	if strings.HasSuffix(path, ".sql") {

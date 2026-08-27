@@ -4,40 +4,55 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/arandu-io/hesape/console"
+	"github.com/arandu-io/hesape/database/migrations"
 	"github.com/arandu-io/hesape/filesystem"
+	"github.com/arandu-io/hesape/session"
 )
 
-// MigrationStub is the migration [SessionTableCommand] writes.
+// MigrationStub returns the SQL the migration is written with.
 //
-// Three of its columns stay null here: the handler does not fill user_id,
-// ip_address or user_agent, because there is no container to fetch the
-// guard and the request out of -- see
-// [session.DatabaseSessionHandler]. They are in the table anyway, because an
-// application that wants them writes them itself and adding a column later
-// costs a second migration.
+// It is read off [session.Migrations] rather than a stub of its own, so the
+// table this writes and the table a Go migration creates cannot drift. The
+// statements come back from migrations.UpStatements, which runs the migration
+// against a connection that records rather than executes, so nothing here
+// reaches a server.
 //
-// last_activity is indexed because garbage collection deletes on it, and an
-// unindexed sweep of the session table is a full scan on the busiest table in
-// the schema.
-const MigrationStub = `-- Sessions, for session.DatabaseSessionHandler.
-CREATE TABLE IF NOT EXISTS sessions (
-    id            VARCHAR(40)  NOT NULL PRIMARY KEY,
-    user_id       BIGINT       NULL,
-    ip_address    VARCHAR(45)  NULL,
-    user_agent    TEXT         NULL,
-    payload       TEXT         NOT NULL,
-    last_activity BIGINT       NOT NULL
-);
+// It used to be a const holding hand-written SQL for one engine. What that SQL
+// said about the table -- which columns, why they are nullable, why
+// last_activity is indexed -- now lives on [session.CreateSessionsTable], where
+// the migrator reads it too.
+func MigrationStub() (string, error) {
+	declared := session.Migrations()
+	if len(declared) == 0 {
+		return "", nil
+	}
 
-CREATE INDEX IF NOT EXISTS sessions_user_id_index ON sessions (user_id);
-CREATE INDEX IF NOT EXISTS sessions_last_activity_index ON sessions (last_activity);
-`
+	statements, err := migrations.UpStatements(context.Background(), declared[0])
+	if err != nil {
+		return "", err
+	}
+
+	var b strings.Builder
+	b.WriteString("-- Sessions, for session.DatabaseSessionHandler.\n")
+	b.WriteString("--\n")
+	b.WriteString("-- last_activity is indexed because garbage collection deletes on it, and an\n")
+	b.WriteString("-- unindexed sweep of the session table is a full scan on the busiest table in\n")
+	b.WriteString("-- the schema.\n\n")
+	for _, statement := range statements {
+		b.WriteString(strings.TrimSpace(statement))
+		// The file is read by a person and replayed by whatever applies it, so
+		// every statement carries the terminator the migration does not need.
+		b.WriteString(";\n")
+	}
+	return b.String(), nil
+}
 
 // TableName is the table the stub creates and the handler reads.
-const TableName = "sessions"
+const TableName = session.Table
 
 // SessionTableCommand writes the migration that creates the sessions table,
 // registered as `make:session-table`. It writes a file and runs nothing: a
@@ -110,7 +125,11 @@ func (c *SessionTableCommand) Handle(ctx context.Context) (string, error) {
 	}
 
 	path := filepath.Join(c.directory, c.MigrationName())
-	if err := c.files.Put(path, []byte(MigrationStub), false); err != nil {
+	stub, err := MigrationStub()
+	if err != nil {
+		return "", err
+	}
+	if err := c.files.Put(path, []byte(stub), false); err != nil {
 		return "", err
 	}
 	return path, nil

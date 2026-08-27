@@ -12,6 +12,7 @@ import (
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/cache"
 	"github.com/arandu-io/hesape/console"
+	"github.com/arandu-io/hesape/database/migrations"
 )
 
 // clearAction is the action the cache commands hold a system grant for.
@@ -279,7 +280,11 @@ func (c *CacheTableCommand) Handle(_ context.Context, o *console.IO) error {
 	}
 	defer func() { _ = file.Close() }()
 
-	if _, err := file.WriteString(cacheTableMigration); err != nil {
+	stub, err := c.MigrationStub()
+	if err != nil {
+		return err
+	}
+	if _, err := file.WriteString(stub); err != nil {
 		return err
 	}
 
@@ -287,35 +292,44 @@ func (c *CacheTableCommand) Handle(_ context.Context, o *console.IO) error {
 	return nil
 }
 
-// cacheTableMigration is the two tables DatabaseStore reads and writes.
+// MigrationStub is the SQL the migration is written with.
 //
-// key is the primary key, value holds the payload, and expiration is a unix
-// timestamp in milliseconds with an index on it -- the index being what makes
-// pruning the expired rows a scan of the ones that are. See cache.DatabaseStore
-// for why the unit is milliseconds.
-const cacheTableMigration = `-- The cache tables.
---
--- cache holds the entries and cache_locks holds the locks. They are two tables
--- and not one because flushing the locks must not flush the cache, and a store
--- whose locks live in the cache table refuses to do it at all -- see
--- cache.DatabaseStore.HasSeparateLockStore.
+// It is read off [cache.Migrations] rather than a stub of its own, so the two
+// tables this writes and the two a Go migration creates cannot drift. The
+// statements come back from migrations.UpStatements, which runs the migration
+// against a connection that records rather than executes, so nothing here
+// reaches a server.
+//
+// It used to be a const holding hand-written SQL, and that SQL named the key
+// column unquoted -- which MySQL refuses, KEY being reserved there. The
+// Blueprint quotes every identifier, so reading the stub off the migration
+// fixed a table that could not be created on one of the three engines.
+func (c *CacheTableCommand) MigrationStub() (string, error) {
+	declared := Migrations()
+	if len(declared) == 0 {
+		return "", nil
+	}
 
--- expiration is unix milliseconds, not seconds: a cache whose resolution is a
--- second cannot honour a ttl shorter than one.
+	statements, err := migrations.UpStatements(context.Background(), declared[0])
+	if err != nil {
+		return "", err
+	}
 
-CREATE TABLE cache (
-    key        VARCHAR(255) NOT NULL PRIMARY KEY,
-    value      TEXT         NOT NULL,
-    expiration BIGINT       NOT NULL
-);
-
-CREATE INDEX cache_expiration_index ON cache (expiration);
-
-CREATE TABLE cache_locks (
-    key        VARCHAR(255) NOT NULL PRIMARY KEY,
-    owner      VARCHAR(255) NOT NULL,
-    expiration BIGINT       NOT NULL
-);
-
-CREATE INDEX cache_locks_expiration_index ON cache_locks (expiration);
-`
+	var b strings.Builder
+	b.WriteString("-- The cache tables.\n")
+	b.WriteString("--\n")
+	b.WriteString("-- cache holds the entries and cache_locks holds the locks. They are two tables\n")
+	b.WriteString("-- and not one because flushing the locks must not flush the cache, and a store\n")
+	b.WriteString("-- whose locks live in the cache table refuses to do it at all -- see\n")
+	b.WriteString("-- cache.DatabaseStore.HasSeparateLockStore.\n")
+	b.WriteString("--\n")
+	b.WriteString("-- expiration is unix milliseconds, not seconds: a cache whose resolution is a\n")
+	b.WriteString("-- second cannot honour a ttl shorter than one.\n\n")
+	for _, statement := range statements {
+		b.WriteString(strings.TrimSpace(statement))
+		// The file is read by a person and replayed by whatever applies it, so
+		// every statement carries the terminator the migration does not need.
+		b.WriteString(";\n")
+	}
+	return b.String(), nil
+}

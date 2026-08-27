@@ -11,6 +11,7 @@ import (
 	"github.com/arandu-io/hesape/database/conformance"
 	_ "github.com/arandu-io/hesape/database/connectors/sqlite"
 	"github.com/arandu-io/hesape/database/migrations"
+	"github.com/arandu-io/hesape/database/schema"
 )
 
 // The connector end to end: importing it has to be enough for Open to work,
@@ -216,4 +217,73 @@ func dsn() string {
 		return from
 	}
 	return filepath.Join(os.TempDir(), "arandu-conformance.sqlite")
+}
+
+// TestDropAllTablesEmptiesTheCatalogue is the wipe migrate:fresh runs before it
+// migrates from nothing.
+//
+// It runs against the real driver because the defect it covers could not be
+// seen anywhere else. The SQLite grammar took a schema name where the interface
+// promised table names, and Builder.DropAllTables passes the qualified table
+// names, so the statement named the schema "main.arandu_migrations" -- which
+// SQLite refused. The grammar's own doc comment described the divergence and
+// nobody had run the two halves together.
+//
+// The second half is the pragma: sqlite_master is read-only without it, and the
+// delete is refused with "table sqlite_master may not be modified".
+func TestDropAllTablesEmptiesTheCatalogue(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "wipe.sqlite")
+
+	db, closeDB, err := database.Open(database.Config{
+		Connection: database.DialectSQLite,
+		Database:   path,
+	})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(closeDB)
+
+	connection := database.NewConnection(db.Unwrap(), path, "", map[string]any{
+		"driver": string(database.DialectSQLite), "name": "wipe", "database": path,
+	})
+	builder := schema.NewBuilder(database.ForSchema(connection))
+
+	if err := builder.Create(ctx, "invoices", func(table *schema.Blueprint) {
+		table.String("id").Primary()
+		table.String("tenant_id")
+		table.Index([]string{"tenant_id"}, "invoices_tenant_idx")
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := builder.Create(ctx, "payments", func(table *schema.Blueprint) {
+		table.String("id").Primary()
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := builder.DropAllTables(ctx); err != nil {
+		t.Fatalf("DropAllTables: %v", err)
+	}
+
+	tables, err := builder.GetTables(ctx)
+	if err != nil {
+		t.Fatalf("GetTables: %v", err)
+	}
+	if len(tables) != 0 {
+		names := make([]string, 0, len(tables))
+		for _, table := range tables {
+			names = append(names, table.Name)
+		}
+		t.Fatalf("DropAllTables left %v behind", names)
+	}
+
+	// The catalogue is writable during the wipe and must not stay that way: a
+	// connection that carries a writable sqlite_master into the migrations that
+	// follow is one where a typo edits the schema instead of failing.
+	if err := builder.Create(ctx, "invoices", func(table *schema.Blueprint) {
+		table.String("id").Primary()
+	}); err != nil {
+		t.Fatalf("the database is unusable after the wipe: %v", err)
+	}
 }

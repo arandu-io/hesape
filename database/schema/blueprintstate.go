@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 
-	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database/query"
 )
 
@@ -30,12 +29,12 @@ type BlueprintState struct {
 // It takes a context and an auth.Grant because the constructor reads three
 // catalogues off the server -- the table's columns, indexes and foreign keys.
 // See Blueprint.ToSQL.
-func NewBlueprintState(ctx context.Context, g auth.Grant, blueprint *Blueprint, connection Connection) (*BlueprintState, error) {
+func NewBlueprintState(ctx context.Context, blueprint *Blueprint, connection Connection) (*BlueprintState, error) {
 	s := &BlueprintState{blueprint: blueprint, connection: connection}
 	builder := NewBuilder(connection)
 	table := blueprint.GetTable()
 
-	columns, err := builder.GetColumns(ctx, g, table)
+	columns, err := builder.GetColumns(ctx, table)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +66,7 @@ func NewBlueprintState(ctx context.Context, g auth.Grant, blueprint *Blueprint, 
 		s.columns = append(s.columns, definition)
 	}
 
-	indexes, err := builder.GetIndexes(ctx, g, table)
+	indexes, err := builder.GetIndexes(ctx, table)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +91,7 @@ func NewBlueprintState(ctx context.Context, g auth.Grant, blueprint *Blueprint, 
 		s.indexes = append(s.indexes, &IndexDefinition{c: command})
 	}
 
-	foreignKeys, err := builder.GetForeignKeys(ctx, g, table)
+	foreignKeys, err := builder.GetForeignKeys(ctx, table)
 	if err != nil {
 		return nil, err
 	}

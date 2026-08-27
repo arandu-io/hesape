@@ -280,22 +280,46 @@ func (g *SQLiteGrammar) CompileDropIfExists(blueprint *schema.Blueprint, command
 	return one("drop table if exists " + g.WrapTable(blueprint)), nil
 }
 
-// CompileDropAllTables builds the statement that deletes every table,
-// index, and trigger from one schema's sqlite_master (the first of
-// schemas, or "main" if none is given). SQLite clears its catalogue this
-// way rather than naming tables individually, so this takes a schema name
-// where MySQLGrammar.CompileDropAllTables takes table names.
-func (g *SQLiteGrammar) CompileDropAllTables(schemas []string) (string, error) {
-	return fmt.Sprintf("delete from %s.sqlite_master where type in ('table', 'index', 'trigger')",
-		g.wrapValue(firstOr(schemas, "main"))), nil
+// CompileDropAllTables builds the statements that clear every table, index
+// and trigger out of SQLite's catalogue.
+//
+// SQLite clears its catalogue rather than naming tables individually, so the
+// list is not read: what it names is what "all tables" means here anyway, and
+// a shorter list would not make this drop less.
+//
+// This used to be documented as taking schema names where the other grammars
+// take table names -- a divergence from its own interface, written down and
+// never checked against the caller. Builder.DropAllTables passes the qualified
+// table names, so the schema came out as "main.arandu_migrations" and SQLite
+// answered that no such schema existed. It is "main" now, which is the only
+// schema a connection has without an ATTACH.
+//
+// The pragma is what makes the delete legal: sqlite_master is read-only
+// otherwise, and the statement is refused with "table sqlite_master may not be
+// modified". It is turned back off in the same batch so the connection does not
+// carry a writable catalogue into whatever runs next.
+//
+// The vacuum is not tidiness either. Deleting the rows empties the catalogue
+// table, and the connection goes on answering pragma_table_list from the schema
+// it already has in memory -- so the tables are gone from disk and still listed,
+// which is the shape of a wipe that reports success and drops nothing. The
+// vacuum rebuilds the file and reloads the schema. It cannot run inside a
+// transaction, which is why this is a wipe a caller runs before migrating
+// rather than a step inside one.
+func (g *SQLiteGrammar) CompileDropAllTables([]string) (string, error) {
+	return "pragma writable_schema = 1; " +
+		"delete from \"main\".sqlite_master where type in ('table', 'index', 'trigger'); " +
+		"pragma writable_schema = 0; " +
+		"vacuum;", nil
 }
 
-// CompileDropAllViews builds the statement that deletes every view from
-// one schema's sqlite_master (the first of schemas, or "main" if none is
-// given).
-func (g *SQLiteGrammar) CompileDropAllViews(schemas []string) (string, error) {
-	return fmt.Sprintf("delete from %s.sqlite_master where type in ('view')",
-		g.wrapValue(firstOr(schemas, "main"))), nil
+// CompileDropAllViews builds the statements that clear every view out of
+// SQLite's catalogue, for the reasons CompileDropAllTables gives.
+func (g *SQLiteGrammar) CompileDropAllViews([]string) (string, error) {
+	return "pragma writable_schema = 1; " +
+		"delete from \"main\".sqlite_master where type in ('view'); " +
+		"pragma writable_schema = 0; " +
+		"vacuum;", nil
 }
 
 // CompileDropColumn builds the ALTER TABLE DROP COLUMN statements for

@@ -48,17 +48,21 @@ func TestNotificationTableWritesTheMigration(t *testing.T) {
 		t.Fatalf("ReadFile: %v", err)
 	}
 	// The columns the store reads and writes. notification_key rather than key
-	// because KEY is reserved in MySQL.
+	// because KEY is reserved in MySQL. The SQL is the grammar's, so it is read
+	// case-insensitively: the migration is written with the Blueprint, and the
+	// case of the keywords belongs to whichever engine it was rendered for.
+	written := strings.ToLower(string(body))
 	for _, want := range []string{
-		"CREATE TABLE notifications",
+		"create table",
+		"notifications",
 		"notification_key",
 		"notifiable_type",
 		"notifiable_id",
 		"tenant",
 		"read_at",
 	} {
-		if !strings.Contains(string(body), want) {
-			t.Fatalf("the migration does not contain %q", want)
+		if !strings.Contains(written, want) {
+			t.Fatalf("the migration does not contain %q:\n%s", want, written)
 		}
 	}
 }
@@ -97,7 +101,8 @@ func TestNotificationTableStubIsTheGoMigration(t *testing.T) {
 	}
 	// The SQL is read off notifications.Migrations rather than a stub of its
 	// own, so the two cannot describe different tables.
-	if !strings.Contains(stub, "CREATE TABLE notifications") {
+	rendered := strings.ToLower(stub)
+	if !strings.Contains(rendered, "create table") || !strings.Contains(rendered, "notifications") {
 		t.Fatalf("the stub does not create the table: %q", stub)
 	}
 	if !strings.Contains(stub, "notifications_recipient_idx") {

@@ -395,12 +395,16 @@ func TestCursorReportsTheConnectionsError(t *testing.T) {
 	}
 }
 
-// bufferedConnection implements query.Connection and nothing else, which is
+// bufferedConnection implements query.connection and nothing else, which is
 // what a driver that cannot stream a result set looks like.
 type bufferedConnection struct{}
 
-func (c *bufferedConnection) Select(string, []any, bool) ([]query.Record, error) { return nil, nil }
-func (c *bufferedConnection) Insert(string, []any) (bool, error)                 { return true, nil }
-func (c *bufferedConnection) Update(string, []any) (int64, error)                { return 0, nil }
-func (c *bufferedConnection) Delete(string, []any) (int64, error)                { return 0, nil }
-func (c *bufferedConnection) Statement(string, []any) (bool, error)              { return true, nil }
+func (c *bufferedConnection) Select(context.Context, string, []any, bool) ([]query.Record, error) {
+	return nil, nil
+}
+func (c *bufferedConnection) Insert(context.Context, string, []any) (bool, error)  { return true, nil }
+func (c *bufferedConnection) Update(context.Context, string, []any) (int64, error) { return 0, nil }
+func (c *bufferedConnection) Delete(context.Context, string, []any) (int64, error) { return 0, nil }
+func (c *bufferedConnection) Statement(context.Context, string, []any) (bool, error) {
+	return true, nil
+}

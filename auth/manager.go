@@ -377,7 +377,7 @@ func (m *AuthManager) ForgetGuards() *AuthManager {
 // CreateUserProvider is the provider of that name, or the default one when the
 // name is empty.
 //
-// There are no built-in drivers: DatabaseUserProvider and EloquentUserProvider
+// There are no built-in drivers: DatabaseUserProvider and ModelUserProvider
 // are hesape/auth/users, and the root of auth imports nothing outside the
 // standard library (see doc.go). Register them with [AuthManager.Provider].
 //

@@ -3,6 +3,7 @@ package migrations
 import (
 	"context"
 	"errors"
+	"github.com/arandu-io/hesape/database/schema"
 	"strings"
 	"testing"
 )
@@ -122,6 +123,14 @@ func (r *fakeRepository) SetSource(name string)                  { r.source = na
 type fakeConnection struct{ statements []string }
 
 func (c *fakeConnection) GetName() string { return "testing" }
+
+// Schema answers a builder that records rather than executing. The migrator
+// tests are about order, batches and rollback, and none of them needs a server
+// -- but every migration now reaches for this, so it has to answer something
+// that compiles a statement without sending one.
+func (c *fakeConnection) Schema() *schema.Builder {
+	return schema.NewBuilder(&recordingSchemaConnection{recorder: &recordingConnection{name: "testing"}})
+}
 
 func (c *fakeConnection) Statement(_ context.Context, query string, _ []any) (bool, error) {
 	c.statements = append(c.statements, query)

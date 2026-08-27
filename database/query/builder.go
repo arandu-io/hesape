@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"strings"
 )
 
@@ -22,7 +23,7 @@ import (
 // GetTimeout, GetGroupLimit and GetIndexHint.
 type Builder struct {
 	// Connection is the thing the query runs its statements against.
-	Connection Connection
+	connection Connection
 
 	// Grammar is what compiles the query to SQL for a specific engine.
 	Grammar Grammar
@@ -99,21 +100,25 @@ type Builder struct {
 // It is declared here rather than imported from the database package because
 // the interface belongs with its consumer in Go, and because database imports
 // this package: naming it there would close the cycle.
+// Every method takes a context, and it is the request's -- not one the
+// connection was built with. A statement that cannot be cancelled outlives the
+// request that asked for it, and a deadline that stops at the handler is a
+// deadline the database never hears about.
 type Connection interface {
 	// Select runs a select and returns its rows.
-	Select(query string, bindings []any, useReadPDO bool) ([]Record, error)
+	Select(ctx context.Context, query string, bindings []any, useReadPDO bool) ([]Record, error)
 
 	// Insert runs an insert.
-	Insert(query string, bindings []any) (bool, error)
+	Insert(ctx context.Context, query string, bindings []any) (bool, error)
 
 	// Update runs an update and returns the number of rows affected.
-	Update(query string, bindings []any) (int64, error)
+	Update(ctx context.Context, query string, bindings []any) (int64, error)
 
 	// Delete runs a delete and returns the number of rows affected.
-	Delete(query string, bindings []any) (int64, error)
+	Delete(ctx context.Context, query string, bindings []any) (int64, error)
 
 	// Statement runs a statement that returns neither rows nor a count.
-	Statement(query string, bindings []any) (bool, error)
+	Statement(ctx context.Context, query string, bindings []any) (bool, error)
 }
 
 // Processor is the hook that lets a driver adjust results on the way out.
@@ -124,7 +129,7 @@ type Processor interface {
 
 	// ProcessInsertGetID runs an insert and reports the ID of the inserted
 	// row, read back from the named sequence.
-	ProcessInsertGetID(query *Builder, sql string, values []any, sequence string) (int64, error)
+	ProcessInsertGetID(ctx context.Context, query *Builder, sql string, values []any, sequence string) (int64, error)
 }
 
 // bindingOrder is the key order of Bindings. The list is the order the
@@ -137,7 +142,7 @@ var bindingOrder = []string{"select", "from", "join", "where", "groupBy", "havin
 // processor, with an empty binding slice for each of the seven segments.
 func NewBuilder(connection Connection, grammar Grammar, processor Processor) *Builder {
 	b := &Builder{
-		Connection: connection,
+		connection: connection,
 		Grammar:    grammar,
 		Processor:  processor,
 		Bindings:   make(map[string][]any, len(bindingOrder)),
@@ -778,7 +783,7 @@ func (b *Builder) ToSQL() string {
 // NewQuery returns a new Builder sharing this one's connection, grammar and
 // processor.
 func (b *Builder) NewQuery() *Builder {
-	return NewBuilder(b.Connection, b.Grammar, b.Processor)
+	return NewBuilder(b.connection, b.Grammar, b.Processor)
 }
 
 // AddBinding appends value to the named binding segment.
@@ -891,7 +896,7 @@ func (b *Builder) GetLimit() *int { return b.limit }
 func (b *Builder) GetOffset() *int { return b.offset }
 
 // GetConnection returns the connection the query runs against.
-func (b *Builder) GetConnection() Connection { return b.Connection }
+func (b *Builder) GetConnection() Connection { return b.connection }
 
 // GetGrammar returns the grammar the query compiles through.
 func (b *Builder) GetGrammar() Grammar { return b.Grammar }

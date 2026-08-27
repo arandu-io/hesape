@@ -31,7 +31,7 @@ func managerFor(t *testing.T) (*auth.AuthManager, *fakeProvider, *fakeCookieJar,
 			"broken": {"driver": "nonsense"},
 		},
 		Providers: map[string]map[string]any{
-			"users":   {"driver": "eloquent", "model": "App\\Models\\User"},
+			"users":   {"driver": "model", "model": "App\\Models\\User"},
 			"nowhere": {"driver": "carrier-pigeon"},
 		},
 		Session:         newFakeSession(),
@@ -44,7 +44,7 @@ func managerFor(t *testing.T) (*auth.AuthManager, *fakeProvider, *fakeCookieJar,
 		HashKey:         "app-key",
 	})
 
-	manager.Provider("eloquent", func(map[string]any) (auth.UserProvider, error) { return provider, nil })
+	manager.Provider("model", func(map[string]any) (auth.UserProvider, error) { return provider, nil })
 
 	return manager, provider, jar, request, dispatcher
 }

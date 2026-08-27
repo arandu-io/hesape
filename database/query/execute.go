@@ -62,7 +62,7 @@ const GroupLimitGroup = "@hesape_group := "
 type AffectingConnection interface {
 	// AffectingStatement runs a statement and returns the number of rows
 	// affected.
-	AffectingStatement(query string, bindings []any) (int64, error)
+	AffectingStatement(ctx context.Context, query string, bindings []any) (int64, error)
 }
 
 // CursorConnection is the part of a connection that Cursor needs: a select that
@@ -75,7 +75,7 @@ type AffectingConnection interface {
 // error.
 type CursorConnection interface {
 	// Cursor runs a select and yields its rows one at a time.
-	Cursor(query string, bindings []any, useReadPDO bool) (func(yield func(Record, error) bool), error)
+	Cursor(ctx context.Context, query string, bindings []any, useReadPDO bool) (func(yield func(Record, error) bool), error)
 }
 
 // PreparesBindings turns a driver-specific value into one the driver accepts.
@@ -148,13 +148,13 @@ func (b *Builder) scoped(ctx context.Context, g auth.Grant) (*Builder, error) {
 // count comparison, and the subqueries compiled into a from, a select or a join.
 //
 // It is the second half of scoped, and it is exported because it is the half the
-// eloquent builder has to end in too. That builder cannot call scoped whole: it
+// model builder has to end in too. That builder cannot call scoped whole: it
 // filters by the model's own tenant column, which a model whose table has none
 // sets to the empty string, and TenantColumn here is a constant on purpose --
 // see its comment. The nested half has no such difference, and it is where every
 // leak found so far lived, so there is one of it and both builders run it.
 //
-// Until it was exported the eloquent builder reached none of it. GetModels sent
+// Until it was exported the model builder reached none of it. GetModels sent
 // b.query.ToSQL() straight to the connection, so scopeUnions, scopeSubqueries
 // and scopeSubqueryClauses were dead code on the path the application uses:
 // Users.WithCount("posts").Get(g) came back with every tenant's posts counted
@@ -162,7 +162,7 @@ func (b *Builder) scoped(ctx context.Context, g auth.Grant) (*Builder, error) {
 // another tenant's rows.
 //
 // It runs on the statement being built and never on the builder the caller
-// holds -- scoped calls it on a clone, and the eloquent builder on the clone
+// holds -- scoped calls it on a clone, and the model builder on the clone
 // ApplyScopes made.
 func (b *Builder) ScopeNested(ctx context.Context, g auth.Grant) error {
 	if err := b.scopeUnions(ctx, g); err != nil {
@@ -399,24 +399,24 @@ func describeTable(from any) string {
 // runSelect runs the query's compiled select and returns its rows.
 //
 // There is no fetch mode to choose: a row arrives as a Record either way.
-func (b *Builder) runSelect() ([]Record, error) {
-	if b.Connection == nil {
+func (b *Builder) runSelect(ctx context.Context) ([]Record, error) {
+	if b.connection == nil {
 		return nil, errors.New("query: the builder has no connection to run against")
 	}
-	return b.Connection.Select(b.ToSQL(), b.GetBindings(), !b.UsingWritePDO())
+	return b.connection.Select(ctx, b.ToSQL(), b.GetBindings(), !b.UsingWritePDO())
 }
 
 // affectingStatement runs a statement that returns a row count, through
 // AffectingConnection when the connection has it and through Update when it
 // does not.
-func (b *Builder) affectingStatement(query string, bindings []any) (int64, error) {
-	if b.Connection == nil {
+func (b *Builder) affectingStatement(ctx context.Context, query string, bindings []any) (int64, error) {
+	if b.connection == nil {
 		return 0, errors.New("query: the builder has no connection to run against")
 	}
-	if connection, ok := b.Connection.(AffectingConnection); ok {
-		return connection.AffectingStatement(query, bindings)
+	if connection, ok := b.connection.(AffectingConnection); ok {
+		return connection.AffectingStatement(ctx, query, bindings)
 	}
-	return b.Connection.Update(query, bindings)
+	return b.connection.Update(ctx, query, bindings)
 }
 
 // Get runs the query and returns its rows.
@@ -433,7 +433,7 @@ func (b *Builder) Get(ctx context.Context, g auth.Grant, columns ...any) ([]Reco
 		query.Columns = wrapColumns(columns)
 	}
 
-	rows, err := query.runSelect()
+	rows, err := query.runSelect(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -655,7 +655,7 @@ func (b *Builder) Pluck(ctx context.Context, g auth.Grant, column any, key ...an
 		}
 	}
 
-	rows, err := query.runSelect()
+	rows, err := query.runSelect(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -734,12 +734,13 @@ func (b *Builder) Exists(ctx context.Context, g auth.Grant) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if query.Connection == nil {
+	if query.connection == nil {
 		return false, errors.New("query: the builder has no connection to run against")
 	}
 	query.ApplyBeforeQueryCallbacks()
 
-	rows, err := query.Connection.Select(
+	rows, err := query.connection.Select(
+		ctx,
 		query.Grammar.CompileExists(query), query.GetBindings(), !query.UsingWritePDO())
 	if err != nil {
 		return false, err
@@ -812,7 +813,7 @@ func (b *Builder) ToRawSQL(ctx context.Context, g auth.Grant) (string, error) {
 	}
 	sql := query.ToSQL()
 	bindings := query.GetBindings()
-	if connection, ok := query.Connection.(PreparesBindings); ok {
+	if connection, ok := query.connection.(PreparesBindings); ok {
 		bindings = connection.PrepareBindings(bindings)
 	}
 	return substituteBindingsIntoRawSQL(query.Grammar, sql, bindings)

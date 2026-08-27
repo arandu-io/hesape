@@ -1,7 +1,6 @@
 package database_test
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -26,7 +25,7 @@ func TestEveryDialectCompilesItsOwnSQL(t *testing.T) {
 	} {
 		t.Run(driver, func(t *testing.T) {
 			c := database.NewConnection(nil, "app", "", map[string]any{"driver": driver})
-			got := c.Query(context.Background()).From("t").Where("id", 1).LockForUpdate().ToSQL()
+			got := c.Query().From("t").Where("id", 1).LockForUpdate().ToSQL()
 			if got != want {
 				t.Errorf("%s compiled %q, want %q", driver, got, want)
 			}

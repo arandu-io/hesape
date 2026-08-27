@@ -10,6 +10,7 @@ import (
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database"
 	"github.com/arandu-io/hesape/database/migrations"
+	"github.com/arandu-io/hesape/database/schema"
 )
 
 // DatabaseFailedJobProvider keeps the failed jobs in a table.
@@ -82,34 +83,26 @@ func (CreateFailedJobsTable) GetName() string {
 // Portable types only: TEXT, INTEGER and TIMESTAMP mean the same thing on
 // SQLite, Postgres and MySQL.
 func (m CreateFailedJobsTable) Up(ctx context.Context, conn migrations.Connection) error {
-	statements := []string{
-		`CREATE TABLE ` + m.table() + ` (
-    id          VARCHAR(255) PRIMARY KEY,
-    uuid        VARCHAR(255) NOT NULL,
-    tenant_id   VARCHAR(255) NOT NULL,
-    connection  VARCHAR(255) NOT NULL,
-    queue       VARCHAR(255) NOT NULL,
-    name        TEXT NOT NULL,
-    payload     TEXT NOT NULL,
-    exception   TEXT NOT NULL,
-    failed_at   TIMESTAMP NOT NULL
-)`,
+	return conn.Schema().Create(ctx, m.table(), func(table *schema.Blueprint) {
+		table.String("id").Primary()
+		table.String("uuid")
+		table.String("tenant_id")
+		table.String("connection")
+		table.String("queue")
+		table.Text("name")
+		table.Text("payload")
+		table.Text("exception")
+		table.Timestamp("failed_at")
+
 		// Every read filters by tenant and orders by failure time, and the
 		// monitor narrows by queue. This index is those queries.
-		`CREATE INDEX idx_failed_jobs_tenant ON ` + m.table() + ` (tenant_id, queue, failed_at)`,
-	}
-	for _, statement := range statements {
-		if _, err := conn.Statement(ctx, statement, nil); err != nil {
-			return err
-		}
-	}
-	return nil
+		table.Index([]string{"tenant_id", "queue", "failed_at"}, "idx_failed_jobs_tenant")
+	})
 }
 
 // Down drops the failed jobs table, and the index with it.
 func (m CreateFailedJobsTable) Down(ctx context.Context, conn migrations.Connection) error {
-	_, err := conn.Statement(ctx, `DROP TABLE `+m.table(), nil)
-	return err
+	return conn.Schema().DropIfExists(ctx, m.table())
 }
 
 // table is m.Table with the default filled in.

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database/query"
 )
 
@@ -47,8 +46,8 @@ func NewBlueprint(connection Connection, table string, callback func(*Blueprint)
 }
 
 // Build runs the blueprint against the database.
-func (b *Blueprint) Build(ctx context.Context, g auth.Grant) error {
-	statements, err := b.ToSQL(ctx, g)
+func (b *Blueprint) Build(ctx context.Context) error {
+	statements, err := b.ToSQL(ctx)
 	if err != nil {
 		return err
 	}
@@ -67,11 +66,8 @@ func (b *Blueprint) Build(ctx context.Context, g auth.Grant) error {
 // it can rewrite it, and a read is a read. Every other driver, and SQLite
 // creating a table rather than altering one, touches nothing -- but the
 // signature cannot say "sometimes", so it says what the worst case does.
-func (b *Blueprint) ToSQL(ctx context.Context, g auth.Grant) ([]string, error) {
-	if err := g.Check(ActionMigrate); err != nil {
-		return nil, err
-	}
-	if err := b.addImpliedCommands(ctx, g); err != nil {
+func (b *Blueprint) ToSQL(ctx context.Context) ([]string, error) {
+	if err := b.addImpliedCommands(ctx); err != nil {
 		return nil, err
 	}
 
@@ -97,7 +93,7 @@ func (b *Blueprint) ToSQL(ctx context.Context, g auth.Grant) ([]string, error) {
 // addImpliedCommands expands each column's fluent index and command
 // shorthand and, when altering an existing table, turns pending column
 // definitions into add or change commands.
-func (b *Blueprint) addImpliedCommands(ctx context.Context, g auth.Grant) error {
+func (b *Blueprint) addImpliedCommands(ctx context.Context) error {
 	b.addFluentIndexes()
 	b.AddFluentCommands()
 
@@ -117,7 +113,7 @@ func (b *Blueprint) addImpliedCommands(ctx context.Context, g auth.Grant) error 
 		}
 	}
 
-	return b.AddAlterCommands(ctx, g)
+	return b.AddAlterCommands(ctx)
 }
 
 // addFluentIndexes turns each column's inline index markers (Primary,
@@ -229,7 +225,7 @@ func (b *Blueprint) AddFluentCommands() {
 // It takes a context and a Grant because a blueprint with an alter command
 // reads the table's current shape from the server to build its
 // BlueprintState.
-func (b *Blueprint) AddAlterCommands(ctx context.Context, g auth.Grant) error {
+func (b *Blueprint) AddAlterCommands(ctx context.Context) error {
 	alterCommands := b.grammar.GetAlterCommands()
 	if len(alterCommands) == 0 {
 		return nil
@@ -254,7 +250,7 @@ func (b *Blueprint) AddAlterCommands(ctx context.Context, g auth.Grant) error {
 	}
 
 	if hasAlterCommand {
-		state, err := NewBlueprintState(ctx, g, b, b.connection)
+		state, err := NewBlueprintState(ctx, b, b.connection)
 		if err != nil {
 			return err
 		}

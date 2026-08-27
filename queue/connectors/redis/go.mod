@@ -7,7 +7,7 @@ go 1.26
 // there is no optional dependency, and this is the only shape that keeps the
 // collection's own module down to golang.org/x/crypto.
 require (
-	github.com/arandu-io/hesape v0.12.0
+	github.com/arandu-io/hesape v0.15.2
 	github.com/redis/go-redis/v9 v9.22.0
 )
 

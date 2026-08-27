@@ -226,9 +226,19 @@ func TestCacheTableWritesTheMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	for _, want := range []string{"CREATE TABLE cache ", "CREATE TABLE cache_locks", "expiration"} {
-		if !strings.Contains(string(body), want) {
-			t.Fatalf("the migration does not contain %q", want)
+	// The SQL is the grammar's, so it is read case-insensitively: the migration
+	// is written with the Blueprint, and the case of the keywords belongs to
+	// whichever engine it was rendered for.
+	written := strings.ToLower(string(body))
+	for _, want := range []string{"create table", `"cache"`, `"cache_locks"`, "expiration"} {
+		if !strings.Contains(written, want) {
+			t.Fatalf("the migration does not contain %q:\n%s", want, written)
 		}
+	}
+	// The key column is reserved in MySQL, and the hand-written SQL this
+	// replaced named it unquoted. Quoted is the whole reason the stub is read
+	// off the migration.
+	if !strings.Contains(written, `"key"`) && !strings.Contains(written, "`key`") {
+		t.Fatalf("the key column is unquoted, which MySQL refuses:\n%s", written)
 	}
 }

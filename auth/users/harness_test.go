@@ -42,7 +42,7 @@ type fakeConnection struct {
 	err      error
 }
 
-func (c *fakeConnection) Select(sql string, bindings []any, _ bool) ([]query.Record, error) {
+func (c *fakeConnection) Select(_ context.Context, sql string, bindings []any, _ bool) ([]query.Record, error) {
 	c.statements = append(c.statements, statement{kind: "select", sql: sql, bindings: bindings})
 	if c.err != nil {
 		return nil, c.err
@@ -55,36 +55,36 @@ func (c *fakeConnection) Select(sql string, bindings []any, _ bool) ([]query.Rec
 	return rows, nil
 }
 
-func (c *fakeConnection) Insert(sql string, bindings []any) (bool, error) {
+func (c *fakeConnection) Insert(_ context.Context, sql string, bindings []any) (bool, error) {
 	c.statements = append(c.statements, statement{kind: "insert", sql: sql, bindings: bindings})
 	return c.err == nil, c.err
 }
 
-func (c *fakeConnection) Update(sql string, bindings []any) (int64, error) {
+func (c *fakeConnection) Update(_ context.Context, sql string, bindings []any) (int64, error) {
 	c.statements = append(c.statements, statement{kind: "update", sql: sql, bindings: bindings})
 	return c.affected, c.err
 }
 
-func (c *fakeConnection) Delete(sql string, bindings []any) (int64, error) {
+func (c *fakeConnection) Delete(_ context.Context, sql string, bindings []any) (int64, error) {
 	c.statements = append(c.statements, statement{kind: "delete", sql: sql, bindings: bindings})
 	return c.affected, c.err
 }
 
-func (c *fakeConnection) Statement(sql string, bindings []any) (bool, error) {
+func (c *fakeConnection) Statement(_ context.Context, sql string, bindings []any) (bool, error) {
 	c.statements = append(c.statements, statement{kind: "statement", sql: sql, bindings: bindings})
 	return c.err == nil, c.err
 }
 
 // Table answers users.Connection: the one method DatabaseUserProvider asks a
 // connection for.
-func (c *fakeConnection) Table(ctx context.Context, table any, as ...string) *query.Builder {
+func (c *fakeConnection) Table(table any, as ...string) *query.Builder {
 	return query.NewBuilder(c, grammars.NewSQLiteGrammar(), processors.NewSQLiteProcessor()).From(table, as...)
 }
 
-// users is the newQuery factory EloquentUserProvider is built with: a fresh
+// users is the newQuery factory ModelUserProvider is built with: a fresh
 // builder on the users table.
 func (c *fakeConnection) users(ctx context.Context) *query.Builder {
-	return c.Table(ctx, "users")
+	return c.Table("users")
 }
 
 // queue puts one result set at the end of the queue, so a test reads as the
@@ -145,7 +145,7 @@ func (s statement) assertNeverBinds(t *testing.T, value string) {
 // methods, plus the two a provider asks for by assertion -- SetRawAttributes to
 // be filled from a row, and ForceFill to take a rehashed password.
 //
-// A user type that embeds *eloquent.Model[T] gets all nine by embedding it; this
+// A user type that embeds *model.Model[T] gets all nine by embedding it; this
 // writes them out so the test depends on nothing but the contracts.
 type testUser struct {
 	attributes map[string]any
@@ -155,7 +155,7 @@ var (
 	_ auth.Authenticatable = (*testUser)(nil)
 )
 
-// newTestUser is the model constructor EloquentUserProvider is built with.
+// newTestUser is the model constructor ModelUserProvider is built with.
 func newTestUser() auth.Authenticatable { return &testUser{attributes: map[string]any{}} }
 
 func (u *testUser) GetAuthIdentifierName() string { return "id" }
