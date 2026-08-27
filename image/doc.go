@@ -25,12 +25,13 @@
 // Read: JPEG, PNG, GIF. Written: JPEG, PNG, GIF.
 //
 // [Image.ToFormat] accepts nine names -- webp, jpg, jpeg, png, gif, avif,
-// heic, heif, bmp -- and the four with no encoder in the standard library
-// fail at the encode, with the format named. That is the honest arrangement:
-// the alternative is [Image.ToWebp] handing back a JPEG, which is a lie that
-// leaves the building as a wrong Content-Type. The same goes for reading: a
-// WebP arriving at [Image.ToBytes] is refused by name rather than
-// half-decoded.
+// heic, heif, bmp. Four of them are written, and they are three formats, since
+// jpg and jpeg are one. The other five -- webp, avif, heic, heif, bmp -- have
+// no encoder in the standard library and fail at the encode, with the format
+// named. That is the honest arrangement: the alternative is [Image.ToWebp]
+// handing back a JPEG, which is a lie that leaves the building as a wrong
+// Content-Type. The same goes for reading: a WebP arriving at [Image.ToBytes]
+// is refused with its media type named rather than half-decoded.
 //
 // [Image.MimeType] and [Image.Extension] know the wider list, because they
 // read what a file is rather than what this package can do with it -- an

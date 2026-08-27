@@ -86,11 +86,12 @@ func decodeCanvas(b []byte) (*stdimage.RGBA, string, error) {
 
 // encodeCanvas writes the canvas back out.
 //
-// Three formats can be written, and the other five accepted names fail here
-// with a message that says so. That is deliberate: WebP, AVIF, HEIC and BMP
-// have no encoder in the standard library, and the packages that do have one
-// are dependencies this module does not carry. Failing at the encode with the
-// format named is the honest version of that -- the alternative is
+// Four of the nine accepted names are written -- jpg and jpeg are one format,
+// so they are three formats -- and the other five fail here with a message that
+// says so. That is deliberate: WebP, AVIF, HEIC and BMP have no encoder in the
+// standard library, and the packages that do have one are dependencies this
+// module does not carry. Failing at the encode with the format named is the
+// honest version of that -- the alternative is
 // [Image.ToWebp] quietly handing back a JPEG, which is a lie that reaches
 // production as a broken Content-Type.
 func encodeCanvas(canvas *stdimage.RGBA, format string, quality int) ([]byte, error) {
