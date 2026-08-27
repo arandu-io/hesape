@@ -7,9 +7,11 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/arandu-io/hesape/process"
 )
 
-// MySqlSchemaState is the SchemaState that shells out to mysqldump and mysql.
+// MySqlSchemaState is the SchemaState that runs mysqldump and mysql.
 //
 // It serves MariaDB as well: the one difference, omitting --set-gtid-purged, is
 // a branch taken on Connection.IsMaria.
@@ -17,10 +19,10 @@ type MySqlSchemaState struct {
 	*BaseSchemaState
 }
 
-// NewMySqlSchemaState builds a MySqlSchemaState for connection, using
-// processFactory to build the mysqldump and mysql commands it runs.
-func NewMySqlSchemaState(connection Connection, processFactory ProcessFactory) *MySqlSchemaState {
-	return &MySqlSchemaState{BaseSchemaState: NewBaseSchemaState(connection, processFactory)}
+// NewMySqlSchemaState builds a MySqlSchemaState for connection, using factory to
+// run the mysqldump and mysql commands.
+func NewMySqlSchemaState(connection Connection, factory *process.Factory) *MySqlSchemaState {
+	return &MySqlSchemaState{BaseSchemaState: NewBaseSchemaState(connection, factory)}
 }
 
 // autoIncrementState matches the AUTO_INCREMENT=<n> clause mysqldump writes
@@ -106,12 +108,12 @@ func (s *MySqlSchemaState) Load(ctx context.Context, path string) error {
 	args := append([]string{"mysql"}, s.connectionFlags()...)
 	args = append(args, "--database="+s.GetConnection().GetConfig("database"))
 
-	command := s.MakeProcess(ctx, args[0], args[1:]...)
-	command.Stdin = file
-	command.Env = s.processEnvironment(s.baseVariables())
-
-	if output, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("schema: loading %s with mysql: %w: %s", path, err, bytes.TrimSpace(output))
+	result, err := s.MakeProcess(s.baseVariables(), args[0], args[1:]...).Input(file).Run(ctx, nil, nil)
+	if err != nil {
+		return fmt.Errorf("schema: loading %s with mysql: %w", path, err)
+	}
+	if _, err := result.Throw(nil); err != nil {
+		return fmt.Errorf("schema: loading %s with mysql: %w", path, err)
 	}
 	return nil
 }
@@ -204,20 +206,23 @@ func (s *MySqlSchemaState) executeDumpProcess(ctx context.Context, args []string
 
 // runDump runs one mysqldump, sending its standard output to the buffer when
 // one was given and letting --result-file place it otherwise.
+//
+// A failed dump is reported through Throw, whose error carries both of the
+// program's streams: that is what executeDumpProcess reads to decide whether the
+// client rejected an option it does not have.
 func (s *MySqlSchemaState) runDump(ctx context.Context, args []string, stdout *bytes.Buffer) error {
-	var stderr bytes.Buffer
+	result, err := s.MakeProcess(s.baseVariables(), args[0], args[1:]...).Run(ctx, nil, nil)
+	if err != nil {
+		return fmt.Errorf("schema: mysqldump: %w", err)
+	}
+	if _, err := result.Throw(nil); err != nil {
+		return fmt.Errorf("schema: mysqldump: %w", err)
+	}
 
-	command := s.MakeProcess(ctx, args[0], args[1:]...)
-	command.Stderr = &stderr
-	command.Env = s.processEnvironment(s.baseVariables())
 	if stdout != nil {
-		command.Stdout = stdout
+		stdout.WriteString(result.Output())
 	}
-
-	if err := command.Run(); err != nil {
-		return fmt.Errorf("schema: mysqldump: %w: %s", err, bytes.TrimSpace(stderr.Bytes()))
-	}
-	s.Output(stderr.String())
+	s.Output(result.ErrorOutput())
 	return nil
 }
 

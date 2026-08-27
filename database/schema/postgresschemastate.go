@@ -1,23 +1,24 @@
 package schema
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
+
+	"github.com/arandu-io/hesape/process"
 )
 
-// PostgresSchemaState is the SchemaState that shells out to pg_dump, pg_restore
-// and psql.
+// PostgresSchemaState is the SchemaState that runs pg_dump, pg_restore and psql.
 type PostgresSchemaState struct {
 	*BaseSchemaState
 }
 
 // NewPostgresSchemaState builds a PostgresSchemaState for connection, using
-// processFactory to build the pg_dump, pg_restore and psql commands it runs.
-func NewPostgresSchemaState(connection Connection, processFactory ProcessFactory) *PostgresSchemaState {
-	return &PostgresSchemaState{BaseSchemaState: NewBaseSchemaState(connection, processFactory)}
+// factory to run the pg_dump, pg_restore and psql commands.
+func NewPostgresSchemaState(connection Connection, factory *process.Factory) *PostgresSchemaState {
+	return &PostgresSchemaState{BaseSchemaState: NewBaseSchemaState(connection, factory)}
 }
 
 // Dump writes the connection's schema, plus the rows of the migration table,
@@ -51,6 +52,11 @@ func (s *PostgresSchemaState) Dump(ctx context.Context, connection Connection, p
 
 // dumpInto runs one pg_dump and sends its standard output to path, truncating
 // or appending depending on appending.
+//
+// The dump is written as it arrives rather than read back off the result: a
+// schema is as big as the database it came from, and a result held as a string
+// holds all of it at once. Quietly is what stops the process package from
+// keeping a second copy for nobody.
 func (s *PostgresSchemaState) dumpInto(ctx context.Context, path string, appending bool, args []string) error {
 	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 	if appending {
@@ -63,14 +69,31 @@ func (s *PostgresSchemaState) dumpInto(ctx context.Context, path string, appendi
 	}
 	defer file.Close()
 
-	var stderr bytes.Buffer
-	command := s.MakeProcess(ctx, args[0], args[1:]...)
-	command.Stdout = file
-	command.Stderr = &stderr
-	command.Env = s.processEnvironment(s.baseVariables())
+	// The handler is called with one stream at a time and never from two
+	// goroutines at once, so these two need no lock of their own; the run has
+	// finished by the time they are read.
+	var stderr strings.Builder
+	var writeErr error
+	streams := func(stream process.Stream, chunk string) {
+		if stream == process.Err {
+			stderr.WriteString(chunk)
+			return
+		}
+		if _, err := io.WriteString(file, chunk); err != nil && writeErr == nil {
+			writeErr = err
+		}
+	}
 
-	if err := command.Run(); err != nil {
-		return fmt.Errorf("schema: pg_dump into %s: %w: %s", path, err, bytes.TrimSpace(stderr.Bytes()))
+	result, err := s.MakeProcess(s.baseVariables(), args[0], args[1:]...).Quietly().Run(ctx, nil, streams)
+	if err != nil {
+		return fmt.Errorf("schema: pg_dump into %s: %w", path, err)
+	}
+	if writeErr != nil {
+		return fmt.Errorf("schema: writing the Postgres dump to %s: %w", path, writeErr)
+	}
+	if result.Failed() {
+		return fmt.Errorf("schema: pg_dump into %s: exit code %d: %s",
+			path, result.ExitCode(), strings.TrimSpace(stderr.String()))
 	}
 	s.Output(stderr.String())
 	return nil
@@ -93,11 +116,12 @@ func (s *PostgresSchemaState) Load(ctx context.Context, path string) error {
 		args = append(args, path)
 	}
 
-	command := s.MakeProcess(ctx, args[0], args[1:]...)
-	command.Env = s.processEnvironment(s.baseVariables())
-
-	if output, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("schema: loading %s with %s: %w: %s", path, args[0], err, bytes.TrimSpace(output))
+	result, err := s.MakeProcess(s.baseVariables(), args[0], args[1:]...).Run(ctx, nil, nil)
+	if err != nil {
+		return fmt.Errorf("schema: loading %s with %s: %w", path, args[0], err)
+	}
+	if _, err := result.Throw(nil); err != nil {
+		return fmt.Errorf("schema: loading %s with %s: %w", path, args[0], err)
 	}
 	return nil
 }
@@ -139,7 +163,8 @@ func (s *PostgresSchemaState) connectionFlags() []string {
 // rather than on the command line: the password.
 //
 // PGPASSWORD is read by every libpq client. A password passed as an argument
-// would be readable by every process on the machine through `ps`.
+// would be readable by every process on the machine through `ps`. Everything
+// else is an ordinary argument, and connectionFlags says why that is safe.
 func (s *PostgresSchemaState) baseVariables() map[string]string {
 	return map[string]string{"PGPASSWORD": s.GetConnection().GetConfig("password")}
 }

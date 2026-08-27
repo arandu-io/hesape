@@ -56,10 +56,11 @@ func (c *CallbackEvent) ShouldSkipDueToOverlapping(ctx context.Context) (bool, e
 
 // RunInBackground is refused.
 //
-// A closure cannot be sent to the background, because the background is
-// another process and the closure is in this one. It panics rather than
-// returning an error because it is a mistake in the schedule, caught the
-// first time the schedule is declared.
+// A command sent to the background is a program the scheduler waits for beside
+// the schedule; a closure has no program, so there would be nothing to wait for
+// and the call would mean running the closure itself next to everything that
+// reads the event. It panics rather than returning an error because it is a
+// mistake in the schedule, caught the first time the schedule is declared.
 func (c *CallbackEvent) RunInBackground() *Event {
 	panic("scheduling: scheduled closures can not be run in the background")
 }

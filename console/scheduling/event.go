@@ -6,14 +6,15 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/console"
+	"github.com/arandu-io/hesape/process"
 )
 
 // defaultExpiresAt is how many minutes an overlap mutex lives when the event
@@ -37,7 +38,9 @@ type Hook func(ctx context.Context) error
 // one run per tenant with a Grant each. Without them a scheduled task would
 // be the one path into the database with no authorization on it.
 type Event struct {
-	// Command is the command line the event runs. CommandBuilder reads it.
+	// Command is the command line the event runs. CommandBuilder splits it into
+	// the program and the arguments a process is started with; no shell reads
+	// it.
 	Command string
 
 	// Output is where the command's output is sent. It is a path, and the
@@ -98,12 +101,16 @@ type Event struct {
 	//
 	// It lives on Event and not only on CallbackEvent because Go has no virtual
 	// dispatch: a Schedule holds *Event, and a run that went through the base
-	// type would otherwise shell out to an empty command line.
+	// type would otherwise try to start a program with no name.
 	callback Callback
 
 	// exception is what the callback failed with, kept so the after callbacks
 	// run before it is returned -- which is the order Event.Run has.
 	exception error
+
+	// factory builds the process a command event runs. Nil means a new one, and
+	// UseProcessFactory is how a test points it at fakes.
+	factory *process.Factory
 }
 
 // NewEvent returns an event for a command line.
@@ -230,8 +237,18 @@ func (e *Event) start(ctx context.Context) (int, error) {
 // execute runs the work: the closure when there is one, the process
 // otherwise.
 //
-// It runs the built command line through the system shell: the command
-// string carries redirections, and a redirection is the shell's.
+// The command is a program and its arguments, and no shell sees any of it. The
+// redirection the command line used to carry is done here instead: the output
+// file is opened, and both of the program's streams are written to it as they
+// arrive, which is what "> file 2>&1" meant.
+//
+// That is the whole reason this does not build a line. A command line handed to
+// a shell is an injection the moment any part of it comes from data, and a
+// scheduled command is assembled from a schedule the operator writes and
+// parameters that reach it from a configuration.
+//
+// The command is given no deadline. A scheduled task takes as long as the work
+// in it, and the context the runner passes is what ends it.
 //
 // The returned error is a failure to run at all. A command that ran and
 // exited non-zero is its status and no error, which is what the onFailure
@@ -245,27 +262,117 @@ func (e *Event) execute(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
-	command := e.BuildCommand()
-	if strings.TrimSpace(command) == "" {
+	command, err := e.BuildCommand()
+	if err != nil {
+		return 1, err
+	}
+	if len(command) == 0 {
 		return 0, nil
 	}
 
-	shell, flag := "/bin/sh", "-c"
-	if os.PathSeparator == '\\' {
-		shell, flag = "cmd", "/c"
+	output, err := e.openOutput()
+	if err != nil {
+		return 1, err
 	}
 
-	err := exec.CommandContext(ctx, shell, flag, command).Run()
-	if err == nil {
+	pending := e.processFactory().NewPendingProcess().Command(command...).Quietly().Forever()
+
+	if e.runInBackground {
+		invoked, err := pending.Start(ctx, nil, redirectTo(output))
+		if err != nil {
+			_ = output.Close()
+			return 1, err
+		}
+		go e.finishInBackground(ctx, invoked, output)
 		return 0, nil
 	}
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		// A non-zero status is the command's answer, not a failure to run it:
-		// the onFailure callbacks are what report it.
-		return exit.ExitCode(), nil
+
+	defer output.Close()
+
+	result, err := pending.Run(ctx, nil, redirectTo(output))
+	if err != nil {
+		return 1, err
 	}
-	return 1, err
+	return result.ExitCode(), nil
+}
+
+// processFactory is the factory this event's command runs through, defaulted.
+func (e *Event) processFactory() *process.Factory {
+	if e.factory == nil {
+		e.factory = process.NewFactory()
+	}
+	return e.factory
+}
+
+// UseProcessFactory points the event at another process factory, and a nil one
+// leaves the event on the factory it has.
+//
+// It is the seam a test uses: a factory with fakes registered answers the
+// event's command line without a program being started.
+func (e *Event) UseProcessFactory(factory *process.Factory) *Event {
+	if factory != nil {
+		e.factory = factory
+	}
+	return e
+}
+
+// openOutput opens the file the command's output is written to.
+//
+// The path is used as it is, and nothing quotes it, because nothing parses it.
+// The default output is the system's null device, and opening that is how output
+// is discarded -- one path through here rather than a branch.
+//
+// A file that cannot be opened stops the event: a task whose output was meant to
+// be read and went nowhere has not run the way it was asked to.
+func (e *Event) openOutput() (*os.File, error) {
+	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+	if e.ShouldAppendOutput {
+		flags = os.O_CREATE | os.O_WRONLY | os.O_APPEND
+	}
+
+	path := e.Output
+	if path == "" {
+		path = e.GetDefaultOutput()
+	}
+
+	file, err := os.OpenFile(path, flags, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("scheduling: opening the output file %s for [%s]: %w", path, e.Command, err)
+	}
+	return file, nil
+}
+
+// redirectTo sends both of a command's streams to the file.
+//
+// Standard output and standard error go to the same place and arrive in the
+// order the program wrote them, because the process package serialises the
+// calls.
+//
+// A write that fails is dropped rather than failing the task: the output file is
+// where a scheduled command's output is kept, not what it produces, and a task
+// that did its work has done its work.
+func redirectTo(file *os.File) process.OutputHandler {
+	return func(_ process.Stream, chunk string) {
+		_, _ = io.WriteString(file, chunk)
+	}
+}
+
+// finishInBackground waits for a backgrounded command and finishes the event.
+//
+// Run has already returned by the time this starts, so the exit code, the after
+// callbacks and the mutex release all happen here rather than there.
+//
+// The event must not be run again while this is outstanding, which is what
+// WithoutOverlapping is for: the mutex is released at the end of this, not at
+// the end of Run.
+func (e *Event) finishInBackground(ctx context.Context, invoked process.InvokedProcess, output *os.File) {
+	defer output.Close()
+
+	code := 1
+	if result, err := invoked.Wait(nil); err == nil {
+		code = result.ExitCode()
+	}
+	_ = e.Finish(ctx, code)
 }
 
 // Finish records the exit code, runs the after callbacks and releases the
@@ -304,8 +411,11 @@ func (e *Event) CallAfterCallbacks(ctx context.Context) error {
 	return first
 }
 
-// BuildCommand renders the command line the event runs.
-func (e *Event) BuildCommand() string { return (CommandBuilder{}).BuildCommand(e) }
+// BuildCommand is the program and the arguments the event runs.
+//
+// It is a list and not a line: nothing joins these back together, and nothing
+// parses them. The error is a command line that ends inside a quoted word.
+func (e *Event) BuildCommand() ([]string, error) { return (CommandBuilder{}).BuildCommand(e) }
 
 // IsDue reports whether the event should run now.
 //
@@ -605,6 +715,11 @@ func (e *Event) withOutputCallback(callback func(ctx context.Context, output str
 //
 // It is the description when it has one, the command line when it is a
 // command, and "Callback" when it is a closure that was never named.
+//
+// The command line, and not what the event is started with: where the output
+// goes and which user it runs as are how the command is run rather than what it
+// is, and a listing that repeated them printed the same redirection on every
+// row.
 func (e *Event) GetSummaryForDisplay() string {
 	if e.description != "" {
 		return e.description
@@ -612,7 +727,7 @@ func (e *Event) GetSummaryForDisplay() string {
 	if e.callback != nil {
 		return "Callback"
 	}
-	return e.BuildCommand()
+	return e.Command
 }
 
 // NextRunDate is when the event runs next, after the given time.
