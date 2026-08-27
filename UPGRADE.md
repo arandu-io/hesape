@@ -69,6 +69,77 @@ Add it only when the endpoint deduplicates. It takes no argument and does nothin
 on its own, because a fifth boolean on `Retry` would sit beside `throw`, where one
 positional slip buys duplicate writes.
 
+### `image`: a ceiling before the decode, and a context through the transformations
+
+```
+- ./image.Driver.Process: changed from func([]byte, *ImagePipeline) ([]byte, error) to func(context.Context, []byte, *ImagePipeline) ([]byte, error)
+- ./image.Driver.DominantColor, .TransformationHandler: the same shape
+- ./image.(*Image).Dimensions, .Width, .Height, .MimeType, .Extension, .ToBytes, .ToString, .ToBase64, .ToDataURI, .HashName: each takes a context first
+- ./image.Driver.MaxPixels: added
+```
+
+Nothing read the header before decoding, so a crafted file declaring enormous
+dimensions was decoded in full — a memory exhaustion whose size the attacker
+chooses. Measured with a 72-byte PNG declaring 12000 by 12000: **549.5 MiB
+allocated** without the ceiling, **6 KiB** with it, and the refusal names both the
+dimensions and the limit.
+
+The default is 33,554,432 pixels, which is a canvas of exactly 128 MiB at four
+bytes a pixel — above an 8K frame and every camera in ordinary use.
+`ImageManager.MaxPixels(n)` moves it, zero restores the default, and there is no
+unlimited setting.
+
+The context reaches the transformations, so a long resize is cancellable rather
+than running to the end of a request nobody is waiting for. `Dimensions` reads the
+header only and takes one for symmetry; `ToResponse` uses the request's own, so a
+browser going away now cancels the work.
+
+The ceiling bounds the decode and not what a transformation is asked to produce:
+`Resize(100000, 100000)` still allocates what the caller asked for. That is
+caller-chosen rather than attacker-chosen, and it is stated in the package
+comment.
+
+### `support/arr` is removed; `collections/arr` is the one
+
+```
+- package github.com/arandu-io/hesape/support/arr: removed
+```
+
+Two packages with the same name answered the same question, sharing 59 exported
+names with diverging signatures. The one that stays has 85.9% test coverage
+against 0.0%, tells a present nil from an absent key, keeps an `int` as an `int`
+where the other round-tripped it to `float64` through JSON, and actually removes
+an element when asked to forget one through a slice — which the other did not,
+silently.
+
+The signatures that change for a caller:
+
+```go
+// before -- a default argument
+v := arr.Get(m, "k", fallback)
+
+// after -- present and absent are distinguishable
+v, ok := arr.Get(m, "k")
+```
+
+`Pull`, `First` and `Last` move the same way. `Sort`/`SortDesc` take a projection
+rather than a comparator. `ToCssClasses`/`ToCssStyles` are variadic — **a caller
+passing a slice must spread it**, and this one compiles either way: without the
+spread a class list renders as `[btn btn-primary]`, one class, with nothing to
+tell you.
+
+`Arrayer` has no replacement type. Write the interface where you need it:
+`interface{ ToArray() map[string]any }`.
+
+**One behaviour is gone on three methods.** `Fluent.Get`, `UriQueryString.Get` and
+`ValidatedInput.Input` no longer accept a `func() any` lazy default. Lazy defaults
+survive in `Fluent.Value` and everywhere else that uses the support package's own
+helper.
+
+**And one widens.** `Dot` now descends into any map or slice kind, where before it
+descended only into `map[string]any`. A translation group nesting
+`map[string]string` will start yielding wildcard messages it previously dropped.
+
 ### A scheduled command no longer goes through a shell
 
 ```
