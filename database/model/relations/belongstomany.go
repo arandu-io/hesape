@@ -73,6 +73,7 @@ func newBelongsToMany(query Builder, parent Model, table, foreignPivotKey, relat
 	}
 	relation.InteractsWithPivotTable = concerns.InteractsWithPivotTable{Host: relation}
 	relation.AliasedPivotColumns = relation.aliasedPivotColumns
+	relation.ExistenceCompareKey = relation.GetExistenceCompareKey
 
 	// The join is on both paths. Only the where clause that narrows the pivot to
 	// one parent is what "unconstrained" leaves off -- an eager load reads the
