@@ -69,6 +69,27 @@ Add it only when the endpoint deduplicates. It takes no argument and does nothin
 on its own, because a fifth boolean on `Retry` would sit beside `throw`, where one
 positional slip buys duplicate writes.
 
+### `encryption.ErrSignature` says which package holds it
+
+No symbol moved, so apidiff reports nothing. The message changed:
+
+```
+before: security: the signature is not valid
+after:  encryption: the signature is not valid
+```
+
+`errors.Is` is unaffected. Only code matching the text notices, and nothing in
+this collection does.
+
+It said `security` because half the package identified as the compatibility shim
+that is removed at v1.0.0, and half as the home where the key lives. A developer
+reading `security: ...` in a log went looking in the package that stops existing.
+Every sibling error in the package, and every sibling package, names itself.
+
+`NewSigner` also copies the application key now, as `NewEncrypter` already did.
+Keeping the caller's slice fails silently: no error and no log, links simply stop
+verifying once the caller reuses the buffer.
+
 ### The rate limiter refuses to be wired in a way that always fails open
 
 ```
