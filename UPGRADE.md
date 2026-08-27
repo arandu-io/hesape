@@ -24,6 +24,95 @@ the first tag and has nothing before it to compare against.
 
 ---
 
+## Unreleased — the HTTP client takes a context, and hashing has one path
+
+### `http/client`: every verb takes a context
+
+```
+- ./http/client.(*PendingRequest).Get: changed from func(string, map[string]string) (*Response, error) to func(context.Context, string, map[string]string) (*Response, error)
+- ./http/client.(*PendingRequest).Post: changed from func(string, any) (*Response, error) to func(context.Context, string, any) (*Response, error)
+- ./http/client.(*PendingRequest).Put, .Patch, .Delete, .Head: the same shape
+- ./http/client.(*PendingRequest).Send: changed from func(string, string, map[string]string, any) (*Response, error) to func(context.Context, string, string, map[string]string, any) (*Response, error)
+```
+
+The context goes first and everything else is unchanged:
+
+```go
+// before
+pr.Get(url, query)
+pr.Send(method, url, query, data)
+
+// after
+pr.Get(ctx, url, query)
+pr.Send(ctx, method, url, query, data)
+```
+
+Passing `context.Background()` reproduces the old behaviour exactly, and is worth
+treating as a smell rather than a fix: it is the shape that made this necessary.
+The deadline was built on a background context, so a caller's cancellation never
+reached the request. Measured before the change: a caller cancelling at 20 ms
+waited the full 60-second client timeout. It now returns in 20 ms with
+`context.Canceled`. The wait between retry attempts was a second uncancellable
+hold and is now cancellable too.
+
+A nil context is refused rather than swapped for a background one.
+
+**`Retry` no longer repeats a non-idempotent method.** `POST`, `PATCH`, `CONNECT`
+and any method outside `GET, HEAD, PUT, DELETE, OPTIONS, TRACE` are sent once,
+whatever `times` says — a retried POST is a duplicated write.
+
+```
+- ./http/client.(*PendingRequest).RetryNonIdempotentMethods: added
+```
+
+Add it only when the endpoint deduplicates. It takes no argument and does nothing
+on its own, because a fifth boolean on `Retry` would sit beside `throw`, where one
+positional slip buys duplicate writes.
+
+### `hashing`: one way to hash, and it was already the only one running
+
+`HashManager` and everything under it are removed — 32 incompatible lines, all in
+`./hashing`. `Make` and `Check` are unchanged and are the whole surface.
+
+```
+- ./hashing.HashManager, .Config, .DriverBcrypt, .DriverArgon, .DriverArgon2id: removed
+- ./hashing.ArgonHasher, .Argon2IdHasher, .NewArgonHasher, .NewArgon2IdHasher: removed
+- ./hashing.AbstractHasher, .ErrDriverNotSupported, .ErrWrongAlgorithm, .ErrValueTooLong: removed
+- ./hashing.Hasher.Make/.Check/.NeedsRehash: the variadic Options parameter is gone
+- ./hashing.Options.Memory, .Time, .Threads, .Limit, .Verify: removed
+```
+
+`HashManager` had no caller outside its own tests. What it did have was three
+disagreeing argon2id parameter sets and a bcrypt fallback, while the configuration
+this framework publishes says argon2id — a key written and read by nothing but the
+manager, whose fallback contradicted the published value.
+
+Two of those disagreements were worse than duplication. `NewArgonHasher` defaulted
+to **1024 KiB** of memory where `Make` compiles in **65536**, so a project setting
+`hashing.driver=argon` wrote hashes sixty-four times weaker without being told. And
+`ForAuth(nil)` — the only non-fake `auth.Hasher` — returned bcrypt at cost 12
+rather than argon2id.
+
+**No stored hash becomes unverifiable.** `Check` dispatches on the `$2` prefix
+independently of anything removed, and a test carries five hashes written by the
+previous code as literals: bcrypt at two costs, argon2i, and argon2id at two
+parameter sets. The one change to stored data is that `ForAuth(nil).Make` now
+writes argon2id; existing bcrypt columns still authenticate and are flagged for
+rewrite on the next sign-in.
+
+`BcryptHasher` and `Options{Rounds}` stay, documented as the import path for
+columns another system wrote.
+
+Per-call options go to the constructor:
+
+```go
+// before
+h.Make(password, hashing.Options{Memory: 65536, Time: 4})
+
+// after -- the parameters are compiled in, deliberately, and there is nothing to pass
+hashing.Make(password)
+```
+
 ## Unreleased — one password reset flow
 
 `hesape/auth/passwords` and `hesape/auth/console` are removed.
