@@ -7,6 +7,8 @@
 // with a type parameter:
 //
 //	type User struct {
+//		model.Model[User]
+//
 //		ID        int64      `db:"id"`
 //		Name      string     `db:"name"`
 //		Email     string     `db:"email"`
@@ -15,17 +17,59 @@
 //		DeletedAt *time.Time `db:"deleted_at"`
 //	}
 //
-//	users := model.NewModel[User]("users", conn, grammar, processor)
-//	users.SoftDeletes = true
+//	users := model.Query[User](db)
 //
-//	found, err := users.NewQuery().Where("email", email).First(ctx, g)
+//	user, err := users.Where("email", "=", email).First(ctx, g)
 //	if err != nil {
 //		return err
 //	}
-//	fmt.Println(found.Entity.Name) // a struct field, checked by the compiler
+//	user.Name = "Ada"        // a struct field, checked by the compiler
+//	_, err = user.Save(ctx, g)
+//
+// # The row is the model
+//
+// A terminal hands back *T -- the application's own struct -- and not a wrapper
+// over it. Reading a column is reading a field, and the methods a row is saved
+// and deleted through are the ones Go promotes out of the embedded Model[T].
+// Collection is the same thing for a set of rows: []*T.
+//
+// The embedding is what makes the second half work, and it is worth saying what
+// a T that does not embed Model[T] gets instead. Everything still runs: the
+// query, the hydration, the eager load, the write. What that row cannot do is
+// answer for itself -- there is no field in it pointing at the model that
+// hydrated it, so Save, GetAttribute and the loaded relations are not reachable
+// from the value a terminal returned. The columns are all there, and nothing
+// else is. See ModelOf.
 //
 // A column is a field. The tag `db:"..."` names it; without a tag the name is
 // the field name in snake case. A field tagged `db:"-"` is not a column.
+//
+// # Reading a relation back, for each of the two shapes
+//
+// With marks a relation to eager load, and the terminal attaches what it matched
+// to the model behind each row. Reading it back takes the row:
+//
+//	users, err := model.Query[User](db).With("posts").Get(ctx, g)
+//	posts, ok := model.Related[User, Post](users[0], "posts")
+//
+// and loading one afterwards is Load, promoted out of the embedded model:
+//
+//	err := users[0].Load(ctx, g, "posts")
+//
+// Both of those reach the model through the row, so both need a T that embeds
+// Model[T]. A T that does not still eager loads -- the query runs, the rows are
+// matched, the relation is attached -- but it is attached to a model beside the
+// row rather than inside it, and no terminal hands that model back. Related
+// answers false there, and Collection.Load, Collection.LoadMissing,
+// Collection.LoadAggregate and Builder.EagerLoadRelations report
+// ErrRowHasNoModel rather than reporting success having loaded onto nothing.
+// The way to read a relation off a row is to give the entity the embedded model.
+//
+// Query is the entry point when the defaults are right: it works the table out
+// of the type and takes the grammar and the processor off the connection.
+// NewModel is the one to reach for when they are not -- another table, another
+// key, soft deletes, a table with no tenant column -- and the model it returns
+// answers NewQuery.
 //
 // # There is no mass-assignment allowlist, and nothing replaces one
 //

@@ -403,11 +403,11 @@ func (b *Builder[T]) WithExists(relation string) *Builder[T] {
 	return b.WithAggregate([]string{relation}, "*", "exists")
 }
 
-// loadAggregateModels is the query Collection.LoadAggregate runs: the keys
-// of the collection, with the aggregate columns beside them.
-func (b *Builder[T]) loadAggregateModels(ctx context.Context, g auth.Grant, keys []any, relations []string, column, function string) (Collection[T], error) {
+// loadAggregateModels is the query LoadAggregate runs: the keys of the
+// collection, with the aggregate columns beside them.
+func (b *Builder[T]) loadAggregateModels(ctx context.Context, g auth.Grant, keys []any, relations []string, column, function string) (models[T], error) {
 	return b.WhereKey(keys).
 		Select(b.model.GetQualifiedKeyName()).
 		WithAggregate(relations, column, function).
-		Get(ctx, g)
+		get(ctx, g)
 }

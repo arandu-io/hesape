@@ -27,13 +27,36 @@ func newFactory() *factories.Factory[user] {
 	return factories.For(model.NewModel[user]("users", nil, nil, nil), definition)
 }
 
+// made and madeOne are Make and MakeOne with the error read, so that the tests
+// below say what they are about rather than what they had to check first.
+func made(t *testing.T, f *factories.Factory[user]) []*user {
+	t.Helper()
+	rows, err := f.Make()
+	if err != nil {
+		t.Fatalf("Make: %v", err)
+	}
+	return rows
+}
+
+func madeOne(t *testing.T, f *factories.Factory[user]) *user {
+	t.Helper()
+	row, err := f.MakeOne()
+	if err != nil {
+		t.Fatalf("MakeOne: %v", err)
+	}
+	return row
+}
+
 // TestMakeTakesNoGrantAndTouchesNothing is the assertion behind the signature.
 //
 // The model is built with a nil connection, so a factory that reached the
 // database would panic rather than pass. That is the point: Make has to be
 // provably offline, not documented as offline.
 func TestMakeTakesNoGrantAndTouchesNothing(t *testing.T) {
-	rows := newFactory().Count(3).Make()
+	rows, err := newFactory().Count(3).Make()
+	if err != nil {
+		t.Fatalf("Make: %v", err)
+	}
 
 	if len(rows) != 3 {
 		t.Fatalf("Make gave %d rows, want 3", len(rows))
@@ -50,17 +73,17 @@ func TestMakeTakesNoGrantAndTouchesNothing(t *testing.T) {
 
 // TestTheSameSeedMakesTheSameRows is what a recorded seed buys.
 func TestTheSameSeedMakesTheSameRows(t *testing.T) {
-	first := newFactory().Count(5).Seed(99).Make()
-	second := newFactory().Count(5).Seed(99).Make()
+	first := made(t, newFactory().Count(5).Seed(99))
+	second := made(t, newFactory().Count(5).Seed(99))
 
 	for i := range first {
-		if first[i] != second[i] {
+		if *first[i] != *second[i] {
 			t.Fatalf("row %d differs between runs of the same seed:\n  %+v\n  %+v", i, first[i], second[i])
 		}
 	}
 
-	other := newFactory().Count(5).Seed(100).Make()
-	if other[0] == first[0] {
+	other := made(t, newFactory().Count(5).Seed(100))
+	if *other[0] == *first[0] {
 		t.Error("two seeds made the same first row; the seed is not reaching the generator")
 	}
 }
@@ -68,10 +91,9 @@ func TestTheSameSeedMakesTheSameRows(t *testing.T) {
 // TestStatesRunInOrderAndTheLastOneWins pins the ordering, because a caller who
 // adds a state later means it to win.
 func TestStatesRunInOrderAndTheLastOneWins(t *testing.T) {
-	row := newFactory().
+	row := madeOne(t, newFactory().
 		State(func(u *user) { u.Name = "first" }).
-		State(func(u *user) { u.Name = "second" }).
-		MakeOne()
+		State(func(u *user) { u.Name = "second" }))
 
 	if row.Name != "second" {
 		t.Errorf("Name = %q, want the later state to win", row.Name)
@@ -84,24 +106,24 @@ func TestAFactoryIsAValue(t *testing.T) {
 	base := newFactory()
 	suspended := base.State(func(u *user) { u.Active = false })
 
-	if !base.MakeOne().Active {
+	if !madeOne(t, base).Active {
 		t.Error("a state added to a derived factory reached the one it came from")
 	}
-	if suspended.MakeOne().Active {
+	if madeOne(t, suspended).Active {
 		t.Error("the derived factory did not get the state")
 	}
-	if got := len(base.Count(7).Make()); len(base.Make()) != 1 || got != 7 {
-		t.Errorf("Count mutated its receiver: base makes %d", len(base.Make()))
+	if got := len(made(t, base.Count(7))); len(made(t, base)) != 1 || got != 7 {
+		t.Errorf("Count mutated its receiver: base makes %d", len(made(t, base)))
 	}
 }
 
 // TestSequenceCyclesRatherThanStopping: three states over ten rows is ten rows.
 func TestSequenceCyclesRatherThanStopping(t *testing.T) {
-	rows := newFactory().Count(10).Sequence(
+	rows := made(t, newFactory().Count(10).Sequence(
 		func(u *user) { u.Name = "a" },
 		func(u *user) { u.Name = "b" },
 		func(u *user) { u.Name = "c" },
-	).Make()
+	))
 
 	want := []string{"a", "b", "c", "a", "b", "c", "a", "b", "c", "a"}
 	for i, row := range rows {
@@ -114,10 +136,10 @@ func TestSequenceCyclesRatherThanStopping(t *testing.T) {
 // TestAfterMakingRunsOnEveryRow.
 func TestAfterMakingRunsOnEveryRow(t *testing.T) {
 	seen := 0
-	rows := newFactory().Count(4).AfterMaking(func(u *user) {
+	rows := made(t, newFactory().Count(4).AfterMaking(func(u *user) {
 		seen++
 		u.Name = strings.ToUpper(u.Name)
-	}).Make()
+	}))
 
 	if seen != 4 {
 		t.Errorf("AfterMaking ran %d times, want 4", seen)
@@ -136,6 +158,79 @@ func TestCreateRefusesAGrantWithNoTenant(t *testing.T) {
 	_, err := newFactory().Create(context.Background(), auth.Grant{})
 	if err == nil {
 		t.Fatal("Create ran under a grant with no tenant")
+	}
+}
+
+// member is the shape the model package tells an application to write: its own
+// struct with the model embedded, so the row and the model are one value.
+type member struct {
+	model.Model[member]
+
+	ID   int64  `db:"id"`
+	Name string `db:"name"`
+}
+
+func memberFactory(conn *recordingConnection) *factories.Factory[member] {
+	return factories.For(newModelOn[member](conn, "members"), func(f faker.Faker) member {
+		return member{Name: f.Name()}
+	})
+}
+
+// TestAMadeRowCanBeSaved is what Make handing back the row is for.
+//
+// The definition answers a member, and a member carries a zero model inside it.
+// Building the row and assigning the definition over it left the model with no
+// connection and no back pointer, so the row came back readable and unsavable --
+// which is the shape of a value nobody built.
+func TestAMadeRowCanBeSaved(t *testing.T) {
+	conn := newRecordingConnection()
+
+	row, err := memberFactory(conn).MakeOne()
+	if err != nil {
+		t.Fatalf("MakeOne: %v", err)
+	}
+	if row.Name == "" {
+		t.Error("the definition did not reach the made row")
+	}
+	if model.ModelOf(row) == nil {
+		t.Fatal("a made row does not carry the model it embeds")
+	}
+	if conn.inserts() != 0 {
+		t.Errorf("Make ran %d inserts", conn.inserts())
+	}
+
+	row.Name = "Ada"
+	saved, err := row.Save(context.Background(), auth.SystemGrant("write", "acme"))
+	if err != nil {
+		t.Fatalf("Save on a made row: %v", err)
+	}
+	if !saved {
+		t.Error("Save on a made row reported that it wrote nothing")
+	}
+	if conn.inserts() != 1 {
+		t.Errorf("Save ran %d inserts, want 1", conn.inserts())
+	}
+}
+
+// TestACreatedRowComesBackWired: what Create returns has to be savable again,
+// for the same reason -- the caller has one row and changes it.
+func TestACreatedRowComesBackWired(t *testing.T) {
+	conn := newRecordingConnection()
+
+	row, err := memberFactory(conn).CreateOne(context.Background(), auth.SystemGrant("write", "acme"))
+	if err != nil {
+		t.Fatalf("CreateOne: %v", err)
+	}
+	if model.ModelOf(row) == nil {
+		t.Fatal("a created row does not carry the model it embeds")
+	}
+	if conn.inserts() != 1 {
+		t.Fatalf("CreateOne ran %d inserts, want 1", conn.inserts())
+	}
+
+	row.Name = "Grace"
+	if _, err := row.Save(context.Background(), auth.SystemGrant("write", "acme")); err != nil {
+		t.Fatalf("Save on a created row: %v", err)
 	}
 }
 

@@ -87,22 +87,63 @@ func TestHydrationWiresEveryRow(t *testing.T) {
 	}
 
 	for i, row := range rows {
-		entity := row.Entity
-		if entity == nil {
-			t.Fatalf("row %d hydrated with no entity", i)
+		if row == nil {
+			t.Fatalf("row %d hydrated as nothing", i)
 		}
-		if inside := modelIn(entity, embeddedIndex[account]()); inside != row {
-			t.Errorf("row %d is not the model embedded in its entity", i)
+		// What Get hands back is the row, and the row is the model: the model
+		// inside it has to be the one the framework filled, and its Entity has to
+		// point back at the row rather than at a second allocation.
+		inside := modelIn(row, embeddedIndex[account]())
+		if inside == nil || inside.Entity != row {
+			t.Errorf("row %d is not the model embedded in itself", i)
 		}
-		if entity.GetTable() != "accounts" {
-			t.Errorf("row %d reached the entity without its configuration", i)
+		if row.GetTable() != "accounts" {
+			t.Errorf("row %d reached the caller without its configuration", i)
 		}
-		if !entity.Exists {
+		if !row.Exists {
 			t.Errorf("row %d came back from the database and does not say it exists", i)
 		}
 	}
-	if rows[0].Entity.Name != "Ada" || rows[1].Entity.Name != "Grace" {
-		t.Errorf("the rows hydrated as %q and %q", rows[0].Entity.Name, rows[1].Entity.Name)
+	if rows[0].Name != "Ada" || rows[1].Name != "Grace" {
+		t.Errorf("the rows hydrated as %q and %q", rows[0].Name, rows[1].Name)
+	}
+}
+
+// TestAnEagerLoadIsReachableFromTheRowATerminalHandedBack.
+//
+// The eager load attaches what it matched to the model, and a terminal hands
+// back the row. For the entity that embeds its model the two are one value, so
+// the relation is reachable from what the caller holds -- which is the whole of
+// what the embedding buys on this side.
+func TestAnEagerLoadIsReachableFromTheRowATerminalHandedBack(t *testing.T) {
+	model, conn := newAccountModel()
+	child, _ := newAccountModel()
+	loaded, err := child.NewFromBuilder(map[string]any{"id": int64(9), "name": "child"})
+	if err != nil {
+		t.Fatalf("NewFromBuilder: %v", err)
+	}
+	withPostsOn(model, &fakeRelation{
+		table: "posts", foreign: "posts.account_id", local: "accounts.id",
+		matched: map[any]any{int64(1): Collection[account]{loaded.Entity}},
+	})
+	conn.queue(query.Record{"id": int64(1), "name": "Ada", "tenant_id": "t-1"})
+
+	rows, err := model.NewQuery().With("posts").Get(context.Background(), grantForTenant("t-1"))
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	posts, ok := Related[account, account](rows[0], "posts")
+	if !ok {
+		t.Fatal("the eager load is not reachable from the row the terminal returned")
+	}
+	if len(posts) != 1 || posts[0].ID != 9 {
+		t.Fatalf("posts = %v, want the one row the relation matched", posts)
+	}
+
+	// And the lazy half, which is the same reach through a promoted method.
+	if err := rows[0].Load(context.Background(), grantForTenant("t-1"), "posts"); err != nil {
+		t.Fatalf("Load on the row: %v", err)
 	}
 }
 

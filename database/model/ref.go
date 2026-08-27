@@ -273,12 +273,12 @@ func (r *builderRef[T]) Clone() concerns.Builder           { return r.b.Clone().
 func asRef[T any](m *Model[T]) concerns.Model { return m.Ref() }
 
 func (r *builderRef[T]) Get(ctx context.Context, g auth.Grant) ([]concerns.Model, error) {
-	models, err := r.b.Get(ctx, g)
+	found, err := r.b.get(ctx, g)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]concerns.Model, 0, len(models))
-	for _, m := range models {
+	out := make([]concerns.Model, 0, len(found))
+	for _, m := range found {
 		out = append(out, m.Ref())
 	}
 	return out, nil
@@ -287,7 +287,7 @@ func (r *builderRef[T]) Get(ctx context.Context, g auth.Grant) ([]concerns.Model
 // First answers (nil, nil) for a miss, as the interface says: ErrModelNotFound
 // belongs to FirstOrFail, which is a different question.
 func (r *builderRef[T]) First(ctx context.Context, g auth.Grant) (concerns.Model, error) {
-	found, err := r.b.First(ctx, g)
+	found, err := r.b.first(ctx, g)
 	if err != nil || found == nil {
 		return nil, err
 	}
@@ -295,7 +295,7 @@ func (r *builderRef[T]) First(ctx context.Context, g auth.Grant) (concerns.Model
 }
 
 func (r *builderRef[T]) Find(ctx context.Context, g auth.Grant, id any) (concerns.Model, error) {
-	found, err := r.b.Find(ctx, g, id)
+	found, err := r.b.find(ctx, g, id)
 	if err != nil || found == nil {
 		return nil, err
 	}
@@ -309,7 +309,7 @@ func (r *builderRef[T]) Cursor(ctx context.Context, g auth.Grant) iter.Seq2[conc
 		// then. A stream that fails halfway has already handed out rows, which
 		// is why the interface carries the error beside the value at all.
 		var failure error
-		for m := range r.b.Cursor(ctx, g, &failure) {
+		for m := range r.b.cursor(ctx, g, &failure) {
 			if !yield(m.Ref(), nil) {
 				return
 			}

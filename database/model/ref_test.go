@@ -75,25 +75,29 @@ func TestUnrefGivesTheTypeBack(t *testing.T) {
 
 // TestRelatedReadsBackWhatARelationLoaded covers the one call that is the whole
 // price of the seam: a relation loads erased models, and this is the way back.
+//
+// It is written over the entity that embeds its model, because that is the row
+// the read starts from: a plain row has no way back to the model the relation
+// was attached to.
 func TestRelatedReadsBackWhatARelationLoaded(t *testing.T) {
-	parent, _ := newUserModel()
-	first, _ := newUserModel()
-	second, _ := newUserModel()
+	parent, _ := newAccountModel()
+	first, _ := newAccountModel()
+	second, _ := newAccountModel()
 	first.Entity.Name = "Ada"
 	second.Entity.Name = "Grace"
 
 	// Stored the way a relation stores it: the narrow interface, not the type.
 	parent.SetRelation("friends", []concerns.Model{first.Ref(), second.Ref()})
 
-	friends, ok := Related[user, user](parent, "friends")
+	friends, ok := Related[account, account](parent.Entity, "friends")
 	if !ok {
 		t.Fatal("Related did not read back what the relation loaded")
 	}
-	if len(friends) != 2 || friends[0].Entity.Name != "Ada" || friends[1].Entity.Name != "Grace" {
+	if len(friends) != 2 || friends[0].Name != "Ada" || friends[1].Name != "Grace" {
 		t.Fatalf("friends = %v, want the two models in order", friends)
 	}
 
-	if _, ok := Related[user, user](parent, "nothing"); ok {
+	if _, ok := Related[account, account](parent.Entity, "nothing"); ok {
 		t.Error("Related claimed a relation nobody loaded")
 	}
 }

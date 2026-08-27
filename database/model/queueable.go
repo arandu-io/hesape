@@ -76,8 +76,9 @@ func (c Collection[T]) GetQueueableIDs() []any {
 	if c.IsEmpty() {
 		return []any{}
 	}
-	out := make([]any, 0, len(c))
-	for _, model := range c {
+	found := c.models()
+	out := make([]any, 0, len(found))
+	for _, model := range found {
 		out = append(out, model.GetQueueableID())
 	}
 	return out
@@ -92,8 +93,12 @@ func (c Collection[T]) GetQueueableRelations() []string {
 	if c.IsEmpty() {
 		return []string{}
 	}
-	shared := c.First().GetQueueableRelations()
-	for _, model := range c[1:] {
+	found := c.models()
+	if len(found) == 0 {
+		return []string{}
+	}
+	shared := found[0].GetQueueableRelations()
+	for _, model := range found[1:] {
 		relations := model.GetQueueableRelations()
 		shared = slices.DeleteFunc(shared, func(name string) bool {
 			return !slices.Contains(relations, name)
@@ -109,8 +114,12 @@ func (c Collection[T]) GetQueueableConnection() (string, error) {
 	if c.IsEmpty() {
 		return "", nil
 	}
-	connection := c.First().GetConnectionName()
-	for _, model := range c {
+	found := c.models()
+	if len(found) == 0 {
+		return "", nil
+	}
+	connection := found[0].GetConnectionName()
+	for _, model := range found {
 		if model.GetConnectionName() != connection {
 			return "", ErrMixedQueueableConnections
 		}

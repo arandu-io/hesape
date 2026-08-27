@@ -29,9 +29,10 @@ type Model[T any] struct {
 	// type of infinite size, and Go refuses it by name: "invalid recursive
 	// type". A pointer makes the same shape finite.
 	//
-	// Reading through it costs nothing at the call site -- found.Entity.Name is
-	// the same expression it was -- and the model always has one: NewInstance
-	// allocates it, so it is never nil on a model this package built.
+	// It is what a terminal hands back, and for a T that embeds Model[T] it
+	// points at the value this model is inside of: the two are one allocation
+	// seen from two sides. The model always has one -- NewModel and NewInstance
+	// both allocate it -- so it is never nil on a model this package built.
 	Entity *T
 
 	// Table is the table name. Empty means the snake-cased plural of the type
@@ -145,8 +146,16 @@ type Model[T any] struct {
 // created_at / updated_at / deleted_at. TenantColumn starts at tenant_id: there
 // is no default that leaves the scoping off.
 func NewModel[T any](table string, connection query.Connection, grammar query.Grammar, processor query.Processor) *Model[T] {
-	return &Model[T]{
-		Entity:          new(T),
+	// Entity first, and the model from inside it when T embeds one, for the
+	// reason NewInstance does the same: a model whose Entity is a second
+	// allocation is a value where m.Entity.Save() and m.Save() write different
+	// rows. Allocating the T and then pointing at it is what makes them one.
+	entity, model := newEntity[T]()
+	if model == nil {
+		model = &Model[T]{}
+	}
+	*model = Model[T]{
+		Entity:          entity,
 		Table:           table,
 		PrimaryKey:      "id",
 		KeyType:         "int",
@@ -161,6 +170,7 @@ func NewModel[T any](table string, connection query.Connection, grammar query.Gr
 		Grammar:         grammar,
 		Processor:       processor,
 	}
+	return model
 }
 
 // Fill writes the columns the entity declares and drops the keys it does not
@@ -581,12 +591,12 @@ func (m *Model[T]) Destroy(ctx context.Context, g auth.Grant, ids ...any) (int, 
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	models, err := m.NewQuery().WhereKey(ids).Get(ctx, g)
+	found, err := m.NewQuery().WhereKey(ids).get(ctx, g)
 	if err != nil {
 		return 0, err
 	}
 	count := 0
-	for _, model := range models {
+	for _, model := range found {
 		deleted, err := model.Delete(ctx, g)
 		if err != nil {
 			return count, err
@@ -602,7 +612,7 @@ func (m *Model[T]) Destroy(ctx context.Context, g auth.Grant, ids ...any) (int, 
 //
 // It queries without the global scopes, which is what makes it able to find a
 // row that has since been soft deleted.
-func (m *Model[T]) Fresh(ctx context.Context, g auth.Grant, with ...string) (*Model[T], error) {
+func (m *Model[T]) Fresh(ctx context.Context, g auth.Grant, with ...string) (*T, error) {
 	if !m.Exists {
 		return nil, nil
 	}
@@ -626,7 +636,7 @@ func (m *Model[T]) Refresh(ctx context.Context, g auth.Grant) error {
 	}
 	q := m.NewQueryWithoutScopes()
 	m.setKeysForSelectQuery(q)
-	fresh, err := q.FirstOrFail(ctx, g)
+	fresh, err := q.firstOrFail(ctx, g)
 	if err != nil {
 		return err
 	}
@@ -650,7 +660,16 @@ func (m *Model[T]) setKeysForSelectQuery(b *Builder[T]) *Builder[T] {
 // Replicate returns the same row as a new, unsaved model.
 //
 // The key, the timestamps and anything named in except are left out.
-func (m *Model[T]) Replicate(except ...string) (*Model[T], error) {
+func (m *Model[T]) Replicate(except ...string) (*T, error) {
+	instance, err := m.replicate(except...)
+	if err != nil {
+		return nil, err
+	}
+	return instance.Entity, nil
+}
+
+// replicate is Replicate with the model still in hand. See Builder.get.
+func (m *Model[T]) replicate(except ...string) (*Model[T], error) {
 	defaults := []string{m.GetKeyName(), m.GetCreatedAtColumn(), m.GetUpdatedAtColumn()}
 	drop := append(slices.Clone(except), defaults...)
 
@@ -676,47 +695,57 @@ func (m *Model[T]) Replicate(except ...string) (*Model[T], error) {
 }
 
 // ReplicateQuietly replicates the model without firing model events.
-func (m *Model[T]) ReplicateQuietly(except ...string) (copied *Model[T], err error) {
+func (m *Model[T]) ReplicateQuietly(except ...string) (copied *T, err error) {
 	return copied, m.WithoutEvents(func() error {
 		copied, err = m.Replicate(except...)
 		return err
 	})
 }
 
-// Is reports whether other is the same key, on the same table, on the same
-// connection.
-func (m *Model[T]) Is(other *Model[T]) bool {
+// Is reports whether other is the same row: the same key, on the same table, on
+// the same connection.
+//
+// It takes the row, which is what a terminal hands back, and what it can answer
+// depends on the shape of T. A T that embeds Model[T] carries its model inside
+// itself, so a.Is(b) on two rows reaches the key and the table on both. A T that
+// does not has no field pointing back at a model, and this answers false: a
+// table and a connection are not columns, so a plain row does not carry them.
+func (m *Model[T]) Is(other *T) bool { return m.is(ModelOf(other)) }
+
+// IsNot reports the opposite of Is.
+func (m *Model[T]) IsNot(other *T) bool { return !m.Is(other) }
+
+// is is Is with the model still in hand, which is what the package holds when it
+// compares rows to each other.
+func (m *Model[T]) is(other *Model[T]) bool {
 	return other != nil &&
 		reflect.DeepEqual(m.GetKey(), other.GetKey()) &&
 		m.GetTable() == other.GetTable() &&
 		m.GetConnectionName() == other.GetConnectionName()
 }
 
-// IsNot reports the opposite of Is.
-func (m *Model[T]) IsNot(other *Model[T]) bool { return !m.Is(other) }
-
 // Load eager loads these relations onto this model.
 func (m *Model[T]) Load(ctx context.Context, g auth.Grant, relations ...string) error {
 	if len(relations) == 0 {
 		return nil
 	}
-	return m.NewQueryWithoutRelationships().With(relations...).EagerLoadRelations(ctx, g, Collection[T]{m})
+	return m.NewQueryWithoutRelationships().With(relations...).eagerLoadRelations(ctx, g, models[T]{m})
 }
 
 // LoadMissing eager loads these relations onto this model, skipping the ones
 // already loaded.
 func (m *Model[T]) LoadMissing(ctx context.Context, g auth.Grant, relations ...string) error {
-	return Collection[T]{m}.LoadMissing(ctx, g, relations...)
+	return models[T]{m}.LoadMissing(ctx, g, relations...)
 }
 
 // LoadCount loads the count of each relation onto this model.
 func (m *Model[T]) LoadCount(ctx context.Context, g auth.Grant, relations ...string) error {
-	return Collection[T]{m}.LoadCount(ctx, g, relations...)
+	return models[T]{m}.LoadCount(ctx, g, relations...)
 }
 
 // LoadAggregate loads function over column of each relation onto this model.
 func (m *Model[T]) LoadAggregate(ctx context.Context, g auth.Grant, relations []string, column, function string) error {
-	return Collection[T]{m}.LoadAggregate(ctx, g, relations, column, function)
+	return models[T]{m}.LoadAggregate(ctx, g, relations, column, function)
 }
 
 // GetRelation returns the value loaded for a relation, and whether it was
@@ -777,7 +806,7 @@ func (m *Model[T]) UnsetRelations() *Model[T] {
 }
 
 // WithoutRelations returns the same row, with nothing loaded hanging off it.
-func (m *Model[T]) WithoutRelations() (*Model[T], error) {
+func (m *Model[T]) WithoutRelations() (*T, error) {
 	instance, err := m.NewInstance(nil, m.Exists)
 	if err != nil {
 		return nil, err
@@ -786,16 +815,29 @@ func (m *Model[T]) WithoutRelations() (*Model[T], error) {
 		return nil, err
 	}
 	instance.original = copyMap(m.original)
-	return instance, nil
+	return instance.Entity, nil
 }
 
-// Related reads a loaded relation as the type it was loaded as.
+// Related reads a loaded relation off the row, as the type it was loaded as.
 //
-// The relation was loaded as models of another type, which Go cannot spell
-// as a field, so the read is a generic function rather than a method. It
-// reports false when the relation was not loaded, or was loaded as
-// something else.
-func Related[T, R any](m *Model[T], name string) (Collection[R], bool) {
+// The relation was loaded as rows of another type, which Go cannot spell as a
+// field, so the read is a generic function rather than a method:
+//
+//	posts, ok := model.Related[User, Post](user, "posts")
+//
+// It reports false when the relation was not loaded, when it was loaded as
+// something else, and when the row carries no model to read it off.
+//
+// That last one is the shape of T. A T that embeds Model[T] carries its model
+// inside itself, so the relation an eager load attached is on the row this takes.
+// A T that does not has no field pointing back: the relation is on a model
+// beside the row, which no terminal hands back, so there is nothing here to read
+// and the answer is false rather than a dereference of nothing.
+func Related[T, R any](row *T, name string) (Collection[R], bool) {
+	m := ModelOf(row)
+	if m == nil {
+		return nil, false
+	}
 	value, ok := m.GetRelation(name)
 	if !ok {
 		return nil, false
@@ -804,7 +846,7 @@ func Related[T, R any](m *Model[T], name string) (Collection[R], bool) {
 	case Collection[R]:
 		return typed, true
 	case *Model[R]:
-		return Collection[R]{typed}, true
+		return Collection[R]{typed.Entity}, true
 
 	// What a relation loads is erased -- the relations tree holds the narrow
 	// interface, not the typed model -- so the way back is through the adapter.
@@ -816,7 +858,7 @@ func Related[T, R any](m *Model[T], name string) (Collection[R], bool) {
 			if !ok {
 				return nil, false
 			}
-			out = append(out, model)
+			out = append(out, model.Entity)
 		}
 		return out, true
 	case concerns.Model:
@@ -824,7 +866,7 @@ func Related[T, R any](m *Model[T], name string) (Collection[R], bool) {
 		if !ok {
 			return nil, false
 		}
-		return Collection[R]{model}, true
+		return Collection[R]{model.Entity}, true
 	}
 	return nil, false
 }

@@ -13,7 +13,7 @@ import (
 // what makes Find skip a soft deleted row.
 
 // Find calls Find on a fresh query for the model.
-func (m *Model[T]) Find(ctx context.Context, g auth.Grant, id any, columns ...any) (*Model[T], error) {
+func (m *Model[T]) Find(ctx context.Context, g auth.Grant, id any, columns ...any) (*T, error) {
 	return m.NewQuery().Find(ctx, g, id, columns...)
 }
 
@@ -23,42 +23,42 @@ func (m *Model[T]) FindMany(ctx context.Context, g auth.Grant, ids []any, column
 }
 
 // FindOrFail calls FindOrFail on a fresh query for the model.
-func (m *Model[T]) FindOrFail(ctx context.Context, g auth.Grant, id any, columns ...any) (*Model[T], error) {
+func (m *Model[T]) FindOrFail(ctx context.Context, g auth.Grant, id any, columns ...any) (*T, error) {
 	return m.NewQuery().FindOrFail(ctx, g, id, columns...)
 }
 
 // FindOrNew calls FindOrNew on a fresh query for the model.
-func (m *Model[T]) FindOrNew(ctx context.Context, g auth.Grant, id any, columns ...any) (*Model[T], error) {
+func (m *Model[T]) FindOrNew(ctx context.Context, g auth.Grant, id any, columns ...any) (*T, error) {
 	return m.NewQuery().FindOrNew(ctx, g, id, columns...)
 }
 
 // First calls First on a fresh query for the model.
-func (m *Model[T]) First(ctx context.Context, g auth.Grant, columns ...any) (*Model[T], error) {
+func (m *Model[T]) First(ctx context.Context, g auth.Grant, columns ...any) (*T, error) {
 	return m.NewQuery().First(ctx, g, columns...)
 }
 
 // FirstOrNew calls FirstOrNew on a fresh query for the model.
-func (m *Model[T]) FirstOrNew(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+func (m *Model[T]) FirstOrNew(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*T, error) {
 	return m.NewQuery().FirstOrNew(ctx, g, attributes, values)
 }
 
 // FirstOrCreate calls FirstOrCreate on a fresh query for the model.
-func (m *Model[T]) FirstOrCreate(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+func (m *Model[T]) FirstOrCreate(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*T, error) {
 	return m.NewQuery().FirstOrCreate(ctx, g, attributes, values)
 }
 
 // UpdateOrCreate calls UpdateOrCreate on a fresh query for the model.
-func (m *Model[T]) UpdateOrCreate(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+func (m *Model[T]) UpdateOrCreate(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*T, error) {
 	return m.NewQuery().UpdateOrCreate(ctx, g, attributes, values)
 }
 
 // Create calls Create on a fresh query for the model.
-func (m *Model[T]) Create(ctx context.Context, g auth.Grant, attributes map[string]any) (*Model[T], error) {
+func (m *Model[T]) Create(ctx context.Context, g auth.Grant, attributes map[string]any) (*T, error) {
 	return m.NewQuery().Create(ctx, g, attributes)
 }
 
 // ForceCreate calls ForceCreate on a fresh query for the model.
-func (m *Model[T]) ForceCreate(ctx context.Context, g auth.Grant, attributes map[string]any) (*Model[T], error) {
+func (m *Model[T]) ForceCreate(ctx context.Context, g auth.Grant, attributes map[string]any) (*T, error) {
 	return m.NewQuery().ForceCreate(ctx, g, attributes)
 }
 

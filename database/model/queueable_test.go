@@ -7,7 +7,7 @@ import (
 )
 
 func TestModelQueueableIDAndConnection(t *testing.T) {
-	model, _ := newUserModel()
+	model, _ := newAccountModel()
 	model.Entity.ID = 7
 	model.SetConnection("reporting", nil)
 
@@ -20,9 +20,9 @@ func TestModelQueueableIDAndConnection(t *testing.T) {
 }
 
 func TestModelQueueableRelationsSkipsWhatIsNotDeclared(t *testing.T) {
-	model, _ := newUserModel()
-	model.RelationResolvers = map[string]func(*Model[user]) Relation{"posts": nil}
-	model.SetRelation("posts", Collection[user]{})
+	model, _ := newAccountModel()
+	model.RelationResolvers = map[string]func(*Model[account]) Relation{"posts": nil}
+	model.SetRelation("posts", Collection[account]{})
 	model.SetRelation("stray", "not a relation")
 
 	if got := model.GetQueueableRelations(); !reflect.DeepEqual(got, []string{"posts"}) {
@@ -31,13 +31,13 @@ func TestModelQueueableRelationsSkipsWhatIsNotDeclared(t *testing.T) {
 }
 
 func TestModelQueueableRelationsNestsWithADot(t *testing.T) {
-	model, _ := newUserModel()
-	model.RelationResolvers = map[string]func(*Model[user]) Relation{"posts": nil}
+	model, _ := newAccountModel()
+	model.RelationResolvers = map[string]func(*Model[account]) Relation{"posts": nil}
 
-	child, _ := newUserModel()
-	child.RelationResolvers = map[string]func(*Model[user]) Relation{"comments": nil}
-	child.SetRelation("comments", Collection[user]{})
-	model.SetRelation("posts", Collection[user]{child})
+	child, _ := newAccountModel()
+	child.RelationResolvers = map[string]func(*Model[account]) Relation{"comments": nil}
+	child.SetRelation("comments", Collection[account]{})
+	model.SetRelation("posts", Collection[account]{child.Entity})
 
 	want := []string{"posts", "posts.comments"}
 	if got := model.GetQueueableRelations(); !reflect.DeepEqual(got, want) {
@@ -46,52 +46,52 @@ func TestModelQueueableRelationsNestsWithADot(t *testing.T) {
 }
 
 func TestCollectionQueueableClassAndIDs(t *testing.T) {
-	first, _ := newUserModel()
+	first, _ := newAccountModel()
 	first.Entity.ID = 1
-	second, _ := newUserModel()
+	second, _ := newAccountModel()
 	second.Entity.ID = 2
-	c := Collection[user]{first, second}
+	c := Collection[account]{first.Entity, second.Entity}
 
-	if got := c.GetQueueableClass(); got != "user" {
-		t.Errorf("GetQueueableClass = %q, want user: a Collection[T] holds one type and that type is the class", got)
+	if got := c.GetQueueableClass(); got != "account" {
+		t.Errorf("GetQueueableClass = %q, want account: a Collection[T] holds one type and that type is the class", got)
 	}
 	if got := c.GetQueueableIDs(); !reflect.DeepEqual(got, []any{int64(1), int64(2)}) {
 		t.Errorf("GetQueueableIDs = %v, want [1 2]", got)
 	}
-	if got := (Collection[user]{}).GetQueueableClass(); got != "" {
+	if got := (Collection[account]{}).GetQueueableClass(); got != "" {
 		t.Errorf("GetQueueableClass on an empty collection = %q, want the empty string", got)
 	}
 }
 
 func TestCollectionQueueableRelationsIsTheIntersection(t *testing.T) {
-	resolvers := map[string]func(*Model[user]) Relation{"posts": nil, "roles": nil}
+	resolvers := map[string]func(*Model[account]) Relation{"posts": nil, "roles": nil}
 
-	first, _ := newUserModel()
+	first, _ := newAccountModel()
 	first.RelationResolvers = resolvers
-	first.SetRelation("posts", Collection[user]{})
-	first.SetRelation("roles", Collection[user]{})
+	first.SetRelation("posts", Collection[account]{})
+	first.SetRelation("roles", Collection[account]{})
 
-	second, _ := newUserModel()
+	second, _ := newAccountModel()
 	second.RelationResolvers = resolvers
-	second.SetRelation("posts", Collection[user]{})
+	second.SetRelation("posts", Collection[account]{})
 
-	got := Collection[user]{first, second}.GetQueueableRelations()
+	got := Collection[account]{first.Entity, second.Entity}.GetQueueableRelations()
 	if !reflect.DeepEqual(got, []string{"posts"}) {
 		t.Errorf("GetQueueableRelations = %v, want [posts]: a relation loaded on one row only cannot be restored for the collection", got)
 	}
 }
 
 func TestCollectionQueueableConnectionRefusesAMix(t *testing.T) {
-	first, _ := newUserModel()
+	first, _ := newAccountModel()
 	first.SetConnection("primary", nil)
-	second, _ := newUserModel()
+	second, _ := newAccountModel()
 	second.SetConnection("reporting", nil)
 
-	if _, err := (Collection[user]{first, second}).GetQueueableConnection(); !errors.Is(err, ErrMixedQueueableConnections) {
+	if _, err := (Collection[account]{first.Entity, second.Entity}).GetQueueableConnection(); !errors.Is(err, ErrMixedQueueableConnections) {
 		t.Fatalf("error = %v, want ErrMixedQueueableConnections: the PHP throws a LogicException here", err)
 	}
 
-	got, err := (Collection[user]{first}).GetQueueableConnection()
+	got, err := (Collection[account]{first.Entity}).GetQueueableConnection()
 	if err != nil || got != "primary" {
 		t.Errorf("GetQueueableConnection = %q, %v, want primary and no error", got, err)
 	}

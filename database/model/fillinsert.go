@@ -83,7 +83,7 @@ func (b *Builder[T]) InsertOrIgnore(ctx context.Context, g auth.Grant, values ..
 
 // IncrementOrCreate returns the row matching attributes with column set to
 // def, or increments column by step on the row that was already there.
-func (b *Builder[T]) IncrementOrCreate(ctx context.Context, g auth.Grant, attributes map[string]any, column string, def, step any) (*Model[T], error) {
+func (b *Builder[T]) IncrementOrCreate(ctx context.Context, g auth.Grant, attributes map[string]any, column string, def, step any) (*T, error) {
 	if column == "" {
 		column = "count"
 	}
@@ -94,12 +94,12 @@ func (b *Builder[T]) IncrementOrCreate(ctx context.Context, g auth.Grant, attrib
 		step = 1
 	}
 
-	instance, err := b.FirstOrCreate(ctx, g, attributes, map[string]any{column: def})
+	instance, err := b.firstOrCreate(ctx, g, attributes, map[string]any{column: def})
 	if err != nil {
 		return nil, err
 	}
 	if instance.WasRecentlyCreated {
-		return instance, nil
+		return b.result(instance), nil
 	}
 
 	q := instance.NewModelQuery()
@@ -107,7 +107,7 @@ func (b *Builder[T]) IncrementOrCreate(ctx context.Context, g auth.Grant, attrib
 	if _, err := q.Increment(ctx, g, column, step, nil); err != nil {
 		return nil, err
 	}
-	return instance, instance.Refresh(ctx, g)
+	return b.result(instance), instance.Refresh(ctx, g)
 }
 
 // UseWritePDO points this builder's statement at the write connection, even

@@ -14,10 +14,22 @@
 //
 // # It is typed, and that is the difference worth naming
 //
-// The definition returns a T. A state takes a *T. What comes back is a T. A
-// column the entity does not declare does not compile, where the same mistake
-// against a map of strings is a key that is silently dropped and a row that is
-// quietly wrong.
+// The definition returns a T. A state takes a *T. What comes back is the row --
+// a *T, the same value a query terminal hands back. A column the entity does not
+// declare does not compile, where the same mistake against a map of strings is a
+// key that is silently dropped and a row that is quietly wrong.
+//
+// The row is built through the model, made and created alike, which is what lets
+// an entity that embeds model.Model[T] be saved after it was made:
+//
+//	user, err := users.MakeOne()
+//	user.Name = "Ada"
+//	_, err = user.Save(ctx, g)
+//
+// A definition answers a T, and a T that embeds the model carries a zero one in
+// it -- so building the row and then assigning the definition over it would
+// leave the model with no connection to save through. What comes back here has
+// its model, and Create stores exactly the rows Make would have handed over.
 //
 // This package used to hold the other shape -- a factory over map[string]any,
 // with relationships resolved by a runtime type switch over a caller-supplied

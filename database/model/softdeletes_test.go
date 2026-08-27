@@ -224,7 +224,9 @@ func TestSoftDeletedRowsAreStillReadableWithTrashed(t *testing.T) {
 	deletedAt := time.Now()
 	conn.queue(query.Record{"id": int64(7), "deleted_at": deletedAt})
 
-	models, err := model.NewQuery().WithTrashed().Get(context.Background(), grant())
+	// The model-side read: whether a row is trashed is the model's answer, and
+	// this entity does not embed one.
+	models, err := model.NewQuery().WithTrashed().get(context.Background(), grant())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}

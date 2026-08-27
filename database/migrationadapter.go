@@ -41,33 +41,23 @@ func (m migrationConnection) Schema() *schema.Builder {
 	return schema.NewBuilder(ForSchema(m.Connection))
 }
 
-// Statement satisfies migrations.Connection.Statement: it rebinds the
-// placeholders and runs the statement.
-func (m migrationConnection) Statement(ctx context.Context, query string, bindings []any) (bool, error) {
-	return m.Connection.Statement(ctx, m.rebind(query), bindings)
-}
-
-// Select satisfies migrations.Connection.Select: it rebinds the placeholders
-// and runs the query on the write pool.
-func (m migrationConnection) Select(ctx context.Context, query string, bindings []any) ([]map[string]any, error) {
-	return m.Connection.Select(ctx, m.rebind(query), bindings, false)
-}
-
-// rebind translates the portable "?" into what the driver expects.
+// Statement satisfies migrations.Connection.Statement.
 //
-// The migrations component writes "?" like everything else in this framework,
-// and PostgreSQL wants "$1". The translation is here rather than there because
-// there is where the driver is not known: the component talks to an interface
-// of three methods and would have to be told which engine it is on to do this
-// itself. A statement with no "?" comes back untouched, which is every schema
-// change; the ones with bindings are the repository's own inserts and the
-// backfill a migration writes by hand.
-func (m migrationConnection) rebind(query string) string {
-	dialect, err := ParseDialect(m.GetDriverName())
-	if err != nil {
-		return query
-	}
-	return dialect.Rebind(query)
+// The migrations component writes its placeholders as "?", like everything
+// else in this framework, and PostgreSQL wants "$1". The translation used to
+// happen here, because this was the first side of the pair that knew which
+// engine it was talking to. It now happens on the connection, for every
+// statement rather than only the migrator's -- so this method is the call it
+// forwards and nothing else.
+func (m migrationConnection) Statement(ctx context.Context, query string, bindings []any) (bool, error) {
+	return m.Connection.Statement(ctx, query, bindings)
+}
+
+// Select satisfies migrations.Connection.Select: it runs the query on the
+// write pool, because a migration that read from a replica would be reading a
+// schema the replica has not been told about yet.
+func (m migrationConnection) Select(ctx context.Context, query string, bindings []any) ([]map[string]any, error) {
+	return m.Connection.Select(ctx, query, bindings, false)
 }
 
 // SupportsSchemaTransactions satisfies

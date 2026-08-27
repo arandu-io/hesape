@@ -44,6 +44,21 @@ var ErrNoKey = errors.New("model: no primary key defined on model")
 // is no model to take the table from.
 var ErrEmptyCollection = errors.New("model: unable to create query for empty collection")
 
+// ErrRowHasNoModel is what a relation load reports when the rows it was handed
+// carry no model to attach anything to.
+//
+// A relation is attached to the model behind a row, and a row reaches its model
+// only when T embeds Model[T]: a plain struct has no field to point back with,
+// and a struct written as a literal has a zero model inside it. Loading onto
+// either would run the query, match the rows and attach the result to nothing,
+// so it says so instead -- a silent success here is a relation the next line
+// reads and does not find.
+//
+// It is wrapped with how many of the rows were unreachable, because one literal
+// in a collection of hydrated rows and a collection that is entirely the plain
+// shape are different mistakes.
+var ErrRowHasNoModel = errors.New("model: these rows carry no model to load a relation onto (embed Model[T] in the entity, or read the rows back through a query)")
+
 // ErrRelationNotFound is returned when a query names a relation the model never
 // registered: an eager load of "author" on a model that declares no author, a
 // nested path whose second segment does not exist on the model the first
