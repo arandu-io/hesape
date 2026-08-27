@@ -475,6 +475,59 @@ h.HandleException(w, r, err)
 `HandleException` returns what the handler stack answered, which the removed
 method discarded. Panics keep going through `Recover`, unchanged.
 
+### The seeder call runner is removed; `database.Seed` is the one
+
+```
+- ./database.Call: removed
+- ./database.CallWith: removed
+- ./database.CallSilent: removed
+- ./database.CallOnce: removed
+- ./database.CalledSeeders: removed
+- ./database.ForgetCalledSeeders: removed
+```
+
+Six functions for running a seeder by name, none of them called outside their own
+test. `CallSilent` said so in its own doc comment — it was `Call`, forwarding to
+it unchanged, because nothing in this package writes to a console and there was
+no output to suppress.
+
+A seeder that runs other seeders names them as values, which is what every
+application already writes and what `aru make:seeder` prints:
+
+```go
+// before
+func (DatabaseSeeder) Run(ctx context.Context, d Deps) error {
+	_, err := database.Call(ctx, registry, d, "AdminSeeder", "PostSeeder")
+	return err
+}
+
+// after
+func (DatabaseSeeder) Run(ctx context.Context, d Deps) error {
+	for _, seeder := range []Seeder{AdminSeeder{}, PostSeeder{}} {
+		if err := seeder.Run(ctx, d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+```
+
+The second form is checked by the compiler. The first resolved a string against a
+registry and reported an unknown name at run time, against a database that was
+usually already half seeded.
+
+**No idempotency guarantee is lost with `CallOnce`, because it never held one.**
+The list it read was written only by `Call`, so in a process that reached seeders
+through `database.Seed` — every one of them — the list was empty and `CallOnce`
+ran everything. It was also per process, which is the wrong grain for the case it
+named: two `aru db:seed` invocations are two processes, and the second one
+remembered nothing. The guarantee is where it always was, on the interface:
+`Seeder.Run` must be safe to run twice, and `aru make:seeder` writes that line
+into every seeder it prints.
+
+`database.Seed`, `database.Seeder`, `database.Flag` and `database.Switch` are
+unchanged.
+
 ## Unreleased — the unsigned verification link is gone
 
 ```
