@@ -10,7 +10,10 @@ network = true
 # The local filesystem driver, the file cache, the view compiler and
 # workbench's scaffolder all write to disk.
 filesystem = true
-# process wraps os/exec; the queue listener and the scheduler both drive it.
+# process wraps os/exec, and it is the only package here that imports it. The
+# schema states, the queue listener, the scheduler and workbench all run their
+# programs through it, so a program is a name and a list of arguments and no
+# command line is ever handed to a shell.
 exec = true
 # database/migrations owns the tracking table, plus every table folded in from
 # the four adapter repositories by ADR 0048.
