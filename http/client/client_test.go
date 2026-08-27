@@ -1091,6 +1091,100 @@ func TestANilContextIsRefused(t *testing.T) {
 	assertEqual(t, int(sent.Load()), 0, "requests that left")
 }
 
+// --- Retry and the methods that may be repeated ---
+
+// TestARetriedPostIsSentOnceAndARetriedGetIsRepeated is the filter at the size
+// it matters: the same Retry, the same failure, and two methods. A repeated
+// POST is a second write, and the failure that provokes the repeat is exactly
+// the case where the first one may already have been applied.
+func TestARetriedPostIsSentOnceAndARetriedGetIsRepeated(t *testing.T) {
+	var sent atomic.Int32
+	f := NewFactory(nil)
+	f.Fake(failingStub(&sent))
+
+	post := f.CreatePendingRequest().Retry(3, time.Millisecond, nil, false)
+	resp, err := post.Post(t.Context(), "https://example.test/orders", map[string]any{"amount": 10})
+	assertNoErr(t, err, "throw is off, so the failed response comes back")
+	assertEqual(t, resp.Status(), 500, "status")
+	assertEqual(t, int(sent.Load()), 1, "a POST is sent once")
+
+	sent.Store(0)
+	get := f.CreatePendingRequest().Retry(3, time.Millisecond, nil, false)
+	_, err = get.Get(t.Context(), "https://example.test/orders", nil)
+	assertNoErr(t, err, "throw is off, so the failed response comes back")
+	assertEqual(t, int(sent.Load()), 3, "a GET is repeated")
+}
+
+// TestRetryRepeatsOnlyTheMethodsThatAreIdempotent walks the closed list, and
+// the two entries at the end of it: a method this package does not know, and a
+// known one written in lower case. Neither carries a promise this code can
+// read, and the safe reading of no promise is to send it once.
+func TestRetryRepeatsOnlyTheMethodsThatAreIdempotent(t *testing.T) {
+	for _, c := range []struct {
+		method   string
+		attempts int
+	}{
+		{"GET", 3},
+		{"HEAD", 3},
+		{"PUT", 3},
+		{"DELETE", 3},
+		{"OPTIONS", 3},
+		{"TRACE", 3},
+		{"POST", 1},
+		{"PATCH", 1},
+		{"CONNECT", 1},
+		{"PURGE", 1},
+		{"get", 1},
+	} {
+		t.Run(c.method, func(t *testing.T) {
+			var sent atomic.Int32
+			f := NewFactory(nil)
+			f.Fake(failingStub(&sent))
+
+			pr := f.CreatePendingRequest().Retry(3, time.Millisecond, nil, false)
+			_, err := pr.Send(t.Context(), c.method, "https://example.test/thing", nil, nil)
+			assertNoErr(t, err, "throw is off, so the failed response comes back")
+			assertEqual(t, int(sent.Load()), c.attempts, "attempts")
+		})
+	}
+}
+
+// TestRetryNonIdempotentMethodsRepeatsThePostTheCallerDeclaredSafe. The filter
+// is a default and not a wall: an endpoint that deduplicates is one the caller
+// knows about and this code cannot read off the request.
+func TestRetryNonIdempotentMethodsRepeatsThePostTheCallerDeclaredSafe(t *testing.T) {
+	var sent atomic.Int32
+	f := NewFactory(nil)
+	f.Fake(failingStub(&sent))
+
+	pr := f.CreatePendingRequest().
+		Retry(3, time.Millisecond, nil, false).
+		RetryNonIdempotentMethods()
+
+	_, err := pr.Post(t.Context(), "https://example.test/orders", map[string]any{"amount": 10})
+	assertNoErr(t, err, "throw is off, so the failed response comes back")
+	assertEqual(t, int(sent.Load()), 3, "attempts")
+}
+
+// TestAPostThatIsNotRepeatedStillThrows. Throwing is keyed to what the caller
+// asked for, not to what the method allowed: refusing to repeat a POST is not
+// a reason to also stop reporting that it failed.
+func TestAPostThatIsNotRepeatedStillThrows(t *testing.T) {
+	var sent atomic.Int32
+	f := NewFactory(nil)
+	f.Fake(failingStub(&sent))
+
+	pr := f.CreatePendingRequest().Retry(3, time.Millisecond, nil, true)
+	_, err := pr.Post(t.Context(), "https://example.test/orders", nil)
+
+	assertErr(t, err, "the failure of a POST that was not repeated")
+	var exception *RequestException
+	if !errors.As(err, &exception) {
+		t.Fatalf("the failure should be the response's own exception, got %T: %v", err, err)
+	}
+	assertEqual(t, int(sent.Load()), 1, "attempts")
+}
+
 // TestThePoolSendsEachRequestUnderTheContextItsVerbWasGiven. A pooled verb
 // records instead of sending, and the context has to be recorded with it or
 // the request the pool makes is one nobody can cancel.

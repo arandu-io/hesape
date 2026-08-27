@@ -72,6 +72,12 @@ type PendingRequest struct {
 	retryWhen  func(*http.Response, error) bool
 	retryThrow bool
 
+	// retryNonIdempotent is the caller's claim that repeating this request is
+	// safe even when its method is not idempotent. Without it a POST, a PATCH
+	// or a method this package does not know is sent once, whatever Retry was
+	// given. See RetryNonIdempotentMethods.
+	retryNonIdempotent bool
+
 	// Middleware.
 	middleware         []func(*http.Request, http.RoundTripper) http.RoundTripper
 	requestMiddleware  []func(*http.Request) error
@@ -334,13 +340,63 @@ func (p *PendingRequest) ConnectTimeout(d time.Duration) *PendingRequest {
 //
 // throw: when more than one attempt was asked for and the last one still
 // failed, the failure comes back as an error rather than as a response. It
-// is on by default.
+// is on by default, and it holds whether or not the method was repeatable.
+//
+// Only a method that may be repeated is repeated. GET, HEAD, PUT, DELETE,
+// OPTIONS and TRACE are; POST, PATCH, CONNECT and any method this package does
+// not know are not, and are sent once whatever times says. A repeated POST is a
+// second write, and the failure that provokes the repeat -- a timeout, a
+// connection dropped after the request was on the wire -- is exactly the case
+// where the first one may already have been applied. A caller whose endpoint is
+// safe to repeat says so with [PendingRequest.RetryNonIdempotentMethods].
 func (p *PendingRequest) Retry(times int, delay time.Duration, when func(*http.Response, error) bool, throw bool) *PendingRequest {
 	p.retryTimes = times
 	p.retryDelay = delay
 	p.retryWhen = when
 	p.retryThrow = throw
 	return p
+}
+
+// RetryNonIdempotentMethods lets [PendingRequest.Retry] repeat this request
+// even though its method is one the protocol does not promise is repeatable.
+//
+// It is the caller stating a property of the endpoint the client cannot read
+// off the request: that sending the same POST or PATCH twice leaves the same
+// result as sending it once, because the endpoint deduplicates -- on an
+// idempotency key, on a natural key, or by ignoring a repeat.
+//
+// It takes no argument and does nothing on its own, so it can only be reached
+// by naming it. That is deliberate: an extra bool on Retry would sit next to
+// throw, where a caller who wanted the fourth argument true would get this one
+// too, and duplicated writes would be the cost of a positional mistake.
+func (p *PendingRequest) RetryNonIdempotentMethods() *PendingRequest {
+	p.retryNonIdempotent = true
+	return p
+}
+
+// mayRepeat reports whether a request of this method may be sent more than
+// once: either the method is idempotent, or the caller declared the endpoint
+// safe to repeat.
+func (p *PendingRequest) mayRepeat(method string) bool {
+	return p.retryNonIdempotent || isIdempotentMethod(method)
+}
+
+// isIdempotentMethod reports whether repeating a request of this method is
+// defined to leave the same result as sending it once.
+//
+// The list is closed, and an unknown method is not on it. A method the caller
+// invented, or wrote in lower case, carries no promise this code can read, and
+// the safe reading of no promise is to send it once.
+func isIdempotentMethod(method string) bool {
+	switch method {
+	case "GET", "HEAD", "PUT", "DELETE", "OPTIONS", "TRACE":
+		return true
+	case "":
+		// net/http reads an empty method as GET, and so does this.
+		return true
+	default:
+		return false
+	}
 }
 
 // WithOptions sets arbitrary options on the underlying HTTP client.
@@ -730,6 +786,18 @@ func (p *PendingRequest) Send(ctx context.Context, method, urlStr string, query 
 		attempts = 1
 	}
 
+	// A method the protocol does not promise is repeatable is sent once,
+	// whatever was asked for. See Retry and RetryNonIdempotentMethods.
+	if !p.mayRepeat(method) {
+		attempts = 1
+	}
+
+	// Whether the caller asked to repeat, which is not whether the request may
+	// be. Throwing is keyed to the request: a POST that cannot be repeated
+	// still returns its failure as an error, because refusing to repeat is not
+	// a reason to also stop reporting.
+	retryRequested := p.retryTimes > 1
+
 	// One deadline per attempt, released when Send returns. A single deadline
 	// spanning every attempt would spend the caller's budget on the attempts
 	// that already failed.
@@ -827,7 +895,7 @@ func (p *PendingRequest) Send(ctx context.Context, method, urlStr string, query 
 		if attemptErr != nil {
 			return nil, attemptErr
 		}
-		if attempts > 1 && p.retryThrow {
+		if retryRequested && p.retryThrow {
 			return nil, failure
 		}
 		return resp, nil
