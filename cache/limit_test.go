@@ -2,6 +2,7 @@ package cache_test
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -214,18 +215,15 @@ func TestCleanRateLimiterKeyMakesOneCounterOfTwoSpellings(t *testing.T) {
 	}
 }
 
-func TestAfterAndResponseAreCarried(t *testing.T) {
-	l := cache.PerMinute(5).
-		After(func(status int) bool { return status >= 400 }).
-		Response(nil)
-
-	if l.AfterCallback == nil {
-		t.Fatal("After did not set the callback")
+// TestALimitIsOnlyItsThreeFields fixes the shape, because the two callbacks
+// that were here were carried and never read: a limit built to count only
+// failures compiled and counted everything.
+func TestALimitIsOnlyItsThreeFields(t *testing.T) {
+	if n := reflect.TypeOf(cache.Limit{}).NumField(); n != 3 {
+		t.Fatalf("cache.Limit has %d fields, want 3: a field nothing reads is behaviour that was promised and is not there", n)
 	}
-	if !l.AfterCallback(500) || l.AfterCallback(200) {
-		t.Fatal("the after callback was not the one that was set")
-	}
-	if l.MaxAttempts != 5 || l.Decay != time.Minute {
-		t.Fatalf("After and Response changed the limit: %+v", l)
+	l := cache.PerMinute(5).By("ip:192.0.2.1")
+	if l.Key != "ip:192.0.2.1" || l.MaxAttempts != 5 || l.Decay != time.Minute {
+		t.Fatalf("the three fields are not the limit that was built: %+v", l)
 	}
 }

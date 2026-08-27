@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"net/http"
 	"strconv"
 	"sync"
 	"time"
@@ -20,6 +19,22 @@ import (
 // It lives here, next to the RateLimiter that counts against it, and not in a
 // ratelimiting subpackage: a subpackage is a real boundary, and one struct on
 // the far side of one is an import for no gain.
+//
+// # It is three fields, and it carries no callbacks
+//
+// It carried two: one that decided, from the status a handler wrote, whether
+// an attempt counted, and one that wrote the refusal itself. Nothing in the
+// collection read either of them. A field that is documented as behaviour and
+// is never read is worse than an absent one -- writing a limit that counts
+// only failures compiled, ran, and counted everything, and the reason was
+// invisible to whoever wired it.
+//
+// They do not come back as working code either, because each already has one
+// spelling. The refusal is written by the Refuse passed to the throttle
+// middleware, which is one place for every refusal a request layer makes; a
+// second one carried on the limit would be two. And giving an attempt back
+// once the work is known to have succeeded is Release, which is a call the
+// caller makes when it knows the answer, not a callback the counter invokes.
 type Limit struct {
 	// Key identifies the caller being limited: an IP, a session id, an account.
 	// It is not a tenant: rate limiting happens before authentication on the
@@ -31,23 +46,6 @@ type Limit struct {
 
 	// Decay is the length of the window.
 	Decay time.Duration
-
-	// AfterCallback decides, once the work has run, whether it counted. A
-	// limit that only counts the failures -- five wrong passwords a minute,
-	// and as many right ones as you like -- is written with this and nothing
-	// else.
-	//
-	// It receives the status code the handler wrote, because that is what a Go
-	// handler leaves behind: there is no response object to hand over.
-	AfterCallback func(status int) bool
-
-	// ResponseCallback writes the answer to a caller that went over. Its
-	// absence is the default 429 the middleware writes.
-	//
-	// headers carries what the middleware would have set -- Retry-After,
-	// X-RateLimit-Remaining -- so a callback that writes its own answer does not
-	// have to rebuild them.
-	ResponseCallback func(w http.ResponseWriter, r *http.Request, headers map[string]string)
 }
 
 // PerSecond, PerMinute, PerHour and PerDay build the limits anybody writes.
@@ -92,23 +90,6 @@ func (l Limit) By(key string) Limit {
 	return l
 }
 
-// After returns the same limit with a callback that decides whether an attempt
-// counted.
-//
-// It answers Limit::after(). See AfterCallback for what it receives and why.
-func (l Limit) After(fn func(status int) bool) Limit {
-	l.AfterCallback = fn
-	return l
-}
-
-// Response returns the same limit with a callback that writes the refusal.
-//
-// It answers Limit::response(). See ResponseCallback.
-func (l Limit) Response(fn func(w http.ResponseWriter, r *http.Request, headers map[string]string)) Limit {
-	l.ResponseCallback = fn
-	return l
-}
-
 // FallbackKey is a key for this limit that no other limit in the same set can
 // collide with.
 //
@@ -140,6 +121,22 @@ func (l Limit) FallbackKey() string {
 // throttle may well choose the opposite. That decision was previously buried
 // inside the limiter, where the middleware could not see it and could not
 // change it.
+//
+// # No method here takes a Grant, and none should
+//
+// Every Repository method in this package takes one, and takes the tenant out
+// of it. This type is the exception on purpose, and making it consistent with
+// its neighbour would break the routes it exists to protect: a rate limit runs
+// before authentication precisely where it matters most -- the sign-in form,
+// the password reset, the public API key check -- and at that point in the
+// request nobody has been identified, so there is no Grant to take a tenant
+// from. A signature that demanded one would be a signature no caller on those
+// routes could satisfy, and the limit would come off the routes rather than the
+// requirement coming off the signature.
+//
+// What a caller wants a tenant in the key for, it already has: Limit.Key is a
+// string, so a limit that really is per tenant is written by putting the tenant
+// in the key it is built with.
 type RateLimiter struct {
 	store Store
 
