@@ -147,6 +147,43 @@ strings.ToLower(s)
 `Stringable` and are links in a fluent chain, which the standard library has no
 equivalent for; only their bodies changed.
 
+### The relation surface is reachable, and it was compiling the wrong column
+
+```
+- ./database/model.Relation.Match: changed from func(auth.Grant, []any, func(*query.Builder)) (map[any]any, error) to func([]relations.Model, []relations.Model, string) ([]relations.Model, error)
+- ./database/model.Relation.GetRelationExistenceQuery: changed shape to the one every relation implements
+- ./database/model/relations.BaseRelation: no longer comparable (also HasManyThrough, HasOneOrManyThrough)
+```
+
+`model.Relation` had one implementor and it was a test double. The ten real
+relations could not satisfy it, so `Builder.With`, `Model.Load`,
+`Collection.Load*`, `Has`, `WhereHas`, `WithCount` and `model.Related` were
+**unreachable from any application** — in either entity shape. `model.Relation` is
+now `relations.Relation` plus the one method the tree has and did not declare.
+
+Its old shape could not have worked even if something had implemented it: keys
+were the primary keys, so a has-many on another local key read the wrong column;
+morph-to matched its own parents; and a key-to-value dictionary had nothing to say
+for a parent that matched nothing, so a childless parent read back as never
+loaded rather than loaded and empty.
+
+**A live wrong-results bug went with it.** `BaseRelation.GetRelationExistenceQuery`
+called `GetExistenceCompareKey`, which every relation overrides — and Go
+dispatches statically, so it reached the base's answer. Every `WhereHas`, `Has`
+and `WithCount` over a has-many compiled `where users.id = posts.id`: the parent's
+key against the child's own key. Well-formed, it runs, and it returns whichever
+rows happen to share an id. Nothing reported it because nothing could reach the
+path.
+
+**Relation queries named the tenant twice.** `model.Builder.prepare` owns the
+scoping now, and it uses the model's declared column where the relation layer only
+knew the default name — wrong for a renamed column, and a column that does not
+exist on a shared table. A builder that makes no promise is still filtered, so the
+failure mode of this split is a duplicate clause, never a missing one.
+
+The comparability loss is the func field that fixes the static dispatch. Nothing
+compares relations with `==`.
+
 ### `image`: a ceiling before the decode, and a context through the transformations
 
 ```
