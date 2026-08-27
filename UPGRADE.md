@@ -24,7 +24,7 @@ the first tag and has nothing before it to compare against.
 
 ---
 
-## Unreleased — the row is the model
+## v0.17.0 — the row is the model
 
 The heading is `Unreleased` because these have not been tagged yet. It becomes
 the number of the release that carries them, at the moment it is cut.
