@@ -275,19 +275,65 @@ func TestTheWholeMessagePipelineEndToEnd(t *testing.T) {
 // The English catalogue.
 // ---------------------------------------------------------------------------
 
-func TestEveryRuleThatSaysSomethingHasAnEnglishLine(t *testing.T) {
+// Every key the message pipeline builds must resolve to a sentence in the
+// shipped catalogue. A key that resolves to nothing is not a quiet fallback: the
+// translator answers with the key itself, and "validation.min.string" is what
+// then prints on the page where the sentence belonged.
+//
+// It asks through the translator rather than indexing the table, so it fails the
+// same way whether a line went missing from the catalogue, a group stopped being
+// a group, or the lookup that reads it broke.
+func TestEveryKeyTheMessagePipelineBuildsResolvesToASentence(t *testing.T) {
 	// The flow markers say nothing when they fail -- bail and sometimes cannot
 	// fail at all, nullable only changes what counts as absent, and the exclude
 	// family removes the field instead of putting a message on it. The
-	// lang file carries no line for any of them either.
+	// catalogue carries no line for any of them either.
 	silent := append([]string{"bail", "sometimes", "nullable"}, excludeRules...)
 
+	// getMessage builds "validation.<rule>" for every rule, and getSizeMessage
+	// builds "validation.<rule>.<type>" for the eight whose sentence depends on
+	// what is being measured -- the four getAttributeType can answer.
+	var keys []string
 	for name := range specs {
 		if slices.Contains(silent, name) {
 			continue
 		}
-		if _, held := englishLines[name]; !held {
-			t.Errorf("rule %q has no line in englishLines", name)
+		if slices.Contains(sizeRules, name) {
+			for _, measured := range []string{"numeric", "file", "array", "string"} {
+				keys = append(keys, "validation."+name+"."+measured)
+			}
+			continue
+		}
+		keys = append(keys, "validation."+name)
+	}
+	// The password rule reports which requirement failed, and each segment is a
+	// key of its own that no rule name spells.
+	for _, segment := range []string{"letters", "mixed", "numbers", "symbols", "uncompromised"} {
+		keys = append(keys, "validation.password."+segment)
+	}
+
+	slices.Sort(keys)
+	for _, key := range keys {
+		got := line(english.Get(key, nil, ""), key)
+		if got == key {
+			t.Errorf("%s has no line in the shipped English catalogue: it would print as the key", key)
+		}
+	}
+}
+
+// A size rule is asked for its whole group as well, in the branch that reads a
+// custom message written as one, so each of the eight must answer with a group
+// and not with a sentence.
+func TestEverySizeRuleAnswersWithItsGroup(t *testing.T) {
+	for _, name := range sizeRules {
+		key := "validation." + name
+		group, isGroup := english.Get(key, nil, "").(map[string]string)
+		if !isGroup {
+			t.Errorf("%s is not a group in the shipped English catalogue", key)
+			continue
+		}
+		if len(group) != 4 {
+			t.Errorf("%s has %d lines, want the four an attribute can measure", key, len(group))
 		}
 	}
 }
