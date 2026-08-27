@@ -294,6 +294,31 @@ func TenantColumnFor(m Model) string {
 	return TenantColumn
 }
 
+// OwnTenantScoper is how a Builder says it puts the tenant filter on its own
+// table itself, on every statement it runs.
+//
+// ScopeTenant asks before filtering, and a builder that stays silent is
+// filtered. That direction is the whole point: the answer that requires no code
+// is the safe one, so a builder nobody thought about is scoped rather than
+// trusted.
+//
+// A builder that answers true is promising something the reader cannot see from
+// here, so the promise has to be paid for by the builder's own tests: that every
+// terminal it offers carries the filter, not just the one the author had in
+// mind. What it buys is a statement whose tenant clause appears once -- a second
+// identical clause is not wrong, but every reader after has to prove it
+// redundant before they can move on, and the one who decides it is the copy to
+// delete may delete the other one.
+type OwnTenantScoper interface {
+	// ScopesOwnTableByTenant reports whether every statement this builder runs
+	// already filters its own table by the tenant of the Grant it was given.
+	//
+	// It says nothing about the tables the query joins: those carry no model to
+	// ask and no builder answers for them, which is why ScopeTenant filters them
+	// whatever this returns.
+	ScopesOwnTableByTenant() bool
+}
+
 // RequireTenant answers the tenant carried by g, and refuses a Grant that has
 // none.
 //
@@ -344,6 +369,19 @@ func RequireTenant(g auth.Grant) (string, error) {
 // to the parent's join segment when the join is declared (see addJoinClause), so
 // a condition added afterwards would compile into the statement with its value
 // sitting in another join's placeholder.
+//
+// # The own table, and who filters it
+//
+// The joined tables are filtered here always. The relation's own table is
+// filtered here only when the builder does not already do it, which it says by
+// implementing OwnTenantScoper -- and the read that reaches a real model does,
+// so its statement names the tenant once instead of twice.
+//
+// The question is asked of the builder rather than answered by a name check on
+// the wheres, and that is the part that matters. A query already carrying
+// `posts.tenant_id = 'other'` because the caller wrote that where by hand looks
+// exactly like a query somebody scoped, and a filter skipped on that evidence is
+// a filter the caller chose the value of.
 func ScopeTenant(b Builder, m Model, g auth.Grant) (Builder, error) {
 	tenant, err := RequireTenant(g)
 	if err != nil {
@@ -351,6 +389,10 @@ func ScopeTenant(b Builder, m Model, g auth.Grant) (Builder, error) {
 	}
 
 	b = scopeJoinedTables(b, tenant)
+
+	if scoper, ok := b.(OwnTenantScoper); ok && scoper.ScopesOwnTableByTenant() {
+		return b, nil
+	}
 
 	column := TenantColumnFor(m)
 	if column == "" {

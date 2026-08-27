@@ -3,9 +3,11 @@ package model
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/database/model/relations/concerns"
 )
 
 // One builder, two Grants.
@@ -95,5 +97,106 @@ func TestRunningABuilderDoesNotScopeTheBuilderTheCallerKept(t *testing.T) {
 		if where.Column == "users.tenant_id" || where.Column == "tenant_id" {
 			t.Fatalf("the tenant filter landed on the builder the caller kept: %+v", where)
 		}
+	}
+}
+
+// Who puts the tenant on a relation's own table.
+//
+// Two layers used to, and the statement said so: `... and "posts"."tenant_id" =
+// ? and "posts"."tenant_id" = ?`, bound [1 acme acme]. Both clauses were right,
+// which is why it survived -- the rows were correct and the only cost was a
+// reader having to prove the second copy redundant.
+//
+// It is prepare that owns it. The relation layer asks the builder first
+// (concerns.OwnTenantScoper) and the typed builder answers yes, because prepare
+// filters on the column the model itself declares. The relation layer only knows
+// the default name, so on a model that renamed the column it would have written
+// a second filter on a column that is not there, and on a shared table a filter
+// on a column that exists nowhere.
+//
+// The three tests below are one property read from three sides, and they are
+// separate because they fail differently. Deleting the filter from prepare
+// leaves the first two green and breaks the third; deleting the claim from the
+// builder leaves all three green and puts the second clause back. Nothing here
+// can end in a statement with no tenant filter, which is the failure the split
+// has to be safe against.
+
+// TestARelationNamesTheTenantOnceAndNamesIt is the statement itself: the filter
+// is there, and there is one of it.
+func TestARelationNamesTheTenantOnceAndNamesIt(t *testing.T) {
+	users, _ := newUserModel()
+	posts, postsConn := newPostModel()
+
+	parent, err := users.NewFromBuilder(map[string]any{"id": int64(1), "tenant_id": "acme"})
+	if err != nil {
+		t.Fatalf("NewFromBuilder: %v", err)
+	}
+
+	postsConn.queue()
+	if _, err := HasManyOf(parent, posts, "", "").Get(context.Background(), auth.SystemGrant("posts.read", "acme")); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	last := postsConn.last()
+	if got := strings.Count(last.SQL, `"posts"."tenant_id"`); got != 1 {
+		t.Errorf(`the relation names "posts"."tenant_id" %d times, want 1: %s`, got, last.SQL)
+	}
+
+	tenants := 0
+	for _, binding := range last.Bindings {
+		if binding == "acme" {
+			tenants++
+		}
+	}
+	if tenants != 1 {
+		t.Errorf("the relation binds the tenant %d times, want 1: %v", tenants, last.Bindings)
+	}
+}
+
+// TestTheTypedBuilderPromisesToScopeItsOwnTable reads the claim the relation
+// layer trusts. It is one line of production code and it is load bearing: with
+// it false, the clause comes back twice; with it true and prepare not
+// delivering, it never comes at all.
+func TestTheTypedBuilderPromisesToScopeItsOwnTable(t *testing.T) {
+	posts, _ := newPostModel()
+
+	scoper, ok := posts.NewQuery().Ref().(concerns.OwnTenantScoper)
+	if !ok {
+		t.Fatal("the typed builder no longer answers OwnTenantScoper, so a relation over it writes the filter itself -- and only ever under the default column name")
+	}
+	if !scoper.ScopesOwnTableByTenant() {
+		t.Fatal("the typed builder says it does not scope its own table, which prepare does")
+	}
+}
+
+// TestPrepareIsWhatPutsTheTenantOnTheOwnTable is the promise paid.
+//
+// It reaches under the relation deliberately: ScopeTenant is asked to scope the
+// typed builder and answers by adding nothing at all, so whatever tenant filter
+// the statement ends up carrying can only have come from prepare. A change that
+// dropped it there would leave this test looking at a statement with no tenant
+// in it, which is the failure this split has to be caught by.
+func TestPrepareIsWhatPutsTheTenantOnTheOwnTable(t *testing.T) {
+	posts, conn := newPostModel()
+
+	builder := posts.NewQuery()
+	g := auth.SystemGrant("posts.read", "acme")
+
+	scoped, err := concerns.ScopeTenant(builder.Ref(), posts.Ref(), g)
+	if err != nil {
+		t.Fatalf("ScopeTenant: %v", err)
+	}
+	for _, where := range scoped.GetQuery().Wheres {
+		if where.Column == "posts.tenant_id" {
+			t.Fatalf("the relation layer wrote the own-table filter after promising not to: %+v", where)
+		}
+	}
+
+	conn.queue()
+	if _, err := builder.Get(context.Background(), g); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !strings.Contains(conn.last().SQL, `"posts"."tenant_id" = ?`) {
+		t.Fatalf("nothing put the tenant on the statement: %s", conn.last().SQL)
 	}
 }

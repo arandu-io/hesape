@@ -117,23 +117,17 @@ func TestHydrationWiresEveryRow(t *testing.T) {
 // what the embedding buys on this side.
 func TestAnEagerLoadIsReachableFromTheRowATerminalHandedBack(t *testing.T) {
 	model, conn := newAccountModel()
-	child, _ := newAccountModel()
-	loaded, err := child.NewFromBuilder(map[string]any{"id": int64(9), "name": "child"})
-	if err != nil {
-		t.Fatalf("NewFromBuilder: %v", err)
-	}
-	withPostsOn(model, &fakeRelation{
-		table: "posts", foreign: "posts.account_id", local: "accounts.id",
-		matched: map[any]any{int64(1): Collection[account]{loaded.Entity}},
-	})
+	withPostsOn(model, conn)
+
 	conn.queue(query.Record{"id": int64(1), "name": "Ada", "tenant_id": "t-1"})
+	conn.queue(query.Record{"id": int64(9), "account_id": int64(1), "title": "child", "tenant_id": "t-1"})
 
 	rows, err := model.NewQuery().With("posts").Get(context.Background(), grantForTenant("t-1"))
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 
-	posts, ok := Related[account, account](rows[0], "posts")
+	posts, ok := Related[account, post](rows[0], "posts")
 	if !ok {
 		t.Fatal("the eager load is not reachable from the row the terminal returned")
 	}
@@ -142,6 +136,7 @@ func TestAnEagerLoadIsReachableFromTheRowATerminalHandedBack(t *testing.T) {
 	}
 
 	// And the lazy half, which is the same reach through a promoted method.
+	conn.queue(query.Record{"id": int64(9), "account_id": int64(1), "title": "child", "tenant_id": "t-1"})
 	if err := rows[0].Load(context.Background(), grantForTenant("t-1"), "posts"); err != nil {
 		t.Fatalf("Load on the row: %v", err)
 	}

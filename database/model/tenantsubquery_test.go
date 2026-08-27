@@ -543,14 +543,7 @@ func twoTenants(t *testing.T) (*Model[customer], *evalDB) {
 	db := newEvalDB()
 	grammar := &evalGrammar{testGrammar: newTestGrammar(), db: db}
 	model := NewModel[customer]("users", db, grammar, evalProcessor{})
-	model.RelationResolvers = map[string]func(*Model[customer]) Relation{
-		"posts": func(*Model[customer]) Relation {
-			return &fakeRelation{table: "posts", foreign: "posts.user_id", local: "users.id"}
-		},
-		"orders": func(*Model[customer]) Relation {
-			return &fakeRelation{table: "orders", foreign: "orders.user_id", local: "users.id"}
-		},
-	}
+	withPostsAndOrdersOn(model, db, grammar, evalProcessor{})
 
 	// One user per tenant, both with id 1, because a correlated subquery joins
 	// on that id and nothing else: if the tenant is missing from the subquery,
@@ -782,7 +775,7 @@ func TestEveryRelationSubqueryNamesTheTenantColumn(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			model, conn := newCustomerModel()
-			withPostsAndOrders(model)
+			withPostsAndOrders(model, conn)
 			conn.queue()
 
 			if _, err := tc.build(model.NewQuery()).Get(context.Background(), acme()); err != nil {
@@ -807,14 +800,26 @@ func TestEveryRelationSubqueryNamesTheTenantColumn(t *testing.T) {
 	}
 }
 
-func withPostsAndOrders[T any](model *Model[T]) *Model[T] {
+// withPostsAndOrders registers the two has-manys these tests filter by, over
+// the same connection the parent reads through.
+//
+// The keys are the conventional ones -- user_id on the child, id on the users
+// table the parent sits on -- so the subquery correlates on exactly the pair the
+// fixtures below seed.
+func withPostsAndOrders[T any](model *Model[T], conn *testConnection) *Model[T] {
+	return withPostsAndOrdersOn(model, conn, newTestGrammar(), &testProcessor{conn: conn})
+}
+
+func withPostsAndOrdersOn[T any](model *Model[T], conn query.Connection, grammar query.Grammar, processor query.Processor) *Model[T] {
+	posts := NewModel[post]("posts", conn, grammar, processor)
+	orders := NewModel[post]("orders", conn, grammar, processor)
+
+	// The keys are named rather than conventional: these fixtures seed user_id
+	// on both children, and the parent's entity is a customer, whose convention
+	// would be customer_id.
 	model.RelationResolvers = map[string]func(*Model[T]) Relation{
-		"posts": func(*Model[T]) Relation {
-			return &fakeRelation{table: "posts", foreign: "posts.user_id", local: "users.id"}
-		},
-		"orders": func(*Model[T]) Relation {
-			return &fakeRelation{table: "orders", foreign: "orders.user_id", local: "users.id"}
-		},
+		"posts":  func(m *Model[T]) Relation { return HasManyOfUnconstrained(m, posts, "user_id", "id") },
+		"orders": func(m *Model[T]) Relation { return HasManyOfUnconstrained(m, orders, "user_id", "id") },
 	}
 	return model
 }

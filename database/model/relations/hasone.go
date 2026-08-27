@@ -25,6 +25,7 @@ type HasOne struct {
 // into the relation itself, applies its constraints, and returns it.
 func newHasOne(query Builder, parent Model, foreignKey, localKey string) *HasOne {
 	relation := &HasOne{HasOneOrMany: NewHasOneOrMany(query, parent, foreignKey, localKey)}
+	relation.ExistenceCompareKey = relation.GetExistenceCompareKey
 
 	relation.SupportsDefaultModels = concerns.SupportsDefaultModels{
 		NewRelatedInstanceFor: relation.NewRelatedInstanceFor,

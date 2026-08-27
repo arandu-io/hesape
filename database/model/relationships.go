@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/database/model/relations"
 	"github.com/arandu-io/hesape/database/query"
 	"github.com/arandu-io/hesape/str"
 )
@@ -32,7 +33,7 @@ func (b *Builder[T]) Has(relation, operator string, count int, boolean string, c
 	if err != nil {
 		return b.fail(err)
 	}
-	return b.addHasWhere(rel, operator, count, boolean, callback)
+	return b.addHasWhere(rel, operator, count, boolean, onBaseQuery(callback))
 }
 
 // addHasWhere adds the where clause for a Has-style filter on rel.
@@ -40,24 +41,28 @@ func (b *Builder[T]) Has(relation, operator string, count int, boolean string, c
 // A ">= 1" or a "< 1" is an exists rather than a count, which is the
 // optimisation canUseExistsForExistenceCheck exists for: the engine can stop
 // at the first matching row instead of counting every one.
-func (b *Builder[T]) addHasWhere(rel Relation, operator string, count int, boolean string, callback func(*query.Builder)) *Builder[T] {
+//
+// The callback takes the builder a relation hands back rather than the base
+// query, which is what hasNested needs to go one segment deeper. The public
+// methods take func(*query.Builder) and onBaseQuery is the step between.
+func (b *Builder[T]) addHasWhere(rel Relation, operator string, count int, boolean string, callback func(relations.Builder)) *Builder[T] {
 	if boolean == "" {
 		boolean = "and"
 	}
 	if canUseExistsForExistenceCheck(operator, count) {
-		sub := rel.GetRelationExistenceQuery(b.query, query.Raw("*"))
+		sub := existenceSubquery(rel, b.Ref(), query.Raw("*"))
 		if callback != nil {
 			callback(sub)
 		}
-		b.query.AddWhereExistsQuery(sub, boolean, operator == "<" && count == 1)
+		b.query.AddWhereExistsQuery(sub.GetQuery(), boolean, operator == "<" && count == 1)
 		return b
 	}
 
-	sub := rel.GetRelationExistenceQuery(b.query, query.Raw("count(*)"))
+	sub := existenceSubquery(rel, b.Ref(), query.Raw("count(*)"))
 	if callback != nil {
 		callback(sub)
 	}
-	return b.addWhereCountQuery(sub, operator, count, boolean)
+	return b.addWhereCountQuery(sub.GetQuery(), operator, count, boolean)
 }
 
 // addWhereCountQuery adds the subquery compared against a number, as an
@@ -93,8 +98,8 @@ func canUseExistsForExistenceCheck(operator string, count int) bool {
 //
 // A relation that cannot resolve the next segment is an error, never a
 // query with the filter silently missing.
-func (b *Builder[T]) hasNested(relations, operator string, count int, boolean string, callback func(*query.Builder)) *Builder[T] {
-	segments := strings.Split(relations, ".")
+func (b *Builder[T]) hasNested(path, operator string, count int, boolean string, callback func(*query.Builder)) *Builder[T] {
+	segments := strings.Split(path, ".")
 
 	rel, err := b.GetRelationWithoutConstraints(segments[0])
 	if err != nil {
@@ -105,7 +110,7 @@ func (b *Builder[T]) hasNested(relations, operator string, count int, boolean st
 	for _, segment := range segments[1:] {
 		nested, ok := chain[len(chain)-1].(NestedRelation)
 		if !ok {
-			return b.fail(fmt.Errorf("%w: %s does not reach %s", ErrRelationNotFound, relations, segment))
+			return b.fail(fmt.Errorf("%w: %s does not reach %s", ErrRelationNotFound, path, segment))
 		}
 		next, err := nested.Nested(segment)
 		if err != nil {
@@ -116,21 +121,21 @@ func (b *Builder[T]) hasNested(relations, operator string, count int, boolean st
 
 	// The innermost relation carries the caller's constraints; every outer one
 	// only has to exist.
-	return b.addHasWhere(chain[0], operator, count, boolean, func(sub *query.Builder) {
+	return b.addHasWhere(chain[0], operator, count, boolean, func(sub relations.Builder) {
 		nest(sub, chain[1:], callback)
 	})
 }
 
-func nest(parent *query.Builder, chain []Relation, callback func(*query.Builder)) {
+func nest(parent relations.Builder, chain []Relation, callback func(*query.Builder)) {
 	if len(chain) == 0 {
 		if callback != nil {
-			callback(parent)
+			callback(parent.GetQuery())
 		}
 		return
 	}
-	sub := chain[0].GetRelationExistenceQuery(parent, query.Raw("*"))
+	sub := existenceSubquery(chain[0], parent, query.Raw("*"))
 	nest(sub, chain[1:], callback)
-	parent.AddWhereExistsQuery(sub, "and", false)
+	parent.GetQuery().AddWhereExistsQuery(sub.GetQuery(), "and", false)
 }
 
 // NestedRelation is the relation a dotted existence check walks through. See
@@ -243,9 +248,9 @@ func (b *Builder[T]) WhereMorphRelation(relation string, types []string, column 
 			}
 			outer.OrWhere(func(branch *Builder[T]) {
 				branch.Where(b.model.QualifyColumn(morph.GetMorphType()), "=", morphType)
-				branch.addHasWhere(typed, ">=", 1, "and", func(sub *query.Builder) {
+				branch.addHasWhere(typed, ">=", 1, "and", onBaseQuery(func(sub *query.Builder) {
 					sub.Where(column, args...)
-				})
+				}))
 			})
 		}
 	})
@@ -316,7 +321,7 @@ func (b *Builder[T]) WithAggregate(relations []string, column, function string) 
 			expression = fmt.Sprintf("%s(%s)", function, b.aggregateColumn(column))
 		}
 
-		sub := rel.GetRelationExistenceQuery(b.query, query.Raw(expression))
+		sub := existenceSubquery(rel, b.Ref(), query.Raw(expression)).GetQuery()
 		if constraints, ok := b.eagerLoad[name]; ok && constraints != nil {
 			// The eager-load constraints narrow the subquery, not the query the
 			// subselect hangs off -- which is what callScope does to the relation's

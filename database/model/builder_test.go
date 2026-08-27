@@ -8,39 +8,35 @@ import (
 	"testing"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/database/model/relations"
 	"github.com/arandu-io/hesape/database/query"
 	"github.com/arandu-io/hesape/pagination"
 )
 
-// fakeRelation stands in for model/relations while this slice is written. It
-// is the whole of what the builder asks a relation for.
-type fakeRelation struct {
-	table   string
-	foreign string
-	local   string
-	matched map[any]any
-}
-
-func (r *fakeRelation) GetRelationExistenceQuery(parent *query.Builder, columns any) *query.Builder {
-	sub := query.NewBuilder(parent.GetConnection(), parent.Grammar, parent.Processor)
-	sub.From(r.table).Select(columns).WhereColumn(r.foreign, "=", r.local)
-	return sub
-}
-
-func (r *fakeRelation) Match(g auth.Grant, keys []any, constraints func(*query.Builder)) (map[any]any, error) {
-	return r.matched, nil
-}
-
-func withPosts(model *Model[user], relation *fakeRelation) *Model[user] {
-	return withPostsOn(model, relation)
+// withPosts registers a has-many onto the posts table, the way an application
+// registers one.
+//
+// There is no stand-in relation any more. There used to be, with a Match that
+// answered a canned dictionary, and it was the only thing in the package that
+// satisfied the builder's relation interface -- which is how that interface came
+// to have a shape no real relation could implement. The tests below now build
+// the same relation an application builds, so the builder is measured against
+// what it will actually be handed.
+//
+// The related model reads through the caller's own connection, so one queue
+// feeds both the parent query and the relation's, and one log shows the order
+// they ran in.
+func withPosts(model *Model[user], conn *testConnection) *Model[user] {
+	return withPostsOn(model, conn)
 }
 
 // withPostsOn is withPosts over whatever entity the test uses, because the
 // collection tests write the shape an application writes and the builder tests
 // write the one that does not embed the model.
-func withPostsOn[T any](model *Model[T], relation *fakeRelation) *Model[T] {
+func withPostsOn[T any](model *Model[T], conn *testConnection) *Model[T] {
+	posts := NewModel[post]("posts", conn, newTestGrammar(), &testProcessor{conn: conn})
 	model.RelationResolvers = map[string]func(*Model[T]) Relation{
-		"posts": func(*Model[T]) Relation { return relation },
+		"posts": func(m *Model[T]) Relation { return HasManyOfUnconstrained(m, posts, "", "") },
 	}
 	return model
 }
@@ -287,7 +283,7 @@ func TestUpdateOrCreateUpdatesTheRowItFound(t *testing.T) {
 
 func TestWhereHasCompilesAnExistsSubquery(t *testing.T) {
 	model, conn := newUserModel()
-	withPosts(model, &fakeRelation{table: "posts", foreign: "posts.user_id", local: "users.id"})
+	withPosts(model, conn)
 	conn.queue()
 
 	_, err := model.NewQuery().WhereHas("posts", func(sub *query.Builder) {
@@ -301,7 +297,7 @@ func TestWhereHasCompilesAnExistsSubquery(t *testing.T) {
 	// The subquery carries a tenant of its own. Without it the exists asked
 	// whether ANY tenant had a matching post, which selected this tenant's users
 	// by another tenant's rows -- the shape this test used to assert.
-	if !strings.Contains(sql, `exists (select * from "posts" where "posts"."tenant_id" = ? and ("posts"."user_id" = "users"."id" and "published" = ?))`) {
+	if !strings.Contains(sql, `exists (select * from "posts" where "posts"."tenant_id" = ? and ("users"."id" = "posts"."user_id" and "published" = ?))`) {
 		t.Fatalf("SQL = %q, want the correlated exists whereHas compiles to, scoped", sql)
 	}
 	if got := conn.last().Bindings[0]; got != "acme" {
@@ -314,7 +310,7 @@ func TestWhereHasCompilesAnExistsSubquery(t *testing.T) {
 
 func TestHasWithACountCompilesTheSubqueryAsAComparison(t *testing.T) {
 	model, conn := newUserModel()
-	withPosts(model, &fakeRelation{table: "posts", foreign: "posts.user_id", local: "users.id"})
+	withPosts(model, conn)
 	conn.queue()
 
 	if _, err := model.NewQuery().Has("posts", ">=", 3, "and", nil).Get(context.Background(), grant()); err != nil {
@@ -338,7 +334,7 @@ func TestHasWithACountCompilesTheSubqueryAsAComparison(t *testing.T) {
 
 func TestDoesntHaveCompilesANotExists(t *testing.T) {
 	model, conn := newUserModel()
-	withPosts(model, &fakeRelation{table: "posts", foreign: "posts.user_id", local: "users.id"})
+	withPosts(model, conn)
 	conn.queue()
 
 	if _, err := model.NewQuery().WhereDoesntHave("posts", nil).Get(context.Background(), grant()); err != nil {
@@ -360,7 +356,7 @@ func TestAnUnknownRelationIsReportedByTheFirstMethodThatRuns(t *testing.T) {
 
 func TestWithCountAddsTheAliasedSubselect(t *testing.T) {
 	model, conn := newUserModel()
-	withPosts(model, &fakeRelation{table: "posts", foreign: "posts.user_id", local: "users.id"})
+	withPosts(model, conn)
 	conn.queue(query.Record{"id": int64(1), "posts_count": int64(4)})
 
 	// The model-side read, because the aggregate lands as a raw attribute and a
@@ -372,7 +368,7 @@ func TestWithCountAddsTheAliasedSubselect(t *testing.T) {
 	}
 
 	sql := conn.last().SQL
-	if !strings.Contains(sql, `(select count(*) from "posts" where "posts"."tenant_id" = ? and ("posts"."user_id" = "users"."id")) as "posts_count"`) {
+	if !strings.Contains(sql, `(select count(*) from "posts" where "posts"."tenant_id" = ? and ("users"."id" = "posts"."user_id")) as "posts_count"`) {
 		t.Fatalf("SQL = %q, want the aggregate subselect aliased posts_count, scoped", sql)
 	}
 	if !strings.Contains(sql, `"users".*`) {
@@ -385,11 +381,13 @@ func TestWithCountAddsTheAliasedSubselect(t *testing.T) {
 
 func TestWithLoadsTheRelationOntoEveryModel(t *testing.T) {
 	model, conn := newUserModel()
-	withPosts(model, &fakeRelation{
-		table: "posts", foreign: "posts.user_id", local: "users.id",
-		matched: map[any]any{int64(1): []string{"first"}, int64(2): []string{"second"}},
-	})
+	withPosts(model, conn)
+
 	conn.queue(query.Record{"id": int64(1)}, query.Record{"id": int64(2)})
+	conn.queue(
+		query.Record{"id": int64(10), "user_id": int64(1), "title": "first"},
+		query.Record{"id": int64(20), "user_id": int64(2), "title": "second"},
+	)
 
 	// The model-side read: a loaded relation hangs off the model, and this
 	// entity does not embed one.
@@ -397,12 +395,60 @@ func TestWithLoadsTheRelationOntoEveryModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
+
+	// Two statements for two parents, which is the whole of what an eager load
+	// buys. A third would be the N+1 this exists to prevent.
+	if got := len(conn.sqls()); got != 2 {
+		t.Fatalf("ran %d statements, want 2: %v", got, conn.sqls())
+	}
+	if want := `"posts"."user_id" in (?, ?)`; !strings.Contains(conn.last().SQL, want) {
+		t.Errorf("SQL = %q, want every parent's key in one %s", conn.last().SQL, want)
+	}
+
 	loaded, ok := models[0].GetRelation("posts")
 	if !ok {
 		t.Fatal("the relation was not set on the model")
 	}
-	if loaded.([]string)[0] != "first" {
-		t.Errorf("relation = %v, want the rows matched to this parent", loaded)
+	matched, ok := loaded.([]relations.Model)
+	if !ok {
+		t.Fatalf("relation = %T, want the rows the relation matched", loaded)
+	}
+	if len(matched) != 1 {
+		t.Fatalf("relation = %v rows, want the one post whose user_id is this parent's key", len(matched))
+	}
+	first, ok := Unref[post](matched[0])
+	if !ok {
+		t.Fatal("the matched row is not a post")
+	}
+	if first.Entity.Title != "first" {
+		t.Errorf("relation = %q, want the row matched to this parent", first.Entity.Title)
+	}
+}
+
+// TestWithSeedsTheParentThatMatchedNothing.
+//
+// A parent with no children answers an empty collection, not a relation that
+// was never loaded. It is the difference between "this user has no posts" and
+// "nobody asked", and the caller has no way to tell them apart afterwards --
+// the second one is what makes a lazy load look necessary.
+func TestWithSeedsTheParentThatMatchedNothing(t *testing.T) {
+	model, conn := newUserModel()
+	withPosts(model, conn)
+
+	conn.queue(query.Record{"id": int64(1)}, query.Record{"id": int64(2)})
+	conn.queue(query.Record{"id": int64(10), "user_id": int64(1), "title": "first"})
+
+	models, err := model.NewQuery().With("posts").get(context.Background(), grant())
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	loaded, ok := models[1].GetRelation("posts")
+	if !ok {
+		t.Fatal("the parent that matched nothing reads as a relation that was never loaded")
+	}
+	if matched, ok := loaded.([]relations.Model); !ok || len(matched) != 0 {
+		t.Errorf("relation = %#v, want an empty collection", loaded)
 	}
 }
 
@@ -556,7 +602,7 @@ func TestIncrementRefusesAnAmountThatIsNotANumber(t *testing.T) {
 
 func TestEagerLoadConstraintsNarrowTheSubqueryAndNotTheOuterOne(t *testing.T) {
 	model, conn := newUserModel()
-	withPosts(model, &fakeRelation{table: "posts", foreign: "posts.user_id", local: "users.id"})
+	withPosts(model, conn)
 	conn.queue()
 
 	_, err := model.NewQuery().
@@ -568,7 +614,7 @@ func TestEagerLoadConstraintsNarrowTheSubqueryAndNotTheOuterOne(t *testing.T) {
 	}
 
 	sql := conn.last().SQL
-	if !strings.Contains(sql, `from "posts" where "posts"."tenant_id" = ? and ("posts"."user_id" = "users"."id" and "published" = ?)`) {
+	if !strings.Contains(sql, `from "posts" where "posts"."tenant_id" = ? and ("users"."id" = "posts"."user_id" and "published" = ?)`) {
 		t.Fatalf("SQL = %q, want the constraint inside the subquery, under the subquery's own tenant", sql)
 	}
 	if strings.Contains(sql, `from "users" where "published"`) {

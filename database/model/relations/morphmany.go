@@ -15,6 +15,7 @@ type MorphMany struct {
 // NewMorphMany answers MorphMany::__construct.
 func newMorphMany(query Builder, parent Model, typ, id, localKey string) *MorphMany {
 	relation := &MorphMany{MorphOneOrMany: NewMorphOneOrMany(query, parent, typ, id, localKey)}
+	relation.ExistenceCompareKey = relation.GetExistenceCompareKey
 	relation.SupportsInverseRelations.PossibleInverseRelations = relation.PossibleInverseRelations
 	return relation
 }

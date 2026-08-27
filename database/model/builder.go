@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/database/model/relations"
 	"github.com/arandu-io/hesape/database/query"
 )
 
@@ -1499,10 +1500,26 @@ func (b *Builder[T]) EagerLoadRelations(ctx context.Context, g auth.Grant, rows 
 // eagerLoadRelations is EagerLoadRelations over the models, which is what it
 // needs: a relation is attached to the model, and the row is only where the
 // columns are.
+//
+// The loading itself is relations.EagerLoadRelation, which is four calls and is
+// where eager loading is implemented. Writing it again here would be the second
+// implementation of the one thing that turns N queries into two, and the two
+// would drift on the case neither author tested -- the morph-to that matches
+// its own parents, the relation whose local key is not the primary key.
+//
+// The models are handed over as refs, which is the same pointer seen through the
+// interface a relation consumes: what the relation sets is set on the model the
+// caller holds.
 func (b *Builder[T]) eagerLoadRelations(ctx context.Context, g auth.Grant, models models[T]) error {
 	if len(models) == 0 {
 		return nil
 	}
+
+	refs := make([]relations.Model, 0, len(models))
+	for _, model := range models {
+		refs = append(refs, model.Ref())
+	}
+
 	for _, name := range b.GetEagerLoads() {
 		if strings.Contains(name, ".") {
 			// A nested eager load is loaded by the query that fetches its parent,
@@ -1513,15 +1530,25 @@ func (b *Builder[T]) eagerLoadRelations(ctx context.Context, g auth.Grant, model
 		if err != nil {
 			return err
 		}
-		matched, err := relation.Match(g, models.ModelKeys(), b.eagerLoad[name])
-		if err != nil {
+		if _, err := relations.EagerLoadRelation(ctx, g, refs, name, relation, onRelationQuery(b.eagerLoad[name])); err != nil {
 			return err
-		}
-		for _, model := range models {
-			model.SetRelation(name, matched[model.GetKey()])
 		}
 	}
 	return nil
+}
+
+// onRelationQuery adapts what With recorded to what the eager loader applies.
+//
+// WithConstraints takes func(*query.Builder) because a caller narrowing an
+// eager load is writing wheres, and the loader hands the relation itself so that
+// a constraint could reach more than its query. This is the step between, and it
+// is applied after the batch's own `in (...)` for the reason the loader
+// documents.
+func onRelationQuery(callback func(*query.Builder)) func(relations.Relation) {
+	if callback == nil {
+		return nil
+	}
+	return func(rel relations.Relation) { callback(rel.GetQuery().GetQuery()) }
 }
 
 // Limit sets the row limit, forwarded to the underlying query.
