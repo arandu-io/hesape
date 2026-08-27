@@ -70,7 +70,7 @@ func TestASuccessfulRequestFiresRequestSendingThenResponseReceived(t *testing.T)
 		return NewResponseFromBytes(201, []byte(`{"ok":true}`), nil).HTTPResponse(), nil
 	})
 
-	_, err := f.CreatePendingRequest().Get("https://api.example.com/users", nil)
+	_, err := f.CreatePendingRequest().Get(t.Context(), "https://api.example.com/users", nil)
 	assertNoErr(t, err, "Get")
 
 	assertEventNames(t, d, "RequestSending", "ResponseReceived")
@@ -104,7 +104,7 @@ func TestATransportFailureFiresConnectionFailed(t *testing.T) {
 	d := &recordingDispatcher{}
 	f := NewFactory(client).SetDispatcher(d)
 
-	_, err := f.CreatePendingRequest().Get(url, nil)
+	_, err := f.CreatePendingRequest().Get(t.Context(), url, nil)
 	assertErr(t, err, "a request to a closed server should fail")
 
 	assertEventNames(t, d, "RequestSending", "ConnectionFailed")
@@ -130,7 +130,7 @@ func TestAStrayRequestDoesNotFireConnectionFailed(t *testing.T) {
 		return nil, nil
 	})
 
-	_, err := f.CreatePendingRequest().Get("https://api.example.com/forbidden", nil)
+	_, err := f.CreatePendingRequest().Get(t.Context(), "https://api.example.com/forbidden", nil)
 	assertErr(t, err, "an unstubbed request should fail")
 
 	var stray *StrayRequestError
@@ -152,7 +152,7 @@ func TestEveryAttemptOfARetriedRequestFiresItsOwnEvents(t *testing.T) {
 
 	pr := f.CreatePendingRequest()
 	pr.Retry(3, 0, func(resp *http.Response, err error) bool { return true }, false)
-	_, _ = pr.Get("https://api.example.com/flaky", nil)
+	_, _ = pr.Get(t.Context(), "https://api.example.com/flaky", nil)
 
 	assertEventNames(t, d,
 		"RequestSending", "ResponseReceived",
@@ -169,7 +169,7 @@ func TestARequestWithoutADispatcherSends(t *testing.T) {
 		return NewResponseFromBytes(200, []byte(`{}`), nil).HTTPResponse(), nil
 	})
 
-	resp, err := f.CreatePendingRequest().Get("https://api.example.com/quiet", nil)
+	resp, err := f.CreatePendingRequest().Get(t.Context(), "https://api.example.com/quiet", nil)
 	assertNoErr(t, err, "Get")
 	assertEqual(t, resp.Status(), 200, "status")
 	if f.GetDispatcher() != nil {

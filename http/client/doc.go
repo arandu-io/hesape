@@ -9,6 +9,14 @@
 // application and the test: a test calls Factory.Fake to intercept
 // requests and Factory.AssertSent to verify them.
 //
+// # Cancellation
+//
+// Every verb takes a context.Context first, and every attempt is made under a
+// context derived from it. Cancelling it ends the request in flight, and ends
+// the wait between two retried attempts, rather than holding the caller until
+// the destination decides to answer. PendingRequest.Timeout is a ceiling laid
+// on top of that context, applied per attempt.
+//
 // # What a request may reach
 //
 // A request built here carries a deadline, reads a bounded body, goes out over

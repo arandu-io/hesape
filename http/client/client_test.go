@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -58,7 +59,7 @@ func TestFactoryFakeMatchesRequest(t *testing.T) {
 	})
 
 	pr := f.CreatePendingRequest()
-	resp, err := pr.Get("https://api.example.com/users", nil)
+	resp, err := pr.Get(t.Context(), "https://api.example.com/users", nil)
 	assertNoErr(t, err, "Get")
 	assertNotNil(t, resp, "response")
 	assertEqual(t, called, true, "stub was not called")
@@ -84,7 +85,7 @@ func TestFactoryFakeMultipleStubs(t *testing.T) {
 	})
 
 	pr := f.CreatePendingRequest()
-	resp, err := pr.Get("https://api.example.com/users", nil)
+	resp, err := pr.Get(t.Context(), "https://api.example.com/users", nil)
 	assertNoErr(t, err, "Get users")
 	assertEqual(t, resp.Status(), 200, "users status")
 	assertEqual(t, len(order) >= 1, true, "at least one stub called")
@@ -109,7 +110,7 @@ func TestFactoryFakeDoesNotMatch(t *testing.T) {
 
 	f.client = server.Client()
 	pr := f.CreatePendingRequest()
-	resp, err := pr.Get(server.URL+"/ok", nil)
+	resp, err := pr.Get(t.Context(), server.URL+"/ok", nil)
 	assertNoErr(t, err, "Get real server")
 	assertEqual(t, resp.Successful(), true, "successful")
 	body, _ := resp.JSON("", nil)
@@ -207,7 +208,7 @@ func TestPreventStrayRequestsBlocksUnstubbedRequest(t *testing.T) {
 	// No stubs registered.
 
 	pr := f.CreatePendingRequest()
-	_, err := pr.Get("https://api.example.com/forbidden", nil)
+	_, err := pr.Get(t.Context(), "https://api.example.com/forbidden", nil)
 	assertErr(t, err, "unstubbed request should fail")
 	if err != nil {
 		msg := err.Error()
@@ -225,7 +226,7 @@ func TestPreventStrayRequestsStubbedRequestsSucceed(t *testing.T) {
 	})
 
 	pr := f.CreatePendingRequest()
-	resp, err := pr.Get("https://api.example.com/ok", nil)
+	resp, err := pr.Get(t.Context(), "https://api.example.com/ok", nil)
 	assertNoErr(t, err, "stubbed request should succeed")
 	assertEqual(t, resp.Status(), 200, "status")
 }
@@ -248,7 +249,7 @@ func TestAssertSent(t *testing.T) {
 	f.Record()
 
 	pr := f.CreatePendingRequest()
-	resp, err := pr.Get("https://api.example.com/users", nil)
+	resp, err := pr.Get(t.Context(), "https://api.example.com/users", nil)
 	// Ignore connection errors since there's no real server.
 	_ = resp
 	_ = err
@@ -274,7 +275,7 @@ func TestAssertSentWithFake(t *testing.T) {
 	})
 
 	pr := f.CreatePendingRequest()
-	resp, err := pr.Get("https://api.example.com/users", nil)
+	resp, err := pr.Get(t.Context(), "https://api.example.com/users", nil)
 	assertNoErr(t, err, "stubbed Get")
 	assertEqual(t, resp.Status(), 200, "status")
 
@@ -297,7 +298,7 @@ func TestAssertNotSent(t *testing.T) {
 	})
 
 	pr := f.CreatePendingRequest()
-	pr.Get("https://api.example.com/users", nil)
+	pr.Get(t.Context(), "https://api.example.com/users", nil)
 
 	assertErr := f.AssertNotSent(func(r *http.Request) bool {
 		return r.URL.String() == "https://api.example.com/posts"
@@ -321,9 +322,9 @@ func TestAssertSentCount(t *testing.T) {
 	})
 
 	pr := f.CreatePendingRequest()
-	pr.Get("https://api.example.com/a", nil)
-	pr.Get("https://api.example.com/b", nil)
-	pr.Get("https://api.example.com/c", nil)
+	pr.Get(t.Context(), "https://api.example.com/a", nil)
+	pr.Get(t.Context(), "https://api.example.com/b", nil)
+	pr.Get(t.Context(), "https://api.example.com/c", nil)
 
 	assertNoErr(t, f.AssertSentCount(3), "count should be 3")
 	assertErr(t, f.AssertSentCount(2), "count should not be 2")
@@ -337,9 +338,9 @@ func TestAssertSentInOrder(t *testing.T) {
 	})
 
 	pr := f.CreatePendingRequest()
-	pr.Get("https://api.example.com/1", nil)
-	pr.Get("https://api.example.com/2", nil)
-	pr.Get("https://api.example.com/3", nil)
+	pr.Get(t.Context(), "https://api.example.com/1", nil)
+	pr.Get(t.Context(), "https://api.example.com/2", nil)
+	pr.Get(t.Context(), "https://api.example.com/3", nil)
 
 	assertNoErr(t, f.AssertSentInOrder(
 		func(r *http.Request) bool { return r.URL.String() == "https://api.example.com/1" },
@@ -375,7 +376,7 @@ func TestRetryAttemptsAllRetries(t *testing.T) {
 		return resp != nil && resp.StatusCode >= 500
 	}, true)
 
-	resp, err := pr.Get(server.URL, nil)
+	resp, err := pr.Get(t.Context(), server.URL, nil)
 	assertNoErr(t, err, "retry should eventually succeed")
 	assertEqual(t, resp.Status(), 200, "final status should be 200")
 }
@@ -400,7 +401,7 @@ func TestRetryBackoffWaits(t *testing.T) {
 		return resp != nil && resp.StatusCode >= 500
 	}, true)
 
-	pr.Get(server.URL, nil)
+	pr.Get(t.Context(), server.URL, nil)
 	elapsed := time.Since(start)
 
 	if elapsed < 100*time.Millisecond {
@@ -420,9 +421,9 @@ func TestPoolConcurrentRequests(t *testing.T) {
 	f := NewFactory(server.Client())
 	pool := f.Pool()
 
-	pool.As("a").Get(server.URL+"/a", nil)
-	pool.As("b").Get(server.URL+"/b", nil)
-	pool.As("c").Get(server.URL+"/c", nil)
+	pool.As("a").Get(t.Context(), server.URL+"/a", nil)
+	pool.As("b").Get(t.Context(), server.URL+"/b", nil)
+	pool.As("c").Get(t.Context(), server.URL+"/c", nil)
 
 	results, err := pool.Send(3)
 	assertNoErr(t, err, "pool send should succeed")
@@ -451,8 +452,8 @@ func TestBatchConcurrentRequests(t *testing.T) {
 	// Factory.Pool already answers with a *Pool; Batch wraps one.
 	pool := f.Pool()
 
-	pool.As("x").Get(server.URL+"/x", nil)
-	pool.As("y").Get(server.URL+"/y", nil)
+	pool.As("x").Get(t.Context(), server.URL+"/x", nil)
+	pool.As("y").Get(t.Context(), server.URL+"/y", nil)
 
 	results, err := pool.Send(2)
 	assertNoErr(t, err, "batch send")
@@ -711,7 +712,7 @@ func TestAnAsyncRequestLeavesAPromiseAndSendsWhenItIsWaitedOn(t *testing.T) {
 	})
 
 	pending := f.CreatePendingRequest().Async(true)
-	resp, err := pending.Get("https://example.test/things", nil)
+	resp, err := pending.Get(t.Context(), "https://example.test/things", nil)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -760,13 +761,13 @@ func TestStubUrlOnlyAnswersForTheUrlItWasGiven(t *testing.T) {
 		return f.Response("yes", 200, nil), nil
 	})
 
-	resp, err := f.CreatePendingRequest().Get("https://example.test/allowed/thing", nil)
+	resp, err := f.CreatePendingRequest().Get(t.Context(), "https://example.test/allowed/thing", nil)
 	if err != nil {
 		t.Fatalf("the stubbed URL failed: %v", err)
 	}
 	assertEqual(t, resp.Body(), "yes", "stubbed body")
 
-	if _, err := f.CreatePendingRequest().Get("https://example.test/other", nil); err == nil {
+	if _, err := f.CreatePendingRequest().Get(t.Context(), "https://example.test/other", nil); err == nil {
 		t.Fatal("a URL the stub does not match should have been a stray request")
 	}
 }
@@ -775,7 +776,7 @@ func TestFailedConnectionAndFailedRequestAreStubsThatFail(t *testing.T) {
 	f := NewFactory(nil)
 
 	f.Fake(f.FailedConnection(""))
-	_, err := f.CreatePendingRequest().Get("https://example.test/thing", nil)
+	_, err := f.CreatePendingRequest().Get(t.Context(), "https://example.test/thing", nil)
 	if err == nil || !strings.Contains(err.Error(), "example.test") {
 		t.Fatalf("error = %v, want one naming the host", err)
 	}
@@ -883,7 +884,7 @@ func TestRetryWithoutAWhenCallbackStillRetries(t *testing.T) {
 	f := NewFactory(server.Client())
 	p := f.CreatePendingRequest().Retry(3, time.Millisecond, nil, true)
 
-	resp, err := p.Get(server.URL, nil)
+	resp, err := p.Get(t.Context(), server.URL, nil)
 	assertNoErr(t, err, "the third attempt succeeds")
 	assertEqual(t, resp.Status(), 200, "final status")
 	assertEqual(t, int(attempts.Load()), 3, "attempts")
@@ -906,7 +907,7 @@ func TestRetryMakesAtMostTheNumberOfAttemptsAskedFor(t *testing.T) {
 		return true
 	}, true)
 
-	_, err := p.Get(server.URL, nil)
+	_, err := p.Get(t.Context(), server.URL, nil)
 	assertErr(t, err, "every attempt failed, so the exception is returned")
 	assertEqual(t, int(attempts.Load()), 3, "attempts")
 }
@@ -920,7 +921,7 @@ func TestRetryRepeatsAConnectionError(t *testing.T) {
 	f := NewFactory(&http.Client{Transport: transport})
 	p := f.CreatePendingRequest().Retry(3, time.Millisecond, nil, true)
 
-	_, err := p.Get("https://example.test/thing", nil)
+	_, err := p.Get(t.Context(), "https://example.test/thing", nil)
 	assertErr(t, err, "the connection never came up")
 	assertEqual(t, int(transport.attempts.Load()), 3, "attempts")
 }
@@ -943,7 +944,7 @@ func TestRetryDoesNotRepeatWhenTheCallbackSaysNot(t *testing.T) {
 		return false
 	}, false)
 
-	resp, err := p.Get(server.URL, nil)
+	resp, err := p.Get(t.Context(), server.URL, nil)
 	assertNoErr(t, err, "throw is off, so the response comes back")
 	assertEqual(t, resp.Status(), 429, "status")
 	assertEqual(t, int(attempts.Load()), 1, "attempts")
@@ -963,11 +964,264 @@ func TestStrayPreventionHoldsWithNoStubsRegistered(t *testing.T) {
 	f.PreventStrayRequests(true)
 
 	pr := f.CreatePendingRequest()
-	_, err := pr.Get("https://api.example.com/forbidden", nil)
+	_, err := pr.Get(t.Context(), "https://api.example.com/forbidden", nil)
 	assertErr(t, err, "a request left with prevention on and no stub registered")
 
 	var stray *StrayRequestError
 	if !errors.As(err, &stray) {
 		t.Fatalf("the request was attempted rather than refused: %T: %v", err, err)
+	}
+}
+
+// --- Cancellation ---
+
+// failingStub answers every request with a 500 and counts what reached it,
+// which is the shape both the retry filter and the retry delay are measured
+// against.
+func failingStub(counter *atomic.Int32) StubCallback {
+	return func(*http.Request) (*http.Response, error) {
+		counter.Add(1)
+		return NewResponseFromBytes(500, nil, nil).HTTPResponse(), nil
+	}
+}
+
+// TestCancellingTheContextEndsTheRequestInFlight is what the context parameter
+// exists for. The destination accepts the connection and does not answer, and
+// the caller walks away: the error is the cancellation and it arrives at once,
+// rather than when the destination or the request deadline decides.
+//
+// The deadline used to be built on context.Background(), so nothing a caller
+// held could reach the request and this test could not have been written.
+func TestCancellingTheContextEndsTheRequestInFlight(t *testing.T) {
+	// Closed by the deferred call below, so the handler returns and Close does
+	// not wait on it. Defers run last-registered first, which puts the close
+	// before the shutdown.
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		<-release
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	defer close(release)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	// A deadline far past the point the caller gives up, so that what ends the
+	// request is the cancellation and cannot be anything else.
+	f := NewFactory(nil).AllowInternalHosts(loopbackHost)
+	pr := f.CreatePendingRequest().Timeout(time.Minute)
+
+	start := time.Now()
+	_, err := pr.Get(ctx, server.URL, nil)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("the cancellation should have come back, got %T: %v", err, err)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("the request took %v to give up, which is the destination's answer and not the caller's", elapsed)
+	}
+}
+
+// TestCancellingTheContextEndsTheWaitBetweenAttempts. The delay is part of the
+// call, so it ends with the call. A plain sleep held a caller who had already
+// given up for the whole delay, and a long delay is exactly when that happens.
+func TestCancellingTheContextEndsTheWaitBetweenAttempts(t *testing.T) {
+	var sent atomic.Int32
+	f := NewFactory(nil)
+	f.Fake(failingStub(&sent))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	pr := f.CreatePendingRequest().Retry(3, time.Minute, nil, true)
+
+	start := time.Now()
+	_, err := pr.Get(ctx, "https://example.test/flaky", nil)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("the cancellation should have come back, got %T: %v", err, err)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("the wait between attempts ran for %v after the caller gave up", elapsed)
+	}
+	assertEqual(t, int(sent.Load()), 1, "attempts made before the cancellation")
+}
+
+// TestADeadlineOnTheCallersContextEndsTheRequest. A deadline shorter than the
+// request timeout is the caller's, and it wins.
+func TestADeadlineOnTheCallersContextEndsTheRequest(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		<-release
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	defer close(release)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+
+	f := NewFactory(nil).AllowInternalHosts(loopbackHost)
+	_, err := f.CreatePendingRequest().Timeout(time.Minute).Get(ctx, server.URL, nil)
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("the caller's deadline should have ended the request, got %T: %v", err, err)
+	}
+}
+
+// TestANilContextIsRefused. A call that cannot be cancelled is what the
+// parameter exists to prevent, so a nil one is an error rather than a
+// background context quietly put in its place.
+func TestANilContextIsRefused(t *testing.T) {
+	f := NewFactory(nil)
+	var sent atomic.Int32
+	f.Fake(failingStub(&sent))
+
+	_, err := f.CreatePendingRequest().Send(nil, "GET", "https://example.test/thing", nil, nil)
+	assertErr(t, err, "a nil context")
+	assertEqual(t, int(sent.Load()), 0, "requests that left")
+}
+
+// --- Retry and the methods that may be repeated ---
+
+// TestARetriedPostIsSentOnceAndARetriedGetIsRepeated is the filter at the size
+// it matters: the same Retry, the same failure, and two methods. A repeated
+// POST is a second write, and the failure that provokes the repeat is exactly
+// the case where the first one may already have been applied.
+func TestARetriedPostIsSentOnceAndARetriedGetIsRepeated(t *testing.T) {
+	var sent atomic.Int32
+	f := NewFactory(nil)
+	f.Fake(failingStub(&sent))
+
+	post := f.CreatePendingRequest().Retry(3, time.Millisecond, nil, false)
+	resp, err := post.Post(t.Context(), "https://example.test/orders", map[string]any{"amount": 10})
+	assertNoErr(t, err, "throw is off, so the failed response comes back")
+	assertEqual(t, resp.Status(), 500, "status")
+	assertEqual(t, int(sent.Load()), 1, "a POST is sent once")
+
+	sent.Store(0)
+	get := f.CreatePendingRequest().Retry(3, time.Millisecond, nil, false)
+	_, err = get.Get(t.Context(), "https://example.test/orders", nil)
+	assertNoErr(t, err, "throw is off, so the failed response comes back")
+	assertEqual(t, int(sent.Load()), 3, "a GET is repeated")
+}
+
+// TestRetryRepeatsOnlyTheMethodsThatAreIdempotent walks the closed list, and
+// the two entries at the end of it: a method this package does not know, and a
+// known one written in lower case. Neither carries a promise this code can
+// read, and the safe reading of no promise is to send it once.
+func TestRetryRepeatsOnlyTheMethodsThatAreIdempotent(t *testing.T) {
+	for _, c := range []struct {
+		method   string
+		attempts int
+	}{
+		{"GET", 3},
+		{"HEAD", 3},
+		{"PUT", 3},
+		{"DELETE", 3},
+		{"OPTIONS", 3},
+		{"TRACE", 3},
+		{"POST", 1},
+		{"PATCH", 1},
+		{"CONNECT", 1},
+		{"PURGE", 1},
+		{"get", 1},
+	} {
+		t.Run(c.method, func(t *testing.T) {
+			var sent atomic.Int32
+			f := NewFactory(nil)
+			f.Fake(failingStub(&sent))
+
+			pr := f.CreatePendingRequest().Retry(3, time.Millisecond, nil, false)
+			_, err := pr.Send(t.Context(), c.method, "https://example.test/thing", nil, nil)
+			assertNoErr(t, err, "throw is off, so the failed response comes back")
+			assertEqual(t, int(sent.Load()), c.attempts, "attempts")
+		})
+	}
+}
+
+// TestRetryNonIdempotentMethodsRepeatsThePostTheCallerDeclaredSafe. The filter
+// is a default and not a wall: an endpoint that deduplicates is one the caller
+// knows about and this code cannot read off the request.
+func TestRetryNonIdempotentMethodsRepeatsThePostTheCallerDeclaredSafe(t *testing.T) {
+	var sent atomic.Int32
+	f := NewFactory(nil)
+	f.Fake(failingStub(&sent))
+
+	pr := f.CreatePendingRequest().
+		Retry(3, time.Millisecond, nil, false).
+		RetryNonIdempotentMethods()
+
+	_, err := pr.Post(t.Context(), "https://example.test/orders", map[string]any{"amount": 10})
+	assertNoErr(t, err, "throw is off, so the failed response comes back")
+	assertEqual(t, int(sent.Load()), 3, "attempts")
+}
+
+// TestAPostThatIsNotRepeatedStillThrows. Throwing is keyed to what the caller
+// asked for, not to what the method allowed: refusing to repeat a POST is not
+// a reason to also stop reporting that it failed.
+func TestAPostThatIsNotRepeatedStillThrows(t *testing.T) {
+	var sent atomic.Int32
+	f := NewFactory(nil)
+	f.Fake(failingStub(&sent))
+
+	pr := f.CreatePendingRequest().Retry(3, time.Millisecond, nil, true)
+	_, err := pr.Post(t.Context(), "https://example.test/orders", nil)
+
+	assertErr(t, err, "the failure of a POST that was not repeated")
+	var exception *RequestException
+	if !errors.As(err, &exception) {
+		t.Fatalf("the failure should be the response's own exception, got %T: %v", err, err)
+	}
+	assertEqual(t, int(sent.Load()), 1, "attempts")
+}
+
+// TestThePoolSendsEachRequestUnderTheContextItsVerbWasGiven. A pooled verb
+// records instead of sending, and the context has to be recorded with it or
+// the request the pool makes is one nobody can cancel.
+func TestThePoolSendsEachRequestUnderTheContextItsVerbWasGiven(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slow" {
+			<-release
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	defer close(release)
+
+	cancelled, cancel := context.WithCancel(t.Context())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	f := NewFactory(nil).AllowInternalHosts(loopbackHost)
+	pool := f.Pool()
+	pool.As("quick").Get(t.Context(), server.URL+"/quick", nil)
+	pool.As("slow").Get(cancelled, server.URL+"/slow", nil)
+
+	start := time.Now()
+	results, err := pool.Send(2)
+	elapsed := time.Since(start)
+
+	assertErr(t, err, "the cancelled request failed, so the pool reports a failure")
+	if elapsed > 5*time.Second {
+		t.Fatalf("the pool waited %v for a request its caller had cancelled", elapsed)
+	}
+	if _, ok := results["quick"]; !ok {
+		t.Fatalf("the request that was not cancelled should have answered; got keys %v", mapKeys(results))
+	}
+	if _, ok := results["slow"]; ok {
+		t.Fatal("the cancelled request should not have produced a response")
 	}
 }
