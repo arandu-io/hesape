@@ -22,7 +22,11 @@
 // request layer above this one. Constructing the handler happens there now, and
 // a controller action reaches a route the same way any other handler does:
 //
-//	r.Get("/dashboard", hhttp.Action(dashboard.Index)).Name("dashboard")
+//	r.Get("/dashboard", adapt(dashboard.Index)).Name("dashboard")
+//
+// where adapt is the adapter that layer supplies. This package neither declares
+// it nor names one, because the type it builds is the one this package must not
+// import.
 //
 // Resource takes the adaptation as an argument for the same reason, which is
 // what lets this package register controller routes without importing the type
