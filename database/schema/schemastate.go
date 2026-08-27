@@ -2,21 +2,20 @@ package schema
 
 import (
 	"context"
-	"os"
-	"os/exec"
-	"sort"
 	"strings"
+
+	"github.com/arandu-io/hesape/process"
 )
 
 // SchemaState is the pair of operations behind `schema:dump` and the squashed
 // migration:
-// write the whole schema to a file, and load one back. Both shell out to the
-// engine's own tool -- mysqldump, pg_dump, sqlite3 -- because no driver can
-// produce a dump another server will accept.
+// write the whole schema to a file, and load one back. Both run the engine's own
+// tool -- mysqldump, pg_dump, sqlite3 -- because no driver can produce a dump
+// another server will accept.
 //
 // Dump and Load are the interface; everything else is BaseSchemaState, which a
-// driver's state embeds. The process factory is a field so a test can substitute
-// a command that runs nothing.
+// driver's state embeds. The process factory is a field so a test can fake the
+// tools instead of needing them installed.
 type SchemaState interface {
 	// Dump writes the connection's schema to path.
 	Dump(ctx context.Context, connection Connection, path string) error
@@ -34,47 +33,54 @@ var (
 	_ SchemaState = (*SqliteSchemaState)(nil)
 )
 
-// ProcessFactory builds the command a schema state runs.
-//
-// It is a named type rather than a bare signature because three schema states
-// and their tests pass it around, and because it is the seam a test uses to
-// substitute a command that touches no database.
-type ProcessFactory func(ctx context.Context, name string, args ...string) *exec.Cmd
-
 // BaseSchemaState is the half of a SchemaState no driver disagrees about: the
 // connection, the migration table's name, the process factory and the output
 // handler. A driver's schema state embeds it and adds Dump and Load.
 type BaseSchemaState struct {
 	connection     Connection
 	migrationTable string
-	processFactory ProcessFactory
+	factory        *process.Factory
 	output         func(line string)
 }
 
 // NewBaseSchemaState builds a BaseSchemaState for connection, with the
 // migration table named "migrations" until WithMigrationTable overrides it. A
-// nil processFactory defaults to exec.CommandContext, and the output handler
-// defaults to one that discards every line.
-func NewBaseSchemaState(connection Connection, processFactory ProcessFactory) *BaseSchemaState {
-	if processFactory == nil {
-		processFactory = exec.CommandContext
+// nil factory means a new one, and the output handler defaults to one that
+// discards every line.
+func NewBaseSchemaState(connection Connection, factory *process.Factory) *BaseSchemaState {
+	if factory == nil {
+		factory = process.NewFactory()
 	}
 	return &BaseSchemaState{
 		connection:     connection,
 		migrationTable: "migrations",
-		processFactory: processFactory,
+		factory:        factory,
 		output:         func(string) {},
 	}
 }
 
-// MakeProcess builds the *exec.Cmd for name and args through the installed
-// process factory.
+// MakeProcess describes the program name and args, without starting it.
 //
 // It takes the program and its arguments apart rather than a shell string,
 // because a shell string assembled from a database configuration is an
-// injection with a familiar shape.
-func (s *BaseSchemaState) MakeProcess(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return s.processFactory(ctx, name, args...)
+// injection with a familiar shape -- and the process package it goes through has
+// no string form to hand a shell.
+//
+// The environment is what a client program has to be told without it appearing
+// on a command line: PGPASSWORD and MYSQL_PWD are how pg_dump and mysqldump take
+// a password without it being visible in `ps`. It is added to the environment
+// this process already has rather than replacing it, because these programs also
+// read PGHOST, PGSSLMODE, HOME and the rest, and a schema dump that ignored the
+// operator's environment would fail in ways that have nothing to do with the
+// schema.
+//
+// There is no deadline: a dump takes as long as the database is big, and a limit
+// measured in seconds is a limit that fails on the databases worth dumping.
+func (s *BaseSchemaState) MakeProcess(environment map[string]string, name string, args ...string) *process.PendingProcess {
+	return s.factory.NewPendingProcess().
+		Command(append([]string{name}, args...)...).
+		Env(environment).
+		Forever()
 }
 
 // HasMigrationTable reports whether the connection's migration table exists.
@@ -112,33 +118,6 @@ func (s *BaseSchemaState) Output(line string) { s.output(line) }
 
 // GetConnection returns the connection the state works against.
 func (s *BaseSchemaState) GetConnection() Connection { return s.connection }
-
-// processEnvironment builds the environment a dump or load command needs: the
-// values it must be told without them appearing on a command line.
-//
-// The ordinary arguments are passed as arguments -- no shell is involved at all,
-// so there is nothing to interpolate and nothing to quote -- and the environment
-// is used only for what the client programs read from it, which is the password.
-// PGPASSWORD and MYSQL_PWD are how pg_dump and mysqldump take one without it
-// being visible in `ps`.
-//
-// The parent environment is inherited, because these programs also read PGHOST,
-// PGSSLMODE, HOME and the rest, and a schema dump that ignored the operator's
-// environment would fail in ways that have nothing to do with the schema.
-func (s *BaseSchemaState) processEnvironment(extra map[string]string) []string {
-	environment := os.Environ()
-
-	keys := make([]string, 0, len(extra))
-	for key := range extra {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	for _, key := range keys {
-		environment = append(environment, key+"="+extra[key])
-	}
-	return environment
-}
 
 // configuredHost returns the connection's configured host, taking the first
 // entry when it is a comma-separated list.

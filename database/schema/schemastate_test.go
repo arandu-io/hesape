@@ -3,12 +3,12 @@ package schema_test
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/arandu-io/hesape/database/schema"
+	"github.com/arandu-io/hesape/process"
 )
 
 // configuredConn is a schema.Connection carrying a database configuration, so a
@@ -28,35 +28,37 @@ func (c *configuredConn) GetConfig(option string) string { return c.config[optio
 func (c *configuredConn) GetDriverName() string          { return c.driver }
 func (c *configuredConn) IsMaria() bool                  { return c.maria }
 
-// recorder is a schema.ProcessFactory that records every command it was asked
-// for and runs a harmless stand-in instead.
+// faked is a process factory that answers every command with output and records
+// what it was asked for, and refuses to let anything really run.
 //
-// The stand-in is `cat` reading nothing, which exits zero and writes the given
-// output. What is under test is the command line each state assembles and where
-// it sends the bytes -- not whether pg_dump is installed on the machine running
-// the tests, which it usually is not.
-type recorder struct {
-	commands [][]string
-	stdout   string
-	envs     [][]string
+// What is under test is the command line each state assembles and where it sends
+// the bytes -- not whether pg_dump is installed on the machine running the tests,
+// which it usually is not. PreventStrayProcesses is what turns "this state built
+// a command the fake does not cover" into a named failure rather than a call to
+// a program that is not there.
+func faked(output string) *process.Factory {
+	return process.NewFactory().
+		Fake(process.FakeHandler{Command: "*", Result: output}).
+		PreventStrayProcesses()
 }
 
-func (r *recorder) factory(ctx context.Context, name string, args ...string) *exec.Cmd {
-	r.commands = append(r.commands, append([]string{name}, args...))
-
-	command := exec.CommandContext(ctx, "printf", "%s", r.stdout)
-	r.envs = append(r.envs, nil)
-	return command
-}
-
-func (r *recorder) last() []string {
-	if len(r.commands) == 0 {
-		return nil
+// last is the command line of the most recent process, or the empty string.
+func last(factory *process.Factory) string {
+	ran := factory.Recorded()
+	if len(ran) == 0 {
+		return ""
 	}
-	return r.commands[len(r.commands)-1]
+	return ran[len(ran)-1]
 }
 
-func joined(command []string) string { return strings.Join(command, " ") }
+// program is the first word of a command line, which is the program that ran.
+func program(commandLine string) string {
+	fields := strings.Fields(commandLine)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
 
 // TestSqliteSchemaStateDumpStripsInternalTables is the reason the dump is
 // filtered at all: sqlite_sequence comes back from .schema, and a dump that
@@ -64,11 +66,11 @@ func joined(command []string) string { return strings.Join(command, " ") }
 func TestSqliteSchemaStateDumpStripsInternalTables(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "schema.sql")
 
-	factory := &recorder{stdout: "CREATE TABLE sqlite_sequence(name,seq);\nCREATE TABLE users (id integer);\n"}
+	factory := faked("CREATE TABLE sqlite_sequence(name,seq);\nCREATE TABLE users (id integer);\n")
 	connection := newConfiguredConn("sqlite", map[string]string{"database": "/tmp/app.sqlite"})
 	connection.scalar = nil
 
-	state := schema.NewSqliteSchemaState(connection, factory.factory)
+	state := schema.NewSqliteSchemaState(connection, factory)
 
 	if err := state.Dump(context.Background(), connection, path); err != nil {
 		t.Fatalf("Dump: %v", err)
@@ -86,8 +88,10 @@ func TestSqliteSchemaStateDumpStripsInternalTables(t *testing.T) {
 		t.Errorf("the dump lost the application's table:\n%s", written)
 	}
 
-	if got := joined(factory.commands[0]); !strings.Contains(got, "sqlite3 /tmp/app.sqlite .schema --indent") {
-		t.Errorf("command was %q, want the sqlite3 .schema dot-command", got)
+	// The dot-command is one argument, so the command line renders it quoted:
+	// it is a single word handed to sqlite3, not two words handed to a shell.
+	if got := factory.Recorded()[0]; got != `sqlite3 /tmp/app.sqlite ".schema --indent"` {
+		t.Errorf("command was %q, want the sqlite3 .schema dot-command as one argument", got)
 	}
 }
 
@@ -100,18 +104,16 @@ func TestSqliteSchemaStateLoadUsesTheConnectionInMemory(t *testing.T) {
 		t.Fatalf("writing the schema file: %v", err)
 	}
 
-	factory := &recorder{}
+	factory := faked("")
 	connection := newConfiguredConn("sqlite", map[string]string{"database": ":memory:"})
 
-	state := schema.NewSqliteSchemaState(connection, factory.factory)
+	state := schema.NewSqliteSchemaState(connection, factory)
 
 	if err := state.Load(context.Background(), path); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if len(factory.commands) != 0 {
-		t.Errorf("an in-memory load shelled out to %v, and the second process cannot see the database", factory.commands)
-	}
+	factory.AssertNothingRan(t)
 	if len(connection.statements) != 1 || !strings.Contains(connection.statements[0], "create table users") {
 		t.Errorf("statements were %v, want the schema file run through the connection", connection.statements)
 	}
@@ -122,19 +124,19 @@ func TestSqliteSchemaStateLoadUsesTheConnectionInMemory(t *testing.T) {
 func TestPostgresDumpCommandCarriesNoOwnerAndNoACL(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "schema.sql")
 
-	factory := &recorder{}
+	factory := faked("")
 	connection := newConfiguredConn("pgsql", map[string]string{
 		"host": "db.internal", "port": "5432",
 		"username": "app", "password": "s3cret", "database": "acme",
 	})
 
-	state := schema.NewPostgresSchemaState(connection, factory.factory)
+	state := schema.NewPostgresSchemaState(connection, factory)
 
 	if err := state.Dump(context.Background(), connection, path); err != nil {
 		t.Fatalf("Dump: %v", err)
 	}
 
-	got := joined(factory.commands[0])
+	got := factory.Recorded()[0]
 	for _, want := range []string{
 		"pg_dump", "--no-owner", "--no-acl", "--schema-only",
 		"--host=db.internal", "--port=5432", "--username=app", "--dbname=acme",
@@ -161,13 +163,13 @@ func TestPostgresLoadPicksTheToolByExtension(t *testing.T) {
 		"/tmp/schema.sql":  "psql",
 		"/tmp/schema.dump": "pg_restore",
 	} {
-		factory := &recorder{}
-		state := schema.NewPostgresSchemaState(connection, factory.factory)
+		factory := faked("")
+		state := schema.NewPostgresSchemaState(connection, factory)
 
 		if err := state.Load(context.Background(), path); err != nil {
 			t.Fatalf("Load(%s): %v", path, err)
 		}
-		if got := factory.last()[0]; got != want {
+		if got := program(last(factory)); got != want {
 			t.Errorf("Load(%s) ran %q, want %q", path, got, want)
 		}
 	}
@@ -184,8 +186,8 @@ func TestMySqlDumpOmitsGtidPurgedOnMaria(t *testing.T) {
 	for _, maria := range []bool{false, true} {
 		connection.maria = maria
 
-		factory := &recorder{}
-		state := schema.NewMySqlSchemaState(connection, factory.factory)
+		factory := faked("")
+		state := schema.NewMySqlSchemaState(connection, factory)
 		path := filepath.Join(t.TempDir(), "schema.sql")
 		if err := os.WriteFile(path, nil, 0o600); err != nil {
 			t.Fatalf("seeding the dump file: %v", err)
@@ -195,7 +197,7 @@ func TestMySqlDumpOmitsGtidPurgedOnMaria(t *testing.T) {
 			t.Fatalf("Dump(maria=%v): %v", maria, err)
 		}
 
-		got := joined(factory.commands[0])
+		got := factory.Recorded()[0]
 		has := strings.Contains(got, "--set-gtid-purged=OFF")
 		if has == maria {
 			t.Errorf("maria=%v produced %q; --set-gtid-purged=OFF is MySQL only", maria, got)
@@ -215,8 +217,8 @@ func TestMySqlDumpPrefersTheSocket(t *testing.T) {
 		"database": "acme", "unix_socket": "/var/run/mysqld.sock",
 	})
 
-	factory := &recorder{}
-	state := schema.NewMySqlSchemaState(connection, factory.factory)
+	factory := faked("")
+	state := schema.NewMySqlSchemaState(connection, factory)
 	path := filepath.Join(t.TempDir(), "schema.sql")
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		t.Fatalf("seeding the dump file: %v", err)
@@ -226,7 +228,7 @@ func TestMySqlDumpPrefersTheSocket(t *testing.T) {
 		t.Fatalf("Dump: %v", err)
 	}
 
-	got := joined(factory.commands[0])
+	got := factory.Recorded()[0]
 	if !strings.Contains(got, "--socket=/var/run/mysqld.sock") {
 		t.Errorf("command %q did not use the configured socket", got)
 	}
