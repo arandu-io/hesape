@@ -757,12 +757,18 @@ func (b *Builder[T]) getModels(ctx context.Context, g auth.Grant, columns ...any
 // AfterQuery registers a callback run on the result of Get, allowed to
 // replace it.
 //
-// It runs where a result is handed to a caller, which is every terminal that
-// reads rows: the row a First matched is a one-row result, and the callback sees
-// it as one. It does not run on the reads this package makes for itself -- the
-// row Refresh reads back into a model it already holds, the parent a route
-// binding resolves through -- because those results are not the caller's to
-// replace.
+// It runs wherever a Collection is handed to a caller: Get, Chunk and the walks
+// built on it, and the terminals that are a Get with a limit -- First, Sole,
+// Find and their neighbours, whose row the callback sees as a result of one.
+//
+// It does not run on the reads this package makes for itself, and the reason is
+// the signature. A callback takes rows and answers rows, and a row is not a way
+// back to the model behind it, so a read whose next step is on the model cannot
+// pass through one: the row Refresh reads back into a model it already holds,
+// the rows Destroy loads in order to delete them, the aggregate LoadCount fills
+// in, everything the relation tree reads through its own seam. Nor does it run
+// on a paginator, whose page is not a Collection but items of whatever type the
+// page was asked for.
 func (b *Builder[T]) AfterQuery(callback func(Collection[T]) Collection[T]) *Builder[T] {
 	b.afterQueryCallbacks = append(b.afterQueryCallbacks, callback)
 	return b
