@@ -24,6 +24,35 @@ the first tag and has nothing before it to compare against.
 
 ---
 
+## Unreleased — one password reset flow
+
+`hesape/auth/passwords` and `hesape/auth/console` are removed.
+
+```
+- package github.com/arandu-io/hesape/auth/passwords: removed
+- package github.com/arandu-io/hesape/auth/console: removed
+```
+
+They held a second reset flow, complete and unused: a broker, a manager, and a
+database and a cache repository for a token whose hash was stored. The flow this
+framework runs is stateless and signed, and it was already the decided one -- the
+stored table was written up as debt and then discharged, in writing, before this
+removal.
+
+**What you get instead.** The signed link carries tenant, account id and address,
+each length-prefixed so no field can move a boundary, plus a fingerprint of the
+stored password hash. Expiry is enforced by the signer. Single use comes from the
+fingerprint: changing the password invalidates every link ever minted against the
+old one at the same instant, rather than only the one that was redeemed.
+
+**What you give up, and it is deliberate.** There is no way to revoke one link
+before it expires without changing the password. That is the price of having no
+table, and it was weighed rather than overlooked.
+
+`ClearResetsCommand` goes with the packages. It swept expired rows out of a
+store, and there are no rows. It was registered in no console registry, so
+nothing loses a command it was running.
+
 ## v0.17.0 — the row is the model
 
 The heading is `Unreleased` because these have not been tagged yet. It becomes
