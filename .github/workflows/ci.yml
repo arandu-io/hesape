@@ -78,8 +78,14 @@ jobs:
           # in, and from anywhere else it would read the module cache -- which
           # holds the published release, not the tag this checkout is at.
           (cd "$old" && go run golang.org/x/exp/cmd/apidiff@latest -m -w "$tmp/api.out" github.com/arandu-io/hesape)
-          broke=$(go run golang.org/x/exp/cmd/apidiff@latest -m -incompatible "$tmp/api.out" github.com/arandu-io/hesape | grep '^- ' || true)
           git worktree remove --force "$old"
+
+          # Written to a file and read afterwards. Piped straight into grep, the
+          # `|| true` that catches grep's no-match also catches apidiff's exit
+          # code -- so a module that does not load reports nothing, `broke` is
+          # empty, and the step says there was no incompatible change and passes.
+          go run golang.org/x/exp/cmd/apidiff@latest -m -incompatible "$tmp/api.out" github.com/arandu-io/hesape > "$tmp/diff.out"
+          broke=$(grep '^- ' "$tmp/diff.out" || true)
 
           if [ -z "$broke" ]; then
             echo "no incompatible change since $latest"
@@ -96,6 +102,87 @@ jobs:
           fi
           echo
           echo "incompatible changes, and UPGRADE.md was updated. Read the entry in review."
+
+      # The same gate, for the six modules the step above deliberately leaves
+      # alone. Each carries its own go.mod, its own tags and its own release, and
+      # each is required by somebody: without this an incompatible change in
+      # hesape/redis shipped unwritten, because the root comparison never looks
+      # inside a nested module.
+      #
+      # Three things this gets wrong if it is written the obvious way, and all
+      # three pass silently rather than failing:
+      #
+      #   - A submodule's tags carry its path -- redis/v0.7.0, never v0.7.0.
+      #     Matching 'v*' here compares the module against the ROOT's release: a
+      #     real tree, a real diff, and an answer about the wrong module.
+      #   - UPGRADE.md is one file, at the root. `git diff -- UPGRADE.md` asked
+      #     from inside redis/ is a question about redis/UPGRADE.md, which does
+      #     not exist and never should, so the diff is empty and every break
+      #     fails the build. The pathspec is anchored with :(top).
+      #   - `go run ... | grep '^- ' || true` swallows the exit code of the whole
+      #     pipeline. A module that does not even load would report nothing and
+      #     pass. The tool writes to a file and the file is read afterwards.
+      #
+      # It runs under the checkout above, which is the one that fetches the tags.
+      # A default checkout finds no release, says so, and exits 0.
+      - name: api diff of each submodule against its own last release
+        run: |
+          set -euo pipefail
+          failed=0
+          for gomod in $(git ls-files '*/go.mod' | sort); do
+            dir=${gomod%/go.mod}
+            mod="github.com/arandu-io/hesape/$dir"
+
+            latest=$(git tag --list "$dir/v*" --sort=-v:refname | head -1)
+            if [ -z "$latest" ]; then
+              echo "$mod: no release to compare against yet"
+              continue
+            fi
+            echo "comparing $mod against $latest"
+
+            tmp=$(mktemp -d)
+            old="$tmp/last-release"
+            git worktree add -q --detach "$old" "$latest"
+
+            # Both halves run from inside the module's own directory: apidiff
+            # resolves an import path against the go.mod of the directory it is
+            # in, and from anywhere else it reads the module cache.
+            if ! (cd "$old/$dir" && go run golang.org/x/exp/cmd/apidiff@latest -m -w "$tmp/api.out" "$mod"); then
+              echo "$mod: could not read the surface of $latest"
+              git worktree remove --force "$old"
+              failed=1
+              continue
+            fi
+            git worktree remove --force "$old"
+
+            if ! (cd "$dir" && go run golang.org/x/exp/cmd/apidiff@latest -m -incompatible "$tmp/api.out" "$mod" > "$tmp/diff.out" 2>&1); then
+              echo "$mod: could not read the surface of the working tree"
+              cat "$tmp/diff.out"
+              failed=1
+              continue
+            fi
+
+            broke=$(grep '^- ' "$tmp/diff.out" || true)
+            if [ -z "$broke" ]; then
+              echo "  no incompatible change since $latest"
+              continue
+            fi
+            echo "$broke" | sed 's/^/    /'
+
+            # Broken is allowed. Broken and unwritten is not.
+            if git diff --quiet "$latest" -- ":(top)UPGRADE.md"; then
+              echo
+              echo "$mod has incompatible changes and UPGRADE.md was not touched since $latest."
+              echo "Write what broke and what to write instead. That file is the whole mechanism."
+              failed=1
+              continue
+            fi
+            echo "  incompatible changes, and UPGRADE.md was updated. Read the entry in review."
+          done
+
+          # Every module is checked before the step fails, so one run reports all
+          # of them rather than the first one.
+          exit "$failed"
 
       # A known vulnerability blocks the merge rather than showing up in a
       # report nobody reads. Unpinned on purpose, unlike the linter: a new
