@@ -38,6 +38,24 @@
 // image that only needs storing never goes near the driver, and its type and
 // extension are still right.
 //
+// # A ceiling before the decode
+//
+// An image is decoded only after its header has been read and the dimensions it
+// declares have been found to be under [DefaultMaxPixels], or under whatever
+// [ImageManager.MaxPixels] was told instead. Past it the decode does not
+// happen and the failure is [ErrTooLarge], naming the dimensions and the limit.
+//
+// The order is the whole of it. The canvas is four bytes a pixel, so a file of
+// a few dozen bytes declaring 50000 by 50000 asks for ten gigabytes, and asks
+// for it inside the decoder, before anything this package wrote gets to look at
+// the result. Reading the header first costs the header.
+//
+// What the ceiling does not cover is stated as plainly: it bounds what is
+// decoded, not what a transformation is asked to produce. A resize to
+// dimensions the application chose allocates what the application asked for,
+// and an image nobody asked to transform is never decoded at all -- it can be
+// stored, and its header can be read, at any size.
+//
 // # Resizing, and why it looks the way it does
 //
 // [Image.Resize], [Image.Cover], [Image.Contain] and [Image.Scale] resample

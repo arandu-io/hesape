@@ -35,6 +35,15 @@ type Driver interface {
 	// TransformUsing registers a handler for one transformation, named by its
 	// TransformationName. It returns the driver, so registrations chain.
 	TransformUsing(transformation string, handler TransformationHandler) Driver
+	// MaxPixels sets how many pixels an image may declare before this driver
+	// refuses to decode it, and returns the driver so calls chain. Zero or less
+	// means the driver's own default.
+	//
+	// An implementation is expected to read the declared dimensions out of the
+	// header and refuse past this ceiling before it allocates the pixels --
+	// which is the only point at which refusing them is worth anything, since
+	// the memory a crafted file asks for is spent by the decode itself.
+	MaxPixels(pixels int) Driver
 }
 
 // stdDriver is the one driver this package carries.
@@ -44,8 +53,9 @@ type Driver interface {
 // without one: [NewImageManager] installs it, [ImageManager.Driver] hands it
 // back, and [ImageManager.Extend] is how a different one gets in.
 type stdDriver struct {
-	mu       sync.RWMutex
-	handlers map[string]TransformationHandler
+	mu        sync.RWMutex
+	handlers  map[string]TransformationHandler
+	maxPixels int
 }
 
 func newStdDriver() *stdDriver {
@@ -63,6 +73,27 @@ func (d *stdDriver) TransformUsing(transformation string, handler Transformation
 	return d
 }
 
+// MaxPixels implements [Driver.MaxPixels].
+func (d *stdDriver) MaxPixels(pixels int) Driver {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.maxPixels = pixels
+	return d
+}
+
+// pixelLimit is the ceiling this driver decodes under, with the default filled
+// in here rather than at the setter: a driver nobody configured and one told to
+// use the default are the same driver, and reading it in one place is what
+// makes them so.
+func (d *stdDriver) pixelLimit() int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if d.maxPixels <= 0 {
+		return DefaultMaxPixels
+	}
+	return d.maxPixels
+}
+
 // handlerFor returns the handler registered for name, or nil when none was.
 func (d *stdDriver) handlerFor(name string) TransformationHandler {
 	d.mu.RLock()
@@ -77,7 +108,7 @@ func (d *stdDriver) Process(contents []byte, pipeline *ImagePipeline) ([]byte, e
 		return nil, fail("the image format [%s] is not supported", mediaType)
 	}
 
-	canvas, sourceFormat, err := decodeCanvas(contents)
+	canvas, sourceFormat, err := decodeCanvas(contents, d.pixelLimit())
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +195,7 @@ func (d *stdDriver) Dimensions(contents []byte) (int, int, error) {
 // image down to a single pixel and reading it, without the intermediate
 // canvas or the rounding the resize would add.
 func (d *stdDriver) DominantColor(contents []byte) (string, error) {
-	canvas, _, err := decodeCanvas(contents)
+	canvas, _, err := decodeCanvas(contents, d.pixelLimit())
 	if err != nil {
 		return "", err
 	}

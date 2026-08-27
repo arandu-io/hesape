@@ -73,10 +73,55 @@ func supportedInput(mediaType string) bool {
 	return false
 }
 
+// DefaultMaxPixels is how many pixels an image may declare before this package
+// refuses to decode it.
+//
+// The number is a memory bound and not a photographic one. The canvas every
+// transformation runs on is four bytes a pixel, so this ceiling of 33,554,432
+// pixels is a canvas of exactly 128 MiB -- and a file declaring more asks for
+// that memory before a single pixel of it has been read, which is what makes an
+// image somebody else chose the dimensions of worth bounding at all.
+//
+// It sits above every camera in ordinary use, since a 24-megapixel frame is
+// 6000 by 4000 and an 8K frame is 7680 by 4320, and far below what a crafted
+// file declares. Raise it with [ImageManager.MaxPixels] where the larger
+// picture is the job.
+const DefaultMaxPixels = 32 << 20
+
+// refuseOversize reads the header, and only the header, and refuses an image
+// whose declared dimensions come to more than maxPixels.
+//
+// This is the whole of the ceiling, and where it runs is the point of it:
+// image.DecodeConfig parses the handful of bytes that carry the dimensions and
+// allocates nothing for the pixels, so a file declaring 50000 by 50000 is
+// refused for the ten gigabytes it was about to ask for rather than after
+// asking for them.
+//
+// A header that cannot be read is left to the decoder rather than refused
+// here. The decoder reads the same bytes through the same parser and fails on
+// them before it allocates a canvas, and the error it produces names the media
+// type that was detected, which this one could not.
+func refuseOversize(b []byte, maxPixels int) error {
+	cfg, _, err := stdimage.DecodeConfig(bytes.NewReader(b))
+	if err != nil {
+		return nil
+	}
+	if int64(cfg.Width)*int64(cfg.Height) > int64(maxPixels) {
+		return tooLarge(cfg.Width, cfg.Height, maxPixels)
+	}
+	return nil
+}
+
 // decodeCanvas opens the bytes onto the working canvas and says which format
 // they were in, so that an image nobody asked to convert is written back as
 // what it was.
-func decodeCanvas(b []byte) (*stdimage.RGBA, string, error) {
+//
+// The ceiling is checked first, and this is the only place in the package
+// where pixels are allocated, so an image past it never reaches memory.
+func decodeCanvas(b []byte, maxPixels int) (*stdimage.RGBA, string, error) {
+	if err := refuseOversize(b, maxPixels); err != nil {
+		return nil, "", err
+	}
 	src, format, err := stdimage.Decode(bytes.NewReader(b))
 	if err != nil {
 		return nil, "", failWith(err, "the image could not be decoded (this driver reads jpeg, png and gif; %s was detected)", sniffMimeType(b))

@@ -2,14 +2,19 @@ package image_test
 
 import (
 	"bytes"
+	"compress/zlib"
 	"context"
+	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"image/png"
 	"io"
 	"net/http"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -769,6 +774,7 @@ func (fakeDriver) DominantColor([]byte) (string, error) { return "#000000", nil 
 func (d fakeDriver) TransformUsing(string, himage.TransformationHandler) himage.Driver {
 	return d
 }
+func (d fakeDriver) MaxPixels(int) himage.Driver { return d }
 
 func TestToResponseWritesTheImage(t *testing.T) {
 	images := himage.NewImageManager()
@@ -888,5 +894,155 @@ func TestUsingNamesTheDriverForOneImageOnly(t *testing.T) {
 	}
 	if _, err := img.Grayscale().ToBytes(); err != nil {
 		t.Fatalf("the default driver stopped working: %v", err)
+	}
+}
+
+// craftedPNG is a valid PNG file of about seventy bytes that declares w by h
+// and carries nothing like that many pixels.
+//
+// This is the attack, written out: the header is free to write, and the canvas
+// the decoder allocates from it is not. The IDAT holds a real but tiny zlib
+// stream, which matters -- image/png allocates the whole image the moment it
+// reaches an IDAT and only afterwards finds there is not enough pixel data
+// behind it. A file with no IDAT at all would be refused by the decoder for
+// nothing more than ending early, and would prove nothing about a ceiling.
+func craftedPNG(t *testing.T, w, h int) []byte {
+	t.Helper()
+
+	chunk := func(name string, data []byte) []byte {
+		body := append([]byte(name), data...)
+		out := binary.BigEndian.AppendUint32(nil, uint32(len(data)))
+		out = append(out, body...)
+		// The CRC is real because image/png verifies it before it reads the
+		// dimensions out of the chunk.
+		return binary.BigEndian.AppendUint32(out, crc32.ChecksumIEEE(body))
+	}
+
+	header := binary.BigEndian.AppendUint32(nil, uint32(w))
+	header = binary.BigEndian.AppendUint32(header, uint32(h))
+	header = append(header, 8, 6, 0, 0, 0) // eight bits a channel, colour with alpha
+
+	var pixels bytes.Buffer
+	zw := zlib.NewWriter(&pixels)
+	if _, err := zw.Write(make([]byte, 64)); err != nil {
+		t.Fatalf("zlib.Write: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zlib.Close: %v", err)
+	}
+
+	out := []byte("\x89PNG\r\n\x1a\n")
+	out = append(out, chunk("IHDR", header)...)
+	out = append(out, chunk("IDAT", pixels.Bytes())...)
+	return append(out, chunk("IEND", nil)...)
+}
+
+// allocatedDuring is how many bytes the heap was asked for while f ran.
+//
+// TotalAlloc is cumulative and never falls, so the difference is what f asked
+// for whether or not the collector took it back -- which is the question here,
+// since a canvas that is allocated and immediately dropped is still a canvas
+// somebody else chose the size of.
+func allocatedDuring(f func()) uint64 {
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	f()
+	runtime.ReadMemStats(&after)
+	return after.TotalAlloc - before.TotalAlloc
+}
+
+// TestAnOversizedDeclarationIsRefusedBeforeThePixelsAreAllocated is the whole
+// point of the ceiling, and the allocation is the assertion.
+//
+// A test that decoded the image and then measured it would have proved nothing:
+// the memory is spent inside the decoder, before anything this package wrote
+// gets a look at the result. Seventy-odd bytes here declare 144 megapixels, and
+// the canvas image/png allocates for them, before it discovers there is no
+// pixel data behind them, is 549 MiB.
+func TestAnOversizedDeclarationIsRefusedBeforeThePixelsAreAllocated(t *testing.T) {
+	images := himage.NewImageManager()
+	bomb := craftedPNG(t, 12000, 12000)
+
+	var err error
+	allocated := allocatedDuring(func() {
+		_, err = images.FromBytes(bomb).Grayscale().ToBytes()
+	})
+
+	if !errors.Is(err, himage.ErrTooLarge) {
+		t.Fatalf("err = %v, want ErrTooLarge", err)
+	}
+	if !errors.Is(err, himage.ErrImage) {
+		t.Fatalf("err = %v, want ErrImage too: one check must still catch every failure of this package", err)
+	}
+	if !strings.Contains(err.Error(), "12000") ||
+		!strings.Contains(err.Error(), strconv.Itoa(himage.DefaultMaxPixels)) {
+		t.Fatalf("err = %v, want the declared dimensions and the ceiling named", err)
+	}
+	if allocated > 1<<20 {
+		t.Fatalf("the refusal allocated %d bytes, and the canvas it refused is %d: the pixels were decoded first",
+			allocated, 4*12000*12000)
+	}
+}
+
+// TestTheCeilingIsWhatTheManagerWasTold: the limit is configurable in both
+// directions, and reaches a driver that was already built -- the second call
+// lands after the first has created one.
+func TestTheCeilingIsWhatTheManagerWasTold(t *testing.T) {
+	images := himage.NewImageManager().MaxPixels(100)
+	source := solidPNG(t, 20, 20, color.RGBA{A: 255}) // four hundred pixels
+
+	_, err := images.FromBytes(source).Grayscale().ToBytes()
+	if !errors.Is(err, himage.ErrTooLarge) {
+		t.Fatalf("err = %v, want ErrTooLarge under a ceiling of 100 pixels", err)
+	}
+
+	images.MaxPixels(0)
+	if _, err := images.FromBytes(source).Grayscale().ToBytes(); err != nil {
+		t.Fatalf("ToBytes: %v; zero must put the default ceiling back", err)
+	}
+}
+
+// TestTheCeilingCoversTheDominantColourToo: it is the other method that decodes,
+// and a ceiling that only covered the pipeline would leave the same file
+// costing the same memory by another name.
+func TestTheCeilingCoversTheDominantColourToo(t *testing.T) {
+	images := himage.NewImageManager()
+
+	var err error
+	allocated := allocatedDuring(func() {
+		_, err = images.FromBytes(craftedPNG(t, 12000, 12000)).DominantColor()
+	})
+
+	if !errors.Is(err, himage.ErrTooLarge) {
+		t.Fatalf("err = %v, want ErrTooLarge", err)
+	}
+	if allocated > 1<<20 {
+		t.Fatalf("the refusal allocated %d bytes: the pixels were decoded first", allocated)
+	}
+}
+
+// TestAnImageTooLargeToDecodeIsStillStoredAndMeasured states the edge of the
+// ceiling rather than leaving it to be discovered. It bounds the decode, and
+// nothing else: an upload nobody asked to transform is never decoded, so it is
+// stored as it arrived, and its header is read at any size it likes.
+func TestAnImageTooLargeToDecodeIsStillStoredAndMeasured(t *testing.T) {
+	images := himage.NewImageManager()
+	disk := newFakeDisk()
+	bomb := craftedPNG(t, 12000, 12000)
+
+	key, err := images.FromBytes(bomb).StoreAs(context.Background(), grant(), disk, "uploads", "big.png")
+	if err != nil {
+		t.Fatalf("StoreAs: %v", err)
+	}
+	if key != "uploads/big.png" || !bytes.Equal(disk.body, bomb) {
+		t.Fatalf("stored %q with %d bytes, want the file exactly as it arrived", key, len(disk.body))
+	}
+
+	w, h, err := images.FromBytes(bomb).Dimensions()
+	if err != nil {
+		t.Fatalf("Dimensions: %v", err)
+	}
+	if w != 12000 || h != 12000 {
+		t.Fatalf("dimensions = %dx%d, want the 12000x12000 the header declares", w, h)
 	}
 }
