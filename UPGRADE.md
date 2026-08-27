@@ -325,6 +325,67 @@ h.Make(password, hashing.Options{Memory: 65536, Time: 4})
 hashing.Make(password)
 ```
 
+### The string-form resource registration is removed
+
+```
+- ./routing.(*Router).Resource: removed
+- ./routing.(*Router).Resources: removed
+- ./routing.(*Router).ApiResource: removed
+- ./routing.(*Router).ApiResources: removed
+- ./routing.(*Router).Singleton: removed
+- ./routing.(*Router).Singletons: removed
+- ./routing.(*Router).ApiSingleton: removed
+- ./routing.(*Router).ApiSingletons: removed
+- ./routing.(*Router).SetControllerDispatcher: removed
+- ./routing.(*Router).GetControllerDispatcher: removed
+- ./routing.(*Router).ResourceParameters: removed
+- ./routing.(*Router).ResourceVerbs: removed
+- ./routing.(*Router).SingularResourceParameters: removed
+- ./routing.ControllerDispatcher: removed
+- ./routing.ResourceOptions: removed
+- ./routing.ResourceRegistrar: removed
+- ./routing.NewResourceRegistrar: removed
+- ./routing.PendingResourceRegistration: removed
+- ./routing.NewPendingResourceRegistration: removed
+- ./routing.PendingSingletonResourceRegistration: removed
+- ./routing.NewPendingSingletonResourceRegistration: removed
+- ./routing.GetParameters: removed
+- ./routing.SetParameters: removed
+- ./routing.SingularParameters: removed
+- ./routing.Verbs: removed
+```
+
+Every route these registered answered `500 no controller dispatcher wired`.
+`SetControllerDispatcher` is the only thing that could have made them answer, and
+nothing called it — not here, not in any module that requires this one. The
+routes appeared in the table and in `aru routes`, they matched, and then they
+failed at request time.
+
+Nothing replaces the dispatcher, because dispatching a method by its name is
+what this collection does not do: there is no container to resolve a controller
+out of, and Go has no call-by-name that a compiler checks.
+
+`routing.Resource[C]` is the registration path, and it is unchanged. It takes the
+controller value rather than its name, and registers exactly the actions the
+value implements — a type assertion against `Indexer[C]`, `Shower[C]` and the
+other five, decided when it compiles:
+
+```go
+// before -- registered seven routes, each of which answered 500
+r.Resource("invoices", "InvoiceController").Only("index", "show").Register()
+
+// after -- registers the actions InvoiceController actually implements
+routing.Resource(r, "invoices", InvoiceController{}, adapt)
+```
+
+The `Only`/`Except` pair has no replacement and needs none: a controller that
+should not answer `destroy` does not implement `Destroy`, and then there is no
+route rather than a route that 404s or 500s.
+
+The options with no equivalent on `Resource[C]` — `Shallow`, `Scoped`,
+`WithTrashed`, `Names`, `Parameters`, `MiddlewareFor` — went with it. Each was
+reachable only through a route that could not answer, so none of them ever ran.
+
 ### `view/compilers` is removed; there was never a second compiler
 
 ```
