@@ -186,12 +186,31 @@ func TestRelatedReadsALoadedRelationAsItsType(t *testing.T) {
 	}
 	model.SetRelation("manager", Collection[account]{related.Entity})
 
-	got, ok := Related[account, account](model, "manager")
+	// Read off the row, which is what a terminal hands back: the model the
+	// relation was set on is the one inside it.
+	got, ok := Related[account, account](model.Entity, "manager")
 	if !ok || len(got) != 1 || got[0].ID != 9 {
 		t.Fatalf("Related = %v, %v", got, ok)
 	}
-	if _, ok := Related[account, account](model, "nothing"); ok {
+	if _, ok := Related[account, account](model.Entity, "nothing"); ok {
 		t.Error("Related answered for a relation that was never loaded")
+	}
+}
+
+// TestRelatedAnswersNoForARowThatCarriesNoModel.
+//
+// A T that does not embed Model[T] has no field pointing back at the model the
+// relation was attached to, and reading one used to dereference nothing. False
+// is the answer: the relation is not there to be read.
+func TestRelatedAnswersNoForARowThatCarriesNoModel(t *testing.T) {
+	plain, _ := newUserModel()
+	plain.SetRelation("manager", Collection[user]{&user{ID: 9}})
+
+	if _, ok := Related[user, user](plain.Entity, "manager"); ok {
+		t.Error("Related read a relation off a row that carries no model")
+	}
+	if _, ok := Related[account, account](&account{}, "manager"); ok {
+		t.Error("Related read a relation off a literal")
 	}
 }
 

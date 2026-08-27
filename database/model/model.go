@@ -702,17 +702,27 @@ func (m *Model[T]) ReplicateQuietly(except ...string) (copied *T, err error) {
 	})
 }
 
-// Is reports whether other is the same key, on the same table, on the same
-// connection.
-func (m *Model[T]) Is(other *Model[T]) bool {
+// Is reports whether other is the same row: the same key, on the same table, on
+// the same connection.
+//
+// It takes the row, which is what a terminal hands back, and what it can answer
+// depends on the shape of T. A T that embeds Model[T] carries its model inside
+// itself, so a.Is(b) on two rows reaches the key and the table on both. A T that
+// does not has no field pointing back at a model, and this answers false: a
+// table and a connection are not columns, so a plain row does not carry them.
+func (m *Model[T]) Is(other *T) bool { return m.is(ModelOf(other)) }
+
+// IsNot reports the opposite of Is.
+func (m *Model[T]) IsNot(other *T) bool { return !m.Is(other) }
+
+// is is Is with the model still in hand, which is what the package holds when it
+// compares rows to each other.
+func (m *Model[T]) is(other *Model[T]) bool {
 	return other != nil &&
 		reflect.DeepEqual(m.GetKey(), other.GetKey()) &&
 		m.GetTable() == other.GetTable() &&
 		m.GetConnectionName() == other.GetConnectionName()
 }
-
-// IsNot reports the opposite of Is.
-func (m *Model[T]) IsNot(other *Model[T]) bool { return !m.Is(other) }
 
 // Load eager loads these relations onto this model.
 func (m *Model[T]) Load(ctx context.Context, g auth.Grant, relations ...string) error {
@@ -808,13 +818,26 @@ func (m *Model[T]) WithoutRelations() (*T, error) {
 	return instance.Entity, nil
 }
 
-// Related reads a loaded relation as the type it was loaded as.
+// Related reads a loaded relation off the row, as the type it was loaded as.
 //
-// The relation was loaded as models of another type, which Go cannot spell
-// as a field, so the read is a generic function rather than a method. It
-// reports false when the relation was not loaded, or was loaded as
-// something else.
-func Related[T, R any](m *Model[T], name string) (Collection[R], bool) {
+// The relation was loaded as rows of another type, which Go cannot spell as a
+// field, so the read is a generic function rather than a method:
+//
+//	posts, ok := model.Related[User, Post](user, "posts")
+//
+// It reports false when the relation was not loaded, when it was loaded as
+// something else, and when the row carries no model to read it off.
+//
+// That last one is the shape of T. A T that embeds Model[T] carries its model
+// inside itself, so the relation an eager load attached is on the row this takes.
+// A T that does not has no field pointing back: the relation is on a model
+// beside the row, which no terminal hands back, so there is nothing here to read
+// and the answer is false rather than a dereference of nothing.
+func Related[T, R any](row *T, name string) (Collection[R], bool) {
+	m := ModelOf(row)
+	if m == nil {
+		return nil, false
+	}
 	value, ok := m.GetRelation(name)
 	if !ok {
 		return nil, false

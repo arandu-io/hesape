@@ -320,8 +320,10 @@ func TestReplicateDropsTheKeyAndTheTimestamps(t *testing.T) {
 	}
 }
 
+// TestIsComparesKeyTableAndConnection, over the rows a terminal hands back,
+// which is what a caller has two of when it asks whether they are the same one.
 func TestIsComparesKeyTableAndConnection(t *testing.T) {
-	model, _ := newUserModel()
+	model, _ := newAccountModel()
 	if err := model.SetRawAttributes(map[string]any{"id": int64(7)}, true); err != nil {
 		t.Fatalf("SetRawAttributes: %v", err)
 	}
@@ -334,11 +336,26 @@ func TestIsComparesKeyTableAndConnection(t *testing.T) {
 		t.Fatalf("NewInstance: %v", err)
 	}
 
-	if !model.Is(same) {
+	if !model.Entity.Is(same.Entity) {
 		t.Error("Is = false for the same row of the same table")
 	}
-	if !model.IsNot(other) {
+	if !model.Entity.IsNot(other.Entity) {
 		t.Error("IsNot = false for another key")
+	}
+}
+
+// TestIsAnswersNoForARowThatCarriesNoModel: a plain row has columns and nothing
+// else, and a table is not a column.
+func TestIsAnswersNoForARowThatCarriesNoModel(t *testing.T) {
+	plain, _ := newUserModel()
+	if err := plain.SetRawAttributes(map[string]any{"id": int64(7)}, true); err != nil {
+		t.Fatalf("SetRawAttributes: %v", err)
+	}
+	if plain.Is(plain.Entity) {
+		t.Error("Is compared a row that has no model to compare through")
+	}
+	if plain.Is(nil) {
+		t.Error("Is answered true for no row at all")
 	}
 }
 

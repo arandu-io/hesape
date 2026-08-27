@@ -363,7 +363,7 @@ func (ms models[T]) FindOrFail(key any) (*Model[T], error) {
 func (ms models[T]) Contains(key any) bool {
 	if model, ok := key.(*Model[T]); ok {
 		for _, candidate := range ms {
-			if candidate.Is(model) {
+			if candidate.is(model) {
 				return true
 			}
 		}

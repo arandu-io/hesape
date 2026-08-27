@@ -109,6 +109,44 @@ func TestHydrationWiresEveryRow(t *testing.T) {
 	}
 }
 
+// TestAnEagerLoadIsReachableFromTheRowATerminalHandedBack.
+//
+// The eager load attaches what it matched to the model, and a terminal hands
+// back the row. For the entity that embeds its model the two are one value, so
+// the relation is reachable from what the caller holds -- which is the whole of
+// what the embedding buys on this side.
+func TestAnEagerLoadIsReachableFromTheRowATerminalHandedBack(t *testing.T) {
+	model, conn := newAccountModel()
+	child, _ := newAccountModel()
+	loaded, err := child.NewFromBuilder(map[string]any{"id": int64(9), "name": "child"})
+	if err != nil {
+		t.Fatalf("NewFromBuilder: %v", err)
+	}
+	withPostsOn(model, &fakeRelation{
+		table: "posts", foreign: "posts.account_id", local: "accounts.id",
+		matched: map[any]any{int64(1): Collection[account]{loaded.Entity}},
+	})
+	conn.queue(query.Record{"id": int64(1), "name": "Ada", "tenant_id": "t-1"})
+
+	rows, err := model.NewQuery().With("posts").Get(context.Background(), grantForTenant("t-1"))
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	posts, ok := Related[account, account](rows[0], "posts")
+	if !ok {
+		t.Fatal("the eager load is not reachable from the row the terminal returned")
+	}
+	if len(posts) != 1 || posts[0].ID != 9 {
+		t.Fatalf("posts = %v, want the one row the relation matched", posts)
+	}
+
+	// And the lazy half, which is the same reach through a promoted method.
+	if err := rows[0].Load(context.Background(), grantForTenant("t-1"), "posts"); err != nil {
+		t.Fatalf("Load on the row: %v", err)
+	}
+}
+
 // TestALiteralEntityIsNotWiredAndDoesNotPanic.
 //
 // This is the one difference a Laravel developer learns at this layer, so it has
