@@ -464,7 +464,7 @@ func (v *Validator) getAttributeFromLocalArray(attribute string, source map[stri
 // how a line chooses its own capitalisation.
 func (v *Validator) replaceAttributePlaceholder(message, value string) string {
 	message = strings.ReplaceAll(message, ":attribute", value)
-	message = strings.ReplaceAll(message, ":ATTRIBUTE", str.Upper(value))
+	message = strings.ReplaceAll(message, ":ATTRIBUTE", strings.ToUpper(value))
 	return strings.ReplaceAll(message, ":Attribute", str.Ucfirst(value))
 }
 

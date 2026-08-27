@@ -39,6 +39,20 @@ const (
 // idLength is how many characters a session id has, and what [Store.IsValidID]
 // insists on. Forty alphanumerics is 238 bits, which is not a number anybody
 // walks.
+//
+// That number is the whole boundary between one session and another, and it is
+// meant to be. A handler is asked for a session by its id and by nothing else:
+// there is no second term in the key that a caller could supply, get wrong, or
+// leave off, so there is no read that returns somebody else's session short of
+// holding somebody else's id.
+//
+// The key therefore carries no customer prefix, and must not grow one. The
+// tenant is inside the record, which is what the read returns: prefixing the key
+// would mean naming the tenant to perform the read that discovers it. Sessions
+// of different customers are already disjoint because their ids are, and the one
+// question this package answers by attribute rather than by id --
+// [Handler.DestroyIndex], which asks for every session of a subject -- takes the
+// tenant explicitly and refuses an empty one.
 const idLength = 40
 
 // ErrNoPreviousURL is returned by [Store.PreviousURI] when nothing has been

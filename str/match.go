@@ -16,14 +16,14 @@ import (
 // name, an ability or a host, not a file name.
 func Is(patterns []string, value string, ignoreCase bool) bool {
 	if ignoreCase {
-		value = Lower(value)
+		value = strings.ToLower(value)
 	}
 	for _, pattern := range patterns {
 		if pattern == "*" {
 			return true
 		}
 		if ignoreCase {
-			pattern = Lower(pattern)
+			pattern = strings.ToLower(pattern)
 		}
 		if pattern == value {
 			return true
