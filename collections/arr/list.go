@@ -54,6 +54,11 @@ func CrossJoin[T any](arrays ...[]T) [][]T {
 //
 // A nil callback returns the first element. The second result is false when
 // the slice is empty or nothing matched.
+//
+// The miss is reported as a bool and not as a default taken as an argument,
+// because an element equal to the zero value of T is a hit and a default
+// returned in its place could not be told from one. It also spares the caller
+// building a fallback for a call that finds something.
 func First[T any](array []T, callback func(value T, key int) bool) (T, bool) {
 	for i, v := range array {
 		if callback == nil || callback(v, i) {
@@ -69,6 +74,9 @@ func First[T any](array []T, callback func(value T, key int) bool) (T, bool) {
 // The slice is walked backwards rather than reversed, and the callback still
 // sees each element's original position. A nil callback returns the last
 // element.
+//
+// The second result reports the miss, for the reason it does in First: a zero
+// value found and nothing found are different answers.
 func Last[T any](array []T, callback func(value T, key int) bool) (T, bool) {
 	for i := len(array) - 1; i >= 0; i-- {
 		if callback == nil || callback(array[i], i) {
@@ -355,6 +363,12 @@ func Sole[T any](array []T, callback func(value T, key int) bool) (T, error) {
 // The callback is a projection and not a comparator, and it is required: Go
 // cannot compare an arbitrary T. The result is a new slice, renumbered from
 // zero, and the sort is stable.
+//
+// A projection is taken rather than a comparator because a comparator over a
+// slice is already slices.SortStableFunc, which sorts in place; what this adds
+// is deriving the key once per element and leaving the argument untouched. An
+// order a projection cannot express -- several keys, a ranking of its own --
+// is a comparator, so reach for slices.SortStableFunc over a copy.
 func Sort[T any, V cmp.Ordered](array []T, callback func(value T, key int) V) []T {
 	type keyed struct {
 		item T

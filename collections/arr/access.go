@@ -184,6 +184,12 @@ func Exists(array any, key string) bool {
 // The second result is false when the value is missing, a segment ran off the
 // end of a list, or something along the path was not indexable. A key present
 // but holding nil returns (nil, true).
+//
+// The miss is reported as a bool and not absorbed by a default taken as an
+// argument, because the two do not carry the same information: a key holding
+// nil is a hit, and a default handed back in its place cannot say which of the
+// two happened. Writing the fallback at the call site also leaves it
+// unevaluated until there is a miss to answer.
 func Get(array any, key string) (any, bool) {
 	if !Accessible(array) {
 		return nil, false
