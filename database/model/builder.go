@@ -63,6 +63,51 @@ func NewBuilder[T any](q *query.Builder) *Builder[T] {
 	return &Builder[T]{query: q, eagerLoad: map[string]func(*query.Builder){}}
 }
 
+// DB is a connection that also carries the grammar its statements compile
+// through and the processor their results are read back through.
+//
+// query.Connection is the five verbs and nothing else, on purpose: it is the
+// contract a driver implements. The two below are not a driver's job, they are
+// what a connection already knows about itself -- which grammar quotes its
+// identifiers, which processor reads an inserted key back -- and asking for them
+// by assertion is how Go spells a capability a narrow contract does not carry.
+// Transactor is the same shape for the same reason.
+type DB interface {
+	query.Connection
+
+	// GetQueryGrammar returns the grammar statements are compiled through.
+	GetQueryGrammar() query.Grammar
+
+	// GetPostProcessor returns the processor results are read back through.
+	GetPostProcessor() query.Processor
+}
+
+// Query returns a query over T, on db, with T's global scopes registered.
+//
+//	user, err := model.Query[User](db).Where("email", "=", email).First(ctx, g)
+//
+// What it does that NewModel(table, connection, grammar, processor).NewQuery()
+// does not is refuse to be told what is already known. The table is the name of
+// T, pluralised and snake cased, which is what GetTable falls back to; the
+// grammar and the processor are the connection's own. NewModel cannot work any
+// of the three out, because all three arrive as arguments -- and an argument
+// that repeats what a value already carries is an argument that can disagree
+// with it.
+//
+// NewModel stays for the model that is not the default: another table, another
+// key, a table with no tenant column, soft deletes. Configure that model once,
+// keep it, and ask it for its query.
+//
+// It does not take a Grant, and that is the decision rather than an omission.
+// Every terminal takes one already, because authorization belongs to the
+// statement that runs and not to the sentence that builds it: a Grant held on
+// the builder would be a second place a tenant could come from, and the two
+// could differ. A builder authorizes nothing, which is why it can be built,
+// stored and passed around without one.
+func Query[T any](db DB) *Builder[T] {
+	return NewModel[T]("", db, db.GetQueryGrammar(), db.GetPostProcessor()).NewQuery()
+}
+
 // NewTypedBuilder returns the Builder used for m's queries.
 //
 // A model that wants a wider query writes a type that embeds Builder[T] and

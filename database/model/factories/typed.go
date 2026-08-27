@@ -42,7 +42,7 @@ type Factory[T any] struct {
 	states        []func(*T)
 	sequence      []func(*T)
 	afterMaking   []func(*T)
-	afterCreating []func(context.Context, auth.Grant, *model.Model[T]) error
+	afterCreating []func(context.Context, auth.Grant, *T) error
 
 	// resolvers run before the rows are built, and each answers a state.
 	//
@@ -133,8 +133,9 @@ func (f *Factory[T]) AfterMaking(fn func(*T)) *Factory[T] {
 // AfterCreating returns a factory that runs fn on each row once it is stored.
 //
 // It takes the context and the Grant because whatever it does next is another
-// statement, and a statement here is a statement like any other.
-func (f *Factory[T]) AfterCreating(fn func(context.Context, auth.Grant, *model.Model[T]) error) *Factory[T] {
+// statement, and a statement here is a statement like any other. The row it
+// receives is the stored one, so the key the database generated is on it.
+func (f *Factory[T]) AfterCreating(fn func(context.Context, auth.Grant, *T) error) *Factory[T] {
 	out := f.clone()
 	out.afterCreating = append(out.afterCreating, fn)
 	return out
@@ -171,11 +172,11 @@ func (f *Factory[T]) MakeOne() T {
 	return rows[0]
 }
 
-// Create stores the rows and returns them as models.
+// Create stores the rows and returns them.
 //
 // It takes the Grant that every write in this collection takes, and the tenant
 // comes off it: a factory is not a way around the policy that guards the table.
-func (f *Factory[T]) Create(ctx context.Context, g auth.Grant) ([]*model.Model[T], error) {
+func (f *Factory[T]) Create(ctx context.Context, g auth.Grant) ([]*T, error) {
 	// Anything that has to exist before these rows do -- a parent a child names
 	// -- runs here, and each answers a state the rows are then built with.
 	resolved := f
@@ -188,7 +189,7 @@ func (f *Factory[T]) Create(ctx context.Context, g auth.Grant) ([]*model.Model[T
 	}
 
 	rows := resolved.Make()
-	out := make([]*model.Model[T], 0, len(rows))
+	out := make([]*T, 0, len(rows))
 
 	for i := range rows {
 		instance, err := f.model.NewInstance(nil, false)
@@ -201,17 +202,17 @@ func (f *Factory[T]) Create(ctx context.Context, g auth.Grant) ([]*model.Model[T
 			return nil, err
 		}
 		for _, after := range resolved.afterCreating {
-			if err := after(ctx, g, instance); err != nil {
+			if err := after(ctx, g, instance.Entity); err != nil {
 				return nil, err
 			}
 		}
-		out = append(out, instance)
+		out = append(out, instance.Entity)
 	}
 	return out, nil
 }
 
 // CreateOne stores one row, whatever Count says.
-func (f *Factory[T]) CreateOne(ctx context.Context, g auth.Grant) (*model.Model[T], error) {
+func (f *Factory[T]) CreateOne(ctx context.Context, g auth.Grant) (*T, error) {
 	created, err := f.Count(1).Create(ctx, g)
 	if err != nil {
 		return nil, err
@@ -239,8 +240,8 @@ func (f *Factory[T]) CreateOne(ctx context.Context, g auth.Grant) (*model.Model[
 // they name does not have its identifier until the statement that inserts it
 // has run.
 func Has[T, C any](parent *Factory[T], child *Factory[C], link func(*T, *C)) *Factory[T] {
-	return parent.AfterCreating(func(ctx context.Context, g auth.Grant, created *model.Model[T]) error {
-		_, err := child.State(func(c *C) { link(created.Entity, c) }).Create(ctx, g)
+	return parent.AfterCreating(func(ctx context.Context, g auth.Grant, created *T) error {
+		_, err := child.State(func(c *C) { link(created, c) }).Create(ctx, g)
 		return err
 	})
 }
@@ -267,7 +268,7 @@ func ForParent[C, P any](child *Factory[C], parent *Factory[P], link func(*C, *P
 		if err != nil {
 			return nil, err
 		}
-		return func(c *C) { link(c, created.Entity) }, nil
+		return func(c *C) { link(c, created) }, nil
 	})
 	return out
 }

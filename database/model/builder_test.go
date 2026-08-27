@@ -607,3 +607,58 @@ func TestToBaseHandsOutAQueryThatIsAlreadyScoped(t *testing.T) {
 		t.Errorf("SQL = %q: a base builder handed out unscoped is a query somebody will run", base.ToSQL())
 	}
 }
+
+// testDB is a testConnection that also answers for its grammar and its
+// processor, which is what model.DB asks of a connection.
+type testDB struct{ *testConnection }
+
+func (d testDB) GetQueryGrammar() query.Grammar { return newTestGrammar() }
+
+func (d testDB) GetPostProcessor() query.Processor {
+	return &testProcessor{conn: d.testConnection}
+}
+
+// TestQueryWorksOutWhatItIsNotTold.
+//
+// The table, the grammar and the processor are the three arguments NewModel has
+// to be handed, and none of them is a choice here: the table is the name of the
+// type and the other two belong to the connection. This is the proof that Query
+// finds all three rather than defaulting them to something that happens to work.
+func TestQueryWorksOutWhatItIsNotTold(t *testing.T) {
+	conn := newTestConnection()
+	conn.queue(query.Record{"id": int64(1), "name": "Ada"})
+
+	rows, err := Query[account](testDB{conn}).Where("name", "=", "Ada").Get(context.Background(), grantForTenant("t-1"))
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Name != "Ada" {
+		t.Fatalf("Get returned %d rows", len(rows))
+	}
+
+	sql := conn.last().SQL
+	if !strings.Contains(sql, `from "accounts"`) {
+		t.Errorf("SQL = %q, want the table worked out from the type name", sql)
+	}
+	if !strings.Contains(sql, `"accounts"."tenant_id" = ?`) {
+		t.Errorf("SQL = %q, want the tenant filter every read carries", sql)
+	}
+}
+
+// TestQueryTakesNoGrantAndItsTerminalStillDoes.
+//
+// The entry point builds and does not run, so it needs no Grant: a Grant on the
+// builder would be a second place a tenant could come from. What runs is the
+// terminal, and the terminal refuses one that carries no tenant.
+func TestQueryTakesNoGrantAndItsTerminalStillDoes(t *testing.T) {
+	conn := newTestConnection()
+	conn.queue()
+
+	q := Query[account](testDB{conn}).Where("name", "=", "Ada")
+	if _, err := q.Get(context.Background(), auth.Grant{}); !errors.Is(err, ErrNoTenant) {
+		t.Fatalf("Get with the zero Grant = %v, want ErrNoTenant", err)
+	}
+	if len(conn.sqls()) != 0 {
+		t.Errorf("statements = %v, want none: nothing runs without a tenant", conn.sqls())
+	}
+}

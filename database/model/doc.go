@@ -17,7 +17,7 @@
 //		DeletedAt *time.Time `db:"deleted_at"`
 //	}
 //
-//	users := model.NewModel[User]("users", conn, grammar, processor)
+//	users := model.Query[User](db)
 //
 //	user, err := users.Where("email", "=", email).First(ctx, g)
 //	if err != nil {
@@ -43,6 +43,12 @@
 //
 // A column is a field. The tag `db:"..."` names it; without a tag the name is
 // the field name in snake case. A field tagged `db:"-"` is not a column.
+//
+// Query is the entry point when the defaults are right: it works the table out
+// of the type and takes the grammar and the processor off the connection.
+// NewModel is the one to reach for when they are not -- another table, another
+// key, soft deletes, a table with no tenant column -- and the model it returns
+// answers NewQuery.
 //
 // # There is no mass-assignment allowlist, and nothing replaces one
 //
