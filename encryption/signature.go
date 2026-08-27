@@ -38,13 +38,20 @@ type Signer struct {
 
 // ErrSignature is what every failure below unwraps to, so a caller answers "this
 // link is not valid" once rather than switching on four reasons it is not.
-var ErrSignature = errors.New("security: the signature is not valid")
+var ErrSignature = errors.New("encryption: the signature is not valid")
 
 // NewSigner returns a Signer over the application key.
 //
 // The same key as the session and the CSRF token, because they are the same
 // secret: an attacker who has it does not need three.
-func NewSigner(appKey []byte) *Signer { return &Signer{key: appKey} }
+//
+// The key is copied, for the reason [NewEncrypter] copies it: a []byte handed
+// in stays a window onto the caller's memory, and a caller that zeroes or
+// reuses that buffer would silently change what the application signs. One key,
+// one package, one rule about who owns the bytes.
+func NewSigner(appKey []byte) *Signer {
+	return &Signer{key: append([]byte(nil), appKey...)}
+}
 
 // Sign returns a token carrying payload, valid for ttl, usable only for purpose.
 //
@@ -97,10 +104,11 @@ var ErrExpired = fmt.Errorf("%w: the link has expired", ErrSignature)
 
 func (s *Signer) sign(purpose, body string) string {
 	m := hmac.New(sha256.New, s.key)
-	// The purpose is written with its length in front of it, so that a purpose
-	// of "verify" with a body of "x.y" cannot produce the same input as a
-	// purpose of "verifyx" with a body of ".y". Without it the two are the same
-	// byte string, and one token works for both.
+	// The purpose is written with its length in front of it, so that nothing on
+	// either side of the separator can move the boundary between them: a purpose
+	// of "a|b" with a body of "c" and a purpose of "a" with a body of "b|c" are
+	// the byte string "a|b|c" either way, and without the length one token is
+	// signed for both purposes.
 	_, _ = fmt.Fprintf(m, "%d:%s|%s", len(purpose), purpose, body)
 	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))
 }

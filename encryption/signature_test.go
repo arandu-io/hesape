@@ -13,6 +13,82 @@ func signer() *encryption.Signer {
 	return encryption.NewSigner([]byte("an application key long enough to be one"))
 }
 
+// goldenSignerKey is the key the fixtures below were signed under. It is 32
+// bytes of 'a' and it is not a secret: it exists so that tokens this package
+// issued can be checked into this file.
+const goldenSignerKey = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+// The fixtures. Both were signed by an earlier build of this package and pasted
+// here, which is the whole point of them: a round trip agrees with itself even
+// when the signing and the checking changed together, and what has to hold is
+// that a link already sitting in somebody's inbox still opens.
+const (
+	// Purpose "verify-email", expiring in the year 2286, carrying a payload
+	// written the way the application writes one -- each field behind its length.
+	goldenLiveToken = "ODp0ZW5hbnQtMXw0OnUtNDJ8MTc6cmVhZGVyQGV4YW1wbGUuY29t.9999999999.lew3tvMqP0v9Av293YP39mxzj6v4NiPxnqLuzQvakcg"
+
+	// Purpose "password-reset", expired in November 2023.
+	goldenExpiredToken = "ODp0ZW5hbnQtMXw0OnUtNDI.1700000000.12pPtsWmeqR8C-gLYKL8B2mXxh1ZzAymA06YOH6SdDU"
+)
+
+// TestATokenIssuedByAnEarlierBuildStillVerifies.
+//
+// A link is in an inbox for as long as it is valid, which outlasts a deploy.
+// Anything that changes what gets signed -- the field order, the separator, the
+// length in front of the purpose, the encoding of the payload -- refuses every
+// one of those links at once, and this fixture is what says so before the
+// release rather than after it.
+func TestATokenIssuedByAnEarlierBuildStillVerifies(t *testing.T) {
+	s := encryption.NewSigner([]byte(goldenSignerKey))
+
+	got, err := s.Verify("verify-email", goldenLiveToken)
+	if err != nil {
+		t.Fatalf("a token an earlier build of this package issued was refused: %v", err)
+	}
+	if want := "8:tenant-1|4:u-42|17:reader@example.com"; got != want {
+		t.Errorf("the payload came back as %q, want %q", got, want)
+	}
+}
+
+// TestAnOldTokenThatHasRunOutIsRefusedForTheRightReason.
+//
+// It pins two things at once, and only the fixture can pin them together.
+// ErrExpired is reachable only after hmac.Equal has passed, so reaching it says
+// the signature over a token issued before this build still verifies; and
+// reaching it rather than a payload says the expiry is still enforced here,
+// where the signature is checked, rather than left to a caller to look at.
+// A build that stopped checking the expiry would hand back the payload and pass
+// every round-trip test in this file.
+func TestAnOldTokenThatHasRunOutIsRefusedForTheRightReason(t *testing.T) {
+	s := encryption.NewSigner([]byte(goldenSignerKey))
+
+	payload, err := s.Verify("password-reset", goldenExpiredToken)
+	if !errors.Is(err, encryption.ErrExpired) {
+		t.Fatalf("an expired token from an earlier build reported %v, and returned %q", err, payload)
+	}
+}
+
+// TestTheSignerDoesNotHoldOntoTheCallersKey.
+//
+// The Encrypter copies the key it is given and says why; the Signer is the
+// other half of the same package holding the same secret, so it owes the same
+// promise. Without the copy, a caller that reuses its buffer changes what the
+// application signs, and nothing anywhere reports it -- the links simply stop
+// verifying.
+func TestTheSignerDoesNotHoldOntoTheCallersKey(t *testing.T) {
+	key := []byte(goldenSignerKey)
+	s := encryption.NewSigner(key)
+
+	token := s.Sign("verify-email", "user-1", time.Hour)
+	for i := range key {
+		key[i] = 'z'
+	}
+
+	if _, err := s.Verify("verify-email", token); err != nil {
+		t.Fatalf("zeroing the caller's buffer changed what the signer signs with: %v", err)
+	}
+}
+
 // TestASignedPayloadComesBackUnchanged is the base case: without it, nothing
 // below is testing anything.
 func TestASignedPayloadComesBackUnchanged(t *testing.T) {
@@ -43,12 +119,14 @@ func TestATokenDoesNotWorkForAnotherPurpose(t *testing.T) {
 	}
 }
 
-// TestAPurposeCannotBorrowTheBodysFirstCharacter.
+// TestATokenIsRefusedUnderAPurposeThatIsAPrefixOfItsOwn.
 //
-// Length-prefixing the purpose is not decoration: "verify" + "|x.y" and
-// "verify|" + "x.y" are the same byte string once concatenated, so without the
-// prefix one token verifies under two purposes.
-func TestAPurposeCannotBorrowTheBodysFirstCharacter(t *testing.T) {
+// The near miss, from outside: a purpose one character short of the one the
+// token was issued for is a different purpose, not a shorter spelling of it.
+// The collision this file cannot reach -- a purpose that ends where the body
+// begins -- is held in internal_test.go, against sign itself, because a token
+// carrying it is refused for an unrelated reason before Verify returns.
+func TestATokenIsRefusedUnderAPurposeThatIsAPrefixOfItsOwn(t *testing.T) {
 	s := signer()
 
 	token := s.Sign("verify", "payload", time.Hour)
