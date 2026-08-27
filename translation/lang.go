@@ -3,6 +3,7 @@ package translation
 import (
 	"embed"
 	"io/fs"
+	"maps"
 )
 
 // The English catalogue that ships with the framework: the sentences of
@@ -32,4 +33,28 @@ func mustBundled() Loader {
 		panic("translation: the embedded catalogue does not parse: " + err.Error())
 	}
 	return l
+}
+
+// Bundled returns the lines the framework's own catalogue carries for one group
+// of one locale, with nested objects flattened to dotted items, and nil for a
+// group it does not carry.
+//
+// It is for a package that produces one of these sentences without holding a
+// [Translator] -- the validator answering with no catalogue configured, before
+// an application has wired one. That package reads the sentences from here
+// rather than keeping its own copy of them: two tables of the same English is
+// two answers to what a message says, and which one a project reads is decided
+// by which of them happened to be loaded.
+//
+// The catalogue that ships is English, so "en" is the locale that answers.
+//
+// The map is a copy. The catalogue is read once and shared by every
+// [Translator], and a caller able to write into it would be editing the
+// sentences of all of them.
+func Bundled(locale, group string) Lines {
+	lines := bundled.Load(locale, group, AppNamespace)
+	if len(lines) == 0 {
+		return nil
+	}
+	return maps.Clone(lines)
 }
