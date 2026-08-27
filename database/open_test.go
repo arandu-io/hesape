@@ -203,6 +203,115 @@ func TestTheServerPoolIsBounded(t *testing.T) {
 	}
 }
 
+// TestAZeroPoolSettingIsThePackageDefaultAndNeverUnbounded is the one rule
+// these three fields have that database/sql does not.
+//
+// SetMaxOpenConns(0) there is an unbounded pool. Every Config comes out of
+// ParseURL with all three at zero, so reading zero the way database/sql does
+// would take the bound off every pool that exists rather than off the ones that
+// asked for it -- and the bound is what Open is for.
+func TestAZeroPoolSettingIsThePackageDefaultAndNeverUnbounded(t *testing.T) {
+	maxOpen, maxIdle, lifetime := Config{}.pool()
+
+	if maxOpen != defaultMaxOpenConns {
+		t.Errorf("maxOpen = %d, want %d", maxOpen, defaultMaxOpenConns)
+	}
+	if maxIdle != defaultMaxIdleConns {
+		t.Errorf("maxIdle = %d, want %d", maxIdle, defaultMaxIdleConns)
+	}
+	if lifetime != defaultConnMaxLifetime {
+		t.Errorf("lifetime = %s, want %s", lifetime, defaultConnMaxLifetime)
+	}
+	// Said twice on purpose: zero here is the value that would be handed to
+	// SetMaxOpenConns, and there it means no bound at all.
+	if maxOpen == 0 {
+		t.Fatal("a zero configuration produced an unbounded pool")
+	}
+
+	// And a parsed URL really does leave all three at zero, so the rule above is
+	// about every configuration a project has rather than a shape nobody builds.
+	parsed, err := ParseURL("postgres://u:p@localhost:5432/app")
+	if err != nil {
+		t.Fatalf("ParseURL: %v", err)
+	}
+	if parsed.MaxOpenConns != 0 || parsed.MaxIdleConns != 0 || parsed.ConnMaxLifetime != 0 {
+		t.Fatalf("ParseURL now writes the pool fields (%d, %d, %s), and the zero rule was written for a URL that does not",
+			parsed.MaxOpenConns, parsed.MaxIdleConns, parsed.ConnMaxLifetime)
+	}
+}
+
+// TestAPoolSettingThatIsSetIsTheOneUsed, per field: a project that names one of
+// the three keeps the package's answer for the other two.
+func TestAPoolSettingThatIsSetIsTheOneUsed(t *testing.T) {
+	maxOpen, maxIdle, lifetime := Config{
+		MaxOpenConns:    8,
+		MaxIdleConns:    3,
+		ConnMaxLifetime: 90 * time.Second,
+	}.pool()
+
+	if maxOpen != 8 || maxIdle != 3 || lifetime != 90*time.Second {
+		t.Errorf("pool = %d, %d, %s, want what the configuration said", maxOpen, maxIdle, lifetime)
+	}
+
+	maxOpen, maxIdle, lifetime = Config{MaxOpenConns: 8}.pool()
+	if maxOpen != 8 {
+		t.Errorf("maxOpen = %d, want the configured 8", maxOpen)
+	}
+	if maxIdle != defaultMaxIdleConns || lifetime != defaultConnMaxLifetime {
+		t.Errorf("one field set changed the other two: %d, %s", maxIdle, lifetime)
+	}
+}
+
+// TestTheConfiguredPoolReachesTheDriver: the settings above are worth nothing
+// until they are on the handle, and this package already shipped three of them
+// that were declared, validated and then dropped on the way to the driver.
+//
+// MaxOpenConnections is the one of the three database/sql reports back. The
+// other two are covered by the tests above, on the value rather than on the
+// handle, because sql.DB has no way to ask what they were set to.
+func TestTheConfiguredPoolReachesTheDriver(t *testing.T) {
+	reset(t)
+	Register(testConnector{DialectPostgres, "arandu-open-test"})
+	swap(t, sql.Open)
+
+	db, closeDB, err := Open(Config{
+		Connection: DialectPostgres,
+		Host:       "localhost", Port: "5432", Username: "u", Database: "app",
+		MaxOpenConns: 8,
+	})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer closeDB()
+
+	if got := db.Unwrap().Stats().MaxOpenConnections; got != 8 {
+		t.Errorf("MaxOpenConnections = %d, want the configured 8", got)
+	}
+}
+
+// TestSQLiteKeepsOneWriterWhateverTheConfigurationSays: a pool setting written
+// for a server travels to a developer's machine, where the same number would buy
+// nothing and cost "database is locked".
+func TestSQLiteKeepsOneWriterWhateverTheConfigurationSays(t *testing.T) {
+	reset(t)
+	Register(testConnector{DialectSQLite, "arandu-open-test"})
+	swap(t, sql.Open)
+
+	db, closeDB, err := Open(Config{
+		Connection:   DialectSQLite,
+		Database:     t.TempDir() + "/app.sqlite",
+		MaxOpenConns: 50,
+	})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer closeDB()
+
+	if got := db.Unwrap().Stats().MaxOpenConnections; got != 1 {
+		t.Errorf("MaxOpenConnections = %d, want 1 whatever the configuration asked for", got)
+	}
+}
+
 // TestTheSQLiteDirectoryIsCreated: SQLite creates the file and never the
 // directory above it, and the error it gives for a missing one names neither.
 func TestTheSQLiteDirectoryIsCreated(t *testing.T) {

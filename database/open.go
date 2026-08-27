@@ -65,13 +65,49 @@ func sortedLocked() []Dialect {
 	return out
 }
 
+// The pool this package keeps when the configuration asks for nothing.
+//
+// They are the answer to "what should a web application hold", not a tuning
+// guide: 25 in flight is more than a request-per-core process ever needs at
+// once, 5 idle covers the gap between two bursts without holding a server's
+// connection table, and an hour is short enough that a rotated credential or a
+// proxy that moved is noticed by the pool rather than by a request.
+const (
+	defaultMaxOpenConns    = 25
+	defaultMaxIdleConns    = 5
+	defaultConnMaxLifetime = time.Hour
+)
+
+// pool answers the three settings [Open] applies, reading a zero on any of them
+// as the default of this package.
+//
+// Zero is never database/sql's meaning for zero. SetMaxOpenConns(0) there is an
+// unbounded pool, and every Config that reaches this comes out of [ParseURL]
+// with these three at zero -- so taking that meaning would remove the bound from
+// every pool that exists rather than from the ones that asked. The bound is what
+// [Open] is for.
+func (d Config) pool() (maxOpen, maxIdle int, lifetime time.Duration) {
+	maxOpen, maxIdle, lifetime = defaultMaxOpenConns, defaultMaxIdleConns, defaultConnMaxLifetime
+	if d.MaxOpenConns > 0 {
+		maxOpen = d.MaxOpenConns
+	}
+	if d.MaxIdleConns > 0 {
+		maxIdle = d.MaxIdleConns
+	}
+	if d.ConnMaxLifetime > 0 {
+		lifetime = d.ConnMaxLifetime
+	}
+	return maxOpen, maxIdle, lifetime
+}
+
 // Open connects, tunes the pool, and returns the instrumented handle plus the
 // function that closes it.
 //
 // The pool policy lives here rather than in each project's main, because it is
 // not a preference: the defaults of database/sql are an unbounded pool, which
 // turns one traffic spike into "too many connections" on the server instead of a
-// queue in the process.
+// queue in the process. What a project may choose is the size, through the three
+// pool fields of [Config]; what it may not choose is having no size at all.
 func Open(cfg Config) (*DB, func(), error) {
 	driverName, err := driverFor(cfg.Connection)
 	if err != nil {
@@ -91,15 +127,20 @@ func Open(cfg Config) (*DB, func(), error) {
 		return nil, nil, fmt.Errorf("opening %s: %w", cfg.Redacted(), err)
 	}
 
+	maxOpen, maxIdle, lifetime := cfg.pool()
 	if cfg.Connection == DialectSQLite {
-		// One writer. SQLite serializes writes anyway, and letting the pool open
-		// more connections only converts the wait into "database is locked".
-		sqldb.SetMaxOpenConns(1)
-	} else {
-		sqldb.SetMaxOpenConns(25)
-		sqldb.SetMaxIdleConns(5)
-		sqldb.SetConnMaxLifetime(time.Hour)
+		// One writer, whatever the configuration asked for. SQLite serializes
+		// writes anyway, so a larger pool does not open a second writer -- it
+		// only converts the wait into "database is locked", which reads like
+		// corruption and is really a pool setting. A number that cannot do what
+		// it says is worse than no setting, so this one overrides rather than
+		// being refused at the top: the configuration is portable across
+		// engines, and the same value is right on the server it was written for.
+		maxOpen = 1
 	}
+	sqldb.SetMaxOpenConns(maxOpen)
+	sqldb.SetMaxIdleConns(maxIdle)
+	sqldb.SetConnMaxLifetime(lifetime)
 
 	// And it connects, here, before anything else runs.
 	//

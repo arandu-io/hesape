@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/arandu-io/hesape/config"
 )
@@ -33,8 +34,11 @@ import (
 // import from the configuration package into the SQL package, pointing the wrong
 // way.
 //
-// The fields below are what the URL parsed into. They are read, never written:
-// what wrote them is ParseURL, in one place, with one set of rules.
+// The connection fields below are what the URL parsed into. They are read,
+// never written: what wrote them is ParseURL, in one place, with one set of
+// rules. The three pool fields are the exception and are documented as such --
+// ParseURL never touches them, because how many connections to hold is not part
+// of where the database is.
 type Config struct {
 	Connection Dialect
 	Database   string // file path for SQLite, database name otherwise
@@ -51,6 +55,38 @@ type Config struct {
 	// URL is what was parsed, kept for the error messages and for a driver that
 	// would rather have the string than the parts.
 	URL string
+
+	// MaxOpenConns caps the connections in flight. Zero is 25.
+	//
+	// Zero on this field and the two below means the default of this package,
+	// and never database/sql's meaning for zero, which is unbounded. That
+	// difference is the whole rule: ParseURL leaves all three at zero, so every
+	// configuration built from a URL -- which is every configuration there is --
+	// carries zero. Reading it as database/sql does would take the bound off
+	// every pool at once, and the bound is the reason [Open] sets these at all:
+	// an unbounded pool turns one traffic spike into "too many connections" on
+	// the server instead of a queue in this process.
+	//
+	// There is therefore no way to ask for an unbounded pool, deliberately. The
+	// answer to a pool that is too small is a larger number, and the answer to
+	// one that is too small at every number is a queue.
+	//
+	// SQLite ignores this one: it gets a single writer whatever is set here.
+	// See [Open].
+	MaxOpenConns int
+
+	// MaxIdleConns is how many connections stay open between queries. Zero is 5.
+	//
+	// database/sql caps it at MaxOpenConns on its own, so a number above the
+	// open limit is the open limit.
+	MaxIdleConns int
+
+	// ConnMaxLifetime retires a connection after this long. Zero is one hour.
+	//
+	// A managed database that rotates behind a proxy hands out connections that
+	// stop working, and a lifetime is what makes the pool replace them without a
+	// request failing first.
+	ConnMaxLifetime time.Duration
 }
 
 // DefaultSQLitePath is where a fresh project keeps its database file.
