@@ -69,6 +69,40 @@ Add it only when the endpoint deduplicates. It takes no argument and does nothin
 on its own, because a fifth boolean on `Retry` would sit beside `throw`, where one
 positional slip buys duplicate writes.
 
+### The rate limiter refuses to be wired in a way that always fails open
+
+```
+- ./cache.Limit.After, .AfterCallback, .Response, .ResponseCallback: removed
+```
+
+Both callbacks were documented as behaviour and **nothing anywhere read them**.
+`PerMinute(5).After(onlyFailures)` compiled and counted every request;
+`.Response(myPage)` got the default 429. The only test asserted that the setter
+stored the value. They do not come back, because each already has one spelling:
+`Refuse` for the refusal and `Release` for giving an attempt back.
+
+No caller in any repository used them, so this breaks nobody today.
+
+**`routing/middleware.Throttle` now panics at construction** on a wiring that
+could never limit: a zero or negative budget, a limit with no window, a nil
+limiter, a nil key function and a nil refusal. `cache.None()` still wires, because
+allowing everything is a decision rather than a mistake.
+
+That is a behaviour change apidiff cannot see, and it is the point. Measured
+against the previous code with `PerMinute(0)`: **10000 of 10000 requests were
+allowed**, none refused, each one logging that the rate limiter could not be
+reached — over an error that actually said the limit allows zero attempts. A
+security control that silently does not exist, blaming the store. A nil refusal
+was worse: the first caller to go over would have panicked instead of getting a
+429, possibly weeks later.
+
+Failing open when the store is genuinely unreachable is kept, and is now stated
+as a decision rather than inherited: a guard against abuse must not turn a cache
+outage into a total one, and the caller whose budget *is* the security control
+checks in the handler against the same limiter, where it can fail closed. It is
+also now provably loud — the request passes and an error line naming the cause is
+written.
+
 ### `str` stops spelling the standard library
 
 ```
