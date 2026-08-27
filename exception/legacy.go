@@ -65,13 +65,6 @@ func (h *Handler) HandleException(w http.ResponseWriter, r *http.Request, err er
 	return nil
 }
 
-// HandleUncaughtException handles the failure nobody caught.
-//
-// It is Recover that calls this.
-func (h *Handler) HandleUncaughtException(w http.ResponseWriter, r *http.Request, err error) {
-	h.HandleException(w, r, err)
-}
-
 // HandleConsole handles an error raised by a command.
 //
 // It runs the same handler stack with fromConsole set. The failure that

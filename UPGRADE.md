@@ -325,6 +325,29 @@ h.Make(password, hashing.Options{Memory: 65536, Time: 4})
 hashing.Make(password)
 ```
 
+### `exception.(*Handler).HandleUncaughtException` is removed
+
+```
+- ./exception.(*Handler).HandleUncaughtException: removed
+```
+
+It forwarded to `HandleException` and nothing called it. Its doc comment said
+"It is Recover that calls this", and `Recover` does not: the recovered panic goes
+to the handler's own answer path, which captures the stack frames the error page
+needs. A caller that took the comment at its word got the handler stack without
+those frames.
+
+```go
+// before
+h.HandleUncaughtException(w, r, err)
+
+// after
+h.HandleException(w, r, err)
+```
+
+`HandleException` returns what the handler stack answered, which the removed
+method discarded. Panics keep going through `Recover`, unchanged.
+
 ## Unreleased — the unsigned verification link is gone
 
 ```
