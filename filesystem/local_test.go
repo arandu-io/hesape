@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -548,4 +550,349 @@ func equal(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+// The bodies of the files beside the root. A test that finds either of them in
+// an answer has watched the adapter read a file that is not in its store.
+const (
+	outsideSecret = "outside secret"
+	outsideNested = "outside nested"
+)
+
+// symlinkFixture builds a root with a directory beside it, and returns both
+// plus an adapter rooted at the first.
+//
+// They are siblings rather than parent and child so that no key can name the
+// second one: reaching it takes a link, which is the whole subject.
+func symlinkFixture(t *testing.T) (root, outside string, a *filesystem.LocalFilesystemAdapter) {
+	t.Helper()
+
+	base := t.TempDir()
+	root = filepath.Join(base, "files")
+	outside = filepath.Join(base, "outside")
+
+	if err := os.MkdirAll(filepath.Join(outside, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"secret.txt":     outsideSecret,
+		"sub/nested.txt": outsideNested,
+	} {
+		if err := os.WriteFile(filepath.Join(outside, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	a, err := filesystem.NewLocalFilesystemAdapter(root)
+	if err != nil {
+		t.Fatalf("NewLocalFilesystemAdapter: %v", err)
+	}
+	return root, outside, a
+}
+
+func symlink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// escapeRoutes are the shapes a link inside the root takes to point out of it.
+//
+// They are separate cases because they are followed at different moments: a
+// link as the last component is followed by a read, a link as a directory
+// component is followed by every operation including the write, and a chain and
+// a relative target are what a check that reads one link at a time misses. None
+// of the keys contains "..", which is what a check on the key alone reads.
+var escapeRoutes = []struct {
+	name string
+	// plant creates the links under root. Nothing under outside may be
+	// reachable afterwards.
+	plant func(t *testing.T, root, outside string)
+	// key is the stored path that walks them, and body what the file it lands
+	// on holds -- so a test can say which file came back rather than that one
+	// did.
+	key  string
+	body string
+}{
+	{
+		name: "a link as a directory component",
+		plant: func(t *testing.T, root, outside string) {
+			symlink(t, outside, filepath.Join(root, "out"))
+		},
+		key:  "out/secret.txt",
+		body: outsideSecret,
+	},
+	{
+		name: "a link as the last component",
+		plant: func(t *testing.T, root, outside string) {
+			symlink(t, filepath.Join(outside, "secret.txt"), filepath.Join(root, "secret.txt"))
+		},
+		key:  "secret.txt",
+		body: outsideSecret,
+	},
+	{
+		name: "a chain of links",
+		plant: func(t *testing.T, root, outside string) {
+			symlink(t, "second", filepath.Join(root, "first"))
+			symlink(t, outside, filepath.Join(root, "second"))
+		},
+		key:  "first/secret.txt",
+		body: outsideSecret,
+	},
+	{
+		name: "a relative link that climbs out",
+		plant: func(t *testing.T, root, outside string) {
+			target, err := filepath.Rel(filepath.Join(root, tenant), outside)
+			if err != nil {
+				t.Fatal(err)
+			}
+			symlink(t, target, filepath.Join(root, tenant, "up"))
+		},
+		key:  tenant + "/up/secret.txt",
+		body: outsideSecret,
+	},
+	{
+		name: "a link under a deeper prefix",
+		plant: func(t *testing.T, root, outside string) {
+			symlink(t, outside, filepath.Join(root, "out"))
+		},
+		key:  "out/sub/nested.txt",
+		body: outsideNested,
+	},
+}
+
+// TestLocalASymlinkCannotBeReadThrough: the key names nothing that escapes, and
+// the path it resolves to does. A check that compares strings answers about the
+// key; the kernel answers about the link.
+func TestLocalASymlinkCannotBeReadThrough(t *testing.T) {
+	for _, route := range escapeRoutes {
+		t.Run(route.name, func(t *testing.T) {
+			root, outside, a := symlinkFixture(t)
+			route.plant(t, root, outside)
+			ctx := context.Background()
+
+			if f, err := a.Get(ctx, route.key); err == nil {
+				body, _ := io.ReadAll(f.Body)
+				_ = f.Body.Close()
+				t.Errorf("Get(%q) read %q from outside the root", route.key, body)
+			}
+			if info, err := a.Stat(ctx, route.key); err == nil {
+				t.Errorf("Stat(%q) answered %d bytes about a file outside the root", route.key, info.Size)
+			}
+			if ok, err := a.Exists(ctx, route.key); err == nil && ok {
+				t.Errorf("Exists(%q) = true for a file outside the root", route.key)
+			}
+		})
+	}
+}
+
+// TestLocalASymlinkCannotBeWrittenThrough is the half that is not a leak but a
+// write: the application's own credentials putting attacker-chosen bytes at an
+// attacker-chosen path.
+func TestLocalASymlinkCannotBeWrittenThrough(t *testing.T) {
+	for _, route := range escapeRoutes {
+		t.Run(route.name, func(t *testing.T) {
+			root, outside, a := symlinkFixture(t)
+			route.plant(t, root, outside)
+			ctx := context.Background()
+
+			// The route's own key replaces a file outside the root; the name
+			// beside it creates one.
+			for _, key := range []string{route.key, path.Join(path.Dir(route.key), "planted.txt")} {
+				_ = a.Put(ctx, key, strings.NewReader("planted"), "")
+			}
+			assertOutsideIsUntouched(t, outside)
+		})
+	}
+}
+
+// TestLocalASymlinkCannotBeDeletedThrough: Delete removes the link when the
+// link is the last component, and the file the link points at when it is not.
+func TestLocalASymlinkCannotBeDeletedThrough(t *testing.T) {
+	for _, route := range escapeRoutes {
+		t.Run(route.name, func(t *testing.T) {
+			root, outside, a := symlinkFixture(t)
+			route.plant(t, root, outside)
+
+			_ = a.Delete(context.Background(), route.key)
+			assertOutsideIsUntouched(t, outside)
+		})
+	}
+}
+
+// TestLocalASymlinkCannotBeListedThrough: a listing is the one answer that
+// names files the caller had not asked for by name, so a walk that follows a
+// link hands back the contents of a directory nobody has a key for.
+func TestLocalASymlinkCannotBeListedThrough(t *testing.T) {
+	for _, route := range escapeRoutes {
+		t.Run(route.name, func(t *testing.T) {
+			root, outside, a := symlinkFixture(t)
+			route.plant(t, root, outside)
+
+			realRoot, err := filepath.EvalSymlinks(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, prefix := range []string{"", path.Dir(route.key) + "/", route.key} {
+				keys, err := a.List(context.Background(), prefix)
+				if err != nil {
+					continue
+				}
+				for _, key := range keys {
+					// Where the key lands, not what it says. A key naming a
+					// path that resolves outside the root is a key the caller
+					// can hand straight back to Get.
+					landed, err := filepath.EvalSymlinks(filepath.Join(root, key))
+					if err != nil {
+						continue
+					}
+					if !strings.HasPrefix(landed, realRoot+string(filepath.Separator)) {
+						t.Errorf("List(%q) answered %q, which is %s -- outside the root", prefix, key, landed)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestLocalAPathThatPassedTheCheckIsNotACapability is the race written down:
+// the path is checked while it names a directory inside the root, the directory
+// becomes a link out of it, and the operation runs against the name that was
+// approved.
+//
+// It is deterministic rather than concurrent because the window is not the
+// point. The point is that the check and the syscall are two separate
+// resolutions of one string, and a check that resolves it itself is answering
+// about a filesystem that no longer exists by the time the syscall runs.
+func TestLocalAPathThatPassedTheCheckIsNotACapability(t *testing.T) {
+	root, outside, a := symlinkFixture(t)
+	ctx := context.Background()
+
+	// A real directory holding a real file, entirely inside the root.
+	if err := a.Put(ctx, "reports/q1.txt", strings.NewReader("inside"), ""); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	// The check. It passes, and it passes for the right reason.
+	if _, err := a.Path("reports/q1.txt"); err != nil {
+		t.Fatalf("Path: %v", err)
+	}
+
+	// The swap.
+	if err := os.RemoveAll(filepath.Join(root, "reports")); err != nil {
+		t.Fatal(err)
+	}
+	symlink(t, outside, filepath.Join(root, "reports"))
+
+	// The use.
+	if f, err := a.Get(ctx, "reports/secret.txt"); err == nil {
+		body, _ := io.ReadAll(f.Body)
+		_ = f.Body.Close()
+		t.Errorf("Get read %q after the directory became a link out of the root", body)
+	}
+	if p, err := a.Path("reports/secret.txt"); err == nil {
+		landed, err := filepath.EvalSymlinks(p)
+		realRoot, rootErr := filepath.EvalSymlinks(root)
+		if err == nil && rootErr == nil && !strings.HasPrefix(landed, realRoot+string(filepath.Separator)) {
+			t.Errorf("Path answered %q, which is %s -- outside the root", p, landed)
+		}
+	}
+	_ = a.Put(ctx, "reports/planted.txt", strings.NewReader("planted"), "")
+	_ = a.Delete(ctx, "reports/secret.txt")
+	assertOutsideIsUntouched(t, outside)
+}
+
+// TestLocalASymlinkIsRefusedThroughTheDiskToo puts the same question at the
+// layer an application actually calls: the key goes through the Grant, the
+// Grant puts the tenant in front of it, and the adapter sees a stored path it
+// did not build.
+//
+// It is also where the tenant prefix is proved to be untouched by the
+// containment fix. The link is planted inside the tenant's own directory, so
+// reaching it at all takes a key that carried the prefix -- and what comes back
+// is the tenant's own file, alone.
+func TestLocalASymlinkIsRefusedThroughTheDiskToo(t *testing.T) {
+	root, outside, a := symlinkFixture(t)
+	d := filesystem.NewDisk("local", a)
+	g := grant(tenant)
+	ctx := context.Background()
+
+	// A file of the tenant's own, so the listing has something right to say.
+	put(t, d, g, "invoices/q1.pdf", "mine")
+	// And a link inside the tenant's directory, pointing out of the root.
+	symlink(t, outside, filepath.Join(root, tenant, "out"))
+
+	if f, err := d.Get(ctx, g, "out/secret.txt"); err == nil {
+		body, _ := io.ReadAll(f.Body)
+		_ = f.Body.Close()
+		t.Errorf("Get read %q from outside the root", body)
+	}
+	if err := d.Put(ctx, g, "out/planted.txt", strings.NewReader("planted"), ""); err == nil {
+		t.Error("Put wrote through a link out of the root")
+	}
+	if err := d.Delete(ctx, g, "out/secret.txt"); err == nil {
+		t.Error("Delete removed a file outside the root")
+	}
+
+	keys, err := d.AllFiles(ctx, g, "")
+	if err != nil {
+		t.Fatalf("AllFiles: %v", err)
+	}
+	if !equal(keys, []string{"invoices/q1.pdf"}) {
+		t.Errorf("AllFiles = %v, want the tenant's own file and nothing else", keys)
+	}
+	// The other tenant holds the same shape of Grant and reaches none of it.
+	if keys, err := d.AllFiles(ctx, grant(otherTenant), ""); err != nil || len(keys) != 0 {
+		t.Errorf("another tenant sees %v (%v)", keys, err)
+	}
+	assertOutsideIsUntouched(t, outside)
+}
+
+// assertOutsideIsUntouched is the whole assertion for a write or a delete:
+// anything extra beside the root was put there through the root, and anything
+// missing was removed through it.
+func assertOutsideIsUntouched(t *testing.T, outside string) {
+	t.Helper()
+
+	want := map[string]string{
+		"secret.txt":     outsideSecret,
+		"sub/nested.txt": outsideNested,
+	}
+	got := map[string]string{}
+	err := filepath.WalkDir(outside, func(p string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		body, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(outside, p)
+		if err != nil {
+			return err
+		}
+		got[filepath.ToSlash(relative)] = string(body)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for name, body := range want {
+		switch have, ok := got[name]; {
+		case !ok:
+			t.Errorf("%s was deleted from outside the root", name)
+		case have != body:
+			t.Errorf("%s outside the root now holds %q", name, have)
+		}
+	}
+	for name := range got {
+		if _, ok := want[name]; !ok {
+			t.Errorf("%s was created outside the root", name)
+		}
+	}
 }

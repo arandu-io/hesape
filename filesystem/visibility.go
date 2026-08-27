@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 
 	"github.com/arandu-io/hesape/auth"
 )
@@ -107,11 +106,11 @@ var _ VisibilityAware = (*LocalFilesystemAdapter)(nil)
 // world-readable is still reachable by somebody who is not the process, and
 // calling that private would be the more dangerous of the two mistakes.
 func (a *LocalFilesystemAdapter) Visibility(_ context.Context, storedPath string) (string, error) {
-	full, err := a.file(storedPath)
+	name, err := a.file(storedPath)
 	if err != nil {
 		return "", err
 	}
-	info, err := os.Stat(full)
+	info, err := a.dir.Stat(name)
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", ErrNotFound
 	}
@@ -126,7 +125,7 @@ func (a *LocalFilesystemAdapter) Visibility(_ context.Context, storedPath string
 
 // SetVisibility chmods the file.
 func (a *LocalFilesystemAdapter) SetVisibility(_ context.Context, storedPath, visibility string) error {
-	full, err := a.file(storedPath)
+	name, err := a.file(storedPath)
 	if err != nil {
 		return err
 	}
@@ -134,7 +133,7 @@ func (a *LocalFilesystemAdapter) SetVisibility(_ context.Context, storedPath, vi
 	if visibility == VisibilityPublic {
 		mode = publicFileMode
 	}
-	if err := os.Chmod(full, mode); err != nil {
+	if err := a.dir.Chmod(name, mode); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return ErrNotFound
 		}
