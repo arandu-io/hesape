@@ -321,10 +321,16 @@ func newLockOwner() (string, error) {
 
 // lockKey namespaces locks, and does not prefix them by tenant.
 //
-// That is deliberate and it is one of the three documented exceptions to RULE
-// 14 (docs/15): a scheduler lock covers the whole instance, and a lock that
-// existed per tenant would let N replicas each run the task for a different
-// tenant at the same time -- which is the problem, not the solution. A lock
-// that really is about one tenant puts the tenant in its name, which is what
-// Repository.WithoutOverlapping does.
+// That is deliberate, and it is the sentence that has to survive somebody
+// making this consistent with the cache keys next door, which are all prefixed.
+// A lock is taken to make one thing happen once across every replica of the
+// instance. Prefixed by tenant it would be a different lock per tenant, so N
+// replicas would each win a lock and each run the scheduled task -- for a
+// different tenant, at the same minute, which is the failure the lock exists to
+// prevent rather than an improvement on it. The same goes for the outbox relay
+// and for a console command that must not run twice.
+//
+// A lock that really is about one tenant is written by putting the tenant in
+// the name passed to Locks.Lock, which is what Repository.WithoutOverlapping
+// does. The name is a string for that reason.
 func lockKey(name string) string { return "lock:" + name }

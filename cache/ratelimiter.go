@@ -140,6 +140,22 @@ func (l Limit) FallbackKey() string {
 // throttle may well choose the opposite. That decision was previously buried
 // inside the limiter, where the middleware could not see it and could not
 // change it.
+//
+// # No method here takes a Grant, and none should
+//
+// Every Repository method in this package takes one, and takes the tenant out
+// of it. This type is the exception on purpose, and making it consistent with
+// its neighbour would break the routes it exists to protect: a rate limit runs
+// before authentication precisely where it matters most -- the sign-in form,
+// the password reset, the public API key check -- and at that point in the
+// request nobody has been identified, so there is no Grant to take a tenant
+// from. A signature that demanded one would be a signature no caller on those
+// routes could satisfy, and the limit would come off the routes rather than the
+// requirement coming off the signature.
+//
+// What a caller wants a tenant in the key for, it already has: Limit.Key is a
+// string, so a limit that really is per tenant is written by putting the tenant
+// in the key it is built with.
 type RateLimiter struct {
 	store Store
 
