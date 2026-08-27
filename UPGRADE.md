@@ -24,6 +24,111 @@ the first tag and has nothing before it to compare against.
 
 ---
 
+## Unreleased — the row is the model
+
+The heading is `Unreleased` because these have not been tagged yet. It becomes
+the number of the release that carries them, at the moment it is cut.
+
+`database/model.Collection[T]` was `[]*Model[T]` and is `[]*T`. Every terminal
+that answered a model answers the row: the application's own struct, with the
+columns as fields. Reading one is reading a field, and there is nothing to
+unwrap first.
+
+That is one change, and it moved 61 exported signatures. They are all the same
+substitution — `*Model[T]` became `*T` — so the table is one row per family and
+the full list is at the end of this entry.
+
+| was | is | what to do |
+|---|---|---|
+| `Collection[T]` was `[]*Model[T]` | `[]*T` | Range over it and read fields. `c.First()`, `c.Find(id)`, `c.All()` and `c.GetDictionary()` hand back rows |
+| `First`, `Find`, `Sole`, `FirstOrCreate` and the rest returned `(*Model[T], error)` | `(*T, error)` | Drop the `.Entity`. Where you called a model method on the result, see the two shapes below |
+| `Each`, `Cursor`, `Lazy`, `LazyById` handed the callback a `*Model[T]` | a `*T` | Same, in the callback's parameter |
+| `Map`, `CountBy`, `MapWithKeys`, `Zip`, `Pad`, `Partition` took a `*Model[T]` | a `*T` | Same, in the callback's parameter |
+| `Related(m *Model[T], name)` | `Related(row *T, name)` | Pass the row. It answers `false` for a row that reaches no model, where it used to dereference nothing |
+| `m.Is(other *Model[T])`, `m.IsNot(...)` | `m.Is(other *T)` | Pass the row |
+| `factories.Factory[T].Make() []T` | `([]*T, error)` | Read the error. What comes back is rows, built through the model, so a made row can then be saved |
+| `factories.Factory[T].MakeOne() T` | `(*T, error)` | Same |
+| `factories.Factory[T].Create` returned `[]*model.Model[T]` | `[]*T` | Drop the `.Entity` |
+| `factories.AfterCreating(func(ctx, g, *model.Model[T]) error)` | `func(ctx, g, *T) error` | The callback receives the stored row |
+
+### The line that replaces `m.Save(...)`, for each of the two entity shapes
+
+A loop that read rows and wrote them back was:
+
+```go
+users, err := q.Get(ctx, g)          // []*model.Model[User]
+for _, m := range users {
+        _ = m.SetAttribute("name", "Ada")
+        _, err = m.Save(ctx, g)
+}
+```
+
+**An entity that embeds `model.Model[T]`** carries its model inside itself, so
+the row is the model and Go promotes the methods out of it:
+
+```go
+type User struct {
+        model.Model[User]
+
+        ID   int64  `db:"id"`
+        Name string `db:"name"`
+}
+
+users, err := model.Query[User](db).Get(ctx, g)   // []*User
+for _, u := range users {
+        u.Name = "Ada"
+        _, err = u.Save(ctx, g)
+}
+```
+
+`Save`, `Delete`, `Refresh`, `Load`, `Is` and the rest are reached this way, and
+`model.ModelOf(u)` is how to reach the model's configuration — the table, the
+key, the tenant column — without the struct exposing them again.
+
+**A plain struct that does not embed it** has no field pointing back at a model,
+so there is nothing on the row to call. The columns are all it carries. Write the
+update as a statement over the key:
+
+```go
+_, err := model.Query[User](db).WhereKey(u.ID).
+        Update(ctx, g, map[string]any{"name": "Ada"})
+```
+
+or give the entity the embedded model, which is what makes the first form work.
+The same line divides the relations: `Related` answers `false` on a plain row,
+and `Collection.Load`, `LoadMissing`, `LoadAggregate` and
+`Builder.EagerLoadRelations` report the new `ErrRowHasNoModel` rather than
+attaching a relation to nothing and reporting success.
+
+That last one is a behaviour change and not a compile break, so it is here rather
+than in the table: those five used to answer `nil` having loaded nothing at all
+for a collection of the plain shape, which is a relation the next line reads and
+does not find.
+
+### Every signature the tool reported
+
+`database/model`, on `*Builder[T]`: `Create`, `CreateOrFirst`, `CreateOrRestore`,
+`Cursor`, `Each`, `Find`, `FindOrFail`, `FindOrNew`, `FindSole`, `First`,
+`FirstOr`, `FirstOrCreate`, `FirstOrFail`, `FirstOrNew`, `FirstWhere`,
+`ForceCreate`, `IncrementOrCreate`, `Lazy`, `LazyById`, `RestoreOrCreate`,
+`Sole`, `UpdateOrCreate`.
+
+On `*Model[T]`: `Create`, `Find`, `FindOrFail`, `FindOrNew`, `First`,
+`FirstOrCreate`, `FirstOrNew`, `ForceCreate`, `Fresh`, `Is`, `IsNot`,
+`NewCollection`, `Replicate`, `ReplicateQuietly`, `ResolveRouteBinding`,
+`ResolveSoftDeletableRouteBinding`, `UpdateOrCreate`, `WithoutRelations`.
+
+On `Collection[T]`: the type itself, `All`, `Find`, `FindOrFail`, `First`,
+`Flip`, `GetDictionary`, `Pad`, `Partition`.
+
+Package functions: `CountBy`, `Map`, `MapWithKeys`, `Related`,
+`ResolveChildRouteBinding`, `ResolveSoftDeletableChildRouteBinding`, `Zip`.
+
+`database/model/factories`, on `*Factory[T]`: `AfterCreating`, `Create`,
+`CreateOne`, `Make`, `MakeOne`.
+
+---
+
 ## v0.11.0 — the console takes the gauge registry
 
 | was | is | what to do |
