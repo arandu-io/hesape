@@ -218,15 +218,43 @@ type Asset struct {
 //
 // The hash comes from the content, so upgrading HTMX changes the URL and no
 // browser serves a stale script -- without anyone remembering to bump a version.
+//
+// A name nobody registered panics. It used to answer AssetPath+"missing/"+name,
+// which is a well-formed URL for a file that is not there: the page rendered,
+// with 200, and the browser took a 404 on it every time. A script tag in a
+// published layout did exactly that, on every page of every project built from
+// it, until somebody opened a network tab.
+//
+// The argument is a constant. The set of assets is fixed when the binary is
+// linked and this is called with a literal name, so the name is either always
+// right or always wrong -- and a wrong one is a build that shipped a reference
+// to a file it does not carry. There is no run in which the fallback URL is the
+// answer somebody wanted, which is the whole reason it is not offered: a
+// refusal names the missing asset once, and a plausible URL hides it forever.
 func URL(name string) string {
 	assetsMu.RLock()
 	defer assetsMu.RUnlock()
 
 	a, ok := assets[name]
 	if !ok {
-		return AssetPath + "missing/" + name
+		panic("view: " + name + " is not a registered asset -- register it with view.RegisterAsset, " +
+			"or drop the reference. Registered: " + strings.Join(registeredNames(), ", "))
 	}
 	return AssetPath + a.hash + "/" + a.name
+}
+
+// registeredNames is the sorted set of names, for a message.
+//
+// The caller holds the lock. Taking it here would be a second read lock on a
+// mutex a writer may already be queued behind, which is the shape that
+// deadlocks rather than the shape that reads twice.
+func registeredNames() []string {
+	out := make([]string, 0, len(assets))
+	for name := range assets {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Handler serves the embedded assets.

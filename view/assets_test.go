@@ -134,6 +134,33 @@ func TestEveryAssetIsServed(t *testing.T) {
 	}
 }
 
+// TestAnUnregisteredAssetIsRefusedRatherThanLinked is the failure this file has
+// already shipped: a script tag for alpine.min.js in a published layout, which
+// nothing registers, answered with a URL of the right shape for a file that is
+// not there. Every page rendered with 200 and every browser took a 404, and
+// nothing anywhere said so.
+func TestAnUnregisteredAssetIsRefusedRatherThanLinked(t *testing.T) {
+	defer func() {
+		v := recover()
+		if v == nil {
+			t.Fatal("view.URL answered for an asset nobody registered")
+		}
+		message, ok := v.(string)
+		if !ok {
+			t.Fatalf("the panic is not a message: %v", v)
+		}
+		if !strings.Contains(message, "alpine.min.js") {
+			t.Errorf("the panic does not name the asset: %s", message)
+		}
+		// And it says what IS registered, so a typo reads as one.
+		if !strings.Contains(message, view.Stylesheet) {
+			t.Errorf("the panic does not say what is registered: %s", message)
+		}
+	}()
+
+	_ = view.URL("alpine.min.js")
+}
+
 // TestTheStylesheetDoesNotReadItsOwnOutput pins the one line that keeps this
 // build a function of its inputs.
 //
