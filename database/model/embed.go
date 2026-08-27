@@ -122,8 +122,8 @@ func newEntity[T any]() (*T, *Model[T]) {
 // It answers nil for a T that does not embed Model[T], and for a value the
 // framework did not build: a User written as a literal has a zero Model[User]
 // inside it, with no connection and no back pointer, and calling a terminal on
-// it returns ErrUnwired rather than panicking. The way to make one is Create,
-// which persists it and returns it wired.
+// it returns ErrUnwired rather than panicking. The ways to make one are the
+// three ErrUnwired names.
 func ModelOf[T any](entity *T) *Model[T] {
 	model := modelIn(entity, embeddedIndex[T]())
 	if model == nil || model.Entity == nil {
@@ -138,7 +138,12 @@ func ModelOf[T any](entity *T) *Model[T] {
 // back pointer to itself, no table. It is the one difference a Laravel developer
 // meets at this layer, because in PHP $this is free and here it is not, so the
 // error says what to do rather than what went wrong.
-var ErrUnwired = errors.New("model: this value was not built by the framework, so it has no connection to save through -- create it with Create(ctx, g, entity), or read it back with Find, First or Get")
+//
+// The three it names are the three ways to get a wired row: an empty one from
+// the model, a stored one from the query, and one read back. It named a fourth,
+// Create(ctx, g, entity), and no such call exists -- Create takes the columns as
+// a map, never a struct the caller already filled.
+var ErrUnwired = errors.New("model: this value was not built by the framework, so it has no connection to save through -- make one with Model.NewInstance, insert one with Builder.Create, or read one back with Find, First or Get")
 
 // entityValue is the entity as a reflect.Value, and whether there is one.
 //

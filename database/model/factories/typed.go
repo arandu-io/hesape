@@ -13,8 +13,9 @@ import (
 //
 // It is the public way to make test and seed data, and it is typed all the way
 // through: the definition returns a T, a state takes a *T, and what comes back
-// is a T. Nothing here takes a map of strings, and a column that does not exist
-// on the entity does not compile rather than being dropped at run time.
+// is the row -- a *T, the same value a query terminal hands back. Nothing here
+// takes a map of strings, and a column that does not exist on the entity does
+// not compile rather than being dropped at run time.
 //
 //	var Users = model.NewModel[User]("users", conn, grammar, processor)
 //
@@ -147,29 +148,70 @@ func (f *Factory[T]) AfterCreating(fn func(context.Context, auth.Grant, *T) erro
 // omission: nothing here reaches the database, so a Grant would be a parameter
 // that authorizes nothing. Asking for one would teach the opposite of what the
 // Grant means everywhere else in this collection.
-func (f *Factory[T]) Make() []T {
+//
+// What comes back is what every terminal hands back -- the rows, built through
+// the model, so a made row is a row that can then be saved. The error is the
+// model's: a definition whose value does not fit the field it names fails here
+// rather than at the statement.
+func (f *Factory[T]) Make() ([]*T, error) {
+	built, err := f.make()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*T, 0, len(built))
+	for _, instance := range built {
+		out = append(out, instance.Entity)
+	}
+	return out, nil
+}
+
+// make is Make with the models still in hand, which is what Create needs: a row
+// reaches its model only when T embeds Model[T], and the storing has to work for
+// both shapes.
+func (f *Factory[T]) make() ([]*model.Model[T], error) {
 	fake := faker.New(f.seed)
-	out := make([]T, 0, f.count)
+	out := make([]*model.Model[T], 0, f.count)
 	for i := range f.count {
-		row := f.define(fake)
+		instance, err := f.model.NewInstance(nil, false)
+		if err != nil {
+			return nil, err
+		}
+
+		// The definition answers a T, and a T that embeds Model[T] carries a
+		// zero model inside it. Assigning the whole struct overwrites the model
+		// this instance IS -- for that shape the two are one allocation -- so
+		// the model is put back once the columns have landed. Without this the
+		// row comes back with no connection and no back pointer, and storing it
+		// fails with the error a hand-written literal gets.
+		//
+		// For a T that does not embed one the model is a value beside the row,
+		// nothing overwrites it, and the last line writes back what it read.
+		row := instance.Entity
+		wiring := *instance
+		*row = f.define(fake)
+		*instance = wiring
+
 		for _, state := range f.states {
-			state(&row)
+			state(row)
 		}
 		if n := len(f.sequence); n > 0 {
-			f.sequence[i%n](&row)
+			f.sequence[i%n](row)
 		}
 		for _, after := range f.afterMaking {
-			after(&row)
+			after(row)
 		}
-		out = append(out, row)
+		out = append(out, instance)
 	}
-	return out
+	return out, nil
 }
 
 // MakeOne returns one row, whatever Count says.
-func (f *Factory[T]) MakeOne() T {
-	rows := f.Count(1).Make()
-	return rows[0]
+func (f *Factory[T]) MakeOne() (*T, error) {
+	rows, err := f.Count(1).Make()
+	if err != nil {
+		return nil, err
+	}
+	return rows[0], nil
 }
 
 // Create stores the rows and returns them.
@@ -188,16 +230,13 @@ func (f *Factory[T]) Create(ctx context.Context, g auth.Grant) ([]*T, error) {
 		resolved = resolved.State(state)
 	}
 
-	rows := resolved.Make()
-	out := make([]*T, 0, len(rows))
+	built, err := resolved.make()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*T, 0, len(built))
 
-	for i := range rows {
-		instance, err := f.model.NewInstance(nil, false)
-		if err != nil {
-			return nil, err
-		}
-		*instance.Entity = rows[i]
-
+	for _, instance := range built {
 		if _, err := instance.Save(ctx, g); err != nil {
 			return nil, err
 		}
