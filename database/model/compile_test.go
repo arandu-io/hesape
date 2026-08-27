@@ -69,3 +69,32 @@ func TestTheModelCannotBeReachedWithoutAGrant(t *testing.T) {
 		})
 	}
 }
+
+// TestAModuleCanReachTheRelationSurface is the positive fixture, and it is here
+// rather than beside the tests that run because what it measures is compilation
+// from outside the package.
+//
+// The relation surface was unreachable while every test inside the package
+// passed. The builder asked relations for Match(grant, keys, constraints) and
+// GetRelationExistenceQuery(*query.Builder, any); the twelve constructors in
+// model/relations answer Match(models, results, relation) and
+// GetRelationExistenceQuery(Builder, Builder, ...any). Nothing satisfied the
+// first pair except a stand-in in a test file -- so RelationResolvers could not
+// be populated from HasManyOf or any of its siblings, and With, Load, Has,
+// WhereHas and WithCount could not be called by an application at all.
+//
+// A test inside the package cannot catch that, because the stand-in it holds is
+// the thing that made the interface look inhabited. This compiles a program that
+// only imports the package, which is the position an application is in.
+func TestAModuleCanReachTheRelationSurface(t *testing.T) {
+	if testing.Short() {
+		t.Skip("compiles a fixture with the go tool")
+	}
+
+	cmd := exec.Command("go", "vet", "./testdata/relation_surface")
+	cmd.Env = append(os.Environ(), "GOWORK=off")
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("a module that registers a relation and eager loads it does not compile:\n%s", out)
+	}
+}
