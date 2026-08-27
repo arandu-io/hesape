@@ -325,6 +325,27 @@ h.Make(password, hashing.Options{Memory: 65536, Time: 4})
 hashing.Make(password)
 ```
 
+### `view/compilers` is removed; there was never a second compiler
+
+```
+- package github.com/arandu-io/hesape/view/compilers: removed
+- package github.com/arandu-io/hesape/view/compilers/concerns: removed
+```
+
+Nothing imported either one, and nothing in them emitted Go. `Compiler` held a
+cache path and a hash; `KyseCompiler` held registries; `ComponentTagCompiler`
+expanded component tags into directives that no emitter read. `concerns` was one
+`doc.go` saying of itself that nothing there was implemented yet.
+
+The compiler that runs is the one the view build has always called, and it is
+unchanged. Building a view goes through the CLI, not through this package, so
+there is nothing to rewrite: a caller of these types could not have compiled a
+view with them.
+
+`view.Factory` keeps every runtime method a compiled view calls — `StartSection`,
+`YieldContent`, `StartPush`, `StartFragment`, `AddLoop` and the rest — and none
+of it moved.
+
 ### `exception.(*Handler).HandleUncaughtException` is removed
 
 ```
