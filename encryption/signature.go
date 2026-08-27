@@ -104,10 +104,11 @@ var ErrExpired = fmt.Errorf("%w: the link has expired", ErrSignature)
 
 func (s *Signer) sign(purpose, body string) string {
 	m := hmac.New(sha256.New, s.key)
-	// The purpose is written with its length in front of it, so that a purpose
-	// of "verify" with a body of "x.y" cannot produce the same input as a
-	// purpose of "verifyx" with a body of ".y". Without it the two are the same
-	// byte string, and one token works for both.
+	// The purpose is written with its length in front of it, so that nothing on
+	// either side of the separator can move the boundary between them: a purpose
+	// of "a|b" with a body of "c" and a purpose of "a" with a body of "b|c" are
+	// the byte string "a|b|c" either way, and without the length one token is
+	// signed for both purposes.
 	_, _ = fmt.Fprintf(m, "%d:%s|%s", len(purpose), purpose, body)
 	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))
 }
