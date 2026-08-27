@@ -69,6 +69,29 @@ Add it only when the endpoint deduplicates. It takes no argument and does nothin
 on its own, because a fifth boolean on `Retry` would sit beside `throw`, where one
 positional slip buys duplicate writes.
 
+### `str` stops spelling the standard library
+
+```
+- ./str.Lower: removed
+- ./str.Upper: removed
+```
+
+Both were one-line forwards to `strings.ToLower` and `strings.ToUpper`, inside the
+package whose stated destination is the standard library first. Call `strings`
+directly:
+
+```go
+// before
+str.Lower(s)
+
+// after
+strings.ToLower(s)
+```
+
+`Stringable.Lower()` and `Stringable.Upper()` **stay**. They return a
+`Stringable` and are links in a fluent chain, which the standard library has no
+equivalent for; only their bodies changed.
+
 ### `image`: a ceiling before the decode, and a context through the transformations
 
 ```
