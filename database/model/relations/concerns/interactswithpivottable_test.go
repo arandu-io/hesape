@@ -420,6 +420,89 @@ func TestSyncOfNothingWithoutDetachingRunsNothing(t *testing.T) {
 	}
 }
 
+// TestSyncMatchesADatabaseStringKeyAgainstACallersIntKey.
+//
+// MySQL's text protocol returns every column as bytes, which the connection
+// turns into a string, so an int primary key reaches a relation as "7" while the
+// caller holds int64(7). Every decision Sync makes -- what is already attached,
+// what was asked for, what is missing -- goes through GetDictionaryKey, which
+// renders both to "7" for exactly this reason.
+//
+// Pinned because the alternative is the worst shape this could take: Sync
+// treating the two as different keys would detach and reattach the same pair on
+// every call, forever, with no error anywhere.
+func TestSyncMatchesADatabaseStringKeyAgainstACallersIntKey(t *testing.T) {
+	pivot, host, conn := newPivot()
+	host.relate.(*fakeModel).keyType = "int"
+
+	conn.rows = []query.Record{{"role_id": "7"}}
+
+	changes, err := pivot.Sync(context.Background(), grant(), []any{int64(7)})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	if len(changes.Attached) != 0 {
+		t.Fatalf("Sync attached %#v, and that row was already attached under the same key", changes.Attached)
+	}
+	if len(changes.Detached) != 0 {
+		t.Fatalf("Sync detached %#v, and that row was asked for under the same key", changes.Detached)
+	}
+
+	for _, ran := range conn.statements {
+		if ran.kind != "select" {
+			t.Fatalf("Sync ran a %s for a pair that was already in the state asked for: %s", ran.kind, ran.sql)
+		}
+	}
+}
+
+// TestSyncReportsBothHalvesOfTheChangeInTheRelatedKeysType.
+//
+// Attached is built from the ids the caller passed and Detached from the keys
+// the database returned, and CastKey exists to make both come back as the
+// related model's key type. It read Go types only, so the half that arrived as
+// text from MySQL was handed back as text: one call answering int64 for what it
+// attached and a string for what it detached, for the same model and the same
+// column.
+//
+// A caller ranging over both and asserting int64 panics on the second half.
+func TestSyncReportsBothHalvesOfTheChangeInTheRelatedKeysType(t *testing.T) {
+	pivot, host, conn := newPivot()
+	host.relate.(*fakeModel).keyType = "int"
+
+	conn.rows = []query.Record{{"role_id": "7"}}
+
+	changes, err := pivot.Sync(context.Background(), grant(), []any{int64(9)})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	if !reflect.DeepEqual(changes.Attached, []any{int64(9)}) {
+		t.Fatalf("Sync attached %#v, want int64", changes.Attached)
+	}
+	if !reflect.DeepEqual(changes.Detached, []any{int64(7)}) {
+		t.Fatalf("Sync detached %#v, want int64: the key came back from the database as text, "+
+			"and the caller reads the two halves of one change set the same way", changes.Detached)
+	}
+}
+
+// TestToggleReportsADetachedKeyInTheRelatedKeysType, which is the other place a
+// key read out of the database is handed back to the caller.
+func TestToggleReportsADetachedKeyInTheRelatedKeysType(t *testing.T) {
+	pivot, host, conn := newPivot()
+	host.relate.(*fakeModel).keyType = "int"
+
+	conn.rows = []query.Record{{"role_id": "7"}}
+
+	changes, err := pivot.Toggle(context.Background(), grant(), []any{int64(7)})
+	if err != nil {
+		t.Fatalf("Toggle: %v", err)
+	}
+	if !reflect.DeepEqual(changes.Detached, []any{int64(7)}) {
+		t.Fatalf("Toggle detached %#v, want int64", changes.Detached)
+	}
+}
+
 // TestToggleTakesOffWhatIsOnAndPutsOnWhatIsNot.
 func TestToggleTakesOffWhatIsOnAndPutsOnWhatIsNot(t *testing.T) {
 	pivot, _, conn := newPivot()
@@ -603,9 +686,15 @@ func TestFormatRecordsListPassesRecordsThroughWhole(t *testing.T) {
 
 // TestGetTypeSwapValueMatchesTheRelatedKeysType.
 //
-// The keys come back off the database and are compared against the ones the
-// caller passed. An int64 from a driver and an int from a literal are different
-// map keys, so a sync would detach and reattach the same row forever.
+// This is what makes a change set answer one type per column. The keys on one
+// side come out of the database and the ones on the other from the caller, and
+// the caller reads both halves the same way.
+//
+// Text is in the table because a driver may hand an integer column back as
+// bytes, which the connection renders to a string. Text that is not the whole of
+// a base-ten integer is refused and passes through unchanged: reading "7.9" as
+// far as it parses would make it the same key as "7", which is the failure this
+// prevents rather than a lesser version of it.
 func TestGetTypeSwapValueMatchesTheRelatedKeysType(t *testing.T) {
 	for _, c := range []struct {
 		keyType string
@@ -614,22 +703,58 @@ func TestGetTypeSwapValueMatchesTheRelatedKeysType(t *testing.T) {
 	}{
 		{"int", 7, int64(7)},
 		{"int", int32(7), int64(7)},
+		{"int", uint32(7), int64(7)},
 		{"int", float64(7), int64(7)},
+		{"int", float32(7), int64(7)},
 		{"integer", int64(7), int64(7)},
-		{"int", "seven", "seven"},
 
-		// A numeric string is left alone too. PHP's (int) cast would make this
-		// 7; the conversion here reads Go types and a string is not one of
-		// them. Pinned rather than assumed, because a driver handing back a
-		// string id for an int key would compare unequal to the caller's int.
-		{"int", "7", "7"},
+		// What a driver hands back for an integer column over a text protocol.
+		{"int", "7", int64(7)},
+		{"int", []byte("7"), int64(7)},
+		{"int", "-7", int64(-7)},
+
+		// Refused, and left as it came.
+		{"int", "seven", "seven"},
+		{"int", "7.9", "7.9"},
+		{"int", " 7", " 7"},
+		{"int", "", ""},
+		{"int", "9223372036854775808", "9223372036854775808"},
 
 		{"string", 7, "7"},
 		{"string", "admin", "admin"},
 		{"uuid", 7, 7},
 	} {
-		if got := GetTypeSwapValue(c.keyType, c.in); got != c.want {
+		got := GetTypeSwapValue(c.keyType, c.in)
+		if !reflect.DeepEqual(got, c.want) {
 			t.Errorf("GetTypeSwapValue(%q, %#v) = %#v, want %#v", c.keyType, c.in, got, c.want)
+		}
+	}
+}
+
+// TestGetTypeSwapValueCountsWhatTheDictionaryCounts.
+//
+// The two read the same keys: one decides whether two keys are the same, the
+// other decides what type the caller is handed back. A value the dictionary
+// renders as a number and this one refuses is a key that compares equal and is
+// reported as a different type, which is the shape the text case had.
+func TestGetTypeSwapValueCountsWhatTheDictionaryCounts(t *testing.T) {
+	numbers := []any{
+		int(7), int8(7), int16(7), int32(7), int64(7),
+		uint(7), uint8(7), uint16(7), uint32(7), uint64(7),
+		float32(7), float64(7),
+		"7", []byte("7"),
+	}
+
+	for _, value := range numbers {
+		key, err := GetDictionaryKey(value)
+		if err != nil {
+			t.Fatalf("GetDictionaryKey(%#v): %v", value, err)
+		}
+		if key != "7" {
+			t.Fatalf("GetDictionaryKey(%#v) = %q, and this table is the values that key as 7", value, key)
+		}
+		if got := GetTypeSwapValue("int", value); got != int64(7) {
+			t.Errorf("GetTypeSwapValue(\"int\", %#v) = %#v, and the dictionary counts it as 7", value, got)
 		}
 	}
 }
@@ -648,8 +773,8 @@ func TestCastKeyUsesTheRelatedModelsKeyType(t *testing.T) {
 	host.relate = related
 
 	got := pivot.CastKeys([]any{8, "9"})
-	if !reflect.DeepEqual(got, []any{int64(8), "9"}) {
-		t.Fatalf("CastKeys = %#v; the int is normalised and the string is left as it came", got)
+	if !reflect.DeepEqual(got, []any{int64(8), int64(9)}) {
+		t.Fatalf("CastKeys = %#v; both are integer keys and one of them only arrived as text", got)
 	}
 }
 

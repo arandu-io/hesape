@@ -3,6 +3,7 @@ package concerns
 import (
 	"context"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
@@ -710,6 +711,24 @@ func intersection(left, right []any) []any {
 	return out
 }
 
+// toInt64 answers value as an int64, and whether it is one at all.
+//
+// The type set is the one GetDictionaryKey renders as a number, because these
+// two read the same keys and a value one of them can count and the other cannot
+// is the shape a key comparison goes wrong in.
+//
+// Text is part of that set, and it is where this went wrong. A driver may return
+// an integer column as bytes -- MySQL's text protocol returns every column that
+// way -- and the connection renders those to a string before a relation ever
+// sees them. So an int primary key reaches here as "7" and left as "7", while
+// the same key from the caller was int64: one change set answering two types for
+// one column.
+//
+// Text that is not a base-ten integer is refused rather than read as far as it
+// parses. "seven" has no number in it, and "7.9" has one that is not this key:
+// truncating it would make "7.9" and "7" the same key, which is the failure this
+// function exists to prevent rather than a lesser version of it. Refusing leaves
+// the value as it came, where it compares unequal and stays visible.
 func toInt64(value any) (int64, bool) {
 	switch number := value.(type) {
 	case int:
@@ -724,10 +743,35 @@ func toInt64(value any) (int64, bool) {
 		return number, true
 	case uint:
 		return int64(number), true
+	case uint8:
+		return int64(number), true
+	case uint16:
+		return int64(number), true
+	case uint32:
+		return int64(number), true
 	case uint64:
+		return int64(number), true
+	case float32:
 		return int64(number), true
 	case float64:
 		return int64(number), true
+	case string:
+		return parseIntegerKey(number)
+	case []byte:
+		return parseIntegerKey(string(number))
 	}
 	return 0, false
+}
+
+// parseIntegerKey reads a key that arrived as text, and refuses anything that is
+// not the whole of a base-ten integer.
+//
+// Whitespace, a fraction, a suffix and a value too large for an int64 are all
+// refused, because each of them would map two different keys onto one.
+func parseIntegerKey(text string) (int64, bool) {
+	number, err := strconv.ParseInt(text, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return number, true
 }
