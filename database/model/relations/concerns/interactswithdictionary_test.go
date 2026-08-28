@@ -168,3 +168,36 @@ func TestDictionaryKeyAnswersTheEmptyStringForWhatItCannotRender(t *testing.T) {
 		t.Fatal("an unkeyable value and a null key landed in different buckets, and this pins that they do not")
 	}
 }
+
+// TestAnEmptyStringKeySharesTheEmptyBucket.
+//
+// The empty bucket is where a null key and a value that cannot key anything
+// land, and the empty string renders to the name of that bucket, so a row whose
+// key is "" lands there too. Sync and Toggle compare through this, so the row is
+// detached by a caller that named neither it nor anything like it.
+//
+// It is left as it is, and this test is that the next reader finds it decided
+// rather than missed. Separating a real empty key from the empty bucket means
+// giving the bucket a name no key can spell, and the bucket's name is what
+// GetDictionaryKey answers for nil -- an exported answer, relied on by every
+// eager load in this package, and pinned above as the behaviour a nullable
+// foreign key needs. The empty string differs from nil in what it costs to
+// defend, not in whether it is a value: nil arrives from a nullable column that
+// a schema declares on purpose, while an empty primary key is a value no key
+// this collection generates ever takes.
+func TestAnEmptyStringKeySharesTheEmptyBucket(t *testing.T) {
+	if got := dictionaryKey(""); got != dictionaryKey(nil) {
+		t.Fatalf("dictionaryKey(%q) = %q, and this pins that it shares the null key's bucket", "", got)
+	}
+	if dictionaryKey([]byte{}) != dictionaryKey(nil) {
+		t.Fatal("an empty byte slice left the empty bucket, and this pins that it does not")
+	}
+
+	// What that costs, said in the terms Toggle reads it in: the caller named a
+	// value that keys nothing, and the row keyed by the empty string comes back
+	// as one to detach.
+	unkeyable := struct{ A int }{A: 1}
+	if got := intersection([]any{""}, []any{unkeyable}); len(got) != 1 {
+		t.Fatalf("intersection = %#v, and this pins that the empty key matches what cannot key anything", got)
+	}
+}
