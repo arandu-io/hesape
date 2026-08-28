@@ -26,7 +26,39 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
-Nothing here has a tag yet. `apidiff` is clean across it — the signatures did not
+### `otp` and `2fa` — the second factor, and one thing a caller must do
+
+Two new packages. Nothing to change to upgrade: no existing API moved, and
+`apidiff` reports only `package …/otp: added` and `package …/2fa: added`.
+
+`otp` is the algorithm — RFC 4226 and RFC 6238, HMAC-SHA-1, proved against the
+test vectors in Appendix D of 4226 and Appendix B of 6238. The digest is not a
+parameter: SHA-1 is what the authenticator applications implement, and a stronger
+one here means a phone that cannot enrol.
+
+**`TOTP.Verify` returns the time step it accepted, and the caller has to store
+it.** That is not decoration:
+
+```go
+step, err := t.Verify(secret, code, time.Now())
+// a caller that discards step has a replay window one period wide
+```
+
+The package holds no state, so it cannot refuse a code it has already accepted.
+It answers *which* step matched and leaves the remembering to whoever owns a
+schema. `2fa` declares the contract for that — `ReplayGuard.Spend`, atomic and
+failing closed — and implements no storage.
+
+`2fa` is `package twofactor`, and the name differs from the directory because a
+Go identifier cannot begin with a digit. It carries the provisioning URI, the
+recovery codes, and the two storage interfaces. It knows nothing about users and
+assumes no table exists.
+
+Two properties are closed by construction: the code comparison is constant time,
+and `Authenticator.Verify` fails closed — a missing guard, an empty subject or an
+unreachable store refuses the attempt rather than allowing it.
+
+The module still has one direct dependency, `golang.org/x/crypto`. `apidiff` is clean across it — the signatures did not
 move — which is exactly why the entry exists: a break `apidiff` cannot see is the
 kind that reaches a caller as wrong data rather than as a compile error.
 
