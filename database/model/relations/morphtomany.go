@@ -20,21 +20,28 @@ type MorphToMany struct {
 	inverse    bool
 }
 
-// NewMorphToMany answers MorphToMany::__construct.
-func NewMorphToMany(q Builder, parent Model, name, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relationName string, inverse bool) *MorphToMany {
+// newMorphToMany answers MorphToMany::__construct, without the where that
+// narrows the pivot to one parent.
+//
+// The join and the type clause are both on this side of the split, and for the
+// same reason: neither is about which parent is being read. An eager load walks
+// the pivot for every parent at once and still must reach the related table and
+// still must not pick up the tags of the video whose id matches the post's.
+func newMorphToMany(q Builder, parent Model, name, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relationName string, inverse bool) *MorphToMany {
 	morphClass := parent.GetMorphClass()
 	if inverse {
 		morphClass = q.GetModel().GetMorphClass()
 	}
 
 	relation := &MorphToMany{
-		BelongsToMany: *NewBelongsToMany(q, parent, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relationName),
+		BelongsToMany: *newBelongsToMany(q, parent, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relationName),
 		morphType:     name + "_type",
 		morphClass:    morphClass,
 		inverse:       inverse,
 	}
 	relation.InteractsWithPivotTable = concerns.InteractsWithPivotTable{Host: relation}
 	relation.AliasedPivotColumns = relation.aliasedPivotColumns
+	relation.ExistenceCompareKey = relation.GetExistenceCompareKey
 
 	// baseAttachRecord in the PHP adds the type to every row it writes. Here the
 	// same thing is said with the mechanism that already exists: a pivot value
@@ -44,13 +51,31 @@ func NewMorphToMany(q Builder, parent Model, name, table, foreignPivotKey, relat
 		Value:  relation.morphClass,
 	})
 
-	// The embedded constructor already added the join and the parent's where.
 	// The type clause is this relation's own, and it is added here rather than
 	// in an overridden addWhereConstraints because Go dispatches statically:
 	// the embedded AddConstraints would never have reached an override.
 	relation.Query.Where(relation.QualifyPivotColumn(relation.morphType), relation.morphClass)
 
 	return relation
+}
+
+// NewMorphToMany answers MorphToMany::__construct.
+func NewMorphToMany(q Builder, parent Model, name, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relationName string, inverse bool) *MorphToMany {
+	relation := newMorphToMany(q, parent, name, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relationName, inverse)
+	relation.addWhereConstraints()
+	return relation
+}
+
+// NewMorphToManyUnconstrained builds the relation without narrowing it to one
+// parent.
+//
+// It exists because the constraint used to be switched off through a
+// process-wide flag, which meant a relation built on another goroutine while
+// the flag was down came back unconstrained -- every parent's children, in a
+// well-formed query nobody could tell apart from the right one. The call site
+// says which it wants now, and there is no flag to leave down.
+func NewMorphToManyUnconstrained(q Builder, parent Model, name, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relationName string, inverse bool) *MorphToMany {
+	return newMorphToMany(q, parent, name, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relationName, inverse)
 }
 
 // AddEagerConstraints answers MorphToMany::addEagerConstraints.

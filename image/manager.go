@@ -41,6 +41,9 @@ type ImageManager struct {
 	drivers       map[string]Driver
 	creators      map[string]func() (Driver, error)
 	handlers      map[string]map[string]TransformationHandler
+	// maxPixels is the ceiling handed to every driver this manager builds.
+	// Zero means nobody set one, and each driver keeps its own default.
+	maxPixels int
 }
 
 // NewImageManager returns a manager with the one driver this package carries
@@ -118,8 +121,37 @@ func (m *ImageManager) Driver(name ...string) (Driver, error) {
 	for transformation, handler := range m.handlers[want] {
 		d.TransformUsing(transformation, handler)
 	}
+	if m.maxPixels != 0 {
+		d.MaxPixels(m.maxPixels)
+	}
 	m.drivers[want] = d
 	return d, nil
+}
+
+// MaxPixels sets how many pixels an image may declare before the drivers of
+// this manager refuse to decode it. A value of zero or less restores
+// [DefaultMaxPixels].
+//
+// The ceiling is read out of the header, so an image past it is refused before
+// its pixels are allocated -- which is the only moment where refusing it saves
+// anything, since the memory a crafted file asks for is spent by the decode:
+//
+//	images := image.NewImageManager()
+//	images.MaxPixels(8_000_000)    // nothing over eight megapixels is decoded
+//
+// There is no unlimited setting. An image with no bound on it is one whoever
+// sent it decides the size of.
+//
+// It reaches a driver already built immediately, and every driver built after
+// it, so the ceiling is one number for the manager rather than one per driver.
+func (m *ImageManager) MaxPixels(pixels int) *ImageManager {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.maxPixels = pixels
+	for _, d := range m.drivers {
+		d.MaxPixels(pixels)
+	}
+	return m
 }
 
 // TransformUsing registers how one driver should carry out one

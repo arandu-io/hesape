@@ -806,6 +806,114 @@ func TestLocalAPathThatPassedTheCheckIsNotACapability(t *testing.T) {
 	assertOutsideIsUntouched(t, outside)
 }
 
+// swapRoutes are the other three shapes of the race above.
+//
+// The one written out in full is the read: a name approved by Path and then
+// opened. These are the write, the delete and the listing, and they are
+// separate cases because each resolves the name a different number of times --
+// a write resolves it to make the directory, again to open the partial file and
+// again to rename, and a listing resolves the directory it starts in and then
+// walks what it finds there.
+//
+// check is the call a caller makes before acting, and it succeeds: that is what
+// makes this a race rather than a rejected path. use is what runs after the
+// directory underneath has become a link out of the root, and it may fail or
+// succeed -- what it may not do is reach what is on the other side of the link.
+var swapRoutes = []struct {
+	name  string
+	check func(t *testing.T, a *filesystem.LocalFilesystemAdapter)
+	use   func(t *testing.T, a *filesystem.LocalFilesystemAdapter, root string)
+}{
+	{
+		name: "a write after the directory was found",
+		check: func(t *testing.T, a *filesystem.LocalFilesystemAdapter) {
+			ok, err := a.Exists(context.Background(), "reports/q1.txt")
+			if err != nil || !ok {
+				t.Fatalf("Exists before the swap = %v (%v), want true", ok, err)
+			}
+		},
+		use: func(t *testing.T, a *filesystem.LocalFilesystemAdapter, _ string) {
+			// Both names: the one that would replace a file on the other side
+			// of the link, and the one that would create one.
+			_ = a.Put(context.Background(), "reports/secret.txt", strings.NewReader("planted"), "")
+			_ = a.Put(context.Background(), "reports/planted.txt", strings.NewReader("planted"), "")
+		},
+	},
+	{
+		name: "a delete after the file was stat'd",
+		check: func(t *testing.T, a *filesystem.LocalFilesystemAdapter) {
+			if _, err := a.Stat(context.Background(), "reports/q1.txt"); err != nil {
+				t.Fatalf("Stat before the swap: %v", err)
+			}
+		},
+		use: func(t *testing.T, a *filesystem.LocalFilesystemAdapter, _ string) {
+			_ = a.Delete(context.Background(), "reports/secret.txt")
+			_ = a.Delete(context.Background(), "reports/sub/nested.txt")
+		},
+	},
+	{
+		name: "a listing after the directory was found",
+		check: func(t *testing.T, a *filesystem.LocalFilesystemAdapter) {
+			ok, err := a.DirectoryExists(context.Background(), "reports")
+			if err != nil || !ok {
+				t.Fatalf("DirectoryExists before the swap = %v (%v), want true", ok, err)
+			}
+		},
+		use: func(t *testing.T, a *filesystem.LocalFilesystemAdapter, root string) {
+			realRoot, err := filepath.EvalSymlinks(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, prefix := range []string{"", "reports/"} {
+				keys, err := a.List(context.Background(), prefix)
+				if err != nil {
+					continue
+				}
+				for _, key := range keys {
+					landed, err := filepath.EvalSymlinks(filepath.Join(root, key))
+					if err != nil {
+						continue
+					}
+					if !strings.HasPrefix(landed, realRoot+string(filepath.Separator)) {
+						t.Errorf("List(%q) answered %q, which is %s -- outside the root", prefix, key, landed)
+					}
+				}
+			}
+		},
+	},
+}
+
+// TestLocalTheSwapBetweenTheCheckAndTheUseIsRefused is the race of
+// [TestLocalAPathThatPassedTheCheckIsNotACapability] asked of the three
+// operations that one does not cover.
+//
+// Deterministic for the same reason: the width of the window is not the
+// subject. The subject is that a check and the syscall after it are two
+// resolutions of one string, and only the second one decides which file is
+// opened.
+func TestLocalTheSwapBetweenTheCheckAndTheUseIsRefused(t *testing.T) {
+	for _, route := range swapRoutes {
+		t.Run(route.name, func(t *testing.T) {
+			root, outside, a := symlinkFixture(t)
+
+			// A real directory holding a real file, entirely inside the root.
+			if err := a.Put(context.Background(), "reports/q1.txt", strings.NewReader("inside"), ""); err != nil {
+				t.Fatalf("Put: %v", err)
+			}
+			route.check(t, a)
+
+			// The swap: what the check looked at becomes a link out of the root.
+			if err := os.RemoveAll(filepath.Join(root, "reports")); err != nil {
+				t.Fatal(err)
+			}
+			symlink(t, outside, filepath.Join(root, "reports"))
+
+			route.use(t, a, root)
+			assertOutsideIsUntouched(t, outside)
+		})
+	}
+}
+
 // TestLocalASymlinkIsRefusedThroughTheDiskToo puts the same question at the
 // layer an application actually calls: the key goes through the Grant, the
 // Grant puts the tenant in front of it, and the adapter sees a stored path it
@@ -850,6 +958,64 @@ func TestLocalASymlinkIsRefusedThroughTheDiskToo(t *testing.T) {
 		t.Errorf("another tenant sees %v (%v)", keys, err)
 	}
 	assertOutsideIsUntouched(t, outside)
+}
+
+// TestLocalNothingADiskWritesIsALink is what bounds the one exposure the
+// adapter declares: a link from one tenant's directory to another's does not
+// leave the root, so it is followed.
+//
+// The bound is that no call an application can make plants one. Every write
+// here goes through the Disk -- the whole of its writing surface -- and what
+// lands underneath is regular files and directories, so reaching the followed
+// case at all takes something other than this package writing to the same
+// directory. The declared limitation stays declared; this is the sentence after
+// it, checked rather than argued.
+func TestLocalNothingADiskWritesIsALink(t *testing.T) {
+	a := localAdapter(t)
+	d := filesystem.NewDisk("local", a)
+	g := grant(tenant)
+	ctx := context.Background()
+
+	put(t, d, g, "invoices/q1.pdf", "mine")
+	put(t, d, g, "notes.txt", "mine")
+	if _, err := d.PutFileAs(ctx, g, "uploads", filesystem.Upload{
+		Field: "file",
+		Name:  "scan.pdf",
+		Size:  4,
+		Open:  func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader("scan")), nil },
+	}, "scan.pdf"); err != nil {
+		t.Fatalf("PutFileAs: %v", err)
+	}
+	if err := d.MakeDirectory(ctx, g, "empty"); err != nil {
+		t.Fatalf("MakeDirectory: %v", err)
+	}
+	if err := d.Copy(ctx, g, "notes.txt", "copies/notes.txt"); err != nil {
+		t.Fatalf("Copy: %v", err)
+	}
+	if err := d.Move(ctx, g, "copies/notes.txt", "moved/notes.txt"); err != nil {
+		t.Fatalf("Move: %v", err)
+	}
+	if err := d.Append(ctx, g, "notes.txt", "more"); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	// Lstat, not Stat: Stat follows a link and would answer about whatever it
+	// points at, which is the question this is not asking.
+	err := filepath.WalkDir(a.Root(), func(p string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.Type()&fs.ModeSymlink != 0 {
+			t.Errorf("%s is a symbolic link, and nothing a Disk writes may be one", p)
+		}
+		if !entry.IsDir() && !entry.Type().IsRegular() {
+			t.Errorf("%s is neither a directory nor a regular file: %s", p, entry.Type())
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // assertOutsideIsUntouched is the whole assertion for a write or a delete:

@@ -147,10 +147,10 @@ func (s Stringable) Headline() Stringable { return Of(Headline(s.value)) }
 func (s Stringable) Apa() Stringable { return Of(Apa(s.value)) }
 
 // Lower lowercases the whole string.
-func (s Stringable) Lower() Stringable { return Of(Lower(s.value)) }
+func (s Stringable) Lower() Stringable { return Of(strings.ToLower(s.value)) }
 
 // Upper uppercases the whole string.
-func (s Stringable) Upper() Stringable { return Of(Upper(s.value)) }
+func (s Stringable) Upper() Stringable { return Of(strings.ToUpper(s.value)) }
 
 // Ucfirst uppercases the first character and leaves the rest alone.
 func (s Stringable) Ucfirst() Stringable { return Of(Ucfirst(s.value)) }
@@ -705,7 +705,7 @@ func (s Stringable) ToFloat() float64 { return phpFloatval(s.value) }
 // ToBoolean reads the string as a boolean: "1", "true", "on" and "yes" are
 // true, in any case and with the ends trimmed, and everything else is false.
 func (s Stringable) ToBoolean() bool {
-	switch Lower(strings.TrimSpace(s.value)) {
+	switch strings.ToLower(strings.TrimSpace(s.value)) {
 	case "1", "true", "on", "yes":
 		return true
 	}

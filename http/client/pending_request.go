@@ -72,6 +72,12 @@ type PendingRequest struct {
 	retryWhen  func(*http.Response, error) bool
 	retryThrow bool
 
+	// retryNonIdempotent is the caller's claim that repeating this request is
+	// safe even when its method is not idempotent. Without it a POST, a PATCH
+	// or a method this package does not know is sent once, whatever Retry was
+	// given. See RetryNonIdempotentMethods.
+	retryNonIdempotent bool
+
 	// Middleware.
 	middleware         []func(*http.Request, http.RoundTripper) http.RoundTripper
 	requestMiddleware  []func(*http.Request) error
@@ -324,7 +330,8 @@ func (p *PendingRequest) ConnectTimeout(d time.Duration) *PendingRequest {
 // Retry sets how many times the request may be attempted.
 //
 // times is a total and includes the first send: Retry(3) makes at most
-// three requests, not four. delay is what is waited between them.
+// three requests, not four. delay is what is waited between them, and it is
+// abandoned as soon as the context passed to the verb is done.
 //
 // when decides whether a failure is worth repeating and is handed the raw
 // response, if one arrived, and the failure itself -- a *RequestException when
@@ -333,13 +340,63 @@ func (p *PendingRequest) ConnectTimeout(d time.Duration) *PendingRequest {
 //
 // throw: when more than one attempt was asked for and the last one still
 // failed, the failure comes back as an error rather than as a response. It
-// is on by default.
+// is on by default, and it holds whether or not the method was repeatable.
+//
+// Only a method that may be repeated is repeated. GET, HEAD, PUT, DELETE,
+// OPTIONS and TRACE are; POST, PATCH, CONNECT and any method this package does
+// not know are not, and are sent once whatever times says. A repeated POST is a
+// second write, and the failure that provokes the repeat -- a timeout, a
+// connection dropped after the request was on the wire -- is exactly the case
+// where the first one may already have been applied. A caller whose endpoint is
+// safe to repeat says so with [PendingRequest.RetryNonIdempotentMethods].
 func (p *PendingRequest) Retry(times int, delay time.Duration, when func(*http.Response, error) bool, throw bool) *PendingRequest {
 	p.retryTimes = times
 	p.retryDelay = delay
 	p.retryWhen = when
 	p.retryThrow = throw
 	return p
+}
+
+// RetryNonIdempotentMethods lets [PendingRequest.Retry] repeat this request
+// even though its method is one the protocol does not promise is repeatable.
+//
+// It is the caller stating a property of the endpoint the client cannot read
+// off the request: that sending the same POST or PATCH twice leaves the same
+// result as sending it once, because the endpoint deduplicates -- on an
+// idempotency key, on a natural key, or by ignoring a repeat.
+//
+// It takes no argument and does nothing on its own, so it can only be reached
+// by naming it. That is deliberate: an extra bool on Retry would sit next to
+// throw, where a caller who wanted the fourth argument true would get this one
+// too, and duplicated writes would be the cost of a positional mistake.
+func (p *PendingRequest) RetryNonIdempotentMethods() *PendingRequest {
+	p.retryNonIdempotent = true
+	return p
+}
+
+// mayRepeat reports whether a request of this method may be sent more than
+// once: either the method is idempotent, or the caller declared the endpoint
+// safe to repeat.
+func (p *PendingRequest) mayRepeat(method string) bool {
+	return p.retryNonIdempotent || isIdempotentMethod(method)
+}
+
+// isIdempotentMethod reports whether repeating a request of this method is
+// defined to leave the same result as sending it once.
+//
+// The list is closed, and an unknown method is not on it. A method the caller
+// invented, or wrote in lower case, carries no promise this code can read, and
+// the safe reading of no promise is to send it once.
+func isIdempotentMethod(method string) bool {
+	switch method {
+	case "GET", "HEAD", "PUT", "DELETE", "OPTIONS", "TRACE":
+		return true
+	case "":
+		// net/http reads an empty method as GET, and so does this.
+		return true
+	default:
+		return false
+	}
 }
 
 // WithOptions sets arbitrary options on the underlying HTTP client.
@@ -612,38 +669,52 @@ func (p *PendingRequest) IsAllowedRequestUrl(url string) bool {
 }
 
 // Get sends a GET request.
-func (p *PendingRequest) Get(urlStr string, query map[string]string) (*Response, error) {
-	return p.Send("GET", urlStr, query, nil)
+func (p *PendingRequest) Get(ctx context.Context, urlStr string, query map[string]string) (*Response, error) {
+	return p.Send(ctx, "GET", urlStr, query, nil)
 }
 
 // Post sends a POST request.
-func (p *PendingRequest) Post(urlStr string, data any) (*Response, error) {
-	return p.Send("POST", urlStr, nil, data)
+func (p *PendingRequest) Post(ctx context.Context, urlStr string, data any) (*Response, error) {
+	return p.Send(ctx, "POST", urlStr, nil, data)
 }
 
 // Put sends a PUT request.
-func (p *PendingRequest) Put(urlStr string, data any) (*Response, error) {
-	return p.Send("PUT", urlStr, nil, data)
+func (p *PendingRequest) Put(ctx context.Context, urlStr string, data any) (*Response, error) {
+	return p.Send(ctx, "PUT", urlStr, nil, data)
 }
 
 // Patch sends a PATCH request.
-func (p *PendingRequest) Patch(urlStr string, data any) (*Response, error) {
-	return p.Send("PATCH", urlStr, nil, data)
+func (p *PendingRequest) Patch(ctx context.Context, urlStr string, data any) (*Response, error) {
+	return p.Send(ctx, "PATCH", urlStr, nil, data)
 }
 
 // Delete sends a DELETE request.
-func (p *PendingRequest) Delete(urlStr string, data any) (*Response, error) {
-	return p.Send("DELETE", urlStr, nil, data)
+func (p *PendingRequest) Delete(ctx context.Context, urlStr string, data any) (*Response, error) {
+	return p.Send(ctx, "DELETE", urlStr, nil, data)
 }
 
 // Head sends a HEAD request.
-func (p *PendingRequest) Head(urlStr string, query map[string]string) (*Response, error) {
-	return p.Send("HEAD", urlStr, query, nil)
+func (p *PendingRequest) Head(ctx context.Context, urlStr string, query map[string]string) (*Response, error) {
+	return p.Send(ctx, "HEAD", urlStr, query, nil)
 }
 
 // Send sends the request. It is the central method that all HTTP verb
 // methods delegate to.
-func (p *PendingRequest) Send(method, urlStr string, query map[string]string, data any) (*Response, error) {
+//
+// The context governs the whole call: every attempt is made under a context
+// derived from it, and so is the wait between two attempts. Cancelling it ends
+// the request that is in flight rather than waiting for the destination to
+// answer, and the error it returns matches [context.Canceled] or
+// [context.DeadlineExceeded]. [PendingRequest.Timeout] is a ceiling laid on top
+// of it, per attempt; whichever expires first ends the attempt.
+//
+// A nil context is refused rather than replaced with a background one: a call
+// that cannot be cancelled is the thing this parameter exists to prevent.
+func (p *PendingRequest) Send(ctx context.Context, method, urlStr string, query map[string]string, data any) (*Response, error) {
+	if ctx == nil {
+		return nil, errors.New("http client: nil context")
+	}
+
 	// Inside a pool, a verb records the call instead of making it, and the
 	// pool makes them all at once when Send is called on it.
 	//
@@ -651,18 +722,22 @@ func (p *PendingRequest) Send(method, urlStr string, query map[string]string, da
 	// until that pool runs. A caller outside a pool never sees it, because a
 	// pending request only has a pool if the pool built it.
 	if p.pool != nil {
-		p.pool.record(p, method, urlStr, query, data)
+		p.pool.record(ctx, p, method, urlStr, query, data)
 		return nil, nil
 	}
 
 	// An asynchronous request leaves a promise behind instead of a response.
 	// Nothing goes out until somebody waits on it -- see [promises.LazyPromise].
+	//
+	// The context is the one handed to the verb, not one taken at the moment
+	// the promise is waited on: a caller that cancelled before waiting has
+	// already said the request is not wanted.
 	if p.async {
 		p.async = false
 		p.promise = promises.NewLazyPromise(func() promises.Promise {
 			deferred := promises.NewDeferred(nil)
 			go func() {
-				response, err := p.Send(method, urlStr, query, data)
+				response, err := p.Send(ctx, method, urlStr, query, data)
 				if err != nil {
 					_ = deferred.Reject(err)
 					return
@@ -711,6 +786,18 @@ func (p *PendingRequest) Send(method, urlStr string, query map[string]string, da
 		attempts = 1
 	}
 
+	// A method the protocol does not promise is repeatable is sent once,
+	// whatever was asked for. See Retry and RetryNonIdempotentMethods.
+	if !p.mayRepeat(method) {
+		attempts = 1
+	}
+
+	// Whether the caller asked to repeat, which is not whether the request may
+	// be. Throwing is keyed to the request: a POST that cannot be repeated
+	// still returns its failure as an error, because refusing to repeat is not
+	// a reason to also stop reporting.
+	retryRequested := p.retryTimes > 1
+
 	// One deadline per attempt, released when Send returns. A single deadline
 	// spanning every attempt would spend the caller's budget on the attempts
 	// that already failed.
@@ -722,7 +809,10 @@ func (p *PendingRequest) Send(method, urlStr string, query map[string]string, da
 	}()
 
 	for attempt := 1; ; attempt++ {
-		ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
+		// Derived from the caller's context, so cancelling it ends the attempt
+		// in flight. It used to be derived from context.Background(), which
+		// meant no caller could ever stop a request once it had left.
+		attemptCtx, cancel := context.WithTimeout(ctx, p.timeout)
 		cancels = append(cancels, cancel)
 
 		var reader io.Reader
@@ -730,7 +820,7 @@ func (p *PendingRequest) Send(method, urlStr string, query map[string]string, da
 			reader = bytes.NewReader(payload)
 		}
 
-		req, err := http.NewRequestWithContext(ctx, method, fullURL, reader)
+		req, err := http.NewRequestWithContext(attemptCtx, method, fullURL, reader)
 		if err != nil {
 			return nil, fmt.Errorf("http client: creating request: %w", err)
 		}
@@ -784,7 +874,17 @@ func (p *PendingRequest) Send(method, urlStr string, query map[string]string, da
 
 		if attempt < attempts && shouldRetry {
 			if p.retryDelay > 0 {
-				time.Sleep(p.retryDelay)
+				// The wait is part of the call, so it ends when the call is
+				// cancelled. A plain sleep held a cancelled caller for the
+				// whole delay, and a long delay is exactly when a caller
+				// gives up.
+				timer := time.NewTimer(p.retryDelay)
+				select {
+				case <-timer.C:
+				case <-ctx.Done():
+					timer.Stop()
+					return nil, fmt.Errorf("http client: %w while waiting to retry, after: %w", ctx.Err(), failure)
+				}
 			}
 			continue
 		}
@@ -795,7 +895,7 @@ func (p *PendingRequest) Send(method, urlStr string, query map[string]string, da
 		if attemptErr != nil {
 			return nil, attemptErr
 		}
-		if attempts > 1 && p.retryThrow {
+		if retryRequested && p.retryThrow {
 			return nil, failure
 		}
 		return resp, nil

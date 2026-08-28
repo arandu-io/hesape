@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/arandu-io/hesape/support/arr"
+	"github.com/arandu-io/hesape/collections/arr"
 	htesting "github.com/arandu-io/hesape/testing"
 )
 
@@ -82,7 +82,8 @@ func (a *AssertableJSON) prop(key ...string) any {
 	if len(key) == 0 || key[0] == "" {
 		return a.props
 	}
-	return arr.Get(a.props, key[0], nil)
+	held, _ := arr.Get(a.props, key[0])
+	return held
 }
 
 // scope asserts about what is under a key, with the same accounting. It fails

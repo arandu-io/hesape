@@ -67,30 +67,19 @@ func HasMany(parent, related relations.Model, foreignKey, localKey string) *rela
 // rather than guessed from the call site. It is not decoration: associate
 // and dissociate write the loaded relation under it.
 func BelongsTo(child, related relations.Model, foreignKey, ownerKey, relation string) *relations.BelongsTo {
-	if foreignKey == "" {
-		foreignKey = str.Snake(relation, "_") + "_" + related.GetKeyName()
-	}
-	if ownerKey == "" {
-		ownerKey = related.GetKeyName()
-	}
+	foreignKey, ownerKey = defaultBelongsToKeys(related, foreignKey, ownerKey, relation)
 	return relations.NewBelongsTo(related.NewQuery(), child, foreignKey, ownerKey, relation)
 }
 
 // MorphOne returns a morph-one relation from parent to related.
 func MorphOne(parent, related relations.Model, name, typ, id, localKey string) *relations.MorphOne {
-	typ, id = GetMorphs(name, typ, id)
-	if localKey == "" {
-		localKey = parent.GetKeyName()
-	}
+	typ, id, localKey = defaultMorphKeys(parent, name, typ, id, localKey)
 	return relations.NewMorphOne(related.NewQuery(), parent, related.QualifyColumn(typ), related.QualifyColumn(id), localKey)
 }
 
 // MorphMany returns a morph-many relation from parent to related.
 func MorphMany(parent, related relations.Model, name, typ, id, localKey string) *relations.MorphMany {
-	typ, id = GetMorphs(name, typ, id)
-	if localKey == "" {
-		localKey = parent.GetKeyName()
-	}
+	typ, id, localKey = defaultMorphKeys(parent, name, typ, id, localKey)
 	return relations.NewMorphMany(related.NewQuery(), parent, related.QualifyColumn(typ), related.QualifyColumn(id), localKey)
 }
 
@@ -106,21 +95,8 @@ func MorphTo(parent, related relations.Model, name, typ, id, ownerKey string) *r
 
 // BelongsToMany returns a many-to-many relation from parent to related.
 func BelongsToMany(parent, related relations.Model, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relation string) *relations.BelongsToMany {
-	if table == "" {
-		table = JoiningTable(parent, related)
-	}
-	if foreignPivotKey == "" {
-		foreignPivotKey = parent.GetForeignKey()
-	}
-	if relatedPivotKey == "" {
-		relatedPivotKey = related.GetForeignKey()
-	}
-	if parentKey == "" {
-		parentKey = parent.GetKeyName()
-	}
-	if relatedKey == "" {
-		relatedKey = related.GetKeyName()
-	}
+	table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey = defaultPivotKeys(
+		parent, related, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey)
 
 	return relations.NewBelongsToMany(
 		related.NewQuery(), parent, table,
@@ -131,21 +107,8 @@ func BelongsToMany(parent, related relations.Model, table, foreignPivotKey, rela
 // MorphToMany returns a polymorphic many-to-many relation from parent to
 // related.
 func MorphToMany(parent, related relations.Model, name, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, relation string, inverse bool) *relations.MorphToMany {
-	if table == "" {
-		table = str.Plural(name)
-	}
-	if foreignPivotKey == "" {
-		foreignPivotKey = name + "_id"
-	}
-	if relatedPivotKey == "" {
-		relatedPivotKey = related.GetForeignKey()
-	}
-	if parentKey == "" {
-		parentKey = parent.GetKeyName()
-	}
-	if relatedKey == "" {
-		relatedKey = related.GetKeyName()
-	}
+	table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey = defaultMorphPivotKeys(
+		parent, related, name, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey)
 
 	return relations.NewMorphToMany(
 		related.NewQuery(), parent, name, table,
@@ -179,6 +142,10 @@ func HasOneThrough(farParent, through, related relations.Model, firstKey, second
 	return relations.NewHasOneThrough(related.NewQuery(), farParent, through, firstKey, secondKey, localKey, secondLocalKey)
 }
 
+// The conventions, one function each, because both the constrained constructor
+// and its Unconstrained twin default the same way. Two copies of a rule that
+// picks a column name is two schemas one refactor apart.
+
 func defaultHasKeys(parent relations.Model, foreignKey, localKey string) (string, string) {
 	if foreignKey == "" {
 		foreignKey = parent.GetForeignKey()
@@ -187,6 +154,62 @@ func defaultHasKeys(parent relations.Model, foreignKey, localKey string) (string
 		localKey = parent.GetKeyName()
 	}
 	return foreignKey, localKey
+}
+
+func defaultBelongsToKeys(related relations.Model, foreignKey, ownerKey, relation string) (string, string) {
+	if foreignKey == "" {
+		foreignKey = str.Snake(relation, "_") + "_" + related.GetKeyName()
+	}
+	if ownerKey == "" {
+		ownerKey = related.GetKeyName()
+	}
+	return foreignKey, ownerKey
+}
+
+func defaultMorphKeys(parent relations.Model, name, typ, id, localKey string) (string, string, string) {
+	typ, id = GetMorphs(name, typ, id)
+	if localKey == "" {
+		localKey = parent.GetKeyName()
+	}
+	return typ, id, localKey
+}
+
+func defaultPivotKeys(parent, related relations.Model, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey string) (string, string, string, string, string) {
+	if table == "" {
+		table = JoiningTable(parent, related)
+	}
+	if foreignPivotKey == "" {
+		foreignPivotKey = parent.GetForeignKey()
+	}
+	if relatedPivotKey == "" {
+		relatedPivotKey = related.GetForeignKey()
+	}
+	if parentKey == "" {
+		parentKey = parent.GetKeyName()
+	}
+	if relatedKey == "" {
+		relatedKey = related.GetKeyName()
+	}
+	return table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey
+}
+
+func defaultMorphPivotKeys(parent, related relations.Model, name, table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey string) (string, string, string, string, string) {
+	if table == "" {
+		table = str.Plural(name)
+	}
+	if foreignPivotKey == "" {
+		foreignPivotKey = name + "_id"
+	}
+	if relatedPivotKey == "" {
+		relatedPivotKey = related.GetForeignKey()
+	}
+	if parentKey == "" {
+		parentKey = parent.GetKeyName()
+	}
+	if relatedKey == "" {
+		relatedKey = related.GetKeyName()
+	}
+	return table, foreignPivotKey, relatedPivotKey, parentKey, relatedKey
 }
 
 func defaultThroughKeys(farParent, through relations.Model, firstKey, secondKey, localKey, secondLocalKey string) (string, string, string, string) {

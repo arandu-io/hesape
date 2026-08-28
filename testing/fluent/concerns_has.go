@@ -3,7 +3,7 @@ package fluent
 import (
 	"fmt"
 
-	"github.com/arandu-io/hesape/support/arr"
+	"github.com/arandu-io/hesape/collections/arr"
 	htesting "github.com/arandu-io/hesape/testing"
 )
 

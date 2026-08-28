@@ -7,6 +7,7 @@ import (
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database/model/relations"
+	"github.com/arandu-io/hesape/database/model/relations/concerns"
 )
 
 // TestAMorphEagerLoadFiltersOnTheTypeColumn: the id alone is not enough. Post 1
@@ -373,5 +374,41 @@ func TestTheUnconstrainedConstructorLeavesTheParentWhereOffTheQuery(t *testing.T
 	unconstrained := eagerPostsOf(database, users[0])
 	if len(unconstrained.GetQuery().GetQuery().Wheres) != 0 {
 		t.Fatalf("an unconstrained relation carried %+v", unconstrained.GetQuery().GetQuery().Wheres)
+	}
+}
+
+// TestABuilderThatMakesNoTenantPromiseIsFilteredByTheRelation is the safe
+// direction of the split written down.
+//
+// ScopeTenant asks the builder whether it already filters its own table, and
+// skips its own clause when the answer is yes. This is the other answer: a
+// builder that says nothing -- because it never heard of the question, which is
+// the state every builder starts in -- is filtered here.
+//
+// The failure this guards is the one that leaves no filter at all. Somebody
+// reading two identical tenant clauses deletes one, and if the default here were
+// to skip, deleting the wrong one would mean a relation over an ordinary builder
+// reading every customer's rows in a statement that looks finished.
+func TestABuilderThatMakesNoTenantPromiseIsFilteredByTheRelation(t *testing.T) {
+	database := newDB()
+	posts := newModel(database, "posts", "post", nil)
+
+	if _, promises := any(posts.NewQuery()).(concerns.OwnTenantScoper); promises {
+		t.Fatal("this fake now answers OwnTenantScoper, so it no longer stands for a builder that makes no promise")
+	}
+
+	scoped, err := concerns.ScopeTenant(posts.NewQuery(), posts, auth.SystemGrant("posts.read", "acme"))
+	if err != nil {
+		t.Fatalf("ScopeTenant: %v", err)
+	}
+
+	filtered := false
+	for _, where := range scoped.GetQuery().Wheres {
+		if where.Column == "posts.tenant_id" {
+			filtered = true
+		}
+	}
+	if !filtered {
+		t.Fatalf("a builder that promises nothing was left unfiltered: %+v", scoped.GetQuery().Wheres)
 	}
 }

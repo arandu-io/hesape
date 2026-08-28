@@ -7,9 +7,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/arandu-io/hesape/collections/arr"
 	"github.com/arandu-io/hesape/session"
 	"github.com/arandu-io/hesape/support"
-	"github.com/arandu-io/hesape/support/arr"
 	"github.com/arandu-io/hesape/view"
 )
 
@@ -362,7 +362,7 @@ func (r *TestResponse) AssertViewHas(key any, value ...any) *TestResponse {
 
 	name := fmt.Sprint(key)
 	data := rendered.GatherData()
-	actual := arr.Get(data, name, nil)
+	actual, _ := arr.Get(data, name)
 
 	switch expected := first(value).(type) {
 	case nil:

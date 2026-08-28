@@ -1,6 +1,7 @@
 package image
 
 import (
+	"context"
 	"fmt"
 	stdimage "image"
 	"image/color"
@@ -9,6 +10,27 @@ import (
 	"strconv"
 	"strings"
 )
+
+// interrupted returns the context's error once the context is done, and nil
+// while it is still live.
+//
+// The routines that resample, turn and convolve call it once per line of the
+// pass they are in -- a row, or a column where the pass runs down the canvas. A
+// line is short enough that work abandoned by the caller stops within a
+// fraction of the whole, and long enough that the check costs nothing
+// measurable beside the arithmetic of the line itself.
+//
+// The routines that only move pixels -- the crop, the flips, the quarter turns
+// -- do not call it. They run at the speed of memory, and a check between two
+// copies would be most of the work rather than a fraction of it.
+func interrupted(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return failWith(ctx.Err(), "processing the image")
+	default:
+		return nil
+	}
+}
 
 // The canvas every transformation runs on is *image.RGBA from the standard
 // library: eight bits a channel, alpha premultiplied.
@@ -96,7 +118,11 @@ func weights(dstSize, srcSize int) []contribution {
 // Two separable passes, horizontal then vertical, because a separable filter
 // over w*h*(kx+ky) samples produces the same result as the square kernel over
 // w*h*kx*ky and is the reason a resize of a large photograph finishes.
-func resample(src *stdimage.RGBA, w, h int) *stdimage.RGBA {
+//
+// The context bounds both passes. The horizontal one runs first, so a resize
+// abandoned at its first row never reaches the allocation the vertical pass
+// makes, which for an enlargement is the whole of the output canvas.
+func resample(ctx context.Context, src *stdimage.RGBA, w, h int) (*stdimage.RGBA, error) {
 	sw, sh := src.Rect.Dx(), src.Rect.Dy()
 	if w < 1 {
 		w = 1
@@ -105,19 +131,29 @@ func resample(src *stdimage.RGBA, w, h int) *stdimage.RGBA {
 		h = 1
 	}
 	if w == sw && h == sh {
-		return src
+		return src, nil
 	}
-	return resampleVertical(resampleHorizontal(src, w), h)
+	wide, err := resampleHorizontal(ctx, src, w)
+	if err != nil {
+		return nil, err
+	}
+	return resampleVertical(ctx, wide, h)
 }
 
-func resampleHorizontal(src *stdimage.RGBA, w int) *stdimage.RGBA {
+func resampleHorizontal(ctx context.Context, src *stdimage.RGBA, w int) (*stdimage.RGBA, error) {
 	sw, sh := src.Rect.Dx(), src.Rect.Dy()
 	if w == sw {
-		return src
+		return src, nil
+	}
+	if err := interrupted(ctx); err != nil {
+		return nil, err
 	}
 	dst := stdimage.NewRGBA(stdimage.Rect(0, 0, w, sh))
 	cols := weights(w, sw)
 	for y := 0; y < sh; y++ {
+		if err := interrupted(ctx); err != nil {
+			return nil, err
+		}
 		row := src.Pix[y*src.Stride : y*src.Stride+sw*4]
 		out := dst.Pix[y*dst.Stride : y*dst.Stride+w*4]
 		for x, c := range cols {
@@ -137,17 +173,23 @@ func resampleHorizontal(src *stdimage.RGBA, w int) *stdimage.RGBA {
 			o[2] = clamp8(b, o[3])
 		}
 	}
-	return dst
+	return dst, nil
 }
 
-func resampleVertical(src *stdimage.RGBA, h int) *stdimage.RGBA {
+func resampleVertical(ctx context.Context, src *stdimage.RGBA, h int) (*stdimage.RGBA, error) {
 	sw, sh := src.Rect.Dx(), src.Rect.Dy()
 	if h == sh {
-		return src
+		return src, nil
+	}
+	if err := interrupted(ctx); err != nil {
+		return nil, err
 	}
 	dst := stdimage.NewRGBA(stdimage.Rect(0, 0, sw, h))
 	rows := weights(h, sh)
 	for y, c := range rows {
+		if err := interrupted(ctx); err != nil {
+			return nil, err
+		}
 		out := dst.Pix[y*dst.Stride : y*dst.Stride+sw*4]
 		for x := 0; x < sw; x++ {
 			var r, g, b, a float64
@@ -166,7 +208,7 @@ func resampleVertical(src *stdimage.RGBA, h int) *stdimage.RGBA {
 			o[2] = clamp8(b, o[3])
 		}
 	}
-	return dst
+	return dst, nil
 }
 
 // crop cuts a w by h rectangle whose top left corner is at (x, y).
@@ -232,7 +274,7 @@ func rotate90(src *stdimage.RGBA) *stdimage.RGBA {
 // sampling them; everything else is sampled bilinearly from the source, and the
 // canvas grows to the bounding box of the turned rectangle so nothing is cut
 // off.
-func rotate(src *stdimage.RGBA, angle float64, bg color.RGBA) *stdimage.RGBA {
+func rotate(ctx context.Context, src *stdimage.RGBA, angle float64, bg color.RGBA) (*stdimage.RGBA, error) {
 	// Degrees are taken modulo a full turn so that 450 and 90 agree, and a
 	// negative angle turns the other way.
 	a := math.Mod(angle, 360)
@@ -241,13 +283,17 @@ func rotate(src *stdimage.RGBA, angle float64, bg color.RGBA) *stdimage.RGBA {
 	}
 	switch a {
 	case 0:
-		return src
+		return src, nil
 	case 90:
-		return rotate90(src)
+		return rotate90(src), nil
 	case 180:
-		return flipVertical(flipHorizontal(src))
+		return flipVertical(flipHorizontal(src)), nil
 	case 270:
-		return rotate90(rotate90(rotate90(src)))
+		return rotate90(rotate90(rotate90(src))), nil
+	}
+
+	if err := interrupted(ctx); err != nil {
+		return nil, err
 	}
 
 	rad := a * math.Pi / 180
@@ -262,6 +308,9 @@ func rotate(src *stdimage.RGBA, angle float64, bg color.RGBA) *stdimage.RGBA {
 	scx, scy := sw/2, sh/2
 	dcx, dcy := float64(w)/2, float64(h)/2
 	for y := 0; y < h; y++ {
+		if err := interrupted(ctx); err != nil {
+			return nil, err
+		}
 		for x := 0; x < w; x++ {
 			rx := float64(x) + 0.5 - dcx
 			ry := float64(y) + 0.5 - dcy
@@ -278,7 +327,7 @@ func rotate(src *stdimage.RGBA, angle float64, bg color.RGBA) *stdimage.RGBA {
 			p[0], p[1], p[2], p[3] = r, g, b, al
 		}
 	}
-	return dst
+	return dst, nil
 }
 
 // sampleBilinear reads the source at a fractional position, mixing the four
@@ -337,13 +386,20 @@ func flatten(src *stdimage.RGBA, bg color.RGBA) *stdimage.RGBA {
 // averageColor is the mean of every pixel, unpremultiplied -- equivalent to
 // resizing the image down to a single pixel and reading it, without the
 // intermediate canvas.
-func averageColor(src *stdimage.RGBA) color.RGBA {
+//
+// It reads every pixel of the canvas, which is why it takes a context: this is
+// the whole of the work behind a dominant colour, and a dominant colour nobody
+// is waiting for any more should stop like a resize does.
+func averageColor(ctx context.Context, src *stdimage.RGBA) (color.RGBA, error) {
 	w, h := src.Rect.Dx(), src.Rect.Dy()
 	if w == 0 || h == 0 {
-		return color.RGBA{}
+		return color.RGBA{}, nil
 	}
 	var r, g, b, a float64
 	for y := 0; y < h; y++ {
+		if err := interrupted(ctx); err != nil {
+			return color.RGBA{}, err
+		}
 		row := src.Pix[y*src.Stride : y*src.Stride+w*4]
 		for x := 0; x < w; x++ {
 			p := row[x*4:]
@@ -355,7 +411,7 @@ func averageColor(src *stdimage.RGBA) color.RGBA {
 	}
 	n := float64(w * h)
 	al := round8(a / n)
-	return color.RGBA{R: clamp8(r/n, al), G: clamp8(g/n, al), B: clamp8(b/n, al), A: al}
+	return color.RGBA{R: clamp8(r/n, al), G: clamp8(g/n, al), B: clamp8(b/n, al), A: al}, nil
 }
 
 // hex renders a colour as seven characters, "#rrggbb", with the alpha

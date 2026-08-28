@@ -90,6 +90,57 @@ func TestMiddlewareFallsBackWithNoHeader(t *testing.T) {
 	}
 }
 
+func TestInLocalePutsTheDecidedLocaleInTheContext(t *testing.T) {
+	var seen string
+	h := translation.InLocale("es")(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			seen = translation.Locale(r.Context())
+		}))
+
+	r := httptest.NewRequest(http.MethodGet, "/es/docs", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if want := "es"; seen != want {
+		t.Errorf("Locale = %q, want %q", seen, want)
+	}
+	if got, want := w.Header().Get("Content-Language"), "es"; got != want {
+		t.Errorf("Content-Language = %q, want %q", got, want)
+	}
+}
+
+// The header is not an input here, so a request that carries one is served the
+// language of its address anyway.
+func TestInLocaleIgnoresAcceptLanguage(t *testing.T) {
+	var seen string
+	h := translation.InLocale("es")(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			seen = translation.Locale(r.Context())
+		}))
+
+	r := httptest.NewRequest(http.MethodGet, "/es/docs", nil)
+	r.Header.Set("Accept-Language", "en;q=1.0,pt-BR;q=0.9")
+	h.ServeHTTP(httptest.NewRecorder(), r)
+
+	if want := "es"; seen != want {
+		t.Errorf("Locale = %q, want %q", seen, want)
+	}
+}
+
+// The one that keeps a path addressed site cacheable: this response does not
+// depend on Accept-Language, and saying that it does costs a shared cache a
+// stored copy per distinct header value for pages that are all the same.
+func TestInLocaleDoesNotVaryOnAcceptLanguage(t *testing.T) {
+	h := translation.InLocale("es")(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/es/docs", nil))
+
+	if got := w.Header().Values("Vary"); len(got) != 0 {
+		t.Errorf("Vary = %q, want none", got)
+	}
+}
+
 // A caller with no request passes the empty string straight through, and the
 // translator reads it as its own locale.
 func TestLocaleOfAContextThatHasNone(t *testing.T) {

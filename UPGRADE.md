@@ -24,6 +24,567 @@ the first tag and has nothing before it to compare against.
 
 ---
 
+## Unreleased — the HTTP client takes a context, and hashing has one path
+
+### `http/client`: every verb takes a context
+
+```
+- ./http/client.(*PendingRequest).Get: changed from func(string, map[string]string) (*Response, error) to func(context.Context, string, map[string]string) (*Response, error)
+- ./http/client.(*PendingRequest).Post: changed from func(string, any) (*Response, error) to func(context.Context, string, any) (*Response, error)
+- ./http/client.(*PendingRequest).Put, .Patch, .Delete, .Head: the same shape
+- ./http/client.(*PendingRequest).Send: changed from func(string, string, map[string]string, any) (*Response, error) to func(context.Context, string, string, map[string]string, any) (*Response, error)
+```
+
+The context goes first and everything else is unchanged:
+
+```go
+// before
+pr.Get(url, query)
+pr.Send(method, url, query, data)
+
+// after
+pr.Get(ctx, url, query)
+pr.Send(ctx, method, url, query, data)
+```
+
+Passing `context.Background()` reproduces the old behaviour exactly, and is worth
+treating as a smell rather than a fix: it is the shape that made this necessary.
+The deadline was built on a background context, so a caller's cancellation never
+reached the request. Measured before the change: a caller cancelling at 20 ms
+waited the full 60-second client timeout. It now returns in 20 ms with
+`context.Canceled`. The wait between retry attempts was a second uncancellable
+hold and is now cancellable too.
+
+A nil context is refused rather than swapped for a background one.
+
+**`Retry` no longer repeats a non-idempotent method.** `POST`, `PATCH`, `CONNECT`
+and any method outside `GET, HEAD, PUT, DELETE, OPTIONS, TRACE` are sent once,
+whatever `times` says — a retried POST is a duplicated write.
+
+```
+- ./http/client.(*PendingRequest).RetryNonIdempotentMethods: added
+```
+
+Add it only when the endpoint deduplicates. It takes no argument and does nothing
+on its own, because a fifth boolean on `Retry` would sit beside `throw`, where one
+positional slip buys duplicate writes.
+
+### `encryption.ErrSignature` says which package holds it
+
+No symbol moved, so apidiff reports nothing. The message changed:
+
+```
+before: security: the signature is not valid
+after:  encryption: the signature is not valid
+```
+
+`errors.Is` is unaffected. Only code matching the text notices, and nothing in
+this collection does.
+
+It said `security` because half the package identified as the compatibility shim
+that is removed at v1.0.0, and half as the home where the key lives. A developer
+reading `security: ...` in a log went looking in the package that stops existing.
+Every sibling error in the package, and every sibling package, names itself.
+
+`NewSigner` also copies the application key now, as `NewEncrypter` already did.
+Keeping the caller's slice fails silently: no error and no log, links simply stop
+verifying once the caller reuses the buffer.
+
+### The rate limiter refuses to be wired in a way that always fails open
+
+```
+- ./cache.Limit.After, .AfterCallback, .Response, .ResponseCallback: removed
+```
+
+Both callbacks were documented as behaviour and **nothing anywhere read them**.
+`PerMinute(5).After(onlyFailures)` compiled and counted every request;
+`.Response(myPage)` got the default 429. The only test asserted that the setter
+stored the value. They do not come back, because each already has one spelling:
+`Refuse` for the refusal and `Release` for giving an attempt back.
+
+No caller in any repository used them, so this breaks nobody today.
+
+**`routing/middleware.Throttle` now panics at construction** on a wiring that
+could never limit: a zero or negative budget, a limit with no window, a nil
+limiter, a nil key function and a nil refusal. `cache.None()` still wires, because
+allowing everything is a decision rather than a mistake.
+
+That is a behaviour change apidiff cannot see, and it is the point. Measured
+against the previous code with `PerMinute(0)`: **10000 of 10000 requests were
+allowed**, none refused, each one logging that the rate limiter could not be
+reached — over an error that actually said the limit allows zero attempts. A
+security control that silently does not exist, blaming the store. A nil refusal
+was worse: the first caller to go over would have panicked instead of getting a
+429, possibly weeks later.
+
+Failing open when the store is genuinely unreachable is kept, and is now stated
+as a decision rather than inherited: a guard against abuse must not turn a cache
+outage into a total one, and the caller whose budget *is* the security control
+checks in the handler against the same limiter, where it can fail closed. It is
+also now provably loud — the request passes and an error line naming the cause is
+written.
+
+### `str` stops spelling the standard library
+
+```
+- ./str.Lower: removed
+- ./str.Upper: removed
+```
+
+Both were one-line forwards to `strings.ToLower` and `strings.ToUpper`, inside the
+package whose stated destination is the standard library first. Call `strings`
+directly:
+
+```go
+// before
+str.Lower(s)
+
+// after
+strings.ToLower(s)
+```
+
+`Stringable.Lower()` and `Stringable.Upper()` **stay**. They return a
+`Stringable` and are links in a fluent chain, which the standard library has no
+equivalent for; only their bodies changed.
+
+### The relation surface is reachable, and it was compiling the wrong column
+
+```
+- ./database/model.Relation.Match: changed from func(auth.Grant, []any, func(*query.Builder)) (map[any]any, error) to func([]relations.Model, []relations.Model, string) ([]relations.Model, error)
+- ./database/model.Relation.GetRelationExistenceQuery: changed shape to the one every relation implements
+- ./database/model/relations.BaseRelation: no longer comparable (also HasManyThrough, HasOneOrManyThrough)
+```
+
+`model.Relation` had one implementor and it was a test double. The ten real
+relations could not satisfy it, so `Builder.With`, `Model.Load`,
+`Collection.Load*`, `Has`, `WhereHas`, `WithCount` and `model.Related` were
+**unreachable from any application** — in either entity shape. `model.Relation` is
+now `relations.Relation` plus the one method the tree has and did not declare.
+
+Its old shape could not have worked even if something had implemented it: keys
+were the primary keys, so a has-many on another local key read the wrong column;
+morph-to matched its own parents; and a key-to-value dictionary had nothing to say
+for a parent that matched nothing, so a childless parent read back as never
+loaded rather than loaded and empty.
+
+**A live wrong-results bug went with it.** `BaseRelation.GetRelationExistenceQuery`
+called `GetExistenceCompareKey`, which every relation overrides — and Go
+dispatches statically, so it reached the base's answer. Every `WhereHas`, `Has`
+and `WithCount` over a has-many compiled `where users.id = posts.id`: the parent's
+key against the child's own key. Well-formed, it runs, and it returns whichever
+rows happen to share an id. Nothing reported it because nothing could reach the
+path.
+
+**Relation queries named the tenant twice.** `model.Builder.prepare` owns the
+scoping now, and it uses the model's declared column where the relation layer only
+knew the default name — wrong for a renamed column, and a column that does not
+exist on a shared table. A builder that makes no promise is still filtered, so the
+failure mode of this split is a duplicate clause, never a missing one.
+
+The comparability loss is the func field that fixes the static dispatch. Nothing
+compares relations with `==`.
+
+### `image`: a ceiling before the decode, and a context through the transformations
+
+```
+- ./image.Driver.Process: changed from func([]byte, *ImagePipeline) ([]byte, error) to func(context.Context, []byte, *ImagePipeline) ([]byte, error)
+- ./image.Driver.DominantColor, .TransformationHandler: the same shape
+- ./image.(*Image).Dimensions, .Width, .Height, .MimeType, .Extension, .ToBytes, .ToString, .ToBase64, .ToDataURI, .HashName: each takes a context first
+- ./image.Driver.MaxPixels: added
+```
+
+Nothing read the header before decoding, so a crafted file declaring enormous
+dimensions was decoded in full — a memory exhaustion whose size the attacker
+chooses. Measured with a 72-byte PNG declaring 12000 by 12000: **549.5 MiB
+allocated** without the ceiling, **6 KiB** with it, and the refusal names both the
+dimensions and the limit.
+
+The default is 33,554,432 pixels, which is a canvas of exactly 128 MiB at four
+bytes a pixel — above an 8K frame and every camera in ordinary use.
+`ImageManager.MaxPixels(n)` moves it, zero restores the default, and there is no
+unlimited setting.
+
+The context reaches the transformations, so a long resize is cancellable rather
+than running to the end of a request nobody is waiting for. `Dimensions` reads the
+header only and takes one for symmetry; `ToResponse` uses the request's own, so a
+browser going away now cancels the work.
+
+The ceiling bounds the decode and not what a transformation is asked to produce:
+`Resize(100000, 100000)` still allocates what the caller asked for. That is
+caller-chosen rather than attacker-chosen, and it is stated in the package
+comment.
+
+### `support/arr` is removed; `collections/arr` is the one
+
+```
+- package github.com/arandu-io/hesape/support/arr: removed
+```
+
+Two packages with the same name answered the same question, sharing 59 exported
+names with diverging signatures. The one that stays has 85.9% test coverage
+against 0.0%, tells a present nil from an absent key, keeps an `int` as an `int`
+where the other round-tripped it to `float64` through JSON, and actually removes
+an element when asked to forget one through a slice — which the other did not,
+silently.
+
+The signatures that change for a caller:
+
+```go
+// before -- a default argument
+v := arr.Get(m, "k", fallback)
+
+// after -- present and absent are distinguishable
+v, ok := arr.Get(m, "k")
+```
+
+`Pull`, `First` and `Last` move the same way. `Sort`/`SortDesc` take a projection
+rather than a comparator. `ToCssClasses`/`ToCssStyles` are variadic — **a caller
+passing a slice must spread it**, and this one compiles either way: without the
+spread a class list renders as `[btn btn-primary]`, one class, with nothing to
+tell you.
+
+`Arrayer` has no replacement type. Write the interface where you need it:
+`interface{ ToArray() map[string]any }`.
+
+**One behaviour is gone on three methods.** `Fluent.Get`, `UriQueryString.Get` and
+`ValidatedInput.Input` no longer accept a `func() any` lazy default. Lazy defaults
+survive in `Fluent.Value` and everywhere else that uses the support package's own
+helper.
+
+**And one widens.** `Dot` now descends into any map or slice kind, where before it
+descended only into `map[string]any`. A translation group nesting
+`map[string]string` will start yielding wildcard messages it previously dropped.
+
+### A scheduled command no longer goes through a shell
+
+```
+- ./console/scheduling.(*CommandBuilder).BuildCommand: changed from func(...) string to func(...) ([]string, error)
+- ./database/schema.ProcessFactory: removed
+- ./queue.(*Listener).MakeProcess, .RunProcess: re-typed
+```
+
+Three packages built a command line and handed it to `exec.CommandContext`
+directly, and one of them handed it to a shell: `sh -c "<the line>"`. Any part of
+that line coming from data was interpreted, which is an injection surface — and
+the package written to prevent exactly that sat unused beside it.
+
+Measured on the old path, with a scheduled command containing `; touch <file>`:
+the file **was created**. On the new path it is not, and the argument is echoed
+verbatim.
+
+What the shell was carrying moved rather than disappearing: redirection is an
+output handler, `sudo -u` is the first four words of the argument list, and the
+backgrounded subshell that reported the finish is now a wait beside the run in
+the process that started it.
+
+If you were relying on `BuildCommand` to hand you a string, it now hands you the
+argument list, which is what a command actually is. A parameter containing a
+space, a semicolon or a quote is one argument and stays one argument.
+
+### `hashing`: one way to hash, and it was already the only one running
+
+`HashManager` and everything under it are removed — 32 incompatible lines, all in
+`./hashing`. `Make` and `Check` are unchanged and are the whole surface.
+
+```
+- ./hashing.HashManager, .Config, .DriverBcrypt, .DriverArgon, .DriverArgon2id: removed
+- ./hashing.ArgonHasher, .Argon2IdHasher, .NewArgonHasher, .NewArgon2IdHasher: removed
+- ./hashing.AbstractHasher, .ErrDriverNotSupported, .ErrWrongAlgorithm, .ErrValueTooLong: removed
+- ./hashing.Hasher.Make/.Check/.NeedsRehash: the variadic Options parameter is gone
+- ./hashing.Options.Memory, .Time, .Threads, .Limit, .Verify: removed
+```
+
+`HashManager` had no caller outside its own tests. What it did have was three
+disagreeing argon2id parameter sets and a bcrypt fallback, while the configuration
+this framework publishes says argon2id — a key written and read by nothing but the
+manager, whose fallback contradicted the published value.
+
+Two of those disagreements were worse than duplication. `NewArgonHasher` defaulted
+to **1024 KiB** of memory where `Make` compiles in **65536**, so a project setting
+`hashing.driver=argon` wrote hashes sixty-four times weaker without being told. And
+`ForAuth(nil)` — the only non-fake `auth.Hasher` — returned bcrypt at cost 12
+rather than argon2id.
+
+**No stored hash becomes unverifiable.** `Check` dispatches on the `$2` prefix
+independently of anything removed, and a test carries five hashes written by the
+previous code as literals: bcrypt at two costs, argon2i, and argon2id at two
+parameter sets. The one change to stored data is that `ForAuth(nil).Make` now
+writes argon2id; existing bcrypt columns still authenticate and are flagged for
+rewrite on the next sign-in.
+
+`BcryptHasher` and `Options{Rounds}` stay, documented as the import path for
+columns another system wrote.
+
+Per-call options go to the constructor:
+
+```go
+// before
+h.Make(password, hashing.Options{Memory: 65536, Time: 4})
+
+// after -- the parameters are compiled in, deliberately, and there is nothing to pass
+hashing.Make(password)
+```
+
+### A rollback refuses the migration it cannot undo
+
+No symbol changed, so apidiff reports nothing. The behaviour did.
+
+A migration with no `Down` used to be rolled back like this: nothing ran, the row
+recording it as applied was **deleted**, and the line printed said `Success`. The
+schema kept the change and the table stopped saying so. The next `aru migrate`
+ran the `Up` again and failed on what was already there — two commands away from
+the thing that caused it.
+
+Now the record is deleted only when the change was actually undone, and a
+migration that reverses nothing has to say which of two things it is:
+
+```go
+// The change that genuinely has no inverse. The rollback leaves it applied,
+// prints the reason, and carries on with the rest of the batch.
+func (BackfillPostViews) Irreversible() string {
+    return "the rows it filled in are no longer distinguishable from the rows it did not"
+}
+
+// Everything else: write the Down.
+func (CreatePostsTable) Down(ctx context.Context, conn migrations.Connection) error {
+    return conn.Schema().Drop(ctx, "posts")
+}
+```
+
+A migration that declares neither stops the rollback with an error naming it. The
+migrations already undone in that run stay undone; their records are already
+gone. `aru migrate` is unaffected — a migration with no `Down` still applies.
+
+`migrations.IrreversibleMigration` is the interface, tested for the same way
+`ReversibleMigration` is: a type assertion, so a wrong signature is a build
+failure rather than a rollback that quietly does nothing.
+
+Declaring both `Down` and `Irreversible` is refused rather than resolved. They
+are opposite claims about one migration and nothing outside it can tell which
+the author meant.
+
+`Reset` is no longer a guarantee of an empty schema: a declared-irreversible
+migration keeps its record and its change.
+
+`aru doctor`'s `rollback-does-nothing` still reports a migration that created a
+table and wrote no `Down`, and it still leaves a backfill alone. It warns earlier
+than this refuses; it does not replace it.
+
+### The string-form resource registration is removed
+
+```
+- ./routing.(*Router).Resource: removed
+- ./routing.(*Router).Resources: removed
+- ./routing.(*Router).ApiResource: removed
+- ./routing.(*Router).ApiResources: removed
+- ./routing.(*Router).Singleton: removed
+- ./routing.(*Router).Singletons: removed
+- ./routing.(*Router).ApiSingleton: removed
+- ./routing.(*Router).ApiSingletons: removed
+- ./routing.(*Router).SetControllerDispatcher: removed
+- ./routing.(*Router).GetControllerDispatcher: removed
+- ./routing.(*Router).ResourceParameters: removed
+- ./routing.(*Router).ResourceVerbs: removed
+- ./routing.(*Router).SingularResourceParameters: removed
+- ./routing.ControllerDispatcher: removed
+- ./routing.ResourceOptions: removed
+- ./routing.ResourceRegistrar: removed
+- ./routing.NewResourceRegistrar: removed
+- ./routing.PendingResourceRegistration: removed
+- ./routing.NewPendingResourceRegistration: removed
+- ./routing.PendingSingletonResourceRegistration: removed
+- ./routing.NewPendingSingletonResourceRegistration: removed
+- ./routing.GetParameters: removed
+- ./routing.SetParameters: removed
+- ./routing.SingularParameters: removed
+- ./routing.Verbs: removed
+```
+
+Every route these registered answered `500 no controller dispatcher wired`.
+`SetControllerDispatcher` is the only thing that could have made them answer, and
+nothing called it — not here, not in any module that requires this one. The
+routes appeared in the table and in `aru routes`, they matched, and then they
+failed at request time.
+
+Nothing replaces the dispatcher, because dispatching a method by its name is
+what this collection does not do: there is no container to resolve a controller
+out of, and Go has no call-by-name that a compiler checks.
+
+`routing.Resource[C]` is the registration path, and it is unchanged. It takes the
+controller value rather than its name, and registers exactly the actions the
+value implements — a type assertion against `Indexer[C]`, `Shower[C]` and the
+other five, decided when it compiles:
+
+```go
+// before -- registered seven routes, each of which answered 500
+r.Resource("invoices", "InvoiceController").Only("index", "show").Register()
+
+// after -- registers the actions InvoiceController actually implements
+routing.Resource(r, "invoices", InvoiceController{}, adapt)
+```
+
+The `Only`/`Except` pair has no replacement and needs none: a controller that
+should not answer `destroy` does not implement `Destroy`, and then there is no
+route rather than a route that 404s or 500s.
+
+The options with no equivalent on `Resource[C]` — `Shallow`, `Scoped`,
+`WithTrashed`, `Names`, `Parameters`, `MiddlewareFor` — went with it. Each was
+reachable only through a route that could not answer, so none of them ever ran.
+
+### `view/compilers` is removed; there was never a second compiler
+
+```
+- package github.com/arandu-io/hesape/view/compilers: removed
+- package github.com/arandu-io/hesape/view/compilers/concerns: removed
+```
+
+Nothing imported either one, and nothing in them emitted Go. `Compiler` held a
+cache path and a hash; `KyseCompiler` held registries; `ComponentTagCompiler`
+expanded component tags into directives that no emitter read. `concerns` was one
+`doc.go` saying of itself that nothing there was implemented yet.
+
+The compiler that runs is the one the view build has always called, and it is
+unchanged. Building a view goes through the CLI, not through this package, so
+there is nothing to rewrite: a caller of these types could not have compiled a
+view with them.
+
+`view.Factory` keeps every runtime method a compiled view calls — `StartSection`,
+`YieldContent`, `StartPush`, `StartFragment`, `AddLoop` and the rest — and none
+of it moved.
+
+### `exception.(*Handler).HandleUncaughtException` is removed
+
+```
+- ./exception.(*Handler).HandleUncaughtException: removed
+```
+
+It forwarded to `HandleException` and nothing called it. Its doc comment said
+"It is Recover that calls this", and `Recover` does not: the recovered panic goes
+to the handler's own answer path, which captures the stack frames the error page
+needs. A caller that took the comment at its word got the handler stack without
+those frames.
+
+```go
+// before
+h.HandleUncaughtException(w, r, err)
+
+// after
+h.HandleException(w, r, err)
+```
+
+`HandleException` returns what the handler stack answered, which the removed
+method discarded. Panics keep going through `Recover`, unchanged.
+
+### The seeder call runner is removed; `database.Seed` is the one
+
+```
+- ./database.Call: removed
+- ./database.CallWith: removed
+- ./database.CallSilent: removed
+- ./database.CallOnce: removed
+- ./database.CalledSeeders: removed
+- ./database.ForgetCalledSeeders: removed
+```
+
+Six functions for running a seeder by name, none of them called outside their own
+test. `CallSilent` said so in its own doc comment — it was `Call`, forwarding to
+it unchanged, because nothing in this package writes to a console and there was
+no output to suppress.
+
+A seeder that runs other seeders names them as values, which is what every
+application already writes and what `aru make:seeder` prints:
+
+```go
+// before
+func (DatabaseSeeder) Run(ctx context.Context, d Deps) error {
+	_, err := database.Call(ctx, registry, d, "AdminSeeder", "PostSeeder")
+	return err
+}
+
+// after
+func (DatabaseSeeder) Run(ctx context.Context, d Deps) error {
+	for _, seeder := range []Seeder{AdminSeeder{}, PostSeeder{}} {
+		if err := seeder.Run(ctx, d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+```
+
+The second form is checked by the compiler. The first resolved a string against a
+registry and reported an unknown name at run time, against a database that was
+usually already half seeded.
+
+**No idempotency guarantee is lost with `CallOnce`, because it never held one.**
+The list it read was written only by `Call`, so in a process that reached seeders
+through `database.Seed` — every one of them — the list was empty and `CallOnce`
+ran everything. It was also per process, which is the wrong grain for the case it
+named: two `aru db:seed` invocations are two processes, and the second one
+remembered nothing. The guarantee is where it always was, on the interface:
+`Seeder.Run` must be safe to run twice, and `aru make:seeder` writes that line
+into every seeder it prints.
+
+`database.Seed`, `database.Seeder`, `database.Flag` and `database.Switch` are
+unchanged.
+
+## Unreleased — the unsigned verification link is gone
+
+```
+- package github.com/arandu-io/hesape/auth/notifications: removed
+```
+
+Both halves described a flow this collection does not have.
+
+`ResetPassword` carried a `Token` "minted and stored by the password broker" and
+an `Expire` the broker was to fill in — a broker, a repository and a token table
+that were removed in the same release. Its own comment said the lifetime is only
+a sentence in the message because the token repository is what refuses an old
+token.
+
+`VerifyEmail` was the second token model, and it was the unsigned one:
+`/verify-email/{id}/{sha1(address)}`. The package's own doc said of it that a
+verification link **must** be signed, and that without one *"anybody who knows
+somebody's e-mail address can confirm it for them"* — a built-in behaviour
+documented as unusable, next to a signed flow that already works.
+
+**Nothing you have issued stops working.** The package had no importer outside its
+own test, so no link in anybody's inbox came from it. The live flow signs
+`len(id):id|address` and is unchanged; a link minted before this release was
+verified against the code after it, byte for byte.
+
+What stays, because none of it is a token model: the `MustVerifyEmail` column and
+its check, the listener that sends, and the middleware that gates.
+
+## Unreleased — one password reset flow
+
+`hesape/auth/passwords` and `hesape/auth/console` are removed.
+
+```
+- package github.com/arandu-io/hesape/auth/passwords: removed
+- package github.com/arandu-io/hesape/auth/console: removed
+```
+
+They held a second reset flow, complete and unused: a broker, a manager, and a
+database and a cache repository for a token whose hash was stored. The flow this
+framework runs is stateless and signed, and it was already the decided one -- the
+stored table was written up as debt and then discharged, in writing, before this
+removal.
+
+**What you get instead.** The signed link carries tenant, account id and address,
+each length-prefixed so no field can move a boundary, plus a fingerprint of the
+stored password hash. Expiry is enforced by the signer. Single use comes from the
+fingerprint: changing the password invalidates every link ever minted against the
+old one at the same instant, rather than only the one that was redeemed.
+
+**What you give up, and it is deliberate.** There is no way to revoke one link
+before it expires without changing the password. That is the price of having no
+table, and it was weighed rather than overlooked.
+
+`ClearResetsCommand` goes with the packages. It swept expired rows out of a
+store, and there are no rows. It was registered in no console registry, so
+nothing loses a command it was running.
+
 ## v0.17.0 — the row is the model
 
 The heading is `Unreleased` because these have not been tagged yet. It becomes

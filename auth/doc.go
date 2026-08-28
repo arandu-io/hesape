@@ -34,7 +34,14 @@
 //
 // # What is elsewhere
 //
-// The user providers that read a database are hesape/auth/users; the password
-// reset flow is hesape/auth/passwords and hesape/auth/notifications; the
-// middleware is hesape/auth/middleware; the Gate is hesape/auth/access.
+// The user providers that read a database are hesape/auth/users; the middleware
+// is hesape/auth/middleware; the Gate is hesape/auth/access; the listener that
+// asks a fresh registration to confirm its address is hesape/auth/listeners.
+//
+// The reset link and the verification link are neither here nor in a subpackage
+// of this one. Both are signed rather than stored: the application mints a token
+// over the account it is for and the address it was mailed to, and nothing is
+// written when the message goes out. A second flow here that kept a token in a
+// table would be a second answer to the same question, and the two do not
+// revoke alike.
 package auth

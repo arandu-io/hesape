@@ -19,6 +19,7 @@ type MorphOne struct {
 // NewMorphOne answers MorphOne::__construct.
 func newMorphOne(query Builder, parent Model, typ, id, localKey string) *MorphOne {
 	relation := &MorphOne{MorphOneOrMany: NewMorphOneOrMany(query, parent, typ, id, localKey)}
+	relation.ExistenceCompareKey = relation.GetExistenceCompareKey
 
 	relation.SupportsInverseRelations.PossibleInverseRelations = relation.PossibleInverseRelations
 	relation.SupportsDefaultModels = concerns.SupportsDefaultModels{

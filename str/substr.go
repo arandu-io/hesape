@@ -418,7 +418,7 @@ func SubstrReplace(value, replace string, offset int, length ...int) string {
 //
 // The second result is false when the phrase is not in the text.
 func Excerpt(text, phrase string, radius int, omission string) (string, bool) {
-	i := strings.Index(Lower(text), Lower(phrase))
+	i := strings.Index(strings.ToLower(text), strings.ToLower(phrase))
 	if i < 0 {
 		return "", false
 	}

@@ -293,6 +293,9 @@ func (m *Migrator) getMigrationsForRollback(ctx context.Context, options Options
 // skipped rather than stopping the rollback: the alternative is a rollback
 // that refuses to start because of one file somebody deleted six releases
 // ago.
+//
+// A migration runDown refuses stops the loop, exactly as a failing Down does.
+// The ones already undone stay undone, and their records are already gone.
 func (m *Migrator) rollbackMigrations(ctx context.Context, records []MigrationRecord, paths []string, options Options) ([]string, error) {
 	var rolledBack []string
 
@@ -321,6 +324,10 @@ func (m *Migrator) rollbackMigrations(ctx context.Context, records []MigrationRe
 }
 
 // Reset rolls every applied migration back, newest first.
+//
+// Every one that can be: a migration declaring itself irreversible is left
+// applied and keeps its record, so a reset is not a guarantee of an empty
+// schema. One that declares neither a Down nor Irreversible stops the reset.
 func (m *Migrator) Reset(ctx context.Context, paths []string, pretend bool) ([]string, error) {
 	ran, err := m.repository.GetRan(ctx)
 	if err != nil {
@@ -344,8 +351,37 @@ func (m *Migrator) Reset(ctx context.Context, paths []string, pretend bool) ([]s
 }
 
 // runDown runs one migration's Down and removes its record.
+//
+// The record is deleted only when the change was actually undone, and that is
+// the whole of the rule. A migration with no Down used to reach the delete
+// anyway: the schema stayed, the row saying so was removed, the line printed
+// said Success, and the next migrate ran the Up again and failed on what was
+// already there -- two commands away from the thing that caused it.
+//
+// So a migration that reverses nothing is now one of two things, and it has to
+// say which. One that declares Irreversible is left applied, with its record
+// and its reason. One that declares neither is refused, and the rollback stops
+// there rather than reporting a change it did not make.
 func (m *Migrator) runDown(ctx context.Context, migration Migration, record MigrationRecord, pretend bool) error {
 	name := migration.GetName()
+
+	_, isReversible := migration.(ReversibleMigration)
+	irreversible, isIrreversible := migration.(IrreversibleMigration)
+
+	switch {
+	case isReversible && isIrreversible:
+		return fmt.Errorf("migration %s declares both Down and Irreversible, "+
+			"and nothing outside it can tell which one is true: keep the one that is", name)
+
+	case isIrreversible:
+		m.FireMigrationEvent(events.NewMigrationSkipped(name))
+		m.write(fmt.Sprintf("%s %s: %s", name, Skipped, irreversible.Irreversible()))
+		return nil
+
+	case !isReversible:
+		return fmt.Errorf("migration %s cannot be rolled back: it declares neither Down nor Irreversible. "+
+			"Write Down to undo what Up applied, or Irreversible to declare that nothing can", name)
+	}
 
 	if pretend {
 		return m.pretendToRun(ctx, migration, "down")
@@ -375,9 +411,11 @@ func (m *Migrator) runMigration(ctx context.Context, migration Migration, method
 	callback := func() error {
 		reversible, isReversible := migration.(ReversibleMigration)
 		if method == "down" && !isReversible {
-			// A migration with no Down is not reversed, and that is not an
-			// error.
-			return nil
+			// runDown decides what a migration with no Down means, and every
+			// rollback goes through it. Reaching here is a caller that skipped
+			// that decision, so it says so rather than returning nil -- which
+			// is the shape that printed Success over a schema nobody touched.
+			return fmt.Errorf("migration %s has no Down", migration.GetName())
 		}
 
 		m.FireMigrationEvent(events.NewMigrationStarted(migration, method))

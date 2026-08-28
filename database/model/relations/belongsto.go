@@ -34,6 +34,7 @@ func newBelongsTo(query Builder, child Model, foreignKey, ownerKey, relationName
 		ownerKey:     ownerKey,
 		relationName: relationName,
 	}
+	relation.ExistenceCompareKey = relation.GetExistenceCompareKey
 
 	relation.SupportsDefaultModels = concerns.SupportsDefaultModels{
 		NewRelatedInstanceFor: relation.newRelatedInstanceFor,

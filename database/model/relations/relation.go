@@ -144,6 +144,21 @@ type BaseRelation struct {
 	// carried no keys at all, so that GetEager answers an empty collection
 	// instead of running `where in ()`.
 	EagerKeysWereEmpty bool
+
+	// ExistenceCompareKey is getExistenceCompareKey as the subtype answers it.
+	//
+	// It is a field for the reason AliasedPivotColumns is one: the method below
+	// is called from GetRelationExistenceQuery, which lives on this type, and Go
+	// dispatches statically -- so the call would reach this type's own answer and
+	// never the override, whatever the relation actually is. The field is what
+	// makes the subtype's version run.
+	//
+	// What it cost while it was missing: a whereHas over a has-many compiled
+	// `where exists (select * from posts where users.id = posts.id)`, comparing
+	// the parent's key against the child's own key instead of against the foreign
+	// key pointing back. That is a well formed query, it runs, and it answers
+	// with the rows whose ids happen to line up.
+	ExistenceCompareKey func() string
 }
 
 // NewBaseRelation answers the shared half of Relation::__construct.
@@ -292,10 +307,16 @@ func (r *BaseRelation) GetRelationExistenceCountQuery(q Builder, parentQuery Bui
 	return counted
 }
 
-// GetExistenceCompareKey answers Relation::getExistenceCompareKey. Each
-// relation overrides it; the base answers the related model's key, which is
-// what a relation with no foreign key of its own would compare.
+// GetExistenceCompareKey answers Relation::getExistenceCompareKey.
+//
+// Each relation overrides it, and sets ExistenceCompareKey in its constructor so
+// that the override is what this answers -- see the field. Without one set, this
+// answers the related model's key, which is what a relation with no foreign key
+// of its own would compare.
 func (r *BaseRelation) GetExistenceCompareKey() string {
+	if r.ExistenceCompareKey != nil {
+		return r.ExistenceCompareKey()
+	}
 	return r.Related.QualifyColumn(r.Related.GetKeyName())
 }
 

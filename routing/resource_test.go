@@ -22,9 +22,9 @@ type request struct {
 	r *http.Request
 }
 
-// adapt is what hesape/hhttp.Action is: it builds the context, runs the action
-// and decides what a returned error means. Here, "means" is a 500, which is
-// enough to prove the error travelled.
+// adapt is what an Adapter is: it builds the context, runs the action and
+// decides what a returned error means. Here, "means" is a 500, which is enough
+// to prove the error travelled.
 func adapt(h func(*request) error) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := h(&request{w: w, r: r}); err != nil {

@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sync"
@@ -28,6 +29,7 @@ type poolRequest struct {
 	key     string
 	req     *http.Request
 	pending *PendingRequest
+	ctx     context.Context
 	method  string
 	url     string
 	query   map[string]string
@@ -74,7 +76,10 @@ func (p *Pool) claim(key string) *PendingRequest {
 // A second verb on the same pending request replaces the first rather than
 // adding a second entry: pool.As("a").Get(...) followed by .Post(...) is one
 // request too, because the key names one slot.
-func (p *Pool) record(pr *PendingRequest, method, url string, query map[string]string, data any) {
+//
+// The context the verb was called with is recorded along with it, so that
+// [Pool.Send] makes each request under the context its own caller gave it.
+func (p *Pool) record(ctx context.Context, pr *PendingRequest, method, url string, query map[string]string, data any) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -82,7 +87,7 @@ func (p *Pool) record(pr *PendingRequest, method, url string, query map[string]s
 	if !ok {
 		return
 	}
-	entry := poolRequest{key: key, pending: pr, method: method, url: url, query: query, data: data}
+	entry := poolRequest{key: key, pending: pr, ctx: ctx, method: method, url: url, query: query, data: data}
 	for i := range p.requests {
 		if p.requests[i].key == key {
 			p.requests[i] = entry
@@ -99,6 +104,9 @@ func (p *Pool) GetRequests() []poolRequest {
 
 // Send sends all requests in the pool concurrently and returns a map
 // of key → Response. If concurrency is 0, all requests run concurrently.
+//
+// Each request goes out under the context passed to the verb that added it, so
+// a caller cancels the pool by cancelling what it handed the verbs.
 func (p *Pool) Send(concurrency int) (map[string]*Response, error) {
 	if concurrency <= 0 {
 		concurrency = len(p.requests)
@@ -122,7 +130,7 @@ func (p *Pool) Send(concurrency int) (map[string]*Response, error) {
 			// instead of making it.
 			r.pending.pool = nil
 
-			resp, err := r.pending.Send(r.method, r.url, r.query, r.data)
+			resp, err := r.pending.Send(r.ctx, r.method, r.url, r.query, r.data)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -144,4 +152,4 @@ func (p *Pool) Send(concurrency int) (map[string]*Response, error) {
 
 // Pool provides NewRequest() and As(key) as access points; callers chain
 // HTTP verb methods directly from the returned *PendingRequest, such as
-// As(key).Get(url, nil).
+// As(key).Get(ctx, url, nil).

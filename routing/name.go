@@ -119,7 +119,7 @@ func (r *Route) RouteName() string {
 // written by hand.
 //
 //	r.Get("/", home).Name("home")
-//	routing.Resource(r, "invoices", InvoiceController{}, http.Action) // names them all
+//	routing.Resource(r, "invoices", InvoiceController{}, adapt) // names them all
 //
 // It returns the route so the call chains, and the declaration reads as one
 // line.

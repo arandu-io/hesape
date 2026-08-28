@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/arandu-io/hesape/collections/arr"
 	"github.com/arandu-io/hesape/str"
-	"github.com/arandu-io/hesape/support/arr"
 )
 
 // This file is how a failure becomes a sentence, and what a caller can do to
@@ -309,7 +309,7 @@ func (v *Validator) getCustomMessageFromTranslator(keys []string) string {
 
 		custom, _ := v.translator().Get("validation.custom", nil, "").(map[string]any)
 
-		if message := v.getWildcardCustomMessages(arr.Dot(custom, ""), shortKey, key); message != key {
+		if message := v.getWildcardCustomMessages(arr.Dot(custom), shortKey, key); message != key {
 			return message
 		}
 	}
@@ -443,7 +443,7 @@ func (v *Validator) getAttributeFromTranslations(name string) string {
 	if !isGroup {
 		return ""
 	}
-	return v.getAttributeFromLocalArray(name, dotStrings(arr.Dot(attributes, "")))
+	return v.getAttributeFromLocalArray(name, dotStrings(arr.Dot(attributes)))
 }
 
 // getAttributeFromLocalArray returns the field name a source map holds, with the
@@ -464,7 +464,7 @@ func (v *Validator) getAttributeFromLocalArray(attribute string, source map[stri
 // how a line chooses its own capitalisation.
 func (v *Validator) replaceAttributePlaceholder(message, value string) string {
 	message = strings.ReplaceAll(message, ":attribute", value)
-	message = strings.ReplaceAll(message, ":ATTRIBUTE", str.Upper(value))
+	message = strings.ReplaceAll(message, ":ATTRIBUTE", strings.ToUpper(value))
 	return strings.ReplaceAll(message, ":Attribute", str.Ucfirst(value))
 }
 

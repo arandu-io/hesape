@@ -22,7 +22,7 @@ func TestARequestToALoopbackAddressIsRefused(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := NewFactory(nil).CreatePendingRequest().Get(server.URL, nil)
+	_, err := NewFactory(nil).CreatePendingRequest().Get(t.Context(), server.URL, nil)
 	if !errors.Is(err, ErrInternalAddress) {
 		t.Fatalf("a request to %s should be refused, got %v", server.URL, err)
 	}
@@ -38,7 +38,7 @@ func TestANamedHostReachesAnInternalAddress(t *testing.T) {
 	defer server.Close()
 
 	f := NewFactory(nil).AllowInternalHosts(loopbackHost)
-	resp, err := f.CreatePendingRequest().Get(server.URL, nil)
+	resp, err := f.CreatePendingRequest().Get(t.Context(), server.URL, nil)
 	if err != nil {
 		t.Fatalf("a declared host should be reachable: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestARefusalNamesTheHostAndTheWayToAllowIt(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer server.Close()
 
-	_, err := NewFactory(nil).CreatePendingRequest().Get(server.URL, nil)
+	_, err := NewFactory(nil).CreatePendingRequest().Get(t.Context(), server.URL, nil)
 	if err == nil {
 		t.Fatal("expected a refusal")
 	}
@@ -75,7 +75,7 @@ func TestARedirectDoesNotEscapeTheCheck(t *testing.T) {
 	defer server.Close()
 
 	f := NewFactory(nil).AllowInternalHosts(loopbackHost)
-	_, err := f.CreatePendingRequest().Get(server.URL, nil)
+	_, err := f.CreatePendingRequest().Get(t.Context(), server.URL, nil)
 	if !errors.Is(err, ErrInternalAddress) {
 		t.Fatalf("the redirect should be refused, got %v", err)
 	}
@@ -87,7 +87,7 @@ func TestARedirectDoesNotEscapeTheCheck(t *testing.T) {
 // TestASchemeThatDoesNotLeaveIsRefused. Only http and https go out, so a URL
 // that reached the client from somewhere else cannot ask it to read a file.
 func TestASchemeThatDoesNotLeaveIsRefused(t *testing.T) {
-	_, err := NewFactory(nil).CreatePendingRequest().Get("file:///etc/passwd", nil)
+	_, err := NewFactory(nil).CreatePendingRequest().Get(t.Context(), "file:///etc/passwd", nil)
 	if !errors.Is(err, ErrUnsupportedScheme) {
 		t.Fatalf("file:// should be refused, got %v", err)
 	}
@@ -102,7 +102,7 @@ func TestADeclaredBodyLargerThanTheLimitIsRefusedBeforeItIsRead(t *testing.T) {
 	defer server.Close()
 
 	f := NewFactory(nil).AllowInternalHosts(loopbackHost).MaxResponseBytes(64)
-	_, err := f.CreatePendingRequest().Get(server.URL, nil)
+	_, err := f.CreatePendingRequest().Get(t.Context(), server.URL, nil)
 	if !errors.Is(err, ErrResponseTooLarge) {
 		t.Fatalf("a 512 byte answer under a 64 byte limit should be refused, got %v", err)
 	}
@@ -129,7 +129,7 @@ func TestAStreamedBodyLargerThanTheLimitIsRefusedWhileItIsRead(t *testing.T) {
 	defer server.Close()
 
 	f := NewFactory(nil).AllowInternalHosts(loopbackHost).MaxResponseBytes(64)
-	_, err := f.CreatePendingRequest().Get(server.URL, nil)
+	_, err := f.CreatePendingRequest().Get(t.Context(), server.URL, nil)
 	if !errors.Is(err, ErrResponseTooLarge) {
 		t.Fatalf("a streamed answer past the limit should be refused, got %v", err)
 	}
@@ -147,7 +147,7 @@ func TestABodyEndingExactlyAtTheLimitIsKept(t *testing.T) {
 	defer server.Close()
 
 	f := NewFactory(nil).AllowInternalHosts(loopbackHost).MaxResponseBytes(64)
-	resp, err := f.CreatePendingRequest().Get(server.URL, nil)
+	resp, err := f.CreatePendingRequest().Get(t.Context(), server.URL, nil)
 	if err != nil {
 		t.Fatalf("a body of exactly the limit should be kept: %v", err)
 	}

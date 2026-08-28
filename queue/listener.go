@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"runtime"
 	"strconv"
 	"time"
+
+	"github.com/arandu-io/hesape/process"
 )
 
 // ListenerOptions configures a [Listener].
@@ -35,6 +35,10 @@ type ListenerOptions struct {
 // The child is started with Command, which is the path of the binary and the
 // arguments before the ones this adds. An application whose worker command is
 // not `aru work` says so there.
+//
+// The child is a program and a list of arguments, run through
+// [github.com/arandu-io/hesape/process]. No shell is involved, so a queue name
+// or a connection name is an argument whatever characters are in it.
 type Listener struct {
 	// commandPath is the working directory the child is started in.
 	commandPath string
@@ -45,6 +49,8 @@ type Listener struct {
 	// stop ends the loop. It is a function so [Listener.Stop] can be called
 	// from a signal handler and from a test.
 	stop context.CancelFunc
+	// factory builds the child worker's process.
+	factory *process.Factory
 }
 
 // NewListener returns a listener that starts command in dir.
@@ -53,7 +59,21 @@ type Listener struct {
 //
 //	queue.NewListener(".", os.Args[0], "work")
 func NewListener(dir string, command ...string) *Listener {
-	return &Listener{commandPath: dir, command: command}
+	return &Listener{commandPath: dir, command: command, factory: process.NewFactory()}
+}
+
+// UseProcessFactory points the listener at another process factory, and a nil
+// one leaves the listener on the factory it has.
+//
+// It is the seam a test uses: a factory with fakes registered answers the child
+// worker's command line without a worker ever being started, and
+// [github.com/arandu-io/hesape/process.Factory.PreventStrayProcesses] turns a
+// command nobody faked into a failure that names it.
+func (l *Listener) UseProcessFactory(factory *process.Factory) *Listener {
+	if factory != nil {
+		l.factory = factory
+	}
+	return l
 }
 
 // SetOutputHandler sets what to do with each line the child writes.
@@ -77,6 +97,10 @@ var ErrNoListenerCommand = errors.New("queue: this listener has no command to ru
 // what it stopped for. A child that cannot be started at all is an error: a
 // loop that retries a binary that does not exist is a loop that fills a disk
 // with the same line.
+//
+// The two are told apart by the process package rather than by reading an exit
+// status: a worker that ran and exited non-zero is a result, and only a worker
+// that never ran comes back as an error.
 func (l *Listener) Listen(ctx context.Context, connectionName, queue string, options ListenerOptions) error {
 	if len(l.command) == 0 {
 		return ErrNoListenerCommand
@@ -91,17 +115,13 @@ func (l *Listener) Listen(ctx context.Context, connectionName, queue string, opt
 			return nil
 		}
 
-		process := l.MakeProcess(ctx, connectionName, queue, options)
-		if err := l.RunProcess(process, options.Memory); err != nil {
+		if err := l.RunProcess(ctx, l.MakeProcess(connectionName, queue, options), options.Memory); err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
-			var exit *exec.ExitError
-			if !errors.As(err, &exit) {
-				// Not the worker failing: the worker not starting. Retrying
-				// cannot fix a path that is wrong.
-				return fmt.Errorf("queue: starting the worker: %w", err)
-			}
+			// Not the worker failing: the worker not starting. Retrying
+			// cannot fix a path that is wrong.
+			return fmt.Errorf("queue: starting the worker: %w", err)
 		}
 
 		if options.Rest > 0 {
@@ -116,14 +136,18 @@ func (l *Listener) Listen(ctx context.Context, connectionName, queue string, opt
 	}
 }
 
-// MakeProcess builds the child worker's command.
+// MakeProcess describes the child worker, without starting it.
 //
-// It answers makeProcess(). The flags are the worker's options turned back into
-// the arguments `aru work` parses, which is the round trip that makes a listener
-// and a worker configurable in one place.
-func (l *Listener) MakeProcess(ctx context.Context, connectionName, queue string, options ListenerOptions) *exec.Cmd {
-	args := append([]string(nil), l.command[1:]...)
-	args = append(args,
+// The flags are the worker's options turned back into the arguments `aru work`
+// parses, which is the round trip that makes a listener and a worker
+// configurable in one place. They are arguments and not a line: a queue named
+// with a space, a semicolon or a quote is one argument all the same.
+//
+// The child is given no deadline. It runs one job and exits, and a job is as
+// long as the work in it.
+func (l *Listener) MakeProcess(connectionName, queue string, options ListenerOptions) *process.PendingProcess {
+	command := append([]string(nil), l.command...)
+	command = append(command,
 		connectionName,
 		"--once",
 		"--name="+options.Name,
@@ -134,15 +158,17 @@ func (l *Listener) MakeProcess(ctx context.Context, connectionName, queue string
 		"--tries="+strconv.Itoa(options.MaxTries),
 	)
 	if options.Force {
-		args = append(args, "--force")
+		command = append(command, "--force")
 	}
 	if options.Environment != "" {
-		args = append(args, "--env="+options.Environment)
+		command = append(command, "--env="+options.Environment)
 	}
 
-	cmd := exec.CommandContext(ctx, l.command[0], args...)
-	cmd.Dir = l.commandPath
-	return cmd
+	return l.factory.NewPendingProcess().
+		Command(command...).
+		Path(l.commandPath).
+		Quietly().
+		Forever()
 }
 
 // seconds renders a backoff schedule as the whole seconds a flag carries.
@@ -158,23 +184,23 @@ func seconds(backoff func(int) time.Duration) string {
 
 // RunProcess runs one child worker to completion.
 //
+// A worker that exited non-zero is not an error: it is what the listener exists
+// to start again. The error is for a worker that never ran, or one this
+// process's context ended.
+//
+// Both of the child's streams go to the output handler as they arrive, which is
+// what the child writing to standard error and standard output at once needs;
+// nothing is kept, because the listener never reads it back.
+//
 // The memory check afterwards is about this process, the listener: it has
 // grown, and something outside it should start it again with a clean heap.
-func (l *Listener) RunProcess(process *exec.Cmd, memory int) error {
+func (l *Listener) RunProcess(ctx context.Context, worker *process.PendingProcess, memory int) error {
+	var handler process.OutputHandler
 	if l.outputHandler != nil {
-		out, err := process.StdoutPipe()
-		if err != nil {
-			return err
-		}
-		process.Stderr = process.Stdout
-		if err := process.Start(); err != nil {
-			return err
-		}
-		l.handleWorkerOutput(out)
-		if err := process.Wait(); err != nil {
-			return err
-		}
-	} else if err := process.Run(); err != nil {
+		handler = func(_ process.Stream, chunk string) { l.outputHandler(chunk) }
+	}
+
+	if _, err := worker.Run(ctx, nil, handler); err != nil {
 		return err
 	}
 
@@ -182,20 +208,6 @@ func (l *Listener) RunProcess(process *exec.Cmd, memory int) error {
 		l.Stop()
 	}
 	return nil
-}
-
-// handleWorkerOutput hands each line the child wrote to the output handler.
-func (l *Listener) handleWorkerOutput(out io.Reader) {
-	buf := make([]byte, 4096)
-	for {
-		n, err := out.Read(buf)
-		if n > 0 && l.outputHandler != nil {
-			l.outputHandler(string(buf[:n]))
-		}
-		if err != nil {
-			return
-		}
-	}
 }
 
 // MemoryExceeded reports whether this process is holding more than limit

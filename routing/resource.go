@@ -15,11 +15,11 @@ import (
 //
 // The layer that owns C supplies the adapter, and the call reads:
 //
-//	routing.Resource(r, "invoices", InvoiceController{}, hhttp.Action)
+//	routing.Resource(r, "invoices", InvoiceController{}, adapt)
 //
-// It is the same function a single route already goes through --
-// r.Get("/x", hhttp.Action(c.Show)) -- passed by name instead of applied, so
-// Resource can apply it to the seven actions it finds.
+// where adapt is that layer's own function. It is the same one a single route
+// already goes through -- r.Get("/x", adapt(c.Show)) -- passed by name instead
+// of applied, so Resource can apply it to the seven actions it finds.
 type Adapter[C any] func(func(*C) error) http.Handler
 
 // The seven actions of a resource controller, one interface each.
@@ -67,7 +67,7 @@ type (
 
 // Resource registers the REST routes a controller implements.
 //
-//	routing.Resource(r, "invoices", InvoiceController{}, hhttp.Action)
+//	routing.Resource(r, "invoices", InvoiceController{}, adapt)
 //
 // The seven, in the conventional order and with the conventional names:
 //

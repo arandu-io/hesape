@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -32,6 +33,7 @@ type Batch struct {
 type batchRequest struct {
 	key     string
 	pending *PendingRequest
+	ctx     context.Context
 	method  string
 	url     string
 	query   map[string]string
@@ -140,7 +142,7 @@ func (b *Batch) Send() (map[string]*Response, error) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			resp, err := r.pending.Send(r.method, r.url, r.query, r.data)
+			resp, err := r.pending.Send(r.ctx, r.method, r.url, r.query, r.data)
 
 			mu.Lock()
 			defer mu.Unlock()

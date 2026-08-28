@@ -34,10 +34,11 @@ type MustVerifyEmailTrait struct {
 
 	// VerifyEmail is the notification that asks for the confirmation.
 	//
-	// It is an any because the notification itself lives in
-	// hesape/auth/notifications, which the root of auth cannot import -- it
-	// imports nothing outside the standard library (see doc.go). The model puts
-	// the notification here, and Notify is what knows how to send it.
+	// It is an any because this package cannot name the type: the root of auth
+	// imports nothing outside the standard library (see doc.go), and the message
+	// is the application's anyway -- so is the link in it, which has to be signed
+	// by whoever holds the application key. The model puts the notification here,
+	// and Notify is what knows how to send it.
 	VerifyEmail any
 }
 

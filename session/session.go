@@ -160,6 +160,18 @@ func (rec Record[T]) PasswordConfirmedWithin(window time.Duration) bool {
 
 // Handler stores the record behind a session id.
 //
+// Read, Write and Destroy are keyed by the id alone. That is the separation
+// between one session and another: the id is unguessable and it is the entire
+// key, so an implementation has nothing to scope and no second term to get
+// wrong. An implementation must not add a customer prefix to it -- the tenant is
+// a field of the Record the read returns, so a prefixed key would have to name
+// the tenant before the read that discovers it, and two customers whose ids
+// differ are already disjoint.
+//
+// DestroyIndex is the exception, and it is the shape of the rule: it is the one
+// method that asks by attribute instead of by id, so it is the one method that
+// takes the tenant, and it refuses an empty one.
+//
 // The core ships ArrayHandler only, which is enough for development and for a
 // single instance. The kv adapter provides the distributed store with active
 // invalidation; see 00-meta/DOC-repositories.md.
@@ -337,7 +349,7 @@ func (s *RecordStore[T]) Start(ctx context.Context, w http.ResponseWriter, rec R
 //
 // It MUST be called on login: keeping the pre-login id is session fixation, the
 // bug that lets an attacker plant a known id and inherit the session after the
-// victim authenticates. `aru doctor` checks for this call.
+// victim authenticates.
 // The options are the same as Start's, and Regenerate takes them because login
 // is where remember-me is answered: the sign-in handler calls Regenerate, not
 // Start, so an option only Start accepted would be unreachable from the one

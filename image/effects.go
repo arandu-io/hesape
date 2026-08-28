@@ -1,6 +1,7 @@
 package image
 
 import (
+	"context"
 	stdimage "image"
 )
 
@@ -9,10 +10,16 @@ import (
 // The coefficients are Rec. 601's -- the same ones GD and ImageMagick use for a
 // plain desaturation -- so a red and a blue of equal brightness on screen do
 // not come out as the same grey.
-func grayscale(src *stdimage.RGBA) *stdimage.RGBA {
+func grayscale(ctx context.Context, src *stdimage.RGBA) (*stdimage.RGBA, error) {
 	w, h := src.Rect.Dx(), src.Rect.Dy()
+	if err := interrupted(ctx); err != nil {
+		return nil, err
+	}
 	dst := stdimage.NewRGBA(stdimage.Rect(0, 0, w, h))
 	for y := 0; y < h; y++ {
+		if err := interrupted(ctx); err != nil {
+			return nil, err
+		}
 		in := src.Pix[y*src.Stride : y*src.Stride+w*4]
 		out := dst.Pix[y*dst.Stride : y*dst.Stride+w*4]
 		for x := 0; x < w; x++ {
@@ -22,7 +29,7 @@ func grayscale(src *stdimage.RGBA) *stdimage.RGBA {
 			o[0], o[1], o[2], o[3] = g, g, g, p[3]
 		}
 	}
-	return dst
+	return dst, nil
 }
 
 // blurRadius turns a 0-to-100 amount into a radius in pixels.
@@ -48,22 +55,34 @@ func blurRadius(amount int) int {
 // pass the kernel has converged close enough to a bell that nothing shows.
 // Each pass is separable and runs on a sliding sum, so the cost is the number
 // of pixels and not the number of pixels times the radius.
-func blur(src *stdimage.RGBA, radius int) *stdimage.RGBA {
+func blur(ctx context.Context, src *stdimage.RGBA, radius int) (*stdimage.RGBA, error) {
 	if radius < 1 {
-		return src
+		return src, nil
 	}
 	out := src
 	for i := 0; i < 3; i++ {
-		out = boxBlurVertical(boxBlurHorizontal(out, radius), radius)
+		wide, err := boxBlurHorizontal(ctx, out, radius)
+		if err != nil {
+			return nil, err
+		}
+		if out, err = boxBlurVertical(ctx, wide, radius); err != nil {
+			return nil, err
+		}
 	}
-	return out
+	return out, nil
 }
 
-func boxBlurHorizontal(src *stdimage.RGBA, r int) *stdimage.RGBA {
+func boxBlurHorizontal(ctx context.Context, src *stdimage.RGBA, r int) (*stdimage.RGBA, error) {
 	w, h := src.Rect.Dx(), src.Rect.Dy()
+	if err := interrupted(ctx); err != nil {
+		return nil, err
+	}
 	dst := stdimage.NewRGBA(stdimage.Rect(0, 0, w, h))
 	window := 2*r + 1
 	for y := 0; y < h; y++ {
+		if err := interrupted(ctx); err != nil {
+			return nil, err
+		}
 		row := src.Pix[y*src.Stride : y*src.Stride+w*4]
 		out := dst.Pix[y*dst.Stride : y*dst.Stride+w*4]
 		at := func(x int) []uint8 { return row[clampInt(x, 0, w-1)*4:] }
@@ -89,14 +108,20 @@ func boxBlurHorizontal(src *stdimage.RGBA, r int) *stdimage.RGBA {
 			}
 		}
 	}
-	return dst
+	return dst, nil
 }
 
-func boxBlurVertical(src *stdimage.RGBA, r int) *stdimage.RGBA {
+func boxBlurVertical(ctx context.Context, src *stdimage.RGBA, r int) (*stdimage.RGBA, error) {
 	w, h := src.Rect.Dx(), src.Rect.Dy()
+	if err := interrupted(ctx); err != nil {
+		return nil, err
+	}
 	dst := stdimage.NewRGBA(stdimage.Rect(0, 0, w, h))
 	window := 2*r + 1
 	for x := 0; x < w; x++ {
+		if err := interrupted(ctx); err != nil {
+			return nil, err
+		}
 		at := func(y int) []uint8 { return src.Pix[clampInt(y, 0, h-1)*src.Stride+x*4:] }
 
 		var sum [4]int
@@ -120,7 +145,7 @@ func boxBlurVertical(src *stdimage.RGBA, r int) *stdimage.RGBA {
 			}
 		}
 	}
-	return dst
+	return dst, nil
 }
 
 // sharpen is an unsharp mask: the difference between the canvas and a blurred
@@ -130,16 +155,26 @@ func boxBlurVertical(src *stdimage.RGBA, r int) *stdimage.RGBA {
 // difference twice over -- past that the halo around every edge is more
 // visible than the detail it was meant to recover, which is why the number is
 // clamped before it arrives.
-func sharpen(src *stdimage.RGBA, amount int) *stdimage.RGBA {
+func sharpen(ctx context.Context, src *stdimage.RGBA, amount int) (*stdimage.RGBA, error) {
 	if amount <= 0 {
-		return src
+		return src, nil
 	}
 	k := float64(amount) / 100 * 2
-	soft := boxBlurVertical(boxBlurHorizontal(src, 1), 1)
+	wide, err := boxBlurHorizontal(ctx, src, 1)
+	if err != nil {
+		return nil, err
+	}
+	soft, err := boxBlurVertical(ctx, wide, 1)
+	if err != nil {
+		return nil, err
+	}
 
 	w, h := src.Rect.Dx(), src.Rect.Dy()
 	dst := stdimage.NewRGBA(stdimage.Rect(0, 0, w, h))
 	for y := 0; y < h; y++ {
+		if err := interrupted(ctx); err != nil {
+			return nil, err
+		}
 		in := src.Pix[y*src.Stride : y*src.Stride+w*4]
 		lo := soft.Pix[y*soft.Stride : y*soft.Stride+w*4]
 		out := dst.Pix[y*dst.Stride : y*dst.Stride+w*4]
@@ -153,5 +188,5 @@ func sharpen(src *stdimage.RGBA, amount int) *stdimage.RGBA {
 			}
 		}
 	}
-	return dst
+	return dst, nil
 }

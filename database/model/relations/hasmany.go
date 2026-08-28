@@ -15,6 +15,7 @@ type HasMany struct {
 // and localKey, applies its constraints, and returns it.
 func newHasMany(query Builder, parent Model, foreignKey, localKey string) *HasMany {
 	relation := &HasMany{HasOneOrMany: NewHasOneOrMany(query, parent, foreignKey, localKey)}
+	relation.ExistenceCompareKey = relation.GetExistenceCompareKey
 	return relation
 }
 

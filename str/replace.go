@@ -246,7 +246,7 @@ func Initials(value string, capitalize bool) string {
 		b.WriteString(Substr(part, 0, 1))
 	}
 	if capitalize {
-		return Upper(b.String())
+		return strings.ToUpper(b.String())
 	}
 	return b.String()
 }

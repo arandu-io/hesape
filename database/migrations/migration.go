@@ -101,6 +101,36 @@ type ReversibleMigration interface {
 	Down(ctx context.Context, conn Connection) error
 }
 
+// IrreversibleMigration is a Migration that declares nothing can undo it.
+//
+// A rollback that reaches one leaves it applied, says so with the reason, and
+// carries on with the rest of the batch. Its record is kept, because the record
+// is what says the change is applied and it still is -- deleting it would send
+// the next migrate through Up a second time.
+//
+// It is for the change that genuinely has no inverse: a backfill whose rows are
+// no longer distinguishable from the rows it did not touch. It is not a way out
+// of writing a Down. A migration that created a table and declares this turns
+// every rollback of its batch into a no-op, and the next deploy of the previous
+// binary meets a schema nobody undid.
+//
+// Declaring it is what separates "cannot be undone" from "nobody wrote the
+// Down yet", which are the same thing to a compiler and opposite things at
+// three in the morning. A migration that declares neither is refused by the
+// rollback rather than reported as undone.
+//
+// Declaring both this and Down is refused too: the two say opposite things
+// about the same migration, and nothing outside the migration can tell which
+// one its author meant.
+type IrreversibleMigration interface {
+	Migration
+
+	// Irreversible returns why the change cannot be undone. The rollback
+	// prints it beside the migration's name, so it is what somebody reads
+	// while deciding what to do instead.
+	Irreversible() string
+}
+
 // BaseMigration is the half of a Migration that is the same for every one of
 // them: the connection name, the guard, and whether it runs in a transaction.
 //

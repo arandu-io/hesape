@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/arandu-io/hesape/database/model/relations"
 	"github.com/arandu-io/hesape/database/query"
 )
 
@@ -129,27 +130,32 @@ func TestCollectionFreshDropsWhatIsGone(t *testing.T) {
 }
 
 func TestLoadMissingSkipsWhatIsLoaded(t *testing.T) {
-	model, _ := newAccountModel()
-	relation := &fakeRelation{
-		table: "posts", foreign: "posts.user_id", local: "users.id",
-		matched: map[any]any{int64(1): []string{"first"}, int64(2): []string{"second"}},
-	}
-	withPostsOn(model, relation)
+	model, conn := newAccountModel()
+	withPostsOn(model, conn)
 
 	models := collectionOf(t, model, 1, 2)
 	models[0].SetRelation("posts", []string{"already here"})
+
+	conn.queue(query.Record{"id": int64(20), "account_id": int64(2), "title": "second"})
 
 	if err := models.LoadMissing(context.Background(), grant(), "posts"); err != nil {
 		t.Fatalf("LoadMissing: %v", err)
 	}
 
 	first, _ := models[0].GetRelation("posts")
-	if first.([]string)[0] != "already here" {
+	if loaded, ok := first.([]string); !ok || loaded[0] != "already here" {
 		t.Errorf("LoadMissing overwrote a relation that was loaded: %v", first)
 	}
 	second, ok := models[1].GetRelation("posts")
-	if !ok || second.([]string)[0] != "second" {
-		t.Errorf("LoadMissing did not load the missing one: %v", second)
+	if !ok {
+		t.Fatalf("LoadMissing did not load the missing one: %v", second)
+	}
+	matched, ok := second.([]relations.Model)
+	if !ok || len(matched) != 1 {
+		t.Fatalf("the missing one loaded %#v, want the row whose key points at it", second)
+	}
+	if loaded, ok := Unref[post](matched[0]); !ok || loaded.Entity.Title != "second" {
+		t.Errorf("the missing one loaded the wrong row: %v", second)
 	}
 }
 
@@ -160,10 +166,7 @@ func TestLoadMissingSkipsWhatIsLoaded(t *testing.T) {
 // load a query that ran and attached its result to nothing, reported as success.
 func TestARelationLoadRefusesRowsThatCarryNoModel(t *testing.T) {
 	plain, conn := newUserModel()
-	withPosts(plain, &fakeRelation{
-		table: "posts", foreign: "posts.user_id", local: "users.id",
-		matched: map[any]any{int64(1): []string{"first"}},
-	})
+	withPosts(plain, conn)
 	rows := Collection[user]{plain.Entity}
 
 	for name, load := range map[string]func() error{
@@ -193,8 +196,8 @@ func TestARelationLoadRefusesRowsThatCarryNoModel(t *testing.T) {
 // TestARelationLoadRefusesOneLiteralAmongHydratedRows: the count in the message
 // is what tells the two mistakes apart.
 func TestARelationLoadRefusesOneLiteralAmongHydratedRows(t *testing.T) {
-	model, _ := newAccountModel()
-	withPostsOn(model, &fakeRelation{table: "posts", foreign: "posts.account_id", local: "accounts.id"})
+	model, conn := newAccountModel()
+	withPostsOn(model, conn)
 
 	rows := append(collectionOf(t, model, 1, 2), &account{ID: 3})
 	err := rows.Load(context.Background(), grant(), "posts")
@@ -208,7 +211,7 @@ func TestARelationLoadRefusesOneLiteralAmongHydratedRows(t *testing.T) {
 
 func TestLoadCountFillsTheAggregateOntoEveryModel(t *testing.T) {
 	model, conn := newAccountModel()
-	withPostsOn(model, &fakeRelation{table: "posts", foreign: "posts.user_id", local: "users.id"})
+	withPostsOn(model, conn)
 	models := collectionOf(t, model, 1, 2)
 
 	conn.queue(

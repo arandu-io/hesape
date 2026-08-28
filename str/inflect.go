@@ -35,7 +35,7 @@ func Plural(s string, count ...int) string {
 	if len(count) > 0 && (count[0] == 1 || count[0] == -1) {
 		return s
 	}
-	if pluralizerUncountable[Lower(s)] || !endsInflectable(s) {
+	if pluralizerUncountable[strings.ToLower(s)] || !endsInflectable(s) {
 		return s
 	}
 	head, word := splitTail(s)

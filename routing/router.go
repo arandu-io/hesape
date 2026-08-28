@@ -61,9 +61,6 @@ type Router struct {
 	// viewRenderer renders the view a View route answers with; SetViewRenderer
 	// wires it and View uses it. The concrete is hesape/view.
 	viewRenderer ViewRenderer
-	// controllerDispatcher turns a controller name and an action into the
-	// handler a resource route calls. SetControllerDispatcher wires it.
-	controllerDispatcher ControllerDispatcher
 	// implicitBindingCallback runs instead of the built-in implicit binding
 	// when SubstituteImplicitBindingsUsing set one.
 	implicitBindingCallback func(rt *Route, req *http.Request) error

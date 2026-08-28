@@ -1,23 +1,24 @@
 package schema
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/arandu-io/hesape/process"
 )
 
-// SqliteSchemaState is the SchemaState that shells out to the sqlite3 command.
+// SqliteSchemaState is the SchemaState that runs the sqlite3 command.
 type SqliteSchemaState struct {
 	*BaseSchemaState
 }
 
-// NewSqliteSchemaState builds a SqliteSchemaState for connection, using
-// processFactory to build the sqlite3 commands it runs.
-func NewSqliteSchemaState(connection Connection, processFactory ProcessFactory) *SqliteSchemaState {
-	return &SqliteSchemaState{BaseSchemaState: NewBaseSchemaState(connection, processFactory)}
+// NewSqliteSchemaState builds a SqliteSchemaState for connection, using factory
+// to run the sqlite3 commands.
+func NewSqliteSchemaState(connection Connection, factory *process.Factory) *SqliteSchemaState {
+	return &SqliteSchemaState{BaseSchemaState: NewBaseSchemaState(connection, factory)}
 }
 
 // sqliteInternalTables matches the CREATE TABLE statement for one of SQLite's
@@ -117,31 +118,33 @@ func (s *SqliteSchemaState) Load(ctx context.Context, path string) error {
 	}
 	defer file.Close()
 
-	command := s.MakeProcess(ctx, "sqlite3", database)
-	command.Stdin = file
-	command.Env = s.processEnvironment(nil)
-
-	if output, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("schema: loading %s with sqlite3: %w: %s", path, err, bytes.TrimSpace(output))
+	result, err := s.MakeProcess(nil, "sqlite3", database).Input(file).Run(ctx, nil, nil)
+	if err != nil {
+		return fmt.Errorf("schema: loading %s with sqlite3: %w", path, err)
+	}
+	if _, err := result.Throw(nil); err != nil {
+		return fmt.Errorf("schema: loading %s with sqlite3: %w", path, err)
 	}
 	return nil
 }
 
 // runSqlite runs one sqlite3 dot-command against the configured database and
 // returns what it wrote to standard output.
+//
+// The dot-command is one argument. sqlite3 parses it itself, and no shell sees
+// it -- which is what makes a table name with a quote in it a table name.
 func (s *SqliteSchemaState) runSqlite(ctx context.Context, dotCommand string) ([]byte, error) {
-	command := s.MakeProcess(ctx, "sqlite3", s.GetConnection().GetConfig("database"), dotCommand)
-	command.Env = s.processEnvironment(nil)
-
-	var stdout, stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-
-	if err := command.Run(); err != nil {
-		return nil, fmt.Errorf("schema: sqlite3 %s: %w: %s", dotCommand, err, bytes.TrimSpace(stderr.Bytes()))
+	result, err := s.MakeProcess(nil, "sqlite3", s.GetConnection().GetConfig("database"), dotCommand).
+		Run(ctx, nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("schema: sqlite3 %s: %w", dotCommand, err)
 	}
-	s.Output(stdout.String())
-	return stdout.Bytes(), nil
+	if _, err := result.Throw(nil); err != nil {
+		return nil, fmt.Errorf("schema: sqlite3 %s: %w", dotCommand, err)
+	}
+
+	s.Output(result.Output())
+	return []byte(result.Output()), nil
 }
 
 // isSqliteMemory reports whether database names an in-memory SQLite database:

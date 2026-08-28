@@ -184,12 +184,3 @@ func TestSupportedDriversLeavesSQLServerOut(t *testing.T) {
 		t.Fatalf("SupportedDrivers answered %v", SupportedDrivers())
 	}
 }
-
-func TestCalledSeedersAreRememberedOnce(t *testing.T) {
-	t.Cleanup(ForgetCalledSeeders)
-	ForgetCalledSeeders()
-
-	if len(CalledSeeders()) != 0 {
-		t.Fatal("the called list is not empty at the start of the test")
-	}
-}

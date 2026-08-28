@@ -131,10 +131,16 @@
 //
 // # What is not here
 //
-// Relations live in model/relations and reach this package through the
-// Relation interface declared in relation.go, which is declared here for the
-// reason query.Connection is declared in query: in Go the interface belongs with
-// its consumer, and relations imports this package for Builder.
+// Relations live in model/relations. The Relation interface in relation.go is
+// what this package asks of one, and it is the contract declared there plus the
+// one method the builder needs that the tree does not put in its own interface.
+// It is not a second contract: a relation satisfies it by being a relation, and
+// the constructors in relationsof.go are how an application builds one.
+//
+// A relation is registered by name in Model.RelationResolvers, in its
+// Unconstrained form -- the builder resolves it from the model it queries
+// through, which carries no key, and narrows it to the batch. relationsof.go
+// says why the split exists.
 //
 // There is no automatic eager loading. Reading an unloaded relation would run a
 // query behind the caller, and that query carries no auth.Grant.
