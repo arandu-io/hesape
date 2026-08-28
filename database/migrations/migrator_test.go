@@ -384,6 +384,131 @@ func TestRollbackLeavesADeclaredIrreversibleMigrationApplied(t *testing.T) {
 	}
 }
 
+// TestRollbackUndoesNothingWhenOneMigrationInTheBatchCannotBeUndone is about
+// the batch, not the migration.
+//
+// The refusal itself is older than this test: runDown has always answered an
+// error for a migration declaring neither Down nor Irreversible. But it answered
+// it on reaching that migration, and the rollback undoes newest first -- so
+// everything applied after it was already undone and its records already
+// deleted. The command stopped in the middle, which is the one state a migrator
+// has no way back from: half a batch is not a version anybody deployed.
+//
+// The batch here is that shape. The reversible migration is the newer of the
+// two, so a rollback that starts undoing reaches it first and only then finds
+// the one it cannot undo.
+func TestRollbackUndoesNothingWhenOneMigrationInTheBatchCannotBeUndone(t *testing.T) {
+	t.Cleanup(flushRegistry)
+	flushRegistry()
+
+	var ups, downs []string
+	Register(oneWayMigration{name: "2026_01_01_000000_add_column", ups: &ups})
+	Register(fakeMigration{name: "2026_01_02_000000_add_index", ups: &ups, downs: &downs})
+
+	migrator, repository, _ := newTestMigrator()
+
+	if _, err := migrator.Run(context.Background(), nil, Options{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	rolledBack, err := migrator.Rollback(context.Background(), nil, Options{})
+	if err == nil {
+		t.Fatal("Rollback reported success for a batch it could not undo whole")
+	}
+	if !strings.Contains(err.Error(), "2026_01_01_000000_add_column") {
+		t.Fatalf("Rollback: %v, and the error has to name the migration that stopped it", err)
+	}
+	if !strings.Contains(err.Error(), "neither Down nor Irreversible") {
+		t.Fatalf("Rollback: %v, and the error has to name both ways out", err)
+	}
+
+	// The whole of the point: the reversible migration was not undone, even
+	// though the rollback would have reached it first.
+	if len(downs) != 0 {
+		t.Fatalf("Down ran for %v before the batch was refused, so the rollback stopped in the middle", downs)
+	}
+	if len(rolledBack) != 0 {
+		t.Fatalf("Rollback reported undoing %v, and it undid nothing", rolledBack)
+	}
+	if len(repository.records) != 2 {
+		t.Fatalf("the repository holds %v, and both migrations are still applied", repository.records)
+	}
+}
+
+// TestResetUndoesNothingWhenOneMigrationCannotBeUndone is the same property on
+// the other entry point. Reset and Rollback choose different records and undo
+// them the same way, so the check belongs where they meet rather than in each.
+func TestResetUndoesNothingWhenOneMigrationCannotBeUndone(t *testing.T) {
+	t.Cleanup(flushRegistry)
+	flushRegistry()
+
+	var ups, downs []string
+	Register(oneWayMigration{name: "2026_01_01_000000_add_column", ups: &ups})
+	Register(fakeMigration{name: "2026_01_02_000000_add_index", ups: &ups, downs: &downs})
+
+	migrator, repository, _ := newTestMigrator()
+
+	if _, err := migrator.Run(context.Background(), nil, Options{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if _, err := migrator.Reset(context.Background(), nil, false); err == nil {
+		t.Fatal("Reset reported success for a batch it could not undo whole")
+	}
+	if len(downs) != 0 {
+		t.Fatalf("Down ran for %v before Reset was refused, so it stopped in the middle", downs)
+	}
+	if len(repository.records) != 2 {
+		t.Fatalf("the repository holds %v, and both migrations are still applied", repository.records)
+	}
+}
+
+// TestRollbackSaysUpFrontWhichMigrationsItWillLeaveApplied is the other half of
+// reading the batch first. A migration declaring Irreversible does not stop the
+// rollback -- it is skipped and left applied -- so the preflight must not refuse
+// it. What it does instead is name it before the first Down runs, because "this
+// batch will not come back whole" is worth knowing before the command starts
+// rather than after.
+func TestRollbackSaysUpFrontWhichMigrationsItWillLeaveApplied(t *testing.T) {
+	t.Cleanup(flushRegistry)
+	flushRegistry()
+
+	var ups, downs []string
+	Register(backfillMigration{oneWayMigration{name: "2026_01_01_000000_backfill_totals", ups: &ups}})
+	Register(fakeMigration{name: "2026_01_02_000000_add_index", ups: &ups, downs: &downs})
+
+	migrator, _, _ := newTestMigrator()
+	output := &strings.Builder{}
+	migrator.SetOutput(output)
+
+	if _, err := migrator.Run(context.Background(), nil, Options{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	output.Reset()
+
+	if _, err := migrator.Rollback(context.Background(), nil, Options{}); err != nil {
+		t.Fatalf("Rollback: %v, and a declared irreversible migration must not stop the batch", err)
+	}
+
+	printed := output.String()
+	notice := strings.Index(printed, "2026_01_01_000000_backfill_totals will be left applied")
+	if notice < 0 {
+		t.Fatalf("the rollback never said the backfill would be left applied:\n%s", printed)
+	}
+	started := strings.Index(printed, "Rolling back migrations.")
+	if started < 0 {
+		t.Fatalf("the rollback never announced itself:\n%s", printed)
+	}
+	if notice > started {
+		t.Fatalf("the notice came after the rollback began, and it exists to be read before:\n%s", printed)
+	}
+
+	// And the reversible one in the same batch was still undone.
+	if strings.Join(downs, ",") != "2026_01_02_000000_add_index" {
+		t.Fatalf("the rollback ran Down for %v, want only the reversible migration", downs)
+	}
+}
+
 func TestRollbackRefusesAMigrationClaimingBothDirections(t *testing.T) {
 	t.Cleanup(flushRegistry)
 	flushRegistry()
