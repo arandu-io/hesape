@@ -26,6 +26,34 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+### `qr` — an encoder that refuses rather than emit a code that does not read
+
+A new package. One byte-mode segment at correction level H, versions 7 to 16,
+rendered as inline SVG. Nothing existing changed.
+
+The surface is `Encode`, the `Code` type, and `Code.SVG(Options)`. The zero
+`Options` draws black square modules on white with a four-module quiet zone — a
+caller who passes nothing gets something that scans.
+
+**It refuses instead of emitting a code that fails on a phone**, each refusal
+with its own error type naming the values: a quiet zone under four modules, a
+colour pair below `MinimumContrast` or with the modules lighter than the
+background, a reserved centre larger than the correction can repair, content
+larger than the biggest symbol, and centre markup that reaches outside the
+document.
+
+**`ModuleRadius` and `FinderRadius` run 0 to 1 and are fractions of the roundest
+a reader still accepts — not lengths.** That is deliberate. The corner radius of
+the locator pattern has a narrow ceiling: measured, an outer ring past half a
+module starts failing detectors, because the reader confirms the pattern along
+its diagonal. Expressed as a fraction, the unreadable state is not representable.
+
+Connected modules, dots, gradients and a reserved centre do **not** affect
+reading — that was measured too, and it was the opposite of what was expected.
+
+The markup carries no `style` element, no `style` attribute, no script and no
+external reference.
+
 ### `otp` and `2fa` — the second factor, and one thing a caller must do
 
 Two new packages. Nothing to change to upgrade: no existing API moved, and
