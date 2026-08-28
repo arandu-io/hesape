@@ -26,6 +26,43 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+### `onetime` — the code that arrives by email, and what it is not
+
+A new package. Nothing to change to upgrade: no existing API moved, and `apidiff`
+reports only `package …/onetime: added`.
+
+`otp` calculates, `onetime` remembers. One is a function of a secret and an
+instant and stores nothing; the other keeps which code is pending, for what, for
+whom, until when, and how many times it has been tried.
+
+**It is not a second factor and must not be offered as one.** A code that lands
+in an inbox proves somebody reads that inbox, and it travels the same channel a
+password-reset link would — so whoever controls the inbox controls both. It is a
+second proof of the same factor.
+
+`New` requires the application key:
+
+```go
+codes, err := onetime.New(store, appKey, onetime.Config{})
+```
+
+That is not decoration. Six digits are a million possibilities, and an unkeyed
+digest of one is a table anybody builds in a second — what makes the stored digest
+worthless to whoever reads the cache is the key, and the key does not live in the
+cache.
+
+**`Config.MaxAttempts` is the security control, not a volume guard.** It fails
+closed: a store that cannot answer refuses the attempt, at each of the three
+points where it is consulted. That is why `routing/middleware.Throttle` does not
+protect this path — it fails open by design and says of itself that it is wrong
+for exactly this caller.
+
+Three things worth reading before wiring it: issuing replaces, so there are never
+two pending codes for one pair; consuming ends the cooldown, because the record is
+the cooldown's only memory; and `ErrNoCode` and `ErrInvalidCode` differ so your
+code can branch, **not** so the screen can — showing them differently tells
+somebody who is not signed in which addresses have a code waiting.
+
 ### `qr` — an encoder that refuses rather than emit a code that does not read
 
 A new package. One byte-mode segment at correction level H, versions 7 to 16,
