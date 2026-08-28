@@ -24,6 +24,37 @@ the first tag and has nothing before it to compare against.
 
 ---
 
+## Unreleased
+
+Nothing here has a tag yet. `apidiff` is clean across it — the signatures did not
+move — which is exactly why the entry exists: a break `apidiff` cannot see is the
+kind that reaches a caller as wrong data rather than as a compile error.
+
+### `Migrator.Rollback` and `Migrator.Reset` answer only with what they undid
+
+The slice of names both return now holds only the migrations that were actually
+undone. A migration declaring `Irreversible` is left applied and keeps its row in
+the migrations table — and is now also left out of the answer.
+
+It used to be in there. The name was appended before the descent was attempted
+and nothing removed it afterwards, so a single `migrate:rollback` printed both
+lines for one migration:
+
+```
+2026_01_01_000000_backfill_totals Skipped: the rows it filled in are no longer distinguishable from the rows it did not
+2026_01_01_000000_backfill_totals ............................. REVERTED
+```
+
+The signatures did not change, so nothing stops compiling. Code that counts or
+prints the names starts getting the right count with no edit. Code that relied on
+the slice holding the whole batch that was read — to learn which records existed,
+say — has to read the repository, which is where that has always lived.
+
+Under `--pretend` the names are still the ones a real run would undo, which is
+the shape `Migrator.Run` already answers with.
+
+---
+
 ## v0.18.0 — the connection has no public door
 
 Eighteen breaking changes, grouped under the four entries below. Most remove a
