@@ -24,6 +24,43 @@ the first tag and has nothing before it to compare against.
 
 ---
 
+## Unreleased — a model no longer hands out its connection
+
+```
+- ./database/model.(*Model[T]).GetConnection: removed
+```
+
+`query.Connection` has five verbs — `Select`, `Insert`, `Update`, `Delete` and
+`Statement` — and not one of them takes a `Grant`. So the accessor took a model
+whose every other read and write is filtered by `Tenant(g)` and handed back a
+handle that filters by nothing.
+
+It was kept as the *declared* way to the connection: the field under it is
+unexported, and a method with a name can at least be grepped for and refused in
+review. That trade is only worth making for a path somebody is on, and nobody
+was. Measured across every module in this repository and every test in them,
+including by renaming the method and rebuilding: zero callers. Nothing declares
+an interface with it either.
+
+**If you were calling it**, you already hold the connection — it is the second
+argument to `model.NewModel`, and the model has no resolver to look one up in.
+Keep the value you passed:
+
+```go
+// before
+conn := users.GetConnection()
+
+// after
+conn := postgres // the same value NewModel was given
+users := model.NewModel[User]("users", conn, grammar, processor)
+```
+
+Reaching for it at all is worth a second look: a statement issued through it
+carries no tenant filter, and the model it came from exists to make that
+impossible.
+
+`GetConnectionName` and `SetConnection` are unchanged.
+
 ## Unreleased — the HTTP client takes a context, and hashing has one path
 
 ### `http/client`: every verb takes a context
