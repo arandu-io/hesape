@@ -53,6 +53,37 @@ say — has to read the repository, which is where that has always lived.
 Under `--pretend` the names are still the ones a real run would undo, which is
 the shape `Migrator.Run` already answers with.
 
+### A pivot key the `int64` cannot hold is no longer converted
+
+`CastKey`, `CastKeys` and `GetTypeSwapValue` converted any float and any unsigned
+to `int64` when the related model declares an integer key. Conversion is total in
+Go, so the result was another row's key:
+
+| given | answered | which is also the key of |
+|---|---|---|
+| `float64(7.9)` | `int64(7)` | the row keyed `7` |
+| `float64(1e19)`, `1e20`, `1e300`, `+Inf` | `int64(9223372036854775807)` | the row keyed `MaxInt64` |
+| `NaN` | `int64(0)` | the row keyed `0` |
+| `uint64(1<<63)` | `int64(-9223372036854775808)` | the row keyed `MinInt64` |
+
+`Sync` detached the right row and then reported a key the table does not hold —
+the dictionary files `uint64(1<<63)` under `"9223372036854775808"` while the
+change set named `-9223372036854775808`.
+
+A float is now converted only when it is the whole number an `int64` holds, and
+an unsigned only when the range holds it. What is refused comes back as it
+arrived, which is the rule the text path already followed for `"7.9"` and
+`"9223372036854775808"`.
+
+The function's own doc comment already called truncation *"the failure this
+function exists to prevent rather than a lesser version of it"*. The text path
+honoured that; the numeric paths did not.
+
+**What changes for you:** if you read `SyncChanges.Attached`, `.Detached` or
+`.Updated` with a direct type assertion to `int64`, a refused key now arrives in
+the type the driver gave it. An intact key behaves as before. If the assertion
+started failing, it was receiving a wrong key before.
+
 ---
 
 ## v0.18.0 — the connection has no public door
