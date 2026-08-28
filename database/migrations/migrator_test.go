@@ -384,6 +384,126 @@ func TestRollbackLeavesADeclaredIrreversibleMigrationApplied(t *testing.T) {
 	}
 }
 
+// TestRollbackDoesNotReportAnIrreversibleMigrationAsReverted reads the two
+// things the test above does not: the slice Rollback answers and the text it
+// wrote.
+//
+// The state was already right -- the schema keeps the change and the repository
+// keeps the row -- while the returned names included the migration anyway. The
+// rollback command prints one line per name in that slice, so a single run said
+// "Skipped" and then "REVERTED" about the same migration, and anything reading
+// the slice rather than the screen had no way to tell it was left applied.
+func TestRollbackDoesNotReportAnIrreversibleMigrationAsReverted(t *testing.T) {
+	t.Cleanup(flushRegistry)
+	flushRegistry()
+
+	var ups, downs []string
+	Register(backfillMigration{oneWayMigration{name: "2026_01_01_000000_backfill_totals", ups: &ups}})
+	Register(fakeMigration{name: "2026_01_02_000000_add_index", ups: &ups, downs: &downs})
+
+	migrator, _, _ := newTestMigrator()
+	output := &strings.Builder{}
+	migrator.SetOutput(output)
+
+	if _, err := migrator.Run(context.Background(), nil, Options{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	output.Reset()
+
+	reverted, err := migrator.Rollback(context.Background(), nil, Options{})
+	if err != nil {
+		t.Fatalf("Rollback: %v, and a declared irreversible migration must not stop the batch", err)
+	}
+
+	printed := output.String()
+	if !strings.Contains(printed, "2026_01_01_000000_backfill_totals Skipped:") {
+		t.Fatalf("the rollback never said it skipped the backfill:\n%s", printed)
+	}
+	if strings.Join(reverted, ",") != "2026_01_02_000000_add_index" {
+		t.Fatalf("Rollback answered %v after printing:\n%s\nand the two have to say the same thing about the backfill", reverted, printed)
+	}
+}
+
+// TestRollbackUnderPretendAnswersWhatARealRunWouldUndo pins a decision rather
+// than an accident.
+//
+// Pretend runs nothing, so nothing is undone and every record survives. The
+// names it answers with are still the ones a real run would undo, because that
+// is the whole of the question pretending is asked -- an empty answer would say
+// "this would roll nothing back", which is the opposite of true, and migrate
+// already reports its pending migrations the same way under --pretend. The
+// migration that will be left applied is left out here too: a real run would not
+// undo it either.
+func TestRollbackUnderPretendAnswersWhatARealRunWouldUndo(t *testing.T) {
+	t.Cleanup(flushRegistry)
+	flushRegistry()
+
+	var ups, downs []string
+	Register(backfillMigration{oneWayMigration{name: "2026_01_01_000000_backfill_totals", ups: &ups}})
+	Register(fakeMigration{name: "2026_01_02_000000_add_index", ups: &ups, downs: &downs})
+
+	migrator, repository, _ := newTestMigrator()
+
+	if _, err := migrator.Run(context.Background(), nil, Options{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	reverted, err := migrator.Rollback(context.Background(), nil, Options{Pretend: true})
+	if err != nil {
+		t.Fatalf("Rollback --pretend: %v", err)
+	}
+	if strings.Join(reverted, ",") != "2026_01_02_000000_add_index" {
+		t.Fatalf("Rollback --pretend answered %v, want what a real run would undo", reverted)
+	}
+	if len(downs) != 0 {
+		t.Fatalf("Down ran for %v, and pretending runs nothing", downs)
+	}
+	if len(repository.records) != 2 {
+		t.Fatalf("the repository holds %v, and pretending removes no record", repository.records)
+	}
+}
+
+// TestRollbackDoesNotReportAMigrationWhoseCodeIsGoneAsReverted pins the case
+// that was already right, so that a later change cannot make it wrong.
+//
+// A record whose migration is no longer registered is passed over rather than
+// stopping the rollback, and it is passed over before anything is collected.
+// Nothing undid that change, its row stays, and reporting it undone would be the
+// same untruth as the one above for a different reason.
+func TestRollbackDoesNotReportAMigrationWhoseCodeIsGoneAsReverted(t *testing.T) {
+	t.Cleanup(flushRegistry)
+	flushRegistry()
+
+	var ups, downs []string
+	Register(fakeMigration{name: "2026_01_01_000000_deleted_later", ups: &ups, downs: &downs})
+	Register(fakeMigration{name: "2026_01_02_000000_add_index", ups: &ups, downs: &downs})
+
+	migrator, repository, _ := newTestMigrator()
+
+	if _, err := migrator.Run(context.Background(), nil, Options{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// The release that deleted the file: the row is still in the repository and
+	// the code is no longer in the binary.
+	flushRegistry()
+	Register(fakeMigration{name: "2026_01_02_000000_add_index", ups: &ups, downs: &downs})
+
+	reverted, err := migrator.Rollback(context.Background(), nil, Options{})
+	if err != nil {
+		t.Fatalf("Rollback: %v, and one deleted migration must not stop a rollback", err)
+	}
+	if strings.Join(reverted, ",") != "2026_01_02_000000_add_index" {
+		t.Fatalf("Rollback answered %v, and nothing undid the migration whose code is gone", reverted)
+	}
+	if strings.Join(downs, ",") != "2026_01_02_000000_add_index" {
+		t.Fatalf("the rollback ran Down for %v, want only the migration still registered", downs)
+	}
+	if len(repository.records) != 1 || repository.records[0].Migration != "2026_01_01_000000_deleted_later" {
+		t.Fatalf("the repository holds %v, and the row of a migration nobody undid stays", repository.records)
+	}
+}
+
 // TestRollbackUndoesNothingWhenOneMigrationInTheBatchCannotBeUndone is about
 // the batch, not the migration.
 //
@@ -460,6 +580,36 @@ func TestResetUndoesNothingWhenOneMigrationCannotBeUndone(t *testing.T) {
 	}
 	if len(repository.records) != 2 {
 		t.Fatalf("the repository holds %v, and both migrations are still applied", repository.records)
+	}
+}
+
+// TestResetDoesNotReportAnIrreversibleMigrationAsReverted is the same property
+// on the other entry point. Reset and Rollback choose different records and undo
+// them through the same loop, so what one leaves out of its answer the other
+// leaves out too.
+func TestResetDoesNotReportAnIrreversibleMigrationAsReverted(t *testing.T) {
+	t.Cleanup(flushRegistry)
+	flushRegistry()
+
+	var ups, downs []string
+	Register(backfillMigration{oneWayMigration{name: "2026_01_01_000000_backfill_totals", ups: &ups}})
+	Register(fakeMigration{name: "2026_01_02_000000_add_index", ups: &ups, downs: &downs})
+
+	migrator, repository, _ := newTestMigrator()
+
+	if _, err := migrator.Run(context.Background(), nil, Options{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	reverted, err := migrator.Reset(context.Background(), nil, false)
+	if err != nil {
+		t.Fatalf("Reset: %v, and a declared irreversible migration must not stop it", err)
+	}
+	if strings.Join(reverted, ",") != "2026_01_02_000000_add_index" {
+		t.Fatalf("Reset answered %v, and a reset is not a guarantee of an empty schema", reverted)
+	}
+	if len(repository.records) != 1 || repository.records[0].Migration != "2026_01_01_000000_backfill_totals" {
+		t.Fatalf("the repository holds %v, and the backfill is still applied", repository.records)
 	}
 }
 

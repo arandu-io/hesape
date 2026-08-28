@@ -261,6 +261,13 @@ func (m *Migrator) runUp(ctx context.Context, migration Migration, batch int, pr
 // It undoes all of the batch or none of it: if a migration in it declares
 // neither Down nor Irreversible, the batch is refused before the first Down
 // runs. Migrations declaring Irreversible are named up front and left applied.
+//
+// The names it answers are the migrations it undid, and nothing else: one left
+// applied because it declares Irreversible, and one whose code is no longer
+// registered, are both absent from them. The caller prints a line per name, so a
+// name here is a claim that the change is gone and its record with it. Under
+// Pretend the names are what a real run would undo, which is what pretending
+// answers.
 func (m *Migrator) Rollback(ctx context.Context, paths []string, options Options) ([]string, error) {
 	records, err := m.getMigrationsForRollback(ctx, options)
 	if err != nil {
@@ -304,6 +311,12 @@ func (m *Migrator) getMigrationsForRollback(ctx context.Context, options Options
 // A Down that fails at run time still stops the loop. That one cannot be read
 // ahead of time, so the ones already undone stay undone and their records are
 // already gone.
+//
+// It collects a name only once runDown reports having undone that migration.
+// Collecting on reaching one instead put every record in the answer, including
+// the ones runDown went on to skip -- and the answer is what the command prints
+// its table from, so a migration left applied was announced as reverted on the
+// line after the one saying it was skipped.
 func (m *Migrator) rollbackMigrations(ctx context.Context, records []MigrationRecord, paths []string, options Options) ([]string, error) {
 	var rolledBack []string
 
@@ -323,9 +336,11 @@ func (m *Migrator) rollbackMigrations(ctx context.Context, records []MigrationRe
 			continue
 		}
 
-		rolledBack = append(rolledBack, record.Migration)
-
-		if err := m.runDown(ctx, migration, record, options.Pretend); err != nil {
+		undone, err := m.runDown(ctx, migration, record, options.Pretend)
+		if undone {
+			rolledBack = append(rolledBack, record.Migration)
+		}
+		if err != nil {
 			return rolledBack, err
 		}
 	}
@@ -341,6 +356,10 @@ func (m *Migrator) rollbackMigrations(ctx context.Context, records []MigrationRe
 // applied and keeps its record, so a reset is not a guarantee of an empty
 // schema. One that declares neither a Down nor Irreversible refuses the reset
 // before any of it is undone.
+//
+// The names it answers are the migrations it undid, on the same terms as
+// Rollback: the one left applied is not among them, which is how a caller counts
+// what is still there.
 func (m *Migrator) Reset(ctx context.Context, paths []string, pretend bool) ([]string, error) {
 	ran, err := m.repository.GetRan(ctx)
 	if err != nil {
@@ -440,7 +459,8 @@ func rollbackRefusal(migration Migration) error {
 	return nil
 }
 
-// runDown runs one migration's Down and removes its record.
+// runDown runs one migration's Down, removes its record, and reports whether
+// the migration was undone.
 //
 // The record is deleted only when the change was actually undone, and that is
 // the whole of the rule. A migration with no Down used to reach the delete
@@ -448,37 +468,50 @@ func rollbackRefusal(migration Migration) error {
 // said Success, and the next migrate ran the Up again and failed on what was
 // already there -- two commands away from the thing that caused it.
 //
+// The bool is that same rule made readable by the caller. Several paths out of
+// here end with the migration still recorded as applied -- a refusal, one
+// declaring Irreversible, a Down that failed, a delete that did -- and a nil
+// error is not enough to tell them apart from the one that undid it, because a
+// skip is not a failure and must not stop the batch. Under pretend it reports
+// true: nothing ran, but the migration is one a real run would undo, and that is
+// the question pretending is asked.
+//
 // It refuses the same migrations checkBatchCanRollBack refuses, through the
 // same function. That is not a second gate but the same one: every batch is
 // read first, and this is what answers for a migration reached any other way.
-func (m *Migrator) runDown(ctx context.Context, migration Migration, record MigrationRecord, pretend bool) error {
+func (m *Migrator) runDown(ctx context.Context, migration Migration, record MigrationRecord, pretend bool) (bool, error) {
 	name := migration.GetName()
 
 	if err := rollbackRefusal(migration); err != nil {
-		return err
+		return false, err
 	}
 
 	if irreversible, isIrreversible := migration.(IrreversibleMigration); isIrreversible {
 		m.FireMigrationEvent(events.NewMigrationSkipped(name))
 		m.write(fmt.Sprintf("%s %s: %s", name, Skipped, irreversible.Irreversible()))
-		return nil
+		return false, nil
 	}
 
 	if pretend {
-		return m.pretendToRun(ctx, migration, "down")
+		err := m.pretendToRun(ctx, migration, "down")
+		return err == nil, err
 	}
 
 	if err := m.runMigration(ctx, migration, "down"); err != nil {
 		m.write(fmt.Sprintf("%s %s", name, Failure))
-		return fmt.Errorf("rollback of %s failed: %w", name, err)
+		return false, fmt.Errorf("rollback of %s failed: %w", name, err)
 	}
 
 	if err := m.repository.Delete(ctx, record); err != nil {
-		return err
+		// The change is undone and the row saying it is applied is still there.
+		// Reporting it reverted would put the name in a table the operator reads
+		// as "this is gone and forgotten", when the next migrate will not run it
+		// again. The error carries what happened; the name does not.
+		return false, err
 	}
 
 	m.write(fmt.Sprintf("%s %s", name, Success))
-	return nil
+	return true, nil
 }
 
 // runMigration runs one direction of one migration, inside a transaction
