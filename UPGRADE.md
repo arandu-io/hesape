@@ -26,6 +26,11 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+Nothing here has a tag yet. Four new packages and two behaviour changes; the
+additions break nothing, and the two changes are the ones `apidiff` cannot see —
+which is exactly why they have entries. A break the tool misses reaches a caller
+as wrong data rather than as a compile error.
+
 ### `onetime` — the code that arrives by email, and what it is not
 
 A new package. Nothing to change to upgrade: no existing API moved, and `apidiff`
@@ -123,9 +128,7 @@ Two properties are closed by construction: the code comparison is constant time,
 and `Authenticator.Verify` fails closed — a missing guard, an empty subject or an
 unreachable store refuses the attempt rather than allowing it.
 
-The module still has one direct dependency, `golang.org/x/crypto`. `apidiff` is clean across it — the signatures did not
-move — which is exactly why the entry exists: a break `apidiff` cannot see is the
-kind that reaches a caller as wrong data rather than as a compile error.
+The module still has one direct dependency, `golang.org/x/crypto`.
 
 ### `Migrator.Rollback` and `Migrator.Reset` answer only with what they undid
 
