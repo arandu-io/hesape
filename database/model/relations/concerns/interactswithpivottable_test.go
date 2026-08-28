@@ -2,6 +2,8 @@ package concerns
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -720,6 +722,12 @@ func TestGetTypeSwapValueMatchesTheRelatedKeysType(t *testing.T) {
 		{"int", "", ""},
 		{"int", "9223372036854775808", "9223372036854775808"},
 
+		// The same two refusals, arriving as a number instead of as text. The
+		// rule is about the value, not about the type it was boxed in.
+		{"int", float64(7.9), float64(7.9)},
+		{"int", float32(7.5), float32(7.5)},
+		{"int", uint64(1) << 63, uint64(1) << 63},
+
 		{"string", 7, "7"},
 		{"string", "admin", "admin"},
 		{"uuid", 7, 7},
@@ -756,6 +764,122 @@ func TestGetTypeSwapValueCountsWhatTheDictionaryCounts(t *testing.T) {
 		if got := GetTypeSwapValue("int", value); got != int64(7) {
 			t.Errorf("GetTypeSwapValue(\"int\", %#v) = %#v, and the dictionary counts it as 7", value, got)
 		}
+	}
+}
+
+// TestGetTypeSwapValueRefusesAFloatThatIsNotTheWholeKey.
+//
+// A float carrying a fraction is two keys away from being one: truncating it
+// files 7.9 and 7 under 7, while the dictionary that decides which row was
+// touched files them apart. The pair below is the collision itself, and the
+// caller reads the second half of it as the key of a row it never named.
+func TestGetTypeSwapValueRefusesAFloatThatIsNotTheWholeKey(t *testing.T) {
+	whole := GetTypeSwapValue("int", float64(7))
+	fraction := GetTypeSwapValue("int", float64(7.9))
+
+	if whole == fraction {
+		t.Fatalf("float64(7) and float64(7.9) both swapped to %#v, and the dictionary keys them %q and %q",
+			whole, dictionaryKey(float64(7)), dictionaryKey(float64(7.9)))
+	}
+	if fraction != float64(7.9) {
+		t.Fatalf("a refused float came back as %#v, want the value as it arrived", fraction)
+	}
+	if narrow := GetTypeSwapValue("int", float32(7.5)); narrow != float32(7.5) {
+		t.Fatalf("float32(7.5) swapped to %#v, want the value as it arrived", narrow)
+	}
+}
+
+// TestGetTypeSwapValueRefusesAFloatTheInt64RangeDoesNotHold.
+//
+// A magnitude past the range, and a value that is no number at all, convert to
+// an int64 the language leaves undefined, and what the machine under this
+// package answers is a key some other value already holds: every float above
+// the range comes back as the largest int64, and one that is no number comes
+// back as zero. It is a table rather than a pair because each of them lands on
+// a different existing key.
+//
+// It stands apart from the fraction so that neither hides the other: a test
+// that stops at its first failure reports one of the two and pins nothing about
+// the rest.
+func TestGetTypeSwapValueRefusesAFloatTheInt64RangeDoesNotHold(t *testing.T) {
+	for _, unbounded := range []any{
+		float64(1e19), float64(-1e19), math.Inf(1), math.Inf(-1), math.NaN(),
+	} {
+		if got, swapped := GetTypeSwapValue("int", unbounded).(int64); swapped {
+			t.Errorf("GetTypeSwapValue(\"int\", %v) = int64(%d), and no int64 is that value", unbounded, got)
+		}
+	}
+}
+
+// TestGetTypeSwapValueRefusesAnUnsignedPastTheInt64Range.
+//
+// The conversion from uint64 wraps instead of failing, so 2^63 comes back as
+// the most negative int64 -- byte for byte the key a genuinely negative id
+// answers. The dictionary renders the two apart, so the change set would name a
+// key that no row in the table holds.
+func TestGetTypeSwapValueRefusesAnUnsignedPastTheInt64Range(t *testing.T) {
+	past := uint64(1) << 63
+	negative := int64(math.MinInt64)
+
+	if got, want := GetTypeSwapValue("int", past), GetTypeSwapValue("int", negative); got == want {
+		t.Fatalf("uint64(%d) and int64(%d) both swapped to %#v, and the dictionary keys them %q and %q",
+			past, negative, got, dictionaryKey(past), dictionaryKey(negative))
+	}
+	if got := GetTypeSwapValue("int", past); got != past {
+		t.Fatalf("a refused unsigned came back as %#v, want the value as it arrived", got)
+	}
+	if got := GetTypeSwapValue("int", uint(1)<<63); got != uint(1)<<63 {
+		t.Fatalf("a refused uint came back as %#v, want the value as it arrived", got)
+	}
+
+	// The same number arriving as text is already refused, and this is the two
+	// paths answering one value the same way.
+	if got := GetTypeSwapValue("int", "9223372036854775808"); got != "9223372036854775808" {
+		t.Fatalf("the text form swapped to %#v while the unsigned form did not", got)
+	}
+}
+
+// TestGetTypeSwapValueKeepsApartWhatTheDictionaryKeepsApart.
+//
+// The two halves of a change set come from different functions: the dictionary
+// decides which row was touched, and the swap decides which key the caller is
+// handed for it. Two values the dictionary files apart that swap to one value
+// are a change set naming a row that was never touched.
+//
+// Only this direction is asserted. The other one holds for what the swap
+// accepts -- every shape of 7 swaps to int64(7) -- and cannot hold for what it
+// refuses, because a refused value comes back as it arrived and "7.9" and 7.9
+// arrived as different types.
+func TestGetTypeSwapValueKeepsApartWhatTheDictionaryKeepsApart(t *testing.T) {
+	values := []any{
+		int64(7), uint64(7), float64(7), "7", []byte("7"),
+		int64(-7), "-7",
+		float64(7.9), float32(7.5), "7.9",
+		int64(math.MinInt64), uint64(1) << 63, uint(1) << 63,
+		int64(math.MaxInt64), "9223372036854775808", float64(1e19),
+		"seven", "",
+	}
+
+	// A swapped value is the identity of a reported key, and %T with %v names
+	// both halves of it: int64(7) and "7" are two keys, and neither is []byte.
+	type reported struct{ dictionary, value string }
+	seen := map[string]reported{}
+
+	for _, value := range values {
+		key, err := GetDictionaryKey(value)
+		if err != nil {
+			t.Fatalf("GetDictionaryKey(%#v): %v", value, err)
+		}
+
+		swapped := GetTypeSwapValue("int", value)
+		identity := fmt.Sprintf("%T %v", swapped, swapped)
+
+		if first, ok := seen[identity]; ok && first.dictionary != key {
+			t.Errorf("%#v and %v both swap to %s, and the dictionary keys them %q and %q",
+				value, first.value, identity, key, first.dictionary)
+			continue
+		}
+		seen[identity] = reported{dictionary: key, value: fmt.Sprintf("%#v", value)}
 	}
 }
 

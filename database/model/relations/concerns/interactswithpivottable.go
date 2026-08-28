@@ -2,6 +2,7 @@ package concerns
 
 import (
 	"context"
+	"math"
 	"sort"
 	"strconv"
 	"time"
@@ -729,6 +730,12 @@ func intersection(left, right []any) []any {
 // truncating it would make "7.9" and "7" the same key, which is the failure this
 // function exists to prevent rather than a lesser version of it. Refusing leaves
 // the value as it came, where it compares unequal and stays visible.
+//
+// A number is held to that same rule, because the rule is about the value and
+// not about the type a driver boxed it in. A fraction and a magnitude the int64
+// range does not hold are refused here for the reason they are refused in text:
+// both conversions are total in Go, so each of them answers a key that another
+// value already holds.
 func toInt64(value any) (int64, bool) {
 	switch number := value.(type) {
 	case int:
@@ -742,7 +749,7 @@ func toInt64(value any) (int64, bool) {
 	case int64:
 		return number, true
 	case uint:
-		return int64(number), true
+		return unsignedIntegerKey(uint64(number))
 	case uint8:
 		return int64(number), true
 	case uint16:
@@ -750,17 +757,56 @@ func toInt64(value any) (int64, bool) {
 	case uint32:
 		return int64(number), true
 	case uint64:
-		return int64(number), true
+		return unsignedIntegerKey(number)
 	case float32:
-		return int64(number), true
+		return floatIntegerKey(float64(number))
 	case float64:
-		return int64(number), true
+		return floatIntegerKey(number)
 	case string:
 		return parseIntegerKey(number)
 	case []byte:
 		return parseIntegerKey(string(number))
 	}
 	return 0, false
+}
+
+// unsignedIntegerKey reads a key that arrived unsigned, and refuses one past the
+// int64 range.
+//
+// The conversion wraps rather than fails, so 2^63 would answer the most negative
+// int64 -- the key a genuinely negative id answers, byte for byte, while the
+// dictionary renders the two apart. Refusing leaves the value as it came, where
+// it still names its own row.
+func unsignedIntegerKey(number uint64) (int64, bool) {
+	if number > math.MaxInt64 {
+		return 0, false
+	}
+	return int64(number), true
+}
+
+// floatIntegerKey reads a key that arrived as a float, and refuses one that is
+// not the whole of an int64.
+//
+// A fraction is refused rather than truncated: 7.9 read as 7 is two keys
+// arriving at one. Out of range is refused because the conversion is undefined
+// there, so every value past the range would land on whatever one key it
+// happens to produce. A value that is no number at all needs no case of its own:
+// it equals nothing, itself included, so the whole-number test below refuses it.
+func floatIntegerKey(number float64) (int64, bool) {
+	// int64 spans [-2^63, 2^63). Both bounds are exact as a float64 and the
+	// largest int64 is not, so the upper one is compared as the exclusive 2^63.
+	const (
+		lowest = -9223372036854775808.0
+		limit  = 9223372036854775808.0
+	)
+
+	if number != math.Trunc(number) {
+		return 0, false
+	}
+	if number < lowest || number >= limit {
+		return 0, false
+	}
+	return int64(number), true
 }
 
 // parseIntegerKey reads a key that arrived as text, and refuses anything that is
