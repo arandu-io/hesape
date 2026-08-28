@@ -257,6 +257,10 @@ func (m *Migrator) runUp(ctx context.Context, migration Migration, batch int, pr
 }
 
 // Rollback undoes the last batch, or the batch or step count options names.
+//
+// It undoes all of the batch or none of it: if a migration in it declares
+// neither Down nor Irreversible, the batch is refused before the first Down
+// runs. Migrations declaring Irreversible are named up front and left applied.
 func (m *Migrator) Rollback(ctx context.Context, paths []string, options Options) ([]string, error) {
 	records, err := m.getMigrationsForRollback(ctx, options)
 	if err != nil {
@@ -289,17 +293,25 @@ func (m *Migrator) getMigrationsForRollback(ctx context.Context, options Options
 
 // rollbackMigrations runs Down for each recorded migration, newest first.
 //
+// The batch is read before any of it is undone, and a migration that cannot be
+// rolled back refuses the whole batch there -- see checkBatchCanRollBack.
+//
 // A recorded migration whose code is no longer registered is reported and
 // skipped rather than stopping the rollback: the alternative is a rollback
 // that refuses to start because of one file somebody deleted six releases
 // ago.
 //
-// A migration runDown refuses stops the loop, exactly as a failing Down does.
-// The ones already undone stay undone, and their records are already gone.
+// A Down that fails at run time still stops the loop. That one cannot be read
+// ahead of time, so the ones already undone stay undone and their records are
+// already gone.
 func (m *Migrator) rollbackMigrations(ctx context.Context, records []MigrationRecord, paths []string, options Options) ([]string, error) {
 	var rolledBack []string
 
 	files := m.GetMigrationFiles(paths)
+
+	if err := m.checkBatchCanRollBack(records, files); err != nil {
+		return nil, err
+	}
 
 	m.FireMigrationEvent(events.NewMigrationsStarted("down", optionsMap(options)))
 	m.write("Rolling back migrations.")
@@ -327,7 +339,8 @@ func (m *Migrator) rollbackMigrations(ctx context.Context, records []MigrationRe
 //
 // Every one that can be: a migration declaring itself irreversible is left
 // applied and keeps its record, so a reset is not a guarantee of an empty
-// schema. One that declares neither a Down nor Irreversible stops the reset.
+// schema. One that declares neither a Down nor Irreversible refuses the reset
+// before any of it is undone.
 func (m *Migrator) Reset(ctx context.Context, paths []string, pretend bool) ([]string, error) {
 	ran, err := m.repository.GetRan(ctx)
 	if err != nil {
@@ -350,6 +363,83 @@ func (m *Migrator) Reset(ctx context.Context, paths []string, pretend bool) ([]s
 	return rolledBack, err
 }
 
+// checkBatchCanRollBack reads the whole batch before any of it is undone, and
+// refuses it if a migration in it cannot be rolled back.
+//
+// Without this the rollback learned of such a migration by reaching it. It
+// undoes newest first, so everything applied after it was already undone and
+// its records already deleted -- the command stopped in the middle, which is
+// the one state a migrator has no way back from. Half a batch is not a version
+// anybody deployed. Refusing here costs nothing to act on, because nothing has
+// happened yet.
+//
+// A migration that declares Irreversible does not refuse the batch: it is
+// skipped and left applied, which the rollback survives. It is named in what
+// this prints, because "this batch will not come back whole" is worth knowing
+// before the first Down runs.
+//
+// A recorded migration whose code is no longer registered is passed over here
+// exactly as the loop passes over it, so nothing is refused that the rollback
+// would have survived.
+func (m *Migrator) checkBatchCanRollBack(records []MigrationRecord, files map[string]Migration) error {
+	var leftApplied []string
+
+	for _, record := range records {
+		migration, known := files[record.Migration]
+		if !known {
+			continue
+		}
+
+		if err := rollbackRefusal(migration); err != nil {
+			return fmt.Errorf("this batch would stop partway, so nothing was rolled back: %w", err)
+		}
+
+		if irreversible, is := migration.(IrreversibleMigration); is {
+			leftApplied = append(leftApplied,
+				fmt.Sprintf("%s will be left applied: %s", migration.GetName(), irreversible.Irreversible()))
+		}
+	}
+
+	for _, line := range leftApplied {
+		m.write(line)
+	}
+
+	return nil
+}
+
+// rollbackRefusal reports why migration cannot be rolled back, or nil when it
+// can.
+//
+// A migration that reverses nothing has to say which of two things it is. One
+// that declares Irreversible can take part in a rollback -- it is skipped and
+// left applied, with its record and its reason. One that declares neither
+// cannot, and neither can one declaring both, because the two say opposite
+// things about the same migration and nothing outside it can tell which its
+// author meant.
+//
+// It is one function because checkBatchCanRollBack and runDown have to agree.
+// A second copy of these two cases would drift, and what drift produces here is
+// a batch the preflight cleared and runDown then refused halfway through --
+// which is the failure the preflight exists to prevent.
+func rollbackRefusal(migration Migration) error {
+	name := migration.GetName()
+
+	_, isReversible := migration.(ReversibleMigration)
+	_, isIrreversible := migration.(IrreversibleMigration)
+
+	switch {
+	case isReversible && isIrreversible:
+		return fmt.Errorf("migration %s declares both Down and Irreversible, "+
+			"and nothing outside it can tell which one is true: keep the one that is", name)
+
+	case !isReversible && !isIrreversible:
+		return fmt.Errorf("migration %s cannot be rolled back: it declares neither Down nor Irreversible. "+
+			"Write Down to undo what Up applied, or Irreversible to declare that nothing can", name)
+	}
+
+	return nil
+}
+
 // runDown runs one migration's Down and removes its record.
 //
 // The record is deleted only when the change was actually undone, and that is
@@ -358,29 +448,20 @@ func (m *Migrator) Reset(ctx context.Context, paths []string, pretend bool) ([]s
 // said Success, and the next migrate ran the Up again and failed on what was
 // already there -- two commands away from the thing that caused it.
 //
-// So a migration that reverses nothing is now one of two things, and it has to
-// say which. One that declares Irreversible is left applied, with its record
-// and its reason. One that declares neither is refused, and the rollback stops
-// there rather than reporting a change it did not make.
+// It refuses the same migrations checkBatchCanRollBack refuses, through the
+// same function. That is not a second gate but the same one: every batch is
+// read first, and this is what answers for a migration reached any other way.
 func (m *Migrator) runDown(ctx context.Context, migration Migration, record MigrationRecord, pretend bool) error {
 	name := migration.GetName()
 
-	_, isReversible := migration.(ReversibleMigration)
-	irreversible, isIrreversible := migration.(IrreversibleMigration)
+	if err := rollbackRefusal(migration); err != nil {
+		return err
+	}
 
-	switch {
-	case isReversible && isIrreversible:
-		return fmt.Errorf("migration %s declares both Down and Irreversible, "+
-			"and nothing outside it can tell which one is true: keep the one that is", name)
-
-	case isIrreversible:
+	if irreversible, isIrreversible := migration.(IrreversibleMigration); isIrreversible {
 		m.FireMigrationEvent(events.NewMigrationSkipped(name))
 		m.write(fmt.Sprintf("%s %s: %s", name, Skipped, irreversible.Irreversible()))
 		return nil
-
-	case !isReversible:
-		return fmt.Errorf("migration %s cannot be rolled back: it declares neither Down nor Irreversible. "+
-			"Write Down to undo what Up applied, or Irreversible to declare that nothing can", name)
 	}
 
 	if pretend {

@@ -92,12 +92,17 @@ type Model[T any] struct {
 	// connection, Grammar and Processor are given to the constructor and copied
 	// onto every instance. There is no resolver to look them up in.
 	//
-	// The connection is unexported and GetConnection is the one way to it. That
-	// is not tidiness: a statement issued straight through the connection carries
-	// no Grant and no tenant filter, and an exported field made that the shortest
-	// path rather than a declared one. What is left is a method with a name, so
-	// that a module reaching for it can be found by a lint and sent back in
-	// review.
+	// The connection is unexported and nothing hands it back out. That is not
+	// tidiness: query.Connection has five verbs and not one of them takes a
+	// Grant, so a statement issued straight through it carries no tenant filter
+	// at all. An exported field made that the shortest path out of an authorized
+	// model, and an exported accessor made it a declared one -- but a declared
+	// path still has to be found and refused in review, and nothing was using
+	// it. What is left is no path, which the compiler enforces on its own.
+	//
+	// A caller that genuinely needs raw SQL still reaches the connection it
+	// built the model with, or the database package. It does not get there
+	// through a model that has a Grant on every other method.
 	connection query.Connection
 	Grammar    query.Grammar
 	Processor  query.Processor
@@ -927,18 +932,14 @@ func (m *Model[T]) SetTable(table string) *Model[T] {
 	return m
 }
 
-// GetConnection returns the connection this model runs on: the one it was
-// given.
-func (m *Model[T]) GetConnection() query.Connection { return m.connection }
-
 // GetConnectionName returns the name of the connection this model uses.
 func (m *Model[T]) GetConnectionName() string { return m.ConnectionName }
 
 // SetConnection replaces the connection name and, when connection is not
 // nil, the connection itself.
 //
-// It takes the connection as well as the name, for the reason GetConnection
-// gives: with no resolver, a name is not enough to reach a connection.
+// It takes the connection as well as the name because there is no resolver to
+// look one up in: a name on its own reaches nothing.
 func (m *Model[T]) SetConnection(name string, connection query.Connection) *Model[T] {
 	m.ConnectionName = name
 	if connection != nil {

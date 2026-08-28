@@ -1,8 +1,10 @@
 // Package grammars turns a schema.Blueprint into statements, one grammar per
 // engine: MySQLGrammar, PostgresGrammar and SQLiteGrammar over BaseGrammar.
 //
-// A grammar executes nothing and takes no auth.Grant: schema.Builder is the half
-// that runs what is compiled here, and that is where the Grant is checked.
+// A grammar executes nothing: schema.Builder is the half that runs what is
+// compiled here. Neither asks for an authorization credential, because DDL names
+// a table rather than rows -- there is no tenant column to scope by and no
+// subject to attribute a statement to.
 //
 // # What the three do not agree on
 //

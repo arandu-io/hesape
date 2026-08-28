@@ -24,9 +24,57 @@ the first tag and has nothing before it to compare against.
 
 ---
 
-## Unreleased — the HTTP client takes a context, and hashing has one path
+## v0.18.0 — the connection has no public door
 
-### `http/client`: every verb takes a context
+Eighteen breaking changes, grouped under the four entries below. Most remove a
+symbol, a package or a route that had no caller and could not have worked; the
+rest thread a context through a signature, or refuse a configuration that used
+to fail open.
+
+The two that will reach the most code are the HTTP client, whose every verb now
+takes a `context.Context`, and `support/arr`, which is gone in favour of
+`collections/arr`.
+
+### A model no longer hands out its connection
+
+```
+- ./database/model.(*Model[T]).GetConnection: removed
+```
+
+`query.Connection` has five verbs — `Select`, `Insert`, `Update`, `Delete` and
+`Statement` — and not one of them takes a `Grant`. So the accessor took a model
+whose every other read and write is filtered by `Tenant(g)` and handed back a
+handle that filters by nothing.
+
+It was kept as the *declared* way to the connection: the field under it is
+unexported, and a method with a name can at least be grepped for and refused in
+review. That trade is only worth making for a path somebody is on, and nobody
+was. Measured across every module in this repository and every test in them,
+including by renaming the method and rebuilding: zero callers. Nothing declares
+an interface with it either.
+
+**If you were calling it**, you already hold the connection — it is the second
+argument to `model.NewModel`, and the model has no resolver to look one up in.
+Keep the value you passed:
+
+```go
+// before
+conn := users.GetConnection()
+
+// after
+conn := postgres // the same value NewModel was given
+users := model.NewModel[User]("users", conn, grammar, processor)
+```
+
+Reaching for it at all is worth a second look: a statement issued through it
+carries no tenant filter, and the model it came from exists to make that
+impossible.
+
+`GetConnectionName` and `SetConnection` are unchanged.
+
+### The HTTP client takes a context, and hashing has one path
+
+#### `http/client`: every verb takes a context
 
 ```
 - ./http/client.(*PendingRequest).Get: changed from func(string, map[string]string) (*Response, error) to func(context.Context, string, map[string]string) (*Response, error)
@@ -69,7 +117,7 @@ Add it only when the endpoint deduplicates. It takes no argument and does nothin
 on its own, because a fifth boolean on `Retry` would sit beside `throw`, where one
 positional slip buys duplicate writes.
 
-### `encryption.ErrSignature` says which package holds it
+#### `encryption.ErrSignature` says which package holds it
 
 No symbol moved, so apidiff reports nothing. The message changed:
 
@@ -90,7 +138,7 @@ Every sibling error in the package, and every sibling package, names itself.
 Keeping the caller's slice fails silently: no error and no log, links simply stop
 verifying once the caller reuses the buffer.
 
-### The rate limiter refuses to be wired in a way that always fails open
+#### The rate limiter refuses to be wired in a way that always fails open
 
 ```
 - ./cache.Limit.After, .AfterCallback, .Response, .ResponseCallback: removed
@@ -124,7 +172,7 @@ checks in the handler against the same limiter, where it can fail closed. It is
 also now provably loud — the request passes and an error line naming the cause is
 written.
 
-### `str` stops spelling the standard library
+#### `str` stops spelling the standard library
 
 ```
 - ./str.Lower: removed
@@ -147,7 +195,7 @@ strings.ToLower(s)
 `Stringable` and are links in a fluent chain, which the standard library has no
 equivalent for; only their bodies changed.
 
-### The relation surface is reachable, and it was compiling the wrong column
+#### The relation surface is reachable, and it was compiling the wrong column
 
 ```
 - ./database/model.Relation.Match: changed from func(auth.Grant, []any, func(*query.Builder)) (map[any]any, error) to func([]relations.Model, []relations.Model, string) ([]relations.Model, error)
@@ -184,7 +232,7 @@ failure mode of this split is a duplicate clause, never a missing one.
 The comparability loss is the func field that fixes the static dispatch. Nothing
 compares relations with `==`.
 
-### `image`: a ceiling before the decode, and a context through the transformations
+#### `image`: a ceiling before the decode, and a context through the transformations
 
 ```
 - ./image.Driver.Process: changed from func([]byte, *ImagePipeline) ([]byte, error) to func(context.Context, []byte, *ImagePipeline) ([]byte, error)
@@ -214,7 +262,7 @@ The ceiling bounds the decode and not what a transformation is asked to produce:
 caller-chosen rather than attacker-chosen, and it is stated in the package
 comment.
 
-### `support/arr` is removed; `collections/arr` is the one
+#### `support/arr` is removed; `collections/arr` is the one
 
 ```
 - package github.com/arandu-io/hesape/support/arr: removed
@@ -255,7 +303,7 @@ helper.
 descended only into `map[string]any`. A translation group nesting
 `map[string]string` will start yielding wildcard messages it previously dropped.
 
-### A scheduled command no longer goes through a shell
+#### A scheduled command no longer goes through a shell
 
 ```
 - ./console/scheduling.(*CommandBuilder).BuildCommand: changed from func(...) string to func(...) ([]string, error)
@@ -281,7 +329,7 @@ If you were relying on `BuildCommand` to hand you a string, it now hands you the
 argument list, which is what a command actually is. A parameter containing a
 space, a semicolon or a quote is one argument and stays one argument.
 
-### `hashing`: one way to hash, and it was already the only one running
+#### `hashing`: one way to hash, and it was already the only one running
 
 `HashManager` and everything under it are removed — 32 incompatible lines, all in
 `./hashing`. `Make` and `Check` are unchanged and are the whole surface.
@@ -325,7 +373,7 @@ h.Make(password, hashing.Options{Memory: 65536, Time: 4})
 hashing.Make(password)
 ```
 
-### A rollback refuses the migration it cannot undo
+#### A rollback refuses the migration it cannot undo
 
 No symbol changed, so apidiff reports nothing. The behaviour did.
 
@@ -370,7 +418,7 @@ migration keeps its record and its change.
 table and wrote no `Down`, and it still leaves a backfill alone. It warns earlier
 than this refuses; it does not replace it.
 
-### The string-form resource registration is removed
+#### The string-form resource registration is removed
 
 ```
 - ./routing.(*Router).Resource: removed
@@ -431,7 +479,7 @@ The options with no equivalent on `Resource[C]` — `Shallow`, `Scoped`,
 `WithTrashed`, `Names`, `Parameters`, `MiddlewareFor` — went with it. Each was
 reachable only through a route that could not answer, so none of them ever ran.
 
-### `view/compilers` is removed; there was never a second compiler
+#### `view/compilers` is removed; there was never a second compiler
 
 ```
 - package github.com/arandu-io/hesape/view/compilers: removed
@@ -452,7 +500,7 @@ view with them.
 `YieldContent`, `StartPush`, `StartFragment`, `AddLoop` and the rest — and none
 of it moved.
 
-### `exception.(*Handler).HandleUncaughtException` is removed
+#### `exception.(*Handler).HandleUncaughtException` is removed
 
 ```
 - ./exception.(*Handler).HandleUncaughtException: removed
@@ -475,7 +523,7 @@ h.HandleException(w, r, err)
 `HandleException` returns what the handler stack answered, which the removed
 method discarded. Panics keep going through `Recover`, unchanged.
 
-### The seeder call runner is removed; `database.Seed` is the one
+#### The seeder call runner is removed; `database.Seed` is the one
 
 ```
 - ./database.Call: removed
@@ -528,7 +576,7 @@ into every seeder it prints.
 `database.Seed`, `database.Seeder`, `database.Flag` and `database.Switch` are
 unchanged.
 
-## Unreleased — the unsigned verification link is gone
+### The unsigned verification link is gone
 
 ```
 - package github.com/arandu-io/hesape/auth/notifications: removed
@@ -556,7 +604,7 @@ verified against the code after it, byte for byte.
 What stays, because none of it is a token model: the `MustVerifyEmail` column and
 its check, the listener that sends, and the middleware that gates.
 
-## Unreleased — one password reset flow
+### One password reset flow
 
 `hesape/auth/passwords` and `hesape/auth/console` are removed.
 
@@ -586,9 +634,6 @@ store, and there are no rows. It was registered in no console registry, so
 nothing loses a command it was running.
 
 ## v0.17.0 — the row is the model
-
-The heading is `Unreleased` because these have not been tagged yet. It becomes
-the number of the release that carries them, at the moment it is cut.
 
 `database/model.Collection[T]` was `[]*Model[T]` and is `[]*T`. Every terminal
 that answered a model answers the row: the application's own struct, with the

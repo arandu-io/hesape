@@ -9,9 +9,8 @@ import (
 	"github.com/arandu-io/hesape/database/schema"
 )
 
-// grant is the Grant every test compiles under. A migration runner has no
-// request to authorize from, so it takes the named escape hatch, which refuses
-// to issue a Grant without a tenant.
+// compile builds a blueprint for table and returns the statements it compiles
+// to, failing the test if compilation reports an error.
 func compile(t *testing.T, conn *fakeConnection, table string, build func(*schema.Blueprint)) []string {
 	t.Helper()
 	blueprint := schema.NewBlueprint(conn, table, build)

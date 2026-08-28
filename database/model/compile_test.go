@@ -49,6 +49,11 @@ func TestTheModelCannotBeReachedWithoutAGrant(t *testing.T) {
 			reason:  "reaching the connection under the model as a field",
 			want:    "users.Connection undefined",
 		},
+		{
+			fixture: "./testdata/connection_accessor",
+			reason:  "reaching the connection under the model through an accessor",
+			want:    "users.GetConnection undefined",
+		},
 	}
 
 	for _, c := range cases {

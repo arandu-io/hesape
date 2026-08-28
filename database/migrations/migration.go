@@ -117,7 +117,8 @@ type ReversibleMigration interface {
 // Declaring it is what separates "cannot be undone" from "nobody wrote the
 // Down yet", which are the same thing to a compiler and opposite things at
 // three in the morning. A migration that declares neither is refused by the
-// rollback rather than reported as undone.
+// rollback rather than reported as undone, and refused before any of its batch
+// is undone rather than on being reached.
 //
 // Declaring both this and Down is refused too: the two say opposite things
 // about the same migration, and nothing outside the migration can tell which
