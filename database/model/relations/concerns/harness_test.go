@@ -114,6 +114,12 @@ type fakeModel struct {
 	saveErr error
 
 	query Builder
+
+	// queryFactory, when set, answers a fresh Builder on every NewQuery.
+	// ofMany builds one subquery per column and joins them to each other, so
+	// two calls handing back the same builder would make one query that is its
+	// own join.
+	queryFactory func() Builder
 }
 
 func newFakeModel(table string) *fakeModel {
@@ -201,7 +207,13 @@ func (m *fakeModel) Delete(context.Context, auth.Grant) (int64, error) {
 	return 1, nil
 }
 
-func (m *fakeModel) NewQuery() Builder          { return m.query }
+func (m *fakeModel) NewQuery() Builder {
+	if m.queryFactory != nil {
+		return m.queryFactory()
+	}
+	return m.query
+}
+
 func (m *fakeModel) GetCreatedAtColumn() string { return "created_at" }
 func (m *fakeModel) GetUpdatedAtColumn() string { return "updated_at" }
 func (m *fakeModel) UsesTimestamps() bool       { return true }
@@ -227,19 +239,20 @@ type columnModel struct {
 
 func (m columnModel) GetTenantColumn() string { return m.column }
 
-// fakeBuilder is a Builder that records the wheres asked of it and carries a
-// real base query underneath, which is the half ScopeTenant reads.
+// fakeBuilder is a Builder over a real base query.
 //
-// The read terminals answer zero values. Nothing here exercises them: what the
-// tests using this builder measure is which filters were added before a read,
-// not what the read returned.
+// Every clause method forwards to the query underneath as well as recording, so
+// the statement a test compiles is the statement the package built. A stand-in
+// that swallowed its clauses would make the interface look inhabited while
+// measuring nothing, which is the shape a relation surface was already found
+// unreachable behind.
+//
+// The read terminals answer zero values, and only those: what the tests using
+// this builder measure is the statement, not what a read returned.
 type fakeBuilder struct {
 	base   *query.Builder
 	model  Model
 	wheres []whereCall
-
-	ownScoped bool
-	scoper    bool
 }
 
 // whereCall is one Where the builder was asked for.
@@ -258,27 +271,79 @@ func (b *fakeBuilder) asScoper(scopes bool) *scopingBuilder {
 	return &scopingBuilder{fakeBuilder: b, scopes: scopes}
 }
 
-func (b *fakeBuilder) GetModel() Model                  { return b.model }
-func (b *fakeBuilder) GetQuery() *query.Builder         { return b.base }
-func (b *fakeBuilder) Select(...any) Builder            { return b }
-func (b *fakeBuilder) AddSelect(...any) Builder         { return b }
-func (b *fakeBuilder) WhereNotNull(...any) Builder      { return b }
-func (b *fakeBuilder) WhereColumn(any, ...any) Builder  { return b }
-func (b *fakeBuilder) WhereKey(...any) Builder          { return b }
-func (b *fakeBuilder) Join(any, any, ...any) Builder    { return b }
-func (b *fakeBuilder) GroupBy(...any) Builder           { return b }
-func (b *fakeBuilder) SelectRaw(string, ...any) Builder { return b }
-func (b *fakeBuilder) OrderBy(any, ...string) Builder   { return b }
-func (b *fakeBuilder) Limit(int) Builder                { return b }
-func (b *fakeBuilder) Offset(int) Builder               { return b }
+func (b *fakeBuilder) GetModel() Model          { return b.model }
+func (b *fakeBuilder) GetQuery() *query.Builder { return b.base }
+
+func (b *fakeBuilder) Select(columns ...any) Builder {
+	b.base.Select(columns...)
+	return b
+}
+
+func (b *fakeBuilder) AddSelect(columns ...any) Builder {
+	b.base.AddSelect(columns...)
+	return b
+}
+
+func (b *fakeBuilder) WhereNotNull(columns ...any) Builder {
+	b.base.WhereNotNull(columns...)
+	return b
+}
+
+func (b *fakeBuilder) WhereColumn(first any, args ...any) Builder {
+	b.base.WhereColumn(first, args...)
+	return b
+}
+
+// WhereKey is the one clause with no counterpart on the base query: it is the
+// typed builder's shorthand for the model's own key, and a base query has no
+// model to ask for one.
+func (b *fakeBuilder) WhereKey(ids ...any) Builder {
+	if b.model == nil {
+		return b
+	}
+	b.base.WhereIn(b.model.QualifyColumn(b.model.GetKeyName()), ids)
+	return b
+}
+
+func (b *fakeBuilder) Join(table any, first any, args ...any) Builder {
+	b.base.Join(table, first, args...)
+	return b
+}
+
+func (b *fakeBuilder) GroupBy(groups ...any) Builder {
+	b.base.GroupBy(groups...)
+	return b
+}
+
+func (b *fakeBuilder) SelectRaw(expression string, bindings ...any) Builder {
+	b.base.SelectRaw(expression, bindings...)
+	return b
+}
+
+func (b *fakeBuilder) OrderBy(column any, direction ...string) Builder {
+	b.base.OrderBy(column, direction...)
+	return b
+}
+
+func (b *fakeBuilder) Limit(value int) Builder {
+	b.base.Limit(value)
+	return b
+}
+
+func (b *fakeBuilder) Offset(value int) Builder {
+	b.base.Offset(value)
+	return b
+}
 
 func (b *fakeBuilder) Where(column any, args ...any) Builder {
 	b.wheres = append(b.wheres, whereCall{column: column, args: args})
+	b.base.Where(column, args...)
 	return b
 }
 
 func (b *fakeBuilder) WhereIn(column any, values []any) Builder {
 	b.wheres = append(b.wheres, whereCall{column: column, args: []any{values}})
+	b.base.WhereIn(column, values)
 	return b
 }
 
@@ -312,7 +377,9 @@ func (b *fakeBuilder) Upsert(context.Context, auth.Grant, []map[string]any, []st
 }
 
 func (b *fakeBuilder) Delete(context.Context, auth.Grant) (int64, error) { return 0, nil }
-func (b *fakeBuilder) Clone() Builder                                    { return b }
+func (b *fakeBuilder) Clone() Builder {
+	return &fakeBuilder{base: b.base.Clone(), model: b.model}
+}
 
 // scopingBuilder is a fakeBuilder that answers OwnTenantScoper.
 type scopingBuilder struct {
