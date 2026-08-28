@@ -9,11 +9,13 @@ import (
 )
 
 // Blueprint is the value a migration writes against: the table under
-// construction, its
-// columns and the commands that will be run for it. It builds no SQL itself --
-// ToSQL hands each command to the Grammar -- and it takes no auth.Grant,
-// because deciding nothing is the point of it. Builder is the half that
-// executes, and that is where the Grant is required.
+// construction, its columns and the commands that will be run for it. It builds
+// no SQL itself -- ToSQL hands each command to the Grammar -- and Builder is the
+// half that executes.
+//
+// Neither half asks for an authorization credential, because DDL has nothing to
+// offer one: a table has no tenant column to scope by, and a migration step has
+// no subject to attribute a statement to.
 type Blueprint struct {
 	connection Connection
 	grammar    Grammar
@@ -61,11 +63,11 @@ func (b *Blueprint) Build(ctx context.Context) error {
 
 // ToSQL compiles the blueprint's commands into statements.
 //
-// It takes a context and an auth.Grant because on SQLite a blueprint that
-// alters a table has to read the table's current shape from the server before
-// it can rewrite it, and a read is a read. Every other driver, and SQLite
-// creating a table rather than altering one, touches nothing -- but the
-// signature cannot say "sometimes", so it says what the worst case does.
+// It takes a context because on SQLite a blueprint that alters a table has to
+// read the table's current shape from the server before it can rewrite it, and
+// a read is a read. Every other driver, and SQLite creating a table rather than
+// altering one, touches nothing -- but the signature cannot say "sometimes", so
+// it says what the worst case does.
 func (b *Blueprint) ToSQL(ctx context.Context) ([]string, error) {
 	if err := b.addImpliedCommands(ctx); err != nil {
 		return nil, err
@@ -222,9 +224,8 @@ func (b *Blueprint) AddFluentCommands() {
 // is the only driver whose GetAlterCommands returns anything, because it is
 // the only one that rebuilds the table.
 //
-// It takes a context and a Grant because a blueprint with an alter command
-// reads the table's current shape from the server to build its
-// BlueprintState.
+// It takes a context because a blueprint with an alter command reads the
+// table's current shape from the server to build its BlueprintState.
 func (b *Blueprint) AddAlterCommands(ctx context.Context) error {
 	alterCommands := b.grammar.GetAlterCommands()
 	if len(alterCommands) == 0 {

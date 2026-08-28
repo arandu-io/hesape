@@ -63,12 +63,16 @@ func intPointer(value int) *int { return &value }
 var ErrUnsupported = errors.New("schema: this database driver does not support the operation")
 
 // Builder is the half of this component that executes: Blueprint and Grammar
-// build
-// strings, and everything that reaches the connection is here. Every method
-// that does so takes an auth.Grant and checks it against ActionMigrate before a
-// statement leaves. DDL names tables rather than rows, so there is no
-// auth.Tenant() in the SQL -- see the package documentation for why the Grant
-// is required anyway.
+// build strings, and everything that reaches the connection is here.
+//
+// No method on it asks for an authorization credential, and that is a decision
+// rather than an omission. DDL names a table rather than rows, so there is no
+// tenant column to scope the statement by, and it is run as a pipeline step with
+// no request behind it, so there is no subject to attribute it to. The only
+// credential this type could hold is one its caller invented, and a parameter
+// that looks like enforcement while enforcing nothing is worse than no
+// parameter, because a reader stops looking. The path to application rows is a
+// different one, and it is still closed on every method.
 type Builder struct {
 	connection Connection
 	grammar    Grammar

@@ -15,17 +15,21 @@
 // RefreshDatabaseFile, which touches a file rather than the database and so
 // checks the driver itself.
 //
-// # The Grant
+// # No authorization credential on this path
 //
-// Blueprint and Grammar build strings and decide nothing: they take no
-// executes, and every method on it that reaches the database takes an
+// Nothing in this component asks for one, and that is a decision rather than an
+// omission. Blueprint and Grammar build strings and decide nothing; Builder
+// executes, and no method on it asks for one either.
 //
-// DDL is the one place in this component where auth.Tenant() does not appear in
-// the statement: a create table names a table, not rows, so there is no tenant
-// column to filter on. The Grant is still mandatory, because what it closes is a
-// path that reaches the database with nobody having decided anything, and a
-// migration runner is such a path. A pipeline gets its Grant from
-// auth.SystemGrant, which refuses to issue one without a tenant:
+// DDL has nothing to offer such a credential. A create table names a table, not
+// rows, so there is no tenant column to filter on, and the statement is run as a
+// pipeline step with no request behind it, so there is no subject to attribute
+// it to. The only credential this component could hold is one its caller
+// invented, and a parameter that looks like enforcement while enforcing nothing
+// is worse than no parameter, because a reader stops looking.
+//
+// The path to application rows is a different one and is unaffected: it is still
+// closed on every method. What a migration writes here looks like this:
 //
 //	if err := builder.Create(ctx, "users", func(t *schema.Blueprint) {
 //	    t.ID("")

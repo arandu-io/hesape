@@ -26,9 +26,8 @@ type BlueprintState struct {
 
 // NewBlueprintState builds a BlueprintState for blueprint's table.
 //
-// It takes a context and an auth.Grant because the constructor reads three
-// catalogues off the server -- the table's columns, indexes and foreign keys.
-// See Blueprint.ToSQL.
+// It takes a context because the constructor reads three catalogues off the
+// server -- the table's columns, indexes and foreign keys. See Blueprint.ToSQL.
 func NewBlueprintState(ctx context.Context, blueprint *Blueprint, connection Connection) (*BlueprintState, error) {
 	s := &BlueprintState{blueprint: blueprint, connection: connection}
 	builder := NewBuilder(connection)
