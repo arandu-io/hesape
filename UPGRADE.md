@@ -24,11 +24,11 @@ the first tag and has nothing before it to compare against.
 
 ---
 
-## Unreleased
+## v0.19.0 — the second factor is native
 
-Nothing here has a tag yet. Four new packages and a compatible authentication
-addition break nothing. Four behaviour changes are invisible to `apidiff`; one
-migration of configuration ownership is deliberately visible to the compiler.
+Four new packages and a compatible authentication addition break nothing. Four
+behaviour changes are invisible to `apidiff`; one migration of configuration
+ownership is deliberately visible to the compiler.
 
 ### Migration configuration belongs to one `Migrator`
 
