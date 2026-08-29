@@ -31,6 +31,31 @@ additions break nothing, and the two changes are the ones `apidiff` cannot see �
 which is exactly why they have entries. A break the tool misses reaches a caller
 as wrong data rather than as a compile error.
 
+### `session.IsSecretField` now withholds single-use codes
+
+The signature did not move and `apidiff` reports nothing — which is why this
+entry exists. The **answer** changed for a set of inputs.
+
+Field names it did not recognise before are answered `true`: `code`,
+`recovery_code`, `recovery_codes`, `backup_code`, `backup_codes`,
+`two_factor_code`, `otp_code`, `mfa_code`, `verification_code`,
+`confirmation_code`, and each of those behind a qualifier. Their values no longer
+survive a rejected request — they are absent from the flash cookie, from
+`Store.FlashInput`, and from the request dump an exception report prints. The
+messages for those fields are unaffected.
+
+**Names ending in `code` whose head is a place, a status or a category are
+unchanged** and still come back: `postal_code`, `country_code`, `area_code`,
+`status_code`, `promo_code`. A suffix rule on `_code` would have caught all of
+them, which is why there is none — every existing suffix rule works because the
+word it ends in *is* the credential, and `code` is not that word.
+
+**One application-visible cost:** a field named exactly `code` for something
+ordinary — a coupon box is the usual one — redraws empty after a rejection.
+Rename it to `promo_code` or `coupon_code`. The bare name is on the list because
+this collection already has a single-use credential called exactly that:
+`oauth/providers` reads `r.FormValue("code")`.
+
 ### `onetime` — the code that arrives by email, and what it is not
 
 A new package. Nothing to change to upgrade: no existing API moved, and `apidiff`
