@@ -1,4 +1,0 @@
-# Rendered images and their expected content are build output of
-# "go test ./qr -run TestFixtures -qr.update". The golden matrices are not.
-*.pgm
-*.expected

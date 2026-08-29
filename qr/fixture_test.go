@@ -3,28 +3,27 @@ package qr
 import (
 	"flag"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 )
 
 // A QR symbol has no published test vectors, so the golden files in testdata
-// are what an independent reader made of this encoder's output. They were
-// produced by running this file with -qr.update, which writes both the module
-// matrix and a rendered image of every style, and then by decoding those
-// images with a reader that shares no code with this package. The script that
-// does the decoding is testdata/crosscheck.py, and it prints what it found.
+// preserve this encoder's module matrices. They were produced by running this
+// file with -qr.update.
 //
 // Redo it with:
 //
 //	go test ./qr -run TestFixtures -qr.update
-//	python3 qr/testdata/crosscheck.py qr/testdata
 //
-// The images are build output and are not committed; the matrices are.
-var updateFixtures = flag.Bool("qr.update", false, "rewrite the golden files and images in testdata")
+// decodeRaster in decode_test.go then reads rendered pixels back without using
+// renderer geometry, so a shape drawn off-grid fails even when its module
+// matrix is right. It shares QR tables and arithmetic with the encoder and is
+// therefore a permanent geometry proof, not an independent interoperability
+// implementation. TestEveryStyleDecodes runs it over every style at three
+// scales during the ordinary test run.
+var updateFixtures = flag.Bool("qr.update", false, "rewrite the golden matrix files in testdata")
 
 // fixtureContents are the two ends of the content this package carries.
 var fixtureContents = map[string]string{
@@ -46,7 +45,6 @@ func TestFixturesMatchTheGoldenMatrices(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Logf("%s: wrote %s", name, path)
-			writeStyleImages(t, name, c)
 			continue
 		}
 
@@ -98,46 +96,4 @@ func reportFirstDifference(t *testing.T, want, got string) {
 			return
 		}
 	}
-}
-
-// writeStyleImages renders every style at several sizes and writes each as a
-// grey image, for the cross-check script to read.
-func writeStyleImages(t *testing.T, name string, c *Code) {
-	t.Helper()
-	all := styles(c.MaxCenterFraction())
-	names := make([]string, 0, len(all))
-	for style := range all {
-		names = append(names, style)
-	}
-	sort.Strings(names)
-
-	for _, style := range names {
-		svg, err := c.SVG(all[style])
-		if err != nil {
-			t.Fatalf("%s/%s: %v", name, style, err)
-		}
-		for _, scale := range []float64{6, 10, 16} {
-			r, err := rasterize(svg, scale)
-			if err != nil {
-				t.Fatalf("%s/%s: %v", name, style, err)
-			}
-			file := fmt.Sprintf("%s.%s.s%02d.pgm", name, strings.ReplaceAll(style, " ", "-"), int(scale))
-			if err := os.WriteFile(filepath.Join("testdata", file), portableGreyMap(r), 0o644); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	if err := os.WriteFile(filepath.Join("testdata", name+".expected"), []byte(fixtureContents[name]), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// portableGreyMap serialises a rendered image in the plainest format a reader
-// outside Go can open without a library.
-func portableGreyMap(r *raster) []byte {
-	out := []byte(fmt.Sprintf("P5\n%d %d\n255\n", r.w, r.h))
-	for _, v := range r.lum {
-		out = append(out, byte(math.Round(math.Max(0, math.Min(1, v))*255)))
-	}
-	return out
 }

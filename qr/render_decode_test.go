@@ -6,22 +6,36 @@ import (
 	"testing"
 )
 
+var decodeScales = []float64{6, 10, 16}
+
 // The tests here are the ones that matter. Everything else checks that a
 // number is where it should be; these read the rendered markup back as an
 // image and get the content out of it.
 
 func TestEveryStyleDecodes(t *testing.T) {
+	if len(fixtureContents) != 2 {
+		t.Fatalf("decode matrix has %d fixtures, want 2", len(fixtureContents))
+	}
+	if len(decodeScales) != 3 {
+		t.Fatalf("decode matrix has %d scales, want 3", len(decodeScales))
+	}
+	cases := 0
 	for name, content := range fixtureContents {
 		c, err := Encode(content)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		for style, o := range styles(c.MaxCenterFraction()) {
+		allStyles := styles(c.MaxCenterFraction())
+		if len(allStyles) != 10 {
+			t.Fatalf("%s: decode matrix has %d styles, want 10", name, len(allStyles))
+		}
+		for style, o := range allStyles {
 			svg, err := c.SVG(o)
 			if err != nil {
 				t.Fatalf("%s/%s: %v", name, style, err)
 			}
-			for _, scale := range []float64{6, 10, 16} {
+			for _, scale := range decodeScales {
+				cases++
 				r, err := rasterize(svg, scale)
 				if err != nil {
 					t.Fatalf("%s/%s at %v: %v", name, style, scale, err)
@@ -36,6 +50,9 @@ func TestEveryStyleDecodes(t *testing.T) {
 				}
 			}
 		}
+	}
+	if cases != 60 {
+		t.Fatalf("decode matrix ran %d cases, want 60", cases)
 	}
 }
 
