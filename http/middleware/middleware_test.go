@@ -71,11 +71,33 @@ func TestTheCspIsTheFullExpectedPolicy(t *testing.T) {
 		"font-src 'self'; " +
 		"img-src 'self' data:; " +
 		"connect-src 'self'; " +
+		"object-src 'none'; " +
 		"frame-ancestors 'none'; " +
 		"base-uri 'self'; " +
 		"form-action 'self'"
 	if got := rec.Header().Get("Content-Security-Policy"); got != want {
 		t.Errorf("Content-Security-Policy = %q, want %q", got, want)
+	}
+}
+
+// TestTheCspRefusesPluginObjectsExplicitly pins the directive rather than its
+// current fallback. Without object-src, an object or embed inherits
+// default-src 'self', so a file served by this application remains loadable.
+func TestTheCspRefusesPluginObjectsExplicitly(t *testing.T) {
+	for _, dev := range []bool{false, true} {
+		rec, _ := run(middleware.SecurityHeaders(dev), httptest.NewRequest(http.MethodGet, "/", nil))
+		csp := rec.Header().Get("Content-Security-Policy")
+
+		found := false
+		for _, directive := range strings.Split(csp, "; ") {
+			if directive == "object-src 'none'" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("development=%t Content-Security-Policy has no explicit object-src 'none': %q", dev, csp)
+		}
 	}
 }
 

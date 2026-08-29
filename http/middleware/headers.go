@@ -23,6 +23,9 @@ func SecurityHeaders(dev bool) hhttp.Middleware {
 		"font-src 'self'; " +
 		"img-src 'self' data:; " +
 		"connect-src 'self'; " +
+		// Plugin objects can execute active content, so the same-origin fallback
+		// from default-src is not restrictive enough for them.
+		"object-src 'none'; " +
 		"frame-ancestors 'none'; " +
 		"base-uri 'self'; " +
 		"form-action 'self'"
