@@ -119,11 +119,39 @@ func TestFlashNeverCarriesASecretValueButAlwaysItsMessage(t *testing.T) {
 		{"csrf_token", "_token"},
 		{"login_otp", "_otp"},
 		{"client_secret", "_secret"},
+		{"code", "the bare name"},
+		{"recovery_code", "the bare name"},
+		{"recovery_codes", "the bare name"},
+		{"backup_code", "the bare name"},
+		{"backup_codes", "the bare name"},
+		{"two_factor_code", "the bare name"},
+		{"otp_code", "the bare name"},
+		{"mfa_code", "the bare name"},
+		{"verification_code", "the bare name"},
+		{"confirmation_code", "the bare name"},
+		{"account_recovery_code", "_recovery_code"},
+		{"account_recovery_codes", "_recovery_codes"},
+		{"user_backup_code", "_backup_code"},
+		{"user_backup_codes", "_backup_codes"},
+		{"admin_two_factor_code", "_two_factor_code"},
+		{"login_otp_code", "_otp_code"},
+		{"login_mfa_code", "_mfa_code"},
+		{"email_verification_code", "_verification_code"},
+		{"email_confirmation_code", "_confirmation_code"},
 	}
 
 	// What has to come back. laptop is why every suffix is anchored on the
 	// underscore: an unanchored otp takes it.
-	kept := []string{"email", "name", "laptop"}
+	//
+	// The five ending in code are the other half of the rule above them: they
+	// are the reason there is no _code suffix, and widening the rule to one
+	// empties every box here. A postcode that comes back blank is a bug
+	// somebody reports on the first day, and the fix for it would reopen the
+	// hole the code entries close.
+	kept := []string{
+		"email", "name", "laptop",
+		"postal_code", "country_code", "area_code", "status_code", "promo_code",
+	}
 
 	old := url.Values{}
 	for i, c := range secrets {
@@ -142,6 +170,19 @@ func TestFlashNeverCarriesASecretValueButAlwaysItsMessage(t *testing.T) {
 		t.Fatal("Write set no cookie")
 	}
 	payload := flashPayload(t, cookie)
+
+	// Every secret check below asserts a substring is ABSENT, and a value the
+	// trimming in Write gave up is absent for a reason that proves nothing. If
+	// this table outgrows the cookie budget, the old input is what Write drops
+	// first, and the whole of the redaction half starts passing on a payload
+	// that never carried anything. So what must survive is asserted present
+	// before anything is asserted missing.
+	for i, field := range kept {
+		if want := fmt.Sprintf("typed%02d", i); !strings.Contains(payload, want) {
+			t.Fatalf("%s did not reach the cookie: this table has outgrown the %d-byte budget, and every absence checked below is vacuous",
+				field, session.MaxFlashBytes)
+		}
+	}
 
 	errs, back, ok := f.Take(httptest.NewRecorder(), pageRead(cookie))
 	if !ok {
@@ -169,6 +210,61 @@ func TestFlashNeverCarriesASecretValueButAlwaysItsMessage(t *testing.T) {
 	// why it was rejected is the failure being fixed, not the fix.
 	if got := errs["password"]; len(got) != 1 || got[0] != "must be at least 12 characters" {
 		t.Errorf("the password's message did not survive: %v", errs)
+	}
+}
+
+// TestIsSecretFieldTellsACredentialCodeFromAnOrdinaryOne asserts the rule with
+// nothing standing between the question and the answer.
+//
+// The round trip above proves the rule reaches the cookie. It cannot prove the
+// rule is the right WIDTH, and width is the whole difficulty here: a field
+// whose name ends in code is a credential when the word in front of it names
+// one, and an ordinary value the person typed when it names a place, a status
+// or a category.
+//
+// It calls the predicate instead of flashing anything, deliberately. A round
+// trip answers through a signer, a query encoder and a parser, and each of them
+// can turn a wrong answer into a missing value that reads like the right one.
+// Here a wrong answer is the only thing that can be reported.
+func TestIsSecretFieldTellsACredentialCodeFromAnOrdinaryOne(t *testing.T) {
+	// Withheld: single-use, worth the whole account, spent once.
+	withheld := []string{
+		"code",
+		"recovery_code", "recovery_codes",
+		"backup_code", "backup_codes",
+		"two_factor_code", "otp_code", "mfa_code",
+		"verification_code", "confirmation_code",
+		// The same names behind a qualifier, which is the half whoever writes
+		// the form invents freely.
+		"account_recovery_code", "user_backup_codes", "admin_two_factor_code",
+		"login_otp_code", "email_verification_code",
+		// The comparison is case-insensitive.
+		"Recovery_Code", "TWO_FACTOR_CODE",
+	}
+
+	// Returned: ordinary fields, and every one of them is emptied if the rule
+	// above is ever rewritten as a suffix on _code. That is the mutation this
+	// half exists to catch, and it is the plausible one -- _code is shorter
+	// than the list and looks like the same shape as _password.
+	//
+	// The last five carry no underscore at all: they are what an unanchored
+	// code would take, the way an unanchored otp takes laptop.
+	returned := []string{
+		"postal_code", "country_code", "area_code", "status_code",
+		"currency_code", "language_code", "promo_code", "discount_code",
+		"zip_code", "error_code", "product_code", "sort_code",
+		"barcode", "qrcode", "decode", "encode", "postcode",
+	}
+
+	for _, field := range withheld {
+		if !session.IsSecretField(field) {
+			t.Errorf("IsSecretField(%q) = false: the code is written into the redrawn HTML and into the flash cookie", field)
+		}
+	}
+	for _, field := range returned {
+		if session.IsSecretField(field) {
+			t.Errorf("IsSecretField(%q) = true: an ordinary field comes back empty, and a rule that empties it is a rule somebody removes", field)
+		}
 	}
 }
 

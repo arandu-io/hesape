@@ -93,6 +93,29 @@ var neverFlashed = map[string]bool{
 	"token":                 true,
 	"otp":                   true,
 	"secret":                true,
+
+	// The single-use codes. Each one is worth the whole account by itself and
+	// is spent once, so a single redrawn form that hands one back is the whole
+	// of the damage -- and the screens carrying them are forms like any other,
+	// rejected for a stale request token or for an empty box beside them.
+	//
+	// They are named one at a time rather than caught by a rule on the end of
+	// the name, for the reason written on neverFlashedSuffix.
+	//
+	// code is bare because that is what a prompt asking for one calls its
+	// field when it asks for nothing else. The cost is a checkout that redraws
+	// its coupon box empty, which is the trade secret is on this list for.
+	// The plurals are here because a screen that issues a set names the set.
+	"code":              true,
+	"recovery_code":     true,
+	"recovery_codes":    true,
+	"backup_code":       true,
+	"backup_codes":      true,
+	"two_factor_code":   true,
+	"otp_code":          true,
+	"mfa_code":          true,
+	"verification_code": true,
+	"confirmation_code": true,
 }
 
 // neverFlashedSuffix catches the same secrets behind a qualifier, which is the
@@ -106,12 +129,37 @@ var neverFlashed = map[string]bool{
 //
 // Every entry is anchored on the underscore, and that anchor is what keeps a
 // rule this wide off ordinary fields: otp without it matches laptop and desktop.
+//
+// # Why _code is not here
+//
+// Every rule above works because the word it ends on IS the credential:
+// anything whose name ends in _password is a password, whoever wrote the form.
+// code is not such a word. What decides whether a field called something_code
+// holds a credential is the word in FRONT of it, and on that side the ordinary
+// ones are the majority -- postal_code, country_code, area_code, status_code,
+// currency_code, promo_code are all values somebody typed and expects to get
+// back. A rule that empties a postcode box is a rule that gets removed within
+// the week, and removing it would take the recovery code out with it.
+//
+// So the credential-headed compounds are named one at a time on both lists:
+// the unqualified form in neverFlashed, and the qualified form here, the same
+// pairing password and _password already are. That is a longer list than a
+// suffix would be, and it is the length that makes it safe to keep.
 var neverFlashedSuffix = []string{
 	"_password",
 	"_password_confirmation",
 	"_token",
 	"_otp",
 	"_secret",
+	"_recovery_code",
+	"_recovery_codes",
+	"_backup_code",
+	"_backup_codes",
+	"_two_factor_code",
+	"_otp_code",
+	"_mfa_code",
+	"_verification_code",
+	"_confirmation_code",
 }
 
 // Flash carries the messages and the input of a rejected request across the one
