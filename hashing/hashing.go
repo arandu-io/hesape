@@ -25,6 +25,24 @@ const (
 	// MinPasswordLen is the shortest password the framework accepts. Length
 	// beats composition rules: it is the only parameter that reliably raises
 	// the cost of an offline attack.
+	//
+	// What it measures is the string [Make] is handed, which is the right
+	// measure of a secret a person chose and no measure at all of one a machine
+	// drew: ten characters from a thirty-two letter alphabet are fifty bits and
+	// are turned away here, while twelve characters of one chosen word are not.
+	//
+	// There is deliberately no second entry point that waives the floor for the
+	// machine-generated case. A waiver a caller can reach for a generated
+	// secret is one a caller can reach for a chosen password, and for a chosen
+	// password this floor is the whole of the defence -- so the waiver would
+	// cost more than it saves, and it would be a second way to hash a
+	// credential besides.
+	//
+	// A caller hashing a generated secret hashes it behind a constant that
+	// names what the secret is for, applied identically where it is issued and
+	// where it is checked. That constant is what keeps a hash moved between two
+	// columns from verifying in the wrong one, so it is there whatever this
+	// floor says, and it carries the value past the floor on the way.
 	MinPasswordLen = 12
 
 	// MaxPasswordLen is the longest password the framework accepts. A
