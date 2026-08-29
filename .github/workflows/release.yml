@@ -46,7 +46,7 @@ jobs:
           # the tag's. Two tags cut the same afternoon come back in an order
           # nothing guarantees, and the second one then generates notes over the
           # wrong range -- wrong, and it looks right.
-          previous="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          previous="$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*/*' "${TAG}^" 2>/dev/null || true)"
 
           if [ -n "$previous" ]; then
             gh release create "$TAG" --verify-tag --title "$TAG" \
@@ -69,7 +69,7 @@ jobs:
           body="$(gh release view "$TAG" --json body --jq .body)"
           day="$(gh release view "$TAG" --json publishedAt --jq .publishedAt)"
           day="${day%%T*}"
-          previous="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          previous="$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*/*' "${TAG}^" 2>/dev/null || true)"
 
           if [ -n "$previous" ]; then
             heading="## [${TAG}](https://github.com/${REPO}/compare/${previous}...${TAG}) - ${day}"

@@ -26,18 +26,17 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
-Nothing here has a tag yet. Four new packages, two behaviour changes and one
-compile-time migration of configuration ownership. The additions break nothing;
-the behaviour changes are ones `apidiff` cannot see, while the configuration
-change is deliberately visible to the compiler.
+Nothing here has a tag yet. Four new packages and a compatible authentication
+addition break nothing. Four behaviour changes are invisible to `apidiff`; one
+migration of configuration ownership is deliberately visible to the compiler.
 
 ### Migration configuration belongs to one `Migrator`
 
 The process-wide setters are gone:
 
 ```text
-- migrations.WithoutMigrations(names)
-- migrations.ResolveConnectionsUsing(callback)
+- database/migrations.WithoutMigrations(names)
+- database/migrations.ResolveConnectionsUsing(callback)
 ```
 
 Configure the instance that will run instead:
@@ -77,6 +76,16 @@ ordinary — a coupon box is the usual one — redraws empty after a rejection.
 Rename it to `promo_code` or `coupon_code`. The bare name is on the list because
 this collection already has a single-use credential called exactly that:
 `oauth/providers` reads `r.FormValue("code")`.
+
+### The default CSP refuses plugin objects
+
+`http/middleware.SecurityHeaders` now emits `object-src 'none'` in development
+and production. Previously, `object` and `embed` elements inherited
+`default-src 'self'`, so same-origin plugin content remained loadable.
+
+An application that intentionally embeds plugin content must replace the
+default policy with an explicit `object-src` directive. This change adds no
+`unsafe-inline` or `unsafe-eval`.
 
 ### `onetime` — the code that arrives by email, and what it is not
 
