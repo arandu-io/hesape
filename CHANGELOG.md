@@ -1,5 +1,37 @@
 # Release Notes
 
+## [v0.18.0](https://github.com/arandu-io/hesape/compare/v0.17.0...v0.18.0) - 2026-08-28
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.17.0...v0.18.0
+
+## [v0.17.0](https://github.com/arandu-io/hesape/compare/database/connectors/mysql/v0.7.0...v0.17.0) - 2026-08-27
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/database/connectors/mysql/v0.7.0...v0.17.0
+
+## [v0.16.0](https://github.com/arandu-io/hesape/compare/database/connectors/mysql/v0.6.2...v0.16.0) - 2026-08-27
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/database/connectors/mysql/v0.6.2...v0.16.0
+
+## [v0.15.2](https://github.com/arandu-io/hesape/compare/database/connectors/mysql/v0.6.1...v0.15.2) - 2026-08-27
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/database/connectors/mysql/v0.6.1...v0.15.2
+
+## [v0.15.1](https://github.com/arandu-io/hesape/compare/filesystem/s3/v0.6.0...v0.15.1) - 2026-08-27
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/filesystem/s3/v0.6.0...v0.15.1
+
+## [v0.15.0](https://github.com/arandu-io/hesape/compare/v0.14.2...v0.15.0) - 2026-08-26
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.14.2...v0.15.0
+
+## [v0.14.2](https://github.com/arandu-io/hesape/compare/v0.14.1...v0.14.2) - 2026-08-24
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.14.1...v0.14.2
+
+## [v0.14.1](https://github.com/arandu-io/hesape/compare/v0.14.0...v0.14.1) - 2026-08-24
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.14.0...v0.14.1
+
 ## [v0.14.0](https://github.com/arandu-io/hesape/compare/database/connectors/mysql/v0.5.0...v0.14.0) - 2026-08-23
 
 **Full Changelog**: https://github.com/arandu-io/hesape/compare/database/connectors/mysql/v0.5.0...v0.14.0
