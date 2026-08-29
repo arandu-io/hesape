@@ -3,9 +3,11 @@ package migrations
 import (
 	"context"
 	"errors"
-	"github.com/arandu-io/hesape/database/schema"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/arandu-io/hesape/database/schema"
 )
 
 // fakeMigration is a migration that records what was asked of it.
@@ -33,6 +35,20 @@ func (m fakeMigration) Up(context.Context, Connection) error {
 func (m fakeMigration) Down(context.Context, Connection) error {
 	*m.downs = append(*m.downs, m.name)
 	return nil
+}
+
+// statementMigration records which connection a Migrator resolved by writing
+// its own name to that connection.
+type statementMigration struct {
+	BaseMigration
+	name string
+}
+
+func (m statementMigration) GetName() string { return m.name }
+
+func (m statementMigration) Up(ctx context.Context, connection Connection) error {
+	_, err := connection.Statement(ctx, m.name, nil)
+	return err
 }
 
 // oneWayMigration has an Up and no Down, and declares nothing about being
@@ -685,14 +701,14 @@ func TestRollbackRefusesAMigrationClaimingBothDirections(t *testing.T) {
 }
 
 func TestWithoutMigrationsLeavesThemPending(t *testing.T) {
-	t.Cleanup(func() { flushRegistry(); WithoutMigrations(nil) })
+	t.Cleanup(flushRegistry)
 	flushRegistry()
 
 	var ups, downs []string
 	Register(fakeMigration{name: "2026_01_01_000000_first", ups: &ups, downs: &downs})
-	WithoutMigrations([]string{"2026_01_01_000000_first"})
 
 	migrator, _, _ := newTestMigrator()
+	migrator.WithoutMigrations([]string{"2026_01_01_000000_first"})
 
 	ran, err := migrator.Run(context.Background(), nil, Options{})
 	if err != nil {
@@ -700,6 +716,117 @@ func TestWithoutMigrationsLeavesThemPending(t *testing.T) {
 	}
 	if len(ran) != 0 {
 		t.Fatalf("Run applied %v, and it was told to skip it", ran)
+	}
+}
+
+func TestWithoutMigrationsCopiesTheCallersSlice(t *testing.T) {
+	t.Cleanup(flushRegistry)
+	flushRegistry()
+
+	var ups, downs []string
+	first := "2026_01_01_000000_first"
+	second := "2026_01_02_000000_second"
+	Register(fakeMigration{name: first, ups: &ups, downs: &downs})
+	Register(fakeMigration{name: second, ups: &ups, downs: &downs})
+
+	migrator, _, _ := newTestMigrator()
+	names := []string{first}
+	migrator.WithoutMigrations(names)
+	names[0] = second
+
+	ran, err := migrator.Run(context.Background(), nil, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Join(ran, ",") != second {
+		t.Fatalf("Run applied %v after the caller changed its slice, want only %s", ran, second)
+	}
+}
+
+// TestMigratorsKeepResolversAndSkippedMigrationsIndependent makes both
+// Migrators enter their resolver callbacks before either can continue. A test
+// that merely starts two goroutines can finish one before the other starts and
+// never exercise the overlap that process-wide configuration breaks.
+func TestMigratorsKeepResolversAndSkippedMigrationsIndependent(t *testing.T) {
+	t.Cleanup(flushRegistry)
+	flushRegistry()
+
+	first := "2026_01_01_000000_first"
+	second := "2026_01_02_000000_second"
+	Register(statementMigration{name: first})
+	Register(statementMigration{name: second})
+
+	migratorA, _, defaultA := newTestMigrator()
+	migratorB, _, defaultB := newTestMigrator()
+	connectionA := &fakeConnection{}
+	connectionB := &fakeConnection{}
+
+	callbacksReady := make(chan struct{}, 2)
+	releaseCallbacks := make(chan struct{})
+	resolverFor := func(connection *fakeConnection) func(Resolver, string) (Connection, error) {
+		return func(Resolver, string) (Connection, error) {
+			callbacksReady <- struct{}{}
+			<-releaseCallbacks
+			return connection, nil
+		}
+	}
+
+	migratorA.ResolveConnectionsUsing(resolverFor(connectionA))
+	migratorA.WithoutMigrations([]string{first})
+	migratorB.ResolveConnectionsUsing(resolverFor(connectionB))
+	migratorB.WithoutMigrations([]string{second})
+
+	type result struct {
+		name string
+		ran  []string
+		err  error
+	}
+	results := make(chan result, 2)
+	start := make(chan struct{})
+	run := func(name string, migrator *Migrator) {
+		<-start
+		ran, err := migrator.Run(context.Background(), nil, Options{})
+		results <- result{name: name, ran: ran, err: err}
+	}
+
+	go run("A", migratorA)
+	go run("B", migratorB)
+	close(start)
+	timeout := time.NewTimer(5 * time.Second)
+	defer timeout.Stop()
+	for range 2 {
+		select {
+		case <-callbacksReady:
+		case <-timeout.C:
+			close(releaseCallbacks)
+			t.Fatal("both Migrators did not enter their resolver callbacks concurrently")
+		}
+	}
+	close(releaseCallbacks)
+
+	ranByMigrator := map[string][]string{}
+	for range 2 {
+		result := <-results
+		if result.err != nil {
+			t.Fatalf("Migrator %s Run: %v", result.name, result.err)
+		}
+		ranByMigrator[result.name] = result.ran
+	}
+
+	if strings.Join(ranByMigrator["A"], ",") != second {
+		t.Fatalf("Migrator A applied %v, want only %s", ranByMigrator["A"], second)
+	}
+	if strings.Join(ranByMigrator["B"], ",") != first {
+		t.Fatalf("Migrator B applied %v, want only %s", ranByMigrator["B"], first)
+	}
+	if strings.Join(connectionA.statements, ",") != second {
+		t.Fatalf("Migrator A resolved statements %v, want only %s", connectionA.statements, second)
+	}
+	if strings.Join(connectionB.statements, ",") != first {
+		t.Fatalf("Migrator B resolved statements %v, want only %s", connectionB.statements, first)
+	}
+	if len(defaultA.statements) != 0 || len(defaultB.statements) != 0 {
+		t.Fatalf("default resolvers were used instead of instance callbacks: A=%v B=%v", defaultA.statements, defaultB.statements)
 	}
 }
 

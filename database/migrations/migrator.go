@@ -67,17 +67,6 @@ type Options struct {
 	Batch int
 }
 
-// connectionResolverCallback is how a migration reaches a connection by name.
-//
-// It is package-level because it is set once, for the whole process.
-var (
-	connectionResolverMu       sync.RWMutex
-	connectionResolverCallback func(resolver Resolver, name string) (Connection, error)
-
-	withoutMigrationsMu sync.RWMutex
-	withoutMigrations   []string
-)
-
 // Migrator runs migrations up and down and keeps the repository in step with the
 // schema.
 //
@@ -98,6 +87,11 @@ var (
 // A new column is nullable or has a default; removing one takes two releases,
 // the first stopping the writes and the second dropping the column.
 type Migrator struct {
+	// configurationMu keeps configuration changes on this Migrator from racing
+	// with a run of the same Migrator. It does not coordinate different
+	// Migrators: each instance owns the values it protects.
+	configurationMu sync.RWMutex
+
 	// events is where the Migrator dispatches its events.
 	events Dispatcher
 
@@ -106,6 +100,12 @@ type Migrator struct {
 
 	// resolver is how the Migrator reaches a connection by name.
 	resolver Resolver
+
+	// resolveConnection is an optional instance-specific connection resolver.
+	resolveConnection func(resolver Resolver, name string) (Connection, error)
+
+	// skippedMigrations holds names this Migrator leaves pending.
+	skippedMigrations []string
 
 	// connection is the default connection name.
 	connection string
@@ -178,14 +178,15 @@ func (m *Migrator) pendingMigrations(files map[string]Migration, ran []string) [
 	return out
 }
 
-// migrationsToSkip returns the names WithoutMigrations registered, resolved
-// to their migration names.
+// migrationsToSkip returns the names this Migrator was told to leave pending,
+// resolved to their migration names.
 func (m *Migrator) migrationsToSkip() []string {
-	withoutMigrationsMu.RLock()
-	defer withoutMigrationsMu.RUnlock()
+	m.configurationMu.RLock()
+	names := append([]string(nil), m.skippedMigrations...)
+	m.configurationMu.RUnlock()
 
-	out := make([]string, 0, len(withoutMigrations))
-	for _, name := range withoutMigrations {
+	out := make([]string, 0, len(names))
+	for _, name := range names {
 		out = append(out, m.GetMigrationName(name))
 	}
 	return out
@@ -669,15 +670,15 @@ func (m *Migrator) Path(path string) {
 // Paths returns the groups the Migrator looks in.
 func (m *Migrator) Paths() []string { return m.paths }
 
-// WithoutMigrations sets names to leave pending however many times migrate
-// runs.
+// WithoutMigrations sets names this Migrator leaves pending however many times
+// it runs.
 //
-// It is package-level rather than a method because the test suite sets it
-// once for a process.
-func WithoutMigrations(names []string) {
-	withoutMigrationsMu.Lock()
-	defer withoutMigrationsMu.Unlock()
-	withoutMigrations = names
+// The names are copied so changing the caller's slice cannot reconfigure a run
+// that is already being prepared.
+func (m *Migrator) WithoutMigrations(names []string) {
+	m.configurationMu.Lock()
+	defer m.configurationMu.Unlock()
+	m.skippedMigrations = append([]string(nil), names...)
 }
 
 // GetConnection returns the default connection name.
@@ -704,12 +705,12 @@ func (m *Migrator) SetConnection(name string) {
 }
 
 // ResolveConnection returns the named connection, or the default connection
-// when connection is empty, through the registered resolver callback when
-// one was set.
+// when connection is empty, through this Migrator's resolver callback when one
+// was set.
 func (m *Migrator) ResolveConnection(connection string) (Connection, error) {
-	connectionResolverMu.RLock()
-	callback := connectionResolverCallback
-	connectionResolverMu.RUnlock()
+	m.configurationMu.RLock()
+	callback := m.resolveConnection
+	m.configurationMu.RUnlock()
 
 	name := connection
 	if name == "" {
@@ -722,12 +723,12 @@ func (m *Migrator) ResolveConnection(connection string) (Connection, error) {
 	return m.resolver.Connection(name)
 }
 
-// ResolveConnectionsUsing registers the callback ResolveConnection uses to
-// resolve a connection.
-func ResolveConnectionsUsing(callback func(resolver Resolver, name string) (Connection, error)) {
-	connectionResolverMu.Lock()
-	defer connectionResolverMu.Unlock()
-	connectionResolverCallback = callback
+// ResolveConnectionsUsing sets the callback this Migrator's ResolveConnection
+// uses to resolve a connection.
+func (m *Migrator) ResolveConnectionsUsing(callback func(resolver Resolver, name string) (Connection, error)) {
+	m.configurationMu.Lock()
+	defer m.configurationMu.Unlock()
+	m.resolveConnection = callback
 }
 
 // GetRepository returns the repository migrations are recorded in.
