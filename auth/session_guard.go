@@ -325,11 +325,7 @@ func (g *SessionGuard) OnceUsingID(ctx context.Context, id any) Authenticatable 
 // of customers.
 func (g *SessionGuard) Validate(ctx context.Context, credentials map[string]any) bool {
 	validated, _ := g.timebox.Call(func(timebox Timebox) (any, error) {
-		user := g.retrieveByCredentials(ctx, credentials)
-
-		g.lastAttempted = user
-
-		validated := g.hasValidCredentials(ctx, user, credentials)
+		_, validated := g.validateCredentials(ctx, credentials)
 
 		if validated {
 			timebox.ReturnEarly()
@@ -402,14 +398,12 @@ func (g *SessionGuard) Attempt(ctx context.Context, credentials map[string]any, 
 	attempted, _ := g.timebox.Call(func(timebox Timebox) (any, error) {
 		g.fireAttemptEvent(credentials, remember)
 
-		user := g.retrieveByCredentials(ctx, credentials)
-
-		g.lastAttempted = user
+		user, validated := g.validateCredentials(ctx, credentials)
 
 		// If an implementation of Authenticatable was returned, we ask the
 		// provider to validate it against the credentials, and if they are in
 		// fact valid we log the user in and return true.
-		if g.hasValidCredentials(ctx, user, credentials) {
+		if validated {
 			g.rehashPasswordIfRequired(ctx, user, credentials)
 
 			g.Login(ctx, user, remember)
@@ -443,14 +437,12 @@ func (g *SessionGuard) AttemptWhen(ctx context.Context, credentials map[string]a
 	attempted, _ := g.timebox.Call(func(timebox Timebox) (any, error) {
 		g.fireAttemptEvent(credentials, remember)
 
-		user := g.retrieveByCredentials(ctx, credentials)
-
-		g.lastAttempted = user
+		user, validated := g.validateCredentials(ctx, credentials)
 
 		// This does the same thing as Attempt, and also runs the callbacks once
 		// the user has been retrieved and validated. If one of them says no, the
 		// person is not signed in.
-		if g.hasValidCredentials(ctx, user, credentials) && g.shouldLogin(callbacks, user) {
+		if validated && g.shouldLogin(callbacks, user) {
 			g.rehashPasswordIfRequired(ctx, user, credentials)
 
 			g.Login(ctx, user, remember)
@@ -469,16 +461,18 @@ func (g *SessionGuard) AttemptWhen(ctx context.Context, credentials map[string]a
 	return ok
 }
 
-// hasValidCredentials reports whether the credentials check out against user,
-// and fires [Validated] when they do.
-func (g *SessionGuard) hasValidCredentials(ctx context.Context, user Authenticatable, credentials map[string]any) bool {
-	validated := user != nil && g.provider.ValidateCredentials(ctx, user, credentials)
-
-	if validated {
-		g.fireValidatedEvent(user)
+// validateCredentials looks up and checks credentials through the shared
+// verifier path, records the account attempted, and fires [Validated] on a
+// match.
+func (g *SessionGuard) validateCredentials(ctx context.Context, credentials map[string]any) (Authenticatable, bool) {
+	user, err := verifyCredentials(ctx, g.provider, credentials)
+	g.lastAttempted = user
+	if err != nil {
+		return user, false
 	}
 
-	return validated
+	g.fireValidatedEvent(user)
+	return user, true
 }
 
 // shouldLogin runs the callbacks and reports whether every one of them allowed
@@ -920,16 +914,6 @@ func (g *SessionGuard) context() context.Context {
 // nobody.
 func (g *SessionGuard) retrieveByID(ctx context.Context, id any) Authenticatable {
 	user, err := g.provider.RetrieveByID(ctx, id)
-	if err != nil {
-		return nil
-	}
-	return user
-}
-
-// retrieveByCredentials asks the provider for the user these credentials name,
-// reading an error as nobody.
-func (g *SessionGuard) retrieveByCredentials(ctx context.Context, credentials map[string]any) Authenticatable {
-	user, err := g.provider.RetrieveByCredentials(ctx, credentials)
 	if err != nil {
 		return nil
 	}

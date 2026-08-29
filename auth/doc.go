@@ -11,6 +11,13 @@
 // decision it protects, not in a route limiter that knows nothing about
 // identities.
 //
+// # Credential verification
+//
+// CredentialVerifier uses the same provider and timebox path as SessionGuard
+// to return the account behind valid credentials without owning a request,
+// cookie jar, or session. It is the seam for a flow that must decide what
+// follows a valid password before it creates authenticated identity.
+//
 // # The guards
 //
 // Three guards live here, with the helpers they embed and the pieces they read.

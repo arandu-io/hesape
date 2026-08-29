@@ -43,13 +43,17 @@ type rehash struct {
 // fakeProvider is a user store holding one user, found by id, by remember token
 // or by the "email" credential.
 type fakeProvider struct {
-	user     *fakeUser
-	email    string
-	password string
+	user                   *fakeUser
+	email                  string
+	password               string
+	retrieveCredentialsErr error
+	rehashErr              error
 
-	rehashes      []rehash
-	tokensWritten []string
-	byTokenCalls  int
+	rehashes            []rehash
+	tokensWritten       []string
+	byTokenCalls        int
+	credentialLookups   int
+	credentialValidates int
 }
 
 func (p *fakeProvider) RetrieveByID(_ context.Context, identifier any) (auth.Authenticatable, error) {
@@ -75,6 +79,10 @@ func (p *fakeProvider) UpdateRememberToken(_ context.Context, user auth.Authenti
 }
 
 func (p *fakeProvider) RetrieveByCredentials(_ context.Context, credentials map[string]any) (auth.Authenticatable, error) {
+	p.credentialLookups++
+	if p.retrieveCredentialsErr != nil {
+		return nil, p.retrieveCredentialsErr
+	}
 	if p.user == nil {
 		return nil, nil
 	}
@@ -88,6 +96,7 @@ func (p *fakeProvider) RetrieveByCredentials(_ context.Context, credentials map[
 }
 
 func (p *fakeProvider) ValidateCredentials(_ context.Context, user auth.Authenticatable, credentials map[string]any) bool {
+	p.credentialValidates++
 	password, _ := credentials["password"].(string)
 
 	return user != nil && password != "" && password == p.password
@@ -101,7 +110,7 @@ func (p *fakeProvider) RehashPasswordIfRequired(_ context.Context, user auth.Aut
 	if force {
 		p.user.password = "hashed:" + password + ":again"
 	}
-	return nil
+	return p.rehashErr
 }
 
 // fakeSession is the session store, as a map.
