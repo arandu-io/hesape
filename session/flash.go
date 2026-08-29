@@ -89,10 +89,13 @@ const (
 // is the failure being fixed here, not the fix.
 var neverFlashed = map[string]bool{
 	"password":              true,
+	"passwords":             true,
 	"password_confirmation": true,
 	"token":                 true,
+	"tokens":                true,
 	"otp":                   true,
 	"secret":                true,
+	"secrets":               true,
 
 	// The single-use codes. Each one is worth the whole account by itself and
 	// is spent once, so a single redrawn form that hands one back is the whole

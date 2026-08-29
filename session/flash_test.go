@@ -105,10 +105,13 @@ func TestFlashNeverCarriesASecretValueButAlwaysItsMessage(t *testing.T) {
 	// what the row is there to hold down.
 	secrets := []struct{ field, rule string }{
 		{"password", "the bare name"},
+		{"passwords", "the bare plural name"},
 		{"password_confirmation", "the bare name"},
 		{"token", "the bare name"},
+		{"tokens", "the bare plural name"},
 		{"otp", "the bare name"},
 		{"secret", "the bare name"},
+		{"secrets", "the bare plural name"},
 		{"Access_Token", "the comparison is case-insensitive"},
 		{"owner_password", "_password"},
 		{"new_password_confirmation", "_password_confirmation"},
@@ -150,6 +153,7 @@ func TestFlashNeverCarriesASecretValueButAlwaysItsMessage(t *testing.T) {
 	// hole the code entries close.
 	kept := []string{
 		"email", "name", "laptop",
+		"max_tokens",
 		"postal_code", "country_code", "area_code", "status_code", "promo_code",
 	}
 

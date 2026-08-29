@@ -1202,10 +1202,14 @@ func TestFlashInputNeverStoresASecret(t *testing.T) {
 	// either of them fails a row here instead of passing quietly.
 	secrets := []struct{ field, rule string }{
 		{"password", "the bare name"},
+		{"passwords", "the bare plural name"},
 		{"password_confirmation", "the bare name"},
 		{"token", "the bare name"},
+		{"tokens", "the bare plural name"},
 		{"otp", "the bare name"},
 		{"secret", "the bare name"},
+		{"secrets", "the bare plural name"},
+		{"recovery_codes", "the bare name"},
 		{"Access_Token", "the comparison is case-insensitive"},
 		{"current_password", "_password"},
 		{"new_password", "_password"},
@@ -1218,7 +1222,7 @@ func TestFlashInputNeverStoresASecret(t *testing.T) {
 
 	// What has to come back. laptop is why every suffix is anchored on the
 	// underscore: an unanchored otp takes it.
-	kept := []string{"email", "name", "laptop"}
+	kept := []string{"email", "name", "laptop", "max_tokens"}
 
 	input := map[string]any{}
 	for i, c := range secrets {
