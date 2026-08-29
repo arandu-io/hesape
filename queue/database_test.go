@@ -508,8 +508,8 @@ func TestTheModuleReportsABacklog(t *testing.T) {
 	if len(diagnosis) == 0 {
 		t.Fatal("a backlog produced no diagnosis")
 	}
-	if !strings.Contains(diagnosis[0], "aru work") {
-		t.Errorf("the diagnosis does not say what to check: %q", diagnosis[0])
+	if !strings.Contains(diagnosis[0], "aru queue:work") {
+		t.Errorf("the diagnosis does not name the public worker command: %q", diagnosis[0])
 	}
 }
 

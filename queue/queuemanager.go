@@ -15,9 +15,9 @@ import (
 //
 // There is no resolution from a config array: the application constructs its
 // queues in bootstrap/app.go and passes them here. What is left is the part
-// anybody calls -- `aru work --connection=redis` has to turn a string into a
-// queue, the default connection has to have a name, and a queue has to be
-// pausable while an incident is open.
+// anybody calls -- `aru queue:work --connection=redis` has to turn a string
+// into a queue, the default connection has to have a name, and a queue has to
+// be pausable while an incident is open.
 //
 //	m := queue.NewQueueManager().
 //		Extend("database", queue.NewDatabaseQueue(db)).

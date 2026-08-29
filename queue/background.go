@@ -16,9 +16,9 @@ import (
 // crashing, or one that has to be isolated from it.
 //
 // It is a wrapper over a command rather than a fork, because Go cannot fork:
-// Run is `aru work --once` or whatever the application names it, and the job is
-// handed over on its argument list. An application that has not set Run gets an
-// error at push, not silence.
+// Run is `aru queue:work --once` or whatever the application names it, and the
+// job is handed over on its argument list. An application that has not set Run
+// gets an error at push, not silence.
 type BackgroundQueue struct {
 	connection
 	// run starts the job in another process and returns once it has started.

@@ -192,9 +192,9 @@ const restartKey = "hesape:queue:restart"
 // into code, and here it is a map somebody filled in, so the set of names a
 // binary can run is visible at the call site.
 //
-// It runs in the same binary as the application, started by `aru work`, which
-// is the same image with a different argument. Not a second artifact: one image
-// is one thing to build, ship and roll back.
+// It runs in the same binary as the application, started by `aru queue:work`,
+// which is the same image with a different argument. Not a second artifact:
+// one image is one thing to build, ship and roll back.
 type Worker struct {
 	queue    Queue
 	manager  *QueueManager
@@ -242,7 +242,7 @@ func (w *Worker) Handler(name string) (Handler, bool) {
 
 var _ Handlers = (*Worker)(nil)
 
-// Names returns the registered job names, for `aru work` to print at start.
+// Names returns the registered job names, for `aru queue:work` to print at start.
 func (w *Worker) Names() []string {
 	out := make([]string, 0, len(w.handlers))
 	for name := range w.handlers {
@@ -289,10 +289,10 @@ func (w *Worker) Options() WorkerOptions { return w.opts }
 // SetOptions replaces the configuration, and returns the worker so the call
 // chains.
 //
-// It is the setter half of [Worker.Options], and it is what `queue:work
-// --queue=reports` uses. Calling it while the loop is running is a data race:
-// the options are read on every pass, and a command sets them before it starts
-// the worker.
+// It is the setter half of [Worker.Options], and `aru queue:work` with
+// `--queue=reports` uses it. Calling it while the loop is running is a data
+// race: the options are read on every pass, and a command sets them before it
+// starts the worker.
 func (w *Worker) SetOptions(o WorkerOptions) *Worker {
 	w.opts = o.withDefaults()
 	return w
@@ -302,8 +302,8 @@ func (w *Worker) SetOptions(o WorkerOptions) *Worker {
 //
 // A Worker is a long-lived object, and the two flags a signal sets outlive the
 // loop that read them: without this, a worker started a second time in the same
-// process -- which is what a test and `queue:work --once` in a loop both do --
-// stops immediately because something asked the first one to.
+// process -- which is what a test and `aru queue:work --once` in a loop both
+// do -- stops immediately because something asked the first one to.
 func (w *Worker) FlushState() {
 	w.ShouldQuit.Store(false)
 	w.Paused.Store(false)
@@ -312,8 +312,8 @@ func (w *Worker) FlushState() {
 // Pause stops this worker taking new jobs, without ending its loop.
 //
 // It is a method rather than a signal handler because signal handling belongs
-// to the program, not to a library: `aru work` installs the handlers and calls
-// this.
+// to the program, not to a library: `aru queue:work` installs the handlers and
+// calls this.
 func (w *Worker) Pause() { w.Paused.Store(true) }
 
 // Resume lets this worker take jobs again.
@@ -337,8 +337,8 @@ func (w *Worker) SetManager(m *QueueManager) { w.manager = m }
 // arguments, because a worker is constructed with them.
 //
 // The status is one of [ExitSuccess], [ExitError] and [ExitMemoryLimit], and it
-// is what `aru work` returns to the shell: a supervisor reads it to tell "asked
-// to stop" from "ran out of memory".
+// is what `aru queue:work` returns to the shell: a supervisor reads it to tell
+// "asked to stop" from "ran out of memory".
 func (w *Worker) Daemon(ctx context.Context) (int, error) {
 	logger := log.For(ctx).With("component", "worker", "queue", w.opts.Queue, "worker", w.opts.Name)
 	logger.Info("worker started", "concurrency", w.opts.Concurrency, "handlers", len(w.handlers))
@@ -432,9 +432,9 @@ func (w *Worker) Daemon(ctx context.Context) (int, error) {
 
 // RunNextJob takes one batch off the queue and runs it.
 //
-// It is what `queue:work --once` calls: one pass of the loop, with none of the
-// bookkeeping that decides whether to make another. An empty queue sleeps once
-// and returns.
+// It is what `aru queue:work --once` calls: one pass of the loop, with none of
+// the bookkeeping that decides whether to make another. An empty queue sleeps
+// once and returns.
 func (w *Worker) RunNextJob(ctx context.Context) error {
 	popped, err := w.getNextJobs(ctx)
 	if err != nil {

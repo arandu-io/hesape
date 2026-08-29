@@ -32,9 +32,13 @@ type ListenerOptions struct {
 // production -- [Worker] is. What it is for is development: a rebuilt binary is
 // picked up without anybody remembering to restart anything.
 //
-// The child is started with Command, which is the path of the binary and the
-// arguments before the ones this adds. An application whose worker command is
-// not `aru work` says so there.
+// The public command is `aru queue:work`. Aru delegates it to the application's
+// internal `<app-binary> work` subcommand, which is the protocol the listener
+// uses to start each child. It is not a second public Aru command.
+//
+// The child is started with Command, which is the path of the application
+// binary and the arguments before the ones this adds. An application with a
+// different internal worker protocol says so there.
 //
 // The child is a program and a list of arguments, run through
 // [github.com/arandu-io/hesape/process]. No shell is involved, so a queue name
@@ -138,10 +142,12 @@ func (l *Listener) Listen(ctx context.Context, connectionName, queue string, opt
 
 // MakeProcess describes the child worker, without starting it.
 //
-// The flags are the worker's options turned back into the arguments `aru work`
-// parses, which is the round trip that makes a listener and a worker
-// configurable in one place. They are arguments and not a line: a queue named
-// with a space, a semicolon or a quote is one argument all the same.
+// The flags are the worker's options turned back into the arguments the
+// internal `<app-binary> work` subcommand parses. This is the private side of
+// the public `aru queue:work` delegation and is the round trip that makes a
+// listener and a worker configurable in one place. They are arguments and not
+// a line: a queue named with a space, a semicolon or a quote is one argument all
+// the same.
 //
 // The child is given no deadline. It runs one job and exits, and a job is as
 // long as the work in it.

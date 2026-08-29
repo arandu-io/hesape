@@ -14,8 +14,8 @@ import (
 //
 // Five minutes on a worker that polls every second means nothing is draining --
 // the process is down, every handler is failing, or nobody ever started
-// `aru work`. The last one is the common case, and it is the one that otherwise
-// shows up as a customer asking why they never got the email.
+// `aru queue:work`. The last one is the common case, and it is the one that
+// otherwise shows up as a customer asking why they never got the email.
 const maxLag = 5 * time.Minute
 
 // hintLag is when a backlog stops being normal and starts being worth
@@ -24,9 +24,9 @@ const hintLag = time.Minute
 
 // Module brings the jobs table, and reports on the queue.
 //
-// It registers no routes and runs no worker: the worker is `aru work`, a
-// separate process from the same image. What this module owns is the schema and
-// the answer to "is anything draining this".
+// It registers no routes and runs no worker: the worker is `aru queue:work`, a
+// separate process from the same image. What this module owns is the schema
+// and the answer to "is anything draining this".
 type Module struct {
 	queue Queue
 	// queues are the ones the health check and the diagnosis look at. Empty
@@ -102,7 +102,7 @@ func (m *Module) Diagnose(ctx context.Context) []string {
 		if lag > hintLag {
 			pending, _ := m.queue.PendingSize(ctx, q)
 			out = append(out, fmt.Sprintf(
-				"The %s queue has %d job(s) waiting, the oldest for %s. Is `aru work` running?",
+				"The %s queue has %d job(s) waiting, the oldest for %s. Is `aru queue:work` running?",
 				q, pending, lag.Truncate(time.Second)))
 		}
 	}

@@ -47,9 +47,10 @@ func (*Module) Name() string { return "events" }
 
 // Start begins the relay loop, and only the process that serves calls it.
 //
-// It is Start and not Boot, which every command calls: otherwise each `aru work`
-// replica would run a relay of its own, and so would `aru routes`. The lock
-// makes that duplicate harmless rather than correct.
+// It is Start and not Boot, which every command calls: otherwise each worker
+// started by `aru queue:work` would run a relay of its own, and so would the
+// `aru routes` command. The lock makes that duplicate harmless rather than
+// correct.
 func (m *Module) Start(ctx context.Context) error {
 	if m.relay == nil {
 		return nil

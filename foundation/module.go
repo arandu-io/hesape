@@ -64,10 +64,11 @@ type Bootable interface {
 //
 // Start is called by Run, never by Boot, and that distinction is the difference
 // between a process that serves and a process that does something else. Every
-// command boots: `aru work`, `aru routes`, `aru schedule:list`, `aru migrate`.
-// Starting the loops at boot meant every worker replica also ran a scheduler
-// and a relay, and `aru schedule:run`, which exists to run one task by hand,
-// started the loop that runs all of them. Found by audit.
+// command boots. The worker command is `aru queue:work`. The same is true of
+// `aru routes`, `aru schedule:list` and `aru migrate`. Starting the loops at
+// boot meant every worker replica also ran a scheduler and a relay. That meant
+// `aru schedule:run`, which exists to run one task by hand, also started the
+// loop that runs all of them. Found by audit.
 //
 // One process, one job. The lock in the scheduler makes the duplicate harmless
 // rather than correct, and "harmless because something else catches it" is not
