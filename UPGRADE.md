@@ -26,10 +26,32 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
-Nothing here has a tag yet. Four new packages and two behaviour changes; the
-additions break nothing, and the two changes are the ones `apidiff` cannot see —
-which is exactly why they have entries. A break the tool misses reaches a caller
-as wrong data rather than as a compile error.
+Nothing here has a tag yet. Four new packages, two behaviour changes and one
+compile-time migration of configuration ownership. The additions break nothing;
+the behaviour changes are ones `apidiff` cannot see, while the configuration
+change is deliberately visible to the compiler.
+
+### Migration configuration belongs to one `Migrator`
+
+The process-wide setters are gone:
+
+```text
+- migrations.WithoutMigrations(names)
+- migrations.ResolveConnectionsUsing(callback)
+```
+
+Configure the instance that will run instead:
+
+```go
+migrator.WithoutMigrations(names)
+migrator.ResolveConnectionsUsing(callback)
+```
+
+The old functions shared one skip list and one resolver callback across every
+`Migrator` in the process. Two applications, test cases or concurrent migration
+runs could overwrite one another even though they held different instances.
+The methods keep both values on their receiver; `WithoutMigrations` also copies
+the caller's slice so later mutation cannot reconfigure an in-flight run.
 
 ### `session.IsSecretField` now withholds single-use codes
 
