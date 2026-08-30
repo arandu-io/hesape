@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -194,7 +195,38 @@ func (errFailed) Error() string { return "the rule said no" }
 //
 //	go test ./...
 func TestConformance(t *testing.T) {
-	conformance.Run(t, database.DialectSQLite, driverName(t), dsn())
+	conformance.Run(t, database.DialectSQLite, driverName(t), dsn(t))
+}
+
+// TestTheDefaultConformanceDatabaseEndsWithTheTest: a fixed file under the
+// process temp directory survives the test that created it and leaks state into
+// later conformance runs.
+func TestTheDefaultConformanceDatabaseEndsWithTheTest(t *testing.T) {
+	t.Setenv("ARANDU_TEST_SQLITE_DSN", "")
+	t.Setenv("TMPDIR", t.TempDir())
+
+	var path string
+	if ok := t.Run("owner", func(t *testing.T) {
+		path = dsn(t)
+		if err := os.WriteFile(path, []byte("conformance"), 0o600); err != nil {
+			t.Fatalf("write conformance database: %v", err)
+		}
+	}); !ok {
+		t.Fatal("the owner test failed before cleanup could be checked")
+	}
+
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("default conformance database survived its test at %q: %v", path, err)
+	}
+}
+
+func TestAnExplicitConformanceDSNRemainsCallerOwned(t *testing.T) {
+	const override = "file:caller-owned.sqlite?mode=memory&cache=shared"
+	t.Setenv("ARANDU_TEST_SQLITE_DSN", override)
+
+	if got := dsn(t); got != override {
+		t.Fatalf("conformance DSN = %q, want explicit override %q", got, override)
+	}
 }
 
 // driverName is what the connector registered, read back rather than
@@ -209,14 +241,15 @@ func driverName(t *testing.T) string {
 	return name
 }
 
-// dsn is a file in the test's own directory. SQLite needs nothing installed, so
-// this connector runs the suite on every machine and every CI job -- which is
-// what makes the other two connectors a comparison rather than the only signal.
-func dsn() string {
+// dsn returns an explicit caller-owned override or a database owned by the
+// current test. SQLite needs nothing installed, so this connector runs the
+// suite on every machine and every CI job.
+func dsn(t *testing.T) string {
+	t.Helper()
 	if from := os.Getenv("ARANDU_TEST_SQLITE_DSN"); from != "" {
 		return from
 	}
-	return filepath.Join(os.TempDir(), "arandu-conformance.sqlite")
+	return filepath.Join(t.TempDir(), "arandu-conformance.sqlite")
 }
 
 // TestDropAllTablesEmptiesTheCatalogue is the wipe migrate:fresh runs before it
