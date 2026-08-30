@@ -48,8 +48,19 @@ type fieldSchema struct {
 	fields []fieldSchema
 }
 
+// Encode encodes value as a TOON 4.1 string using the supplied options.
+// Without options, Encode uses the same canonical comma and two-space profile
+// as Marshal.
+func Encode(value any, options ...EncodeOption) (string, error) {
+	resolved, err := resolveEncodeOptions(options)
+	if err != nil {
+		return "", err
+	}
+	return encode(value, resolved)
+}
+
 // Marshal encodes value as TOON 4.1 from the pinned v4.1.1 specification
-// release.
+// release using the fixed comma and two-space canonical profile.
 //
 // Marshal first applies encoding/json's field, tag, omission, and Marshaler
 // rules. Values encoding/json refuses are refused here too. Object keys from Go
@@ -60,38 +71,46 @@ type fieldSchema struct {
 // values, including cycles, channels, functions, NaN, and infinities, are
 // outside Marshal's input domain and return an error.
 func Marshal(value any) ([]byte, error) {
+	encoded, err := encode(value, defaultEncodeOptions())
+	if err != nil {
+		return nil, err
+	}
+	return []byte(encoded), nil
+}
+
+func encode(value any, options encodeOptions) (string, error) {
 	encoded, err := json.Marshal(value)
 	if err != nil {
-		return nil, fmt.Errorf("toon: normalize JSON value: %w", err)
+		return "", fmt.Errorf("toon: normalize JSON value: %w", err)
 	}
 	replacedInvalidUTF8, err := validateJSONStrings(encoded)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
 	decoder.UseNumber()
 	root, err := decodeNode(decoder, 0)
 	if err != nil {
-		return nil, fmt.Errorf("toon: normalize JSON value: %w", err)
+		return "", fmt.Errorf("toon: normalize JSON value: %w", err)
 	}
 	if _, err := decoder.Token(); err != io.EOF {
 		if err == nil {
-			return nil, fmt.Errorf("toon: normalize JSON value: trailing JSON value")
+			return "", fmt.Errorf("toon: normalize JSON value: trailing JSON value")
 		}
-		return nil, fmt.Errorf("toon: normalize JSON value: %w", err)
+		return "", fmt.Errorf("toon: normalize JSON value: %w", err)
 	}
 	if replacedInvalidUTF8 {
 		if err := validateInputStrings(reflect.ValueOf(value), make(map[visit]struct{})); err != nil {
-			return nil, err
+			return "", err
 		}
 	}
 
 	var lines []string
-	if err := appendNode(&lines, root, 0); err != nil {
-		return nil, err
+	if err := appendNode(&lines, root, 0, options); err != nil {
+		return "", err
 	}
-	return []byte(strings.Join(lines, "\n")), nil
+	return strings.Join(lines, "\n"), nil
 }
 
 const maxNestingDepth = 1000
@@ -171,15 +190,15 @@ func decodeArray(decoder *json.Decoder, depth int) (node, error) {
 	return node{kind: kindArray, array: array}, nil
 }
 
-func appendNode(lines *[]string, value node, depth int) error {
+func appendNode(lines *[]string, value node, depth int, options encodeOptions) error {
 	switch value.kind {
 	case kindObject:
 		if schema, ok := keyedSchema(value.object); ok {
-			appendKeyedTable(lines, "", value.object, schema, depth+1)
+			appendKeyedTable(lines, "", value.object, schema, depth+1, options)
 			return nil
 		}
 		for _, field := range value.object {
-			if err := appendField(lines, field, indent(depth), depth+1); err != nil {
+			if err := appendField(lines, field, indent(depth, options.indentSize), depth+1, options); err != nil {
 				return err
 			}
 		}
@@ -190,26 +209,26 @@ func appendNode(lines *[]string, value node, depth int) error {
 			return nil
 		}
 		if allPrimitive(value.array) {
-			*lines = append(*lines, fmt.Sprintf("[%d]: %s", len(value.array), joinPrimitives(value.array, ',')))
+			*lines = append(*lines, arrayHeader(len(value.array), false, options.delimiter)+": "+joinPrimitives(value.array, options.delimiter))
 			return nil
 		}
 		if schema, ok := tabularSchema(value.array); ok {
-			appendTable(lines, "", value.array, schema, 1)
+			appendTable(lines, "", value.array, schema, 1, options)
 			return nil
 		}
-		return appendListArray(lines, "", value.array, 1)
+		return appendListArray(lines, "", value.array, 1, options)
 	case kindNull, kindBool, kindNumber, kindString:
-		*lines = append(*lines, indent(depth)+encodePrimitive(value, ','))
+		*lines = append(*lines, indent(depth, options.indentSize)+encodePrimitive(value, options.delimiter))
 		return nil
 	default:
 		return fmt.Errorf("toon: value kind %d is not implemented", value.kind)
 	}
 }
 
-func appendField(lines *[]string, field member, linePrefix string, childDepth int) error {
+func appendField(lines *[]string, field member, linePrefix string, childDepth int, options encodeOptions) error {
 	key := encodeKey(field.name)
 	if isPrimitive(field.value) {
-		*lines = append(*lines, linePrefix+key+": "+encodePrimitive(field.value, ','))
+		*lines = append(*lines, linePrefix+key+": "+encodePrimitive(field.value, options.delimiter))
 		return nil
 	}
 	if field.value.kind == kindArray && allPrimitive(field.value.array) {
@@ -217,24 +236,24 @@ func appendField(lines *[]string, field member, linePrefix string, childDepth in
 			*lines = append(*lines, linePrefix+key+": []")
 			return nil
 		}
-		*lines = append(*lines, fmt.Sprintf("%s%s[%d]: %s", linePrefix, key, len(field.value.array), joinPrimitives(field.value.array, ',')))
+		*lines = append(*lines, linePrefix+key+arrayHeader(len(field.value.array), false, options.delimiter)+": "+joinPrimitives(field.value.array, options.delimiter))
 		return nil
 	}
 	if field.value.kind == kindArray {
 		if schema, ok := tabularSchema(field.value.array); ok {
-			appendTable(lines, linePrefix+key, field.value.array, schema, childDepth)
+			appendTable(lines, linePrefix+key, field.value.array, schema, childDepth, options)
 			return nil
 		}
-		return appendListArray(lines, linePrefix+key, field.value.array, childDepth)
+		return appendListArray(lines, linePrefix+key, field.value.array, childDepth, options)
 	}
 	if field.value.kind == kindObject {
 		if schema, ok := keyedSchema(field.value.object); ok {
-			appendKeyedTable(lines, linePrefix+key, field.value.object, schema, childDepth)
+			appendKeyedTable(lines, linePrefix+key, field.value.object, schema, childDepth, options)
 			return nil
 		}
 		*lines = append(*lines, linePrefix+key+":")
 		for _, nested := range field.value.object {
-			if err := appendField(lines, nested, indent(childDepth), childDepth+1); err != nil {
+			if err := appendField(lines, nested, indent(childDepth, options.indentSize), childDepth+1, options); err != nil {
 				return err
 			}
 		}
@@ -243,33 +262,33 @@ func appendField(lines *[]string, field member, linePrefix string, childDepth in
 	return fmt.Errorf("toon: unsupported value at %q", field.name)
 }
 
-func appendListArray(lines *[]string, headerPrefix string, values []node, itemDepth int) error {
-	*lines = append(*lines, fmt.Sprintf("%s[%d]:", headerPrefix, len(values)))
+func appendListArray(lines *[]string, headerPrefix string, values []node, itemDepth int, options encodeOptions) error {
+	*lines = append(*lines, headerPrefix+arrayHeader(len(values), false, options.delimiter)+":")
 	for _, value := range values {
-		if err := appendListItem(lines, value, itemDepth); err != nil {
+		if err := appendListItem(lines, value, itemDepth, options); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func appendListItem(lines *[]string, value node, depth int) error {
-	prefix := indent(depth) + "- "
+func appendListItem(lines *[]string, value node, depth int, options encodeOptions) error {
+	prefix := indent(depth, options.indentSize) + "- "
 	switch value.kind {
 	case kindNull, kindBool, kindNumber, kindString:
-		*lines = append(*lines, prefix+encodePrimitive(value, ','))
+		*lines = append(*lines, prefix+encodePrimitive(value, options.delimiter))
 	case kindArray:
 		if len(value.array) == 0 {
-			*lines = append(*lines, prefix+"[0]:")
+			*lines = append(*lines, prefix+arrayHeader(0, false, options.delimiter)+":")
 			return nil
 		}
 		if allPrimitive(value.array) {
-			*lines = append(*lines, fmt.Sprintf("%s[%d]: %s", prefix, len(value.array), joinPrimitives(value.array, ',')))
+			*lines = append(*lines, prefix+arrayHeader(len(value.array), false, options.delimiter)+": "+joinPrimitives(value.array, options.delimiter))
 			return nil
 		}
-		*lines = append(*lines, fmt.Sprintf("%s[%d]:", prefix, len(value.array)))
+		*lines = append(*lines, prefix+arrayHeader(len(value.array), false, options.delimiter)+":")
 		for _, nested := range value.array {
-			if err := appendListItem(lines, nested, depth+1); err != nil {
+			if err := appendListItem(lines, nested, depth+1, options); err != nil {
 				return err
 			}
 		}
@@ -278,11 +297,11 @@ func appendListItem(lines *[]string, value node, depth int) error {
 			*lines = append(*lines, strings.TrimSuffix(prefix, " "))
 			return nil
 		}
-		if err := appendField(lines, value.object[0], prefix, depth+2); err != nil {
+		if err := appendField(lines, value.object[0], prefix, depth+2, options); err != nil {
 			return err
 		}
 		for _, field := range value.object[1:] {
-			if err := appendField(lines, field, indent(depth+1), depth+2); err != nil {
+			if err := appendField(lines, field, indent(depth+1, options.indentSize), depth+2, options); err != nil {
 				return err
 			}
 		}
@@ -367,33 +386,33 @@ func findMember(object []member, name string) (node, bool) {
 	return node{}, false
 }
 
-func appendTable(lines *[]string, headerPrefix string, values []node, schema []fieldSchema, rowDepth int) {
-	*lines = append(*lines, fmt.Sprintf("%s[%d]{%s}:", headerPrefix, len(values), encodeSchema(schema)))
+func appendTable(lines *[]string, headerPrefix string, values []node, schema []fieldSchema, rowDepth int, options encodeOptions) {
+	*lines = append(*lines, headerPrefix+arrayHeader(len(values), false, options.delimiter)+"{"+encodeSchema(schema, options.delimiter)+"}:")
 	for _, value := range values {
 		cells := make([]node, 0, leafCount(schema))
 		appendCells(&cells, value, schema)
-		*lines = append(*lines, indent(rowDepth)+joinPrimitives(cells, ','))
+		*lines = append(*lines, indent(rowDepth, options.indentSize)+joinPrimitives(cells, options.delimiter))
 	}
 }
 
-func appendKeyedTable(lines *[]string, headerPrefix string, object []member, schema []fieldSchema, rowDepth int) {
-	*lines = append(*lines, fmt.Sprintf("%s[%d:]{%s}:", headerPrefix, len(object), encodeSchema(schema)))
+func appendKeyedTable(lines *[]string, headerPrefix string, object []member, schema []fieldSchema, rowDepth int, options encodeOptions) {
+	*lines = append(*lines, headerPrefix+arrayHeader(len(object), true, options.delimiter)+"{"+encodeSchema(schema, options.delimiter)+"}:")
 	for _, entry := range object {
 		cells := make([]node, 0, leafCount(schema))
 		appendCells(&cells, entry.value, schema)
-		*lines = append(*lines, indent(rowDepth)+encodeKey(entry.name)+": "+joinPrimitives(cells, ','))
+		*lines = append(*lines, indent(rowDepth, options.indentSize)+encodeKey(entry.name)+": "+joinPrimitives(cells, options.delimiter))
 	}
 }
 
-func encodeSchema(schema []fieldSchema) string {
+func encodeSchema(schema []fieldSchema, delimiter byte) string {
 	fields := make([]string, len(schema))
 	for i, field := range schema {
 		fields[i] = encodeKey(field.name)
 		if len(field.fields) > 0 {
-			fields[i] += "{" + encodeSchema(field.fields) + "}"
+			fields[i] += "{" + encodeSchema(field.fields, delimiter) + "}"
 		}
 	}
-	return strings.Join(fields, ",")
+	return strings.Join(fields, string(delimiter))
 }
 
 func leafCount(schema []fieldSchema) int {
@@ -573,7 +592,18 @@ func quote(value string) string {
 	return out.String()
 }
 
-func indent(depth int) string { return strings.Repeat("  ", depth) }
+func arrayHeader(length int, keyed bool, delimiter byte) string {
+	marker := ""
+	if delimiter != defaultDelimiter {
+		marker = string(delimiter)
+	}
+	if keyed {
+		return fmt.Sprintf("[%d:%s]", length, marker)
+	}
+	return fmt.Sprintf("[%d%s]", length, marker)
+}
+
+func indent(depth, size int) string { return strings.Repeat(" ", depth*size) }
 
 var jsonMarshalerType = reflect.TypeFor[json.Marshaler]()
 var textMarshalerType = reflect.TypeFor[encoding.TextMarshaler]()

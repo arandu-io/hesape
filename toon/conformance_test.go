@@ -59,6 +59,17 @@ func TestMarshalPassesTheOfficialDefaultProfileCorpus(t *testing.T) {
 				if string(got) != test.Expected {
 					t.Errorf("Marshal = %q, want %q", got, test.Expected)
 				}
+
+				encoded, err := toon.Encode(test.Input)
+				if err != nil {
+					t.Fatalf("Encode: %v", err)
+				}
+				if encoded != test.Expected {
+					t.Errorf("Encode = %q, want %q", encoded, test.Expected)
+				}
+				if encoded != string(got) {
+					t.Errorf("Encode = %q, Marshal = %q", encoded, got)
+				}
 			})
 		}
 	}
@@ -67,6 +78,70 @@ func TestMarshalPassesTheOfficialDefaultProfileCorpus(t *testing.T) {
 		t.Fatalf("ran %d default-profile fixtures, want the 154 cases pinned at v4.1.1", run)
 	}
 	if skipped != 25 {
-		t.Fatalf("skipped %d option fixtures, want the 25 cases outside Marshal's fixed profile", skipped)
+		t.Fatalf("skipped %d option fixtures, want the 25 cases covered by Encode", skipped)
 	}
+}
+
+func TestEncodePassesTheOfficialOptionsCorpus(t *testing.T) {
+	entries, err := os.ReadDir("testdata/spec-v4.1.1/encode")
+	if err != nil {
+		t.Fatalf("read specification fixtures: %v", err)
+	}
+
+	run := 0
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join("testdata/spec-v4.1.1/encode", entry.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", entry.Name(), err)
+		}
+		var file specFile
+		if err := json.Unmarshal(body, &file); err != nil {
+			t.Fatalf("decode %s: %v", entry.Name(), err)
+		}
+
+		for _, test := range file.Tests {
+			if len(test.Options) == 0 || string(test.Options) == "null" {
+				continue
+			}
+			run++
+			t.Run(entry.Name()+"/"+test.Name, func(t *testing.T) {
+				options := fixtureEncodeOptions(t, test.Options)
+				got, err := toon.Encode(test.Input, options...)
+				if err != nil {
+					t.Fatalf("Encode: %v", err)
+				}
+				if got != test.Expected {
+					t.Errorf("Encode = %q, want %q", got, test.Expected)
+				}
+			})
+		}
+	}
+
+	if run != 25 {
+		t.Fatalf("ran %d option fixtures, want the 25 cases pinned at v4.1.1", run)
+	}
+}
+
+func fixtureEncodeOptions(t *testing.T, raw json.RawMessage) []toon.EncodeOption {
+	t.Helper()
+
+	var fixture struct {
+		Delimiter  *string `json:"delimiter"`
+		IndentSize *int    `json:"indentSize"`
+	}
+	if err := json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatalf("decode fixture options: %v", err)
+	}
+
+	options := make([]toon.EncodeOption, 0, 2)
+	if fixture.Delimiter != nil {
+		options = append(options, toon.WithDelimiter(*fixture.Delimiter))
+	}
+	if fixture.IndentSize != nil {
+		options = append(options, toon.WithIndent(*fixture.IndentSize))
+	}
+	return options
 }
