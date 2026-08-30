@@ -196,6 +196,31 @@ type missing struct{}
 
 func (missing) IsMissing() bool { return true }
 
+type invalidResource struct{}
+
+func (invalidResource) ToArray() map[string]any {
+	return map[string]any{"stream": make(chan int)}
+}
+
+func (invalidResource) With() map[string]any { return nil }
+
+type untouchedWriter struct {
+	header stdhttp.Header
+	status int
+	body   strings.Builder
+}
+
+func (w *untouchedWriter) Header() stdhttp.Header { return w.header }
+
+func (w *untouchedWriter) WriteHeader(status int) { w.status = status }
+
+func (w *untouchedWriter) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.status = stdhttp.StatusOK
+	}
+	return w.body.Write(body)
+}
+
 func TestJSONAndStatusAnswerWithoutAViewLayer(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ctx := hhttp.NewContext(rec, request(stdhttp.MethodGet, "/api/invoices/42"), nil, nil)
@@ -221,6 +246,38 @@ func TestJSONAndStatusAnswerWithoutAViewLayer(t *testing.T) {
 	}
 	if rec.Code != stdhttp.StatusNoContent || rec.Body.Len() != 0 {
 		t.Errorf("answered %d with %d bytes", rec.Code, rec.Body.Len())
+	}
+}
+
+func TestTOONAnswersThroughTheSameResourceAllowlistAsJSON(t *testing.T) {
+	rec := httptest.NewRecorder()
+	ctx := hhttp.NewContext(rec, request(stdhttp.MethodGet, "/ai/invoices/42"), nil, nil)
+
+	resource := invoiceResource{invoice{ID: 42, InternalMargin: 31, OwningAccountID: 7}}
+	if err := ctx.TOON(stdhttp.StatusCreated, resource); err != nil {
+		t.Fatalf("TOON: %v", err)
+	}
+	if rec.Code != stdhttp.StatusCreated {
+		t.Errorf("answered %d, want 201", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/toon; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want text/toon; charset=utf-8", got)
+	}
+	want := "data:\n  id: 42\nversion: 1"
+	if got := rec.Body.String(); got != want {
+		t.Errorf("body = %q, want %q", got, want)
+	}
+}
+
+func TestTOONEncodingFailureLeavesTheResponseUntouched(t *testing.T) {
+	w := &untouchedWriter{header: make(stdhttp.Header)}
+	ctx := hhttp.NewContext(w, request(stdhttp.MethodGet, "/ai/invoices/42"), nil, nil)
+
+	if err := ctx.TOON(stdhttp.StatusCreated, invalidResource{}); err == nil {
+		t.Fatal("TOON accepted a channel that cannot belong to the JSON data model")
+	}
+	if w.status != 0 || w.body.Len() != 0 || len(w.header) != 0 {
+		t.Errorf("failed encoding wrote status=%d headers=%v body=%q", w.status, w.header, w.body.String())
 	}
 }
 

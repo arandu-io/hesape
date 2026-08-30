@@ -6,6 +6,7 @@ import (
 	stdhttp "net/http"
 
 	"github.com/arandu-io/hesape/log"
+	"github.com/arandu-io/hesape/toon"
 )
 
 // Context is what a controller action receives.
@@ -311,6 +312,38 @@ type JsonResource interface {
 // into the response has already sent the status and half an object by the time
 // it reports that it cannot marshal the rest, and neither can be taken back.
 func (c *Context) JSON(status int, resource JsonResource) error {
+	encoded, err := json.Marshal(resourceBody(resource))
+	if err != nil {
+		return err
+	}
+
+	c.Response.Header().Set("Content-Type", "application/json; charset=utf-8")
+	c.Response.WriteHeader(status)
+	_, err = c.Response.Write(encoded)
+	return err
+}
+
+// TOON answers with Token-Oriented Object Notation for a caller that
+// explicitly chooses the AI-oriented representation. JSON remains the default
+// response and request format; TOON is never selected from an Accept header.
+//
+// TOON takes the same JsonResource as [Context.JSON] and applies the same field
+// selection, conditional-field filter, and top-level metadata semantics. The
+// complete body is encoded before any header or status is written, leaving the
+// response untouched when encoding fails.
+func (c *Context) TOON(status int, resource JsonResource) error {
+	encoded, err := toon.Marshal(resourceBody(resource))
+	if err != nil {
+		return err
+	}
+
+	c.Response.Header().Set("Content-Type", toon.MediaType+"; charset=utf-8")
+	c.Response.WriteHeader(status)
+	_, err = c.Response.Write(encoded)
+	return err
+}
+
+func resourceBody(resource JsonResource) map[string]any {
 	data := make(map[string]any)
 	for name, value := range resource.ToArray() {
 		if missing, ok := value.(interface{ IsMissing() bool }); ok && missing.IsMissing() {
@@ -323,16 +356,7 @@ func (c *Context) JSON(status int, resource JsonResource) error {
 	for name, value := range resource.With() {
 		body[name] = value
 	}
-
-	encoded, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-
-	c.Response.Header().Set("Content-Type", "application/json; charset=utf-8")
-	c.Response.WriteHeader(status)
-	_, err = c.Response.Write(encoded)
-	return err
+	return body
 }
 
 // Status answers with a status and no body.
