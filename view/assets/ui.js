@@ -419,10 +419,126 @@
 		}
 	});
 
+	/* ---------------------------------------------------------------------
+	 * Motion, on the platform's own animation engine.
+	 *
+	 * CSS covers almost everything a page needs: a hover, a transition, and --
+	 * with animation-timeline: view() -- an element that arrives as it is
+	 * scrolled to. Two things it does not cover well are a sequence whose steps
+	 * are offset from one another, and an animation that has to run backwards on
+	 * the way out. Those are what this is for, and it is why the list of what it
+	 * can do is short: an effect CSS already expresses belongs in the stylesheet,
+	 * where it survives this file failing to load.
+	 *
+	 * It is Element.animate -- the Web Animations API, which every current
+	 * browser ships. That matters beyond taste: the animation libraries a page
+	 * would otherwise reach for are built on this same call, and what they add is
+	 * a nicer way to write it. Writing it directly costs the sugar and saves the
+	 * dependency, the bytes, and the policy exception a third-party script would
+	 * need under script-src 'self'.
+	 *
+	 * It reads no expression, like the rest of this file. `data-stagger` names an
+	 * effect from a closed list and `data-stagger-step` is a number; anything
+	 * else is ignored. A catalogue rather than a parser is what keeps an
+	 * attribute data instead of code.
+	 *
+	 * Nothing here is required for a page to be usable. Every element is at its
+	 * final state before this runs and is put back to it if anything goes wrong,
+	 * so a browser without IntersectionObserver, a reader who asked for less
+	 * motion, and this file failing to parse all produce the same page: the one
+	 * with everything already in place.
+	 */
+	var EFFECTS = {
+		rise: [
+			{ opacity: 0, transform: 'translateY(20px)' },
+			{ opacity: 1, transform: 'none' }
+		],
+		fade: [
+			{ opacity: 0 },
+			{ opacity: 1 }
+		],
+		/* Used for a row of cards: each one arrives a little scaled down and a
+		 * little low, so it settles into place rather than blinking on. The scale
+		 * reads as depth and the small rise carries the eye; on their own each was
+		 * too slight to see, which is the whole of the "did it animate?" report. */
+		settle: [
+			{ opacity: 0, transform: 'scale(.94) translateY(10px)' },
+			{ opacity: 1, transform: 'none' }
+		]
+	};
+
+	var STAGGER_MS = 70;
+
+	/* Long enough to read as motion. At 460ms with the slight transforms above,
+	 * the animation was over before the eye found it -- a reader would ask whether
+	 * anything moved. The distance grew and the duration with it; the ease still
+	 * starts fast and settles, so the row does not feel slow, it feels placed. */
+	var DURATION_MS = 640;
+	var EASE = 'cubic-bezier(.16,1,.3,1)';
+
+	/* Whether motion is wanted at all.
+	 *
+	 * Asked at the moment of use rather than once at load, because a reader can
+	 * change the setting without reloading the page, and the honest answer is the
+	 * one the system gives now. */
+	function motionWanted() {
+		return !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+	}
+
+	/* Runs one container's children, offset from one another.
+	 *
+	 * The container is unobserved before the first frame rather than after the
+	 * last: this runs once by design, and an element that scrolled out and back
+	 * in mid-animation would otherwise restart from nothing while the reader was
+	 * looking at it. */
+	function runStagger(container) {
+		var name = container.getAttribute('data-stagger');
+		var frames = EFFECTS[name] || EFFECTS.rise;
+
+		var step = parseInt(container.getAttribute('data-stagger-step'), 10);
+		if (!(step >= 0 && step <= 400)) step = STAGGER_MS;
+
+		var children = container.children;
+		for (var i = 0; i < children.length; i++) {
+			children[i].animate(frames, {
+				duration: DURATION_MS,
+				delay: i * step,
+				easing: EASE,
+				/* No fill. The element is already at its final state in the
+				 * document, so the animation plays and hands it back rather
+				 * than holding it: an animation that ends is an element the
+				 * browser stops compositing. */
+				fill: 'none'
+			});
+		}
+	}
+
+	function watchStagger(root) {
+		if (!motionWanted()) return;
+		if (typeof IntersectionObserver !== 'function') return;
+		if (!Element.prototype.animate) return;
+
+		var containers = root.querySelectorAll('[data-stagger]:not([data-stagger-done])');
+		if (!containers.length) return;
+
+		var seen = new IntersectionObserver(function (entries) {
+			for (var i = 0; i < entries.length; i++) {
+				if (!entries[i].isIntersecting) continue;
+				var container = entries[i].target;
+				seen.unobserve(container);
+				container.setAttribute('data-stagger-done', '');
+				runStagger(container);
+			}
+		}, { rootMargin: '0px 0px -12% 0px' });
+
+		for (var j = 0; j < containers.length; j++) seen.observe(containers[j]);
+	}
+
 	if (document.readyState === 'loading') {
-		document.addEventListener('DOMContentLoaded', function () { stamp(document); });
+		document.addEventListener('DOMContentLoaded', function () { stamp(document); watchStagger(document); });
 	} else {
 		stamp(document);
+		watchStagger(document);
 	}
-	document.addEventListener('htmx:load', function (event) { stamp(event.target); });
+	document.addEventListener('htmx:load', function (event) { stamp(event.target); watchStagger(event.target); });
 })();
