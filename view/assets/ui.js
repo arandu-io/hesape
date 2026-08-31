@@ -438,9 +438,10 @@
 	 * need under script-src 'self'.
 	 *
 	 * It reads no expression, like the rest of this file. `data-stagger` names an
-	 * effect from a closed list and `data-stagger-step` is a number; anything
-	 * else is ignored. A catalogue rather than a parser is what keeps an
-	 * attribute data instead of code.
+	 * effect from a closed list, and `data-stagger-step` and
+	 * `data-stagger-duration` are numbers clamped to a sane range; anything else
+	 * is ignored. A catalogue rather than a parser is what keeps an attribute
+	 * data instead of code.
 	 *
 	 * Nothing here is required for a page to be usable. Every element is at its
 	 * final state before this runs and is put back to it if anything goes wrong,
@@ -498,10 +499,17 @@
 		var step = parseInt(container.getAttribute('data-stagger-step'), 10);
 		if (!(step >= 0 && step <= 400)) step = STAGGER_MS;
 
+		/* A grid whose cards want a slower, more deliberate arrival than the row
+		 * default sets data-stagger-duration; out of range or absent, the default
+		 * stands. The component catalogue is the first caller: its cards read as
+		 * hurried at the shared 640ms. */
+		var duration = parseInt(container.getAttribute('data-stagger-duration'), 10);
+		if (!(duration >= 200 && duration <= 2000)) duration = DURATION_MS;
+
 		var children = container.children;
 		for (var i = 0; i < children.length; i++) {
 			children[i].animate(frames, {
-				duration: DURATION_MS,
+				duration: duration,
 				delay: i * step,
 				easing: EASE,
 				/* No fill. The element is already at its final state in the
