@@ -40,6 +40,25 @@ func TestCountQueryAsksForNullInsteadOfComparingToIt(t *testing.T) {
 	}
 }
 
+// The other half of the same rule, and the half that was missing: a match could
+// say a column was NULL and had no way to say it held something, so "this row
+// is soft deleted" was not an assertion anybody could write. A sentinel bound
+// to a placeholder would compare the column against the sentinel.
+func TestCountQueryAsksForNotNullWithoutBindingTheSentinel(t *testing.T) {
+	query, args, err := countQuery("users", Match{"deleted_at": NotNull, "tenant": "acme"})
+	if err != nil {
+		t.Fatalf("building the count: %v", err)
+	}
+
+	const want = "SELECT COUNT(*) FROM users WHERE deleted_at IS NOT NULL AND tenant = ?"
+	if query != want {
+		t.Errorf("built %q, want %q", query, want)
+	}
+	if len(args) != 1 || args[0] != "acme" {
+		t.Errorf("bound %v, want [acme]", args)
+	}
+}
+
 func TestCountQueryWithoutAMatchCountsTheWholeTable(t *testing.T) {
 	query, args, err := countQuery("users", nil)
 	if err != nil {
@@ -84,6 +103,69 @@ func TestMatchPrintsItselfInColumnOrder(t *testing.T) {
 	const want = `{count=3, deleted_at=NULL, tenant="acme"}`
 	if got != want {
 		t.Errorf("printed %s, want %s", got, want)
+	}
+}
+
+// The failure message has to say which question was asked, and a sentinel that
+// printed as a struct literal would say it in a shape nobody reads.
+func TestMatchPrintsTheNotNullPredicateAsThePredicate(t *testing.T) {
+	got := Match{"deleted_at": NotNull}.String()
+
+	const want = `{deleted_at=NOT NULL}`
+	if got != want {
+		t.Errorf("printed %s, want %s", got, want)
+	}
+}
+
+// A soft delete leaves the row and stamps the column. Asking whether the row
+// exists is not the assertion: a delete that removed it outright would pass
+// nothing, and one that did nothing at all would pass a plain AssertDatabaseHas.
+func TestAssertSoftDeletedAsksForTheRowAndForTheStamp(t *testing.T) {
+	db, fake := newFakeDB(t)
+	fake.count = 1
+
+	AssertSoftDeleted(t, context.Background(), db, "invoices", Match{"tenant": "acme", "id": "inv-1"})
+
+	const want = "SELECT COUNT(*) FROM invoices WHERE deleted_at IS NOT NULL AND id = ? AND tenant = ?"
+	if got := fake.lastQuery(); got != want {
+		t.Errorf("asked %q, want %q", got, want)
+	}
+}
+
+// Not the negation of the one above: a row that was hard deleted fails both,
+// because a row that is gone is not a row that survived.
+func TestAssertNotSoftDeletedAsksForTheRowAndForTheAbsenceOfTheStamp(t *testing.T) {
+	db, fake := newFakeDB(t)
+	fake.count = 1
+
+	AssertNotSoftDeleted(t, context.Background(), db, "invoices", Match{"tenant": "acme", "id": "inv-1"})
+
+	const want = "SELECT COUNT(*) FROM invoices WHERE deleted_at IS NULL AND id = ? AND tenant = ?"
+	if got := fake.lastQuery(); got != want {
+		t.Errorf("asked %q, want %q", got, want)
+	}
+}
+
+// The assertion supplies the deleted_at half, so a match that supplies it too
+// is a test saying one thing twice -- and able to say two contradictory things,
+// of which SQL would answer only the second.
+func TestTheSoftDeleteAssertionsRefuseAMatchThatNamesTheColumnItself(t *testing.T) {
+	if _, err := withDeletedAt(Match{DeletedAtColumn: nil}, NotNull); err == nil {
+		t.Error("accepted a match that already named the column the assertion supplies")
+	}
+}
+
+// A match handed to two assertions has to survive the first one: the caller's
+// map is the caller's, and the column this adds is not something they asked for.
+func TestTheSoftDeleteAssertionsDoNotEditTheMatchTheyWereGiven(t *testing.T) {
+	db, fake := newFakeDB(t)
+	fake.count = 1
+
+	where := Match{"tenant": "acme"}
+	AssertSoftDeleted(t, context.Background(), db, "invoices", where)
+
+	if len(where) != 1 {
+		t.Errorf("the match came back as %s, want {tenant=\"acme\"}", where)
 	}
 }
 

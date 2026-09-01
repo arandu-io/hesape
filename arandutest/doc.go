@@ -3,9 +3,9 @@
 //
 // It is a browser (Client), the assertions worth having about what came back
 // (Response), the assertions worth having about what landed in the database
-// (AssertDatabaseHas, AssertDatabaseMissing, AssertDatabaseCount), and the two
-// pieces a test needs to say something about domain events (DrainOutbox,
-// Collected).
+// (AssertDatabaseHas, AssertDatabaseMissing, AssertDatabaseCount,
+// AssertSoftDeleted, AssertNotSoftDeleted), and the two pieces a test needs to
+// say something about domain events (DrainOutbox, Collected).
 //
 // Every application writes the same six things: send a request, do not follow
 // the redirect, keep the cookie, act as somebody, assert about the HTML that
@@ -30,7 +30,7 @@
 //
 // # The database assertions read without a Grant, on purpose
 //
-// These three do, and that is what they are for: they check what the
+// These five do, and that is what they are for: they check what the
 // Grant-protected path actually wrote, so they cannot be the same path or they
 // would prove nothing. They take a table name and a match, never an entity,
 // and they never appear outside a _test.go.
@@ -51,6 +51,5 @@
 // There is no assertion language over JSON here: what these handlers answer
 // with is HTML fragments, and [Response.AssertSee] over the fragment is the
 // assertion that matches. There is no per-process schema cloning, no console
-// command runner, no view-level assertion and no soft-delete assertion --
-// nothing in this collection writes such a column.
+// command runner and no view-level assertion.
 package arandutest

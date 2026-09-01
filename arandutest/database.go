@@ -3,6 +3,7 @@ package arandutest
 import (
 	"context"
 	"fmt"
+	"maps"
 	"regexp"
 	"sort"
 	"strings"
@@ -22,6 +23,27 @@ import (
 // itself. Naming the columns is what makes the assertion say something -- and
 // it is the only spelling that catches the field that never reached SQL.
 type Match map[string]any
+
+// NotNull is the value a Match carries to ask that a column holds something,
+// without saying what.
+//
+//	arandutest.Match{"tenant": "acme", "deleted_at": arandutest.NotNull}
+//
+// nil already meant IS NULL, and the opposite had no spelling at all: a match
+// could say a row was live and could not say it was deleted, so "this row is
+// soft deleted" was not an assertion anybody could write. Every other value in
+// a match is compared with a placeholder, and a placeholder holding a sentinel
+// would compare against the sentinel -- so this one is read where the statement
+// is built and becomes IS NOT NULL instead.
+var NotNull = notNull{}
+
+// notNull is unexported so that NotNull is the only one of it. A second value
+// of the same shape would compile and would silently ask a different question.
+type notNull struct{}
+
+// String is what a failure message prints for it, in the column list beside the
+// values the match compares against.
+func (notNull) String() string { return "NOT NULL" }
 
 // AssertDatabaseHas fails unless at least one row in the table matches.
 //
@@ -80,6 +102,88 @@ func AssertDatabaseCount(t *testing.T, ctx context.Context, db *database.DB, tab
 	if n != want {
 		t.Errorf("%s holds %d row(s), want %d\n%s", table, n, want, sample(ctx, db, table))
 	}
+}
+
+// DeletedAtColumn is the column [AssertSoftDeleted] and [AssertNotSoftDeleted]
+// ask about, and the one a model marks a row deleted in unless it was told to
+// use another.
+//
+// A model that was told to use another is asserted about with
+// [AssertDatabaseHas] and [NotNull] directly, which is what these two are: the
+// name for the column almost every model uses.
+const DeletedAtColumn = "deleted_at"
+
+// AssertSoftDeleted fails unless a row matching is there and is marked deleted.
+//
+//	arandutest.AssertSoftDeleted(t, ctx, db, "invoices", arandutest.Match{
+//		"tenant": "acme",
+//		"id":     "inv-1",
+//	})
+//
+// Both halves are the assertion. A delete that removed the row outright passes
+// no more than a delete that did nothing: the first is a row that is gone when
+// it should be recoverable, the second is a row that is still live, and the
+// failure has to tell them apart. [AssertDatabaseMissing] is the one for a row
+// that should not be there at all.
+//
+// The match must not name the deleted_at column itself -- that is the half this
+// assertion supplies, and a match that supplied it too could contradict it.
+func AssertSoftDeleted(t *testing.T, ctx context.Context, db *database.DB, table string, where Match) {
+	t.Helper()
+
+	deleted, err := withDeletedAt(where, NotNull)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	n, err := countRows(ctx, db, table, deleted)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	if n == 0 {
+		t.Errorf("no soft-deleted row in %s matches %s\n%s", table, deleted, sample(ctx, db, table))
+	}
+}
+
+// AssertNotSoftDeleted fails unless a row matching is there and is not marked
+// deleted.
+//
+// It is not the negation of [AssertSoftDeleted]: a row that was hard deleted
+// fails both, because a row that is gone is not a row that survived. That is
+// the failure this one catches -- a delete that was meant to leave the row
+// recoverable and removed it instead reads as success to any assertion that
+// only asks whether the row is still live.
+//
+// The match must not name the deleted_at column itself.
+func AssertNotSoftDeleted(t *testing.T, ctx context.Context, db *database.DB, table string, where Match) {
+	t.Helper()
+
+	live, err := withDeletedAt(where, nil)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	n, err := countRows(ctx, db, table, live)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	if n == 0 {
+		t.Errorf("no live row in %s matches %s\n%s", table, live, sample(ctx, db, table))
+	}
+}
+
+// withDeletedAt copies the match and adds the question the caller did not ask.
+// It copies rather than writes because the caller's map is the caller's, and a
+// test that hands the same one to two assertions would be asserting about a
+// match the first of them edited.
+func withDeletedAt(where Match, value any) (Match, error) {
+	if _, taken := where[DeletedAtColumn]; taken {
+		return nil, fmt.Errorf("the match already names %s, which this assertion supplies: "+
+			"say it once. A model that marks a row deleted in another column is asserted "+
+			"about with AssertDatabaseHas and arandutest.NotNull", DeletedAtColumn)
+	}
+	out := make(Match, len(where)+1)
+	maps.Copy(out, where)
+	out[DeletedAtColumn] = value
+	return out, nil
 }
 
 // String renders the match the way the failure message needs it: in column
@@ -162,6 +266,12 @@ func countQuery(table string, where Match) (string, []any, error) {
 		// afternoon.
 		if where[col] == nil {
 			b.WriteString(" IS NULL")
+			continue
+		}
+		// The other half of the same rule: NULL never equals anything, so
+		// "holds something" is not a comparison either.
+		if _, ok := where[col].(notNull); ok {
+			b.WriteString(" IS NOT NULL")
 			continue
 		}
 		b.WriteString(" = ?")
