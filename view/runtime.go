@@ -7,6 +7,8 @@ import (
 	"io"
 	"math"
 	"reflect"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -314,6 +316,124 @@ func cssIsSafe(r rune) bool {
 		return true
 	}
 	return strings.ContainsRune("#%.,-+_!", r)
+}
+
+// Attributes renders a set of attributes a caller handed a component, as the
+// text that goes inside a tag: a leading space before each, sorted by name.
+//
+// # Why this exists rather than an escape
+//
+// Every other function here answers a value whose position the compiler read
+// off the markup around it. This one answers a value whose *name* comes from
+// data, and that is a different question: the position of a value is decided by
+// the attribute it lands in, so an attribute nobody wrote at build time has no
+// decided position. TextAttr would be applied to a URL and to a script alike.
+//
+// So the name is checked instead, against what it would mean:
+//
+//   - it has to look like an attribute name -- a letter, then letters, digits
+//     and hyphens, optionally one colon and more of the same;
+//   - "on" at the front, or "hx-on" anywhere in front of a colon, is an event
+//     handler, and its value is JavaScript wearing an attribute's shape;
+//   - "x-" at the front is an Alpine directive, which this framework does not
+//     serve and whose value is an expression;
+//   - "style" is refused because the policy is style-src 'self' with no
+//     unsafe-inline, so a style attribute is dropped by the browser and the
+//     page silently does not do what the markup says;
+//   - an attribute a browser resolves as an address is refused, because TextURL
+//     is what decides a scheme and this would be the one door around it;
+//   - "class", "role" and the aria- family are refused because a component owns
+//     them: class has a field of its own, and the other two are the promise the
+//     component makes to a screen reader.
+//
+// What is left is the set an attribute can carry inertly -- data-, id, title,
+// the form and layout attributes -- and every one of those values is escaped as
+// HTML.
+//
+// The refusal is an error and what comes back beside it is the empty string,
+// for the reason TextURL gives: an attribute quietly renamed or dropped is a
+// page that changed without saying so. A caller that drops the error writes
+// nothing instead of writing the attack.
+//
+// Names are sorted so the output of a given map is one string and not several,
+// which is what a test can hold.
+func Attributes(attrs map[string]string) (string, error) {
+	if len(attrs) == 0 {
+		return "", nil
+	}
+
+	names := make([]string, 0, len(attrs))
+	for name := range attrs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var out strings.Builder
+	for _, name := range names {
+		if err := attributeIsInert(name); err != nil {
+			return "", err
+		}
+		out.WriteString(" " + name + `="` + template.HTMLEscapeString(attrs[name]) + `"`)
+	}
+	return out.String(), nil
+}
+
+// attributeIsInert reports why an attribute name may not be written by a
+// caller, or nil when it may.
+func attributeIsInert(name string) error {
+	if !attributeNamePattern.MatchString(name) {
+		return fmt.Errorf("view: %q is not written as an attribute name. "+
+			"A name is a letter, then letters, digits and hyphens, and at most one colon "+
+			"-- a space or a quote in one ends it, and no escape puts it back", name)
+	}
+
+	head, _, _ := strings.Cut(name, ":")
+	switch {
+	case strings.HasPrefix(head, "on"), strings.HasPrefix(head, "hx-on"):
+		return fmt.Errorf("view: %q holds a script rather than text. "+
+			"An attribute a browser or a library compiles is a JavaScript position "+
+			"wearing an attribute's shape, and nothing escapes a value into being data there", name)
+	case strings.HasPrefix(name, "x-"):
+		return fmt.Errorf("view: %q is an Alpine directive, and this framework serves none. "+
+			"Client behaviour is a name in a catalogue, dispatched by ui.js, "+
+			"and no attribute here is evaluated", name)
+	case name == "style":
+		return fmt.Errorf("view: %q is refused. "+
+			"The policy is style-src 'self' with no unsafe-inline, so the browser drops it "+
+			"and the page does not do what the markup says. Write a class", name)
+	case attributeHoldsURL(name):
+		return fmt.Errorf("view: %q holds an address, and what makes an address safe is its scheme. "+
+			"A component that takes a URL takes it as a field of its own, "+
+			"which is what puts it through the check", name)
+	case name == "class", name == "role", strings.HasPrefix(name, "aria-"):
+		return fmt.Errorf("view: %q belongs to the component. "+
+			"A class is added through the class field, and role and aria- are the promise "+
+			"the component makes to a screen reader", name)
+	}
+	return nil
+}
+
+// attributeNamePattern is the shape of a name this will write.
+//
+// Narrower than the HTML syntax allows, deliberately: what it accepts is what a
+// component is written with, and a name outside it is far more likely to be a
+// mistake than a requirement.
+var attributeNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*(:[a-z0-9-]+)?$`)
+
+// attributeHoldsURL reports whether a browser resolves this attribute's value
+// as an address.
+//
+// The list is of the attributes rather than of the schemes, and it is closed:
+// widening it is a decision somebody makes, while a value reaching one of these
+// unchecked is a decision nobody made.
+func attributeHoldsURL(name string) bool {
+	switch name {
+	case "href", "src", "srcset", "action", "formaction", "cite", "data",
+		"poster", "background", "codebase", "longdesc", "manifest", "profile",
+		"ping", "usemap", "xlink:href":
+		return true
+	}
+	return false
 }
 
 // Yield renders the section a child view declared, or nothing.
