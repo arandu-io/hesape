@@ -24,6 +24,56 @@ the first tag and has nothing before it to compare against.
 
 ---
 
+## v0.21.0 — an attribute bag escapes as HTML
+
+### `view.(*ComponentAttributeBag).Merge` no longer takes an escape flag
+
+```text
+- ./view.(*ComponentAttributeBag).Merge: changed from func(map[string]any, ...bool) *ComponentAttributeBag to func(map[string]any) *ComponentAttributeBag
+```
+
+Drop the argument:
+
+```go
+bag.Merge(defaults, false)   // before
+bag.Merge(defaults)          // now
+```
+
+The flag chose whether to escape a default on the way into the bag, and nothing
+escaped the caller's own value on the way out — so the two halves of one
+attribute were written under different rules. A default carrying an ampersand
+came out doubly escaped, and the value beside it came out able to end the
+attribute it sat in.
+
+Escaping now happens once, in `String`, which is the one place a bag becomes
+markup. Everything the bag holds is text.
+
+### `String` escapes a value as HTML, and drops a name that cannot be written
+
+The signature did not move and `apidiff` reports nothing, which is why this
+entry exists: the **output** changed, and the old output was a hole.
+
+A quote in a value was written as `\"`, faithful to the Blade method this was
+ported from and wrong in HTML, which has no backslash escape. The parser reads
+the backslash as a character of the value and ends the attribute at the quote
+behind it, so
+
+```go
+view.NewComponentAttributeBag(map[string]any{"title": `a" onerror=alert(1) x="`})
+```
+
+rendered a closed `title`, then an `onerror` the caller wrote. Values now go
+through `template.HTMLEscapeString`, the same escape `view.TextAttr` applies.
+
+An attribute **name** carries no character references, so a space or a quote in
+one ends it and no escape puts it back. A name holding any of ``space \t \n \r
+\f " ' > / =`` or NUL is now dropped rather than written. Legal-but-unusual
+names — `wire:model`, `x-data`, `@click`, `:class` — are unaffected: whether a
+component may carry one is not a question this bag answers.
+
+If you relied on `String` returning a value with `\"` in it, you were relying on
+markup this framework could not render safely.
+
 ## v0.19.0 — the second factor is native
 
 Four new packages and a compatible authentication addition break nothing. Four

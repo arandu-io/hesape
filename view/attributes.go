@@ -2,7 +2,7 @@ package view
 
 import (
 	"fmt"
-	"html"
+	"html/template"
 	"iter"
 	"sort"
 	"strings"
@@ -205,19 +205,16 @@ func (b *ComponentAttributeBag) Style(styleList any) *ComponentAttributeBag {
 // are appended rather than replaced, which is why a button can carry its own
 // padding and still take a colour from the call site.
 //
-// escape is variadic so it can be omitted entirely; it defaults to true.
-func (b *ComponentAttributeBag) Merge(attributeDefaults map[string]any, escape ...bool) *ComponentAttributeBag {
-	shouldEscape := true
-	if len(escape) > 0 {
-		shouldEscape = escape[0]
-	}
-
+// # Why nothing is escaped here
+//
+// A bag holds text, and String is the one place that text becomes markup, so
+// String is the one place that escapes. Escaping a default on the way in and
+// the caller's own value never left the two halves of one attribute under
+// different rules: a default carrying an ampersand came out doubly escaped
+// while the value beside it came out able to end the attribute it sat in.
+func (b *ComponentAttributeBag) Merge(attributeDefaults map[string]any) *ComponentAttributeBag {
 	defaults := make(map[string]any, len(attributeDefaults))
 	for k, v := range attributeDefaults {
-		if shouldEscapeAttributeValue(shouldEscape, v) {
-			defaults[k] = html.EscapeString(attributeToString(v))
-			continue
-		}
 		defaults[k] = v
 	}
 
@@ -236,7 +233,7 @@ func (b *ComponentAttributeBag) Merge(attributeDefaults map[string]any, escape .
 	for k, v := range appendable {
 		var defaultsValue any
 		if appendableDefault, ok := defaults[k].(AppendableAttributeValue); ok {
-			defaultsValue = resolveAppendableAttributeDefault(appendableDefault, shouldEscape)
+			defaultsValue = appendableDefault.Value
 		} else {
 			defaultsValue = defaults[k]
 		}
@@ -277,32 +274,6 @@ func joinUnique(values ...string) string {
 	return strings.Join(kept, " ")
 }
 
-// shouldEscapeAttributeValue reports whether value should be HTML-escaped:
-// escape false disables it outright, and otherwise only scalar values --
-// strings and numbers -- are escaped. Anything with a String method is left
-// alone.
-func shouldEscapeAttributeValue(escape bool, value any) bool {
-	if !escape {
-		return false
-	}
-	switch value.(type) {
-	case string, int, int8, int16, int32, int64,
-		uint, uint8, uint16, uint32, uint64, float32, float64:
-		return true
-	default:
-		return false
-	}
-}
-
-// resolveAppendableAttributeDefault returns the underlying value of an
-// appendable default, escaping it first when required.
-func resolveAppendableAttributeDefault(value AppendableAttributeValue, escape bool) any {
-	if shouldEscapeAttributeValue(escape, value.Value) {
-		return html.EscapeString(attributeToString(value.Value))
-	}
-	return value.Value
-}
-
 // Prepends marks value as a default to be appended to, rather than replaced
 // by, what the caller wrote.
 func (b *ComponentAttributeBag) Prepends(value any) AppendableAttributeValue {
@@ -333,7 +304,7 @@ func (b *ComponentAttributeBag) SetAttributes(attributes map[string]any) {
 
 	if parent, ok := copied["attributes"].(*ComponentAttributeBag); ok {
 		delete(copied, "attributes")
-		copied = parent.Merge(copied, false).GetAttributes()
+		copied = parent.Merge(copied).GetAttributes()
 	}
 
 	b.attributes = copied
@@ -397,12 +368,33 @@ func (b *ComponentAttributeBag) ToArray() map[string]any { return b.All() }
 // false and nil drop the attribute entirely; true writes the bare name, which
 // is what checked and disabled need -- except for x-data and the wire: family,
 // where true means an empty value.
+//
+// # The escape, and the one it replaced
+//
+// A value is escaped as HTML, and a name that could not survive being written
+// as one is dropped rather than written.
+//
+// What stood here escaped a quote as \" -- faithful to the Blade method it was
+// ported from, and wrong in HTML, which has no backslash escape. The parser
+// reads the backslash as a character of the value and ends the attribute at the
+// quote behind it, so the value
+//
+//	a" onerror=alert(1) x="
+//
+// came out as a closed attribute followed by an onerror the caller wrote. The
+// name went out unchecked beside it, where a space or a quote does the same
+// thing one field earlier.
+//
+// Dropping the bad name rather than reporting it is what a method returning
+// only a string can do. It is why nothing in this framework's own components
+// renders through this bag: they go through Attributes, which refuses, names
+// the attribute, and gives the view's own line.
 func (b *ComponentAttributeBag) String() string {
 	var out strings.Builder
 	for _, key := range b.keys() {
 		value := b.attributes[key]
 
-		if value == nil {
+		if value == nil || !isAttributeName(key) {
 			continue
 		}
 		if boolean, ok := value.(bool); ok {
@@ -417,9 +409,23 @@ func (b *ComponentAttributeBag) String() string {
 		}
 
 		text := strings.TrimSpace(attributeToString(value))
-		out.WriteString(" " + key + `="` + strings.ReplaceAll(text, `"`, `\"`) + `"`)
+		out.WriteString(" " + key + `="` + template.HTMLEscapeString(text) + `"`)
 	}
 	return strings.TrimSpace(out.String())
+}
+
+// isAttributeName reports whether name can be written as an attribute name.
+//
+// The set it refuses is the one the HTML syntax refuses, and no more: a name
+// carries no character references, so a character that ends the name cannot be
+// written as anything else. Everything outside that -- x-data, wire:model,
+// @click, :class -- is a legal name here, and whether a component may carry it
+// is a question this bag does not answer. Attributes answers it.
+func isAttributeName(name string) bool {
+	if name == "" {
+		return false
+	}
+	return !strings.ContainsAny(name, " \t\n\r\f\"'>/=\x00")
 }
 
 // attributeToString converts an attribute value to the string it renders as.
