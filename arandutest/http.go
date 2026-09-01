@@ -34,6 +34,9 @@ type Client struct {
 	// in one test would otherwise post each other's tokens, and t.Parallel would
 	// make that a race rather than a wrong answer.
 	lastBody string
+
+	// headers are what WithHeader added, sent on every request from here on.
+	headers http.Header
 }
 
 // NewClient returns a client over a handler.
@@ -76,6 +79,39 @@ func (c *Client) ActingAs(s auth.Subject) *Client {
 			"every query is scoped by auth.Tenant(g) and a subject without one reaches no rows (RULE 14).")
 	}
 	c.subject = &s
+	return c
+}
+
+// WithHeader makes every request from here on carry the header, and returns the
+// client so it reads as one line:
+//
+//	arandutest.NewClient(t, app).WithHeader("HX-Request", "true").Delete("/invoices/1", nil)
+//
+// It is sticky rather than an argument for the same reason the cookie jar is a
+// field: the headers a test needs to set describe the client, not the call. A
+// page that boosts sends HX-Request on everything it fires, and the token a
+// generated view puts in hx-headers sits on the body element, so every request
+// leaving that page carries it. Passed per call it would have to be repeated on
+// every line, and the line that forgot it would be exercising a different
+// client than the ones around it.
+//
+// An empty value removes the header, which is how a test says "and this one is
+// not an HTMX request" after saying the others were.
+//
+// What is set here wins over what the client would send itself -- the
+// Content-Type of a form and the X-CSRF-Token read off the last page are both
+// replaceable. That is deliberate: refusing a stolen token and refusing a body
+// that is not the shape it claims are both behaviour a test has to be able to
+// provoke, and neither can be provoked by a client that always knows better.
+func (c *Client) WithHeader(name, value string) *Client {
+	if value == "" {
+		c.headers.Del(name)
+		return c
+	}
+	if c.headers == nil {
+		c.headers = http.Header{}
+	}
+	c.headers.Set(name, value)
 	return c
 }
 
@@ -171,6 +207,11 @@ func (c *Client) do(method, path string, body io.Reader, contentType, csrfToken 
 	}
 	if csrfToken != "" {
 		req.Header.Set("X-CSRF-Token", csrfToken)
+	}
+	// Last, so a header the test set replaces the one the client inferred. See
+	// WithHeader for why that is the way round it is.
+	for name, values := range c.headers {
+		req.Header[name] = append([]string(nil), values...)
 	}
 	for _, ck := range c.cookies {
 		req.AddCookie(ck)

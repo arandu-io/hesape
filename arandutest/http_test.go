@@ -224,3 +224,89 @@ func TestTheJarSurvivesEveryVerb(t *testing.T) {
 	client.Delete("/", nil).AssertSee("carrying first")
 	client.Options("/").AssertSee("carrying first")
 }
+
+// echoHeader answers with one header's value, or with the word for its absence.
+func echoHeader(t *testing.T, name string) http.Handler {
+	t.Helper()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		value := r.Header.Get(name)
+		if value == "" {
+			value = "nothing"
+		}
+		_, _ = w.Write([]byte(name + " is " + value))
+	})
+}
+
+// A header set on the client is sent by every request afterwards, not just the
+// next one: a page that boosts fires HX-Request on everything it sends, and a
+// seam that held for one call would describe a client nobody has.
+func TestAHeaderHoldsForEveryLaterRequest(t *testing.T) {
+	client := arandutest.NewClient(t, echoHeader(t, "HX-Request"))
+
+	client.Get("/").AssertSee("HX-Request is nothing")
+
+	client.WithHeader("HX-Request", "true")
+	client.Get("/").AssertSee("HX-Request is true")
+	client.Post("/", nil).AssertSee("HX-Request is true")
+	client.Delete("/", nil).AssertSee("HX-Request is true")
+}
+
+// Saying a request is not an HTMX one after saying the others were is the other
+// half of the seam. Without it a test would have to build a second client to
+// ask the same handler the same question the other way.
+func TestAnEmptyValueRemovesTheHeader(t *testing.T) {
+	client := arandutest.NewClient(t, echoHeader(t, "HX-Request")).WithHeader("HX-Request", "true")
+
+	client.Get("/").AssertSee("HX-Request is true")
+
+	client.WithHeader("HX-Request", "")
+	client.Get("/").AssertSee("HX-Request is nothing")
+}
+
+// The client reads a token off the last page and sends it. A test that wants to
+// prove the guard refuses somebody else's token has to be able to send somebody
+// else's, so what the test sets replaces what the client inferred.
+func TestAHeaderTheTestSetsReplacesTheOneTheClientInferred(t *testing.T) {
+	client := arandutest.NewClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(tokenPage))
+			return
+		}
+		_, _ = w.Write([]byte("guard read " + r.Header.Get("X-CSRF-Token")))
+	}))
+
+	client.Get("/invoices/1")
+	client.Delete("/invoices/1", nil).AssertSee("guard read tok-1")
+
+	client.WithHeader("X-CSRF-Token", "stolen")
+	client.Delete("/invoices/1", nil).AssertSee("guard read stolen")
+}
+
+// The path the generator emits, end to end: hx-delete on a button, the token in
+// hx-headers because there is no form to hide it in, and a handler that answers
+// an HTMX request with HX-Redirect and no body. AssertRedirect could already
+// read that header; until now nothing could provoke it.
+func TestTheHTMXDeleteThePayloadGeneratorEmitsIsReachable(t *testing.T) {
+	client := arandutest.NewClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(tokenPage))
+			return
+		}
+		if r.Method != http.MethodDelete || r.Header.Get("HX-Request") == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if r.Header.Get("X-CSRF-Token") != "tok-1" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.Header().Set("HX-Redirect", "/invoices")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	client.Get("/invoices/1")
+	client.WithHeader("HX-Request", "true").
+		Delete("/invoices/1", nil).
+		AssertStatus(http.StatusNoContent).
+		AssertRedirect("/invoices")
+}
