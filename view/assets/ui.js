@@ -12,14 +12,24 @@
  * evaluator by hand would reopen the same hole under a different name.
  *
  * Because it is delegation, markup that HTMX swaps in is live the moment it
- * lands: there is nothing to initialise and nothing to tear down. The one sweep
- * below stamps state that only the browser knows -- which accent is in force --
- * onto attributes a stylesheet and a screen reader can see. Skipping the sweep
- * costs a checkmark, never an interaction.
+ * lands: every behaviour this file ships needs no initialising and no tearing
+ * down. The one sweep below stamps state that only the browser knows -- which
+ * accent is in force -- onto attributes a stylesheet and a screen reader can
+ * see. Skipping the sweep costs a checkmark, never an interaction.
  *
- * It reads no expression, keeps no parallel state, and stores nothing per
- * element: open, active and selected all live in the ARIA the markup already
- * has to carry, so the DOM is the state and there is only one copy of it.
+ * Those behaviours read no expression, keep no parallel state, and store
+ * nothing per element: open, active and selected all live in the ARIA the
+ * markup already has to carry, so the DOM is the state and there is only one
+ * copy of it.
+ *
+ * # The one thing that does have a lifecycle
+ *
+ * An application registers behaviours of its own by name -- arandu.ui.define
+ * and arandu.ui.action, below -- and those get mounted, updated and destroyed,
+ * because a behaviour somebody else wrote may take a timer or an observer and
+ * has to be told when its element is going away. That is the exception, it is
+ * hooked to htmx's own events, and it changes nothing about the rule: the
+ * attribute holds a name that is looked up in a map, never code that is run.
  *
  * Loading this file twice is a no-op.
  */
@@ -331,13 +341,157 @@
 		});
 	}
 
-	/* ---- delegation --------------------------------------------------------
+	/* ---- the registry ------------------------------------------------------
 	 *
-	 * Four listeners, all on document, all reading attributes rather than
-	 * running them.
+	 * Everything above is a behaviour this file ships. This is how an
+	 * application adds one of its own without an inline handler.
+	 *
+	 * An application serves a script of its own -- registered with
+	 * view.RegisterAsset, from the origin, like every other asset -- and calls:
+	 *
+	 *     arandu.ui.action('archive-message', function (event, element) { ... });
+	 *
+	 *     arandu.ui.define('message-actions', {
+	 *         mounted:   function (ctx) { ... },
+	 *         updated:   function (ctx) { ... },
+	 *         destroyed: function (ctx) { ... },
+	 *     });
+	 *
+	 * The markup names them and carries nothing else:
+	 *
+	 *     <div data-kyse-behavior="message-actions" data-kyse-props='{"confirm":true}'>
+	 *       <button data-kyse-on-click="archive-message">Archive</button>
+	 *
+	 * # Why a name and not the code
+	 *
+	 * The attribute holds a key into a map. Nothing here parses it, compiles it
+	 * or evaluates it, so the policy stays script-src 'self' with no
+	 * unsafe-eval and this file keeps the property that made it exist instead of
+	 * Alpine. A name that is not registered does nothing and says so once in the
+	 * console -- which is a page missing a behaviour, never a page running one
+	 * somebody typed into a form.
+	 *
+	 * It is the same shape as the effects catalogue below: a catalogue rather
+	 * than a parser is what keeps an attribute data instead of code.
 	 */
 
+	var actions = {};
+	var behaviours = {};
+
+	arandu.ui.action = function (name, fn) {
+		if (typeof name !== 'string' || typeof fn !== 'function') return;
+		actions[name] = fn;
+	};
+
+	arandu.ui.define = function (name, hooks) {
+		if (typeof name !== 'string' || !hooks) return;
+		behaviours[name] = hooks;
+		/* Registration can arrive after the markup: a deferred application
+		 * script runs once, and by then the document is parsed. Mounting what
+		 * is already on the page is what makes the order not matter. */
+		mount(document);
+	};
+
+	/* named answers a lookup and reports a miss once per name.
+	 *
+	 * Once, because the alternative is a console line per element per swap on a
+	 * page whose behaviour is misspelled -- which buries the first one, and the
+	 * first one is the whole message. */
+	var reported = {};
+
+	function named(map, kind, name) {
+		if (Object.prototype.hasOwnProperty.call(map, name)) return map[name];
+		if (!reported[kind + ':' + name] && window.console && console.warn) {
+			reported[kind + ':' + name] = true;
+			console.warn('arandu.ui: no ' + kind + ' is registered as "' + name + '"');
+		}
+		return null;
+	}
+
+	/* context is what a hook receives: the element, and the props the server
+	 * wrote beside it.
+	 *
+	 * The props are parsed once and kept on the element, so updated and
+	 * destroyed see the same object mounted did -- a hook that stored something
+	 * on ctx.props finds it there later, which is the only place per-element
+	 * state can live without this file keeping a second copy of the DOM. */
+	function context(element) {
+		if (!element.__kyse) {
+			var props = {};
+			var raw = element.getAttribute('data-kyse-props');
+			if (raw) {
+				try {
+					props = JSON.parse(raw);
+				} catch (e) {
+					/* The server encodes this, so a parse failure is a bug here
+					 * rather than something a visitor did. The behaviour still
+					 * mounts, with no props, because half a page is worse. */
+					if (window.console && console.warn) {
+						console.warn('arandu.ui: the props of "' + element.getAttribute('data-kyse-behavior') + '" are not JSON');
+					}
+				}
+			}
+			element.__kyse = { element: element, props: props };
+		}
+		return element.__kyse;
+	}
+
+	function mount(scope) {
+		var node = scope && (scope.nodeType === 1 || scope.nodeType === 9) ? scope : document;
+		each(node, '[data-kyse-behavior]', function (element) {
+			if (element.getAttribute('data-kyse-mounted') === 'true') return;
+			var hooks = named(behaviours, 'behaviour', element.getAttribute('data-kyse-behavior'));
+			if (!hooks) return;
+			element.setAttribute('data-kyse-mounted', 'true');
+			if (typeof hooks.mounted === 'function') hooks.mounted(context(element));
+		});
+	}
+
+	function update(scope) {
+		var node = scope && (scope.nodeType === 1 || scope.nodeType === 9) ? scope : document;
+		each(node, '[data-kyse-behavior][data-kyse-mounted="true"]', function (element) {
+			var hooks = behaviours[element.getAttribute('data-kyse-behavior')];
+			if (hooks && typeof hooks.updated === 'function') hooks.updated(context(element));
+		});
+	}
+
+	function destroy(element) {
+		if (!element || element.nodeType !== 1) return;
+		each(element, '[data-kyse-behavior][data-kyse-mounted="true"]', function (mounted) {
+			var hooks = behaviours[mounted.getAttribute('data-kyse-behavior')];
+			if (hooks && typeof hooks.destroyed === 'function') hooks.destroyed(context(mounted));
+			mounted.removeAttribute('data-kyse-mounted');
+			mounted.__kyse = null;
+		});
+	}
+
+	/* dispatch runs the action named for this event, if there is one.
+	 *
+	 * The attribute is data-kyse-on-<event>, so one lookup per delegated
+	 * listener covers every action for that event on the page. */
+	function dispatch(event, type) {
+		var from = origin(event);
+		if (!from) return;
+		var element = from.closest('[data-kyse-on-' + type + ']');
+		if (!element) return;
+		var fn = named(actions, 'action', element.getAttribute('data-kyse-on-' + type));
+		if (fn) fn(event, element);
+	}
+
+	/* ---- delegation --------------------------------------------------------
+	 *
+	 * Six listeners, all on document, all reading attributes rather than
+	 * running them. Change and submit carry no behaviour of this file's own and
+	 * exist for the registry: a form is submitted and a select is changed, and
+	 * neither reaches a click listener.
+	 */
+
+	document.addEventListener('change', function (event) { dispatch(event, 'change'); });
+	document.addEventListener('submit', function (event) { dispatch(event, 'submit'); });
+
 	document.addEventListener('click', function (event) {
+		dispatch(event, 'click');
+
 		var from = origin(event);
 		if (!from) return;
 
@@ -362,6 +516,8 @@
 	});
 
 	document.addEventListener('input', function (event) {
+		dispatch(event, 'input');
+
 		var from = origin(event);
 		if (!from) return;
 
@@ -381,6 +537,8 @@
 	});
 
 	document.addEventListener('keydown', function (event) {
+		dispatch(event, 'keydown');
+
 		var from = origin(event);
 		if (!from || !from.matches('input[role="combobox"]')) return;
 
@@ -543,10 +701,33 @@
 	}
 
 	if (document.readyState === 'loading') {
-		document.addEventListener('DOMContentLoaded', function () { stamp(document); watchStagger(document); });
+		document.addEventListener('DOMContentLoaded', function () { stamp(document); watchStagger(document); mount(document); });
 	} else {
 		stamp(document);
 		watchStagger(document);
+		mount(document);
 	}
-	document.addEventListener('htmx:load', function (event) { stamp(event.target); watchStagger(event.target); });
+
+	/* htmx:load fires for markup that has just been inserted, which is where a
+	 * behaviour on it is mounted. The two sweeps beside it were always
+	 * idempotent; mount is too, by the marker it writes.
+	 *
+	 * afterSettle fires once the swap has settled, on markup that may have been
+	 * there before -- so it is updated and never mounted, and an element that
+	 * arrived in this same swap has already had mounted called by the line
+	 * above rather than updated, which is the distinction the two hooks are
+	 * for.
+	 *
+	 * beforeCleanupElement is the one hook this file has that is not a sweep:
+	 * htmx calls it with an element it is about to remove, which is the last
+	 * moment a behaviour can give back a timer, an observer or a listener it
+	 * took. Without it the only cost is a leak, which is the kind that is
+	 * invisible until a page has been open for an hour. */
+	document.addEventListener('htmx:load', function (event) {
+		stamp(event.target);
+		watchStagger(event.target);
+		mount(event.target);
+	});
+	document.addEventListener('htmx:afterSettle', function (event) { update(event.target); });
+	document.addEventListener('htmx:beforeCleanupElement', function (event) { destroy(event.target); });
 })();
