@@ -50,8 +50,8 @@ type fakeDB struct {
 	queries []string
 }
 
-// newFakeDB registers a fake and returns the instrumented handle plus its state.
-func newFakeDB(t *testing.T) (*database.DB, *fakeDB) {
+// openFake registers a fake and returns the pool over it plus its state.
+func openFake(t *testing.T) (*sql.DB, *fakeDB) {
 	t.Helper()
 
 	fakeMu.Lock()
@@ -72,7 +72,24 @@ func newFakeDB(t *testing.T) (*database.DB, *fakeDB) {
 		fakeMu.Unlock()
 	})
 
+	return inner, state
+}
+
+// newFakeDB returns the instrumented handle over a fake, plus its state.
+func newFakeDB(t *testing.T) (*database.DB, *fakeDB) {
+	t.Helper()
+
+	inner, state := openFake(t)
 	return database.Wrap(inner, database.DialectSQLite), state
+}
+
+// newFakeConnection returns a connection over a fake, plus its state. It is the
+// handle that carries query listeners, which the instrumented one does not.
+func newFakeConnection(t *testing.T) (*database.Connection, *fakeDB) {
+	t.Helper()
+
+	inner, state := openFake(t)
+	return database.NewConnection(inner, "fake", "", nil), state
 }
 
 func lookupFake(dsn string) *fakeDB {

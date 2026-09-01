@@ -4,7 +4,8 @@
 // It is a browser (Client), the assertions worth having about what came back
 // (Response), the assertions worth having about what landed in the database
 // (AssertDatabaseHas, AssertDatabaseMissing, AssertDatabaseCount,
-// AssertSoftDeleted, AssertNotSoftDeleted), and the two pieces a test needs to
+// AssertSoftDeleted, AssertNotSoftDeleted), the assertion about how many
+// statements a block ran (AssertQueryCount), and the two pieces a test needs to
 // say something about domain events (DrainOutbox, Collected).
 //
 // Every application writes the same six things: send a request, do not follow
