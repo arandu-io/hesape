@@ -53,7 +53,7 @@ var csrfFieldSites = []csrfFieldSite{
 	},
 	{
 		file: filepath.Join("..", "arandutest", "http.go"),
-		fn:   "Post",
+		fn:   "submit",
 		role: "the field the test client sends with a submission",
 		find: regexp.MustCompile(`^(_[A-Za-z0-9_]+)=$`),
 	},
