@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/arandu-io/hesape/routing"
 	"github.com/arandu-io/hesape/session"
 )
 
@@ -212,7 +213,7 @@ type finisher struct {
 // first.
 func (f *finisher) run() {
 	f.once.Do(func() {
-		f.middleware.storeCurrentURL(f.request, f.store)
+		f.middleware.storeCurrentPage(f.request, f.store)
 		f.middleware.addCookieToResponse(f.writer, f.store)
 		// The save is last because ageing the flash is part of it, and the
 		// address stored above has to survive into the next request.
@@ -220,7 +221,7 @@ func (f *finisher) run() {
 	})
 }
 
-// storeCurrentURL remembers where somebody was, so a guard can send them back
+// storeCurrentPage remembers where somebody was, so a guard can send them back
 // after they sign in.
 //
 // Only a GET that is a whole page: a POST is not somewhere to return to, and
@@ -233,7 +234,15 @@ func (f *finisher) run() {
 // the same; across two, or behind a redirect the browser resolves against
 // whatever it is currently on, it is a sign-in that lands somewhere else, and
 // http:// is what a scheme-less address downgrades to.
-func (m *StartSession) storeCurrentURL(r *http.Request, store *session.Store) {
+//
+// The name of the route that address matched is stored beside it, from the same
+// request under the same conditions. Two writers filtering separately would be
+// two definitions of "the previous page", and the request that satisfied one
+// filter and not the other would leave a name pointing at an address it never
+// matched. This runs on the way out, after the router has matched, so the route
+// is on the context to be read; a request that reached no registered route
+// stores the empty name, which is the honest answer and keeps the pair in step.
+func (m *StartSession) storeCurrentPage(r *http.Request, store *session.Store) {
 	if r.Method != http.MethodGet {
 		return
 	}
@@ -244,6 +253,7 @@ func (m *StartSession) storeCurrentURL(r *http.Request, store *session.Store) {
 		return
 	}
 	store.SetPreviousURL(fullURL(r))
+	store.SetPreviousRoute(routing.RouteFromContext(r.Context()).GetName())
 }
 
 // fullURL returns the whole address: scheme, host, path and query.

@@ -25,6 +25,8 @@ const (
 	OldInputKey = "_old_input"
 	// PreviousURLKey holds the address to send somebody back to.
 	PreviousURLKey = "_previous.url"
+	// PreviousRouteKey holds the name of the route that address matched.
+	PreviousRouteKey = "_previous.route"
 	// PasswordConfirmedKey holds when the password was last typed again, as a
 	// unix timestamp.
 	PasswordConfirmedKey = "auth.password_confirmed_at"
@@ -737,6 +739,29 @@ func (s *Store) PreviousURL() string {
 // to without a check is an open redirect, and the place to refuse it is where
 // the request is understood -- see hesape/hhttp.
 func (s *Store) SetPreviousURL(u string) { s.Put(PreviousURLKey, u) }
+
+// PreviousRoute returns the name of the route the previous page matched, or ""
+// when there is none -- which is also what an unnamed route reads as, because
+// "the page had no name" and "there was no page" lead to the same code.
+//
+// It is the question the address cannot answer. Deciding what to do about where
+// somebody was -- whether to offer the way back at all, whether this is the
+// sign-in page they are already on, which of several tabs to reopen -- is a
+// decision about which page it was, and reaching that from a URL means matching
+// it a second time or comparing strings against a route that may carry an id.
+// The name is what the router already decided.
+func (s *Store) PreviousRoute() string {
+	previous, _ := s.Get(PreviousRouteKey, "").(string)
+	return previous
+}
+
+// SetPreviousRoute stores the name of the route the previous page matched.
+//
+// It is written wherever [Store.SetPreviousURL] is written and under the same
+// conditions, because the two describe one page. Written apart they would drift
+// into two answers to "where was I", and the request that updated one but not
+// the other would leave a name pointing at an address it never matched.
+func (s *Store) SetPreviousRoute(name string) { s.Put(PreviousRouteKey, name) }
 
 // PasswordConfirmed records that the subject has just typed their password
 // again, as a unix timestamp under [PasswordConfirmedKey].

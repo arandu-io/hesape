@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/arandu-io/hesape/routing"
 	"github.com/arandu-io/hesape/session"
 	"github.com/arandu-io/hesape/session/middleware"
 )
@@ -169,6 +170,114 @@ func TestThePreviousURLIsOnlyRememberedForAPageSomebodyNavigatedTo(t *testing.T)
 	asset.Header.Set("Accept", "text/css,*/*;q=0.1")
 	if got := remembered(asset); got != "" {
 		t.Fatalf("a stylesheet was remembered: %q", got)
+	}
+}
+
+// servedThroughRoute registers the path under name, with the session
+// middleware in the route's own chain, and answers one request through it. It
+// hands back the store as it stood once the middleware had finished with it.
+//
+// The middleware goes in the route's chain rather than around the router
+// because that is where a request carrying the matched route reaches it: the
+// route installs itself in the context and then runs its middleware.
+func servedThroughRoute(t *testing.T, name string, r *http.Request) *session.Store {
+	t.Helper()
+
+	m := middleware.NewStartSession(manager(session.Config{}), nil)
+
+	var store *session.Store
+	route := routing.NewRouter().Get(r.URL.Path, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s, _ := middleware.Session(r.Context())
+		// Read after the middleware has finished, through the same store.
+		defer func() { store = s }()
+		w.WriteHeader(http.StatusOK)
+	}), m.Handle)
+	if name != "" {
+		route.Name(name)
+	}
+
+	route.ServeHTTP(httptest.NewRecorder(), r)
+	if store == nil {
+		t.Fatal("the handler never ran, so this proves nothing about what was remembered")
+	}
+	return store
+}
+
+// The address alone cannot say which page it was. Deciding whether to offer the
+// way back, or whether somebody is already on the page they would be sent to,
+// is a decision about the route -- and reaching it from a URL means matching it
+// a second time, or comparing strings against a path that carries an id.
+func TestThePreviousRouteIsRememberedBesideTheAddress(t *testing.T) {
+	store := servedThroughRoute(t, "invoices.index", pageRequest(http.MethodGet, "/invoices"))
+
+	if got := store.PreviousRoute(); got != "invoices.index" {
+		t.Errorf("the previous route is %q, want invoices.index", got)
+	}
+	if got := store.PreviousURL(); got != "http://example.com/invoices" {
+		t.Errorf("the previous address is %q, and the two have to describe one page", got)
+	}
+}
+
+// One filter, or two definitions of "where I was". A fragment that updated the
+// name and not the address would leave a name pointing at a page nobody was on.
+func TestThePreviousRouteIsFilteredExactlyAsTheAddressIs(t *testing.T) {
+	fragment := pageRequest(http.MethodGet, "/invoices")
+	fragment.Header.Set("HX-Request", "true")
+
+	for _, c := range []struct {
+		name    string
+		request *http.Request
+	}{
+		{"a submission", pageRequest(http.MethodPost, "/invoices")},
+		{"an HTMX fragment", fragment},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			store := servedThroughRoute(t, "invoices.index", c.request)
+
+			if got := store.PreviousRoute(); got != "" {
+				t.Errorf("%s was remembered as %q", c.name, got)
+			}
+			if got := store.PreviousURL(); got != "" {
+				t.Errorf("%s was remembered at %q", c.name, got)
+			}
+		})
+	}
+}
+
+// A page whose route carries no name is remembered at its address under the
+// empty name, and the name of the page before it is cleared rather than left.
+// Leaving it is worse than saying nothing: the pair would then describe two
+// different pages, and nothing in the session says which half is stale.
+func TestAnUnnamedRouteClearsTheNameRatherThanLeavingTheOneBeforeIt(t *testing.T) {
+	m := middleware.NewStartSession(manager(session.Config{}), nil)
+	router := routing.NewRouter()
+
+	var store *session.Store
+	report := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s, _ := middleware.Session(r.Context())
+		defer func() { store = s }()
+		w.WriteHeader(http.StatusOK)
+	})
+	named := router.Get("/invoices", report, m.Handle).Name("invoices.index")
+	unnamed := router.Get("/health", report, m.Handle)
+
+	first := httptest.NewRecorder()
+	named.ServeHTTP(first, pageRequest(http.MethodGet, "/invoices"))
+	if got := store.PreviousRoute(); got != "invoices.index" {
+		t.Fatalf("the first page was remembered as %q, so the rest of this proves nothing", got)
+	}
+
+	// The same session, carried on to a page whose route has no name.
+	c := sessionCookie(t, first, "arandu_session")
+	second := pageRequest(http.MethodGet, "/health")
+	second.AddCookie(&http.Cookie{Name: c.Name, Value: c.Value})
+	unnamed.ServeHTTP(httptest.NewRecorder(), second)
+
+	if got := store.PreviousRoute(); got != "" {
+		t.Errorf("the name of the page before it survived as %q", got)
+	}
+	if got := store.PreviousURL(); got != "http://example.com/health" {
+		t.Errorf("the previous address is %q, and it has to be the page with no name", got)
 	}
 }
 
