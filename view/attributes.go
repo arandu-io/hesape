@@ -421,11 +421,25 @@ func (b *ComponentAttributeBag) String() string {
 // written as anything else. Everything outside that -- x-data, wire:model,
 // @click, :class -- is a legal name here, and whether a component may carry it
 // is a question this bag does not answer. Attributes answers it.
+//
+// The set is the compiler's, which reaches the same question from the other
+// side: aru/internal/kyse/generate.go refuses these same characters where a
+// view writes a name. It first read `" \t\n\r\f\"'>/=\x00"` here and that was
+// short by three -- the less-than, the backtick, and the control characters
+// below U+0020 that are not whitespace.
 func isAttributeName(name string) bool {
 	if name == "" {
 		return false
 	}
-	return !strings.ContainsAny(name, " \t\n\r\f\"'>/=\x00")
+	if strings.ContainsAny(name, " \"'<>/=`") {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if name[i] < 0x20 || name[i] == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // attributeToString converts an attribute value to the string it renders as.

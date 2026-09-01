@@ -81,10 +81,17 @@ func TestAnAttributeThatIsNotInertIsRefused(t *testing.T) {
 	}{
 		{"an event handler", "onclick"},
 		{"an htmx handler", "hx-on:click"},
+		{"the same handler under the alias htmx also reads", "data-hx-on-click"},
+		{"an htmx verb, which is fetched", "hx-post"},
+		{"the same verb under the alias", "data-hx-post"},
+		{"what htmx sends beside the request", "hx-headers"},
+		{"what htmx replaces with the answer", "hx-swap-oob"},
 		{"an Alpine directive", "x-data"},
 		{"an inline style the policy drops", "style"},
 		{"an address, which TextURL decides", "href"},
 		{"an address wearing another name", "formaction"},
+		{"a document, which escaping hands back", "srcdoc"},
+		{"a directive to the browser", "http-equiv"},
 		{"the component's own class", "class"},
 		{"the component's promise to a screen reader", "aria-label"},
 		{"the same promise under its other name", "role"},
@@ -134,7 +141,7 @@ func TestOneRefusalRefusesTheWholeSet(t *testing.T) {
 func TestAnInertNameIsWritten(t *testing.T) {
 	for _, name := range []string{
 		"data-testid", "id", "title", "lang", "dir", "tabindex",
-		"hidden", "draggable", "spellcheck", "inputmode", "hx-post",
+		"hidden", "draggable", "spellcheck", "inputmode", "data-order",
 	} {
 		if _, err := view.Attributes(map[string]string{name: "1"}); err != nil {
 			t.Errorf("%q is inert and was refused: %v", name, err)

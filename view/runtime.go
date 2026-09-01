@@ -333,10 +333,16 @@ func cssIsSafe(r rune) bool {
 //
 //   - it has to look like an attribute name -- a letter, then letters, digits
 //     and hyphens, optionally one colon and more of the same;
-//   - "on" at the front, or "hx-on" anywhere in front of a colon, is an event
-//     handler, and its value is JavaScript wearing an attribute's shape;
+//   - "on" at the front is an event handler, and its value is JavaScript
+//     wearing an attribute's shape;
+//   - the whole HTMX family is refused, in both spellings: a verb is fetched,
+//     hx-vals and hx-headers change what is sent, and hx-swap-oob decides what
+//     of the page the answer replaces. A component that speaks HTMX takes the
+//     ones it supports as fields, where the compiler reads the position;
 //   - "x-" at the front is an Alpine directive, which this framework does not
 //     serve and whose value is an expression;
+//   - srcdoc is a document, and http-equiv makes the element a directive to the
+//     browser -- neither is answered by escaping;
 //   - "style" is refused because the policy is style-src 'self' with no
 //     unsafe-inline, so a style attribute is dropped by the browser and the
 //     page silently does not do what the markup says;
@@ -349,6 +355,14 @@ func cssIsSafe(r rune) bool {
 // What is left is the set an attribute can carry inertly -- data-, id, title,
 // the form and layout attributes -- and every one of those values is escaped as
 // HTML.
+//
+// The list of addresses overlaps the compiler's and is deliberately wider. In
+// aru/internal/kyse/generate.go the position decides, so an HTMX verb is a URL
+// there and goes through TextURL; here the name decides and there is no
+// component behind it, so the whole HTMX family is refused rather than checked.
+// The two lists disagreeing on purpose is fine; disagreeing by accident is how
+// the same attribute ends up under two rules, which is what the first version of
+// this function did with hx-post.
 //
 // The refusal is an error and what comes back beside it is the empty string,
 // for the reason TextURL gives: an attribute quietly renamed or dropped is a
@@ -389,11 +403,25 @@ func attributeIsInert(name string) error {
 
 	head, _, _ := strings.Cut(name, ":")
 	switch {
-	case strings.HasPrefix(head, "on"), strings.HasPrefix(head, "hx-on"):
+	case strings.HasPrefix(head, "on"):
 		return fmt.Errorf("view: %q holds a script rather than text. "+
-			"An attribute a browser or a library compiles is a JavaScript position "+
-			"wearing an attribute's shape, and nothing escapes a value into being data there", name)
-	case strings.HasPrefix(name, "x-"):
+			"An attribute a browser compiles is a JavaScript position wearing an "+
+			"attribute's shape, and nothing escapes a value into being data there", name)
+	case isHTMX(name):
+		// The whole family, not the handlers and the verbs. hx-post is fetched,
+		// hx-vals and hx-headers change what is sent, hx-swap-oob decides what
+		// of the page the answer replaces -- and a component that speaks HTMX
+		// takes the ones it supports as fields of its own, where the compiler
+		// reads the position and puts a URL through TextURL.
+		//
+		// Written as a family for the reason the compiler writes it as one: it
+		// is open, and a list would be one name short of the page that used a
+		// new one.
+		return fmt.Errorf("view: %q is an HTMX attribute, and a component takes the ones it "+
+			"supports as fields of its own. "+
+			"A request written here would go out with the page's own credentials, "+
+			"to an address nothing checked, and swap the answer into the document", name)
+	case strings.HasPrefix(name, "x-"), strings.HasPrefix(name, "data-x-"):
 		return fmt.Errorf("view: %q is an Alpine directive, and this framework serves none. "+
 			"Client behaviour is a name in a catalogue, dispatched by ui.js, "+
 			"and no attribute here is evaluated", name)
@@ -405,12 +433,30 @@ func attributeIsInert(name string) error {
 		return fmt.Errorf("view: %q holds an address, and what makes an address safe is its scheme. "+
 			"A component that takes a URL takes it as a field of its own, "+
 			"which is what puts it through the check", name)
+	case name == "srcdoc":
+		return fmt.Errorf("view: %q holds a document rather than text. "+
+			"The parser undoes character references before it parses what is inside, "+
+			"so escaping the value hands the markup back", name)
+	case name == "http-equiv":
+		return fmt.Errorf("view: %q makes the element a directive to the browser. "+
+			"With a content beside it, it is a redirect or a policy, and neither is "+
+			"something a caller decides about somebody else's component", name)
 	case name == "class", name == "role", strings.HasPrefix(name, "aria-"):
 		return fmt.Errorf("view: %q belongs to the component. "+
 			"A class is added through the class field, and role and aria- are the promise "+
 			"the component makes to a screen reader", name)
 	}
 	return nil
+}
+
+// isHTMX reports whether HTMX reads this attribute.
+//
+// Both spellings, because HTMX resolves every one of its attributes through a
+// data- alias -- `ee(e,t)||ee(e,"data-"+t)` in the bundle -- so a check that
+// only knew the short form is six characters from being bypassed. Alpine reads
+// no such alias, which is why the case above is narrower.
+func isHTMX(name string) bool {
+	return strings.HasPrefix(name, "hx-") || strings.HasPrefix(name, "data-hx-")
 }
 
 // attributeNamePattern is the shape of a name this will write.
