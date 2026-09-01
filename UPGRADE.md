@@ -24,7 +24,36 @@ the first tag and has nothing before it to compare against.
 
 ---
 
-## v0.21.0 — an attribute bag escapes as HTML
+## v0.21.0 — an attribute bag escapes as HTML, and the CSRF field has one name
+
+### The hidden CSRF field is named `_token`
+
+`view.CSRF` — the `@csrf` directive — wrote `name="_csrf"`, and the middleware
+that checks the token read the same spelling. `html.FormBuilder` wrote
+`name="_token"`, and the session has always stored the token under that key.
+
+So a form built with `FormBuilder` carried a field the middleware never looked
+for, and the submission came back 419 with a message telling the developer to
+add a field the form already had.
+
+One spelling survives, and it is `_token`: it is the one the form builder
+already emitted and the one the session already stores.
+
+A view that uses the `@csrf` directive needs no change. A form or an HTMX
+request that writes the field by hand does:
+
+```html
+<input type="hidden" name="_csrf" value="{{ .CSRFToken }}">   <!-- before -->
+<input type="hidden" name="_token" value="{{ .CSRFToken }}">  <!-- now -->
+```
+
+The `X-CSRF-Token` header did not move, so a request that sends the token as a
+header rather than as a form field is unaffected.
+
+`apidiff` reports nothing here, which is why this entry exists: a string literal
+inside a function body is not part of the exported surface. What catches a
+future drift is a test that reads both source files and fails when the two
+spellings stop agreeing.
 
 ### `view.(*ComponentAttributeBag).Merge` no longer takes an escape flag
 
