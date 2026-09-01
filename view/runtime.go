@@ -557,6 +557,6 @@ func CSRF(w io.Writer, data any) error {
 		return fmt.Errorf("view: @csrf needs the page data to provide the token. " +
 			"Add a CSRFToken() string method to the struct the view declares")
 	}
-	_, err := fmt.Fprintf(w, `<input type="hidden" name="_csrf" value="%s">`, holder.CSRFToken())
+	_, err := fmt.Fprintf(w, `<input type="hidden" name="_token" value="%s">`, holder.CSRFToken())
 	return err
 }

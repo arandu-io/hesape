@@ -90,7 +90,7 @@ func (c *Client) Get(path string) *Response { return c.do(http.MethodGet, path, 
 func (c *Client) Post(path string, form map[string]string) *Response {
 	values := make([]string, 0, len(form)+1)
 	if token := c.token(); token != "" {
-		values = append(values, "_csrf="+token)
+		values = append(values, "_token="+token)
 	}
 	for k, v := range form {
 		values = append(values, k+"="+strings.ReplaceAll(v, " ", "+"))
@@ -100,7 +100,7 @@ func (c *Client) Post(path string, form map[string]string) *Response {
 }
 
 func (c *Client) token() string {
-	const marker = `name="_csrf" value="`
+	const marker = `name="_token" value="`
 	at := strings.Index(c.lastBody, marker)
 	if at < 0 {
 		return ""
