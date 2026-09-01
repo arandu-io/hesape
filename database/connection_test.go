@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	dbevents "github.com/arandu-io/hesape/database/events"
 )
@@ -211,6 +212,67 @@ func TestPrepareBindingsConvertsBoolsAndTimes(t *testing.T) {
 	}
 	if got[2] != "x" || got[3] != 3 {
 		t.Fatalf("PrepareBindings changed a value it should not have: %v", got)
+	}
+}
+
+// The three shapes a value that spells its own column answers with: the two the
+// grammar converts, and one it leaves alone.
+type (
+	valuerTime struct{ at time.Time }
+	valuerBool struct{ yes bool }
+	valuerJSON struct{}
+	valuerBad  struct{}
+)
+
+func (v valuerTime) Value() (driver.Value, error) { return v.at, nil }
+func (v valuerBool) Value() (driver.Value, error) { return v.yes, nil }
+func (valuerJSON) Value() (driver.Value, error)   { return `["admin"]`, nil }
+func (valuerBad) Value() (driver.Value, error)    { return nil, errors.New("this one cannot be written") }
+
+// A value that answers with a time reached the driver as a time, while a plain
+// time reached it as the string the grammar spells -- because database/sql
+// resolves a Valuer downstream of this conversion. The two disagreed about what
+// a Tuesday is, which is the thing this function exists to prevent.
+func TestPrepareBindingsConvertsWhatAValuerAnswersWith(t *testing.T) {
+	connection := NewConnection(nil, "", "", nil)
+	at := time.Date(2026, 9, 1, 10, 30, 0, 0, time.UTC)
+
+	got := connection.PrepareBindings([]any{at, valuerTime{at}, true, valuerBool{true}, valuerJSON{}})
+
+	if got[0] != got[1] {
+		t.Errorf("a time came out as %v and a value answering that time as %v; a binding is converted by what it is worth, not by what wraps it", got[0], got[1])
+	}
+	if got[2] != got[3] {
+		t.Errorf("a bool came out as %v and a value answering that bool as %v", got[2], got[3])
+	}
+	if got[4] != `["admin"]` {
+		t.Errorf("a value answering with a string came out as %v, want the string it answered with", got[4])
+	}
+}
+
+// A nil pointer whose type declares Value on the value underneath would panic
+// inside the method rather than answer, so it is NULL -- which is what
+// database/sql answers for the same case.
+func TestPrepareBindingsAnswersNullForANilPointerThatSpellsItsOwnColumn(t *testing.T) {
+	connection := NewConnection(nil, "", "", nil)
+
+	got := connection.PrepareBindings([]any{(*valuerBool)(nil)})
+
+	if got[0] != nil {
+		t.Errorf("PrepareBindings answered %v, want NULL", got[0])
+	}
+}
+
+// A value that refuses to be written is left as it is, so database/sql asks it
+// again and reports the refusal against the statement it belongs to. Swallowing
+// it here would send NULL instead and write a row nobody asked for.
+func TestPrepareBindingsLeavesAValueThatRefusesToBeWritten(t *testing.T) {
+	connection := NewConnection(nil, "", "", nil)
+
+	got := connection.PrepareBindings([]any{valuerBad{}})
+
+	if got[0] != (valuerBad{}) {
+		t.Errorf("PrepareBindings answered %v, want the value itself so the driver reports why it cannot be written", got[0])
 	}
 }
 

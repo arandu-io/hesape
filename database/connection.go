@@ -3,7 +3,9 @@ package database
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -682,7 +684,9 @@ func (c *Connection) BindValues(bindings []any) []any { return c.PrepareBindings
 //
 // A time becomes the string the grammar's date format spells, and a bool
 // becomes 0 or 1 -- both because the engines disagree about the wire form and
-// the grammar is the one that knows which.
+// the grammar is the one that knows which. A value that spells its own column
+// is asked for that spelling first, and what it answers is converted the same
+// way anything else is.
 func (c *Connection) PrepareBindings(bindings []any) []any {
 	return prepareBindings(c.GetQueryGrammar(), bindings)
 }
@@ -707,7 +711,7 @@ func prepareBindings(grammar query.Grammar, bindings []any) []any {
 
 	out := make([]any, len(bindings))
 	for i, value := range bindings {
-		switch v := value.(type) {
+		switch v := resolveValuer(value).(type) {
 		case time.Time:
 			out[i] = v.Format(layout)
 		case bool:
@@ -717,11 +721,50 @@ func prepareBindings(grammar query.Grammar, bindings []any) []any {
 				out[i] = 0
 			}
 		default:
-			out[i] = value
+			out[i] = v
 		}
 	}
 	return out
 }
+
+// resolveValuer asks a value that spells its own column for that spelling, and
+// returns anything else unchanged.
+//
+// It runs before the conversion above rather than after it, and that ordering
+// is the point. database/sql resolves a Valuer too, but it does so downstream of
+// this function -- so a type answering a time.Time reached the driver as a
+// time.Time while a plain time.Time reached it as the string the grammar
+// spells, and the two disagreed about what a Tuesday is. The same held for a
+// bool, which one path sent as 0 or 1 and the other as true.
+//
+// A Value that reports an error is left alone. database/sql asks again and
+// reports it against the statement it belongs to, which is where a person can
+// see which binding it was; swallowing it here would send NULL instead and
+// write a row nobody asked for.
+func resolveValuer(value any) any {
+	valuer, ok := value.(driver.Valuer)
+	if !ok {
+		return value
+	}
+
+	// A nil pointer whose type declares Value on the value underneath would
+	// panic inside the method rather than answer. It is NULL, which is what
+	// database/sql answers for the same case.
+	if v := reflect.ValueOf(valuer); v.Kind() == reflect.Pointer && v.IsNil() &&
+		v.Type().Elem().Implements(valuerType) {
+		return nil
+	}
+
+	resolved, err := valuer.Value()
+	if err != nil {
+		return value
+	}
+	return resolved
+}
+
+// valuerType is driver.Valuer as a reflect.Type, taken once rather than per
+// binding.
+var valuerType = reflect.TypeFor[driver.Valuer]()
 
 // rebind numbers the placeholders of a finished statement for the dialect this
 // connection speaks.

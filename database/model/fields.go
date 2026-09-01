@@ -1,6 +1,7 @@
 package model
 
 import (
+	"database/sql"
 	"fmt"
 	"reflect"
 	"strings"
@@ -234,12 +235,18 @@ var timeLayouts = []string{
 // assign writes a value read from the database into a struct field.
 //
 // It is the half of casting that Go still needs. The other half -- int, bool,
-// array, datetime -- is the field's own type, which the compiler already knows.
+// datetime -- is the field's own type, which the compiler already knows.
 //
 // A conversion that would silently produce the wrong value is refused rather
 // than performed. Go converts an int to a string as a rune, so a numeric column
 // landing in a string field would read as "\x07" instead of "7"; that is an
 // error here.
+//
+// A field whose type knows how to read itself out of a column -- anything with
+// a Scan method -- is handed the driver's value and left to it. That is the
+// whole of array, JSON and enum support, and it is deliberately not a list of
+// encodings this package understands: a type that spells its own column knows
+// what is in it, and a second opinion here would be the encoding decided twice.
 func assign(dst reflect.Value, value any) error {
 	if value == nil {
 		dst.Set(reflect.Zero(dst.Type()))
@@ -269,6 +276,23 @@ func assign(dst reflect.Value, value any) error {
 			return nil
 		}
 		return assign(dst, src.Elem().Interface())
+	}
+
+	// A field that reads itself does so, before any conversion here is tried.
+	// It is the type's own answer about its own column: the slice that is a
+	// JSON array, the struct that is a document, and the enum that refuses a
+	// value it does not know instead of accepting whatever string came back.
+	//
+	// A NULL is not routed here. It is answered above, as the field's zero, so
+	// that a type whose Scan speaks only about the values it has does not have
+	// to carry a branch for the absence of one.
+	if dst.CanAddr() {
+		if scanner, ok := dst.Addr().Interface().(sql.Scanner); ok {
+			if err := scanner.Scan(value); err != nil {
+				return fmt.Errorf("model: reading a %s out of the column: %w", dst.Type(), err)
+			}
+			return nil
+		}
 	}
 
 	switch dst.Type() {
