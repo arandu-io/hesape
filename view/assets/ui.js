@@ -396,16 +396,28 @@
 	 *
 	 * Once, because the alternative is a console line per element per swap on a
 	 * page whose behaviour is misspelled -- which buries the first one, and the
-	 * first one is the whole message. */
+	 * first one is the whole message.
+	 *
+	 * And not before the page has loaded. This file and the application's script
+	 * are both deferred, so the first sweep runs before a single define() has;
+	 * warning there reported every behaviour on the page as unregistered, on
+	 * every load, moments before registering all of them. What is left after
+	 * window load is a real miss, and the sweep below says so. */
 	var reported = {};
+	var loaded = false;
 
 	function named(map, kind, name) {
 		if (Object.prototype.hasOwnProperty.call(map, name)) return map[name];
-		if (!reported[kind + ':' + name] && window.console && console.warn) {
-			reported[kind + ':' + name] = true;
+		if (loaded) miss(kind, name);
+		return null;
+	}
+
+	function miss(kind, name) {
+		if (reported[kind + ':' + name]) return;
+		reported[kind + ':' + name] = true;
+		if (window.console && console.warn) {
 			console.warn('arandu.ui: no ' + kind + ' is registered as "' + name + '"');
 		}
-		return null;
 	}
 
 	/* context is what a hook receives: the element, and the props the server
@@ -436,6 +448,15 @@
 		return element.__kyse;
 	}
 
+	/* justMounted holds what mounted since the last settle finished.
+	 *
+	 * htmx fires htmx:load from a settle task and htmx:afterSettle right after
+	 * the tasks run -- `se(l.tasks,…);se(l.elts,…afterSettle…)` in the bundle --
+	 * so without this every element that arrived in a swap got mounted and then
+	 * immediately updated. Two hooks that always fire together are one hook, and
+	 * a behaviour that did its setting up in mounted did it twice. */
+	var justMounted = new WeakSet();
+
 	function mount(scope) {
 		var node = scope && (scope.nodeType === 1 || scope.nodeType === 9) ? scope : document;
 		each(node, '[data-kyse-behavior]', function (element) {
@@ -443,6 +464,7 @@
 			var hooks = named(behaviours, 'behaviour', element.getAttribute('data-kyse-behavior'));
 			if (!hooks) return;
 			element.setAttribute('data-kyse-mounted', 'true');
+			justMounted.add(element);
 			if (typeof hooks.mounted === 'function') hooks.mounted(context(element));
 		});
 	}
@@ -450,6 +472,10 @@
 	function update(scope) {
 		var node = scope && (scope.nodeType === 1 || scope.nodeType === 9) ? scope : document;
 		each(node, '[data-kyse-behavior][data-kyse-mounted="true"]', function (element) {
+			if (justMounted.has(element)) {
+				justMounted.delete(element);
+				return;
+			}
 			var hooks = behaviours[element.getAttribute('data-kyse-behavior')];
 			if (hooks && typeof hooks.updated === 'function') hooks.updated(context(element));
 		});
@@ -730,4 +756,18 @@
 	});
 	document.addEventListener('htmx:afterSettle', function (event) { update(event.target); });
 	document.addEventListener('htmx:beforeCleanupElement', function (event) { destroy(event.target); });
+
+	/* By window load every deferred script has run, so a behaviour still
+	 * unmounted is one nobody registered -- which is worth one line each, and is
+	 * the only moment this file can tell that apart from a script that has not
+	 * run yet. From here on a miss is reported where it is found. */
+	window.addEventListener('load', function () {
+		loaded = true;
+		mount(document);
+		each(document, '[data-kyse-behavior]', function (element) {
+			if (element.getAttribute('data-kyse-mounted') !== 'true') {
+				miss('behaviour', element.getAttribute('data-kyse-behavior'));
+			}
+		});
+	});
 })();

@@ -214,6 +214,48 @@ func TestTheLifecycleIsHookedToHtmx(t *testing.T) {
 	}
 }
 
+// TestUpdatedDoesNotFireOnWhatJustMounted is the ordering the two hooks are
+// only distinct because of.
+//
+// htmx fires htmx:load from a settle task and htmx:afterSettle immediately
+// after the tasks run -- se(l.tasks,…);se(l.elts,…afterSettle…) in the bundle --
+// so an element that arrives in a swap reaches both. Without a guard it mounted
+// and then updated in the same breath, two hooks that always fire together are
+// one hook, and a behaviour that set itself up in mounted did it twice.
+func TestUpdatedDoesNotFireOnWhatJustMounted(t *testing.T) {
+	script := code(readUI(t))
+
+	if !strings.Contains(script, "justMounted.add(element)") {
+		t.Error("mounting records nothing, so the update that follows it cannot be told apart")
+	}
+	if !strings.Contains(script, "justMounted.has(element)") {
+		t.Error("updating does not check what just mounted")
+	}
+	if !strings.Contains(script, "justMounted.delete(element)") {
+		t.Error("the record is never cleared, so the element is skipped by every later update")
+	}
+}
+
+// TestAMissIsNotReportedBeforeTheScriptsHaveRun. This file and the
+// application's are both deferred, so the first sweep runs before a single
+// define() has. Warning there reported every behaviour on the page as
+// unregistered, on every load, moments before registering all of them -- and a
+// warning that is wrong on the happy path is one nobody reads on the unhappy
+// one.
+func TestAMissIsNotReportedBeforeTheScriptsHaveRun(t *testing.T) {
+	script := code(readUI(t))
+
+	if !strings.Contains(script, "if (loaded) miss(kind, name);") {
+		t.Error("a miss is reported without waiting for the page to load")
+	}
+	if !strings.Contains(script, `window.addEventListener('load'`) {
+		t.Error("nothing reports the misses that are real once every script has run")
+	}
+	if !strings.Contains(script, "loaded = true;") {
+		t.Error("the flag is never set, so a miss after load is never reported either")
+	}
+}
+
 // line returns the source line containing the byte at, for a message somebody
 // can act on without opening the file and counting.
 func line(src string, at int) string {
