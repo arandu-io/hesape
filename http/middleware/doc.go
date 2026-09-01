@@ -1,6 +1,6 @@
 // Package middleware holds the standard middleware every application
 // wires: CORS, security headers, body-size limits, host and proxy trust,
-// and cache validation.
+// cache validation, and the method a form could not send for itself.
 //
 // A middleware here is a func(http.Handler) http.Handler, because that is
 // the shape net/http composes. Configuration that a bootstrap step sets
