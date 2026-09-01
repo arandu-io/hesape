@@ -80,23 +80,72 @@ func (c *Client) ActingAs(s auth.Subject) *Client {
 }
 
 // Get sends a GET.
-func (c *Client) Get(path string) *Response { return c.do(http.MethodGet, path, nil, "") }
+func (c *Client) Get(path string) *Response { return c.do(http.MethodGet, path, nil, "", "") }
+
+// Options sends an OPTIONS, which carries no body for the same reason a GET
+// does not: it asks what may be done with the address rather than doing it.
+func (c *Client) Options(path string) *Response {
+	return c.do(http.MethodOptions, path, nil, "", "")
+}
 
 // Post sends a form.
 //
 // The CSRF token is read off the last page this client loaded and sent with the
-// body, because that is what a browser does -- and a test that skips it is a
+// request, because that is what a browser does -- and a test that skips it is a
 // test that proves the form works with protection disabled.
 func (c *Client) Post(path string, form map[string]string) *Response {
+	return c.submit(http.MethodPost, path, form)
+}
+
+// Put sends a form as a PUT: the whole replacement of what is at the address.
+//
+// It carries the token and the cookies exactly as [Client.Post] does. A
+// generated resource registers PUT beside POST, so a client without this leaves
+// a route of every generated module unreachable -- and a test that reaches for
+// POST instead proves something about a route the application does not have.
+func (c *Client) Put(path string, form map[string]string) *Response {
+	return c.submit(http.MethodPut, path, form)
+}
+
+// Patch sends a form as a PATCH: the part of what is at the address that
+// changed. It carries the token and the cookies exactly as [Client.Post] does.
+func (c *Client) Patch(path string, form map[string]string) *Response {
+	return c.submit(http.MethodPatch, path, form)
+}
+
+// Delete sends a DELETE, with a form when one is given and a nil form when
+// there is nothing to say beyond the address.
+//
+// A nil form still carries the token, because the guard in front of a delete is
+// the guard that is in front of a post: a request that reaches it without one is
+// refused, and a client that could not send one would need the guard turned off
+// to pass.
+func (c *Client) Delete(path string, form map[string]string) *Response {
+	return c.submit(http.MethodDelete, path, form)
+}
+
+// submit is what the four form-carrying verbs share: the method is the only
+// thing that differs between them, so it is the only thing they pass.
+//
+// The token goes in the header as well as in the body, and the header is the
+// half that matters here. net/http parses a request body into the form only for
+// POST, PUT and PATCH -- a DELETE body is never parsed, whatever it holds -- so
+// a delete that carried the token only in the body would arrive at the guard
+// carrying nothing. That is the same reason the generated markup puts the token
+// in hx-headers rather than in a field: the request that deletes has no form.
+func (c *Client) submit(method, path string, form map[string]string) *Response {
+	c.t.Helper()
+
+	token := c.token()
 	values := make([]string, 0, len(form)+1)
-	if token := c.token(); token != "" {
+	if token != "" {
 		values = append(values, "_token="+token)
 	}
 	for k, v := range form {
 		values = append(values, k+"="+strings.ReplaceAll(v, " ", "+"))
 	}
-	return c.do(http.MethodPost, path, strings.NewReader(strings.Join(values, "&")),
-		"application/x-www-form-urlencoded")
+	return c.do(method, path, strings.NewReader(strings.Join(values, "&")),
+		"application/x-www-form-urlencoded", token)
 }
 
 func (c *Client) token() string {
@@ -113,12 +162,15 @@ func (c *Client) token() string {
 	return rest[:end]
 }
 
-func (c *Client) do(method, path string, body io.Reader, contentType string) *Response {
+func (c *Client) do(method, path string, body io.Reader, contentType, csrfToken string) *Response {
 	c.t.Helper()
 
 	req := httptest.NewRequest(method, path, body)
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
+	}
+	if csrfToken != "" {
+		req.Header.Set("X-CSRF-Token", csrfToken)
 	}
 	for _, ck := range c.cookies {
 		req.AddCookie(ck)

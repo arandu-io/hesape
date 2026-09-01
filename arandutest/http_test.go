@@ -1,7 +1,9 @@
 package arandutest_test
 
 import (
+	"io"
 	"net/http"
+	"strconv"
 	"testing"
 
 	"github.com/arandu-io/hesape/arandutest"
@@ -107,4 +109,118 @@ func TestActingAsAcceptsADeclaredGuest(t *testing.T) {
 	client := arandutest.NewClient(t, whoami(t)).ActingAs(auth.Guest("acme"))
 
 	client.Get("/").AssertSee("guest of acme")
+}
+
+// tokenPage is a page carrying the hidden field a form carries, so a client
+// that loads it has a token to send afterwards.
+const tokenPage = `<form method="post"><input type="hidden" name="_token" value="tok-1"></form>`
+
+// tokenOf reads the token off a request the way a guard reads it: the header
+// first, then the parsed form. The order is not a preference -- net/http parses
+// a body into the form only for POST, PUT and PATCH, so on a DELETE the header
+// is the only place a token can be.
+func tokenOf(r *http.Request) string {
+	if token := r.Header.Get("X-CSRF-Token"); token != "" {
+		return token
+	}
+	_ = r.ParseForm()
+	return r.PostFormValue("_token")
+}
+
+// echoRequest hands out the token page on a GET and, on anything else, answers
+// with the method it was asked with and the token the request carried -- the
+// pair every verb has to get right.
+func echoRequest(t *testing.T) http.Handler {
+	t.Helper()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(tokenPage))
+			return
+		}
+		token := tokenOf(r)
+		if token == "" {
+			token = "none"
+		}
+		_, _ = w.Write([]byte(r.Method + " with token " + token))
+	})
+}
+
+// A generated resource registers PUT, PATCH and DELETE beside GET and POST. A
+// client that reaches only two of the five leaves three routes of every
+// generated module untestable, and a test that posts to a route registered as a
+// DELETE proves something about a route the application does not have.
+func TestEveryVerbAResourceRegistersReachesTheHandler(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		send func(*arandutest.Client) *arandutest.Response
+		want string
+	}{
+		{"put", func(cl *arandutest.Client) *arandutest.Response {
+			return cl.Put("/invoices/1", map[string]string{"total": "10"})
+		}, "PUT with token tok-1"},
+		{"patch", func(cl *arandutest.Client) *arandutest.Response {
+			return cl.Patch("/invoices/1", map[string]string{"total": "10"})
+		}, "PATCH with token tok-1"},
+		{"delete", func(cl *arandutest.Client) *arandutest.Response {
+			return cl.Delete("/invoices/1", nil)
+		}, "DELETE with token tok-1"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			client := arandutest.NewClient(t, echoRequest(t))
+			client.Get("/invoices/1/edit")
+
+			c.send(client).AssertOk().AssertSee(c.want)
+		})
+	}
+}
+
+// A delete has no form to hide a field in, and net/http never parses a DELETE
+// body into one. The token therefore has to arrive in the header, which is what
+// the generated markup does with hx-headers: a client that sent it only in the
+// body would arrive at the guard carrying nothing, and the only way to make the
+// test pass would be to turn the guard off.
+func TestADeleteCarriesTheTokenWhereAGuardCanReadIt(t *testing.T) {
+	client := arandutest.NewClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(tokenPage))
+			return
+		}
+		_ = r.ParseForm()
+		_, _ = w.Write([]byte("header " + r.Header.Get("X-CSRF-Token") +
+			", form " + r.PostFormValue("_token")))
+	}))
+
+	client.Get("/invoices/1")
+	client.Delete("/invoices/1", nil).AssertSee("header tok-1, form ")
+}
+
+// An OPTIONS asks what may be done with the address, so it sends no body: a
+// request that arrives with a form is a request that did something.
+func TestOptionsAsksWithoutSendingABody(t *testing.T) {
+	client := arandutest.NewClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("Allow", "GET, DELETE")
+		_, _ = w.Write([]byte(r.Method + " carried " + strconv.Itoa(len(body)) + " bytes"))
+	}))
+
+	client.Get("/invoices/1")
+	response := client.Options("/invoices/1")
+
+	response.AssertSee("OPTIONS carried 0 bytes")
+	if got := response.Header("Allow"); got != "GET, DELETE" {
+		t.Errorf("Allow came back %q, want %q", got, "GET, DELETE")
+	}
+}
+
+// The jar holds across the verbs too. It used to hold only across the two that
+// existed, which is the same thing said about a smaller set: a sign-in followed
+// by a delete has to arrive as the same session or the delete is anonymous.
+func TestTheJarSurvivesEveryVerb(t *testing.T) {
+	client := arandutest.NewClient(t, echoCookie(t))
+
+	client.Get("/?set=first")
+	client.Put("/", nil).AssertSee("carrying first")
+	client.Patch("/", nil).AssertSee("carrying first")
+	client.Delete("/", nil).AssertSee("carrying first")
+	client.Options("/").AssertSee("carrying first")
 }
