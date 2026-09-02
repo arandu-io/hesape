@@ -239,6 +239,9 @@ func (b *Builder) addWhere(boolean string, column any, args ...any) *Builder {
 
 	operator, value := prepareValueAndOperator(args...)
 	operator = b.acceptOperator(operator)
+	if b.Err() != nil {
+		return b
+	}
 	b.Wheres = append(b.Wheres, Where{
 		Type:     "Basic",
 		Column:   column,
@@ -315,6 +318,9 @@ func (b *Builder) AddNestedWhereQuery(query *Builder, boolean string) *Builder {
 func (b *Builder) WhereColumn(first any, args ...any) *Builder {
 	operator, second := prepareValueAndOperator(args...)
 	operator = b.acceptOperator(operator)
+	if b.Err() != nil {
+		return b
+	}
 	b.Wheres = append(b.Wheres, Where{
 		Type:     "Column",
 		First:    first,

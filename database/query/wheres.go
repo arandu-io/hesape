@@ -113,6 +113,9 @@ func (b *Builder) MergeWheres(wheres []Where, bindings []any) *Builder {
 func (b *Builder) OrWhereColumn(first any, args ...any) *Builder {
 	operator, second := prepareValueAndOperator(args...)
 	operator = b.acceptOperator(operator)
+	if b.Err() != nil {
+		return b
+	}
 	b.Wheres = append(b.Wheres, Where{
 		Type:     "Column",
 		First:    first,
@@ -338,6 +341,9 @@ func (b *Builder) OrWhereYear(column any, args ...any) *Builder {
 func (b *Builder) addDateBasedWhere(typ string, column any, boolean string, args ...any) *Builder {
 	operator, value := prepareValueAndOperator(args...)
 	operator = b.acceptOperator(operator)
+	if b.Err() != nil {
+		return b
+	}
 	value = formatDatePart(typ, flattenValue(value))
 
 	b.Wheres = append(b.Wheres, Where{
@@ -392,6 +398,9 @@ func (b *Builder) WhereRowValues(columns []any, operator string, values []any, b
 			len(columns), len(values)))
 	}
 	operator = b.acceptOperator(operator)
+	if b.Err() != nil {
+		return b
+	}
 	b.Wheres = append(b.Wheres, Where{
 		Type: "RowValues", Columns: columns, Operator: operator, Values: values, Boolean: boolean,
 	})
@@ -534,6 +543,9 @@ func (b *Builder) OrWhereJSONLength(column any, args ...any) *Builder {
 func (b *Builder) addWhereJSONLength(column any, boolean string, args ...any) *Builder {
 	operator, value := prepareValueAndOperator(args...)
 	operator = b.acceptOperator(operator)
+	if b.Err() != nil {
+		return b
+	}
 
 	b.Wheres = append(b.Wheres, Where{
 		Type: "JsonLength", Column: column, Operator: operator, Value: value, Boolean: boolean,

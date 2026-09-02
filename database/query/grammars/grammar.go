@@ -154,6 +154,37 @@ func NewGrammar() *Grammar {
 	return g
 }
 
+// compilationError runs the builder's final operator barrier against the
+// grammar that will actually compile it. Compile methods are public, so they
+// cannot assume the caller came through Builder.ToSQL or an execution method.
+func (g *Grammar) compilationError(q *query.Builder) error {
+	if q == nil {
+		return errors.New("query/grammars: cannot compile a nil query")
+	}
+	if err := q.Err(); err != nil {
+		return err
+	}
+
+	original := q.Grammar
+	policy := original
+	if active, ok := g.self.(query.Grammar); ok {
+		policy = active
+	}
+	defer func() { q.Grammar = original }()
+
+	q.Grammar = policy
+	q.ApplyBeforeQueryCallbacks()
+	if err := q.Err(); err != nil {
+		return err
+	}
+
+	// A callback can replace the public Grammar field. The receiver still
+	// compiles this call, so validate once more with its policy authoritative.
+	q.Grammar = policy
+	q.ApplyBeforeQueryCallbacks()
+	return q.Err()
+}
+
 // selectComponents lists the clauses of a select, in the order they are
 // concatenated.
 var selectComponents = []string{
@@ -182,6 +213,9 @@ type component struct {
 // CompileSelect builds the SQL for a select statement, or delegates to the
 // group-limit or union-aggregate path when the query needs one.
 func (g *Grammar) CompileSelect(q *query.Builder) string {
+	if g.compilationError(q) != nil {
+		return ""
+	}
 	if (len(q.Unions) > 0 || len(q.Havings) > 0) && q.GetAggregate() != nil {
 		return g.compileUnionAggregate(q)
 	}
@@ -322,6 +356,9 @@ func (g *Grammar) CompileIndexHint(q *query.Builder, indexHint *query.IndexHint)
 
 // CompileJoins builds the SQL for the query's join clauses.
 func (g *Grammar) CompileJoins(q *query.Builder, joins []*query.JoinClause) string {
+	if g.compilationError(q) != nil {
+		return ""
+	}
 	d := g.self
 	parts := make([]string, 0, len(joins))
 
@@ -385,6 +422,9 @@ func (g *Grammar) SupportsStraightJoins() (bool, error) {
 // CompileWheres builds the SQL where clause for the query, or the empty
 // string if it has no where clauses.
 func (g *Grammar) CompileWheres(q *query.Builder) string {
+	if g.compilationError(q) != nil {
+		return ""
+	}
 	clauses := g.whereClauses(q)
 	if clauses == "" {
 		return ""
@@ -875,6 +915,9 @@ func (g *Grammar) CompileGroups(q *query.Builder, groups []any) string {
 // CompileHavings builds the SQL having clause, or the empty string if the
 // query has no having clauses.
 func (g *Grammar) CompileHavings(q *query.Builder) string {
+	if g.compilationError(q) != nil {
+		return ""
+	}
 	clauses := g.havingClauses(q)
 	if clauses == "" {
 		return ""
@@ -1104,6 +1147,9 @@ func (g *Grammar) compileUnionAggregate(q *query.Builder) string {
 // CompileExists builds a select that reports whether the query would
 // return any rows.
 func (g *Grammar) CompileExists(q *query.Builder) string {
+	if g.compilationError(q) != nil {
+		return ""
+	}
 	return "select exists(" + g.self.CompileSelect(q) + ") as " + g.self.Wrap("exists")
 }
 
@@ -1117,6 +1163,9 @@ func (g *Grammar) CompileExists(q *query.Builder) string {
 // up with it. Every method here that walks a values map sorts it the same
 // way.
 func (g *Grammar) CompileInsert(q *query.Builder, values []map[string]any) string {
+	if g.compilationError(q) != nil {
+		return ""
+	}
 	d := g.self
 	table := d.WrapTable(q.GetFrom())
 
@@ -1141,12 +1190,18 @@ func (g *Grammar) CompileInsert(q *query.Builder, values []map[string]any) strin
 // CompileInsertGetID builds the SQL for an insert whose generated id the
 // caller wants back.
 func (g *Grammar) CompileInsertGetID(q *query.Builder, values map[string]any, sequence string) string {
+	if g.compilationError(q) != nil {
+		return ""
+	}
 	return g.self.CompileInsert(q, []map[string]any{values})
 }
 
 // CompileInsertUsing builds the SQL for an insert whose values come from a
 // select statement rather than literal rows.
 func (g *Grammar) CompileInsertUsing(q *query.Builder, columns []any, sql string) string {
+	if g.compilationError(q) != nil {
+		return ""
+	}
 	d := g.self
 	table := d.WrapTable(q.GetFrom())
 
@@ -1162,6 +1217,9 @@ func (g *Grammar) CompileInsertUsing(q *query.Builder, columns []any, sql string
 // insert. The base implementation returns an error: only a driver that
 // supports it overrides it.
 func (g *Grammar) CompileInsertOrIgnoreReturning(q *query.Builder, values []map[string]any, uniqueBy, returning []string) (string, error) {
+	if err := g.compilationError(q); err != nil {
+		return "", err
+	}
 	return "", fmt.Errorf("query/grammars: this database engine does not support insert or ignore with returning")
 }
 
@@ -1169,11 +1227,17 @@ func (g *Grammar) CompileInsertOrIgnoreReturning(q *query.Builder, values []map[
 // statement that ignores conflicting rows. The base implementation returns
 // an error: only a driver that supports it overrides it.
 func (g *Grammar) CompileInsertOrIgnoreUsing(q *query.Builder, columns []any, sql string) (string, error) {
+	if err := g.compilationError(q); err != nil {
+		return "", err
+	}
 	return "", fmt.Errorf("query/grammars: this database engine does not support inserting while ignoring errors")
 }
 
 // CompileUpdate builds the SQL for an update statement.
 func (g *Grammar) CompileUpdate(q *query.Builder, values map[string]any) string {
+	if g.compilationError(q) != nil {
+		return ""
+	}
 	d := g.self
 	table := d.WrapTable(q.GetFrom())
 	columns := d.CompileUpdateColumns(q, values)
@@ -1239,6 +1303,9 @@ func (g *Grammar) PrepareBindingsForUpdate(bindings map[string][]any, values map
 
 // CompileDelete builds the SQL for a delete statement.
 func (g *Grammar) CompileDelete(q *query.Builder) string {
+	if g.compilationError(q) != nil {
+		return ""
+	}
 	d := g.self
 	table := d.WrapTable(q.GetFrom())
 	where := d.CompileWheres(q)
@@ -1277,6 +1344,9 @@ func (g *Grammar) PrepareBindingsForDelete(bindings map[string][]any) []any {
 
 // CompileTruncate builds the SQL that empties a table.
 func (g *Grammar) CompileTruncate(q *query.Builder) map[string][]any {
+	if g.compilationError(q) != nil {
+		return nil
+	}
 	return map[string][]any{"truncate table " + g.self.WrapTable(q.GetFrom()): {}}
 }
 

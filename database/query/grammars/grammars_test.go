@@ -1,6 +1,7 @@
 package grammars_test
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
@@ -708,6 +709,74 @@ func TestOperatorsAreValidatedAgainstTheEffectiveDialect(t *testing.T) {
 				t.Fatalf("unsupported operator %q compiled as %s", test.operator, sql)
 			}
 		})
+	}
+}
+
+func TestAnInvalidCommonOperatorIsNeitherStoredNorDirectlyCompiled(t *testing.T) {
+	g := grammars.NewMySQLGrammar()
+	b := query.NewBuilder(nil, g, nil).
+		From("users").
+		Where("id", "= 0 OR 1 =", 1)
+
+	if len(b.Wheres) != 0 {
+		t.Errorf("the invalid operator was stored in %v", b.Wheres)
+	}
+	if sql := g.CompileSelect(b); sql != "" {
+		t.Errorf("the public compiler emitted hostile SQL: %s", sql)
+	}
+	if !errors.Is(b.Err(), query.ErrInvalidOperator) {
+		t.Fatalf("Err() = %v, want ErrInvalidOperator", b.Err())
+	}
+}
+
+func TestPublicStatementCompilersFailClosedAfterDirectOperatorMutation(t *testing.T) {
+	actions := map[string]func(query.Grammar, *query.Builder) bool{
+		"select": func(g query.Grammar, b *query.Builder) bool {
+			return g.CompileSelect(b) != ""
+		},
+		"exists": func(g query.Grammar, b *query.Builder) bool {
+			return g.CompileExists(b) != ""
+		},
+		"insert": func(g query.Grammar, b *query.Builder) bool {
+			return g.CompileInsert(b, []map[string]any{{"name": "Ada"}}) != ""
+		},
+		"insert or ignore": func(g query.Grammar, b *query.Builder) bool {
+			return g.CompileInsertOrIgnore(b, []map[string]any{{"name": "Ada"}}) != ""
+		},
+		"insert get id": func(g query.Grammar, b *query.Builder) bool {
+			return g.CompileInsertGetID(b, map[string]any{"name": "Ada"}, "id") != ""
+		},
+		"update": func(g query.Grammar, b *query.Builder) bool {
+			return g.CompileUpdate(b, map[string]any{"name": "Ada"}) != ""
+		},
+		"upsert": func(g query.Grammar, b *query.Builder) bool {
+			return g.CompileUpsert(b, []map[string]any{{"name": "Ada"}}, []string{"name"}, []string{"name"}) != ""
+		},
+		"delete": func(g query.Grammar, b *query.Builder) bool {
+			return g.CompileDelete(b) != ""
+		},
+		"truncate": func(g query.Grammar, b *query.Builder) bool {
+			return len(g.CompileTruncate(b)) != 0
+		},
+	}
+
+	for _, dialect := range dialects() {
+		for name, compiled := range actions {
+			t.Run(dialect.name+"/"+name, func(t *testing.T) {
+				g := dialect.grammar()
+				b := query.NewBuilder(nil, g, nil).From("users")
+				b.Wheres = append(b.Wheres, query.Where{
+					Type: "Basic", Column: "id", Operator: "= 0 OR 1 =", Value: 1, Boolean: "and",
+				})
+
+				if compiled(g, b) {
+					t.Fatal("the public compiler produced a statement with an invalid operator")
+				}
+				if !errors.Is(b.Err(), query.ErrInvalidOperator) {
+					t.Fatalf("Err() = %v, want ErrInvalidOperator", b.Err())
+				}
+			})
+		}
 	}
 }
 
