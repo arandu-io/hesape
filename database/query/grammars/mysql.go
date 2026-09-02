@@ -38,6 +38,9 @@ func (g *MySQLGrammar) GetOperators() []string {
 // CompileSelect builds the SQL for a select statement, adding the
 // execution time hint when the query asked for a timeout.
 func (g *MySQLGrammar) CompileSelect(q *query.Builder) string {
+	if g.Grammar.compilationError(q) != nil {
+		return ""
+	}
 	sql := g.Grammar.CompileSelect(q)
 
 	timeout := q.GetTimeout()
@@ -233,6 +236,9 @@ func (g *MySQLGrammar) CompileInsertOrIgnore(q *query.Builder, values []map[stri
 // CompileInsertOrIgnoreUsing builds an insert-from-select statement that
 // ignores conflicting rows.
 func (g *MySQLGrammar) CompileInsertOrIgnoreUsing(q *query.Builder, columns []any, sql string) (string, error) {
+	if err := g.Grammar.compilationError(q); err != nil {
+		return "", err
+	}
 	return strings.Replace(g.self.CompileInsertUsing(q, columns, sql), "insert", "insert ignore", 1), nil
 }
 
@@ -348,6 +354,9 @@ func (g *MySQLGrammar) compileJSONUpdateColumn(key string, value any) string {
 // form every caller of upsert uses, rather than also accepting a map of
 // column to a different value.
 func (g *MySQLGrammar) CompileUpsert(q *query.Builder, values []map[string]any, uniqueBy []string, update []string) string {
+	if g.Grammar.compilationError(q) != nil {
+		return ""
+	}
 	d := g.self
 	useUpsertAlias := configBool(q.GetConnection(), "use_upsert_alias")
 

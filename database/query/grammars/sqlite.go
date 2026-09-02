@@ -189,6 +189,9 @@ func (g *SQLiteGrammar) CompileGroupLimit(q *query.Builder) string {
 // CompileUpdate builds the SQL for an update statement, routing through a
 // rowid subquery when the update has joins or a limit.
 func (g *SQLiteGrammar) CompileUpdate(q *query.Builder, values map[string]any) string {
+	if g.Grammar.compilationError(q) != nil {
+		return ""
+	}
 	if len(q.Joins) > 0 || q.GetLimit() != nil {
 		return g.compileUpdateWithJoinsOrLimit(q, values)
 	}
@@ -204,6 +207,9 @@ func (g *SQLiteGrammar) CompileInsertOrIgnore(q *query.Builder, values []map[str
 // CompileInsertOrIgnoreReturning builds an insert statement that ignores
 // conflicting rows and returns the given columns.
 func (g *SQLiteGrammar) CompileInsertOrIgnoreReturning(q *query.Builder, values []map[string]any, uniqueBy, returning []string) (string, error) {
+	if err := g.Grammar.compilationError(q); err != nil {
+		return "", err
+	}
 	d := g.self
 	return d.CompileInsert(q, values) +
 		" on conflict (" + d.Columnize(toAny(uniqueBy)) + ") do nothing" +
@@ -213,6 +219,9 @@ func (g *SQLiteGrammar) CompileInsertOrIgnoreReturning(q *query.Builder, values 
 // CompileInsertOrIgnoreUsing builds an insert-from-select statement that
 // ignores conflicting rows.
 func (g *SQLiteGrammar) CompileInsertOrIgnoreUsing(q *query.Builder, columns []any, sql string) (string, error) {
+	if err := g.Grammar.compilationError(q); err != nil {
+		return "", err
+	}
 	return strings.Replace(g.self.CompileInsertUsing(q, columns, sql), "insert", "insert or ignore", 1), nil
 }
 
@@ -253,6 +262,9 @@ func (g *SQLiteGrammar) CompileUpdateColumns(q *query.Builder, values map[string
 // CompileUpsert builds an insert statement that updates the given columns
 // on a conflicting row.
 func (g *SQLiteGrammar) CompileUpsert(q *query.Builder, values []map[string]any, uniqueBy []string, update []string) string {
+	if g.Grammar.compilationError(q) != nil {
+		return ""
+	}
 	d := g.self
 
 	sql := d.CompileInsert(q, values) + " on conflict (" + d.Columnize(toAny(uniqueBy)) + ") do update set "
@@ -347,6 +359,9 @@ func (g *SQLiteGrammar) PrepareBindingsForUpdate(bindings map[string][]any, valu
 // CompileDelete builds the SQL for a delete statement, routing through a
 // rowid subquery when the delete has joins or a limit.
 func (g *SQLiteGrammar) CompileDelete(q *query.Builder) string {
+	if g.Grammar.compilationError(q) != nil {
+		return ""
+	}
 	if len(q.Joins) > 0 || q.GetLimit() != nil {
 		return g.compileDeleteWithJoinsOrLimit(q)
 	}
@@ -376,6 +391,9 @@ func (g *SQLiteGrammar) compileDeleteWithJoinsOrLimit(q *query.Builder) string {
 // schema builder, because a query grammar reaching into a schema builder to
 // read a string is a dependency for nothing.
 func (g *SQLiteGrammar) CompileTruncate(q *query.Builder) map[string][]any {
+	if g.Grammar.compilationError(q) != nil {
+		return nil
+	}
 	d := g.self
 	from := text(q.GetFrom())
 

@@ -330,12 +330,18 @@ func (g *PostgresGrammar) CompileLock(q *query.Builder, value any) string {
 // CompileInsertOrIgnore compiles an insert that silently skips a row already
 // present, via "on conflict do nothing".
 func (g *PostgresGrammar) CompileInsertOrIgnore(q *query.Builder, values []map[string]any) string {
+	if g.Grammar.compilationError(q) != nil {
+		return ""
+	}
 	return g.self.CompileInsert(q, values) + " on conflict do nothing"
 }
 
 // CompileInsertOrIgnoreReturning compiles an insert that skips a conflicting
 // row and returns the given columns for the rows it did insert.
 func (g *PostgresGrammar) CompileInsertOrIgnoreReturning(q *query.Builder, values []map[string]any, uniqueBy, returning []string) (string, error) {
+	if err := g.Grammar.compilationError(q); err != nil {
+		return "", err
+	}
 	d := g.self
 	return d.CompileInsert(q, values) +
 		" on conflict (" + d.Columnize(toAny(uniqueBy)) + ") do nothing" +
@@ -345,6 +351,9 @@ func (g *PostgresGrammar) CompileInsertOrIgnoreReturning(q *query.Builder, value
 // CompileInsertOrIgnoreUsing compiles an insert-from-select that silently
 // skips a row already present.
 func (g *PostgresGrammar) CompileInsertOrIgnoreUsing(q *query.Builder, columns []any, sql string) (string, error) {
+	if err := g.Grammar.compilationError(q); err != nil {
+		return "", err
+	}
 	return g.self.CompileInsertUsing(q, columns, sql) + " on conflict do nothing", nil
 }
 
@@ -355,6 +364,9 @@ func (g *PostgresGrammar) CompileInsertOrIgnoreUsing(q *query.Builder, columns [
 // reads it from the result set instead of asking the connection for the last
 // one it assigned.
 func (g *PostgresGrammar) CompileInsertGetID(q *query.Builder, values map[string]any, sequence string) string {
+	if g.Grammar.compilationError(q) != nil {
+		return ""
+	}
 	if sequence == "" {
 		sequence = "id"
 	}
@@ -364,6 +376,9 @@ func (g *PostgresGrammar) CompileInsertGetID(q *query.Builder, values map[string
 // CompileUpdate compiles an update statement, routing through
 // compileUpdateWithJoinsOrLimit when the query has joins or a limit.
 func (g *PostgresGrammar) CompileUpdate(q *query.Builder, values map[string]any) string {
+	if g.Grammar.compilationError(q) != nil {
+		return ""
+	}
 	if len(q.Joins) > 0 || q.GetLimit() != nil {
 		return g.compileUpdateWithJoinsOrLimit(q, values)
 	}
@@ -396,6 +411,9 @@ func (g *PostgresGrammar) CompileUpdateColumns(q *query.Builder, values map[stri
 // each one takes the value the conflicting insert carried -- that is what
 // "excluded" names.
 func (g *PostgresGrammar) CompileUpsert(q *query.Builder, values []map[string]any, uniqueBy []string, update []string) string {
+	if g.Grammar.compilationError(q) != nil {
+		return ""
+	}
 	d := g.self
 
 	sql := d.CompileInsert(q, values) + " on conflict (" + d.Columnize(toAny(uniqueBy)) + ") do update set "
@@ -431,6 +449,9 @@ func (g *PostgresGrammar) compileJSONUpdateColumn(key string, value any) string 
 // since Postgres lists the joined tables there rather than beside the table
 // being updated.
 func (g *PostgresGrammar) CompileUpdateFrom(q *query.Builder, values map[string]any) string {
+	if g.Grammar.compilationError(q) != nil {
+		return ""
+	}
 	d := g.self
 	table := d.WrapTable(q.GetFrom())
 	columns := d.CompileUpdateColumns(q, values)
@@ -559,6 +580,9 @@ func (g *PostgresGrammar) jsonBinding(column string, value any) any {
 // CompileDelete compiles a delete statement, routing through
 // compileDeleteWithJoinsOrLimit when the query has joins or a limit.
 func (g *PostgresGrammar) CompileDelete(q *query.Builder) string {
+	if g.Grammar.compilationError(q) != nil {
+		return ""
+	}
 	if len(q.Joins) > 0 || q.GetLimit() != nil {
 		return g.compileDeleteWithJoinsOrLimit(q)
 	}
@@ -580,6 +604,9 @@ func (g *PostgresGrammar) compileDeleteWithJoinsOrLimit(q *query.Builder) string
 // CompileTruncate compiles a truncate statement, appending cascade when
 // CascadeOnTruncate is enabled.
 func (g *PostgresGrammar) CompileTruncate(q *query.Builder) map[string][]any {
+	if g.Grammar.compilationError(q) != nil {
+		return nil
+	}
 	sql := "truncate " + g.self.WrapTable(q.GetFrom()) + " restart identity"
 	if cascadeTruncate.Load() {
 		sql += " cascade"
