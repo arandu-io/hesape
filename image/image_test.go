@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/arandu-io/hesape/auth"
@@ -954,23 +955,62 @@ func allocatedDuring(f func()) uint64 {
 	return after.TotalAlloc - before.TotalAlloc
 }
 
+// The BMP prefix lets the production MIME gate admit the fixture while the
+// test-only registered format remains the only BMP decoder in this module.
+const oversizedTestMagic = "BMHESAPE-OVERSIZE-TEST"
+
+var (
+	oversizedTestFormatOnce sync.Once
+	oversizedTestDecodes    atomic.Int64
+)
+
+// oversizedDeclaration returns a test format whose header declares a 144
+// megapixel image. Its pixel decoder records any call and refuses immediately,
+// making the ordering assertion deterministic without allocating the canvas
+// the production ceiling is meant to prevent.
+func oversizedDeclaration() ([]byte, int64) {
+	oversizedTestFormatOnce.Do(func() {
+		image.RegisterFormat(
+			"hesape-oversize-test",
+			oversizedTestMagic,
+			func(io.Reader) (image.Image, error) {
+				oversizedTestDecodes.Add(1)
+				return nil, errors.New("oversized test decoder was called")
+			},
+			func(io.Reader) (image.Config, error) {
+				return image.Config{
+					ColorModel: color.RGBAModel,
+					Width:      12000,
+					Height:     12000,
+				}, nil
+			},
+		)
+	})
+	return []byte(oversizedTestMagic), oversizedTestDecodes.Load()
+}
+
+func requireOversizedPixelsWereNotDecoded(t *testing.T, before int64) {
+	t.Helper()
+	if got := oversizedTestDecodes.Load() - before; got != 0 {
+		t.Fatalf("the oversized pixel decoder ran %d times during the refusal, want zero", got)
+	}
+}
+
 // TestAnOversizedDeclarationIsRefusedBeforeThePixelsAreAllocated is the whole
-// point of the ceiling, and the allocation is the assertion.
+// point of the ceiling, and the decoder spy is the assertion.
 //
-// A test that decoded the image and then measured it would have proved nothing:
-// the memory is spent inside the decoder, before anything this package wrote
-// gets a look at the result. Seventy-odd bytes here declare 144 megapixels, and
-// the canvas image/png allocates for them, before it discovers there is no
-// pixel data behind them, is 549 MiB.
+// A test that decoded the image and then inspected the error would have proved
+// nothing: the memory is spent inside a real decoder, before anything this
+// package wrote gets a look at the result. The registered test format declares
+// 144 megapixels in its header and records whether its pixel decoder was called.
 func TestAnOversizedDeclarationIsRefusedBeforeThePixelsAreAllocated(t *testing.T) {
 	images := himage.NewImageManager()
-	bomb := craftedPNG(t, 12000, 12000)
+	bomb, decodesBefore := oversizedDeclaration()
 
 	var err error
-	allocated := allocatedDuring(func() {
-		_, err = images.FromBytes(bomb).Grayscale().ToBytes(context.Background())
-	})
+	_, err = images.FromBytes(bomb).Grayscale().ToBytes(context.Background())
 
+	requireOversizedPixelsWereNotDecoded(t, decodesBefore)
 	if !errors.Is(err, himage.ErrTooLarge) {
 		t.Fatalf("err = %v, want ErrTooLarge", err)
 	}
@@ -980,10 +1020,6 @@ func TestAnOversizedDeclarationIsRefusedBeforeThePixelsAreAllocated(t *testing.T
 	if !strings.Contains(err.Error(), "12000") ||
 		!strings.Contains(err.Error(), strconv.Itoa(himage.DefaultMaxPixels)) {
 		t.Fatalf("err = %v, want the declared dimensions and the ceiling named", err)
-	}
-	if allocated > 1<<20 {
-		t.Fatalf("the refusal allocated %d bytes, and the canvas it refused is %d: the pixels were decoded first",
-			allocated, 4*12000*12000)
 	}
 }
 
@@ -1010,17 +1046,13 @@ func TestTheCeilingIsWhatTheManagerWasTold(t *testing.T) {
 // costing the same memory by another name.
 func TestTheCeilingCoversTheDominantColourToo(t *testing.T) {
 	images := himage.NewImageManager()
+	bomb, decodesBefore := oversizedDeclaration()
 
-	var err error
-	allocated := allocatedDuring(func() {
-		_, err = images.FromBytes(craftedPNG(t, 12000, 12000)).DominantColor(context.Background())
-	})
+	_, err := images.FromBytes(bomb).DominantColor(context.Background())
 
+	requireOversizedPixelsWereNotDecoded(t, decodesBefore)
 	if !errors.Is(err, himage.ErrTooLarge) {
 		t.Fatalf("err = %v, want ErrTooLarge", err)
-	}
-	if allocated > 1<<20 {
-		t.Fatalf("the refusal allocated %d bytes: the pixels were decoded first", allocated)
 	}
 }
 
