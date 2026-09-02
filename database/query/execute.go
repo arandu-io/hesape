@@ -129,6 +129,7 @@ func (b *Builder) scoped(ctx context.Context, g auth.Grant) (*Builder, error) {
 	scoped := b.Clone()
 	if len(scoped.Wheres) > 0 {
 		inner := b.Clone()
+		inner.BeforeQueryCallbacks = nil
 		scoped.Wheres = nil
 		scoped.Bindings["where"] = nil
 		scoped.Where(b.qualifyTenantColumn(), "=", tenant)
@@ -165,6 +166,10 @@ func (b *Builder) scoped(ctx context.Context, g auth.Grant) (*Builder, error) {
 // holds -- scoped calls it on a clone, and the model builder on the clone
 // ApplyScopes made.
 func (b *Builder) ScopeNested(ctx context.Context, g auth.Grant) error {
+	b.ApplyBeforeQueryCallbacks()
+	if err := b.Err(); err != nil {
+		return err
+	}
 	if err := b.scopeUnions(ctx, g); err != nil {
 		return err
 	}
@@ -174,7 +179,11 @@ func (b *Builder) ScopeNested(ctx context.Context, g auth.Grant) error {
 	if err := b.scopeSubqueryClauses(ctx, g); err != nil {
 		return err
 	}
-	return b.scopeJoins(ctx, g)
+	if err := b.scopeJoins(ctx, g); err != nil {
+		return err
+	}
+	b.ApplyBeforeQueryCallbacks()
+	return b.Err()
 }
 
 // scopeJoins filters every table this query joins.
@@ -297,8 +306,13 @@ func (b *Builder) scopeSubqueries(ctx context.Context, g auth.Grant) error {
 			if err != nil {
 				return err
 			}
+			sql := scoped.ToSQL()
+			if err := scoped.Err(); err != nil {
+				b.setError(err)
+				return err
+			}
 			where.Query = scoped
-			where.Column = Raw("(" + scoped.ToSQL() + ")")
+			where.Column = Raw("(" + sql + ")")
 			b.Wheres[i] = where
 			changed = true
 
@@ -403,7 +417,11 @@ func (b *Builder) runSelect(ctx context.Context) ([]Record, error) {
 	if b.connection == nil {
 		return nil, errors.New("query: the builder has no connection to run against")
 	}
-	return b.connection.Select(ctx, b.ToSQL(), b.GetBindings(), !b.UsingWritePDO())
+	sql := b.ToSQL()
+	if err := b.Err(); err != nil {
+		return nil, err
+	}
+	return b.connection.Select(ctx, sql, b.GetBindings(), !b.UsingWritePDO())
 }
 
 // affectingStatement runs a statement that returns a row count, through
@@ -734,10 +752,13 @@ func (b *Builder) Exists(ctx context.Context, g auth.Grant) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	query.ApplyBeforeQueryCallbacks()
+	if err := query.Err(); err != nil {
+		return false, err
+	}
 	if query.connection == nil {
 		return false, errors.New("query: the builder has no connection to run against")
 	}
-	query.ApplyBeforeQueryCallbacks()
 
 	rows, err := query.connection.Select(
 		ctx,
@@ -812,6 +833,9 @@ func (b *Builder) ToRawSQL(ctx context.Context, g auth.Grant) (string, error) {
 		return "", err
 	}
 	sql := query.ToSQL()
+	if err := query.Err(); err != nil {
+		return "", err
+	}
 	bindings := query.GetBindings()
 	if connection, ok := query.connection.(PreparesBindings); ok {
 		bindings = connection.PrepareBindings(bindings)

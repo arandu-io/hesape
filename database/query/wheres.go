@@ -37,10 +37,15 @@ func (b *Builder) PrepareValueAndOperator(value, operator any, useDefault bool) 
 	if useDefault {
 		return operator, "=", nil
 	}
-	if invalidOperatorAndValue(stringify(operator), value) {
+	canonical, err := normalizeOperator(b.Grammar, stringify(operator))
+	if err != nil {
+		b.setError(err)
+		return nil, "", err
+	}
+	if invalidOperatorAndValue(canonical, value) {
 		return nil, "", fmt.Errorf("query: illegal operator and value combination")
 	}
-	return value, stringify(operator), nil
+	return value, canonical, nil
 }
 
 // invalidOperatorAndValue reports whether operator is one that needs a value,
@@ -56,41 +61,15 @@ func invalidOperatorAndValue(operator string, value any) bool {
 	return containsFold(operators, operator)
 }
 
-// invalidOperator reports whether operator is not one any grammar in the
-// list accepts. shortcutOperator uses this to tell a two-argument call, where
-// the second argument is a value, from a three-argument one where it is a
-// real operator.
-func (b *Builder) invalidOperator(operator any) bool {
-	name, ok := operator.(string)
-	if !ok {
-		return true
-	}
-	if containsFold(operators, name) {
-		return false
-	}
-	if b.Grammar == nil {
-		return true
-	}
-	return !containsFold(b.Grammar.GetOperators(), name)
-}
-
+// containsFold reports whether the list contains value without changing the
+// caller's spelling.
 func containsFold(list []string, value string) bool {
 	for _, item := range list {
-		if item == lower(value) {
+		if strings.EqualFold(item, value) {
 			return true
 		}
 	}
 	return false
-}
-
-// shortcutOperator centralises the three lines every date and JSON length
-// clause repeats: an operator that is not an operator was meant as the value,
-// with "=" understood.
-func (b *Builder) shortcutOperator(operator string, value any) (string, any) {
-	if b.invalidOperator(operator) {
-		return "=", operator
-	}
-	return operator, value
 }
 
 // flattenValue returns the first leaf of a value that arrived as a list.
@@ -133,6 +112,7 @@ func (b *Builder) MergeWheres(wheres []Where, bindings []any) *Builder {
 // OrWhereColumn adds an "or" clause comparing two columns.
 func (b *Builder) OrWhereColumn(first any, args ...any) *Builder {
 	operator, second := prepareValueAndOperator(args...)
+	operator = b.acceptOperator(operator)
 	b.Wheres = append(b.Wheres, Where{
 		Type:     "Column",
 		First:    first,
@@ -357,9 +337,7 @@ func (b *Builder) OrWhereYear(column any, args ...any) *Builder {
 // that differs between them.
 func (b *Builder) addDateBasedWhere(typ string, column any, boolean string, args ...any) *Builder {
 	operator, value := prepareValueAndOperator(args...)
-	if len(args) > 1 {
-		operator, value = b.shortcutOperator(operator, value)
-	}
+	operator = b.acceptOperator(operator)
 	value = formatDatePart(typ, flattenValue(value))
 
 	b.Wheres = append(b.Wheres, Where{
@@ -413,6 +391,7 @@ func (b *Builder) WhereRowValues(columns []any, operator string, values []any, b
 			"query: the number of columns must match the number of values, got %d and %d",
 			len(columns), len(values)))
 	}
+	operator = b.acceptOperator(operator)
 	b.Wheres = append(b.Wheres, Where{
 		Type: "RowValues", Columns: columns, Operator: operator, Values: values, Boolean: boolean,
 	})
@@ -554,9 +533,7 @@ func (b *Builder) OrWhereJSONLength(column any, args ...any) *Builder {
 
 func (b *Builder) addWhereJSONLength(column any, boolean string, args ...any) *Builder {
 	operator, value := prepareValueAndOperator(args...)
-	if len(args) > 1 {
-		operator, value = b.shortcutOperator(operator, value)
-	}
+	operator = b.acceptOperator(operator)
 
 	b.Wheres = append(b.Wheres, Where{
 		Type: "JsonLength", Column: column, Operator: operator, Value: value, Boolean: boolean,

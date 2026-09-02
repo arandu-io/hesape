@@ -13,6 +13,59 @@ import (
 
 func grant() auth.Grant { return auth.SystemGrant("invoice.read", "acme") }
 
+func TestReadTerminalsNeverCompileOrExecuteAnInvalidOperator(t *testing.T) {
+	ctx := context.Background()
+	actions := map[string]func(*query.Builder) error{
+		"get": func(b *query.Builder) error {
+			_, err := b.Get(ctx, grant())
+			return err
+		},
+		"exists": func(b *query.Builder) error {
+			_, err := b.Exists(ctx, grant())
+			return err
+		},
+		"count": func(b *query.Builder) error {
+			_, err := b.Count(ctx, grant())
+			return err
+		},
+		"pagination count": func(b *query.Builder) error {
+			_, err := b.GroupBy("plan").GetCountForPagination(ctx, grant())
+			return err
+		},
+		"raw SQL": func(b *query.Builder) error {
+			_, err := b.ToRawSQL(ctx, grant())
+			return err
+		},
+		"cursor": func(b *query.Builder) error {
+			for _, err := range b.Cursor(ctx, grant()) {
+				return err
+			}
+			return nil
+		},
+	}
+
+	for name, action := range actions {
+		t.Run(name, func(t *testing.T) {
+			connection := &fakeConnection{}
+			grammar := &compileSpyGrammar{fakeGrammar: &fakeGrammar{}}
+			b := query.NewBuilder(connection, grammar, &fakeProcessor{}).
+				From("invoices").
+				Where("id", "bogus", 1)
+
+			err := action(b)
+			if !errors.Is(err, query.ErrInvalidOperator) {
+				t.Fatalf("error = %v, want ErrInvalidOperator", err)
+			}
+			if grammar.compileCalls != 0 {
+				t.Fatalf("a compiler was called %d times", grammar.compileCalls)
+			}
+			if len(connection.calls) != 0 {
+				t.Fatalf("the connection received %d calls", len(connection.calls))
+			}
+		})
+	}
+}
+
 // TestNoStatementReachesTheDatabaseWithoutATenant covers every door rather than
 // one of them.
 //

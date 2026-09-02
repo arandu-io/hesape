@@ -20,8 +20,9 @@ func (b *Builder) addHaving(boolean string, column any, args ...any) *Builder {
 	}
 
 	operator, value := prepareValueAndOperator(args...)
-	if len(args) > 1 {
-		operator, value = b.shortcutOperator(operator, value)
+	operator = b.acceptOperator(operator)
+	if b.Err() != nil {
+		return b
 	}
 
 	typ := "Basic"
@@ -70,6 +71,9 @@ func (b *Builder) HavingNested(callback func(*Builder), boolean string) *Builder
 // AddNestedWhereQuery gives: "()" is a syntax error on every engine, and an
 // empty callback is an ordinary outcome of a conditional filter.
 func (b *Builder) AddNestedHavingQuery(query *Builder, boolean string) *Builder {
+	if query != nil && query.Err() != nil {
+		b.setError(query.Err())
+	}
 	if query == nil || len(query.Havings) == 0 {
 		return b
 	}

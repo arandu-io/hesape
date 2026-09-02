@@ -9,9 +9,42 @@ import (
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database/query"
+	"github.com/arandu-io/hesape/database/query/grammars"
 
 	"github.com/arandu-io/hesape/database/concerns"
 )
+
+type explainConnectionSpy struct{ calls int }
+
+func (c *explainConnectionSpy) Select(context.Context, auth.Grant, string, []any) ([]map[string]any, error) {
+	c.calls++
+	return nil, nil
+}
+
+type explainableBuilder struct {
+	*query.Builder
+	connection *explainConnectionSpy
+}
+
+func (b *explainableBuilder) GetConnection() concerns.ExplainConnection { return b.connection }
+
+func TestExplainPropagatesBuilderErrorsWithoutCallingTheConnection(t *testing.T) {
+	connection := &explainConnectionSpy{}
+	b := &explainableBuilder{
+		Builder: query.NewBuilder(nil, grammars.NewMySQLGrammar(), nil).
+			From("users").
+			Where("id", "= OR 1=1", 1),
+		connection: connection,
+	}
+
+	_, err := concerns.Explain(context.Background(), auth.SystemGrant("user.read", "acme"), b)
+	if !errors.Is(err, query.ErrInvalidOperator) {
+		t.Fatalf("Explain() error = %v, want ErrInvalidOperator", err)
+	}
+	if connection.calls != 0 {
+		t.Fatalf("Explain called the connection %d times", connection.calls)
+	}
+}
 
 // rows is a Chunkable over a slice, which is enough to test the arithmetic that
 // BuildsQueries is: the offsets, the limits and the stopping conditions.

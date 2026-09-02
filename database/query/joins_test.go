@@ -1,12 +1,41 @@
 package query_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/arandu-io/hesape/database/query"
 	"github.com/arandu-io/hesape/database/query/grammars"
 )
+
+func TestJoinOperatorsCannotBypassTheCentralBarrier(t *testing.T) {
+	tests := map[string]*query.Builder{
+		"on":        mysqlBuilder().Join("contacts", "contacts.user_id", "= OR 1=1", "users.id"),
+		"joinWhere": mysqlBuilder().JoinWhere("contacts", "contacts.user_id", "=; select", 1, "inner"),
+	}
+	for name, b := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := b.ToSQL(); got != "" || !errors.Is(b.Err(), query.ErrInvalidOperator) {
+				t.Fatalf("ToSQL() = %q, Err() = %v", got, b.Err())
+			}
+		})
+	}
+}
+
+func TestInvalidJoinSubOperatorDoesNotPartiallyCompileTheSubquery(t *testing.T) {
+	grammar := &compileSpyGrammar{fakeGrammar: &fakeGrammar{}}
+	sub := query.NewBuilder(nil, grammar, nil).From("contacts")
+	parent := query.NewBuilder(nil, grammar, nil).From("users").
+		JoinSub(sub, "contacts", "contacts.user_id", "= OR 1=1", "users.id", "inner", false)
+
+	if !errors.Is(parent.Err(), query.ErrInvalidOperator) {
+		t.Fatalf("Err() = %v, want ErrInvalidOperator", parent.Err())
+	}
+	if grammar.selectCalls != 0 {
+		t.Fatalf("the invalid join partially compiled its subquery %d times", grammar.selectCalls)
+	}
+}
 
 // The difference between a join's "on" and its "where" is the one people move a
 // condition across and lose: on names a column on the right, where binds a

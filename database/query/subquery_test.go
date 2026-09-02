@@ -2,6 +2,7 @@ package query_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,6 +10,101 @@ import (
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database/query"
 )
+
+func TestRecursiveOperatorBarrierCoversNestedExistsJoinUnionAndPendingSubqueries(t *testing.T) {
+	makeChild := func() *query.Builder {
+		return mysqlBuilder().Where("id", "=", 1)
+	}
+	mutate := func(child *query.Builder) {
+		child.Wheres[0].Operator = "= OR 1=1"
+	}
+
+	tests := map[string]func() *query.Builder{
+		"nested": func() *query.Builder {
+			child := makeChild()
+			parent := mysqlBuilder().AddNestedWhereQuery(child, "and")
+			mutate(child)
+			return parent
+		},
+		"exists": func() *query.Builder {
+			child := makeChild()
+			parent := mysqlBuilder().AddWhereExistsQuery(child, "and", false)
+			mutate(child)
+			return parent
+		},
+		"join": func() *query.Builder {
+			parent := mysqlBuilder().Join("contacts", "contacts.user_id", "=", "users.id")
+			parent.Joins[0].Wheres[0].Operator = "= OR 1=1"
+			return parent
+		},
+		"union": func() *query.Builder {
+			child := makeChild()
+			parent := mysqlBuilder().Union(child)
+			mutate(child)
+			return parent
+		},
+		"selectSub": func() *query.Builder {
+			child := makeChild()
+			parent := mysqlBuilder().SelectSub(child, "child_id")
+			mutate(child)
+			return parent
+		},
+		"fromSub": func() *query.Builder {
+			child := makeChild()
+			parent := mysqlBuilder().FromSub(child, "children")
+			mutate(child)
+			return parent
+		},
+		"joinSub": func() *query.Builder {
+			child := makeChild()
+			parent := mysqlBuilder().JoinSub(child, "children", "children.id", "=", "users.id", "inner", false)
+			mutate(child)
+			return parent
+		},
+		"subCount": func() *query.Builder {
+			child := makeChild()
+			parent := mysqlBuilder().WhereSubCount(child, ">", 0, "and")
+			mutate(child)
+			return parent
+		},
+	}
+
+	for name, build := range tests {
+		t.Run(name, func(t *testing.T) {
+			b := build()
+			if got := b.ToSQL(); got != "" || !errors.Is(b.Err(), query.ErrInvalidOperator) {
+				t.Fatalf("ToSQL() = %q, Err() = %v", got, b.Err())
+			}
+		})
+	}
+}
+
+func TestScopingPreflightsCallbacksBeforeItCompilesRecordedSubqueries(t *testing.T) {
+	connection := &fakeConnection{}
+	grammar := &compileSpyGrammar{fakeGrammar: &fakeGrammar{}}
+	sub := query.NewBuilder(connection, grammar, &fakeProcessor{}).From("contacts")
+	parent := query.NewBuilder(connection, grammar, &fakeProcessor{}).
+		From("users").
+		SelectSub(sub, "contact_id")
+	grammar.compileCalls = 0 // SelectSub renders its initial, unscoped snapshot.
+	grammar.selectCalls = 0
+	parent.BeforeQuery(func(mutated *query.Builder) {
+		mutated.Wheres = append(mutated.Wheres, query.Where{
+			Type: "Basic", Column: "id", Operator: "bogus", Value: 1, Boolean: "and",
+		})
+	})
+
+	_, err := parent.Get(context.Background(), grant())
+	if !errors.Is(err, query.ErrInvalidOperator) {
+		t.Fatalf("Get() error = %v, want ErrInvalidOperator", err)
+	}
+	if grammar.compileCalls != 0 {
+		t.Fatalf("scoping compiled a subquery %d times before rejecting the operator", grammar.compileCalls)
+	}
+	if len(connection.calls) != 0 {
+		t.Fatalf("the connection received %d calls", len(connection.calls))
+	}
+}
 
 // countTenantFilters reports how many times the tenant column is compared in a
 // statement. A statement with a subquery has to carry one per query, not one in

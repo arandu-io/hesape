@@ -56,6 +56,7 @@ var postgresBitwiseOperators = []string{"~", "&", "|", "#", "<<", ">>", "<<=", "
 var (
 	customOperatorsMu sync.RWMutex
 	customOperators   []string
+	customOperator    = regexp.MustCompile("^[+\\-*/<>=~!@#%^&|?]+$")
 
 	cascadeTruncate = newAtomicTrue()
 )
@@ -73,7 +74,10 @@ func CustomOperators(operators []string) {
 	defer customOperatorsMu.Unlock()
 
 	for _, operator := range operators {
-		if operator != "" {
+		if customOperator.MatchString(operator) &&
+			!strings.Contains(operator, "--") &&
+			!strings.Contains(operator, "/*") &&
+			!strings.Contains(operator, "*/") {
 			customOperators = append(customOperators, operator)
 		}
 	}

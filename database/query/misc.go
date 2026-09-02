@@ -92,6 +92,9 @@ func (b *Builder) InsertOrIgnoreReturning(ctx context.Context, g auth.Grant, val
 
 	query := b.Clone()
 	query.ApplyBeforeQueryCallbacks()
+	if err := query.Err(); err != nil {
+		return nil, err
+	}
 
 	grammar, ok := query.Grammar.(InsertOrIgnoreReturningGrammar)
 	if !ok {

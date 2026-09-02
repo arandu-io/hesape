@@ -1083,7 +1083,7 @@ func (g *Grammar) compileUnion(union query.Union) string {
 	if union.All {
 		conjunction = " union all "
 	}
-	return conjunction + g.self.WrapUnion(union.Query.ToSQL())
+	return conjunction + g.self.WrapUnion(g.self.CompileSelect(union.Query))
 }
 
 // WrapUnion parenthesises a compiled union member's SQL.

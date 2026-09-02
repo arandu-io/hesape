@@ -2,11 +2,125 @@ package query_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/arandu-io/hesape/database/query"
 )
+
+func TestWriteTerminalsRejectInvalidOperatorsBeforeCompilationOrConnection(t *testing.T) {
+	ctx := context.Background()
+	actions := map[string]func(*query.Builder) error{
+		"insert": func(b *query.Builder) error {
+			_, err := b.Insert(ctx, grant(), map[string]any{"name": "Ada"})
+			return err
+		},
+		"insertOrIgnore": func(b *query.Builder) error {
+			_, err := b.InsertOrIgnore(ctx, grant(), map[string]any{"name": "Ada"})
+			return err
+		},
+		"insertGetID": func(b *query.Builder) error {
+			_, err := b.InsertGetID(ctx, grant(), map[string]any{"name": "Ada"}, "")
+			return err
+		},
+		"insertUsing": func(b *query.Builder) error {
+			source := b.NewQuery().From("staff").Select("name")
+			_, err := b.InsertUsing(ctx, grant(), []any{"name"}, source)
+			return err
+		},
+		"insertOrIgnoreUsing": func(b *query.Builder) error {
+			source := b.NewQuery().From("staff").Select("name")
+			_, err := b.InsertOrIgnoreUsing(ctx, grant(), []any{"name"}, source)
+			return err
+		},
+		"update": func(b *query.Builder) error {
+			_, err := b.Update(ctx, grant(), map[string]any{"name": "Ada"})
+			return err
+		},
+		"upsert": func(b *query.Builder) error {
+			_, err := b.Upsert(ctx, grant(), []map[string]any{{"name": "Ada"}}, []string{"tenant_id", "name"}, nil)
+			return err
+		},
+		"delete": func(b *query.Builder) error {
+			_, err := b.Delete(ctx, grant())
+			return err
+		},
+		"truncate": func(b *query.Builder) error {
+			return b.Truncate(ctx, grant())
+		},
+	}
+
+	for name, action := range actions {
+		t.Run(name, func(t *testing.T) {
+			connection := &fakeConnection{inserted: true}
+			grammar := &compileSpyGrammar{fakeGrammar: &fakeGrammar{}}
+			processor := &fakeProcessor{connection: connection}
+			b := query.NewBuilder(connection, grammar, processor).
+				From("users").
+				Where("id", "bogus", 1)
+
+			err := action(b)
+			if !errors.Is(err, query.ErrInvalidOperator) {
+				t.Fatalf("error = %v, want ErrInvalidOperator", err)
+			}
+			if grammar.compileCalls != 0 {
+				t.Fatalf("a compiler was called %d times", grammar.compileCalls)
+			}
+			if len(connection.calls) != 0 {
+				t.Fatalf("the connection received %d calls", len(connection.calls))
+			}
+		})
+	}
+}
+
+func TestUpdateTerminalsRevalidateAfterCompilingSubqueryValues(t *testing.T) {
+	actions := map[string]struct {
+		run   func(*query.Builder, map[string]any) error
+		calls func(*compileSpyGrammar) int
+	}{
+		"update": {
+			run: func(builder *query.Builder, values map[string]any) error {
+				_, err := builder.Update(context.Background(), grant(), values)
+				return err
+			},
+			calls: func(grammar *compileSpyGrammar) int { return grammar.updateCalls },
+		},
+		"update from": {
+			run: func(builder *query.Builder, values map[string]any) error {
+				_, err := builder.UpdateFrom(context.Background(), grant(), values)
+				return err
+			},
+			calls: func(grammar *compileSpyGrammar) int { return grammar.updateFromCalls },
+		},
+	}
+
+	for name, action := range actions {
+		t.Run(name, func(t *testing.T) {
+			connection := &fakeConnection{affected: 1}
+			grammar := &compileSpyGrammar{fakeGrammar: &fakeGrammar{}}
+			builder := query.NewBuilder(connection, grammar, &fakeProcessor{connection: connection}).
+				From("users").
+				Join("accounts", "accounts.id", "=", "users.account_id")
+			sharedJoin := builder.Joins[0]
+			value := builder.NewQuery().From("profiles").Select("display_name")
+			value.BeforeQuery(func(*query.Builder) {
+				sharedJoin.Wheres[0].Operator = "= OR 1=1"
+			})
+
+			err := action.run(builder, map[string]any{"name": value})
+			if !errors.Is(err, query.ErrInvalidOperator) {
+				t.Fatalf("error = %v, want ErrInvalidOperator", err)
+			}
+			if calls := action.calls(grammar); calls != 0 {
+				t.Fatalf("the target compiler was called %d times", calls)
+			}
+			if len(connection.calls) != 0 {
+				t.Fatalf("the connection received %d calls", len(connection.calls))
+			}
+		})
+	}
+}
 
 // TestInsertWritesTheTenantIntoTheRow: an insert has no where clause to filter,
 // so the tenant is the column it writes.

@@ -35,6 +35,9 @@ func insert(ctx context.Context, q *query.Builder, values []map[string]any) erro
 	}
 
 	q.ApplyBeforeQueryCallbacks()
+	if err := q.Err(); err != nil {
+		return err
+	}
 
 	bindings := make([]any, 0, len(values)*len(values[0]))
 	for _, record := range values {
@@ -52,6 +55,9 @@ func insert(ctx context.Context, q *query.Builder, values []map[string]any) erro
 // update runs the update the builder compiled.
 func update(ctx context.Context, q *query.Builder, values map[string]any) (int64, error) {
 	q.ApplyBeforeQueryCallbacks()
+	if err := q.Err(); err != nil {
+		return 0, err
+	}
 
 	sql := q.Grammar.CompileUpdate(q, values)
 	return q.GetConnection().Update(ctx, sql, q.Grammar.PrepareBindingsForUpdate(q.GetRawBindings(), values))
@@ -63,6 +69,9 @@ func update(ctx context.Context, q *query.Builder, values map[string]any) (int64
 // shadowing it inside this package would be a trap for the next reader.
 func deleteFrom(ctx context.Context, q *query.Builder) (int64, error) {
 	q.ApplyBeforeQueryCallbacks()
+	if err := q.Err(); err != nil {
+		return 0, err
+	}
 
 	sql := q.Grammar.CompileDelete(q)
 	return q.GetConnection().Delete(ctx, sql, q.Grammar.PrepareBindingsForDelete(q.GetRawBindings()))
@@ -70,7 +79,11 @@ func deleteFrom(ctx context.Context, q *query.Builder) (int64, error) {
 
 // selectRows runs the select the builder compiled: the rows, unhydrated.
 func selectRows(ctx context.Context, q *query.Builder) ([]query.Record, error) {
-	rows, err := q.GetConnection().Select(ctx, q.ToSQL(), q.GetBindings(), false)
+	sql := q.ToSQL()
+	if err := q.Err(); err != nil {
+		return nil, err
+	}
+	rows, err := q.GetConnection().Select(ctx, sql, q.GetBindings(), false)
 	if err != nil {
 		return nil, err
 	}

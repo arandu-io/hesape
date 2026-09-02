@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"errors"
 	"strings"
 )
 
@@ -92,6 +93,7 @@ type Builder struct {
 	aggregate   *Aggregate
 	timeout     *int
 	useWritePDO bool
+	err         error
 }
 
 // Connection is what a query builder asks of the thing that runs its
@@ -236,6 +238,7 @@ func (b *Builder) addWhere(boolean string, column any, args ...any) *Builder {
 	}
 
 	operator, value := prepareValueAndOperator(args...)
+	operator = b.acceptOperator(operator)
 	b.Wheres = append(b.Wheres, Where{
 		Type:     "Basic",
 		Column:   column,
@@ -291,6 +294,12 @@ func (b *Builder) ForNestedWhere() *Builder {
 // syntax error on every engine and an empty callback is an ordinary outcome of
 // a conditional filter.
 func (b *Builder) AddNestedWhereQuery(query *Builder, boolean string) *Builder {
+	if query != nil && query.Err() != nil {
+		b.setError(query.Err())
+	}
+	if query == nil {
+		return b
+	}
 	if len(query.Wheres) == 0 {
 		return b
 	}
@@ -305,6 +314,7 @@ func (b *Builder) AddNestedWhereQuery(query *Builder, boolean string) *Builder {
 // WhereColumn adds a clause comparing two columns.
 func (b *Builder) WhereColumn(first any, args ...any) *Builder {
 	operator, second := prepareValueAndOperator(args...)
+	operator = b.acceptOperator(operator)
 	b.Wheres = append(b.Wheres, Where{
 		Type:     "Column",
 		First:    first,
@@ -764,20 +774,168 @@ func (b *Builder) BeforeQuery(callback func(*Builder)) *Builder {
 	return b
 }
 
-// ApplyBeforeQueryCallbacks runs every registered BeforeQuery callback, then
-// clears them.
+// ApplyBeforeQueryCallbacks runs every registered BeforeQuery callback, clears
+// them, then validates every non-raw operator in the complete query graph.
 func (b *Builder) ApplyBeforeQueryCallbacks() {
-	for _, callback := range b.BeforeQueryCallbacks {
-		callback(b)
-	}
-	b.BeforeQueryCallbacks = nil
+	b.applyBeforeQueryCallbacks(make(map[*Builder]bool))
+	b.validateQueryGraph(make(map[*Builder]bool), b.Grammar)
 }
 
 // ToSQL runs the before-query callbacks and compiles the query to a select
 // statement.
 func (b *Builder) ToSQL() string {
 	b.ApplyBeforeQueryCallbacks()
+	if b.Err() != nil {
+		return ""
+	}
+	if b.Grammar == nil {
+		b.setError(errors.New("query: the builder has no grammar to compile with"))
+		return ""
+	}
 	return b.Grammar.CompileSelect(b)
+}
+
+// Err returns the first final-validation error recorded by the builder or one
+// of its child queries.
+func (b *Builder) Err() error { return b.err }
+
+func (b *Builder) setError(err error) {
+	if err != nil && b.err == nil {
+		b.err = err
+	}
+}
+
+func (b *Builder) acceptOperator(operator string) string {
+	canonical, err := normalizeOperator(b.Grammar, operator)
+	if err != nil {
+		b.setError(err)
+		return operator
+	}
+	return canonical
+}
+
+func (b *Builder) applyBeforeQueryCallbacks(visited map[*Builder]bool) {
+	if b == nil {
+		return
+	}
+	if visited[b] {
+		return
+	}
+	visited[b] = true
+
+	callbacks := b.BeforeQueryCallbacks
+	b.BeforeQueryCallbacks = nil
+	for _, callback := range callbacks {
+		callback(b)
+	}
+	for i := range b.Wheres {
+		b.Wheres[i].Query.applyBeforeQueryCallbacks(visited)
+	}
+	for i := range b.Havings {
+		b.Havings[i].Query.applyBeforeQueryCallbacks(visited)
+	}
+	for _, join := range b.Joins {
+		if join != nil {
+			join.Builder.applyBeforeQueryCallbacks(visited)
+		}
+	}
+	for _, union := range b.Unions {
+		union.Query.applyBeforeQueryCallbacks(visited)
+	}
+	for _, sub := range b.subqueries {
+		sub.query.applyBeforeQueryCallbacks(visited)
+	}
+}
+
+func (b *Builder) validateQueryGraph(visited map[*Builder]bool, grammar Grammar) error {
+	if b == nil {
+		return nil
+	}
+	if visited[b] {
+		return b.err
+	}
+	visited[b] = true
+
+	if b.err != nil {
+		return b.err
+	}
+
+	for i := range b.Wheres {
+		where := &b.Wheres[i]
+		if clauseOperatorNeedsValidation(where.Type, where.Operator) {
+			canonical, err := normalizeOperator(grammar, where.Operator)
+			if err != nil {
+				b.setError(err)
+				return b.err
+			}
+			where.Operator = canonical
+		}
+		if err := b.validateChild(where.Query, visited, grammar); err != nil {
+			return err
+		}
+	}
+	for i := range b.Havings {
+		having := &b.Havings[i]
+		if clauseOperatorNeedsValidation(having.Type, having.Operator) {
+			canonical, err := normalizeOperator(grammar, having.Operator)
+			if err != nil {
+				b.setError(err)
+				return b.err
+			}
+			having.Operator = canonical
+		}
+		if err := b.validateChild(having.Query, visited, grammar); err != nil {
+			return err
+		}
+	}
+	for _, join := range b.Joins {
+		if join != nil {
+			if err := b.validateChild(join.Builder, visited, grammar); err != nil {
+				return err
+			}
+		}
+	}
+	for _, union := range b.Unions {
+		if err := b.validateChild(union.Query, visited, grammar); err != nil {
+			return err
+		}
+	}
+	for _, sub := range b.subqueries {
+		subGrammar := grammar
+		if sub.query != nil && sub.query.Grammar != nil {
+			subGrammar = sub.query.Grammar
+		}
+		if err := b.validateChild(sub.query, visited, subGrammar); err != nil {
+			return err
+		}
+	}
+	return b.err
+}
+
+func clauseOperatorNeedsValidation(typ, operator string) bool {
+	if typ == "Raw" || typ == "Expression" {
+		return false
+	}
+	if operator != "" {
+		return true
+	}
+	switch typ {
+	case "Basic", "Bitwise", "bit", "Column", "Date", "Time", "Day", "Month", "Year", "RowValues", "JsonLength", "Sub":
+		return true
+	default:
+		return false
+	}
+}
+
+func (b *Builder) validateChild(child *Builder, visited map[*Builder]bool, grammar Grammar) error {
+	if child == nil {
+		return nil
+	}
+	if err := child.validateQueryGraph(visited, grammar); err != nil {
+		b.setError(err)
+		return b.err
+	}
+	return nil
 }
 
 // NewQuery returns a new Builder sharing this one's connection, grammar and

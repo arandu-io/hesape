@@ -3,6 +3,7 @@ package query
 import (
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // Grammar is what a Builder needs of the thing that spells its SQL.
@@ -141,6 +142,56 @@ var operators = []string{
 // bitwiseOperators is the list of operators treated as bitwise rather than
 // comparison.
 var bitwiseOperators = []string{"&", "|", "^", "<<", ">>", "&~"}
+
+// normalizeOperator returns the active grammar's canonical spelling for an
+// operator. It deliberately does not trim: surrounding, repeated or control
+// whitespace is malformed input rather than an alternate spelling.
+func normalizeOperator(grammar Grammar, operator string) (string, error) {
+	if !lexicallySafeOperator(operator) {
+		return "", &InvalidOperatorError{Operator: operator}
+	}
+
+	allowed := operators
+	if grammar != nil {
+		allowed = grammar.GetOperators()
+	}
+	for _, candidate := range allowed {
+		if lexicallySafeOperator(candidate) && strings.EqualFold(candidate, operator) {
+			return candidate, nil
+		}
+	}
+	return "", &InvalidOperatorError{Operator: operator}
+}
+
+func lexicallySafeOperator(operator string) bool {
+	if operator == "" || strings.TrimSpace(operator) != operator ||
+		strings.Contains(operator, "--") || strings.Contains(operator, "/*") ||
+		strings.Contains(operator, "*/") {
+		return false
+	}
+
+	compound := strings.ContainsRune(operator, ' ')
+	for i, r := range operator {
+		if r == ' ' {
+			if i == 0 || i == len(operator)-1 || operator[i-1] == ' ' {
+				return false
+			}
+			continue
+		}
+		if unicode.IsControl(r) || unicode.IsSpace(r) || r > unicode.MaxASCII {
+			return false
+		}
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
+			continue
+		}
+		if !compound &&
+			strings.ContainsRune("+-*/<>=~!@#%^&|?", r) {
+			continue
+		}
+		return false
+	}
+	return true
+}
 
 // GetOperators returns the comparison operators the grammar accepts.
 func (g *BaseGrammar) GetOperators() []string {

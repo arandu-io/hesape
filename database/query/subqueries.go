@@ -60,11 +60,26 @@ func (b *Builder) resolveSub(query any) (*Builder, string, []any, error) {
 	case func(*Builder):
 		nested := b.NewQuery()
 		sub(nested)
-		return nested, nested.ToSQL(), nested.GetBindings(), nil
+		sql := nested.ToSQL()
+		if err := nested.Err(); err != nil {
+			b.setError(err)
+			return nested, "", nested.GetBindings(), err
+		}
+		return nested, sql, nested.GetBindings(), nil
 	case *Builder:
-		return sub, sub.ToSQL(), sub.GetBindings(), nil
+		sql := sub.ToSQL()
+		if err := sub.Err(); err != nil {
+			b.setError(err)
+			return sub, "", sub.GetBindings(), err
+		}
+		return sub, sql, sub.GetBindings(), nil
 	case *JoinClause:
-		return sub.Builder, sub.ToSQL(), sub.GetBindings(), nil
+		sql := sub.ToSQL()
+		if err := sub.Err(); err != nil {
+			b.setError(err)
+			return sub.Builder, "", sub.GetBindings(), err
+		}
+		return sub.Builder, sql, sub.GetBindings(), nil
 	case string:
 		return nil, sub, nil, nil
 	case Expression:
@@ -198,10 +213,19 @@ func (b *Builder) WhereSubCount(sub *Builder, operator string, count int, boolea
 	if sub == nil {
 		return b.refuse(boolean, errors.New("query: a count comparison was given no subquery to count"))
 	}
+	operator = b.acceptOperator(operator)
+	if b.Err() != nil {
+		return b
+	}
+	sql := sub.ToSQL()
+	if err := sub.Err(); err != nil {
+		b.setError(err)
+		return b
+	}
 
 	b.Wheres = append(b.Wheres, Where{
 		Type:     "Basic",
-		Column:   Raw("(" + sub.ToSQL() + ")"),
+		Column:   Raw("(" + sql + ")"),
 		Operator: operator,
 		Value:    count,
 		Query:    sub,
@@ -238,6 +262,13 @@ func (b *Builder) FromSub(query any, as string) *Builder {
 // isWhere says whether the condition compares a column with a value rather
 // than with another column.
 func (b *Builder) JoinSub(query any, as string, first any, operator, second any, typ string, isWhere bool) *Builder {
+	canonical := stringify(operator)
+	if _, callback := first.(func(*JoinClause)); !callback {
+		canonical = b.acceptOperator(canonical)
+		if b.Err() != nil {
+			return b
+		}
+	}
 	sub, sql, bindings, err := b.resolveSub(query)
 	if err != nil {
 		return b.refuse("and", err)
@@ -250,7 +281,7 @@ func (b *Builder) JoinSub(query any, as string, first any, operator, second any,
 	b.AddBinding(bindings, "join")
 
 	expression := b.aliased("", sql, as, true)
-	b.addJoinClause(typ, isWhere, expression, first, operator, second)
+	b.addJoinClause(typ, isWhere, expression, first, canonical, second)
 	b.pend(sub, as, true, "join", "join", len(b.Joins)-1, offset, len(bindings), "")
 	return b
 }
@@ -338,7 +369,12 @@ func (b *Builder) scopeSubqueryClauses(ctx context.Context, g auth.Grant) error 
 			return err
 		}
 
-		expression := b.aliased(sub.prefix, scoped.ToSQL(), sub.as, sub.table)
+		sql := scoped.ToSQL()
+		if err := scoped.Err(); err != nil {
+			b.setError(err)
+			return err
+		}
+		expression := b.aliased(sub.prefix, sql, sub.as, sub.table)
 		switch sub.kind {
 		case "from":
 			b.from = expression

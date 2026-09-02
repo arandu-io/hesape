@@ -67,6 +67,9 @@ func (b *Builder) Insert(ctx context.Context, g auth.Grant, values ...map[string
 
 	query := b.Clone()
 	query.ApplyBeforeQueryCallbacks()
+	if err := query.Err(); err != nil {
+		return false, err
+	}
 
 	if query.connection == nil {
 		return false, errors.New("query: the builder has no connection to run against")
@@ -91,6 +94,9 @@ func (b *Builder) InsertOrIgnore(ctx context.Context, g auth.Grant, values ...ma
 
 	query := b.Clone()
 	query.ApplyBeforeQueryCallbacks()
+	if err := query.Err(); err != nil {
+		return 0, err
+	}
 
 	return query.affectingStatement(ctx,
 		query.Grammar.CompileInsertOrIgnore(query, rows),
@@ -110,6 +116,9 @@ func (b *Builder) InsertGetID(ctx context.Context, g auth.Grant, values map[stri
 
 	query := b.Clone()
 	query.ApplyBeforeQueryCallbacks()
+	if err := query.Err(); err != nil {
+		return 0, err
+	}
 
 	if query.Processor == nil {
 		return 0, errors.New("query: the builder has no processor to read the inserted id through")
@@ -143,17 +152,20 @@ func (b *Builder) insertUsing(ctx context.Context, g auth.Grant, columns []any, 
 		return 0, err
 	}
 
-	sql, bindings, err := b.createSub(ctx, g, query)
-	if err != nil {
-		return 0, err
-	}
-
 	statement := b.Clone()
 	statement.ApplyBeforeQueryCallbacks()
+	if err := statement.Err(); err != nil {
+		return 0, err
+	}
 
 	grammar, ok := statement.Grammar.(InsertUsingGrammar)
 	if !ok {
 		return 0, errors.New("query: this database engine does not support the insertUsing method")
+	}
+
+	sql, bindings, err := b.createSub(ctx, g, query)
+	if err != nil {
+		return 0, err
 	}
 
 	compiled := grammar.CompileInsertUsing(statement, columns, sql)
@@ -182,9 +194,16 @@ func (b *Builder) Update(ctx context.Context, g auth.Grant, values map[string]an
 		return 0, err
 	}
 	query.ApplyBeforeQueryCallbacks()
+	if err := query.Err(); err != nil {
+		return 0, err
+	}
 
 	compiled, bindings, err := b.prepareUpdateValues(ctx, g, values)
 	if err != nil {
+		return 0, err
+	}
+	query.ApplyBeforeQueryCallbacks()
+	if err := query.Err(); err != nil {
 		return 0, err
 	}
 
@@ -205,14 +224,21 @@ func (b *Builder) UpdateFrom(ctx context.Context, g auth.Grant, values map[strin
 		return 0, err
 	}
 
+	query.ApplyBeforeQueryCallbacks()
+	if err := query.Err(); err != nil {
+		return 0, err
+	}
 	grammar, ok := query.Grammar.(UpdateFromGrammar)
 	if !ok {
 		return 0, errors.New("query: this database engine does not support the updateFrom method")
 	}
-	query.ApplyBeforeQueryCallbacks()
 
 	compiled, bindings, err := b.prepareUpdateValues(ctx, g, values)
 	if err != nil {
+		return 0, err
+	}
+	query.ApplyBeforeQueryCallbacks()
+	if err := query.Err(); err != nil {
 		return 0, err
 	}
 
@@ -336,6 +362,9 @@ func (b *Builder) Upsert(ctx context.Context, g auth.Grant, values []map[string]
 
 	query := b.Clone()
 	query.ApplyBeforeQueryCallbacks()
+	if err := query.Err(); err != nil {
+		return 0, err
+	}
 
 	// The Grammar interface here takes update as a list of column names, so
 	// there is nothing in it to bind.
@@ -403,6 +432,9 @@ func (b *Builder) Delete(ctx context.Context, g auth.Grant, id ...any) (int64, e
 		return 0, err
 	}
 	query.ApplyBeforeQueryCallbacks()
+	if err := query.Err(); err != nil {
+		return 0, err
+	}
 
 	if query.connection == nil {
 		return 0, errors.New("query: the builder has no connection to run against")
@@ -431,6 +463,9 @@ func (b *Builder) Truncate(ctx context.Context, g auth.Grant) error {
 
 	query := b.Clone()
 	query.ApplyBeforeQueryCallbacks()
+	if err := query.Err(); err != nil {
+		return err
+	}
 
 	if query.connection == nil {
 		return errors.New("query: the builder has no connection to run against")
@@ -470,7 +505,11 @@ func (b *Builder) parseSub(ctx context.Context, g auth.Grant, query any) (string
 		if err != nil {
 			return "", nil, err
 		}
-		return scoped.ToSQL(), scoped.GetBindings(), nil
+		sql := scoped.ToSQL()
+		if err := scoped.Err(); err != nil {
+			return "", nil, err
+		}
+		return sql, scoped.GetBindings(), nil
 	case string:
 		return sub, nil, nil
 	case Expression:

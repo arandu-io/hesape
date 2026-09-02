@@ -69,7 +69,9 @@ func (b *Builder[T]) InsertOrIgnore(ctx context.Context, g auth.Grant, values ..
 		return true, nil
 	}
 
-	prepared.query.ApplyBeforeQueryCallbacks()
+	if err := prepared.validateWriteQuery(); err != nil {
+		return false, err
+	}
 	sql := b.model.Grammar.CompileInsertOrIgnore(prepared.query, rows)
 
 	bindings := make([]any, 0, len(rows)*len(rows[0]))

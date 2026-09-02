@@ -57,6 +57,7 @@ func (j *JoinClause) On(first any, args ...any) *JoinClause {
 		return j.onNested(nested, "and")
 	}
 	operator, second := prepareValueAndOperator(args...)
+	operator = j.acceptOperator(operator)
 	j.Wheres = append(j.Wheres, Where{
 		Type:     "Column",
 		First:    first,
@@ -73,6 +74,7 @@ func (j *JoinClause) OrOn(first any, args ...any) *JoinClause {
 		return j.onNested(nested, "or")
 	}
 	operator, second := prepareValueAndOperator(args...)
+	operator = j.acceptOperator(operator)
 	j.Wheres = append(j.Wheres, Where{
 		Type:     "Column",
 		First:    first,

@@ -685,6 +685,63 @@ func TestPostgresOperatorsAreOffered(t *testing.T) {
 	}
 }
 
+func TestOperatorsAreValidatedAgainstTheEffectiveDialect(t *testing.T) {
+	tests := []struct {
+		name     string
+		grammar  query.Grammar
+		operator string
+		valid    bool
+	}{
+		{name: "mysql extension", grammar: grammars.NewMySQLGrammar(), operator: "SoUnDs LiKe", valid: true},
+		{name: "postgres extension", grammar: grammars.NewPostgresGrammar(), operator: "@>", valid: true},
+		{name: "postgres operator on mysql", grammar: grammars.NewMySQLGrammar(), operator: "@>", valid: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			builder := query.NewBuilder(nil, test.grammar, nil).From("documents").Where("body", test.operator, "value")
+			sql := builder.ToSQL()
+			if test.valid && sql == "" {
+				t.Fatalf("supported operator %q was refused: %v", test.operator, builder.Err())
+			}
+			if !test.valid && builder.Err() == nil {
+				t.Fatalf("unsupported operator %q compiled as %s", test.operator, sql)
+			}
+		})
+	}
+}
+
+func TestPostgresCustomOperatorsOnlyRegisterSafeSymbolTokens(t *testing.T) {
+	grammars.CustomOperators([]string{"@#", "safe_word", "= OR", "=;", "/*", "--"})
+	operators := grammars.NewPostgresGrammar().GetOperators()
+
+	if !slices.Contains(operators, "@#") {
+		t.Fatal("the safe custom Postgres operator was not registered")
+	}
+	for _, unsafe := range []string{"safe_word", "= OR", "=;", "/*", "--"} {
+		if slices.Contains(operators, unsafe) {
+			t.Errorf("unsafe custom Postgres operator %q was registered", unsafe)
+		}
+	}
+
+	b := query.NewBuilder(nil, grammars.NewPostgresGrammar(), nil).
+		From("documents").
+		Where("metadata", "@#", "value")
+	if sql := b.ToSQL(); sql == "" {
+		t.Fatalf("registered custom operator was refused: %v", b.Err())
+	}
+}
+
+func TestPostgresCustomOperatorRegisteredAfterBuilderCreationIsLive(t *testing.T) {
+	b := query.NewBuilder(nil, grammars.NewPostgresGrammar(), nil).From("documents")
+	grammars.CustomOperators([]string{"#@#"})
+	b.Where("metadata", "#@#", "value")
+
+	if sql := b.ToSQL(); sql == "" {
+		t.Fatalf("late registered custom operator was refused: %v", b.Err())
+	}
+}
+
 func contains(haystack, needle string) bool {
 	return len(haystack) >= len(needle) && (func() bool {
 		for i := 0; i+len(needle) <= len(haystack); i++ {

@@ -1,10 +1,30 @@
 package query
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 )
+
+// ErrInvalidOperator is returned when a non-raw query clause contains an
+// operator the active grammar does not explicitly support.
+var ErrInvalidOperator = errors.New("query: invalid operator")
+
+// InvalidOperatorError identifies the operator a query refused.
+//
+// Use errors.Is with ErrInvalidOperator when the concrete value is not needed.
+type InvalidOperatorError struct {
+	Operator string
+}
+
+// Error returns a deterministic description of the refused operator.
+func (e *InvalidOperatorError) Error() string {
+	return fmt.Sprintf("query: invalid operator %q", e.Operator)
+}
+
+// Unwrap makes InvalidOperatorError match ErrInvalidOperator with errors.Is.
+func (e *InvalidOperatorError) Unwrap() error { return ErrInvalidOperator }
 
 // Record is one row as the connection hands it back: column name to value.
 type Record = map[string]any

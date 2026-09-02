@@ -43,6 +43,11 @@ type ExplainConnection interface {
 // query's own bindings.
 func Explain(ctx context.Context, g auth.Grant, query Explainable) ([]map[string]any, error) {
 	sql := query.ToSQL()
+	if checked, ok := query.(interface{ Err() error }); ok {
+		if err := checked.Err(); err != nil {
+			return nil, err
+		}
+	}
 
 	bindings := query.GetBindings()
 

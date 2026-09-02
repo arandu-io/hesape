@@ -175,9 +175,13 @@ func (b *Builder) runPaginationCountQuery(ctx context.Context, g auth.Grant, col
 		if err != nil {
 			return nil, err
 		}
+		sql := inner.ToSQL()
+		if err := inner.Err(); err != nil {
+			return nil, err
+		}
 
 		outer := b.NewQuery()
-		outer.From(Raw("(" + inner.ToSQL() + ") as " + b.Grammar.Wrap("aggregate_table")))
+		outer.From(Raw("(" + sql + ") as " + b.Grammar.Wrap("aggregate_table")))
 		outer.MergeBindings(inner)
 		outer.setAggregate("count", withoutSelectAliases(columns))
 		outer.Columns = []any{"*"}
