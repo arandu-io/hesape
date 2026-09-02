@@ -180,6 +180,9 @@ func (g *SQLiteGrammar) CompileJSONContainsKey(column any) (string, error) {
 // group, and the caller cuts them itself. A connection that cannot report a
 // version is taken to be current.
 func (g *SQLiteGrammar) CompileGroupLimit(q *query.Builder) string {
+	if g.Grammar.compilationError(q) != nil {
+		return ""
+	}
 	if version, ok := serverVersion(q.GetConnection()); ok && versionLess(version, "3.25.0") {
 		return g.compileSelectWithoutGroupLimit(q)
 	}

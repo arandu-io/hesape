@@ -154,33 +154,15 @@ func NewGrammar() *Grammar {
 	return g
 }
 
-// compilationError runs the builder's final operator barrier against the
-// grammar that will actually compile it. Compile methods are public, so they
-// cannot assume the caller came through Builder.ToSQL or an execution method.
+// compilationError runs the builder's final operator barrier against its live
+// grammar. Compile methods are public, so they cannot assume the caller came
+// through Builder.ToSQL or an execution method. The builder's grammar remains
+// authoritative because an external grammar may inherit a dialect's compiler
+// while extending its operator policy.
 func (g *Grammar) compilationError(q *query.Builder) error {
 	if q == nil {
 		return errors.New("query/grammars: cannot compile a nil query")
 	}
-	if err := q.Err(); err != nil {
-		return err
-	}
-
-	original := q.Grammar
-	policy := original
-	if active, ok := g.self.(query.Grammar); ok {
-		policy = active
-	}
-	defer func() { q.Grammar = original }()
-
-	q.Grammar = policy
-	q.ApplyBeforeQueryCallbacks()
-	if err := q.Err(); err != nil {
-		return err
-	}
-
-	// A callback can replace the public Grammar field. The receiver still
-	// compiles this call, so validate once more with its policy authoritative.
-	q.Grammar = policy
 	q.ApplyBeforeQueryCallbacks()
 	return q.Err()
 }
@@ -1055,6 +1037,9 @@ func (g *Grammar) CompileOffset(q *query.Builder, offset int) string {
 // on a clone instead of on the caller's query, which reaches the same
 // statement without leaving the builder changed behind the caller's back.
 func (g *Grammar) CompileGroupLimit(q *query.Builder) string {
+	if g.compilationError(q) != nil {
+		return ""
+	}
 	d := g.self
 
 	selectBindings := make([]any, 0, len(q.Bindings["select"])+len(q.Bindings["order"]))

@@ -712,6 +712,23 @@ func TestOperatorsAreValidatedAgainstTheEffectiveDialect(t *testing.T) {
 	}
 }
 
+type extendedOperatorGrammar struct{ query.Grammar }
+
+func (g *extendedOperatorGrammar) GetOperators() []string {
+	return append(g.Grammar.GetOperators(), "matches phrase")
+}
+
+func TestPromotedCompilerUsesTheExternalGrammarOperatorPolicy(t *testing.T) {
+	g := &extendedOperatorGrammar{Grammar: grammars.NewMySQLGrammar()}
+	b := query.NewBuilder(nil, g, nil).
+		From("documents").
+		Where("body", "matches phrase", "value")
+
+	if got := b.ToSQL(); got != "select * from `documents` where `body` matches phrase ?" {
+		t.Fatalf("ToSQL() = %q, Err() = %v", got, b.Err())
+	}
+}
+
 func TestAnInvalidCommonOperatorIsNeitherStoredNorDirectlyCompiled(t *testing.T) {
 	g := grammars.NewMySQLGrammar()
 	b := query.NewBuilder(nil, g, nil).
@@ -777,6 +794,33 @@ func TestPublicStatementCompilersFailClosedAfterDirectOperatorMutation(t *testin
 				}
 			})
 		}
+	}
+}
+
+func TestPublicGroupLimitCompilersFailClosedAfterDirectOperatorMutation(t *testing.T) {
+	type groupLimitCompiler interface {
+		CompileGroupLimit(*query.Builder) string
+	}
+
+	for _, dialect := range dialects() {
+		t.Run(dialect.name, func(t *testing.T) {
+			g := dialect.grammar()
+			compiler, ok := g.(groupLimitCompiler)
+			if !ok {
+				t.Fatalf("%T does not expose CompileGroupLimit", g)
+			}
+			b := query.NewBuilder(nil, g, nil).From("users").GroupLimit(1, "team_id")
+			b.Wheres = append(b.Wheres, query.Where{
+				Type: "Basic", Column: "id", Operator: "not an operator", Value: 1, Boolean: "and",
+			})
+
+			if sql := compiler.CompileGroupLimit(b); sql != "" {
+				t.Fatalf("CompileGroupLimit() emitted an unfiltered statement: %s", sql)
+			}
+			if !errors.Is(b.Err(), query.ErrInvalidOperator) {
+				t.Fatalf("Err() = %v, want ErrInvalidOperator", b.Err())
+			}
+		})
 	}
 }
 

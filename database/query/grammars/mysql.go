@@ -163,6 +163,9 @@ type legacyGroupLimiter interface {
 // CompileGroupLimit builds a select with a group limit's window function,
 // or the legacy session-variable form on a server old enough to need it.
 func (g *MySQLGrammar) CompileGroupLimit(q *query.Builder) string {
+	if g.Grammar.compilationError(q) != nil {
+		return ""
+	}
 	if limiter, ok := g.self.(legacyGroupLimiter); ok && limiter.UseLegacyGroupLimit(q) {
 		return g.compileLegacyGroupLimit(q)
 	}

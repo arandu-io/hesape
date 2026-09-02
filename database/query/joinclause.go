@@ -96,6 +96,10 @@ func (j *JoinClause) OrOn(first any, args ...any) *JoinClause {
 func (j *JoinClause) onNested(callback func(*JoinClause), boolean string) *JoinClause {
 	nested := j.NewJoinClause()
 	callback(nested)
+	if nested.Err() != nil {
+		j.setError(nested.Err())
+		return j
+	}
 	if len(nested.Wheres) == 0 {
 		return j
 	}

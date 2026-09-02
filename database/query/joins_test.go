@@ -23,6 +23,16 @@ func TestJoinOperatorsCannotBypassTheCentralBarrier(t *testing.T) {
 	}
 }
 
+func TestInvalidOperatorInNestedJoinPropagatesToTheParent(t *testing.T) {
+	b := mysqlBuilder().Join("contacts", func(join *query.JoinClause) {
+		join.On("contacts.user_id", "not an operator", "users.id")
+	})
+
+	if got := b.ToSQL(); got != "" || !errors.Is(b.Err(), query.ErrInvalidOperator) {
+		t.Fatalf("ToSQL() = %q, Err() = %v", got, b.Err())
+	}
+}
+
 func TestInvalidJoinSubOperatorDoesNotPartiallyCompileTheSubquery(t *testing.T) {
 	grammar := &compileSpyGrammar{fakeGrammar: &fakeGrammar{}}
 	sub := query.NewBuilder(nil, grammar, nil).From("contacts")
