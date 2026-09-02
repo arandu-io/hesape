@@ -7,12 +7,12 @@ import (
 	"encoding/binary"
 	"encoding/xml"
 	"image"
+	"image/gif"
 	"io"
 	"mime"
 	stdhttp "net/http"
 	"strings"
 
-	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
 )
@@ -237,6 +237,22 @@ func decodeRaster(open func() (io.ReadCloser, error), mediaType string) (int, in
 	reader, err = open()
 	if err != nil {
 		return 0, 0, false
+	}
+	if mediaType == "image/gif" {
+		decoded, err := gif.DecodeAll(io.LimitReader(reader, imageBodyLimit))
+		_ = reader.Close()
+		if err != nil || decoded == nil ||
+			decoded.Config.Width != config.Width || decoded.Config.Height != config.Height ||
+			!safeDimensions(decoded.Config.Width, decoded.Config.Height) || len(decoded.Image) == 0 {
+			return 0, 0, false
+		}
+		screen := image.Rect(0, 0, config.Width, config.Height)
+		for _, frame := range decoded.Image {
+			if frame == nil || frame.Bounds().Empty() || !frame.Bounds().In(screen) {
+				return 0, 0, false
+			}
+		}
+		return config.Width, config.Height, true
 	}
 	decoded, decodedFormat, err := image.Decode(io.LimitReader(reader, imageBodyLimit))
 	_ = reader.Close()

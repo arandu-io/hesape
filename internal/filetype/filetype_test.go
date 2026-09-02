@@ -43,6 +43,19 @@ func TestDetectRejectsIncompleteDecodedImages(t *testing.T) {
 	}
 }
 
+func TestDetectRejectsGIFWithATruncatedTrailingExtension(t *testing.T) {
+	body := encodeGIF(t)
+	body = append(body[:len(body)-1], 0x21, 0xfe, 0x01)
+
+	mediaType, extension, _ := filetype.Detect(openBytes(body))
+	if mediaType == "image/gif" || extension == "gif" {
+		t.Fatalf("Detect = (%q, %q), accepted a GIF with a truncated trailing extension", mediaType, extension)
+	}
+	if _, _, ok := filetype.Image(openBytes(body), false); ok {
+		t.Fatal("Image accepted a GIF with a truncated trailing extension")
+	}
+}
+
 func TestDetectAcceptsJPEGWithMetadataBeyondTheSniffPrefix(t *testing.T) {
 	body := encodeJPEG(t)
 	metadata := bytes.Repeat([]byte{'x'}, 4094)
