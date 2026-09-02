@@ -24,12 +24,29 @@ the first tag and has nothing before it to compare against.
 
 ---
 
+## Unreleased — forms refuse method combinations a browser cannot deliver
+
+`html.FormBuilder.Open` now returns `ErrMultipartMethodSpoofing` when `Files`
+is true and `Method` is PUT, PATCH or DELETE. The method override middleware
+only reads URL-encoded bodies; emitting a multipart form with `_method` would
+therefore create a form that can never reach its intended route.
+
+Register `http/middleware.OverrideMethod` after the application's CSRF check
+and before routing. Ordinary PUT, PATCH and DELETE forms are rendered as POST
+with a hidden `_method`; the CSRF layer validates what the browser actually
+sent, then the override selects the intended route.
+
+`OpenOptions.Method` and `OpenOptions.Files` are also authoritative over the
+free `Attributes` map. An attribute named `method` or `enctype`, in any letter
+case, is ignored so the form tag cannot disagree with the hidden field or with
+the typed upload option.
+
 ## v0.21.0 — an attribute bag escapes as HTML, and the CSRF field has one name
 
 ### The hidden CSRF field is named `_token`
 
-`view.CSRF` — the `@csrf` directive — wrote `name="_csrf"`, and the middleware
-that checks the token read the same spelling. `html.FormBuilder` wrote
+`view.CSRF` — the `@csrf` directive — wrote `name="_csrf"`, and Framework
+v0.41.0's `CSRFProtect` read that spelling. `html.FormBuilder` wrote
 `name="_token"`, and the session has always stored the token under that key.
 
 So a form built with `FormBuilder` carried a field the middleware never looked
@@ -37,7 +54,10 @@ for, and the submission came back 419 with a message telling the developer to
 add a field the form already had.
 
 One spelling survives, and it is `_token`: it is the one the form builder
-already emitted and the one the session already stores.
+already emitted and the one the session already stores. This release unifies
+Hesape's writers; the matching reader is Framework v0.42.0. Do not combine
+Hesape v0.21.0 with Framework v0.41.0: an `@csrf` form from that pair carries
+`_token` to a reader still looking for `_csrf` and is refused with 419.
 
 A view that uses the `@csrf` directive needs no change. A form or an HTMX
 request that writes the field by hand does:
