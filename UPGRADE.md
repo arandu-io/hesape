@@ -24,7 +24,7 @@ the first tag and has nothing before it to compare against.
 
 ---
 
-## Unreleased — forms refuse method combinations a browser cannot deliver
+## v0.21.1 — forms refuse method combinations a browser cannot deliver
 
 `html.FormBuilder.Open` now returns `ErrMultipartMethodSpoofing` when `Files`
 is true and `Method` is PUT, PATCH or DELETE. The method override middleware
