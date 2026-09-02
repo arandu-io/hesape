@@ -17,6 +17,12 @@ import (
 // that comes back is about the wrong thing.
 var ErrNoToken = errors.New("html: no CSRF token: pass one to NewFormBuilder or SetSessionStore")
 
+// ErrMultipartMethodSpoofing is what [FormBuilder.Open] answers when a file
+// upload asks for a method the browser cannot send. Method overriding only
+// reads urlencoded forms, so emitting that multipart form would create markup
+// no matching PUT, PATCH or DELETE route can receive.
+var ErrMultipartMethodSpoofing = errors.New("html: multipart forms cannot spoof HTTP methods")
+
 // FormBuilder builds escaped HTML form elements as values.
 //
 // Nothing here competes with the kyse components: these return escaped markup
@@ -56,7 +62,8 @@ func NewFormBuilder(html *HtmlBuilder, url UrlGenerator, csrfToken string) *Form
 // type itself rather than a list somebody has to keep in step with it.
 type OpenOptions struct {
 	// Method is the HTTP method: "post" when empty. DELETE, PATCH and PUT
-	// are spoofed -- the form posts and carries a hidden _method.
+	// are spoofed -- the form posts and carries a hidden _method. Attributes
+	// cannot replace it, because the tag and hidden field must agree.
 	Method string
 
 	// URL is a path, then any extra segments, covered together by one
@@ -69,7 +76,8 @@ type OpenOptions struct {
 	// Action is a controller action, then its parameters.
 	Action []string
 
-	// Files, when true, sets enctype to multipart/form-data.
+	// Files, when true, sets enctype to multipart/form-data. Attributes cannot
+	// set enctype independently of it.
 	Files bool
 
 	// Attributes is any other HTML attribute to write on the form tag.
@@ -83,6 +91,9 @@ func (f *FormBuilder) Open(options OpenOptions) (template.HTML, error) {
 	method := options.Method
 	if method == "" {
 		method = "post"
+	}
+	if options.Files && slices.Contains(spoofedMethods, strings.ToUpper(method)) {
+		return "", ErrMultipartMethodSpoofing
 	}
 
 	action, err := f.getAction(options)
@@ -99,8 +110,15 @@ func (f *FormBuilder) Open(options OpenOptions) (template.HTML, error) {
 		attributes["enctype"] = "multipart/form-data"
 	}
 
-	// An attribute the caller passed overrides the computed one.
+	// Method and enctype are typed above because they determine behavior beyond
+	// the tag. A free attribute cannot disagree with Method and leave the tag
+	// saying GET while the body says DELETE, or claim multipart when Files is
+	// false. HTML attribute names are case-insensitive, so every spelling is
+	// reserved.
 	for key, value := range options.Attributes {
+		if strings.EqualFold(key, "method") || strings.EqualFold(key, "enctype") {
+			continue
+		}
 		attributes[key] = value
 	}
 

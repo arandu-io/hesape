@@ -4,11 +4,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/arandu-io/hesape/html"
 	hhttp "github.com/arandu-io/hesape/http"
 	"github.com/arandu-io/hesape/http/middleware"
+	"github.com/arandu-io/hesape/session"
 )
 
 // served is the request as the handler under the middleware saw it.
@@ -272,3 +276,83 @@ func TestABodyThatWillNotParseLeavesTheMethodAlone(t *testing.T) {
 		t.Errorf("the request was refused with %d, and refusing a malformed body is not this middleware's decision", rec.Code)
 	}
 }
+
+// TestAFormSubmissionIsCheckedBeforeItsMethodIsOverridden exercises the public
+// seam from markup to handler. The field names are read from FormBuilder's HTML
+// instead of repeated in the request body, so a writer and reader that drift
+// apart cannot keep this test green by each agreeing only with itself.
+func TestAFormSubmissionIsCheckedBeforeItsMethodIsOverridden(t *testing.T) {
+	const sessionID = "session-1"
+	csrf := session.NewCSRF([]byte("0123456789abcdef0123456789abcdef"), time.Hour)
+	token, err := csrf.Issue(sessionID)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	for _, method := range []string{http.MethodPut, http.MethodPatch, http.MethodDelete} {
+		t.Run(method, func(t *testing.T) {
+			form := html.NewFormBuilder(html.NewHtmlBuilder(formURLs{}), formURLs{}, token)
+			markup, err := form.Open(html.OpenOptions{Method: method, URL: []string{"/posts/1"}})
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+
+			body := hiddenFields(t, string(markup)).Encode()
+			r := formRequest(http.MethodPost, "/posts/1", body)
+			stack := func(handler http.Handler) http.Handler {
+				return checkCSRF(csrf, sessionID)(middleware.OverrideMethod()(handler))
+			}
+			got, rec := through(stack, r)
+
+			if rec.Code != http.StatusOK || !got.ran {
+				t.Fatalf("status = %d, want the checked form to reach the handler", rec.Code)
+			}
+			if got.method != method {
+				t.Fatalf("handler method = %s, want %s", got.method, method)
+			}
+		})
+	}
+}
+
+var hiddenInput = regexp.MustCompile(`<input name="([^"]+)" type="hidden" value="([^"]+)">`)
+
+func hiddenFields(t *testing.T, markup string) url.Values {
+	t.Helper()
+
+	fields := url.Values{}
+	for _, match := range hiddenInput.FindAllStringSubmatch(markup, -1) {
+		fields.Add(match[1], match[2])
+	}
+	if len(fields) != 2 {
+		t.Fatalf("hidden fields in %q = %v, want method and token", markup, fields)
+	}
+	return fields
+}
+
+// checkCSRF is the component-level half of the Framework's CSRFProtect: it
+// reads the form field and validates it against the public session issuer. The
+// Framework wrapper additionally performs the browser-origin check and renders
+// its refusal response; importing it here would reverse the module dependency.
+func checkCSRF(csrf *session.CSRF, sessionID string) hhttp.Middleware {
+	return func(handler http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := csrf.Validate(sessionID, r.PostFormValue("_token")); err != nil {
+				w.WriteHeader(419)
+				return
+			}
+			handler.ServeHTTP(w, r)
+		})
+	}
+}
+
+// formURLs supplies only the URL behavior FormBuilder.Open observes in this
+// test. The remaining methods complete the public UrlGenerator contract.
+type formURLs struct{}
+
+func (formURLs) To(path string, _ ...string) string                { return path }
+func (formURLs) Secure(path string, _ ...string) string            { return path }
+func (formURLs) Asset(path string) string                          { return path }
+func (formURLs) SecureAsset(path string) string                    { return path }
+func (formURLs) Route(name string, _ ...string) (string, error)    { return name, nil }
+func (formURLs) Action(action string, _ ...string) (string, error) { return action, nil }
+func (formURLs) Current() string                                   { return "/" }

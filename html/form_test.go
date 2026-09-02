@@ -82,7 +82,78 @@ func TestOpenWithFilesSetsTheEnctype(t *testing.T) {
 	}
 }
 
-// PHP's array_merge lets the caller's attributes win over the computed ones.
+func TestOpenRejectsFilesWithAMethodTheBrowserCannotSend(t *testing.T) {
+	for _, method := range []string{"put", "PATCH", "delete"} {
+		t.Run(method, func(t *testing.T) {
+			form, _ := newForm()
+
+			got, err := form.Open(html.OpenOptions{Method: method, Files: true})
+
+			if !errors.Is(err, html.ErrMultipartMethodSpoofing) {
+				t.Fatalf("Open error = %v, want ErrMultipartMethodSpoofing", err)
+			}
+			if got != "" {
+				t.Fatalf("Open = %q after refusing the options, want no HTML", got)
+			}
+		})
+	}
+}
+
+func TestOpenMethodOptionCannotBeOverriddenByAttributes(t *testing.T) {
+	form, _ := newForm()
+
+	got, err := form.Open(html.OpenOptions{
+		Method:     "DELETE",
+		Attributes: html.Attrs{"method": "GET", "METHOD": "GET"},
+	})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	markup := string(got)
+	if strings.Contains(markup, `method="GET"`) || strings.Contains(markup, `METHOD=`) {
+		t.Fatalf("Open = %q, want Attributes unable to replace the typed Method", got)
+	}
+	if !strings.Contains(markup, `method="POST"`) ||
+		!strings.Contains(markup, `name="_method" type="hidden" value="DELETE"`) {
+		t.Fatalf("Open = %q, want a POST carrying the DELETE override", got)
+	}
+}
+
+func TestOpenFilesOptionOwnsTheEnctype(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		files     bool
+		want      string
+		wantCount int
+	}{
+		{name: "file form", files: true, want: `enctype="multipart/form-data"`, wantCount: 1},
+		{name: "ordinary form", files: false, wantCount: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			form, _ := newForm()
+			got, err := form.Open(html.OpenOptions{
+				Files:      tc.files,
+				Attributes: html.Attrs{"enctype": "text/plain", "ENCTYPE": "text/plain"},
+			})
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+
+			markup := string(got)
+			if strings.Count(markup, "enctype=") != tc.wantCount ||
+				strings.Contains(markup, "ENCTYPE=") || strings.Contains(markup, `enctype="text/plain"`) {
+				t.Fatalf("Open = %q, want Files=%t to be the only source of enctype", got, tc.files)
+			}
+			if tc.want != "" && !strings.Contains(markup, tc.want) {
+				t.Fatalf("Open = %q, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// Action remains overridable for compatibility; Method and Files are the two
+// typed options that own their corresponding attributes.
 func TestOpenLetsTheCallerOverrideAComputedAttribute(t *testing.T) {
 	form, _ := newForm()
 
