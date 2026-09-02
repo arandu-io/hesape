@@ -156,15 +156,14 @@ func NewGrammar() *Grammar {
 
 // compilationError runs the builder's final operator barrier against its live
 // grammar. Compile methods are public, so they cannot assume the caller came
-// through Builder.ToSQL or an execution method. The builder's grammar remains
-// authoritative because an external grammar may inherit a dialect's compiler
-// while extending its operator policy.
+// through Builder.ToSQL or an execution method. They deliberately do not run
+// callbacks: the builder owns that lifecycle, including callbacks queued for a
+// later compilation.
 func (g *Grammar) compilationError(q *query.Builder) error {
 	if q == nil {
 		return errors.New("query/grammars: cannot compile a nil query")
 	}
-	q.ApplyBeforeQueryCallbacks()
-	return q.Err()
+	return q.ValidateForCompilation()
 }
 
 // selectComponents lists the clauses of a select, in the order they are

@@ -780,11 +780,24 @@ func (b *Builder) BeforeQuery(callback func(*Builder)) *Builder {
 	return b
 }
 
-// ApplyBeforeQueryCallbacks runs every registered BeforeQuery callback, clears
-// them, then validates every non-raw operator in the complete query graph.
+// ApplyBeforeQueryCallbacks runs the current snapshot of registered callbacks,
+// clears it, then validates every non-raw operator in the complete query graph.
+// A callback registered by another callback remains queued for the next
+// compilation instead of running midway through the current statement.
 func (b *Builder) ApplyBeforeQueryCallbacks() {
 	b.applyBeforeQueryCallbacks(make(map[*Builder]bool))
-	b.validateQueryGraph(make(map[*Builder]bool), b.Grammar)
+	b.ValidateForCompilation()
+}
+
+// ValidateForCompilation applies the final operator barrier to the complete
+// query graph without executing callbacks. Grammar compilers use it to reject
+// direct public-field mutations while leaving callback lifecycle ownership to
+// Builder execution methods.
+func (b *Builder) ValidateForCompilation() error {
+	if b == nil {
+		return errors.New("query: cannot validate a nil builder")
+	}
+	return b.validateQueryGraph(make(map[*Builder]bool), b.Grammar)
 }
 
 // ToSQL runs the before-query callbacks and compiles the query to a select

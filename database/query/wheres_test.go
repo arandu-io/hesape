@@ -409,6 +409,25 @@ func TestExternalGrammarMayDeclareASafeMultiwordOperator(t *testing.T) {
 	}
 }
 
+func TestCallbackQueuedByCallbackWaitsForTheNextCompilation(t *testing.T) {
+	b := mysqlBuilder().Where("tenant_id", "=", "acme")
+	b.BeforeQuery(func(q *query.Builder) {
+		q.BeforeQuery(func(next *query.Builder) {
+			next.Wheres[0].Operator = "not an operator"
+		})
+	})
+
+	if got := b.ToSQL(); got != "select * from `users` where `tenant_id` = ?" {
+		t.Fatalf("first ToSQL() = %q, Err() = %v", got, b.Err())
+	}
+	if len(b.BeforeQueryCallbacks) != 1 {
+		t.Fatalf("queued callbacks = %d, want 1", len(b.BeforeQueryCallbacks))
+	}
+	if got := b.ToSQL(); got != "" || !errors.Is(b.Err(), query.ErrInvalidOperator) {
+		t.Fatalf("second ToSQL() = %q, Err() = %v", got, b.Err())
+	}
+}
+
 func TestFinalBarrierUsesTheLiveGrammarAfterPublicOrCallbackMutation(t *testing.T) {
 	t.Run("public mutation rejects an old dialect operator", func(t *testing.T) {
 		b := query.NewBuilder(nil, grammars.NewPostgresGrammar(), nil).
