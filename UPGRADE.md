@@ -24,6 +24,31 @@ the first tag and has nothing before it to compare against.
 
 ---
 
+## Unreleased — upload validation trusts bytes, not client metadata
+
+`mimes`, `mimetypes` and `image` now classify uploaded files from bounded
+reads of their content. A filename or `Content-Type` announced by the client no
+longer decides the server MIME type or the extension used by `PutFile`.
+
+Use `GetClientMimeType`, `GetClientOriginalName` or
+`GetClientOriginalExtension` only when you deliberately need the original
+metadata. The `extensions` validation rule remains the explicit policy for the
+client filename; content rules intentionally ignore it. Consequently, a valid
+PNG named `photo.php` passes `mimes:png`, while PHP or text named `photo.png`
+does not.
+
+PNG, JPEG and GIF must decode completely and stay within fixed byte and pixel
+budgets. Animated GIFs also have a bounded frame count and cumulative pixel
+budget. BMP and WebP can be identified by MIME, but fail the `image` rule until
+an audited full decoder is available. SVG remains opt-in with
+`image:allow_svg` and must be a well-formed document.
+
+`filesystem.Disk.PutFile` now derives its generated suffix from detected
+content. An upload whose content cannot be classified is refused instead of
+falling back to its name. Mail attachments whose server-side MIME is unknown
+are emitted as `application/octet-stream`, preventing the mail renderer from
+reinferencing an active type from an untrusted filename.
+
 ## v0.21.1 — forms refuse method combinations a browser cannot deliver
 
 `html.FormBuilder.Open` now returns `ErrMultipartMethodSpoofing` when `Files`
