@@ -409,22 +409,33 @@ func TestExternalGrammarMayDeclareASafeMultiwordOperator(t *testing.T) {
 	}
 }
 
-func TestCallbackQueuedByCallbackWaitsForTheNextCompilation(t *testing.T) {
+func TestCallbacksRegisteredByCallbacksDrainBeforeCompilation(t *testing.T) {
 	b := mysqlBuilder().Where("tenant_id", "=", "acme")
+	calls := 0
 	b.BeforeQuery(func(q *query.Builder) {
+		calls++
 		q.BeforeQuery(func(next *query.Builder) {
+			calls++
 			next.Wheres[0].Operator = "not an operator"
 		})
 	})
 
-	if got := b.ToSQL(); got != "select * from `users` where `tenant_id` = ?" {
-		t.Fatalf("first ToSQL() = %q, Err() = %v", got, b.Err())
-	}
-	if len(b.BeforeQueryCallbacks) != 1 {
-		t.Fatalf("queued callbacks = %d, want 1", len(b.BeforeQueryCallbacks))
-	}
 	if got := b.ToSQL(); got != "" || !errors.Is(b.Err(), query.ErrInvalidOperator) {
-		t.Fatalf("second ToSQL() = %q, Err() = %v", got, b.Err())
+		t.Fatalf("ToSQL() = %q, Err() = %v", got, b.Err())
+	}
+	if calls != 2 || len(b.BeforeQueryCallbacks) != 0 {
+		t.Fatalf("callback calls = %d, queued = %d", calls, len(b.BeforeQueryCallbacks))
+	}
+}
+
+func TestSelfRegisteringBeforeQueryCallbackFailsClosed(t *testing.T) {
+	b := mysqlBuilder().Where("tenant_id", "=", "acme")
+	var callback func(*query.Builder)
+	callback = func(q *query.Builder) { q.BeforeQuery(callback) }
+	b.BeforeQuery(callback)
+
+	if got := b.ToSQL(); got != "" || b.Err() == nil {
+		t.Fatalf("ToSQL() = %q, Err() = %v", got, b.Err())
 	}
 }
 

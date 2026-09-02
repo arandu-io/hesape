@@ -66,6 +66,24 @@ func TestReadTerminalsNeverCompileOrExecuteAnInvalidOperator(t *testing.T) {
 	}
 }
 
+func TestGetDrainsChainedCallbacksBeforeReachingTheConnection(t *testing.T) {
+	connection := &fakeConnection{}
+	b := newTestBuilder(connection).Where("status", "=", "open")
+	b.BeforeQuery(func(q *query.Builder) {
+		q.BeforeQuery(func(next *query.Builder) {
+			next.Wheres[0].Operator = "not an operator"
+		})
+	})
+
+	_, err := b.Get(context.Background(), grant())
+	if !errors.Is(err, query.ErrInvalidOperator) {
+		t.Fatalf("Get() error = %v, want ErrInvalidOperator", err)
+	}
+	if len(connection.calls) != 0 {
+		t.Fatalf("the connection received %d calls", len(connection.calls))
+	}
+}
+
 // TestNoStatementReachesTheDatabaseWithoutATenant covers every door rather than
 // one of them.
 //

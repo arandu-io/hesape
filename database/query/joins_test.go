@@ -25,7 +25,9 @@ func TestJoinOperatorsCannotBypassTheCentralBarrier(t *testing.T) {
 
 func TestInvalidOperatorInNestedJoinPropagatesToTheParent(t *testing.T) {
 	b := mysqlBuilder().Join("contacts", func(join *query.JoinClause) {
-		join.On("contacts.user_id", "not an operator", "users.id")
+		join.On(func(nested *query.JoinClause) {
+			nested.On("contacts.user_id", "not an operator", "users.id")
+		})
 	})
 
 	if got := b.ToSQL(); got != "" || !errors.Is(b.Err(), query.ErrInvalidOperator) {

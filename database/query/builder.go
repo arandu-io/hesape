@@ -780,13 +780,20 @@ func (b *Builder) BeforeQuery(callback func(*Builder)) *Builder {
 	return b
 }
 
-// ApplyBeforeQueryCallbacks runs the current snapshot of registered callbacks,
-// clears it, then validates every non-raw operator in the complete query graph.
-// A callback registered by another callback remains queued for the next
-// compilation instead of running midway through the current statement.
+// ApplyBeforeQueryCallbacks drains registered callbacks across the complete
+// query graph, then validates every non-raw operator. Callbacks registered by
+// callbacks are part of the same preparation and cannot run midway through SQL
+// compilation. A callback cycle fails closed after a bounded number of rounds.
 func (b *Builder) ApplyBeforeQueryCallbacks() {
-	b.applyBeforeQueryCallbacks(make(map[*Builder]bool))
-	b.ValidateForCompilation()
+	const maxRounds = 64
+	for range maxRounds {
+		b.applyBeforeQueryCallbacks(make(map[*Builder]bool))
+		if !b.hasBeforeQueryCallbacks(make(map[*Builder]bool)) {
+			b.ValidateForCompilation()
+			return
+		}
+	}
+	b.setError(errors.New("query: before-query callbacks did not settle"))
 }
 
 // ValidateForCompilation applies the final operator barrier to the complete
@@ -864,6 +871,42 @@ func (b *Builder) applyBeforeQueryCallbacks(visited map[*Builder]bool) {
 	for _, sub := range b.subqueries {
 		sub.query.applyBeforeQueryCallbacks(visited)
 	}
+}
+
+func (b *Builder) hasBeforeQueryCallbacks(visited map[*Builder]bool) bool {
+	if b == nil || visited[b] {
+		return false
+	}
+	visited[b] = true
+	if len(b.BeforeQueryCallbacks) > 0 {
+		return true
+	}
+	for i := range b.Wheres {
+		if b.Wheres[i].Query.hasBeforeQueryCallbacks(visited) {
+			return true
+		}
+	}
+	for i := range b.Havings {
+		if b.Havings[i].Query.hasBeforeQueryCallbacks(visited) {
+			return true
+		}
+	}
+	for _, join := range b.Joins {
+		if join != nil && join.Builder.hasBeforeQueryCallbacks(visited) {
+			return true
+		}
+	}
+	for _, union := range b.Unions {
+		if union.Query.hasBeforeQueryCallbacks(visited) {
+			return true
+		}
+	}
+	for _, sub := range b.subqueries {
+		if sub.query.hasBeforeQueryCallbacks(visited) {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *Builder) validateQueryGraph(visited map[*Builder]bool, grammar Grammar) error {
