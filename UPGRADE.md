@@ -24,7 +24,9 @@ the first tag and has nothing before it to compare against.
 
 ---
 
-## Unreleased — upload validation trusts bytes, not client metadata
+## Unreleased
+
+### Upload validation trusts bytes, not client metadata
 
 `mimes`, `mimetypes` and `image` now classify uploaded files from bounded
 reads of their content. A filename or `Content-Type` announced by the client no
@@ -48,6 +50,29 @@ content. An upload whose content cannot be classified is refused instead of
 falling back to its name. Mail attachments whose server-side MIME is unknown
 are emitted as `application/octet-stream`, preventing the mail renderer from
 reinferencing an active type from an untrusted filename.
+
+### Query operators are validated before compilation
+
+Every non-raw comparison operator must now be declared by the active
+`query.Grammar.GetOperators` policy. Matching is case-insensitive and emits the
+grammar's canonical spelling, but padding, repeated or control whitespace,
+comments, terminators and unknown operators are rejected with
+`query.ErrInvalidOperator`. `Builder.Err` exposes the first validation error,
+and `ToSQL` returns an empty string after failure; execution methods return the
+error without invoking the database connection.
+
+Before-query callbacks are drained before the final recursive validation pass,
+including callbacks registered by other callbacks. A callback cycle fails
+closed instead of allowing compilation to begin with an unstable query tree.
+Direct mutation of exported clauses is also covered by
+`Builder.ValidateForCompilation`, which public grammar compilers invoke before
+building a statement.
+
+Raw APIs remain the explicit escape hatch for trusted SQL. An external grammar
+may continue to add lexically safe compound operators through `GetOperators`.
+PostgreSQL's process-wide `grammars.CustomOperators` extension accepts only a
+single safe symbolic token; it does not accept words, whitespace, comments or
+SQL fragments.
 
 ## v0.21.1 — forms refuse method combinations a browser cannot deliver
 
