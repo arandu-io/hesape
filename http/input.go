@@ -570,18 +570,37 @@ func (r *Request) ValidateWithBag(bag string, rules *validation.Set, opts ...val
 	return validation.Make(data, rules, opts...).ValidateWithBag(bag)
 }
 
-// validationData builds the validation.Data from the request's input. Files
-// are included so that the file rules (file, mimes, image, size) can reach
-// them. The *multipart.FileHeader satisfies validation.File through the
-// [UploadedFile] wrapper; when that wrapper is not wired, file rules see the
-// header and the rules that need the interface fail closed.
+// validationData builds the validation.Data from the request's input. Public
+// input access keeps returning multipart headers, while validation receives
+// UploadedFile values whose security metadata comes from the bytes.
 func (r *Request) validationData() validation.Data {
 	all := r.All()
 	data := make(validation.Data, len(all))
 	for k, v := range all {
-		data[k] = v
+		data[k] = validationValue(k, v)
 	}
 	return data
+}
+
+func validationValue(field string, value any) any {
+	switch files := value.(type) {
+	case *multipart.FileHeader:
+		return NewUploadedFile(files, field)
+	case []*multipart.FileHeader:
+		wrapped := make([]any, len(files))
+		for i, file := range files {
+			wrapped[i] = NewUploadedFile(file, field)
+		}
+		return wrapped
+	case []any:
+		wrapped := make([]any, len(files))
+		for i, file := range files {
+			wrapped[i] = validationValue(field, file)
+		}
+		return wrapped
+	default:
+		return value
+	}
 }
 
 // jsonBodyBytes reads and restores the body, returning the raw bytes. It is

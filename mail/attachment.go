@@ -24,9 +24,9 @@ func firstOption(options []AttachOptions) AttachOptions {
 	return AttachOptions{}
 }
 
-// UploadedFile is the part of an uploaded file that [FromUploadedFile] needs.
-// It is an interface rather than an import because an uploaded file belongs to
-// the HTTP layer and this package is underneath it.
+// UploadedFile is the part of an uploaded file that [FromUploadedFile] accepts.
+// The explicit client MIME method remains available as metadata, but attachment
+// MIME never falls back to it when server-side detection fails.
 type UploadedFile interface {
 	GetClientOriginalName() string
 	GetMimeType() string
@@ -84,17 +84,19 @@ func FromData(data func() ([]byte, error), name ...string) *Attachment {
 	return a
 }
 
-// FromUploadedFile is an attachment made from an upload. The name and the
-// content type come off the upload, which is what stops a browser-supplied
-// filename from being the only thing describing the part.
+// FromUploadedFile is an attachment made from an upload. Its display name is
+// client metadata; its content type is the server-detected type only.
 func FromUploadedFile(file UploadedFile) *Attachment {
 	return &Attachment{
 		resolver: func(a *Attachment, _ func(string) any, dataStrategy func(func() ([]byte, error)) any) any {
-			mime := file.GetMimeType()
-			if mime == "" {
-				mime = file.GetClientMimeType()
+			mediaType := file.GetMimeType()
+			if mediaType == "" {
+				// Empty normally means "guess from the filename" in the mail API.
+				// An upload's name is client metadata, so detection failure instead
+				// gets an explicit inert type that cannot be re-inferred later.
+				mediaType = "application/octet-stream"
 			}
-			a.As(file.GetClientOriginalName()).WithMime(mime)
+			a.As(file.GetClientOriginalName()).WithMime(mediaType)
 			return dataStrategy(file.Get)
 		},
 	}

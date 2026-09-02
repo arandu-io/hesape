@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/internal/filetype"
 )
 
 // ErrRefusedUpload is what every [UploadRules] failure unwraps to, so a handler
@@ -79,10 +80,9 @@ func (u Upload) Extension() string { return strings.ToLower(path.Ext(u.Name)) }
 // would accept an .exe -- and the moment those are the defaults, the rule that
 // was forgotten looks exactly like the rule that was written.
 //
-// There is no content-type rule. The announced type is a header the client
-// wrote, so checking it stops nobody who is trying; the extension is checked
-// because it is what a person sees, and the real defense is on the way out --
-// the stored type comes from the key, and [Serve] sends nosniff.
+// There is no client content-type rule. The announced type and filename are
+// metadata the client wrote; Extensions is compared to the extension derived
+// from a bounded read of the bytes.
 type UploadRules struct {
 	// MaxBytes is the largest file accepted. It must be positive.
 	MaxBytes int64
@@ -111,31 +111,51 @@ func (u Upload) Check(r UploadRules) error {
 	if u.Size > r.MaxBytes {
 		return fmt.Errorf("%w: it is %d bytes and the limit is %d", ErrRefusedUpload, u.Size, r.MaxBytes)
 	}
-	ext := u.Extension()
+	ext, ok := u.contentExtension()
+	if !ok {
+		return fmt.Errorf("%w: its content could not be classified", ErrRefusedUpload)
+	}
 	for _, want := range r.Extensions {
-		if ext == strings.ToLower(want) {
+		if sameUploadExtension(ext, strings.ToLower(want)) {
 			return nil
 		}
 	}
-	if ext == "" {
-		return fmt.Errorf("%w: %q has no extension, and only %s are accepted", ErrRefusedUpload, u.Name, strings.Join(r.Extensions, ", "))
+	return fmt.Errorf("%w: content detected as %s is not accepted, only %s", ErrRefusedUpload, ext, strings.Join(r.Extensions, ", "))
+}
+
+func (u Upload) contentExtension() (string, bool) {
+	_, extension, ok := filetype.Detect(u.Open)
+	if !ok || extension == "" {
+		return "", false
 	}
-	return fmt.Errorf("%w: %s is not accepted, only %s", ErrRefusedUpload, ext, strings.Join(r.Extensions, ", "))
+	return "." + extension, true
+}
+
+func sameUploadExtension(detected, allowed string) bool {
+	if detected == allowed {
+		return true
+	}
+	return detected == ".jpeg" && allowed == ".jpg" || detected == ".jpg" && allowed == ".jpeg"
 }
 
 // PutFile stores an upload under a directory and returns the key it landed on.
 //
-// The name is drawn at random and keeps only the extension, which is the point
-// of the call: the announced filename is a string the client chose, and storing
-// under it means two people uploading "scan.pdf" overwrite each other -- and
-// that somebody who guesses a filename guesses a key.
+// The name is drawn at random and keeps only the extension detected from the
+// content, which is the point of the call: the announced filename is a string
+// the client chose, and storing under it means two people uploading "scan.pdf"
+// overwrite each other -- and that somebody who guesses a filename guesses a
+// key or controls its executable suffix.
 //
 // It does not check [UploadRules]. Checking is [Upload.Check], called where the
 // answer can be shown to the person who picked the file; folding it in here
 // would make an unchecked Put impossible to write and a checked one impossible
 // to see.
 func (d *Disk) PutFile(ctx context.Context, g auth.Grant, directory string, u Upload) (string, error) {
-	return d.PutFileAs(ctx, g, directory, u, randomName()+u.Extension())
+	extension, ok := u.contentExtension()
+	if !ok {
+		return "", fmt.Errorf("%w: its content could not be classified", ErrRefusedUpload)
+	}
+	return d.PutFileAs(ctx, g, directory, u, randomName()+extension)
 }
 
 // randomName draws the forty random characters a stored file is named with.

@@ -15,8 +15,8 @@ import (
 	hhttp "github.com/arandu-io/hesape/http"
 )
 
-// File is an UploadedFile a test made, with a size and a type it reports
-// rather than ones a browser sent.
+// File is an UploadedFile a test made, with a size it reports and optional
+// client MIME metadata. Server MIME detection still reads its bytes.
 //
 // It embeds *hesape/http.UploadedFile, so everything an upload answers --
 // HashName, Extension, Get, StoreAs -- is the same method on the same
@@ -31,7 +31,7 @@ type File struct {
 	TempFile *os.File
 	// SizeToReport is the size [File.Size] set, in bytes.
 	SizeToReport int64
-	// MimeTypeToReport is the type [File.MimeType] set.
+	// MimeTypeToReport is the client type [File.MimeType] set.
 	MimeTypeToReport string
 }
 
@@ -39,9 +39,9 @@ type File struct {
 // the bytes.
 func NewFile(name string, tempFile *os.File) *File {
 	f := &File{Name: name, TempFile: tempFile}
-	f.MimeTypeToReport = ""
+	f.MimeTypeToReport = From(name)
 	f.UploadedFile = hhttp.NewUploadedFileFromPath(
-		f.tempFilePath(), name, f.GetMimeType(), true,
+		f.tempFilePath(), name, f.MimeTypeToReport, true,
 	)
 	return f
 }
@@ -90,19 +90,14 @@ func (f *File) GetSize() int64 {
 	return f.UploadedFile.GetSize()
 }
 
-// MimeType sets the type the fake reports.
+// MimeType sets the client-announced type without changing what the server
+// detects from the fake's bytes.
 func (f *File) MimeType(contentType string) *File {
 	f.MimeTypeToReport = contentType
+	f.UploadedFile = hhttp.NewUploadedFileFromPath(
+		f.tempFilePath(), f.Name, contentType, true,
+	)
 	return f
-}
-
-// GetMimeType is the type the fake reports, falling back to the one the
-// name implies.
-func (f *File) GetMimeType() string {
-	if f.MimeTypeToReport != "" {
-		return f.MimeTypeToReport
-	}
-	return From(f.Name)
 }
 
 // Close removes the temporary file. It is what a test defers, since
@@ -148,9 +143,8 @@ func (f *FileFactory) Create(name string, args ...int) (*File, error) {
 	return file, nil
 }
 
-// CreateWithMimeType is Create with the type the fake reports also set. It
-// is a separate method because Go has no optional argument that can be
-// skipped over.
+// CreateWithMimeType is Create with client MIME metadata also set. It is a
+// separate method because Go has no optional argument that can be skipped over.
 func (f *FileFactory) CreateWithMimeType(name string, kilobytes int, contentType string) (*File, error) {
 	file, err := f.Create(name, kilobytes)
 	if err != nil {

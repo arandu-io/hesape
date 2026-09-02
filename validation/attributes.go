@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/internal/filetype"
 	"github.com/arandu-io/hesape/str"
 )
 
@@ -1513,9 +1514,6 @@ func (v *Validator) ValidateMimes(attribute string, value any, parameters []stri
 	if !v.IsValidFileInstance(value) {
 		return false
 	}
-	if v.ShouldBlockPhpUpload(value, parameters) {
-		return false
-	}
 	allowed := parameters
 	if slices.Contains(parameters, "jpg") || slices.Contains(parameters, "jpeg") {
 		allowed = append(slices.Clone(parameters), "jpg", "jpeg")
@@ -1529,9 +1527,6 @@ func (v *Validator) ValidateMimes(attribute string, value any, parameters []stri
 // group.
 func (v *Validator) ValidateMimetypes(attribute string, value any, parameters []string) bool {
 	if !v.IsValidFileInstance(value) {
-		return false
-	}
-	if v.ShouldBlockPhpUpload(value, parameters) {
 		return false
 	}
 	f, _ := asFile(value)
@@ -1553,18 +1548,20 @@ func (v *Validator) ValidateExtensions(attribute string, value any, parameters [
 	return slices.Contains(parameters, strings.ToLower(clientExtension(value)))
 }
 
-// ValidateImage is `image`: mimes over the six image types, plus svg when the
-// parameters carry allow_svg.
+// ValidateImage is `image`: a complete PNG, JPEG or GIF decoded under fixed
+// bounds, plus a well-formed SVG when the parameters carry allow_svg. Formats
+// without an audited decoder fail closed even when their MIME can be detected.
 func (v *Validator) ValidateImage(attribute string, value any, parameters []string) bool {
-	mimes := []string{"jpg", "jpeg", "png", "gif", "bmp", "webp"}
-	if slices.Contains(parameters, "allow_svg") {
-		mimes = append(mimes, "svg")
+	if !v.IsValidFileInstance(value) {
+		return false
 	}
-	return v.ValidateMimes(attribute, value, mimes)
+	f, _ := asFile(value)
+	return validImage(f, slices.Contains(parameters, "allow_svg"))
 }
 
-// ShouldBlockPhpUpload reports whether an upload is refused for the extension it
-// came in with: one of phpExtensions is, unless the rule asked for php by name.
+// ShouldBlockPhpUpload reports whether the explicit `extensions` rule refuses
+// the client-announced name: one of phpExtensions is, unless the rule asked for
+// php by name. Content-based rules deliberately do not consult this metadata.
 func (v *Validator) ShouldBlockPhpUpload(value any, parameters []string) bool {
 	if slices.Contains(parameters, "php") {
 		return false
@@ -1587,12 +1584,16 @@ func clientExtension(value any) string {
 // ValidateDimensions is `dimensions`: the image measures what the named
 // parameters ask for.
 //
-// An SVG passes without being measured: it has no pixels to count. Everything
-// else has its bytes read, which is a decode of input a stranger chose -- only
-// the header is read, never the pixels.
+// An SVG passes without being measured after its document is validated: it has
+// no pixels to count. Supported raster bytes are decoded under fixed input and
+// pixel bounds before their dimensions are compared.
 func (v *Validator) ValidateDimensions(attribute string, value any, parameters []string) bool {
 	if v.IsValidFileInstance(value) {
 		if f, _ := asFile(value); f.GetMimeType() == "image/svg+xml" || f.GetMimeType() == "image/svg" {
+			if opener, opensContent := f.(contentOpener); opensContent {
+				_, _, ok := filetype.Image(opener.Open, true)
+				return ok
+			}
 			return true
 		}
 	}

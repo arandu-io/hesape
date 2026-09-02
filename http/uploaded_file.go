@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"image"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -12,17 +11,11 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-
-	// The three decoders are imported for their side effect:
-	// image.DecodeConfig backs Dimensions, and it only knows the formats
-	// that registered themselves. PNG, JPEG and GIF are the formats
-	// supported.
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
+	"sync"
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/filesystem"
+	"github.com/arandu-io/hesape/internal/filetype"
 )
 
 // ErrFileNotFound is returned when the file behind an upload is gone.
@@ -63,12 +56,14 @@ func (f *BaseFile) GetPathname() string { return f.pathname }
 // Extension is an alias for GuessExtension.
 func (f *BaseFile) Extension() string { return f.GuessExtension() }
 
-// GuessExtension is the extension guessed from the file's name, without the
-// dot, empty when nothing is known. It guesses from the name because Go has
-// no built-in content-sniffing equivalent to libmagic, and the name is what
-// a person sees.
+// GuessExtension is the canonical extension implied by the file's content,
+// without the dot. It is empty when the content cannot be read or classified.
 func (f *BaseFile) GuessExtension() string {
-	return strings.TrimPrefix(strings.ToLower(path.Ext(f.pathname)), ".")
+	_, extension, ok := filetype.Detect(func() (io.ReadCloser, error) { return os.Open(f.pathname) })
+	if !ok {
+		return ""
+	}
+	return extension
 }
 
 // HashName is a random 40-character name with the file's extension, under
@@ -97,17 +92,7 @@ func (f *BaseFile) HashName(dir ...string) string {
 // Returns (width, height, ok): ok is false when the file is not a
 // decodable image.
 func (f *BaseFile) Dimensions() (int, int, bool) {
-	handle, err := os.Open(f.GetRealPath())
-	if err != nil {
-		return 0, 0, false
-	}
-	defer handle.Close()
-
-	config, _, err := image.DecodeConfig(handle)
-	if err != nil {
-		return 0, 0, false
-	}
-	return config.Width, config.Height, true
+	return filetype.Image(func() (io.ReadCloser, error) { return os.Open(f.GetRealPath()) }, false)
 }
 
 // GetSize is the file's size in bytes.
@@ -119,9 +104,22 @@ func (f *BaseFile) GetSize() int64 {
 	return info.Size()
 }
 
-// GetMimeType is the MIME type guessed from the extension.
+// GetMimeType is the normalized MIME type detected from a bounded read of the
+// content. It is empty when the content cannot be opened or is empty.
 func (f *BaseFile) GetMimeType() string {
-	return mime.TypeByExtension(strings.ToLower(path.Ext(f.pathname)))
+	mediaType, _, ok := filetype.Detect(func() (io.ReadCloser, error) { return os.Open(f.pathname) })
+	if !ok {
+		return ""
+	}
+	return mediaType
+}
+
+// GetPath returns the location that identifies the file to validation.
+func (f *BaseFile) GetPath() string { return f.pathname }
+
+// GetExtension returns the extension of the file's name, without the dot.
+func (f *BaseFile) GetExtension() string {
+	return strings.TrimPrefix(strings.ToLower(path.Ext(f.pathname)), ".")
 }
 
 // UploadedFile is one file that arrived in a form field, with the
@@ -153,6 +151,14 @@ type UploadedFile struct {
 	// browser, which is what makes IsValid true without a real upload
 	// behind it.
 	test bool
+	// inspection is shared by every content-derived answer, so a validation
+	// chain decodes untrusted bytes once rather than once per rule.
+	inspection *uploadInspection
+}
+
+type uploadInspection struct {
+	once   sync.Once
+	result filetype.Inspection
 }
 
 // NewUploadedFile builds an UploadedFile from the multipart part a browser
@@ -173,6 +179,7 @@ func NewUploadedFile(header *multipart.FileHeader, field string) *UploadedFile {
 		header:       header,
 		originalName: name,
 		mimeType:     announced,
+		inspection:   &uploadInspection{},
 	}
 }
 
@@ -186,6 +193,7 @@ func NewUploadedFileFromPath(pathname, originalName, mimeType string, test bool)
 		originalName: originalName,
 		mimeType:     mimeType,
 		test:         test,
+		inspection:   &uploadInspection{},
 	}
 }
 
@@ -240,10 +248,14 @@ func (f *UploadedFile) GetSize() int64 {
 	return f.BaseFile.GetSize()
 }
 
-// GuessExtension is the extension guessed from the announced name, since
-// the pathname of an upload is that name.
+// GuessExtension is the canonical extension implied by the uploaded bytes.
+// It never falls back to the announced name or Content-Type.
 func (f *UploadedFile) GuessExtension() string {
-	return strings.TrimPrefix(strings.ToLower(path.Ext(f.originalName)), ".")
+	result := f.inspect()
+	if !result.OK {
+		return ""
+	}
+	return result.Extension
 }
 
 // HashName is redeclared here so that the extension comes from the
@@ -265,6 +277,34 @@ func (f *UploadedFile) HashName(dir ...string) string {
 
 // Extension is an alias for GuessExtension.
 func (f *UploadedFile) Extension() string { return f.GuessExtension() }
+
+// GetMimeType is the normalized MIME type detected from a bounded read of the
+// uploaded bytes. It never falls back to client metadata.
+func (f *UploadedFile) GetMimeType() string {
+	result := f.inspect()
+	if !result.OK {
+		return ""
+	}
+	return result.MediaType
+}
+
+// Dimensions returns the dimensions of a structurally valid raster image.
+func (f *UploadedFile) Dimensions() (int, int, bool) {
+	result := f.inspect()
+	return result.Width, result.Height, result.OK && result.Image && !result.SVG
+}
+
+func (f *UploadedFile) inspect() filetype.Inspection {
+	if f.inspection == nil {
+		// A zero-value UploadedFile has no useful stream and is not cacheable.
+		// Keeping this branch mutation-free also makes concurrent failure safe.
+		return filetype.Inspect(f.Open)
+	}
+	f.inspection.once.Do(func() {
+		f.inspection.result = filetype.Inspect(f.Open)
+	})
+	return f.inspection.result
+}
 
 // Open returns a reader over the bytes. It is what Get and the store methods
 // read through, and it may be called more than once.

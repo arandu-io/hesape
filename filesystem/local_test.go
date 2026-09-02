@@ -481,19 +481,19 @@ func TestLocalAppendAndPrependStayInTheTenant(t *testing.T) {
 }
 
 // TestLocalPutFileNamesTheFileItself: the announced filename is a string the
-// client chose, and storing under it means two people uploading "scan.pdf"
-// overwrite each other.
+// client chose, so the generated name keeps only the content-derived extension.
 func TestLocalPutFileNamesTheFileItself(t *testing.T) {
 	d := localDisk(t)
 	ctx := context.Background()
 	g := grant(tenant)
 
+	body := "%PDF-1.7\n%%EOF"
 	u := filesystem.Upload{
 		Field:       "avatar",
 		Name:        "scan.PDF",
-		Size:        3,
+		Size:        int64(len(body)),
 		ContentType: "text/html",
-		Open:        func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader("abc")), nil },
+		Open:        func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(body)), nil },
 	}
 
 	first, err := d.PutFile(ctx, g, "avatars", u)
@@ -528,7 +528,7 @@ func TestLocalPutFileNamesTheFileItself(t *testing.T) {
 	if named != "avatars/me.pdf" {
 		t.Errorf("PutFileAs = %q", named)
 	}
-	if got := read(t, d, g, named); got != "abc" {
+	if got := read(t, d, g, named); got != body {
 		t.Errorf("body = %q", got)
 	}
 

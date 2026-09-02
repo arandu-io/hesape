@@ -2,9 +2,14 @@ package filesystem_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"mime/multipart"
+	"path"
 	"strings"
 	"testing"
 
@@ -12,11 +17,21 @@ import (
 )
 
 func upload(name string, size int64) filesystem.Upload {
+	body := []byte("x")
+	var encoded bytes.Buffer
+	switch strings.ToLower(path.Ext(name)) {
+	case ".png":
+		_ = png.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 1, 1)))
+		body = encoded.Bytes()
+	case ".jpg", ".jpeg":
+		_ = jpeg.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 1, 1)), nil)
+		body = encoded.Bytes()
+	}
 	return filesystem.Upload{
 		Field: "avatar",
 		Name:  name,
 		Size:  size,
-		Open:  func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader("x")), nil },
+		Open:  func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil },
 	}
 }
 
@@ -31,6 +46,113 @@ func TestAnAcceptableUploadPasses(t *testing.T) {
 	if err := upload("IMG_0001.JPG", 100).Check(pngRules); err != nil {
 		t.Fatalf("Check: %v", err)
 	}
+}
+
+// TestUploadRulesUseTheContentExtension: the announced name and type are both
+// controlled by the sender and cannot turn text into an accepted image.
+func TestUploadRulesUseTheContentExtension(t *testing.T) {
+	picture := encodedPNG(t)
+	valid := filesystem.Upload{
+		Field:       "avatar",
+		Name:        "payload.php",
+		Size:        int64(len(picture)),
+		ContentType: "text/x-php",
+		Open: func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(picture)), nil
+		},
+	}
+	if err := valid.Check(filesystem.UploadRules{MaxBytes: 1024, Extensions: []string{".png"}}); err != nil {
+		t.Fatalf("valid PNG with a misleading name was refused: %v", err)
+	}
+
+	malicious := filesystem.Upload{
+		Field:       "avatar",
+		Name:        "avatar.png",
+		Size:        19,
+		ContentType: "image/png",
+		Open: func() (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader("<?php echo 'owned';")), nil
+		},
+	}
+	if err := malicious.Check(filesystem.UploadRules{MaxBytes: 1024, Extensions: []string{".png"}}); !errors.Is(err, filesystem.ErrRefusedUpload) {
+		t.Fatalf("renamed PHP err = %v, want ErrRefusedUpload", err)
+	}
+}
+
+// TestUploadRulesInspectOnlyABoundedPrefix: classification must not scale its
+// allocation or read with the size of input an attacker supplied.
+func TestUploadRulesInspectOnlyABoundedPrefix(t *testing.T) {
+	picture := append(encodedPNG(t), bytes.Repeat([]byte("x"), 2<<20)...)
+	read := 0
+	upload := filesystem.Upload{
+		Field: "avatar",
+		Name:  "avatar.bin",
+		Size:  int64(len(picture)),
+		Open: func() (io.ReadCloser, error) {
+			return &countingReadCloser{Reader: bytes.NewReader(picture), read: &read}, nil
+		},
+	}
+
+	if err := upload.Check(filesystem.UploadRules{MaxBytes: int64(len(picture)), Extensions: []string{".png"}}); err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if read == 0 {
+		t.Fatal("Check accepted the upload without inspecting its content")
+	}
+	// The image decoder buffers ahead, but must not consume the multi-megabyte
+	// tail merely to classify a tiny PNG.
+	if read > 64<<10 {
+		t.Fatalf("Check read %d bytes to classify the upload, want at most 64 KiB", read)
+	}
+}
+
+// TestPutFileUsesTheContentExtension: the default generated key must not carry
+// a suffix chosen by the client after validation accepted different bytes.
+func TestPutFileUsesTheContentExtension(t *testing.T) {
+	picture := encodedPNG(t)
+	upload := filesystem.Upload{
+		Field:       "avatar",
+		Name:        "payload.php",
+		Size:        int64(len(picture)),
+		ContentType: "text/x-php",
+		Open: func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(picture)), nil
+		},
+	}
+
+	key, err := localDisk(t).PutFile(context.Background(), grant(tenant), "avatars", upload)
+	if err != nil {
+		t.Fatalf("PutFile: %v", err)
+	}
+	if !strings.HasSuffix(key, ".png") {
+		t.Fatalf("key = %q, want the extension detected from the PNG bytes", key)
+	}
+	if strings.HasSuffix(key, ".php") {
+		t.Fatalf("key = %q, and kept the client-announced extension", key)
+	}
+}
+
+type countingReadCloser struct {
+	*bytes.Reader
+	read *int
+}
+
+func (r *countingReadCloser) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	*r.read += n
+	return n, err
+}
+
+func (r *countingReadCloser) Close() error { return nil }
+
+func encodedPNG(t *testing.T) []byte {
+	t.Helper()
+
+	var out bytes.Buffer
+	if err := png.Encode(&out, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	return out.Bytes()
 }
 
 func TestAnUploadOverTheLimitIsRefused(t *testing.T) {

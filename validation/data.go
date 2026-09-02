@@ -345,8 +345,9 @@ type Resolver interface {
 // the HTTP layer. A type there satisfies this by having the methods, with no
 // import either way.
 type File interface {
-	// GetPath returns the directory the file lives in. An empty path is a file
-	// that was never written, which `mimes` and `mimetypes` refuse.
+	// GetPath returns the non-empty location or upload name that identifies the
+	// file. An empty path is a file that was never written, which `mimes` and
+	// `mimetypes` refuse.
 	GetPath() string
 	// GetRealPath returns where the bytes are.
 	GetRealPath() string

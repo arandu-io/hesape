@@ -441,7 +441,7 @@ func TestTheNumericExtras(t *testing.T) {
 }
 
 func TestTheFileRules(t *testing.T) {
-	png := upload{path: "/tmp/a.png", size: 100, mime: "image/png", guessed: "png", client: "png", valid: true}
+	png := upload{path: "/tmp/a.png", size: 100, mime: "image/png", guessed: "png", client: "png", valid: true, width: 1, height: 1, dimensions: true}
 	script := upload{path: "/tmp/a.php", size: 100, mime: "text/x-php", guessed: "php", client: "php", valid: true}
 	unfinished := upload{path: "/tmp/a.png", size: 100, mime: "image/png", guessed: "png", client: "png", valid: false}
 

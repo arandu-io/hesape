@@ -8,6 +8,8 @@ import (
 	"mime/multipart"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1019,15 +1021,19 @@ func TestWithOnARedirectWithNoSessionIsQuietRatherThanFatal(t *testing.T) {
 }
 
 func TestAnUploadThatLiesAboutItsTypeKeepsBothAnswersApart(t *testing.T) {
-	// The browser announced an image; the name says otherwise. Neither is
-	// trusted over the other, and the two questions have two answers.
-	upload := NewUploadedFileFromPath("/tmp/upload", "invoice.exe", "image/jpeg", true)
+	// The browser announced an image and an executable name. Security metadata
+	// comes from the bytes, while both client answers remain available by name.
+	pathname := filepath.Join(t.TempDir(), "upload")
+	if err := os.WriteFile(pathname, []byte("plain text"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	upload := NewUploadedFileFromPath(pathname, "invoice.exe", "image/jpeg", true)
 
 	if got := upload.GetClientOriginalExtension(); got != "exe" {
 		t.Fatalf("GetClientOriginalExtension() = %q, want %q", got, "exe")
 	}
-	if got := upload.GuessExtension(); got != "exe" {
-		t.Fatalf("GuessExtension() = %q, want %q -- the name, not the header", got, "exe")
+	if got := upload.GuessExtension(); got != "txt" {
+		t.Fatalf("GuessExtension() = %q, want %q from the bytes", got, "txt")
 	}
 	// The registered extensions for a type differ between machines -- jpg,
 	// jpeg and jfif are all image/jpeg -- so what is asserted is that the
@@ -1035,8 +1041,8 @@ func TestAnUploadThatLiesAboutItsTypeKeepsBothAnswersApart(t *testing.T) {
 	if got := upload.ClientExtension(); got == "" || got == "exe" {
 		t.Fatalf("ClientExtension() = %q, want the extension of the announced type", got)
 	}
-	if got := upload.HashName(); !strings.HasSuffix(got, ".exe") {
-		t.Fatalf("HashName() = %q, want it to end in the real extension", got)
+	if got := upload.HashName(); !strings.HasSuffix(got, ".txt") {
+		t.Fatalf("HashName() = %q, want it to end in the content extension", got)
 	}
 }
 
