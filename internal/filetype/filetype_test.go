@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"image"
+	"image/color"
 	"image/gif"
 	"image/jpeg"
 	"image/png"
@@ -53,6 +54,79 @@ func TestDetectRejectsGIFWithATruncatedTrailingExtension(t *testing.T) {
 	}
 	if _, _, ok := filetype.Image(openBytes(body), false); ok {
 		t.Fatal("Image accepted a GIF with a truncated trailing extension")
+	}
+}
+
+func TestDetectPreservesASmallAnimatedGIF(t *testing.T) {
+	body := animatedGIF(t, 2)
+
+	mediaType, extension, ok := filetype.Detect(openBytes(body))
+	if !ok || mediaType != "image/gif" || extension != "gif" {
+		t.Fatalf("Detect = (%q, %q, %v), want a valid animated GIF", mediaType, extension, ok)
+	}
+	if width, height, ok := filetype.Image(openBytes(body), false); !ok || width != 1 || height != 1 {
+		t.Fatalf("Image = (%d, %d, %v), want (1, 1, true)", width, height, ok)
+	}
+}
+
+func TestDetectRejectsGIFBeforeDecodeAllWhenFrameBudgetIsExceeded(t *testing.T) {
+	body := animatedGIF(t, 257)
+	opens := 0
+	open := func() (io.ReadCloser, error) {
+		opens++
+		return io.NopCloser(bytes.NewReader(body)), nil
+	}
+
+	mediaType, extension, _ := filetype.Detect(open)
+	if mediaType == "image/gif" || extension == "gif" {
+		t.Fatalf("Detect = (%q, %q), accepted a GIF over the frame budget", mediaType, extension)
+	}
+	if opens != 2 {
+		t.Fatalf("Detect opened the GIF %d times, want sniff plus preflight without DecodeAll", opens)
+	}
+}
+
+func TestDetectRejectsGIFBeforeDecodeAllWhenPixelBudgetIsExceeded(t *testing.T) {
+	body := gifWithRepeatedDescriptors(171, 65535, 3)
+	opens := 0
+	open := func() (io.ReadCloser, error) {
+		opens++
+		return io.NopCloser(bytes.NewReader(body)), nil
+	}
+
+	filetype.Detect(open)
+	if opens != 2 {
+		t.Fatalf("Detect opened the GIF %d times, want the cumulative pixel budget to stop before DecodeAll", opens)
+	}
+}
+
+func TestGIFPreflightRejectsInvalidContainerBeforeDecodeAll(t *testing.T) {
+	outsideScreen := gifWithRepeatedDescriptors(1, 1, 1)
+	outsideScreen[20] = 1
+	truncatedSubBlock := gifWithRepeatedDescriptors(1, 1, 1)[:32]
+
+	for _, test := range []struct {
+		name string
+		body []byte
+	}{
+		{name: "frame outside logical screen", body: outsideScreen},
+		{name: "truncated image data sub-block", body: truncatedSubBlock},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			opens := 0
+			open := func() (io.ReadCloser, error) {
+				opens++
+				return io.NopCloser(bytes.NewReader(test.body)), nil
+			}
+
+			mediaType, extension, _ := filetype.Detect(open)
+			if mediaType == "image/gif" || extension == "gif" {
+				t.Fatalf("Detect = (%q, %q), accepted an invalid GIF container", mediaType, extension)
+			}
+			if opens != 2 {
+				t.Fatalf("Detect opened the GIF %d times, want rejection by preflight before DecodeAll", opens)
+			}
+		})
 	}
 }
 
@@ -325,6 +399,48 @@ func encodeGIF(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return out.Bytes()
+}
+
+func animatedGIF(t *testing.T, frameCount int) []byte {
+	t.Helper()
+	colors := color.Palette{color.Black, color.White}
+	frame := image.NewPaletted(image.Rect(0, 0, 1, 1), colors)
+	frames := make([]*image.Paletted, frameCount)
+	for index := range frames {
+		frames[index] = frame
+	}
+
+	var out bytes.Buffer
+	err := gif.EncodeAll(&out, &gif.GIF{
+		Image: frames,
+		Delay: make([]int, frameCount),
+		Config: image.Config{
+			ColorModel: colors,
+			Width:      1,
+			Height:     1,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out.Bytes()
+}
+
+func gifWithRepeatedDescriptors(frameCount, width, height int) []byte {
+	body := append([]byte("GIF89a"), byte(width), byte(width>>8), byte(height), byte(height>>8), 0x80, 0, 0)
+	body = append(body, 0, 0, 0, 0xff, 0xff, 0xff)
+	for range frameCount {
+		body = append(body,
+			0x2c,
+			0, 0, 0, 0,
+			byte(width), byte(width>>8), byte(height), byte(height>>8),
+			0,
+			2,
+			2, 0x44, 0x01,
+			0,
+		)
+	}
+	return append(body, 0x3b)
 }
 
 func jpegScanOffset(t *testing.T, body []byte) int {

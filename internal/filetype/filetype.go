@@ -3,6 +3,7 @@
 package filetype
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"encoding/xml"
@@ -23,6 +24,10 @@ const (
 	imageBodyLimit   = int64(64 << 20)
 	svgBodyLimit     = int64(1 << 20)
 	maxImagePixels   = int64(32 << 20)
+	// gif.DecodeAll retains every frame, so both pixel storage and per-frame
+	// overhead need budgets checked by the streaming preflight.
+	maxGIFFrames = 256
+	maxGIFPixels = maxImagePixels
 )
 
 // Inspection is the immutable result of examining one file. Image is true only
@@ -224,6 +229,10 @@ func hasSVGRoot(head []byte) bool {
 }
 
 func decodeRaster(open func() (io.ReadCloser, error), mediaType string) (int, int, bool) {
+	if mediaType == "image/gif" {
+		return decodeGIF(open)
+	}
+
 	reader, err := open()
 	if err != nil {
 		return 0, 0, false
@@ -238,22 +247,6 @@ func decodeRaster(open func() (io.ReadCloser, error), mediaType string) (int, in
 	if err != nil {
 		return 0, 0, false
 	}
-	if mediaType == "image/gif" {
-		decoded, err := gif.DecodeAll(io.LimitReader(reader, imageBodyLimit))
-		_ = reader.Close()
-		if err != nil || decoded == nil ||
-			decoded.Config.Width != config.Width || decoded.Config.Height != config.Height ||
-			!safeDimensions(decoded.Config.Width, decoded.Config.Height) || len(decoded.Image) == 0 {
-			return 0, 0, false
-		}
-		screen := image.Rect(0, 0, config.Width, config.Height)
-		for _, frame := range decoded.Image {
-			if frame == nil || frame.Bounds().Empty() || !frame.Bounds().In(screen) {
-				return 0, 0, false
-			}
-		}
-		return config.Width, config.Height, true
-	}
 	decoded, decodedFormat, err := image.Decode(io.LimitReader(reader, imageBodyLimit))
 	_ = reader.Close()
 	if err != nil || !formatMatches(mediaType, decodedFormat) {
@@ -264,6 +257,215 @@ func decodeRaster(open func() (io.ReadCloser, error), mediaType string) (int, in
 		return 0, 0, false
 	}
 	return config.Width, config.Height, true
+}
+
+type gifMetadata struct {
+	width  int
+	height int
+	frames int
+	pixels int64
+}
+
+func decodeGIF(open func() (io.ReadCloser, error)) (int, int, bool) {
+	metadata, ok := preflightGIF(open)
+	if !ok {
+		return 0, 0, false
+	}
+
+	reader, err := open()
+	if err != nil {
+		return 0, 0, false
+	}
+	decoded, err := gif.DecodeAll(io.LimitReader(reader, imageBodyLimit))
+	_ = reader.Close()
+	if err != nil || decoded == nil ||
+		decoded.Config.Width != metadata.width || decoded.Config.Height != metadata.height ||
+		!safeDimensions(decoded.Config.Width, decoded.Config.Height) ||
+		len(decoded.Image) != metadata.frames || len(decoded.Delay) != metadata.frames ||
+		len(decoded.Disposal) != metadata.frames {
+		return 0, 0, false
+	}
+
+	screen := image.Rect(0, 0, metadata.width, metadata.height)
+	var pixels int64
+	for _, frame := range decoded.Image {
+		if frame == nil || frame.Bounds().Empty() || !frame.Bounds().In(screen) {
+			return 0, 0, false
+		}
+		framePixels := int64(frame.Bounds().Dx()) * int64(frame.Bounds().Dy())
+		if framePixels > maxGIFPixels-pixels {
+			return 0, 0, false
+		}
+		pixels += framePixels
+	}
+	if pixels != metadata.pixels {
+		return 0, 0, false
+	}
+	return metadata.width, metadata.height, true
+}
+
+func preflightGIF(open func() (io.ReadCloser, error)) (gifMetadata, bool) {
+	if open == nil {
+		return gifMetadata{}, false
+	}
+	reader, err := open()
+	if err != nil {
+		return gifMetadata{}, false
+	}
+	defer reader.Close()
+
+	limited := &io.LimitedReader{R: reader, N: imageBodyLimit}
+	stream := &gifStream{reader: bufio.NewReader(limited)}
+	var header [13]byte
+	if !stream.readFull(header[:]) ||
+		string(header[:6]) != "GIF87a" && string(header[:6]) != "GIF89a" {
+		return gifMetadata{}, false
+	}
+
+	metadata := gifMetadata{
+		width:  int(binary.LittleEndian.Uint16(header[6:8])),
+		height: int(binary.LittleEndian.Uint16(header[8:10])),
+	}
+	if !safeDimensions(metadata.width, metadata.height) {
+		return gifMetadata{}, false
+	}
+	if header[10]&0x80 != 0 && !skipGIFColorTable(stream, header[10]) {
+		return gifMetadata{}, false
+	}
+
+	for {
+		blockType, err := stream.readByte()
+		if err != nil {
+			return gifMetadata{}, false
+		}
+		switch blockType {
+		case 0x21:
+			if !skipGIFExtension(stream) {
+				return gifMetadata{}, false
+			}
+		case 0x2c:
+			if !inspectGIFFrame(stream, &metadata) {
+				return gifMetadata{}, false
+			}
+		case 0x3b:
+			if metadata.frames == 0 || stream.bytes >= imageBodyLimit {
+				return gifMetadata{}, false
+			}
+			if _, err := stream.readByte(); err != io.EOF {
+				return gifMetadata{}, false
+			}
+			return metadata, true
+		default:
+			return gifMetadata{}, false
+		}
+	}
+}
+
+type gifStream struct {
+	reader io.Reader
+	bytes  int64
+}
+
+func (stream *gifStream) Read(body []byte) (int, error) {
+	read, err := stream.reader.Read(body)
+	stream.bytes += int64(read)
+	return read, err
+}
+
+func (stream *gifStream) readByte() (byte, error) {
+	var body [1]byte
+	_, err := io.ReadFull(stream, body[:])
+	return body[0], err
+}
+
+func (stream *gifStream) readFull(body []byte) bool {
+	_, err := io.ReadFull(stream, body)
+	return err == nil
+}
+
+func (stream *gifStream) skip(size int) bool {
+	_, err := io.CopyN(io.Discard, stream, int64(size))
+	return err == nil
+}
+
+func skipGIFColorTable(stream *gifStream, fields byte) bool {
+	entries := 1 << (1 + uint(fields&0x07))
+	return stream.skip(3 * entries)
+}
+
+func skipGIFExtension(stream *gifStream) bool {
+	extension, err := stream.readByte()
+	if err != nil {
+		return false
+	}
+	switch extension {
+	case 0x01:
+		size, err := stream.readByte()
+		if err != nil || size != 12 || !stream.skip(int(size)) {
+			return false
+		}
+	case 0xf9:
+		var control [6]byte
+		return stream.readFull(control[:]) && control[0] == 4 && control[5] == 0
+	case 0xfe:
+		return skipGIFSubBlocks(stream, false)
+	case 0xff:
+		size, err := stream.readByte()
+		if err != nil || !stream.skip(int(size)) {
+			return false
+		}
+	default:
+		return false
+	}
+	return skipGIFSubBlocks(stream, false)
+}
+
+func inspectGIFFrame(stream *gifStream, metadata *gifMetadata) bool {
+	var descriptor [9]byte
+	if !stream.readFull(descriptor[:]) {
+		return false
+	}
+	left := int(binary.LittleEndian.Uint16(descriptor[0:2]))
+	top := int(binary.LittleEndian.Uint16(descriptor[2:4]))
+	width := int(binary.LittleEndian.Uint16(descriptor[4:6]))
+	height := int(binary.LittleEndian.Uint16(descriptor[6:8]))
+	if !safeDimensions(width, height) || width > metadata.width || height > metadata.height ||
+		left > metadata.width-width || top > metadata.height-height {
+		return false
+	}
+
+	framePixels := int64(width) * int64(height)
+	if metadata.frames >= maxGIFFrames || framePixels > maxGIFPixels-metadata.pixels {
+		return false
+	}
+	metadata.frames++
+	metadata.pixels += framePixels
+
+	if descriptor[8]&0x80 != 0 && !skipGIFColorTable(stream, descriptor[8]) {
+		return false
+	}
+	codeSize, err := stream.readByte()
+	if err != nil || codeSize < 2 || codeSize > 8 {
+		return false
+	}
+	return skipGIFSubBlocks(stream, true)
+}
+
+func skipGIFSubBlocks(stream *gifStream, requireData bool) bool {
+	hasData := false
+	for {
+		size, err := stream.readByte()
+		if err != nil {
+			return false
+		}
+		if size == 0 {
+			return hasData || !requireData
+		}
+		if !stream.skip(int(size)) {
+			return false
+		}
+		hasData = true
+	}
 }
 
 func formatMatches(mediaType, format string) bool {
