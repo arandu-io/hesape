@@ -40,6 +40,17 @@ jobs:
         run: |
           set -euo pipefail
 
+          # A pushed tag can point at any commit, including one that only ever
+          # existed on develop. A release is public and irreversible, so prove
+          # that the commit behind either a lightweight or an annotated tag is
+          # already part of main before publishing it.
+          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+          tag_commit="$(git rev-parse --verify "${TAG}^{commit}")"
+          if ! git merge-base --is-ancestor "$tag_commit" origin/main; then
+            echo "refusing to publish ${TAG}: ${tag_commit} is not part of origin/main"
+            exit 1
+          fi
+
           # The baseline for the notes, asked of the history rather than of a
           # date-sorted tag list: sorting puts whatever tag was created last in
           # front, and for a lightweight tag that is the commit's date and not
