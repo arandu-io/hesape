@@ -824,6 +824,53 @@ func TestPublicGroupLimitCompilersFailClosedAfterDirectOperatorMutation(t *testi
 	}
 }
 
+func TestPublicUpdateAndDeleteHelpersFailClosedAfterDirectOperatorMutation(t *testing.T) {
+	type statementHelpers interface {
+		CompileUpdateWithoutJoins(*query.Builder, string, string, string) string
+		CompileUpdateWithJoins(*query.Builder, string, string, string) string
+		CompileDeleteWithoutJoins(*query.Builder, string, string) string
+		CompileDeleteWithJoins(*query.Builder, string, string) string
+	}
+
+	actions := map[string]func(statementHelpers, *query.Builder) string{
+		"update without joins": func(g statementHelpers, b *query.Builder) string {
+			return g.CompileUpdateWithoutJoins(b, "users", "name = ?", "")
+		},
+		"update with joins": func(g statementHelpers, b *query.Builder) string {
+			return g.CompileUpdateWithJoins(b, "users", "name = ?", "")
+		},
+		"delete without joins": func(g statementHelpers, b *query.Builder) string {
+			return g.CompileDeleteWithoutJoins(b, "users", "")
+		},
+		"delete with joins": func(g statementHelpers, b *query.Builder) string {
+			return g.CompileDeleteWithJoins(b, "users", "")
+		},
+	}
+
+	for _, dialect := range dialects() {
+		for name, compile := range actions {
+			t.Run(dialect.name+"/"+name, func(t *testing.T) {
+				g := dialect.grammar()
+				helpers, ok := g.(statementHelpers)
+				if !ok {
+					t.Fatalf("%T does not expose update/delete statement helpers", g)
+				}
+				b := query.NewBuilder(nil, g, nil).From("users")
+				b.Wheres = append(b.Wheres, query.Where{
+					Type: "Basic", Column: "tenant_id", Operator: "not an operator", Value: "acme", Boolean: "and",
+				})
+
+				if sql := compile(helpers, b); sql != "" {
+					t.Fatalf("compiler emitted an unfiltered statement: %s", sql)
+				}
+				if !errors.Is(b.Err(), query.ErrInvalidOperator) {
+					t.Fatalf("Err() = %v, want ErrInvalidOperator", b.Err())
+				}
+			})
+		}
+	}
+}
+
 func TestPostgresCustomOperatorsOnlyRegisterSafeSymbolTokens(t *testing.T) {
 	grammars.CustomOperators([]string{"@#", "safe_word", "= OR", "=;", "/*", "--"})
 	operators := grammars.NewPostgresGrammar().GetOperators()

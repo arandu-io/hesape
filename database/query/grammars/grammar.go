@@ -1245,12 +1245,18 @@ func (g *Grammar) CompileUpdateColumns(q *query.Builder, values map[string]any) 
 
 // CompileUpdateWithoutJoins builds the SQL for an update with no joins.
 func (g *Grammar) CompileUpdateWithoutJoins(q *query.Builder, table, columns, where string) string {
+	if g.compilationError(q) != nil {
+		return ""
+	}
 	return "update " + table + " set " + columns + " " + where
 }
 
 // CompileUpdateWithJoins builds the SQL for an update that joins other
 // tables.
 func (g *Grammar) CompileUpdateWithJoins(q *query.Builder, table, columns, where string) string {
+	if g.compilationError(q) != nil {
+		return ""
+	}
 	joins := g.self.CompileJoins(q, q.Joins)
 	return "update " + table + " " + joins + " set " + columns + " " + where
 }
@@ -1302,12 +1308,18 @@ func (g *Grammar) CompileDelete(q *query.Builder) string {
 
 // CompileDeleteWithoutJoins builds the SQL for a delete with no joins.
 func (g *Grammar) CompileDeleteWithoutJoins(q *query.Builder, table, where string) string {
+	if g.compilationError(q) != nil {
+		return ""
+	}
 	return "delete from " + table + " " + where
 }
 
 // CompileDeleteWithJoins builds the SQL for a delete that joins other
 // tables.
 func (g *Grammar) CompileDeleteWithJoins(q *query.Builder, table, where string) string {
+	if g.compilationError(q) != nil {
+		return ""
+	}
 	alias := lastSegment(table, " as ")
 	joins := g.self.CompileJoins(q, q.Joins)
 	return "delete " + alias + " from " + table + " " + joins + " " + where

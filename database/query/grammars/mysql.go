@@ -394,6 +394,9 @@ func (g *MySQLGrammar) SupportsStraightJoins() (bool, error) { return true, nil 
 // CompileUpdateWithoutJoins builds the SQL for an update with no joins.
 // MySQL takes an order and a limit on an update.
 func (g *MySQLGrammar) CompileUpdateWithoutJoins(q *query.Builder, table, columns, where string) string {
+	if g.Grammar.compilationError(q) != nil {
+		return ""
+	}
 	sql := g.Grammar.CompileUpdateWithoutJoins(q, table, columns, where)
 	return sql + g.orderAndLimit(q)
 }
@@ -401,6 +404,9 @@ func (g *MySQLGrammar) CompileUpdateWithoutJoins(q *query.Builder, table, column
 // CompileDeleteWithoutJoins builds the SQL for a delete with no joins,
 // adding an order and a limit when the query has them.
 func (g *MySQLGrammar) CompileDeleteWithoutJoins(q *query.Builder, table, where string) string {
+	if g.Grammar.compilationError(q) != nil {
+		return ""
+	}
 	sql := g.Grammar.CompileDeleteWithoutJoins(q, table, where)
 	return sql + g.orderAndLimit(q)
 }
@@ -412,6 +418,9 @@ func (g *MySQLGrammar) CompileDeleteWithoutJoins(q *query.Builder, table, where 
 // compatible servers accept them, so they are emitted when they were asked
 // for and the server is left to say what it supports.
 func (g *MySQLGrammar) CompileDeleteWithJoins(q *query.Builder, table, where string) string {
+	if g.Grammar.compilationError(q) != nil {
+		return ""
+	}
 	sql := g.Grammar.CompileDeleteWithJoins(q, table, where)
 	return sql + g.orderAndLimit(q)
 }
