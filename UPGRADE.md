@@ -64,7 +64,7 @@ falling back to its name. Mail attachments whose server-side MIME is unknown
 are emitted as `application/octet-stream`, preventing the mail renderer from
 reinferencing an active type from an untrusted filename.
 
-### Query operators are validated before compilation
+### Query operators and order directions are validated before compilation
 
 Every non-raw comparison operator must now be declared by the active
 `query.Grammar.GetOperators` policy. Matching is case-insensitive and emits the
@@ -72,14 +72,51 @@ grammar's canonical spelling, but padding, repeated or control whitespace,
 comments, terminators and unknown operators are rejected with
 `query.ErrInvalidOperator`. `Builder.Err` exposes the first validation error,
 and `ToSQL` returns an empty string after failure; execution methods return the
-error without invoking the database connection.
+error without invoking the database connection. `PrepareValueAndOperator` is
+the exception: it screens a combination and returns the refusal to its caller
+without recording it, so validating an operator assembled from user input and
+falling back to a safe one leaves the builder usable.
+
+An order-by direction is screened by the same barrier. The grammar interpolates
+`Order.Direction` into the statement, so a direction written onto that exported
+field must read as `asc` or `desc` in some letter case; anything else is refused
+with `query.ErrInvalidDirection`. `OrderBy` is unchanged, and a raw order
+carries an expression instead of a direction and is unaffected.
 
 Before-query callbacks are drained before the final recursive validation pass,
 including callbacks registered by other callbacks. A callback cycle fails
 closed instead of allowing compilation to begin with an unstable query tree.
 Direct mutation of exported clauses is also covered by
-`Builder.ValidateForCompilation`, which public grammar compilers invoke before
-building a statement.
+`Builder.ValidateForCompilation`, which every public compiler of a complete
+statement invokes before building one. `CompileJoins` screens the join clauses
+it is handed as well as the query they are compiled into, so calling it
+directly with clauses from elsewhere returns the empty string rather than
+their SQL.
+
+The fragment compilers do not, and are not meant to. `WhereBasic`,
+`WhereColumn`, `WhereDate`, `WhereTime`, `WhereDay`, `WhereMonth`, `WhereYear`,
+`WhereRowValues`, `CompileHaving`, `CompileBasicHaving`, `CompileHavingBit` and
+`CompileJSONLength` are handed one clause by value and spell exactly what they
+are given, which makes them the raw APIs of the grammar layer: no path through
+the builder reaches them with a clause the barrier has not already screened,
+and calling one directly with a hand-built clause is trusting that clause. A
+grammar outside this module that overrides a compiler is responsible for the
+same barrier: call `Builder.ValidateForCompilation` before building a
+statement, or `Builder.ValidateForCompilationWith` when compiling a builder
+another grammar assembled.
+
+A compiler screens against its own dialect, not against the grammar the builder
+happens to carry. Handing a builder assembled with one grammar straight to
+another dialect's compiler validates it against the dialect that is spelling
+the SQL, because the engine receiving the statement is the one that decides how
+a token reads: `#` is an operator in PostgreSQL and the start of a comment in
+MySQL. A word operator -- letters, digits, underscores and the spaces between
+them -- is still accepted from the builder's own grammar, since no engine reads
+one as punctuation.
+
+`not in` is refused with the rest. It was never in the operator list, so
+`Where(column, "not in", values)` compiled to `column not in ?`, which no
+engine accepts; `WhereNotIn` is the clause that means it and is unaffected.
 
 Raw APIs remain the explicit escape hatch for trusted SQL. An external grammar
 may continue to add lexically safe compound operators through `GetOperators`.

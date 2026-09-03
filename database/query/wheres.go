@@ -33,13 +33,20 @@ import (
 // distinction off the length of a variadic slice. This one is exported
 // because a caller assembling an operator and a value from user input has the
 // same combination to validate.
+//
+// It screens and reports; it does not record the refusal on the builder. A
+// caller validating a combination is expected to handle the error and fall
+// back to something safe, and a builder that had been disabled by the question
+// would drop every clause added after it. Nothing is given up by staying
+// quiet: the operator returned here is not what reaches SQL. Where, Having and
+// On screen what they are given, and the final barrier screens the whole graph
+// again against the compiling grammar before a statement is built.
 func (b *Builder) PrepareValueAndOperator(value, operator any, useDefault bool) (any, string, error) {
 	if useDefault {
 		return operator, "=", nil
 	}
-	canonical, err := normalizeOperator(b.Grammar, stringify(operator))
+	canonical, err := normalizeOperator(b.Grammar, nil, stringify(operator))
 	if err != nil {
-		b.setError(err)
 		return nil, "", err
 	}
 	if invalidOperatorAndValue(canonical, value) {

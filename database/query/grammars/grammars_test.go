@@ -912,3 +912,133 @@ func contains(haystack, needle string) bool {
 		return false
 	})()
 }
+
+func TestPublicCompilersFailClosedAfterDirectOrderDirectionMutation(t *testing.T) {
+	for _, dialect := range dialects() {
+		t.Run(dialect.name, func(t *testing.T) {
+			g := dialect.grammar()
+			b := query.NewBuilder(nil, g, nil).From("users").OrderBy("name")
+			b.Orders[0].Direction = "asc, (select secret from vault) desc"
+
+			if sql := g.CompileSelect(b); sql != "" {
+				t.Fatalf("the public compiler emitted an unfiltered direction: %s", sql)
+			}
+			if !errors.Is(b.Err(), query.ErrInvalidDirection) {
+				t.Fatalf("Err() = %v, want ErrInvalidDirection", b.Err())
+			}
+		})
+	}
+}
+
+func TestUnionOrderDirectionIsScreenedLikeAnOrderDirection(t *testing.T) {
+	for _, dialect := range dialects() {
+		t.Run(dialect.name, func(t *testing.T) {
+			g := dialect.grammar()
+			b := query.NewBuilder(nil, g, nil).From("users").
+				Union(query.NewBuilder(nil, g, nil).From("admins")).
+				OrderBy("name")
+			b.UnionOrders[0].Direction = "asc, (select secret from vault) desc"
+
+			if sql := b.ToSQL(); sql != "" {
+				t.Fatalf("a union order carried an unfiltered direction: %s", sql)
+			}
+			if !errors.Is(b.Err(), query.ErrInvalidDirection) {
+				t.Fatalf("Err() = %v, want ErrInvalidDirection", b.Err())
+			}
+		})
+	}
+}
+
+func TestADirectionWrittenIntoTheClauseIsAcceptedInAnySpellingOfAscAndDesc(t *testing.T) {
+	compile := func(g query.Grammar) string {
+		q := query.NewBuilder(nil, g, nil).From("users").OrderBy("name")
+		q.Orders[0].Direction = "DESC"
+		return q.ToSQL()
+	}
+
+	compiles(t, compile, map[string]string{
+		"mysql":    "select * from `users` order by `name` desc",
+		"mariadb":  "select * from `users` order by `name` desc",
+		"postgres": `select * from "users" order by "name" desc`,
+		"sqlite":   `select * from "users" order by "name" desc`,
+	})
+}
+
+func TestARawOrderKeepsCompilingWithoutADirection(t *testing.T) {
+	compile := func(g query.Grammar) string {
+		return query.NewBuilder(nil, g, nil).From("users").OrderByRaw("field(status, ?, ?)", "new", "old").ToSQL()
+	}
+
+	compiles(t, compile, map[string]string{
+		"mysql":    "select * from `users` order by field(status, ?, ?)",
+		"mariadb":  "select * from `users` order by field(status, ?, ?)",
+		"postgres": `select * from "users" order by field(status, ?, ?)`,
+		"sqlite":   `select * from "users" order by field(status, ?, ?)`,
+	})
+}
+
+func TestACompilerAppliesItsOwnDialectOperatorPolicy(t *testing.T) {
+	b := query.NewBuilder(nil, grammars.NewPostgresGrammar(), nil).From("users").Where("id", "#", 1)
+
+	if sql := grammars.NewMySQLGrammar().CompileSelect(b); sql != "" {
+		t.Fatalf("a MySQL statement carried a token MySQL reads as a comment: %s", sql)
+	}
+	if !errors.Is(b.Err(), query.ErrInvalidOperator) {
+		t.Fatalf("Err() = %v, want ErrInvalidOperator", b.Err())
+	}
+}
+
+func TestAWordOperatorSurvivesACompilerThatDoesNotDeclareIt(t *testing.T) {
+	b := query.NewBuilder(nil, grammars.NewMySQLGrammar(), nil).From("users").Where("name", "sounds like", "Ada")
+
+	sql := grammars.NewSQLiteGrammar().CompileSelect(b)
+	if sql != `select * from "users" where "name" sounds like ?` {
+		t.Fatalf("CompileSelect() = %q, Err() = %v", sql, b.Err())
+	}
+}
+
+func TestPostgresJSONOperatorsStillCompileToASinglePlaceholder(t *testing.T) {
+	for _, operator := range []string{"?", "?|", "?&"} {
+		t.Run(operator, func(t *testing.T) {
+			g := grammars.NewPostgresGrammar()
+			b := query.NewBuilder(nil, g, nil).From("documents").Where("payload", operator, "tags")
+
+			// The operator is doubled so the driver reads it as a literal
+			// question mark; the one placeholder left is the binding.
+			want := `select * from "documents" where "payload" ?` + operator + " ?"
+			if sql := b.ToSQL(); sql != want {
+				t.Fatalf("ToSQL() = %q, want %q, Err() = %v", sql, want, b.Err())
+			}
+		})
+	}
+}
+
+func TestCompileJoinsScreensTheJoinsItIsHanded(t *testing.T) {
+	type joinCompiler interface {
+		CompileJoins(*query.Builder, []*query.JoinClause) string
+	}
+
+	for _, dialect := range dialects() {
+		t.Run(dialect.name, func(t *testing.T) {
+			g := dialect.grammar()
+			compiler, ok := g.(joinCompiler)
+			if !ok {
+				t.Fatalf("%T does not expose CompileJoins", g)
+			}
+
+			clean := query.NewBuilder(nil, g, nil).From("users")
+			hostile := query.NewBuilder(nil, g, nil).From("users").
+				Join("roles", "users.id", "=", "roles.user_id")
+			hostile.Joins[0].Wheres = append(hostile.Joins[0].Wheres, query.Where{
+				Type: "Basic", Column: "id", Operator: "= 1 OR 1 =", Value: 1, Boolean: "and",
+			})
+
+			if sql := compiler.CompileJoins(clean, hostile.Joins); sql != "" {
+				t.Fatalf("CompileJoins() emitted an unfiltered join: %s", sql)
+			}
+			if !errors.Is(hostile.Joins[0].Err(), query.ErrInvalidOperator) {
+				t.Fatalf("the join clause recorded %v, want ErrInvalidOperator", hostile.Joins[0].Err())
+			}
+		})
+	}
+}

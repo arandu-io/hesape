@@ -781,9 +781,10 @@ func (b *Builder) BeforeQuery(callback func(*Builder)) *Builder {
 }
 
 // ApplyBeforeQueryCallbacks drains registered callbacks across the complete
-// query graph, then validates every non-raw operator. Callbacks registered by
-// callbacks are part of the same preparation and cannot run midway through SQL
-// compilation. A callback cycle fails closed after a bounded number of rounds.
+// query graph, then validates every non-raw operator and order direction.
+// Callbacks registered by callbacks are part of the same preparation and
+// cannot run midway through SQL compilation. A callback cycle fails closed
+// after a bounded number of rounds.
 func (b *Builder) ApplyBeforeQueryCallbacks() {
 	const maxRounds = 64
 	for range maxRounds {
@@ -796,15 +797,32 @@ func (b *Builder) ApplyBeforeQueryCallbacks() {
 	b.setError(errors.New("query: before-query callbacks did not settle"))
 }
 
-// ValidateForCompilation applies the final operator barrier to the complete
-// query graph without executing callbacks. Grammar compilers use it to reject
-// direct public-field mutations while leaving callback lifecycle ownership to
-// Builder execution methods.
+// ValidateForCompilation applies the final barrier to the complete query
+// graph without executing callbacks: every non-raw operator and every order
+// direction has to be one the grammar declares. Grammar compilers use it to
+// reject direct public-field mutations while leaving callback lifecycle
+// ownership to Builder execution methods.
 func (b *Builder) ValidateForCompilation() error {
 	if b == nil {
 		return errors.New("query: cannot validate a nil builder")
 	}
-	return b.validateQueryGraph(make(map[*Builder]bool), b.Grammar)
+	return b.validateQueryGraph(make(map[*Builder]bool), b.Grammar, nil)
+}
+
+// ValidateForCompilationWith applies the same barrier under the operator
+// policy of the grammar that is about to spell the SQL, which is not always
+// the one the builder was given: a builder assembled for one dialect can be
+// handed straight to another dialect's compiler, and the engine that receives
+// the statement is the one that decides how each token reads.
+//
+// The grammar the builder carries stays in the conversation, but only for word
+// operators, which is how a grammar extending a dialect keeps the operators it
+// adds. A nil compiler leaves the operators every dialect shares.
+func (b *Builder) ValidateForCompilationWith(compiler Grammar) error {
+	if b == nil {
+		return errors.New("query: cannot validate a nil builder")
+	}
+	return b.validateQueryGraph(make(map[*Builder]bool), compiler, b.Grammar)
 }
 
 // ToSQL runs the before-query callbacks and compiles the query to a select
@@ -832,7 +850,7 @@ func (b *Builder) setError(err error) {
 }
 
 func (b *Builder) acceptOperator(operator string) string {
-	canonical, err := normalizeOperator(b.Grammar, operator)
+	canonical, err := normalizeOperator(b.Grammar, nil, operator)
 	if err != nil {
 		b.setError(err)
 		return operator
@@ -909,7 +927,13 @@ func (b *Builder) hasBeforeQueryCallbacks(visited map[*Builder]bool) bool {
 	return false
 }
 
-func (b *Builder) validateQueryGraph(visited map[*Builder]bool, grammar Grammar) error {
+// validateQueryGraph walks the whole query graph under one pair of policies.
+//
+// Both are fixed for the walk: one statement is spelled by one dialect,
+// however many grammars the builders inside it were assembled with. declared
+// is the grammar of the builder that was handed to the compiler, and is nil
+// when the builder is being compiled by its own.
+func (b *Builder) validateQueryGraph(visited map[*Builder]bool, compiler, declared Grammar) error {
 	if b == nil {
 		return nil
 	}
@@ -925,49 +949,57 @@ func (b *Builder) validateQueryGraph(visited map[*Builder]bool, grammar Grammar)
 	for i := range b.Wheres {
 		where := &b.Wheres[i]
 		if clauseOperatorNeedsValidation(where.Type, where.Operator) {
-			canonical, err := normalizeOperator(grammar, where.Operator)
+			canonical, err := normalizeOperator(compiler, declared, where.Operator)
 			if err != nil {
 				b.setError(err)
 				return b.err
 			}
 			where.Operator = canonical
 		}
-		if err := b.validateChild(where.Query, visited, grammar); err != nil {
+		if err := b.validateChild(where.Query, visited, compiler, declared); err != nil {
 			return err
 		}
 	}
 	for i := range b.Havings {
 		having := &b.Havings[i]
 		if clauseOperatorNeedsValidation(having.Type, having.Operator) {
-			canonical, err := normalizeOperator(grammar, having.Operator)
+			canonical, err := normalizeOperator(compiler, declared, having.Operator)
 			if err != nil {
 				b.setError(err)
 				return b.err
 			}
 			having.Operator = canonical
 		}
-		if err := b.validateChild(having.Query, visited, grammar); err != nil {
+		if err := b.validateChild(having.Query, visited, compiler, declared); err != nil {
 			return err
+		}
+	}
+	for i := range b.Orders {
+		if err := normalizeOrderDirection(&b.Orders[i]); err != nil {
+			b.setError(err)
+			return b.err
+		}
+	}
+	for i := range b.UnionOrders {
+		if err := normalizeOrderDirection(&b.UnionOrders[i]); err != nil {
+			b.setError(err)
+			return b.err
 		}
 	}
 	for _, join := range b.Joins {
 		if join != nil {
-			if err := b.validateChild(join.Builder, visited, grammar); err != nil {
+			if err := b.validateChild(join.Builder, visited, compiler, declared); err != nil {
 				return err
 			}
 		}
 	}
 	for _, union := range b.Unions {
-		if err := b.validateChild(union.Query, visited, grammar); err != nil {
+		if err := b.validateChild(union.Query, visited, compiler, declared); err != nil {
 			return err
 		}
 	}
 	for _, sub := range b.subqueries {
-		subGrammar := grammar
-		if sub.query != nil && sub.query.Grammar != nil {
-			subGrammar = sub.query.Grammar
-		}
-		if err := b.validateChild(sub.query, visited, subGrammar); err != nil {
+		if err := b.validateChild(sub.query, visited, compiler, declared); err != nil {
 			return err
 		}
 	}
@@ -989,11 +1021,11 @@ func clauseOperatorNeedsValidation(typ, operator string) bool {
 	}
 }
 
-func (b *Builder) validateChild(child *Builder, visited map[*Builder]bool, grammar Grammar) error {
+func (b *Builder) validateChild(child *Builder, visited map[*Builder]bool, compiler, declared Grammar) error {
 	if child == nil {
 		return nil
 	}
-	if err := child.validateQueryGraph(visited, grammar); err != nil {
+	if err := child.validateQueryGraph(visited, compiler, declared); err != nil {
 		b.setError(err)
 		return b.err
 	}
