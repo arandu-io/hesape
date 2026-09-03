@@ -375,6 +375,11 @@ func validate(msg *Message) error {
 			return fmt.Errorf("mail: %q is not an address", a.Address)
 		}
 	}
+	// Before anything renders it: a header line ends at CRLF, so a value
+	// carrying one is a second header that whoever supplied the value wrote.
+	if err := checkMessageHeaders(msg); err != nil {
+		return err
+	}
 	if strings.TrimSpace(msg.Subject) == "" {
 		return errors.New("mail: the envelope has no subject")
 	}

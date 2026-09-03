@@ -64,6 +64,12 @@ type Model[T any] struct {
 	// The empty string turns the scoping off, and it is spelled out at the
 	// construction of the model so that a reader sees a table that is deliberately
 	// global rather than a filter somebody forgot.
+	//
+	// It turns off the filter and nothing else. Every query method still takes
+	// an auth.Grant and still refuses without one, so a table declared global is
+	// a table every tenant may be allowed to read -- not a table reachable
+	// without authorization. The two are separate guarantees and only this one
+	// is configurable.
 	TenantColumn string
 
 	// PerPage is the default page size for Paginate.

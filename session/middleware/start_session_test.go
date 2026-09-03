@@ -14,12 +14,24 @@ import (
 	"github.com/arandu-io/hesape/session/middleware"
 )
 
+// manager fills in what a test does not care about, so a case says only the
+// field it is about.
+//
+// HTTPOnly and SameSite are among those: session.Config.Check refuses a
+// configuration that leaves them unset, and every case here is about something
+// else. A case that is about them sets them and this leaves them alone.
 func manager(cfg session.Config) *session.SessionManager {
 	if cfg.Driver == "" {
 		cfg.Driver = "array"
 	}
 	if cfg.Cookie == "" {
 		cfg.Cookie = "arandu_session"
+	}
+	if !cfg.HTTPOnly {
+		cfg.HTTPOnly = true
+	}
+	if cfg.SameSite == 0 {
+		cfg.SameSite = http.SameSiteLaxMode
 	}
 	return session.NewSessionManager(cfg, nil)
 }

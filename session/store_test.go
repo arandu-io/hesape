@@ -913,7 +913,10 @@ func TestAnEncryptedSessionUnderAnotherKeyStartsEmptyRatherThanFailing(t *testin
 }
 
 func TestTheManagerBuildsANewStorePerCallOverASharedHandler(t *testing.T) {
-	manager := session.NewSessionManager(session.Config{Driver: "array", Cookie: "arandu_session"}, nil)
+	manager := session.NewSessionManager(session.Config{
+		Driver: "array", Cookie: "arandu_session",
+		HTTPOnly: true, SameSite: http.SameSiteLaxMode,
+	}, nil)
 	ctx := context.Background()
 
 	first, err := manager.Driver("")
@@ -953,7 +956,9 @@ func TestTheManagerBuildsANewStorePerCallOverASharedHandler(t *testing.T) {
 }
 
 func TestTheManagerNamesTheDriverItCannotBuildAlone(t *testing.T) {
-	manager := session.NewSessionManager(session.Config{Driver: "database"}, nil)
+	manager := session.NewSessionManager(session.Config{
+		Driver: "database", HTTPOnly: true, SameSite: http.SameSiteLaxMode,
+	}, nil)
 
 	_, err := manager.Driver("")
 	if !errors.Is(err, session.ErrNoDriver) {
@@ -1017,7 +1022,9 @@ func TestTheManagerAnswersTheBlockingQuestions(t *testing.T) {
 
 func TestTheFileDriverIsBuiltFromConfiguration(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "framework", "sessions")
-	manager := session.NewSessionManager(session.Config{Driver: "file", Files: dir}, nil)
+	manager := session.NewSessionManager(session.Config{
+		Driver: "file", Files: dir, HTTPOnly: true, SameSite: http.SameSiteLaxMode,
+	}, nil)
 
 	s, err := manager.Driver("")
 	if err != nil {

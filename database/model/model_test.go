@@ -3,6 +3,9 @@ package model
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"reflect"
 	"strings"
 	"testing"
@@ -432,6 +435,72 @@ func TestTransactionalSaveSaysSoWhenTheConnectionCannot(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "transaction") {
 		t.Fatalf("SaveOrFail error = %v, want a refusal naming the transaction: writing outside one the caller believes in is worse", err)
 	}
+}
+
+// TestTenantColumnSaysWhatItsEmptyValueDoesAndDoesNotTurnOff reads the doc
+// comment on the field and fails when it describes only the filter it turns off.
+//
+// TenantColumn and the credential are two guarantees, and the empty string
+// touches one of them: the statement stops carrying the tenant predicate, and
+// every method still refuses to run without an auth.Grant. Stated as one
+// guarantee -- which is how a product sentence tends to state it -- the empty
+// string reads as switching authorization off, and the reader who wants a
+// deliberately global table decides against the design that already supports it,
+// or the reader who wants no authorization believes this is the switch.
+//
+// Reading the comment rather than asserting behaviour is the point: the
+// behaviour is fixed by the tests around this one, and what is unfixed is the
+// sentence pkg.go.dev publishes about it.
+func TestTenantColumnSaysWhatItsEmptyValueDoesAndDoesNotTurnOff(t *testing.T) {
+	doc := fieldDoc(t, "model.go", "Model", "TenantColumn")
+
+	for _, want := range []string{"Grant", "authorization"} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("the TenantColumn comment never says %q, so it describes the filter it turns "+
+				"off and leaves the guarantee it does not turn off to the reader's guess:\n%s",
+				want, doc)
+		}
+	}
+}
+
+// fieldDoc returns the doc comment of one field of one struct in the named
+// published source.
+func fieldDoc(t *testing.T, path, structName, fieldName string) string {
+	t.Helper()
+
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parsing %s: %v", path, err)
+	}
+
+	for _, decl := range file.Decls {
+		generic, ok := decl.(*ast.GenDecl)
+		if !ok || generic.Tok != token.TYPE {
+			continue
+		}
+		for _, spec := range generic.Specs {
+			typeSpec, ok := spec.(*ast.TypeSpec)
+			if !ok || typeSpec.Name.Name != structName {
+				continue
+			}
+			structType, ok := typeSpec.Type.(*ast.StructType)
+			if !ok || structType.Fields == nil {
+				continue
+			}
+			for _, field := range structType.Fields.List {
+				for _, name := range field.Names {
+					if name.Name == fieldName {
+						return field.Doc.Text()
+					}
+				}
+			}
+		}
+	}
+
+	t.Fatalf("%s declares no field %s.%s, so this test read nothing and would pass on anything",
+		path, structName, fieldName)
+	return ""
 }
 
 func reflectTypeOfUser() reflect.Type { return reflect.TypeFor[user]() }

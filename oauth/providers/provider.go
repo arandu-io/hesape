@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
+	httpclient "github.com/arandu-io/hesape/http/client"
 	"github.com/arandu-io/hesape/oauth"
 	"github.com/arandu-io/hesape/str"
 )
@@ -25,10 +25,19 @@ type HTTPClient interface {
 
 // defaultClient is the client a provider uses when none was given.
 //
-// The timeout is the point of it: a client with none will wait for a provider
-// that has stopped answering until the request that started it is the last
-// thing the process ever does.
-var defaultClient = &http.Client{Timeout: 30 * time.Second}
+// It is the guarded one rather than a bare http.Client, and the difference is
+// the endpoints: three of them are strings, and two of the four constructors
+// here let an application supply its own. A string that reaches an address
+// inside the network turns the token exchange into a request the application
+// makes on somebody else's behalf to a service that trusts it -- a cloud
+// metadata endpoint answers one of those with credentials. This one refuses
+// such an address between resolving it and connecting to it, on every hop a
+// redirect adds.
+//
+// The timeout comes with it: a client with none will wait for a provider that
+// has stopped answering until the request that started it is the last thing the
+// process ever does.
+var defaultClient = httpclient.NewFactory(nil).Client()
 
 // Provider is the authorization code flow, from the redirect out to the user
 // data back.

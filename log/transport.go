@@ -32,6 +32,11 @@ func Transport(next http.RoundTripper) http.RoundTripper {
 // The timeout is required rather than optional: http.Client has none by
 // default, and a call with no deadline is how one slow dependency turns into
 // every request of the process hanging.
+//
+// The client it returns is outside the outbound guard: it records where a
+// request went and decides nothing about where a request may go. An application
+// that wants both wraps this transport around a guarded client's own, which is
+// what the argument is for.
 func Client(timeout time.Duration) *http.Client {
 	return &http.Client{Timeout: timeout, Transport: Transport(nil)}
 }

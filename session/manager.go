@@ -46,8 +46,10 @@ type Config struct {
 
 	// The cookie's own attributes. Secure and HTTPOnly are not defaulted true
 	// by this struct because the zero value of a bool is false and a field that
-	// silently corrects itself is one nobody notices is unset -- [Config.Check]
-	// is what refuses an unsafe combination out loud.
+	// silently corrects itself would also silently ignore an explicit false --
+	// [Config.Check] refuses an unsafe combination out loud instead, and
+	// [SessionManager.Driver] runs it before there is a session to put in a
+	// cookie.
 	Path        string
 	Domain      string
 	Secure      bool
@@ -154,7 +156,15 @@ func (m *SessionManager) Extend(driver string, creator HandlerCreator) *SessionM
 // The id it starts with is empty, so a fresh one is minted; [StartSession] sets
 // the one the browser sent immediately afterwards, which is why a missing
 // cookie is not a special case anywhere.
+//
+// It refuses an unsafe cookie configuration here rather than where the cookie is
+// written, because this is the one call every request makes before there is a
+// session id to carry: a refusal that arrives at the cookie has already let the
+// request run.
 func (m *SessionManager) Driver(name string) (*Store, error) {
+	if err := m.GetSessionConfig().Check(); err != nil {
+		return nil, err
+	}
 	if name == "" {
 		name = m.GetDefaultDriver()
 	}

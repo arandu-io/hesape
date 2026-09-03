@@ -34,13 +34,19 @@ type LocalFilesystemAdapter struct {
 	// there is no window between deciding a path is inside the root and using
 	// it.
 	//
-	// What it confines is the root, and not a directory inside it: a link from
-	// one tenant's directory to another's never leaves the root, so it is
-	// followed. That is the smaller exposure and it is stated rather than
+	// What it confines is the root, and not a directory inside it: a link
+	// written relative to where it sits, from one tenant's directory into
+	// another's, never leaves the root and is followed. A link whose target is
+	// written as an absolute path is refused wherever it points, because the
+	// open root resolves the names it walked and an absolute target is not one
+	// of them.
+	//
+	// The followed case is the smaller exposure and it is stated rather than
 	// papered over -- whatever can plant that link can already read both
-	// directories. Leaving the root is the one worth refusing, because there
-	// the application's own credentials reach files no key names and write
-	// bytes where nothing asked them to.
+	// directories, and nothing a caller can ask of this adapter plants one.
+	// Leaving the root is the one worth refusing, because there the
+	// application's own credentials reach files no key names and write bytes
+	// where nothing asked them to.
 	dir *os.Root
 	// diskName and serveSigned are what lets a link be turned back into a disk.
 	// See [LocalFilesystemAdapter.DiskName]

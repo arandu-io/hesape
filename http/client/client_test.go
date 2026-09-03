@@ -4,8 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1224,4 +1229,132 @@ func TestThePoolSendsEachRequestUnderTheContextItsVerbWasGiven(t *testing.T) {
 	if _, ok := results["slow"]; ok {
 		t.Fatal("the cancelled request should not have produced a response")
 	}
+}
+
+// outboundDeclaration is what a package that builds its own *http.Client writes
+// beside it: the sentence that says the client does not go through the refusal
+// this package makes, and why that is all right there.
+const outboundDeclaration = "outside the outbound guard"
+
+// TestEveryOutboundClientIsGuardedOrSaysItIsNot walks the published sources of
+// the module and fails when a package builds an http.Client without either
+// going through this package or declaring that it does not.
+//
+// One did, and nothing said so: the OAuth providers reached the network on a
+// bare client, so a token endpoint read from configuration could name an
+// address inside the network and be dialed. It was found by reading, which is
+// the way a second one would be missed.
+//
+// The declaration is a sentence and not a linter suppression because the
+// question it answers is "what does this reach, and why is that fine" -- and
+// that answer belongs where the client is built, next to the endpoints it will
+// be pointed at.
+func TestEveryOutboundClientIsGuardedOrSaysItIsNot(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolving the module root: %v", err)
+	}
+	// This package is the guard, so it is where an unwrapped client is built on
+	// purpose.
+	guardDir := filepath.Join(root, "http", "client")
+
+	scanned := 0
+	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if entry.Name() == "testdata" || entry.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			return nil
+		}
+		if filepath.Dir(path) == guardDir {
+			return nil
+		}
+
+		scanned++
+		for _, line := range undeclaredClients(t, path) {
+			t.Errorf("%s:%d builds an http.Client of its own. Send it through client.Factory, or write "+
+				"%q in a comment on the declaration that builds it, with what it reaches and why that is "+
+				"all right.", path, line, outboundDeclaration)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking %s: %v", root, err)
+	}
+	if scanned == 0 {
+		t.Fatal("no published sources were read, so this test would pass on anything")
+	}
+}
+
+// undeclaredClients returns the lines of path where an http.Client is built
+// inside a declaration that carries no declaration comment.
+func undeclaredClients(t *testing.T, path string) []int {
+	t.Helper()
+
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parsing %s: %v", path, err)
+	}
+
+	var lines []int
+	for _, decl := range file.Decls {
+		var built []token.Pos
+		ast.Inspect(decl, func(node ast.Node) bool {
+			composite, ok := node.(*ast.CompositeLit)
+			if !ok {
+				return true
+			}
+			if selector, ok := composite.Type.(*ast.SelectorExpr); ok {
+				if pkg, ok := selector.X.(*ast.Ident); ok && pkg.Name == "http" && selector.Sel.Name == "Client" {
+					built = append(built, composite.Pos())
+				}
+			}
+			return true
+		})
+		if len(built) == 0 || declares(file, fset, decl) {
+			continue
+		}
+		for _, pos := range built {
+			lines = append(lines, fset.Position(pos).Line)
+		}
+	}
+	return lines
+}
+
+// declares reports whether any comment inside decl, or the doc comment above
+// it, carries the declaration.
+func declares(file *ast.File, fset *token.FileSet, decl ast.Decl) bool {
+	for _, group := range file.Comments {
+		if group.End() < decl.Pos() || group.Pos() > decl.End() {
+			// A doc comment sits just above the declaration it documents, and
+			// go/ast attaches it to the declaration's own Pos through Doc rather
+			// than through position, so the range check alone would miss it.
+			if doc := docOf(decl); doc == nil || doc != group {
+				continue
+			}
+		}
+		if strings.Contains(group.Text(), outboundDeclaration) {
+			return true
+		}
+	}
+	return false
+}
+
+// docOf returns the doc comment of a declaration, or nil when it has none.
+func docOf(decl ast.Decl) *ast.CommentGroup {
+	switch d := decl.(type) {
+	case *ast.FuncDecl:
+		return d.Doc
+	case *ast.GenDecl:
+		return d.Doc
+	}
+	return nil
 }

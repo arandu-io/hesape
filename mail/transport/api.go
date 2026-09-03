@@ -249,6 +249,12 @@ type answer struct {
 }
 
 // post is the whole of the provider transports that is not the body.
+//
+// The client it falls back to is outside the outbound guard: the destination is
+// the provider endpoint on the transport, which is a constant unless the
+// deployment replaced it, and a transport that refused an address inside the
+// network could not reach a provider run on the deployment's own network. A
+// deployment that wants the refusal sets Client to one that makes it.
 func post(ctx context.Context, client *http.Client, timeout time.Duration,
 	url string, headers map[string]string, body any,
 	describe func(status int, body []byte) string) (answer, error) {
