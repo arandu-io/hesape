@@ -6,7 +6,7 @@ go 1.26
 // reachable from any repository List. govulncheck found it here on its first
 // run, in a project that did not even need Postgres.
 require (
-	github.com/arandu-io/hesape v0.19.1
+	github.com/arandu-io/hesape v0.21.1
 	github.com/jackc/pgx/v5 v5.10.0
 )
 
