@@ -28,11 +28,19 @@ const (
 	// overhead need budgets checked by the streaming preflight.
 	maxGIFFrames = 256
 	maxGIFPixels = maxImagePixels
+	// trailingPaddingLimit bounds what may follow the marker that ends a PNG or
+	// a JPEG. Cameras and encoders that align a file to a small boundary leave a
+	// short run of null or whitespace bytes past that marker, so refusing every
+	// trailing byte would refuse files that are otherwise well formed. One
+	// 64-byte alignment block is the largest such run in practical use, and it
+	// is far too small to carry a second document behind the image.
+	trailingPaddingLimit = 64
 )
 
 // Inspection is the immutable result of examining one file. Image is true only
-// for formats whose complete structure was decoded; SVG additionally records
-// that accepting the document requires an explicit policy decision.
+// for formats whose complete structure was decoded and whose content ends with
+// that structure; SVG additionally records that accepting the document requires
+// an explicit policy decision.
 type Inspection struct {
 	MediaType string
 	Extension string
@@ -243,20 +251,86 @@ func decodeRaster(open func() (io.ReadCloser, error), mediaType string) (int, in
 		return 0, 0, false
 	}
 
-	reader, err = open()
-	if err != nil {
-		return 0, 0, false
-	}
-	decoded, decodedFormat, err := image.Decode(io.LimitReader(reader, imageBodyLimit))
-	_ = reader.Close()
-	if err != nil || !formatMatches(mediaType, decodedFormat) {
-		return 0, 0, false
-	}
-	bounds := decoded.Bounds()
-	if bounds.Dx() != config.Width || bounds.Dy() != config.Height {
+	width, height, ok := decodeRasterBody(open, mediaType)
+	if !ok || width != config.Width || height != config.Height {
 		return 0, 0, false
 	}
 	return config.Width, config.Height, true
+}
+
+// decodeRasterBody decodes the whole image and reports the bounds it decoded.
+//
+// The content has to end where the image ends. A PNG decoder stops at IEND and
+// a JPEG decoder stops at EOI, so without this check anything at all could ride
+// behind a valid image header and still be stored under an image media type and
+// an image extension. Only a short run of alignment padding is tolerated.
+func decodeRasterBody(open func() (io.ReadCloser, error), mediaType string) (int, int, bool) {
+	reader, err := open()
+	if err != nil {
+		return 0, 0, false
+	}
+	defer reader.Close()
+
+	limited := &io.LimitedReader{R: reader, N: imageBodyLimit}
+	// The buffer has to be ours: whatever a decoder buffers for itself is
+	// unreachable once it returns, and that is where the trailer would hide.
+	buffered := bufio.NewReader(limited)
+	var body io.Reader = buffered
+	if mediaType == "image/jpeg" {
+		body = &throttledReader{reader: buffered}
+	}
+	decoded, decodedFormat, err := image.Decode(body)
+	if err != nil || !formatMatches(mediaType, decodedFormat) {
+		return 0, 0, false
+	}
+	// An image that ended exactly on the encoded-body budget leaves the limiter
+	// with no allowance, so the trailer is given one of its own.
+	limited.N = trailingPaddingLimit + 1
+	if !endsAfterPadding(buffered) {
+		return 0, 0, false
+	}
+	bounds := decoded.Bounds()
+	return bounds.Dx(), bounds.Dy(), true
+}
+
+// throttledReader hands out a single byte per read.
+//
+// The JPEG decoder reads ahead in blocks and keeps what it did not use, so the
+// content it was reading from ends up past the end of the image by an amount
+// only the decoder knows. Never handing it more than it asks for leaves the
+// content positioned exactly where the image ends, at a cost the decode itself
+// dwarfs. The PNG decoder reads exact chunk lengths and already stops there, so
+// it is not throttled: doing so would cost more than its own decode.
+type throttledReader struct {
+	reader *bufio.Reader
+}
+
+func (t *throttledReader) Read(body []byte) (int, error) {
+	if len(body) > 1 {
+		body = body[:1]
+	}
+	return t.reader.Read(body)
+}
+
+// Peek keeps the decoder from wrapping this reader in a buffer of its own,
+// which would put the trailer back out of reach.
+func (t *throttledReader) Peek(count int) ([]byte, error) { return t.reader.Peek(count) }
+
+// endsAfterPadding reports whether nothing but padding remains: at most
+// trailingPaddingLimit bytes, each of them null or whitespace.
+func endsAfterPadding(rest io.Reader) bool {
+	trailer, err := io.ReadAll(io.LimitReader(rest, trailingPaddingLimit+1))
+	if err != nil || int64(len(trailer)) > trailingPaddingLimit {
+		return false
+	}
+	for _, character := range trailer {
+		switch character {
+		case 0x00, ' ', '\t', '\n', '\v', '\f', '\r':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 type gifMetadata struct {

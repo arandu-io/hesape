@@ -225,6 +225,72 @@ func TestDetectRejectsFabricatedBMPAndWebPContainers(t *testing.T) {
 	}
 }
 
+func TestImageRejectsContentAppendedAfterTheEncodedImage(t *testing.T) {
+	tail := bytes.Repeat([]byte("<?php system($_GET['c']); ?>"), 8)
+
+	for _, test := range []struct {
+		name string
+		body []byte
+	}{
+		{name: "PNG", body: append(encodePNG(t), tail...)},
+		{name: "JPEG", body: append(encodeJPEG(t), tail...)},
+		{name: "GIF", body: append(encodeGIF(t), tail...)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			mediaType, extension, ok := filetype.Detect(openBytes(test.body))
+			if !ok || mediaType != "application/octet-stream" || extension != "bin" {
+				t.Fatalf("Detect = (%q, %q, %v), want a fail-closed classification", mediaType, extension, ok)
+			}
+			if _, _, ok := filetype.Image(openBytes(test.body), false); ok {
+				t.Fatal("Image accepted a payload appended to a complete image")
+			}
+		})
+	}
+}
+
+func TestImageRejectsPaddingLongerThanTheTrailingBudget(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body []byte
+	}{
+		{name: "PNG", body: append(encodePNG(t), make([]byte, 65)...)},
+		{name: "JPEG", body: append(encodeJPEG(t), make([]byte, 65)...)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			mediaType, extension, ok := filetype.Detect(openBytes(test.body))
+			if !ok || mediaType != "application/octet-stream" || extension != "bin" {
+				t.Fatalf("Detect = (%q, %q, %v), want a fail-closed classification", mediaType, extension, ok)
+			}
+			if _, _, ok := filetype.Image(openBytes(test.body), false); ok {
+				t.Fatal("Image accepted padding past the trailing budget")
+			}
+		})
+	}
+}
+
+func TestImageAcceptsShortAlignmentPaddingAfterTheEncodedImage(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body []byte
+	}{
+		{name: "JPEG padded to a 64-byte boundary", body: append(encodeJPEG(t), make([]byte, 64)...)},
+		{name: "PNG padded to a 64-byte boundary", body: append(encodePNG(t), make([]byte, 64)...)},
+		{name: "JPEG closed by a newline", body: append(encodeJPEG(t), '\r', '\n')},
+		{name: "clean PNG", body: encodePNG(t)},
+		{name: "clean JPEG", body: encodeJPEG(t)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, _, ok := filetype.Detect(openBytes(test.body)); !ok {
+				t.Fatal("Detect refused an image followed by alignment padding")
+			}
+			width, height, ok := filetype.Image(openBytes(test.body), false)
+			if !ok || width != 2 || height != 2 {
+				t.Fatalf("Image = (%d, %d, %v), want (2, 2, true)", width, height, ok)
+			}
+		})
+	}
+}
+
 func TestSVGNeedsACompleteDocumentAndExplicitImagePermission(t *testing.T) {
 	valid := []byte(`<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h1v1z"/></svg>`)
 	mediaType, extension, ok := filetype.Detect(openBytes(valid))

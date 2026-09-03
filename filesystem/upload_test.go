@@ -79,9 +79,10 @@ func TestUploadRulesUseTheContentExtension(t *testing.T) {
 	}
 }
 
-// TestUploadRulesInspectOnlyABoundedPrefix: classification must not scale its
+// TestUploadRulesRefuseAPayloadAppendedToAnImage: a payload riding behind a
+// valid PNG header is not a PNG, and classification must not scale its
 // allocation or read with the size of input an attacker supplied.
-func TestUploadRulesInspectOnlyABoundedPrefix(t *testing.T) {
+func TestUploadRulesRefuseAPayloadAppendedToAnImage(t *testing.T) {
 	picture := append(encodedPNG(t), bytes.Repeat([]byte("x"), 2<<20)...)
 	read := 0
 	upload := filesystem.Upload{
@@ -93,14 +94,14 @@ func TestUploadRulesInspectOnlyABoundedPrefix(t *testing.T) {
 		},
 	}
 
-	if err := upload.Check(filesystem.UploadRules{MaxBytes: int64(len(picture)), Extensions: []string{".png"}}); err != nil {
-		t.Fatalf("Check: %v", err)
+	if err := upload.Check(filesystem.UploadRules{MaxBytes: int64(len(picture)), Extensions: []string{".png"}}); !errors.Is(err, filesystem.ErrRefusedUpload) {
+		t.Fatalf("Check err = %v, want ErrRefusedUpload", err)
 	}
 	if read == 0 {
-		t.Fatal("Check accepted the upload without inspecting its content")
+		t.Fatal("Check answered without inspecting the content")
 	}
-	// The image decoder buffers ahead, but must not consume the multi-megabyte
-	// tail merely to classify a tiny PNG.
+	// Refusing the tail must not mean reading it: the decoder stops at the end
+	// of the image and only the trailing budget is read past it.
 	if read > 64<<10 {
 		t.Fatalf("Check read %d bytes to classify the upload, want at most 64 KiB", read)
 	}

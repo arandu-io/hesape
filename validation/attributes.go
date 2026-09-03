@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
-	"github.com/arandu-io/hesape/internal/filetype"
 	"github.com/arandu-io/hesape/str"
 )
 
@@ -1584,17 +1583,15 @@ func clientExtension(value any) string {
 // ValidateDimensions is `dimensions`: the image measures what the named
 // parameters ask for.
 //
-// An SVG passes without being measured after its document is validated: it has
-// no pixels to count. Supported raster bytes are decoded under fixed input and
-// pixel bounds before their dimensions are compared.
+// An SVG passes without being measured once its document is validated: it has
+// no pixels to count. Validating it means reading its bytes, so a file that
+// announces an SVG it will not let anyone read fails instead of passing.
+// Supported raster bytes are decoded under fixed input and pixel bounds before
+// their dimensions are compared.
 func (v *Validator) ValidateDimensions(attribute string, value any, parameters []string) bool {
 	if v.IsValidFileInstance(value) {
 		if f, _ := asFile(value); f.GetMimeType() == "image/svg+xml" || f.GetMimeType() == "image/svg" {
-			if opener, opensContent := f.(contentOpener); opensContent {
-				_, _, ok := filetype.Image(opener.Open, true)
-				return ok
-			}
-			return true
+			return validSVGDocument(f)
 		}
 	}
 	if !v.IsValidFileInstance(value) {
