@@ -12,14 +12,6 @@ import (
 	"github.com/arandu-io/hesape/queue/failed"
 )
 
-// failedAction is the action the failed job commands hold a system grant for.
-//
-// Every one of them reads or writes a customer's failed jobs, and a grant is
-// issued for one action and refused on any other (auth.Grant.Check), so naming
-// it once here is what keeps five commands from drifting into five spellings of
-// the same permission.
-const failedAction auth.Action = "queue:failed"
-
 // tenantFlag is the flag every failed job command takes.
 //
 // It is not optional and it has no default. A failed job carries a customer's
@@ -34,7 +26,7 @@ func grantFor(tenant string) (auth.Grant, error) {
 	if tenant == "" {
 		return auth.Grant{}, fmt.Errorf("queue: --tenant is required. A failed job list is one customer's, and there is no default")
 	}
-	return auth.SystemGrant(failedAction, tenant), nil
+	return auth.SystemGrant(failed.Action, tenant), nil
 }
 
 // ListFailedCommand prints the jobs that gave up. It is `queue:failed`.

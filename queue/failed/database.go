@@ -122,7 +122,13 @@ func (p *DatabaseFailedJobProvider) Migrations() []migrations.Migration {
 	return []migrations.Migration{CreateFailedJobsTable{Table: p.table}}
 }
 
-// Log records a job that gave up.
+// Log records a job that gave up, once.
+//
+// The id is the job's own uuid and it is the primary key, so a second record of
+// one failure is refused by the table rather than written. That refusal is the
+// answer the caller wanted -- the failure is listed -- so it is read back as
+// such, and only an insert that failed for any other reason is returned as an
+// error.
 func (p *DatabaseFailedJobProvider) Log(ctx context.Context, g auth.Grant, job FailedJob) (string, error) {
 	tenant, err := tenantOf(g)
 	if err != nil {
@@ -147,9 +153,29 @@ func (p *DatabaseFailedJobProvider) Log(ctx context.Context, g auth.Grant, job F
 		id, id, tenant, job.Connection, job.Queue, job.Name,
 		string(job.Payload), job.Exception, failedAt.UTC())
 	if err != nil {
+		// Asked afterwards rather than before: a check that ran first would be
+		// a read every failure pays for, and it would still race with a second
+		// worker recording the same id.
+		if recorded, lookupErr := p.recorded(ctx, tenant, id); lookupErr == nil && recorded {
+			return id, nil
+		}
 		return "", fmt.Errorf("queue/failed: recording %s: %w", job.Name, err)
 	}
 	return id, nil
+}
+
+// recorded reports whether this tenant already has a failure under id.
+//
+// The tenant is in the WHERE, so a row somebody else's id collided with is not
+// this tenant's failure and the insert that hit it is still an error.
+func (p *DatabaseFailedJobProvider) recorded(ctx context.Context, tenant, id string) (bool, error) {
+	var count int
+	err := p.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM `+p.table+` WHERE tenant_id = ? AND id = ?`, tenant, id).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 // IDs is the identifiers of this tenant's failed jobs, newest first.

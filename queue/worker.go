@@ -13,8 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/log"
 	"github.com/arandu-io/hesape/queue/events"
+	"github.com/arandu-io/hesape/queue/failed"
 	"github.com/arandu-io/hesape/queue/jobs"
 	"github.com/arandu-io/hesape/queue/middleware"
 )
@@ -289,6 +291,7 @@ type Worker struct {
 	opts     WorkerOptions
 	cache    Cache
 	events   Dispatcher
+	failed   failed.FailedJobProvider
 
 	// ShouldQuit ends the loop after the job in flight. It is what a signal
 	// handler sets.
@@ -354,6 +357,23 @@ func (w *Worker) SetName(name string) *Worker {
 // single-process deployment can live with.
 func (w *Worker) SetCache(c Cache) *Worker {
 	w.cache = c
+	return w
+}
+
+// SetFailedJobs gives the worker the dead letter list to record parked jobs in,
+// and returns it so the call chains.
+//
+// Wire the provider the failed job commands were built with. They read a
+// provider and nothing else, so the one this worker writes to has to be the one
+// `aru queue:failed` lists, `queue:retry` pushes back and `queue:forget`
+// deletes -- otherwise the four are a console over an empty table, which is
+// what an operator finds out during the incident they were meant for.
+//
+// Nil is the default and means the driver's own park is the whole record: a
+// [DatabaseQueue] marks the job failed in the jobs table it was already in, and
+// Queue.Failed lists them. That arrangement needs no provider and gets none.
+func (w *Worker) SetFailedJobs(p failed.FailedJobProvider) *Worker {
+	w.failed = p
 	return w
 }
 
@@ -578,9 +598,7 @@ func (w *Worker) Process(ctx context.Context, j *jobs.Job) (err error) {
 		// register the handler. It parks immediately, where it can be seen.
 		err = fmt.Errorf("no handler registered for %s", j.Name)
 		log.For(ctx).Error("job has no handler", "job", j.Name, "id", j.UUID)
-		parkCtx, endPark := settling(ctx)
-		_ = j.Fail(parkCtx, err)
-		endPark()
+		_ = w.park(ctx, j, err, log.For(ctx))
 		w.dispatch(events.JobFailed{ConnectionName: connectionName, Job: j, Exception: err})
 		return err
 	}
@@ -692,10 +710,7 @@ func (w *Worker) handleJobException(ctx context.Context, j *jobs.Job, cause erro
 	if !settled {
 		j.LastError = cause.Error()
 		if parked = w.shouldFail(j, attempts, cause); parked {
-			parkCtx, endPark := settling(ctx)
-			failErr := j.Fail(parkCtx, cause)
-			endPark()
-			if failErr != nil {
+			if failErr := w.park(ctx, j, cause, logger); failErr != nil {
 				logger.Error("parking the job failed", "error", failErr)
 			}
 			// The line says what happened and the attempt count says how many
@@ -788,13 +803,69 @@ func (w *Worker) MarkJobAsFailedIfAlreadyExceedsMaxAttempts(ctx context.Context,
 	}
 
 	err := MaxAttemptsExceeded{}.ForJob(j, w.maxTriesFor(j))
-	parkCtx, endPark := settling(ctx)
-	failErr := j.Fail(parkCtx, err)
-	endPark()
-	if failErr != nil {
+	if failErr := w.park(ctx, j, err, log.For(ctx)); failErr != nil {
 		return failErr
 	}
 	return err
+}
+
+// park is the one way a job leaves the queue for good: the driver stops
+// delivering it, and the record goes where the failed job commands read.
+//
+// The two are one step because they are one decision. `aru queue:failed`,
+// `queue:retry`, `queue:forget` and `queue:flush` read a
+// [failed.FailedJobProvider] and nothing else, so a worker that only told the
+// driver leaves an operator four commands that print nothing about a job that
+// is gone. Recording it here rather than adding a fifth listing that reads the
+// driver keeps one dead letter list rather than two that disagree.
+//
+// The driver first, then the record. A park the driver refused means the job is
+// still queued and will be delivered again, and a dead letter entry for a job
+// that is still running is an operator retrying work that never stopped.
+//
+// A provider that refuses is reported and not returned: what the caller does
+// next depends on what became of the job, and the job did give up. The error is
+// logged rather than folded into the cause, so a dead letter list that has
+// stopped accepting writes is visible without changing the error the handler
+// saw.
+func (w *Worker) park(ctx context.Context, j *jobs.Job, cause error, logger *slog.Logger) error {
+	settle, settled := settling(ctx)
+	defer settled()
+
+	if err := j.Fail(settle, cause); err != nil {
+		return err
+	}
+	if w.failed == nil {
+		return nil
+	}
+
+	message := j.LastError
+	if cause != nil {
+		message = cause.Error()
+	}
+	// The job's own tenant, under the action the failed job list is reached
+	// under -- the same Grant the commands hold, because they read what this
+	// writes and a provider is free to check it.
+	g := auth.SystemGrant(failed.Action, j.TenantID)
+	if _, err := w.failed.Log(settle, g, failed.FailedJob{
+		UUID: j.UUID,
+		// The routing name, not the display name: `queue:retry` pushes the
+		// record back under it, and a name a person reads is not one a handler
+		// is registered under.
+		Name:       j.Name,
+		Connection: j.GetConnectionName(),
+		Queue:      j.Queue,
+		Payload:    j.Payload,
+		Exception:  message,
+		FailedAt:   time.Now().UTC(),
+	}); err != nil {
+		// The job and the reason, never the payload: it is a customer's
+		// arguments, and the failed job list is where it belongs -- behind a
+		// Grant -- rather than in a log line anything can ship anywhere.
+		logger.Error("the failed job could not be recorded; it is parked but will not be listed",
+			"job", j.Name, "job_id", j.UUID, "error", err)
+	}
+	return nil
 }
 
 // maxTriesFor is the job's own limit when it has one, and the worker's when it

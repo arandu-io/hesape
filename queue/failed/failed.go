@@ -38,6 +38,15 @@ type FailedJob struct {
 	FailedAt time.Time
 }
 
+// Action is the permission a failed job list is reached under.
+//
+// One spelling, because a Grant is issued for one action and refused on any
+// other (auth.Grant.Check): the worker that records a parked job and the five
+// commands that read it back have to name the same permission, and they are in
+// different packages. A second spelling is a console that cannot see what the
+// worker wrote.
+const Action auth.Action = "queue:failed"
+
 // FailedJobProvider is where a job goes when it gives up.
 //
 // Every method takes a context and an auth.Grant.
@@ -49,6 +58,11 @@ type FailedJob struct {
 // would leak the arguments of every job every customer ever queued.
 type FailedJobProvider interface {
 	// Log records a job that gave up, and returns the id it was recorded under.
+	//
+	// Recording the same job twice records it once. The id is the job's own
+	// uuid, so the second call is the same failure arriving again -- a worker
+	// that retried the write, a replay -- and a dead letter list that answered
+	// with two rows would have an operator retry the work twice.
 	Log(ctx context.Context, g auth.Grant, job FailedJob) (string, error)
 
 	// IDs is the identifiers of the failed jobs, newest first. An empty queue
