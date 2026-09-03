@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/arandu-io/hesape/translation"
 )
@@ -111,5 +112,60 @@ func TestALocaleCatalogueWinsOverTheBundledEnglish(t *testing.T) {
 	// showing the key.
 	if got, want := tr.Get("pt-BR", "passwords.reset", nil), "Your password has been reset."; got != want {
 		t.Errorf("Get = %q, want %q", got, want)
+	}
+}
+
+// The whole route a project takes to add a locale: a directory of locale
+// directories, read by a [translation.FileLoader], handed to [translation.New].
+//
+// It is asserted end to end rather than at the loader, because it is the layout
+// the package comment tells a project to use, and a layout that is only
+// described drifts from the one that works. Nothing here is a change to this
+// package: adding a language is a project writing files.
+func TestAProjectAddsALocaleWithFilesAlone(t *testing.T) {
+	files := fstest.MapFS{
+		// A group file: one item of one group, translated.
+		"lang/pt-BR/auth.json": &fstest.MapFile{
+			Data: []byte(`{"failed": "Estas credenciais não correspondem aos nossos registros."}`),
+		},
+		// The JSON catalogue of the same locale, whose keys are sentences.
+		"lang/pt-BR.json": &fstest.MapFile{
+			Data: []byte(`{"Save changes": "Salvar alterações"}`),
+		},
+		// The project's own English, overriding one bundled line.
+		"lang/en/auth.json": &fstest.MapFile{
+			Data: []byte(`{"failed": "We do not know that email and password."}`),
+		},
+	}
+	loader, err := translation.NewFileLoader(files, "lang")
+	if err != nil {
+		t.Fatalf("NewFileLoader: %v", err)
+	}
+	tr := translation.New(loader, "pt-BR", "en")
+
+	for _, c := range []struct {
+		name   string
+		locale string
+		key    string
+		want   string
+	}{
+		{"a group line the project translated", "pt-BR", "auth.failed",
+			"Estas credenciais não correspondem aos nossos registros."},
+		{"a sentence key from the JSON catalogue", "pt-BR", "Save changes",
+			"Salvar alterações"},
+		{"a line the project did not translate falls to the fallback locale", "pt-BR", "auth.password",
+			"The provided password is incorrect."},
+		{"a nested item still flattens", "pt-BR", "validation.min.string",
+			"The :attribute field must be at least :min characters."},
+		{"the project's English wins over the bundled line", "en", "auth.failed",
+			"We do not know that email and password."},
+		{"the rest of the bundled group is untouched by that override", "en", "auth.throttle",
+			"Too many login attempts. Please try again in :seconds seconds."},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := tr.Get(c.locale, c.key, nil); got != c.want {
+				t.Errorf("Get(%q, %q) = %q, want %q", c.locale, c.key, got, c.want)
+			}
+		})
 	}
 }

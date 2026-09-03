@@ -276,21 +276,31 @@ func group(s string) string {
 		negative = false
 	}
 
-	var b strings.Builder
-	b.Grow(len(s) + len(integer)/3 + 1)
+	grouped := groupDigits(integer, string(groupSeparator)) + fraction
 	if negative {
-		b.WriteByte('-')
+		return "-" + grouped
 	}
-	lead := len(integer) % 3
-	if lead == 0 {
-		lead = 3
+	return grouped
+}
+
+// groupDigits writes sep between each three integer digits, counting from the
+// right. It takes the separator rather than reading groupSeparator so that it is
+// the one place in the package that inserts one, which is what lets a locale
+// change the separator without a second way of counting the groups.
+//
+// The digits arrive with no sign and no point in them.
+func groupDigits(integer, sep string) string {
+	if integer == "" {
+		return ""
 	}
+	var b strings.Builder
+	b.Grow(len(integer) + len(sep)*((len(integer)-1)/3))
+	lead := (len(integer)-1)%3 + 1
 	b.WriteString(integer[:lead])
 	for i := lead; i < len(integer); i += 3 {
-		b.WriteByte(groupSeparator)
+		b.WriteString(sep)
 		b.WriteString(integer[i : i+3])
 	}
-	b.WriteString(fraction)
 	return b.String()
 }
 
