@@ -480,3 +480,74 @@ func (m *Message) parts() []embedded {
 
 	return out
 }
+
+// checkParts refuses an attachment or an embedded file whose name or content
+// type would end one of the four header lines a part is written under.
+//
+// It reads the fields a caller set rather than the parts [Render] writes,
+// because writing them means reading every attachment off a disk, and a message
+// that is going to be refused should be refused before a transport is opened
+// rather than while one is being written to. What a disk answers with instead
+// of a caller -- the content type it guesses for a file it holds -- is refused
+// where it is written.
+//
+// The name is resolved the way parts resolves it, so that a message this
+// accepts is a message that renders: an attachment with no name of its own goes
+// under the base name of its path, and it is that name which reaches the
+// header.
+func (m *Message) checkParts() error {
+	for _, a := range m.Attachments {
+		name := a.Options.As
+		if name == "" {
+			if p, ok := a.File.(string); ok {
+				name = filepath.Base(p)
+			}
+		}
+		if err := checkPartHeaders(name, a.Options.Mime, ""); err != nil {
+			return err
+		}
+	}
+	for _, a := range m.RawAttachments {
+		if err := checkPartHeaders(a.Name, a.Options.Mime, ""); err != nil {
+			return err
+		}
+	}
+	for _, a := range m.DiskAttachments {
+		if err := checkPartHeaders(a.Name, a.Options.Mime, ""); err != nil {
+			return err
+		}
+	}
+	for _, e := range m.embeds {
+		if err := checkPartHeaders(e.Name, e.Mime, e.CID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkPartHeaders refuses the three values a part contributes to its own
+// headers. An empty content id means the part is not referenced from the body
+// and no Content-ID line is written for it.
+//
+// The name is checked as a quoted parameter because it is written as one,
+// twice: Content-Type carries it as name and Content-Disposition as filename.
+// The content type shares those lines and is checked as a parameter for the
+// same reason, even though it is not itself quoted -- a quote in it opens a
+// quoted string that runs to the end of the line and takes the name with it.
+//
+// The content id is only checked for a line break: it is written between angle
+// brackets, and this package is the only thing that assigns one. That is the
+// reason to check it rather than the reason not to -- the check is what keeps
+// it true once a caller is allowed to name one.
+func checkPartHeaders(name, contentType, cid string) error {
+	if err := checkHeaderParameter("Content-Disposition filename", name); err != nil {
+		return err
+	}
+	if err := checkHeaderParameter("Content-Type", contentType); err != nil {
+		return err
+	}
+	if cid == "" {
+		return nil
+	}
+	return checkHeaderValue("Content-ID", cid)
+}

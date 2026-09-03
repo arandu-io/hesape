@@ -26,6 +26,43 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+### `mail.Render` returns an error, and refuses an attachment name that is a header
+
+`mail.Render` was `func(Message) string` and is now
+`func(Message) (string, error)`. A transport that renders a message itself
+reads the error and returns it:
+
+```go
+rendered, err := mail.Render(m)
+if err != nil {
+    return mail.SentMessage{}, err
+}
+```
+
+It refuses because not every message has a rendering. An attachment's name is
+written into three header lines and its content type into a fourth, and neither
+was checked: a name carrying `\r\n` became a header of its own, so a file named
+`invoice.pdf"\r\nBcc: attacker@example.test\r\nX: "` sent a blind copy the
+sender never wrote. Attachment names usually come from uploads.
+
+The name, the content type and the content id now go through the same refusal
+as every other header value, and the name and content type through a stricter
+one: a double quote closes the `filename="..."` parameter it sits in and a
+backslash escapes the closing quote, so both are refused even with no line
+break in the value. The refusal is a `*mail.HeaderError` wrapping
+`mail.ErrHeaderInjection`, the same as the envelope and header checks return,
+and it lands on `Mailer.Send` before a transport is opened as well as inside
+`Render` for a caller that renders a message nothing validated.
+
+A name with a space, a comma or an accent in it is unaffected. A name with a
+quote or a backslash in it is refused rather than rewritten, for the reason
+already on `Headers.Check`: a value that had to be rewritten to be safe is not
+the value the caller meant.
+
+`mail.ErrHeaderInjection`'s message changed from "a header value carries a line
+break" to "a header value carries a character that ends it early", because it
+now wraps both. Match it with `errors.Is`, not on the text.
+
 ### Upload validation trusts bytes, not client metadata
 
 `mimes`, `mimetypes` and `image` now classify uploaded files from bounded

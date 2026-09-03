@@ -142,11 +142,14 @@ func (e Envelope) Check() error {
 }
 
 // checkMessageHeaders is every header refusal a message goes through before
-// anything renders it: the envelope, the headers a mailable asked for, and the
-// two a Message carries on its own.
+// anything renders it: the envelope, the headers a mailable asked for, the two
+// a Message carries on its own, and the headers each attachment and embedded
+// file is written under.
 //
-// One function rather than three calls at the send site, because a fourth field
-// added later has one place to be added to and not three to be remembered in.
+// One function rather than four calls at the send site, because a fifth field
+// added later has one place to be added to and not four to be remembered in.
+// The attachments were the field that proved the point: they reach four header
+// lines and were the last to be checked.
 func checkMessageHeaders(m *Message) error {
 	if err := m.Envelope.Check(); err != nil {
 		return err
@@ -160,5 +163,8 @@ func checkMessageHeaders(m *Message) error {
 	if err := checkHeaderValue("Sender", m.sender.Name); err != nil {
 		return err
 	}
-	return checkHeaderValue("Return-Path", m.returnPath)
+	if err := checkHeaderValue("Return-Path", m.returnPath); err != nil {
+		return err
+	}
+	return m.checkParts()
 }

@@ -44,6 +44,14 @@ func (SMTP) Name() string { return "smtp" }
 func (t SMTP) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error) {
 	sent := mail.SentMessage{Transport: t.Name()}
 
+	// Rendered before the connection is dialled, because a message that cannot
+	// be rendered must not reach the server at all: RCPT TO tells it who the
+	// recipients are, and a refusal after that has already named them.
+	rendered, err := mail.Render(m)
+	if err != nil {
+		return mail.SentMessage{}, err
+	}
+
 	timeout := t.Timeout
 	if timeout <= 0 {
 		timeout = 30 * time.Second
@@ -94,7 +102,7 @@ func (t SMTP) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error
 	if err != nil {
 		return mail.SentMessage{}, fmt.Errorf("mail: data: %w", err)
 	}
-	if _, err := w.Write([]byte(mail.Render(m))); err != nil {
+	if _, err := w.Write([]byte(rendered)); err != nil {
 		return mail.SentMessage{}, fmt.Errorf("mail: writing the message: %w", err)
 	}
 	if err := w.Close(); err != nil {

@@ -28,7 +28,7 @@ func TestAnUnclassifiedUploadDoesNotFallBackToClientMime(t *testing.T) {
 		t.Fatalf("attachment MIME = %q, want fail-closed application/octet-stream", got)
 	}
 
-	rendered := mail.Render(*message)
+	rendered := mustRender(t, *message)
 	if !strings.Contains(rendered, `Content-Type: application/octet-stream; name="payload.png"`) {
 		t.Fatalf("rendered attachment did not keep the fail-closed MIME:\n%s", rendered)
 	}
