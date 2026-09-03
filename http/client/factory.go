@@ -425,9 +425,31 @@ func (f *Factory) GlobalOptions(fn func(*http.Client)) *Factory {
 	return f
 }
 
-// Client returns the underlying *http.Client.
+// Client returns an *http.Client carrying this factory's guard: it refuses a
+// scheme that does not leave, refuses a destination inside the network on every
+// hop a redirect adds unless [Factory.AllowInternalHosts] named it, and caps the
+// body it reads back.
+//
+// It is what a package that holds a client of its own asks for, where the
+// request building of a [PendingRequest] is not what is wanted and the refusal
+// is. A zero-value factory, or one built with a nil client, answers with the
+// defaults.
+//
+// The client is a copy, so changing its timeout or its transport changes this
+// caller's client and nobody else's. Use [Factory.GlobalOptions] to change the
+// one every request of this factory goes out on.
 func (f *Factory) Client() *http.Client {
-	return f.client
+	base := defaultClient
+	if f != nil && f.client != nil {
+		base = f.client
+	}
+
+	client := *base
+	if client.Transport == nil {
+		client.Transport = defaultTransport
+	}
+	client.Transport = &guardedTransport{next: client.Transport, guard: f.guard()}
+	return &client
 }
 
 // AssertionError is returned by assertion methods when the assertion fails.

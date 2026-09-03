@@ -1,7 +1,9 @@
 package client
 
 import (
+	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -65,22 +67,42 @@ func TestARefusalNamesTheHostAndTheWayToAllowIt(t *testing.T) {
 }
 
 // TestARedirectDoesNotEscapeTheCheck is the classic case. The first hop is a
-// host the factory declared; the answer sends the client to the metadata
-// address, which it did not. Following the redirect must be checked again
-// rather than inherit the first hop's permission.
+// host the factory declared; the answer sends the client somewhere it did not.
+// Following the redirect must be checked again rather than inherit the first
+// hop's permission.
+//
+// The three destinations are the three shapes the escape takes: the machine
+// itself, the metadata service every cloud answers on a link-local address, and
+// a unique-local address, which is the IPv6 form and the one a check written
+// against the IPv4 private ranges alone would let through.
 func TestARedirectDoesNotEscapeTheCheck(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Redirect(w, &http.Request{}, "http://169.254.169.254/latest/meta-data/", http.StatusFound)
-	}))
-	defer server.Close()
+	for _, target := range []struct {
+		name string
+		url  string
+		says string
+	}{
+		// A loopback address other than the one the first hop declared: the
+		// permission is per host, and 127.0.0.2 is the machine itself just as
+		// much as 127.0.0.1 is.
+		{"the machine itself", "http://127.0.0.2:9/", "127.0.0.2"},
+		{"the metadata service", "http://169.254.169.254/latest/meta-data/", "169.254.169.254"},
+		{"a unique-local address", "http://[fd00::1]:9/", "fd00::1"},
+	} {
+		t.Run(target.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Redirect(w, &http.Request{}, target.url, http.StatusFound)
+			}))
+			defer server.Close()
 
-	f := NewFactory(nil).AllowInternalHosts(loopbackHost)
-	_, err := f.CreatePendingRequest().Get(t.Context(), server.URL, nil)
-	if !errors.Is(err, ErrInternalAddress) {
-		t.Fatalf("the redirect should be refused, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "169.254.169.254") {
-		t.Fatalf("the refusal should name the address redirected to: %v", err)
+			f := NewFactory(nil).AllowInternalHosts(loopbackHost)
+			_, err := f.CreatePendingRequest().Get(t.Context(), server.URL, nil)
+			if !errors.Is(err, ErrInternalAddress) {
+				t.Fatalf("the redirect to %s should be refused, got %v", target.url, err)
+			}
+			if !strings.Contains(err.Error(), target.says) {
+				t.Fatalf("the refusal should name the address redirected to: %v", err)
+			}
+		})
 	}
 }
 
@@ -188,10 +210,19 @@ func TestSetHandlerLeavesTheSharedClientAlone(t *testing.T) {
 	}
 }
 
-// TestAnAddressIsInternalOrItIsNot walks the ranges the guard names, and the
-// mapped form of a loopback address, which is the same address written so that
-// a check on the IPv6 form alone misses it.
-func TestAnAddressIsInternalOrItIsNot(t *testing.T) {
+// TestTheDialRefusesEveryInternalLiteral walks the ranges the guard names, and
+// the mapped form of a loopback address, which is the same address written so
+// that a check on the IPv6 form alone misses it.
+//
+// It drives the dialer hook rather than the classification underneath it,
+// because the hook is what a connection actually goes through: a classification
+// that is right and a hook that never consults it would pass a test written one
+// layer down and connect anyway.
+//
+// The context carries no destination, which is the case a request that skipped
+// the round tripper produces. Nothing is allowed then, and that is the answer
+// this fixes.
+func TestTheDialRefusesEveryInternalLiteral(t *testing.T) {
 	for _, c := range []struct {
 		address  string
 		internal bool
@@ -213,12 +244,52 @@ func TestAnAddressIsInternalOrItIsNot(t *testing.T) {
 		{"8.8.8.8", false},
 		{"2606:2800:220:1:248:1893:25c8:1946", false},
 	} {
-		addr, err := netip.ParseAddr(c.address)
-		if err != nil {
+		if _, err := netip.ParseAddr(c.address); err != nil {
 			t.Fatalf("parsing %s: %v", c.address, err)
 		}
-		if got := isInternalAddress(addr); got != c.internal {
-			t.Errorf("isInternalAddress(%s) = %v, want %v", c.address, got, c.internal)
+
+		err := refuseInternalAddress(t.Context(), "tcp", net.JoinHostPort(c.address, "443"), nil)
+		if refused := errors.Is(err, ErrInternalAddress); refused != c.internal {
+			t.Errorf("dialing %s was refused=%v, want %v (%v)", c.address, refused, c.internal, err)
 		}
+	}
+}
+
+// TestAnAddressThatAnsweredPublicIsStillRefusedWhenItIsDialedPrivate is the
+// rebinding case: one name, two answers, and the second one points inside.
+//
+// The guard has no separate check to race, which is the whole design -- it runs
+// between resolving a name and connecting to the address, so the address it
+// reads is the address the connection uses. This drives that hook with the two
+// answers in order, under the destination the round tripper builds from a URL
+// whose host says nothing about where it points.
+//
+// It stands in for a resolver rather than running one: a DNS server in a unit
+// test would prove the same property and would be the only test here that can
+// fail because of the machine it runs on. What is fixed is that the first
+// answer buys nothing for the second.
+func TestAnAddressThatAnsweredPublicIsStillRefusedWhenItIsDialedPrivate(t *testing.T) {
+	// The destination the round tripper puts on the context for a URL whose
+	// host is not on any allow list.
+	ctx := context.WithValue(t.Context(), destinationKey{}, destination{host: "rebinding.example"})
+
+	answers := []struct {
+		address string
+		refused bool
+	}{
+		{"93.184.216.34:443", false},
+		{"127.0.0.1:443", true},
+	}
+
+	for i, answer := range answers {
+		err := refuseInternalAddress(ctx, "tcp", answer.address, nil)
+		if refused := errors.Is(err, ErrInternalAddress); refused != answer.refused {
+			t.Fatalf("answer %d (%s) was refused=%v, want %v (%v)", i+1, answer.address, refused, answer.refused, err)
+		}
+	}
+
+	err := refuseInternalAddress(ctx, "tcp", "127.0.0.1:443", nil)
+	if !strings.Contains(err.Error(), "rebinding.example") || !strings.Contains(err.Error(), "127.0.0.1") {
+		t.Errorf("the refusal names neither the host asked for nor the address it resolved to: %v", err)
 	}
 }
