@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -41,18 +42,17 @@ type storeQueue struct {
 	deleted  []string
 	released map[string]time.Duration
 	parked   []string
-	pushed   []rawPush
+	unparked []string
+	pushed   []jobs.Job
 	pops     int
+	// keepsParked says whether this driver still holds the jobs it parked, which
+	// is the difference between the two kinds of driver a retry has to serve: one
+	// that can put its own row back, and one whose only copy is the dead letter
+	// record.
+	keepsParked bool
 	// afterPop runs once a batch has been handed over, with its jobs already
 	// reserved. It is where a test puts the signal that has to land in that gap.
 	afterPop func()
-}
-
-// rawPush is one job put back by queue:retry.
-type rawPush struct {
-	name    string
-	payload string
-	queue   string
 }
 
 func newStoreQueue(js ...jobs.Job) *storeQueue {
@@ -118,10 +118,54 @@ func (q *storeQueue) FailJob(ctx context.Context, j *jobs.Job, _ error) error {
 	return nil
 }
 
-func (q *storeQueue) PushRaw(_ context.Context, _ auth.Grant, name string, payload []byte, queueName string) error {
+// PushRaw records the job a driver would store rather than the arguments it was
+// handed.
+//
+// It goes through jobs.New like every real driver's PushRaw does, which is what
+// makes the record honest: the id and the action are minted from the Grant that
+// pushes, not carried by whatever is being pushed back.
+func (q *storeQueue) PushRaw(_ context.Context, g auth.Grant, name string, payload []byte, queueName string) error {
+	j, err := jobs.New(g, queueName, name, nil)
+	if err != nil {
+		return err
+	}
+	j.Payload = payload
+
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	q.pushed = append(q.pushed, rawPush{name: name, payload: string(payload), queue: queueName})
+	q.pushed = append(q.pushed, j)
+	return nil
+}
+
+// Retry answers the way this driver's own store would.
+//
+// A driver that keeps its parked jobs puts the one it holds back and reports
+// nothing left to rebuild; one that keeps none says so, so the caller knows the
+// record it is holding is the only copy left.
+func (q *storeQueue) Retry(_ context.Context, uuid string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.keepsParked {
+		for i, id := range q.parked {
+			if id == uuid {
+				q.parked = append(q.parked[:i:i], q.parked[i+1:]...)
+				q.unparked = append(q.unparked, uuid)
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("%w: %s", queue.ErrNotParked, uuid)
+}
+
+// Push records the job as it arrived, after the check every driver makes first:
+// a job naming an action the Grant does not carry is refused, not stored.
+func (q *storeQueue) Push(_ context.Context, g auth.Grant, j jobs.Job) error {
+	if err := jobs.Authorized(g, j); err != nil {
+		return err
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.pushed = append(q.pushed, jobs.Prepare(g, j))
 	return nil
 }
 
@@ -155,10 +199,17 @@ func (q *storeQueue) waiting() int {
 	return len(q.ready)
 }
 
-func (q *storeQueue) pushes() []rawPush {
+func (q *storeQueue) pushes() []jobs.Job {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return append([]rawPush(nil), q.pushed...)
+	return append([]jobs.Job(nil), q.pushed...)
+}
+
+// retried is the jobs this driver put back from its own store.
+func (q *storeQueue) retried() []string {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return append([]string(nil), q.unparked...)
 }
 
 // newJob builds a job carrying something worth not printing.
@@ -551,11 +602,11 @@ func TestTheFailedJobCommandsActOnWhatTheWorkerRecorded(t *testing.T) {
 		t.Fatalf("queue:retry: %v", err)
 	}
 	pushed := q.pushes()
-	if len(pushed) != 1 || pushed[0].name != "invoice.send" {
+	if len(pushed) != 1 || pushed[0].Name != "invoice.send" {
 		t.Fatalf("queue:retry put back %v", pushed)
 	}
-	if pushed[0].payload != string(retried.Payload) {
-		t.Errorf("queue:retry pushed %q, want the payload that failed", pushed[0].payload)
+	if string(pushed[0].Payload) != string(retried.Payload) {
+		t.Errorf("queue:retry pushed %q, want the payload that failed", pushed[0].Payload)
 	}
 
 	if _, err := runCommand(t, queueconsole.NewForgetFailedCommand(provider).Command(),
@@ -569,6 +620,103 @@ func TestTheFailedJobCommandsActOnWhatTheWorkerRecorded(t *testing.T) {
 	}
 	if !strings.Contains(printed, "no failed jobs") {
 		t.Errorf("the retried and the forgotten job are still listed:\n%s", printed)
+	}
+}
+
+// TestTheRetriedJobKeepsItsIdentityAndItsAuthorization: a retry puts the job
+// back, not a copy of it wearing the operator's badge.
+//
+// Two things travel with a job and neither is recoverable once dropped. The
+// uuid is the deduplication key, so a handler that recognizes work it already
+// did cannot recognize a job that came back under a new one. The action is what
+// the worker reissues the Grant from -- jobs.GrantFor reads it -- so a job put
+// back under the action the dead letter list is read with runs as the
+// administrator who listed it: every Policy that checks the job's own action
+// refuses the work, and every Policy that does not lets it do more than the
+// original push ever authorized.
+func TestTheRetriedJobKeepsItsIdentityAndItsAuthorization(t *testing.T) {
+	j := newJob(t, "invoice.send")
+	q := newStoreQueue(j)
+	provider := fileProvider(t)
+	manager := queue.NewQueueManager().Extend("store", q)
+
+	w := queue.NewWorker(q, queue.WorkerOptions{MaxTries: 1}).SetFailedJobs(provider)
+	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, *jobs.Job) error {
+		return errors.New("the payment gateway is down")
+	})
+	if err := deliverOnce(t, context.Background(), w, q); err == nil {
+		t.Fatal("the handler failed and Process reported nothing")
+	}
+
+	if _, err := runCommand(t, queueconsole.NewRetryCommand(provider, manager, nil).Command(),
+		"-tenant="+tenant, j.UUID); err != nil {
+		t.Fatalf("queue:retry: %v", err)
+	}
+
+	pushed := q.pushes()
+	if len(pushed) != 1 {
+		t.Fatalf("queue:retry put back %d job(s)", len(pushed))
+	}
+	if pushed[0].UUID != j.UUID {
+		t.Errorf("the job came back as %q, want the id it failed under, %q",
+			pushed[0].UUID, j.UUID)
+	}
+	if pushed[0].Action != j.Action {
+		t.Errorf("the job came back under the action %q, want the one it was pushed with, %q",
+			pushed[0].Action, j.Action)
+	}
+	if pushed[0].TenantID != j.TenantID {
+		t.Errorf("the job came back for tenant %q, want %q", pushed[0].TenantID, j.TenantID)
+	}
+}
+
+// TestARetryUnparksTheDriversOwnCopyRatherThanQueueingASecond: one dead letter
+// list, and it has to be the same one on a driver that keeps its own.
+//
+// A driver that parks in place -- the database queue marks failed_at, the redis
+// queue moves the id into a parked set -- still holds the job after it gave up.
+// A retry that pushed a fresh job there would leave that copy parked for good:
+// `queue:failed` would report the failure gone while the driver's own listing,
+// and the health check reading it, reported it forever. Un-parking is also the
+// only path that cannot lose anything, because nothing about the job is rebuilt.
+func TestARetryUnparksTheDriversOwnCopyRatherThanQueueingASecond(t *testing.T) {
+	j := newJob(t, "invoice.send")
+	q := newStoreQueue(j)
+	q.keepsParked = true
+	provider := fileProvider(t)
+	manager := queue.NewQueueManager().Extend("store", q)
+
+	w := queue.NewWorker(q, queue.WorkerOptions{MaxTries: 1}).SetFailedJobs(provider)
+	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, *jobs.Job) error {
+		return errors.New("the payment gateway is down")
+	})
+	if err := deliverOnce(t, context.Background(), w, q); err == nil {
+		t.Fatal("the handler failed and Process reported nothing")
+	}
+
+	if _, err := runCommand(t, queueconsole.NewRetryCommand(provider, manager, nil).Command(),
+		"-tenant="+tenant, j.UUID); err != nil {
+		t.Fatalf("queue:retry: %v", err)
+	}
+
+	if pushed := q.pushes(); len(pushed) != 0 {
+		t.Errorf("the retry queued %d second cop(ies) beside the one the driver still held: %v",
+			len(pushed), pushed)
+	}
+	if unparked := q.retried(); len(unparked) != 1 || unparked[0] != j.UUID {
+		t.Errorf("the driver un-parked %v, want the job that failed", unparked)
+	}
+	// The two listings now agree, which is the whole claim: the driver reports
+	// nothing parked and the command reports nothing failed.
+	if _, _, parked := q.settled(); len(parked) != 0 {
+		t.Errorf("the driver still reports %v parked after the retry", parked)
+	}
+	printed, err := runCommand(t, queueconsole.NewListFailedCommand(provider).Command(), "-tenant="+tenant)
+	if err != nil {
+		t.Fatalf("queue:failed: %v", err)
+	}
+	if !strings.Contains(printed, "no failed jobs") {
+		t.Errorf("the retried job is still on the dead letter list:\n%s", printed)
 	}
 }
 

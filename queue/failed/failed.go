@@ -30,6 +30,20 @@ type FailedJob struct {
 	Queue string
 	// Name is what routes the job to a handler.
 	Name string
+	// Action is the permission the job was pushed under, and it is the half of
+	// the envelope that cannot be rebuilt from anything else here.
+	//
+	// The worker reissues a job's Grant from its action -- jobs.GrantFor is
+	// auth.SystemGrant(action, tenant) -- so a record that lost it can only put
+	// the job back under the action the dead letter list itself is read with.
+	// That is an administrative permission: every Policy that checks the job's
+	// own action refuses the work, and every Policy that does not lets it do
+	// more than the push ever authorized.
+	//
+	// Empty on a record written before the column existed. A retry that finds
+	// none is refused rather than guessed at: an action is exactly the thing
+	// nothing else in the record implies.
+	Action string
 	// Payload is the job's arguments, as they were stored.
 	Payload []byte
 	// Exception is why it gave up.

@@ -2,6 +2,7 @@ package console
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/arandu-io/hesape/queue"
 	"github.com/arandu-io/hesape/queue/events"
 	"github.com/arandu-io/hesape/queue/failed"
+	"github.com/arandu-io/hesape/queue/jobs"
 )
 
 // tenantFlag is the flag every failed job command takes.
@@ -27,6 +29,44 @@ func grantFor(tenant string) (auth.Grant, error) {
 		return auth.Grant{}, fmt.Errorf("queue: --tenant is required. A failed job list is one customer's, and there is no default")
 	}
 	return auth.SystemGrant(failed.Action, tenant), nil
+}
+
+// requeue puts one recorded failure back in line on the connection it came off.
+//
+// The driver is asked first, because a driver that still holds the parked job
+// holds the job itself: the row it un-parks already carries the id, the action,
+// the tenant and the arguments, and none of them is rebuilt from anything.
+// Pushing a job instead would leave that copy parked for good -- a dead letter
+// list reporting the failure gone beside a driver still reporting it -- and on a
+// store keyed by the job's id the push would not be accepted at all.
+//
+// A driver with no such parked job is the case the record exists for: the store
+// was flushed, or it never kept the job. The record is then the only copy left,
+// and the job is rebuilt from it.
+//
+// Either way the work goes back under the id it failed with and the action it
+// was pushed with. tenant comes from the Grant the list was read under, which is
+// the one the record was found by.
+func requeue(ctx context.Context, target queue.Queue, tenant string, record failed.FailedJob) error {
+	if err := target.Retry(ctx, record.UUID); !errors.Is(err, queue.ErrNotParked) {
+		return err
+	}
+	if record.Action == "" {
+		return fmt.Errorf("queue: %s was recorded before the list kept the permission a job was pushed under, and the connection no longer holds the job. Rebuilding it would mean choosing an action nobody granted", record.UUID)
+	}
+
+	// The job's own action, never failed.Action: the worker reissues the Grant
+	// from what the record says, so this is the permission the work runs with.
+	g := auth.SystemGrant(auth.Action(record.Action), tenant)
+	return target.Push(ctx, g, jobs.Job{
+		UUID:         record.UUID,
+		Queue:        record.Queue,
+		Name:         record.Name,
+		TenantID:     tenant,
+		Payload:      record.Payload,
+		Action:       record.Action,
+		AuthorizedBy: g.Subject().ID,
+	})
 }
 
 // ListFailedCommand prints the jobs that gave up. It is `queue:failed`.
@@ -112,6 +152,12 @@ func (c *RetryCommand) Command() console.Command {
 // The order matters: the job is pushed back before it is forgotten, so a push
 // that fails leaves the failure where it was. Forgetting first and then failing
 // to push loses the job.
+//
+// Two Grants, and they are not interchangeable. The list is read under
+// [failed.Action], which is an administrator's permission over other people's
+// failures; the job goes back under the action it was pushed with, which is
+// what the worker will reissue its Grant from. Using one for both is the whole
+// defect: the read Grant would put the work back as the administrator.
 func (c *RetryCommand) Handle(ctx context.Context, o *console.IO) error {
 	flags := o.Flags()
 	tenant := tenantFlag(o)
@@ -147,13 +193,7 @@ func (c *RetryCommand) Handle(ctx context.Context, o *console.IO) error {
 		if err != nil {
 			return err
 		}
-		pusher, can := target.(interface {
-			PushRaw(context.Context, auth.Grant, string, []byte, string) error
-		})
-		if !can {
-			return fmt.Errorf("queue: the %s connection cannot take a job back", job.Connection)
-		}
-		if err := pusher.PushRaw(ctx, g, job.Name, job.Payload, job.Queue); err != nil {
+		if err := requeue(ctx, target, auth.Tenant(g), job); err != nil {
 			o.Error("%s: %v", id, err)
 			continue
 		}

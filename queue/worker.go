@@ -800,7 +800,13 @@ func (w *Worker) park(ctx context.Context, j *jobs.Job, cause error, logger *slo
 		// The routing name, not the display name: `queue:retry` pushes the
 		// record back under it, and a name a person reads is not one a handler
 		// is registered under.
-		Name:       j.Name,
+		Name: j.Name,
+		// The job's own action, and not the one this record is written under.
+		// They are different permissions on purpose -- the list is read by an
+		// administrator and the work is not -- and a retry rebuilds the job's
+		// Grant from this field, so the record has to carry the action the job
+		// was pushed with or the work comes back as the administrator.
+		Action:     j.Action,
 		Connection: j.GetConnectionName(),
 		Queue:      j.Queue,
 		Payload:    j.Payload,

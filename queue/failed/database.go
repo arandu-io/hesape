@@ -113,13 +113,66 @@ func (m CreateFailedJobsTable) table() string {
 	return m.Table
 }
 
+// AddActionToFailedJobsTable adds the column that carries the permission a job
+// was pushed under, which the record used to drop.
+//
+// A retry rebuilds the job from this row, and the Grant it runs under is built
+// from an action. Without the column the only action a retry could name was the
+// one the dead letter list is read with, so the work came back as an
+// administrator rather than as itself.
+//
+// It is its own migration rather than an edit to [CreateFailedJobsTable]: a
+// published migration is not changed, because a database that already applied
+// it would not apply it again and the two would be one name over two schemas.
+type AddActionToFailedJobsTable struct {
+	migrations.BaseMigration
+
+	// Table is the table to alter. Empty means DefaultTable.
+	Table string
+}
+
+// GetName returns the migration's name.
+func (AddActionToFailedJobsTable) GetName() string {
+	return "2026_09_03_000010_add_action_to_failed_jobs_table"
+}
+
+// Up adds the column.
+//
+// Nullable, so the release running while this is applied keeps inserting
+// without it: a NOT NULL column with no default added to a table that has rows
+// fails on every row already there, and the previous binary's insert names nine
+// columns rather than ten.
+func (m AddActionToFailedJobsTable) Up(ctx context.Context, conn migrations.Connection) error {
+	return conn.Schema().Table(ctx, m.table(), func(table *schema.Blueprint) {
+		table.Text("action").Nullable()
+	})
+}
+
+// Down drops the column.
+func (m AddActionToFailedJobsTable) Down(ctx context.Context, conn migrations.Connection) error {
+	return conn.Schema().Table(ctx, m.table(), func(table *schema.Blueprint) {
+		table.DropColumn("action")
+	})
+}
+
+// table is m.Table with the default filled in.
+func (m AddActionToFailedJobsTable) table() string {
+	if m.Table == "" {
+		return DefaultTable
+	}
+	return m.Table
+}
+
 // Migrations returns the failed jobs table.
 //
 // The schema is on the provider rather than on the queue module because it
 // belongs to whoever wired this provider: an application that keeps its
 // failures in the jobs table declares nothing here.
 func (p *DatabaseFailedJobProvider) Migrations() []migrations.Migration {
-	return []migrations.Migration{CreateFailedJobsTable{Table: p.table}}
+	return []migrations.Migration{
+		CreateFailedJobsTable{Table: p.table},
+		AddActionToFailedJobsTable{Table: p.table},
+	}
 }
 
 // Log records a job that gave up, once.
@@ -148,9 +201,9 @@ func (p *DatabaseFailedJobProvider) Log(ctx context.Context, g auth.Grant, job F
 
 	_, err = p.db.ExecContext(ctx, `
 		INSERT INTO `+p.table+` (
-			id, uuid, tenant_id, connection, queue, name, payload, exception, failed_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, id, tenant, job.Connection, job.Queue, job.Name,
+			id, uuid, tenant_id, connection, queue, name, action, payload, exception, failed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, id, tenant, job.Connection, job.Queue, job.Name, job.Action,
 		string(job.Payload), job.Exception, failedAt.UTC())
 	if err != nil {
 		// Asked afterwards rather than before: a check that ran first would be
@@ -326,7 +379,7 @@ func (p *DatabaseFailedJobProvider) query(ctx context.Context, tail string, args
 	// concatenates into "failed_jobsWHERE", which SQLite reads as a table alias
 	// and then fails on the next word.
 	rows, err := p.db.QueryContext(ctx, `
-		SELECT id, uuid, tenant_id, connection, queue, name, payload, exception, failed_at
+		SELECT id, uuid, tenant_id, connection, queue, name, action, payload, exception, failed_at
 		FROM `+p.table+`
 		`+tail, args...)
 	if err != nil {
@@ -338,13 +391,18 @@ func (p *DatabaseFailedJobProvider) query(ctx context.Context, tail string, args
 	for rows.Next() {
 		var job FailedJob
 		var payload string
+		// The action column is nullable, because it was added to a table that
+		// already had rows: a record written before it existed scans as NULL,
+		// and a plain string destination refuses that outright.
+		var action sql.NullString
 		if err := rows.Scan(&job.ID, &job.UUID, &job.TenantID, &job.Connection, &job.Queue,
-			&job.Name, &payload, &job.Exception, &job.FailedAt); err != nil {
+			&job.Name, &action, &payload, &job.Exception, &job.FailedAt); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return out, nil
 			}
 			return nil, fmt.Errorf("queue/failed: reading the failed jobs: %w", err)
 		}
+		job.Action = action.String
 		job.Payload = []byte(payload)
 		out = append(out, job)
 	}

@@ -37,9 +37,16 @@ var (
 )
 
 // keyedTable is the rows, by id, with the tenant each belongs to.
+//
+// stored keeps each row as it was inserted, in the projection's own column
+// order, so a read can be answered with what a write actually wrote. That is
+// what makes an insert and a select that disagree about the columns visible
+// here rather than at the first engine that runs them.
 type keyedTable struct {
 	mu     sync.Mutex
 	byID   map[string]string
+	stored map[string][]driver.Value
+	order  []string
 	insert int
 }
 
@@ -47,7 +54,7 @@ func newKeyedTable() (*sql.DB, *keyedTable) {
 	tablesMu.Lock()
 	tableSeq++
 	dsn := fmt.Sprintf("fake-failed-%d", tableSeq)
-	table := &keyedTable{byID: map[string]string{}}
+	table := &keyedTable{byID: map[string]string{}, stored: map[string][]driver.Value{}}
 	tables[dsn] = table
 	tablesMu.Unlock()
 
@@ -86,6 +93,13 @@ func (c *keyedConn) ExecContext(_ context.Context, query string, args []driver.N
 	if !strings.Contains(query, "INSERT INTO") {
 		return keyedResult{}, nil
 	}
+	// An engine binds by position, so a statement naming one more column than
+	// it carries values for is refused before it is run. Refusing it here too
+	// is what keeps a column added to the insert and forgotten in the values
+	// from passing as a working write.
+	if placeholders := strings.Count(query, "?"); placeholders != len(args) {
+		return nil, fmt.Errorf("the insert has %d placeholders and %d values", placeholders, len(args))
+	}
 	id, _ := args[0].Value.(string)
 	tenantID, _ := args[2].Value.(string)
 
@@ -96,10 +110,20 @@ func (c *keyedConn) ExecContext(_ context.Context, query string, args []driver.N
 		return nil, errors.New("UNIQUE constraint failed: failed_jobs.id")
 	}
 	c.rows.byID[id] = tenantID
+
+	row := make([]driver.Value, 0, len(args))
+	for _, arg := range args {
+		row = append(row, arg.Value)
+	}
+	c.rows.stored[id] = row
+	c.rows.order = append([]string{id}, c.rows.order...)
 	return keyedResult{}, nil
 }
 
 func (c *keyedConn) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	if strings.Contains(query, "SELECT id, uuid") {
+		return c.projection(query)
+	}
 	if !strings.Contains(query, "count(*)") {
 		return &keyedRows{columns: []string{"empty"}}, nil
 	}
@@ -113,6 +137,32 @@ func (c *keyedConn) QueryContext(_ context.Context, query string, args []driver.
 		found = 1
 	}
 	return &keyedRows{columns: []string{"count"}, values: [][]driver.Value{{found}}}, nil
+}
+
+// projection answers a read with the rows as they were written.
+//
+// The insert names its columns in the projection's order, so a stored row is
+// already the row this hands back. The tenant filter is the provider's and not
+// this fake's -- what is under test here is the shape of the two statements.
+func (c *keyedConn) projection(query string) (driver.Rows, error) {
+	list := query[strings.Index(query, "SELECT ")+len("SELECT ") : strings.Index(query, "FROM")]
+	columns := strings.Split(list, ",")
+	for i := range columns {
+		columns[i] = strings.TrimSpace(columns[i])
+	}
+
+	c.rows.mu.Lock()
+	defer c.rows.mu.Unlock()
+	values := make([][]driver.Value, 0, len(c.rows.order))
+	for _, id := range c.rows.order {
+		row := c.rows.stored[id]
+		if len(row) != len(columns) {
+			return nil, fmt.Errorf("the read names %d columns and the write stored %d",
+				len(columns), len(row))
+		}
+		values = append(values, row)
+	}
+	return &keyedRows{columns: columns, values: values}, nil
 }
 
 type keyedTx struct{}
@@ -180,6 +230,43 @@ func TestTheDatabaseProviderRecordsOneFailureOnce(t *testing.T) {
 	}
 	if rows := table.rows(); rows != 1 {
 		t.Errorf("the table holds %d rows for one failure", rows)
+	}
+}
+
+// TestTheDatabaseProviderKeepsThePermissionTheJobWasPushedUnder: the record has
+// to carry the action, because a retry rebuilds the job's Grant from it.
+//
+// Written and read back rather than only written: the insert and the projection
+// name their columns independently, and a column added to one and not the other
+// is a provider that stores the action and answers without it.
+func TestTheDatabaseProviderKeepsThePermissionTheJobWasPushedUnder(t *testing.T) {
+	ctx := context.Background()
+	sqldb, _ := newKeyedTable()
+	t.Cleanup(func() { _ = sqldb.Close() })
+
+	p := failed.NewDatabaseFailedJobProvider(database.Wrap(sqldb, database.DialectSQLite), "")
+	if _, err := p.Log(ctx, grantFor(tenant), failed.FailedJob{
+		UUID:       "job-1",
+		Connection: "database",
+		Queue:      "default",
+		Name:       "invoice.send",
+		Action:     "invoice.send",
+		Payload:    []byte(`{"id":"i-1"}`),
+		Exception:  "the payment gateway is down",
+	}); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
+
+	all, err := p.All(ctx, grantFor(tenant))
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("the table answered with %d records", len(all))
+	}
+	if all[0].Action != "invoice.send" {
+		t.Errorf("the record came back under the action %q, want the one it was logged with",
+			all[0].Action)
 	}
 }
 
