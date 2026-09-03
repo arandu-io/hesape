@@ -45,6 +45,22 @@ type FailedJob struct {
 	// nothing else in the record implies.
 	Action string
 	// Payload is the job's arguments, as they were stored.
+	//
+	// As they were, and not masked. Masking them here would cost the retry and
+	// protect nothing. A driver that parks in place still holds the same bytes
+	// -- the database queue leaves the row and only marks failed_at, the redis
+	// queue leaves the job hash and only moves the id -- so a masked copy would
+	// sit one table over from the original, written by the same park. And when
+	// the store no longer holds the job, this is the last copy of the arguments
+	// there is: masked, a retry has nothing to put back.
+	//
+	// What is enforced is the boundary the bytes can actually cross. Reading
+	// them takes a Grant and they are scoped to one tenant, and they never go
+	// into a log line -- a log is shipped, retained and read without a Grant,
+	// which a table is not. Keeping them unreadable at rest as well is
+	// encryption, not redaction: it is one decision for both stores, with a key
+	// to manage and rotate, and doing it to this record alone would leave the
+	// same payload in the clear beside it.
 	Payload []byte
 	// Exception is why it gave up.
 	Exception string
