@@ -609,8 +609,10 @@ func (p *PendingRequest) BuildClient() *http.Client {
 // A nil transport keeps whatever the client already had.
 //
 // Whatever the transport turns out to be, it is wrapped in the factory's guard:
-// the scheme, the destination and the size of the answer are settled on every
-// hop, redirects included.
+// the scheme and the size of the answer are settled on every hop, redirects
+// included. The destination is settled by the transport's own dialer, which is
+// this package's unless a caller brought one; [Factory.Client] says why it is
+// there and not in the wrapper.
 func (p *PendingRequest) CreateClient(handler http.RoundTripper) *http.Client {
 	client := *p.BuildClient()
 	if handler != nil {

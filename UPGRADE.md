@@ -26,6 +26,30 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+### `client.Factory.Client` returns a copy, and says what its guard does not cover
+
+`Factory.Client()` used to return the factory's own `*http.Client`. It now
+returns a copy, wrapped in the factory's guard. The signature is unchanged, so
+nothing stops compiling, and that is the reason this entry exists: code that
+mutated the returned client to change every request the factory sends —
+`f.Client().Timeout = time.Minute`, or assigning `.Transport` — now mutates a
+copy and changes nothing, silently. Use `Factory.GlobalOptions` for that:
+
+```go
+factory.GlobalOptions(func(c *http.Client) { c.Timeout = time.Minute })
+```
+
+Its documentation also claimed the returned client refuses a destination inside
+the network on every hop, without a condition. That refusal is on the dialer,
+so it travels with the transport: a `Factory` built on a client that brought its
+own transport answers with a client that reaches whatever that transport's
+dialer reaches. The scheme refusal and the response cap are in the wrapper and
+hold on any transport. `NewFactory` always said this; `Client` did not.
+
+Nothing changed in behaviour here. Pass a nil client to `NewFactory`, or leave
+the client's `Transport` nil, to get the transport that carries the address
+check.
+
 ### `mail.Render` returns an error, and refuses an attachment name that is a header
 
 `mail.Render` was `func(Message) string` and is now
