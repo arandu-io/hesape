@@ -34,6 +34,11 @@ func NewPostgresProcessor() *PostgresProcessor { return &PostgresProcessor{} }
 // identifier comes back as a row and the statement runs as a select. It
 // runs against the write connection, because a replica has not seen the
 // row yet.
+//
+// It takes no authorization credential and runs the statement it is handed: a
+// caller that reaches this is below the authorization layer, not outside it.
+// The credential was checked where the *query.Builder was obtained, and a
+// second check here would be a second place to forget it.
 func (p *PostgresProcessor) ProcessInsertGetID(ctx context.Context, q *query.Builder, sql string, values []any, sequence string) (int64, error) {
 	connection := q.GetConnection()
 	if connection == nil {

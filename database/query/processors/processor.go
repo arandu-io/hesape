@@ -59,6 +59,11 @@ func (p *Processor) ProcessSelect(q *query.Builder, results []query.Record) []qu
 // It returns an int64: query.Processor declares the signature, and an
 // engine whose identifier is not a number is a repository's problem before
 // it is a processor's.
+//
+// It takes no authorization credential and runs the statement it is handed: a
+// caller that reaches this is below the authorization layer, not outside it.
+// The credential was checked where the *query.Builder was obtained, and a
+// second check here would be a second place to forget it.
 func (p *Processor) ProcessInsertGetID(ctx context.Context, q *query.Builder, sql string, values []any, sequence string) (int64, error) {
 	connection := q.GetConnection()
 	if connection == nil {
