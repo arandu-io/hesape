@@ -71,8 +71,20 @@ Before-query callbacks are drained before the final recursive validation pass,
 including callbacks registered by other callbacks. A callback cycle fails
 closed instead of allowing compilation to begin with an unstable query tree.
 Direct mutation of exported clauses is also covered by
-`Builder.ValidateForCompilation`, which public grammar compilers invoke before
-building a statement.
+`Builder.ValidateForCompilation`, which every public compiler of a complete
+statement invokes before building one.
+
+The fragment compilers do not, and are not meant to. `WhereBasic`,
+`WhereColumn`, `WhereDate`, `WhereTime`, `WhereDay`, `WhereMonth`, `WhereYear`,
+`WhereRowValues`, `CompileHaving`, `CompileBasicHaving`, `CompileHavingBit` and
+`CompileJSONLength` are handed one clause by value and spell exactly what they
+are given, which makes them the raw APIs of the grammar layer: no path through
+the builder reaches them with a clause the barrier has not already screened,
+and calling one directly with a hand-built clause is trusting that clause. A
+grammar outside this module that overrides a compiler is responsible for the
+same barrier: call `Builder.ValidateForCompilation` before building a
+statement, or `Builder.ValidateForCompilationWith` when compiling a builder
+another grammar assembled.
 
 A compiler screens against its own dialect, not against the grammar the builder
 happens to carry. Handing a builder assembled with one grammar straight to
