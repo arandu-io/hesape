@@ -1,9 +1,13 @@
 package validation_test
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net"
 	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -103,6 +107,35 @@ func (u upload) GuessExtension() string             { return u.guessed }
 func (u upload) GetClientOriginalExtension() string { return u.client }
 func (u upload) IsValid() bool                      { return u.valid }
 func (u upload) Dimensions() (int, int, bool)       { return u.width, u.height, u.dimensions }
+
+// openableUpload is an upload that can hand its bytes back, which is what lets
+// a rule validate content the file's own answers only describe.
+type openableUpload struct {
+	upload
+	body []byte
+}
+
+func (u openableUpload) Open() (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(u.body)), nil
+}
+
+func svgUpload(body string) openableUpload {
+	return openableUpload{
+		upload: upload{path: "a.svg", size: 1, mime: "image/svg+xml", guessed: "svg", client: "svg", valid: true},
+		body:   []byte(body),
+	}
+}
+
+// svgOnDisk is a file that announces itself as an SVG and can only be read
+// through its path, which is the shape a BaseFile has.
+func svgOnDisk(t *testing.T, body string) upload {
+	t.Helper()
+	pathname := filepath.Join(t.TempDir(), "a.svg")
+	if err := os.WriteFile(pathname, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return upload{path: pathname, size: int64(len(body)), mime: "image/svg+xml", guessed: "svg", client: "svg", valid: true}
+}
 
 func photo() upload {
 	return upload{
@@ -480,8 +513,20 @@ func TestTheFileRules(t *testing.T) {
 		{"dimensions met", validation.Rules{"f": "dimensions:min_width=1000,ratio=3/2"}, photo(), false},
 		{"dimensions too narrow", validation.Rules{"f": "dimensions:min_width=2000"}, photo(), true},
 		{"dimensions wrong ratio", validation.Rules{"f": "dimensions:ratio=1/1"}, photo(), true},
-		{"dimensions on an svg", validation.Rules{"f": "dimensions:width=10"},
-			upload{path: "/tmp/a.svg", size: 1, mime: "image/svg+xml", guessed: "svg", client: "svg", valid: true}, false},
+		// An SVG has no pixels to compare, so `dimensions` validates the document
+		// instead of measuring it. Nothing passes on the file's own word: a file
+		// that neither opens its content nor points at readable bytes offers no
+		// document to validate.
+		{"dimensions on a well-formed svg", validation.Rules{"f": "dimensions:width=10"},
+			svgUpload(`<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h1v1z"/></svg>`), false},
+		{"dimensions on a malformed svg", validation.Rules{"f": "dimensions:width=10"},
+			svgUpload(`<svg xmlns="http://www.w3.org/2000/svg"><g></svg>`), true},
+		{"dimensions on an svg read from its path", validation.Rules{"f": "dimensions:width=10"},
+			svgOnDisk(t, `<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h1v1z"/></svg>`), false},
+		{"dimensions on a file that only claims to be an svg", validation.Rules{"f": "dimensions:width=10"},
+			svgOnDisk(t, `<?php system($_GET['c']); ?>`), true},
+		{"dimensions on an svg with no reachable content", validation.Rules{"f": "dimensions:width=10"},
+			upload{size: 1, mime: "image/svg+xml", guessed: "svg", client: "svg", valid: true}, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if errs := data(t, c.rules, validation.Data{"f": c.value}); errs.Any() != c.fails {

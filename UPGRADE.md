@@ -51,6 +51,13 @@ bounded frame count and cumulative pixel budget. BMP and WebP can be identified
 by MIME, but fail the `image` rule until an audited full decoder is available.
 SVG remains opt-in with `image:allow_svg` and must be a well-formed document.
 
+The `dimensions` rule no longer takes a file's word for it. An SVG has no pixels
+to compare, so the rule validates the document instead of measuring it, and it
+now reads the bytes to do so: from the file's opener when it has one, from its
+real path otherwise. A `validation.File` that announces `image/svg+xml` while
+offering neither now fails where it used to pass. Types this module publishes
+are unaffected, because every one of them exposes an opener or a readable path.
+
 `filesystem.Disk.PutFile` now derives its generated suffix from detected
 content. An upload whose content cannot be classified is refused instead of
 falling back to its name. Mail attachments whose server-side MIME is unknown

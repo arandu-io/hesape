@@ -30,6 +30,26 @@ func imageDimensions(f File) (width, height int, ok bool) {
 	return filetype.Image(func() (io.ReadCloser, error) { return os.Open(path) }, false)
 }
 
+// validSVGDocument reports whether the file's own bytes are one well-formed SVG
+// document.
+//
+// It never takes the file's word for it. Content is read from the opener when
+// there is one and from the path otherwise, and a file that offers neither has
+// nothing to validate -- which is a refusal, because a rule that cannot examine
+// what it was handed has not checked anything.
+func validSVGDocument(f File) bool {
+	if opener, opensContent := f.(contentOpener); opensContent {
+		_, _, ok := filetype.Image(opener.Open, true)
+		return ok
+	}
+	path := f.GetRealPath()
+	if path == "" {
+		return false
+	}
+	_, _, ok := filetype.Image(func() (io.ReadCloser, error) { return os.Open(path) }, true)
+	return ok
+}
+
 func validImage(f File, allowSVG bool) bool {
 	if d, isDimensioner := f.(Dimensioner); isDimensioner {
 		_, _, valid := d.Dimensions()
