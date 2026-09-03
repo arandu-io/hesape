@@ -40,10 +40,16 @@ PNG named `photo.php` passes `mimes:png`, while PHP or text named `photo.png`
 does not.
 
 PNG, JPEG and GIF must decode completely and stay within fixed byte and pixel
-budgets. Animated GIFs also have a bounded frame count and cumulative pixel
-budget. BMP and WebP can be identified by MIME, but fail the `image` rule until
-an audited full decoder is available. SVG remains opt-in with
-`image:allow_svg` and must be a well-formed document.
+budgets, and the content has to end where the image ends. A file that appends
+anything to a complete image is classified as `application/octet-stream`, so it
+fails `image`, `mimes:png` and `mimetypes:image/png` instead of being stored
+under an image extension. PNG and JPEG tolerate at most 64 trailing bytes when
+every one of them is null or whitespace, because encoders that align a file to
+a small boundary leave exactly that; GIF, BMP and WebP declare their own length
+or trailer and are still required to end on it. Animated GIFs also have a
+bounded frame count and cumulative pixel budget. BMP and WebP can be identified
+by MIME, but fail the `image` rule until an audited full decoder is available.
+SVG remains opt-in with `image:allow_svg` and must be a well-formed document.
 
 `filesystem.Disk.PutFile` now derives its generated suffix from detected
 content. An upload whose content cannot be classified is refused instead of
