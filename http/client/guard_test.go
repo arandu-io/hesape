@@ -3,12 +3,14 @@ package client
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 )
 
 // loopbackHost is the host httptest listens on, and the one a test has to name
@@ -291,5 +293,109 @@ func TestAnAddressThatAnsweredPublicIsStillRefusedWhenItIsDialedPrivate(t *testi
 	err := refuseInternalAddress(ctx, "tcp", "127.0.0.1:443", nil)
 	if !strings.Contains(err.Error(), "rebinding.example") || !strings.Contains(err.Error(), "127.0.0.1") {
 		t.Errorf("the refusal names neither the host asked for nor the address it resolved to: %v", err)
+	}
+}
+
+// TestAClientFromAFactoryHoldingItsOwnTransportKeepsTheCallersReach fixes the
+// boundary of the guard, because the guard used to be documented as having
+// none.
+//
+// The refusal of an address inside the network is on the dialer, so it travels
+// with the transport. A factory built on a client of its own answers with that
+// client's transport, and a request on it reaches whatever that transport's
+// dialer reaches -- here, a server on loopback. Nothing about this is a bug to
+// fix by moving the check onto the URL: an address checked before it is dialed
+// is not the address dialed.
+func TestAClientFromAFactoryHoldingItsOwnTransportKeepsTheCallersReach(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	factory := NewFactory(&http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()})
+
+	resp, err := factory.Client().Get(server.URL)
+	if err != nil {
+		t.Fatalf("the caller's own transport did not reach %s: %v", server.URL, err)
+	}
+	resp.Body.Close()
+}
+
+// TestAClientFromADefaultFactoryRefusesTheNetwork is the other side of that
+// boundary: the factory that built the transport carries the dialer that
+// refuses, so the promise holds where it is made.
+func TestAClientFromADefaultFactoryRefusesTheNetwork(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	for name, factory := range map[string]*Factory{
+		"a nil client":                          NewFactory(nil),
+		"a zero-value factory":                  {},
+		"a client with no transport of its own": NewFactory(&http.Client{}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp, err := factory.Client().Get(server.URL)
+			if err == nil {
+				resp.Body.Close()
+			}
+			if !errors.Is(err, ErrInternalAddress) {
+				t.Fatalf("a request to %s was not refused: %v", server.URL, err)
+			}
+		})
+	}
+}
+
+// TestTheGuardOnACallersTransportStillRefusesTheScheme is the half of the guard
+// that does not depend on the dialer, and so holds on any transport. It is in
+// the round tripper the factory wraps around whatever it was given.
+func TestTheGuardOnACallersTransportStillRefusesTheScheme(t *testing.T) {
+	factory := NewFactory(&http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()})
+
+	_, err := factory.Client().Get("ftp://example.test/file")
+	if !errors.Is(err, ErrUnsupportedScheme) {
+		t.Fatalf("the scheme was not refused: %v", err)
+	}
+}
+
+// TestTheGuardOnACallersTransportStillCapsTheBody is the other half that holds
+// on any transport, for the same reason.
+func TestTheGuardOnACallersTransportStillCapsTheBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(make([]byte, 4096))
+	}))
+	defer server.Close()
+
+	factory := NewFactory(&http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()}).
+		MaxResponseBytes(16)
+
+	resp, err := factory.Client().Get(server.URL)
+	if err != nil {
+		t.Fatalf("the request failed before the body could be read: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if _, err := io.ReadAll(resp.Body); !errors.Is(err, ErrResponseTooLarge) {
+		t.Fatalf("reading the body = %v, want ErrResponseTooLarge", err)
+	}
+}
+
+// TestTheClientAFactoryHandsOutIsACopy is the change no signature reports. The
+// method returned the factory's own client, so a caller could set a timeout on
+// it and change every request the factory sends; it returns a copy now, and
+// that caller changes nothing at all.
+func TestTheClientAFactoryHandsOutIsACopy(t *testing.T) {
+	factory := NewFactory(nil)
+
+	factory.Client().Timeout = time.Minute
+
+	if got := factory.CreatePendingRequest().BuildClient().Timeout; got == time.Minute {
+		t.Fatal("mutating the client handed out changed the one the factory sends on")
+	}
+
+	factory.GlobalOptions(func(c *http.Client) { c.Timeout = time.Minute })
+	if got := factory.CreatePendingRequest().BuildClient().Timeout; got != time.Minute {
+		t.Fatalf("GlobalOptions left the timeout at %v, and it is the way to change it", got)
 	}
 }

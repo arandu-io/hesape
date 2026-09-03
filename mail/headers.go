@@ -45,9 +45,9 @@ func (h Headers) ReferencesString() string {
 // ErrHeaderInjection is what every refusal from a header check wraps, so a
 // caller can tell a smuggled line apart from a missing recipient with errors.Is
 // rather than by reading the message.
-var ErrHeaderInjection = errors.New("mail: a header value carries a line break")
+var ErrHeaderInjection = errors.New("mail: a header value carries a character that ends it early")
 
-// HeaderError is the refusal: which field carried the line break, and what it
+// HeaderError is the refusal: which field carried the character, and what it
 // held.
 //
 // The field is a separate string because the message this ends up in is a log
@@ -56,8 +56,8 @@ type HeaderError struct {
 	// Field is the name of the header, or of the envelope field, that is unsafe.
 	Field string
 
-	// Value is what it held, with the line breaks made visible so a log line
-	// stays one line.
+	// Value is what it held, quoted so that a line break in it stays inside one
+	// log line.
 	Value string
 }
 
@@ -112,6 +112,29 @@ func (h Headers) Check() error {
 // value.
 func checkHeaderValue(field, value string) error {
 	if !strings.ContainsAny(value, "\r\n") {
+		return nil
+	}
+	return &HeaderError{Field: field, Value: value}
+}
+
+// checkHeaderParameter refuses one field written into a header line that
+// carries quoted parameters, which is the line an attachment's name and content
+// type share.
+//
+// It refuses two characters more than [checkHeaderValue] does, because two more
+// end a value early here. A double quote closes the parameter it sits inside,
+// so a name holding one is a name followed by whatever the sender wrote after
+// it -- reason enough on its own, with no line break needed. A backslash
+// escapes the character after it, so a name ending in one escapes the closing
+// quote and swallows the rest of the line.
+//
+// Neither is in a filename anybody meant to send: a quote and a backslash are
+// already refused by the filesystems these names come from.
+func checkHeaderParameter(field, value string) error {
+	if err := checkHeaderValue(field, value); err != nil {
+		return err
+	}
+	if !strings.ContainsAny(value, `"\`) {
 		return nil
 	}
 	return &HeaderError{Field: field, Value: value}

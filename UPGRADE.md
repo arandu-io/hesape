@@ -26,6 +26,67 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+### `client.Factory.Client` returns a copy, and says what its guard does not cover
+
+`Factory.Client()` used to return the factory's own `*http.Client`. It now
+returns a copy, wrapped in the factory's guard. The signature is unchanged, so
+nothing stops compiling, and that is the reason this entry exists: code that
+mutated the returned client to change every request the factory sends —
+`f.Client().Timeout = time.Minute`, or assigning `.Transport` — now mutates a
+copy and changes nothing, silently. Use `Factory.GlobalOptions` for that:
+
+```go
+factory.GlobalOptions(func(c *http.Client) { c.Timeout = time.Minute })
+```
+
+Its documentation also claimed the returned client refuses a destination inside
+the network on every hop, without a condition. That refusal is on the dialer,
+so it travels with the transport: a `Factory` built on a client that brought its
+own transport answers with a client that reaches whatever that transport's
+dialer reaches. The scheme refusal and the response cap are in the wrapper and
+hold on any transport. `NewFactory` always said this; `Client` did not.
+
+Nothing changed in behaviour here. Pass a nil client to `NewFactory`, or leave
+the client's `Transport` nil, to get the transport that carries the address
+check.
+
+### `mail.Render` returns an error, and refuses an attachment name that is a header
+
+`mail.Render` was `func(Message) string` and is now
+`func(Message) (string, error)`. A transport that renders a message itself
+reads the error and returns it:
+
+```go
+rendered, err := mail.Render(m)
+if err != nil {
+    return mail.SentMessage{}, err
+}
+```
+
+It refuses because not every message has a rendering. An attachment's name is
+written into three header lines and its content type into a fourth, and neither
+was checked: a name carrying `\r\n` became a header of its own, so a file named
+`invoice.pdf"\r\nBcc: attacker@example.test\r\nX: "` sent a blind copy the
+sender never wrote. Attachment names usually come from uploads.
+
+The name, the content type and the content id now go through the same refusal
+as every other header value, and the name and content type through a stricter
+one: a double quote closes the `filename="..."` parameter it sits in and a
+backslash escapes the closing quote, so both are refused even with no line
+break in the value. The refusal is a `*mail.HeaderError` wrapping
+`mail.ErrHeaderInjection`, the same as the envelope and header checks return,
+and it lands on `Mailer.Send` before a transport is opened as well as inside
+`Render` for a caller that renders a message nothing validated.
+
+A name with a space, a comma or an accent in it is unaffected. A name with a
+quote or a backslash in it is refused rather than rewritten, for the reason
+already on `Headers.Check`: a value that had to be rewritten to be safe is not
+the value the caller meant.
+
+`mail.ErrHeaderInjection`'s message changed from "a header value carries a line
+break" to "a header value carries a character that ends it early", because it
+now wraps both. Match it with `errors.Is`, not on the text.
+
 ### Upload validation trusts bytes, not client metadata
 
 `mimes`, `mimetypes` and `image` now classify uploaded files from bounded

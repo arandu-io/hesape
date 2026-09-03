@@ -29,6 +29,20 @@ import (
 // A line consisting of a single dot ends the message: a body containing one is
 // a body that is silently truncated, and the transfer encoding removes that too.
 //
+// # The error
+//
+// Not every message has a rendering. A header value carrying a carriage return
+// or a line feed is a second header line written by whoever supplied the value,
+// and an attachment name carrying a double quote or a backslash is a filename
+// followed by whatever the sender wrote after it. Render refuses such a message
+// with a [*HeaderError] naming the field, and returns no bytes at all -- the
+// alternative is a caller that writes a partial message to a socket.
+//
+// The refusal is here and not only on the sending path because this function is
+// exported: a caller holding a message nothing validated is a caller this
+// package cannot see, and a guarantee that depends on being called in the right
+// order is not one.
+//
 // # The nesting
 //
 // An attachment wraps everything in multipart/mixed, an embedded image wraps
@@ -37,7 +51,11 @@ import (
 // the related part shows it as a second attachment instead of in the message.
 //
 // Render is Mailable::render.
-func Render(m Message) string {
+func Render(m Message) (string, error) {
+	if err := checkMessageHeaders(&m); err != nil {
+		return "", err
+	}
+
 	var b strings.Builder
 
 	header(&b, "From", m.From.String())
@@ -76,12 +94,14 @@ func Render(m Message) string {
 
 	header(&b, "MIME-Version", "1.0")
 
-	body(&b, m)
-	return b.String()
+	if err := body(&b, m); err != nil {
+		return "", err
+	}
+	return b.String(), nil
 }
 
 // body writes the content headers and the parts, from the outside in.
-func body(b *strings.Builder, m Message) {
+func body(b *strings.Builder, m Message) error {
 	attachments := m.parts()
 
 	if len(attachments) > 0 {
@@ -91,26 +111,30 @@ func body(b *strings.Builder, m Message) {
 
 		b.WriteString("--" + boundary + "\r\n")
 		var inner strings.Builder
-		related(&inner, m)
+		if err := related(&inner, m); err != nil {
+			return err
+		}
 		b.WriteString(inner.String())
 		b.WriteString("\r\n")
 
 		for _, part := range attachments {
-			attachmentPart(b, boundary, part, false)
+			if err := attachmentPart(b, boundary, part, false); err != nil {
+				return err
+			}
 		}
 		b.WriteString("--" + boundary + "--\r\n")
-		return
+		return nil
 	}
 
-	related(b, m)
+	return related(b, m)
 }
 
 // related wraps the body in multipart/related when something is embedded in it,
 // so that a client shows the image inside the message rather than beside it.
-func related(b *strings.Builder, m Message) {
+func related(b *strings.Builder, m Message) error {
 	if len(m.embeds) == 0 {
 		alternative(b, m)
-		return
+		return nil
 	}
 
 	boundary := newBoundary()
@@ -124,9 +148,12 @@ func related(b *strings.Builder, m Message) {
 	b.WriteString("\r\n")
 
 	for _, part := range m.embeds {
-		attachmentPart(b, boundary, part, true)
+		if err := attachmentPart(b, boundary, part, true); err != nil {
+			return err
+		}
 	}
 	b.WriteString("--" + boundary + "--\r\n")
+	return nil
 }
 
 // alternative writes the readable body: both parts when both exist, and one
@@ -158,13 +185,27 @@ func alternative(b *strings.Builder, m Message) {
 	}
 }
 
-func attachmentPart(b *strings.Builder, boundary string, p embedded, inline bool) {
-	b.WriteString("--" + boundary + "\r\n")
-
+// attachmentPart writes one part and the four headers it goes under.
+//
+// It checks the name, the content type and the content id even though the
+// message was checked before anything rendered, because these three are what a
+// part is resolved to and not what a caller set: a disk names the file it holds
+// and guesses its content type, and neither answer passed through the earlier
+// check. Refusing here costs one comparison per part and closes the difference.
+func attachmentPart(b *strings.Builder, boundary string, p embedded, inline bool) error {
 	contentType := p.Mime
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
+	cid := ""
+	if inline {
+		cid = p.CID
+	}
+	if err := checkPartHeaders(p.Name, contentType, cid); err != nil {
+		return err
+	}
+
+	b.WriteString("--" + boundary + "\r\n")
 	header(b, "Content-Type", contentType+`; name="`+p.Name+`"`)
 	header(b, "Content-Transfer-Encoding", "base64")
 	if inline {
@@ -176,6 +217,7 @@ func attachmentPart(b *strings.Builder, boundary string, p embedded, inline bool
 	b.WriteString("\r\n")
 	b.WriteString(base64Lines(p.Data))
 	b.WriteString("\r\n")
+	return nil
 }
 
 // base64Lines folds base64 at 76 characters, which is what the transfer

@@ -1,6 +1,7 @@
 package mail
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -161,5 +162,67 @@ func TestStripUnsafeLinksTakesEveryScheme(t *testing.T) {
 				t.Errorf("%q survived in %q", scheme, got)
 			}
 		}
+	}
+}
+
+// TestAnEmbeddedPartWithASmuggledContentIDIsRefused reaches a field a caller
+// cannot set today: addEmbed assigns every content id itself, so there is no
+// exported way to put a line break in one.
+//
+// It is tested from inside the package for exactly that reason. The check is
+// what keeps the field safe once something else is allowed to name one, and a
+// check with no test is a check the next change deletes.
+func TestAnEmbeddedPartWithASmuggledContentIDIsRefused(t *testing.T) {
+	m := Message{
+		Envelope: Envelope{
+			From:    Address{Address: "app@example.test"},
+			To:      []Address{{Address: "you@example.test"}},
+			Subject: "Invoice",
+		},
+		HTML: `<img src="cid:logo@arandu">`,
+	}
+	m.embeds = []embedded{{
+		CID:  "logo@arandu>\r\nBcc: attacker@example.test\r\nX: <x",
+		Name: "logo.png",
+		Mime: "image/png",
+		Data: []byte("data"),
+	}}
+
+	out, err := Render(m)
+
+	if strings.Contains(out, "Bcc: attacker@example.test") {
+		t.Errorf("the content id wrote a header of its own:\n%s", out)
+	}
+	var refusal *HeaderError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("Render = %v, want a *HeaderError", err)
+	}
+	if refusal.Field != "Content-ID" {
+		t.Errorf("the refusal names %q, want Content-ID", refusal.Field)
+	}
+}
+
+// TestAnEmbeddedPartStillRenders is the other half: an embed the package built
+// itself has to keep reaching the message.
+func TestAnEmbeddedPartStillRenders(t *testing.T) {
+	m := Message{
+		Envelope: Envelope{
+			From:    Address{Address: "app@example.test"},
+			To:      []Address{{Address: "you@example.test"}},
+			Subject: "Invoice",
+		},
+	}
+	cid := m.EmbedData([]byte("data"), "logo.png", "image/png")
+	m.HTML = `<img src="` + cid + `">`
+
+	out, err := Render(m)
+	if err != nil {
+		t.Fatalf("Render = %v, want nil", err)
+	}
+	if !strings.Contains(out, `Content-Disposition: inline; filename="logo.png"`) {
+		t.Errorf("the embedded part did not render:\n%s", out)
+	}
+	if !strings.Contains(out, "Content-ID: <"+strings.TrimPrefix(cid, "cid:")+">") {
+		t.Errorf("the content id did not render:\n%s", out)
 	}
 }

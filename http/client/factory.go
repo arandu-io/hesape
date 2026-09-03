@@ -426,14 +426,29 @@ func (f *Factory) GlobalOptions(fn func(*http.Client)) *Factory {
 }
 
 // Client returns an *http.Client carrying this factory's guard: it refuses a
-// scheme that does not leave, refuses a destination inside the network on every
-// hop a redirect adds unless [Factory.AllowInternalHosts] named it, and caps the
-// body it reads back.
+// scheme that does not leave and caps the body it reads back, on every hop a
+// redirect adds.
 //
 // It is what a package that holds a client of its own asks for, where the
 // request building of a [PendingRequest] is not what is wanted and the refusal
-// is. A zero-value factory, or one built with a nil client, answers with the
-// defaults.
+// is.
+//
+// # Where the refusal of an internal destination comes from
+//
+// Not from the wrapper, and this is the line to know before relying on one.
+// That refusal is on the dialer, between resolving a name and connecting to it,
+// because only there is the address checked the address connected to: a name
+// answering with a public address when it is checked and a loopback one when it
+// is dialed passes every check made earlier.
+//
+// So it travels with the transport rather than with the factory. A factory
+// built with a nil client, a zero-value factory, and one given a client with no
+// transport of its own all answer with the transport this package builds, and
+// their clients refuse a destination inside the network unless
+// [Factory.AllowInternalHosts] named it. A factory built on a client that
+// brought its own transport answers with that transport, and its client reaches
+// whatever that transport's dialer reaches -- while still refusing the scheme
+// and still capping the body, which are in the wrapper.
 //
 // The client is a copy, so changing its timeout or its transport changes this
 // caller's client and nobody else's. Use [Factory.GlobalOptions] to change the

@@ -696,7 +696,7 @@ func TestMailablesIsTheSameTypesUnderASecondName(t *testing.T) {
 // Blind copy is on the envelope, in RCPT TO. Writing it into the message is how
 // every recipient learns who else was copied, and it is one line to get wrong.
 func TestBccIsNotAHeader(t *testing.T) {
-	rendered := mail.Render(mail.Message{
+	rendered := mustRender(t, mail.Message{
 		Envelope: mail.Envelope{
 			From:    mail.Address{Address: "app@example.test"},
 			To:      []mail.Address{{Address: "you@example.test"}},
@@ -717,7 +717,7 @@ func TestBccIsNotAHeader(t *testing.T) {
 // TestANonASCIISubjectIsEncoded: "Você tem uma fatura" is the first subject
 // anybody writes here, and a raw one arrives as mojibake.
 func TestANonASCIISubjectIsEncoded(t *testing.T) {
-	rendered := mail.Render(mail.Message{
+	rendered := mustRender(t, mail.Message{
 		Envelope: mail.Envelope{
 			From:    mail.Address{Address: "app@example.test"},
 			To:      []mail.Address{{Address: "you@example.test"}},
@@ -737,7 +737,7 @@ func TestANonASCIISubjectIsEncoded(t *testing.T) {
 // TestBothPartsAreSentWhenBothExist, in the order the standard asks for: least
 // preferred first, so a client picks the last one it understands.
 func TestBothPartsAreSentWhenBothExist(t *testing.T) {
-	rendered := mail.Render(mail.Message{
+	rendered := mustRender(t, mail.Message{
 		Envelope: mail.Envelope{
 			From:    mail.Address{Address: "app@example.test"},
 			To:      []mail.Address{{Address: "you@example.test"}},
@@ -773,7 +773,7 @@ func TestAnAttachmentIsCarriedByTheRenderedMessage(t *testing.T) {
 	}
 	msg.AttachData([]byte("%PDF-1.7"), "invoice.pdf", mail.AttachOptions{Mime: "application/pdf"})
 
-	rendered := mail.Render(msg)
+	rendered := mustRender(t, msg)
 	if !strings.Contains(rendered, "multipart/mixed") {
 		t.Fatalf("the message is not multipart/mixed:\n%s", rendered)
 	}
@@ -788,7 +788,7 @@ func TestAnAttachmentIsCarriedByTheRenderedMessage(t *testing.T) {
 // TestALongLineIsFolded. A body line over 998 bytes is refused by the protocol,
 // and an HTML document is one long line often enough.
 func TestALongLineIsFolded(t *testing.T) {
-	rendered := mail.Render(mail.Message{
+	rendered := mustRender(t, mail.Message{
 		Envelope: mail.Envelope{
 			From:    mail.Address{Address: "app@example.test"},
 			To:      []mail.Address{{Address: "you@example.test"}},

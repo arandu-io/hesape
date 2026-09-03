@@ -30,6 +30,13 @@
 // of its own names it with Factory.AllowInternalHosts, and one that reads
 // larger answers raises Factory.MaxResponseBytes.
 //
+// The address check is on the dialer, so it belongs to the transport rather
+// than to the factory: a Factory built on a client that brought its own
+// transport sends requests over that transport's dialer and reaches whatever it
+// reaches. The deadline, the scheme and the bounded body hold either way.
+// Factory.Client says why the check is there and not somewhere it could be
+// added to any transport.
+//
 // # Why not a third-party HTTP client library
 //
 // Go's net/http is the standard, and the testing surface -- Fake,
