@@ -257,3 +257,133 @@ jobs:
             echo "$direct"
             exit 1
           fi
+
+  # The six modules under this one, compiled against the tree they live in.
+  #
+  # Each of them requires a published github.com/arandu-io/hesape rather than
+  # the checkout, and that is deliberate -- it is what makes the job build what
+  # a consumer downloads, and it is what stopped seven releases of drift under a
+  # replace directive. The cost is the other direction: a change in the core is
+  # compiled against them by nothing until it has been released, so a submodule
+  # can be broken for a whole release cycle without a red build. An addition to
+  # an interface the core declares and only a submodule implements leaves
+  # `go build ./...` at the root green and breaks every consumer of that
+  # submodule.
+  #
+  # So both legs run, per module:
+  #
+  #   - pinned: what a consumer gets today, which is what the module's own
+  #     workflow already tests against a real server. Kept here as a build, so
+  #     that a manifest naming a release that cannot resolve fails in the same
+  #     job as the leg below rather than in a different workflow.
+  #   - working tree: a go.work written at run time, never committed. A
+  #     `replace` in a manifest would do the same thing and would ship to
+  #     whoever downloads the module, which is the thing being undone.
+  #
+  # The service-backed suites stay where they are, in database-connectors.yml
+  # and resp-connectors.yml. This job is about compilation against the core, and
+  # a second copy of those jobs would be a second place for them to disagree.
+  nested-modules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The pin check below reads the tags. A default checkout fetches none,
+          # which would make it find no release and pass.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+
+      # A manifest pinned to something older than the newest release is a
+      # manifest whose module is being tested against a core nobody runs.
+      - name: each nested manifest names the latest release
+        run: |
+          set -euo pipefail
+          latest=$(git tag --list 'v*' --sort=-v:refname | head -1)
+          if [ -z "$latest" ]; then
+            echo "no release yet, so there is no pin to check"
+            exit 0
+          fi
+          failed=0
+          for gomod in $(git ls-files '*/go.mod' | sort); do
+            # go.mod has two shapes -- a require block with indented lines,
+            # and one require line per dependency -- and a pattern that reads
+            # only the first finds nothing in the second, reports an empty pin
+            # and fails a manifest that is correct. filesystem/s3 is written the
+            # second way and proved it.
+            pinned=$(grep -E '^(require[[:space:]]+)?[[:space:]]*github\.com/arandu-io/hesape v' "$gomod" \
+              | sed -E 's/.*hesape (v[^[:space:]]+).*/\1/')
+            if [ -z "$pinned" ]; then
+              echo "$gomod does not require github.com/arandu-io/hesape at all"
+              failed=1
+              continue
+            fi
+            if [ "$pinned" != "$latest" ]; then
+              echo "$gomod pins $pinned and the latest release is $latest"
+              failed=1
+            else
+              echo "$gomod pins $pinned"
+            fi
+          done
+          exit "$failed"
+
+      # No replace may be committed: it makes the manifest describe a build
+      # nobody outside this checkout can reproduce.
+      - name: no nested manifest carries a replace
+        run: |
+          set -euo pipefail
+          found=$(git ls-files '*/go.mod' | xargs grep -l '^replace' || true)
+          if [ -n "$found" ]; then
+            echo "a replace directive is committed in:"
+            echo "$found"
+            exit 1
+          fi
+
+      - name: build and test each nested module, pinned and against the tree
+        run: |
+          set -euo pipefail
+          root=$(pwd)
+          work=$(mktemp -d)
+          failed=0
+
+          for gomod in $(git ls-files '*/go.mod' | sort); do
+            dir=${gomod%/go.mod}
+            echo "=== $dir"
+
+            if ! (cd "$dir" && GOWORK=off go build ./...); then
+              echo "  $dir does not build against the release it pins"
+              failed=1
+              continue
+            fi
+            echo "  pinned: builds"
+
+            # Absolute paths, because a use directive is resolved against the
+            # directory the go.work is in and this one is outside the checkout.
+            printf 'go 1.26\n\nuse (\n\t%s\n\t%s\n)\n' "$root" "$root/$dir" > "$work/go.work"
+
+            if ! (cd "$dir" && GOWORK="$work/go.work" go build ./...); then
+              echo "  $dir does not build against the core in this tree"
+              failed=1
+              continue
+            fi
+            if ! (cd "$dir" && GOWORK="$work/go.work" go vet ./...); then
+              echo "  $dir does not vet against the core in this tree"
+              failed=1
+              continue
+            fi
+            # The tests are compiled and the ones that need no server run. The
+            # ones that do skip here and are run for real, against a server, in
+            # the module's own workflow -- what this leg is for is the compile.
+            if ! (cd "$dir" && GOWORK="$work/go.work" go test -race -count=1 ./...); then
+              echo "  $dir fails its tests against the core in this tree"
+              failed=1
+              continue
+            fi
+            echo "  working tree: builds, vets and tests"
+          done
+
+          # Every module is reported before the step fails, so one run says
+          # which of the six broke rather than only the first.
+          exit "$failed"
