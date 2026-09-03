@@ -215,8 +215,7 @@ func TestAJobInFlightIsSettledAfterTheShutdownSignal(t *testing.T) {
 
 	running, finish := make(chan struct{}), make(chan struct{})
 	w := queue.NewWorker(q, queue.WorkerOptions{
-		Sleep:         time.Millisecond,
-		ShutdownGrace: time.Minute,
+		Sleep: time.Millisecond,
 	})
 	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, *jobs.Job) error {
 		close(running)
@@ -252,8 +251,7 @@ func TestAJobThatFailsDuringTheShutdownIsPutBack(t *testing.T) {
 
 	running, finish := make(chan struct{}), make(chan struct{})
 	w := queue.NewWorker(q, queue.WorkerOptions{
-		Sleep:         time.Millisecond,
-		ShutdownGrace: time.Minute,
+		Sleep: time.Millisecond,
 	})
 	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, *jobs.Job) error {
 		close(running)
@@ -290,9 +288,8 @@ func TestTheWorkerReservesNothingAfterTheShutdownSignal(t *testing.T) {
 
 	running, finish := make(chan struct{}), make(chan struct{})
 	w := queue.NewWorker(q, queue.WorkerOptions{
-		Concurrency:   1,
-		Sleep:         time.Millisecond,
-		ShutdownGrace: time.Minute,
+		Concurrency: 1,
+		Sleep:       time.Millisecond,
 	})
 	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, *jobs.Job) error {
 		close(running)
@@ -340,9 +337,8 @@ func TestABatchIsNotAbandonedWhenTheSignalLandsAfterThePop(t *testing.T) {
 
 	var ran atomic.Int32
 	w := queue.NewWorker(q, queue.WorkerOptions{
-		Concurrency:   2,
-		Sleep:         time.Millisecond,
-		ShutdownGrace: time.Minute,
+		Concurrency: 2,
+		Sleep:       time.Millisecond,
 	})
 	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, *jobs.Job) error {
 		ran.Add(1)
@@ -361,28 +357,33 @@ func TestABatchIsNotAbandonedWhenTheSignalLandsAfterThePop(t *testing.T) {
 	}
 }
 
-// TestTheDrainDeadlineEndsAJobThatOutlivesIt: the drain is bounded, and running
-// out of it is not the same as losing the job.
+// TestTheJobsOwnTimeoutEndsAHandlerThatIgnoresTheShutdown: what bounds a
+// shutdown is the timeout the job already carries, and nothing else.
 //
-// A handler that keeps working past the grace is cancelled the way the timeout
-// cancels one, and its failure settles the job on a context the shutdown does
-// not reach -- so the process exits and the work is back on the queue.
-func TestTheDrainDeadlineEndsAJobThatOutlivesIt(t *testing.T) {
-	const grace = 50 * time.Millisecond
-
+// A handler that never returns on its own would hold the process open forever,
+// and the ceiling on that is the job's timeout -- the same one that ends a hung
+// handler with nobody shutting anything down. The shutdown ends nothing: it
+// stops the worker reserving more.
+//
+// Which of the two ended it is readable from the error the handler saw.
+// context.DeadlineExceeded is the job's timeout; context.Canceled would be the
+// shutdown reaching in and cutting work the store had already handed over.
+func TestTheJobsOwnTimeoutEndsAHandlerThatIgnoresTheShutdown(t *testing.T) {
 	j := newJob(t, "invoice.send")
+	// The worker's own Timeout is its Lease, five minutes here, so a handler
+	// that ends in a tenth of a second ended for one reason only.
+	j.Attributes.Timeout = 100 * time.Millisecond
 	q := newStoreQueue(j)
 
 	running := make(chan struct{})
-	ended := make(chan time.Time, 1)
+	ended := make(chan error, 1)
 	w := queue.NewWorker(q, queue.WorkerOptions{
-		Sleep:         time.Millisecond,
-		ShutdownGrace: grace,
+		Sleep: time.Millisecond,
 	})
 	w.HandleFunc("invoice.send", func(ctx context.Context, _ auth.Grant, _ *jobs.Job) error {
 		close(running)
 		<-ctx.Done()
-		ended <- time.Now()
+		ended <- ctx.Err()
 		return ctx.Err()
 	})
 
@@ -391,24 +392,23 @@ func TestTheDrainDeadlineEndsAJobThatOutlivesIt(t *testing.T) {
 	stopped := runDaemon(w, ctx)
 
 	await(t, "the handler starting", running)
-	signalled := time.Now()
 	cancel()
 
-	var cancelledAt time.Time
+	var why error
 	select {
-	case cancelledAt = <-ended:
+	case why = <-ended:
 	case <-time.After(deadline):
-		t.Fatal("the handler was never cancelled, so the grace does not bound the drain")
+		t.Fatal("the handler was never ended, so nothing bounds one that ignores its context")
 	}
 	awaitStop(t, stopped)
 
-	if waited := cancelledAt.Sub(signalled); waited < grace {
-		t.Errorf("the handler was cancelled %s after the signal, before the %s grace: "+
-			"the shutdown killed it rather than draining it", waited, grace)
+	if !errors.Is(why, context.DeadlineExceeded) {
+		t.Errorf("the handler ended with %v, want the job's own timeout: "+
+			"the shutdown cut work the store had already handed over", why)
 	}
 	_, released, _ := q.settled()
 	if _, back := released[j.UUID]; !back {
-		t.Errorf("the job was not put back when the grace ran out; it is reserved until its lease expires")
+		t.Errorf("the job was not put back when its timeout ran out; it is reserved until its lease expires")
 	}
 }
 

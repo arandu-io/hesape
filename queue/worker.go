@@ -46,22 +46,13 @@ type WorkerOptions struct {
 	// It defaults to Lease so there is one number until somebody needs two, and
 	// a Timeout longer than the Lease is the misconfiguration that hands a
 	// running job to a second worker.
+	//
+	// It is also the only thing that bounds a shutdown. A job already handed
+	// over runs to the end whatever the process was asked to do meanwhile, so a
+	// handler that never returns is what would hold the process open -- and
+	// this is the number that ends it, settling the job the ordinary way
+	// instead of abandoning it under its lease.
 	Timeout time.Duration
-	// ShutdownGrace is how long a job already running gets to finish once the
-	// worker's context is cancelled. Default 30 seconds.
-	//
-	// A popped job is work the store has already handed over, and the only
-	// record that it ran is the settlement the worker has yet to write. Killing
-	// it with the process is what leaves the job reserved until its lease
-	// expires -- minutes of nothing, and then a redelivery with an attempt
-	// already spent, on every deploy. So the handler and the write that settles
-	// it run on a context the cancellation does not reach.
-	//
-	// This is what keeps that from being unbounded. It starts counting when the
-	// cancellation arrives, and when it runs out the handler's context is
-	// cancelled after all: the error settles the job the ordinary way -- put
-	// back with backoff, not lost -- and the process exits.
-	ShutdownGrace time.Duration
 	// Sleep is how long to wait before asking again when the queue was empty.
 	// Default 1 second.
 	Sleep time.Duration
@@ -129,9 +120,6 @@ func (o WorkerOptions) withDefaults() WorkerOptions {
 	if o.Timeout <= 0 {
 		o.Timeout = o.Lease
 	}
-	if o.ShutdownGrace <= 0 {
-		o.ShutdownGrace = defaultShutdownGrace
-	}
 	if o.Sleep <= 0 {
 		o.Sleep = time.Second
 	}
@@ -144,14 +132,6 @@ func (o WorkerOptions) withDefaults() WorkerOptions {
 	return o
 }
 
-// defaultShutdownGrace is how long a running job gets to finish once the worker
-// was asked to stop.
-//
-// Thirty seconds, because that is the window a container runtime leaves between
-// the stop signal and the kill that follows it. A grace longer than the one the
-// platform allows is a number that never applies.
-const defaultShutdownGrace = 30 * time.Second
-
 // settleTimeout is how long the write that settles a job -- the delete, the
 // release or the park -- is given.
 //
@@ -161,45 +141,6 @@ const defaultShutdownGrace = 30 * time.Second
 // redelivery of a job that is still in the queue, which is at-least-once
 // behaving as documented.
 const settleTimeout = 5 * time.Second
-
-// draining returns the context a running job uses, and the function that ends
-// it.
-//
-// The context is detached from ctx and cancelled grace after ctx is, and that
-// is the whole difference between a shutdown that drains and one that abandons.
-// The handler keeps running past the signal, and the settlement after it still
-// has a live context to write on.
-//
-// Cancelled eventually, though: a handler that outlives the grace is stopped
-// the way the timeout stops one, so its failure settles the job instead of the
-// process exiting with the job still reserved.
-func draining(ctx context.Context, grace time.Duration) (context.Context, context.CancelFunc) {
-	drain, cancel := context.WithCancel(context.WithoutCancel(ctx))
-
-	// The watch ends with the job, so nothing outlives it: a timer started here
-	// and never stopped would keep firing after a worker that ran millions of
-	// jobs had long finished each of them.
-	finished := make(chan struct{})
-	go func() {
-		select {
-		case <-finished:
-		case <-ctx.Done():
-			timer := time.NewTimer(grace)
-			defer timer.Stop()
-			select {
-			case <-finished:
-			case <-timer.C:
-				cancel()
-			}
-		}
-	}()
-
-	var once sync.Once
-	return drain, func() {
-		once.Do(func() { close(finished) })
-		cancel()
-	}
-}
 
 // settling returns the context a job is settled on, and the function that ends
 // it.
@@ -518,8 +459,8 @@ func (w *Worker) Daemon(ctx context.Context) (int, error) {
 		// between the pop and this loop. They are all reserved already, for the
 		// same lease, and breaking out here left the rest of the batch invisible
 		// to every worker until that lease expired -- jobs nobody was running
-		// and nobody could see. Process is what bounds them now: it drains what
-		// it started and stops taking longer than the grace.
+		// and nobody could see. Each of them is bounded by its own timeout, so
+		// finishing the batch is not an unbounded wait.
 		var wg sync.WaitGroup
 		for _, j := range popped {
 			wg.Add(1)
@@ -578,11 +519,18 @@ func (w *Worker) Process(ctx context.Context, j *jobs.Job) (err error) {
 	connectionName := j.GetConnectionName()
 
 	// A job that has been handed over runs to the end whatever the process was
-	// asked to do meanwhile. See WorkerOptions.ShutdownGrace: the caller's
-	// cancellation no longer reaches the handler or the write that settles it,
-	// and the grace is what still bounds both.
-	ctx, drained := draining(ctx, w.opts.ShutdownGrace)
-	defer drained()
+	// asked to do meanwhile, so the caller's cancellation reaches neither the
+	// handler nor the write that settles it.
+	//
+	// A popped job is work the store has already hidden from every other
+	// worker, and the only record that it ran is the settlement still to be
+	// written. Killing it with the process is what leaves the job reserved
+	// until its lease expires -- minutes of nothing, and then a redelivery with
+	// an attempt already spent, on every deploy.
+	//
+	// What bounds it is the job's own timeout, applied below. A cancellation
+	// says "reserve nothing more", not "drop what is running".
+	ctx = context.WithoutCancel(ctx)
 
 	// Deferred rather than written at each return, because there are six of
 	// them and the one that forgets is a delivery nobody counted.
