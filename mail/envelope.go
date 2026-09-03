@@ -103,3 +103,62 @@ func (e Envelope) HasTag(tag string) bool {
 	}
 	return false
 }
+
+// Check refuses an envelope whose subject or addresses carry a carriage return
+// or a line feed.
+//
+// Each of these becomes a header line, so a value holding a line break is two
+// headers and the second one is whoever supplied the value's to write. It is
+// refused rather than escaped, for the reason given on [Headers.Check].
+//
+// The display name of an address and the subject are encoded on the way out and
+// would survive this, which is exactly why the check is here and not there: an
+// encoding that happens to make one field safe is not a decision anybody took
+// about that field, and it changes when the encoder does.
+func (e Envelope) Check() error {
+	if err := checkHeaderValue("Subject", e.Subject); err != nil {
+		return err
+	}
+	for _, list := range []struct {
+		field     string
+		addresses []Address
+	}{
+		{"From", []Address{e.From}},
+		{"To", e.To},
+		{"Cc", e.CC},
+		{"Bcc", e.BCC},
+		{"Reply-To", e.ReplyTo},
+	} {
+		for _, a := range list.addresses {
+			if err := checkHeaderValue(list.field, a.Address); err != nil {
+				return err
+			}
+			if err := checkHeaderValue(list.field, a.Name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// checkMessageHeaders is every header refusal a message goes through before
+// anything renders it: the envelope, the headers a mailable asked for, and the
+// two a Message carries on its own.
+//
+// One function rather than three calls at the send site, because a fourth field
+// added later has one place to be added to and not three to be remembered in.
+func checkMessageHeaders(m *Message) error {
+	if err := m.Envelope.Check(); err != nil {
+		return err
+	}
+	if err := m.Headers.Check(); err != nil {
+		return err
+	}
+	if err := checkHeaderValue("Sender", m.sender.Address); err != nil {
+		return err
+	}
+	if err := checkHeaderValue("Sender", m.sender.Name); err != nil {
+		return err
+	}
+	return checkHeaderValue("Return-Path", m.returnPath)
+}
