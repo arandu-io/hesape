@@ -101,6 +101,10 @@ MySQL. A word operator -- letters, digits, underscores and the spaces between
 them -- is still accepted from the builder's own grammar, since no engine reads
 one as punctuation.
 
+`not in` is refused with the rest. It was never in the operator list, so
+`Where(column, "not in", values)` compiled to `column not in ?`, which no
+engine accepts; `WhereNotIn` is the clause that means it and is unaffected.
+
 Raw APIs remain the explicit escape hatch for trusted SQL. An external grammar
 may continue to add lexically safe compound operators through `GetOperators`.
 PostgreSQL's process-wide `grammars.CustomOperators` extension accepts only a
