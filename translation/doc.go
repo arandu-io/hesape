@@ -50,6 +50,46 @@
 // application overrides one of them by defining the same key; it never has to
 // publish a file to get a sentence.
 //
+// # Where the application's own catalogue goes
+//
+// The embedded English is a fallback, not the only path. An application carries
+// its own catalogue, in as many locales as it has, and this package holds none
+// of them: the sentences a product says are the product's, and a language
+// shipped here would be a second place they are written.
+//
+// The catalogue is a directory of locale directories, which the application
+// owns and names -- lang at the root of the project is the usual place. Inside
+// it, a group is lang/<locale>/<group>.json and the sentence-keyed catalogue of
+// a locale is lang/<locale>.json:
+//
+//	lang/pt-BR/validation.json
+//	lang/pt-BR/auth.json
+//	lang/pt-BR.json
+//	lang/en/auth.json
+//
+// It is read by a [FileLoader] over any fs.FS -- os.DirFS for a directory on
+// disk, embed.FS for one compiled into the binary -- and that loader is what
+// [New] is built with, together with the locale to answer in and the locale to
+// fall back to:
+//
+//	loader, err := translation.NewFileLoader(os.DirFS("."), "lang")
+//	tr := translation.New(loader, "pt-BR", "en")
+//
+// Three things answer a key, in this order: the application's catalogue in the
+// locale asked for, then its catalogue in the fallback locale, then the English
+// embedded here. So a project that has translated forty validation lines into a
+// locale gets those forty and English for the rest, which is what makes a
+// catalogue worth shipping before it is finished.
+//
+// Overriding is per key, not per file: an auth.json carrying one item replaces
+// that item and leaves the rest of the group answering from here. A language
+// this package has never heard of needs no change to it -- [New] takes the
+// locale as a string, and the catalogue is files.
+//
+// Files are not the only way in: [ArrayLoader] is the same catalogue written in
+// Go, and [Translator.AddLines] writes lines into a translator already built,
+// which is what a module registering its own text at boot uses.
+//
 // # Plurals
 //
 // [Translator.Choice] takes the count and hands the line to the [Selector],
