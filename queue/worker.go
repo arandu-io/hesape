@@ -45,6 +45,21 @@ type WorkerOptions struct {
 	// a Timeout longer than the Lease is the misconfiguration that hands a
 	// running job to a second worker.
 	Timeout time.Duration
+	// ShutdownGrace is how long a job already running gets to finish once the
+	// worker's context is cancelled. Default 30 seconds.
+	//
+	// A popped job is work the store has already handed over, and the only
+	// record that it ran is the settlement the worker has yet to write. Killing
+	// it with the process is what leaves the job reserved until its lease
+	// expires -- minutes of nothing, and then a redelivery with an attempt
+	// already spent, on every deploy. So the handler and the write that settles
+	// it run on a context the cancellation does not reach.
+	//
+	// This is what keeps that from being unbounded. It starts counting when the
+	// cancellation arrives, and when it runs out the handler's context is
+	// cancelled after all: the error settles the job the ordinary way -- put
+	// back with backoff, not lost -- and the process exits.
+	ShutdownGrace time.Duration
 	// Sleep is how long to wait before asking again when the queue was empty.
 	// Default 1 second.
 	Sleep time.Duration
@@ -112,6 +127,9 @@ func (o WorkerOptions) withDefaults() WorkerOptions {
 	if o.Timeout <= 0 {
 		o.Timeout = o.Lease
 	}
+	if o.ShutdownGrace <= 0 {
+		o.ShutdownGrace = defaultShutdownGrace
+	}
 	if o.Sleep <= 0 {
 		o.Sleep = time.Second
 	}
@@ -122,6 +140,75 @@ func (o WorkerOptions) withDefaults() WorkerOptions {
 		o.Backoff = ExponentialBackoff
 	}
 	return o
+}
+
+// defaultShutdownGrace is how long a running job gets to finish once the worker
+// was asked to stop.
+//
+// Thirty seconds, because that is the window a container runtime leaves between
+// the stop signal and the kill that follows it. A grace longer than the one the
+// platform allows is a number that never applies.
+const defaultShutdownGrace = 30 * time.Second
+
+// settleTimeout is how long the write that settles a job -- the delete, the
+// release or the park -- is given.
+//
+// Deliberately short. The write happens on a context the shutdown cannot
+// cancel, so it is the only thing standing between an unreachable store and a
+// process that never exits. A settlement that runs out of time costs one
+// redelivery of a job that is still in the queue, which is at-least-once
+// behaving as documented.
+const settleTimeout = 5 * time.Second
+
+// draining returns the context a running job uses, and the function that ends
+// it.
+//
+// The context is detached from ctx and cancelled grace after ctx is, and that
+// is the whole difference between a shutdown that drains and one that abandons.
+// The handler keeps running past the signal, and the settlement after it still
+// has a live context to write on.
+//
+// Cancelled eventually, though: a handler that outlives the grace is stopped
+// the way the timeout stops one, so its failure settles the job instead of the
+// process exiting with the job still reserved.
+func draining(ctx context.Context, grace time.Duration) (context.Context, context.CancelFunc) {
+	drain, cancel := context.WithCancel(context.WithoutCancel(ctx))
+
+	// The watch ends with the job, so nothing outlives it: a timer started here
+	// and never stopped would keep firing after a worker that ran millions of
+	// jobs had long finished each of them.
+	finished := make(chan struct{})
+	go func() {
+		select {
+		case <-finished:
+		case <-ctx.Done():
+			timer := time.NewTimer(grace)
+			defer timer.Stop()
+			select {
+			case <-finished:
+			case <-timer.C:
+				cancel()
+			}
+		}
+	}()
+
+	var once sync.Once
+	return drain, func() {
+		once.Do(func() { close(finished) })
+		cancel()
+	}
+}
+
+// settling returns the context a job is settled on, and the function that ends
+// it.
+//
+// The delete, the release and the park are the only record of what became of
+// the job, and they are what must not be cancelled with the process. A
+// settlement that fails leaves the job reserved until its lease expires, and it
+// comes back with an attempt already spent -- so it rides a context nothing
+// cancels, bounded by a timeout of its own.
+func settling(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), settleTimeout)
 }
 
 // ExponentialBackoff doubles the wait each attempt, capped at an hour.
@@ -406,11 +493,15 @@ func (w *Worker) Daemon(ctx context.Context) (int, error) {
 		//
 		// The batch is sized by Concurrency, so running all of it at once is
 		// exactly Concurrency jobs in flight, not Concurrency squared.
+		//
+		// Every job of the batch is started, even when the cancellation lands
+		// between the pop and this loop. They are all reserved already, for the
+		// same lease, and breaking out here left the rest of the batch invisible
+		// to every worker until that lease expired -- jobs nobody was running
+		// and nobody could see. Process is what bounds them now: it drains what
+		// it started and stops taking longer than the grace.
 		var wg sync.WaitGroup
 		for _, j := range popped {
-			if ctx.Err() != nil {
-				break
-			}
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -466,6 +557,13 @@ func (w *Worker) RunNextJob(ctx context.Context) error {
 func (w *Worker) Process(ctx context.Context, j *jobs.Job) (err error) {
 	connectionName := j.GetConnectionName()
 
+	// A job that has been handed over runs to the end whatever the process was
+	// asked to do meanwhile. See WorkerOptions.ShutdownGrace: the caller's
+	// cancellation no longer reaches the handler or the write that settles it,
+	// and the grace is what still bounds both.
+	ctx, drained := draining(ctx, w.opts.ShutdownGrace)
+	defer drained()
+
 	// Deferred rather than written at each return, because there are six of
 	// them and the one that forgets is a delivery nobody counted.
 	defer func() {
@@ -480,7 +578,9 @@ func (w *Worker) Process(ctx context.Context, j *jobs.Job) (err error) {
 		// register the handler. It parks immediately, where it can be seen.
 		err = fmt.Errorf("no handler registered for %s", j.Name)
 		log.For(ctx).Error("job has no handler", "job", j.Name, "id", j.UUID)
-		_ = j.Fail(ctx, err)
+		parkCtx, endPark := settling(ctx)
+		_ = j.Fail(parkCtx, err)
+		endPark()
 		w.dispatch(events.JobFailed{ConnectionName: connectionName, Job: j, Exception: err})
 		return err
 	}
@@ -539,11 +639,14 @@ func (w *Worker) Process(ctx context.Context, j *jobs.Job) (err error) {
 		return nil
 	}
 
-	if err := j.Delete(ctx); err != nil {
+	settle, settled := settling(ctx)
+	deleteErr := j.Delete(settle)
+	settled()
+	if deleteErr != nil {
 		// The work is done and the deletion failed, so the job runs again when
 		// the lease expires. That is at-least-once behaving as documented, and
 		// why a handler has to tolerate running twice.
-		logger.Error("deleting the job failed; it will run again", "error", err)
+		logger.Error("deleting the job failed; it will run again", "error", deleteErr)
 		return nil
 	}
 
@@ -589,7 +692,10 @@ func (w *Worker) handleJobException(ctx context.Context, j *jobs.Job, cause erro
 	if !settled {
 		j.LastError = cause.Error()
 		if parked = w.shouldFail(j, attempts, cause); parked {
-			if failErr := j.Fail(ctx, cause); failErr != nil {
+			parkCtx, endPark := settling(ctx)
+			failErr := j.Fail(parkCtx, cause)
+			endPark()
+			if failErr != nil {
 				logger.Error("parking the job failed", "error", failErr)
 			}
 			// The line says what happened and the attempt count says how many
@@ -612,7 +718,10 @@ func (w *Worker) handleJobException(ctx context.Context, j *jobs.Job, cause erro
 	}
 
 	wait := w.calculateBackoff(j, attempts)
-	if relErr := j.Release(ctx, wait); relErr != nil {
+	settle, endSettle := settling(ctx)
+	relErr := j.Release(settle, wait)
+	endSettle()
+	if relErr != nil {
 		logger.Error("releasing the job failed", "error", relErr)
 	}
 	logger.Warn("job failed", "attempt", attempts, "retry_in", wait, "error", cause)
@@ -679,7 +788,10 @@ func (w *Worker) MarkJobAsFailedIfAlreadyExceedsMaxAttempts(ctx context.Context,
 	}
 
 	err := MaxAttemptsExceeded{}.ForJob(j, w.maxTriesFor(j))
-	if failErr := j.Fail(ctx, err); failErr != nil {
+	parkCtx, endPark := settling(ctx)
+	failErr := j.Fail(parkCtx, err)
+	endPark()
+	if failErr != nil {
 		return failErr
 	}
 	return err
