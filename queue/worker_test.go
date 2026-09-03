@@ -50,6 +50,10 @@ type storeQueue struct {
 	// that can put its own row back, and one whose only copy is the dead letter
 	// record.
 	keepsParked bool
+	// refusesToPark is what FailJob answers with instead of parking, which is a
+	// store that would not take the write: the job is still queued and will be
+	// delivered again.
+	refusesToPark error
 	// afterPop runs once a batch has been handed over, with its jobs already
 	// reserved. It is where a test puts the signal that has to land in that gap.
 	afterPop func()
@@ -114,6 +118,9 @@ func (q *storeQueue) FailJob(ctx context.Context, j *jobs.Job, _ error) error {
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if q.refusesToPark != nil {
+		return q.refusesToPark
+	}
 	q.parked = append(q.parked, j.UUID)
 	return nil
 }
@@ -366,6 +373,77 @@ func TestTheWorkerReservesNothingAfterTheShutdownSignal(t *testing.T) {
 	deleted, _, _ := q.settled()
 	if len(deleted) != 1 || deleted[0] != first.UUID {
 		t.Errorf("the job in flight was not the only one settled: %v", deleted)
+	}
+}
+
+// deafQueue is a driver whose Pop ignores its context: it hands a job over
+// however often it is asked, cancelled or not.
+//
+// Nothing in the Queue contract makes a driver refuse a cancelled pop, and
+// there are three shapes that do not -- a request already in flight when the
+// signal lands, a store with no context to honour, and a pop the application
+// supplied through PopUsing. storeQueue is the other kind, and it answers the
+// shutdown question on the driver's behalf; this one leaves it to the worker.
+type deafQueue struct {
+	queue.NullQueue
+
+	mu   sync.Mutex
+	job  jobs.Job
+	pops int
+}
+
+func (q *deafQueue) GetConnectionName() string { return "deaf" }
+
+func (q *deafQueue) Pop(_ context.Context, _ string, _ int, _ time.Duration) ([]*jobs.Job, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.pops++
+	j := q.job
+	j.Attempts++
+	return []*jobs.Job{jobs.Popped(q, "deaf", j)}, nil
+}
+
+func (q *deafQueue) popCount() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.pops
+}
+
+// TestTheWorkerReservesNothingFromADriverThatIgnoresTheShutdown: the check at
+// the top of the loop is the worker's own, and it is the only one when the
+// driver has none.
+//
+// A driver whose Pop honours its context refuses to hand anything over after
+// the signal, which answers the question before the worker is asked it. For one
+// that does not, this is what stops the worker reserving work it has just been
+// told to stop taking -- reserved, then run past the shutdown, or left on a
+// lease nobody is holding when the process exits.
+//
+// Without it, this worker does not stop at all: the driver keeps handing jobs
+// over, and there is nothing else in the loop that ends it.
+//
+// Cancelled before the loop starts, so the pass under test is the first one and
+// there is nothing to race with.
+func TestTheWorkerReservesNothingFromADriverThatIgnoresTheShutdown(t *testing.T) {
+	q := &deafQueue{job: newJob(t, "invoice.send")}
+
+	var ran atomic.Int32
+	w := queue.NewWorker(q, queue.WorkerOptions{Sleep: time.Millisecond})
+	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, *jobs.Job) error {
+		ran.Add(1)
+		return nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	awaitStop(t, runDaemon(w, ctx))
+
+	if pops := q.popCount(); pops != 0 {
+		t.Errorf("the worker reserved jobs %d time(s) after the shutdown signal, from a driver "+
+			"that will hand them over whatever its context says", pops)
+	}
+	if got := ran.Load(); got != 0 {
+		t.Errorf("%d job(s) ran after the shutdown signal", got)
 	}
 }
 
@@ -776,6 +854,46 @@ func TestADeadLetterListThatRefusesIsReportedAndNotSwallowed(t *testing.T) {
 	}
 	if !strings.Contains(logged.String(), "the dead letter table is gone") {
 		t.Errorf("nothing was said about the list refusing the record:\n%s", logged.String())
+	}
+}
+
+// TestNoDeadLetterRecordIsWrittenWhenTheDriverRefusesToPark: parking is two
+// writes in one order, and the order is only visible when the first one fails.
+//
+// The driver stops delivering the job, and then the record goes where the
+// failed job commands read. A driver that refused the first step still has the
+// job: it is queued, its lease expires, and it comes back. A record written
+// anyway lists that job as finished while it is still running, and the operator
+// who retries it from the list is starting work that never stopped -- two
+// deliveries of the same job, on purpose, by the tool meant to recover it.
+func TestNoDeadLetterRecordIsWrittenWhenTheDriverRefusesToPark(t *testing.T) {
+	j := newJob(t, "invoice.send")
+	q := newStoreQueue(j)
+	q.refusesToPark = errors.New("the jobs table is read only")
+	provider := &recordingProvider{}
+
+	gatewayDown := errors.New("the payment gateway is down")
+	w := queue.NewWorker(q, queue.WorkerOptions{MaxTries: 1}).SetFailedJobs(provider)
+	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, *jobs.Job) error {
+		return gatewayDown
+	})
+
+	ctx, logged := capturing(context.Background())
+	if err := deliverOnce(t, ctx, w, q); !errors.Is(err, gatewayDown) {
+		t.Fatalf("Process returned %v, want the handler's own error", err)
+	}
+
+	if _, _, parked := q.settled(); len(parked) != 0 {
+		t.Fatalf("the driver parked the job after all, so this proves nothing: %v", parked)
+	}
+	if grants, records := provider.seen(); len(grants) != 0 || len(records) != 0 {
+		t.Errorf("the dead letter list was told about %d failure(s) for a job the driver "+
+			"would not stop delivering", len(grants))
+	}
+	// And the refusal is not silent: a park that did not happen is the reason
+	// the job comes back, and nobody can read that off a list it never reached.
+	if !strings.Contains(logged.String(), "the jobs table is read only") {
+		t.Errorf("nothing was said about the driver refusing to park:\n%s", logged.String())
 	}
 }
 
