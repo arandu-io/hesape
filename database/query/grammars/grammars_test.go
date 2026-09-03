@@ -976,3 +976,39 @@ func TestARawOrderKeepsCompilingWithoutADirection(t *testing.T) {
 		"sqlite":   `select * from "users" order by field(status, ?, ?)`,
 	})
 }
+
+func TestACompilerAppliesItsOwnDialectOperatorPolicy(t *testing.T) {
+	b := query.NewBuilder(nil, grammars.NewPostgresGrammar(), nil).From("users").Where("id", "#", 1)
+
+	if sql := grammars.NewMySQLGrammar().CompileSelect(b); sql != "" {
+		t.Fatalf("a MySQL statement carried a token MySQL reads as a comment: %s", sql)
+	}
+	if !errors.Is(b.Err(), query.ErrInvalidOperator) {
+		t.Fatalf("Err() = %v, want ErrInvalidOperator", b.Err())
+	}
+}
+
+func TestAWordOperatorSurvivesACompilerThatDoesNotDeclareIt(t *testing.T) {
+	b := query.NewBuilder(nil, grammars.NewMySQLGrammar(), nil).From("users").Where("name", "sounds like", "Ada")
+
+	sql := grammars.NewSQLiteGrammar().CompileSelect(b)
+	if sql != `select * from "users" where "name" sounds like ?` {
+		t.Fatalf("CompileSelect() = %q, Err() = %v", sql, b.Err())
+	}
+}
+
+func TestPostgresJSONOperatorsStillCompileToASinglePlaceholder(t *testing.T) {
+	for _, operator := range []string{"?", "?|", "?&"} {
+		t.Run(operator, func(t *testing.T) {
+			g := grammars.NewPostgresGrammar()
+			b := query.NewBuilder(nil, g, nil).From("documents").Where("payload", operator, "tags")
+
+			// The operator is doubled so the driver reads it as a literal
+			// question mark; the one placeholder left is the binding.
+			want := `select * from "documents" where "payload" ?` + operator + " ?"
+			if sql := b.ToSQL(); sql != want {
+				t.Fatalf("ToSQL() = %q, want %q, Err() = %v", sql, want, b.Err())
+			}
+		})
+	}
+}

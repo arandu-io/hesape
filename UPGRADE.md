@@ -74,6 +74,15 @@ Direct mutation of exported clauses is also covered by
 `Builder.ValidateForCompilation`, which public grammar compilers invoke before
 building a statement.
 
+A compiler screens against its own dialect, not against the grammar the builder
+happens to carry. Handing a builder assembled with one grammar straight to
+another dialect's compiler validates it against the dialect that is spelling
+the SQL, because the engine receiving the statement is the one that decides how
+a token reads: `#` is an operator in PostgreSQL and the start of a comment in
+MySQL. A word operator -- letters, digits, underscores and the spaces between
+them -- is still accepted from the builder's own grammar, since no engine reads
+one as punctuation.
+
 Raw APIs remain the explicit escape hatch for trusted SQL. An external grammar
 may continue to add lexically safe compound operators through `GetOperators`.
 PostgreSQL's process-wide `grammars.CustomOperators` extension accepts only a

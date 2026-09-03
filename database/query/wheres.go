@@ -37,7 +37,7 @@ func (b *Builder) PrepareValueAndOperator(value, operator any, useDefault bool) 
 	if useDefault {
 		return operator, "=", nil
 	}
-	canonical, err := normalizeOperator(b.Grammar, stringify(operator))
+	canonical, err := normalizeOperator(b.Grammar, nil, stringify(operator))
 	if err != nil {
 		b.setError(err)
 		return nil, "", err

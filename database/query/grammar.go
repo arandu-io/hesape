@@ -143,24 +143,68 @@ var operators = []string{
 // comparison.
 var bitwiseOperators = []string{"&", "|", "^", "<<", ">>", "&~"}
 
-// normalizeOperator returns the active grammar's canonical spelling for an
-// operator. It deliberately does not trim: surrounding, repeated or control
-// whitespace is malformed input rather than an alternate spelling.
-func normalizeOperator(grammar Grammar, operator string) (string, error) {
+// normalizeOperator returns the canonical spelling of an operator under the
+// policy of the grammar that will compile the query. It deliberately does not
+// trim: surrounding, repeated or control whitespace is malformed input rather
+// than an alternate spelling.
+//
+// compiler is the grammar that spells the SQL. declared is the grammar the
+// builder was given when that is a different one, and nil when the builder is
+// being compiled by its own. The compiling grammar is the one that decides,
+// because a token is read by the engine that receives it: "#" is an operator
+// in PostgreSQL and the start of a comment in MySQL, so a query assembled for
+// the first would lose everything after it under the second.
+//
+// A word operator the builder's grammar declares is accepted even when the
+// compiling one does not know it, which is what lets a grammar extend a
+// dialect it does not otherwise replace. Nothing is given up: a word cannot
+// open a comment, end a statement or stand in for a placeholder, so an engine
+// that does not know it refuses the statement instead of reading it as
+// something else.
+func normalizeOperator(compiler, declared Grammar, operator string) (string, error) {
 	if !lexicallySafeOperator(operator) {
 		return "", &InvalidOperatorError{Operator: operator}
 	}
+	if canonical, ok := declaredOperator(compiler, operator); ok {
+		return canonical, nil
+	}
+	if declared != nil && wordOperator(operator) {
+		if canonical, ok := declaredOperator(declared, operator); ok {
+			return canonical, nil
+		}
+	}
+	return "", &InvalidOperatorError{Operator: operator}
+}
 
+// declaredOperator reports the grammar's own spelling of an operator it
+// declares. A nil grammar declares the operators every dialect shares.
+func declaredOperator(grammar Grammar, operator string) (string, bool) {
 	allowed := operators
 	if grammar != nil {
 		allowed = grammar.GetOperators()
 	}
 	for _, candidate := range allowed {
 		if lexicallySafeOperator(candidate) && strings.EqualFold(candidate, operator) {
-			return candidate, nil
+			return candidate, true
 		}
 	}
-	return "", &InvalidOperatorError{Operator: operator}
+	return "", false
+}
+
+// wordOperator reports whether an operator is spelled out of letters, digits,
+// underscores and the single spaces between them, and so carries no character
+// any dialect reads as punctuation.
+func wordOperator(operator string) bool {
+	if operator == "" {
+		return false
+	}
+	for _, r := range operator {
+		if r == ' ' || r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // normalizeOrderDirection rewrites an order's direction in place, in the one
