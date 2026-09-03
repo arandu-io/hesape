@@ -1012,3 +1012,33 @@ func TestPostgresJSONOperatorsStillCompileToASinglePlaceholder(t *testing.T) {
 		})
 	}
 }
+
+func TestCompileJoinsScreensTheJoinsItIsHanded(t *testing.T) {
+	type joinCompiler interface {
+		CompileJoins(*query.Builder, []*query.JoinClause) string
+	}
+
+	for _, dialect := range dialects() {
+		t.Run(dialect.name, func(t *testing.T) {
+			g := dialect.grammar()
+			compiler, ok := g.(joinCompiler)
+			if !ok {
+				t.Fatalf("%T does not expose CompileJoins", g)
+			}
+
+			clean := query.NewBuilder(nil, g, nil).From("users")
+			hostile := query.NewBuilder(nil, g, nil).From("users").
+				Join("roles", "users.id", "=", "roles.user_id")
+			hostile.Joins[0].Wheres = append(hostile.Joins[0].Wheres, query.Where{
+				Type: "Basic", Column: "id", Operator: "= 1 OR 1 =", Value: 1, Boolean: "and",
+			})
+
+			if sql := compiler.CompileJoins(clean, hostile.Joins); sql != "" {
+				t.Fatalf("CompileJoins() emitted an unfiltered join: %s", sql)
+			}
+			if !errors.Is(hostile.Joins[0].Err(), query.ErrInvalidOperator) {
+				t.Fatalf("the join clause recorded %v, want ErrInvalidOperator", hostile.Joins[0].Err())
+			}
+		})
+	}
+}

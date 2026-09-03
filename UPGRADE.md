@@ -75,7 +75,10 @@ including callbacks registered by other callbacks. A callback cycle fails
 closed instead of allowing compilation to begin with an unstable query tree.
 Direct mutation of exported clauses is also covered by
 `Builder.ValidateForCompilation`, which every public compiler of a complete
-statement invokes before building one.
+statement invokes before building one. `CompileJoins` screens the join clauses
+it is handed as well as the query they are compiled into, so calling it
+directly with clauses from elsewhere returns the empty string rather than
+their SQL.
 
 The fragment compilers do not, and are not meant to. `WhereBasic`,
 `WhereColumn`, `WhereDate`, `WhereTime`, `WhereDay`, `WhereMonth`, `WhereYear`,

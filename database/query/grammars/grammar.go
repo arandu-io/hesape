@@ -167,6 +167,21 @@ func (g *Grammar) compilationError(q *query.Builder) error {
 	return q.ValidateForCompilationWith(g.compilingDialect())
 }
 
+// joinsError runs the same barrier over join clauses handed in as a
+// parameter, under the dialect about to spell them.
+func (g *Grammar) joinsError(joins []*query.JoinClause) error {
+	dialect := g.compilingDialect()
+	for _, join := range joins {
+		if join == nil {
+			continue
+		}
+		if err := join.ValidateForCompilationWith(dialect); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // compilingDialect returns the outermost grammar of the compile pipeline as
 // an operator policy, or nil when it is not one: Grammar alone is incomplete
 // on purpose and no builder can have been given it.
@@ -346,9 +361,15 @@ func (g *Grammar) CompileIndexHint(q *query.Builder, indexHint *query.IndexHint)
 	return ""
 }
 
-// CompileJoins builds the SQL for the query's join clauses.
+// CompileJoins builds the SQL for the given join clauses.
+//
+// The joins are a parameter rather than being read off the query, so they are
+// screened alongside it: a guard that clears the builder and then spells a
+// slice nobody looked at is protection in name only. Each refusal is recorded
+// on the join clause that carries it, and the whole call returns the empty
+// string.
 func (g *Grammar) CompileJoins(q *query.Builder, joins []*query.JoinClause) string {
-	if g.compilationError(q) != nil {
+	if g.compilationError(q) != nil || g.joinsError(joins) != nil {
 		return ""
 	}
 	d := g.self
