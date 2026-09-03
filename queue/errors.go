@@ -93,6 +93,20 @@ var ErrManuallyFailed = errors.New("queue: the job failed and will not be retrie
 // already names the type and the field.
 var ErrInvalidPayload = errors.New("queue: the job payload cannot be encoded")
 
+// ErrNotParked is what Retry returns when the store holds no parked job under
+// that id.
+//
+// It is the answer that keeps a dead letter record worth having. A driver that
+// still holds the job puts that row back -- same id, same envelope, nothing
+// rebuilt -- and a driver that does not is the case the record exists for: the
+// queue was flushed, or it never kept the job at all, and the record is the only
+// copy left. Told apart, a caller can push the record back; folded into a plain
+// nil, a retry against a store that lost the job reports success and queues
+// nothing, and the record is then forgotten on the strength of it.
+//
+// It is a refusal and not a failure: nothing is wrong with the store.
+var ErrNotParked = errors.New("queue: no parked job under that id")
+
 // HandlerPanicked is why a job was parked: its handler panicked instead of
 // returning an error.
 //

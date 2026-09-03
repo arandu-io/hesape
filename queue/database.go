@@ -429,18 +429,39 @@ func (q *DatabaseQueue) Failed(ctx context.Context, limit int) ([]jobs.Job, erro
 
 // Retry puts a failed job back in line with its attempts reset.
 //
-// The exception count is reset with them: a retry that kept the count would be
-// parked again by the failure that parked it the first time, without the
-// handler ever having run. created_at moves to now for the reason it moves on a
-// release -- the job goes to the back of the queue.
+// The row that failed is the row that comes back, which is what makes this the
+// way out of a dead letter list rather than a second push: the id, the action,
+// the tenant and the payload are already there and none of them is rebuilt, so
+// nothing about the job can be lost in the round trip.
+//
+// The exception count is reset with the attempts: a retry that kept the count
+// would be parked again by the failure that parked it the first time, without
+// the handler ever having run. created_at moves to now for the reason it moves
+// on a release -- the job goes to the back of the queue.
+//
+// failed_at is in the WHERE, so this un-parks and nothing else. Without it a
+// retry aimed at a parked id that had already been retried would reset the
+// attempts of a job that is running, and a job whose count is reset mid-flight
+// is one the worker will not park when it next fails.
+//
+// Nothing updated is [ErrNotParked] rather than success. The caller is holding a
+// dead letter record and has somewhere else to put the job; told the retry
+// worked, it forgets the record and the work is gone.
 func (q *DatabaseQueue) Retry(ctx context.Context, uuid string) error {
 	now := time.Now().UTC()
-	_, err := q.db.ExecContext(ctx, `
+	res, err := q.db.ExecContext(ctx, `
 		UPDATE jobs SET failed_at = NULL, attempts = 0, exceptions = 0, last_error = NULL,
 		                reserved_until = NULL, run_at = ?, created_at = ?
-		WHERE id = ?`, now, now, uuid)
+		WHERE id = ? AND failed_at IS NOT NULL`, now, now, uuid)
 	if err != nil {
 		return fmt.Errorf("queue: retrying %s: %w", uuid, err)
+	}
+	updated, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("queue: retrying %s: %w", uuid, err)
+	}
+	if updated == 0 {
+		return fmt.Errorf("%w: %s", ErrNotParked, uuid)
 	}
 	return nil
 }

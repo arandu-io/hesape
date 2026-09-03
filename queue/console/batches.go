@@ -86,13 +86,10 @@ func (c *RetryBatchCommand) Handle(ctx context.Context, o *console.IO) error {
 		if err != nil {
 			return err
 		}
-		pusher, can := target.(interface {
-			PushRaw(context.Context, auth.Grant, string, []byte, string) error
-		})
-		if !can {
-			return fmt.Errorf("queue: the %s connection cannot take a job back", job.Connection)
-		}
-		if err := pusher.PushRaw(ctx, g, job.Name, job.Payload, job.Queue); err != nil {
+		// The same requeue as `queue:retry`, and for the same reason: a batch is
+		// a set of jobs, not a different kind of job. Two commands putting work
+		// back their own way would be two answers to what a retry preserves.
+		if err := requeue(ctx, target, auth.Tenant(g), job); err != nil {
 			o.Error("%s: %v", id, err)
 			continue
 		}

@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
@@ -131,8 +132,11 @@ func (q *BackgroundQueue) Clear(context.Context, string) (int, error) { return 0
 // error went to that process's log.
 func (q *BackgroundQueue) Failed(context.Context, int) ([]jobs.Job, error) { return nil, nil }
 
-// Retry has nothing to retry.
-func (q *BackgroundQueue) Retry(context.Context, string) error { return nil }
+// Retry has nothing to retry: the job ran in another process, and this one kept
+// nothing to put back.
+func (q *BackgroundQueue) Retry(_ context.Context, uuid string) error {
+	return fmt.Errorf("%w: %s", ErrNotParked, uuid)
+}
 
 // ReleaseJob does nothing. There is no queue to put the job back on.
 func (q *BackgroundQueue) ReleaseJob(context.Context, *jobs.Job, time.Duration) error { return nil }

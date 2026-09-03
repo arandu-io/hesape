@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
@@ -153,8 +154,11 @@ func (q *DeferredQueue) Clear(context.Context, string) (int, error) { return 0, 
 // nobody is holding, and its error went to the log.
 func (q *DeferredQueue) Failed(context.Context, int) ([]jobs.Job, error) { return nil, nil }
 
-// Retry has nothing to retry.
-func (q *DeferredQueue) Retry(context.Context, string) error { return nil }
+// Retry has nothing to retry: the job ran on a goroutine nobody is holding, and
+// this driver kept nothing to put back.
+func (q *DeferredQueue) Retry(_ context.Context, uuid string) error {
+	return fmt.Errorf("%w: %s", ErrNotParked, uuid)
+}
 
 // ReleaseJob does nothing. There is no queue to put the job back on.
 func (q *DeferredQueue) ReleaseJob(context.Context, *jobs.Job, time.Duration) error { return nil }

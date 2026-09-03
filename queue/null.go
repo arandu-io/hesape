@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
@@ -73,8 +74,15 @@ func (NullQueue) Clear(context.Context, string) (int, error) { return 0, nil }
 // Failed lists nothing.
 func (NullQueue) Failed(context.Context, int) ([]jobs.Job, error) { return nil, nil }
 
-// Retry has nothing to retry.
-func (NullQueue) Retry(context.Context, string) error { return nil }
+// Retry has nothing to retry, and says so.
+//
+// This is the one place a null driver does not answer with nil. Nil means "the
+// job is back in line", and a caller holding a dead letter record acts on that
+// by forgetting the record -- so a silent success here is the one way to lose
+// work through a queue that was never meant to hold any.
+func (NullQueue) Retry(_ context.Context, uuid string) error {
+	return fmt.Errorf("%w: %s", ErrNotParked, uuid)
+}
 
 // ReleaseJob does nothing.
 func (NullQueue) ReleaseJob(context.Context, *jobs.Job, time.Duration) error { return nil }

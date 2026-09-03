@@ -478,6 +478,34 @@ func TestRetryResetsTheAttempts(t *testing.T) {
 	if !state.sawStatement("UPDATE jobs SET failed_at = NULL, attempts = 0, exceptions = 0, last_error = NULL, reserved_until = NULL, run_at = ?, created_at = ? WHERE id = ?") {
 		t.Fatalf("Retry issued %v", state.statements())
 	}
+	// Only a parked row. Without this the same statement aimed at an id that
+	// was already retried resets the attempts of a job that is running, and a
+	// job whose count goes back to zero mid-flight is one the worker will not
+	// park when it next fails.
+	if !state.sawStatement("WHERE id = ? AND failed_at IS NOT NULL") {
+		t.Errorf("Retry would have reset a job that is not parked: %v", state.statements())
+	}
+}
+
+// TestRetryReportsAJobTheStoreNoLongerHolds: a retry that moved nothing is not
+// a retry.
+//
+// The caller is `queue:retry`, holding a dead letter record and about to forget
+// it. Told the job is back in line it forgets the record, and if nothing was
+// queued that is the last copy of the work going away quietly. The refusal is
+// what sends it down the other path instead -- rebuild the job from the record
+// and push it.
+func TestRetryReportsAJobTheStoreNoLongerHolds(t *testing.T) {
+	q, state := databaseQueue(t)
+	state.setRowsAffected(0)
+
+	err := q.Retry(context.Background(), "j-1")
+	if !errors.Is(err, queue.ErrNotParked) {
+		t.Fatalf("Retry = %v, want ErrNotParked", err)
+	}
+	if !strings.Contains(err.Error(), "j-1") {
+		t.Errorf("the refusal does not name the job: %v", err)
+	}
 }
 
 // TestTheModuleReportsABacklog: a stopped worker looks exactly like an idle

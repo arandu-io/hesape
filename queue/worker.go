@@ -13,8 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/log"
 	"github.com/arandu-io/hesape/queue/events"
+	"github.com/arandu-io/hesape/queue/failed"
 	"github.com/arandu-io/hesape/queue/jobs"
 	"github.com/arandu-io/hesape/queue/middleware"
 )
@@ -44,6 +46,12 @@ type WorkerOptions struct {
 	// It defaults to Lease so there is one number until somebody needs two, and
 	// a Timeout longer than the Lease is the misconfiguration that hands a
 	// running job to a second worker.
+	//
+	// It is also the only thing that bounds a shutdown. A job already handed
+	// over runs to the end whatever the process was asked to do meanwhile, so a
+	// handler that never returns is what would hold the process open -- and
+	// this is the number that ends it, settling the job the ordinary way
+	// instead of abandoning it under its lease.
 	Timeout time.Duration
 	// Sleep is how long to wait before asking again when the queue was empty.
 	// Default 1 second.
@@ -124,6 +132,28 @@ func (o WorkerOptions) withDefaults() WorkerOptions {
 	return o
 }
 
+// settleTimeout is how long the write that settles a job -- the delete, the
+// release or the park -- is given.
+//
+// Deliberately short. The write happens on a context the shutdown cannot
+// cancel, so it is the only thing standing between an unreachable store and a
+// process that never exits. A settlement that runs out of time costs one
+// redelivery of a job that is still in the queue, which is at-least-once
+// behaving as documented.
+const settleTimeout = 5 * time.Second
+
+// settling returns the context a job is settled on, and the function that ends
+// it.
+//
+// The delete, the release and the park are the only record of what became of
+// the job, and they are what must not be cancelled with the process. A
+// settlement that fails leaves the job reserved until its lease expires, and it
+// comes back with an attempt already spent -- so it rides a context nothing
+// cancels, bounded by a timeout of its own.
+func settling(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), settleTimeout)
+}
+
 // ExponentialBackoff doubles the wait each attempt, capped at an hour.
 //
 // Capped, because unbounded doubling means the eleventh attempt is next year --
@@ -202,6 +232,7 @@ type Worker struct {
 	opts     WorkerOptions
 	cache    Cache
 	events   Dispatcher
+	failed   failed.FailedJobProvider
 
 	// ShouldQuit ends the loop after the job in flight. It is what a signal
 	// handler sets.
@@ -267,6 +298,23 @@ func (w *Worker) SetName(name string) *Worker {
 // single-process deployment can live with.
 func (w *Worker) SetCache(c Cache) *Worker {
 	w.cache = c
+	return w
+}
+
+// SetFailedJobs gives the worker the dead letter list to record parked jobs in,
+// and returns it so the call chains.
+//
+// Wire the provider the failed job commands were built with. They read a
+// provider and nothing else, so the one this worker writes to has to be the one
+// `aru queue:failed` lists, `queue:retry` pushes back and `queue:forget`
+// deletes -- otherwise the four are a console over an empty table, which is
+// what an operator finds out during the incident they were meant for.
+//
+// Nil is the default and means the driver's own park is the whole record: a
+// [DatabaseQueue] marks the job failed in the jobs table it was already in, and
+// Queue.Failed lists them. That arrangement needs no provider and gets none.
+func (w *Worker) SetFailedJobs(p failed.FailedJobProvider) *Worker {
+	w.failed = p
 	return w
 }
 
@@ -406,11 +454,15 @@ func (w *Worker) Daemon(ctx context.Context) (int, error) {
 		//
 		// The batch is sized by Concurrency, so running all of it at once is
 		// exactly Concurrency jobs in flight, not Concurrency squared.
+		//
+		// Every job of the batch is started, even when the cancellation lands
+		// between the pop and this loop. They are all reserved already, for the
+		// same lease, and breaking out here left the rest of the batch invisible
+		// to every worker until that lease expired -- jobs nobody was running
+		// and nobody could see. Each of them is bounded by its own timeout, so
+		// finishing the batch is not an unbounded wait.
 		var wg sync.WaitGroup
 		for _, j := range popped {
-			if ctx.Err() != nil {
-				break
-			}
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -466,6 +518,20 @@ func (w *Worker) RunNextJob(ctx context.Context) error {
 func (w *Worker) Process(ctx context.Context, j *jobs.Job) (err error) {
 	connectionName := j.GetConnectionName()
 
+	// A job that has been handed over runs to the end whatever the process was
+	// asked to do meanwhile, so the caller's cancellation reaches neither the
+	// handler nor the write that settles it.
+	//
+	// A popped job is work the store has already hidden from every other
+	// worker, and the only record that it ran is the settlement still to be
+	// written. Killing it with the process is what leaves the job reserved
+	// until its lease expires -- minutes of nothing, and then a redelivery with
+	// an attempt already spent, on every deploy.
+	//
+	// What bounds it is the job's own timeout, applied below. A cancellation
+	// says "reserve nothing more", not "drop what is running".
+	ctx = context.WithoutCancel(ctx)
+
 	// Deferred rather than written at each return, because there are six of
 	// them and the one that forgets is a delivery nobody counted.
 	defer func() {
@@ -480,7 +546,7 @@ func (w *Worker) Process(ctx context.Context, j *jobs.Job) (err error) {
 		// register the handler. It parks immediately, where it can be seen.
 		err = fmt.Errorf("no handler registered for %s", j.Name)
 		log.For(ctx).Error("job has no handler", "job", j.Name, "id", j.UUID)
-		_ = j.Fail(ctx, err)
+		_ = w.park(ctx, j, err, log.For(ctx))
 		w.dispatch(events.JobFailed{ConnectionName: connectionName, Job: j, Exception: err})
 		return err
 	}
@@ -539,11 +605,14 @@ func (w *Worker) Process(ctx context.Context, j *jobs.Job) (err error) {
 		return nil
 	}
 
-	if err := j.Delete(ctx); err != nil {
+	settle, settled := settling(ctx)
+	deleteErr := j.Delete(settle)
+	settled()
+	if deleteErr != nil {
 		// The work is done and the deletion failed, so the job runs again when
 		// the lease expires. That is at-least-once behaving as documented, and
 		// why a handler has to tolerate running twice.
-		logger.Error("deleting the job failed; it will run again", "error", err)
+		logger.Error("deleting the job failed; it will run again", "error", deleteErr)
 		return nil
 	}
 
@@ -589,7 +658,7 @@ func (w *Worker) handleJobException(ctx context.Context, j *jobs.Job, cause erro
 	if !settled {
 		j.LastError = cause.Error()
 		if parked = w.shouldFail(j, attempts, cause); parked {
-			if failErr := j.Fail(ctx, cause); failErr != nil {
+			if failErr := w.park(ctx, j, cause, logger); failErr != nil {
 				logger.Error("parking the job failed", "error", failErr)
 			}
 			// The line says what happened and the attempt count says how many
@@ -612,7 +681,10 @@ func (w *Worker) handleJobException(ctx context.Context, j *jobs.Job, cause erro
 	}
 
 	wait := w.calculateBackoff(j, attempts)
-	if relErr := j.Release(ctx, wait); relErr != nil {
+	settle, endSettle := settling(ctx)
+	relErr := j.Release(settle, wait)
+	endSettle()
+	if relErr != nil {
 		logger.Error("releasing the job failed", "error", relErr)
 	}
 	logger.Warn("job failed", "attempt", attempts, "retry_in", wait, "error", cause)
@@ -679,10 +751,75 @@ func (w *Worker) MarkJobAsFailedIfAlreadyExceedsMaxAttempts(ctx context.Context,
 	}
 
 	err := MaxAttemptsExceeded{}.ForJob(j, w.maxTriesFor(j))
-	if failErr := j.Fail(ctx, err); failErr != nil {
+	if failErr := w.park(ctx, j, err, log.For(ctx)); failErr != nil {
 		return failErr
 	}
 	return err
+}
+
+// park is the one way a job leaves the queue for good: the driver stops
+// delivering it, and the record goes where the failed job commands read.
+//
+// The two are one step because they are one decision. `aru queue:failed`,
+// `queue:retry`, `queue:forget` and `queue:flush` read a
+// [failed.FailedJobProvider] and nothing else, so a worker that only told the
+// driver leaves an operator four commands that print nothing about a job that
+// is gone. Recording it here rather than adding a fifth listing that reads the
+// driver keeps one dead letter list rather than two that disagree.
+//
+// The driver first, then the record. A park the driver refused means the job is
+// still queued and will be delivered again, and a dead letter entry for a job
+// that is still running is an operator retrying work that never stopped.
+//
+// A provider that refuses is reported and not returned: what the caller does
+// next depends on what became of the job, and the job did give up. The error is
+// logged rather than folded into the cause, so a dead letter list that has
+// stopped accepting writes is visible without changing the error the handler
+// saw.
+func (w *Worker) park(ctx context.Context, j *jobs.Job, cause error, logger *slog.Logger) error {
+	settle, settled := settling(ctx)
+	defer settled()
+
+	if err := j.Fail(settle, cause); err != nil {
+		return err
+	}
+	if w.failed == nil {
+		return nil
+	}
+
+	message := j.LastError
+	if cause != nil {
+		message = cause.Error()
+	}
+	// The job's own tenant, under the action the failed job list is reached
+	// under -- the same Grant the commands hold, because they read what this
+	// writes and a provider is free to check it.
+	g := auth.SystemGrant(failed.Action, j.TenantID)
+	if _, err := w.failed.Log(settle, g, failed.FailedJob{
+		UUID: j.UUID,
+		// The routing name, not the display name: `queue:retry` pushes the
+		// record back under it, and a name a person reads is not one a handler
+		// is registered under.
+		Name: j.Name,
+		// The job's own action, and not the one this record is written under.
+		// They are different permissions on purpose -- the list is read by an
+		// administrator and the work is not -- and a retry rebuilds the job's
+		// Grant from this field, so the record has to carry the action the job
+		// was pushed with or the work comes back as the administrator.
+		Action:     j.Action,
+		Connection: j.GetConnectionName(),
+		Queue:      j.Queue,
+		Payload:    j.Payload,
+		Exception:  message,
+		FailedAt:   time.Now().UTC(),
+	}); err != nil {
+		// The job and the reason, never the payload: it is a customer's
+		// arguments, and the failed job list is where it belongs -- behind a
+		// Grant -- rather than in a log line anything can ship anywhere.
+		logger.Error("the failed job could not be recorded; it is parked but will not be listed",
+			"job", j.Name, "job_id", j.UUID, "error", err)
+	}
+	return nil
 }
 
 // maxTriesFor is the job's own limit when it has one, and the worker's when it

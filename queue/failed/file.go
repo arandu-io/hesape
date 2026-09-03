@@ -54,7 +54,10 @@ var (
 	_ PrunableFailedJobProvider  = (*FileFailedJobProvider)(nil)
 )
 
-// Log records a job that gave up. It answers log().
+// Log records a job that gave up, once. It answers log().
+//
+// The file has no key to refuse a duplicate with, so the check is here: a
+// record already under this id is this failure, already listed.
 func (p *FileFailedJobProvider) Log(ctx context.Context, g auth.Grant, job FailedJob) (string, error) {
 	tenant, err := tenantOf(g)
 	if err != nil {
@@ -78,6 +81,11 @@ func (p *FileFailedJobProvider) Log(ctx context.Context, g auth.Grant, job Faile
 	stored, err := p.read()
 	if err != nil {
 		return "", err
+	}
+	for _, existing := range stored {
+		if existing.ID == id && existing.TenantID == tenant {
+			return id, nil
+		}
 	}
 	stored = append([]FailedJob{job}, stored...)
 	if len(stored) > p.limit {

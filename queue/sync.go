@@ -137,8 +137,10 @@ func (q *SyncQueue) Clear(context.Context, string) (int, error) { return 0, nil 
 // already has the error.
 func (q *SyncQueue) Failed(context.Context, int) ([]jobs.Job, error) { return nil, nil }
 
-// Retry has nothing to retry.
-func (q *SyncQueue) Retry(context.Context, string) error { return nil }
+// Retry has nothing to retry: this driver keeps no job to put back.
+func (q *SyncQueue) Retry(_ context.Context, uuid string) error {
+	return fmt.Errorf("%w: %s", ErrNotParked, uuid)
+}
 
 // ReleaseJob does nothing. There is no queue to put the job back on, and a
 // handler that releases a sync job is told so by the error it gets back from

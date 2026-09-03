@@ -30,13 +30,52 @@ type FailedJob struct {
 	Queue string
 	// Name is what routes the job to a handler.
 	Name string
+	// Action is the permission the job was pushed under, and it is the half of
+	// the envelope that cannot be rebuilt from anything else here.
+	//
+	// The worker reissues a job's Grant from its action -- jobs.GrantFor is
+	// auth.SystemGrant(action, tenant) -- so a record that lost it can only put
+	// the job back under the action the dead letter list itself is read with.
+	// That is an administrative permission: every Policy that checks the job's
+	// own action refuses the work, and every Policy that does not lets it do
+	// more than the push ever authorized.
+	//
+	// Empty on a record written before the column existed. A retry that finds
+	// none is refused rather than guessed at: an action is exactly the thing
+	// nothing else in the record implies.
+	Action string
 	// Payload is the job's arguments, as they were stored.
+	//
+	// As they were, and not masked. Masking them here would cost the retry and
+	// protect nothing. A driver that parks in place still holds the same bytes
+	// -- the database queue leaves the row and only marks failed_at, the redis
+	// queue leaves the job hash and only moves the id -- so a masked copy would
+	// sit one table over from the original, written by the same park. And when
+	// the store no longer holds the job, this is the last copy of the arguments
+	// there is: masked, a retry has nothing to put back.
+	//
+	// What is enforced is the boundary the bytes can actually cross. Reading
+	// them takes a Grant and they are scoped to one tenant, and they never go
+	// into a log line -- a log is shipped, retained and read without a Grant,
+	// which a table is not. Keeping them unreadable at rest as well is
+	// encryption, not redaction: it is one decision for both stores, with a key
+	// to manage and rotate, and doing it to this record alone would leave the
+	// same payload in the clear beside it.
 	Payload []byte
 	// Exception is why it gave up.
 	Exception string
 	// FailedAt is when.
 	FailedAt time.Time
 }
+
+// Action is the permission a failed job list is reached under.
+//
+// One spelling, because a Grant is issued for one action and refused on any
+// other (auth.Grant.Check): the worker that records a parked job and the five
+// commands that read it back have to name the same permission, and they are in
+// different packages. A second spelling is a console that cannot see what the
+// worker wrote.
+const Action auth.Action = "queue:failed"
 
 // FailedJobProvider is where a job goes when it gives up.
 //
@@ -49,6 +88,11 @@ type FailedJob struct {
 // would leak the arguments of every job every customer ever queued.
 type FailedJobProvider interface {
 	// Log records a job that gave up, and returns the id it was recorded under.
+	//
+	// Recording the same job twice records it once. The id is the job's own
+	// uuid, so the second call is the same failure arriving again -- a worker
+	// that retried the write, a replay -- and a dead letter list that answered
+	// with two rows would have an operator retry the work twice.
 	Log(ctx context.Context, g auth.Grant, job FailedJob) (string, error)
 
 	// IDs is the identifiers of the failed jobs, newest first. An empty queue

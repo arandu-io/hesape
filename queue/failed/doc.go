@@ -17,6 +17,14 @@
 // then a deliberate second place, wired on purpose, and the cost -- two stores,
 // two retentions -- is paid knowingly.
 //
+// # The commands read a provider and nothing else
+//
+// `aru queue:failed`, `queue:retry`, `queue:forget` and `queue:flush` are built
+// over a [FailedJobProvider]. An application that registers them and gives the
+// worker no provider -- see queue.Worker.SetFailedJobs -- has four commands
+// over a list nothing writes, and finds that out during the incident they were
+// meant for. Wire the same provider into both.
+//
 // # Every read takes a Grant
 //
 // A failed job carries a customer's payload, so listing them is a read like any
