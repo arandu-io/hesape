@@ -4,6 +4,10 @@
 
 **Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.21.1...v0.22.0
 
+## [v0.22.0](https://github.com/arandu-io/hesape/compare/v0.21.1...v0.22.0) - 2026-09-03
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.21.1...v0.22.0
+
 ## [v0.21.1](https://github.com/arandu-io/hesape/compare/v0.21.0...v0.21.1) - 2026-09-02
 
 **Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.21.0...v0.21.1
