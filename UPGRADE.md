@@ -59,7 +59,10 @@ grammar's canonical spelling, but padding, repeated or control whitespace,
 comments, terminators and unknown operators are rejected with
 `query.ErrInvalidOperator`. `Builder.Err` exposes the first validation error,
 and `ToSQL` returns an empty string after failure; execution methods return the
-error without invoking the database connection.
+error without invoking the database connection. `PrepareValueAndOperator` is
+the exception: it screens a combination and returns the refusal to its caller
+without recording it, so validating an operator assembled from user input and
+falling back to a safe one leaves the builder usable.
 
 An order-by direction is screened by the same barrier. The grammar interpolates
 `Order.Direction` into the statement, so a direction written onto that exported

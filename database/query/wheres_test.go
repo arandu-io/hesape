@@ -178,6 +178,19 @@ func TestPrepareValueAndOperatorRefusesAnOperatorWithNoValue(t *testing.T) {
 	}
 }
 
+func TestPrepareValueAndOperatorRefusesWithoutDisablingTheBuilder(t *testing.T) {
+	b := mysqlBuilder()
+
+	if _, _, err := b.PrepareValueAndOperator(1, "OR 1=1 --", false); !errors.Is(err, query.ErrInvalidOperator) {
+		t.Fatalf("PrepareValueAndOperator() error = %v, want ErrInvalidOperator", err)
+	}
+	if b.Err() != nil {
+		t.Fatalf("Err() = %v: screening a combination disabled the builder", b.Err())
+	}
+
+	assertSQL(t, b.Where("id", "=", 1), "select * from `users` where `id` = ?")
+}
+
 func TestWhereRejectsAnOperatorFragmentBeforeItReachesSQL(t *testing.T) {
 	b := mysqlBuilder().Where("id", "= ? OR 1=1 --", 7)
 
