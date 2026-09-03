@@ -26,6 +26,26 @@ func (e *InvalidOperatorError) Error() string {
 // Unwrap makes InvalidOperatorError match ErrInvalidOperator with errors.Is.
 func (e *InvalidOperatorError) Unwrap() error { return ErrInvalidOperator }
 
+// ErrInvalidDirection is returned when an order-by clause carries a direction
+// that is neither ascending nor descending.
+var ErrInvalidDirection = errors.New("query: invalid order direction")
+
+// InvalidDirectionError identifies the order direction a query refused.
+//
+// Use errors.Is with ErrInvalidDirection when the concrete value is not
+// needed.
+type InvalidDirectionError struct {
+	Direction string
+}
+
+// Error returns a deterministic description of the refused direction.
+func (e *InvalidDirectionError) Error() string {
+	return fmt.Sprintf("query: invalid order direction %q", e.Direction)
+}
+
+// Unwrap makes InvalidDirectionError match ErrInvalidDirection with errors.Is.
+func (e *InvalidDirectionError) Unwrap() error { return ErrInvalidDirection }
+
 // Record is one row as the connection hands it back: column name to value.
 type Record = map[string]any
 

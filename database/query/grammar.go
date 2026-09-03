@@ -163,6 +163,32 @@ func normalizeOperator(grammar Grammar, operator string) (string, error) {
 	return "", &InvalidOperatorError{Operator: operator}
 }
 
+// normalizeOrderDirection rewrites an order's direction in place, in the one
+// spelling the grammar interpolates.
+//
+// OrderBy screens the direction it is handed, but Order.Direction is an
+// exported field that reaches the statement verbatim, so a direction written
+// straight into the clause has to pass the same screen before compilation.
+// Matching is case-insensitive for the same reason operator matching is: a
+// clause assembled by hand is not malformed for spelling a keyword in capitals.
+//
+// A raw order carries an expression instead of a column, and its direction is
+// never interpolated, so it has none to check.
+func normalizeOrderDirection(order *Order) error {
+	if order.SQL != nil {
+		return nil
+	}
+	switch {
+	case strings.EqualFold(order.Direction, "asc"):
+		order.Direction = "asc"
+	case strings.EqualFold(order.Direction, "desc"):
+		order.Direction = "desc"
+	default:
+		return &InvalidDirectionError{Direction: order.Direction}
+	}
+	return nil
+}
+
 func lexicallySafeOperator(operator string) bool {
 	if operator == "" || strings.TrimSpace(operator) != operator ||
 		strings.Contains(operator, "--") || strings.Contains(operator, "/*") ||

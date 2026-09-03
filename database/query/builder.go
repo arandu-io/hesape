@@ -781,9 +781,10 @@ func (b *Builder) BeforeQuery(callback func(*Builder)) *Builder {
 }
 
 // ApplyBeforeQueryCallbacks drains registered callbacks across the complete
-// query graph, then validates every non-raw operator. Callbacks registered by
-// callbacks are part of the same preparation and cannot run midway through SQL
-// compilation. A callback cycle fails closed after a bounded number of rounds.
+// query graph, then validates every non-raw operator and order direction.
+// Callbacks registered by callbacks are part of the same preparation and
+// cannot run midway through SQL compilation. A callback cycle fails closed
+// after a bounded number of rounds.
 func (b *Builder) ApplyBeforeQueryCallbacks() {
 	const maxRounds = 64
 	for range maxRounds {
@@ -796,10 +797,11 @@ func (b *Builder) ApplyBeforeQueryCallbacks() {
 	b.setError(errors.New("query: before-query callbacks did not settle"))
 }
 
-// ValidateForCompilation applies the final operator barrier to the complete
-// query graph without executing callbacks. Grammar compilers use it to reject
-// direct public-field mutations while leaving callback lifecycle ownership to
-// Builder execution methods.
+// ValidateForCompilation applies the final barrier to the complete query
+// graph without executing callbacks: every non-raw operator and every order
+// direction has to be one the grammar declares. Grammar compilers use it to
+// reject direct public-field mutations while leaving callback lifecycle
+// ownership to Builder execution methods.
 func (b *Builder) ValidateForCompilation() error {
 	if b == nil {
 		return errors.New("query: cannot validate a nil builder")
@@ -948,6 +950,18 @@ func (b *Builder) validateQueryGraph(visited map[*Builder]bool, grammar Grammar)
 		}
 		if err := b.validateChild(having.Query, visited, grammar); err != nil {
 			return err
+		}
+	}
+	for i := range b.Orders {
+		if err := normalizeOrderDirection(&b.Orders[i]); err != nil {
+			b.setError(err)
+			return b.err
+		}
+	}
+	for i := range b.UnionOrders {
+		if err := normalizeOrderDirection(&b.UnionOrders[i]); err != nil {
+			b.setError(err)
+			return b.err
 		}
 	}
 	for _, join := range b.Joins {

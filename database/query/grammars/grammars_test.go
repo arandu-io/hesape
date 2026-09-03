@@ -912,3 +912,67 @@ func contains(haystack, needle string) bool {
 		return false
 	})()
 }
+
+func TestPublicCompilersFailClosedAfterDirectOrderDirectionMutation(t *testing.T) {
+	for _, dialect := range dialects() {
+		t.Run(dialect.name, func(t *testing.T) {
+			g := dialect.grammar()
+			b := query.NewBuilder(nil, g, nil).From("users").OrderBy("name")
+			b.Orders[0].Direction = "asc, (select secret from vault) desc"
+
+			if sql := g.CompileSelect(b); sql != "" {
+				t.Fatalf("the public compiler emitted an unfiltered direction: %s", sql)
+			}
+			if !errors.Is(b.Err(), query.ErrInvalidDirection) {
+				t.Fatalf("Err() = %v, want ErrInvalidDirection", b.Err())
+			}
+		})
+	}
+}
+
+func TestUnionOrderDirectionIsScreenedLikeAnOrderDirection(t *testing.T) {
+	for _, dialect := range dialects() {
+		t.Run(dialect.name, func(t *testing.T) {
+			g := dialect.grammar()
+			b := query.NewBuilder(nil, g, nil).From("users").
+				Union(query.NewBuilder(nil, g, nil).From("admins")).
+				OrderBy("name")
+			b.UnionOrders[0].Direction = "asc, (select secret from vault) desc"
+
+			if sql := b.ToSQL(); sql != "" {
+				t.Fatalf("a union order carried an unfiltered direction: %s", sql)
+			}
+			if !errors.Is(b.Err(), query.ErrInvalidDirection) {
+				t.Fatalf("Err() = %v, want ErrInvalidDirection", b.Err())
+			}
+		})
+	}
+}
+
+func TestADirectionWrittenIntoTheClauseIsAcceptedInAnySpellingOfAscAndDesc(t *testing.T) {
+	compile := func(g query.Grammar) string {
+		q := query.NewBuilder(nil, g, nil).From("users").OrderBy("name")
+		q.Orders[0].Direction = "DESC"
+		return q.ToSQL()
+	}
+
+	compiles(t, compile, map[string]string{
+		"mysql":    "select * from `users` order by `name` desc",
+		"mariadb":  "select * from `users` order by `name` desc",
+		"postgres": `select * from "users" order by "name" desc`,
+		"sqlite":   `select * from "users" order by "name" desc`,
+	})
+}
+
+func TestARawOrderKeepsCompilingWithoutADirection(t *testing.T) {
+	compile := func(g query.Grammar) string {
+		return query.NewBuilder(nil, g, nil).From("users").OrderByRaw("field(status, ?, ?)", "new", "old").ToSQL()
+	}
+
+	compiles(t, compile, map[string]string{
+		"mysql":    "select * from `users` order by field(status, ?, ?)",
+		"mariadb":  "select * from `users` order by field(status, ?, ?)",
+		"postgres": `select * from "users" order by field(status, ?, ?)`,
+		"sqlite":   `select * from "users" order by field(status, ?, ?)`,
+	})
+}

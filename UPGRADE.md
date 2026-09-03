@@ -51,7 +51,7 @@ falling back to its name. Mail attachments whose server-side MIME is unknown
 are emitted as `application/octet-stream`, preventing the mail renderer from
 reinferencing an active type from an untrusted filename.
 
-### Query operators are validated before compilation
+### Query operators and order directions are validated before compilation
 
 Every non-raw comparison operator must now be declared by the active
 `query.Grammar.GetOperators` policy. Matching is case-insensitive and emits the
@@ -60,6 +60,12 @@ comments, terminators and unknown operators are rejected with
 `query.ErrInvalidOperator`. `Builder.Err` exposes the first validation error,
 and `ToSQL` returns an empty string after failure; execution methods return the
 error without invoking the database connection.
+
+An order-by direction is screened by the same barrier. The grammar interpolates
+`Order.Direction` into the statement, so a direction written onto that exported
+field must read as `asc` or `desc` in some letter case; anything else is refused
+with `query.ErrInvalidDirection`. `OrderBy` is unchanged, and a raw order
+carries an expression instead of a direction and is unaffected.
 
 Before-query callbacks are drained before the final recursive validation pass,
 including callbacks registered by other callbacks. A callback cycle fails
