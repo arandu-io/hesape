@@ -214,7 +214,7 @@ type Asset struct {
 	URL         string
 }
 
-// URL returns the versioned path of an asset: /_arandu/assets/<hash>/htmx.min.js
+// AssetURL returns the versioned path of an asset: /_arandu/assets/<hash>/htmx.min.js
 //
 // The hash comes from the content, so upgrading HTMX changes the URL and no
 // browser serves a stale script -- without anyone remembering to bump a version.
@@ -231,7 +231,7 @@ type Asset struct {
 // to a file it does not carry. There is no run in which the fallback URL is the
 // answer somebody wanted, which is the whole reason it is not offered: a
 // refusal names the missing asset once, and a plausible URL hides it forever.
-func URL(name string) string {
+func AssetURL(name string) string {
 	assetsMu.RLock()
 	defer assetsMu.RUnlock()
 

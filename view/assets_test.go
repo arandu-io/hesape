@@ -111,7 +111,7 @@ func TestEveryAssetIsServed(t *testing.T) {
 	defer server.Close()
 
 	for _, name := range []string{"app.css", "htmx.min.js", "ui.js"} {
-		url := view.URL(name)
+		url := view.AssetURL(name)
 		if url == "" {
 			t.Errorf("%s has no URL", name)
 			continue
@@ -158,7 +158,7 @@ func TestAnUnregisteredAssetIsRefusedRatherThanLinked(t *testing.T) {
 		}
 	}()
 
-	_ = view.URL("alpine.min.js")
+	_ = view.AssetURL("alpine.min.js")
 }
 
 // TestTheStylesheetDoesNotReadItsOwnOutput pins the one line that keeps this
