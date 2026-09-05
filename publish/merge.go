@@ -17,8 +17,8 @@ import (
 // no backreference to stop it -- and the region between them would be whatever
 // happened to be in the middle.
 var (
-	goBlock   = regexp.MustCompile(`(?s)// arandu:begin custom\n(.*?)// arandu:end custom`)
-	viewBlock = regexp.MustCompile(`(?s)\{\{-- arandu:begin custom --\}\}\n(.*?)\{\{-- arandu:end custom --\}\}`)
+	goBlock   = regexp.MustCompile(`(?s)// arandu:begin custom\n(.*?)[ \t]*// arandu:end custom`)
+	viewBlock = regexp.MustCompile(`(?s)\{\{-- arandu:begin custom --\}\}\n(.*?)[ \t]*\{\{-- arandu:end custom --\}\}`)
 )
 
 // markerFor picks the expression that matches the markers a file carries.
