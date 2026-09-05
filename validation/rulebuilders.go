@@ -6,6 +6,7 @@ import (
 	"unicode"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/enum"
 )
 
 // This file is the rule builders: a typed way to write a rule that a caller
@@ -1085,9 +1086,9 @@ func containsRune(value string, is func(rune) bool) bool {
 
 // Enum is the rule that the value must be one of the cases of a type.
 //
-// Go has no enum type to read the cases off, and no reflection is used here, so
-// the cases are given. Only and Except then narrow them. Build one with
-// NewEnum.
+// Only and Except then narrow them. Build it with EnumOf, which reads the cases
+// off the type, or with NewEnum when there is no type to read -- a set that
+// lives in a column and nowhere else.
 type Enum struct {
 	cases  []string
 	only   []string
@@ -1097,7 +1098,21 @@ type Enum struct {
 }
 
 // NewEnum returns an Enum over the given cases.
+//
+// The cases are text, so the rule can only compare text. Prefer EnumOf wherever
+// a generated type exists: a list written beside a type is a second copy of the
+// set, and the two disagree the first time a case is added to one of them.
 func NewEnum(cases ...string) *Enum { return &Enum{cases: cases} }
+
+// EnumOf returns an Enum over the cases of a generated enum type.
+//
+//	validation.EnumOf(enums.InvoiceStatusValues()...)
+//
+// The cases are derived rather than written, so the rule cannot disagree with
+// the type -- which is the failure a hand-written list produces and nothing
+// reports. It takes the values because the generated list of them is a package
+// function, the one place that knows the declaration order.
+func EnumOf[E enum.Enum](values ...E) *Enum { return &Enum{cases: enum.Names(values...)} }
 
 // Only narrows the cases to these, and nothing else passes.
 func (r *Enum) Only(values ...string) *Enum {
@@ -1115,10 +1130,25 @@ func (r *Enum) Except(values ...string) *Enum {
 
 // Passes reports whether the value is one of the cases, after Only and Except
 // have narrowed them.
+//
+// A value of the enum type is asked rather than compared: stringOf renders a
+// named type as nothing, so comparing text used to refuse every typed value the
+// rule was built for. Only and Except still narrow, and they narrow on the
+// shown spelling, which is what the caller wrote them in.
 func (r *Enum) Passes(attribute string, value any) bool {
 	if value == nil {
 		return false
 	}
+
+	if cases, typed := enum.From(value); typed {
+		if !cases.Valid() {
+			return false
+		}
+		return r.isDesirable(cases.String())
+	}
+
+	// An untyped value -- a string off a form -- is compared against the cases,
+	// which EnumOf derived from the type and cannot have got wrong.
 	text := stringOf(value)
 
 	var known bool

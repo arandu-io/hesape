@@ -615,8 +615,11 @@ var specs = map[string]*spec{
 		eval:    (*Validator).ValidateNotIn,
 		message: func(f *field, r *rule) string { return "is not one of the allowed values" },
 	},
+	// The cases are optional because a typed value carries them: `enum` on a
+	// field holding a generated enum reads the set off the type, and a list
+	// written beside it can only disagree.
 	"enum": {
-		minArgs: 1, maxArgs: -1,
+		minArgs: 0, maxArgs: -1,
 		eval:    (*Validator).ValidateEnum,
 		message: func(f *field, r *rule) string { return "is not one of the allowed values" },
 	},

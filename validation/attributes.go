@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/enum"
 	"github.com/arandu-io/hesape/str"
 )
 
@@ -1044,14 +1045,35 @@ func (v *Validator) ValidateNotIn(attribute string, value any, parameters []stri
 
 // ValidateEnum is `enum`: the value is one of the cases.
 //
-// Go has no enum type to ask, so the cases are the parameters --
-// enum:draft,published,archived -- and the Enum rule builder writes that string
-// from a typed list.
+// A value that carries its own type -- a generated enum -- is asked, and the
+// parameters are not consulted for membership. The list in a rule string is a
+// second copy of a set the type already holds, and a second copy can disagree
+// with it: a case added to the type and not to the rule used to reject a value
+// the column accepts, and the two were never compared by anything.
+//
+// The parameters are still read, for exactly that disagreement. A case named in
+// the rule that the type does not declare fails the rule outright, whatever the
+// value was, because a rule listing a case nothing can produce was written
+// against a different type -- and passing the field would hide it until the
+// case that is missing arrives.
+//
+// Written against an untyped value -- a string straight off a form, which is
+// what a field that has not been typed yet carries -- the parameters are the
+// only set there is, and the rule reads them. Without either, there is nothing
+// to decide against and the value is refused rather than waved through.
 func (v *Validator) ValidateEnum(attribute string, value any, parameters []string) bool {
-	if !v.RequireParameterCount(1, parameters, "enum") {
+	if value == nil || isArray(value) {
 		return false
 	}
-	if value == nil || isArray(value) {
+
+	if cases, typed := enum.From(value); typed {
+		if unknown, comparable := enum.Unknown(cases, parameters); comparable && len(unknown) > 0 {
+			return false
+		}
+		return cases.Valid()
+	}
+
+	if !v.RequireParameterCount(1, parameters, "enum") {
 		return false
 	}
 	return slices.Contains(parameters, stringOf(value))
