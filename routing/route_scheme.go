@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/routing/matching"
 )
 
@@ -105,23 +106,54 @@ func (rt *Route) SetRouter(router *Router) *Route {
 	return rt
 }
 
-// Can records the ability a request must be granted before the route
-// answers, and the resources that ability is asked about.
+// Can declares which authorization action this route requires.
 //
-// Middleware here is a typed function and there is no container to resolve a
-// name through, so the ability is recorded on the route instead: route
-// introspection prints it, and the handler asks auth.Authorize for the
-// Grant, which is the only thing that opens a repository.
-func (rt *Route) Can(ability string, models ...string) *Route {
+//	r.Delete("/invoices/{id}", destroy).Name("invoices.destroy").Can("invoice.delete")
+//
+// It declares and it does not decide, and that difference is the whole of what
+// it is for. Nothing in the dispatch reads it: the handler still asks
+// auth.Authorize, the policy still answers, and the repository still refuses
+// without the Grant that answer produced. A route carrying this and no
+// authorization is exactly as open as one carrying neither -- which is why it
+// cannot become a second way to authorize, and must not be read as one.
+//
+// What it is for is the catalogue. A permissions screen has to list what may be
+// granted, and the honest list is the router: actions written down beside it
+// disagree with the code the first time somebody adds a route. Requirements
+// reads it back.
+//
+// One route requires one action, because Grant.Check compares one. Declaring a
+// second replaces the first rather than adding to it.
+//
+// It used to take a string and a list of models, and to append them into the
+// action map -- which nothing ever read. The type is the action the policy is
+// asked about, and the reader is Requirements: what a route requires is now
+// answerable rather than merely recorded.
+//
+// The declaration is carried to the sibling rows of a single registration --
+// the PATCH of an update, the later verbs of a Match -- because they are one
+// route to everyone but the mux.
+func (rt *Route) Can(action auth.Action) *Route {
 	if rt == nil {
 		return nil
 	}
-	if len(models) > 0 {
-		ability += "," + strings.Join(models, ",")
+	rt.can = action
+	for _, sibling := range rt.siblings {
+		sibling.can = action
 	}
-	existing, _ := rt.action["can"].([]string)
-	rt.action["can"] = append(existing, ability)
 	return rt
+}
+
+// RequiredAction returns the action Can declared, or empty.
+//
+// It is not called Action because that name is the controller action string,
+// and the two are different questions: one is which method answers, this is
+// what the caller has to be allowed to do.
+func (rt *Route) RequiredAction() auth.Action {
+	if rt == nil {
+		return ""
+	}
+	return rt.can
 }
 
 // Block stops two requests of the same session from running this route at

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/pipeline"
 )
 
@@ -92,6 +93,10 @@ type Route struct {
 	// all.
 	lockSeconds *int
 	waitSeconds *int
+	// can is the action this route requires, as Can declared it. It is
+	// metadata: nothing in the dispatch reads it, and the policy is still what
+	// decides. See Can.
+	can auth.Action
 	// deprecatedSince and sunset are what Deprecated set: the instant the
 	// route was deprecated, and the instant it stops answering. Both are zero
 	// on a route that is not deprecated, and Deprecated refuses to set one

@@ -2,6 +2,8 @@ package routing
 
 import (
 	"net/http"
+
+	"github.com/arandu-io/hesape/auth"
 )
 
 // Add registers a route in the table and returns it. It is the exported form
@@ -40,6 +42,54 @@ func (t *Routes) Match(req *http.Request) *Route {
 		return route
 	}
 	return fallback
+}
+
+// Requirement is a route and the action it requires.
+type Requirement struct {
+	// Route is the route that declared it.
+	Route *Route
+	// Action is what Can declared.
+	Action auth.Action
+}
+
+// Requirements lists the routes that declare a required action, in
+// registration order.
+//
+// It is the catalogue, and the router is the enumeration. A list of actions
+// kept beside the routes would be wrong the first time somebody added one
+// without remembering it, and a permissions screen reading that list would
+// offer a permission no route requires -- or leave out one that some route
+// does.
+//
+// The sibling rows of a single registration are left out, so a resource route
+// registered as PUT and PATCH is one requirement rather than two.
+func (t *Routes) Requirements() []Requirement {
+	if t == nil {
+		return nil
+	}
+	all := t.All()
+
+	// A Match registration is one row per verb, linked through siblings, and
+	// they carry the same declaration. Listing each of them would offer the
+	// same permission twice, so the sibling rows are gathered and skipped --
+	// the route returned is the one Methods answers for all of them.
+	sibling := map[*Route]bool{}
+	for _, route := range all {
+		for _, extra := range route.siblings {
+			sibling[extra] = true
+		}
+	}
+
+	var out []Requirement
+	for _, route := range all {
+		if sibling[route] {
+			continue
+		}
+		if action := route.RequiredAction(); action != "" {
+			out = append(out, Requirement{Route: route, Action: action})
+		}
+	}
+	return out
 }
 
 // GetByName returns the route registered with name, or nil. It is the
