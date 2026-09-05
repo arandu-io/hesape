@@ -47,11 +47,11 @@ func digest(b []byte) string {
 // way an application wires it. Calling Handler directly is what every test used
 // to do, and it is why nothing noticed the routes were never registered.
 func TestTheApplicationStylesheetIsWhatTheBrowserGets(t *testing.T) {
-	frameworkDefault := view.AssetURL(view.Stylesheet)
+	frameworkDefault := view.Asset(view.Stylesheet)
 
 	view.RegisterStylesheet(builtByViewBuild)
 
-	url := view.AssetURL(view.Stylesheet)
+	url := view.Asset(view.Stylesheet)
 	if url == frameworkDefault {
 		t.Fatal("the URL did not change: it carries a content hash, and it is served immutable for a year -- every browser would keep the framework's stylesheet forever")
 	}

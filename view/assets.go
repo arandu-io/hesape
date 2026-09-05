@@ -194,27 +194,27 @@ func RegisterAsset(name, contentType string, body []byte) {
 // know what a font is. Sorted by name, so the answer does not change between
 // two runs of a binary serving the same bytes: a map has no order, and markup
 // that differs by line order is markup no diff and no cache can compare.
-func Assets() []Asset {
+func Assets() []Registration {
 	assetsMu.RLock()
 	defer assetsMu.RUnlock()
 
-	out := make([]Asset, 0, len(assets))
+	out := make([]Registration, 0, len(assets))
 	for name, a := range assets {
-		out = append(out, Asset{Name: name, ContentType: a.contentType,
+		out = append(out, Registration{Name: name, ContentType: a.contentType,
 			URL: AssetPath + a.hash + "/" + name})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
-// Asset is one served file, as Registered reports it.
-type Asset struct {
+// Registration is one served file, as Assets reports it.
+type Registration struct {
 	Name        string
 	ContentType string
 	URL         string
 }
 
-// AssetURL returns the versioned path of an asset: /_arandu/assets/<hash>/htmx.min.js
+// Asset returns the versioned path of an asset: /_arandu/assets/<hash>/htmx.min.js
 //
 // The hash comes from the content, so upgrading HTMX changes the URL and no
 // browser serves a stale script -- without anyone remembering to bump a version.
@@ -231,7 +231,7 @@ type Asset struct {
 // to a file it does not carry. There is no run in which the fallback URL is the
 // answer somebody wanted, which is the whole reason it is not offered: a
 // refusal names the missing asset once, and a plausible URL hides it forever.
-func AssetURL(name string) string {
+func Asset(name string) string {
 	assetsMu.RLock()
 	defer assetsMu.RUnlock()
 
