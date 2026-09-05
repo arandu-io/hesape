@@ -207,8 +207,13 @@ func TestPrepareBindingsConvertsBoolsAndTimes(t *testing.T) {
 	connection := NewConnection(nil, "", "", nil)
 
 	got := connection.PrepareBindings([]any{true, false, "x", 3})
-	if got[0] != 1 || got[1] != 0 {
-		t.Fatalf("PrepareBindings answered %v; a bool becomes 0 or 1 because the engines disagree about the wire form", got)
+	// A bool is handed to the driver as a bool. Rewriting it to 1 and 0 here
+	// reads as harmless -- SQLite and MySQL take either -- and it is not:
+	// pgx refuses an integer for a boolean column outright, with "unable to
+	// encode 0 into binary format for bool (OID 16)". A column declared
+	// boolean therefore worked in a test and failed against Postgres.
+	if got[0] != true || got[1] != false {
+		t.Fatalf("PrepareBindings answered %v; a bool reaches the driver as a bool, because pgx refuses an integer for a boolean column", got)
 	}
 	if got[2] != "x" || got[3] != 3 {
 		t.Fatalf("PrepareBindings changed a value it should not have: %v", got)

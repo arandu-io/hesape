@@ -714,12 +714,6 @@ func prepareBindings(grammar query.Grammar, bindings []any) []any {
 		switch v := resolveValuer(value).(type) {
 		case time.Time:
 			out[i] = v.Format(layout)
-		case bool:
-			if v {
-				out[i] = 1
-			} else {
-				out[i] = 0
-			}
 		default:
 			out[i] = v
 		}

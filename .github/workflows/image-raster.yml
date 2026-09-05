@@ -1,0 +1,57 @@
+name: image-raster
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  static-codecs:
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: 'off'
+    defaults:
+      run:
+        working-directory: image/drivers/raster
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+          cache-dependency-path: image/drivers/raster/go.sum
+      - name: Formatting and module integrity
+        run: |
+          test -z "$(gofmt -l .)"
+          go mod verify
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+      - name: Build without CGo
+        run: CGO_ENABLED=0 go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Codec tests and race detector
+        run: go test -race -count=1 ./...
+      - name: Tests really ran
+        run: |
+          out=$(go test -count=1 -v ./...) || { echo "$out"; exit 1; }
+          echo "$out"
+          test "$(grep -c -- '--- PASS' <<<"$out")" -gt 0
+          ! grep -q -- '--- SKIP' <<<"$out"
+      - name: Codec dependencies stay outside the root module
+        working-directory: .
+        run: |
+          deps=$(go list -deps ./image/...)
+          if grep -E 'github.com/(HugoSmits86/nativewebp|fyne-io/oksvg|srwiley/(rasterx|scanFT))' <<<"$deps"; then
+            echo 'optional codecs leaked into the root module'
+            exit 1
+          fi
+      - name: No sibling driver dependencies
+        run: |
+          deps=$(go list -deps ./...)
+          if grep -E 'github.com/arandu-io/hesape/(redis|filesystem/s3|database/connectors|queue/connectors)' <<<"$deps"; then
+            echo 'an unrelated driver entered the image module'
+            exit 1
+          fi

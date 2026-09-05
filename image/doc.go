@@ -17,12 +17,18 @@
 // image/gif from the standard library, which add no third-party dependency.
 // The [Driver] interface stays: registering a custom transformation handler
 // and [ImageManager.Extend] both need something to be an implementation of,
-// and a driver for a format this one cannot write is a real thing to add
-// later.
+// and optional codecs live in their own module rather than adding dependencies
+// to every consumer of this package.
+//
+// The optional github.com/arandu-io/hesape/image/drivers/raster module adds
+// static SVG rasterization and lossless WebP encoding through ImageManager.Extend.
+// It also reads static WebP. PNG/WebP retain alpha; unsupported SVG features
+// and animated inputs are refused. See that module's package documentation for
+// registration, limits, format coverage and third-party license notices.
 //
 // # Which formats
 //
-// Read: JPEG, PNG, GIF. Written: JPEG, PNG, GIF.
+// Standard driver: read JPEG, PNG, GIF; write JPEG, PNG, GIF.
 //
 // [Image.ToFormat] accepts nine names -- webp, jpg, jpeg, png, gif, avif,
 // heic, heif, bmp. Four of them are written, and they are three formats, since
