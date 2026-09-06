@@ -48,8 +48,9 @@ type asset struct {
 // at runtime and costs nothing either. It is here so that a test replacing the
 // stylesheet is not a data race against a server it started.
 var (
-	assetsMu sync.RWMutex
-	assets   = map[string]*asset{}
+	assetsMu     sync.RWMutex
+	assets       = map[string]*asset{}
+	assetAliases = map[string]string{}
 
 	// appStylesheet records that the application already replaced the default,
 	// so a second replacement is an error rather than a coin toss.
@@ -181,7 +182,7 @@ func RegisterAsset(name, contentType string, body []byte) {
 	assetsMu.Lock()
 	defer assetsMu.Unlock()
 
-	if _, exists := assets[name]; exists {
+	if _, exists := assets[name]; exists || assetAliases[name] != "" {
 		panic("view: " + name + " is already registered -- a stale generated file is probably still on disk")
 	}
 	assets[name] = newAsset(name, contentType, body)
@@ -215,6 +216,8 @@ type Registration struct {
 }
 
 // Asset returns the versioned path of an asset: /_arandu/assets/<hash>/htmx.min.js
+// Image source names registered with RegisterImageAsset resolve to their WebP
+// derivatives; no image processing takes place during this lookup.
 //
 // The hash comes from the content, so upgrading HTMX changes the URL and no
 // browser serves a stale script -- without anyone remembering to bump a version.
@@ -235,6 +238,9 @@ func Asset(name string) string {
 	assetsMu.RLock()
 	defer assetsMu.RUnlock()
 
+	if target := assetAliases[name]; target != "" {
+		name = target
+	}
 	a, ok := assets[name]
 	if !ok {
 		panic("view: " + name + " is not a registered asset -- register it with view.RegisterAsset, " +

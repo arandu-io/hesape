@@ -1,6 +1,7 @@
 // Package raster adds static SVG input and lossless WebP output to the native
 // image pipeline without requiring CGo, Node, external processes or network
 // access. JPEG, PNG and static GIF continue through the standard driver.
+// WebP encoding is pure Go; it does not load system libraries or a WASM runtime.
 //
 // Register it explicitly:
 //
@@ -11,13 +12,17 @@
 //	images.SetDefaultDriver("raster")
 //	webp, err := images.FromBytes(svg).ToWebp().ToBytes(ctx)
 //
-// WebP output is lossless (VP8L), including alpha. Quality does not change
-// WebP's fidelity; it continues to control JPEG quality. PNG also preserves
+// WebP output is lossless (VP8L), including alpha, by default. LossyWebP
+// explicitly opts into lossy color compression controlled by pipeline Quality
+// (image.DefaultQuality when zero), while retaining lossless alpha. Measure
+// transfer size and review the chosen viewport before registering an asset.
+// PNG also preserves
 // alpha. JPEG intentionally flattens transparency using the standard driver.
 // The source bytes and the caller's pipeline are never modified.
 //
 // SVG supports the static path/shape/gradient subset implemented by oksvg,
-// including simple CSS classes and a uniform root fill rule. Mixed fill rules
+// including simple CSS classes and inherited per-shape fill rules from
+// presentation attributes or inline styles. Nonuniform stylesheet fill rules
 // are refused. Unsupported elements, external references,
 // scripts, animation, entities and recursive use elements are refused. This
 // is not a browser or a complete SVG implementation. Retain originals and

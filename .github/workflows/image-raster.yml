@@ -33,7 +33,9 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Codec tests and race detector
-        run: go test -race -count=1 ./...
+        run: |
+          go test -race -count=1 ./...
+          go test -tags noasm -race -count=1 ./...
       - name: Tests really ran
         run: |
           out=$(go test -count=1 -v ./...) || { echo "$out"; exit 1; }
@@ -44,7 +46,7 @@ jobs:
         working-directory: .
         run: |
           deps=$(go list -deps ./image/...)
-          if grep -E 'github.com/(HugoSmits86/nativewebp|fyne-io/oksvg|srwiley/(rasterx|scanFT))' <<<"$deps"; then
+          if grep -E 'github.com/(gen2brain/vpx|fyne-io/oksvg|srwiley/(rasterx|scanFT))' <<<"$deps"; then
             echo 'optional codecs leaked into the root module'
             exit 1
           fi

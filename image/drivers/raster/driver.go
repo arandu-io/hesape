@@ -9,8 +9,9 @@ import (
 	"image/png"
 	"sync"
 
-	"github.com/HugoSmits86/nativewebp"
 	"github.com/arandu-io/hesape/image"
+	"github.com/gen2brain/vpx/webp"
+	xwebp "golang.org/x/image/webp"
 )
 
 // Options bounds inputs and selects the SVG raster viewport. Zero values use
@@ -20,6 +21,10 @@ type Options struct {
 	MaxPixels int
 	SVGWidth  int
 	SVGHeight int
+	// LossyWebP opts into lossy color compression with lossless alpha.
+	// ImagePipeline.Output.Quality controls quality, with image.DefaultQuality
+	// when zero. The default remains lossless WebP.
+	LossyWebP bool
 }
 
 type driver struct {
@@ -135,7 +140,7 @@ func (d *driver) normalize(ctx context.Context, b []byte) ([]byte, error) {
 		if len(b) >= 21 && string(b[12:16]) == "VP8X" && b[20]&2 != 0 {
 			return nil, fail("animated WebP is not supported")
 		}
-		img, err = nativewebp.Decode(bytes.NewReader(b))
+		img, err = xwebp.Decode(bytes.NewReader(b))
 	case len(b) >= 6 && (string(b[:6]) == "GIF87a" || string(b[:6]) == "GIF89a"):
 		// Count image descriptors structurally without decoding every frame.
 		if err := staticGIF(b); err != nil {
@@ -186,7 +191,16 @@ func (d *driver) Process(ctx context.Context, b []byte, pipeline *image.ImagePip
 		return nil, fail("decode transformed PNG: %v", err)
 	}
 	var encoded bytes.Buffer
-	if err := nativewebp.Encode(&encoded, canvas, nil); err != nil {
+	quality := 100
+	lossy := d.settings().LossyWebP
+	if lossy {
+		quality = pipeline.Output.Quality
+		if quality == 0 {
+			quality = image.DefaultQuality
+		}
+		quality = max(1, min(100, quality))
+	}
+	if err := webp.Encode(&encoded, canvas, webp.EncodeOptions{Lossless: !lossy, Quality: quality, Method: 6, Exact: true}); err != nil {
 		return nil, fail("encode WebP: %v", err)
 	}
 	if err := ctx.Err(); err != nil {

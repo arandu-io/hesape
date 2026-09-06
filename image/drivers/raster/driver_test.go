@@ -12,12 +12,23 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/HugoSmits86/nativewebp"
 	"github.com/arandu-io/hesape/image"
 	"github.com/arandu-io/hesape/image/drivers/raster"
+	"github.com/gen2brain/vpx/webp"
+	xwebp "golang.org/x/image/webp"
 )
 
 const vector = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><defs><style type="text/css">.brand {fill:#f08030;}</style></defs><path class="brand" d="M5 2H15V8H5Z"/></svg>`
+
+// Decode with an independent implementation to prove the encoder's output.
+// The raster driver also explicitly uses x/image for WebP input.
+func decodeOutput(b []byte) (stdimage.Image, string, error) {
+	if len(b) >= 12 && string(b[:4]) == "RIFF" && string(b[8:12]) == "WEBP" {
+		img, err := xwebp.Decode(bytes.NewReader(b))
+		return img, "webp", err
+	}
+	return stdimage.Decode(bytes.NewReader(b))
+}
 
 func manager(t *testing.T, options raster.Options) *image.ImageManager {
 	t.Helper()
@@ -44,7 +55,7 @@ func inputs(t *testing.T) map[string][]byte {
 		"png":  func(b *bytes.Buffer) error { return png.Encode(b, img) },
 		"jpg":  func(b *bytes.Buffer) error { return jpeg.Encode(b, img, nil) },
 		"gif":  func(b *bytes.Buffer) error { return gif.Encode(b, img, nil) },
-		"webp": func(b *bytes.Buffer) error { return nativewebp.Encode(b, img, nil) },
+		"webp": func(b *bytes.Buffer) error { return webp.Encode(b, img, webp.EncodeOptions{Lossless: true}) },
 	}
 	for name, encode := range encoders {
 		var b bytes.Buffer
@@ -74,7 +85,7 @@ func TestStaticConversionMatrix(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				decoded, format, err := stdimage.Decode(bytes.NewReader(out))
+				decoded, format, err := decodeOutput(out)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -104,7 +115,7 @@ func TestSVGColorsAndTransparency(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		img, _, err := stdimage.Decode(bytes.NewReader(out))
+		img, _, err := decodeOutput(out)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -119,7 +130,52 @@ func TestSVGColorsAndTransparency(t *testing.T) {
 		if pixel != (color.NRGBA{240, 128, 48, 255}) {
 			t.Fatalf("CSS class color lost: %v", pixel)
 		}
+		registered, _, err := stdimage.Decode(bytes.NewReader(out))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := color.NRGBAModel.Convert(registered.At(20, 10)); got != pixel {
+			t.Fatalf("registered decoder changed lossless color: %v", got)
+		}
 	}
+}
+
+func TestLossyWebPIsExplicitAndPreservesAlpha(t *testing.T) {
+	m := manager(t, raster.Options{SVGWidth: 40, SVGHeight: 20, LossyWebP: true})
+	out, err := m.FromBytes([]byte(vector)).ToWebp().Quality(90).ToBytes(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := xwebp.Decode(bytes.NewReader(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(out, []byte("VP8 ")) {
+		t.Fatal("lossy WebP did not use VP8")
+	}
+	pixel := color.NRGBAModel.Convert(decoded.At(20, 10)).(color.NRGBA)
+	// VP8 stores subsampled chroma, so color is approximate even at quality 90.
+	if abs(int(pixel.R)-240) > 20 || abs(int(pixel.G)-128) > 20 || abs(int(pixel.B)-48) > 20 {
+		t.Fatalf("solid color changed excessively: %v", pixel)
+	}
+	_, _, _, alpha := decoded.At(0, 0).RGBA()
+	if alpha != 0 || pixel.A != 255 {
+		t.Fatal("lossy color encoding changed alpha")
+	}
+	roundTrip, err := m.FromBytes(out).ToPng().ToBytes(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := png.Decode(bytes.NewReader(roundTrip)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 func TestWebPAlphaRoundTripAndDefaultFormat(t *testing.T) {
@@ -142,7 +198,7 @@ func TestWebPAlphaRoundTripAndDefaultFormat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, format, err := stdimage.Decode(bytes.NewReader(out))
+	decoded, format, err := decodeOutput(out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +305,7 @@ func TestExportedLogoFillRuleAndMetadata(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		img, _, err := stdimage.Decode(bytes.NewReader(out))
+		img, _, err := decodeOutput(out)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -259,11 +315,33 @@ func TestExportedLogoFillRuleAndMetadata(t *testing.T) {
 		}
 	}
 	for _, source := range []string{
-		`<svg viewBox="0 0 20 20"><path fill-rule="evenodd" d="M1 1H19V19H1Z"/></svg>`,
+		`<svg viewBox="0 0 20 20"><path fill-rule="invalid" d="M1 1H19V19H1Z"/></svg>`,
 		`<svg viewBox="0 0 20 20"><metadata><path d="M1 1H19V19H1Z"/></metadata></svg>`,
 	} {
 		if _, err := m.FromBytes([]byte(source)).ToWebp().ToBytes(context.Background()); err == nil {
 			t.Fatal("unsupported document silently rendered")
+		}
+	}
+}
+
+func TestPerPathFillRulesPreserveHolesAndSiblingInheritance(t *testing.T) {
+	m := manager(t, raster.Options{})
+	source := `<svg viewBox="0 0 80 20"><path fill-rule="evenodd" d="M1 1H19V19H1Z M5 5H15V15H5Z"/><path d="M21 1H39V19H21Z M25 5H35V15H25Z"/><g fill-rule="evenodd"><path d="M41 1H59V19H41Z M45 5H55V15H45Z"/><path style="fill-rule:nonzero" fill-rule="evenodd" d="M61 1H79V19H61Z M65 5H75V15H65Z"/></g></svg>`
+	out, err := m.FromBytes([]byte(source)).ToWebp().ToBytes(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, _, err := decodeOutput(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []struct {
+		x           int
+		transparent bool
+	}{{10, true}, {30, false}, {50, true}, {70, false}} {
+		_, _, _, a := img.At(p.x, 10).RGBA()
+		if (a == 0) != p.transparent {
+			t.Fatalf("fill rule at %d: alpha %d", p.x, a)
 		}
 	}
 }
@@ -302,7 +380,7 @@ func TestResizedSVGViewBoxOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	img, _, err := stdimage.Decode(bytes.NewReader(out))
+	img, _, err := decodeOutput(out)
 	if err != nil {
 		t.Fatal(err)
 	}

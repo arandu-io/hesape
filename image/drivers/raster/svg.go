@@ -189,7 +189,7 @@ func renderSVG(ctx context.Context, b []byte, o Options) (result stdimage.Image,
 	if err != nil {
 		return nil, err
 	}
-	prepared, nonZero, err := prepareSVG(b)
+	prepared, winding, err := prepareSVG(b)
 	if err != nil {
 		return nil, err
 	}
@@ -199,6 +199,9 @@ func renderSVG(ctx context.Context, b []byte, o Options) (result stdimage.Image,
 	}
 	if icon.ViewBox.W <= 0 || icon.ViewBox.H <= 0 {
 		return nil, fail("invalid renderer viewport")
+	}
+	if len(winding) != len(icon.SVGPaths) {
+		return nil, fail("SVG path and fill-rule counts disagree")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -210,11 +213,11 @@ func renderSVG(ctx context.Context, b []byte, o Options) (result stdimage.Image,
 	// Scale the viewBox origin as well as its paths. SetTarget translates
 	// before scaling, which misplaces a nonzero origin at resized dimensions.
 	icon.Transform = rasterx.Identity.Scale(float64(w)/icon.ViewBox.W, float64(h)/icon.ViewBox.H).Translate(-icon.ViewBox.X, -icon.ViewBox.Y)
-	for _, path := range icon.SVGPaths {
+	for i, path := range icon.SVGPaths {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		path.UseNonZeroWinding = nonZero
+		path.UseNonZeroWinding = winding[i]
 		path.DrawTransformed(raster, 1, icon.Transform)
 	}
 	return canvas, nil
@@ -222,25 +225,30 @@ func renderSVG(ctx context.Context, b []byte, o Options) (result stdimage.Image,
 
 var fillRule = regexp.MustCompile(`(?i)fill-rule\s*:\s*([a-z]+)`)
 
-// oksvg does not apply fill-rule declarations. Support a uniform explicit
-// rule (common in exported logos), and refuse mixed rules instead of changing
-// holes in the artwork. Non-rendering metadata is represented as description
-// in the in-memory input; the caller's original bytes remain untouched.
-func prepareSVG(b []byte) ([]byte, bool, error) {
+// oksvg does not apply fill-rule declarations. Resolve presentation attributes
+// and inline styles with inheritance per drawable, then bind them to the
+// renderer's paths in document order. Stylesheet declarations remain limited
+// to the root rule because there is no second CSS cascade here.
+// Metadata becomes description in memory; original bytes remain untouched.
+func prepareSVG(b []byte) ([]byte, []bool, error) {
 	decoder := xml.NewDecoder(bytes.NewReader(b))
 	var out bytes.Buffer
 	encoder := xml.NewEncoder(&out)
-	rule := "nonzero"
-	setRule := func(value string, root bool) error {
+	stack := []bool{true}
+	var winding []bool
+	defsDepth := 0
+	parseRule := func(value string, inherited bool) (bool, error) {
 		value = strings.ToLower(strings.TrimSpace(value))
-		if value != "nonzero" && value != "evenodd" {
-			return fail("unsupported SVG fill rule")
+		switch value {
+		case "nonzero":
+			return true, nil
+		case "evenodd":
+			return false, nil
+		case "inherit":
+			return inherited, nil
+		default:
+			return false, fail("unsupported SVG fill rule")
 		}
-		if !root && rule != value {
-			return fail("mixed SVG fill rules are not supported")
-		}
-		rule = value
-		return nil
 	}
 	for {
 		token, err := decoder.Token()
@@ -248,46 +256,69 @@ func prepareSVG(b []byte) ([]byte, bool, error) {
 			break
 		}
 		if err != nil {
-			return nil, false, err
+			return nil, nil, err
 		}
 		switch t := token.(type) {
 		case xml.StartElement:
+			inherited := stack[len(stack)-1]
+			rule := inherited
+			if t.Name.Local == "defs" {
+				defsDepth++
+			}
 			if t.Name.Local == "metadata" {
 				t.Name.Local = "desc"
 			}
 			for _, a := range t.Attr {
 				if a.Name.Local == "fill-rule" {
-					if err := setRule(a.Value, t.Name.Local == "svg"); err != nil {
-						return nil, false, err
+					rule, err = parseRule(a.Value, inherited)
+					if err != nil {
+						return nil, nil, err
 					}
 				}
+			}
+			// Inline styles override presentation attributes regardless of the
+			// order the XML attributes were written in.
+			for _, a := range t.Attr {
 				if a.Name.Local == "style" {
 					for _, match := range fillRule.FindAllStringSubmatch(a.Value, -1) {
-						if err := setRule(match[1], t.Name.Local == "svg"); err != nil {
-							return nil, false, err
+						rule, err = parseRule(match[1], inherited)
+						if err != nil {
+							return nil, nil, err
 						}
 					}
 				}
 			}
+			stack = append(stack, rule)
+			if defsDepth == 0 {
+				switch t.Name.Local {
+				case "path", "rect", "circle", "ellipse", "line", "polyline", "polygon":
+					winding = append(winding, rule)
+				}
+			}
 			token = t
 		case xml.EndElement:
+			stack = stack[:len(stack)-1]
+			if t.Name.Local == "defs" {
+				defsDepth--
+			}
 			if t.Name.Local == "metadata" {
 				t.Name.Local = "desc"
 			}
 			token = t
 		case xml.CharData:
 			for _, match := range fillRule.FindAllStringSubmatch(string(t), -1) {
-				if err := setRule(match[1], false); err != nil {
-					return nil, false, err
+				rule, err := parseRule(match[1], stack[len(stack)-1])
+				if err != nil || rule != stack[len(stack)-1] {
+					return nil, nil, fail("nonuniform stylesheet SVG fill rules are not supported")
 				}
 			}
 		}
 		if err := encoder.EncodeToken(token); err != nil {
-			return nil, false, err
+			return nil, nil, err
 		}
 	}
 	if err := encoder.Flush(); err != nil {
-		return nil, false, err
+		return nil, nil, err
 	}
-	return out.Bytes(), rule != "evenodd", nil
+	return out.Bytes(), winding, nil
 }
