@@ -50,6 +50,41 @@ type Tx struct {
 // the same operation, and the shape this framework wants is one write, one
 // outcome.
 func Transaction(ctx context.Context, db *DB, fn func(context.Context) error) error {
+	return TransactionAt(ctx, db, sql.LevelDefault, fn)
+}
+
+// TransactionAt runs fn inside a transaction opened at the named isolation
+// level.
+//
+// It is Transaction with the level stated instead of inherited, and everything
+// said there holds here: the transaction travels on the context, returning an
+// error rolls back, a panic keeps panicking, and a transaction inside a
+// transaction joins the outer one.
+//
+// # Why the level is named when the transaction opens
+//
+// The alternative is a SET statement as the first thing inside it, and that
+// alternative is not portable. PostgreSQL takes SET TRANSACTION ISOLATION LEVEL
+// inside an open transaction; MySQL refuses it there -- the characteristics of a
+// transaction cannot be changed once it is in progress -- and would need SET
+// SESSION instead, which outlives the transaction and rides the connection back
+// into the pool set for everybody. Naming it here hands the level to BeginTx,
+// where the driver of each engine spells it the way that engine takes.
+//
+// # A joined transaction keeps the level it was opened at
+//
+// Where the context already carries a transaction on this handle, fn joins it
+// and the level asked for here is not applied. Changing the level of a
+// transaction somebody else opened would be deciding about statements this call
+// cannot see, and on MySQL it is not expressible at all. A caller that needs a
+// guarantee from the level opens the transaction itself.
+//
+// sql.LevelDefault is what Transaction passes, and it means the engine's own
+// default -- which is not the same on every engine, and is a setting an operator
+// can change for a whole cluster. Code whose correctness rests on what a
+// predicate is evaluated against while another transaction changes the same row
+// names the level rather than inheriting it.
+func TransactionAt(ctx context.Context, db *DB, level sql.IsolationLevel, fn func(context.Context) error) error {
 	if db == nil {
 		return errors.New("database: Transaction needs a database handle")
 	}
@@ -59,7 +94,11 @@ func Transaction(ctx context.Context, db *DB, fn func(context.Context) error) er
 		return fn(ctx)
 	}
 
-	inner, err := db.inner.BeginTx(ctx, nil)
+	var opts *sql.TxOptions
+	if level != sql.LevelDefault {
+		opts = &sql.TxOptions{Isolation: level}
+	}
+	inner, err := db.inner.BeginTx(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("beginning the transaction: %w", err)
 	}

@@ -41,6 +41,7 @@ import (
 	"database/sql"
 	"fmt"
 	"math"
+
 	"testing"
 	"time"
 
@@ -86,6 +87,9 @@ func Run(t *testing.T, dialect database.Dialect, driverName, dsn string) {
 	})
 	t.Run("a transaction rolls back", func(t *testing.T) {
 		testTransactionRollback(t, db)
+	})
+	t.Run("a transaction opens at the level it names", func(t *testing.T) {
+		testTransactionIsolation(t, dialect, db)
 	})
 }
 
@@ -332,4 +336,95 @@ func drop(t *testing.T, db *database.DB, name string) {
 	t.Helper()
 	// A missing table is not an error here: this runs before the create.
 	_, _ = db.ExecContext(context.Background(), `DROP TABLE IF EXISTS `+name)
+}
+
+// testTransactionIsolation is the claim that an isolation level asked for is an
+// isolation level the transaction has.
+//
+// It belongs in a suite that speaks to real servers because the portable way of
+// asking is the only way that works on all three, and the unportable one looks
+// fine until an engine sees it. A SET statement as the first thing inside an
+// open transaction is taken by PostgreSQL and refused by MySQL -- the
+// characteristics of a transaction cannot be changed once it is in progress --
+// so code written that way names its level on one engine and inherits whatever
+// the operator configured on another. TransactionAt hands the level to BeginTx,
+// where each driver spells it the way its engine takes.
+//
+// # It asks by behaviour, not by variable
+//
+// Reading the level back does not answer the question. On MySQL the driver sets
+// the level for the transaction it is about to open, and @@transaction_isolation
+// goes on reporting the session's -- so the introspective form reads
+// REPEATABLE-READ inside a transaction that is reading committed, and a test
+// written that way fails against a server that is behaving correctly.
+//
+// What read committed means is that a row committed by somebody else, after
+// this transaction began, is visible to it. That is asked here by doing it: read
+// a row, let another connection change it and commit, read it again. Under read
+// committed the second read is the new value; under repeatable read it is the
+// first one.
+//
+// The default is not the same on the three: PostgreSQL reads committed, InnoDB
+// repeats reads. So this passes on PostgreSQL whether or not the level was
+// applied, and on MySQL only if it was -- which is the engine the claim was
+// untested on.
+//
+// SQLite is left out: a writer holds the database, so there is no second
+// connection to commit from while a transaction is open.
+func testTransactionIsolation(t *testing.T, dialect database.Dialect, db *database.DB) {
+	if dialect == database.DialectSQLite {
+		t.Skip("SQLite has one writer at a time: there is no concurrent commit to see")
+	}
+
+	ctx := context.Background()
+	name := table("levels")
+	drop(t, db, name)
+	t.Cleanup(func() { drop(t, db, name) })
+
+	if _, err := db.ExecContext(ctx, fmt.Sprintf(
+		`CREATE TABLE %s (id %s PRIMARY KEY, amount BIGINT NOT NULL)`,
+		name, database.KeyText)); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		fmt.Sprintf(`INSERT INTO %s (id, amount) VALUES (?, ?)`, name), "1", 1); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	read := func(ctx context.Context) (int64, error) {
+		var amount int64
+		err := db.QueryRowContext(ctx,
+			fmt.Sprintf(`SELECT amount FROM %s WHERE id = ?`, name), "1").Scan(&amount)
+		return amount, err
+	}
+
+	err := database.TransactionAt(ctx, db, sql.LevelReadCommitted, func(ctx context.Context) error {
+		before, err := read(ctx)
+		if err != nil {
+			return fmt.Errorf("the first read: %w", err)
+		}
+		if before != 1 {
+			t.Errorf("the first read = %d, want 1", before)
+		}
+
+		// Outside the transaction, because the context it travels on is the one
+		// above rather than this one.
+		if _, err := db.ExecContext(context.Background(),
+			fmt.Sprintf(`UPDATE %s SET amount = ? WHERE id = ?`, name), 2, "1"); err != nil {
+			return fmt.Errorf("the concurrent commit: %w", err)
+		}
+
+		after, err := read(ctx)
+		if err != nil {
+			return fmt.Errorf("the second read: %w", err)
+		}
+		if after != 2 {
+			t.Errorf("the second read = %d, want 2: this transaction is not reading committed, "+
+				"so the level it named was not applied", after)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("a transaction at read committed: %v", err)
+	}
 }
