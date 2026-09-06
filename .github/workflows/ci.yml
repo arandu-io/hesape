@@ -361,7 +361,7 @@ jobs:
 
             # Absolute paths, because a use directive is resolved against the
             # directory the go.work is in and this one is outside the checkout.
-            printf 'go 1.26\n\nuse (\n\t%s\n\t%s\n)\n' "$root" "$root/$dir" > "$work/go.work"
+            printf 'go 1.26.4\n\nuse (\n\t%s\n\t%s\n)\n' "$root" "$root/$dir" > "$work/go.work"
 
             if ! (cd "$dir" && GOWORK="$work/go.work" go build ./...); then
               echo "  $dir does not build against the core in this tree"
