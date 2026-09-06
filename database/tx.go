@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/arandu-io/hesape/log"
@@ -36,6 +37,33 @@ type txKey struct{ db *DB }
 type Tx struct {
 	inner   *sql.Tx
 	dialect Dialect
+
+	// The work waiting on this transaction committing. It is held here rather
+	// than on the context because only the outermost transaction builds a Tx --
+	// a nested one joins this same value -- so a callback registered at any
+	// depth is a callback this one owns and this one runs.
+	mu          sync.Mutex
+	afterCommit []func(context.Context)
+}
+
+// addAfterCommit queues work for when this transaction commits.
+func (t *Tx) addAfterCommit(fn func(context.Context)) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.afterCommit = append(t.afterCommit, fn)
+}
+
+// takeAfterCommit hands over the queue and empties it.
+//
+// Emptied, so a callback cannot run twice however this transaction ends, and
+// taken under the lock because the queue is appended to by whatever ran inside
+// the transaction.
+func (t *Tx) takeAfterCommit() []func(context.Context) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	queued := t.afterCommit
+	t.afterCommit = nil
+	return queued
 }
 
 // Transaction runs fn inside a database transaction.
@@ -90,7 +118,7 @@ func TransactionAt(ctx context.Context, db *DB, level sql.IsolationLevel, fn fun
 	}
 	// Reentrant per handle: a transaction on this database joins; one on a
 	// different database opens its own, because they are different databases.
-	if _, ok := ctx.Value(txKey{db}).(*Tx); ok {
+	if _, ok := txFrom(ctx, db); ok {
 		return fn(ctx)
 	}
 
@@ -122,7 +150,85 @@ func TransactionAt(ctx context.Context, db *DB, level sql.IsolationLevel, fn fun
 		return fmt.Errorf("committing: %w", err)
 	}
 	committed = true
+
+	// Only here, and only on this line's side of it. Everything the transaction
+	// wrote is durable now, so what these were waiting for has happened.
+	runAfterCommit(ctx, db, tx.takeAfterCommit())
 	return nil
+}
+
+// AfterCommit runs fn once the outermost transaction on db has committed.
+//
+// It is how work that must not happen twice, and must not happen at all if the
+// write did not, is attached to a write: a notification, a cache invalidation,
+// a job handed to a queue. Registered at any depth, it belongs to the outermost
+// transaction, because that is the one whose commit makes anything durable.
+//
+// Outside a transaction it runs immediately, which is the same promise kept
+// under the only circumstances there are: the write it is about has already
+// happened.
+//
+// A rollback discards it. So does a panic, because the deferred rollback is
+// what runs. There is no callback for that case here -- a caller that needs to
+// know a transaction failed reads the error it returned.
+//
+// fn is handed a context on which InTransaction reports false, so a callback
+// cannot mistake itself for part of the write and cannot open a statement that
+// joins a transaction that has ended.
+//
+// # This is not durable delivery
+//
+// A process that dies between the commit and the callback loses it, and no
+// amount of ordering inside one process fixes that. What after-commit removes
+// is the announcement of a write that was rolled back; what it does not add is
+// a guarantee that the announcement arrives. Work that has to arrive is written
+// into the same transaction as the row and read out of the database afterwards
+// -- an outbox -- and deferring a callback is not that, however carefully it is
+// deferred.
+func AfterCommit(ctx context.Context, db *DB, fn func(context.Context)) error {
+	if db == nil {
+		return errors.New("database: AfterCommit needs a database handle")
+	}
+	if fn == nil {
+		return errors.New("database: AfterCommit needs something to run")
+	}
+
+	tx, ok := txFrom(ctx, db)
+	if !ok {
+		fn(withoutTransaction(ctx, db))
+		return nil
+	}
+	tx.addAfterCommit(fn)
+	return nil
+}
+
+// runAfterCommit runs what a committed transaction left waiting.
+//
+// Every one of them runs, in the order they were registered, and one that
+// panics does not stop the rest: the commit already happened, so a callback
+// cannot undo it, and letting the first failure swallow the others would hide
+// work that had nothing to do with it.
+func runAfterCommit(ctx context.Context, db *DB, queued []func(context.Context)) {
+	if len(queued) == 0 {
+		return
+	}
+	after := withoutTransaction(ctx, db)
+	for _, fn := range queued {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.FromContext(ctx).RecordQuery(
+						"after-commit callback panicked", []any{r}, 0, -1, nil)
+				}
+			}()
+			fn(after)
+		}()
+	}
+}
+
+// withoutTransaction is ctx with the transaction on db reported as ended.
+func withoutTransaction(ctx context.Context, db *DB) context.Context {
+	return context.WithValue(ctx, txKey{db}, (*Tx)(nil))
 }
 
 // InTransaction reports whether the context is inside a transaction on db.
@@ -135,14 +241,19 @@ func TransactionAt(ctx context.Context, db *DB, level sql.IsolationLevel, fn fun
 // database. An outbox on the analytics handle is not protected by a transaction
 // open on the primary.
 func InTransaction(ctx context.Context, db *DB) bool {
-	_, ok := ctx.Value(txKey{db}).(*Tx)
+	_, ok := txFrom(ctx, db)
 	return ok
 }
 
 // txFrom returns the open transaction on db, if any.
+//
+// A nil under the key is not a transaction: it is how the context handed to an
+// after-commit callback says that the transaction it is about has ended. The
+// alternative would be a context with the key removed, and a context cannot
+// have a value removed.
 func txFrom(ctx context.Context, db *DB) (*Tx, bool) {
 	tx, ok := ctx.Value(txKey{db}).(*Tx)
-	return tx, ok
+	return tx, ok && tx != nil
 }
 
 func (t *Tx) queryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
