@@ -112,7 +112,7 @@ func (l Limit) FallbackKey() string {
 // It replaces two implementations that disagreed: an in-memory one in the HTTP
 // middleware, which counted per process -- so N replicas allowed N times the
 // limit, on the one endpoint where that gap is worth exploiting -- and a second
-// one in the kv adapter. There is one now, and which store it counts in is
+// one in the former distributed adapter. There is one now, and which store it counts in is
 // wiring.
 //
 // It does not decide what happens when the store is unreachable. It reports the

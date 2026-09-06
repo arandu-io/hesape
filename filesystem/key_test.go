@@ -144,7 +144,7 @@ func TestATenantCannotBeAPathItself(t *testing.T) {
 	for _, tenant := range []string{
 		"acme/reports", // collides with tenant "acme" storing "reports/..."
 		"../../etc",    // leaves the prefix entirely
-		"a:b",          // a separator in kv
+		"a:b",          // a separator in Redis keys
 		"a\x00b",       // truncates in every syscall that takes a path
 		"..",
 		"/",

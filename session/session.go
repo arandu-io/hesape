@@ -45,9 +45,9 @@ var (
 // the empty subject" of one tenant is every session nobody has signed in on
 // -- the guests. Found by audit: RecordStore.DestroyOthers refused both, and the
 // in-memory handler's DestroyIndex, which is exported and reachable without the
-// store, happily deleted every guest session of a tenant while the kv handler
+// store, happily deleted every guest session of a tenant while the Redis handler
 // answered the same call with an error. Two handlers that disagree is a bug that
-// only appears in production, which is the only place the kv one runs.
+// only appears when the application switches to shared storage.
 var errNoSubjectScope = errors.New("session: signing out the other sessions needs a subject with an id and a tenant")
 
 // RememberLifetime is how long a session started with Remember(true) lives.
@@ -173,8 +173,8 @@ func (rec Record[T]) PasswordConfirmedWithin(window time.Duration) bool {
 // takes the tenant, and it refuses an empty one.
 //
 // The core ships ArrayHandler only, which is enough for development and for a
-// single instance. The kv adapter provides the distributed store with active
-// invalidation; see 00-meta/DOC-repositories.md.
+// single instance. A Redis-backed handler provides shared storage and active
+// invalidation across application instances.
 type Handler[T any] interface {
 	// Read returns the record, or ErrExpired when the handler does not hold the
 	// id -- expired, evicted, or destroyed by a logout elsewhere.
@@ -182,7 +182,7 @@ type Handler[T any] interface {
 	// ErrExpired specifically, not the handler's own not-found error. Callers
 	// branch on it to send somebody back to the login page, and a handler that
 	// returns something else makes swapping the store change the behaviour of the
-	// application. Found by audit: the kv handler returned its own kv.ErrNotFound,
+	// application. Found by audit: the distributed handler returned its own not-found error,
 	// so an expired session in Redis fell through to the generic error path that a
 	// single-instance deployment never reached.
 	Read(ctx context.Context, id string) (Record[T], error)
@@ -423,7 +423,7 @@ func (s *RecordStore[T]) Confirm(ctx context.Context, w http.ResponseWriter, r *
 	// not survivable by the person in front of it: the sensitive action asks
 	// PasswordConfirmedWithin, gets no, sends them to the password screen, they
 	// type it correctly, and land on the password screen again -- forever, with
-	// nothing in the logs. Found by audit on the kv handler, whose stored shape
+	// nothing in the logs. Found by audit on the Redis handler, whose stored shape
 	// does not carry this field and cannot yet, because the field is newer than
 	// the framework version that module requires.
 	//
@@ -547,7 +547,7 @@ func newID() (string, error) {
 //
 // It is the right choice for development and for a single instance. Behind more
 // than one pod it silently logs people out on every deploy and on every request
-// routed elsewhere -- use the kv adapter there.
+// routed elsewhere -- use a Redis-backed handler for shared storage.
 type ArrayHandler[T any] struct {
 	mu      sync.RWMutex
 	entries map[string]arrayEntry[T]
@@ -611,12 +611,12 @@ func (h *ArrayHandler[T]) Destroy(ctx context.Context, id string) error {
 // getting that wrong leaves a password reset believing it signed somebody out.
 // This handler holds one instance's sessions, and walking them costs less than
 // the round trip the caller just made. A distributed handler cannot scan and
-// carries a real index -- see the kv adapter.
+// carries a shared index instead.
 func (h *ArrayHandler[T]) DestroyIndex(ctx context.Context, tenant, subjectID, keepID string) error {
 	// The same refusal RecordStore.DestroyOthers makes, repeated here because this
 	// method is exported and a caller can reach it without the store. It used to
 	// loop with whatever it was given: tenant "t1" and an empty subject id matched
-	// every session that had no subject on it, which is every guest, and the kv
+	// every session that had no subject on it, which is every guest, and the Redis
 	// handler refused the identical call. See errNoSubjectScope.
 	if tenant == "" || subjectID == "" {
 		return errNoSubjectScope

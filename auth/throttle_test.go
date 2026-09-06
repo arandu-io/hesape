@@ -44,7 +44,7 @@ func refused(th *MemoryThrottle, tenant, identity, client string) bool {
 }
 
 // TestMemoryThrottleIsASignInThrottle is what keeps the in-memory counter and
-// the kv-backed one the same thing rather than two shapes with one name.
+// the Redis-backed one the same thing rather than two shapes with one name.
 func TestMemoryThrottleIsASignInThrottle(t *testing.T) {
 	var _ SignInThrottle = NewMemoryThrottle()
 }

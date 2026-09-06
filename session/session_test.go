@@ -542,7 +542,7 @@ func TestSigningInDoesNotInheritTheOldSessionsConfirmation(t *testing.T) {
 
 // forgetfulHandler stores the record the way a handler with its own wire shape
 // does: the fields it was written to know about, and nothing else. It stands in
-// for the kv handler, whose stored shape predates PasswordConfirmedAt.
+// for an older distributed handler whose stored shape predates PasswordConfirmedAt.
 type forgetfulHandler struct{ *session.ArrayHandler[account] }
 
 func (h forgetfulHandler) Write(ctx context.Context, id string, rec session.Record[account], ttl time.Duration) error {
@@ -571,7 +571,7 @@ func TestAHandlerThatDropsTheStampIsRefusedRatherThanLooping(t *testing.T) {
 
 // TestSigningOutASubjectNobodySignedInIsRefusedByTheHandlerToo: ArrayHandler is
 // exported and reachable without the store, and an empty subject id matches every
-// session that has no subject on it -- every guest. The kv handler refuses the
+// session that has no subject on it -- every guest. The Redis handler refuses the
 // same call, and two handlers that disagree only diverge in production.
 func TestSigningOutASubjectNobodySignedInIsRefusedByTheHandlerToo(t *testing.T) {
 	handler := session.NewArrayHandler[account]()

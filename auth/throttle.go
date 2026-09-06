@@ -95,7 +95,7 @@ const (
 // authentication on the routes where it matters most.
 //
 // So: a second interface, and deliberately not a second mechanism. The
-// in-memory implementation below is what the core ships; a kv-backed one has
+// in-memory implementation below is what the core ships; a Redis-backed one has
 // this same shape, which is what makes it an adapter rather than a mode. The
 // context is on all three methods for that implementation's sake -- it is the
 // one that talks over a socket, and a sign-in form that cannot give up on a
@@ -139,7 +139,7 @@ const maxTrackedSignIns = 1 << 16
 //
 // It is right for development and for a single instance. Behind more than one
 // pod the budget multiplies by the number of pods, the same way the in-memory
-// route limiter's window does -- use the kv-backed implementation there.
+// route limiter's window does -- use the Redis-backed implementation there.
 //
 // It has no background goroutine. Everything it removes, it removes on the call
 // that would have grown it, because a sweeper started by a constructor outlives
