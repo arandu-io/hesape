@@ -1,5 +1,5 @@
-github.com/arandu-io/hesape v0.24.0 h1:he9SikBH828EjG66mcQ322G6Jag2yTtUzTTTDZjKrtY=
-github.com/arandu-io/hesape v0.24.0/go.mod h1:KNXJJuKrDIpWvJgNbE2LxtHkOqO4J6cqPkmMcNlxrL0=
+github.com/arandu-io/hesape v0.25.2 h1:03iVVLGxfI7Er0GhY615LUlG3DP5P7N5B9B3GUzn+sY=
+github.com/arandu-io/hesape v0.25.2/go.mod h1:KNXJJuKrDIpWvJgNbE2LxtHkOqO4J6cqPkmMcNlxrL0=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
