@@ -757,6 +757,111 @@
 	document.addEventListener('htmx:afterSettle', function (event) { update(event.target); });
 	document.addEventListener('htmx:beforeCleanupElement', function (event) { destroy(event.target); });
 
+	/* The password box, which is the one behaviour this file owns.
+	 *
+	 * Every other behaviour is the application's: this file registers two by way
+	 * of example and nothing else. This one is different because the component
+	 * that emits it ships in kyse, so a project that draws a password field
+	 * writes data-kyse-behavior="password" without having asked for it -- and
+	 * until now nothing registered that name. The panel never opened, the
+	 * checklist never ticked, and the console said the behaviour was missing on
+	 * every page with a sign-up form on it. A component that emits a name its
+	 * own ecosystem does not answer is a component with a hole in it, and the
+	 * hole belongs here rather than in every project.
+	 *
+	 * The props are the policy's AppliedRules verbatim -- min, max, letters,
+	 * mixedCase, numbers, symbols, uncompromised -- keyed exactly as the
+	 * requirement lines are, so a line is matched to its rule by name and never
+	 * by position or by its wording.
+	 *
+	 * # What it does not do
+	 *
+	 * It does not decide. The server validates the password when the form is
+	 * submitted, with the same policy, and nothing here is consulted for that:
+	 * a checklist is a courtesy to whoever is typing, and treating it as the
+	 * rule would put the decision in the browser. uncompromised is the plainest
+	 * case -- only the server can answer it -- so its line never ticks here.
+	 */
+	arandu.ui.define('password', {
+		mounted: function (ctx) {
+			var root = ctx.element;
+			var input = root.querySelector('[data-part="input"]');
+			if (!input) return;
+
+			var reveal = root.querySelector('[data-part="reveal"]');
+			if (reveal) {
+				reveal.addEventListener('click', function () {
+					var hidden = input.type === 'password';
+					input.type = hidden ? 'text' : 'password';
+					reveal.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+					/* The two labels are in the markup, so this file carries no
+					 * sentence and translates nothing. */
+					toggle(reveal.querySelector('[data-reveal-shown]'), hidden);
+					toggle(reveal.querySelector('[data-reveal-hidden]'), !hidden);
+				});
+			}
+
+			ctx.judge = function () { judge(root, input.value, ctx.props || {}); };
+			input.addEventListener('input', ctx.judge);
+			ctx.judge();
+		},
+		destroyed: function (ctx) {
+			var input = ctx.element.querySelector('[data-part="input"]');
+			if (input && ctx.judge) input.removeEventListener('input', ctx.judge);
+		},
+	});
+
+	/* toggle shows or hides one of the reveal labels. */
+	function toggle(element, shown) {
+		if (element) element.hidden = !shown;
+	}
+
+	/* judge ticks the lines a password already satisfies and moves the meter.
+	 *
+	 * The meter is the count of satisfied requirements over the number of them,
+	 * and not a score: a number nobody can derive from what is on the screen is
+	 * a number nobody can act on, and "why is it orange" has to have an answer
+	 * the checklist gives.
+	 */
+	function judge(root, value, rules) {
+		var met = {
+			min: typeof rules.min !== 'number' || value.length >= rules.min,
+			max: typeof rules.max !== 'number' || value.length <= rules.max,
+			letters: !rules.letters || /\p{L}/u.test(value),
+			mixedCase: !rules.mixedCase || (/\p{Lu}/u.test(value) && /\p{Ll}/u.test(value)),
+			numbers: !rules.numbers || /\p{N}/u.test(value),
+			symbols: !rules.symbols || /[^\p{L}\p{N}\s]/u.test(value),
+			/* Only the server knows, so this line never ticks here. */
+			uncompromised: false,
+		};
+
+		var total = 0;
+		var satisfied = 0;
+		each(root, '[data-requirement]', function (line) {
+			var key = line.getAttribute('data-requirement');
+			var ok = met[key] === true;
+			total += 1;
+			if (ok) satisfied += 1;
+			line.setAttribute('data-met', ok ? 'true' : 'false');
+			var done = line.querySelector('[data-part="done"]');
+			if (done) done.hidden = !ok;
+		});
+
+		var fill = root.querySelector('[data-part="fill"]');
+		if (fill) {
+			fill.style.width = total === 0 ? '0%' : Math.round((satisfied / total) * 100) + '%';
+		}
+		var meter = root.querySelector('[data-part="meter"]');
+		if (meter) {
+			meter.setAttribute('aria-valuenow', String(satisfied));
+			meter.setAttribute('aria-valuemax', String(total));
+		}
+		/* An empty box has nothing to say about itself, so the panel that
+		 * explains the policy stays open and the strength summary stays quiet. */
+		var strength = root.querySelector('[data-part="strength"]');
+		if (strength) strength.setAttribute('data-met', total > 0 && satisfied === total ? 'true' : 'false');
+	}
+
 	/* By window load every deferred script has run, so a behaviour still
 	 * unmounted is one nobody registered -- which is worth one line each, and is
 	 * the only moment this file can tell that apart from a script that has not

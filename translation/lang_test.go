@@ -102,15 +102,18 @@ func TestTheApplicationCatalogueOverridesABundledLine(t *testing.T) {
 // over them even though they are the last catalogue consulted.
 func TestALocaleCatalogueWinsOverTheBundledEnglish(t *testing.T) {
 	l := translation.NewArrayLoader()
-	l.AddMessages("pt-BR", "auth", translation.Lines{"failed": "Estas credenciais não correspondem aos nossos registros."}, "")
-	tr := translation.New(l, "pt-BR", "en")
+	// Spanish, and not Portuguese, because the bundled catalogue ships pt-BR
+	// now: a locale this package already answers would not test the question,
+	// which is whether a project's own catalogue wins over the bundled one.
+	l.AddMessages("es", "auth", translation.Lines{"failed": "Estas credenciales no coinciden con nuestros registros."}, "")
+	tr := translation.New(l, "es", "en")
 
-	if got, want := tr.Get("pt-BR", "auth.failed", nil), "Estas credenciais não correspondem aos nossos registros."; got != want {
+	if got, want := tr.Get("es", "auth.failed", nil), "Estas credenciales no coinciden con nuestros registros."; got != want {
 		t.Errorf("Get = %q, want %q", got, want)
 	}
 	// And a group it has not translated falls through to English rather than
 	// showing the key.
-	if got, want := tr.Get("pt-BR", "passwords.reset", nil), "Your password has been reset."; got != want {
+	if got, want := tr.Get("es", "passwords.reset", nil), "Your password has been reset."; got != want {
 		t.Errorf("Get = %q, want %q", got, want)
 	}
 }
@@ -125,12 +128,12 @@ func TestALocaleCatalogueWinsOverTheBundledEnglish(t *testing.T) {
 func TestAProjectAddsALocaleWithFilesAlone(t *testing.T) {
 	files := fstest.MapFS{
 		// A group file: one item of one group, translated.
-		"lang/pt-BR/auth.json": &fstest.MapFile{
-			Data: []byte(`{"failed": "Estas credenciais não correspondem aos nossos registros."}`),
+		"lang/es/auth.json": &fstest.MapFile{
+			Data: []byte(`{"failed": "Estas credenciales no coinciden con nuestros registros."}`),
 		},
 		// The JSON catalogue of the same locale, whose keys are sentences.
-		"lang/pt-BR.json": &fstest.MapFile{
-			Data: []byte(`{"Save changes": "Salvar alterações"}`),
+		"lang/es.json": &fstest.MapFile{
+			Data: []byte(`{"Save changes": "Guardar cambios"}`),
 		},
 		// The project's own English, overriding one bundled line.
 		"lang/en/auth.json": &fstest.MapFile{
@@ -141,7 +144,7 @@ func TestAProjectAddsALocaleWithFilesAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileLoader: %v", err)
 	}
-	tr := translation.New(loader, "pt-BR", "en")
+	tr := translation.New(loader, "es", "en")
 
 	for _, c := range []struct {
 		name   string
@@ -149,13 +152,13 @@ func TestAProjectAddsALocaleWithFilesAlone(t *testing.T) {
 		key    string
 		want   string
 	}{
-		{"a group line the project translated", "pt-BR", "auth.failed",
-			"Estas credenciais não correspondem aos nossos registros."},
-		{"a sentence key from the JSON catalogue", "pt-BR", "Save changes",
-			"Salvar alterações"},
-		{"a line the project did not translate falls to the fallback locale", "pt-BR", "auth.password",
+		{"a group line the project translated", "es", "auth.failed",
+			"Estas credenciales no coinciden con nuestros registros."},
+		{"a sentence key from the JSON catalogue", "es", "Save changes",
+			"Guardar cambios"},
+		{"a line the project did not translate falls to the fallback locale", "es", "auth.password",
 			"The provided password is incorrect."},
-		{"a nested item still flattens", "pt-BR", "validation.min.string",
+		{"a nested item still flattens", "es", "validation.min.string",
 			"The :attribute field must be at least :min characters."},
 		{"the project's English wins over the bundled line", "en", "auth.failed",
 			"We do not know that email and password."},
