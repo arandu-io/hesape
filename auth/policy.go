@@ -16,7 +16,32 @@ var ErrForbidden = errors.New("arandu: action not authorized")
 type Subject struct {
 	ID     string
 	Tenant string
-	Roles  []string
+
+	// Roles are what this subject is: "admin", "member", "owner". A policy
+	// asks about one with HasRole.
+	//
+	// Names an application chose, and this package never validates them --
+	// which is exactly why nothing else may be put here. A permission written
+	// into Roles is a permission HasRole answers about, and every policy that
+	// asks HasRole("admin") starts answering false the moment something fills
+	// this list with anything else. Both sides are []string, so the compiler
+	// says nothing, and what reaches support is "my access disappeared".
+	Roles []string
+
+	// Actions are what this subject may do: "user.view", "invoice.create". A
+	// policy asks about one with Can.
+	//
+	// It is a separate list from Roles because the two are separate questions.
+	// An application that decides by role reads Roles and never fills this; one
+	// whose permissions are administered -- by arandu-permission or by anything
+	// else -- fills this and leaves Roles to mean what it always meant. An
+	// application that does both is answered correctly by both.
+	//
+	// Typed as Action rather than string, so a role slug put here does not
+	// compile. That is the whole of the protection, and it is enough: the
+	// mistake this exists to prevent was two lists of strings that looked
+	// alike.
+	Actions []Action
 
 	// Verified says whether the address behind this account was confirmed.
 	//
@@ -117,9 +142,32 @@ func Guest(tenant string) Subject {
 func (s Subject) IsGuest() bool { return s.guest }
 
 // HasRole reports whether the subject carries the given role.
+//
+// A role is what somebody is. For what they may do, ask Can: the two lists are
+// separate, and a permission is never answered here.
 func (s Subject) HasRole(r string) bool {
 	for _, have := range s.Roles {
 		if have == r {
+			return true
+		}
+	}
+	return false
+}
+
+// Can reports whether the subject carries the given action.
+//
+// It answers about Actions and nothing else. A subject whose permissions are
+// administered elsewhere -- by a module that resolves group membership into a
+// flat list, or by an application that computes one itself -- carries them
+// there, and a policy that asks this question gets the answer whether or not
+// that subject also has roles.
+//
+// A subject with no actions answers false to everything, which is what an
+// application that decides purely by role carries and is the right answer for
+// it: such an application asks HasRole, and this is not its question.
+func (s Subject) Can(a Action) bool {
+	for _, have := range s.Actions {
+		if have == a {
 			return true
 		}
 	}
