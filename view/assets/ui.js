@@ -151,6 +151,134 @@
 	arandu.ui.define('table', {
 		mounted: function (ctx) {
 			var root = ctx.element;
+			var props = ctx.props || {};
+
+			/* ---- working the rows in the browser --------------------------
+			 *
+			 * Only when the page holds the whole list, which the server says
+			 * with data-complete. Ordering a page of a longer list orders only
+			 * the rows that were sent, and filtering it hides matches that
+			 * never arrived -- both read as a table in the wrong order to
+			 * everyone except whoever wrote it.
+			 *
+			 * When it is not complete, none of this runs: the headers are
+			 * links, the search is a form, and the server answers. The two are
+			 * not two implementations of one thing -- they are the two answers
+			 * to "does this page have everything", and the server picks.
+			 */
+			var complete = root.getAttribute('data-complete') === 'true';
+
+			var body = function () { return root.querySelector('tbody'); };
+			var allRows = function () {
+				var tbody = body();
+				return tbody ? Array.prototype.slice.call(tbody.rows) : [];
+			};
+
+			/* comparable is what a cell sorts by: the value the server handed
+			 * over, or the text it draws. A number is compared as a number and
+			 * everything else as text -- which for an ISO date is the same
+			 * order, and is why the server is asked for that form. */
+			var comparable = function (row, at) {
+				var cell = row.cells[at];
+				if (!cell) return '';
+				var raw = cell.getAttribute('data-sort-value');
+				return raw === null ? (cell.textContent || '').trim() : raw;
+			};
+
+			var order = function (at, dir) {
+				var tbody = body();
+				if (!tbody) return;
+				var rows = allRows();
+				var sign = dir === 'desc' ? -1 : 1;
+				rows.sort(function (a, b) {
+					var x = comparable(a, at), y = comparable(b, at);
+					var nx = Number(x), ny = Number(y);
+					if (x !== '' && y !== '' && !isNaN(nx) && !isNaN(ny)) {
+						return (nx - ny) * sign;
+					}
+					return x.localeCompare(y, undefined, { numeric: true, sensitivity: 'base' }) * sign;
+				});
+				/* Appending a row that is already in the table moves it, so the
+				 * whole order is applied without removing anything first --
+				 * which keeps focus and any checked box exactly where it was. */
+				rows.forEach(function (row) { tbody.appendChild(row); });
+			};
+
+			/* show decides which rows are on screen: the ones that match the
+			 * search, windowed to the page. It is one function because the two
+			 * cannot be decided apart -- the third page of a filtered list is
+			 * the third page of what matched, not of everything. */
+			var page = 1;
+			var show = function () {
+				var query = '';
+				var box = root.querySelector('[data-part="search"]');
+				if (box) query = (box.value || '').trim().toLowerCase();
+
+				var matched = allRows().filter(function (row) {
+					row.hidden = false;
+					if (!query) return true;
+					/* Every visible cell, because a person searching a table
+					 * does not know which column holds what they remember. A
+					 * hidden column is not searched: it is not on the screen,
+					 * and a hit nobody can see is a row that appears for no
+					 * reason. */
+					var text = Array.prototype.filter
+						.call(row.cells, function (cell) { return !cell.hidden; })
+						.map(function (cell) { return cell.textContent || ''; })
+						.join(' ')
+						.toLowerCase();
+					return text.indexOf(query) >= 0;
+				});
+
+				var size = Number(props.pageSize) || 0;
+				var pages = size > 0 ? Math.max(1, Math.ceil(matched.length / size)) : 1;
+				if (page > pages) page = pages;
+
+				allRows().forEach(function (row) { row.hidden = true; });
+				matched.forEach(function (row, at) {
+					row.hidden = size > 0 && (at < (page - 1) * size || at >= page * size);
+				});
+
+                                pager(pages);
+				empty(matched.length === 0);
+				count();
+			};
+
+			/* The pager is redrawn rather than re-fetched: its links are still
+			 * addresses, and a page with no script follows them. */
+			var pager = function (pages) {
+				var nav = root.querySelector('[data-part="pagination"]');
+				if (!nav) return;
+				nav.hidden = pages < 2;
+				each(nav, 'a[aria-label]', function (link) {
+					var number = Number((link.textContent || '').trim());
+					if (!number) return;
+					link.setAttribute('aria-current', number === page ? 'page' : 'false');
+					if (number === page) link.setAttribute('aria-current', 'page');
+					else link.removeAttribute('aria-current');
+				});
+			};
+
+			/* A search that matched nothing is not an empty table: the table
+			 * has rows, and none of them are the answer. So the row says which
+			 * it is rather than leaving a blank body. */
+			var empty = function (nothing) {
+				var tbody = body();
+				if (!tbody) return;
+				var line = tbody.querySelector('[data-empty-row]');
+				if (!nothing) {
+					if (line) line.remove();
+					return;
+				}
+				if (line) return;
+				var row = tbody.insertRow();
+				row.setAttribute('data-empty-row', '');
+				var cell = row.insertCell();
+				var head = root.querySelector('thead tr');
+				cell.colSpan = head ? head.cells.length : 1;
+				cell.className = 'text-muted-foreground py-6 text-center text-sm';
+				cell.textContent = props.empty || 'Nothing matched';
+			};
 
 			var boxes = function () {
 				return Array.prototype.slice.call(root.querySelectorAll('[data-part="select"]'));
@@ -250,11 +378,58 @@
 
 			root.addEventListener('change', ctx.change);
 			root.addEventListener('keydown', ctx.key);
+
+			if (complete) {
+				/* The header is a link and stays one. Taking the click before
+				 * the browser follows it is what makes this an enhancement:
+				 * with no script the same link loads the same order from the
+				 * server. */
+				ctx.sort = function (event) {
+					var link = event.target.closest('[data-part="sort"]');
+					if (!link) return;
+					event.preventDefault();
+					var head = link.closest('th');
+					var at = Array.prototype.indexOf.call(head.parentElement.children, head);
+					var now = head.getAttribute('aria-sort');
+					var dir = now === 'ascending' ? 'desc' : 'asc';
+					each(root, 'th[aria-sort]', function (one) { one.setAttribute('aria-sort', 'none'); });
+					head.setAttribute('aria-sort', dir === 'desc' ? 'descending' : 'ascending');
+					order(at, dir);
+					show();
+				};
+
+				ctx.filter = function (event) {
+					if (!event.target.closest('[data-part="search"]')) return;
+					page = 1;
+					show();
+				};
+
+				ctx.paginate = function (event) {
+					var link = event.target.closest('[data-part="pagination"] a');
+					if (!link) return;
+					event.preventDefault();
+					var number = Number((link.textContent || '').trim());
+					if (number) { page = number; show(); return; }
+					var rel = link.getAttribute('rel');
+					if (rel === 'prev') page = Math.max(1, page - 1);
+					if (rel === 'next') page = page + 1;
+					show();
+				};
+
+				root.addEventListener('click', ctx.sort);
+				root.addEventListener('click', ctx.paginate);
+				root.addEventListener('input', ctx.filter);
+				show();
+			}
+
 			count();
 		},
 		destroyed: function (ctx) {
 			ctx.element.removeEventListener('change', ctx.change);
 			ctx.element.removeEventListener('keydown', ctx.key);
+			if (ctx.sort) ctx.element.removeEventListener('click', ctx.sort);
+			if (ctx.paginate) ctx.element.removeEventListener('click', ctx.paginate);
+			if (ctx.filter) ctx.element.removeEventListener('input', ctx.filter);
 		},
 	});
 
