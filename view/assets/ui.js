@@ -132,6 +132,363 @@
 		stamp(document);
 	}
 
+	/* ---- table ---------------------------------------------------------------
+	 *
+	 * The three things about a table only the browser can do: keep the count
+	 * of chosen rows in step, switch a column off, and move a cell at a time
+	 * when the table is a grid.
+	 *
+	 * Sorting is not among them, and that is the design rather than an
+	 * omission. A table sorted here is sorted only within the page that was
+	 * fetched, so page two of a list ordered by name holds whatever the server
+	 * thought page two was -- and it reads as rows in the wrong order to
+	 * everyone except whoever wrote it. So the header is a link, the server
+	 * orders, and htmx swaps the result.
+	 *
+	 * The sentence for the count comes from the server, in the same field the
+	 * server rendered it from. Nothing here composes English.
+	 */
+	arandu.ui.define('table', {
+		mounted: function (ctx) {
+			var root = ctx.element;
+
+			var boxes = function () {
+				return Array.prototype.slice.call(root.querySelectorAll('[data-part="select"]'));
+			};
+
+			var count = function () {
+				var line = root.querySelector('[data-part="count"]');
+				if (!line) return;
+				var all = boxes();
+				var chosen = all.filter(function (box) { return box.checked; }).length;
+				/* The template is the server's, written onto the element it
+				 * renders into -- so the count is said in the language the page
+				 * is served in and this file carries no sentence. */
+				var template = line.getAttribute('data-selected-template') ||
+					'{n} of {total} rows selected';
+				line.textContent = template
+					.split('{n}').join(String(chosen))
+					.split('{total}').join(String(all.length));
+
+				all.forEach(function (box) {
+					var row = box.closest('tr');
+					if (row) row.setAttribute('aria-selected', box.checked ? 'true' : 'false');
+				});
+
+				var master = root.querySelector('[data-select-all]');
+				if (master) {
+					master.checked = all.length > 0 && chosen === all.length;
+					/* Indeterminate is a property and not an attribute: there is
+					 * no markup for "some", which is why the server cannot draw
+					 * this state and this line exists. */
+					master.indeterminate = chosen > 0 && chosen < all.length;
+				}
+			};
+
+			ctx.change = function (event) {
+				var master = event.target.closest('[data-select-all]');
+				if (master) {
+					boxes().forEach(function (box) { box.checked = master.checked; });
+					count();
+					return;
+				}
+				if (event.target.closest('[data-part="select"]')) { count(); return; }
+
+				var toggle = event.target.closest('[data-column-toggle]');
+				if (!toggle) return;
+				var key = toggle.getAttribute('data-column-toggle');
+				/* hidden rather than a class: a cell removed from the layout is
+				 * also removed from the table's own column count, which is what
+				 * keeps a screen reader reading the right header for the right
+				 * cell. */
+				each(root, '[data-column="' + key + '"]', function (cell) {
+					cell.hidden = !toggle.checked;
+				});
+			};
+
+			ctx.key = function (event) {
+				if (root.getAttribute('data-navigable') !== 'true') return;
+				var cell = event.target.closest('td, th');
+				if (!cell || !root.contains(cell)) return;
+
+				var row = cell.parentElement;
+				var rows = Array.prototype.slice.call(root.querySelectorAll('tr'));
+				var at = Array.prototype.indexOf.call(row.children, cell);
+				var down = rows.indexOf(row);
+
+				var go = function (r, c) {
+					event.preventDefault();
+					var target = rows[r] && rows[r].children[c];
+					if (!target) return;
+					rows.forEach(function (one) {
+						Array.prototype.forEach.call(one.children, function (child) {
+							child.setAttribute('tabindex', '-1');
+						});
+					});
+					target.setAttribute('tabindex', '0');
+					target.focus();
+				};
+
+				switch (event.key) {
+					case 'ArrowRight': go(down, at + 1); break;
+					case 'ArrowLeft': go(down, at - 1); break;
+					case 'ArrowDown': go(down + 1, at); break;
+					case 'ArrowUp': go(down - 1, at); break;
+					case 'Home': go(down, 0); break;
+					case 'End': go(down, row.children.length - 1); break;
+				}
+			};
+
+			/* A navigable table needs one cell reachable by tab, and the server
+			 * cannot know which -- it is wherever the person left off. The
+			 * first is where they start. */
+			if (root.getAttribute('data-navigable') === 'true') {
+				each(root, 'td, th', function (cell) { cell.setAttribute('tabindex', '-1'); });
+				var first = root.querySelector('th, td');
+				if (first) first.setAttribute('tabindex', '0');
+			}
+
+			root.addEventListener('change', ctx.change);
+			root.addEventListener('keydown', ctx.key);
+			count();
+		},
+		destroyed: function (ctx) {
+			ctx.element.removeEventListener('change', ctx.change);
+			ctx.element.removeEventListener('keydown', ctx.key);
+		},
+	});
+
+	/* ---- dialog ---------------------------------------------------------------
+	 *
+	 * Opening and closing a <dialog> from an attribute, so nothing has to write
+	 * an inline handler to do it.
+	 *
+	 * The components' own documentation used to say `onclick="ID.showModal()"`,
+	 * and that is advice this project's policy refuses: the CSP is
+	 * script-src 'self' with no 'unsafe-inline', which blocks an inline handler
+	 * exactly as it blocks an inline <script>. The advice would work on a page
+	 * that had loosened the policy, and on no page that had not -- which is the
+	 * worst kind of wrong, because it works while somebody is building and
+	 * fails when the headers go on.
+	 *
+	 * So it is a delegated attribute, like every other behaviour here: a name
+	 * that is looked up, never a string that is evaluated.
+	 *
+	 *     <button data-dialog-open="confirm-delete">Delete</button>
+	 *     <button data-dialog-close>Cancel</button>
+	 *
+	 * showModal rather than show, because a modal is what these panels are:
+	 * the rest of the document goes inert, focus is trapped, and Escape closes
+	 * -- all three from the element, none of them written here.
+	 */
+	document.addEventListener('click', function (event) {
+		var open = event.target.closest('[data-dialog-open]');
+		if (open) {
+			var panel = document.getElementById(open.getAttribute('data-dialog-open'));
+			/* A dialog that is not on the page is a page that changed under a
+			 * button, and it is worth one line rather than a silent nothing. */
+			if (!panel || typeof panel.showModal !== 'function') {
+				miss('dialog', open.getAttribute('data-dialog-open'));
+				return;
+			}
+			event.preventDefault();
+			if (!panel.open) panel.showModal();
+			return;
+		}
+
+		var close = event.target.closest('[data-dialog-close]');
+		if (!close) return;
+		/* The named dialog, or the one this button is inside -- so a close
+		 * button needs no id when it sits in the panel it closes. */
+		var named = close.getAttribute('data-dialog-close');
+		var target = named ? document.getElementById(named) : close.closest('dialog');
+		if (!target) return;
+		event.preventDefault();
+		target.close();
+	});
+
+	/* ---- calendar ------------------------------------------------------------
+	 *
+	 * A month grid: the arrow keys move a day at a time, the buttons move a
+	 * month, and choosing writes the date into the input the calendar was
+	 * pointed at.
+	 *
+	 * # The arithmetic is here and the words are not
+	 *
+	 * Moving to another month redraws the grid rather than asking the server,
+	 * so a month change costs nothing. That is a second copy of the date
+	 * arithmetic the component already did in Go, and it is worth saying so
+	 * plainly rather than pretending otherwise -- what keeps the two from
+	 * drifting is that neither decides anything a person reads. The month
+	 * names, the column heads, the first day of the week and the bounds all
+	 * arrive as props, drawn from the application's catalogue. Nothing here
+	 * formats a name, reads a locale or picks a calendar system, so the grid
+	 * this draws and the grid the server drew say the same words.
+	 *
+	 * # Why the cells are not buttons
+	 *
+	 * A month is forty-two cells. As buttons that is forty-two tab stops, and
+	 * the grid role exists precisely so it is one: the arrows move within it,
+	 * and tab leaves it. That is the contract a person already knows from
+	 * every other calendar.
+	 */
+	arandu.ui.define('calendar', {
+		mounted: function (ctx) {
+			var root = ctx.element;
+			var props = ctx.props || {};
+
+			var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+			var iso = function (y, m, d) { return y + '-' + pad(m + 1) + '-' + pad(d); };
+
+			var cells = function () {
+				return Array.prototype.slice.call(root.querySelectorAll('[role="gridcell"]'));
+			};
+			var focusDate = function (date) {
+				var all = cells();
+				for (var at = 0; at < all.length; at++) {
+					if (all[at].getAttribute('data-date') !== date) continue;
+					all.forEach(function (one) { one.setAttribute('tabindex', '-1'); });
+					all[at].setAttribute('tabindex', '0');
+					all[at].focus();
+					return true;
+				}
+				return false;
+			};
+
+			/* draw rewrites the grid for one month. It writes numbers, dates
+			 * and state, and nothing else -- the elements are the ones the
+			 * server drew, so every class and every part name is untouched. */
+			var draw = function (year, month) {
+				var first = new Date(Date.UTC(year, month, 1));
+				var firstDay = Number(props.firstDay) || 0;
+				var offset = (first.getUTCDay() - firstDay + 7) % 7;
+				var start = new Date(Date.UTC(year, month, 1 - offset));
+
+				var today = new Date();
+				var todayISO = iso(today.getFullYear(), today.getMonth(), today.getDate());
+				var chosen = root.getAttribute('data-value') || '';
+
+				cells().forEach(function (cell, at) {
+					var day = new Date(start.getTime());
+					day.setUTCDate(day.getUTCDate() + at);
+					var date = iso(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate());
+
+					cell.textContent = String(day.getUTCDate());
+					cell.setAttribute('data-date', date);
+					attr(cell, 'data-outside', day.getUTCMonth() !== month ? 'true' : null);
+					attr(cell, 'data-today', date === todayISO ? 'true' : null);
+					cell.setAttribute('aria-selected', date === chosen ? 'true' : 'false');
+					attr(cell, 'aria-disabled', outside(date) ? 'true' : null);
+					cell.setAttribute('tabindex', '-1');
+				});
+
+				root.setAttribute('data-month', year + '-' + pad(month + 1));
+				var title = root.querySelector('[data-part="title"]');
+				var names = props.months || [];
+				if (title && names.length === 12) title.textContent = names[month] + ' ' + year;
+			};
+
+			var attr = function (element, name, value) {
+				if (value === null) element.removeAttribute(name);
+				else element.setAttribute(name, value);
+			};
+
+			var outside = function (date) {
+				if (props.min && date < props.min) return true;
+				return !!(props.max && date > props.max);
+			};
+
+			var month = function () {
+				var parts = (root.getAttribute('data-month') || '').split('-');
+				return { year: Number(parts[0]), month: Number(parts[1]) - 1 };
+			};
+
+			var step = function (by) {
+				var at = month();
+				var moved = new Date(Date.UTC(at.year, at.month + by, 1));
+				draw(moved.getUTCFullYear(), moved.getUTCMonth());
+			};
+
+			/* choose writes the day into the input the calendar points at, and
+			 * fires the events a form and htmx are listening for -- setting
+			 * .value fires neither on its own. */
+			var choose = function (date) {
+				root.setAttribute('data-value', date || '');
+				cells().forEach(function (cell) {
+					cell.setAttribute('aria-selected',
+						date && cell.getAttribute('data-date') === date ? 'true' : 'false');
+				});
+				if (!props.target) return;
+				var field = document.getElementById(props.target);
+				if (!field) return;
+				field.value = date || '';
+				field.dispatchEvent(new Event('input', { bubbles: true }));
+				field.dispatchEvent(new Event('change', { bubbles: true }));
+			};
+
+			ctx.click = function (event) {
+				var stepper = event.target.closest('[data-calendar-step]');
+				if (stepper) { step(Number(stepper.getAttribute('data-calendar-step')) || 1); return; }
+				if (event.target.closest('[data-calendar-clear]')) { choose(''); return; }
+				if (event.target.closest('[data-calendar-today]')) {
+					var now = new Date();
+					draw(now.getFullYear(), now.getMonth());
+					var date = iso(now.getFullYear(), now.getMonth(), now.getDate());
+					if (!outside(date)) { choose(date); focusDate(date); }
+					return;
+				}
+				var cell = event.target.closest('[role="gridcell"]');
+				if (cell && cell.getAttribute('aria-disabled') !== 'true') {
+					choose(cell.getAttribute('data-date'));
+					focusDate(cell.getAttribute('data-date'));
+				}
+			};
+
+			ctx.key = function (event) {
+				var cell = event.target.closest('[role="gridcell"]');
+				if (!cell) return;
+				var parts = cell.getAttribute('data-date').split('-');
+				var day = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
+
+				var move = function (days) {
+					event.preventDefault();
+					day.setUTCDate(day.getUTCDate() + days);
+					var date = iso(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate());
+					if (!focusDate(date)) {
+						draw(day.getUTCFullYear(), day.getUTCMonth());
+						focusDate(date);
+					}
+				};
+
+				switch (event.key) {
+					case 'ArrowRight': move(1); break;
+					case 'ArrowLeft': move(-1); break;
+					case 'ArrowDown': move(7); break;
+					case 'ArrowUp': move(-7); break;
+					/* Home and End are the ends of the week, which is the row
+					 * the person is looking at -- not the ends of the month,
+					 * which PageUp and PageDown reach. */
+					case 'Home': move(-((day.getUTCDay() - (Number(props.firstDay) || 0) + 7) % 7)); break;
+					case 'End': move(6 - ((day.getUTCDay() - (Number(props.firstDay) || 0) + 7) % 7)); break;
+					case 'PageUp': event.preventDefault(); step(-1); break;
+					case 'PageDown': event.preventDefault(); step(1); break;
+					case 'Enter':
+					case ' ':
+						event.preventDefault();
+						if (cell.getAttribute('aria-disabled') !== 'true') choose(cell.getAttribute('data-date'));
+						break;
+				}
+			};
+
+			root.addEventListener('click', ctx.click);
+			root.addEventListener('keydown', ctx.key);
+		},
+		destroyed: function (ctx) {
+			ctx.element.removeEventListener('click', ctx.click);
+			ctx.element.removeEventListener('keydown', ctx.key);
+		},
+	});
+
 	/* ---- roving ---------------------------------------------------------------
 	 *
 	 * One tab stop for a group of controls, with the arrow keys moving inside
@@ -862,8 +1219,9 @@
 	 * console -- which is a page missing a behaviour, never a page running one
 	 * somebody typed into a form.
 	 *
-	 * It is the same shape as the effects catalogue below: a catalogue rather
-	 * than a parser is what keeps an attribute data instead of code.
+	 * It is the same shape as every delegated attribute above -- data-copy,
+	 * data-dialog-open, data-slider: a catalogue rather than a parser is what
+	 * keeps an attribute data instead of code.
 	 */
 
 	var actions = {};
