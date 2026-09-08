@@ -757,6 +757,281 @@
 	document.addEventListener('htmx:afterSettle', function (event) { update(event.target); });
 	document.addEventListener('htmx:beforeCleanupElement', function (event) { destroy(event.target); });
 
+	/* The mask, which formats a field as somebody types in it.
+	 *
+	 * The pattern is a string of tokens, and the vocabulary is the one anybody
+	 * who has written a mask before already knows:
+	 *
+	 *     0  a digit, required
+	 *     9  a digit, optional
+	 *     #  a digit, repeated to the end
+	 *     A  a letter or a digit
+	 *     S  a letter
+	 *
+	 * Everything else in the pattern is written through as it stands.
+	 *
+	 * # What the form sends is the raw value
+	 *
+	 * The visible field shows 123.456.789-00 and is not the field that submits.
+	 * Beside it is a hidden input carrying 12345678900, kept in step on every
+	 * keystroke, and that is what has the form name. So nothing on the server
+	 * has to know a mask existed, and no query stores punctuation because
+	 * somebody forgot to strip it in one of the places that read the field.
+	 *
+	 * The component writes both, so a caller cannot get half of it.
+	 *
+	 * # Alternatives
+	 *
+	 * A field that takes either of two shapes is given both, and the shortest
+	 * one that still holds what has been typed is the one applied. A phone
+	 * number grows into its longer form at the digit that needs it rather than
+	 * jumping there.
+	 *
+	 * # It is not validation
+	 *
+	 * A mask says what may be typed. Whether what was typed means anything is
+	 * the server's answer, and this asks nothing of it -- the same division the
+	 * password behaviour above keeps.
+	 */
+	arandu.ui.define('mask', {
+		mounted: function (ctx) {
+			var input = ctx.element.matches('input') ? ctx.element : ctx.element.querySelector('input:not([type="hidden"])');
+			if (!input) return;
+
+			var patterns = maskPatterns(ctx.props);
+			if (!patterns.length) return;
+
+			var raw = ctx.element.querySelector('[data-part="raw"]');
+
+			var reverse = ctx.props.reverse === true;
+
+			ctx.format = function () {
+				var pattern = maskFor(patterns, input.value);
+				var before = input.value;
+				var caret = input.selectionStart;
+				var formatted = maskApply(pattern, before, reverse);
+
+				if (formatted !== before) {
+					input.value = formatted;
+					if (reverse) {
+						/* Filling from the right means the caret belongs at the
+						 * end: every keystroke pushes what came before it left. */
+						input.setSelectionRange(formatted.length, formatted.length);
+					} else {
+						/* The caret moves by however many characters the mask
+						 * inserted before it, so typing in the middle of a value
+						 * does not throw the cursor to the end. */
+						var typed = maskUnmask(pattern, before.slice(0, caret)).length;
+						var at = maskCaretFor(pattern, typed);
+						input.setSelectionRange(at, at);
+					}
+				}
+				if (raw) raw.value = maskUnmask(pattern, input.value);
+
+				/* The field says whether the pattern is filled, so a stylesheet
+				 * can show it and nothing has to ask this file. It is not a
+				 * verdict: the server decides whether the value means anything,
+				 * and a complete shape is only a shape. */
+				input.setAttribute('data-mask-complete',
+					maskComplete(pattern, input.value) ? 'true' : 'false');
+			};
+
+			input.addEventListener('input', ctx.format);
+			/* Emptying a field that never matched, on the way out, is what the
+			 * plugin this borrows its vocabulary from calls clearIfNotMatch. A
+			 * half-typed value left behind is a value somebody submits without
+			 * looking. */
+			if (ctx.props.clearIfNotMatch === true) {
+				input.addEventListener('blur', function () {
+					var pattern = maskFor(patterns, input.value);
+					if (input.value && !maskComplete(pattern, input.value)) {
+						input.value = '';
+						if (raw) raw.value = '';
+						input.setAttribute('data-mask-complete', 'false');
+					}
+				});
+			}
+			/* A paste arrives as an input event in every browser this ships to,
+			 * so there is nothing extra to listen for -- and a value the server
+			 * rendered is formatted once, here, rather than left raw until
+			 * somebody types. */
+			ctx.format();
+		},
+		destroyed: function (ctx) {
+			var input = ctx.element.matches('input') ? ctx.element : ctx.element.querySelector('input:not([type="hidden"])');
+			if (input && ctx.format) input.removeEventListener('input', ctx.format);
+		},
+	});
+
+	/* maskTokens is the dictionary, and it is closed: a mask needing a sixth
+	 * token would be a mask nobody can read without this table beside them. */
+	var maskTokens = {
+		'0': { accepts: /[0-9]/ },
+		'9': { accepts: /[0-9]/, optional: true },
+		'#': { accepts: /[0-9]/, repeating: true },
+		'A': { accepts: /[0-9a-zA-Z]/ },
+		'S': { accepts: /[a-zA-Z]/ },
+	};
+
+	/* maskPatterns reads the pattern or patterns out of the props. */
+	function maskPatterns(props) {
+		var declared = (props || {}).pattern;
+		if (typeof declared === 'string') return declared ? [declared] : [];
+		if (Object.prototype.toString.call(declared) === '[object Array]') {
+			return declared.filter(function (one) { return typeof one === 'string' && one; });
+		}
+		return [];
+	}
+
+	/* maskCapacity is how many characters a pattern's tokens accept, and -1 for
+	 * one that repeats and therefore has no end. */
+	function maskCapacity(pattern) {
+		var n = 0;
+		for (var i = 0; i < pattern.length; i++) {
+			var token = maskTokens[pattern.charAt(i)];
+			if (!token) continue;
+			if (token.repeating) return -1;
+			n++;
+		}
+		return n;
+	}
+
+	/* maskFor picks the shortest pattern that still holds what was typed. */
+	function maskFor(patterns, value) {
+		if (patterns.length === 1) return patterns[0];
+
+		var widest = patterns[0];
+		for (var i = 0; i < patterns.length; i++) {
+			if (maskCapacity(patterns[i]) > maskCapacity(widest)) widest = patterns[i];
+		}
+		var typed = maskUnmask(widest, value).length;
+
+		var best = null;
+		for (var j = 0; j < patterns.length; j++) {
+			var size = maskCapacity(patterns[j]);
+			if (size < 0 || size < typed) continue;
+			if (best === null || size < maskCapacity(best)) best = patterns[j];
+		}
+		return best || widest;
+	}
+
+	/* maskApply formats a value, dropping what the pattern cannot accept.
+	 *
+	 * Dropped rather than refused: what somebody pastes is usually the
+	 * formatted value, and refusing its punctuation would mean refusing a paste
+	 * of exactly what this produces. */
+	function maskApply(pattern, value, reverse) {
+		if (reverse) return maskApplyReverse(pattern, value);
+		var out = '';
+		var at = 0;
+		for (var cursor = 0; cursor < pattern.length && at < value.length;) {
+			var symbol = pattern.charAt(cursor);
+			var token = maskTokens[symbol];
+			if (!token) {
+				out += symbol;
+				if (value.charAt(at) === symbol) at++;
+				cursor++;
+				continue;
+			}
+			if (!token.accepts.test(value.charAt(at))) { at++; continue; }
+			out += value.charAt(at);
+			at++;
+			if (!token.repeating) cursor++;
+		}
+		/* A separator with nothing behind it is punctuation somebody is about to
+		 * type past, and showing it moves the caret for no reason. */
+		while (out.length && !/[0-9a-zA-Z]/.test(out.charAt(out.length - 1))) {
+			out = out.slice(0, -1);
+		}
+		return out;
+	}
+
+	/* maskApplyReverse fills a pattern from the right.
+	 *
+	 * It is how money is typed: the first digit somebody enters is the last one
+	 * of the value, and every one after pushes the rest left past the
+	 * separators. Filling from the left instead would put the first keystroke
+	 * in the thousands and read 1 as 1.000,00.
+	 *
+	 * A separator with nothing in front of it is dropped for the same reason a
+	 * trailing one is: it is punctuation the next keystroke is about to fill. */
+	function maskApplyReverse(pattern, value) {
+		var out = '';
+		var at = value.length - 1;
+		for (var cursor = pattern.length - 1; cursor >= 0 && at >= 0;) {
+			var symbol = pattern.charAt(cursor);
+			var token = maskTokens[symbol];
+			if (!token) {
+				out = symbol + out;
+				if (value.charAt(at) === symbol) at--;
+				cursor--;
+				continue;
+			}
+			if (!token.accepts.test(value.charAt(at))) { at--; continue; }
+			out = value.charAt(at) + out;
+			at--;
+			if (!token.repeating) cursor--;
+		}
+		while (out.length && !/[0-9a-zA-Z]/.test(out.charAt(0))) {
+			out = out.slice(1);
+		}
+		return out;
+	}
+
+	/* maskUnmask gives back what the form sends: the characters the tokens
+	 * accept, with everything the pattern writes through removed. */
+	function maskUnmask(pattern, value) {
+		var out = '';
+		var at = 0;
+		for (var cursor = 0; cursor < pattern.length && at < value.length;) {
+			var symbol = pattern.charAt(cursor);
+			var token = maskTokens[symbol];
+			if (!token) {
+				if (value.charAt(at) === symbol) at++;
+				cursor++;
+				continue;
+			}
+			if (!token.accepts.test(value.charAt(at))) { at++; continue; }
+			out += value.charAt(at);
+			at++;
+			if (!token.repeating) cursor++;
+		}
+		return out;
+	}
+
+	/* maskComplete reports whether every required token is filled.
+	 *
+	 * Required, so a pattern whose tail is optional is complete without it:
+	 * 0009 is complete at three digits. It answers about the shape and nothing
+	 * else -- eleven digits are eleven digits, and whether they mean anything is
+	 * a question with arithmetic in it that belongs to whoever owns the
+	 * document. */
+	function maskComplete(pattern, value) {
+		var required = 0;
+		for (var i = 0; i < pattern.length; i++) {
+			var token = maskTokens[pattern.charAt(i)];
+			if (!token || token.optional) continue;
+			required++;
+			if (token.repeating) break;
+		}
+		return maskUnmask(pattern, value).length >= required;
+	}
+
+	/* maskCaretFor is where the caret sits after a given number of accepted
+	 * characters: past the separators that precede them. */
+	function maskCaretFor(pattern, typed) {
+		if (typed <= 0) return 0;
+		var seen = 0;
+		for (var i = 0; i < pattern.length; i++) {
+			var token = maskTokens[pattern.charAt(i)];
+			if (token) {
+				seen++;
+				if (seen >= typed) return i + 1;
+			}
+		}
+		return pattern.length;
+	}
+
 	/* The password box, which is the one behaviour this file owns.
 	 *
 	 * Every other behaviour is the application's: this file registers two by way
