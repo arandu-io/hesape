@@ -132,6 +132,497 @@
 		stamp(document);
 	}
 
+	/* ---- roving ---------------------------------------------------------------
+	 *
+	 * One tab stop for a group of controls, with the arrow keys moving inside
+	 * it. A toolbar, a menubar and a tree all want exactly this, so it is
+	 * written once.
+	 *
+	 * The tab stop moves rather than multiplying: whichever control is current
+	 * has tabindex 0 and every other has -1, so tabbing out and back in
+	 * returns to where the person was rather than to the beginning.
+	 */
+	function roving(container, selector, options) {
+		var settings = options || {};
+		var items = function () {
+			return Array.prototype.filter.call(
+				container.querySelectorAll(selector),
+				function (element) {
+					return !element.disabled &&
+						element.getAttribute('aria-disabled') !== 'true' &&
+						element.offsetParent !== null;
+				}
+			);
+		};
+
+		var focus = function (element) {
+			if (!element) return;
+			items().forEach(function (one) { one.setAttribute('tabindex', '-1'); });
+			element.setAttribute('tabindex', '0');
+			element.focus();
+		};
+
+		container.addEventListener('keydown', function (event) {
+			var all = items();
+			var at = all.indexOf(document.activeElement);
+			if (at < 0) return;
+
+			var vertical = settings.vertical;
+			var forward = vertical ? 'ArrowDown' : 'ArrowRight';
+			var backward = vertical ? 'ArrowUp' : 'ArrowLeft';
+
+			if (event.key === forward) {
+				event.preventDefault();
+				focus(all[(at + 1) % all.length]);
+			} else if (event.key === backward) {
+				event.preventDefault();
+				focus(all[(at - 1 + all.length) % all.length]);
+			} else if (event.key === 'Home') {
+				event.preventDefault();
+				focus(all[0]);
+			} else if (event.key === 'End') {
+				event.preventDefault();
+				focus(all[all.length - 1]);
+			} else if (settings.onKey) {
+				settings.onKey(event, all, at, focus);
+			}
+		});
+
+		/* A click also moves the tab stop, so the two ways of getting to a
+		 * control agree about where the keyboard is. */
+		container.addEventListener('click', function (event) {
+			var hit = event.target.closest(selector);
+			if (hit && items().indexOf(hit) >= 0) {
+				items().forEach(function (one) { one.setAttribute('tabindex', '-1'); });
+				hit.setAttribute('tabindex', '0');
+			}
+		});
+	}
+
+	/* ---- toolbar -------------------------------------------------------------
+	 *
+	 * A row of controls that is one tab stop. Nothing else: the controls do
+	 * what they do, and this only decides which of them the keyboard is on.
+	 */
+	arandu.ui.define('toolbar', {
+		mounted: function (ctx) {
+			roving(ctx.element, '[data-part="control"]', {
+				vertical: !!(ctx.props || {}).vertical,
+			});
+		},
+	});
+
+	/* ---- menubar -------------------------------------------------------------
+	 *
+	 * The row of menus along the top of an application.
+	 *
+	 * Moving sideways while a menu is open closes it and opens the next --
+	 * that is the behaviour that makes a menubar quick, and it is the part
+	 * most reimplementations leave out. Down opens and steps in; Escape closes
+	 * and comes back to the trigger, which is where the person was.
+	 */
+	arandu.ui.define('menubar', {
+		mounted: function (ctx) {
+			var bar = ctx.element;
+
+			var panelOf = function (trigger) {
+				return document.getElementById(trigger.id.replace('-trigger-', '-panel-'));
+			};
+			var close = function (trigger) {
+				var panel = panelOf(trigger);
+				if (!panel) return;
+				panel.setAttribute('aria-hidden', 'true');
+				trigger.setAttribute('aria-expanded', 'false');
+			};
+			var closeAll = function () {
+				bar.querySelectorAll('[data-part="trigger"]').forEach(close);
+			};
+			var open = function (trigger) {
+				var panel = panelOf(trigger);
+				if (!panel) return;
+				closeAll();
+				panel.setAttribute('aria-hidden', 'false');
+				trigger.setAttribute('aria-expanded', 'true');
+			};
+			var isOpen = function (trigger) {
+				return trigger.getAttribute('aria-expanded') === 'true';
+			};
+
+			roving(bar, '[data-part="trigger"]', {
+				onKey: function (event, all, at) {
+					if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+						event.preventDefault();
+						open(all[at]);
+						var first = panelOf(all[at]).querySelector('[role="menuitem"]:not([disabled])');
+						if (first) first.focus();
+					} else if (event.key === 'Escape') {
+						closeAll();
+					}
+				},
+			});
+
+			/* The roving handler already moved the focus by the time this runs,
+			 * so an open menu simply follows it to whatever is now focused. */
+			bar.addEventListener('keyup', function (event) {
+				if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+				var landed = document.activeElement;
+				if (landed && landed.matches('[data-part="trigger"]') &&
+					bar.querySelector('[data-part="trigger"][aria-expanded="true"]')) {
+					open(landed);
+				}
+			});
+
+			bar.addEventListener('click', function (event) {
+				var trigger = event.target.closest('[data-part="trigger"]');
+				if (!trigger) return;
+				if (isOpen(trigger)) close(trigger); else open(trigger);
+			});
+
+			/* Inside a menu: up and down between entries, Escape back out to
+			 * the trigger -- which is where the person came from and where
+			 * they expect to be. */
+			bar.addEventListener('keydown', function (event) {
+				var entry = event.target.closest('[role="menuitem"]');
+				if (!entry) return;
+				var menu = entry.closest('[role="menu"]');
+				var entries = Array.prototype.filter.call(
+					menu.querySelectorAll('[role="menuitem"]'),
+					function (one) { return !one.disabled; }
+				);
+				var at = entries.indexOf(entry);
+				var trigger = document.getElementById(menu.getAttribute('aria-labelledby'));
+
+				if (event.key === 'ArrowDown') {
+					event.preventDefault();
+					entries[(at + 1) % entries.length].focus();
+				} else if (event.key === 'ArrowUp') {
+					event.preventDefault();
+					entries[(at - 1 + entries.length) % entries.length].focus();
+				} else if (event.key === 'Escape') {
+					event.preventDefault();
+					close(trigger);
+					trigger.focus();
+				}
+			});
+
+			ctx.dismiss = function (event) {
+				if (!bar.contains(event.target)) closeAll();
+			};
+			document.addEventListener('click', ctx.dismiss);
+		},
+		destroyed: function (ctx) {
+			if (ctx.dismiss) document.removeEventListener('click', ctx.dismiss);
+		},
+	});
+
+	/* ---- tree ----------------------------------------------------------------
+	 *
+	 * A hierarchy that is one tab stop.
+	 *
+	 * Right opens a closed branch and then steps into it; left closes an open
+	 * one and then steps out to the parent. That two-stage behaviour is the
+	 * whole tree contract and is what makes a deep tree navigable with two
+	 * keys.
+	 *
+	 * Opening and closing is done here rather than fetched, because the rows
+	 * are already in the markup -- a tree whose branches are fetched swaps its
+	 * own rows and this behaviour re-mounts on what comes back.
+	 */
+	arandu.ui.define('tree', {
+		mounted: function (ctx) {
+			var tree = ctx.element;
+			var multiple = !!(ctx.props || {}).multiple;
+
+			var rows = function () {
+				return Array.prototype.filter.call(
+					tree.querySelectorAll('[role="treeitem"]'),
+					function (row) { return row.getAttribute('aria-disabled') !== 'true'; }
+				);
+			};
+			var levelOf = function (row) {
+				return Number(row.getAttribute('aria-level') || '1');
+			};
+			var move = function (row) {
+				if (!row) return;
+				rows().forEach(function (one) { one.setAttribute('tabindex', '-1'); });
+				row.setAttribute('tabindex', '0');
+				row.focus();
+			};
+			var toggle = function (row, open) {
+				if (!row.hasAttribute('aria-expanded')) return false;
+				if (row.getAttribute('aria-expanded') === String(open)) return false;
+				row.setAttribute('aria-expanded', String(open));
+				/* The children are the following rows deeper than this one, up
+				 * to the next row at the same level or shallower. */
+				var all = Array.prototype.slice.call(tree.querySelectorAll('[role="treeitem"]'));
+				var at = all.indexOf(row);
+				var depth = levelOf(row);
+				for (var next = at + 1; next < all.length; next++) {
+					if (levelOf(all[next]) <= depth) break;
+					all[next].hidden = !open || levelOf(all[next]) > depth + 1
+						? !open || all[next].closest('[aria-expanded="false"]') !== null
+						: !open;
+				}
+				return true;
+			};
+
+			tree.addEventListener('keydown', function (event) {
+				var row = event.target.closest('[role="treeitem"]');
+				if (!row) return;
+				var all = rows();
+				var at = all.indexOf(row);
+
+				if (event.key === 'ArrowDown') {
+					event.preventDefault();
+					move(all[Math.min(at + 1, all.length - 1)]);
+				} else if (event.key === 'ArrowUp') {
+					event.preventDefault();
+					move(all[Math.max(at - 1, 0)]);
+				} else if (event.key === 'ArrowRight') {
+					event.preventDefault();
+					if (!toggle(row, true) && at + 1 < all.length &&
+						levelOf(all[at + 1]) > levelOf(row)) {
+						move(all[at + 1]);
+					}
+				} else if (event.key === 'ArrowLeft') {
+					event.preventDefault();
+					if (!toggle(row, false)) {
+						for (var back = at - 1; back >= 0; back--) {
+							if (levelOf(all[back]) < levelOf(row)) { move(all[back]); break; }
+						}
+					}
+				} else if (event.key === 'Home') {
+					event.preventDefault();
+					move(all[0]);
+				} else if (event.key === 'End') {
+					event.preventDefault();
+					move(all[all.length - 1]);
+				} else if (event.key === 'Enter' || event.key === ' ') {
+					if (!multiple) {
+						all.forEach(function (one) { one.removeAttribute('aria-selected'); });
+					}
+					row.setAttribute('aria-selected',
+						row.getAttribute('aria-selected') === 'true' && multiple ? 'false' : 'true');
+				}
+			});
+
+			tree.addEventListener('click', function (event) {
+				var toggleHit = event.target.closest('[data-part="toggle"]');
+				var row = event.target.closest('[role="treeitem"]');
+				if (!row) return;
+				move(row);
+				if (toggleHit) {
+					toggle(row, row.getAttribute('aria-expanded') !== 'true');
+				}
+			});
+		},
+	});
+
+	/* ---- carousel ------------------------------------------------------------
+	 *
+	 * The two buttons beside a scroll-snapping row.
+	 *
+	 * The scrolling itself belongs to the browser -- a drag, a swipe and the
+	 * scrollbar all already work -- so this only asks it to scroll by one
+	 * slide. That is why a carousel with no script still works and this only
+	 * adds a way to do it with a pointer that is not dragging.
+	 */
+	arandu.ui.define('carousel', {
+		mounted: function (ctx) {
+			var root = ctx.element;
+			var viewport = root.querySelector('[data-part="viewport"]');
+			if (!viewport) return;
+			var vertical = !!(ctx.props || {}).vertical;
+
+			ctx.step = function (event) {
+				var button = event.target.closest('[data-carousel-step]');
+				if (!button) return;
+				var direction = Number(button.getAttribute('data-carousel-step')) || 1;
+				var slide = viewport.querySelector('[data-part="slide"]');
+				var by = slide
+					? (vertical ? slide.offsetHeight : slide.offsetWidth)
+					: (vertical ? viewport.clientHeight : viewport.clientWidth);
+				var to = {};
+				to[vertical ? 'top' : 'left'] = by * direction;
+				to.behavior = 'smooth';
+				viewport.scrollBy(to);
+			};
+			root.addEventListener('click', ctx.step);
+		},
+		destroyed: function (ctx) {
+			if (ctx.step) ctx.element.removeEventListener('click', ctx.step);
+		},
+	});
+
+	/* ---- file-upload ---------------------------------------------------------
+	 *
+	 * Dropping files into the real file input.
+	 *
+	 * The input is what holds them, always: a drop writes into input.files
+	 * through a DataTransfer, so the form submits exactly as if the files had
+	 * been picked. Nothing here keeps a list of its own, which is what would
+	 * otherwise disagree with the field the moment somebody picks again.
+	 *
+	 * dragover has to be cancelled or the browser opens the file instead, and
+	 * that is the one line without which nothing works.
+	 */
+	arandu.ui.define('file-upload', {
+		mounted: function (ctx) {
+			var root = ctx.element;
+			var zone = root.querySelector('[data-dropzone]');
+			var input = root.querySelector('[data-part="input"]');
+			if (!zone || !input) return;
+
+			var stop = function (event) {
+				event.preventDefault();
+				event.stopPropagation();
+			};
+
+			ctx.over = function (event) {
+				stop(event);
+				zone.setAttribute('data-dragging', 'true');
+			};
+			ctx.leave = function (event) {
+				stop(event);
+				zone.removeAttribute('data-dragging');
+			};
+			ctx.drop = function (event) {
+				stop(event);
+				zone.removeAttribute('data-dragging');
+				if (!event.dataTransfer || !event.dataTransfer.files.length) return;
+
+				var carried = new DataTransfer();
+				var files = event.dataTransfer.files;
+				var many = input.multiple;
+				for (var at = 0; at < files.length; at++) {
+					carried.items.add(files[at]);
+					if (!many) break;
+				}
+				input.files = carried.files;
+				/* change, not input: it is the event a file input fires when
+				 * files are picked, and it is what the hx-trigger listens for. */
+				input.dispatchEvent(new Event('change', { bubbles: true }));
+			};
+
+			zone.addEventListener('dragenter', ctx.over);
+			zone.addEventListener('dragover', ctx.over);
+			zone.addEventListener('dragleave', ctx.leave);
+			zone.addEventListener('drop', ctx.drop);
+		},
+		destroyed: function (ctx) {
+			var zone = ctx.element.querySelector('[data-dropzone]');
+			if (!zone) return;
+			zone.removeEventListener('dragenter', ctx.over);
+			zone.removeEventListener('dragover', ctx.over);
+			zone.removeEventListener('dragleave', ctx.leave);
+			zone.removeEventListener('drop', ctx.drop);
+		},
+	});
+
+	/* ---- optimistic-toggle ---------------------------------------------------
+	 *
+	 * Flip now, reconcile after.
+	 *
+	 * The flip happens on the press and the request goes out behind it. What
+	 * the server answers with is this control redrawn in the state it actually
+	 * stored, which replaces the optimistic one -- so a disagreement corrects
+	 * itself without anything here comparing the two.
+	 *
+	 * A failed request is the case that needs handling: nothing comes back to
+	 * replace the control, so the flip is undone here and the count with it.
+	 */
+	arandu.ui.define('optimistic-toggle', {
+		mounted: function (ctx) {
+			var button = ctx.element;
+
+			var paint = function (pressed) {
+				button.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+				var on = button.querySelector('[data-toggle-on]');
+				var off = button.querySelector('[data-toggle-off]');
+				if (on) on.hidden = !pressed;
+				if (off) off.hidden = pressed;
+			};
+
+			ctx.flip = function () {
+				ctx.was = button.getAttribute('aria-pressed') === 'true';
+				var now = !ctx.was;
+				paint(now);
+
+				var count = button.querySelector('[data-toggle-count]');
+				if (count) {
+					var value = parseInt(count.textContent, 10);
+					if (!isNaN(value)) {
+						ctx.count = count.textContent;
+						count.textContent = String(Math.max(0, value + (now ? 1 : -1)));
+					}
+				}
+			};
+
+			ctx.revert = function () {
+				if (ctx.was === undefined) return;
+				paint(ctx.was);
+				var count = button.querySelector('[data-toggle-count]');
+				if (count && ctx.count !== undefined) count.textContent = ctx.count;
+			};
+
+			button.addEventListener('click', ctx.flip);
+			/* htmx:responseError covers a 4xx or 5xx; htmx:sendError covers the
+			 * request never arriving. Both leave the control as it was drawn,
+			 * and both have to put it back. */
+			button.addEventListener('htmx:responseError', ctx.revert);
+			button.addEventListener('htmx:sendError', ctx.revert);
+		},
+		destroyed: function (ctx) {
+			ctx.element.removeEventListener('click', ctx.flip);
+			ctx.element.removeEventListener('htmx:responseError', ctx.revert);
+			ctx.element.removeEventListener('htmx:sendError', ctx.revert);
+		},
+	});
+
+	/* ---- number-input --------------------------------------------------------
+	 *
+	 * The two buttons beside a number box.
+	 *
+	 * The stepping itself is the browser's -- stepUp and stepDown honour min,
+	 * max and step, and clamp rather than overshoot -- so this file decides
+	 * nothing about arithmetic. What it adds is the press, and the input event
+	 * afterwards, because stepUp does not fire one and everything watching the
+	 * box for changes would otherwise never hear about these.
+	 *
+	 * The buttons are aria-hidden and out of the tab order in the markup: a
+	 * keyboard already steps this box with the arrow keys, and two more tab
+	 * stops per number on a form is a form nobody can get through.
+	 */
+	arandu.ui.define('number-input', {
+		mounted: function (ctx) {
+			var root = ctx.element;
+			var input = root.querySelector('[data-part="input"]');
+			if (!input) return;
+
+			ctx.step = function (event) {
+				var button = event.target.closest('[data-number-step]');
+				if (!button || button.disabled || input.disabled || input.readOnly) return;
+				var direction = Number(button.getAttribute('data-number-step'));
+				if (!direction) return;
+				try {
+					if (direction > 0) input.stepUp(); else input.stepDown();
+				} catch (error) {
+					/* stepUp throws on a box whose value is not a number the
+					 * element can read -- a half-typed exponent, an empty box in
+					 * some engines. Starting from zero is the answer a person
+					 * pressing "up" on an empty box expects. */
+					input.value = String(direction > 0 ? 1 : -1);
+				}
+				input.dispatchEvent(new Event('input', { bubbles: true }));
+				input.dispatchEvent(new Event('change', { bubbles: true }));
+			};
+			root.addEventListener('click', ctx.step);
+		},
+		destroyed: function (ctx) {
+			if (ctx.step) ctx.element.removeEventListener('click', ctx.step);
+		},
+	});
+
 	/* ---- copy --------------------------------------------------------------
 	 *
 	 * The text is read out of an attribute and handed to the clipboard as text.
@@ -1194,8 +1685,18 @@
 					var hidden = input.type === 'password';
 					input.type = hidden ? 'text' : 'password';
 					reveal.setAttribute('aria-pressed', hidden ? 'true' : 'false');
-					/* The two labels are in the markup, so this file carries no
-					 * sentence and translates nothing. */
+					/* The two names are in the markup, so this file carries no
+					 * sentence and translates nothing. The control is an icon,
+					 * so the name is the only thing a screen reader has: it has
+					 * to say which state pressing lands in, and it flips with
+					 * the picture rather than after it. */
+					var name = reveal.getAttribute(hidden ? 'data-reveal-shown' : 'data-reveal-hidden');
+					if (name) reveal.setAttribute('aria-label', name);
+					toggle(reveal.querySelector('[data-reveal-icon-shown]'), hidden);
+					toggle(reveal.querySelector('[data-reveal-icon-hidden]'), !hidden);
+					/* A label written as text rather than as a picture is still
+					 * supported: a caller who put the words inside the button
+					 * gets them swapped the same way. */
 					toggle(reveal.querySelector('[data-reveal-shown]'), hidden);
 					toggle(reveal.querySelector('[data-reveal-hidden]'), !hidden);
 				});
@@ -1260,6 +1761,133 @@
 		 * explains the policy stays open and the strength summary stays quiet. */
 		var strength = root.querySelector('[data-part="strength"]');
 		if (strength) strength.setAttribute('data-met', total > 0 && satisfied === total ? 'true' : 'false');
+	}
+
+	/* ---- copy ---------------------------------------------------------------
+	 *
+	 * Puts a value on the clipboard and says so.
+	 *
+	 * The confirmation is written into a live region inside the button rather
+	 * than swapped for its label, because the label is what the control is
+	 * called and a control that renames itself after being pressed is a
+	 * control a screen reader can no longer find by name. The region says
+	 * "Copied" and empties again; the button keeps its name throughout.
+	 *
+	 * The writing itself is the asynchronous clipboard, and it is allowed only
+	 * from a gesture and only on a secure origin. Both are true here -- this
+	 * runs inside a click -- but a page served over plain HTTP has no
+	 * clipboard at all, so the failure is answered rather than assumed away:
+	 * the region says the copy did not happen, which is the truth and is more
+	 * use than a tick that lies.
+	 */
+	arandu.ui.define('copy', {
+		mounted: function (ctx) {
+			var button = ctx.element;
+			ctx.copy = function () {
+				var props = ctx.props || {};
+				var text = props.value;
+				if (!text && props.source) {
+					var from = document.getElementById(props.source);
+					if (from) text = from.value !== undefined ? from.value : from.textContent;
+				}
+				if (!text) return;
+
+				var say = function (message) {
+					var region = button.querySelector('[data-part="feedback"]');
+					if (!region) return;
+					region.textContent = message;
+					/* Emptied again so the next copy is a change, and a change
+					 * is the only thing a live region announces. */
+					window.setTimeout(function () { region.textContent = ''; }, 2000);
+				};
+
+				if (!navigator.clipboard || !navigator.clipboard.writeText) {
+					say('Copying is not available here');
+					return;
+				}
+				navigator.clipboard.writeText(text).then(
+					function () { say(props.copied || 'Copied'); },
+					function () { say('Copy failed'); }
+				);
+			};
+			button.addEventListener('click', ctx.copy);
+		},
+		destroyed: function (ctx) {
+			if (ctx.copy) ctx.element.removeEventListener('click', ctx.copy);
+		},
+	});
+
+	/* ---- relative-time -------------------------------------------------------
+	 *
+	 * Rewrites a timestamp in the reader's own locale and time zone.
+	 *
+	 * The server cannot know either: no request carries them, and a server
+	 * that guesses from the address is wrong for everyone travelling. So the
+	 * server writes the instant in the datetime attribute, where it is exact,
+	 * and a sentence in the element, where it is readable -- and this replaces
+	 * the sentence once, with the browser's own formatter.
+	 *
+	 * Everything here degrades to what the server wrote: an unparseable
+	 * instant, a browser without Intl, a script that never ran. The element is
+	 * never emptied and never left saying "Invalid Date".
+	 */
+	arandu.ui.define('relative-time', {
+		mounted: function (ctx) {
+			var element = ctx.element;
+			var when = new Date(element.getAttribute('datetime'));
+			if (isNaN(when.getTime())) return;
+
+			var style = (ctx.props || {}).style;
+			var text = localised(when, style);
+			if (text) element.textContent = text;
+		},
+	});
+
+	/* localised writes one instant the way the reader's locale writes it, and
+	 * returns nothing when it cannot -- which leaves the server's sentence. */
+	function localised(when, style) {
+		try {
+			if (style === 'relative') {
+				if (typeof Intl === 'undefined' || !Intl.RelativeTimeFormat) return '';
+				return elapsed(when);
+			}
+			if (typeof Intl === 'undefined' || !Intl.DateTimeFormat) return '';
+			if (style === 'time') return when.toLocaleTimeString();
+			if (style === 'datetime') return when.toLocaleString();
+			if (style === 'date') return when.toLocaleDateString();
+			return '';
+		} catch (error) {
+			return '';
+		}
+	}
+
+	/* elapsed says how long ago, in the largest unit that still has a whole
+	 * number in it: "3 hours ago" and not "180 minutes ago".
+	 *
+	 * The table is walked from the largest down, so the first unit whose span
+	 * fits is the one used. Months are 30 days and years are 365, which is
+	 * wrong by up to a day and a half and is invisible at the scale where
+	 * those units are chosen -- "2 months ago" does not become wrong because
+	 * February is short.
+	 */
+	function elapsed(when) {
+		var seconds = Math.round((when.getTime() - Date.now()) / 1000);
+		var units = [
+			['year', 31536000],
+			['month', 2592000],
+			['week', 604800],
+			['day', 86400],
+			['hour', 3600],
+			['minute', 60],
+		];
+		var format = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+		for (var at = 0; at < units.length; at++) {
+			var span = units[at][1];
+			if (Math.abs(seconds) >= span) {
+				return format.format(Math.round(seconds / span), units[at][0]);
+			}
+		}
+		return format.format(seconds, 'second');
 	}
 
 	/* By window load every deferred script has run, so a behaviour still
