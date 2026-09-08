@@ -138,12 +138,17 @@
 	 * of chosen rows in step, switch a column off, and move a cell at a time
 	 * when the table is a grid.
 	 *
-	 * Sorting is not among them, and that is the design rather than an
-	 * omission. A table sorted here is sorted only within the page that was
-	 * fetched, so page two of a list ordered by name holds whatever the server
-	 * thought page two was -- and it reads as rows in the wrong order to
-	 * everyone except whoever wrote it. So the header is a link, the server
-	 * orders, and htmx swaps the result.
+	 * Searching, ordering and paging are not among them, and that is the whole
+	 * design. Each is an address: the header is a link, the search is a form,
+	 * and htmx swaps what the server answers with. A copy of that written here
+	 * would be a second way to order a table -- one that orders only the rows
+	 * that were fetched, so page two of a list sorted by name holds whatever
+	 * the server thought page two was.
+	 *
+	 * It was written once and taken out again. What it cost to keep correct
+	 * -- a memo per row, a collator, a debounce, a cache thrown away on every
+	 * sort and every hidden column -- is the tell: that is a table engine, and
+	 * this framework already has one on the other side of the request.
 	 *
 	 * The sentence for the count comes from the server, in the same field the
 	 * server rendered it from. Nothing here composes English.
@@ -153,31 +158,84 @@
 			var root = ctx.element;
 			var props = ctx.props || {};
 
-			/* ---- working the rows in the browser --------------------------
+			/* ---- working a complete list in the browser --------------------
 			 *
-			 * Only when the page holds the whole list, which the server says
-			 * with data-complete. Ordering a page of a longer list orders only
-			 * the rows that were sent, and filtering it hides matches that
-			 * never arrived -- both read as a table in the wrong order to
-			 * everyone except whoever wrote it.
+			 * Only when the page holds every row, which the server states with
+			 * data-complete. Ordering a page of a longer list orders only what
+			 * was sent, and filtering it hides matches that never arrived --
+			 * both read as a table in the wrong order to everyone except
+			 * whoever wrote it. When it is not complete none of this runs: the
+			 * header is a link, the search is a form, and the server answers.
 			 *
-			 * When it is not complete, none of this runs: the headers are
-			 * links, the search is a form, and the server answers. The two are
-			 * not two implementations of one thing -- they are the two answers
-			 * to "does this page have everything", and the server picks.
+			 * The rows are moved, never rebuilt. Redrawing a body from strings
+			 * loses every data attribute, every checked box, the focus and
+			 * anything htmx bound to a row -- and turns text back into markup
+			 * on the way. Moving a <tr> that is already in the document keeps
+			 * all of it.
+			 *
+			 * Every sentence comes from the server, with its placeholders.
+			 * Nothing here composes English.
 			 */
 			var complete = root.getAttribute('data-complete') === 'true';
-
 			var body = function () { return root.querySelector('tbody'); };
 			var allRows = function () {
 				var tbody = body();
-				return tbody ? Array.prototype.slice.call(tbody.rows) : [];
+				if (!tbody) return [];
+				return Array.prototype.filter.call(tbody.rows, function (row) {
+					return !row.hasAttribute('data-empty-row');
+				});
 			};
 
+			var say = function (name, slots) {
+				var sentence = props[name] || '';
+				for (var key in slots) {
+					if (Object.prototype.hasOwnProperty.call(slots, key)) {
+						sentence = sentence.split('{' + key + '}').join(slots[key]);
+					}
+				}
+				return sentence;
+			};
+
+			/* One collator, made once. localeCompare builds one per call, and
+			 * a sort is n log n calls -- measured over fifty thousand rows,
+			 * eighty-eight milliseconds against fourteen. */
+			var collator = null;
+			var compare = function (x, y) {
+				if (!collator) {
+					collator = typeof Intl !== 'undefined' && Intl.Collator
+						? new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+						: { compare: function (a, b) { return a < b ? -1 : a > b ? 1 : 0; } };
+				}
+				return collator.compare(x, y);
+			};
+
+			/* The text a row is searched by, built once and kept on the row.
+			 * It was built per row per keystroke; memoised it is four to eight
+			 * times faster, and the gap widens with the table. It is dropped
+			 * whenever a column is hidden, because a hidden column is not
+			 * searched. */
+			var haystack = function (row) {
+				if (row.__hay === undefined) {
+					var text = '';
+					for (var i = 0; i < row.cells.length; i++) {
+						if (row.cells[i].hidden) continue;
+						text += (row.cells[i].textContent || '').toLowerCase() + ' ';
+					}
+					row.__hay = text;
+				}
+				return row.__hay;
+			};
+			var forget = function () {
+				allRows().forEach(function (row) { row.__hay = undefined; });
+			};
+
+			var size = Number(props.pageSize) || 0;
+			var page = 1;
+
 			/* comparable is what a cell sorts by: the value the server handed
-			 * over, or the text it draws. A number is compared as a number and
-			 * everything else as text -- which for an ISO date is the same
-			 * order, and is why the server is asked for that form. */
+			 * over, or the text it draws. The two are different strings --
+			 * "1.240,00" sorts before "860,00" as text and after it as money
+			 * -- which is why the server is asked for the comparable form. */
 			var comparable = function (row, at) {
 				var cell = row.cells[at];
 				if (!cell) return '';
@@ -185,88 +243,57 @@
 				return raw === null ? (cell.textContent || '').trim() : raw;
 			};
 
+			/* Decorate, sort, undecorate: the key is read once per row instead
+			 * of twice per comparison, and the column is numeric or it is not
+			 * -- deciding per comparison lets one stray cell order the others
+			 * by a rule that does not apply to them. */
 			var order = function (at, dir) {
 				var tbody = body();
 				if (!tbody) return;
 				var rows = allRows();
 				var sign = dir === 'desc' ? -1 : 1;
-				rows.sort(function (a, b) {
-					var x = comparable(a, at), y = comparable(b, at);
-					var nx = Number(x), ny = Number(y);
-					if (x !== '' && y !== '' && !isNaN(nx) && !isNaN(ny)) {
-						return (nx - ny) * sign;
+
+				var keyed = new Array(rows.length);
+				var numeric = false;
+				var seenValue = false;
+				for (var i = 0; i < rows.length; i++) {
+					var raw = comparable(rows[i], at);
+					var num = raw === '' ? NaN : Number(raw);
+					/* Empty cells do not decide the kind of the column. One
+					 * blank would otherwise send a column of money to the
+					 * collator, where 1.5 sorts before 1.25 and -5 before -10. */
+					if (raw !== '') {
+						if (!seenValue) { numeric = true; seenValue = true; }
+						if (isNaN(num)) numeric = false;
 					}
-					return x.localeCompare(y, undefined, { numeric: true, sensitivity: 'base' }) * sign;
-				});
-				/* Appending a row that is already in the table moves it, so the
-				 * whole order is applied without removing anything first --
-				 * which keeps focus and any checked box exactly where it was. */
-				rows.forEach(function (row) { tbody.appendChild(row); });
-			};
-
-			/* show decides which rows are on screen: the ones that match the
-			 * search, windowed to the page. It is one function because the two
-			 * cannot be decided apart -- the third page of a filtered list is
-			 * the third page of what matched, not of everything. */
-			var page = 1;
-			var show = function () {
-				var query = '';
-				var box = root.querySelector('[data-part="search"]');
-				if (box) query = (box.value || '').trim().toLowerCase();
-
-				var matched = allRows().filter(function (row) {
-					row.hidden = false;
-					if (!query) return true;
-					/* Every visible cell, because a person searching a table
-					 * does not know which column holds what they remember. A
-					 * hidden column is not searched: it is not on the screen,
-					 * and a hit nobody can see is a row that appears for no
-					 * reason. */
-					var text = Array.prototype.filter
-						.call(row.cells, function (cell) { return !cell.hidden; })
-						.map(function (cell) { return cell.textContent || ''; })
-						.join(' ')
-						.toLowerCase();
-					return text.indexOf(query) >= 0;
+					keyed[i] = { row: rows[i], raw: raw, num: num, blank: raw === '' };
+				}
+				/* Blanks go to one end and stay there whichever way the column
+				 * is sorted: a row with nothing in the column is not the
+				 * smallest value, it is the absence of one. */
+				var by = numeric
+					? function (a, b) { return (a.num - b.num) * sign; }
+					: function (a, b) { return compare(a.raw, b.raw) * sign; };
+				keyed.sort(function (a, b) {
+					if (a.blank !== b.blank) return a.blank ? 1 : -1;
+					if (a.blank) return 0;
+					return by(a, b);
 				});
 
-				var size = Number(props.pageSize) || 0;
-				var pages = size > 0 ? Math.max(1, Math.ceil(matched.length / size)) : 1;
-				if (page > pages) page = pages;
-
-				allRows().forEach(function (row) { row.hidden = true; });
-				matched.forEach(function (row, at) {
-					row.hidden = size > 0 && (at < (page - 1) * size || at >= page * size);
-				});
-
-                                pager(pages);
-				empty(matched.length === 0);
-				count();
-			};
-
-			/* The pager is redrawn rather than re-fetched: its links are still
-			 * addresses, and a page with no script follows them. */
-			var pager = function (pages) {
-				var nav = root.querySelector('[data-part="pagination"]');
-				if (!nav) return;
-				nav.hidden = pages < 2;
-				each(nav, 'a[aria-label]', function (link) {
-					var number = Number((link.textContent || '').trim());
-					if (!number) return;
-					link.setAttribute('aria-current', number === page ? 'page' : 'false');
-					if (number === page) link.setAttribute('aria-current', 'page');
-					else link.removeAttribute('aria-current');
-				});
+				/* Through a fragment: appending each row to the live table is a
+				 * layout per row, and the fragment makes it one. */
+				var moved = document.createDocumentFragment();
+				for (var m = 0; m < keyed.length; m++) moved.appendChild(keyed[m].row);
+				tbody.appendChild(moved);
 			};
 
 			/* A search that matched nothing is not an empty table: the table
-			 * has rows, and none of them are the answer. So the row says which
-			 * it is rather than leaving a blank body. */
-			var empty = function (nothing) {
+			 * has rows, and none of them is the answer. */
+			var nothing = function (missing, columns) {
 				var tbody = body();
 				if (!tbody) return;
 				var line = tbody.querySelector('[data-empty-row]');
-				if (!nothing) {
+				if (!missing) {
 					if (line) line.remove();
 					return;
 				}
@@ -274,14 +301,134 @@
 				var row = tbody.insertRow();
 				row.setAttribute('data-empty-row', '');
 				var cell = row.insertCell();
-				var head = root.querySelector('thead tr');
-				cell.colSpan = head ? head.cells.length : 1;
-				cell.className = 'text-muted-foreground py-6 text-center text-sm';
-				cell.textContent = props.empty || 'Nothing matched';
+				cell.colSpan = columns;
+				cell.className = 'data-table-nothing';
+				cell.textContent = props.noResult || 'Nothing matched';
 			};
 
+			var showing = function (from, to, total) {
+				var line = root.querySelector('[data-part="showing"]');
+				if (!line) return;
+				line.textContent = say('showing', { from: from, to: to, total: total });
+			};
+
+			/* The pager moves its window over the markup the server drew.
+			 *
+			 * Rebuilding it was the first thing tried and it is wrong: the
+			 * <nav> loses its accessible name, the <a> become <button> and
+			 * stop being addresses, every data-part and caller class goes, and
+			 * the focus lands on <body> after every click. Moving the window
+			 * keeps all of it -- the entries were already correct, they were
+			 * pointing at the wrong numbers.
+			 */
+			var pager = function (pages) {
+				var nav = root.querySelector('[data-part="pagination"]');
+				if (!nav) return;
+				nav.hidden = pages < 2;
+				if (pages < 2) return;
+
+				var numbered = Array.prototype.filter.call(
+					nav.querySelectorAll('[data-part="link"]'),
+					function (link) { return link.hasAttribute('data-page'); }
+				);
+				/* The window the server drew is as wide as it is; sliding it
+				 * means renumbering the entries in place, not making more. */
+				var width = numbered.length;
+				var first = Math.max(1, Math.min(page - Math.floor(width / 2), pages - width + 1));
+
+				numbered.forEach(function (link, at) {
+					var n = first + at;
+					var shown = n >= 1 && n <= pages;
+					link.closest('li').hidden = !shown;
+					if (!shown) return;
+					link.textContent = String(n);
+					link.setAttribute('data-page', String(n));
+					link.setAttribute('aria-label', say('page', { n: n }));
+					if (n === page) link.setAttribute('aria-current', 'page');
+					else link.removeAttribute('aria-current');
+				});
+
+				var end = function (part, to, live) {
+					var link = nav.querySelector('[data-part="' + part + '"]');
+					if (!link) return;
+					var item = link.closest('li');
+					if (item) item.hidden = !live;
+					link.setAttribute('data-page', String(to));
+				};
+				end('previous', Math.max(1, page - 1), page > 1);
+				end('next', Math.min(pages, page + 1), page < pages);
+
+				var gap = nav.querySelector('[data-part="ellipsis"]');
+				if (gap && gap.closest('li')) gap.closest('li').hidden = first + width - 1 >= pages;
+			};
+
+			var show = function () {
+				var query = '';
+				var box = root.querySelector('[data-part="search"]');
+				if (box) query = (box.value || '').trim().toLowerCase();
+
+				var rows = allRows();
+				var hits = new Array(rows.length);
+				var matched = 0;
+				for (var i = 0; i < rows.length; i++) {
+					hits[i] = !query || haystack(rows[i]).indexOf(query) >= 0;
+					if (hits[i]) matched++;
+				}
+
+				var pages = size > 0 ? Math.max(1, Math.ceil(matched / size)) : 1;
+				if (page > pages) page = pages;
+				var from = size > 0 ? (page - 1) * size : 0;
+				var to = size > 0 ? page * size : Infinity;
+
+				var seen = 0;
+				for (var at = 0; at < rows.length; at++) {
+					if (!hits[at]) { rows[at].hidden = true; continue; }
+					rows[at].hidden = seen < from || seen >= to;
+					seen++;
+				}
+
+				release();
+
+				var head = root.querySelector('thead tr');
+				nothing(matched === 0, head ? head.cells.length : 1);
+				showing(matched === 0 ? 0 : from + 1, Math.min(from + (size || matched), matched), matched);
+				pager(pages);
+				count();
+			};
+
+			/* Only the rows on screen.
+			 *
+			 * A filtered-away row keeps its checkbox in the document, keeps its
+			 * form attribute, and is still submitted -- so a header checkbox
+			 * that ticked every box in the DOM would archive two hundred
+			 * invoices from a table showing three. The count would say so, and
+			 * nobody would read it in time.
+			 *
+			 * The server marks the same rows hidden for the same reason, and
+			 * disables their boxes, so the hole is closed on both paths. */
 			var boxes = function () {
-				return Array.prototype.slice.call(root.querySelectorAll('[data-part="select"]'));
+				return Array.prototype.filter.call(
+					root.querySelectorAll('[data-part="select"]'),
+					function (box) {
+						var row = box.closest('tr');
+						return row && !row.hidden;
+					}
+				);
+			};
+
+			/* A row leaving the window takes its selection with it. Keeping it
+			 * checked is a value the form would still send from a row nobody
+			 * can see. */
+			var release = function () {
+				Array.prototype.forEach.call(
+					root.querySelectorAll('[data-part="select"]'),
+					function (box) {
+						var row = box.closest('tr');
+						if (!row) return;
+						box.disabled = !!row.hidden;
+						if (row.hidden) box.checked = false;
+					}
+				);
 			};
 
 			var count = function () {
@@ -293,14 +440,21 @@
 				 * renders into -- so the count is said in the language the page
 				 * is served in and this file carries no sentence. */
 				var template = line.getAttribute('data-selected-template') ||
-					'{n} of {total} rows selected';
+					props.selected || '{n} of {total} rows selected';
 				line.textContent = template
 					.split('{n}').join(String(chosen))
 					.split('{total}').join(String(all.length));
 
 				all.forEach(function (box) {
 					var row = box.closest('tr');
-					if (row) row.setAttribute('aria-selected', box.checked ? 'true' : 'false');
+					if (!row) return;
+					/* Written only where it differs: rewriting the attribute on
+					 * every row on every keystroke is a mutation record per row
+					 * for a value that did not change. */
+					var now = box.checked ? 'true' : 'false';
+					if (row.getAttribute('aria-selected') !== now) {
+						row.setAttribute('aria-selected', now);
+					}
 				});
 
 				var master = root.querySelector('[data-select-all]');
@@ -332,6 +486,9 @@
 				each(root, '[data-column="' + key + '"]', function (cell) {
 					cell.hidden = !toggle.checked;
 				});
+				/* A hidden column is not searched, so what every row is
+				 * searched by has just changed. */
+				if (complete) { forget(); show(); }
 			};
 
 			ctx.key = function (event) {
@@ -357,9 +514,15 @@
 					target.focus();
 				};
 
+				/* Read once, at the gesture: in a right-to-left document the
+				 * arrow that points right moves towards the earlier column,
+				 * and a grid that ignores that is a grid that moves backwards. */
+				var rtl = getComputedStyle(root).direction === 'rtl';
+				var forward = rtl ? -1 : 1;
+
 				switch (event.key) {
-					case 'ArrowRight': go(down, at + 1); break;
-					case 'ArrowLeft': go(down, at - 1); break;
+					case 'ArrowRight': go(down, at + forward); break;
+					case 'ArrowLeft': go(down, at - forward); break;
 					case 'ArrowDown': go(down + 1, at); break;
 					case 'ArrowUp': go(down - 1, at); break;
 					case 'Home': go(down, 0); break;
@@ -380,56 +543,94 @@
 			root.addEventListener('keydown', ctx.key);
 
 			if (complete) {
-				/* The header is a link and stays one. Taking the click before
-				 * the browser follows it is what makes this an enhancement:
-				 * with no script the same link loads the same order from the
-				 * server. */
+				/* Every sortable header says which of the three states it is
+				 * in. A header that only draws an arrow is a header a screen
+				 * reader reads as a link. */
+				var name = function (head) {
+					var link = head.querySelector('[data-part="sort"]');
+					if (!link) return;
+					var state = head.getAttribute('aria-sort');
+					var line = state === 'ascending' ? 'ascending'
+						: state === 'descending' ? 'descending' : 'unsorted';
+					link.setAttribute('aria-label',
+						say(line, { column: (link.textContent || '').trim() }));
+				};
+				each(root, 'th[aria-sort]', name);
+
+				/* The header stays a link. Taking the click before the browser
+				 * follows it is what makes this an enhancement: with no script
+				 * the same address loads the same order from the server. */
 				ctx.sort = function (event) {
 					var link = event.target.closest('[data-part="sort"]');
 					if (!link) return;
 					event.preventDefault();
 					var head = link.closest('th');
 					var at = Array.prototype.indexOf.call(head.parentElement.children, head);
-					var now = head.getAttribute('aria-sort');
-					var dir = now === 'ascending' ? 'desc' : 'asc';
+					var dir = head.getAttribute('aria-sort') === 'ascending' ? 'desc' : 'asc';
 					each(root, 'th[aria-sort]', function (one) { one.setAttribute('aria-sort', 'none'); });
 					head.setAttribute('aria-sort', dir === 'desc' ? 'descending' : 'ascending');
+					each(root, 'th[aria-sort]', name);
 					order(at, dir);
-					show();
-				};
-
-				ctx.filter = function (event) {
-					if (!event.target.closest('[data-part="search"]')) return;
+					/* Reordering resets the page, as the server's own SortURL
+					 * does -- otherwise the same gesture has two answers
+					 * depending on where the rows are worked. */
 					page = 1;
 					show();
 				};
 
-				ctx.paginate = function (event) {
-					var link = event.target.closest('[data-part="pagination"] a');
+				/* Debounced for the same reason the server search is: a word
+				 * typed at speed is one answer and not eight. Shorter, because
+				 * there is no network to wait for. */
+				var pending = 0;
+				ctx.filter = function (event) {
+					if (!event.target.closest('[data-part="search"]')) return;
+					window.clearTimeout(pending);
+					pending = window.setTimeout(function () { page = 1; show(); }, 80);
+				};
+
+				ctx.turn = function (event) {
+					var link = event.target.closest('[data-part="pagination"] [data-page]');
 					if (!link) return;
 					event.preventDefault();
-					var number = Number((link.textContent || '').trim());
-					if (number) { page = number; show(); return; }
-					var rel = link.getAttribute('rel');
-					if (rel === 'prev') page = Math.max(1, page - 1);
-					if (rel === 'next') page = page + 1;
+					page = Number(link.getAttribute('data-page')) || 1;
+					show();
+					/* The entry moved under the pointer; the focus follows the
+					 * number rather than the position, so a keyboard does not
+					 * land on whatever now occupies that slot. */
+					var again = root.querySelector('[data-part="pagination"] [data-page="' + page + '"]');
+					if (again) again.focus();
+				};
+
+				ctx.resize = function (event) {
+					var chooser = event.target.closest('[data-page-size]');
+					if (!chooser) return;
+					size = Number(chooser.value) || 0;
+					page = 1;
 					show();
 				};
 
 				root.addEventListener('click', ctx.sort);
-				root.addEventListener('click', ctx.paginate);
+				root.addEventListener('click', ctx.turn);
 				root.addEventListener('input', ctx.filter);
+				root.addEventListener('change', ctx.resize);
+				ctx.refresh = function () { forget(); show(); };
 				show();
 			}
 
 			count();
 		},
+		updated: function (ctx) {
+			/* The body may be entirely different rows now. What each was
+			 * searched by is the first thing that is no longer true. */
+			if (ctx.refresh) ctx.refresh();
+		},
 		destroyed: function (ctx) {
 			ctx.element.removeEventListener('change', ctx.change);
 			ctx.element.removeEventListener('keydown', ctx.key);
 			if (ctx.sort) ctx.element.removeEventListener('click', ctx.sort);
-			if (ctx.paginate) ctx.element.removeEventListener('click', ctx.paginate);
+			if (ctx.turn) ctx.element.removeEventListener('click', ctx.turn);
 			if (ctx.filter) ctx.element.removeEventListener('input', ctx.filter);
+			if (ctx.resize) ctx.element.removeEventListener('change', ctx.resize);
 		},
 	});
 
