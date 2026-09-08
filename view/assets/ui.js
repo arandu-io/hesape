@@ -757,6 +757,131 @@
 	document.addEventListener('htmx:afterSettle', function (event) { update(event.target); });
 	document.addEventListener('htmx:beforeCleanupElement', function (event) { destroy(event.target); });
 
+	/* The one-time code, typed one square at a time.
+	 *
+	 * The squares are the visible inputs and none of them submits; a hidden
+	 * input beside them carries the whole code under the field's name, kept in
+	 * step on every keystroke. So the server reads one field and never has to
+	 * join six of them.
+	 *
+	 * # What it does about the small things
+	 *
+	 * Typing moves to the next square, and backspace on an empty one moves back
+	 * -- otherwise fixing a mistake means clicking. Arrow keys walk the row. A
+	 * code pasted into any square fills all of them, because that is what
+	 * copying six digits out of a message means, and a code longer than the
+	 * field is cut rather than refused.
+	 *
+	 * # It does not decide
+	 *
+	 * Whether the code is the right one is the server's answer, and nothing here
+	 * asks. data-code-complete says every square is filled, which is a count.
+	 */
+	arandu.ui.define('one-time-code', {
+		mounted: function (ctx) {
+			var root = ctx.element;
+			var squares = Array.prototype.slice.call(root.querySelectorAll('[data-part="square"]'));
+			var raw = root.querySelector('[data-part="raw"]');
+			if (!squares.length) return;
+
+			var accepts = ctx.props.alphanumeric ? /[0-9a-zA-Z]/ : /[0-9]/;
+
+			function collect() {
+				var code = squares.map(function (one) { return one.value; }).join('');
+				if (raw) raw.value = code;
+				root.setAttribute('data-code-complete', code.length === squares.length ? 'true' : 'false');
+			}
+
+			function spread(text, from) {
+				var kept = String(text).split('').filter(function (one) { return accepts.test(one); });
+				for (var i = 0; i < kept.length && from + i < squares.length; i++) {
+					squares[from + i].value = kept[i];
+				}
+				var landed = Math.min(from + kept.length, squares.length - 1);
+				squares[landed].focus();
+				collect();
+			}
+
+			ctx.otp = { onInput: [], onKeyDown: [], onPaste: [], onFocus: [] };
+
+			squares.forEach(function (square, at) {
+				var onInput = function () {
+					var typed = square.value;
+					if (typed.length > 1) {
+						/* More than one character in a box that takes one is a
+						 * paste the browser routed here as input. */
+						square.value = '';
+						spread(typed, at);
+						return;
+					}
+					if (typed && !accepts.test(typed)) {
+						square.value = '';
+						collect();
+						return;
+					}
+					if (typed && at + 1 < squares.length) {
+						squares[at + 1].focus();
+					}
+					collect();
+				};
+
+				var onKeyDown = function (event) {
+					if (event.key === 'Backspace' && !square.value && at > 0) {
+						/* Backspace on an empty square goes back and clears the
+						 * one it lands on: otherwise fixing a mistake means
+						 * pressing it twice. */
+						event.preventDefault();
+						squares[at - 1].value = '';
+						squares[at - 1].focus();
+						collect();
+						return;
+					}
+					if (event.key === 'ArrowLeft' && at > 0) {
+						event.preventDefault();
+						squares[at - 1].focus();
+					}
+					if (event.key === 'ArrowRight' && at + 1 < squares.length) {
+						event.preventDefault();
+						squares[at + 1].focus();
+					}
+				};
+
+				var onPaste = function (event) {
+					event.preventDefault();
+					var text = (event.clipboardData || window.clipboardData).getData('text');
+					spread(text, at);
+				};
+
+				/* Selecting what is in the square means the next keystroke
+				 * replaces it, which is what somebody correcting one digit
+				 * expects. */
+				var onFocus = function () { square.select(); };
+
+				square.addEventListener('input', onInput);
+				square.addEventListener('keydown', onKeyDown);
+				square.addEventListener('paste', onPaste);
+				square.addEventListener('focus', onFocus);
+				ctx.otp.onInput.push(onInput);
+				ctx.otp.onKeyDown.push(onKeyDown);
+				ctx.otp.onPaste.push(onPaste);
+				ctx.otp.onFocus.push(onFocus);
+			});
+
+			collect();
+		},
+		destroyed: function (ctx) {
+			if (!ctx.otp) return;
+			var squares = Array.prototype.slice.call(
+				ctx.element.querySelectorAll('[data-part="square"]'));
+			squares.forEach(function (square, at) {
+				square.removeEventListener('input', ctx.otp.onInput[at]);
+				square.removeEventListener('keydown', ctx.otp.onKeyDown[at]);
+				square.removeEventListener('paste', ctx.otp.onPaste[at]);
+				square.removeEventListener('focus', ctx.otp.onFocus[at]);
+			});
+		},
+	});
+
 	/* The mask, which formats a field as somebody types in it.
 	 *
 	 * The pattern is a string of tokens, and the vocabulary is the one anybody
