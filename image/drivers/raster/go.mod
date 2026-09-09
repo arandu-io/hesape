@@ -5,7 +5,7 @@ module github.com/arandu-io/hesape/image/drivers/raster
 go 1.26.4
 
 require (
-	github.com/arandu-io/hesape v0.25.2
+	github.com/arandu-io/hesape v0.36.0
 	github.com/fyne-io/oksvg v0.2.0
 	github.com/gen2brain/vpx v0.2.1
 	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef
