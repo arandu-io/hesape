@@ -26,6 +26,39 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+### A publication is refused when it carries a directory named `vendor`
+
+`foundation.Publications` now returns an error for a module whose publication
+names the directory the go command reserves. Nothing in the signature changed,
+so a module that does not use the name compiles and behaves as before; one that
+does now fails where it used to publish.
+
+The name could not keep working. Two rules of the go command act on it, and a
+tree of published views hits both:
+
+  - a file under a directory named `vendor` is left out of the module zip at any
+    depth. The file stays in the module's repository and is missing for everyone
+    who downloads it, so a `go:embed` naming its directory matches nothing and
+    the failure lands on whoever builds the project: `pattern resources/views:
+    no matching files found`.
+  - a package whose import path carries the element cannot be imported:
+    `use of vendored package not allowed`. A published view is compiled into a
+    Go package the application has to import for its `init()` to register
+    anything, so the second rule refuses the last step of the install.
+
+Both were reproduced before this was written, not reasoned about.
+
+The archive is checked for every tag, because the zip rule applies to any file.
+The destination is checked for `view` and `component`, the two that become Go.
+A translation keeps its destination: `resources/lang/vendor/<namespace>` is the
+override tree the catalogue loader already reads, it is never named by an import
+path, and it belongs to the application rather than to a published module.
+
+A module that hits this renames the directory — `modules` is what the package
+skeleton uses — and releases. Projects that already published the old tree
+publish again and delete the old files, their lines in `vendor-publish.lock` and
+their import in `bootstrap/app.go`.
+
 ### A conventional index name is shortened to fit the driver, and may differ from the one already in your database
 
 `Blueprint` built the conventional name of an index, unique constraint, primary

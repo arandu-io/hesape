@@ -3,6 +3,8 @@ package foundation
 import (
 	"fmt"
 	"io/fs"
+	"path"
+	"strings"
 )
 
 // PublishTag names the kind of file a module publishes.
@@ -108,6 +110,83 @@ func Publications(module any) ([]Publication, error) {
 		if publication.Files == nil {
 			return nil, fmt.Errorf("foundation: a %s publication carries no files", publication.Tag)
 		}
+		if err := checkVendorSegment(module, publication); err != nil {
+			return nil, err
+		}
 	}
 	return publications, nil
+}
+
+// vendorSegment is the directory name the go command reserves.
+//
+// It is not a style preference. Two rules of the go command act on a path that
+// carries it, and between them they make such a path unusable for a module that
+// publishes files:
+//
+//   - a file inside a directory named vendor is left out of the module zip, at
+//     any depth. The file stays in the repository and is absent for everyone
+//     who downloads the module, so an embed that names its directory fails to
+//     match anything and the refusal lands on whoever built the project, not on
+//     whoever published the module.
+//   - a package whose import path carries the element cannot be imported:
+//     "use of vendored package not allowed". A published view is compiled into
+//     a Go package the application has to import, so a view under this name is
+//     written, compiled, and then refused by the compiler.
+const vendorSegment = "vendor"
+
+// checkVendorSegment refuses a publication the go command would take apart.
+//
+// The archive is checked for every tag, because the zip rule applies to any
+// file. The destination is checked for the two tags that become Go: a view and
+// a component are compiled into packages the application imports, and a
+// configuration file, a migration, a catalogue or an asset is read at runtime
+// and never named by an import path.
+//
+// It is checked here rather than where the files are written because here is
+// the side that still has them: for a module already published, the archive has
+// no such file left to find, and the only thing anybody sees is an embed that
+// matched nothing. Reading the publication in the module's own tests is the
+// last moment the truth is still on disk.
+func checkVendorSegment(module any, publication Publication) error {
+	name := "a module"
+	if named, ok := module.(interface{ Name() string }); ok {
+		name = named.Name()
+	}
+
+	if hasVendorSegment(publication.To) && (publication.Tag == PublishView || publication.Tag == PublishComponent) {
+		return fmt.Errorf("foundation: %s publishes a %s into %q, and the go command refuses to import a package whose path carries a %q element: "+
+			"the file is written and compiled, and then the build says \"use of vendored package not allowed\". Name the directory something else",
+			name, publication.Tag, publication.To, vendorSegment)
+	}
+
+	from := publication.From
+	if from == "" {
+		from = "."
+	}
+
+	return fs.WalkDir(publication.Files, from, func(file string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		if !hasVendorSegment(file) {
+			return nil
+		}
+		return fmt.Errorf("foundation: %s carries %q in its %s publication, and the go command leaves a file under a %q directory out of the module zip: "+
+			"it is in the repository and absent for everyone who downloads the module. Name the directory something else",
+			name, file, publication.Tag, vendorSegment)
+	})
+}
+
+// hasVendorSegment reports whether any element of a slash-separated path is the
+// reserved name.
+func hasVendorSegment(p string) bool {
+	if p == "" {
+		return false
+	}
+	for _, element := range strings.Split(path.Clean(p), "/") {
+		if element == vendorSegment {
+			return true
+		}
+	}
+	return false
 }
