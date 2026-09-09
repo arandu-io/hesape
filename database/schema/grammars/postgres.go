@@ -40,6 +40,15 @@ func NewPostgresGrammar(connection schema.Connection) *PostgresGrammar {
 	return g
 }
 
+// MaxIdentifierLength returns 63, which is NAMEDATALEN - 1.
+//
+// Postgres does not refuse a longer name: it truncates to this length and says
+// so in a NOTICE the client library usually discards. Two index names that
+// differ only after the cut therefore become one name, and the second CREATE
+// INDEX fails with "already exists" -- on whichever database happens to hold
+// both, which is rarely the one the migration was written on.
+func (g *PostgresGrammar) MaxIdentifierLength() int { return 63 }
+
 // CompileCreateDatabase builds on the base's SQL, appending an encoding
 // clause when the connection configures a charset.
 func (g *PostgresGrammar) CompileCreateDatabase(name string) (string, error) {

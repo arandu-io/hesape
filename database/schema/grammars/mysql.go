@@ -31,6 +31,14 @@ func NewMySQLGrammar(connection schema.Connection) *MySQLGrammar {
 	return g
 }
 
+// MaxIdentifierLength returns 64, the limit MySQL and MariaDB place on a
+// table, column or index name.
+//
+// Unlike Postgres, MySQL refuses a longer name instead of truncating it, so
+// the failure is immediate and names it. The limit is enforced here anyway, so
+// that a conventional name is shortened the same way on every driver.
+func (g *MySQLGrammar) MaxIdentifierLength() int { return 64 }
+
 // CompileCreateDatabase builds the CREATE DATABASE statement for name,
 // appending the connection's configured charset and collation when set.
 func (g *MySQLGrammar) CompileCreateDatabase(name string) (string, error) {

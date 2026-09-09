@@ -62,6 +62,15 @@ func (g *BaseGrammar) GetAlterCommands() []string { return nil }
 // statements inside a transaction.
 func (g *BaseGrammar) SupportsSchemaTransactions() bool { return g.transactions }
 
+// MaxIdentifierLength returns the longest identifier this driver accepts, in
+// bytes.
+//
+// The base returns zero, which means no limit worth enforcing: SQLite is the
+// driver that answers this way, since it caps neither an index name nor a
+// column name at any length a migration would reach. Postgres and MySQL
+// override it with their own.
+func (g *BaseGrammar) MaxIdentifierLength() int { return 0 }
+
 // Wrap quotes value as a SQL identifier. A column definition is unwrapped to
 // its name before quoting, and an expression passes through untouched.
 func (g *BaseGrammar) Wrap(value any) string {

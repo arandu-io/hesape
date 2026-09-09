@@ -26,6 +26,81 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+### A conventional index name is shortened to fit the driver, and may differ from the one already in your database
+
+`Blueprint` built the conventional name of an index, unique constraint, primary
+key or foreign key by joining the table, every column and the type, with no
+limit on the result. Postgres caps an identifier at 63 bytes and **truncates**
+past it, saying so only in a `NOTICE`; MySQL caps it at 64 and refuses the
+statement. So a composite index on a multitenant table — the
+`(tenant_id, environment, merchant_id, ...)` shape — produced a name the server
+cut. Two indexes on one table whose names matched through the first 63 bytes
+became one name, and the second `CREATE INDEX` failed with `already exists`, on
+whichever database happened to hold both.
+
+A conventional name longer than the driver's limit is now shortened before it
+leaves the process: a prefix of the name, then a digest of the whole of it. The
+digest is of the full conventional name and nothing else, so the same table and
+the same columns produce the same name on every run and every machine, and two
+names that differed only past the cut still differ after it.
+
+Nothing in the public API changed, and no name that already fit moves — a name
+of 63 bytes or fewer on Postgres, 64 or fewer on MySQL, and every name on
+SQLite, is byte for byte what it was.
+
+**What can move, and what to do about it.** A name that did *not* fit is now
+different from the one your database is carrying, because the one it is
+carrying is the server's truncation of the old name. Two consequences, both on
+Postgres:
+
+- A `DROP INDEX` written as a column list — `table.DropIndex([]string{...})` —
+  names the index by the same convention that created it, so on those indexes
+  it now names something the database does not have.
+- `aru migrate:rollback` over a migration that created one hits the same thing.
+
+Neither affects an index whose conventional name was within the limit, which is
+the overwhelming majority. To find the ones that are not, look for an index
+whose name is exactly 63 bytes:
+
+```sql
+select tablename, indexname from pg_indexes
+where schemaname = current_schema() and length(indexname) = 63;
+```
+
+Drop each by the name Postgres actually gave it, or name the index explicitly in
+the migration and keep the name you have.
+
+### A name you write yourself is refused when the driver would cut it
+
+An index name passed explicitly is still used verbatim. It is now checked
+against the driver's limit when the blueprint compiles, and `ToSQL` returns a
+`*schema.IdentifierTooLongError` rather than letting the server shorten it:
+
+```go
+var tooLong *schema.IdentifierTooLongError
+if errors.As(err, &tooLong) {
+    // tooLong.Name is the name as written, tooLong.Limit the driver's cap.
+}
+```
+
+The check is on the name you chose, never on one the convention built. It also
+covers the new name of a `RenameIndex`, and both names of a `DropIndex` given as
+a string.
+
+### `database/schema.Grammar.MaxIdentifierLength` is a new method on the interface
+
+`schema.Grammar` is the interface the schema builder needs of a driver grammar,
+and `database/schema.Grammar.MaxIdentifierLength` is new on it:
+
+```go
+MaxIdentifierLength() int
+```
+
+Zero means the driver imposes no limit worth enforcing. The three grammars in
+this module answer 63 (Postgres), 64 (MySQL and MariaDB) and 0 (SQLite);
+`grammars.BaseGrammar` answers 0, so a grammar embedding it needs no change. A
+grammar written from scratch against the interface has to add the method.
+
 ### `client.Factory.Client` returns a copy, and says what its guard does not cover
 
 `Factory.Client()` used to return the factory's own `*http.Client`. It now
