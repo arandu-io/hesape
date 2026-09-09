@@ -1,5 +1,7 @@
 package schema
 
+import "fmt"
+
 // Grammar is what a Blueprint needs of the thing that spells its DDL.
 //
 // It is an interface, declared in the package that consumes it, because the
@@ -195,6 +197,17 @@ type Grammar interface {
 	// replaces the connection's table prefix, which is how the SQLite
 	// rebuild names its temporary table.
 	WrapTable(table any, prefix ...string) string
+
+	// MaxIdentifierLength returns the longest identifier this driver
+	// accepts, in bytes. Zero means the driver imposes no limit worth
+	// enforcing.
+	//
+	// The limit belongs to the driver and not to the Blueprint, because the
+	// drivers disagree on both the number and on what happens past it: one
+	// truncates the name and carries on, another refuses the statement. A
+	// conventional name is shortened to fit before it ever reaches the
+	// server, so neither behaviour is ever reached.
+	MaxIdentifierLength() int
 }
 
 // compileCommand hands one command to the grammar.
@@ -267,4 +280,27 @@ type UnknownCommandError struct{ Name string }
 
 func (e *UnknownCommandError) Error() string {
 	return "schema: no grammar compiles the blueprint command " + e.Name
+}
+
+// IdentifierTooLongError is returned when a name the caller wrote out by hand
+// is longer than the driver accepts.
+//
+// A conventional name is shortened to fit and never reaches this, so the error
+// only ever reports a name the caller chose. It is an error rather than a
+// silent shortening because the caller who names an index means to use that
+// name again -- to drop it, to rename it, to read it in a report -- and a name
+// quietly changed underneath is worse than a migration that refuses to run.
+type IdentifierTooLongError struct {
+	// Name is the identifier as the caller wrote it.
+	Name string
+
+	// Limit is the longest identifier the driver accepts, in bytes.
+	Limit int
+}
+
+func (e *IdentifierTooLongError) Error() string {
+	return fmt.Sprintf(
+		"schema: identifier %q is %d bytes, over this driver's limit of %d; name it something shorter",
+		e.Name, len(e.Name), e.Limit,
+	)
 }

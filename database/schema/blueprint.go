@@ -2,6 +2,8 @@ package schema
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -78,6 +80,9 @@ func (b *Blueprint) ToSQL(ctx context.Context) ([]string, error) {
 	for _, command := range b.commands {
 		if command.ShouldBeSkipped {
 			continue
+		}
+		if err := b.checkIdentifiers(command); err != nil {
+			return nil, err
 		}
 		if b.state != nil {
 			b.state.Update(command)
@@ -1088,7 +1093,73 @@ func (b *Blueprint) createIndexName(typ string, columns []any) string {
 
 	index := strings.ToLower(strings.Join(parts, "_"))
 	index = strings.ReplaceAll(index, "-", "_")
-	return strings.ReplaceAll(index, ".", "_")
+	index = strings.ReplaceAll(index, ".", "_")
+
+	return shortenIdentifier(index, b.maxIdentifierLength())
+}
+
+// maxIdentifierLength is the grammar's identifier limit, or zero when the
+// blueprint was built without a grammar.
+func (b *Blueprint) maxIdentifierLength() int {
+	if b.grammar == nil {
+		return 0
+	}
+	return b.grammar.MaxIdentifierLength()
+}
+
+// identifierHashLength is how many hex digits of the digest a shortened
+// identifier carries. Six bytes is enough that a table would need on the order
+// of sixteen million index names before two of them were expected to collide,
+// and short enough to leave the readable half of the name readable.
+const identifierHashLength = 12
+
+// shortenIdentifier returns name unchanged when it fits within limit, and a
+// deterministic name of at most limit bytes when it does not.
+//
+// The shortened form is a prefix of the conventional name followed by a digest
+// of the whole of it, so that two names differing only past the cut still
+// differ after it -- which plain truncation, the obvious fix, does not give.
+// The digest is of the full name and nothing else, so the same columns on the
+// same table produce the same name on every run and every machine.
+//
+// A limit of zero, or a name already within it, is returned untouched: the
+// driver that reports no limit gets the conventional name it always got.
+func shortenIdentifier(name string, limit int) string {
+	if limit <= 0 || len(name) <= limit {
+		return name
+	}
+
+	sum := sha256.Sum256([]byte(name))
+	suffix := "_" + hex.EncodeToString(sum[:])[:identifierHashLength]
+
+	keep := limit - len(suffix)
+	if keep < 1 {
+		// The limit is too small for a prefix. Return as much of the digest
+		// as fits, which is still deterministic and still distinguishing.
+		return suffix[1:][:limit]
+	}
+
+	return strings.TrimRight(name[:keep], "_") + suffix
+}
+
+// checkIdentifiers reports an IdentifierTooLongError when a command carries a
+// name the driver will not accept.
+//
+// Only a name the caller wrote by hand can fail here: createIndexName shortens
+// the ones this package generates before they are ever stored on the command.
+func (b *Blueprint) checkIdentifiers(command *Command) error {
+	limit := b.maxIdentifierLength()
+	if limit <= 0 {
+		return nil
+	}
+
+	for _, name := range []string{command.Index, command.To} {
+		if name != "" && len(name) > limit {
+			return &IdentifierTooLongError{Name: name, Limit: limit}
+		}
+	}
+
+	return nil
 }
 
 // AddColumn adds a column of the given type and name to the blueprint.
