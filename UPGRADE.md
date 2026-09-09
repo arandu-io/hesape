@@ -26,6 +26,60 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+### Um timestamp anulável passa a ser gravado como o não-anulável
+
+Duas colunas da mesma linha, escritas pelo mesmo `Save`, chegavam ao banco em
+grafias diferentes conforme o campo Go fosse valor ou ponteiro:
+
+| coluna | tipo Go | texto gravado |
+|---|---|---|
+| `starts_at` (NOT NULL) | `time.Time` | `2026-09-09 23:14:04` |
+| `ends_at` (NULLABLE) | `*time.Time` | `2026-09-09 23:14:04 +0000 UTC` |
+
+A conversão de bindings decidia por asserção de tipo, e um `*time.Time` não é
+um `time.Time`: caía no caso padrão e nunca era formatado. A partir desta
+versão o ponteiro é atravessado **antes** da decisão, o que corrige o caso
+geral e não apenas o tempo. Um ponteiro nulo continua sendo NULL.
+
+**Por que isso não era cosmético.** Um engine que guarda timestamp como texto
+compara essas duas grafias como texto, e a de 29 caracteres é o mais longo de
+dois prefixos iguais — então ordena **depois** do bound de 19 que uma consulta
+envia. `WHERE coluna <= ?` acertava sempre que os dois instantes diferiam e
+errava exatamente na fronteira. Como todo timestamp desse caminho é truncado ao
+segundo, a fronteira acontece: uma varredura de expiração rodando no mesmo
+segundo do fim da janela deixava o registro ativo.
+
+**O que acontece com o que já está gravado, dito por escrito porque não é
+óbvio.** Esta correção muda a escrita e **não corrige o passado**. Uma base
+existente tem as duas grafias misturadas na mesma coluna, e não há migração de
+dados nesta versão — uma coluna pode conter as duas, e reescrever às cegas
+converteria também os valores que já estavam certos.
+
+Quem precisa normalizar faz isso na própria aplicação, e o SQL abaixo mostra o
+tamanho do problema antes de mexer em nada:
+
+```sql
+-- quantas linhas carregam a grafia longa
+SELECT count(*) FROM sua_tabela WHERE length(CAST(sua_coluna AS TEXT)) > 19;
+```
+
+A conversão, quando decidida, é cortar no décimo nono caractere — os dois
+prefixos são iguais até ali, que é a razão de o defeito existir:
+
+```sql
+UPDATE sua_tabela
+   SET sua_coluna = substr(CAST(sua_coluna AS TEXT), 1, 19)
+ WHERE length(CAST(sua_coluna AS TEXT)) > 19;
+```
+
+Isso é uma migração da aplicação, não do framework: só quem conhece a tabela
+sabe se ela pode ser reescrita e quando.
+
+**Não verificado:** a medição foi feita contra SQLite, que é o que reproduz o
+defeito por guardar timestamp como texto. Em PostgreSQL o driver pode recusar a
+string em vez de gravá-la, o que troca um erro silencioso por um ruidoso —
+melhor, e ainda assim um defeito. A correção vale para os dois.
+
 ### A publication is refused when it carries a directory named `vendor`
 
 `foundation.Publications` now returns an error for a module whose publication

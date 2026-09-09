@@ -424,3 +424,63 @@ func TestTheBoundConnectionAnswersTheProcessor(t *testing.T) {
 		t.Fatal("GetLastInsertID answered 0 after an insert that reported one")
 	}
 }
+
+// A nullable column is a pointer field, and a pointer reached the driver
+// unformatted while the value beside it was formatted -- so two columns of the
+// same row, written by the same save, arrived in two spellings.
+//
+// The engines that store a timestamp as text then compare those spellings as
+// text. The long one is the longer of two equal prefixes, so it sorts after the
+// bound a query sends, and `WHERE column <= ?` misses exactly at the boundary:
+// right whenever the two instants differ, wrong when they are the same second.
+// Every timestamp on this path is truncated to the second, so that boundary is
+// a case that happens rather than a curiosity.
+func TestPrepareBindingsSpellsAPointerToATimeLikeATime(t *testing.T) {
+	connection := NewConnection(nil, "", "", nil)
+	at := time.Date(2026, 9, 9, 23, 14, 4, 0, time.UTC)
+
+	got := connection.PrepareBindings([]any{at, &at})
+
+	if got[0] != got[1] {
+		t.Errorf("a time came out as %v and a pointer to that same time as %v; "+
+			"a nullable column and a non-nullable one are written by the same save and have to arrive in one spelling", got[0], got[1])
+	}
+	if _, isString := got[1].(string); !isString {
+		t.Errorf("a pointer to a time came out as %T, want the string the grammar spells", got[1])
+	}
+}
+
+// A nil pointer is NULL, and it has to stay NULL: formatting the zero value
+// behind it would write the year one into a column that means "not set".
+func TestPrepareBindingsAnswersNullForANilPointer(t *testing.T) {
+	connection := NewConnection(nil, "", "", nil)
+
+	var absent *time.Time
+	got := connection.PrepareBindings([]any{absent})
+
+	if got[0] != nil {
+		t.Errorf("a nil pointer to a time came out as %v, want NULL", got[0])
+	}
+}
+
+// The conversion decides by asking what a value is, and a pointer answers a
+// different question than the value behind it. Fixing only the time would
+// leave every other case that decides by type asking the wrong one, so the
+// dereference happens before the decision rather than inside one branch of it.
+func TestPrepareBindingsLooksThroughAPointerForEveryTypeItDecidesOn(t *testing.T) {
+	connection := NewConnection(nil, "", "", nil)
+
+	yes, text, number := true, "x", 3
+
+	got := connection.PrepareBindings([]any{&yes, &text, &number})
+
+	if got[0] != true {
+		t.Errorf("a pointer to a bool came out as %v, want the bool", got[0])
+	}
+	if got[1] != "x" {
+		t.Errorf("a pointer to a string came out as %v, want the string", got[1])
+	}
+	if got[2] != 3 {
+		t.Errorf("a pointer to an int came out as %v, want the int", got[2])
+	}
+}

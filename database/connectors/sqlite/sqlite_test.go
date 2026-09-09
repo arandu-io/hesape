@@ -3,9 +3,11 @@ package sqlite_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database"
@@ -318,5 +320,132 @@ func TestDropAllTablesEmptiesTheCatalogue(t *testing.T) {
 		table.String("id").Primary()
 	}); err != nil {
 		t.Fatalf("the database is unusable after the wipe: %v", err)
+	}
+}
+
+// TestANullableTimestampIsStoredLikeANonNullableOne is the measurement, not a
+// reading of the code: it writes both through the connection and then reads
+// the text the column actually holds.
+//
+// Reading the value back through a model would hide the defect, because the
+// model reparses either spelling and answers the same instant. The column is
+// what the next query compares against, so the column is what has to be
+// asserted.
+func TestANullableTimestampIsStoredLikeANonNullableOne(t *testing.T) {
+	ctx := context.Background()
+	cfg := database.Config{
+		Connection: database.DialectSQLite,
+		Database:   filepath.Join(t.TempDir(), "app.sqlite"),
+	}
+
+	db, closeDB, err := database.Open(cfg)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer closeDB()
+
+	conn := database.NewConnection(db.Unwrap(), "", "", map[string]any{
+		"driver": string(database.DialectSQLite),
+		"name":   "sqlite",
+	})
+
+	if _, err := conn.Statement(ctx,
+		`CREATE TABLE window (id TEXT PRIMARY KEY, starts_at DATETIME NOT NULL, ends_at DATETIME)`, nil); err != nil {
+		t.Fatalf("creating the table: %v", err)
+	}
+
+	// One instant, written twice: once as a value, once through a pointer.
+	// Truncated to the second, because every timestamp on this path is.
+	at := time.Date(2026, 9, 9, 23, 14, 4, 0, time.UTC)
+	if _, err := conn.Statement(ctx,
+		`INSERT INTO window (id, starts_at, ends_at) VALUES (?, ?, ?)`,
+		conn.PrepareBindings([]any{"w1", at, &at})); err != nil {
+		t.Fatalf("inserting: %v", err)
+	}
+
+	// CAST to TEXT, because the driver parses a DATETIME column on the way
+	// back and would answer both spellings as the same instant -- which is the
+	// same hiding the model does, one layer lower.
+	rows, err := conn.Select(ctx,
+		`SELECT CAST(starts_at AS TEXT) AS starts_at, CAST(ends_at AS TEXT) AS ends_at FROM window WHERE id = ?`,
+		conn.PrepareBindings([]any{"w1"}), true)
+	if err != nil {
+		t.Fatalf("reading the columns back: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("read %d rows, want 1", len(rows))
+	}
+
+	starts, ends := fmt.Sprint(rows[0]["starts_at"]), fmt.Sprint(rows[0]["ends_at"])
+	if starts != ends {
+		t.Errorf("the same instant is stored as %q in a NOT NULL column and %q in a nullable one; "+
+			"an engine that stores a timestamp as text compares those as text, and the longer of two "+
+			"equal prefixes sorts after the bound a query sends", starts, ends)
+	}
+
+	// The boundary, which is where the difference in spelling stops being
+	// cosmetic: a scan running in the same second as the end of a window has
+	// to find the window.
+	found, err := conn.Select(ctx, `SELECT id FROM window WHERE ends_at <= ?`,
+		conn.PrepareBindings([]any{at}), true)
+	if err != nil {
+		t.Fatalf("querying the boundary: %v", err)
+	}
+	if len(found) != 1 {
+		t.Errorf("`ends_at <= ?` against the exact instant found %d rows, want 1: "+
+			"an expiry scan running in the same second as the end of the window left the record active", len(found))
+	}
+
+	// And the same query against the column beside it, which was already
+	// right, so a regression that broke both would not read as this one.
+	found, err = conn.Select(ctx, `SELECT id FROM window WHERE starts_at <= ?`,
+		conn.PrepareBindings([]any{at}), true)
+	if err != nil {
+		t.Fatalf("querying the boundary on the NOT NULL column: %v", err)
+	}
+	if len(found) != 1 {
+		t.Errorf("`starts_at <= ?` against the exact instant found %d rows, want 1", len(found))
+	}
+}
+
+// TestANilTimestampIsStillNull keeps the other half: a pointer that is not set
+// is the absence of a value, and formatting the zero behind it would write the
+// year one into a column that means "not set".
+func TestANilTimestampIsStillNull(t *testing.T) {
+	ctx := context.Background()
+	cfg := database.Config{
+		Connection: database.DialectSQLite,
+		Database:   filepath.Join(t.TempDir(), "app.sqlite"),
+	}
+
+	db, closeDB, err := database.Open(cfg)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer closeDB()
+
+	conn := database.NewConnection(db.Unwrap(), "", "", map[string]any{
+		"driver": string(database.DialectSQLite),
+		"name":   "sqlite",
+	})
+
+	if _, err := conn.Statement(ctx,
+		`CREATE TABLE window (id TEXT PRIMARY KEY, ends_at DATETIME)`, nil); err != nil {
+		t.Fatalf("creating the table: %v", err)
+	}
+
+	var absent *time.Time
+	if _, err := conn.Statement(ctx, `INSERT INTO window (id, ends_at) VALUES (?, ?)`,
+		conn.PrepareBindings([]any{"w1", absent})); err != nil {
+		t.Fatalf("inserting: %v", err)
+	}
+
+	rows, err := conn.Select(ctx, `SELECT ends_at IS NULL AS absent FROM window WHERE id = ?`,
+		conn.PrepareBindings([]any{"w1"}), true)
+	if err != nil {
+		t.Fatalf("reading it back: %v", err)
+	}
+	if fmt.Sprint(rows[0]["absent"]) != "1" {
+		t.Errorf("a nil pointer was stored as %v, want NULL", rows[0]["absent"])
 	}
 }
