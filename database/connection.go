@@ -682,11 +682,16 @@ func (c *Connection) BindValues(bindings []any) []any { return c.PrepareBindings
 
 // PrepareBindings converts each binding into the value a driver accepts.
 //
-// A time becomes the string the grammar's date format spells, and a bool
-// becomes 0 or 1 -- both because the engines disagree about the wire form and
-// the grammar is the one that knows which. A value that spells its own column
-// is asked for that spelling first, and what it answers is converted the same
-// way anything else is.
+// A time becomes the string the grammar's date format spells, because the
+// engines disagree about the wire form and the grammar is the one that knows
+// which. A bool is handed over as a bool: rewriting it to 1 and 0 reads as
+// harmless and is not, because one driver refuses an integer for a boolean
+// column outright.
+//
+// A value that spells its own column is asked for that spelling first, and
+// what it answers is converted the same way anything else is. A pointer is
+// looked through before any of that, so a nullable column and a non-nullable
+// one carrying the same instant arrive in one spelling.
 func (c *Connection) PrepareBindings(bindings []any) []any {
 	return prepareBindings(c.GetQueryGrammar(), bindings)
 }
@@ -711,7 +716,7 @@ func prepareBindings(grammar query.Grammar, bindings []any) []any {
 
 	out := make([]any, len(bindings))
 	for i, value := range bindings {
-		switch v := resolveValuer(value).(type) {
+		switch v := dereference(resolveValuer(value)).(type) {
 		case time.Time:
 			out[i] = v.Format(layout)
 		default:
@@ -719,6 +724,46 @@ func prepareBindings(grammar query.Grammar, bindings []any) []any {
 		}
 	}
 	return out
+}
+
+// dereference answers with the value behind a pointer, and with nil for a nil
+// one.
+//
+// It runs before the conversion decides anything, and that placement is the
+// whole of it. The conversion decides by asking what a value is, and a pointer
+// answers a different question than the value behind it: a *time.Time is not a
+// time.Time, so it fell through untouched while the field beside it was
+// formatted -- and two columns of the same row, written by the same save,
+// reached the database in two spellings. An engine that stores a timestamp as
+// text then compares those spellings as text, and the longer of two equal
+// prefixes sorts after the bound a query sends, so `WHERE column <= ?` missed
+// exactly at the boundary.
+//
+// Looking through the pointer here rather than adding a case for one type is
+// what makes it general: every branch that decides by type now asks about the
+// value rather than about the box around it. It also matches what happens
+// downstream anyway -- database/sql dereferences a pointer before handing it
+// to a driver -- so this moves the step earlier rather than adding one.
+//
+// A nil pointer answers with untyped nil and not with the typed nil it came
+// as, because the zero value behind it would format as the year one in a
+// column that means "not set", and because nothing downstream can tell the two
+// apart once the type is gone.
+//
+// It runs after a value that spells its own column has been asked, so a
+// pointer that reaches here is one nothing else claimed.
+func dereference(value any) any {
+	v := reflect.ValueOf(value)
+	for v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return nil
+		}
+		v = v.Elem()
+	}
+	if !v.IsValid() {
+		return value
+	}
+	return v.Interface()
 }
 
 // resolveValuer asks a value that spells its own column for that spelling, and
