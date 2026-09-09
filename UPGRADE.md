@@ -87,10 +87,10 @@ The check is on the name you chose, never on one the convention built. It also
 covers the new name of a `RenameIndex`, and both names of a `DropIndex` given as
 a string.
 
-### `schema.Grammar` gained `MaxIdentifierLength`
+### `database/schema.Grammar.MaxIdentifierLength` is a new method on the interface
 
-`schema.Grammar` is the interface the schema builder needs of a driver grammar.
-It has a new method:
+`schema.Grammar` is the interface the schema builder needs of a driver grammar,
+and `database/schema.Grammar.MaxIdentifierLength` is new on it:
 
 ```go
 MaxIdentifierLength() int
