@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	stdhttp "net/http"
+	"strings"
 
 	"github.com/arandu-io/hesape/log"
 	"github.com/arandu-io/hesape/toon"
@@ -174,10 +175,80 @@ func (c *Context) Fragment(status int, name string, data any) error {
 }
 
 func (c *Context) renderWith(status int, name string, data any) error {
+	if c.wantsViewData() {
+		return c.writeViewData(status, name, data)
+	}
 	if c.render == nil {
 		return errNoRenderer
 	}
 	return c.render.Render(c.Ctx(), c.Response, status, name, data)
+}
+
+// ViewDataMediaType is what a client asks for when it draws the page itself.
+//
+// A browser is handed markup because a browser draws markup. A client that
+// draws with its own controls needs the same answer without the drawing: the
+// name of the page and the values the page was going to be built from.
+//
+// It is one media type and not a query parameter or a header of our own,
+// because content negotiation is what the protocol already has for "the same
+// resource, a different representation" -- and because a parameter would be
+// part of the URL, which would make the two representations two addresses and
+// therefore two resources.
+const ViewDataMediaType = "application/vnd.arandu.view+json"
+
+// ViewData is the answer a client that draws for itself receives.
+//
+// The name travels because the client picks what to draw from it, the same way
+// the renderer picks a template from it. Sending only the values would leave
+// the client guessing which page it asked for, which it cannot do reliably: a
+// route may answer with one of several pages depending on what it found.
+type ViewData struct {
+	// View is the name the handler rendered.
+	View string `json:"view"`
+	// Data is what the page was going to be built from.
+	Data any `json:"data"`
+}
+
+// wantsViewData reports whether the caller asked for the values instead of the
+// drawing.
+//
+// The match is on the exact media type appearing in Accept. It is deliberately
+// not a full negotiation with quality values: there are two representations
+// and one of them is the default, so the question is a yes or a no, and a
+// parser for q-values would be a parser to maintain for an answer it never
+// changes.
+func (c *Context) wantsViewData() bool {
+	if c.Request == nil {
+		return false
+	}
+	for _, accepted := range c.Request.Header.Values("Accept") {
+		for _, part := range strings.Split(accepted, ",") {
+			if strings.TrimSpace(strings.Split(part, ";")[0]) == ViewDataMediaType {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// writeViewData answers with the name and the values.
+//
+// Vary is set because the same address now has two representations chosen by a
+// header, and a cache that did not know that would hand markup to a client
+// that cannot draw it, or the values to a browser that would show them as
+// text. It is the one line that makes this safe in front of a proxy.
+func (c *Context) writeViewData(status int, name string, data any) error {
+	encoded, err := json.Marshal(ViewData{View: name, Data: data})
+	if err != nil {
+		return err
+	}
+
+	c.Response.Header().Add("Vary", "Accept")
+	c.Response.Header().Set("Content-Type", ViewDataMediaType+"; charset=utf-8")
+	c.Response.WriteHeader(status)
+	_, err = c.Response.Write(encoded)
+	return err
 }
 
 // Redirect answers a redirect, and does the right thing under HTMX.
