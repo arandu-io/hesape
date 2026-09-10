@@ -26,6 +26,25 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+### Uma view responde `Vary: Accept`, e um cliente pode pedir os valores
+
+`ctx.View` e `ctx.Fragment` passam a negociar. Um cliente que envia
+`Accept: application/vnd.arandu.view+json` recebe o nome da view e a struct que
+o handler entregou, serializados; qualquer outro `Accept` — inclusive nenhum —
+continua recebendo a marcação, byte a byte como antes.
+
+Nada quebra em código: o método tem a mesma assinatura, e um navegador nunca
+envia esse tipo. **O que muda e é observável** é o cabeçalho: uma resposta
+negociada carrega `Vary: Accept`. Se você tem cache ou CDN na frente da
+aplicação, é essa linha que impede o cache de servir marcação para quem não
+desenha marcação, ou valores para um navegador que os mostraria como texto.
+Confira que o seu cache respeita `Vary` — a maioria respeita por padrão.
+
+Por que existe: um cliente que desenha a tela com os próprios controles precisa
+da mesma resposta sem o desenho. A alternativa era um segundo handler por
+cliente, e handler que existe duas vezes é segundo caminho — os dois divergem,
+e o que ninguém está olhando é o que deixa de checar alguma coisa.
+
 ### Um timestamp anulável passa a ser gravado como o não-anulável
 
 Duas colunas da mesma linha, escritas pelo mesmo `Save`, chegavam ao banco em

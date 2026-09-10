@@ -2,6 +2,7 @@ package http_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	stdhttp "net/http"
@@ -311,5 +312,148 @@ func TestTheMissingRendererFailureIsOneValue(t *testing.T) {
 	second := ctx.Fragment(stdhttp.StatusOK, "home", nil)
 	if !errors.Is(second, first) {
 		t.Errorf("two calls produced two failures: %v and %v", first, second)
+	}
+}
+
+// invoices is the typed struct a controller hands a view. It is declared here
+// rather than reused from a fixture so that the assertion below is about the
+// shape crossing the wire and not about somebody else's struct tags.
+type invoices struct {
+	Open  int      `json:"open"`
+	Names []string `json:"names"`
+}
+
+// TestAClientThatDrawsForItselfGetsTheValuesAndNotTheDrawing is the seam that
+// lets one handler serve a browser and a client with its own controls.
+//
+// The alternative is a second handler for the second client, and a handler
+// that exists twice is a second path: the two drift, and the one nobody is
+// looking at is the one that stops checking something.
+func TestAClientThatDrawsForItselfGetsTheValuesAndNotTheDrawing(t *testing.T) {
+	view := &renderer{}
+	rec := httptest.NewRecorder()
+
+	r := request(stdhttp.MethodGet, "/invoices")
+	r.Header.Set("Accept", hhttp.ViewDataMediaType)
+	ctx := hhttp.NewContext(rec, r, view, nil)
+
+	if err := ctx.View("invoices/index", invoices{Open: 2, Names: []string{"ada", "grace"}}); err != nil {
+		t.Fatalf("View: %v", err)
+	}
+
+	if view.name != "" {
+		t.Errorf("the renderer was asked to draw %q; a client that draws for itself gets no markup", view.name)
+	}
+
+	var answered hhttp.ViewData
+	if err := json.Unmarshal(rec.Body.Bytes(), &answered); err != nil {
+		t.Fatalf("decoding the answer: %v\n%s", err, rec.Body)
+	}
+	if answered.View != "invoices/index" {
+		t.Errorf("the answer names %q, want the view the handler rendered", answered.View)
+	}
+
+	values, ok := answered.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("the values came through as %T", answered.Data)
+	}
+	if values["open"] != float64(2) {
+		t.Errorf("open came through as %v", values["open"])
+	}
+}
+
+// TestABrowserStillGetsTheDrawing is the other half, and the one that would
+// fail silently: a negotiation that matched too widely would answer every page
+// in the application with values, and every browser would show them as text.
+func TestABrowserStillGetsTheDrawing(t *testing.T) {
+	for _, accept := range []string{
+		"",
+		"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+		"application/json",
+		"application/vnd.arandu.view+xml",
+	} {
+		t.Run(accept, func(t *testing.T) {
+			view := &renderer{}
+			r := request(stdhttp.MethodGet, "/invoices")
+			if accept != "" {
+				r.Header.Set("Accept", accept)
+			}
+			ctx := hhttp.NewContext(httptest.NewRecorder(), r, view, nil)
+
+			if err := ctx.View("invoices/index", invoices{}); err != nil {
+				t.Fatalf("View: %v", err)
+			}
+			if view.name != "invoices/index" {
+				t.Error("the renderer was not asked to draw")
+			}
+		})
+	}
+}
+
+// TestTheMediaTypeIsFoundBesideOthers keeps the match honest: a client may
+// send several, with parameters, in any order.
+func TestTheMediaTypeIsFoundBesideOthers(t *testing.T) {
+	for _, accept := range []string{
+		hhttp.ViewDataMediaType,
+		"text/html, " + hhttp.ViewDataMediaType,
+		hhttp.ViewDataMediaType + "; charset=utf-8",
+		"*/*, " + hhttp.ViewDataMediaType + ";q=1.0",
+	} {
+		t.Run(accept, func(t *testing.T) {
+			view := &renderer{}
+			r := request(stdhttp.MethodGet, "/invoices")
+			r.Header.Set("Accept", accept)
+			ctx := hhttp.NewContext(httptest.NewRecorder(), r, view, nil)
+
+			if err := ctx.View("invoices/index", invoices{}); err != nil {
+				t.Fatalf("View: %v", err)
+			}
+			if view.name != "" {
+				t.Error("the renderer drew markup for a client that asked for the values")
+			}
+		})
+	}
+}
+
+// TestTheAnswerSaysItVariesByAccept is one header and it is the one that makes
+// this safe behind a proxy.
+//
+// The same address now has two representations chosen by a request header. A
+// cache that did not know would serve whichever it stored first: markup to a
+// client that cannot draw it, or values to a browser that shows them as text.
+func TestTheAnswerSaysItVariesByAccept(t *testing.T) {
+	rec := httptest.NewRecorder()
+	r := request(stdhttp.MethodGet, "/invoices")
+	r.Header.Set("Accept", hhttp.ViewDataMediaType)
+	ctx := hhttp.NewContext(rec, r, &renderer{}, nil)
+
+	if err := ctx.View("invoices/index", invoices{}); err != nil {
+		t.Fatalf("View: %v", err)
+	}
+
+	if got := rec.Header().Get("Vary"); got != "Accept" {
+		t.Errorf("Vary is %q, want Accept", got)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, hhttp.ViewDataMediaType) {
+		t.Errorf("Content-Type is %q", got)
+	}
+}
+
+// TestAFragmentCarriesItsStatusIntoTheValues keeps the status meaning the same
+// thing in both representations. A rejected form answers 422 with the form, and
+// a client that drew that form has to see the same 422 -- otherwise the two
+// clients disagree about whether the write happened.
+func TestAFragmentCarriesItsStatusIntoTheValues(t *testing.T) {
+	rec := httptest.NewRecorder()
+	r := request(stdhttp.MethodPost, "/invoices")
+	r.Header.Set("Accept", hhttp.ViewDataMediaType)
+	ctx := hhttp.NewContext(rec, r, &renderer{}, nil)
+
+	if err := ctx.Fragment(stdhttp.StatusUnprocessableEntity, "invoices/form", invoices{}); err != nil {
+		t.Fatalf("Fragment: %v", err)
+	}
+
+	if rec.Code != stdhttp.StatusUnprocessableEntity {
+		t.Errorf("answered %d, want 422", rec.Code)
 	}
 }
