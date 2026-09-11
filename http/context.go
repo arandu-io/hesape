@@ -208,6 +208,21 @@ type ViewData struct {
 	View string `json:"view"`
 	// Data is what the page was going to be built from.
 	Data any `json:"data"`
+	// Token is the CSRF token of this session, and empty on a page that has
+	// none.
+	//
+	// In the envelope rather than inside the values, because it is a fact about
+	// the protocol and not about the page -- the same reason the view's name is
+	// here. The markup representation carries it in the same two senses: the
+	// hidden field a form writes, and the header attribute every enhanced
+	// request sends. A client that draws for itself has neither, so it is given
+	// the value and sends it back itself.
+	//
+	// Declared, which is the point. It reached a client before this existed, as
+	// whatever name the page's own field happened to marshal under -- so a tag
+	// added to that field, or a rename, or a change of embedding would have
+	// moved it with nothing saying so and nothing failing.
+	Token string `json:"token,omitempty"`
 }
 
 // wantsViewData reports whether the caller asked for the values instead of the
@@ -239,7 +254,16 @@ func (c *Context) wantsViewData() bool {
 // that cannot draw it, or the values to a browser that would show them as
 // text. It is the one line that makes this safe in front of a proxy.
 func (c *Context) writeViewData(status int, name string, data any) error {
-	encoded, err := json.Marshal(ViewData{View: name, Data: data})
+	// Asked of the data through the same interface the markup path asks, which
+	// is what makes this one contract rather than two. A page that provides no
+	// token is a page with no form on it, and it sends no token -- exactly as
+	// the markup of such a page carries no hidden field.
+	token := ""
+	if holder, ok := data.(interface{ CSRFToken() string }); ok {
+		token = holder.CSRFToken()
+	}
+
+	encoded, err := json.Marshal(ViewData{View: name, Data: data, Token: token})
 	if err != nil {
 		return err
 	}

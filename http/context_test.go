@@ -457,3 +457,113 @@ func TestAFragmentCarriesItsStatusIntoTheValues(t *testing.T) {
 		t.Errorf("answered %d, want 422", rec.Code)
 	}
 }
+
+// screenWithToken is what a real page is: its own values, and the chrome that
+// carries the session's token.
+type screenWithToken struct {
+	Title string `json:"title"`
+	token string
+}
+
+func (s screenWithToken) CSRFToken() string { return s.token }
+
+// screenWithoutToken is a page with no form on it.
+type screenWithoutToken struct {
+	Title string `json:"title"`
+}
+
+// viewDataOf renders a page as values and answers the envelope.
+func viewDataOf(t *testing.T, data any) hhttp.ViewData {
+	t.Helper()
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(stdhttp.MethodGet, "/", nil)
+	request.Header.Set("Accept", hhttp.ViewDataMediaType)
+
+	ctx := &hhttp.Context{Response: recorder, Request: request}
+	if err := ctx.View("home", data); err != nil {
+		t.Fatalf("the page was not rendered as values: %v", err)
+	}
+
+	var envelope hhttp.ViewData
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("what came back is not an envelope: %v -- %s", err, recorder.Body.String())
+	}
+	return envelope
+}
+
+// TestTheEnvelopeCarriesTheTokenThroughTheOneContract is the whole point of the
+// field.
+//
+// A client that draws for itself has neither the hidden field a form writes nor
+// the header attribute an enhanced request sends, so it has to be given the
+// value and send it back. Where it reads it from has to be declared, and the
+// contract it is read through here is the one the markup path already uses:
+// a page provides the token by having the method, and both representations ask
+// for it the same way.
+func TestTheEnvelopeCarriesTheTokenThroughTheOneContract(t *testing.T) {
+	envelope := viewDataOf(t, screenWithToken{Title: "Invoices", token: "the-token"})
+
+	if envelope.Token != "the-token" {
+		t.Errorf("the envelope carries the token %q", envelope.Token)
+	}
+	if envelope.View != "home" {
+		t.Errorf("the envelope names the view %q", envelope.View)
+	}
+}
+
+// TestAPageWithNoTokenSendsNone keeps the field from appearing empty on every
+// page that has no form.
+//
+// The markup of such a page carries no hidden field and no header attribute.
+// The envelope of it carries no token, which is the same answer written the
+// other way.
+func TestAPageWithNoTokenSendsNone(t *testing.T) {
+	envelope := viewDataOf(t, screenWithoutToken{Title: "About"})
+
+	if envelope.Token != "" {
+		t.Errorf("a page with no token sent %q", envelope.Token)
+	}
+}
+
+// TestTheTokenIsOmittedRatherThanSentEmpty keeps a field nobody filled out of
+// every response.
+func TestTheTokenIsOmittedRatherThanSentEmpty(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(stdhttp.MethodGet, "/", nil)
+	request.Header.Set("Accept", hhttp.ViewDataMediaType)
+
+	ctx := &hhttp.Context{Response: recorder, Request: request}
+	if err := ctx.View("home", screenWithoutToken{Title: "About"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(recorder.Body.String(), "token") {
+		t.Errorf("a page with no token still named the field: %s", recorder.Body.String())
+	}
+}
+
+// TestTheTokenIsInTheEnvelopeAndNotOnlyInTheValues fixes what a client was
+// depending on before the field existed.
+//
+// It read the token out of the page's own values, under whatever name the
+// field happened to marshal as. Nothing declared that name, so a tag added to
+// that field, a rename, or a change of embedding would have moved it with
+// nothing failing anywhere.
+func TestTheTokenIsInTheEnvelopeAndNotOnlyInTheValues(t *testing.T) {
+	envelope := viewDataOf(t, screenWithToken{Title: "Invoices", token: "the-token"})
+
+	if envelope.Token == "" {
+		t.Fatal("the envelope carries no token, so a client has to go looking in the values")
+	}
+
+	// And the values of this page carry it nowhere: the method is how it is
+	// provided, and an unexported field marshals to nothing.
+	values, err := json.Marshal(envelope.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(values), "the-token") {
+		t.Errorf("the values carry the token as well, which is two places to read it from: %s", values)
+	}
+}
