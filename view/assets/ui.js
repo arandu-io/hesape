@@ -40,6 +40,36 @@
 	if (arandu.ui) return;
 	arandu.ui = { version: 1 };
 
+	/* The two ways in, declared before anything uses them.
+	 *
+	 * Every behaviour in this file registers itself by calling define, and the
+	 * first of those calls is a few hundred lines above where these used to
+	 * sit. So the first one threw -- define was not a function yet -- and the
+	 * throw took the rest of the file with it: no behaviour registered, no
+	 * delegated attribute listened, and the page kept every control it draws
+	 * and lost everything they do. The theme buttons were the visible half of
+	 * that, because they are the ones somebody presses first.
+	 *
+	 * mount is a function declaration and is reachable from here whatever
+	 * order it is written in; these are assignments and are not.
+	 */
+	var actions = {};
+	var behaviours = {};
+
+	arandu.ui.action = function (name, fn) {
+		if (typeof name !== 'string' || typeof fn !== 'function') return;
+		actions[name] = fn;
+	};
+
+	arandu.ui.define = function (name, hooks) {
+		if (typeof name !== 'string' || !hooks) return;
+		behaviours[name] = hooks;
+		/* Registration can arrive after the markup: a deferred application
+		 * script runs once, and by then the document is parsed. Mounting what
+		 * is already on the page is what makes the order not matter. */
+		mount(document);
+	};
+
 	var OPTION = '[role="option"]';
 	var LINE = '[role="menuitem"]';
 	var COPY_RESET = 1600;
@@ -1600,22 +1630,6 @@
 	 * keeps an attribute data instead of code.
 	 */
 
-	var actions = {};
-	var behaviours = {};
-
-	arandu.ui.action = function (name, fn) {
-		if (typeof name !== 'string' || typeof fn !== 'function') return;
-		actions[name] = fn;
-	};
-
-	arandu.ui.define = function (name, hooks) {
-		if (typeof name !== 'string' || !hooks) return;
-		behaviours[name] = hooks;
-		/* Registration can arrive after the markup: a deferred application
-		 * script runs once, and by then the document is parsed. Mounting what
-		 * is already on the page is what makes the order not matter. */
-		mount(document);
-	};
 
 	/* named answers a lookup and reports a miss once per name.
 	 *
