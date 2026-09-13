@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/queue/attributes"
 )
 
 // Arrayable is the one thing a payload value is checked for before it travels:
@@ -84,6 +85,27 @@ type BroadcastEvent struct {
 	DeleteWhenMissingModels bool
 }
 
+// queuedBroadcast is the resolved, serializable form of a broadcast.
+//
+// An event's methods exist only in the process that constructed it. Resolving
+// them before a queue stores the work keeps the consumer from having to recover
+// a concrete Go type from JSON, which JSON cannot do. The consumer needs only
+// these four facts to publish the same broadcast.
+type queuedBroadcast struct {
+	// Event is the name sent to subscribers.
+	Event string `json:"event"`
+	// Channels are the channels the event is published on.
+	Channels []Channel `json:"channels"`
+	// Connections are the broadcast connections used to publish it. An empty
+	// string names the default connection.
+	Connections []string `json:"connections"`
+	// Payload is the document sent to subscribers.
+	Payload map[string]any `json:"payload"`
+	// jobAttributes configures the queue envelope but is not part of the
+	// document the broadcast consumer decodes.
+	jobAttributes attributes.Attributes
+}
+
 // The optional interfaces [NewBroadcastEvent] fills the job's fields from. An
 // event that declares none gets the zero value of each, and
 // DeleteWhenMissingModels true.
@@ -148,6 +170,16 @@ func NewBroadcastEvent(event any) *BroadcastEvent {
 //
 // An event on no channels returns without touching a driver.
 func (b *BroadcastEvent) Handle(ctx context.Context, g auth.Grant, manager Factory) error {
+	queued, err := b.snapshot()
+	if err != nil {
+		return err
+	}
+	return queued.handle(ctx, g, manager)
+}
+
+// snapshot resolves the event methods into the serializable facts a queued
+// consumer needs.
+func (b *BroadcastEvent) snapshot() (queuedBroadcast, error) {
 	name := b.DisplayName()
 	if as, ok := b.Event.(BroadcastsAs); ok {
 		name = as.BroadcastAs()
@@ -155,32 +187,69 @@ func (b *BroadcastEvent) Handle(ctx context.Context, g auth.Grant, manager Facto
 
 	on, ok := b.Event.(BroadcastsOn)
 	if !ok {
-		return NewBroadcastError("broadcasting: %T has no BroadcastOn method, so there is no channel to publish it on", b.Event)
+		return queuedBroadcast{}, NewBroadcastError("broadcasting: %T has no BroadcastOn method, so there is no channel to publish it on", b.Event)
 	}
 
-	channels := on.BroadcastOn()
+	channels := append([]Channel(nil), on.BroadcastOn()...)
 	if len(channels) == 0 {
-		return nil
+		return queuedBroadcast{Event: name}, nil
 	}
 
 	connections := []string{""}
 	if via, ok := b.Event.(BroadcastsOnConnections); ok {
-		connections = via.BroadcastConnections()
+		connections = append([]string(nil), via.BroadcastConnections()...)
 	}
 
 	payload := b.getPayloadFromEvent(b.Event)
+	copiedPayload := make(map[string]any, len(payload))
+	for key, value := range payload {
+		copiedPayload[key] = value
+	}
 
-	for _, connection := range connections {
+	return queuedBroadcast{
+		Event:       name,
+		Channels:    channels,
+		Connections: connections,
+		Payload:     copiedPayload,
+	}, nil
+}
+
+// Handle publishes the resolved broadcast on every requested connection.
+func (b queuedBroadcast) handle(ctx context.Context, g auth.Grant, manager Factory) error {
+	if len(b.Channels) == 0 {
+		return nil
+	}
+
+	for _, connection := range b.Connections {
 		driver, err := manager.Connection(connection)
 		if err != nil {
 			return err
 		}
-		if err := driver.Broadcast(ctx, g, channels, name, b.getConnectionPayload(payload, connection)); err != nil {
+		if err := driver.Broadcast(ctx, g, b.Channels, b.Event, b.connectionPayload(connection)); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// connectionPayload narrows a payload keyed by broadcast connection while
+// preserving the socket exclusion shared by all connections.
+func (b queuedBroadcast) connectionPayload(connection string) map[string]any {
+	nested, ok := b.Payload[connection].(map[string]any)
+	if !ok {
+		return b.Payload
+	}
+
+	narrowed := make(map[string]any, len(nested)+1)
+	for key, value := range nested {
+		narrowed[key] = value
+	}
+	if socket, ok := b.Payload["socket"]; ok {
+		narrowed["socket"] = socket
+	}
+
+	return narrowed
 }
 
 // getPayloadFromEvent builds the document an event is published as.

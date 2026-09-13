@@ -18,8 +18,8 @@ import (
 // below happens to export -- and it is what lets a test drive a batch with
 // twenty lines of recorder instead of a running worker.
 //
-// hesape/queue satisfies it. Nothing in this package knows how a job is stored,
-// reserved or retried, and nothing in it should.
+// queue.BusAdapter satisfies it. Nothing in this package knows how a job is
+// stored, reserved or retried, and nothing in it should.
 type Queue interface {
 	Push(ctx context.Context, g auth.Grant, queue, name string, payload []byte) error
 }

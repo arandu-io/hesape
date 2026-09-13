@@ -22,7 +22,7 @@
 // RedisJSON, no RediSearch, no Lua -- which is what keeps every server speaking
 // the protocol a drop-in replacement for every other.
 //
-// The claim is ZRem: exactly one worker removes the member and the others get
-// zero back, which is the compare-and-set the DatabaseQueue spells with
-// reserved_until in a WHERE.
+// A claim is one WATCH and MULTI/EXEC transition from scheduled to leased:
+// exactly one worker commits it, and no observer can see the id between sets.
+// Lease recovery, settlement and retry use the same transition shape.
 package redis
