@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 	"unicode"
 
 	hhttp "github.com/arandu-io/hesape/http"
@@ -141,8 +142,9 @@ func (f *ResponseFactory) StreamJSON(data any, status int, headers http.Header, 
 // stop a proxy or a browser from buffering it.
 //
 // callback is an iter.Seq: a producer that is pulled, not a slice built in
-// advance. A message that is an *hhttp.StreamedEvent names its own event;
-// anything else is sent under "update", and a value that is neither a string
+// advance. A message that is an *hhttp.StreamedEvent names its own event; an
+// *hhttp.ServerSentEvent may also carry an ID, retry delay and comments.
+// Anything else is sent under "update", and a value that is neither a string
 // nor a number is encoded as JSON.
 //
 // endStreamWith is optional and defaults to "</stream>": omit it for that
@@ -151,6 +153,20 @@ func (f *ResponseFactory) StreamJSON(data any, status int, headers http.Header, 
 //
 // The iteration stops when the request context is done.
 func (f *ResponseFactory) EventStream(callback iter.Seq[any], headers http.Header, endStreamWith ...any) *StreamedResponse {
+	return f.EventStreamWithOptions(callback, headers, EventStreamOptions{}, endStreamWith...)
+}
+
+// EventStreamOptions configures an event stream without changing the
+// EventStream contract.
+type EventStreamOptions struct {
+	// Heartbeat emits an SSE comment at this interval while the producer is
+	// waiting. A non-positive duration disables heartbeats.
+	Heartbeat time.Duration
+}
+
+// EventStreamWithOptions builds a server-sent event stream with optional
+// heartbeat comments.
+func (f *ResponseFactory) EventStreamWithOptions(callback iter.Seq[any], headers http.Header, options EventStreamOptions, endStreamWith ...any) *StreamedResponse {
 	end := any(responseFactoryDefaultEndStream)
 	if len(endStreamWith) > 0 {
 		end = endStreamWith[0]
@@ -161,32 +177,93 @@ func (f *ResponseFactory) EventStream(callback iter.Seq[any], headers http.Heade
 	merged.Set("Cache-Control", "no-cache")
 	merged.Set("X-Accel-Buffering", "no")
 
-	return f.Stream(func(ctx context.Context, w io.Writer) error {
-		var failure error
-		if callback != nil {
-			callback(func(message any) bool {
-				if ctx.Err() != nil {
-					return false
-				}
-				if _, err := io.WriteString(w, responseFactoryEvent(message)); err != nil {
-					failure = err
-					return false
-				}
+	response := f.Stream(func(ctx context.Context, w io.Writer) error {
+		if options.Heartbeat <= 0 {
+			return responseFactoryWriteEventSequence(ctx, w, callback, end)
+		}
+		return responseFactoryWriteHeartbeatEventSequence(ctx, w, callback, end, options.Heartbeat)
+	}, http.StatusOK, merged)
+	response.disableWriteDeadline = true
+	return response
+}
+
+func responseFactoryWriteEventSequence(ctx context.Context, w io.Writer, callback iter.Seq[any], end any) error {
+	var failure error
+	if callback != nil {
+		callback(func(message any) bool {
+			if ctx.Err() != nil {
+				return false
+			}
+			if _, err := io.WriteString(w, responseFactoryEvent(message)); err != nil {
+				failure = err
+				return false
+			}
+			return ctx.Err() == nil
+		})
+	}
+	if failure != nil {
+		return failure
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if responseFactoryFilled(end) {
+		_, err := io.WriteString(w, responseFactoryEvent(end))
+		return err
+	}
+	return nil
+}
+
+func responseFactoryWriteHeartbeatEventSequence(ctx context.Context, w io.Writer, callback iter.Seq[any], end any, heartbeat time.Duration) error {
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	messages := make(chan any)
+	go func() {
+		defer close(messages)
+		if callback == nil {
+			return
+		}
+		callback(func(message any) bool {
+			select {
+			case messages <- message:
 				return true
-			})
+			case <-streamCtx.Done():
+				return false
+			}
+		})
+	}()
+
+	ticker := time.NewTicker(heartbeat)
+	defer ticker.Stop()
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		if failure != nil {
-			return failure
-		}
-		// The closing event is written outside the loop, so it happens even
-		// when the loop stopped early.
-		if responseFactoryFilled(end) {
-			if _, err := io.WriteString(w, responseFactoryEvent(end)); err != nil {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if _, err := io.WriteString(w, ": heartbeat\n\n"); err != nil {
+				return err
+			}
+		case message, ok := <-messages:
+			if !ok {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if responseFactoryFilled(end) {
+					_, err := io.WriteString(w, responseFactoryEvent(end))
+					return err
+				}
+				return nil
+			}
+			if _, err := io.WriteString(w, responseFactoryEvent(message)); err != nil {
 				return err
 			}
 		}
-		return nil
-	}, http.StatusOK, merged)
+	}
 }
 
 // StreamDownload is a [Stream] the browser saves instead of showing, because
@@ -307,6 +384,9 @@ type StreamedResponse struct {
 	// wrapErrors reports whether a failure from the callback is wrapped in an
 	// exceptions.StreamedResponseError. Only StreamDownload sets it.
 	wrapErrors bool
+	// disableWriteDeadline keeps long-lived event streams from inheriting the
+	// server's ordinary response deadline.
+	disableWriteDeadline bool
 }
 
 // SendContent writes the headers, the status and then the body, flushing as it
@@ -320,6 +400,9 @@ func (r *StreamedResponse) SendContent(w http.ResponseWriter, req *http.Request)
 		return errors.New("routing: expected a response writer to stream into, got none")
 	}
 	responseFactoryApplyHeaders(w, r.Headers)
+	if r.disableWriteDeadline {
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+	}
 
 	status := responseFactoryStatus(r.Status, http.StatusOK)
 	w.WriteHeader(status)
@@ -501,6 +584,13 @@ func (fw *responseFactoryFlushWriter) Flush() {
 // payload that is neither a string nor a number as JSON, so this only supplies
 // the default event name.
 func responseFactoryEvent(message any) string {
+	if event, ok := message.(*hhttp.ServerSentEvent); ok && event != nil {
+		copy := *event
+		if copy.Event == "" && copy.Comment == "" {
+			copy.Event = responseFactoryDefaultEvent
+		}
+		return copy.String()
+	}
 	if event, ok := message.(*hhttp.StreamedEvent); ok && event != nil {
 		name := event.Event
 		if name == "" {
