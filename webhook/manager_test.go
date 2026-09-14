@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/database"
 	"github.com/arandu-io/hesape/events"
 	httpclient "github.com/arandu-io/hesape/http/client"
+	"github.com/arandu-io/hesape/queue"
 	"github.com/arandu-io/hesape/queue/jobs"
 )
 
@@ -22,6 +24,7 @@ const testSecret = "01234567890123456789012345678901"
 
 type memoryStore struct {
 	mu         sync.Mutex
+	action     auth.Action
 	deliveries map[string]Delivery
 	unique     map[string]string
 	claims     map[string]Claim
@@ -30,11 +33,20 @@ type memoryStore struct {
 }
 
 func newMemoryStore() *memoryStore {
+	return newMemoryStoreForAction(ActionDispatch)
+}
+
+func newMemoryStoreForAction(action auth.Action) *memoryStore {
 	return &memoryStore{
+		action:     action,
 		deliveries: map[string]Delivery{},
 		unique:     map[string]string{},
 		claims:     map[string]Claim{},
 	}
+}
+
+func (s *memoryStore) tenantFor(g auth.Grant) (string, error) {
+	return tenantForAction(g, s.action)
 }
 
 func (s *memoryStore) Transaction(ctx context.Context, fn func(context.Context) error) error {
@@ -55,7 +67,7 @@ func (s *memoryStore) Transaction(ctx context.Context, fn func(context.Context) 
 }
 
 func (s *memoryStore) Create(_ context.Context, g auth.Grant, delivery Delivery) (bool, error) {
-	tenant, err := tenantFor(g)
+	tenant, err := s.tenantFor(g)
 	if err != nil {
 		return false, err
 	}
@@ -74,7 +86,7 @@ func (s *memoryStore) Create(_ context.Context, g auth.Grant, delivery Delivery)
 }
 
 func (s *memoryStore) Find(_ context.Context, g auth.Grant, id string) (Delivery, error) {
-	tenant, err := tenantFor(g)
+	tenant, err := s.tenantFor(g)
 	if err != nil {
 		return Delivery{}, err
 	}
@@ -88,7 +100,7 @@ func (s *memoryStore) Find(_ context.Context, g auth.Grant, id string) (Delivery
 }
 
 func (s *memoryStore) Claim(_ context.Context, g auth.Grant, id string, lease time.Duration) (Claim, bool, error) {
-	tenant, err := tenantFor(g)
+	tenant, err := s.tenantFor(g)
 	if err != nil {
 		return Claim{}, false, err
 	}
@@ -117,7 +129,7 @@ func (s *memoryStore) Claim(_ context.Context, g auth.Grant, id string, lease ti
 }
 
 func (s *memoryStore) Complete(_ context.Context, g auth.Grant, claim Claim, result Result) error {
-	if _, err := tenantFor(g); err != nil {
+	if _, err := s.tenantFor(g); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -137,7 +149,7 @@ func (s *memoryStore) Complete(_ context.Context, g auth.Grant, claim Claim, res
 }
 
 func (s *memoryStore) Fail(_ context.Context, g auth.Grant, claim Claim, failure Failure) error {
-	if _, err := tenantFor(g); err != nil {
+	if _, err := s.tenantFor(g); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -158,7 +170,7 @@ func (s *memoryStore) Fail(_ context.Context, g auth.Grant, claim Claim, failure
 }
 
 func (s *memoryStore) Prune(_ context.Context, g auth.Grant, cutoff time.Time) (int64, error) {
-	tenant, err := tenantFor(g)
+	tenant, err := s.tenantFor(g)
 	if err != nil {
 		return 0, err
 	}
@@ -234,6 +246,136 @@ func TestDispatchQueueHandlerDeliversSignedSnapshot(t *testing.T) {
 	delivery, err := store.Find(context.Background(), g, deliveryID)
 	if err != nil || delivery.Status != StatusDelivered || delivery.ResponseStatus != http.StatusNoContent {
 		t.Fatalf("delivery = %#v, error = %v", delivery, err)
+	}
+}
+
+func TestConfiguredManagersRouteLegacyActionJobsWithoutColliding(t *testing.T) {
+	const (
+		legacyAction    auth.Action = "whatsapp.runtime"
+		configuredQueue             = "whatsapp-webhooks"
+		configuredJob               = "whatsapp.webhook.deliver"
+		configuredAgent             = "Arandu-WhatsApp/1.0"
+	)
+	store := newMemoryStoreForAction(legacyAction)
+	target := &memoryQueue{store: store}
+	var received *http.Request
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		received = request
+		return response(request, http.StatusNoContent, ""), nil
+	})}
+	manager, err := newManager(store, target, NewStaticSecret([]byte(testSecret)), ManagerOptions{
+		Action: legacyAction, QueueName: configuredQueue, DeliveryJobName: configuredJob,
+		UserAgent: configuredAgent, HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("newManager() error = %v", err)
+	}
+	otherStore := newMemoryStore()
+	other, err := newManager(otherStore, &memoryQueue{store: otherStore},
+		NewStaticSecret([]byte(testSecret)), ManagerOptions{DeliveryJobName: "billing.webhook.deliver"})
+	if err != nil {
+		t.Fatalf("second newManager() error = %v", err)
+	}
+	worker := queue.NewWorker(queue.NullQueue{}, queue.WorkerOptions{})
+	if err := manager.RegisterJobHandlers(worker); err != nil {
+		t.Fatalf("first RegisterJobHandlers() error = %v", err)
+	}
+	if err := other.RegisterJobHandlers(worker); err != nil {
+		t.Fatalf("second RegisterJobHandlers() error = %v", err)
+	}
+	if _, registered := worker.Handler(configuredJob); !registered {
+		t.Fatalf("handler %q was not registered", configuredJob)
+	}
+	if _, registered := worker.Handler("billing.webhook.deliver"); !registered {
+		t.Fatal("second manager handler was not registered")
+	}
+
+	grant := auth.SystemGrant(legacyAction, "tenant-a")
+	if err := manager.Dispatch(context.Background(), grant,
+		Event{ID: "event-legacy", Name: "message.sent", Payload: []byte(`{"id":"message-1"}`)},
+		[]Endpoint{{ID: "application", URL: "https://hooks.example.test/messages"}},
+	); err != nil {
+		t.Fatalf("Dispatch() with legacy action error = %v", err)
+	}
+	if len(target.jobs) != 1 {
+		t.Fatalf("queued jobs = %d, want 1", len(target.jobs))
+	}
+	job := &target.jobs[0]
+	if job.Queue != configuredQueue || job.Name != configuredJob || job.Action != string(legacyAction) {
+		t.Fatalf("queued job route = queue %q, name %q, action %q", job.Queue, job.Name, job.Action)
+	}
+	handler, _ := worker.Handler(configuredJob)
+	if err := handler.Handle(context.Background(), jobs.GrantFor(job), job); err != nil {
+		t.Fatalf("legacy job handler error = %v", err)
+	}
+	if received == nil {
+		t.Fatal("delivery request was not sent")
+	}
+	if received.Header.Get("User-Agent") != configuredAgent {
+		t.Fatalf("wire User-Agent = %q", received.Header.Get("User-Agent"))
+	}
+}
+
+func TestManagerOptionsDefaultsAndValidation(t *testing.T) {
+	store := newMemoryStore()
+	manager, err := newManager(store, &memoryQueue{store: store},
+		NewStaticSecret([]byte(testSecret)), ManagerOptions{})
+	if err != nil {
+		t.Fatalf("newManager() error = %v", err)
+	}
+	if manager.action != ActionDispatch || manager.queueName != QueueName ||
+		manager.jobName != DeliveryJobName || manager.userAgent != defaultUserAgent {
+		t.Fatalf("default routing = action %q, queue %q, job %q, agent %q",
+			manager.action, manager.queueName, manager.jobName, manager.userAgent)
+	}
+
+	tests := []struct {
+		name    string
+		options ManagerOptions
+	}{
+		{name: "blank action", options: ManagerOptions{Action: " "}},
+		{name: "unsafe action", options: ManagerOptions{Action: "webhook/action"}},
+		{name: "blank queue", options: ManagerOptions{QueueName: "\t"}},
+		{name: "unsafe queue", options: ManagerOptions{QueueName: "webhooks primary"}},
+		{name: "blank job", options: ManagerOptions{DeliveryJobName: "\n"}},
+		{name: "ambiguous legacy job", options: ManagerOptions{DeliveryJobName: "webhook.deliver@fire"}},
+		{name: "empty routing segment", options: ManagerOptions{DeliveryJobName: "webhook..deliver"}},
+		{name: "trailing separator", options: ManagerOptions{QueueName: "webhooks-"}},
+		{name: "blank user agent", options: ManagerOptions{UserAgent: "   "}},
+		{name: "header injection", options: ManagerOptions{UserAgent: "Arandu/1.0\r\nX-Injected: yes"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := newManager(store, &memoryQueue{store: store},
+				NewStaticSecret([]byte(testSecret)), test.options); err == nil {
+				t.Fatal("newManager() error = nil")
+			}
+		})
+	}
+}
+
+func TestPublicConstructorsKeepDatabaseQueueInternalAndActionCoherent(t *testing.T) {
+	db := database.Wrap(nil, database.DialectSQLite)
+	customStore := newMemoryStore()
+	manager, err := NewManagerWithStore(db, customStore, NewStaticSecret([]byte(testSecret)), ManagerOptions{})
+	if err != nil {
+		t.Fatalf("NewManagerWithStore() error = %v", err)
+	}
+	if manager.store != customStore {
+		t.Fatal("NewManagerWithStore() did not retain the caller store")
+	}
+	if _, internal := manager.queue.(*queue.DatabaseQueue); !internal {
+		t.Fatalf("manager queue = %T, want *queue.DatabaseQueue", manager.queue)
+	}
+
+	const customAction auth.Action = "whatsapp.runtime"
+	manager, err = NewManager(db, NewStaticSecret([]byte(testSecret)), ManagerOptions{Action: customAction})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	databaseStore, ok := manager.store.(*DatabaseStore)
+	if !ok || databaseStore.action != customAction {
+		t.Fatalf("NewManager() store = %#v, want DatabaseStore action %q", manager.store, customAction)
 	}
 }
 

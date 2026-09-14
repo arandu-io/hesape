@@ -58,10 +58,19 @@ func (CreateDeliveriesTable) Down(ctx context.Context, conn migrations.Connectio
 }
 
 // DatabaseStore persists delivery state through a Hesape database handle.
-type DatabaseStore struct{ db *database.DB }
+type DatabaseStore struct {
+	db     *database.DB
+	action auth.Action
+}
 
 // NewDatabaseStore returns a database-backed delivery store.
-func NewDatabaseStore(db *database.DB) *DatabaseStore { return &DatabaseStore{db: db} }
+func NewDatabaseStore(db *database.DB) *DatabaseStore {
+	return newDatabaseStore(db, ActionDispatch)
+}
+
+func newDatabaseStore(db *database.DB, action auth.Action) *DatabaseStore {
+	return &DatabaseStore{db: db, action: action}
+}
 
 // Migrations returns the schema owned by the store.
 func (*DatabaseStore) Migrations() []migrations.Migration {
@@ -75,7 +84,7 @@ func (s *DatabaseStore) Transaction(ctx context.Context, fn func(context.Context
 
 // Create inserts an immutable delivery, or reports an idempotent existing row.
 func (s *DatabaseStore) Create(ctx context.Context, g auth.Grant, item Delivery) (bool, error) {
-	if _, err := tenantFor(g); err != nil {
+	if _, err := s.tenantFor(g); err != nil {
 		return false, err
 	}
 	headers, err := json.Marshal(item.Headers)
@@ -108,7 +117,7 @@ func (s *DatabaseStore) Create(ctx context.Context, g auth.Grant, item Delivery)
 
 // Find returns one tenant-scoped delivery.
 func (s *DatabaseStore) Find(ctx context.Context, g auth.Grant, id string) (Delivery, error) {
-	tenant, err := tenantFor(g)
+	tenant, err := s.tenantFor(g)
 	if err != nil {
 		return Delivery{}, err
 	}
@@ -152,7 +161,7 @@ func (s *DatabaseStore) Find(ctx context.Context, g auth.Grant, id string) (Deli
 
 // Claim takes a fenced lease when no current worker owns the delivery.
 func (s *DatabaseStore) Claim(ctx context.Context, g auth.Grant, id string, lease time.Duration) (Claim, bool, error) {
-	tenant, err := tenantFor(g)
+	tenant, err := s.tenantFor(g)
 	if err != nil {
 		return Claim{}, false, err
 	}
@@ -192,7 +201,7 @@ func (s *DatabaseStore) Claim(ctx context.Context, g auth.Grant, id string, leas
 
 // Complete records a successful result only for the current claim.
 func (s *DatabaseStore) Complete(ctx context.Context, g auth.Grant, claim Claim, result Result) error {
-	tenant, err := tenantFor(g)
+	tenant, err := s.tenantFor(g)
 	if err != nil {
 		return err
 	}
@@ -212,7 +221,7 @@ func (s *DatabaseStore) Complete(ctx context.Context, g auth.Grant, claim Claim,
 
 // Fail records a classified failure only for the current claim.
 func (s *DatabaseStore) Fail(ctx context.Context, g auth.Grant, claim Claim, failure Failure) error {
-	tenant, err := tenantFor(g)
+	tenant, err := s.tenantFor(g)
 	if err != nil {
 		return err
 	}
@@ -229,7 +238,7 @@ func (s *DatabaseStore) Fail(ctx context.Context, g auth.Grant, claim Claim, fai
 
 // Prune removes delivery records older than cutoff for one tenant.
 func (s *DatabaseStore) Prune(ctx context.Context, g auth.Grant, cutoff time.Time) (int64, error) {
-	tenant, err := tenantFor(g)
+	tenant, err := s.tenantFor(g)
 	if err != nil {
 		return 0, err
 	}
@@ -241,7 +250,19 @@ func (s *DatabaseStore) Prune(ctx context.Context, g auth.Grant, cutoff time.Tim
 }
 
 func tenantFor(g auth.Grant) (string, error) {
-	if err := g.Check(ActionDispatch); err != nil {
+	return tenantForAction(g, ActionDispatch)
+}
+
+func (s *DatabaseStore) tenantFor(g auth.Grant) (string, error) {
+	action := s.action
+	if action == "" {
+		action = ActionDispatch
+	}
+	return tenantForAction(g, action)
+}
+
+func tenantForAction(g auth.Grant, action auth.Action) (string, error) {
+	if err := g.Check(action); err != nil {
 		return "", err
 	}
 	tenant := auth.Tenant(g)

@@ -25,7 +25,7 @@ const (
 	terminalWriteTimeout = 3 * time.Second
 	pruneInterval        = time.Hour
 	minimumSecretBytes   = 32
-	userAgent            = "Arandu-Webhook/1.0"
+	defaultUserAgent     = "Arandu-Webhook/1.0"
 	signatureHeader      = "X-Arandu-Signature"
 	timestampHeader      = "X-Arandu-Timestamp"
 	deliveryHeader       = "X-Arandu-Delivery-ID"
@@ -41,10 +41,20 @@ type deliveryQueue interface {
 	Push(context.Context, auth.Grant, jobs.Job) error
 }
 
-// ManagerOptions configures transport timing and retention.
+// ManagerOptions configures authorization, routing, transport and retention.
+// Empty Action, QueueName, DeliveryJobName and UserAgent values use the
+// package defaults.
 type ManagerOptions struct {
 	Timeout   time.Duration
 	Retention time.Duration
+	// Action is the grant action persisted on delivery jobs.
+	Action auth.Action
+	// QueueName is the queue that carries delivery jobs.
+	QueueName string
+	// DeliveryJobName is the name registered with queue workers.
+	DeliveryJobName string
+	// UserAgent is sent with every webhook request.
+	UserAgent string
 	// HTTPClient supplies an application transport. The webhook client still
 	// guards schemes, response size and every redirect hop, but a custom
 	// transport owns DNS and dialing; nil uses Hesape's SSRF-guarded transport.
@@ -59,6 +69,10 @@ type Manager struct {
 	client    *http.Client
 	timeout   time.Duration
 	retention time.Duration
+	action    auth.Action
+	queueName string
+	jobName   string
+	userAgent string
 	pruneMu   sync.Mutex
 	lastPrune map[string]time.Time
 }
@@ -69,29 +83,134 @@ func NewManager(db *database.DB, secrets SecretProvider, options ManagerOptions)
 	if db == nil {
 		return nil, errors.New("webhook: NewManager needs a database handle")
 	}
-	return newManager(NewDatabaseStore(db), queue.NewDatabaseQueue(db), secrets, options)
+	resolved, err := resolveManagerOptions(options)
+	if err != nil {
+		return nil, err
+	}
+	return newManagerResolved(newDatabaseStore(db, resolved.action), queue.NewDatabaseQueue(db), secrets, resolved)
+}
+
+// NewManagerWithStore creates a manager with a caller-owned delivery store and
+// the DatabaseQueue owned by the engine. The store's Transaction method must
+// use db when dispatch and queue persistence need to commit atomically. Store
+// calls receive Grants for the resolved ManagerOptions.Action, whose default is
+// ActionDispatch.
+func NewManagerWithStore(db *database.DB, store Store, secrets SecretProvider, options ManagerOptions) (*Manager, error) {
+	if db == nil {
+		return nil, errors.New("webhook: NewManagerWithStore needs a database handle")
+	}
+	resolved, err := resolveManagerOptions(options)
+	if err != nil {
+		return nil, err
+	}
+	return newManagerResolved(store, queue.NewDatabaseQueue(db), secrets, resolved)
 }
 
 func newManager(store Store, target deliveryQueue, secrets SecretProvider, options ManagerOptions) (*Manager, error) {
+	resolved, err := resolveManagerOptions(options)
+	if err != nil {
+		return nil, err
+	}
+	return newManagerResolved(store, target, secrets, resolved)
+}
+
+type managerOptions struct {
+	timeout   time.Duration
+	retention time.Duration
+	action    auth.Action
+	queueName string
+	jobName   string
+	userAgent string
+	client    *http.Client
+}
+
+func resolveManagerOptions(options ManagerOptions) (managerOptions, error) {
+	if options.Timeout < 0 || options.Retention < 0 {
+		return managerOptions{}, errors.New("webhook: timeout and retention cannot be negative")
+	}
+	resolved := managerOptions{
+		timeout: options.Timeout, retention: options.Retention, action: options.Action,
+		queueName: options.QueueName, jobName: options.DeliveryJobName,
+		userAgent: options.UserAgent, client: options.HTTPClient,
+	}
+	if resolved.timeout == 0 {
+		resolved.timeout = defaultTimeout
+	}
+	if resolved.retention == 0 {
+		resolved.retention = DefaultRetention
+	}
+	if resolved.action == "" {
+		resolved.action = ActionDispatch
+	}
+	if resolved.queueName == "" {
+		resolved.queueName = QueueName
+	}
+	if resolved.jobName == "" {
+		resolved.jobName = DeliveryJobName
+	}
+	if resolved.userAgent == "" {
+		resolved.userAgent = defaultUserAgent
+	}
+	for _, option := range []struct {
+		label string
+		value string
+	}{
+		{label: "action", value: string(resolved.action)},
+		{label: "queue name", value: resolved.queueName},
+		{label: "delivery job name", value: resolved.jobName},
+	} {
+		if !validRoutingName(option.value) {
+			return managerOptions{}, fmt.Errorf("webhook: invalid %s %q", option.label, option.value)
+		}
+	}
+	if !validUserAgent(resolved.userAgent) {
+		return managerOptions{}, errors.New("webhook: user agent must be non-blank and contain no control characters")
+	}
+	return resolved, nil
+}
+
+func validRoutingName(name string) bool {
+	if len(name) == 0 || len(name) > 128 {
+		return false
+	}
+	separator := false
+	for index := 0; index < len(name); index++ {
+		character := name[index]
+		alphanumeric := character >= 'a' && character <= 'z' ||
+			character >= 'A' && character <= 'Z' || character >= '0' && character <= '9'
+		if alphanumeric {
+			separator = false
+			continue
+		}
+		if index == 0 || separator || character != '.' && character != '_' && character != '-' && character != ':' {
+			return false
+		}
+		separator = true
+	}
+	return !separator
+}
+
+func validUserAgent(value string) bool {
+	if strings.TrimSpace(value) == "" {
+		return false
+	}
+	for index := 0; index < len(value); index++ {
+		if value[index] < ' ' || value[index] == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+func newManagerResolved(store Store, target deliveryQueue, secrets SecretProvider, options managerOptions) (*Manager, error) {
 	if store == nil || target == nil {
 		return nil, errors.New("webhook: manager needs a store and database queue")
 	}
 	if secrets == nil {
 		return nil, ErrSecretRequired
 	}
-	if options.Timeout < 0 || options.Retention < 0 {
-		return nil, errors.New("webhook: timeout and retention cannot be negative")
-	}
-	timeout := options.Timeout
-	if timeout == 0 {
-		timeout = defaultTimeout
-	}
-	retention := options.Retention
-	if retention == 0 {
-		retention = DefaultRetention
-	}
-	client := httpclient.NewFactory(options.HTTPClient).CreatePendingRequest().
-		Timeout(timeout).MaxRedirects(5).CreateClient(nil)
+	client := httpclient.NewFactory(options.client).CreatePendingRequest().
+		Timeout(options.timeout).MaxRedirects(5).CreateClient(nil)
 	client.CheckRedirect = func(_ *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {
 			return errRedirectLimit
@@ -99,7 +218,9 @@ func newManager(store Store, target deliveryQueue, secrets SecretProvider, optio
 		return nil
 	}
 	return &Manager{store: store, queue: target, secrets: secrets, client: client,
-		timeout: timeout, retention: retention, lastPrune: map[string]time.Time{}}, nil
+		timeout: options.timeout, retention: options.retention, action: options.action,
+		queueName: options.queueName, jobName: options.jobName, userAgent: options.userAgent,
+		lastPrune: map[string]time.Time{}}, nil
 }
 
 // Migrations returns the delivery schema owned by the manager.
@@ -107,18 +228,18 @@ func (*Manager) Migrations() []migrations.Migration {
 	return []migrations.Migration{CreateDeliveriesTable{}}
 }
 
-// RegisterJobHandlers registers the only consumer of DeliveryJobName.
+// RegisterJobHandlers registers this manager's configured delivery consumer.
 func (m *Manager) RegisterJobHandlers(worker *queue.Worker) error {
 	if worker == nil {
 		return errors.New("webhook: RegisterJobHandlers needs a worker")
 	}
-	worker.HandleFunc(DeliveryJobName, m.handleDelivery)
+	worker.HandleFunc(m.jobName, m.handleDelivery)
 	return nil
 }
 
 // Dispatch atomically records and queues one immutable delivery per endpoint.
 func (m *Manager) Dispatch(ctx context.Context, g auth.Grant, event Event, endpoints []Endpoint) error {
-	if _, err := tenantFor(g); err != nil {
+	if _, err := tenantForAction(g, m.action); err != nil {
 		return err
 	}
 	if strings.TrimSpace(event.ID) == "" || strings.TrimSpace(event.Name) == "" {
@@ -164,7 +285,7 @@ func (m *Manager) Dispatch(ctx context.Context, g auth.Grant, event Event, endpo
 			if !created {
 				continue
 			}
-			job, err := jobs.New(g, QueueName, DeliveryJobName, deliveryJob{DeliveryID: id})
+			job, err := jobs.New(g, m.queueName, m.jobName, deliveryJob{DeliveryID: id})
 			if err != nil {
 				return err
 			}
@@ -180,7 +301,7 @@ func (m *Manager) Dispatch(ctx context.Context, g auth.Grant, event Event, endpo
 }
 
 func (m *Manager) handleDelivery(ctx context.Context, g auth.Grant, job *jobs.Job) error {
-	if _, err := tenantFor(g); err != nil {
+	if _, err := tenantForAction(g, m.action); err != nil {
 		return err
 	}
 	if job == nil {
@@ -224,7 +345,7 @@ func (m *Manager) handleDelivery(ctx context.Context, g auth.Grant, job *jobs.Jo
 		request.Header.Set(name, value)
 	}
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("User-Agent", userAgent)
+	request.Header.Set("User-Agent", m.userAgent)
 	request.Header.Set(deliveryHeader, item.ID)
 	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
 	request.Header.Set(timestampHeader, timestamp)

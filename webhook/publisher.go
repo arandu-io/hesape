@@ -37,8 +37,8 @@ func (p *Publisher) Publish(ctx context.Context, stored events.Stored) error {
 	if p == nil || p.manager == nil || p.resolver == nil {
 		return errors.New("webhook: publisher needs a manager and endpoint resolver")
 	}
-	g := auth.SystemGrant(ActionDispatch, stored.TenantID)
-	if _, err := tenantFor(g); err != nil {
+	g := auth.SystemGrant(p.manager.action, stored.TenantID)
+	if _, err := tenantForAction(g, p.manager.action); err != nil {
 		return err
 	}
 	endpoints, err := p.resolver.Endpoints(ctx, g, stored)

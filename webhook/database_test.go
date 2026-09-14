@@ -44,6 +44,32 @@ func TestDatabaseDispatchCommitsSnapshotAndJobTogether(t *testing.T) {
 	}
 }
 
+func TestDatabaseManagerUsesConfiguredActionForStoreAndJob(t *testing.T) {
+	db := integrationDatabase(t)
+	const customAction auth.Action = "whatsapp.runtime"
+	manager, err := NewManager(db, NewStaticSecret([]byte(testSecret)), ManagerOptions{
+		Action: customAction, QueueName: "whatsapp-webhooks", DeliveryJobName: "whatsapp.webhook.deliver",
+	})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	grant := auth.SystemGrant(customAction, "tenant-a")
+	if err := manager.Dispatch(context.Background(), grant,
+		Event{ID: "event-legacy", Name: "message.sent", Payload: []byte(`{"id":"message-1"}`)},
+		[]Endpoint{{ID: "application", URL: "https://hooks.example.test/messages"}},
+	); err != nil {
+		t.Fatalf("Dispatch() with configured action error = %v", err)
+	}
+	var action, queueName, jobName string
+	if err := db.QueryRowContext(context.Background(), `SELECT action, queue, name FROM jobs`).
+		Scan(&action, &queueName, &jobName); err != nil {
+		t.Fatalf("reading configured job: %v", err)
+	}
+	if action != string(customAction) || queueName != "whatsapp-webhooks" || jobName != "whatsapp.webhook.deliver" {
+		t.Fatalf("stored job route = action %q, queue %q, name %q", action, queueName, jobName)
+	}
+}
+
 func TestDatabaseDispatchRollsBackSnapshotWhenJobInsertFails(t *testing.T) {
 	db := integrationDatabase(t)
 	if _, err := db.ExecContext(context.Background(), `CREATE TRIGGER refuse_webhook_job
