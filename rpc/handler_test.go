@@ -161,6 +161,48 @@ func requestWithToken[T any](message *T, token string) *connect.Request[T] {
 	return request
 }
 
+func TestHandlerRecognizesOnlyRPCRequestsInsideItsService(t *testing.T) {
+	_, handler, err := rpc.NewHandler(func(options ...connect.HandlerOption) (string, http.Handler) {
+		return fixturev1connect.NewCommunicationServiceHandler(&fixtureService{}, options...)
+	}, authenticate, defaultConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name        string
+		method      string
+		path        string
+		contentType string
+		version     string
+		want        bool
+	}{
+		{name: "connect proto", method: http.MethodPost, path: fixturev1connect.CommunicationServiceUnaryProcedure, contentType: "application/proto", version: "1", want: true},
+		{name: "connect streaming", method: http.MethodPost, path: fixturev1connect.CommunicationServiceBidiProcedure, contentType: "application/connect+proto", version: "1", want: true},
+		{name: "grpc", method: http.MethodPost, path: fixturev1connect.CommunicationServiceUnaryProcedure, contentType: "application/grpc+proto", want: true},
+		{name: "grpc web text", method: http.MethodPost, path: fixturev1connect.CommunicationServiceUnaryProcedure, contentType: "application/grpc-web-text+proto; charset=utf-8", want: true},
+		{name: "ordinary json", method: http.MethodPost, path: fixturev1connect.CommunicationServiceUnaryProcedure, contentType: "application/json"},
+		{name: "missing connect version", method: http.MethodPost, path: fixturev1connect.CommunicationServiceUnaryProcedure, contentType: "application/connect+json"},
+		{name: "neighboring service", method: http.MethodPost, path: "/fixture.v1.CommunicationService.evil/Unary", contentType: "application/grpc+proto"},
+		{name: "nested procedure", method: http.MethodPost, path: fixturev1connect.CommunicationServiceUnaryProcedure + "/extra", contentType: "application/grpc+proto"},
+		{name: "preflight", method: http.MethodOptions, path: fixturev1connect.CommunicationServiceUnaryProcedure, contentType: "application/grpc-web+proto"},
+		{name: "rest path", method: http.MethodPost, path: "/users", contentType: "application/grpc+proto"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(test.method, "https://rpc.example"+test.path, nil)
+			request.Header.Set("Content-Type", test.contentType)
+			if test.version != "" {
+				request.Header.Set("Connect-Protocol-Version", test.version)
+			}
+			if got := handler.Handles(request); got != test.want {
+				t.Fatalf("Handles = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
 func TestAllProtocolsServeAllFourRPCStyles(t *testing.T) {
 	protocolsObserved := make(chan string, 12)
 	server, _ := newServer(t, &fixtureService{protocols: protocolsObserved}, defaultConfig)

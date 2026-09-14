@@ -44,11 +44,40 @@ type HandlerFactory func(...connect.HandlerOption) (string, http.Handler)
 type Handler struct {
 	next      http.Handler
 	admission *admission
+	path      string
 }
 
 // ServeHTTP implements [http.Handler].
 func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	h.next.ServeHTTP(response, request)
+}
+
+// Handles reports whether request is an RPC call for this service. Applications
+// use it to exempt only authenticated RPC traffic from browser CSRF protection;
+// it deliberately rejects neighboring paths and ordinary JSON POST requests.
+func (h *Handler) Handles(request *http.Request) bool {
+	if h == nil || request == nil || request.Method != http.MethodPost {
+		return false
+	}
+	procedure, ok := strings.CutPrefix(request.URL.Path, h.path)
+	if !ok || procedure == "" || strings.ContainsRune(procedure, '/') {
+		return false
+	}
+
+	contentType, _, _ := strings.Cut(request.Header.Get("Content-Type"), ";")
+	mediaType := strings.ToLower(strings.TrimSpace(contentType))
+	switch {
+	case mediaType == "application/grpc", strings.HasPrefix(mediaType, "application/grpc+"):
+		return true
+	case mediaType == "application/grpc-web", strings.HasPrefix(mediaType, "application/grpc-web+"),
+		mediaType == "application/grpc-web-text", strings.HasPrefix(mediaType, "application/grpc-web-text+"):
+		return true
+	case mediaType == "application/json", mediaType == "application/proto",
+		mediaType == "application/connect+json", mediaType == "application/connect+proto":
+		return request.Header.Get("Connect-Protocol-Version") == "1"
+	default:
+		return false
+	}
 }
 
 // CloseAdmission refuses new RPC calls while calls already inside the
@@ -99,7 +128,7 @@ func NewHandler(factory HandlerFactory, authenticate AuthenticateBearer, config 
 		defer cancel()
 		limitedHandler.ServeHTTP(response, request.WithContext(ctx))
 	})
-	return path, &Handler{next: handler, admission: admission}, nil
+	return path, &Handler{next: handler, admission: admission, path: path}, nil
 }
 
 func (c Config) validate() error {
