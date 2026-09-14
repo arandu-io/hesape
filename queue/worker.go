@@ -680,7 +680,7 @@ func (w *Worker) handleJobException(ctx context.Context, j *jobs.Job, cause erro
 		return
 	}
 
-	wait := w.calculateBackoff(j, attempts)
+	wait := w.calculateBackoff(j, attempts, cause)
 	settle, endSettle := settling(ctx)
 	relErr := j.Release(settle, wait)
 	endSettle()
@@ -783,42 +783,46 @@ func (w *Worker) park(ctx context.Context, j *jobs.Job, cause error, logger *slo
 	if err := j.Fail(settle, cause); err != nil {
 		return err
 	}
-	if w.failed == nil {
-		return nil
+	if w.failed != nil {
+		message := j.LastError
+		if cause != nil {
+			message = cause.Error()
+		}
+		// The job's own tenant, under the action the failed job list is reached
+		// under -- the same Grant the commands hold, because they read what this
+		// writes and a provider is free to check it.
+		g := auth.SystemGrant(failed.Action, j.TenantID)
+		if _, err := w.failed.Log(settle, g, failed.FailedJob{
+			UUID: j.UUID,
+			// The routing name, not the display name: `queue:retry` pushes the
+			// record back under it, and a name a person reads is not one a handler
+			// is registered under.
+			Name: j.Name,
+			// The job's own action, and not the one this record is written under.
+			// They are different permissions on purpose -- the list is read by an
+			// administrator and the work is not -- and a retry rebuilds the job's
+			// Grant from this field, so the record has to carry the action the job
+			// was pushed with or the work comes back as the administrator.
+			Action:     j.Action,
+			Connection: j.GetConnectionName(),
+			Queue:      j.Queue,
+			Payload:    j.Payload,
+			Exception:  message,
+			FailedAt:   time.Now().UTC(),
+		}); err != nil {
+			// The job and the reason, never the payload: it is a customer's
+			// arguments, and the failed job list is where it belongs -- behind a
+			// Grant -- rather than in a log line anything can ship anywhere.
+			logger.Error("the failed job could not be recorded; it is parked but will not be listed",
+				"job", j.Name, "job_id", j.UUID, "error", err)
+		}
 	}
 
-	message := j.LastError
-	if cause != nil {
-		message = cause.Error()
-	}
-	// The job's own tenant, under the action the failed job list is reached
-	// under -- the same Grant the commands hold, because they read what this
-	// writes and a provider is free to check it.
-	g := auth.SystemGrant(failed.Action, j.TenantID)
-	if _, err := w.failed.Log(settle, g, failed.FailedJob{
-		UUID: j.UUID,
-		// The routing name, not the display name: `queue:retry` pushes the
-		// record back under it, and a name a person reads is not one a handler
-		// is registered under.
-		Name: j.Name,
-		// The job's own action, and not the one this record is written under.
-		// They are different permissions on purpose -- the list is read by an
-		// administrator and the work is not -- and a retry rebuilds the job's
-		// Grant from this field, so the record has to carry the action the job
-		// was pushed with or the work comes back as the administrator.
-		Action:     j.Action,
-		Connection: j.GetConnectionName(),
-		Queue:      j.Queue,
-		Payload:    j.Payload,
-		Exception:  message,
-		FailedAt:   time.Now().UTC(),
-	}); err != nil {
-		// The job and the reason, never the payload: it is a customer's
-		// arguments, and the failed job list is where it belongs -- behind a
-		// Grant -- rather than in a log line anything can ship anywhere.
-		logger.Error("the failed job could not be recorded; it is parked but will not be listed",
-			"job", j.Name, "job_id", j.UUID, "error", err)
-	}
+	// The compensating action is the last step. It may issue I/O of its own, so
+	// it receives the same bounded, shutdown-independent context as the two
+	// writes above. Calling it before Fail succeeds would tell a handler that a
+	// job gave up while the driver is still going to deliver it again.
+	NewCallQueuedHandler(w).Failed(settle, j, cause)
 	return nil
 }
 
@@ -849,15 +853,29 @@ func (w *Worker) timeoutFor(j *jobs.Job) time.Duration {
 	return w.opts.Timeout
 }
 
+// retryAfterError is deliberately private and structural. A transport can
+// carry a server's retry advice without queue importing that transport.
+type retryAfterError interface {
+	RetryAfterDuration() time.Duration
+}
+
 // calculateBackoff is how long to wait before the next delivery.
 //
 // It is the job's own schedule when it declared one, and the worker's when it
-// did not.
-func (w *Worker) calculateBackoff(j *jobs.Job, attempt int) time.Duration {
+// did not. A wrapped error may ask for a longer wait; it may not shorten the
+// configured wait or extend it beyond the same one-hour ceiling as the default
+// exponential policy.
+func (w *Worker) calculateBackoff(j *jobs.Job, attempt int, cause error) time.Duration {
+	wait := w.opts.Backoff(attempt)
 	if own := j.Backoff(); own > 0 {
-		return own
+		wait = own
 	}
-	return w.opts.Backoff(attempt)
+
+	var retryAfter retryAfterError
+	if errors.As(cause, &retryAfter) {
+		wait = max(wait, retryAfter.RetryAfterDuration())
+	}
+	return min(wait, time.Hour)
 }
 
 // getNextJobs takes the next batch off the queue, through the registered pop

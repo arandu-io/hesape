@@ -6,10 +6,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
+	queuecore "github.com/arandu-io/hesape/queue"
 	"github.com/arandu-io/hesape/queue/connectors/redis"
 	"github.com/arandu-io/hesape/queue/jobs"
 )
@@ -219,6 +221,126 @@ func TestRetryBringsAParkedJobBack(t *testing.T) {
 	}
 	if back[0].Attempts != 1 {
 		t.Errorf("attempts = %d after a retry, want the count to have restarted", back[0].Attempts)
+	}
+}
+
+// TestRetryRefusesAJobThatIsNotParked protects a running or merely scheduled
+// job from having its delivery counters reset behind a worker's back.
+func TestRetryRefusesAJobThatIsNotParked(t *testing.T) {
+	q := queue(t)
+	ctx := context.Background()
+	pushed := push(t, q, "invoice.send")
+
+	if err := q.Retry(ctx, pushed.UUID); !errors.Is(err, queuecore.ErrNotParked) {
+		t.Fatalf("Retry = %v, want ErrNotParked", err)
+	}
+	popped, err := q.Pop(ctx, "", 10, time.Minute)
+	if err != nil || len(popped) != 1 || popped[0].UUID != pushed.UUID {
+		t.Fatalf("the refused retry changed the scheduled job: %+v (%v)", popped, err)
+	}
+}
+
+// TestRetryResetsEveryFailureCounter proves parity with DatabaseQueue. Keeping
+// Exceptions would park the retried job again before its handler had another
+// chance to run.
+func TestRetryResetsEveryFailureCounter(t *testing.T) {
+	q := queue(t)
+	ctx := context.Background()
+	push(t, q, "invoice.send")
+
+	popped, err := q.Pop(ctx, "", 1, time.Minute)
+	if err != nil || len(popped) != 1 {
+		t.Fatalf("Pop: %v, %d", err, len(popped))
+	}
+	popped[0].Exceptions = 4
+	if err := popped[0].Fail(ctx, errors.New("the consumer was down")); err != nil {
+		t.Fatalf("Fail: %v", err)
+	}
+	if err := q.Retry(ctx, popped[0].UUID); err != nil {
+		t.Fatalf("Retry: %v", err)
+	}
+
+	retried, err := q.Pop(ctx, "", 1, time.Minute)
+	if err != nil || len(retried) != 1 {
+		t.Fatalf("Pop after Retry: %v, %d", err, len(retried))
+	}
+	if retried[0].Attempts != 1 || retried[0].Exceptions != 0 || retried[0].LastError != "" {
+		t.Errorf("retry left attempts=%d exceptions=%d last_error=%q",
+			retried[0].Attempts, retried[0].Exceptions, retried[0].LastError)
+	}
+}
+
+// TestAStaleWorkerCannotSettleANewerDelivery covers the lease race that a
+// transaction alone does not close. Once attempt two owns the lease, the
+// pointer from attempt one must not delete its body or move it back to ready.
+func TestAStaleWorkerCannotSettleANewerDelivery(t *testing.T) {
+	q := queue(t)
+	ctx := context.Background()
+	push(t, q, "invoice.send")
+
+	first, err := q.Pop(ctx, "", 1, 40*time.Millisecond)
+	if err != nil || len(first) != 1 {
+		t.Fatalf("first Pop: %v, %d", err, len(first))
+	}
+	time.Sleep(100 * time.Millisecond)
+	second, err := q.Pop(ctx, "", 1, time.Minute)
+	if err != nil || len(second) != 1 || second[0].Attempts != 2 {
+		t.Fatalf("second Pop: %+v (%v)", second, err)
+	}
+
+	if err := first[0].Delete(ctx); err == nil {
+		t.Fatal("the expired first delivery deleted the second delivery")
+	}
+	if err := second[0].Delete(ctx); err != nil {
+		t.Fatalf("the current delivery could not settle: %v", err)
+	}
+	if size, err := q.Size(ctx, ""); err != nil || size != 0 {
+		t.Errorf("size = %d (%v), want no job after the current delivery settled", size, err)
+	}
+}
+
+// TestConcurrentClaimsHandEveryJobToExactlyOneWorker is the end-to-end proof
+// that the WATCH and MULTI/EXEC transition neither loses an id between sets nor
+// lets two consumers receive it.
+func TestConcurrentClaimsHandEveryJobToExactlyOneWorker(t *testing.T) {
+	q := queue(t)
+	ctx := context.Background()
+	const total = 48
+	for range total {
+		push(t, q, "invoice.send")
+	}
+
+	start := make(chan struct{})
+	claimed := make(chan *jobs.Job, total)
+	var workers sync.WaitGroup
+	for range 8 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			batch, err := q.Pop(ctx, "", total, time.Minute)
+			if err != nil {
+				t.Errorf("Pop: %v", err)
+				return
+			}
+			for _, job := range batch {
+				claimed <- job
+			}
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(claimed)
+
+	seen := map[string]bool{}
+	for job := range claimed {
+		if seen[job.UUID] {
+			t.Errorf("job %s was handed to more than one worker", job.UUID)
+		}
+		seen[job.UUID] = true
+	}
+	if len(seen) != total {
+		t.Fatalf("workers received %d jobs, want all %d", len(seen), total)
 	}
 }
 

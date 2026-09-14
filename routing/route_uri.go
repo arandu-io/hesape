@@ -45,10 +45,10 @@ func (RouteUri) Parse(uri string) RouteUri {
 			continue
 		}
 		name := inner[:colon]
-		field := inner[colon+1:]
+		optional := strings.HasSuffix(inner, "?")
+		field := strings.TrimSuffix(inner[colon+1:], "?")
 		fields[name] = field
 
-		optional := strings.HasSuffix(inner, "?")
 		replacement := "{" + name + "}"
 		if optional {
 			replacement = "{" + name + "?}"

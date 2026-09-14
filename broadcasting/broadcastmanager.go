@@ -66,10 +66,8 @@ type Router interface {
 
 // Queue is the little of a queue factory that [BroadcastManager.Queue] uses.
 //
-// It is declared here rather than imported from
-// github.com/arandu-io/hesape/queue so that an application can broadcast
-// without a queue behind it, and so that this package does not pull the
-// worker, the drivers and their database in.
+// It stays narrow so an application can broadcast without configuring a queue
+// and tests can supply only the push operation the manager consumes.
 type Queue interface {
 	// PushOn puts the job on a named queue of a named connection. Both names
 	// may be empty: the default queue of the default connection.

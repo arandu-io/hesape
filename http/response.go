@@ -6,6 +6,7 @@ import (
 	stdhttp "net/http"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/arandu-io/hesape/http/exceptions"
 	"github.com/arandu-io/hesape/support"
@@ -372,9 +373,29 @@ type StreamedEvent struct {
 	Data any
 }
 
+// ServerSentEvent is an event with the complete server-sent event metadata.
+// StreamedEvent remains the compact event-and-data form.
+type ServerSentEvent struct {
+	// ID updates the client's last event ID when it is not empty.
+	ID string
+	// Event is the name of the event.
+	Event string
+	// Data is the payload.
+	Data any
+	// Retry asks the client to wait this long before reconnecting.
+	Retry time.Duration
+	// Comment is emitted as comment lines before the event fields.
+	Comment string
+}
+
 // NewStreamedEvent builds a StreamedEvent.
 func NewStreamedEvent(event string, data any) *StreamedEvent {
 	return &StreamedEvent{Event: event, Data: data}
+}
+
+// NewServerSentEvent builds an event with ID and retry metadata.
+func NewServerSentEvent(id, event string, data any, retry time.Duration) *ServerSentEvent {
+	return &ServerSentEvent{ID: id, Event: event, Data: data, Retry: retry}
 }
 
 // String formats the event the way the server-sent event wire format wants it:
@@ -383,23 +404,81 @@ func NewStreamedEvent(event string, data any) *StreamedEvent {
 // It is here and not in a writer of its own because StreamedEvent is two
 // fields and nothing else, and the framework that reads it needs the bytes.
 func (e *StreamedEvent) String() string {
-	var out strings.Builder
-	if e.Event != "" {
-		out.WriteString("event: ")
-		out.WriteString(e.Event)
-		out.WriteString("\n")
+	if e == nil {
+		return ""
 	}
-	payload := stringify(e.Data)
-	if shouldBeJson(e.Data) {
-		if encoded, err := morphToJson(e.Data); err == nil {
-			payload = encoded
+	return formatServerSentEvent("", e.Event, e.Data, 0, "", true)
+}
+
+// String formats the event according to the server-sent event wire format.
+func (e *ServerSentEvent) String() string {
+	if e == nil {
+		return ""
+	}
+	hasData := e.Data != nil || e.Comment == ""
+	return formatServerSentEvent(e.ID, e.Event, e.Data, e.Retry, e.Comment, hasData)
+}
+
+func formatServerSentEvent(id, event string, data any, retry time.Duration, comment string, hasData bool) string {
+	var out strings.Builder
+	if comment != "" {
+		for _, line := range splitServerSentEventLines(comment) {
+			out.WriteString(":")
+			if line != "" {
+				out.WriteString(" ")
+				out.WriteString(line)
+			}
+			out.WriteString("\n")
 		}
 	}
-	for _, line := range strings.Split(payload, "\n") {
-		out.WriteString("data: ")
-		out.WriteString(line)
+	if id != "" && !strings.ContainsRune(id, '\x00') {
+		out.WriteString("id: ")
+		out.WriteString(serverSentEventSingleLine(id))
 		out.WriteString("\n")
+	}
+	if event != "" {
+		out.WriteString("event: ")
+		out.WriteString(serverSentEventSingleLine(event))
+		out.WriteString("\n")
+	}
+	if retry > 0 {
+		out.WriteString("retry: ")
+		out.WriteString(fmt.Sprintf("%d", retry.Milliseconds()))
+		out.WriteString("\n")
+	}
+	if hasData {
+		payload := stringify(data)
+		if shouldBeJson(data) {
+			if encoded, err := morphToJson(data); err == nil {
+				payload = encoded
+			}
+		}
+		for _, line := range splitServerSentEventLines(payload) {
+			out.WriteString("data: ")
+			out.WriteString(line)
+			out.WriteString("\n")
+		}
 	}
 	out.WriteString("\n")
 	return out.String()
+}
+
+func splitServerSentEventLines(value string) []string {
+	if value == "" {
+		return []string{""}
+	}
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	return strings.Split(value, "\n")
+}
+
+func serverSentEventSingleLine(value string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '\r', '\n':
+			return ' '
+		default:
+			return r
+		}
+	}, value)
 }

@@ -552,6 +552,24 @@ type recordingProvider struct {
 	refuse  error
 }
 
+// failureAwareHandler records the one compensating action a terminal failure
+// earns, including whether the queue had already settled the job when it ran.
+type failureAwareHandler struct {
+	calls     atomic.Int32
+	wasParked atomic.Bool
+	cause     error
+}
+
+func (h *failureAwareHandler) Handle(context.Context, auth.Grant, *jobs.Job) error {
+	return h.cause
+}
+
+func (h *failureAwareHandler) Failed(_ context.Context, _ auth.Grant, j *jobs.Job, cause error) {
+	h.calls.Add(1)
+	h.wasParked.Store(j.HasFailed() && j.IsDeletedOrReleased())
+	h.cause = cause
+}
+
 func (p *recordingProvider) Log(_ context.Context, g auth.Grant, job failed.FailedJob) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -894,6 +912,52 @@ func TestNoDeadLetterRecordIsWrittenWhenTheDriverRefusesToPark(t *testing.T) {
 	// the job comes back, and nobody can read that off a list it never reached.
 	if !strings.Contains(logged.String(), "the jobs table is read only") {
 		t.Errorf("nothing was said about the driver refusing to park:\n%s", logged.String())
+	}
+}
+
+// TestTheTerminalFailureHookRunsOnceAfterTheJobIsParked closes the gap between
+// the public HandlesFailure contract and Worker.Process. The hook existed and
+// CallQueuedHandler could invoke it, but no worker path called that method, so
+// production jobs were parked without their compensating action.
+func TestTheTerminalFailureHookRunsOnceAfterTheJobIsParked(t *testing.T) {
+	j := newJob(t, "invoice.send")
+	q := newStoreQueue(j)
+	cause := errors.New("the payment gateway is down")
+	handler := &failureAwareHandler{cause: cause}
+
+	w := queue.NewWorker(q, queue.WorkerOptions{MaxTries: 1})
+	w.Handle("invoice.send", handler)
+
+	if err := deliverOnce(t, context.Background(), w, q); !errors.Is(err, cause) {
+		t.Fatalf("Process = %v, want the handler's error", err)
+	}
+	if got := handler.calls.Load(); got != 1 {
+		t.Fatalf("the terminal failure hook ran %d times, want once", got)
+	}
+	if !handler.wasParked.Load() {
+		t.Error("the hook ran before the driver had parked the job")
+	}
+	if !errors.Is(handler.cause, cause) {
+		t.Errorf("the hook received %v, want %v", handler.cause, cause)
+	}
+}
+
+// TestTheTerminalFailureHookDoesNotRunWhenParkingFails proves that a failed
+// settlement is not reported as terminal. The lease will expire and the store
+// will deliver the job again, so running compensation here would run it once
+// for work that has not actually given up.
+func TestTheTerminalFailureHookDoesNotRunWhenParkingFails(t *testing.T) {
+	j := newJob(t, "invoice.send")
+	q := newStoreQueue(j)
+	q.refusesToPark = errors.New("the jobs table is read only")
+	handler := &failureAwareHandler{cause: errors.New("the payment gateway is down")}
+
+	w := queue.NewWorker(q, queue.WorkerOptions{MaxTries: 1})
+	w.Handle("invoice.send", handler)
+
+	_ = deliverOnce(t, context.Background(), w, q)
+	if got := handler.calls.Load(); got != 0 {
+		t.Fatalf("the terminal failure hook ran %d times for a job the driver did not park", got)
 	}
 }
 

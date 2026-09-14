@@ -244,16 +244,15 @@ func (r *Router) handle(method, pattern string, h http.Handler, mws ...pipeline.
 // the route-in-context and a matched listener all act on a route already in the
 // mux, which is the shape every fluent call returns.
 func (r *Router) register(method, full string, h http.Handler, mws ...pipeline.Middleware[http.Handler]) *Route {
-	key := full
+	parsed := (RouteUri{}).Parse(full)
 	label := anyMethod
 	if method != "" {
-		key = method + " " + full
 		label = method
 	}
 
 	route := &Route{
 		Method:     label,
-		Pattern:    full,
+		Pattern:    parsed.URI,
 		Module:     r.module,
 		namePrefix: r.name,
 		prefix:     r.prefix,
@@ -265,17 +264,62 @@ func (r *Router) register(method, full string, h http.Handler, mws ...pipeline.M
 		defaults:   map[string]any{},
 		action:     map[string]any{"uses": "Closure", "controller": "Closure"},
 	}
+	if len(parsed.BindingFields) > 0 {
+		route.bindingFields = parsed.BindingFields
+	}
 	// Global where patterns apply to every route. They are compiled once, at
 	// registration.
 	for name, expr := range r.root.patterns {
-		if re, err := regexp.Compile(expr); err == nil {
-			route.wheres[name] = re
-			route.whereOrder = append(route.whereOrder, name)
-		}
+		route.wheres[name] = compileRouteConstraint(name, expr)
+		route.whereOrder = append(route.whereOrder, name)
 	}
-	r.mux.Handle(key, route)
+	for _, pattern := range expandOptionalRoutePatterns(parsed.URI) {
+		key := pattern
+		if method != "" {
+			key = method + " " + pattern
+		}
+		r.mux.Handle(key, route)
+	}
 	r.table.add(route)
 	return route
+}
+
+// expandOptionalRoutePatterns turns one logical route with optional path
+// parameters into the concrete patterns understood by http.ServeMux. The
+// logical route remains a single row in the route table and a single target
+// for URL generation.
+func expandOptionalRoutePatterns(pattern string) []string {
+	segments := strings.Split(pattern, "/")
+	for len(segments) > 1 && segments[len(segments)-1] == "" {
+		segments = segments[:len(segments)-1]
+	}
+	firstOptional := -1
+	for i, segment := range segments {
+		if strings.HasPrefix(segment, "{") && strings.HasSuffix(segment, "?}") {
+			if firstOptional < 0 {
+				firstOptional = i
+			}
+			segments[i] = strings.TrimSuffix(segment, "?}") + "}"
+			continue
+		}
+		if firstOptional >= 0 && segment != "" {
+			panic("routing: required path segments cannot follow optional parameters")
+		}
+	}
+	if firstOptional < 0 {
+		return []string{pattern}
+	}
+
+	patterns := make([]string, 0, len(segments)-firstOptional+1)
+	for end := len(segments); end >= firstOptional; end-- {
+		concrete := strings.Join(segments[:end], "/")
+		concrete = strings.TrimSuffix(concrete, "/")
+		if concrete == "" {
+			concrete = "/"
+		}
+		patterns = append(patterns, concrete)
+	}
+	return patterns
 }
 
 func joinPath(a, b string) string {

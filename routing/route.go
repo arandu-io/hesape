@@ -766,10 +766,7 @@ func (rt *Route) GetWheres() map[string]string {
 
 func (rt *Route) whereMap(wheres map[string]string) *Route {
 	for name, expr := range wheres {
-		re, err := regexp.Compile(expr)
-		if err != nil {
-			continue
-		}
+		re := compileRouteConstraint(name, expr)
 		if _, ok := rt.wheres[name]; !ok {
 			rt.whereOrder = append(rt.whereOrder, name)
 		}
@@ -808,7 +805,7 @@ func (rt *Route) WhereIn(param string, values ...string) *Route {
 	if rt == nil {
 		return nil
 	}
-	return rt.Where(param, strings.Join(values, "|"))
+	return rt.Where(param, routeLiteralAlternation(values))
 }
 
 func (rt *Route) assignExpr(params []string, expr string) *Route {
@@ -820,6 +817,25 @@ func (rt *Route) assignExpr(params []string, expr string) *Route {
 		m[p] = expr
 	}
 	return rt.whereMap(m)
+}
+
+// compileRouteConstraint compiles a route constraint as a whole-value match.
+// Invalid constraints are configuration errors and fail at registration rather
+// than silently opening the route.
+func compileRouteConstraint(name, expr string) *regexp.Regexp {
+	re, err := regexp.Compile(`^(?:` + expr + `)$`)
+	if err != nil {
+		panic("routing: invalid constraint for parameter " + name + ": " + err.Error())
+	}
+	return re
+}
+
+func routeLiteralAlternation(values []string) string {
+	escaped := make([]string, len(values))
+	for i, value := range values {
+		escaped[i] = regexp.QuoteMeta(value)
+	}
+	return strings.Join(escaped, "|")
 }
 
 // compileParameterNames extracts {name} segments from a pattern, stripping

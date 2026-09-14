@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -172,40 +173,84 @@ func (q *RedisQueue) Pop(ctx context.Context, name string, n int, lease time.Dur
 
 	out := make([]*jobs.Job, 0, len(ids))
 	for _, id := range ids {
-		// ZRem is the claim: exactly one worker removes the member, and the
-		// others get zero back. That is the compare-and-set, in plain RESP.
-		removed, err := q.client.ZRem(ctx, scheduled, id).Result()
+		j, claimed, err := q.claim(ctx, name, id, now, lease)
 		if err != nil {
-			return nil, fmt.Errorf("queue/redis: claiming %s: %w", id, err)
+			return nil, err
 		}
-		if removed == 0 {
-			continue
+		if claimed {
+			out = append(out, jobs.Popped(q, connection, j))
 		}
-
-		j, err := q.load(ctx, id)
-		if err != nil {
-			// The body is gone and the id was claimed: nothing to run, and
-			// leaving it out of the lease set is what stops it coming back.
-			continue
-		}
-		j.Attempts++
-
-		body, err := json.Marshal(j)
-		if err != nil {
-			return nil, fmt.Errorf("queue/redis: serializing %s: %w", j.UUID, err)
-		}
-		pipe := q.client.TxPipeline()
-		pipe.HSet(ctx, q.key("jobs"), j.UUID, body)
-		pipe.ZAdd(ctx, q.key(name, "leased"), redis.Z{
-			Score:  float64(now.Add(lease).UnixMilli()),
-			Member: j.UUID,
-		})
-		if _, err := pipe.Exec(ctx); err != nil {
-			return nil, fmt.Errorf("queue/redis: leasing %s: %w", j.UUID, err)
-		}
-		out = append(out, jobs.Popped(q, connection, j))
 	}
 	return out, nil
+}
+
+var errStateChanged = errors.New("queue/redis: the job moved to another state")
+
+// transaction retries an optimistic transaction until it commits, the caller
+// cancels, or the callback reports a real error. WATCH is deliberately used
+// instead of Lua so the connector remains portable across RESP servers.
+func (q *RedisQueue) transaction(ctx context.Context, keys []string, run func(*redis.Tx) error) error {
+	for {
+		err := q.client.Watch(ctx, run, keys...)
+		if !errors.Is(err, redis.TxFailedErr) {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+}
+
+// claim moves one eligible id from scheduled to leased and increments its
+// attempt in the same transaction. No observer can see the id in neither set.
+func (q *RedisQueue) claim(ctx context.Context, name, id string, now time.Time, lease time.Duration) (jobs.Job, bool, error) {
+	scheduled := q.key(name, "scheduled")
+	leased := q.key(name, "leased")
+	var claimed jobs.Job
+
+	err := q.transaction(ctx, []string{scheduled}, func(tx *redis.Tx) error {
+		score, err := tx.ZScore(ctx, scheduled, id).Result()
+		if errors.Is(err, redis.Nil) || score > float64(now.UnixMilli()) {
+			return errStateChanged
+		}
+		if err != nil {
+			return err
+		}
+
+		raw, err := tx.HGet(ctx, q.key("jobs"), id).Bytes()
+		if err != nil {
+			return err
+		}
+		var j jobs.Job
+		if err := json.Unmarshal(raw, &j); err != nil {
+			return fmt.Errorf("queue/redis: decoding %s: %w", id, err)
+		}
+		j.Attempts++
+		body, err := json.Marshal(j)
+		if err != nil {
+			return fmt.Errorf("queue/redis: serializing %s: %w", id, err)
+		}
+
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.HSet(ctx, q.key("jobs"), id, body)
+			pipe.ZRem(ctx, scheduled, id)
+			pipe.ZAdd(ctx, leased, redis.Z{
+				Score: float64(now.Add(lease).UnixMilli()), Member: id,
+			})
+			return nil
+		})
+		if err == nil {
+			claimed = j
+		}
+		return err
+	})
+	if errors.Is(err, errStateChanged) {
+		return jobs.Job{}, false, nil
+	}
+	if err != nil {
+		return jobs.Job{}, false, fmt.Errorf("queue/redis: claiming %s: %w", id, err)
+	}
+	return claimed, true, nil
 }
 
 // recoverExpiredLeases moves jobs whose lease passed back into the queue.
@@ -220,28 +265,47 @@ func (q *RedisQueue) recoverExpiredLeases(ctx context.Context, name string, now 
 	}
 
 	for _, id := range expired {
-		removed, err := q.client.ZRem(ctx, leased, id).Result()
-		if err != nil {
-			return fmt.Errorf("queue/redis: recovering %s: %w", id, err)
-		}
-		if removed == 0 {
-			continue
-		}
-		if err := q.client.ZAdd(ctx, q.key(name, "scheduled"), redis.Z{
-			Score: float64(now.UnixMilli()), Member: id,
-		}).Err(); err != nil {
+		if err := q.recoverLease(ctx, name, id, now); err != nil {
 			return fmt.Errorf("queue/redis: requeueing %s: %w", id, err)
 		}
 	}
 	return nil
 }
 
+func (q *RedisQueue) recoverLease(ctx context.Context, name, id string, now time.Time) error {
+	leased := q.key(name, "leased")
+	scheduled := q.key(name, "scheduled")
+	err := q.transaction(ctx, []string{leased}, func(tx *redis.Tx) error {
+		score, err := tx.ZScore(ctx, leased, id).Result()
+		if errors.Is(err, redis.Nil) || score > float64(now.UnixMilli()) {
+			return errStateChanged
+		}
+		if err != nil {
+			return err
+		}
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.ZRem(ctx, leased, id)
+			pipe.ZAdd(ctx, scheduled, redis.Z{Score: float64(now.UnixMilli()), Member: id})
+			return nil
+		})
+		return err
+	})
+	if errors.Is(err, errStateChanged) {
+		return nil
+	}
+	return err
+}
+
 // DeleteJob removes a finished job.
 func (q *RedisQueue) DeleteJob(ctx context.Context, j *jobs.Job) error {
-	pipe := q.client.TxPipeline()
-	pipe.ZRem(ctx, q.key(j.Queue, "leased"), j.UUID)
-	pipe.HDel(ctx, q.key("jobs"), j.UUID)
-	if _, err := pipe.Exec(ctx); err != nil {
+	if err := q.settleLeased(ctx, j, func(tx *redis.Tx) error {
+		_, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.ZRem(ctx, q.key(j.Queue, "leased"), j.UUID)
+			pipe.HDel(ctx, q.key("jobs"), j.UUID)
+			return nil
+		})
+		return err
+	}); err != nil {
 		return fmt.Errorf("queue/redis: deleting %s: %w", j.UUID, err)
 	}
 	return nil
@@ -260,13 +324,17 @@ func (q *RedisQueue) ReleaseJob(ctx context.Context, j *jobs.Job, delay time.Dur
 		return fmt.Errorf("queue/redis: serializing %s: %w", j.UUID, err)
 	}
 
-	pipe := q.client.TxPipeline()
-	pipe.HSet(ctx, q.key("jobs"), j.UUID, body)
-	pipe.ZRem(ctx, q.key(j.Queue, "leased"), j.UUID)
-	pipe.ZAdd(ctx, q.key(j.Queue, "scheduled"), redis.Z{
-		Score: float64(runAt.UnixMilli()), Member: j.UUID,
-	})
-	if _, err := pipe.Exec(ctx); err != nil {
+	if err := q.settleLeased(ctx, j, func(tx *redis.Tx) error {
+		_, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.HSet(ctx, q.key("jobs"), j.UUID, body)
+			pipe.ZRem(ctx, q.key(j.Queue, "leased"), j.UUID)
+			pipe.ZAdd(ctx, q.key(j.Queue, "scheduled"), redis.Z{
+				Score: float64(runAt.UnixMilli()), Member: j.UUID,
+			})
+			return nil
+		})
+		return err
+	}); err != nil {
 		return fmt.Errorf("queue/redis: releasing %s: %w", j.UUID, err)
 	}
 	return nil
@@ -282,16 +350,46 @@ func (q *RedisQueue) FailJob(ctx context.Context, j *jobs.Job, cause error) erro
 		return fmt.Errorf("queue/redis: serializing %s: %w", j.UUID, err)
 	}
 
-	pipe := q.client.TxPipeline()
-	pipe.HSet(ctx, q.key("jobs"), j.UUID, body)
-	pipe.ZRem(ctx, q.key(j.Queue, "leased"), j.UUID)
-	pipe.ZAdd(ctx, q.key("parked"), redis.Z{
-		Score: float64(time.Now().UTC().UnixMilli()), Member: j.UUID,
-	})
-	if _, err := pipe.Exec(ctx); err != nil {
+	failedAt := time.Now().UTC()
+	if err := q.settleLeased(ctx, j, func(tx *redis.Tx) error {
+		_, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.HSet(ctx, q.key("jobs"), j.UUID, body)
+			pipe.ZRem(ctx, q.key(j.Queue, "leased"), j.UUID)
+			pipe.ZAdd(ctx, q.key("parked"), redis.Z{
+				Score: float64(failedAt.UnixMilli()), Member: j.UUID,
+			})
+			return nil
+		})
+		return err
+	}); err != nil {
 		return fmt.Errorf("queue/redis: parking %s: %w", j.UUID, err)
 	}
 	return nil
+}
+
+// settleLeased applies one outcome only to the delivery represented by j. The
+// attempt count is the delivery generation: if a lease expired and another
+// worker already claimed the job, the old pointer cannot delete or release the
+// new worker's delivery.
+func (q *RedisQueue) settleLeased(ctx context.Context, j *jobs.Job, settle func(*redis.Tx) error) error {
+	leased := q.key(j.Queue, "leased")
+	return q.transaction(ctx, []string{leased}, func(tx *redis.Tx) error {
+		if _, err := tx.ZScore(ctx, leased, j.UUID).Result(); err != nil {
+			if errors.Is(err, redis.Nil) {
+				return errors.New("the job is not leased for this delivery")
+			}
+			return err
+		}
+
+		stored, err := q.loadFrom(ctx, tx, j.UUID)
+		if err != nil {
+			return err
+		}
+		if stored.Attempts != j.Attempts {
+			return fmt.Errorf("the lease belongs to attempt %d, not stale attempt %d", stored.Attempts, j.Attempts)
+		}
+		return settle(tx)
+	})
 }
 
 // Failed lists the jobs that gave up, most recent failure first.
@@ -317,26 +415,39 @@ func (q *RedisQueue) Failed(ctx context.Context, limit int) ([]jobs.Job, error) 
 
 // Retry puts a parked job back in line with its attempts reset.
 func (q *RedisQueue) Retry(ctx context.Context, uuid string) error {
-	j, err := q.load(ctx, uuid)
-	if err != nil {
+	parked := q.key("parked")
+	err := q.transaction(ctx, []string{parked}, func(tx *redis.Tx) error {
+		if _, err := tx.ZScore(ctx, parked, uuid).Result(); err != nil {
+			if errors.Is(err, redis.Nil) {
+				return fmt.Errorf("%w: %s", queue.ErrNotParked, uuid)
+			}
+			return err
+		}
+
+		j, err := q.loadFrom(ctx, tx, uuid)
+		if err != nil {
+			return err
+		}
+		j.Attempts = 0
+		j.Exceptions = 0
+		j.LastError = ""
+		j.RunAt = time.Now().UTC()
+
+		body, err := json.Marshal(j)
+		if err != nil {
+			return fmt.Errorf("queue/redis: serializing %s: %w", uuid, err)
+		}
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.HSet(ctx, q.key("jobs"), uuid, body)
+			pipe.ZRem(ctx, parked, uuid)
+			pipe.ZAdd(ctx, q.key(j.Queue, "scheduled"), redis.Z{
+				Score: float64(j.RunAt.UnixMilli()), Member: uuid,
+			})
+			return nil
+		})
 		return err
-	}
-	j.Attempts = 0
-	j.LastError = ""
-	j.RunAt = time.Now().UTC()
-
-	body, err := json.Marshal(j)
-	if err != nil {
-		return fmt.Errorf("queue/redis: serializing %s: %w", uuid, err)
-	}
-
-	pipe := q.client.TxPipeline()
-	pipe.HSet(ctx, q.key("jobs"), uuid, body)
-	pipe.ZRem(ctx, q.key("parked"), uuid)
-	pipe.ZAdd(ctx, q.key(j.Queue, "scheduled"), redis.Z{
-		Score: float64(j.RunAt.UnixMilli()), Member: uuid,
 	})
-	if _, err := pipe.Exec(ctx); err != nil {
+	if err != nil {
 		return fmt.Errorf("queue/redis: retrying %s: %w", uuid, err)
 	}
 	return nil
@@ -421,7 +532,15 @@ func (q *RedisQueue) Clear(ctx context.Context, name string) (int, error) {
 }
 
 func (q *RedisQueue) load(ctx context.Context, id string) (jobs.Job, error) {
-	raw, err := q.client.HGet(ctx, q.key("jobs"), id).Bytes()
+	return q.loadFrom(ctx, q.client, id)
+}
+
+type hashGetter interface {
+	HGet(ctx context.Context, key, field string) *redis.StringCmd
+}
+
+func (q *RedisQueue) loadFrom(ctx context.Context, source hashGetter, id string) (jobs.Job, error) {
+	raw, err := source.HGet(ctx, q.key("jobs"), id).Bytes()
 	if err != nil {
 		return jobs.Job{}, fmt.Errorf("queue/redis: reading %s: %w", id, err)
 	}

@@ -728,6 +728,58 @@ func alwaysFails(*queue.Worker) queue.HandlerFunc {
 	}
 }
 
+type retryAfterFailure struct{ delay time.Duration }
+
+func (e retryAfterFailure) Error() string { return "the remote service is busy" }
+
+func (e retryAfterFailure) RetryAfterDuration() time.Duration { return e.delay }
+
+func releasedAfter(t *testing.T, backoff time.Duration, cause error) time.Duration {
+	t.Helper()
+
+	d := &deliveryDriver{}
+	j, err := jobs.New(grant(), "", "invoice.send", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.push(j)
+
+	w := queue.NewWorker(&fakeQueue{}, queue.WorkerOptions{
+		MaxTries: 2,
+		Backoff:  func(int) time.Duration { return backoff },
+	})
+	w.HandleFunc("invoice.send", func(context.Context, auth.Grant, *jobs.Job) error {
+		return cause
+	})
+	_ = w.Process(context.Background(), d.deliver())
+
+	if len(d.released) != 1 {
+		t.Fatalf("released = %d, want 1", len(d.released))
+	}
+	return d.released[0].delay
+}
+
+func TestRetryAfterCanExtendTheConfiguredBackoff(t *testing.T) {
+	want := 45 * time.Second
+	cause := fmt.Errorf("webhook delivery: %w", retryAfterFailure{delay: want})
+	if got := releasedAfter(t, 10*time.Second, cause); got != want {
+		t.Fatalf("delay = %s, want Retry-After %s", got, want)
+	}
+}
+
+func TestRetryAfterCannotShortenTheConfiguredBackoff(t *testing.T) {
+	want := 45 * time.Second
+	if got := releasedAfter(t, want, retryAfterFailure{delay: 10 * time.Second}); got != want {
+		t.Fatalf("delay = %s, want configured backoff %s", got, want)
+	}
+}
+
+func TestRetryAfterIsCappedAtOneHour(t *testing.T) {
+	if got := releasedAfter(t, time.Second, retryAfterFailure{delay: 24 * time.Hour}); got != time.Hour {
+		t.Fatalf("delay = %s, want %s cap", got, time.Hour)
+	}
+}
+
 // TestMaxExceptionsIsCountedAcrossDeliveries: a job with MaxExceptions 2 on a
 // worker with MaxTries 5, and a handler that always fails.
 //

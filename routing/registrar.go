@@ -165,7 +165,7 @@ func (reg *RouteRegistrar) WhereUlid(params ...string) *RouteRegistrar {
 
 // WhereIn constrains the given parameter to one of the listed values.
 func (reg *RouteRegistrar) WhereIn(param string, values ...string) *RouteRegistrar {
-	return reg.Where(param, joinValues(values, "|"))
+	return reg.Where(param, routeLiteralAlternation(values))
 }
 
 func (reg *RouteRegistrar) assignExpr(params []string, expr string) *RouteRegistrar {
@@ -261,16 +261,4 @@ func (reg *RouteRegistrar) register(method, pattern string, h http.Handler, mws 
 		rt.Where(name, expr)
 	}
 	return rt
-}
-
-// joinValues joins values with sep, for WhereIn.
-func joinValues(values []string, sep string) string {
-	out := ""
-	for i, v := range values {
-		if i > 0 {
-			out += sep
-		}
-		out += v
-	}
-	return out
 }

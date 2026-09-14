@@ -200,6 +200,10 @@ func (t *Routes) Route(name string, params ...string) (string, error) {
 			continue
 		}
 		if len(params) == 0 {
+			if strings.HasSuffix(segment, "?}") {
+				out = strings.Replace(out, "/"+segment, "", 1)
+				continue
+			}
 			missing = append(missing, segment)
 			continue
 		}
@@ -212,6 +216,9 @@ func (t *Routes) Route(name string, params ...string) (string, error) {
 	}
 	if len(params) > 0 {
 		return "", fmt.Errorf("routing: route %q takes fewer parameters than the %d given", name, len(params))
+	}
+	if out == "" {
+		out = "/"
 	}
 	return out, nil
 }
