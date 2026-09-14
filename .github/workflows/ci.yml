@@ -296,6 +296,17 @@ jobs:
         with:
           go-version: '1.26'
 
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: '35.1'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # The protobuf contract is a second source language, so generated Go is
+      # accepted only when a fresh generation in a temporary directory is byte
+      # identical. The tool dependencies are pinned by rpc/go.mod.
+      - name: generated RPC contract is current
+        run: (cd rpc && GOWORK=off go run ./internal/cmd/protogen)
+
       # A manifest pinned to something older than the newest release is a
       # manifest whose module is being tested against a core nobody runs.
       - name: each nested manifest names the latest release
