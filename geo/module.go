@@ -32,21 +32,42 @@ func (m *Module) Boot(context.Context) error {
 	return nil
 }
 
-// Routes registers only explicitly enabled machine surfaces.
-func (m *Module) Routes(r *routing.Router) {
+// HTTPRoute is one GET endpoint owned by the GEO module.
+//
+// It exists so a framework router envelope can register the same handler without
+// reimplementing any GEO behavior. Method is currently always net/http.MethodGet.
+type HTTPRoute struct {
+	Method  string
+	Path    string
+	Name    string
+	Handler http.Handler
+}
+
+// HTTPRoutes returns the selected machine-facing endpoints in stable order.
+// Disabled surfaces are absent rather than registered behind a runtime branch.
+func (m *Module) HTTPRoutes() []HTTPRoute {
 	if !m.config.Enabled {
-		return
+		return nil
 	}
+	routes := make([]HTTPRoute, 0, 4)
 	if m.config.Surfaces.Has(Robots) {
-		r.Get("/robots.txt", http.HandlerFunc(m.robots)).Name("robots")
+		routes = append(routes, HTTPRoute{Method: http.MethodGet, Path: "/robots.txt", Name: "robots", Handler: http.HandlerFunc(m.robots)})
 	}
 	if m.config.Surfaces.Has(Sitemap) {
-		r.Get("/sitemap.xml", http.HandlerFunc(m.sitemap)).Name("sitemap")
+		routes = append(routes, HTTPRoute{Method: http.MethodGet, Path: "/sitemap.xml", Name: "sitemap", Handler: http.HandlerFunc(m.sitemap)})
 	}
 	if m.config.Surfaces.Has(LLMs) {
-		r.Get("/llms.txt", http.HandlerFunc(m.llms)).Name("llms")
+		routes = append(routes, HTTPRoute{Method: http.MethodGet, Path: "/llms.txt", Name: "llms", Handler: http.HandlerFunc(m.llms)})
 	}
 	if m.config.Surfaces.Has(LLMsFull) {
-		r.Get("/llms-full.txt", http.HandlerFunc(m.llmsFull)).Name("llms.full")
+		routes = append(routes, HTTPRoute{Method: http.MethodGet, Path: "/llms-full.txt", Name: "llms.full", Handler: http.HandlerFunc(m.llmsFull)})
+	}
+	return routes
+}
+
+// Routes registers only explicitly enabled machine surfaces.
+func (m *Module) Routes(r *routing.Router) {
+	for _, route := range m.HTTPRoutes() {
+		r.Get(route.Path, route.Handler).Name(route.Name)
 	}
 }
