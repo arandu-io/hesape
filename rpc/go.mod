@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	connectrpc.com/connect v1.21.0
-	github.com/arandu-io/hesape v0.41.3
+	github.com/arandu-io/hesape v0.42.0
 )
 
 require google.golang.org/protobuf v1.36.11
