@@ -152,12 +152,17 @@ func TestMetadataUsesConfiguredOriginAndEscapesStructuredData(t *testing.T) {
 	cfg := Config{Enabled: true, Indexing: true, Origin: "https://example.test", Language: "pt-BR"}
 	meta, err := MetadataFor(cfg, MetadataInput{
 		Path: "/page", Title: `Title </script><script>alert(1)</script>`, Description: `A & B`,
-		SiteName: "Example", Locale: "pt_BR", Indexable: true,
+		SiteName: "Example", Locale: "pt_BR", OpenGraphAlternates: []string{"en_US"}, Indexable: true,
+		Alternates:      []AlternateInput{{Tag: "pt-BR", Path: "/page"}, {Tag: "en", Path: "/en/page"}},
+		SocialImagePath: "/social-cover.png", SocialImageWidth: 1200, SocialImageHeight: 630,
+		SocialImageType: "image/png", SocialImageAlt: "Example preview", TwitterCard: "summary_large_image",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta.Canonical != "https://example.test/page" || meta.Robots != "index, follow, max-image-preview:large" {
+	if meta.Canonical != "https://example.test/page" || meta.Robots != "index, follow, max-image-preview:large" ||
+		meta.Image != "https://example.test/social-cover.png" || meta.ImageWidth != 1200 || meta.ImageHeight != 630 ||
+		meta.TwitterCard != "summary_large_image" || len(meta.Alternates) != 2 || meta.Alternates[1].URL != "https://example.test/en/page" || len(meta.Locales) != 1 {
 		t.Fatalf("metadata = %#v", meta)
 	}
 	if strings.Contains(string(meta.Schema), "</script>") || !strings.Contains(string(meta.Schema), `\u003c/script\u003e`) {
@@ -186,5 +191,17 @@ func TestOutputSizeLimitRefusesLargeBodies(t *testing.T) {
 	}, []Document{{Path: "/large", Title: "Large", Content: strings.Repeat("x", 256)}})
 	if got := request(t, r, "/llms-full.txt").Code; got != http.StatusServiceUnavailable {
 		t.Fatalf("large GEO response = %d", got)
+	}
+}
+
+func TestMetadataRejectsUnsafeAlternateAndImagePaths(t *testing.T) {
+	cfg := Config{Enabled: true, Indexing: true, Origin: "https://example.test"}
+	for _, input := range []MetadataInput{
+		{Path: "/page", Title: "Page", SiteName: "Site", Indexable: true, Alternates: []AlternateInput{{Tag: "en", Path: "//evil.example/page"}}},
+		{Path: "/page", Title: "Page", SiteName: "Site", Indexable: true, SocialImagePath: "javascript:alert(1)"},
+	} {
+		if _, err := MetadataFor(cfg, input); err == nil {
+			t.Fatal("unsafe metadata URL was accepted")
+		}
 	}
 }
