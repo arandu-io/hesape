@@ -1,6 +1,7 @@
 package pagination_test
 
 import (
+	"encoding/json"
 	"slices"
 	"strconv"
 	"strings"
@@ -453,12 +454,27 @@ func TestCursorPaginatorToArrayCarriesBothCursors(t *testing.T) {
 		t.Fatalf("ToPrettyJSON is not indented four spaces: %s", pretty)
 	}
 
-	// MarshalJSON is jsonSerialize: the paginator itself is encodable.
+	// MarshalJSON is jsonSerialize: the paginator itself is encodable. Cursor
+	// tokens contain an expiry timestamp, so two serializations are compared by
+	// meaning rather than bytes: crossing a wall-clock second legitimately
+	// changes the signature while preserving the boundary.
 	direct, err := first.MarshalJSON()
 	if err != nil {
 		t.Fatalf("MarshalJSON: %v", err)
 	}
-	if string(direct) != string(body) {
-		t.Fatalf("MarshalJSON and ToJSON disagree:\n%s\n%s", direct, body)
+	for name, encoded := range map[string][]byte{"ToJSON": body, "MarshalJSON": direct} {
+		var payload struct {
+			NextCursor string  `json:"next_cursor"`
+			PrevCursor *string `json:"prev_cursor"`
+			PerPage    int     `json:"per_page"`
+			Path       string  `json:"path"`
+		}
+		if err := json.Unmarshal(encoded, &payload); err != nil {
+			t.Fatalf("%s payload: %v", name, err)
+		}
+		cursor, err := cursors.FromEncoded(payload.NextCursor)
+		if err != nil || parameterOf(&cursor, "id") != "10" || payload.PrevCursor != nil || payload.PerPage != 10 || payload.Path != "/posts" {
+			t.Fatalf("%s changed the paginator semantics: %#v err=%v", name, payload, err)
+		}
 	}
 }
