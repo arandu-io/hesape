@@ -56,6 +56,15 @@
 	var actions = {};
 	var behaviours = {};
 
+	// Native registration may synchronously format existing masked inputs.
+	var maskTokens = {
+		'0': { accepts: /[0-9]/ },
+		'9': { accepts: /[0-9]/, optional: true },
+		'#': { accepts: /[0-9]/, repeating: true },
+		'A': { accepts: /[0-9a-zA-Z]/ },
+		'S': { accepts: /[a-zA-Z]/ },
+	};
+
 	// define() can mount existing elements before the rest of this file runs.
 	var justMounted = new WeakSet();
 
@@ -2229,16 +2238,6 @@
 		},
 	});
 
-	/* maskTokens is the dictionary, and it is closed: a mask needing a sixth
-	 * token would be a mask nobody can read without this table beside them. */
-	var maskTokens = {
-		'0': { accepts: /[0-9]/ },
-		'9': { accepts: /[0-9]/, optional: true },
-		'#': { accepts: /[0-9]/, repeating: true },
-		'A': { accepts: /[0-9a-zA-Z]/ },
-		'S': { accepts: /[a-zA-Z]/ },
-	};
-
 	/* maskPatterns reads the pattern or patterns out of the props. */
 	function maskPatterns(props) {
 		var declared = (props || {}).pattern;
@@ -2431,7 +2430,7 @@
 
 			var reveal = root.querySelector('[data-part="reveal"]');
 			if (reveal) {
-				reveal.addEventListener('click', function () {
+				ctx.reveal = function () {
 					var hidden = input.type === 'password';
 					input.type = hidden ? 'text' : 'password';
 					reveal.setAttribute('aria-pressed', hidden ? 'true' : 'false');
@@ -2449,16 +2448,38 @@
 					 * gets them swapped the same way. */
 					toggle(reveal.querySelector('[data-reveal-shown]'), hidden);
 					toggle(reveal.querySelector('[data-reveal-hidden]'), !hidden);
-				});
+				};
+				reveal.addEventListener('click', ctx.reveal);
 			}
 
+			var panel = root.querySelector('[data-part="panel"]');
+			var done = panel && panel.querySelector('[data-part="done"]');
+			ctx.showPanel = function () { if (panel) { panel.hidden = false; input.setAttribute('aria-expanded', 'true'); } };
+			ctx.closePanel = function () { if (panel) { panel.hidden = true; input.setAttribute('aria-expanded', 'false'); } };
 			ctx.judge = function () { judge(root, input.value, ctx.props || {}); };
-			input.addEventListener('input', ctx.judge);
+			ctx.typed = function () { ctx.judge(); ctx.showPanel(); };
+			ctx.finish = function () { input.focus(); ctx.closePanel(); };
+			ctx.escape = function (event) { if (event.key === 'Escape' && panel && !panel.hidden) { event.preventDefault(); ctx.finish(); } };
+			ctx.left = function (event) { if (!root.contains(event.relatedTarget)) ctx.closePanel(); };
+			input.addEventListener('input', ctx.typed);
+			input.addEventListener('focus', ctx.showPanel);
+			root.addEventListener('keydown', ctx.escape);
+			root.addEventListener('focusout', ctx.left);
+			if (done) done.addEventListener('click', ctx.finish);
 			ctx.judge();
+			ctx.closePanel();
 		},
 		destroyed: function (ctx) {
+			var reveal = ctx.element.querySelector('[data-part="reveal"]');
+			if (reveal && ctx.reveal) reveal.removeEventListener('click', ctx.reveal);
 			var input = ctx.element.querySelector('[data-part="input"]');
-			if (input && ctx.judge) input.removeEventListener('input', ctx.judge);
+			var root = ctx.element;
+			if (input && ctx.typed) input.removeEventListener('input', ctx.typed);
+			if (input && ctx.showPanel) input.removeEventListener('focus', ctx.showPanel);
+			if (ctx.escape) root.removeEventListener('keydown', ctx.escape);
+			if (ctx.left) root.removeEventListener('focusout', ctx.left);
+			var done = root.querySelector('[data-part="panel"] [data-part="done"]');
+			if (done && ctx.finish) done.removeEventListener('click', ctx.finish);
 		},
 	});
 
@@ -2475,9 +2496,10 @@
 	 * the checklist gives.
 	 */
 	function judge(root, value, rules) {
+		var length = Array.from(value).length;
 		var met = {
-			min: typeof rules.min !== 'number' || value.length >= rules.min,
-			max: typeof rules.max !== 'number' || value.length <= rules.max,
+			min: typeof rules.min !== 'number' || length >= rules.min,
+			max: typeof rules.max !== 'number' || rules.max <= 0 || length <= rules.max,
 			letters: !rules.letters || /\p{L}/u.test(value),
 			mixedCase: !rules.mixedCase || (/\p{Lu}/u.test(value) && /\p{Ll}/u.test(value)),
 			numbers: !rules.numbers || /\p{N}/u.test(value),
@@ -2492,8 +2514,11 @@
 			var key = line.getAttribute('data-requirement');
 			var ok = met[key] === true;
 			total += 1;
+			if (!value) ok = false;
 			if (ok) satisfied += 1;
 			line.setAttribute('data-met', ok ? 'true' : 'false');
+			var status = line.querySelector('[data-password-status]');
+			if (status) status.textContent = root.getAttribute(ok ? 'data-password-met' : 'data-password-unmet') || (ok ? 'Met:' : 'Not met:');
 			var done = line.querySelector('[data-part="done"]');
 			if (done) done.hidden = !ok;
 		});
@@ -2510,7 +2535,11 @@
 		/* An empty box has nothing to say about itself, so the panel that
 		 * explains the policy stays open and the strength summary stays quiet. */
 		var strength = root.querySelector('[data-part="strength"]');
-		if (strength) strength.setAttribute('data-met', total > 0 && satisfied === total ? 'true' : 'false');
+		if (strength) {
+			strength.setAttribute('data-met', total > 0 && satisfied === total ? 'true' : 'false');
+			var label = strength.getAttribute('data-password-summary') || '{met} of {total} requirements met';
+			strength.textContent = label.replace(/\{met\}/g, String(satisfied)).replace(/\{total\}/g, String(total));
+		}
 	}
 
 	/* ---- copy ---------------------------------------------------------------
