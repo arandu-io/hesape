@@ -2503,7 +2503,9 @@
 			letters: !rules.letters || /\p{L}/u.test(value),
 			mixedCase: !rules.mixedCase || (/\p{Lu}/u.test(value) && /\p{Ll}/u.test(value)),
 			numbers: !rules.numbers || /\p{N}/u.test(value),
-			symbols: !rules.symbols || /[^\p{L}\p{N}\s]/u.test(value),
+			symbols: !rules.symbols || (typeof rules.symbolCharacters === 'string'
+                ? Array.from(value).some(function (character) { return Array.from(rules.symbolCharacters).indexOf(character) !== -1; })
+                : /[\p{P}\p{S}\p{White_Space}]/u.test(value)),
 			/* Only the server knows, so this line never ticks here. */
 			uncompromised: false,
 		};
@@ -2513,9 +2515,15 @@
 		each(root, '[data-requirement]', function (line) {
 			var key = line.getAttribute('data-requirement');
 			var ok = met[key] === true;
-			total += 1;
-			if (!value) ok = false;
-			if (ok) satisfied += 1;
+            /* A maximum is a technical constraint, never a strength reward. */
+            if (key === 'max') {
+                line.hidden = !value || ok;
+                line.classList.toggle('hidden', !value || ok);
+            } else {
+                total += 1;
+            }
+            if (!value) ok = false;
+			if (ok && key !== 'max') satisfied += 1;
 			line.setAttribute('data-met', ok ? 'true' : 'false');
 			var status = line.querySelector('[data-password-status]');
 			if (status) status.textContent = root.getAttribute(ok ? 'data-password-met' : 'data-password-unmet') || (ok ? 'Met:' : 'Not met:');
@@ -2523,12 +2531,15 @@
 			if (done) done.hidden = !ok;
 		});
 
-		var fill = root.querySelector('[data-part="fill"]');
-		if (fill) {
+        var complete = !!value && total > 0 && satisfied === total && met.max;
+        root.setAttribute('data-password-complete', complete ? 'true' : 'false');
+        var fill = root.querySelector('[data-part="fill"]');
+        if (fill) {
 			fill.style.width = total === 0 ? '0%' : Math.round((satisfied / total) * 100) + '%';
 		}
 		var meter = root.querySelector('[data-part="meter"]');
 		if (meter) {
+			meter.setAttribute('data-password-complete', complete ? 'true' : 'false');
 			meter.setAttribute('aria-valuenow', String(satisfied));
 			meter.setAttribute('aria-valuemax', String(total));
 		}
@@ -2536,7 +2547,7 @@
 		 * explains the policy stays open and the strength summary stays quiet. */
 		var strength = root.querySelector('[data-part="strength"]');
 		if (strength) {
-			strength.setAttribute('data-met', total > 0 && satisfied === total ? 'true' : 'false');
+			strength.setAttribute('data-met', complete ? 'true' : 'false');
 			var label = strength.getAttribute('data-password-summary') || '{met} of {total} requirements met';
 			strength.textContent = label.replace(/\{met\}/g, String(satisfied)).replace(/\{total\}/g, String(total));
 		}

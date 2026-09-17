@@ -809,13 +809,14 @@ type UncompromisedVerifier interface {
 //		v.ValidateUsingCustomRule("password", v.GetValue("password"), rule)
 //	})
 type Password struct {
-	min           int
-	max           int
-	mixedCase     bool
-	letters       bool
-	numbers       bool
-	symbols       bool
-	uncompromised bool
+	min              int
+	max              int
+	mixedCase        bool
+	letters          bool
+	numbers          bool
+	symbols          bool
+	symbolCharacters *string
+	uncompromised    bool
 
 	compromisedThreshold int
 	verifier             UncompromisedVerifier
@@ -914,6 +915,15 @@ func (p *Password) Symbols() *Password {
 	return p
 }
 
+// SymbolsFrom requires at least one rune from characters, treated literally.
+// Other characters remain allowed; an empty set cannot be satisfied.
+// Symbols without this method retains its original character categories.
+func (p *Password) SymbolsFrom(characters string) *Password {
+	p.symbols = true
+	p.symbolCharacters = &characters
+	return p
+}
+
 // Rules merges more rules into the ones this policy enforces.
 func (p *Password) Rules(rules ...string) *Password {
 	p.customRules = append(p.customRules, rules...)
@@ -924,7 +934,7 @@ func (p *Password) Rules(rules ...string) *Password {
 // AppliedRules returns what this policy is currently asking for, which is what a
 // "your password must" list on the form is drawn from.
 func (p *Password) AppliedRules() map[string]any {
-	return map[string]any{
+	rules := map[string]any{
 		"min":                  p.min,
 		"max":                  p.max,
 		"mixedCase":            p.mixedCase,
@@ -935,6 +945,10 @@ func (p *Password) AppliedRules() map[string]any {
 		"compromisedThreshold": p.compromisedThreshold,
 		"customRules":          p.customRules,
 	}
+	if p.symbolCharacters != nil {
+		rules["symbolCharacters"] = *p.symbolCharacters
+	}
+	return rules
 }
 
 // SetValidator hands the rule the validator running it, so that its messages
@@ -993,7 +1007,11 @@ func (p *Password) Passes(attribute string, value any) bool {
 		p.fail(p.line("validation.password.letters",
 			"The :attribute field must contain at least one letter."))
 	}
-	if p.symbols && !containsRune(text, isSymbolRune) {
+	symbolMatch := containsRune(text, isSymbolRune)
+	if p.symbolCharacters != nil {
+		symbolMatch = strings.ContainsAny(text, *p.symbolCharacters)
+	}
+	if p.symbols && !symbolMatch {
 		p.fail(p.line("validation.password.symbols",
 			"The :attribute field must contain at least one symbol."))
 	}
