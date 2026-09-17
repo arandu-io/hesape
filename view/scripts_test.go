@@ -96,3 +96,20 @@ func TestTheBehaviourFileRegistersEverythingItDraws(t *testing.T) {
 		t.Error(fmt.Sprintf("the first registration is at byte %d and the function it calls is given a value at byte %d", first, defined))
 	}
 }
+
+// TestMountTrackingIsReadyForEagerBehaviourRegistration catches startup order
+// that otherwise fails only on pages containing an initial native behaviour.
+func TestMountTrackingIsReadyForEagerBehaviourRegistration(t *testing.T) {
+	source := code(readUI(t))
+	first := strings.Index(source, "arandu.ui.define('")
+	tracker := strings.Index(source, "var justMounted = new WeakSet();")
+	if first < 0 || tracker < 0 {
+		t.Fatal("native behaviour registration or mount tracking is missing")
+	}
+	if tracker > first {
+		t.Fatal("initial component mounting reaches an uninitialized tracker")
+	}
+	if strings.Count(source, "var justMounted = new WeakSet();") != 1 {
+		t.Fatal("mount tracking must be initialized once, before registration")
+	}
+}

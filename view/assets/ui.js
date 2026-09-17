@@ -56,6 +56,9 @@
 	var actions = {};
 	var behaviours = {};
 
+	// define() can mount existing elements before the rest of this file runs.
+	var justMounted = new WeakSet();
+
 	arandu.ui.action = function (name, fn) {
 		if (typeof name !== 'string' || typeof fn !== 'function') return;
 		actions[name] = fn;
@@ -1694,7 +1697,6 @@
 	 * so without this every element that arrived in a swap got mounted and then
 	 * immediately updated. Two hooks that always fire together are one hook, and
 	 * a behaviour that did its setting up in mounted did it twice. */
-	var justMounted = new WeakSet();
 
 	function mount(scope) {
 		var node = scope && (scope.nodeType === 1 || scope.nodeType === 9) ? scope : document;
