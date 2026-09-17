@@ -59,6 +59,16 @@ type Config struct {
 	Surfaces Surfaces
 	// Language is the BCP 47 language reported by text representations.
 	Language string
+	// IndexTitle is the heading of llms.txt. Empty uses "Public index".
+	IndexTitle string
+	// IndexSummary is optional prose under the llms.txt heading.
+	IndexSummary string
+	// CorpusTitle is the heading of llms-full.txt. Empty uses "Public corpus".
+	CorpusTitle string
+	// CorpusIntro is optional prose under the llms-full.txt heading.
+	CorpusIntro string
+	// Labels localizes the fixed words used by model-facing documents.
+	Labels Labels
 	// Robots customizes allow and deny prefixes when Indexing is true.
 	Robots RobotsPolicy
 	// SitemapStylesheet is an optional same-origin path to an XML stylesheet.
@@ -73,6 +83,17 @@ type Config struct {
 type RobotsPolicy struct {
 	Allow    []string
 	Disallow []string
+}
+
+// Labels is the localized fixed vocabulary of model-facing documents.
+type Labels struct {
+	Pages             string
+	Optional          string
+	CanonicalURL      string
+	PublicPageContent string
+	DisabledTitle     string
+	DisabledIndex     string
+	DisabledCorpus    string
 }
 
 var (
@@ -99,6 +120,39 @@ func (c Config) normalized() (Config, error) {
 	}
 	if c.Language == "" {
 		c.Language = "en"
+	}
+	if strings.TrimSpace(c.IndexTitle) == "" {
+		c.IndexTitle = "Public index"
+	} else {
+		c.IndexTitle = strings.Join(strings.Fields(c.IndexTitle), " ")
+	}
+	c.IndexSummary = strings.Join(strings.Fields(c.IndexSummary), " ")
+	if strings.TrimSpace(c.CorpusTitle) == "" {
+		c.CorpusTitle = "Public corpus"
+	} else {
+		c.CorpusTitle = strings.Join(strings.Fields(c.CorpusTitle), " ")
+	}
+	c.CorpusIntro = strings.Join(strings.Fields(c.CorpusIntro), " ")
+	if strings.TrimSpace(c.Labels.Pages) == "" {
+		c.Labels.Pages = "Pages"
+	}
+	if strings.TrimSpace(c.Labels.Optional) == "" {
+		c.Labels.Optional = "Optional"
+	}
+	if strings.TrimSpace(c.Labels.CanonicalURL) == "" {
+		c.Labels.CanonicalURL = "Canonical URL"
+	}
+	if strings.TrimSpace(c.Labels.PublicPageContent) == "" {
+		c.Labels.PublicPageContent = "Public page content"
+	}
+	if strings.TrimSpace(c.Labels.DisabledTitle) == "" {
+		c.Labels.DisabledTitle = "Discovery disabled"
+	}
+	if strings.TrimSpace(c.Labels.DisabledIndex) == "" {
+		c.Labels.DisabledIndex = "This deployment does not publish a model-facing index."
+	}
+	if strings.TrimSpace(c.Labels.DisabledCorpus) == "" {
+		c.Labels.DisabledCorpus = "This deployment does not publish an expanded model-facing corpus."
 	}
 	if c.Indexing {
 		u, err := url.Parse(c.Origin)
