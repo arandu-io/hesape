@@ -26,6 +26,31 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+### `SecurityHeaders` recebe as origens de onde uma imagem pode vir
+
+`middleware.SecurityHeaders(dev bool)` passa a ser
+`middleware.SecurityHeaders(dev bool, imageOrigins ...string)`. Toda chamada
+compila igual e responde a mesma política, byte a byte. O `apidiff` acusa a
+mudança porque o tipo da função mudou: **só quebra o código que guarda
+`SecurityHeaders` numa variável de tipo `func(bool) http.Middleware`** — troque o
+tipo da variável por `func(bool, ...string) http.Middleware`.
+
+As origens entram em `img-src` e em nenhuma outra diretiva. Cada uma é uma origem
+`https` nua — esquema e host, com porta opcional, sem caminho, consulta,
+credencial ou curinga —, e o que não for isso entra em panic na montagem do
+pipeline, não no primeiro request:
+
+```go
+middleware.SecurityHeaders(cfg.App.IsDev(), "https://cdn.example.com")
+// img-src 'self' data: https://cdn.example.com
+```
+
+Por que existe: um disco com endereço público (`filesystem.Config.URL`,
+`Disk.URL`) é como um bucket atrás de um CDN entrega os arquivos, e a política
+padrão recusava desenhar exatamente o endereço que `Disk.URL` devolve. Script,
+estilo, fonte e conexão continuam presos a `'self'`: uma imagem de outro host
+não executa nada, e é só ela que a lista alcança.
+
 ### Uma view responde `Vary: Accept`, e um cliente pode pedir os valores
 
 `ctx.View` e `ctx.Fragment` passam a negociar. Um cliente que envia

@@ -374,3 +374,66 @@ func TestAnUntrustedPeerLeavesNoChain(t *testing.T) {
 		t.Fatalf("IPs = %v, want [203.0.113.7]", chain)
 	}
 }
+
+// TestNamedImageOriginsReachImgSrcAndNothingElse: an origin passed for images is
+// written into img-src, normalised, and every other directive is the default
+// policy's, byte for byte.
+func TestNamedImageOriginsReachImgSrcAndNothingElse(t *testing.T) {
+	rec, _ := run(middleware.SecurityHeaders(false), httptest.NewRequest(http.MethodGet, "/", nil))
+	plain := strings.Split(rec.Header().Get("Content-Security-Policy"), "; ")
+
+	rec, _ = run(middleware.SecurityHeaders(false, "https://cdn.example.com", "https://Media.Example.org:8443/"),
+		httptest.NewRequest(http.MethodGet, "/", nil))
+	named := strings.Split(rec.Header().Get("Content-Security-Policy"), "; ")
+
+	if len(named) != len(plain) {
+		t.Fatalf("the policy has %d directives, want %d: %q", len(named), len(plain), named)
+	}
+	for i, directive := range named {
+		if strings.HasPrefix(directive, "img-src ") {
+			if want := "img-src 'self' data: https://cdn.example.com https://media.example.org:8443"; directive != want {
+				t.Errorf("img-src = %q, want %q", directive, want)
+			}
+			continue
+		}
+		if directive != plain[i] {
+			t.Errorf("directive %d = %q, want the default %q", i, directive, plain[i])
+		}
+	}
+}
+
+// TestAnImageOriginThatIsNotABareHttpsOriginPanics: the origin is written into a
+// header, so anything that could widen the list or start another directive is
+// refused when the pipeline is wired.
+func TestAnImageOriginThatIsNotABareHttpsOriginPanics(t *testing.T) {
+	for _, origin := range []string{
+		"",
+		"*",
+		"'self'",
+		"'unsafe-inline'",
+		"data:",
+		"cdn.example.com",
+		"http://cdn.example.com",
+		"https://",
+		"https://*.example.com",
+		"https://cdn.example.com/media",
+		"https://cdn.example.com?v=1",
+		"https://cdn.example.com#top",
+		"https://user@cdn.example.com",
+		"https://cdn.example.com; script-src *",
+		"https://cdn.example.com;script-src",
+		"https://cdn..example.com",
+		"https://cdn.example.com:port",
+		"https://cdn.example.com:",
+		"https://[::1]",
+	} {
+		t.Run(origin, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("SecurityHeaders accepted the image origin %q", origin)
+				}
+			}()
+			middleware.SecurityHeaders(false, origin)
+		})
+	}
+}
