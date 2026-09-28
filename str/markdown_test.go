@@ -163,22 +163,40 @@ func FuzzMarkdownNeverPanics(f *testing.F) {
 // TestMarkdownStaysLinearOnOpenersThatNeverClose holds the shapes that once
 // made each opener read the rest of the text: emphasis with no closer, a [
 // with no ], a destination that keeps opening parentheses, and a run of hard
-// breaks. Each is a few milliseconds at this size; the bound only catches the
-// quadratic case, which took a second or more.
+// breaks.
+//
+// It measures the growth rather than the time. Doubling the input doubles the
+// work of a linear render and quadruples it when every opener reads the rest
+// of the text; a wall-clock bound is instead a guess about the machine, and the
+// race detector on a shared runner made a linear render of 60 KB take a second.
+// The fastest of a few runs is compared, and a render too quick to measure is
+// too quick to be quadratic.
 func TestMarkdownStaysLinearOnOpenersThatNeverClose(t *testing.T) {
-	for name, src := range map[string]string{
-		"emphasis":      strings.Repeat("*a ", 20000),
-		"strong":        strings.Repeat("__a ", 15000),
-		"strikethrough": strings.Repeat("~~a ", 15000),
-		"brackets":      strings.Repeat("[", 60000),
-		"links":         strings.Repeat("[a](", 15000),
-		"destinations":  strings.Repeat("[a](b(", 10000),
-		"hard breaks":   strings.Repeat("a  \n", 15000),
+	fastest := func(src string) time.Duration {
+		best := time.Duration(1 << 62)
+		for range 5 {
+			start := time.Now()
+			str.Markdown(src)
+			best = min(best, time.Since(start))
+		}
+		return best
+	}
+	for name, unit := range map[string]string{
+		"emphasis":      "*a ",
+		"strong":        "__a ",
+		"strikethrough": "~~a ",
+		"brackets":      "[",
+		"links":         "[a](",
+		"destinations":  "[a](b(",
+		"hard breaks":   "a  \n",
 	} {
-		start := time.Now()
-		str.Markdown(src)
-		if took := time.Since(start); took > time.Second {
-			t.Errorf("%s: %d bytes took %s", name, len(src), took)
+		reps := 16000 / len(unit)
+		small, large := fastest(strings.Repeat(unit, reps)), fastest(strings.Repeat(unit, 2*reps))
+		if large < 10*time.Millisecond {
+			continue
+		}
+		if growth := float64(large) / float64(small); growth > 3.2 {
+			t.Errorf("%s: doubling the input took %.1f times as long (%s to %s)", name, growth, small, large)
 		}
 	}
 }
