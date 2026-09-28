@@ -3,6 +3,7 @@ package str_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/arandu-io/hesape/str"
 )
@@ -157,4 +158,44 @@ func FuzzMarkdownNeverPanics(f *testing.F) {
 		_ = str.Markdown(src)
 		_ = str.InlineMarkdown(src)
 	})
+}
+
+// TestMarkdownStaysLinearOnOpenersThatNeverClose holds the shapes that once
+// made each opener read the rest of the text: emphasis with no closer, a [
+// with no ], a destination that keeps opening parentheses, and a run of hard
+// breaks. Each is a few milliseconds at this size; the bound only catches the
+// quadratic case, which took a second or more.
+func TestMarkdownStaysLinearOnOpenersThatNeverClose(t *testing.T) {
+	for name, src := range map[string]string{
+		"emphasis":      strings.Repeat("*a ", 20000),
+		"strong":        strings.Repeat("__a ", 15000),
+		"strikethrough": strings.Repeat("~~a ", 15000),
+		"brackets":      strings.Repeat("[", 60000),
+		"links":         strings.Repeat("[a](", 15000),
+		"destinations":  strings.Repeat("[a](b(", 10000),
+		"hard breaks":   strings.Repeat("a  \n", 15000),
+	} {
+		start := time.Now()
+		str.Markdown(src)
+		if took := time.Since(start); took > time.Second {
+			t.Errorf("%s: %d bytes took %s", name, len(src), took)
+		}
+	}
+}
+
+// TestMarkdownBoundsTheNestingOfADestination keeps the CommonMark allowance
+// for nested parentheses in a destination, up to the bound.
+func TestMarkdownBoundsTheNestingOfADestination(t *testing.T) {
+	nested := func(n int) string {
+		return "[a](x" + strings.Repeat("(", n) + strings.Repeat(")", n) + ")"
+	}
+	if got := str.Markdown(nested(32)); !strings.Contains(got, "<a href=") {
+		t.Errorf("32 nested parentheses are not a link: %q", got)
+	}
+	if got := str.Markdown(nested(33)); strings.Contains(got, "<a href=") {
+		t.Errorf("33 nested parentheses are a link: %q", got)
+	}
+	if got := str.Markdown("[a](b(c)d)"); !strings.Contains(got, `<a href="b(c)d">a</a>`) {
+		t.Errorf("a balanced pair in a destination = %q", got)
+	}
 }

@@ -30,6 +30,25 @@ func renderInline(s string) string {
 	var b strings.Builder
 	b.Grow(len(s) + len(s)/4)
 
+	// What keeps a run of openers that never close linear rather than
+	// quadratic. closers is where each [ closes, found in one pass the first
+	// time a [ is met. unclosed records each emphasis delimiter whose search
+	// for a closer has run off the end: every later opener of the same
+	// delimiter would search a subset of the same positions, under the same
+	// conditions, and find nothing either.
+	var closers []int
+	var unclosed map[[2]byte]bool
+	// closeOf is where the [ at open closes, counted from from, or -1.
+	closeOf := func(open, from int) int {
+		if closers == nil {
+			closers = bracketClosers(s)
+		}
+		if closers[open] < 0 {
+			return -1
+		}
+		return closers[open] - from
+	}
+
 	for i := 0; i < len(s); {
 		switch c := s[i]; {
 		case c == '\\' && i+1 < len(s) && strings.IndexByte(asciiPunctuation, s[i+1]) >= 0:
@@ -85,7 +104,7 @@ func renderInline(s string) string {
 			i++
 
 		case c == '!' && i+1 < len(s) && s[i+1] == '[':
-			if html, width := linkOrImage(s[i:], true); width > 0 {
+			if html, width := linkOrImage(s[i:], true, closeOf(i+1, i)); width > 0 {
 				b.WriteString(html)
 				i += width
 				continue
@@ -94,7 +113,7 @@ func renderInline(s string) string {
 			i++
 
 		case c == '[':
-			if html, width := linkOrImage(s[i:], false); width > 0 {
+			if html, width := linkOrImage(s[i:], false, closeOf(i, i)); width > 0 {
 				b.WriteString(html)
 				i += width
 				continue
@@ -108,21 +127,45 @@ func renderInline(s string) string {
 				i++
 				continue
 			}
-			if html, width := emphasis(s[i:], c); width > 0 {
-				b.WriteString(html)
-				i += width
-				continue
+			delimiter := [2]byte{c, 1}
+			if i+1 < len(s) && s[i+1] == c {
+				delimiter[1] = 2
+			}
+			if !unclosed[delimiter] {
+				html, width, exhausted := emphasis(s[i:], c)
+				if width > 0 {
+					b.WriteString(html)
+					i += width
+					continue
+				}
+				if exhausted {
+					if unclosed == nil {
+						unclosed = map[[2]byte]bool{}
+					}
+					unclosed[delimiter] = true
+				}
 			}
 			b.WriteByte(c)
 			i++
 
-		case c == '\n':
-			if strings.HasSuffix(b.String(), "  ") {
-				trimHardBreakSpaces(&b)
-				b.WriteString("<br />\n")
-			} else {
-				b.WriteString("\n")
+		case c == ' ':
+			// Two spaces or more before a line break make a hard break, and
+			// the run is read here, before it is written: nothing else this
+			// renders ends in a space, so the source's run is the output's.
+			j := i
+			for j < len(s) && s[j] == ' ' {
+				j++
 			}
+			if j-i >= 2 && j < len(s) && s[j] == '\n' {
+				b.WriteString("<br />\n")
+				i = j + 1
+				continue
+			}
+			b.WriteString(s[i:j])
+			i = j
+
+		case c == '\n':
+			b.WriteString("\n")
 			i++
 
 		case c == 'h' || c == 'w':
@@ -162,14 +205,6 @@ func isWordByte(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c >= 0x80
 }
 
-// trimHardBreakSpaces removes the two spaces that made a hard line break, which
-// the builder has already been handed.
-func trimHardBreakSpaces(b *strings.Builder) {
-	kept := strings.TrimRight(b.String(), " ")
-	b.Reset()
-	b.WriteString(kept)
-}
-
 // codeSpan reads a backtick-delimited code span off the front of s and reports
 // how much of it the span took.
 func codeSpan(s string) (string, int) {
@@ -198,17 +233,18 @@ func codeSpan(s string) (string, int) {
 }
 
 // linkOrImage reads an inline link or image off the front of s and reports how
-// much of it it took. Reference links are not read: there is no link reference
-// definition parser here.
-func linkOrImage(s string, image bool) (string, int) {
+// much of it it took. labelEnd is the index just past the ] that closes the
+// label, or -1 when nothing closes it. Reference links are not read: there is
+// no link reference definition parser here.
+func linkOrImage(s string, image bool, labelEnd int) (string, int) {
 	bracket := 0
 	if image {
 		bracket = 1
 	}
-	text, labelEnd := matchBrackets(s, bracket)
 	if labelEnd < 0 || labelEnd >= len(s) || s[labelEnd] != '(' {
 		return "", 0
 	}
+	text := s[bracket+1 : labelEnd-1]
 	destination, title, end := linkTarget(s[labelEnd:])
 	if end < 0 {
 		return "", 0
@@ -227,25 +263,39 @@ func linkOrImage(s string, image bool) (string, int) {
 	return "<a " + attributes + ">" + renderInline(text) + "</a>", labelEnd + end
 }
 
-// matchBrackets finds the closing bracket that answers the one at open,
-// counting the pairs in between, and reports the index just past it.
-func matchBrackets(s string, open int) (string, int) {
-	depth := 0
-	for i := open; i < len(s); i++ {
+// bracketClosers answers, for every [ in s, the index just past the ] that
+// closes it -- counting the pairs in between, and skipping a character a
+// backslash escapes -- and -1 for a [ nothing closes and for every other byte.
+//
+// One pass with a stack gives every [ the answer a scan from it would give,
+// and a scan from each would read the rest of the text once per [ that never
+// closes.
+func bracketClosers(s string) []int {
+	closers := make([]int, len(s))
+	for i := range closers {
+		closers[i] = -1
+	}
+	var open []int
+	for i := 0; i < len(s); i++ {
 		switch s[i] {
 		case '\\':
 			i++
 		case '[':
-			depth++
+			open = append(open, i)
 		case ']':
-			depth--
-			if depth == 0 {
-				return s[open+1 : i], i + 1
+			if n := len(open); n > 0 {
+				closers[open[n-1]] = i + 1
+				open = open[:n-1]
 			}
 		}
 	}
-	return "", -1
+	return closers
 }
+
+// maxDestinationNesting is how many unescaped parentheses a link destination
+// may nest. CommonMark leaves the bound to the implementation and asks for at
+// least three; this is the one cmark uses.
+const maxDestinationNesting = 32
 
 // linkTarget reads the "(destination "title")" of a link and reports the index
 // just past the closing parenthesis.
@@ -275,7 +325,12 @@ func linkTarget(s string) (destination, title string, end int) {
 				continue
 			}
 			if c == '(' {
-				depth++
+				// Every [ of a run that never closes opens one more level
+				// for each scan still reading, so the bound is what keeps
+				// those scans from each reading the rest of the text.
+				if depth++; depth > maxDestinationNesting {
+					return "", "", -1
+				}
 			}
 			if c == ')' {
 				if depth == 0 {
@@ -341,19 +396,19 @@ func stripInline(s string) string {
 // Two markers are strong, one is emphasis, and two tildes are the GitHub
 // flavour's strikethrough. An underscore inside a word opens nothing, which is
 // what keeps snake_case_names whole.
-func emphasis(s string, marker byte) (string, int) {
+func emphasis(s string, marker byte) (html string, width int, exhausted bool) {
 	run := 0
 	for run < len(s) && s[run] == marker {
 		run++
 	}
 	if marker == '~' && run != 2 {
-		return "", 0
+		return "", 0, false
 	}
 	if run > 2 {
 		run = 2
 	}
 	if run+1 > len(s) || s[run] == ' ' || s[run] == '\n' {
-		return "", 0
+		return "", 0, false
 	}
 
 	open := s[:run]
@@ -376,12 +431,12 @@ func emphasis(s string, marker byte) (string, int) {
 		inner := s[run:i]
 		switch {
 		case marker == '~':
-			return "<del>" + renderInline(inner) + "</del>", i + run
+			return "<del>" + renderInline(inner) + "</del>", i + run, false
 		case run == 2:
-			return "<strong>" + renderInline(inner) + "</strong>", i + run
+			return "<strong>" + renderInline(inner) + "</strong>", i + run, false
 		default:
-			return "<em>" + renderInline(inner) + "</em>", i + run
+			return "<em>" + renderInline(inner) + "</em>", i + run, false
 		}
 	}
-	return "", 0
+	return "", 0, true
 }
