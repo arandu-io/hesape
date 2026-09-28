@@ -1,5 +1,19 @@
 # Release Notes
 
+## [v0.43.0](https://github.com/arandu-io/hesape/compare/v0.42.2...v0.43.0) - 2026-09-28
+
+## What's Changed
+* build(deps): bump golang.org/x/crypto from 0.55.0 to 0.57.0 in the gomod group across 1 directory by @dependabot[bot] in https://github.com/arandu-io/hesape/pull/6
+* build(deps): bump modernc.org/sqlite from 1.57.0 to 1.58.0 in /database/connectors/sqlite in the gomod group across 1 directory by @dependabot[bot] in https://github.com/arandu-io/hesape/pull/7
+* build(deps): bump github.com/go-sql-driver/mysql from 1.10.0 to 1.10.1 in /database/connectors/mysql in the gomod group across 1 directory by @dependabot[bot] in https://github.com/arandu-io/hesape/pull/8
+* build(deps): bump github.com/jackc/pgx/v5 from 5.10.0 to 5.11.0 in /database/connectors/pgx in the gomod group by @dependabot[bot] in https://github.com/arandu-io/hesape/pull/9
+* build(deps): bump modernc.org/sqlite from 1.58.0 to 1.59.0 in /database/connectors/sqlite in the gomod group by @dependabot[bot] in https://github.com/arandu-io/hesape/pull/10
+
+## New Contributors
+* @dependabot[bot] made their first contribution in https://github.com/arandu-io/hesape/pull/6
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.42.2...v0.43.0
+
 ## [v0.42.2](https://github.com/arandu-io/hesape/compare/v0.42.1...v0.42.2) - 2026-09-17
 
 **Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.42.1...v0.42.2
