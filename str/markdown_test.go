@@ -1,6 +1,7 @@
 package str_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/arandu-io/hesape/str"
@@ -128,4 +129,32 @@ func TestMarkdownLooseList(t *testing.T) {
 	if got != want {
 		t.Errorf("Markdown of a loose list = %q, want %q", got, want)
 	}
+}
+
+// TestMarkdownReadsATrailingBackslashInALinkAsText holds a destination that
+// ends on the backslash that would have escaped its next character. There is
+// no next character, and reading past the end panicked the whole render.
+func TestMarkdownReadsATrailingBackslashInALinkAsText(t *testing.T) {
+	for _, src := range []string{"[](\\", "![](\\", "[a](b\\", "[a](b \\", "x [a](\\"} {
+		got := str.Markdown(src)
+		if strings.Contains(got, "<a ") || strings.Contains(got, "<img ") {
+			t.Errorf("Markdown(%q) = %q, want the text with no link", src, got)
+		}
+	}
+}
+
+// FuzzMarkdownNeverPanics runs its seeds on every test run and searches past
+// them under `go test -fuzz`: a renderer handed text somebody typed has an
+// answer for all of it.
+func FuzzMarkdownNeverPanics(f *testing.F) {
+	for _, seed := range []string{
+		"[](\\", "[a](<b>)", "![a](b \"c\")", "`a", "***a**", "| a |\n|---|\n| b |",
+		"- [ ] a\n  - b", "> > a\n>\n> b", "<div>\n\na", "a  \nb\\\nc", "1. a\n\n   b",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, src string) {
+		_ = str.Markdown(src)
+		_ = str.InlineMarkdown(src)
+	})
 }

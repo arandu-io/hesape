@@ -268,7 +268,9 @@ func linkTarget(s string) (destination, title string, end int) {
 		depth, start := 0, i
 		for i < len(s) {
 			c := s[i]
-			if c == '\\' {
+			// A backslash escapes the character after it, and there is none
+			// when it ends the text: skipping two would run past the end.
+			if c == '\\' && i+1 < len(s) {
 				i += 2
 				continue
 			}
