@@ -1,10 +1,10 @@
 module github.com/arandu-io/hesape/rpc
 
-go 1.26
+go 1.26.0
 
 require (
 	connectrpc.com/connect v1.21.0
-	github.com/arandu-io/hesape v0.42.2
+	github.com/arandu-io/hesape v0.43.0
 )
 
 require google.golang.org/protobuf v1.36.11

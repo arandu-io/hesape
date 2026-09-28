@@ -1,12 +1,12 @@
 module github.com/arandu-io/hesape/database/connectors/pgx
 
-go 1.26
+go 1.26.0
 
 // pgx v5.10.0 or later: earlier versions carry GO-2026-5004, a SQL injection
 // reachable from any repository List. govulncheck found it here on its first
 // run, in a project that did not even need Postgres.
 require (
-	github.com/arandu-io/hesape v0.42.2
+	github.com/arandu-io/hesape v0.43.0
 	github.com/jackc/pgx/v5 v5.11.0
 )
 

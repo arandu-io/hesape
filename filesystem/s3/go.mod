@@ -1,6 +1,6 @@
 module github.com/arandu-io/hesape/filesystem/s3
 
-go 1.26
+go 1.26.0
 
 // Its own module, and not because the SDK is heavy -- there is no SDK. The root
 // module of hesape declares one dependency in total and its CI reproves any
@@ -11,4 +11,4 @@ go 1.26
 // AWS SDK that brings a hundred modules, its own credential chain, its own retry
 // policy and its own context rules -- and the algorithm has not changed since
 // 2012, while the SDK's surface changes every quarter.
-require github.com/arandu-io/hesape v0.42.2
+require github.com/arandu-io/hesape v0.43.0
