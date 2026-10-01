@@ -6,6 +6,8 @@ import (
 	"math/rand/v2"
 	"strconv"
 	"strings"
+
+	"github.com/arandu-io/hesape/view"
 )
 
 // HtmlBuilder builds escaped HTML fragments -- links, lists, obfuscated
@@ -32,8 +34,9 @@ func NewHtmlBuilder(url UrlGenerator) *HtmlBuilder { return &HtmlBuilder{url: ur
 // Entities escapes value the same way every other method in this package
 // does.
 //
-// See [escape] for what a fuller escaping scheme would do that this does
-// not, and for why not double-encoding matters here.
+// Every ampersand is encoded, including one that already opens an entity, so
+// the value shows as the text it was. See [escape] for why a reference left
+// alone is a way past a scheme check.
 func (h *HtmlBuilder) Entities(value string) template.HTML {
 	return template.HTML(escape(value))
 }
@@ -73,12 +76,17 @@ func (h *HtmlBuilder) Style(url string, attributes Attrs, secure bool) template.
 
 // Image builds an img tag.
 //
-// # Two things worth knowing
+// # Three things worth knowing
 //
 // The resolved URL is escaped before being concatenated into a quoted
 // attribute: an asset path carrying a double quote would otherwise close
 // the attribute and open whatever follows it. It is the same hole as in
 // [HtmlBuilder.Link].
+//
+// The resolved URL is also checked for its scheme, with view.TextURL's rule:
+// relative, http, https, mailto or tel. Any other is left out, and the tag is
+// written without a src -- a broken image says what happened, where a src
+// quietly rewritten to something else would not.
 //
 // The alt attribute is always written, even when empty, so an image with
 // no alt text says it has none rather than leaving a screen reader to read
@@ -87,7 +95,11 @@ func (h *HtmlBuilder) Image(url, alt string, attributes Attrs, secure bool) temp
 	attributes = cloneAttrs(attributes)
 	attributes["alt"] = alt
 
-	return template.HTML(`<img src="` + escape(h.asset(url, secure)) + `"` + string(h.Attributes(attributes)) + ">")
+	src := ""
+	if resolved, ok := safeURL(h.asset(url, secure)); ok {
+		src = ` src="` + resolved + `"`
+	}
+	return template.HTML(`<img` + src + string(h.Attributes(attributes)) + ">")
 }
 
 // Link builds an anchor tag.
@@ -95,18 +107,38 @@ func (h *HtmlBuilder) Image(url, alt string, attributes Attrs, secure bool) temp
 // An empty title falls back to using the URL as the text.
 //
 // The resolved URL is escaped before being concatenated into a quoted
-// attribute. Note what escaping does and does not buy: it stops the
-// attribute being closed, and it does not stop a `javascript:` URL, which
-// is a scheme rather than a syntax problem and is noted in the package
-// comment.
+// attribute, which stops the attribute being closed. Escaping does not stop
+// a javascript: URL, which is a scheme rather than a syntax problem, so the
+// URL is also checked with view.TextURL's rule: relative, http, https, mailto
+// or tel. Any other scheme -- and a URL that starts with two slashes, or
+// carries a control character -- is left out, and the anchor is written
+// without an href: the text is still on the page, and following it does
+// nothing.
 func (h *HtmlBuilder) Link(url, title string, attributes Attrs, secure bool) template.HTML {
 	url = h.to(url, secure)
 	if title == "" {
 		title = url
 	}
 
-	return template.HTML(`<a href="` + escape(url) + `"` + string(h.Attributes(attributes)) + ">" +
+	href := ""
+	if resolved, ok := safeURL(url); ok {
+		href = ` href="` + resolved + `"`
+	}
+	return template.HTML(`<a` + href + string(h.Attributes(attributes)) + ">" +
 		escape(title) + "</a>")
+}
+
+// safeURL reports whether a URL may be written into an attribute, and the
+// URL escaped for it when it may.
+//
+// The verdict is view.TextURL's, so a link built here and a link a view
+// writes refuse the same addresses. The escape is this package's, so the
+// output reads like the rest of what the builders write.
+func safeURL(url string) (string, bool) {
+	if _, err := view.TextURL(url); err != nil {
+		return "", false
+	}
+	return escape(url), true
 }
 
 // SecureLink is [HtmlBuilder.Link] over https.
@@ -156,24 +188,26 @@ func (h *HtmlBuilder) LinkAction(action, title string, parameters []string, attr
 
 // Mailto builds a link to an address, obfuscated.
 //
-// An empty title falls back to the obfuscated address -- which is then
-// passed through [HtmlBuilder.Entities], and survives it intact only
-// because [HtmlBuilder.Entities] does not double-encode. See [escape].
+// An empty title falls back to the obfuscated address, written as it stands.
+// A title the caller gave is escaped like any other text.
 //
-// The href is safe to write unescaped here, which it is not in
-// [HtmlBuilder.Link]: everything in it came out of [HtmlBuilder.Obfuscate],
-// which never emits a raw quote.
+// The href and the fallback title are safe to write unescaped here, which a
+// URL is not in [HtmlBuilder.Link]: everything in them came out of
+// [HtmlBuilder.Obfuscate], which never emits a raw quote, ampersand or angle
+// bracket, and the scheme is always mailto. Escaping them would encode the
+// entities Obfuscate wrote, and the reader would see them as text.
 func (h *HtmlBuilder) Mailto(email, title string, attributes Attrs) template.HTML {
 	obfuscated := string(h.Email(email))
 
-	if title == "" {
-		title = obfuscated
+	text := obfuscated
+	if title != "" {
+		text = escape(title)
 	}
 
 	href := string(h.Obfuscate("mailto:")) + obfuscated
 
 	return template.HTML(`<a href="` + href + `"` + string(h.Attributes(attributes)) + ">" +
-		escape(title) + "</a>")
+		text + "</a>")
 }
 
 // Email obfuscates an address, with every at-sign that survived turned

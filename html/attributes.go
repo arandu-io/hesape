@@ -5,6 +5,8 @@ import (
 	"maps"
 	"slices"
 	"strings"
+
+	"github.com/arandu-io/hesape/view"
 )
 
 // Attrs is the attribute map every method in this package takes last.
@@ -37,8 +39,12 @@ type Attrs map[string]string
 // concatenating one lets the caller close the tag, and
 // `Attrs{`x"><script>`: "1"}` would be a script tag.
 //
-// The legal set is HTML5's, stated as what it forbids, so hx-post,
-// data-copy-text, @click and :class all pass.
+// A key the browser or a client library would act on is dropped too: an
+// event handler, the HTMX family, an Alpine directive, style, srcdoc and
+// http-equiv. Escaping a value does not make any of those inert, and the list
+// is view.ActiveAttribute's, so the builders here and the view layer refuse
+// the same names. A request or a script belongs in a component that takes it
+// as a field, not in a map of attributes.
 func (h *HtmlBuilder) Attributes(attributes Attrs) template.HTML {
 	if len(attributes) == 0 {
 		return ""
@@ -60,7 +66,7 @@ func (h *HtmlBuilder) Attributes(attributes Attrs) template.HTML {
 // attributeElement builds one key="value" pair, or "" when key is not a
 // legal attribute name.
 func (h *HtmlBuilder) attributeElement(key, value string) string {
-	if !isAttributeName(key) {
+	if !isAttributeName(key) || view.ActiveAttribute(key) != nil {
 		return ""
 	}
 	return key + `="` + escape(value) + `"`
@@ -70,11 +76,11 @@ func (h *HtmlBuilder) attributeElement(key, value string) string {
 //
 // HTML5 states this as a prohibition rather than an alphabet: anything except
 // a control character, a space, a quote, an apostrophe, a greater-than, a
-// slash, an equals sign, and the noncharacters. Reading it that way is what
-// keeps the framework's own attributes -- HTMX's hx-*, the data-* hooks the
-// client behaviours dispatch on, and the punctuation-led names a library may
-// still ask for -- working without an allow-list somebody has to remember to
-// extend.
+// slash, an equals sign, and the noncharacters. Reading it that way keeps the
+// data-* hooks the client behaviours dispatch on, and the aria- and form
+// attributes, working without an allow-list somebody has to remember to
+// extend. What a browser would execute is a separate question, answered by
+// view.ActiveAttribute.
 func isAttributeName(key string) bool {
 	if key == "" {
 		return false
@@ -105,8 +111,7 @@ func cloneAttrs(attributes Attrs) Attrs {
 }
 
 // escape converts the characters that can change the shape of an HTML
-// document into their entity references, without double-encoding one that
-// is already there.
+// document into their entity references.
 //
 // # What it does and does not convert
 //
@@ -119,25 +124,22 @@ func cloneAttrs(attributes Attrs) Attrs {
 // security-carrying half of a fuller scheme is the five, and that half is
 // here in full.
 //
-// # Not double-encoding, which is load-bearing
+// # Every ampersand, including one that opens an entity
 //
-// An ampersand that already opens a well-formed entity reference is left as it
-// stands, so &amp; stays &amp; instead of becoming &amp;amp;. It is not a
-// detail: [HtmlBuilder.Mailto] runs an already-obfuscated address, full of
-// &#64; and &#x40;, back through this, and every one of them would be shown
-// to the reader as text if this re-encoded.
+// An ampersand is always encoded, so &amp; becomes &amp;amp; and shows as the
+// text it was. Leaving a well-formed reference alone looks harmless and is
+// not: the parser decodes it before anything reads the attribute, so
+// "javascript&colon;alert(1)" reaches a scheme check without a colon in it and
+// reaches the browser as a javascript: URL. A value that is already markup --
+// what [HtmlBuilder.Obfuscate] produces -- is written as it stands by the
+// caller that made it, and never passes through here.
 func escape(value string) string {
 	var b strings.Builder
 	b.Grow(len(value) + 16)
 
-	for i := 0; i < len(value); {
+	for i := 0; i < len(value); i++ {
 		switch value[i] {
 		case '&':
-			if n := entityLength(value[i:]); n > 0 {
-				b.WriteString(value[i : i+n])
-				i += n
-				continue
-			}
 			b.WriteString("&amp;")
 		case '<':
 			b.WriteString("&lt;")
@@ -150,61 +152,7 @@ func escape(value string) string {
 		default:
 			b.WriteByte(value[i])
 		}
-		i++
 	}
 
 	return b.String()
-}
-
-// entityLength reports the length of the entity reference s opens, or zero.
-//
-// s begins with an ampersand. The three shapes are the three an HTML entity
-// reference can take: &name;, &#1234; and &#x4a;.
-func entityLength(s string) int {
-	if len(s) < 3 {
-		return 0
-	}
-
-	i := 1
-	switch {
-	case s[i] == '#':
-		i++
-		if i < len(s) && (s[i] == 'x' || s[i] == 'X') {
-			i++
-			start := i
-			for i < len(s) && isHexDigit(s[i]) {
-				i++
-			}
-			if i == start {
-				return 0
-			}
-		} else {
-			start := i
-			for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-				i++
-			}
-			if i == start {
-				return 0
-			}
-		}
-	case isAlpha(s[i]):
-		for i < len(s) && (isAlpha(s[i]) || (s[i] >= '0' && s[i] <= '9')) {
-			i++
-		}
-	default:
-		return 0
-	}
-
-	if i < len(s) && s[i] == ';' {
-		return i + 1
-	}
-	return 0
-}
-
-func isAlpha(c byte) bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-}
-
-func isHexDigit(c byte) bool {
-	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }

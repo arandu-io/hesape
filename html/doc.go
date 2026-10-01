@@ -60,14 +60,24 @@
 // has a sixth, which is also a data-corrupting bug, and its comment has both.
 //
 // Escaping closes the syntax hole: a value cannot end an attribute or open a
-// tag. It does not close the scheme hole. `Link("javascript:alert(1)", ...)`
-// produces a link that runs script when clicked, because the URL is
-// well-formed and the danger is in what it means rather than in how it
-// is written. 20-components/DOC-hesape-reorganization.md records that this is open
-// across the whole view layer, kyse included, and that it is a decision to take
-// knowingly rather than by omission. Until it is taken, do not pass a URL that
-// came from a person to [HtmlBuilder.Link], [HtmlBuilder.Image] or
-// [FormBuilder.Open] without checking its scheme.
+// tag. Every ampersand is encoded, including one that opens an entity, because
+// a reference the parser decodes is a character nothing before it checked.
+//
+// The scheme hole is closed for [HtmlBuilder.Link] and [HtmlBuilder.Image]:
+// the resolved URL is held to view.TextURL's rule -- relative, http, https,
+// mailto or tel -- and a URL outside it is left out of the tag rather than
+// written. [FormBuilder.Open] writes its action through the same attribute
+// writer as everything else and does not check a scheme, so a URL that came
+// from a person goes through a check before it reaches the form.
+//
+// The attribute maps refuse what escaping does not answer: an event handler,
+// the HTMX family, an Alpine directive, style, srcdoc and http-equiv. The list
+// is view.ActiveAttribute's, so these builders and the view layer refuse the
+// same names.
+//
+// Old input fills what a person typed, never what the page fixed: a hidden
+// field written with a value keeps it, and _method and _token are never taken
+// from the old input at all.
 //
 // # The return types say what is safe
 //

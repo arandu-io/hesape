@@ -400,14 +400,52 @@ func attributeIsInert(name string) error {
 			"A name is a letter, then letters, digits and hyphens, and at most one colon "+
 			"-- a space or a quote in one ends it, and no escape puts it back", name)
 	}
+	if err := ActiveAttribute(name); err != nil {
+		return err
+	}
 
-	head, _, _ := strings.Cut(name, ":")
+	switch {
+	case attributeHoldsURL(name):
+		return fmt.Errorf("view: %q holds an address, and what makes an address safe is its scheme. "+
+			"A component that takes a URL takes it as a field of its own, "+
+			"which is what puts it through the check", name)
+	case name == "class", name == "role", strings.HasPrefix(name, "aria-"):
+		return fmt.Errorf("view: %q belongs to the component. "+
+			"A class is added through the class field, and role and aria- are the promise "+
+			"the component makes to a screen reader", name)
+	}
+	return nil
+}
+
+// ActiveAttribute reports why a browser or a client library would act on an
+// attribute's value rather than hold it as text, or nil when it would not.
+//
+// It is the one list of such names, and every writer of an attribute whose
+// name comes from data consults it: Attributes here, and any builder that
+// assembles a tag out of a caller's map. What it refuses, escaping does not
+// answer:
+//
+//   - "on" at the front is an event handler, and its value is JavaScript;
+//   - the HTMX family, in both spellings, is a request sent with the page's
+//     credentials and an answer swapped into the document;
+//   - "x-", "data-x-", "@" and ":" at the front are Alpine directives, which
+//     this framework does not serve and whose values are expressions;
+//   - "style" is dropped by a policy without unsafe-inline, so the page would
+//     not do what the markup says;
+//   - "srcdoc" is a document, decoded before it is parsed;
+//   - "http-equiv" makes the element a directive to the browser.
+//
+// The name is compared without regard to case, because HTML reads ONCLICK and
+// onclick as one attribute.
+func ActiveAttribute(name string) error {
+	lower := strings.ToLower(name)
+	head, _, _ := strings.Cut(lower, ":")
 	switch {
 	case strings.HasPrefix(head, "on"):
 		return fmt.Errorf("view: %q holds a script rather than text. "+
 			"An attribute a browser compiles is a JavaScript position wearing an "+
 			"attribute's shape, and nothing escapes a value into being data there", name)
-	case isHTMX(name):
+	case isHTMX(lower):
 		// The whole family, not the handlers and the verbs. hx-post is fetched,
 		// hx-vals and hx-headers change what is sent, hx-swap-oob decides what
 		// of the page the answer replaces -- and a component that speaks HTMX
@@ -421,30 +459,23 @@ func attributeIsInert(name string) error {
 			"supports as fields of its own. "+
 			"A request written here would go out with the page's own credentials, "+
 			"to an address nothing checked, and swap the answer into the document", name)
-	case strings.HasPrefix(name, "x-"), strings.HasPrefix(name, "data-x-"):
+	case strings.HasPrefix(lower, "x-"), strings.HasPrefix(lower, "data-x-"),
+		strings.HasPrefix(lower, "@"), strings.HasPrefix(lower, ":"):
 		return fmt.Errorf("view: %q is an Alpine directive, and this framework serves none. "+
 			"Client behaviour is a name in a catalogue, dispatched by ui.js, "+
 			"and no attribute here is evaluated", name)
-	case name == "style":
+	case lower == "style":
 		return fmt.Errorf("view: %q is refused. "+
 			"The policy is style-src 'self' with no unsafe-inline, so the browser drops it "+
 			"and the page does not do what the markup says. Write a class", name)
-	case attributeHoldsURL(name):
-		return fmt.Errorf("view: %q holds an address, and what makes an address safe is its scheme. "+
-			"A component that takes a URL takes it as a field of its own, "+
-			"which is what puts it through the check", name)
-	case name == "srcdoc":
+	case lower == "srcdoc":
 		return fmt.Errorf("view: %q holds a document rather than text. "+
 			"The parser undoes character references before it parses what is inside, "+
 			"so escaping the value hands the markup back", name)
-	case name == "http-equiv":
+	case lower == "http-equiv":
 		return fmt.Errorf("view: %q makes the element a directive to the browser. "+
 			"With a content beside it, it is a redirect or a policy, and neither is "+
 			"something a caller decides about somebody else's component", name)
-	case name == "class", name == "role", strings.HasPrefix(name, "aria-"):
-		return fmt.Errorf("view: %q belongs to the component. "+
-			"A class is added through the class field, and role and aria- are the promise "+
-			"the component makes to a screen reader", name)
 	}
 	return nil
 }
@@ -557,6 +588,10 @@ func CSRF(w io.Writer, data any) error {
 		return fmt.Errorf("view: @csrf needs the page data to provide the token. " +
 			"Add a CSRFToken() string method to the struct the view declares")
 	}
-	_, err := fmt.Fprintf(w, `<input type="hidden" name="_token" value="%s">`, holder.CSRFToken())
+	// The token is escaped like any other attribute value. A token is
+	// supposed to be letters and digits, and the page data is what supplies
+	// it: a store that hands back something else must not get to end the
+	// attribute and write markup of its own.
+	_, err := io.WriteString(w, `<input type="hidden" name="_token" value="`+TextAttr(holder.CSRFToken())+`">`)
 	return err
 }

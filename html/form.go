@@ -220,7 +220,11 @@ func (f *FormBuilder) Input(inputType, name, value string, options Attrs) templa
 		attributes["id"] = id
 	}
 
-	if !slices.Contains(skipValueTypes, inputType) {
+	// A hidden field with a value is a value the page fixed, not one a person
+	// typed, so the old input never replaces it. The old input is whatever the
+	// rejected request carried, and letting it win would let that request
+	// choose what the next submission of this form says.
+	if !slices.Contains(skipValueTypes, inputType) && !(strings.EqualFold(inputType, "hidden") && value != "") {
 		value = f.GetValueAttribute(name, value)
 	}
 
@@ -646,13 +650,19 @@ func (f *FormBuilder) GetIdAttribute(name string, attributes Attrs) string {
 // value is variadic, so it can be left out entirely. That the old input
 // wins over the argument is what makes a rejected form come back filled in
 // with what was typed rather than with what the handler passed.
+//
+// The two fields the framework reads -- _method and _token -- are the
+// exception, and answer the given value alone. They decide which route the
+// submission reaches and whether it is accepted, and the old input is what
+// the rejected request sent: taking it would let one request write the method
+// or the token of the next.
 func (f *FormBuilder) GetValueAttribute(name string, value ...string) string {
 	given := ""
 	if len(value) > 0 {
 		given = value[0]
 	}
 
-	if name == "" {
+	if name == "" || slices.Contains(reservedFields, name) {
 		return given
 	}
 
@@ -667,6 +677,10 @@ func (f *FormBuilder) GetValueAttribute(name string, value ...string) string {
 	modelValue, _ := f.getModelValueAttribute(name)
 	return modelValue
 }
+
+// reservedFields are the hidden fields the framework reads off a submission
+// and that no old input or model may fill.
+var reservedFields = []string{"_method", "_token"}
 
 // getModelValueAttribute reads a field off the model, transforming the
 // name first.

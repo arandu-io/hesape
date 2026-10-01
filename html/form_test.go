@@ -652,3 +652,62 @@ func TestModelOpensAndFills(t *testing.T) {
 		t.Fatalf("Text = %q, want the model value", got)
 	}
 }
+
+// TestOldInputNeverOverridesAFixedHiddenValue: the old input is whatever the
+// rejected request carried. A hidden field the page wrote with a value used to
+// take it, so a request that failed validation chose what the form said on
+// the next submission -- including the _method that decides which route it
+// reaches.
+func TestOldInputNeverOverridesAFixedHiddenValue(t *testing.T) {
+	form, _ := newForm()
+	form.SetSessionStore(html.OldInput{Values: url.Values{
+		"_method":   {"DELETE"},
+		"_token":    {"attacker"},
+		"tenant_id": {"other-tenant"},
+	}})
+
+	open, err := form.Open(html.OpenOptions{Method: "put", URL: []string{"/invoices/7"}})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	for _, leaked := range []string{"DELETE", "attacker"} {
+		if strings.Contains(string(open), leaked) {
+			t.Errorf("Open = %q, took %q from the old input", open, leaked)
+		}
+	}
+	if !strings.Contains(string(open), `name="_method" type="hidden" value="PUT"`) {
+		t.Errorf("Open = %q, want the _method the form was opened with", open)
+	}
+
+	if got := string(form.Hidden("tenant_id", "tenant-a", nil)); !strings.Contains(got, `value="tenant-a"`) {
+		t.Errorf("Hidden = %q, want the value the page fixed", got)
+	}
+}
+
+// TestTheReservedFieldsNeverTakeOldInput: _method and _token are read by the
+// framework, so not even an empty hidden field fills them from the old input.
+func TestTheReservedFieldsNeverTakeOldInput(t *testing.T) {
+	form, _ := newForm()
+	form.SetSessionStore(html.OldInput{Values: url.Values{"_method": {"DELETE"}, "_token": {"attacker"}}})
+
+	for _, name := range []string{"_method", "_token"} {
+		if got := string(form.Hidden(name, "", nil)); strings.Contains(got, "DELETE") || strings.Contains(got, "attacker") {
+			t.Errorf("Hidden(%q, \"\") = %q, took the old input", name, got)
+		}
+		if got := form.GetValueAttribute(name); got != "" {
+			t.Errorf("GetValueAttribute(%q) = %q, want nothing", name, got)
+		}
+	}
+}
+
+// TestAnEmptyHiddenFieldStillComesBackFromOldInput: only a value the page fixed
+// is protected. A hidden field written empty is one the page means to fill
+// from what was sent, which is what a multi-step form does.
+func TestAnEmptyHiddenFieldStillComesBackFromOldInput(t *testing.T) {
+	form, _ := newForm()
+	form.SetSessionStore(html.OldInput{Values: url.Values{"step": {"2"}}})
+
+	if got := string(form.Hidden("step", "", nil)); !strings.Contains(got, `value="2"`) {
+		t.Fatalf("Hidden = %q, want the old input", got)
+	}
+}

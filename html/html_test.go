@@ -71,11 +71,20 @@ func TestEntitiesConvertsTheFive(t *testing.T) {
 	}
 }
 
-// double_encode false is what keeps Mailto's obfuscated address readable.
-func TestEntitiesDoesNotDoubleEncode(t *testing.T) {
-	for _, value := range []string{"&amp;", "&#64;", "&#x40;", "&nbsp;"} {
-		if got := string(newBuilder().Entities(value)); got != value {
-			t.Errorf("Entities(%q) = %q, want it unchanged", value, got)
+// TestEntitiesEncodesAnAmpersandThatOpensAnEntity: a reference left as it
+// stood was decoded by the parser before anything read the value, so
+// "javascript&colon;" reached a scheme check with no colon in it and reached
+// the browser as a javascript: URL.
+func TestEntitiesEncodesAnAmpersandThatOpensAnEntity(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"&amp;", "&amp;amp;"},
+		{"&#64;", "&amp;#64;"},
+		{"&#x40;", "&amp;#x40;"},
+		{"&nbsp;", "&amp;nbsp;"},
+		{"javascript&colon;alert(1)", "javascript&amp;colon;alert(1)"},
+	} {
+		if got := string(newBuilder().Entities(c.in)); got != c.want {
+			t.Errorf("Entities(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
@@ -129,13 +138,28 @@ func TestAttributesDropsAnIllegalName(t *testing.T) {
 }
 
 // The framework depends on attribute names an allow-list would not think to
-// permit: HTMX's hx-*, the data-* hooks the client behaviours dispatch on, and
-// the punctuation-led names a library may still ask for. isAttributeName reads
-// HTML5 as a prohibition rather than an alphabet, and these are the proof.
+// permit: the data-* hooks the client behaviours dispatch on, and the aria-
+// family. isAttributeName reads HTML5 as a prohibition rather than an
+// alphabet, and these are the proof.
 func TestAttributesKeepsFrameworkNames(t *testing.T) {
-	for _, key := range []string{"hx-post", "data-copy-text", "data-theme-accent", "@click", ":class", "data-variant", "aria-label"} {
+	for _, key := range []string{"data-copy-text", "data-theme-accent", "data-variant", "aria-label", "accept-charset"} {
 		if got := string(newBuilder().Attributes(html.Attrs{key: "1"})); got != " "+key+`="1"` {
 			t.Errorf("Attributes with key %q = %q, want it kept", key, got)
+		}
+	}
+}
+
+// TestAttributesDropsWhatABrowserWouldRun: an escaped value is still a script
+// in an event handler, a request in hx-post, an expression in an Alpine
+// directive and a document in srcdoc. The map used to write every one of
+// them, so a builder fed a caller's attributes wrote whatever it was handed.
+func TestAttributesDropsWhatABrowserWouldRun(t *testing.T) {
+	for _, key := range []string{
+		"onclick", "ONERROR", "onmouseover", "hx-post", "hx-get", "hx-vals", "data-hx-post",
+		"x-data", "@click", ":class", "srcdoc", "style", "http-equiv",
+	} {
+		if got := string(newBuilder().Attributes(html.Attrs{key: "alert(1)", "id": "x"})); got != ` id="x"` {
+			t.Errorf("Attributes with key %q = %q, want only the id", key, got)
 		}
 	}
 }
@@ -196,6 +220,81 @@ func TestLinkEscapesTheHref(t *testing.T) {
 		t.Fatalf("Link let the href close the attribute: %s", got)
 	}
 }
+
+// TestLinkRefusesASchemeABrowserWouldRun: escaping stops a URL closing the
+// attribute and does nothing about what the scheme means. The anchor keeps its
+// text and loses the href, so following it does nothing.
+func TestLinkRefusesASchemeABrowserWouldRun(t *testing.T) {
+	builder := html.NewHtmlBuilder(&absoluteUrls{fakeUrls: newFakeUrls()})
+	for _, url := range []string{
+		"javascript:alert(1)",
+		"JavaScript:alert(1)",
+		"data:text/html,<script>alert(1)</script>",
+		"vbscript:msgbox(1)",
+		"java\tscript:alert(1)",
+		" javascript:alert(1)",
+		"//evil.example/x",
+		"/\\evil.example/x",
+	} {
+		got := string(builder.Link(url, "Go", nil, false))
+		if strings.Contains(got, "href") {
+			t.Errorf("Link(%q) = %q, want no href", url, got)
+		}
+		if !strings.Contains(got, ">Go</a>") {
+			t.Errorf("Link(%q) = %q, want the text kept", url, got)
+		}
+	}
+}
+
+// TestLinkDoesNotDecodeAnEntityIntoAScheme: "javascript&colon;" has no colon
+// for the scheme check to find, and the browser decodes it into one. Written
+// with its ampersand encoded it is a relative path and nothing else.
+func TestLinkDoesNotDecodeAnEntityIntoAScheme(t *testing.T) {
+	urls := &absoluteUrls{fakeUrls: newFakeUrls()}
+	got := string(html.NewHtmlBuilder(urls).Link("javascript&colon;alert(1)", "Go", nil, false))
+
+	if !strings.Contains(got, `href="javascript&amp;colon;alert(1)"`) {
+		t.Fatalf("Link = %q, want the ampersand encoded", got)
+	}
+	if strings.Contains(stdhtml.UnescapeString(got), "javascript:") {
+		t.Fatalf("Link = %q decodes to a javascript: URL", got)
+	}
+}
+
+// TestLinkKeepsTheSchemesAPageUses: the allowlist is the four a link is for,
+// and a relative path.
+func TestLinkKeepsTheSchemesAPageUses(t *testing.T) {
+	urls := &absoluteUrls{fakeUrls: newFakeUrls()}
+	builder := html.NewHtmlBuilder(urls)
+	for _, url := range []string{"https://example.test/a", "http://example.test/a", "mailto:ada@example.test", "tel:+5511999999999", "/invoices/7", "invoices?page=2"} {
+		if got := string(builder.Link(url, "Go", nil, false)); !strings.Contains(got, `href="`) {
+			t.Errorf("Link(%q) = %q, want an href", url, got)
+		}
+	}
+}
+
+// TestImageRefusesASchemeABrowserWouldRun: an asset generator hands an
+// absolute URL back unchanged, so the src is checked after it resolves.
+func TestImageRefusesASchemeABrowserWouldRun(t *testing.T) {
+	urls := &absoluteUrls{fakeUrls: newFakeUrls()}
+	builder := html.NewHtmlBuilder(urls)
+	for _, url := range []string{"javascript:alert(1)", "data:image/svg+xml,<svg onload=alert(1)>", "//evil.example/a.png", "javascript&colon;alert(1)"} {
+		got := string(builder.Image(url, "logo", nil, false))
+		if strings.Contains(stdhtml.UnescapeString(got), "javascript:") || strings.Contains(got, "data:") || strings.Contains(got, "//evil") {
+			t.Errorf("Image(%q) = %q, wrote the refused address", url, got)
+		}
+		if !strings.Contains(got, `alt="logo"`) {
+			t.Errorf("Image(%q) = %q, want the alt kept", url, got)
+		}
+	}
+}
+
+// absoluteUrls resolves nothing, so a test hands the builder the URL exactly
+// as an absolute URL reaches it from a generator that returns one unchanged.
+type absoluteUrls struct{ *fakeUrls }
+
+func (absoluteUrls) To(path string, _ ...string) string { return path }
+func (absoluteUrls) Asset(path string) string           { return path }
 
 func TestLinkEscapesTheTitleAndFallsBackToTheUrl(t *testing.T) {
 	builder := newBuilder()
@@ -349,6 +448,15 @@ func TestMailtoRendersTheAddressAndKeepsTheHrefUsable(t *testing.T) {
 	}
 	if !strings.Contains(decoded, ">ada@example.com</a>") {
 		t.Fatalf("Mailto decoded to %q, want the address as the text", decoded)
+	}
+}
+
+// TestMailtoFallsBackToTheAddressAsText: the fallback title is Obfuscate's
+// output, already safe, and escaping it again would show its entities as text.
+func TestMailtoFallsBackToTheAddressAsText(t *testing.T) {
+	got := string(newBuilder().Mailto("ada@example.com", "", nil))
+	if strings.Contains(got, "&amp;") {
+		t.Fatalf("Mailto = %q, encoded the obfuscated address a second time", got)
 	}
 }
 
