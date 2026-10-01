@@ -15,13 +15,27 @@ import (
 // Raw HTML passes through untouched. Rendering untrusted Markdown therefore
 // renders untrusted HTML: sanitize it after this, before it reaches a page.
 //
+// Block quotes and list items nest at most 100 deep, counted together, and
+// emphasis, strikethrough, links and images nest at most 100 deep inside a
+// block. A marker past that depth is text, escaped like any other text. Every
+// level reads again the text it contains, so the bound is what keeps the time
+// of a render proportional to the length of the input when the input is
+// nothing but markers nested inside each other.
+//
 // There is nothing to configure and there will not be: the renderer is this
 // file, and one way to spell a document is enough.
 func Markdown(s string) string {
 	var b strings.Builder
-	renderBlocks(splitLines(s), &b)
+	renderBlocks(splitLines(s), 0, &b)
 	return b.String()
 }
+
+// maxNesting is how deep block quotes and list items may nest inside each
+// other, and how deep emphasis, links and images may nest inside a block.
+// Each level reads again the lines or the text it holds, so without a bound a
+// document of markers nested to its full length costs the square of its
+// length.
+const maxNesting = 100
 
 // InlineMarkdown renders only the inline part of CommonMark -- emphasis, code
 // spans, links, images -- with no block element around it.
@@ -31,7 +45,8 @@ func Markdown(s string) string {
 // A heading marker or a list marker is left standing as text, because there is
 // no block parser to read it.
 //
-// The note on raw HTML in the comment on Markdown holds here too.
+// The notes on raw HTML and on the depth of nesting in the comment on Markdown
+// hold here too.
 func InlineMarkdown(s string) string {
 	return renderInline(strings.TrimRight(s, "\n")) + "\n"
 }
@@ -47,11 +62,9 @@ func splitLines(s string) []string {
 var (
 	atxHeading     = regexp.MustCompile(`^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*#*[ \t]*$`)
 	setextHeading  = regexp.MustCompile(`^ {0,3}(=+|-+)[ \t]*$`)
-	thematicBreak  = regexp.MustCompile(`^ {0,3}((\*[ \t]*){3,}|(-[ \t]*){3,}|(_[ \t]*){3,})$`)
 	fenceOpen      = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})[ \t]*(.*)$")
-	blockQuoteLine = regexp.MustCompile(`^ {0,3}>[ \t]?`)
-	bulletItem     = regexp.MustCompile(`^( {0,3})([-*+])([ \t]+)(.*)$`)
-	orderedItem    = regexp.MustCompile(`^( {0,3})(\d{1,9})([.)])([ \t]+)(.*)$`)
+	bulletItem     = regexp.MustCompile(`^( {0,3})([-*+])([ \t]+)`)
+	orderedItem    = regexp.MustCompile(`^( {0,3})(\d{1,9})([.)])([ \t]+)`)
 	taskMarker     = regexp.MustCompile(`^\[([ xX])\][ \t]+`)
 	tableDelimiter = regexp.MustCompile(`^ {0,3}\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$`)
 	// htmlBlockStart wants a name that is followed by what a tag is followed
@@ -60,8 +73,11 @@ var (
 )
 
 // renderBlocks reads block elements off the front of the lines until they run
-// out, writing the HTML for each.
-func renderBlocks(lines []string, b *strings.Builder) {
+// out, writing the HTML for each. depth is the number of block quotes and list
+// items the lines sit inside; at maxNesting a quote or list marker opens
+// nothing and is read as paragraph text.
+func renderBlocks(lines []string, depth int, b *strings.Builder) {
+	container := depth < maxNesting
 	for i := 0; i < len(lines); {
 		line := lines[i]
 
@@ -69,7 +85,7 @@ func renderBlocks(lines []string, b *strings.Builder) {
 		case strings.TrimSpace(line) == "":
 			i++
 
-		case thematicBreak.MatchString(line):
+		case isThematicBreak(line):
 			b.WriteString("<hr />\n")
 			i++
 
@@ -82,11 +98,11 @@ func renderBlocks(lines []string, b *strings.Builder) {
 		case fenceOpen.MatchString(line):
 			i = renderFencedCode(lines, i, b)
 
-		case blockQuoteLine.MatchString(line):
-			i = renderBlockQuote(lines, i, b)
+		case container && quoteMarker(line) >= 0:
+			i = renderBlockQuote(lines, i, depth, b)
 
-		case bulletItem.MatchString(line) || orderedItem.MatchString(line):
-			i = renderList(lines, i, b)
+		case container && (bulletItem.MatchString(line) || orderedItem.MatchString(line)):
+			i = renderList(lines, i, depth, b)
 
 		case isIndentedCode(line):
 			i = renderIndentedCode(lines, i, b)
@@ -95,13 +111,38 @@ func renderBlocks(lines []string, b *strings.Builder) {
 			i = renderHTMLBlock(lines, i, b)
 
 		default:
-			i = renderParagraphOrTable(lines, i, b)
+			i = renderParagraphOrTable(lines, i, depth, b)
 		}
 	}
 }
 
 func isIndentedCode(line string) bool {
 	return strings.HasPrefix(line, "    ") || strings.HasPrefix(line, "\t")
+}
+
+// isThematicBreak reports whether line is a thematic break: up to three spaces,
+// then three or more of one of *, - or _, with only spaces and tabs between and
+// after them. It reads the line once, by hand, because a line of nested list
+// markers is read by it once per level.
+func isThematicBreak(line string) bool {
+	i := 0
+	for i < 3 && i < len(line) && line[i] == ' ' {
+		i++
+	}
+	if i == len(line) || (line[i] != '*' && line[i] != '-' && line[i] != '_') {
+		return false
+	}
+	marker, count := line[i], 0
+	for ; i < len(line); i++ {
+		switch line[i] {
+		case marker:
+			count++
+		case ' ', '\t':
+		default:
+			return false
+		}
+	}
+	return count >= 3
 }
 
 // renderFencedCode reads a fenced code block and writes it out with the info
@@ -182,28 +223,45 @@ func lastIndex(lines []string, i int) int {
 }
 
 // renderBlockQuote reads the run of quoted lines, strips the markers and
-// renders what is left as blocks of its own.
-func renderBlockQuote(lines []string, i int, b *strings.Builder) int {
+// renders what is left as blocks of its own, one level deeper.
+func renderBlockQuote(lines []string, i, depth int, b *strings.Builder) int {
 	var inner []string
 	for i < len(lines) {
-		switch {
-		case blockQuoteLine.MatchString(lines[i]):
-			inner = append(inner, blockQuoteLine.ReplaceAllString(lines[i], ""))
+		if width := quoteMarker(lines[i]); width >= 0 {
+			// The rest of the line is sliced, not copied: a line of nested
+			// markers would otherwise be copied once per level.
+			inner = append(inner, lines[i][width:])
 			i++
-		case strings.TrimSpace(lines[i]) != "" && len(inner) > 0:
-			// A lazy continuation line belongs to the paragraph inside the quote.
-			inner = append(inner, lines[i])
-			i++
-		default:
-			b.WriteString("<blockquote>\n")
-			renderBlocks(inner, b)
-			b.WriteString("</blockquote>\n")
-			return i
+			continue
 		}
+		if strings.TrimSpace(lines[i]) == "" || len(inner) == 0 {
+			break
+		}
+		// A lazy continuation line belongs to the paragraph inside the quote.
+		inner = append(inner, lines[i])
+		i++
 	}
 	b.WriteString("<blockquote>\n")
-	renderBlocks(inner, b)
+	renderBlocks(inner, depth+1, b)
 	b.WriteString("</blockquote>\n")
+	return i
+}
+
+// quoteMarker is the width of the block quote marker that opens line -- up to
+// three spaces, a >, and one space or tab after it -- or -1 when the line does
+// not open with one.
+func quoteMarker(line string) int {
+	i := 0
+	for i < 3 && i < len(line) && line[i] == ' ' {
+		i++
+	}
+	if i == len(line) || line[i] != '>' {
+		return -1
+	}
+	i++
+	if i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+		i++
+	}
 	return i
 }
 
@@ -215,7 +273,7 @@ type listItem struct {
 }
 
 // renderList reads a run of items sharing one marker type and writes the list.
-func renderList(lines []string, i int, b *strings.Builder) int {
+func renderList(lines []string, i, depth int, b *strings.Builder) int {
 	ordered := orderedItem.MatchString(lines[i])
 	start := ""
 	if ordered {
@@ -282,7 +340,7 @@ func renderList(lines []string, i int, b *strings.Builder) int {
 
 	b.WriteString(open + "\n")
 	for _, item := range items {
-		writeListItem(item, loose, b)
+		writeListItem(item, loose, depth, b)
 	}
 	b.WriteString("</" + tag + ">\n")
 	return i
@@ -290,7 +348,7 @@ func renderList(lines []string, i int, b *strings.Builder) int {
 
 // writeListItem writes one item, wrapping its text in a paragraph when the list
 // is loose and leaving it bare when it is tight.
-func writeListItem(item listItem, loose bool, b *strings.Builder) {
+func writeListItem(item listItem, loose bool, depth int, b *strings.Builder) {
 	body := strings.Join(item.lines, "\n")
 	checkbox := ""
 	if m := taskMarker.FindStringSubmatch(body); m != nil {
@@ -310,7 +368,7 @@ func writeListItem(item listItem, loose bool, b *strings.Builder) {
 	if checkbox != "" {
 		b.WriteString(checkbox)
 	}
-	renderBlocks(splitLines(body), b)
+	renderBlocks(splitLines(body), depth+1, b)
 	b.WriteString("</li>\n")
 }
 
@@ -330,18 +388,29 @@ func itemMarker(line string) string {
 // to be indented to belong to it.
 func itemContent(line string) (string, int) {
 	if m := bulletItem.FindStringSubmatch(line); m != nil {
-		return m[4], len(m[1]) + 1 + len(m[3])
+		return line[len(m[0]):], len(m[1]) + 1 + len(m[3])
 	}
 	m := orderedItem.FindStringSubmatch(line)
-	return m[5], len(m[1]) + len(m[2]) + 1 + len(m[4])
+	return line[len(m[0]):], len(m[1]) + len(m[2]) + 1 + len(m[4])
 }
 
 // startsBlock reports whether a line opens a block of its own, which is what
 // stops it from being read as the continuation of a paragraph.
 func startsBlock(line string) bool {
-	return thematicBreak.MatchString(line) || atxHeading.MatchString(line) ||
-		fenceOpen.MatchString(line) || blockQuoteLine.MatchString(line) ||
+	return isThematicBreak(line) || atxHeading.MatchString(line) ||
+		fenceOpen.MatchString(line) || quoteMarker(line) >= 0 ||
 		htmlBlockStart.MatchString(line)
+}
+
+// interruptsParagraph reports whether a line ends the paragraph above it. Past
+// the nesting bound a quote or list marker opens nothing, so it is text and
+// carries the paragraph on.
+func interruptsParagraph(line string, depth int) bool {
+	if depth >= maxNesting {
+		return isThematicBreak(line) || atxHeading.MatchString(line) ||
+			fenceOpen.MatchString(line) || htmlBlockStart.MatchString(line)
+	}
+	return startsBlock(line) || itemMarker(line) != ""
 }
 
 // renderHTMLBlock passes a run of raw HTML through to the output untouched.
@@ -355,7 +424,7 @@ func renderHTMLBlock(lines []string, i int, b *strings.Builder) int {
 
 // renderParagraphOrTable reads the run of lines up to the next blank line or
 // block start, and writes it as a table, a setext heading or a paragraph.
-func renderParagraphOrTable(lines []string, i int, b *strings.Builder) int {
+func renderParagraphOrTable(lines []string, i, depth int, b *strings.Builder) int {
 	var block []string
 	for i < len(lines) {
 		line := lines[i]
@@ -372,7 +441,7 @@ func renderParagraphOrTable(lines []string, i int, b *strings.Builder) int {
 			b.WriteString("<h" + level + ">" + renderInline(strings.TrimSpace(strings.Join(block, "\n"))) + "</h" + level + ">\n")
 			return i + 1
 		}
-		if len(block) > 0 && (startsBlock(line) || itemMarker(line) != "") {
+		if len(block) > 0 && interruptsParagraph(line, depth) {
 			break
 		}
 		block = append(block, line)

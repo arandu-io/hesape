@@ -172,15 +172,6 @@ func FuzzMarkdownNeverPanics(f *testing.F) {
 // The fastest of a few runs is compared, and a render too quick to measure is
 // too quick to be quadratic.
 func TestMarkdownStaysLinearOnOpenersThatNeverClose(t *testing.T) {
-	fastest := func(src string) time.Duration {
-		best := time.Duration(1 << 62)
-		for range 5 {
-			start := time.Now()
-			str.Markdown(src)
-			best = min(best, time.Since(start))
-		}
-		return best
-	}
 	for name, unit := range map[string]string{
 		"emphasis":      "*a ",
 		"strong":        "__a ",
@@ -191,13 +182,7 @@ func TestMarkdownStaysLinearOnOpenersThatNeverClose(t *testing.T) {
 		"hard breaks":   "a  \n",
 	} {
 		reps := 16000 / len(unit)
-		small, large := fastest(strings.Repeat(unit, reps)), fastest(strings.Repeat(unit, 2*reps))
-		if large < 10*time.Millisecond {
-			continue
-		}
-		if growth := float64(large) / float64(small); growth > 3.2 {
-			t.Errorf("%s: doubling the input took %.1f times as long (%s to %s)", name, growth, small, large)
-		}
+		checkLinearGrowth(t, name, strings.Repeat(unit, reps), strings.Repeat(unit, 2*reps))
 	}
 }
 
@@ -215,5 +200,161 @@ func TestMarkdownBoundsTheNestingOfADestination(t *testing.T) {
 	}
 	if got := str.Markdown("[a](b(c)d)"); !strings.Contains(got, `<a href="b(c)d">a</a>`) {
 		t.Errorf("a balanced pair in a destination = %q", got)
+	}
+}
+
+// fastestRender is the fastest of a few renders of src, which is the one the
+// rest of the machine disturbed least.
+func fastestRender(src string) time.Duration {
+	best := time.Duration(1 << 62)
+	for range 5 {
+		start := time.Now()
+		str.Markdown(src)
+		best = min(best, time.Since(start))
+	}
+	return best
+}
+
+// checkLinearGrowth fails when rendering large, twice the length of small,
+// takes more than 3.2 times as long. A linear render takes twice as long and a
+// quadratic one four times; a render of large too quick to measure is too quick
+// to be quadratic, and is not compared.
+func checkLinearGrowth(t *testing.T, name, small, large string) {
+	t.Helper()
+	smallTime, largeTime := fastestRender(small), fastestRender(large)
+	if largeTime < 10*time.Millisecond {
+		return
+	}
+	if growth := float64(largeTime) / float64(smallTime); growth > 3.2 {
+		t.Errorf("%s: doubling the input took %.1f times as long (%s to %s)", name, growth, smallTime, largeTime)
+	}
+}
+
+// TestMarkdownStaysLinearOnHostileInput holds the bodies an application that
+// renders what its users type has to survive, each at its length and at twice
+// it.
+func TestMarkdownStaysLinearOnHostileInput(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		src  func(n int) string
+		n    int
+	}{
+		{"emphasis", func(n int) string { return strings.Repeat("*a ", n) }, 20000},
+		{"strong", func(n int) string { return strings.Repeat("__a ", n) }, 15000},
+		{"brackets", func(n int) string { return strings.Repeat("[", 2*n) + strings.Repeat("](", n) }, 10000},
+		{"links", func(n int) string { return strings.Repeat("[a](", n) }, 15000},
+		{"backticks", func(n int) string { return strings.Repeat("`", n) }, 30001},
+		{"quotes", func(n int) string { return strings.Repeat("> ", n) + "x" }, 5000},
+		{"list markers", func(n int) string { return strings.Repeat("- ", n) + "x" }, 5000},
+		{"hard breaks", func(n int) string { return strings.Repeat("a  \n", n) }, 15000},
+	} {
+		checkLinearGrowth(t, c.name, c.src(c.n), c.src(2*c.n))
+	}
+}
+
+// TestMarkdownStaysLinearOnNestedContainers holds the shapes where every level
+// of nesting once read again everything it held: quotes, lists and spans
+// nested to the full length of the text, and the lazy lines of a deep quote,
+// which every level carried down to the paragraph at the bottom.
+func TestMarkdownStaysLinearOnNestedContainers(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		src  func(n int) string
+		n    int
+	}{
+		{"nested quotes", func(n int) string { return strings.Repeat("> ", n) + "x" }, 64000},
+		{"heading in nested quotes", func(n int) string { return strings.Repeat("> ", n) + "# x" }, 64000},
+		{"fence in nested quotes", func(n int) string {
+			return strings.Repeat("> ", n) + "```\n" + strings.Repeat("> ", n) + "x"
+		}, 64000},
+		{"lazy lines under nested quotes", func(n int) string {
+			return strings.Repeat("> ", n) + "x\n" + strings.Repeat("y\n", n)
+		}, 5000},
+		{"nested lists", func(n int) string { return strings.Repeat("- ", n) + "x\ny" }, 2000},
+		{"quote in list", func(n int) string { return strings.Repeat("- > ", n) + "x\ny" }, 2000},
+		{"list in quote", func(n int) string { return strings.Repeat("> - ", n) + "x\ny" }, 2000},
+		{"nested strong", func(n int) string { return strings.Repeat("**", n) + "x" + strings.Repeat("**", n) }, 5000},
+		{"nested links", func(n int) string { return strings.Repeat("[", n) + "x" + strings.Repeat("](u)", n) }, 5000},
+		{"nested images", func(n int) string { return strings.Repeat("![", n) + "x" + strings.Repeat("](u)", n) }, 3000},
+		{"emphasis in links", func(n int) string { return strings.Repeat("[*", n) + "x" + strings.Repeat("*](u)", n) }, 3000},
+	} {
+		checkLinearGrowth(t, c.name, c.src(c.n), c.src(2*c.n))
+	}
+}
+
+// TestMarkdownBoundsContainerNesting holds the depth past which a marker is
+// text: a hundred quotes or list items nest, and the marker after them is
+// written escaped, inside the innermost one.
+func TestMarkdownBoundsContainerNesting(t *testing.T) {
+	quotes := str.Markdown(strings.Repeat("> ", 100) + "x")
+	if n := strings.Count(quotes, "<blockquote>"); n != 100 {
+		t.Errorf("100 nested quotes rendered %d", n)
+	}
+	deeper := str.Markdown(strings.Repeat("> ", 101) + "x\n" + strings.Repeat("> ", 101) + "- y")
+	if n := strings.Count(deeper, "<blockquote>"); n != 100 {
+		t.Errorf("101 nested quotes rendered %d", n)
+	}
+	if !strings.Contains(deeper, "<blockquote>\n<p>&gt; x\n&gt; - y</p>\n</blockquote>") {
+		t.Errorf("the marker past the bound is not text in the innermost quote: %q", deeper[len(deeper)/2-60:len(deeper)/2+60])
+	}
+
+	lists := str.Markdown(strings.Repeat("- ", 101) + "x\ny")
+	if n := strings.Count(lists, "<ul>"); n != 100 {
+		t.Errorf("101 nested list items rendered %d lists", n)
+	}
+	if !strings.Contains(lists, "<li>\n<p>- x\ny</p>\n</li>") {
+		t.Errorf("the marker past the bound is not text in the innermost item")
+	}
+}
+
+// TestMarkdownBoundsSpanNesting holds the same depth for emphasis and links:
+// the span past the hundredth is written as its markers.
+func TestMarkdownBoundsSpanNesting(t *testing.T) {
+	strong := str.Markdown(strings.Repeat("**", 101) + "x" + strings.Repeat("**", 101))
+	if n := strings.Count(strong, "<strong>"); n != 100 {
+		t.Errorf("101 nested strong spans rendered %d", n)
+	}
+	links := str.Markdown(strings.Repeat("[", 101) + "x" + strings.Repeat("](u)", 101))
+	if n := strings.Count(links, "<a "); n != 100 {
+		t.Errorf("101 nested links rendered %d", n)
+	}
+	if !strings.Contains(links, `<a href="u">[x](u)</a>`) {
+		t.Errorf("the link past the bound is not text in the innermost one")
+	}
+}
+
+// TestMarkdownRendersShallowNestingAsBefore pins what the bound must not
+// touch: quotes, lists and spans nested a few levels deep, as documents
+// actually nest them.
+func TestMarkdownRendersShallowNestingAsBefore(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{
+			"> one\n> > two\n> > > three\n> > > lazy\n>\n> back",
+			"<blockquote>\n<p>one</p>\n<blockquote>\n<p>two</p>\n<blockquote>\n<p>three\nlazy</p>\n</blockquote>\n</blockquote>\n<p>back</p>\n</blockquote>\n",
+		},
+		{
+			"> - a\n>   - b\n>\n> c",
+			"<blockquote>\n<ul>\n<li>\n<p>a</p>\n<ul>\n<li>b</li>\n</ul>\n</li>\n</ul>\n<p>c</p>\n</blockquote>\n",
+		},
+		{
+			"- a\n  > quoted\n  > - inner\n- b",
+			"<ul>\n<li>\n<p>a</p>\n<blockquote>\n<p>quoted</p>\n<ul>\n<li>inner</li>\n</ul>\n</blockquote>\n</li>\n<li>b</li>\n</ul>\n",
+		},
+		{
+			"> # Title\n> ```go\n> x := 1\n> ```",
+			"<blockquote>\n<h1>Title</h1>\n<pre><code class=\"language-go\">x := 1\n</code></pre>\n</blockquote>\n",
+		},
+		{
+			"**a *b ~~c~~ b* a** [l *e* ![i](s)](d)",
+			"<p><strong>a <em>b <del>c</del> b</em> a</strong> <a href=\"d\">l <em>e</em> <img src=\"s\" alt=\"i\" /></a></p>\n",
+		},
+	}
+	for _, c := range cases {
+		if got := str.Markdown(c.in); got != c.want {
+			t.Errorf("Markdown(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }

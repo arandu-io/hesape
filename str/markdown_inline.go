@@ -26,7 +26,13 @@ var (
 
 // renderInline renders the inline part of CommonMark: escapes, code spans,
 // autolinks, raw HTML, images, links, emphasis, strikethrough and hard breaks.
-func renderInline(s string) string {
+func renderInline(s string) string { return renderSpan(s, 0) }
+
+// renderSpan is renderInline for text that sits inside depth spans of
+// emphasis, links and images. At maxNesting none of those opens again, and
+// their markers are written as text.
+func renderSpan(s string, depth int) string {
+	nest := depth < maxNesting
 	var b strings.Builder
 	b.Grow(len(s) + len(s)/4)
 
@@ -103,8 +109,8 @@ func renderInline(s string) string {
 			b.WriteString("&quot;")
 			i++
 
-		case c == '!' && i+1 < len(s) && s[i+1] == '[':
-			if html, width := linkOrImage(s[i:], true, closeOf(i+1, i)); width > 0 {
+		case nest && c == '!' && i+1 < len(s) && s[i+1] == '[':
+			if html, width := linkOrImage(s[i:], true, closeOf(i+1, i), depth); width > 0 {
 				b.WriteString(html)
 				i += width
 				continue
@@ -112,8 +118,8 @@ func renderInline(s string) string {
 			b.WriteString("!")
 			i++
 
-		case c == '[':
-			if html, width := linkOrImage(s[i:], false, closeOf(i, i)); width > 0 {
+		case nest && c == '[':
+			if html, width := linkOrImage(s[i:], false, closeOf(i, i), depth); width > 0 {
 				b.WriteString(html)
 				i += width
 				continue
@@ -121,7 +127,7 @@ func renderInline(s string) string {
 			b.WriteString("[")
 			i++
 
-		case c == '*' || c == '_' || c == '~':
+		case nest && (c == '*' || c == '_' || c == '~'):
 			if c == '_' && !startsWord(s, i) {
 				b.WriteByte(c)
 				i++
@@ -132,7 +138,7 @@ func renderInline(s string) string {
 				delimiter[1] = 2
 			}
 			if !unclosed[delimiter] {
-				html, width, exhausted := emphasis(s[i:], c)
+				html, width, exhausted := emphasis(s[i:], c, depth)
 				if width > 0 {
 					b.WriteString(html)
 					i += width
@@ -236,7 +242,7 @@ func codeSpan(s string) (string, int) {
 // much of it it took. labelEnd is the index just past the ] that closes the
 // label, or -1 when nothing closes it. Reference links are not read: there is
 // no link reference definition parser here.
-func linkOrImage(s string, image bool, labelEnd int) (string, int) {
+func linkOrImage(s string, image bool, labelEnd, depth int) (string, int) {
 	bracket := 0
 	if image {
 		bracket = 1
@@ -252,7 +258,7 @@ func linkOrImage(s string, image bool, labelEnd int) (string, int) {
 
 	attributes := `href="` + escapeHTML(destination) + `"`
 	if image {
-		attributes = `src="` + escapeHTML(destination) + `" alt="` + escapeHTML(stripInline(text)) + `"`
+		attributes = `src="` + escapeHTML(destination) + `" alt="` + escapeHTML(stripInline(text, depth+1)) + `"`
 	}
 	if title != "" {
 		attributes += ` title="` + escapeHTML(title) + `"`
@@ -260,7 +266,7 @@ func linkOrImage(s string, image bool, labelEnd int) (string, int) {
 	if image {
 		return "<img " + attributes + " />", labelEnd + end
 	}
-	return "<a " + attributes + ">" + renderInline(text) + "</a>", labelEnd + end
+	return "<a " + attributes + ">" + renderSpan(text, depth+1) + "</a>", labelEnd + end
 }
 
 // bracketClosers answers, for every [ in s, the index just past the ] that
@@ -386,8 +392,8 @@ var anyTag = regexp.MustCompile(`<[^>]*>`)
 var htmlUnescaper = strings.NewReplacer("&lt;", "<", "&gt;", ">", "&quot;", `"`, "&amp;", "&")
 
 // stripInline is the plain text of a span, which is what an image alt carries.
-func stripInline(s string) string {
-	return htmlUnescaper.Replace(anyTag.ReplaceAllString(renderInline(s), ""))
+func stripInline(s string, depth int) string {
+	return htmlUnescaper.Replace(anyTag.ReplaceAllString(renderSpan(s, depth), ""))
 }
 
 // emphasis reads a run of emphasis markers and the span it closes, and reports
@@ -396,7 +402,7 @@ func stripInline(s string) string {
 // Two markers are strong, one is emphasis, and two tildes are the GitHub
 // flavour's strikethrough. An underscore inside a word opens nothing, which is
 // what keeps snake_case_names whole.
-func emphasis(s string, marker byte) (html string, width int, exhausted bool) {
+func emphasis(s string, marker byte, depth int) (html string, width int, exhausted bool) {
 	run := 0
 	for run < len(s) && s[run] == marker {
 		run++
@@ -431,11 +437,11 @@ func emphasis(s string, marker byte) (html string, width int, exhausted bool) {
 		inner := s[run:i]
 		switch {
 		case marker == '~':
-			return "<del>" + renderInline(inner) + "</del>", i + run, false
+			return "<del>" + renderSpan(inner, depth+1) + "</del>", i + run, false
 		case run == 2:
-			return "<strong>" + renderInline(inner) + "</strong>", i + run, false
+			return "<strong>" + renderSpan(inner, depth+1) + "</strong>", i + run, false
 		default:
-			return "<em>" + renderInline(inner) + "</em>", i + run, false
+			return "<em>" + renderSpan(inner, depth+1) + "</em>", i + run, false
 		}
 	}
 	return "", 0, true

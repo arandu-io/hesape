@@ -26,6 +26,24 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+### `str.Markdown` nests at most 100 deep, and the marker past that is text
+
+Block quotes and list items nested inside each other, and emphasis,
+strikethrough, links and images nested inside each other, were rendered at any
+depth. Every level read again the text it held, so a body that was nothing but
+nested markers rendered in time proportional to the square of its length: a
+quote nested to the length of a 60 KB body took a tenth of a second, and a run
+of nested list markers with a second line under it took seconds at 16 KB. Both
+now stop at 100 levels, block quotes and list items counted together, and the
+render takes time proportional to the length of the input. `str.InlineMarkdown`
+keeps the same bound on its spans.
+
+**What changes without a compiler error.** Past the hundredth level, a `>`, a
+list marker, an emphasis or strikethrough marker, `[` or `![` opens nothing: it
+is written as text, escaped like any other text, inside the innermost element,
+and a line that carries one continues the paragraph above it. A document nested
+100 levels or fewer renders exactly as before.
+
 ### The body is the only input of a POST, and every reader reads the same one
 
 `Request.Input`, `All`, `Only`, `Validate`, `Context.Input` and `Context.Bind`
