@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/pagination"
 )
 
 // The reads and writes taken straight off a model -- Find, Create and their
@@ -80,3 +81,17 @@ func (m *Model[T]) WithTrashed() *Builder[T] { return m.NewQuery().WithTrashed()
 
 // OnlyTrashed calls OnlyTrashed on a fresh query for the model.
 func (m *Model[T]) OnlyTrashed() *Builder[T] { return m.NewQuery().OnlyTrashed() }
+
+// Latest calls Latest on a fresh query for the model: newest first, by column
+// or by the created-at column when none is given.
+func (m *Model[T]) Latest(column ...string) *Builder[T] { return m.NewQuery().Latest(column...) }
+
+// Oldest calls Oldest on a fresh query for the model: oldest first, by column
+// or by the created-at column when none is given.
+func (m *Model[T]) Oldest(column ...string) *Builder[T] { return m.NewQuery().Oldest(column...) }
+
+// SimplePaginate calls SimplePaginate on a fresh query for the model: one
+// page, in the order the table returns it, and whether there is another.
+func (m *Model[T]) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[*T], error) {
+	return m.NewQuery().SimplePaginate(ctx, g, perPage, page, opts, columns...)
+}
