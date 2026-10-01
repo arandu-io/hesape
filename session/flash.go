@@ -171,7 +171,7 @@ var neverFlashedSuffix = []string{
 // It is a signed one-shot cookie rather than session state on purpose. The
 // forms that need it most -- sign in, sign up, password reset -- are
 // submitted by somebody who has no session at all, which is the same reason
-// CSRF.Issue("") already accepts an empty session id. A flash on the session
+// CSRF.Binding binds a token to a guest cookie when there is no session id. A flash on the session
 // would work everywhere except on the three screens it was built for.
 //
 // It is not a bag of arbitrary messages either. What it carries is what a

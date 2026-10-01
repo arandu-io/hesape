@@ -88,6 +88,31 @@ middleware.KeyBySession(store) // store is a *session.RecordStore[T]
 A wrapper that only exposes an id function implements `Exists` by asking its
 store, and must not answer `true` for an id it did not look up.
 
+### A guest's CSRF token is bound to a guest cookie, and an empty binding is refused
+
+A visitor with no session was issued `CSRF.Issue("")`, a token bound to the empty
+id — one token for every visitor, valid on anybody's sign-in form for its whole
+lifetime. `CSRF.Binding(w, r, sessionID)` now returns the session id, or for a
+guest a random id carried in the signed `arandu_csrf_guest` cookie (HttpOnly,
+SameSite=Lax, Secure unless `CSRF.Secure(false)`), setting it on `w` when the
+request has none.
+
+**What changes without a compiler error.** `Issue("")` returns
+`session.ErrUnboundToken`, and `Validate("", token)` returns `ErrTokenMismatch`.
+A caller that issued and validated with the session id alone passes the binding
+instead:
+
+```go
+// Issuing, on the page that renders the form
+token, err := csrf.Issue(csrf.Binding(w, r, sessionID))
+
+// Validating, in the middleware
+err := csrf.Validate(csrf.Binding(nil, r, sessionID), token)
+```
+
+Development over plain HTTP calls `csrf.Secure(false)`, or the browser never
+sends the guest cookie back.
+
 ### A duplicate key is `database.ErrUniqueViolation`, and `database.UniqueConstraintDetector` is gone
 
 A write the engine refuses for a duplicate key now satisfies
