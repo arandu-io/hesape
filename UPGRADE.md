@@ -73,103 +73,160 @@ question now, so it recovers from the race it exists for when the model writes
 through a `*database.DB` — before, it only recognised the violation on a
 `Connection`.
 
-### `SecurityHeaders` recebe as origens de onde uma imagem pode vir
+### Every "not found" under `database` is a `database.ErrRecordNotFound`
 
-`middleware.SecurityHeaders(dev bool)` passa a ser
-`middleware.SecurityHeaders(dev bool, imageOrigins ...string)`. Toda chamada
-compila igual e responde a mesma política, byte a byte. O `apidiff` acusa a
-mudança porque o tipo da função mudou: **só quebra o código que guarda
-`SecurityHeaders` numa variável de tipo `func(bool) http.Middleware`** — troque o
-tipo da variável por `func(bool, ...string) http.Middleware`.
+`errors.Is(err, database.ErrRecordNotFound)` now answers true for every miss in
+the collection: `query.ErrRecordNotFound` and `concerns.ErrRecordNotFound`, which
+are one value now; `ErrRecordsNotFound` in `query`, `concerns` and `database`;
+`database.ErrNotFound`; and `model.ErrModelNotFound`, which is now the same value
+as `relations.ErrModelNotFound`, so a failing read on a relation matches it too.
+The reverse stays false: `database.ErrRecordNotFound` does not match
+`ErrNotFound`, `ErrRecordsNotFound` or `ErrModelNotFound`, so a check that told
+them apart still does.
 
-As origens entram em `img-src` e em nenhuma outra diretiva. Cada uma é uma origem
-`https` nua — esquema e host, com porta opcional, sem caminho, consulta,
-credencial ou curinga —, e o que não for isso entra em panic na montagem do
-pipeline, não no primeiro request:
+No symbol was added or removed, and nothing stops compiling. **What changes
+without a compiler error:**
+
+- A `switch` that tests `database.ErrRecordNotFound` before a narrower sentinel
+  now takes that first branch for both. Test the narrow sentinel first.
+- Three messages changed, because two values became one.
+  `database.ErrRecordNotFound` and `concerns.ErrRecordNotFound` read
+  `query: no record found for the given query` (was
+  `No record found for the given query.`); `database.ErrRecordsNotFound` and
+  `concerns.ErrRecordsNotFound` read `query: no records found for the given query`
+  (was `records not found`); `relations.ErrModelNotFound` reads
+  `model: no query results for model` (was
+  `relations: no query results for the model`). A check on the text is the thing
+  to replace with `errors.Is`.
+
+Why: a routing layer answers a missing row with 404 by asking `errors.Is` about
+the canonical sentinel, and every other name for the same miss was answered with
+500.
+
+### The `html` builders refuse what the view layer refuses
+
+No signature changed. What a page receives did:
+
+- `HtmlBuilder.Link` and `HtmlBuilder.Image` hold the resolved URL to the rule
+  `view.TextURL` applies: relative, `http`, `https`, `mailto` or `tel`, with no
+  leading `//` or `/\` and no control character. A refused URL is left out of
+  the tag: the anchor keeps its text without an `href`, and the image keeps its
+  `alt` without a `src`.
+- Every `&` is encoded, including one that already opens an entity, in
+  `HtmlBuilder.Entities` and in every value and text the builders write: `&amp;`
+  becomes `&amp;amp;`. A value escaped once and passed in again now shows its
+  entities as text; pass the raw text instead. `Mailto` is unaffected.
+- `HtmlBuilder.Attributes`, and every builder that takes `Attrs`, drops the names
+  `view.ActiveAttribute` refuses, in any case: `on*`, `hx-*`, `data-hx-*`, `x-*`,
+  `data-x-*`, `@*`, `:*`, `style`, `srcdoc` and `http-equiv`. A page that set one
+  of them through these builders loses it; write it in the view's markup, or in
+  a component that takes it as a field.
+- `FormBuilder` no longer lets old input replace a hidden field that was given a
+  value, and never fills `_method` or `_token` from old input or from the model.
+  A hidden field given `""` still comes back from old input.
+
+Why: `Link("javascript:alert(1)", ...)` produced a link that ran script;
+`javascript&colon;` passed a scheme check and became a colon only in the
+browser; and a request rejected by validation chose the `_method` of the next
+submission of the same form.
+
+### `SecurityHeaders` takes the origins an image may come from
+
+`middleware.SecurityHeaders(dev bool)` becomes
+`middleware.SecurityHeaders(dev bool, imageOrigins ...string)`. Every call
+compiles the same and answers the same policy, byte for byte. `apidiff` reports
+the change because the function's type changed: **it only breaks code that
+stores `SecurityHeaders` in a variable of type `func(bool) http.Middleware`** —
+change the variable's type to `func(bool, ...string) http.Middleware`.
+
+The origins go into `img-src` and into no other directive. Each one is a bare
+`https` origin — scheme and host, with an optional port, and no path, query,
+credential or wildcard — and anything else panics when the pipeline is
+assembled, not on the first request:
 
 ```go
 middleware.SecurityHeaders(cfg.App.IsDev(), "https://cdn.example.com")
 // img-src 'self' data: https://cdn.example.com
 ```
 
-Por que existe: um disco com endereço público (`filesystem.Config.URL`,
-`Disk.URL`) é como um bucket atrás de um CDN entrega os arquivos, e a política
-padrão recusava desenhar exatamente o endereço que `Disk.URL` devolve. Script,
-estilo, fonte e conexão continuam presos a `'self'`: uma imagem de outro host
-não executa nada, e é só ela que a lista alcança.
+Why it exists: a disk with a public address (`filesystem.Config.URL`,
+`Disk.URL`) is how a bucket behind a CDN serves its files, and the default
+policy refused to draw exactly the address `Disk.URL` returns. Script, style,
+font and connection stay pinned to `'self'`: an image from another host
+executes nothing, and it is the only thing the list reaches.
 
-### Uma view responde `Vary: Accept`, e um cliente pode pedir os valores
+### A view answers `Vary: Accept`, and a client can ask for the values
 
-`ctx.View` e `ctx.Fragment` passam a negociar. Um cliente que envia
-`Accept: application/vnd.arandu.view+json` recebe o nome da view e a struct que
-o handler entregou, serializados; qualquer outro `Accept` — inclusive nenhum —
-continua recebendo a marcação, byte a byte como antes.
+`ctx.View` and `ctx.Fragment` now negotiate. A client that sends
+`Accept: application/vnd.arandu.view+json` receives the view's name and the
+struct the handler handed over, serialized; any other `Accept` — including none
+— keeps receiving the markup, byte for byte as before.
 
-Nada quebra em código: o método tem a mesma assinatura, e um navegador nunca
-envia esse tipo. **O que muda e é observável** é o cabeçalho: uma resposta
-negociada carrega `Vary: Accept`. Se você tem cache ou CDN na frente da
-aplicação, é essa linha que impede o cache de servir marcação para quem não
-desenha marcação, ou valores para um navegador que os mostraria como texto.
-Confira que o seu cache respeita `Vary` — a maioria respeita por padrão.
+Nothing breaks in code: the method has the same signature, and a browser never
+sends that type. **What changes and is observable** is the header: a negotiated
+response carries `Vary: Accept`. If you have a cache or a CDN in front of the
+application, that line is what stops the cache serving markup to a client that
+does not draw markup, or values to a browser that would show them as text.
+Check that your cache honours `Vary` — most do by default.
 
-Por que existe: um cliente que desenha a tela com os próprios controles precisa
-da mesma resposta sem o desenho. A alternativa era um segundo handler por
-cliente, e handler que existe duas vezes é segundo caminho — os dois divergem,
-e o que ninguém está olhando é o que deixa de checar alguma coisa.
+Why it exists: a client that draws the screen with its own controls needs the
+same response without the drawing. The alternative was a second handler per
+client, and a handler that exists twice is a second path — the two diverge, and
+the one nobody is watching is the one that stops checking something.
 
-### Um timestamp anulável passa a ser gravado como o não-anulável
+### A nullable timestamp is now written like the non-nullable one
 
-Duas colunas da mesma linha, escritas pelo mesmo `Save`, chegavam ao banco em
-grafias diferentes conforme o campo Go fosse valor ou ponteiro:
+Two columns of the same row, written by the same `Save`, reached the database
+spelled differently depending on whether the Go field was a value or a pointer:
 
-| coluna | tipo Go | texto gravado |
+| column | Go type | text written |
 |---|---|---|
 | `starts_at` (NOT NULL) | `time.Time` | `2026-09-09 23:14:04` |
 | `ends_at` (NULLABLE) | `*time.Time` | `2026-09-09 23:14:04 +0000 UTC` |
 
-A conversão de bindings decidia por asserção de tipo, e um `*time.Time` não é
-um `time.Time`: caía no caso padrão e nunca era formatado. A partir desta
-versão o ponteiro é atravessado **antes** da decisão, o que corrige o caso
-geral e não apenas o tempo. Um ponteiro nulo continua sendo NULL.
+The binding conversion decided by type assertion, and a `*time.Time` is not a
+`time.Time`: it fell into the default case and was never formatted. From this
+version on the pointer is followed **before** the decision, which fixes the
+general case and not only time. A nil pointer is still NULL.
 
-**Por que isso não era cosmético.** Um engine que guarda timestamp como texto
-compara essas duas grafias como texto, e a de 29 caracteres é o mais longo de
-dois prefixos iguais — então ordena **depois** do bound de 19 que uma consulta
-envia. `WHERE coluna <= ?` acertava sempre que os dois instantes diferiam e
-errava exatamente na fronteira. Como todo timestamp desse caminho é truncado ao
-segundo, a fronteira acontece: uma varredura de expiração rodando no mesmo
-segundo do fim da janela deixava o registro ativo.
+**Why this was not cosmetic.** An engine that stores a timestamp as text
+compares these two spellings as text, and the 29-character one is the longer of
+two equal prefixes — so it sorts **after** the 19-character bound a query sends.
+`WHERE column <= ?` was right whenever the two instants differed and wrong
+exactly at the boundary. Because every timestamp on this path is truncated to
+the second, the boundary happens: an expiry sweep running in the same second as
+the end of the window left the record active.
 
-**O que acontece com o que já está gravado, dito por escrito porque não é
-óbvio.** Esta correção muda a escrita e **não corrige o passado**. Uma base
-existente tem as duas grafias misturadas na mesma coluna, e não há migração de
-dados nesta versão — uma coluna pode conter as duas, e reescrever às cegas
-converteria também os valores que já estavam certos.
+**What happens to what is already stored, written down because it is not
+obvious.** This fix changes the write and **does not fix the past**. An existing
+database has both spellings mixed in the same column, and there is no data
+migration in this version — a column can hold both, and rewriting blindly would
+also convert the values that were already right.
 
-Quem precisa normalizar faz isso na própria aplicação, e o SQL abaixo mostra o
-tamanho do problema antes de mexer em nada:
-
-```sql
--- quantas linhas carregam a grafia longa
-SELECT count(*) FROM sua_tabela WHERE length(CAST(sua_coluna AS TEXT)) > 19;
-```
-
-A conversão, quando decidida, é cortar no décimo nono caractere — os dois
-prefixos são iguais até ali, que é a razão de o defeito existir:
+Whoever needs to normalise does it in their own application, and the SQL below
+shows the size of the problem before anything is touched:
 
 ```sql
-UPDATE sua_tabela
-   SET sua_coluna = substr(CAST(sua_coluna AS TEXT), 1, 19)
- WHERE length(CAST(sua_coluna AS TEXT)) > 19;
+-- how many rows carry the long spelling
+SELECT count(*) FROM your_table WHERE length(CAST(your_column AS TEXT)) > 19;
 ```
 
-Isso é uma migração da aplicação, não do framework: só quem conhece a tabela
-sabe se ela pode ser reescrita e quando.
+The conversion, once decided, is to cut at the nineteenth character — the two
+prefixes are equal up to there, which is the reason the defect exists:
 
-**Não verificado:** a medição foi feita contra SQLite, que é o que reproduz o
-defeito por guardar timestamp como texto. Em PostgreSQL o driver pode recusar a
-string em vez de gravá-la, o que troca um erro silencioso por um ruidoso —
-melhor, e ainda assim um defeito. A correção vale para os dois.
+```sql
+UPDATE your_table
+   SET your_column = substr(CAST(your_column AS TEXT), 1, 19)
+ WHERE length(CAST(your_column AS TEXT)) > 19;
+```
+
+That is a migration of the application, not of the framework: only whoever
+knows the table knows whether it can be rewritten, and when.
+
+**Not verified:** the measurement was made against SQLite, which is what
+reproduces the defect by storing timestamps as text. On PostgreSQL the driver
+may refuse the string instead of writing it, which trades a silent error for a
+loud one — better, and still a defect. The fix applies to both.
 
 ### A publication is refused when it carries a directory named `vendor`
 
