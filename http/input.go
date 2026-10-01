@@ -268,12 +268,31 @@ func (r *Request) Boolean(key string, def ...bool) bool {
 	case bool:
 		return v
 	case string:
-		s := strings.ToLower(v)
-		return s == "1" || s == "true" || s == "on" || s == "yes"
+		return truthy(v)
 	case nil:
 		return d
 	}
 	return d
+}
+
+// truthy reports whether a form value spells true: "1", "true", "on" or "yes",
+// in any case. "on" is what a checked checkbox with no value attribute sends.
+func truthy(s string) bool {
+	switch strings.ToLower(s) {
+	case "1", "true", "on", "yes":
+		return true
+	}
+	return false
+}
+
+// falsy reports whether a form value spells false: "", "0", "false", "off" or
+// "no", in any case.
+func falsy(s string) bool {
+	switch strings.ToLower(s) {
+	case "", "0", "false", "off", "no":
+		return true
+	}
+	return false
 }
 
 // Integer is the value as an int64.
