@@ -329,3 +329,24 @@ func TestCreateHandsBackTheGrantsTenant(t *testing.T) {
 		}
 	}
 }
+
+// TestUniqueHoldsAcrossTheRowsOfOneRun: the definition runs once per row and
+// asks Unique each time, over a domain barely larger than the run.
+func TestUniqueHoldsAcrossTheRowsOfOneRun(t *testing.T) {
+	names := make([]string, 60)
+	for i := range names {
+		names[i] = "name-" + string(rune('a'+i%26)) + string(rune('a'+i/26))
+	}
+	f := factories.For(model.NewModel[user]("users", nil, nil, nil), func(f faker.Faker) user {
+		return user{Name: f.Unique().Pick(names...)}
+	})
+
+	rows := made(t, f.Count(50))
+	seen := map[string]bool{}
+	for i, row := range rows {
+		if seen[row.Name] {
+			t.Fatalf("row %d repeated %q", i, row.Name)
+		}
+		seen[row.Name] = true
+	}
+}

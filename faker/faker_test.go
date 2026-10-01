@@ -1,6 +1,7 @@
 package faker_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -121,5 +122,28 @@ func TestTheGeneratedValuesLookLikeTheirNames(t *testing.T) {
 	}
 	if !at.Equal(at.Truncate(time.Second)) {
 		t.Errorf("Time = %v, want it truncated to the second", at)
+	}
+}
+
+// TestUniqueRemembersAcrossCalls: a factory definition calls f.Unique() once
+// per row, so a memory made per call never saw the previous row's value.
+func TestUniqueRemembersAcrossCalls(t *testing.T) {
+	f := faker.New(3)
+	options := make([]string, 60)
+	for i := range options {
+		options[i] = fmt.Sprintf("option-%02d", i)
+	}
+
+	seen := map[string]bool{}
+	for i := range 50 {
+		got := f.Unique().Pick(options...)
+		if seen[got] {
+			t.Fatalf("call %d repeated %q", i, got)
+		}
+		seen[got] = true
+	}
+
+	if faker.New(3).Unique() == f.Unique() {
+		t.Error("two Fakers share one memory")
 	}
 }

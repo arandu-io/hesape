@@ -68,6 +68,11 @@ type Faker interface {
 	Pick(options ...string) string
 	// Unique returns a Faker that does not repeat a value it has already
 	// answered for the same method.
+	//
+	// The memory belongs to the Faker Unique is called on, not to the value it
+	// returns: every call answers the same memory, so a factory definition that
+	// asks f.Unique().Email() once per row never repeats an address across the
+	// rows of one run. It is never reset; a fresh Faker, from New, starts empty.
 	Unique() Faker
 }
 
@@ -82,6 +87,10 @@ func New(seed int64) Faker {
 
 type faker struct {
 	rand *rand.Rand
+
+	// unique is the memory Unique answers with, made on the first call and kept
+	// for the life of this Faker.
+	unique *uniqueFaker
 }
 
 func (f *faker) FirstName() string { return f.Pick(firstNames...) }
@@ -180,11 +189,18 @@ func (f *faker) Pick(options ...string) string {
 
 // Unique returns a Faker whose every method refuses to repeat itself.
 //
-// The uniqueness is per method and per returned Faker, which is what a caller
-// asking for unique emails means. It gives up after a bounded number of tries
+// The uniqueness is per method and per Faker: each call answers the same
+// memory, made on the first, so a definition run once per row and asking
+// Unique on every row still never repeats. Nothing resets it -- a caller that
+// wants an empty memory asks New for another Faker. A factory does, once per
+// Make or Create, so uniqueness holds across the rows of one run and not
+// across two runs; two runs with one seed produce the same values anyway. It gives up after a bounded number of tries
 // and returns the value anyway rather than looping: a word list of forty words
 // asked for a hundred unique words has no answer, and hanging is worse than
 // repeating.
 func (f *faker) Unique() Faker {
-	return &uniqueFaker{inner: f, seen: map[string]map[string]struct{}{}}
+	if f.unique == nil {
+		f.unique = &uniqueFaker{inner: f, seen: map[string]map[string]struct{}{}}
+	}
+	return f.unique
 }

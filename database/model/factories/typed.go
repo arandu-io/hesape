@@ -153,6 +153,10 @@ func (f *Factory[T]) AfterCreating(fn func(context.Context, auth.Grant, *T) erro
 // the model, so a made row is a row that can then be saved. The error is the
 // model's: a definition whose value does not fit the field it names fails here
 // rather than at the statement.
+//
+// Every row of one run is built with one Faker, so a value the definition asks
+// of f.Unique() is not repeated across the rows. The next run starts a fresh
+// Faker, with an empty memory.
 func (f *Factory[T]) Make() ([]*T, error) {
 	built, err := f.make()
 	if err != nil {
