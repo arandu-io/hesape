@@ -404,3 +404,38 @@ func TestAnOversizeFlashDropsOldInputBeforeMessages(t *testing.T) {
 		t.Errorf("old title = %q, want %q -- the cheap field cost nothing to keep", got, "A title")
 	}
 }
+
+// TestASecretIsRecognisedHoweverItsNameIsSpelled: the rule was an exact list of
+// lowercase names and underscore suffixes, so newPassword, currentPassword,
+// senha, pin, cvv, card_number and api_key went back into the redrawn form and
+// into the flash cookie, which is signed and not encrypted.
+func TestASecretIsRecognisedHoweverItsNameIsSpelled(t *testing.T) {
+	withheld := []string{
+		"newPassword", "currentPassword", "new_password", "current_password",
+		"new-password", "NEW_PASSWORD", "password1", "user[password]", "user.password",
+		"senha", "nova_senha", "senhaAtual",
+		"pin", "card_pin", "newPin",
+		"cvv", "cvc", "card_cvv", "cvv2", "CVC",
+		"card_number", "cardnumber", "cardNumber", "credit_card",
+		"api_key", "apikey", "apiKey", "X-API-Key", "private_key",
+		"secret", "clientSecret", "token", "accessToken", "csrftoken",
+		"otp", "totp", "loginOtp", "code", "securityCode",
+		"passwd", "pwd", "passphrase",
+	}
+	returned := []string{
+		"email", "name", "laptop", "desktop", "max_tokens", "tokenizer",
+		"shipping", "pinned", "spinner", "opinion", "mapping",
+		"secretary", "company", "description",
+		"postal_code", "zip_code", "promo_code", "barcode", "postcode",
+	}
+	for _, field := range withheld {
+		if !session.IsSecretField(field) {
+			t.Errorf("IsSecretField(%q) = false: its value goes back into the page and the flash cookie", field)
+		}
+	}
+	for _, field := range returned {
+		if session.IsSecretField(field) {
+			t.Errorf("IsSecretField(%q) = true: an ordinary field comes back empty", field)
+		}
+	}
+}

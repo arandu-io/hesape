@@ -113,6 +113,21 @@ err := csrf.Validate(csrf.Binding(nil, r, sessionID), token)
 Development over plain HTTP calls `csrf.Secure(false)`, or the browser never
 sends the guest cookie back.
 
+### `session.IsSecretField` reads a name however it is spelled
+
+The rule was an exact list of lowercase names and underscore suffixes, so
+`newPassword`, `currentPassword`, `senha`, `pin`, `cvv`, `card_number` and
+`api_key` went back into the redrawn form and into the flash cookie. A name is
+now read lowercased, cut into words at separators and case changes, and
+withheld when it contains a secret word (`password`, `secret`, `token`, `otp`,
+`pin`, `cvv`, `cvc`, `apikey`, …), a fragment no ordinary name contains
+(`password`, `senha`, `cardnumber`, …), or ends in a credential (`…token`,
+`…recoverycode`, …).
+
+**What changes without a compiler error.** More fields come back empty after a
+rejected form, and the exception report withholds the same ones. Ordinary names
+such as `max_tokens`, `shipping`, `postal_code` and `laptop` still come back.
+
 ### A duplicate key is `database.ErrUniqueViolation`, and `database.UniqueConstraintDetector` is gone
 
 A write the engine refuses for a duplicate key now satisfies

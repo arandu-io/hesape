@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/arandu-io/hesape/encryption"
 )
@@ -62,107 +63,117 @@ const (
 	flashOldPrefix   = "o:"
 )
 
-// neverFlashed are the field names whose VALUE never goes back in the browser.
+// The rules below decide which field's VALUE never goes back in the browser.
 //
-// A name belongs on one of these two lists when putting its value back on the
-// page would redisplay a credential, a one-time code, or a request token that is
-// already stale by the time the redirect lands. The two ways of being wrong cost
-// different amounts, and that is what decides how wide the rules are: a name
-// caught by mistake comes back as an empty box somebody retypes, while a name
-// missed comes back as a secret written into the HTML and into the old input a
-// debug dump prints. So the rules are written to over-catch.
+// A name is caught when putting its value back on the page would redisplay a
+// credential, a one-time code, a payment card's secrets or a request token that
+// is already stale by the time the redirect lands. The two ways of being wrong
+// cost different amounts, and that is what decides how wide the rules are: a
+// name caught by mistake comes back as an empty box somebody retypes, while a
+// name missed comes back as a secret written into the HTML and into the old
+// input a debug dump prints. So the rules are written to over-catch.
 //
-// This half holds the BARE names, and only those. An exact match is the one rule
-// that says "the whole field is called this", which is what a bare name needs:
-// matching the end of the name instead would take laptop for otp. A name with a
-// qualifier in front of it belongs in neverFlashedSuffix, which is why
-// current_password and new_password are not repeated here -- a name covered
-// twice is a name no test can prove either rule still catches.
-//
-// secret is here although it is an ordinary English word, and the cost is real:
-// a checkbox called is_secret comes back unticked. That is the cheap side of the
-// trade above, and it is written down so the next reader knows the name was
-// weighed rather than copied in.
+// Every rule reads the name the same way: lowercased, cut into words at an
+// underscore, a hyphen, a dot, a bracket or a change from lower to upper case,
+// and joined back without separators. newPassword, new-password, new_password
+// and NEW_PASSWORD are one name to every rule, which an exact list of spellings
+// never was: it caught new_password and let newPassword through.
 //
 // What is dropped is the value alone. The MESSAGES for these fields are flashed
 // like any other -- an empty password box that does not say why it was rejected
 // is the failure being fixed here, not the fix.
-var neverFlashed = map[string]bool{
-	"password":              true,
-	"passwords":             true,
-	"password_confirmation": true,
-	"token":                 true,
-	"tokens":                true,
-	"otp":                   true,
-	"secret":                true,
-	"secrets":               true,
 
-	// The single-use codes. Each one is worth the whole account by itself and
-	// is spent once, so a single redrawn form that hands one back is the whole
-	// of the damage -- and the screens carrying them are forms like any other,
-	// rejected for a stale request token or for an empty box beside them.
-	//
-	// They are named one at a time rather than caught by a rule on the end of
-	// the name, for the reason written on neverFlashedSuffix.
-	//
-	// code is bare because that is what a prompt asking for one calls its
-	// field when it asks for nothing else. The cost is a checkout that redraws
-	// its coupon box empty, which is the trade secret is on this list for.
-	// The plurals are here because a screen that issues a set names the set.
-	"code":              true,
-	"recovery_code":     true,
-	"recovery_codes":    true,
-	"backup_code":       true,
-	"backup_codes":      true,
-	"two_factor_code":   true,
-	"otp_code":          true,
-	"mfa_code":          true,
-	"verification_code": true,
-	"confirmation_code": true,
+// secretNames are whole names, compared after the separators are removed.
+//
+// code is here because that is what a prompt asking for one calls its field
+// when it asks for nothing else. The cost is a checkout that redraws its coupon
+// box empty, the cheap side of the trade above. The plurals are here because a
+// screen that issues a set names the set; tokens is here and not among the
+// words, because max_tokens is a number somebody typed.
+var secretNames = map[string]bool{
+	"tokens":  true,
+	"secrets": true,
+	"code":    true,
+	"pan":     true,
 }
 
-// neverFlashedSuffix catches the same secrets behind a qualifier, which is the
-// part of a field name whoever writes the form invents freely.
+// secretWords are words that make a field secret wherever they stand in its
+// name: client_secret, accessToken, card-pin, login_otp, card_cvv. Each is the
+// credential itself, whatever words a form author puts around it.
 //
-// current_password, owner_password and admin_password are one secret with three
-// prefixes; access_token, api_token and refresh_token are one token with three.
-// An exact list that names two of any such group looks complete while letting
-// the third through, and it is a list somebody has to remember to extend. The
-// CSRF field is called _token, so this rule covers it as well as csrf_token.
+// They are matched as whole words and not as substrings, and that is what keeps
+// short ones off ordinary fields: pin is not found in shipping or pinned, and
+// otp is not found in laptop.
 //
-// Every entry is anchored on the underscore, and that anchor is what keeps a
-// rule this wide off ordinary fields: otp without it matches laptop and desktop.
+// secret is here although it is an ordinary English word, and the cost is real:
+// a checkbox called is_secret comes back unticked. That is the cheap side of the
+// trade, written down so the next reader knows the name was weighed rather than
+// copied in.
+var secretWords = map[string]bool{
+	"password":   true,
+	"passwords":  true,
+	"passwd":     true,
+	"pwd":        true,
+	"passphrase": true,
+	"senha":      true,
+	"secret":     true,
+	"token":      true,
+	"otp":        true,
+	"totp":       true,
+	"pin":        true,
+	"cvv":        true,
+	"cvv2":       true,
+	"cvc":        true,
+	"cvc2":       true,
+	"apikey":     true,
+}
+
+// secretFragments are found anywhere in the joined name, so they catch a name
+// whose author ran the words together: newpassword, senhaatual, xapikey,
+// cardnumber. Only fragments no ordinary field name contains belong here --
+// token and secret do not qualify (tokenizer, secretary), and they are caught as
+// words and as endings instead.
+var secretFragments = []string{
+	"password",
+	"passwd",
+	"passphrase",
+	"senha",
+	"apikey",
+	"privatekey",
+	"secretkey",
+	"cardnumber",
+	"creditcard",
+	"cvv",
+	"cvc",
+}
+
+// secretEndings catch a credential at the end of a joined name with no
+// separator before it: csrftoken, clientsecret, loginotp.
 //
-// # Why _code is not here
-//
-// Every rule above works because the word it ends on IS the credential:
-// anything whose name ends in _password is a password, whoever wrote the form.
-// code is not such a word. What decides whether a field called something_code
-// holds a credential is the word in FRONT of it, and on that side the ordinary
-// ones are the majority -- postal_code, country_code, area_code, status_code,
-// currency_code, promo_code are all values somebody typed and expects to get
-// back. A rule that empties a postcode box is a rule that gets removed within
-// the week, and removing it would take the recovery code out with it.
-//
-// So the credential-headed compounds are named one at a time on both lists:
-// the unqualified form in neverFlashed, and the qualified form here, the same
-// pairing password and _password already are. That is a longer list than a
-// suffix would be, and it is the length that makes it safe to keep.
-var neverFlashedSuffix = []string{
-	"_password",
-	"_password_confirmation",
-	"_token",
-	"_otp",
-	"_secret",
-	"_recovery_code",
-	"_recovery_codes",
-	"_backup_code",
-	"_backup_codes",
-	"_two_factor_code",
-	"_otp_code",
-	"_mfa_code",
-	"_verification_code",
-	"_confirmation_code",
+// The credential codes are here too, one at a time. What decides whether a
+// field ending in code holds a credential is the word in FRONT of it, and on
+// that side the ordinary ones are the majority -- postal_code, country_code,
+// area_code, status_code, currency_code, promo_code are all values somebody
+// typed and expects to get back. A rule that empties a postcode box is a rule
+// that gets removed within the week, and removing it would take the recovery
+// code out with it. So each credential code is named, and caught behind any
+// qualifier.
+var secretEndings = []string{
+	"token",
+	"secret",
+	"otp",
+	"pwd",
+	"recoverycode",
+	"recoverycodes",
+	"backupcode",
+	"backupcodes",
+	"twofactorcode",
+	"otpcode",
+	"mfacode",
+	"verificationcode",
+	"confirmationcode",
+	"securitycode",
+	"cardcode",
 }
 
 // Flash carries the messages and the input of a rejected request across the one
@@ -171,8 +182,9 @@ var neverFlashedSuffix = []string{
 // It is a signed one-shot cookie rather than session state on purpose. The
 // forms that need it most -- sign in, sign up, password reset -- are
 // submitted by somebody who has no session at all, which is the same reason
-// CSRF.Binding binds a token to a guest cookie when there is no session id. A flash on the session
-// would work everywhere except on the three screens it was built for.
+// CSRF.Binding binds a token to a guest cookie when there is no session id. A
+// flash on the session would work everywhere except on the three screens it was
+// built for.
 //
 // It is not a bag of arbitrary messages either. What it carries is what a
 // rejected request produced: the errors, and what was typed. A general-purpose
@@ -372,9 +384,11 @@ func redactInputValue(value any) any {
 	return value
 }
 
-// IsSecretField reports whether a field's value never goes back in the browser:
-// the bare names matched whole, and the same secrets behind a qualifier matched
-// on the end of the name. The name is compared lowercased.
+// IsSecretField reports whether a field's value never goes back in the browser.
+// The name is read case-insensitively and with its separators ignored, and is
+// secret when it is one of the secret names, contains a secret word or
+// fragment, or ends in a secret ending; the variables above say which is which
+// and why.
 //
 // It is exported because the flash cookie is not the only place a rejected
 // request's input is dropped, and the alternative is a second list answering
@@ -382,16 +396,60 @@ func redactInputValue(value any) any {
 // gained token, otp and the qualified names would have been the only one that
 // had them.
 func IsSecretField(field string) bool {
-	name := strings.ToLower(field)
-	if neverFlashed[name] {
+	words := fieldWords(field)
+	joined := strings.Join(words, "")
+	if secretNames[joined] {
 		return true
 	}
-	for _, suffix := range neverFlashedSuffix {
-		if strings.HasSuffix(name, suffix) {
+	for _, word := range words {
+		if secretWords[word] {
+			return true
+		}
+	}
+	for _, fragment := range secretFragments {
+		if strings.Contains(joined, fragment) {
+			return true
+		}
+	}
+	for _, ending := range secretEndings {
+		if strings.HasSuffix(joined, ending) {
 			return true
 		}
 	}
 	return false
+}
+
+// fieldWords cuts a field name into lowercase words: at every character that
+// is not a letter or a digit, and where a lowercase letter or a digit is
+// followed by an uppercase one, so newPassword is new and password. A run of
+// capitals stays one word until the last of them starts a lowercase one, so
+// APIKey is api and key.
+func fieldWords(field string) []string {
+	runes := []rune(field)
+	var words []string
+	var current []rune
+	flush := func() {
+		if len(current) > 0 {
+			words = append(words, strings.ToLower(string(current)))
+			current = current[:0]
+		}
+	}
+	for i, r := range runes {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			flush()
+			continue
+		}
+		if unicode.IsUpper(r) && len(current) > 0 {
+			prev := runes[i-1]
+			nextLower := i+1 < len(runes) && unicode.IsLower(runes[i+1])
+			if unicode.IsLower(prev) || unicode.IsDigit(prev) || (unicode.IsUpper(prev) && nextLower) {
+				flush()
+			}
+		}
+		current = append(current, r)
+	}
+	flush()
+	return words
 }
 
 // fit encodes and signs the flash, giving up what Write documents until the
