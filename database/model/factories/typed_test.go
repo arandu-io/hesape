@@ -302,3 +302,30 @@ func TestForParentCreatesOneParentBeforeAnyChild(t *testing.T) {
 		t.Errorf("the first table written was %q, want users -- the parent has to exist first", conn.first())
 	}
 }
+
+// tenanted is a row with a tenant column, which the factory never fills.
+type tenanted struct {
+	ID       int64  `db:"id"`
+	TenantID string `db:"tenant_id"`
+	Name     string `db:"name"`
+}
+
+// TestCreateHandsBackTheGrantsTenant: the rows are inserted with the Grant's
+// tenant, and the rows Create returns carry it, whatever the definition said.
+func TestCreateHandsBackTheGrantsTenant(t *testing.T) {
+	conn := newRecordingConnection()
+	f := factories.For(newModelOn[tenanted](conn, "things"), func(f faker.Faker) tenanted {
+		return tenanted{Name: f.Name(), TenantID: "globex"}
+	})
+	g := auth.SystemGrant("write", "acme")
+
+	rows, err := f.Count(3).Create(context.Background(), g)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for i, row := range rows {
+		if row.TenantID != auth.Tenant(g) {
+			t.Fatalf("row %d: TenantID = %q, want %q", i, row.TenantID, auth.Tenant(g))
+		}
+	}
+}

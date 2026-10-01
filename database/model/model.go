@@ -468,6 +468,17 @@ func (m *Model[T]) performUpdate(ctx context.Context, g auth.Grant) (bool, error
 	}
 
 	dirty := m.GetDirty()
+	// A tenant field the caller changed is not written: the statement keeps the
+	// Grant's tenant. The entity is put back to it, so that what the caller
+	// holds after the save is the row as stored.
+	if column := m.TenantColumn; column != "" {
+		if _, changed := dirty[column]; changed {
+			if err := m.stampTenant(g); err != nil {
+				return false, err
+			}
+			dirty = m.GetDirty()
+		}
+	}
 	if len(dirty) == 0 {
 		return true, nil
 	}
@@ -491,11 +502,21 @@ func (m *Model[T]) performInsert(ctx context.Context, g auth.Grant) (bool, error
 	if err := m.setUniqueID(); err != nil {
 		return false, err
 	}
+	// The row is written with the Grant's tenant whatever the entity holds, so
+	// the entity is given it too: listeners see the row that will be written,
+	// and the value handed back afterwards matches the stored one.
+	if err := m.stampTenant(g); err != nil {
+		return false, err
+	}
 	if err := m.fireModelEvent(Creating); err != nil {
 		return false, err
 	}
 	if m.UsesTimestamps() {
 		m.UpdateTimestamps()
+	}
+	// Again after Creating, which may have assigned the field.
+	if err := m.stampTenant(g); err != nil {
+		return false, err
 	}
 
 	attributes := m.getAttributesForInsert()
@@ -525,6 +546,29 @@ func (m *Model[T]) performInsert(ctx context.Context, g auth.Grant) (bool, error
 		return false, err
 	}
 	return true, nil
+}
+
+// stampTenant sets the entity's tenant field to the Grant's tenant.
+//
+// Every write puts auth.Tenant(g) in the tenant column whatever the entity
+// carries, so without this the value a save hands back would disagree with the
+// row it stored -- empty after a Create from a map, since Fill never writes the
+// tenant. A model with no tenant column, or an entity with no field for it, is
+// left alone.
+func (m *Model[T]) stampTenant(g auth.Grant) error {
+	column := m.TenantColumn
+	if column == "" {
+		return nil
+	}
+	entity, ok := m.entityValue()
+	if !ok {
+		return ErrUnwired
+	}
+	if _, declared := fieldByColumn(entity.Type(), column); !declared {
+		return nil
+	}
+	_, err := m.setAttribute(column, auth.Tenant(g))
+	return err
 }
 
 // getAttributesForInsert returns the row's columns for an insert statement.

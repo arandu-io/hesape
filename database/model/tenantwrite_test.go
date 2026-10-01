@@ -130,3 +130,102 @@ func TestCreateTakesTheTenantFromTheGrantAndTheKeyFromTheMap(t *testing.T) {
 		t.Fatalf("the key the map named was not inserted: %#v", conn.last().Bindings)
 	}
 }
+
+// TestCreateHandsBackTheTenantItWrote: Fill skips the tenant column, and the
+// insert wrote the Grant's tenant into the row but not into the entity, so a
+// caller reading TenantID off what Create returned read the empty string.
+func TestCreateHandsBackTheTenantItWrote(t *testing.T) {
+	m, _ := sqliteNotes()
+	created, err := m.Create(context.Background(), acmeNotes,
+		map[string]any{"id": "n1", "body": "hello", "tenant_id": "globex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.TenantID != auth.Tenant(acmeNotes) {
+		t.Fatalf("TenantID = %q, want %q", created.TenantID, auth.Tenant(acmeNotes))
+	}
+}
+
+// TestSavingANewStructHandsBackTheTenantItWrote: the struct path, with the
+// field set by hand to another tenant. The row takes the Grant's tenant, and so
+// does the value the caller holds.
+func TestSavingANewStructHandsBackTheTenantItWrote(t *testing.T) {
+	m, conn := sqliteNotes()
+	fresh, err := m.NewInstance(nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	*fresh.Entity = note{ID: "n1", TenantID: "globex", Body: "hello"}
+	if _, err := fresh.Save(context.Background(), acmeNotes); err != nil {
+		t.Fatal(err)
+	}
+	assertNotWritten(t, conn, "globex")
+	if fresh.Entity.TenantID != "acme" {
+		t.Fatalf("TenantID = %q, want acme", fresh.Entity.TenantID)
+	}
+	if fresh.IsDirty() {
+		t.Fatalf("a saved row is dirty: %v", fresh.GetDirty())
+	}
+}
+
+// TestACreatingListenerCannotLeaveTheEntityOnAnotherTenant: a listener runs
+// after the first stamp, and the row is still written with the Grant's tenant.
+func TestACreatingListenerCannotLeaveTheEntityOnAnotherTenant(t *testing.T) {
+	m, conn := sqliteNotes()
+	m.RegisterModelEvent(Creating, func(n *Model[note]) error {
+		n.Entity.TenantID = "globex"
+		return nil
+	})
+	created, err := m.Create(context.Background(), acmeNotes, map[string]any{"id": "n1", "body": "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNotWritten(t, conn, "globex")
+	if created.TenantID != "acme" {
+		t.Fatalf("TenantID = %q, want acme", created.TenantID)
+	}
+}
+
+// TestSaveOfAMovedFieldPutsTheEntityBack: the update keeps the row with the
+// Grant's tenant, and the entity is put back to match it.
+func TestSaveOfAMovedFieldPutsTheEntityBack(t *testing.T) {
+	m, conn := sqliteNotes()
+	loaded, _ := m.NewInstance(nil, true)
+	_ = loaded.SetRawAttributes(map[string]any{"id": "n1", "tenant_id": "acme", "body": "x"}, true)
+
+	loaded.Entity.TenantID = "globex"
+	loaded.Entity.Body = "edited"
+	if _, err := loaded.Save(context.Background(), acmeNotes); err != nil {
+		t.Fatal(err)
+	}
+	assertNotWritten(t, conn, "globex")
+	if loaded.Entity.TenantID != "acme" || loaded.Entity.Body != "edited" {
+		t.Fatalf("entity = %+v, want body edited on tenant acme", *loaded.Entity)
+	}
+}
+
+// TestAnEntityWithNoTenantFieldStillSaves: the tenant column is written from
+// the Grant, and there is no field to hand it back in.
+func TestAnEntityWithNoTenantFieldStillSaves(t *testing.T) {
+	type bare struct {
+		ID   string `db:"id"`
+		Body string `db:"body"`
+	}
+	conn := newTestConnection()
+	m := NewModel[bare]("notes", conn, grammars.NewSQLiteGrammar(), &testProcessor{conn: conn})
+	m.KeyType = "string"
+	m.Incrementing = false
+	m.Timestamps = false
+	if _, err := m.Create(context.Background(), acmeNotes, map[string]any{"id": "n1", "body": "x"}); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, binding := range conn.last().Bindings {
+		if binding == "acme" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the Grant's tenant was not inserted: %#v", conn.last().Bindings)
+	}
+}

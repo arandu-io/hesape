@@ -1135,6 +1135,9 @@ func (b *Builder[T]) Exists(ctx context.Context, g auth.Grant) (bool, error) {
 }
 
 // Create returns a new model, filled with attributes and saved.
+//
+// A tenant in attributes is ignored, as Fill ignores it. The row is written
+// with the Grant's tenant, and the entity returned carries that tenant.
 func (b *Builder[T]) Create(ctx context.Context, g auth.Grant, attributes map[string]any) (*T, error) {
 	instance, err := b.create(ctx, g, attributes)
 	if err != nil {
