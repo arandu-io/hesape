@@ -69,7 +69,7 @@ type Layout interface {
 	// The banner is the layout's, which is why these two are here and the
 	// per-field message is not: a page body draws "must be at least 12
 	// characters" under the box it belongs to, and the layout draws the summary
-	// once, above everything. First and OldValue are promoted methods on
+	// once, above everything. FieldError and OldValue are promoted methods on
 	// Page for the body to call, deliberately outside this interface -- Layout
 	// is what the LAYOUT asks for.
 	Any() bool
@@ -268,7 +268,7 @@ func (p Page) WithToken(token string) Page {
 	return p
 }
 
-// First returns the first message for name, or empty.
+// FieldError returns the first message for the input called name, or empty.
 //
 // One message and not all of them, because that is what a form draws: the box
 // has room for one line, and the first is the one that names what to change.
@@ -279,15 +279,21 @@ func (p Page) WithToken(token string) Page {
 //		Name: "email", Label: "Email", Type: "email", Page: .Page,
 //	}) !!}
 //
-// components.Page is the two-method interface Page satisfies -- First and
-// OldOr -- so the name is written once, in one place, instead of once per prop
-// beside it. This comment used to say the message went in as `Error: ...`, a
-// prop that does not exist, and nine published screens were written from it.
+// components.Page is the two-method interface Page satisfies -- FieldError
+// and OldOr -- so the name is written once, in one place, instead of once per
+// prop beside it, and a page struct that embeds Page satisfies it without
+// declaring either method itself.
 //
 // Empty for a field that was accepted, and empty for every field on a page
 // nobody was rejected on -- so a screen asks unconditionally and draws nothing
 // when there is nothing. There is no @error directive and none is needed.
-func (p Page) First(name string) string { return p.Errors.First(name) }
+func (p Page) FieldError(name string) string { return p.Errors.First(name) }
+
+// First returns the first message for name, or empty.
+//
+// Deprecated: use FieldError, which is the name the inputs ask for. First
+// answers the same message.
+func (p Page) First(name string) string { return p.FieldError(name) }
 
 // Get returns every message for name, for the rare screen that lists them.
 func (p Page) Get(name string) []string { return p.Errors.Get(name) }

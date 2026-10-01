@@ -27,8 +27,8 @@ func TestPageCarriesTheErrorsOfTheRequestThatRedirectedHere(t *testing.T) {
 	page := view.New(ctx, "Sign up").WithToken("csrf-token")
 
 	// Nothing in the handler mentioned errors, and the errors are on the page.
-	if got := page.First("password"); got != "must be at least 12 characters" {
-		t.Errorf("First = %q", got)
+	if got := page.FieldError("password"); got != "must be at least 12 characters" {
+		t.Errorf("FieldError = %q", got)
 	}
 	if got := page.OldValue("email"); got != "ada@example.test" {
 		t.Errorf("OldValue = %q", got)
@@ -54,8 +54,8 @@ func TestAPageNobodyWasRejectedOnDrawsNothing(t *testing.T) {
 	if page.Any() {
 		t.Error("Any said yes on a fresh page")
 	}
-	if got := page.First("email"); got != "" {
-		t.Errorf("First = %q", got)
+	if got := page.FieldError("email"); got != "" {
+		t.Errorf("FieldError = %q", got)
 	}
 	if got := page.OldValue("email"); got != "" {
 		t.Errorf("OldValue = %q", got)
@@ -78,7 +78,7 @@ func TestOldValueIsEmptyForAPasswordField(t *testing.T) {
 	if got := page.OldValue("password"); got != "" {
 		t.Errorf("OldValue(password) = %q", got)
 	}
-	if got := page.First("password"); got == "" {
+	if got := page.FieldError("password"); got == "" {
 		t.Error("the password box would come back empty and silent")
 	}
 }
@@ -119,8 +119,8 @@ func TestErrorSummaryNamesTheFieldAndTheBareMessageDoesNot(t *testing.T) {
 	// The same message drawn under its own labelled box says only what to
 	// change. The name is prepended for the banner and baked into nothing
 	// else.
-	if got := page.First("email"); got != "is not a valid email address" {
-		t.Errorf("First = %q, want the bare sentence", got)
+	if got := page.FieldError("email"); got != "is not a valid email address" {
+		t.Errorf("FieldError = %q, want the bare sentence", got)
 	}
 }
 
@@ -170,5 +170,39 @@ func TestNewWithoutAnIssuedTokenCarriesNone(t *testing.T) {
 	ctx := hhttp.NewContext(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil), nil, nil)
 	if got := view.New(ctx, "Home").CSRFToken(); got != "" {
 		t.Fatalf("CSRFToken = %q, want empty", got)
+	}
+}
+
+// inputPage is the interface the form inputs ask of the page they are handed:
+// the message for their own name, and what was typed into it.
+type inputPage interface {
+	FieldError(name string) string
+	OldOr(name, fallback string) string
+}
+
+// TestAPageThatEmbedsPageIsWhatAnInputAsksFor: every generated form declared
+// FieldError over First by hand, once per view, because Page did not have it.
+// Embedding Page is now the whole of it.
+func TestAPageThatEmbedsPageIsWhatAnInputAsksFor(t *testing.T) {
+	type createData struct {
+		view.Page
+		StoreURL string
+	}
+	var _ inputPage = createData{}
+
+	state := hhttp.State{Errors: validation.Errors{"title": {"is required", "is too short"}}}
+	req := httptest.NewRequest(http.MethodGet, "/posts/new", nil)
+	req = req.WithContext(hhttp.WithState(req.Context(), state))
+	data := createData{Page: view.New(hhttp.NewContext(httptest.NewRecorder(), req, nil, nil), "New post")}
+
+	var page inputPage = data
+	if got := page.FieldError("title"); got != "is required" {
+		t.Errorf("FieldError = %q, want the first message", got)
+	}
+	if got := page.FieldError("body"); got != "" {
+		t.Errorf("FieldError for an accepted field = %q, want empty", got)
+	}
+	if got := data.First("title"); got != page.FieldError("title") {
+		t.Errorf("First = %q, and FieldError answers %q: the two must not disagree", got, page.FieldError("title"))
 	}
 }
