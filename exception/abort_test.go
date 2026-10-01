@@ -104,3 +104,30 @@ func TestTheErrorStringNamesTheStatusAndTheCause(t *testing.T) {
 		t.Error("the cause must stay reachable through errors.Is")
 	}
 }
+
+// TestAnAbortAnswersTheStatusInterface: a routing layer that does not import
+// this package finds the status through errors.As over an interface. Without
+// the method an aborted request was a panic there, and a 404 became a 500.
+func TestAnAbortAnswersTheStatusInterface(t *testing.T) {
+	err := fmt.Errorf("loading invoice: %w", exception.Abort(http.StatusConflict, "this invoice is closed"))
+
+	var statused interface{ HTTPStatus() int }
+	if !errors.As(err, &statused) {
+		t.Fatal("a wrapped *HTTPError must satisfy interface{ HTTPStatus() int }")
+	}
+	if got := statused.HTTPStatus(); got != http.StatusConflict {
+		t.Fatalf("HTTPStatus() = %d, want 409", got)
+	}
+}
+
+// TestHTTPStatusAgreesWithStatusOf: the two ways of reading the status are the
+// same field, so they cannot disagree about what an error asks for.
+func TestHTTPStatusAgreesWithStatusOf(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusNotFound, exception.StatusPageExpired, http.StatusServiceUnavailable} {
+		err := &exception.HTTPError{Status: status}
+		got, ok := exception.StatusOf(err)
+		if !ok || got != err.HTTPStatus() {
+			t.Fatalf("StatusOf = (%d, %v), HTTPStatus() = %d", got, ok, err.HTTPStatus())
+		}
+	}
+}

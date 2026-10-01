@@ -60,6 +60,15 @@ func (e *HTTPError) Error() string {
 // Unwrap exposes the cause, so errors.Is and errors.As reach through it.
 func (e *HTTPError) Unwrap() error { return e.Err }
 
+// HTTPStatus reports the status the error asks for.
+//
+// It is the method a routing layer looks for on any error, through errors.As
+// over an interface rather than over this type, so an *HTTPError is answered
+// with its own status by code that never imports this package. It returns
+// Status as written: what to do with a value outside 400-599 is the caller's
+// decision.
+func (e *HTTPError) HTTPStatus() int { return e.Status }
+
 // Abort builds a failure as a value rather than raising one.
 //
 //	return exception.Abort(http.StatusNotFound, "no invoice with that number")
