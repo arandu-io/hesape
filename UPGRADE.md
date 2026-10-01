@@ -601,6 +601,53 @@ PostgreSQL's process-wide `grammars.CustomOperators` extension accepts only a
 single safe symbolic token; it does not accept words, whitespace, comments or
 SQL fragments.
 
+### A body over the size limit is a 413, before the handler or from the readers
+
+`middleware.LimitBodySize` said it answered 413 by itself, and it did not:
+`http.MaxBytesReader` only fails the read. Nothing was removed and nothing stops
+compiling. **What changes without a compiler error:**
+
+- A request whose `Content-Length` is over the limit is answered `413` by the
+  middleware, with `Connection: close`, and the handler does not run.
+- A body cut off by the reader — a chunked one, with no length — makes
+  `Context.Bind`, `Request.Validate` and `Request.ValidateWithBag` return an
+  `*exceptions.PostTooLargeException` wrapping the reader's
+  `*http.MaxBytesError`. Before, `Validate` judged the part that arrived, `Bind`
+  returned `http: reading the form: …` for a form and bound a JSON body as an
+  empty object. `Context.Input` reads such a body as empty.
+- `exceptions.HTTPError` answers `HTTPStatus`, so every exception embedding it
+  is answered with its own status by a router that reads that method, and
+  `exception.StatusOf` maps `PostTooLargeException` to `413`.
+
+### The built-in error pages send their own Content-Security-Policy
+
+The status, debug and dump pages of `exception` replace the
+`Content-Security-Policy` an earlier middleware set, for their own response
+only, with one that allows their inline style by hash and nothing else:
+`default-src 'none'; style-src 'sha256-…'; img-src data:; base-uri 'none';
+form-action 'none'; frame-ancestors 'none'`. Under the policy
+`SecurityHeaders` sets they rendered unstyled. A test that asserted the
+application's policy on an error response now sees this one. An application's
+own `errors/<status>` view is not affected.
+
+### The broadcast endpoint and the OAuth callback read only the body of a POST
+
+`broadcasting.BroadcastController.Authenticate` and
+`providers.Provider.GetAccessToken` read their fields through
+`hesape/http.Request` instead of `FormValue`: the query string of a `GET`, the
+body of any other method — url-encoded, multipart or JSON. A `POST` that carried
+`channel_name`, `code`, `state` or `error` only in its query string is no longer
+read. A callback redirected by `GET`, the default for every provider, and a
+`response_mode=form_post` callback are unaffected.
+
+### `view.New` carries the CSRF token, and `view.Page.First` is deprecated
+
+`view.New` fills `Page.Token` from `http.CSRFTokenFrom` on the request context,
+which the middleware that protects forms fills through `http.WithCSRFToken`.
+`WithToken` still replaces it. `Page.FieldError` is what the form inputs ask
+for; `Page.First` answers the same message and is deprecated. Nothing stops
+compiling.
+
 ## v0.21.1 — forms refuse method combinations a browser cannot deliver
 
 `html.FormBuilder.Open` now returns `ErrMultipartMethodSpoofing` when `Files`
