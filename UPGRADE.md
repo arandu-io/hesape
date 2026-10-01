@@ -65,6 +65,60 @@ row without error, as they skip an unknown key. A program that re-keys a row
 assigns the field, or uses `ForceFill`. `NewInstance(attributes, true)` still
 takes the key from `attributes`.
 
+### A saved entity carries the tenant its row was written with
+
+The previous entry made `Fill` skip the tenant column, and the insert wrote the
+Grant's tenant into the row but not into the entity: `Model.Create(ctx, g,
+map[string]any{...})` returned a `*T` whose tenant field was empty, and so did
+`factories.Factory.Create`. Every insert now sets the entity's tenant field to
+`auth.Tenant(g)` — before the `Creating` listeners run and again before the
+statement is built — and an update whose tenant field was changed puts the
+field back to the Grant's tenant, so the value a write hands back matches the
+stored row. The statement is unchanged.
+
+**What changes without a compiler error.** After `Create`, `Save` on a new
+row, `UpdateOrCreate` or a factory's `Create`, the tenant field holds
+`auth.Tenant(g)` whatever the entity or the map carried. After `Save` on an
+existing row whose tenant field was assigned, the field holds the Grant's
+tenant again rather than the value assigned. An entity with no field for the
+tenant column is left as it was. A factory's `Make` takes no Grant and still
+leaves the field as the definition set it.
+
+### `view.New` fills the signed-in state and the navigation
+
+`view.New(ctx, title)` left `Authenticated`, `HomeURL`, `LoginURL`, `LogoutURL`
+and `RegisterURL` empty, so a page built with it drew the guest navigation for
+a signed-in person: a sign-in link with no address and no way to sign out.
+`Authenticated` now comes from `auth.Check` over the subject the authentication
+middleware put on the request context — a declared guest is not signed in —
+and the four links from the routes named `home`, `auth.login`, `auth.logout`
+and `auth.register`. A name the application did not register leaves its field
+empty, which draws no link. `UserName`, `AppName`, `PanelURL` and `AdminURL`
+are still the controller's: the subject carries no display name.
+
+The new `http.Context.HasRoute(name)` answers whether a route is registered
+without logging the unknown name `Context.URL` reports.
+
+**What changes without a compiler error.** A page built with `New` and drawn
+without further assignment now shows the signed-in navigation to a signed-in
+person and links to the registered routes. A controller that assigned these
+fields after `New` keeps its values. One that relied on an empty `RegisterURL`
+to hide registration while an `auth.register` route exists assigns the empty
+string after `New`.
+
+### `faker.Faker.Unique` remembers across calls
+
+`Unique()` made a new memory on every call. A factory definition runs once per
+row and calls `f.Unique().Email()` on each, so the memory never saw the previous
+rows and `Count(n)` repeated values. The memory now belongs to the Faker: every
+`Unique()` call on one Faker answers the same memory, which is never reset. A
+fresh Faker from `faker.New` starts empty, and a factory makes one per `Make`
+or `Create`, so uniqueness holds across the rows of one run and not across two.
+
+**What changes without a compiler error.** Two `Unique()` calls on one Faker no
+longer answer independent memories: a value one returned is refused by the
+other. A caller that wants an empty memory asks `faker.New` for another Faker.
+
 ### `middleware.KeyBySession` takes the session store, and keys only a live session
 
 `routing/middleware.KeyBySession` took a function returning the session id the
