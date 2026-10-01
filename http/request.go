@@ -32,7 +32,7 @@ type Route interface {
 }
 
 // Request wraps a *net/http.Request and provides the methods a controller
-// action reaches for: the input the body and the query string carried, the
+// action reaches for: the input the request carried, the
 // headers, the cookies, the files, the session that survived the redirect,
 // and the route that matched.
 //
@@ -554,12 +554,7 @@ func (r *Request) Replace(input map[string]any) *Request {
 // replaceInputSource writes the merged input back to the request's form or
 // JSON body, depending on which source Input reads.
 func (r *Request) replaceInputSource(source map[string]any) {
-	if r.IsJSON() {
-		r.json = source
-		r.jsonParsed = true
-		return
-	}
-	if r.request.Method == "GET" || r.request.Method == "HEAD" {
+	if !readsBody(r.request.Method) {
 		values := make(url.Values, len(source))
 		for k, v := range source {
 			values.Set(k, stringify(v))
@@ -567,7 +562,12 @@ func (r *Request) replaceInputSource(source map[string]any) {
 		r.request.URL.RawQuery = values.Encode()
 		return
 	}
-	_ = r.request.ParseForm()
+	if r.IsJSON() {
+		r.json = source
+		r.jsonParsed = true
+		return
+	}
+	_ = parseBody(r.request)
 	values := make(url.Values, len(source))
 	for k, v := range source {
 		values.Set(k, stringify(v))

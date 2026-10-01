@@ -2,8 +2,11 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
+	"mime"
 	"mime/multipart"
+	stdhttp "net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -13,16 +16,42 @@ import (
 	"github.com/arandu-io/hesape/validation"
 )
 
-// Input is a value from the request's input source merged with the query
-// string, read with dot notation. The input source is the JSON body for
-// JSON requests, the post form for POST/PUT/PATCH/DELETE, and the query
-// string for GET/HEAD. The input source takes precedence over the query.
+// multipartMaxMemory is how much of a multipart body is held in memory while it
+// is parsed; the rest of the files go to temporary files, which are removed
+// when the request ends. It is the amount net/http's own FormValue uses.
+const multipartMaxMemory = 32 << 20
+
+// formBodyMaxBytes caps a url-encoded body read for a method net/http does not
+// read one for, at the size net/http caps its own read at.
+const formBodyMaxBytes = 10 << 20
+
+// readsBody reports whether a request with this method carries its input in
+// the body. GET and HEAD carry it in the query string; every other method
+// carries it in the body, and for those the query string is never input.
+func readsBody(method string) bool {
+	switch method {
+	case "", stdhttp.MethodGet, stdhttp.MethodHead:
+		return false
+	}
+	return true
+}
+
+// Input is a value from the request's input, read with dot notation.
+//
+// The input is one map, and it is the same map All, Only, Validate,
+// Context.Input and Context.Bind read, so what a rule validated is exactly
+// what a handler reads afterwards. For GET and HEAD it is the query string.
+// For every other method it is the body and only the body: the JSON payload
+// for a JSON request, otherwise the url-encoded or multipart form's text
+// fields. The query string of such a request is never merged in -- a value in
+// the action URL of a form must not stand in for a field the body did not
+// send -- and stays readable on its own through Query.
 //
 // A JSON body is read the same way as form input: Input("user.name")
 // descends by dot through the decoded payload, so a nested JSON field is
 // found the same way a flattened form field is.
 //
-// With no key, returns the whole merged map.
+// With no key, returns the whole map.
 func (r *Request) Input(key string, def ...any) any {
 	merged := r.inputMap()
 	if key == "" {
@@ -34,32 +63,72 @@ func (r *Request) Input(key string, def ...any) any {
 	return dataGet(merged, key, nil)
 }
 
-// inputMap returns the input source merged with the query string, with the
-// input source taking precedence.
+// inputMap is the request's input: the input source, and nothing merged into
+// it.
 func (r *Request) inputMap() map[string]any {
-	source := r.inputSource()
-	query := valuesToMap(r.request.URL.Query())
-	merged := make(map[string]any, len(source)+len(query))
-	for k, v := range query {
-		merged[k] = v
-	}
-	for k, v := range source {
-		merged[k] = v
-	}
-	return merged
+	return r.inputSource()
 }
 
-// inputSource returns the JSON payload for JSON requests, the query string
-// for GET/HEAD, and the post form for everything else.
+// inputSource returns the query string for GET/HEAD, the JSON payload for a
+// JSON request, and the body's form fields for everything else. A multipart
+// body is parsed before its fields are read, so its text fields are input
+// like a url-encoded body's are.
 func (r *Request) inputSource() map[string]any {
+	if !readsBody(r.request.Method) {
+		return valuesToMap(r.request.URL.Query())
+	}
 	if r.IsJSON() {
 		return r.jsonPayload()
 	}
-	if r.request.Method == "GET" || r.request.Method == "HEAD" {
-		return valuesToMap(r.request.URL.Query())
-	}
-	_ = r.request.ParseForm()
+	_ = parseBody(r.request)
 	return valuesToMap(r.request.PostForm)
+}
+
+// parseBody reads the body's form into r.PostForm, and nothing of the query
+// string into it: a url-encoded body for any method, including DELETE, which
+// net/http does not read, and the text fields of a multipart body. A multipart
+// body that leaves temporary files behind has them removed when the request
+// ends, by removeFormAtEnd.
+func parseBody(r *stdhttp.Request) error {
+	mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	switch mediaType {
+	case "multipart/form-data":
+		return parseMultipart(r)
+	case "application/x-www-form-urlencoded":
+		if r.PostForm == nil && !parsesPostForm(r.Method) && r.Body != nil {
+			body, err := io.ReadAll(io.LimitReader(r.Body, formBodyMaxBytes+1))
+			if err != nil {
+				return err
+			}
+			if len(body) > formBodyMaxBytes {
+				return errors.New("http: url-encoded body too large")
+			}
+			values, err := url.ParseQuery(string(body))
+			r.PostForm = values
+			if r.PostForm == nil {
+				r.PostForm = url.Values{}
+			}
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return r.ParseForm()
+}
+
+// parsesPostForm reports whether net/http's ParseForm reads a url-encoded body
+// for the method.
+func parsesPostForm(method string) bool {
+	return method == stdhttp.MethodPost || method == stdhttp.MethodPut || method == stdhttp.MethodPatch
+}
+
+// parseMultipart parses a multipart body once, with the text fields joining
+// r.PostForm and the files r.MultipartForm.
+func parseMultipart(r *stdhttp.Request) error {
+	if r.MultipartForm != nil {
+		return nil
+	}
+	return r.ParseMultipartForm(multipartMaxMemory)
 }
 
 // data is the value at the key from the input source, without the query
@@ -470,7 +539,7 @@ func (r *Request) Collect(keys ...string) []any {
 }
 
 // Fluent is the input as a map that reads with dot notation. It is the
-// input source merged with the query, and a read on a missing key returns
+// same input Input reads, and a read on a missing key returns
 // nil rather than panicking.
 func (r *Request) Fluent(key string, def ...map[string]any) map[string]any {
 	if key == "" {
@@ -500,7 +569,7 @@ func (r *Request) Query(key string, def ...string) string {
 // Post is a post body parameter, or a default when it is absent. With an
 // empty key, returns empty.
 func (r *Request) Post(key string, def ...string) string {
-	_ = r.request.ParseForm()
+	_ = parseBody(r.request)
 	values := r.request.PostForm
 	if key == "" {
 		return ""
@@ -548,10 +617,8 @@ func (r *Request) AllFiles() map[string]any {
 // map. A single upload is a *multipart.FileHeader; a repeated field is a
 // []*multipart.FileHeader.
 func (r *Request) allFilesMap() map[string]any {
-	if r.request.MultipartForm == nil {
-		if err := r.request.ParseMultipartForm(32 << 20); err != nil {
-			return map[string]any{}
-		}
+	if err := parseMultipart(r.request); err != nil {
+		return map[string]any{}
 	}
 	if r.request.MultipartForm == nil || len(r.request.MultipartForm.File) == 0 {
 		return map[string]any{}

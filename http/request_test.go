@@ -848,10 +848,9 @@ func TestKeysReturnsInputAndFileKeys(t *testing.T) {
 	if !hasUpload {
 		t.Errorf("Keys() should contain \"upload\"")
 	}
-	// "name" is a multipart field, which ParseMultipartForm puts in
-	// MultipartForm.Value, not PostForm. The current inputSource reads PostForm
-	// only; reading multipart fields is reported in stillMissing.
-	_ = hasName
+	if !hasName {
+		t.Errorf("Keys() should contain the multipart text field \"name\"")
+	}
 }
 
 func TestCreateFromCopiesState(t *testing.T) {

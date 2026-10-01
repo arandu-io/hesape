@@ -28,6 +28,10 @@ type Context struct {
 
 	render Renderer
 	urls   URLGenerator
+
+	// input is the Request that Input and Bind read through, made on first use
+	// so that a JSON body is decoded once and both read the same map.
+	input *Request
 }
 
 // NewContext builds the Context an action is called with.
@@ -90,11 +94,33 @@ func (c *Context) Param(name string) string { return c.Request.PathValue(name) }
 // Query reads a query string parameter.
 func (c *Context) Query(name string) string { return c.Request.URL.Query().Get(name) }
 
-// Input reads a form field, from the body or the query string.
+// Input reads one field of the request's input, as text.
+//
+// It reads the map Request.Input reads: the query string for GET and HEAD, and
+// for every other method the body alone -- the url-encoded or multipart form,
+// or the JSON payload -- with nothing of the query string merged in. A value a
+// rule validated is the value this returns. A key that holds a list returns its
+// first value, and a dotted key descends into a JSON object when no field has
+// the dotted name itself. The query string of any request is read with Query.
 //
 // Named Input rather than Form because Input is the word the vocabulary
 // already uses for it, and the vocabulary is the point.
-func (c *Context) Input(name string) string { return c.Request.FormValue(name) }
+func (c *Context) Input(name string) string {
+	input := c.inputRequest().inputMap()
+	if value, ok := input[name]; ok {
+		return stringify(value)
+	}
+	return stringify(dataGet(input, name, nil))
+}
+
+// inputRequest is the Request wrapping c.Request, kept while c.Request is the
+// same request so the decoded JSON body is shared between reads.
+func (c *Context) inputRequest() *Request {
+	if c.input == nil || c.input.request != c.Request {
+		c.input = NewRequest(c.Request)
+	}
+	return c.input
+}
 
 // URL is the path of a named route, with its parameters filled in order.
 //

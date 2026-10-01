@@ -52,9 +52,10 @@ func Reject(w stdhttp.ResponseWriter, r *stdhttp.Request, f *session.Flash, errs
 	if f != nil {
 		// Parsed here rather than assumed: a handler that rejected on the first
 		// rule may never have read the body, and the whole value of what was
-		// typed is that it goes back in the boxes. ParseForm is a no-op when the
-		// form has already been read.
-		_ = r.ParseForm()
+		// typed is that it goes back in the boxes. The body is read as the
+		// input is, multipart and DELETE included, and reading it again is a
+		// no-op.
+		_ = parseBody(r)
 		f.Write(w, errs, r.PostForm)
 	}
 

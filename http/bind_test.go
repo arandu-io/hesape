@@ -361,7 +361,7 @@ func TestARepeatedKeyFillsASlice(t *testing.T) {
 }
 
 // TestAGetReadsTheQuery and the POST below pin where the values come from: the
-// query on a GET, and the body ahead of the query on a POST.
+// query on a GET, and the body alone on a POST.
 func TestAGetReadsTheQuery(t *testing.T) {
 	var req filterRequest
 	if err := get("/invoices?status=paid").Bind(&req); err != nil {
@@ -372,23 +372,23 @@ func TestAGetReadsTheQuery(t *testing.T) {
 	}
 }
 
-func TestAPostPrefersTheBodyToTheQuery(t *testing.T) {
+func TestAPostReadsTheBodyAndNeverTheQuery(t *testing.T) {
 	var req filterRequest
 	if err := post("/invoices?status=from-query&tags=q", url.Values{"status": {"from-body"}, "tags": {"b"}}).Bind(&req); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if req.Status != "from-body" {
-		t.Fatalf("status = %q, want the body's value ahead of the query's", req.Status)
+		t.Fatalf("status = %q, want the body's value", req.Status)
 	}
-	if !reflect.DeepEqual(req.Tags, []string{"b", "q"}) {
-		t.Fatalf("tags = %q, want the body's values followed by the query's", req.Tags)
+	if !reflect.DeepEqual(req.Tags, []string{"b"}) {
+		t.Fatalf("tags = %q, want the body's values and none of the query's", req.Tags)
 	}
 }
 
 // TestAMultipartFormBindsItsTextFields: a form that uploads a file is still a
-// form. Its text fields are read, and ahead of the query as a url-encoded
-// body's are -- net/http orders the two the other way round for multipart, and
-// the value a field takes must not depend on the form's enctype.
+// form. Its text fields are read, and the query string is not, as for a
+// url-encoded body: the value a field takes must not depend on the form's
+// enctype.
 func TestAMultipartFormBindsItsTextFields(t *testing.T) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -405,7 +405,7 @@ func TestAMultipartFormBindsItsTextFields(t *testing.T) {
 		t.Fatalf("Bind: %v", err)
 	}
 	if req.Status != "draft" {
-		t.Fatalf("status = %q, want the multipart text field, trimmed, ahead of the query", req.Status)
+		t.Fatalf("status = %q, want the multipart text field, trimmed, and not the query's", req.Status)
 	}
 }
 

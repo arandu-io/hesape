@@ -26,6 +26,29 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+### The body is the only input of a POST, and every reader reads the same one
+
+`Request.Input`, `All`, `Only`, `Validate`, `Context.Input` and `Context.Bind`
+now read one map. For `GET` and `HEAD` it is the query string. For every other
+method it is the body alone: the JSON payload of a JSON request, otherwise the
+url-encoded form or the text fields of a multipart form. Before, the rules ran
+against the post form merged with the query, a multipart body was not read until
+the files were, and `Context.Input` read `FormValue` — so the value a rule
+accepted and the value a handler stored could differ.
+
+**What changes without a compiler error.**
+
+- On `POST`, `PUT`, `PATCH` and `DELETE` the query string is no longer merged
+  into the input, and `Context.Bind` no longer appends its values. A value that
+  arrives in the action URL of a form is read with `Context.Query` or
+  `Request.Query`, explicitly.
+- A multipart form's text fields are input, and are validated.
+- `Context.Input` reads a JSON body, and a dotted key descends into it.
+- `Context.Bind` reads a JSON body's top-level fields.
+- A url-encoded `DELETE` body is read; net/http does not read one.
+- A `GET` or `HEAD` with a JSON content type reads its query string, not its
+  body.
+
 ### A duplicate key is `database.ErrUniqueViolation`, and `database.UniqueConstraintDetector` is gone
 
 A write the engine refuses for a duplicate key now satisfies

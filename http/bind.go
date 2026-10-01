@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	stdhttp "net/http"
 	"net/url"
 	"reflect"
 	"strconv"
@@ -13,11 +12,6 @@ import (
 
 	"github.com/arandu-io/hesape/validation"
 )
-
-// bindMaxMemory is how much of a multipart body Bind keeps in memory, the same
-// amount Request.FormValue reads with, so Bind and Input agree on what a
-// multipart form holds.
-const bindMaxMemory = 32 << 20
 
 // bindTimeLayouts are the spellings Bind accepts for a time.Time, in the order
 // it tries them: what an <input type="datetime-local"> sends, with and without
@@ -68,15 +62,14 @@ var (
 //
 // # Where the values come from
 //
-// From the body and the query string, parsed as Request.ParseForm and
-// Request.ParseMultipartForm parse them. For GET, HEAD, DELETE and every
-// method other than POST, PUT and PATCH, net/http reads no body, so the values
-// are the query string's. For POST, PUT and PATCH they are the url-encoded or
-// multipart body's values followed by the query string's, so when a key is in
-// both the body's value comes first and is the one a single-valued field
-// takes -- whichever of the two encodings the form used. The text fields of a
-// multipart body are read; its files are not, and stay where the upload path
-// reads them. A JSON body is not a form and is never read.
+// From the map Context.Input and Request.Input read, so a struct holds what a
+// rule validated and nothing else. For GET and HEAD that is the query string.
+// For every other method it is the body alone, and the query string is never
+// read: a url-encoded body, for DELETE as well, or the text fields of a
+// multipart body, whose files stay where the upload path reads them, or the
+// top-level fields of a JSON object, where a number, a boolean or a string is
+// read as its text, an array as one value per element, and null and a nested
+// object as absent.
 //
 // # How a value is converted
 //
@@ -124,18 +117,15 @@ func (c *Context) Bind(dst any) error {
 		return fmt.Errorf("http: Bind needs a non-nil pointer to a struct, and was given %T", dst)
 	}
 
-	// ParseForm first and on its own: ParseMultipartForm calls it too, but
-	// returns ErrNotMultipart in place of its error for any body that is not
-	// multipart, which would bind a malformed body as an empty one.
-	if err := c.Request.ParseForm(); err != nil {
-		return fmt.Errorf("http: reading the form: %w", err)
-	}
-	if err := c.Request.ParseMultipartForm(bindMaxMemory); err != nil && !errors.Is(err, stdhttp.ErrNotMultipart) {
-		return fmt.Errorf("http: reading the form: %w", err)
+	input := c.inputRequest()
+	if readsBody(c.Request.Method) && !input.IsJSON() {
+		if err := parseBody(c.Request); err != nil {
+			return fmt.Errorf("http: reading the form: %w", err)
+		}
 	}
 
 	errs := validation.Errors{}
-	if err := bindStruct(target.Elem(), formValues(c.Request), errs); err != nil {
+	if err := bindStruct(target.Elem(), formValues(input.inputMap()), errs); err != nil {
 		return err
 	}
 	if errs.Any() {
@@ -144,21 +134,34 @@ func (c *Context) Bind(dst any) error {
 	return nil
 }
 
-// formValues is the body's values followed by the query's, key by key.
-//
-// It is built here rather than read from Request.Form because Request.Form is
-// not in one order: net/http puts a url-encoded body ahead of the query and a
-// multipart body behind it, so the value a single-valued field takes would
-// depend on the encoding the browser chose.
-func formValues(r *stdhttp.Request) url.Values {
-	values := make(url.Values, len(r.PostForm))
-	for key, posted := range r.PostForm {
-		values[key] = append(values[key], posted...)
-	}
-	for key, queried := range r.URL.Query() {
-		values[key] = append(values[key], queried...)
+// formValues is the input map as the lists of text Bind converts from.
+func formValues(input map[string]any) url.Values {
+	values := make(url.Values, len(input))
+	for key, value := range input {
+		switch typed := value.(type) {
+		case nil, map[string]any:
+			continue
+		case []any:
+			list := make([]string, 0, len(typed))
+			for _, item := range typed {
+				list = append(list, formText(item))
+			}
+			values[key] = list
+		default:
+			values[key] = []string{formText(typed)}
+		}
 	}
 	return values
+}
+
+// formText is one input value as the text a form would have sent for it. A
+// boolean is spelled out, because the empty string stringify gives false would
+// read as absent for a pointer field.
+func formText(value any) string {
+	if b, ok := value.(bool); ok {
+		return strconv.FormatBool(b)
+	}
+	return stringify(value)
 }
 
 // bindStruct reads the form into every tagged field of v, recursing into
