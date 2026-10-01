@@ -59,4 +59,7 @@ func (MySqlConnector) CausedByUniqueViolation(err error) bool {
 	return driverErr.Number == erDupEntry || driverErr.Number == erDupEntryWithKeyName
 }
 
+// The core consults this connector on every failed statement of its dialect.
+var _ database.UniqueViolationDetector = MySqlConnector{}
+
 func init() { database.Register(MySqlConnector{}) }

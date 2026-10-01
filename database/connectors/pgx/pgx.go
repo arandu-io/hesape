@@ -53,4 +53,7 @@ func (PostgresConnector) CausedByUniqueViolation(err error) bool {
 	return errors.As(err, &coded) && coded.SQLState() == uniqueViolation
 }
 
+// The core consults this connector on every failed statement of its dialect.
+var _ database.UniqueViolationDetector = PostgresConnector{}
+
 func init() { database.Register(PostgresConnector{}) }

@@ -59,4 +59,7 @@ func (SQLiteConnector) CausedByUniqueViolation(err error) bool {
 	return false
 }
 
+// The core consults this connector on every failed statement of its dialect.
+var _ database.UniqueViolationDetector = SQLiteConnector{}
+
 func init() { database.Register(SQLiteConnector{}) }
