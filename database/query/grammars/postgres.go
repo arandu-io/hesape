@@ -440,7 +440,9 @@ func (g *PostgresGrammar) compileJSONUpdateColumn(key string, value any) string 
 
 	segments := strings.Split(key, "->")
 	field := d.Wrap(segments[0])
-	path := "'{" + strings.Join(g.wrapJSONPathAttributes(segments[1:], `"`), ",") + "}'"
+	// The array literal is itself inside a string literal, so its single quotes
+	// are doubled after its elements are quoted.
+	path := "'{" + strings.ReplaceAll(strings.Join(g.wrapJSONPathAttributes(segments[1:], `"`), ","), "'", "''") + "}'"
 
 	return field + " = jsonb_set(" + field + "::jsonb, " + path + ", " + d.Parameter(value) + ")"
 }
@@ -661,6 +663,14 @@ func (g *PostgresGrammar) WrapJSONBooleanValue(value string) string {
 // The quote is a parameter because the same path is spelled with single quotes
 // inside an operator chain and with double quotes inside the array literal
 // jsonb_set takes.
+//
+// A key is caller text, and each spelling escapes what ends it: a single quote
+// is doubled inside the string literal an operator takes, and a double quote
+// and a backslash are backslash-escaped inside an array element, whose literal
+// the caller then quotes as a string. Without that, a key carrying a quote
+// closed the literal and the rest of it was SQL. Backslashes are otherwise
+// literal in a string, as they are under standard_conforming_strings, which
+// every supported server has on.
 func (g *PostgresGrammar) wrapJSONPathAttributes(path []string, quote string) []string {
 	out := make([]string, 0, len(path))
 
@@ -670,7 +680,7 @@ func (g *PostgresGrammar) wrapJSONPathAttributes(path []string, quote string) []
 				out = append(out, key)
 				continue
 			}
-			out = append(out, quote+key+quote)
+			out = append(out, quoteJSONPathKey(key, quote))
 		}
 	}
 
@@ -727,4 +737,15 @@ func (g *PostgresGrammar) SubstituteBindingsIntoRawSQL(sql string, bindings []an
 func lastAliasSegment(from string) string {
 	segments := aliasPattern.Split(from, -1)
 	return segments[len(segments)-1]
+}
+
+// quoteJSONPathKey quotes one object key of a JSON path: as a string literal
+// when quote is a single quote, and as an array element when it is a double
+// quote. See wrapJSONPathAttributes.
+func quoteJSONPathKey(key, quote string) string {
+	if quote == `"` {
+		key = strings.ReplaceAll(key, `\`, `\\`)
+		return `"` + strings.ReplaceAll(key, `"`, `\"`) + `"`
+	}
+	return "'" + strings.ReplaceAll(key, "'", "''") + "'"
 }
