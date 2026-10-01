@@ -173,23 +173,33 @@ func (d *DB) PingContext(ctx context.Context) error { return d.inner.PingContext
 // Inside database.Transaction it runs on the open transaction. That is what lets
 // a repository written once work in both places, and what puts the outbox write
 // in the same transaction as the row it describes.
+//
+// An error the connector recognises as a violated unique constraint satisfies
+// errors.Is(err, ErrUniqueViolation), with the driver error still reachable
+// through errors.As.
 func (d *DB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	if tx, ok := txFrom(ctx, d); ok {
-		return tx.queryContext(ctx, query, args...)
+		rows, err := tx.queryContext(ctx, query, args...)
+		return rows, classifyStatementError(d.dialect, err)
 	}
 	query = d.dialect.Rebind(query)
 	start := time.Now()
 	rows, err := d.inner.QueryContext(ctx, query, args...)
 	log.FromContext(ctx).RecordQuery(query, args, time.Since(start), -1, err)
-	return rows, err
+	return rows, classifyStatementError(d.dialect, err)
 }
 
 // ExecContext runs a statement and records it, with the affected row count.
 //
 // Inside database.Transaction it runs on the open transaction.
+//
+// An error the connector recognises as a violated unique constraint satisfies
+// errors.Is(err, ErrUniqueViolation), with the driver error still reachable
+// through errors.As.
 func (d *DB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	if tx, ok := txFrom(ctx, d); ok {
-		return tx.execContext(ctx, query, args...)
+		res, err := tx.execContext(ctx, query, args...)
+		return res, classifyStatementError(d.dialect, err)
 	}
 	query = d.dialect.Rebind(query)
 	start := time.Now()
@@ -201,7 +211,7 @@ func (d *DB) ExecContext(ctx context.Context, query string, args ...any) (sql.Re
 		}
 	}
 	log.FromContext(ctx).RecordQuery(query, args, time.Since(start), rows, err)
-	return res, err
+	return res, classifyStatementError(d.dialect, err)
 }
 
 // QueryRowContext runs a single-row query and records it.

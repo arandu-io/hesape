@@ -28,11 +28,11 @@ func (c testConnector) DriverName() string { return c.driver }
 func reset(t *testing.T) {
 	t.Helper()
 	registryMu.Lock()
-	registry = map[Dialect]string{}
+	registry = map[Dialect]Connector{}
 	registryMu.Unlock()
 	t.Cleanup(func() {
 		registryMu.Lock()
-		registry = map[Dialect]string{}
+		registry = map[Dialect]Connector{}
 		registryMu.Unlock()
 	})
 }
@@ -358,7 +358,7 @@ func TestOpenDoesNotDeadlockAgainstRegister(t *testing.T) {
 		for i := range 200 {
 			if i%2 == 0 {
 				registryMu.Lock()
-				registry[DialectMySQL] = "mysql"
+				registry[DialectMySQL] = testConnector{DialectMySQL, "mysql"}
 				delete(registry, DialectMySQL)
 				registryMu.Unlock()
 				continue

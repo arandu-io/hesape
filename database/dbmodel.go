@@ -49,7 +49,11 @@ func (d *DB) Select(ctx context.Context, statement string, bindings []any, _ boo
 	}
 	defer func() { _ = rows.Close() }()
 
-	return scanRecords(rows)
+	// A driver may report the failure of an insert that returns its key while
+	// the rows are read rather than when the statement is sent, so the error
+	// is classified here as well as in QueryContext.
+	records, err := scanRecords(rows)
+	return records, classifyStatementError(d.dialect, err)
 }
 
 // Insert runs an insert, reporting whether it succeeded.

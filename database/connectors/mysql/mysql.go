@@ -16,9 +16,11 @@
 package mysql
 
 import (
+	"errors"
+
 	"github.com/arandu-io/hesape/database"
 
-	_ "github.com/go-sql-driver/mysql"
+	gomysql "github.com/go-sql-driver/mysql"
 )
 
 // MySqlConnector names the driver the blank import above linked in.
@@ -33,5 +35,28 @@ func (MySqlConnector) Dialect() database.Dialect { return database.DialectMySQL 
 
 // DriverName is the name go-sql-driver/mysql registers with database/sql.
 func (MySqlConnector) DriverName() string { return "mysql" }
+
+// The error numbers MySQL and MariaDB report for a duplicate key: ER_DUP_ENTRY,
+// and ER_DUP_ENTRY_WITH_KEY_NAME, which the server sends instead when it can
+// name the key. Both cover a unique index and the primary key alike. The
+// SQLSTATE is no help here -- it is 23000 for every integrity constraint,
+// a NOT NULL among them.
+const (
+	erDupEntry            = 1062
+	erDupEntryWithKeyName = 1586
+)
+
+// CausedByUniqueViolation reports whether err is a MySQL error numbered 1062
+// or 1586.
+//
+// The number is read from the driver's error type and never from the
+// message, which the server translates with lc_messages.
+func (MySqlConnector) CausedByUniqueViolation(err error) bool {
+	var driverErr *gomysql.MySQLError
+	if !errors.As(err, &driverErr) {
+		return false
+	}
+	return driverErr.Number == erDupEntry || driverErr.Number == erDupEntryWithKeyName
+}
 
 func init() { database.Register(MySqlConnector{}) }

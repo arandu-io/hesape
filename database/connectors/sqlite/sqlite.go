@@ -18,9 +18,12 @@
 package sqlite
 
 import (
+	"errors"
+
 	"github.com/arandu-io/hesape/database"
 
-	_ "modernc.org/sqlite"
+	modernc "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // SQLiteConnector names the driver the blank import above linked in.
@@ -35,5 +38,25 @@ func (SQLiteConnector) Dialect() database.Dialect { return database.DialectSQLit
 
 // DriverName is the name modernc.org/sqlite registers with database/sql.
 func (SQLiteConnector) DriverName() string { return "sqlite" }
+
+// CausedByUniqueViolation reports whether err is an SQLite error with the
+// extended result code SQLITE_CONSTRAINT_UNIQUE or
+// SQLITE_CONSTRAINT_PRIMARYKEY.
+//
+// The extended code is what tells a duplicate apart from the other constraint
+// failures: the primary code is SQLITE_CONSTRAINT for all of them, a NOT NULL
+// and a CHECK included. The driver turns extended codes on for every
+// connection it opens, so the code read here is always the extended one.
+func (SQLiteConnector) CausedByUniqueViolation(err error) bool {
+	var driverErr *modernc.Error
+	if !errors.As(err, &driverErr) {
+		return false
+	}
+	switch driverErr.Code() {
+	case sqlite3.SQLITE_CONSTRAINT_UNIQUE, sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY:
+		return true
+	}
+	return false
+}
 
 func init() { database.Register(SQLiteConnector{}) }

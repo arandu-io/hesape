@@ -1,6 +1,9 @@
 package database
 
-import "strings"
+import (
+	"errors"
+	"strings"
+)
 
 // LostConnectionDetector reads a driver error and says whether the connection is
 // gone.
@@ -199,3 +202,66 @@ var lostConnectionMessages = []string{
 	"transaction pool connection limit exceeded",
 	"SSL operation failed with code 5",
 }
+
+// UniqueViolationDetector is implemented by a [Connector] that can tell, from
+// its driver's own error code, that a statement violated a unique constraint.
+//
+// It is a separate interface rather than a third method on Connector because
+// the answer is the driver's and nothing this package can read: the codes live
+// in types the core cannot import without carrying every driver into every
+// project. A connector that implements it is consulted for the dialect it
+// registered, by every statement that fails on a [DB] or a [Connection] of that
+// dialect, and an error it recognises comes back satisfying
+// errors.Is(err, ErrUniqueViolation). A connector that does not implement it
+// leaves its errors exactly as the driver returned them.
+//
+// The answer must come from the code the driver carries -- an SQLSTATE, an
+// engine error number, an extended result code -- and never from the message,
+// which changes with the driver version and with the language the server
+// speaks.
+type UniqueViolationDetector interface {
+	// CausedByUniqueViolation reports whether err, anywhere in its chain, is
+	// the driver's report of a violated unique or primary key constraint.
+	CausedByUniqueViolation(err error) bool
+}
+
+// uniqueViolationDetector returns the detector the connector registered for
+// the dialect, or nil when none was registered or it does not detect.
+func uniqueViolationDetector(d Dialect) UniqueViolationDetector {
+	registryMu.RLock()
+	connector := registry[d]
+	registryMu.RUnlock()
+
+	detector, _ := connector.(UniqueViolationDetector)
+	return detector
+}
+
+// classifyStatementError marks a driver error as a unique violation when the
+// connector for the dialect recognises it, and returns every other error
+// untouched.
+//
+// The driver error is wrapped, never replaced: its message is the message, and
+// errors.As still reaches the driver's own type for a caller that needs the
+// constraint name or the detail the driver carries.
+func classifyStatementError(d Dialect, err error) error {
+	if err == nil || errors.Is(err, ErrUniqueViolation) {
+		return err
+	}
+	if detector := uniqueViolationDetector(d); detector != nil && detector.CausedByUniqueViolation(err) {
+		return &uniqueViolation{driver: err}
+	}
+	return err
+}
+
+// uniqueViolation is a driver error its connector recognised as a violated
+// unique constraint.
+type uniqueViolation struct{ driver error }
+
+// Error is the driver's message, unchanged.
+func (e *uniqueViolation) Error() string { return e.driver.Error() }
+
+// Is makes errors.Is(err, ErrUniqueViolation) true.
+func (e *uniqueViolation) Is(target error) bool { return target == ErrUniqueViolation }
+
+// Unwrap returns the driver error, so errors.As reaches its type.
+func (e *uniqueViolation) Unwrap() error { return e.driver }

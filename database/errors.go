@@ -135,6 +135,12 @@ func NewUniqueConstraintViolationException(connectionName, sql string, bindings 
 	}
 }
 
+// Is makes errors.Is(err, ErrUniqueViolation) true for this exception, so a
+// caller asks one question whichever layer the write went through.
+func (e *UniqueConstraintViolationException) Is(target error) bool {
+	return target == ErrUniqueViolation
+}
+
 // DeadlockException reports that the engine chose this transaction as the
 // deadlock victim.
 //
@@ -190,6 +196,26 @@ type MultipleRecordsFoundException = concerns.MultipleRecordsFoundError
 func NewMultipleRecordsFoundException(count int) *MultipleRecordsFoundException {
 	return concerns.NewMultipleRecordsFoundError(count)
 }
+
+// ErrUniqueViolation reports that a write was refused because it would have
+// duplicated a value a unique or primary key constraint protects.
+//
+// A statement error satisfies errors.Is(err, ErrUniqueViolation) when the
+// connector that linked the driver recognised it by the driver's own code:
+// SQLSTATE 23505 on PostgreSQL, error 1062 or 1586 on MySQL and MariaDB, and the
+// extended result codes SQLITE_CONSTRAINT_UNIQUE and
+// SQLITE_CONSTRAINT_PRIMARYKEY on SQLite. The message is never read, because it
+// changes with the driver version and with the language of the server.
+//
+// It holds for every statement that fails through a [DB] -- ExecContext,
+// QueryContext and the verbs a model writes through, including an insert that
+// returns its key -- and through a [Connection]. A row read with
+// DB.QueryRowContext reports its error from Scan, which this package never
+// sees, so a write issued that way returns the driver error unclassified.
+//
+// The driver error is wrapped, not replaced: errors.As still reaches the
+// driver's own type, and the message is the driver's.
+var ErrUniqueViolation = errors.New("database: unique constraint violated")
 
 // ErrMultipleColumnsSelected is what Scalar raises when the row it read has
 // more than one column.

@@ -11,11 +11,15 @@ import (
 	"time"
 )
 
-// registry maps a dialect to the database/sql driver name a compartment
-// registered for it.
+// registry maps a dialect to the connector a compartment registered for it.
+//
+// The connector is kept whole rather than reduced to its driver name, because
+// the driver name is not the only thing read back from it: a write that failed
+// is classified by the connector that linked the driver, see
+// [UniqueViolationDetector].
 var (
 	registryMu sync.RWMutex
-	registry   = map[Dialect]string{}
+	registry   = map[Dialect]Connector{}
 )
 
 // sqlOpen is a variable so a test can substitute it. Opening a real connection
@@ -38,11 +42,11 @@ func Register(c Connector) {
 
 	d, driverName := c.Dialect(), c.DriverName()
 
-	if existing, taken := registry[d]; taken && existing != driverName {
+	if existing, taken := registry[d]; taken && existing.DriverName() != driverName {
 		panic(fmt.Sprintf("database: %s is already registered to the %q driver, and %q wants it too -- remove one of the imports",
-			d, existing, driverName))
+			d, existing.DriverName(), driverName))
 	}
-	registry[d] = driverName
+	registry[d] = c
 }
 
 // Registered reports the dialects this binary can speak, sorted.
@@ -187,12 +191,12 @@ func driverFor(d Dialect) (string, error) {
 	// two acquisitions, Go blocks the second reader to keep the writer from
 	// starving, and the process deadlocks permanently. Found by audit.
 	registryMu.RLock()
-	name, found := registry[d]
+	connector, found := registry[d]
 	dialects := sortedLocked()
 	registryMu.RUnlock()
 
 	if found {
-		return name, nil
+		return connector.DriverName(), nil
 	}
 
 	linked := "none"

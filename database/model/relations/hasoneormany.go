@@ -366,8 +366,7 @@ func (r *HasOneOrMany) CreateOrFirst(ctx context.Context, g auth.Grant, attribut
 		return instance, nil
 	}
 
-	var violation *database.UniqueConstraintViolationException
-	if !errors.As(err, &violation) {
+	if !errors.Is(err, database.ErrUniqueViolation) {
 		return nil, err
 	}
 

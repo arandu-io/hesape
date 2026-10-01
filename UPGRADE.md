@@ -26,6 +26,53 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+### A duplicate key is `database.ErrUniqueViolation`, and `database.UniqueConstraintDetector` is gone
+
+A write the engine refuses for a duplicate key now satisfies
+`errors.Is(err, database.ErrUniqueViolation)`. The connector that links the
+driver decides it from the driver's own code — SQLSTATE `23505` on PostgreSQL,
+error `1062` or `1586` on MySQL and MariaDB, `SQLITE_CONSTRAINT_UNIQUE` or
+`SQLITE_CONSTRAINT_PRIMARYKEY` on SQLite — and never from the message. It holds
+for `DB.ExecContext`, `DB.QueryContext`, the verbs a model writes through
+(`Create`, `Save`, `Update`) and a `Connection`. A write issued through
+`DB.QueryRowContext` reports its error from `Scan`, which the handle never sees,
+and stays unclassified.
+
+**What breaks.** `database.UniqueConstraintDetector`, the package variable a
+connector was meant to assign, is removed. No connector in this collection ever
+assigned it, so nothing read from it ever answered true. A program that
+assigned it has one place to move to: the connector. It implements
+`database.UniqueViolationDetector` — one method,
+`CausedByUniqueViolation(err error) bool` — and the three connectors here
+already do, once their module is upgraded with this one.
+
+**What changes without a compiler error.** On a handle whose connector
+recognises the failure, the error is now a wrapper around the driver error
+rather than the driver error itself. The message is the driver's, byte for
+byte, and `errors.As` still reaches the driver's type. What stops working is
+reading it without unwrapping:
+
+```go
+// Before: compiled, and is now false for a duplicate key.
+if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23505" { ... }
+
+// After: one question, on every engine.
+if errors.Is(err, database.ErrUniqueViolation) { ... }
+
+// Or, when the driver's detail is the point:
+var pgErr *pgconn.PgError
+if errors.As(err, &pgErr) { ... pgErr.ConstraintName ... }
+```
+
+A check that searches the message for `"duplicate key"`, `"23505"` or
+`"UNIQUE constraint failed"` keeps working, and is the thing to delete: it
+breaks with the server's language and with the driver's version.
+
+`CreateOrFirst` on a `HasOneOrMany` or `BelongsToMany` relation asks the same
+question now, so it recovers from the race it exists for when the model writes
+through a `*database.DB` — before, it only recognised the violation on a
+`Connection`.
+
 ### `SecurityHeaders` recebe as origens de onde uma imagem pode vir
 
 `middleware.SecurityHeaders(dev bool)` passa a ser

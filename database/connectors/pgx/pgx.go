@@ -19,6 +19,8 @@
 package pgx
 
 import (
+	"errors"
+
 	"github.com/arandu-io/hesape/database"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -35,5 +37,20 @@ func (PostgresConnector) Dialect() database.Dialect { return database.DialectPos
 
 // DriverName is the name jackc/pgx registers with database/sql.
 func (PostgresConnector) DriverName() string { return "pgx" }
+
+// uniqueViolation is the SQLSTATE PostgreSQL raises for a duplicate in a
+// unique index and in a primary key alike.
+const uniqueViolation = "23505"
+
+// CausedByUniqueViolation reports whether err carries SQLSTATE 23505.
+//
+// It reads the code through the SQLState method rather than through pgx's
+// error type by name, so any error in the chain that reports an SQLSTATE is
+// read the same way. The message is never consulted: it is translated by the
+// server's lc_messages and reworded between versions, and the code is neither.
+func (PostgresConnector) CausedByUniqueViolation(err error) bool {
+	var coded interface{ SQLState() string }
+	return errors.As(err, &coded) && coded.SQLState() == uniqueViolation
+}
 
 func init() { database.Register(PostgresConnector{}) }

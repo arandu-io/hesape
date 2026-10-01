@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -884,23 +885,19 @@ func (c *Connection) wrapQueryError(err error, q string, bindings []any) error {
 }
 
 // IsUniqueConstraintError reports whether err came from a unique constraint
-// violation, using the UniqueConstraintDetector a connector registered; it is
-// false when none was.
+// violation, asking the connector registered for this connection's dialect;
+// it is false when that connector is not a [UniqueViolationDetector], or when
+// none is registered.
 //
-// It is exported so a driver connection living in another package can call it
-// -- a connector sets UniqueConstraintDetector rather than overriding a
-// method, which is the same decision as DefaultQueryGrammar.
+// The answer is the connector's because it is the driver's error code, and the
+// connector is the only package that links the driver which defines it.
 func (c *Connection) IsUniqueConstraintError(err error) bool {
-	if UniqueConstraintDetector == nil {
-		return false
+	if errors.Is(err, ErrUniqueViolation) {
+		return true
 	}
-	return UniqueConstraintDetector(c.GetDriverName(), err)
+	detector := uniqueViolationDetector(c.dialect())
+	return detector != nil && detector.CausedByUniqueViolation(err)
 }
-
-// UniqueConstraintDetector says whether a driver error was a unique constraint
-// violation. A connector sets it next to the driver it registers, because the
-// answer is the driver's SQLSTATE and nothing this package can read.
-var UniqueConstraintDetector func(driver string, err error) bool
 
 // LogQuery records a query's execution: it dispatches the QueryExecuted
 // event, runs the query listeners and duration handlers, and appends to the

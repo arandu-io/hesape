@@ -565,8 +565,7 @@ func (r *BelongsToMany) CreateOrFirst(ctx context.Context, g auth.Grant, attribu
 		return instance, nil
 	}
 
-	var violation *database.UniqueConstraintViolationException
-	if !errors.As(err, &violation) {
+	if !errors.Is(err, database.ErrUniqueViolation) {
 		return nil, err
 	}
 
@@ -584,7 +583,7 @@ func (r *BelongsToMany) CreateOrFirst(ctx context.Context, g auth.Grant, attribu
 	if attachErr == nil {
 		return existing, nil
 	}
-	if errors.As(attachErr, &violation) {
+	if errors.Is(attachErr, database.ErrUniqueViolation) {
 		// The pivot row is already there, which is the state Attach was asked
 		// to reach. Another request reached it first.
 		return existing, nil

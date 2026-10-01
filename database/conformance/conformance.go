@@ -39,14 +39,17 @@ package conformance
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 
 	"testing"
 	"time"
 
+	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database"
 	"github.com/arandu-io/hesape/database/migrations"
+	"github.com/arandu-io/hesape/database/model"
 )
 
 // Run executes the suite against a live server.
@@ -90,6 +93,12 @@ func Run(t *testing.T, dialect database.Dialect, driverName, dsn string) {
 	})
 	t.Run("a transaction opens at the level it names", func(t *testing.T) {
 		testTransactionIsolation(t, dialect, db)
+	})
+	t.Run("a duplicate key is a unique violation, and a missing value is not", func(t *testing.T) {
+		testUniqueViolation(t, db)
+	})
+	t.Run("a model write that duplicates a key is a unique violation", func(t *testing.T) {
+		testModelUniqueViolation(t, db)
 	})
 }
 
@@ -426,5 +435,132 @@ func testTransactionIsolation(t *testing.T, dialect database.Dialect, db *databa
 	})
 	if err != nil {
 		t.Fatalf("a transaction at read committed: %v", err)
+	}
+}
+
+// testUniqueViolation is the classification every connector owes: a write the
+// engine refuses for a duplicate key satisfies errors.Is(err,
+// database.ErrUniqueViolation), whether the key is the primary key or a unique
+// index, on the pool and inside a transaction -- and a write refused for any
+// other constraint does not.
+//
+// It is asserted against a server because the codes are the server's. A
+// connector reading the wrong field of its driver's error passes every test
+// that builds the error by hand.
+func testUniqueViolation(t *testing.T, db *database.DB) {
+	ctx := context.Background()
+	name := table("unique")
+	drop(t, db, name)
+	t.Cleanup(func() { drop(t, db, name) })
+
+	if _, err := db.ExecContext(ctx, fmt.Sprintf(
+		`CREATE TABLE %s (id %s PRIMARY KEY, email %s NOT NULL UNIQUE)`,
+		name, database.KeyText, database.KeyText)); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	insert := fmt.Sprintf(`INSERT INTO %s (id, email) VALUES (?, ?)`, name)
+	for _, row := range [][2]string{{"1", "ana@example.com"}, {"2", "bia@example.com"}} {
+		if _, err := db.ExecContext(ctx, insert, row[0], row[1]); err != nil {
+			t.Fatalf("insert %s: %v", row[0], err)
+		}
+	}
+
+	unique := []struct {
+		name string
+		run  func(ctx context.Context) error
+	}{
+		{"a unique index on insert", func(ctx context.Context) error {
+			_, err := db.ExecContext(ctx, insert, "3", "ana@example.com")
+			return err
+		}},
+		{"the primary key on insert", func(ctx context.Context) error {
+			_, err := db.ExecContext(ctx, insert, "1", "cid@example.com")
+			return err
+		}},
+		{"a unique index on update", func(ctx context.Context) error {
+			_, err := db.ExecContext(ctx, fmt.Sprintf(`UPDATE %s SET email = ? WHERE id = ?`, name), "ana@example.com", "2")
+			return err
+		}},
+		{"a unique index inside a transaction", func(ctx context.Context) error {
+			return database.Transaction(ctx, db, func(ctx context.Context) error {
+				_, err := db.ExecContext(ctx, insert, "3", "ana@example.com")
+				return err
+			})
+		}},
+	}
+	for _, tc := range unique {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run(ctx)
+			if !errors.Is(err, database.ErrUniqueViolation) {
+				t.Fatalf("error = %v, want errors.Is(err, database.ErrUniqueViolation)", err)
+			}
+			if errors.Unwrap(err) == nil {
+				t.Fatal("the driver error is not reachable through the classified one, so errors.As cannot recover its code")
+			}
+		})
+	}
+
+	t.Run("a NOT NULL violation is not", func(t *testing.T) {
+		_, err := db.ExecContext(ctx, insert, "4", nil)
+		if err == nil {
+			t.Fatal("a NULL in a NOT NULL column was accepted")
+		}
+		if errors.Is(err, database.ErrUniqueViolation) {
+			t.Fatalf("a NOT NULL violation was classified as a unique violation: %v", err)
+		}
+	})
+}
+
+// conformanceAccount is the entity testModelUniqueViolation writes through the
+// model layer.
+type conformanceAccount struct {
+	ID       string `db:"id"`
+	TenantID string `db:"tenant_id"`
+	Email    string `db:"email"`
+}
+
+// testModelUniqueViolation is the same classification seen from where an
+// application meets it: a model's Create, and the Save an Update runs. The
+// model compiles its own statements -- an insert with a returning clause on
+// Postgres -- so this is a path the statement-level test above does not take.
+func testModelUniqueViolation(t *testing.T, db *database.DB) {
+	ctx := context.Background()
+	name := table("account")
+	drop(t, db, name)
+	t.Cleanup(func() { drop(t, db, name) })
+
+	if _, err := db.ExecContext(ctx, fmt.Sprintf(
+		`CREATE TABLE %s (id %s PRIMARY KEY, tenant_id %s NOT NULL, email %s NOT NULL UNIQUE)`,
+		name, database.KeyText, database.KeyText, database.KeyText)); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	accounts := model.NewModel[conformanceAccount](name, db, db.GetQueryGrammar(), db.GetPostProcessor())
+	accounts.KeyType = "string"
+	accounts.Incrementing = false
+	accounts.Timestamps = false
+	g := auth.SystemGrant("accounts.write", "tenant-1")
+
+	for _, row := range []map[string]any{
+		{"id": "1", "email": "ana@example.com"},
+		{"id": "2", "email": "bia@example.com"},
+	} {
+		if _, err := accounts.NewQuery().Create(ctx, g, row); err != nil {
+			t.Fatalf("Create %v: %v", row["id"], err)
+		}
+	}
+
+	_, err := accounts.NewQuery().Create(ctx, g, map[string]any{"id": "3", "email": "ana@example.com"})
+	if !errors.Is(err, database.ErrUniqueViolation) {
+		t.Fatalf("Create with a duplicate email: error = %v, want errors.Is(err, database.ErrUniqueViolation)", err)
+	}
+
+	existing, err := accounts.NewFromBuilder(map[string]any{"id": "2", "tenant_id": "tenant-1", "email": "bia@example.com"})
+	if err != nil {
+		t.Fatalf("NewFromBuilder: %v", err)
+	}
+	if _, err := existing.Update(ctx, g, map[string]any{"email": "ana@example.com"}); !errors.Is(err, database.ErrUniqueViolation) {
+		t.Fatalf("Update with a duplicate email: error = %v, want errors.Is(err, database.ErrUniqueViolation)", err)
 	}
 }
