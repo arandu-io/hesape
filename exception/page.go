@@ -100,6 +100,7 @@ func (h *Handler) renderDebug(w http.ResponseWriter, r *http.Request, status int
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	setPagePolicy(w, debugCSP)
 	w.WriteHeader(status)
 	_ = debugTmpl.Execute(w, d)
 }
@@ -114,6 +115,7 @@ func (h *Handler) renderDump(w http.ResponseWriter, r *http.Request) {
 		d.QueryTime = col.QueryTime()
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	setPagePolicy(w, debugCSP)
 	_ = debugTmpl.Execute(w, d)
 }
 
@@ -154,29 +156,7 @@ var debugTmpl = template.Must(template.New("debug").Funcs(template.FuncMap{
 const debugHTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>{{.Title}} — arandu</title>
-<style>
-:root{color-scheme:dark;--bg:#0d1117;--panel:#161b22;--line:#30363d;--fg:#e6edf3;--dim:#8b949e;--red:#f85149;--amber:#d29922;--accent:#58a6ff}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}
-header{background:var(--panel);border-bottom:1px solid var(--line);padding:20px 28px}
-h1{margin:0;font-size:16px;color:var(--red)}h1 span{color:var(--dim);font-weight:400}
-.msg{margin-top:8px;font-size:18px;color:var(--fg)}
-.meta{margin-top:10px;color:var(--dim);font-size:12px}
-main{padding:20px 28px;max-width:1200px}
-section{margin-bottom:28px}
-h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);border-bottom:1px solid var(--line);padding-bottom:6px}
-.hint{background:rgba(210,153,34,.12);border-left:3px solid var(--amber);padding:10px 14px;margin:8px 0;border-radius:0 4px 4px 0}
-.frame{border:1px solid var(--line);border-radius:6px;margin-bottom:10px;overflow:hidden}
-.frame.vendor{opacity:.45}
-.frame>summary{padding:8px 12px;background:var(--panel);cursor:pointer;list-style:none}
-.frame .fn{color:var(--accent)}.frame .loc{color:var(--dim);font-size:12px}
-.frame a{color:var(--dim)}
-pre{margin:0;padding:12px;overflow-x:auto;background:#010409}
-table{width:100%;border-collapse:collapse;font-size:13px}
-td,th{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}
-th{color:var(--dim);font-weight:500}
-.slow{color:var(--amber)}
-.err{color:var(--red)}
-</style></head><body>
+<style>` + debugStyle + `</style></head><body>
 <header>
   <h1>{{.Title}} <span>{{if .Kind}}{{.Kind}} — {{end}}arandu debug (development only)</span></h1>
   <div class="msg">{{.Message}}</div>
@@ -232,3 +212,29 @@ th{color:var(--dim);font-weight:500}
 </table></section>
 
 </main></body></html>`
+
+// debugStyle is the whole of the debug page's styling. It is a constant of
+// its own because debugCSP is the hash of exactly these bytes.
+const debugStyle = `
+:root{color-scheme:dark;--bg:#0d1117;--panel:#161b22;--line:#30363d;--fg:#e6edf3;--dim:#8b949e;--red:#f85149;--amber:#d29922;--accent:#58a6ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}
+header{background:var(--panel);border-bottom:1px solid var(--line);padding:20px 28px}
+h1{margin:0;font-size:16px;color:var(--red)}h1 span{color:var(--dim);font-weight:400}
+.msg{margin-top:8px;font-size:18px;color:var(--fg)}
+.meta{margin-top:10px;color:var(--dim);font-size:12px}
+main{padding:20px 28px;max-width:1200px}
+section{margin-bottom:28px}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);border-bottom:1px solid var(--line);padding-bottom:6px}
+.hint{background:rgba(210,153,34,.12);border-left:3px solid var(--amber);padding:10px 14px;margin:8px 0;border-radius:0 4px 4px 0}
+.frame{border:1px solid var(--line);border-radius:6px;margin-bottom:10px;overflow:hidden}
+.frame.vendor{opacity:.45}
+.frame>summary{padding:8px 12px;background:var(--panel);cursor:pointer;list-style:none}
+.frame .fn{color:var(--accent)}.frame .loc{color:var(--dim);font-size:12px}
+.frame a{color:var(--dim)}
+pre{margin:0;padding:12px;overflow-x:auto;background:#010409}
+table{width:100%;border-collapse:collapse;font-size:13px}
+td,th{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--dim);font-weight:500}
+.slow{color:var(--amber)}
+.err{color:var(--red)}
+`

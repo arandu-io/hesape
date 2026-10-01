@@ -96,6 +96,7 @@ func statusMessage(status int) string {
 // 403 and a 503 is two strings.
 func statusPage(w http.ResponseWriter, d PageData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	setPagePolicy(w, statusCSP)
 	// A status page is about this request and this account. A shared cache must
 	// never hand it to somebody else, and a 404 that got cached is a page that
 	// stays missing after it is created.
@@ -110,7 +111,18 @@ const statusHTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Status}} {{.Title}}</title>
-<style>
+<style>` + statusStyle + `</style></head><body>
+<main>
+  <div class="status">{{.Status}}</div>
+  <h1>{{.Title}}</h1>
+  <p>{{.Message}}</p>
+  {{if .RequestID}}<div class="id">request_id {{.RequestID}}</div>{{end}}
+</main>
+</body></html>`
+
+// statusStyle is the whole of the status page's styling. It is a constant of
+// its own because statusCSP is the hash of exactly these bytes.
+const statusStyle = `
 :root{color-scheme:light dark;--bg:#fff;--fg:#111827;--dim:#6b7280;--line:#e5e7eb}
 @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#e6edf3;--dim:#8b949e;--line:#30363d}}
 *{box-sizing:border-box}
@@ -123,11 +135,4 @@ h1{margin:.5rem 0 0;font-size:1.5rem;font-weight:600}
 p{margin:.75rem 0 0}
 .id{margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--line);
 font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--dim)}
-</style></head><body>
-<main>
-  <div class="status">{{.Status}}</div>
-  <h1>{{.Title}}</h1>
-  <p>{{.Message}}</p>
-  {{if .RequestID}}<div class="id">request_id {{.RequestID}}</div>{{end}}
-</main>
-</body></html>`
+`
