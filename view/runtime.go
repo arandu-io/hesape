@@ -405,7 +405,7 @@ func attributeIsInert(name string) error {
 	}
 
 	switch {
-	case attributeHoldsURL(name):
+	case URLAttribute(name):
 		return fmt.Errorf("view: %q holds an address, and what makes an address safe is its scheme. "+
 			"A component that takes a URL takes it as a field of its own, "+
 			"which is what puts it through the check", name)
@@ -497,14 +497,17 @@ func isHTMX(name string) bool {
 // mistake than a requirement.
 var attributeNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*(:[a-z0-9-]+)?$`)
 
-// attributeHoldsURL reports whether a browser resolves this attribute's value
-// as an address.
+// URLAttribute reports whether a browser resolves this attribute's value as an
+// address, so that the value is safe only once TextURL has passed it.
 //
-// The list is of the attributes rather than of the schemes, and it is closed:
-// widening it is a decision somebody makes, while a value reaching one of these
-// unchecked is a decision nobody made.
-func attributeHoldsURL(name string) bool {
-	switch name {
+// It is the one list of such names, and every writer of an attribute whose name
+// comes from data consults it, as it consults ActiveAttribute. The list is of
+// the attributes rather than of the schemes, and it is closed: widening it is a
+// decision somebody makes, while a value reaching one of these unchecked is a
+// decision nobody made. The name is compared without regard to case, because
+// HTML reads HREF and href as one attribute.
+func URLAttribute(name string) bool {
+	switch strings.ToLower(name) {
 	case "href", "src", "srcset", "action", "formaction", "cite", "data",
 		"poster", "background", "codebase", "longdesc", "manifest", "profile",
 		"ping", "usemap", "xlink:href":

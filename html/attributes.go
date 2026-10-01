@@ -45,6 +45,10 @@ type Attrs map[string]string
 // is view.ActiveAttribute's, so the builders here and the view layer refuse
 // the same names. A request or a script belongs in a component that takes it
 // as a field, not in a map of attributes.
+//
+// An attribute that holds an address -- href, src, action, formaction and the
+// rest of view.URLAttribute's list -- is dropped when view.TextURL refuses its
+// value, so Attrs{"href": "javascript:alert(1)"} writes no href at all.
 func (h *HtmlBuilder) Attributes(attributes Attrs) template.HTML {
 	if len(attributes) == 0 {
 		return ""
@@ -64,10 +68,16 @@ func (h *HtmlBuilder) Attributes(attributes Attrs) template.HTML {
 }
 
 // attributeElement builds one key="value" pair, or "" when key is not a
-// legal attribute name.
+// legal attribute name, or when it holds an address -- view.URLAttribute --
+// whose value view.TextURL refuses.
 func (h *HtmlBuilder) attributeElement(key, value string) string {
 	if !isAttributeName(key) || view.ActiveAttribute(key) != nil {
 		return ""
+	}
+	if view.URLAttribute(key) {
+		if _, ok := safeURL(value); !ok {
+			return ""
+		}
 	}
 	return key + `="` + escape(value) + `"`
 }

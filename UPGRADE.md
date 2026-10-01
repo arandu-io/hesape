@@ -226,6 +226,10 @@ No signature changed. What a page receives did:
 - `FormBuilder` no longer lets old input replace a hidden field that was given a
   value, and never fills `_method` or `_token` from old input or from the model.
   A hidden field given `""` still comes back from old input.
+- An attribute that holds an address — `href`, `src`, `action`, `formaction`
+  and the rest of `view.URLAttribute`'s list, in any case — is dropped from
+  `Attrs` when `view.TextURL` refuses its value, and `FormBuilder.Open` answers
+  `html.ErrUnsafeAction` instead of writing a refused action.
 
 Why: `Link("javascript:alert(1)", ...)` produced a link that ran script;
 `javascript&colon;` passed a scheme check and became a colon only in the

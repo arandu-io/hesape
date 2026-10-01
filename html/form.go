@@ -23,6 +23,12 @@ var ErrNoToken = errors.New("html: no CSRF token: pass one to NewFormBuilder or 
 // no matching PUT, PATCH or DELETE route can receive.
 var ErrMultipartMethodSpoofing = errors.New("html: multipart forms cannot spoof HTTP methods")
 
+// ErrUnsafeAction is what [FormBuilder.Open] answers when the resolved action is
+// an address view.TextURL refuses -- a javascript: URL, another host written
+// as //host, a value carrying a control character. A form posting there sends
+// what was typed into it, CSRF token included, wherever the value pointed.
+var ErrUnsafeAction = errors.New("html: the form's action is an address the view layer refuses: it may be relative, or use http, https, mailto or tel")
+
 // FormBuilder builds escaped HTML form elements as values.
 //
 // Nothing here competes with the kyse components: these return escaped markup
@@ -86,7 +92,10 @@ type OpenOptions struct {
 
 // Open builds the opening tag and the appendage: the hidden _method for a
 // spoofed method, and the CSRF token for anything that is not GET. It
-// returns (template.HTML, error), because Route and Action can fail.
+// returns (template.HTML, error), because Route and Action can fail, and
+// because an action view.TextURL refuses is ErrUnsafeAction rather than a form
+// that posts there. A formaction among the Attributes is held to the same rule
+// and left out when refused.
 func (f *FormBuilder) Open(options OpenOptions) (template.HTML, error) {
 	method := options.Method
 	if method == "" {
@@ -99,6 +108,9 @@ func (f *FormBuilder) Open(options OpenOptions) (template.HTML, error) {
 	action, err := f.getAction(options)
 	if err != nil {
 		return "", err
+	}
+	if _, ok := safeURL(action); !ok {
+		return "", ErrUnsafeAction
 	}
 
 	attributes := Attrs{
