@@ -103,6 +103,9 @@ func (c *Context) Query(name string) string { return c.Request.URL.Query().Get(n
 // first value, and a dotted key descends into a JSON object when no field has
 // the dotted name itself. The query string of any request is read with Query.
 //
+// A body cut off by the limit the server put on it reads as empty here, since
+// there is no error to return; Bind and Request.Validate answer it with 413.
+//
 // Named Input rather than Form because Input is the word the vocabulary
 // already uses for it, and the vocabulary is the point.
 func (c *Context) Input(name string) string {

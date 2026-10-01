@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/http/exceptions"
 	"github.com/arandu-io/hesape/session"
 )
 
@@ -148,6 +149,12 @@ func classify(err error) (int, bool) {
 		return http.StatusForbidden, true
 	case errors.Is(err, session.ErrTokenMismatch):
 		return StatusPageExpired, true
+	}
+
+	// A body cut off by the server's limit, as the request readers report it.
+	var tooLarge *exceptions.PostTooLargeException
+	if errors.As(err, &tooLarge) {
+		return http.StatusRequestEntityTooLarge, true
 	}
 
 	return 0, false

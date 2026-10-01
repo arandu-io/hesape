@@ -14,11 +14,13 @@ import (
 // is a middleware over the whole server and not a check inside the handlers that
 // happen to accept an upload.
 //
-// It wraps the body in http.MaxBytesReader, which stops at the limit, answers
-// 413 by itself when the handler reads past it, and tells the connection not to
-// bother reading the rest. The reader is what enforces it rather than
-// Content-Length: a length is a header the client wrote, and a chunked body does
-// not carry one at all.
+// A request that declares a Content-Length above max is answered 413 here, and
+// the handler never runs. Every other body is wrapped in http.MaxBytesReader,
+// which stops reading at the limit and tells the connection not to bother with
+// the rest: a length is a header the client wrote, and a chunked body does not
+// carry one at all, so the reader is what enforces the limit. A read that meets
+// it fails with *http.MaxBytesError, which the request readers in hesape/http --
+// Context.Bind and Request.Validate -- answer as a 413 of their own.
 //
 // max is in bytes and there is no default: a limit that defaults to something is
 // a limit nobody notices is wrong, and the right number is a property of what an
@@ -27,6 +29,13 @@ import (
 func LimitBodySize(max int64) hhttp.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.ContentLength > max {
+				// The body is not read, so the connection cannot carry another
+				// request after this answer.
+				w.Header().Set("Connection", "close")
+				http.Error(w, http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
+				return
+			}
 			if r.Body != nil {
 				r.Body = http.MaxBytesReader(w, r.Body, max)
 			}

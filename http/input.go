@@ -14,6 +14,7 @@ import (
 
 	"net/url"
 
+	"github.com/arandu-io/hesape/http/exceptions"
 	"github.com/arandu-io/hesape/validation"
 )
 
@@ -81,7 +82,7 @@ func (r *Request) inputSource() map[string]any {
 	if r.IsJSON() {
 		return r.jsonPayload()
 	}
-	_ = parseBody(r.request)
+	r.noteTooLarge(parseBody(r.request))
 	return valuesToMap(r.request.PostForm)
 }
 
@@ -641,6 +642,7 @@ func (r *Request) AllFiles() map[string]any {
 // []*multipart.FileHeader.
 func (r *Request) allFilesMap() map[string]any {
 	if err := parseMultipart(r.request); err != nil {
+		r.noteTooLarge(err)
 		return map[string]any{}
 	}
 	if r.request.MultipartForm == nil || len(r.request.MultipartForm.File) == 0 {
@@ -667,8 +669,15 @@ func (r *Request) allFilesMap() map[string]any {
 // The rules are a compiled *validation.Set, built at boot with
 // validation.MustCompile. The options carry the context, the Grant and the
 // collaborators the rules that leave the process need.
+//
+// A body cut off by the limit the server put on it is not validated: the rules
+// would judge whatever part of it arrived. The error is instead a
+// *exceptions.PostTooLargeException, which answers 413.
 func (r *Request) Validate(rules *validation.Set, opts ...validation.ValidatorOption) (validation.Input, error) {
 	data := r.validationData()
+	if r.tooLarge != nil {
+		return validation.Input{}, r.tooLarge
+	}
 	return validation.Make(data, rules, opts...).Validate()
 }
 
@@ -676,6 +685,9 @@ func (r *Request) Validate(rules *validation.Set, opts ...validation.ValidatorOp
 // one page do not draw each other's errors.
 func (r *Request) ValidateWithBag(bag string, rules *validation.Set, opts ...validation.ValidatorOption) (validation.Input, error) {
 	data := r.validationData()
+	if r.tooLarge != nil {
+		return validation.Input{}, r.tooLarge
+	}
 	return validation.Make(data, rules, opts...).ValidateWithBag(bag)
 }
 
@@ -737,4 +749,25 @@ func jsonDecode(body []byte) map[string]any {
 		return map[string]any{}
 	}
 	return parsed
+}
+
+// bodyTooLarge is the 413 for an error that a body cut off by
+// http.MaxBytesReader produced, or nil for any other error.
+//
+// The reader returns *http.MaxBytesError and nothing else; the status is what
+// the caller is owed for it, and without this the same body reads as a parse
+// failure, or as a form with its fields missing.
+func bodyTooLarge(err error) error {
+	var tooLarge *stdhttp.MaxBytesError
+	if !errors.As(err, &tooLarge) {
+		return nil
+	}
+	return exceptions.NewPostTooLargeException("The request body is larger than this server accepts.", err, nil, 0)
+}
+
+// noteTooLarge keeps the first 413 a read of the body met.
+func (r *Request) noteTooLarge(err error) {
+	if r.tooLarge == nil {
+		r.tooLarge = bodyTooLarge(err)
+	}
 }

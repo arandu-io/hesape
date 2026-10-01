@@ -52,6 +52,11 @@ func (e *HTTPError) Unwrap() error { return e.Previous }
 // GetStatusCode returns StatusCode.
 func (e *HTTPError) GetStatusCode() int { return e.StatusCode }
 
+// HTTPStatus returns StatusCode. It is the method a routing layer looks for on
+// any error it is handed, so every exception embedding HTTPError is answered
+// with its own status by code that never imports this package.
+func (e *HTTPError) HTTPStatus() int { return e.StatusCode }
+
 // GetHeaders returns Headers.
 func (e *HTTPError) GetHeaders() stdhttp.Header { return e.Headers }
 
@@ -108,9 +113,10 @@ func NewMalformedUrlException() *MalformedUrlException {
 }
 
 // PostTooLargeException is the 413 for a request body bigger than the server
-// agreed to accept. It is raised from the declared content length, before the
-// body is read, so the caller is told the size was refused instead of being
-// handed a parse failure on a body that was cut short.
+// agreed to accept. Context.Bind and Request.Validate in hesape/http return it
+// for a body that http.MaxBytesReader cut off, wrapping the reader's
+// *http.MaxBytesError, so the caller is told the size was refused instead of
+// being handed a parse failure on a body that was cut short.
 type PostTooLargeException struct{ HTTPError }
 
 // NewPostTooLargeException builds a PostTooLargeException.

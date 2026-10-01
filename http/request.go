@@ -63,6 +63,12 @@ type Request struct {
 	json       map[string]any
 	jsonParsed bool
 
+	// tooLarge is the 413 for a body that http.MaxBytesReader cut off, kept from
+	// the read that met it. Input has no error to return, so it reads such a
+	// body as empty; Validate and Bind answer this instead of judging what was
+	// left.
+	tooLarge error
+
 	// userResolver is the closure the auth middleware installs, which
 	// returns the signed-in user.
 	userResolver func(guard string) any
@@ -607,6 +613,7 @@ func (r *Request) jsonPayload() map[string]any {
 	}
 	r.jsonParsed = true
 	body, err := io.ReadAll(r.request.Body)
+	r.noteTooLarge(err)
 	if err != nil || len(body) == 0 {
 		r.json = map[string]any{}
 		r.request.Body = io.NopCloser(strings.NewReader(""))

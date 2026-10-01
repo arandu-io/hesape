@@ -217,8 +217,10 @@ func TestTheHostIsNeverTakenFromAHeader(t *testing.T) {
 
 func TestABodyOverTheLimitIsRefusedRatherThanRead(t *testing.T) {
 	// One POST is enough to take a process down, and it needs no credentials and
-	// no route that does anything.
+	// no route that does anything. A chunked body declares no length, so the
+	// reader is what stops it.
 	r := httptest.NewRequest(http.MethodPost, "/documents", strings.NewReader(strings.Repeat("a", 4096)))
+	r.ContentLength = -1
 
 	_, got := run(middleware.LimitBodySize(64), r)
 	if got.err == nil {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/exception"
+	"github.com/arandu-io/hesape/http/exceptions"
 	"github.com/arandu-io/hesape/session"
 )
 
@@ -129,5 +130,18 @@ func TestHTTPStatusAgreesWithStatusOf(t *testing.T) {
 		if !ok || got != err.HTTPStatus() {
 			t.Fatalf("StatusOf = (%d, %v), HTTPStatus() = %d", got, ok, err.HTTPStatus())
 		}
+	}
+}
+
+// TestABodyOverTheLimitIs413: the request readers answer a body cut off by the
+// server's limit with the collection's own PostTooLargeException, and a handler
+// returning it must not turn into a 500.
+func TestABodyOverTheLimitIs413(t *testing.T) {
+	err := fmt.Errorf("storing the scan: %w",
+		exceptions.NewPostTooLargeException("too large", &http.MaxBytesError{Limit: 64}, nil, 0))
+
+	status, known := exception.StatusOf(err)
+	if !known || status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("StatusOf = %d, %v, want 413, true", status, known)
 	}
 }

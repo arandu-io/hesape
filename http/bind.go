@@ -111,6 +111,10 @@ var (
 // type Bind does not convert into (time.Duration among them, because "90"
 // would be read as ninety nanoseconds), and a body that could not be parsed.
 // It returns rather than panics, like every other failure a handler returns.
+//
+// A body cut off by the limit the server put on it binds nothing: the error is
+// a *exceptions.PostTooLargeException, which answers 413, rather than a struct
+// filled from whatever part of the body arrived.
 func (c *Context) Bind(dst any) error {
 	target := reflect.ValueOf(dst)
 	if target.Kind() != reflect.Pointer || target.IsNil() || target.Elem().Kind() != reflect.Struct {
@@ -120,12 +124,19 @@ func (c *Context) Bind(dst any) error {
 	input := c.inputRequest()
 	if readsBody(c.Request.Method) && !input.IsJSON() {
 		if err := parseBody(c.Request); err != nil {
+			if tooLarge := bodyTooLarge(err); tooLarge != nil {
+				return tooLarge
+			}
 			return fmt.Errorf("http: reading the form: %w", err)
 		}
 	}
 
+	form := formValues(input.inputMap())
+	if input.tooLarge != nil {
+		return input.tooLarge
+	}
 	errs := validation.Errors{}
-	if err := bindStruct(target.Elem(), formValues(input.inputMap()), errs); err != nil {
+	if err := bindStruct(target.Elem(), form, errs); err != nil {
 		return err
 	}
 	if errs.Any() {
