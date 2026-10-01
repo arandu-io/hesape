@@ -50,7 +50,30 @@ var ErrMultipleRecordsFound = errors.New("relations: more than one record matche
 // answer nil instead, so seeing this error means the caller asked for a row
 // that has to exist. The wrapping message carries the table, and the key when
 // the lookup had one.
-var ErrModelNotFound = errors.New("relations: no query results for the model")
+//
+// It is the value model.ErrModelNotFound re-exports -- the model package
+// imports this one, so the sentinel is declared here -- and a miss on a
+// relation and a miss on FindOrFail are one miss to errors.Is. It also answers
+// errors.Is for query.ErrRecordNotFound, the collection's one "no row".
+var ErrModelNotFound error = &narrowedError{
+	msg:    "model: no query results for model",
+	parent: query.ErrRecordNotFound,
+}
+
+// narrowedError is a sentinel that is also the broader one it names.
+//
+// errors.Is matches it by identity, and through Is against parent and
+// whatever parent itself answers for. Nothing reaches the parent through
+// Unwrap, so the message stays the narrow sentinel's own.
+type narrowedError struct {
+	msg    string
+	parent error
+}
+
+func (e *narrowedError) Error() string { return e.msg }
+
+// Is reports whether target is the parent, or something the parent is.
+func (e *narrowedError) Is(target error) bool { return errors.Is(e.parent, target) }
 
 // Relation is the contract every relation type implements.
 //

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/database/query"
 )
 
 // Chunkable is what the chunking functions ask of the query they walk.
@@ -81,8 +82,9 @@ type KeyChunkable[T any] interface {
 // It is declared here rather than in the database package because that package
 // imports this one, and Go refuses the cycle. The database package re-exports
 // it, so database.ErrRecordNotFound and concerns.ErrRecordNotFound are one
-// value under two names.
-var ErrRecordNotFound = errors.New("No record found for the given query.")
+// value under two names -- and both are query.ErrRecordNotFound, so a miss
+// from the query builder and a miss from here are the same miss to errors.Is.
+var ErrRecordNotFound = query.ErrRecordNotFound
 
 // ErrRecordsNotFound is what Sole returns when the query matched no row at all.
 //
@@ -90,7 +92,10 @@ var ErrRecordNotFound = errors.New("No record found for the given query.")
 // of being wrong are errors: none is this one, more than one is
 // MultipleRecordsFoundError. A caller that would rather have a zero value than
 // an error wants First, not Sole.
-var ErrRecordsNotFound = errors.New("records not found")
+//
+// It is query.ErrRecordsNotFound, so errors.Is also answers true for
+// ErrRecordNotFound: none matched is a missing row.
+var ErrRecordsNotFound = query.ErrRecordsNotFound
 
 // MultipleRecordsFoundError is what Sole returns when the query matched more
 // than one row, and it carries how many it saw.

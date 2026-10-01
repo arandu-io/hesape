@@ -20,15 +20,41 @@ import (
 // close the cycle.
 var (
 	// ErrRecordNotFound is what FirstOrFail returns when nothing matched.
+	//
+	// It is the one "no row" in the collection: every other not-found
+	// sentinel under database is this value or answers errors.Is for it, so a
+	// caller that only wants to know the row was missing checks this one.
 	ErrRecordNotFound = errors.New("query: no record found for the given query")
 
 	// ErrRecordsNotFound is what Sole returns when nothing matched.
-	ErrRecordsNotFound = errors.New("query: no records found for the given query")
+	//
+	// errors.Is answers true for ErrRecordNotFound too: none matched is a
+	// missing row. The reverse is false, so a caller can still tell Sole's
+	// miss from FirstOrFail's.
+	ErrRecordsNotFound error = &narrowedError{
+		msg:    "query: no records found for the given query",
+		parent: ErrRecordNotFound,
+	}
 
 	// ErrMultipleRecordsFound is what Sole returns when more than one row
 	// matched. The message carries the count.
 	ErrMultipleRecordsFound = errors.New("query: multiple records found")
 )
+
+// narrowedError is a sentinel that is also the broader one it names.
+//
+// errors.Is matches it by identity, and through Is against parent and
+// whatever parent itself answers for. Nothing reaches the parent through
+// Unwrap, so the message stays the narrow sentinel's own.
+type narrowedError struct {
+	msg    string
+	parent error
+}
+
+func (e *narrowedError) Error() string { return e.msg }
+
+// Is reports whether target is the parent, or something the parent is.
+func (e *narrowedError) Is(target error) bool { return errors.Is(e.parent, target) }
 
 // TenantColumn is the column every statement this package issues is filtered
 // by, and the column every row it writes carries.

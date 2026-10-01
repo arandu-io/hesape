@@ -3,6 +3,8 @@ package model
 import (
 	"errors"
 	"fmt"
+
+	"github.com/arandu-io/hesape/database/model/relations"
 )
 
 // ErrModelNotFound is what FindOrFail and its neighbours return when no row
@@ -14,9 +16,12 @@ import (
 //	fmt.Errorf("%w: users [7]", ErrModelNotFound)
 //
 // It is a sentinel and not a type for the reason database.ErrNotFound is one:
-// the exception classifier turns it into a 404, and a caller comparing against
-// it should not have to name a struct.
-var ErrModelNotFound = errors.New("model: no query results for model")
+// a caller comparing against it should not have to name a struct. It is the
+// same value as relations.ErrModelNotFound, so a failing read on a relation
+// matches it too, and errors.Is answers true for database.ErrRecordNotFound as
+// well -- a routing layer that answers a missing row with 404 answers this one
+// the same way.
+var ErrModelNotFound = relations.ErrModelNotFound
 
 // ErrMultipleRecordsFound is what Sole returns when the query matched more than
 // one row.

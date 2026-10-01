@@ -172,9 +172,12 @@ func (e *LostConnectionException) Error() string { return e.Message }
 
 // ErrRecordNotFound is what FirstOrFail returns when the query matched no row.
 //
-// It is the same value as concerns.ErrRecordNotFound, re-exported: FirstOrFail
-// lives there, and errors.Is has to keep working across both names, which it
-// does because there is only one.
+// It is the same value as concerns.ErrRecordNotFound and
+// query.ErrRecordNotFound, re-exported: FirstOrFail lives in both, and errors.Is
+// has to keep working across every name, which it does because there is only
+// one. Every other not-found sentinel under database -- ErrNotFound,
+// ErrRecordsNotFound, model.ErrModelNotFound -- answers errors.Is for it, so it
+// is the one check for "the row was not there".
 var ErrRecordNotFound = concerns.ErrRecordNotFound
 
 // ErrRecordsNotFound is what Sole returns when the query matched no row at all.
@@ -183,6 +186,21 @@ var ErrRecordNotFound = concerns.ErrRecordNotFound
 // reason ErrRecordNotFound is: Sole lives in that package, and errors.Is has to
 // give the same answer under either name.
 var ErrRecordsNotFound = concerns.ErrRecordsNotFound
+
+// narrowedError is a sentinel that is also the broader one it names.
+//
+// errors.Is matches it by identity, and through Is against parent and
+// whatever parent itself answers for. Nothing reaches the parent through
+// Unwrap, so the message stays the narrow sentinel's own.
+type narrowedError struct {
+	msg    string
+	parent error
+}
+
+func (e *narrowedError) Error() string { return e.msg }
+
+// Is reports whether target is the parent, or something the parent is.
+func (e *narrowedError) Is(target error) bool { return errors.Is(e.parent, target) }
 
 // MultipleRecordsFoundException is what Sole returns when the query matched
 // more than one row, and it carries how many it saw.

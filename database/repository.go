@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
-	"errors"
 	"fmt"
 	"time"
 
@@ -17,12 +16,14 @@ import (
 //
 // It is a sentinel rather than sql.ErrNoRows for two reasons. A repository that
 // leaks sql.ErrNoRows makes every caller import database/sql to compare against
-// it, and the exception classifier turns this one into a 404 -- so a module that
-// returns it gets the right status without writing a status anywhere.
+// it, and errors.Is answers true for ErrRecordNotFound too -- so a routing layer
+// that answers a missing row with 404 answers this one the same way, and a
+// module that returns it gets the right status without writing a status
+// anywhere. The reverse is false: a FirstOrFail miss is not a repository's.
 //
 // A repository wraps it (fmt.Errorf("%w: invoice %s", database.ErrNotFound, id))
 // so errors.Is keeps working and the message still says which row.
-var ErrNotFound = errors.New("database: no such row")
+var ErrNotFound error = &narrowedError{msg: "database: no such row", parent: ErrRecordNotFound}
 
 // Repository is the contract every module repository implements.
 //
