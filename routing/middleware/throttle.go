@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -171,11 +172,30 @@ func KeyByIP(r *http.Request) string {
 	return "ip:" + block.String()
 }
 
-// KeyBySession keys on the session id, falling back to the address for
-// anonymous requests. Pass session.Store.ID as the extractor.
-func KeyBySession(idFrom func(*http.Request) string) KeyFunc {
+// Sessions is what KeyBySession reads a session through. *session.RecordStore
+// satisfies it.
+type Sessions interface {
+	// ID is the session id the request's cookie names, once its signature is
+	// verified, or the empty string.
+	ID(r *http.Request) string
+	// Exists reports whether the store still holds the session id names.
+	Exists(ctx context.Context, id string) bool
+}
+
+// KeyBySession keys on the session id, falling back to the address for a
+// request with no session.
+//
+// A session counts only while the store holds it. A signature proves that this
+// application minted the id once, not that the session is alive: every id a
+// client was ever given -- one per visit, one per sign-out, kept from any number
+// of earlier sessions -- still verifies, and each one keyed a budget of its own,
+// so a client that rotated old cookies was never limited at all. A cookie whose
+// session expired or was destroyed is keyed by the address, as if it were
+// absent. That costs the store one read per request, which the session the
+// request loads anyway usually pays already.
+func KeyBySession(sessions Sessions) KeyFunc {
 	return func(r *http.Request) string {
-		if id := idFrom(r); id != "" {
+		if id := sessions.ID(r); id != "" && sessions.Exists(r.Context(), id) {
 			return "session:" + id
 		}
 		return KeyByIP(r)

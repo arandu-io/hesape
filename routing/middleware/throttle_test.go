@@ -321,8 +321,8 @@ func TestKeyByIPIgnoresWhatTheClientSends(t *testing.T) {
 // TestKeyBySessionFallsBackToTheAddress for an anonymous request, which is
 // every request that reaches a sign-in form.
 func TestKeyBySessionFallsBackToTheAddress(t *testing.T) {
-	signedIn := middleware.KeyBySession(func(*http.Request) string { return "sess-1" })
-	anonymous := middleware.KeyBySession(func(*http.Request) string { return "" })
+	signedIn := middleware.KeyBySession(fixedSession("sess-1"))
+	anonymous := middleware.KeyBySession(fixedSession(""))
 
 	req := request()
 	req.RemoteAddr = "192.0.2.10:5000"

@@ -511,6 +511,18 @@ func (s *RecordStore[T]) ID(r *http.Request) string {
 	return id
 }
 
+// Exists reports whether the handler still holds the session id names: it was
+// not expired, evicted or destroyed. A signed cookie proves only that the id was
+// minted here once, so a caller that keys anything on a session -- a rate limit
+// above all -- asks this too.
+func (s *RecordStore[T]) Exists(ctx context.Context, id string) bool {
+	if id == "" {
+		return false
+	}
+	_, err := s.handler.Read(ctx, id)
+	return err == nil
+}
+
 // writeCookie takes the lifetime rather than reading s.ttl, because the record
 // was written with that same value: a remembered session whose cookie still said
 // one hour was a session the browser threw away while the handler held it, and

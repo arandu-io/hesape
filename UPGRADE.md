@@ -65,6 +65,29 @@ row without error, as they skip an unknown key. A program that re-keys a row
 assigns the field, or uses `ForceFill`. `NewInstance(attributes, true)` still
 takes the key from `attributes`.
 
+### `middleware.KeyBySession` takes the session store, and keys only a live session
+
+`routing/middleware.KeyBySession` took a function returning the session id the
+cookie named. A signature on the cookie proves only that the id was minted here
+once, so every expired or signed-out id a client kept was a fresh rate-limit
+budget. It now takes a `middleware.Sessions` — the `ID` it read before, plus
+`Exists(ctx, id) bool` — and keys by the session only while the store holds it,
+falling back to the address otherwise. `*session.RecordStore` satisfies it, with
+the new `RecordStore.Exists`.
+
+**What breaks.** `KeyBySession(func(*http.Request) string)` no longer compiles.
+
+```go
+// Before
+middleware.KeyBySession(store.ID)
+
+// After
+middleware.KeyBySession(store) // store is a *session.RecordStore[T]
+```
+
+A wrapper that only exposes an id function implements `Exists` by asking its
+store, and must not answer `true` for an id it did not look up.
+
 ### A duplicate key is `database.ErrUniqueViolation`, and `database.UniqueConstraintDetector` is gone
 
 A write the engine refuses for a duplicate key now satisfies
