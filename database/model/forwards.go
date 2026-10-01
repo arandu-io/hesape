@@ -95,3 +95,14 @@ func (m *Model[T]) Oldest(column ...string) *Builder[T] { return m.NewQuery().Ol
 func (m *Model[T]) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[*T], error) {
 	return m.NewQuery().SimplePaginate(ctx, g, perPage, page, opts, columns...)
 }
+
+// DoesntExist calls DoesntExist on a fresh query for the model: whether the
+// tenant's table holds no row the global scopes let through, which is the
+// question a seeder asks before it fills one.
+//
+// It has no Exists counterpart on the model, because Exists is the field that
+// says whether this instance is stored, and a type cannot carry a field and a
+// method of the same name. NewQuery().Exists asks the positive question.
+func (m *Model[T]) DoesntExist(ctx context.Context, g auth.Grant) (bool, error) {
+	return m.NewQuery().DoesntExist(ctx, g)
+}

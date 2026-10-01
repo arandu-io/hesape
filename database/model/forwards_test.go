@@ -59,3 +59,26 @@ func TestOldestOnTheModelOrdersByTheGivenColumnOldestFirst(t *testing.T) {
 		t.Errorf("SQL = %q, want oldest first by name", sql)
 	}
 }
+
+// TestDoesntExistOnTheModelIsAScopedCount: a seeder asks whether the table is
+// empty off the model, and the question is the tenant's, not the table's.
+func TestDoesntExistOnTheModelIsAScopedCount(t *testing.T) {
+	model, conn := newUserModel()
+	conn.queue(query.Record{"aggregate": int64(0)})
+
+	empty, err := model.DoesntExist(context.Background(), grant())
+	if err != nil {
+		t.Fatalf("DoesntExist: %v", err)
+	}
+	if !empty {
+		t.Error("DoesntExist reported a row where the count was zero")
+	}
+	if sql := conn.last().SQL; !strings.Contains(sql, `"users"."tenant_id" = ?`) {
+		t.Errorf("SQL = %q, want the tenant scope a fresh query carries", sql)
+	}
+
+	conn.queue(query.Record{"aggregate": int64(2)})
+	if empty, err = model.DoesntExist(context.Background(), grant()); err != nil || empty {
+		t.Errorf("DoesntExist = %v, %v over two rows, want false", empty, err)
+	}
+}
