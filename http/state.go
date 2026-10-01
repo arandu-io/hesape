@@ -67,3 +67,41 @@ func (c *Context) State() State { return StateFrom(c.Ctx()) }
 func (c *Context) Old(field string) string {
 	return c.State().Old.Get(field)
 }
+
+// csrfTokenKey is the context key of the CSRF token issued for this request,
+// of an unexported type for the same reason as stateKey.
+type csrfTokenKey struct{}
+
+// WithCSRFToken returns a context carrying the CSRF token issued for this
+// request.
+//
+// The contract is with the middleware that protects forms: on every request
+// that may render a page, it issues the token bound to this visitor -- the
+// session id, or the guest binding for somebody who has none -- and puts it
+// here before the handler runs. view.New reads it back, so a controller that
+// renders a form never sees the issuer, the session store or the binding, and
+// a page cannot carry a token issued for another request.
+//
+// It is a key of its own rather than a field of State because the two are
+// written by different middleware that know nothing of each other's order: one
+// struct written twice is a struct where the second write erases the first.
+//
+// An empty token is not stored, so a context passed through here with nothing
+// to carry answers CSRFTokenFrom exactly as one that never was.
+func WithCSRFToken(parent context.Context, token string) context.Context {
+	if token == "" {
+		return parent
+	}
+	return context.WithValue(parent, csrfTokenKey{}, token)
+}
+
+// CSRFTokenFrom returns the CSRF token on a request context, and whether one
+// was issued for it.
+//
+// False is the answer for a request no protecting middleware ran on: an API
+// route, a test that builds its own request. A page drawn there carries an
+// empty token, and a form posted from it is refused.
+func CSRFTokenFrom(ctx context.Context) (string, bool) {
+	token, ok := ctx.Value(csrfTokenKey{}).(string)
+	return token, ok && token != ""
+}

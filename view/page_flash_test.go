@@ -138,3 +138,37 @@ func TestPageStillSatisfiesLayout(t *testing.T) {
 		t.Error("a layout cannot see that this page was rejected")
 	}
 }
+
+// TestNewTakesTheCSRFTokenFromTheRequest: the middleware that protects forms
+// issues the token and stores it on the request; the controller writes
+// view.New(ctx, title) and nothing else, and the form carries the token.
+func TestNewTakesTheCSRFTokenFromTheRequest(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/posts/new", nil)
+	req = req.WithContext(hhttp.WithCSRFToken(req.Context(), "issued-token"))
+	ctx := hhttp.NewContext(httptest.NewRecorder(), req, nil, nil)
+
+	if got := view.New(ctx, "New post").CSRFToken(); got != "issued-token" {
+		t.Fatalf("CSRFToken = %q, want the token issued for the request", got)
+	}
+}
+
+// TestWithTokenReplacesTheIssuedToken: a page rendered outside the protecting
+// middleware still has a way to carry one, and that way wins.
+func TestWithTokenReplacesTheIssuedToken(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/posts/new", nil)
+	req = req.WithContext(hhttp.WithCSRFToken(req.Context(), "issued-token"))
+	ctx := hhttp.NewContext(httptest.NewRecorder(), req, nil, nil)
+
+	if got := view.New(ctx, "New post").WithToken("explicit").CSRFToken(); got != "explicit" {
+		t.Fatalf("CSRFToken = %q, want explicit", got)
+	}
+}
+
+// TestNewWithoutAnIssuedTokenCarriesNone: no middleware, no token -- and no
+// panic, because a page drawn in a test or behind an API route still renders.
+func TestNewWithoutAnIssuedTokenCarriesNone(t *testing.T) {
+	ctx := hhttp.NewContext(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil), nil, nil)
+	if got := view.New(ctx, "Home").CSRFToken(); got != "" {
+		t.Fatalf("CSRFToken = %q, want empty", got)
+	}
+}
