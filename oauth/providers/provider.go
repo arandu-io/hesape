@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 
+	hhttp "github.com/arandu-io/hesape/http"
 	httpclient "github.com/arandu-io/hesape/http/client"
 	"github.com/arandu-io/hesape/oauth"
 	"github.com/arandu-io/hesape/str"
@@ -180,8 +181,14 @@ func (p *Provider) Redirect(w http.ResponseWriter, r *http.Request) error {
 // The state is verified first, and a mismatch is [ErrStateMismatch] before any
 // request is made, for every provider.
 //
+// The state, the code and the error are read from the query string of a GET --
+// the redirect every provider sends by default -- and from the body of any other
+// method, which is where a provider answering with response_mode=form_post puts
+// them. A query string on a POST is not read.
+//
 // options is applied last, so grant_type can be replaced.
 func (p *Provider) GetAccessToken(r *http.Request, options ...map[string]string) (AccessToken, error) {
+	callback := hhttp.NewRequest(r)
 	if p.usesState() {
 		if p.state == nil {
 			return nil, errors.New("oauth: this provider has no state store, and the callback cannot be verified without one (pass one, or call Stateless)")
@@ -190,15 +197,15 @@ func (p *Provider) GetAccessToken(r *http.Request, options ...map[string]string)
 		if err != nil {
 			return nil, fmt.Errorf("oauth: reading the stored state: %w", err)
 		}
-		if err := Verify(stored, r.FormValue("state")); err != nil {
+		if err := Verify(stored, callback.String("state")); err != nil {
 			return nil, err
 		}
 	}
 
-	if code := r.FormValue("code"); code == "" {
+	if code := callback.String("code"); code == "" {
 		// The provider sends error=access_denied when the person says no, and
 		// saying so is more useful than an empty exchange that fails later.
-		if reason := r.FormValue("error"); reason != "" {
+		if reason := callback.String("error"); reason != "" {
 			return nil, fmt.Errorf("oauth: the provider refused the authorization: %s", reason)
 		}
 		return nil, errors.New("oauth: the callback carries no authorization code")
@@ -209,7 +216,7 @@ func (p *Provider) GetAccessToken(r *http.Request, options ...map[string]string)
 	form.Set("client_id", p.clientID)
 	form.Set("client_secret", p.secret)
 	form.Set("redirect_uri", p.redirectTarget(currentURL(r)))
-	form.Set("code", r.FormValue("code"))
+	form.Set("code", callback.String("code"))
 	for k, v := range p.parameters {
 		form.Set(k, v)
 	}

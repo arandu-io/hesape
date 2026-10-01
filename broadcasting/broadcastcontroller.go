@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/arandu-io/hesape/auth"
+	hhttp "github.com/arandu-io/hesape/http"
 )
 
 // ChannelNameField is the field the socket client sends the channel it wants to
@@ -48,7 +49,11 @@ func (c *BroadcastController) Authenticate(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	channel := r.FormValue(ChannelNameField)
+	// Read through the request's one input path rather than FormValue: a
+	// multipart body parsed there has its temporary files removed when the
+	// request ends, and FormValue would also take a query-string value for a
+	// field the body did not send.
+	channel := hhttp.NewRequest(r).String(ChannelNameField)
 
 	g, response, err := driver.Auth(r.Context(), channel)
 	if err != nil {
