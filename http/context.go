@@ -150,6 +150,24 @@ func (c *Context) URL(name string, params ...string) string {
 	return out
 }
 
+// HasRoute reports whether a route is registered under name.
+//
+// It is the question URL cannot be asked without logging: a link that exists
+// only when the application registered its route -- sign-in, registration --
+// asks this first and draws nothing otherwise, where URL would report an
+// unknown name as an error. A Context built without a route table has no
+// routes.
+func (c *Context) HasRoute(name string) bool {
+	if c.urls == nil {
+		return false
+	}
+	if named, ok := c.urls.(interface{ HasNamedRoute(string) bool }); ok {
+		return named.HasNamedRoute(name)
+	}
+	_, err := c.urls.Route(name)
+	return err == nil
+}
+
 // View renders a page. The data is a typed struct, never a map.
 //
 //	return ctx.View("invoices/index", IndexData{Invoices: list})

@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/arandu-io/hesape/auth"
 	hhttp "github.com/arandu-io/hesape/http"
 	"github.com/arandu-io/hesape/str"
 	"github.com/arandu-io/hesape/validation"
@@ -114,12 +115,14 @@ type Page struct {
 	Token string
 
 	// Authenticated decides which half of the navigation bar is drawn, and
-	// UserName is the signed-in person's display name.
+	// UserName is the signed-in person's display name. New fills Authenticated
+	// from the subject on the request; UserName is the controller's.
 	Authenticated bool
 	UserName      string
 
-	// Where the navigation points. They come from the router, through the
-	// controller. RegisterURL is empty when registration is not open.
+	// Where the navigation points. New fills them from the route table, by the
+	// names it documents, and leaves empty the ones the application did not
+	// register. RegisterURL is empty when registration is not open.
 	HomeURL     string
 	LoginURL    string
 	LogoutURL   string
@@ -239,22 +242,60 @@ func (p Page) AdminLink() string { return p.AdminURL }
 // forgetting produces a form that comes back blank, or one that is refused on
 // submit -- correct-looking, and wrong.
 //
-// It fills only what the request itself knows: the title it was given, the
-// address being served, what the flash left behind, and the token the
-// middleware that protects forms issued for this request (hhttp.CSRFTokenFrom).
-// The application name, the navigation and the signed-in person are the
-// controller's, because they are decisions -- see the Layout interface on why
-// the layout is never allowed to go and fetch them.
+// It fills what the request itself knows: the title it was given, the address
+// being served, what the flash left behind, the token the middleware that
+// protects forms issued for this request (hhttp.CSRFTokenFrom), and whether
+// somebody is signed in -- auth.Check over the subject the authentication
+// middleware put on the context, so a guest is not signed in.
+//
+// The four navigation targets come from the route table: HomeURL from the
+// route named "home", LoginURL from "auth.login", LogoutURL from "auth.logout"
+// and RegisterURL from "auth.register". A name the application never
+// registered leaves its field empty, which draws no link. A page built without
+// them draws guest navigation for a signed-in person -- a sign-in link with
+// nowhere to go and no way out -- and that is why they are here rather than
+// left to every controller.
+//
+// UserName stays empty: the subject carries an identifier, not a display name,
+// and the name is a read the controller makes. So are the application name,
+// PanelURL and AdminURL, which are decisions -- see the Layout interface on
+// why the layout is never allowed to go and fetch them. A controller assigns
+// any of these on the value New returns.
 func New(ctx *hhttp.Context, title string) Page {
 	state := ctx.State()
 	token, _ := hhttp.CSRFTokenFrom(ctx.Ctx())
 	return Page{
-		Title:  title,
-		Path:   ctx.Request.URL.Path,
-		Token:  token,
-		Errors: state.Errors,
-		Old:    state.Old,
+		Title:         title,
+		Path:          ctx.Request.URL.Path,
+		Token:         token,
+		Errors:        state.Errors,
+		Old:           state.Old,
+		Authenticated: auth.Check(ctx.Ctx()),
+		HomeURL:       routeIfRegistered(ctx, routeHome),
+		LoginURL:      routeIfRegistered(ctx, routeLogin),
+		LogoutURL:     routeIfRegistered(ctx, routeLogout),
+		RegisterURL:   routeIfRegistered(ctx, routeRegister),
 	}
+}
+
+// The route names New reads the navigation from. They are the names the
+// authentication starter kit and the application skeleton register, and an
+// application that registers its routes under others assigns the fields
+// itself.
+const (
+	routeHome     = "home"
+	routeLogin    = "auth.login"
+	routeLogout   = "auth.logout"
+	routeRegister = "auth.register"
+)
+
+// routeIfRegistered is the path of the route called name, or empty when the
+// application did not register one.
+func routeIfRegistered(ctx *hhttp.Context, name string) string {
+	if !ctx.HasRoute(name) {
+		return ""
+	}
+	return ctx.URL(name)
 }
 
 // WithToken replaces the CSRF token New took from the request context.
