@@ -10,7 +10,8 @@ import (
 // model per row on the way to the database.
 //
 // It is the path a seeder and an importer take: one statement for a thousand
-// rows, with the columns a save would have written.
+// rows, with the columns a save would have written -- the generated key of a
+// model that uses unique ids among them.
 func (b *Builder[T]) FillForInsert(values []map[string]any) ([]map[string]any, error) {
 	if len(values) == 0 {
 		return nil, nil
@@ -19,6 +20,9 @@ func (b *Builder[T]) FillForInsert(values []map[string]any) ([]map[string]any, e
 	for _, row := range values {
 		instance, err := b.NewModelInstance(row)
 		if err != nil {
+			return nil, err
+		}
+		if err := instance.setUniqueID(); err != nil {
 			return nil, err
 		}
 		if instance.UsesTimestamps() {

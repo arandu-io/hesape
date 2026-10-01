@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/database"
 	"github.com/arandu-io/hesape/database/model/relations/concerns"
 	"github.com/arandu-io/hesape/database/query"
 	"github.com/arandu-io/hesape/str"
@@ -83,6 +84,10 @@ type Model[T any] struct {
 	CreatedAtColumn string
 	UpdatedAtColumn string
 	DeletedAtColumn string
+
+	// uniqueIDs says the model fills an empty primary key on insert. See
+	// UseUniqueIDs.
+	uniqueIDs bool
 
 	// embedded is where Model[T] sits inside T, plus two, so that the zero
 	// value means "not resolved yet". See entityIndex.
@@ -242,6 +247,7 @@ func (m *Model[T]) NewInstance(attributes map[string]any, exists bool) (*Model[T
 	}
 	*instance = Model[T]{
 		embedded:          m.embedded,
+		uniqueIDs:         m.uniqueIDs,
 		Table:             m.Table,
 		PrimaryKey:        m.PrimaryKey,
 		KeyType:           m.KeyType,
@@ -482,6 +488,9 @@ func (m *Model[T]) performUpdate(ctx context.Context, g auth.Grant) (bool, error
 // performInsert fires the Creating/Created events and inserts the row for a
 // model that does not exist yet.
 func (m *Model[T]) performInsert(ctx context.Context, g auth.Grant) (bool, error) {
+	if err := m.setUniqueID(); err != nil {
+		return false, err
+	}
 	if err := m.fireModelEvent(Creating); err != nil {
 		return false, err
 	}
@@ -925,6 +934,47 @@ func (m *Model[T]) GetIncrementing() bool { return m.Incrementing }
 func (m *Model[T]) SetIncrementing(value bool) *Model[T] {
 	m.Incrementing = value
 	return m
+}
+
+// UseUniqueIDs makes the primary key an identifier the model generates: text,
+// not incremented by the database, and filled on insert when it is empty.
+//
+//	func Invoices(db *data.DB) *model.Model[Invoice] {
+//		return model.NewModel[Invoice]("invoices", db, db.GetQueryGrammar(), db.GetPostProcessor()).UseUniqueIDs()
+//	}
+//
+// It sets KeyType to "string" and Incrementing to false, and from then on Save,
+// Create and FillForInsert give a row whose key is empty a fresh
+// database.NewOrderedID -- a version 7 UUID, the same text as the version 4 a
+// key column already holds, which sorts by the time it was made. A key that is
+// already set is kept, so a caller that has to choose the id still can.
+//
+// The key is filled before the Creating event, so a listener sees the id the
+// row is about to be written with.
+//
+// It returns m, so it chains onto NewModel, and every instance the model makes
+// carries it.
+func (m *Model[T]) UseUniqueIDs() *Model[T] {
+	m.KeyType = "string"
+	m.Incrementing = false
+	m.uniqueIDs = true
+	return m
+}
+
+// UsesUniqueIDs reports whether UseUniqueIDs was called on the model.
+func (m *Model[T]) UsesUniqueIDs() bool { return m.uniqueIDs }
+
+// setUniqueID fills an empty primary key on a model that uses unique ids, and
+// does nothing on any other.
+func (m *Model[T]) setUniqueID() error {
+	if !m.uniqueIDs || !isZero(m.GetKey()) {
+		return nil
+	}
+	id, err := database.NewOrderedID()
+	if err != nil {
+		return err
+	}
+	return m.SetAttribute(m.GetKeyName(), id)
 }
 
 // GetTable returns the table name: Table when it is set, or else the name

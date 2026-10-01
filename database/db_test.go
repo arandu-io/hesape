@@ -124,3 +124,25 @@ func TestNewIDIsAUUIDv4(t *testing.T) {
 		seen[id] = true
 	}
 }
+
+// TestNewOrderedIDIsTheTextOfAUUID: an ordered id goes into the same column a
+// NewID went into, so it has to be the same 36 characters.
+func TestNewOrderedIDIsTheTextOfAUUID(t *testing.T) {
+	seen := map[string]bool{}
+	for range 100 {
+		id, err := database.NewOrderedID()
+		if err != nil {
+			t.Fatalf("NewOrderedID: %v", err)
+		}
+		if len(id) != 36 || id[8] != '-' || id[13] != '-' || id[18] != '-' || id[23] != '-' {
+			t.Fatalf("id = %q, want the five groups of a uuid", id)
+		}
+		if id[14] != '7' {
+			t.Fatalf("id = %q, want version 7 in the third group", id)
+		}
+		if seen[id] {
+			t.Fatalf("NewOrderedID repeated %q", id)
+		}
+		seen[id] = true
+	}
+}
