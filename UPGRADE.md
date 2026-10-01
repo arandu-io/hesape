@@ -49,6 +49,22 @@ accepted and the value a handler stored could differ.
 - A `GET` or `HEAD` with a JSON content type reads its query string, not its
   body.
 
+### No write takes the tenant from the caller's map, under any spelling
+
+`query.Builder` and `model.Builder` already replaced a value under the exact key
+`tenant_id` with the Grant's tenant. A key that reaches the same column another
+way — `notes.tenant_id`, `TENANT_ID`, a quoted or space-padded name — was written
+as given, and an `Update(ctx, g, r.All())` moved the row to another tenant. Every
+spelling `query.NamesColumn` recognises is now replaced on `Update`, `Insert`,
+`Upsert`, `Increment` and `Save`, and `Model.Fill` writes neither the tenant
+column nor the primary key of a row that already exists.
+
+**What changes without a compiler error.** `Fill`, and therefore `Update`,
+`UpdateOrFail` and `UpdateOrCreate`, skip `tenant_id` and the key of an existing
+row without error, as they skip an unknown key. A program that re-keys a row
+assigns the field, or uses `ForceFill`. `NewInstance(attributes, true)` still
+takes the key from `attributes`.
+
 ### A duplicate key is `database.ErrUniqueViolation`, and `database.UniqueConstraintDetector` is gone
 
 A write the engine refuses for a duplicate key now satisfies

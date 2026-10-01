@@ -7,6 +7,7 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/arandu-io/hesape/auth"
 )
@@ -181,9 +182,10 @@ func (b *Builder) insertUsing(ctx context.Context, g auth.Grant, columns []any, 
 // its bindings landing where its placeholders are. Such a subquery is scoped by
 // the Grant first, for the reason InsertUsing's is.
 //
-// A value under TenantColumn is replaced by the Grant's tenant rather than
-// written: an update that moved a row to another tenant would pass its own where
-// clause on the way out and be unreachable afterwards.
+// A value under TenantColumn -- spelled any way NamesColumn recognises, such
+// as "notes.tenant_id" or "TENANT_ID" -- is replaced by the Grant's tenant
+// rather than written: an update that moved a row to another tenant would pass
+// its own where clause on the way out and be unreachable afterwards.
 //
 // Two maps go to the grammar -- the values to compile and the bindings to send
 // -- and both are keyed by column, so the grammar has to walk them in sorted key
@@ -259,14 +261,14 @@ func (b *Builder) prepareUpdateValues(ctx context.Context, g auth.Grant, values 
 		return nil, nil, err
 	}
 
-	compiled = make(map[string]any, len(values))
-	bindings = make(map[string]any, len(values))
+	values, named := withoutTenantColumn(values)
+	compiled = make(map[string]any, len(values)+1)
+	bindings = make(map[string]any, len(values)+1)
+	if named {
+		compiled[TenantColumn] = tenant
+		bindings[TenantColumn] = tenant
+	}
 	for column, value := range values {
-		if column == TenantColumn {
-			compiled[column] = tenant
-			bindings[column] = tenant
-			continue
-		}
 		if sub, ok := value.(*Builder); ok {
 			sql, subBindings, subErr := b.parseSub(ctx, g, sub)
 			if subErr != nil {
@@ -539,14 +541,12 @@ func (b *Builder) tenantFor(ctx context.Context, g auth.Grant) (string, error) {
 //
 // The copy is what keeps the caller's map free of a column it did not write,
 // and the overwrite is what makes the Grant the only source of a tenant: a value
-// the caller passed under TenantColumn does not survive this.
+// the caller passed under TenantColumn does not survive this, under any spelling
+// NamesColumn recognises.
 func stampTenant(values []map[string]any, tenant string) []map[string]any {
 	out := make([]map[string]any, len(values))
 	for i, row := range values {
-		copied := make(map[string]any, len(row)+1)
-		for column, value := range row {
-			copied[column] = value
-		}
+		copied, _ := withoutTenantColumn(row)
 		copied[TenantColumn] = tenant
 		out[i] = copied
 	}
@@ -574,4 +574,46 @@ func flattenRow(row map[string]any) []any {
 		out = append(out, row[column])
 	}
 	return out
+}
+
+// NamesColumn reports whether key, a column name as a caller wrote it into a
+// map of values, names column.
+//
+// The comparison is the one an engine makes when it resolves the name, made
+// generously: surrounding space and identifier quotes are ignored, a table or
+// schema qualifier is ignored, and case is ignored. Every engine this package
+// compiles for strips the qualifier off the left side of a SET or reads it as
+// the same column, and SQLite and MySQL resolve a column name in any case, so
+// "notes.tenant_id" and "TENANT_ID" reach the column "tenant_id" as surely as
+// the exact spelling does. A guard that recognised only the exact spelling
+// would be a guard with two spellings around it.
+func NamesColumn(key, column string) bool {
+	if column == "" {
+		return false
+	}
+	return strings.EqualFold(bareColumn(key), bareColumn(column))
+}
+
+// bareColumn is a column name without space, qualifier or identifier quotes.
+func bareColumn(name string) string {
+	name = strings.TrimSpace(name)
+	if i := strings.LastIndexByte(name, '.'); i >= 0 {
+		name = name[i+1:]
+	}
+	return strings.Trim(name, " \t\r\n\"`[]")
+}
+
+// withoutTenantColumn copies values without any key that names the tenant
+// column, and reports whether one was there.
+func withoutTenantColumn(values map[string]any) (map[string]any, bool) {
+	out := make(map[string]any, len(values)+1)
+	found := false
+	for column, value := range values {
+		if NamesColumn(column, TenantColumn) {
+			found = true
+			continue
+		}
+		out[column] = value
+	}
+	return out, found
 }

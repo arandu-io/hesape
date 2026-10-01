@@ -79,6 +79,9 @@ func (m *Model[T]) setAttributes(attributes map[string]any, keepUnknown bool) er
 			continue
 		}
 		written++
+		if !keepUnknown && m.guarded(f.column) {
+			continue
+		}
 		dst, settable := settableAt(entity, f)
 		if !settable {
 			continue
@@ -501,4 +504,20 @@ func (m *Model[T]) resetEntity() {
 	// m is interior to the entity, so it has just been zeroed with it. Writing
 	// the copy back through it restores the same allocation the caller holds.
 	*m = saved
+}
+
+// guarded reports whether Fill leaves column alone: the tenant column always,
+// because the tenant comes from the Grant at the write and from nowhere else,
+// and the primary key of a row that exists, because a map of request values
+// that names the key would otherwise re-key the row it was meant to edit.
+//
+// A row that does not exist yet still takes its key from Fill, since for a key
+// the database does not generate that map is where a new row's key comes
+// from. ForceFill and SetRawAttributes guard nothing: they are the explicit
+// paths, and the second is what a row read from the database is built with.
+func (m *Model[T]) guarded(column string) bool {
+	if column == m.TenantColumn && column != "" {
+		return true
+	}
+	return m.Exists && column == m.PrimaryKey && column != ""
 }

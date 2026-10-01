@@ -187,6 +187,12 @@ func NewModel[T any](table string, connection query.Connection, grammar query.Gr
 // Fill writes the columns the entity declares and drops the keys it does not
 // know.
 //
+// It never writes the tenant column, and never the primary key of a row that
+// already exists: a form posted back into Update or UpdateOrCreate carries
+// whatever keys its sender added, and neither of those is the sender's to
+// choose. Both are skipped without error, like an unknown key. ForceFill writes
+// them.
+//
 // There is no allowlist to consult beyond the struct itself: an unexported
 // field is unreachable to reflection, so the allowlist is the initial letter
 // of the field and the compiler keeps it (see the package comment).
@@ -254,16 +260,19 @@ func (m *Model[T]) NewInstance(attributes map[string]any, exists bool) (*Model[T
 		RelationResolvers: m.RelationResolvers,
 		NamedScopes:       m.NamedScopes,
 		Entity:            entity,
-		Exists:            exists,
 		hidden:            slices.Clone(m.hidden),
 		visible:           slices.Clone(m.visible),
 		appends:           slices.Clone(m.appends),
 		globalScopes:      cloneScopes(m.globalScopes),
 		events:            cloneEvents(m.events),
 	}
+	// Filled before it is marked as existing: the attributes a caller builds an
+	// instance with are its row, key included, and Fill guards the key only of
+	// a row that already exists.
 	if err := instance.Fill(attributes); err != nil {
 		return nil, err
 	}
+	instance.Exists = exists
 	return instance, nil
 }
 

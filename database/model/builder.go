@@ -1208,9 +1208,11 @@ func (b *Builder[T]) prepareWrite(g auth.Grant, values []map[string]any) (*Build
 	}
 	rows := make([]map[string]any, 0, len(values))
 	for _, row := range values {
-		row = copyMap(row)
 		if column := b.model.TenantColumn; column != "" {
+			row, _ = withoutColumn(row, column)
 			row[column] = auth.Tenant(g)
+		} else {
+			row = copyMap(row)
 		}
 		rows = append(rows, row)
 	}
@@ -1219,10 +1221,21 @@ func (b *Builder[T]) prepareWrite(g auth.Grant, values []map[string]any) (*Build
 
 // Update runs an UPDATE with values over the query as it stands, and
 // returns the number of rows affected.
+//
+// A value under the model's tenant column, spelled any way
+// query.NamesColumn recognises, is replaced by the Grant's tenant rather than
+// written: the row stays with the tenant whose Grant reached it. It holds for
+// Save, Increment and every other write that ends here.
 func (b *Builder[T]) Update(ctx context.Context, g auth.Grant, values map[string]any) (int64, error) {
 	prepared, err := b.prepare(g)
 	if err != nil {
 		return 0, err
+	}
+	if column := b.model.TenantColumn; column != "" {
+		var named bool
+		if values, named = withoutColumn(values, column); named {
+			values[column] = auth.Tenant(g)
+		}
 	}
 	return prepared.runUpdate(ctx, prepared.addUpdatedAtColumn(values))
 }
@@ -1872,4 +1885,19 @@ func parseInt64(s string) int64 {
 		return -out
 	}
 	return out
+}
+
+// withoutColumn copies values without any key that names column, as
+// query.NamesColumn compares them, and reports whether one was there.
+func withoutColumn(values map[string]any, column string) (map[string]any, bool) {
+	out := make(map[string]any, len(values)+1)
+	found := false
+	for key, value := range values {
+		if query.NamesColumn(key, column) {
+			found = true
+			continue
+		}
+		out[key] = value
+	}
+	return out, found
 }
