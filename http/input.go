@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -123,12 +124,34 @@ func parsesPostForm(method string) bool {
 }
 
 // parseMultipart parses a multipart body once, with the text fields joining
-// r.PostForm and the files r.MultipartForm.
+// r.PostForm and the files r.MultipartForm, and arranges for the temporary
+// files of the parse to be removed when the request ends.
+//
+// net/http removes them only for the request it handed to the server's
+// handler. A middleware that calls WithContext hands the next one a copy, and
+// a form parsed on the copy is never seen by that cleanup, so every upload
+// above the in-memory limit would stay in the temporary directory for good.
+// The request context is cancelled when the server's handler returns, whether
+// it returned an answer, an error page or panicked, and that is when the files
+// are removed.
 func parseMultipart(r *stdhttp.Request) error {
 	if r.MultipartForm != nil {
 		return nil
 	}
-	return r.ParseMultipartForm(multipartMaxMemory)
+	err := r.ParseMultipartForm(multipartMaxMemory)
+	removeFormAtEnd(r)
+	return err
+}
+
+// removeFormAtEnd removes the temporary files of the form parsed on r once r's
+// context is done. The form is captured now rather than read from r later,
+// because the field belongs to the handler from here on.
+func removeFormAtEnd(r *stdhttp.Request) {
+	form := r.MultipartForm
+	if form == nil || len(form.File) == 0 {
+		return
+	}
+	context.AfterFunc(r.Context(), func() { _ = form.RemoveAll() })
 }
 
 // data is the value at the key from the input source, without the query

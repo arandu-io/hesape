@@ -2,6 +2,7 @@ package http
 
 import (
 	"fmt"
+	stdhttp "net/http"
 
 	"github.com/arandu-io/hesape/filesystem"
 )
@@ -26,17 +27,17 @@ import (
 // The body is read into memory or into a temporary file before this returns, so
 // the thing that stops a four gigabyte upload is middleware.LimitBodySize on the
 // way in, not a rule checked on the way out. The temporary file, when there is
-// one, is removed by net/http when the request ends -- so the bytes must be read
-// during the request, which is what Disk.Put does.
+// one, is removed when the request ends -- also when the request this Context
+// carries is a copy a middleware made, which net/http's own cleanup does not
+// reach -- so the bytes must be read during the request, which is what Disk.Put
+// does.
 func File(c *Context, field string) (filesystem.Upload, error) {
-	f, header, err := c.Request.FormFile(field)
-	if err != nil {
+	if err := parseMultipart(c.Request); err != nil {
 		return filesystem.Upload{}, fmt.Errorf("http: no file arrived in the %q field: %w", field, err)
 	}
-	// Closed immediately: Upload.Open opens its own reader, and may be called
-	// more than once. Holding this one would be a descriptor per upload kept for
-	// no reader.
-	_ = f.Close()
-
-	return filesystem.FromMultipart(field, header), nil
+	headers := c.Request.MultipartForm.File[field]
+	if len(headers) == 0 {
+		return filesystem.Upload{}, fmt.Errorf("http: no file arrived in the %q field: %w", field, stdhttp.ErrMissingFile)
+	}
+	return filesystem.FromMultipart(field, headers[0]), nil
 }
