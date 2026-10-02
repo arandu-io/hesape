@@ -251,12 +251,28 @@ func (q *DatabaseQueue) Push(ctx context.Context, g auth.Grant, j jobs.Job) erro
 			run_at, attempts, exceptions, attributes, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		j.UUID, j.Queue, j.Name, j.DisplayName, j.TenantID, string(j.Payload),
-		j.AuthorizedBy, j.Action, j.RunAt, j.Attempts, j.Exceptions, string(settings),
+		j.AuthorizedBy, j.Action, dueAt(j.RunAt, time.Now()), j.Attempts, j.Exceptions, string(settings),
 		time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("queue: pushing %s: %w", j.Name, err)
 	}
 	return nil
+}
+
+// dueAt is the run_at a job is stored with, in UTC.
+//
+// The column holds whole seconds, and PostgreSQL rounds a fraction to the
+// nearest second: a job due at 12:00:00.7 would be stored at 12:00:01, and
+// every Pop until then -- which asks for run_at <= now -- would not see a job
+// that was already due. So a job due now or earlier is stored at its second,
+// rounded down. A job due later keeps its time: rounding that one down would
+// run it before the delay it was given.
+func dueAt(runAt, now time.Time) time.Time {
+	runAt = runAt.UTC()
+	if runAt.After(now) {
+		return runAt
+	}
+	return runAt.Truncate(time.Second)
 }
 
 // PushRaw adds a job whose arguments are already encoded.
@@ -397,7 +413,7 @@ func (q *DatabaseQueue) ReleaseJob(ctx context.Context, j *jobs.Job, delay time.
 		UPDATE jobs SET run_at = ?, last_error = ?, exceptions = ?, created_at = ?,
 		                reserved_until = NULL
 		WHERE id = ?`,
-		now.Add(delay), j.LastError, j.Exceptions, now, j.UUID)
+		dueAt(now.Add(delay), now), j.LastError, j.Exceptions, now, j.UUID)
 	if err != nil {
 		return fmt.Errorf("queue: releasing %s: %w", j.UUID, err)
 	}
@@ -452,7 +468,7 @@ func (q *DatabaseQueue) Retry(ctx context.Context, uuid string) error {
 	res, err := q.db.ExecContext(ctx, `
 		UPDATE jobs SET failed_at = NULL, attempts = 0, exceptions = 0, last_error = NULL,
 		                reserved_until = NULL, run_at = ?, created_at = ?
-		WHERE id = ? AND failed_at IS NOT NULL`, now, now, uuid)
+		WHERE id = ? AND failed_at IS NOT NULL`, dueAt(now, now), now, uuid)
 	if err != nil {
 		return fmt.Errorf("queue: retrying %s: %w", uuid, err)
 	}

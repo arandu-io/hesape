@@ -581,3 +581,47 @@ func TestTheMigrationIsPortable(t *testing.T) {
 	}
 	var _ foundation.Migratable = module
 }
+
+// TestAJobDueNowIsNeverStoredLaterThanNow pins the column, not the clock.
+//
+// run_at is a timestamp with no fractional seconds, and PostgreSQL rounds a
+// value with a fraction to the NEAREST second. A job pushed at 12:00:00.7 was
+// stored as 12:00:01, and every Pop in the next three tenths of a second asked
+// for run_at <= 12:00:00.9 and did not see it -- a job queued "now" that the
+// worker could not take yet. A job that is due is written at its second, never
+// past it.
+func TestAJobDueNowIsNeverStoredLaterThanNow(t *testing.T) {
+	q, state := databaseQueue(t)
+	j, _ := jobs.New(grant(), "", "invoice.send", nil)
+	j.RunAt = time.Now().UTC().Truncate(time.Second).Add(700 * time.Millisecond).Add(-time.Second)
+
+	if err := q.Push(context.Background(), grant(), j); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	runAt, isTime := state.argsFor("INSERT INTO jobs")[8].Value.(time.Time)
+	if !isTime {
+		t.Fatal("run_at was not bound as a time")
+	}
+	if runAt.Nanosecond() != 0 || runAt.After(j.RunAt) {
+		t.Errorf("run_at = %s for a job due at %s: a column that rounds would put it in the future", runAt, j.RunAt)
+	}
+}
+
+// TestAJobReleasedWithNoDelayIsDueAtOnce is the same column on the way back.
+func TestAJobReleasedWithNoDelayIsDueAtOnce(t *testing.T) {
+	q, state := databaseQueue(t)
+	state.answerWith("SELECT id, queue", jobColumns,
+		jobRow("j-1", "invoice.send", time.Now().Add(-time.Minute), 0, nil))
+	popped, err := q.Pop(context.Background(), "", 1, time.Minute)
+	if err != nil || len(popped) != 1 {
+		t.Fatalf("Pop: %v, %d", err, len(popped))
+	}
+	if err := popped[0].Release(context.Background(), 0); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	args := state.argsFor("UPDATE jobs SET run_at = ?, last_error = ?, exceptions = ?, created_at = ?, reserved_until = NULL")
+	runAt, isTime := args[0].Value.(time.Time)
+	if !isTime || runAt.Nanosecond() != 0 || runAt.After(time.Now()) {
+		t.Errorf("a job released with no delay comes back at %v", args[0].Value)
+	}
+}
