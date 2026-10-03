@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/arandu-io/hesape/auth"
@@ -235,7 +236,8 @@ func withoutSelectAliases(columns []any) []any {
 	return out
 }
 
-// Paginate runs the query for one page and returns a length-aware paginator.
+// Paginate runs the query for one page and returns its records, beside the
+// length-aware page that does the arithmetic.
 //
 // No request is reachable from here, so the page number is an argument and the
 // path is a field of pagination.Options, along with the name of the page
@@ -244,7 +246,7 @@ func withoutSelectAliases(columns []any) []any {
 // total is a count the caller already has. Leaving it out runs
 // GetCountForPagination, which is one extra statement -- the one SimplePaginate
 // exists to avoid.
-func (b *Builder) Paginate(ctx context.Context, g auth.Grant, perPage, page int, columns []any, opts pagination.Options, total ...int) (*pagination.LengthAwarePaginator[Record], error) {
+func (b *Builder) Paginate(ctx context.Context, g auth.Grant, perPage, page int, columns []any, opts pagination.Options, total ...int) ([]Record, *pagination.LengthAwarePage, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -255,7 +257,7 @@ func (b *Builder) Paginate(ctx context.Context, g auth.Grant, perPage, page int,
 	} else {
 		counted, err := b.GetCountForPagination(ctx, g)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		count = counted
 	}
@@ -264,36 +266,39 @@ func (b *Builder) Paginate(ctx context.Context, g auth.Grant, perPage, page int,
 	if count > 0 {
 		fetched, err := b.ForPage(page, perPage).Get(ctx, g, columns...)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		rows = fetched
 	}
-	return pagination.Paginate(rows, count, perPage, page, opts), nil
+	return rows, pagination.NewLengthAwarePage(len(rows), count, perPage, page, opts), nil
 }
 
-// SimplePaginate runs the query for one page without counting the total.
+// SimplePaginate runs the query for one page without counting the total, and
+// returns its records beside the page.
 //
 // It reads one row more than the page holds, and that extra row is the whole of
-// how it resolves "is there a next page" without a count. pagination.SimplePaginate
-// drops it before anybody sees it.
-func (b *Builder) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, columns []any, opts pagination.Options) (*pagination.Paginator[Record], error) {
+// how it resolves "is there a next page" without a count. It is dropped here,
+// before anybody sees it.
+func (b *Builder) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, columns []any, opts pagination.Options) ([]Record, *pagination.Page, error) {
 	if page < 1 {
 		page = 1
 	}
 	rows, err := b.Offset((page-1)*perPage).Limit(perPage+1).Get(ctx, g, columns...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return pagination.SimplePaginate(rows, perPage, page, opts), nil
+	meta := pagination.NewPage(len(rows), perPage, page, opts)
+	return rows[:meta.Count()], meta, nil
 }
 
 // CursorPaginate pages through the query using a keyset cursor instead of an
-// offset.
+// offset, and returns the records of the page, in reading order, beside the
+// page and its cursors.
 //
 // The cursor is resolved by the caller -- pagination.ResolveCurrentCursor reads
 // it off a URL -- because no request is reachable from here. A nil cursor is
 // the first page.
-func (b *Builder) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, columns []any, opts pagination.Options) (*pagination.CursorPaginator[Record], error) {
+func (b *Builder) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, columns []any, opts pagination.Options) ([]Record, *pagination.CursorPage, error) {
 	return b.paginateUsingCursor(ctx, g, perPage, cursor, columns, opts)
 }
 
@@ -308,11 +313,11 @@ func (b *Builder) CursorPaginate(ctx context.Context, g auth.Grant, perPage int,
 // which is built by recursing over the orders, one level per column. The
 // comparison flips to < for a descending column, and the whole ordering is
 // reversed when the cursor points backwards -- the rows then come back in
-// reverse and pagination.CursorPaginate turns them around again.
-func (b *Builder) paginateUsingCursor(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, columns []any, opts pagination.Options) (*pagination.CursorPaginator[Record], error) {
+// reverse and are turned around again here, as the page says.
+func (b *Builder) paginateUsingCursor(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, columns []any, opts pagination.Options) ([]Record, *pagination.CursorPage, error) {
 	orders, err := b.ensureOrderForCursorPagination(cursor != nil && cursor.PointsToPreviousItems())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if cursor != nil {
@@ -321,27 +326,32 @@ func (b *Builder) paginateUsingCursor(ctx context.Context, g auth.Grant, perPage
 		// statement reads them.
 		b.SetBindings(nil, "union")
 		if err := b.addCursorConditions(b, *cursor, orders, nil, "", 0); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
 	rows, err := b.Limit(perPage+1).Get(ctx, g, columns...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// The cursor of a row is the value it has in every ordering column. The
 	// names are the columns as the ordering wrote them; the values are read
 	// under the name the driver keys the row by, which is the column without
 	// its table or alias.
-	key := func(row Record) map[string]string {
+	key := func(i int) map[string]string {
 		parameters := make(map[string]string, len(orders))
 		for _, order := range orders {
-			parameters[stringify(order.Column)] = stringify(row[stripTableForPluck(order.Column)])
+			parameters[stringify(order.Column)] = stringify(rows[i][stripTableForPluck(order.Column)])
 		}
 		return parameters
 	}
-	return pagination.CursorPaginate(rows, perPage, cursor, key, opts), nil
+	meta := pagination.NewCursorPage(len(rows), perPage, cursor, key, opts)
+	rows = rows[:meta.Count()]
+	if meta.Reversed() {
+		slices.Reverse(rows)
+	}
+	return rows, meta, nil
 }
 
 // addCursorConditions recursively builds the nested where/orWhere clauses

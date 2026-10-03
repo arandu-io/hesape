@@ -144,15 +144,15 @@ func TestNoStatementReachesTheDatabaseWithoutATenant(t *testing.T) {
 			return err
 		},
 		"Paginate": func(b *query.Builder, g auth.Grant) error {
-			_, err := b.Paginate(ctx, g, 15, 1, nil, pagination.Options{})
+			_, _, err := b.Paginate(ctx, g, 15, 1, nil, pagination.Options{})
 			return err
 		},
 		"SimplePaginate": func(b *query.Builder, g auth.Grant) error {
-			_, err := b.SimplePaginate(ctx, g, 15, 1, nil, pagination.Options{})
+			_, _, err := b.SimplePaginate(ctx, g, 15, 1, nil, pagination.Options{})
 			return err
 		},
 		"CursorPaginate": func(b *query.Builder, g auth.Grant) error {
-			_, err := b.OrderBy("id").CursorPaginate(ctx, g, 15, nil, nil, signedOptions())
+			_, _, err := b.OrderBy("id").CursorPaginate(ctx, g, 15, nil, nil, signedOptions())
 			return err
 		},
 		"Chunk": func(b *query.Builder, g auth.Grant) error {
@@ -632,15 +632,15 @@ func TestPaginateCountsOnceAndReadsOnePage(t *testing.T) {
 		{{"id": int64(11)}, {"id": int64(12)}},
 	}}
 
-	page, err := newTestBuilder(connection).Paginate(context.Background(), grant(), 2, 3, nil, pagination.Options{Path: "/users"})
+	items, page, err := newTestBuilder(connection).Paginate(context.Background(), grant(), 2, 3, nil, pagination.Options{Path: "/users"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if page.Total() != 42 || page.CurrentPage() != 3 || page.LastPage() != 21 {
-		t.Fatalf("the paginator says total=%d page=%d last=%d", page.Total(), page.CurrentPage(), page.LastPage())
+		t.Fatalf("the page says total=%d page=%d last=%d", page.Total(), page.CurrentPage(), page.LastPage())
 	}
-	if len(page.Items()) != 2 {
-		t.Fatalf("the page holds %d rows", len(page.Items()))
+	if len(items) != 2 {
+		t.Fatalf("the page holds %d rows", len(items))
 	}
 	if !strings.Contains(connection.lastSQL(), "limit 2 offset 4") {
 		t.Fatalf("the page query did not ask for page three:\n%s", connection.lastSQL())
@@ -650,12 +650,12 @@ func TestPaginateCountsOnceAndReadsOnePage(t *testing.T) {
 func TestPaginateWithAKnownTotalSkipsTheCountQuery(t *testing.T) {
 	connection := &fakeConnection{results: [][]query.Record{{{"id": int64(1)}}}}
 
-	page, err := newTestBuilder(connection).Paginate(context.Background(), grant(), 15, 1, nil, pagination.Options{}, 1)
+	_, page, err := newTestBuilder(connection).Paginate(context.Background(), grant(), 15, 1, nil, pagination.Options{}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if page.Total() != 1 {
-		t.Fatalf("the paginator ignored the total it was given: %d", page.Total())
+		t.Fatalf("the page ignored the total it was given: %d", page.Total())
 	}
 	if len(connection.calls) != 1 {
 		t.Fatalf("the count query ran anyway: %d statements", len(connection.calls))
@@ -667,15 +667,15 @@ func TestSimplePaginateReadsOneRowMoreThanThePage(t *testing.T) {
 		{"id": int64(1)}, {"id": int64(2)}, {"id": int64(3)},
 	}}}
 
-	page, err := newTestBuilder(connection).SimplePaginate(context.Background(), grant(), 2, 1, nil, pagination.Options{})
+	items, page, err := newTestBuilder(connection).SimplePaginate(context.Background(), grant(), 2, 1, nil, pagination.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(connection.lastSQL(), "limit 3") {
 		t.Fatalf("simplePaginate did not read the probe row:\n%s", connection.lastSQL())
 	}
-	if len(page.Items()) != 2 {
-		t.Fatalf("the probe row was handed to the reader: %d rows", len(page.Items()))
+	if len(items) != 2 {
+		t.Fatalf("the probe row was handed to the reader: %d rows", len(items))
 	}
 	if !page.HasMorePages() {
 		t.Fatal("the probe row did not answer the question it exists for")
@@ -691,7 +691,7 @@ func TestCursorPaginateWalksFromTheBoundary(t *testing.T) {
 	}}}
 	cursor := pagination.NewCursor(map[string]string{"id": "5"}, true)
 
-	page, err := newTestBuilder(connection).
+	items, page, err := newTestBuilder(connection).
 		OrderBy("id").
 		CursorPaginate(context.Background(), grant(), 1, &cursor, nil, signedOptions())
 	if err != nil {
@@ -709,8 +709,8 @@ func TestCursorPaginateWalksFromTheBoundary(t *testing.T) {
 	if len(bindings) != 2 || bindings[0] != "acme" || bindings[1] != "5" {
 		t.Fatalf("the boundary value is not bound: %#v", bindings)
 	}
-	if len(page.Items()) != 1 || !page.HasMorePages() {
-		t.Fatalf("the cursor page holds %d rows, more=%v", len(page.Items()), page.HasMorePages())
+	if len(items) != 1 || !page.HasMorePages() {
+		t.Fatalf("the cursor page holds %d rows, more=%v", len(items), page.HasMorePages())
 	}
 	if page.NextCursor() == nil {
 		t.Fatal("the page has no cursor to walk on with")
@@ -719,7 +719,7 @@ func TestCursorPaginateWalksFromTheBoundary(t *testing.T) {
 
 func TestCursorPaginateRefusesAnUnorderedQuery(t *testing.T) {
 	connection := &fakeConnection{}
-	_, err := newTestBuilder(connection).CursorPaginate(context.Background(), grant(), 15, nil, nil, signedOptions())
+	_, _, err := newTestBuilder(connection).CursorPaginate(context.Background(), grant(), 15, nil, nil, signedOptions())
 	if err == nil {
 		t.Fatal("a keyset walk with no ordering was allowed")
 	}
@@ -776,5 +776,31 @@ func TestACancelledContextStopsTheStatement(t *testing.T) {
 	}
 	if len(connection.calls) != 0 {
 		t.Fatal("the statement was issued on a cancelled context")
+	}
+}
+
+// TestCursorPaginateBackwardHandsTheRecordsBackInReadingOrder: a backward page
+// is read the wrong way round, so the records come back trimmed of the probe row
+// and turned around, with the cursors taken from the edges the reader sees.
+func TestCursorPaginateBackwardHandsTheRecordsBackInReadingOrder(t *testing.T) {
+	connection := &fakeConnection{results: [][]query.Record{{
+		{"id": int64(4)}, {"id": int64(3)}, {"id": int64(2)},
+	}}}
+	cursor := pagination.NewCursor(map[string]string{"id": "5"}, false)
+
+	items, page, err := newTestBuilder(connection).
+		OrderBy("id").
+		CursorPaginate(context.Background(), grant(), 2, &cursor, nil, signedOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0]["id"] != int64(3) || items[1]["id"] != int64(4) {
+		t.Fatalf("records = %v, want ids 3 and 4 in reading order", items)
+	}
+	if id, _ := page.PreviousCursor().Parameter("id"); id != "3" {
+		t.Errorf("previous cursor at %q, want 3", id)
+	}
+	if id, _ := page.NextCursor().Parameter("id"); id != "4" {
+		t.Errorf("next cursor at %q, want 4", id)
 	}
 }
