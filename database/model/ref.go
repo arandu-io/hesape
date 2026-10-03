@@ -2,7 +2,6 @@ package model
 
 import (
 	"context"
-	"iter"
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
@@ -305,7 +304,7 @@ func (r *builderRef) Find(ctx context.Context, g auth.Grant, id any) (concerns.M
 	return refOf(found), nil
 }
 
-func (r *builderRef) Cursor(ctx context.Context, g auth.Grant) iter.Seq2[concerns.Model, error] {
+func (r *builderRef) Cursor(ctx context.Context, g auth.Grant) concerns.ModelSeq {
 	return func(yield func(concerns.Model, error) bool) {
 		found, err := r.b.get(ctx, g)
 		if err != nil {

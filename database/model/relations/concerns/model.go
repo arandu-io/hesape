@@ -3,7 +3,6 @@ package concerns
 import (
 	"context"
 	"fmt"
-	"iter"
 	"strings"
 	"time"
 
@@ -215,11 +214,12 @@ type Builder interface {
 	// Cursor answers Builder::cursor: the rows streamed one at a time rather
 	// than gathered into a slice.
 	//
-	// The error arrives beside each value, as iter.Seq2 does throughout this
+	// The error arrives beside each value, as it does in every stream in this
 	// collection, because a stream can fail after it has already yielded rows
 	// and a signature that returned the error at the end would be read after
-	// the caller had acted on half the data.
-	Cursor(ctx context.Context, g auth.Grant) iter.Seq2[Model, error]
+	// the caller had acted on half the data. See ModelSeq for why the result is
+	// not an iter.Seq2.
+	Cursor(ctx context.Context, g auth.Grant) ModelSeq
 
 	// Paginate answers Builder::paginate: the rows of one page, beside the page
 	// that does its arithmetic.
@@ -264,6 +264,26 @@ type Builder interface {
 	// Clone answers PHP's `clone $builder`.
 	Clone() Builder
 }
+
+// ModelSeq is the stream Builder.Cursor answers: each row, or the error that
+// ended the walk, in a range-over-func loop.
+//
+//	for m, err := range q.Cursor(ctx, g) {
+//		if err != nil {
+//			return err
+//		}
+//		...
+//	}
+//
+// It is a defined function type rather than iter.Seq2[Model, error], and ranges
+// the same way; a value converts to and from that instantiation. The reason is
+// what an instantiation over an interface costs. Builder is reachable from every
+// relation, and so from every type a relation can be registered on; iter.Seq2
+// over Model in its method set makes the compiler emit a wrapper for each of
+// Model's methods in every package whose imports reach Builder, whether or not
+// anything there walks a cursor. A defined type has no type argument, and costs
+// none of that.
+type ModelSeq func(yield func(Model, error) bool)
 
 // TenantColumn is the column a tenant-scoped table carries.
 //

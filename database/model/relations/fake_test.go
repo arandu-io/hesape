@@ -3,7 +3,6 @@ package relations_test
 import (
 	"context"
 	"fmt"
-	"iter"
 	"sort"
 	"strings"
 	"time"
@@ -272,7 +271,7 @@ func (b *builder) Clone() relations.Builder {
 // map, so there is nothing to stream from -- what a relation test measures here
 // is that the rows arrive one at a time and carry their pivot, not that the
 // driver kept a statement open.
-func (b *builder) Cursor(ctx context.Context, g auth.Grant) iter.Seq2[relations.Model, error] {
+func (b *builder) Cursor(ctx context.Context, g auth.Grant) relations.ModelSeq {
 	return func(yield func(relations.Model, error) bool) {
 		models, err := b.Get(ctx, g)
 		if err != nil {

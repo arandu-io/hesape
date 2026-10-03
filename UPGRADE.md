@@ -26,6 +26,26 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+### `database/model/relations/concerns.Builder.Cursor` returns `concerns.ModelSeq`
+
+The builder a relation runs on streamed its rows as
+`iter.Seq2[concerns.Model, error]`. That interface is reachable from every
+relation, and so from `model.Table`, and an instantiation of `iter.Seq2` over an
+interface makes the compiler emit a wrapper for each of the interface's methods
+in every package whose imports reach it: a package that only called `Table.Name`
+compiled 33 of them, none written by it. `Cursor` now returns
+`concerns.ModelSeq`, a defined `func(yield func(concerns.Model, error) bool)`,
+also reachable as `relations.ModelSeq`.
+
+A `range` over the result is unchanged. What changes is an implementation of
+`concerns.Builder` — `relations.Builder` is the same interface — and a value
+held as the instantiation:
+
+| before | now |
+|---|---|
+| `func (b *B) Cursor(ctx context.Context, g auth.Grant) iter.Seq2[concerns.Model, error]` | `func (b *B) Cursor(ctx context.Context, g auth.Grant) concerns.ModelSeq` |
+| `var seq iter.Seq2[concerns.Model, error] = q.Cursor(ctx, g)` | `seq := iter.Seq2[concerns.Model, error](q.Cursor(ctx, g))` |
+
 ### The model layer is not generic: each entity is a concrete type over `model.Model`
 
 `model.Model[T]`, `model.Builder[T]`, `model.Collection[T]`, `model.Query[T]`,

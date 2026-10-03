@@ -34,6 +34,11 @@ type Model = concerns.Model
 // it.
 type Builder = concerns.Builder
 
+// ModelSeq is the stream Builder.Cursor answers, aliased back for the reason
+// Model and Builder are: an implementation of Builder written against this
+// package names its result without importing relations/concerns.
+type ModelSeq = concerns.ModelSeq
+
 // ErrMultipleRecordsFound is returned by the singular reads on a relation --
 // Sole, and the pivot lookups that expect one row -- when the query matched
 // more than one.

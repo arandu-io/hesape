@@ -2,7 +2,6 @@ package concerns
 
 import (
 	"context"
-	"iter"
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
@@ -347,7 +346,7 @@ func (b *fakeBuilder) WhereIn(column any, values []any) Builder {
 	return b
 }
 
-func (b *fakeBuilder) Cursor(context.Context, auth.Grant) iter.Seq2[Model, error] {
+func (b *fakeBuilder) Cursor(context.Context, auth.Grant) ModelSeq {
 	return func(func(Model, error) bool) {}
 }
 
