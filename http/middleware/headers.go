@@ -27,28 +27,7 @@ import (
 // where a ';' ends the directive and starts another, and a wildcard or a path
 // changes which addresses the list admits.
 func SecurityHeaders(dev bool, imageOrigins ...string) hhttp.Middleware {
-	images := "'self' data:"
-	for _, origin := range imageOrigins {
-		images += " " + imageOrigin(origin)
-	}
-
-	csp := "default-src 'self'; " +
-		"script-src 'self'; " +
-		"style-src 'self'; " +
-		// Explicit, though default-src already covers it. A font is vendored and
-		// served from this origin like everything else (view.RegisterAsset), and
-		// spelling it out is what makes the line say so -- the next person
-		// wondering whether a Google Fonts URL would work reads the policy, not
-		// the fallback rules.
-		"font-src 'self'; " +
-		"img-src " + images + "; " +
-		"connect-src 'self'; " +
-		// Plugin objects can execute active content, so the same-origin fallback
-		// from default-src is not restrictive enough for them.
-		"object-src 'none'; " +
-		"frame-ancestors 'none'; " +
-		"base-uri 'self'; " +
-		"form-action 'self'"
+	csp := DefaultContentSecurityPolicy(imageOrigins...).String()
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

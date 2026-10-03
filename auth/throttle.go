@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -149,6 +150,7 @@ const maxTrackedSignIns = 1 << 16
 // nothing to give up on.
 type MemoryThrottle struct {
 	mu       sync.Mutex
+	policy   ThrottlePolicy
 	counters map[string]*failureCount
 
 	// lastSweep bounds the ordinary case: without it every key ever seen stays
@@ -169,7 +171,50 @@ type failureCount struct {
 
 // NewMemoryThrottle returns an empty in-memory sign-in throttle.
 func NewMemoryThrottle() *MemoryThrottle {
-	return &MemoryThrottle{counters: map[string]*failureCount{}, lastSweep: time.Now(), now: time.Now}
+	return &MemoryThrottle{policy: DefaultThrottlePolicy(), counters: map[string]*failureCount{}, lastSweep: time.Now(), now: time.Now}
+}
+
+// ThrottlePolicy is how many wrong sign-ins a MemoryThrottle accepts and for how
+// long a spent budget stays spent.
+//
+// MaxFailures is the budget of one identity from one address, and
+// MaxFailuresPerClient the budget of one address across every identity it
+// names. Window is how long failures accumulate before the count starts over.
+// Lockout, when it is not zero, is how long the budget stays spent counted from
+// the failure that spent it -- a lockout in the sense of PCI DSS 8.3.4, where an
+// account stays locked for a fixed time after the last allowed attempt. When it
+// is zero, a spent budget is released when its window ends, which is a rate
+// limit rather than a lockout.
+type ThrottlePolicy struct {
+	MaxFailures          int
+	MaxFailuresPerClient int
+	Window               time.Duration
+	Lockout              time.Duration
+}
+
+// DefaultThrottlePolicy is the policy of NewMemoryThrottle: MaxSignInFailures
+// per identity and MaxSignInFailuresPerClient per address in SignInWindow, with
+// no lockout beyond the window.
+func DefaultThrottlePolicy() ThrottlePolicy {
+	return ThrottlePolicy{MaxFailures: MaxSignInFailures, MaxFailuresPerClient: MaxSignInFailuresPerClient, Window: SignInWindow}
+}
+
+// LockoutPolicy is the policy a console that can move money needs under PCI
+// DSS 8.3.4: an identity is locked for thirty minutes after its tenth wrong
+// attempt in thirty minutes, and one address may spend fifty across every
+// identity in that time.
+func LockoutPolicy() ThrottlePolicy {
+	return ThrottlePolicy{MaxFailures: 10, MaxFailuresPerClient: 50, Window: 30 * time.Minute, Lockout: 30 * time.Minute}
+}
+
+// NewMemoryThrottleWith returns an empty in-memory throttle that counts under
+// policy, or an error naming what the policy is missing: both budgets and the
+// window must be positive, and a lockout cannot be negative.
+func NewMemoryThrottleWith(policy ThrottlePolicy) (*MemoryThrottle, error) {
+	if policy.MaxFailures <= 0 || policy.MaxFailuresPerClient <= 0 || policy.Window <= 0 || policy.Lockout < 0 {
+		return nil, errors.New("auth: a throttle policy needs positive budgets and window, and a lockout of zero or more")
+	}
+	return &MemoryThrottle{policy: policy, counters: map[string]*failureCount{}, lastSweep: time.Now(), now: time.Now}, nil
 }
 
 // Attempt takes one unit from the pair's budget and one from the address's, or
@@ -189,7 +234,7 @@ func (m *MemoryThrottle) Attempt(_ context.Context, tenant, identity, client str
 	m.trim(now)
 
 	pk := pairKey(tenant, identity, client)
-	if retry, spent := m.spent(pk, MaxSignInFailures, now); spent {
+	if retry, spent := m.spent(pk, m.policy.MaxFailures, now); spent {
 		return retry, false
 	}
 	// The address's own budget is read before the pair counter is opened, and
@@ -200,12 +245,12 @@ func (m *MemoryThrottle) Attempt(_ context.Context, tenant, identity, client str
 	// Leaving it to the caller to stop calling would be leaving the memory bound
 	// to whoever writes the next sign-in screen.
 	ck := clientKey(tenant, client)
-	if retry, spent := m.spent(ck, MaxSignInFailuresPerClient, now); spent {
+	if retry, spent := m.spent(ck, m.policy.MaxFailuresPerClient, now); spent {
 		return retry, false
 	}
 
-	m.count(pk, now)
-	m.count(ck, now)
+	m.count(pk, m.policy.MaxFailures, now)
+	m.count(ck, m.policy.MaxFailuresPerClient, now)
 	return 0, true
 }
 
@@ -249,13 +294,18 @@ func (m *MemoryThrottle) spent(key string, limit int, now time.Time) (time.Durat
 
 // count adds one to a key, starting a fresh window when the last one has run
 // out. The caller holds the lock.
-func (m *MemoryThrottle) count(key string, now time.Time) {
+func (m *MemoryThrottle) count(key string, limit int, now time.Time) {
 	c, ok := m.counters[key]
 	if !ok || !now.Before(c.reset) {
-		c = &failureCount{reset: now.Add(SignInWindow)}
+		c = &failureCount{reset: now.Add(m.policy.Window)}
 		m.counters[key] = c
 	}
 	c.count++
+	// The attempt that spends the budget starts the lockout, so the account
+	// stays locked for the whole Lockout whatever was left of the window.
+	if c.count >= limit && m.policy.Lockout > 0 {
+		c.reset = now.Add(m.policy.Lockout)
+	}
 }
 
 // giveBack takes one off a key and drops it when nothing is left, so an
@@ -289,7 +339,7 @@ func (m *MemoryThrottle) giveBack(key string) {
 // bounds each one. That is a botnet, and at that size the counters are no longer
 // the interesting defence.
 func (m *MemoryThrottle) trim(now time.Time) {
-	if now.Sub(m.lastSweep) >= SignInWindow {
+	if now.Sub(m.lastSweep) >= m.policy.Window {
 		m.dropUpTo(now)
 		m.lastSweep = now
 	}

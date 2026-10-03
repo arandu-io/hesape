@@ -291,3 +291,67 @@ func TestHangingUpMidAttemptIsWorthNothingAndNoMore(t *testing.T) {
 		t.Fatal("a hundred abandoned attempts bought a hundred more guesses -- hanging up is the way out of the lockout")
 	}
 }
+
+// lockoutAt returns a throttle under LockoutPolicy reading the given clock.
+func lockoutAt(t *testing.T, c *testClock) *MemoryThrottle {
+	t.Helper()
+	th, err := NewMemoryThrottleWith(LockoutPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	th.now = func() time.Time { return c.t }
+	th.lastSweep = c.t
+	return th
+}
+
+func TestTheLockoutCountsFromTheFailureThatSpentTheBudget(t *testing.T) {
+	c := &testClock{t: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)}
+	th := lockoutAt(t, c)
+	policy := LockoutPolicy()
+	for i := 0; i < policy.MaxFailures-1; i++ {
+		if _, ok := th.Attempt(context.Background(), tenant, owner, home); !ok {
+			t.Fatalf("attempt %d was refused before the budget was spent", i+1)
+		}
+	}
+	// The tenth failure arrives late in the window; the lockout still lasts its
+	// full length from here, not what was left of the window.
+	c.advance(25 * time.Minute)
+	if _, ok := th.Attempt(context.Background(), tenant, owner, home); !ok {
+		t.Fatal("the tenth attempt was refused")
+	}
+	retry, ok := th.Attempt(context.Background(), tenant, owner, home)
+	if ok || retry != policy.Lockout {
+		t.Fatalf("the eleventh attempt: ok=%v retry=%v, want a refusal for %v", ok, retry, policy.Lockout)
+	}
+	c.advance(29 * time.Minute)
+	if _, ok := th.Attempt(context.Background(), tenant, owner, home); ok {
+		t.Fatal("the lockout ended before its length, measured from the failure that started it")
+	}
+	c.advance(time.Minute)
+	if _, ok := th.Attempt(context.Background(), tenant, owner, home); !ok {
+		t.Fatal("the lockout never ended")
+	}
+}
+
+func TestTheDefaultPolicyIsTheOneNewMemoryThrottleAlwaysHad(t *testing.T) {
+	if got := NewMemoryThrottle().policy; got != DefaultThrottlePolicy() {
+		t.Fatalf("NewMemoryThrottle counts under %+v", got)
+	}
+	want := ThrottlePolicy{MaxFailures: MaxSignInFailures, MaxFailuresPerClient: MaxSignInFailuresPerClient, Window: SignInWindow}
+	if DefaultThrottlePolicy() != want {
+		t.Fatalf("the default policy changed: %+v", DefaultThrottlePolicy())
+	}
+}
+
+func TestAnIncompletePolicyIsRefused(t *testing.T) {
+	for _, policy := range []ThrottlePolicy{
+		{MaxFailures: 0, MaxFailuresPerClient: 5, Window: time.Minute},
+		{MaxFailures: 5, MaxFailuresPerClient: 0, Window: time.Minute},
+		{MaxFailures: 5, MaxFailuresPerClient: 5, Window: 0},
+		{MaxFailures: 5, MaxFailuresPerClient: 5, Window: time.Minute, Lockout: -time.Second},
+	} {
+		if _, err := NewMemoryThrottleWith(policy); err == nil {
+			t.Fatalf("the policy %+v was accepted", policy)
+		}
+	}
+}
