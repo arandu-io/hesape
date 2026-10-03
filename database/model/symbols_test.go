@@ -29,7 +29,7 @@ import (
 // It is the measured count with a fifth on top, so that an unrelated method
 // added to a model does not fail the suite, while a change that starts stamping
 // out another type's whole method set per model does.
-const shapeCeiling = 4168
+const shapeCeiling = 3756
 
 var fixture struct {
 	once    sync.Once
