@@ -26,14 +26,14 @@ import (
 // callback may be nil.
 func (b *Builder[T]) Has(relation, operator string, count int, boolean string, callback func(*query.Builder)) *Builder[T] {
 	if strings.Contains(relation, ".") {
-		return b.hasNested(relation, operator, count, boolean, callback)
+		return hasNested(b, relation, operator, count, boolean, callback)
 	}
 
 	rel, err := b.GetRelationWithoutConstraints(relation)
 	if err != nil {
-		return b.fail(err)
+		return fail(b, err)
 	}
-	return b.addHasWhere(rel, operator, count, boolean, onBaseQuery(callback))
+	return addHasWhere(b, rel, operator, count, boolean, onBaseQuery(callback))
 }
 
 // addHasWhere adds the where clause for a Has-style filter on rel.
@@ -45,7 +45,7 @@ func (b *Builder[T]) Has(relation, operator string, count int, boolean string, c
 // The callback takes the builder a relation hands back rather than the base
 // query, which is what hasNested needs to go one segment deeper. The public
 // methods take func(*query.Builder) and onBaseQuery is the step between.
-func (b *Builder[T]) addHasWhere(rel Relation, operator string, count int, boolean string, callback func(relations.Builder)) *Builder[T] {
+func addHasWhere[T any](b *Builder[T], rel Relation, operator string, count int, boolean string, callback func(relations.Builder)) *Builder[T] {
 	if boolean == "" {
 		boolean = "and"
 	}
@@ -62,7 +62,7 @@ func (b *Builder[T]) addHasWhere(rel Relation, operator string, count int, boole
 	if callback != nil {
 		callback(sub)
 	}
-	return b.addWhereCountQuery(sub.GetQuery(), operator, count, boolean)
+	return addWhereCountQuery(b, sub.GetQuery(), operator, count, boolean)
 }
 
 // addWhereCountQuery adds the subquery compared against a number, as an
@@ -78,7 +78,7 @@ func (b *Builder[T]) addHasWhere(rel Relation, operator string, count int, boole
 // query.WhereSubCount keeps the builder on the clause, and prepare scopes it
 // through query.Builder.ScopeNested. That is the same door the query
 // builder's own statements go through, and it is the only one.
-func (b *Builder[T]) addWhereCountQuery(sub *query.Builder, operator string, count int, boolean string) *Builder[T] {
+func addWhereCountQuery[T any](b *Builder[T], sub *query.Builder, operator string, count int, boolean string) *Builder[T] {
 	b.query.WhereSubCount(sub, operator, count, boolean)
 	return b
 }
@@ -98,30 +98,30 @@ func canUseExistsForExistenceCheck(operator string, count int) bool {
 //
 // A relation that cannot resolve the next segment is an error, never a
 // query with the filter silently missing.
-func (b *Builder[T]) hasNested(path, operator string, count int, boolean string, callback func(*query.Builder)) *Builder[T] {
+func hasNested[T any](b *Builder[T], path, operator string, count int, boolean string, callback func(*query.Builder)) *Builder[T] {
 	segments := strings.Split(path, ".")
 
 	rel, err := b.GetRelationWithoutConstraints(segments[0])
 	if err != nil {
-		return b.fail(err)
+		return fail(b, err)
 	}
 
 	chain := []Relation{rel}
 	for _, segment := range segments[1:] {
 		nested, ok := chain[len(chain)-1].(NestedRelation)
 		if !ok {
-			return b.fail(fmt.Errorf("%w: %s does not reach %s", ErrRelationNotFound, path, segment))
+			return fail(b, fmt.Errorf("%w: %s does not reach %s", ErrRelationNotFound, path, segment))
 		}
 		next, err := nested.Nested(segment)
 		if err != nil {
-			return b.fail(err)
+			return fail(b, err)
 		}
 		chain = append(chain, next)
 	}
 
 	// The innermost relation carries the caller's constraints; every outer one
 	// only has to exist.
-	return b.addHasWhere(chain[0], operator, count, boolean, func(sub relations.Builder) {
+	return addHasWhere(b, chain[0], operator, count, boolean, func(sub relations.Builder) {
 		nest(sub, chain[1:], callback)
 	})
 }
@@ -226,14 +226,14 @@ func (b *Builder[T]) WhereDoesntHaveRelation(relation string, column any, args .
 func (b *Builder[T]) WhereMorphRelation(relation string, types []string, column any, args ...any) *Builder[T] {
 	rel, err := b.GetRelationWithoutConstraints(relation)
 	if err != nil {
-		return b.fail(err)
+		return fail(b, err)
 	}
 	morph, ok := rel.(MorphRelation)
 	if !ok {
-		return b.fail(fmt.Errorf("%w: %s is not a polymorphic relation", ErrRelationNotFound, relation))
+		return fail(b, fmt.Errorf("%w: %s is not a polymorphic relation", ErrRelationNotFound, relation))
 	}
 	if len(types) == 0 || (len(types) == 1 && types[0] == "*") {
-		return b.fail(fmt.Errorf("model: %s needs the morph types spelled out, because resolving \"*\" is a query and this builds SQL", relation))
+		return fail(b, fmt.Errorf("model: %s needs the morph types spelled out, because resolving \"*\" is a query and this builds SQL", relation))
 	}
 
 	return b.Where(func(outer *Builder[T]) {
@@ -243,12 +243,12 @@ func (b *Builder[T]) WhereMorphRelation(relation string, types []string, column 
 				// The failure is recorded on the outer builder and not on the
 				// nested one, which is thrown away as soon as its wheres are
 				// merged -- an error left on it would never be reported.
-				b.fail(err)
+				fail(b, err)
 				return
 			}
 			outer.OrWhere(func(branch *Builder[T]) {
 				branch.Where(b.model.QualifyColumn(morph.GetMorphType()), "=", morphType)
-				branch.addHasWhere(typed, ">=", 1, "and", onBaseQuery(func(sub *query.Builder) {
+				addHasWhere(branch, typed, ">=", 1, "and", onBaseQuery(func(sub *query.Builder) {
 					sub.Where(column, args...)
 				}))
 			})
@@ -263,15 +263,15 @@ func (b *Builder[T]) WhereMorphRelation(relation string, types []string, column 
 // another type and a Go method cannot introduce a type parameter.
 func WhereBelongsTo[T, R any](b *Builder[T], relationshipName string, related ...*Model[R]) *Builder[T] {
 	if len(related) == 0 {
-		return b.fail(fmt.Errorf("model: WhereBelongsTo was given no models to belong to"))
+		return fail(b, fmt.Errorf("model: WhereBelongsTo was given no models to belong to"))
 	}
 	rel, err := b.GetRelationWithoutConstraints(relationshipName)
 	if err != nil {
-		return b.fail(err)
+		return fail(b, err)
 	}
 	belongsTo, ok := rel.(BelongsToRelation)
 	if !ok {
-		return b.fail(fmt.Errorf("%w: %s is not a belongs-to relation", ErrRelationNotFound, relationshipName))
+		return fail(b, fmt.Errorf("%w: %s is not a belongs-to relation", ErrRelationNotFound, relationshipName))
 	}
 
 	keys := make([]any, 0, len(related))
@@ -308,7 +308,7 @@ func (b *Builder[T]) WithAggregate(relations []string, column, function string) 
 
 		rel, err := b.GetRelationWithoutConstraints(name)
 		if err != nil {
-			return b.fail(err)
+			return fail(b, err)
 		}
 
 		var expression string
@@ -316,9 +316,9 @@ func (b *Builder[T]) WithAggregate(relations []string, column, function string) 
 		case function == "":
 			expression = column
 		case function == "exists":
-			expression = b.aggregateColumn(column)
+			expression = aggregateColumn(b, column)
 		default:
-			expression = fmt.Sprintf("%s(%s)", function, b.aggregateColumn(column))
+			expression = fmt.Sprintf("%s(%s)", function, aggregateColumn(b, column))
 		}
 
 		sub := existenceSubquery(rel, b.Ref(), query.Raw(expression)).GetQuery()
@@ -347,7 +347,7 @@ func (b *Builder[T]) WithAggregate(relations []string, column, function string) 
 
 // aggregateColumn wraps the column an aggregate is taken over, leaving "*"
 // alone.
-func (b *Builder[T]) aggregateColumn(column string) string {
+func aggregateColumn[T any](b *Builder[T], column string) string {
 	if column == "*" {
 		return column
 	}
@@ -410,7 +410,7 @@ func (b *Builder[T]) WithExists(relation string) *Builder[T] {
 
 // loadAggregateModels is the query LoadAggregate runs: the keys of the
 // collection, with the aggregate columns beside them.
-func (b *Builder[T]) loadAggregateModels(ctx context.Context, g auth.Grant, keys []any, relations []string, column, function string) (models, error) {
+func aggregateQuery[T any](b *Builder[T], ctx context.Context, g auth.Grant, keys []any, relations []string, column, function string) (models, error) {
 	return b.WhereKey(keys).
 		Select(b.model.GetQualifiedKeyName()).
 		WithAggregate(relations, column, function).

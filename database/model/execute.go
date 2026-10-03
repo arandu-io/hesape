@@ -16,7 +16,7 @@ import (
 // itself is still the grammar's -- nothing here concatenates a fragment.
 
 // runSelect runs the query's SELECT and returns the rows.
-func (b *Builder[T]) runSelect(ctx context.Context) ([]query.Record, error) {
+func runSelect[T any](b *Builder[T], ctx context.Context) ([]query.Record, error) {
 	sql := b.query.ToSQL()
 	if err := b.query.Err(); err != nil {
 		return nil, err
@@ -35,11 +35,11 @@ func (b *Builder[T]) runSelect(ctx context.Context) ([]query.Record, error) {
 //
 // The rows are sorted by column name before they are compiled and bound,
 // which is the only ordering available here, since a Go map has none.
-func (b *Builder[T]) runInsert(ctx context.Context, values []map[string]any) (bool, error) {
+func runInsert[T any](b *Builder[T], ctx context.Context, values []map[string]any) (bool, error) {
 	if len(values) == 0 {
 		return true, nil
 	}
-	if err := b.validateWriteQuery(); err != nil {
+	if err := validateWriteQuery(b); err != nil {
 		return false, err
 	}
 
@@ -59,8 +59,8 @@ func (b *Builder[T]) runInsert(ctx context.Context, values []map[string]any) (bo
 
 // runInsertGetID runs an INSERT for one row and returns the value generated
 // for sequence.
-func (b *Builder[T]) runInsertGetID(ctx context.Context, values map[string]any, sequence string) (int64, error) {
-	if err := b.validateWriteQuery(); err != nil {
+func runInsertGetID[T any](b *Builder[T], ctx context.Context, values map[string]any, sequence string) (int64, error) {
+	if err := validateWriteQuery(b); err != nil {
 		return 0, err
 	}
 
@@ -80,8 +80,8 @@ func (b *Builder[T]) runInsertGetID(ctx context.Context, values map[string]any, 
 
 // runUpdate runs an UPDATE for values and returns the number of rows
 // affected.
-func (b *Builder[T]) runUpdate(ctx context.Context, values map[string]any) (int64, error) {
-	if err := b.validateWriteQuery(); err != nil {
+func runUpdate[T any](b *Builder[T], ctx context.Context, values map[string]any) (int64, error) {
+	if err := validateWriteQuery(b); err != nil {
 		return 0, err
 	}
 
@@ -99,8 +99,8 @@ func (b *Builder[T]) runUpdate(ctx context.Context, values map[string]any) (int6
 //
 // It goes through query.Connection's Update -- a statement that reports how many
 // rows it touched.
-func (b *Builder[T]) runUpsert(ctx context.Context, values []map[string]any, uniqueBy, update []string) (int64, error) {
-	if err := b.validateWriteQuery(); err != nil {
+func runUpsert[T any](b *Builder[T], ctx context.Context, values []map[string]any, uniqueBy, update []string) (int64, error) {
+	if err := validateWriteQuery(b); err != nil {
 		return 0, err
 	}
 
@@ -120,8 +120,8 @@ func (b *Builder[T]) runUpsert(ctx context.Context, values []map[string]any, uni
 }
 
 // runDelete runs a DELETE and returns the number of rows affected.
-func (b *Builder[T]) runDelete(ctx context.Context) (int64, error) {
-	if err := b.validateWriteQuery(); err != nil {
+func runDelete[T any](b *Builder[T], ctx context.Context) (int64, error) {
+	if err := validateWriteQuery(b); err != nil {
 		return 0, err
 	}
 
@@ -138,7 +138,7 @@ func (b *Builder[T]) runDelete(ctx context.Context) (int64, error) {
 // validateWriteQuery applies the operator policy of the grammar that will
 // actually compile the model write. SetQuery is public, so the query carried
 // by a model may have been constructed with a different dialect.
-func (b *Builder[T]) validateWriteQuery() error {
+func validateWriteQuery[T any](b *Builder[T]) error {
 	compilerGrammar := b.model.Grammar
 	b.query.Grammar = compilerGrammar
 	b.query.ApplyBeforeQueryCallbacks()
@@ -156,14 +156,14 @@ func (b *Builder[T]) validateWriteQuery() error {
 
 // runAggregate returns the one row an aggregate select returns, read out of
 // the column the grammar aliases as "aggregate".
-func (b *Builder[T]) runAggregate(ctx context.Context, function string, columns []any) (any, error) {
-	aggregate := b.clone()
+func runAggregate[T any](b *Builder[T], ctx context.Context, function string, columns []any) (any, error) {
+	aggregate := clone(b)
 	aggregate.query = aggregate.query.
 		CloneWithout("columns", "orders").
 		CloneWithoutBindings("select", "order")
 	aggregate.query.SetAggregate(function, columns)
 
-	rows, err := aggregate.runSelect(ctx)
+	rows, err := runSelect(aggregate, ctx)
 	if err != nil {
 		return nil, err
 	}

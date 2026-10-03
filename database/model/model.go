@@ -205,14 +205,14 @@ func NewModel[T any](table string, connection query.Connection, grammar query.Gr
 // The error here is the other failure a typed model can have -- a value
 // that does not fit the field.
 func (m *Model[T]) Fill(attributes map[string]any) error {
-	return m.setAttributes(attributes, false)
+	return setAttributes(m, attributes, false)
 }
 
 // ForceFill writes the columns the entity declares, and keeps the keys it
 // does not know as raw attributes instead of dropping them the way Fill
 // does. It still cannot reach an unexported field, because nothing can.
 func (m *Model[T]) ForceFill(attributes map[string]any) error {
-	return m.setAttributes(attributes, true)
+	return setAttributes(m, attributes, true)
 }
 
 // QualifyColumn returns column qualified with the model's table, unless it
@@ -239,7 +239,7 @@ func (m *Model[T]) NewInstance(attributes map[string]any, exists bool) (*Model[T
 	// The entity first, and the model from inside it when T embeds one: the
 	// model and the entity are then one allocation, which is what lets
 	// user.Save() see the fields the caller just set on user. See embed.go.
-	index := m.entityIndex()
+	index := entityIndex(m)
 	entity := new(T)
 	instance := modelIn(entity, index)
 	if instance == nil {
@@ -292,7 +292,7 @@ func (m *Model[T]) NewFromBuilder(attributes map[string]any) (*Model[T], error) 
 	if err := instance.SetRawAttributes(attributes, true); err != nil {
 		return nil, err
 	}
-	if err := instance.fireModelEvent(Retrieved); err != nil {
+	if err := fireModelEvent(instance, Retrieved); err != nil {
 		return nil, err
 	}
 	return instance, nil
@@ -307,11 +307,11 @@ func (m *Model[T]) Save(ctx context.Context, g auth.Grant) (bool, error) {
 	// and no back pointer to the entity it is inside. It is the literal case,
 	// and it says so rather than reporting a write that never happened -- see
 	// ErrUnwired.
-	if err := m.wired(); err != nil {
+	if err := wired(m); err != nil {
 		return false, err
 	}
 
-	if err := m.fireModelEvent(Saving); err != nil {
+	if err := fireModelEvent(m, Saving); err != nil {
 		return false, err
 	}
 
@@ -323,17 +323,17 @@ func (m *Model[T]) Save(ctx context.Context, g auth.Grant) (bool, error) {
 		if !m.IsDirty() {
 			saved = true
 		} else {
-			saved, err = m.performUpdate(ctx, g)
+			saved, err = performUpdate(m, ctx, g)
 		}
 	} else {
-		saved, err = m.performInsert(ctx, g)
+		saved, err = performInsert(m, ctx, g)
 	}
 	if err != nil {
 		return false, err
 	}
 
 	if saved {
-		if err := m.finishSave(); err != nil {
+		if err := finishSave(m); err != nil {
 			return false, err
 		}
 	}
@@ -355,7 +355,7 @@ func (m *Model[T]) SaveQuietly(ctx context.Context, g auth.Grant) (saved bool, e
 // outside a transaction the caller believes it is in.
 func (m *Model[T]) SaveOrFail(ctx context.Context, g auth.Grant) (bool, error) {
 	var saved bool
-	err := m.transaction(func() error {
+	err := transaction(m, func() error {
 		var err error
 		saved, err = m.Save(ctx, g)
 		return err
@@ -370,7 +370,7 @@ func (m *Model[T]) Update(ctx context.Context, g auth.Grant, attributes map[stri
 	// and no back pointer to the entity it is inside. It is the literal case,
 	// and it says so rather than reporting a write that never happened -- see
 	// ErrUnwired.
-	if err := m.wired(); err != nil {
+	if err := wired(m); err != nil {
 		return false, err
 	}
 
@@ -411,7 +411,7 @@ func (m *Model[T]) Push(ctx context.Context, g auth.Grant) (bool, error) {
 	// and no back pointer to the entity it is inside. It is the literal case,
 	// and it says so rather than reporting a write that never happened -- see
 	// ErrUnwired.
-	if err := m.wired(); err != nil {
+	if err := wired(m); err != nil {
 		return false, err
 	}
 
@@ -449,8 +449,8 @@ type Pushable interface {
 //
 // It does not touch the owners of loaded relations: doing that needs the
 // relation to say who its owner is, which lives in model/relations.
-func (m *Model[T]) finishSave() error {
-	if err := m.fireModelEvent(Saved); err != nil {
+func finishSave[T any](m *Model[T]) error {
+	if err := fireModelEvent(m, Saved); err != nil {
 		return err
 	}
 	m.SyncOriginal()
@@ -459,8 +459,8 @@ func (m *Model[T]) finishSave() error {
 
 // performUpdate fires the Updating/Updated events and writes the dirty
 // columns for a model that already exists.
-func (m *Model[T]) performUpdate(ctx context.Context, g auth.Grant) (bool, error) {
-	if err := m.fireModelEvent(Updating); err != nil {
+func performUpdate[T any](m *Model[T], ctx context.Context, g auth.Grant) (bool, error) {
+	if err := fireModelEvent(m, Updating); err != nil {
 		return false, err
 	}
 	if m.UsesTimestamps() {
@@ -473,7 +473,7 @@ func (m *Model[T]) performUpdate(ctx context.Context, g auth.Grant) (bool, error
 	// holds after the save is the row as stored.
 	if column := m.TenantColumn; column != "" {
 		if _, changed := dirty[column]; changed {
-			if err := m.stampTenant(g); err != nil {
+			if err := stampTenant(m, g); err != nil {
 				return false, err
 			}
 			dirty = m.GetDirty()
@@ -484,13 +484,13 @@ func (m *Model[T]) performUpdate(ctx context.Context, g auth.Grant) (bool, error
 	}
 
 	q := m.NewModelQuery()
-	m.setKeysForSaveQuery(q)
+	setKeysForSaveQuery(m, q)
 	if _, err := q.Update(ctx, g, dirty); err != nil {
 		return false, err
 	}
 
 	m.SyncChanges()
-	if err := m.fireModelEvent(Updated); err != nil {
+	if err := fireModelEvent(m, Updated); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -498,28 +498,28 @@ func (m *Model[T]) performUpdate(ctx context.Context, g auth.Grant) (bool, error
 
 // performInsert fires the Creating/Created events and inserts the row for a
 // model that does not exist yet.
-func (m *Model[T]) performInsert(ctx context.Context, g auth.Grant) (bool, error) {
-	if err := m.setUniqueID(); err != nil {
+func performInsert[T any](m *Model[T], ctx context.Context, g auth.Grant) (bool, error) {
+	if err := setUniqueID(m); err != nil {
 		return false, err
 	}
 	// The row is written with the Grant's tenant whatever the entity holds, so
 	// the entity is given it too: listeners see the row that will be written,
 	// and the value handed back afterwards matches the stored one.
-	if err := m.stampTenant(g); err != nil {
+	if err := stampTenant(m, g); err != nil {
 		return false, err
 	}
-	if err := m.fireModelEvent(Creating); err != nil {
+	if err := fireModelEvent(m, Creating); err != nil {
 		return false, err
 	}
 	if m.UsesTimestamps() {
 		m.UpdateTimestamps()
 	}
 	// Again after Creating, which may have assigned the field.
-	if err := m.stampTenant(g); err != nil {
+	if err := stampTenant(m, g); err != nil {
 		return false, err
 	}
 
-	attributes := m.getAttributesForInsert()
+	attributes := getAttributesForInsert(m)
 	q := m.NewModelQuery()
 
 	if m.Incrementing {
@@ -542,7 +542,7 @@ func (m *Model[T]) performInsert(ctx context.Context, g auth.Grant) (bool, error
 	m.Exists = true
 	m.WasRecentlyCreated = true
 
-	if err := m.fireModelEvent(Created); err != nil {
+	if err := fireModelEvent(m, Created); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -555,19 +555,19 @@ func (m *Model[T]) performInsert(ctx context.Context, g auth.Grant) (bool, error
 // row it stored -- empty after a Create from a map, since Fill never writes the
 // tenant. A model with no tenant column, or an entity with no field for it, is
 // left alone.
-func (m *Model[T]) stampTenant(g auth.Grant) error {
+func stampTenant[T any](m *Model[T], g auth.Grant) error {
 	column := m.TenantColumn
 	if column == "" {
 		return nil
 	}
-	entity, ok := m.entityValue()
+	entity, ok := entityValue(m)
 	if !ok {
 		return ErrUnwired
 	}
 	if _, declared := fieldByColumn(entity.Type(), column); !declared {
 		return nil
 	}
-	_, err := m.setAttribute(column, auth.Tenant(g))
+	_, err := setAttribute(m, column, auth.Tenant(g))
 	return err
 }
 
@@ -577,7 +577,7 @@ func (m *Model[T]) stampTenant(g auth.Grant) error {
 // struct always carries the field, so a zero key cannot simply be absent the
 // way an unset property would be; inserting id = 0 into an auto-increment
 // column is a row with the wrong id on MySQL and an error on Postgres.
-func (m *Model[T]) getAttributesForInsert() map[string]any {
+func getAttributesForInsert[T any](m *Model[T]) map[string]any {
 	attributes := m.GetAttributes()
 	if m.Incrementing {
 		if value, ok := attributes[m.GetKeyName()]; ok && isZero(value) {
@@ -589,13 +589,13 @@ func (m *Model[T]) getAttributesForInsert() map[string]any {
 
 // setKeysForSaveQuery adds the primary key filter a save statement runs
 // under.
-func (m *Model[T]) setKeysForSaveQuery(b *Builder[T]) *Builder[T] {
-	return b.Where(m.GetQualifiedKeyName(), "=", m.getKeyForSaveQuery())
+func setKeysForSaveQuery[T any](m *Model[T], b *Builder[T]) *Builder[T] {
+	return b.Where(m.GetQualifiedKeyName(), "=", getKeyForSaveQuery(m))
 }
 
 // getKeyForSaveQuery returns the original key, so that changing the key of a
 // loaded row updates the right one.
-func (m *Model[T]) getKeyForSaveQuery() any {
+func getKeyForSaveQuery[T any](m *Model[T]) any {
 	if original, ok := m.original[m.GetKeyName()]; ok {
 		return original
 	}
@@ -611,7 +611,7 @@ func (m *Model[T]) Delete(ctx context.Context, g auth.Grant) (bool, error) {
 	// and no back pointer to the entity it is inside. It is the literal case,
 	// and it says so rather than reporting a write that never happened -- see
 	// ErrUnwired.
-	if err := m.wired(); err != nil {
+	if err := wired(m); err != nil {
 		return false, err
 	}
 
@@ -621,13 +621,13 @@ func (m *Model[T]) Delete(ctx context.Context, g auth.Grant) (bool, error) {
 	if !m.Exists {
 		return false, nil
 	}
-	if err := m.fireModelEvent(Deleting); err != nil {
+	if err := fireModelEvent(m, Deleting); err != nil {
 		return false, err
 	}
-	if err := m.performDeleteOnModel(ctx, g); err != nil {
+	if err := performDeleteOnModel(m, ctx, g); err != nil {
 		return false, err
 	}
-	if err := m.fireModelEvent(Deleted); err != nil {
+	if err := fireModelEvent(m, Deleted); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -647,7 +647,7 @@ func (m *Model[T]) DeleteOrFail(ctx context.Context, g auth.Grant) (bool, error)
 		return false, nil
 	}
 	var deleted bool
-	err := m.transaction(func() error {
+	err := transaction(m, func() error {
 		var err error
 		deleted, err = m.Delete(ctx, g)
 		return err
@@ -690,7 +690,7 @@ func (m *Model[T]) Fresh(ctx context.Context, g auth.Grant, with ...string) (*T,
 		return nil, nil
 	}
 	q := m.NewQueryWithoutScopes().With(with...)
-	m.setKeysForSelectQuery(q)
+	setKeysForSelectQuery(m, q)
 	return q.First(ctx, g)
 }
 
@@ -700,7 +700,7 @@ func (m *Model[T]) Refresh(ctx context.Context, g auth.Grant) error {
 	// and no back pointer to the entity it is inside. It is the literal case,
 	// and it says so rather than reporting a write that never happened -- see
 	// ErrUnwired.
-	if err := m.wired(); err != nil {
+	if err := wired(m); err != nil {
 		return err
 	}
 
@@ -708,8 +708,8 @@ func (m *Model[T]) Refresh(ctx context.Context, g auth.Grant) error {
 		return nil
 	}
 	q := m.NewQueryWithoutScopes()
-	m.setKeysForSelectQuery(q)
-	fresh, err := q.firstOrFail(ctx, g)
+	setKeysForSelectQuery(m, q)
+	fresh, err := firstOrFail(q, ctx, g)
 	if err != nil {
 		return err
 	}
@@ -726,15 +726,15 @@ func (m *Model[T]) Refresh(ctx context.Context, g auth.Grant) error {
 
 // setKeysForSelectQuery adds the primary key filter a select statement runs
 // under.
-func (m *Model[T]) setKeysForSelectQuery(b *Builder[T]) *Builder[T] {
-	return b.Where(m.GetQualifiedKeyName(), "=", m.getKeyForSaveQuery())
+func setKeysForSelectQuery[T any](m *Model[T], b *Builder[T]) *Builder[T] {
+	return b.Where(m.GetQualifiedKeyName(), "=", getKeyForSaveQuery(m))
 }
 
 // Replicate returns the same row as a new, unsaved model.
 //
 // The key, the timestamps and anything named in except are left out.
 func (m *Model[T]) Replicate(except ...string) (*T, error) {
-	instance, err := m.replicate(except...)
+	instance, err := replicate(m, except...)
 	if err != nil {
 		return nil, err
 	}
@@ -742,7 +742,7 @@ func (m *Model[T]) Replicate(except ...string) (*T, error) {
 }
 
 // replicate is Replicate with the model still in hand. See Builder.get.
-func (m *Model[T]) replicate(except ...string) (*Model[T], error) {
+func replicate[T any](m *Model[T], except ...string) (*Model[T], error) {
 	defaults := []string{m.GetKeyName(), m.GetCreatedAtColumn(), m.GetUpdatedAtColumn()}
 	drop := append(slices.Clone(except), defaults...)
 
@@ -761,7 +761,7 @@ func (m *Model[T]) replicate(except ...string) (*Model[T], error) {
 		return nil, err
 	}
 	instance.relations = copyMap(m.relations)
-	if err := instance.fireModelEvent(Replicating); err != nil {
+	if err := fireModelEvent(instance, Replicating); err != nil {
 		return nil, err
 	}
 	return instance, nil
@@ -783,26 +783,20 @@ func (m *Model[T]) ReplicateQuietly(except ...string) (copied *T, err error) {
 // itself, so a.Is(b) on two rows reaches the key and the table on both. A T that
 // does not has no field pointing back at a model, and this answers false: a
 // table and a connection are not columns, so a plain row does not carry them.
-func (m *Model[T]) Is(other *T) bool { return m.is(ModelOf(other)) }
+func (m *Model[T]) Is(other *T) bool {
+	model := ModelOf(other)
+	return model != nil && sameRow(m, model)
+}
 
 // IsNot reports the opposite of Is.
 func (m *Model[T]) IsNot(other *T) bool { return !m.Is(other) }
-
-// is is Is with the model still in hand, which is what the package holds when it
-// compares rows to each other.
-func (m *Model[T]) is(other *Model[T]) bool {
-	return other != nil &&
-		reflect.DeepEqual(m.GetKey(), other.GetKey()) &&
-		m.GetTable() == other.GetTable() &&
-		m.GetConnectionName() == other.GetConnectionName()
-}
 
 // Load eager loads these relations onto this model.
 func (m *Model[T]) Load(ctx context.Context, g auth.Grant, relations ...string) error {
 	if len(relations) == 0 {
 		return nil
 	}
-	return m.NewQueryWithoutRelationships().With(relations...).eagerLoadRelations(ctx, g, models{m})
+	return eagerLoadRelations(m.NewQueryWithoutRelationships().With(relations...), ctx, g, models{m})
 }
 
 // LoadMissing eager loads these relations onto this model, skipping the ones
@@ -836,7 +830,7 @@ func (m *Model[T]) GetRelation(name string) (any, bool) {
 	value, ok := m.relations[name]
 	if !ok {
 		if _, declared := m.RelationResolvers[name]; declared {
-			m.handleLazyLoadingViolation(name)
+			handleLazyLoadingViolation(m, name)
 		}
 	}
 	return value, ok
@@ -1017,7 +1011,7 @@ func (m *Model[T]) UsesUniqueIDs() bool { return m.uniqueIDs }
 
 // setUniqueID fills an empty primary key on a model that uses unique ids, and
 // does nothing on any other.
-func (m *Model[T]) setUniqueID() error {
+func setUniqueID[T any](m *Model[T]) error {
 	if !m.uniqueIDs || !isZero(m.GetKey()) {
 		return nil
 	}
@@ -1127,16 +1121,16 @@ func (m *Model[T]) WithoutTimestamps(callback func() error) error {
 // column, and inserting one would fail on the first row.
 func (m *Model[T]) UpdateTimestamps() {
 	now := m.FreshTimestamp()
-	if column := m.GetUpdatedAtColumn(); m.hasColumn(column) {
-		_, _ = m.setAttribute(column, now)
+	if column := m.GetUpdatedAtColumn(); hasColumn(m, column) {
+		_, _ = setAttribute(m, column, now)
 	}
-	if column := m.GetCreatedAtColumn(); !m.Exists && m.hasColumn(column) {
-		_, _ = m.setAttribute(column, now)
+	if column := m.GetCreatedAtColumn(); !m.Exists && hasColumn(m, column) {
+		_, _ = setAttribute(m, column, now)
 	}
 }
 
 // hasColumn reports whether the entity declares this column.
-func (m *Model[T]) hasColumn(column string) bool {
+func hasColumn[T any](m *Model[T], column string) bool {
 	if column == "" {
 		return false
 	}
@@ -1148,7 +1142,7 @@ func (m *Model[T]) hasColumn(column string) bool {
 //
 // See SaveOrFail for why it is an assertion rather than a method on
 // query.Connection.
-func (m *Model[T]) transaction(fn func() error) error {
+func transaction[T any](m *Model[T], fn func() error) error {
 	transactor, ok := m.connection.(Transactor)
 	if !ok {
 		return fmt.Errorf("model: %s: the connection cannot open a transaction, so this cannot be the atomic form", m.GetTable())

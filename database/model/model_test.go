@@ -314,7 +314,7 @@ func TestReplicateDropsTheKeyAndTheTimestamps(t *testing.T) {
 
 	// Whether the replica exists is the model's answer, and this entity does not
 	// embed one, so the model-side form is what carries it.
-	replica, err := model.replicate()
+	replica, err := replicate(model)
 	if err != nil {
 		t.Fatalf("replicate: %v", err)
 	}

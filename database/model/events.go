@@ -55,7 +55,7 @@ func (m *Model[T]) WithoutEvents(callback func() error) error {
 
 // fireModelEvent runs every callback registered for event, in registration
 // order, stopping at the first one that returns an error.
-func (m *Model[T]) fireModelEvent(event Event) error {
+func fireModelEvent[T any](m *Model[T], event Event) error {
 	if m.muted {
 		return nil
 	}

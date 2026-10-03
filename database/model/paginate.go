@@ -92,7 +92,7 @@ func simplePaginateRows(b rowsBuilder, ctx context.Context, g auth.Grant, perPag
 // The orders, the limit and the offset come off before the count, because a
 // count with a limit on it counts the page rather than the result set.
 func (b *Builder[T]) GetCountForPagination(ctx context.Context, g auth.Grant) (int64, error) {
-	counted := b.clone()
+	counted := clone(b)
 	counted.query = counted.query.CloneWithout("columns", "orders", "limit", "offset")
 	return counted.Count(ctx, g)
 }

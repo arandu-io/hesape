@@ -76,7 +76,7 @@ func (c Collection[T]) GetQueueableIDs() []any {
 	if c.IsEmpty() {
 		return []any{}
 	}
-	found := c.models()
+	found := rowModels(c)
 	out := make([]any, 0, len(found))
 	for _, model := range found {
 		out = append(out, model.GetQueueableID())
@@ -93,7 +93,7 @@ func (c Collection[T]) GetQueueableRelations() []string {
 	if c.IsEmpty() {
 		return []string{}
 	}
-	found := c.models()
+	found := rowModels(c)
 	if len(found) == 0 {
 		return []string{}
 	}
@@ -114,7 +114,7 @@ func (c Collection[T]) GetQueueableConnection() (string, error) {
 	if c.IsEmpty() {
 		return "", nil
 	}
-	found := c.models()
+	found := rowModels(c)
 	if len(found) == 0 {
 		return "", nil
 	}

@@ -51,7 +51,7 @@ type Builder[T any] struct {
 
 // fail records an error for the first method that runs to report. See
 // Builder.err.
-func (b *Builder[T]) fail(err error) *Builder[T] {
+func fail[T any](b *Builder[T], err error) *Builder[T] {
 	if b.err == nil {
 		b.err = err
 	}
@@ -216,7 +216,7 @@ func (b *Builder[T]) SetQuery(q *query.Builder) *Builder[T] {
 // filter goes on, and a base builder handed out without it is a query
 // somebody will run.
 func (b *Builder[T]) ToBase(ctx context.Context, g auth.Grant) (*query.Builder, error) {
-	prepared, err := b.prepare(g)
+	prepared, err := prepare(b, g)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +277,7 @@ func (b *Builder[T]) WithSavepointIfNeeded(scope func() error) error {
 
 // clone returns a copy of b with its own query, scopes and callback slices,
 // so that mutating the copy never touches b.
-func (b *Builder[T]) clone() *Builder[T] {
+func clone[T any](b *Builder[T]) *Builder[T] {
 	out := &Builder[T]{
 		query:               b.query.Clone(),
 		model:               b.model,
@@ -301,7 +301,7 @@ func (b *Builder[T]) clone() *Builder[T] {
 }
 
 // Clone returns a copy of b, safe to mutate independently.
-func (b *Builder[T]) Clone() *Builder[T] { return b.clone() }
+func (b *Builder[T]) Clone() *Builder[T] { return clone(b) }
 
 // prepare is where a query becomes runnable: the global scopes go on, and then
 // the tenant filter.
@@ -315,7 +315,7 @@ func (b *Builder[T]) Clone() *Builder[T] { return b.clone() }
 // tenant = ?` appended reads as `a or (b and tenant = ?)`, so every row matching
 // a comes back whoever it belongs to. Grouping first is what makes the filter
 // mean what it says.
-func (b *Builder[T]) prepare(g auth.Grant) (*Builder[T], error) {
+func prepare[T any](b *Builder[T], g auth.Grant) (*Builder[T], error) {
 	if b.err != nil {
 		return nil, b.err
 	}
@@ -331,7 +331,7 @@ func (b *Builder[T]) prepare(g auth.Grant) (*Builder[T], error) {
 	prepared := b.ApplyScopes()
 	prepared.prepared = true
 
-	if err := prepared.scopeToTenant(g, tenant); err != nil {
+	if err := scopeToTenant(prepared, g, tenant); err != nil {
 		return nil, err
 	}
 	return prepared, nil
@@ -363,7 +363,7 @@ func (b *Builder[T]) prepare(g auth.Grant) (*Builder[T], error) {
 // signature that accepted one could not pass it on. All ScopeNested does with it
 // is refuse to build a statement whose context is already cancelled, and there
 // is nothing here for that to cancel.
-func (b *Builder[T]) scopeToTenant(g auth.Grant, tenant string) error {
+func scopeToTenant[T any](b *Builder[T], g auth.Grant, tenant string) error {
 	if column := b.model.TenantColumn; column != "" {
 		isolateWheres(b.query)
 		b.query.Where(b.model.QualifyColumn(column), "=", tenant)
@@ -443,9 +443,9 @@ func (b *Builder[T]) RemovedScopes() []string { return slices.Clone(b.removedSco
 // or: without that, a scope's filter joins an or chain and stops filtering.
 func (b *Builder[T]) ApplyScopes() *Builder[T] {
 	if len(b.scopes) == 0 {
-		return b.clone()
+		return clone(b)
 	}
-	out := b.clone()
+	out := clone(b)
 	for _, identifier := range sortedScopeNames(b.scopes) {
 		scope := b.scopes[identifier]
 		before := len(out.query.Wheres)
@@ -510,7 +510,7 @@ func groupWhereSliceForScope(q *query.Builder, slice []query.Where) {
 // name adds a group built by calling that function with a fresh builder.
 func (b *Builder[T]) Where(column any, args ...any) *Builder[T] {
 	if nested, ok := column.(func(*Builder[T])); ok {
-		return b.whereNested(nested, "and")
+		return whereNested(b, nested, "and")
 	}
 	b.query.Where(column, args...)
 	return b
@@ -521,7 +521,7 @@ func (b *Builder[T]) Where(column any, args ...any) *Builder[T] {
 // builder.
 func (b *Builder[T]) OrWhere(column any, args ...any) *Builder[T] {
 	if nested, ok := column.(func(*Builder[T])); ok {
-		return b.whereNested(nested, "or")
+		return whereNested(b, nested, "or")
 	}
 	b.query.OrWhere(column, args...)
 	return b
@@ -529,13 +529,13 @@ func (b *Builder[T]) OrWhere(column any, args ...any) *Builder[T] {
 
 // whereNested runs callback against a fresh builder for the same model, and
 // adds what it builds as one group joined with boolean.
-func (b *Builder[T]) whereNested(callback func(*Builder[T]), boolean string) *Builder[T] {
+func whereNested[T any](b *Builder[T], callback func(*Builder[T]), boolean string) *Builder[T] {
 	nested := b.model.NewQueryWithoutRelationships()
 	callback(nested)
 	if nested.err != nil {
 		// The nested builder is thrown away once its wheres are merged, so an
 		// error left on it would never reach anybody.
-		b.fail(nested.err)
+		fail(b, nested.err)
 	}
 	for name, constraints := range nested.eagerLoad {
 		b.eagerLoad[name] = constraints
@@ -552,7 +552,7 @@ func (b *Builder[T]) WhereNot(column any, args ...any) *Builder[T] {
 	b.Where(func(nested *Builder[T]) {
 		nested.Where(column, args...)
 	})
-	return b.negateLastWhere(before)
+	return negateLastWhere(b, before)
 }
 
 // negateLastWhere flips the boolean of the group at index before to "...
@@ -561,7 +561,7 @@ func (b *Builder[T]) WhereNot(column any, args ...any) *Builder[T] {
 // It negates nothing when the group turned out empty -- an empty nested
 // where is dropped rather than compiled, and negating whatever came before
 // it would change a clause the caller did not write.
-func (b *Builder[T]) negateLastWhere(before int) *Builder[T] {
+func negateLastWhere[T any](b *Builder[T], before int) *Builder[T] {
 	if len(b.query.Wheres) == before {
 		return b
 	}
@@ -578,7 +578,7 @@ func (b *Builder[T]) OrWhereNot(column any, args ...any) *Builder[T] {
 	b.OrWhere(func(nested *Builder[T]) {
 		nested.Where(column, args...)
 	})
-	return b.negateLastWhere(before)
+	return negateLastWhere(b, before)
 }
 
 // WhereKey filters by the model's primary key. A slice of ids adds a WHERE
@@ -634,7 +634,7 @@ func timestampColumn(fallback string, column []string) any {
 
 // Hydrate turns rows into models: rows in, models out.
 func (b *Builder[T]) Hydrate(items []query.Record) (Collection[T], error) {
-	found, err := b.hydrate(items)
+	found, err := hydrate(b, items)
 	if err != nil {
 		return nil, err
 	}
@@ -646,7 +646,7 @@ func (b *Builder[T]) Hydrate(items []query.Record) (Collection[T], error) {
 // Every read in this package goes through it, and the ones that keep working on
 // the result -- an eager load, a Fresh, the key a chunk resumes from -- stay on
 // this side rather than on the Collection. See models.
-func (b *Builder[T]) hydrate(items []query.Record) (models, error) {
+func hydrate[T any](b *Builder[T], items []query.Record) (models, error) {
 	out := make(models, 0, len(items))
 	for _, item := range items {
 		model, err := b.model.NewFromBuilder(item)
@@ -687,7 +687,7 @@ func (b *Builder[T]) Get(ctx context.Context, g auth.Grant, columns ...any) (Col
 	if err != nil {
 		return nil, err
 	}
-	return b.results(found), nil
+	return results(b, found), nil
 }
 
 // get is Get with the models still in hand, and without the after-query
@@ -697,16 +697,16 @@ func (b *Builder[T]) Get(ctx context.Context, g auth.Grant, columns ...any) (Col
 // handed to one: results is the other half, and every read in this package that
 // keeps working on the rows calls both.
 func (b *Builder[T]) get(ctx context.Context, g auth.Grant, columns ...any) (models, error) {
-	prepared, err := b.prepare(g)
+	prepared, err := prepare(b, g)
 	if err != nil {
 		return nil, err
 	}
-	found, err := prepared.getModels(ctx, g, columns...)
+	found, err := getModels(prepared, ctx, g, columns...)
 	if err != nil {
 		return nil, err
 	}
 	if len(found) > 0 {
-		if err := prepared.eagerLoadRelations(ctx, g, found); err != nil {
+		if err := eagerLoadRelations(prepared, ctx, g, found); err != nil {
 			return nil, err
 		}
 	}
@@ -715,7 +715,7 @@ func (b *Builder[T]) get(ctx context.Context, g auth.Grant, columns ...any) (mod
 
 // results is what get's models become for a caller: the after-query callbacks,
 // over the rows.
-func (b *Builder[T]) results(found models) Collection[T] {
+func results[T any](b *Builder[T], found models) Collection[T] {
 	return b.ApplyAfterQueryCallbacks(entitiesOf[T](found))
 }
 
@@ -724,14 +724,14 @@ func (b *Builder[T]) results(found models) Collection[T] {
 // A First is a Get with a limit of one, so its row is a one-row result and the
 // callbacks see it as one. Nothing matched stays nothing matched: a callback
 // that replaced an empty result would be answering a question nobody asked.
-func (b *Builder[T]) result(model *Model[T]) *T {
+func result[T any](b *Builder[T], model *Model[T]) *T {
 	if model == nil {
 		return nil
 	}
 	if len(b.afterQueryCallbacks) == 0 {
 		return model.Entity
 	}
-	return b.results(models{model}).First()
+	return results(b, models{model}).First()
 }
 
 // GetModels returns the rows, hydrated, with nothing eager loaded.
@@ -739,7 +739,7 @@ func (b *Builder[T]) result(model *Model[T]) *T {
 // It is already prepared when Get calls it; called on its own it prepares
 // itself, so there is no way to reach the rows without the Grant.
 func (b *Builder[T]) GetModels(ctx context.Context, g auth.Grant, columns ...any) (Collection[T], error) {
-	found, err := b.getModels(ctx, g, columns...)
+	found, err := getModels(b, ctx, g, columns...)
 	if err != nil {
 		return nil, err
 	}
@@ -747,19 +747,19 @@ func (b *Builder[T]) GetModels(ctx context.Context, g auth.Grant, columns ...any
 }
 
 // getModels is GetModels with the models still in hand. See hydrate.
-func (b *Builder[T]) getModels(ctx context.Context, g auth.Grant, columns ...any) (models, error) {
-	prepared, err := b.prepare(g)
+func getModels[T any](b *Builder[T], ctx context.Context, g auth.Grant, columns ...any) (models, error) {
+	prepared, err := prepare(b, g)
 	if err != nil {
 		return nil, err
 	}
 	if len(columns) > 0 && prepared.query.Columns == nil {
 		prepared.query.Select(columns...)
 	}
-	rows, err := prepared.runSelect(ctx)
+	rows, err := runSelect(prepared, ctx)
 	if err != nil {
 		return nil, err
 	}
-	return prepared.hydrate(rows)
+	return hydrate(prepared, rows)
 }
 
 // AfterQuery registers a callback run on the result of Get, allowed to
@@ -797,13 +797,13 @@ func (b *Builder[T]) ApplyAfterQueryCallbacks(result Collection[T]) Collection[T
 // is none: no row is not a failure, and FirstOrFail is the spelling for when
 // it is.
 func (b *Builder[T]) First(ctx context.Context, g auth.Grant, columns ...any) (*T, error) {
-	model, err := b.first(ctx, g, columns...)
-	return b.result(model), err
+	model, err := first(b, ctx, g, columns...)
+	return result(b, model), err
 }
 
 // first is First with the model still in hand, and without the after-query
 // callbacks. See get.
-func (b *Builder[T]) first(ctx context.Context, g auth.Grant, columns ...any) (*Model[T], error) {
+func first[T any](b *Builder[T], ctx context.Context, g auth.Grant, columns ...any) (*Model[T], error) {
 	found, err := firstRow(b, ctx, g, columns...)
 	return asModel[T](found), err
 }
@@ -833,17 +833,17 @@ func asModel[T any](found row) *Model[T] {
 // FirstOrFail returns the first row matching the query, or an error when
 // there is none.
 func (b *Builder[T]) FirstOrFail(ctx context.Context, g auth.Grant, columns ...any) (*T, error) {
-	model, err := b.firstOrFail(ctx, g, columns...)
+	model, err := firstOrFail(b, ctx, g, columns...)
 	if err != nil {
 		return nil, err
 	}
-	return b.result(model), nil
+	return result(b, model), nil
 }
 
 // firstOrFail is firstOrFail with the model still in hand, and without the
 // after-query callbacks. See get.
-func (b *Builder[T]) firstOrFail(ctx context.Context, g auth.Grant, columns ...any) (*Model[T], error) {
-	model, err := b.first(ctx, g, columns...)
+func firstOrFail[T any](b *Builder[T], ctx context.Context, g auth.Grant, columns ...any) (*Model[T], error) {
+	model, err := first(b, ctx, g, columns...)
 	if err != nil {
 		return nil, err
 	}
@@ -856,12 +856,12 @@ func (b *Builder[T]) firstOrFail(ctx context.Context, g auth.Grant, columns ...a
 // FirstOr returns the first row matching the query, or what callback makes
 // when there is none.
 func (b *Builder[T]) FirstOr(ctx context.Context, g auth.Grant, callback func() (*T, error), columns ...any) (*T, error) {
-	model, err := b.first(ctx, g, columns...)
+	model, err := first(b, ctx, g, columns...)
 	if err != nil {
 		return nil, err
 	}
 	if model != nil {
-		return b.result(model), nil
+		return result(b, model), nil
 	}
 	return callback()
 }
@@ -874,16 +874,16 @@ func (b *Builder[T]) FirstWhere(ctx context.Context, g auth.Grant, column any, a
 // Sole returns the row matching the query, and fails unless it is the only
 // one.
 func (b *Builder[T]) Sole(ctx context.Context, g auth.Grant, columns ...any) (*T, error) {
-	model, err := b.sole(ctx, g, columns...)
+	model, err := sole(b, ctx, g, columns...)
 	if err != nil {
 		return nil, err
 	}
-	return b.result(model), nil
+	return result(b, model), nil
 }
 
 // sole is Sole with the model still in hand, and without the after-query
 // callbacks. See get.
-func (b *Builder[T]) sole(ctx context.Context, g auth.Grant, columns ...any) (*Model[T], error) {
+func sole[T any](b *Builder[T], ctx context.Context, g auth.Grant, columns ...any) (*Model[T], error) {
 	found, err := b.Limit(2).get(ctx, g, columns...)
 	if err != nil {
 		return nil, err
@@ -901,16 +901,16 @@ func (b *Builder[T]) sole(ctx context.Context, g auth.Grant, columns ...any) (*M
 // Find returns the row with the given primary key, or the rows for a slice
 // of keys.
 func (b *Builder[T]) Find(ctx context.Context, g auth.Grant, id any, columns ...any) (*T, error) {
-	model, err := b.find(ctx, g, id, columns...)
+	model, err := find(b, ctx, g, id, columns...)
 	if err != nil {
 		return nil, err
 	}
-	return b.result(model), nil
+	return result(b, model), nil
 }
 
 // find is Find with the model still in hand, and without the after-query
 // callbacks. See get.
-func (b *Builder[T]) find(ctx context.Context, g auth.Grant, id any, columns ...any) (*Model[T], error) {
+func find[T any](b *Builder[T], ctx context.Context, g auth.Grant, id any, columns ...any) (*Model[T], error) {
 	found, err := findRow(b, ctx, g, id, columns...)
 	return asModel[T](found), err
 }
@@ -930,16 +930,16 @@ func findRow(b rowsBuilder, ctx context.Context, g auth.Grant, id any, columns .
 
 // FindMany returns the rows matching any of ids.
 func (b *Builder[T]) FindMany(ctx context.Context, g auth.Grant, ids []any, columns ...any) (Collection[T], error) {
-	found, err := b.findMany(ctx, g, ids, columns...)
+	found, err := findMany(b, ctx, g, ids, columns...)
 	if err != nil {
 		return nil, err
 	}
-	return b.results(found), nil
+	return results(b, found), nil
 }
 
 // findMany is FindMany with the models still in hand, and without the
 // after-query callbacks. See get.
-func (b *Builder[T]) findMany(ctx context.Context, g auth.Grant, ids []any, columns ...any) (models, error) {
+func findMany[T any](b *Builder[T], ctx context.Context, g auth.Grant, ids []any, columns ...any) (models, error) {
 	return findManyRows(b, ctx, g, ids, columns...)
 }
 
@@ -958,18 +958,18 @@ func findManyRows(b rowsBuilder, ctx context.Context, g auth.Grant, ids []any, c
 // Given a list it also fails when one id is missing: asking for three rows
 // and getting two is not a shorter result, it is a wrong one.
 func (b *Builder[T]) FindOrFail(ctx context.Context, g auth.Grant, id any, columns ...any) (*T, error) {
-	model, err := b.findOrFail(ctx, g, id, columns...)
+	model, err := findOrFail(b, ctx, g, id, columns...)
 	if err != nil {
 		return nil, err
 	}
-	return b.result(model), nil
+	return result(b, model), nil
 }
 
 // findOrFail is FindOrFail with the model still in hand, and without the
 // after-query callbacks. See get.
-func (b *Builder[T]) findOrFail(ctx context.Context, g auth.Grant, id any, columns ...any) (*Model[T], error) {
+func findOrFail[T any](b *Builder[T], ctx context.Context, g auth.Grant, id any, columns ...any) (*Model[T], error) {
 	if ids, ok := id.([]any); ok {
-		found, err := b.findMany(ctx, g, ids, columns...)
+		found, err := findMany(b, ctx, g, ids, columns...)
 		if err != nil {
 			return nil, err
 		}
@@ -978,7 +978,7 @@ func (b *Builder[T]) findOrFail(ctx context.Context, g auth.Grant, id any, colum
 		}
 		return found[0].(*Model[T]), nil
 	}
-	model, err := b.find(ctx, g, id, columns...)
+	model, err := find(b, ctx, g, id, columns...)
 	if err != nil {
 		return nil, err
 	}
@@ -991,12 +991,12 @@ func (b *Builder[T]) findOrFail(ctx context.Context, g auth.Grant, id any, colum
 // FindOrNew returns the row with the given primary key, or a new unsaved
 // model when there is none.
 func (b *Builder[T]) FindOrNew(ctx context.Context, g auth.Grant, id any, columns ...any) (*T, error) {
-	model, err := b.find(ctx, g, id, columns...)
+	model, err := find(b, ctx, g, id, columns...)
 	if err != nil {
 		return nil, err
 	}
 	if model != nil {
-		return b.result(model), nil
+		return result(b, model), nil
 	}
 	instance, err := b.NewModelInstance(nil)
 	if err != nil {
@@ -1008,12 +1008,12 @@ func (b *Builder[T]) FindOrNew(ctx context.Context, g auth.Grant, id any, column
 // FirstOrNew returns the first row matching attributes, or a new unsaved
 // model built from attributes and values when there is none.
 func (b *Builder[T]) FirstOrNew(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*T, error) {
-	model, err := b.clone().whereAll(attributes).first(ctx, g)
+	model, err := first(whereAll(clone(b), attributes), ctx, g)
 	if err != nil {
 		return nil, err
 	}
 	if model != nil {
-		return b.result(model), nil
+		return result(b, model), nil
 	}
 	instance, err := b.NewModelInstance(mergeMaps(attributes, values))
 	if err != nil {
@@ -1025,24 +1025,24 @@ func (b *Builder[T]) FirstOrNew(ctx context.Context, g auth.Grant, attributes, v
 // FirstOrCreate returns the first row matching attributes, or creates and
 // returns one from attributes and values when there is none.
 func (b *Builder[T]) FirstOrCreate(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*T, error) {
-	model, err := b.firstOrCreate(ctx, g, attributes, values)
+	model, err := firstOrCreate(b, ctx, g, attributes, values)
 	if err != nil {
 		return nil, err
 	}
-	return b.result(model), nil
+	return result(b, model), nil
 }
 
 // firstOrCreate is FirstOrCreate with the model still in hand, and without the
 // after-query callbacks. See get.
-func (b *Builder[T]) firstOrCreate(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
-	model, err := b.clone().whereAll(attributes).first(ctx, g)
+func firstOrCreate[T any](b *Builder[T], ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+	model, err := first(whereAll(clone(b), attributes), ctx, g)
 	if err != nil {
 		return nil, err
 	}
 	if model != nil {
 		return model, nil
 	}
-	return b.createOrFirst(ctx, g, attributes, values)
+	return createOrFirst(b, ctx, g, attributes, values)
 }
 
 // CreateOrFirst inserts a row from attributes and values, and if a unique
@@ -1052,21 +1052,21 @@ func (b *Builder[T]) firstOrCreate(ctx context.Context, g auth.Grant, attributes
 // looking for the row, and the insert error is returned when there is none
 // -- which keeps the race safe and never swallows a real failure.
 func (b *Builder[T]) CreateOrFirst(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*T, error) {
-	model, err := b.createOrFirst(ctx, g, attributes, values)
+	model, err := createOrFirst(b, ctx, g, attributes, values)
 	if err != nil {
 		return nil, err
 	}
-	return b.result(model), nil
+	return result(b, model), nil
 }
 
 // createOrFirst is CreateOrFirst with the model still in hand, and without the
 // after-query callbacks. See get.
-func (b *Builder[T]) createOrFirst(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
-	model, err := b.create(ctx, g, mergeMaps(attributes, values))
+func createOrFirst[T any](b *Builder[T], ctx context.Context, g auth.Grant, attributes, values map[string]any) (*Model[T], error) {
+	model, err := create(b, ctx, g, mergeMaps(attributes, values))
 	if err == nil {
 		return model, nil
 	}
-	existing, findErr := b.clone().whereAll(attributes).first(ctx, g)
+	existing, findErr := first(whereAll(clone(b), attributes), ctx, g)
 	if findErr != nil || existing == nil {
 		return nil, err
 	}
@@ -1076,12 +1076,12 @@ func (b *Builder[T]) createOrFirst(ctx context.Context, g auth.Grant, attributes
 // UpdateOrCreate finds or creates a row matching attributes, then fills it
 // with values and saves it.
 func (b *Builder[T]) UpdateOrCreate(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*T, error) {
-	model, err := b.firstOrCreate(ctx, g, attributes, values)
+	model, err := firstOrCreate(b, ctx, g, attributes, values)
 	if err != nil {
 		return nil, err
 	}
 	if model.WasRecentlyCreated {
-		return b.result(model), nil
+		return result(b, model), nil
 	}
 	if err := model.Fill(values); err != nil {
 		return nil, err
@@ -1089,11 +1089,11 @@ func (b *Builder[T]) UpdateOrCreate(ctx context.Context, g auth.Grant, attribute
 	if _, err := model.Save(ctx, g); err != nil {
 		return nil, err
 	}
-	return b.result(model), nil
+	return result(b, model), nil
 }
 
 // whereAll adds one equality where clause per entry in attributes.
-func (b *Builder[T]) whereAll(attributes map[string]any) *Builder[T] {
+func whereAll[T any](b *Builder[T], attributes map[string]any) *Builder[T] {
 	for _, column := range sortedKeys(attributes) {
 		b.Where(b.model.QualifyColumn(column), "=", attributes[column])
 	}
@@ -1102,7 +1102,7 @@ func (b *Builder[T]) whereAll(attributes map[string]any) *Builder[T] {
 
 // Value returns one column of the first row matching the query.
 func (b *Builder[T]) Value(ctx context.Context, g auth.Grant, column string) (any, error) {
-	model, err := b.first(ctx, g, column)
+	model, err := first(b, ctx, g, column)
 	if err != nil || model == nil {
 		return nil, err
 	}
@@ -1112,7 +1112,7 @@ func (b *Builder[T]) Value(ctx context.Context, g auth.Grant, column string) (an
 // ValueOrFail returns one column of the first row matching the query, or an
 // error when there is none.
 func (b *Builder[T]) ValueOrFail(ctx context.Context, g auth.Grant, column string) (any, error) {
-	model, err := b.firstOrFail(ctx, g, column)
+	model, err := firstOrFail(b, ctx, g, column)
 	if err != nil {
 		return nil, err
 	}
@@ -1122,7 +1122,7 @@ func (b *Builder[T]) ValueOrFail(ctx context.Context, g auth.Grant, column strin
 // SoleValue returns one column of the row matching the query, and fails
 // unless it is the only one.
 func (b *Builder[T]) SoleValue(ctx context.Context, g auth.Grant, column string) (any, error) {
-	model, err := b.sole(ctx, g, column)
+	model, err := sole(b, ctx, g, column)
 	if err != nil {
 		return nil, err
 	}
@@ -1154,14 +1154,14 @@ func (b *Builder[T]) Count(ctx context.Context, g auth.Grant, columns ...any) (i
 // Aggregate runs function (count, sum, min, max, avg) over columns and
 // returns the result.
 func (b *Builder[T]) Aggregate(ctx context.Context, g auth.Grant, function string, columns ...any) (any, error) {
-	prepared, err := b.prepare(g)
+	prepared, err := prepare(b, g)
 	if err != nil {
 		return nil, err
 	}
 	if len(columns) == 0 {
 		columns = []any{"*"}
 	}
-	return prepared.runAggregate(ctx, function, columns)
+	return runAggregate(prepared, ctx, function, columns)
 }
 
 // Exists reports whether the query matches any row.
@@ -1175,7 +1175,7 @@ func (b *Builder[T]) Exists(ctx context.Context, g auth.Grant) (bool, error) {
 // A tenant in attributes is ignored, as Fill ignores it. The row is written
 // with the Grant's tenant, and the entity returned carries that tenant.
 func (b *Builder[T]) Create(ctx context.Context, g auth.Grant, attributes map[string]any) (*T, error) {
-	instance, err := b.create(ctx, g, attributes)
+	instance, err := create(b, ctx, g, attributes)
 	if err != nil {
 		return nil, err
 	}
@@ -1183,7 +1183,7 @@ func (b *Builder[T]) Create(ctx context.Context, g auth.Grant, attributes map[st
 }
 
 // create is Create with the model still in hand. See get.
-func (b *Builder[T]) create(ctx context.Context, g auth.Grant, attributes map[string]any) (*Model[T], error) {
+func create[T any](b *Builder[T], ctx context.Context, g auth.Grant, attributes map[string]any) (*Model[T], error) {
 	instance, err := b.NewModelInstance(attributes)
 	if err != nil {
 		return nil, err
@@ -1221,27 +1221,27 @@ func (b *Builder[T]) ForceCreate(ctx context.Context, g auth.Grant, attributes m
 // whatever the caller put there: the tenant comes from the Grant and from
 // nowhere else.
 func (b *Builder[T]) Insert(ctx context.Context, g auth.Grant, values ...map[string]any) (bool, error) {
-	prepared, rows, err := b.prepareWrite(g, values)
+	prepared, rows, err := prepareWrite(b, g, values)
 	if err != nil {
 		return false, err
 	}
-	return prepared.runInsert(ctx, rows)
+	return runInsert(prepared, ctx, rows)
 }
 
 // InsertGetID inserts values as one new row and returns the value generated
 // for sequence.
 func (b *Builder[T]) InsertGetID(ctx context.Context, g auth.Grant, values map[string]any, sequence string) (int64, error) {
-	prepared, rows, err := b.prepareWrite(g, []map[string]any{values})
+	prepared, rows, err := prepareWrite(b, g, []map[string]any{values})
 	if err != nil {
 		return 0, err
 	}
-	return prepared.runInsertGetID(ctx, rows[0], sequence)
+	return runInsertGetID(prepared, ctx, rows[0], sequence)
 }
 
 // prepareWrite is prepare() for a statement that carries values: the Grant is
 // checked, the scopes are applied, and the tenant is written into every row.
-func (b *Builder[T]) prepareWrite(g auth.Grant, values []map[string]any) (*Builder[T], []map[string]any, error) {
-	prepared, err := b.prepare(g)
+func prepareWrite[T any](b *Builder[T], g auth.Grant, values []map[string]any) (*Builder[T], []map[string]any, error) {
+	prepared, err := prepare(b, g)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1266,7 +1266,7 @@ func (b *Builder[T]) prepareWrite(g auth.Grant, values []map[string]any) (*Build
 // written: the row stays with the tenant whose Grant reached it. It holds for
 // Save, Increment and every other write that ends here.
 func (b *Builder[T]) Update(ctx context.Context, g auth.Grant, values map[string]any) (int64, error) {
-	prepared, err := b.prepare(g)
+	prepared, err := prepare(b, g)
 	if err != nil {
 		return 0, err
 	}
@@ -1276,7 +1276,7 @@ func (b *Builder[T]) Update(ctx context.Context, g auth.Grant, values map[string
 			values[column] = auth.Tenant(g)
 		}
 	}
-	return prepared.runUpdate(ctx, prepared.addUpdatedAtColumn(values))
+	return runUpdate(prepared, ctx, addUpdatedAtColumn(prepared, values))
 }
 
 // addUpdatedAtColumn adds the updated-at timestamp to values when the model
@@ -1286,7 +1286,7 @@ func (b *Builder[T]) Update(ctx context.Context, g auth.Grant, values map[string
 // names the table it means. The grammars that cannot take a qualified name
 // on the left of a SET -- Postgres and SQLite -- strip it again before
 // compiling.
-func (b *Builder[T]) addUpdatedAtColumn(values map[string]any) map[string]any {
+func addUpdatedAtColumn[T any](b *Builder[T], values map[string]any) map[string]any {
 	column := b.model.GetUpdatedAtColumn()
 	if !b.model.UsesTimestamps() || column == "" {
 		return values
@@ -1326,7 +1326,7 @@ func (b *Builder[T]) Upsert(ctx context.Context, g auth.Grant, values []map[stri
 	if len(uniqueBy) == 0 {
 		return 0, fmt.Errorf("model: the unique columns must not be empty")
 	}
-	prepared, rows, err := b.prepareWrite(g, values)
+	prepared, rows, err := prepareWrite(b, g, values)
 	if err != nil {
 		return 0, err
 	}
@@ -1344,19 +1344,19 @@ func (b *Builder[T]) Upsert(ctx context.Context, g auth.Grant, values []map[stri
 			update = append(update, column)
 		}
 	}
-	return prepared.runUpsert(ctx, rows, uniqueBy, update)
+	return runUpsert(prepared, ctx, rows, uniqueBy, update)
 }
 
 // Increment adds amount to column, plus any extra columns to set, and
 // returns the number of rows affected.
 func (b *Builder[T]) Increment(ctx context.Context, g auth.Grant, column string, amount any, extra map[string]any) (int64, error) {
-	return b.incrementOrDecrement(ctx, g, column, amount, extra, "+")
+	return incrementOrDecrement(b, ctx, g, column, amount, extra, "+")
 }
 
 // Decrement subtracts amount from column, plus any extra columns to set, and
 // returns the number of rows affected.
 func (b *Builder[T]) Decrement(ctx context.Context, g auth.Grant, column string, amount any, extra map[string]any) (int64, error) {
-	return b.incrementOrDecrement(ctx, g, column, amount, extra, "-")
+	return incrementOrDecrement(b, ctx, g, column, amount, extra, "-")
 }
 
 // incrementOrDecrement is the shared body of Increment and Decrement.
@@ -1365,7 +1365,7 @@ func (b *Builder[T]) Decrement(ctx context.Context, g auth.Grant, column string,
 // the right of an assignment to the column itself. That is why a
 // non-numeric amount is refused: one that came from a request would
 // otherwise be SQL.
-func (b *Builder[T]) incrementOrDecrement(ctx context.Context, g auth.Grant, column string, amount any, extra map[string]any, sign string) (int64, error) {
+func incrementOrDecrement[T any](b *Builder[T], ctx context.Context, g auth.Grant, column string, amount any, extra map[string]any, sign string) (int64, error) {
 	if amount == nil {
 		amount = 1
 	}
@@ -1388,11 +1388,11 @@ func (b *Builder[T]) Delete(ctx context.Context, g auth.Grant) (int64, error) {
 	if b.onDelete != nil {
 		return b.onDelete(ctx, b, g)
 	}
-	prepared, err := b.prepare(g)
+	prepared, err := prepare(b, g)
 	if err != nil {
 		return 0, err
 	}
-	return prepared.runDelete(ctx)
+	return runDelete(prepared, ctx)
 }
 
 // ForceDelete removes the row, whatever the scope would have done.
@@ -1414,11 +1414,11 @@ func (b *Builder[T]) ForceDelete(ctx context.Context, g auth.Grant) (int64, erro
 	if tenant == "" || !auth.ValidTenant(tenant) {
 		return 0, ErrNoTenant
 	}
-	forced := b.clone()
-	if err := forced.scopeToTenant(g, tenant); err != nil {
+	forced := clone(b)
+	if err := scopeToTenant(forced, g, tenant); err != nil {
 		return 0, err
 	}
-	return forced.runDelete(ctx)
+	return runDelete(forced, ctx)
 }
 
 // OnDelete registers callback as the override Delete runs instead of a
@@ -1542,11 +1542,11 @@ func (b *Builder[T]) TouchQuietly(ctx context.Context, g auth.Grant, column ...s
 // are ErrRowHasNoModel: attaching a relation to nothing and reporting success
 // would be a load the next line cannot read back.
 func (b *Builder[T]) EagerLoadRelations(ctx context.Context, g auth.Grant, rows Collection[T]) error {
-	found, err := rows.modelsOrFail()
+	found, err := rowModelsOrFail(rows)
 	if err != nil {
 		return err
 	}
-	return b.eagerLoadRelations(ctx, g, found)
+	return eagerLoadRelations(b, ctx, g, found)
 }
 
 // eagerLoadRelations is EagerLoadRelations over the models, which is what it
@@ -1562,7 +1562,7 @@ func (b *Builder[T]) EagerLoadRelations(ctx context.Context, g auth.Grant, rows 
 // The models are handed over as refs, which is the same pointer seen through the
 // interface a relation consumes: what the relation sets is set on the model the
 // caller holds.
-func (b *Builder[T]) eagerLoadRelations(ctx context.Context, g auth.Grant, models models) error {
+func eagerLoadRelations[T any](b *Builder[T], ctx context.Context, g auth.Grant, models models) error {
 	if len(models) == 0 {
 		return nil
 	}
@@ -1698,7 +1698,7 @@ func (b *Builder[T]) Chunk(ctx context.Context, g auth.Grant, count int, callbac
 			return nil
 		}
 
-		results, err := b.clone().Offset((page-1)*count+skip).Limit(size).Get(ctx, g)
+		results, err := clone(b).Offset((page-1)*count+skip).Limit(size).Get(ctx, g)
 		if err != nil {
 			return err
 		}
@@ -1746,7 +1746,7 @@ func (b *Builder[T]) ChunkById(ctx context.Context, g auth.Grant, count int, cal
 
 	var lastID any
 	for page := 1; ; page++ {
-		q := b.clone()
+		q := clone(b)
 		if lastID != nil {
 			q.Where(b.model.QualifyColumn(name), ">", lastID)
 		}
@@ -1757,7 +1757,7 @@ func (b *Builder[T]) ChunkById(ctx context.Context, g auth.Grant, count int, cal
 		if len(found) == 0 {
 			return nil
 		}
-		keepGoing, err := callback(q.results(found), page)
+		keepGoing, err := callback(results(q, found), page)
 		if err != nil {
 			return err
 		}

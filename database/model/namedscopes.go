@@ -28,7 +28,7 @@ func (m *Model[T]) HasNamedScope(scope string) bool {
 func (m *Model[T]) CallNamedScope(scope string, b *Builder[T], parameters ...any) *Builder[T] {
 	apply, ok := m.NamedScopes[scope]
 	if !ok {
-		return b.fail(fmt.Errorf("%w: %s on %s", ErrNamedScopeNotFound, scope, m.GetTable()))
+		return fail(b, fmt.Errorf("%w: %s on %s", ErrNamedScopeNotFound, scope, m.GetTable()))
 	}
 	return apply(b, parameters...)
 }

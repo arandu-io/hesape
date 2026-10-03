@@ -173,7 +173,7 @@ func HandleMissingAttributeViolationUsing(callback func(model any, key string)) 
 // Unlike handleMissingAttributeViolation, it has no exempt case for a model
 // that does not exist yet or was just created: there is no fallback
 // behavior here left to exempt anything from, only the callback.
-func (m *Model[T]) handleLazyLoadingViolation(key string) {
+func handleLazyLoadingViolation[T any](m *Model[T], key string) {
 	if !PreventsLazyLoading() {
 		return
 	}
@@ -189,7 +189,7 @@ func (m *Model[T]) handleLazyLoadingViolation(key string) {
 // handleMissingAttributeViolation reports a missing-attribute violation to
 // the registered callback, when PreventAccessingMissingAttributes is on and
 // the model exists.
-func (m *Model[T]) handleMissingAttributeViolation(key string) {
+func handleMissingAttributeViolation[T any](m *Model[T], key string) {
 	if !PreventsAccessingMissingAttributes() || !m.Exists {
 		return
 	}
@@ -204,7 +204,7 @@ func (m *Model[T]) handleMissingAttributeViolation(key string) {
 
 // handleDiscardedAttributeViolation returns the error Fill reports for the
 // discarded keys, or nil when a callback took the violation instead.
-func (m *Model[T]) handleDiscardedAttributeViolation(keys []string) error {
+func handleDiscardedAttributeViolation[T any](m *Model[T], keys []string) error {
 	if len(keys) == 0 || !PreventsSilentlyDiscardingAttributes() {
 		return nil
 	}

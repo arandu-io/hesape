@@ -16,7 +16,7 @@ import (
 // withCount alias, a column a migration added and the struct has not caught
 // up with).
 func (m *Model[T]) GetAttributes() map[string]any {
-	entity, ok := m.entityValue()
+	entity, ok := entityValue(m)
 	if !ok {
 		// A literal has no entity to read columns off. The raw attributes are
 		// still whatever was put there, and an empty map is the honest answer
@@ -41,9 +41,9 @@ func (m *Model[T]) GetAttributes() map[string]any {
 // attribute rather than dropped, because a select the caller wrote has a reason
 // for every column in it.
 func (m *Model[T]) SetRawAttributes(attributes map[string]any, sync bool) error {
-	m.resetEntity()
+	resetEntity(m)
 	m.attributes = nil
-	if err := m.setAttributes(attributes, true); err != nil {
+	if err := setAttributes(m, attributes, true); err != nil {
 		return err
 	}
 	if sync {
@@ -55,7 +55,7 @@ func (m *Model[T]) SetRawAttributes(attributes map[string]any, sync bool) error 
 // setAttributes writes a map onto the entity. keepUnknown decides what happens
 // to a key with no field behind it: Fill drops it, ForceFill and
 // SetRawAttributes keep it.
-func (m *Model[T]) setAttributes(attributes map[string]any, keepUnknown bool) error {
+func setAttributes[T any](m *Model[T], attributes map[string]any, keepUnknown bool) error {
 	if len(attributes) == 0 {
 		return nil
 	}
@@ -64,7 +64,7 @@ func (m *Model[T]) setAttributes(attributes map[string]any, keepUnknown bool) er
 	// the walk is over the schema rather than over a sorted copy of the map's
 	// keys. Sorting existed to make the first conversion error deterministic; so
 	// does declaration order, and it costs no allocation and no sort per row.
-	entity, ok := m.entityValue()
+	entity, ok := entityValue(m)
 	if !ok {
 		return ErrUnwired
 	}
@@ -79,7 +79,7 @@ func (m *Model[T]) setAttributes(attributes map[string]any, keepUnknown bool) er
 			continue
 		}
 		written++
-		if !keepUnknown && m.guarded(f.column) {
+		if !keepUnknown && guarded(m, f.column) {
 			continue
 		}
 		dst, settable := settableAt(entity, f)
@@ -111,14 +111,14 @@ func (m *Model[T]) setAttributes(attributes map[string]any, keepUnknown bool) er
 		}
 		discarded = append(discarded, key)
 	}
-	return m.handleDiscardedAttributeViolation(discarded)
+	return handleDiscardedAttributeViolation(m, discarded)
 }
 
 // SetAttribute converts value to the field's type and assigns it, or reports
 // the conversion error. A column the entity does not declare is kept as a raw
 // attribute instead.
 func (m *Model[T]) SetAttribute(key string, value any) error {
-	known, err := m.setAttribute(key, value)
+	known, err := setAttribute(m, key, value)
 	if err != nil {
 		return err
 	}
@@ -131,8 +131,8 @@ func (m *Model[T]) SetAttribute(key string, value any) error {
 	return nil
 }
 
-func (m *Model[T]) setAttribute(key string, value any) (bool, error) {
-	entity, ok := m.entityValue()
+func setAttribute[T any](m *Model[T], key string, value any) (bool, error) {
+	entity, ok := entityValue(m)
 	if !ok {
 		return false, ErrUnwired
 	}
@@ -158,7 +158,7 @@ func (m *Model[T]) setAttribute(key string, value any) (bool, error) {
 // it would need to elsewhere: a typo like found.Entity.Naem fails to
 // compile, so it never reaches this check at all.
 func (m *Model[T]) GetAttribute(key string) any {
-	entity, live := m.entityValue()
+	entity, live := entityValue(m)
 	if !live {
 		return m.attributes[key]
 	}
@@ -171,7 +171,7 @@ func (m *Model[T]) GetAttribute(key string) any {
 	if related, ok := m.relations[key]; ok {
 		return related
 	}
-	m.handleMissingAttributeViolation(key)
+	handleMissingAttributeViolation(m, key)
 	return nil
 }
 
@@ -181,13 +181,13 @@ func (m *Model[T]) AttributesToArray() map[string]any {
 	attributes := m.GetAttributes()
 	out := make(map[string]any, len(attributes))
 	for key, value := range attributes {
-		if !m.isVisible(key) {
+		if !isVisible(m, key) {
 			continue
 		}
 		out[key] = value
 	}
 	for _, key := range m.appends {
-		if !m.isVisible(key) {
+		if !isVisible(m, key) {
 			continue
 		}
 		out[key] = m.GetAttribute(key)
@@ -197,7 +197,7 @@ func (m *Model[T]) AttributesToArray() map[string]any {
 
 // isVisible reports whether key should be serialised: the visible list wins
 // when it is set, otherwise the hidden list removes.
-func (m *Model[T]) isVisible(key string) bool {
+func isVisible[T any](m *Model[T], key string) bool {
 	if len(m.visible) > 0 {
 		return slices.Contains(m.visible, key)
 	}
@@ -208,7 +208,7 @@ func (m *Model[T]) isVisible(key string) bool {
 func (m *Model[T]) ToArray() map[string]any {
 	out := m.AttributesToArray()
 	for name, related := range m.relations {
-		if !m.isVisible(name) {
+		if !isVisible(m, name) {
 			continue
 		}
 		out[name] = related
@@ -489,11 +489,11 @@ func sortedKeys(in map[string]any) []string {
 // A T that does not embed Model[T] is the simple case, and takes the simple
 // path: nothing of the model lives in the entity, so zeroing it is just zeroing
 // it.
-func (m *Model[T]) resetEntity() {
+func resetEntity[T any](m *Model[T]) {
 	if m.Entity == nil {
 		return
 	}
-	index := m.entityIndex()
+	index := entityIndex(m)
 	if index < 0 {
 		*m.Entity = *new(T)
 		return
@@ -515,7 +515,7 @@ func (m *Model[T]) resetEntity() {
 // the database does not generate that map is where a new row's key comes
 // from. ForceFill and SetRawAttributes guard nothing: they are the explicit
 // paths, and the second is what a row read from the database is built with.
-func (m *Model[T]) guarded(column string) bool {
+func guarded[T any](m *Model[T], column string) bool {
 	if column == m.TenantColumn && column != "" {
 		return true
 	}

@@ -22,13 +22,13 @@ func (b *Builder[T]) FillForInsert(values []map[string]any) ([]map[string]any, e
 		if err != nil {
 			return nil, err
 		}
-		if err := instance.setUniqueID(); err != nil {
+		if err := setUniqueID(instance); err != nil {
 			return nil, err
 		}
 		if instance.UsesTimestamps() {
 			instance.UpdateTimestamps()
 		}
-		out = append(out, instance.getAttributesForInsert())
+		out = append(out, getAttributesForInsert(instance))
 	}
 	return out, nil
 }
@@ -65,7 +65,7 @@ func (b *Builder[T]) FillAndInsertGetID(ctx context.Context, g auth.Grant, value
 // InsertOrIgnore writes values as new rows, dropping the ones that violate a
 // unique index rather than failing the statement.
 func (b *Builder[T]) InsertOrIgnore(ctx context.Context, g auth.Grant, values ...map[string]any) (bool, error) {
-	prepared, rows, err := b.prepareWrite(g, values)
+	prepared, rows, err := prepareWrite(b, g, values)
 	if err != nil {
 		return false, err
 	}
@@ -73,7 +73,7 @@ func (b *Builder[T]) InsertOrIgnore(ctx context.Context, g auth.Grant, values ..
 		return true, nil
 	}
 
-	if err := prepared.validateWriteQuery(); err != nil {
+	if err := validateWriteQuery(prepared); err != nil {
 		return false, err
 	}
 	sql := b.model.Grammar.CompileInsertOrIgnore(prepared.query, rows)
@@ -100,20 +100,20 @@ func (b *Builder[T]) IncrementOrCreate(ctx context.Context, g auth.Grant, attrib
 		step = 1
 	}
 
-	instance, err := b.firstOrCreate(ctx, g, attributes, map[string]any{column: def})
+	instance, err := firstOrCreate(b, ctx, g, attributes, map[string]any{column: def})
 	if err != nil {
 		return nil, err
 	}
 	if instance.WasRecentlyCreated {
-		return b.result(instance), nil
+		return result(b, instance), nil
 	}
 
 	q := instance.NewModelQuery()
-	instance.setKeysForSaveQuery(q)
+	setKeysForSaveQuery(instance, q)
 	if _, err := q.Increment(ctx, g, column, step, nil); err != nil {
 		return nil, err
 	}
-	return b.result(instance), instance.Refresh(ctx, g)
+	return result(b, instance), instance.Refresh(ctx, g)
 }
 
 // UseWritePDO points this builder's statement at the write connection, even

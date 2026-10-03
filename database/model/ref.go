@@ -146,7 +146,7 @@ func (b *Builder[T]) Ref() concerns.Builder { return &builderRef{b: b} }
 func (b *Builder[T]) modelRow() row { return b.model }
 
 // cloneRows is the hook behind rowsBuilder.cloneRows.
-func (b *Builder[T]) cloneRows() rowsBuilder { return b.clone() }
+func (b *Builder[T]) cloneRows() rowsBuilder { return clone(b) }
 
 // whereRow is the hook behind rowsBuilder.whereRow.
 func (b *Builder[T]) whereRow(column any, args ...any) { b.Where(column, args...) }

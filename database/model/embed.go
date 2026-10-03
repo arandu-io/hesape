@@ -93,7 +93,7 @@ func modelIn[T any](entity *T, index int) *Model[T] {
 // Hydration builds one instance per row and resets it once, and each of those
 // asked embeddedIndex, which is two map lookups on the path a thousand-row query
 // takes a thousand times. The answer depends only on T, so the model carries it.
-func (m *Model[T]) entityIndex() int {
+func entityIndex[T any](m *Model[T]) int {
 	if m.embedded == 0 {
 		// Stored one past the index so the zero value means "not resolved yet",
 		// which is what a Model[T] built as a literal has.
@@ -152,7 +152,7 @@ var ErrUnwired = errors.New("model: this value was not built by the framework, s
 // the zero Value, and the next call on it panics with "reflect: call of
 // reflect.Value.Type on zero Value" -- which is what a literal used to get
 // instead of ErrUnwired.
-func (m *Model[T]) entityValue() (reflect.Value, bool) {
+func entityValue[T any](m *Model[T]) (reflect.Value, bool) {
 	if m == nil || m.Entity == nil {
 		return reflect.Value{}, false
 	}
@@ -163,7 +163,7 @@ func (m *Model[T]) entityValue() (reflect.Value, bool) {
 //
 // Both halves are checked because they fail apart: an entity built by Fill has a
 // connection and no back pointer, and a literal has neither.
-func (m *Model[T]) wired() error {
+func wired[T any](m *Model[T]) error {
 	if m == nil || m.Entity == nil || m.connection == nil {
 		return ErrUnwired
 	}

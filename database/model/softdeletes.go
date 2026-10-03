@@ -38,7 +38,7 @@ func (s *SoftDeletingScope[T]) Apply(builder *Builder[T], model *Model[T]) {
 // points the builder's delete at an update.
 func (s *SoftDeletingScope[T]) Extend(builder *Builder[T]) {
 	builder.OnDelete(func(ctx context.Context, b *Builder[T], g auth.Grant) (int64, error) {
-		column := s.deletedAtColumn(b)
+		column := deletedAtColumn(b)
 		return b.Update(ctx, g, map[string]any{column: b.GetModel().FreshTimestamp()})
 	})
 }
@@ -47,7 +47,7 @@ func (s *SoftDeletingScope[T]) Extend(builder *Builder[T]) {
 // qualified when the query joins, bare otherwise, because a bare name is
 // ambiguous across a join and a qualified one is refused on the left of a SET
 // by some engines.
-func (s *SoftDeletingScope[T]) deletedAtColumn(b *Builder[T]) string {
+func deletedAtColumn[T any](b *Builder[T]) string {
 	if len(b.query.Joins) > 0 {
 		return b.GetModel().GetQualifiedDeletedAtColumn()
 	}
@@ -81,13 +81,13 @@ func (m *Model[T]) IsForceDeleting() bool { return m.forceDeleting }
 // performDeleteOnModel deletes the model's row, or marks it deleted: a model
 // that soft deletes and is not force deleting marks the row instead of
 // removing it.
-func (m *Model[T]) performDeleteOnModel(ctx context.Context, g auth.Grant) error {
+func performDeleteOnModel[T any](m *Model[T], ctx context.Context, g auth.Grant) error {
 	if m.SoftDeletes && !m.forceDeleting {
-		return m.runSoftDelete(ctx, g)
+		return runSoftDelete(m, ctx, g)
 	}
 
 	q := m.NewModelQuery()
-	m.setKeysForSaveQuery(q)
+	setKeysForSaveQuery(m, q)
 	if _, err := q.ForceDelete(ctx, g); err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func (m *Model[T]) performDeleteOnModel(ctx context.Context, g auth.Grant) error
 
 // runSoftDelete sets the deleted_at column to the current time instead of
 // removing the row, and fires the Trashed event.
-func (m *Model[T]) runSoftDelete(ctx context.Context, g auth.Grant) error {
+func runSoftDelete[T any](m *Model[T], ctx context.Context, g auth.Grant) error {
 	now := m.FreshTimestamp()
 	column := m.GetDeletedAtColumn()
 
@@ -114,13 +114,13 @@ func (m *Model[T]) runSoftDelete(ctx context.Context, g auth.Grant) error {
 	}
 
 	q := m.NewModelQuery()
-	m.setKeysForSaveQuery(q)
+	setKeysForSaveQuery(m, q)
 	if _, err := q.Update(ctx, g, columns); err != nil {
 		return err
 	}
 
 	m.SyncOriginalAttributes(sortedKeys(columns)...)
-	return m.fireModelEvent(Trashed)
+	return fireModelEvent(m, Trashed)
 }
 
 // ForceDelete removes the row even if the model soft deletes. On a model
@@ -129,7 +129,7 @@ func (m *Model[T]) ForceDelete(ctx context.Context, g auth.Grant) (bool, error) 
 	if !m.SoftDeletes {
 		return m.Delete(ctx, g)
 	}
-	if err := m.fireModelEvent(ForceDeleting); err != nil {
+	if err := fireModelEvent(m, ForceDeleting); err != nil {
 		return false, err
 	}
 
@@ -140,7 +140,7 @@ func (m *Model[T]) ForceDelete(ctx context.Context, g auth.Grant) (bool, error) 
 		return false, err
 	}
 	if deleted {
-		if err := m.fireModelEvent(ForceDeleted); err != nil {
+		if err := fireModelEvent(m, ForceDeleted); err != nil {
 			return false, err
 		}
 	}
@@ -187,14 +187,14 @@ func (m *Model[T]) Restore(ctx context.Context, g auth.Grant) (bool, error) {
 	// and no back pointer to the entity it is inside. It is the literal case,
 	// and it says so rather than reporting a write that never happened -- see
 	// ErrUnwired.
-	if err := m.wired(); err != nil {
+	if err := wired(m); err != nil {
 		return false, err
 	}
 
 	if !m.SoftDeletes {
 		return false, fmt.Errorf("model: %s does not soft delete, so there is nothing to restore", m.GetTable())
 	}
-	if err := m.fireModelEvent(Restoring); err != nil {
+	if err := fireModelEvent(m, Restoring); err != nil {
 		return false, err
 	}
 	if err := m.SetAttribute(m.GetDeletedAtColumn(), nil); err != nil {
@@ -206,7 +206,7 @@ func (m *Model[T]) Restore(ctx context.Context, g auth.Grant) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if err := m.fireModelEvent(Restored); err != nil {
+	if err := fireModelEvent(m, Restored); err != nil {
 		return false, err
 	}
 	return restored, nil
@@ -228,8 +228,8 @@ func (b *Builder[T]) WithTrashed(withTrashed ...bool) *Builder[T] {
 	if len(withTrashed) > 0 && !withTrashed[0] {
 		return b.WithoutTrashed()
 	}
-	if err := b.requireSoftDeletes("withTrashed"); err != nil {
-		return b.fail(err)
+	if err := requireSoftDeletes(b, "withTrashed"); err != nil {
+		return fail(b, err)
 	}
 	return b.WithoutGlobalScope(SoftDeletingScopeName)
 }
@@ -238,8 +238,8 @@ func (b *Builder[T]) WithTrashed(withTrashed ...bool) *Builder[T] {
 // explicit not-deleted filter, so trashed rows stay excluded even after the
 // scope is gone.
 func (b *Builder[T]) WithoutTrashed() *Builder[T] {
-	if err := b.requireSoftDeletes("withoutTrashed"); err != nil {
-		return b.fail(err)
+	if err := requireSoftDeletes(b, "withoutTrashed"); err != nil {
+		return fail(b, err)
 	}
 	b.WithoutGlobalScope(SoftDeletingScopeName)
 	b.query.WhereNull(b.model.GetQualifiedDeletedAtColumn())
@@ -248,8 +248,8 @@ func (b *Builder[T]) WithoutTrashed() *Builder[T] {
 
 // OnlyTrashed restricts the query to soft-deleted rows only.
 func (b *Builder[T]) OnlyTrashed() *Builder[T] {
-	if err := b.requireSoftDeletes("onlyTrashed"); err != nil {
-		return b.fail(err)
+	if err := requireSoftDeletes(b, "onlyTrashed"); err != nil {
+		return fail(b, err)
 	}
 	b.WithoutGlobalScope(SoftDeletingScopeName)
 	b.query.WhereNotNull(b.model.GetQualifiedDeletedAtColumn())
@@ -258,7 +258,7 @@ func (b *Builder[T]) OnlyTrashed() *Builder[T] {
 
 // Restore un-deletes every row the query matches, in one statement.
 func (b *Builder[T]) Restore(ctx context.Context, g auth.Grant) (int64, error) {
-	if err := b.requireSoftDeletes("restore"); err != nil {
+	if err := requireSoftDeletes(b, "restore"); err != nil {
 		return 0, err
 	}
 	return b.WithTrashed().Update(ctx, g, map[string]any{b.model.GetDeletedAtColumn(): nil})
@@ -267,37 +267,37 @@ func (b *Builder[T]) Restore(ctx context.Context, g auth.Grant) (int64, error) {
 // RestoreOrCreate finds the first trashed-or-not row matching attributes and
 // restores it, or creates one from attributes and values if none matches.
 func (b *Builder[T]) RestoreOrCreate(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*T, error) {
-	if err := b.requireSoftDeletes("restoreOrCreate"); err != nil {
+	if err := requireSoftDeletes(b, "restoreOrCreate"); err != nil {
 		return nil, err
 	}
-	model, err := b.WithTrashed().firstOrCreate(ctx, g, attributes, values)
+	model, err := firstOrCreate(b.WithTrashed(), ctx, g, attributes, values)
 	if err != nil {
 		return nil, err
 	}
 	if _, err := model.Restore(ctx, g); err != nil {
 		return nil, err
 	}
-	return b.result(model), nil
+	return result(b, model), nil
 }
 
 // CreateOrRestore finds the first row matching attributes, including
 // trashed, and restores it if trashed; otherwise it creates one from
 // attributes and values.
 func (b *Builder[T]) CreateOrRestore(ctx context.Context, g auth.Grant, attributes, values map[string]any) (*T, error) {
-	if err := b.requireSoftDeletes("createOrRestore"); err != nil {
+	if err := requireSoftDeletes(b, "createOrRestore"); err != nil {
 		return nil, err
 	}
-	model, err := b.WithTrashed().createOrFirst(ctx, g, attributes, values)
+	model, err := createOrFirst(b.WithTrashed(), ctx, g, attributes, values)
 	if err != nil {
 		return nil, err
 	}
 	if _, err := model.Restore(ctx, g); err != nil {
 		return nil, err
 	}
-	return b.result(model), nil
+	return result(b, model), nil
 }
 
-func (b *Builder[T]) requireSoftDeletes(method string) error {
+func requireSoftDeletes[T any](b *Builder[T], method string) error {
 	if b.model.SoftDeletes {
 		return nil
 	}

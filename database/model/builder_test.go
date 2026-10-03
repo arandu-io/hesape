@@ -251,7 +251,7 @@ func TestFirstOrCreateInsertsWhenThereIsNothing(t *testing.T) {
 
 	// The model-side read, because this asserts on the model rather than on the
 	// row: a T that does not embed Model[T] has no way back from one to the other.
-	created, err := model.NewQuery().firstOrCreate(context.Background(), grant(), map[string]any{"name": "Ada"}, map[string]any{"email": "ada@example.com"})
+	created, err := firstOrCreate(model.NewQuery(), context.Background(), grant(), map[string]any{"name": "Ada"}, map[string]any{"email": "ada@example.com"})
 	if err != nil {
 		t.Fatalf("FirstOrCreate: %v", err)
 	}
