@@ -584,11 +584,18 @@ func (b *Builder[T]) OrWhereNot(column any, args ...any) *Builder[T] {
 // WhereKey filters by the model's primary key. A slice of ids adds a WHERE
 // IN instead of an equality.
 func (b *Builder[T]) WhereKey(id any) *Builder[T] {
+	whereKey(b, id)
+	return b
+}
+
+// whereKey is WhereKey over rowsBuilder, which is what the relation seam holds.
+func whereKey(b rowsBuilder, id any) {
+	key := b.modelRow().GetQualifiedKeyName()
 	if ids, ok := id.([]any); ok {
-		b.query.WhereIn(b.model.GetQualifiedKeyName(), ids)
-		return b
+		b.GetQuery().WhereIn(key, ids)
+		return
 	}
-	return b.Where(b.model.GetQualifiedKeyName(), "=", id)
+	b.GetQuery().Where(key, "=", id)
 }
 
 // WhereKeyNot excludes the model's primary key. A slice of ids adds a WHERE
@@ -797,14 +804,30 @@ func (b *Builder[T]) First(ctx context.Context, g auth.Grant, columns ...any) (*
 // first is First with the model still in hand, and without the after-query
 // callbacks. See get.
 func (b *Builder[T]) first(ctx context.Context, g auth.Grant, columns ...any) (*Model[T], error) {
-	found, err := b.Limit(1).get(ctx, g, columns...)
+	found, err := firstRow(b, ctx, g, columns...)
+	return asModel[T](found), err
+}
+
+// firstRow is first over rowsBuilder: the query with a limit of one, and the
+// model it found or nil.
+func firstRow(b rowsBuilder, ctx context.Context, g auth.Grant, columns ...any) (row, error) {
+	b.GetQuery().Limit(1)
+	found, err := b.get(ctx, g, columns...)
 	if err != nil {
 		return nil, err
 	}
 	if len(found) == 0 {
 		return nil, nil
 	}
-	return found[0].(*Model[T]), nil
+	return found[0], nil
+}
+
+// asModel is the typed model a row holds, and nil for no row.
+func asModel[T any](found row) *Model[T] {
+	if found == nil {
+		return nil
+	}
+	return found.(*Model[T])
 }
 
 // FirstOrFail returns the first row matching the query, or an error when
@@ -888,14 +911,21 @@ func (b *Builder[T]) Find(ctx context.Context, g auth.Grant, id any, columns ...
 // find is Find with the model still in hand, and without the after-query
 // callbacks. See get.
 func (b *Builder[T]) find(ctx context.Context, g auth.Grant, id any, columns ...any) (*Model[T], error) {
+	found, err := findRow(b, ctx, g, id, columns...)
+	return asModel[T](found), err
+}
+
+// findRow is find over rowsBuilder.
+func findRow(b rowsBuilder, ctx context.Context, g auth.Grant, id any, columns ...any) (row, error) {
 	if ids, ok := id.([]any); ok {
-		found, err := b.findMany(ctx, g, ids, columns...)
+		found, err := findManyRows(b, ctx, g, ids, columns...)
 		if err != nil || len(found) == 0 {
 			return nil, err
 		}
-		return found[0].(*Model[T]), nil
+		return found[0], nil
 	}
-	return b.WhereKey(id).first(ctx, g, columns...)
+	whereKey(b, id)
+	return firstRow(b, ctx, g, columns...)
 }
 
 // FindMany returns the rows matching any of ids.
@@ -910,10 +940,16 @@ func (b *Builder[T]) FindMany(ctx context.Context, g auth.Grant, ids []any, colu
 // findMany is FindMany with the models still in hand, and without the
 // after-query callbacks. See get.
 func (b *Builder[T]) findMany(ctx context.Context, g auth.Grant, ids []any, columns ...any) (models, error) {
+	return findManyRows(b, ctx, g, ids, columns...)
+}
+
+// findManyRows is findMany over rowsBuilder.
+func findManyRows(b rowsBuilder, ctx context.Context, g auth.Grant, ids []any, columns ...any) (models, error) {
 	if len(ids) == 0 {
 		return models{}, nil
 	}
-	return b.WhereKey(ids).get(ctx, g, columns...)
+	whereKey(b, ids)
+	return b.get(ctx, g, columns...)
 }
 
 // FindOrFail returns the row with the given primary key, or an error when
@@ -1621,12 +1657,12 @@ func (b *Builder[T]) SelectRaw(expression string, bindings ...any) *Builder[T] {
 	return b
 }
 
-// enforceOrderBy adds an ascending order by the model's key when the query
-// has none: chunking without an order is chunking over a set the engine may
-// return in a different order each time.
-func (b *Builder[T]) enforceOrderBy() {
-	if len(b.query.Orders) == 0 && len(b.query.UnionOrders) == 0 {
-		b.OrderBy(b.model.GetQualifiedKeyName(), "asc")
+// enforceOrderBy adds an ascending order by the model's key, qualifiedKey,
+// when the query has none: chunking without an order is chunking over a set
+// the engine may return in a different order each time.
+func enforceOrderBy(q *query.Builder, qualifiedKey string) {
+	if len(q.Orders) == 0 && len(q.UnionOrders) == 0 {
+		q.OrderBy(qualifiedKey, "asc")
 	}
 }
 
@@ -1642,7 +1678,7 @@ func (b *Builder[T]) Chunk(ctx context.Context, g auth.Grant, count int, callbac
 	if count < 1 {
 		return fmt.Errorf("model: the chunk size should be at least 1")
 	}
-	b.enforceOrderBy()
+	enforceOrderBy(b.query, b.model.GetQualifiedKeyName())
 
 	skip := 0
 	if offset := b.GetOffset(); offset != nil {
@@ -1799,25 +1835,6 @@ func (b *Builder[T]) Cursor(ctx context.Context, g auth.Grant, err *error) func(
 		}
 		for _, row := range rows {
 			if !yield(row) {
-				return
-			}
-		}
-	}
-}
-
-// cursor is Cursor with the models still in hand, and without the after-query
-// callbacks. See get.
-func (b *Builder[T]) cursor(ctx context.Context, g auth.Grant, err *error) func(func(*Model[T]) bool) {
-	return func(yield func(*Model[T]) bool) {
-		found, getErr := b.get(ctx, g)
-		if getErr != nil {
-			if err != nil {
-				*err = getErr
-			}
-			return
-		}
-		for _, model := range found {
-			if !yield(model.(*Model[T])) {
 				return
 			}
 		}

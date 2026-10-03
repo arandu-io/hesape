@@ -140,7 +140,7 @@ type Model[T any] struct {
 
 	// ref is this model seen through the interface a relation asks for, kept so
 	// that two calls to Ref answer the same value.
-	ref *modelRef[T]
+	ref *modelRef
 
 	// touches names the relations whose owner is stamped when this model is
 	// saved. It is empty by default: a save that silently stamped a parent
@@ -844,11 +844,18 @@ func (m *Model[T]) GetRelation(name string) (any, bool) {
 
 // SetRelation records value as the loaded relation named name.
 func (m *Model[T]) SetRelation(name string, value any) *Model[T] {
-	if m.relations == nil {
-		m.relations = map[string]any{}
-	}
-	m.relations[name] = value
+	setRelation(&m.relations, name, value)
 	return m
+}
+
+// setRelation records value under name in the relations map relations points
+// at, making the map first when there is none. The typed model and the ref a
+// relation holds both write through it.
+func setRelation(relations *map[string]any, name string, value any) {
+	if *relations == nil {
+		*relations = map[string]any{}
+	}
+	(*relations)[name] = value
 }
 
 // RelationLoaded reports whether name has a loaded value.

@@ -18,8 +18,8 @@ import (
 
 // The two lines the probe existed for. They still carry the whole shape.
 var (
-	_ concerns.Model   = (*modelRef[user])(nil)
-	_ concerns.Builder = (*builderRef[user])(nil)
+	_ concerns.Model   = (*modelRef)(nil)
+	_ concerns.Builder = (*builderRef)(nil)
 )
 
 // TestRefIsStable pins the caching, because something will eventually key a map

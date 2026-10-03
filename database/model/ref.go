@@ -42,8 +42,14 @@ import (
 // real *Model[T], so what a relation writes is on the model the caller holds.
 
 // modelRef is *Model[T] seen through the interface a relation asks for.
-type modelRef[T any] struct {
-	m *Model[T]
+//
+// It is one type for every T rather than one per T. A generic adapter had its
+// whole method set compiled again for each model type, in every package that
+// named the model, and the adapter does nothing that depends on T: every method
+// is a call through row, which *Model[T] satisfies with methods it already has,
+// plus the three hooks below that only the typed model can answer.
+type modelRef struct {
+	m row
 
 	// err holds what a method with nowhere to report it could not say.
 	//
@@ -54,12 +60,49 @@ type modelRef[T any] struct {
 	err error
 }
 
-// builderRef is *Builder[T] seen the same way.
-type builderRef[T any] struct{ b *Builder[T] }
+// builderRef is *Builder[T] seen the same way, and for the same reason one type
+// for every T.
+type builderRef struct{ b rowsBuilder }
+
+// rowsBuilder is the typed builder as builderRef and the paginators reach it:
+// methods *Builder[T] already has with these exact signatures, plus the hooks
+// only the typed builder can answer.
+type rowsBuilder interface {
+	GetQuery() *query.Builder
+	Insert(ctx context.Context, g auth.Grant, values ...map[string]any) (bool, error)
+	Update(ctx context.Context, g auth.Grant, values map[string]any) (int64, error)
+	Upsert(ctx context.Context, g auth.Grant, values []map[string]any, uniqueBy, update []string) (int64, error)
+	Delete(ctx context.Context, g auth.Grant) (int64, error)
+	GetCountForPagination(ctx context.Context, g auth.Grant) (int64, error)
+
+	// get runs the query and hands back the models. See Builder.get.
+	get(ctx context.Context, g auth.Grant, columns ...any) (models, error)
+
+	// modelRow is the model the builder queries.
+	modelRow() row
+
+	// cloneRows is Clone, as this interface.
+	cloneRows() rowsBuilder
+
+	// whereRow is Where, for a caller that cannot name the typed builder: it
+	// still recognises the typed nested closure Where takes.
+	whereRow(column any, args ...any)
+}
+
+// refState is what modelRef reads and writes on the typed model that has no
+// method with a signature the adapter can call: two fields, the table, and the
+// loaded relations. The typed model hands out pointers to its own, so what the
+// adapter writes is on the model the caller holds.
+type refState struct {
+	exists             *bool
+	wasRecentlyCreated *bool
+	table              *string
+	relations          *map[string]any
+}
 
 var (
-	_ concerns.Model   = (*modelRef[struct{}])(nil)
-	_ concerns.Builder = (*builderRef[struct{}])(nil)
+	_ concerns.Model   = (*modelRef)(nil)
+	_ concerns.Builder = (*builderRef)(nil)
 )
 
 // Ref returns m as the model a relation takes.
@@ -69,13 +112,44 @@ var (
 // be a trap waiting for the first thing that did.
 func (m *Model[T]) Ref() concerns.Model {
 	if m.ref == nil {
-		m.ref = &modelRef[T]{m: m}
+		m.ref = &modelRef{m: m}
 	}
 	return m.ref
 }
 
+// refState hands modelRef the fields it writes. See refState.
+func (m *Model[T]) refState() refState {
+	return refState{
+		exists:             &m.Exists,
+		wasRecentlyCreated: &m.WasRecentlyCreated,
+		table:              &m.Table,
+		relations:          &m.relations,
+	}
+}
+
+// newRow is NewInstance for a caller that cannot name *Model[T].
+func (m *Model[T]) newRow(attributes map[string]any) (row, error) {
+	instance, err := m.NewInstance(attributes, false)
+	if err != nil {
+		return nil, err
+	}
+	return instance, nil
+}
+
+// newQueryRef is NewQuery, as the builder a relation takes.
+func (m *Model[T]) newQueryRef() concerns.Builder { return m.NewQuery().Ref() }
+
 // Ref returns b as the builder a relation takes.
-func (b *Builder[T]) Ref() concerns.Builder { return &builderRef[T]{b: b} }
+func (b *Builder[T]) Ref() concerns.Builder { return &builderRef{b: b} }
+
+// modelRow is the hook behind rowsBuilder.modelRow.
+func (b *Builder[T]) modelRow() row { return b.model }
+
+// cloneRows is the hook behind rowsBuilder.cloneRows.
+func (b *Builder[T]) cloneRows() rowsBuilder { return b.clone() }
+
+// whereRow is the hook behind rowsBuilder.whereRow.
+func (b *Builder[T]) whereRow(column any, args ...any) { b.Where(column, args...) }
 
 // Unref is the way back: the typed model behind a ref, and whether the ref was
 // over this entity at all.
@@ -84,57 +158,69 @@ func (b *Builder[T]) Ref() concerns.Builder { return &builderRef[T]{b: b} }
 // question "is this relation's model a Post" is one a caller is entitled to ask
 // and get no for.
 func Unref[T any](m concerns.Model) (*Model[T], bool) {
-	ref, ok := m.(*modelRef[T])
+	ref, ok := m.(*modelRef)
 	if !ok {
 		return nil, false
 	}
-	return ref.m, true
+	typed, ok := ref.m.(*Model[T])
+	return typed, ok
+}
+
+// refsOf returns every model as the interface a relation takes.
+func refsOf(found models) []concerns.Model {
+	out := make([]concerns.Model, 0, len(found))
+	for _, m := range found {
+		out = append(out, m.Ref())
+	}
+	return out
 }
 
 // -- modelRef ---------------------------------------------------------------
 
-func (r *modelRef[T]) GetTable() string                    { return r.m.GetTable() }
-func (r *modelRef[T]) QualifyColumn(column string) string  { return r.m.QualifyColumn(column) }
-func (r *modelRef[T]) GetKeyName() string                  { return r.m.GetKeyName() }
-func (r *modelRef[T]) GetKeyType() string                  { return r.m.GetKeyType() }
-func (r *modelRef[T]) GetKey() any                         { return r.m.GetKey() }
-func (r *modelRef[T]) GetForeignKey() string               { return r.m.GetForeignKey() }
-func (r *modelRef[T]) GetMorphClass() string               { return r.m.GetMorphClass() }
-func (r *modelRef[T]) GetAttribute(key string) any         { return r.m.GetAttribute(key) }
-func (r *modelRef[T]) GetAttributes() map[string]any       { return r.m.GetAttributes() }
-func (r *modelRef[T]) RelationLoaded(relation string) bool { return r.m.RelationLoaded(relation) }
-func (r *modelRef[T]) GetCreatedAtColumn() string          { return r.m.GetCreatedAtColumn() }
-func (r *modelRef[T]) GetUpdatedAtColumn() string          { return r.m.GetUpdatedAtColumn() }
-func (r *modelRef[T]) UsesTimestamps() bool                { return r.m.UsesTimestamps() }
-func (r *modelRef[T]) UnsetAttribute(key string)           { r.m.UnsetAttribute(key) }
-func (r *modelRef[T]) IsRelation(key string) bool          { return r.m.IsRelation(key) }
-func (r *modelRef[T]) Touches(relation string) bool        { return r.m.Touches(relation) }
+func (r *modelRef) GetTable() string                    { return r.m.GetTable() }
+func (r *modelRef) QualifyColumn(column string) string  { return r.m.QualifyColumn(column) }
+func (r *modelRef) GetKeyName() string                  { return r.m.GetKeyName() }
+func (r *modelRef) GetKeyType() string                  { return r.m.GetKeyType() }
+func (r *modelRef) GetKey() any                         { return r.m.GetKey() }
+func (r *modelRef) GetForeignKey() string               { return r.m.GetForeignKey() }
+func (r *modelRef) GetMorphClass() string               { return r.m.GetMorphClass() }
+func (r *modelRef) GetAttribute(key string) any         { return r.m.GetAttribute(key) }
+func (r *modelRef) GetAttributes() map[string]any       { return r.m.GetAttributes() }
+func (r *modelRef) RelationLoaded(relation string) bool { return r.m.RelationLoaded(relation) }
+func (r *modelRef) GetCreatedAtColumn() string          { return r.m.GetCreatedAtColumn() }
+func (r *modelRef) GetUpdatedAtColumn() string          { return r.m.GetUpdatedAtColumn() }
+func (r *modelRef) UsesTimestamps() bool                { return r.m.UsesTimestamps() }
+func (r *modelRef) UnsetAttribute(key string)           { r.m.UnsetAttribute(key) }
+func (r *modelRef) IsRelation(key string) bool          { return r.m.IsRelation(key) }
+func (r *modelRef) Touches(relation string) bool        { return r.m.Touches(relation) }
 
-func (r *modelRef[T]) FreshTimestamp() time.Time { return r.m.FreshTimestamp() }
+func (r *modelRef) FreshTimestamp() time.Time { return r.m.FreshTimestamp() }
 
 // Exists and WasRecentlyCreated are fields on the model and methods here, and
 // that is the collision the adapter exists to absorb: a Go type cannot have
 // both under one name, and this is a different type.
-func (r *modelRef[T]) Exists() bool             { return r.m.Exists }
-func (r *modelRef[T]) WasRecentlyCreated() bool { return r.m.WasRecentlyCreated }
+func (r *modelRef) Exists() bool             { return *r.m.refState().exists }
+func (r *modelRef) WasRecentlyCreated() bool { return *r.m.refState().wasRecentlyCreated }
 
-func (r *modelRef[T]) GetRelation(relation string) (any, bool) { return r.m.GetRelation(relation) }
-func (r *modelRef[T]) SetRelation(relation string, value any)  { r.m.SetRelation(relation, value) }
-func (r *modelRef[T]) UnsetRelation(relation string)           { r.m.UnsetRelation(relation) }
-func (r *modelRef[T]) SetTable(table string)                   { r.m.SetTable(table) }
+func (r *modelRef) GetRelation(relation string) (any, bool) { return r.m.GetRelation(relation) }
+func (r *modelRef) SetRelation(relation string, value any) {
+	setRelation(r.m.refState().relations, relation, value)
+}
+func (r *modelRef) UnsetRelation(relation string) { delete(*r.m.refState().relations, relation) }
+func (r *modelRef) SetTable(table string)         { *r.m.refState().table = table }
 
-func (r *modelRef[T]) Fill(attributes map[string]any)      { r.hold(r.m.Fill(attributes)) }
-func (r *modelRef[T]) ForceFill(attributes map[string]any) { r.hold(r.m.ForceFill(attributes)) }
+func (r *modelRef) Fill(attributes map[string]any)      { r.hold(r.m.Fill(attributes)) }
+func (r *modelRef) ForceFill(attributes map[string]any) { r.hold(r.m.ForceFill(attributes)) }
 
-func (r *modelRef[T]) SetAttribute(key string, value any) {
+func (r *modelRef) SetAttribute(key string, value any) {
 	r.hold(r.m.SetAttribute(key, value))
 }
 
-func (r *modelRef[T]) SetRawAttributes(attributes map[string]any, sync bool) {
+func (r *modelRef) SetRawAttributes(attributes map[string]any, sync bool) {
 	r.hold(r.m.SetRawAttributes(attributes, sync))
 }
 
-func (r *modelRef[T]) WithoutEvents(callback func() error) error {
+func (r *modelRef) WithoutEvents(callback func() error) error {
 	return r.m.WithoutEvents(callback)
 }
 
@@ -142,19 +228,19 @@ func (r *modelRef[T]) WithoutEvents(callback func() error) error {
 //
 // The error the typed constructor reports is held rather than dropped, and the
 // next method that can report one does.
-func (r *modelRef[T]) NewInstance(attributes map[string]any) concerns.Model {
-	instance, err := r.m.NewInstance(attributes, false)
+func (r *modelRef) NewInstance(attributes map[string]any) concerns.Model {
+	instance, err := r.m.newRow(attributes)
 	if err != nil {
-		failed := &modelRef[T]{m: r.m}
+		failed := &modelRef{m: r.m}
 		failed.hold(err)
 		return failed
 	}
 	return instance.Ref()
 }
 
-func (r *modelRef[T]) NewQuery() concerns.Builder { return r.m.NewQuery().Ref() }
+func (r *modelRef) NewQuery() concerns.Builder { return r.m.newQueryRef() }
 
-func (r *modelRef[T]) Save(ctx context.Context, g auth.Grant) error {
+func (r *modelRef) Save(ctx context.Context, g auth.Grant) error {
 	if err := r.taken(); err != nil {
 		return err
 	}
@@ -164,7 +250,7 @@ func (r *modelRef[T]) Save(ctx context.Context, g auth.Grant) error {
 
 // Delete answers rows affected where the typed one answers whether anything
 // went.
-func (r *modelRef[T]) Delete(ctx context.Context, g auth.Grant) (int64, error) {
+func (r *modelRef) Delete(ctx context.Context, g auth.Grant) (int64, error) {
 	if err := r.taken(); err != nil {
 		return 0, err
 	}
@@ -175,7 +261,7 @@ func (r *modelRef[T]) Delete(ctx context.Context, g auth.Grant) (int64, error) {
 	return 1, nil
 }
 
-func (r *modelRef[T]) Touch(ctx context.Context, g auth.Grant) error {
+func (r *modelRef) Touch(ctx context.Context, g auth.Grant) error {
 	if err := r.taken(); err != nil {
 		return err
 	}
@@ -183,7 +269,7 @@ func (r *modelRef[T]) Touch(ctx context.Context, g auth.Grant) error {
 }
 
 // hold keeps the first error a method with no return could not report.
-func (r *modelRef[T]) hold(err error) {
+func (r *modelRef) hold(err error) {
 	if err != nil && r.err == nil {
 		r.err = err
 	}
@@ -191,7 +277,7 @@ func (r *modelRef[T]) hold(err error) {
 
 // taken answers the held error once and forgets it, so that a model which
 // recovered is not refused forever.
-func (r *modelRef[T]) taken() error {
+func (r *modelRef) taken() error {
 	err := r.err
 	r.err = nil
 	return err
@@ -199,8 +285,8 @@ func (r *modelRef[T]) taken() error {
 
 // -- builderRef -------------------------------------------------------------
 
-func (r *builderRef[T]) GetModel() concerns.Model { return r.b.GetModel().Ref() }
-func (r *builderRef[T]) GetQuery() *query.Builder { return r.b.GetQuery() }
+func (r *builderRef) GetModel() concerns.Model { return r.b.modelRow().Ref() }
+func (r *builderRef) GetQuery() *query.Builder { return r.b.GetQuery() }
 
 // ScopesOwnTableByTenant answers for every terminal on the typed builder at
 // once, because they share the one door: prepare puts the model's tenant column
@@ -211,151 +297,166 @@ func (r *builderRef[T]) GetQuery() *query.Builder { return r.b.GetQuery() }
 // column, or declares none because its table is shared, is filtered on what it
 // declared -- where a second filter added from outside would only know the
 // default name, and would name a column a shared table does not have.
-func (r *builderRef[T]) ScopesOwnTableByTenant() bool { return true }
+func (r *builderRef) ScopesOwnTableByTenant() bool { return true }
 
 // The chainables. Each returns this ref rather than a new one: the typed
 // builder mutates and returns itself, and a ref that allocated per call would
 // make a chain of ten allocate ten.
-func (r *builderRef[T]) Select(columns ...any) concerns.Builder {
-	r.b.Select(columns...)
+//
+// Every one but Where and WhereKey is a forward to the query the typed builder
+// holds, which is all the typed method does too. Where goes through the typed
+// builder because it also takes the typed nested closure.
+func (r *builderRef) Select(columns ...any) concerns.Builder {
+	r.b.GetQuery().Select(columns...)
 	return r
 }
 
-func (r *builderRef[T]) AddSelect(columns ...any) concerns.Builder {
-	r.b.AddSelect(columns...)
+func (r *builderRef) AddSelect(columns ...any) concerns.Builder {
+	r.b.GetQuery().AddSelect(columns...)
 	return r
 }
 
-func (r *builderRef[T]) Where(column any, args ...any) concerns.Builder {
-	r.b.Where(column, args...)
+func (r *builderRef) Where(column any, args ...any) concerns.Builder {
+	r.b.whereRow(column, args...)
 	return r
 }
 
-func (r *builderRef[T]) WhereIn(column any, values []any) concerns.Builder {
-	r.b.WhereIn(column, values)
+func (r *builderRef) WhereIn(column any, values []any) concerns.Builder {
+	r.b.GetQuery().WhereIn(column, values)
 	return r
 }
 
-func (r *builderRef[T]) WhereNotNull(columns ...any) concerns.Builder {
-	r.b.WhereNotNull(columns...)
+func (r *builderRef) WhereNotNull(columns ...any) concerns.Builder {
+	r.b.GetQuery().WhereNotNull(columns...)
 	return r
 }
 
-func (r *builderRef[T]) WhereColumn(first any, args ...any) concerns.Builder {
-	r.b.WhereColumn(first, args...)
+func (r *builderRef) WhereColumn(first any, args ...any) concerns.Builder {
+	r.b.GetQuery().WhereColumn(first, args...)
 	return r
 }
 
-func (r *builderRef[T]) WhereKey(ids ...any) concerns.Builder {
+func (r *builderRef) WhereKey(ids ...any) concerns.Builder {
 	if len(ids) == 1 {
-		r.b.WhereKey(ids[0])
+		whereKey(r.b, ids[0])
 		return r
 	}
-	r.b.WhereKey(ids)
+	whereKey(r.b, ids)
 	return r
 }
 
-func (r *builderRef[T]) Join(table any, first any, args ...any) concerns.Builder {
-	r.b.Join(table, first, args...)
+func (r *builderRef) Join(table any, first any, args ...any) concerns.Builder {
+	r.b.GetQuery().Join(table, first, args...)
 	return r
 }
 
-func (r *builderRef[T]) GroupBy(groups ...any) concerns.Builder {
-	r.b.GroupBy(groups...)
+func (r *builderRef) GroupBy(groups ...any) concerns.Builder {
+	r.b.GetQuery().GroupBy(groups...)
 	return r
 }
 
-func (r *builderRef[T]) SelectRaw(expression string, bindings ...any) concerns.Builder {
-	r.b.SelectRaw(expression, bindings...)
+func (r *builderRef) SelectRaw(expression string, bindings ...any) concerns.Builder {
+	r.b.GetQuery().SelectRaw(expression, bindings...)
 	return r
 }
 
-func (r *builderRef[T]) OrderBy(column any, direction ...string) concerns.Builder {
-	r.b.OrderBy(column, direction...)
+func (r *builderRef) OrderBy(column any, direction ...string) concerns.Builder {
+	r.b.GetQuery().OrderBy(column, direction...)
 	return r
 }
 
-func (r *builderRef[T]) Limit(value int) concerns.Builder  { r.b.Limit(value); return r }
-func (r *builderRef[T]) Offset(value int) concerns.Builder { r.b.Offset(value); return r }
-func (r *builderRef[T]) Clone() concerns.Builder           { return r.b.Clone().Ref() }
+func (r *builderRef) Limit(value int) concerns.Builder  { r.b.GetQuery().Limit(value); return r }
+func (r *builderRef) Offset(value int) concerns.Builder { r.b.GetQuery().Offset(value); return r }
+func (r *builderRef) Clone() concerns.Builder           { return &builderRef{b: r.b.cloneRows()} }
 
-// asRef is the conversion the reads hand to the paginators and to Get: one
-// model, as the interface.
-func asRef[T any](m *Model[T]) concerns.Model { return m.Ref() }
-
-func (r *builderRef[T]) Get(ctx context.Context, g auth.Grant) ([]concerns.Model, error) {
+func (r *builderRef) Get(ctx context.Context, g auth.Grant) ([]concerns.Model, error) {
 	found, err := r.b.get(ctx, g)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]concerns.Model, 0, len(found))
-	for _, m := range found {
-		out = append(out, m.Ref())
-	}
-	return out, nil
+	return refsOf(found), nil
 }
 
 // First answers (nil, nil) for a miss, as the interface says: ErrModelNotFound
 // belongs to FirstOrFail, which is a different question.
-func (r *builderRef[T]) First(ctx context.Context, g auth.Grant) (concerns.Model, error) {
-	found, err := r.b.first(ctx, g)
+func (r *builderRef) First(ctx context.Context, g auth.Grant) (concerns.Model, error) {
+	found, err := firstRow(r.b, ctx, g)
 	if err != nil || found == nil {
 		return nil, err
 	}
 	return found.Ref(), nil
 }
 
-func (r *builderRef[T]) Find(ctx context.Context, g auth.Grant, id any) (concerns.Model, error) {
-	found, err := r.b.find(ctx, g, id)
+func (r *builderRef) Find(ctx context.Context, g auth.Grant, id any) (concerns.Model, error) {
+	found, err := findRow(r.b, ctx, g, id)
 	if err != nil || found == nil {
 		return nil, err
 	}
 	return found.Ref(), nil
 }
 
-func (r *builderRef[T]) Cursor(ctx context.Context, g auth.Grant) iter.Seq2[concerns.Model, error] {
+func (r *builderRef) Cursor(ctx context.Context, g auth.Grant) iter.Seq2[concerns.Model, error] {
 	return func(yield func(concerns.Model, error) bool) {
 		// The typed cursor reports its failure through a pointer rather than
 		// beside each value, so the error is read after the walk and yielded
 		// then. A stream that fails halfway has already handed out rows, which
 		// is why the interface carries the error beside the value at all.
-		var failure error
-		for m := range r.b.cursor(ctx, g, &failure) {
+		found, err := r.b.get(ctx, g)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		for _, m := range found {
 			if !yield(m.Ref(), nil) {
 				return
 			}
 		}
-		if failure != nil {
-			yield(nil, failure)
-		}
 	}
 }
 
-func (r *builderRef[T]) Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.LengthAwarePaginator[concerns.Model], error) {
-	return paginateAs(r.b, ctx, g, perPage, page, opts, asRef[T], columns...)
+func (r *builderRef) Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.LengthAwarePaginator[concerns.Model], error) {
+	items, total, perPage, page, err := paginateRows(r.b, ctx, g, perPage, page, columns...)
+	if err != nil {
+		return nil, err
+	}
+	return pagination.Paginate(refsOf(items), int(total), perPage, page, opts), nil
 }
 
-func (r *builderRef[T]) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[concerns.Model], error) {
-	return simplePaginateAs(r.b, ctx, g, perPage, page, opts, asRef[T], columns...)
+func (r *builderRef) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[concerns.Model], error) {
+	items, perPage, page, err := simplePaginateRows(r.b, ctx, g, perPage, page, columns...)
+	if err != nil {
+		return nil, err
+	}
+	return pagination.SimplePaginate(refsOf(items), perPage, page, opts), nil
 }
 
-func (r *builderRef[T]) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (*pagination.CursorPaginator[concerns.Model], error) {
-	return cursorPaginateAs(r.b, ctx, g, perPage, cursor, opts, asRef[T], columns...)
+func (r *builderRef) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (*pagination.CursorPaginator[concerns.Model], error) {
+	items, values, perPage, err := cursorPaginateRows(r.b, ctx, g, perPage, cursor, columns...)
+	if err != nil {
+		return nil, err
+	}
+	refs := refsOf(items)
+	cursors := make(map[concerns.Model]map[string]string, len(refs))
+	for i, ref := range refs {
+		cursors[ref] = values[i]
+	}
+	key := func(item concerns.Model) map[string]string { return cursors[item] }
+	return pagination.CursorPaginate(refs, perPage, cursor, key, opts), nil
 }
 
-func (r *builderRef[T]) Insert(ctx context.Context, g auth.Grant, values []map[string]any) error {
+func (r *builderRef) Insert(ctx context.Context, g auth.Grant, values []map[string]any) error {
 	_, err := r.b.Insert(ctx, g, values...)
 	return err
 }
 
-func (r *builderRef[T]) Update(ctx context.Context, g auth.Grant, values map[string]any) (int64, error) {
+func (r *builderRef) Update(ctx context.Context, g auth.Grant, values map[string]any) (int64, error) {
 	return r.b.Update(ctx, g, values)
 }
 
-func (r *builderRef[T]) Upsert(ctx context.Context, g auth.Grant, values []map[string]any, uniqueBy, update []string) (int64, error) {
+func (r *builderRef) Upsert(ctx context.Context, g auth.Grant, values []map[string]any, uniqueBy, update []string) (int64, error) {
 	return r.b.Upsert(ctx, g, values, uniqueBy, update)
 }
 
-func (r *builderRef[T]) Delete(ctx context.Context, g auth.Grant) (int64, error) {
+func (r *builderRef) Delete(ctx context.Context, g auth.Grant) (int64, error) {
 	return r.b.Delete(ctx, g)
 }

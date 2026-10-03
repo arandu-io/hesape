@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"time"
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/collections"
@@ -40,21 +41,55 @@ type Collection[T any] []*T
 // compiled only where they are called.
 type models []row
 
-// row is a model as the list sees it: the methods the list's operations call,
-// each one a method *Model[T] already has with this exact signature.
+// row is a model as the code that does not know T sees it: the list here, the
+// ref a relation holds, the paginators. Every method but the last three is one
+// *Model[T] already has with this exact signature, so holding a model as a row
+// costs nothing; the last three are the hooks only the typed model can answer.
 type row interface {
 	GetKey() any
+	GetKeyName() string
+	GetKeyType() string
+	GetQualifiedKeyName() string
 	GetTable() string
+	QualifyColumn(column string) string
+	GetForeignKey() string
+	GetMorphClass() string
 	GetConnectionName() string
+	GetPerPage() int
 	GetAttribute(key string) any
+	GetAttributes() map[string]any
+	SetAttribute(key string, value any) error
+	SetRawAttributes(attributes map[string]any, sync bool) error
+	UnsetAttribute(key string)
+	Fill(attributes map[string]any) error
+	ForceFill(attributes map[string]any) error
 	GetRelation(name string) (any, bool)
 	RelationLoaded(name string) bool
+	IsRelation(key string) bool
+	Touches(relation string) bool
+	GetCreatedAtColumn() string
+	GetUpdatedAtColumn() string
+	UsesTimestamps() bool
+	FreshTimestamp() time.Time
 	Trashed() bool
 	ToArray() map[string]any
+	WithoutEvents(callback func() error) error
+	Save(ctx context.Context, g auth.Grant) (bool, error)
+	Delete(ctx context.Context, g auth.Grant) (bool, error)
+	Touch(ctx context.Context, g auth.Grant) error
 	Push(ctx context.Context, g auth.Grant) (bool, error)
-	Ref() concerns.Model
 	GetQueueableID() any
 	GetQueueableRelations() []string
+	Ref() concerns.Model
+
+	// refState hands out the fields the ref writes. See refState.
+	refState() refState
+
+	// newRow is NewInstance(attributes, false), held as a row.
+	newRow(attributes map[string]any) (row, error)
+
+	// newQueryRef is NewQuery, as the builder a relation takes.
+	newQueryRef() concerns.Builder
 }
 
 // entitiesOf returns the row of every model.
