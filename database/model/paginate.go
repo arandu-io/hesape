@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/arandu-io/hesape/auth"
@@ -10,29 +11,29 @@ import (
 	"github.com/arandu-io/hesape/pagination"
 )
 
-// Paginate runs the query for one page and returns a length-aware
-// paginator.
+// Paginate runs the query for one page and returns its rows, beside the
+// length-aware page that does the arithmetic.
 //
 // The page number is an argument: no request is reachable from here, and the
 // caller reads it with pagination.ResolveCurrentPage.
 //
 // perPage of zero means the model's own.
-func (b *Builder[T]) Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.LengthAwarePaginator[*T], error) {
+func (b *Builder[T]) Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (Collection[T], *pagination.LengthAwarePage, error) {
 	items, total, perPage, page, err := paginateRows(b, ctx, g, perPage, page, columns...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return pagination.Paginate([]*T(entitiesOf[T](items)), int(total), perPage, page, opts), nil
+	return entitiesOf[T](items), pagination.NewLengthAwarePage(len(items), int(total), perPage, page, opts), nil
 }
 
 // paginateRows is Paginate up to the page: the models on it, the total, and
 // the page size and number it settled on.
 //
-// It stops short of the paginator because the same page has to be answered as
-// *T to the caller who typed the query and as a relation's Model to the
-// relation seam. Each converts the models it is handed; the counting is done
-// here, once, because a paginator that counts differently in two places is the
-// bug that would follow from writing it twice.
+// It stops short of the page because the same rows have to be answered as *T
+// to the caller who typed the query and as a relation's Model to the relation
+// seam. Each converts the models it is handed; the counting is done here, once,
+// because a page that counts differently in two places is the bug that would
+// follow from writing it twice.
 func paginateRows(b rowsBuilder, ctx context.Context, g auth.Grant, perPage, page int, columns ...any) (models, int64, int, int, error) {
 	if perPage <= 0 {
 		perPage = b.modelRow().GetPerPage()
@@ -58,18 +59,19 @@ func paginateRows(b rowsBuilder, ctx context.Context, g auth.Grant, perPage, pag
 	return items, total, perPage, page, nil
 }
 
-// SimplePaginate returns one page and whether there is another, without the
-// count.
-func (b *Builder[T]) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[*T], error) {
-	items, perPage, page, err := simplePaginateRows(b, ctx, g, perPage, page, columns...)
+// SimplePaginate returns the rows of one page, without the count, beside the
+// page that says whether there is another.
+func (b *Builder[T]) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (Collection[T], *pagination.Page, error) {
+	items, meta, err := simplePaginateRows(b, ctx, g, perPage, page, opts, columns...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return pagination.SimplePaginate([]*T(entitiesOf[T](items)), perPage, page, opts), nil
+	return entitiesOf[T](items), meta, nil
 }
 
-// simplePaginateRows is SimplePaginate up to the page. See paginateRows.
-func simplePaginateRows(b rowsBuilder, ctx context.Context, g auth.Grant, perPage, page int, columns ...any) (models, int, int, error) {
+// simplePaginateRows is SimplePaginate over rowsBuilder: the models on the page,
+// with the probe row already dropped, and the page. See paginateRows.
+func simplePaginateRows(b rowsBuilder, ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (models, *pagination.Page, error) {
 	if perPage <= 0 {
 		perPage = b.modelRow().GetPerPage()
 	}
@@ -81,9 +83,10 @@ func simplePaginateRows(b rowsBuilder, ctx context.Context, g auth.Grant, perPag
 	paged.GetQuery().Offset((page - 1) * perPage).Limit(perPage + 1)
 	items, err := paged.get(ctx, g, columns...)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, nil, err
 	}
-	return items, perPage, page, nil
+	meta := pagination.NewPage(len(items), perPage, page, opts)
+	return items[:meta.Count()], meta, nil
 }
 
 // GetCountForPagination returns the row count of the query, ignoring its
@@ -107,68 +110,59 @@ func (b *Builder[T]) GetCountForPagination(ctx context.Context, g auth.Grant) (i
 // cursor is nil for the first page. The columns the query orders by are the
 // cursor's parameters, so every one of them has to be selected -- the cursor is
 // built out of the rows that come back.
-func (b *Builder[T]) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (*pagination.CursorPaginator[*T], error) {
-	items, values, perPage, err := cursorPaginateRows(b, ctx, g, perPage, cursor, columns...)
+func (b *Builder[T]) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (Collection[T], *pagination.CursorPage, error) {
+	items, meta, err := cursorPaginateRows(b, ctx, g, perPage, cursor, opts, columns...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	rows := entitiesOf[T](items)
-	cursors := make(map[*T]map[string]string, len(rows))
-	for i, row := range rows {
-		cursors[row] = values[i]
-	}
-	key := func(item *T) map[string]string { return cursors[item] }
-	return pagination.CursorPaginate([]*T(rows), perPage, cursor, key, opts), nil
+	return entitiesOf[T](items), meta, nil
 }
 
-// cursorPaginateRows is CursorPaginate up to the page: the models on it, the
-// cursor parameters of each one at the same index, and the page size it
-// settled on. See paginateRows.
+// cursorPaginateRows is CursorPaginate over rowsBuilder: the models on the page,
+// in reading order, and the page with its cursors. See paginateRows.
 //
-// The cursor is built here, off the models, and handed back beside the items
-// rather than read off them later. It is not read off the item itself because
-// the item is whatever the caller converts it to: a row of a T that does not
-// embed Model[T] has fields and no GetAttribute.
-func cursorPaginateRows(b rowsBuilder, ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, columns ...any) (models, []map[string]string, int, error) {
+// The cursors are built here, off the models, rather than off the rows the
+// caller converts them to: the value of an ordering column is an attribute of
+// the model, and a row has fields.
+func cursorPaginateRows(b rowsBuilder, ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (models, *pagination.CursorPage, error) {
 	if perPage <= 0 {
 		perPage = b.modelRow().GetPerPage()
 	}
 	if len(b.GetQuery().Unions) > 0 {
-		return nil, nil, 0, fmt.Errorf("model: cursor pagination over a union is not supported: the boundary conditions have to be repeated inside every branch, and this builder has no way to reach them")
+		return nil, nil, fmt.Errorf("model: cursor pagination over a union is not supported: the boundary conditions have to be repeated inside every branch, and this builder has no way to reach them")
 	}
 
 	paginated := b.cloneRows()
 	orders := ensureOrderForCursorPagination(paginated.GetQuery(), paginated.modelRow().GetQualifiedKeyName(), cursor != nil && cursor.PointsToPreviousItems())
 	if len(orders) == 0 {
-		return nil, nil, 0, fmt.Errorf("model: cursor pagination needs an order it can compare against")
+		return nil, nil, fmt.Errorf("model: cursor pagination needs an order it can compare against")
 	}
 
 	if cursor != nil {
 		if err := addCursorConditions(paginated.GetQuery(), *cursor, orders, 0); err != nil {
-			return nil, nil, 0, err
+			return nil, nil, err
 		}
 	}
 
 	paginated.GetQuery().Limit(perPage + 1)
 	items, err := paginated.get(ctx, g, columns...)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, nil, err
 	}
 
-	parameters := make([]string, 0, len(orders))
-	for _, order := range orders {
-		parameters = append(parameters, order.column)
-	}
-
-	values := make([]map[string]string, len(items))
-	for i, item := range items {
-		parameter := make(map[string]string, len(parameters))
-		for _, name := range parameters {
-			parameter[name] = fmt.Sprint(item.GetAttribute(afterLastDot(name)))
+	key := func(i int) map[string]string {
+		parameter := make(map[string]string, len(orders))
+		for _, order := range orders {
+			parameter[order.column] = fmt.Sprint(items[i].GetAttribute(afterLastDot(order.column)))
 		}
-		values[i] = parameter
+		return parameter
 	}
-	return items, values, perPage, nil
+	meta := pagination.NewCursorPage(len(items), perPage, cursor, key, opts)
+	items = items[:meta.Count()]
+	if meta.Reversed() {
+		slices.Reverse(items)
+	}
+	return items, meta, nil
 }
 
 // cursorOrder is one entry of what ensureOrderForCursorPagination returns: a

@@ -351,16 +351,16 @@ func (b *fakeBuilder) Cursor(context.Context, auth.Grant) iter.Seq2[Model, error
 	return func(func(Model, error) bool) {}
 }
 
-func (b *fakeBuilder) Paginate(context.Context, auth.Grant, int, int, pagination.Options, ...any) (*pagination.LengthAwarePaginator[Model], error) {
-	return nil, nil
+func (b *fakeBuilder) Paginate(context.Context, auth.Grant, int, int, pagination.Options, ...any) ([]Model, *pagination.LengthAwarePage, error) {
+	return nil, nil, nil
 }
 
-func (b *fakeBuilder) SimplePaginate(context.Context, auth.Grant, int, int, pagination.Options, ...any) (*pagination.Paginator[Model], error) {
-	return nil, nil
+func (b *fakeBuilder) SimplePaginate(context.Context, auth.Grant, int, int, pagination.Options, ...any) ([]Model, *pagination.Page, error) {
+	return nil, nil, nil
 }
 
-func (b *fakeBuilder) CursorPaginate(context.Context, auth.Grant, int, *pagination.Cursor, pagination.Options, ...any) (*pagination.CursorPaginator[Model], error) {
-	return nil, nil
+func (b *fakeBuilder) CursorPaginate(context.Context, auth.Grant, int, *pagination.Cursor, pagination.Options, ...any) ([]Model, *pagination.CursorPage, error) {
+	return nil, nil, nil
 }
 
 func (b *fakeBuilder) Get(context.Context, auth.Grant) ([]Model, error)           { return nil, nil }

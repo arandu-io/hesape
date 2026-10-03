@@ -287,15 +287,14 @@ func TestBelongsToManyPaginateHydratesThePivot(t *testing.T) {
 	database, user := seedManyRoles()
 	ctx, g := context.Background(), auth.SystemGrant("role.view", "acme")
 
-	paginator, err := rolesOf(database, user).Paginate(ctx, g, 2, 1, pagination.Options{})
+	items, page, err := rolesOf(database, user).Paginate(ctx, g, 2, 1, pagination.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if got := paginator.Total(); got != 6 {
-		t.Errorf("the paginator reported %d rows in total, want the tenant's 6", got)
+	if got := page.Total(); got != 6 {
+		t.Errorf("the page reported %d rows in total, want the tenant's 6", got)
 	}
-	items := paginator.Items()
 	if len(items) != 2 {
 		t.Fatalf("page 1 held %d rows, want 2", len(items))
 	}

@@ -221,14 +221,17 @@ type Builder interface {
 	// the caller had acted on half the data.
 	Cursor(ctx context.Context, g auth.Grant) iter.Seq2[Model, error]
 
-	// Paginate answers Builder::paginate.
-	Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.LengthAwarePaginator[Model], error)
+	// Paginate answers Builder::paginate: the rows of one page, beside the page
+	// that does its arithmetic.
+	Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) ([]Model, *pagination.LengthAwarePage, error)
 
-	// SimplePaginate answers Builder::simplePaginate.
-	SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[Model], error)
+	// SimplePaginate answers Builder::simplePaginate: the rows of one page, with
+	// the probe row already left out, beside the page.
+	SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) ([]Model, *pagination.Page, error)
 
-	// CursorPaginate answers Builder::cursorPaginate.
-	CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (*pagination.CursorPaginator[Model], error)
+	// CursorPaginate answers Builder::cursorPaginate: the rows of one page, in
+	// reading order, beside the page and its cursors.
+	CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) ([]Model, *pagination.CursorPage, error)
 
 	// Get answers Builder::get.
 	Get(ctx context.Context, g auth.Grant) ([]Model, error)

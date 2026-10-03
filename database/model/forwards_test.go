@@ -16,7 +16,7 @@ func TestSimplePaginateOnTheModelIsAScopedPage(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue(query.Record{"id": int64(1)}, query.Record{"id": int64(2)}, query.Record{"id": int64(3)})
 
-	page, err := model.SimplePaginate(context.Background(), grant(), 2, 1, pagination.Options{})
+	items, page, err := model.SimplePaginate(context.Background(), grant(), 2, 1, pagination.Options{})
 	if err != nil {
 		t.Fatalf("SimplePaginate: %v", err)
 	}
@@ -27,8 +27,8 @@ func TestSimplePaginateOnTheModelIsAScopedPage(t *testing.T) {
 	if !strings.Contains(sql, "limit 3") {
 		t.Errorf("SQL = %q, want perPage+1", sql)
 	}
-	if len(page.Items()) != 2 || !page.HasMorePages() {
-		t.Errorf("page holds %d rows, more = %v", len(page.Items()), page.HasMorePages())
+	if len(items) != 2 || !page.HasMorePages() {
+		t.Errorf("page holds %d rows, more = %v", len(items), page.HasMorePages())
 	}
 }
 
@@ -38,7 +38,7 @@ func TestLatestOnTheModelOrdersByCreatedAtNewestFirst(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue(query.Record{"id": int64(1)})
 
-	if _, err := model.Latest().SimplePaginate(context.Background(), grant(), 10, 1, pagination.Options{}); err != nil {
+	if _, _, err := model.Latest().SimplePaginate(context.Background(), grant(), 10, 1, pagination.Options{}); err != nil {
 		t.Fatalf("SimplePaginate: %v", err)
 	}
 	if sql := conn.last().SQL; !strings.Contains(sql, `order by "created_at" desc`) {

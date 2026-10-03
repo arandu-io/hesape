@@ -287,29 +287,34 @@ func (b *builder) Cursor(ctx context.Context, g auth.Grant) iter.Seq2[relations.
 	}
 }
 
-func (b *builder) Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.LengthAwarePaginator[relations.Model], error) {
+func (b *builder) Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) ([]relations.Model, *pagination.LengthAwarePage, error) {
 	models, err := b.Get(ctx, g)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return pagination.Paginate(pageSlice(models, perPage, page), len(models), perPage, page, opts), nil
+	items := pageSlice(models, perPage, page)
+	return items, pagination.NewLengthAwarePage(len(items), len(models), perPage, page, opts), nil
 }
 
-func (b *builder) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[relations.Model], error) {
+func (b *builder) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) ([]relations.Model, *pagination.Page, error) {
 	models, err := b.Get(ctx, g)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return pagination.SimplePaginate(pageSlice(models, perPage, page), perPage, page, opts), nil
+	items := pageSlice(models, perPage, page)
+	meta := pagination.NewPage(len(items), perPage, page, opts)
+	return items[:meta.Count()], meta, nil
 }
 
-func (b *builder) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (*pagination.CursorPaginator[relations.Model], error) {
+func (b *builder) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) ([]relations.Model, *pagination.CursorPage, error) {
 	models, err := b.Get(ctx, g)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return pagination.CursorPaginate(pageSlice(models, perPage, 1), perPage, cursor,
-		func(model relations.Model) map[string]string { return nil }, opts), nil
+	items := pageSlice(models, perPage, 1)
+	meta := pagination.NewCursorPage(len(items), perPage, cursor,
+		func(int) map[string]string { return nil }, opts)
+	return items[:meta.Count()], meta, nil
 }
 
 func pageSlice(models []relations.Model, perPage, page int) []relations.Model {

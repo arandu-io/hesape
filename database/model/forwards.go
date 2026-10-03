@@ -92,7 +92,7 @@ func (m *Model[T]) Oldest(column ...string) *Builder[T] { return m.NewQuery().Ol
 
 // SimplePaginate calls SimplePaginate on a fresh query for the model: one
 // page, in the order the table returns it, and whether there is another.
-func (m *Model[T]) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[*T], error) {
+func (m *Model[T]) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (Collection[T], *pagination.Page, error) {
 	return m.NewQuery().SimplePaginate(ctx, g, perPage, page, opts, columns...)
 }
 

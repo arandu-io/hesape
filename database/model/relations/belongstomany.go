@@ -315,17 +315,17 @@ func (r *BelongsToMany) Cursor(ctx context.Context, g auth.Grant) iter.Seq2[Mode
 }
 
 // Paginate answers BelongsToMany::paginate.
-func (r *BelongsToMany) Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.LengthAwarePaginator[Model], error) {
+func (r *BelongsToMany) Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) ([]Model, *pagination.LengthAwarePage, error) {
 	return r.walker().paginate(ctx, g, perPage, page, opts, columns...)
 }
 
 // SimplePaginate answers BelongsToMany::simplePaginate.
-func (r *BelongsToMany) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[Model], error) {
+func (r *BelongsToMany) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) ([]Model, *pagination.Page, error) {
 	return r.walker().simplePaginate(ctx, g, perPage, page, opts, columns...)
 }
 
 // CursorPaginate answers BelongsToMany::cursorPaginate.
-func (r *BelongsToMany) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (*pagination.CursorPaginator[Model], error) {
+func (r *BelongsToMany) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) ([]Model, *pagination.CursorPage, error) {
 	return r.walker().cursorPaginate(ctx, g, perPage, cursor, opts, columns...)
 }
 

@@ -128,15 +128,15 @@ func TestEveryReadRefusesAGrantWithNoTenant(t *testing.T) {
 			return err
 		},
 		"Paginate": func(m *Model[user]) error {
-			_, err := m.NewQuery().Paginate(context.Background(), zero, 10, 1, pagination.Options{})
+			_, _, err := m.NewQuery().Paginate(context.Background(), zero, 10, 1, pagination.Options{})
 			return err
 		},
 		"SimplePaginate": func(m *Model[user]) error {
-			_, err := m.NewQuery().SimplePaginate(context.Background(), zero, 10, 1, pagination.Options{})
+			_, _, err := m.NewQuery().SimplePaginate(context.Background(), zero, 10, 1, pagination.Options{})
 			return err
 		},
 		"CursorPaginate": func(m *Model[user]) error {
-			_, err := m.NewQuery().CursorPaginate(context.Background(), zero, 10, nil, signedOptions())
+			_, _, err := m.NewQuery().CursorPaginate(context.Background(), zero, 10, nil, signedOptions())
 			return err
 		},
 		"Chunk": func(m *Model[user]) error {
@@ -498,7 +498,7 @@ func TestPaginateCountsThenReadsThePage(t *testing.T) {
 	conn.queue(query.Record{"aggregate": int64(7)})
 	conn.queue(query.Record{"id": int64(1)}, query.Record{"id": int64(2)})
 
-	page, err := model.NewQuery().Paginate(context.Background(), grant(), 2, 2, pagination.Options{Path: "/users"})
+	items, page, err := model.NewQuery().Paginate(context.Background(), grant(), 2, 2, pagination.Options{Path: "/users"})
 	if err != nil {
 		t.Fatalf("Paginate: %v", err)
 	}
@@ -508,8 +508,8 @@ func TestPaginateCountsThenReadsThePage(t *testing.T) {
 	if page.LastPage() != 4 {
 		t.Errorf("LastPage() = %d, want 4", page.LastPage())
 	}
-	if len(page.Items()) != 2 {
-		t.Errorf("Items() = %d rows, want 2", len(page.Items()))
+	if len(items) != 2 {
+		t.Errorf("Items() = %d rows, want 2", len(items))
 	}
 
 	sqls := conn.sqls()
@@ -528,15 +528,15 @@ func TestSimplePaginateReadsOneMoreRowThanThePage(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue(query.Record{"id": int64(1)}, query.Record{"id": int64(2)}, query.Record{"id": int64(3)})
 
-	page, err := model.NewQuery().SimplePaginate(context.Background(), grant(), 2, 1, pagination.Options{})
+	items, page, err := model.NewQuery().SimplePaginate(context.Background(), grant(), 2, 1, pagination.Options{})
 	if err != nil {
 		t.Fatalf("SimplePaginate: %v", err)
 	}
 	if !strings.Contains(conn.last().SQL, "limit 3") {
 		t.Errorf("SQL = %q, want perPage+1 -- the extra row is how the next page is answered without a count", conn.last().SQL)
 	}
-	if len(page.Items()) != 2 || !page.HasMorePages() {
-		t.Errorf("page holds %d rows, more = %v", len(page.Items()), page.HasMorePages())
+	if len(items) != 2 || !page.HasMorePages() {
+		t.Errorf("page holds %d rows, more = %v", len(items), page.HasMorePages())
 	}
 }
 
@@ -545,7 +545,7 @@ func TestCursorPaginateComparesAgainstTheBoundary(t *testing.T) {
 	conn.queue(query.Record{"id": int64(4)}, query.Record{"id": int64(5)})
 
 	cursor := pagination.NewCursor(map[string]string{"users.id": "3"}, true)
-	page, err := model.NewQuery().CursorPaginate(context.Background(), grant(), 1, &cursor, signedOptions())
+	items, page, err := model.NewQuery().CursorPaginate(context.Background(), grant(), 1, &cursor, signedOptions())
 	if err != nil {
 		t.Fatalf("CursorPaginate: %v", err)
 	}
@@ -554,8 +554,36 @@ func TestCursorPaginateComparesAgainstTheBoundary(t *testing.T) {
 	if !strings.Contains(sql, `"users"."id" > ?`) {
 		t.Fatalf("SQL = %q, want the boundary comparison", sql)
 	}
-	if len(page.Items()) != 1 || page.NextCursor() == nil {
-		t.Errorf("page holds %d rows, next = %v", len(page.Items()), page.NextCursor())
+	if len(items) != 1 || page.NextCursor() == nil {
+		t.Errorf("page holds %d rows, next = %v", len(items), page.NextCursor())
+	}
+}
+
+// TestCursorPaginateBackwardHandsTheRowsBackInReadingOrder: a backward page is
+// read the wrong way round, and the probe row is the one furthest from the
+// boundary -- the rows come back trimmed and turned around, and the cursors are
+// taken from the rows at the edges of the page as the reader sees it.
+func TestCursorPaginateBackwardHandsTheRowsBackInReadingOrder(t *testing.T) {
+	model, conn := newUserModel()
+	conn.queue(query.Record{"id": int64(3)}, query.Record{"id": int64(2)}, query.Record{"id": int64(1)})
+
+	cursor := pagination.NewCursor(map[string]string{"users.id": "4"}, false)
+	items, page, err := model.NewQuery().CursorPaginate(context.Background(), grant(), 2, &cursor, signedOptions())
+	if err != nil {
+		t.Fatalf("CursorPaginate: %v", err)
+	}
+	if len(items) != 2 || items[0].ID != 2 || items[1].ID != 3 {
+		t.Fatalf("items = %v, want ids 2 and 3 in reading order", items)
+	}
+	previous, next := page.PreviousCursor(), page.NextCursor()
+	if previous == nil || next == nil {
+		t.Fatalf("previous = %v, next = %v, want both: there are rows on either side", previous, next)
+	}
+	if id, _ := previous.Parameter("users.id"); id != "2" {
+		t.Errorf("previous cursor at %q, want the first row the reader sees, 2", id)
+	}
+	if id, _ := next.Parameter("users.id"); id != "3" {
+		t.Errorf("next cursor at %q, want the last row the reader sees, 3", id)
 	}
 }
 

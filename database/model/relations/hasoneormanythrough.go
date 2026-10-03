@@ -263,17 +263,17 @@ func (r *HasOneOrManyThrough) Cursor(ctx context.Context, g auth.Grant) iter.Seq
 }
 
 // Paginate answers HasOneOrManyThrough::paginate.
-func (r *HasOneOrManyThrough) Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.LengthAwarePaginator[Model], error) {
+func (r *HasOneOrManyThrough) Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) ([]Model, *pagination.LengthAwarePage, error) {
 	return r.walker().paginate(ctx, g, perPage, page, opts, columns...)
 }
 
 // SimplePaginate answers HasOneOrManyThrough::simplePaginate.
-func (r *HasOneOrManyThrough) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[Model], error) {
+func (r *HasOneOrManyThrough) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) ([]Model, *pagination.Page, error) {
 	return r.walker().simplePaginate(ctx, g, perPage, page, opts, columns...)
 }
 
 // CursorPaginate answers HasOneOrManyThrough::cursorPaginate.
-func (r *HasOneOrManyThrough) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (*pagination.CursorPaginator[Model], error) {
+func (r *HasOneOrManyThrough) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) ([]Model, *pagination.CursorPage, error) {
 	return r.walker().cursorPaginate(ctx, g, perPage, cursor, opts, columns...)
 }
 

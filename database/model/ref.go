@@ -414,34 +414,28 @@ func (r *builderRef) Cursor(ctx context.Context, g auth.Grant) iter.Seq2[concern
 	}
 }
 
-func (r *builderRef) Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.LengthAwarePaginator[concerns.Model], error) {
+func (r *builderRef) Paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) ([]concerns.Model, *pagination.LengthAwarePage, error) {
 	items, total, perPage, page, err := paginateRows(r.b, ctx, g, perPage, page, columns...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return pagination.Paginate(refsOf(items), int(total), perPage, page, opts), nil
+	return refsOf(items), pagination.NewLengthAwarePage(len(items), int(total), perPage, page, opts), nil
 }
 
-func (r *builderRef) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[concerns.Model], error) {
-	items, perPage, page, err := simplePaginateRows(r.b, ctx, g, perPage, page, columns...)
+func (r *builderRef) SimplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) ([]concerns.Model, *pagination.Page, error) {
+	items, meta, err := simplePaginateRows(r.b, ctx, g, perPage, page, opts, columns...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return pagination.SimplePaginate(refsOf(items), perPage, page, opts), nil
+	return refsOf(items), meta, nil
 }
 
-func (r *builderRef) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (*pagination.CursorPaginator[concerns.Model], error) {
-	items, values, perPage, err := cursorPaginateRows(r.b, ctx, g, perPage, cursor, columns...)
+func (r *builderRef) CursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) ([]concerns.Model, *pagination.CursorPage, error) {
+	items, meta, err := cursorPaginateRows(r.b, ctx, g, perPage, cursor, opts, columns...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	refs := refsOf(items)
-	cursors := make(map[concerns.Model]map[string]string, len(refs))
-	for i, ref := range refs {
-		cursors[ref] = values[i]
-	}
-	key := func(item concerns.Model) map[string]string { return cursors[item] }
-	return pagination.CursorPaginate(refs, perPage, cursor, key, opts), nil
+	return refsOf(items), meta, nil
 }
 
 func (r *builderRef) Insert(ctx context.Context, g auth.Grant, values []map[string]any) error {

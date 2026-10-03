@@ -226,48 +226,45 @@ func (c chunker) cursor(ctx context.Context, g auth.Grant) iter.Seq2[Model, erro
 }
 
 // paginate answers Builder::paginate for a relation.
-func (c chunker) paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.LengthAwarePaginator[Model], error) {
+func (c chunker) paginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) ([]Model, *pagination.LengthAwarePage, error) {
 	q, err := c.prepare(g)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	paginator, err := q.Paginate(ctx, g, perPage, page, opts, columns...)
+	items, meta, err := q.Paginate(ctx, g, perPage, page, opts, columns...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	c.page(paginator.Items())
-	return paginator, nil
+	return c.page(items), meta, nil
 }
 
 // simplePaginate answers Builder::simplePaginate for a relation.
-func (c chunker) simplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) (*pagination.Paginator[Model], error) {
+func (c chunker) simplePaginate(ctx context.Context, g auth.Grant, perPage, page int, opts pagination.Options, columns ...any) ([]Model, *pagination.Page, error) {
 	q, err := c.prepare(g)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	paginator, err := q.SimplePaginate(ctx, g, perPage, page, opts, columns...)
+	items, meta, err := q.SimplePaginate(ctx, g, perPage, page, opts, columns...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	c.page(paginator.Items())
-	return paginator, nil
+	return c.page(items), meta, nil
 }
 
 // cursorPaginate answers Builder::cursorPaginate for a relation.
-func (c chunker) cursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) (*pagination.CursorPaginator[Model], error) {
+func (c chunker) cursorPaginate(ctx context.Context, g auth.Grant, perPage int, cursor *pagination.Cursor, opts pagination.Options, columns ...any) ([]Model, *pagination.CursorPage, error) {
 	q, err := c.prepare(g)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	paginator, err := q.CursorPaginate(ctx, g, perPage, cursor, opts, columns...)
+	items, meta, err := q.CursorPaginate(ctx, g, perPage, cursor, opts, columns...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	c.page(paginator.Items())
-	return paginator, nil
+	return c.page(items), meta, nil
 }
 
 // lastSegment answers the column name without its table qualifier, which is the
