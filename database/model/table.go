@@ -116,9 +116,14 @@ type TableSpec struct {
 // every request at once. The one thing added afterwards is the relations, and
 // only before the first query -- see Relate.
 type Table struct {
+	// No field here holds a reflect type, nor does anything they point at. The
+	// type of every field is part of the export data each package naming a
+	// Table compiles against, and reflect.Type and reflect.Value return
+	// iterators over themselves that the compiler wraps, one function per
+	// method, in every such package. What reflection answers about the entity
+	// is read once, in NewTable, and kept as schema and morphClass.
 	name         string
 	newEntity    func() Entity
-	entityType   reflect.Type
 	schema       *entitySchema
 	morphClass   string
 	foreignKey   string
@@ -180,7 +185,6 @@ func NewTable(spec TableSpec) *Table {
 	t := &Table{
 		name:         spec.Name,
 		newEntity:    spec.New,
-		entityType:   entityType,
 		schema:       schemaOf(entityType),
 		morphClass:   entityType.Name(),
 		keyName:      spec.PrimaryKey,
