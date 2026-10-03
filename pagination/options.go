@@ -10,12 +10,12 @@ import (
 // Default names and window width. They are exported because a caller that
 // overrides one of them usually wants to compare against the default first.
 const (
-	// DefaultPageName is the query parameter LengthAwarePaginator and Paginator
-	// write the page number into.
+	// DefaultPageName is the query parameter LengthAwarePage and Page write the
+	// page number into.
 	DefaultPageName = "page"
 
-	// DefaultCursorName is the query parameter CursorPaginator writes the
-	// encoded cursor into.
+	// DefaultCursorName is the query parameter CursorPage writes the encoded
+	// cursor into.
 	DefaultCursorName = "cursor"
 
 	// DefaultOnEachSide is how many numbered links sit either side of the
@@ -38,14 +38,14 @@ const (
 	NextLabel     = "Next"
 )
 
-// Options is everything a paginator needs to write the URL of another page.
+// Options is everything a page needs to write the URL of another page.
 //
 // It is one value the three constructors take, rather than four things read out
 // of the request when they are needed.
 //
-// The zero value is usable by the numbered paginators: it paginates the path
-// "/" with no extra query, the parameter names "page" and "cursor", and three
-// links either side. [CursorPaginate] needs Signer as well, and says so.
+// The zero value is usable by the numbered pages: it paginates the path "/"
+// with no extra query, the parameter names "page" and "cursor", and three links
+// either side. [NewCursorPage] needs Signer as well, and says so.
 //
 // Every constructor takes an Options by value and normalises its own copy, so
 // filling one in after passing it changes nothing.
@@ -56,7 +56,7 @@ type Options struct {
 
 	// Query is carried onto every generated URL, which is what keeps a filter
 	// or a sort selected while the reader walks the pages. The page and cursor
-	// parameters are dropped from it: the paginator writes those itself.
+	// parameters are dropped from it: the page writes those itself.
 	Query url.Values
 
 	// Fragment is appended after a "#", so a page link can land on the table
@@ -76,16 +76,16 @@ type Options struct {
 	// way to ask for a window with nothing but the caps.
 	OnEachSide int
 
-	// Signer signs the cursor a [CursorPaginator] writes into its links, and is
-	// what read it back on the way in. It is required by [CursorPaginate] and
-	// ignored by the numbered paginators, whose position is a page number: a
+	// Signer signs the cursor a [CursorPage] writes into its links, and is what
+	// read it back on the way in. It is required by [NewCursorPage] and ignored
+	// by the numbered pages, whose position is a page number: a
 	// rewritten page number reaches nothing a reader could not reach by typing
 	// one, and a rewritten cursor names a row.
 	Signer *CursorSigner
 }
 
 // normalize returns a copy with the defaults applied and the query cloned, so
-// that a paginator can never be changed through the map its caller kept.
+// that a page can never be changed through the map its caller kept.
 func (o Options) normalize() Options {
 	if o.Path == "" {
 		o.Path = "/"
@@ -146,7 +146,7 @@ func (o Options) url(name, value string) string {
 	return out
 }
 
-// OptionsFrom reads the paginator options out of the URL of the request being
+// OptionsFrom reads the page options out of the URL of the request being
 // served.
 //
 // The path keeps whatever the URL had: for a *http.Request served by the

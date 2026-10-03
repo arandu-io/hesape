@@ -9,7 +9,7 @@ import (
 
 // The probe row is the whole mechanism: it settles "is there a next page"
 // without counting, and the reader must never see it.
-func TestSimplePaginateDropsTheProbeRow(t *testing.T) {
+func TestPageDropsTheProbeRow(t *testing.T) {
 	p := pagination.NewPage(11, 10, 1, pagination.Options{Path: "/users"})
 
 	if got := p.Count(); got != 10 {
@@ -23,7 +23,7 @@ func TestSimplePaginateDropsTheProbeRow(t *testing.T) {
 	}
 }
 
-func TestSimplePaginateWithoutProbeRowIsTheLastPage(t *testing.T) {
+func TestPageWithoutProbeRowIsTheLastPage(t *testing.T) {
 	p := pagination.NewPage(10, 10, 3, pagination.Options{Path: "/users"})
 
 	if p.HasMorePages() {
@@ -40,7 +40,7 @@ func TestSimplePaginateWithoutProbeRowIsTheLastPage(t *testing.T) {
 	}
 }
 
-func TestSimplePaginateFirstPageAlone(t *testing.T) {
+func TestPageFirstPageAlone(t *testing.T) {
 	p := pagination.NewPage(4, 10, 1, pagination.Options{Path: "/users"})
 
 	if !p.OnFirstPage() {
@@ -54,7 +54,7 @@ func TestSimplePaginateFirstPageAlone(t *testing.T) {
 	}
 }
 
-func TestSimplePaginateItemRange(t *testing.T) {
+func TestPageItemRange(t *testing.T) {
 	p := pagination.NewPage(11, 10, 4, pagination.Options{})
 	if got, want := p.FirstItem(), 31; got != want {
 		t.Errorf("FirstItem = %d, want %d", got, want)
@@ -69,7 +69,7 @@ func TestSimplePaginateItemRange(t *testing.T) {
 	}
 }
 
-func TestSimplePaginateGuardsAgainstNonsenseInput(t *testing.T) {
+func TestPageGuardsAgainstNonsenseInput(t *testing.T) {
 	p := pagination.NewPage(3, 0, -2, pagination.Options{})
 	if got := p.PerPage(); got != 1 {
 		t.Errorf("PerPage = %d, want 1", got)

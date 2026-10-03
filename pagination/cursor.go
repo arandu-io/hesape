@@ -80,8 +80,8 @@ type Cursor struct {
 //
 // pointsToNextItems reports which side of the boundary the next query reads.
 // True is forward, the ordinary "next page". False is backward, and a backward
-// query returns its rows in reverse order; CursorPaginate turns them around
-// again.
+// query returns its rows in reverse order, and CursorPage.Reversed says so to
+// whoever arranges them.
 //
 // The map is copied, so a cursor cannot be changed through the map its caller
 // kept.

@@ -2,21 +2,11 @@ package pagination_test
 
 import (
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/arandu-io/hesape/pagination"
 )
-
-// rows returns n placeholder items, which is all a paginator needs to count.
-func rows(n int) []string {
-	out := make([]string, n)
-	for i := range out {
-		out[i] = "row-" + strconv.Itoa(i)
-	}
-	return out
-}
 
 // pages reads a rendered window back as page numbers, with zero for a
 // separator, which is the shape the arithmetic is worth asserting on.
@@ -28,7 +18,7 @@ func pages(links []pagination.Link) []int {
 	return out
 }
 
-func TestPaginateCounts(t *testing.T) {
+func TestLengthAwarePageCounts(t *testing.T) {
 	p := pagination.NewLengthAwarePage(10, 512, 10, 3, pagination.Options{Path: "/users"})
 
 	if got := p.Total(); got != 512 {
@@ -54,7 +44,7 @@ func TestPaginateCounts(t *testing.T) {
 	}
 }
 
-func TestPaginateLastPageRoundsUp(t *testing.T) {
+func TestLengthAwarePageLastPageRoundsUp(t *testing.T) {
 	cases := []struct {
 		total, perPage, want int
 	}{
@@ -74,7 +64,7 @@ func TestPaginateLastPageRoundsUp(t *testing.T) {
 	}
 }
 
-func TestPaginateEmptyPageHasNoItemRange(t *testing.T) {
+func TestLengthAwarePageEmptyPageHasNoItemRange(t *testing.T) {
 	p := pagination.NewLengthAwarePage(0, 0, 10, 1, pagination.Options{})
 	if got := p.FirstItem(); got != 0 {
 		t.Errorf("FirstItem = %d, want 0", got)
@@ -92,7 +82,7 @@ func TestPaginateEmptyPageHasNoItemRange(t *testing.T) {
 
 // A page size of zero comes from an unset configuration value, and dividing by
 // it is a panic in production rather than a wrong number on a screen.
-func TestPaginateGuardsAgainstNonsenseInput(t *testing.T) {
+func TestLengthAwarePageGuardsAgainstNonsenseInput(t *testing.T) {
 	p := pagination.NewLengthAwarePage(3, 30, 0, -4, pagination.Options{})
 	if got := p.PerPage(); got != 1 {
 		t.Errorf("PerPage = %d, want 1", got)
@@ -107,7 +97,7 @@ func TestPaginateGuardsAgainstNonsenseInput(t *testing.T) {
 
 // The reader who deleted the last row of the last page lands here. The page is
 // empty and every link on it still works.
-func TestPaginatePastTheEnd(t *testing.T) {
+func TestLengthAwarePagePastTheEnd(t *testing.T) {
 	p := pagination.NewLengthAwarePage(0, 20, 10, 7, pagination.Options{Path: "/users"})
 	if got := p.CurrentPage(); got != 7 {
 		t.Errorf("CurrentPage = %d, want 7", got)
@@ -120,7 +110,7 @@ func TestPaginatePastTheEnd(t *testing.T) {
 	}
 }
 
-func TestPaginateNeighbourURLs(t *testing.T) {
+func TestLengthAwarePageNeighbourURLs(t *testing.T) {
 	opts := pagination.Options{Path: "/users"}
 
 	first := pagination.NewLengthAwarePage(10, 100, 10, 1, opts)
@@ -140,7 +130,7 @@ func TestPaginateNeighbourURLs(t *testing.T) {
 	}
 }
 
-func TestPaginateURLClampsBelowOne(t *testing.T) {
+func TestLengthAwarePageURLClampsBelowOne(t *testing.T) {
 	p := pagination.NewLengthAwarePage(10, 100, 10, 1, pagination.Options{Path: "/users"})
 	if got, want := p.URL(-5), "/users?page=1"; got != want {
 		t.Errorf("URL(-5) = %q, want %q", got, want)

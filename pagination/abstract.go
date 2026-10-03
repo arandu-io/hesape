@@ -2,20 +2,19 @@ package pagination
 
 import (
 	"encoding/json"
-	"iter"
 	"net/url"
 )
 
-// The behaviour the three paginators share.
+// The behaviour the three pages share.
 //
-// Each paginator declares its own methods and each of them is one line over a
-// helper here. They are declared per type rather than promoted from an embedded
-// struct because every mutator returns the receiver, and a promoted method would
-// return the embedded value instead of the paginator -- which breaks the
-// chaining those methods exist for.
+// Each page declares its own methods and each of them is one line over a helper
+// here. They are declared per type rather than promoted from an embedded struct
+// because every mutator returns the receiver, and a promoted method would return
+// the embedded value instead of the page -- which breaks the chaining those
+// methods exist for.
 
 // addQuery records one query string parameter, and drops the one holding the
-// position: the paginator writes that itself, and letting a caller append it
+// position: the page writes that itself, and letting a caller append it
 // would make two of them fight over the same key.
 func addQuery(o *Options, reserved, key, value string) {
 	if key == reserved {
@@ -65,18 +64,6 @@ func mergeQuery(o *Options, reserved string, values url.Values) {
 			o.Query = url.Values{}
 		}
 		o.Query[name] = append([]string(nil), list...)
-	}
-}
-
-// seq2 is the body of every GetIterator: the items, with their offsets, as a
-// range-over-func sequence.
-func seq2[T any](items []T) iter.Seq2[int, T] {
-	return func(yield func(int, T) bool) {
-		for i, item := range items {
-			if !yield(i, item) {
-				return
-			}
-		}
 	}
 }
 

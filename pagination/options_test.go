@@ -90,7 +90,7 @@ func TestOptionsDropIncomingPageAndCursor(t *testing.T) {
 	}
 }
 
-// A paginator that changed under the map its caller kept would render one thing
+// A page that changed under the map its caller kept would render one thing
 // and link another.
 func TestOptionsQueryIsCopied(t *testing.T) {
 	query := url.Values{"team": {"core"}}

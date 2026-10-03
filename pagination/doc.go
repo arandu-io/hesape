@@ -1,23 +1,29 @@
 // Package pagination turns a page of rows into the values a pager renders from.
 //
-// It holds three paginators, one per question a list page can answer:
+// It holds three pages, one per question a list page can answer:
 //
-//   - [LengthAwarePaginator], from [Paginate]: knows the total, so it can say
-//     "page 3 of 47" and print numbered links. It costs one COUNT query.
-//   - [Paginator], from [SimplePaginate]: knows only whether one more row
-//     exists, so it can say "previous" and "next" and nothing else. It costs
-//     one extra row.
-//   - [CursorPaginator], from [CursorPaginate]: keyset paging, forward and
-//     backward, over a signed [Cursor]. It has no total and no page number,
-//     and it is the only one of the three that does not skip or repeat rows
-//     when the data changes underneath.
+//   - [LengthAwarePage], from [NewLengthAwarePage]: knows the total, so it can
+//     say "page 3 of 47" and print numbered links. It costs one COUNT query.
+//   - [Page], from [NewPage]: knows only whether one more row exists, so it can
+//     say "previous" and "next" and nothing else. It costs one extra row.
+//   - [CursorPage], from [NewCursorPage]: keyset paging, forward and backward,
+//     over a signed [Cursor]. It has no total and no page number, and it is the
+//     only one of the three that does not skip or repeat rows when the data
+//     changes underneath.
 //
-// # What a paginator is here
+// # What a page is here
 //
-// A paginator is a value: the items of one page, plus the arithmetic needed to
-// write the URL of the pages around it. It runs no query, holds no database
-// handle and knows no Grant. A repository reads the rows -- through a Policy,
-// like every other read -- and hands them here.
+// A page is a value: the arithmetic needed to say where one page of a result
+// set sits and to write the URL of the pages around it. It runs no query, holds
+// no database handle and knows no Grant. A repository reads the rows -- through
+// a Policy, like every other read -- and tells the page how many it read.
+//
+// It does not hold the rows either. The rows travel beside the page, as
+// whatever type the query returned them as, and the page is the same type for
+// every kind of row. A page that carried its rows would be a type with a type
+// parameter, compiled again for every kind of row in every package that names
+// it; this one is compiled once. The payload methods take the rows as an
+// argument for the same reason -- ToArray(rows) puts them under "data".
 //
 // That division is why this package is a leaf. It imports the standard library
 // and the application key, and every dependency runs the other way: the
@@ -48,11 +54,11 @@
 // their siblings name a pager, and a name is all they are. Nothing in this
 // package writes HTML: rendering belongs to the view layer.
 //
-// What a component renders from is [LengthAwarePaginator.Links]: a flat []Link
+// What a component renders from is [LengthAwarePage.Links]: a flat []Link
 // holding the numbered pages and a [Separator] wherever the window left pages
-// out, in the order a pager draws them. [LengthAwarePaginator.LinkCollection]
-// is the same list with previous and next at its ends, and is what the JSON
-// payload carries.
+// out, in the order a pager draws them. [LengthAwarePage.LinkCollection] is the
+// same list with previous and next at its ends, and is what the JSON payload
+// carries.
 //
 // # No interfaces
 //
@@ -62,9 +68,6 @@
 //
 // # Naming
 //
-// An initialism is spelled in one case, so [LengthAwarePaginator.URL] and
-// [LengthAwarePaginator.ToJSON]. Three names are functions rather than methods,
-// because a Go method cannot introduce a type parameter and the point of these
-// three is to change the element type: [Through], [ThroughSimple] and
-// [ThroughCursor]. One name each, because Go cannot overload.
+// An initialism is spelled in one case, so [LengthAwarePage.URL] and
+// [LengthAwarePage.ToJSON].
 package pagination

@@ -2,7 +2,7 @@ package pagination
 
 import "sync"
 
-// The nine pager views, by the name a paginator asks for one by. They are names,
+// The nine pager views, by the name a page asks for one by. They are names,
 // not templates: nothing in this package renders (see the package doc), and the
 // view layer is what turns a name into markup.
 //

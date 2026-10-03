@@ -17,7 +17,7 @@ import (
 var cursors = pagination.NewCursorSigner(
 	encryption.NewSigner([]byte("an application key long enough to be one")), 0)
 
-// signedOptions is the Options a cursor paginator needs: a path, and the signer
+// signedOptions is the Options a cursor page needs: a path, and the signer
 // without which CursorPaginate refuses to write a link.
 func signedOptions(path string) pagination.Options {
 	return pagination.Options{Path: path, Signer: cursors}
@@ -57,7 +57,7 @@ func parametersOf(t *testing.T, c pagination.Cursor) map[string]string {
 	return out
 }
 
-// cursorPtr builds a cursor a paginator can be handed.
+// cursorPtr builds a cursor a page can be handed.
 //
 // NewCursor returns a value, because a cursor is one; the constructors take a
 // pointer so that "no cursor" is expressible.
