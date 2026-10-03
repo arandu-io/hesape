@@ -274,15 +274,15 @@ func (p *CursorPage) meta() map[string]any {
 		if c == nil {
 			return nil
 		}
-		return nullable(p.options.Signer.Encode(*c))
+		return nullText(p.options.Signer.Encode(*c))
 	}
 	return map[string]any{
 		"path":          p.Path(),
 		"per_page":      p.perPage,
 		"next_cursor":   encode(p.next),
-		"next_page_url": nullable(p.NextPageURL()),
+		"next_page_url": nullText(p.NextPageURL()),
 		"prev_cursor":   encode(p.previous),
-		"prev_page_url": nullable(p.PreviousPageURL()),
+		"prev_page_url": nullText(p.PreviousPageURL()),
 	}
 }
 

@@ -238,12 +238,12 @@ func (p *Page) meta() map[string]any {
 		"current_page":     p.currentPage,
 		"current_page_url": p.URL(p.currentPage),
 		"first_page_url":   p.URL(1),
-		"from":             nullable(p.FirstItem()),
-		"next_page_url":    nullable(p.NextPageURL()),
+		"from":             nullCount(p.FirstItem()),
+		"next_page_url":    nullText(p.NextPageURL()),
 		"path":             p.Path(),
 		"per_page":         p.perPage,
-		"prev_page_url":    nullable(p.PreviousPageURL()),
-		"to":               nullable(p.LastItem()),
+		"prev_page_url":    nullText(p.PreviousPageURL()),
+		"to":               nullCount(p.LastItem()),
 	}
 }
 

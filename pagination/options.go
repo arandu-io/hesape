@@ -253,9 +253,9 @@ func (l Link) MarshalJSON() ([]byte, error) {
 		Page   any    `json:"page"`
 		Active bool   `json:"active"`
 	}{
-		URL:    nullable(l.URL),
+		URL:    nullText(l.URL),
 		Label:  l.Label,
-		Page:   nullable(l.Page),
+		Page:   nullCount(l.Page),
 		Active: l.Active,
 	})
 }

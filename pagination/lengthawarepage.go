@@ -332,15 +332,15 @@ func (p *LengthAwarePage) meta() map[string]any {
 	return map[string]any{
 		"current_page":   p.currentPage,
 		"first_page_url": p.URL(1),
-		"from":           nullable(p.FirstItem()),
+		"from":           nullCount(p.FirstItem()),
 		"last_page":      p.lastPage,
 		"last_page_url":  p.URL(p.lastPage),
 		"links":          p.LinkCollection(),
-		"next_page_url":  nullable(p.NextPageURL()),
+		"next_page_url":  nullText(p.NextPageURL()),
 		"path":           p.Path(),
 		"per_page":       p.perPage,
-		"prev_page_url":  nullable(p.PreviousPageURL()),
-		"to":             nullable(p.LastItem()),
+		"prev_page_url":  nullText(p.PreviousPageURL()),
+		"to":             nullCount(p.LastItem()),
 		"total":          p.total,
 	}
 }

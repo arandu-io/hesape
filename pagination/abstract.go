@@ -67,12 +67,19 @@ func mergeQuery(o *Options, reserved string, values url.Values) {
 	}
 }
 
-// nullable renders a zero value as JSON null, which is what "from", "to",
-// "next_page_url" and "prev_page_url" carry when there is no such item and no
-// such page.
-func nullable[T comparable](value T) any {
-	var zero T
-	if value == zero {
+// nullText and nullCount render a zero value as JSON null, which is what "from",
+// "to", "next_page_url" and "prev_page_url" carry when there is no such item and
+// no such page. They are two functions rather than one generic one, so nothing
+// in this package is instantiated per type.
+func nullText(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func nullCount(value int) any {
+	if value == 0 {
 		return nil
 	}
 	return value
