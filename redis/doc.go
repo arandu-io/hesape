@@ -34,10 +34,27 @@
 // what it serves: the store, the lock and the session handler are together, one
 // import away from the components they plug into.
 //
+// # Importing it links it
+//
+// The package registers itself with the cache when it is imported, the way a
+// database connector registers with database. A binary that blank-imports it
+// can build the store from the configuration alone:
+//
+//	import _ "github.com/arandu-io/hesape/redis"
+//
+//	store, err := cache.Open("redis", cache.Endpoint{Address: addr, Prefix: prefix})
+//
+// and a binary that does not import it carries no RESP client, and cache.Linked
+// says which import is missing. What cache.Open returns is a Shared: the
+// RedisStore over a fresh connection, its Ping and Close, and its sessions,
+// which session.Decode types.
+//
 // # What is here
 //
 //	RedisStore                  a cache.Store, a cache.Locking, a
 //	                            cache.CurrentOwner and a cache.CanFlushLocks
+//	Shared                      the RedisStore cache.Open builds, a
+//	                            cache.SharedStore and a session.Keeper
 //	CacheBasedSessionHandler    a session.Handler over RESP
 //	Module                      the health check and the shutdown
 //	connections.Connection      the connection the three of them share
