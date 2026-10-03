@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,6 +33,15 @@ type Options struct {
 	Database int
 	// Prefix namespaces the keys, so two applications can share one server.
 	Prefix string
+
+	// TLS encrypts the connection, and nil leaves it in the clear. On any
+	// network the process does not own it is the only correct setting: the
+	// password and every job body cross the wire with it off.
+	//
+	// It is crypto/tls's own type, because a private authority and a client
+	// certificate are what tls.Config already names. The value is used as
+	// given, not copied, so it must not be mutated after New returns.
+	TLS *tls.Config
 }
 
 // New returns the queue over its own client.
@@ -46,6 +56,7 @@ func New(opts Options) *RedisQueue {
 			DB:          opts.Database,
 			DialTimeout: 5 * time.Second,
 			ReadTimeout: 3 * time.Second,
+			TLSConfig:   opts.TLS,
 		}),
 		prefix: opts.Prefix,
 	}

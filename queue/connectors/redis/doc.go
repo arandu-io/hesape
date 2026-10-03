@@ -6,6 +6,14 @@
 // database. Import github.com/arandu-io/hesape/queue/connectors/redis to get
 // it.
 //
+// Importing it registers the redis driver with the queue, so a blank import is
+// enough for queue.Open to build the queue from the configuration, and a
+// binary that leaves it out is told by queue.Linked which import is missing:
+//
+//	import _ "github.com/arandu-io/hesape/queue/connectors/redis"
+//
+//	q, err := queue.Open("redis", cache.Endpoint{Address: addr, Prefix: prefix})
+//
 // Same contract as [github.com/arandu-io/hesape/queue.Queue], same Worker, same
 // handlers -- one line different in bootstrap/app.go. Use it when the volume
 // outgrows what a table handles comfortably, and accept what it costs: a job
