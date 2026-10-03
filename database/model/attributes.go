@@ -11,38 +11,39 @@ import (
 
 // GetAttributes returns every column of the row, as the database sees it.
 //
-// The row lives in the entity struct, so the map is built from it -- plus
-// the raw attributes a column with no field behind it left behind (a
-// withCount alias, a column a migration added and the struct has not caught
-// up with).
-func (m *Model[T]) GetAttributes() map[string]any {
-	entity, ok := entityValue(m)
+// The row lives in the entity struct, so the map is built from it -- plus the
+// raw attributes a column with no field behind it left behind (a withCount
+// alias, a column a migration added and the struct has not caught up with).
+func (m *Model) GetAttributes() map[string]any {
+	entity, ok := entityOf(m)
 	if !ok {
-		// A literal has no entity to read columns off. The raw attributes are
-		// still whatever was put there, and an empty map is the honest answer
-		// rather than a panic.
-		return maps.Clone(m.attributes)
+		return map[string]any{}
 	}
-	out := make(map[string]any, len(fieldsOf(entity.Type()))+len(m.attributes))
-	for _, f := range fieldsOf(entity.Type()) {
+	fields := m.r.table.schema.fields
+	out := make(map[string]any, len(fields)+len(m.r.attributes))
+	for _, f := range fields {
 		out[f.column] = valueAt(entity, f)
 	}
-	for key, value := range m.attributes {
+	for key, value := range m.r.attributes {
 		out[key] = value
 	}
 	return out
 }
 
-// SetRawAttributes replaces the row without checking anything, and
-// optionally syncs the original.
+// SetRawAttributes replaces the row without checking anything, and optionally
+// syncs the original.
 //
-// It is what Hydrate uses, and it is the only path that puts a value the caller
-// did not declare on the model: a key with no field behind it is kept as a raw
-// attribute rather than dropped, because a select the caller wrote has a reason
-// for every column in it.
-func (m *Model[T]) SetRawAttributes(attributes map[string]any, sync bool) error {
-	resetEntity(m)
-	m.attributes = nil
+// It is what hydration uses, and it is the only path that puts a value the
+// caller did not declare on the model: a key with no field behind it is kept as
+// a raw attribute rather than dropped, because a select the caller wrote has a
+// reason for every column in it.
+func (m *Model) SetRawAttributes(attributes map[string]any, sync bool) error {
+	entity, ok := entityOf(m)
+	if !ok {
+		return ErrUnwired
+	}
+	resetEntity(m, entity)
+	m.r.attributes = nil
 	if err := setAttributes(m, attributes, true); err != nil {
 		return err
 	}
@@ -52,10 +53,36 @@ func (m *Model[T]) SetRawAttributes(attributes map[string]any, sync bool) error 
 	return nil
 }
 
+// Fill writes the columns the entity declares and drops the keys it does not
+// know.
+//
+// It never writes the tenant column, and never the primary key of a row that
+// already exists: a form posted back into Update or UpdateOrCreate carries
+// whatever keys its sender added, and neither of those is the sender's to
+// choose. Both are skipped without error, like an unknown key. ForceFill writes
+// them.
+//
+// There is no allowlist to consult beyond the struct itself: an unexported
+// field is unreachable to reflection, so the allowlist is the initial letter of
+// the field and the compiler keeps it (see the package comment).
+//
+// The error is the other failure a typed model can have -- a value that does
+// not fit the field.
+func (m *Model) Fill(attributes map[string]any) error {
+	return setAttributes(m, attributes, false)
+}
+
+// ForceFill writes the columns the entity declares, and keeps the keys it does
+// not know as raw attributes instead of dropping them the way Fill does. It
+// still cannot reach an unexported field, because nothing can.
+func (m *Model) ForceFill(attributes map[string]any) error {
+	return setAttributes(m, attributes, true)
+}
+
 // setAttributes writes a map onto the entity. keepUnknown decides what happens
 // to a key with no field behind it: Fill drops it, ForceFill and
 // SetRawAttributes keep it.
-func setAttributes[T any](m *Model[T], attributes map[string]any, keepUnknown bool) error {
+func setAttributes(m *Model, attributes map[string]any, keepUnknown bool) error {
 	if len(attributes) == 0 {
 		return nil
 	}
@@ -64,13 +91,12 @@ func setAttributes[T any](m *Model[T], attributes map[string]any, keepUnknown bo
 	// the walk is over the schema rather than over a sorted copy of the map's
 	// keys. Sorting existed to make the first conversion error deterministic; so
 	// does declaration order, and it costs no allocation and no sort per row.
-	entity, ok := entityValue(m)
+	entity, ok := entityOf(m)
 	if !ok {
 		return ErrUnwired
 	}
-	schema := schemaOf(entity.Type())
+	schema := m.r.table.schema
 
-	var discarded []string
 	written := 0
 	for i := range schema.fields {
 		f := schema.fields[i]
@@ -87,7 +113,7 @@ func setAttributes[T any](m *Model[T], attributes map[string]any, keepUnknown bo
 			continue
 		}
 		if err := assign(dst, value); err != nil {
-			return fmt.Errorf("model: %s.%s: %w", m.GetTable(), f.column, err)
+			return fmt.Errorf("model: %s.%s: %w", m.r.table.name, f.column, err)
 		}
 	}
 
@@ -98,15 +124,16 @@ func setAttributes[T any](m *Model[T], attributes map[string]any, keepUnknown bo
 	if written == len(attributes) {
 		return nil
 	}
+	var discarded []string
 	for _, key := range sortedKeys(attributes) {
 		if _, ok := schema.byName[key]; ok {
 			continue
 		}
 		if keepUnknown {
-			if m.attributes == nil {
-				m.attributes = map[string]any{}
+			if m.r.attributes == nil {
+				m.r.attributes = map[string]any{}
 			}
-			m.attributes[key] = attributes[key]
+			m.r.attributes[key] = attributes[key]
 			continue
 		}
 		discarded = append(discarded, key)
@@ -117,26 +144,28 @@ func setAttributes[T any](m *Model[T], attributes map[string]any, keepUnknown bo
 // SetAttribute converts value to the field's type and assigns it, or reports
 // the conversion error. A column the entity does not declare is kept as a raw
 // attribute instead.
-func (m *Model[T]) SetAttribute(key string, value any) error {
+func (m *Model) SetAttribute(key string, value any) error {
 	known, err := setAttribute(m, key, value)
 	if err != nil {
 		return err
 	}
 	if !known {
-		if m.attributes == nil {
-			m.attributes = map[string]any{}
+		if m.r.attributes == nil {
+			m.r.attributes = map[string]any{}
 		}
-		m.attributes[key] = value
+		m.r.attributes[key] = value
 	}
 	return nil
 }
 
-func setAttribute[T any](m *Model[T], key string, value any) (bool, error) {
-	entity, ok := entityValue(m)
+// setAttribute assigns value to the field behind key, and reports whether there
+// is one.
+func setAttribute(m *Model, key string, value any) (bool, error) {
+	entity, ok := entityOf(m)
 	if !ok {
 		return false, ErrUnwired
 	}
-	f, ok := fieldByColumn(entity.Type(), key)
+	f, ok := m.r.table.schema.field(key)
 	if !ok {
 		return false, nil
 	}
@@ -145,39 +174,47 @@ func setAttribute[T any](m *Model[T], key string, value any) (bool, error) {
 		return false, nil
 	}
 	if err := assign(dst, value); err != nil {
-		return true, fmt.Errorf("model: %s.%s: %w", m.GetTable(), key, err)
+		return true, fmt.Errorf("model: %s.%s: %w", m.r.table.name, key, err)
 	}
 	return true, nil
 }
 
-// GetAttribute returns the value for key: a column value if key names a
-// field, else a raw attribute, else a loaded relation.
+// GetAttribute returns the value for key: a column value if key names a field,
+// else a raw attribute, else a loaded relation.
 //
 // A key that matches none of those reads as nil. PreventAccessingMissingAttributes
 // turns that into a reported violation, though it catches much less here than
-// it would need to elsewhere: a typo like found.Entity.Naem fails to
-// compile, so it never reaches this check at all.
-func (m *Model[T]) GetAttribute(key string) any {
-	entity, live := entityValue(m)
+// it would need to elsewhere: a typo like user.Naem fails to compile, so it
+// never reaches this check at all.
+func (m *Model) GetAttribute(key string) any {
+	entity, live := entityOf(m)
 	if !live {
-		return m.attributes[key]
+		return nil
 	}
-	if f, ok := fieldByColumn(entity.Type(), key); ok {
+	if f, ok := m.r.table.schema.field(key); ok {
 		return valueAt(entity, f)
 	}
-	if value, ok := m.attributes[key]; ok {
+	if value, ok := m.r.attributes[key]; ok {
 		return value
 	}
-	if related, ok := m.relations[key]; ok {
+	if related, ok := m.r.relations[key]; ok {
 		return related
 	}
 	handleMissingAttributeViolation(m, key)
 	return nil
 }
 
-// AttributesToArray returns the row as it is serialised, with the hidden
+// unsetAttribute removes a raw attribute.
+//
+// It reaches only the attributes a column has no field behind: a struct field
+// cannot be removed, and setting it to its zero value would be a different
+// thing said with the same word. A pivot row, whose columns are not known until
+// run time, is what needs this.
+func unsetAttribute(m *Model, key string) { delete(m.r.attributes, key) }
+
+// attributesToArray returns the row as it is serialised, with the hidden
 // columns removed and the appended ones added.
-func (m *Model[T]) AttributesToArray() map[string]any {
+func attributesToArray(m *Model) map[string]any {
 	attributes := m.GetAttributes()
 	out := make(map[string]any, len(attributes))
 	for key, value := range attributes {
@@ -186,7 +223,7 @@ func (m *Model[T]) AttributesToArray() map[string]any {
 		}
 		out[key] = value
 	}
-	for _, key := range m.appends {
+	for _, key := range appendsList(m) {
 		if !isVisible(m, key) {
 			continue
 		}
@@ -197,17 +234,20 @@ func (m *Model[T]) AttributesToArray() map[string]any {
 
 // isVisible reports whether key should be serialised: the visible list wins
 // when it is set, otherwise the hidden list removes.
-func isVisible[T any](m *Model[T], key string) bool {
-	if len(m.visible) > 0 {
-		return slices.Contains(m.visible, key)
+func isVisible(m *Model, key string) bool {
+	if visible := visibleList(m); len(visible) > 0 {
+		return slices.Contains(visible, key)
 	}
-	return !slices.Contains(m.hidden, key)
+	return !slices.Contains(hiddenList(m), key)
 }
 
 // ToArray returns the serialised row together with the loaded relations.
-func (m *Model[T]) ToArray() map[string]any {
-	out := m.AttributesToArray()
-	for name, related := range m.relations {
+func (m *Model) ToArray() map[string]any {
+	if !live(m) {
+		return map[string]any{}
+	}
+	out := attributesToArray(m)
+	for name, related := range m.r.relations {
 		if !isVisible(m, name) {
 			continue
 		}
@@ -218,79 +258,65 @@ func (m *Model[T]) ToArray() map[string]any {
 
 // ToJSON encodes the serialised row as JSON. Go initialisms are upper case,
 // hence ToJSON rather than ToJson, and it returns bytes rather than a string.
-func (m *Model[T]) ToJSON() ([]byte, error) {
+func (m *Model) ToJSON() ([]byte, error) {
 	out, err := json.Marshal(m.ToArray())
 	if err != nil {
-		return nil, fmt.Errorf("model: encoding %s: %w", m.GetTable(), err)
-	}
-	return out, nil
-}
-
-// ToPrettyJSON encodes the serialised row as indented JSON.
-func (m *Model[T]) ToPrettyJSON() ([]byte, error) {
-	out, err := json.MarshalIndent(m.ToArray(), "", "    ")
-	if err != nil {
-		return nil, fmt.Errorf("model: encoding %s: %w", m.GetTable(), err)
+		table := ""
+		if live(m) {
+			table = m.r.table.name
+		}
+		return nil, fmt.Errorf("model: encoding %s: %w", table, err)
 	}
 	return out, nil
 }
 
 // GetOriginal returns the row as it was when it was last synced.
-func (m *Model[T]) GetOriginal() map[string]any {
-	return copyMap(m.original)
+func (m *Model) GetOriginal() map[string]any {
+	if !live(m) {
+		return map[string]any{}
+	}
+	return copyMap(m.r.original)
 }
-
-// GetRawOriginal returns the original value for one key, uncast.
-//
-// It is the same value GetOriginal would give for that key, because the cast
-// is the field's type and the original was already cast when it was read.
-// The two methods are kept apart anyway, because a caller that asks for the
-// raw one is saying something about intent.
-func (m *Model[T]) GetRawOriginal(key string) any { return m.original[key] }
 
 // SyncOriginal replaces the original snapshot with the row's current values.
-func (m *Model[T]) SyncOriginal() *Model[T] {
-	m.original = m.GetAttributes()
-	return m
+func (m *Model) SyncOriginal() {
+	if live(m) {
+		m.r.original = m.GetAttributes()
+	}
 }
 
-// SyncOriginalAttribute replaces the original snapshot for one column with
-// its current value.
-func (m *Model[T]) SyncOriginalAttribute(attribute string) *Model[T] {
-	return m.SyncOriginalAttributes(attribute)
-}
-
-// SyncOriginalAttributes replaces the original snapshot for the named
-// columns with their current values.
-func (m *Model[T]) SyncOriginalAttributes(attributes ...string) *Model[T] {
+// syncOriginalAttributes replaces the original snapshot for the named columns
+// with their current values.
+func syncOriginalAttributes(m *Model, attributes ...string) {
 	current := m.GetAttributes()
-	if m.original == nil {
-		m.original = map[string]any{}
+	if m.r.original == nil {
+		m.r.original = map[string]any{}
 	}
 	for _, key := range attributes {
-		m.original[key] = current[key]
+		m.r.original[key] = current[key]
 	}
-	return m
 }
 
-// SyncChanges records the current dirty columns as the last save's changes,
+// syncChanges records the current dirty columns as the last save's changes,
 // and captures what each one held before it.
-func (m *Model[T]) SyncChanges() *Model[T] {
-	m.changes = m.GetDirty()
-	m.previous = map[string]any{}
-	for key := range m.changes {
-		if original, ok := m.original[key]; ok {
-			m.previous[key] = original
+func syncChanges(m *Model) {
+	m.r.changes = m.GetDirty()
+	m.r.previous = map[string]any{}
+	for key := range m.r.changes {
+		if original, ok := m.r.original[key]; ok {
+			m.r.previous[key] = original
 		}
 	}
-	return m
 }
 
 // GetDirty returns the columns that differ from the original.
-func (m *Model[T]) GetDirty() map[string]any {
+func (m *Model) GetDirty() map[string]any {
 	dirty := map[string]any{}
+	if !live(m) {
+		return dirty
+	}
 	for key, value := range m.GetAttributes() {
-		if !m.OriginalIsEquivalent(key) {
+		if !originalIsEquivalent(m, key, value) {
 			dirty[key] = value
 		}
 	}
@@ -298,36 +324,28 @@ func (m *Model[T]) GetDirty() map[string]any {
 }
 
 // GetChanges returns what changed on the last save.
-func (m *Model[T]) GetChanges() map[string]any { return copyMap(m.changes) }
+func (m *Model) GetChanges() map[string]any {
+	if !live(m) {
+		return map[string]any{}
+	}
+	return copyMap(m.r.changes)
+}
 
-// GetPrevious returns what the changed columns held before the last save.
-func (m *Model[T]) GetPrevious() map[string]any { return copyMap(m.previous) }
-
-// IsDirty reports whether the given columns differ from the original. With
-// no argument it asks about the whole row.
-func (m *Model[T]) IsDirty(attributes ...string) bool {
+// IsDirty reports whether the given columns differ from the original. With no
+// argument it asks about the whole row.
+func (m *Model) IsDirty(attributes ...string) bool {
 	return hasChanges(m.GetDirty(), attributes)
 }
 
 // IsClean reports the opposite of IsDirty.
-func (m *Model[T]) IsClean(attributes ...string) bool { return !m.IsDirty(attributes...) }
+func (m *Model) IsClean(attributes ...string) bool { return !m.IsDirty(attributes...) }
 
 // WasChanged reports whether the last save touched these columns.
-func (m *Model[T]) WasChanged(attributes ...string) bool {
-	return hasChanges(m.changes, attributes)
-}
-
-// DiscardChanges resets the row to its original values and clears the
-// recorded changes.
-func (m *Model[T]) DiscardChanges() error {
-	original := copyMap(m.original)
-	if err := m.SetRawAttributes(original, false); err != nil {
-		return err
+func (m *Model) WasChanged(attributes ...string) bool {
+	if !live(m) {
+		return false
 	}
-	m.original = original
-	m.changes = nil
-	m.previous = nil
-	return nil
+	return hasChanges(m.r.changes, attributes)
 }
 
 // hasChanges reports whether changes contains any of attributes, or is
@@ -344,105 +362,81 @@ func hasChanges(changes map[string]any, attributes []string) bool {
 	return false
 }
 
-// OriginalIsEquivalent reports whether key's current value equals its
-// original value.
+// originalIsEquivalent reports whether current, the value of key now, equals
+// its original value.
 //
 // The field has one static type, and both the current and the original value
-// went through assign to reach it, so this is a plain comparison rather than
-// a ladder of type coercions. The one case a plain comparison cannot handle
-// is an uncomparable field (a slice, a map), which reflect.DeepEqual handles
-// instead.
-func (m *Model[T]) OriginalIsEquivalent(key string) bool {
-	original, ok := m.original[key]
+// went through assign to reach it, so this is a plain comparison rather than a
+// ladder of type coercions. The one case a plain comparison cannot handle is an
+// uncomparable field (a slice, a map), which reflect.DeepEqual handles instead.
+func originalIsEquivalent(m *Model, key string, current any) bool {
+	original, ok := m.r.original[key]
 	if !ok {
 		return false
 	}
-	current := m.GetAttribute(key)
 	if current == nil || original == nil {
 		return current == nil && original == nil
 	}
 	return reflect.DeepEqual(current, original)
 }
 
-// Only returns a subset of the row, by column.
-func (m *Model[T]) Only(attributes ...string) map[string]any {
-	out := make(map[string]any, len(attributes))
-	for _, attribute := range attributes {
-		out[attribute] = m.GetAttribute(attribute)
+// MakeVisible takes the named columns out of the hidden list, and adds them to
+// the visible list when that list is in use.
+func (m *Model) MakeVisible(attributes ...string) {
+	if !live(m) {
+		return
 	}
-	return out
-}
-
-// Except returns the row without the named columns.
-func (m *Model[T]) Except(attributes ...string) map[string]any {
-	out := map[string]any{}
-	for key := range m.GetAttributes() {
-		if slices.Contains(attributes, key) {
-			continue
-		}
-		out[key] = m.GetAttribute(key)
-	}
-	return out
-}
-
-// GetHidden returns the columns hidden from serialisation.
-func (m *Model[T]) GetHidden() []string { return slices.Clone(m.hidden) }
-
-// SetHidden replaces the columns hidden from serialisation.
-func (m *Model[T]) SetHidden(hidden ...string) *Model[T] {
-	m.hidden = slices.Clone(hidden)
-	return m
-}
-
-// GetVisible returns the columns allowed in serialisation, when the visible
-// list is in use.
-func (m *Model[T]) GetVisible() []string { return slices.Clone(m.visible) }
-
-// SetVisible replaces the columns allowed in serialisation.
-func (m *Model[T]) SetVisible(visible ...string) *Model[T] {
-	m.visible = slices.Clone(visible)
-	return m
-}
-
-// MakeVisible takes the named columns out of the hidden list, and adds them
-// to the visible list when that list is in use.
-func (m *Model[T]) MakeVisible(attributes ...string) *Model[T] {
-	m.hidden = slices.DeleteFunc(slices.Clone(m.hidden), func(key string) bool {
+	ownLists(m)
+	m.r.hidden = slices.DeleteFunc(m.r.hidden, func(key string) bool {
 		return slices.Contains(attributes, key)
 	})
-	if len(m.visible) > 0 {
-		m.visible = appendUnique(m.visible, attributes...)
+	if len(m.r.visible) > 0 {
+		m.r.visible = appendUnique(m.r.visible, attributes...)
 	}
-	return m
 }
 
 // MakeHidden adds the named columns to the hidden list.
-func (m *Model[T]) MakeHidden(attributes ...string) *Model[T] {
-	m.hidden = appendUnique(m.hidden, attributes...)
-	return m
+func (m *Model) MakeHidden(attributes ...string) {
+	if !live(m) {
+		return
+	}
+	ownLists(m)
+	m.r.hidden = appendUnique(m.r.hidden, attributes...)
 }
 
-// Append adds a name that is serialised with the row without being a column.
-//
-// The value comes from a raw attribute or a loaded relation -- the two
-// things a model can hold that the entity struct does not declare.
-func (m *Model[T]) Append(attributes ...string) *Model[T] {
-	m.appends = appendUnique(m.appends, attributes...)
-	return m
+// ownLists gives the row its own copy of the table's serialisation lists, the
+// first time one of them changes.
+func ownLists(m *Model) {
+	if m.r.ownLists {
+		return
+	}
+	m.r.hidden = slices.Clone(m.r.table.hidden)
+	m.r.visible = slices.Clone(m.r.table.visible)
+	m.r.appends = slices.Clone(m.r.table.appends)
+	m.r.ownLists = true
 }
 
-// GetAppends returns the names appended to serialisation.
-func (m *Model[T]) GetAppends() []string { return slices.Clone(m.appends) }
-
-// SetAppends replaces the names appended to serialisation.
-func (m *Model[T]) SetAppends(appends ...string) *Model[T] {
-	m.appends = slices.Clone(appends)
-	return m
+// hiddenList, visibleList and appendsList are the lists this row serialises
+// by: its own once it changed one, and the table's until then.
+func hiddenList(m *Model) []string {
+	if m.r.ownLists {
+		return m.r.hidden
+	}
+	return m.r.table.hidden
 }
 
-// HasAppended reports whether attribute is in the appended list.
-func (m *Model[T]) HasAppended(attribute string) bool {
-	return slices.Contains(m.appends, attribute)
+func visibleList(m *Model) []string {
+	if m.r.ownLists {
+		return m.r.visible
+	}
+	return m.r.table.visible
+}
+
+func appendsList(m *Model) []string {
+	if m.r.ownLists {
+		return m.r.appends
+	}
+	return m.r.table.appends
 }
 
 func appendUnique(list []string, values ...string) []string {
@@ -457,9 +451,7 @@ func appendUnique(list []string, values ...string) []string {
 
 func copyMap(in map[string]any) map[string]any {
 	out := make(map[string]any, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
+	maps.Copy(out, in)
 	return out
 }
 
@@ -476,33 +468,12 @@ func sortedKeys(in map[string]any) []string {
 	return out
 }
 
-// resetEntity clears the entity's columns, and puts the model back afterwards
-// when the entity is the one it lives inside.
-//
-// This used to be `*m.Entity = *new(T)` written where SetRawAttributes calls it,
-// and that line zeroed the model along with the columns: an entity that embeds
-// Model[T] contains this very model, so the assignment set the receiver's own
-// Entity to nil in the middle of the call, and the next line reflected over a
-// nil pointer. The failure was a panic inside hydration -- the path every row of
-// every query takes.
-//
-// A T that does not embed Model[T] is the simple case, and takes the simple
-// path: nothing of the model lives in the entity, so zeroing it is just zeroing
-// it.
-func resetEntity[T any](m *Model[T]) {
-	if m.Entity == nil {
-		return
-	}
-	index := entityIndex(m)
-	if index < 0 {
-		*m.Entity = *new(T)
-		return
-	}
-
+// resetEntity clears the entity's columns and puts the model back afterwards:
+// the model is inside the entity, so zeroing the struct zeroes it too, and the
+// row it points at is what the caller holds.
+func resetEntity(m *Model, entity reflect.Value) {
 	saved := *m
-	*m.Entity = *new(T)
-	// m is interior to the entity, so it has just been zeroed with it. Writing
-	// the copy back through it restores the same allocation the caller holds.
+	entity.SetZero()
 	*m = saved
 }
 
@@ -512,12 +483,13 @@ func resetEntity[T any](m *Model[T]) {
 // that names the key would otherwise re-key the row it was meant to edit.
 //
 // A row that does not exist yet still takes its key from Fill, since for a key
-// the database does not generate that map is where a new row's key comes
-// from. ForceFill and SetRawAttributes guard nothing: they are the explicit
-// paths, and the second is what a row read from the database is built with.
-func guarded[T any](m *Model[T], column string) bool {
-	if column == m.TenantColumn && column != "" {
+// the database does not generate that map is where a new row's key comes from.
+// ForceFill and SetRawAttributes guard nothing: they are the explicit paths, and
+// the second is what a row read from the database is built with.
+func guarded(m *Model, column string) bool {
+	t := m.r.table
+	if column == t.tenantColumn && column != "" {
 		return true
 	}
-	return m.Exists && column == m.PrimaryKey && column != ""
+	return m.r.exists && column == t.keyName
 }

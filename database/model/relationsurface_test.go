@@ -8,8 +8,7 @@ import (
 	"github.com/arandu-io/hesape/auth"
 )
 
-// The four methods a relation asks of a model, and the two accessors that
-// carry the list one of them reads.
+// The four things a relation asks of a model that nothing else does.
 
 func TestUnsetAttributeReachesTheRawAttributesAndNotTheFields(t *testing.T) {
 	m, _ := newUserModel()
@@ -17,7 +16,7 @@ func TestUnsetAttributeReachesTheRawAttributesAndNotTheFields(t *testing.T) {
 		t.Fatalf("SetRawAttributes: %v", err)
 	}
 
-	m.UnsetAttribute("posts_count")
+	refOf(m.base()).UnsetAttribute("posts_count")
 	if got := m.GetAttribute("posts_count"); got != nil {
 		t.Errorf("posts_count = %v after UnsetAttribute, want nil", got)
 	}
@@ -25,7 +24,7 @@ func TestUnsetAttributeReachesTheRawAttributesAndNotTheFields(t *testing.T) {
 	// A struct field is not a raw attribute and cannot be removed. Setting it to
 	// its zero value would be a different thing said with the same word, so the
 	// call is a no-op rather than a surprise.
-	m.UnsetAttribute("name")
+	refOf(m.base()).UnsetAttribute("name")
 	if got := m.GetAttribute("name"); got != "Ada" {
 		t.Errorf("name = %v after UnsetAttribute, want it untouched", got)
 	}
@@ -33,36 +32,31 @@ func TestUnsetAttributeReachesTheRawAttributesAndNotTheFields(t *testing.T) {
 
 func TestIsRelationReadsTheDeclarationAndNotTheLoadedValue(t *testing.T) {
 	m, _ := newUserModel()
-	m.RelationResolvers = map[string]func(*Model[user]) Relation{
-		"posts": func(*Model[user]) Relation { return nil },
-	}
+	declared(m, "posts")
 
 	// Declared and not loaded: still a relation. That is the question being
 	// asked, and answering it from the loaded values would say no.
-	if !m.IsRelation("posts") {
+	if !refOf(m.base()).IsRelation("posts") {
 		t.Error("a declared relation that is not loaded read as not a relation")
 	}
-	if m.IsRelation("name") {
+	if refOf(m.base()).IsRelation("name") {
 		t.Error("a column read as a relation")
 	}
 }
 
-func TestTouchesReadsTheListTheApplicationSet(t *testing.T) {
+func TestTouchesReadsTheListTheTableNames(t *testing.T) {
 	m, _ := newUserModel()
 
-	if m.Touches("posts") {
+	if refOf(m.base()).Touches("posts") {
 		t.Error("a model touches something by default; it must not")
 	}
 
-	m.SetTouchedRelations([]string{"posts"})
-	if !m.Touches("posts") {
-		t.Error("Touches did not read the list that was set")
+	touching, _ := newUserModel(func(s *TableSpec) { s.Touches = []string{"posts"} })
+	if !refOf(touching.base()).Touches("posts") {
+		t.Error("Touches did not read the list the spec named")
 	}
-	if m.Touches("comments") {
+	if refOf(touching.base()).Touches("comments") {
 		t.Error("Touches answered for a relation that is not in the list")
-	}
-	if got := m.GetTouchedRelations(); len(got) != 1 || got[0] != "posts" {
-		t.Errorf("GetTouchedRelations = %v", got)
 	}
 }
 
@@ -70,7 +64,7 @@ func TestTouchStampsTheUpdatedAtColumn(t *testing.T) {
 	m, conn := newUserModel()
 	conn.queue()
 
-	instance, err := m.NewFromBuilder(map[string]any{
+	instance, err := fromRecord(m, map[string]any{
 		"id": int64(1), "name": "Ada", "tenant_id": "acme",
 		"updated_at": time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
 	})
@@ -82,7 +76,7 @@ func TestTouchStampsTheUpdatedAtColumn(t *testing.T) {
 		t.Fatalf("Touch: %v", err)
 	}
 
-	if instance.Entity.UpdatedAt.Year() == 2020 {
+	if instance.UpdatedAt.Year() == 2020 {
 		t.Error("Touch left the old timestamp in place")
 	}
 	if len(conn.statements) == 0 {
@@ -94,8 +88,7 @@ func TestTouchStampsTheUpdatedAtColumn(t *testing.T) {
 // nothing wrong with a model that carries no timestamps -- there is just
 // nothing to do.
 func TestTouchIsANoOpOnAModelWithNothingToStamp(t *testing.T) {
-	m, conn := newUserModel()
-	m.Timestamps = false
+	m, conn := newUserModel(func(s *TableSpec) { s.NoTimestamps = true })
 
 	if err := m.Touch(context.Background(), auth.SystemGrant("users.write", "acme")); err != nil {
 		t.Fatalf("Touch: %v", err)

@@ -24,11 +24,10 @@ import (
 // WithTrashed on a model that does not soft delete, then force-deletes.
 func TestForceDeleteRefusesABuilderThatAlreadyFailed(t *testing.T) {
 	model, conn := newUserModel()
-	model.SoftDeletes = false
 
 	// WithTrashed on a model with no soft deletes fails the builder rather than
 	// returning an error, because it has to stay chainable.
-	builder := model.NewQuery().WithTrashed()
+	builder := newQuery(model.base()).WithTrashed()
 
 	affected, err := builder.ForceDelete(context.Background(), auth.SystemGrant("users.write", "acme"))
 	if err == nil {
@@ -46,9 +45,8 @@ func TestForceDeleteRefusesABuilderThatAlreadyFailed(t *testing.T) {
 // read side. It matters less than the delete and fails the same way.
 func TestFromQueryRefusesABuilderThatAlreadyFailed(t *testing.T) {
 	model, conn := newUserModel()
-	model.SoftDeletes = false
 
-	builder := model.NewQuery().WithTrashed()
+	builder := newQuery(model.base()).WithTrashed()
 
 	rows, err := builder.FromQuery(context.Background(), auth.SystemGrant("users.read", "acme"),
 		`SELECT * FROM users WHERE tenant_id = ?`, []any{"acme"})

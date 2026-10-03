@@ -11,13 +11,19 @@ import (
 )
 
 type User struct {
+	model.Model
+
 	ID    int64  `db:"id"`
 	Email string `db:"email"`
 }
 
-func main() {
-	users := model.NewModel[User]("users", nil, nil, nil)
+var table = model.NewTable(model.TableSpec{Name: "users", New: func() model.Entity { return new(User) }})
 
-	// The field is unexported.
+func main() {
+	var db model.DB
+	users := table.New(db).(*User)
+
+	// The field is unexported: neither the row nor the model inside it hands
+	// the connection out.
 	_ = users.Connection
 }

@@ -22,22 +22,22 @@ func TestWhereForwardsReachTheStatementAndStayScoped(t *testing.T) {
 
 	cases := []struct {
 		name  string
-		build func(*Builder[user]) *Builder[user]
+		build func(*Builder) *Builder
 		want  string
 	}{
-		{"WhereIn", func(b *Builder[user]) *Builder[user] {
+		{"WhereIn", func(b *Builder) *Builder {
 			return b.WhereIn("id", []any{1, 2, 3})
 		}, "in"},
-		{"WhereNotIn", func(b *Builder[user]) *Builder[user] {
+		{"WhereNotIn", func(b *Builder) *Builder {
 			return b.WhereNotIn("id", []any{4})
 		}, "not in"},
-		{"WhereNull", func(b *Builder[user]) *Builder[user] {
+		{"WhereNull", func(b *Builder) *Builder {
 			return b.WhereNull("deleted_at")
 		}, "is null"},
-		{"WhereNotNull", func(b *Builder[user]) *Builder[user] {
+		{"WhereNotNull", func(b *Builder) *Builder {
 			return b.WhereNotNull("email")
 		}, "is not null"},
-		{"WhereBetween", func(b *Builder[user]) *Builder[user] {
+		{"WhereBetween", func(b *Builder) *Builder {
 			return b.WhereBetween("id", 1, 10)
 		}, "between"},
 	}
@@ -47,7 +47,7 @@ func TestWhereForwardsReachTheStatementAndStayScoped(t *testing.T) {
 			model, conn := newUserModel()
 			conn.queue()
 
-			if _, err := c.build(model.NewQuery()).Get(context.Background(), g); err != nil {
+			if _, err := c.build(newQuery(model.base())).Get(context.Background(), g); err != nil {
 				t.Fatalf("Get: %v", err)
 			}
 
@@ -71,7 +71,7 @@ func TestDoesntExistIsExistsReadTheOtherWay(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue()
 
-	missing, err := model.NewQuery().Where("email", "nobody@example.test").DoesntExist(context.Background(), g)
+	missing, err := newQuery(model.base()).Where("email", "nobody@example.test").DoesntExist(context.Background(), g)
 	if err != nil {
 		t.Fatalf("DoesntExist: %v", err)
 	}
@@ -90,18 +90,18 @@ func TestAggregateForwardsNameTheirFunction(t *testing.T) {
 
 	for _, c := range []struct {
 		name string
-		call func(*Builder[user]) (any, error)
+		call func(*Builder) (any, error)
 	}{
-		{"sum", func(b *Builder[user]) (any, error) { return b.Sum(context.Background(), g, "id") }},
-		{"avg", func(b *Builder[user]) (any, error) { return b.Avg(context.Background(), g, "id") }},
-		{"min", func(b *Builder[user]) (any, error) { return b.Min(context.Background(), g, "id") }},
-		{"max", func(b *Builder[user]) (any, error) { return b.Max(context.Background(), g, "id") }},
+		{"sum", func(b *Builder) (any, error) { return b.Sum(context.Background(), g, "id") }},
+		{"avg", func(b *Builder) (any, error) { return b.Avg(context.Background(), g, "id") }},
+		{"min", func(b *Builder) (any, error) { return b.Min(context.Background(), g, "id") }},
+		{"max", func(b *Builder) (any, error) { return b.Max(context.Background(), g, "id") }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			model, conn := newUserModel()
 			conn.queue()
 
-			if _, err := c.call(model.NewQuery()); err != nil {
+			if _, err := c.call(newQuery(model.base())); err != nil {
 				t.Fatalf("%s: %v", c.name, err)
 			}
 

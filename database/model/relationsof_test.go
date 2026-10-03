@@ -11,15 +11,36 @@ import (
 
 // post is the other end of the relation under test.
 type post struct {
-	ID       int64  `db:"id"`
-	UserID   int64  `db:"user_id"`
-	Title    string `db:"title"`
-	TenantID string `db:"tenant_id"`
+	Model
+
+	ID        int64  `db:"id"`
+	UserID    int64  `db:"user_id"`
+	AccountID int64  `db:"account_id"`
+	Title     string `db:"title"`
+	TenantID  string `db:"tenant_id"`
 }
 
-func newPostModel() (*Model[post], *testConnection) {
+func newPostTable(configure ...func(*TableSpec)) *Table {
+	spec := TableSpec{Name: "posts", New: func() Entity { return new(post) }}
+	for _, c := range configure {
+		c(&spec)
+	}
+	return NewTable(spec)
+}
+
+func newPostModel() (*post, *testConnection) {
 	conn := newTestConnection()
-	return NewModel[post]("posts", conn, newTestGrammar(), &testProcessor{conn: conn}), conn
+	return newPostTable().New(conn).(*post), conn
+}
+
+// withPostsOn registers "posts" on the table of model: a has-many to a posts
+// table keyed by foreignKey, read through the connection the parent came from.
+func withPostsOn(model Entity, foreignKey string) *Table {
+	posts := newPostTable()
+	model.base().Table().Relate("posts", func(m *Model) Relation {
+		return HasMany(m, posts, foreignKey, "")
+	})
+	return posts
 }
 
 // TestAHasManyBetweenTwoRealModels is the end of the seam.
@@ -30,10 +51,10 @@ func newPostModel() (*Model[post], *testConnection) {
 // the thing the whole adapter exists for -- two real models, one relation, one
 // statement, scoped.
 func TestAHasManyBetweenTwoRealModels(t *testing.T) {
-	users, _ := newUserModel()
-	posts, postsConn := newPostModel()
+	users, conn := newUserModel()
+	posts := newPostTable()
 
-	parent, err := users.NewFromBuilder(map[string]any{
+	parent, err := fromRecord(users, map[string]any{
 		"id": int64(1), "name": "Ada", "tenant_id": "acme",
 	})
 	if err != nil {
@@ -42,15 +63,16 @@ func TestAHasManyBetweenTwoRealModels(t *testing.T) {
 
 	// The conventional keys: user_id on posts, id on users. Naming them here
 	// would be noise, and getting them wrong is what the convention prevents.
-	relation := HasManyOf(parent, posts, "", "")
+	relation := HasMany(&parent.Model, posts, "", "")
 
-	postsConn.queue()
+	conn.queue()
 	ctx, g := context.Background(), auth.SystemGrant("posts.read", "acme")
 	if _, err := relation.Get(ctx, g); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 
-	last := postsConn.last()
+	// The relation runs on the connection the parent came from.
+	last := conn.last()
 	if !strings.Contains(last.SQL, "posts") {
 		t.Errorf("the relation did not read the related table: %s", last.SQL)
 	}
@@ -72,27 +94,56 @@ func TestAHasManyBetweenTwoRealModels(t *testing.T) {
 	}
 }
 
+// TestARelationOnARowIsConstrainedAndOnThePrototypeIsNot: the same factory
+// narrows the relation to the row it was handed and leaves it open on the model
+// a query runs through, which is the one the eager loader resolves -- a
+// narrowing there would be to a parent that does not exist.
+func TestARelationOnARowIsConstrainedAndOnThePrototypeIsNot(t *testing.T) {
+	users, conn := newUserModel()
+	posts := newPostTable()
+
+	parent, err := fromRecord(users, map[string]any{"id": int64(1), "tenant_id": "acme"})
+	if err != nil {
+		t.Fatalf("NewFromBuilder: %v", err)
+	}
+
+	ctx, g := context.Background(), auth.SystemGrant("posts.read", "acme")
+	conn.queue()
+	if _, err := HasMany(&parent.Model, posts, "", "").Get(ctx, g); err != nil {
+		t.Fatalf("Get on the row's relation: %v", err)
+	}
+	if sql := conn.last().SQL; !strings.Contains(sql, `"posts"."user_id" = ?`) {
+		t.Errorf("SQL = %q, want the row's relation narrowed to its key", sql)
+	}
+
+	prototype := newQuery(users.base()).GetModel()
+	relation := HasMany(prototype, posts, "", "")
+	if wheres := relation.GetQuery().GetQuery().Wheres; len(wheres) != 0 {
+		t.Errorf("the prototype's relation carries %d wheres, want none: it stands for no row", len(wheres))
+	}
+}
+
 // TestABelongsToBetweenTwoRealModels is the inverse, and it reads the other
 // conventional key.
 func TestABelongsToBetweenTwoRealModels(t *testing.T) {
-	users, usersConn := newUserModel()
-	posts, _ := newPostModel()
+	posts, conn := newPostModel()
+	users := newUserTable()
 
-	child, err := posts.NewFromBuilder(map[string]any{
+	child, err := fromRecord(posts, map[string]any{
 		"id": int64(9), "user_id": int64(1), "title": "a post", "tenant_id": "acme",
 	})
 	if err != nil {
 		t.Fatalf("NewFromBuilder: %v", err)
 	}
 
-	relation := BelongsToModel(child, users, "user_id", "", "user")
+	relation := BelongsTo(&child.Model, users, "user_id", "", "user")
 
-	usersConn.queue()
+	conn.queue()
 	if _, err := relation.GetResults(context.Background(), auth.SystemGrant("users.read", "acme")); err != nil {
 		t.Fatalf("GetResults: %v", err)
 	}
 
-	last := usersConn.last()
+	last := conn.last()
 	if !strings.Contains(last.SQL, "users") {
 		t.Errorf("the relation did not read the owner's table: %s", last.SQL)
 	}
@@ -104,20 +155,33 @@ func TestABelongsToBetweenTwoRealModels(t *testing.T) {
 // TestARelationRefusesAGrantWithNoTenant: whatever else a relation is, it is a
 // read path, and a read path without authorization does not run.
 func TestARelationRefusesAGrantWithNoTenant(t *testing.T) {
-	users, _ := newUserModel()
-	posts, postsConn := newPostModel()
+	users, conn := newUserModel()
+	posts := newPostTable()
 
-	parent, err := users.NewFromBuilder(map[string]any{"id": int64(1), "tenant_id": "acme"})
+	parent, err := fromRecord(users, map[string]any{"id": int64(1), "tenant_id": "acme"})
 	if err != nil {
 		t.Fatalf("NewFromBuilder: %v", err)
 	}
 
-	if _, err := HasManyOf(parent, posts, "", "").Get(context.Background(), auth.Grant{}); err == nil {
+	if _, err := HasMany(&parent.Model, posts, "", "").Get(context.Background(), auth.Grant{}); err == nil {
 		t.Fatal("a relation ran under a grant that carries no tenant")
 	}
-	if len(postsConn.statements) != 0 {
-		t.Fatalf("it reached the connection anyway: %v", postsConn.sqls())
+	if len(conn.statements) != 0 {
+		t.Fatalf("it reached the connection anyway: %v", conn.sqls())
 	}
+}
+
+// TestARelationOnARowNothingBuiltPanicsWithTheReason: a relation reads its
+// connection off the parent, and a literal has none -- the factory is called
+// while declaring a relation, where there is no error to return.
+func TestARelationOnARowNothingBuiltPanicsWithTheReason(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil || !strings.Contains(r.(string), "did not build") {
+			t.Fatalf("recovered %v, want a panic naming the unwired row", r)
+		}
+	}()
+	HasMany(&(&user{}).Model, newPostTable(), "", "")
 }
 
 // A module, and the relation surface it reaches.
@@ -128,27 +192,26 @@ func TestARelationRefusesAGrantWithNoTenant(t *testing.T) {
 // compiles and returns the wrong rows is the failure the compile fixture cannot
 // see.
 
-// blog is what a module constructor keeps.
+// blog is what a module keeps: its tables, built once.
 type blog struct {
-	users *Model[account]
-	posts *Model[post]
+	users *Table
+	posts *Table
+	conn  *testConnection
 }
 
 func newBlog(conn *testConnection) *blog {
-	users := NewModel[account]("users", conn, newTestGrammar(), &testProcessor{conn: conn})
-	posts := NewModel[post]("posts", conn, newTestGrammar(), &testProcessor{conn: conn})
+	users := NewTable(TableSpec{Name: "users", New: func() Entity { return new(account) }})
+	posts := newPostTable()
 
-	users.RelationResolvers = map[string]func(*Model[account]) Relation{
-		"posts": func(u *Model[account]) Relation {
-			return HasManyOfUnconstrained(u, posts, "user_id", "id")
-		},
-	}
-	return &blog{users: users, posts: posts}
+	users.Relate("posts", func(u *Model) Relation {
+		return HasMany(u, posts, "user_id", "id")
+	})
+	return &blog{users: users, posts: posts, conn: conn}
 }
 
 // TestAModuleEagerLoadsAndReadsBackTheRelation is the whole of what the surface
 // is for: one call registers it, one query loads it, and the row a terminal
-// handed back carries it typed.
+// handed back carries it.
 func TestAModuleEagerLoadsAndReadsBackTheRelation(t *testing.T) {
 	conn := newTestConnection()
 	blog := newBlog(conn)
@@ -163,7 +226,7 @@ func TestAModuleEagerLoadsAndReadsBackTheRelation(t *testing.T) {
 	)
 
 	ctx, g := context.Background(), auth.SystemGrant("users.list", "acme")
-	rows, err := blog.users.NewQuery().With("posts").Get(ctx, g)
+	rows, err := blog.users.Query(conn).With("posts").Get(ctx, g)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -187,17 +250,17 @@ func TestAModuleEagerLoadsAndReadsBackTheRelation(t *testing.T) {
 		t.Errorf("the relation query names the tenant %d times, want 1: %s", got, relation)
 	}
 
-	// Read back typed, off the row the terminal handed over.
-	posts, ok := Related[account, post](rows[0], "posts")
+	// Read back off the row the terminal handed over.
+	posts, ok := rows[0].base().Related("posts")
 	if !ok {
 		t.Fatal("the loaded relation is not reachable from the row")
 	}
-	if len(posts) != 2 || posts[0].Title != "first" {
+	if len(posts) != 2 || posts[0].(*post).Title != "first" {
 		t.Fatalf("posts = %v, want the two rows whose user_id is this parent's key", posts)
 	}
 
 	// The parent that matched nothing is loaded and empty, not unloaded.
-	empty, ok := Related[account, post](rows[1], "posts")
+	empty, ok := rows[1].base().Related("posts")
 	if !ok {
 		t.Fatal("the parent with no children reads as a relation that was never loaded")
 	}
@@ -215,7 +278,7 @@ func TestAModuleFiltersByWhatTheRelationContains(t *testing.T) {
 	conn.queue()
 
 	ctx, g := context.Background(), auth.SystemGrant("users.list", "acme")
-	_, err := blog.users.NewQuery().
+	_, err := blog.users.Query(conn).
 		WhereHas("posts", func(sub *query.Builder) { sub.Where("published", "=", true) }).
 		WithCount("posts").
 		Get(ctx, g)
@@ -263,10 +326,26 @@ func TestAModuleRefusesToLoadARelationWithoutATenant(t *testing.T) {
 	blog := newBlog(conn)
 	conn.queue(query.Record{"id": int64(1), "name": "Ada", "tenant_id": "acme"})
 
-	if _, err := blog.users.NewQuery().With("posts").Get(context.Background(), auth.Grant{}); err == nil {
+	if _, err := blog.users.Query(conn).With("posts").Get(context.Background(), auth.Grant{}); err == nil {
 		t.Fatal("an eager load ran under a grant that carries no tenant")
 	}
 	if got := len(conn.sqls()); got != 0 {
 		t.Fatalf("it reached the connection anyway: %v", conn.sqls())
 	}
+}
+
+// TestRelateAfterTheFirstQueryPanics: a table is shared by every request at
+// once, so a relation added after it served one would be a write racing every
+// read.
+func TestRelateAfterTheFirstQueryPanics(t *testing.T) {
+	conn := newTestConnection()
+	blog := newBlog(conn)
+	_ = blog.users.Query(conn)
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("Relate after a query did not panic")
+		}
+	}()
+	blog.users.Relate("comments", func(u *Model) Relation { return HasMany(u, blog.posts, "", "") })
 }

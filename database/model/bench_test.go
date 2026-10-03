@@ -85,7 +85,7 @@ func BenchmarkHydrate(b *testing.B) {
 	for _, size := range benchSizes {
 		b.Run(fmt.Sprint(size), func(b *testing.B) {
 			model, _ := newUserModel()
-			builder := model.NewQuery()
+			builder := newQuery(model.base())
 			rows := benchRows(size)
 
 			b.ReportAllocs()
@@ -114,30 +114,31 @@ func BenchmarkHandScan(b *testing.B) {
 }
 
 // BenchmarkNewFromBuilder is one row on its own: the per-row cost with the
-// slice growth of Hydrate taken out of it.
+// slice growth of Hydrate taken out of it, and the bookkeeping allocated per row
+// rather than in the block Hydrate shares across a result.
 func BenchmarkNewFromBuilder(b *testing.B) {
 	model, _ := newUserModel()
-	row := benchRows(1)[0]
+	builder := newModelQuery(model.base())
+	record := benchRows(1)[0]
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, err := model.NewFromBuilder(row); err != nil {
+		if _, err := hydrateRow(builder, record, new(row)); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-// BenchmarkNewInstance measures what a hydrated row pays before a single
-// column is written: the clone of the events map, the global scopes and the
-// three visibility slices.
+// BenchmarkNewInstance measures what a row pays before a single column is
+// written: the entity, allocated by the table's New, and its bookkeeping.
 func BenchmarkNewInstance(b *testing.B) {
 	model, _ := newUserModel()
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, err := model.NewInstance(nil, true); err != nil {
+		if _, err := instanceOf(model, nil, true); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -147,7 +148,7 @@ func BenchmarkNewInstance(b *testing.B) {
 // reflection, on every call with no memoization.
 func BenchmarkGetAttributes(b *testing.B) {
 	model, _ := newUserModel()
-	instance, err := model.NewFromBuilder(benchRows(1)[0])
+	instance, err := fromRecord(model, benchRows(1)[0])
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -163,7 +164,7 @@ func BenchmarkGetAttributes(b *testing.B) {
 // then every key is looked up again through a linear scan over the field slice.
 func BenchmarkGetDirty(b *testing.B) {
 	model, _ := newUserModel()
-	instance, err := model.NewFromBuilder(benchRows(1)[0])
+	instance, err := fromRecord(model, benchRows(1)[0])
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -184,7 +185,7 @@ func BenchmarkSaveExisting(b *testing.B) {
 	model, conn := newUserModel()
 	g := auth.SystemGrant("users.write", "acme")
 
-	instance, err := model.NewFromBuilder(benchRows(1)[0])
+	instance, err := fromRecord(model, benchRows(1)[0])
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -212,7 +213,7 @@ func BenchmarkSaveNew(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
-		instance, err := model.NewInstance(nil, false)
+		instance, err := instanceOf(model, nil, false)
 		if err != nil {
 			b.Fatal(err)
 		}

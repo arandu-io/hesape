@@ -8,90 +8,42 @@ import (
 	"testing"
 )
 
-func twoAccounts() Collection[account] {
+func twoAccounts() Rows {
 	first, _ := newAccountModel()
-	first.Entity.ID = 1
-	first.Entity.Name = "Ada"
+	first.ID = 1
+	first.Name = "Ada"
 	second, _ := newAccountModel()
-	second.Entity.ID = 2
-	second.Entity.Name = "Grace"
-	return Collection[account]{first.Entity, second.Entity}
+	second.ID = 2
+	second.Name = "Grace"
+	return Rows{first, second}
 }
 
-func TestNewCollectionWrapsTheModels(t *testing.T) {
-	model, _ := newAccountModel()
+func TestRowsAnswerTheirSizeAndTheirFirst(t *testing.T) {
+	rows := twoAccounts()
 
-	if got := model.NewCollection(model.Entity); len(got) != 1 || got[0] != model.Entity {
-		t.Errorf("NewCollection = %v, want the one row back", got)
+	if rows.Count() != 2 || rows.IsEmpty() || !rows.IsNotEmpty() {
+		t.Errorf("Count = %d, IsEmpty = %v for two rows", rows.Count(), rows.IsEmpty())
 	}
-	if got := model.NewCollection(); len(got) != 0 {
-		t.Errorf("NewCollection() = %v, want the empty collection, which is the PHP's default argument", got)
+	if rows.First() != rows[0] {
+		t.Error("First is not the first row")
 	}
-}
-
-func TestMapAnswersTheCallbacksType(t *testing.T) {
-	names := Map(twoAccounts(), func(m *account, _ int) string { return m.Name })
-
-	if !reflect.DeepEqual([]string(names), []string{"Ada", "Grace"}) {
-		t.Errorf("Map = %v, want [Ada Grace]: the PHP drops to a base collection when the callback stopped returning models", names)
+	if (Rows{}).First() != nil || !(Rows{}).IsEmpty() {
+		t.Error("no rows has a first row")
 	}
 }
 
-func TestMapWithKeysPairsTheResult(t *testing.T) {
-	byName := MapWithKeys(twoAccounts(), func(m *account, _ int) (string, int64) {
-		return m.Name, m.ID
-	})
+func TestMergeReplacesARowWithTheSameKey(t *testing.T) {
+	rows := twoAccounts()
+	replacement, _ := newAccountModel()
+	replacement.ID = 2
+	replacement.Name = "Grace Hopper"
 
-	if byName["Grace"] != 2 {
-		t.Errorf("MapWithKeys = %v, want Grace at 2", byName)
+	merged := rows.Merge(Rows{replacement})
+	if len(merged) != 2 {
+		t.Fatalf("Merge = %d rows, want 2: the key was already there", len(merged))
 	}
-}
-
-func TestCountByGroupsWithTheCallersKey(t *testing.T) {
-	counts := CountBy(twoAccounts(), func(m *account, _ int) bool { return m.ID > 1 })
-
-	if counts[true] != 1 || counts[false] != 1 {
-		t.Errorf("CountBy = %v, want one on each side", counts)
-	}
-}
-
-func TestFlipMapsModelsToTheirPositions(t *testing.T) {
-	c := twoAccounts()
-
-	if got := c.Flip()[c[1]]; got != 1 {
-		t.Errorf("Flip put the second model at %d, want 1", got)
-	}
-}
-
-func TestFlattenKeepsTheModelsAsLeaves(t *testing.T) {
-	if got := twoAccounts().Flatten(); len(got) != 2 {
-		t.Errorf("Flatten = %v, want the two models: a model is not a list, so it is a leaf", got)
-	}
-}
-
-func TestPadAndPartitionDropToTheBaseCollection(t *testing.T) {
-	c := twoAccounts()
-
-	if got := c.Pad(4, nil); len(got) != 4 {
-		t.Errorf("Pad gave %d models, want 4", len(got))
-	}
-
-	passed, failed := c.Partition(func(m *account, _ int) bool { return m.ID == 1 })
-	if len(passed) != 1 || len(failed) != 1 {
-		t.Errorf("Partition = %d passed and %d failed, want one each", len(passed), len(failed))
-	}
-}
-
-func TestZipPairsTheCollections(t *testing.T) {
-	c := twoAccounts()
-	other, _ := newAccountModel()
-
-	tuples := Zip(c, []*account{other.Entity})
-	if len(tuples) != 2 || len(tuples[0]) != 2 {
-		t.Fatalf("Zip = %v, want two tuples of two", tuples)
-	}
-	if tuples[1][1] != nil {
-		t.Error("the short list pads with the zero value, which is what array_map does with null there")
+	if merged[1].(*account).Name != "Grace Hopper" {
+		t.Errorf("Merge kept %q, want the row merged in", merged[1].(*account).Name)
 	}
 }
 
@@ -99,7 +51,7 @@ func TestModelNotFoundErrorCarriesTheIDs(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue()
 
-	_, err := model.NewQuery().FindOrFail(context.Background(), grant(), 7)
+	_, err := newQuery(model.base()).FindOrFail(context.Background(), grant(), 7)
 	if !errors.Is(err, ErrModelNotFound) {
 		t.Fatalf("error = %v, want ErrModelNotFound", err)
 	}

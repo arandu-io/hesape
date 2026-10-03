@@ -11,13 +11,17 @@ import (
 )
 
 type User struct {
+	model.Model
+
 	ID    int64  `db:"id"`
 	Email string `db:"email"`
 }
 
+var users = model.NewTable(model.TableSpec{Name: "users", New: func() model.Entity { return new(User) }})
+
 func main() {
-	users := model.NewModel[User]("users", nil, nil, nil)
+	var db model.DB
 
 	// The context argument is missing.
-	_, _ = users.NewQuery().Get(auth.SystemGrant("users.read", "acme"))
+	_, _ = users.Query(db).Get(auth.SystemGrant("users.read", "acme"))
 }

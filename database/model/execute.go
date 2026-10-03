@@ -16,17 +16,17 @@ import (
 // itself is still the grammar's -- nothing here concatenates a fragment.
 
 // runSelect runs the query's SELECT and returns the rows.
-func runSelect[T any](b *Builder[T], ctx context.Context) ([]query.Record, error) {
+func runSelect(b *Builder, ctx context.Context) ([]query.Record, error) {
 	sql := b.query.ToSQL()
 	if err := b.query.Err(); err != nil {
 		return nil, err
 	}
-	rows, err := b.model.connection.Select(ctx, sql, b.query.GetBindings(), !b.query.UsingWritePDO())
+	rows, err := b.conn.connection.Select(ctx, sql, b.query.GetBindings(), !b.query.UsingWritePDO())
 	if err != nil {
-		return nil, fmt.Errorf("model: selecting from %s: %w", b.model.GetTable(), err)
+		return nil, fmt.Errorf("model: selecting from %s: %w", b.table.name, err)
 	}
-	if b.model.Processor != nil {
-		rows = b.model.Processor.ProcessSelect(b.query, rows)
+	if b.conn.processor != nil {
+		rows = b.conn.processor.ProcessSelect(b.query, rows)
 	}
 	return rows, nil
 }
@@ -35,7 +35,7 @@ func runSelect[T any](b *Builder[T], ctx context.Context) ([]query.Record, error
 //
 // The rows are sorted by column name before they are compiled and bound,
 // which is the only ordering available here, since a Go map has none.
-func runInsert[T any](b *Builder[T], ctx context.Context, values []map[string]any) (bool, error) {
+func runInsert(b *Builder, ctx context.Context, values []map[string]any) (bool, error) {
 	if len(values) == 0 {
 		return true, nil
 	}
@@ -43,54 +43,54 @@ func runInsert[T any](b *Builder[T], ctx context.Context, values []map[string]an
 		return false, err
 	}
 
-	sql := b.model.Grammar.CompileInsert(b.query, values)
+	sql := b.conn.grammar.CompileInsert(b.query, values)
 	bindings := make([]any, 0, len(values)*len(values[0]))
 	for _, row := range values {
 		for _, column := range sortedKeys(row) {
 			bindings = append(bindings, row[column])
 		}
 	}
-	ok, err := b.model.connection.Insert(ctx, sql, cleanBindings(bindings))
+	ok, err := b.conn.connection.Insert(ctx, sql, cleanBindings(bindings))
 	if err != nil {
-		return false, fmt.Errorf("model: inserting into %s: %w", b.model.GetTable(), err)
+		return false, fmt.Errorf("model: inserting into %s: %w", b.table.name, err)
 	}
 	return ok, nil
 }
 
 // runInsertGetID runs an INSERT for one row and returns the value generated
 // for sequence.
-func runInsertGetID[T any](b *Builder[T], ctx context.Context, values map[string]any, sequence string) (int64, error) {
+func runInsertGetID(b *Builder, ctx context.Context, values map[string]any, sequence string) (int64, error) {
 	if err := validateWriteQuery(b); err != nil {
 		return 0, err
 	}
 
-	sql := b.model.Grammar.CompileInsertGetID(b.query, values, sequence)
+	sql := b.conn.grammar.CompileInsertGetID(b.query, values, sequence)
 
 	bindings := make([]any, 0, len(values))
 	for _, column := range sortedKeys(values) {
 		bindings = append(bindings, values[column])
 	}
 
-	id, err := b.model.Processor.ProcessInsertGetID(ctx, b.query, sql, cleanBindings(bindings), sequence)
+	id, err := b.conn.processor.ProcessInsertGetID(ctx, b.query, sql, cleanBindings(bindings), sequence)
 	if err != nil {
-		return 0, fmt.Errorf("model: inserting into %s: %w", b.model.GetTable(), err)
+		return 0, fmt.Errorf("model: inserting into %s: %w", b.table.name, err)
 	}
 	return id, nil
 }
 
 // runUpdate runs an UPDATE for values and returns the number of rows
 // affected.
-func runUpdate[T any](b *Builder[T], ctx context.Context, values map[string]any) (int64, error) {
+func runUpdate(b *Builder, ctx context.Context, values map[string]any) (int64, error) {
 	if err := validateWriteQuery(b); err != nil {
 		return 0, err
 	}
 
-	sql := b.model.Grammar.CompileUpdate(b.query, values)
-	bindings := b.model.Grammar.PrepareBindingsForUpdate(b.query.GetRawBindings(), values)
+	sql := b.conn.grammar.CompileUpdate(b.query, values)
+	bindings := b.conn.grammar.PrepareBindingsForUpdate(b.query.GetRawBindings(), values)
 
-	affected, err := b.model.connection.Update(ctx, sql, cleanBindings(bindings))
+	affected, err := b.conn.connection.Update(ctx, sql, cleanBindings(bindings))
 	if err != nil {
-		return 0, fmt.Errorf("model: updating %s: %w", b.model.GetTable(), err)
+		return 0, fmt.Errorf("model: updating %s: %w", b.table.name, err)
 	}
 	return affected, nil
 }
@@ -99,12 +99,12 @@ func runUpdate[T any](b *Builder[T], ctx context.Context, values map[string]any)
 //
 // It goes through query.Connection's Update -- a statement that reports how many
 // rows it touched.
-func runUpsert[T any](b *Builder[T], ctx context.Context, values []map[string]any, uniqueBy, update []string) (int64, error) {
+func runUpsert(b *Builder, ctx context.Context, values []map[string]any, uniqueBy, update []string) (int64, error) {
 	if err := validateWriteQuery(b); err != nil {
 		return 0, err
 	}
 
-	sql := b.model.Grammar.CompileUpsert(b.query, values, uniqueBy, update)
+	sql := b.conn.grammar.CompileUpsert(b.query, values, uniqueBy, update)
 	bindings := make([]any, 0, len(values)*len(values[0]))
 	for _, row := range values {
 		for _, column := range sortedKeys(row) {
@@ -112,25 +112,25 @@ func runUpsert[T any](b *Builder[T], ctx context.Context, values []map[string]an
 		}
 	}
 
-	affected, err := b.model.connection.Update(ctx, sql, cleanBindings(bindings))
+	affected, err := b.conn.connection.Update(ctx, sql, cleanBindings(bindings))
 	if err != nil {
-		return 0, fmt.Errorf("model: upserting into %s: %w", b.model.GetTable(), err)
+		return 0, fmt.Errorf("model: upserting into %s: %w", b.table.name, err)
 	}
 	return affected, nil
 }
 
 // runDelete runs a DELETE and returns the number of rows affected.
-func runDelete[T any](b *Builder[T], ctx context.Context) (int64, error) {
+func runDelete(b *Builder, ctx context.Context) (int64, error) {
 	if err := validateWriteQuery(b); err != nil {
 		return 0, err
 	}
 
-	sql := b.model.Grammar.CompileDelete(b.query)
-	bindings := b.model.Grammar.PrepareBindingsForDelete(b.query.GetRawBindings())
+	sql := b.conn.grammar.CompileDelete(b.query)
+	bindings := b.conn.grammar.PrepareBindingsForDelete(b.query.GetRawBindings())
 
-	affected, err := b.model.connection.Delete(ctx, sql, cleanBindings(bindings))
+	affected, err := b.conn.connection.Delete(ctx, sql, cleanBindings(bindings))
 	if err != nil {
-		return 0, fmt.Errorf("model: deleting from %s: %w", b.model.GetTable(), err)
+		return 0, fmt.Errorf("model: deleting from %s: %w", b.table.name, err)
 	}
 	return affected, nil
 }
@@ -138,8 +138,8 @@ func runDelete[T any](b *Builder[T], ctx context.Context) (int64, error) {
 // validateWriteQuery applies the operator policy of the grammar that will
 // actually compile the model write. SetQuery is public, so the query carried
 // by a model may have been constructed with a different dialect.
-func validateWriteQuery[T any](b *Builder[T]) error {
-	compilerGrammar := b.model.Grammar
+func validateWriteQuery(b *Builder) error {
+	compilerGrammar := b.conn.grammar
 	b.query.Grammar = compilerGrammar
 	b.query.ApplyBeforeQueryCallbacks()
 	if err := b.query.Err(); err != nil {
@@ -156,7 +156,7 @@ func validateWriteQuery[T any](b *Builder[T]) error {
 
 // runAggregate returns the one row an aggregate select returns, read out of
 // the column the grammar aliases as "aggregate".
-func runAggregate[T any](b *Builder[T], ctx context.Context, function string, columns []any) (any, error) {
+func runAggregate(b *Builder, ctx context.Context, function string, columns []any) (any, error) {
 	aggregate := clone(b)
 	aggregate.query = aggregate.query.
 		CloneWithout("columns", "orders").
@@ -175,7 +175,7 @@ func runAggregate[T any](b *Builder[T], ctx context.Context, function string, co
 			return value, nil
 		}
 	}
-	return nil, fmt.Errorf("model: the %s query on %s came back without an aggregate column", function, b.model.GetTable())
+	return nil, fmt.Errorf("model: the %s query on %s came back without an aggregate column", function, b.table.name)
 }
 
 // cleanBindings drops every query.Expression from bindings: an expression

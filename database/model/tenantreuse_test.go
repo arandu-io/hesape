@@ -12,7 +12,7 @@ import (
 
 // One builder, two Grants.
 //
-// A *Builder[T] is a value a caller can hold and run more than once, and
+// A *Builder is a value a caller can hold and run more than once, and
 // prepare short-circuits on a flag (`if b.prepared`). Those two facts together
 // are the shape of a tenant leak: if the flag ever lets the second run reuse the
 // first run's scoped query, the second Grant reads the first Grant's rows and
@@ -34,7 +34,7 @@ func TestOneBuilderUnderTwoGrantsScopesEachRunSeparately(t *testing.T) {
 
 	// One builder, held by the caller, as a repository or a scope helper would
 	// hold it.
-	builder := model.NewQuery().Where("name", "Ada")
+	builder := newQuery(model.base()).Where("name", "Ada")
 
 	conn.queue()
 	if _, err := builder.Get(context.Background(), auth.SystemGrant("users.read", "acme")); err != nil {
@@ -81,7 +81,7 @@ func TestOneBuilderUnderTwoGrantsScopesEachRunSeparately(t *testing.T) {
 func TestRunningABuilderDoesNotScopeTheBuilderTheCallerKept(t *testing.T) {
 	model, conn := newUserModel()
 
-	builder := model.NewQuery().Where("name", "Ada")
+	builder := newQuery(model.base()).Where("name", "Ada")
 
 	conn.queue()
 	if _, err := builder.Get(context.Background(), auth.SystemGrant("users.read", "acme")); err != nil {
@@ -108,8 +108,8 @@ func TestRunningABuilderDoesNotScopeTheBuilderTheCallerKept(t *testing.T) {
 // reader having to prove the second copy redundant.
 //
 // It is prepare that owns it. The relation layer asks the builder first
-// (concerns.OwnTenantScoper) and the typed builder answers yes, because prepare
-// filters on the column the model itself declares. The relation layer only knows
+// (concerns.OwnTenantScoper) and the builder answers yes, because prepare
+// filters on the column the table itself declares. The relation layer only knows
 // the default name, so on a model that renamed the column it would have written
 // a second filter on a column that is not there, and on a shared table a filter
 // on a column that exists nowhere.
@@ -124,20 +124,20 @@ func TestRunningABuilderDoesNotScopeTheBuilderTheCallerKept(t *testing.T) {
 // TestARelationNamesTheTenantOnceAndNamesIt is the statement itself: the filter
 // is there, and there is one of it.
 func TestARelationNamesTheTenantOnceAndNamesIt(t *testing.T) {
-	users, _ := newUserModel()
-	posts, postsConn := newPostModel()
+	users, conn := newUserModel()
+	posts := newPostTable()
 
-	parent, err := users.NewFromBuilder(map[string]any{"id": int64(1), "tenant_id": "acme"})
+	parent, err := fromRecord(users, map[string]any{"id": int64(1), "tenant_id": "acme"})
 	if err != nil {
 		t.Fatalf("NewFromBuilder: %v", err)
 	}
 
-	postsConn.queue()
-	if _, err := HasManyOf(parent, posts, "", "").Get(context.Background(), auth.SystemGrant("posts.read", "acme")); err != nil {
+	conn.queue()
+	if _, err := HasMany(&parent.Model, posts, "", "").Get(context.Background(), auth.SystemGrant("posts.read", "acme")); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 
-	last := postsConn.last()
+	last := conn.last()
 	if got := strings.Count(last.SQL, `"posts"."tenant_id"`); got != 1 {
 		t.Errorf(`the relation names "posts"."tenant_id" %d times, want 1: %s`, got, last.SQL)
 	}
@@ -153,36 +153,36 @@ func TestARelationNamesTheTenantOnceAndNamesIt(t *testing.T) {
 	}
 }
 
-// TestTheTypedBuilderPromisesToScopeItsOwnTable reads the claim the relation
+// TestTheBuilderPromisesToScopeItsOwnTable reads the claim the relation
 // layer trusts. It is one line of production code and it is load bearing: with
 // it false, the clause comes back twice; with it true and prepare not
 // delivering, it never comes at all.
-func TestTheTypedBuilderPromisesToScopeItsOwnTable(t *testing.T) {
+func TestTheBuilderPromisesToScopeItsOwnTable(t *testing.T) {
 	posts, _ := newPostModel()
 
-	scoper, ok := posts.NewQuery().Ref().(concerns.OwnTenantScoper)
+	scoper, ok := newQuery(posts.base()).Ref().(concerns.OwnTenantScoper)
 	if !ok {
-		t.Fatal("the typed builder no longer answers OwnTenantScoper, so a relation over it writes the filter itself -- and only ever under the default column name")
+		t.Fatal("the builder no longer answers OwnTenantScoper, so a relation over it writes the filter itself -- and only ever under the default column name")
 	}
 	if !scoper.ScopesOwnTableByTenant() {
-		t.Fatal("the typed builder says it does not scope its own table, which prepare does")
+		t.Fatal("the builder says it does not scope its own table, which prepare does")
 	}
 }
 
 // TestPrepareIsWhatPutsTheTenantOnTheOwnTable is the promise paid.
 //
 // It reaches under the relation deliberately: ScopeTenant is asked to scope the
-// typed builder and answers by adding nothing at all, so whatever tenant filter
+// builder and answers by adding nothing at all, so whatever tenant filter
 // the statement ends up carrying can only have come from prepare. A change that
 // dropped it there would leave this test looking at a statement with no tenant
 // in it, which is the failure this split has to be caught by.
 func TestPrepareIsWhatPutsTheTenantOnTheOwnTable(t *testing.T) {
 	posts, conn := newPostModel()
 
-	builder := posts.NewQuery()
+	builder := newQuery(posts.base())
 	g := auth.SystemGrant("posts.read", "acme")
 
-	scoped, err := concerns.ScopeTenant(builder.Ref(), posts.Ref(), g)
+	scoped, err := concerns.ScopeTenant(builder.Ref(), refOf(posts.base()), g)
 	if err != nil {
 		t.Fatalf("ScopeTenant: %v", err)
 	}

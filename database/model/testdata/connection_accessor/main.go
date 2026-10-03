@@ -12,12 +12,17 @@ import (
 )
 
 type User struct {
+	model.Model
+
 	ID    int64  `db:"id"`
 	Email string `db:"email"`
 }
 
+var table = model.NewTable(model.TableSpec{Name: "users", New: func() model.Entity { return new(User) }})
+
 func main() {
-	users := model.NewModel[User]("users", nil, nil, nil)
+	var db model.DB
+	users := table.New(db).(*User)
 
 	// There is no accessor for the connection.
 	_ = users.GetConnection()

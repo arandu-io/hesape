@@ -42,32 +42,14 @@ var ErrMultipleRecordsFound = errors.New("model: multiple records found")
 // So it does not run.
 var ErrNoTenant = errors.New("model: the grant carries no tenant, and a query without one reads every tenant (call auth.Authorize, or auth.SystemGrant with the tenant this work belongs to)")
 
-// ErrNoKey is what Delete returns when the model has no primary key defined.
-var ErrNoKey = errors.New("model: no primary key defined on model")
-
-// ErrEmptyCollection is what ToQuery returns for an empty collection: there
-// is no model to take the table from.
+// ErrEmptyCollection is what Rows.ToQuery returns for no rows: there is no row
+// to take the table from.
 var ErrEmptyCollection = errors.New("model: unable to create query for empty collection")
 
-// ErrRowHasNoModel is what a relation load reports when the rows it was handed
-// carry no model to attach anything to.
-//
-// A relation is attached to the model behind a row, and a row reaches its model
-// only when T embeds Model[T]: a plain struct has no field to point back with,
-// and a struct written as a literal has a zero model inside it. Loading onto
-// either would run the query, match the rows and attach the result to nothing,
-// so it says so instead -- a silent success here is a relation the next line
-// reads and does not find.
-//
-// It is wrapped with how many of the rows were unreachable, because one literal
-// in a collection of hydrated rows and a collection that is entirely the plain
-// shape are different mistakes.
-var ErrRowHasNoModel = errors.New("model: these rows carry no model to load a relation onto (embed Model[T] in the entity, or read the rows back through a query)")
-
-// ErrRelationNotFound is returned when a query names a relation the model never
-// registered: an eager load of "author" on a model that declares no author, a
-// nested path whose second segment does not exist on the model the first
-// segment reaches, or a route binding through a relation that is not there.
+// ErrRelationNotFound is returned when a query names a relation the table never
+// registered: an eager load of "author" on a table that declares no author, or a
+// nested path whose second segment does not exist on the table the first
+// segment reaches.
 //
 // Wrapping it always carries the name and the table, because the useful part of
 // the message is which relation was asked for on which model. It is a
@@ -75,13 +57,6 @@ var ErrRowHasNoModel = errors.New("model: these rows carry no model to load a re
 // declaration, not a retry -- so callers usually let it travel rather than
 // matching on it.
 var ErrRelationNotFound = errors.New("model: call to undefined relationship")
-
-// ErrNamedScopeNotFound is what CallNamedScope reports for a scope the model
-// never registered.
-//
-// A scope is an entry in Model.NamedScopes, so the miss is a missing key
-// rather than a missing method.
-var ErrNamedScopeNotFound = errors.New("model: call to undefined named scope")
 
 // ModelNotFoundError carries what ModelNotFoundException records beyond its
 // message: the model that was looked for and the ids it was looked for by.

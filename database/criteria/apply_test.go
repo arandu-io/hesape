@@ -12,14 +12,10 @@ import (
 	"github.com/arandu-io/hesape/database/query/grammars"
 )
 
-// invoice stands in for an entity, so that the builder the application actually
-// uses can be named here.
-type invoice struct{}
-
 // The model builder satisfies the target as written, with no adapter and no
 // method added for it. A signature that drifted would fail to compile here
 // rather than at the first listing screen.
-var _ criteria.Target[*model.Builder[invoice]] = (*model.Builder[invoice])(nil)
+var _ criteria.Target[*model.Builder] = (*model.Builder)(nil)
 
 // recorder is a Target that writes down what it was asked for, so the
 // translation can be read without a database.

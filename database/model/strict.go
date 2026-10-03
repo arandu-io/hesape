@@ -138,7 +138,7 @@ func HandleDiscardedAttributeViolationUsing(callback func(model any, keys []stri
 // HandleMissingAttributeViolationUsing registered.
 //
 // Most of what this would catch the compiler catches first: a row is a struct,
-// and found.Entity.Naem does not build. What is left is the read by name --
+// and user.Naem does not build. What is left is the read by name --
 // GetAttribute takes a string -- which is where a typo still survives to run
 // time.
 func PreventAccessingMissingAttributes(value ...bool) {
@@ -167,13 +167,13 @@ func HandleMissingAttributeViolationUsing(callback func(model any, key string)) 
 }
 
 // handleLazyLoadingViolation reports a lazy-loading violation to the
-// registered callback, when PreventLazyLoading is on. With no callback
-// registered, nothing happens.
+// registered callback, with the entity, when PreventLazyLoading is on. With no
+// callback registered, nothing happens.
 //
 // Unlike handleMissingAttributeViolation, it has no exempt case for a model
 // that does not exist yet or was just created: there is no fallback
 // behavior here left to exempt anything from, only the callback.
-func handleLazyLoadingViolation[T any](m *Model[T], key string) {
+func handleLazyLoadingViolation(m *Model, key string) {
 	if !PreventsLazyLoading() {
 		return
 	}
@@ -182,15 +182,15 @@ func handleLazyLoadingViolation[T any](m *Model[T], key string) {
 	strict.mu.RUnlock()
 
 	if callback != nil {
-		callback(m, key)
+		callback(m.r.self, key)
 	}
 }
 
 // handleMissingAttributeViolation reports a missing-attribute violation to
-// the registered callback, when PreventAccessingMissingAttributes is on and
-// the model exists.
-func handleMissingAttributeViolation[T any](m *Model[T], key string) {
-	if !PreventsAccessingMissingAttributes() || !m.Exists {
+// the registered callback, with the entity, when
+// PreventAccessingMissingAttributes is on and the row exists.
+func handleMissingAttributeViolation(m *Model, key string) {
+	if !PreventsAccessingMissingAttributes() || !m.r.exists {
 		return
 	}
 	strict.mu.RLock()
@@ -198,13 +198,13 @@ func handleMissingAttributeViolation[T any](m *Model[T], key string) {
 	strict.mu.RUnlock()
 
 	if callback != nil {
-		callback(m, key)
+		callback(m.r.self, key)
 	}
 }
 
 // handleDiscardedAttributeViolation returns the error Fill reports for the
 // discarded keys, or nil when a callback took the violation instead.
-func handleDiscardedAttributeViolation[T any](m *Model[T], keys []string) error {
+func handleDiscardedAttributeViolation(m *Model, keys []string) error {
 	if len(keys) == 0 || !PreventsSilentlyDiscardingAttributes() {
 		return nil
 	}
@@ -213,10 +213,10 @@ func handleDiscardedAttributeViolation[T any](m *Model[T], keys []string) error 
 	strict.mu.RUnlock()
 
 	if callback != nil {
-		callback(m, keys)
+		callback(m.r.self, keys)
 		return nil
 	}
-	return fmt.Errorf("%w: %s on %s", ErrMassAssignment, keys, m.GetTable())
+	return fmt.Errorf("%w: %s on %s", ErrMassAssignment, keys, m.r.table.name)
 }
 
 // optionalBool reads a variadic bool as an optional argument defaulting to

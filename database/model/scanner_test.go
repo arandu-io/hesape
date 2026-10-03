@@ -113,6 +113,8 @@ var (
 // document is an entity whose columns are the three kinds of field that had no
 // way into a struct: a slice, a struct, and a named string that validates.
 type document struct {
+	Model
+
 	ID      int64   `db:"id"`
 	Roles   roles   `db:"roles"`
 	Address address `db:"address"`
@@ -120,9 +122,9 @@ type document struct {
 	Backup  *roles  `db:"backup"`
 }
 
-func newDocumentModel() *Model[document] {
+func newDocumentModel() *document {
 	conn := newTestConnection()
-	return NewModel[document]("documents", conn, newTestGrammar(), &testProcessor{conn: conn})
+	return NewTable(TableSpec{Name: "documents", New: func() Entity { return new(document) }}).New(conn).(*document)
 }
 
 // The whole of the gap. A field whose type reads itself out of a column never
@@ -144,14 +146,14 @@ func TestAFieldThatReadsItselfOutOfAColumnIsAskedTo(t *testing.T) {
 		t.Fatalf("SetRawAttributes: %v", err)
 	}
 
-	if got := strings.Join(model.Entity.Roles, ","); got != "admin,auditor" {
-		t.Errorf("Entity.Roles = %v, want [admin auditor]", model.Entity.Roles)
+	if got := strings.Join(model.Roles, ","); got != "admin,auditor" {
+		t.Errorf("Entity.Roles = %v, want [admin auditor]", model.Roles)
 	}
-	if model.Entity.Address.City != "Asuncion" {
-		t.Errorf("Entity.Address.City = %q, want Asuncion", model.Entity.Address.City)
+	if model.Address.City != "Asuncion" {
+		t.Errorf("Entity.Address.City = %q, want Asuncion", model.Address.City)
 	}
-	if model.Entity.Status != statusPaid {
-		t.Errorf("Entity.Status = %q, want paid", model.Entity.Status)
+	if model.Status != statusPaid {
+		t.Errorf("Entity.Status = %q, want paid", model.Status)
 	}
 }
 
@@ -164,11 +166,11 @@ func TestAPointerToSuchAFieldIsAllocatedAndThenAsked(t *testing.T) {
 		t.Fatalf("SetRawAttributes: %v", err)
 	}
 
-	if model.Entity.Backup == nil {
+	if model.Backup == nil {
 		t.Fatal("Entity.Backup is nil: a pointer field is allocated before it is written")
 	}
-	if got := strings.Join(*model.Entity.Backup, ","); got != "archivist" {
-		t.Errorf("Entity.Backup = %v, want [archivist]", *model.Entity.Backup)
+	if got := strings.Join(*model.Backup, ","); got != "archivist" {
+		t.Errorf("Entity.Backup = %v, want [archivist]", *model.Backup)
 	}
 }
 
@@ -204,8 +206,8 @@ func TestAnEnumStillHydratesFromWhatADriverHandsBack(t *testing.T) {
 			if err := model.SetRawAttributes(map[string]any{"status": c.value}, true); err != nil {
 				t.Fatalf("SetRawAttributes: %v", err)
 			}
-			if model.Entity.Status != statusOpen {
-				t.Errorf("Entity.Status = %q, want open", model.Entity.Status)
+			if model.Status != statusOpen {
+				t.Errorf("Entity.Status = %q, want open", model.Status)
 			}
 		})
 	}
@@ -227,17 +229,17 @@ func TestANullIsTheZeroRatherThanSomethingTheTypeHasToRefuse(t *testing.T) {
 		t.Fatalf("SetRawAttributes: %v", err)
 	}
 
-	if model.Entity.Roles != nil {
-		t.Errorf("Entity.Roles = %v, want nothing", model.Entity.Roles)
+	if model.Roles != nil {
+		t.Errorf("Entity.Roles = %v, want nothing", model.Roles)
 	}
-	if model.Entity.Address.City != "" {
-		t.Errorf("Entity.Address.City = %q, want empty", model.Entity.Address.City)
+	if model.Address.City != "" {
+		t.Errorf("Entity.Address.City = %q, want empty", model.Address.City)
 	}
-	if model.Entity.Status != "" {
-		t.Errorf("Entity.Status = %q, want empty", model.Entity.Status)
+	if model.Status != "" {
+		t.Errorf("Entity.Status = %q, want empty", model.Status)
 	}
-	if model.Entity.Backup != nil {
-		t.Errorf("Entity.Backup = %v, want nil", model.Entity.Backup)
+	if model.Backup != nil {
+		t.Errorf("Entity.Backup = %v, want nil", model.Backup)
 	}
 }
 
@@ -250,8 +252,8 @@ func TestAValueAlreadyOfTheFieldsTypeIsAssignedDirectly(t *testing.T) {
 		t.Fatalf("SetAttribute: %v", err)
 	}
 
-	if got := strings.Join(model.Entity.Roles, ","); got != "admin" {
-		t.Errorf("Entity.Roles = %v, want [admin]", model.Entity.Roles)
+	if got := strings.Join(model.Roles, ","); got != "admin" {
+		t.Errorf("Entity.Roles = %v, want [admin]", model.Roles)
 	}
 }
 

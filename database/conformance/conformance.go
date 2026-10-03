@@ -515,6 +515,8 @@ func testUniqueViolation(t *testing.T, db *database.DB) {
 // conformanceAccount is the entity testModelUniqueViolation writes through the
 // model layer.
 type conformanceAccount struct {
+	model.Model
+
 	ID       string `db:"id"`
 	TenantID string `db:"tenant_id"`
 	Email    string `db:"email"`
@@ -536,30 +538,33 @@ func testModelUniqueViolation(t *testing.T, db *database.DB) {
 		t.Fatalf("create: %v", err)
 	}
 
-	accounts := model.NewModel[conformanceAccount](name, db, db.GetQueryGrammar(), db.GetPostProcessor())
-	accounts.KeyType = "string"
-	accounts.Incrementing = false
-	accounts.Timestamps = false
+	accounts := model.NewTable(model.TableSpec{
+		Name:         name,
+		New:          func() model.Entity { return new(conformanceAccount) },
+		ManualKey:    true,
+		NoTimestamps: true,
+	})
 	g := auth.SystemGrant("accounts.write", "tenant-1")
 
 	for _, row := range []map[string]any{
 		{"id": "1", "email": "ana@example.com"},
 		{"id": "2", "email": "bia@example.com"},
 	} {
-		if _, err := accounts.NewQuery().Create(ctx, g, row); err != nil {
+		if _, err := accounts.Query(db).Create(ctx, g, row); err != nil {
 			t.Fatalf("Create %v: %v", row["id"], err)
 		}
 	}
 
-	_, err := accounts.NewQuery().Create(ctx, g, map[string]any{"id": "3", "email": "ana@example.com"})
+	_, err := accounts.Query(db).Create(ctx, g, map[string]any{"id": "3", "email": "ana@example.com"})
 	if !errors.Is(err, database.ErrUniqueViolation) {
 		t.Fatalf("Create with a duplicate email: error = %v, want errors.Is(err, database.ErrUniqueViolation)", err)
 	}
 
-	existing, err := accounts.NewFromBuilder(map[string]any{"id": "2", "tenant_id": "tenant-1", "email": "bia@example.com"})
-	if err != nil {
-		t.Fatalf("NewFromBuilder: %v", err)
+	found, err := accounts.Query(db).Find(ctx, g, "2")
+	if err != nil || found == nil {
+		t.Fatalf("Find: %v, %v", found, err)
 	}
+	existing := found.(*conformanceAccount)
 	if _, err := existing.Update(ctx, g, map[string]any{"email": "ana@example.com"}); !errors.Is(err, database.ErrUniqueViolation) {
 		t.Fatalf("Update with a duplicate email: error = %v, want errors.Is(err, database.ErrUniqueViolation)", err)
 	}

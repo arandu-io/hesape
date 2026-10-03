@@ -32,8 +32,8 @@ import (
 // seeds every parent with an empty collection first -- so a childless parent
 // read back as a relation that was never loaded.
 //
-// A relation is registered on the model by name, in RelationResolvers, because
-// Go cannot look up a method by name and stay type safe.
+// A relation is registered on the table by name, with Relate, because Go cannot
+// look up a method by name and stay type safe.
 type Relation interface {
 	relations.Relation
 
@@ -101,20 +101,19 @@ type MorphRelation interface {
 	RelationForMorphType(morphType string) (Relation, error)
 }
 
-// GetRelationWithoutConstraints resolves relation by calling its registered
-// resolver.
+// GetRelationWithoutConstraints resolves relation by calling the function the
+// table registered for it with Relate.
 //
-// What comes back must not be narrowed to one parent, and it is the resolver
-// that promises so: this is called with the model the builder queries through,
-// which for a list query is a prototype carrying no key at all. The
-// Unconstrained constructors in relationsof.go are what a resolver registers,
-// and the note at the top of that file is why.
-func (b *Builder[T]) GetRelationWithoutConstraints(name string) (Relation, error) {
-	resolver, ok := b.model.RelationResolvers[name]
+// What comes back must not be narrowed to one parent, and the prototype is what
+// promises so: the function is called with the model the builder runs through,
+// which stands for no row, and the relation factories build an unconstrained
+// relation from it -- the eager loader narrows it to the batch afterwards.
+func (b *Builder) GetRelationWithoutConstraints(name string) (Relation, error) {
+	resolver, ok := b.table.relation(name)
 	if !ok {
-		return nil, fmt.Errorf("%w: %s on %s", ErrRelationNotFound, name, b.model.GetTable())
+		return nil, fmt.Errorf("%w: %s on %s", ErrRelationNotFound, name, b.table.name)
 	}
-	return resolver(b.model), nil
+	return resolver(b.GetModel()), nil
 }
 
 // existenceSubquery is the subquery Has, WhereHas and WithCount hang off: the

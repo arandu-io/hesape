@@ -15,14 +15,18 @@ import (
 // User stands in for any entity an application owns. What is under test is the
 // shape of the contract, which does not depend on the row.
 type User struct {
+	model.Model
+
 	ID    int64  `db:"id"`
 	Email string `db:"email"`
 }
 
+var users = model.NewTable(model.TableSpec{Name: "users", New: func() model.Entity { return new(User) }})
+
 func main() {
-	users := model.NewModel[User]("users", nil, nil, nil)
+	var db model.DB
 
 	// The Grant argument is missing. There is no overload without it, so a read
 	// that nobody authorized cannot be written by accident and shipped.
-	_, _ = users.NewQuery().Where("email", "ada@example.test").First(context.Background())
+	_, _ = users.Query(db).Where("email", "ada@example.test").First(context.Background())
 }

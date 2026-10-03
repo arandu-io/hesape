@@ -1,70 +1,89 @@
 package model
 
 import (
-	"reflect"
+	"context"
 	"slices"
 	"sync"
+
+	"github.com/arandu-io/hesape/auth"
 )
 
-// ignoreOnTouch holds the model types for which touch propagation is
-// currently suspended.
+// ignoreOnTouch holds the tables for which touch propagation is currently
+// suspended.
 //
-// It is a package variable behind a mutex, the same shape strict.go uses for
-// its switches: the state is process-wide rather than per-model, so any
-// goroutine calling WithoutTouchingOn or IsIgnoringTouch on any model type
-// sees the same list. The entries are types rather than names, because a type
-// is what identifies a model in Go.
+// It is a package variable behind a mutex, the same shape strict.go uses for its
+// switches: the state is process-wide rather than per-row, so any goroutine
+// calling WithoutTouchingOn or IsIgnoringTouch sees the same list.
 var ignoreOnTouch struct {
-	mu    sync.RWMutex
-	types []reflect.Type
+	mu     sync.RWMutex
+	tables []*Table
 }
 
-// WithoutTouching suspends touch propagation for T for the length of
-// callback: a relation whose owner would have had its updated_at bumped is
-// left alone until callback returns.
-//
-// It is a package-level generic function rather than a method, because no
-// model instance is needed -- only the type identifies which relations to
-// suspend.
-func WithoutTouching[T any](callback func() error) error {
-	return WithoutTouchingOn([]reflect.Type{reflect.TypeFor[T]()}, callback)
+// WithoutTouching suspends touch propagation for the table for the length of
+// callback: a relation whose owner would have had its updated_at bumped is left
+// alone until callback returns.
+func (t *Table) WithoutTouching(callback func() error) error {
+	return WithoutTouchingOn([]*Table{t}, callback)
 }
 
-// WithoutTouchingOn suspends touch propagation for every type in models for
-// the length of callback, restoring the previous list via defer once callback
-// returns -- even when it returns an error.
-//
-// It takes reflect.Type values rather than name strings, because Go cannot
-// reach a type from a name in a string.
-func WithoutTouchingOn(models []reflect.Type, callback func() error) error {
+// WithoutTouchingOn suspends touch propagation for every table in tables for
+// the length of callback, restoring the previous list once callback returns --
+// even when it returns an error.
+func WithoutTouchingOn(tables []*Table, callback func() error) error {
 	ignoreOnTouch.mu.Lock()
-	ignoreOnTouch.types = append(ignoreOnTouch.types, models...)
+	ignoreOnTouch.tables = append(ignoreOnTouch.tables, tables...)
 	ignoreOnTouch.mu.Unlock()
 
 	defer func() {
 		ignoreOnTouch.mu.Lock()
 		defer ignoreOnTouch.mu.Unlock()
-		ignoreOnTouch.types = slices.DeleteFunc(ignoreOnTouch.types, func(t reflect.Type) bool {
-			return slices.Contains(models, t)
+		ignoreOnTouch.tables = slices.DeleteFunc(ignoreOnTouch.tables, func(t *Table) bool {
+			return slices.Contains(tables, t)
 		})
 	}()
 
 	return callback()
 }
 
-// IsIgnoringTouch reports whether touch propagation is currently suspended
-// for T.
+// IsIgnoringTouch reports whether touch propagation is currently suspended for
+// the table.
 //
-// A model with no updated_at column, or with timestamps switched off,
-// reports true without consulting the suspended list, because neither has
-// anything a touch could update. Otherwise a type counts as suspended only
-// when it is itself in the list -- there is no supertype or subtype
-// relationship to walk.
-func (m *Model[T]) IsIgnoringTouch() bool {
-	if m.GetUpdatedAtColumn() == "" || !m.UsesTimestamps() {
+// A table with no updated_at column, or with timestamps switched off, reports
+// true without consulting the suspended list, because neither has anything a
+// touch could update.
+func (t *Table) IsIgnoringTouch() bool {
+	if t.updatedAt == "" || !t.timestamps {
 		return true
 	}
 	ignoreOnTouch.mu.RLock()
 	defer ignoreOnTouch.mu.RUnlock()
-	return slices.Contains(ignoreOnTouch.types, reflect.TypeFor[T]())
+	return slices.Contains(ignoreOnTouch.tables, t)
+}
+
+// Touch stamps the row's updated-at column and saves it.
+//
+// A table that does not use timestamps, or has no updated-at column, is not an
+// error: it is a row there is nothing to stamp on, and the call is a no-op
+// rather than a failure. The builder's Touch is the same idea over a set of
+// rows.
+func (m *Model) Touch(ctx context.Context, g auth.Grant) error {
+	if err := wired(m); err != nil {
+		return err
+	}
+	if !usesTimestamps(m) || m.r.table.updatedAt == "" {
+		return nil
+	}
+	if err := m.SetAttribute(m.r.table.updatedAt, freshTimestamp()); err != nil {
+		return err
+	}
+	_, err := m.Save(ctx, g)
+	return err
+}
+
+// touches reports whether saving this row stamps the owner of relation.
+//
+// The list is the table's, from TableSpec.Touches. An empty list means the row
+// touches nothing, which is the default.
+func touches(m *Model, relation string) bool {
+	return slices.Contains(m.r.table.touches, relation)
 }

@@ -13,15 +13,19 @@ import (
 )
 
 type User struct {
+	model.Model
+
 	ID    int64  `db:"id"`
 	Email string `db:"email"`
 }
 
+var users = model.NewTable(model.TableSpec{Name: "users", New: func() model.Entity { return new(User) }})
+
 func main() {
-	users := model.NewModel[User]("users", nil, nil, nil)
+	var db model.DB
 
 	// Forging the Grant rather than being issued one.
 	forged := auth.Grant{valid: true}
 
-	_, _ = users.NewQuery().Get(context.Background(), forged)
+	_, _ = users.Query(db).Get(context.Background(), forged)
 }

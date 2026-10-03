@@ -2,16 +2,15 @@ package model
 
 import (
 	"errors"
-	"reflect"
 	"slices"
 )
 
-// ErrMixedQueueableConnections is what GetQueueableConnection returns for a
-// queued collection whose models are not all on one connection: it cannot
-// be restored, because the job records one connection name.
+// ErrMixedQueueableConnections is what GetQueueableConnection returns for
+// queued rows that are not all on one connection: they cannot be restored,
+// because the job records one connection name.
 var ErrMixedQueueableConnections = errors.New("model: queueing collections with multiple model connections is not supported")
 
-// Queueable is what GetQueueableRelations recurses into: a value hanging off a
+// Queueable is what the queueable relations recurse into: a value hanging off a
 // loaded relation that can name its own.
 //
 // It is one method, declared where it is consumed.
@@ -21,32 +20,23 @@ type Queueable interface {
 	GetQueueableRelations() []string
 }
 
-// GetQueueableID returns what a queued job writes down so it can find this
-// row again.
-func (m *Model[T]) GetQueueableID() any { return m.GetKey() }
-
-// GetQueueableConnection returns the name of the connection this model
-// uses, for a queued job to restore it on.
-func (m *Model[T]) GetQueueableConnection() string { return m.GetConnectionName() }
-
-// GetQueueableRelations returns the loaded relations a job restores along
-// with the row.
+// queueableRelations returns the loaded relations a job restores along with the
+// row.
 //
-// A loaded relation with no registered resolver is skipped, since a
-// relation with no resolver cannot be loaded again on the other side of the
-// queue.
+// A loaded relation with no registered relation behind it is skipped, since it
+// cannot be loaded again on the other side of the queue.
 //
-// The order is sorted rather than insertion order: a Go map has none, and a
-// job payload that differs between two runs over the same row is a payload
-// nobody can diff.
-func (m *Model[T]) GetQueueableRelations() []string {
+// The order is sorted rather than insertion order: a Go map has none, and a job
+// payload that differs between two runs over the same row is a payload nobody
+// can diff.
+func queueableRelations(m *Model) []string {
 	out := []string{}
-	for _, name := range sortedKeys(m.relations) {
-		if _, declared := m.RelationResolvers[name]; !declared {
+	for _, name := range sortedKeys(m.r.relations) {
+		if _, declared := m.r.table.relation(name); !declared {
 			continue
 		}
 		out = append(out, name)
-		nested, ok := m.relations[name].(Queueable)
+		nested, ok := m.r.relations[name].(Queueable)
 		if !ok {
 			continue
 		}
@@ -57,49 +47,38 @@ func (m *Model[T]) GetQueueableRelations() []string {
 	return out
 }
 
-// GetQueueableClass returns the type name of the models being queued.
-//
-// A Collection[T] cannot hold two model types, so there is no mixed-type
-// case left to refuse.
-//
-// It returns the empty string for an empty collection: there is no model to
-// take the name from.
-func (c Collection[T]) GetQueueableClass() string {
-	if c.IsEmpty() {
+// GetQueueableClass returns the type name of the rows being queued, and the
+// empty string when there are none.
+func (rows Rows) GetQueueableClass() string {
+	first := rows.firstModel()
+	if first == nil {
 		return ""
 	}
-	return reflect.TypeFor[T]().Name()
+	return first.r.table.morphClass
 }
 
-// GetQueueableIDs returns the queueable id of every model.
-func (c Collection[T]) GetQueueableIDs() []any {
-	if c.IsEmpty() {
-		return []any{}
-	}
-	found := rowModels(c)
-	out := make([]any, 0, len(found))
-	for _, model := range found {
-		out = append(out, model.GetQueueableID())
+// GetQueueableIDs returns the key of every row: what a queued job writes down
+// so it can find them again.
+func (rows Rows) GetQueueableIDs() []any {
+	out := make([]any, 0, len(rows))
+	for _, m := range rows.models() {
+		out = append(out, m.GetKey())
 	}
 	return out
 }
 
-// GetQueueableRelations returns the relations every model in the collection
-// has loaded.
+// GetQueueableRelations returns the relations every row has loaded.
 //
-// It is the intersection and not the union: a relation loaded on one row
-// and not on another cannot be restored for the whole collection.
-func (c Collection[T]) GetQueueableRelations() []string {
-	if c.IsEmpty() {
-		return []string{}
-	}
-	found := rowModels(c)
+// It is the intersection and not the union: a relation loaded on one row and
+// not on another cannot be restored for the whole collection.
+func (rows Rows) GetQueueableRelations() []string {
+	found := rows.models()
 	if len(found) == 0 {
 		return []string{}
 	}
-	shared := found[0].GetQueueableRelations()
-	for _, model := range found[1:] {
-		relations := model.GetQueueableRelations()
+	shared := queueableRelations(found[0])
+	for _, m := range found[1:] {
+		relations := queueableRelations(m)
 		shared = slices.DeleteFunc(shared, func(name string) bool {
 			return !slices.Contains(relations, name)
 		})
@@ -107,20 +86,16 @@ func (c Collection[T]) GetQueueableRelations() []string {
 	return shared
 }
 
-// GetQueueableConnection returns the connection name shared by every model,
-// or ErrMixedQueueableConnections when they disagree. An empty collection
-// returns the empty string.
-func (c Collection[T]) GetQueueableConnection() (string, error) {
-	if c.IsEmpty() {
-		return "", nil
-	}
-	found := rowModels(c)
+// GetQueueableConnection returns the connection name shared by every row, or
+// ErrMixedQueueableConnections when they disagree. No rows is the empty string.
+func (rows Rows) GetQueueableConnection() (string, error) {
+	found := rows.models()
 	if len(found) == 0 {
 		return "", nil
 	}
-	connection := found[0].GetConnectionName()
-	for _, model := range found {
-		if model.GetConnectionName() != connection {
+	connection := found[0].r.conn.name
+	for _, m := range found {
+		if m.r.conn.name != connection {
 			return "", ErrMixedQueueableConnections
 		}
 	}

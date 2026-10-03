@@ -23,10 +23,10 @@ func TestFillWritesDeclaredColumnsAndDropsTheRest(t *testing.T) {
 		t.Fatalf("Fill: %v", err)
 	}
 
-	if model.Entity.Name != "Ada" {
-		t.Errorf("Entity.Name = %q, want Ada: a declared column is what Fill writes", model.Entity.Name)
+	if model.Name != "Ada" {
+		t.Errorf("Entity.Name = %q, want Ada: a declared column is what Fill writes", model.Name)
 	}
-	if _, ok := model.attributes["nickname"]; ok {
+	if _, ok := model.r.attributes["nickname"]; ok {
 		t.Error("Fill kept nickname, and it must drop what the entity does not declare -- that is fill() outside $fillable")
 	}
 }
@@ -50,10 +50,10 @@ func TestFillCannotReachAnUnexportedField(t *testing.T) {
 		t.Fatalf("Fill: %v", err)
 	}
 
-	if model.Entity.secret != "" {
+	if model.secret != "" {
 		t.Error("Fill wrote an unexported field, and the compiler is what stops that -- it is this framework's $guarded")
 	}
-	if _, ok := fieldByColumn(reflectTypeOfUser(), "secret"); ok {
+	if _, ok := schemaOf(reflectTypeOfUser()).field("secret"); ok {
 		t.Error("an unexported field must not be a column at all")
 	}
 }
@@ -76,7 +76,7 @@ func TestColumnNameFallsBackToSnakeCase(t *testing.T) {
 		FirstName string
 		Skipped   string `db:"-"`
 	}
-	columns := fieldsOf(reflectTypeOf[untagged]())
+	columns := schemaOf(reflectTypeOf[untagged]()).fields
 
 	var names []string
 	for _, column := range columns {
@@ -103,7 +103,7 @@ func TestDirtyTracking(t *testing.T) {
 		t.Error("a model that was just synced is clean")
 	}
 
-	model.Entity.Name = "Grace"
+	model.Name = "Grace"
 
 	if !model.IsDirty("name") {
 		t.Error("IsDirty(name) = false after the field changed")
@@ -115,19 +115,19 @@ func TestDirtyTracking(t *testing.T) {
 		t.Errorf("GetDirty()[name] = %v, want Grace", got)
 	}
 
-	model.SyncChanges()
+	syncChanges(model.base())
 	if !model.WasChanged("name") {
 		t.Error("WasChanged(name) = false after SyncChanges")
 	}
-	if got := model.GetPrevious()["name"]; got != "Ada" {
+	if got := model.r.previous["name"]; got != "Ada" {
 		t.Errorf("GetPrevious()[name] = %v, want Ada", got)
 	}
 }
 
 func TestSaveInsertsWithTheTenantFromTheGrantAndSetsTheKey(t *testing.T) {
 	model, conn := newUserModel()
-	model.Entity.Name = "Ada"
-	model.Entity.TenantID = "somebody-elses"
+	model.Name = "Ada"
+	model.TenantID = "somebody-elses"
 
 	saved, err := model.Save(context.Background(), grant())
 	if err != nil {
@@ -144,26 +144,26 @@ func TestSaveInsertsWithTheTenantFromTheGrantAndSetsTheKey(t *testing.T) {
 	if !strings.Contains(last.SQL, `"tenant_id"`) {
 		t.Errorf("SQL = %q, and every insert carries the tenant column", last.SQL)
 	}
-	if model.Entity.TenantID == "acme" {
+	if model.TenantID == "acme" {
 		t.Log("the entity keeps what the caller set; what is written is the grant's tenant")
 	}
 	if got := last.Bindings[4]; got != "acme" {
 		t.Errorf("tenant binding = %v, want acme: the tenant comes from the Grant and nowhere else (RULE 14)", got)
 	}
-	if model.Entity.ID != 1 {
-		t.Errorf("Entity.ID = %d, want 1: an incrementing insert sets the key", model.Entity.ID)
+	if model.ID != 1 {
+		t.Errorf("Entity.ID = %d, want 1: an incrementing insert sets the key", model.ID)
 	}
-	if !model.Exists || !model.WasRecentlyCreated {
+	if !model.Exists() || !model.WasRecentlyCreated() {
 		t.Error("after an insert the model exists and was recently created")
 	}
-	if model.Entity.CreatedAt.IsZero() || model.Entity.UpdatedAt.IsZero() {
+	if model.CreatedAt.IsZero() || model.UpdatedAt.IsZero() {
 		t.Error("timestamps were not written")
 	}
 }
 
 func TestInsertLeavesTheIncrementingKeyOut(t *testing.T) {
 	model, conn := newUserModel()
-	model.Entity.Name = "Ada"
+	model.Name = "Ada"
 
 	if _, err := model.Save(context.Background(), grant()); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -180,8 +180,8 @@ func TestSaveUpdatesOnlyTheDirtyColumns(t *testing.T) {
 	}, true); err != nil {
 		t.Fatalf("SetRawAttributes: %v", err)
 	}
-	model.Exists = true
-	model.Entity.Name = "Grace"
+	model.r.exists = true
+	model.Name = "Grace"
 
 	if _, err := model.Save(context.Background(), grant()); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -210,7 +210,7 @@ func TestSaveOnACleanModelWritesNothing(t *testing.T) {
 	if err := model.SetRawAttributes(map[string]any{"id": int64(7), "name": "Ada"}, true); err != nil {
 		t.Fatalf("SetRawAttributes: %v", err)
 	}
-	model.Exists = true
+	model.r.exists = true
 
 	saved, err := model.Save(context.Background(), grant())
 	if err != nil || !saved {
@@ -226,7 +226,7 @@ func TestDeleteRemovesTheRowByKeyAndTenant(t *testing.T) {
 	if err := model.SetRawAttributes(map[string]any{"id": int64(7)}, true); err != nil {
 		t.Fatalf("SetRawAttributes: %v", err)
 	}
-	model.Exists = true
+	model.r.exists = true
 
 	deleted, err := model.Delete(context.Background(), grant())
 	if err != nil || !deleted {
@@ -240,7 +240,7 @@ func TestDeleteRemovesTheRowByKeyAndTenant(t *testing.T) {
 	if !strings.Contains(sql, `"tenant_id" = ?`) {
 		t.Errorf("SQL = %q: a delete is scoped by tenant", sql)
 	}
-	if model.Exists {
+	if model.Exists() {
 		t.Error("the model still reports that it exists after a hard delete")
 	}
 }
@@ -261,9 +261,10 @@ func TestDeleteOnAModelThatWasNeverSavedIsNotAFailure(t *testing.T) {
 }
 
 func TestEventCallbackStopsTheSave(t *testing.T) {
-	model, conn := newUserModel()
 	refused := errors.New("no")
-	model.RegisterModelEvent(Saving, func(*Model[user]) error { return refused })
+	model, conn := newUserModel(func(s *TableSpec) {
+		s.Events = map[Event][]func(Entity) error{Saving: {func(Entity) error { return refused }}}
+	})
 
 	if _, err := model.Save(context.Background(), grant()); !errors.Is(err, refused) {
 		t.Fatalf("Save error = %v, want the callback's; returning false in PHP halts the save and says nothing", err)
@@ -274,11 +275,12 @@ func TestEventCallbackStopsTheSave(t *testing.T) {
 }
 
 func TestWithoutEventsMutesTheCallback(t *testing.T) {
-	model, _ := newUserModel()
 	fired := false
-	model.RegisterModelEvent(Creating, func(*Model[user]) error {
-		fired = true
-		return nil
+	model, _ := newUserModel(func(s *TableSpec) {
+		s.Events = map[Event][]func(Entity) error{Creating: {func(Entity) error {
+			fired = true
+			return nil
+		}}}
 	})
 
 	if _, err := model.SaveQuietly(context.Background(), grant()); err != nil {
@@ -296,12 +298,13 @@ func TestReplicateDropsTheKeyAndTheTimestamps(t *testing.T) {
 	}, true); err != nil {
 		t.Fatalf("SetRawAttributes: %v", err)
 	}
-	model.Exists = true
+	model.r.exists = true
 
-	copied, err := model.Replicate()
+	replica, err := model.Replicate()
 	if err != nil {
 		t.Fatalf("Replicate: %v", err)
 	}
+	copied := replica.(*user)
 	if copied.ID != 0 {
 		t.Errorf("copy carries id %d, and a replica is a new row", copied.ID)
 	}
@@ -312,13 +315,7 @@ func TestReplicateDropsTheKeyAndTheTimestamps(t *testing.T) {
 		t.Errorf("copy lost the columns it should keep: name = %q", copied.Name)
 	}
 
-	// Whether the replica exists is the model's answer, and this entity does not
-	// embed one, so the model-side form is what carries it.
-	replica, err := replicate(model)
-	if err != nil {
-		t.Fatalf("replicate: %v", err)
-	}
-	if replica.Exists {
+	if copied.Exists() {
 		t.Error("a replica does not exist yet")
 	}
 }
@@ -330,34 +327,34 @@ func TestIsComparesKeyTableAndConnection(t *testing.T) {
 	if err := model.SetRawAttributes(map[string]any{"id": int64(7)}, true); err != nil {
 		t.Fatalf("SetRawAttributes: %v", err)
 	}
-	same, err := model.NewInstance(map[string]any{"id": int64(7)}, true)
+	same, err := instanceOf(model, map[string]any{"id": int64(7)}, true)
 	if err != nil {
 		t.Fatalf("NewInstance: %v", err)
 	}
-	other, err := model.NewInstance(map[string]any{"id": int64(8)}, true)
+	other, err := instanceOf(model, map[string]any{"id": int64(8)}, true)
 	if err != nil {
 		t.Fatalf("NewInstance: %v", err)
 	}
 
-	if !model.Entity.Is(same.Entity) {
+	if !model.Is(same) {
 		t.Error("Is = false for the same row of the same table")
 	}
-	if !model.Entity.IsNot(other.Entity) {
-		t.Error("IsNot = false for another key")
+	if model.Is(other) {
+		t.Error("Is = true for another key")
 	}
 }
 
-// TestIsAnswersNoForARowThatCarriesNoModel: a plain row has columns and nothing
-// else, and a table is not a column.
-func TestIsAnswersNoForARowThatCarriesNoModel(t *testing.T) {
-	plain, _ := newUserModel()
-	if err := plain.SetRawAttributes(map[string]any{"id": int64(7)}, true); err != nil {
+// TestIsAnswersNoForARowNothingBuilt: a literal has columns and nothing else,
+// and a table is not a column.
+func TestIsAnswersNoForARowNothingBuilt(t *testing.T) {
+	model, _ := newUserModel()
+	if err := model.SetRawAttributes(map[string]any{"id": int64(7)}, true); err != nil {
 		t.Fatalf("SetRawAttributes: %v", err)
 	}
-	if plain.Is(plain.Entity) {
+	if model.Is(&user{ID: 7}) {
 		t.Error("Is compared a row that has no model to compare through")
 	}
-	if plain.Is(nil) {
+	if model.Is(nil) {
 		t.Error("Is answered true for no row at all")
 	}
 }
@@ -383,7 +380,8 @@ func TestHiddenAndAppendedAttributes(t *testing.T) {
 	}
 
 	model.SetRelation("posts", []string{"one"})
-	model.Append("posts")
+	ownLists(model.base())
+	model.r.appends = appendUnique(model.r.appends, "posts")
 	json, err := model.ToJSON()
 	if err != nil {
 		t.Fatalf("ToJSON: %v", err)
@@ -393,27 +391,24 @@ func TestHiddenAndAppendedAttributes(t *testing.T) {
 	}
 }
 
-func TestOnlyAndExcept(t *testing.T) {
-	model, _ := newUserModel()
-	if err := model.SetRawAttributes(map[string]any{"id": int64(1), "name": "Ada", "email": "ada@example.com"}, true); err != nil {
+// TestTheTableSpecSerialisesWhatItNames: the hidden and appended lists of the
+// spec are every row's, until a row changes its own.
+func TestTheTableSpecSerialisesWhatItNames(t *testing.T) {
+	model, _ := newUserModel(func(s *TableSpec) { s.Hidden = []string{"email"} })
+	if err := model.SetRawAttributes(map[string]any{"id": int64(1), "email": "ada@example.com"}, true); err != nil {
 		t.Fatalf("SetRawAttributes: %v", err)
 	}
-
-	only := model.Only("name")
-	if len(only) != 1 || only["name"] != "Ada" {
-		t.Errorf("Only(name) = %v", only)
+	if _, ok := model.ToArray()["email"]; ok {
+		t.Error("a column the spec hides is serialised")
 	}
-	if _, ok := model.Except("name")["name"]; ok {
-		t.Error("Except kept the column it was told to drop")
+
+	other, _ := instanceOf(model, nil, false)
+	model.MakeVisible("email")
+	if _, ok := model.ToArray()["email"]; !ok {
+		t.Error("MakeVisible did not bring the column back on the row it was called on")
 	}
-}
-
-func TestGetTableFallsBackToThePluralOfTheType(t *testing.T) {
-	conn := newTestConnection()
-	model := NewModel[user]("", conn, newTestGrammar(), &testProcessor{conn: conn})
-
-	if got := model.GetTable(); got != "users" {
-		t.Errorf("GetTable() = %q, want users", got)
+	if _, ok := other.ToArray()["email"]; ok {
+		t.Error("MakeVisible on one row changed what another row of the table serialises")
 	}
 }
 
@@ -423,7 +418,7 @@ func TestAssignParsesATimestampADriverWroteAsText(t *testing.T) {
 	if err := model.SetRawAttributes(map[string]any{"created_at": "2026-08-11 09:30:00"}, true); err != nil {
 		t.Fatalf("SetRawAttributes: %v", err)
 	}
-	if got := model.Entity.CreatedAt.Format("2006-01-02 15:04:05"); got != "2026-08-11 09:30:00" {
+	if got := model.CreatedAt.Format("2006-01-02 15:04:05"); got != "2026-08-11 09:30:00" {
 		t.Errorf("created_at = %q, and SQLite has no date type -- it hands back text", got)
 	}
 }
@@ -437,26 +432,26 @@ func TestTransactionalSaveSaysSoWhenTheConnectionCannot(t *testing.T) {
 	}
 }
 
-// TestTenantColumnSaysWhatItsEmptyValueDoesAndDoesNotTurnOff reads the doc
-// comment on the field and fails when it describes only the filter it turns off.
+// TestGlobalSaysWhatItDoesAndDoesNotTurnOff reads the doc comment on the field
+// and fails when it describes only the filter it turns off.
 //
-// TenantColumn and the credential are two guarantees, and the empty string
-// touches one of them: the statement stops carrying the tenant predicate, and
-// every method still refuses to run without an auth.Grant. Stated as one
-// guarantee -- which is how a product sentence tends to state it -- the empty
-// string reads as switching authorization off, and the reader who wants a
-// deliberately global table decides against the design that already supports it,
-// or the reader who wants no authorization believes this is the switch.
+// Global and the credential are two guarantees, and Global touches one of them:
+// the statement stops carrying the tenant predicate, and every method still
+// refuses to run without an auth.Grant. Stated as one guarantee -- which is how a
+// product sentence tends to state it -- Global reads as switching authorization
+// off, and the reader who wants a deliberately global table decides against the
+// design that already supports it, or the reader who wants no authorization
+// believes this is the switch.
 //
 // Reading the comment rather than asserting behaviour is the point: the
 // behaviour is fixed by the tests around this one, and what is unfixed is the
 // sentence pkg.go.dev publishes about it.
-func TestTenantColumnSaysWhatItsEmptyValueDoesAndDoesNotTurnOff(t *testing.T) {
-	doc := fieldDoc(t, "model.go", "Model", "TenantColumn")
+func TestGlobalSaysWhatItDoesAndDoesNotTurnOff(t *testing.T) {
+	doc := fieldDoc(t, "table.go", "TableSpec", "Global")
 
 	for _, want := range []string{"Grant", "authorization"} {
 		if !strings.Contains(doc, want) {
-			t.Errorf("the TenantColumn comment never says %q, so it describes the filter it turns "+
+			t.Errorf("the Global comment never says %q, so it describes the filter it turns "+
 				"off and leaves the guarantee it does not turn off to the reader's guess:\n%s",
 				want, doc)
 		}

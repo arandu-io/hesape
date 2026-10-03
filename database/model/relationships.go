@@ -24,7 +24,7 @@ import (
 // Go has no default arguments, so the full form is spelled out here and the
 // short ones -- WhereHas, DoesntHave, OrHas -- are the ones to reach for.
 // callback may be nil.
-func (b *Builder[T]) Has(relation, operator string, count int, boolean string, callback func(*query.Builder)) *Builder[T] {
+func (b *Builder) Has(relation, operator string, count int, boolean string, callback func(*query.Builder)) *Builder {
 	if strings.Contains(relation, ".") {
 		return hasNested(b, relation, operator, count, boolean, callback)
 	}
@@ -45,7 +45,7 @@ func (b *Builder[T]) Has(relation, operator string, count int, boolean string, c
 // The callback takes the builder a relation hands back rather than the base
 // query, which is what hasNested needs to go one segment deeper. The public
 // methods take func(*query.Builder) and onBaseQuery is the step between.
-func addHasWhere[T any](b *Builder[T], rel Relation, operator string, count int, boolean string, callback func(relations.Builder)) *Builder[T] {
+func addHasWhere(b *Builder, rel Relation, operator string, count int, boolean string, callback func(relations.Builder)) *Builder {
 	if boolean == "" {
 		boolean = "and"
 	}
@@ -78,7 +78,7 @@ func addHasWhere[T any](b *Builder[T], rel Relation, operator string, count int,
 // query.WhereSubCount keeps the builder on the clause, and prepare scopes it
 // through query.Builder.ScopeNested. That is the same door the query
 // builder's own statements go through, and it is the only one.
-func addWhereCountQuery[T any](b *Builder[T], sub *query.Builder, operator string, count int, boolean string) *Builder[T] {
+func addWhereCountQuery(b *Builder, sub *query.Builder, operator string, count int, boolean string) *Builder {
 	b.query.WhereSubCount(sub, operator, count, boolean)
 	return b
 }
@@ -98,7 +98,7 @@ func canUseExistsForExistenceCheck(operator string, count int) bool {
 //
 // A relation that cannot resolve the next segment is an error, never a
 // query with the filter silently missing.
-func hasNested[T any](b *Builder[T], path, operator string, count int, boolean string, callback func(*query.Builder)) *Builder[T] {
+func hasNested(b *Builder, path, operator string, count int, boolean string, callback func(*query.Builder)) *Builder {
 	segments := strings.Split(path, ".")
 
 	rel, err := b.GetRelationWithoutConstraints(segments[0])
@@ -149,58 +149,58 @@ type NestedRelation interface {
 }
 
 // OrHas is Has joined with or.
-func (b *Builder[T]) OrHas(relation, operator string, count int) *Builder[T] {
+func (b *Builder) OrHas(relation, operator string, count int) *Builder {
 	return b.Has(relation, operator, count, "or", nil)
 }
 
 // DoesntHave adds a filter requiring relation to not exist.
-func (b *Builder[T]) DoesntHave(relation, boolean string, callback func(*query.Builder)) *Builder[T] {
+func (b *Builder) DoesntHave(relation, boolean string, callback func(*query.Builder)) *Builder {
 	return b.Has(relation, "<", 1, boolean, callback)
 }
 
 // OrDoesntHave is DoesntHave joined with or.
-func (b *Builder[T]) OrDoesntHave(relation string) *Builder[T] {
+func (b *Builder) OrDoesntHave(relation string) *Builder {
 	return b.DoesntHave(relation, "or", nil)
 }
 
 // WhereHas adds a filter requiring relation to exist, constrained by
 // callback.
-func (b *Builder[T]) WhereHas(relation string, callback func(*query.Builder)) *Builder[T] {
+func (b *Builder) WhereHas(relation string, callback func(*query.Builder)) *Builder {
 	return b.Has(relation, ">=", 1, "and", callback)
 }
 
 // WhereHasCount is WhereHas with an explicit operator and count instead of
 // ">=" and 1.
-func (b *Builder[T]) WhereHasCount(relation string, callback func(*query.Builder), operator string, count int) *Builder[T] {
+func (b *Builder) WhereHasCount(relation string, callback func(*query.Builder), operator string, count int) *Builder {
 	return b.Has(relation, operator, count, "and", callback)
 }
 
 // OrWhereHas is WhereHas joined with or.
-func (b *Builder[T]) OrWhereHas(relation string, callback func(*query.Builder)) *Builder[T] {
+func (b *Builder) OrWhereHas(relation string, callback func(*query.Builder)) *Builder {
 	return b.Has(relation, ">=", 1, "or", callback)
 }
 
 // WhereDoesntHave adds a filter requiring relation to not exist, constrained
 // by callback.
-func (b *Builder[T]) WhereDoesntHave(relation string, callback func(*query.Builder)) *Builder[T] {
+func (b *Builder) WhereDoesntHave(relation string, callback func(*query.Builder)) *Builder {
 	return b.DoesntHave(relation, "and", callback)
 }
 
 // OrWhereDoesntHave is WhereDoesntHave joined with or.
-func (b *Builder[T]) OrWhereDoesntHave(relation string, callback func(*query.Builder)) *Builder[T] {
+func (b *Builder) OrWhereDoesntHave(relation string, callback func(*query.Builder)) *Builder {
 	return b.DoesntHave(relation, "or", callback)
 }
 
 // WhereRelation adds a filter requiring relation to have a row matching
 // column args.
-func (b *Builder[T]) WhereRelation(relation string, column any, args ...any) *Builder[T] {
+func (b *Builder) WhereRelation(relation string, column any, args ...any) *Builder {
 	return b.WhereHas(relation, func(sub *query.Builder) {
 		sub.Where(column, args...)
 	})
 }
 
 // OrWhereRelation is WhereRelation joined with or.
-func (b *Builder[T]) OrWhereRelation(relation string, column any, args ...any) *Builder[T] {
+func (b *Builder) OrWhereRelation(relation string, column any, args ...any) *Builder {
 	return b.OrWhereHas(relation, func(sub *query.Builder) {
 		sub.Where(column, args...)
 	})
@@ -208,7 +208,7 @@ func (b *Builder[T]) OrWhereRelation(relation string, column any, args ...any) *
 
 // WhereDoesntHaveRelation adds a filter requiring relation to have no row
 // matching column args.
-func (b *Builder[T]) WhereDoesntHaveRelation(relation string, column any, args ...any) *Builder[T] {
+func (b *Builder) WhereDoesntHaveRelation(relation string, column any, args ...any) *Builder {
 	return b.WhereDoesntHave(relation, func(sub *query.Builder) {
 		sub.Where(column, args...)
 	})
@@ -223,7 +223,7 @@ func (b *Builder[T]) WhereDoesntHaveRelation(relation string, column any, args .
 // A single type of "*" is refused rather than resolved: resolving it means
 // selecting the distinct morph column first, which is a query, and this
 // method builds SQL and runs nothing.
-func (b *Builder[T]) WhereMorphRelation(relation string, types []string, column any, args ...any) *Builder[T] {
+func (b *Builder) WhereMorphRelation(relation string, types []string, column any, args ...any) *Builder {
 	rel, err := b.GetRelationWithoutConstraints(relation)
 	if err != nil {
 		return fail(b, err)
@@ -236,7 +236,7 @@ func (b *Builder[T]) WhereMorphRelation(relation string, types []string, column 
 		return fail(b, fmt.Errorf("model: %s needs the morph types spelled out, because resolving \"*\" is a query and this builds SQL", relation))
 	}
 
-	return b.Where(func(outer *Builder[T]) {
+	return b.Where(func(outer *Builder) {
 		for _, morphType := range types {
 			typed, err := morph.RelationForMorphType(morphType)
 			if err != nil {
@@ -246,8 +246,8 @@ func (b *Builder[T]) WhereMorphRelation(relation string, types []string, column 
 				fail(b, err)
 				return
 			}
-			outer.OrWhere(func(branch *Builder[T]) {
-				branch.Where(b.model.QualifyColumn(morph.GetMorphType()), "=", morphType)
+			outer.OrWhere(func(branch *Builder) {
+				branch.Where(b.qualify(morph.GetMorphType()), "=", morphType)
 				addHasWhere(branch, typed, ">=", 1, "and", onBaseQuery(func(sub *query.Builder) {
 					sub.Where(column, args...)
 				}))
@@ -256,14 +256,11 @@ func (b *Builder[T]) WhereMorphRelation(relation string, types []string, column 
 	})
 }
 
-// WhereBelongsTo adds a filter requiring the named belongs-to relation to
-// point at one of related.
-//
-// It is a function and not a method because the related models are of
-// another type and a Go method cannot introduce a type parameter.
-func WhereBelongsTo[T, R any](b *Builder[T], relationshipName string, related ...*Model[R]) *Builder[T] {
+// WhereBelongsTo adds a filter requiring the named belongs-to relation to point
+// at one of related.
+func (b *Builder) WhereBelongsTo(relationshipName string, related ...Entity) *Builder {
 	if len(related) == 0 {
-		return fail(b, fmt.Errorf("model: WhereBelongsTo was given no models to belong to"))
+		return fail(b, fmt.Errorf("model: WhereBelongsTo was given no rows to belong to"))
 	}
 	rel, err := b.GetRelationWithoutConstraints(relationshipName)
 	if err != nil {
@@ -275,8 +272,8 @@ func WhereBelongsTo[T, R any](b *Builder[T], relationshipName string, related ..
 	}
 
 	keys := make([]any, 0, len(related))
-	for _, model := range related {
-		keys = append(keys, model.GetAttribute(belongsTo.GetOwnerKeyName()))
+	for _, e := range related {
+		keys = append(keys, modelOf(e).GetAttribute(belongsTo.GetOwnerKeyName()))
 	}
 	b.query.WhereIn(belongsTo.GetQualifiedForeignKeyName(), keys)
 	return b
@@ -295,12 +292,12 @@ func WhereBelongsTo[T, R any](b *Builder[T], relationshipName string, related ..
 // "user.list", "acme")) gave every row the number of posts EVERY tenant
 // had, and WithSum("orders", "total") handed one tenant another tenant's
 // revenue as a scalar.
-func (b *Builder[T]) WithAggregate(relations []string, column, function string) *Builder[T] {
+func (b *Builder) WithAggregate(relations []string, column, function string) *Builder {
 	if len(relations) == 0 {
 		return b
 	}
 	if b.query.Columns == nil {
-		b.query.Select(query.Raw(b.model.Grammar.WrapTable(b.model.GetTable()) + ".*"))
+		b.query.Select(query.Raw(b.conn.grammar.WrapTable(b.tableName()) + ".*"))
 	}
 
 	for _, entry := range relations {
@@ -347,11 +344,11 @@ func (b *Builder[T]) WithAggregate(relations []string, column, function string) 
 
 // aggregateColumn wraps the column an aggregate is taken over, leaving "*"
 // alone.
-func aggregateColumn[T any](b *Builder[T], column string) string {
+func aggregateColumn(b *Builder, column string) string {
 	if column == "*" {
 		return column
 	}
-	return b.model.Grammar.Wrap(column)
+	return b.conn.grammar.Wrap(column)
 }
 
 // splitAggregateAlias reads "posts as recent" into its two halves.
@@ -379,40 +376,40 @@ func aggregateAlias(name, function, column string) string {
 }
 
 // WithCount adds the row count of each relation, aliased onto the row.
-func (b *Builder[T]) WithCount(relations ...string) *Builder[T] {
+func (b *Builder) WithCount(relations ...string) *Builder {
 	return b.WithAggregate(relations, "*", "count")
 }
 
 // WithMax adds the max of column over relation, aliased onto the row.
-func (b *Builder[T]) WithMax(relation, column string) *Builder[T] {
+func (b *Builder) WithMax(relation, column string) *Builder {
 	return b.WithAggregate([]string{relation}, column, "max")
 }
 
 // WithMin adds the min of column over relation, aliased onto the row.
-func (b *Builder[T]) WithMin(relation, column string) *Builder[T] {
+func (b *Builder) WithMin(relation, column string) *Builder {
 	return b.WithAggregate([]string{relation}, column, "min")
 }
 
 // WithSum adds the sum of column over relation, aliased onto the row.
-func (b *Builder[T]) WithSum(relation, column string) *Builder[T] {
+func (b *Builder) WithSum(relation, column string) *Builder {
 	return b.WithAggregate([]string{relation}, column, "sum")
 }
 
 // WithAvg adds the average of column over relation, aliased onto the row.
-func (b *Builder[T]) WithAvg(relation, column string) *Builder[T] {
+func (b *Builder) WithAvg(relation, column string) *Builder {
 	return b.WithAggregate([]string{relation}, column, "avg")
 }
 
 // WithExists adds whether relation exists, aliased onto the row.
-func (b *Builder[T]) WithExists(relation string) *Builder[T] {
+func (b *Builder) WithExists(relation string) *Builder {
 	return b.WithAggregate([]string{relation}, "*", "exists")
 }
 
-// loadAggregateModels is the query LoadAggregate runs: the keys of the
-// collection, with the aggregate columns beside them.
-func aggregateQuery[T any](b *Builder[T], ctx context.Context, g auth.Grant, keys []any, relations []string, column, function string) (models, error) {
+// aggregateQuery is the query LoadAggregate runs: the keys of the rows, with
+// the aggregate columns beside them.
+func aggregateQuery(b *Builder, ctx context.Context, g auth.Grant, keys []any, relations []string, column, function string) (Rows, error) {
 	return b.WhereKey(keys).
-		Select(b.model.GetQualifiedKeyName()).
+		Select(b.qualify(b.table.keyName)).
 		WithAggregate(relations, column, function).
 		get(ctx, g)
 }

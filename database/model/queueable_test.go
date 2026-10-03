@@ -6,76 +6,81 @@ import (
 	"testing"
 )
 
-func TestModelQueueableIDAndConnection(t *testing.T) {
-	model, _ := newAccountModel()
-	model.Entity.ID = 7
-	model.SetConnection("reporting", nil)
-
-	if got := model.GetQueueableID(); got != int64(7) {
-		t.Errorf("GetQueueableID = %v, want 7: the PHP returns getKey", got)
-	}
-	if got := model.GetQueueableConnection(); got != "reporting" {
-		t.Errorf("GetQueueableConnection = %q, want reporting", got)
+// declared registers names on the table of model as relations nothing calls,
+// which is all a queued job asks: whether a loaded key is one of them.
+func declared(model Entity, names ...string) {
+	for _, name := range names {
+		model.base().Table().Relate(name, func(*Model) Relation { return nil })
 	}
 }
 
-func TestModelQueueableRelationsSkipsWhatIsNotDeclared(t *testing.T) {
+func TestRowsQueueableIDAndConnection(t *testing.T) {
 	model, _ := newAccountModel()
-	model.RelationResolvers = map[string]func(*Model[account]) Relation{"posts": nil}
-	model.SetRelation("posts", Collection[account]{})
+	model.ID = 7
+	onConnection(model, "reporting")
+
+	if got := (Rows{model}).GetQueueableIDs(); !reflect.DeepEqual(got, []any{int64(7)}) {
+		t.Errorf("GetQueueableIDs = %v, want [7]: the PHP returns getKey", got)
+	}
+	if got, err := (Rows{model}).GetQueueableConnection(); err != nil || got != "reporting" {
+		t.Errorf("GetQueueableConnection = %q, %v; want reporting", got, err)
+	}
+}
+
+func TestQueueableRelationsSkipsWhatIsNotDeclared(t *testing.T) {
+	model, _ := newAccountModel()
+	declared(model, "posts")
+	model.SetRelation("posts", Rows{})
 	model.SetRelation("stray", "not a relation")
 
-	if got := model.GetQueueableRelations(); !reflect.DeepEqual(got, []string{"posts"}) {
-		t.Errorf("GetQueueableRelations = %v, want [posts]: a loaded key with nothing behind it is skipped, as method_exists does there", got)
+	if got := queueableRelations(model.base()); !reflect.DeepEqual(got, []string{"posts"}) {
+		t.Errorf("queueableRelations = %v, want [posts]: a loaded key with nothing behind it is skipped, as method_exists does there", got)
 	}
 }
 
-func TestModelQueueableRelationsNestsWithADot(t *testing.T) {
+func TestQueueableRelationsNestsWithADot(t *testing.T) {
 	model, _ := newAccountModel()
-	model.RelationResolvers = map[string]func(*Model[account]) Relation{"posts": nil}
+	declared(model, "posts")
 
 	child, _ := newAccountModel()
-	child.RelationResolvers = map[string]func(*Model[account]) Relation{"comments": nil}
-	child.SetRelation("comments", Collection[account]{})
-	model.SetRelation("posts", Collection[account]{child.Entity})
+	declared(child, "comments")
+	child.SetRelation("comments", Rows{})
+	model.SetRelation("posts", Rows{child})
 
 	want := []string{"posts", "posts.comments"}
-	if got := model.GetQueueableRelations(); !reflect.DeepEqual(got, want) {
-		t.Errorf("GetQueueableRelations = %v, want %v", got, want)
+	if got := queueableRelations(model.base()); !reflect.DeepEqual(got, want) {
+		t.Errorf("queueableRelations = %v, want %v", got, want)
 	}
 }
 
 func TestCollectionQueueableClassAndIDs(t *testing.T) {
 	first, _ := newAccountModel()
-	first.Entity.ID = 1
+	first.ID = 1
 	second, _ := newAccountModel()
-	second.Entity.ID = 2
-	c := Collection[account]{first.Entity, second.Entity}
+	second.ID = 2
+	c := Rows{first, second}
 
 	if got := c.GetQueueableClass(); got != "account" {
-		t.Errorf("GetQueueableClass = %q, want account: a Collection[T] holds one type and that type is the class", got)
+		t.Errorf("GetQueueableClass = %q, want account: the rows of one table are of one type, and that type is the class", got)
 	}
 	if got := c.GetQueueableIDs(); !reflect.DeepEqual(got, []any{int64(1), int64(2)}) {
 		t.Errorf("GetQueueableIDs = %v, want [1 2]", got)
 	}
-	if got := (Collection[account]{}).GetQueueableClass(); got != "" {
+	if got := (Rows{}).GetQueueableClass(); got != "" {
 		t.Errorf("GetQueueableClass on an empty collection = %q, want the empty string", got)
 	}
 }
 
 func TestCollectionQueueableRelationsIsTheIntersection(t *testing.T) {
-	resolvers := map[string]func(*Model[account]) Relation{"posts": nil, "roles": nil}
-
 	first, _ := newAccountModel()
-	first.RelationResolvers = resolvers
-	first.SetRelation("posts", Collection[account]{})
-	first.SetRelation("roles", Collection[account]{})
+	declared(first, "posts", "roles")
+	first.SetRelation("posts", Rows{})
+	first.SetRelation("roles", Rows{})
 
-	second, _ := newAccountModel()
-	second.RelationResolvers = resolvers
-	second.SetRelation("posts", Collection[account]{})
+	second, _ := instanceOf(first, nil, true)
+	second.SetRelation("posts", Rows{})
 
-	got := Collection[account]{first.Entity, second.Entity}.GetQueueableRelations()
+	got := Rows{first, second}.GetQueueableRelations()
 	if !reflect.DeepEqual(got, []string{"posts"}) {
 		t.Errorf("GetQueueableRelations = %v, want [posts]: a relation loaded on one row only cannot be restored for the collection", got)
 	}
@@ -83,15 +88,15 @@ func TestCollectionQueueableRelationsIsTheIntersection(t *testing.T) {
 
 func TestCollectionQueueableConnectionRefusesAMix(t *testing.T) {
 	first, _ := newAccountModel()
-	first.SetConnection("primary", nil)
+	onConnection(first, "primary")
 	second, _ := newAccountModel()
-	second.SetConnection("reporting", nil)
+	onConnection(second, "reporting")
 
-	if _, err := (Collection[account]{first.Entity, second.Entity}).GetQueueableConnection(); !errors.Is(err, ErrMixedQueueableConnections) {
+	if _, err := (Rows{first, second}).GetQueueableConnection(); !errors.Is(err, ErrMixedQueueableConnections) {
 		t.Fatalf("error = %v, want ErrMixedQueueableConnections: the PHP throws a LogicException here", err)
 	}
 
-	got, err := (Collection[account]{first.Entity}).GetQueueableConnection()
+	got, err := (Rows{first}).GetQueueableConnection()
 	if err != nil || got != "primary" {
 		t.Errorf("GetQueueableConnection = %q, %v, want primary and no error", got, err)
 	}

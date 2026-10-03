@@ -12,6 +12,8 @@ import (
 // note is the row of the mass-assignment reproduction: a string key the
 // application chooses, a tenant column, and one field a form edits.
 type note struct {
+	Model
+
 	ID       string `db:"id"`
 	TenantID string `db:"tenant_id"`
 	Body     string `db:"body"`
@@ -19,13 +21,14 @@ type note struct {
 
 // sqliteNotes is a notes model on the SQLite grammar over a recording
 // connection.
-func sqliteNotes() (*Model[note], *testConnection) {
+func sqliteNotes(configure ...func(*TableSpec)) (*note, *testConnection) {
 	conn := newTestConnection()
-	m := NewModel[note]("notes", conn, grammars.NewSQLiteGrammar(), &testProcessor{conn: conn})
-	m.KeyType = "string"
-	m.Incrementing = false
-	m.Timestamps = false
-	return m, conn
+	spec := TableSpec{Name: "notes", New: func() Entity { return new(note) }, ManualKey: true, NoTimestamps: true}
+	for _, c := range configure {
+		c(&spec)
+	}
+	db := grammarDB{conn, grammars.NewSQLiteGrammar(), &testProcessor{conn: conn}}
+	return NewTable(spec).New(db).(*note), conn
 }
 
 var acmeNotes = auth.SystemGrant("notes.write", "acme")
@@ -52,7 +55,7 @@ func TestABuilderUpdateCannotMoveARowToAnotherTenant(t *testing.T) {
 	for _, key := range []string{"tenant_id", "notes.tenant_id", "TENANT_ID"} {
 		t.Run(key, func(t *testing.T) {
 			m, conn := sqliteNotes()
-			if _, err := m.Where("id", "=", "n1").Update(context.Background(), acmeNotes,
+			if _, err := newQuery(m.base()).Where("id", "=", "n1").Update(context.Background(), acmeNotes,
 				map[string]any{"body": "edited", key: "globex"}); err != nil {
 				t.Fatal(err)
 			}
@@ -65,7 +68,7 @@ func TestABuilderUpdateCannotMoveARowToAnotherTenant(t *testing.T) {
 // from the request's map, and that map carries whatever keys its sender added.
 func TestFillLeavesTheTenantAndTheKeyOfAnExistingRowAlone(t *testing.T) {
 	m, conn := sqliteNotes()
-	loaded, err := m.NewInstance(nil, true)
+	loaded, err := instanceOf(m, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,8 +80,8 @@ func TestFillLeavesTheTenantAndTheKeyOfAnExistingRowAlone(t *testing.T) {
 		map[string]any{"body": "edited", "tenant_id": "globex", "id": "n9"}); err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Entity.TenantID != "acme" || loaded.Entity.ID != "n1" || loaded.Entity.Body != "edited" {
-		t.Fatalf("entity = %+v, want body edited and the tenant and key untouched", *loaded.Entity)
+	if loaded.TenantID != "acme" || loaded.ID != "n1" || loaded.Body != "edited" {
+		t.Fatalf("entity = %+v, want body edited and the tenant and key untouched", loaded.GetAttributes())
 	}
 	assertNotWritten(t, conn, "globex", "n9")
 }
@@ -87,10 +90,10 @@ func TestFillLeavesTheTenantAndTheKeyOfAnExistingRowAlone(t *testing.T) {
 // the explicit path, and the write still takes its tenant from the Grant.
 func TestSaveCannotMoveARowWhoseFieldWasChanged(t *testing.T) {
 	m, conn := sqliteNotes()
-	loaded, _ := m.NewInstance(nil, true)
+	loaded, _ := instanceOf(m, nil, true)
 	_ = loaded.SetRawAttributes(map[string]any{"id": "n1", "tenant_id": "acme", "body": "x"}, true)
 
-	loaded.Entity.TenantID = "globex"
+	loaded.TenantID = "globex"
 	if _, err := loaded.Save(context.Background(), acmeNotes); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +106,7 @@ func TestUpdateOrCreateCannotMoveTheRowItFound(t *testing.T) {
 	m, conn := sqliteNotes()
 	conn.queue(query.Record{"id": "n1", "tenant_id": "acme", "body": "x"})
 
-	if _, err := m.NewQuery().UpdateOrCreate(context.Background(), acmeNotes,
+	if _, err := newQuery(m.base()).UpdateOrCreate(context.Background(), acmeNotes,
 		map[string]any{"id": "n1"}, map[string]any{"body": "edited", "tenant_id": "globex"}); err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +118,7 @@ func TestUpdateOrCreateCannotMoveTheRowItFound(t *testing.T) {
 // tenant still never does.
 func TestCreateTakesTheTenantFromTheGrantAndTheKeyFromTheMap(t *testing.T) {
 	m, conn := sqliteNotes()
-	if _, err := m.Create(context.Background(), acmeNotes,
+	if _, err := newQuery(m.base()).Create(context.Background(), acmeNotes,
 		map[string]any{"id": "n1", "body": "hello", "tenant_id": "globex", "TENANT_ID": "initech"}); err != nil {
 		t.Fatal(err)
 	}
@@ -136,13 +139,13 @@ func TestCreateTakesTheTenantFromTheGrantAndTheKeyFromTheMap(t *testing.T) {
 // caller reading TenantID off what Create returned read the empty string.
 func TestCreateHandsBackTheTenantItWrote(t *testing.T) {
 	m, _ := sqliteNotes()
-	created, err := m.Create(context.Background(), acmeNotes,
+	created, err := newQuery(m.base()).Create(context.Background(), acmeNotes,
 		map[string]any{"id": "n1", "body": "hello", "tenant_id": "globex"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.TenantID != auth.Tenant(acmeNotes) {
-		t.Fatalf("TenantID = %q, want %q", created.TenantID, auth.Tenant(acmeNotes))
+	if got := created.(*note).TenantID; got != auth.Tenant(acmeNotes) {
+		t.Fatalf("TenantID = %q, want %q", got, auth.Tenant(acmeNotes))
 	}
 }
 
@@ -151,17 +154,17 @@ func TestCreateHandsBackTheTenantItWrote(t *testing.T) {
 // does the value the caller holds.
 func TestSavingANewStructHandsBackTheTenantItWrote(t *testing.T) {
 	m, conn := sqliteNotes()
-	fresh, err := m.NewInstance(nil, false)
+	fresh, err := instanceOf(m, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	*fresh.Entity = note{ID: "n1", TenantID: "globex", Body: "hello"}
+	fresh.ID, fresh.TenantID, fresh.Body = "n1", "globex", "hello"
 	if _, err := fresh.Save(context.Background(), acmeNotes); err != nil {
 		t.Fatal(err)
 	}
 	assertNotWritten(t, conn, "globex")
-	if fresh.Entity.TenantID != "acme" {
-		t.Fatalf("TenantID = %q, want acme", fresh.Entity.TenantID)
+	if fresh.TenantID != "acme" {
+		t.Fatalf("TenantID = %q, want acme", fresh.TenantID)
 	}
 	if fresh.IsDirty() {
 		t.Fatalf("a saved row is dirty: %v", fresh.GetDirty())
@@ -171,18 +174,19 @@ func TestSavingANewStructHandsBackTheTenantItWrote(t *testing.T) {
 // TestACreatingListenerCannotLeaveTheEntityOnAnotherTenant: a listener runs
 // after the first stamp, and the row is still written with the Grant's tenant.
 func TestACreatingListenerCannotLeaveTheEntityOnAnotherTenant(t *testing.T) {
-	m, conn := sqliteNotes()
-	m.RegisterModelEvent(Creating, func(n *Model[note]) error {
-		n.Entity.TenantID = "globex"
-		return nil
+	m, conn := sqliteNotes(func(s *TableSpec) {
+		s.Events = map[Event][]func(Entity) error{Creating: {func(e Entity) error {
+			e.(*note).TenantID = "globex"
+			return nil
+		}}}
 	})
-	created, err := m.Create(context.Background(), acmeNotes, map[string]any{"id": "n1", "body": "x"})
+	created, err := newQuery(m.base()).Create(context.Background(), acmeNotes, map[string]any{"id": "n1", "body": "x"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertNotWritten(t, conn, "globex")
-	if created.TenantID != "acme" {
-		t.Fatalf("TenantID = %q, want acme", created.TenantID)
+	if got := created.(*note).TenantID; got != "acme" {
+		t.Fatalf("TenantID = %q, want acme", got)
 	}
 }
 
@@ -190,17 +194,17 @@ func TestACreatingListenerCannotLeaveTheEntityOnAnotherTenant(t *testing.T) {
 // Grant's tenant, and the entity is put back to match it.
 func TestSaveOfAMovedFieldPutsTheEntityBack(t *testing.T) {
 	m, conn := sqliteNotes()
-	loaded, _ := m.NewInstance(nil, true)
+	loaded, _ := instanceOf(m, nil, true)
 	_ = loaded.SetRawAttributes(map[string]any{"id": "n1", "tenant_id": "acme", "body": "x"}, true)
 
-	loaded.Entity.TenantID = "globex"
-	loaded.Entity.Body = "edited"
+	loaded.TenantID = "globex"
+	loaded.Body = "edited"
 	if _, err := loaded.Save(context.Background(), acmeNotes); err != nil {
 		t.Fatal(err)
 	}
 	assertNotWritten(t, conn, "globex")
-	if loaded.Entity.TenantID != "acme" || loaded.Entity.Body != "edited" {
-		t.Fatalf("entity = %+v, want body edited on tenant acme", *loaded.Entity)
+	if loaded.TenantID != "acme" || loaded.Body != "edited" {
+		t.Fatalf("entity = %+v, want body edited on tenant acme", loaded.GetAttributes())
 	}
 }
 
@@ -208,15 +212,14 @@ func TestSaveOfAMovedFieldPutsTheEntityBack(t *testing.T) {
 // the Grant, and there is no field to hand it back in.
 func TestAnEntityWithNoTenantFieldStillSaves(t *testing.T) {
 	type bare struct {
+		Model
 		ID   string `db:"id"`
 		Body string `db:"body"`
 	}
 	conn := newTestConnection()
-	m := NewModel[bare]("notes", conn, grammars.NewSQLiteGrammar(), &testProcessor{conn: conn})
-	m.KeyType = "string"
-	m.Incrementing = false
-	m.Timestamps = false
-	if _, err := m.Create(context.Background(), acmeNotes, map[string]any{"id": "n1", "body": "x"}); err != nil {
+	table := NewTable(TableSpec{Name: "notes", New: func() Entity { return new(bare) }, ManualKey: true, NoTimestamps: true})
+	db := grammarDB{conn, grammars.NewSQLiteGrammar(), &testProcessor{conn: conn}}
+	if _, err := table.Query(db).Create(context.Background(), acmeNotes, map[string]any{"id": "n1", "body": "x"}); err != nil {
 		t.Fatal(err)
 	}
 	found := false

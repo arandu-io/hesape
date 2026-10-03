@@ -318,9 +318,39 @@ func (p *testProcessor) ProcessInsertGetID(ctx context.Context, q *query.Builder
 	return id, nil
 }
 
-// user is the entity the tests model. It is deliberately ordinary: exported
-// fields with db tags, one unexported field to prove Fill cannot reach it.
+// GetQueryGrammar and GetPostProcessor make the fake connection a DB: the
+// grammar the tests read the compiled SQL back through, and the processor that
+// hands out the incrementing ids.
+func (c *testConnection) GetQueryGrammar() query.Grammar { return newTestGrammar() }
+
+func (c *testConnection) GetPostProcessor() query.Processor { return &testProcessor{conn: c} }
+
+// asDB makes a bare connection a DB with the test grammar, for the tests whose
+// connection is a fake of its own.
+type asDB struct{ query.Connection }
+
+func (d asDB) GetQueryGrammar() query.Grammar { return newTestGrammar() }
+
+func (d asDB) GetPostProcessor() query.Processor { return &testProcessor{conn: newTestConnection()} }
+
+// grammarDB is a connection with a grammar and a processor of the test's
+// choosing.
+type grammarDB struct {
+	query.Connection
+	grammar   query.Grammar
+	processor query.Processor
+}
+
+func (d grammarDB) GetQueryGrammar() query.Grammar { return d.grammar }
+
+func (d grammarDB) GetPostProcessor() query.Processor { return d.processor }
+
+// user is the entity the tests model. It is deliberately ordinary: the model
+// embedded, exported fields with db tags, one unexported field to prove Fill
+// cannot reach it.
 type user struct {
+	Model
+
 	ID        int64      `db:"id"`
 	Name      string     `db:"name"`
 	Email     string     `db:"email"`
@@ -332,10 +362,57 @@ type user struct {
 	secret string
 }
 
-func newUserModel() (*Model[user], *testConnection) {
+// newUserTable is the users table with the defaults, adjusted by configure.
+func newUserTable(configure ...func(*TableSpec)) *Table {
+	spec := TableSpec{Name: "users", New: func() Entity { return new(user) }}
+	for _, c := range configure {
+		c(&spec)
+	}
+	return NewTable(spec)
+}
+
+// newUserModel is an empty user on a fresh fake connection: a row that does not
+// exist yet, and the query every test starts from through newQuery.
+func newUserModel(configure ...func(*TableSpec)) (*user, *testConnection) {
 	conn := newTestConnection()
-	model := NewModel[user]("users", conn, newTestGrammar(), &testProcessor{conn: conn})
-	return model, conn
+	return newUserTable(configure...).New(conn).(*user), conn
+}
+
+// softDeletes and global are the two settings the tests change most: a table
+// that stamps instead of deleting, and one shared by every tenant.
+func softDeletes(s *TableSpec) { s.SoftDeletes = true }
+
+func global(s *TableSpec) { s.Global = true }
+
+// onConnection gives one row a connection of its own under name, leaving every
+// other row of its query on theirs.
+func onConnection(m Entity, name string) {
+	c := *m.base().r.conn
+	c.name = name
+	m.base().r.conn = &c
+}
+
+// fromRecord is the row a record becomes on the way out of the database:
+// hydrated through the same query a Get runs, existing and synced.
+func fromRecord[E Entity](m E, record query.Record) (E, error) {
+	var zero E
+	rows, err := newModelQuery(m.base()).Hydrate([]query.Record{record})
+	if err != nil {
+		return zero, err
+	}
+	return rows[0].(E), nil
+}
+
+// instanceOf is an unsaved row of the same table, filled with attributes, marked
+// as existing when exists says so.
+func instanceOf[E Entity](m E, attributes map[string]any, exists bool) (E, error) {
+	var zero E
+	instance, err := newInstance(m.base(), attributes)
+	if err != nil {
+		return zero, err
+	}
+	instance.r.exists = exists
+	return instance.r.self.(E), nil
 }
 
 // signedOptions is what a cursor page is built with: a cursor names the

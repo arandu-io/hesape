@@ -5,15 +5,13 @@ import (
 	"errors"
 	"strings"
 	"testing"
-
-	"github.com/arandu-io/hesape/database/query"
 )
 
 func TestWithAttributesFiltersAndFills(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue()
 
-	q := model.NewQuery().WithAttributes(map[string]any{"name": "Ada"})
+	q := newQuery(model.base()).WithAttributes(map[string]any{"name": "Ada"})
 	if _, err := q.Get(context.Background(), grant()); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -25,7 +23,7 @@ func TestWithAttributesFiltersAndFills(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewModelInstance: %v", err)
 	}
-	if created.Entity.Name != "Ada" {
+	if created.(*user).Name != "Ada" {
 		t.Error("the pending attributes are what a model made off this query starts with")
 	}
 }
@@ -34,7 +32,7 @@ func TestWithAttributesCanSkipTheConditions(t *testing.T) {
 	model, conn := newUserModel()
 	conn.queue()
 
-	q := model.NewQuery().WithAttributes(map[string]any{"name": "Ada"}, false)
+	q := newQuery(model.base()).WithAttributes(map[string]any{"name": "Ada"}, false)
 	if _, err := q.Get(context.Background(), grant()); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -60,18 +58,17 @@ func (c *savepointConnection) Transaction(callback func() error) error {
 
 func (c *savepointConnection) TransactionLevel() int { return c.level }
 
-func newSavepointModel(level int) (*Model[user], *savepointConnection) {
+func newSavepointModel(level int) (*user, *savepointConnection) {
 	inner := newTestConnection()
 	conn := &savepointConnection{testConnection: inner, level: level}
-	model := NewModel[user]("users", conn, newTestGrammar(), &testProcessor{conn: inner})
-	return model, conn
+	return newUserTable().New(conn).(*user), conn
 }
 
 func TestWithSavepointIfNeededOpensOneOnlyInsideATransaction(t *testing.T) {
 	model, conn := newSavepointModel(0)
 
 	ran := false
-	if err := model.NewQuery().WithSavepointIfNeeded(func() error { ran = true; return nil }); err != nil {
+	if err := newQuery(model.base()).WithSavepointIfNeeded(func() error { ran = true; return nil }); err != nil {
 		t.Fatalf("WithSavepointIfNeeded: %v", err)
 	}
 	if !ran || conn.wrapped {
@@ -79,7 +76,7 @@ func TestWithSavepointIfNeededOpensOneOnlyInsideATransaction(t *testing.T) {
 	}
 
 	model, conn = newSavepointModel(1)
-	if err := model.NewQuery().WithSavepointIfNeeded(func() error { return nil }); err != nil {
+	if err := newQuery(model.base()).WithSavepointIfNeeded(func() error { return nil }); err != nil {
 		t.Fatalf("WithSavepointIfNeeded: %v", err)
 	}
 	if !conn.wrapped {
@@ -91,26 +88,32 @@ func TestWithSavepointIfNeededRunsPlainlyOnAConnectionThatCannotSay(t *testing.T
 	model, _ := newUserModel()
 
 	boom := errors.New("boom")
-	if err := model.NewQuery().WithSavepointIfNeeded(func() error { return boom }); !errors.Is(err, boom) {
+	if err := newQuery(model.base()).WithSavepointIfNeeded(func() error { return boom }); !errors.Is(err, boom) {
 		t.Fatalf("error = %v, want the callback's own", err)
 	}
 }
 
-func TestNewTypedBuilderIsWhatNewModelQueryGoesThrough(t *testing.T) {
+// TestGetModelIsThePrototypeTheQueryRunsThrough: a relation reads the table off
+// the model a builder runs through, and renames it when it joins the table to
+// itself -- so it is one model per builder, the same on every call, and it
+// stands for no row.
+func TestGetModelIsThePrototypeTheQueryRunsThrough(t *testing.T) {
 	model, _ := newUserModel()
 
-	base := model.NewBaseQueryBuilder()
-	if got := tableOf(base.GetFrom()); got != "users" {
-		t.Errorf("NewBaseQueryBuilder from = %q, want users", got)
+	b := newQuery(model.base())
+	prototype := b.GetModel()
+	if prototype != b.GetModel() {
+		t.Error("two calls answered two models, and a rename on the first would not reach the second")
+	}
+	if !prototype.r.prototype || prototype.Exists() {
+		t.Error("the model a query runs through stands for a row")
+	}
+	if got := tableOf(b.GetQuery().GetFrom()); got != "users" {
+		t.Errorf("the query reads %q, want users", got)
 	}
 
-	b := model.NewTypedBuilder(base)
-	if b.GetModel() != nil {
-		t.Error("newTypedBuilder does not set the model: newModelQuery does that after, as there")
+	refOf(prototype.base()).SetTable("laravel_reserved_0")
+	if got := b.Qualify("id"); got != "laravel_reserved_0.id" {
+		t.Errorf("Qualify = %q, want the alias the relation renamed the table to", got)
 	}
-	if b.GetQuery() != base {
-		t.Error("the builder must be built over the query it was handed")
-	}
-
-	var _ *query.Builder = base
 }

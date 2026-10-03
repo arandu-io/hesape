@@ -22,11 +22,11 @@ func (g *modelCompileSpyGrammar) CompileUpdate(builder *query.Builder, values ma
 
 func TestModelWritesValidateOperatorsAgainstTheGrammarThatCompilesThem(t *testing.T) {
 	connection := newTestConnection()
-	model := NewModel[user]("users", connection, grammars.NewMySQLGrammar(), &testProcessor{conn: connection})
+	model := newUserTable().New(grammarDB{connection, grammars.NewMySQLGrammar(), &testProcessor{conn: connection}}).(*user)
 	foreign := query.NewBuilder(connection, grammars.NewPostgresGrammar(), &testProcessor{conn: connection}).
 		From("users").
 		Where("metadata", "@>", "{}")
-	builder := model.NewQuery().SetQuery(foreign)
+	builder := newQuery(model.base()).SetQuery(foreign)
 
 	_, err := builder.Update(context.Background(), auth.SystemGrant("users.write", "acme"), map[string]any{"name": "Ada"})
 	if !errors.Is(err, query.ErrInvalidOperator) {
@@ -40,7 +40,7 @@ func TestModelWritesValidateOperatorsAgainstTheGrammarThatCompilesThem(t *testin
 func TestModelWriteCallbackCannotReplaceTheCompilerOperatorPolicy(t *testing.T) {
 	connection := newTestConnection()
 	compiler := &modelCompileSpyGrammar{Grammar: grammars.NewMySQLGrammar()}
-	model := NewModel[user]("users", connection, compiler, &testProcessor{conn: connection})
+	model := newUserTable().New(grammarDB{connection, compiler, &testProcessor{conn: connection}}).(*user)
 	foreign := query.NewBuilder(connection, grammars.NewPostgresGrammar(), &testProcessor{conn: connection}).
 		From("users")
 	foreign.Wheres = append(foreign.Wheres, query.Where{
@@ -49,7 +49,7 @@ func TestModelWriteCallbackCannotReplaceTheCompilerOperatorPolicy(t *testing.T) 
 	foreign.BeforeQuery(func(builder *query.Builder) {
 		builder.Grammar = grammars.NewPostgresGrammar()
 	})
-	builder := model.NewQuery().SetQuery(foreign)
+	builder := newQuery(model.base()).SetQuery(foreign)
 	// A prepared builder reaches the write sink without another ScopeNested
 	// preflight; the sink must independently enforce its compiler's policy.
 	builder.prepared = true

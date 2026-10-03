@@ -19,9 +19,17 @@ var _ model.DB = (*database.DB)(nil)
 
 // Widget is a module's row.
 type Widget struct {
+	model.Model
+
 	ID     string `db:"id"`
 	Status string `db:"status"`
 }
+
+// widgets is the module's table, declared once.
+var widgets = model.NewTable(model.TableSpec{
+	Name: "widgets",
+	New:  func() model.Entity { return new(Widget) },
+})
 
 // widgetRepository is the module-shaped consumer: it holds exactly what a
 // module constructor is given and nothing else.
@@ -32,8 +40,8 @@ func newWidgetRepository(db *database.DB) *widgetRepository {
 }
 
 // Open reads through the Model, off the handle the constructor received.
-func (r *widgetRepository) Open(ctx context.Context, g auth.Grant) (model.Collection[Widget], error) {
-	return model.Query[Widget](r.db).Where("status", "=", "open").Get(ctx, g)
+func (r *widgetRepository) Open(ctx context.Context, g auth.Grant) (model.Rows, error) {
+	return widgets.Query(r.db).Where("status", "=", "open").Get(ctx, g)
 }
 
 // TestAModuleReadsThroughTheModelOnTheHandleItWasGiven is the whole of Task 2
@@ -49,14 +57,14 @@ func TestAModuleReadsThroughTheModelOnTheHandleItWasGiven(t *testing.T) {
 	ctx := log.WithCollector(context.Background(), collector)
 	g := auth.SystemGrant("widget.list", "acme")
 
-	widgets, err := newWidgetRepository(db).Open(ctx, g)
+	rows, err := newWidgetRepository(db).Open(ctx, g)
 	if err != nil {
 		t.Fatalf("reading through the model: %v", err)
 	}
-	if len(widgets) != 1 || widgets[0].ID != "w-1" || widgets[0].Status != "open" {
-		t.Fatalf("the row came back as %+v", widgets)
+	if len(rows) != 1 || rows[0].(*Widget).ID != "w-1" || rows[0].(*Widget).Status != "open" {
+		t.Fatalf("the row came back as %+v", rows)
 	}
-	t.Logf("ROW            : %+v", *widgets[0])
+	t.Logf("ROW            : %+v", rows[0].(*Widget).GetAttributes())
 
 	queries := collector.Queries()
 	if len(queries) != 1 {
@@ -127,15 +135,15 @@ func TestAModelWriteRunsThroughTheHandle(t *testing.T) {
 	ctx := log.WithCollector(context.Background(), collector)
 	g := auth.SystemGrant("widget.write", "acme")
 
-	q := model.Query[Widget](db)
+	q := widgets.Query(db)
 	if _, err := q.Insert(ctx, g, map[string]any{"id": "w-1", "status": "open"}); err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
-	if _, err := model.Query[Widget](db).Where("id", "=", "w-1").
+	if _, err := widgets.Query(db).Where("id", "=", "w-1").
 		Update(ctx, g, map[string]any{"status": "closed"}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if _, err := model.Query[Widget](db).Where("id", "=", "w-1").Delete(ctx, g); err != nil {
+	if _, err := widgets.Query(db).Where("id", "=", "w-1").Delete(ctx, g); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
@@ -165,7 +173,7 @@ func TestTheHandleRefusesToReportAnInsertedIdentifier(t *testing.T) {
 	ctx := context.Background()
 	g := auth.SystemGrant("widget.write", "acme")
 
-	_, err := model.Query[Widget](db).
+	_, err := widgets.Query(db).
 		InsertGetID(ctx, g, map[string]any{"status": "open"}, "id")
 	if err == nil {
 		t.Fatal("InsertGetID reported an identifier off a pool")

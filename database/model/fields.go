@@ -33,11 +33,12 @@ type entitySchema struct {
 	byName map[string]int
 }
 
-// fieldCache holds the schema per entity type. Reflection over a struct is
-// the same answer every time, and Hydrate asks for it once per row.
+// fieldCache holds the schema per entity type. Reflection over a struct is the
+// same answer every time, so two tables over one type share it.
 var fieldCache sync.Map // reflect.Type -> *entitySchema
 
-// fieldsOf returns the columns of an entity type.
+// schemaOf returns the cached schema of an entity type, building it on first
+// sight.
 //
 // Only exported fields are columns, and that is the design rather than a
 // limitation of reflection: an unexported field cannot be written from outside
@@ -51,10 +52,6 @@ var fieldCache sync.Map // reflect.Type -> *entitySchema
 // are columns of the outer one. An embedded struct with a `db` tag is treated as
 // a column of its own instead, which is how a driver-level type
 // (sql.NullString, a custom scanner) stays one value.
-func fieldsOf(t reflect.Type) []field { return schemaOf(t).fields }
-
-// schemaOf returns the cached schema of an entity type, building it on first
-// sight.
 func schemaOf(t reflect.Type) *entitySchema {
 	if cached, ok := fieldCache.Load(t); ok {
 		return cached.(*entitySchema)
@@ -107,30 +104,15 @@ func collectFields(t reflect.Type, prefix []int) []field {
 	return out
 }
 
-// isEmbeddedModel reports whether f is the Model[T] an entity embeds.
+// isEmbeddedModel reports whether f is the Model an entity embeds.
 //
-// Its fields are the model's configuration -- the table, the primary key, the
-// grammar, the back pointer to the entity itself -- and every one of them is
-// exported, because a Go value has no subtype to override them in. Walked as an
-// embedded struct they become columns: an insert on a User that embeds
-// Model[User] tried to write table, primary_key, entity and grammar, alongside
-// the two the developer declared.
-//
-// The test is the type's own identity rather than its name, so a field the
-// application happens to call Model is a column like any other, and an entity
-// that embeds a Model[T] of any T is skipped whatever T is. That is why the name
-// is matched with a prefix: Go spells the instantiated type Model[pkg.User], and
-// there is no T here to compare against.
+// The model holds the row's bookkeeping, not a column of it: walked as an
+// embedded struct it would have no exported field to contribute, and skipping it
+// by identity keeps a struct of the application's that happens to be called
+// Model a column like any other.
 func isEmbeddedModel(f reflect.StructField) bool {
-	return f.Anonymous &&
-		f.Type.Kind() == reflect.Struct &&
-		f.Type.PkgPath() == modelPackage &&
-		strings.HasPrefix(f.Type.Name(), "Model[")
+	return f.Anonymous && f.Type == modelType
 }
-
-// modelPackage is this package's import path, read off a type rather than
-// written as a string: a package that moves takes the constant with it.
-var modelPackage = reflect.TypeFor[Model[struct{}]]().PkgPath()
 
 // columnName is the column a field with no tag gets: the field name in snake
 // case, with an initialism kept whole.
@@ -163,14 +145,13 @@ func toLowerRune(r rune) rune {
 	return r
 }
 
-// fieldByColumn finds the column in an entity type, reporting whether it exists.
-func fieldByColumn(t reflect.Type, column string) (field, bool) {
-	schema := schemaOf(t)
-	i, ok := schema.byName[column]
+// field finds the column in the schema, reporting whether it exists.
+func (s *entitySchema) field(column string) (field, bool) {
+	i, ok := s.byName[column]
 	if !ok {
 		return field{}, false
 	}
-	return schema.fields[i], true
+	return s.fields[i], true
 }
 
 // valueAt reads a column off an entity value.

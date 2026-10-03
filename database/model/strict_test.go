@@ -82,10 +82,11 @@ func TestForceFillIsNotADiscardedAttribute(t *testing.T) {
 func TestMissingAttributeViolationReachesTheCallback(t *testing.T) {
 	resetStrict(t)
 	model, _ := newUserModel()
-	model.Exists = true
+	model.r.exists = true
 
 	var seen string
-	HandleMissingAttributeViolationUsing(func(_ any, key string) { seen = key })
+	var row any
+	HandleMissingAttributeViolationUsing(func(m any, key string) { seen, row = key, m })
 
 	if got := model.GetAttribute("nickname"); got != nil {
 		t.Errorf("GetAttribute = %v, want nil: the read still answers nil", got)
@@ -99,6 +100,9 @@ func TestMissingAttributeViolationReachesTheCallback(t *testing.T) {
 
 	if seen != "nickname" {
 		t.Errorf("callback saw %q, want nickname", seen)
+	}
+	if row != any(model) {
+		t.Errorf("callback was handed %T, want the entity the attribute was read off", row)
 	}
 }
 
@@ -120,15 +124,15 @@ func TestMissingAttributeViolationSkipsAModelThatDoesNotExist(t *testing.T) {
 func TestLazyLoadingViolationIsReportedForADeclaredRelation(t *testing.T) {
 	resetStrict(t)
 	model, _ := newUserModel()
-	model.Exists = true
-	model.RelationResolvers = map[string]func(*Model[user]) Relation{"posts": nil}
+	model.r.exists = true
+	declared(model, "posts")
 
 	var seen string
 	HandleLazyLoadingViolationUsing(func(_ any, key string) { seen = key })
 	PreventLazyLoading()
 
-	if _, ok := model.GetRelation("posts"); ok {
-		t.Fatal("posts was never loaded, so GetRelation must answer false rather than run a query")
+	if _, ok := model.Related("posts"); ok {
+		t.Fatal("posts was never loaded, so Related must answer false rather than run a query")
 	}
 	if seen != "posts" {
 		t.Errorf("callback saw %q, want posts", seen)
@@ -138,13 +142,13 @@ func TestLazyLoadingViolationIsReportedForADeclaredRelation(t *testing.T) {
 func TestLazyLoadingViolationIgnoresANameThatIsNotARelation(t *testing.T) {
 	resetStrict(t)
 	model, _ := newUserModel()
-	model.Exists = true
+	model.r.exists = true
 	PreventLazyLoading()
 
 	reported := false
 	HandleLazyLoadingViolationUsing(func(any, string) { reported = true })
 
-	model.GetRelation("posts")
+	model.Related("posts")
 
 	if reported {
 		t.Error("no resolver is registered for posts, so there is no relation to have loaded")
@@ -154,15 +158,15 @@ func TestLazyLoadingViolationIgnoresANameThatIsNotARelation(t *testing.T) {
 func TestLoadedRelationIsNoViolation(t *testing.T) {
 	resetStrict(t)
 	model, _ := newUserModel()
-	model.Exists = true
-	model.RelationResolvers = map[string]func(*Model[user]) Relation{"posts": nil}
-	model.SetRelation("posts", Collection[user]{})
+	model.r.exists = true
+	declared(model, "posts")
+	model.SetRelation("posts", Rows{})
 	PreventLazyLoading()
 
 	reported := false
 	HandleLazyLoadingViolationUsing(func(any, string) { reported = true })
 
-	if _, ok := model.GetRelation("posts"); !ok {
+	if _, ok := model.Related("posts"); !ok {
 		t.Fatal("posts is loaded")
 	}
 	if reported {
@@ -170,16 +174,20 @@ func TestLoadedRelationIsNoViolation(t *testing.T) {
 	}
 }
 
-func TestWithoutTouchingIgnoresTheTypeForTheCallbackOnly(t *testing.T) {
+func TestWithoutTouchingIgnoresTheTableForTheCallbackOnly(t *testing.T) {
 	model, _ := newUserModel()
+	table := model.Table()
 
-	if model.IsIgnoringTouch() {
+	if table.IsIgnoringTouch() {
 		t.Fatal("nothing is ignored before withoutTouching runs")
 	}
 
-	err := WithoutTouching[user](func() error {
-		if !model.IsIgnoringTouch() {
-			t.Error("the type is ignored for the length of the callback")
+	err := table.WithoutTouching(func() error {
+		if !table.IsIgnoringTouch() {
+			t.Error("the table is ignored for the length of the callback")
+		}
+		if newUserTable().IsIgnoringTouch() {
+			t.Error("another table over the same type is ignored too, and the list holds tables")
 		}
 		return nil
 	})
@@ -187,7 +195,7 @@ func TestWithoutTouchingIgnoresTheTypeForTheCallbackOnly(t *testing.T) {
 		t.Fatalf("WithoutTouching: %v", err)
 	}
 
-	if model.IsIgnoringTouch() {
+	if table.IsIgnoringTouch() {
 		t.Error("the finally block puts the list back, however the callback ends")
 	}
 }
@@ -196,26 +204,22 @@ func TestWithoutTouchingRestoresAfterAFailure(t *testing.T) {
 	model, _ := newUserModel()
 	boom := errors.New("boom")
 
-	if err := WithoutTouching[user](func() error { return boom }); !errors.Is(err, boom) {
+	if err := model.Table().WithoutTouching(func() error { return boom }); !errors.Is(err, boom) {
 		t.Fatalf("WithoutTouching must return what the callback returned, got %v", err)
 	}
-	if model.IsIgnoringTouch() {
-		t.Error("array_diff runs in a finally, so an error still puts the type back")
+	if model.Table().IsIgnoringTouch() {
+		t.Error("array_diff runs in a finally, so an error still puts the table back")
 	}
 }
 
 func TestIsIgnoringTouchIsTrueWithoutTimestamps(t *testing.T) {
-	model, _ := newUserModel()
-	model.Timestamps = false
-
-	if !model.IsIgnoringTouch() {
-		t.Error("a model with timestamps off has no updated_at to bump, which the PHP checks before the list")
+	untimed, _ := newUserModel(func(s *TableSpec) { s.NoTimestamps = true })
+	if !untimed.Table().IsIgnoringTouch() {
+		t.Error("a table with timestamps off has no updated_at to bump, which the PHP checks before the list")
 	}
 
-	model.Timestamps = true
-	model.UpdatedAtColumn = ""
-
-	if !model.IsIgnoringTouch() {
+	unstamped, _ := newUserModel(func(s *TableSpec) { s.UpdatedAtColumn = NoColumn })
+	if !unstamped.Table().IsIgnoringTouch() {
 		t.Error("UPDATED_AT of null is the PHP's first check")
 	}
 }

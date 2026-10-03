@@ -66,12 +66,12 @@ func (c *cancellingConnection) Statement(ctx context.Context, _ string, _ []any)
 // half. TestTheConnectionSeesTheContextTheCallerPassed is the other half.
 func TestAReadCarriesTheCallersContextToTheConnection(t *testing.T) {
 	conn := &cancellingConnection{}
-	model := NewModel[user]("users", conn, newTestGrammar(), &testProcessor{})
+	model := newUserTable().New(asDB{conn}).(*user)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	_, err := model.NewQuery().Where("name", "Ada").Get(ctx, auth.SystemGrant("users.read", "acme"))
+	_, err := newQuery(model.base()).Where("name", "Ada").Get(ctx, auth.SystemGrant("users.read", "acme"))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Get returned %v, want context.Canceled", err)
 	}
@@ -86,12 +86,12 @@ func TestAReadCarriesTheCallersContextToTheConnection(t *testing.T) {
 // Background fabricated on the way down.
 func TestTheConnectionSeesTheContextTheCallerPassed(t *testing.T) {
 	conn := &cancellingConnection{}
-	model := NewModel[user]("users", conn, newTestGrammar(), &testProcessor{})
+	model := newUserTable().New(asDB{conn}).(*user)
 
 	type key struct{}
 	ctx := context.WithValue(t.Context(), key{}, "the caller's")
 
-	if _, err := model.NewQuery().Get(ctx, auth.SystemGrant("users.read", "acme")); err != nil {
+	if _, err := newQuery(model.base()).Get(ctx, auth.SystemGrant("users.read", "acme")); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 
@@ -110,12 +110,12 @@ func TestTheConnectionSeesTheContextTheCallerPassed(t *testing.T) {
 // most: a cancelled request that still inserts is a row nobody asked for.
 func TestAWriteCarriesTheCallersContextToTheConnection(t *testing.T) {
 	conn := &cancellingConnection{}
-	model := NewModel[user]("users", conn, newTestGrammar(), &testProcessor{})
+	model := newUserTable().New(asDB{conn}).(*user)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	_, err := model.NewQuery().Update(ctx, auth.SystemGrant("users.write", "acme"),
+	_, err := newQuery(model.base()).Update(ctx, auth.SystemGrant("users.write", "acme"),
 		map[string]any{"name": "Ada"})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Update returned %v, want context.Canceled", err)

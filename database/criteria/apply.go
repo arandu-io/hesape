@@ -7,7 +7,7 @@ import "strings"
 // It is an interface over a builder rather than a dependency on one, and the
 // self-referential type parameter is what lets a fluent builder satisfy it:
 // every method returns the builder itself, so Self is the builder's own type.
-// *model.Builder[T] satisfies Target[*model.Builder[T]] as written.
+// *model.Builder satisfies Target[*model.Builder] as written.
 //
 // It is an interface at all because this package translates and does not query.
 // Naming a builder here would put a data path inside the door, and the door
