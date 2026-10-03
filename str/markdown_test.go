@@ -182,7 +182,7 @@ func TestMarkdownStaysLinearOnOpenersThatNeverClose(t *testing.T) {
 		"hard breaks":   "a  \n",
 	} {
 		reps := 16000 / len(unit)
-		checkLinearGrowth(t, name, strings.Repeat(unit, reps), strings.Repeat(unit, 2*reps))
+		checkLinearGrowth(t, name, strings.Repeat(unit, reps/2), strings.Repeat(unit, 2*reps))
 	}
 }
 
@@ -203,30 +203,37 @@ func TestMarkdownBoundsTheNestingOfADestination(t *testing.T) {
 	}
 }
 
-// fastestRender is the fastest of a few renders of src, which is the one the
-// rest of the machine disturbed least.
-func fastestRender(src string) time.Duration {
-	best := time.Duration(1 << 62)
+// fastestRenders is the fastest of a few renders of small and of large, taken
+// in turns. The fastest is the one the rest of the machine disturbed least, and
+// taking the two in turns means a slow stretch on a shared machine slows both
+// instead of only the one measured during it.
+func fastestRenders(small, large string) (time.Duration, time.Duration) {
+	bestSmall, bestLarge := time.Duration(1<<62), time.Duration(1<<62)
 	for range 5 {
 		start := time.Now()
-		str.Markdown(src)
-		best = min(best, time.Since(start))
+		str.Markdown(small)
+		bestSmall = min(bestSmall, time.Since(start))
+		start = time.Now()
+		str.Markdown(large)
+		bestLarge = min(bestLarge, time.Since(start))
 	}
-	return best
+	return bestSmall, bestLarge
 }
 
-// checkLinearGrowth fails when rendering large, twice the length of small,
-// takes more than 3.2 times as long. A linear render takes twice as long and a
-// quadratic one four times; a render of large too quick to measure is too quick
-// to be quadratic, and is not compared.
+// checkLinearGrowth fails when rendering large, four times the length of small,
+// takes more than eight times as long. A linear render takes four times as long
+// and a quadratic one sixteen, so eight sits far from both: doubling the length
+// left a gap of 2 against 4, narrow enough that a busy shared runner under the
+// race detector crossed it with a linear render. A render of large too quick to
+// measure is too quick to be quadratic, and is not compared.
 func checkLinearGrowth(t *testing.T, name, small, large string) {
 	t.Helper()
-	smallTime, largeTime := fastestRender(small), fastestRender(large)
+	smallTime, largeTime := fastestRenders(small, large)
 	if largeTime < 10*time.Millisecond {
 		return
 	}
-	if growth := float64(largeTime) / float64(smallTime); growth > 3.2 {
-		t.Errorf("%s: doubling the input took %.1f times as long (%s to %s)", name, growth, smallTime, largeTime)
+	if growth := float64(largeTime) / float64(smallTime); growth > 8 {
+		t.Errorf("%s: four times the input took %.1f times as long (%s to %s)", name, growth, smallTime, largeTime)
 	}
 }
 
@@ -248,7 +255,7 @@ func TestMarkdownStaysLinearOnHostileInput(t *testing.T) {
 		{"list markers", func(n int) string { return strings.Repeat("- ", n) + "x" }, 5000},
 		{"hard breaks", func(n int) string { return strings.Repeat("a  \n", n) }, 15000},
 	} {
-		checkLinearGrowth(t, c.name, c.src(c.n), c.src(2*c.n))
+		checkLinearGrowth(t, c.name, c.src(c.n/2), c.src(2*c.n))
 	}
 }
 
@@ -278,7 +285,7 @@ func TestMarkdownStaysLinearOnNestedContainers(t *testing.T) {
 		{"nested images", func(n int) string { return strings.Repeat("![", n) + "x" + strings.Repeat("](u)", n) }, 3000},
 		{"emphasis in links", func(n int) string { return strings.Repeat("[*", n) + "x" + strings.Repeat("*](u)", n) }, 3000},
 	} {
-		checkLinearGrowth(t, c.name, c.src(c.n), c.src(2*c.n))
+		checkLinearGrowth(t, c.name, c.src(c.n/2), c.src(2*c.n))
 	}
 }
 
