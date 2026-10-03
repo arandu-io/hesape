@@ -8,6 +8,7 @@ import (
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/collections"
+	"github.com/arandu-io/hesape/database/model/relations/concerns"
 )
 
 // Collection is the rows a query came back with.
@@ -30,16 +31,49 @@ type Collection[T any] []*T
 // eager loading, Fresh, the key a chunk resumes from -- and it keeps working for
 // a T that does not embed Model[T], where a row has no way back to the model
 // that hydrated it. See embed.go for the two shapes.
-type models[T any] []*Model[T]
+//
+// It is not generic, and that is what it is for. A generic type has every
+// method compiled again for each type argument, in every package that names
+// it, so a list type over *Model[T] cost each model a copy of the whole list.
+// The elements are the models seen through row, which *Model[T] satisfies for
+// every T, and the few operations that need T back are generic functions,
+// compiled only where they are called.
+type models []row
 
-// entities returns the row of every model.
+// row is a model as the list sees it: the methods the list's operations call,
+// each one a method *Model[T] already has with this exact signature.
+type row interface {
+	GetKey() any
+	GetTable() string
+	GetConnectionName() string
+	GetAttribute(key string) any
+	GetRelation(name string) (any, bool)
+	RelationLoaded(name string) bool
+	Trashed() bool
+	ToArray() map[string]any
+	Push(ctx context.Context, g auth.Grant) (bool, error)
+	Ref() concerns.Model
+	GetQueueableID() any
+	GetQueueableRelations() []string
+}
+
+// entitiesOf returns the row of every model.
 //
 // Every model has one, whichever shape T is: NewInstance allocates it, so the
 // two sides are always the same length.
-func (ms models[T]) entities() Collection[T] {
+func entitiesOf[T any](ms models) Collection[T] {
 	out := make(Collection[T], len(ms))
 	for i, model := range ms {
-		out[i] = model.Entity
+		out[i] = model.(*Model[T]).Entity
+	}
+	return out
+}
+
+// modelsOf holds the given models as the list.
+func modelsOf[T any](ms ...*Model[T]) models {
+	out := make(models, len(ms))
+	for i, model := range ms {
+		out[i] = model
 	}
 	return out
 }
@@ -54,9 +88,9 @@ func (ms models[T]) entities() Collection[T] {
 //
 // So every method below that reaches a model is a method for the embedding
 // shape. Nothing in this package calls one -- it holds the models already, and
-// reads them through models[T]. See embed.go and ModelOf.
-func (c Collection[T]) models() models[T] {
-	out := make(models[T], 0, len(c))
+// reads them through models. See embed.go and ModelOf.
+func (c Collection[T]) models() models {
+	out := make(models, 0, len(c))
 	for _, entity := range c {
 		if model := ModelOf(entity); model != nil {
 			out = append(out, model)
@@ -73,7 +107,7 @@ func (c Collection[T]) models() models[T] {
 // nil. It is the wrong answer for a relation load, which would report success
 // having attached the relation to nothing. So the loads come through here and
 // the rest do not.
-func (c Collection[T]) modelsOrFail() (models[T], error) {
+func (c Collection[T]) modelsOrFail() (models, error) {
 	found := c.models()
 	if len(found) != len(c) {
 		return nil, fmt.Errorf("%w: %d of %d rows", ErrRowHasNoModel, len(c)-len(found), len(c))
@@ -108,22 +142,25 @@ func (c Collection[T]) First() *T {
 func (c Collection[T]) ModelKeys() []any { return c.models().ModelKeys() }
 
 // Find returns the row with this key, out of the ones already in hand.
-func (c Collection[T]) Find(key any) *T { return entityOf(c.models().Find(key)) }
+func (c Collection[T]) Find(key any) *T { return entityOfRow[T](c.models().Find(key)) }
 
 // FindOrFail returns the row with this key, or an error when none matches.
 func (c Collection[T]) FindOrFail(key any) (*T, error) {
 	model, err := c.models().FindOrFail(key)
-	return entityOf(model), err
+	return entityOfRow[T](model), err
 }
 
-// Contains reports whether key -- a key value, or a row to compare by key --
-// matches one of the rows.
+// Contains reports whether key -- a key value, a row, or the model behind one,
+// to compare by key -- matches one of the rows.
 func (c Collection[T]) Contains(key any) bool {
-	if entity, ok := key.(*T); ok {
-		model := ModelOf(entity)
-		return model != nil && c.models().Contains(model)
+	switch typed := key.(type) {
+	case *T:
+		model := ModelOf(typed)
+		return model != nil && c.models().containsModel(model)
+	case *Model[T]:
+		return c.models().containsModel(typed)
 	}
-	return c.models().Contains(key)
+	return c.models().Find(key) != nil
 }
 
 // DoesntContain reports the opposite of Contains.
@@ -139,7 +176,7 @@ func (c Collection[T]) GetDictionary() map[any]*T {
 	found := c.models()
 	out := make(map[any]*T, len(found))
 	for _, model := range found {
-		out[model.GetKey()] = model.Entity
+		out[model.GetKey()] = model.(*Model[T]).Entity
 	}
 	return out
 }
@@ -147,7 +184,7 @@ func (c Collection[T]) GetDictionary() map[any]*T {
 // Merge returns the other rows added, with a key that is already here
 // replaced rather than repeated.
 func (c Collection[T]) Merge(items Collection[T]) Collection[T] {
-	return c.models().Merge(items.models()).entities()
+	return entitiesOf[T](c.models().Merge(items.models()))
 }
 
 // Load eager loads these relations onto every row.
@@ -163,7 +200,7 @@ func (c Collection[T]) Load(ctx context.Context, g auth.Grant, relations ...stri
 	if err != nil {
 		return err
 	}
-	return found.Load(ctx, g, relations...)
+	return loadModels[T](ctx, g, found, relations...)
 }
 
 // LoadMissing eager loads these relations onto every row, skipping the
@@ -176,7 +213,7 @@ func (c Collection[T]) LoadMissing(ctx context.Context, g auth.Grant, relations 
 	if err != nil {
 		return err
 	}
-	return found.LoadMissing(ctx, g, relations...)
+	return loadMissingModels[T](ctx, g, found, relations...)
 }
 
 // LoadAggregate loads function over column of each relation onto every
@@ -189,7 +226,7 @@ func (c Collection[T]) LoadAggregate(ctx context.Context, g auth.Grant, relation
 	if err != nil {
 		return err
 	}
-	return found.LoadAggregate(ctx, g, relations, column, function)
+	return loadAggregateModels[T](ctx, g, found, relations, column, function)
 }
 
 // LoadCount loads the count of each relation onto every row.
@@ -226,69 +263,81 @@ func (c Collection[T]) LoadExists(ctx context.Context, g auth.Grant, relations .
 //
 // A row that has since been deleted drops out of the result.
 func (c Collection[T]) Fresh(ctx context.Context, g auth.Grant, with ...string) (Collection[T], error) {
-	fresh, err := c.models().Fresh(ctx, g, with...)
+	fresh, err := freshModels[T](ctx, g, c.models(), with...)
 	if err != nil {
 		return nil, err
 	}
-	return fresh.entities(), nil
+	return entitiesOf[T](fresh), nil
 }
 
 // Diff returns the rows that are not in items.
 func (c Collection[T]) Diff(items Collection[T]) Collection[T] {
-	return c.models().Diff(items.models()).entities()
+	return entitiesOf[T](c.models().Diff(items.models()))
 }
 
 // Intersect returns the rows that are also in items.
 func (c Collection[T]) Intersect(items Collection[T]) Collection[T] {
-	return c.models().Intersect(items.models()).entities()
+	return entitiesOf[T](c.models().Intersect(items.models()))
 }
 
 // Unique returns one row per key, the first one seen.
-func (c Collection[T]) Unique() Collection[T] { return c.models().Unique().entities() }
+func (c Collection[T]) Unique() Collection[T] { return entitiesOf[T](c.models().Unique()) }
 
 // Only returns the rows with these keys.
 func (c Collection[T]) Only(keys ...any) Collection[T] {
-	return c.models().Only(keys...).entities()
+	return entitiesOf[T](c.models().Only(keys...))
 }
 
 // Except returns the rows without these keys.
 func (c Collection[T]) Except(keys ...any) Collection[T] {
-	return c.models().Except(keys...).entities()
+	return entitiesOf[T](c.models().Except(keys...))
 }
 
 // MakeVisible calls Model.MakeVisible on every row.
 func (c Collection[T]) MakeVisible(attributes ...string) Collection[T] {
-	c.models().MakeVisible(attributes...)
+	for _, model := range c.models() {
+		model.(*Model[T]).MakeVisible(attributes...)
+	}
 	return c
 }
 
 // MakeHidden calls Model.MakeHidden on every row.
 func (c Collection[T]) MakeHidden(attributes ...string) Collection[T] {
-	c.models().MakeHidden(attributes...)
+	for _, model := range c.models() {
+		model.(*Model[T]).MakeHidden(attributes...)
+	}
 	return c
 }
 
 // SetVisible calls Model.SetVisible on every row.
 func (c Collection[T]) SetVisible(visible ...string) Collection[T] {
-	c.models().SetVisible(visible...)
+	for _, model := range c.models() {
+		model.(*Model[T]).SetVisible(visible...)
+	}
 	return c
 }
 
 // SetHidden calls Model.SetHidden on every row.
 func (c Collection[T]) SetHidden(hidden ...string) Collection[T] {
-	c.models().SetHidden(hidden...)
+	for _, model := range c.models() {
+		model.(*Model[T]).SetHidden(hidden...)
+	}
 	return c
 }
 
 // Append calls Model.Append on every row.
 func (c Collection[T]) Append(attributes ...string) Collection[T] {
-	c.models().Append(attributes...)
+	for _, model := range c.models() {
+		model.(*Model[T]).Append(attributes...)
+	}
 	return c
 }
 
 // SetAppends calls Model.SetAppends on every row.
 func (c Collection[T]) SetAppends(appends ...string) Collection[T] {
-	c.models().SetAppends(appends...)
+	for _, model := range c.models() {
+		model.(*Model[T]).SetAppends(appends...)
+	}
 	return c
 }
 
@@ -296,7 +345,7 @@ func (c Collection[T]) SetAppends(appends ...string) Collection[T] {
 //
 // A Go collection cannot hold two model types, so the only refusal is the
 // empty one -- with no row there is no table to query.
-func (c Collection[T]) ToQuery() (*Builder[T], error) { return c.models().ToQuery() }
+func (c Collection[T]) ToQuery() (*Builder[T], error) { return modelsToQuery[T](c.models()) }
 
 // ToArray returns every row, serialised.
 func (c Collection[T]) ToArray() []map[string]any { return c.models().ToArray() }
@@ -362,14 +411,17 @@ func entityOf[T any](m *Model[T]) *T {
 	return m.Entity
 }
 
-// All returns the models as a plain slice.
-func (ms models[T]) All() []*Model[T] { return []*Model[T](ms) }
-
-// IsEmpty reports whether there are no models.
-func (ms models[T]) IsEmpty() bool { return len(ms) == 0 }
+// entityOfRow is entityOf for a model held in the list, where no model is the
+// nil interface.
+func entityOfRow[T any](m row) *T {
+	if m == nil {
+		return nil
+	}
+	return m.(*Model[T]).Entity
+}
 
 // First returns the first model, or nil when there is none.
-func (ms models[T]) First() *Model[T] {
+func (ms models) First() row {
 	if len(ms) == 0 {
 		return nil
 	}
@@ -377,7 +429,7 @@ func (ms models[T]) First() *Model[T] {
 }
 
 // ModelKeys returns the primary key of every model.
-func (ms models[T]) ModelKeys() []any {
+func (ms models) ModelKeys() []any {
 	out := make([]any, 0, len(ms))
 	for _, model := range ms {
 		out = append(out, model.GetKey())
@@ -386,7 +438,7 @@ func (ms models[T]) ModelKeys() []any {
 }
 
 // Find returns the model with this key, out of the ones already in hand.
-func (ms models[T]) Find(key any) *Model[T] {
+func (ms models) Find(key any) row {
 	for _, model := range ms {
 		if reflect.DeepEqual(model.GetKey(), key) {
 			return model
@@ -396,7 +448,7 @@ func (ms models[T]) Find(key any) *Model[T] {
 }
 
 // FindOrFail returns the model with this key, or an error when none matches.
-func (ms models[T]) FindOrFail(key any) (*Model[T], error) {
+func (ms models) FindOrFail(key any) (row, error) {
 	if model := ms.Find(key); model != nil {
 		return model, nil
 	}
@@ -407,23 +459,28 @@ func (ms models[T]) FindOrFail(key any) (*Model[T], error) {
 	return nil, modelNotFound(table, key)
 }
 
-// Contains reports whether key -- a key value, or a *Model[T] to compare by
-// key -- matches one of the models.
-func (ms models[T]) Contains(key any) bool {
-	if model, ok := key.(*Model[T]); ok {
-		for _, candidate := range ms {
-			if candidate.is(model) {
-				return true
-			}
+// containsModel reports whether one of the models is the same row as model:
+// the same key, on the same table, on the same connection.
+func (ms models) containsModel(model row) bool {
+	for _, candidate := range ms {
+		if sameRow(candidate, model) {
+			return true
 		}
-		return false
 	}
-	return ms.Find(key) != nil
+	return false
+}
+
+// sameRow is the comparison Model.Is makes: the same key, on the same table,
+// on the same connection.
+func sameRow(a, b row) bool {
+	return reflect.DeepEqual(a.GetKey(), b.GetKey()) &&
+		a.GetTable() == b.GetTable() &&
+		a.GetConnectionName() == b.GetConnectionName()
 }
 
 // Pluck returns one attribute of every model, as a slice of any: the value
 // is whatever that column holds.
-func (ms models[T]) Pluck(column string) []any {
+func (ms models) Pluck(column string) []any {
 	out := make([]any, 0, len(ms))
 	for _, model := range ms {
 		out = append(out, model.GetAttribute(column))
@@ -431,20 +488,10 @@ func (ms models[T]) Pluck(column string) []any {
 	return out
 }
 
-// GetDictionary returns the models keyed by their key, which is how every
-// set operation here compares them.
-func (ms models[T]) GetDictionary() map[any]*Model[T] {
-	out := make(map[any]*Model[T], len(ms))
-	for _, model := range ms {
-		out[model.GetKey()] = model
-	}
-	return out
-}
-
 // Merge returns the other models added, with a key that is already here
 // replaced rather than repeated.
-func (ms models[T]) Merge(items models[T]) models[T] {
-	out := make(models[T], 0, len(ms)+len(items))
+func (ms models) Merge(items models) models {
+	out := make(models, 0, len(ms)+len(items))
 	out = append(out, ms...)
 	for _, model := range items {
 		if existing := out.Find(model.GetKey()); existing != nil {
@@ -460,23 +507,23 @@ func (ms models[T]) Merge(items models[T]) models[T] {
 	return out
 }
 
-// Load eager loads these relations onto every model.
-func (ms models[T]) Load(ctx context.Context, g auth.Grant, relations ...string) error {
+// loadModels eager loads these relations onto every model.
+func loadModels[T any](ctx context.Context, g auth.Grant, ms models, relations ...string) error {
 	if len(ms) == 0 || len(relations) == 0 {
 		return nil
 	}
-	q := ms.First().NewQueryWithoutRelationships().With(relations...)
+	q := ms.First().(*Model[T]).NewQueryWithoutRelationships().With(relations...)
 	return q.eagerLoadRelations(ctx, g, ms)
 }
 
-// LoadMissing eager loads these relations onto every model, skipping the
-// ones already loaded.
-func (ms models[T]) LoadMissing(ctx context.Context, g auth.Grant, relations ...string) error {
+// loadMissingModels eager loads these relations onto every model, skipping
+// the ones already loaded.
+func loadMissingModels[T any](ctx context.Context, g auth.Grant, ms models, relations ...string) error {
 	if len(ms) == 0 {
 		return nil
 	}
 	for _, relation := range relations {
-		missing := make(models[T], 0, len(ms))
+		missing := make(models, 0, len(ms))
 		for _, model := range ms {
 			if !model.RelationLoaded(relation) {
 				missing = append(missing, model)
@@ -485,43 +532,44 @@ func (ms models[T]) LoadMissing(ctx context.Context, g auth.Grant, relations ...
 		if len(missing) == 0 {
 			continue
 		}
-		if err := missing.Load(ctx, g, relation); err != nil {
+		if err := loadModels[T](ctx, g, missing, relation); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// LoadAggregate loads function over column of each relation onto every
+// loadAggregateModels loads function over column of each relation onto every
 // model.
 //
 // It reads the aggregate columns for the keys already in hand and force
 // fills them onto the models. The columns are not declared on the entity,
 // so they land as raw attributes.
-func (ms models[T]) LoadAggregate(ctx context.Context, g auth.Grant, relations []string, column, function string) error {
+func loadAggregateModels[T any](ctx context.Context, g auth.Grant, ms models, relations []string, column, function string) error {
 	if len(ms) == 0 || len(relations) == 0 {
 		return nil
 	}
-	first := ms.First()
-	rows, err := first.NewModelQuery().loadAggregateModels(ctx, g, ms.ModelKeys(), relations, column, function)
+	first := ms.First().(*Model[T])
+	aggregates, err := first.NewModelQuery().loadAggregateModels(ctx, g, ms.ModelKeys(), relations, column, function)
 	if err != nil {
 		return err
 	}
 
 	byKey := map[any]*Model[T]{}
-	for _, row := range rows {
-		byKey[row.GetKey()] = row
+	for _, aggregate := range aggregates {
+		byKey[aggregate.GetKey()] = aggregate.(*Model[T])
 	}
 
 	keyName := first.GetKeyName()
-	for _, model := range ms {
-		row, ok := byKey[model.GetKey()]
+	for _, held := range ms {
+		model := held.(*Model[T])
+		aggregate, ok := byKey[model.GetKey()]
 		if !ok {
 			continue
 		}
 		extra := map[string]any{}
 		names := make([]string, 0)
-		for key, value := range row.GetAttributes() {
+		for key, value := range aggregate.GetAttributes() {
 			if key == keyName {
 				continue
 			}
@@ -537,19 +585,14 @@ func (ms models[T]) LoadAggregate(ctx context.Context, g auth.Grant, relations [
 	return nil
 }
 
-// LoadCount loads the count of each relation onto every model.
-func (ms models[T]) LoadCount(ctx context.Context, g auth.Grant, relations ...string) error {
-	return ms.LoadAggregate(ctx, g, relations, "*", "count")
-}
-
-// Fresh returns the same rows, read again.
+// freshModels returns the same rows, read again.
 //
 // A model that has since been deleted drops out of the result.
-func (ms models[T]) Fresh(ctx context.Context, g auth.Grant, with ...string) (models[T], error) {
+func freshModels[T any](ctx context.Context, g auth.Grant, ms models, with ...string) (models, error) {
 	if len(ms) == 0 {
-		return models[T]{}, nil
+		return models{}, nil
 	}
-	first := ms.First()
+	first := ms.First().(*Model[T])
 	fresh, err := first.NewQueryWithoutScopes().
 		With(with...).
 		WhereKey(ms.ModelKeys()).
@@ -558,14 +601,14 @@ func (ms models[T]) Fresh(ctx context.Context, g auth.Grant, with ...string) (mo
 		return nil, err
 	}
 
-	byKey := map[any]*Model[T]{}
+	byKey := map[any]row{}
 	for _, model := range fresh {
 		byKey[model.GetKey()] = model
 	}
 
-	out := make(models[T], 0, len(ms))
+	out := make(models, 0, len(ms))
 	for _, model := range ms {
-		if reloaded, ok := byKey[model.GetKey()]; ok && model.Exists {
+		if reloaded, ok := byKey[model.GetKey()]; ok && model.(*Model[T]).Exists {
 			out = append(out, reloaded)
 		}
 	}
@@ -573,8 +616,8 @@ func (ms models[T]) Fresh(ctx context.Context, g auth.Grant, with ...string) (mo
 }
 
 // Diff returns the models that are not in items.
-func (ms models[T]) Diff(items models[T]) models[T] {
-	out := models[T]{}
+func (ms models) Diff(items models) models {
+	out := models{}
 	for _, model := range ms {
 		if items.Find(model.GetKey()) == nil {
 			out = append(out, model)
@@ -584,8 +627,8 @@ func (ms models[T]) Diff(items models[T]) models[T] {
 }
 
 // Intersect returns the models that are also in items.
-func (ms models[T]) Intersect(items models[T]) models[T] {
-	out := models[T]{}
+func (ms models) Intersect(items models) models {
+	out := models{}
 	if len(items) == 0 {
 		return out
 	}
@@ -598,8 +641,8 @@ func (ms models[T]) Intersect(items models[T]) models[T] {
 }
 
 // Unique returns one model per key, the first one seen.
-func (ms models[T]) Unique() models[T] {
-	out := models[T]{}
+func (ms models) Unique() models {
+	out := models{}
 	for _, model := range ms {
 		if out.Find(model.GetKey()) == nil {
 			out = append(out, model)
@@ -609,8 +652,8 @@ func (ms models[T]) Unique() models[T] {
 }
 
 // Only returns the models with these keys.
-func (ms models[T]) Only(keys ...any) models[T] {
-	out := models[T]{}
+func (ms models) Only(keys ...any) models {
+	out := models{}
 	for _, model := range ms {
 		if containsValue(keys, model.GetKey()) {
 			out = append(out, model)
@@ -620,8 +663,8 @@ func (ms models[T]) Only(keys ...any) models[T] {
 }
 
 // Except returns the models without these keys.
-func (ms models[T]) Except(keys ...any) models[T] {
-	out := models[T]{}
+func (ms models) Except(keys ...any) models {
+	out := models{}
 	for _, model := range ms {
 		if !containsValue(keys, model.GetKey()) {
 			out = append(out, model)
@@ -630,62 +673,20 @@ func (ms models[T]) Except(keys ...any) models[T] {
 	return out
 }
 
-// MakeVisible calls Model.MakeVisible on every model.
-func (ms models[T]) MakeVisible(attributes ...string) {
-	for _, model := range ms {
-		model.MakeVisible(attributes...)
-	}
-}
-
-// MakeHidden calls Model.MakeHidden on every model.
-func (ms models[T]) MakeHidden(attributes ...string) {
-	for _, model := range ms {
-		model.MakeHidden(attributes...)
-	}
-}
-
-// SetVisible calls Model.SetVisible on every model.
-func (ms models[T]) SetVisible(visible ...string) {
-	for _, model := range ms {
-		model.SetVisible(visible...)
-	}
-}
-
-// SetHidden calls Model.SetHidden on every model.
-func (ms models[T]) SetHidden(hidden ...string) {
-	for _, model := range ms {
-		model.SetHidden(hidden...)
-	}
-}
-
-// Append calls Model.Append on every model.
-func (ms models[T]) Append(attributes ...string) {
-	for _, model := range ms {
-		model.Append(attributes...)
-	}
-}
-
-// SetAppends calls Model.SetAppends on every model.
-func (ms models[T]) SetAppends(appends ...string) {
-	for _, model := range ms {
-		model.SetAppends(appends...)
-	}
-}
-
-// ToQuery returns a query over exactly these rows.
+// modelsToQuery returns a query over exactly these rows.
 //
 // A Go collection cannot hold two model types, so the only refusal is the
 // empty one -- with no model there is no table to query.
-func (ms models[T]) ToQuery() (*Builder[T], error) {
+func modelsToQuery[T any](ms models) (*Builder[T], error) {
 	first := ms.First()
 	if first == nil {
 		return nil, ErrEmptyCollection
 	}
-	return first.NewModelQuery().WhereKey(ms.ModelKeys()), nil
+	return first.(*Model[T]).NewModelQuery().WhereKey(ms.ModelKeys()), nil
 }
 
 // ToArray returns every model, serialised.
-func (ms models[T]) ToArray() []map[string]any {
+func (ms models) ToArray() []map[string]any {
 	out := make([]map[string]any, 0, len(ms))
 	for _, model := range ms {
 		out = append(out, model.ToArray())
@@ -695,7 +696,7 @@ func (ms models[T]) ToArray() []map[string]any {
 
 // Push calls Model.Push on every model, which is what makes a loaded
 // relation pushable.
-func (ms models[T]) Push(ctx context.Context, g auth.Grant) (bool, error) {
+func (ms models) Push(ctx context.Context, g auth.Grant) (bool, error) {
 	for _, model := range ms {
 		pushed, err := model.Push(ctx, g)
 		if err != nil || !pushed {
@@ -703,29 +704,6 @@ func (ms models[T]) Push(ctx context.Context, g auth.Grant) (bool, error) {
 		}
 	}
 	return true, nil
-}
-
-// Flatten returns the same models as a collection of any.
-func (ms models[T]) Flatten(depth ...int) collections.Collection[any] {
-	items := make(collections.Collection[any], 0, len(ms))
-	for _, model := range ms {
-		items = append(items, model)
-	}
-	return collections.Flatten(items, depth...)
-}
-
-// Flip returns the models as keys and their positions as values.
-//
-// It is written out for the reason Collection.Flip is, and more so: a
-// *Model[T] is never compiled as a shared pointer, whatever the constraint, so
-// handing this list to the collections package compiled that package's
-// collection once per model type.
-func (ms models[T]) Flip() map[*Model[T]]int {
-	out := make(map[*Model[T]]int, len(ms))
-	for i, model := range ms {
-		out[model] = i
-	}
-	return out
 }
 
 // NewCollection builds the Collection a query's rows are handed back in.

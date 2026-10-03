@@ -410,7 +410,7 @@ func (b *Builder[T]) WithExists(relation string) *Builder[T] {
 
 // loadAggregateModels is the query LoadAggregate runs: the keys of the
 // collection, with the aggregate columns beside them.
-func (b *Builder[T]) loadAggregateModels(ctx context.Context, g auth.Grant, keys []any, relations []string, column, function string) (models[T], error) {
+func (b *Builder[T]) loadAggregateModels(ctx context.Context, g auth.Grant, keys []any, relations []string, column, function string) (models, error) {
 	return b.WhereKey(keys).
 		Select(b.model.GetQualifiedKeyName()).
 		WithAggregate(relations, column, function).

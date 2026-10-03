@@ -631,7 +631,7 @@ func (b *Builder[T]) Hydrate(items []query.Record) (Collection[T], error) {
 	if err != nil {
 		return nil, err
 	}
-	return found.entities(), nil
+	return entitiesOf[T](found), nil
 }
 
 // hydrate is Hydrate with the models still in hand.
@@ -639,8 +639,8 @@ func (b *Builder[T]) Hydrate(items []query.Record) (Collection[T], error) {
 // Every read in this package goes through it, and the ones that keep working on
 // the result -- an eager load, a Fresh, the key a chunk resumes from -- stay on
 // this side rather than on the Collection. See models.
-func (b *Builder[T]) hydrate(items []query.Record) (models[T], error) {
-	out := make(models[T], 0, len(items))
+func (b *Builder[T]) hydrate(items []query.Record) (models, error) {
+	out := make(models, 0, len(items))
 	for _, item := range items {
 		model, err := b.model.NewFromBuilder(item)
 		if err != nil {
@@ -689,7 +689,7 @@ func (b *Builder[T]) Get(ctx context.Context, g auth.Grant, columns ...any) (Col
 // The callbacks are the caller's, and they are applied where the result is
 // handed to one: results is the other half, and every read in this package that
 // keeps working on the rows calls both.
-func (b *Builder[T]) get(ctx context.Context, g auth.Grant, columns ...any) (models[T], error) {
+func (b *Builder[T]) get(ctx context.Context, g auth.Grant, columns ...any) (models, error) {
 	prepared, err := b.prepare(g)
 	if err != nil {
 		return nil, err
@@ -708,8 +708,8 @@ func (b *Builder[T]) get(ctx context.Context, g auth.Grant, columns ...any) (mod
 
 // results is what get's models become for a caller: the after-query callbacks,
 // over the rows.
-func (b *Builder[T]) results(found models[T]) Collection[T] {
-	return b.ApplyAfterQueryCallbacks(found.entities())
+func (b *Builder[T]) results(found models) Collection[T] {
+	return b.ApplyAfterQueryCallbacks(entitiesOf[T](found))
 }
 
 // result is results for a terminal that matched at most one row.
@@ -724,7 +724,7 @@ func (b *Builder[T]) result(model *Model[T]) *T {
 	if len(b.afterQueryCallbacks) == 0 {
 		return model.Entity
 	}
-	return b.results(models[T]{model}).First()
+	return b.results(models{model}).First()
 }
 
 // GetModels returns the rows, hydrated, with nothing eager loaded.
@@ -736,11 +736,11 @@ func (b *Builder[T]) GetModels(ctx context.Context, g auth.Grant, columns ...any
 	if err != nil {
 		return nil, err
 	}
-	return found.entities(), nil
+	return entitiesOf[T](found), nil
 }
 
 // getModels is GetModels with the models still in hand. See hydrate.
-func (b *Builder[T]) getModels(ctx context.Context, g auth.Grant, columns ...any) (models[T], error) {
+func (b *Builder[T]) getModels(ctx context.Context, g auth.Grant, columns ...any) (models, error) {
 	prepared, err := b.prepare(g)
 	if err != nil {
 		return nil, err
@@ -804,7 +804,7 @@ func (b *Builder[T]) first(ctx context.Context, g auth.Grant, columns ...any) (*
 	if len(found) == 0 {
 		return nil, nil
 	}
-	return found[0], nil
+	return found[0].(*Model[T]), nil
 }
 
 // FirstOrFail returns the first row matching the query, or an error when
@@ -869,7 +869,7 @@ func (b *Builder[T]) sole(ctx context.Context, g auth.Grant, columns ...any) (*M
 	case 0:
 		return nil, modelNotFound(b.model.GetTable())
 	case 1:
-		return found[0], nil
+		return found[0].(*Model[T]), nil
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrMultipleRecordsFound, b.model.GetTable())
 	}
@@ -893,7 +893,7 @@ func (b *Builder[T]) find(ctx context.Context, g auth.Grant, id any, columns ...
 		if err != nil || len(found) == 0 {
 			return nil, err
 		}
-		return found[0], nil
+		return found[0].(*Model[T]), nil
 	}
 	return b.WhereKey(id).first(ctx, g, columns...)
 }
@@ -909,9 +909,9 @@ func (b *Builder[T]) FindMany(ctx context.Context, g auth.Grant, ids []any, colu
 
 // findMany is FindMany with the models still in hand, and without the
 // after-query callbacks. See get.
-func (b *Builder[T]) findMany(ctx context.Context, g auth.Grant, ids []any, columns ...any) (models[T], error) {
+func (b *Builder[T]) findMany(ctx context.Context, g auth.Grant, ids []any, columns ...any) (models, error) {
 	if len(ids) == 0 {
-		return models[T]{}, nil
+		return models{}, nil
 	}
 	return b.WhereKey(ids).get(ctx, g, columns...)
 }
@@ -940,7 +940,7 @@ func (b *Builder[T]) findOrFail(ctx context.Context, g auth.Grant, id any, colum
 		if len(found) != len(uniqueValues(ids)) {
 			return nil, modelNotFound(b.model.GetTable(), ids...)
 		}
-		return found[0], nil
+		return found[0].(*Model[T]), nil
 	}
 	model, err := b.find(ctx, g, id, columns...)
 	if err != nil {
@@ -1526,7 +1526,7 @@ func (b *Builder[T]) EagerLoadRelations(ctx context.Context, g auth.Grant, rows 
 // The models are handed over as refs, which is the same pointer seen through the
 // interface a relation consumes: what the relation sets is set on the model the
 // caller holds.
-func (b *Builder[T]) eagerLoadRelations(ctx context.Context, g auth.Grant, models models[T]) error {
+func (b *Builder[T]) eagerLoadRelations(ctx context.Context, g auth.Grant, models models) error {
 	if len(models) == 0 {
 		return nil
 	}
@@ -1817,7 +1817,7 @@ func (b *Builder[T]) cursor(ctx context.Context, g auth.Grant, err *error) func(
 			return
 		}
 		for _, model := range found {
-			if !yield(model) {
+			if !yield(model.(*Model[T])) {
 				return
 			}
 		}

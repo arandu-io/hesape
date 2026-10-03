@@ -670,7 +670,7 @@ func (m *Model[T]) Destroy(ctx context.Context, g auth.Grant, ids ...any) (int, 
 	}
 	count := 0
 	for _, model := range found {
-		deleted, err := model.Delete(ctx, g)
+		deleted, err := model.(*Model[T]).Delete(ctx, g)
 		if err != nil {
 			return count, err
 		}
@@ -802,23 +802,23 @@ func (m *Model[T]) Load(ctx context.Context, g auth.Grant, relations ...string) 
 	if len(relations) == 0 {
 		return nil
 	}
-	return m.NewQueryWithoutRelationships().With(relations...).eagerLoadRelations(ctx, g, models[T]{m})
+	return m.NewQueryWithoutRelationships().With(relations...).eagerLoadRelations(ctx, g, models{m})
 }
 
 // LoadMissing eager loads these relations onto this model, skipping the ones
 // already loaded.
 func (m *Model[T]) LoadMissing(ctx context.Context, g auth.Grant, relations ...string) error {
-	return models[T]{m}.LoadMissing(ctx, g, relations...)
+	return loadMissingModels[T](ctx, g, models{m}, relations...)
 }
 
 // LoadCount loads the count of each relation onto this model.
 func (m *Model[T]) LoadCount(ctx context.Context, g auth.Grant, relations ...string) error {
-	return models[T]{m}.LoadCount(ctx, g, relations...)
+	return loadAggregateModels[T](ctx, g, models{m}, relations, "*", "count")
 }
 
 // LoadAggregate loads function over column of each relation onto this model.
 func (m *Model[T]) LoadAggregate(ctx context.Context, g auth.Grant, relations []string, column, function string) error {
-	return models[T]{m}.LoadAggregate(ctx, g, relations, column, function)
+	return loadAggregateModels[T](ctx, g, models{m}, relations, column, function)
 }
 
 // GetRelation returns the value loaded for a relation, and whether it was

@@ -169,7 +169,7 @@ func (m *Model[T]) ForceDestroy(ctx context.Context, g auth.Grant, ids ...any) (
 	}
 	count := 0
 	for _, model := range found {
-		deleted, err := model.ForceDelete(ctx, g)
+		deleted, err := model.(*Model[T]).ForceDelete(ctx, g)
 		if err != nil {
 			return count, err
 		}

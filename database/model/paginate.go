@@ -41,7 +41,7 @@ func paginateAs[T, R any](b *Builder[T], ctx context.Context, g auth.Grant, perP
 		return nil, err
 	}
 
-	items := models[T]{}
+	items := models{}
 	if total > 0 {
 		items, err = b.clone().ForPage(page, perPage).get(ctx, g, columns...)
 		if err != nil {
@@ -52,10 +52,10 @@ func paginateAs[T, R any](b *Builder[T], ctx context.Context, g auth.Grant, perP
 }
 
 // convertAll maps a page of models through the conversion its caller asked for.
-func convertAll[T, R any](items models[T], convert func(*Model[T]) R) []R {
+func convertAll[T, R any](items models, convert func(*Model[T]) R) []R {
 	out := make([]R, 0, len(items))
 	for _, item := range items {
-		out = append(out, convert(item))
+		out = append(out, convert(item.(*Model[T])))
 	}
 	return out
 }
@@ -154,7 +154,7 @@ func cursorPaginateAs[T any, R comparable](b *Builder[T], ctx context.Context, g
 	converted := make([]R, 0, len(items))
 	cursors := make(map[R]map[string]string, len(items))
 	for _, item := range items {
-		row := convert(item)
+		row := convert(item.(*Model[T]))
 		converted = append(converted, row)
 
 		values := make(map[string]string, len(parameters))

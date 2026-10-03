@@ -105,7 +105,7 @@ func (m *Model[T]) morphTarget(relation string) (MorphLoadable, bool) {
 // where the grouping is the compiler's.
 func (c Collection[T]) LoadMorph(ctx context.Context, g auth.Grant, relation string, relations map[string][]string) error {
 	for _, model := range c.models() {
-		if err := model.LoadMorph(ctx, g, relation, relations); err != nil {
+		if err := model.(*Model[T]).LoadMorph(ctx, g, relation, relations); err != nil {
 			return err
 		}
 	}
@@ -117,7 +117,7 @@ func (c Collection[T]) LoadMorph(ctx context.Context, g auth.Grant, relation str
 // per class.
 func (c Collection[T]) LoadMorphCount(ctx context.Context, g auth.Grant, relation string, relations map[string][]string) error {
 	for _, model := range c.models() {
-		if err := model.LoadMorphCount(ctx, g, relation, relations); err != nil {
+		if err := model.(*Model[T]).LoadMorphCount(ctx, g, relation, relations); err != nil {
 			return err
 		}
 	}
