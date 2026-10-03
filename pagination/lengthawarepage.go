@@ -2,22 +2,25 @@ package pagination
 
 import (
 	"encoding/json"
-	"iter"
 	"net/url"
 	"strconv"
 )
 
-// LengthAwarePaginator is a page of a result set whose size is known.
+// LengthAwarePage is the arithmetic of one page of a result set whose size is
+// known.
 //
 // Knowing the total is the whole difference: it can print "page 3 of 47", it
-// can link the last page, and it can render a
-// numbered window. That knowledge is bought with a COUNT over the same
-// predicate as the page query, which on a large table is the more expensive of
-// the two.
+// can link the last page, and it can render a numbered window. That knowledge
+// is bought with a COUNT over the same predicate as the page query, which on a
+// large table is the more expensive of the two.
 //
-// Build one with Paginate.
-type LengthAwarePaginator[T any] struct {
-	items       []T
+// It holds no rows. The rows are whatever the query that read them returned,
+// handed to the caller beside the page, so this type is the same one for every
+// kind of row and is compiled once rather than once per row type.
+//
+// Build one with NewLengthAwarePage.
+type LengthAwarePage struct {
+	count       int
 	total       int
 	perPage     int
 	currentPage int
@@ -26,22 +29,22 @@ type LengthAwarePaginator[T any] struct {
 	options     Options
 }
 
-// Paginate returns the page holding items, out of total rows.
+// NewLengthAwarePage returns the page holding count rows, out of total.
 //
-// The items are the rows of this page as the repository read them; nothing is
+// count is how many rows this page holds, as the query read them; nothing is
 // sliced here. total is the row count of the whole result set, and currentPage
 // is the page those rows were read for -- normally ResolveCurrentPage of the
 // request URL.
 //
 // perPage below one is read as one, and currentPage below one as one. Neither
 // is a caller's mistake worth an error: they are what an empty configuration
-// value and a hand-edited URL produce, and a paginator that returns an error
-// instead of a page turns both into a 500.
+// value and a hand-edited URL produce, and a page that returns an error instead
+// of rendering turns both into a 500.
 //
 // A currentPage past the last one is kept rather than clamped, because that is
 // what a reader who deleted the last row of the last page sees: an empty page,
 // with a working link back.
-func Paginate[T any](items []T, total, perPage, currentPage int, opts Options) *LengthAwarePaginator[T] {
+func NewLengthAwarePage(count, total, perPage, currentPage int, opts Options) *LengthAwarePage {
 	if perPage < 1 {
 		perPage = 1
 	}
@@ -51,6 +54,9 @@ func Paginate[T any](items []T, total, perPage, currentPage int, opts Options) *
 	if total < 0 {
 		total = 0
 	}
+	if count < 0 {
+		count = 0
+	}
 
 	lastPage := (total + perPage - 1) / perPage
 	if lastPage < 1 {
@@ -58,8 +64,8 @@ func Paginate[T any](items []T, total, perPage, currentPage int, opts Options) *
 	}
 
 	normalized := opts.normalize()
-	return &LengthAwarePaginator[T]{
-		items:       items,
+	return &LengthAwarePage{
+		count:       count,
 		total:       total,
 		perPage:     perPage,
 		currentPage: currentPage,
@@ -69,60 +75,40 @@ func Paginate[T any](items []T, total, perPage, currentPage int, opts Options) *
 	}
 }
 
-// Items returns the rows of this page, in the order they were read.
-func (p *LengthAwarePaginator[T]) Items() []T { return p.items }
-
 // Count returns how many rows this page holds, which is at most PerPage and is
 // less on the last page.
-func (p *LengthAwarePaginator[T]) Count() int { return len(p.items) }
+func (p *LengthAwarePage) Count() int { return p.count }
 
 // IsEmpty reports whether this page holds no rows.
-func (p *LengthAwarePaginator[T]) IsEmpty() bool { return len(p.items) == 0 }
+func (p *LengthAwarePage) IsEmpty() bool { return p.count == 0 }
 
 // IsNotEmpty reports whether this page holds any rows.
-func (p *LengthAwarePaginator[T]) IsNotEmpty() bool { return len(p.items) > 0 }
-
-// GetIterator ranges over the rows of this page with their offsets.
-//
-// It is a range-over-func, so the page ranges like a slice.
-func (p *LengthAwarePaginator[T]) GetIterator() iter.Seq2[int, T] { return seq2(p.items) }
-
-// GetCollection returns the rows this page holds.
-//
-// It is the same slice Items returns; both names exist because both are called.
-func (p *LengthAwarePaginator[T]) GetCollection() []T { return p.items }
-
-// SetCollection replaces the rows this page holds, leaving every number --
-// total, last page, current page -- alone.
-func (p *LengthAwarePaginator[T]) SetCollection(items []T) *LengthAwarePaginator[T] {
-	p.items = items
-	return p
-}
+func (p *LengthAwarePage) IsNotEmpty() bool { return p.count > 0 }
 
 // GetOptions returns the options this page builds its URLs from, with the
 // defaults already applied.
-func (p *LengthAwarePaginator[T]) GetOptions() Options { return p.options }
+func (p *LengthAwarePage) GetOptions() Options { return p.options }
 
 // Total returns how many rows the whole result set holds.
-func (p *LengthAwarePaginator[T]) Total() int { return p.total }
+func (p *LengthAwarePage) Total() int { return p.total }
 
-// PerPage returns the page size the paginator was built with.
-func (p *LengthAwarePaginator[T]) PerPage() int { return p.perPage }
+// PerPage returns the page size the page was built with.
+func (p *LengthAwarePage) PerPage() int { return p.perPage }
 
 // CurrentPage returns the page being read, counting from one.
-func (p *LengthAwarePaginator[T]) CurrentPage() int { return p.currentPage }
+func (p *LengthAwarePage) CurrentPage() int { return p.currentPage }
 
 // LastPage returns the number of the final page, and is at least one -- an
 // empty result set still has a page one to show the reader.
-func (p *LengthAwarePaginator[T]) LastPage() int { return p.lastPage }
+func (p *LengthAwarePage) LastPage() int { return p.lastPage }
 
 // FirstItem returns the one-based index, in the whole result set, of the first
 // row on this page.
 //
 // It is zero when the page is empty: Go has no null int, and a nullable one
 // would make every caller unwrap a number it prints.
-func (p *LengthAwarePaginator[T]) FirstItem() int {
-	if len(p.items) == 0 {
+func (p *LengthAwarePage) FirstItem() int {
+	if p.count == 0 {
 		return 0
 	}
 	return (p.currentPage-1)*p.perPage + 1
@@ -132,11 +118,11 @@ func (p *LengthAwarePaginator[T]) FirstItem() int {
 // row on this page, and zero when the page is empty.
 //
 // FirstItem and LastItem are the two numbers in "showing 21 to 40 of 512".
-func (p *LengthAwarePaginator[T]) LastItem() int {
-	if len(p.items) == 0 {
+func (p *LengthAwarePage) LastItem() int {
+	if p.count == 0 {
 		return 0
 	}
-	return p.FirstItem() + len(p.items) - 1
+	return p.FirstItem() + p.count - 1
 }
 
 // HasPages reports whether there is anywhere to go from here, which is the
@@ -145,21 +131,21 @@ func (p *LengthAwarePaginator[T]) LastItem() int {
 // It is not "more than one page": a reader who followed a stale link to page 4
 // of a result set that now has one page is not on page one, and has somewhere
 // to go back to.
-func (p *LengthAwarePaginator[T]) HasPages() bool {
+func (p *LengthAwarePage) HasPages() bool {
 	return p.currentPage != 1 || p.HasMorePages()
 }
 
 // HasMorePages reports whether a page follows this one.
-func (p *LengthAwarePaginator[T]) HasMorePages() bool { return p.currentPage < p.lastPage }
+func (p *LengthAwarePage) HasMorePages() bool { return p.currentPage < p.lastPage }
 
 // OnFirstPage reports whether this is page one.
-func (p *LengthAwarePaginator[T]) OnFirstPage() bool { return p.currentPage <= 1 }
+func (p *LengthAwarePage) OnFirstPage() bool { return p.currentPage <= 1 }
 
 // OnLastPage reports whether this is the final page.
-func (p *LengthAwarePaginator[T]) OnLastPage() bool { return !p.HasMorePages() }
+func (p *LengthAwarePage) OnLastPage() bool { return !p.HasMorePages() }
 
 // URL returns the address of the given page; a page below one is read as one.
-func (p *LengthAwarePaginator[T]) URL(page int) string {
+func (p *LengthAwarePage) URL(page int) string {
 	if page < 1 {
 		page = 1
 	}
@@ -168,14 +154,14 @@ func (p *LengthAwarePaginator[T]) URL(page int) string {
 
 // GetURLRange returns the address of every page from start to end inclusive,
 // keyed by page number.
-func (p *LengthAwarePaginator[T]) GetURLRange(start, end int) map[int]string {
+func (p *LengthAwarePage) GetURLRange(start, end int) map[int]string {
 	return p.urlsFor(pageRange(start, end))
 }
 
 // urlsFor is GetURLRange over a list of pages rather than a range, and returns
-// nil for nothing -- which is the null UrlWindow puts in a piece that does not
+// nil for nothing -- which is the null URLWindow puts in a piece that does not
 // apply.
-func (p *LengthAwarePaginator[T]) urlsFor(pages []int) map[int]string {
+func (p *LengthAwarePage) urlsFor(pages []int) map[int]string {
 	if len(pages) == 0 {
 		return nil
 	}
@@ -188,7 +174,7 @@ func (p *LengthAwarePaginator[T]) urlsFor(pages []int) map[int]string {
 
 // PreviousPageURL returns the address of the page before this one, and the
 // empty string on page one.
-func (p *LengthAwarePaginator[T]) PreviousPageURL() string {
+func (p *LengthAwarePage) PreviousPageURL() string {
 	if p.currentPage <= 1 {
 		return ""
 	}
@@ -197,7 +183,7 @@ func (p *LengthAwarePaginator[T]) PreviousPageURL() string {
 
 // NextPageURL returns the address of the page after this one, and the empty
 // string on the last page.
-func (p *LengthAwarePaginator[T]) NextPageURL() string {
+func (p *LengthAwarePage) NextPageURL() string {
 	if !p.HasMorePages() {
 		return ""
 	}
@@ -205,25 +191,23 @@ func (p *LengthAwarePaginator[T]) NextPageURL() string {
 }
 
 // Path returns the base path the page links are built on.
-func (p *LengthAwarePaginator[T]) Path() string { return p.options.Path }
+func (p *LengthAwarePage) Path() string { return p.options.Path }
 
 // SetPath sets the base path the page links are built on.
-func (p *LengthAwarePaginator[T]) SetPath(path string) *LengthAwarePaginator[T] {
+func (p *LengthAwarePage) SetPath(path string) *LengthAwarePage {
 	p.options.Path = path
 	return p
 }
 
 // WithPath sets the base address every page link is built on.
-func (p *LengthAwarePaginator[T]) WithPath(path string) *LengthAwarePaginator[T] {
-	return p.SetPath(path)
-}
+func (p *LengthAwarePage) WithPath(path string) *LengthAwarePage { return p.SetPath(path) }
 
 // GetPageName returns the query parameter the page number is written into.
-func (p *LengthAwarePaginator[T]) GetPageName() string { return p.options.PageName }
+func (p *LengthAwarePage) GetPageName() string { return p.options.PageName }
 
 // SetPageName sets the query parameter the page number is written into, which
-// is how two paginators appear on one screen without moving each other.
-func (p *LengthAwarePaginator[T]) SetPageName(name string) *LengthAwarePaginator[T] {
+// is how two pagers appear on one screen without moving each other.
+func (p *LengthAwarePage) SetPageName(name string) *LengthAwarePage {
 	p.options.PageName = name
 	return p
 }
@@ -232,7 +216,7 @@ func (p *LengthAwarePaginator[T]) SetPageName(name string) *LengthAwarePaginator
 // before the window collapses into a separator.
 //
 // It is a setter and not also a field, so that there is one way to change it.
-func (p *LengthAwarePaginator[T]) OnEachSide(count int) *LengthAwarePaginator[T] {
+func (p *LengthAwarePage) OnEachSide(count int) *LengthAwarePage {
 	if count < 0 {
 		count = 0
 	}
@@ -246,7 +230,7 @@ func (p *LengthAwarePaginator[T]) OnEachSide(count int) *LengthAwarePaginator[T]
 //
 // It is the setter only -- the form the fluent calls use -- and the fragment is
 // read back through GetOptions. An empty string clears it.
-func (p *LengthAwarePaginator[T]) Fragment(fragment string) *LengthAwarePaginator[T] {
+func (p *LengthAwarePage) Fragment(fragment string) *LengthAwarePage {
 	p.options.Fragment = fragment
 	return p
 }
@@ -258,8 +242,8 @@ func (p *LengthAwarePaginator[T]) Fragment(fragment string) *LengthAwarePaginato
 // -- or a map[string]string, a url.Values or a map[string][]string naming
 // several. Anything else, nil included, is ignored.
 //
-// The page parameter is never appended: the paginator writes that itself.
-func (p *LengthAwarePaginator[T]) Appends(key any, value ...string) *LengthAwarePaginator[T] {
+// The page parameter is never appended: the page writes that itself.
+func (p *LengthAwarePage) Appends(key any, value ...string) *LengthAwarePage {
 	appendQuery(&p.options, p.options.PageName, key, value)
 	return p
 }
@@ -269,7 +253,7 @@ func (p *LengthAwarePaginator[T]) Appends(key any, value ...string) *LengthAware
 //
 // The parameters are passed in -- normally Query of the request URL. The page
 // parameter is dropped.
-func (p *LengthAwarePaginator[T]) WithQueryString(query url.Values) *LengthAwarePaginator[T] {
+func (p *LengthAwarePage) WithQueryString(query url.Values) *LengthAwarePage {
 	mergeQuery(&p.options, p.options.PageName, query)
 	return p
 }
@@ -284,7 +268,7 @@ func (p *LengthAwarePaginator[T]) WithQueryString(query url.Values) *LengthAware
 // icon, and this package has no translator to ask; PreviousPageURL and
 // NextPageURL are what the component draws them from. LinkCollection is the list
 // that does include them.
-func (p *LengthAwarePaginator[T]) Links() []Link {
+func (p *LengthAwarePage) Links() []Link {
 	first, slider, last := windowPages(p.currentPage, p.lastPage, p.onEachSide)
 
 	links := make([]Link, 0, len(first)+len(slider)+len(last)+2)
@@ -317,7 +301,7 @@ func (p *LengthAwarePaginator[T]) Links() []Link {
 // The two steps are labelled Previous and Next, because there is no translator
 // to ask here. A step with nowhere to go has an empty URL and a Page of zero,
 // which MarshalJSON writes as null.
-func (p *LengthAwarePaginator[T]) LinkCollection() []Link {
+func (p *LengthAwarePage) LinkCollection() []Link {
 	numbered := p.Links()
 	links := make([]Link, 0, len(numbered)+2)
 
@@ -335,11 +319,18 @@ func (p *LengthAwarePaginator[T]) LinkCollection() []Link {
 	return append(links, next)
 }
 
-// ToArray is the payload a length-aware page serialises to.
-func (p *LengthAwarePaginator[T]) ToArray() map[string]any {
+// ToArray is the payload a length-aware page serialises to, with data -- the
+// rows the page was read for -- under "data".
+func (p *LengthAwarePage) ToArray(data any) map[string]any {
+	out := p.meta()
+	out["data"] = data
+	return out
+}
+
+// meta is the payload without the rows.
+func (p *LengthAwarePage) meta() map[string]any {
 	return map[string]any{
 		"current_page":   p.currentPage,
-		"data":           p.items,
 		"first_page_url": p.URL(1),
 		"from":           nullable(p.FirstItem()),
 		"last_page":      p.lastPage,
@@ -354,42 +345,17 @@ func (p *LengthAwarePaginator[T]) ToArray() map[string]any {
 	}
 }
 
-// MarshalJSON makes the paginator itself encodable, so a handler can hand one
-// to a JSON encoder.
-func (p *LengthAwarePaginator[T]) MarshalJSON() ([]byte, error) {
-	return json.Marshal(p.ToArray())
-}
+// MarshalJSON encodes the page without the rows, which it does not hold: a
+// response that carries both puts the rows beside it, or calls ToJSON with them.
+func (p *LengthAwarePage) MarshalJSON() ([]byte, error) { return json.Marshal(p.meta()) }
 
-// ToJSON returns the payload as bytes, with the error json.Marshal reports.
-func (p *LengthAwarePaginator[T]) ToJSON() ([]byte, error) {
-	return json.Marshal(p.ToArray())
+// ToJSON returns the payload with data under "data", as bytes, with the error
+// json.Marshal reports.
+func (p *LengthAwarePage) ToJSON(data any) ([]byte, error) {
+	return json.Marshal(p.ToArray(data))
 }
 
 // ToPrettyJSON is ToJSON indented four spaces.
-func (p *LengthAwarePaginator[T]) ToPrettyJSON() ([]byte, error) {
-	return prettyJSON(p.ToArray())
-}
-
-// Through is the same page with every item passed through f, which is how a
-// page of database rows becomes a page of whatever the view is written against
-// without recomputing a single number.
-//
-// It is a function rather than a method because a Go method cannot introduce a
-// type parameter, and the point of this one is to change the element type.
-// ThroughSimple and ThroughCursor are the same operation on the other two
-// paginators; three names, because Go cannot overload one.
-func Through[A, B any](p *LengthAwarePaginator[A], f func(A) B) *LengthAwarePaginator[B] {
-	items := make([]B, len(p.items))
-	for i, item := range p.items {
-		items[i] = f(item)
-	}
-	return &LengthAwarePaginator[B]{
-		items:       items,
-		total:       p.total,
-		perPage:     p.perPage,
-		currentPage: p.currentPage,
-		lastPage:    p.lastPage,
-		onEachSide:  p.onEachSide,
-		options:     p.options,
-	}
+func (p *LengthAwarePage) ToPrettyJSON(data any) ([]byte, error) {
+	return prettyJSON(p.ToArray(data))
 }

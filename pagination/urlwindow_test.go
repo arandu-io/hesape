@@ -8,10 +8,10 @@ import (
 	"github.com/arandu-io/hesape/pagination"
 )
 
-// window is the paginator every test in this file takes a window of: a result
-// set long enough that the pages do not all fit, read at the given page.
-func window(page, total int) *pagination.LengthAwarePaginator[string] {
-	return pagination.Paginate(rows(10), total, 10, page, pagination.Options{Path: "/orders"})
+// window is the page every test in this file takes a window of: a result set
+// long enough that the pages do not all fit, read at the given page.
+func window(page, total int) *pagination.LengthAwarePage {
+	return pagination.NewLengthAwarePage(10, total, 10, page, pagination.Options{Path: "/orders"})
 }
 
 // keys reads the page numbers of one range back, sorted, since a Go map has no

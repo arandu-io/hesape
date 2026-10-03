@@ -1,8 +1,7 @@
 package pagination_test
 
 import (
-	"slices"
-	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/arandu-io/hesape/pagination"
@@ -11,7 +10,7 @@ import (
 // The probe row is the whole mechanism: it settles "is there a next page"
 // without counting, and the reader must never see it.
 func TestSimplePaginateDropsTheProbeRow(t *testing.T) {
-	p := pagination.SimplePaginate(rows(11), 10, 1, pagination.Options{Path: "/users"})
+	p := pagination.NewPage(11, 10, 1, pagination.Options{Path: "/users"})
 
 	if got := p.Count(); got != 10 {
 		t.Errorf("Count = %d, want 10", got)
@@ -25,7 +24,7 @@ func TestSimplePaginateDropsTheProbeRow(t *testing.T) {
 }
 
 func TestSimplePaginateWithoutProbeRowIsTheLastPage(t *testing.T) {
-	p := pagination.SimplePaginate(rows(10), 10, 3, pagination.Options{Path: "/users"})
+	p := pagination.NewPage(10, 10, 3, pagination.Options{Path: "/users"})
 
 	if p.HasMorePages() {
 		t.Error("HasMorePages = true, want false")
@@ -42,7 +41,7 @@ func TestSimplePaginateWithoutProbeRowIsTheLastPage(t *testing.T) {
 }
 
 func TestSimplePaginateFirstPageAlone(t *testing.T) {
-	p := pagination.SimplePaginate(rows(4), 10, 1, pagination.Options{Path: "/users"})
+	p := pagination.NewPage(4, 10, 1, pagination.Options{Path: "/users"})
 
 	if !p.OnFirstPage() {
 		t.Error("OnFirstPage = false, want true")
@@ -56,7 +55,7 @@ func TestSimplePaginateFirstPageAlone(t *testing.T) {
 }
 
 func TestSimplePaginateItemRange(t *testing.T) {
-	p := pagination.SimplePaginate(rows(11), 10, 4, pagination.Options{})
+	p := pagination.NewPage(11, 10, 4, pagination.Options{})
 	if got, want := p.FirstItem(), 31; got != want {
 		t.Errorf("FirstItem = %d, want %d", got, want)
 	}
@@ -64,14 +63,14 @@ func TestSimplePaginateItemRange(t *testing.T) {
 		t.Errorf("LastItem = %d, want %d", got, want)
 	}
 
-	empty := pagination.SimplePaginate(rows(0), 10, 4, pagination.Options{})
+	empty := pagination.NewPage(0, 10, 4, pagination.Options{})
 	if empty.FirstItem() != 0 || empty.LastItem() != 0 {
 		t.Errorf("empty page item range = %d..%d, want 0..0", empty.FirstItem(), empty.LastItem())
 	}
 }
 
 func TestSimplePaginateGuardsAgainstNonsenseInput(t *testing.T) {
-	p := pagination.SimplePaginate(rows(3), 0, -2, pagination.Options{})
+	p := pagination.NewPage(3, 0, -2, pagination.Options{})
 	if got := p.PerPage(); got != 1 {
 		t.Errorf("PerPage = %d, want 1", got)
 	}
@@ -83,17 +82,42 @@ func TestSimplePaginateGuardsAgainstNonsenseInput(t *testing.T) {
 	}
 }
 
-func TestThroughSimple(t *testing.T) {
-	p := pagination.SimplePaginate([]int{1, 2, 3, 4}, 3, 2, pagination.Options{Path: "/users"})
-	mapped := pagination.ThroughSimple(p, strconv.Itoa)
+func TestNewPageReadsANegativeCountAsEmpty(t *testing.T) {
+	p := pagination.NewPage(-3, 10, 1, pagination.Options{})
+	if !p.IsEmpty() || p.IsNotEmpty() || p.Count() != 0 {
+		t.Errorf("Count = %d, want an empty page", p.Count())
+	}
+	if p.HasMorePages() {
+		t.Error("HasMorePages = true, want false")
+	}
+}
 
-	if got := mapped.Items(); !slices.Equal(got, []string{"1", "2", "3"}) {
-		t.Errorf("Items = %v, want the first three as strings", got)
+// The page holds no rows, so the rows reach the payload through the argument,
+// and a page encoded on its own is the arithmetic and nothing else.
+func TestPagePayloadCarriesTheRowsItIsGiven(t *testing.T) {
+	p := pagination.NewPage(3, 2, 1, pagination.Options{Path: "/users"})
+
+	payload := p.ToArray([]int{1, 2})
+	if got, ok := payload["data"].([]int); !ok || len(got) != 2 {
+		t.Errorf("data = %v, want the rows handed to ToArray", payload["data"])
 	}
-	if !mapped.HasMorePages() {
-		t.Error("HasMorePages = false, want true")
+	if payload["next_page_url"] != "/users?page=2" || payload["current_page_url"] != "/users?page=1" {
+		t.Errorf("payload = %v, want the next page and the current page linked", payload)
 	}
-	if got, want := mapped.NextPageURL(), "/users?page=3"; got != want {
-		t.Errorf("NextPageURL = %q, want %q", got, want)
+
+	pretty, err := p.ToPrettyJSON([]int{1, 2})
+	if err != nil {
+		t.Fatalf("ToPrettyJSON: %v", err)
+	}
+	if !strings.Contains(string(pretty), "\n    \"data\"") {
+		t.Errorf("ToPrettyJSON = %s, want the rows under data, indented four spaces", pretty)
+	}
+
+	alone, err := p.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	if strings.Contains(string(alone), `"data"`) {
+		t.Errorf("MarshalJSON = %s, want no data key: the page holds no rows", alone)
 	}
 }

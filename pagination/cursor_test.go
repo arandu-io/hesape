@@ -359,7 +359,7 @@ func TestACursorHoldingTextEncodesEveryByteOfIt(t *testing.T) {
 // Options.url, which drops an empty value and so answered with the address of
 // the first page -- offered as the next one, which is a loop.
 func TestAPageWhoseCursorHasNoTokenHasNoLinkToIt(t *testing.T) {
-	p := pagination.CursorPaginate(ascending(1, 3), 10, nil, postKey, signedOptions("/posts"))
+	_, p := readCursorPage(ascending(1, 3), 10, nil, signedOptions("/posts"))
 	unencodable := pagination.NewCursor(map[string]string{"id": "\xff"}, true)
 
 	if got := p.URL(&unencodable); got != "" {

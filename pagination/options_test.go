@@ -18,7 +18,7 @@ func mustParse(t *testing.T, raw string) *url.URL {
 
 func TestOptionsFromKeepsPathAndQuery(t *testing.T) {
 	opts := pagination.OptionsFrom(mustParse(t, "/users?team=core&page=7#list"))
-	p := pagination.Paginate([]int{1}, 100, 10, 2, opts)
+	p := pagination.NewLengthAwarePage(1, 100, 10, 2, opts)
 
 	if got, want := p.URL(3), "/users?page=3&team=core"; got != want {
 		t.Errorf("URL(3) = %q, want %q", got, want)
@@ -27,7 +27,7 @@ func TestOptionsFromKeepsPathAndQuery(t *testing.T) {
 
 func TestOptionsFromKeepsSchemeAndHost(t *testing.T) {
 	opts := pagination.OptionsFrom(mustParse(t, "https://arandu.test/users?sort=name"))
-	p := pagination.Paginate([]int{1}, 100, 10, 1, opts)
+	p := pagination.NewLengthAwarePage(1, 100, 10, 1, opts)
 
 	if got, want := p.URL(2), "https://arandu.test/users?page=2&sort=name"; got != want {
 		t.Errorf("URL(2) = %q, want %q", got, want)
@@ -35,35 +35,35 @@ func TestOptionsFromKeepsSchemeAndHost(t *testing.T) {
 }
 
 func TestOptionsFromNilURL(t *testing.T) {
-	p := pagination.Paginate([]int{1}, 1, 10, 1, pagination.OptionsFrom(nil))
+	p := pagination.NewLengthAwarePage(1, 1, 10, 1, pagination.OptionsFrom(nil))
 	if got, want := p.URL(1), "/?page=1"; got != want {
 		t.Errorf("URL(1) = %q, want %q", got, want)
 	}
 }
 
 func TestZeroOptionsPaginateRoot(t *testing.T) {
-	p := pagination.Paginate([]int{1}, 1, 10, 1, pagination.Options{})
+	p := pagination.NewLengthAwarePage(1, 1, 10, 1, pagination.Options{})
 	if got, want := p.URL(2), "/?page=2"; got != want {
 		t.Errorf("URL(2) = %q, want %q", got, want)
 	}
 }
 
 func TestOptionsTrimTrailingSlash(t *testing.T) {
-	p := pagination.Paginate([]int{1}, 1, 10, 1, pagination.Options{Path: "/users/"})
+	p := pagination.NewLengthAwarePage(1, 1, 10, 1, pagination.Options{Path: "/users/"})
 	if got, want := p.URL(2), "/users?page=2"; got != want {
 		t.Errorf("URL(2) = %q, want %q", got, want)
 	}
 }
 
 func TestOptionsPathWithQueryUsesAmpersand(t *testing.T) {
-	p := pagination.Paginate([]int{1}, 1, 10, 1, pagination.Options{Path: "/index.php?route=users"})
+	p := pagination.NewLengthAwarePage(1, 1, 10, 1, pagination.Options{Path: "/index.php?route=users"})
 	if got, want := p.URL(2), "/index.php?route=users&page=2"; got != want {
 		t.Errorf("URL(2) = %q, want %q", got, want)
 	}
 }
 
 func TestOptionsFragment(t *testing.T) {
-	p := pagination.Paginate([]int{1}, 1, 10, 1, pagination.Options{Path: "/users", Fragment: "list"})
+	p := pagination.NewLengthAwarePage(1, 1, 10, 1, pagination.Options{Path: "/users", Fragment: "list"})
 	if got, want := p.URL(2), "/users?page=2#list"; got != want {
 		t.Errorf("URL(2) = %q, want %q", got, want)
 	}
@@ -71,7 +71,7 @@ func TestOptionsFragment(t *testing.T) {
 
 func TestOptionsCustomPageName(t *testing.T) {
 	opts := pagination.Options{Path: "/users", PageName: "p"}
-	p := pagination.Paginate([]int{1}, 100, 10, 1, opts)
+	p := pagination.NewLengthAwarePage(1, 100, 10, 1, opts)
 	if got, want := p.URL(4), "/users?p=4"; got != want {
 		t.Errorf("URL(4) = %q, want %q", got, want)
 	}
@@ -84,7 +84,7 @@ func TestOptionsDropIncomingPageAndCursor(t *testing.T) {
 		Path:  "/users",
 		Query: url.Values{"page": {"9"}, "cursor": {"abc"}, "team": {"core"}},
 	}
-	p := pagination.Paginate([]int{1}, 100, 10, 9, opts)
+	p := pagination.NewLengthAwarePage(1, 100, 10, 9, opts)
 	if got, want := p.URL(2), "/users?page=2&team=core"; got != want {
 		t.Errorf("URL(2) = %q, want %q", got, want)
 	}
@@ -94,7 +94,7 @@ func TestOptionsDropIncomingPageAndCursor(t *testing.T) {
 // and link another.
 func TestOptionsQueryIsCopied(t *testing.T) {
 	query := url.Values{"team": {"core"}}
-	p := pagination.Paginate([]int{1}, 100, 10, 1, pagination.Options{Path: "/users", Query: query})
+	p := pagination.NewLengthAwarePage(1, 100, 10, 1, pagination.Options{Path: "/users", Query: query})
 	query.Set("team", "view")
 
 	if got, want := p.URL(2), "/users?page=2&team=core"; got != want {

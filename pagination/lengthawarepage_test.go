@@ -3,6 +3,7 @@ package pagination_test
 import (
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/arandu-io/hesape/pagination"
@@ -28,7 +29,7 @@ func pages(links []pagination.Link) []int {
 }
 
 func TestPaginateCounts(t *testing.T) {
-	p := pagination.Paginate(rows(10), 512, 10, 3, pagination.Options{Path: "/users"})
+	p := pagination.NewLengthAwarePage(10, 512, 10, 3, pagination.Options{Path: "/users"})
 
 	if got := p.Total(); got != 512 {
 		t.Errorf("Total = %d, want 512", got)
@@ -66,7 +67,7 @@ func TestPaginateLastPageRoundsUp(t *testing.T) {
 		{101, 10, 11},
 	}
 	for _, c := range cases {
-		p := pagination.Paginate(rows(0), c.total, c.perPage, 1, pagination.Options{})
+		p := pagination.NewLengthAwarePage(0, c.total, c.perPage, 1, pagination.Options{})
 		if got := p.LastPage(); got != c.want {
 			t.Errorf("LastPage(total=%d, perPage=%d) = %d, want %d", c.total, c.perPage, got, c.want)
 		}
@@ -74,7 +75,7 @@ func TestPaginateLastPageRoundsUp(t *testing.T) {
 }
 
 func TestPaginateEmptyPageHasNoItemRange(t *testing.T) {
-	p := pagination.Paginate(rows(0), 0, 10, 1, pagination.Options{})
+	p := pagination.NewLengthAwarePage(0, 0, 10, 1, pagination.Options{})
 	if got := p.FirstItem(); got != 0 {
 		t.Errorf("FirstItem = %d, want 0", got)
 	}
@@ -92,7 +93,7 @@ func TestPaginateEmptyPageHasNoItemRange(t *testing.T) {
 // A page size of zero comes from an unset configuration value, and dividing by
 // it is a panic in production rather than a wrong number on a screen.
 func TestPaginateGuardsAgainstNonsenseInput(t *testing.T) {
-	p := pagination.Paginate(rows(3), 30, 0, -4, pagination.Options{})
+	p := pagination.NewLengthAwarePage(3, 30, 0, -4, pagination.Options{})
 	if got := p.PerPage(); got != 1 {
 		t.Errorf("PerPage = %d, want 1", got)
 	}
@@ -107,7 +108,7 @@ func TestPaginateGuardsAgainstNonsenseInput(t *testing.T) {
 // The reader who deleted the last row of the last page lands here. The page is
 // empty and every link on it still works.
 func TestPaginatePastTheEnd(t *testing.T) {
-	p := pagination.Paginate(rows(0), 20, 10, 7, pagination.Options{Path: "/users"})
+	p := pagination.NewLengthAwarePage(0, 20, 10, 7, pagination.Options{Path: "/users"})
 	if got := p.CurrentPage(); got != 7 {
 		t.Errorf("CurrentPage = %d, want 7", got)
 	}
@@ -122,7 +123,7 @@ func TestPaginatePastTheEnd(t *testing.T) {
 func TestPaginateNeighbourURLs(t *testing.T) {
 	opts := pagination.Options{Path: "/users"}
 
-	first := pagination.Paginate(rows(10), 100, 10, 1, opts)
+	first := pagination.NewLengthAwarePage(10, 100, 10, 1, opts)
 	if got := first.PreviousPageURL(); got != "" {
 		t.Errorf("PreviousPageURL on page one = %q, want empty", got)
 	}
@@ -130,7 +131,7 @@ func TestPaginateNeighbourURLs(t *testing.T) {
 		t.Errorf("NextPageURL = %q, want %q", got, want)
 	}
 
-	last := pagination.Paginate(rows(10), 100, 10, 10, opts)
+	last := pagination.NewLengthAwarePage(10, 100, 10, 10, opts)
 	if got, want := last.PreviousPageURL(), "/users?page=9"; got != want {
 		t.Errorf("PreviousPageURL = %q, want %q", got, want)
 	}
@@ -140,7 +141,7 @@ func TestPaginateNeighbourURLs(t *testing.T) {
 }
 
 func TestPaginateURLClampsBelowOne(t *testing.T) {
-	p := pagination.Paginate(rows(10), 100, 10, 1, pagination.Options{Path: "/users"})
+	p := pagination.NewLengthAwarePage(10, 100, 10, 1, pagination.Options{Path: "/users"})
 	if got, want := p.URL(-5), "/users?page=1"; got != want {
 		t.Errorf("URL(-5) = %q, want %q", got, want)
 	}
@@ -148,7 +149,7 @@ func TestPaginateURLClampsBelowOne(t *testing.T) {
 
 func TestLinksFitWithoutSeparator(t *testing.T) {
 	// Thirteen pages is one below the width at which the window collapses.
-	p := pagination.Paginate(rows(10), 130, 10, 5, pagination.Options{Path: "/users"})
+	p := pagination.NewLengthAwarePage(10, 130, 10, 5, pagination.Options{Path: "/users"})
 	want := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}
 	if got := pages(p.Links()); !slices.Equal(got, want) {
 		t.Errorf("Links = %v, want %v", got, want)
@@ -156,7 +157,7 @@ func TestLinksFitWithoutSeparator(t *testing.T) {
 }
 
 func TestLinksNearTheBeginning(t *testing.T) {
-	p := pagination.Paginate(rows(10), 140, 10, 1, pagination.Options{Path: "/users"})
+	p := pagination.NewLengthAwarePage(10, 140, 10, 1, pagination.Options{Path: "/users"})
 	want := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0, 13, 14}
 	if got := pages(p.Links()); !slices.Equal(got, want) {
 		t.Errorf("Links = %v, want %v", got, want)
@@ -164,7 +165,7 @@ func TestLinksNearTheBeginning(t *testing.T) {
 }
 
 func TestLinksNearTheEnd(t *testing.T) {
-	p := pagination.Paginate(rows(10), 140, 10, 14, pagination.Options{Path: "/users"})
+	p := pagination.NewLengthAwarePage(10, 140, 10, 14, pagination.Options{Path: "/users"})
 	want := []int{1, 2, 0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}
 	if got := pages(p.Links()); !slices.Equal(got, want) {
 		t.Errorf("Links = %v, want %v", got, want)
@@ -172,7 +173,7 @@ func TestLinksNearTheEnd(t *testing.T) {
 }
 
 func TestLinksInTheMiddle(t *testing.T) {
-	p := pagination.Paginate(rows(10), 300, 10, 15, pagination.Options{Path: "/users"})
+	p := pagination.NewLengthAwarePage(10, 300, 10, 15, pagination.Options{Path: "/users"})
 	want := []int{1, 2, 0, 12, 13, 14, 15, 16, 17, 18, 0, 29, 30}
 	if got := pages(p.Links()); !slices.Equal(got, want) {
 		t.Errorf("Links = %v, want %v", got, want)
@@ -181,7 +182,7 @@ func TestLinksInTheMiddle(t *testing.T) {
 
 func TestLinksOnEachSide(t *testing.T) {
 	opts := pagination.Options{Path: "/users", OnEachSide: 1}
-	p := pagination.Paginate(rows(10), 300, 10, 15, opts)
+	p := pagination.NewLengthAwarePage(10, 300, 10, 15, opts)
 	want := []int{1, 2, 0, 14, 15, 16, 0, 29, 30}
 	if got := pages(p.Links()); !slices.Equal(got, want) {
 		t.Errorf("Links = %v, want %v", got, want)
@@ -191,7 +192,7 @@ func TestLinksOnEachSide(t *testing.T) {
 // Zero means the default, so asking for no neighbours at all takes a negative.
 func TestLinksNegativeOnEachSideMeansNone(t *testing.T) {
 	opts := pagination.Options{Path: "/users", OnEachSide: -1}
-	p := pagination.Paginate(rows(10), 300, 10, 15, opts)
+	p := pagination.NewLengthAwarePage(10, 300, 10, 15, opts)
 	want := []int{1, 2, 0, 15, 0, 29, 30}
 	if got := pages(p.Links()); !slices.Equal(got, want) {
 		t.Errorf("Links = %v, want %v", got, want)
@@ -199,7 +200,7 @@ func TestLinksNegativeOnEachSideMeansNone(t *testing.T) {
 }
 
 func TestLinksShape(t *testing.T) {
-	p := pagination.Paginate(rows(10), 140, 10, 1, pagination.Options{Path: "/users"})
+	p := pagination.NewLengthAwarePage(10, 140, 10, 1, pagination.Options{Path: "/users"})
 	links := p.Links()
 
 	if links[0].Label != "1" || links[0].URL != "/users?page=1" || !links[0].Active {
@@ -219,26 +220,44 @@ func TestLinksShape(t *testing.T) {
 }
 
 func TestLinksSinglePage(t *testing.T) {
-	p := pagination.Paginate(rows(3), 3, 10, 1, pagination.Options{Path: "/users"})
+	p := pagination.NewLengthAwarePage(3, 3, 10, 1, pagination.Options{Path: "/users"})
 	if got := pages(p.Links()); !slices.Equal(got, []int{1}) {
 		t.Errorf("Links = %v, want [1]", got)
 	}
 }
 
-func TestThroughMapsItemsAndKeepsTheArithmetic(t *testing.T) {
-	p := pagination.Paginate([]int{1, 2, 3}, 33, 3, 4, pagination.Options{Path: "/users", Fragment: "list"})
-	mapped := pagination.Through(p, strconv.Itoa)
+// The page holds no rows, so the rows reach the payload through the argument,
+// and a page encoded on its own is the arithmetic and nothing else.
+func TestLengthAwarePagePayloadCarriesTheRowsItIsGiven(t *testing.T) {
+	p := pagination.NewLengthAwarePage(2, 12, 2, 3, pagination.Options{Path: "/users"})
 
-	if got := mapped.Items(); !slices.Equal(got, []string{"1", "2", "3"}) {
-		t.Errorf("Items = %v, want [1 2 3] as strings", got)
+	payload := p.ToArray([]string{"a", "b"})
+	if got, ok := payload["data"].([]string); !ok || !slices.Equal(got, []string{"a", "b"}) {
+		t.Errorf("data = %v, want the rows handed to ToArray", payload["data"])
 	}
-	if mapped.Total() != p.Total() || mapped.LastPage() != p.LastPage() || mapped.CurrentPage() != p.CurrentPage() {
-		t.Error("Through changed the arithmetic")
+	if payload["total"] != 12 || payload["last_page"] != 6 || payload["current_page"] != 3 {
+		t.Errorf("payload = %v, want total 12, last page 6, current page 3", payload)
 	}
-	if got, want := mapped.NextPageURL(), "/users?page=5#list"; got != want {
-		t.Errorf("NextPageURL = %q, want %q", got, want)
+	if payload["from"] != 5 || payload["to"] != 6 {
+		t.Errorf("from/to = %v/%v, want 5/6", payload["from"], payload["to"])
 	}
-	if got := p.Items(); !slices.Equal(got, []int{1, 2, 3}) {
-		t.Errorf("the original items changed: %v", got)
+
+	body, err := p.ToJSON([]string{"a", "b"})
+	if err != nil {
+		t.Fatalf("ToJSON: %v", err)
+	}
+	if !strings.Contains(string(body), `"data":["a","b"]`) {
+		t.Errorf("ToJSON = %s, want the rows under data", body)
+	}
+
+	alone, err := p.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	if strings.Contains(string(alone), `"data"`) {
+		t.Errorf("MarshalJSON = %s, want no data key: the page holds no rows", alone)
+	}
+	if !strings.Contains(string(alone), `"total":12`) {
+		t.Errorf("MarshalJSON = %s, want the arithmetic", alone)
 	}
 }
