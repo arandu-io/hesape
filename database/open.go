@@ -9,6 +9,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/arandu-io/hesape/internal/linking"
 )
 
 // registry maps a dialect to the connector a compartment registered for it.
@@ -199,32 +201,23 @@ func driverFor(d Dialect) (string, error) {
 		return connector.DriverName(), nil
 	}
 
-	linked := "none"
-	if len(dialects) > 0 {
-		linked = ""
-		for i, a := range dialects {
-			if i > 0 {
-				linked += ", "
-			}
-			linked += string(a)
-		}
+	linked := make([]string, len(dialects))
+	for i, a := range dialects {
+		linked[i] = string(a)
 	}
-	return "", fmt.Errorf(
-		"DATABASE_URL asks for %s and no connector for it is linked into this binary (linked: %s).\n"+
-			"Add it:\n\n    go get github.com/arandu-io/hesape/database/connectors/%s\n\n"+
-			"and blank-import it in main.go, next to the other connectors:\n\n    _ \"github.com/arandu-io/hesape/database/connectors/%s\"",
-		d, linked, connectorFor(d), connectorFor(d))
+	return "", linking.NotLinked("DATABASE_URL", string(d), connectorFor(d), linked)
 }
 
 // connectorFor is the module that carries the connector for a dialect.
 func connectorFor(d Dialect) string {
+	const connectors = "github.com/arandu-io/hesape/database/connectors/"
 	switch d {
 	case DialectPostgres:
-		return "pgx"
+		return connectors + "pgx"
 	case DialectMySQL:
-		return "mysql"
+		return connectors + "mysql"
 	default:
-		return "sqlite"
+		return connectors + "sqlite"
 	}
 }
 

@@ -86,14 +86,39 @@ func TestAMissingDriverSaysWhichOneAndHow(t *testing.T) {
 		"pgsql",  // what is configured
 		"sqlite", // what is linked, so the gap is visible
 		"go get github.com/arandu-io/hesape/database/connectors/pgx", // the command that fixes it
-		// And where the import goes. The entrypoint is main.go in the root,
-		// so a message naming any other file sends whoever hit it looking for
-		// a directory that is not there.
-		"blank-import it in main.go",
+		// And where the import goes. The connectors are imported where the
+		// application is assembled, beside the cache and queue connectors, so
+		// a message naming any other file sends whoever hit it to a file that
+		// holds none of them.
+		"blank-import it in bootstrap/app.go",
 	} {
 		if !strings.Contains(message, want) {
 			t.Errorf("the error does not mention %q:\n%s", want, message)
 		}
+	}
+}
+
+// TestTheMissingDriverMessageIsWholeAndExact pins the text byte for byte. The
+// cache and the queue give the same sentence for their own settings, and the
+// only way three messages stay one is a test that notices the first word that
+// moves.
+func TestTheMissingDriverMessageIsWholeAndExact(t *testing.T) {
+	reset(t)
+	Register(testConnector{DialectSQLite, "sqlite"})
+	Register(testConnector{DialectMySQL, "mysql"})
+
+	_, err := DriverName(DialectPostgres)
+	if err == nil {
+		t.Fatal("a dialect with no driver resolved")
+	}
+
+	want := "DATABASE_URL asks for pgsql and no connector for it is linked into this binary (linked: mysql, sqlite).\n" +
+		"Add it:\n\n" +
+		"    go get github.com/arandu-io/hesape/database/connectors/pgx\n\n" +
+		"and blank-import it in bootstrap/app.go, next to the other connectors:\n\n" +
+		"    _ \"github.com/arandu-io/hesape/database/connectors/pgx\""
+	if err.Error() != want {
+		t.Errorf("message =\n%s\n\nwant\n%s", err, want)
 	}
 }
 

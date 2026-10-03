@@ -40,7 +40,17 @@
 // FailoverStore tries several in turn.
 //
 // The RESP store -- Dragonfly, Redis, Valkey and KeyDB, which are one product to
-// this collection -- is hesape/redis, a separate module, and it arrives through
-// CacheManager.Extend, so that the driver ships in the binaries that use it and
-// in no others.
+// this collection -- is hesape/redis, a separate module, so that the driver
+// ships in the binaries that use it and in no others.
+//
+// # Shared stores are linked by import
+//
+// A store every replica sees is a [SharedStore], and its connector is linked
+// the way a database connector is: the module is blank-imported, its init()
+// calls [Register], and [Open] builds the store from the driver name the
+// configuration holds. [Linked] is the check a boot makes first, and a driver
+// the binary does not link is an error naming the module and the import line,
+// not a nil store inside the first request. The store [Open] returns sits
+// under a [Repository] like any other, which is where the tenant enters the
+// key.
 package cache
