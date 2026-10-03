@@ -324,7 +324,19 @@ func (c Collection[T]) Flatten(depth ...int) collections.Collection[any] {
 //
 // The keys of a Collection[T] are positions, so flipping gives row to
 // position, and a row that repeats keeps the last position.
-func (c Collection[T]) Flip() map[*T]int { return collections.Flip(c.ToBase()) }
+//
+// It is written out rather than handed to collections.Flip. That function
+// constrains its element to comparable, and a pointer under a comparable
+// constraint is compiled once per pointed-to type rather than once for every
+// pointer: each model would then carry its own copy of the whole
+// collections.Collection method set, in every package that names the model.
+func (c Collection[T]) Flip() map[*T]int {
+	out := make(map[*T]int, len(c))
+	for i, row := range c {
+		out[row] = i
+	}
+	return out
+}
 
 // Pad returns the rows padded with value to size elements.
 //
@@ -348,11 +360,6 @@ func entityOf[T any](m *Model[T]) *T {
 		return nil
 	}
 	return m.Entity
-}
-
-// ToBase returns the models as a collections.Collection.
-func (ms models[T]) ToBase() collections.Collection[*Model[T]] {
-	return collections.Collect([]*Model[T](ms))
 }
 
 // All returns the models as a plain slice.
@@ -708,7 +715,18 @@ func (ms models[T]) Flatten(depth ...int) collections.Collection[any] {
 }
 
 // Flip returns the models as keys and their positions as values.
-func (ms models[T]) Flip() map[*Model[T]]int { return collections.Flip(ms.ToBase()) }
+//
+// It is written out for the reason Collection.Flip is, and more so: a
+// *Model[T] is never compiled as a shared pointer, whatever the constraint, so
+// handing this list to the collections package compiled that package's
+// collection once per model type.
+func (ms models[T]) Flip() map[*Model[T]]int {
+	out := make(map[*Model[T]]int, len(ms))
+	for i, model := range ms {
+		out[model] = i
+	}
+	return out
+}
 
 // NewCollection builds the Collection a query's rows are handed back in.
 //
