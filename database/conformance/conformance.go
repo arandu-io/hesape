@@ -79,6 +79,9 @@ func Run(t *testing.T, dialect database.Dialect, driverName, dsn string) {
 	t.Run("the migrations table can be created", func(t *testing.T) {
 		testMigrationsTable(t, dialect, db)
 	})
+	t.Run("a rollback undoes a batch in the order it ran, whatever the names", func(t *testing.T) {
+		testRollbackOrder(t, dialect, db)
+	})
 	t.Run("a generated schema applies", func(t *testing.T) {
 		testGeneratedSchema(t, db)
 	})
@@ -126,7 +129,52 @@ func (conformanceMigration) Down(ctx context.Context, conn migrations.Connection
 	return err
 }
 
-func init() { migrations.Register(conformanceMigration{}, conformanceMigrationPath) }
+func init() {
+	migrations.Register(conformanceMigration{}, conformanceMigrationPath)
+	migrations.Register(orderCreate{}, orderMigrationPath)
+	migrations.Register(orderAlter{}, orderMigrationPath)
+}
+
+// orderMigrationPath groups the two migrations testRollbackOrder applies.
+const orderMigrationPath = "database/conformance/order"
+
+// orderCreate and orderAlter are a table and a later change to it, named in
+// the two styles a project ends up mixing. Go sorts "20260101_" before
+// "2026_01_02_", byte by byte, so they run in that order; a collation that puts
+// "_" before the digits sorts them the other way.
+type orderCreate struct{ migrations.BaseMigration }
+
+// GetName returns the migration's name.
+func (orderCreate) GetName() string { return "20260101_0001_conformance_order_create" }
+
+// Up creates the table.
+func (orderCreate) Up(ctx context.Context, conn migrations.Connection) error {
+	_, err := conn.Statement(ctx, `CREATE TABLE `+table("order")+` (id `+database.KeyText+` PRIMARY KEY)`, nil)
+	return err
+}
+
+// Down drops it.
+func (orderCreate) Down(ctx context.Context, conn migrations.Connection) error {
+	_, err := conn.Statement(ctx, `DROP TABLE `+table("order"), nil)
+	return err
+}
+
+type orderAlter struct{ migrations.BaseMigration }
+
+// GetName returns the migration's name.
+func (orderAlter) GetName() string { return "2026_01_02_0001_conformance_order_alter" }
+
+// Up adds a column to the table orderCreate made.
+func (orderAlter) Up(ctx context.Context, conn migrations.Connection) error {
+	_, err := conn.Statement(ctx, `ALTER TABLE `+table("order")+` ADD COLUMN note VARCHAR(40)`, nil)
+	return err
+}
+
+// Down drops the column, which fails if the table is already gone.
+func (orderAlter) Down(ctx context.Context, conn migrations.Connection) error {
+	_, err := conn.Statement(ctx, `ALTER TABLE `+table("order")+` DROP COLUMN note`, nil)
+	return err
+}
 
 // testMigrationsTable is the statement MySQL rejected. The migrator creates its
 // tracking table before it does anything else, so a failure here means the
@@ -169,6 +217,50 @@ func testMigrationsTable(t *testing.T, dialect database.Dialect, db *database.DB
 	}
 	if len(rolledBack) != 1 {
 		t.Errorf("rolled back %v, want the one migration", rolledBack)
+	}
+}
+
+// testRollbackOrder is the rollback that undid a table before the migration
+// that altered it. The tracking table was read back ORDER BY migration, so the
+// engine's collation chose the order: PostgreSQL's put "2026_01_02_" before
+// "20260101_", the reverse of the order Go had applied them in. The rollback
+// and the reset must undo exactly what ran, newest first.
+func testRollbackOrder(t *testing.T, dialect database.Dialect, db *database.DB) {
+	ctx := context.Background()
+	for _, undo := range []struct {
+		name string
+		run  func(*migrations.Migrator) ([]string, error)
+	}{
+		{"rollback", func(m *migrations.Migrator) ([]string, error) {
+			return m.Rollback(ctx, []string{orderMigrationPath}, migrations.Options{})
+		}},
+		{"reset", func(m *migrations.Migrator) ([]string, error) {
+			return m.Reset(ctx, []string{orderMigrationPath}, false)
+		}},
+	} {
+		drop(t, db, migrations.DefaultTable)
+		drop(t, db, table("order"))
+		t.Cleanup(func() { drop(t, db, table("order")) })
+
+		migrator := newMigrator(dialect, db)
+		if err := migrator.GetRepository().CreateRepository(ctx); err != nil {
+			t.Fatalf("creating the tracking table: %v", err)
+		}
+		applied, err := migrator.Run(ctx, []string{orderMigrationPath}, migrations.Options{})
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		want := []string{"2026_01_02_0001_conformance_order_alter", "20260101_0001_conformance_order_create"}
+		if len(applied) != 2 || applied[0] != want[1] || applied[1] != want[0] {
+			t.Fatalf("applied %v, want the create and then the alter", applied)
+		}
+		undone, err := undo.run(migrator)
+		if err != nil {
+			t.Fatalf("%s: %v", undo.name, err)
+		}
+		if len(undone) != 2 || undone[0] != want[0] || undone[1] != want[1] {
+			t.Errorf("%s undid %v, want %v", undo.name, undone, want)
+		}
 	}
 }
 

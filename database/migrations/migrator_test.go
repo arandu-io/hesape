@@ -3,6 +3,7 @@ package migrations
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -99,8 +100,7 @@ func (r *fakeRepository) GetRan(context.Context) ([]string, error) {
 }
 
 func (r *fakeRepository) GetMigrations(_ context.Context, steps int) ([]MigrationRecord, error) {
-	out := append([]MigrationRecord(nil), r.records...)
-	sortRecordsByName(out, true)
+	out := newestFirst(r.records)
 	if len(out) > steps {
 		out = out[:steps]
 	}
@@ -114,8 +114,7 @@ func (r *fakeRepository) GetMigrationsByBatch(_ context.Context, batch int) ([]M
 			out = append(out, record)
 		}
 	}
-	sortRecordsByName(out, true)
-	return out, nil
+	return newestFirst(out), nil
 }
 
 func (r *fakeRepository) GetLast(ctx context.Context) ([]MigrationRecord, error) {
@@ -126,6 +125,15 @@ func (r *fakeRepository) GetLast(ctx context.Context) ([]MigrationRecord, error)
 		}
 	}
 	return r.GetMigrationsByBatch(ctx, last)
+}
+
+// newestFirst orders records as the database repository does: by batch, the
+// latest first, and inside a batch the last one recorded first.
+func newestFirst(records []MigrationRecord) []MigrationRecord {
+	out := slices.Clone(records)
+	slices.Reverse(out)
+	slices.SortStableFunc(out, func(a, b MigrationRecord) int { return b.Batch - a.Batch })
+	return out
 }
 
 func (r *fakeRepository) GetMigrationBatches(context.Context) (map[string]int, error) {

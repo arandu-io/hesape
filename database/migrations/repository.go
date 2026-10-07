@@ -3,7 +3,6 @@ package migrations
 import (
 	"context"
 	"fmt"
-	"sort"
 )
 
 // Resolver answers a connection by name, narrowed to what the repository and the
@@ -45,8 +44,8 @@ type MigrationRecord struct {
 // connection is gone" writes a migrate command that reports success on a dead
 // database.
 type MigrationRepositoryInterface interface {
-	// GetRan answers getRan: the names of every applied migration, ordered by
-	// batch and then by name.
+	// GetRan answers getRan: the names of every applied migration, oldest
+	// first, in the order they ran.
 	GetRan(ctx context.Context) ([]string, error)
 
 	// GetMigrations answers getMigrations: the last N applied, most recent
@@ -113,10 +112,18 @@ func NewDatabaseMigrationRepository(resolver Resolver, table string) *DatabaseMi
 	return &DatabaseMigrationRepository{resolver: resolver, table: table}
 }
 
-// GetRan returns the names of every applied migration, ordered by batch and
-// then by name.
+// GetRan returns the names of every applied migration, oldest first: by batch,
+// then in the order Log recorded them.
+//
+// Every read that orders the table orders it by batch and id, never by name.
+// The migrator sorts pending names in Go, byte by byte, and the engine would
+// sort them by the column's collation -- which on PostgreSQL and MySQL puts
+// "_" before the digits. A project whose names mix "20260729_0001_x" and
+// "2026_10_04_0001_y" then had its rollback undo a table before the
+// migration that altered it. The id is max + 1 at Log, so it is the order the
+// migrations actually ran in, on every engine.
 func (r *DatabaseMigrationRepository) GetRan(ctx context.Context) ([]string, error) {
-	records, err := r.query(ctx, `SELECT id, migration, batch FROM `+r.table+` ORDER BY batch ASC, migration ASC`)
+	records, err := r.query(ctx, `SELECT id, migration, batch FROM `+r.table+` ORDER BY batch ASC, id ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +142,7 @@ func (r *DatabaseMigrationRepository) GetRan(ctx context.Context) ([]string, err
 func (r *DatabaseMigrationRepository) GetMigrations(ctx context.Context, steps int) ([]MigrationRecord, error) {
 	records, err := r.query(ctx,
 		`SELECT id, migration, batch FROM `+r.table+
-			` WHERE batch >= 1 ORDER BY batch DESC, migration DESC LIMIT ?`, steps)
+			` WHERE batch >= 1 ORDER BY batch DESC, id DESC LIMIT ?`, steps)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +153,7 @@ func (r *DatabaseMigrationRepository) GetMigrations(ctx context.Context, steps i
 // first.
 func (r *DatabaseMigrationRepository) GetMigrationsByBatch(ctx context.Context, batch int) ([]MigrationRecord, error) {
 	return r.query(ctx,
-		`SELECT id, migration, batch FROM `+r.table+` WHERE batch = ? ORDER BY migration DESC`, batch)
+		`SELECT id, migration, batch FROM `+r.table+` WHERE batch = ? ORDER BY id DESC`, batch)
 }
 
 // GetLast returns the most recent batch, in the order a rollback wants it.
@@ -156,7 +163,7 @@ func (r *DatabaseMigrationRepository) GetLast(ctx context.Context) ([]MigrationR
 		return nil, err
 	}
 	return r.query(ctx,
-		`SELECT id, migration, batch FROM `+r.table+` WHERE batch = ? ORDER BY migration DESC`, last)
+		`SELECT id, migration, batch FROM `+r.table+` WHERE batch = ? ORDER BY id DESC`, last)
 }
 
 // GetMigrationBatches returns the name-to-batch map `migrate:status` prints.
@@ -413,14 +420,4 @@ func asString(v any) string {
 	default:
 		return fmt.Sprint(v)
 	}
-}
-
-// sortRecordsByName orders records the way the rollback paths want them.
-func sortRecordsByName(records []MigrationRecord, descending bool) {
-	sort.SliceStable(records, func(i, j int) bool {
-		if descending {
-			return records[i].Migration > records[j].Migration
-		}
-		return records[i].Migration < records[j].Migration
-	})
 }

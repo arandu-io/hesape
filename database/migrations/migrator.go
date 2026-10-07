@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -375,8 +376,9 @@ func (m *Migrator) Reset(ctx context.Context, paths []string, pretend bool) ([]s
 	for _, name := range ran {
 		records = append(records, MigrationRecord{Migration: name})
 	}
-	// GetRan answers oldest first, and a reset undoes them the other way.
-	sortRecordsByName(records, true)
+	// GetRan answers oldest first, in the order they ran, and a reset undoes
+	// them the other way. Sorting them by name instead ignored the batches.
+	slices.Reverse(records)
 
 	rolledBack, err := m.rollbackMigrations(ctx, records, paths, Options{Pretend: pretend})
 	m.write("")
