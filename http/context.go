@@ -180,43 +180,36 @@ func (c *Context) View(name string, data any) error {
 
 // Fragment renders a partial with a status, for HTMX.
 //
-// The status matters: a form that failed validation answers 422 with the form
-// fragment, so the browser and the logs agree with each other. Answering 200
-// would make both of them believe it worked.
+// It is for a fragment the page asked for and will draw: a row after an
+// inline edit, a panel that loads on scroll, a list re-rendered after a
+// filter. The status says what the fragment is, so the browser, the logs and
+// whatever reads them agree.
 //
-// # The layout has to let htmx swap it, and by default htmx does not
+// # A rejected form is not answered here
 //
-// This comment used to end with "and HTMX swaps it in", stated as fact. It does
-// not. htmx's default response handling is
+// The answer to a form whose input failed the rules is a redirect back to it,
+// with the messages and what was typed carried in the flash: the handler
+// returns the validation.Errors, and the router answers with [Reject]. A
+// client that asked for JSON gets a 422 problem document with the messages by
+// field instead. Neither goes through Fragment.
+//
+// A 422 fragment carrying the messages was tried, and it is the failure that
+// produced Reject. htmx's default response handling, in the copy this
+// framework embeds (2.0.4), is
 //
 //	[{code:"204", swap:false}, {code:"[23]..", swap:true}, {code:"[45]..", swap:false, error:true}]
 //
-// in the copy this framework embeds (2.0.4), and a 422 matches the third entry.
-// The fragment is fetched, the status is right, the body is correct -- and it is
-// thrown away. The person sees the form they submitted, unchanged, with no
-// message on it: the same failure that made a guard's 403 invisible, on the
-// answer every form in an application gives.
+// and a 422 matches the third entry: the fragment is fetched, the status is
+// right, the body is correct -- and it is thrown away, so the person sees the
+// form they submitted, unchanged, with no message on it. Neither HX-Retarget
+// nor HX-Reswap rescues it, because both are read after the decision to swap
+// is made. Reconfiguring that table in the layout makes the swap happen, and
+// still leaves a reload that posts the form again; it is also a second way to
+// answer a rejected form beside the one the router already gives.
 //
-// Neither HX-Retarget nor HX-Reswap rescues it. Both are read after shouldSwap
-// has already been decided from the table above; they change where and how, not
-// whether. What decides whether is the configuration, and htmx reads it from the
-// document without any script running:
-//
-//	<meta name="htmx-config" content='{"responseHandling":[
-//	  {"code":"204","swap":false},
-//	  {"code":"422","swap":true},
-//	  {"code":"[23]..","swap":true},
-//	  {"code":"[45]..","swap":false,"error":true}]}'>
-//
-// 422 before the catch-all, because htmx takes the first entry that matches.
-// That line belongs in the application's layout, once -- it is the layout that
-// decides what a fragment answer means, and a per-page opt-in would be a second
-// way to answer a rejected form. A meta tag is not a script, so it costs
-// nothing against a `script-src 'self'` policy and nothing in Node.
-//
-// A refusal is a different thing and does not go through here: 403, 419 and 429
-// are not a form coming back with messages on it, and they answer through
-// Refuse.
+// The same holds for any 4xx or 5xx status passed here: htmx discards it
+// unless the layout says otherwise. A refusal -- 403, 419, 429 -- is not a
+// fragment at all, and answers through [Refuse].
 func (c *Context) Fragment(status int, name string, data any) error {
 	return c.renderWith(status, name, data)
 }
