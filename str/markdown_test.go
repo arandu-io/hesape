@@ -1,6 +1,7 @@
 package str_test
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -207,12 +208,22 @@ func TestMarkdownBoundsTheNestingOfADestination(t *testing.T) {
 // in turns. The fastest is the one the rest of the machine disturbed least, and
 // taking the two in turns means a slow stretch on a shared machine slows both
 // instead of only the one measured during it.
+//
+// The heap is collected before every render, so that each one starts from the
+// same heap and pays the collections its own allocations cause. Without it the
+// large render leaves the collector a target sized to its garbage, the small
+// render after it runs under that target without one collection, and the
+// fastest small render is the one that paid nothing for its allocations: a
+// linear render that allocates heavily then looked eight times slower at four
+// times the input.
 func fastestRenders(small, large string) (time.Duration, time.Duration) {
 	bestSmall, bestLarge := time.Duration(1<<62), time.Duration(1<<62)
 	for range 5 {
+		runtime.GC()
 		start := time.Now()
 		str.Markdown(small)
 		bestSmall = min(bestSmall, time.Since(start))
+		runtime.GC()
 		start = time.Now()
 		str.Markdown(large)
 		bestLarge = min(bestLarge, time.Since(start))
@@ -274,9 +285,13 @@ func TestMarkdownStaysLinearOnNestedContainers(t *testing.T) {
 		{"fence in nested quotes", func(n int) string {
 			return strings.Repeat("> ", n) + "```\n" + strings.Repeat("> ", n) + "x"
 		}, 64000},
+		// Every lazy line is carried by each of the hundred levels, so the
+		// render is linear with a large constant. The length keeps the small
+		// render at several milliseconds, well above what a collection or a
+		// descheduled thread adds to one render.
 		{"lazy lines under nested quotes", func(n int) string {
 			return strings.Repeat("> ", n) + "x\n" + strings.Repeat("y\n", n)
-		}, 5000},
+		}, 12000},
 		{"nested lists", func(n int) string { return strings.Repeat("- ", n) + "x\ny" }, 2000},
 		{"quote in list", func(n int) string { return strings.Repeat("- > ", n) + "x\ny" }, 2000},
 		{"list in quote", func(n int) string { return strings.Repeat("> - ", n) + "x\ny" }, 2000},
