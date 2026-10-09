@@ -26,6 +26,21 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+### `exception.Problem` carries `Errors`, and is no longer comparable
+
+`exception.Problem` gained `Errors map[string][]string`: the messages of a
+validation failure, keyed by the field each belongs to, written as the `errors`
+member and left out of every other problem. A JSON client had no other way to
+learn which field to correct, and every application wrote its own format for
+it. A struct holding a map cannot be compared with `==`, so code that compared
+two problems, or used one as a map key, no longer compiles. No code in the
+collection, the framework or the skeleton did either.
+
+| before | now |
+|---|---|
+| `if got == want { … }` | `if got.Status == want.Status && got.Title == want.Title { … }`, or `reflect.DeepEqual(got, want)` |
+| `seen := map[exception.Problem]int{}` | key by the member you group on: `map[int]int{}` over `Status`, or `map[string]int{}` over `Title` |
+
 ### `exception.StatusOf` is the one status table, and it claims more errors
 
 `exception.StatusOf` answered an `*exception.HTTPError`, `auth.ErrForbidden`,
