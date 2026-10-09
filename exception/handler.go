@@ -180,7 +180,7 @@ func (h *Handler) reportThrowable(ctx context.Context, err error) {
 		}
 	}
 
-	status, known := classify(err)
+	status, known := StatusOf(err)
 	fields := []any{"status", statusOr500(status, known), "error", err}
 	for key, value := range h.buildExceptionContext(err) {
 		fields = append(fields, key, value)
@@ -286,7 +286,7 @@ func isComparable(err error) bool {
 // This is the path that did not exist: every error leaving a controller became
 // a panic, and every panic became 500, so an authorization refusal and a
 // database being down were the same page. Now the error says what it is --
-// through Abort, or through the sentinel table in classify -- and what it says
+// through Abort, or through the table in StatusOf -- and what it says
 // is the answer.
 //
 // It does not report. Report and Render are the two halves the type doc
@@ -363,7 +363,7 @@ func (h *Handler) RenderForConsole(w io.Writer, err error) {
 	if err == nil {
 		return
 	}
-	if status, known := classify(err); known {
+	if status, known := StatusOf(err); known {
 		fmt.Fprintf(w, "error: %s (%d)\n", messageFor(err, status), status)
 		return
 	}
@@ -373,7 +373,7 @@ func (h *Handler) RenderForConsole(w io.Writer, err error) {
 // answer writes the response. value is what failed -- an error, or whatever was
 // panicked with -- and err is the same thing when it happened to be an error.
 func (h *Handler) answer(w http.ResponseWriter, r *http.Request, value any, err error, frames []StackFrame) {
-	status, known := classify(err)
+	status, known := StatusOf(err)
 	applyErrorHeaders(w, err)
 
 	if h.shouldReturnJSON(r, err) {

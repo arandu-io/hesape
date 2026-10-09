@@ -44,7 +44,7 @@ func (h *Handler) Missing(callback func(err error) any) {
 // claimed, and that is what this fires for.
 func (h *Handler) Fatal(callback func(err error) any) {
 	h.Error(func(err error, _ int, _ bool) any {
-		if _, known := classify(err); known {
+		if _, known := StatusOf(err); known {
 			return nil
 		}
 		return callback(err)
@@ -79,7 +79,7 @@ func (h *Handler) callCustomHandlers(err error, fromConsole bool) (response any)
 	handlers := append([]ErrorHandler(nil), h.handlers...)
 	h.mu.Unlock()
 
-	status, known := classify(err)
+	status, known := StatusOf(err)
 	if !known {
 		status = http.StatusInternalServerError
 	}
@@ -184,7 +184,7 @@ type PlainDisplayer struct{ handler *Handler }
 // copy, and an *HTTPError has carried them since -- Retry-After on a 429 is
 // the difference between a client that backs off and one that hammers.
 func (d *PlainDisplayer) Display(w http.ResponseWriter, r *http.Request, err error) {
-	status, known := classify(err)
+	status, known := StatusOf(err)
 	applyErrorHeaders(w, err)
 	d.handler.renderStatus(w, r, statusOr500(status, known), messageFor(err, status))
 }
@@ -202,7 +202,7 @@ type DebugDisplayer struct{ handler *Handler }
 // client and to every test written against it -- the page is the same page
 // either way, and the status is the error's answer rather than the page's.
 func (d *DebugDisplayer) Display(w http.ResponseWriter, r *http.Request, err error) {
-	status, known := classify(err)
+	status, known := StatusOf(err)
 	applyErrorHeaders(w, err)
 	d.handler.renderDebug(w, r, statusOr500(status, known), err, Capture(3, d.handler.cfg.AppModule))
 }

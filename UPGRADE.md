@@ -26,6 +26,30 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+### `exception.StatusOf` is the one status table, and it claims more errors
+
+`exception.StatusOf` answered an `*exception.HTTPError`, `auth.ErrForbidden`,
+`session.ErrTokenMismatch` and a body over the size limit, and nothing else. It
+now answers, first match wins: any error with a method `HTTPStatus() int`, with
+that status; `validation.Errors` holding a message, 422;
+`database.ErrRecordNotFound` — which every "not found" under `database`,
+`model.ErrModelNotFound` included, answers for — 404; `auth.ErrForbidden`, 403;
+`session.ErrTokenMismatch`, 419; `database.ErrUniqueViolation`, 409. The
+`exception.Handler` reads the same table to report, render and print.
+
+**What changes without a compiler error.** An error that reached the Handler as
+a 500 — and, in development, as the debug page — is now answered with its
+status, and is logged at warning rather than error, because below 500 the
+application answered on purpose. `Handler.Fatal` no longer fires for one.
+
+| error | before | now |
+|---|---|---|
+| `database.ErrRecordNotFound`, `model.ErrModelNotFound` | 500 | 404 |
+| `database.ErrUniqueViolation` | 500 | 409 |
+| `validation.Errors` with a message, `*validation.ValidationException` | 500 | 422, or the exception's own status |
+| `exceptions.ThrottleRequestsException`, `exceptions.MalformedUrlException`, a type of your own with `HTTPStatus() int` | 500 | its status |
+| an `HTTPStatus()` error wrapping `auth.ErrForbidden` | 403 unless it was an `*exception.HTTPError` | its own status |
+
 ### A `*validation.ValidationException` reads as `validation.Errors`, and answers `HTTPStatus`
 
 `errors.As(err, &errs)` with `errs` a `validation.Errors` now answers true for a

@@ -25,17 +25,21 @@
 // failure, which is what lets the caller write one line instead of the same if
 // statement twice.
 //
-// Abort builds an *HTTPError, StatusOf reads the status back out of an error
-// chain, and classify is the closed table that says what the collection's own
-// sentinels mean -- auth.ErrForbidden is 403, an expired CSRF token is 419.
+// Abort builds an *HTTPError, and StatusOf is the closed table that reads the
+// status back out of an error chain: an error that states its own, a
+// validation failure as 422, a missing row as 404, auth.ErrForbidden as 403,
+// an expired CSRF token as 419, a duplicate key as 409. Every adapter that
+// turns an error into a response asks it -- the router's, and the Handler
+// here -- so an error is answered with the same status wherever it surfaces.
 // Before this existed, every error leaving a handler became 500, including the
 // ones that had already said exactly what they were.
 //
 // The table is closed on purpose. An application that wants a status says so
-// with Abort; it does not get a second mechanism for the same sentence. Map is
-// not that second mechanism: it turns somebody else's error -- a driver's, a
-// library's -- into one of these, and the answer still comes from the one
-// table.
+// with Abort, or with an HTTPStatus method on its own error type, which the
+// first row of the table reads; it does not get a registry of translators,
+// which would be a second answer for the same error. Map is not that second
+// mechanism either: it turns somebody else's error -- a driver's, a library's
+// -- into one of these, and the answer still comes from the one table.
 //
 // # The pages
 //

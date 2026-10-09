@@ -5,8 +5,9 @@ import (
 	"net/http"
 
 	"github.com/arandu-io/hesape/auth"
-	"github.com/arandu-io/hesape/http/exceptions"
+	"github.com/arandu-io/hesape/database"
 	"github.com/arandu-io/hesape/session"
+	"github.com/arandu-io/hesape/validation"
 )
 
 // StatusPageExpired is 419, which is not in any RFC.
@@ -116,46 +117,73 @@ func AbortUnless(condition bool, status int, message string) error {
 // StatusOf reads an error chain and answers two things at once: the HTTP status
 // the error asks for, and whether it asked at all.
 //
-// It is what the routing layer calls with whatever a controller action
-// returned. False means nobody claimed the error, which is a 500 and, in
-// development, the debug page.
-func StatusOf(err error) (int, bool) { return classify(err) }
-
-// classify is the closed table of what the collection's own errors mean.
+// It is the one table: every adapter that turns an error into a response asks
+// it, the router's and this package's Handler alike, so the same error is
+// answered with the same status wherever it surfaces. A second table beside it
+// would be a second answer for the same error, and the failure that produces
+// is invisible when one of them is wrong.
 //
-// Closed is the point. Every entry here is a sentinel this collection
-// declares, so the list cannot grow with an application's own errors -- those
-// say what they want with Abort, which is the one mechanism, and cannot end up
-// with two ways to mean 403.
+// The list is closed, and the order is the order below, first match wins:
 //
-// Order matters: an *HTTPError anywhere in the chain wins, because it is the
-// explicit statement and the sentinel below it may be the cause it wrapped.
-func classify(err error) (int, bool) {
+//	an error with a method HTTPStatus() int        that status
+//	validation.Errors holding at least one message  422
+//	database.ErrRecordNotFound                      404
+//	auth.ErrForbidden                               403
+//	session.ErrTokenMismatch                        419
+//	database.ErrUniqueViolation                     409
+//
+// The first row is how an error states its own status: an *HTTPError, which
+// Abort builds; a *validation.ValidationException; the errors of
+// hesape/http/exceptions, which is how a body over the size limit arrives as
+// 413; and an application's own domain failure. It is matched by method set,
+// so the type needs no import of this package, and it wins over the rows below
+// because it is the explicit statement -- the sentinel under it may be the
+// cause it wrapped. The status is returned as written, even outside 400-599:
+// what to do with one that is not an error status is the caller's decision.
+//
+// validation.Errors with no message in it is not claimed. A handler that
+// returned one did not ask whether anything failed, and a 422 with nothing to
+// correct is the failure answering a rejected form exists to remove.
+//
+// model.ErrModelNotFound, and every other "not found" under database, answers
+// errors.Is for database.ErrRecordNotFound, so all of them are the 404 row.
+// auth.ErrForbidden is 403 rather than 404: the tenant filter has already
+// decided what exists at all, so a status does not hide a resource. A token
+// that does not match is 419, because the account may do this and the page is
+// simply old. A duplicate key is 409, because it is the request that collided
+// with a row already there; the engine decides it from its own error code,
+// never from the message.
+//
+// errors.Is and errors.As walk the chain, so a sentinel wrapped with
+// fmt.Errorf("loading invoice %d: %w", id, err) keeps its status, and the
+// context it was wrapped with stays out of the answer.
+//
+// False means nobody claimed the error, which is a 500 and, in development,
+// the debug page.
+func StatusOf(err error) (int, bool) {
 	if err == nil {
 		return 0, false
 	}
 
-	var he *HTTPError
-	if errors.As(err, &he) {
-		return he.Status, true
+	var stated interface{ HTTPStatus() int }
+	if errors.As(err, &stated) {
+		return stated.HTTPStatus(), true
+	}
+
+	var rejected validation.Errors
+	if errors.As(err, &rejected) && rejected.Any() {
+		return http.StatusUnprocessableEntity, true
 	}
 
 	switch {
-	// A policy refused, or a repository was reached without a Grant. Both are
-	// auth.ErrForbidden, and both are 403 rather than 404: this collection does
-	// not hide the existence of a resource behind a status, because the tenant
-	// filter has already decided what exists at all.
+	case errors.Is(err, database.ErrRecordNotFound):
+		return http.StatusNotFound, true
 	case errors.Is(err, auth.ErrForbidden):
 		return http.StatusForbidden, true
 	case errors.Is(err, session.ErrTokenMismatch):
 		return StatusPageExpired, true
+	case errors.Is(err, database.ErrUniqueViolation):
+		return http.StatusConflict, true
 	}
-
-	// A body cut off by the server's limit, as the request readers report it.
-	var tooLarge *exceptions.PostTooLargeException
-	if errors.As(err, &tooLarge) {
-		return http.StatusRequestEntityTooLarge, true
-	}
-
 	return 0, false
 }
