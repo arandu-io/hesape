@@ -100,6 +100,55 @@ func TestTheErrorsReadFromAnExceptionAreACopy(t *testing.T) {
 	}
 }
 
+// TestTheMessagesErrorsReturnsAreACopy: Errors handed out the validator's own
+// map while As handed out a copy, so a controller that added a message to what
+// Errors returned, or trimmed a field's list before flashing it, rewrote the
+// failure the exception reported to the log and to every later reader.
+func TestTheMessagesErrorsReturnsAreACopy(t *testing.T) {
+	v := validation.Make(validation.Data{"name": "", "email": "nope"},
+		validation.MustCompile(validation.Rules{"name": "required", "email": "email"}))
+	_, failed := v.Validate()
+	var exc *validation.ValidationException
+	if !errors.As(failed, &exc) {
+		t.Fatal("a failed Validate must carry a *ValidationException")
+	}
+	before := exc.Errors()
+	first := before["name"][0]
+
+	got := exc.Errors()
+	got["name"][0] = "rewritten by the caller"
+	got["name"] = append(got["name"], "appended by the caller")
+	got["other"] = []string{"added by the caller"}
+	delete(got, "email")
+
+	after := exc.Errors()
+	if len(after) != len(before) {
+		t.Fatalf("the exception now reports %d fields, want %d: %v", len(after), len(before), after)
+	}
+	if _, added := after["other"]; added {
+		t.Fatal("a field added to the returned map reached the exception")
+	}
+	if len(after["email"]) != 1 {
+		t.Fatal("a field deleted from the returned map was deleted from the exception")
+	}
+	if len(after["name"]) != 1 || after["name"][0] != first {
+		t.Fatalf("name now reads %q, want only %q: the returned slice aliased the exception's", after["name"], first)
+	}
+	if v.Errors().First("name") != first {
+		t.Fatalf("the validator's own bag reads %q, want %q", v.Errors().First("name"), first)
+	}
+}
+
+// TestANilValidationExceptionHasNoMessages: As already answers false for a nil
+// exception, and Errors answers the empty map rather than a panic, so a caller
+// that reads it from a typed nil does not take the request down.
+func TestANilValidationExceptionHasNoMessages(t *testing.T) {
+	var exc *validation.ValidationException
+	if got := exc.Errors(); got == nil || len(got) != 0 {
+		t.Fatalf("Errors() = %#v, want an empty map", got)
+	}
+}
+
 // TestAValidationExceptionIsNotEveryTarget: As answers only for Errors, so
 // errors.As keeps walking the chain for anything else.
 func TestAValidationExceptionIsNotEveryTarget(t *testing.T) {

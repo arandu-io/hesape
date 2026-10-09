@@ -45,6 +45,21 @@ headers, the wrapper's are the ones sent, the same first-match rule
 | `exceptions.NewThrottleRequestsException("", nil, http.Header{"Retry-After": {"30"}}, 0)` | 429, no `Retry-After` | 429, `Retry-After: 30` |
 | a type of your own with `GetHeaders() http.Header` | its headers dropped | its headers sent |
 
+### `validation.(*ValidationException).Errors` returns a copy
+
+`Errors` returned the validator's own map, so writing to it rewrote the failure;
+`errors.As` into a `validation.Errors` already returned a copy. Both now do.
+
+**What changes without a compiler error.** Code that added a message to the map
+`Errors` returned, or changed a field's slice, and expected the exception — its
+next `Errors`, the validator behind it — to report the change no longer gets
+it. Build the failure you mean instead. A nil `*ValidationException` answers an
+empty map where it panicked.
+
+| before | now |
+|---|---|
+| `exc.Errors()["name"] = append(exc.Errors()["name"], "taken")` changes `exc` | changes a copy; write `validation.WithMessages(merged)` |
+
 ### `exception.Problem` carries `Errors`, and is no longer comparable
 
 `exception.Problem` gained `Errors map[string][]string`: the messages of a

@@ -94,11 +94,21 @@ func (e *ValidationException) Error() string { return e.message }
 
 // Errors returns every validation message, keyed by the field it belongs to. It
 // is what a controller turns into a 422 body.
+//
+// The map and its slices are a copy, the same copy As writes: a caller that
+// adds to them, or flashes them and trims them, does not change what the
+// exception reports afterwards. A nil exception, or one with no run behind it,
+// answers an empty map.
 func (e *ValidationException) Errors() map[string][]string {
-	if e.validator == nil {
+	if e == nil || e.validator == nil {
 		return map[string][]string{}
 	}
-	return e.validator.Errors().Messages()
+	messages := e.validator.Errors()
+	copied := make(map[string][]string, len(messages))
+	for field, list := range messages {
+		copied[field] = append([]string(nil), list...)
+	}
+	return copied
 }
 
 // Validator returns the run that failed.
@@ -177,12 +187,7 @@ func (e *ValidationException) As(target any) bool {
 		return false
 	}
 
-	messages := e.Errors()
-	copied := make(Errors, len(messages))
-	for field, list := range messages {
-		copied[field] = append([]string(nil), list...)
-	}
-	*errs = copied
+	*errs = Errors(e.Errors())
 	return true
 }
 
