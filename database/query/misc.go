@@ -84,7 +84,7 @@ func (b *Builder) InsertOrIgnoreReturning(ctx context.Context, g auth.Grant, val
 		return nil, errors.New("query: the returning columns must not be empty")
 	}
 
-	tenant, err := b.tenantFor(ctx, g)
+	tenant, err := b.writeTenant(ctx, g)
 	if err != nil {
 		return nil, err
 	}

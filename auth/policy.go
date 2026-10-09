@@ -93,6 +93,20 @@ type Subject struct {
 	// session that survived a deploy walk past the confirmation screen.
 	PasswordConfirmedAt time.Time
 
+	// Impersonator is who is really acting when this subject is somebody else
+	// being viewed by them -- an operator looking at a customer's account as the
+	// customer sees it. Nil on every ordinary session.
+	//
+	// A subject that carries one only reads: every Grant issued to it is
+	// refused by Writable, and the database refuses to write with it. Only
+	// Impersonate sets it, and Leave answers it back.
+	//
+	// It is exported because the session store keeps the subject as it is
+	// written and reads it back, and a field it could not write would not
+	// survive the first request. Setting it by hand can only take writing away
+	// from a subject, never give it.
+	Impersonator *Subject
+
 	// guest marks a subject that is deliberately anonymous. It is unexported and
 	// only Guest sets it, which is the whole point: a Subject nobody filled in
 	// is not a guest, it is a session somebody forgot to load, and Authorize

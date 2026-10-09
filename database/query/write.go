@@ -60,7 +60,7 @@ func (b *Builder) Insert(ctx context.Context, g auth.Grant, values ...map[string
 	if len(values) == 0 {
 		return true, nil
 	}
-	tenant, err := b.tenantFor(ctx, g)
+	tenant, err := b.writeTenant(ctx, g)
 	if err != nil {
 		return false, err
 	}
@@ -87,7 +87,7 @@ func (b *Builder) InsertOrIgnore(ctx context.Context, g auth.Grant, values ...ma
 	if len(values) == 0 {
 		return 0, nil
 	}
-	tenant, err := b.tenantFor(ctx, g)
+	tenant, err := b.writeTenant(ctx, g)
 	if err != nil {
 		return 0, err
 	}
@@ -109,7 +109,7 @@ func (b *Builder) InsertOrIgnore(ctx context.Context, g auth.Grant, values ...ma
 // sequence is the name of the sequence the id comes from, which Postgres needs
 // and the other engines ignore. Empty means the engine's default.
 func (b *Builder) InsertGetID(ctx context.Context, g auth.Grant, values map[string]any, sequence string) (int64, error) {
-	tenant, err := b.tenantFor(ctx, g)
+	tenant, err := b.writeTenant(ctx, g)
 	if err != nil {
 		return 0, err
 	}
@@ -149,7 +149,7 @@ func (b *Builder) InsertOrIgnoreUsing(ctx context.Context, g auth.Grant, columns
 }
 
 func (b *Builder) insertUsing(ctx context.Context, g auth.Grant, columns []any, query any, ignore bool) (int64, error) {
-	if _, err := b.tenantFor(ctx, g); err != nil {
+	if _, err := b.writeTenant(ctx, g); err != nil {
 		return 0, err
 	}
 
@@ -191,7 +191,7 @@ func (b *Builder) insertUsing(ctx context.Context, g auth.Grant, columns []any, 
 // -- and both are keyed by column, so the grammar has to walk them in sorted key
 // order for the placeholders and the values to line up.
 func (b *Builder) Update(ctx context.Context, g auth.Grant, values map[string]any) (int64, error) {
-	query, err := b.scoped(ctx, g)
+	query, err := b.writeScoped(ctx, g)
 	if err != nil {
 		return 0, err
 	}
@@ -221,7 +221,7 @@ func (b *Builder) Update(ctx context.Context, g auth.Grant, values map[string]an
 // UpdateFrom runs an "update ... from" statement, which only Postgres
 // compiles.
 func (b *Builder) UpdateFrom(ctx context.Context, g auth.Grant, values map[string]any) (int64, error) {
-	query, err := b.scoped(ctx, g)
+	query, err := b.writeScoped(ctx, g)
 	if err != nil {
 		return 0, err
 	}
@@ -352,7 +352,7 @@ func (b *Builder) Upsert(ctx context.Context, g auth.Grant, values []map[string]
 		return 0, nil
 	}
 
-	tenant, err := b.tenantFor(ctx, g)
+	tenant, err := b.writeTenant(ctx, g)
 	if err != nil {
 		return 0, err
 	}
@@ -429,7 +429,7 @@ func (b *Builder) Delete(ctx context.Context, g auth.Grant, id ...any) (int64, e
 		b.Where(b.qualify("id"), "=", id[0])
 	}
 
-	query, err := b.scoped(ctx, g)
+	query, err := b.writeScoped(ctx, g)
 	if err != nil {
 		return 0, err
 	}
@@ -459,7 +459,7 @@ func (b *Builder) Delete(ctx context.Context, g auth.Grant, id ...any) (int64, e
 // the sequence separately -- which is why the grammar returns a map of
 // statements to bindings.
 func (b *Builder) Truncate(ctx context.Context, g auth.Grant) error {
-	if _, err := b.tenantFor(ctx, g); err != nil {
+	if _, err := b.writeTenant(ctx, g); err != nil {
 		return err
 	}
 
@@ -535,6 +535,25 @@ func (b *Builder) tenantFor(ctx context.Context, g auth.Grant) (string, error) {
 			auth.ErrForbidden, describeTable(b.GetFrom()))
 	}
 	return tenant, nil
+}
+
+// writeTenant is tenantFor for a statement that writes: it refuses first a
+// Grant that only reads -- one issued to a subject somebody else is viewing as
+// -- so viewing an account cannot change it, whatever the screen offered.
+func (b *Builder) writeTenant(ctx context.Context, g auth.Grant) (string, error) {
+	if err := auth.Writable(g); err != nil {
+		return "", fmt.Errorf("%w (writing %s)", err, describeTable(b.GetFrom()))
+	}
+	return b.tenantFor(ctx, g)
+}
+
+// writeScoped is scoped for an update or a delete, refusing a Grant that only
+// reads the way writeTenant does.
+func (b *Builder) writeScoped(ctx context.Context, g auth.Grant) (*Builder, error) {
+	if err := auth.Writable(g); err != nil {
+		return nil, fmt.Errorf("%w (writing %s)", err, describeTable(b.GetFrom()))
+	}
+	return b.scoped(ctx, g)
 }
 
 // stampTenant copies the rows and writes the tenant into each of them.

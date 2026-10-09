@@ -164,6 +164,9 @@ func (p *InteractsWithPivotTable) Attach(ctx context.Context, g auth.Grant, ids 
 				}
 			}
 		} else {
+			if err := auth.Writable(g); err != nil {
+				return err
+			}
 			statement, err := p.Host.NewPivotStatement(g)
 			if err != nil {
 				return err
@@ -187,6 +190,9 @@ func (p *InteractsWithPivotTable) Attach(ctx context.Context, g auth.Grant, ids 
 // to this parent and this tenant. A detach that dropped the tenant filter would
 // delete another customer's rows on a shared pivot table.
 func (p *InteractsWithPivotTable) Detach(ctx context.Context, g auth.Grant, ids any, touch ...bool) (int64, error) {
+	if err := auth.Writable(g); err != nil {
+		return 0, err
+	}
 	statement, err := p.Host.NewPivotQuery(g)
 	if err != nil {
 		return 0, err
@@ -328,6 +334,9 @@ func (p *InteractsWithPivotTable) UpdateExistingPivot(ctx context.Context, g aut
 		values[p.Host.UpdatedAt()] = p.freshTimestamp()
 	}
 
+	if err := auth.Writable(g); err != nil {
+		return 0, err
+	}
 	statement, err := p.NewPivotStatementForID(g, id)
 	if err != nil {
 		return 0, err

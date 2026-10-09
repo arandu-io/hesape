@@ -1105,9 +1105,23 @@ func (b *Builder) InsertGetID(ctx context.Context, g auth.Grant, values map[stri
 	return runInsertGetID(prepared, ctx, rows[0], sequence)
 }
 
+// writable refuses a write with a Grant that only reads -- one issued to a
+// subject somebody else is viewing as. Every statement this package issues
+// that writes passes here first, so viewing an account cannot change it
+// whatever the screen offered.
+func writable(b *Builder, g auth.Grant) error {
+	if err := auth.Writable(g); err != nil {
+		return fmt.Errorf("%w (writing %s)", err, b.table.name)
+	}
+	return nil
+}
+
 // prepareWrite is prepare for a statement that carries values: the Grant is
 // checked, the scopes are applied, and the tenant is written into every row.
 func prepareWrite(b *Builder, g auth.Grant, values []map[string]any) (*Builder, []map[string]any, error) {
+	if err := writable(b, g); err != nil {
+		return nil, nil, err
+	}
 	prepared, err := prepare(b, g)
 	if err != nil {
 		return nil, nil, err
@@ -1133,6 +1147,9 @@ func prepareWrite(b *Builder, g auth.Grant, values []map[string]any) (*Builder, 
 // stays with the tenant whose Grant reached it. It holds for Save, Increment and
 // every other write that ends here.
 func (b *Builder) Update(ctx context.Context, g auth.Grant, values map[string]any) (int64, error) {
+	if err := writable(b, g); err != nil {
+		return 0, err
+	}
 	prepared, err := prepare(b, g)
 	if err != nil {
 		return 0, err
@@ -1249,6 +1266,9 @@ func incrementOrDecrement(b *Builder, ctx context.Context, g auth.Grant, column 
 // A table that soft deletes has an onDelete callback on its builder, so this
 // runs the update that stamps the rows instead of a delete.
 func (b *Builder) Delete(ctx context.Context, g auth.Grant) (int64, error) {
+	if err := writable(b, g); err != nil {
+		return 0, err
+	}
 	if b.onDelete != nil {
 		return b.onDelete(ctx, b, g)
 	}
@@ -1273,6 +1293,9 @@ func (b *Builder) ForceDelete(ctx context.Context, g auth.Grant) (int64, error) 
 		return 0, b.err
 	}
 
+	if err := writable(b, g); err != nil {
+		return 0, err
+	}
 	tenant := auth.Tenant(g)
 	if tenant == "" || !auth.ValidTenant(tenant) {
 		return 0, ErrNoTenant
