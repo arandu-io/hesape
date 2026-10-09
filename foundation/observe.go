@@ -139,7 +139,19 @@ type statusWriter struct {
 	hijacked bool
 }
 
+// WriteHeader records the final status and passes every status through.
+//
+// An informational status is sent and not recorded: 103 Early Hints comes
+// before the answer, not instead of it. Recording it used to cost the answer
+// itself, because the wrapper then swallowed the final WriteHeader as a second
+// one and net/http sent an implicit 200 in its place -- a 404 after Early Hints
+// reached the client as a 200 and was logged as a 103. The test for
+// informational is net/http's own, under which 101 is final.
 func (w *statusWriter) WriteHeader(code int) {
+	if code >= 100 && code <= 199 && code != http.StatusSwitchingProtocols {
+		w.ResponseWriter.WriteHeader(code)
+		return
+	}
 	if w.wrote {
 		return
 	}
