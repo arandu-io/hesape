@@ -53,6 +53,39 @@ framework, the CLI or the skeleton uses any of them.
 | `console/events.ArtisanStarting` | drop it, and any listener registered for it: nothing dispatches it, so that listener never ran. A package adds its commands with `(*console.Application).Add` |
 | `console/events.Application` | drop it with `ArtisanStarting`, the only event that carries it |
 
+## v0.50.2 — Bind leaves a password as typed
+
+### `http.(*Context).Bind` no longer trims a password
+
+Bind trimmed every value with `strings.TrimSpace`. It still does, except the
+values of `password`, of a key ending in `_password` (`current_password`,
+`new_password`), and of the `_confirmation` of either. Those reach the handler,
+and the hasher, as typed. The confirmation follows its field so that
+`confirmed` keeps comparing like with like. The rule reads the key as spelled:
+`password_hint`, `passwordless` and `newPassword` are trimmed as before. A form
+body, a JSON body and a `[]string` field follow the same rule.
+
+**What changes without a compiler error.** A password with spaces at its ends
+is hashed with the spaces. A value of only spaces under a password key is no
+longer empty to Bind: a `*string` field gets a pointer to it rather than nil,
+and `required` is still what refuses it.
+
+| form value | key | before | now |
+|---|---|---|---|
+| `" secret "` | `password`, `password_confirmation` | `"secret"` | `" secret "` |
+| `" secret "` | `current_password`, `new_password_confirmation` | `"secret"` | `" secret "` |
+| `" ana@example.com "` | `email` | `"ana@example.com"` | `"ana@example.com"` |
+| `"   "` | `current_password` on a `*string` | `nil` | pointer to `"   "` |
+
+**For an account that already exists.** A password chosen with spaces at its
+ends while Bind trimmed it was stored without them. That account still signs in
+when the person types the password without the spaces; typed with them, it is
+now refused, because the hash is of the trimmed text. The auth kit's sign-in
+will try the trimmed form once during the transition. An application with a
+sign-in of its own that wants the same either tries the trimmed text once after
+a refusal and rehashes on success, or tells the person to type the password
+without the spaces.
+
 ## v0.50.1 — the headers an error carries are sent, and three names are deprecated
 
 ### The `exception.Handler` copies the headers of any error that carries them
