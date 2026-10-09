@@ -29,9 +29,9 @@ const blankProblemType = "about:blank"
 // which failure it is, Detail to show somebody, and RequestID to quote when it
 // asks what happened.
 //
-// The members are the ones the RFC names, plus RequestID, which it allows as an
-// extension. Detail is the only one written for a person, and it is the one
-// that carries nothing the caller was not allowed to see.
+// The members are the ones the RFC names, plus RequestID and Errors, which it
+// allows as extensions. Detail and Errors are the ones written for a person,
+// and they carry nothing the caller was not allowed to see.
 type Problem struct {
 	// Type names the class of failure as a URI, and is "about:blank" when the
 	// status code says all there is to say. A client that matches on it gets
@@ -58,9 +58,18 @@ type Problem struct {
 	Instance string `json:"instance,omitempty"`
 
 	// RequestID ties the document to the log line that holds the cause. It is
-	// the extension member, and it is the one thing here worth quoting in a
+	// an extension member, and it is the one thing here worth quoting in a
 	// support conversation: the detail is deliberately vague, and this is not.
 	RequestID string `json:"request_id,omitempty"`
+
+	// Errors maps each input that failed validation to the messages it failed
+	// with, and is absent from every other problem.
+	//
+	// It is an extension member, keyed by the input's name as the request sent
+	// it, so a client puts each message beside the field it belongs to without
+	// parsing the detail. The messages are the rules' sentences, written for
+	// the person who filled in the form; nothing else reaches this member.
+	Errors map[string][]string `json:"errors,omitempty"`
 }
 
 // WriteProblem answers the request with a problem document, and is the only
@@ -73,6 +82,32 @@ type Problem struct {
 //
 // It writes the status and the body, so nothing may write to w afterwards.
 func WriteProblem(w http.ResponseWriter, r *http.Request, status int, detail string) {
+	writeProblem(w, r, status, detail, nil)
+}
+
+// WriteValidationProblem answers a request whose input failed validation: 422,
+// with the messages in the errors member, keyed by the field each belongs to.
+//
+// It is WriteProblem for the one failure whose detail is a list rather than a
+// sentence, and it writes the same way: the problem content type, no-store,
+// the request id, and the path the request was made to without its query. It
+// takes a plain map so that validation.Errors and the messages of a
+// *validation.ValidationException are both handed over as they are.
+//
+// An empty map writes a 422 with no errors member. Whether there is anything
+// to reject is the caller's question, and a caller that asks StatusOf first
+// never gets here with nothing.
+//
+// It writes the status and the body, so nothing may write to w afterwards.
+func WriteValidationProblem(w http.ResponseWriter, r *http.Request, errs map[string][]string) {
+	status := http.StatusUnprocessableEntity
+	writeProblem(w, r, status, statusMessage(status), errs)
+}
+
+// writeProblem is the one place a problem document is written: both writers
+// above call it, so the headers a JSON failure leaves with cannot differ
+// between them.
+func writeProblem(w http.ResponseWriter, r *http.Request, status int, detail string, errs map[string][]string) {
 	body := Problem{
 		Type:      blankProblemType,
 		Title:     statusTitle(status),
@@ -80,6 +115,7 @@ func WriteProblem(w http.ResponseWriter, r *http.Request, status int, detail str
 		Detail:    detail,
 		Instance:  instanceOf(r),
 		RequestID: requestID(w, r),
+		Errors:    errs,
 	}
 
 	w.Header().Set("Content-Type", ProblemContentType)

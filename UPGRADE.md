@@ -40,7 +40,10 @@ that status; `validation.Errors` holding a message, 422;
 **What changes without a compiler error.** An error that reached the Handler as
 a 500 — and, in development, as the debug page — is now answered with its
 status, and is logged at warning rather than error, because below 500 the
-application answered on purpose. `Handler.Fatal` no longer fires for one.
+application answered on purpose. `Handler.Fatal` no longer fires for one. A
+JSON answer to a validation failure is a 422 problem document whose `errors`
+member maps each field to its messages — the shape `exception.WriteValidationProblem`
+writes, and the one a client that parsed `detail` for them should read instead.
 
 | error | before | now |
 |---|---|---|

@@ -61,8 +61,11 @@
 //
 // A client that asked for JSON gets a [Problem]: the problem details document
 // of RFC 9457, served as [ProblemContentType]. It is one shape, and
-// [WriteProblem] is the one function that writes it, so a refusal from a
-// middleware and a failure from a handler read the same to whoever parses them.
+// [WriteProblem] writes it, so a refusal from a middleware and a failure from
+// a handler read the same to whoever parses them. A validation failure is the
+// one problem whose detail is a list: [WriteValidationProblem] answers it with
+// 422 and the messages by field in the errors member, through the same code
+// and with the same headers.
 //
 // htmx is not that client. It sends X-Requested-With and swaps HTML, so
 // wantsJSON excludes it: a problem document swapped into a div is a JSON

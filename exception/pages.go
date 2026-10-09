@@ -76,6 +76,8 @@ func statusMessage(status int) string {
 		return "This address does not answer that method."
 	case StatusPageExpired:
 		return "This page expired. Reload it and submit the form again."
+	case http.StatusUnprocessableEntity:
+		return "Some of the values sent are not valid. Correct them and send again."
 	case http.StatusTooManyRequests:
 		return "Too many requests. Wait a moment and try again."
 	case http.StatusInternalServerError:

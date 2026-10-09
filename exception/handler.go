@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/arandu-io/hesape/log"
+	"github.com/arandu-io/hesape/validation"
 )
 
 // Config is everything the Handler needs from the application.
@@ -377,7 +378,7 @@ func (h *Handler) answer(w http.ResponseWriter, r *http.Request, value any, err 
 	applyErrorHeaders(w, err)
 
 	if h.shouldReturnJSON(r, err) {
-		WriteProblem(w, r, statusOr500(status, known), messageFor(err, status))
+		writeProblem(w, r, statusOr500(status, known), messageFor(err, status), validationMessages(err))
 		return
 	}
 
@@ -469,6 +470,19 @@ func messageFor(err error, status int) string {
 		return he.Message
 	}
 	return statusMessage(statusOr500(status, status != 0))
+}
+
+// validationMessages is what a validation failure in the chain asks to show
+// beside its fields, and nil for every other error.
+//
+// A JSON client gets them in the problem's errors member, which is the only
+// way it learns which field to correct; the detail stays one sentence.
+func validationMessages(err error) map[string][]string {
+	var errs validation.Errors
+	if errors.As(err, &errs) && errs.Any() {
+		return errs
+	}
+	return nil
 }
 
 // applyErrorHeaders copies onto the response what the error asked to carry.
