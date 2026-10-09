@@ -21,6 +21,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: '1.26'
+          check-latest: true
 
       # `gofmt -l .` skips nothing, and a view source is not valid Go: it
       # carries a build tag the compiler honours and gofmt does not.
@@ -295,6 +296,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: '1.26'
+          check-latest: true
 
       - uses: arduino/setup-protoc@v3
         with:
