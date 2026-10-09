@@ -822,3 +822,107 @@ func TestRetryableSurvivesWrapping(t *testing.T) {
 		t.Error("Retryable(nil) is an error, so a caller has to guard the call it exists to remove")
 	}
 }
+
+// TestTheTransportIsReadAndSwappedUnderEitherName: SetTransport is what a test
+// reaches for to send one case through the array transport, so the swap has to
+// change where the next message goes, not only what the getter answers. The
+// deprecated names stay until they are removed, and must reach the same field.
+func TestTheTransportIsReadAndSwappedUnderEitherName(t *testing.T) {
+	m, first := mailer(t)
+	if m.GetTransport() != first {
+		t.Fatal("GetTransport must answer the transport the mailer was built with")
+	}
+
+	second := &transport.Array{}
+	m.SetTransport(second)
+	if m.GetTransport() != second || m.GetSymfonyTransport() != second {
+		t.Fatal("both getters must answer the transport SetTransport put in")
+	}
+	if _, err := m.To("you@example.test").Send(context.Background(), welcome{Name: "Ada", Body: "hi"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if _, ok := second.Last(); !ok {
+		t.Fatal("the message did not go through the transport SetTransport put in")
+	}
+	if _, ok := first.Last(); ok {
+		t.Fatal("the message went through the transport that was swapped out")
+	}
+
+	m.SetSymfonyTransport(first)
+	if m.GetTransport() != first {
+		t.Fatal("SetSymfonyTransport must swap the transport SetTransport swaps")
+	}
+}
+
+// TestCreateTransportBuildsWhatTheConfigurationNames, under either name, and an
+// unknown driver is named in the error by both.
+func TestCreateTransportBuildsWhatTheConfigurationNames(t *testing.T) {
+	manager := mail.NewMailManager(mail.ManagerConfig{}, echoView{}, nil)
+	transport.Register(manager)
+
+	creators := map[string]func(mail.MailerConfig) (mail.Transport, error){
+		"CreateTransport":        manager.CreateTransport,
+		"CreateSymfonyTransport": manager.CreateSymfonyTransport,
+	}
+	for name, create := range creators {
+		built, err := create(mail.MailerConfig{Transport: "array"})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if _, ok := built.(*transport.Array); !ok {
+			t.Errorf("%s built %T, want the array transport the configuration names", name, built)
+		}
+		if _, err := create(mail.MailerConfig{Transport: "carrier-pigeon"}); err == nil || !strings.Contains(err.Error(), "carrier-pigeon") {
+			t.Errorf("%s: err = %v, want the driver named", name, err)
+		}
+	}
+}
+
+// TestAMessageCallbackWritesAHeaderTheTransportSees: the callback is the way
+// to write a header no field covers, so what it writes has to be on the message
+// the transport is handed. The deprecated name registers into the same list,
+// and the callbacks run in the order they were registered.
+func TestAMessageCallbackWritesAHeaderTheTransportSees(t *testing.T) {
+	m, box := mailer(t)
+
+	var order []string
+	_, err := m.To("you@example.test").
+		WithMessage(func(msg *mail.Message) {
+			order = append(order, "WithMessage")
+			if msg.Headers.Text == nil {
+				msg.Headers.Text = map[string]string{}
+			}
+			msg.Headers.Text["X-Campaign"] = "spring"
+		}).
+		WithSymfonyMessage(func(*mail.Message) { order = append(order, "WithSymfonyMessage") }).
+		Send(context.Background(), welcome{Name: "Ada", Body: "hi"})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	sent, ok := box.Last()
+	if !ok {
+		t.Fatal("nothing was sent")
+	}
+	if got := sent.Headers.Text["X-Campaign"]; got != "spring" {
+		t.Errorf("X-Campaign = %q, want the header the callback wrote", got)
+	}
+	if got := strings.Join(order, ","); got != "WithMessage,WithSymfonyMessage" {
+		t.Errorf("callbacks ran as %q, want both, in the order they were registered", got)
+	}
+}
+
+// TestTheDeprecatedUnwrappersReturnTheReceiver: there is nothing under a
+// SentMessage or a *Message to unwrap, so until the two names are removed each
+// hands back exactly the value it was called on.
+func TestTheDeprecatedUnwrappersReturnTheReceiver(t *testing.T) {
+	msg := &mail.Message{HTML: "<p>hi</p>"}
+	if msg.GetSymfonyMessage() != msg {
+		t.Error("GetSymfonyMessage must return the message it is called on")
+	}
+
+	sent := mail.SentMessage{ID: "prov-42", Transport: "array", Message: msg}
+	if sent.GetSymfonySentMessage() != sent {
+		t.Error("GetSymfonySentMessage must return the receipt it is called on")
+	}
+}

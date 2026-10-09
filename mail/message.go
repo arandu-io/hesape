@@ -115,8 +115,10 @@ func sameFile(a, b any) bool {
 	return false
 }
 
-// GetSymfonyMessage is the underlying MIME message, which is this value: there
-// is no separate object to unwrap, so the method returns the receiver.
+// GetSymfonyMessage returns the message it is called on.
+//
+// Deprecated: drop the call. A *Message is the MIME message itself, not a
+// wrapper around one, so there is nothing to unwrap.
 func (m *Message) GetSymfonyMessage() *Message { return m }
 
 // Sender sets the Sender header, which is who actually submitted the message

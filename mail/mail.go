@@ -92,8 +92,10 @@ type SentMessage struct {
 	Message *Message
 }
 
-// GetSymfonySentMessage is the receipt the mail library produced, which is this
-// value: it is not a wrapper around one, so the method returns the receiver.
+// GetSymfonySentMessage returns the receipt it is called on.
+//
+// Deprecated: drop the call. A SentMessage is the receipt itself, not a
+// wrapper around one, so there is nothing to unwrap.
 func (s SentMessage) GetSymfonySentMessage() SentMessage { return s }
 
 // Transport delivers a rendered message.

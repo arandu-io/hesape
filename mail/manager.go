@@ -77,7 +77,7 @@ type ManagerConfig struct {
 
 // TransportCreator turns one mailer's configuration into the [Transport] that
 // delivers for it. It is what [MailManager.Extend] registers under a driver
-// name, and what [MailManager.CreateSymfonyTransport] calls when a
+// name, and what [MailManager.CreateTransport] calls when a
 // configuration asks for that name.
 //
 // It runs once per mailer, the first time that mailer is resolved, and it may
@@ -184,7 +184,7 @@ func (m *MailManager) resolve(name string) (*Mailer, error) {
 // Build makes a mailer out of a configuration that was never registered, for
 // the one send that needs it. The mailer is returned rather than kept.
 func (m *MailManager) Build(cfg MailerConfig) (*Mailer, error) {
-	transport, err := m.CreateSymfonyTransport(cfg)
+	transport, err := m.CreateTransport(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -208,9 +208,9 @@ func (m *MailManager) Build(cfg MailerConfig) (*Mailer, error) {
 	return built, nil
 }
 
-// CreateSymfonyTransport builds the [Transport] a configuration names, and
-// fails when no driver is registered under that name.
-func (m *MailManager) CreateSymfonyTransport(cfg MailerConfig) (Transport, error) {
+// CreateTransport builds the [Transport] a configuration names, and fails when
+// no driver is registered under that name.
+func (m *MailManager) CreateTransport(cfg MailerConfig) (Transport, error) {
 	if cfg.Transport == "" {
 		return nil, fmt.Errorf("mail: unsupported mail transport []")
 	}
@@ -223,6 +223,14 @@ func (m *MailManager) CreateSymfonyTransport(cfg MailerConfig) (Transport, error
 		return nil, fmt.Errorf("mail: unsupported mail transport [%s]", cfg.Transport)
 	}
 	return creator(cfg)
+}
+
+// CreateSymfonyTransport builds the transport CreateTransport builds, and fails
+// as it does.
+//
+// Deprecated: use CreateTransport.
+func (m *MailManager) CreateSymfonyTransport(cfg MailerConfig) (Transport, error) {
+	return m.CreateTransport(cfg)
 }
 
 // ConfigFor is the configuration of a named mailer, and is what a composite

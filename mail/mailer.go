@@ -162,12 +162,22 @@ func (m *Mailer) Build(ctx context.Context, mailable Mailable) (*Message, error)
 	return (&PendingMail{mailer: m}).Build(ctx, mailable)
 }
 
-// GetSymfonyTransport is the [Transport] this mailer sends through.
-func (m *Mailer) GetSymfonyTransport() Transport { return m.transport }
+// GetTransport is the [Transport] this mailer sends through.
+func (m *Mailer) GetTransport() Transport { return m.transport }
 
-// SetSymfonyTransport swaps the transport, which is what a test that wants the
-// array transport for one case does.
-func (m *Mailer) SetSymfonyTransport(t Transport) { m.transport = t }
+// SetTransport swaps the transport, which is what a test that wants the array
+// transport for one case does.
+func (m *Mailer) SetTransport(t Transport) { m.transport = t }
+
+// GetSymfonyTransport returns what GetTransport returns.
+//
+// Deprecated: use GetTransport.
+func (m *Mailer) GetSymfonyTransport() Transport { return m.GetTransport() }
+
+// SetSymfonyTransport swaps the transport, as SetTransport does.
+//
+// Deprecated: use SetTransport.
+func (m *Mailer) SetSymfonyTransport(t Transport) { m.SetTransport(t) }
 
 // GetViewFactory is the [Renderer] this mailer draws its views with.
 func (m *Mailer) GetViewFactory() Renderer { return m.views }

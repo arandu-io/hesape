@@ -29,6 +29,24 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ## Unreleased
 
+### More names that named another framework are deprecated, and go in the next minor
+
+The rest of the exported names that named another framework, or the libraries
+it is built on, have neutral names. The old ones still compile and answer
+exactly what they did, carry a `Deprecated:` line, and are removed in the next
+minor release after the one that carries this entry. Where an old name has
+nothing to forward to, the table says to drop the call. No code in the
+collection, the framework, the CLI or the skeleton uses any of them.
+
+| before | now |
+|---|---|
+| `(*mail.Mailer).GetSymfonyTransport()` | `(*mail.Mailer).GetTransport()` |
+| `(*mail.Mailer).SetSymfonyTransport(t)` | `(*mail.Mailer).SetTransport(t)` |
+| `(*mail.MailManager).CreateSymfonyTransport(cfg)` | `(*mail.MailManager).CreateTransport(cfg)` |
+| `(*mail.PendingMail).WithSymfonyMessage(callback)` | `(*mail.PendingMail).WithMessage(callback)` |
+| `mail.SentMessage.GetSymfonySentMessage()` | drop the call: a `mail.SentMessage` is the receipt itself |
+| `(*mail.Message).GetSymfonyMessage()` | drop the call: a `*mail.Message` is the MIME message itself |
+
 ## v0.50.1 — the headers an error carries are sent, and three names are deprecated
 
 ### The `exception.Handler` copies the headers of any error that carries them

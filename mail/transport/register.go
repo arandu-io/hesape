@@ -62,7 +62,7 @@ func Register(m *mail.MailManager) *mail.MailManager {
 			if !ok {
 				return nil, fmt.Errorf("mail: mailer [%s] is not defined", name)
 			}
-			built, err := m.CreateSymfonyTransport(part)
+			built, err := m.CreateTransport(part)
 			if err != nil {
 				return nil, err
 			}

@@ -289,12 +289,21 @@ func (p *PendingMail) Theme(theme string) *PendingMail {
 	return p
 }
 
-// WithSymfonyMessage registers a callback that gets the message after it is
-// built and before it is sent, which is where a header no field covers is
-// written.
-func (p *PendingMail) WithSymfonyMessage(callback func(*Message)) *PendingMail {
+// WithMessage registers a callback that gets the message after it is built and
+// before it is sent, which is where a header no field covers is written.
+//
+// The callbacks run in the order they were registered, before the ones the
+// mailable declares in [Envelope.Using].
+func (p *PendingMail) WithMessage(callback func(*Message)) *PendingMail {
 	p.callbacks = append(p.callbacks, callback)
 	return p
+}
+
+// WithSymfonyMessage registers a callback, as WithMessage does.
+//
+// Deprecated: use WithMessage.
+func (p *PendingMail) WithSymfonyMessage(callback func(*Message)) *PendingMail {
+	return p.WithMessage(callback)
 }
 
 // BuildViewData is what the views render from: the mailable's exported fields,
