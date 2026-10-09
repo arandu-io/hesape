@@ -22,9 +22,14 @@ is filed under the release it actually shipped in. `v0.4.0`, `v0.6.0` and
 `v0.10.0` are absent because nothing broke in them, and `v0.1.0` because it is
 the first tag and has nothing before it to compare against.
 
+From `v0.22.0` on, an entry is filed under the first tag whose history holds
+the commit that made the change, which `git tag --contains <commit>` prints.
+
 ---
 
 ## Unreleased
+
+## v0.50.1 — the headers an error carries are sent, and three names are deprecated
 
 ### The `exception.Handler` copies the headers of any error that carries them
 
@@ -73,6 +78,8 @@ the framework, the CLI or the skeleton calls any of them.
 | `console.PhpBinary()` | `console.Binary()` |
 | `console.ArtisanBinary()` | drop the call: it always returned `""`, and `console.Binary()` is the whole command line before the command name |
 | `(*http.Request).SetLaravelSession(store)` | `(*http.Request).SetSession(store)` |
+
+## v0.50.0 — one status table, and a failed validation reads as its errors
 
 ### `exception.Problem` carries `Errors`, and is no longer comparable
 
@@ -189,6 +196,8 @@ included. To keep a dotted literal segment, register the routes one by one with
 | `Resource(r, "projects.tasks", …)` → `GET /projects.tasks/{id}` | `GET /tasks/{task}`, and `GET /projects/{project}/tasks` for the list |
 | `Resource(r, "invoices", …)` → `GET /invoices/{id}` | unchanged |
 
+## v0.48.0 — the relation builder streams a defined type
+
 ### `database/model/relations/concerns.Builder.Cursor` returns `concerns.ModelSeq`
 
 The builder a relation runs on streamed its rows as
@@ -208,6 +217,8 @@ held as the instantiation:
 |---|---|
 | `func (b *B) Cursor(ctx context.Context, g auth.Grant) iter.Seq2[concerns.Model, error]` | `func (b *B) Cursor(ctx context.Context, g auth.Grant) concerns.ModelSeq` |
 | `var seq iter.Seq2[concerns.Model, error] = q.Cursor(ctx, g)` | `seq := iter.Seq2[concerns.Model, error](q.Cursor(ctx, g))` |
+
+## v0.47.0 — the model layer is not generic
 
 ### The model layer is not generic: each entity is a concrete type over `model.Model`
 
@@ -252,6 +263,8 @@ return `([]query.Record, *pagination.…, error)`. Named scopes, route binding a
 connection. `LoadAggregate` and `LoadCount` no longer zero the columns their
 select does not read.
 
+## v0.44.1 — Markdown nesting is bounded
+
 ### `str.Markdown` nests at most 100 deep, and the marker past that is text
 
 Block quotes and list items nested inside each other, and emphasis,
@@ -269,6 +282,8 @@ list marker, an emphasis or strikethrough marker, `[` or `![` opens nothing: it
 is written as text, escaped like any other text, inside the innermost element,
 and a line that carries one continues the paragraph above it. A document nested
 100 levels or fewer renders exactly as before.
+
+## v0.44.0 — a POST reads its body alone, and the tenant comes only from the Grant
 
 ### The body is the only input of a POST, and every reader reads the same one
 
@@ -534,6 +549,55 @@ Why: `Link("javascript:alert(1)", ...)` produced a link that ran script;
 browser; and a request rejected by validation chose the `_method` of the next
 submission of the same form.
 
+### A body over the size limit is a 413, before the handler or from the readers
+
+`middleware.LimitBodySize` said it answered 413 by itself, and it did not:
+`http.MaxBytesReader` only fails the read. Nothing was removed and nothing stops
+compiling. **What changes without a compiler error:**
+
+- A request whose `Content-Length` is over the limit is answered `413` by the
+  middleware, with `Connection: close`, and the handler does not run.
+- A body cut off by the reader — a chunked one, with no length — makes
+  `Context.Bind`, `Request.Validate` and `Request.ValidateWithBag` return an
+  `*exceptions.PostTooLargeException` wrapping the reader's
+  `*http.MaxBytesError`. Before, `Validate` judged the part that arrived, `Bind`
+  returned `http: reading the form: …` for a form and bound a JSON body as an
+  empty object. `Context.Input` reads such a body as empty.
+- `exceptions.HTTPError` answers `HTTPStatus`, so every exception embedding it
+  is answered with its own status by a router that reads that method, and
+  `exception.StatusOf` maps `PostTooLargeException` to `413`.
+
+### The built-in error pages send their own Content-Security-Policy
+
+The status, debug and dump pages of `exception` replace the
+`Content-Security-Policy` an earlier middleware set, for their own response
+only, with one that allows their inline style by hash and nothing else:
+`default-src 'none'; style-src 'sha256-…'; img-src data:; base-uri 'none';
+form-action 'none'; frame-ancestors 'none'`. Under the policy
+`SecurityHeaders` sets they rendered unstyled. A test that asserted the
+application's policy on an error response now sees this one. An application's
+own `errors/<status>` view is not affected.
+
+### The broadcast endpoint and the OAuth callback read only the body of a POST
+
+`broadcasting.BroadcastController.Authenticate` and
+`providers.Provider.GetAccessToken` read their fields through
+`hesape/http.Request` instead of `FormValue`: the query string of a `GET`, the
+body of any other method — url-encoded, multipart or JSON. A `POST` that carried
+`channel_name`, `code`, `state` or `error` only in its query string is no longer
+read. A callback redirected by `GET`, the default for every provider, and a
+`response_mode=form_post` callback are unaffected.
+
+### `view.New` carries the CSRF token, and `view.Page.First` is deprecated
+
+`view.New` fills `Page.Token` from `http.CSRFTokenFrom` on the request context,
+which the middleware that protects forms fills through `http.WithCSRFToken`.
+`WithToken` still replaces it. `Page.FieldError` is what the form inputs ask
+for; `Page.First` answers the same message and is deprecated. Nothing stops
+compiling.
+
+## v0.43.0 — `SecurityHeaders` takes the origins an image may come from
+
 ### `SecurityHeaders` takes the origins an image may come from
 
 `middleware.SecurityHeaders(dev bool)` becomes
@@ -559,6 +623,8 @@ policy refused to draw exactly the address `Disk.URL` returns. Script, style,
 font and connection stay pinned to `'self'`: an image from another host
 executes nothing, and it is the only thing the list reaches.
 
+## v0.39.0 — a view answers `Vary: Accept`
+
 ### A view answers `Vary: Accept`, and a client can ask for the values
 
 `ctx.View` and `ctx.Fragment` now negotiate. A client that sends
@@ -577,6 +643,8 @@ Why it exists: a client that draws the screen with its own controls needs the
 same response without the drawing. The alternative was a second handler per
 client, and a handler that exists twice is a second path — the two diverge, and
 the one nobody is watching is the one that stops checking something.
+
+## v0.38.0 — a nullable timestamp is written like the non-nullable one
 
 ### A nullable timestamp is now written like the non-nullable one
 
@@ -632,6 +700,8 @@ reproduces the defect by storing timestamps as text. On PostgreSQL the driver
 may refuse the string instead of writing it, which trades a silent error for a
 loud one — better, and still a defect. The fix applies to both.
 
+## v0.37.0 — a publication carrying `vendor` is refused
+
 ### A publication is refused when it carries a directory named `vendor`
 
 `foundation.Publications` now returns an error for a module whose publication
@@ -664,6 +734,8 @@ A module that hits this renames the directory — `modules` is what the package
 skeleton uses — and releases. Projects that already published the old tree
 publish again and delete the old files, their lines in `vendor-publish.lock` and
 their import in `bootstrap/app.go`.
+
+## v0.36.0 — an identifier fits the limit of the driver it is written for
 
 ### A conventional index name is shortened to fit the driver, and may differ from the one already in your database
 
@@ -739,6 +811,8 @@ Zero means the driver imposes no limit worth enforcing. The three grammars in
 this module answer 63 (Postgres), 64 (MySQL and MariaDB) and 0 (SQLite);
 `grammars.BaseGrammar` answers 0, so a grammar embedding it needs no change. A
 grammar written from scratch against the interface has to add the method.
+
+## v0.22.0 — uploads, query operators and attachment names are checked before use
 
 ### `client.Factory.Client` returns a copy, and says what its guard does not cover
 
@@ -898,53 +972,6 @@ may continue to add lexically safe compound operators through `GetOperators`.
 PostgreSQL's process-wide `grammars.CustomOperators` extension accepts only a
 single safe symbolic token; it does not accept words, whitespace, comments or
 SQL fragments.
-
-### A body over the size limit is a 413, before the handler or from the readers
-
-`middleware.LimitBodySize` said it answered 413 by itself, and it did not:
-`http.MaxBytesReader` only fails the read. Nothing was removed and nothing stops
-compiling. **What changes without a compiler error:**
-
-- A request whose `Content-Length` is over the limit is answered `413` by the
-  middleware, with `Connection: close`, and the handler does not run.
-- A body cut off by the reader — a chunked one, with no length — makes
-  `Context.Bind`, `Request.Validate` and `Request.ValidateWithBag` return an
-  `*exceptions.PostTooLargeException` wrapping the reader's
-  `*http.MaxBytesError`. Before, `Validate` judged the part that arrived, `Bind`
-  returned `http: reading the form: …` for a form and bound a JSON body as an
-  empty object. `Context.Input` reads such a body as empty.
-- `exceptions.HTTPError` answers `HTTPStatus`, so every exception embedding it
-  is answered with its own status by a router that reads that method, and
-  `exception.StatusOf` maps `PostTooLargeException` to `413`.
-
-### The built-in error pages send their own Content-Security-Policy
-
-The status, debug and dump pages of `exception` replace the
-`Content-Security-Policy` an earlier middleware set, for their own response
-only, with one that allows their inline style by hash and nothing else:
-`default-src 'none'; style-src 'sha256-…'; img-src data:; base-uri 'none';
-form-action 'none'; frame-ancestors 'none'`. Under the policy
-`SecurityHeaders` sets they rendered unstyled. A test that asserted the
-application's policy on an error response now sees this one. An application's
-own `errors/<status>` view is not affected.
-
-### The broadcast endpoint and the OAuth callback read only the body of a POST
-
-`broadcasting.BroadcastController.Authenticate` and
-`providers.Provider.GetAccessToken` read their fields through
-`hesape/http.Request` instead of `FormValue`: the query string of a `GET`, the
-body of any other method — url-encoded, multipart or JSON. A `POST` that carried
-`channel_name`, `code`, `state` or `error` only in its query string is no longer
-read. A callback redirected by `GET`, the default for every provider, and a
-`response_mode=form_post` callback are unaffected.
-
-### `view.New` carries the CSRF token, and `view.Page.First` is deprecated
-
-`view.New` fills `Page.Token` from `http.CSRFTokenFrom` on the request context,
-which the middleware that protects forms fills through `http.WithCSRFToken`.
-`WithToken` still replaces it. `Page.FieldError` is what the form inputs ask
-for; `Page.First` answers the same message and is deprecated. Nothing stops
-compiling.
 
 ## v0.21.1 — forms refuse method combinations a browser cannot deliver
 
