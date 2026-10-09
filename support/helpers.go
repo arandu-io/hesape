@@ -144,8 +144,13 @@ func E(v any, doubleEncode ...bool) string {
 	return b.String()
 }
 
-// Laravel_cloud reports whether the hosting platform of that name is running
-// this process, which it marks with an environment variable set to "1".
+// Laravel_cloud reports whether the environment variable LARAVEL_CLOUD is "1",
+// which is how the hosting platform of that name marks the processes it runs.
+//
+// Deprecated: write os.Getenv("LARAVEL_CLOUD") == "1" where the answer is
+// needed, and drop the call where it is not. The check is one line of the
+// standard library, and this package keeps no helper named after a hosting
+// platform.
 func Laravel_cloud() bool {
 	return os.Getenv("LARAVEL_CLOUD") == "1"
 }

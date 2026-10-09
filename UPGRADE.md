@@ -47,6 +47,7 @@ collection, the framework, the CLI or the skeleton uses any of them.
 | `mail.SentMessage.GetSymfonySentMessage()` | drop the call: a `mail.SentMessage` is the receipt itself |
 | `(*mail.Message).GetSymfonyMessage()` | drop the call: a `*mail.Message` is the MIME message itself |
 | `notifications/messages.Mail.WithSymfonyMessage(fn)` | `notifications/messages.Mail.WithMessage(fn)` |
+| `support.Laravel_cloud()` | `os.Getenv("LARAVEL_CLOUD") == "1"` where the answer is needed; drop the call where it is not |
 
 ## v0.50.1 — the headers an error carries are sent, and three names are deprecated
 
