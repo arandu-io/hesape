@@ -4,6 +4,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/arandu-io/hesape/collections/arr"
+	hhttp "github.com/arandu-io/hesape/http"
 )
 
 // Redirector builds RedirectResponses to every place a handler can send the
@@ -162,6 +165,10 @@ func (r *Redirector) GetIntendedUrl() string {
 // GetUrlGenerator returns the generator backing this redirector.
 func (r *Redirector) GetUrlGenerator() *UrlGenerator { return r.generator }
 
+// createRedirect builds every Redirect this redirector answers, carrying its
+// session and the request the generator was built for, so that what a handler
+// flashes on the redirect -- With, WithInput, OnlyInput -- reaches the session
+// instead of a nil store that drops it.
 func (r *Redirector) createRedirect(path string, status int, headers http.Header) *Redirect {
 	if status == 0 {
 		status = http.StatusFound
@@ -169,7 +176,11 @@ func (r *Redirector) createRedirect(path string, status int, headers http.Header
 	if headers == nil {
 		headers = http.Header{}
 	}
-	return &Redirect{Path: path, Status: status, Headers: headers}
+	var request *http.Request
+	if r.generator != nil {
+		request = r.generator.GetRequest()
+	}
+	return &Redirect{Path: path, Status: status, Headers: headers, Session: r.session, request: request}
 }
 
 // Redirect is the data a handler returns to tell the framework to send a
@@ -182,7 +193,13 @@ type Redirect struct {
 	Status  int
 	Headers http.Header
 	// Session carries flash data attached to the redirect: WithInput, WithErrors.
+	// A Redirector fills it with its own session; a Redirect written as a
+	// literal flashes nothing until it is set.
 	Session SessionStore
+
+	// request is the request OnlyInput and ExceptInput read the input off. A
+	// Redirector fills it; a literal has none.
+	request *http.Request
 }
 
 // With flashes the value under key so the next request reads it.
@@ -211,11 +228,59 @@ func (r *Redirect) WithoutInput() *Redirect {
 	return r
 }
 
-// OnlyInput flashes only the named keys from the current input.
-func (r *Redirect) OnlyInput(keys ...string) *Redirect { return r }
+// OnlyInput flashes the named keys of the request's input, and nothing else
+// of it.
+//
+//	return redirector.Back(0, nil, "/login").OnlyInput("email")
+//
+// A key may be a "dot" path into nested input, and a key the request did not
+// send is skipped. The input is the request's fields as hesape/http reads them,
+// without the uploaded files: a file is not something to put back in a text
+// box.
+//
+// It reads the request the Redirector was built for, so a Redirect written as
+// a literal, which has none, flashes nothing; so does one with no Session.
+func (r *Redirect) OnlyInput(keys ...string) *Redirect {
+	input, ok := r.input()
+	if !ok {
+		return r
+	}
+	only := map[string]any{}
+	for _, key := range keys {
+		if value, found := arr.Get(input, key); found {
+			arr.Set(only, key, value)
+		}
+	}
+	return r.WithInput(only)
+}
 
-// ExceptInput flashes everything except the named keys.
-func (r *Redirect) ExceptInput(keys ...string) *Redirect { return r }
+// ExceptInput flashes the request's input without the named keys.
+//
+//	return redirector.Back(0, nil, "/register").ExceptInput("password", "password_confirmation")
+//
+// A key may be a "dot" path into nested input. The input is read as OnlyInput
+// reads it, from the same request and without the uploaded files, and flashes
+// nothing under the same two conditions.
+func (r *Redirect) ExceptInput(keys ...string) *Redirect {
+	input, ok := r.input()
+	if !ok {
+		return r
+	}
+	return r.WithInput(arr.Except(input, keys...))
+}
+
+// input is the request's input without its files, and false when there is no
+// request to read it from or no session to flash it into.
+func (r *Redirect) input() (map[string]any, bool) {
+	if r.request == nil || r.Session == nil {
+		return nil, false
+	}
+	input, _ := hhttp.NewRequest(r.request).Input("").(map[string]any)
+	if input == nil {
+		input = map[string]any{}
+	}
+	return input, true
+}
 
 // WithFragment appends a fragment to the URL.
 func (r *Redirect) WithFragment(fragment string) *Redirect {

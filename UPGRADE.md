@@ -53,6 +53,27 @@ writes, and the one a client that parsed `detail` for them should read instead.
 | `exceptions.ThrottleRequestsException`, `exceptions.MalformedUrlException`, a type of your own with `HTTPStatus() int` | 500 | its status |
 | an `HTTPStatus()` error wrapping `auth.ErrForbidden` | 403 unless it was an `*exception.HTTPError` | its own status |
 
+### A `routing.Redirect` from a `Redirector` flashes into its session, and `OnlyInput`/`ExceptInput` flash
+
+`routing.Redirect.OnlyInput` and `ExceptInput` returned the receiver and did
+nothing. They now flash the named keys of the request's input, or everything
+but them, read the way `hesape/http` reads input and without the uploaded files.
+Every `Redirect` a `Redirector` builds now carries the redirector's session and
+the request its generator was built for.
+
+**What changes without a compiler error.** `With`, `WithInput`, `WithErrors`
+and `WithoutInput` on a redirect from `Redirector.Back`, `To`, `Route` and the
+rest wrote to a `nil` session and were dropped unless the caller set
+`Redirect.Session` by hand. They now write to the session given to
+`Redirector.SetSession`. A `Redirect` written as a literal behaves as before:
+no request, so `OnlyInput` and `ExceptInput` flash nothing.
+
+| call | before | now |
+|---|---|---|
+| `redirector.Back(0, nil, "/login").OnlyInput("email")` | nothing flashed | `email` flashed |
+| `redirector.Back(0, nil, "/register").ExceptInput("password")` | nothing flashed | the input minus `password` flashed |
+| `redirector.To("/home", 0, nil, nil).With("status", "saved")` | dropped | written to the redirector's session |
+
 ### `events.Module` is a `foundation.Module`, and brings the outbox table
 
 `hesape/events.Module` answers `Routes`, registering nothing, and `Migrations`,
