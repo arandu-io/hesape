@@ -26,6 +26,27 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+### A dot in a `routing.Resource` name nests the resource
+
+`routing.Resource` read its name as one path segment, dots included:
+`Resource(r, "projects.tasks", c, adapt)` registered `/projects.tasks` and
+`/projects.tasks/{id}`. A dot now nests the resource under its parent, shallow:
+index, create and store under `/projects/{project}/tasks`, show, edit, update
+and destroy at `/tasks/{task}`, every route still named `projects.tasks.*`. Each
+parameter of a nested resource is the singular of its segment, with dashes as
+underscores.
+
+**What changes without a compiler error.** A name with a dot registers
+different paths, and a controller registered under one reads `{task}` where it
+read `{id}`. A name without a dot registers exactly what it did, `{id}`
+included. To keep a dotted literal segment, register the routes one by one with
+`Get`, `Post` and the rest.
+
+| before | now |
+|---|---|
+| `Resource(r, "projects.tasks", …)` → `GET /projects.tasks/{id}` | `GET /tasks/{task}`, and `GET /projects/{project}/tasks` for the list |
+| `Resource(r, "invoices", …)` → `GET /invoices/{id}` | unchanged |
+
 ### `database/model/relations/concerns.Builder.Cursor` returns `concerns.ModelSeq`
 
 The builder a relation runs on streamed its rows as

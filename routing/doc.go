@@ -6,8 +6,9 @@
 // standard mux has no opinion about: groups with an inherited prefix, name
 // and middleware; a route table that survives registration so a view can
 // build a URL from a name instead of a string literal; the seven REST routes
-// of a resource controller; and the two middlewares that decide whether a
-// request reaches a route at all.
+// of a resource controller, nested under a parent by a dot, with its singleton
+// and its named actions beside them; the route of a single-action controller;
+// and the two middlewares that decide whether a request reaches a route at all.
 //
 // # One handler type
 //
@@ -28,9 +29,10 @@
 // it nor names one, because the type it builds is the one this package must not
 // import.
 //
-// Resource takes the adaptation as an argument for the same reason, which is
-// what lets this package register controller routes without importing the type
-// a controller receives. See Adapter.
+// Resource, Singleton, ResourceAction and Invokable take the adaptation as an
+// argument for the same reason, which is what lets this package register
+// controller routes without importing the type a controller receives. See
+// Adapter.
 //
 // # Names, not paths
 //
