@@ -95,20 +95,6 @@ func Binary() string {
 	return os.Args[0]
 }
 
-// PhpBinary returns what Binary returns.
-//
-// Deprecated: use Binary.
-func PhpBinary() string { return Binary() }
-
-// ArtisanBinary returns the empty string.
-//
-// A compiled binary is its own entry point, so there is no script beside it
-// to name, and FormatCommandString does not ask for one.
-//
-// Deprecated: drop the call. Binary is the whole of a command line before the
-// command name.
-func ArtisanBinary() string { return "" }
-
 // FormatCommandString turns a command name into a line a shell can run.
 //
 // The binary path and the command name are joined with a space, and an empty

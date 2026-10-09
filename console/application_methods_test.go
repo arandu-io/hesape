@@ -35,14 +35,3 @@ func TestFormatCommandStringIsTheBinaryAndTheCommand(t *testing.T) {
 		t.Fatalf("FormatCommandString(\"  \") = %q, want the binary alone, %q", got, binary)
 	}
 }
-
-// TestTheDeprecatedBinaryNamesAnswerAsBefore: the old names stay until they
-// are removed, and a caller still on them must get what it got.
-func TestTheDeprecatedBinaryNamesAnswerAsBefore(t *testing.T) {
-	if got, want := console.PhpBinary(), console.Binary(); got != want {
-		t.Fatalf("PhpBinary() = %q, want what Binary answers, %q", got, want)
-	}
-	if got := console.ArtisanBinary(); got != "" {
-		t.Fatalf("ArtisanBinary() = %q, want the empty string it always returned", got)
-	}
-}

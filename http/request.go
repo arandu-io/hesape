@@ -847,11 +847,6 @@ func (r *Request) SetDefaultRequestLocale(locale string) *Request {
 // for Session.
 func (r *Request) GetSession() *session.Store { return r.Session() }
 
-// SetLaravelSession sets the session store, as SetSession does.
-//
-// Deprecated: use SetSession.
-func (r *Request) SetLaravelSession(s *session.Store) *Request { return r.SetSession(s) }
-
 // requestLocaleKey and defaultRequestLocaleKey are the context keys for the
 // locale the view layer reads.
 type requestLocaleKey struct{}
