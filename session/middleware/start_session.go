@@ -1,8 +1,10 @@
 package middleware
 
 import (
+	"bufio"
 	"context"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -325,6 +327,28 @@ func (w *sessionWriter) Flush() {
 	}
 }
 
+// Hijack takes the connection over through the writer underneath, and
+// finishes the session the moment it is taken.
+//
+// A takeover is the last moment this request is the session's: a websocket
+// handler returns when its connection closes, which can be hours later.
+// Finishing then would save the session as it stood when the connection opened,
+// over whatever other requests did to it meanwhile -- and over a sign-out that
+// destroyed it, which is a session brought back to life. So the session is
+// saved here, once, and the handler returning finds nothing left to do.
+//
+// It is a method rather than left to Unwrap because http.ResponseController
+// asks the outermost writer for Hijack before it unwraps. A refused takeover
+// finishes nothing: the handler goes on answering through the writer, and the
+// session finishes on that answer as it always does.
+func (w *sessionWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	conn, brw, err := http.NewResponseController(w.ResponseWriter).Hijack()
+	if err == nil {
+		w.finish.run()
+	}
+	return conn, brw, err
+}
+
 // Unwrap gives net/http's ResponseController the writer underneath, so
-// hijacking and deadline control keep working through this wrapper.
+// deadline control keeps working through this wrapper.
 func (w *sessionWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
