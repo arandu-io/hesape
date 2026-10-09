@@ -53,6 +53,62 @@ framework, the CLI or the skeleton uses any of them.
 | `console/events.ArtisanStarting` | drop it, and any listener registered for it: nothing dispatches it, so that listener never ran. A package adds its commands with `(*console.Application).Add` |
 | `console/events.Application` | drop it with `ArtisanStarting`, the only event that carries it |
 
+### `config.Load` refuses an `APP_DEBUG` it cannot read
+
+`Load` read `APP_DEBUG` with `config.Bool`, which falls back on a word it does
+not know, and the fallback is the environment: `APP_DEBUG=sometimes` was the
+debug page in `dev` and no debug page anywhere else. It now reads it with
+`config.StrictBool`, which accepts the same spellings — true, false, 1, 0, yes,
+no, on and off, in any case — and refuses anything else. `config.Bool` itself is
+unchanged.
+
+**What changes without a compiler error.** A process whose `APP_DEBUG` is set
+to anything else stops at boot, with the error naming the variable and its
+value quoted. Unset, empty and blank still mean the environment's default. A
+value padded with spaces is refused rather than trimmed, as `config.Bool` never
+trimmed it either; the quotes in the message show the space.
+
+| `APP_DEBUG` | before | now |
+|---|---|---|
+| `sometimes`, `t`, `yes-please` | the environment's default, in silence | `Load` returns `APP_DEBUG is "sometimes", and it is read as a boolean.` |
+| `" true"` | the environment's default, in silence | refused, quoted as `" true"` |
+| unset, `""`, `"   "` | the environment's default | the environment's default |
+| `on`, `OFF`, `1`, `no` | read | read |
+
+### A connection taken over through the writers is logged and finished as one
+
+The response writers of `foundation.Observe`, the live reload middleware in
+development, the `exception.Handler`'s check for a written answer and
+`session/middleware.StartSession` now answer `Hijack` through
+`http.ResponseController`. `http.ResponseController` asks the outermost writer
+for `Hijack` before it unwraps, so a takeover used to go around them, or, where
+a writer had no `Unwrap`, was refused.
+
+**What changes without a compiler error.**
+
+- **The access line.** A request whose connection was taken over is logged with
+  `hijacked=true` and `connection_ms`, the connection's lifetime, in place of
+  `duration_ms` and `bytes`. An upgrade request — an `Upgrade` header and the
+  `upgrade` token in `Connection` — is logged as `status=101` with `upgrade=<its
+  value>`; any other takeover has no `status` key. The console records the same
+  status, 0 for a takeover that was not an upgrade, and the Collector carries an
+  `http.hijacked` event with `upgrade` and `connection_ms`. A dashboard or alert
+  that reads `duration_ms` or `status` from every line needs to allow for these.
+  The keys are the ones the framework's `Observe` writes.
+- **Early Hints.** `Observe` no longer records a 1xx status other than 101. It
+  used to record a `103 Early Hints` and then drop the final `WriteHeader`, so
+  the client received a 200 in place of the status the handler chose; the
+  client now receives it and the line logs it.
+- **The session.** `StartSession` saves the session and sets its cookie the
+  moment a takeover succeeds, not when the handler returns. A change a
+  websocket handler makes to the session after taking the connection is no
+  longer saved; it used to be saved when the connection closed, over whatever
+  other requests had done to the session meanwhile, including a sign-out.
+- **Development and error pages.** Behind the live reload middleware a handler
+  can now take the connection over and lift its write deadline, where both were
+  refused with `http.ErrNotSupported`. A `RespondUsing` callback can take the
+  connection over, and the Handler then writes nothing after it.
+
 ## v0.50.2 — Bind leaves a password as typed
 
 ### `http.(*Context).Bind` no longer trims a password
