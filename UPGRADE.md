@@ -60,6 +60,19 @@ empty map where it panicked.
 |---|---|
 | `exc.Errors()["name"] = append(exc.Errors()["name"], "taken")` changes `exc` | changes a copy; write `validation.WithMessages(merged)` |
 
+### Names that named another framework are deprecated, and go in the next minor
+
+Exported names that named another framework's interpreter, console script or
+request method have neutral names. The old ones still compile and answer
+exactly what they did, carry a `Deprecated:` line, and are removed in the next
+minor release after the one that carries this entry. No code in the collection,
+the framework, the CLI or the skeleton calls any of them.
+
+| before | now |
+|---|---|
+| `console.PhpBinary()` | `console.Binary()` |
+| `console.ArtisanBinary()` | drop the call: it always returned `""`, and `console.Binary()` is the whole command line before the command name |
+
 ### `exception.Problem` carries `Errors`, and is no longer comparable
 
 `exception.Problem` gained `Errors map[string][]string`: the messages of a

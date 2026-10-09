@@ -82,33 +82,41 @@ func (r *Application) All() []Command {
 	return out
 }
 
-// PhpBinary returns the path to the binary a command runs under.
+// Binary returns the path to the binary a command runs under.
 //
 // Go compiles, so there is no interpreter separate from the program: the
 // binary is both, and this is the whole of what FormatCommandString needs to
-// build a command line that runs this binary again.
-func PhpBinary() string {
+// build a command line that runs this binary again. It is the path
+// os.Executable reports, and os.Args[0] when that fails.
+func Binary() string {
 	if executable, err := os.Executable(); err == nil {
 		return executable
 	}
 	return os.Args[0]
 }
 
-// ArtisanBinary is the console entry point.
+// PhpBinary returns what Binary returns.
 //
-// A compiled binary is both the interpreter and the script, so there is no
-// second file to name and this is empty -- FormatCommandString drops it.
+// Deprecated: use Binary.
+func PhpBinary() string { return Binary() }
+
+// ArtisanBinary returns the empty string.
+//
+// A compiled binary is its own entry point, so there is no script beside it
+// to name, and FormatCommandString does not ask for one.
+//
+// Deprecated: drop the call. Binary is the whole of a command line before the
+// command name.
 func ArtisanBinary() string { return "" }
 
 // FormatCommandString turns a command name into a line a shell can run.
 //
-// The binary path, the script path and the command name are joined with
-// spaces; the script path here is always empty, and an empty part is dropped,
-// so what comes out is "/path/to/app schedule:finish" rather than a line with
-// a hole in the middle.
+// The binary path and the command name are joined with a space, and an empty
+// command is dropped rather than leaving a trailing space, so what comes out
+// is "/path/to/app schedule:finish".
 func FormatCommandString(command string) string {
 	parts := []string{}
-	for _, part := range []string{PhpBinary(), ArtisanBinary(), command} {
+	for _, part := range []string{Binary(), command} {
 		if strings.TrimSpace(part) != "" {
 			parts = append(parts, part)
 		}

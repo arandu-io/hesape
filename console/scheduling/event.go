@@ -786,7 +786,7 @@ func (e *Event) removeMutex(ctx context.Context) {
 // moves: two replicas installed under different paths must resolve to the
 // same lock, or neither ever loses the race.
 func NormalizeCommand(command string) string {
-	binary := console.PhpBinary()
+	binary := console.Binary()
 	if binary == "" {
 		return command
 	}

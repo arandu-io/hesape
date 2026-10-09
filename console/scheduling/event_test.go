@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/arandu-io/hesape/console"
 	"github.com/arandu-io/hesape/console/scheduling"
 )
 
@@ -265,4 +266,15 @@ func read(t *testing.T, path string) string {
 		t.Fatalf("reading %s: %v", path, err)
 	}
 	return string(contents)
+}
+
+// TestNormalizeCommandRewritesTheRunningBinary: the mutex name is built from
+// the command line with the binary's path taken out, so two replicas
+// installed under different paths contend for the same lock.
+func TestNormalizeCommandRewritesTheRunningBinary(t *testing.T) {
+	line := console.FormatCommandString("reports:send")
+
+	if got := scheduling.NormalizeCommand(line); got != "app reports:send" {
+		t.Fatalf("NormalizeCommand(%q) = %q, want %q", line, got, "app reports:send")
+	}
 }
