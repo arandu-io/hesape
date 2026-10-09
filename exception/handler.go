@@ -1,11 +1,13 @@
 package exception
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -544,3 +546,23 @@ func (p *probe) Write(b []byte) (int, error) {
 	p.wrote = true
 	return p.ResponseWriter.Write(b)
 }
+
+// Hijack takes the connection over through the writer underneath, and counts
+// a takeover as something that reached the client.
+//
+// It is a method rather than left to Unwrap because http.ResponseController
+// asks the outermost writer for Hijack before it unwraps. A takeover that went
+// around the probe would leave it reporting that nothing was written, and the
+// handler would then write a page, with a status, onto a connection that is no
+// longer the server's.
+func (p *probe) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	conn, brw, err := http.NewResponseController(p.ResponseWriter).Hijack()
+	if err == nil {
+		p.wrote = true
+	}
+	return conn, brw, err
+}
+
+// Unwrap lets http.ResponseController reach the writer underneath, so a
+// callback or a view handed the probe can still flush and set deadlines.
+func (p *probe) Unwrap() http.ResponseWriter { return p.ResponseWriter }
