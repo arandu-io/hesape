@@ -48,6 +48,8 @@ collection, the framework, the CLI or the skeleton uses any of them.
 | `(*mail.Message).GetSymfonyMessage()` | drop the call: a `*mail.Message` is the MIME message itself |
 | `notifications/messages.Mail.WithSymfonyMessage(fn)` | `notifications/messages.Mail.WithMessage(fn)` |
 | `support.Laravel_cloud()` | `os.Getenv("LARAVEL_CLOUD") == "1"` where the answer is needed; drop the call where it is not |
+| `console/events.ArtisanStarting` | drop it, and any listener registered for it: nothing dispatches it, so that listener never ran. A package adds its commands with `(*console.Application).Add` |
+| `console/events.Application` | drop it with `ArtisanStarting`, the only event that carries it |
 
 ## v0.50.1 — the headers an error carries are sent, and three names are deprecated
 
