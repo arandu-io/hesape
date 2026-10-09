@@ -4,19 +4,24 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/arandu-io/hesape/database/migrations"
+	"github.com/arandu-io/hesape/foundation"
+	"github.com/arandu-io/hesape/routing"
 )
 
-// Module runs the relay when one is wired, and reports on it.
+// Module brings the outbox table, runs the relay when one is wired, and
+// reports on it.
 //
 // It registers no routes: the relay is infrastructure, and nothing here is
 // reachable from a request. Register it in bootstrap/app.go next to the modules
 // that store events.
 //
 // The outbox table travels with this module rather than being copied into every
-// project's migrations. The two migrations that create it are the one piece not
-// declared here yet: a migration is a value the migrator consumes, so the type
-// belongs to the package that migrates, and that package has not moved into
-// this collection.
+// project's migrations: Migrations declares the two that create it, and the
+// kernel collects them with every other registered module's, so `aru migrate`
+// creates the table an Outbox writes to without the application writing a
+// migration of its own.
 type Module struct {
 	relay *Relay
 	// stop cancels the relay loop at shutdown.
@@ -42,8 +47,30 @@ func NewModule() *Module { return &Module{} }
 // each one publishes every event.
 func WithRelay(r *Relay) *Module { return &Module{relay: r} }
 
+var (
+	_ foundation.Module     = (*Module)(nil)
+	_ foundation.Migratable = (*Module)(nil)
+	_ foundation.Background = (*Module)(nil)
+	_ foundation.Closable   = (*Module)(nil)
+	_ foundation.Health     = (*Module)(nil)
+	_ foundation.Diagnostic = (*Module)(nil)
+)
+
 // Name is the module identifier.
 func (*Module) Name() string { return "events" }
+
+// Routes registers nothing: this module has no HTTP surface.
+func (*Module) Routes(*routing.Router) {}
+
+// Migrations returns the outbox table: the migration that creates it, and the
+// one that adds the column a parked event is marked with.
+//
+// They are declared with or without a relay, because storing is what cannot be
+// recovered later: an application that stores events before it publishes them
+// needs the table from the first one.
+func (*Module) Migrations() []migrations.Migration {
+	return []migrations.Migration{createOutboxTable{}, addOutboxDeadLetter{}}
+}
 
 // Start begins the relay loop, and only the process that serves calls it.
 //

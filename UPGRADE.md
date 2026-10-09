@@ -53,6 +53,19 @@ writes, and the one a client that parsed `detail` for them should read instead.
 | `exceptions.ThrottleRequestsException`, `exceptions.MalformedUrlException`, a type of your own with `HTTPStatus() int` | 500 | its status |
 | an `HTTPStatus()` error wrapping `auth.ErrForbidden` | 403 unless it was an `*exception.HTTPError` | its own status |
 
+### `events.Module` is a `foundation.Module`, and brings the outbox table
+
+`hesape/events.Module` answers `Routes`, registering nothing, and `Migrations`,
+returning the two migrations that create the `outbox` table and add its
+`failed_at` column. They carry the names the framework's events module has
+always declared — `2026_07_31_000001_create_outbox_table` and
+`2026_07_31_000002_add_outbox_dead_letter` — so a database that already ran them
+does not run them again.
+
+**What changes without a compiler error.** Nothing for an application that
+registers one events module. Register this one or the framework's, not both:
+each declares the same two migrations.
+
 ### A `*validation.ValidationException` reads as `validation.Errors`, and answers `HTTPStatus`
 
 `errors.As(err, &errs)` with `errs` a `validation.Errors` now answers true for a
