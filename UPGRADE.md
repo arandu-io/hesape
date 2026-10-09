@@ -47,6 +47,7 @@ collection, the framework, the CLI or the skeleton uses any of them.
 | `mail.SentMessage.GetSymfonySentMessage()` | drop the call: a `mail.SentMessage` is the receipt itself |
 | `(*mail.Message).GetSymfonyMessage()` | drop the call: a `*mail.Message` is the MIME message itself |
 | `notifications/messages.Mail.WithSymfonyMessage(fn)` | `notifications/messages.Mail.WithMessage(fn)` |
+| `redis/connections.PacksPhpRedisValues` | `redis/connections.PacksValues`. The old name is an alias, so the two are one type. `connections.Connection` still embeds it under the old name until that name goes; call its methods on the connection rather than through the field |
 | `support.Laravel_cloud()` | `os.Getenv("LARAVEL_CLOUD") == "1"` where the answer is needed; drop the call where it is not |
 | `console/events.ArtisanStarting` | drop it, and any listener registered for it: nothing dispatches it, so that listener never ran. A package adds its commands with `(*console.Application).Add` |
 | `console/events.Application` | drop it with `ArtisanStarting`, the only event that carries it |

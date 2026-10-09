@@ -1,6 +1,6 @@
 package connections
 
-// PacksPhpRedisValues reports what the driver does to a value on its way to the
+// PacksValues reports what the driver does to a value on its way to the
 // server, and prepares values for the eval command.
 //
 // A driver that serialized or compressed on the way out would need every value
@@ -21,10 +21,15 @@ package connections
 // only thing in this collection that does.
 //
 // It is embedded by Connection, so the methods are reachable on a connection.
-type PacksPhpRedisValues struct{}
+type PacksValues struct{}
+
+// PacksPhpRedisValues is the former name of PacksValues.
+//
+// Deprecated: use PacksValues.
+type PacksPhpRedisValues = PacksValues
 
 // Pack prepares the given values to be used with the eval command.
-func (PacksPhpRedisValues) Pack(values []string) []string { return values }
+func (PacksValues) Pack(values []string) []string { return values }
 
 // WithoutSerializationOrCompression executes callback with serialization and
 // compression turned off.
@@ -34,21 +39,21 @@ func (PacksPhpRedisValues) Pack(values []string) []string { return values }
 // it is
 // stating something true about the read, and the statement should keep
 // compiling if this adapter ever gains an encoder.
-func (PacksPhpRedisValues) WithoutSerializationOrCompression(callback func() error) error {
+func (PacksValues) WithoutSerializationOrCompression(callback func() error) error {
 	return callback()
 }
 
 // Serialized reports whether serialization is enabled. It is not.
-func (PacksPhpRedisValues) Serialized() bool { return false }
+func (PacksValues) Serialized() bool { return false }
 
 // Compressed reports whether compression is enabled. It is not.
-func (PacksPhpRedisValues) Compressed() bool { return false }
+func (PacksValues) Compressed() bool { return false }
 
 // LzfCompressed reports whether LZF compression is enabled. It is not.
-func (PacksPhpRedisValues) LzfCompressed() bool { return false }
+func (PacksValues) LzfCompressed() bool { return false }
 
 // ZstdCompressed reports whether Zstd compression is enabled. It is not.
-func (PacksPhpRedisValues) ZstdCompressed() bool { return false }
+func (PacksValues) ZstdCompressed() bool { return false }
 
 // Lz4Compressed reports whether LZ4 compression is enabled. It is not.
-func (PacksPhpRedisValues) Lz4Compressed() bool { return false }
+func (PacksValues) Lz4Compressed() bool { return false }

@@ -93,7 +93,13 @@ type Config struct {
 type Connection struct {
 	// PacksPhpRedisValues is embedded so that Pack and the questions about
 	// serialization are reachable on a connection. Every answer is a constant
-	// -- see the type.
+	// -- see PacksValues, which is the type it holds.
+	//
+	// The field keeps the type's former name so that code naming the field
+	// still compiles. The methods are promoted whatever the field is called.
+	//
+	// Deprecated: call the methods on the connection, and name the type
+	// PacksValues.
 	PacksPhpRedisValues
 
 	client goredis.UniversalClient
