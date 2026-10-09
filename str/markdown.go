@@ -76,6 +76,15 @@ var (
 // out, writing the HTML for each. depth is the number of block quotes and list
 // items the lines sit inside; at maxNesting a quote or list marker opens
 // nothing and is read as paragraph text.
+//
+// The lines are the renderer's own, cut once from the document, and a block
+// quote or a list item rewrites the ones it has read in place -- the marker or
+// the indent taken off -- and renders that same range one level deeper. Every
+// level reads its lines front to back and never returns to one it has passed,
+// and a rewrite touches only lines the block has already claimed, so nothing
+// sees it but the level below. A level holds its lines as a range of the one
+// slice, not as a copy, because a hundred nested levels each copying every
+// line beneath them hold a hundred copies of the document.
 func renderBlocks(lines []string, depth int, b *strings.Builder) {
 	container := depth < maxNesting
 	for i := 0; i < len(lines); {
@@ -223,26 +232,28 @@ func lastIndex(lines []string, i int) int {
 }
 
 // renderBlockQuote reads the run of quoted lines, strips the markers and
-// renders what is left as blocks of its own, one level deeper.
+// renders what is left as blocks of its own, one level deeper. The markers are
+// stripped in place and the quote renders its range of lines, as the comment
+// on renderBlocks explains.
 func renderBlockQuote(lines []string, i, depth int, b *strings.Builder) int {
-	var inner []string
+	start := i
 	for i < len(lines) {
 		if width := quoteMarker(lines[i]); width >= 0 {
 			// The rest of the line is sliced, not copied: a line of nested
 			// markers would otherwise be copied once per level.
-			inner = append(inner, lines[i][width:])
+			lines[i] = lines[i][width:]
 			i++
 			continue
 		}
-		if strings.TrimSpace(lines[i]) == "" || len(inner) == 0 {
+		if strings.TrimSpace(lines[i]) == "" || i == start {
 			break
 		}
-		// A lazy continuation line belongs to the paragraph inside the quote.
-		inner = append(inner, lines[i])
+		// A lazy continuation line belongs to the paragraph inside the quote,
+		// and is left as it is.
 		i++
 	}
 	b.WriteString("<blockquote>\n")
-	renderBlocks(inner, depth+1, b)
+	renderBlocks(lines[start:i], depth+1, b)
 	b.WriteString("</blockquote>\n")
 	return i
 }
@@ -266,7 +277,9 @@ func quoteMarker(line string) int {
 }
 
 // listItem is one item of a list, with the lines that belong to it and whether
-// a blank line sat inside or in front of it.
+// a blank line sat inside or in front of it. The lines are the item's range of
+// the list's own lines, rewritten in place, as the comment on renderBlocks
+// explains.
 type listItem struct {
 	lines []string
 	loose bool
@@ -301,29 +314,32 @@ func renderList(lines []string, i, depth int, b *strings.Builder) int {
 			break
 		}
 
+		first := i
 		content, indent := itemContent(lines[i])
-		item := listItem{lines: []string{content}}
+		lines[i] = content
+		item := listItem{}
 		i++
 		for i < len(lines) {
 			switch {
 			case strings.TrimSpace(lines[i]) == "":
 				if j := i + 1; j < len(lines) && countIndent(lines[j]) >= indent {
-					item.lines = append(item.lines, "")
+					lines[i] = ""
 					item.loose = true
 					i++
 					continue
 				}
 			case countIndent(lines[i]) >= indent:
-				item.lines = append(item.lines, trimLeadingSpaces(lines[i], indent))
+				lines[i] = trimLeadingSpaces(lines[i], indent)
 				i++
 				continue
 			case itemMarker(lines[i]) == "" && !startsBlock(lines[i]):
-				item.lines = append(item.lines, lines[i])
+				// A lazy continuation line is left as it is.
 				i++
 				continue
 			}
 			break
 		}
+		item.lines = lines[first:i]
 		items = append(items, item)
 		loose = loose || item.loose
 	}
@@ -348,28 +364,56 @@ func renderList(lines []string, i, depth int, b *strings.Builder) int {
 
 // writeListItem writes one item, wrapping its text in a paragraph when the list
 // is loose and leaving it bare when it is tight.
+//
+// It reads the item's lines where they are rather than joining them into one
+// string and cutting that again, which would copy the text of every item once
+// per level of nesting. The task marker sits on the first line, because what
+// follows the brackets is spaces and tabs and never a line break.
 func writeListItem(item listItem, loose bool, depth int, b *strings.Builder) {
-	body := strings.Join(item.lines, "\n")
+	lines := item.lines
 	checkbox := ""
-	if m := taskMarker.FindStringSubmatch(body); m != nil {
+	if m := taskMarker.FindStringSubmatch(lines[0]); m != nil {
 		checked := ""
 		if m[1] != " " {
 			checked = ` checked=""`
 		}
 		checkbox = `<input` + checked + ` disabled="" type="checkbox"> `
-		body = body[len(m[0]):]
+		lines[0] = lines[0][len(m[0]):]
 	}
 
-	if !loose && !strings.Contains(strings.TrimSpace(body), "\n") {
-		b.WriteString("<li>" + checkbox + renderInline(strings.TrimSpace(body)) + "</li>\n")
-		return
+	if !loose {
+		if text, single := onlyText(lines); single {
+			b.WriteString("<li>" + checkbox + renderInline(text) + "</li>\n")
+			return
+		}
 	}
 	b.WriteString("<li>\n")
 	if checkbox != "" {
 		b.WriteString(checkbox)
 	}
-	renderBlocks(splitLines(body), depth+1, b)
+	// A blank last line makes no empty block, as splitLines drops the break at
+	// the end of a document.
+	if len(lines) > 1 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	renderBlocks(lines, depth+1, b)
 	b.WriteString("</li>\n")
+}
+
+// onlyText is the trimmed text of the one line that is not blank, and whether
+// there is at most one such line: the lines joined and trimmed hold no line
+// break exactly when every line but one is blank.
+func onlyText(lines []string) (string, bool) {
+	text, seen := "", false
+	for _, l := range lines {
+		if t := strings.TrimSpace(l); t != "" {
+			if seen {
+				return "", false
+			}
+			text, seen = t, true
+		}
+	}
+	return text, true
 }
 
 // itemMarker names the kind of list a line opens, so that a run of items with
@@ -425,7 +469,7 @@ func renderHTMLBlock(lines []string, i int, b *strings.Builder) int {
 // renderParagraphOrTable reads the run of lines up to the next blank line or
 // block start, and writes it as a table, a setext heading or a paragraph.
 func renderParagraphOrTable(lines []string, i, depth int, b *strings.Builder) int {
-	var block []string
+	start := i
 	for i < len(lines) {
 		line := lines[i]
 		if strings.TrimSpace(line) == "" {
@@ -433,20 +477,21 @@ func renderParagraphOrTable(lines []string, i, depth int, b *strings.Builder) in
 		}
 		// The setext underline is read before the block starters, because a run
 		// of dashes is also a thematic break and under a paragraph it is not.
-		if len(block) > 0 && setextHeading.MatchString(line) {
+		if i > start && setextHeading.MatchString(line) {
 			level := "2"
 			if strings.HasPrefix(strings.TrimSpace(line), "=") {
 				level = "1"
 			}
-			b.WriteString("<h" + level + ">" + renderInline(strings.TrimSpace(strings.Join(block, "\n"))) + "</h" + level + ">\n")
+			b.WriteString("<h" + level + ">" + renderInline(strings.TrimSpace(strings.Join(lines[start:i], "\n"))) + "</h" + level + ">\n")
 			return i + 1
 		}
-		if len(block) > 0 && interruptsParagraph(line, depth) {
+		if i > start && interruptsParagraph(line, depth) {
 			break
 		}
-		block = append(block, line)
 		i++
 	}
+	// The paragraph is its range of the lines, read where they are.
+	block := lines[start:i]
 
 	if len(block) >= 2 && strings.Contains(block[0], "|") && tableDelimiter.MatchString(block[1]) {
 		writeTable(block, b)

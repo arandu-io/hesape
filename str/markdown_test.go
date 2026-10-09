@@ -380,3 +380,87 @@ func TestMarkdownRendersShallowNestingAsBefore(t *testing.T) {
 		}
 	}
 }
+
+// TestMarkdownHoldsNestedLinesOnce bounds what a render allocates for each
+// byte of input on the shapes where every level of nesting holds the lines
+// beneath it: the lazy lines of a deep quote or a deep list item, and quotes
+// and lists nested inside each other. Each level once copied those lines into
+// a slice of its own, or joined them into a string and cut it again, so a
+// hundred levels held a hundred copies of the document while the render ran:
+// a quote or a list with lazy lines allocated 1.2 to 2.7 KB, and kept 0.5 to
+// 1 KB live, for every byte of input. Holding a level as a range of the one
+// slice of lines leaves at most about 13 bytes per byte, and the bound sits
+// well above that and well below the 60 the mildest copying shape allocated.
+// The time of the same shapes is held by
+// TestMarkdownStaysLinearOnNestedContainers.
+func TestMarkdownHoldsNestedLinesOnce(t *testing.T) {
+	const bound = 32
+	for _, c := range []struct {
+		name string
+		src  string
+	}{
+		{"lazy lines under nested quotes", strings.Repeat("> ", 5000) + "x\n" + strings.Repeat("y\n", 5000)},
+		{"lazy lines under nested lists", strings.Repeat("- ", 2500) + "x\n" + strings.Repeat("y\n", 2500)},
+		{"lazy lines under quotes in lists", strings.Repeat("- > ", 2000) + "x\n" + strings.Repeat("y\n", 2000)},
+		{"nested lists", strings.Repeat("- ", 10000) + "x\ny"},
+		{"quote in list", strings.Repeat("- > ", 5000) + "x\ny"},
+		{"list in quote", strings.Repeat("> - ", 5000) + "x\ny"},
+	} {
+		if perByte := allocatedPerByte(t, c.src); perByte > bound {
+			t.Errorf("%s: a render of %d bytes allocated %.0f bytes for each, want at most %d", c.name, len(c.src), perByte, bound)
+		} else {
+			t.Logf("%s: %.1f bytes allocated per input byte", c.name, perByte)
+		}
+	}
+}
+
+// allocatedPerByte is what one render of src allocates in package str,
+// divided by the length of src, read from a memory profile that records every
+// allocation.
+//
+// The profile is read rather than the heap's running total because of what
+// package regexp allocates under the race detector. A matcher keeps its
+// backtracking state, 32 KB of it, in a sync.Pool, and with the detector on the
+// pool drops a quarter of what is put back, so a render that matches a short
+// line a million times allocates gigabytes that a build without the detector
+// never does. That is the detector's cost and not the renderer's, and it would
+// bury the copies this measures; the allocations made under regexp are left
+// out, and what remains is the same with the detector on and off.
+func allocatedPerByte(t *testing.T, src string) float64 {
+	t.Helper()
+	defer func(rate int) { runtime.MemProfileRate = rate }(runtime.MemProfileRate)
+	runtime.MemProfileRate = 1
+	before := rendererAllocations()
+	str.Markdown(src)
+	return float64(rendererAllocations()-before) / float64(len(src))
+}
+
+// rendererAllocations is the total the memory profile has recorded allocated
+// under a function of package str and outside package regexp. The collection
+// it runs first is what publishes the allocations made since the last one.
+func rendererAllocations() int64 {
+	runtime.GC()
+	var records []runtime.MemProfileRecord
+	n, ok := runtime.MemProfile(nil, true)
+	for !ok {
+		records = make([]runtime.MemProfileRecord, n+64)
+		n, ok = runtime.MemProfile(records, true)
+	}
+	var total int64
+	for _, r := range records[:n] {
+		inStr, inRegexp := false, false
+		frames := runtime.CallersFrames(r.Stack())
+		for {
+			frame, more := frames.Next()
+			inStr = inStr || strings.HasPrefix(frame.Function, "github.com/arandu-io/hesape/str.")
+			inRegexp = inRegexp || strings.HasPrefix(frame.Function, "regexp.")
+			if !more {
+				break
+			}
+		}
+		if inStr && !inRegexp {
+			total += r.AllocBytes
+		}
+	}
+	return total
+}
