@@ -1,6 +1,8 @@
 package http_test
 
 import (
+	"errors"
+	"fmt"
 	stdhttp "net/http"
 	"net/http/httptest"
 	"strings"
@@ -142,5 +144,38 @@ func TestBackAcceptsARefererThatIsAlreadyAPath(t *testing.T) {
 
 	if got := hhttp.Back(req); got != "/posts/new" {
 		t.Errorf("Back = %q, want /posts/new", got)
+	}
+}
+
+// TestAFailedValidateIsRejectedLikeErrors: an adapter that answers a rejected
+// form looks for validation.Errors, and a failed Validate is a
+// *validation.ValidationException. The one errors.As below has to find both,
+// with the messages intact through Reject and the redirect, or the exception
+// is the rejected form that turns into a 500.
+func TestAFailedValidateIsRejectedLikeErrors(t *testing.T) {
+	failure := fmt.Errorf("signing up: %w", validation.WithMessages(map[string][]string{
+		"email": {"The email field must be a valid email address."},
+	}))
+
+	var errs validation.Errors
+	if !errors.As(failure, &errs) {
+		t.Fatal("a failed Validate is not read as validation.Errors, so the adapter does not reject it")
+	}
+
+	rec := httptest.NewRecorder()
+	f := flash()
+	hhttp.Reject(rec, submitted("http://example.test/signup", "http://example.test/signup"), f, errs)
+
+	if rec.Code != stdhttp.StatusSeeOther {
+		t.Fatalf("answered %d, want %d", rec.Code, stdhttp.StatusSeeOther)
+	}
+	next := httptest.NewRequest(stdhttp.MethodGet, "/signup", nil)
+	next.Header.Set("Accept", "text/html")
+	for _, c := range rec.Result().Cookies() {
+		next.AddCookie(c)
+	}
+	carried, _, ok := f.Take(httptest.NewRecorder(), next)
+	if !ok || len(carried["email"]) != 1 {
+		t.Fatalf("the messages did not survive the redirect: %v", carried)
 	}
 }
