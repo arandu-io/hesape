@@ -963,6 +963,14 @@ func (p *Password) SetData(data Data) { p.data = data }
 //
 // The length and the merged rules are checked by a sibling validator compiled
 // from the same chain; the four character checks run after it.
+//
+// An empty value, and one that is only whitespace, passes the length: like
+// every rule in a chain, min and max do not run on a blank value unless the
+// rule is implicit. Refusing an empty password is the job of required, which
+// is why a password field carries it beside the policy and PasswordRequired
+// returns the two together. A policy asking for nothing but a length therefore
+// passes "". The character checks and Uncompromised read the text itself, so a
+// policy asking for any of them refuses "" with that check's message.
 func (p *Password) Passes(attribute string, value any) bool {
 	p.messages = nil
 
