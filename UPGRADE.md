@@ -27,31 +27,10 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
-## Unreleased
+## v0.51.0 — `config.StrictBool`, and a connection taken over is finished as one
 
-### More names that named another framework are deprecated, and go in the next minor
-
-The exported names in `mail`, `notifications/messages`, `redis/connections`,
-`support` and `console/events` that named another framework, or the libraries it
-is built on, have neutral names. The old ones still compile and answer exactly
-what they did, carry a `Deprecated:` line, and are removed in the next minor
-release after the one that carries this entry. Where an old name has nothing to
-forward to, the table says to drop the call. No code in the collection, the
-framework, the CLI or the skeleton uses any of them.
-
-| before | now |
-|---|---|
-| `(*mail.Mailer).GetSymfonyTransport()` | `(*mail.Mailer).GetTransport()` |
-| `(*mail.Mailer).SetSymfonyTransport(t)` | `(*mail.Mailer).SetTransport(t)` |
-| `(*mail.MailManager).CreateSymfonyTransport(cfg)` | `(*mail.MailManager).CreateTransport(cfg)` |
-| `(*mail.PendingMail).WithSymfonyMessage(callback)` | `(*mail.PendingMail).WithMessage(callback)` |
-| `mail.SentMessage.GetSymfonySentMessage()` | drop the call: a `mail.SentMessage` is the receipt itself |
-| `(*mail.Message).GetSymfonyMessage()` | drop the call: a `*mail.Message` is the MIME message itself |
-| `notifications/messages.Mail.WithSymfonyMessage(fn)` | `notifications/messages.Mail.WithMessage(fn)` |
-| `redis/connections.PacksPhpRedisValues` | `redis/connections.PacksValues`. The old name is an alias, so the two are one type. `connections.Connection` still embeds it under the old name until that name goes; call its methods on the connection rather than through the field |
-| `support.Laravel_cloud()` | `os.Getenv("LARAVEL_CLOUD") == "1"` where the answer is needed; drop the call where it is not |
-| `console/events.ArtisanStarting` | drop it, and any listener registered for it: nothing dispatches it, so that listener never ran. A package adds its commands with `(*console.Application).Add` |
-| `console/events.Application` | drop it with `ArtisanStarting`, the only event that carries it |
+The names deprecated in v0.50.1 and v0.50.2 are still here: they were to go in this minor, and go in v0.52.0
+instead, with the second session path.
 
 ### `config.Load` refuses an `APP_DEBUG` it cannot read
 
@@ -110,6 +89,30 @@ a writer had no `Unwrap`, was refused.
   connection over, and the Handler then writes nothing after it.
 
 ## v0.50.2 — Bind leaves a password as typed
+
+### More names that named another framework are deprecated, and go in the next minor
+
+The exported names in `mail`, `notifications/messages`, `redis/connections`,
+`support` and `console/events` that named another framework, or the libraries it
+is built on, have neutral names. The old ones still compile and answer exactly
+what they did, carry a `Deprecated:` line, and are removed in the next minor
+release after the one that carries this entry. Where an old name has nothing to
+forward to, the table says to drop the call. No code in the collection, the
+framework, the CLI or the skeleton uses any of them.
+
+| before | now |
+|---|---|
+| `(*mail.Mailer).GetSymfonyTransport()` | `(*mail.Mailer).GetTransport()` |
+| `(*mail.Mailer).SetSymfonyTransport(t)` | `(*mail.Mailer).SetTransport(t)` |
+| `(*mail.MailManager).CreateSymfonyTransport(cfg)` | `(*mail.MailManager).CreateTransport(cfg)` |
+| `(*mail.PendingMail).WithSymfonyMessage(callback)` | `(*mail.PendingMail).WithMessage(callback)` |
+| `mail.SentMessage.GetSymfonySentMessage()` | drop the call: a `mail.SentMessage` is the receipt itself |
+| `(*mail.Message).GetSymfonyMessage()` | drop the call: a `*mail.Message` is the MIME message itself |
+| `notifications/messages.Mail.WithSymfonyMessage(fn)` | `notifications/messages.Mail.WithMessage(fn)` |
+| `redis/connections.PacksPhpRedisValues` | `redis/connections.PacksValues`. The old name is an alias, so the two are one type. `connections.Connection` still embeds it under the old name until that name goes; call its methods on the connection rather than through the field |
+| `support.Laravel_cloud()` | `os.Getenv("LARAVEL_CLOUD") == "1"` where the answer is needed; drop the call where it is not |
+| `console/events.ArtisanStarting` | drop it, and any listener registered for it: nothing dispatches it, so that listener never ran. A package adds its commands with `(*console.Application).Add` |
+| `console/events.Application` | drop it with `ArtisanStarting`, the only event that carries it |
 
 ### `http.(*Context).Bind` no longer trims a password
 
