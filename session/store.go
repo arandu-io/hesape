@@ -159,9 +159,10 @@ type RequestAware interface {
 //
 // # This is not [RecordStore]
 //
-// [RecordStore] is the other half -- it signs the cookie, mints ids and
-// stores one typed [Record] per session. This one is the bag of keys a
-// page's handler reaches for. They share nothing but the package.
+// [RecordStore] is the other store, and the one session path -- it signs the
+// cookie, mints ids and stores one typed [Record] per session. This one is
+// the bag of keys a page's handler reaches for. They share nothing but the
+// package.
 //
 // Deprecated: use [RecordStore], the one session path. Store is the second
 // one: nothing outside that path builds it, the id its cookie carries is not

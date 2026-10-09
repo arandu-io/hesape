@@ -41,9 +41,9 @@ var errNoSubject = errors.New("redis: signing out every session of a subject nee
 // record onto a wire struct of its own drops any field the struct does not name
 // -- the write succeeds, the read comes back zero, and it only shows in the
 // deployment that uses this handler. The version of this that lived in the kv
-// repository had that defect twice over, and session.Store.Confirm still reads
-// the password confirmation stamp back because of it. Marshalling the record
-// itself is what makes the class of bug unreachable.
+// repository had that defect twice over, and session.RecordStore.Confirm still
+// reads the password confirmation stamp back because of it. Marshalling the
+// record itself is what makes the class of bug unreachable.
 type CacheBasedSessionHandler[T any] struct {
 	conn *connections.Connection
 }
@@ -51,10 +51,10 @@ type CacheBasedSessionHandler[T any] struct {
 // NewCacheBasedSessionHandler returns the handler over a connection.
 //
 // The payload type is the one the application keeps in its sessions, and it is
-// the same type session.NewStore is built with:
+// the same type session.NewRecordStore is built with:
 //
 //	handler := redis.NewCacheBasedSessionHandler[auth.Subject](conn)
-//	store := session.NewStore(appKey, 2*time.Hour, true, handler)
+//	store := session.NewRecordStore(appKey, 2*time.Hour, true, handler)
 func NewCacheBasedSessionHandler[T any](c *connections.Connection) *CacheBasedSessionHandler[T] {
 	return &CacheBasedSessionHandler[T]{conn: c}
 }
@@ -167,8 +167,8 @@ func (h *CacheBasedSessionHandler[T]) DestroyIndex(ctx context.Context, tenant, 
 // this account" without something having written that list down.
 //
 // A record with no tenant or no subject id is not indexed and cannot be signed
-// out in bulk. That is the same refusal session.Store.DestroyOthers makes at
-// the front door, and it keeps this from failing a Write -- a login must not
+// out in bulk. That is the same refusal session.RecordStore.DestroyOthers makes
+// at the front door, and it keeps this from failing a Write -- a login must not
 // break because the session it just started belongs to a guest.
 //
 // The index is a sorted set scored by when each session expires, which is the

@@ -235,11 +235,9 @@ type Handler[T any] interface {
 // back and ends the session, and it is generic over the payload, which
 // [Store] is not.
 //
-// Both are here because both are used: [Store] is what the flash, the old
-// input and the CSRF token live in; this is what auth builds a session with
-// when the payload is a struct and the application would rather the
-// compiler checked it. They share [Handler] and [Record]; nothing else is
-// duplicated between them.
+// This is the one session path. [Store] is the second, deprecated, and the two
+// share nothing but the package: [Store] reads a [SessionHandler], and this
+// reads a [Handler].
 type RecordStore[T any] struct {
 	appKey  []byte
 	ttl     time.Duration

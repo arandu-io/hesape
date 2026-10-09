@@ -21,15 +21,18 @@
 // # The guards
 //
 // Three guards live here, with the helpers they embed and the pieces they read.
-// SessionGuard is the browser session a login form starts; TokenGuard reads an
-// API token off the Authorization header; RequestGuard hands the request to a
-// callback that resolves the user itself. Alongside them are Recaller, which parses the
-// "remember me" cookie, GenericUser, MustVerifyEmailTrait, the authentication
-// error, and AuthManager, which builds a guard from configuration.
+// TokenGuard reads an API token off the Authorization header; RequestGuard hands
+// the request to a callback that resolves the user itself. Alongside them are
+// GenericUser, MustVerifyEmailTrait and the authentication error. The
+// interfaces the guards need from the request and the timebox are in
+// collaborators.go.
 //
-// The eight events the session guard fires are in session_guard.go, and the
-// interfaces the guards need from the session, the cookie jar, the event
-// dispatcher, the request and the timebox are in collaborators.go.
+// SessionGuard, the third, is deprecated with everything only it uses: the
+// eight events it fires, Recaller, the Session, CookieJar and Dispatcher
+// collaborators, and AuthManager, which builds it from configuration. It keeps
+// the signed-in user in the deprecated session.Store. The session is
+// session.RecordStore, and a sign-in on it checks the password with
+// CredentialVerifier.
 //
 // The root imports nothing but the standard library, deliberately. Everything
 // that scopes itself by tenant -- the database, the cache, the filesystem, the

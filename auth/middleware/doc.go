@@ -7,6 +7,10 @@
 // signed-in visitor away from the login form, and [RequirePassword] asks for
 // the password again before something destructive.
 //
+// [RequirePassword] is deprecated: it reads the confirmation stamp the
+// deprecated session.Store keeps. On session.RecordStore, the one session path,
+// the stamp is session.Record.PasswordConfirmedAt.
+//
 // # The shape of a middleware here
 //
 // Each one is a struct with a Handle method, and Handle is

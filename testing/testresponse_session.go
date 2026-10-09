@@ -24,8 +24,9 @@ import (
 // through [TestResponse.Flash], and say so when it is not set.
 //
 // [TestResponse.AssertSessionHas], [TestResponse.AssertSessionHasAll] and
-// [TestResponse.AssertSessionMissing] are unaffected: they read the session
-// store, which is a general key/value store.
+// [TestResponse.AssertSessionMissing] read the session store, a general
+// key/value store, and are deprecated with it: session.Store is the second
+// session path, and the one path is session.RecordStore.
 
 // AssertSessionHas asserts the session holds the key, and the value too when
 // one is given.

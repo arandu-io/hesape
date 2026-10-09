@@ -68,9 +68,10 @@ const stateLifetime = 10 * time.Minute
 // CookieStateStore is a [StateStoreInterface] that keeps the state in a
 // short-lived cookie of its own.
 //
-// The state is not kept in the session: hesape's session.Store holds one typed
-// record per session and not a bag of keys, so putting a state there would
-// either bend that record into a key-value store or introduce a second session.
+// The state is not kept in the session: hesape's session.RecordStore holds one
+// typed record per session and not a bag of keys, so putting a state there
+// would either bend that record into a key-value store or introduce a second
+// session.
 //
 // A cookie is the remaining answer and it is a sound one. The state is not a
 // secret and it does not authenticate anybody: it only has to be something the
