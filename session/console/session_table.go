@@ -25,6 +25,10 @@ import (
 // said about the table -- which columns, why they are nullable, why
 // last_activity is indexed -- now lives on [session.CreateSessionsTable], where
 // the migrator reads it too.
+//
+// Deprecated: the sessions table is read only by the deprecated
+// session.DatabaseSessionHandler, and [session.RecordStore], the one session
+// path, keeps no table.
 func MigrationStub() (string, error) {
 	declared := session.Migrations()
 	if len(declared) == 0 {
@@ -52,6 +56,10 @@ func MigrationStub() (string, error) {
 }
 
 // TableName is the table the stub creates and the handler reads.
+//
+// Deprecated: the sessions table is read only by the deprecated
+// session.DatabaseSessionHandler, and [session.RecordStore], the one session
+// path, keeps no table.
 const TableName = session.Table
 
 // SessionTableCommand writes the migration that creates the sessions table,
@@ -59,6 +67,10 @@ const TableName = session.Table
 // migration that ran itself would be N replicas racing each other at boot,
 // and the whole point of emitting a file is that somebody reads it before
 // it reaches production.
+//
+// Deprecated: the sessions table is read only by the deprecated
+// session.DatabaseSessionHandler, and [session.RecordStore], the one session
+// path, keeps no table.
 type SessionTableCommand struct {
 	files     *filesystem.Filesystem
 	directory string
@@ -72,6 +84,10 @@ type SessionTableCommand struct {
 // derive a default database path from.
 //
 // files may be nil, in which case a plain [filesystem.Filesystem] is used.
+//
+// Deprecated: the sessions table is read only by the deprecated
+// session.DatabaseSessionHandler, and [session.RecordStore], the one session
+// path, keeps no table.
 func NewSessionTableCommand(files *filesystem.Filesystem, directory string) *SessionTableCommand {
 	if files == nil {
 		files = filesystem.NewFilesystem()

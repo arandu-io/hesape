@@ -23,6 +23,9 @@ type storeKey struct{}
 //
 // It is what [StartSession] does before calling the handler, and what a test
 // does to run a handler without the middleware in front of it.
+//
+// Deprecated: it carries the deprecated [session.Store]. Use
+// [session.RecordStore], the one session path.
 func WithSession(ctx context.Context, s *session.Store) context.Context {
 	return context.WithValue(ctx, storeKey{}, s)
 }
@@ -36,6 +39,10 @@ func WithSession(ctx context.Context, s *session.Store) context.Context {
 // without this middleware, a request answered by the error handler before it
 // ran, and a console binary all reach a handler with no session on the context.
 // A caller that dereferences without checking panics on exactly those paths.
+//
+// Deprecated: it returns the deprecated [session.Store]. A handler on
+// [session.RecordStore], the one session path, reads its record with
+// RecordStore.All.
 func Session(ctx context.Context) (*session.Store, bool) {
 	s, ok := ctx.Value(storeKey{}).(*session.Store)
 	return s, ok
@@ -47,6 +54,9 @@ func Session(ctx context.Context) (*session.Store, bool) {
 // It is declared here, minimally, rather than imported: the lock lives in the
 // cache and this package must not depend on it. hesape/cache's locks are what an
 // application wires behind it.
+//
+// Deprecated: asked for only by the deprecated [StartSession]. Use
+// [session.RecordStore], the one session path.
 type LockFactory interface {
 	// Lock takes the named lock, waiting up to wait for it, and returns the
 	// release. It returns false when the wait ran out, which is a request that
@@ -67,6 +77,10 @@ type LockFactory interface {
 // byte is a header that never reaches the browser. This wraps the
 // ResponseWriter and does the work on the first write, or after the handler
 // returns when it wrote nothing, and it is invisible from a handler.
+//
+// Deprecated: use [session.RecordStore], the one session path. StartSession
+// serves the deprecated [session.Store], whose cookie carries an unsigned id,
+// and nothing outside that path builds it.
 type StartSession struct {
 	manager *session.SessionManager
 	locks   LockFactory
@@ -83,6 +97,8 @@ type StartSession struct {
 // running unprotected is the lost write that blocking was turned on to stop,
 // and doing it silently means nobody finds out until a customer reports data
 // that reverted.
+//
+// Deprecated: use [session.NewRecordStore]. See [StartSession].
 func NewStartSession(manager *session.SessionManager, locks LockFactory) *StartSession {
 	return &StartSession{manager: manager, locks: locks}
 }

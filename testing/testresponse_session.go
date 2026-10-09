@@ -33,6 +33,13 @@ import (
 // Passing no value asserts only that the key is there. A value of
 // func(any) bool is called with what is stored and must report true. A key
 // that is really a set of bindings is handed to [TestResponse.AssertSessionHasAll].
+//
+// Deprecated: it reads the deprecated [session.Store] off the request, which
+// only the deprecated StartSession middleware puts there. A test of an
+// application on [session.RecordStore], the one session path, reads the record
+// with RecordStore.All, and the flashed errors and old input with the
+// assertions that read the flash cookie, [TestResponse.AssertSessionHasErrors]
+// and [TestResponse.AssertSessionHasInput].
 func (r *TestResponse) AssertSessionHas(key any, value ...any) *TestResponse {
 	r.t.Helper()
 
@@ -66,6 +73,13 @@ func (r *TestResponse) AssertSessionHas(key any, value ...any) *TestResponse {
 // A nil value asks only that the key is there, which is the same nil
 // [TestResponse.AssertSessionHas] reads as "no value given". Keys are walked
 // in sorted order, so a failure message is stable.
+//
+// Deprecated: it reads the deprecated [session.Store] off the request, which
+// only the deprecated StartSession middleware puts there. A test of an
+// application on [session.RecordStore], the one session path, reads the record
+// with RecordStore.All, and the flashed errors and old input with the
+// assertions that read the flash cookie, [TestResponse.AssertSessionHasErrors]
+// and [TestResponse.AssertSessionHasInput].
 func (r *TestResponse) AssertSessionHasAll(bindings map[string]any) *TestResponse {
 	r.t.Helper()
 
@@ -206,6 +220,13 @@ func (r *TestResponse) AssertSessionDoesntHaveErrors(keys any, format string, er
 
 // AssertSessionMissing asserts the session does not hold the key, or any of
 // them when a list is given.
+//
+// Deprecated: it reads the deprecated [session.Store] off the request, which
+// only the deprecated StartSession middleware puts there. A test of an
+// application on [session.RecordStore], the one session path, reads the record
+// with RecordStore.All, and the flashed errors and old input with the
+// assertions that read the flash cookie, [TestResponse.AssertSessionHasErrors]
+// and [TestResponse.AssertSessionHasInput].
 func (r *TestResponse) AssertSessionMissing(key any) *TestResponse {
 	r.t.Helper()
 

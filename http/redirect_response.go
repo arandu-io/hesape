@@ -79,6 +79,11 @@ func (r *RedirectResponse) SetTargetUrl(to string) *RedirectResponse {
 //
 // The key may be a map or a single key: a map flashes every pair in it, and
 // a single key flashes with value. The value is variadic, defaulting to nil.
+//
+// Deprecated: it flashes into the deprecated [session.Store], and does nothing
+// without one. Use [session.RecordStore], the one session path, and send a
+// rejected form back through [Reject], which writes its errors and its old
+// input to [session.Flash].
 func (r *RedirectResponse) With(key any, value ...any) *RedirectResponse {
 	if r.session == nil {
 		return r
@@ -123,6 +128,11 @@ func (r *RedirectResponse) WithCookies(cookies []*stdhttp.Cookie) *RedirectRespo
 //
 // The variadic argument is the optional input to flash; with none, the
 // request's own input is used.
+//
+// Deprecated: it flashes into the deprecated [session.Store], and does nothing
+// without one. Use [session.RecordStore], the one session path, and send a
+// rejected form back through [Reject], which writes its errors and its old
+// input to [session.Flash].
 func (r *RedirectResponse) WithInput(input ...map[string]any) *RedirectResponse {
 	if r.session == nil {
 		return r
@@ -176,6 +186,11 @@ func isUploadedValue(value any) bool {
 }
 
 // OnlyInput flashes only the named keys.
+//
+// Deprecated: it flashes into the deprecated [session.Store], and does nothing
+// without one. Use [session.RecordStore], the one session path, and send a
+// rejected form back through [Reject], which writes its errors and its old
+// input to [session.Flash].
 func (r *RedirectResponse) OnlyInput(keys ...string) *RedirectResponse {
 	if r.request == nil {
 		return r
@@ -188,6 +203,11 @@ func (r *RedirectResponse) OnlyInput(keys ...string) *RedirectResponse {
 // The keys are the form's own reason to drop a field. A password, a one-time
 // code or a request token does not need naming here: the session store drops
 // the secret fields whatever the caller passes.
+//
+// Deprecated: it flashes into the deprecated [session.Store], and does nothing
+// without one. Use [session.RecordStore], the one session path, and send a
+// rejected form back through [Reject], which writes its errors and its old
+// input to [session.Flash].
 func (r *RedirectResponse) ExceptInput(keys ...string) *RedirectResponse {
 	if r.request == nil {
 		return r
@@ -203,6 +223,11 @@ func (r *RedirectResponse) ExceptInput(keys ...string) *RedirectResponse {
 // what this module's validator produces. The variadic key names the bag,
 // defaulting to "default" -- which is what lets two forms on one page keep
 // their messages apart.
+//
+// Deprecated: it flashes into the deprecated [session.Store], and does nothing
+// without one. Use [session.RecordStore], the one session path, and send a
+// rejected form back through [Reject], which writes its errors and its old
+// input to [session.Flash].
 func (r *RedirectResponse) WithErrors(provider any, key ...string) *RedirectResponse {
 	if r.session == nil {
 		return r
@@ -319,10 +344,20 @@ func (r *RedirectResponse) SetRequest(request *Request) *RedirectResponse {
 }
 
 // GetSession is the session store this redirect flashes into.
+//
+// Deprecated: it flashes into the deprecated [session.Store], and does nothing
+// without one. Use [session.RecordStore], the one session path, and send a
+// rejected form back through [Reject], which writes its errors and its old
+// input to [session.Flash].
 func (r *RedirectResponse) GetSession() *session.Store { return r.session }
 
 // SetSession sets the session store With, WithInput and WithErrors flash
 // into.
+//
+// Deprecated: it flashes into the deprecated [session.Store], and does nothing
+// without one. Use [session.RecordStore], the one session path, and send a
+// rejected form back through [Reject], which writes its errors and its old
+// input to [session.Flash].
 func (r *RedirectResponse) SetSession(store *session.Store) *RedirectResponse {
 	r.session = store
 	return r

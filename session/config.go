@@ -10,6 +10,9 @@ import (
 // ErrUnsafeConfig is what every refusal from [Config.Check] wraps, so a caller
 // can tell an unsafe cookie configuration from a missing driver with errors.Is
 // instead of matching on the message.
+//
+// Deprecated: wrapped only by [Config.Check], which is deprecated with
+// [Config]. Use [RecordStore], the one session path.
 var ErrUnsafeConfig = errors.New("session: unsafe cookie configuration")
 
 // ConfigError is the refusal [Config.Check] returns: which field is unsafe, and
@@ -18,6 +21,9 @@ var ErrUnsafeConfig = errors.New("session: unsafe cookie configuration")
 // The field is a separate string rather than a sentence, because the caller that
 // prints this is usually a boot sequence with one line to spend, and "SameSite"
 // is the part a person greps their configuration for.
+//
+// Deprecated: returned only by [Config.Check], which is deprecated with
+// [Config]. Use [RecordStore], the one session path.
 type ConfigError struct {
 	// Field is the name of the [Config] field that is unsafe.
 	Field string

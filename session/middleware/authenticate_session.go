@@ -10,6 +10,9 @@ import (
 // It is declared here, minimally, rather than imported, because this package
 // sits below the one that authenticates and importing it would be the cycle.
 // hesape/auth is what an application wires behind it.
+//
+// Deprecated: asked for only by the deprecated [AuthenticateSession]. Use
+// [session.RecordStore], the one session path.
 type Guard interface {
 	// GetDefaultDriver names the guard. It is what the session key is suffixed
 	// with, so two guards on one application do not invalidate each other's
@@ -38,6 +41,10 @@ type Guard interface {
 // forced the change, which is the whole point.
 //
 // It runs after [StartSession] and after whatever authenticates the request.
+//
+// Deprecated: it reads the deprecated [session.Store]. On
+// [session.RecordStore], the one session path, a password change ends the
+// subject's other sessions with RecordStore.DestroyOthers.
 type AuthenticateSession struct {
 	auth Guard
 	// redirectTo is an instance field rather than a package-level one: a
@@ -48,6 +55,9 @@ type AuthenticateSession struct {
 }
 
 // NewAuthenticateSession returns a middleware over an authentication guard.
+//
+// Deprecated: it builds the deprecated [AuthenticateSession]. Use
+// [session.RecordStore], the one session path.
 func NewAuthenticateSession(auth Guard) *AuthenticateSession {
 	return &AuthenticateSession{auth: auth}
 }

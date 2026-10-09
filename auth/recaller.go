@@ -11,12 +11,19 @@ import "strings"
 // RetrieveByToken.
 //
 // The value is the cookie's string, decoded no further.
+//
+// Deprecated: read only by the deprecated [SessionGuard]. On
+// session.RecordStore, the one session path, a remembered sign-in is
+// session.Remember, passed to RecordStore.Start.
 type Recaller struct {
 	// recaller is the cookie value.
 	recaller string
 }
 
 // NewRecaller returns a recaller over the cookie value.
+//
+// Deprecated: it builds the deprecated [Recaller]. Use session.RecordStore,
+// the one session path.
 func NewRecaller(recaller string) *Recaller {
 	return &Recaller{recaller: recaller}
 }

@@ -14,6 +14,9 @@ import (
 // Guards and Providers are maps rather than structs because a custom driver
 // registered with [AuthManager.Extend] reads keys this package has never heard
 // of.
+//
+// Deprecated: read only by the deprecated [AuthManager]. Use
+// session.RecordStore, the one session path.
 type ManagerConfig struct {
 	// DefaultGuard is the guard an empty name means.
 	DefaultGuard string
@@ -71,6 +74,11 @@ type ManagerConfig struct {
 //
 // There is no forwarding of unknown calls to the default guard: call
 // [AuthManager.Guard] and then the method.
+//
+// Deprecated: it exists to build the deprecated [SessionGuard] from
+// configuration. Build a [TokenGuard] with [NewTokenGuard] or a [RequestGuard]
+// with [NewRequestGuard] where one is needed, and sign in with
+// session.RecordStore, the one session path.
 type AuthManager struct {
 	// mu guards everything below it, because a Go server answers requests
 	// concurrently.
@@ -116,6 +124,9 @@ type AuthManager struct {
 //
 // The user resolver it starts with answers with the user of the named guard, or
 // of the default one; [AuthManager.ResolveUsersUsing] replaces it.
+//
+// Deprecated: it builds the deprecated [AuthManager]. Use session.RecordStore,
+// the one session path.
 func NewAuthManager(config ManagerConfig) *AuthManager {
 	manager := &AuthManager{
 		defaultGuard:           config.DefaultGuard,

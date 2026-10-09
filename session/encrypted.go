@@ -5,6 +5,9 @@ package session
 // It is declared here, minimally, rather than imported, so that a project that
 // does not encrypt its sessions does not carry the cipher package behind them.
 // *encryption.Encrypter satisfies it unchanged.
+//
+// Deprecated: read only by the deprecated [EncryptedStore] and
+// [SessionManager]. Use [RecordStore], the one session path.
 type Encrypter interface {
 	// EncryptString returns the sealed payload.
 	EncryptString(value string) (string, error)
@@ -24,6 +27,9 @@ type Encrypter interface {
 // It is not a substitute for a session id nobody can guess. Encrypting the
 // payload does not stop somebody who stole the cookie from using it: that is
 // what the expiry and [Store.Regenerate] are for.
+//
+// Deprecated: use [RecordStore], the one session path. Sealing a session at
+// rest is not on that path, and joins it when an application asks for it.
 type EncryptedStore struct {
 	*Store
 	encrypter Encrypter
@@ -33,6 +39,8 @@ type EncryptedStore struct {
 // application key.
 //
 // The arguments are [NewStore]'s with the encrypter added.
+//
+// Deprecated: use [NewRecordStore]. See [EncryptedStore].
 func NewEncryptedStore(name string, handler SessionHandler, encrypter Encrypter, id string) *EncryptedStore {
 	store := NewStore(name, handler, id)
 	s := &EncryptedStore{Store: store, encrypter: encrypter}

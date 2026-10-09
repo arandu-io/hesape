@@ -14,4 +14,9 @@
 // authentication guard -- are declared here as [LockFactory] and [Guard], with
 // the smallest surface each of them uses. hesape/cache and hesape/auth are what
 // an application wires behind them.
+//
+// Deprecated: both middlewares run the second session path, over the
+// deprecated session.Store. The session is [session.RecordStore]: it is
+// started where somebody signs in and read back with RecordStore.All, with no
+// middleware in between. This package is removed in a later minor release.
 package middleware

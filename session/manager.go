@@ -14,6 +14,10 @@ import (
 // a misspelled key in a map is an application that boots and then behaves like
 // a different one -- the cookie secure flag silently false, the lifetime
 // silently zero -- and a struct makes the misspelling a compile error.
+//
+// Deprecated: read only by the deprecated [SessionManager]. [NewRecordStore],
+// the one session path, takes the lifetime and the Secure flag as arguments,
+// and reads nothing else.
 type Config struct {
 	// Driver names the handler: "file", "cookie", "database", "cache", "array"
 	// or "null", or one registered with [SessionManager.Extend].
@@ -75,14 +79,26 @@ type Config struct {
 // The defaults for the fields a zero value cannot stand in for.
 const (
 	// DefaultLifetime is two hours.
+	//
+	// Deprecated: a default of the deprecated [Config]. Use [RecordStore], the
+	// one session path.
 	DefaultLifetime = 2 * time.Hour
 	// DefaultBlockLockSeconds is how long a route holds the session lock.
+	//
+	// Deprecated: a default of the deprecated [Config]. Use [RecordStore], the
+	// one session path.
 	DefaultBlockLockSeconds = 10 * time.Second
 	// DefaultBlockWaitSeconds is how long it waits to take one.
+	//
+	// Deprecated: a default of the deprecated [Config]. Use [RecordStore], the
+	// one session path.
 	DefaultBlockWaitSeconds = 10 * time.Second
 )
 
 // ErrNoDriver is returned for a driver nobody registered.
+//
+// Deprecated: returned only by the deprecated [SessionManager]. Use
+// [RecordStore], the one session path.
 var ErrNoDriver = errors.New("session: no such session driver")
 
 // HandlerCreator builds a handler out of the configuration.
@@ -92,6 +108,9 @@ var ErrNoDriver = errors.New("session: no such session driver")
 // a cache and the database driver a connection, and there is no container here
 // to fetch them from. The application that has them registers three
 // closures at boot, in one place a person can read.
+//
+// Deprecated: registered only with the deprecated [SessionManager]. Use
+// [RecordStore], the one session path.
 type HandlerCreator func(cfg Config) (SessionHandler, error)
 
 // SessionManager builds sessions from configuration: which driver, which
@@ -105,6 +124,9 @@ type HandlerCreator func(cfg Config) (SessionHandler, error)
 // would interleave their writes and save each other's session. The HANDLER
 // is shared -- that is the connection, the directory or the map, and it is
 // built once.
+//
+// Deprecated: use [NewRecordStore], the one session path. The manager builds
+// the deprecated [Store], and nothing builds the manager.
 type SessionManager struct {
 	mu        sync.RWMutex
 	config    Config
@@ -118,6 +140,8 @@ type SessionManager struct {
 // encrypter may be nil when Config.Encrypt is false. When it is true and the
 // encrypter is nil, [SessionManager.Driver] refuses rather than quietly storing
 // the session in the clear.
+//
+// Deprecated: use [NewRecordStore]. See [SessionManager].
 func NewSessionManager(cfg Config, encrypter Encrypter) *SessionManager {
 	if cfg.Lifetime <= 0 {
 		cfg.Lifetime = DefaultLifetime

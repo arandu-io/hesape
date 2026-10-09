@@ -716,9 +716,17 @@ func (r *Request) GetRouteResolver() func() Route {
 }
 
 // HasSession reports whether a session store was set.
+//
+// Deprecated: the store is the deprecated [session.Store]. A handler on
+// [session.RecordStore], the one session path, reads its record with
+// [session.RecordStore.All].
 func (r *Request) HasSession() bool { return r.session != nil }
 
 // Session is the session store. Panics when none is set.
+//
+// Deprecated: the store is the deprecated [session.Store]. A handler on
+// [session.RecordStore], the one session path, reads its record with
+// [session.RecordStore.All].
 func (r *Request) Session() *session.Store {
 	if r.session == nil {
 		panic("http: session store not set on request")
@@ -727,6 +735,10 @@ func (r *Request) Session() *session.Store {
 }
 
 // SetSession sets the session store.
+//
+// Deprecated: the store is the deprecated [session.Store]. A handler on
+// [session.RecordStore], the one session path, reads its record with
+// [session.RecordStore.All].
 func (r *Request) SetSession(s *session.Store) *Request {
 	r.session = s
 	return r
@@ -845,6 +857,10 @@ func (r *Request) SetDefaultRequestLocale(locale string) *Request {
 
 // GetSession is the session store. Panics when none is set. It is an alias
 // for Session.
+//
+// Deprecated: the store is the deprecated [session.Store]. A handler on
+// [session.RecordStore], the one session path, reads its record with
+// [session.RecordStore.All].
 func (r *Request) GetSession() *session.Store { return r.Session() }
 
 // requestLocaleKey and defaultRequestLocaleKey are the context keys for the

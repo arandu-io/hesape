@@ -17,6 +17,11 @@ import (
 // is the path the middleware sends them to unless told otherwise.
 // [RequirePassword.Using] is how a project that mounts the screen elsewhere
 // says so.
+//
+// Deprecated: it reads the stamp the deprecated session.Store keeps. On
+// [session.RecordStore], the one session path, the stamp is
+// [session.Record.PasswordConfirmedAt], written by RecordStore.Confirm and
+// read with Record.PasswordConfirmedWithin.
 const PasswordConfirmURI = "/confirm-password"
 
 // RequirePassword guards the part of an application that a stolen open session
@@ -29,6 +34,11 @@ const PasswordConfirmURI = "/confirm-password"
 // The window is the only thing it decides. session.Store.PasswordConfirmed is
 // what stamps the session, and the screen that asks for the password is the
 // application's.
+//
+// Deprecated: it reads the stamp the deprecated session.Store keeps. On
+// [session.RecordStore], the one session path, the stamp is
+// [session.Record.PasswordConfirmedAt], written by RecordStore.Confirm and
+// read with Record.PasswordConfirmedWithin.
 type RequirePassword struct {
 	guestRedirect
 
@@ -52,6 +62,11 @@ type RequirePassword struct {
 //
 // The redirect target is a path rather than a route name: resolving a name
 // needs the router this package must not import.
+//
+// Deprecated: it reads the stamp the deprecated session.Store keeps. On
+// [session.RecordStore], the one session path, the stamp is
+// [session.Record.PasswordConfirmedAt], written by RecordStore.Confirm and
+// read with Record.PasswordConfirmedWithin.
 func NewRequirePassword(passwordTimeout time.Duration) *RequirePassword {
 	return &RequirePassword{passwordTimeout: passwordTimeout}
 }

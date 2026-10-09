@@ -30,6 +30,9 @@ import (
 //
 // The four signatures are hesape/session.Store's, so *session.Store is a
 // Session with nothing in between.
+//
+// Deprecated: asked for only by the deprecated [SessionGuard] and
+// [AuthManager]. Use session.RecordStore, the one session path.
 type Session interface {
 	// Get is the value under key, or the first def when there is none.
 	Get(key string, def ...any) any
@@ -58,6 +61,9 @@ type Session interface {
 // full attribute list rather than the three arguments SessionGuard passes. The
 // cookie is a *net/http.Cookie: net/http is the standard library, so naming it
 // here costs the root of auth no dependency.
+//
+// Deprecated: asked for only by the deprecated [SessionGuard] and
+// [AuthManager]. Use session.RecordStore, the one session path.
 type CookieJar interface {
 	// Make builds a cookie with these attributes.
 	Make(name, value string, minutes int, path, domain string, secure *bool, httpOnly, raw bool, sameSite http.SameSite) *http.Cookie
@@ -82,6 +88,9 @@ type CookieJar interface {
 // The signatures are hesape/events.Dispatcher's. An event is dispatched as a
 // value and a listener is registered against a value of the same type, which is
 // how that dispatcher names an event that is not a string.
+//
+// Deprecated: asked for only by the deprecated [SessionGuard] and
+// [AuthManager]. Use session.RecordStore, the one session path.
 type Dispatcher interface {
 	// Dispatch fires an event and returns whatever the listeners answered.
 	Dispatch(event any, payload ...any) []any

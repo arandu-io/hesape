@@ -8,6 +8,10 @@ import (
 )
 
 // Table is the table [DatabaseSessionHandler] reads and writes.
+//
+// Deprecated: the sessions table is read only by the deprecated
+// [DatabaseSessionHandler], and [RecordStore], the one session path, keeps no
+// table.
 const Table = "sessions"
 
 // CreateSessionsTable creates the table the database session handler uses.
@@ -15,6 +19,10 @@ const Table = "sessions"
 // It is code rather than a file in a tree, for the reason
 // [migrations.Migration] gives: a migration written as SQL text describes one
 // engine, and this collection runs on three.
+//
+// Deprecated: the sessions table is read only by the deprecated
+// [DatabaseSessionHandler], and [RecordStore], the one session path, keeps no
+// table.
 type CreateSessionsTable struct{ migrations.BaseMigration }
 
 // GetName returns the migration's name.
@@ -60,6 +68,10 @@ func (CreateSessionsTable) Down(ctx context.Context, conn migrations.Connection)
 // The table belongs to the package that reads it: an application keeping
 // sessions in a cookie or in Redis does not create it, and one using
 // [DatabaseSessionHandler] adds this to the list it hands the migrator.
+//
+// Deprecated: the sessions table is read only by the deprecated
+// [DatabaseSessionHandler], and [RecordStore], the one session path, keeps no
+// table.
 func Migrations() []migrations.Migration {
 	return []migrations.Migration{CreateSessionsTable{}}
 }

@@ -40,6 +40,10 @@ func sessionIsExpired(age, lifetime time.Duration) bool { return age > lifetime 
 //
 // It is not [ArrayHandler], which is the same idea for [RecordStore]: that one
 // stores a typed [Record] and this one stores the bytes a [Store] serialised.
+//
+// Deprecated: a [SessionHandler] of the deprecated [Store]. Use [RecordStore],
+// the one session path, over a [Handler]: [ArrayHandler] in memory, or the
+// RESP handler in hesape/redis.
 type ArraySessionHandler struct {
 	mu       sync.RWMutex
 	storage  map[string]arraySession
@@ -53,6 +57,9 @@ type arraySession struct {
 
 // NewArraySessionHandler returns an empty in-memory handler whose sessions
 // live for lifetime.
+//
+// Deprecated: use [NewRecordStore] over [NewArrayHandler], or over the RESP
+// handler in hesape/redis.
 func NewArraySessionHandler(lifetime time.Duration) *ArraySessionHandler {
 	return &ArraySessionHandler{storage: map[string]arraySession{}, lifetime: lifetime}
 }
@@ -124,10 +131,17 @@ func (h *ArraySessionHandler) GC(_ context.Context, lifetime time.Duration) (int
 // Every request gets an empty session, and nothing said in one survives it. It
 // is what a stateless API or a console binary wires so that code reaching for
 // the session does not have to branch on whether there is one.
+//
+// Deprecated: a [SessionHandler] of the deprecated [Store]. Use [RecordStore],
+// the one session path, over a [Handler]: [ArrayHandler] in memory, or the
+// RESP handler in hesape/redis.
 type NullSessionHandler struct{}
 
 // NewNullSessionHandler returns a handler that stores nothing and reads
 // nothing back.
+//
+// Deprecated: use [NewRecordStore] over [NewArrayHandler], or over the RESP
+// handler in hesape/redis.
 func NewNullSessionHandler() *NullSessionHandler { return &NullSessionHandler{} }
 
 var _ SessionHandler = (*NullSessionHandler)(nil)
@@ -160,6 +174,10 @@ func (h *NullSessionHandler) GC(context.Context, time.Duration) (int, error) { r
 // The read is a shared-locked read and the write is a locked write, so a request
 // never sees half of what another one is writing. See
 // [filesystem.LockableFile].
+//
+// Deprecated: a [SessionHandler] of the deprecated [Store]. Use [RecordStore],
+// the one session path, over a [Handler]: [ArrayHandler] in memory, or the
+// RESP handler in hesape/redis.
 type FileSessionHandler struct {
 	files    *filesystem.Filesystem
 	path     string
@@ -168,6 +186,9 @@ type FileSessionHandler struct {
 
 // NewFileSessionHandler returns a handler over a directory, creating it
 // immediately rather than waiting for the first write.
+//
+// Deprecated: use [NewRecordStore] over [NewArrayHandler], or over the RESP
+// handler in hesape/redis.
 func NewFileSessionHandler(files *filesystem.Filesystem, path string, lifetime time.Duration) (*FileSessionHandler, error) {
 	if path == "" {
 		return nil, errors.New("session: the file handler needs a directory")
@@ -287,6 +308,9 @@ func (h *FileSessionHandler) GC(_ context.Context, lifetime time.Duration) (int,
 // on it is what keeps that true. hesape/cookie's jar is what an application
 // wires behind it, through the two lines that turn a name, a value and a
 // lifetime into the *http.Cookie that jar queues.
+//
+// Deprecated: asked for only by the deprecated [CookieSessionHandler]. Use
+// [RecordStore], the one session path.
 type CookieJar interface {
 	// Queue puts a cookie on the response that is about to be written.
 	Queue(name, value string, lifetime time.Duration)
@@ -305,6 +329,10 @@ type CookieJar interface {
 //
 // Wire it with an encrypting jar or an [EncryptedStore]. Unencrypted, the
 // session is readable by whoever holds the machine.
+//
+// Deprecated: a [SessionHandler] of the deprecated [Store]. Use [RecordStore],
+// the one session path, over a [Handler]: [ArrayHandler] in memory, or the
+// RESP handler in hesape/redis.
 type CookieSessionHandler struct {
 	cookie        CookieJar
 	request       *http.Request
@@ -317,6 +345,9 @@ type CookieSessionHandler struct {
 //
 // expireOnClose gives the cookie no expiry, so the browser drops it when it is
 // closed.
+//
+// Deprecated: use [NewRecordStore] over [NewArrayHandler], or over the RESP
+// handler in hesape/redis.
 func NewCookieSessionHandler(cookie CookieJar, lifetime time.Duration, expireOnClose bool) *CookieSessionHandler {
 	return &CookieSessionHandler{cookie: cookie, lifetime: lifetime, expireOnClose: expireOnClose}
 }
@@ -428,6 +459,9 @@ func (h *CookieSessionHandler) GC(context.Context, time.Duration) (int, error) {
 // keeping sessions on disk does not drag the cache package in behind them.
 // hesape/cache's repository satisfies it, and so does anything else with these
 // three methods.
+//
+// Deprecated: asked for only by the deprecated [CacheBasedSessionHandler]. Use
+// [RecordStore], the one session path.
 type Cache interface {
 	// Get returns the value, or "" when the key is not there.
 	Get(ctx context.Context, key string) (string, error)
@@ -444,6 +478,10 @@ type Cache interface {
 // gives up is durability -- a cache that is flushed is every session ending at
 // once, which is survivable and is why this is the usual answer rather than the
 // database.
+//
+// Deprecated: a [SessionHandler] of the deprecated [Store]. Use [RecordStore],
+// the one session path, over a [Handler]: [ArrayHandler] in memory, or the
+// RESP handler in hesape/redis.
 type CacheBasedSessionHandler struct {
 	cache    Cache
 	lifetime time.Duration
@@ -451,6 +489,9 @@ type CacheBasedSessionHandler struct {
 
 // NewCacheBasedSessionHandler returns a handler that stores sessions in
 // cache.
+//
+// Deprecated: use [NewRecordStore] over [NewArrayHandler], or over the RESP
+// handler in hesape/redis.
 func NewCacheBasedSessionHandler(cache Cache, lifetime time.Duration) *CacheBasedSessionHandler {
 	return &CacheBasedSessionHandler{cache: cache, lifetime: lifetime}
 }
@@ -489,6 +530,9 @@ func (h *CacheBasedSessionHandler) GC(context.Context, time.Duration) (int, erro
 // It is declared here rather than imported from hesape/database, minimally and
 // on purpose: this handler needs two calls, and *sql.DB and *sql.Tx both satisfy
 // it unchanged.
+//
+// Deprecated: asked for only by the deprecated [DatabaseSessionHandler]. Use
+// [RecordStore], the one session path.
 type Connection interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
@@ -508,6 +552,10 @@ type Connection interface {
 // says "this session lives in the request", and it does not. An
 // application that wants those columns writes them beside the session,
 // where it knows who is signed in.
+//
+// Deprecated: a [SessionHandler] of the deprecated [Store]. Use [RecordStore],
+// the one session path, over a [Handler]: [ArrayHandler] in memory, or the
+// RESP handler in hesape/redis.
 type DatabaseSessionHandler struct {
 	connection Connection
 	table      string
@@ -522,6 +570,9 @@ type DatabaseSessionHandler struct {
 // table is quoted into the statements as an identifier, so it must be a name the
 // application chose and never one that came from a request. It is checked for
 // that: see [ErrBadTableName].
+//
+// Deprecated: use [NewRecordStore] over [NewArrayHandler], or over the RESP
+// handler in hesape/redis.
 func NewDatabaseSessionHandler(connection Connection, table string, lifetime time.Duration) (*DatabaseSessionHandler, error) {
 	if !validTableName(table) {
 		return nil, fmt.Errorf("%w: %q", ErrBadTableName, table)
@@ -535,6 +586,9 @@ func NewDatabaseSessionHandler(connection Connection, table string, lifetime tim
 // of the data -- so the only defence is refusing anything that is not letters,
 // digits and underscores. This is the line that means a configuration value read
 // from the environment cannot become an injection.
+//
+// Deprecated: returned only by the deprecated [NewDatabaseSessionHandler]. Use
+// [RecordStore], the one session path.
 var ErrBadTableName = errors.New("session: the table name must be letters, digits and underscores")
 
 func validTableName(table string) bool {

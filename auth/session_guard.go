@@ -46,15 +46,24 @@ const (
 var (
 	// ErrCookieJarNotSet reports that the guard was asked for the cookie jar and
 	// nobody set one.
+	//
+	// Deprecated: returned only by the deprecated [SessionGuard]. Use
+	// session.RecordStore, the one session path.
 	ErrCookieJarNotSet = errors.New("auth: cookie jar has not been set")
 
 	// ErrHasherNotSet is what [SessionGuard.LogoutOtherDevices] answers when the
 	// guard has no hasher. The hasher is a field, and an unset one is a wiring
 	// mistake rather than a wrong password.
+	//
+	// Deprecated: returned only by the deprecated [SessionGuard]. Use
+	// session.RecordStore, the one session path.
 	ErrHasherNotSet = errors.New("auth: hasher has not been set")
 
 	// ErrPasswordMismatch reports that the password given to
 	// [SessionGuard.LogoutOtherDevices] is not the account's current password.
+	//
+	// Deprecated: returned only by the deprecated [SessionGuard]. Use
+	// session.RecordStore, the one session path.
 	ErrPasswordMismatch = errors.New("auth: the given password does not match the current password")
 
 	// ErrInvalidBasicCredentials reports that the HTTP Basic credentials on the
@@ -62,6 +71,9 @@ var (
 	//
 	// It carries no WWW-Authenticate challenge: the response is the caller's, and
 	// a middleware that gets this error writes 401 and the Basic realm.
+	//
+	// Deprecated: returned only by the deprecated [SessionGuard]. Use
+	// session.RecordStore, the one session path.
 	ErrInvalidBasicCredentials = errors.New("auth: invalid credentials")
 )
 
@@ -76,6 +88,12 @@ var (
 // It is stateful and it is per request: it caches the user it resolved, the
 // request it reads cookies from, and whether logout was called. Build one per
 // request, and do not share it between goroutines.
+//
+// Deprecated: use session.RecordStore, the one session path. SessionGuard
+// keeps the signed-in user in the deprecated session.Store, which nothing
+// outside that path builds, and it is removed with it. A sign-in on the one
+// path checks the password with [CredentialVerifier] and starts the session
+// with RecordStore.Start.
 type SessionGuard struct {
 	GuardHelpers
 
@@ -156,6 +174,9 @@ var (
 // The cookie jar and the event dispatcher are not arguments. Set them with
 // [SessionGuard.SetCookieJar] and [SessionGuard.SetDispatcher], which is what
 // [AuthManager] does.
+//
+// Deprecated: use [NewCredentialVerifier] and session.RecordStore, the one
+// session path. See [SessionGuard].
 func NewSessionGuard(
 	name string,
 	provider UserProvider,
@@ -966,6 +987,9 @@ func randomToken(length int) string {
 // against the value:
 //
 //	dispatcher.Listen(auth.Login{}, func(e auth.Login) { ... })
+//
+// Deprecated: fired only by the deprecated [SessionGuard], and removed with
+// it. Use session.RecordStore, the one session path.
 type Attempting struct {
 	// Guard is the name of the guard.
 	Guard string
@@ -980,6 +1004,9 @@ type Attempting struct {
 }
 
 // Authenticated announces that a user was resolved for this request.
+//
+// Deprecated: fired only by the deprecated [SessionGuard], and removed with
+// it. Use session.RecordStore, the one session path.
 type Authenticated struct {
 	// Guard is the name of the guard.
 	Guard string
@@ -990,6 +1017,9 @@ type Authenticated struct {
 
 // Validated announces that the credentials were good, before anybody was signed
 // in.
+//
+// Deprecated: fired only by the deprecated [SessionGuard], and removed with
+// it. Use session.RecordStore, the one session path.
 type Validated struct {
 	// Guard is the name of the guard.
 	Guard string
@@ -999,6 +1029,9 @@ type Validated struct {
 }
 
 // Login announces that somebody signed in.
+//
+// Deprecated: fired only by the deprecated [SessionGuard], and removed with
+// it. Use session.RecordStore, the one session path.
 type Login struct {
 	// Guard is the name of the guard.
 	Guard string
@@ -1011,6 +1044,9 @@ type Login struct {
 }
 
 // Logout announces that somebody signed out, everywhere.
+//
+// Deprecated: fired only by the deprecated [SessionGuard], and removed with
+// it. Use session.RecordStore, the one session path.
 type Logout struct {
 	// Guard is the name of the guard.
 	Guard string
@@ -1020,6 +1056,9 @@ type Logout struct {
 }
 
 // CurrentDeviceLogout announces that somebody signed out of this browser only.
+//
+// Deprecated: fired only by the deprecated [SessionGuard], and removed with
+// it. Use session.RecordStore, the one session path.
 type CurrentDeviceLogout struct {
 	// Guard is the name of the guard.
 	Guard string
@@ -1029,6 +1068,9 @@ type CurrentDeviceLogout struct {
 }
 
 // OtherDeviceLogout announces that somebody invalidated their other sessions.
+//
+// Deprecated: fired only by the deprecated [SessionGuard], and removed with
+// it. Use session.RecordStore, the one session path.
 type OtherDeviceLogout struct {
 	// Guard is the name of the guard.
 	Guard string
@@ -1042,6 +1084,9 @@ type OtherDeviceLogout struct {
 // User is the account the credentials named, and it is nil when they named
 // nobody. It is the event a "somebody tried to sign in to your account" notice
 // listens for.
+//
+// Deprecated: fired only by the deprecated [SessionGuard], and removed with
+// it. Use session.RecordStore, the one session path.
 type Failed struct {
 	// Guard is the name of the guard.
 	Guard string

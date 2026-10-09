@@ -20,15 +20,34 @@ import (
 // silently look empty.
 const (
 	// TokenKey holds the CSRF token. [Store.Token] reads it.
+	//
+	// Deprecated: a key of the deprecated [Store]. [RecordStore], the one
+	// session path, keeps one typed [Record] rather than a bag of keys. Its
+	// CSRF token is minted by [CSRF] and bound to the session id.
 	TokenKey = "_token"
 	// OldInputKey holds what was typed into the form that was rejected.
+	//
+	// Deprecated: a key of the deprecated [Store]. [RecordStore], the one
+	// session path, keeps one typed [Record] rather than a bag of keys. The
+	// old input of a rejected form travels in [Flash].
 	OldInputKey = "_old_input"
 	// PreviousURLKey holds the address to send somebody back to.
+	//
+	// Deprecated: a key of the deprecated [Store]. [RecordStore], the one
+	// session path, keeps one typed [Record] rather than a bag of keys.
 	PreviousURLKey = "_previous.url"
 	// PreviousRouteKey holds the name of the route that address matched.
+	//
+	// Deprecated: a key of the deprecated [Store]. [RecordStore], the one
+	// session path, keeps one typed [Record] rather than a bag of keys.
 	PreviousRouteKey = "_previous.route"
 	// PasswordConfirmedKey holds when the password was last typed again, as a
 	// unix timestamp.
+	//
+	// Deprecated: a key of the deprecated [Store]. [RecordStore], the one
+	// session path, keeps one typed [Record] rather than a bag of keys. Its
+	// confirmation stamp is [Record.PasswordConfirmedAt], written by
+	// [RecordStore.Confirm].
 	PasswordConfirmedKey = "auth.password_confirmed_at"
 
 	// flashNewKey names the keys flashed by THIS request, which the next one
@@ -59,6 +78,9 @@ const idLength = 40
 
 // ErrNoPreviousURL is returned by [Store.PreviousURI] when nothing has been
 // stored.
+//
+// Deprecated: returned only by the deprecated [Store]. Use [RecordStore], the
+// one session path.
 var ErrNoPreviousURL = errors.New("session: no previous URL was stored")
 
 // SessionHandler is where a session's bytes live between requests.
@@ -72,6 +94,10 @@ var ErrNoPreviousURL = errors.New("session: no previous URL was stored")
 // because that is what makes a first request and an expired one the same
 // case: both start an empty session, and neither is an error the
 // application can do anything about.
+//
+// Deprecated: read only by the deprecated [Store]. [RecordStore], the one
+// session path, reads a [Handler]: [ArrayHandler] in memory, or the RESP
+// handler in hesape/redis.
 type SessionHandler interface {
 	// Open is called before the first read. Every handler here answers nil;
 	// the method exists so a handler that opens a connection has somewhere
@@ -97,6 +123,9 @@ type SessionHandler interface {
 // is an INSERT or an UPDATE, and getting that wrong is either a duplicate key
 // or an update that touches nothing. [Store.Migrate] tells it, because migrating
 // is the moment the id stops being one the table has.
+//
+// Deprecated: asked for only by the deprecated [Store]. Use [RecordStore], the
+// one session path.
 type ExistenceAwareInterface interface {
 	SetExists(value bool)
 }
@@ -107,6 +136,9 @@ type ExistenceAwareInterface interface {
 // Only [CookieSessionHandler] does. [Store.HandlerNeedsRequest] asks for this
 // capability rather than naming the concrete type, so it does not have to be
 // edited when a second handler needs the same thing.
+//
+// Deprecated: asked for only by the deprecated [Store]. Use [RecordStore], the
+// one session path.
 type RequestAware interface {
 	SetRequest(r *http.Request)
 }
@@ -130,6 +162,11 @@ type RequestAware interface {
 // [RecordStore] is the other half -- it signs the cookie, mints ids and
 // stores one typed [Record] per session. This one is the bag of keys a
 // page's handler reaches for. They share nothing but the package.
+//
+// Deprecated: use [RecordStore], the one session path. Store is the second
+// one: nothing outside that path builds it, the id its cookie carries is not
+// signed, and it is removed in a later minor release with the rest of the
+// path.
 type Store struct {
 	id         string
 	name       string
@@ -155,6 +192,8 @@ type Store struct {
 //
 // The payload is always encoded as JSON, which is portable to a second
 // language reading the same store.
+//
+// Deprecated: use [NewRecordStore]. See [Store].
 func NewStore(name string, handler SessionHandler, id string) *Store {
 	s := &Store{
 		name:                  name,
