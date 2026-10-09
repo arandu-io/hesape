@@ -72,6 +72,7 @@ the framework, the CLI or the skeleton calls any of them.
 |---|---|
 | `console.PhpBinary()` | `console.Binary()` |
 | `console.ArtisanBinary()` | drop the call: it always returned `""`, and `console.Binary()` is the whole command line before the command name |
+| `(*http.Request).SetLaravelSession(store)` | `(*http.Request).SetSession(store)` |
 
 ### `exception.Problem` carries `Errors`, and is no longer comparable
 

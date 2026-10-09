@@ -895,6 +895,21 @@ func TestHasSessionAndSetSession(t *testing.T) {
 	}
 }
 
+// TestTheDeprecatedSessionSetterSetsTheSameStore: the old name stays until it
+// is removed, and a caller still on it must get the store it handed over, and
+// the request back so the chain it wrote keeps compiling into the same thing.
+func TestTheDeprecatedSessionSetterSetsTheSameStore(t *testing.T) {
+	r := newRequest(t, "GET", "/", nil)
+	store := newSessionStore(t)
+
+	if got := r.SetLaravelSession(store); got != r {
+		t.Fatal("SetLaravelSession must return the request, as SetSession does")
+	}
+	if !r.HasSession() || r.Session() != store {
+		t.Fatal("SetLaravelSession must set the store SetSession would have set")
+	}
+}
+
 func TestSessionPanicsWhenNotSetOnSession(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
