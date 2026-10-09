@@ -4,7 +4,7 @@
 
 <h1 align="center">arandu-io/hesape</h1>
 
-<p align="center">47 packages, one per concern — the collection the framework is built from.</p>
+<p align="center">One package per concern — the collection the framework is built from.</p>
 
 <p align="center">
 <a href="https://github.com/arandu-io/hesape/actions/workflows/ci.yml"><img src="https://github.com/arandu-io/hesape/actions/workflows/ci.yml/badge.svg" alt="Build Status"></a>
@@ -42,22 +42,22 @@ nothing stops a project from importing a package here directly.
 | diagnostics & quality | `log`, `exception`, `validation`, `console`, `testing`/`arandutest` | the request Collector this framework exists for, the handler a failed request stops at (and the development error page), a form validator with 108 rules, the vocabulary a project's own commands are written against, a test client with assertions and outbox helpers |
 | foundation & utilities | `foundation`, `config`, `collections`, `str`, `support`, `number`, `image`, `jsonschema`, `process`, `pipeline`, `translation` | process composition run once at boot, typed configuration, generic collections, the string transforms a generator, a router and a validator all need, number/currency formatting, declarative image transforms, typed JSON Schema, external process execution, a value piped through a chain of steps, translated strings |
 
-Seven of the 47 export nothing at all, on purpose, and hold only a doc comment
-explaining why: a dependency-injection container (`container` — the wiring here
-is explicit and hand-written, never resolved), a way to attach a method to a
-type from outside its own package (`macroable` — a receiver has to be declared
-where its type is, and Go has no hook for a call that resolves to nothing),
-reflection over a type's structure (`reflection` — a type assertion asks at the
-call site what a runtime lookup would only ask later, and code generation reads
-`go/ast` at build time), SSH-driven remote command execution (`remote` — not
-built; running a command on another machine is `process` with the ssh binary as
-the transport), a home for `When` and `Unless` (`conditionable` — same receiver
-rule, so every chainable type declares them itself), a tree of interfaces
-(`contracts` — an interface belongs to the package that consumes it), and the
-old top-level scheduler (`scheduler` — it moved to `console/scheduling`, and the
-doc comment names what each symbol became). The package stays on disk so an
-import that goes looking for the concept finds the reason instead of a path that
-resolves to nothing.
+Seven of the top-level packages export nothing at all, on purpose, and hold only
+a doc comment explaining why: a dependency-injection container (`container` —
+the wiring here is explicit and hand-written, never resolved), a way to attach a
+method to a type from outside its own package (`macroable` — a receiver has to
+be declared where its type is, and Go has no hook for a call that resolves to
+nothing), reflection over a type's structure (`reflection` — a type assertion
+asks at the call site what a runtime lookup would only ask later, and code
+generation reads `go/ast` at build time), SSH-driven remote command execution
+(`remote` — not built; running a command on another machine is `process` with
+the ssh binary as the transport), a home for `When` and `Unless`
+(`conditionable` — same receiver rule, so every chainable type declares them
+itself), a tree of interfaces (`contracts` — an interface belongs to the package
+that consumes it), and the old top-level scheduler (`scheduler` — it moved to
+`console/scheduling`, and the doc comment names what each symbol became). The
+package stays on disk so an import that goes looking for the concept finds the
+reason instead of a path that resolves to nothing.
 
 **Assets are embedded, not fetched** — one `go:embed` directive
 (`view/assets.go:21`) bundles HTMX 2.0.4, Tailwind CSS 4.3.3, Basecoat 1.0.2
@@ -74,11 +74,13 @@ SHA-256, and caches — not an npm package. Zero Node anywhere in the tree,
 checked in CI.
 
 One direct dependency: `golang.org/x/crypto`, and CI fails a pull request that
-adds a second — every third-party driver lives in one of the six modules beside
-the root (`redis`, `queue/connectors/redis`, `filesystem/s3` and the three under
-`database/connectors`), each with its own `go.mod`, because Go has no optional
-dependency. 186,122 lines of production code and 87,439 of test, across 314 test
-files, and `go test -race ./...` passes.
+adds a second — every third-party driver, codec and runtime lives in a module
+beside the root (`redis`, `queue/connectors/redis`, `filesystem/s3`, the three
+under `database/connectors`, `image/drivers/raster` and `rpc`), each with its own
+`go.mod`, because Go has no optional dependency. From a checkout,
+`go list ./... | wc -l` counts the packages of the root module and
+`find . -name go.mod` lists every module; the numbers are theirs to print, not
+this file's to keep.
 
 ## Install
 
@@ -110,7 +112,7 @@ second time is worse — there is wrong documentation published.
 See [CONTRIBUTING.md](CONTRIBUTING.md). Every commit carries a `Signed-off-by`
 line, and before a pull request opens the three commands in that file — `gofmt`,
 `go vet ./...`, `go test -race ./...` — have to pass in the root module and in
-each of the six beside it. CI runs those three and three gates on top of them:
+each module beside it. CI runs those three and three gates on top of them:
 the exported surface diffed against the last release, which fails an
 incompatible change that `UPGRADE.md` does not record; `govulncheck`; and a
 check that `go.mod` still declares the one dependency.

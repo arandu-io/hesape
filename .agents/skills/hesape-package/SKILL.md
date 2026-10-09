@@ -1,21 +1,26 @@
 ---
 name: hesape-package
-description: Decide where a behaviour lives in the hesape component collection, and whether it should be a package at all. Use when the request is to "add a package", "create a new component", "port Illuminate's X", "add a helper for Y", "where should this code go", or "we need a container / macro / facade / reflection / contracts package"; when a change does not obviously belong to any of the 47 packages already here; or when a proposal arrives for something Laravel has and this collection does not. Also use when the answer is no — a refusal here is written down as a package that exports nothing and carries the argument, and seven of them exist for exactly that. Covers the triage, the naming rule, the doc.go that comes first, the subpackage conventions, and what to do instead of widening a package.
+description: Decide where a behaviour lives in the hesape component collection, and whether it should be a package at all. Use when the request is to "add a package", "create a new component", "port Illuminate's X", "add a helper for Y", "where should this code go", or "we need a container / macro / facade / reflection / contracts package"; when a change does not obviously belong to any of the packages already here; or when a proposal arrives for something Laravel has and this collection does not. Also use when the answer is no — a refusal here is written down as a package that exports nothing and carries the argument, and seven of them exist for exactly that. Covers the triage, the naming rule, the doc.go that comes first, the subpackage conventions, and what to do instead of widening a package.
 license: MIT
 ---
 
 # Adding a package, or writing down why there is not one
 
-The collection is 47 top-level packages in the root module, and 153 packages
-counting every subdirectory. The default answer to "should this be a new
-package" is no, and the second-best answer — after "it belongs in one that
-exists" — is a package that exports nothing and says why.
+The collection is the top-level packages of the root module and the packages
+under them. The default answer to "should this be a new package" is no, and the
+second-best answer — after "it belongs in one that exists" — is a package that
+exports nothing and says why.
+
+How many there are is whatever these print, not a number kept here:
 
 ```sh
 export GOWORK=off
-go list ./... | wc -l    # 153
-ls -d */ | wc -l         # 47
+go list ./... | wc -l                         # every package in the root module
+go list ./... | awk -F/ 'NF==4' | wc -l      # the top-level ones
 ```
+
+`ls -d */` is not the second count: it also lists `internal`, and the
+directories of the modules beside the root, which are not packages of this one.
 
 ## The triage
 
@@ -66,12 +71,14 @@ naming: a developer arriving from Laravel should recognise the vocabulary and
 only learn what actually differs. `str`, `collections`, `pipeline`, `bus`,
 `notifications` are all the name from there.
 
-**Write the `doc.go` before the code.** Every one of the 47 top-level packages
-has one, and it is checked by the fact that `pkg.go.dev` is the only reference
-this project publishes. Verify with:
+**Write the `doc.go` before the code.** Every top-level package is meant to
+have one, because `pkg.go.dev` is the only reference this project publishes.
+This lists the ones that do not, and should print nothing:
 
 ```sh
-for d in */; do [ -f "$d/doc.go" ] || echo "MISSING $d"; done   # prints nothing
+for p in $(GOWORK=off go list ./... | awk -F/ 'NF==4 {print $4}'); do
+  [ -f "$p/doc.go" ] || echo "MISSING $p"
+done
 ```
 
 The comment states what the package owns, what is in it, and the signature

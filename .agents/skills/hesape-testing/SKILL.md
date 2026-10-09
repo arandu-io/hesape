@@ -1,6 +1,6 @@
 ---
 name: hesape-testing
-description: Write, place and run a test in the hesape collection, whose suite is 3,750 test functions across 321 files in seven Go modules. Use when the request is to "add a test", "write tests for this", "cover this case", "the suite is failing", "run the tests", "how do I test X", "should this be a table test", or "where does this test go"; when adding a second implementation of an interface that already has a contract suite; when a test needs a real PostgreSQL, MySQL or RESP server; and when deciding between package X and package X_test. Covers where a file goes and why, which package it declares, the naming and failure-message conventions, the two contract suites, tests that prove a claim by compiling code that must fail, and the command that reaches all seven modules.
+description: Write, place and run a test in the hesape collection, whose suite runs to thousands of test functions across the root module and the modules beside it. Use when the request is to "add a test", "write tests for this", "cover this case", "the suite is failing", "run the tests", "how do I test X", "should this be a table test", or "where does this test go"; when adding a second implementation of an interface that already has a contract suite; when a test needs a real PostgreSQL, MySQL or RESP server; and when deciding between package X and package X_test. Covers where a file goes and why, which package it declares, the naming and failure-message conventions, the two contract suites, tests that prove a claim by compiling code that must fail, and the command that reaches every module.
 license: MIT
 ---
 
@@ -8,9 +8,11 @@ license: MIT
 
 The suite is the reason a change to a library this size can be made at all.
 
+Its size is whatever these print, not a number kept here:
+
 ```sh
-find . -name '*_test.go' | wc -l                                    # 321
-grep -rhcE '^func Test[A-Za-z0-9_]*\(' --include='*_test.go' . | paste -sd+ - | bc   # 3750
+find . -name '*_test.go' | wc -l                                    # test files
+grep -rhcE '^func Test[A-Za-z0-9_]*\(' --include='*_test.go' . | paste -sd+ - | bc   # test functions
 ```
 
 At that size the only thing that makes a failure useful is that it names the
@@ -27,10 +29,16 @@ directory, so a test filed elsewhere leaves the package under test reporting 0%
 
 This is a real choice, and it answers one question.
 
-| declare | when | count |
-| --- | --- | --- |
-| `package X_test` | this is the **contract**. The test sees what a caller sees, which is the point | 262 files |
-| `package X` | this is the **implementation**, and the test genuinely needs something unexported | 59 files |
+| declare | when |
+| --- | --- |
+| `package X_test` | this is the **contract**. The test sees what a caller sees, which is the point |
+| `package X` | this is the **implementation**, and the test genuinely needs something unexported |
+
+Most files declare the first. This lists the ones that declare the second:
+
+```sh
+grep -L '^package [a-z0-9_]*_test$' $(find . -name '*_test.go')
+```
 
 Prefer the first, and take the second only when you actually use it — a test
 declaring the internal package while naming nothing unexported is a test that
@@ -43,16 +51,17 @@ internal and that is the end of it.
 
 ## The shape
 
-**One function per behaviour, named as a sentence.** The suite has 3,750 test
-functions and 110 `t.Run` calls, which is the ratio on purpose: a table with
-eight rows reports one failing name, and eight functions report the one that
-broke. Reach for `t.Run` when the rows really are the same assertion over
-varying input — `TestARefusedSystemGrantSaysWhy` in `auth/policy_test.go:148` is
-the shape, three tenants against one message check.
+**One function per behaviour, named as a sentence.** The `t.Run` calls, which
+`grep -rho 't\.Run(' --include='*_test.go' . | wc -l` counts, are a small
+fraction of the test functions counted above, and that ratio is on purpose: a
+table with eight rows reports one failing name, and eight functions report the
+one that broke. Reach for `t.Run` when the rows really are the same assertion
+over varying input — `TestARefusedSystemGrantSaysWhy` in
+`auth/policy_test.go:148` is the shape, three tenants against one message check.
 
-**A doc comment where the name cannot carry the reason.** 897 tests open with
-one, 438 of them in the `// TestName: sentence` form. The good ones say what
-breaks rather than what is asserted:
+**A doc comment where the name cannot carry the reason.** Many tests open with
+one, often in the `// TestName: sentence` form. The good ones say what breaks
+rather than what is asserted:
 
 ```go
 // TestNoExternalOrigin: the CSP the framework sets is script-src 'self', so an
@@ -76,9 +85,9 @@ t.Fatalf("error = %v, want ErrForbidden", err)
 t.Fatal("the system subject must carry the system role, so audits can find it")
 ```
 
-`t.Helper()` (151 uses), `t.Cleanup` (85) and `t.TempDir()` (93) are the
-standard-library tools this suite leans on. `t.Parallel()` appears 343 times;
-use it where the test owns everything it touches.
+`t.Helper()`, `t.Cleanup` and `t.TempDir()` are the standard-library tools this
+suite leans on, and `t.Parallel()` is common: use it where the test owns
+everything it touches.
 
 ## Contract suites
 
@@ -118,8 +127,8 @@ nothing for as long as it read a variable no runner set, and the two doc
 comments saying "CI sets it" were describing a CI that no longer existed.
 
 One RESP image serves all four products, and what keeps that honest is
-`TestNothingUsesLuaOrModules` — declared in both `redis/redis_test.go:971` and
-`queue/connectors/redis/redis_test.go:327` — which reads the source rather than
+`TestNothingUsesLuaOrModules` — declared in both `redis/redis_test.go` and
+`queue/connectors/redis/redis_test.go` — which reads the source rather than
 talking to a server. Portability is guarded where it can actually be broken.
 
 ## Proving a claim that is about the compiler
@@ -146,7 +155,7 @@ go vet ./...
 go test -race -count=1 ./...
 ```
 
-`./...` stops at a module boundary, so that reaches the root and none of the six
+`./...` stops at a module boundary, so that reaches the root and none of the
 modules beside it — which is exactly where every third-party driver lives:
 
 ```sh
@@ -158,7 +167,7 @@ done
 ```
 
 `gofmt` stays out of that loop and loses nothing: it walks paths rather than
-modules, so the `find` above already covers all seven.
+modules, so the `find` above already covers every module.
 
 ## Two packages that are not for these tests
 

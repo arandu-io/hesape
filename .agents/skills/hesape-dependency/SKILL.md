@@ -1,6 +1,6 @@
 ---
 name: hesape-dependency
-description: The dependency rule of the hesape collection — one direct third-party dependency in the root module, and a CI gate that refuses the second. Use before running "go get", adding a require line, importing an SDK, a client library, a database or cache driver, a UUID package, an assertion library or a logger; when the request mentions "add a dependency", "use library X", "we need a Redis / S3 / Postgres / MySQL client", "vendor this", "add a JS library", "load it from a CDN", "npm", "node_modules", or "why is this written by hand"; and when a change adds or replaces anything under view/assets. Covers the one dependency the root module has, the gate that reads go.mod and how it was made able to fail, the six driver modules and what belongs in one, and the tests that keep Node, a CDN and an uncredited asset out of the tree.
+description: The dependency rule of the hesape collection — one direct third-party dependency in the root module, and a CI gate that refuses the second. Use before running "go get", adding a require line, importing an SDK, a client library, a database or cache driver, a UUID package, an assertion library or a logger; when the request mentions "add a dependency", "use library X", "we need a Redis / S3 / Postgres / MySQL client", "vendor this", "add a JS library", "load it from a CDN", "npm", "node_modules", or "why is this written by hand"; and when a change adds or replaces anything under view/assets. Covers the one dependency the root module has, the gate that reads go.mod and how it was made able to fail, the modules beside the root and what belongs in one, and the tests that keep Node, a CDN and an uncredited asset out of the tree.
 license: MIT
 ---
 
@@ -13,15 +13,9 @@ dependency.
 cat go.mod
 ```
 
-```
-module github.com/arandu-io/hesape
-
-go 1.26
-
-require golang.org/x/crypto v0.53.0
-
-require golang.org/x/sys v0.46.0 // indirect
-```
+It prints the module line, the `go` directive, one `require` for
+`golang.org/x/crypto`, and one for `golang.org/x/sys` marked `// indirect`. The
+versions move with every bump; that shape is what the rule holds.
 
 `golang.org/x/sys` is indirect, through `x/crypto`. A module graph recording
 what it always pulled is not a dependency somebody added, and the rule is about
@@ -60,7 +54,14 @@ the root module is a driver in every consumer — and the case that made the poi
 was the reverse of the obvious one: the skeleton used to carry pgx into every
 SQLite-only project, vulnerability surface included.
 
-Six modules exist for that, and each states its own argument in its `go.mod`:
+The modules beside the root exist for that. This lists every module in the tree,
+the root included, and the count is however many lines it prints:
+
+```sh
+find . -name go.mod
+```
+
+What each one beside the root carries:
 
 | module | what it carries |
 | --- | --- |
@@ -70,10 +71,12 @@ Six modules exist for that, and each states its own argument in its `go.mod`:
 | `database/connectors/pgx` | `github.com/jackc/pgx/v5` |
 | `database/connectors/mysql` | `github.com/go-sql-driver/mysql` |
 | `database/connectors/sqlite` | `modernc.org/sqlite` |
+| `image/drivers/raster` | the SVG renderer (`github.com/fyne-io/oksvg`, `github.com/srwiley/rasterx`, `github.com/srwiley/scanFT`), the WebP encoder (`github.com/gen2brain/vpx`) and `golang.org/x/image` |
+| `rpc` | `connectrpc.com/connect` and `google.golang.org/protobuf` |
 
-```sh
-find . -name go.mod | wc -l    # 7: the root and the six
-```
+A `go.mod` that `find` prints and this table does not name is a module somebody
+added without updating this file; read its `require` lines before trusting the
+table.
 
 `filesystem/s3` is the one to read before proposing an SDK. It is a module for
 the rule rather than for the weight, and its `go.mod` says why: SigV4 is two
@@ -85,8 +88,8 @@ quarter.
 A new driver module needs, at minimum:
 
 1. **Its own `go.mod`**, with a comment saying what a project that does not want
-   this driver is being spared. Three of the six carry one today —
-   `queue/connectors/redis`, `filesystem/s3` and `database/connectors/sqlite`.
+   this driver is being spared. `queue/connectors/redis`, `filesystem/s3`,
+   `database/connectors/sqlite` and `image/drivers/raster` carry one today.
    Copy their shape; the argument is what stops the module being folded back in
    by somebody who only sees the inconvenience.
 2. **No `replace` pointing at the checkout.** The database and RESP connectors
@@ -98,12 +101,13 @@ A new driver module needs, at minimum:
    each connector and fails if it can reach another driver. If two drivers meet
    in one module the split has stopped paying for itself, and nobody notices
    until `govulncheck` reports an advisory in a project that does not use it.
-4. **A CI job of its own**, with a real server where the claim needs one, and a
-   check that the suite did not skip. `go test` has no exit code for "everything
-   skipped", so a suite that skipped is a suite that printed ok. A module with
-   no workflow is built by nothing: `.github/workflows/` currently names the
-   root, the three database connectors and the two RESP ones, and `filesystem/s3`
-   appears in none of them.
+4. **A CI job with a real server, where the claim needs one**, and a check that
+   the suite did not skip. The `nested-modules` job in `ci.yml` loops over every
+   `go.mod` and builds, vets and tests each module against the tree, but a test
+   that needs a server skips there. `go test` has no exit code for "everything
+   skipped", so a suite that skipped is a suite that printed ok: the database
+   and RESP connectors each have a workflow that starts the server and fails on
+   a skip, and a new driver that talks to a server needs the same.
 
 ## Assets are a dependency too
 
@@ -154,7 +158,7 @@ gofmt -l $(find . -name '*.go' -not -path '*/testdata/*' -not -name '*.kyse.go')
 go build ./... && go vet ./... && go test -race ./...
 ```
 
-Then the six beside the root, which `./...` never reaches:
+Then every module beside the root, which `./...` never reaches:
 
 ```sh
 for mod in $(find . -name go.mod); do

@@ -17,7 +17,7 @@ names the situation you are in rather than the topic it covers.
 | `hesape-package` | a new behaviour has no obvious home, or somebody proposes a new package |
 | `hesape-dependency` | anything is about to enter the dependency graph: a Go module, a driver, a script, a stylesheet |
 | `hesape-grant` | writing a method that reads or writes stored data, or asking why one needs a `Grant` |
-| `hesape-testing` | writing, moving or running a test in any of the seven modules |
+| `hesape-testing` | writing, moving or running a test in the root module or any module beside it |
 
 ## Why these exist
 
@@ -27,10 +27,11 @@ the three skills above: put the code where nobody will find it, pull something
 into the graph that every consumer then carries, or write a data path that
 nobody authorized.
 
-The fourth is subtler. The suite is 3,750 test functions across 321 files, and
-the value of a suite that size is that a failure names the behaviour that broke.
-A test filed in the wrong package, or written against the implementation when
-the contract was the point, subtracts from that.
+The fourth is subtler. The suite runs to thousands of test functions —
+`hesape-testing` has the command that counts them — and the value of a suite
+that size is that a failure names the behaviour that broke. A test filed in the
+wrong package, or written against the implementation when the contract was the
+point, subtracts from that.
 
 The collection is also in nobody's training set, and it is close enough to
 Laravel to invite the wrong guess. A model asked to add something here reaches

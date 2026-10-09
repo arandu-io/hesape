@@ -25,11 +25,11 @@ go vet ./...
 go test -race ./...
 ```
 
-That covers the root module and nothing else. This repository is seven Go
-modules -- the root, plus `redis`, `queue/connectors/redis`, `filesystem/s3` and
-the three under `database/connectors` -- and `./...` stops at a module boundary.
-The six are where every third-party driver in the collection lives, so they are
-the last part of the tree that should go unchecked. Run the pair in each:
+That covers the root module and nothing else. This repository is more than one
+Go module -- `find . -name go.mod` lists them, the root included -- and `./...`
+stops at a module boundary. The modules beside the root are where every
+third-party driver, codec and runtime in the collection lives, so they are the
+last part of the tree that should go unchecked. Run the pair in each:
 
 ```
 for mod in $(find . -name go.mod); do
@@ -40,7 +40,7 @@ done
 ```
 
 `gofmt` stays out of the loop and loses nothing by it: it walks paths rather than
-modules, so the `find` above already reaches every file in all seven.
+modules, so the `find` above already reaches every file in every module.
 
 The driver suites skip when they cannot reach a server, which is what keeps them
 runnable on a machine with nothing installed. CI gives them a real PostgreSQL, a
@@ -54,11 +54,11 @@ CI runs all of that, and a handful of gates besides. They live in
 a copy here would be right until the day somebody adds one. The gate to know
 before you write the change is the one on dependencies: the root module depends
 on the standard library and `golang.org/x/crypto`, and nothing else.
-The six driver modules exist for that reason -- Go has no optional dependency, so
-a project that wanted a directory on disk must not carry an S3 client, and a
-project on SQLite must not carry pgx. A pull request that adds a require line to
-the root `go.mod`, or a second driver to a connector, needs to argue for it
-first, in an issue.
+The modules beside the root exist for that reason -- Go has no optional
+dependency, so a project that wanted a directory on disk must not carry an S3
+client, and a project on SQLite must not carry pgx. A pull request that adds a
+require line to the root `go.mod`, or a second driver to a connector, needs to
+argue for it first, in an issue.
 
 ## Where a test goes
 
