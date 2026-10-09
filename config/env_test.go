@@ -63,8 +63,8 @@ func TestBoolAcceptsEverySpellingPeopleWrite(t *testing.T) {
 	}
 }
 
-// TestBoolFallsBackOnNonsense: refusing to boot over a misspelt boolean costs a
-// deploy; Validate is where a combination that matters is refused.
+// TestBoolFallsBackOnNonsense: Bool is the reader for a setting whose fallback
+// is a working answer. StrictBool is the one that refuses the word instead.
 func TestBoolFallsBackOnNonsense(t *testing.T) {
 	t.Setenv("ARANDU_TEST_BOOL", "maybe")
 

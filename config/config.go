@@ -114,15 +114,23 @@ func Load() (App, error) {
 		return App{}, fmt.Errorf("APP_TIMEZONE %q is not a time zone: %w", zone, err)
 	}
 
+	// The default is the environment, not false: a developer who has to set a
+	// variable to see the error page will read a blank 500 instead, and a
+	// default of true would carry the page into production on the first deploy
+	// that forgets to unset it. Validate refuses that combination either way.
+	//
+	// It is read strictly because the default depends on the environment: a
+	// word the reader did not know would be on in dev and off everywhere else,
+	// and nothing would say which the .env had meant.
+	debug, err := StrictBool("APP_DEBUG", env == EnvDev)
+	if err != nil {
+		return App{}, err
+	}
+
 	app := App{
-		Name: String("APP_NAME", "arandu-app"),
-		Env:  env,
-		// The default is the environment, not false: a developer who has to set
-		// a variable to see the error page will read a blank 500 instead, and a
-		// default of true would carry the page into production on the first
-		// deploy that forgets to unset it. Validate refuses that combination
-		// either way.
-		Debug:        Bool("APP_DEBUG", env == EnvDev),
+		Name:         String("APP_NAME", "arandu-app"),
+		Env:          env,
+		Debug:        debug,
 		URL:          parsed,
 		HTTPAddr:     String("HTTP_ADDR", ":8080"),
 		Timezone:     location,

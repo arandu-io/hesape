@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -53,21 +54,66 @@ func MustString(key string) string {
 //
 // The accepted spellings are 1/true/yes/on and 0/false/no/off, in any case,
 // because all six appear in.env files people have already written. Anything
-// else falls back instead of failing: a boolean is never the setting worth
-// refusing to boot over, and Validate is where a combination that matters is
-// refused.
+// else falls back instead of failing, which is right for a setting whose
+// fallback is a working answer. Where a dropped word would change what the
+// process does -- whether the debug page shows, whether a cookie is Secure --
+// read it with [StrictBool], which refuses the word instead.
 func Bool(key string, fallback bool) bool {
 	v, ok := os.LookupEnv(key)
 	if !ok || v == "" {
 		return fallback
 	}
+	if value, known := parseBool(v); known {
+		return value
+	}
+	return fallback
+}
+
+// boolSpellings is what parseBool reads, in the words a refusal shows.
+const boolSpellings = "true, false, 1, 0, yes, no, on and off, in any case"
+
+// StrictBool returns the value of key read as a boolean, or fallback when it is
+// unset or blank, and an error when it is written and is not one of the
+// spellings [Bool] accepts.
+//
+// It is Bool for a setting read once at boot, where falling back in silence is
+// the defect: APP_DEBUG=sometimes would be the environment's default with the
+// .env saying otherwise and no line anywhere reporting the word was dropped.
+// The spellings are Bool's own, read by the same parser, so the two never
+// disagree about what "yes" means.
+//
+// Unset, empty and blank -- only spaces -- are the default, because a variable a
+// template rendered to nothing is a variable nobody meant to set. A value
+// padded with spaces is refused rather than trimmed, because Bool would not
+// trim it: the error shows it quoted, so the space is visible. The error names
+// the variable and the accepted spellings, and ends with how to ask for the
+// default.
+func StrictBool(key string, fallback bool) (bool, error) {
+	v := os.Getenv(key)
+	if strings.TrimSpace(v) == "" {
+		return fallback, nil
+	}
+	value, known := parseBool(v)
+	if !known {
+		return false, fmt.Errorf(`%s is %q, and it is read as a boolean.
+
+    %s=true
+
+The accepted spellings are %s. Leave it unset to keep the default.`, key, v, key, boolSpellings)
+	}
+	return value, nil
+}
+
+// parseBool reads v as one of the accepted spellings, and reports whether it
+// was one. It is the one parser behind [Bool] and [StrictBool].
+func parseBool(v string) (value, known bool) {
 	switch strings.ToLower(v) {
 	case "1", "true", "yes", "on":
-		return true
+		return true, true
 	case "0", "false", "no", "off":
-		return false
+		return false, true
 	default:
-		return fallback
+		return false, false
 	}
 }
 
