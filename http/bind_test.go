@@ -106,6 +106,91 @@ func TestBindTrimsEveryValue(t *testing.T) {
 	}
 }
 
+// passwordForm is a change-password screen: the keys Bind leaves as typed
+// beside keys that only look like them, which it trims.
+type passwordForm struct {
+	Email                   string   `form:"email"`
+	Name                    string   `form:"name"`
+	Password                string   `form:"password"`
+	PasswordConfirmation    string   `form:"password_confirmation"`
+	CurrentPassword         *string  `form:"current_password"`
+	NewPassword             string   `form:"new_password"`
+	NewPasswordConfirmation string   `form:"new_password_confirmation"`
+	RecoveryPassword        []string `form:"recovery_password"`
+	PasswordHint            string   `form:"password_hint"`
+	Passwordless            string   `form:"passwordless"`
+}
+
+// checkPasswordForm asserts that every password key arrived as typed and every
+// other key was trimmed.
+func checkPasswordForm(t *testing.T, req passwordForm) {
+	t.Helper()
+	if req.Password != " secret " || req.PasswordConfirmation != " secret " {
+		t.Errorf("password = %q, password_confirmation = %q, want both as typed: a password set with a space at its ends could never be typed again to sign in",
+			req.Password, req.PasswordConfirmation)
+	}
+	if req.CurrentPassword == nil {
+		t.Errorf("current_password = nil, want a pointer to the text as typed")
+	} else if *req.CurrentPassword != "\told one " {
+		t.Errorf("current_password = %q, want the text as typed", *req.CurrentPassword)
+	}
+	if req.NewPassword != " new " || req.NewPasswordConfirmation != " new " {
+		t.Errorf("new_password = %q, new_password_confirmation = %q, want both as typed: confirmed compares the two, and trimming one of them refuses a password that matches",
+			req.NewPassword, req.NewPasswordConfirmation)
+	}
+	if !reflect.DeepEqual(req.RecoveryPassword, []string{" a ", "b "}) {
+		t.Errorf("recovery_password = %q, want every value as typed", req.RecoveryPassword)
+	}
+	if req.Email != "ana@example.com" || req.Name != "Ana" {
+		t.Errorf("email = %q, name = %q, want both trimmed: only a password key is left as typed", req.Email, req.Name)
+	}
+	if req.PasswordHint != "pet" || req.Passwordless != "yes" {
+		t.Errorf("password_hint = %q, passwordless = %q, want both trimmed: the rule is a key ending in _password, not a key containing the word",
+			req.PasswordHint, req.Passwordless)
+	}
+}
+
+// TestBindLeavesAPasswordAsTyped: Bind trimmed every value, password included,
+// so a password chosen with a space at its ends was stored with the space by
+// a form that did not trim and then refused at every sign in through one that
+// did.
+func TestBindLeavesAPasswordAsTyped(t *testing.T) {
+	ctx := post("/", url.Values{
+		"email":                     {" ana@example.com "},
+		"name":                      {" Ana\t"},
+		"password":                  {" secret "},
+		"password_confirmation":     {" secret "},
+		"current_password":          {"\told one "},
+		"new_password":              {" new "},
+		"new_password_confirmation": {" new "},
+		"recovery_password":         {" a ", "b "},
+		"password_hint":             {" pet "},
+		"passwordless":              {" yes "},
+	})
+
+	var req passwordForm
+	if err := ctx.Bind(&req); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	checkPasswordForm(t, req)
+}
+
+// TestBindLeavesAJSONPasswordAsTyped: a JSON body reaches the same conversion
+// as a form, so the password keys keep their spaces there too.
+func TestBindLeavesAJSONPasswordAsTyped(t *testing.T) {
+	body := `{"email":" ana@example.com ","name":" Ana\t","password":" secret ","password_confirmation":" secret ",` +
+		`"current_password":"\told one ","new_password":" new ","new_password_confirmation":" new ",` +
+		`"recovery_password":[" a ","b "],"password_hint":" pet ","passwordless":" yes "}`
+	r := httptest.NewRequest(stdhttp.MethodPost, "/", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	var req passwordForm
+	if err := hhttp.NewContext(httptest.NewRecorder(), r, nil, nil).Bind(&req); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	checkPasswordForm(t, req)
+}
+
 // numbers holds one field of every numeric kind Bind converts into.
 type numbers struct {
 	Int     int     `form:"int"`

@@ -73,10 +73,19 @@ var (
 //
 // # How a value is converted
 //
-// Every value is trimmed with strings.TrimSpace first. Then, by the kind of the
-// field:
+// Every value is trimmed with strings.TrimSpace first, except the values of a
+// password key: password, a key ending in _password such as current_password
+// or new_password, and the confirmation of either, which is the same key
+// followed by _confirmation. A space at the ends of a password is part of what
+// the person chose, so trimming it would store one password and refuse the one
+// they type afterwards, and a confirmation trimmed differently from its
+// password would no longer match it. The rule reads the key exactly as it is
+// spelled: password_hint and passwordless are trimmed like any other key.
 //
-//   - string, and a type whose underlying type is string: the trimmed text.
+// Then, by the kind of the field:
+//
+//   - string, and a type whose underlying type is string: the trimmed text, or
+//     the text as it arrived for a password key.
 //   - bool: "1", "true", "on" and "yes" are true; "0", "false", "off", "no"
 //     and the empty string are false, in any case.
 //   - int, int8, int16, int32, int64, and the unsigned sizes: base ten, within
@@ -89,7 +98,8 @@ var (
 //     is empty, and a pointer to the converted value otherwise. It is how a
 //     field says that nothing was sent, as distinct from a zero.
 //   - []string, and a slice of a type whose underlying type is string: every
-//     value the key arrived with, each trimmed, in order. A <select multiple>
+//     value the key arrived with, each trimmed unless the key is a password
+//     key, in order. A <select multiple>
 //     and a group of checkboxes sharing a name send exactly that.
 //
 // Any other field takes the first value its key arrived with. An empty value
@@ -213,9 +223,14 @@ var errUnsupportedField = errors.New("its type is not one Bind converts into")
 func bindField(fv reflect.Value, name string, values []string, errs validation.Errors) error {
 	ft := fv.Type()
 
+	trim := strings.TrimSpace
+	if isPasswordKey(name) {
+		trim = func(value string) string { return value }
+	}
+
 	raw := ""
 	if len(values) > 0 {
-		raw = strings.TrimSpace(values[0])
+		raw = trim(values[0])
 	}
 
 	switch {
@@ -229,7 +244,7 @@ func bindField(fv reflect.Value, name string, values []string, errs validation.E
 		}
 		out := reflect.MakeSlice(ft, len(values), len(values))
 		for i, value := range values {
-			out.Index(i).SetString(strings.TrimSpace(value))
+			out.Index(i).SetString(trim(value))
 		}
 		fv.Set(out)
 		return nil
@@ -264,6 +279,15 @@ func bindField(fv reflect.Value, name string, values []string, errs validation.E
 	return errUnsupportedField
 }
 
+// isPasswordKey reports whether Bind leaves the values of the form key name as
+// they arrived: password, a key ending in _password, or either of those
+// followed by _confirmation, which is the key the confirmed rule compares a
+// field against.
+func isPasswordKey(name string) bool {
+	name = strings.TrimSuffix(name, "_confirmation")
+	return name == "password" || strings.HasSuffix(name, "_password")
+}
+
 // convertible reports whether convert can write a value of type t.
 func convertible(t reflect.Type) bool {
 	if t == timeType {
@@ -282,7 +306,8 @@ func convertible(t reflect.Type) bool {
 	return false
 }
 
-// convert writes raw, which is trimmed and not empty, into fv, whose type
+// convert writes raw, which is not empty and is trimmed unless its key is a
+// password key, into fv, whose type
 // convertible accepted. It returns the message for the field when raw does
 // not convert, and the empty string when it did.
 //
