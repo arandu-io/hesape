@@ -87,6 +87,9 @@ func TestTheOutboxMigrationsKeepTheirNames(t *testing.T) {
 // silently does nothing.
 func TestTheOutboxMigrationsRollBack(t *testing.T) {
 	ms := events.NewModule().Migrations()
+	if len(ms) != 2 {
+		t.Fatalf("%d migrations, want the table and its dead-letter column", len(ms))
+	}
 	for _, m := range ms {
 		if _, ok := m.(migrations.ReversibleMigration); !ok {
 			t.Fatalf("%s is not reversible", m.GetName())
