@@ -1,10 +1,12 @@
 package foundation
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -156,10 +158,11 @@ type htmlRecorder struct {
 	// run: pre-seeding this with 200 meant WriteHeader was never reached, so
 	// nothing was ever classified and an SVG containing a <body> element was
 	// handed the script.
-	status  int
-	buf     bytes.Buffer
-	passing bool // decided: not a document, writing straight through
-	wrote   bool // the header has gone out
+	status   int
+	buf      bytes.Buffer
+	passing  bool // decided: not a document, writing straight through
+	wrote    bool // the header has gone out
+	hijacked bool // the handler took the connection; nothing is sent on it
 }
 
 func (h *htmlRecorder) WriteHeader(status int) {
@@ -194,8 +197,30 @@ func (h *htmlRecorder) Flush() {
 	}
 }
 
+// Unwrap lets http.ResponseController reach the connection through this
+// wrapper, which is how a handler that holds a response open lifts the server's
+// write deadline. Without it the deadline is liftable in production, where this
+// middleware is not mounted, and not in development, where it is.
+func (h *htmlRecorder) Unwrap() http.ResponseWriter { return h.ResponseWriter }
+
+// Hijack takes the connection over through the writer underneath, and marks
+// the response as one this recorder must not send.
+//
+// It is a method rather than left to Unwrap because http.ResponseController
+// asks the outermost writer for Hijack before it unwraps, and a takeover that
+// went around this recorder would leave it sending its empty buffer, with a
+// status, onto a connection that is no longer the server's once the handler
+// returns.
+func (h *htmlRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	conn, brw, err := http.NewResponseController(h.ResponseWriter).Hijack()
+	if err == nil {
+		h.hijacked = true
+	}
+	return conn, brw, err
+}
+
 func (h *htmlRecorder) finish() {
-	if h.passing {
+	if h.passing || h.hijacked {
 		return
 	}
 	body := h.buf.Bytes()
