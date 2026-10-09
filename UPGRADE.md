@@ -26,6 +26,24 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+### A `*validation.ValidationException` reads as `validation.Errors`, and answers `HTTPStatus`
+
+`errors.As(err, &errs)` with `errs` a `validation.Errors` now answers true for a
+`*validation.ValidationException` anywhere in the chain, and fills `errs` with a
+copy of its messages. The exception also answers `HTTPStatus() int`: 422, or the
+status `Status` set.
+
+**What changes without a compiler error.** An adapter that answers
+`validation.Errors` and nothing else of the kind now answers a failed `Validate`
+the same way, where it let it through as an error nobody claimed — a 500. Code
+that tested for `validation.Errors` before testing for the exception now takes
+the first branch for both:
+
+| before | now |
+|---|---|
+| `errors.As(err, &errs)` is false for a failed `Validate` | true, with the same messages `invalid.Errors()` returns |
+| `errors.As(err, &statused)` with `interface{ HTTPStatus() int }` is false | true, 422 by default |
+
 ### A dot in a `routing.Resource` name nests the resource
 
 `routing.Resource` read its name as one path segment, dots included:

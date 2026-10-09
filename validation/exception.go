@@ -141,6 +141,51 @@ func (e *ValidationException) GetRedirectTo() string { return e.redirectTo }
 // GetResponse returns the answer the HTTP layer prepared, when it prepared one.
 func (e *ValidationException) GetResponse() any { return e.response }
 
+// HTTPStatus reports the status the failure answers with: 422, unless Status
+// set another.
+//
+// It is the method a routing layer looks for on any error, through errors.As
+// over an interface rather than over this type, so a ValidationException is
+// answered with its own status by code that never imports this package. Without
+// it, an adapter that knew Errors and nothing else let the exception through as
+// a failure nobody claimed, and a rejected form became a 500.
+func (e *ValidationException) HTTPStatus() int {
+	if e.status == 0 {
+		return defaultValidationStatus
+	}
+	return e.status
+}
+
+// As lets errors.As read the exception as Errors: the same messages, keyed by
+// the field they belong to.
+//
+//	var errs validation.Errors
+//	if errors.As(err, &errs) {
+//		// err was an Errors or a *ValidationException, wrapped or not
+//	}
+//
+// A failed Validate and a hand-built Errors are the same failure, and an
+// adapter that answers a rejected form reads both with the one errors.As above
+// instead of a branch for each. The map written into the target is a copy, so
+// what the adapter does with it does not reach back into the exception.
+//
+// Any other target answers false, which is what lets errors.As keep walking the
+// chain.
+func (e *ValidationException) As(target any) bool {
+	errs, ok := target.(*Errors)
+	if !ok || e == nil {
+		return false
+	}
+
+	messages := e.Errors()
+	copied := make(Errors, len(messages))
+	for field, list := range messages {
+		copied[field] = append([]string(nil), list...)
+	}
+	*errs = copied
+	return true
+}
+
 // sortedKeys is the stable order a Go map has none of.
 func sortedKeys(messages map[string][]string) []string {
 	keys := make([]string, 0, len(messages))
