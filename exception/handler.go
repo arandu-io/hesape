@@ -487,16 +487,24 @@ func validationMessages(err error) map[string][]string {
 
 // applyErrorHeaders copies onto the response what the error asked to carry.
 //
-// Nothing here did it, so a 429 went out with no Retry-After and a 401 with no
+// Without it a 429 went out with no Retry-After and a 401 with no
 // WWW-Authenticate -- a status the client could read and no instruction it
 // could obey. It runs before anything is written, because a header set after
 // WriteHeader is a header nobody receives.
+//
+// An error carries headers by answering GetHeaders() http.Header, matched by
+// method set the way StatusOf matches HTTPStatus: an *HTTPError, the rate limit
+// and body size errors of hesape/http/exceptions, and an application's own
+// type alike. Reading only *HTTPError sent the rate limiter's 429 out with the
+// Retry-After it had computed left behind. The first error in the chain that
+// answers is the one whose headers are copied, so a wrapper that states its
+// own headers is the one that is answered.
 func applyErrorHeaders(w http.ResponseWriter, err error) {
-	var he *HTTPError
-	if !errors.As(err, &he) || len(he.Headers) == 0 {
+	var carrier interface{ GetHeaders() http.Header }
+	if !errors.As(err, &carrier) {
 		return
 	}
-	for key, values := range he.Headers {
+	for key, values := range carrier.GetHeaders() {
 		for _, value := range values {
 			w.Header().Add(key, value)
 		}

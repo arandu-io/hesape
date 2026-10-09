@@ -26,6 +26,25 @@ the first tag and has nothing before it to compare against.
 
 ## Unreleased
 
+### The `exception.Handler` copies the headers of any error that carries them
+
+The Handler, and both displayers, copied headers from an `*exception.HTTPError`
+and from nothing else. They now copy them from the first error in the chain
+with a method `GetHeaders() http.Header` — the method an `*exception.HTTPError`
+now answers, and the one the errors of `hesape/http/exceptions` always had.
+
+**What changes without a compiler error.** A `ThrottleRequestsException` is
+answered with the `Retry-After` and rate-limit headers it carries, where the 429
+went out without them. A type of your own that answers `GetHeaders` has its
+headers sent. When an `*exception.HTTPError` wraps another error that carries
+headers, the wrapper's are the ones sent, the same first-match rule
+`exception.StatusOf` reads the status by.
+
+| error | before | now |
+|---|---|---|
+| `exceptions.NewThrottleRequestsException("", nil, http.Header{"Retry-After": {"30"}}, 0)` | 429, no `Retry-After` | 429, `Retry-After: 30` |
+| a type of your own with `GetHeaders() http.Header` | its headers dropped | its headers sent |
+
 ### `exception.Problem` carries `Errors`, and is no longer comparable
 
 `exception.Problem` gained `Errors map[string][]string`: the messages of a

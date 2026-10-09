@@ -71,6 +71,14 @@ func (e *HTTPError) Unwrap() error { return e.Err }
 // decision.
 func (e *HTTPError) HTTPStatus() int { return e.Status }
 
+// GetHeaders reports the headers the answer carries besides the status.
+//
+// It is the method the Handler looks for on any error, through errors.As over
+// an interface rather than over this type, so the Retry-After of a rate limit
+// reaches the response whichever package built the error. The method cannot be
+// named after the field it reads, which is why it carries the prefix.
+func (e *HTTPError) GetHeaders() http.Header { return e.Headers }
+
 // Abort builds a failure as a value rather than raising one.
 //
 //	return exception.Abort(http.StatusNotFound, "no invoice with that number")

@@ -12,6 +12,7 @@ import (
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/exception"
+	"github.com/arandu-io/hesape/http/exceptions"
 	"github.com/arandu-io/hesape/log"
 )
 
@@ -300,5 +301,107 @@ func TestRenderIgnoresANilError(t *testing.T) {
 
 	if rec.Code != http.StatusOK || rec.Body.Len() != 0 {
 		t.Fatalf("a nil error wrote %d and %q", rec.Code, rec.Body.String())
+	}
+}
+
+// limited is the rate limiter's answer as it arrives at the Handler: the 429 of
+// hesape/http/exceptions, with the numbers the limiter computed in its headers,
+// wrapped by the middleware that raised it.
+func limited() error {
+	throttle := exceptions.NewThrottleRequestsException("", nil, http.Header{
+		"Retry-After":           {"30"},
+		"X-Ratelimit-Limit":     {"60"},
+		"X-Ratelimit-Remaining": {"0"},
+	}, 0)
+	return fmt.Errorf("throttling /api/invoices: %w", throttle)
+}
+
+// TestARateLimitKeepsItsRetryAfter: the Handler copied headers from an
+// *exception.HTTPError and from nothing else, so the 429 the rate limiter
+// raised went out without the Retry-After it had just computed, and a client
+// that obeys the header had nothing to obey.
+func TestARateLimitKeepsItsRetryAfter(t *testing.T) {
+	h := exception.NewHandler(exception.Config{})
+
+	page := httptest.NewRequest(http.MethodGet, "/invoices", nil)
+	api := httptest.NewRequest(http.MethodGet, "/api/invoices", nil)
+	api.Header.Set("Accept", "application/json")
+
+	for name, r := range map[string]*http.Request{"page": page, "json": api} {
+		rec := render(h, r, limited())
+
+		if rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("%s: status = %d, want 429", name, rec.Code)
+		}
+		if got := rec.Header().Get("Retry-After"); got != "30" {
+			t.Errorf("%s: Retry-After = %q, want the 30 the limiter computed", name, got)
+		}
+		if got := rec.Header().Get("X-Ratelimit-Remaining"); got != "0" {
+			t.Errorf("%s: X-RateLimit-Remaining = %q, want the 0 the limiter computed", name, got)
+		}
+	}
+}
+
+// TestTheDisplayersCarryARateLimitsHeaders: the displayers answer through the
+// same copy as Render, so the page a development server draws for a 429 still
+// tells the client when to come back.
+func TestTheDisplayersCarryARateLimitsHeaders(t *testing.T) {
+	for _, dev := range []bool{false, true} {
+		h := exception.NewHandler(exception.Config{Dev: dev})
+
+		rec := httptest.NewRecorder()
+		h.Displayer().Display(rec, httptest.NewRequest(http.MethodGet, "/", nil), limited())
+
+		if got := rec.Header().Get("Retry-After"); got != "30" {
+			t.Errorf("dev=%v: Retry-After = %q, want the 30 the limiter computed", dev, got)
+		}
+	}
+}
+
+// maintenance is an application's own failure carrying headers the way the
+// Handler reads them: by method set, with no import of the exception package.
+type maintenance struct{}
+
+func (maintenance) Error() string   { return "down for maintenance" }
+func (maintenance) HTTPStatus() int { return http.StatusServiceUnavailable }
+func (maintenance) GetHeaders() http.Header {
+	return http.Header{"Retry-After": {"600"}}
+}
+
+// TestAnErrorOfYourOwnCarriesItsHeaders: a type that states its status by
+// method set states its headers the same way, or an application has to import
+// this package to send a Retry-After with its own 503.
+func TestAnErrorOfYourOwnCarriesItsHeaders(t *testing.T) {
+	h := exception.NewHandler(exception.Config{})
+
+	rec := render(h, httptest.NewRequest(http.MethodGet, "/", nil), fmt.Errorf("serving: %w", maintenance{}))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	if got := rec.Header().Get("Retry-After"); got != "600" {
+		t.Fatalf("Retry-After = %q, want the 600 the error carried", got)
+	}
+}
+
+// TestTheOutermostErrorStatesTheHeaders: the status is the first one the chain
+// states, and so are the headers. A wrapper that writes its own Retry-After is
+// answered with it alone, rather than with two values a client cannot choose
+// between.
+func TestTheOutermostErrorStatesTheHeaders(t *testing.T) {
+	h := exception.NewHandler(exception.Config{})
+	wrapper := &exception.HTTPError{
+		Status:  http.StatusServiceUnavailable,
+		Headers: http.Header{"Retry-After": {"120"}},
+		Err:     limited(),
+	}
+
+	rec := render(h, httptest.NewRequest(http.MethodGet, "/", nil), wrapper)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want the 503 of the wrapper", rec.Code)
+	}
+	if got := rec.Header().Values("Retry-After"); len(got) != 1 || got[0] != "120" {
+		t.Fatalf("Retry-After = %q, want only the 120 of the wrapper", got)
 	}
 }

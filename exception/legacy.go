@@ -180,9 +180,9 @@ type PlainDisplayer struct{ handler *Handler }
 // Display draws the status page for the failure.
 //
 // This draws the same page the status path draws, with the sentence for the
-// status, and it copies the headers too: the sentence said there were none to
-// copy, and an *HTTPError has carried them since -- Retry-After on a 429 is
-// the difference between a client that backs off and one that hammers.
+// status, and it copies the headers of any error that answers GetHeaders, the
+// way Render does -- Retry-After on a 429 is the difference between a client
+// that backs off and one that hammers.
 func (d *PlainDisplayer) Display(w http.ResponseWriter, r *http.Request, err error) {
 	status, known := StatusOf(err)
 	applyErrorHeaders(w, err)
