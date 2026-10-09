@@ -27,6 +27,68 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.52.0 — the names promised for removal go, and the session has one path
+
+### The names deprecated in v0.50.1 and v0.50.2 are removed
+
+v0.50.1 and v0.50.2 deprecated them, and v0.51.0 moved their removal to this
+minor. No code in the collection, the framework, the CLI, the skeleton, the
+first-party modules or the applications measured before the removal calls any
+of them. The first column is spelled the way `apidiff` reports the removal.
+
+| removed | write instead |
+|---|---|
+| `console.PhpBinary` | `console.Binary()` |
+| `console.ArtisanBinary` | drop the call: it always returned `""`, and `console.Binary()` is the whole command line before the command name |
+| `http.(*Request).SetLaravelSession` | `(*http.Request).SetSession(store)`, itself deprecated below with the store it takes |
+| `mail.(*Mailer).GetSymfonyTransport` | `(*mail.Mailer).GetTransport()` |
+| `mail.(*Mailer).SetSymfonyTransport` | `(*mail.Mailer).SetTransport(t)` |
+| `mail.(*MailManager).CreateSymfonyTransport` | `(*mail.MailManager).CreateTransport(cfg)` |
+| `mail.(*PendingMail).WithSymfonyMessage` | `(*mail.PendingMail).WithMessage(callback)` |
+| `mail.SentMessage.GetSymfonySentMessage` | drop the call: a `mail.SentMessage` is the receipt itself |
+| `mail.(*Message).GetSymfonyMessage` | drop the call: a `*mail.Message` is the MIME message itself. `*mail.TextMessage` embeds it, so the method leaves its method set too |
+| `notifications/messages.Mail.WithSymfonyMessage` | `notifications/messages.Mail.WithMessage(fn)` |
+| `support.Laravel_cloud` | `os.Getenv("LARAVEL_CLOUD") == "1"` where the answer is needed; drop the call where it is not |
+| `console/events.ArtisanStarting` | drop it, and any listener registered for it: nothing dispatched it |
+| `console/events.Application` | drop it with `ArtisanStarting`, the only event that carried it |
+
+`redis/connections.PacksPhpRedisValues`, deprecated in the same v0.50.2 entry,
+stays. It is in the `redis` module, which carries its own releases, and its
+last one, `redis/v0.11.0`, predates the rename: no release of that module has
+carried the deprecation yet, so it goes in the minor of `redis` after the one
+that does.
+
+### The second session path is deprecated, and `RecordStore` is the session
+
+`session.RecordStore` is the session: it signs the cookie its id travels in,
+keeps one typed `session.Record` per session with the tenant and the subject,
+and is what the framework, the skeleton and the applications build. The other
+path -- `session.SessionManager`, the `session.Store` it builds and the
+`StartSession` middleware that loads one per request -- shared nothing with it
+but the package, carried the id in an unsigned cookie, and was built by nothing
+outside its own tests. Every name on it now carries a `Deprecated:` paragraph,
+and the names go in a later minor release.
+
+Nothing stops compiling. A linter that reports a deprecated name, such as
+staticcheck's SA1019, reports these.
+
+| deprecated | write instead |
+|---|---|
+| `session.Store`, `session.NewStore`, `session.EncryptedStore`, `session.NewEncryptedStore`, `session.Encrypter` | `session.RecordStore` from `session.NewRecordStore(appKey, ttl, secure, handler)` |
+| `session.SessionManager`, `session.NewSessionManager`, `session.Config`, `session.HandlerCreator`, `session.ErrNoDriver`, `session.DefaultLifetime`, `session.DefaultBlockLockSeconds`, `session.DefaultBlockWaitSeconds`, `session.ConfigError`, `session.ErrUnsafeConfig` | `session.NewRecordStore`, which takes the lifetime and the Secure flag as arguments and reads nothing else |
+| `session.SessionHandler` and its six implementations -- `ArraySessionHandler`, `NullSessionHandler`, `FileSessionHandler`, `CookieSessionHandler`, `CacheBasedSessionHandler`, `DatabaseSessionHandler` -- with their constructors, `session.CookieJar`, `session.Cache`, `session.Connection`, `session.ExistenceAwareInterface`, `session.RequestAware`, `session.ErrBadTableName` | a `session.Handler[T]`: `session.NewArrayHandler[T]()` in memory, or `redis.NewCacheBasedSessionHandler[T](conn)` from `hesape/redis` |
+| `session.TokenKey`, `session.OldInputKey`, `session.PreviousURLKey`, `session.PreviousRouteKey`, `session.ErrNoPreviousURL` | `session.CSRF` for the token, `session.Flash` for the old input of a rejected form; a `Record` is one typed value, not a bag of keys |
+| `session.PasswordConfirmedKey` | `session.Record.PasswordConfirmedAt`, written by `RecordStore.Confirm` and read with `Record.PasswordConfirmedWithin` |
+| `session.Table`, `session.CreateSessionsTable`, `session.Migrations`, and the package `session/console` (`SessionTableCommand`, `NewSessionTableCommand`, `MigrationStub`, `TableName`) | nothing: `RecordStore` keeps no table, so drop the migration from the list handed to the migrator |
+| the package `session/middleware`: `StartSession`, `NewStartSession`, `LockFactory`, `WithSession`, `Session`, `AuthenticateSession`, `NewAuthenticateSession`, `Guard` | `RecordStore.Start` where somebody signs in and `RecordStore.All` where a handler reads the session; `RecordStore.DestroyOthers` to end the other sessions of an account when its password changes |
+| `auth.SessionGuard`, `auth.NewSessionGuard`, `auth.ErrCookieJarNotSet`, `auth.ErrHasherNotSet`, `auth.ErrPasswordMismatch`, `auth.ErrInvalidBasicCredentials`, `auth.Recaller`, `auth.NewRecaller`, `auth.Session`, `auth.CookieJar`, `auth.Dispatcher` | `auth.NewCredentialVerifier` to check the password, `RecordStore.Start` with `session.Remember(on)` to start the session |
+| the events `auth.Attempting`, `auth.Authenticated`, `auth.Validated`, `auth.Login`, `auth.Logout`, `auth.CurrentDeviceLogout`, `auth.OtherDeviceLogout`, `auth.Failed` | nothing fires them but `SessionGuard`; drop the listeners with it |
+| `auth.AuthManager`, `auth.NewAuthManager`, `auth.ManagerConfig` | `auth.NewTokenGuard` or `auth.NewRequestGuard` directly where a guard is needed |
+| `auth/middleware.RequirePassword`, `auth/middleware.NewRequirePassword`, `auth/middleware.PasswordConfirmURI` | `Record.PasswordConfirmedWithin(window)` on the record `RecordStore.All` returns |
+| `(*http.Request).HasSession`, `Session`, `SetSession`, `GetSession` | `RecordStore.All(ctx, r)` |
+| `(*http.RedirectResponse).With`, `WithInput`, `OnlyInput`, `ExceptInput`, `WithErrors`, `GetSession`, `SetSession` | `http.Reject(w, r, flash, errs)`, which writes the errors and the old input of a rejected form to `session.Flash`. Without a store set, these did nothing |
+| `(*testing.TestResponse).AssertSessionHas`, `AssertSessionHasAll`, `AssertSessionMissing`, `DumpSession`, `DDSession` | `RecordStore.All` for the record; `AssertSessionHasErrors` and `AssertSessionHasInput`, which read the flash cookie, for a rejected form |
+
 ## v0.51.0 — `config.StrictBool`, and a connection taken over is finished as one
 
 The names deprecated in v0.50.1 and v0.50.2 are still here: they were to go in this minor, and go in v0.52.0
