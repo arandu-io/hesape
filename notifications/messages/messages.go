@@ -375,11 +375,6 @@ func (m Mail) WithMessage(fn MessageCallback) Mail {
 	return m
 }
 
-// WithSymfonyMessage registers a callback, as WithMessage does.
-//
-// Deprecated: use WithMessage.
-func (m Mail) WithSymfonyMessage(fn MessageCallback) Mail { return m.WithMessage(fn) }
-
 // Tone is the level with the zero value resolved: an empty LevelName reads as
 // [LevelInfo], so a message nobody set a tone on still renders with one.
 func (m Mail) Tone() Level {

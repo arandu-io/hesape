@@ -225,14 +225,6 @@ func (m *MailManager) CreateTransport(cfg MailerConfig) (Transport, error) {
 	return creator(cfg)
 }
 
-// CreateSymfonyTransport builds the transport CreateTransport builds, and fails
-// as it does.
-//
-// Deprecated: use CreateTransport.
-func (m *MailManager) CreateSymfonyTransport(cfg MailerConfig) (Transport, error) {
-	return m.CreateTransport(cfg)
-}
-
 // ConfigFor is the configuration of a named mailer, and is what a composite
 // transport creator -- failover, round robin -- asks for to build its parts.
 func (m *MailManager) ConfigFor(name string) (MailerConfig, bool) {

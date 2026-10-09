@@ -12,32 +12,6 @@ import (
 	"time"
 )
 
-// Application is the console application an ArtisanStarting listener would be
-// handed.
-//
-// It is an interface for the same reason ScheduledTask is: the console package
-// would dispatch the event, and importing it back would be a cycle.
-//
-// Deprecated: drop it along with ArtisanStarting, the only event that carries
-// it.
-type Application interface {
-	// Names lists the commands a person can be told about.
-	Names() []string
-}
-
-// ArtisanStarting describes the moment the console application has been built
-// and has not yet run anything.
-//
-// Nothing dispatches it, so a listener registered for it is never called. A
-// package adds its commands with console.Application.Add, where the
-// application is assembled.
-//
-// Deprecated: drop it, and the listener registered for it, which never runs.
-type ArtisanStarting struct {
-	// Artisan is the application that is starting.
-	Artisan Application
-}
-
 // CommandStarting is fired before a command runs.
 type CommandStarting struct {
 	// Command is the command name.

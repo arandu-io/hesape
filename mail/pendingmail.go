@@ -299,13 +299,6 @@ func (p *PendingMail) WithMessage(callback func(*Message)) *PendingMail {
 	return p
 }
 
-// WithSymfonyMessage registers a callback, as WithMessage does.
-//
-// Deprecated: use WithMessage.
-func (p *PendingMail) WithSymfonyMessage(callback func(*Message)) *PendingMail {
-	return p.WithMessage(callback)
-}
-
 // BuildViewData is what the views render from: the mailable's exported fields,
 // merged with whatever [PendingMail.With] and [BuildViewDataUsing] added, so
 // that a view can name a field of the mailable directly. It takes the mailable

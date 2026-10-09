@@ -92,12 +92,6 @@ type SentMessage struct {
 	Message *Message
 }
 
-// GetSymfonySentMessage returns the receipt it is called on.
-//
-// Deprecated: drop the call. A SentMessage is the receipt itself, not a
-// wrapper around one, so there is nothing to unwrap.
-func (s SentMessage) GetSymfonySentMessage() SentMessage { return s }
-
 // Transport delivers a rendered message.
 //
 // One method, so writing one is small: an adapter for a provider is a POST and

@@ -172,14 +172,13 @@ func TestTheEnvelopeFields(t *testing.T) {
 	}
 }
 
-// TestTheDeprecatedCallbackRegistrarAddsAfterTheOthers: the old name stays until
-// it is removed, and a caller still on it must get the callback registered where
-// WithMessage would have put it, after the ones already there.
-func TestTheDeprecatedCallbackRegistrarAddsAfterTheOthers(t *testing.T) {
+// TestASecondCallbackIsAddedAfterTheFirst: WithMessage appends, so a callback
+// registered later runs after the ones already there rather than replacing them.
+func TestASecondCallbackIsAddedAfterTheFirst(t *testing.T) {
 	var ran []string
 	m := messages.NewMail().
 		WithMessage(func(map[string]string) { ran = append(ran, "first") }).
-		WithSymfonyMessage(func(map[string]string) { ran = append(ran, "second") })
+		WithMessage(func(map[string]string) { ran = append(ran, "second") })
 
 	if len(m.Callbacks) != 2 {
 		t.Fatalf("%d callbacks registered, want 2", len(m.Callbacks))
