@@ -162,13 +162,33 @@ func TestTheEnvelopeFields(t *testing.T) {
 	}
 
 	called := 0
-	m = m.WithSymfonyMessage(func(map[string]string) { called++ })
+	m = m.WithMessage(func(map[string]string) { called++ })
 	if len(m.Callbacks) != 1 {
 		t.Fatalf("%d callbacks registered, want 1", len(m.Callbacks))
 	}
 	m.Callbacks[0](map[string]string{})
 	if called != 1 {
 		t.Errorf("the callback ran %d times", called)
+	}
+}
+
+// TestTheDeprecatedCallbackRegistrarAddsAfterTheOthers: the old name stays until
+// it is removed, and a caller still on it must get the callback registered where
+// WithMessage would have put it, after the ones already there.
+func TestTheDeprecatedCallbackRegistrarAddsAfterTheOthers(t *testing.T) {
+	var ran []string
+	m := messages.NewMail().
+		WithMessage(func(map[string]string) { ran = append(ran, "first") }).
+		WithSymfonyMessage(func(map[string]string) { ran = append(ran, "second") })
+
+	if len(m.Callbacks) != 2 {
+		t.Fatalf("%d callbacks registered, want 2", len(m.Callbacks))
+	}
+	for _, callback := range m.Callbacks {
+		callback(map[string]string{})
+	}
+	if got := strings.Join(ran, ","); got != "first,second" {
+		t.Errorf("callbacks ran as %q, want both, in the order they were registered", got)
 	}
 }
 

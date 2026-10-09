@@ -46,6 +46,7 @@ collection, the framework, the CLI or the skeleton uses any of them.
 | `(*mail.PendingMail).WithSymfonyMessage(callback)` | `(*mail.PendingMail).WithMessage(callback)` |
 | `mail.SentMessage.GetSymfonySentMessage()` | drop the call: a `mail.SentMessage` is the receipt itself |
 | `(*mail.Message).GetSymfonyMessage()` | drop the call: a `*mail.Message` is the MIME message itself |
+| `notifications/messages.Mail.WithSymfonyMessage(fn)` | `notifications/messages.Mail.WithMessage(fn)` |
 
 ## v0.50.1 — the headers an error carries are sent, and three names are deprecated
 

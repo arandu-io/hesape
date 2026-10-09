@@ -75,7 +75,7 @@ type Attachment struct {
 
 // MessageCallback is handed the headers of the outgoing message, so an
 // application can add one the message type has no field for. It is registered
-// with [Mail.WithSymfonyMessage] and runs just before the message goes.
+// with [Mail.WithMessage] and runs just before the message goes.
 type MessageCallback func(headers map[string]string)
 
 // Mail is a notification as an e-mail.
@@ -367,13 +367,18 @@ func (m Mail) Priority(level int) Mail {
 	return m
 }
 
-// WithSymfonyMessage registers a callback handed the header map the transport
-// is about to send, which is the escape hatch for a header the message type has
-// no field for.
-func (m Mail) WithSymfonyMessage(fn MessageCallback) Mail {
+// WithMessage registers a callback handed the header map the transport is about
+// to send, which is the escape hatch for a header the message type has no field
+// for.
+func (m Mail) WithMessage(fn MessageCallback) Mail {
 	m.Callbacks = append(append([]MessageCallback(nil), m.Callbacks...), fn)
 	return m
 }
+
+// WithSymfonyMessage registers a callback, as WithMessage does.
+//
+// Deprecated: use WithMessage.
+func (m Mail) WithSymfonyMessage(fn MessageCallback) Mail { return m.WithMessage(fn) }
 
 // Tone is the level with the zero value resolved: an empty LevelName reads as
 // [LevelInfo], so a message nobody set a tone on still renders with one.
