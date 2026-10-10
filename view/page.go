@@ -32,7 +32,9 @@ type Layout interface {
 	// can stop linking to where you already are.
 	IsCurrent(href string) bool
 
-	// BrandName is the application name in the navigation bar.
+	// BrandName is the application name in the navigation bar. It is
+	// configuration, the same on every request, which is why Page takes it from
+	// the request context rather than from the controller -- see New.
 	BrandName() string
 	// CSRFToken is what @csrf reads, and what <body> carries into every HTMX
 	// request.
@@ -103,6 +105,10 @@ type Page struct {
 	Canonical string
 
 	// AppName is the brand in the navigation bar.
+	//
+	// New fills it from the request context, where the framework put the
+	// configured name (see hhttp.WithAppName), so no controller and no module
+	// has to know it. A controller that assigns it afterwards replaces it.
 	AppName string
 
 	// Token is the CSRF token issued for this session. It reaches the markup
@@ -244,9 +250,16 @@ func (p Page) AdminLink() string { return p.AdminURL }
 //
 // It fills what the request itself knows: the title it was given, the address
 // being served, what the flash left behind, the token the middleware that
-// protects forms issued for this request (hhttp.CSRFTokenFrom), and whether
-// somebody is signed in -- auth.Check over the subject the authentication
-// middleware put on the context, so a guest is not signed in.
+// protects forms issued for this request (hhttp.CSRFTokenFrom), the
+// application name the framework put on the context (hhttp.AppNameFrom), and
+// whether somebody is signed in -- auth.Check over the subject the
+// authentication middleware put on the context, so a guest is not signed in.
+//
+// The application name is configuration rather than a decision: it is the same
+// on every request, so a page drawn by a generated controller or by a module,
+// neither of which reads the application's configuration, carries the same
+// brand as the application's own. On a request nothing put a name on, AppName
+// is empty and the navigation bar draws no brand.
 //
 // The four navigation targets come from the route table: HomeURL from the
 // route named "home", LoginURL from "auth.login", LogoutURL from "auth.logout"
@@ -257,16 +270,18 @@ func (p Page) AdminLink() string { return p.AdminURL }
 // left to every controller.
 //
 // UserName stays empty: the subject carries an identifier, not a display name,
-// and the name is a read the controller makes. So are the application name,
-// PanelURL and AdminURL, which are decisions -- see the Layout interface on
-// why the layout is never allowed to go and fetch them. A controller assigns
-// any of these on the value New returns.
+// and the name is a read the controller makes. PanelURL and AdminURL stay empty
+// too, because they depend on who is asking -- see the Layout interface on why
+// the layout is never allowed to go and fetch them. A controller assigns any of
+// these on the value New returns, and may assign AppName there as well, which
+// replaces the configured name for that page.
 func New(ctx *hhttp.Context, title string) Page {
 	state := ctx.State()
 	token, _ := hhttp.CSRFTokenFrom(ctx.Ctx())
 	return Page{
 		Title:         title,
 		Path:          ctx.Request.URL.Path,
+		AppName:       hhttp.AppNameFrom(ctx.Ctx()),
 		Token:         token,
 		Errors:        state.Errors,
 		Old:           state.Old,
