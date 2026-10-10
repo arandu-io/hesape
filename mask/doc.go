@@ -14,7 +14,17 @@
 // database when they disagree is punctuation.
 //
 // So the browser sends the raw value, not the formatted one, and this package
-// is what the server uses to decide whether that raw value fits.
+// is what the server uses to decide whether that value fits.
+//
+// # What a form can send
+//
+// The raw value is what arrives once the browser's script has run. Until it
+// has -- scripting off, the script blocked or not loaded yet -- the form posts
+// the visible box as it stands, and that is the value as it was typed, which
+// may be the formatted one. A server cannot tell the two apart and should not
+// have to, so the checks here take either: Accepts answers yes to 12345678900
+// and to 123.456.789-00 alike, Complete counts the same characters in both,
+// and Unmask turns both into 12345678900, which is what gets stored.
 //
 // # What it does not do
 //

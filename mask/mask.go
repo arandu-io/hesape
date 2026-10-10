@@ -153,13 +153,22 @@ func (p Pattern) Complete(value string) bool {
 	return len(raw) >= required
 }
 
-// Accepts reports whether value fits the pattern: every character it holds is
-// one the pattern would have kept, and there are no more than the pattern takes.
+// Accepts reports whether value is one this pattern can produce: the formatted
+// value, which Apply leaves as it is, or the raw value, which Unmask leaves as
+// it is. Every character it holds is one the pattern would have kept, in a
+// place the pattern would have put it, and there are no more than the pattern
+// takes.
+//
+// Both, because a form sends either. The browser's script posts the raw value,
+// and the same form with no script posts what was typed, punctuation included
+// when somebody typed it -- so 01310100 and 01310-100 are both accepted by
+// 00000-000, while 0131-0100, with its separator in a place the pattern never
+// writes one, is not. Unmask turns whichever arrived into what is stored.
 //
 // Complete asks whether enough was typed; this asks whether what was typed
 // belongs. A caller validating a submitted field wants both.
 func (p Pattern) Accepts(value string) bool {
-	return p.Apply(value) == value
+	return value == p.Apply(value) || value == p.Unmask(value)
 }
 
 // Capacity is how many characters the tokens accept, and -1 for a pattern that
