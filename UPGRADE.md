@@ -27,6 +27,32 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.54.0 — the application name travels on the request
+
+### `view.New` fills `AppName` from the request context
+
+`http.WithAppName` puts the application name on a request context and
+`http.AppNameFrom` reads it back, beside `http.WithCSRFToken` and
+`http.CSRFTokenFrom`. `view.New` now fills `Page.AppName` from it, the way it
+already fills the CSRF token. An empty name is not stored, and a request
+nothing put a name on yields an empty `AppName`, as before.
+
+Nothing stops compiling. A controller that assigns `AppName` on the value
+`view.New` returns keeps working, and its assignment still wins.
+
+Once the framework you build on puts the configured name on the request,
+an application or module that assigned the name by hand can delete:
+
+- the `page.AppName = ...` line after `view.New`, when it assigned the
+  configured application name;
+- the application name passed into a controller's constructor, or kept in a
+  field, only to make that assignment;
+- a per-project helper that wrapped `view.New` only to set `AppName`.
+
+Keep the assignment where a page deliberately shows a different brand.
+`UserName`, `PanelURL` and `AdminURL` depend on who is asking, and remain the
+controller's to fill.
+
 ## v0.53.0 — a masked field and a one-time code complete without script
 
 ### `mask.Pattern.Accepts` takes the raw value as well as the formatted one
