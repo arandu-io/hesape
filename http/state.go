@@ -105,3 +105,41 @@ func CSRFTokenFrom(ctx context.Context) (string, bool) {
 	token, ok := ctx.Value(csrfTokenKey{}).(string)
 	return token, ok && token != ""
 }
+
+// appNameKey is the context key of the application name, of an unexported
+// type for the same reason as stateKey.
+type appNameKey struct{}
+
+// WithAppName returns a context carrying the name of the application serving
+// this request.
+//
+// The name is configuration rather than a per-request decision: it is the
+// same on every request, so the framework puts it here once, before the
+// handler runs, from the configuration that already reads it. view.New reads
+// it back, which is how every page -- the application's own, a generated one,
+// one drawn by a module that never sees the application's configuration --
+// carries the same brand without a controller passing it along.
+//
+// It is a key of its own rather than a field of State for the reason the CSRF
+// token is: the middleware that writes State knows nothing of this one, and one
+// struct written twice is a struct where the second write erases the first.
+//
+// An empty name is not stored, so a context passed through here with nothing
+// to carry answers AppNameFrom exactly as one that never was.
+func WithAppName(parent context.Context, name string) context.Context {
+	if name == "" {
+		return parent
+	}
+	return context.WithValue(parent, appNameKey{}, name)
+}
+
+// AppNameFrom returns the application name on a request context, or empty.
+//
+// Empty is the answer for a request the framework did not put a name on: a
+// test that builds its own request, a handler mounted outside the
+// application. It needs no second result, because an empty name and no name
+// draw the same thing -- a navigation bar with no brand in it.
+func AppNameFrom(ctx context.Context) string {
+	name, _ := ctx.Value(appNameKey{}).(string)
+	return name
+}
