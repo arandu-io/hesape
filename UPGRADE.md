@@ -27,6 +27,38 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.53.0 — a masked field and a one-time code complete without script
+
+### `mask.Pattern.Accepts` takes the raw value as well as the formatted one
+
+`Accepts` used to answer true only for the value as the pattern writes it
+(`01310-100` for `00000-000`), and refused the raw value (`01310100`) that the
+`mask` behaviour posts. A field validated with `Accepts` refused every value
+that came through the script. It now answers true for both, and still refuses a
+value the pattern can neither write nor unmask to (`0131-0100`, `013101001`).
+
+Code that validated a submitted field with `Accepts` needs no change. Code that
+relied on `Accepts` to insist on the punctuation receives both forms now: store
+`Unmask(value)`, which turns either into the value to keep.
+
+### The `one-time-code` and `mask` behaviours mount markup that submits without script
+
+Markup that already worked is mounted exactly as before. The markup a newer
+component library draws, in which the field submits with no script at all, is
+enhanced on mount:
+
+- `one-time-code`: the visible text input is the field and the squares are
+  drawn `hidden`. Mounting spreads what was typed into the squares, shows them,
+  turns the input into the hidden field and hands its `id` to the first square.
+  Focus moves only when the input had it.
+- `mask`: the visible box carries the field's name and the raw input is drawn
+  `disabled`. Mounting enables the raw input and renames the box to the
+  `displayName` the component hands over. Without script, the server receives
+  the value as typed; validate it with `Accepts` and store `Unmask(value)`.
+
+Styles or tests that targeted `input[type=hidden][name=…]` before the script ran
+follow the markup.
+
 ## v0.52.0 — the names promised for removal go, and the session has one path
 
 ### The names deprecated in v0.50.1 and v0.50.2 are removed
