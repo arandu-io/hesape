@@ -2009,10 +2009,21 @@
 
 	/* The one-time code, typed one square at a time.
 	 *
-	 * The squares are the visible inputs and none of them submits; a hidden
-	 * input beside them carries the whole code under the field's name, kept in
-	 * step on every keystroke. So the server reads one field and never has to
-	 * join six of them.
+	 * Once this has mounted, the squares are the visible inputs and none of
+	 * them submits; a hidden input beside them carries the whole code under the
+	 * field's name, kept in step on every keystroke. So the server reads one
+	 * field and never has to join six of them.
+	 *
+	 * # The squares are the enhancement
+	 *
+	 * The markup draws that input as an ordinary text field, labelled and
+	 * named, with the squares hidden, so a form posts the code with no script
+	 * at all. Mounting is what turns it into the hidden field: whatever was
+	 * typed into it before this ran is spread across the squares, the squares
+	 * are shown, and the first one takes the input's id, so a label still
+	 * points at what takes the cursor -- and takes the cursor too, when the
+	 * input had it or was drawn to get it. Markup that already draws
+	 * the field hidden and the squares shown is mounted as it stands.
 	 *
 	 * # What it does about the small things
 	 *
@@ -2035,6 +2046,27 @@
 			if (!squares.length) return;
 
 			var accepts = ctx.props.alphanumeric ? /[0-9a-zA-Z]/ : /[0-9]/;
+
+			if (raw && raw.type !== 'hidden') {
+				/* Focus follows the field only when it had it, or was about to
+				 * by autofocus with nothing else chosen yet: a cursor somebody
+				 * already put elsewhere is not this behaviour's to move. */
+				var active = document.activeElement;
+				var focused = active === raw ||
+					(raw.hasAttribute('autofocus') && (!active || active === document.body));
+				var typed = String(raw.value).split('').filter(function (one) { return accepts.test(one); });
+				if (raw.id && !squares[0].id) {
+					squares[0].id = raw.id;
+					raw.removeAttribute('id');
+				}
+				raw.removeAttribute('autofocus');
+				raw.type = 'hidden';
+				squares.forEach(function (one, at) {
+					one.value = typed[at] || '';
+					one.hidden = false;
+				});
+				if (focused) squares[Math.min(typed.length, squares.length - 1)].focus();
+			}
 
 			function collect() {
 				var code = squares.map(function (one) { return one.value; }).join('');
@@ -2147,13 +2179,24 @@
 	 *
 	 * # What the form sends is the raw value
 	 *
-	 * The visible field shows 123.456.789-00 and is not the field that submits.
-	 * Beside it is a hidden input carrying 12345678900, kept in step on every
-	 * keystroke, and that is what has the form name. So nothing on the server
-	 * has to know a mask existed, and no query stores punctuation because
-	 * somebody forgot to strip it in one of the places that read the field.
+	 * Once this has mounted, the visible field shows 123.456.789-00 and is not
+	 * the field that submits. Beside it is a hidden input carrying 12345678900,
+	 * kept in step on every keystroke, and that is what has the form name. So
+	 * no query stores punctuation because somebody forgot to strip it in one of
+	 * the places that read the field.
 	 *
 	 * The component writes both, so a caller cannot get half of it.
+	 *
+	 * # Until it mounts, the box is the field
+	 *
+	 * The markup draws the visible box carrying the form name and the hidden
+	 * input disabled, so with no script the form posts what was typed, as it was
+	 * typed, and the server unmasks it with the same pattern. Mounting hands the
+	 * name over: the hidden input is enabled and filled from the format below,
+	 * and the box takes the displayName the component wrote into the props, or
+	 * no name at all when there is none. Markup whose hidden input already
+	 * submits is mounted as it stands, and so is a box drawn disabled, which
+	 * posts nothing either way.
 	 *
 	 * # Alternatives
 	 *
@@ -2177,6 +2220,15 @@
 			if (!patterns.length) return;
 
 			var raw = ctx.element.querySelector('[data-part="raw"]');
+
+			if (raw && raw.disabled && !input.disabled) {
+				raw.disabled = false;
+				if (typeof ctx.props.displayName === 'string' && ctx.props.displayName) {
+					input.name = ctx.props.displayName;
+				} else {
+					input.removeAttribute('name');
+				}
+			}
 
 			var reverse = ctx.props.reverse === true;
 
