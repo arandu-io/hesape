@@ -390,15 +390,32 @@
 					else link.removeAttribute('aria-current');
 				});
 
+				/* A step at the end of the list is disabled rather than
+				 * removed, so the two buttons hold their places as the reader
+				 * moves -- and a pager drawn as a list hides the entry instead. */
 				var end = function (part, to, live) {
 					var link = nav.querySelector('[data-part="' + part + '"]');
 					if (!link) return;
 					var item = link.closest('li');
 					if (item) item.hidden = !live;
 					link.setAttribute('data-page', String(to));
+					if (live) {
+						link.removeAttribute('aria-disabled');
+						link.removeAttribute('tabindex');
+					} else {
+						link.setAttribute('aria-disabled', 'true');
+						link.setAttribute('tabindex', '-1');
+					}
 				};
 				end('previous', Math.max(1, page - 1), page > 1);
 				end('next', Math.min(pages, page + 1), page < pages);
+
+				var where = nav.querySelector('[data-part="page-of"]');
+				if (where) {
+					where.textContent = (nav.getAttribute('data-page-of-template') || props.pageOf || '{n} / {total}')
+						.split('{n}').join(String(page))
+						.split('{total}').join(String(pages));
+				}
 
 				var gap = nav.querySelector('[data-part="ellipsis"]');
 				if (gap && gap.closest('li')) gap.closest('li').hidden = first + width - 1 >= pages;
@@ -409,11 +426,27 @@
 				var box = root.querySelector('[data-part="search"]');
 				if (box) query = (box.value || '').trim().toLowerCase();
 
+				/* The facets ticked, by key. A row passes a facet when its own
+				 * value for it is one of those ticked, and a facet with none
+				 * ticked lets every row through -- as the server's own query
+				 * does with a parameter that is absent. */
+				var facets = {};
+				each(root, '[data-part="filter"]:checked', function (box) {
+					(facets[box.name] = facets[box.name] || []).push(box.value);
+				});
+				var passes = function (row) {
+					for (var key in facets) {
+						if (!Object.prototype.hasOwnProperty.call(facets, key)) continue;
+						if (facets[key].indexOf(row.getAttribute('data-facet-' + key)) < 0) return false;
+					}
+					return true;
+				};
+
 				var rows = allRows();
 				var hits = new Array(rows.length);
 				var matched = 0;
 				for (var i = 0; i < rows.length; i++) {
-					hits[i] = !query || haystack(rows[i]).indexOf(query) >= 0;
+					hits[i] = (!query || haystack(rows[i]).indexOf(query) >= 0) && passes(rows[i]);
 					if (hits[i]) matched++;
 				}
 
@@ -645,10 +678,46 @@
 
 				ctx.resize = function (event) {
 					var chooser = event.target.closest('[data-page-size]');
-					if (!chooser) return;
-					size = Number(chooser.value) || 0;
+					if (chooser) {
+						size = Number(chooser.value) || 0;
+						page = 1;
+						show();
+						return;
+					}
+					var box = event.target.closest('[data-part="filter"]');
+					if (!box) return;
+					chosen(box.closest('[data-part="facet"]'));
 					page = 1;
 					show();
+				};
+
+				/* The facet's button says what is ticked, as the server drew it:
+				 * the labels while there are two at most, the count past that. */
+				var chosen = function (facet) {
+					if (!facet) return;
+					var labels = [];
+					each(facet, '[data-part="filter"]:checked', function (box) {
+						var label = box.closest('label');
+						labels.push(((label && label.textContent) || box.value).trim());
+					});
+					var summary = facet.querySelector('summary');
+					var line = facet.querySelector('[data-part="facet-chosen"]');
+					if (!line && summary) {
+						line = document.createElement('span');
+						line.setAttribute('data-part', 'facet-chosen');
+						line.className = 'data-table-facet-chosen';
+						summary.appendChild(line);
+					}
+					if (!line) return;
+					line.hidden = labels.length === 0;
+					while (line.firstChild) line.removeChild(line.firstChild);
+					(labels.length > 2 ? [String(labels.length)] : labels).forEach(function (text) {
+						var badge = document.createElement('span');
+						badge.className = 'badge';
+						badge.setAttribute('data-variant', 'secondary');
+						badge.textContent = text;
+						line.appendChild(badge);
+					});
 				};
 
 				root.addEventListener('click', ctx.sort);
