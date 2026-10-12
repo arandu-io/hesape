@@ -172,3 +172,38 @@ func shiftModulePath(t *testing.T, svg string, dx float64) string {
 	}
 	return svg[:open] + out.String() + svg[end:]
 }
+
+// A WhatsApp pairing text -- the linked-devices address, a reference and three
+// keys -- runs past 250 bytes, so it needs the versions above 16. Each of them
+// reads back in every style, the reserved center included.
+func TestTheLargerVersionsDecodeInEveryStyle(t *testing.T) {
+	for _, n := range []int{271, 300, 330, 382} {
+		content := "https://wa.me/settings/linked_devices#2@" + strings.Repeat("Ab1+xY9/", 60)
+		content = content[:n]
+		c, err := Encode(content)
+		if err != nil {
+			t.Fatalf("%d bytes: %v", n, err)
+		}
+		if c.Version() < 17 {
+			t.Fatalf("%d bytes chose version %d, want 17 or above", n, c.Version())
+		}
+		for style, o := range styles(c.MaxCenterFraction()) {
+			svg, err := c.SVG(o)
+			if err != nil {
+				t.Fatalf("%d bytes/%s: %v", n, style, err)
+			}
+			r, err := rasterize(svg, 6)
+			if err != nil {
+				t.Fatalf("%d bytes/%s: %v", n, style, err)
+			}
+			got, err := decodeRaster(r)
+			if err != nil {
+				t.Errorf("version %d/%s: %v", c.Version(), style, err)
+				continue
+			}
+			if got != content {
+				t.Errorf("version %d/%s read back %d bytes, want %d", c.Version(), style, len(got), n)
+			}
+		}
+	}
+}

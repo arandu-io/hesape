@@ -18,8 +18,10 @@ type version struct {
 }
 
 // versions is the capacity table at error correction level H, restricted to
-// the versions that byte-mode content between 64 and 250 bytes needs. Rows
-// outside that range are deliberately absent.
+// the versions that byte-mode content between 64 and 382 bytes needs. Rows
+// outside that range are deliberately absent. Versions 17 to 20 are there for
+// a WhatsApp pairing text -- the linked-devices address, a reference and three
+// keys -- which runs past 250 bytes.
 var versions = [...]version{
 	{7, 4, 13, 1, 14, 26, 0, []int{6, 22, 38}},
 	{8, 4, 14, 2, 15, 26, 0, []int{6, 24, 42}},
@@ -31,6 +33,10 @@ var versions = [...]version{
 	{14, 11, 12, 5, 13, 24, 3, []int{6, 26, 46, 66}},
 	{15, 11, 12, 7, 13, 24, 3, []int{6, 26, 48, 70}},
 	{16, 3, 15, 13, 16, 30, 3, []int{6, 26, 50, 74}},
+	{17, 2, 14, 17, 15, 28, 3, []int{6, 30, 54, 78}},
+	{18, 2, 14, 19, 15, 28, 3, []int{6, 30, 56, 82}},
+	{19, 9, 13, 16, 14, 26, 3, []int{6, 30, 58, 86}},
+	{20, 15, 15, 10, 16, 28, 3, []int{6, 34, 62, 90}},
 }
 
 // size returns the width of the symbol in modules, excluding the quiet zone.

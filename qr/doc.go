@@ -1,7 +1,7 @@
 // Package qr encodes text into a QR symbol and renders it as inline SVG.
 //
 // The package is deliberately narrow. It encodes a single byte-mode segment at
-// error correction level H, in the version range that content of 64 to 250
+// error correction level H, in the version range that content of 64 to 382
 // bytes needs, and it renders that symbol as SVG markup meant to be written
 // straight into a page. It does not produce raster images, does not write
 // files, and offers no other encoding mode, correction level, or symbol

@@ -51,8 +51,8 @@ func TestVersionCapacitiesRise(t *testing.T) {
 	if got := minVersion().number; got != 7 {
 		t.Errorf("smallest supported version is %d, want 7", got)
 	}
-	if got := maxCapacity(); got != 250 {
-		t.Errorf("largest capacity is %d bytes, want 250", got)
+	if got := maxCapacity(); got != 382 {
+		t.Errorf("largest capacity is %d bytes, want 382", got)
 	}
 }
 
@@ -63,6 +63,7 @@ func TestSelectVersionTakesTheSmallestThatFits(t *testing.T) {
 	}{
 		{1, 7}, {64, 7}, {65, 8}, {84, 8}, {85, 9}, {98, 9},
 		{119, 10}, {137, 11}, {155, 12}, {177, 13}, {194, 14}, {220, 15}, {250, 16},
+		{251, 17}, {280, 17}, {281, 18}, {310, 18}, {311, 19}, {338, 19}, {339, 20}, {382, 20},
 	}
 	for _, c := range cases {
 		v, err := selectVersion(c.bytes)
@@ -97,7 +98,7 @@ func TestEncodeRefusesContentThatDoesNotFit(t *testing.T) {
 		t.Errorf("error reports %d bytes against a limit of %d, want %d and %d",
 			tooLarge.Bytes, tooLarge.Limit, limit+1, limit)
 	}
-	for _, want := range []string{"251", "250"} {
+	for _, want := range []string{"383", "382"} {
 		if !strings.Contains(tooLarge.Error(), want) {
 			t.Errorf("error %q does not name %s", tooLarge.Error(), want)
 		}
