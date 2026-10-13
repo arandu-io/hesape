@@ -27,6 +27,24 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.58.0 — the page's impersonation takes laravel-impersonate's names
+
+The four fields and the interface v0.57.0 added are renamed to the vocabulary
+of laravel-impersonate, which the module that uses them now follows
+(hyz-is/arandu-impersonate):
+
+| v0.57.0 | v0.58.0 |
+| --- | --- |
+| `Page.Inspecting` | `Page.Impersonating` |
+| `Page.InspectionActs` | `Page.ImpersonationActs` |
+| `Page.Inspector` | `Page.Impersonator` |
+| `Page.LeaveInspectionURL` | `Page.LeaveImpersonationURL` |
+| `view.Inspection` | `view.Impersonation` |
+| `IsInspecting`, `InspectionWrites`, `InspectorID`, `LeaveInspectionLink` | `IsImpersonating`, `ImpersonationWrites`, `ImpersonatorID`, `LeaveImpersonationLink` |
+| route `inspect.leave` | route `impersonate.leave` |
+
+A layout that read the v0.57.0 names renames them; nothing else changes.
+
 ## v0.57.0 — a page says an operator is inside somebody's account
 
 `view.New` fills four new `Page` fields from the request's subject when an
