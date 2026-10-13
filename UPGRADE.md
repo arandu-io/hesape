@@ -27,6 +27,24 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.56.0 — an operator can act in an account, not only look at it
+
+### `auth.ImpersonateActing` and `Subject.Acting`
+
+`auth.ImpersonateActing(actor, target)` answers what `auth.Impersonate`
+answers, refused in the same cases, with `Subject.Acting` set: a Grant issued
+to that subject writes, as the account's owner would. `Impersonator` still
+names who really acts, and `Grant.Impersonator()` reads it off a Grant, so the
+record of an act can name the operator beside the account it was done in.
+
+`auth.Impersonate` is unchanged and still only reads: `Writable` refuses its
+Grants with `ErrReadOnly`, and `Grant.ReadOnly()` reports it. `Writable` and
+`ReadOnly` now let a subject through when `Acting` is set.
+
+Nothing stops compiling, and nothing that reads behaves differently. Which
+operator may act in which account is the application's Policy, asked before
+`ImpersonateActing` is called (ADR-0178).
+
 ## v0.54.0 — the application name travels on the request
 
 ### `view.New` fills `AppName` from the request context

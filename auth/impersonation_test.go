@@ -107,3 +107,78 @@ func TestTheViewedSubjectSurvivesTheSessionEncoding(t *testing.T) {
 		t.Fatalf("the actor did not survive the encoding: %+v", read.Impersonator)
 	}
 }
+
+func TestImpersonateActingWritesAndStillNamesWhoActs(t *testing.T) {
+	acting, err := auth.ImpersonateActing(operator(), customer())
+	if err != nil {
+		t.Fatalf("ImpersonateActing refused an operator and a customer: %v", err)
+	}
+	if !acting.Acting || acting.Impersonator == nil || acting.Impersonator.ID != "op-1" || acting.ID != "user-9" {
+		t.Fatalf("the acting subject is %+v", acting)
+	}
+	if acting.Impersonator.Acting {
+		t.Fatal("the kept actor carries the acting mark")
+	}
+	g, err := auth.Authorize(context.Background(), allowEverything{}, acting, "invoice.create", struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := auth.Writable(g); err != nil {
+		t.Fatalf("a grant of an acting impersonation refused a write: %v", err)
+	}
+	if g.ReadOnly() {
+		t.Fatal("a grant of an acting impersonation reads as read-only")
+	}
+	if who := g.Impersonator(); who == nil || who.ID != "op-1" {
+		t.Fatalf("the grant does not name who really acts: %+v", who)
+	}
+	back, err := auth.Leave(acting)
+	if err != nil || back.ID != "op-1" || back.Acting || back.Impersonator != nil {
+		t.Fatalf("leaving answered %+v, %v; want the operator, plain", back, err)
+	}
+
+	// The acting mark survives the session store's round trip, as the
+	// impersonator does.
+	raw, err := json.Marshal(acting)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored auth.Subject
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if !stored.Acting || stored.Impersonator == nil {
+		t.Fatalf("the stored subject lost the acting mark or the actor: %+v", stored)
+	}
+}
+
+func TestImpersonateActingRefusesWhatImpersonateRefuses(t *testing.T) {
+	viewed, _ := auth.Impersonate(operator(), customer())
+	for name, pair := range map[string][2]auth.Subject{
+		"a guest acting":             {auth.Guest("platform"), customer()},
+		"nobody to act as":           {operator(), {}},
+		"an actor already viewing":   {viewed, operator()},
+		"a target already viewed":    {operator(), viewed},
+		"an actor acting as himself": {operator(), operator()},
+	} {
+		if _, err := auth.ImpersonateActing(pair[0], pair[1]); !errors.Is(err, auth.ErrImpersonation) {
+			t.Errorf("%s answered %v, want ErrImpersonation", name, err)
+		}
+	}
+}
+
+func TestAPlainImpersonationStillOnlyReads(t *testing.T) {
+	viewed, _ := auth.Impersonate(operator(), customer())
+	g, _ := auth.Authorize(context.Background(), allowEverything{}, viewed, "invoice.view", struct{}{})
+	if !errors.Is(auth.Writable(g), auth.ErrReadOnly) || !g.ReadOnly() {
+		t.Fatal("a viewing impersonation became writable")
+	}
+	// Acting set by hand on a subject nobody is viewing as gives it nothing
+	// it did not have.
+	plain := customer()
+	plain.Acting = true
+	g, _ = auth.Authorize(context.Background(), allowEverything{}, plain, "invoice.view", struct{}{})
+	if g.Impersonator() != nil || g.ReadOnly() || auth.Writable(g) != nil {
+		t.Fatal("the acting mark changed an ordinary subject")
+	}
+}

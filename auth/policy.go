@@ -97,15 +97,24 @@ type Subject struct {
 	// being viewed by them -- an operator looking at a customer's account as the
 	// customer sees it. Nil on every ordinary session.
 	//
-	// A subject that carries one only reads: every Grant issued to it is
-	// refused by Writable, and the database refuses to write with it. Only
-	// Impersonate sets it, and Leave answers it back.
+	// A subject that carries one only reads, unless Acting says otherwise:
+	// every Grant issued to it is refused by Writable, and the database refuses
+	// to write with it. Only Impersonate and ImpersonateActing set it, and
+	// Leave answers it back.
 	//
 	// It is exported because the session store keeps the subject as it is
 	// written and reads it back, and a field it could not write would not
 	// survive the first request. Setting it by hand can only take writing away
 	// from a subject, never give it.
 	Impersonator *Subject
+
+	// Acting says the Impersonator acts in this account and does not only
+	// look at it: a Grant issued to the subject writes, as the account's owner
+	// would, and Impersonator still says who really did it, so the record of
+	// the act can name them. Only ImpersonateActing sets it. On a subject
+	// nobody is viewing as it means nothing, so setting it by hand gives no
+	// subject more than it already had.
+	Acting bool
 
 	// guest marks a subject that is deliberately anonymous. It is unexported and
 	// only Guest sets it, which is the whole point: a Subject nobody filled in

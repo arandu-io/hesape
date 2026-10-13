@@ -78,3 +78,24 @@ func TestModelWritesRefuseAGrantThatOnlyReads(t *testing.T) {
 		t.Fatalf("the read did not run: %v", connection.sqls())
 	}
 }
+
+// A Grant of an operator acting in an account -- ImpersonateActing -- writes
+// through the model like the account's owner would.
+func TestModelWritesRunWithAGrantThatActs(t *testing.T) {
+	ctx := context.Background()
+	acting, err := auth.ImpersonateActing(auth.Subject{ID: "op-1", Tenant: "acme"}, auth.Subject{ID: "user-9", Tenant: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := auth.Authorize(ctx, allowEverything{}, acting, "users.update", struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, connection := newUserModel()
+	if _, err := newQuery(m.base()).Where("id", "=", 1).Update(ctx, g, map[string]any{"name": "Ada"}); err != nil {
+		t.Fatalf("an update with an acting grant was refused: %v", err)
+	}
+	if len(connection.sqls()) != 1 {
+		t.Fatalf("the update did not reach the connection: %v", connection.sqls())
+	}
+}
