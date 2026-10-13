@@ -27,6 +27,23 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.57.0 — a page says an operator is inside somebody's account
+
+`view.New` fills four new `Page` fields from the request's subject when an
+operator is viewing or acting in somebody's account: `Inspecting`,
+`InspectionActs`, `Inspector` (the operator's identifier) and
+`LeaveInspectionURL`, the route named `inspect.leave` when one is registered.
+`Page` answers the new `view.Inspection` interface, which a layout reads with a
+type assertion to draw the bar that says whose account this is and the way
+back:
+
+```go
+if inspection, ok := data.(hview.Inspection); ok && inspection.IsInspecting() { ... }
+```
+
+`Inspection` is apart from `Layout`, so nothing stops compiling. A page drawn
+for an ordinary session leaves the four fields empty.
+
 ## v0.56.0 — an operator can act in an account, not only look at it
 
 ### `auth.ImpersonateActing` and `Subject.Acting`

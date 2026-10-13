@@ -140,6 +140,18 @@ type Page struct {
 	PanelURL string
 	AdminURL string
 
+	// Inspecting says the person signed in is an operator inside somebody
+	// else's account (hesape auth.Impersonate or auth.ImpersonateActing), and
+	// InspectionActs whether they may change it. Inspector is the operator's
+	// identifier, and LeaveInspectionURL where the bar that says so sends them
+	// back: the route named "inspect.leave", empty when none is registered.
+	// New fills all four from the request; a layout reads them through
+	// Inspection.
+	Inspecting         bool
+	InspectionActs     bool
+	Inspector          string
+	LeaveInspectionURL string
+
 	// Path is the address this page was served at, so the navigation can say
 	// where you are.
 	//
@@ -214,6 +226,37 @@ func (p Page) CSRFToken() string { return p.Token }
 // SignedIn reports whether there is a session behind this render.
 func (p Page) SignedIn() bool { return p.Authenticated }
 
+// Inspection is what a layout reads to tell the person they are inside
+// somebody else's account, and to give them the way back. It is apart from
+// Layout so a type that implements Layout by hand does not stop compiling; a
+// layout asks for it with a type assertion, and Page answers it.
+type Inspection interface {
+	// IsInspecting says an operator is inside somebody else's account.
+	IsInspecting() bool
+	// InspectionWrites says that operator may change the account.
+	InspectionWrites() bool
+	// InspectorID is the operator's identifier.
+	InspectorID() string
+	// LeaveInspectionLink is where the way back posts, empty when the
+	// application registered no route for it.
+	LeaveInspectionLink() string
+}
+
+var _ Inspection = Page{}
+
+// IsInspecting says an operator is inside somebody else's account.
+func (p Page) IsInspecting() bool { return p.Inspecting }
+
+// InspectionWrites says the operator inside the account may change it.
+func (p Page) InspectionWrites() bool { return p.InspectionActs }
+
+// InspectorID is the operator's identifier.
+func (p Page) InspectorID() string { return p.Inspector }
+
+// LeaveInspectionLink is where the way back to the operator's own account
+// posts.
+func (p Page) LeaveInspectionLink() string { return p.LeaveInspectionURL }
+
 // SignedInName is who the navigation bar greets.
 func (p Page) SignedInName() string { return p.UserName }
 
@@ -278,7 +321,7 @@ func (p Page) AdminLink() string { return p.AdminURL }
 func New(ctx *hhttp.Context, title string) Page {
 	state := ctx.State()
 	token, _ := hhttp.CSRFTokenFrom(ctx.Ctx())
-	return Page{
+	page := Page{
 		Title:         title,
 		Path:          ctx.Request.URL.Path,
 		AppName:       hhttp.AppNameFrom(ctx.Ctx()),
@@ -291,6 +334,13 @@ func New(ctx *hhttp.Context, title string) Page {
 		LogoutURL:     routeIfRegistered(ctx, routeLogout),
 		RegisterURL:   routeIfRegistered(ctx, routeRegister),
 	}
+	if subject, ok := auth.SubjectFrom(ctx.Ctx()); ok && subject.Impersonator != nil {
+		page.Inspecting = true
+		page.InspectionActs = subject.Acting
+		page.Inspector = subject.Impersonator.ID
+		page.LeaveInspectionURL = routeIfRegistered(ctx, routeLeaveInspection)
+	}
+	return page
 }
 
 // The route names New reads the navigation from. They are the names the
@@ -302,6 +352,10 @@ const (
 	routeLogin    = "auth.login"
 	routeLogout   = "auth.logout"
 	routeRegister = "auth.register"
+
+	// routeLeaveInspection is where an operator inside somebody's account
+	// goes back to their own: the name arandu-inspect registers.
+	routeLeaveInspection = "inspect.leave"
 )
 
 // routeIfRegistered is the path of the route called name, or empty when the
