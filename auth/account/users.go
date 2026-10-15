@@ -130,7 +130,7 @@ func (s *Users) VerifyCredentials(ctx context.Context, tenant, email, password, 
 // Hooks.Prepare runs first and may refuse, complete the registration or fill
 // the application's own columns. A name, an address and a password of
 // hashing.MinPasswordLen characters are required after it. The insert,
-// Hooks.AfterCreate and the event share one transaction -- the caller's, when
+// Hooks.AfterCreate, Hooks.AfterRegister and the event share one transaction -- the caller's, when
 // ctx already carries one -- so an account is never stored without its event.
 func (s *Users) Register(ctx context.Context, tenant string, registration Registration) (Account, error) {
 	candidate, err := s.probe(map[string]any{columnTenant: tenant})
@@ -164,6 +164,13 @@ func (s *Users) Register(ctx context.Context, tenant string, registration Regist
 	err = database.Transaction(ctx, s.db, func(ctx context.Context) error {
 		if err := s.create(ctx, grant, candidate); err != nil {
 			return err
+		}
+		if after := s.hooks.AfterRegister; after != nil {
+			carried := registration
+			carried.Password = ""
+			if err := after(ctx, grant, candidate, carried); err != nil {
+				return err
+			}
 		}
 		return s.record(ctx, grant, UserRegistered, candidate)
 	})

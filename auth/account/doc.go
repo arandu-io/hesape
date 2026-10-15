@@ -26,6 +26,11 @@
 // verified_at, with email unique per tenant; the statements here name them.
 // Anything else on it -- roles, a document number, a phone -- is written by
 // the application through Hooks and Draft.Fill.
+// What a registration form carries beyond the account -- a document number to
+// store elsewhere, a consent -- travels in Registration.Extra: Prepare reads it
+// before the insert, and Hooks.AfterRegister receives the whole Registration
+// after it, in the same transaction, so nothing of the form needs a field on
+// the user model to get from one to the other.
 //
 // # Why nothing here is generic
 //

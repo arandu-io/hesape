@@ -21,6 +21,9 @@ func hookCases() []testCase {
 		{"AfterCreateRunsInTheTransactionOfTheInsert", afterCreateInTransaction},
 		{"ProvisionAcceptsAnImportedHashOnlyWhenItCanBeRead", provisionImportedHash},
 		{"CloseFieldsAndPayloadAreTheApplications", closeFieldsAndPayload},
+		{"AfterRegisterReceivesTheRegistration", afterRegisterReceivesTheRegistration},
+		{"AFailingAfterRegisterRollsBackTheAccountAndItsEvent", afterRegisterRollsBack},
+		{"ProvisionDoesNotCallAfterRegister", provisionSkipsAfterRegister},
 	}
 }
 
@@ -225,4 +228,100 @@ func bcryptOf(t *testing.T, plain string) string {
 		t.Fatalf("hashing with bcrypt: %v", err)
 	}
 	return hash
+}
+
+// consent is what a registration form carries beyond the account's columns.
+type consent struct {
+	Document string
+	Terms    bool
+}
+
+// afterRegisterReceivesTheRegistration: the step that stores what the form
+// carried beyond the account -- a document number, a consent -- had no way to
+// read it, so applications kept it on a field of the user model only to ferry
+// it from Prepare to AfterCreate.
+func afterRegisterReceivesTheRegistration(t *testing.T, e *env) {
+	var order []string
+	var got account.Registration
+	var sawAccount string
+	users := e.users(account.Hooks{
+		Prepare: func(_ context.Context, r *account.Registration, _ account.Account) error {
+			if r.Name == "" {
+				r.Name = "Personal account"
+			}
+			order = append(order, "prepare")
+			return nil
+		},
+		AfterCreate: func(context.Context, auth.Grant, account.Account) error {
+			order = append(order, "after-create")
+			return nil
+		},
+		AfterRegister: func(ctx context.Context, g auth.Grant, user account.Account, r account.Registration) error {
+			order = append(order, "after-register")
+			got, sawAccount = r, user.AccountID()
+			if auth.Tenant(g) != tenantA || g.Action() != account.ActionUserCreate {
+				t.Errorf("AfterRegister got a Grant for %s in %q", g.Action(), auth.Tenant(g))
+			}
+			var n int64
+			if err := e.f.DB.QueryRowContext(ctx, `SELECT count(*) FROM users WHERE id = ?`, user.AccountID()).Scan(&n); err != nil || n != 1 {
+				t.Errorf("the account is not visible inside AfterRegister (%d, %v)", n, err)
+			}
+			return nil
+		},
+	}, nil)
+	user, err := users.Register(e.ctx, tenantA, account.Registration{
+		Email: "ana@example.test", Password: password, Extra: consent{Document: "123", Terms: true},
+	})
+	if err != nil {
+		t.Fatalf("registering: %v", err)
+	}
+	if want := []string{"prepare", "after-create", "after-register"}; len(order) != 3 || order[0] != want[0] || order[1] != want[1] || order[2] != want[2] {
+		t.Fatalf("the hooks ran in the order %v, want %v", order, want)
+	}
+	if sawAccount != user.AccountID() {
+		t.Errorf("AfterRegister saw account %q, want the one stored, %q", sawAccount, user.AccountID())
+	}
+	if extra, ok := got.Extra.(consent); !ok || extra.Document != "123" || !extra.Terms {
+		t.Errorf("AfterRegister got Extra %#v, want what the form carried", got.Extra)
+	}
+	if got.Name != "Personal account" || got.Email != "ana@example.test" {
+		t.Errorf("AfterRegister got name %q and email %q, want the registration as Prepare left it", got.Name, got.Email)
+	}
+	if got.Password != "" {
+		t.Error("AfterRegister received the password in clear")
+	}
+	if n := e.eventCount(user.AccountID(), account.UserRegistered); n != 1 {
+		t.Errorf("the registration stored %d events, want one", n)
+	}
+}
+
+func afterRegisterRollsBack(t *testing.T, e *env) {
+	failed := errors.New("the consent could not be stored")
+	users := e.users(account.Hooks{AfterRegister: func(context.Context, auth.Grant, account.Account, account.Registration) error {
+		return failed
+	}}, nil)
+	_, err := users.Register(e.ctx, tenantA, account.Registration{Name: "Ana", Email: "ana@example.test", Password: password})
+	if !errors.Is(err, failed) {
+		t.Fatalf("the registration answered %v, want AfterRegister's error", err)
+	}
+	if n := e.count(`SELECT count(*) FROM users`); n != 0 {
+		t.Fatalf("a failed AfterRegister left %d account rows", n)
+	}
+	if n := e.count(`SELECT count(*) FROM outbox`); n != 0 {
+		t.Fatalf("a failed AfterRegister left %d outbox rows", n)
+	}
+}
+
+func provisionSkipsAfterRegister(t *testing.T, e *env) {
+	called := false
+	users := e.users(account.Hooks{AfterRegister: func(context.Context, auth.Grant, account.Account, account.Registration) error {
+		called = true
+		return errors.New("Provision must not reach AfterRegister")
+	}}, nil)
+	if _, err := users.Provision(e.ctx, tenantA, account.Draft{Name: "Admin", Email: "admin@example.test", Password: password}); err != nil {
+		t.Fatalf("provisioning: %v", err)
+	}
+	if called {
+		t.Fatal("Provision called AfterRegister")
+	}
 }

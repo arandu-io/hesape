@@ -132,6 +132,15 @@ type Hooks struct {
 	// made under. An error rolls back the account and the event with it.
 	AfterCreate func(ctx context.Context, grant auth.Grant, user Account) error
 
+	// AfterRegister runs in Register only, in the same transaction, right after
+	// AfterCreate and before the event is stored, with the Registration as
+	// Prepare left it -- Extra included -- so what the form carried beyond the
+	// account's columns reaches the step that stores it without a field on the
+	// user model to ferry it. Password is cleared in the copy it receives. An
+	// error rolls back the account and the event with it. Provision does not
+	// call it: a Draft is all a provisioned account has.
+	AfterRegister func(ctx context.Context, grant auth.Grant, user Account, registration Registration) error
+
 	// CloseFields names the application's own columns Close writes beside the
 	// ones it clears itself, and the values they get.
 	CloseFields func(user Account) map[string]any
