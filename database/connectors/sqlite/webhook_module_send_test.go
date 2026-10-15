@@ -196,8 +196,9 @@ func TestTheEndpointsAreManagedWithinTheTenant(t *testing.T) {
 		t.Fatalf("the endpoint answered its secret or its tenant: %s", rec.Body.String())
 	}
 
-	// An update with no headers keeps the stored ones.
-	rec := w.as(t, acme, http.MethodPut, "/webhook/endpoints/"+id, `{"name":"Billing v2","url":"`+target.srv.URL+`/h2","events":["order.paid","order.refunded"],"active":true}`)
+	// An update with no headers to the same address keeps the stored ones;
+	// TestAnUpdateThatMovesTheAddressDropsTheStoredHeaders holds the other half.
+	rec := w.as(t, acme, http.MethodPut, "/webhook/endpoints/"+id, `{"name":"Billing v2","url":"`+target.srv.URL+`/h","events":["order.paid","order.refunded"],"active":true}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("the update answered %d %s", rec.Code, rec.Body.String())
 	}
