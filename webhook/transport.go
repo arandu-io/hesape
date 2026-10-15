@@ -46,7 +46,7 @@ func newDeliveryClient(custom *http.Client) (*http.Client, error) {
 	transport := base.Clone()
 	transport.Proxy = nil
 	transport.DialContext = publicDialer(transport.DialContext, net.DefaultResolver)
-	return httpclient.NewFactory(&http.Client{Transport: transport}).CreatePendingRequest().CreateClient(nil), nil
+	return httpclient.NewFactory(nil).CreatePendingRequest().CreateClient(transport), nil
 }
 
 // resolver is the one method of net.Resolver the dialer needs.
