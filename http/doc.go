@@ -21,6 +21,14 @@
 // it does not. They read what the browser sent; the tenant is what the Grant
 // authorises, never what the request carries.
 //
+// # Binding a form
+//
+// Context.Bind fills a request struct from the form, one field per form tag,
+// and trims every value except a password's. Text that is stored as it was
+// typed -- a message, a Markdown body, a summary -- is tagged raw after its
+// name, `form:"body,raw"`, and keeps its spaces and newlines; raw is the only
+// option a form tag takes.
+//
 // # A page with a status
 //
 // Context.View answers a page with 200. A page that says something else -- a

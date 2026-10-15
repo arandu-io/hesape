@@ -74,8 +74,9 @@ var (
 // # How a value is converted
 //
 // Every value is trimmed with strings.TrimSpace first, except the values of a
-// password key: password, a key ending in _password such as current_password
-// or new_password, and the confirmation of either, which is the same key
+// password key or of a field tagged raw. A password key is password, a key
+// ending in _password such as current_password or new_password, and the
+// confirmation of either, which is the same key
 // followed by _confirmation. A space at the ends of a password is part of what
 // the person chose, so trimming it would store one password and refuse the one
 // they type afterwards, and a confirmation trimmed differently from its
@@ -85,7 +86,7 @@ var (
 // Then, by the kind of the field:
 //
 //   - string, and a type whose underlying type is string: the trimmed text, or
-//     the text as it arrived for a password key.
+//     the text as it arrived for a password key or a raw field.
 //   - bool: "1", "true", "on" and "yes" are true; "0", "false", "off", "no"
 //     and the empty string are false, in any case.
 //   - int, int8, int16, int32, int64, and the unsigned sizes: base ten, within
@@ -99,12 +100,28 @@ var (
 //     field says that nothing was sent, as distinct from a zero.
 //   - []string, and a slice of a type whose underlying type is string: every
 //     value the key arrived with, each trimmed unless the key is a password
-//     key, in order. A <select multiple>
-//     and a group of checkboxes sharing a name send exactly that.
+//     key or the field is raw, in order. A <select multiple> and a group of
+//     checkboxes sharing a name send exactly that.
 //
 // Any other field takes the first value its key arrived with. An empty value
 // writes the zero value of a non-pointer field rather than failing: whether a
 // field may be empty is a rule for Validate, not a conversion.
+//
+// # Text kept as it was typed
+//
+// A message, a Markdown body or a summary is stored as the person typed it:
+// the newline that ends a code block and the indentation that opens one are
+// part of it. Tag such a field raw, after its name, and its values are left
+// as they arrived, like a password's:
+//
+//	Body string `form:"body,raw"`
+//
+// raw is the only option a form tag takes. It applies to a field that holds
+// text -- a string, a pointer to one or a slice of them -- and a raw value of
+// only spaces is not empty, so a pointer field receives it; whether such a
+// value is acceptable is a rule for Validate. raw on any other field, and an
+// option Bind does not know, is a mistake in the program and is returned as
+// one.
 //
 // # What it returns
 //
@@ -191,7 +208,8 @@ func bindStruct(v reflect.Value, form url.Values, errs validation.Errors) error 
 	t := v.Type()
 	for i := range t.NumField() {
 		field := t.Field(i)
-		name, tagged := field.Tag.Lookup("form")
+		tag, tagged := field.Tag.Lookup("form")
+		name, options, _ := strings.Cut(tag, ",")
 
 		if field.Anonymous && !tagged && field.IsExported() && field.Type.Kind() == reflect.Struct {
 			if err := bindStruct(v.Field(i), form, errs); err != nil {
@@ -205,7 +223,11 @@ func bindStruct(v reflect.Value, form url.Values, errs validation.Errors) error 
 		if !field.IsExported() {
 			return fmt.Errorf("http: Bind cannot write %s.%s, which is unexported and tagged form:%q", t, field.Name, name)
 		}
-		if err := bindField(v.Field(i), name, form[name], errs); err != nil {
+		asTyped, err := bindOptions(options)
+		if err == nil {
+			err = bindField(v.Field(i), name, form[name], asTyped, errs)
+		}
+		if err != nil {
 			return fmt.Errorf("http: Bind cannot write %s.%s, tagged form:%q: %w", t, field.Name, name, err)
 		}
 	}
@@ -220,11 +242,14 @@ var errUnsupportedField = errors.New("its type is not one Bind converts into")
 //
 // It returns an error only for a field type it cannot convert into; a value
 // that does not convert is added to errs.
-func bindField(fv reflect.Value, name string, values []string, errs validation.Errors) error {
+func bindField(fv reflect.Value, name string, values []string, asTyped bool, errs validation.Errors) error {
 	ft := fv.Type()
+	if asTyped && !holdsText(ft) {
+		return errRawNotText
+	}
 
 	trim := strings.TrimSpace
-	if isPasswordKey(name) {
+	if asTyped || isPasswordKey(name) {
 		trim = func(value string) string { return value }
 	}
 
@@ -374,4 +399,35 @@ func convert(fv reflect.Value, raw string) string {
 		fv.SetFloat(f)
 	}
 	return ""
+}
+
+// errRawNotText is what bindField reports for the raw option on a field that
+// does not hold text.
+var errRawNotText = errors.New("the raw option keeps text as it was typed, and the field does not hold text")
+
+// bindOptions reads what follows the name in a form tag: nothing, or raw.
+//
+// An option it does not know is an error rather than ignored, because the one
+// option there is changes what is stored, and a misspelling of it that bound
+// as if it were absent would trim the text the tag was written to keep.
+func bindOptions(options string) (asTyped bool, err error) {
+	if options == "" {
+		return false, nil
+	}
+	for _, option := range strings.Split(options, ",") {
+		if option != "raw" {
+			return false, fmt.Errorf("the form tag option %q is not one Bind knows; the only one is raw", option)
+		}
+		asTyped = true
+	}
+	return asTyped, nil
+}
+
+// holdsText reports whether a field of type t is text: a string, a pointer to
+// one or a slice of them, counting types whose underlying type is string.
+func holdsText(t reflect.Type) bool {
+	if t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice {
+		t = t.Elem()
+	}
+	return t.Kind() == reflect.String
 }
