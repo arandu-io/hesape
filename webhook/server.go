@@ -115,6 +115,12 @@ func newSender(db *database.DB, cfg Config, seal *sealer, audit *auditor) (*send
 
 func (s *sender) clock() time.Time { return s.now().UTC() }
 
+// admits reports whether the outbox may send an event of this name to any
+// endpoint: every name when Config.Server.Events is empty, and only the names
+// in it otherwise. It is asked before an endpoint's subscription, so neither
+// AllEvents nor a row naming an event outside the list reaches past it.
+func (s *sender) admits(event string) bool { return s.allowed == nil || s.allowed[event] }
+
 // policyOf is the policy an endpoint's deliveries are made under: its own,
 // or the server's.
 func (s *sender) policyOf(e *Endpoint) Policy {
@@ -345,9 +351,10 @@ var _ events.Publisher = publisher{}
 
 // Publish records one delivery per endpoint subscribed to the event, keeping
 // the event's id, so the relay publishing it again records nothing new. The
-// module's own management events are not delivered.
+// module's own management events are not delivered, and neither is an event
+// outside Config.Server.Events when that list is set.
 func (p publisher) Publish(ctx context.Context, stored events.Stored) error {
-	if auditEvent(stored.Name) {
+	if auditEvent(stored.Name) || !p.s.admits(stored.Name) {
 		return nil
 	}
 	//arandu:system-grant the event was committed to the outbox in this tenant by the application; its deliveries go to that tenant's own endpoints.

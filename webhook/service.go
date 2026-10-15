@@ -35,7 +35,8 @@ const DefaultRotationOverlap = 24 * time.Hour
 type EndpointRequest struct {
 	Name string
 	URL  string
-	// Events are the event names it receives; AllEvents receives every one.
+	// Events are the event names it receives; AllEvents receives every one,
+	// or every one in Config.Server.Events when that list is set.
 	Events []string
 	// Dialect is DialectArandu (empty means it, unless Signer names one),
 	// DialectHMAC or DialectStandardWebhooks.
@@ -166,7 +167,7 @@ func (s *EndpointService) validate(in EndpointRequest) (endpointInput, validatio
 		if name == "" || seen[name] {
 			continue
 		}
-		if name != AllEvents && s.sender.allowed != nil && !s.sender.allowed[name] {
+		if name != AllEvents && !s.sender.admits(name) {
 			e.Add("events", "Choose events from the list.")
 			break
 		}

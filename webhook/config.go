@@ -148,6 +148,13 @@ type Server struct {
 
 	// Events is the list an endpoint may subscribe to. Empty accepts any
 	// event name.
+	//
+	// When it is set it bounds what the outbox sends as well as what a form
+	// accepts: an endpoint subscribed to AllEvents receives every event in
+	// this list and nothing outside it, and Publisher sends no event outside
+	// it to any endpoint, whatever the endpoint's row says -- a row stored
+	// before the list was set, or imported, included. Send and Outgoing are
+	// the application's own code naming the event, and are not bounded by it.
 	Events []string
 
 	// AllowEmptySubscription lets an endpoint subscribe to no event: the

@@ -31,7 +31,8 @@ type Endpoint struct {
 	// URL is the absolute http or https address the calls go to.
 	URL string `db:"url"`
 	// Events is the comma-separated list of event names it receives; "*"
-	// receives every event.
+	// receives every event, or, when Config.Server.Events is set, every event
+	// in that list.
 	Events string `db:"events"`
 	// Dialect is how its calls are signed and which headers they carry:
 	// DialectArandu, DialectHMAC or DialectStandardWebhooks.
@@ -329,7 +330,8 @@ const MaxPreviousSecrets = 5
 // maxIdentifierLen is the width of an identifier column.
 const maxIdentifierLen = 64
 
-// AllEvents is the subscription to every event.
+// AllEvents is the subscription to every event. Under Config.Server.Events it
+// is every event in that list: Publisher sends no event outside it.
 const AllEvents = "*"
 
 // EventList returns the events the endpoint subscribes to.

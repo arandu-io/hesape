@@ -11,6 +11,7 @@ import (
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database"
+	"github.com/arandu-io/hesape/events"
 	"github.com/arandu-io/hesape/exception"
 	"github.com/arandu-io/hesape/foundation"
 	"github.com/arandu-io/hesape/pipeline"
@@ -291,5 +292,28 @@ func TestTheModuleNeverDeclaresManagersTable(t *testing.T) {
 	}
 	if !slices.Equal(names, want) {
 		t.Fatalf("Migrations() = %v, want the names they were published with: %v", names, want)
+	}
+}
+
+// TestAnEventOutsideTheAllowListReachesNoEndpoint: with Server.Events set, an
+// endpoint subscribed to AllEvents once received every event the outbox
+// relayed -- a registration, a password reset, with the addresses in them --
+// because the list was asked only by the endpoint's form. The publisher asks
+// it first, so such an event is dropped before any endpoint is read: the
+// handle below wraps no database, and reaching it would panic.
+func TestAnEventOutsideTheAllowListReachesNoEndpoint(t *testing.T) {
+	t.Parallel()
+
+	module := newModule(t, webhook.Config{Server: webhook.Server{Events: []string{"order.paid"}}}, nil)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("an event outside Server.Events reached the endpoints: %v", recovered)
+		}
+	}()
+	for _, name := range []string{"auth.user.registered", "auth.password.reset", webhook.AllEvents} {
+		err := module.Publisher().Publish(context.Background(), events.Stored{ID: "evt-1", TenantID: "acme", Name: name, Payload: `{"email":"a@example.com"}`})
+		if err != nil {
+			t.Fatalf("Publish(%q) = %v, want nil: the event is not one the module sends", name, err)
+		}
 	}
 }
