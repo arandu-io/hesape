@@ -65,7 +65,8 @@ var (
 	// ErrHTTPSRequired is an http address under a policy that is HTTPSOnly.
 	ErrHTTPSRequired = errors.New("webhook: the policy sends to https addresses only")
 	// ErrDeliveryIDTaken is a delivery id already used for another event or
-	// endpoint.
+	// endpoint, in this tenant or in another: delivery ids are one namespace
+	// across every tenant, because the id is what the receivers see.
 	ErrDeliveryIDTaken = statusError{status: http.StatusConflict, text: "webhook: the delivery id is already used by another delivery"}
 )
 
@@ -310,7 +311,10 @@ type Message struct {
 	// Webhook-Id of Standard Webhooks, the same on every attempt and every
 	// redelivery. Up to 128 letters, digits, '_', '.', ':' and '-'. Empty
 	// makes one. One id is one delivery: a message to two endpoints takes
-	// two ids.
+	// two ids. Ids are unique across every tenant, not within one, so an id
+	// the application chooses is made unique beyond its tenant -- random, or
+	// prefixed by the tenant -- or a tenant that chose the same one first
+	// answers ErrDeliveryIDTaken.
 	ID string
 	// EventID is what the delivery is for; a second message with the same
 	// EventID to the same endpoint is answered with the first delivery.
@@ -471,7 +475,9 @@ func (o *Outgoing) URL(u string) *Outgoing { o.url = u; return o }
 func (o *Outgoing) Event(name string) *Outgoing { o.event = name; return o }
 
 // UUID sets the call's identity. A call dispatched twice with one identity to
-// one address is delivered once. Empty means a new one.
+// one address is delivered once. Empty means a new one. The identity is a
+// delivery id, unique across every tenant: choose one no other tenant can,
+// random or prefixed by the tenant, or ErrDeliveryIDTaken answers.
 func (o *Outgoing) UUID(id string) *Outgoing { o.id = id; return o }
 
 // Payload sets the body to v, encoded as JSON.
