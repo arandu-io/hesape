@@ -21,6 +21,12 @@
 // it does not. They read what the browser sent; the tenant is what the Grant
 // authorises, never what the request carries.
 //
+// # A page with a status
+//
+// Context.View answers a page with 200. A page that says something else -- a
+// 404, a 409, a 429, a 503 -- is answered whole with Context.ViewStatus, and a
+// piece of a page an element asked for with Context.Fragment.
+//
 // # Net/http and the package name
 //
 // The package is named http because it is the HTTP layer, and the directory

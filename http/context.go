@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	stdhttp "net/http"
 	"strings"
 
@@ -176,6 +177,43 @@ func (c *Context) HasRoute(name string) bool {
 // framework exists to make impossible.
 func (c *Context) View(name string, data any) error {
 	return c.renderWith(stdhttp.StatusOK, name, data)
+}
+
+// ViewStatus renders a whole page with a status other than 200: the page that
+// says the invoice is not there with 404, the page that says it was paid in
+// the meantime with 409, the page that asks to come back later with 429 or
+// 503.
+//
+//	return ctx.ViewStatus(http.StatusConflict, "invoices/already-paid", data)
+//
+// It is View with the status said, and it renders the same pages View does --
+// a layout, its chrome, the values in both representations. A piece of a page
+// an element asked for is a Fragment, and a form whose input failed the rules
+// is answered by returning the validation.Errors, which the router turns into
+// a redirect back to the form; neither is a page.
+//
+// The status is one a page can be answered with: 200 to 599, except 204, 205
+// and 304, which carry no body. Any other is a mistake in the program and is
+// returned as an error before anything is written.
+//
+// # Asked for by htmx
+//
+// htmx does not swap a 4xx or a 5xx in the copy this framework embeds, so a
+// page with one of those statuses, answered to an htmx request, would be
+// thrown away and the click would do nothing. It is answered the way Refuse
+// answers a refusal: with HX-Refresh, so the browser reloads the page it is on
+// as an ordinary navigation, and Refuse says what that reload can and cannot
+// show. The status and the page are written either way, so logs and every
+// other client see them unchanged.
+func (c *Context) ViewStatus(status int, name string, data any) error {
+	if status < stdhttp.StatusOK || status > 599 ||
+		status == stdhttp.StatusNoContent || status == stdhttp.StatusResetContent || status == stdhttp.StatusNotModified {
+		return fmt.Errorf("http: ViewStatus cannot answer %q with %d, which is not a status a page is answered with", name, status)
+	}
+	if status >= stdhttp.StatusBadRequest && c.Request != nil && c.IsHTMX() {
+		c.Response.Header().Set("HX-Refresh", "true")
+	}
+	return c.renderWith(status, name, data)
 }
 
 // Fragment renders a partial with a status, for HTMX.
