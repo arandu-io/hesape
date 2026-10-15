@@ -27,6 +27,71 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.63.0 — webhooks and accounts after the review
+
+Nothing in the API breaks: `Flash.Withhold`, `Users.Admit`,
+`Hooks.AfterClose` and `ErrAccountClosed` are new. What changes is behaviour,
+and five of the changes are ones a deployment notices.
+
+**`Config.Server.Events` bounds what is sent.** With the list set, the
+publisher sends no event outside it to any endpoint, and an endpoint
+subscribed to `"*"` receives every event in the list and nothing else. An
+endpoint that relied on `"*"` reaching an event outside the list stops
+receiving it: add the event to the list.
+
+**A rotation keeps the previous secret verifying.** During the overlap the
+Arandu signature header is written once per secret still signing, the one
+that retires first on the first line; `Verify` and the `Arandu` validator
+accept any line, or the lines joined by commas. A receiver on an earlier hesape
+reads the first line, so it keeps working with the previous secret until that
+secret retires. The HMAC dialect's header holds one value, so it is signed
+with the previous secret until it retires, and only then with the new one: a
+receiver of that dialect moves to the new secret at `retires_at`, not at the
+rotation. Outside a rotation both headers are what they were.
+
+**A Mount whose CSRF exemption reaches other routes is refused by `New`**:
+one whose first segment is a parameter (`"/{org}/x"`, which made
+`CSRFExcept` panic at boot) and one at or under the management `Prefix`.
+Move the Mount, or the `Prefix`.
+
+**An endpoint update that changes the URL drops the stored headers** unless
+the same update supplies headers. A screen that edits the URL of an endpoint
+with headers sends them again.
+
+**A received call keeps no credential in clear.** `StoreHeaders` keeps
+Authorization, Proxy-Authorization, Cookie, Set-Cookie, every header name
+`session.IsSecretField` calls secret and the `HeaderSecret` validator's header
+by name, with `[redacted]` as the value; `URLFull` redacts the value of a query
+parameter that carries a credential. Calls stored before are not rewritten.
+
+The rest needs nothing from an application:
+
+- The publisher pages through a tenant's active endpoints, so a subscribed
+  endpoint is no longer left out behind 500 that are not; the cap of 500
+  applies to the endpoints an event is sent to.
+- `Register` and `ChangePassword` count a password in characters, as
+  `hashing.Make` does, at both ends: a password over 128 characters is refused
+  as input, and `ChangePassword` answers it on the password field with "the
+  new password is too long".
+- `account.Registration` and `account.Draft` log and print which fields arrived
+  and nothing they carried.
+- `IsSecretField` also keeps `email_code`, `authenticator_code`, `sms_code`,
+  `reset_code`, `login_code` and `passcode` out of the flash, behind any
+  qualifier.
+- A delivery id a caller chooses, in `Message.ID` or `Outgoing.UUID`, is unique
+  across every tenant, as it always was; the doc comments now say so.
+
+To revoke what still acts as a closed account, wire `Hooks.AfterClose` to
+delete its tokens and sessions, and ask `Users.Admit` wherever a token or a
+remembered device is resolved to an account. To keep personal data out of the
+flash cookie, call `Withhold` on the router's flash at boot:
+
+```go
+router.Flash().Withhold("cpf", "mobile")
+```
+
+---
+
 ## v0.62.0 — the registration reaches the step after the insert
 
 Nothing breaks: `account.Hooks` gains `AfterRegister`, and `AfterCreate` is
