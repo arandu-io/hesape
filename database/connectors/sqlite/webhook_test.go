@@ -38,7 +38,7 @@ func TestDatabaseDispatchCommitsSnapshotAndJobTogether(t *testing.T) {
 	g := auth.SystemGrant(webhook.ActionDispatch, "tenant-a")
 	err = manager.Dispatch(context.Background(), g,
 		webhook.Event{ID: "event-1", Name: "invoice.paid", Payload: []byte(`{"id":"inv-1"}`)},
-		[]webhook.Endpoint{
+		[]webhook.ManagerEndpoint{
 			{ID: "accounting", URL: "https://accounting.example.test/hook"},
 			{ID: "audit", URL: "https://audit.example.test/hook"},
 		},
@@ -66,7 +66,7 @@ func TestDatabaseManagerUsesConfiguredActionForStoreAndJob(t *testing.T) {
 	grant := auth.SystemGrant(customAction, "tenant-a")
 	if err := manager.Dispatch(context.Background(), grant,
 		webhook.Event{ID: "event-legacy", Name: "message.sent", Payload: []byte(`{"id":"message-1"}`)},
-		[]webhook.Endpoint{{ID: "application", URL: "https://hooks.example.test/messages"}},
+		[]webhook.ManagerEndpoint{{ID: "application", URL: "https://hooks.example.test/messages"}},
 	); err != nil {
 		t.Fatalf("Dispatch() with configured action error = %v", err)
 	}
@@ -92,7 +92,7 @@ func TestDatabaseDispatchRollsBackSnapshotWhenJobInsertFails(t *testing.T) {
 	}
 	err = manager.Dispatch(context.Background(), auth.SystemGrant(webhook.ActionDispatch, "tenant-a"),
 		webhook.Event{ID: "event-1", Name: "invoice.paid", Payload: []byte(`{}`)},
-		[]webhook.Endpoint{{ID: "accounting", URL: "https://accounting.example.test/hook"}},
+		[]webhook.ManagerEndpoint{{ID: "accounting", URL: "https://accounting.example.test/hook"}},
 	)
 	if err == nil {
 		t.Fatal("Dispatch() error = nil")
@@ -110,11 +110,11 @@ func TestDatabaseDispatchIsIdempotent(t *testing.T) {
 	}
 	g := auth.SystemGrant(webhook.ActionDispatch, "tenant-a")
 	event := webhook.Event{ID: "event-1", Name: "invoice.paid", Payload: []byte(`{}`)}
-	endpoint := webhook.Endpoint{ID: "accounting", URL: "https://accounting.example.test/hook"}
-	if err := manager.Dispatch(context.Background(), g, event, []webhook.Endpoint{endpoint}); err != nil {
+	endpoint := webhook.ManagerEndpoint{ID: "accounting", URL: "https://accounting.example.test/hook"}
+	if err := manager.Dispatch(context.Background(), g, event, []webhook.ManagerEndpoint{endpoint}); err != nil {
 		t.Fatalf("first Dispatch() error = %v", err)
 	}
-	if err := manager.Dispatch(context.Background(), g, event, []webhook.Endpoint{endpoint}); err != nil {
+	if err := manager.Dispatch(context.Background(), g, event, []webhook.ManagerEndpoint{endpoint}); err != nil {
 		t.Fatalf("second Dispatch() error = %v", err)
 	}
 	if got := countRows(t, db, "webhook_deliveries"); got != 1 {
@@ -130,7 +130,7 @@ func TestDatabaseClaimFencingRejectsStaleSettlement(t *testing.T) {
 	store := webhook.NewDatabaseStore(db)
 	g := auth.SystemGrant(webhook.ActionDispatch, "tenant-a")
 	now := time.Now().UTC()
-	created, err := store.Create(context.Background(), g, webhook.Delivery{
+	created, err := store.Create(context.Background(), g, webhook.ManagerDelivery{
 		ID: "delivery-1", EventID: "event-1", EventName: "invoice.paid",
 		EndpointID: "accounting", URL: "https://accounting.example.test/hook",
 		Headers: map[string]string{}, Body: []byte(`{}`), CreatedAt: now, UpdatedAt: now,
