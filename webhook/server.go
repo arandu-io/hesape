@@ -27,8 +27,13 @@ const (
 	namedSecretRef    = "secret:"
 )
 
-// maxFanout is how many endpoints one event reaches in one tenant.
+// maxFanout is how many endpoints one event reaches in one tenant: the first
+// this many subscribed to it, by id, however many active endpoints are not.
 const maxFanout = 500
+
+// fanoutPage is how many active endpoints one read takes while the publisher
+// looks for the ones subscribed to an event.
+const fanoutPage = 500
 
 // DefaultEvent is the event name of an Outgoing call that names none.
 const DefaultEvent = "webhook.call"
@@ -362,15 +367,18 @@ func (p publisher) Publish(ctx context.Context, stored events.Stored) error {
 	if !auth.ValidTenant(stored.TenantID) {
 		return fmt.Errorf("%w: the event carries no valid tenant", auth.ErrForbidden)
 	}
-	rows, err := Endpoints(p.s.db).Where("active", "=", Flag(true)).OrderBy("id").Limit(maxFanout).Get(ctx, g)
+	rows, err := subscribed(func(after string) ([]*Endpoint, error) {
+		query := Endpoints(p.s.db).Where("active", "=", Flag(true))
+		if after != "" {
+			query = query.Where("id", ">", after)
+		}
+		return query.OrderBy("id").Limit(fanoutPage).Get(ctx, g)
+	}, stored.Name)
 	if err != nil {
 		return err
 	}
 	var items []outgoing
 	for _, row := range rows {
-		if !row.Receives(stored.Name) {
-			continue
-		}
 		item, err := p.s.target(row)
 		if err != nil {
 			return err
@@ -583,4 +591,33 @@ func (o *Outgoing) Dispatch(ctx context.Context, g auth.Grant) error {
 		signatureHeader: o.hmac, aranduHeaders: !o.noArandu, policy: o.s.policy.clone(), trigger: AttemptScheduled,
 	}})
 	return err
+}
+
+// subscribed reads the active endpoints a page at a time, by id, through
+// page -- which answers the ones after the id it is given, "" for the first --
+// and keeps those subscribed to event, up to maxFanout. The subscription is a
+// list in a text column, so it is read here rather than in the statement; the
+// pages are what keep an endpoint subscribed behind maxFanout others that are
+// not from being left out.
+func subscribed(page func(after string) ([]*Endpoint, error), event string) ([]*Endpoint, error) {
+	var out []*Endpoint
+	after := ""
+	for {
+		rows, err := page(after)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			if !row.Receives(event) {
+				continue
+			}
+			if out = append(out, row); len(out) == maxFanout {
+				return out, nil
+			}
+		}
+		if len(rows) < fanoutPage {
+			return out, nil
+		}
+		after = rows[len(rows)-1].ID
+	}
 }
