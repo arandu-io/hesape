@@ -27,6 +27,63 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.60.0 — account and second-factor rules are importable
+
+Nothing breaks: `auth/account` is a new package. It is listed because it
+replaces files every application carries, and moving to it is a change to
+those files, not to anything of this collection's.
+
+The package holds the account rules and the authenticator second factor that
+each application kept as a copy: `UserService`, `TwoFactorService`,
+`TwoFactorRepository`, the `TwoFactor` and `RecoveryCode` models and
+`TwoFactorPolicy`. The user model, `UserPolicy`, the users migrations and the
+screens stay the application's. It reads and writes the rows those files
+wrote, unchanged: the tables `user_two_factor` and `user_recovery_codes`, the
+recovery-code hashes, the sealed TOTP secrets, the password fingerprint a reset
+link or a pending sign-in carries, the challenge counters, and every event name
+and payload.
+
+To move an application:
+
+1. Delete `app/Services/UserService.go`, `app/Services/TwoFactorService.go`,
+   `app/Repositories/TwoFactorRepository.go`, `app/Models/TwoFactor.go`,
+   `app/Models/TwoFactorQuery.go`, `app/Models/RecoveryCodeQuery.go`,
+   `app/Policies/TwoFactorPolicy.go`, and the auth event names in
+   `app/Events/User.go`.
+2. Implement `account.Account` on `*models.User`: `AccountID`,
+   `AccountTenant`, `AccountEmail`, `AccountName`, `PasswordHash` and
+   `IsVerified`. `PasswordFingerprint` becomes `account.Fingerprint(u.Password)`.
+3. In `UserPolicy`, compare against `account.ActionUserView`,
+   `account.ActionUserCreate`, `account.ActionUserUpdate`,
+   `account.ActionUserDelete` and `account.ActionUserNamesPublic`. They are the
+   same strings, so a policy that keeps its own constants still works.
+4. In `bootstrap/app.go`, build both and hand them to the controllers:
+
+   ```go
+   users, err := account.NewUsers(account.Config[*models.User]{
+   	DB:     db,
+   	Query:  func() *model.Builder { return models.Users(db).Base() },
+   	Policy: policies.UserPolicy{},
+   })
+   factors, err := account.NewFactors(db, appKey, store, nil, users)
+   ```
+
+5. Keep `database/migrations/20260828_0003_create_two_factor.go`. It is
+   applied already, and `account.Migrations()` declares a migration of the same
+   name, so an application registers one or the other and never both. A new
+   application registers `account.Migrations()`.
+
+What changes at the call sites: `Register` takes an `account.Registration`,
+and every method returns the user model's pointer rather than a value. An
+application's own fields at registration -- a document number, a phone --
+are `Hooks.Prepare`; what it creates beside a new account is
+`Hooks.AfterCreate`, in the same transaction; a suspension is `Hooks.Admit`.
+`EnsureUser` and `EnsureAdmin` are `Provision`, with roles written by
+`Draft.Fill`. `ChangePassword`, `Rename` and `Close` are new, and run under
+the Grant the user policy issues.
+
+---
+
 ## v0.59.0 — webhooks are native, and Manager's value types are renamed
 
 The webhook package now holds the Module that sends and receives webhooks,
