@@ -161,6 +161,14 @@ type Hooks struct {
 
 	// AdmitClears says a sign-in Admit refused still clears the throttle, as
 	// a right password does. Left false, the refusal counts as a failure.
+	//
+	// Setting it gives back part of what answering a refusal as a wrong
+	// password protects. The answer is the same, but the throttle is not:
+	// wrong passwords for a refused account run into the lockout, and the
+	// right one resets the count. Whoever guesses at a suspended account can
+	// therefore tell the right password by the lockout that does not come,
+	// and use it the day the account is admitted again. Leave it false unless
+	// a refused person locking themselves out is the larger harm.
 	AdmitClears bool
 
 	// Prepare runs first in Register, with the registration and the unsaved
