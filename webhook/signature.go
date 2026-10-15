@@ -314,6 +314,9 @@ func (v HeaderSecret) Valid(r *http.Request, _ []byte, secrets SecretSet) bool {
 
 func (HeaderSecret) readsHeadersOnly() bool { return true }
 
+// secretHeaders is the header a stored call never keeps in clear.
+func (v HeaderSecret) secretHeaders() []string { return []string{v.Header} }
+
 // StandardWebhooks checks the Standard Webhooks scheme: webhook-signature
 // carries "v1," and the standard base64 HMAC-SHA256 of id.timestamp.body
 // under the key a whsec_ secret encodes, once per secret the sender signs

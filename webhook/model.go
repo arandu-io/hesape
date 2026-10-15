@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/database/model"
+	"github.com/arandu-io/hesape/session"
 )
 
 // Endpoint is one destination the application sends to: an address, the
@@ -513,8 +514,42 @@ func (c *Call) Failed(err error, now time.Time) {
 	c.Status, c.Exception, c.UpdatedAt = CallFailed, message, now
 }
 
-// keptHeaders is the JSON of the headers a receiver keeps.
-func keptHeaders(h http.Header, keep []string) string {
+// redacted is what a stored call keeps in place of a credential: the header
+// or the query parameter is still there, so what arrived can be told apart,
+// and its value is not.
+const redacted = "[redacted]"
+
+// credentialHeaders are the headers whose value is a credential by what HTTP
+// says they are, whatever their name looks like.
+var credentialHeaders = map[string]bool{
+	"authorization":       true,
+	"proxy-authorization": true,
+	"cookie":              true,
+	"set-cookie":          true,
+}
+
+// credentialHeader reports whether a stored call keeps a header's value
+// redacted: a credential header of HTTP, a name session.IsSecretField calls
+// secret -- X-Api-Key, X-Auth-Token, X-Webhook-Secret -- or one of the names
+// the receiver's validator reads its secret from.
+func credentialHeader(name string, secret []string) bool {
+	lower := strings.ToLower(name)
+	if credentialHeaders[lower] || session.IsSecretField(name) {
+		return true
+	}
+	for _, header := range secret {
+		if strings.EqualFold(header, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// keptHeaders is the JSON of the headers a receiver keeps. A credential --
+// see credentialHeader -- is kept by name with its value redacted, under "*"
+// and when it is named alike: the call row is read by whoever reads the
+// panel, and a secret stored there is a secret handed to every one of them.
+func keptHeaders(h http.Header, keep []string, secret []string) string {
 	out := map[string][]string{}
 	all := len(keep) == 1 && keep[0] == "*"
 	wanted := map[string]bool{}
@@ -528,9 +563,14 @@ func keptHeaders(h http.Header, keep []string) string {
 	sort.Strings(names)
 	for _, name := range names {
 		lower := strings.ToLower(name)
-		if all || wanted[lower] {
-			out[lower] = append([]string(nil), h[name]...)
+		if !all && !wanted[lower] {
+			continue
 		}
+		if credentialHeader(name, secret) {
+			out[lower] = append(out[lower], redacted)
+			continue
+		}
+		out[lower] = append(out[lower], h[name]...)
 	}
 	if len(out) == 0 {
 		return ""

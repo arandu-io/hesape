@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/arandu-io/hesape/database"
 	"github.com/arandu-io/hesape/queue"
 	"github.com/arandu-io/hesape/queue/jobs"
+	"github.com/arandu-io/hesape/session"
 )
 
 // ProcessJob is the queued job that hands a stored call to its receiver's
@@ -380,7 +382,7 @@ func (c *client) store(ctx context.Context, r *http.Request, rc *receiver, to ad
 	}
 	now := c.now()
 	call.TenantID, call.Name, call.Method, call.Reference = auth.Tenant(g), rc.Name, r.Method, to.reference
-	call.URL, call.HeaderData, call.Payload = keptURL(r, rc), keptHeaders(r.Header, rc.StoreHeaders), string(body)
+	call.URL, call.HeaderData, call.Payload = keptURL(r, rc), keptHeaders(r.Header, rc.StoreHeaders, secretHeadersOf(to.validator)), string(body)
 	received := r.Header.Clone()
 	call.RemoteAddr, call.HeadersSHA256, call.received = clip(r.RemoteAddr, 255), HeadersDigest(r.Header), &received
 	call.Status, call.ProcessedAt, call.CreatedAt, call.UpdatedAt = CallReceived, now, now, now
@@ -466,7 +468,8 @@ func (c *client) handle(ctx context.Context, g auth.Grant, j *jobs.Job) error {
 	return failure
 }
 
-// keptURL is the address the call arrived at, as the receiver keeps it.
+// keptURL is the address the call arrived at, as the receiver keeps it, with
+// the value of a credential in its query redacted.
 func keptURL(r *http.Request, rc *receiver) string {
 	scheme := "http"
 	if r.TLS != nil {
@@ -478,7 +481,34 @@ func keptURL(r *http.Request, rc *receiver) string {
 	case URLRoute:
 		return clip(scheme+"://"+r.Host+rc.pattern, MaxURLLength)
 	}
-	return clip(scheme+"://"+r.Host+r.URL.RequestURI(), MaxURLLength)
+	arrived := *r.URL
+	if arrived.RawQuery != "" {
+		arrived.RawQuery = redactQuery(arrived.RawQuery)
+	}
+	return clip(scheme+"://"+r.Host+arrived.RequestURI(), MaxURLLength)
+}
+
+// credentialParams are query parameters that carry a credential in a callback
+// address although session.IsSecretField, which reads form fields, does not
+// call them secret: ?key=, ?sig=, ?signature=.
+var credentialParams = map[string]bool{"key": true, "sig": true, "signature": true}
+
+// redactQuery is a raw query with the value of every credential parameter
+// redacted -- a name session.IsSecretField calls secret, such as token,
+// access_token or api_key, or one of credentialParams -- and every other pair
+// kept as it arrived, in its order.
+func redactQuery(raw string) string {
+	pairs := strings.Split(raw, "&")
+	for i, pair := range pairs {
+		name, _, _ := strings.Cut(pair, "=")
+		if unescaped, err := url.QueryUnescape(name); err == nil {
+			name = unescaped
+		}
+		if name != "" && (credentialParams[strings.ToLower(name)] || session.IsSecretField(name)) {
+			pairs[i] = pair[:strings.IndexByte(pair+"=", '=')] + "=" + redacted
+		}
+	}
+	return strings.Join(pairs, "&")
 }
 
 // clip cuts a text to a column's width.
@@ -487,4 +517,13 @@ func clip(text string, width int) string {
 		return text[:width]
 	}
 	return text
+}
+
+// secretHeadersOf is the headers a validator reads its secret from, which a
+// stored call keeps redacted.
+func secretHeadersOf(v SignatureValidator) []string {
+	if reader, ok := v.(interface{ secretHeaders() []string }); ok {
+		return reader.secretHeaders()
+	}
+	return nil
 }

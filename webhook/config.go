@@ -227,7 +227,13 @@ type Receiver struct {
 	Respond Responder
 
 	// StoreHeaders are the request headers kept with the call; "*" keeps
-	// them all. Empty keeps none.
+	// them all. Empty keeps none. A credential is kept by name with its value
+	// as [redacted], whether "*" or its own name asked for it:
+	// Authorization, Proxy-Authorization, Cookie, Set-Cookie, every name
+	// session.IsSecretField calls secret -- X-Api-Key, X-Auth-Token -- and the
+	// header a HeaderSecret validator reads. A validator of the application's
+	// own that reads its secret from another header is not known here: leave
+	// that header out of the list.
 	StoreHeaders []string
 
 	// Process handles a stored call on the queue. Required unless ProcessSync is set.
@@ -393,7 +399,10 @@ const (
 type URLMode string
 
 const (
-	// URLFull keeps the scheme, host, path and query as they arrived.
+	// URLFull keeps the scheme, host, path and query as they arrived, but for
+	// the value of a query parameter that carries a credential -- token,
+	// access_token, api_key, key, sig, signature and every name
+	// session.IsSecretField calls secret -- which is kept as [redacted].
 	URLFull URLMode = "full"
 	// URLRoute keeps the scheme, host and the receiver's route, its path
 	// parameters written as {name} and no query: what was called, without
