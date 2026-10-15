@@ -2,8 +2,8 @@ package mysql_test
 
 // The webhook Module's tables on a real MySQL server: its migrations
 // apply, roll back and apply again beside the webhook_deliveries table the
-// deprecated Manager keeps, and two workers claiming one delivery at once
-// send one attempt.
+// deprecated Manager keeps, and a second worker claiming a delivery whose
+// attempt is on the wire is refused, so one attempt goes out.
 //
 // Both skip without ARANDU_TEST_MYSQL_DSN, like the conformance suite. Each
 // test runs in a database of its own, made for it and dropped after it, so
@@ -193,8 +193,8 @@ func TestTwoWorkersClaimingOneDeliverySendOneAttempt(t *testing.T) {
 	db, conn := webhookServer(t)
 	ctx := context.Background()
 
-	// The receiver holds the first request until both workers have tried, so
-	// the second claim is made while the first attempt is on the wire.
+	// The receiver holds the first request until the test lets it go, so the
+	// second claim is made while the first attempt is on the wire.
 	arrived := make(chan struct{}, 4)
 	release := make(chan struct{})
 	var mu sync.Mutex
@@ -210,7 +210,6 @@ func TestTwoWorkersClaimingOneDeliverySendOneAttempt(t *testing.T) {
 	t.Cleanup(target.Close)
 	var releaseOnce sync.Once
 	letGo := func() { releaseOnce.Do(func() { close(release) }) }
-	t.Cleanup(letGo)
 
 	// A clock in the past: the jobs it queues are due on the queue's clock,
 	// and whole seconds leave nothing to a column's precision.
@@ -222,10 +221,10 @@ func TestTwoWorkersClaimingOneDeliverySendOneAttempt(t *testing.T) {
 		}
 	}
 	jobs := queue.NewDatabaseQueue(db)
-	workers := make([]*queue.Worker, 2)
-	for i := range workers {
-		workers[i] = queue.NewWorker(jobs, queue.WorkerOptions{Queue: webhook.DefaultQueue, Concurrency: 1, Sleep: time.Millisecond})
-		if err := module.RegisterJobHandlers(workers[i]); err != nil {
+	first := queue.NewWorker(jobs, queue.WorkerOptions{Name: "first", Queue: webhook.DefaultQueue, Concurrency: 1, Sleep: time.Millisecond})
+	second := queue.NewWorker(jobs, queue.WorkerOptions{Name: "second", Queue: webhook.DefaultQueue, Concurrency: 1, Sleep: time.Millisecond})
+	for _, worker := range []*queue.Worker{first, second} {
+		if err := module.RegisterJobHandlers(worker); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -236,8 +235,8 @@ func TestTwoWorkersClaimingOneDeliverySendOneAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery, err := module.Send(ctx, auth.SystemGrant(webhook.DeliveryDispatch, webhookTenant), endpoint.ID,
-		webhook.Message{Event: "order.paid", Body: []byte(`{"order":1}`)})
+	dispatch := auth.SystemGrant(webhook.DeliveryDispatch, webhookTenant)
+	delivery, err := module.Send(ctx, dispatch, endpoint.ID, webhook.Message{Event: "order.paid", Body: []byte(`{"order":1}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,41 +249,69 @@ func TestTwoWorkersClaimingOneDeliverySendOneAttempt(t *testing.T) {
 		t.Fatalf("%d jobs wait (%v), want the scheduled one and the redelivery", n, err)
 	}
 
-	done := make(chan error, len(workers))
-	for _, worker := range workers {
-		go func() { done <- worker.RunNextJob(ctx) }()
-	}
+	// The first worker takes one job, claims the delivery and is held on the
+	// wire. Started together, two workers can pick the same job from the queue
+	// and one of them gets nothing, which is the queue's compare-and-set and
+	// not the claim this test is about; so the second starts only once the
+	// first holds its job, and the queue can hand it nothing but the other.
+	var firstErr error
+	firstDone := make(chan struct{})
+	go func() { firstErr = first.RunNextJob(ctx); close(firstDone) }()
+	// Whatever happens below, the held attempt is let go and finishes before
+	// the database closes under it.
+	t.Cleanup(func() {
+		letGo()
+		select {
+		case <-firstDone:
+		case <-time.After(30 * time.Second):
+		}
+	})
 	select {
 	case <-arrived:
 	case <-time.After(30 * time.Second):
 		t.Fatal("no attempt reached the receiver")
 	}
+
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- second.RunNextJob(ctx) }()
 	select {
-	case <-done:
+	case <-secondDone:
 	case <-time.After(30 * time.Second):
 		t.Fatal("the second claim waited on the first attempt instead of being refused")
 	}
-	// The second worker took its job, found the attempt in progress and put
-	// the job back for later; the first still holds its own.
+	// The second worker took the other job, found the attempt in progress and
+	// put the job back for later; the first still holds its own.
 	if held, err := jobs.ReservedSize(ctx, webhook.DefaultQueue); err != nil || held != 1 {
 		t.Fatalf("%d jobs are held (%v), want the attempt on the wire", held, err)
 	}
 	if later, err := jobs.DelayedSize(ctx, webhook.DefaultQueue); err != nil || later != 1 {
 		t.Fatalf("%d jobs wait for later (%v), want the one refused the claim", later, err)
 	}
-	if row, err := webhook.Deliveries(db).WhereKey(delivery.ID).First(ctx, auth.SystemGrant(webhook.DeliveryDispatch, webhookTenant)); err != nil ||
+	if row, err := webhook.Deliveries(db).WhereKey(delivery.ID).First(ctx, dispatch); err != nil ||
 		row == nil || row.Status != webhook.DeliveryProcessing || row.Attempts != 1 {
 		t.Fatalf("while the attempt is out the delivery is %+v, %v", row, err)
 	}
 
 	letGo()
 	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("the attempt that went out: %v", err)
+	case <-firstDone:
+		if firstErr != nil {
+			t.Fatalf("the attempt that went out: %v", firstErr)
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("the attempt that went out never finished")
+	}
+
+	// The job refused the claim comes back after the attempt settled, and
+	// finds nothing left to send.
+	if _, err := db.ExecContext(ctx, `UPDATE jobs SET run_at = ? WHERE queue = ?`, time.Now().UTC().Add(-time.Second), webhook.DefaultQueue); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.RunNextJob(ctx); err != nil {
+		t.Fatalf("the job refused the claim, run again: %v", err)
+	}
+	if n, err := jobs.Size(ctx, webhook.DefaultQueue); err != nil || n != 0 {
+		t.Fatalf("%d jobs are left (%v), want none", n, err)
 	}
 
 	mu.Lock()
@@ -293,7 +320,7 @@ func TestTwoWorkersClaimingOneDeliverySendOneAttempt(t *testing.T) {
 	if sent != 1 {
 		t.Fatalf("two claims of one attempt sent %d requests", sent)
 	}
-	row, err := webhook.Deliveries(db).WhereKey(delivery.ID).First(ctx, auth.SystemGrant(webhook.DeliveryDispatch, webhookTenant))
+	row, err := webhook.Deliveries(db).WhereKey(delivery.ID).First(ctx, dispatch)
 	if err != nil || row == nil || row.Status != webhook.DeliveryDelivered || row.Attempts != 1 {
 		t.Fatalf("after the attempt the delivery is %+v, %v", row, err)
 	}
