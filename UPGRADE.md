@@ -27,6 +27,31 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.62.0 — the registration reaches the step after the insert
+
+Nothing breaks: `account.Hooks` gains `AfterRegister`, and `AfterCreate` is
+unchanged.
+
+`AfterCreate` receives the account and the Grant, not the registration, so an
+application that stores what its form carried beyond the account -- a CPF, a
+mobile number, a consent -- kept it on a transient `db:"-"` field of its User
+model, set in `Prepare` and read back in `AfterCreate`. `AfterRegister`
+receives the `Registration` itself, as `Prepare` left it, `Extra` included and
+`Password` cleared. It runs only for `Register`, in the same transaction,
+right after `AfterCreate` and before the event; an error rolls back the
+account and the event. `Provision` does not call it.
+
+To drop the transient field:
+
+1. Put what the form carried in `Registration.Extra` where the controller
+   builds the registration (or in `Prepare`, if `Prepare` is what reads it).
+2. Move the body of `AfterCreate` that reads the field into `AfterRegister`,
+   reading `registration.Extra.(YourForm)` instead.
+3. Delete the field from the User model. Keep `AfterCreate` only for what must
+   also happen when `Provision` creates an account.
+
+---
+
 ## v0.61.0 — a page with its status, and text bound as typed
 
 Nothing in the API breaks: `http.Context.ViewStatus` is new and `Bind` reads
