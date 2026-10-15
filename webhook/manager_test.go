@@ -324,7 +324,7 @@ func TestManagerOptionsDefaultsAndValidation(t *testing.T) {
 		t.Fatalf("newManager() error = %v", err)
 	}
 	if manager.action != ActionDispatch || manager.queueName != QueueName ||
-		manager.jobName != DeliveryJobName || manager.userAgent != defaultUserAgent {
+		manager.jobName != DeliveryJobName || manager.userAgent != DefaultUserAgent {
 		t.Fatalf("default routing = action %q, queue %q, job %q, agent %q",
 			manager.action, manager.queueName, manager.jobName, manager.userAgent)
 	}

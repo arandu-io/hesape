@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+// aranduPrefix is the prefix the Arandu dialect's headers carry unless
+// Server.HeaderPrefix renames them: X-Arandu-Signature, X-Arandu-Timestamp
+// and X-Arandu-Delivery-Id.
+const aranduPrefix = "X-Arandu"
+
 // StandardSecretPrefix labels a Standard Webhooks secret: what follows it is
 // the standard base64 of the signing key.
 const StandardSecretPrefix = "whsec_"
@@ -83,19 +88,19 @@ func (s signing) current() []byte {
 // sign writes the dialect's headers on the request: the content type, the
 // user agent when the policy has one, and the signature of the body at the
 // timestamp. Extra headers were set before it and cannot override these.
-func sign(h http.Header, d *Delivery, keys signing, signedAt time.Time, prefix, userAgent string) error {
-	body := []byte(d.Body)
+func sign(h http.Header, s shot, signedAt time.Time, prefix, userAgent string) error {
+	body, keys := s.body, s.keys
 	h.Set("Content-Type", "application/json")
 	if userAgent != "" {
 		h.Set("User-Agent", userAgent)
 	}
-	switch d.Dialect {
+	switch s.dialect {
 	case DialectStandardWebhooks:
-		signature, err := SignStandard(keys.secrets, d.ID, signedAt.Unix(), body)
+		signature, err := SignStandard(keys.secrets, s.id, signedAt.Unix(), body)
 		if err != nil {
 			return err
 		}
-		h.Set(StandardHeaderID, d.ID)
+		h.Set(StandardHeaderID, s.id)
 		h.Set(StandardHeaderTimestamp, strconv.FormatInt(signedAt.Unix(), 10))
 		h.Set(StandardHeaderSignature, signature)
 		return nil
@@ -103,8 +108,8 @@ func sign(h http.Header, d *Delivery, keys signing, signedAt time.Time, prefix, 
 		if len(keys.current()) < MinSecretBytes {
 			return ErrSecretTooShort
 		}
-		h.Set(d.SignatureHeader, SignBody(keys.current(), body))
-		if !d.AranduHeaders {
+		h.Set(s.signatureHeader, SignBody(keys.current(), body))
+		if !s.aranduHeaders {
 			return nil
 		}
 	}
@@ -112,8 +117,8 @@ func sign(h http.Header, d *Delivery, keys signing, signedAt time.Time, prefix, 
 		return ErrSecretTooShort
 	}
 	timestamp := strconv.FormatInt(signedAt.Unix(), 10)
-	h.Set(prefix+"-Delivery-Id", d.ID)
+	h.Set(prefix+"-Delivery-Id", s.id)
 	h.Set(prefix+"-Timestamp", timestamp)
-	h.Set(prefix+"-Signature", Sign(keys.current(), timestamp, d.ID, body))
+	h.Set(prefix+"-Signature", Sign(keys.current(), timestamp, s.id, body))
 	return nil
 }

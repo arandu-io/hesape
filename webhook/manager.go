@@ -1,13 +1,10 @@
 package webhook
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,21 +12,27 @@ import (
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database"
 	"github.com/arandu-io/hesape/database/migrations"
-	httpclient "github.com/arandu-io/hesape/http/client"
 	"github.com/arandu-io/hesape/queue"
 	"github.com/arandu-io/hesape/queue/jobs"
 )
 
 const (
-	defaultTimeout       = 15 * time.Second
+	managerTimeout       = 15 * time.Second
 	terminalWriteTimeout = 3 * time.Second
 	pruneInterval        = time.Hour
-	minimumSecretBytes   = 32
-	defaultUserAgent     = "Arandu-Webhook/1.0"
-	signatureHeader      = "X-Arandu-Signature"
-	timestampHeader      = "X-Arandu-Timestamp"
-	deliveryHeader       = "X-Arandu-Delivery-ID"
 )
+
+// The headers a delivery of Manager carries: the engine's Arandu dialect,
+// under its default prefix.
+const (
+	signatureHeader = aranduPrefix + "-Signature"
+	timestampHeader = aranduPrefix + "-Timestamp"
+	deliveryHeader  = aranduPrefix + "-Delivery-ID"
+)
+
+// managerBackoff is the wait before each retry of a delivery of Manager,
+// which the queue makes: 5 attempts in all.
+var managerBackoff = []time.Duration{5 * time.Second, 30 * time.Second, 2 * time.Minute, 10 * time.Minute}
 
 type deliveryJob struct {
 	DeliveryID string `json:"deliveryId"`
@@ -57,7 +60,9 @@ type ManagerOptions struct {
 	UserAgent string
 	// HTTPClient supplies an application transport. The webhook client still
 	// guards schemes, response size and every redirect hop, but a custom
-	// transport owns DNS and dialing; nil uses Hesape's SSRF-guarded transport.
+	// transport owns DNS and dialing; nil uses the guarded transport, which
+	// refuses loopback, private, link-local and shared (100.64.0.0/10)
+	// addresses on every hop.
 	HTTPClient *http.Client
 }
 
@@ -79,6 +84,10 @@ type Manager struct {
 	userAgent string
 	pruneMu   sync.Mutex
 	lastPrune map[string]time.Time
+	// engine makes the attempts, under policy, in the Arandu dialect.
+	engine *engine
+	policy Policy
+	now    func() time.Time
 }
 
 // NewManager creates a manager whose store and DatabaseQueue share db, making
@@ -142,7 +151,7 @@ func resolveManagerOptions(options ManagerOptions) (managerOptions, error) {
 		userAgent: options.UserAgent, client: options.HTTPClient,
 	}
 	if resolved.timeout == 0 {
-		resolved.timeout = defaultTimeout
+		resolved.timeout = managerTimeout
 	}
 	if resolved.retention == 0 {
 		resolved.retention = DefaultRetention
@@ -157,7 +166,7 @@ func resolveManagerOptions(options ManagerOptions) (managerOptions, error) {
 		resolved.jobName = DeliveryJobName
 	}
 	if resolved.userAgent == "" {
-		resolved.userAgent = defaultUserAgent
+		resolved.userAgent = DefaultUserAgent
 	}
 	for _, option := range []struct {
 		label string
@@ -217,18 +226,24 @@ func newManagerResolved(store Store, target deliveryQueue, secrets SecretProvide
 	if secrets == nil {
 		return nil, ErrSecretRequired
 	}
-	client := httpclient.NewFactory(options.client).CreatePendingRequest().
-		Timeout(options.timeout).MaxRedirects(5).CreateClient(nil)
-	client.CheckRedirect = func(_ *http.Request, via []*http.Request) error {
-		if len(via) >= 5 {
-			return errRedirectLimit
-		}
-		return nil
-	}
-	return &Manager{store: store, queue: target, secrets: secrets, client: client,
+	m := &Manager{store: store, queue: target, secrets: secrets,
 		timeout: options.timeout, retention: options.retention, action: options.action,
 		queueName: options.queueName, jobName: options.jobName, userAgent: options.userAgent,
-		lastPrune: map[string]time.Time{}}, nil
+		lastPrune: map[string]time.Time{}, now: time.Now}
+	// The policy says what Manager always did: five attempts, the redirects
+	// and the answers it retries, Retry-After honored. The queue makes the
+	// retries, so Tries and Backoff are what Dispatch gives the job.
+	m.policy = Policy{
+		Tries: 5, Backoff: managerBackoff, Retry: RetryTransient, HonorRetryAfter: true, MaxRedirects: 5,
+		MaxRequestBytes: MaxPayloadBytes, MaxResponseBytes: MaxResponseBytes, Timeout: options.timeout,
+		UserAgent: options.userAgent,
+	}
+	engine, err := newEngine(options.client, aranduPrefix, func() time.Time { return m.now() })
+	if err != nil {
+		return nil, err
+	}
+	m.engine, m.client = engine, engine.clientFor(m.policy)
+	return m, nil
 }
 
 // Migrations returns the delivery schema owned by the manager.
@@ -308,68 +323,81 @@ func (m *Manager) Dispatch(ctx context.Context, g auth.Grant, event Event, endpo
 	})
 }
 
+// handleDelivery is the job: the engine's attempt of a delivery the Store
+// keeps.
 func (m *Manager) handleDelivery(ctx context.Context, g auth.Grant, job *jobs.Job) error {
+	return m.engine.run(ctx, g, storeLedger{m: m}, job)
+}
+
+func (m *Manager) clock() time.Time { return m.now().UTC() }
+
+// storeLedger is the deliveries of Manager: a Store, and the queue that
+// retries them. A failed attempt that another may fix is answered to the
+// queue as the Failure it was, and the queue makes the next attempt after the
+// job's backoff, or after the Retry-After the receiver asked for.
+type storeLedger struct{ m *Manager }
+
+// claim takes the delivery the job names with a lease long enough for one
+// attempt, after pruning the tenant's old deliveries at most once an hour.
+// A delivery somebody else holds is answered to the queue as
+// delivery_claimed, to be tried again when the lease ends.
+func (l storeLedger) claim(ctx context.Context, g auth.Grant, job *jobs.Job) (*take, error) {
+	m := l.m
 	if _, err := tenantForAction(g, m.action); err != nil {
-		return err
+		return nil, err
 	}
 	if job == nil {
-		return errors.New("webhook: delivery job is nil")
+		return nil, errors.New("webhook: delivery job is nil")
 	}
 	var input deliveryJob
 	if err := job.Decode(&input); err != nil {
-		return err
+		return nil, err
 	}
 	if input.DeliveryID == "" {
-		return errors.New("webhook: delivery job has no delivery id")
+		return nil, errors.New("webhook: delivery job has no delivery id")
 	}
 	m.prune(ctx, g)
 	lease := m.timeout + 10*time.Second
 	claim, claimed, err := m.store.Claim(ctx, g, input.DeliveryID, lease)
 	if errors.Is(err, ErrDeliveryNotFound) {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !claimed {
-		return Failure{Code: "delivery_claimed", RetryAfter: lease}
+		return nil, Failure{Code: "delivery_claimed", RetryAfter: lease}
 	}
+
+	t := &take{policy: m.policy, client: m.client, own: claim}
 	item := claim.Delivery
 	secrets, err := m.secrets.Secrets(ctx, g, item.SecretRef)
-	if err != nil {
-		return m.settleFailure(ctx, g, claim, classify(err, 0, ""))
+	switch {
+	case err != nil:
+		refused := classify(err, 0, "")
+		t.refused = &refused
+	case len(secrets.Current) == 0:
+		t.refused = &verdict{Code: ErrSecretRequired.Error(), Permanent: true}
+	case len(secrets.Current) < MinSecretBytes:
+		t.refused = &verdict{Code: ErrSecretTooShort.Error(), Permanent: true}
+	default:
+		t.shot = shot{
+			id: item.ID, url: item.URL, dialect: DialectArandu, body: item.Body, headers: item.Headers,
+			keys: signing{secrets: []string{string(secrets.Current)}},
+		}
 	}
-	if len(secrets.Current) == 0 {
-		return m.settleFailure(ctx, g, claim, Failure{Code: ErrSecretRequired.Error(), Permanent: true})
+	return t, nil
+}
+
+// settle completes the claim, or fails it with what the attempt came to.
+func (l storeLedger) settle(ctx context.Context, g auth.Grant, t *take, r result) error {
+	claim := t.own.(Claim)
+	if r.delivered() {
+		return l.m.store.Complete(ctx, g, claim, Result{StatusCode: r.StatusCode, FinishedAt: l.m.clock()})
 	}
-	if len(secrets.Current) < minimumSecretBytes {
-		return m.settleFailure(ctx, g, claim, Failure{Code: ErrSecretTooShort.Error(), Permanent: true})
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, item.URL, bytes.NewReader(item.Body))
-	if err != nil {
-		return m.settleFailure(ctx, g, claim, classify(err, 0, ""))
-	}
-	for name, value := range item.Headers {
-		request.Header.Set(name, value)
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("User-Agent", m.userAgent)
-	request.Header.Set(deliveryHeader, item.ID)
-	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
-	request.Header.Set(timestampHeader, timestamp)
-	request.Header.Set(signatureHeader, Sign(secrets.Current, timestamp, item.ID, item.Body))
-	response, err := m.client.Do(request)
-	if err != nil {
-		return m.settleFailure(ctx, g, claim, classify(err, 0, ""))
-	}
-	defer response.Body.Close()
-	if _, err := io.Copy(io.Discard, response.Body); err != nil {
-		return m.settleFailure(ctx, g, claim, classify(err, response.StatusCode, ""))
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return m.settleFailure(ctx, g, claim, classify(nil, response.StatusCode, response.Header.Get("Retry-After")))
-	}
-	return m.store.Complete(ctx, g, claim, Result{StatusCode: response.StatusCode, FinishedAt: time.Now().UTC()})
+	return l.m.settleFailure(ctx, g, claim, Failure{
+		Code: r.Code, StatusCode: r.StatusCode, Permanent: r.Permanent, RetryAfter: r.RetryAfter,
+	})
 }
 
 func (m *Manager) settleFailure(ctx context.Context, g auth.Grant, claim Claim, failure Failure) error {
@@ -380,39 +408,6 @@ func (m *Manager) settleFailure(ctx context.Context, g auth.Grant, claim Claim, 
 	}
 	if failure.Permanent {
 		return nil
-	}
-	return failure
-}
-
-func classify(cause error, status int, retryHeader string) Failure {
-	if errors.Is(cause, httpclient.ErrInternalAddress) {
-		return Failure{Code: "unsafe_destination", Permanent: true}
-	}
-	if errors.Is(cause, httpclient.ErrResponseTooLarge) {
-		return Failure{Code: "response_too_large", Permanent: true}
-	}
-	if errors.Is(cause, httpclient.ErrUnsupportedScheme) {
-		return Failure{Code: "unsupported_scheme", Permanent: true}
-	}
-	if errors.Is(cause, errRedirectLimit) {
-		return Failure{Code: "too_many_redirects", Permanent: true}
-	}
-	if cause != nil {
-		code := "transport_failure"
-		if errors.Is(cause, context.DeadlineExceeded) {
-			code = "request_timeout"
-		}
-		if errors.Is(cause, context.Canceled) {
-			code = "request_canceled"
-		}
-		return Failure{Code: code}
-	}
-	failure := Failure{Code: fmt.Sprintf("http_status_%d", status), StatusCode: status}
-	retryable := status == http.StatusRequestTimeout || status == 425 || status == http.StatusTooManyRequests ||
-		status >= http.StatusInternalServerError && status <= 599
-	failure.Permanent = !retryable
-	if !failure.Permanent {
-		failure.RetryAfter = parseRetryAfter(retryHeader, time.Now().UTC())
 	}
 	return failure
 }

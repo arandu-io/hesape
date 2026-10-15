@@ -79,27 +79,28 @@ type sender struct {
 	allowed    map[string]bool
 	allowEmpty bool
 	custom     string
-	prefix     string
 	policy     Policy
-	client     *http.Client
+	engine     *engine
 	now        func() time.Time
 	retention  time.Duration
 }
 
 func newSender(db *database.DB, cfg Config, seal *sealer, audit *auditor) (*sender, error) {
-	client, err := newDeliveryClient(cfg.Server.HTTPClient)
+	s := &sender{
+		db: db, queue: queue.NewDatabaseQueue(db), queueName: cfg.Server.Queue, sealer: seal, audit: audit,
+		named: map[string]string{}, custom: cfg.Server.HeaderPrefix,
+		policy: cfg.Server.Policy.clone(), now: cfg.Server.Now, retention: cfg.Server.Retention,
+		allowEmpty: cfg.Server.AllowEmptySubscription,
+	}
+	prefix := aranduPrefix
+	if s.custom != "" {
+		prefix = s.custom
+	}
+	engine, err := newEngine(cfg.Server.HTTPClient, prefix, s.clock)
 	if err != nil {
 		return nil, err
 	}
-	s := &sender{
-		db: db, queue: queue.NewDatabaseQueue(db), queueName: cfg.Server.Queue, sealer: seal, audit: audit,
-		named: map[string]string{}, custom: cfg.Server.HeaderPrefix, prefix: "X-Arandu",
-		policy: cfg.Server.Policy.clone(), client: client, now: cfg.Server.Now, retention: cfg.Server.Retention,
-		allowEmpty: cfg.Server.AllowEmptySubscription,
-	}
-	if s.custom != "" {
-		s.prefix = s.custom
-	}
+	s.engine = engine
 	for name, secret := range cfg.Server.Secrets {
 		s.named[name] = secret
 	}

@@ -142,7 +142,7 @@ type Arandu struct {
 func (v Arandu) Valid(r *http.Request, body []byte, secrets SecretSet) bool {
 	prefix := v.HeaderPrefix
 	if prefix == "" {
-		prefix = "X-Arandu"
+		prefix = aranduPrefix
 	}
 	tolerance := v.Tolerance
 	if tolerance == 0 {

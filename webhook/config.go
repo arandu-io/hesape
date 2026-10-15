@@ -305,7 +305,7 @@ func (c Config) Validate() error {
 			return fmt.Errorf("webhook: Config.Server.Policy: %w", err)
 		}
 	}
-	if p := c.Server.HeaderPrefix; p != "" && (!headerPattern.MatchString(p) || strings.EqualFold(p, "X-Arandu")) {
+	if p := c.Server.HeaderPrefix; p != "" && (!headerPattern.MatchString(p) || strings.EqualFold(p, aranduPrefix)) {
 		return fmt.Errorf("webhook: Config.Server.HeaderPrefix %q is not a header name such as X-Acme", p)
 	}
 	for name, secret := range c.Server.Secrets {
