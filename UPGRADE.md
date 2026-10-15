@@ -60,10 +60,10 @@ To move an application:
 4. In `bootstrap/app.go`, build both and hand them to the controllers:
 
    ```go
-   users, err := account.NewUsers(account.Config[*models.User]{
+   users, err := account.NewUsers(account.Config{
    	DB:     db,
    	Query:  func() *model.Builder { return models.Users(db).Base() },
-   	Policy: policies.UserPolicy{},
+   	Policy: account.PolicyOf(policies.UserPolicy{}),
    })
    factors, err := account.NewFactors(db, appKey, store, nil, users)
    ```
@@ -74,9 +74,16 @@ To move an application:
    application registers `account.Migrations()`.
 
 What changes at the call sites: `Register` takes an `account.Registration`,
-and every method returns the user model's pointer rather than a value. An
-application's own fields at registration -- a document number, a phone --
-are `Hooks.Prepare`; what it creates beside a new account is
+and every method returns an `account.Account` rather than a `models.User`
+value. It is the application's `*models.User`, and a controller that needs
+the type asserts it once: `user.(*models.User)`. Nothing in the package is a
+generic type, so the rules are compiled once here and not again in every
+package that holds them; `UserPolicy` stays written over `*models.User` and
+`PolicyOf` adapts it. The hooks and `Draft.Fill` receive the `Account` the
+same way.
+
+An application's own fields at registration -- a document number, a phone
+-- are `Hooks.Prepare`; what it creates beside a new account is
 `Hooks.AfterCreate`, in the same transaction; a suspension is `Hooks.Admit`.
 `EnsureUser` and `EnsureAdmin` are `Provision`, with roles written by
 `Draft.Fill`. `ChangePassword`, `Rename` and `Close` are new, and run under
