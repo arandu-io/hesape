@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/arandu-io/hesape/auth"
@@ -106,6 +108,45 @@ type Draft struct {
 	PasswordHash string
 	Verified     bool
 	Fill         func(Account) error
+}
+
+// LogValue says which fields arrived and nothing they carried: the name and
+// the address are account data, the password is the credential, and Extra is
+// the application's.
+func (r Registration) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.Bool("name_supplied", r.Name != ""),
+		slog.Bool("email_supplied", r.Email != ""),
+		slog.Bool("password_supplied", r.Password != ""),
+		slog.Bool("extra_supplied", r.Extra != nil),
+	)
+}
+
+// Format prints what LogValue says, under every verb, %#v included, so a
+// registration handed to fmt or to an error message never prints the
+// password.
+func (r Registration) Format(f fmt.State, _ rune) {
+	_, _ = fmt.Fprintf(f, "account.Registration{name_supplied:%t email_supplied:%t password_supplied:%t extra_supplied:%t}",
+		r.Name != "", r.Email != "", r.Password != "", r.Extra != nil)
+}
+
+// LogValue says which fields a draft carries and nothing they hold: the
+// password and the hash are credentials.
+func (d Draft) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.Bool("name_supplied", d.Name != ""),
+		slog.Bool("email_supplied", d.Email != ""),
+		slog.Bool("password_supplied", d.Password != ""),
+		slog.Bool("password_hash_supplied", d.PasswordHash != ""),
+		slog.Bool("verified", d.Verified),
+		slog.Bool("fill_supplied", d.Fill != nil),
+	)
+}
+
+// Format prints what LogValue says, under every verb, %#v included.
+func (d Draft) Format(f fmt.State, _ rune) {
+	_, _ = fmt.Fprintf(f, "account.Draft{name_supplied:%t email_supplied:%t password_supplied:%t password_hash_supplied:%t verified:%t fill_supplied:%t}",
+		d.Name != "", d.Email != "", d.Password != "", d.PasswordHash != "", d.Verified, d.Fill != nil)
 }
 
 // Hooks are the points where an application adds its own rule to what this

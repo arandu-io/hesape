@@ -1,12 +1,14 @@
 package account_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -380,3 +382,27 @@ func TestPolicyOfForwardsTheApplicationsPolicyOverItsOwnType(t *testing.T) {
 
 // stranger is an Account that is not the application's user type.
 type stranger struct{ member }
+
+// TestARegistrationAndADraftNeverPrintThePassword: both carry the password in
+// clear, and a handler that logged one, or wrapped it in an error, printed it.
+func TestARegistrationAndADraftNeverPrintThePassword(t *testing.T) {
+	const secret = "a-password-nobody-may-read"
+	registration := account.Registration{Name: "Ana", Email: "ana@example.test", Password: secret, Extra: map[string]string{"cpf": "12345678909"}}
+	draft := account.Draft{Name: "Ana", Email: "ana@example.test", Password: secret, PasswordHash: "$argon2id$" + secret}
+
+	var logged bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logged, nil))
+	logger.Info("registration", "registration", registration, "pointer", &registration, "draft", draft)
+	printed := logged.String()
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q"} {
+		printed += fmt.Sprintf(verb, registration) + fmt.Sprintf(verb, &registration) + fmt.Sprintf(verb, draft) + fmt.Sprintf(verb, &draft)
+	}
+	for _, leaked := range []string{secret, "ana@example.test", "12345678909"} {
+		if strings.Contains(printed, leaked) {
+			t.Fatalf("a registration or a draft printed %q:\n%s", leaked, printed)
+		}
+	}
+	if !strings.Contains(logged.String(), `"password_supplied":true`) {
+		t.Fatalf("the log does not say a password arrived: %s", logged.String())
+	}
+}
