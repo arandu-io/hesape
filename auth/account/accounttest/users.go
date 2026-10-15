@@ -13,30 +13,30 @@ import (
 	"github.com/arandu-io/hesape/validation"
 )
 
-func userCases[U account.Account]() []testCase[U] {
-	return []testCase[U]{
-		{"RegistrationStoresNullUntilTheAddressIsVerified", registrationStoresNull[U]},
-		{"VerificationChangesANullRegistrationExactlyOnce", verificationExactlyOnce[U]},
-		{"AVerificationForAnOlderAddressIsRefused", verificationForAnOlderAddress[U]},
-		{"ADuplicateAddressIsRecognisedByTheDriverCode", duplicateAddress[U]},
-		{"RegistrationRefusesWhatItCannotStore", registrationRefusesInput[U]},
-		{"RegistrationJoinsTheCallersTransaction", registrationJoinsTransaction[U]},
-		{"VerifyCredentialsAnswersEveryFailureAlike", verifyCredentialsFailures[U]},
-		{"ASignInRewritesAWeakerHash", signInRewritesWeakerHash[U]},
-		{"ProvisionIsIdempotentAndVerifiesOnRequest", provisionIdempotent[U]},
-		{"LookupOfAnUnknownAddressIsNotFound", lookupUnknown[U]},
-		{"AResetLinkIsSpentByTheResetItMakes", resetLinkSpent[U]},
-		{"ConfirmPasswordAnswersAWrongPasswordAsInvalidCredentials", confirmPassword[U]},
-		{"ChangePasswordNeedsTheCurrentOneAndStoresItsEvent", changePassword[U]},
-		{"RenameChangesTheNameAndStoresItsEvent", rename[U]},
-		{"CloseReleasesTheAddressAndLocksThePassword", closeAccount[U]},
-		{"PublicNamesStayInsideTheReadersTenant", publicNames[U]},
-		{"EventsCarryTheSamePayloadAsBefore", eventPayloads[U]},
+func userCases() []testCase {
+	return []testCase{
+		{"RegistrationStoresNullUntilTheAddressIsVerified", registrationStoresNull},
+		{"VerificationChangesANullRegistrationExactlyOnce", verificationExactlyOnce},
+		{"AVerificationForAnOlderAddressIsRefused", verificationForAnOlderAddress},
+		{"ADuplicateAddressIsRecognisedByTheDriverCode", duplicateAddress},
+		{"RegistrationRefusesWhatItCannotStore", registrationRefusesInput},
+		{"RegistrationJoinsTheCallersTransaction", registrationJoinsTransaction},
+		{"VerifyCredentialsAnswersEveryFailureAlike", verifyCredentialsFailures},
+		{"ASignInRewritesAWeakerHash", signInRewritesWeakerHash},
+		{"ProvisionIsIdempotentAndVerifiesOnRequest", provisionIdempotent},
+		{"LookupOfAnUnknownAddressIsNotFound", lookupUnknown},
+		{"AResetLinkIsSpentByTheResetItMakes", resetLinkSpent},
+		{"ConfirmPasswordAnswersAWrongPasswordAsInvalidCredentials", confirmPassword},
+		{"ChangePasswordNeedsTheCurrentOneAndStoresItsEvent", changePassword},
+		{"RenameChangesTheNameAndStoresItsEvent", rename},
+		{"CloseReleasesTheAddressAndLocksThePassword", closeAccount},
+		{"PublicNamesStayInsideTheReadersTenant", publicNames},
+		{"EventsCarryTheSamePayloadAsBefore", eventPayloads},
 	}
 }
 
-func registrationStoresNull[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func registrationStoresNull(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	user := e.register(users, tenantA, "Ana", "ana@example.test")
 	if user.IsVerified() {
 		t.Fatal("a new registration is already verified")
@@ -59,8 +59,8 @@ func registrationStoresNull[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func verificationExactlyOnce[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func verificationExactlyOnce(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	registered := e.register(users, tenantA, "Ana", "ana@example.test")
 
 	const attempts = 8
@@ -108,8 +108,8 @@ func verificationExactlyOnce[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func verificationForAnOlderAddress[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func verificationForAnOlderAddress(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	registered := e.register(users, tenantA, "Ana", "ana@example.test")
 	if _, _, err := users.MarkVerified(e.ctx, tenantA, registered.AccountID(), "old@example.test"); !errors.Is(err, account.ErrVerificationAddressChanged) {
 		t.Fatalf("a code for another address answered %v, want ErrVerificationAddressChanged", err)
@@ -123,8 +123,8 @@ func verificationForAnOlderAddress[U account.Account](t *testing.T, e *env[U]) {
 // is refused by the unique index, and the error says so twice over: as the
 // account rule the screens check for, and as the unique violation the router
 // answers with 409. It is never read off the driver's message.
-func duplicateAddress[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func duplicateAddress(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	e.register(users, tenantA, "Ana", "ana@example.test")
 
 	_, err := users.Register(e.ctx, tenantA, account.Registration{Name: "Ana again", Email: " ANA@example.test ", Password: password})
@@ -138,8 +138,8 @@ func duplicateAddress[U account.Account](t *testing.T, e *env[U]) {
 	e.register(users, tenantB, "Ana", "ana@example.test")
 }
 
-func registrationRefusesInput[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func registrationRefusesInput(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	for name, registration := range map[string]account.Registration{
 		"no name":            {Name: "  ", Email: "ana@example.test", Password: password},
 		"no address":         {Name: "Ana", Email: " ", Password: password},
@@ -159,8 +159,8 @@ func registrationRefusesInput[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func registrationJoinsTransaction[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func registrationJoinsTransaction(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	refused := errors.New("the caller's next step failed")
 	var id string
 	err := database.Transaction(e.ctx, e.f.DB, func(ctx context.Context) error {
@@ -182,8 +182,8 @@ func registrationJoinsTransaction[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func verifyCredentialsFailures[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func verifyCredentialsFailures(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	registered := e.register(users, tenantA, "Ana", "ana@example.test")
 
 	user, err := users.VerifyCredentials(e.ctx, tenantA, " ANA@example.test ", password, "127.0.0.1")
@@ -209,10 +209,10 @@ func verifyCredentialsFailures[U account.Account](t *testing.T, e *env[U]) {
 // signInRewritesWeakerHash provisions an account carrying a bcrypt hash, the
 // shape an import holds, and signs in with it: the sign-in succeeds and the
 // column now holds argon2id, written through the application's users query.
-func signInRewritesWeakerHash[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func signInRewritesWeakerHash(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	imported := bcryptOf(t, password)
-	user, err := users.Provision(e.ctx, tenantA, account.Draft[U]{Name: "Ana", Email: "ana@example.test", PasswordHash: imported})
+	user, err := users.Provision(e.ctx, tenantA, account.Draft{Name: "Ana", Email: "ana@example.test", PasswordHash: imported})
 	if err != nil {
 		t.Fatalf("provisioning with a bcrypt hash: %v", err)
 	}
@@ -232,16 +232,16 @@ func signInRewritesWeakerHash[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func provisionIdempotent[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
-	first, err := users.Provision(e.ctx, tenantA, account.Draft[U]{Name: "Admin", Email: "Admin@Example.test", Password: password, Verified: true})
+func provisionIdempotent(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
+	first, err := users.Provision(e.ctx, tenantA, account.Draft{Name: "Admin", Email: "Admin@Example.test", Password: password, Verified: true})
 	if err != nil {
 		t.Fatalf("provisioning: %v", err)
 	}
 	if !first.IsVerified() || first.AccountEmail() != "admin@example.test" {
 		t.Fatalf("the provisioned account is verified=%v email=%q", first.IsVerified(), first.AccountEmail())
 	}
-	again, err := users.Provision(e.ctx, tenantA, account.Draft[U]{Name: "Other", Email: "admin@example.test", Password: "another-long-password"})
+	again, err := users.Provision(e.ctx, tenantA, account.Draft{Name: "Other", Email: "admin@example.test", Password: "another-long-password"})
 	if err != nil {
 		t.Fatalf("provisioning again: %v", err)
 	}
@@ -258,7 +258,7 @@ func provisionIdempotent[U account.Account](t *testing.T, e *env[U]) {
 	if got := len(e.events(first.AccountID())); got != 0 {
 		t.Fatalf("provisioning stored %d events, want none", got)
 	}
-	for name, draft := range map[string]account.Draft[U]{
+	for name, draft := range map[string]account.Draft{
 		"both a password and a hash": {Email: "b@example.test", Password: password, PasswordHash: bcryptOf(t, password)},
 		"neither":                    {Email: "c@example.test"},
 		"a hash nothing can read":    {Email: "d@example.test", PasswordHash: "md5:5f4dcc3b5aa765d61d8327deb882cf99"},
@@ -271,8 +271,8 @@ func provisionIdempotent[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func lookupUnknown[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func lookupUnknown(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	e.register(users, tenantA, "Ana", "ana@example.test")
 	if _, err := users.Lookup(e.ctx, tenantA, "nobody@example.test"); !errors.Is(err, account.ErrUserNotFound) {
 		t.Fatalf("an unknown address answered %v, want ErrUserNotFound", err)
@@ -282,8 +282,8 @@ func lookupUnknown[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func resetLinkSpent[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func resetLinkSpent(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	registered := e.register(users, tenantA, "Ana", "ana@example.test")
 	captured := account.Fingerprint(registered.PasswordHash())
 
@@ -315,8 +315,8 @@ func resetLinkSpent[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func confirmPassword[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func confirmPassword(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	registered := e.register(users, tenantA, "Ana", "ana@example.test")
 	if err := users.ConfirmPassword(e.ctx, subject(registered), password, "127.0.0.1"); err != nil {
 		t.Fatalf("the right password answered %v", err)
@@ -333,8 +333,8 @@ func confirmPassword[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func changePassword[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func changePassword(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	registered := e.register(users, tenantA, "Ana", "ana@example.test")
 
 	var refused validation.Errors
@@ -364,8 +364,8 @@ func changePassword[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func rename[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func rename(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	registered := e.register(users, tenantA, "Ana", "ana@example.test")
 
 	var refused validation.Errors
@@ -392,8 +392,8 @@ func rename[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func closeAccount[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func closeAccount(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	registered := e.register(users, tenantA, "Ana", "ana@example.test")
 
 	if err := users.Close(e.ctx, subject(registered), "not-the-password-at-all", "127.0.0.1"); !errors.Is(err, auth.ErrInvalidCredentials) {
@@ -428,8 +428,8 @@ func closeAccount[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func publicNames[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func publicNames(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	ana := e.register(users, tenantA, "Ana", "ana@example.test")
 	bea := e.register(users, tenantA, "Bea", "bea@example.test")
 	other := e.register(users, tenantB, "Carla", "carla@example.test")
@@ -452,8 +452,8 @@ func publicNames[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func eventPayloads[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func eventPayloads(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	registered := e.register(users, tenantA, "Ana", "ana@example.test")
 	stored := e.events(registered.AccountID())
 	if len(stored) != 1 {

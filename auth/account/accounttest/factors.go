@@ -12,13 +12,13 @@ import (
 	"github.com/arandu-io/hesape/otp"
 )
 
-func factorCases[U account.Account]() []testCase[U] {
-	return []testCase[U]{
-		{"TheSecondFactorLifecycle", secondFactorLifecycle[U]},
-		{"ConcurrentAuthenticatorVerificationHasExactlyOneWinner", concurrentAuthenticator[U]},
-		{"ConcurrentRecoveryRedemptionHasExactlyOneWinner", concurrentRecovery[U]},
-		{"TheSecondFactorStaysInsideItsTenant", secondFactorTenant[U]},
-		{"OnlyTheOwnerManagesAnEnrolment", onlyTheOwner[U]},
+func factorCases() []testCase {
+	return []testCase{
+		{"TheSecondFactorLifecycle", secondFactorLifecycle},
+		{"ConcurrentAuthenticatorVerificationHasExactlyOneWinner", concurrentAuthenticator},
+		{"ConcurrentRecoveryRedemptionHasExactlyOneWinner", concurrentRecovery},
+		{"TheSecondFactorStaysInsideItsTenant", secondFactorTenant},
+		{"OnlyTheOwnerManagesAnEnrolment", onlyTheOwner},
 	}
 }
 
@@ -26,8 +26,8 @@ func factorCases[U account.Account]() []testCase[U] {
 // factor makes: an unfinished enrolment that may be replaced, the confirmation
 // that may happen once, recovery codes that are spent once and replaced
 // together, and the removal of all of it.
-func secondFactorLifecycle[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func secondFactorLifecycle(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	user := e.register(users, tenantA, "Ana", "ana@example.test")
 	actor := subject(user)
 	factors := e.factors(users, cache.NewArrayStore())
@@ -127,8 +127,8 @@ func secondFactorLifecycle[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func concurrentAuthenticator[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func concurrentAuthenticator(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	user := e.register(users, tenantA, "Ana", "ana@example.test")
 	secret := otp.NewSecret()
 	e.seedFactor(tenantA, user.AccountID(), sealSecret(t, secret), true)
@@ -143,8 +143,8 @@ func concurrentAuthenticator[U account.Account](t *testing.T, e *env[U]) {
 	assertOneWinner(t, errs, twofactor.ErrReplayed, account.ErrTwoFactorLocked)
 }
 
-func concurrentRecovery[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func concurrentRecovery(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	user := e.register(users, tenantA, "Ana", "ana@example.test")
 	e.seedFactor(tenantA, user.AccountID(), "encrypted", true)
 	recovery, err := twofactor.GenerateRecoveryCodes(1)
@@ -166,8 +166,8 @@ func concurrentRecovery[U account.Account](t *testing.T, e *env[U]) {
 // secondFactorTenant offers tenant-a's enrolment and recovery code under
 // tenant-b, with the same user id, through every operation that takes a
 // tenant or a subject, and proves none of them read, changed or spent a row.
-func secondFactorTenant[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func secondFactorTenant(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	user := e.register(users, tenantA, "Ana", "ana@example.test")
 	secret := otp.NewSecret()
 	e.seedFactor(tenantA, user.AccountID(), sealSecret(t, secret), true)
@@ -214,8 +214,8 @@ func secondFactorTenant[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func onlyTheOwner[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func onlyTheOwner(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	ana := e.register(users, tenantA, "Ana", "ana@example.test")
 	factors := e.factors(users, cache.NewArrayStore())
 	if _, err := factors.Begin(e.ctx, auth.Subject{Tenant: tenantA}, issuer); !errors.Is(err, auth.ErrForbidden) {

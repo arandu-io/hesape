@@ -99,24 +99,24 @@ type Registration struct {
 // creates the account with its address already confirmed. Fill, when set,
 // writes the application's own columns -- roles, a document -- before the row
 // is saved.
-type Draft[U Account] struct {
+type Draft struct {
 	Name         string
 	Email        string
 	Password     string
 	PasswordHash string
 	Verified     bool
-	Fill         func(U) error
+	Fill         func(Account) error
 }
 
 // Hooks are the points where an application adds its own rule to what this
 // package does. Every one is optional.
-type Hooks[U Account] struct {
+type Hooks struct {
 	// Admit decides, after the password proved right, whether the account may
 	// sign in -- a suspension, a closed account. A refusal is answered as
 	// ErrAccountRefused, which matches auth.ErrInvalidCredentials, so the form
 	// says what it says for a wrong password and a suspension is not a
 	// password oracle. ResetPassword refuses the same accounts as a spent link.
-	Admit func(ctx context.Context, user U) error
+	Admit func(ctx context.Context, user Account) error
 
 	// AdmitClears says a sign-in Admit refused still clears the throttle, as
 	// a right password does. Left false, the refusal counts as a failure.
@@ -125,23 +125,23 @@ type Hooks[U Account] struct {
 	// Prepare runs first in Register, with the registration and the unsaved
 	// account. It may refuse, change the registration -- give it a name when
 	// the form has none -- and fill the application's own columns.
-	Prepare func(ctx context.Context, registration *Registration, user U) error
+	Prepare func(ctx context.Context, registration *Registration, user Account) error
 
 	// AfterCreate runs in the transaction that inserted the account, after the
 	// insert and before its event is stored, with the Grant the insert was
 	// made under. An error rolls back the account and the event with it.
-	AfterCreate func(ctx context.Context, grant auth.Grant, user U) error
+	AfterCreate func(ctx context.Context, grant auth.Grant, user Account) error
 
 	// CloseFields names the application's own columns Close writes beside the
 	// ones it clears itself, and the values they get.
-	CloseFields func(user U) map[string]any
+	CloseFields func(user Account) map[string]any
 
 	// Payload replaces UserEvent as the payload of the events Users stores.
-	Payload func(user U) any
+	Payload func(user Account) any
 }
 
 // Config is what NewUsers is built from.
-type Config[U Account] struct {
+type Config struct {
 	// DB is the database the users table and the outbox live in.
 	DB *database.DB
 	// Outbox stores the account's events. Nil is an outbox over DB.
@@ -150,12 +150,12 @@ type Config[U Account] struct {
 	// models.Users(db).Base(). It is a function because a builder holds the
 	// clauses added to it, and every statement here starts from none.
 	Query func() *model.Builder
-	// Policy is the application's user policy. Every operation a signed-in
-	// subject makes on an account is authorized by it.
-	Policy auth.Policy[U]
+	// Policy is the application's user policy, adapted by PolicyOf. Every
+	// operation a signed-in subject makes on an account is authorized by it.
+	Policy auth.Policy[Account]
 	// Throttle counts wrong passwords. Nil is auth.NewMemoryThrottle(), which
 	// is right for one process; behind more than one, pass the shared one.
 	Throttle auth.SignInThrottle
 	// Hooks are the application's own rules.
-	Hooks Hooks[U]
+	Hooks Hooks
 }

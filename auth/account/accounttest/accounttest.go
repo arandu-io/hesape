@@ -24,41 +24,41 @@ import (
 
 // Fixture is one fresh database and the application's half of the account
 // rules over it.
-type Fixture[U account.Account] struct {
+type Fixture struct {
 	// DB holds the users table, the outbox and the second factor's tables,
 	// migrated and empty.
 	DB *database.DB
 	// Query opens a query on the users table: models.Users(db).Base().
 	Query func() *model.Builder
-	// Policy is the application's user policy.
-	Policy auth.Policy[U]
+	// Policy is the application's user policy, adapted by account.PolicyOf.
+	Policy auth.Policy[account.Account]
 }
 
 // Run checks the account package against the application's users table, user
 // model and user policy. open is called once per subtest, so no subtest is
 // affected by what another left behind.
-func Run[U account.Account](t *testing.T, open func(t *testing.T) Fixture[U]) {
+func Run(t *testing.T, open func(t *testing.T) Fixture) {
 	t.Helper()
-	for _, c := range cases[U]() {
+	for _, c := range cases() {
 		t.Run(c.name, func(t *testing.T) {
-			c.run(t, &env[U]{t: t, f: open(t), ctx: context.Background()})
+			c.run(t, &env{t: t, f: open(t), ctx: context.Background()})
 		})
 	}
 }
 
 // testCase is one subtest of the suite.
-type testCase[U account.Account] struct {
+type testCase struct {
 	name string
-	run  func(t *testing.T, e *env[U])
+	run  func(t *testing.T, e *env)
 }
 
-func cases[U account.Account]() []testCase[U] {
-	var all []testCase[U]
-	all = append(all, userCases[U]()...)
-	all = append(all, hookCases[U]()...)
-	all = append(all, factorCases[U]()...)
-	all = append(all, challengeCases[U]()...)
-	all = append(all, compatibilityCases[U]()...)
+func cases() []testCase {
+	var all []testCase
+	all = append(all, userCases()...)
+	all = append(all, hookCases()...)
+	all = append(all, factorCases()...)
+	all = append(all, challengeCases()...)
+	all = append(all, compatibilityCases()...)
 	return all
 }
 
@@ -74,16 +74,16 @@ const (
 var appKey = []byte("0123456789abcdef0123456789abcdef")
 
 // env is one subtest's database and the helpers that read it.
-type env[U account.Account] struct {
+type env struct {
 	t   *testing.T
-	f   Fixture[U]
+	f   Fixture
 	ctx context.Context
 }
 
 // users builds the account rules with hooks; a nil throttle is the default.
-func (e *env[U]) users(hooks account.Hooks[U], throttle auth.SignInThrottle) *account.Users[U] {
+func (e *env) users(hooks account.Hooks, throttle auth.SignInThrottle) *account.Users {
 	e.t.Helper()
-	users, err := account.NewUsers(account.Config[U]{
+	users, err := account.NewUsers(account.Config{
 		DB: e.f.DB, Query: e.f.Query, Policy: e.f.Policy, Throttle: throttle, Hooks: hooks,
 	})
 	if err != nil {
@@ -94,7 +94,7 @@ func (e *env[U]) users(hooks account.Hooks[U], throttle auth.SignInThrottle) *ac
 
 // factors builds the second factor over users, counting challenge attempts in
 // store.
-func (e *env[U]) factors(users account.FactorUsers, store cache.Store) *account.Factors {
+func (e *env) factors(users account.FactorUsers, store cache.Store) *account.Factors {
 	e.t.Helper()
 	factors, err := account.NewFactors(e.f.DB, appKey, store, nil, users)
 	if err != nil {
@@ -104,7 +104,7 @@ func (e *env[U]) factors(users account.FactorUsers, store cache.Store) *account.
 }
 
 // register creates an account through Register, as a person at the form.
-func (e *env[U]) register(users *account.Users[U], tenant, name, email string) U {
+func (e *env) register(users *account.Users, tenant, name, email string) account.Account {
 	e.t.Helper()
 	user, err := users.Register(e.ctx, tenant, account.Registration{Name: name, Email: email, Password: password})
 	if err != nil {
@@ -119,7 +119,7 @@ func subject(user account.Account) auth.Subject {
 }
 
 // value reads one column of one row, as the driver hands it back.
-func (e *env[U]) value(query string, args ...any) any {
+func (e *env) value(query string, args ...any) any {
 	e.t.Helper()
 	var out any
 	if err := e.f.DB.QueryRowContext(e.ctx, query, args...).Scan(&out); err != nil {
@@ -129,7 +129,7 @@ func (e *env[U]) value(query string, args ...any) any {
 }
 
 // count reads a count(*).
-func (e *env[U]) count(query string, args ...any) int64 {
+func (e *env) count(query string, args ...any) int64 {
 	e.t.Helper()
 	var out int64
 	if err := e.f.DB.QueryRowContext(e.ctx, query, args...).Scan(&out); err != nil {
@@ -139,7 +139,7 @@ func (e *env[U]) count(query string, args ...any) int64 {
 }
 
 // text reads one text column of one row.
-func (e *env[U]) text(query string, args ...any) string {
+func (e *env) text(query string, args ...any) string {
 	e.t.Helper()
 	var out sql.NullString
 	if err := e.f.DB.QueryRowContext(e.ctx, query, args...).Scan(&out); err != nil {
@@ -149,7 +149,7 @@ func (e *env[U]) text(query string, args ...any) string {
 }
 
 // events reads the stored events of one account, oldest first.
-func (e *env[U]) events(userID string) []events.Stored {
+func (e *env) events(userID string) []events.Stored {
 	e.t.Helper()
 	stored, err := events.NewOutbox(outboxHandle{e.f.DB}).PendingAll(e.ctx, 500)
 	if err != nil {
@@ -165,7 +165,7 @@ func (e *env[U]) events(userID string) []events.Stored {
 }
 
 // eventCount counts the stored events of one name for one account.
-func (e *env[U]) eventCount(userID, name string) int {
+func (e *env) eventCount(userID, name string) int {
 	e.t.Helper()
 	n := 0
 	for _, event := range e.events(userID) {
@@ -199,7 +199,7 @@ func sealSecret(t *testing.T, secret []byte) string {
 
 // seedFactor stores an enrolment for an account that exists, with its time
 // step unspent.
-func (e *env[U]) seedFactor(tenant, userID, secret string, confirmed bool) {
+func (e *env) seedFactor(tenant, userID, secret string, confirmed bool) {
 	e.t.Helper()
 	var confirmedAt any
 	if confirmed {
@@ -214,7 +214,7 @@ func (e *env[U]) seedFactor(tenant, userID, secret string, confirmed bool) {
 
 // seedRecoveryCode stores one unspent recovery code, hashed the way every
 // recovery code ever issued was hashed.
-func (e *env[U]) seedRecoveryCode(tenant, userID, id, code string) {
+func (e *env) seedRecoveryCode(tenant, userID, id, code string) {
 	e.t.Helper()
 	hash, err := hashing.Make("arandu:two-factor-recovery:" + twofactor.NormalizeCode(code))
 	if err != nil {
@@ -223,7 +223,7 @@ func (e *env[U]) seedRecoveryCode(tenant, userID, id, code string) {
 	e.seedRecoveryHash(tenant, userID, id, hash)
 }
 
-func (e *env[U]) seedRecoveryHash(tenant, userID, id, hash string) {
+func (e *env) seedRecoveryHash(tenant, userID, id, hash string) {
 	e.t.Helper()
 	if _, err := e.f.DB.ExecContext(e.ctx, `
 		INSERT INTO user_recovery_codes (id, tenant_id, user_id, code_hash, used_at, created_at)

@@ -115,5 +115,7 @@ func TestAnEnrolmentIsItsOwnersAlone(t *testing.T) {
 
 type noUsers struct{}
 
-func (noUsers) Owner(context.Context, auth.Subject) (Account, error)    { return nil, nil }
-func (noUsers) Holder(context.Context, string, string) (Account, error) { return nil, nil }
+func (noUsers) Owner(context.Context, auth.Subject) (Account, error) { return nil, nil }
+func (noUsers) FindForAuthentication(context.Context, string, string) (Account, error) {
+	return nil, nil
+}

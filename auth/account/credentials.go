@@ -19,16 +19,16 @@ import (
 // hash on it through ForceFill. The remember-token methods have no storage
 // behind them on purpose: a session is created by the application after every
 // factor, never by a provider from a cookie.
-type credentialUser[U Account] struct {
-	user   U
+type credentialUser struct {
+	user   Account
 	filled bool
 	query  func() *model.Builder
 }
 
 // SetRawAttributes fills the adapter from the row the provider read, onto an
 // account wired to the connection the row came from.
-func (c *credentialUser[U]) SetRawAttributes(attributes map[string]any, sync bool) error {
-	user, err := newAccount[U](c.query())
+func (c *credentialUser) SetRawAttributes(attributes map[string]any, sync bool) error {
+	user, err := newAccount(c.query())
 	if err != nil {
 		return err
 	}
@@ -40,27 +40,27 @@ func (c *credentialUser[U]) SetRawAttributes(attributes map[string]any, sync boo
 }
 
 // ForceFill puts what the provider wrote back on the account it read.
-func (c *credentialUser[U]) ForceFill(attributes map[string]any) error {
+func (c *credentialUser) ForceFill(attributes map[string]any) error {
 	if !c.filled {
 		return model.ErrUnwired
 	}
 	return c.user.ForceFill(attributes)
 }
 
-func (*credentialUser[U]) GetAuthIdentifierName() string { return columnID }
-func (*credentialUser[U]) GetAuthPasswordName() string   { return columnPassword }
-func (*credentialUser[U]) GetRememberToken() string      { return "" }
-func (*credentialUser[U]) SetRememberToken(string)       {}
-func (*credentialUser[U]) GetRememberTokenName() string  { return "" }
+func (*credentialUser) GetAuthIdentifierName() string { return columnID }
+func (*credentialUser) GetAuthPasswordName() string   { return columnPassword }
+func (*credentialUser) GetRememberToken() string      { return "" }
+func (*credentialUser) SetRememberToken(string)       {}
+func (*credentialUser) GetRememberTokenName() string  { return "" }
 
-func (c *credentialUser[U]) GetAuthIdentifier() any {
+func (c *credentialUser) GetAuthIdentifier() any {
 	if !c.filled {
 		return nil
 	}
 	return c.user.AccountID()
 }
 
-func (c *credentialUser[U]) GetAuthPassword() string {
+func (c *credentialUser) GetAuthPassword() string {
 	if !c.filled {
 		return ""
 	}
@@ -83,10 +83,10 @@ func (*credentialProvider) UpdateRememberToken(_ context.Context, user auth.Auth
 // credentials is the verifier of one tenant's passwords. It rehashes a hash
 // made with weaker parameters on the sign-in that proved it, through the
 // application's users query.
-func (s *Users[U]) credentials(tenant string) *auth.CredentialVerifier {
+func (s *Users) credentials(tenant string) *auth.CredentialVerifier {
 	provider := authusers.NewModelUserProvider(
 		hashing.ForAuth(nil),
-		func() auth.Authenticatable { return &credentialUser[U]{query: s.query} },
+		func() auth.Authenticatable { return &credentialUser{query: s.query} },
 		func(context.Context) *query.Builder { return s.query().GetQuery() },
 		tenant,
 	)
@@ -94,20 +94,19 @@ func (s *Users[U]) credentials(tenant string) *auth.CredentialVerifier {
 }
 
 // newAccount is an empty, unsaved account on the users query's connection.
-func newAccount[U Account](b *model.Builder) (U, error) {
-	var zero U
+func newAccount(b *model.Builder) (Account, error) {
 	entity, err := b.NewModelInstance(nil)
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
-	user, ok := entity.(U)
+	user, ok := entity.(Account)
 	if !ok {
-		return zero, fmt.Errorf("account: the users query builds %T, not %T", entity, zero)
+		return nil, fmt.Errorf("account: the users query builds %T, which does not implement account.Account", entity)
 	}
 	return user, nil
 }
 
 var (
-	_ authusers.Hydratable = (*credentialUser[Account])(nil)
-	_ authusers.Fillable   = (*credentialUser[Account])(nil)
+	_ authusers.Hydratable = (*credentialUser)(nil)
+	_ authusers.Fillable   = (*credentialUser)(nil)
 )

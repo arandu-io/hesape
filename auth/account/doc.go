@@ -11,17 +11,30 @@
 // from embedding model.Model -- and Config hands this package the users query
 // and the policy:
 //
-//	users, err := account.NewUsers(account.Config[*models.User]{
+//	users, err := account.NewUsers(account.Config{
 //		DB:     db,
 //		Query:  func() *model.Builder { return models.Users(db).Base() },
-//		Policy: policies.UserPolicy{},
+//		Policy: account.PolicyOf(policies.UserPolicy{}),
 //	})
 //	factors, err := account.NewFactors(db, appKey, store, nil, users)
+//
+// Every method hands back an Account; it is the application's *User, built by
+// its users query, and a caller that needs the type asserts it once at its
+// edge: user.(*models.User).
 //
 // The users table has the columns id, tenant_id, name, email, password and
 // verified_at, with email unique per tenant; the statements here name them.
 // Anything else on it -- roles, a document number, a phone -- is written by
 // the application through Hooks and Draft.Fill.
+//
+// # Why nothing here is generic
+//
+// Go compiles every method of an instantiated generic type into every package
+// that names the instantiation. The rules here are written once over the
+// Account interface and compiled once, in this package, whatever the number of
+// applications and packages that use them. PolicyOf is the one generic
+// declaration: a function whose body is a type assertion, so a package calling
+// it compiles that assertion and nothing more.
 //
 // # What this package owns
 //

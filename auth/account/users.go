@@ -43,20 +43,20 @@ const closedName = "Closed account"
 //
 // It touches no session. Whatever follows a verified password -- a second
 // factor, a new session -- is the caller's.
-type Users[U Account] struct {
+type Users struct {
 	db       *database.DB
 	outbox   *events.Outbox
 	query    func() *model.Builder
-	policy   auth.Policy[U]
+	policy   auth.Policy[Account]
 	throttle auth.SignInThrottle
-	hooks    Hooks[U]
+	hooks    Hooks
 }
 
 // NewUsers returns the account rules over the application's users table.
 //
 // DB, Query and Policy are required: without a policy a signed-in operation
 // would have nothing to authorize it.
-func NewUsers[U Account](cfg Config[U]) (*Users[U], error) {
+func NewUsers(cfg Config) (*Users, error) {
 	if cfg.DB == nil {
 		return nil, errors.New("account: Users needs the database the users table lives in")
 	}
@@ -74,7 +74,7 @@ func NewUsers[U Account](cfg Config[U]) (*Users[U], error) {
 	if throttle == nil {
 		throttle = auth.NewMemoryThrottle()
 	}
-	return &Users[U]{
+	return &Users{
 		db: cfg.DB, outbox: outbox, query: cfg.Query, policy: cfg.Policy, throttle: throttle, hooks: cfg.Hooks,
 	}, nil
 }
@@ -86,12 +86,11 @@ func NewUsers[U Account](cfg Config[U]) (*Users[U], error) {
 // match auth.ErrInvalidCredentials. Too many wrong passwords for one address
 // from one client are refused with TooManyAttemptsError before the password is
 // looked at. A hash made with weaker parameters is rewritten on the way out.
-func (s *Users[U]) VerifyCredentials(ctx context.Context, tenant, email, password, client string) (U, error) {
-	var zero U
+func (s *Users) VerifyCredentials(ctx context.Context, tenant, email, password, client string) (Account, error) {
 	email = NormalizeEmail(email)
 	retry, allowed := s.throttle.Attempt(ctx, tenant, email, client)
 	if !allowed {
-		return zero, TooManyAttemptsError{RetryAfter: retry}
+		return nil, TooManyAttemptsError{RetryAfter: retry}
 	}
 
 	verified, err := s.credentials(tenant).Verify(ctx, map[string]any{columnEmail: email, columnPassword: password})
@@ -99,12 +98,12 @@ func (s *Users[U]) VerifyCredentials(ctx context.Context, tenant, email, passwor
 		if !errors.Is(err, auth.ErrInvalidCredentials) {
 			s.throttle.Refund(ctx, tenant, email, client)
 		}
-		return zero, err
+		return nil, err
 	}
-	adapted, ok := verified.(*credentialUser[U])
+	adapted, ok := verified.(*credentialUser)
 	if !ok || !adapted.filled {
 		s.throttle.Refund(ctx, tenant, email, client)
-		return zero, fmt.Errorf("user: credential provider returned %T", verified)
+		return nil, fmt.Errorf("user: credential provider returned %T", verified)
 	}
 	user := adapted.user
 
@@ -117,7 +116,7 @@ func (s *Users[U]) VerifyCredentials(ctx context.Context, tenant, email, passwor
 				s.throttle.Clear(ctx, tenant, email, client)
 			}
 			log.For(ctx).Warn("sign-in refused for the account", "user_id", user.AccountID(), "tenant", user.AccountTenant(), "reason", reason)
-			return zero, refused{reason: reason}
+			return nil, refused{reason: reason}
 		}
 	}
 	s.throttle.Clear(ctx, tenant, email, client)
@@ -133,34 +132,33 @@ func (s *Users[U]) VerifyCredentials(ctx context.Context, tenant, email, passwor
 // hashing.MinPasswordLen characters are required after it. The insert,
 // Hooks.AfterCreate and the event share one transaction -- the caller's, when
 // ctx already carries one -- so an account is never stored without its event.
-func (s *Users[U]) Register(ctx context.Context, tenant string, registration Registration) (U, error) {
-	var zero U
+func (s *Users) Register(ctx context.Context, tenant string, registration Registration) (Account, error) {
 	candidate, err := s.probe(map[string]any{columnTenant: tenant})
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
 	if prepare := s.hooks.Prepare; prepare != nil {
 		if err := prepare(ctx, &registration, candidate); err != nil {
-			return zero, err
+			return nil, err
 		}
 	}
 	name, email := strings.TrimSpace(registration.Name), NormalizeEmail(registration.Email)
 	if name == "" || email == "" || len(registration.Password) < hashing.MinPasswordLen {
-		return zero, fmt.Errorf("user: invalid registration input")
+		return nil, fmt.Errorf("user: invalid registration input")
 	}
 	if err := candidate.ForceFill(map[string]any{columnName: name, columnEmail: email}); err != nil {
-		return zero, err
+		return nil, err
 	}
 	grant, err := auth.Authorize(ctx, s.policy, auth.Guest(tenant), ActionUserCreate, candidate)
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
 	hash, err := hashing.Make(registration.Password)
 	if err != nil {
-		return zero, fmt.Errorf("user: hashing password: %w", err)
+		return nil, fmt.Errorf("user: hashing password: %w", err)
 	}
 	if err := candidate.ForceFill(map[string]any{columnPassword: hash}); err != nil {
-		return zero, err
+		return nil, err
 	}
 
 	err = database.Transaction(ctx, s.db, func(ctx context.Context) error {
@@ -170,7 +168,7 @@ func (s *Users[U]) Register(ctx context.Context, tenant string, registration Reg
 		return s.record(ctx, grant, UserRegistered, candidate)
 	})
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
 	return candidate, nil
 }
@@ -178,23 +176,22 @@ func (s *Users[U]) Register(ctx context.Context, tenant string, registration Reg
 // FindForAuthentication reads an account during a pre-authentication flow: a
 // pending second factor, a verification or reset link the caller already
 // checked.
-func (s *Users[U]) FindForAuthentication(ctx context.Context, tenant, userID string) (U, error) {
+func (s *Users) FindForAuthentication(ctx context.Context, tenant, userID string) (Account, error) {
 	//arandu:system-grant credential-bound authentication and recovery reads have no Grant-bearing subject; tenant and user ID bind the row
 	return s.find(ctx, auth.SystemGrant(ActionUserView, tenant), ActionUserView, userID)
 }
 
 // Lookup reads an account by its normalized address, for the flows that start
 // from an address: a reset request, a verification resend, a seeder.
-func (s *Users[U]) Lookup(ctx context.Context, tenant, email string) (U, error) {
-	var zero U
+func (s *Users) Lookup(ctx context.Context, tenant, email string) (Account, error) {
 	//arandu:system-grant pre-authentication and seeding lookups have no subject; tenant and normalized email bind this read
 	grant := auth.SystemGrant(ActionUserView, tenant)
 	if err := grant.Check(ActionUserView); err != nil {
-		return zero, err
+		return nil, err
 	}
 	entity, err := s.query().Where(columnEmail, "=", NormalizeEmail(email)).FirstOrFail(ctx, grant)
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
 	return s.cast(entity)
 }
@@ -203,7 +200,7 @@ func (s *Users[U]) Lookup(ctx context.Context, tenant, email string) (U, error) 
 // policy allows the reader ActionUserNamesPublic in their tenant. An account
 // with no name is shown by the part of its address before the @. At most 200
 // ids are read.
-func (s *Users[U]) PublicNames(ctx context.Context, reader auth.Subject, ids []string) (map[string]string, error) {
+func (s *Users) PublicNames(ctx context.Context, reader auth.Subject, ids []string) (map[string]string, error) {
 	resource, err := s.probe(map[string]any{columnTenant: reader.Tenant})
 	if err != nil {
 		return nil, err
@@ -247,14 +244,13 @@ func (s *Users[U]) PublicNames(ctx context.Context, reader auth.Subject, ids []s
 // The boolean reports whether this call made the change: of several
 // concurrent verifications exactly one does, and the others answer the
 // verified account with false.
-func (s *Users[U]) MarkVerified(ctx context.Context, tenant, userID, capturedEmail string) (U, bool, error) {
-	var zero U
+func (s *Users) MarkVerified(ctx context.Context, tenant, userID, capturedEmail string) (Account, bool, error) {
 	user, err := s.FindForAuthentication(ctx, tenant, userID)
 	if err != nil {
-		return zero, false, err
+		return nil, false, err
 	}
 	if NormalizeEmail(user.AccountEmail()) != NormalizeEmail(capturedEmail) {
-		return zero, false, ErrVerificationAddressChanged
+		return nil, false, ErrVerificationAddressChanged
 	}
 	if user.IsVerified() {
 		return user, false, nil
@@ -263,7 +259,7 @@ func (s *Users[U]) MarkVerified(ctx context.Context, tenant, userID, capturedEma
 	//arandu:system-grant a consumed verification code has no session subject; tenant, user ID, and captured email bind the conditional update
 	grant := auth.SystemGrant(ActionUserUpdate, tenant)
 	if err := grant.Check(ActionUserUpdate); err != nil {
-		return zero, false, err
+		return nil, false, err
 	}
 	at := time.Now().UTC()
 	var changed int64
@@ -280,15 +276,15 @@ func (s *Users[U]) MarkVerified(ctx context.Context, tenant, userID, capturedEma
 		return s.record(ctx, grant, EmailVerified, user)
 	})
 	if err != nil {
-		return zero, false, err
+		return nil, false, err
 	}
 	if changed == 0 {
 		fresh, err := s.FindForAuthentication(ctx, tenant, userID)
 		if err != nil {
-			return zero, false, err
+			return nil, false, err
 		}
 		if NormalizeEmail(fresh.AccountEmail()) != NormalizeEmail(capturedEmail) {
-			return zero, false, ErrVerificationAddressChanged
+			return nil, false, ErrVerificationAddressChanged
 		}
 		return fresh, false, nil
 	}
@@ -302,19 +298,18 @@ func (s *Users[U]) MarkVerified(ctx context.Context, tenant, userID, capturedEma
 // Any change to either since the link was minted -- including the reset it
 // already made -- answers ErrResetLinkSpent, and so does an account
 // Hooks.Admit refuses.
-func (s *Users[U]) ResetPassword(ctx context.Context, tenant, userID, capturedEmail, capturedFingerprint, newPassword string) (U, error) {
-	var zero U
+func (s *Users) ResetPassword(ctx context.Context, tenant, userID, capturedEmail, capturedFingerprint, newPassword string) (Account, error) {
 	user, err := s.FindForAuthentication(ctx, tenant, userID)
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
 	if !hmac.Equal([]byte(NormalizeEmail(user.AccountEmail())), []byte(NormalizeEmail(capturedEmail))) ||
 		!hmac.Equal([]byte(Fingerprint(user.PasswordHash())), []byte(capturedFingerprint)) {
-		return zero, ErrResetLinkSpent
+		return nil, ErrResetLinkSpent
 	}
 	if admit := s.hooks.Admit; admit != nil {
 		if err := admit(ctx, user); err != nil {
-			return zero, ErrResetLinkSpent
+			return nil, ErrResetLinkSpent
 		}
 	}
 	return s.replacePassword(ctx, s.passwordGrant(tenant), user, newPassword, PasswordReset)
@@ -322,11 +317,10 @@ func (s *Users[U]) ResetPassword(ctx context.Context, tenant, userID, capturedEm
 
 // SetPassword replaces the password of the account at an address, for an
 // operator's command, and stores PasswordReset.
-func (s *Users[U]) SetPassword(ctx context.Context, tenant, email, password string) (U, error) {
-	var zero U
+func (s *Users) SetPassword(ctx context.Context, tenant, email, password string) (Account, error) {
 	user, err := s.Lookup(ctx, tenant, email)
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
 	return s.replacePassword(ctx, s.passwordGrant(user.AccountTenant()), user, password, PasswordReset)
 }
@@ -334,7 +328,7 @@ func (s *Users[U]) SetPassword(ctx context.Context, tenant, email, password stri
 // ConfirmPassword checks the password of a signed-in subject again, before a
 // sensitive action. It counts wrong passwords like a sign-in does, and answers
 // one with auth.ErrInvalidCredentials.
-func (s *Users[U]) ConfirmPassword(ctx context.Context, subject auth.Subject, password, client string) error {
+func (s *Users) ConfirmPassword(ctx context.Context, subject auth.Subject, password, client string) error {
 	if subject.ID == "" || subject.Tenant == "" {
 		return fmt.Errorf("user: password confirmation needs a subject")
 	}
@@ -364,21 +358,20 @@ func (s *Users[U]) ConfirmPassword(ctx context.Context, subject auth.Subject, pa
 //
 // A new password shorter than hashing.MinPasswordLen is refused as a
 // validation error on the password field before anything is checked.
-func (s *Users[U]) ChangePassword(ctx context.Context, subject auth.Subject, current, next, client string) (U, error) {
-	var zero U
+func (s *Users) ChangePassword(ctx context.Context, subject auth.Subject, current, next, client string) (Account, error) {
 	if len(next) < hashing.MinPasswordLen {
-		return zero, validation.Errors{columnPassword: {"the new password is too short"}}
+		return nil, validation.Errors{columnPassword: {"the new password is too short"}}
 	}
 	grant, err := s.authorizeSelf(ctx, subject, ActionUserUpdate)
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
 	if err := s.ConfirmPassword(ctx, subject, current, client); err != nil {
-		return zero, err
+		return nil, err
 	}
 	user, err := s.find(ctx, grant, ActionUserUpdate, subject.ID)
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
 	return s.replacePassword(ctx, grant, user, next, PasswordChanged)
 }
@@ -386,17 +379,16 @@ func (s *Users[U]) ChangePassword(ctx context.Context, subject auth.Subject, cur
 // Rename changes the name the signed-in subject's account is shown by, under
 // the Grant the user policy issues for ActionUserUpdate, and stores
 // ProfileUpdated.
-func (s *Users[U]) Rename(ctx context.Context, subject auth.Subject, name string) (U, error) {
-	var zero U
+func (s *Users) Rename(ctx context.Context, subject auth.Subject, name string) (Account, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || utf8.RuneCountInString(name) > maxNameLength {
-		return zero, validation.Errors{columnName: {fmt.Sprintf("provide a name of up to %d characters", maxNameLength)}}
+		return nil, validation.Errors{columnName: {fmt.Sprintf("provide a name of up to %d characters", maxNameLength)}}
 	}
 	grant, err := s.authorizeSelf(ctx, subject, ActionUserUpdate)
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
-	var renamed U
+	var renamed Account
 	err = database.Transaction(ctx, s.db, func(ctx context.Context) error {
 		user, err := s.find(ctx, grant, ActionUserUpdate, subject.ID)
 		if err != nil {
@@ -412,7 +404,7 @@ func (s *Users[U]) Rename(ctx context.Context, subject auth.Subject, name string
 		return s.record(ctx, grant, ProfileUpdated, user)
 	})
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
 	return renamed, nil
 }
@@ -425,7 +417,7 @@ func (s *Users[U]) Rename(ctx context.Context, subject auth.Subject, name string
 // The row stays, because what the account did still names its id.
 // Hooks.CloseFields writes the application's own columns in the same
 // statement: a document number to clear, a blocked_at to stamp.
-func (s *Users[U]) Close(ctx context.Context, subject auth.Subject, password, client string) error {
+func (s *Users) Close(ctx context.Context, subject auth.Subject, password, client string) error {
 	grant, err := s.authorizeSelf(ctx, subject, ActionUserUpdate)
 	if err != nil {
 		return err
@@ -477,16 +469,15 @@ func (s *Users[U]) Close(ctx context.Context, subject auth.Subject, password, cl
 // It runs under a system grant for the tenant, so the user policy is not
 // asked: provisioning is how the first administrator comes to exist. It
 // stores no event. Hooks.AfterCreate runs in the transaction of the insert.
-func (s *Users[U]) Provision(ctx context.Context, tenant string, draft Draft[U]) (U, error) {
-	var zero U
+func (s *Users) Provision(ctx context.Context, tenant string, draft Draft) (Account, error) {
 	hash, err := draftHash(draft)
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
 	if existing, err := s.Lookup(ctx, tenant, draft.Email); err == nil {
 		return existing, nil
 	} else if !errors.Is(err, ErrUserNotFound) {
-		return zero, err
+		return nil, err
 	}
 
 	columns := map[string]any{
@@ -498,11 +489,11 @@ func (s *Users[U]) Provision(ctx context.Context, tenant string, draft Draft[U])
 	}
 	user, err := s.probe(columns)
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
 	if draft.Fill != nil {
 		if err := draft.Fill(user); err != nil {
-			return zero, err
+			return nil, err
 		}
 	}
 	//arandu:system-grant the seeder has no request subject; tenant-scoped lookup and explicit account fields bound idempotent creation
@@ -511,14 +502,14 @@ func (s *Users[U]) Provision(ctx context.Context, tenant string, draft Draft[U])
 		return s.create(ctx, grant, user)
 	})
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
 	return user, nil
 }
 
 // draftHash is the password hash a Draft stores: its password hashed, or the
 // hash it carries when the hashing package can read it.
-func draftHash[U Account](draft Draft[U]) (string, error) {
+func draftHash(draft Draft) (string, error) {
 	switch {
 	case draft.Password != "" && draft.PasswordHash != "":
 		return "", errors.New("account: a draft carries a password or a password hash, not both")
@@ -538,29 +529,16 @@ func draftHash[U Account](draft Draft[U]) (string, error) {
 }
 
 // Owner reads the account a signed-in subject is, authorized by the user
-// policy for ActionUserView. It is what Factors reads the account it enrols
-// through.
-func (s *Users[U]) Owner(ctx context.Context, subject auth.Subject) (Account, error) {
+// policy for ActionUserView: the settings screen's account, and the one
+// Factors enrols.
+func (s *Users) Owner(ctx context.Context, subject auth.Subject) (Account, error) {
 	_, user, err := s.self(ctx, subject, ActionUserView)
-	if err != nil {
-		return nil, err
-	}
-	return user, nil
-}
-
-// Holder reads the account a pending sign-in names, which has no subject yet.
-// It is what Factors reads the account a recovery code is spent for through.
-func (s *Users[U]) Holder(ctx context.Context, tenant, userID string) (Account, error) {
-	user, err := s.FindForAuthentication(ctx, tenant, userID)
-	if err != nil {
-		return nil, err
-	}
-	return user, nil
+	return user, err
 }
 
 // passwordGrant is the Grant a password is replaced under when there is no
 // signed-in subject: a reset link, an operator's command.
-func (s *Users[U]) passwordGrant(tenant string) auth.Grant {
+func (s *Users) passwordGrant(tenant string) auth.Grant {
 	//arandu:system-grant guest and operator password replacement has no session subject; tenant lookup plus ID/current-hash compare-and-swap bounds the write
 	return auth.SystemGrant(ActionUserUpdate, tenant)
 }
@@ -568,14 +546,13 @@ func (s *Users[U]) passwordGrant(tenant string) auth.Grant {
 // replacePassword writes a new hash conditionally on the hash the account held
 // when it was read, so of two concurrent replacements exactly one wins and the
 // other answers ErrResetLinkSpent.
-func (s *Users[U]) replacePassword(ctx context.Context, grant auth.Grant, user U, plain, event string) (U, error) {
-	var zero U
+func (s *Users) replacePassword(ctx context.Context, grant auth.Grant, user Account, plain, event string) (Account, error) {
 	hash, err := hashing.Make(plain)
 	if err != nil {
-		return zero, fmt.Errorf("user: hashing password: %w", err)
+		return nil, fmt.Errorf("user: hashing password: %w", err)
 	}
 	if err := grant.Check(ActionUserUpdate); err != nil {
-		return zero, err
+		return nil, err
 	}
 	err = database.Transaction(ctx, s.db, func(ctx context.Context) error {
 		changed, err := s.query().Where(columnID, "=", user.AccountID()).Where(columnPassword, "=", user.PasswordHash()).
@@ -592,7 +569,7 @@ func (s *Users[U]) replacePassword(ctx context.Context, grant auth.Grant, user U
 		return s.record(ctx, grant, event, user)
 	})
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
 	return user, nil
 }
@@ -602,7 +579,7 @@ func (s *Users[U]) replacePassword(ctx context.Context, grant auth.Grant, user U
 //
 // The tenant column is written from the Grant whatever the account holds: the
 // model stamps it on every insert.
-func (s *Users[U]) create(ctx context.Context, grant auth.Grant, user U) error {
+func (s *Users) create(ctx context.Context, grant auth.Grant, user Account) error {
 	if err := grant.Check(ActionUserCreate); err != nil {
 		return err
 	}
@@ -623,11 +600,10 @@ func (s *Users[U]) create(ctx context.Context, grant auth.Grant, user U) error {
 
 // self authorizes subject to act on their own account and reads it under the
 // Grant that decision issued.
-func (s *Users[U]) self(ctx context.Context, subject auth.Subject, action auth.Action) (auth.Grant, U, error) {
-	var zero U
+func (s *Users) self(ctx context.Context, subject auth.Subject, action auth.Action) (auth.Grant, Account, error) {
 	grant, err := s.authorizeSelf(ctx, subject, action)
 	if err != nil {
-		return auth.Grant{}, zero, err
+		return auth.Grant{}, nil, err
 	}
 	user, err := s.find(ctx, grant, action, subject.ID)
 	return grant, user, err
@@ -635,7 +611,7 @@ func (s *Users[U]) self(ctx context.Context, subject auth.Subject, action auth.A
 
 // authorizeSelf asks the user policy whether subject may act on their own
 // account. It reads nothing, so a write decides before it opens a transaction.
-func (s *Users[U]) authorizeSelf(ctx context.Context, subject auth.Subject, action auth.Action) (auth.Grant, error) {
+func (s *Users) authorizeSelf(ctx context.Context, subject auth.Subject, action auth.Action) (auth.Grant, error) {
 	resource, err := s.probe(map[string]any{columnID: subject.ID, columnTenant: subject.Tenant})
 	if err != nil {
 		return auth.Grant{}, err
@@ -643,38 +619,36 @@ func (s *Users[U]) authorizeSelf(ctx context.Context, subject auth.Subject, acti
 	return auth.Authorize(ctx, s.policy, subject, action, resource)
 }
 
-func (s *Users[U]) find(ctx context.Context, grant auth.Grant, action auth.Action, id string) (U, error) {
-	var zero U
+func (s *Users) find(ctx context.Context, grant auth.Grant, action auth.Action, id string) (Account, error) {
 	if err := grant.Check(action); err != nil {
-		return zero, err
+		return nil, err
 	}
 	entity, err := s.query().FindOrFail(ctx, grant, id)
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
 	return s.cast(entity)
 }
 
 // probe is an unsaved account holding columns, for a policy to decide about
 // or for an insert to fill further.
-func (s *Users[U]) probe(columns map[string]any) (U, error) {
-	user, err := newAccount[U](s.query())
+func (s *Users) probe(columns map[string]any) (Account, error) {
+	user, err := newAccount(s.query())
 	if err != nil {
 		return user, err
 	}
 	return user, user.ForceFill(columns)
 }
 
-func (s *Users[U]) cast(entity model.Entity) (U, error) {
-	user, ok := entity.(U)
+func (s *Users) cast(entity model.Entity) (Account, error) {
+	user, ok := entity.(Account)
 	if !ok {
-		var zero U
-		return zero, fmt.Errorf("account: the users query read %T, not %T", entity, zero)
+		return nil, fmt.Errorf("account: the users query read %T, which does not implement account.Account", entity)
 	}
 	return user, nil
 }
 
-func (s *Users[U]) record(ctx context.Context, grant auth.Grant, name string, user U) error {
+func (s *Users) record(ctx context.Context, grant auth.Grant, name string, user Account) error {
 	var payload any = eventOf(user)
 	if custom := s.hooks.Payload; custom != nil {
 		payload = custom(user)
@@ -682,8 +656,8 @@ func (s *Users[U]) record(ctx context.Context, grant auth.Grant, name string, us
 	return s.store(ctx, grant, name, user.AccountID(), payload)
 }
 
-func (s *Users[U]) store(ctx context.Context, grant auth.Grant, name, id string, payload any) error {
+func (s *Users) store(ctx context.Context, grant auth.Grant, name, id string, payload any) error {
 	return s.outbox.Store(ctx, grant, []events.Event{{Name: name, Aggregate: Aggregate, AggregateID: id, Payload: payload}})
 }
 
-var _ FactorUsers = (*Users[Account])(nil)
+var _ FactorUsers = (*Users)(nil)

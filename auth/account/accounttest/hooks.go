@@ -10,25 +10,25 @@ import (
 	"github.com/arandu-io/hesape/hashing"
 )
 
-func hookCases[U account.Account]() []testCase[U] {
-	return []testCase[U]{
-		{"AdmitRefusesASignInAsInvalidCredentials", admitRefuses[U]},
-		{"AdmitClearsDecidesWhetherARefusalCounts", admitClears[U]},
-		{"AdmitRefusesAResetLinkAsSpent", admitRefusesReset[U]},
-		{"PrepareCanRefuseARegistration", prepareRefuses[U]},
-		{"PrepareCanCompleteARegistration", prepareFills[U]},
-		{"AFailingAfterCreateRollsBackTheAccountAndItsEvent", afterCreateRollsBack[U]},
-		{"AfterCreateRunsInTheTransactionOfTheInsert", afterCreateInTransaction[U]},
-		{"ProvisionAcceptsAnImportedHashOnlyWhenItCanBeRead", provisionImportedHash[U]},
-		{"CloseFieldsAndPayloadAreTheApplications", closeFieldsAndPayload[U]},
+func hookCases() []testCase {
+	return []testCase{
+		{"AdmitRefusesASignInAsInvalidCredentials", admitRefuses},
+		{"AdmitClearsDecidesWhetherARefusalCounts", admitClears},
+		{"AdmitRefusesAResetLinkAsSpent", admitRefusesReset},
+		{"PrepareCanRefuseARegistration", prepareRefuses},
+		{"PrepareCanCompleteARegistration", prepareFills},
+		{"AFailingAfterCreateRollsBackTheAccountAndItsEvent", afterCreateRollsBack},
+		{"AfterCreateRunsInTheTransactionOfTheInsert", afterCreateInTransaction},
+		{"ProvisionAcceptsAnImportedHashOnlyWhenItCanBeRead", provisionImportedHash},
+		{"CloseFieldsAndPayloadAreTheApplications", closeFieldsAndPayload},
 	}
 }
 
 var errSuspended = errors.New("the account is suspended")
 
-func admitRefuses[U account.Account](t *testing.T, e *env[U]) {
+func admitRefuses(t *testing.T, e *env) {
 	var admitted []string
-	users := e.users(account.Hooks[U]{Admit: func(_ context.Context, user U) error {
+	users := e.users(account.Hooks{Admit: func(_ context.Context, user account.Account) error {
 		admitted = append(admitted, user.AccountID())
 		if user.AccountName() == "Suspended" {
 			return errSuspended
@@ -56,11 +56,11 @@ func admitRefuses[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func admitClears[U account.Account](t *testing.T, e *env[U]) {
-	refuse := func(context.Context, U) error { return errSuspended }
+func admitClears(t *testing.T, e *env) {
+	refuse := func(context.Context, account.Account) error { return errSuspended }
 	for _, clears := range []bool{false, true} {
 		throttle := &recordingThrottle{}
-		users := e.users(account.Hooks[U]{Admit: refuse, AdmitClears: clears}, throttle)
+		users := e.users(account.Hooks{Admit: refuse, AdmitClears: clears}, throttle)
 		email := "counted@example.test"
 		if clears {
 			email = "cleared@example.test"
@@ -75,8 +75,8 @@ func admitClears[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func admitRefusesReset[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{Admit: func(context.Context, U) error { return errSuspended }}, nil)
+func admitRefusesReset(t *testing.T, e *env) {
+	users := e.users(account.Hooks{Admit: func(context.Context, account.Account) error { return errSuspended }}, nil)
 	registered := e.register(users, tenantA, "Ana", "ana@example.test")
 	_, err := users.ResetPassword(e.ctx, tenantA, registered.AccountID(), registered.AccountEmail(),
 		account.Fingerprint(registered.PasswordHash()), "a-brand-new-password")
@@ -88,9 +88,9 @@ func admitRefusesReset[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func prepareRefuses[U account.Account](t *testing.T, e *env[U]) {
+func prepareRefuses(t *testing.T, e *env) {
 	refused := errors.New("the document number is not valid")
-	users := e.users(account.Hooks[U]{Prepare: func(_ context.Context, r *account.Registration, _ U) error {
+	users := e.users(account.Hooks{Prepare: func(_ context.Context, r *account.Registration, _ account.Account) error {
 		if r.Extra != "valid" {
 			return refused
 		}
@@ -108,9 +108,9 @@ func prepareRefuses[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func prepareFills[U account.Account](t *testing.T, e *env[U]) {
+func prepareFills(t *testing.T, e *env) {
 	var tenantSeen string
-	users := e.users(account.Hooks[U]{Prepare: func(_ context.Context, r *account.Registration, user U) error {
+	users := e.users(account.Hooks{Prepare: func(_ context.Context, r *account.Registration, user account.Account) error {
 		tenantSeen = user.AccountTenant()
 		if r.Name == "" {
 			r.Name = "Personal account"
@@ -129,10 +129,10 @@ func prepareFills[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func afterCreateRollsBack[U account.Account](t *testing.T, e *env[U]) {
+func afterCreateRollsBack(t *testing.T, e *env) {
 	failed := errors.New("the personal organization could not be created")
 	var created string
-	users := e.users(account.Hooks[U]{AfterCreate: func(_ context.Context, g auth.Grant, user U) error {
+	users := e.users(account.Hooks{AfterCreate: func(_ context.Context, g auth.Grant, user account.Account) error {
 		created = user.AccountID()
 		if auth.Tenant(g) != tenantA || g.Action() != account.ActionUserCreate {
 			t.Errorf("AfterCreate got a Grant for %s in %q", g.Action(), auth.Tenant(g))
@@ -153,7 +153,7 @@ func afterCreateRollsBack[U account.Account](t *testing.T, e *env[U]) {
 		t.Fatalf("a failed AfterCreate left %d outbox rows", n)
 	}
 
-	_, err = users.Provision(e.ctx, tenantA, account.Draft[U]{Name: "Ana", Email: "ana@example.test", Password: password})
+	_, err = users.Provision(e.ctx, tenantA, account.Draft{Name: "Ana", Email: "ana@example.test", Password: password})
 	if !errors.Is(err, failed) {
 		t.Fatalf("provisioning answered %v, want AfterCreate's error", err)
 	}
@@ -162,8 +162,8 @@ func afterCreateRollsBack[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func afterCreateInTransaction[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{AfterCreate: func(ctx context.Context, _ auth.Grant, user U) error {
+func afterCreateInTransaction(t *testing.T, e *env) {
+	users := e.users(account.Hooks{AfterCreate: func(ctx context.Context, _ auth.Grant, user account.Account) error {
 		var n int64
 		// The account is visible to a statement on the same context, which is
 		// what an application's own insert beside it needs.
@@ -178,10 +178,10 @@ func afterCreateInTransaction[U account.Account](t *testing.T, e *env[U]) {
 	e.register(users, tenantA, "Ana", "ana@example.test")
 }
 
-func provisionImportedHash[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{}, nil)
+func provisionImportedHash(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
 	imported := bcryptOf(t, password)
-	user, err := users.Provision(e.ctx, tenantA, account.Draft[U]{Name: "Ana", Email: "ana@example.test", PasswordHash: imported})
+	user, err := users.Provision(e.ctx, tenantA, account.Draft{Name: "Ana", Email: "ana@example.test", PasswordHash: imported})
 	if err != nil {
 		t.Fatalf("provisioning a bcrypt hash: %v", err)
 	}
@@ -189,7 +189,7 @@ func provisionImportedHash[U account.Account](t *testing.T, e *env[U]) {
 		t.Fatalf("the imported hash was stored as %q", stored)
 	}
 	broken := imported[:len(imported)-10]
-	if _, err := users.Provision(e.ctx, tenantA, account.Draft[U]{Name: "Bea", Email: "bea@example.test", PasswordHash: broken}); err == nil {
+	if _, err := users.Provision(e.ctx, tenantA, account.Draft{Name: "Bea", Email: "bea@example.test", PasswordHash: broken}); err == nil {
 		t.Fatal("a bcrypt hash the hashing package cannot read was provisioned")
 	}
 	if n := e.count(`SELECT count(*) FROM users WHERE email = ?`, "bea@example.test"); n != 0 {
@@ -197,10 +197,10 @@ func provisionImportedHash[U account.Account](t *testing.T, e *env[U]) {
 	}
 }
 
-func closeFieldsAndPayload[U account.Account](t *testing.T, e *env[U]) {
-	users := e.users(account.Hooks[U]{
-		CloseFields: func(U) map[string]any { return map[string]any{"name": "Gone"} },
-		Payload:     func(user U) any { return map[string]string{"who": user.AccountID()} },
+func closeFieldsAndPayload(t *testing.T, e *env) {
+	users := e.users(account.Hooks{
+		CloseFields: func(account.Account) map[string]any { return map[string]any{"name": "Gone"} },
+		Payload:     func(user account.Account) any { return map[string]string{"who": user.AccountID()} },
 	}, nil)
 	registered := e.register(users, tenantA, "Ana", "ana@example.test")
 	if err := users.Close(e.ctx, subject(registered), password, "127.0.0.1"); err != nil {

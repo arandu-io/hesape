@@ -100,10 +100,10 @@ func noDatabase(t *testing.T) (*database.DB, *statementCounter) {
 	return database.Wrap(handle, database.DialectSQLite), counter
 }
 
-func newUsers(t *testing.T, db *database.DB, hooks account.Hooks[*member]) *account.Users[*member] {
+func newUsers(t *testing.T, db *database.DB, hooks account.Hooks) *account.Users {
 	t.Helper()
-	users, err := account.NewUsers(account.Config[*member]{
-		DB: db, Query: func() *model.Builder { return members.Query(db) }, Policy: memberPolicy{}, Hooks: hooks,
+	users, err := account.NewUsers(account.Config{
+		DB: db, Query: func() *model.Builder { return members.Query(db) }, Policy: account.PolicyOf(memberPolicy{}), Hooks: hooks,
 	})
 	if err != nil {
 		t.Fatalf("NewUsers: %v", err)
@@ -114,9 +114,9 @@ func newUsers(t *testing.T, db *database.DB, hooks account.Hooks[*member]) *acco
 func TestNewUsersRefusesAConfigItCannotAuthorizeWith(t *testing.T) {
 	db, _ := noDatabase(t)
 	query := func() *model.Builder { return members.Query(db) }
-	for name, cfg := range map[string]account.Config[*member]{
-		"no database": {Query: query, Policy: memberPolicy{}},
-		"no query":    {DB: db, Policy: memberPolicy{}},
+	for name, cfg := range map[string]account.Config{
+		"no database": {Query: query, Policy: account.PolicyOf(memberPolicy{})},
+		"no query":    {DB: db, Policy: account.PolicyOf(memberPolicy{})},
 		"no policy":   {DB: db, Query: query},
 	} {
 		if _, err := account.NewUsers(cfg); err == nil {
@@ -127,7 +127,7 @@ func TestNewUsersRefusesAConfigItCannotAuthorizeWith(t *testing.T) {
 
 func TestNewFactorsRefusesWhatTheChallengeCannotRunWithout(t *testing.T) {
 	db, _ := noDatabase(t)
-	users := newUsers(t, db, account.Hooks[*member]{})
+	users := newUsers(t, db, account.Hooks{})
 	key := []byte("0123456789abcdef0123456789abcdef")
 	store := cache.NewArrayStore()
 	for name, build := range map[string]func() (*account.Factors, error){
@@ -147,8 +147,8 @@ func TestNewFactorsRefusesWhatTheChallengeCannotRunWithout(t *testing.T) {
 func TestRefusalsHappenBeforeTheFirstStatement(t *testing.T) {
 	db, counter := noDatabase(t)
 	prepared := errors.New("refused by the application")
-	users := newUsers(t, db, account.Hooks[*member]{})
-	preparing := newUsers(t, db, account.Hooks[*member]{Prepare: func(context.Context, *account.Registration, *member) error { return prepared }})
+	users := newUsers(t, db, account.Hooks{})
+	preparing := newUsers(t, db, account.Hooks{Prepare: func(context.Context, *account.Registration, account.Account) error { return prepared }})
 	factors, err := account.NewFactors(db, []byte("0123456789abcdef0123456789abcdef"), failingStore{cache.NewArrayStore()}, nil, users)
 	if err != nil {
 		t.Fatalf("NewFactors: %v", err)
@@ -171,11 +171,11 @@ func TestRefusalsHappenBeforeTheFirstStatement(t *testing.T) {
 		},
 		"a registration Prepare refused": func() error { _, err := preparing.Register(ctx, "tenant-a", valid); return err },
 		"a draft with an unreadable hash": func() error {
-			_, err := users.Provision(ctx, "tenant-a", account.Draft[*member]{Email: "a@b.c", PasswordHash: "plain-text-password"})
+			_, err := users.Provision(ctx, "tenant-a", account.Draft{Email: "a@b.c", PasswordHash: "plain-text-password"})
 			return err
 		},
 		"a draft with no password": func() error {
-			_, err := users.Provision(ctx, "tenant-a", account.Draft[*member]{Email: "a@b.c"})
+			_, err := users.Provision(ctx, "tenant-a", account.Draft{Email: "a@b.c"})
 			return err
 		},
 		"renaming nobody":            func() error { _, err := users.Rename(ctx, nobody, "Mallory"); return err },
@@ -305,7 +305,7 @@ func TestErrorsMatchWhatTheirCallersAlreadyCheck(t *testing.T) {
 	}
 	var refused validation.Errors
 	db, _ := noDatabase(t)
-	if _, err := newUsers(t, db, account.Hooks[*member]{}).Rename(context.Background(), auth.Subject{ID: "a", Tenant: "t"}, ""); !errors.As(err, &refused) || refused.First("name") == "" {
+	if _, err := newUsers(t, db, account.Hooks{}).Rename(context.Background(), auth.Subject{ID: "a", Tenant: "t"}, ""); !errors.As(err, &refused) || refused.First("name") == "" {
 		t.Errorf("an empty name answered %v, want a validation error on name", err)
 	}
 }
@@ -344,3 +344,27 @@ func TestTheFingerprintIsTheOneLinksInFlightCarry(t *testing.T) {
 		t.Error("an address is not normalized the way every stored one was")
 	}
 }
+
+// TestPolicyOfForwardsTheApplicationsPolicyOverItsOwnType: the application's
+// policy decides about its own *User, and an account of another type is
+// refused rather than handed to it.
+func TestPolicyOfForwardsTheApplicationsPolicyOverItsOwnType(t *testing.T) {
+	policy := account.PolicyOf(memberPolicy{})
+	ctx := context.Background()
+	mine := &member{ID: "ana", TenantID: "acme"}
+	if err := policy.Can(ctx, auth.Subject{ID: "ana", Tenant: "acme"}, account.ActionUserUpdate, mine); err != nil {
+		t.Fatalf("the owner was refused: %v", err)
+	}
+	if err := policy.Can(ctx, auth.Subject{ID: "bea", Tenant: "acme"}, account.ActionUserUpdate, mine); err == nil {
+		t.Fatal("the adapter allowed what the application's policy refuses")
+	}
+	if err := policy.Can(ctx, auth.Subject{ID: "ana", Tenant: "acme"}, account.ActionUserUpdate, &stranger{}); err == nil {
+		t.Fatal("an account of another type was decided about")
+	}
+	if _, err := auth.Authorize(ctx, auth.Policy[account.Account](policy), auth.Subject{ID: "ana", Tenant: "acme"}, account.ActionUserView, account.Account(mine)); err != nil {
+		t.Fatalf("Authorize through the adapter: %v", err)
+	}
+}
+
+// stranger is an Account that is not the application's user type.
+type stranger struct{ member }

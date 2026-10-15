@@ -10,27 +10,27 @@ import (
 	"github.com/arandu-io/hesape/otp"
 )
 
-func challengeCases[U account.Account]() []testCase[U] {
-	return []testCase[U]{
-		{"TheChallengeRefusesTheRightCodeOnceTheBudgetIsSpent", challengeBudgetSpent[U]},
-		{"TheChallengeBudgetBelongsToTheAccountAndNotToTheSession", challengeBudgetPerAccount[U]},
-		{"ASuccessfulChallengeGivesTheBudgetBack", challengeSuccessRefunds[U]},
-		{"AChallengeThatCannotBeCountedIsRefused", challengeUncounted[U]},
+func challengeCases() []testCase {
+	return []testCase{
+		{"TheChallengeRefusesTheRightCodeOnceTheBudgetIsSpent", challengeBudgetSpent},
+		{"TheChallengeBudgetBelongsToTheAccountAndNotToTheSession", challengeBudgetPerAccount},
+		{"ASuccessfulChallengeGivesTheBudgetBack", challengeSuccessRefunds},
+		{"AChallengeThatCannotBeCountedIsRefused", challengeUncounted},
 	}
 }
 
 // challengeFixture is enrolled accounts, the secret their authenticators hold,
 // and the store their challenge attempts are counted in.
-type challengeFixture[U account.Account] struct {
-	users  *account.Users[U]
+type challengeFixture struct {
+	users  *account.Users
 	ids    map[string]string
 	secret []byte
 	store  cache.Store
 }
 
-func newChallenge[U account.Account](t *testing.T, e *env[U], names ...string) challengeFixture[U] {
+func newChallenge(t *testing.T, e *env, names ...string) challengeFixture {
 	t.Helper()
-	users := e.users(account.Hooks[U]{}, nil)
+	users := e.users(account.Hooks{}, nil)
 	secret := otp.NewSecret()
 	sealed := sealSecret(t, secret)
 	ids := map[string]string{}
@@ -39,19 +39,19 @@ func newChallenge[U account.Account](t *testing.T, e *env[U], names ...string) c
 		e.seedFactor(tenantA, user.AccountID(), sealed, true)
 		ids[name] = user.AccountID()
 	}
-	return challengeFixture[U]{users: users, ids: ids, secret: secret, store: cache.NewArrayStore()}
+	return challengeFixture{users: users, ids: ids, secret: secret, store: cache.NewArrayStore()}
 }
 
 // factors is one instance of the application -- one replica, or the code
 // behind one browser's session. Every instance built from a fixture counts in
 // the same store, which is what a deployment shares.
-func (f challengeFixture[U]) factors(e *env[U]) *account.Factors { return e.factors(f.users, f.store) }
+func (f challengeFixture) factors(e *env) *account.Factors { return e.factors(f.users, f.store) }
 
 // challengeBudgetSpent: five wrong codes and the sixth attempt is refused even
 // though it is the right one. A budget that a correct guess could still slip
 // past is a budget that only slows the guessing down. Signing in again does
 // not hand the budget back: it belongs to the account.
-func challengeBudgetSpent[U account.Account](t *testing.T, e *env[U]) {
+func challengeBudgetSpent(t *testing.T, e *env) {
 	fixture := newChallenge(t, e, "ana")
 	factors := fixture.factors(e)
 	id := fixture.ids["ana"]
@@ -98,7 +98,7 @@ func challengeBudgetSpent[U account.Account](t *testing.T, e *env[U]) {
 // replicas -- each carrying a pending sign-in for the same account.
 // Alternating between them does not buy a second budget, and the budget of
 // one account is not spent by another's.
-func challengeBudgetPerAccount[U account.Account](t *testing.T, e *env[U]) {
+func challengeBudgetPerAccount(t *testing.T, e *env) {
 	fixture := newChallenge(t, e, "ana", "bea")
 	first, second := fixture.factors(e), fixture.factors(e)
 	right, wrong := codes(t, fixture.secret)
@@ -125,7 +125,7 @@ func challengeBudgetPerAccount[U account.Account](t *testing.T, e *env[U]) {
 
 // challengeSuccessRefunds: somebody who mistyped twice and then got in has not
 // used up anything the next sign-in needs.
-func challengeSuccessRefunds[U account.Account](t *testing.T, e *env[U]) {
+func challengeSuccessRefunds(t *testing.T, e *env) {
 	fixture := newChallenge(t, e, "ana")
 	factors := fixture.factors(e)
 	id := fixture.ids["ana"]
@@ -147,7 +147,7 @@ func challengeSuccessRefunds[U account.Account](t *testing.T, e *env[U]) {
 // challengeUncounted: the request throttle fails open because it guards
 // capacity; this guards an account, and an attempt nobody counted is an
 // attempt outside the budget.
-func challengeUncounted[U account.Account](t *testing.T, e *env[U]) {
+func challengeUncounted(t *testing.T, e *env) {
 	fixture := newChallenge(t, e, "ana")
 	factors := e.factors(fixture.users, failingStore{cache.NewArrayStore()})
 	right, _ := codes(t, fixture.secret)

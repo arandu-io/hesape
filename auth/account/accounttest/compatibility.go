@@ -45,18 +45,18 @@ func loadRows(t *testing.T) rows {
 	return r
 }
 
-func compatibilityCases[U account.Account]() []testCase[U] {
-	return []testCase[U]{
-		{"RowsWrittenBeforeThisPackageStillSignIn", compatibilitySignIn[U]},
+func compatibilityCases() []testCase {
+	return []testCase{
+		{"RowsWrittenBeforeThisPackageStillSignIn", compatibilitySignIn},
 	}
 }
 
 // compatibilitySignIn stores the rows as they were written and signs the
 // account in through every factor: the password, the fingerprint a reset link
 // carried, the authenticator, and the recovery code.
-func compatibilitySignIn[U account.Account](t *testing.T, e *env[U]) {
+func compatibilitySignIn(t *testing.T, e *env) {
 	r := loadRows(t)
-	users := e.users(account.Hooks[U]{}, nil)
+	users := e.users(account.Hooks{}, nil)
 	user := e.register(users, tenantA, "Ana", "ana@example.test")
 	if _, err := e.f.DB.ExecContext(e.ctx, `UPDATE users SET password = ? WHERE id = ?`, r.PasswordHash, user.AccountID()); err != nil {
 		t.Fatalf("storing the old password hash: %v", err)

@@ -42,9 +42,9 @@ type FactorUsers interface {
 	// Owner reads the account a signed-in subject is, authorized by the user
 	// policy for ActionUserView.
 	Owner(ctx context.Context, subject auth.Subject) (Account, error)
-	// Holder reads the account a pending sign-in names, before there is a
-	// subject.
-	Holder(ctx context.Context, tenant, userID string) (Account, error)
+	// FindForAuthentication reads the account a pending sign-in names, before
+	// there is a subject.
+	FindForAuthentication(ctx context.Context, tenant, userID string) (Account, error)
 }
 
 // Factors owns the authenticator second factor of an application's accounts:
@@ -318,7 +318,7 @@ func (s *Factors) consumeRecovery(ctx context.Context, tenant, userID, code stri
 	if !required {
 		return ErrTwoFactorNotEnrolled
 	}
-	user, err := s.users.Holder(ctx, tenant, userID)
+	user, err := s.users.FindForAuthentication(ctx, tenant, userID)
 	if err != nil {
 		return err
 	}

@@ -11,12 +11,12 @@
 // An application runs it in one test, against a fresh database per subtest:
 //
 //	func TestAccountContract(t *testing.T) {
-//		accounttest.Run(t, func(t *testing.T) accounttest.Fixture[*models.User] {
+//		accounttest.Run(t, func(t *testing.T) accounttest.Fixture {
 //			db := openAMigratedDatabaseForThisTest(t)
-//			return accounttest.Fixture[*models.User]{
+//			return accounttest.Fixture{
 //				DB:     db,
 //				Query:  func() *model.Builder { return models.Users(db).Base() },
-//				Policy: policies.UserPolicy{},
+//				Policy: account.PolicyOf(policies.UserPolicy{}),
 //			}
 //		})
 //	}
