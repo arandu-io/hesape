@@ -77,11 +77,15 @@
 // DialectArandu signs with Sign: the hex HMAC-SHA256 of the timestamp, the
 // delivery id and the body, as sha256=, in X-Arandu-Signature beside
 // X-Arandu-Timestamp and X-Arandu-Delivery-Id. Server.HeaderPrefix renames
-// the three. Verify checks it.
+// the three. During a rotation the signature header is written once per
+// secret still signing, the one that retires first on the first line. Verify
+// checks it, accepting any of the lines.
 //
 // DialectHMAC signs with SignBody, the hex HMAC-SHA256 of the body, in the
 // endpoint's signature header, with the Arandu headers beside it unless the
-// endpoint turns them off.
+// endpoint turns them off. Its header holds one value, so during a rotation
+// it is signed with the previous secret until that secret retires, and a
+// receiver moves to the new secret then.
 //
 // DialectStandardWebhooks follows the Standard Webhooks specification:
 // Webhook-Id, Webhook-Timestamp, and Webhook-Signature carrying "v1," and the

@@ -46,12 +46,29 @@ func Sign(secret []byte, timestamp, deliveryID string, body []byte) string {
 	return signaturePrefix + hex.EncodeToString(mac.Sum(nil))
 }
 
+// maxSignatures is how many signatures one Arandu signature header may list
+// before it is refused: one per secret still signing, and a sender keeps at
+// most MaxPreviousSecrets beside the current one.
+const maxSignatures = MaxPreviousSecrets + 1
+
 // Verify compares a signature against the active and rotation secrets in
-// constant time. Malformed signatures are refused.
+// constant time. signature is one sha256= value, or several separated by
+// commas -- what a sender writes during its own rotation, one per secret it
+// still signs with, as separate header lines a reader may join -- and one of
+// them matching one secret is enough. A malformed value, or more values than
+// a sender signs with, is refused.
 func Verify(secrets SecretSet, timestamp, deliveryID string, body []byte, signature string) bool {
-	provided, err := hex.DecodeString(strings.TrimPrefix(signature, signaturePrefix))
-	if err != nil || !strings.HasPrefix(signature, signaturePrefix) || len(provided) != sha256.Size {
+	if strings.Count(signature, ",") >= maxSignatures {
 		return false
+	}
+	var provided [][]byte
+	for _, entry := range strings.Split(signature, ",") {
+		entry = strings.TrimSpace(entry)
+		decoded, err := hex.DecodeString(strings.TrimPrefix(entry, signaturePrefix))
+		if err != nil || !strings.HasPrefix(entry, signaturePrefix) || len(decoded) != sha256.Size {
+			return false
+		}
+		provided = append(provided, decoded)
 	}
 	all := make([][]byte, 0, len(secrets.Previous)+1)
 	all = append(all, secrets.Current)
@@ -62,8 +79,10 @@ func Verify(secrets SecretSet, timestamp, deliveryID string, body []byte, signat
 			continue
 		}
 		expected, _ := hex.DecodeString(strings.TrimPrefix(Sign(secret, timestamp, deliveryID, body), signaturePrefix))
-		if hmac.Equal(provided, expected) {
-			matched = 1
+		for _, given := range provided {
+			if hmac.Equal(given, expected) {
+				matched = 1
+			}
 		}
 	}
 	return matched == 1
@@ -138,7 +157,8 @@ type Arandu struct {
 	Now func() time.Time
 }
 
-// Valid checks the timestamp's age, then the signature.
+// Valid checks the timestamp's age, then the signature: every line of the
+// signature header, any of which may match.
 func (v Arandu) Valid(r *http.Request, body []byte, secrets SecretSet) bool {
 	prefix := v.HeaderPrefix
 	if prefix == "" {
@@ -160,7 +180,8 @@ func (v Arandu) Valid(r *http.Request, body []byte, secrets SecretSet) bool {
 	if age := now.Sub(time.Unix(seconds, 0)); age > tolerance || age < -tolerance {
 		return false
 	}
-	return Verify(secrets, timestamp, r.Header.Get(prefix+"-Delivery-ID"), body, r.Header.Get(prefix+"-Signature"))
+	signature := strings.Join(r.Header.Values(prefix+"-Signature"), ",")
+	return Verify(secrets, timestamp, r.Header.Get(prefix+"-Delivery-ID"), body, signature)
 }
 
 // SignBody returns the signature of a body DialectHMAC sends: the hex

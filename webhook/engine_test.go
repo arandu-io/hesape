@@ -230,3 +230,62 @@ func mustRequest(t *testing.T, raw string) *http.Request {
 	}
 	return request
 }
+
+// TestARotationSignsTheAranduAndHMACDialectsSoTheOldSecretStillVerifies: the
+// Arandu and HMAC dialects signed with the current secret alone, so a
+// rotation broke every receiver still holding the previous secret at once,
+// although the previous secret was documented as still signing until it
+// retired. The Arandu header now carries one line per secret, the one that
+// retires first on the first line, and the HMAC header carries that one.
+func TestARotationSignsTheAranduAndHMACDialectsSoTheOldSecretStillVerifies(t *testing.T) {
+	at := time.Unix(1700000000, 0)
+	body := []byte(`{"ok":true}`)
+	current, previous := strings.Repeat("c", 32), strings.Repeat("p", 32)
+	keys := signing{secrets: []string{current, previous}}
+
+	arandu := http.Header{}
+	if err := sign(arandu, shot{id: "delivery-1", dialect: DialectArandu, body: body, keys: keys}, at, aranduPrefix, ""); err != nil {
+		t.Fatal(err)
+	}
+	lines := arandu.Values("X-Arandu-Signature")
+	if len(lines) != 2 || lines[0] != Sign([]byte(previous), "1700000000", "delivery-1", body) ||
+		lines[1] != Sign([]byte(current), "1700000000", "delivery-1", body) {
+		t.Fatalf("during a rotation the Arandu signature lines are %q, want the previous secret's and then the current one's", lines)
+	}
+	validator := Arandu{Now: func() time.Time { return at }}
+	for name, held := range map[string]string{"previous": previous, "current": current} {
+		request := &http.Request{Header: arandu.Clone()}
+		if !validator.Valid(request, body, SecretSet{Current: []byte(held)}) {
+			t.Errorf("a receiver holding only the %s secret refused the call", name)
+		}
+	}
+	if !validator.Valid(&http.Request{Header: http.Header{
+		"X-Arandu-Timestamp":   {"1700000000"},
+		"X-Arandu-Delivery-Id": {"delivery-1"},
+		"X-Arandu-Signature":   {strings.Join(lines, ", ")},
+	}}, body, SecretSet{Current: []byte(current)}) {
+		t.Error("the two lines joined by a proxy into one were refused")
+	}
+	if Verify(SecretSet{Current: []byte(strings.Repeat("x", 32))}, "1700000000", "delivery-1", body, strings.Join(lines, ",")) {
+		t.Error("a list of signatures verified under a secret that made none of them")
+	}
+	if Verify(SecretSet{Current: []byte(current)}, "1700000000", "delivery-1", body, lines[1]+",garbage") {
+		t.Error("a list carrying a malformed value was accepted")
+	}
+
+	hmacOnly := http.Header{}
+	if err := sign(hmacOnly, shot{id: "delivery-1", dialect: DialectHMAC, body: body, signatureHeader: "Signature", keys: keys}, at, aranduPrefix, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := hmacOnly.Values("Signature"); len(got) != 1 || got[0] != SignBody([]byte(previous), body) {
+		t.Fatalf("during a rotation the HMAC header is %q, want the previous secret's signature alone", got)
+	}
+
+	outside := http.Header{}
+	if err := sign(outside, shot{id: "delivery-1", dialect: DialectArandu, body: body, keys: signing{secrets: []string{current}}}, at, aranduPrefix, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := outside.Values("X-Arandu-Signature"); len(got) != 1 || got[0] != Sign([]byte(current), "1700000000", "delivery-1", body) {
+		t.Fatalf("outside a rotation the Arandu signature is %q, want the one value it always was", got)
+	}
+}
