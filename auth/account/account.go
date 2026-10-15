@@ -194,6 +194,13 @@ type Hooks struct {
 	// ones it clears itself, and the values they get.
 	CloseFields func(user Account) map[string]any
 
+	// AfterClose runs in the transaction that closed the account, after its
+	// columns are written and before its event is stored, with the Grant the
+	// close was made under: where the application revokes what still acts as
+	// the account without its password -- personal access tokens, sessions,
+	// remembered devices. An error rolls back the close and the event with it.
+	AfterClose func(ctx context.Context, grant auth.Grant, user Account) error
+
 	// Payload replaces UserEvent as the payload of the events Users stores.
 	Payload func(user Account) any
 }

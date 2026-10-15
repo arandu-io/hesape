@@ -34,6 +34,10 @@ var (
 	// answers a wrong password answers this the same way.
 	ErrAccountRefused = fmt.Errorf("user: account refused: %w", auth.ErrInvalidCredentials)
 
+	// ErrAccountClosed is the reason Users.Admit gives for an account Close
+	// closed. Admit answers it inside an error that matches ErrAccountRefused.
+	ErrAccountClosed = errors.New("user: the account is closed")
+
 	// ErrTwoFactorNotEnrolled means no confirmed factor can challenge the account.
 	ErrTwoFactorNotEnrolled = errors.New("two-factor: this account has no enrolment")
 

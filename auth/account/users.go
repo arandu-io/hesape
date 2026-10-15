@@ -428,7 +428,10 @@ func (s *Users) Rename(ctx context.Context, subject auth.Subject, name string) (
 //
 // The row stays, because what the account did still names its id.
 // Hooks.CloseFields writes the application's own columns in the same
-// statement: a document number to clear, a blocked_at to stamp.
+// statement: a document number to clear, a blocked_at to stamp. Close does
+// not touch sessions or tokens; Hooks.AfterClose, in the same transaction, is
+// where the application revokes them, and Admit refuses a closed account to a
+// credential that is still out.
 func (s *Users) Close(ctx context.Context, subject auth.Subject, password, client string) error {
 	grant, err := s.authorizeSelf(ctx, subject, ActionUserUpdate)
 	if err != nil {
@@ -452,7 +455,7 @@ func (s *Users) Close(ctx context.Context, subject auth.Subject, password, clien
 		}
 		columns := map[string]any{
 			columnName:     closedName,
-			columnEmail:    "closed+" + user.AccountID() + "@accounts.invalid",
+			columnEmail:    closedEmail(user.AccountID()),
 			columnPassword: hash,
 		}
 		if extra := s.hooks.CloseFields; extra != nil {
@@ -466,12 +469,52 @@ func (s *Users) Close(ctx context.Context, subject auth.Subject, password, clien
 		if err := user.ForceFill(columns); err != nil {
 			return err
 		}
+		if after := s.hooks.AfterClose; after != nil {
+			if err := after(ctx, grant, user); err != nil {
+				return err
+			}
+		}
 		var payload any = UserEvent{UserID: user.AccountID(), Tenant: user.AccountTenant()}
 		if custom := s.hooks.Payload; custom != nil {
 			payload = custom(user)
 		}
 		return s.store(ctx, grant, AccountClosed, user.AccountID(), payload)
 	})
+}
+
+// Admit answers whether an account may act through a credential other than
+// its password -- a personal access token, a remembered device, a session
+// read back -- by the rules a sign-in is held to: an account Close closed is
+// refused with ErrAccountClosed, and one Hooks.Admit refuses with the hook's
+// reason. A refusal matches ErrAccountRefused and auth.ErrInvalidCredentials,
+// so the caller answers it as it answers a credential it does not accept.
+//
+// A closed account is known by the address Close leaves on it; a
+// Hooks.CloseFields that writes another address leaves telling a closed
+// account apart to Hooks.Admit.
+func (s *Users) Admit(ctx context.Context, user Account) error {
+	if user == nil {
+		return refused{reason: ErrUserNotFound}
+	}
+	if closedAccount(user) {
+		return refused{reason: ErrAccountClosed}
+	}
+	if admit := s.hooks.Admit; admit != nil {
+		if reason := admit(ctx, user); reason != nil {
+			return refused{reason: reason}
+		}
+	}
+	return nil
+}
+
+// closedEmail is the address Close leaves on an account, which no address a
+// person registers can be: the .invalid domain is reserved.
+func closedEmail(id string) string { return "closed+" + id + "@accounts.invalid" }
+
+// closedAccount reports whether Close closed the account, by the address it
+// left there.
+func closedAccount(user Account) bool {
+	return NormalizeEmail(user.AccountEmail()) == closedEmail(strings.ToLower(user.AccountID()))
 }
 
 // Provision creates an account with no person at a form behind it -- a

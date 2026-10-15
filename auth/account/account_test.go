@@ -406,3 +406,22 @@ func TestARegistrationAndADraftNeverPrintThePassword(t *testing.T) {
 		t.Fatalf("the log does not say a password arrived: %s", logged.String())
 	}
 }
+
+// TestAdmitRefusesAClosedAccountWithoutReadingAnything: the address Close
+// leaves is what says an account is closed, so the answer needs no statement.
+func TestAdmitRefusesAClosedAccountWithoutReadingAnything(t *testing.T) {
+	db, counter := noDatabase(t)
+	users := newUsers(t, db, account.Hooks{})
+	closed := &member{ID: "Ana-1", TenantID: "tenant-a", Name: "Closed account", Email: "closed+Ana-1@accounts.invalid"}
+	open := &member{ID: "bea-2", TenantID: "tenant-a", Name: "Bea", Email: "bea@example.test"}
+
+	if err := users.Admit(context.Background(), closed); !errors.Is(err, account.ErrAccountClosed) || !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatalf("Admit answered %v for a closed account, want ErrAccountClosed matching auth.ErrInvalidCredentials", err)
+	}
+	if err := users.Admit(context.Background(), open); err != nil {
+		t.Fatalf("Admit refused an open account: %v", err)
+	}
+	if n := counter.n.Load(); n != 0 {
+		t.Fatalf("Admit ran %d statements", n)
+	}
+}

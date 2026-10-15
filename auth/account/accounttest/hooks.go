@@ -24,6 +24,8 @@ func hookCases() []testCase {
 		{"AfterRegisterReceivesTheRegistration", afterRegisterReceivesTheRegistration},
 		{"AFailingAfterRegisterRollsBackTheAccountAndItsEvent", afterRegisterRollsBack},
 		{"ProvisionDoesNotCallAfterRegister", provisionSkipsAfterRegister},
+		{"AfterCloseRunsInTheTransactionOfTheClose", afterCloseInTransaction},
+		{"AdmitRefusesAClosedAccountAndWhatTheHookRefuses", admitRefusesClosed},
 	}
 }
 
@@ -323,5 +325,78 @@ func provisionSkipsAfterRegister(t *testing.T, e *env) {
 	}
 	if called {
 		t.Fatal("Provision called AfterRegister")
+	}
+}
+
+// afterCloseInTransaction: Close left every personal access token and session
+// of the account valid, and the application had no step inside the close to
+// revoke them. AfterClose runs there, and its failure rolls the close back.
+func afterCloseInTransaction(t *testing.T, e *env) {
+	failing := errors.New("the tokens could not be revoked")
+	var closed []string
+	fail := true
+	users := e.users(account.Hooks{AfterClose: func(_ context.Context, grant auth.Grant, user account.Account) error {
+		if auth.Tenant(grant) != user.AccountTenant() {
+			t.Errorf("AfterClose got a Grant for %q, want the account's tenant %q", auth.Tenant(grant), user.AccountTenant())
+		}
+		closed = append(closed, user.AccountID())
+		if fail {
+			return failing
+		}
+		return nil
+	}}, nil)
+	registered := e.register(users, tenantA, "Ana", "ana@example.test")
+
+	if err := users.Close(e.ctx, subject(registered), password, "127.0.0.1"); !errors.Is(err, failing) {
+		t.Fatalf("a close whose AfterClose failed answered %v, want the hook's error", err)
+	}
+	if email := e.text(`SELECT email FROM users WHERE id = ?`, registered.AccountID()); email != "ana@example.test" {
+		t.Fatalf("a failing AfterClose left the account closed, its address %q", email)
+	}
+	if got := e.eventCount(registered.AccountID(), account.AccountClosed); got != 0 {
+		t.Fatalf("a failing AfterClose left %d %s events", got, account.AccountClosed)
+	}
+
+	fail = false
+	if err := users.Close(e.ctx, subject(registered), password, "127.0.0.1"); err != nil {
+		t.Fatalf("closing: %v", err)
+	}
+	if len(closed) != 2 || closed[1] != registered.AccountID() {
+		t.Fatalf("AfterClose ran for %v, want the account once per close", closed)
+	}
+	if got := e.eventCount(registered.AccountID(), account.AccountClosed); got != 1 {
+		t.Fatalf("closing stored %d %s events, want one", got, account.AccountClosed)
+	}
+}
+
+// admitRefusesClosed: a credential other than the password -- a personal
+// access token -- went on acting as a closed account, because nothing the
+// application could ask said the account was closed.
+func admitRefusesClosed(t *testing.T, e *env) {
+	users := e.users(account.Hooks{Admit: func(_ context.Context, user account.Account) error {
+		if user.AccountName() == "Suspended" {
+			return errSuspended
+		}
+		return nil
+	}}, nil)
+	open := e.register(users, tenantA, "Ana", "ana@example.test")
+	suspended := e.register(users, tenantA, "Suspended", "sus@example.test")
+
+	if err := users.Admit(e.ctx, open); err != nil {
+		t.Fatalf("Admit refused an open account: %v", err)
+	}
+	if err := users.Admit(e.ctx, suspended); !errors.Is(err, account.ErrAccountRefused) || !errors.Is(err, errSuspended) {
+		t.Fatalf("Admit answered %v for an account the hook refuses, want ErrAccountRefused with the hook's reason", err)
+	}
+	if err := users.Close(e.ctx, subject(open), password, "127.0.0.1"); err != nil {
+		t.Fatalf("closing: %v", err)
+	}
+	closed, err := users.FindForAuthentication(e.ctx, tenantA, open.AccountID())
+	if err != nil {
+		t.Fatalf("reading the closed account: %v", err)
+	}
+	err = users.Admit(e.ctx, closed)
+	if !errors.Is(err, account.ErrAccountClosed) || !errors.Is(err, account.ErrAccountRefused) || !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatalf("Admit answered %v for a closed account, want ErrAccountClosed inside ErrAccountRefused", err)
 	}
 }

@@ -75,7 +75,10 @@
 //
 // Sessions. VerifyCredentials answers whether a password is right and nothing
 // else; whether a second factor follows, and when a session starts, is the
-// caller's. Mail is not sent here either: the verification and reset links
+// caller's. Closing an account leaves the application's sessions and tokens
+// to it: Hooks.AfterClose runs inside the close to revoke them, and
+// Users.Admit answers, for a credential that is still out, whether the
+// account behind it may act. Mail is not sent here either: the verification and reset links
 // are signed by the application over the address and the password
 // Fingerprint they were minted for, and checked here against them.
 package account
