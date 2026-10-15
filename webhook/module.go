@@ -121,10 +121,7 @@ func (m *Module) ReceivePaths() []string {
 		if rc.Mount == "" {
 			continue
 		}
-		fixed := rc.Mount
-		if i := strings.Index(fixed, "{"); i >= 0 {
-			fixed = fixed[:strings.LastIndex(fixed[:i], "/")+1]
-		}
+		fixed := mountExemption(rc.Mount)
 		if !seen[fixed] {
 			seen[fixed] = true
 			out = append(out, fixed)

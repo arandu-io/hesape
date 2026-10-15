@@ -317,3 +317,33 @@ func TestAnEventOutsideTheAllowListReachesNoEndpoint(t *testing.T) {
 		}
 	}
 }
+
+// TestAMountWhoseExemptionReachesOtherRoutesIsRefused: ReceivePaths exempts a
+// Mount up to its first parameter, so "/{org}/lpr" asked CSRFExcept for "/" and
+// panicked the application at boot, and a Mount under the management Prefix
+// exempted the management forms a signed-in person submits. New refuses both.
+func TestAMountWhoseExemptionReachesOtherRoutesIsRefused(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []struct{ prefix, mount string }{
+		{"", "/{org}/lpr"},
+		{"", "/hooks{org}"},
+		{"", "/webhook/{org}"},
+		{"", "/webhook/lpr"},
+		{"", "/webhook"},
+		{"/hooks/admin", "/hooks/{org}"},
+	} {
+		mounted := billing()
+		mounted.Name, mounted.Methods, mounted.Mount = "lpr", nil, c.mount
+		_, err := webhook.New(webhook.Config{Key: []byte(testKey), Prefix: c.prefix, Receivers: []webhook.Receiver{mounted}},
+			database.Wrap(nil, database.DialectSQLite), nil)
+		if err == nil {
+			t.Errorf("New accepted Mount %q beside Prefix %q", c.mount, c.prefix)
+		}
+	}
+	for _, mount := range []string{"/integrations/lpr/{org}/{key}", "/hooks/lpr", "/webhooks-legacy/{org}"} {
+		mounted := billing()
+		mounted.Name, mounted.Methods, mounted.Mount = "lpr", nil, mount
+		newModule(t, webhook.Config{Receivers: []webhook.Receiver{mounted}}, nil)
+	}
+}

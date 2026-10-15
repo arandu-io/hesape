@@ -191,7 +191,9 @@ type Receiver struct {
 	// ReceivePrefix, for an address that is already published:
 	// "/integracoes/lpr/{org}/{key}". It cannot be under /_arandu. The
 	// application exempts it from the CSRF check too; ReceivePaths lists
-	// what to exempt.
+	// what to exempt, which is everything up to its first parameter, so its
+	// first segment cannot be a parameter and it cannot reach the management
+	// routes under Prefix.
 	Mount string
 
 	// Tenant is whose calls these are, for a static receiver. It comes from
@@ -338,8 +340,43 @@ func (c Config) Validate() error {
 			return fmt.Errorf("webhook: Config.Receivers has %q twice", r.Name)
 		}
 		seen[r.Name] = true
+		if err := validateMount(r, c.Prefix); err != nil {
+			return fmt.Errorf("webhook: Config.Receivers[%d]: %w", i, err)
+		}
 	}
 	return validateReceiverRoutes(c)
+}
+
+// mountExemption is what ReceivePaths exempts from the CSRF check for a
+// Mount: the Mount itself when it has no parameter, and otherwise its fixed
+// part, up to the slash before its first parameter.
+func mountExemption(mount string) string {
+	if i := strings.Index(mount, "{"); i >= 0 {
+		return mount[:strings.LastIndex(mount[:i], "/")+1]
+	}
+	return mount
+}
+
+// validateMount refuses a Mount whose CSRF exemption would reach routes that
+// are not the receiver's: one whose first segment is a parameter, which would
+// exempt every route of the application, and one that reaches the management
+// routes under Prefix, which are forms a signed-in person submits.
+func validateMount(r Receiver, prefix string) error {
+	if r.Mount == "" {
+		return nil
+	}
+	if prefix == "" {
+		prefix = DefaultPrefix
+	}
+	fixed := mountExemption(r.Mount)
+	if fixed == "/" {
+		return fmt.Errorf("receiver %q: Mount %q starts with a parameter, and exempting it from the CSRF check would exempt every route: give it a fixed first segment", r.Name, r.Mount)
+	}
+	if r.Mount == prefix || strings.HasPrefix(r.Mount, prefix+"/") ||
+		(strings.HasSuffix(fixed, "/") && strings.HasPrefix(prefix+"/", fixed)) {
+		return fmt.Errorf("receiver %q: Mount %q reaches the management routes under %s, and exempting it from the CSRF check would exempt them: mount it elsewhere", r.Name, r.Mount, prefix)
+	}
+	return nil
 }
 
 // reservedPrefix is the namespace the framework keeps for itself.
