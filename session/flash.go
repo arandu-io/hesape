@@ -174,6 +174,12 @@ var secretEndings = []string{
 	"confirmationcode",
 	"securitycode",
 	"cardcode",
+	"emailcode",
+	"authenticatorcode",
+	"smscode",
+	"resetcode",
+	"logincode",
+	"passcode",
 }
 
 // Flash carries the messages and the input of a rejected request across the one

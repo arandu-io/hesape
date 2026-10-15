@@ -242,6 +242,11 @@ func TestIsSecretFieldTellsACredentialCodeFromAnOrdinaryOne(t *testing.T) {
 		// the form invents freely.
 		"account_recovery_code", "user_backup_codes", "admin_two_factor_code",
 		"login_otp_code", "email_verification_code",
+		// The codes the published sign-in and reset screens ask for, which a
+		// refused reset form put back into its cookie and its HTML while the
+		// code was still unspent.
+		"email_code", "authenticator_code", "sms_code", "reset_code",
+		"login_code", "passcode", "user_email_code",
 		// The comparison is case-insensitive.
 		"Recovery_Code", "TWO_FACTOR_CODE",
 	}
