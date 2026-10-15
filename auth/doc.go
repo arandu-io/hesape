@@ -47,6 +47,9 @@
 // The user providers that read a database are hesape/auth/users; the middleware
 // is hesape/auth/middleware; the Gate is hesape/auth/access; the listener that
 // asks a fresh registration to confirm its address is hesape/auth/listeners.
+// The rules of an application's accounts and of their second factor -- sign-in,
+// registration, verification, reset, enrolment and the challenge -- are
+// hesape/auth/account, over the application's own user model and policy.
 //
 // The reset link and the verification link are neither here nor in a subpackage
 // of this one. Both are signed rather than stored: the application mints a token

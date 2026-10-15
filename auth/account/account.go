@@ -1,0 +1,161 @@
+package account
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"strings"
+
+	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/database"
+	"github.com/arandu-io/hesape/database/model"
+	"github.com/arandu-io/hesape/events"
+)
+
+// Account is what this package reads and writes on the application's user
+// model. The application's *User implements it; everything else about the user
+// -- its roles, its other columns, its JSON -- stays the application's.
+//
+// model.Entity, SetRawAttributes, ForceFill and Save are what embedding
+// model.Model already gives the user type, so the six readers are the whole of
+// what an application writes for it.
+type Account interface {
+	model.Entity
+
+	// AccountID is the primary key, the id column.
+	AccountID() string
+	// AccountTenant is the tenant the account belongs to, the table's tenant
+	// column.
+	AccountTenant() string
+	// AccountEmail is the stored address, the email column.
+	AccountEmail() string
+	// AccountName is the name the account is shown by, the name column.
+	AccountName() string
+	// PasswordHash is the stored password hash, the password column.
+	PasswordHash() string
+	// IsVerified reports whether the verified_at column holds a time.
+	IsVerified() bool
+
+	// SetRawAttributes replaces the row the value holds. A row read by the
+	// sign-in provider becomes an account through it.
+	SetRawAttributes(attributes map[string]any, sync bool) error
+	// ForceFill merges columns into the value. A new account is filled through
+	// it, and so is an account a conditional write just changed, so the value
+	// handed back is the row that was stored.
+	ForceFill(attributes map[string]any) error
+	// Save inserts a new account under the Grant it is given.
+	Save(ctx context.Context, g auth.Grant) (bool, error)
+}
+
+// The columns this package writes on the users table, by name.
+//
+// They are the columns of the users table every application starts with: a
+// conditional update names the column it compares, and a column renamed by an
+// application is a column these statements would silently never match.
+const (
+	columnID         = "id"
+	columnTenant     = "tenant_id"
+	columnName       = "name"
+	columnEmail      = "email"
+	columnPassword   = "password"
+	columnVerifiedAt = "verified_at"
+)
+
+// NormalizeEmail is the one normalization every read and write of an address
+// goes through: trimmed and lowercased. An address compared without it is an
+// address registered twice.
+func NormalizeEmail(email string) string { return strings.ToLower(strings.TrimSpace(email)) }
+
+// Fingerprint identifies a complete password hash without exposing it: the
+// unpadded base64url SHA-256 of the hash.
+//
+// A reset link and a pending sign-in carry it, so either is spent by the next
+// password change: a new hash has a new fingerprint. It is a function of the
+// hash and not a method the application writes, because a link minted by one
+// spelling and checked by another is a link that never verifies.
+func Fingerprint(passwordHash string) string {
+	sum := sha256.Sum256([]byte(passwordHash))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+// Registration is what a person typed to create an account.
+//
+// Extra carries what the application's form adds beyond the three fields --
+// a document number, a phone -- for Hooks.Prepare to read; this package never
+// looks at it.
+type Registration struct {
+	Name     string
+	Email    string
+	Password string
+	Extra    any
+}
+
+// Draft is an account an operator, a seeder or an import creates, with no
+// person at a form behind it.
+//
+// Exactly one of Password and PasswordHash is set. PasswordHash is a stored
+// hash carried over from another system; it is accepted only when the hashing
+// package can read it, and it is rehashed on the first sign-in. Verified
+// creates the account with its address already confirmed. Fill, when set,
+// writes the application's own columns -- roles, a document -- before the row
+// is saved.
+type Draft[U Account] struct {
+	Name         string
+	Email        string
+	Password     string
+	PasswordHash string
+	Verified     bool
+	Fill         func(U) error
+}
+
+// Hooks are the points where an application adds its own rule to what this
+// package does. Every one is optional.
+type Hooks[U Account] struct {
+	// Admit decides, after the password proved right, whether the account may
+	// sign in -- a suspension, a closed account. A refusal is answered as
+	// ErrAccountRefused, which matches auth.ErrInvalidCredentials, so the form
+	// says what it says for a wrong password and a suspension is not a
+	// password oracle. ResetPassword refuses the same accounts as a spent link.
+	Admit func(ctx context.Context, user U) error
+
+	// AdmitClears says a sign-in Admit refused still clears the throttle, as
+	// a right password does. Left false, the refusal counts as a failure.
+	AdmitClears bool
+
+	// Prepare runs first in Register, with the registration and the unsaved
+	// account. It may refuse, change the registration -- give it a name when
+	// the form has none -- and fill the application's own columns.
+	Prepare func(ctx context.Context, registration *Registration, user U) error
+
+	// AfterCreate runs in the transaction that inserted the account, after the
+	// insert and before its event is stored, with the Grant the insert was
+	// made under. An error rolls back the account and the event with it.
+	AfterCreate func(ctx context.Context, grant auth.Grant, user U) error
+
+	// CloseFields names the application's own columns Close writes beside the
+	// ones it clears itself, and the values they get.
+	CloseFields func(user U) map[string]any
+
+	// Payload replaces UserEvent as the payload of the events Users stores.
+	Payload func(user U) any
+}
+
+// Config is what NewUsers is built from.
+type Config[U Account] struct {
+	// DB is the database the users table and the outbox live in.
+	DB *database.DB
+	// Outbox stores the account's events. Nil is an outbox over DB.
+	Outbox *events.Outbox
+	// Query opens a query on the users table: the application's
+	// models.Users(db).Base(). It is a function because a builder holds the
+	// clauses added to it, and every statement here starts from none.
+	Query func() *model.Builder
+	// Policy is the application's user policy. Every operation a signed-in
+	// subject makes on an account is authorized by it.
+	Policy auth.Policy[U]
+	// Throttle counts wrong passwords. Nil is auth.NewMemoryThrottle(), which
+	// is right for one process; behind more than one, pass the shared one.
+	Throttle auth.SignInThrottle
+	// Hooks are the application's own rules.
+	Hooks Hooks[U]
+}

@@ -1,0 +1,16 @@
+{
+  "app_key": "0123456789abcdef0123456789abcdef",
+  "password": "a-long-enough-password",
+  "password_fingerprint": "W8lwShXbNG0zKM1WeXqMTsKZTYhTSaWrzFgubB3TGaU",
+  "password_hash": "$argon2id$v=19$m=65536,t=3,p=4$IN5vvy+79npqQVab9UBy+g$fxwnr2RTGWJYOjWUWhhFjcOUlcDlxN5rgbuikImcdxw",
+  "recovery_code": "ABCDE-FGHJK",
+  "recovery_code_hash": "$argon2id$v=19$m=65536,t=3,p=4$CnOuqPoUdWLnHOwSCtXi4Q$EpXpIuZHEWChImkN7M30Rs3/9VZYNQn2Tn5X1gmr85o",
+  "totp_secret_base32": "MFRWG33VNZ2C2ZTJPB2HK4TFFV2G65DQEE",
+  "totp_secret_ciphertext": "eyJpdiI6Imp0dU9yV09wZGhjV1pRcUYiLCJ2YWx1ZSI6IkFUVWFYV2J4MTZ4QWxUNUZ3MnRJdVkrZlJtdzk0V3IrTFUzdGFJOHR5VWlFQWc9PSIsIm1hYyI6IiIsInRhZyI6IlpKbXV0VzYwRVFLNkdScVBhaU9hZGc9PSJ9",
+  "written_at": "2026-10-15T14:01:42Z",
+  "written_by": "the arandu skeleton at 893aca8 (its services unchanged since 24364db), on hesape v0.54.1",
+  "fingerprints": {
+    "$argon2id$v=19$m=65536,t=3,p=4$fixture0$key": "eJoFaiS03g2vrQDqrluMgy4vFVHPSeDK-rE4wKyLxpA",
+    "$argon2id$v=19$m=65536,t=3,p=4$fixture3$key": "hrAhQwoG96znA4_4TOCqti5UuwdFb7aJVBkg71hcNLg"
+  }
+}
