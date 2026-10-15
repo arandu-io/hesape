@@ -27,6 +27,90 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.59.0 — webhooks are native, and Manager's value types are renamed
+
+The webhook package now holds the Module that sends and receives webhooks,
+and its stored entities are `Endpoint` and `Delivery`. Those two names were
+Manager's value types; they are renamed, and nothing else about Manager's
+API changes:
+
+| v0.58.0 | v0.59.0 |
+| --- | --- |
+| `webhook.Endpoint` (`ID`, `URL`, `Headers map[string]string`, `SecretRef`) | `webhook.ManagerEndpoint` |
+| `webhook.Delivery` (the row of `webhook_deliveries`) | `webhook.ManagerDelivery` |
+
+Every signature that named them follows, which is what `apidiff` reports:
+
+- `webhook.(*Manager).Dispatch` takes `[]ManagerEndpoint`.
+- `webhook.Store.Create` and `webhook.Store.Find`, and so
+  `webhook.(*DatabaseStore).Create` and `webhook.(*DatabaseStore).Find`, take
+  and return `ManagerDelivery`. A Store an application wrote renames the type
+  in those two methods.
+- `webhook.Claim.Delivery` is a `ManagerDelivery`.
+- `webhook.EndpointResolver.Endpoints`, `webhook.EndpointResolverFunc` and
+  `webhook.EndpointResolverFunc.Endpoints` return `[]ManagerEndpoint`.
+- `webhook.Delivery.Attempts`, `webhook.Delivery.Body`,
+  `webhook.Delivery.DeliveredAt`, `webhook.Delivery.Headers`,
+  `webhook.Delivery.LastError`, `webhook.Delivery.LeaseUntil`,
+  `webhook.Delivery.Permanent`, `webhook.Delivery.ResponseStatus` and
+  `webhook.Delivery.Status` changed type, `webhook.Endpoint.Headers` changed
+  type and `webhook.Endpoint.SecretRef` was removed, because `Delivery` and `Endpoint` are now the Module's
+  entities. Code that built one of the old values writes `ManagerDelivery{...}`
+  or `ManagerEndpoint{...}` with the same fields.
+
+### Manager is deprecated, and its attempt is the engine's
+
+`Manager`, `ManagerOptions`, `NewManager`, `NewManagerWithStore`, `Store`,
+`DatabaseStore`, `NewDatabaseStore`, `Claim`, `Result`, `Failure`, `Status`
+and its values, `ManagerEndpoint`, `ManagerDelivery`, `Publisher`,
+`NewPublisher`, `EndpointResolver` and `EndpointResolverFunc` are deprecated
+in favour of `New` and the Module's `Send`, `Outgoing` and `Publisher`.
+`ActionDispatch` is `DeliveryDispatch` and `QueueName` is `DefaultQueue`, with
+the same values. None of them is removed in this release, and the facade is
+removed only once its last consumer has moved its deliveries to the Module.
+`CreateDeliveriesTable` is not deprecated and is not scheduled for removal
+while an application still has rows in `webhook_deliveries`; the Module's
+`Migrations` never declares it.
+
+`Manager.Dispatch` writes exactly what it wrote, and its job keeps the name
+`webhook.deliver`, the `{"deliveryId"}` payload and the queue's five tries
+5 s, 30 s, 2 min and 10 min apart. The headers on the wire and the bytes of
+the signature are the same. What changes is the attempt, which is now the
+Module's engine:
+
+- With no `ManagerOptions.HTTPClient`, an address in the shared address
+  space 100.64.0.0/10 is refused like a private one, as `unsafe_destination`,
+  and the transport no longer uses a proxy from the environment.
+- An answer is read up to 1 MiB and decided by its status, so a 2xx with a
+  longer body is delivered instead of failing `response_too_large`. An
+  answer announcing a length above the client's own limit still fails
+  `response_too_large`.
+- A canceled attempt is still `request_canceled`, retried by the queue. A
+  body that cannot be read after the status arrived now keeps that status in
+  `response_status`.
+
+### The error text of ErrPayloadTooLarge
+
+`ErrPayloadTooLarge` is one variable for Manager and the Module, and its text
+is now `webhook: the payload is too large`. Compare it with `errors.Is`, which
+is unchanged.
+
+### Moving from the separate webhook module
+
+An application that used the separate webhook module imports
+`github.com/arandu-io/hesape/webhook` instead and changes three things. `New`
+takes a guard middleware instead of the session store:
+`webhook.New(cfg, db, middleware.RequireAuth(sessions))`, and nil still
+mounts no management route. The framework router registers the Module's
+`HTTPActions`, each `Action` with its `Middleware` under its `Name`, instead
+of calling `Routes`, which now takes a `*routing.Router`. And the types the
+module re-declared from the framework are the collection's: `auth.Grant`,
+`auth.Subject` and `database.DB`. The migration names are the ones that
+module published, so a database that ran them sees nothing pending. A
+canceled attempt now records `request_canceled` and an answer above the
+client's limit `response_too_large`, where that module recorded
+`transport_failure`.
+
 ## v0.58.0 — the page's impersonation takes laravel-impersonate's names
 
 The four fields and the interface v0.57.0 added are renamed to the vocabulary

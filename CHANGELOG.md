@@ -1,5 +1,39 @@
 # Release Notes
 
+## [0.59.0] - 2026-10-15
+
+### Added
+
+- `webhook.Module`, built by `webhook.New(cfg, db, guard)`: webhooks both
+  ways in the collection. Endpoints a tenant subscribes, with a sealed secret,
+  sealed extra headers, a dialect (`DialectArandu`, `DialectHMAC`,
+  `DialectStandardWebhooks`) and an optional `Policy`; durable deliveries and
+  their attempts, sent by `Publisher`, `Send` and `Outgoing`; redelivery, test
+  calls, secret rotation, import, and endpoints turned off after repeated
+  failures; receivers with static or resolved secrets, the `HMAC`, `Arandu`,
+  `StandardWebhooks` and `HeaderSecret` validators, profiles, responders, and
+  queued or synchronous processing of the stored `Call`.
+- `HTTPActions`, the Module's routes as actions for any router, and `Routes`
+  on `routing.Router`; `EndpointService`, `CallService`, the policies and
+  `Actions`; `RegisterJobHandlers`, `Migrations` (seven reversible
+  migrations) and `Schedule`.
+
+### Changed
+
+- One delivery engine. `Manager` sends through it, in the Arandu dialect,
+  with the job, payload and table it always had; its attempts now refuse the
+  shared address space 100.64.0.0/10 and read an answer up to 1 MiB.
+- `Endpoint` and `Delivery` are the Module's entities; Manager's value types
+  are `ManagerEndpoint` and `ManagerDelivery`. See UPGRADE.md.
+
+### Deprecated
+
+- `Manager`, `ManagerOptions`, `NewManager`, `NewManagerWithStore`, `Store`,
+  `DatabaseStore`, `NewDatabaseStore`, `Claim`, `Result`, `Failure`, `Status`
+  and its values, `ManagerEndpoint`, `ManagerDelivery`, `Publisher`,
+  `NewPublisher`, `EndpointResolver`, `EndpointResolverFunc`, `ActionDispatch`
+  (use `DeliveryDispatch`) and `QueueName` (use `DefaultQueue`).
+
 ## [v0.58.0](https://github.com/arandu-io/hesape/compare/v0.57.0...v0.58.0) - 2026-10-13
 
 **Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.57.0...v0.58.0
