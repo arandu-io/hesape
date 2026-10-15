@@ -50,7 +50,8 @@ type EndpointRequest struct {
 	// header alone, without the Arandu signature, timestamp and delivery id.
 	WithoutAranduHeaders bool
 	// Headers is "Name: value" per line. On an update, empty keeps the stored
-	// headers, which are never shown back.
+	// headers, which are never shown back, unless URL changes: a new address
+	// drops them, and the update sends them again to keep them.
 	Headers string
 	Active  bool
 	// Policy is the endpoint's own delivery policy. Nil follows Server.Policy
@@ -338,7 +339,9 @@ func (s *EndpointService) effective(asked *Policy, record *Endpoint) Policy {
 }
 
 // Update changes an endpoint. The secret stays, and empty headers keep the
-// stored ones. Turning it on here is turning it on with Enable: the count
+// stored ones while the URL stays the same: a new URL drops them unless the
+// same update supplies headers, so changing where the calls go never sends
+// the values someone else stored to an address they did not choose. Turning it on here is turning it on with Enable: the count
 // of failures is cleared, and the deliveries it kept waiting go. A change to DialectStandardWebhooks needs a secret that
 // dialect can sign with: rotate first when the endpoint's is not one.
 func (s *EndpointService) Update(ctx context.Context, actor auth.Subject, id string, in EndpointRequest) (*Endpoint, error) {
@@ -372,7 +375,7 @@ func (s *EndpointService) Update(ctx context.Context, actor auth.Subject, id str
 		return nil, errs
 	}
 	before, was := endpointFacts(record), bool(record.Active)
-	if err := s.apply(record, valid, strings.TrimSpace(in.Headers) == ""); err != nil {
+	if err := s.apply(record, valid, keepsHeaders(in, valid, record)); err != nil {
 		return nil, err
 	}
 	turnedOn := !was && bool(record.Active)
@@ -1023,4 +1026,12 @@ func newSecret() (string, error) {
 		return "", err
 	}
 	return StandardSecretPrefix + base64.StdEncoding.EncodeToString(raw), nil
+}
+
+// keepsHeaders reports whether an update keeps the endpoint's stored headers:
+// it supplies none, and the address is the one they were stored for. The
+// headers are never shown back, so whoever changes the address cannot have
+// chosen to send them there.
+func keepsHeaders(in EndpointRequest, valid endpointInput, record *Endpoint) bool {
+	return strings.TrimSpace(in.Headers) == "" && valid.url == record.URL
 }

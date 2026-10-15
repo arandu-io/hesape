@@ -55,3 +55,23 @@ func TestTheFanoutStopsAtMaxFanoutSubscribedEndpoints(t *testing.T) {
 		t.Fatalf("subscribed = %d endpoints, %v, want %d", len(got), err, maxFanout)
 	}
 }
+
+// TestAnUpdateToANewAddressDropsTheStoredHeaders: the stored headers are
+// sealed and never shown back, and an update with no headers kept them
+// whatever its URL was, so a subject allowed to update an endpoint but not to
+// reveal its secrets could point it at a server of their own and read the
+// header values off the next delivery.
+func TestAnUpdateToANewAddressDropsTheStoredHeaders(t *testing.T) {
+	record := &Endpoint{URL: "https://partner.example/hooks"}
+	same := endpointInput{url: "https://partner.example/hooks"}
+	moved := endpointInput{url: "https://attacker.example/hooks"}
+	if !keepsHeaders(EndpointRequest{}, same, record) {
+		t.Error("an update to the same address with no headers dropped the stored ones")
+	}
+	if keepsHeaders(EndpointRequest{}, moved, record) {
+		t.Error("an update to a new address with no headers kept the stored ones")
+	}
+	if keepsHeaders(EndpointRequest{Headers: "Authorization: Bearer new"}, moved, record) {
+		t.Error("an update that supplied headers kept the stored ones instead")
+	}
+}
