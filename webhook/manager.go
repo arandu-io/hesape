@@ -31,8 +31,6 @@ const (
 	deliveryHeader       = "X-Arandu-Delivery-ID"
 )
 
-var errRedirectLimit = errors.New("webhook: redirect limit exceeded")
-
 type deliveryJob struct {
 	DeliveryID string `json:"deliveryId"`
 }
@@ -417,17 +415,6 @@ func classify(cause error, status int, retryHeader string) Failure {
 		failure.RetryAfter = parseRetryAfter(retryHeader, time.Now().UTC())
 	}
 	return failure
-}
-
-func parseRetryAfter(value string, now time.Time) time.Duration {
-	value = strings.TrimSpace(value)
-	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil && seconds > 0 {
-		return time.Duration(seconds) * time.Second
-	}
-	if at, err := http.ParseTime(value); err == nil && at.After(now) {
-		return at.Sub(now)
-	}
-	return 0
 }
 
 func (m *Manager) prune(ctx context.Context, g auth.Grant) {

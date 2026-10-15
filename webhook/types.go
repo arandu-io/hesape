@@ -20,8 +20,6 @@ const (
 	QueueName = "webhooks"
 	// DeliveryJobName is the stable worker handler name.
 	DeliveryJobName = "webhook.deliver"
-	// DefaultRetention is how long delivery audit records remain.
-	DefaultRetention = 30 * 24 * time.Hour
 	// MaxURLLength bounds a persisted endpoint URL.
 	MaxURLLength = 2048
 	// MaxPayloadBytes bounds an immutable request snapshot.
@@ -31,8 +29,6 @@ const (
 var (
 	// ErrInvalidURL means an endpoint URL is not an absolute HTTP(S) URL.
 	ErrInvalidURL = errors.New("webhook: invalid endpoint URL")
-	// ErrPayloadTooLarge means an event exceeds MaxPayloadBytes.
-	ErrPayloadTooLarge = errors.New("webhook: event payload is too large")
 	// ErrSecretRequired means an endpoint has no signing secret.
 	ErrSecretRequired = errors.New("webhook: a signing secret is required")
 	// ErrSecretTooShort means a signing secret contains fewer than 32 bytes.
