@@ -444,3 +444,52 @@ func TestASecretIsRecognisedHoweverItsNameIsSpelled(t *testing.T) {
 		}
 	}
 }
+
+// TestAFieldTheApplicationWithholdsNeverReachesTheCookie: IsSecretField keeps
+// the credentials out, but a sign-up form also carries a document number and
+// a phone, and the flash cookie is signed, not encrypted -- so whatever was
+// typed into them travelled to the browser in a value anyone holding the
+// cookie can read. Withhold names those fields; the person retypes them, and
+// the messages still come back.
+func TestAFieldTheApplicationWithholdsNeverReachesTheCookie(t *testing.T) {
+	f := testFlash()
+	f.Withhold("cpf")
+	f.Withhold("mobile")
+
+	old := url.Values{
+		"cpf":            {"leak-cpf"},
+		"user[CPF]":      {"leak-user-cpf"},
+		"billing_mobile": {"leak-billing-mobile"},
+		"mobilePhone":    {"leak-mobile-phone"},
+		"name":           {"Ana"},
+		"automobile":     {"Fusca"},
+	}
+	rec := httptest.NewRecorder()
+	f.Write(rec, map[string][]string{"cpf": {"Enter a valid CPF."}}, old)
+	cookie := written(rec)
+	if cookie == nil {
+		t.Fatal("Write set no cookie")
+	}
+	if payload := flashPayload(t, cookie); strings.Contains(payload, "leak") {
+		t.Fatalf("the cookie carries a withheld field: %s", payload)
+	}
+	errs, back, ok := f.Take(httptest.NewRecorder(), pageRead(cookie))
+	if !ok {
+		t.Fatal("nothing came back")
+	}
+	for _, field := range []string{"cpf", "user[CPF]", "billing_mobile", "mobilePhone"} {
+		if got := back.Get(field); got != "" {
+			t.Errorf("withheld %s came back as %q", field, got)
+		}
+	}
+	if back.Get("name") != "Ana" || back.Get("automobile") != "Fusca" {
+		t.Errorf("a field nobody withheld did not come back: %v", back)
+	}
+	if got := errs["cpf"]; len(got) != 1 {
+		t.Errorf("the message on a withheld field is %v, want it back", got)
+	}
+
+	if session.IsSecretField("cpf") {
+		t.Fatal("IsSecretField names cpf: withholding is the application's, not the collection's")
+	}
+}

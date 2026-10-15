@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -199,6 +200,73 @@ var secretEndings = []string{
 type Flash struct {
 	signer *encryption.Signer
 	secure bool
+	// withheld is the fields the application named with Withhold, each cut
+	// into its words. It is replaced whole, never changed in place, so a
+	// request reading it while Withhold runs reads one list or the other.
+	withheld atomic.Pointer[[][]string]
+}
+
+// Withhold names fields of the application's own forms whose value is never
+// written to the flash, beside the ones IsSecretField already keeps out: a
+// document number, a phone, anything the application decides is personal data
+// that should not travel in a cookie that is signed but not encrypted. The
+// person retypes the field after a refusal; its messages still come back.
+//
+// A name is read as IsSecretField reads one -- case-insensitively, cut into
+// words at separators and at a change of case -- and withholds every field
+// whose words contain its words in a run: Withhold("mobile") withholds
+// mobile, Mobile, billing_mobile, mobilePhone and user[mobile]. Calls add to
+// the list. Call it while the application is wired, before it serves; it is
+// safe to call at any time, and a request already writing its flash may miss
+// the names one call adds.
+func (f *Flash) Withhold(fields ...string) {
+	for {
+		current := f.withheld.Load()
+		var next [][]string
+		if current != nil {
+			next = append(next, (*current)...)
+		}
+		for _, field := range fields {
+			if words := fieldWords(field); len(words) > 0 {
+				next = append(next, words)
+			}
+		}
+		if f.withheld.CompareAndSwap(current, &next) {
+			return
+		}
+	}
+}
+
+// withholds reports whether a field is one Withhold named.
+func (f *Flash) withholds(field string) bool {
+	list := f.withheld.Load()
+	if list == nil {
+		return false
+	}
+	words := fieldWords(field)
+	for _, named := range *list {
+		if containsRun(words, named) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsRun reports whether run appears in words, in order and adjacent.
+func containsRun(words, run []string) bool {
+	for i := 0; i+len(run) <= len(words); i++ {
+		match := true
+		for j := range run {
+			if words[i+j] != run[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }
 
 // NewFlash returns a Flash over the application key.
@@ -234,7 +302,7 @@ func NewFlash(appKey []byte, secure bool) *Flash {
 // It writes nothing when there is nothing to write, so no caller needs the
 // branch.
 func (f *Flash) Write(w http.ResponseWriter, errs map[string][]string, old url.Values) {
-	kept := redactFlash(old)
+	kept := redactFlash(old, f.withholds)
 	if len(errs) == 0 && len(kept) == 0 {
 		return
 	}
@@ -293,7 +361,7 @@ func (f *Flash) Take(w http.ResponseWriter, r *http.Request) (map[string][]strin
 		return nil, nil, false
 	}
 
-	errs, old := decodeFlash(raw)
+	errs, old := decodeFlash(raw, f.withholds)
 	if len(errs) == 0 && len(old) == 0 {
 		return nil, nil, false
 	}
@@ -333,14 +401,15 @@ func (f *Flash) clearFlash(w http.ResponseWriter) {
 	})
 }
 
-// redactFlash returns the input with every secret's value removed.
-func redactFlash(old url.Values) url.Values {
+// redactFlash returns the input with every secret's value removed, and every
+// field withheld reports.
+func redactFlash(old url.Values, withheld func(string) bool) url.Values {
 	if len(old) == 0 {
 		return nil
 	}
 	kept := make(url.Values, len(old))
 	for field, values := range old {
-		if IsSecretField(field) {
+		if IsSecretField(field) || withheld(field) {
 			continue
 		}
 		kept[field] = values
@@ -531,7 +600,7 @@ func (f *Flash) encode(errs map[string][]string, old url.Values) string {
 // A key with neither prefix is dropped rather than guessed at. The only way one
 // arrives is a payload this version did not write, and inventing a half for it
 // would put an unnamed value on a page.
-func decodeFlash(raw url.Values) (map[string][]string, url.Values) {
+func decodeFlash(raw url.Values, withheld func(string) bool) (map[string][]string, url.Values) {
 	var errs map[string][]string
 	var old url.Values
 
@@ -554,7 +623,7 @@ func decodeFlash(raw url.Values) (map[string][]string, url.Values) {
 	// in, and this side costs nothing: a cookie minted by an older binary, or by
 	// a half of the framework that grows a second Write, cannot put a password
 	// back into a form through here.
-	return errs, redactFlash(old)
+	return errs, redactFlash(old, withheld)
 }
 
 // longestFlashField is the field whose values cost the most bytes, which is what
