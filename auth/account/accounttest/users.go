@@ -147,6 +147,8 @@ func registrationRefusesInput(t *testing.T, e *env) {
 		"an empty password":  {Name: "Ana", Email: "ana@example.test"},
 		"nothing filled in":  {},
 		"a password of 11":   {Name: "Ana", Email: "ana@example.test", Password: "elevenchars"},
+		"7 accented chars":   {Name: "Ana", Email: "ana@example.test", Password: "ççççççç"},
+		"a password of 129":  {Name: "Ana", Email: "ana@example.test", Password: strings.Repeat("a", 129)},
 		"spaces for a name":  {Name: "\t", Email: "ana@example.test", Password: password},
 		"spaces for address": {Name: "Ana", Email: "\n", Password: password},
 	} {
@@ -340,6 +342,14 @@ func changePassword(t *testing.T, e *env) {
 	var refused validation.Errors
 	if _, err := users.ChangePassword(e.ctx, subject(registered), password, "short", "127.0.0.1"); !errors.As(err, &refused) || refused.First("password") == "" {
 		t.Fatalf("a short new password answered %v, want a validation error on password", err)
+	}
+	// Seven characters in fourteen bytes is short, as the hashing counts it,
+	// and is refused before the current password is checked.
+	if _, err := users.ChangePassword(e.ctx, subject(registered), password, "ççççççç", "127.0.0.1"); !errors.As(err, &refused) || refused.First("password") == "" {
+		t.Fatalf("a short new password of accented characters answered %v, want a validation error on password", err)
+	}
+	if _, err := users.ChangePassword(e.ctx, subject(registered), password, strings.Repeat("a", 129), "127.0.0.1"); !errors.As(err, &refused) || refused.First("password") == "" {
+		t.Fatalf("a new password over the longest answered %v, want a validation error on password", err)
 	}
 	if _, err := users.ChangePassword(e.ctx, subject(registered), "not-the-password-at-all", "a-brand-new-password", "127.0.0.1"); !errors.Is(err, auth.ErrInvalidCredentials) {
 		t.Fatalf("a wrong current password answered %v, want auth.ErrInvalidCredentials", err)

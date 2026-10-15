@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -178,10 +179,21 @@ func TestRefusalsHappenBeforeTheFirstStatement(t *testing.T) {
 			_, err := users.Provision(ctx, "tenant-a", account.Draft{Email: "a@b.c"})
 			return err
 		},
-		"renaming nobody":            func() error { _, err := users.Rename(ctx, nobody, "Mallory"); return err },
-		"renaming to nothing":        func() error { _, err := users.Rename(ctx, ana, " "); return err },
-		"a guest renaming":           func() error { _, err := users.Rename(ctx, guest, "Mallory"); return err },
-		"a short new password":       func() error { _, err := users.ChangePassword(ctx, ana, "x", "short", "ip"); return err },
+		"renaming nobody":      func() error { _, err := users.Rename(ctx, nobody, "Mallory"); return err },
+		"renaming to nothing":  func() error { _, err := users.Rename(ctx, ana, " "); return err },
+		"a guest renaming":     func() error { _, err := users.Rename(ctx, guest, "Mallory"); return err },
+		"a short new password": func() error { _, err := users.ChangePassword(ctx, ana, "x", "short", "ip"); return err },
+		// Seven characters and fourteen bytes: counted in bytes it passed,
+		// and the current password was checked and the throttle cleared
+		// before hashing refused it.
+		"a short new password of accented characters": func() error {
+			_, err := users.ChangePassword(ctx, ana, "x", "ççççççç", "ip")
+			return err
+		},
+		"a new password over the longest": func() error {
+			_, err := users.ChangePassword(ctx, ana, "x", strings.Repeat("a", 129), "ip")
+			return err
+		},
 		"confirming for nobody":      func() error { return users.ConfirmPassword(ctx, nobody, "x", "ip") },
 		"closing for nobody":         func() error { return users.Close(ctx, nobody, "x", "ip") },
 		"enrolling nobody":           func() error { _, err := factors.Begin(ctx, nobody, "Arandu"); return err },

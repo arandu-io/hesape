@@ -129,7 +129,8 @@ func (s *Users) VerifyCredentials(ctx context.Context, tenant, email, password, 
 //
 // Hooks.Prepare runs first and may refuse, complete the registration or fill
 // the application's own columns. A name, an address and a password of
-// hashing.MinPasswordLen characters are required after it. The insert,
+// hashing.MinPasswordLen to hashing.MaxPasswordLen characters are required
+// after it, and checked before anything is authorized or hashed. The insert,
 // Hooks.AfterCreate, Hooks.AfterRegister and the event share one transaction -- the caller's, when
 // ctx already carries one -- so an account is never stored without its event.
 func (s *Users) Register(ctx context.Context, tenant string, registration Registration) (Account, error) {
@@ -143,7 +144,7 @@ func (s *Users) Register(ctx context.Context, tenant string, registration Regist
 		}
 	}
 	name, email := strings.TrimSpace(registration.Name), NormalizeEmail(registration.Email)
-	if name == "" || email == "" || len(registration.Password) < hashing.MinPasswordLen {
+	if name == "" || email == "" || !passwordFits(registration.Password) {
 		return nil, fmt.Errorf("user: invalid registration input")
 	}
 	if err := candidate.ForceFill(map[string]any{columnName: name, columnEmail: email}); err != nil {
@@ -363,10 +364,14 @@ func (s *Users) ConfirmPassword(ctx context.Context, subject auth.Subject, passw
 // one is confirmed, under the Grant the user policy issues for ActionUserUpdate,
 // and stores PasswordChanged.
 //
-// A new password shorter than hashing.MinPasswordLen is refused as a
-// validation error on the password field before anything is checked.
+// A new password outside hashing.MinPasswordLen to hashing.MaxPasswordLen
+// characters is refused as a validation error on the password field before
+// anything is checked or counted.
 func (s *Users) ChangePassword(ctx context.Context, subject auth.Subject, current, next, client string) (Account, error) {
-	if len(next) < hashing.MinPasswordLen {
+	if !passwordFits(next) {
+		if utf8.RuneCountInString(next) > hashing.MaxPasswordLen {
+			return nil, validation.Errors{columnPassword: {"the new password is too long"}}
+		}
 		return nil, validation.Errors{columnPassword: {"the new password is too short"}}
 	}
 	grant, err := s.authorizeSelf(ctx, subject, ActionUserUpdate)
@@ -668,3 +673,12 @@ func (s *Users) store(ctx context.Context, grant auth.Grant, name, id string, pa
 }
 
 var _ FactorUsers = (*Users)(nil)
+
+// passwordFits reports whether hashing.Make takes a password: its length
+// counted in characters, as Make counts it, and not in bytes. Counted in bytes,
+// a password of a few accented characters passed the check here and was then
+// refused by Make, after the checks before it had already run.
+func passwordFits(password string) bool {
+	n := utf8.RuneCountInString(password)
+	return n >= hashing.MinPasswordLen && n <= hashing.MaxPasswordLen
+}
