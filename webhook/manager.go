@@ -44,6 +44,8 @@ type deliveryQueue interface {
 // ManagerOptions configures authorization, routing, transport and retention.
 // Empty Action, QueueName, DeliveryJobName and UserAgent values use the
 // package defaults.
+//
+// Deprecated: configure the Module with Config, and its deliveries with Policy.
 type ManagerOptions struct {
 	Timeout   time.Duration
 	Retention time.Duration
@@ -62,6 +64,10 @@ type ManagerOptions struct {
 }
 
 // Manager owns durable dispatch and delivery execution.
+//
+// Deprecated: use New, and send through Module.Send, Module.Outgoing or
+// Module.Publisher. Manager remains for the applications whose deliveries are
+// still in the webhook_deliveries table.
 type Manager struct {
 	store     Store
 	queue     deliveryQueue
@@ -79,6 +85,8 @@ type Manager struct {
 
 // NewManager creates a manager whose store and DatabaseQueue share db, making
 // each delivery snapshot and its job one transaction.
+//
+// Deprecated: use New.
 func NewManager(db *database.DB, secrets SecretProvider, options ManagerOptions) (*Manager, error) {
 	if db == nil {
 		return nil, errors.New("webhook: NewManager needs a database handle")
@@ -95,6 +103,8 @@ func NewManager(db *database.DB, secrets SecretProvider, options ManagerOptions)
 // use db when dispatch and queue persistence need to commit atomically. Store
 // calls receive Grants for the resolved ManagerOptions.Action, whose default is
 // ActionDispatch.
+//
+// Deprecated: use New.
 func NewManagerWithStore(db *database.DB, store Store, secrets SecretProvider, options ManagerOptions) (*Manager, error) {
 	if db == nil {
 		return nil, errors.New("webhook: NewManagerWithStore needs a database handle")
@@ -238,7 +248,7 @@ func (m *Manager) RegisterJobHandlers(worker *queue.Worker) error {
 }
 
 // Dispatch atomically records and queues one immutable delivery per endpoint.
-func (m *Manager) Dispatch(ctx context.Context, g auth.Grant, event Event, endpoints []Endpoint) error {
+func (m *Manager) Dispatch(ctx context.Context, g auth.Grant, event Event, endpoints []ManagerEndpoint) error {
 	if _, err := tenantForAction(g, m.action); err != nil {
 		return err
 	}
@@ -252,7 +262,7 @@ func (m *Manager) Dispatch(ctx context.Context, g auth.Grant, event Event, endpo
 		event.OccurredAt = time.Now().UTC()
 	}
 	seen := map[string]bool{}
-	prepared := make([]Endpoint, 0, len(endpoints))
+	prepared := make([]ManagerEndpoint, 0, len(endpoints))
 	for _, endpoint := range endpoints {
 		if strings.TrimSpace(endpoint.ID) == "" {
 			return errors.New("webhook: endpoint id is required")
@@ -275,7 +285,7 @@ func (m *Manager) Dispatch(ctx context.Context, g auth.Grant, event Event, endpo
 				return err
 			}
 			now := time.Now().UTC()
-			item := Delivery{ID: id, EventID: event.ID, EventName: event.Name, EndpointID: endpoint.ID,
+			item := ManagerDelivery{ID: id, EventID: event.ID, EventName: event.Name, EndpointID: endpoint.ID,
 				URL: endpoint.URL, Headers: cloneHeaders(endpoint.Headers), SecretRef: endpoint.SecretRef,
 				Body: append([]byte(nil), event.Payload...), Status: StatusPending, CreatedAt: now, UpdatedAt: now}
 			created, err := m.store.Create(txCtx, g, item)

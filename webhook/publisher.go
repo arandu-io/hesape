@@ -9,25 +9,34 @@ import (
 )
 
 // EndpointResolver selects the endpoints for one stored event.
+//
+// Deprecated: Module.Publisher sends each event to the stored endpoints that
+// subscribe to it.
 type EndpointResolver interface {
-	Endpoints(context.Context, auth.Grant, events.Stored) ([]Endpoint, error)
+	Endpoints(context.Context, auth.Grant, events.Stored) ([]ManagerEndpoint, error)
 }
 
 // EndpointResolverFunc adapts a function to EndpointResolver.
-type EndpointResolverFunc func(context.Context, auth.Grant, events.Stored) ([]Endpoint, error)
+//
+// Deprecated: use Module.Publisher.
+type EndpointResolverFunc func(context.Context, auth.Grant, events.Stored) ([]ManagerEndpoint, error)
 
 // Endpoints calls f.
-func (f EndpointResolverFunc) Endpoints(ctx context.Context, g auth.Grant, event events.Stored) ([]Endpoint, error) {
+func (f EndpointResolverFunc) Endpoints(ctx context.Context, g auth.Grant, event events.Stored) ([]ManagerEndpoint, error) {
 	return f(ctx, g, event)
 }
 
 // Publisher sends committed outbox events through Manager.Dispatch.
+//
+// Deprecated: use Module.Publisher.
 type Publisher struct {
 	manager  *Manager
 	resolver EndpointResolver
 }
 
 // NewPublisher returns the outbox publisher over manager and resolver.
+//
+// Deprecated: use Module.Publisher.
 func NewPublisher(manager *Manager, resolver EndpointResolver) *Publisher {
 	return &Publisher{manager: manager, resolver: resolver}
 }

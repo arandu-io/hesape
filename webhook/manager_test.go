@@ -25,7 +25,7 @@ const testSecret = "01234567890123456789012345678901"
 type memoryStore struct {
 	mu         sync.Mutex
 	action     auth.Action
-	deliveries map[string]Delivery
+	deliveries map[string]ManagerDelivery
 	unique     map[string]string
 	claims     map[string]Claim
 	inTx       bool
@@ -39,7 +39,7 @@ func newMemoryStore() *memoryStore {
 func newMemoryStoreForAction(action auth.Action) *memoryStore {
 	return &memoryStore{
 		action:     action,
-		deliveries: map[string]Delivery{},
+		deliveries: map[string]ManagerDelivery{},
 		unique:     map[string]string{},
 		claims:     map[string]Claim{},
 	}
@@ -66,7 +66,7 @@ func (s *memoryStore) Transaction(ctx context.Context, fn func(context.Context) 
 	return err
 }
 
-func (s *memoryStore) Create(_ context.Context, g auth.Grant, delivery Delivery) (bool, error) {
+func (s *memoryStore) Create(_ context.Context, g auth.Grant, delivery ManagerDelivery) (bool, error) {
 	tenant, err := s.tenantFor(g)
 	if err != nil {
 		return false, err
@@ -85,16 +85,16 @@ func (s *memoryStore) Create(_ context.Context, g auth.Grant, delivery Delivery)
 	return true, nil
 }
 
-func (s *memoryStore) Find(_ context.Context, g auth.Grant, id string) (Delivery, error) {
+func (s *memoryStore) Find(_ context.Context, g auth.Grant, id string) (ManagerDelivery, error) {
 	tenant, err := s.tenantFor(g)
 	if err != nil {
-		return Delivery{}, err
+		return ManagerDelivery{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delivery, exists := s.deliveries[id]
 	if !exists || delivery.TenantID != tenant {
-		return Delivery{}, ErrDeliveryNotFound
+		return ManagerDelivery{}, ErrDeliveryNotFound
 	}
 	return delivery, nil
 }
@@ -223,7 +223,7 @@ func TestDispatchQueueHandlerDeliversSignedSnapshot(t *testing.T) {
 	g := auth.SystemGrant(ActionDispatch, "tenant-a")
 	err := manager.Dispatch(context.Background(), g,
 		Event{ID: "event-1", Name: "invoice.paid", Payload: []byte(`{"id":"inv-1"}`)},
-		[]Endpoint{{ID: "accounting", URL: "https://hooks.example.test/invoices", SecretRef: "accounting-key"}},
+		[]ManagerEndpoint{{ID: "accounting", URL: "https://hooks.example.test/invoices", SecretRef: "accounting-key"}},
 	)
 	if err != nil {
 		t.Fatalf("Dispatch() error = %v", err)
@@ -293,7 +293,7 @@ func TestConfiguredManagersRouteLegacyActionJobsWithoutColliding(t *testing.T) {
 	grant := auth.SystemGrant(legacyAction, "tenant-a")
 	if err := manager.Dispatch(context.Background(), grant,
 		Event{ID: "event-legacy", Name: "message.sent", Payload: []byte(`{"id":"message-1"}`)},
-		[]Endpoint{{ID: "application", URL: "https://hooks.example.test/messages"}},
+		[]ManagerEndpoint{{ID: "application", URL: "https://hooks.example.test/messages"}},
 	); err != nil {
 		t.Fatalf("Dispatch() with legacy action error = %v", err)
 	}
@@ -385,11 +385,11 @@ func TestDispatchIsIdempotentPerTenantEventEndpoint(t *testing.T) {
 	manager := mustManager(t, store, target, nil)
 	g := auth.SystemGrant(ActionDispatch, "tenant-a")
 	event := Event{ID: "event-1", Name: "invoice.paid", Payload: []byte(`{}`)}
-	endpoint := Endpoint{ID: "accounting", URL: "https://hooks.example.test"}
-	if err := manager.Dispatch(context.Background(), g, event, []Endpoint{endpoint}); err != nil {
+	endpoint := ManagerEndpoint{ID: "accounting", URL: "https://hooks.example.test"}
+	if err := manager.Dispatch(context.Background(), g, event, []ManagerEndpoint{endpoint}); err != nil {
 		t.Fatalf("first Dispatch() error = %v", err)
 	}
-	if err := manager.Dispatch(context.Background(), g, event, []Endpoint{endpoint}); err != nil {
+	if err := manager.Dispatch(context.Background(), g, event, []ManagerEndpoint{endpoint}); err != nil {
 		t.Fatalf("second Dispatch() error = %v", err)
 	}
 	if len(target.jobs) != 1 || len(store.deliveries) != 1 {
@@ -403,7 +403,7 @@ func TestDispatchRollsBackSnapshotWhenQueueWriteFails(t *testing.T) {
 	manager := mustManager(t, store, target, nil)
 	err := manager.Dispatch(context.Background(), auth.SystemGrant(ActionDispatch, "tenant-a"),
 		Event{ID: "event-1", Name: "invoice.paid", Payload: []byte(`{}`)},
-		[]Endpoint{{ID: "accounting", URL: "https://hooks.example.test"}},
+		[]ManagerEndpoint{{ID: "accounting", URL: "https://hooks.example.test"}},
 	)
 	if err == nil {
 		t.Fatal("Dispatch() error = nil")
@@ -427,7 +427,7 @@ func TestHandlerReturnsRetryAfterWithoutTransportRetry(t *testing.T) {
 	g := auth.SystemGrant(ActionDispatch, "tenant-a")
 	if err := manager.Dispatch(context.Background(), g,
 		Event{ID: "event-1", Name: "invoice.paid", Payload: []byte(`{}`)},
-		[]Endpoint{{ID: "accounting", URL: "https://hooks.example.test"}},
+		[]ManagerEndpoint{{ID: "accounting", URL: "https://hooks.example.test"}},
 	); err != nil {
 		t.Fatalf("Dispatch() error = %v", err)
 	}
@@ -600,7 +600,7 @@ func TestConcurrentHandlersEmitOneRequest(t *testing.T) {
 	g := auth.SystemGrant(ActionDispatch, "tenant-a")
 	if err := manager.Dispatch(context.Background(), g,
 		Event{ID: "event-1", Name: "invoice.paid", Payload: []byte(`{}`)},
-		[]Endpoint{{ID: "accounting", URL: "https://hooks.example.test"}},
+		[]ManagerEndpoint{{ID: "accounting", URL: "https://hooks.example.test"}},
 	); err != nil {
 		t.Fatalf("Dispatch() error = %v", err)
 	}
@@ -627,7 +627,7 @@ func TestStoreReadsAreTenantIsolated(t *testing.T) {
 	store := newMemoryStore()
 	owner := auth.SystemGrant(ActionDispatch, "tenant-a")
 	if _, err := store.Create(context.Background(), owner,
-		Delivery{ID: "delivery-1", EventID: "event-1", EndpointID: "endpoint-1"}); err != nil {
+		ManagerDelivery{ID: "delivery-1", EventID: "event-1", EndpointID: "endpoint-1"}); err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
 	other := auth.SystemGrant(ActionDispatch, "tenant-b")
@@ -641,8 +641,8 @@ func TestPruneAppliesRetentionWithinTenant(t *testing.T) {
 	target := &memoryQueue{store: store}
 	manager := mustManager(t, store, target, nil)
 	now := time.Now().UTC()
-	store.deliveries["old-a"] = Delivery{ID: "old-a", TenantID: "tenant-a", CreatedAt: now.Add(-DefaultRetention - time.Hour)}
-	store.deliveries["old-b"] = Delivery{ID: "old-b", TenantID: "tenant-b", CreatedAt: now.Add(-DefaultRetention - time.Hour)}
+	store.deliveries["old-a"] = ManagerDelivery{ID: "old-a", TenantID: "tenant-a", CreatedAt: now.Add(-DefaultRetention - time.Hour)}
+	store.deliveries["old-b"] = ManagerDelivery{ID: "old-b", TenantID: "tenant-b", CreatedAt: now.Add(-DefaultRetention - time.Hour)}
 	manager.prune(context.Background(), auth.SystemGrant(ActionDispatch, "tenant-a"))
 	if _, exists := store.deliveries["old-a"]; exists {
 		t.Fatal("expired tenant delivery was retained")
@@ -675,7 +675,7 @@ func TestNormalizeURLAndPayloadBoundsArePermanentValidation(t *testing.T) {
 func TestFencingRejectsAStaleClaim(t *testing.T) {
 	store := newMemoryStore()
 	g := auth.SystemGrant(ActionDispatch, "tenant-a")
-	created, err := store.Create(context.Background(), g, Delivery{ID: "delivery-1", EventID: "event-1", EndpointID: "endpoint-1"})
+	created, err := store.Create(context.Background(), g, ManagerDelivery{ID: "delivery-1", EventID: "event-1", EndpointID: "endpoint-1"})
 	if err != nil || !created {
 		t.Fatalf("Create() = %v, %v", created, err)
 	}
@@ -699,11 +699,11 @@ func TestPublisherPreservesStoredEventIdentity(t *testing.T) {
 	store := newMemoryStore()
 	target := &memoryQueue{store: store}
 	manager := mustManager(t, store, target, nil)
-	resolver := EndpointResolverFunc(func(_ context.Context, g auth.Grant, stored events.Stored) ([]Endpoint, error) {
+	resolver := EndpointResolverFunc(func(_ context.Context, g auth.Grant, stored events.Stored) ([]ManagerEndpoint, error) {
 		if auth.Tenant(g) != stored.TenantID {
 			t.Fatalf("resolver tenant = %q", auth.Tenant(g))
 		}
-		return []Endpoint{{ID: "endpoint-1", URL: "https://hooks.example.test"}}, nil
+		return []ManagerEndpoint{{ID: "endpoint-1", URL: "https://hooks.example.test"}}, nil
 	})
 	stored := events.Stored{ID: "outbox-1", TenantID: "tenant-a", Name: "invoice.paid", Payload: `{"id":"inv-1"}`}
 	if err := NewPublisher(manager, resolver).Publish(context.Background(), stored); err != nil {
@@ -737,8 +737,8 @@ func response(request *http.Request, status int, body string) *http.Response {
 	}
 }
 
-func cloneDeliveries(source map[string]Delivery) map[string]Delivery {
-	cloned := make(map[string]Delivery, len(source))
+func cloneDeliveries(source map[string]ManagerDelivery) map[string]ManagerDelivery {
+	cloned := make(map[string]ManagerDelivery, len(source))
 	for id, delivery := range source {
 		cloned[id] = delivery
 	}

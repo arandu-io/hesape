@@ -10,8 +10,13 @@ import (
 
 const (
 	// ActionDispatch authorizes durable webhook dispatch and delivery access.
+	//
+	// Deprecated: use DeliveryDispatch, which has the same value, so a Grant
+	// issued for either is one Grant.
 	ActionDispatch auth.Action = "webhook.dispatch"
 	// QueueName is the default queue carrying webhook delivery jobs.
+	//
+	// Deprecated: use DefaultQueue, which has the same value.
 	QueueName = "webhooks"
 	// DeliveryJobName is the stable worker handler name.
 	DeliveryJobName = "webhook.deliver"
@@ -48,17 +53,27 @@ type Event struct {
 	OccurredAt  time.Time
 }
 
-// Endpoint is one stable callback destination.
-type Endpoint struct {
+// ManagerEndpoint is one stable callback destination of Manager.Dispatch.
+//
+// Deprecated: store an Endpoint through the Module and send to it with
+// Module.Send, or build a call with Module.Outgoing.
+type ManagerEndpoint struct {
 	ID        string
 	URL       string
 	Headers   map[string]string
 	SecretRef string
 }
 
-// Status is the durable state of a delivery.
+// Status is the durable state of a delivery Manager keeps.
+//
+// Deprecated: a Delivery of the Module carries its state as one of
+// DeliveryPending, DeliveryProcessing, DeliveryDelivered and DeliveryFailed.
 type Status string
 
+// The states of a delivery Manager keeps.
+//
+// Deprecated: use DeliveryPending, DeliveryProcessing, DeliveryDelivered and
+// DeliveryFailed, which have the same values.
 const (
 	StatusPending    Status = "pending"
 	StatusProcessing Status = "processing"
@@ -66,8 +81,11 @@ const (
 	StatusFailed     Status = "failed"
 )
 
-// Delivery is the immutable request and mutable audit state for one endpoint.
-type Delivery struct {
+// ManagerDelivery is the immutable request and mutable audit state for one
+// endpoint, as Manager and its Store keep it.
+//
+// Deprecated: the Module records a Delivery of its own, with its attempts.
+type ManagerDelivery struct {
 	ID             string
 	TenantID       string
 	EventID        string
@@ -90,20 +108,27 @@ type Delivery struct {
 
 // Claim identifies one fenced attempt. Token and Version must both match when
 // the result is settled.
+//
+// Deprecated: it belongs to Store, which the Module does not use.
 type Claim struct {
-	Delivery Delivery
+	Delivery ManagerDelivery
 	Token    string
 	Version  int64
 	LeaseEnd time.Time
 }
 
 // Result is a successful delivery result.
+//
+// Deprecated: it belongs to Store, which the Module does not use.
 type Result struct {
 	StatusCode int
 	FinishedAt time.Time
 }
 
 // Failure classifies an unsuccessful attempt for persistence and queue retry.
+//
+// Deprecated: it belongs to Store, which the Module does not use; a
+// DeliveryAttempt records what each attempt of the Module came to.
 type Failure struct {
 	Code       string
 	StatusCode int
@@ -118,10 +143,14 @@ func (f Failure) Error() string { return f.Code }
 func (f Failure) RetryAfterDuration() time.Duration { return f.RetryAfter }
 
 // Store owns durable delivery state and its fenced transitions.
+//
+// Deprecated: the Module keeps its deliveries in its own tables. Store remains
+// for Manager, and Manager for the applications that still dispatch through
+// it.
 type Store interface {
 	Transaction(context.Context, func(context.Context) error) error
-	Create(context.Context, auth.Grant, Delivery) (created bool, err error)
-	Find(context.Context, auth.Grant, string) (Delivery, error)
+	Create(context.Context, auth.Grant, ManagerDelivery) (created bool, err error)
+	Find(context.Context, auth.Grant, string) (ManagerDelivery, error)
 	Claim(context.Context, auth.Grant, string, time.Duration) (Claim, bool, error)
 	Complete(context.Context, auth.Grant, Claim, Result) error
 	Fail(context.Context, auth.Grant, Claim, Failure) error

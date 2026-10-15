@@ -15,7 +15,10 @@ import (
 	"github.com/arandu-io/hesape/database/schema"
 )
 
-// CreateDeliveriesTable creates the durable webhook delivery store.
+// CreateDeliveriesTable creates the durable webhook delivery store Manager and
+// DatabaseStore write to. The Module never declares it: its own tables are in
+// Module.Migrations. It stays for every application that has rows in
+// webhook_deliveries.
 type CreateDeliveriesTable struct{ migrations.BaseMigration }
 
 // GetName returns the migration identity.
@@ -58,12 +61,17 @@ func (CreateDeliveriesTable) Down(ctx context.Context, conn migrations.Connectio
 }
 
 // DatabaseStore persists delivery state through a Hesape database handle.
+//
+// Deprecated: the Module keeps its deliveries in its own tables. DatabaseStore
+// remains for Manager.
 type DatabaseStore struct {
 	db     *database.DB
 	action auth.Action
 }
 
 // NewDatabaseStore returns a database-backed delivery store.
+//
+// Deprecated: use New.
 func NewDatabaseStore(db *database.DB) *DatabaseStore {
 	return newDatabaseStore(db, ActionDispatch)
 }
@@ -83,7 +91,7 @@ func (s *DatabaseStore) Transaction(ctx context.Context, fn func(context.Context
 }
 
 // Create inserts an immutable delivery, or reports an idempotent existing row.
-func (s *DatabaseStore) Create(ctx context.Context, g auth.Grant, item Delivery) (bool, error) {
+func (s *DatabaseStore) Create(ctx context.Context, g auth.Grant, item ManagerDelivery) (bool, error) {
 	if _, err := s.tenantFor(g); err != nil {
 		return false, err
 	}
@@ -116,12 +124,12 @@ func (s *DatabaseStore) Create(ctx context.Context, g auth.Grant, item Delivery)
 }
 
 // Find returns one tenant-scoped delivery.
-func (s *DatabaseStore) Find(ctx context.Context, g auth.Grant, id string) (Delivery, error) {
+func (s *DatabaseStore) Find(ctx context.Context, g auth.Grant, id string) (ManagerDelivery, error) {
 	tenant, err := s.tenantFor(g)
 	if err != nil {
-		return Delivery{}, err
+		return ManagerDelivery{}, err
 	}
-	var item Delivery
+	var item ManagerDelivery
 	var headers, body, status string
 	var response sql.NullInt64
 	var lastError sql.NullString
@@ -134,13 +142,13 @@ func (s *DatabaseStore) Find(ctx context.Context, g auth.Grant, id string) (Deli
 		&headers, &item.SecretRef, &body, &status, &item.Attempts, &item.Permanent,
 		&response, &lastError, &lease, &item.CreatedAt, &item.UpdatedAt, &delivered)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Delivery{}, ErrDeliveryNotFound
+		return ManagerDelivery{}, ErrDeliveryNotFound
 	}
 	if err != nil {
-		return Delivery{}, fmt.Errorf("webhook: finding delivery: %w", err)
+		return ManagerDelivery{}, fmt.Errorf("webhook: finding delivery: %w", err)
 	}
 	if err := json.Unmarshal([]byte(headers), &item.Headers); err != nil {
-		return Delivery{}, fmt.Errorf("webhook: decoding delivery headers: %w", err)
+		return ManagerDelivery{}, fmt.Errorf("webhook: decoding delivery headers: %w", err)
 	}
 	item.TenantID, item.Body, item.Status = tenant, []byte(body), Status(status)
 	if response.Valid {
