@@ -27,6 +27,41 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.61.0 — a page with its status, and text bound as typed
+
+Nothing in the API breaks: `http.Context.ViewStatus` is new and `Bind` reads
+one new tag option. Two things change what an application can stop writing by
+hand.
+
+**A whole page with a status other than 200.** `ctx.View` answers 200. A page
+that says the record is gone, changed or cannot be served now is answered with
+`ctx.ViewStatus(status, name, data)`:
+
+```go
+return ctx.ViewStatus(http.StatusConflict, "invoices/already-paid", data)
+```
+
+Replace a whole page answered through `ctx.Fragment(status, ...)` with it, and
+a page written with `w.WriteHeader` and a render by hand. A form whose input
+failed the rules is still answered by returning the `validation.Errors`, which
+the router turns into a redirect back. A 4xx or 5xx answered to an htmx
+request carries `HX-Refresh`, as `Refuse` does.
+
+**Text bound as typed.** `Bind` trims every value but a password's. A field
+that stores text as typed -- a message, a Markdown body, a summary -- is tagged
+`raw`, and the code that read it by hand with `ctx.Input` goes:
+
+```go
+Body string `form:"body,raw"`
+```
+
+`raw` is the only option. A form tag that holds a comma for another reason,
+`form:"a,b"`, used to bind the key `a,b` and is now refused as the unknown
+option `b`; a form key with a comma in it is not one a browser sends from a
+named input, and renaming the field's key is the change.
+
+---
+
 ## v0.60.0 — account and second-factor rules are importable
 
 Nothing breaks: `auth/account` is a new package. It is listed because it
