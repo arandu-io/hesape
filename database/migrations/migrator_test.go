@@ -865,3 +865,26 @@ func TestBaseMigrationDefaultsMatchThePHP(t *testing.T) {
 		t.Fatal("OutsideTransaction did not turn the wrapping off")
 	}
 }
+
+// TestRegisterTakesAMigrationThatIsNotComparableTwice: a second boot in one
+// process registers every migration again, and one that carries a slice --
+// a widening and its tables -- is the same migration, not a panic. Two
+// different ones under its name are still refused.
+func TestRegisterTakesAMigrationThatIsNotComparableTwice(t *testing.T) {
+	t.Cleanup(flushRegistry)
+	flushRegistry()
+
+	widen := WidenTimePrecision{Name: "2026_10_19_000001_widen", Tables: []string{"outbox"}}
+	Register(widen)
+	Register(WidenTimePrecision{Name: "2026_10_19_000001_widen", Tables: []string{"outbox"}})
+	if got := Registered(); len(got) != 1 {
+		t.Fatalf("Registered answered %d migrations, want 1", len(got))
+	}
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("two different widenings under one name did not panic")
+		}
+	}()
+	Register(WidenTimePrecision{Name: "2026_10_19_000001_widen", Tables: []string{"jobs"}})
+}

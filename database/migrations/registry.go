@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 	"sync"
 )
@@ -64,7 +65,7 @@ func Register(migration Migration, path ...string) {
 	if registry[group] == nil {
 		registry[group] = map[string]Migration{}
 	}
-	if existing, taken := registry[group][name]; taken && existing != migration {
+	if existing, taken := registry[group][name]; taken && !sameMigration(existing, migration) {
 		panic(fmt.Sprintf("migrations: %q is registered twice under %q -- one of them is a copied file that kept its neighbour's name", name, group))
 	}
 	registry[group][name] = migration
@@ -129,4 +130,22 @@ func flushRegistry() {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	registry = map[string]map[string]Migration{}
+}
+
+// sameMigration reports whether two registrations under one name are the same
+// migration registered again -- what a second boot in one process does -- rather
+// than two migrations sharing a name.
+//
+// A migration that carries a slice or a map, as WidenTimePrecision carries its
+// tables, is not comparable with ==, and comparing it so panics at run time. So
+// the values are compared by type and then by content.
+func sameMigration(a, b Migration) bool {
+	ta, tb := reflect.TypeOf(a), reflect.TypeOf(b)
+	if ta != tb {
+		return false
+	}
+	if ta.Comparable() {
+		return a == b
+	}
+	return reflect.DeepEqual(a, b)
 }
