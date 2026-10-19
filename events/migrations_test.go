@@ -33,8 +33,8 @@ func TestTheModuleBringsTheOutboxTable(t *testing.T) {
 		t.Fatal("the module does not declare migrations, so the kernel collects no outbox table")
 	}
 	ms := migratable.Migrations()
-	if len(ms) != 2 {
-		t.Fatalf("%d migrations, want the table and its dead-letter column", len(ms))
+	if len(ms) != 3 {
+		t.Fatalf("%d migrations, want the table, its dead-letter column and its widening", len(ms))
 	}
 
 	var up []string
@@ -70,6 +70,7 @@ func TestTheOutboxMigrationsKeepTheirNames(t *testing.T) {
 	want := []string{
 		"2026_07_31_000001_create_outbox_table",
 		"2026_07_31_000002_add_outbox_dead_letter",
+		"2026_10_19_000003_widen_outbox_time_precision",
 	}
 	ms := events.NewModule().Migrations()
 	if len(ms) != len(want) {
@@ -87,8 +88,8 @@ func TestTheOutboxMigrationsKeepTheirNames(t *testing.T) {
 // silently does nothing.
 func TestTheOutboxMigrationsRollBack(t *testing.T) {
 	ms := events.NewModule().Migrations()
-	if len(ms) != 2 {
-		t.Fatalf("%d migrations, want the table and its dead-letter column", len(ms))
+	if len(ms) != 3 {
+		t.Fatalf("%d migrations, want the table, its dead-letter column and its widening", len(ms))
 	}
 	for _, m := range ms {
 		if _, ok := m.(migrations.ReversibleMigration); !ok {

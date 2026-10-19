@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
@@ -267,26 +268,64 @@ func NewID() (string, error) {
 // and a B-tree index on the key grows at its right edge instead of splitting a
 // random page on every insert. The remaining 62 bits are random.
 //
+// Within one process the ids are strictly increasing: one made in the same
+// 1/4096 of a millisecond as the one before it, or under a clock that stepped
+// back, takes the next stamp after it instead. So the order the ids sort in is
+// the order they were made, which is what lets a column of them break a tie
+// between rows that carry the same instant.
+//
 // It is not for a secret. Anybody holding the id can read when it was made, and
 // 62 random bits is fewer than NewID's 122: a token stays NewID.
 func NewOrderedID() (string, error) {
-	return orderedID(time.Now())
+	return orderedIDAt(nextOrderedStamp(time.Now()))
 }
 
-// orderedID is NewOrderedID at a given instant, so the layout can be tested
+// lastOrderedStamp is the stamp NewOrderedID used last: milliseconds shifted
+// left by twelve, plus the fraction of the millisecond.
+var (
+	orderedStampMu   sync.Mutex
+	lastOrderedStamp uint64
+)
+
+// nextOrderedStamp is the stamp of now, or the one after the last stamp handed
+// out when now does not come after it.
+func nextOrderedStamp(now time.Time) uint64 {
+	stamp := orderedStamp(now)
+	orderedStampMu.Lock()
+	defer orderedStampMu.Unlock()
+	if stamp <= lastOrderedStamp {
+		stamp = lastOrderedStamp + 1
+	}
+	lastOrderedStamp = stamp
+	return stamp
+}
+
+// orderedStamp is the 60-bit time an ordered id carries: the milliseconds and
+// the 12-bit fraction of the millisecond.
+func orderedStamp(now time.Time) uint64 {
+	fraction := uint64(now.Nanosecond()%int(time.Millisecond)) * 4096 / uint64(time.Millisecond)
+	return uint64(now.UnixMilli())<<12 | fraction
+}
+
+// orderedID is an ordered id at a given instant, so the layout can be tested
 // against a clock that does not move.
 func orderedID(now time.Time) (string, error) {
+	return orderedIDAt(orderedStamp(now))
+}
+
+// orderedIDAt lays out an ordered id around stamp.
+func orderedIDAt(stamp uint64) (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[6:]); err != nil {
 		return "", fmt.Errorf("database: reading random bytes: %w", err)
 	}
-	ms := uint64(now.UnixMilli())
+	ms := stamp >> 12
 	b[0], b[1], b[2] = byte(ms>>40), byte(ms>>32), byte(ms>>24)
 	b[3], b[4], b[5] = byte(ms>>16), byte(ms>>8), byte(ms)
 	// The 12 bits after the version carry the sub-millisecond part of the
 	// clock rather than randomness, so two ids made in one millisecond still
 	// sort in the order they were made.
-	fraction := uint64(now.Nanosecond()%int(time.Millisecond)) * 4096 / uint64(time.Millisecond)
+	fraction := stamp & 0xfff
 	b[6] = 0x70 | byte(fraction>>8) // version 7
 	b[7] = byte(fraction)
 	b[8] = (b[8] & 0x3f) | 0x80 // variant 10

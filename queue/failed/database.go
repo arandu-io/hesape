@@ -169,9 +169,14 @@ func (m AddActionToFailedJobsTable) table() string {
 // belongs to whoever wired this provider: an application that keeps its
 // failures in the jobs table declares nothing here.
 func (p *DatabaseFailedJobProvider) Migrations() []migrations.Migration {
+	table := p.table
+	if table == "" {
+		table = DefaultTable
+	}
 	return []migrations.Migration{
 		CreateFailedJobsTable{Table: p.table},
 		AddActionToFailedJobsTable{Table: p.table},
+		migrations.WidenTimePrecision{Name: "2026_10_19_000020_widen_failed_jobs_time_precision", Tables: []string{table}},
 	}
 }
 

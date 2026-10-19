@@ -61,8 +61,8 @@ func TestCreateTableAcrossDrivers(t *testing.T) {
 				"`active` tinyint(1) not null default '1', "+
 				"`avatar` blob not null, "+
 				"`public_id` char(36) not null, "+
-				"`created_at` timestamp null, "+
-				"`updated_at` timestamp null)",
+				"`created_at` timestamp(6) null, "+
+				"`updated_at` timestamp(6) null)",
 			"alter table `users` add unique `users_email_unique`(`email`)")
 	})
 
@@ -77,8 +77,8 @@ func TestCreateTableAcrossDrivers(t *testing.T) {
 				`"active" boolean not null default '1', `+
 				`"avatar" bytea not null, `+
 				`"public_id" uuid not null, `+
-				`"created_at" timestamp(0) without time zone null, `+
-				`"updated_at" timestamp(0) without time zone null)`,
+				`"created_at" timestamp(6) without time zone null, `+
+				`"updated_at" timestamp(6) without time zone null)`,
 			`alter table "users" add constraint "users_email_unique" unique ("email")`)
 	})
 
@@ -127,19 +127,19 @@ func TestTimestampsFamily(t *testing.T) {
 	t.Run("mysql", func(t *testing.T) {
 		assertSQL(t, compile(t, newFake("mysql"), "posts", build),
 			"create table `posts` ("+
-				"`created_at` timestamp null, "+
-				"`updated_at` timestamp null, "+
-				"`deleted_at` timestamp null, "+
-				"`published_at` timestamp not null default CURRENT_TIMESTAMP on update CURRENT_TIMESTAMP)")
+				"`created_at` timestamp(6) null, "+
+				"`updated_at` timestamp(6) null, "+
+				"`deleted_at` timestamp(6) null, "+
+				"`published_at` timestamp(6) not null default CURRENT_TIMESTAMP(6) on update CURRENT_TIMESTAMP(6))")
 	})
 
 	t.Run("pgsql", func(t *testing.T) {
 		assertSQL(t, compile(t, newFake("pgsql"), "posts", build),
 			`create table "posts" (`+
-				`"created_at" timestamp(0) with time zone null, `+
-				`"updated_at" timestamp(0) with time zone null, `+
-				`"deleted_at" timestamp(0) without time zone null, `+
-				`"published_at" timestamp(0) without time zone not null default CURRENT_TIMESTAMP)`)
+				`"created_at" timestamp(6) with time zone null, `+
+				`"updated_at" timestamp(6) with time zone null, `+
+				`"deleted_at" timestamp(6) without time zone null, `+
+				`"published_at" timestamp(6) without time zone not null default CURRENT_TIMESTAMP)`)
 	})
 
 	t.Run("sqlite", func(t *testing.T) {

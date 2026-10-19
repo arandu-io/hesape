@@ -22,7 +22,10 @@ type fakeConnection struct {
 	config  map[string]string
 	grammar schema.Grammar
 
-	columns     []schema.ColumnInfo
+	columns []schema.ColumnInfo
+	// rawColumns answers a query that reads information_schema.columns by
+	// itself rather than through ProcessColumns.
+	rawColumns  []schema.Record
 	indexes     []schema.IndexInfo
 	foreignKeys []schema.ForeignKeyInfo
 	fkEnabled   bool
@@ -65,6 +68,8 @@ func (c *fakeConnection) Statement(ctx context.Context, query string) error {
 func (c *fakeConnection) Select(ctx context.Context, query string) ([]schema.Record, error) {
 	c.queries = append(c.queries, query)
 	switch {
+	case strings.Contains(query, "column_type as `type`") && c.rawColumns != nil:
+		return c.rawColumns, nil
 	case strings.Contains(query, "pragma_table_xinfo") && strings.Contains(query, "group_concat"):
 		return []schema.Record{{"kind": "indexes"}}, nil
 	case strings.Contains(query, "pragma_table_xinfo"), strings.Contains(query, "information_schema.columns"):

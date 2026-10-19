@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
-	"github.com/arandu-io/hesape/str"
+	"github.com/arandu-io/hesape/database"
 )
 
 // Event is something that happened, in the past tense.
@@ -138,12 +138,22 @@ func (o *Outbox) Store(ctx context.Context, g auth.Grant, list []Event) error {
 		// gen_random_uuid, UUID() and randomblob are three spellings of the
 		// same idea, and depending on any of them would tie the schema to one
 		// engine.
+		//
+		// They are ordered ids, strictly increasing in this process, and that
+		// is what orders the outbox among rows of one instant: every event of
+		// one Store carries the same occurred_at, so the relay reads them by
+		// occurred_at and then by id, and they leave in the order they were
+		// stored.
+		id, err := database.NewOrderedID()
+		if err != nil {
+			return fmt.Errorf("events: storing %s: %w", e.Name, err)
+		}
 		_, err = o.db.ExecContext(ctx, `
 			INSERT INTO outbox (
 				id, tenant_id, event, aggregate, aggregate_id, payload,
 				authorized_by, action, occurred_at, attempts
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-			str.UUID(), tenant, e.Name, e.Aggregate, e.AggregateID, string(payload),
+			id, tenant, e.Name, e.Aggregate, e.AggregateID, string(payload),
 			g.Subject().ID, string(g.Action()), occurred,
 		)
 		if err != nil {
@@ -157,7 +167,7 @@ func (o *Outbox) Store(ctx context.Context, g auth.Grant, list []Event) error {
 func (o *Outbox) Pending(ctx context.Context, tenant string, limit int) ([]Stored, error) {
 	return o.query(ctx, `
 		WHERE published_at IS NULL AND failed_at IS NULL AND tenant_id = ?
-		ORDER BY occurred_at
+		ORDER BY occurred_at, id
 		LIMIT ?`, tenant, sane(limit))
 }
 
@@ -176,7 +186,7 @@ func (o *Outbox) Pending(ctx context.Context, tenant string, limit int) ([]Store
 func (o *Outbox) PendingAll(ctx context.Context, limit int) ([]Stored, error) {
 	return o.query(ctx, `
 		WHERE published_at IS NULL AND failed_at IS NULL
-		ORDER BY occurred_at
+		ORDER BY occurred_at, id
 		LIMIT ?`, sane(limit))
 }
 
@@ -188,7 +198,7 @@ func (o *Outbox) PendingAll(ctx context.Context, limit int) ([]Stored, error) {
 func (o *Outbox) Parked(ctx context.Context, limit int) ([]Stored, error) {
 	return o.query(ctx, `
 		WHERE failed_at IS NOT NULL
-		ORDER BY failed_at DESC
+		ORDER BY failed_at DESC, id DESC
 		LIMIT ?`, sane(limit))
 }
 
@@ -283,7 +293,11 @@ func (o *Outbox) Lag(ctx context.Context) (time.Duration, error) {
 	if err != nil {
 		return 0, fmt.Errorf("events: measuring the outbox lag: %w", err)
 	}
-	return time.Since(oldest), nil
+	// Never below zero. A column that keeps less of the second than the clock
+	// rounds the instant it stores, and can store one a fraction of a second
+	// after the moment it was written: an event that is waiting has waited no
+	// time, not a negative one.
+	return max(time.Since(oldest), 0), nil
 }
 
 // MarkPublished records that an event left.

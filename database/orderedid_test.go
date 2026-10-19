@@ -49,3 +49,28 @@ func TestOrderedIDsSortInTheOrderTheyWereMade(t *testing.T) {
 		previous = id
 	}
 }
+
+// TestOrderedIDsAreStrictlyIncreasingInOneProcess: ids made faster than the
+// clock's 1/4096 of a millisecond, or under a clock that steps back, still sort
+// in the order they were made.
+func TestOrderedIDsAreStrictlyIncreasingInOneProcess(t *testing.T) {
+	at := time.UnixMilli(1_790_000_000_000)
+	first := nextOrderedStamp(at)
+	same := nextOrderedStamp(at)
+	back := nextOrderedStamp(at.Add(-time.Second))
+	if !(first < same && same < back) {
+		t.Fatalf("stamps %d, %d, %d are not strictly increasing", first, same, back)
+	}
+
+	previous := ""
+	for range 10_000 {
+		id, err := NewOrderedID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id <= previous {
+			t.Fatalf("id %q does not sort after %q", id, previous)
+		}
+		previous = id
+	}
+}

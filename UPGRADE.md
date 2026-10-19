@@ -27,6 +27,75 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.67.0 — date-time columns keep the microsecond
+
+Nothing in the API breaks. What changes is the schema a migration writes, and
+what the next `aru migrate` does.
+
+**The default time precision is microseconds.** `Blueprint.Timestamp`,
+`Timestamps`, `TimestampTz`, `DateTime`, `Time`, `SoftDeletes` and the rest of
+that family, given no precision, used to declare whole seconds:
+`timestamp(0)` on PostgreSQL, a fraction-less `timestamp` or `datetime` on
+MySQL. PostgreSQL rounds a value to the nearest second there and MySQL truncates
+it, so two rows written within one second read back as one instant -- their
+order lost -- and a value could read back later than the moment it was
+written. A column declared from now on is `timestamp(6)`, `datetime(6)` or
+`time(6)`, with `CURRENT_TIMESTAMP(6)` where it uses the current time. A
+precision a migration names is kept as named, `Timestamp("at", 0)` included,
+and `schema.DefaultTimePrecision` still sets the default for a project that
+wants another. SQLite is unchanged: it stores the fraction it is given.
+
+**The package's own tables are widened by the next `aru migrate`.** Each
+package that migrates a table now also declares a migration that raises that
+table's columns below microseconds to microseconds, and leaves alone a column
+already there: `2026_10_19_000003_widen_outbox_time_precision`,
+`2026_10_19_000010_widen_jobs_time_precision`,
+`2026_10_19_000020_widen_failed_jobs_time_precision`,
+`2026_10_19_000030_widen_job_batches_time_precision`,
+`2026_10_19_000040_widen_notifications_time_precision`,
+`20261019_0004_widen_two_factor_time_precision`,
+`20261019_0008_widen_webhook_time_precision` and
+`2026_10_19_000011_widen_webhook_deliveries_time_precision`. On PostgreSQL each
+is one `ALTER TABLE` per table that changes the type modifier only:
+nullability, defaults and indexes stay, and neither the table nor its indexes
+are rewritten, since every value stored in seconds is already a value in
+microseconds. On MySQL each column is restated by `MODIFY`, which may copy the
+table; run it when a copy of the jobs and outbox tables is acceptable. Its
+rollback leaves the columns wide: the code before it reads and writes them as
+it did.
+
+**Your own tables are yours to widen.** A table your migrations created
+before this release keeps whole seconds until a migration of yours widens it.
+`Builder.WidenTimePrecision` reads the table's columns off the database and
+alters only those below the precision, so the migration names tables, not
+columns, and running it twice does nothing the second time:
+
+```go
+func (WidenTimePrecision) Up(ctx context.Context, conn migrations.Connection) error {
+	for _, table := range []string{"invoices", "customers"} {
+		if _, err := conn.Schema().WidenTimePrecision(ctx, table, schema.MaxTimePrecision); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+```
+
+or, as one value, `migrations.WidenTimePrecision{Name: "...", Tables: []string{...}}`.
+Code that compared a time read back from such a column with a time it wrote,
+after truncating one of them to the second to make them meet, can stop
+truncating once the column is widened.
+
+**The outbox reads one write in the order it was stored.** Every event of one
+`Outbox.Store` carries the same `occurred_at`, and the relay ordered by that
+column alone, so their order was whatever the engine returned. Outbox ids are
+now `database.NewOrderedID`, and `Pending`, `PendingAll` and `Parked` order by
+the instant and then by the id. `NewOrderedID` is strictly increasing within a
+process: an id made in the same 1/4096 of a millisecond as the one before it,
+or under a clock that stepped back, takes the next stamp instead. Events
+stored before this release keep their random ids, so their order within one
+instant stays the engine's. `Outbox.Lag` is never negative.
+
 ## v0.64.1 — `http.Context` is comparable again
 
 v0.64.0 gave `http.Context` a map field for `Context.With`, which made the

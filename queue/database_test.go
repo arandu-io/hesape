@@ -548,10 +548,11 @@ func TestTheModuleDeclaresNoSchemaForADriverThatOwnsNone(t *testing.T) {
 	if got := queue.NewModule(queue.NullQueue{}).Migrations(); len(got) != 0 {
 		t.Errorf("the NullQueue brought %d migrations", len(got))
 	}
-	// Three: the jobs table, the settings columns that were added to it once
-	// the per-job attributes had somewhere to travel, and the created_at that
-	// carries the order jobs are taken in.
-	if got := queue.NewModule(queue.NewDatabaseQueue(nil)).Migrations(); len(got) != 3 {
+	// Four: the jobs table, the settings columns that were added to it once
+	// the per-job attributes had somewhere to travel, the created_at that
+	// carries the order jobs are taken in, and the widening of its instants to
+	// microseconds.
+	if got := queue.NewModule(queue.NewDatabaseQueue(nil)).Migrations(); len(got) != 4 {
 		t.Errorf("the DatabaseQueue brought %d migrations, want the jobs table", len(got))
 	}
 }
@@ -574,6 +575,10 @@ func TestTheMigrationIsPortable(t *testing.T) {
 		down, err := migrations.DownStatements(ctx, m)
 		if err != nil {
 			t.Fatalf("DownStatements: %v", err)
+		}
+		// A widening rolls back by leaving the wider columns as they are.
+		if _, widening := m.(migrations.WidenTimePrecision); widening {
+			continue
 		}
 		if len(down) == 0 {
 			t.Errorf("%s cannot be rolled back", m.GetName())

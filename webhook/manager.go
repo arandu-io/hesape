@@ -248,7 +248,7 @@ func newManagerResolved(store Store, target deliveryQueue, secrets SecretProvide
 
 // Migrations returns the delivery schema owned by the manager.
 func (*Manager) Migrations() []migrations.Migration {
-	return []migrations.Migration{CreateDeliveriesTable{}}
+	return []migrations.Migration{CreateDeliveriesTable{}, widenDeliveriesTimePrecision}
 }
 
 // RegisterJobHandlers registers this manager's configured delivery consumer.

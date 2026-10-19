@@ -392,8 +392,8 @@ func TestMigrationsDeclareTheTable(t *testing.T) {
 	t.Parallel()
 
 	ms := bus.Migrations()
-	if len(ms) != 1 {
-		t.Fatalf("%d migrations, want 1", len(ms))
+	if len(ms) != 2 || ms[1].GetName() != "2026_10_19_000030_widen_job_batches_time_precision" {
+		t.Fatalf("%d migrations, want the table and its widening", len(ms))
 	}
 	m := ms[0]
 	if !strings.HasPrefix(m.GetName(), "2026_") {

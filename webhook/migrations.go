@@ -250,3 +250,10 @@ func (addCallRequest) Down(ctx context.Context, conn migrations.Connection) erro
 		table.DropColumn("remote_addr", "headers_sha256")
 	})
 }
+
+// widenTimePrecision raises the instants of the module's four tables to
+// microseconds where an earlier default created them in whole seconds.
+var widenTimePrecision = migrations.WidenTimePrecision{
+	Name:   "20261019_0008_widen_webhook_time_precision",
+	Tables: []string{endpointsTable, callsTable, deliveriesTable, attemptsTable},
+}

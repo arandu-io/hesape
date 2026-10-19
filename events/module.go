@@ -69,7 +69,7 @@ func (*Module) Routes(*routing.Router) {}
 // recovered later: an application that stores events before it publishes them
 // needs the table from the first one.
 func (*Module) Migrations() []migrations.Migration {
-	return []migrations.Migration{createOutboxTable{}, addOutboxDeadLetter{}}
+	return []migrations.Migration{createOutboxTable{}, addOutboxDeadLetter{}, widenOutboxTimePrecision}
 }
 
 // Start begins the relay loop, and only the process that serves calls it.

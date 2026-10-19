@@ -268,11 +268,15 @@ func TestTheStringsAreTheOnesAlreadyStored(t *testing.T) {
 	if account.ErrUserNotFound != model.ErrModelNotFound {
 		t.Error("ErrUserNotFound is not the model's not-found sentinel, so a lookup's error would stop matching it")
 	}
-	if got := account.Migrations(); len(got) != 1 || got[0].GetName() != "20260828_0003_create_two_factor" {
-		t.Fatalf("Migrations() names %v, want the one name applications already recorded", got)
+	got := account.Migrations()
+	if len(got) != 2 || got[0].GetName() != "20260828_0003_create_two_factor" ||
+		got[1].GetName() != "20261019_0004_widen_two_factor_time_precision" {
+		t.Fatalf("Migrations() names %v, want the name applications already recorded and the widening after it", got)
 	}
-	if _, ok := account.Migrations()[0].(migrations.ReversibleMigration); !ok {
-		t.Error("the migration cannot be rolled back")
+	for _, m := range got {
+		if _, ok := m.(migrations.ReversibleMigration); !ok {
+			t.Errorf("%s cannot be rolled back", m.GetName())
+		}
 	}
 	if account.ChallengeAttempts != 5 || account.ChallengeWindow != 15*time.Minute {
 		t.Errorf("the challenge budget is %d in %s, want 5 in 15m", account.ChallengeAttempts, account.ChallengeWindow)

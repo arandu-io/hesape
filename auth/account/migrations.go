@@ -16,7 +16,11 @@ import (
 // application's migrations, as a step of the deploy, never when the process
 // starts.
 func Migrations() []migrations.Migration {
-	return []migrations.Migration{createTwoFactor{}}
+	return []migrations.Migration{
+		createTwoFactor{},
+		migrations.WidenTimePrecision{Name: "20261019_0004_widen_two_factor_time_precision",
+			Tables: []string{twoFactorTableName, recoveryCodeTableName}},
+	}
 }
 
 // createTwoFactor creates the enrolment table and the recovery-code table.

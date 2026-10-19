@@ -94,3 +94,12 @@ func (addOutboxDeadLetter) Down(ctx context.Context, conn migrations.Connection)
 		table.DropColumn("failed_at")
 	})
 }
+
+// widenOutboxTimePrecision raises the outbox's three instants to microseconds
+// where an earlier default created them in whole seconds, which PostgreSQL
+// rounds to and MySQL truncates to: events stored within one second then read
+// back as one instant, and the relay could not tell their order.
+var widenOutboxTimePrecision = migrations.WidenTimePrecision{
+	Name:   "2026_10_19_000003_widen_outbox_time_precision",
+	Tables: []string{"outbox"},
+}

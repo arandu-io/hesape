@@ -177,8 +177,8 @@ func TestPolicyLetsASubjectReadOnlyTheirOwn(t *testing.T) {
 
 func TestMigrationsCreateTheTable(t *testing.T) {
 	list := notifications.Migrations()
-	if len(list) != 1 {
-		t.Fatalf("migrations = %d, want 1", len(list))
+	if len(list) != 2 || list[1].GetName() != "2026_10_19_000040_widen_notifications_time_precision" {
+		t.Fatalf("migrations = %d, want the table and its widening", len(list))
 	}
 	m := list[0]
 	if m.GetName() == "" {

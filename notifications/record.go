@@ -275,5 +275,8 @@ func (CreateNotificationsTable) Down(ctx context.Context, conn migrations.Connec
 // uses the database channel does not create it, and one that does adds this to
 // the list it hands the migrator.
 func Migrations() []migrations.Migration {
-	return []migrations.Migration{CreateNotificationsTable{}}
+	return []migrations.Migration{
+		CreateNotificationsTable{},
+		migrations.WidenTimePrecision{Name: "2026_10_19_000040_widen_notifications_time_precision", Tables: []string{Table}},
+	}
 }

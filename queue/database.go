@@ -220,6 +220,7 @@ func (q *DatabaseQueue) Migrations() []migrations.Migration {
 		CreateJobsTable{},
 		AddJobAttributesToJobsTable{},
 		AddCreatedAtToJobsTable{},
+		migrations.WidenTimePrecision{Name: "2026_10_19_000010_widen_jobs_time_precision", Tables: []string{"jobs"}},
 	}
 }
 
@@ -261,10 +262,11 @@ func (q *DatabaseQueue) Push(ctx context.Context, g auth.Grant, j jobs.Job) erro
 
 // dueAt is the run_at a job is stored with, in UTC.
 //
-// The column holds whole seconds, and PostgreSQL rounds a fraction to the
-// nearest second: a job due at 12:00:00.7 would be stored at 12:00:01, and
-// every Pop until then -- which asks for run_at <= now -- would not see a job
-// that was already due. So a job due now or earlier is stored at its second,
+// A column created before the default time precision was microseconds holds
+// whole seconds until its widening migration runs, and PostgreSQL rounds a
+// fraction to the nearest second there: a job due at 12:00:00.7 would be
+// stored at 12:00:01, and every Pop until then -- which asks for
+// run_at <= now -- would not see a job that was already due. So a job due now or earlier is stored at its second,
 // rounded down. A job due later keeps its time: rounding that one down would
 // run it before the delay it was given.
 func dueAt(runAt, now time.Time) time.Time {

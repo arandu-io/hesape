@@ -289,6 +289,7 @@ func TestTheModuleNeverDeclaresManagersTable(t *testing.T) {
 		"20261014_0005_create_webhook_server_delivery_attempts",
 		"20261015_0006_add_reference_to_webhook_client_calls",
 		"20261015_0007_add_remote_addr_and_headers_digest_to_webhook_client_calls",
+		"20261019_0008_widen_webhook_time_precision",
 	}
 	if !slices.Equal(names, want) {
 		t.Fatalf("Migrations() = %v, want the names they were published with: %v", names, want)

@@ -110,7 +110,10 @@ func (CreateJobBatchesTable) Down(ctx context.Context, conn migrations.Connectio
 
 // Migrations is the schema this repository needs.
 func Migrations() []migrations.Migration {
-	return []migrations.Migration{CreateJobBatchesTable{}}
+	return []migrations.Migration{
+		CreateJobBatchesTable{},
+		migrations.WidenTimePrecision{Name: "2026_10_19_000030_widen_job_batches_time_precision", Tables: []string{BatchesTable}},
+	}
 }
 
 // columns is the read shape, in the order scanBatch expects.

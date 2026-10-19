@@ -15,8 +15,9 @@ import (
 var defaultStringLength = 255
 
 // defaultTimePrecisionValue is the time column precision used when none is
-// given explicitly.
-var defaultTimePrecisionValue = intPointer(0)
+// given explicitly: microseconds, so that two rows written within one second
+// keep their order and a value reads back as the instant it was written.
+var defaultTimePrecisionValue = intPointer(MaxTimePrecision)
 
 // defaultMorphKeyType is the key type used for new morph columns when none
 // is given explicitly.
@@ -26,8 +27,10 @@ var defaultMorphKeyType = "int"
 // none is given explicitly.
 func DefaultStringLength(length int) { defaultStringLength = length }
 
-// DefaultTimePrecision sets the default time column precision. A nil
-// precision declares the column without one.
+// DefaultTimePrecision sets the default time column precision, which is
+// MaxTimePrecision until it is set. A nil precision declares the column
+// without one, which is the engine's own default: microseconds on PostgreSQL,
+// whole seconds on MySQL.
 func DefaultTimePrecision(precision *int) { defaultTimePrecisionValue = precision }
 
 // DefaultMorphKeyType sets the key type used for new morph columns. It

@@ -91,6 +91,15 @@ func Run(t *testing.T, dialect database.Dialect, driverName, dsn string) {
 	t.Run("a timestamp comes back as it went in", func(t *testing.T) {
 		testTimestampRoundTrip(t, db)
 	})
+	t.Run("a blueprint timestamp keeps the microsecond", func(t *testing.T) {
+		testBlueprintTimestampKeepsTheMicrosecond(t, dialect, db)
+	})
+	t.Run("a table created in whole seconds is widened in place", func(t *testing.T) {
+		testWideningKeepsTheRows(t, dialect, db)
+	})
+	t.Run("the outbox keeps the order of one store", func(t *testing.T) {
+		testTheOutboxKeepsTheOrderOfOneStore(t, dialect, db)
+	})
 	t.Run("a transaction rolls back", func(t *testing.T) {
 		testTransactionRollback(t, db)
 	})

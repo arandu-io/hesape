@@ -82,7 +82,7 @@ func newDatabaseStore(db *database.DB, action auth.Action) *DatabaseStore {
 
 // Migrations returns the schema owned by the store.
 func (*DatabaseStore) Migrations() []migrations.Migration {
-	return []migrations.Migration{CreateDeliveriesTable{}}
+	return []migrations.Migration{CreateDeliveriesTable{}, widenDeliveriesTimePrecision}
 }
 
 // Transaction runs work atomically on the store's database.
@@ -299,3 +299,10 @@ func nullableStatus(status int) any {
 }
 
 var _ migrations.ReversibleMigration = CreateDeliveriesTable{}
+
+// widenDeliveriesTimePrecision raises the delivery table's instants to
+// microseconds where an earlier default created them in whole seconds.
+var widenDeliveriesTimePrecision = migrations.WidenTimePrecision{
+	Name:   "2026_10_19_000011_widen_webhook_deliveries_time_precision",
+	Tables: []string{"webhook_deliveries"},
+}

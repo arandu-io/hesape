@@ -86,8 +86,10 @@ func TestTheTwoFactorMigrationIsTheOneApplicationsRan(t *testing.T) {
 	if len(want) == 0 || !reflect.DeepEqual(got, want) {
 		t.Fatalf("the package's migration made\n%v\nthe applications' made\n%v", got, want)
 	}
-	if m := account.Migrations(); len(m) != 1 || m[0].GetName() != (skeletonCreateTwoFactor{}).GetName() {
-		t.Fatalf("Migrations() = %v, want the one name applications recorded", m)
+	// The create keeps the name applications recorded; what follows it -- the
+	// widening of its instants to microseconds -- is a migration of its own.
+	if m := account.Migrations(); len(m) == 0 || m[0].GetName() != (skeletonCreateTwoFactor{}).GetName() {
+		t.Fatalf("Migrations() = %v, want the name applications recorded first", m)
 	}
 }
 
