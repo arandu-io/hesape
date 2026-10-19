@@ -51,6 +51,16 @@ func (g *SQLiteGrammar) CompileSQLCreateStatement(schemaName, name string, typ .
 		g.wrapValue(defaultSchema(schemaName)), g.QuoteString(kind), g.QuoteString(name))
 }
 
+// CompileCurrentSchemas builds the query that names the schema this
+// connection writes to by default, in a column named name: always "main".
+//
+// A database attached with ATTACH is reachable by its qualified name, but an
+// unqualified table is created in main, and main is the only schema
+// CompileDropAllTables clears.
+func (g *SQLiteGrammar) CompileCurrentSchemas() string {
+	return `select 'main' as "name"`
+}
+
 // CompileTableExists builds the query that reports whether table exists
 // in schemaName's sqlite_master.
 func (g *SQLiteGrammar) CompileTableExists(schemaName, table string) string {
@@ -114,18 +124,32 @@ func (g *SQLiteGrammar) CompileRebuild(schemaName ...string) string {
 	return "vacuum " + g.wrapValue(defaultSchema(firstOr(schemaName, "main")))
 }
 
-// CompileViews builds the query that lists views across schemas, from
-// pragma_table_list.
+// CompileViews builds the query that lists views -- name, schema and defining
+// SQL -- in schemas, or in every schema the connection has when none is named.
+//
+// The definition lives in each schema's own catalogue, "<schema>".sqlite_master,
+// and nowhere else: pragma_table_list names the views but carries no sql
+// column. This used to select sql from pragma_table_list, so every GetViews,
+// HasView and DropAllViews on SQLite failed with "no such column: sql" and no
+// test asked for a view. A named schema is read from its own catalogue, one
+// select per schema. With none named, the views come from pragma_table_list,
+// which sees every attached database, and the definition from the catalogue of
+// main or temp -- the two a query can name without being told of an ATTACH --
+// so a view of an attached database comes back without one until its schema is
+// named.
 func (g *SQLiteGrammar) CompileViews(schemas []string) (string, error) {
-	where := ""
-	switch {
-	case len(schemas) > 1:
-		where = "schema in (" + g.QuoteString(schemas) + ") and "
-	case len(schemas) == 1:
-		where = "schema = " + g.QuoteString(schemas[0]) + " and "
+	if len(schemas) == 0 {
+		return "select tl.name as name, tl.schema as schema, coalesce(" +
+			"(select m.sql from \"main\".sqlite_master as m where tl.schema = 'main' and m.type = 'view' and m.name = tl.name), " +
+			"(select m.sql from \"temp\".sqlite_master as m where tl.schema = 'temp' and m.type = 'view' and m.name = tl.name)" +
+			") as definition from pragma_table_list as tl where tl.type = 'view' order by tl.schema, tl.name", nil
 	}
-	return "select name, schema, sql as definition from pragma_table_list where " + where +
-		"type = 'view' order by schema, name", nil
+	selects := make([]string, len(schemas))
+	for i, name := range schemas {
+		selects[i] = fmt.Sprintf("select name, %s as schema, sql as definition from %s.sqlite_master where type = 'view'",
+			g.QuoteString(name), g.wrapValue(name))
+	}
+	return "select name, schema, definition from (" + strings.Join(selects, " union all ") + ") order by schema, name", nil
 }
 
 // CompileColumns builds the query that lists table's columns, in column

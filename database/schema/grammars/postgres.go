@@ -70,6 +70,21 @@ func (g *PostgresGrammar) CompileSchemas() (string, error) {
 		"order by nspname", nil
 }
 
+// CompileCurrentSchemas builds the query that lists the schemas this session
+// searches, in the order it searches them, one row per schema in a column
+// named name.
+//
+// current_schemas(false) is the session's search_path as the server resolved
+// it: "$user" already replaced by the role's name, a schema that does not exist
+// left out, and the implicit pg_catalog and pg_temp schemas left out too. It is
+// asked of the server rather than read from the connection's configuration
+// because a search path can arrive by more routes than the configuration sees
+// -- the DSN's options, ALTER ROLE ... SET, the server's default -- and what a
+// migration creates lands in the path the session actually has.
+func (g *PostgresGrammar) CompileCurrentSchemas() string {
+	return "select s.name from unnest(current_schemas(false)) with ordinality as s(name, position) order by s.position"
+}
+
 // CompileTableExists builds the query that reports whether table exists in
 // schemaName, or the connection's current schema when schemaName is empty.
 // It matches ordinary and partitioned tables (relkind 'r' or 'p').

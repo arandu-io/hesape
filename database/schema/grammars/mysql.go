@@ -63,6 +63,16 @@ func (g *MySQLGrammar) CompileSchemas() (string, error) {
 		" order by schema_name", nil
 }
 
+// CompileCurrentSchemas builds the query that names the database this
+// session is using, in a column named name.
+//
+// MySQL calls a database a schema, and an unqualified table resolves in one of
+// them only: the one the connection selected. The value is null when no
+// database is selected, which a caller reads as no schema at all.
+func (g *MySQLGrammar) CompileCurrentSchemas() string {
+	return "select schema() as `name`"
+}
+
 // CompileTableExists builds the query that reports whether table exists in
 // schemaName, or in the connection's current schema when schemaName is
 // empty.

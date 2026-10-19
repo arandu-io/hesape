@@ -20,6 +20,11 @@ type conn struct {
 	indexes     []schema.IndexInfo
 	foreignKeys []schema.ForeignKeyInfo
 	tables      []schema.TableInfo
+	// searchPath is what the session's schema query answers, and selects
+	// every query Select was asked, so a test can read what a listing was
+	// scoped to.
+	searchPath []schema.Record
+	selects    []string
 }
 
 func newConn() *conn {
@@ -52,6 +57,10 @@ func (c *conn) Statement(ctx context.Context, query string) error {
 }
 
 func (c *conn) Select(ctx context.Context, query string) ([]schema.Record, error) {
+	c.selects = append(c.selects, query)
+	if strings.Contains(query, "current_schemas(false)") || strings.HasPrefix(query, "select schema() as") {
+		return c.searchPath, nil
+	}
 	return []schema.Record{{}}, nil
 }
 

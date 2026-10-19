@@ -182,7 +182,10 @@ func (b *Builder) HasView(ctx context.Context, view string) (bool, error) {
 }
 
 // GetTables returns the tables in the given schemas. With no schemas given,
-// it returns tables from every schema the connection can see.
+// it returns tables from every schema the connection can see -- every
+// non-system schema of a Postgres database, every database a MySQL account can
+// read -- which is the listing db:show wants and the reach a wipe must not
+// have; DropAllTables passes what SearchPath answers instead.
 func (b *Builder) GetTables(ctx context.Context, schemas ...string) ([]TableInfo, error) {
 	sql, err := b.grammar.CompileTables(nonEmpty(schemas))
 	if err != nil {
@@ -240,6 +243,11 @@ func (b *Builder) GetTypes(ctx context.Context, schemas ...string) ([]Record, er
 }
 
 // DropAllTypes drops every type named in types.
+//
+// It drops exactly what it is handed, so which schemas it reaches is the
+// caller's choice. GetTypes with no schema lists every schema of the database;
+// to stay inside the ones the connection searches, as DropAllTables does, list
+// them with GetTypes(ctx, path...) where path is what SearchPath answers.
 //
 // The refusal for a driver with no types to drop comes from the grammar,
 // which is the only thing that knows whether the driver supports dropping
@@ -496,12 +504,34 @@ func (b *Builder) DropColumns(ctx context.Context, table string, columns []strin
 	})
 }
 
-// DropAllTables drops every table the connection can see.
+// DropAllTables drops every table in the schemas the connection searches, as
+// SearchPath answers them, and nothing in any other schema.
+//
+// It used to drop every table the connection could see. On Postgres that is
+// every schema of the database but the system ones, so migrate:fresh on a
+// connection whose search_path was one schema emptied every other schema of the
+// same database too -- the tables of whatever else lived there, and, in a test
+// suite that gives each test a schema of its own, the tables of every test
+// running beside it, which then failed with "relation does not exist" for no
+// reason of their own. MySQL had the same reach across every database the
+// account could read. A wipe is scoped the way Laravel scopes it: Postgres
+// drops the search path's schemas, MySQL the selected database, SQLite main.
+//
+// When the search path resolves to no schema at all -- every schema it names is
+// missing, or MySQL has no database selected -- there is nothing this
+// connection would create a table in, so nothing is dropped.
 //
 // A driver whose grammar cannot compile the statement returns ErrUnsupported
 // instead.
 func (b *Builder) DropAllTables(ctx context.Context) error {
-	tables, err := b.GetTables(ctx)
+	schemas, scoped, err := b.searchPath(ctx)
+	if err != nil {
+		return err
+	}
+	if scoped && len(schemas) == 0 {
+		return nil
+	}
+	tables, err := b.GetTables(ctx, schemas...)
 	if err != nil {
 		return err
 	}
@@ -550,9 +580,18 @@ func (b *Builder) RefreshDatabaseFile(ctx context.Context, path string) error {
 	return nil
 }
 
-// DropAllViews drops every view the connection can see.
+// DropAllViews drops every view in the schemas the connection searches, as
+// SearchPath answers them, and nothing in any other schema -- for the reason
+// DropAllTables gives.
 func (b *Builder) DropAllViews(ctx context.Context) error {
-	views, err := b.GetViews(ctx)
+	schemas, scoped, err := b.searchPath(ctx)
+	if err != nil {
+		return err
+	}
+	if scoped && len(schemas) == 0 {
+		return nil
+	}
+	views, err := b.GetViews(ctx, schemas...)
 	if err != nil {
 		return err
 	}
@@ -647,8 +686,70 @@ func (b *Builder) CreateBlueprint(table string, callback func(*Blueprint)) *Blue
 }
 
 // GetCurrentSchemaListing returns the schemas the connection searches, in
-// priority order.
+// priority order, as far as the builder can tell without asking the server --
+// which is nothing, so it returns nil and HasView falls back to every schema.
+// SearchPath asks the server, and is what the drop-all methods scope by.
 func (b *Builder) GetCurrentSchemaListing() []string { return nil }
+
+// SearchPath returns the schemas this connection's session searches, in the
+// order it searches them, as the server resolves them: Postgres's
+// current_schemas(false), with "$user" resolved and missing schemas left out;
+// MySQL's selected database; SQLite's main. It is empty when the path resolves
+// to no schema, and never falls back to every schema.
+//
+// It asks the server rather than reading the connection's configuration,
+// because a search path reaches a session by routes the configuration does not
+// see -- a DSN's options, ALTER ROLE ... SET, the server's default -- and it is
+// the session's path that an unqualified CREATE TABLE lands in.
+//
+// A grammar that cannot name the session's schemas returns ErrUnsupported.
+func (b *Builder) SearchPath(ctx context.Context) ([]string, error) {
+	schemas, scoped, err := b.searchPath(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !scoped {
+		return nil, fmt.Errorf("%w: the %s grammar cannot name the schemas the session searches", ErrUnsupported, b.connection.GetDriverName())
+	}
+	return schemas, nil
+}
+
+// currentSchemasGrammar is the method a grammar implements to say which
+// schemas the session searches. It is asserted rather than added to Grammar,
+// so a grammar written outside this collection keeps compiling.
+type currentSchemasGrammar interface {
+	CompileCurrentSchemas() string
+}
+
+// searchPath answers the session's schemas, and whether the grammar could
+// name them at all. A grammar that cannot -- one written outside this
+// collection before the method existed -- reports false, and the drop-all
+// methods keep the reach they had before rather than refusing a wipe the
+// grammar has always allowed.
+func (b *Builder) searchPath(ctx context.Context) ([]string, bool, error) {
+	grammar, ok := b.grammar.(currentSchemasGrammar)
+	if !ok {
+		return nil, false, nil
+	}
+	rows, err := b.connection.Select(ctx, grammar.CompileCurrentSchemas())
+	if err != nil {
+		return nil, true, err
+	}
+	schemas := make([]string, 0, len(rows))
+	for _, row := range rows {
+		var name string
+		switch v := row["name"].(type) {
+		case string:
+			name = v
+		case []byte:
+			name = string(v)
+		}
+		if name != "" {
+			schemas = append(schemas, name)
+		}
+	}
+	return schemas, true, nil
+}
 
 // GetCurrentSchemaName returns the first schema from GetCurrentSchemaListing,
 // or the empty string if it returns none.

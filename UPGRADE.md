@@ -27,6 +27,38 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.68.0 — a wipe stays in the connection's own schemas
+
+Nothing in the API breaks. What changes is how much `migrate:fresh` drops.
+
+**`Builder.DropAllTables` and `Builder.DropAllViews` drop only what the
+connection searches.** They listed with no schema, which the PostgreSQL grammar
+reads as every schema of the database but the system ones and the MySQL grammar
+as every database the account can read, and they dropped all of it. A
+`migrate:fresh` on a PostgreSQL connection whose `search_path` named one schema
+emptied every other schema of the same database: another application's tables,
+or, in a suite that gives each test a schema of its own, the tables of every
+test running beside it. They now drop what `Builder.SearchPath` answers, asked
+of the server: on PostgreSQL the schemas of `current_schemas(false)`, which is
+the session's `search_path` with `"$user"` resolved and missing schemas left out
+-- `public` on a connection nobody configured; on MySQL the selected database;
+on SQLite `main`, which is all its wipe ever cleared. A path that resolves to no
+schema drops nothing.
+
+If something relied on a fresh reaching beyond the connection's own schemas,
+run it once per schema, on a connection whose `search_path` names that schema.
+`DropAllTypes` drops exactly the types it is handed; to keep it inside the same
+schemas, list them with `GetTypes(ctx, path...)` where `path` is what
+`SearchPath` answers. `GetTables`, `GetViews` and `GetTypes` with no schema
+still list every schema, as `db:show` expects.
+
+**`GetViews` works on SQLite.** It selected the view's definition from
+`pragma_table_list`, which has no such column, so `GetViews`, `HasView` and
+`DropAllViews` failed there with `no such column: sql`. The definition now comes
+from the schema's own `sqlite_master`.
+
+---
+
 ## v0.67.0 — date-time columns keep the microsecond
 
 Nothing in the API breaks. What changes is the schema a migration writes, and
