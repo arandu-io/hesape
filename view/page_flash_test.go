@@ -206,3 +206,21 @@ func TestAPageThatEmbedsPageIsWhatAnInputAsksFor(t *testing.T) {
 		t.Errorf("First = %q, and FieldError answers %q: the two must not disagree", got, page.FieldError("title"))
 	}
 }
+
+func TestPageCarriesTheStatusOfTheRequestThatRedirectedHere(t *testing.T) {
+	state := hhttp.State{Messages: map[string]string{hhttp.StatusKey: "Perfil salvo."}}
+	req := httptest.NewRequest(http.MethodGet, "/profile", nil)
+	req = req.WithContext(hhttp.WithState(req.Context(), state))
+
+	page := view.New(hhttp.NewContext(httptest.NewRecorder(), req, nil, nil), "Profile")
+
+	if got := page.Flashed(hhttp.StatusKey); got != "Perfil salvo." {
+		t.Errorf("Flashed(status) = %q", got)
+	}
+	if page.Any() {
+		t.Error("a status made the page report a rejection")
+	}
+	if got := (view.Page{}).Flashed(hhttp.StatusKey); got != "" {
+		t.Errorf("a fresh page flashed %q", got)
+	}
+}

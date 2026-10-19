@@ -180,6 +180,12 @@ type Page struct {
 	// the MESSAGE for a password survives when the value does not: an empty
 	// password box that does not say why it was rejected is the original bug.
 	Old url.Values
+
+	// Messages is what the request that redirected here said about what it
+	// did, by key: the sentence a form that worked left under "status" with
+	// Context.With. Filled by New from the flash, like Errors, and read with
+	// Flashed.
+	Messages map[string]string
 }
 
 // Compile-time proof that embedding Page is all a page has to do to fit the
@@ -328,6 +334,7 @@ func New(ctx *hhttp.Context, title string) Page {
 		Token:         token,
 		Errors:        state.Errors,
 		Old:           state.Old,
+		Messages:      state.Messages,
 		Authenticated: auth.Check(ctx.Ctx()),
 		HomeURL:       routeIfRegistered(ctx, routeHome),
 		LoginURL:      routeIfRegistered(ctx, routeLogin),
@@ -414,6 +421,16 @@ func (p Page) Get(name string) []string { return p.Errors.Get(name) }
 // not draw an empty one: a box that is always there and usually blank is a box
 // people stop reading, which is how a real message goes unseen.
 func (p Page) Any() bool { return len(p.Errors) > 0 }
+
+// Flashed is the sentence the request that redirected here left under key, or
+// empty.
+//
+//	@if .Flashed("status") != ""
+//
+// It is the page half of Context.With: the action that wrote says what it did,
+// redirects, and the page it lands on draws it once. Empty on every other page
+// view, so a layout asks unconditionally.
+func (p Page) Flashed(key string) string { return p.Messages[key] }
 
 // OldValue is what was typed in a field on the attempt that was rejected.
 //

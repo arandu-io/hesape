@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/arandu-io/hesape/encryption"
 )
@@ -55,14 +56,38 @@ const flashPurpose = "session.flash"
 // always fits in MaxFlashBytes.
 const maxFlashMessage = 512
 
-// The two halves of the payload. A single url.Values carries both, with the key
-// prefixed by which half it belongs to, because url.Values.Encode sorts its keys
-// -- so the same errors and the same input always produce the same bytes, and a
-// test can assert on the cookie instead of on a decoded copy of it.
+// The three parts of the payload. A single url.Values carries them all, with
+// the key prefixed by which part it belongs to, because url.Values.Encode sorts
+// its keys -- so the same errors and the same input always produce the same
+// bytes, and a test can assert on the cookie instead of on a decoded copy of it.
 const (
-	flashErrorPrefix = "e:"
-	flashOldPrefix   = "o:"
+	flashErrorPrefix   = "e:"
+	flashOldPrefix     = "o:"
+	flashMessagePrefix = "m:"
 )
+
+// Flashed is everything one flash cookie carries to the page the browser is
+// redirected to.
+//
+// Errors and Old are what a rejected request produced, and Write puts them
+// there. Messages are what a request that succeeded has to say about it --
+// "Profile saved.", under "status" -- and WriteMessages puts them there. A
+// response writes one or the other: a request is either refused or not.
+type Flashed struct {
+	// Errors is the validation messages of the rejected request, by field.
+	Errors map[string][]string
+	// Old is what was typed on it, without the fields IsSecretField and
+	// Withhold keep out.
+	Old url.Values
+	// Messages is the sentences a request that succeeded left for the next
+	// page, by key.
+	Messages map[string]string
+}
+
+// empty reports whether there is nothing in it to draw.
+func (f Flashed) empty() bool {
+	return len(f.Errors) == 0 && len(f.Old) == 0 && len(f.Messages) == 0
+}
 
 // The rules below decide which field's VALUE never goes back in the browser.
 //
@@ -183,8 +208,8 @@ var secretEndings = []string{
 	"passcode",
 }
 
-// Flash carries the messages and the input of a rejected request across the one
-// redirect that follows it.
+// Flash carries the messages and the input of a rejected request, or the
+// sentences of one that succeeded, across the one redirect that follows it.
 //
 // It is a signed one-shot cookie rather than session state on purpose. The
 // forms that need it most -- sign in, sign up, password reset -- are
@@ -193,8 +218,10 @@ var secretEndings = []string{
 // flash on the session would work everywhere except on the three screens it was
 // built for.
 //
-// It is not a bag of arbitrary messages either. What it carries is what a
-// rejected request produced: the errors, and what was typed. A general-purpose
+// It is not a bag of arbitrary values either. What it carries is what a
+// rejected request produced -- the errors, and what was typed -- or the
+// sentences a request that succeeded left for the page it redirects to, such as
+// "status". All of it is text for a person to read once. A general-purpose
 // "flash anything" would be a second way to get data onto a page, next to the
 // controller filling a struct.
 type Flash struct {
@@ -306,10 +333,72 @@ func (f *Flash) Write(w http.ResponseWriter, errs map[string][]string, old url.V
 	if len(errs) == 0 && len(kept) == 0 {
 		return
 	}
+	f.setFlash(w, f.fit(errs, kept))
+}
 
+// WriteMessages puts the sentences a request that succeeded has to say about
+// it in the browser, for the page it is about to be redirected to: "Profile
+// saved." under "status", read once by that page and gone on the next.
+//
+// It is the other half of answering a form. A rejected one goes back with its
+// errors through Write; one that worked redirects to the page that shows the
+// result -- post, redirect, get -- and that page cannot know the write just
+// happened unless something carries the sentence across the redirect. Drawing
+// the result at the address that was posted to is the alternative, and it is
+// the one that breaks: a reload posts the form again, and a refused form sent
+// "back" to that address lands on a route that only answers POST.
+//
+// The messages are sentences for a person, by key, and nothing else: no
+// value a page would compute from, no record, nothing a handler could pass
+// through the controller instead. Each is cut to the length a sentence needs,
+// and when they do not fit in MaxFlashBytes the keys at the end of the sorted
+// order are dropped first, so which ones survive is the same on every run.
+//
+// A second call on the same response replaces what the first wrote: the
+// cookie carries one set, and the caller passes the whole of it. Write on the
+// same response replaces it too, because a response either refuses the
+// request or reports what it did. Empty messages are left out, and nothing is
+// written when nothing is left.
+func (f *Flash) WriteMessages(w http.ResponseWriter, messages map[string]string) {
+	kept := make(map[string]string, len(messages))
+	for key, message := range messages {
+		if key != "" && message != "" {
+			kept[key] = message
+		}
+	}
+	if len(kept) == 0 {
+		return
+	}
+	value := f.encode(nil, nil, kept)
+	for len(value) > MaxFlashBytes && len(kept) > 1 {
+		keys := make([]string, 0, len(kept))
+		for key := range kept {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		delete(kept, keys[len(keys)-1])
+		value = f.encode(nil, nil, kept)
+	}
+	f.setFlash(w, value)
+}
+
+// setFlash sets the flash cookie on the response, replacing one this response
+// already set: a browser given two cookies of one name keeps the last, and a
+// header with both is two answers to one question.
+func (f *Flash) setFlash(w http.ResponseWriter, value string) {
+	header := w.Header()
+	if set := header.Values("Set-Cookie"); len(set) > 0 {
+		kept := set[:0:0]
+		for _, line := range set {
+			if !strings.HasPrefix(line, FlashCookieName+"=") {
+				kept = append(kept, line)
+			}
+		}
+		header["Set-Cookie"] = kept
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     FlashCookieName,
-		Value:    f.fit(errs, kept),
+		Value:    value,
 		Path:     "/",
 		MaxAge:   int(FlashLifetime.Seconds()),
 		HttpOnly: true,
@@ -321,8 +410,21 @@ func (f *Flash) Write(w http.ResponseWriter, errs map[string][]string, old url.V
 	})
 }
 
-// Take returns what Write stored and clears it, so it survives exactly one
-// request.
+// Take returns the errors and the input Write stored and clears the cookie, so
+// they survive exactly one request. It is Read without the messages, for a
+// caller that draws only a rejected form: what Read says about when the cookie
+// is spent holds here, and a cookie that carried only messages is spent and
+// answered with ok false.
+func (f *Flash) Take(w http.ResponseWriter, r *http.Request) (map[string][]string, url.Values, bool) {
+	got, ok := f.Read(w, r)
+	if !ok || (len(got.Errors) == 0 && len(got.Old) == 0) {
+		return nil, nil, false
+	}
+	return got.Errors, got.Old, true
+}
+
+// Read returns what Write or WriteMessages stored and clears it, so it
+// survives exactly one request.
 //
 // Cleared on the read rather than counted down like [Store.AgeFlashData],
 // which keeps the data for the request that reads it AND ages it afterwards -- a
@@ -339,33 +441,33 @@ func (f *Flash) Write(w http.ResponseWriter, errs map[string][]string, old url.V
 // ok is false, and the cookie IS cleared, when the value is there and cannot be
 // trusted -- forged, minted for another purpose, expired, or unreadable. There
 // is nothing to show and no reason to keep it.
-func (f *Flash) Take(w http.ResponseWriter, r *http.Request) (map[string][]string, url.Values, bool) {
+func (f *Flash) Read(w http.ResponseWriter, r *http.Request) (Flashed, bool) {
 	if !isPageRead(r) {
-		return nil, nil, false
+		return Flashed{}, false
 	}
 	c, err := r.Cookie(FlashCookieName)
 	if err != nil {
 		// No cookie, so nothing to clear: writing the clearing header anyway
 		// would put a Set-Cookie on every page view in the application.
-		return nil, nil, false
+		return Flashed{}, false
 	}
 
 	f.clearFlash(w)
 
 	payload, err := f.signer.Verify(flashPurpose, c.Value)
 	if err != nil {
-		return nil, nil, false
+		return Flashed{}, false
 	}
 	raw, err := url.ParseQuery(payload)
 	if err != nil {
-		return nil, nil, false
+		return Flashed{}, false
 	}
 
-	errs, old := decodeFlash(raw, f.withholds)
-	if len(errs) == 0 && len(old) == 0 {
-		return nil, nil, false
+	got := decodeFlash(raw, f.withholds)
+	if got.empty() {
+		return Flashed{}, false
 	}
-	return errs, old, true
+	return got, true
 }
 
 // isPageRead reports whether this request is a whole page somebody is about to
@@ -530,7 +632,7 @@ func fieldWords(field string) []string {
 // fit encodes and signs the flash, giving up what Write documents until the
 // cookie is inside MaxFlashBytes.
 func (f *Flash) fit(errs map[string][]string, old url.Values) string {
-	value := f.encode(errs, old)
+	value := f.encode(errs, old, nil)
 	if len(value) <= MaxFlashBytes {
 		return value
 	}
@@ -538,7 +640,7 @@ func (f *Flash) fit(errs map[string][]string, old url.Values) string {
 	// 1. Old input, longest value first. Messages matter more than redisplay.
 	for len(old) > 0 {
 		delete(old, longestFlashField(old))
-		value = f.encode(errs, old)
+		value = f.encode(errs, old, nil)
 		if len(value) <= MaxFlashBytes {
 			return value
 		}
@@ -551,7 +653,7 @@ func (f *Flash) fit(errs map[string][]string, old url.Values) string {
 			first[field] = msgs[:1]
 		}
 	}
-	value = f.encode(first, nil)
+	value = f.encode(first, nil, nil)
 	if len(value) <= MaxFlashBytes {
 		return value
 	}
@@ -562,7 +664,7 @@ func (f *Flash) fit(errs map[string][]string, old url.Values) string {
 	for len(first) > 1 {
 		names := sortedFlashFields(first)
 		delete(first, names[len(names)-1])
-		value = f.encode(first, nil)
+		value = f.encode(first, nil, nil)
 		if len(value) <= MaxFlashBytes {
 			return value
 		}
@@ -572,19 +674,16 @@ func (f *Flash) fit(errs map[string][]string, old url.Values) string {
 	return value
 }
 
-// encode writes the two halves into one signed payload.
+// encode writes the three parts into one signed payload.
 //
 // url.Values.Encode sorts its keys, so the same input produces the same bytes
 // every time: the cookie is stable across runs, which is what lets the trimming
 // above be tested and a report of it be reproduced.
-func (f *Flash) encode(errs map[string][]string, old url.Values) string {
+func (f *Flash) encode(errs map[string][]string, old url.Values, messages map[string]string) string {
 	payload := url.Values{}
 	for field, msgs := range errs {
 		for _, msg := range msgs {
-			if len(msg) > maxFlashMessage {
-				msg = msg[:maxFlashMessage]
-			}
-			payload.Add(flashErrorPrefix+field, msg)
+			payload.Add(flashErrorPrefix+field, capFlashMessage(msg))
 		}
 	}
 	for field, values := range old {
@@ -592,30 +691,54 @@ func (f *Flash) encode(errs map[string][]string, old url.Values) string {
 			payload.Add(flashOldPrefix+field, value)
 		}
 	}
+	for key, message := range messages {
+		payload.Set(flashMessagePrefix+key, capFlashMessage(message))
+	}
 	return f.signer.Sign(flashPurpose, payload.Encode(), FlashLifetime)
 }
 
-// decodeFlash splits the payload back into the two halves.
+// capFlashMessage cuts a message to maxFlashMessage bytes, back to the start of
+// the rune the cut would split, so a sentence in any language arrives as text
+// rather than ending in a broken character.
+func capFlashMessage(msg string) string {
+	if len(msg) <= maxFlashMessage {
+		return msg
+	}
+	cut := maxFlashMessage
+	for cut > 0 && !utf8.RuneStart(msg[cut]) {
+		cut--
+	}
+	return msg[:cut]
+}
+
+// decodeFlash splits the payload back into its three parts.
 //
-// A key with neither prefix is dropped rather than guessed at. The only way one
-// arrives is a payload this version did not write, and inventing a half for it
-// would put an unnamed value on a page.
-func decodeFlash(raw url.Values, withheld func(string) bool) (map[string][]string, url.Values) {
-	var errs map[string][]string
-	var old url.Values
+// A key with none of the prefixes is dropped rather than guessed at. The only
+// way one arrives is a payload this version did not write, and inventing a part
+// for it would put an unnamed value on a page.
+func decodeFlash(raw url.Values, withheld func(string) bool) Flashed {
+	var got Flashed
 
 	for key, values := range raw {
 		switch {
 		case strings.HasPrefix(key, flashErrorPrefix):
-			if errs == nil {
-				errs = map[string][]string{}
+			if got.Errors == nil {
+				got.Errors = map[string][]string{}
 			}
-			errs[strings.TrimPrefix(key, flashErrorPrefix)] = values
+			got.Errors[strings.TrimPrefix(key, flashErrorPrefix)] = values
 		case strings.HasPrefix(key, flashOldPrefix):
-			if old == nil {
-				old = url.Values{}
+			if got.Old == nil {
+				got.Old = url.Values{}
 			}
-			old[strings.TrimPrefix(key, flashOldPrefix)] = values
+			got.Old[strings.TrimPrefix(key, flashOldPrefix)] = values
+		case strings.HasPrefix(key, flashMessagePrefix):
+			if len(values) == 0 || values[0] == "" {
+				continue
+			}
+			if got.Messages == nil {
+				got.Messages = map[string]string{}
+			}
+			got.Messages[strings.TrimPrefix(key, flashMessagePrefix)] = values[0]
 		}
 	}
 
@@ -623,7 +746,8 @@ func decodeFlash(raw url.Values, withheld func(string) bool) (map[string][]strin
 	// in, and this side costs nothing: a cookie minted by an older binary, or by
 	// a half of the framework that grows a second Write, cannot put a password
 	// back into a form through here.
-	return errs, redactFlash(old, withheld)
+	got.Old = redactFlash(got.Old, withheld)
+	return got
 }
 
 // longestFlashField is the field whose values cost the most bytes, which is what

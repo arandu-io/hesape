@@ -33,6 +33,10 @@ type Context struct {
 	// input is the Request that Input and Bind read through, made on first use
 	// so that a JSON body is decoded once and both read the same map.
 	input *Request
+
+	// messages is what With has flashed on this response so far, kept so a
+	// second call adds to the first instead of replacing it.
+	messages map[string]string
 }
 
 // NewContext builds the Context an action is called with.

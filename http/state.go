@@ -9,10 +9,11 @@ import (
 
 // State is what the framework knows about a request before the handler runs.
 //
-// Today it is one thing: what the request that redirected here failed on. It is
-// a struct rather than that one thing so the next piece of per-request framework
-// state -- there will be one -- does not add a second context key, a second
-// middleware and a second accessor that every page has to be taught about.
+// It is what the request that redirected here left for this one: what it failed
+// on, or what it said it did. It is a struct rather than any one of those so the
+// next piece of per-request framework state does not add a second context key,
+// a second middleware and a second accessor that every page has to be taught
+// about.
 //
 // It is put on the request context by the middleware that spends the flash
 // cookie, in hesape/session, and read by view.New. Nothing else writes it, and
@@ -28,6 +29,10 @@ type State struct {
 	// session.Flash for what "every password field" means and why the messages
 	// for those fields survive when their values do not.
 	Old url.Values
+	// Messages is what the request that redirected here said about what it
+	// did, by key -- "status" for the sentence a form that worked leaves for
+	// the page it lands on. See Context.With.
+	Messages map[string]string
 }
 
 // stateKey is the context key, of an unexported type, so that nothing outside

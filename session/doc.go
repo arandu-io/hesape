@@ -18,7 +18,8 @@
 //     in memory, the RESP handler in hesape/redis for more than one instance,
 //     and [Decode] over a [Keeper] that stores raw records.
 //   - [Flash], the one-shot signed cookie that carries the messages and the
-//     typed input of a rejected request even when there is no session at all.
+//     typed input of a rejected request, or the status sentence of one that
+//     succeeded, even when there is no session at all.
 //     Cleared on the read, so a message cannot appear on a page nobody
 //     submitted.
 //   - [CSRF], the double-submit token bound to the session id, or to a guest
