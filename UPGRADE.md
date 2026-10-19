@@ -27,7 +27,7 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
-## v0.68.0 — a wipe stays in the connection's own schemas
+## v0.69.0 — a wipe stays in the connection's own schemas
 
 Nothing in the API breaks. What changes is how much `migrate:fresh` drops.
 
