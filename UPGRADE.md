@@ -27,6 +27,13 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.64.1 — `http.Context` is comparable again
+
+v0.64.0 gave `http.Context` a map field for `Context.With`, which made the
+struct not comparable: code that compared two `http.Context` values, or used
+one as a map key, stopped compiling. v0.64.1 keeps the field behind a pointer
+and the struct is comparable as it was in v0.63.0. Take v0.64.1, not v0.64.0.
+
 ## v0.63.0 — webhooks and accounts after the review
 
 Nothing in the API breaks: `Flash.Withhold`, `Users.Admit`,

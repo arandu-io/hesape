@@ -35,8 +35,9 @@ type Context struct {
 	input *Request
 
 	// messages is what With has flashed on this response so far, kept so a
-	// second call adds to the first instead of replacing it.
-	messages map[string]string
+	// second call adds to the first instead of replacing it. A pointer, so
+	// Context stays comparable: a map field would make it not.
+	messages *flashedMessages
 }
 
 // NewContext builds the Context an action is called with.

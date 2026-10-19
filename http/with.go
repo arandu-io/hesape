@@ -61,9 +61,15 @@ func (c *Context) With(key, message string) *Context {
 		return c
 	}
 	if c.messages == nil {
-		c.messages = map[string]string{}
+		c.messages = &flashedMessages{byKey: map[string]string{}}
 	}
-	c.messages[key] = message
-	f.WriteMessages(c.Response, c.messages)
+	c.messages.byKey[key] = message
+	f.WriteMessages(c.Response, c.messages.byKey)
 	return c
+}
+
+// flashedMessages is what With has written on one response, behind a pointer
+// on Context.
+type flashedMessages struct {
+	byKey map[string]string
 }
