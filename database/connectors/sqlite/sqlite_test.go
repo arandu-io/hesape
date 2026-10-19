@@ -449,3 +449,54 @@ func TestANilTimestampIsStillNull(t *testing.T) {
 		t.Errorf("a nil pointer was stored as %v, want NULL", rows[0]["absent"])
 	}
 }
+
+// TestViewsAreListedWithTheirDefinition: the view listing selected its
+// definition from pragma_table_list, which has no sql column, so GetViews,
+// HasView and DropAllViews all failed on SQLite with "no such column: sql".
+// The definition comes from the schema's own catalogue, whether the schema is
+// named or not.
+func TestViewsAreListedWithTheirDefinition(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "views.sqlite")
+
+	db, closeDB, err := database.Open(database.Config{
+		Connection: database.DialectSQLite,
+		Database:   path,
+	})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(closeDB)
+
+	connection := database.NewConnection(db.Unwrap(), path, "", map[string]any{
+		"driver": string(database.DialectSQLite), "name": "views", "database": path,
+	})
+	builder := schema.NewBuilder(database.ForSchema(connection))
+
+	for _, statement := range []string{
+		`CREATE TABLE invoices (id TEXT PRIMARY KEY)`,
+		`CREATE VIEW open_invoices AS SELECT id FROM invoices`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+
+	for _, schemas := range [][]string{nil, {"main"}} {
+		views, err := builder.GetViews(ctx, schemas...)
+		if err != nil {
+			t.Fatalf("GetViews(%q): %v", schemas, err)
+		}
+		if len(views) != 1 || views[0].Name != "open_invoices" || views[0].Schema != "main" {
+			t.Fatalf("GetViews(%q) = %+v, want open_invoices in main", schemas, views)
+		}
+		if views[0].Definition != "CREATE VIEW open_invoices AS SELECT id FROM invoices" {
+			t.Fatalf("GetViews(%q) definition = %q, want the CREATE VIEW the catalogue keeps", schemas, views[0].Definition)
+		}
+	}
+
+	exists, err := builder.HasView(ctx, "open_invoices")
+	if err != nil || !exists {
+		t.Fatalf("HasView = %v, %v; want true", exists, err)
+	}
+}
