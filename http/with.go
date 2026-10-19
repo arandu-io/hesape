@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"sync"
 
 	"github.com/arandu-io/hesape/session"
 )
@@ -25,7 +26,60 @@ func WithFlash(parent context.Context, f *session.Flash) context.Context {
 	if f == nil {
 		return parent
 	}
-	return context.WithValue(parent, flashKey{}, f)
+	return context.WithValue(context.WithValue(parent, flashKey{}, f), revealKey{}, &revealedFields{})
+}
+
+// Revealer is a request whose form holds a field the flash keeps out by its
+// name alone, and whose value is not a secret on this form: a discount's
+// code, which is a coupon somebody typed rather than a one-time code.
+//
+//	func (DiscountRequest) RevealedFields() []string { return []string{"code"} }
+//
+// Bind reads it from the request it fills, and a refusal of that request
+// carries those fields back with the rest of what was typed. Only a name
+// session.Revealable answers true for is revealed -- one secret by its whole
+// name, such as code or pan -- so a password, a token or a card's security
+// code stays out whatever the request says. Another form posting a field of
+// the same name is unaffected: the declaration belongs to the request that
+// made it.
+type Revealer interface {
+	RevealedFields() []string
+}
+
+// revealKey is the context key of the fields the request bound on this
+// request declared revealed.
+type revealKey struct{}
+
+// revealedFields is what Bind recorded for Reject, behind a pointer the router
+// puts on the request before the action runs: the action binds on the context
+// the router gave it, and the router answers the refusal on the request it
+// kept, so the two meet only through something both hold.
+type revealedFields struct {
+	mu     sync.Mutex
+	fields []string
+}
+
+// revealFields records the fields a bound request declared revealed.
+func revealFields(ctx context.Context, fields []string) {
+	box, ok := ctx.Value(revealKey{}).(*revealedFields)
+	if !ok || box == nil || len(fields) == 0 {
+		return
+	}
+	box.mu.Lock()
+	box.fields = append(box.fields, fields...)
+	box.mu.Unlock()
+}
+
+// revealedFrom returns the fields a request bound on this request declared
+// revealed.
+func revealedFrom(ctx context.Context) []string {
+	box, ok := ctx.Value(revealKey{}).(*revealedFields)
+	if !ok || box == nil {
+		return nil
+	}
+	box.mu.Lock()
+	defer box.mu.Unlock()
+	return append([]string(nil), box.fields...)
 }
 
 // FlashFrom returns the flash on a request context, and whether there is one.

@@ -64,6 +64,9 @@ const (
 	flashErrorPrefix   = "e:"
 	flashOldPrefix     = "o:"
 	flashMessagePrefix = "m:"
+	// flashRevealKey lists the fields of Old a request declared revealed, so
+	// the read applies the same exception the write did. See WriteRevealing.
+	flashRevealKey = "r:"
 )
 
 // Flashed is everything one flash cookie carries to the page the browser is
@@ -329,11 +332,24 @@ func NewFlash(appKey []byte, secure bool) *Flash {
 // It writes nothing when there is nothing to write, so no caller needs the
 // branch.
 func (f *Flash) Write(w http.ResponseWriter, errs map[string][]string, old url.Values) {
-	kept := redactFlash(old, f.withholds)
+	f.WriteRevealing(w, errs, old, nil)
+}
+
+// WriteRevealing is Write for a request that declared fields whose value goes
+// back although IsSecretField keeps them out: a discount's code, which is a
+// coupon somebody typed and not a one-time code.
+//
+// Only a name Revealable answers true for is revealed -- one secret by its
+// whole name alone -- and a field Withhold names stays withheld. Every other
+// name in revealed is ignored, so a declaration cannot carry a password, a
+// token or a card number back into a page. Names are read as IsSecretField
+// reads them: Code and code are one name.
+func (f *Flash) WriteRevealing(w http.ResponseWriter, errs map[string][]string, old url.Values, revealed []string) {
+	kept := redactFlash(old, f.withholds, revealed)
 	if len(errs) == 0 && len(kept) == 0 {
 		return
 	}
-	f.setFlash(w, f.fit(errs, kept))
+	f.setFlash(w, f.fit(errs, kept, revealedIn(kept, revealed)))
 }
 
 // WriteMessages puts the sentences a request that succeeded has to say about
@@ -369,7 +385,7 @@ func (f *Flash) WriteMessages(w http.ResponseWriter, messages map[string]string)
 	if len(kept) == 0 {
 		return
 	}
-	value := f.encode(nil, nil, kept)
+	value := f.encode(nil, nil, kept, nil)
 	for len(value) > MaxFlashBytes && len(kept) > 1 {
 		keys := make([]string, 0, len(kept))
 		for key := range kept {
@@ -377,7 +393,7 @@ func (f *Flash) WriteMessages(w http.ResponseWriter, messages map[string]string)
 		}
 		sort.Strings(keys)
 		delete(kept, keys[len(keys)-1])
-		value = f.encode(nil, nil, kept)
+		value = f.encode(nil, nil, kept, nil)
 	}
 	f.setFlash(w, value)
 }
@@ -505,13 +521,13 @@ func (f *Flash) clearFlash(w http.ResponseWriter) {
 
 // redactFlash returns the input with every secret's value removed, and every
 // field withheld reports.
-func redactFlash(old url.Values, withheld func(string) bool) url.Values {
+func redactFlash(old url.Values, withheld func(string) bool, revealed []string) url.Values {
 	if len(old) == 0 {
 		return nil
 	}
 	kept := make(url.Values, len(old))
 	for field, values := range old {
-		if IsSecretField(field) || withheld(field) {
+		if withheld(field) || (IsSecretField(field) && !revealedField(field, revealed)) {
 			continue
 		}
 		kept[field] = values
@@ -520,6 +536,37 @@ func redactFlash(old url.Values, withheld func(string) bool) url.Values {
 		return nil
 	}
 	return kept
+}
+
+// revealedField reports whether a request declared this field revealed, and
+// the field is one a declaration may reveal.
+func revealedField(field string, revealed []string) bool {
+	if len(revealed) == 0 || !Revealable(field) {
+		return false
+	}
+	joined := strings.Join(fieldWords(field), "")
+	for _, name := range revealed {
+		if strings.Join(fieldWords(name), "") == joined {
+			return true
+		}
+	}
+	return false
+}
+
+// revealedIn is the fields of kept that are there only because they were
+// revealed, by their name in kept.
+func revealedIn(kept url.Values, revealed []string) []string {
+	if len(revealed) == 0 {
+		return nil
+	}
+	var out []string
+	for field := range kept {
+		if IsSecretField(field) && revealedField(field, revealed) {
+			out = append(out, field)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // redactInput returns the input with every secret's value removed, at any
@@ -575,9 +622,30 @@ func redactInputValue(value any) any {
 func IsSecretField(field string) bool {
 	words := fieldWords(field)
 	joined := strings.Join(words, "")
-	if secretNames[joined] {
-		return true
-	}
+	return secretNames[joined] || secretByRule(words, joined)
+}
+
+// Revealable reports whether a request may declare that a field's value goes
+// back after a refusal although IsSecretField keeps it out: whether the field
+// is secret only because its whole name is one of the ambiguous ones -- code,
+// tokens, secrets, pan -- and no word, fragment or ending of it is a
+// credential.
+//
+// Those names are over-caught on purpose: a form that asks for nothing but a
+// code is asking for a one-time one more often than not. A form that knows its
+// code is a coupon, a discount or a product code says so for its own request
+// -- see http.Revealer -- and only for this kind of name. A password, a token
+// or a card number is never revealed by a declaration, whatever the request
+// says.
+func Revealable(field string) bool {
+	words := fieldWords(field)
+	joined := strings.Join(words, "")
+	return secretNames[joined] && !secretByRule(words, joined)
+}
+
+// secretByRule reports whether a word, a fragment or an ending of the name is
+// a credential: every rule of IsSecretField but the whole-name one.
+func secretByRule(words []string, joined string) bool {
 	for _, word := range words {
 		if secretWords[word] {
 			return true
@@ -631,8 +699,8 @@ func fieldWords(field string) []string {
 
 // fit encodes and signs the flash, giving up what Write documents until the
 // cookie is inside MaxFlashBytes.
-func (f *Flash) fit(errs map[string][]string, old url.Values) string {
-	value := f.encode(errs, old, nil)
+func (f *Flash) fit(errs map[string][]string, old url.Values, revealed []string) string {
+	value := f.encode(errs, old, nil, revealed)
 	if len(value) <= MaxFlashBytes {
 		return value
 	}
@@ -640,7 +708,7 @@ func (f *Flash) fit(errs map[string][]string, old url.Values) string {
 	// 1. Old input, longest value first. Messages matter more than redisplay.
 	for len(old) > 0 {
 		delete(old, longestFlashField(old))
-		value = f.encode(errs, old, nil)
+		value = f.encode(errs, old, nil, revealed)
 		if len(value) <= MaxFlashBytes {
 			return value
 		}
@@ -653,7 +721,7 @@ func (f *Flash) fit(errs map[string][]string, old url.Values) string {
 			first[field] = msgs[:1]
 		}
 	}
-	value = f.encode(first, nil, nil)
+	value = f.encode(first, nil, nil, nil)
 	if len(value) <= MaxFlashBytes {
 		return value
 	}
@@ -664,7 +732,7 @@ func (f *Flash) fit(errs map[string][]string, old url.Values) string {
 	for len(first) > 1 {
 		names := sortedFlashFields(first)
 		delete(first, names[len(names)-1])
-		value = f.encode(first, nil, nil)
+		value = f.encode(first, nil, nil, nil)
 		if len(value) <= MaxFlashBytes {
 			return value
 		}
@@ -679,7 +747,10 @@ func (f *Flash) fit(errs map[string][]string, old url.Values) string {
 // url.Values.Encode sorts its keys, so the same input produces the same bytes
 // every time: the cookie is stable across runs, which is what lets the trimming
 // above be tested and a report of it be reproduced.
-func (f *Flash) encode(errs map[string][]string, old url.Values, messages map[string]string) string {
+//
+// revealed names the fields of old a request declared revealed; a name not in
+// old is left out, so trimming old drops its declaration with it.
+func (f *Flash) encode(errs map[string][]string, old url.Values, messages map[string]string, revealed []string) string {
 	payload := url.Values{}
 	for field, msgs := range errs {
 		for _, msg := range msgs {
@@ -693,6 +764,11 @@ func (f *Flash) encode(errs map[string][]string, old url.Values, messages map[st
 	}
 	for key, message := range messages {
 		payload.Set(flashMessagePrefix+key, capFlashMessage(message))
+	}
+	for _, field := range revealed {
+		if _, ok := old[field]; ok {
+			payload.Add(flashRevealKey, field)
+		}
 	}
 	return f.signer.Sign(flashPurpose, payload.Encode(), FlashLifetime)
 }
@@ -721,6 +797,8 @@ func decodeFlash(raw url.Values, withheld func(string) bool) Flashed {
 
 	for key, values := range raw {
 		switch {
+		case key == flashRevealKey:
+			continue
 		case strings.HasPrefix(key, flashErrorPrefix):
 			if got.Errors == nil {
 				got.Errors = map[string][]string{}
@@ -746,7 +824,7 @@ func decodeFlash(raw url.Values, withheld func(string) bool) Flashed {
 	// in, and this side costs nothing: a cookie minted by an older binary, or by
 	// a half of the framework that grows a second Write, cannot put a password
 	// back into a form through here.
-	got.Old = redactFlash(got.Old, withheld)
+	got.Old = redactFlash(got.Old, withheld, raw[flashRevealKey])
 	return got
 }
 

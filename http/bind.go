@@ -158,6 +158,9 @@ func (c *Context) Bind(dst any) error {
 		}
 	}
 
+	if revealer, ok := dst.(Revealer); ok {
+		revealFields(c.Ctx(), revealer.RevealedFields())
+	}
 	form := formValues(input.inputMap())
 	if input.tooLarge != nil {
 		return input.tooLarge

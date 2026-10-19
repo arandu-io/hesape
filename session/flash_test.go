@@ -493,3 +493,69 @@ func TestAFieldTheApplicationWithholdsNeverReachesTheCookie(t *testing.T) {
 		t.Fatal("IsSecretField names cpf: withholding is the application's, not the collection's")
 	}
 }
+
+func TestARevealedCodeComesBackAndNothingElseSecretDoes(t *testing.T) {
+	f := testFlash()
+	f.Withhold("pan")
+
+	old := url.Values{
+		"code":         {"BEMVINDO10"},
+		"tokens":       {"two-of-them"},
+		"pan":          {"leak-withheld"},
+		"password":     {"leak-password"},
+		"email_code":   {"leak-email-code"},
+		"api_token":    {"leak-token"},
+		"name":         {"Desconto"},
+		"secrets":      {"leak-not-declared-either"},
+		"card_cvv":     {"leak-cvv"},
+		"recoverycode": {"leak-recovery"},
+	}
+	rec := httptest.NewRecorder()
+	f.WriteRevealing(rec, map[string][]string{"code": {"Already taken."}}, old,
+		[]string{"Code", "tokens", "pan", "password", "email_code", "api_token", "card_cvv", "recoverycode"})
+	cookie := written(rec)
+	if cookie == nil {
+		t.Fatal("WriteRevealing set no cookie")
+	}
+	if payload := flashPayload(t, cookie); strings.Contains(payload, "leak") {
+		t.Fatalf("the cookie carries a secret no declaration may reveal: %s", payload)
+	}
+	errs, back, ok := f.Take(httptest.NewRecorder(), pageRead(cookie))
+	if !ok {
+		t.Fatal("nothing came back")
+	}
+	if got := back.Get("code"); got != "BEMVINDO10" {
+		t.Errorf("the declared code came back as %q, want what was typed", got)
+	}
+	if got := back.Get("tokens"); got != "two-of-them" {
+		t.Errorf("the declared tokens came back as %q", got)
+	}
+	for field := range old {
+		if strings.HasPrefix(old.Get(field), "leak") && back.Get(field) != "" {
+			t.Errorf("%s came back as %q", field, back.Get(field))
+		}
+	}
+	if back.Get("name") != "Desconto" || len(errs["code"]) != 1 {
+		t.Errorf("an ordinary field or the message was lost: %v %v", back, errs)
+	}
+
+	// The same cookie without the declaration: Write, which a refusal of any
+	// other form calls, keeps the code out as before.
+	rec = httptest.NewRecorder()
+	f.Write(rec, map[string][]string{"code": {"Expired."}}, url.Values{"code": {"123456"}})
+	if _, back, _ := f.Take(httptest.NewRecorder(), pageRead(written(rec))); back.Get("code") != "" {
+		t.Errorf("an undeclared code came back as %q", back.Get("code"))
+	}
+}
+
+func TestOnlyANameSecretByItselfIsRevealable(t *testing.T) {
+	for name, want := range map[string]bool{
+		"code": true, "Code": true, "tokens": true, "secrets": true, "pan": true,
+		"password": false, "email_code": false, "recovery_code": false, "otp": false,
+		"api_token": false, "card_number": false, "cvv": false, "postal_code": false, "name": false,
+	} {
+		if got := session.Revealable(name); got != want {
+			t.Errorf("Revealable(%q) = %v, want %v", name, got, want)
+		}
+	}
+}

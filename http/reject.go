@@ -45,9 +45,11 @@ import (
 // # What goes in the flash
 //
 // The posted form, minus the fields session.Flash never carries back, and the
-// messages. The query string is deliberately not included: it is already in the
-// address being returned to, and adding it would put the same values on the page
-// twice with a chance of the two disagreeing.
+// messages. A field the bound request declared revealed -- see Revealer -- is
+// carried back although its name alone would keep it out. The query string is
+// deliberately not included: it is already in the address being returned to,
+// and adding it would put the same values on the page twice with a chance of
+// the two disagreeing.
 func Reject(w stdhttp.ResponseWriter, r *stdhttp.Request, f *session.Flash, errs validation.Errors) {
 	if f != nil {
 		// Parsed here rather than assumed: a handler that rejected on the first
@@ -56,7 +58,7 @@ func Reject(w stdhttp.ResponseWriter, r *stdhttp.Request, f *session.Flash, errs
 		// input is, multipart and DELETE included, and reading it again is a
 		// no-op.
 		_ = parseBody(r)
-		f.Write(w, errs, r.PostForm)
+		f.WriteRevealing(w, errs, r.PostForm, revealedFrom(r.Context()))
 	}
 
 	// A rejected form is one person's typed input coming back to them. It must

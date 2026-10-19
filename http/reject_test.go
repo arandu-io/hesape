@@ -179,3 +179,50 @@ func TestAFailedValidateIsRejectedLikeErrors(t *testing.T) {
 		t.Fatalf("the messages did not survive the redirect: %v", carried)
 	}
 }
+
+// couponForm is a request whose code is a coupon somebody typed.
+type couponForm struct {
+	Code  string `form:"code"`
+	Title string `form:"title"`
+}
+
+func (couponForm) RevealedFields() []string { return []string{"code"} }
+
+// plainForm posts the same field without declaring it.
+type plainForm struct {
+	Code string `form:"code"`
+}
+
+func TestARefusedRequestThatRevealsItsCodeGetsTheCodeBack(t *testing.T) {
+	refuse := func(bind any) string {
+		t.Helper()
+		f := flash()
+		req := httptest.NewRequest(stdhttp.MethodPost, "http://example.test/discounts",
+			strings.NewReader("code=BEMVINDO10&title="))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Referer", "http://example.test/discounts/new")
+		req = req.WithContext(hhttp.WithFlash(req.Context(), f))
+		rec := httptest.NewRecorder()
+		ctx := hhttp.NewContext(rec, req, nil, nil)
+		if err := ctx.Bind(bind); err != nil {
+			t.Fatalf("Bind: %v", err)
+		}
+		hhttp.Reject(rec, req, f, failed())
+		next := httptest.NewRequest(stdhttp.MethodGet, "/discounts/new", nil)
+		next.Header.Set("Accept", "text/html")
+		for _, c := range rec.Result().Cookies() {
+			next.AddCookie(c)
+		}
+		_, old, ok := f.Take(httptest.NewRecorder(), next)
+		if !ok {
+			t.Fatal("the page the person was sent to found no flash")
+		}
+		return old.Get("code")
+	}
+	if got := refuse(&couponForm{}); got != "BEMVINDO10" {
+		t.Errorf("the coupon came back as %q, want what was typed", got)
+	}
+	if got := refuse(&plainForm{}); got != "" {
+		t.Errorf("a code nobody declared came back as %q", got)
+	}
+}
