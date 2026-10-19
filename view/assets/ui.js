@@ -767,19 +767,81 @@
 	 * showModal rather than show, because a modal is what these panels are:
 	 * the rest of the document goes inert, focus is trapped, and Escape closes
 	 * -- all three from the element, none of them written here.
+	 *
+	 * # A trigger that is a link
+	 *
+	 * The trigger may be an <a href> to the page that holds the same form, which
+	 * is what a form dialog is opened from: without this file the link goes to
+	 * that page, and the form is posted and refused there like any other. With
+	 * it, an ordinary click opens the dialog instead. A click that asks for a
+	 * new tab or a new window -- a modifier held, or a button other than the
+	 * first -- is left to the browser, because that person asked for the page.
+	 *
+	 * # Where focus goes when it closes
+	 *
+	 * Back to whatever opened it. The element does that on its own when the
+	 * opener had focus, and an opener that was clicked does not always have it:
+	 * Safari focuses neither a link nor a button on a click. Focus then lands on
+	 * the body, and somebody on a keyboard starts again from the top of the
+	 * page. So the opener is remembered, and given focus back when the element
+	 * left it nowhere. A dialog nobody clicked open -- one reopened after a
+	 * refused submit -- returns focus to the first trigger on the page that
+	 * names it.
 	 */
+	var openers = new WeakMap();
+
+	function opensInPlace(event, trigger) {
+		if (trigger.tagName !== 'A') return true;
+		return !(event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey);
+	}
+
+	function triggerOf(panel) {
+		if (!panel.id) return null;
+		var name = window.CSS && CSS.escape ? CSS.escape(panel.id) : panel.id;
+		return document.querySelector('[data-dialog-open="' + name + '"]');
+	}
+
+	/* showModal on an element that is already open, but not as a modal, throws.
+	 * That is the state a dialog is drawn in when it has to be readable without
+	 * this file -- see form-dialog below -- so it is shut first and opened
+	 * again the way every dialog here is opened. */
+	function showModal(panel) {
+		var modal = false;
+		try { modal = panel.matches(':modal'); } catch (e) { modal = false; }
+		if (panel.open && modal) return;
+		if (panel.open) panel.close();
+		panel.showModal();
+		landOnAControl(panel);
+	}
+
+	/* The element puts focus on the first thing in the panel that can take it,
+	 * and a region that scrolls can: a form longer than the screen sends the
+	 * cursor to its scrolling body, where typing does nothing. A panel that
+	 * chose a control -- autofocus, or a first field -- is left as it is. */
+	var CONTROL = 'input:not([type="hidden"]), select, textarea, button, a[href], [contenteditable], [tabindex]:not([tabindex="-1"])';
+
+	function landOnAControl(panel) {
+		var focused = document.activeElement;
+		if (!focused || !panel.contains(focused) || focused.matches(CONTROL)) return;
+		var first = panel.querySelector('input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])');
+		if (first) first.focus();
+	}
+
 	document.addEventListener('click', function (event) {
 		var open = event.target.closest('[data-dialog-open]');
 		if (open) {
 			var panel = document.getElementById(open.getAttribute('data-dialog-open'));
 			/* A dialog that is not on the page is a page that changed under a
-			 * button, and it is worth one line rather than a silent nothing. */
+			 * button, and it is worth one line rather than a silent nothing. A
+			 * link is left to go where it points. */
 			if (!panel || typeof panel.showModal !== 'function') {
 				miss('dialog', open.getAttribute('data-dialog-open'));
 				return;
 			}
+			if (!opensInPlace(event, open)) return;
 			event.preventDefault();
-			if (!panel.open) panel.showModal();
+			openers.set(panel, open);
+			showModal(panel);
 			return;
 		}
 
@@ -792,6 +854,48 @@
 		if (!target) return;
 		event.preventDefault();
 		target.close();
+	});
+
+	/* close does not bubble, so this listens in the capture phase. A dialog
+	 * that is open again by the time the event arrives was shut only to be
+	 * reopened as a modal, and focus is already where it belongs. */
+	document.addEventListener('close', function (event) {
+		var panel = origin(event);
+		if (!panel || panel.tagName !== 'DIALOG' || panel.open) return;
+		var opener = openers.get(panel) || triggerOf(panel);
+		openers.delete(panel);
+		if (!opener || !opener.isConnected || typeof opener.focus !== 'function') return;
+		var active = document.activeElement;
+		if (!active || active === document.body || panel.contains(active)) opener.focus();
+	}, true);
+
+	/* ---- form dialog -----------------------------------------------------------
+	 *
+	 * A dialog holding a form, which has to open by itself on one occasion: the
+	 * form inside it was refused. The server answers a refused form by sending
+	 * the person back to the page they posted from, with the messages and what
+	 * they typed, and the page they posted from is the list the dialog sits on.
+	 * Drawn as it was before, the messages would be inside a closed dialog.
+	 *
+	 * So the component draws it with props {"open": true} when the page says
+	 * the refused form was this one, and this opens it as a modal and puts the
+	 * cursor on the first field that was refused. Opening it is the only thing
+	 * this does: the messages, the typed values and the field that is invalid
+	 * are all in the markup the server drew.
+	 *
+	 * The component also writes the open attribute in that case, so the form is
+	 * readable on a page where this file never ran -- shown in place rather than
+	 * as a modal. showModal above turns that into the modal.
+	 */
+	arandu.ui.define('form-dialog', {
+		mounted: function (ctx) {
+			var panel = ctx.element;
+			if (!ctx.props || ctx.props.open !== true) return;
+			if (typeof panel.showModal !== 'function') return;
+			showModal(panel);
+			var refused = panel.querySelector('[aria-invalid="true"]');
+			if (refused && typeof refused.focus === 'function') refused.focus();
+		},
 	});
 
 	/* ---- calendar ------------------------------------------------------------

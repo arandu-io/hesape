@@ -49,7 +49,7 @@ func TestEveryBehaviourTheComponentsEmitIsRegistered(t *testing.T) {
 	// So the names are the ones this script owns, listed here, and the test that
 	// keeps the list honest is in kyse -- it reads its own constants and fails
 	// if one is not in this file.
-	for _, name := range []string{"password"} {
+	for _, name := range []string{"password", "form-dialog"} {
 		if !answered[name] {
 			names := make([]string, 0, len(answered))
 			for have := range answered {
