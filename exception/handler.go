@@ -367,7 +367,7 @@ func (h *Handler) RenderForConsole(w io.Writer, err error) {
 		return
 	}
 	if status, known := StatusOf(err); known {
-		fmt.Fprintf(w, "error: %s (%d)\n", messageFor(err, status), status)
+		fmt.Fprintf(w, "error: %s (%d)\n", messageFor(nil, err, status), status)
 		return
 	}
 	fmt.Fprintf(w, "error: %s\n", err.Error())
@@ -380,7 +380,7 @@ func (h *Handler) answer(w http.ResponseWriter, r *http.Request, value any, err 
 	applyErrorHeaders(w, err)
 
 	if h.shouldReturnJSON(r, err) {
-		writeProblem(w, r, statusOr500(status, known), messageFor(err, status), validationMessages(err))
+		writeProblem(w, r, statusOr500(status, known), messageFor(r, err, status), validationMessages(err))
 		return
 	}
 
@@ -391,7 +391,7 @@ func (h *Handler) answer(w http.ResponseWriter, r *http.Request, value any, err 
 		return
 	}
 
-	h.renderStatus(w, r, statusOr500(status, known), messageFor(err, status))
+	h.renderStatus(w, r, statusOr500(status, known), messageFor(r, err, status))
 }
 
 // renderStatus draws the page for a status: the application's own if it has
@@ -466,12 +466,16 @@ func wantsJSON(r *http.Request) bool {
 // status. There is no environment flag on this: an error string is not written
 // for a stranger even in development, and development already has the debug
 // page, which shows everything.
-func messageFor(err error, status int) string {
+//
+// The standard sentence is the application's when its Sentences chose one for
+// the status; a message the developer wrote on an *HTTPError is kept as it is.
+func messageFor(r *http.Request, err error, status int) string {
 	var he *HTTPError
 	if errors.As(err, &he) && he.Message != "" {
 		return he.Message
 	}
-	return statusMessage(statusOr500(status, status != 0))
+	status = statusOr500(status, status != 0)
+	return Sentence(r, status, statusMessage(status))
 }
 
 // validationMessages is what a validation failure in the chain asks to show

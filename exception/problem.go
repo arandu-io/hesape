@@ -108,6 +108,9 @@ func WriteValidationProblem(w http.ResponseWriter, r *http.Request, errs map[str
 // above call it, so the headers a JSON failure leaves with cannot differ
 // between them.
 func writeProblem(w http.ResponseWriter, r *http.Request, status int, detail string, errs map[string][]string) {
+	// The detail is written for the person reading it, so the application's
+	// sentence for the status replaces the one the caller passed.
+	detail = Sentence(r, status, detail)
 	body := Problem{
 		Type:      blankProblemType,
 		Title:     statusTitle(status),

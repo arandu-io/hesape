@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/arandu-io/hesape/exception"
+	hhttp "github.com/arandu-io/hesape/http"
 	"github.com/arandu-io/hesape/pipeline"
 )
 
@@ -227,8 +229,64 @@ func (r *Router) Table() *Routes { return r.table }
 func (r *Router) Routes() []*Route { return r.table.All() }
 
 // ServeHTTP dispatches to the underlying mux.
+//
+// A request no route matches -- an address nobody registered, a method the
+// address does not answer -- is answered by the mux's own 404 or 405. When the
+// application's exception.Sentences has a sentence for that status, the answer
+// goes through hhttp.Refuse with it, like every other refusal, and an htmx
+// request gets HX-Refresh; otherwise it is the mux's own text. The status and
+// the mux's headers, Allow among them, are kept either way.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	r.mux.ServeHTTP(w, req)
+	h, pattern := r.mux.Handler(req)
+	if pattern != "" {
+		r.mux.ServeHTTP(w, req)
+		return
+	}
+	h.ServeHTTP(&unmatched{ResponseWriter: w, req: req}, req)
+}
+
+// unmatched is the writer the mux answers an unmatched request on: a refusal the
+// application has a sentence for is written through hhttp.Refuse, and the text
+// the mux writes after is dropped, because Refuse has already written it.
+// Anything else -- the redirect to a path's canonical form, a refusal the
+// application left alone -- passes through untouched.
+type unmatched struct {
+	http.ResponseWriter
+	req     *http.Request
+	written bool
+	refused bool
+}
+
+// WriteHeader answers a refusal through Refuse.
+func (u *unmatched) WriteHeader(status int) {
+	if u.written {
+		return
+	}
+	u.written = true
+	if status < http.StatusBadRequest {
+		u.ResponseWriter.WriteHeader(status)
+		return
+	}
+	sentence := exception.Sentence(u.req, status, "")
+	if sentence == "" {
+		// The application said nothing about this status: the mux's own
+		// answer goes out as it always did.
+		u.ResponseWriter.WriteHeader(status)
+		return
+	}
+	u.refused = true
+	hhttp.Refuse(u.ResponseWriter, u.req, status, sentence)
+}
+
+// Write drops the mux's own text once Refuse has answered.
+func (u *unmatched) Write(b []byte) (int, error) {
+	if !u.written {
+		u.WriteHeader(http.StatusOK)
+	}
+	if u.refused {
+		return len(b), nil
+	}
+	return u.ResponseWriter.Write(b)
 }
 
 // handle registers a pattern relative to the router's prefix.

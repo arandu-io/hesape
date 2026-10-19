@@ -186,7 +186,7 @@ type PlainDisplayer struct{ handler *Handler }
 func (d *PlainDisplayer) Display(w http.ResponseWriter, r *http.Request, err error) {
 	status, known := StatusOf(err)
 	applyErrorHeaders(w, err)
-	d.handler.renderStatus(w, r, statusOr500(status, known), messageFor(err, status))
+	d.handler.renderStatus(w, r, statusOr500(status, known), messageFor(r, err, status))
 }
 
 // DebugDisplayer draws the debug page: the stack with source, the queries with

@@ -7,6 +7,7 @@ import (
 	stdhttp "net/http"
 	"strings"
 
+	"github.com/arandu-io/hesape/exception"
 	"github.com/arandu-io/hesape/log"
 	"github.com/arandu-io/hesape/toon"
 )
@@ -441,11 +442,14 @@ func Redirect(w stdhttp.ResponseWriter, r *stdhttp.Request, to string) {
 // It is one function and not a branch in each middleware, for the reason
 // Redirect above is one function: the last time this decision existed in three
 // copies, one of them was wrong.
+//
+// The sentence is the application's when its exception.Sentences chose one for
+// the status, and message otherwise.
 func Refuse(w stdhttp.ResponseWriter, r *stdhttp.Request, status int, message string) {
 	if r.Header.Get("HX-Request") == "true" {
 		w.Header().Set("HX-Refresh", "true")
 	}
-	stdhttp.Error(w, message, status)
+	stdhttp.Error(w, exception.Sentence(r, status, message), status)
 }
 
 // JsonResource is what [Context.JSON] takes: the fields a type is allowed to
