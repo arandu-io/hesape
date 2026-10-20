@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io/fs"
 	"sync"
+
+	"github.com/arandu-io/hesape/internal/linking"
 )
 
 // Config is every cache store an application has, and which of them is the
@@ -77,6 +79,16 @@ type StoreConfig struct {
 
 	// Stores is the failover driver's ordered set of store names.
 	Stores []string
+
+	// Endpoint is the server a connector driver opens its store over: the
+	// address, the credentials, the numbered database and the TLS settings.
+	// It is read when Driver names a connector a module linked into the
+	// binary -- "redis" for hesape/redis -- and by no built-in driver.
+	//
+	// An empty Endpoint.Prefix takes this store's Prefix, so the keys of a
+	// server shared with another application are namespaced the way every
+	// other store's are.
+	Endpoint Endpoint
 }
 
 // Creator builds a repository for a driver the manager does not know.
@@ -98,10 +110,12 @@ type Creator func(m *CacheManager, config StoreConfig) (*Repository, error)
 // file store" means, so a second module cannot decide it means a different
 // directory.
 //
-// The drivers it builds are array, file, database, null and failover. Redis is
-// not one of them: the RESP store is hesape/redis, a separate module, so that
-// its driver ships only in the binaries that use it. Register it with Extend,
-// which is what Extend is for.
+// The drivers it builds are array, file, database, null and failover, and every
+// driver a connector module linked into the binary: a store whose Driver is
+// "redis" is opened over its Endpoint once hesape/redis is imported. The RESP
+// client lives in that module so that it ships only in the binaries that use
+// it; naming the driver without the import is an error naming the import. A
+// driver that is neither is registered with Extend.
 //
 // Memo is not a driver either. It is a method, because a memoized store is per
 // request and a configuration is not.
@@ -282,8 +296,58 @@ func (m *CacheManager) Build(config StoreConfig) (*Repository, error) {
 		config.NoEvents = true
 		return m.Repository(NewFailoverStore(m.events, config.Stores, stores...), config), nil
 	default:
-		return nil, fmt.Errorf("cache: the driver %q is not one this package builds. Register it with Extend, which is how the RESP store in hesape/redis arrives", config.Driver)
+		return m.buildConnected(config)
 	}
+}
+
+// buildConnected opens the store a linked connector builds for config.Driver,
+// over config.Endpoint.
+//
+// Opening dials nothing, so a store built here at boot does not make the
+// application refuse to start because the server is down; Ping is what
+// reaches it. A driver the collection provides and the binary did not link is
+// the error that names the import to add.
+func (m *CacheManager) buildConnected(config StoreConfig) (*Repository, error) {
+	connector, linked, found := connectors.Lookup(config.Driver)
+	if !found {
+		if module, provided := modules[config.Driver]; provided {
+			return nil, linking.NotLinked("CACHE_STORE", config.Driver, module, linked)
+		}
+		return nil, fmt.Errorf("cache: the driver %q is not one this package builds and no linked module provides it. "+
+			"Import its connector module, or register it with Extend", config.Driver)
+	}
+	if config.Endpoint.Address == "" {
+		return nil, fmt.Errorf("cache: the %s store %q names no endpoint, and a store on a server needs the server's address", config.Driver, config.Name)
+	}
+
+	endpoint := config.Endpoint
+	if endpoint.Prefix == "" {
+		endpoint.Prefix = config.Prefix
+	}
+	shared, err := connector.Open(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("cache: opening the %s store %q: %w", config.Driver, config.Name, err)
+	}
+	return m.Repository(shared, config), nil
+}
+
+// Shared returns the named store as the [SharedStore] it was opened as -- the
+// one a session, a rate limit or a scheduler's claim needs every replica to
+// see -- building it the first time, like Store.
+//
+// A store that is not shared is an error naming it rather than a store that
+// satisfies the type and isolates nothing: an array store holds its locks
+// inside one process, and the replica beside it never sees them.
+func (m *CacheManager) Shared(name string) (SharedStore, error) {
+	store, err := m.Store(name)
+	if err != nil {
+		return nil, err
+	}
+	shared, ok := store.GetStore().(SharedStore)
+	if !ok {
+		return nil, fmt.Errorf("cache: the store %q is not one every replica sees, so it cannot hold what has to be shared between them", store.GetName())
+	}
+	return shared, nil
 }
 
 // Repository wraps a store in a repository, with the events wired unless the
