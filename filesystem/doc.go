@@ -17,7 +17,9 @@
 // of its own so that a project storing on disk does not carry it. In Go there is
 // no optional dependency, which is the whole reason that line exists. Register
 // it with [Disks.Extend]: there is no built-in S3 driver name, because the root
-// module cannot import its own submodule.
+// module cannot import its own submodule. Once registered, a [Config] naming the
+// "s3" driver carries the bucket, the endpoint, the region and the credentials,
+// and [Disks.Configure] builds that disk from configuration like any other.
 //
 // That module speaks the protocol over net/http and signs its own requests, so
 // importing it brings no cloud SDK with it, and it hands back no client object

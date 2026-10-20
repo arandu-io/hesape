@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 )
 
@@ -43,6 +44,45 @@ type Config struct {
 	// ServeSigned makes [ServeFile] require a valid signature. See
 	// [LocalFilesystemAdapter.ShouldServeSignedUrls].
 	ServeSigned bool
+
+	// Bucket, Endpoint, Region, AccessKey, SecretKey and PathStyle configure
+	// an object storage disk over the S3 protocol -- the "s3" driver that
+	// github.com/arandu-io/hesape/filesystem/s3 registers, which covers
+	// Cloudflare R2, Amazon S3 and the rest of the services that speak it.
+	//
+	// Endpoint is the service without the bucket, such as
+	// https://<account>.r2.cloudflarestorage.com. Region is what the
+	// signature is computed for, and R2 wants "auto". PathStyle puts the
+	// bucket in the path rather than in the host, which R2 and MinIO want.
+	Bucket    string
+	Endpoint  string
+	Region    string
+	PathStyle bool
+
+	// AccessKey and SecretKey are the credentials, read from the
+	// environment and never written as literals. String and GoString leave
+	// both out, so a disk's configuration printed in a log line or an error
+	// does not carry them.
+	AccessKey string
+	SecretKey string
+}
+
+// String describes the disk's configuration with the credentials left out:
+// the key and the secret print as "[redacted]" when they are set.
+func (c Config) String() string { return c.GoString() }
+
+// GoString is String for the %#v verb, so no formatting verb prints the
+// credentials.
+func (c Config) GoString() string {
+	redacted := c
+	if redacted.AccessKey != "" {
+		redacted.AccessKey = "[redacted]"
+	}
+	if redacted.SecretKey != "" {
+		redacted.SecretKey = "[redacted]"
+	}
+	type plain Config
+	return fmt.Sprintf("filesystem.Config%+v", plain(redacted))
 }
 
 // DriverCreator builds an adapter out of a configuration.
@@ -95,11 +135,12 @@ func (ds *Disks) Set(name string, disk *Disk) *Disks {
 //
 // It is what an adapter living in its own module hooks into: the S3 driver is
 // github.com/arandu-io/hesape/filesystem/s3, a separate module because in Go
-// there is no optional dependency, and the application that imports
-// it registers it here in one line. That is why there is no CreateS3Driver on
-// this type -- the root module cannot import its own submodule, and a creator
-// that lied about being able to build one would fail at boot instead of at
-// compile time.
+// there is no optional dependency, and whoever composes the disks registers it
+// here in one line -- disks.Extend("s3", s3.Driver()) -- after which a disk
+// whose Config names the "s3" driver is built from its configuration like a
+// local one. That is why there is no CreateS3Driver on this type -- the root
+// module cannot import its own submodule, and a creator that lied about being
+// able to build one would fail at boot instead of at compile time.
 func (ds *Disks) Extend(driver string, creator DriverCreator) *Disks {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
@@ -131,6 +172,73 @@ func (ds *Disks) Build(name string, cfg Config) (*Disk, error) {
 		return nil, err
 	}
 	return NewDisk(name, adapter, cfg), nil
+}
+
+// Configure builds every disk the configuration describes and registers each
+// under its name.
+//
+// The disks that stand on their own are built first and the scoped ones after,
+// because a scoped disk is a subtree of another and can only be built once
+// that one is registered; a scoped disk over a scoped disk is built when the
+// one it narrows exists. Names are visited in order, so a configuration builds
+// the same way every time. The first disk that cannot be built stops the call
+// with an error naming it, and a scoped disk whose disk is never built is
+// named the same way -- a set missing a disk the configuration describes is a
+// boot that should not finish.
+func (ds *Disks) Configure(disks map[string]Config) error {
+	names := make([]string, 0, len(disks))
+	for name := range disks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var scoped []string
+	for _, name := range names {
+		if disks[name].Driver == "scoped" {
+			scoped = append(scoped, name)
+			continue
+		}
+		if err := ds.configureOne(name, disks[name]); err != nil {
+			return err
+		}
+	}
+
+	for len(scoped) > 0 {
+		var waiting []string
+		for _, name := range scoped {
+			if _, defined := disks[disks[name].Disk]; defined && !ds.has(disks[name].Disk) {
+				waiting = append(waiting, name)
+				continue
+			}
+			if err := ds.configureOne(name, disks[name]); err != nil {
+				return err
+			}
+		}
+		if len(waiting) == len(scoped) {
+			return fmt.Errorf("filesystem: the scoped disks %s narrow each other in a circle, so none of them can be built",
+				strings.Join(waiting, ", "))
+		}
+		scoped = waiting
+	}
+	return nil
+}
+
+// configureOne builds one disk of a configuration and registers it.
+func (ds *Disks) configureOne(name string, cfg Config) error {
+	disk, err := ds.Build(name, cfg)
+	if err != nil {
+		return fmt.Errorf("filesystem: the disk %q: %w", name, err)
+	}
+	ds.Set(name, disk)
+	return nil
+}
+
+// has reports whether a disk is registered under name.
+func (ds *Disks) has(name string) bool {
+	ds.mu.RLock()
+	defer ds.mu.RUnlock()
+	_, ok := ds.byName[name]
+	return ok
 }
 
 // CreateLocalDriver builds a disk over a directory.
