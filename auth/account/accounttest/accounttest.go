@@ -151,7 +151,7 @@ func (e *env) text(query string, args ...any) string {
 // events reads the stored events of one account, oldest first.
 func (e *env) events(userID string) []events.Stored {
 	e.t.Helper()
-	stored, err := events.NewOutbox(outboxHandle{e.f.DB}).PendingAll(e.ctx, 500)
+	stored, err := events.NewOutbox(e.f.DB).PendingAll(e.ctx, 500)
 	if err != nil {
 		e.t.Fatalf("reading the outbox: %v", err)
 	}
@@ -174,13 +174,6 @@ func (e *env) eventCount(userID, name string) int {
 		}
 	}
 	return n
-}
-
-// outboxHandle is the fixture's database as the outbox reads it.
-type outboxHandle struct{ *database.DB }
-
-func (h outboxHandle) InTransaction(ctx context.Context) bool {
-	return database.InTransaction(ctx, h.DB)
 }
 
 // sealSecret encrypts a TOTP secret the way an enrolment stores it.

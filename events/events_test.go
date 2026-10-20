@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/database"
 	"github.com/arandu-io/hesape/events"
 )
 
@@ -188,5 +189,30 @@ func TestAModuleWithNoRelayIsHealthy(t *testing.T) {
 	}
 	if err := events.NewModule().Close(context.Background()); err != nil {
 		t.Fatalf("Close: %v", err)
+	}
+}
+
+// TestTheOutboxTakesTheApplicationHandle: a *database.DB is the outbox's
+// handle as it is, and the question the outbox asks of it -- is this context
+// inside a transaction on you -- is answered by the handle, so Store refuses
+// outside database.Transaction and stores inside it.
+func TestTheOutboxTakesTheApplicationHandle(t *testing.T) {
+	fake, table := newFakeOutbox()
+	db := database.Wrap(fake.DB, database.DialectSQLite)
+	outbox := events.NewOutbox(db)
+	list := []events.Event{{Name: "customer.created", Aggregate: "customer", AggregateID: "1"}}
+
+	if err := outbox.Store(context.Background(), grant(tenant), list); !errors.Is(err, events.ErrNoTransaction) {
+		t.Fatalf("outside a transaction: err = %v, want ErrNoTransaction", err)
+	}
+
+	err := database.Transaction(context.Background(), db, func(ctx context.Context) error {
+		return outbox.Store(ctx, grant(tenant), list)
+	})
+	if err != nil {
+		t.Fatalf("inside a transaction: %v", err)
+	}
+	if stored := table.stored(); len(stored) != 1 || stored[0].Name != "customer.created" {
+		t.Fatalf("stored = %+v, want the one event", stored)
 	}
 }

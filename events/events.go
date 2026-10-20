@@ -67,6 +67,9 @@ func (r *Recorder) PullEvents() []Event {
 // ask. The three statements are the ones database/sql already offers, and the
 // implementation is expected to rebind placeholders and record the query, which
 // is what puts an outbox write on the debug page next to the row it describes.
+//
+// *database.DB satisfies it as it is, so the application's handle is what
+// NewOutbox is given; the assertion below the interface keeps that true.
 type DB interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
@@ -79,12 +82,18 @@ type DB interface {
 	InTransaction(ctx context.Context) bool
 }
 
+// The application's database handle is an outbox handle with nothing wrapped
+// around it. Asserted here, so a change to either side that breaks it fails
+// this package's build rather than the build of every application.
+var _ DB = (*database.DB)(nil)
+
 // Outbox stores events in the same transaction as the write.
 type Outbox struct {
 	db DB
 }
 
-// NewOutbox returns an outbox over the application's database handle.
+// NewOutbox returns an outbox over the application's database handle, which is
+// a *database.DB as it is: events.NewOutbox(db).
 func NewOutbox(db DB) *Outbox { return &Outbox{db: db} }
 
 // ErrNoTransaction is returned when Store is called outside a transaction.

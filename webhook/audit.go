@@ -77,7 +77,7 @@ type auditor struct {
 }
 
 func newAuditor(db *database.DB, now func() time.Time) *auditor {
-	return &auditor{outbox: events.NewOutbox(outboxHandle{db}), now: now}
+	return &auditor{outbox: events.NewOutbox(db), now: now}
 }
 
 // record stores one event. It runs inside the transaction of the act it
@@ -87,14 +87,6 @@ func (a *auditor) record(ctx context.Context, g auth.Grant, name, aggregate, id 
 	return a.outbox.Store(ctx, g, []events.Event{{
 		Name: name, Aggregate: aggregate, AggregateID: id, Payload: payload, OccurredAt: a.now().UTC(),
 	}})
-}
-
-// outboxHandle is the module's handle as the outbox reads it.
-type outboxHandle struct{ *database.DB }
-
-// InTransaction reports whether ctx is inside a transaction on the handle.
-func (h outboxHandle) InTransaction(ctx context.Context) bool {
-	return database.InTransaction(ctx, h.DB)
 }
 
 // endpointFacts is what the log keeps of an endpoint: nothing sealed.

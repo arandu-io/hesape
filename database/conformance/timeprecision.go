@@ -158,7 +158,7 @@ func testTheOutboxKeepsTheOrderOfOneStore(t *testing.T, dialect database.Dialect
 		t.Fatal("the outbox's third migration is not its widening")
 	}
 
-	outbox := events.NewOutbox(outboxHandle{db})
+	outbox := events.NewOutbox(db)
 	names := []string{"order.placed", "order.paid", "order.shipped", "order.delivered", "order.closed"}
 	list := make([]events.Event, 0, len(names))
 	for _, name := range names {
@@ -185,13 +185,4 @@ func testTheOutboxKeepsTheOrderOfOneStore(t *testing.T, dialect database.Dialect
 	if lag, err := outbox.Lag(ctx); err != nil || lag < 0 {
 		t.Errorf("the lag is %s (%v), want zero or more", lag, err)
 	}
-}
-
-// outboxHandle is the suite's database as the outbox reads it: the handle,
-// and whether a context is inside a transaction on it.
-type outboxHandle struct{ *database.DB }
-
-// InTransaction reports whether ctx is inside a transaction on the handle.
-func (h outboxHandle) InTransaction(ctx context.Context) bool {
-	return database.InTransaction(ctx, h.DB)
 }

@@ -192,3 +192,35 @@ func TestATransactionDoesNotCaptureAnotherDatabase(t *testing.T) {
 		t.Error("the analytics write ran against the primary, inside its transaction")
 	}
 }
+
+// TestTheHandleAnswersWhetherItIsInATransaction: the method is the question
+// asked of the handle itself, and it gives the package-level answer in every
+// state a context can be in -- outside, inside on this handle, inside on
+// another one, and in the callback that runs after the commit.
+func TestTheHandleAnswersWhetherItIsInATransaction(t *testing.T) {
+	primarySQL, _ := newFakeDB()
+	otherSQL, _ := newFakeDB()
+	primary := database.Wrap(primarySQL, database.DialectSQLite)
+	other := database.Wrap(otherSQL, database.DialectSQLite)
+
+	if primary.InTransaction(context.Background()) {
+		t.Error("a context with no transaction reports one")
+	}
+
+	var after context.Context
+	err := database.Transaction(context.Background(), primary, func(ctx context.Context) error {
+		if !primary.InTransaction(ctx) {
+			t.Error("the handle does not see the transaction open on it")
+		}
+		if other.InTransaction(ctx) {
+			t.Error("a transaction on the primary reports as open on another handle")
+		}
+		return database.AfterCommit(ctx, primary, func(ctx context.Context) { after = ctx })
+	})
+	if err != nil {
+		t.Fatalf("Transaction: %v", err)
+	}
+	if after == nil || primary.InTransaction(after) {
+		t.Error("the after-commit callback is told it is still inside the transaction")
+	}
+}

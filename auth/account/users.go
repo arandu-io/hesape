@@ -68,7 +68,7 @@ func NewUsers(cfg Config) (*Users, error) {
 	}
 	outbox := cfg.Outbox
 	if outbox == nil {
-		outbox = events.NewOutbox(outboxHandle{cfg.DB})
+		outbox = events.NewOutbox(cfg.DB)
 	}
 	throttle := cfg.Throttle
 	if throttle == nil {

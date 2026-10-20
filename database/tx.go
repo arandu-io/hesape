@@ -245,6 +245,16 @@ func InTransaction(ctx context.Context, db *DB) bool {
 	return ok
 }
 
+// InTransaction reports whether ctx is inside a transaction on this handle.
+//
+// It answers exactly what the package-level InTransaction answers for d. It is
+// also a method so that the handle satisfies, by shape, an interface that asks
+// the question of the handle itself -- events.DB is one, which is what lets
+// events.NewOutbox take a *DB with nothing wrapped around it.
+func (d *DB) InTransaction(ctx context.Context) bool {
+	return InTransaction(ctx, d)
+}
+
 // txFrom returns the open transaction on db, if any.
 //
 // A nil under the key is not a transaction: it is how the context handed to an

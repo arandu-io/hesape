@@ -88,7 +88,7 @@ func NewFactors(db *database.DB, appKey []byte, attempts cache.Store, outbox *ev
 		return nil, err
 	}
 	if outbox == nil {
-		outbox = events.NewOutbox(outboxHandle{db})
+		outbox = events.NewOutbox(db)
 	}
 	return &Factors{
 		db: db, store: enrolments{db: db}, users: users,

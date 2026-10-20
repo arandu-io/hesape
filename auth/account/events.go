@@ -1,11 +1,6 @@
 package account
 
-import (
-	"context"
-
-	"github.com/arandu-io/hesape/auth"
-	"github.com/arandu-io/hesape/database"
-)
+import "github.com/arandu-io/hesape/auth"
 
 // The actions an application's user policy decides. They are constants so a
 // misspelling cannot silently widen a policy, and they are the strings the
@@ -56,14 +51,4 @@ type UserEvent struct {
 // eventOf is the payload an account's event carries by default.
 func eventOf(user Account) UserEvent {
 	return UserEvent{UserID: user.AccountID(), Tenant: user.AccountTenant(), Email: user.AccountEmail(), Name: user.AccountName()}
-}
-
-// outboxHandle is the database handle as the outbox reads it: the outbox asks
-// whether a context is inside a transaction on it, and *database.DB answers
-// that through database.InTransaction rather than through a method.
-type outboxHandle struct{ *database.DB }
-
-// InTransaction reports whether ctx is inside a transaction on the handle.
-func (h outboxHandle) InTransaction(ctx context.Context) bool {
-	return database.InTransaction(ctx, h.DB)
 }
