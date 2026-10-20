@@ -11,6 +11,12 @@
 // application handed over a Wipe deliberately. "Drop everything" is not a
 // capability a framework should assume it has.
 //
+// migrate:fresh, migrate:reset and migrate:refresh each empty the whole schema,
+// and no argument narrows them, so they run only when Deps.Environment is
+// config.EnvDev. The refusal is the command's own: a binary that wires these
+// commands cannot forget it, and migrate:rollback -- one batch, chosen by a
+// person -- stays available everywhere.
+//
 // Resolving the migration paths is the pathsOf helper rather than a shared base:
 // Go has embedding, and one helper is a function.
 package migrations

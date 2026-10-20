@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/arandu-io/hesape/config"
 	"github.com/arandu-io/hesape/console"
 	"github.com/arandu-io/hesape/database/migrations"
 )
@@ -49,6 +50,18 @@ type Deps struct {
 	// one, and because "drop everything" is the one operation an application
 	// should have to hand over deliberately.
 	Wipe func(ctx context.Context, connection string) error
+
+	// Environment is the environment the binary runs in, and it decides
+	// whether the three commands that empty the whole schema run at all:
+	// migrate:fresh, migrate:reset and migrate:refresh run only under
+	// config.EnvDev. Every other value refuses them before they touch
+	// anything, and so does the zero value -- a binary that did not say
+	// where it runs is not one that may drop every table.
+	//
+	// migrate:rollback is not among them. Undoing the batch a bad release
+	// applied is the one schema-down operation a deployment legitimately
+	// runs, and it is scoped to a batch somebody chose.
+	Environment config.Env
 }
 
 // Commands answers the migration commands as values the console registry takes.
@@ -179,15 +192,19 @@ func RollbackCommand(deps Deps) console.Command {
 //
 // It is rollback without a stopping point: every Down, in one pass. That makes
 // it a development command -- on a database with data in it, the Downs are what
-// drop the tables. --pretend prints the statements and runs none, which is the
-// only safe way to point it at anything shared. It is isolated under the
-// "migrate" lock and does nothing when the migration table does not exist.
+// drop the tables -- and it refuses to run unless Deps.Environment is
+// config.EnvDev. --pretend prints the statements and runs none. It is isolated
+// under the "migrate" lock and does nothing when the migration table does not
+// exist.
 func ResetCommand(deps Deps) console.Command {
 	return console.Command{
 		Name:        "migrate:reset",
 		Description: "roll back all database migrations",
 		Isolated:    "migrate",
 		Run: func(ctx context.Context, o *console.IO) error {
+			if err := refuseOutsideDevelopment("migrate:reset", deps.Environment); err != nil {
+				return err
+			}
 			flags := o.Flags()
 			database := flags.String("database", "", "the database connection to use")
 			pretend := flags.Bool("pretend", false, "dump the SQL queries that would be run")
@@ -215,13 +232,17 @@ func ResetCommand(deps Deps) console.Command {
 //
 // It resets and re-runs, which is not the same as fresh: refresh goes through
 // every Down, so a migration whose Down is wrong fails here rather than
-// silently never being exercised.
+// silently never being exercised. The schema comes back and the rows do not, so
+// it refuses to run unless Deps.Environment is config.EnvDev.
 func RefreshCommand(deps Deps) console.Command {
 	return console.Command{
 		Name:        "migrate:refresh",
 		Description: "reset and re-run all migrations",
 		Isolated:    "migrate",
 		Run: func(ctx context.Context, o *console.IO) error {
+			if err := refuseOutsideDevelopment("migrate:refresh", deps.Environment); err != nil {
+				return err
+			}
 			flags := o.Flags()
 			database := flags.String("database", "", "the database connection to use")
 			step := flags.Int("step", 0, "the number of migrations to be reverted and re-run")
@@ -264,14 +285,18 @@ func RefreshCommand(deps Deps) console.Command {
 // FreshCommand builds `aru migrate:fresh`.
 //
 // It drops every table and migrates from nothing, which is why it refuses to
-// run without a Wipe the application handed over deliberately: "drop
-// everything" is not a capability a framework should assume it has.
+// run without a Wipe the application handed over deliberately -- "drop
+// everything" is not a capability a framework should assume it has -- and why
+// it refuses to run unless Deps.Environment is config.EnvDev.
 func FreshCommand(deps Deps) console.Command {
 	return console.Command{
 		Name:        "migrate:fresh",
 		Description: "drop all tables and re-run all migrations",
 		Isolated:    "migrate",
 		Run: func(ctx context.Context, o *console.IO) error {
+			if err := refuseOutsideDevelopment("migrate:fresh", deps.Environment); err != nil {
+				return err
+			}
 			flags := o.Flags()
 			database := flags.String("database", "", "the database connection to use")
 			seed := flags.Bool("seed", false, "indicates if the seed task should be re-run")
@@ -454,6 +479,33 @@ func MigrateMakeCommand(deps Deps) console.Command {
 			return nil
 		},
 	}
+}
+
+// refuseOutsideDevelopment answers why a command that empties the whole schema
+// may not run in env, or nil in development.
+//
+// It runs before the flags are read and before anything is asked of the
+// database, so a refused command leaves nothing behind that says it tried. The
+// usual guard for a command like this is a confirmation prompt in production,
+// and a prompt is a guard that relies on somebody reading it at 3am; these
+// simply do not run there.
+//
+// The sentence names migrate:rollback, because somebody typing one of these
+// against a deployed database is usually undoing a release rather than
+// emptying it, and that is the command for it. It does not claim more than it
+// does: migrate:rollback --step=99 reaches the same end state, and stopping
+// that would mean refusing the operation a bad release needs.
+func refuseOutsideDevelopment(name string, env config.Env) error {
+	if env.Is(config.EnvDev) {
+		return nil
+	}
+	where := fmt.Sprintf("this is %s", env)
+	if env == "" {
+		where = "and this binary did not say which environment it runs in"
+	}
+	return fmt.Errorf("%s empties the whole schema and only runs with APP_ENV=%s (%s): "+
+		"to undo the migrations a release applied, run migrate:rollback, which takes one batch",
+		name, config.EnvDev, where)
 }
 
 // pathsOf returns the --path when it was given, and the application's own
