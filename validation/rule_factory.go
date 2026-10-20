@@ -106,8 +106,11 @@ func (RuleFactory) Can(allows func(g auth.Grant, ability string, arguments []str
 // Grant's tenant and the extra conditions are applied.
 //
 // It is a function rather than a repository because building the query needs
-// hesape/database, and this package does not import it: the application passes
-// the query in, already written against whatever it stores rows in.
+// hesape/database, and this package does not import it: the query is passed
+// in. For a relational store the one to pass is the Count method of
+// hesape/database's Presence, which filters by the Grant's tenant:
+//
+//	verifier := validation.NewDatabasePresenceVerifier(database.NewPresence(db, "users").Count)
 type PresenceQuery func(ctx context.Context, g auth.Grant, collection, column string, values []any,
 	excludeID any, idColumn string, extra map[string]string) (int, error)
 
