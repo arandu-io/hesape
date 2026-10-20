@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
-	"github.com/arandu-io/hesape/database"
 	"github.com/arandu-io/hesape/database/migrations"
 	"github.com/arandu-io/hesape/events"
 	"github.com/arandu-io/hesape/validation"
