@@ -2905,6 +2905,153 @@
 		return format.format(seconds, 'second');
 	}
 
+	/* ---- sortable ------------------------------------------------------------
+	 *
+	 * Reorders a list in place, by drag and by keyboard, so a form that posts
+	 * the list's inputs posts them in the order the person chose -- the order
+	 * is the DOM's, and nothing else holds a copy of it.
+	 *
+	 * The markup: data-kyse-behavior="sortable" on the list, data-sortable-item
+	 * on each entry. An entry may carry a button with data-sortable-up and one
+	 * with data-sortable-down, which move it one place; Alt+ArrowUp and
+	 * Alt+ArrowDown do the same from anywhere inside the entry and keep the
+	 * focus where it was. Dragging an entry by itself, or by its
+	 * data-sortable-handle when it has one, drops it before or after the entry
+	 * under the pointer. The first entry's "up" and the last one's "down" are
+	 * disabled, so a keyboard never presses a button that does nothing.
+	 *
+	 * After every move a live region inside the list, data-part="feedback",
+	 * says where the entry went, and the list dispatches "kyse:sorted"
+	 * (bubbling) for a page that wants to know. The sentence is the list's
+	 * data-sortable-moved, with {label}, {position} and {count} filled in --
+	 * the application's own language -- or an English one.
+	 *
+	 * Without this script the buttons do nothing and the order stays the one
+	 * the server drew, which is a list that still submits.
+	 */
+	arandu.ui.define('sortable', {
+		mounted: function (ctx) {
+			var list = ctx.element;
+			var entries = function () {
+				var out = [];
+				for (var i = 0; i < list.children.length; i++) {
+					if (list.children[i].hasAttribute('data-sortable-item')) out.push(list.children[i]);
+				}
+				return out;
+			};
+			var refresh = function () {
+				var all = entries();
+				for (var i = 0; i < all.length; i++) {
+					var up = all[i].querySelector('[data-sortable-up]');
+					var down = all[i].querySelector('[data-sortable-down]');
+					if (up) up.disabled = i === 0;
+					if (down) down.disabled = i === all.length - 1;
+					if (!all[i].querySelector('[data-sortable-handle]')) all[i].setAttribute('draggable', 'true');
+				}
+				each(list, '[data-sortable-handle]', function (handle) {
+					handle.setAttribute('draggable', 'true');
+				});
+			};
+			var say = function (entry) {
+				var all = entries();
+				var region = list.querySelector('[data-part="feedback"]');
+				if (region) {
+					var label = entry.getAttribute('data-sortable-label') || entry.textContent.replace(/\s+/g, ' ').trim();
+					var sentence = list.getAttribute('data-sortable-moved') || '{label} moved to position {position} of {count}';
+					region.textContent = sentence.replace('{label}', label)
+						.replace('{position}', String(all.indexOf(entry) + 1))
+						.replace('{count}', String(all.length));
+				}
+				list.dispatchEvent(new CustomEvent('kyse:sorted', { bubbles: true, detail: { item: entry } }));
+			};
+			var move = function (entry, step) {
+				var all = entries();
+				var at = all.indexOf(entry);
+				var to = at + step;
+				if (at < 0 || to < 0 || to >= all.length) return false;
+				if (step < 0) list.insertBefore(entry, all[to]);
+				else list.insertBefore(entry, all[to].nextSibling);
+				refresh();
+				say(entry);
+				return true;
+			};
+			ctx.click = function (event) {
+				var button = event.target.closest('[data-sortable-up], [data-sortable-down]');
+				if (!button || !list.contains(button)) return;
+				var entry = button.closest('[data-sortable-item]');
+				if (!entry) return;
+				event.preventDefault();
+				move(entry, button.hasAttribute('data-sortable-up') ? -1 : 1);
+				/* A disabled button cannot hold the focus, so a press that
+				 * moved an entry to an end hands it to the other button. */
+				if (button.disabled) {
+					var other = entry.querySelector(button.hasAttribute('data-sortable-up') ? '[data-sortable-down]' : '[data-sortable-up]');
+					if (other) other.focus();
+				} else {
+					button.focus();
+				}
+			};
+			ctx.keydown = function (event) {
+				if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
+				var entry = event.target.closest('[data-sortable-item]');
+				if (!entry || entry.parentNode !== list) return;
+				var focused = document.activeElement;
+				if (move(entry, event.key === 'ArrowUp' ? -1 : 1)) {
+					event.preventDefault();
+					if (focused && typeof focused.focus === 'function') focused.focus();
+				}
+			};
+			ctx.dragstart = function (event) {
+				var entry = event.target.closest('[data-sortable-item]');
+				if (!entry || entry.parentNode !== list) return;
+				ctx.dragging = entry;
+				entry.setAttribute('data-dragging', 'true');
+				if (event.dataTransfer) {
+					event.dataTransfer.effectAllowed = 'move';
+					/* Firefox starts no drag without data. */
+					event.dataTransfer.setData('text/plain', '');
+				}
+			};
+			ctx.dragover = function (event) {
+				if (!ctx.dragging) return;
+				var over = event.target.closest('[data-sortable-item]');
+				event.preventDefault();
+				if (!over || over === ctx.dragging || over.parentNode !== list) return;
+				var box = over.getBoundingClientRect();
+				var after = event.clientY > box.top + box.height / 2;
+				list.insertBefore(ctx.dragging, after ? over.nextSibling : over);
+			};
+			ctx.drop = function (event) {
+				if (ctx.dragging) event.preventDefault();
+			};
+			ctx.dragend = function () {
+				if (!ctx.dragging) return;
+				var entry = ctx.dragging;
+				ctx.dragging = null;
+				entry.removeAttribute('data-dragging');
+				refresh();
+				say(entry);
+			};
+			refresh();
+			list.addEventListener('click', ctx.click);
+			list.addEventListener('keydown', ctx.keydown);
+			list.addEventListener('dragstart', ctx.dragstart);
+			list.addEventListener('dragover', ctx.dragover);
+			list.addEventListener('drop', ctx.drop);
+			list.addEventListener('dragend', ctx.dragend);
+		},
+		destroyed: function (ctx) {
+			var list = ctx.element;
+			if (!ctx.click) return;
+			list.removeEventListener('click', ctx.click);
+			list.removeEventListener('keydown', ctx.keydown);
+			list.removeEventListener('dragstart', ctx.dragstart);
+			list.removeEventListener('dragover', ctx.dragover);
+			list.removeEventListener('drop', ctx.drop);
+			list.removeEventListener('dragend', ctx.dragend);
+		},
+	});
+
 	/* By window load every deferred script has run, so a behaviour still
 	 * unmounted is one nobody registered -- which is worth one line each, and is
 	 * the only moment this file can tell that apart from a script that has not
