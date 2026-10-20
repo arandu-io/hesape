@@ -116,6 +116,14 @@ func Migrations() []migrations.Migration {
 	}
 }
 
+// Migrations is the schema this repository reads and writes: the package's
+// [Migrations], asked of the value.
+//
+// It is a method as well as a function so a caller holding the repository can
+// collect its schema the way it collects a failed job provider's, by asking the
+// value it wired rather than knowing which package the type came from.
+func (d *DatabaseBatchRepository) Migrations() []migrations.Migration { return Migrations() }
+
 // columns is the read shape, in the order scanBatch expects.
 const columns = `id, tenant_id, name, total_jobs, pending_jobs, failed_jobs,
 	failed_job_ids, options, created_at, cancelled_at, finished_at`
