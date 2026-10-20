@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/arandu-io/hesape/config"
 	"github.com/arandu-io/hesape/console"
 	"github.com/arandu-io/hesape/database"
 	dbevents "github.com/arandu-io/hesape/database/events"
@@ -39,7 +40,10 @@ type Deps struct {
 	// answers how many rows it removed.
 	Prunables map[string]func(ctx context.Context) (int, error)
 
-	// Environment is what the destructive commands check before they run.
+	// Environment is what the destructive commands check before they run: the
+	// application's config.Env as a string, string(cfg.App.Env). In
+	// production, which is config.EnvProd, db:wipe asks before it drops
+	// anything unless --force is given.
 	Environment string
 }
 
@@ -367,7 +371,7 @@ func WipeCommand(deps Deps) console.Command {
 				return fmt.Errorf("db:wipe drops every table, and this application did not register a Wipe for it")
 			}
 
-			if deps.Environment == "production" && !*force {
+			if config.Env(deps.Environment).IsProduction() && !*force {
 				confirmed, err := o.Confirm("The application is in production. Drop every table anyway?", false)
 				if err != nil {
 					return err

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/arandu-io/hesape/config"
 	"github.com/arandu-io/hesape/console"
 )
 
@@ -19,8 +20,10 @@ type Deps struct {
 	// is empty, and answers the name that ran.
 	Seed func(ctx context.Context, name string, args []string) (string, error)
 
-	// Environment is what `db:seed` checks before it runs. It is a string
-	// rather than a lookup, so a test can set it.
+	// Environment is what `db:seed` checks before it runs: the application's
+	// config.Env as a string, string(cfg.App.Env). In production, which is
+	// config.EnvProd, it asks before seeding unless --force is given. It is a
+	// value rather than a lookup, so a test can set it.
 	Environment string
 
 	// SeederPath is where make:seeder writes.
@@ -59,7 +62,7 @@ func SeedCommand(deps Deps) console.Command {
 				return err
 			}
 
-			if deps.Environment == "production" && !*force {
+			if config.Env(deps.Environment).IsProduction() && !*force {
 				confirmed, err := o.Confirm("The application is in production. Seed the database anyway?", false)
 				if err != nil {
 					return err

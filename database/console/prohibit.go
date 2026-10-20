@@ -25,7 +25,7 @@ var DestructiveCommands = []string{
 // It is the one line an application puts in its bootstrap so that the commands
 // which throw data away cannot run in production:
 //
-//	if config.Env == "production" {
+//	if cfg.App.Env.IsProduction() {
 //	    dbconsole.ProhibitDestructiveCommands(true)
 //	}
 //
