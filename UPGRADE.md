@@ -27,6 +27,59 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.71.0 — the console pieces an application copied live here
+
+Nothing in the API breaks. Three commands change what they do, and the code an
+application wrote under `bootstrap/` to wire its console now has a home in the
+component it wired.
+
+**`migrate:fresh`, `migrate:reset` and `migrate:refresh` refuse outside
+development.** `database/console/migrations.Deps` has an `Environment`
+(`config.Env`), and the three commands that empty the whole schema run only
+when it is `config.EnvDev`. Every other value refuses them before they touch
+anything, **and so does the zero value**: a project that builds `Deps` without
+setting it finds the three refused in development too, with a sentence naming
+`APP_ENV=dev` and `migrate:rollback`. Set `Environment: cfg.App.Env`. The
+refusal an application wrote beside its dispatch for the same three commands
+can go. `migrate:rollback` is unchanged and runs everywhere.
+
+**`queue:work` takes `--workers` and owns the signal.** The flag sets how many
+jobs run at once for one run; `--queue` and `--workers` default to the
+worker's options, so a flag left out is the configuration's answer. While the
+worker drains, SIGINT and SIGTERM stop it taking jobs and let what is in
+flight finish. A caller that cancelled the context to stop it still can.
+
+**A `filesystem.Config` prints without its credentials.** It has `String` and
+`GoString` now, and every formatting verb prints `AccessKey` and `SecretKey`
+as `[redacted]`. Code that formatted a `Config` to read a field back out of
+the text has to read the field.
+
+**A cache store whose driver a linked connector provides is built from its
+configuration.** `cache.StoreConfig` has an `Endpoint`, and a store with
+`Driver: "redis"` is opened over it when `hesape/redis` is imported and no
+`Extend` claims the driver -- an `Extend` still wins. Naming a provided driver
+the binary did not link is now the error naming the import, where it was
+"Register it with Extend".
+
+### Where the hand-written wiring goes
+
+| was written under `bootstrap/` | is now |
+| --- | --- |
+| `publish.go`, the whole `vendor:publish` command | `publish/console.NewPublishCommand(root, publications).Command()` |
+| `queue.go`, thirteen constructors and the migrations of two tables | `queue/console.Commands(Deps)` and `Deps.Migrations()` |
+| `background.go`, `work` and `WorkerOptions` | `queue:work` in `Commands`, built from `WorkerDeps{Options, Register, Recorder}` |
+| `migrate.go`, `newMigrator` and `newConnectionResolver` | `database.NewMigrator(db, table)` and `database.NewSingleConnectionResolver(db, name)` |
+| `migrate.go`, `wipeFor` | `database.Wiper(resolver)` |
+| `migrate.go`, `devOnly` and `refuseCommand`'s first half | `Deps.Environment` on the migration commands |
+| `background.go`, `scheduleList` and `scheduleRun` over the framework scheduler | `console/scheduling.NewTaskModule(tasks, TaskOptions)` and `TaskCommands(module)` |
+| the RESP store's `Extend` and its connect | `StoreConfig{Driver: "redis", Endpoint: ...}` and `CacheManager.Shared` |
+| an S3 or R2 disk built by hand | `filesystem.Config{Driver: "s3", Bucket, Endpoint, Region, AccessKey, SecretKey, PathStyle}`, `Disks.Configure`, and `filesystem/s3.Driver()` in the next release of that module |
+
+A module that adds console commands declares them with
+`foundation.Commandable`, beside `Migratable` and `Schedulable`.
+
+---
+
 ## v0.69.0 — a wipe stays in the connection's own schemas
 
 Nothing in the API breaks. What changes is how much `migrate:fresh` drops.
