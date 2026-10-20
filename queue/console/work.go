@@ -3,8 +3,11 @@ package console
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/arandu-io/hesape/console"
 	"github.com/arandu-io/hesape/queue"
@@ -19,20 +22,40 @@ import (
 // options as flags: the process a deployment runs beside the web one, from the
 // same image.
 //
-// The worker it runs is the one the application built, with its handlers
-// already registered -- nothing resolves a job name to code on its own, so the
-// registry is the thing that has to be passed in.
+// The worker it runs is either one the application built, with its handlers
+// already registered, or one it builds itself from a WorkerDeps when it runs --
+// nothing resolves a job name to code on its own, so either way the handlers
+// are the thing that has to be passed in.
+//
+// The worker owns SIGINT and SIGTERM while it drains, because it is the
+// process: the first signal stops it taking jobs and lets what is in flight
+// finish, which is what keeps a deploy from leaving work behind a lease nobody
+// will release.
 type WorkCommand struct {
 	worker  *queue.Worker
 	manager *queue.QueueManager
+
+	// configured is what the worker is built from when worker is nil.
+	configured *WorkerDeps
 }
 
-// NewWorkCommand returns the command.
+// NewWorkCommand returns the command over a worker the application built.
 //
 // The manager may be nil, and then the worker drains the queue it was built
 // with and the connection argument is refused rather than ignored.
 func NewWorkCommand(w *queue.Worker, m *queue.QueueManager) *WorkCommand {
 	return &WorkCommand{worker: w, manager: m}
+}
+
+// NewConfiguredWorkCommand returns the command over a worker it builds each
+// time it runs, from deps: the store, the options the queue configuration
+// states, the handlers and the recorder. It is the queue:work Commands
+// answers.
+//
+// The manager may be nil when deps.Queue is set; it is what answers the
+// default connection when deps.Queue is not.
+func NewConfiguredWorkCommand(m *queue.QueueManager, deps WorkerDeps) *WorkCommand {
+	return &WorkCommand{manager: m, configured: &deps}
 }
 
 // Command is the registry entry for queue:work.
@@ -46,32 +69,48 @@ func (c *WorkCommand) Command() console.Command {
 
 // Handle runs the command.
 //
+// --queue and --workers default to the worker's options, which for a configured
+// worker are the queue configuration's: a flag left out is the configuration
+// asked for its answer, never a second default of the command's own.
+//
 // The exit status is the worker's, and it is what a supervisor reads: see
 // queue.WorkerStopReason.
 func (c *WorkCommand) Handle(ctx context.Context, o *console.IO) error {
-	flags := o.Flags()
-	queueName := flags.String("queue", "", "the queue to drain")
-	once := flags.Bool("once", false, "run the next job and stop")
-	stopWhenEmpty := flags.Bool("stop-when-empty", false, "stop when the queue is empty")
-	if err := flags.Parse(o.Args()); err != nil {
+	worker, err := c.workerToRun()
+	if err != nil {
 		return err
 	}
 
 	// The flags override what the worker was built with: the worker holds its
 	// options, so the command replaces them.
-	c.worker.FlushState()
-	options := c.worker.Options()
-	if *queueName != "" {
-		options.Queue = *queueName
+	worker.FlushState()
+	options := worker.Options()
+
+	flags := o.Flags()
+	queueName := flags.String("queue", options.Queue, "the queue to drain")
+	workers := flags.Int("workers", options.Concurrency, "how many jobs to run at once")
+	once := flags.Bool("once", false, "run the next job and stop")
+	stopWhenEmpty := flags.Bool("stop-when-empty", false, "stop when the queue is empty")
+	if err := flags.Parse(o.Args()); err != nil {
+		return err
 	}
+	if *workers < 0 {
+		return fmt.Errorf("queue: --workers is how many jobs run at once, and %d is not a number of jobs", *workers)
+	}
+
+	options.Queue = *queueName
+	options.Concurrency = *workers
 	options.StopWhenEmpty = options.StopWhenEmpty || *stopWhenEmpty
-	c.worker.SetOptions(options)
+	worker.SetOptions(options)
 
 	if *once {
-		return c.worker.RunNextJob(ctx)
+		return worker.RunNextJob(ctx)
 	}
 
-	status, err := c.worker.Daemon(ctx)
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	status, err := worker.Daemon(ctx)
 	if err != nil {
 		return err
 	}
@@ -79,6 +118,48 @@ func (c *WorkCommand) Handle(ctx context.Context, o *console.IO) error {
 		return console.Exit(status, "the worker stopped with status %d", status)
 	}
 	return nil
+}
+
+// workerToRun answers the worker this run drains with: the one the command was
+// built over, or a new one built from its WorkerDeps.
+//
+// A configured worker with no handler is refused here, before it takes a job:
+// a worker that knows no job by name would take each one off the queue only to
+// fail it.
+func (c *WorkCommand) workerToRun() (*queue.Worker, error) {
+	if c.worker != nil {
+		return c.worker, nil
+	}
+	if c.configured == nil {
+		return nil, fmt.Errorf("queue: queue:work was built with neither a worker nor what to build one from")
+	}
+
+	deps := *c.configured
+	store := deps.Queue
+	if store == nil {
+		if c.manager == nil {
+			return nil, fmt.Errorf("queue: queue:work names no store to drain and has no manager to ask for the default connection")
+		}
+		resolved, err := c.manager.Connection("")
+		if err != nil {
+			return nil, err
+		}
+		store = resolved
+	}
+
+	options := deps.Options
+	if deps.Recorder != nil {
+		options.Recorder = deps.Recorder()
+	}
+
+	worker := queue.NewWorker(store, options)
+	if deps.Register != nil {
+		deps.Register(worker)
+	}
+	if len(worker.Names()) == 0 {
+		return nil, fmt.Errorf("queue: no job handlers are registered, and a worker that knows no job by name would take each one off the queue only to fail it")
+	}
+	return worker, nil
 }
 
 // ListenCommand runs a worker in a child process and restarts it when it exits.

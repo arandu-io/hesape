@@ -11,6 +11,12 @@
 //		console.NewRestartCommand(manager).Command(),
 //	)
 //
+// An application wires the whole set with one call, naming each collaborator
+// once: Commands(Deps{...}) answers all fourteen, queue:work among them, built
+// from a WorkerDeps whose options are the queue configuration's and whose
+// --workers and --queue override them for one run. Deps.Migrations answers
+// the failed jobs and batches tables those commands read.
+//
 // # Every failed job command takes a tenant
 //
 // A failed job carries a customer's payload, so `aru queue:failed` is a read
