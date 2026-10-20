@@ -11,14 +11,10 @@ import (
 
 // Mailer is the little the mail channel needs to send a message.
 //
-// It is a seam to hesape/mail, whose own mail.Mailer sends through a configured
-// transport. The adapter between them is a dozen lines: turn a messages.Mail
-// into the envelope and the two rendered parts, and hand it over.
-//
-// It stays an interface rather than the mail package itself. A notification
-// channel that imported the whole mailer would drag the view registry and every
-// transport behind every package that sends a notification, and could not be
-// exercised without one.
+// The application's *mail.Mailer is turned into one by [MailVia], which is how
+// a channel over it is built. The interface stays for what is not that mailer:
+// a test that records what would have been sent, or a provider's API called
+// directly, handed to [NewMail].
 type Mailer interface {
 	// Send delivers one message to one address, and answers with whatever the
 	// provider called it -- a message id, for the log line that has to be
@@ -52,7 +48,8 @@ type Mail struct {
 	mailer Mailer
 }
 
-// NewMail returns a mail channel that sends through m.
+// NewMail returns a mail channel that sends through m. The application's
+// *mail.Mailer is given to [MailVia] instead.
 //
 // There is no renderer to hand it: messages.Mail renders itself.
 func NewMail(m Mailer) *Mail { return &Mail{mailer: m} }

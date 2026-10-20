@@ -18,10 +18,12 @@
 //
 // # The seams
 //
-// Mail names a Mailer and Broadcast names a Broadcaster rather than importing
-// hesape/mail and hesape/broadcasting. Naming the little a channel needs is
-// what keeps the view registry, every transport and the driver registry from
-// standing behind every package that sends a notification, and a package that
-// imports the whole mailer to send one message is a package that cannot be
-// tested without one.
+// Mail names a Mailer and Broadcast names a Broadcaster, the little each
+// channel needs, so that either can be exercised without the real thing.
+// [MailVia] builds the mail channel over the application's *mail.Mailer, and
+// that import costs nothing a project does not already link: hesape/mail holds
+// the envelope and the rendering, and its transports and views are interfaces
+// the application fills in. Broadcast still names its Broadcaster rather than
+// importing hesape/broadcasting, whose driver registry would otherwise stand
+// behind every package that sends a notification.
 package channels

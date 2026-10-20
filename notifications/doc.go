@@ -8,7 +8,7 @@
 // delivering. The Notifier puts the three together:
 //
 //	n := notifications.New([]notifications.Channel{
-//		channels.NewMail(mailer),
+//		channels.MailVia(mailer),
 //		channels.NewDatabase(store),
 //	})
 //
