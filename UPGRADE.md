@@ -27,6 +27,43 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.72.0 — the adapters an application wrote around the outbox, the mail channel and the presence rules
+
+Nothing in the API breaks. Two commands change what they do in production,
+the relay changes what a panicking listener costs, and four adapters an
+application wrote have a home in the component they adapted.
+
+**`db:wipe` and `db:seed` ask in production.** Both compared
+`Deps.Environment` with the literal `"production"`, which no configuration
+produces: an application passes `string(cfg.App.Env)`, and production is
+`config.EnvProd`, `"prod"`. So neither ever asked. They now ask whenever the
+environment is `config.EnvProd`, and an answer that is not yes cancels the
+command. **A pipeline that runs either one in production with nobody at the
+keyboard has to pass `--force`**, which is what the confirmation was always
+documented to need; without it the command finds its input closed, fails
+with "the input ended while db:seed was waiting for an answer" and does
+nothing.
+
+**A listener that panics fails its event, not the process.** The relay runs
+each `Publish` under a recover. The panic becomes a
+`concurrency.PanicError`, the event is marked failed with it -- and parked
+once `MaxAttempts` runs out -- the events behind it are still delivered, and
+the panic is logged with its stack. A pass that panics underneath the
+listeners (the driver, the lock) fails that pass and the next tick tries
+again. Code that relied on a panic to stop the process has to return an error
+and watch the parked events instead.
+
+### Where the hand-written wiring goes
+
+| was written by the application or the framework | is now |
+| --- | --- |
+| a type wrapping `*database.DB` with an `InTransaction` method, for `events.NewOutbox` (the framework's `events.NewOutbox` envelope is one) | `events.NewOutbox(db)`: `*database.DB` has `InTransaction(ctx)` |
+| a `Publisher` slice that fans an event out, the `if e.Name != ...` at the top of each listener, and the `Decode` into a local struct | `events.Listeners{events.On("note.published", fn), events.Every(log)}`, with `fn func(ctx, E, events.Stored) error` |
+| a type turning `*mail.Mailer` into a `channels.Mailer`, or a notifier with no mail channel for lack of one | `channels.MailVia(mailer)` |
+| a `validation.PresenceQuery` written in SQL, with the tenant filter by hand | `validation.NewDatabasePresenceVerifier(database.NewPresence(db, "users").Count)`, the shared tables named and every other one filtered by the Grant's tenant |
+
+---
+
 ## v0.71.0 — the console pieces an application copied live here
 
 Nothing in the API breaks. Three commands change what they do, and the code an
