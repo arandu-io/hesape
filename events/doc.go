@@ -33,6 +33,13 @@
 // the two halves meet, and it is why an application registers everything with
 // Listen and never has to know which half delivered it.
 //
+// Listeners is the typed form of the same routing, for listeners that answer
+// only committed events: a list written in bootstrap/app.go, where On names an
+// event and decodes its payload into the listener's own type, and Every takes
+// every event undecoded. The list is a Publisher, so it is what the relay is
+// handed; the fan-out, the name filter and the decode are not written again by
+// each application.
+//
 // Delivery is at-least-once, which is the price of never losing an event: the
 // consumer deduplicates on Stored.ID, and that is why the id is stable and why
 // it travels with the event.
