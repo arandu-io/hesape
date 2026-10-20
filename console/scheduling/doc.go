@@ -7,6 +7,16 @@
 // ScheduleWorkCommand, and its Module is Module. Two schedulers is two ways
 // to say the same thing, and only one stayed.
 //
+// # The tasks modules declare
+//
+// A module declares its scheduled work as foundation.Task values, and the
+// kernel collects them. TaskScheduler runs them on this package's Schedule and
+// Runner, adding what a task carries and an Event has no field for: a Timeout,
+// a Recorder and a durable claim on each occurrence, so a Singleton task runs
+// once per minute per tenant however many replicas fire. TaskModule is that
+// scheduler as a foundation.Module, and TaskCommands answers schedule:list and
+// schedule:run <id> [--tenant=] over it.
+//
 // # Authorization and tenancy
 //
 // Every scheduled event carries an auth.Action, and what it hands a callback
