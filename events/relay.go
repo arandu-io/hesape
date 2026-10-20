@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/cache"
+	"github.com/arandu-io/hesape/concurrency"
 	"github.com/arandu-io/hesape/log"
 )
 
@@ -110,10 +111,19 @@ func (r *Relay) Run(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
-		if err := r.pass(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		// The pass runs under a recover. A listener's panic is already caught
+		// around each event, below; this one is for everything else a pass
+		// calls -- the driver, the lock -- whose panic would otherwise end the
+		// goroutine the relay runs on, and with it the process.
+		err := concurrency.Recover(ctx, "events: outbox relay pass", func() error { return r.pass(ctx) })
+		if err != nil && !errors.Is(err, context.Canceled) {
 			// A failed pass is not fatal: the next tick tries again, and the
 			// events are still in the table. Stopping the relay because the
 			// database blinked would turn a hiccup into a backlog.
+			if panicked, ok := errors.AsType[*concurrency.PanicError](err); ok {
+				logger.Error("outbox pass panicked", "error", err, "stack", string(panicked.Stack))
+				continue
+			}
 			logger.Warn("outbox pass failed", "error", err)
 		}
 	}
@@ -154,7 +164,10 @@ func (r *Relay) publishBatch(ctx context.Context) error {
 			return ctx.Err()
 		}
 
-		if err := r.publisher.Publish(ctx, e); err != nil {
+		if err := r.publish(ctx, e); err != nil {
+			if panicked, ok := errors.AsType[*concurrency.PanicError](err); ok {
+				logger.Error("a listener panicked", "event", e.Name, "id", e.ID, "error", err, "stack", string(panicked.Stack))
+			}
 			attempts := e.Attempts + 1
 			if attempts >= r.opts.MaxAttempts {
 				// Parked rather than retried forever. An event that has failed
@@ -200,6 +213,24 @@ func (r *Relay) publishBatch(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// publish hands one event to the publisher, with a panic in it turned into the
+// error it is.
+//
+// The publisher is the application's code, and a panic in it is a failed
+// delivery like any other: the event is marked failed with the panic as the
+// reason, parked once the attempts run out, and the events behind it are still
+// delivered. Without the recover one listener's nil dereference ended the
+// process that serves requests, and on restart the same event panicked again.
+//
+// The guard is given a context that is never done, because Recover declines to
+// start work on a done one and the cancellation was already checked by the
+// loop; the publisher itself still receives ctx, and with it the shutdown.
+func (r *Relay) publish(ctx context.Context, e Stored) error {
+	return concurrency.Recover(context.WithoutCancel(ctx), "events: "+e.Name, func() error {
+		return r.publisher.Publish(ctx, e)
+	})
 }
 
 // Drain publishes everything pending, once, and returns.

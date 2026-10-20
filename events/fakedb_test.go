@@ -62,6 +62,17 @@ type fakeOutbox struct {
 	// failLag makes the lag query fail, which is how a health check reports a
 	// database that is not answering rather than an outbox that is behind.
 	failLag bool
+
+	// panicReads is how many reads of the pending events panic before the
+	// fake answers again: a driver that blows up underneath a relay pass.
+	panicReads int
+}
+
+// panicOnTheNextRead makes the next read of the pending events panic.
+func (f *fakeOutbox) panicOnTheNextRead() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.panicReads = 1
 }
 
 func newFakeOutbox() (*handle, *fakeOutbox) {
@@ -231,6 +242,10 @@ func (c *fakeConn) QueryContext(_ context.Context, query string, _ []driver.Name
 		return &outboxRows{rows: append([]events.Stored(nil), f.parked...)}, nil
 
 	default:
+		if f.panicReads > 0 {
+			f.panicReads--
+			panic("the driver lost its mind")
+		}
 		return &outboxRows{rows: append([]events.Stored(nil), f.pending...)}, nil
 	}
 }
