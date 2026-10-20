@@ -808,16 +808,9 @@ func TestAnImportKeepsTheIDAndTheSecretInItsTenant(t *testing.T) {
 	}
 }
 
-// outboxReader is the module's handle as the outbox reads it.
-type outboxReader struct{ *database.DB }
-
-func (h outboxReader) InTransaction(ctx context.Context) bool {
-	return database.InTransaction(ctx, h.DB)
-}
-
 func outboxRows(t *testing.T, w *world) []events.Stored {
 	t.Helper()
-	rows, err := events.NewOutbox(outboxReader{w.db}).Pending(context.Background(), tenant, 500)
+	rows, err := events.NewOutbox(w.db).Pending(context.Background(), tenant, 500)
 	if err != nil {
 		t.Fatal(err)
 	}
