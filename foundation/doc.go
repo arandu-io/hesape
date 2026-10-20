@@ -7,12 +7,13 @@
 // # What lives here
 //
 // [Module] and its optional interfaces -- Bootable, Background, Closable,
-// Diagnostic, Health, Schedulable, Migratable -- are the whole
-// vocabulary of composition. A module declares; the kernel collects; nothing
-// runs until something asks. That shape is why [Task] and [Migration] are
-// declared here rather than in the packages that execute them: the scheduler
-// and the migration runner are consumers, and a module must be able to hand its
-// declarations straight to either one.
+// Diagnostic, Health, Schedulable, Migratable, Commandable, Publishable -- are
+// the whole vocabulary of composition. A module declares; the kernel collects;
+// nothing runs until something asks. That shape is why [Task] and [Migration]
+// are declared here rather than in the packages that execute them: the
+// scheduler and the migration runner are consumers, and a module must be able
+// to hand its declarations straight to either one. A [Commandable] module hands
+// its console commands to the kernel the same way.
 //
 // It also owns what the framework mounts for itself. Everything under
 // internalPrefix -- the health probe, the debug console, the development

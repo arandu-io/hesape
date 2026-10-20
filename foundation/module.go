@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/console"
 	"github.com/arandu-io/hesape/database/migrations"
 	"github.com/arandu-io/hesape/routing"
 )
@@ -150,6 +151,23 @@ type Schedulable interface {
 // collects them from every registered module in registration order.
 type Migratable interface {
 	Migrations() []Migration
+}
+
+// Commandable is optional: the module declares the console commands it adds to
+// the application's binary, and the kernel collects them from every registered
+// module in registration order, beside its migrations and its tasks.
+//
+// The commands are values rather than names to look up, so a command the module
+// declares and a command the binary answers are the same slice: one missing from
+// it does not exist, and one in it with a broken Run does not build.
+//
+// What a module declares is added to the commands the kernel composes itself,
+// never put in their place. A name that is already taken -- by a built-in
+// command, by the application or by another module -- is the kernel's to refuse
+// at start-up, naming who declared each, because a module that could shadow
+// `migrate` could change what a deploy step does.
+type Commandable interface {
+	Commands() []console.Command
 }
 
 // Migration is a versioned, immutable-once-published schema change.
