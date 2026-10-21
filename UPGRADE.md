@@ -27,6 +27,74 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.74.0 — one way in for the logger, the translator, the session table and the module wiring
+
+Nothing in the API breaks. Three things change what they do, and every
+package-level setting that reached every instance in the process is
+deprecated in favour of the constructor or the config that reaches one.
+
+**`number.Format` and `number.Parse` follow `UseLocale`.** The locale used to
+reach `Currency` and nothing else. Under `pt-BR`, `Format(1234.5, 2)` is now
+`"1.234,50"`, and so is everything that renders through it -- `Percentage`,
+`Abbreviate`, `ForHumans`, `FileSize` -- and `Parse` reads the same
+separators back: `Parse("1.234,56")` is `1234.56`, and a dot is a group
+separator there, so `Parse("1.5")` is `15`. `Ordinal` and the spelled forms
+stay English. A locale with no conventions of its own (`pt-PT` among them) is
+written the en-US way, as before. Code that set `pt-BR` for its money and
+relied on `Format` staying en-US passes the figure through `WithLocale("en",
+...)`.
+
+**A prohibited console command refuses.** `console.Prohibit` and
+`dbconsole.ProhibitDestructiveCommands` wrote a list nothing read on the way
+in, so `db:wipe` ran with the guard on. `console.Application` now refuses a
+command prohibited there, or on the application with the new
+`Application.Prohibit`, with an exit error of status 1 and the work not done.
+
+**A database error states its own status.** `database.ErrRecordNotFound`
+(404), `database.ErrUniqueViolation` (409) and every error under database
+that answers `errors.Is` for either now carry an `HTTPStatus` method, and
+`exception.StatusOf` reads them in its first row instead of importing the
+database package. One error answers the same; a chain that `errors.Join`ed a
+database error with a validation error or a stale CSRF token is now answered
+with the database error's status.
+
+**Deprecated, with the replacement named on each.** Nothing is removed in
+this release; `staticcheck` (SA1019) shows every use, and every deprecated
+setting is still read until it goes.
+
+- `testing.TestResponse`, `NewTestResponse`, `FromBaseResponse`: assert on the
+  `*arandutest.Response` an `arandutest.Client` returns, which now carries the
+  status, header, redirect, cookie, download, body, text and JSON assertions.
+- `http/middleware.HandleCors`: `HandleCorsWith(CorsConfig)`, which returns
+  the refusal of a wildcard with credentials instead of a middleware.
+- `http/middleware.At`, `Hosts`, `TrustsSubdomains`: the hosts and subdomain
+  arguments of `TrustHosts`. `SkipWhen`: `CorsConfig.Skip`. `FlushState`.
+- `http/resources.Wrap`, `WithoutWrapping`, `ForceWrapping`, `Wrapper`,
+  `FlushState`: `JsonResponseBuilder.WithWrap` and `WithoutWrapping` on the
+  response.
+- `auth.RedirectUsing`: the redirect argument of `NewAuthenticationError`, or
+  the sign-in page of the middleware that answers the error.
+- `cookie/middleware.Except`, `FlushState`: `NewEncryptCookiesExcept`.
+- `console.Prohibit`, `IsProhibited`, `dbconsole.ProhibitDestructiveCommands`:
+  `Application.Prohibit`, as in `app.Prohibit(dbconsole.DestructiveCommands...)`.
+  `console.Starting`, `ForgetBootstrappers`, `Application.Bootstrap`:
+  `foundation.Commandable` for a module's commands, `Application.Add` for the
+  rest.
+
+### Where the hand-written wiring goes
+
+| was written by the application or the framework | is now |
+| --- | --- |
+| `log.New(env, level)` beside a `log.Config` nothing built | `log.FromConfig(cfg.Log, dispatcher)`; a `stdout` driver names New's destination |
+| `translation.NewFileLoader(fsys, "lang")` then `translation.New(...)`, and a list of supported locales in configuration | `translation.NewFromDirectory(fsys, "lang", locale, fallback)` and `translation.Locales(fsys, "lang")` |
+| a dispatch function per job (`jobs.New`, then `Push`) and a `Decode` at the top of each handler | `queue.Dispatch(ctx, q, g, name, payload)` and `queue.HandlerFor(func(ctx, g, j, payload T) error)` |
+| `bus.Handled(...)` on every path out of a batched handler | `queue/middleware.NewReportToBatch(batches, queue.NewBusAdapter(q), worker)` on the worker |
+| `webhooks.RegisterJobHandlers(worker)` and `middleware.CSRFExcept(webhooks.ReceivePaths()...)` | `queue.RegisterJobHandlers(worker, modules...)` and `foundation.CSRFExemptions(modules...)`, over every module that implements `queue.JobHandlers` or `foundation.CSRFExempt` |
+| a second RESP client for the queue, with its own address and TLS | `queue/connectors/redis.FromConnection(conn)` over the `redis/connections` connection the cache holds |
+| sessions in memory only, behind more than one replica | `session.NewDatabaseHandler[T](db, "")` over `session.RecordMigrations()` |
+
+---
+
 ## v0.73.0 — the HTTP layer the framework kept: the controller router, the guards, the session store
 
 Nothing in the API breaks. What the framework kept as its own HTTP layer --
