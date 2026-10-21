@@ -13,8 +13,8 @@ import (
 
 // QueueManager holds the configured connections and hands them out by name.
 //
-// There is no resolution from a config array: the application constructs its
-// queues in bootstrap/app.go and passes them here. What is left is the part
+// There is no resolution from a config array: whoever composes the application
+// constructs its queues and passes them here. What is left is the part
 // anybody calls -- `aru queue:work --connection=redis` has to turn a string
 // into a queue, the default connection has to have a name, and a queue has to
 // be pausable while an incident is open.
@@ -154,7 +154,7 @@ func (m *QueueManager) Connection(name string) (Queue, error) {
 	}
 	connect, registered := m.connectors[name]
 	if !registered {
-		return nil, fmt.Errorf("%w: %q. Register it with Extend in bootstrap/app.go", ErrNoConnection, name)
+		return nil, fmt.Errorf("%w: %q. Set QUEUE_CONNECTION to it, which is the connection the framework registers; a manager built by hand registers it with Extend", ErrNoConnection, name)
 	}
 	q, err := connect()
 	if err != nil {
@@ -226,7 +226,7 @@ func pausedKey(connection, queue string) string {
 // It is an error rather than a silent no-op, because "the queue is paused" is a
 // thing an operator believes after the command returns, and believing it
 // wrongly is how work keeps going out during an incident.
-var ErrNoCache = fmt.Errorf("queue: no cache is wired, so there is nowhere to record this. Call SetCache in bootstrap/app.go")
+var ErrNoCache = fmt.Errorf("queue: no shared cache is wired, so there is nowhere to record this. Set CACHE_STORE=redis or SESSION_DRIVER=redis, whose store the framework hands to the queue; a manager built by hand takes one with SetCache")
 
 // Pause stops workers taking new jobs off a queue, until it is resumed.
 //

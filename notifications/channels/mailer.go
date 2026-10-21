@@ -8,7 +8,7 @@ import (
 )
 
 // MailVia returns a mail channel that sends through the application's
-// *mail.Mailer, the one bootstrap/app.go already builds over its transport:
+// *mail.Mailer, the one already built over its transport:
 //
 //	notifier := notifications.New([]notifications.Channel{
 //		channels.NewDatabase(notifications.NewTableStore(db)),

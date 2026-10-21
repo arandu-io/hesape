@@ -91,7 +91,7 @@ func (s *SerializesModels) FindModelsUsing(class string, find ModelFinder) *Seri
 func (s *SerializesModels) RestoreModel(ctx context.Context, action auth.Action, id ModelIdentifier) (any, error) {
 	find, registered := s.finders[id.Class]
 	if !registered {
-		return nil, fmt.Errorf("queue: nothing knows how to load a %q. Register it with FindModelsUsing in bootstrap/app.go", id.Class)
+		return nil, fmt.Errorf("queue: nothing knows how to load a %q. Register a finder with FindModelsUsing where the job handlers are registered, in app/Providers", id.Class)
 	}
 	if id.TenantID == "" {
 		return nil, fmt.Errorf("queue: the identifier for %s carries no tenant, and a record cannot be loaded without one", id.Class)

@@ -79,8 +79,15 @@ func TestRenderingWithNoViewLayerWiredSaysWhichLineIsMissing(t *testing.T) {
 	if err == nil {
 		t.Fatal("rendering with no renderer answered 200 with an empty body")
 	}
-	if !strings.Contains(err.Error(), "bootstrap/app.go") {
-		t.Errorf("the failure does not name the fix: %v", err)
+	// The call, the builder method it goes in and the file: the kernel that
+	// took k.Register is gone, and a message naming it names nothing.
+	for _, want := range []string{"view.NewModule()", "WithProviders", "bootstrap/app.go"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the failure does not name %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "k.Register") {
+		t.Errorf("the failure names the kernel registration that no longer exists: %v", err)
 	}
 }
 

@@ -475,7 +475,7 @@ func MigrateMakeCommand(deps Deps) console.Command {
 			}
 
 			o.Info("Created migration [%s]", written)
-			o.Comment("Register it by blank-importing the package it lives in, from main.go")
+			o.Comment("It registers itself from init(), and runs once the package it lives in is blank-imported in bootstrap/app.go")
 			return nil
 		},
 	}

@@ -311,7 +311,7 @@ func SupportedDrivers() []string {
 
 // AvailableDrivers returns the supported drivers that this binary can
 // actually reach: the intersection of SupportedDrivers and the connector
-// registry, which reports what main.go imported -- the same question asked
+// registry, which reports what bootstrap/app.go imported -- the same question asked
 // of the thing that decides it here.
 func AvailableDrivers() []string {
 	linked := map[Dialect]bool{}

@@ -79,7 +79,7 @@ func TestAViewWithNoRendererSaysWhatToWire(t *testing.T) {
 	// The file, and the call that goes in it. The wiring moved from
 	// cmd/app/main.go to bootstrap/app.go, and a message naming a file the
 	// project does not have is worse than no message.
-	for _, want := range []string{"bootstrap/app.go", "view.NewModule()"} {
+	for _, want := range []string{"bootstrap/app.go", "WithProviders", "view.NewModule()"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error does not mention %q: %v", want, err)
 		}

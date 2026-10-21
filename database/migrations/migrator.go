@@ -642,7 +642,8 @@ func (m *Migrator) GetMigrationFiles(paths []string) map[string]Migration {
 //
 // A migration file needs a separate load step only when something has to
 // read it off disk to make it exist as code. Go has no such step: the import
-// in main.go put every registered migration in the binary before it started.
+// in bootstrap/app.go put every registered migration in the binary before it
+// started.
 
 // GetMigrationName returns the name of a migration, given either the name
 // itself or a path that ends in it.

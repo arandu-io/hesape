@@ -41,8 +41,8 @@ var (
 //
 //	func init() { migrations.Register(CreateUsersTable{}) }
 //
-// and main.go blank-imports the package the migrations live in. That import is
-// the loading step, moved to link time -- with the compiler checking, before
+// and bootstrap/app.go blank-imports the package the migrations live in. That
+// import is the loading step, moved to link time -- with the compiler checking, before
 // anything runs, that every registered migration actually implements Migration.
 //
 // Registering the same name twice panics rather than picking one. Two

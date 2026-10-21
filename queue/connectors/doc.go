@@ -1,6 +1,6 @@
 // Package connectors opens queue connections.
 //
-// The application constructs its queues in bootstrap/app.go and hands them to
+// Whoever composes the application constructs its queues and hands them to
 // queue.QueueManager. A connector is the lazy form of that: the thing that
 // knows how to open a connection, handed to QueueManager.AddConnector so it is
 // not opened until something asks for it.
