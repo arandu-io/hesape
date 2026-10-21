@@ -14,6 +14,13 @@
 //
 //	q, err := queue.Open("redis", cache.Endpoint{Address: addr, Prefix: prefix})
 //
+// An application that already holds a connection from
+// github.com/arandu-io/hesape/redis/connections -- the one its cache and
+// sessions speak over -- queues over that same client with [FromConnection],
+// rather than opening a second pool with its own address, password and TLS
+// configuration. [New] opens its client through that package too, so there is
+// one place a RESP client is dialled.
+//
 // Same contract as [github.com/arandu-io/hesape/queue.Queue], same Worker, same
 // handlers -- one line different in bootstrap/app.go. Use it when the volume
 // outgrows what a table handles comfortably, and accept what it costs: a job

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/arandu-io/hesape/cache"
+	"github.com/arandu-io/hesape/redis/connections"
 )
 
 // These are in the package because the client is unexported, and the claim is
@@ -61,5 +62,28 @@ func TestOpenHandsTheEndpointToTheClient(t *testing.T) {
 	}
 	if q.prefix != "app" {
 		t.Errorf("prefix = %q, want the endpoint's", q.prefix)
+	}
+}
+
+// TestFromConnectionTakesTheConnectionsClientAndPrefix: the queue must not
+// open a second pool beside the connection it was handed, and must write under
+// the prefix that connection carries.
+func TestFromConnectionTakesTheConnectionsClientAndPrefix(t *testing.T) {
+	encryption := &tls.Config{MinVersion: tls.VersionTLS13}
+	conn := connections.Connect(connections.Config{Address: "127.0.0.1:1", Prefix: "app", TLS: encryption})
+	t.Cleanup(func() { _ = conn.Close() })
+
+	q, err := FromConnection(conn)
+	if err != nil {
+		t.Fatalf("FromConnection: %v", err)
+	}
+	if q.client != conn.Client() {
+		t.Error("the queue opened a client of its own instead of using the connection's")
+	}
+	if q.prefix != "app" {
+		t.Errorf("prefix = %q, want the connection's", q.prefix)
+	}
+	if q.client.Options().TLSConfig != encryption {
+		t.Error("the shared client lost the connection's TLS configuration")
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/queue"
 	"github.com/arandu-io/hesape/queue/jobs"
+	"github.com/arandu-io/hesape/redis/connections"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -45,21 +46,52 @@ type Options struct {
 }
 
 // New returns the queue over its own client.
+//
+// The client is opened by redis/connections, the one place the collection
+// turns an address, a password and a TLS configuration into a RESP client, so
+// the queue and the cache dial the same way. The prefix is used as given.
 func New(opts Options) *RedisQueue {
 	if opts.Address == "" {
 		opts.Address = "127.0.0.1:6379"
 	}
-	return &RedisQueue{
-		client: redis.NewClient(&redis.Options{
-			Addr:        opts.Address,
-			Password:    opts.Password,
-			DB:          opts.Database,
-			DialTimeout: 5 * time.Second,
-			ReadTimeout: 3 * time.Second,
-			TLSConfig:   opts.TLS,
-		}),
-		prefix: opts.Prefix,
+	conn := connections.Connect(connections.Config{
+		Address:     opts.Address,
+		Password:    opts.Password,
+		Database:    opts.Database,
+		DialTimeout: 5 * time.Second,
+		ReadTimeout: 3 * time.Second,
+		TLS:         opts.TLS,
+	})
+	// One address and no cluster is the single-node client, which is the
+	// concrete type Connect returns for it.
+	return &RedisQueue{client: conn.Client().(*redis.Client), prefix: opts.Prefix}
+}
+
+// ErrClustered is what FromConnection returns for a connection over a cluster.
+//
+// A claim, a settlement and a retry each move a job between keys in one
+// WATCH and MULTI/EXEC transaction, and a cluster refuses a transaction whose
+// keys sit in different slots. Refusing the connection here is the error at
+// boot rather than at the first job.
+var ErrClustered = errors.New("queue/redis: the connection is clustered, and a claim moves a job between keys a cluster keeps in different slots")
+
+// FromConnection returns the queue over a connection the application already
+// opened with redis/connections, under that connection's prefix.
+//
+// It is the way to queue over the client the cache and the sessions already
+// use, rather than opening a second pool with its own address, password and
+// TLS configuration that can drift from the first. The queue and the
+// connection share the client, so Close on either closes both: close the
+// connection, once, at shutdown.
+//
+// A connection over several addresses is a cluster, and it is refused with
+// ErrClustered.
+func FromConnection(conn *connections.Connection) (*RedisQueue, error) {
+	client, ok := conn.Client().(*redis.Client)
+	if !ok {
+		return nil, ErrClustered
 	}
+	return &RedisQueue{client: client, prefix: conn.Prefix()}, nil
 }
 
 // Wrap returns a queue over a client the application already opened.
