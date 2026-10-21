@@ -48,6 +48,16 @@ func NewEncryptCookies(encrypter *encryption.Encrypter) *EncryptCookies {
 	return &EncryptCookies{encrypter: encrypter}
 }
 
+// NewEncryptCookiesExcept returns the middleware with the named cookies left
+// in the clear from the start: the CSRF token a script on the page has to
+// read, a preference the front end sets itself.
+//
+// It is the exemption named where the middleware is built, so it reaches this
+// instance and no other -- what the package-level Except could not say.
+func NewEncryptCookiesExcept(encrypter *encryption.Encrypter, except ...string) *EncryptCookies {
+	return &EncryptCookies{encrypter: encrypter, except: slices.Clone(except)}
+}
+
 // DisableFor marks the named cookies to be read and written in the clear by
 // this instance.
 //
@@ -84,6 +94,10 @@ func (m *EncryptCookies) IsDisabled(name string) bool {
 // It is global state, because the point is to declare the exception once at
 // boot rather than on every instance that gets built. A test that touches it
 // calls [FlushState] afterwards.
+//
+// Deprecated: it exempts the cookies from every instance in the process, from
+// wherever it is called. Name them where the middleware is built, with
+// [NewEncryptCookiesExcept].
 func Except(cookies ...string) {
 	stateMu.Lock()
 	defer stateMu.Unlock()
@@ -114,6 +128,9 @@ func Serialized(name string) bool {
 
 // FlushState empties the global never-encrypt list and clears the serialize
 // flag. A test that called [Except] calls this to put the package back.
+//
+// Deprecated: it resets what the deprecated [Except] set, and an exemption
+// named on the instance has nothing to reset.
 func FlushState() {
 	stateMu.Lock()
 	defer stateMu.Unlock()

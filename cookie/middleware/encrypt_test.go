@@ -433,3 +433,30 @@ func TestOnlyTheNamedCookieIsDecryptedAndTheRestStillArrive(t *testing.T) {
 		t.Fatalf("got %v, want secret=shh and plain=visible", got)
 	}
 }
+
+// TestNewEncryptCookiesExceptLeavesTheNamedCookiesInTheClear: the exemption
+// named at construction reaches this instance, and a second instance built
+// without it still encrypts the same cookie.
+func TestNewEncryptCookiesExceptLeavesTheNamedCookiesInTheClear(t *testing.T) {
+	enc := newEncrypter(t, key)
+	exempt := middleware.NewEncryptCookiesExcept(enc, "XSRF-TOKEN")
+	plain := middleware.NewEncryptCookies(enc)
+
+	if !exempt.IsDisabled("XSRF-TOKEN") {
+		t.Fatal("the cookie named at construction is encrypted")
+	}
+	if exempt.IsDisabled("session") {
+		t.Fatal("a cookie nobody named is left in the clear")
+	}
+	if plain.IsDisabled("XSRF-TOKEN") {
+		t.Fatal("an exemption named on one instance reached another")
+	}
+
+	w := httptest.NewRecorder()
+	exempt.Handle(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.SetCookie(w, &http.Cookie{Name: "XSRF-TOKEN", Value: "token-1"})
+	})).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+	if got := w.Result().Cookies(); len(got) != 1 || got[0].Value != "token-1" {
+		t.Fatalf("the exempt cookie went out as %v, want its plain value", got)
+	}
+}
