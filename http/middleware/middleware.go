@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"strconv"
+	"time"
 )
 
 // ValidatePostSize checks the Content-Length header against maxSize and
@@ -152,7 +153,42 @@ func TrustHosts(hosts []string, subdomains bool) func(http.Handler) http.Handler
 // HandleCors handles CORS preflight requests and adds CORS headers to
 // responses. The allowedOrigins, allowedMethods, and allowedHeaders
 // parameters configure which origins, methods, and headers are permitted.
+//
+// Deprecated: use [HandleCorsWith], which takes the policy as a [CorsConfig],
+// refuses the unsafe combination [CorsConfig.Valid] names before serving, and
+// sends the exposed headers this form has no parameter for.
 func HandleCors(allowedOrigins []string, allowedMethods []string, allowedHeaders []string, maxAge int, allowCredentials bool) func(http.Handler) http.Handler {
+	return cors(CorsConfig{
+		AllowedOrigins:   allowedOrigins,
+		AllowedMethods:   allowedMethods,
+		AllowedHeaders:   allowedHeaders,
+		MaxAge:           time.Duration(maxAge) * time.Second,
+		AllowCredentials: allowCredentials,
+	})
+}
+
+// HandleCorsWith returns the CORS middleware for a policy: it answers a
+// preflight from an allowed origin with the methods, the headers and the cache
+// lifetime the policy names, and adds the allow-origin, credentials and
+// exposed headers to every other response to one.
+//
+// The policy is checked first, and one [CorsConfig.Valid] refuses is returned
+// as the error with no middleware: a wrong CORS policy does not fail, it works
+// for the attacker, so the place to hear about it is where the application is
+// wired.
+//
+// An origin outside the list gets no CORS header at all, and the request is
+// handed on: the browser is what refuses the cross-origin read.
+func HandleCorsWith(c CorsConfig) (func(http.Handler) http.Handler, error) {
+	if err := c.Valid(); err != nil {
+		return nil, err
+	}
+	return cors(c), nil
+}
+
+// cors is the middleware both constructors return.
+func cors(c CorsConfig) func(http.Handler) http.Handler {
+	maxAge := int(c.MaxAge / time.Second)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if shouldSkipCors(r) {
@@ -175,7 +211,7 @@ func HandleCors(allowedOrigins []string, allowedMethods []string, allowedHeaders
 			// combination at boot so this branch is never reached with both.
 			wildcard := false
 			allowed := false
-			for _, o := range allowedOrigins {
+			for _, o := range c.AllowedOrigins {
 				if o == "*" {
 					wildcard, allowed = true, true
 					break
@@ -199,18 +235,18 @@ func HandleCors(allowedOrigins []string, allowedMethods []string, allowedHeaders
 			// Never with the wildcard. A response carrying both is refused by
 			// every browser, and the way people work around that is the leak
 			// this middleware used to have.
-			if allowCredentials && !wildcard {
+			if c.AllowCredentials && !wildcard {
 				h.Set("Access-Control-Allow-Credentials", "true")
 			}
 			h.Set("Vary", "Origin")
 
 			if r.Method == http.MethodOptions {
 				// Preflight.
-				if len(allowedMethods) > 0 {
-					h.Set("Access-Control-Allow-Methods", joinHeaders(allowedMethods))
+				if len(c.AllowedMethods) > 0 {
+					h.Set("Access-Control-Allow-Methods", joinHeaders(c.AllowedMethods))
 				}
-				if len(allowedHeaders) > 0 {
-					h.Set("Access-Control-Allow-Headers", joinHeaders(allowedHeaders))
+				if len(c.AllowedHeaders) > 0 {
+					h.Set("Access-Control-Allow-Headers", joinHeaders(c.AllowedHeaders))
 				}
 				if maxAge > 0 {
 					h.Set("Access-Control-Max-Age", strconv.Itoa(maxAge))
@@ -219,6 +255,9 @@ func HandleCors(allowedOrigins []string, allowedMethods []string, allowedHeaders
 				return
 			}
 
+			if len(c.ExposedHeaders) > 0 {
+				h.Set("Access-Control-Expose-Headers", joinHeaders(c.ExposedHeaders))
+			}
 			next.ServeHTTP(w, r)
 		})
 	}

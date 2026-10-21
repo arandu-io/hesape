@@ -9,7 +9,8 @@ import "time"
 // and the compiler checks the field.
 //
 // It exists as a type and not as five parameters because of what the five
-// permit in combination. See [CorsConfig.Valid].
+// permit in combination. See [CorsConfig.Valid]. [HandleCorsWith] is the
+// middleware built from one.
 type CorsConfig struct {
 	// AllowedOrigins is the set of origins that may read a response.
 	//
