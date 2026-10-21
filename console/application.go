@@ -34,6 +34,9 @@ type Application struct {
 
 	observers []Observer
 
+	// prohibited is the commands Prohibit stopped on this application.
+	prohibited map[string]bool
+
 	// lastOutput is what the command Call ran most recently printed, kept so
 	// Output can hand it back.
 	lastOutput *BufferedConsoleOutput
@@ -123,6 +126,23 @@ func (r *Application) Add(commands ...Command) *Application {
 func (r *Application) WithLocks(locks *cache.Locks, ttl time.Duration) *Application {
 	r.locks = locks
 	r.lockTTL = ttl
+	return r
+}
+
+// Prohibit stops the named commands from running on this application: they
+// stay registered and listed, and running one refuses with an ExitError that
+// says it is prohibited, instead of doing the work.
+//
+// It is what a production binary is built with so the commands that throw
+// data away cannot run there, and it reaches this application only -- the
+// package-level Prohibit reached every application in the process.
+func (r *Application) Prohibit(names ...string) *Application {
+	if r.prohibited == nil {
+		r.prohibited = map[string]bool{}
+	}
+	for _, name := range names {
+		r.prohibited[name] = true
+	}
 	return r
 }
 
@@ -248,7 +268,10 @@ func (r *Application) run(ctx context.Context, c Command, args []string, out, er
 	started := time.Now()
 	o := NewIO(c.Name, args, out, errOut, in)
 
-	err := bindSignature(c, o, args)
+	err := r.refuseProhibited(c)
+	if err == nil {
+		err = bindSignature(c, o, args)
+	}
 	if err == nil {
 		err = r.guarded(ctx, c, o)
 	}
@@ -266,6 +289,15 @@ func (r *Application) run(ctx context.Context, c Command, args []string, out, er
 		return nil
 	}
 	return err
+}
+
+// refuseProhibited is the refusal of a command Prohibit stopped, on this
+// application or through the deprecated package-level Prohibit.
+func (r *Application) refuseProhibited(c Command) error {
+	if r.prohibited[c.Name] || IsProhibited(c.Name, nil, true) {
+		return Exit(1, "the command %s is prohibited from running in this environment", c.Name)
+	}
+	return nil
 }
 
 // bindSignature parses the command's signature and binds the command line to

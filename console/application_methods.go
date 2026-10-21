@@ -18,6 +18,11 @@ var bootstrappers []func(*Application)
 //
 // It is where a package that ships commands adds them without the entry point
 // having to name it.
+//
+// Deprecated: it runs on every application built afterwards, from wherever it
+// is called. A module declares its commands with foundation.Commandable and
+// the kernel adds them; anything else is added with [Application.Add] where
+// the application is built.
 func Starting(callback func(*Application)) {
 	if callback != nil {
 		bootstrappers = append(bootstrappers, callback)
@@ -28,12 +33,17 @@ func Starting(callback func(*Application)) {
 //
 // It exists for the test that must not inherit what an earlier one
 // registered.
+//
+// Deprecated: it resets what the deprecated [Starting] registered.
 func ForgetBootstrappers() { bootstrappers = nil }
 
 // Bootstrap runs the registered callbacks against this application.
 //
 // It is a separate call from NewApplication: a constructor that runs
 // arbitrary callbacks is a constructor no test can build quietly.
+//
+// Deprecated: it runs what the deprecated [Starting] registered. Add the
+// commands with [Application.Add].
 func (r *Application) Bootstrap() *Application {
 	for _, bootstrapper := range bootstrappers {
 		bootstrapper(r)

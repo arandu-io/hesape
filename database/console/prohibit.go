@@ -40,9 +40,13 @@ var DestructiveCommands = []string{
 //
 // A destructive command that has to remember to declare itself is a command
 // somebody will add without declaring. The list is read by a person, in one
-// place, and the guard it feeds is checked by console.IsProhibited on the way
-// in -- so the command still exists, still appears in the help, and refuses
+// place, and the application refuses a prohibited command on the way in -- so the command still exists, still appears in the help, and refuses
 // with a sentence instead of vanishing.
+//
+// Deprecated: it prohibits the five on every application in the process. Build
+// the application with them prohibited:
+//
+//	app.Prohibit(dbconsole.DestructiveCommands...)
 func ProhibitDestructiveCommands(prohibit bool) {
 	for _, name := range DestructiveCommands {
 		console.Prohibit(name, prohibit)

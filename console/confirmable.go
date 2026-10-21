@@ -53,7 +53,12 @@ var prohibited struct {
 // Prohibit stops a command from running, or lets it run again.
 //
 // Calling it with no second value prohibits. It is what a test suite calls so
-// a destructive command cannot fire from inside a test run.
+// a destructive command cannot fire from inside a test run. An [Application]
+// refuses to run a command prohibited here.
+//
+// Deprecated: it prohibits the command on every application in the process,
+// from wherever it is called. Build the application with
+// [Application.Prohibit].
 func Prohibit(name string, prohibit ...bool) {
 	value := true
 	if len(prohibit) > 0 {
@@ -70,6 +75,9 @@ func Prohibit(name string, prohibit ...bool) {
 
 // IsProhibited reports whether the command was prohibited, and says so on the
 // terminal unless it was asked to be quiet.
+//
+// Deprecated: it reads what the deprecated [Prohibit] set. An [Application]
+// refuses a prohibited command itself, so a command has nothing to ask.
 func IsProhibited(name string, o *IO, quiet ...bool) bool {
 	prohibited.RLock()
 	stopped := prohibited.names[name]
