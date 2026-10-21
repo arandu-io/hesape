@@ -27,6 +27,49 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.73.0 — the HTTP layer the framework kept: the controller router, the guards, the session store
+
+Nothing in the API breaks. What the framework kept as its own HTTP layer --
+the router that runs controller actions, the CSRF check, the session and token
+guards, idempotency, the typed session store -- now lives here, with its tests,
+and the framework's copies become aliases of these in its next release. Code
+written against the framework keeps compiling unchanged.
+
+**Deprecated, with the replacement named on each.** Nothing is removed in this
+release; `staticcheck` (SA1019) shows every use.
+
+- `foundation.Module.Routes`, and the empty `Routes` of `queue.Module`,
+  `redis.Module`, `events.Module` and `scheduling.TaskModule`. A module with
+  routes implements `foundation.Routable`, whose `Routes` takes a
+  `*controllers.Router`; a module with none implements nothing. `Module`
+  stops requiring `Routes` in a later release, and the empty methods go then.
+  A module that keeps `Routes(*routing.Router)` until then is handed
+  `controllers.Router.Routing()`.
+- `events.Dispatcher.Publish`. The relay is handed an `events.Listeners` list;
+  `Listen` and `Dispatch` stay for events that never leave the process.
+- `auth/middleware` (the whole package), `auth/access` and `auth/access/events`
+  (whole packages), and `users.DatabaseUserProvider`, `users.GenericUser` and
+  their constructors and `users.Connection`.
+
+### Where the framework's HTTP layer goes
+
+| was in the framework | is now |
+| --- | --- |
+| `http.Router`, `http.NewRouter`, `http.Routes` (with `URL`), `Router.Action`, `Resource`, `Singleton`, `ResourceAction`, `Invokable` | `routing/controllers.Router`, `NewRouter`, `Routes` |
+| `http.Indexer` ... `http.Destroyer`, `http.Invoker` | `controllers.Indexer` ... `controllers.Destroyer`, `controllers.Invoker` |
+| the unexported adapter from a `func(*Context) error` to an `http.Handler`, with the flash and redirect for a rejection, the 422 problem for JSON and the status an error names | `http.NewAdapter(renderer, urls, flash)`, a `routing.Adapter[http.Context]` |
+| `foundation.Module` with `Routes(*http.Router)` | `foundation.Routable`, with `Routes(*controllers.Router)` |
+| `security.SessionStore`, `NewSessionStore`, `SessionBackend`, `MemoryBackend`, `NewMemoryBackend`, `NewSessionBackend`, `PasswordConfirmedWithin` | the same names in `http` |
+| `middleware.CSRFProtect`, `CSRFExcept`, `CSRFOption`, `StatusCSRFExpired` | the same names in `http/middleware` |
+| `middleware.RequireAuth`, `LoadSubject`, `RedirectIfAuthenticated`, `RequireRole`, `RequireConfirmedPassword`, `SignInPath`, `PasswordConfirmPath` | the same names in `http/middleware`, over `*http.SessionStore` |
+| `middleware.RequireToken`, `TokenResolver`, `TokenDigest`, `DigestToken`, `ErrUnknownToken` | the same names in `http/middleware` |
+| `middleware.Idempotent`, `IdempotencyStore` | the same names in `http/middleware` |
+| `middleware.KeyBySession`, `Sessions` | the same names in `http/middleware`; `KeyByIP` is `routing/middleware.KeyByIP` |
+| `middleware.Observe` | `foundation.Observe`, which was already the same code |
+| a screen's own `Translator()` and `Locale()` beside `view.Page`, for the words a component draws | `view.Page` answers both, from `translation.WithTranslator` and `translation.Locale` on the request; `view.New` fills them |
+
+---
+
 ## v0.72.0 — the adapters an application wrote around the outbox, the mail channel and the presence rules
 
 Nothing in the API breaks. Two commands change what they do in production,
