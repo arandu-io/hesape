@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/arandu-io/hesape/auth"
-	"github.com/arandu-io/hesape/database"
 	"github.com/arandu-io/hesape/session"
 	"github.com/arandu-io/hesape/validation"
 )
@@ -135,15 +134,15 @@ func AbortUnless(condition bool, status int, message string) error {
 //
 //	an error with a method HTTPStatus() int        that status
 //	validation.Errors holding at least one message  422
-//	database.ErrRecordNotFound                      404
 //	auth.ErrForbidden                               403
 //	session.ErrTokenMismatch                        419
-//	database.ErrUniqueViolation                     409
 //
 // The first row is how an error states its own status: an *HTTPError, which
 // Abort builds; a *validation.ValidationException; the errors of
 // hesape/http/exceptions, which is how a body over the size limit arrives as
-// 413; and an application's own domain failure. It is matched by method set,
+// 413; database.ErrRecordNotFound, 404, and database.ErrUniqueViolation, 409,
+// with every error under database that answers errors.Is for either; and an
+// application's own domain failure. It is matched by method set,
 // so the type needs no import of this package, and it wins over the rows below
 // because it is the explicit statement -- the sentinel under it may be the
 // cause it wrapped. The status is returned as written, even outside 400-599:
@@ -153,9 +152,11 @@ func AbortUnless(condition bool, status int, message string) error {
 // returned one did not ask whether anything failed, and a 422 with nothing to
 // correct is the failure answering a rejected form exists to remove.
 //
-// model.ErrModelNotFound, and every other "not found" under database, answers
-// errors.Is for database.ErrRecordNotFound, so all of them are the 404 row.
-// auth.ErrForbidden is 403 rather than 404: the tenant filter has already
+// The database errors state their status rather than being named here, so
+// this package does not import the database layer to answer a request.
+// model.ErrModelNotFound, and every other "not found" under database, states
+// 404 as database.ErrRecordNotFound does. auth.ErrForbidden is 403 rather than
+// 404: the tenant filter has already
 // decided what exists at all, so a status does not hide a resource. A token
 // that does not match is 419, because the account may do this and the page is
 // simply old. A duplicate key is 409, because it is the request that collided
@@ -184,14 +185,10 @@ func StatusOf(err error) (int, bool) {
 	}
 
 	switch {
-	case errors.Is(err, database.ErrRecordNotFound):
-		return http.StatusNotFound, true
 	case errors.Is(err, auth.ErrForbidden):
 		return http.StatusForbidden, true
 	case errors.Is(err, session.ErrTokenMismatch):
 		return StatusPageExpired, true
-	case errors.Is(err, database.ErrUniqueViolation):
-		return http.StatusConflict, true
 	}
 	return 0, false
 }

@@ -105,6 +105,22 @@ func assertUniqueViolation(t *testing.T, err error) {
 	}
 }
 
+// TestAClassifiedUniqueViolationStatesItsStatus: the error a statement fails
+// with answers errors.Is for ErrUniqueViolation without the sentinel in its
+// chain, so it has to state the sentinel's status itself, or a layer that
+// reads the status by method set answers a duplicate key with 500.
+func TestAClassifiedUniqueViolationStatesItsStatus(t *testing.T) {
+	db := openFailing(t, "duplicate")
+	_, err := db.ExecContext(context.Background(), "INSERT INTO users (email) VALUES (?)", "a@example.com")
+	var stated interface{ HTTPStatus() int }
+	if !errors.As(err, &stated) || stated.HTTPStatus() != 409 {
+		t.Fatalf("%T does not state 409", err)
+	}
+	if !errors.As(ErrUniqueViolation, &stated) || stated.HTTPStatus() != 409 {
+		t.Fatal("ErrUniqueViolation does not state 409")
+	}
+}
+
 func TestAUniqueViolationOnExecSatisfiesErrUniqueViolation(t *testing.T) {
 	db := openFailing(t, "duplicate")
 	_, err := db.ExecContext(context.Background(), "INSERT INTO users (email) VALUES (?)", "a@example.com")

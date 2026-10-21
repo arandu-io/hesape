@@ -3,6 +3,7 @@ package database
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/arandu-io/hesape/database/concerns"
@@ -141,6 +142,10 @@ func (e *UniqueConstraintViolationException) Is(target error) bool {
 	return target == ErrUniqueViolation
 }
 
+// HTTPStatus is 409 Conflict, the status of ErrUniqueViolation, which this
+// exception answers errors.Is for.
+func (e *UniqueConstraintViolationException) HTTPStatus() int { return http.StatusConflict }
+
 // DeadlockException reports that the engine chose this transaction as the
 // deadlock victim.
 //
@@ -202,6 +207,16 @@ func (e *narrowedError) Error() string { return e.msg }
 // Is reports whether target is the parent, or something the parent is.
 func (e *narrowedError) Is(target error) bool { return errors.Is(e.parent, target) }
 
+// HTTPStatus is the parent's: a narrower sentinel is answered as the one it
+// names, which for every one declared here is a missing row.
+func (e *narrowedError) HTTPStatus() int {
+	var stated interface{ HTTPStatus() int }
+	if errors.As(e.parent, &stated) {
+		return stated.HTTPStatus()
+	}
+	return 500
+}
+
 // MultipleRecordsFoundException is what Sole returns when the query matched
 // more than one row, and it carries how many it saw.
 //
@@ -233,7 +248,20 @@ func NewMultipleRecordsFoundException(count int) *MultipleRecordsFoundException 
 //
 // The driver error is wrapped, not replaced: errors.As still reaches the
 // driver's own type, and the message is the driver's.
-var ErrUniqueViolation = errors.New("database: unique constraint violated")
+//
+// It states its own HTTP status, 409, and so does every error that answers
+// errors.Is for it, so a layer that answers a request with one reads the
+// status off the error rather than importing this package to recognise it.
+var ErrUniqueViolation error = &conflictError{msg: "database: unique constraint violated"}
+
+// conflictError is the type of ErrUniqueViolation: its message, and the status
+// a duplicate key is answered with.
+type conflictError struct{ msg string }
+
+func (e *conflictError) Error() string { return e.msg }
+
+// HTTPStatus is 409 Conflict: the request collided with a row already there.
+func (e *conflictError) HTTPStatus() int { return http.StatusConflict }
 
 // ErrMultipleColumnsSelected is what Scalar raises when the row it read has
 // more than one column.

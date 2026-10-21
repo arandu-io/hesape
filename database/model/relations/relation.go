@@ -80,6 +80,16 @@ func (e *narrowedError) Error() string { return e.msg }
 // Is reports whether target is the parent, or something the parent is.
 func (e *narrowedError) Is(target error) bool { return errors.Is(e.parent, target) }
 
+// HTTPStatus is the parent's: a narrower sentinel is answered as the one it
+// names, which for every one declared here is a missing row.
+func (e *narrowedError) HTTPStatus() int {
+	var stated interface{ HTTPStatus() int }
+	if errors.As(e.parent, &stated) {
+		return stated.HTTPStatus()
+	}
+	return 500
+}
+
 // Relation is the contract every relation type implements.
 //
 // The contract is here and the shared body is BaseRelation, the same division

@@ -55,6 +55,8 @@ func everyRow() []row {
 		{"a policy refused", fmt.Errorf("%w: invoices.delete", auth.ErrForbidden), http.StatusForbidden},
 		{"a token that does not match", fmt.Errorf("submitting: %w", session.ErrTokenMismatch), exception.StatusPageExpired},
 		{"a duplicate key", fmt.Errorf("inserting user: %w", database.ErrUniqueViolation), http.StatusConflict},
+		{"no record for Sole", fmt.Errorf("loading the invoice: %w", database.ErrRecordsNotFound), http.StatusNotFound},
+		{"a duplicate key a connection raised", database.NewUniqueConstraintViolationException("main", "insert", nil, errors.New("23505"), nil, "write"), http.StatusConflict},
 	}
 }
 

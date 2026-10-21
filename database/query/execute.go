@@ -24,7 +24,11 @@ var (
 	// It is the one "no row" in the collection: every other not-found
 	// sentinel under database is this value or answers errors.Is for it, so a
 	// caller that only wants to know the row was missing checks this one.
-	ErrRecordNotFound = errors.New("query: no record found for the given query")
+	//
+	// It states its own HTTP status, 404, so a layer that answers a request
+	// with it reads the status off the error rather than importing this
+	// package to recognise it.
+	ErrRecordNotFound error = &notFoundError{msg: "query: no record found for the given query"}
 
 	// ErrRecordsNotFound is what Sole returns when nothing matched.
 	//
@@ -55,6 +59,29 @@ func (e *narrowedError) Error() string { return e.msg }
 
 // Is reports whether target is the parent, or something the parent is.
 func (e *narrowedError) Is(target error) bool { return errors.Is(e.parent, target) }
+
+// HTTPStatus is the parent's: a narrower sentinel is answered as the one it
+// names.
+func (e *narrowedError) HTTPStatus() int { return statusOf(e.parent) }
+
+// notFoundError is the type of ErrRecordNotFound: its message, and the status
+// a missing row is answered with.
+type notFoundError struct{ msg string }
+
+func (e *notFoundError) Error() string { return e.msg }
+
+// HTTPStatus is 404 Not Found.
+func (e *notFoundError) HTTPStatus() int { return 404 }
+
+// statusOf is the HTTP status an error states, and 500 for one that states
+// none -- which no sentinel narrowed here does, since each names a missing row.
+func statusOf(err error) int {
+	var stated interface{ HTTPStatus() int }
+	if errors.As(err, &stated) {
+		return stated.HTTPStatus()
+	}
+	return 500
+}
 
 // TenantColumn is the column every statement this package issues is filtered
 // by, and the column every row it writes carries.

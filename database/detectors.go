@@ -2,6 +2,7 @@ package database
 
 import (
 	"errors"
+	"net/http"
 	"strings"
 )
 
@@ -265,3 +266,6 @@ func (e *uniqueViolation) Is(target error) bool { return target == ErrUniqueViol
 
 // Unwrap returns the driver error, so errors.As reaches its type.
 func (e *uniqueViolation) Unwrap() error { return e.driver }
+
+// HTTPStatus is 409 Conflict, the status of ErrUniqueViolation.
+func (e *uniqueViolation) HTTPStatus() int { return http.StatusConflict }
