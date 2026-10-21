@@ -8,11 +8,14 @@
 //
 //	webhooks, err := webhook.New(webhook.Config{Key: appKey, Receivers: receivers}, db, middleware.RequireAuth(sessions))
 //
-// The application then registers it like any module, gives its worker the
-// jobs with RegisterJobHandlers, adds Publisher to its events relay, exempts
-// ReceivePaths from the CSRF check, and runs Migrations as a step of its
-// deploy pipeline -- never when the process starts. Schedule declares the
-// daily cleans.
+// The application then registers it like any module, adds Publisher to its
+// events relay, and runs Migrations as a step of its deploy pipeline -- never
+// when the process starts. Schedule declares the daily cleans. The module is a
+// queue.JobHandlers, so queue.RegisterJobHandlers gives the worker its jobs,
+// and a foundation.CSRFExempt, so foundation.CSRFExemptions exempts its
+// receivers from the CSRF check: a kernel that collects both over its modules
+// leaves the application nothing to write for either. RegisterJobHandlers and
+// ReceivePaths remain for an application that wires them itself.
 //
 // HTTPActions lists every route: one per receiver method, with no middleware,
 // because another system calls a receiver with no session and its signature

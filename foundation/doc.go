@@ -8,12 +8,15 @@
 //
 // [Module] and its optional interfaces -- Routable, Bootable, Background,
 // Closable, Diagnostic, Health, Schedulable, Migratable, Commandable,
-// Publishable -- are the whole vocabulary of composition. A module declares;
+// Publishable, CSRFExempt -- are the whole vocabulary of composition. A module declares;
 // the kernel collects; nothing runs until something asks. That shape is why
 // [Task] and [Migration] are declared here rather than in the packages that
 // execute them: the scheduler and the migration runner are consumers, and a
 // module must be able to hand its declarations straight to either one. A
-// [Commandable] module hands its console commands to the kernel the same way.
+// [Commandable] module hands its console commands to the kernel the same way,
+// and a [CSRFExempt] module the paths [CSRFExemptions] collects for the CSRF
+// check. queue.JobHandlers is the same shape for job handlers, declared in the
+// queue package because a handler is registered on its Worker.
 //
 // It also owns what the framework mounts for itself. Everything under
 // internalPrefix -- the health probe, the debug console, the development

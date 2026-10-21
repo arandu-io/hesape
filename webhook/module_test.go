@@ -15,6 +15,7 @@ import (
 	"github.com/arandu-io/hesape/exception"
 	"github.com/arandu-io/hesape/foundation"
 	"github.com/arandu-io/hesape/pipeline"
+	"github.com/arandu-io/hesape/queue"
 	"github.com/arandu-io/hesape/routing"
 	"github.com/arandu-io/hesape/webhook"
 )
@@ -267,6 +268,37 @@ func TestReceivePathsListEveryAddressToExemptFromCSRF(t *testing.T) {
 	module := newModule(t, webhook.Config{Receivers: []webhook.Receiver{billing(), mounted}}, nil)
 	if got := module.ReceivePaths(); !slices.Equal(got, []string{"/webhooks/", "/integrations/lpr/"}) {
 		t.Fatalf("ReceivePaths() = %v", got)
+	}
+}
+
+// TestTheModuleDeclaresItsReceiversAsCSRFExemptions: the kernel collects the
+// exemption through foundation.CSRFExempt, so it has to be the same list the
+// application would have written by hand.
+func TestTheModuleDeclaresItsReceiversAsCSRFExemptions(t *testing.T) {
+	t.Parallel()
+
+	mounted := billing()
+	mounted.Name, mounted.Methods, mounted.Mount = "lpr", nil, "/integrations/lpr/{org}/{key}"
+	module := newModule(t, webhook.Config{Receivers: []webhook.Receiver{billing(), mounted}}, nil)
+	if got := foundation.CSRFExemptions(module); !slices.Equal(got, module.ReceivePaths()) {
+		t.Fatalf("CSRFExemptions(module) = %v, want ReceivePaths() = %v", got, module.ReceivePaths())
+	}
+}
+
+// TestTheKernelRegistersTheModulesJobs: queue.RegisterJobHandlers over the
+// module gives the worker the delivery and the processing jobs.
+func TestTheKernelRegistersTheModulesJobs(t *testing.T) {
+	t.Parallel()
+
+	module := newModule(t, webhook.Config{Receivers: []webhook.Receiver{billing()}}, nil)
+	w := queue.NewWorker(queue.NullQueue{}, queue.WorkerOptions{})
+	if err := queue.RegisterJobHandlers(w, module); err != nil {
+		t.Fatalf("RegisterJobHandlers: %v", err)
+	}
+	for _, name := range []string{webhook.DeliverJob, webhook.ProcessJob} {
+		if _, ok := w.Handler(name); !ok {
+			t.Errorf("the worker has no handler for %s", name)
+		}
 	}
 }
 

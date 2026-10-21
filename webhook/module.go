@@ -130,6 +130,16 @@ func (m *Module) ReceivePaths() []string {
 	return out
 }
 
+// CSRFExemptPaths is ReceivePaths under the name foundation.CSRFExempt
+// declares, so the kernel exempts the receivers from the CSRF check without
+// the application naming them.
+func (m *Module) CSRFExemptPaths() []string { return m.ReceivePaths() }
+
+var (
+	_ foundation.CSRFExempt = (*Module)(nil)
+	_ queue.JobHandlers     = (*Module)(nil)
+)
+
 // RegisterJobHandlers gives the worker the attempts of the deliveries and
 // the processing of received calls. The worker is the application's,
 // started by its worker command, on Server.Queue.
