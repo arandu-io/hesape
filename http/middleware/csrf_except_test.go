@@ -198,3 +198,131 @@ func TestAWrongExemptionPanicsAtWiring(t *testing.T) {
 		})
 	}
 }
+
+// A parameter matches one whole segment, so a route with a token in the middle
+// of its path is exempt and its siblings are not.
+func TestAParameterInAnExemptPathMatchesOneSegment(t *testing.T) {
+	h := exceptHandler(middleware.CSRFExcept("/checkout/{token}/sessions"))
+
+	// The last is cleaned to /checkout/x/sessions before it is compared.
+	for _, target := range []string{"/checkout/abc/sessions", "/checkout/0f9e-41/sessions", "/checkout/abc/../x/sessions"} {
+		if got := serve(h, httptest.NewRequest(http.MethodPost, target, nil)); got != http.StatusOK {
+			t.Errorf("POST %s: status = %d, want 200", target, got)
+		}
+	}
+	for _, target := range []string{
+		"/checkout/abc/refunds",        // a sibling
+		"/checkout/sessions",           // the parameter is missing
+		"/checkout//sessions",          // cleaned to the line above
+		"/checkout/a/b/sessions",       // a parameter is one segment, not two
+		"/checkout/abc/sessionsx",      // never a prefix of a segment
+		"/checkout/abc/sessions/1",     // exact, not a subtree
+		"/checkoutx/abc/sessions",      // the fixed segments are whole too
+		"/other/checkout/abc/sessions", // anchored at the root
+	} {
+		if got := serve(h, httptest.NewRequest(http.MethodPost, target, nil)); got != middleware.StatusCSRFExpired {
+			t.Errorf("POST %s: status = %d, want %d", target, got, middleware.StatusCSRFExpired)
+		}
+	}
+}
+
+// A parameter in a path that ends in '/' names a subtree under each value.
+func TestAParameterInAnExemptSubtree(t *testing.T) {
+	h := exceptHandler(middleware.CSRFExcept("/tenants/{tenant}/hooks/"))
+
+	if got := serve(h, httptest.NewRequest(http.MethodPost, "/tenants/acme/hooks/stripe", nil)); got != http.StatusOK {
+		t.Errorf("POST /tenants/acme/hooks/stripe: status = %d, want 200", got)
+	}
+	for _, target := range []string{"/tenants/acme/hooks", "/tenants/acme/notes/1", "/tenants/hooks/x"} {
+		if got := serve(h, httptest.NewRequest(http.MethodPost, target, nil)); got != middleware.StatusCSRFExpired {
+			t.Errorf("POST %s: status = %d, want %d", target, got, middleware.StatusCSRFExpired)
+		}
+	}
+}
+
+// An escaped path is never exempt through a parameter either: it may decode to
+// a path the pattern names while the router routes it somewhere else.
+func TestAnEscapedPathIsNeverExemptThroughAParameter(t *testing.T) {
+	h := exceptHandler(middleware.CSRFExcept("/checkout/{token}/sessions"))
+
+	for _, target := range []string{
+		"/notes/%2E%2E/checkout/abc/sessions",
+		"/checkout/a%2Fb/sessions",
+		"/checkout/%61bc/sessions",
+	} {
+		r := httptest.NewRequest(http.MethodPost, target, nil)
+		if r.URL.RawPath == "" {
+			t.Fatalf("%s: RawPath is empty, so this case does not test what it names", target)
+		}
+		if got := serve(h, r); got != middleware.StatusCSRFExpired {
+			t.Errorf("POST %s (Path %q): status = %d, want %d", target, r.URL.Path, got, middleware.StatusCSRFExpired)
+		}
+	}
+}
+
+// The end-to-end reason, behind http.ServeMux: the escaped path decodes to the
+// exempt checkout route and is routed to the notes route.
+func TestAnEscapedPathCannotReachASessionRouteThroughAParameter(t *testing.T) {
+	var reached string
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /notes/{rest...}", func(w http.ResponseWriter, r *http.Request) { reached = "notes" })
+	mux.HandleFunc("POST /checkout/{token}/sessions", func(w http.ResponseWriter, r *http.Request) { reached = "checkout" })
+
+	const smuggled = "/notes/%2E%2E/checkout/abc/sessions"
+	serve(mux, httptest.NewRequest(http.MethodPost, smuggled, nil))
+	if reached != "notes" {
+		t.Fatalf("the router sent %s to %q, want notes: the premise this test guards no longer holds", smuggled, reached)
+	}
+
+	csrf := session.NewCSRF(appKey, time.Hour)
+	h := pipeline.Chain[http.Handler](mux, middleware.CSRFProtect(csrf, func(*http.Request) string { return "" }, middleware.CSRFExcept("/checkout/{token}/sessions")))
+
+	reached = ""
+	if got := serve(h, httptest.NewRequest(http.MethodPost, smuggled, nil)); got != middleware.StatusCSRFExpired || reached != "" {
+		t.Fatalf("POST %s: status = %d, reached %q; want %d and no handler", smuggled, got, reached, middleware.StatusCSRFExpired)
+	}
+	reached = ""
+	if got := serve(h, httptest.NewRequest(http.MethodPost, "/checkout/abc/sessions", nil)); got != http.StatusOK || reached != "checkout" {
+		t.Fatalf("POST /checkout/abc/sessions: status = %d, reached %q; want 200 and the checkout", got, reached)
+	}
+}
+
+// A parameter written as anything but a whole {name} segment, or one that
+// leads the path, panics at wiring.
+func TestAWrongParameterPanicsAtWiring(t *testing.T) {
+	cases := []struct{ path, says string }{
+		{"/checkout/tok{en}/sessions", "is not a parameter"},
+		{"/checkout/{token}x/sessions", "is not a parameter"},
+		{"/checkout/{}/sessions", "is not a parameter"},
+		{"/checkout/{1st}/sessions", "is not a parameter"},
+		{"/checkout/{to-ken}/sessions", "is not a parameter"},
+		{"/checkout/{rest...}", "is not a parameter"},
+		{"/checkout/{token/sessions}", "is not a parameter"},
+		{"/{token}/sessions", "begins with a parameter"},
+		{"/{tenant}/", "begins with a parameter"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			defer func() {
+				msg, _ := recover().(string)
+				if !strings.Contains(msg, tc.says) {
+					t.Fatalf("panic = %q, want one saying %q", msg, tc.says)
+				}
+			}()
+			middleware.CSRFExcept(tc.path)
+		})
+	}
+}
+
+// A parameter never matches the empty segment a trailing slash leaves, so the
+// path with the value missing is checked.
+func TestAParameterNeverMatchesAnEmptySegment(t *testing.T) {
+	h := exceptHandler(middleware.CSRFExcept("/pay/{token}"))
+
+	if got := serve(h, httptest.NewRequest(http.MethodPost, "/pay/abc", nil)); got != http.StatusOK {
+		t.Errorf("POST /pay/abc: status = %d, want 200", got)
+	}
+	if got := serve(h, httptest.NewRequest(http.MethodPost, "/pay/", nil)); got != middleware.StatusCSRFExpired {
+		t.Errorf("POST /pay/: status = %d, want %d: the token is missing", got, middleware.StatusCSRFExpired)
+	}
+}

@@ -225,7 +225,18 @@ type CSRFOption func(*csrfOptions)
 
 // csrfOptions is what the options passed to CSRFProtect accumulate.
 type csrfOptions struct {
-	except []string
+	except []exemption
+}
+
+// exemption is one path CSRFExcept named, split into its segments.
+type exemption struct {
+	// segments are the path's segments after the leading '/'. A segment
+	// written as {name} matches any one segment; every other segment matches
+	// only itself.
+	segments []string
+	// subtree is set when the path ended in '/', and then it covers every path
+	// that has at least one more segment under it.
+	subtree bool
 }
 
 // CSRFExcept returns the option that exempts the paths the application names
@@ -233,30 +244,45 @@ type csrfOptions struct {
 // origin check and no token. A GET on one is still issued a token, like any
 // other page.
 //
-// A prefix that ends in '/' covers every path under it; one that does not
+// A path that ends in '/' covers every path under it; one that does not
 // covers exactly that path. "/webhooks/" exempts /webhooks/stripe, and
 // "/webhooks" exempts /webhooks and never /webhooksx nor /webhooks/stripe:
 // matching is by whole segments, never across a segment boundary.
+//
+// A segment written as {name} matches any one segment, the way the router's
+// own patterns do, so a route with a parameter in the middle can be exempted
+// without exempting its siblings: "/checkout/{token}/sessions" exempts
+// /checkout/abc/sessions and never /checkout/abc/refunds, /checkout/sessions
+// nor /checkout/a/b/sessions. A parameter is a whole segment or nothing --
+// "/checkout/tok{en}" is refused -- and it never matches an empty segment, so
+// /checkout//sessions is not exempt. There is no {name...}: a trailing '/'
+// already covers a subtree, and a parameter that swallowed several segments
+// would cover paths nobody listed.
 //
 // The request path is cleaned before it is compared, the way the router cleans
 // it, so /webhooks/../notes is /notes and is checked. A path that arrived with
 // an escape its decoded form does not round-trip to -- %2F, %2E, anything that
 // leaves url.URL.RawPath set -- is never exempt: the router matches the escaped
 // path segment by segment, so /notes/%2E%2E/webhooks/x decodes to a path under
-// /webhooks/ while it is routed under /notes/. Such a request is checked like
-// any other.
+// /webhooks/ while it is routed under /notes/, and /checkout/a%2Fb/sessions
+// decodes to four segments while it is routed as three. Such a request is
+// checked like any other.
 //
 // An exempt route carries no protection from this middleware, so it has to
 // prove the request itself, by the signature a provider computes over the
-// body. The exemption is a decision about an application, which is why it is
-// an argument written in its bootstrap and not a setting read from anywhere.
+// body or by the credential its path carries. The exemption is a decision
+// about an application, which is why it is an argument written in its
+// bootstrap and not a setting read from anywhere.
 //
-// A prefix that is empty, does not begin with '/', is "/" -- which would turn
-// the check off for every route -- or is not already clean, so that no cleaned
-// path could ever equal it, panics: each is a wiring mistake, and a panic at
-// start names it before any request is served.
-func CSRFExcept(prefixes ...string) CSRFOption {
-	for _, p := range prefixes {
+// A path that is empty, does not begin with '/', is "/" -- which would turn
+// the check off for every route -- is not already clean, so that no cleaned
+// path could ever equal it, begins with a parameter, which would exempt every
+// route at that depth, or writes a parameter as anything but a whole {name}
+// segment, panics: each is a wiring mistake, and a panic at start names it
+// before any request is served.
+func CSRFExcept(paths ...string) CSRFOption {
+	kept := make([]exemption, 0, len(paths))
+	for _, p := range paths {
 		switch {
 		case p == "" || p[0] != '/':
 			panic("middleware: CSRFExcept was given " + strconv.Quote(p) + ", which does not begin with '/'. Write the path as the request carries it, such as \"/webhooks/\"")
@@ -265,9 +291,39 @@ func CSRFExcept(prefixes ...string) CSRFOption {
 		case cleanPath(p) != p:
 			panic("middleware: CSRFExcept was given " + strconv.Quote(p) + ", which is not a clean path: a request path is cleaned before it is compared, so this prefix would never match. Write it as " + strconv.Quote(cleanPath(p)))
 		}
+		e := exemption{subtree: strings.HasSuffix(p, "/")}
+		e.segments = strings.Split(strings.TrimSuffix(p[1:], "/"), "/")
+		for i, segment := range e.segments {
+			if !strings.ContainsAny(segment, "{}") {
+				continue
+			}
+			if !isParameter(segment) {
+				panic("middleware: CSRFExcept was given " + strconv.Quote(p) + ", whose segment " + strconv.Quote(segment) + " is not a parameter: a parameter is a whole segment written as {name}, such as \"/checkout/{token}/sessions\"")
+			}
+			if i == 0 {
+				panic("middleware: CSRFExcept was given " + strconv.Quote(p) + ", which begins with a parameter and so exempts every route at that depth. Begin it with the fixed segment the routes share, such as \"/checkout/{token}/sessions\"")
+			}
+		}
+		kept = append(kept, e)
 	}
-	kept := append([]string(nil), prefixes...)
 	return func(o *csrfOptions) { o.except = append(o.except, kept...) }
+}
+
+// isParameter reports whether a segment is a whole {name}, with a name made of
+// letters, digits and underscores that does not begin with a digit.
+func isParameter(segment string) bool {
+	if len(segment) < 3 || segment[0] != '{' || segment[len(segment)-1] != '}' {
+		return false
+	}
+	for i, r := range segment[1 : len(segment)-1] {
+		switch {
+		case r == '_', 'a' <= r && r <= 'z', 'A' <= r && r <= 'Z':
+		case '0' <= r && r <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // exempt reports whether the request's path is one CSRFExcept named.
@@ -275,13 +331,40 @@ func (o csrfOptions) exempt(u *url.URL) bool {
 	if len(o.except) == 0 || u.RawPath != "" {
 		return false
 	}
-	p := cleanPath(u.Path)
-	for _, prefix := range o.except {
-		if p == prefix || (strings.HasSuffix(prefix, "/") && strings.HasPrefix(p, prefix)) {
+	segments := strings.Split(cleanPath(u.Path)[1:], "/")
+	for _, e := range o.except {
+		if e.matches(segments) {
 			return true
 		}
 	}
 	return false
+}
+
+// matches reports whether a cleaned path, split after its leading '/', is the
+// one this exemption names or, for a subtree, lies under it. A path with a
+// trailing slash ends in an empty segment, so "/webhooks/" lies under the
+// subtree "/webhooks/" and is not the exact path "/webhooks".
+func (e exemption) matches(path []string) bool {
+	if e.subtree {
+		if len(path) <= len(e.segments) {
+			return false
+		}
+	} else if len(path) != len(e.segments) {
+		return false
+	}
+	for i, want := range e.segments {
+		got := path[i]
+		if want[0] == '{' {
+			if got == "" {
+				return false
+			}
+			continue
+		}
+		if got != want {
+			return false
+		}
+	}
+	return true
 }
 
 // cleanPath is the canonical form of a request path as the router computes
