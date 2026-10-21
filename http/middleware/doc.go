@@ -2,6 +2,17 @@
 // wires: CORS, security headers, body-size limits, host and proxy trust,
 // cache validation, and the method a form could not send for itself.
 //
+// It also holds the guards that read the session and the credentials of a
+// request, over hesape/http.SessionStore: [CSRFProtect], which checks the
+// origin and the token of every write and issues the token a page draws;
+// [RequireAuth], [LoadSubject], [RedirectIfAuthenticated], [RequireRole] and
+// [RequireConfirmedPassword], which answer whether there is a session and
+// what it carries; [RequireToken], which authenticates a bearer token through
+// the application's [TokenResolver]; [Idempotent], which runs a write with an
+// Idempotency-Key once; and [KeyBySession], the rate-limit key for a signed-in
+// request. None of them decides about a record: that is the Policy's answer,
+// through auth.Authorize, on every read and every write behind them.
+//
 // A middleware here is a func(http.Handler) http.Handler, because that is
 // the shape net/http composes. Configuration that a bootstrap step sets
 // once -- which proxies or hosts to trust, which requests to skip -- lives
