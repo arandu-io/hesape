@@ -28,17 +28,21 @@
 //
 // So an event that has to survive the request is stored in the same transaction
 // as the write that produced it -- Outbox.Store -- and Relay publishes it
-// afterwards, into a Publisher. A *Dispatcher is a Publisher: Publish hands the
-// stored row to the listeners registered for its name. That is the one place
-// the two halves meet, and it is why an application registers everything with
-// Listen and never has to know which half delivered it.
+// afterwards, into a Publisher.
 //
-// Listeners is the typed form of the same routing, for listeners that answer
-// only committed events: a list written in bootstrap/app.go, where On names an
-// event and decodes its payload into the listener's own type, and Every takes
-// every event undecoded. The list is a Publisher, so it is what the relay is
-// handed; the fan-out, the name filter and the decode are not written again by
-// each application.
+// # One way to answer a committed event
+//
+// The Publisher the relay is handed is a Listeners list, written where the
+// application is wired: On names an event and decodes its payload into the
+// listener's own type, and Every takes every event undecoded. The fan-out, the
+// name filter and the decode are not written again by each application, and
+// the list is the one place to read who answers a committed event.
+//
+// The dispatcher answers the other kind -- an event that never leaves the
+// process -- with Listen and Dispatch. Dispatcher.Publish, which routed a
+// stored row through the same registry, is deprecated: it was a second router
+// for the relay, untyped, handing each listener the row and a context through
+// reflection.
 //
 // Delivery is at-least-once, which is the price of never losing an event: the
 // consumer deduplicates on Stored.ID, and that is why the id is stable and why

@@ -157,9 +157,9 @@ type TransactionManager interface {
 // Dispatcher registers listeners by event name, fires them in registration
 // order, and stops early on request.
 //
-// The outbox in this package is a different thing and they meet in one place:
-// Publish hands a stored event to the listeners registered for its name, so the
-// relay delivers through this registry.
+// The outbox in this package is a different thing. A committed event reaches
+// its listeners through a [Listeners] list handed to the relay, not through
+// this registry: Publish, which did that here, is deprecated.
 //
 // A Dispatcher is safe for concurrent use: one process serves many requests, and
 // a listener registered while another goroutine dispatches would otherwise be a
@@ -846,6 +846,14 @@ func (d *Dispatcher) Defer(callback func() any, events ...string) any {
 // retry then runs all of them again, which is at-least-once arriving where it
 // always arrives: a listener is idempotent on Stored.ID. A listener that does
 // want to stop the ones behind it returns false.
+//
+// Deprecated: hand the relay a [Listeners] list instead. It routes a stored
+// event to the listeners named for it as this does, and decodes the payload
+// into each listener's own type, where a listener registered here receives
+// the row and a context spread through reflection and decodes it by hand. Two
+// routers for one relay is two places to look for who answers an event; the
+// dispatcher keeps Listen and Dispatch for events that never leave the
+// process.
 func (d *Dispatcher) Publish(ctx context.Context, e Stored) error {
 	for _, response := range d.Dispatch(e.Name, ctx, e) {
 		if err, ok := response.(error); ok && err != nil {
