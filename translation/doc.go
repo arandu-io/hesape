@@ -2,6 +2,7 @@
 //
 // It holds [Translator], [MessageSelector], [Selector], [ArrayLoader],
 // [FileLoader], [Loader], [Lines], [Replace], [PotentiallyTranslatedString],
+// [NewFromDirectory] and [Locales] for an application's lang directory,
 // the four English groups the framework produces sentences from, and
 // [Negotiate], [Middleware], [InLocale] and [Locale] for the locale of a
 // request.
@@ -74,6 +75,13 @@
 //
 //	loader, err := translation.NewFileLoader(os.DirFS("."), "lang")
 //	tr := translation.New(loader, "pt-BR", "en")
+//
+// [NewFromDirectory] is those two steps in one call, which is what the wiring
+// of an application makes, and [Locales] lists the locales the directory
+// carries, which is what [Middleware] negotiates against:
+//
+//	tr, err := translation.NewFromDirectory(os.DirFS("."), "lang", "pt-BR", "en")
+//	negotiate := translation.Middleware(translation.Locales(os.DirFS("."), "lang"), "en")
 //
 // Three things answer a key, in this order: the application's catalogue in the
 // locale asked for, then its catalogue in the fallback locale, then the English
