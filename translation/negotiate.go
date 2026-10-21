@@ -165,3 +165,24 @@ func accepted(header string) []string {
 	}
 	return tags
 }
+
+type ctxTranslatorKey struct{}
+
+// WithTranslator returns a context carrying the application's translator, so
+// the code that draws a page can say its words in the request's locale without
+// being handed the translator itself.
+//
+// The translator is configuration, the same on every request, and it goes on
+// the context once, where the request enters the application; a page reads it
+// back with [TranslatorFrom] and the locale with [Locale].
+func WithTranslator(ctx context.Context, t *Translator) context.Context {
+	return context.WithValue(ctx, ctxTranslatorKey{}, t)
+}
+
+// TranslatorFrom reads the translator [WithTranslator] put on the context, and
+// returns nil when there is none -- which a reader of the catalogue treats as
+// a catalogue with no lines.
+func TranslatorFrom(ctx context.Context) *Translator {
+	t, _ := ctx.Value(ctxTranslatorKey{}).(*Translator)
+	return t
+}

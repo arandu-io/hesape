@@ -148,3 +148,17 @@ func TestLocaleOfAContextThatHasNone(t *testing.T) {
 		t.Errorf("Locale = %q, want the empty string", got)
 	}
 }
+
+// TestTheTranslatorTravelsOnTheContext: what WithTranslator put is what
+// TranslatorFrom reads, and a context with none answers nil.
+func TestTheTranslatorTravelsOnTheContext(t *testing.T) {
+	tr := translation.New(translation.NewArrayLoader(), "en", "en")
+	ctx := translation.WithTranslator(httptest.NewRequest(http.MethodGet, "/", nil).Context(), tr)
+
+	if got := translation.TranslatorFrom(ctx); got != tr {
+		t.Fatalf("TranslatorFrom = %p, want %p", got, tr)
+	}
+	if got := translation.TranslatorFrom(httptest.NewRequest(http.MethodGet, "/", nil).Context()); got != nil {
+		t.Fatalf("a context with no translator answered %p", got)
+	}
+}
