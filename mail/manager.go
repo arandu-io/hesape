@@ -23,8 +23,11 @@ type MailerConfig struct {
 	Port     string
 	Username string
 	Password string
-	Scheme   string
-	Timeout  time.Duration
+	// Scheme is smtps or smtp for the smtp transport: smtps is implicit TLS,
+	// on 465 unless Port says otherwise, and smtp or empty is STARTTLS on 587.
+	// Any other value is refused when the transport is built.
+	Scheme  string
+	Timeout time.Duration
 
 	// Key is the API key of a provider transport.
 	Key string

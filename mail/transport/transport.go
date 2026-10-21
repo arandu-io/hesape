@@ -15,10 +15,23 @@ import (
 	"github.com/arandu-io/hesape/mail"
 )
 
-// SMTP sends over SMTP, with STARTTLS.
+// The two values [SMTP.Encryption] takes besides empty, as a mail URL's scheme
+// selects them: smtps:// is implicit TLS and smtp:// is STARTTLS.
+const (
+	// EncryptionTLS is implicit TLS: the connection is TLS from the first
+	// byte, which is what port 465 serves.
+	EncryptionTLS = "tls"
+	// EncryptionStartTLS upgrades a plain connection with STARTTLS when the
+	// server offers it, which is what port 587 serves.
+	EncryptionStartTLS = "starttls"
+)
+
+// SMTP sends over SMTP: over implicit TLS when Encryption is [EncryptionTLS],
+// and otherwise with STARTTLS when the server offers it.
 type SMTP struct {
 	// Host and Port are the server. 587 is submission with STARTTLS, which is
-	// what a provider gives you; 25 is server-to-server and is usually blocked.
+	// what a provider gives you; 465 is submission over implicit TLS; 25 is
+	// server-to-server and is usually blocked.
 	Host string
 	Port string
 
@@ -31,6 +44,23 @@ type SMTP struct {
 	// request that triggered it until the client gives up -- and net/smtp has no
 	// deadline of its own.
 	Timeout time.Duration
+
+	// Encryption is how the connection is protected. [EncryptionTLS] is
+	// implicit TLS: the handshake completes before the server's greeting is
+	// read, and a server that does not complete it is sent nothing.
+	// [EncryptionStartTLS] and empty both upgrade a plain connection when the
+	// server offers STARTTLS; a password is never sent over one that was not
+	// upgraded, except to a relay on this machine. Any other value is refused
+	// before anything is dialled, because a misspelt "tsl" read as either
+	// would be the failure the field exists to rule out.
+	Encryption string
+
+	// TLSConfig verifies the server, over implicit TLS and over STARTTLS
+	// alike. Nil checks the certificate against the system roots for Host; a
+	// test, or a relay with a private authority, passes its own. A config
+	// without a ServerName is given Host, because a certificate is checked
+	// against a name.
+	TLSConfig *tls.Config
 }
 
 // Name identifies the transport in a log line.
@@ -43,6 +73,15 @@ func (SMTP) Name() string { return "smtp" }
 // is obliged to be given.
 func (t SMTP) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error) {
 	sent := mail.SentMessage{Transport: t.Name()}
+
+	implicit := false
+	switch t.Encryption {
+	case "", EncryptionStartTLS:
+	case EncryptionTLS:
+		implicit = true
+	default:
+		return mail.SentMessage{}, fmt.Errorf("mail: SMTP Encryption is %q; expected %q, %q or empty", t.Encryption, EncryptionTLS, EncryptionStartTLS)
+	}
 
 	// Rendered before the connection is dialled, because a message that cannot
 	// be rendered must not reach the server at all: RCPT TO tells it who the
@@ -60,14 +99,23 @@ func (t SMTP) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error
 	addr := net.JoinHostPort(t.Host, t.Port)
 	dialer := &net.Dialer{Timeout: timeout}
 
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	raw, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		// The server was not reachable, which is the same kind of event as a
 		// provider answering 502: nothing about the message was refused.
 		return mail.SentMessage{}, mail.Retryable(fmt.Errorf("mail: dialing %s: %w", addr, err))
 	}
-	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(timeout))
+	defer raw.Close()
+	_ = raw.SetDeadline(time.Now().Add(timeout))
+
+	conn := raw
+	if implicit {
+		secured := tls.Client(raw, t.tlsConfig())
+		if err := secured.HandshakeContext(ctx); err != nil {
+			return mail.SentMessage{}, fmt.Errorf("mail: tls with %s: %w", addr, err)
+		}
+		conn = secured
+	}
 
 	c, err := smtp.NewClient(conn, t.Host)
 	if err != nil {
@@ -77,10 +125,13 @@ func (t SMTP) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error
 
 	// STARTTLS when the server offers it, and that is not optional when there
 	// are credentials: PlainAuth refuses to send a password over a connection
-	// that is not encrypted, and it is right to.
-	if ok, _ := c.Extension("STARTTLS"); ok {
-		if err := c.StartTLS(&tls.Config{ServerName: t.Host}); err != nil {
-			return mail.SentMessage{}, fmt.Errorf("mail: starttls: %w", err)
+	// that is not encrypted, and it is right to. Over implicit TLS the
+	// connection already is, and the extension is not asked for.
+	if !implicit {
+		if ok, _ := c.Extension("STARTTLS"); ok {
+			if err := c.StartTLS(t.tlsConfig()); err != nil {
+				return mail.SentMessage{}, fmt.Errorf("mail: starttls: %w", err)
+			}
 		}
 	}
 	if t.Username != "" {
@@ -219,3 +270,16 @@ var (
 	_ mail.Transport = Log{}
 	_ mail.Transport = (*Array)(nil)
 )
+
+// tlsConfig is TLSConfig, or the system roots for Host. A config without a
+// ServerName is given Host, because a certificate is checked against a name.
+func (t SMTP) tlsConfig() *tls.Config {
+	if t.TLSConfig == nil {
+		return &tls.Config{ServerName: t.Host, MinVersion: tls.VersionTLS12}
+	}
+	cfg := t.TLSConfig.Clone()
+	if cfg.ServerName == "" {
+		cfg.ServerName = t.Host
+	}
+	return cfg
+}

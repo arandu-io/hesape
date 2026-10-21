@@ -2,6 +2,7 @@ package transport
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/arandu-io/hesape/mail"
 )
@@ -18,17 +19,29 @@ import (
 //	manager := mail.NewMailManager(config, views, events)
 //	transport.Register(manager)
 func Register(m *mail.MailManager) *mail.MailManager {
+	// The scheme decides the encryption: smtps is implicit TLS on 465, and
+	// smtp, or none, is STARTTLS on 587. Anything else is refused rather than
+	// read as either, because a misspelt scheme that sent in the clear would
+	// be found by whoever was watching the wire.
 	m.Extend("smtp", func(cfg mail.MailerConfig) (mail.Transport, error) {
-		port := cfg.Port
-		if port == "" {
-			port = "587"
+		encryption, port := EncryptionStartTLS, "587"
+		switch strings.ToLower(cfg.Scheme) {
+		case "", "smtp":
+		case "smtps":
+			encryption, port = EncryptionTLS, "465"
+		default:
+			return nil, fmt.Errorf("mail: mailer [%s] has the scheme %q; expected smtp or smtps", cfg.Name, cfg.Scheme)
+		}
+		if cfg.Port != "" {
+			port = cfg.Port
 		}
 		return SMTP{
-			Host:     cfg.Host,
-			Port:     port,
-			Username: cfg.Username,
-			Password: cfg.Password,
-			Timeout:  cfg.Timeout,
+			Host:       cfg.Host,
+			Port:       port,
+			Username:   cfg.Username,
+			Password:   cfg.Password,
+			Timeout:    cfg.Timeout,
+			Encryption: encryption,
 		}, nil
 	})
 
