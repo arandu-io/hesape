@@ -25,9 +25,12 @@
 //
 //	r.Get("/dashboard", adapt(dashboard.Index)).Name("dashboard")
 //
-// where adapt is the adapter that layer supplies. This package neither declares
-// it nor names one, because the type it builds is the one this package must not
-// import.
+// where adapt is the adapter that layer supplies: hesape/http.NewAdapter, built
+// from the renderer, the route table and the flash. This package takes it as a
+// parameter rather than calling it, because what it builds -- a request context,
+// a rendered view, a rejected form -- is the request layer's and not the
+// router's. hesape/routing/controllers.Router holds the adapter and registers
+// controller actions with it, and is what an application registers on.
 //
 // Resource, Singleton, ResourceAction and Invokable take the adaptation as an
 // argument for the same reason, which is what lets this package register

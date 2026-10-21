@@ -20,7 +20,8 @@ import (
 //
 //	routing.Resource(r, "invoices", InvoiceController{}, adapt)
 //
-// where adapt is that layer's own function. It is the same one a single route
+// where adapt is that layer's own function, hesape/http.NewAdapter for an
+// action that receives a hesape/http.Context. It is the same one a single route
 // already goes through -- r.Get("/x", adapt(c.Show)) -- passed by name instead
 // of applied, so Resource can apply it to the seven actions it finds.
 type Adapter[C any] func(func(*C) error) http.Handler
