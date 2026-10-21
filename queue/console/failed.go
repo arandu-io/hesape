@@ -162,7 +162,8 @@ func (c *RetryCommand) Handle(ctx context.Context, o *console.IO) error {
 	flags := o.Flags()
 	tenant := tenantFlag(o)
 	queueName := flags.String("queue", "", "retry every failure from this queue")
-	if err := flags.Parse(o.Args()); err != nil {
+	ids, err := parseInterspersed(flags, o.Args())
+	if err != nil {
 		return err
 	}
 	g, err := grantFor(*tenant)
@@ -170,7 +171,6 @@ func (c *RetryCommand) Handle(ctx context.Context, o *console.IO) error {
 		return err
 	}
 
-	ids := flags.Args()
 	if *queueName != "" {
 		fromQueue, err := c.failed.IDs(ctx, g, *queueName)
 		if err != nil {
@@ -231,7 +231,8 @@ func (c *ForgetFailedCommand) Command() console.Command {
 // Handle runs the command.
 func (c *ForgetFailedCommand) Handle(ctx context.Context, o *console.IO) error {
 	tenant := tenantFlag(o)
-	if err := o.Flags().Parse(o.Args()); err != nil {
+	rest, err := parseInterspersed(o.Flags(), o.Args())
+	if err != nil {
 		return err
 	}
 	g, err := grantFor(*tenant)
@@ -239,7 +240,6 @@ func (c *ForgetFailedCommand) Handle(ctx context.Context, o *console.IO) error {
 		return err
 	}
 
-	rest := o.Flags().Args()
 	if len(rest) == 0 {
 		return fmt.Errorf("queue: name the failed job to delete")
 	}

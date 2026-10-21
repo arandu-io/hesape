@@ -53,13 +53,13 @@ func (c *RetryBatchCommand) IsolatableID(batchID string) string {
 // Handle runs the command.
 func (c *RetryBatchCommand) Handle(ctx context.Context, o *console.IO) error {
 	tenant := tenantFlag(o)
-	if err := o.Flags().Parse(o.Args()); err != nil {
+	rest, err := parseInterspersed(o.Flags(), o.Args())
+	if err != nil {
 		return err
 	}
 	if *tenant == "" {
 		return fmt.Errorf("queue: --tenant is required. A batch belongs to one customer")
 	}
-	rest := o.Flags().Args()
 	if len(rest) == 0 {
 		return fmt.Errorf("queue: name the batch to retry")
 	}
