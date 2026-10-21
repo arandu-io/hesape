@@ -406,6 +406,9 @@ func decodeInto(raw []byte, v any) error {
 //
 // A job that belongs to neither a batch nor a chain does nothing and returns
 // nil.
+//
+// A worker running the ReportToBatch middleware of hesape/queue/middleware
+// makes this call itself, after every job, and a handler under it does not.
 func Handled(ctx context.Context, g auth.Grant, r BatchRepository, q Queue, m Batchable, cause error) error {
 	if m.BatchID == "" && len(m.Chained) == 0 && !m.ChainCatch.declared() {
 		return nil

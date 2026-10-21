@@ -728,6 +728,23 @@ func (w *Worker) shouldFail(j *jobs.Job, attempts int, cause error) bool {
 	return false
 }
 
+// IsFinalAttempt reports whether cause, returned by the handler of j, is the
+// failure this worker parks the job for rather than releasing it to try again.
+//
+// It is asked by a middleware, which sees the handler's error before the
+// worker has counted it, so it answers as the worker will once it has: the
+// same predicate the worker parks by, with this failure included. A job a
+// middleware already released or deleted is not parked by the worker, and
+// nil is not a failure; both answer false.
+func (w *Worker) IsFinalAttempt(j *jobs.Job, cause error) bool {
+	if cause == nil || j.IsDeletedOrReleased() {
+		return false
+	}
+	counted := *j
+	counted.Exceptions++
+	return w.shouldFail(&counted, max(j.Attempts, 1), cause)
+}
+
 // MarkJobAsFailedIfAlreadyExceedsMaxAttempts parks a job that used up its
 // deliveries without ever reporting an error.
 //

@@ -31,6 +31,11 @@
 // that never calls it leaves its batch pending forever, which is the one
 // failure mode worth remembering.
 //
+// So the worker can call it instead. The ReportToBatch middleware in
+// hesape/queue/middleware calls Handled after every job, a success at once and
+// a failure on the final attempt the worker parks it for, and a handler under
+// it reads its payload with Batched and reports nothing.
+//
 // # The counters
 //
 // PendingJobs falls by one for every job that *succeeded*; FailedJobs rises for

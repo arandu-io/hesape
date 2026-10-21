@@ -995,3 +995,36 @@ func TestTheFailedJobIsRecordedUnderAGrantAndWithoutLeakingThePayload(t *testing
 		t.Errorf("the payload was written to the log:\n%s", logged.String())
 	}
 }
+
+// TestIsFinalAttemptAnswersAsTheWorkerParks: a middleware asks before the
+// worker counts the failure, and the answer has to be the one the worker then
+// acts on.
+func TestIsFinalAttemptAnswersAsTheWorkerParks(t *testing.T) {
+	w := queue.NewWorker(queue.NullQueue{}, queue.WorkerOptions{MaxTries: 3})
+	broken := errors.New("the store blinked")
+	j, err := jobs.New(grant(), "", "invoice.send", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	j.Attempts = 2
+	if w.IsFinalAttempt(&j, broken) {
+		t.Error("the second of three deliveries was called final")
+	}
+	j.Attempts = 3
+	if !w.IsFinalAttempt(&j, broken) {
+		t.Error("the third of three deliveries was not called final")
+	}
+	j.Attempts = 1
+	if !w.IsFinalAttempt(&j, queue.ErrManuallyFailed) {
+		t.Error("a manual failure is final on the first delivery")
+	}
+	if w.IsFinalAttempt(&j, nil) {
+		t.Error("no error is not a failure")
+	}
+
+	j.Attributes.MaxExceptions = 1
+	if !w.IsFinalAttempt(&j, broken) {
+		t.Error("the failure that reaches MaxExceptions is final, counted before the worker counts it")
+	}
+}
