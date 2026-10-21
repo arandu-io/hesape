@@ -2,7 +2,8 @@
 // not use.
 //
 // It is a browser (Client), the assertions worth having about what came back
-// (Response), the assertions worth having about what landed in the database
+// (Response: the status, the headers, the redirect, the cookies, a download,
+// the body as HTML and as the text a person reads, and a JSON answer), the assertions worth having about what landed in the database
 // (AssertDatabaseHas, AssertDatabaseMissing, AssertDatabaseCount,
 // AssertSoftDeleted, AssertNotSoftDeleted), the assertion about how many
 // statements a block ran (AssertQueryCount), and the two pieces a test needs to

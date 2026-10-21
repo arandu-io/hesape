@@ -8,6 +8,11 @@
 // ([ParallelTesting] for the per-process callbacks,
 // [LoggedExceptionCollection] for what the handler recorded).
 //
+// [TestResponse] is deprecated: a response is asserted on through
+// hesape/arandutest, whose Client drives the handler through the middleware
+// production runs and whose Response carries the assertions worth keeping,
+// over [AssertableJSONString] for a JSON answer.
+//
 // # Everything reports through T
 //
 // No assertion here takes *testing.T. They take [T], which is the part of it
