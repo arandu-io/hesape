@@ -172,9 +172,10 @@ func (rec Record[T]) PasswordConfirmedWithin(window time.Duration) bool {
 // method that asks by attribute instead of by id, so it is the one method that
 // takes the tenant, and it refuses an empty one.
 //
-// The core ships ArrayHandler only, which is enough for development and for a
-// single instance. A Redis-backed handler provides shared storage and active
-// invalidation across application instances.
+// The core ships ArrayHandler, which is enough for development and for a
+// single instance, and DatabaseHandler, which keeps the sessions in the
+// application's own database. A Redis-backed handler provides shared storage
+// over RESP.
 type Handler[T any] interface {
 	// Read returns the record, or ErrExpired when the handler does not hold the
 	// id -- expired, evicted, or destroyed by a logout elsewhere.

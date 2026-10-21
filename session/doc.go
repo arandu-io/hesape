@@ -15,8 +15,9 @@
 //   - [RecordStore] and [NewRecordStore], with [Remember] to ask for a session
 //     that survives closing the browser.
 //   - [Record], and [Handler], where it lives between requests: [ArrayHandler]
-//     in memory, the RESP handler in hesape/redis for more than one instance,
-//     and [Decode] over a [Keeper] that stores raw records.
+//     in memory, [DatabaseHandler] in the application's database, the RESP
+//     handler in hesape/redis for more than one instance, and [Decode] over a
+//     [Keeper] that stores raw records.
 //   - [Flash], the one-shot signed cookie that carries the messages and the
 //     typed input of a rejected request, or the status sentence of one that
 //     succeeded, even when there is no session at all.
@@ -41,5 +42,6 @@
 // ways for one of them to be the one nobody tested. Every name on it is
 // deprecated in favour of [RecordStore] and goes in a later minor release, with
 // the middleware, the sessions table, and what exists only on top of the
-// Store in hesape/auth, hesape/http and hesape/testing.
+// Store in hesape/auth, hesape/http and hesape/testing. [DatabaseHandler] keeps
+// the records of the one path in a table of its own, [RecordTable].
 package session

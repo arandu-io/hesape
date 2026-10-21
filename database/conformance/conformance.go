@@ -121,6 +121,9 @@ func Run(t *testing.T, dialect database.Dialect, driverName, dsn string) {
 	t.Run("the presence count is scoped to the tenant", func(t *testing.T) {
 		testThePresenceCount(t, db)
 	})
+	t.Run("the session record table keeps a record per session", func(t *testing.T) {
+		testTheSessionRecordTable(t, dialect, db)
+	})
 }
 
 // conformanceMigrationPath is the group the suite's own migration registers
